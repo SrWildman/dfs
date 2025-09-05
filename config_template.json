@@ -1,0 +1,72 @@
+{
+  "_comment": "DFS Data Collection Suite - Configuration File",
+  "_instructions": "Copy this file to config.json and customize the settings below",
+  
+  "google_sheets": {
+    "_description": "Google Sheets integration settings",
+    "sheet_id": "YOUR_GOOGLE_SHEET_ID_HERE",
+    "credentials_file": "dfs-uploader-86ac915dfec5.json",
+    "tab_mappings": {
+      "_description": "Maps data sources to Google Sheets tab names",
+      "fantasy_footballers": "Projections",
+      "draftkings": "Salaries", 
+      "nfl_odds": "Odds"
+    },
+    "update_behavior": {
+      "_description": "How to handle existing data in sheets",
+      "clear_before_upload": true,
+      "create_missing_tabs": true,
+      "batch_upload": true
+    }
+  },
+  
+  "file_management": {
+    "_description": "File organization and processing settings", 
+    "downloads_folder": "downloads",
+    "keep_timestamped_files": true,
+    "max_age_minutes": 30,
+    "content_sample_size": 500
+  },
+  
+  "scrapers": {
+    "_description": "Individual scraper configuration",
+    "fantasy_footballers": {
+      "_description": "Fantasy Footballers projection scraper settings",
+      "url": "https://www.thefantasyfootballers.com/2025-ultimate-dfs-pass/dfs-pass-lineup-optimizer/",
+      "browser_wait_time": 15,
+      "download_timeout": 10,
+      "automation_delay": 5
+    },
+    "draftkings": {
+      "_description": "DraftKings salary scraper settings", 
+      "api_url": "https://api.draftkings.com/draftgroups/v1/",
+      "default_timeout": 30,
+      "default_filename": "DraftKings Salaries.csv"
+    },
+    "nfl_odds": {
+      "_description": "NFL odds scraper settings",
+      "base_url": "https://www.rotowire.com/betting/nfl/tables/nfl-games-by-market.php",
+      "default_week": 1,
+      "default_season": 2025,
+      "min_week": 1,
+      "max_week": 18,
+      "default_timeout": 30
+    }
+  },
+  
+  "workflows": {
+    "_description": "Main workflow behavior settings",
+    "upload_by_default": true,
+    "continue_on_scraper_failure": true,
+    "organize_files_after_scraping": true,
+    "show_detailed_progress": true
+  },
+  
+  "advanced": {
+    "_description": "Advanced settings - modify with caution",
+    "retry_attempts": 3,
+    "retry_delay_seconds": 2,
+    "parallel_uploads": false,
+    "debug_mode": false
+  }
+}
