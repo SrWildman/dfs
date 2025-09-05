@@ -4,6 +4,9 @@ credentials.json
 dfs-uploader-*.json
 config.json
 
+# Downloads
+downloads/
+
 # Python
 __pycache__/
 *.py[cod]
