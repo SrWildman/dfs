@@ -31,9 +31,6 @@ Examples:
 Performance:
     - Typical execution time: 30-60 seconds
     - Reduces data collection time by ~50% vs full workflow
-
-Author: Claude Code Assistant
-Version: 2.0
 """
 
 import argparse

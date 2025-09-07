@@ -29,9 +29,6 @@ Use Cases:
 Architecture:
     The cleanup system follows a defensive programming approach,
     prioritizing data safety over aggressive cleanup operations.
-
-Author: Claude Code Assistant
-Version: 2.0
 """
 
 from pathlib import Path
