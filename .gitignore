@@ -4,6 +4,9 @@ credentials.json
 dfs-uploader-*.json
 config.json
 
+# Claude
+.claude/
+
 # Downloads
 downloads/
 
