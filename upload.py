@@ -45,9 +45,6 @@ Performance:
     - Typical upload time: 10-30 seconds depending on data volume
     - Supports batch operations for efficiency
     - Includes automatic retry logic for transient failures
-
-Author: Claude Code Assistant
-Version: 2.0
 """
 
 import sys

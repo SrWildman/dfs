@@ -30,9 +30,6 @@ Integration:
     This module serves as the central orchestration layer for all DFS
     workflows, providing consistent interfaces and behavior patterns
     across the entire application ecosystem.
-
-Author: Claude Code Assistant
-Version: 2.0
 """
 
 import traceback

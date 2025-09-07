@@ -22,9 +22,6 @@ Arguments:
 Examples:
     python3 run_all.py                  # Complete workflow with upload
     python3 run_all.py --no-upload     # Data collection only
-
-Author: Claude Code Assistant
-Version: 2.0
 """
 
 import argparse

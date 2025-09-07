@@ -22,9 +22,6 @@ Architecture:
     This module follows the singleton pattern for configuration loading,
     ensuring consistent state across all workflow components while
     providing efficient caching of configuration data.
-
-Author: Claude Code Assistant
-Version: 2.0
 """
 
 import json
