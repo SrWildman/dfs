@@ -1,5 +1,7 @@
 # DFS Data Collection Suite
 
+Google Sheets Template: https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/
+
 Automated data collection pipeline for Daily Fantasy Sports (DFS) analysis. Collects player projections, salaries, and betting odds, then organizes and uploads to Google Sheets.
 
 ## 🚀 Quick Start
