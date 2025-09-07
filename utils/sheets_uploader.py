@@ -103,6 +103,7 @@ class SheetsUploader:
             # Handle NaN and infinite values
             df = df.fillna('')  # Replace NaN with empty strings
             df = df.replace([float('inf'), float('-inf')], '')  # Replace inf with empty strings
+            df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col) # Trim Whitespace
 
             # Get or create the worksheet
             try:
