@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 
+# TODO allow argument passing. ex, what week is it?
 def run_scraper(scraper_path, scraper_file, description):
     """
     Run a specific scraper and report results.

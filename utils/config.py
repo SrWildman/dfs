@@ -95,9 +95,11 @@ def get_scraper_configs() -> ScraperConfigList:
     project_root = Path(__file__).parent.parent
     base_dir = project_root / "scrapers"
 
+    # TODO: define  args in here (and update), make   configurable/dynamic...ex, what  week  is  it?
     return [
         (base_dir / "draftkings", "scraper.py", "DraftKings Salaries"),
         (base_dir / "nfl_odds", "nfl_odds_scraper.py", "NFL Odds Data"),
+        # TODO: add TFFB SOS here
         (base_dir / "fantasy_footballers", "scraper.py", "Fantasy Footballers Projections"),
     ]
 
