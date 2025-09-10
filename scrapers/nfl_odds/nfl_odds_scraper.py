@@ -12,6 +12,7 @@ from pathlib import Path
 
 import requests
 
+# TODO: get values from config
 # Configuration constants
 ROTOWIRE_BASE_URL = "https://www.rotowire.com/betting/nfl/tables/nfl-games-by-market.php"
 DEFAULT_TIMEOUT = 30  # Seconds for HTTP requests
@@ -267,6 +268,8 @@ def main():
     Provides argument parsing and executes the scraping workflow
     based on provided command line arguments.
     """
+
+    # TODO get from defaults or config
     parser = argparse.ArgumentParser(description='Scrape NFL DraftKings odds from Rotowire')
     parser.add_argument('--week', '-w', type=int, default=1, help='NFL week (1-18)')
     parser.add_argument('--season', '-s', type=int, help='NFL season year (default: current year)')
