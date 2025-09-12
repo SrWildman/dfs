@@ -10,8 +10,7 @@ import subprocess
 from pathlib import Path
 
 
-# TODO allow argument passing. ex, what week is it?
-def run_scraper(scraper_path, scraper_file, description):
+def run_scraper(scraper_path, scraper_file, description, args=None):
     """
     Run a specific scraper and report results.
 
@@ -19,6 +18,7 @@ def run_scraper(scraper_path, scraper_file, description):
         scraper_path (Path): Directory containing the scraper script
         scraper_file (str): Name of the scraper script to run
         description (str): Human-readable description for logging
+        args (list, optional): Additional arguments to pass to the scraper
 
     Returns:
         bool: True if scraper completed successfully, False otherwise
@@ -29,6 +29,10 @@ def run_scraper(scraper_path, scraper_file, description):
         cmd = ['python3', scraper_file]
         if 'fantasy_footballers' in str(scraper_path):
             cmd.append('--auto-skip')
+        
+        # Add any additional arguments passed to the scraper
+        if args:
+            cmd.extend(args)
 
         result = subprocess.run(
             cmd,
@@ -52,12 +56,13 @@ def run_scraper(scraper_path, scraper_file, description):
         return False
 
 
-def run_scrapers(scrapers):
+def run_scrapers(scrapers, args=None):
     """
     Run multiple scrapers and collect results.
 
     Args:
         scrapers (list): List of tuples (scraper_path, scraper_file, description)
+        args (list, optional): Additional arguments to pass to all scrapers
 
     Returns:
         list: List of (description, success) tuples
@@ -66,7 +71,7 @@ def run_scrapers(scrapers):
 
     for scraper_path, scraper_file, description in scrapers:
         if scraper_path.exists() and (scraper_path / scraper_file).exists():
-            success = run_scraper(scraper_path, scraper_file, description)
+            success = run_scraper(scraper_path, scraper_file, description, args)
             results.append((description, success))
         else:
             print(f"⚠️  {description} scraper not found at {scraper_path}")

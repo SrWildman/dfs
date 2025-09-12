@@ -11,14 +11,17 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
+import sys
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from utils.config import get_scraper_settings
 
-# TODO: get values from config
-# Configuration constants
-ROTOWIRE_BASE_URL = "https://www.rotowire.com/betting/nfl/tables/nfl-games-by-market.php"
-DEFAULT_TIMEOUT = 30  # Seconds for HTTP requests
-CONTENT_SAMPLE_SIZE = 500  # Characters to read for content analysis
-MIN_NFL_WEEK = 1  # Minimum NFL week number
-MAX_NFL_WEEK = 18  # Maximum NFL week number
+# Load configuration from centralized config
+config = get_scraper_settings("nfl_odds")
+ROTOWIRE_BASE_URL = config["rotowire_base_url"]
+DEFAULT_TIMEOUT = config["default_timeout"]
+CONTENT_SAMPLE_SIZE = config["content_sample_size"]
+MIN_NFL_WEEK = config["min_nfl_week"]
+MAX_NFL_WEEK = config["max_nfl_week"]
 
 class NFLOddsScraper:
     """
@@ -269,7 +272,6 @@ def main():
     based on provided command line arguments.
     """
 
-    # TODO get from defaults or config
     parser = argparse.ArgumentParser(description='Scrape NFL DraftKings odds from Rotowire')
     parser.add_argument('--week', '-w', type=int, default=1, help='NFL week (1-18)')
     parser.add_argument('--season', '-s', type=int, help='NFL season year (default: current year)')

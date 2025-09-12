@@ -67,6 +67,11 @@ def main() -> bool:
         action='store_true',
         help='Skip automatic Google Sheets upload'
     )
+    parser.add_argument(
+        '--week', '-w',
+        type=int,
+        help='NFL week number (1-18)'
+    )
     args = parser.parse_args()
 
     # Display workflow header
@@ -79,7 +84,10 @@ def main() -> bool:
 
     # Step 2: Execute all data collection scrapers
     scrapers = get_scraper_configs()
-    results = run_scrapers(scrapers)
+    scraper_args = []
+    if args.week:
+        scraper_args.extend(['--week', str(args.week)])
+    results = run_scrapers(scrapers, scraper_args)
     successful, total = print_results_summary(results, "Collection Summary")
 
     # Step 3: Organize downloaded files
