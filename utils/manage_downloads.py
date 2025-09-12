@@ -44,7 +44,8 @@ class DownloadsManager:
         self.sources = {
             'fantasy_footballers': self.downloads_dir / "fantasy_footballers",
             'draftkings': self.downloads_dir / "draftkings",
-            'nfl_odds': self.downloads_dir / "nfl_odds"
+            'nfl_odds': self.downloads_dir / "nfl_odds",
+            'tffb_sos': self.downloads_dir / "tffb_sos"
         }
 
         self._setup_directories()
@@ -101,6 +102,10 @@ class DownloadsManager:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read(CONTENT_SAMPLE_SIZE).lower()  # First N chars
 
+            # TFFB SOS patterns (check first since it contains 'fantasy')
+            if ('strength of schedule' in content or 'sos' in content) and 'fantasy' in content:
+                return 'tffb_sos'
+            
             # Fantasy Footballers patterns
             if any(pattern in content for pattern in ['projpts', 'projown', 'fantasy', 'footballers']):
                 return 'fantasy_footballers'
@@ -130,7 +135,9 @@ class DownloadsManager:
         """
         filename_lower = filename.lower()
 
-        if any(pattern in filename_lower for pattern in ['projection', 'fantasy', 'footballers']):
+        if ('strength of schedule' in filename_lower or 'sos' in filename_lower) and 'fantasy' in filename_lower:
+            return 'tffb_sos'
+        elif any(pattern in filename_lower for pattern in ['projection', 'fantasy', 'footballers']):
             return 'fantasy_footballers'
         elif any(pattern in filename_lower for pattern in ['draftkings', 'dk', 'salaries']):
             return 'draftkings'
@@ -160,6 +167,32 @@ class DownloadsManager:
         # Fallback to filename patterns
         return self._check_filename_patterns(filename)
 
+    def _extract_tffb_position(self, filename):
+        """
+        Extract position from TFFB SOS filename.
+        
+        Args:
+            filename (str): Name of the TFFB SOS CSV file
+            
+        Returns:
+            str or None: Position (QB, RB, WR, TE, DST) if found, None otherwise
+        """
+        filename_upper = filename.upper()
+        
+        # Check for position patterns in filename
+        if 'TFFB_SOS_QB_' in filename_upper or '_QB_' in filename_upper:
+            return 'QB'
+        elif 'TFFB_SOS_RB_' in filename_upper or '_RB_' in filename_upper:
+            return 'RB'
+        elif 'TFFB_SOS_WR_' in filename_upper or '_WR_' in filename_upper:
+            return 'WR'
+        elif 'TFFB_SOS_TE_' in filename_upper or '_TE_' in filename_upper:
+            return 'TE'
+        elif 'TFFB_SOS_D/ST_' in filename_upper or '_DST_' in filename_upper or 'D%2FST' in filename_upper:
+            return 'DST'
+        
+        return None
+
     def move_and_organize_files(self, files_to_move):
         """
         Move files to organized project structure.
@@ -188,15 +221,25 @@ class DownloadsManager:
 
             # Determine destination
             dest_dir = self.sources[source]
+            
+            # Handle TFFB SOS position-specific files
+            if source == 'tffb_sos':
+                position = self._extract_tffb_position(file_info['name'])
+                if position:
+                    # Create position-specific filename
+                    base_name = f"tffb-sos-{position.lower()}"
+                else:
+                    base_name = "tffb-sos"
+            else:
+                base_name = source.replace('_', '-')
 
             # Create standardized filename
             timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
-            source_name = source.replace('_', '-')
-            dest_filename = f"{source_name}_{timestamp}.csv"
+            dest_filename = f"{base_name}_{timestamp}.csv"
             dest_path = dest_dir / dest_filename
 
             # Also create a "latest" symlink/copy
-            latest_path = dest_dir / f"{source_name}_latest.csv"
+            latest_path = dest_dir / f"{base_name}_latest.csv"
 
             try:
                 # Move the file

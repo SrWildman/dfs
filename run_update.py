@@ -81,6 +81,11 @@ def main() -> bool:
         action='store_true',
         help='Skip automatic Google Sheets upload'
     )
+    parser.add_argument(
+        '--week', '-w',
+        type=int,
+        help='NFL week number (1-18)'
+    )
     args = parser.parse_args()
 
     # Display update-specific header
@@ -88,7 +93,10 @@ def main() -> bool:
 
     # Step 1: Execute frequent update scrapers only
     scrapers = get_update_scrapers()
-    results = run_scrapers(scrapers)
+    scraper_args = []
+    if args.week:
+        scraper_args.extend(['--week', str(args.week)])
+    results = run_scrapers(scrapers, scraper_args)
     successful, total = print_results_summary(results, "Update Summary")
 
     # Step 2: Organize downloaded files

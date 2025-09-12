@@ -141,9 +141,17 @@ class SheetsUploader:
         downloads_dir = Path(__file__).parent.parent / "downloads"
 
         for source, tab_name in self.tab_mappings.items():
-            # Look for the latest CSV file for this source
-            source_dir = downloads_dir / source
-            latest_file = source_dir / f"{source.replace('_', '-')}_latest.csv"
+            # Handle TFFB SOS position-specific files
+            if source.startswith('tffb_sos_'):
+                position = source.replace('tffb_sos_', '').upper()
+                if position == 'DST':
+                    position = 'dst'  # Handle D/ST case
+                source_dir = downloads_dir / 'tffb_sos'
+                latest_file = source_dir / f"tffb-sos-{position.lower()}_latest.csv"
+            else:
+                # Look for the latest CSV file for this source
+                source_dir = downloads_dir / source
+                latest_file = source_dir / f"{source.replace('_', '-')}_latest.csv"
 
             if latest_file.exists():
                 available_files[source] = latest_file

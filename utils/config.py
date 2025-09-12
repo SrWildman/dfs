@@ -34,6 +34,17 @@ ScraperConfigList = List[ScraperConfig]
 ConfigDict = Dict[str, Union[str, Dict, List]]
 SheetsConfig = Dict[str, Union[str, Dict, None]]
 
+# Scraper Configuration Constants
+SCRAPER_SETTINGS = {
+    "nfl_odds": {
+        "rotowire_base_url": "https://www.rotowire.com/betting/nfl/tables/nfl-games-by-market.php",
+        "default_timeout": 30,
+        "content_sample_size": 500,
+        "min_nfl_week": 1,
+        "max_nfl_week": 18
+    }
+}
+
 
 def load_config() -> Optional[ConfigDict]:
     """
@@ -95,11 +106,10 @@ def get_scraper_configs() -> ScraperConfigList:
     project_root = Path(__file__).parent.parent
     base_dir = project_root / "scrapers"
 
-    # TODO: define  args in here (and update), make   configurable/dynamic...ex, what  week  is  it?
     return [
         (base_dir / "draftkings", "scraper.py", "DraftKings Salaries"),
         (base_dir / "nfl_odds", "nfl_odds_scraper.py", "NFL Odds Data"),
-        # TODO: add TFFB SOS here
+        (base_dir / "tffb_sos", "scraper.py", "TFFB Strength of Schedule"),
         (base_dir / "fantasy_footballers", "scraper.py", "Fantasy Footballers Projections"),
     ]
 
@@ -133,6 +143,25 @@ def get_update_scrapers() -> ScraperConfigList:
     ]
 
 
+def get_scraper_settings(scraper_name: str) -> Dict[str, Union[str, int]]:
+    """
+    Get configuration settings for a specific scraper.
+    
+    Args:
+        scraper_name (str): Name of the scraper (e.g., 'nfl_odds')
+    
+    Returns:
+        dict: Configuration settings for the specified scraper
+    
+    Raises:
+        KeyError: If scraper_name is not found in SCRAPER_SETTINGS
+    """
+    if scraper_name not in SCRAPER_SETTINGS:
+        raise KeyError(f"Scraper '{scraper_name}' not found in configuration")
+    
+    return SCRAPER_SETTINGS[scraper_name]
+
+
 def get_google_sheets_config() -> Optional[SheetsConfig]:
     """
     Extract and process Google Sheets configuration from main config.
@@ -154,7 +183,12 @@ def get_google_sheets_config() -> Optional[SheetsConfig]:
             'tab_mappings': {
                 'draftkings': 'DKSalRaw',
                 'fantasy_footballers': 'FFProjections',
-                'nfl_odds': 'oddsraw'
+                'nfl_odds': 'oddsraw',
+                'tffb_sos_qb': 'SoSQB',
+                'tffb_sos_rb': 'SoSRB',
+                'tffb_sos_wr': 'SoSWr',
+                'tffb_sos_te': 'SoSTE',
+                'tffb_sos_dst': 'SoSDef'
             }
         }
     """
