@@ -35,7 +35,7 @@ POSITIONS = {
     'RB': 'RB',
     'WR': 'WR',
     'TE': 'TE',
-    'D/ST': 'D%2FST'  # URL encoded
+    'D/ST': 'D'
 }
 
 
