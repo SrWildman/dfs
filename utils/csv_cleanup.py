@@ -2,33 +2,7 @@
 """
 DFS CSV Cleanup Utilities
 
-A comprehensive file management system for cleaning stale Daily Fantasy Sports (DFS)
-CSV data at the beginning of new analysis periods. This module provides safe,
-selective cleanup operations that preserve system integrity while ensuring
-fresh data collection.
-
-Key Features:
-    - Safe deletion with comprehensive error handling
-    - Project-scoped cleanup (never touches user's main Downloads)
-    - Detailed progress reporting and logging
-    - Atomic operations with rollback capabilities
-    - Performance optimized for large file sets
-
-Safety Measures:
-    - Only operates within project directory structure
-    - Comprehensive error handling and reporting
-    - Detailed logging of all deletion operations
-    - Graceful handling of permission and access issues
-
-Use Cases:
-    - New week data refresh preparation
-    - Storage space management
-    - Data pipeline reset operations
-    - Development environment cleanup
-
-Architecture:
-    The cleanup system follows a defensive programming approach,
-    prioritizing data safety over aggressive cleanup operations.
+Safe cleanup of project CSV files for new analysis periods.
 """
 
 from pathlib import Path
@@ -36,37 +10,7 @@ from typing import List, Tuple
 
 
 def clear_old_csvs() -> bool:
-    """
-    Execute comprehensive cleanup of project CSV files for new analysis period.
-
-    This function safely removes all CSV files from the project's downloads
-    directories, preparing for fresh data collection. The operation is scoped
-    exclusively to project directories, ensuring user data safety.
-
-    Target Directories:
-        - Main downloads directory (root level CSV files)
-        - Organized subdirectories (draftkings, fantasy_footballers, nfl_odds)
-
-    Safety Features:
-        - Project-scoped operations only (never touches ~/Downloads)
-        - Comprehensive error handling and reporting
-        - Detailed progress logging for audit trails
-        - Graceful degradation on permission errors
-
-    Returns:
-        bool: True if cleanup completed successfully with no errors,
-              False if any errors occurred during cleanup process
-
-    Note:
-        This function provides detailed console output for monitoring
-        progress and identifying any issues that may occur during cleanup.
-        All file deletions are logged for audit purposes.
-
-    Performance:
-        - Optimized for handling large numbers of CSV files
-        - Memory efficient using generator patterns
-        - Minimal I/O overhead through targeted directory scanning
-    """
+    """Execute cleanup of project CSV files for new analysis period."""
     print("🧹 Clearing old CSV data (new week cleanup)...")
 
     errors: List[str] = []
@@ -97,15 +41,7 @@ def clear_old_csvs() -> bool:
 
 
 def _cleanup_directory(directory: Path) -> Tuple[int, List[str]]:
-    """
-    Clean all CSV files from a specific directory.
-
-    Args:
-        directory: Target directory path for cleanup
-
-    Returns:
-        tuple: (files_deleted_count, list_of_errors)
-    """
+    """Clean all CSV files from a specific directory."""
     deleted_count = 0
     errors: List[str] = []
 
@@ -132,20 +68,12 @@ def _cleanup_directory(directory: Path) -> Tuple[int, List[str]]:
 
 
 def _print_cleanup_summary(total_deleted: int, errors: List[str]) -> None:
-    """
-    Print comprehensive cleanup operation summary.
-
-    Args:
-        total_deleted: Total number of files successfully deleted
-        errors: List of error messages encountered during cleanup
-    """
-    # Print success summary
+    """Print cleanup operation summary."""
     if total_deleted > 0:
         print(f"✅ Successfully cleaned up {total_deleted} CSV file(s)")
     else:
         print("ℹ️  No CSV files found to clean (directories already clean)")
 
-    # Print error summary if any occurred
     if errors:
         print("⚠️  Cleanup completed with some errors:")
         for error in errors:
@@ -158,20 +86,16 @@ def _print_cleanup_summary(total_deleted: int, errors: List[str]) -> None:
 
 
 if __name__ == "__main__":
-    # Comprehensive testing suite for CSV cleanup module
     print("🧪 DFS CSV Cleanup - Testing Suite")
     print("=" * 50)
 
     print("\n🧹 Executing CSV cleanup test...")
     success = clear_old_csvs()
 
-    # Provide detailed test results
     if success:
         print("✅ CSV cleanup test completed successfully")
-        print("📊 All cleanup operations executed without errors")
     else:
         print("⚠️  CSV cleanup test completed with some issues")
-        print("🔧 Review error messages above for details")
 
     print("\n🎯 CSV cleanup testing completed!")
     print("=" * 50)

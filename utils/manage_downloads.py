@@ -40,12 +40,11 @@ class DownloadsManager:
         self.downloads_dir = self.project_dir / "downloads"
         self.system_downloads = Path.home() / "Downloads"
 
-        # Create organized structure
         self.sources = {
-            'fantasy_footballers': self.downloads_dir / "fantasy_footballers",
+            'projections': self.downloads_dir / "projections",
             'draftkings': self.downloads_dir / "draftkings",
             'nfl_odds': self.downloads_dir / "nfl_odds",
-            'tffb_sos': self.downloads_dir / "tffb_sos"
+            'sos': self.downloads_dir / "sos"
         }
 
         self._setup_directories()
@@ -102,20 +101,20 @@ class DownloadsManager:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read(CONTENT_SAMPLE_SIZE).lower()  # First N chars
 
-            # TFFB SOS patterns (check first since it contains 'fantasy')
-            if ('strength of schedule' in content or 'sos' in content) and 'fantasy' in content:
-                return 'tffb_sos'
+            # SOS patterns (check first since it contains 'fantasy')
+            if 'strength of schedule' in content or ('opp avg' in content and 'fpa' in content):
+                return 'sos'
             
-            # Fantasy Footballers patterns
+            # Projections patterns
             if any(pattern in content for pattern in ['projpts', 'projown', 'fantasy', 'footballers']):
-                return 'fantasy_footballers'
+                return 'projections'
 
             # DraftKings patterns
             if any(pattern in content for pattern in ['draftkings', 'salary', 'roster position']):
                 return 'draftkings'
 
             # NFL odds patterns
-            if any(pattern in content for pattern in ['spread', 'total', 'odds', 'moneyline']):
+            if any(pattern in content for pattern in ['spread', 'moneyline']) or ('total' in content and any(p in content for p in ['odds', 'line', 'bet'])):
                 return 'nfl_odds'
 
         except Exception:
@@ -135,10 +134,10 @@ class DownloadsManager:
         """
         filename_lower = filename.lower()
 
-        if ('strength of schedule' in filename_lower or 'sos' in filename_lower) and 'fantasy' in filename_lower:
-            return 'tffb_sos'
+        if 'strength of schedule' in filename_lower and 'fantasy' in filename_lower:
+            return 'sos'
         elif any(pattern in filename_lower for pattern in ['projection', 'fantasy', 'footballers']):
-            return 'fantasy_footballers'
+            return 'projections'
         elif any(pattern in filename_lower for pattern in ['draftkings', 'dk', 'salaries']):
             return 'draftkings'
         elif any(pattern in filename_lower for pattern in ['odds', 'lines', 'betting']):
@@ -167,12 +166,12 @@ class DownloadsManager:
         # Fallback to filename patterns
         return self._check_filename_patterns(filename)
 
-    def _extract_tffb_position(self, filename):
+    def _extract_sos_position(self, filename):
         """
-        Extract position from TFFB SOS filename.
+        Extract position from SOS filename.
         
         Args:
-            filename (str): Name of the TFFB SOS CSV file
+            filename (str): Name of the SOS CSV file
             
         Returns:
             str or None: Position (QB, RB, WR, TE, DST) if found, None otherwise
@@ -180,15 +179,15 @@ class DownloadsManager:
         filename_upper = filename.upper()
         
         # Check for position patterns in filename
-        if 'TFFB_SOS_QB_' in filename_upper or '_QB_' in filename_upper:
+        if 'SOS_QB_' in filename_upper or '_QB_' in filename_upper:
             return 'QB'
-        elif 'TFFB_SOS_RB_' in filename_upper or '_RB_' in filename_upper:
+        elif 'SOS_RB_' in filename_upper or '_RB_' in filename_upper:
             return 'RB'
-        elif 'TFFB_SOS_WR_' in filename_upper or '_WR_' in filename_upper:
+        elif 'SOS_WR_' in filename_upper or '_WR_' in filename_upper:
             return 'WR'
-        elif 'TFFB_SOS_TE_' in filename_upper or '_TE_' in filename_upper:
+        elif 'SOS_TE_' in filename_upper or '_TE_' in filename_upper:
             return 'TE'
-        elif 'TFFB_SOS_D/ST_' in filename_upper or '_DST_' in filename_upper or 'D%2FST' in filename_upper:
+        elif 'SOS_D/ST_' in filename_upper or '_DST_' in filename_upper or 'D%2FST' in filename_upper:
             return 'DST'
         
         return None
@@ -222,18 +221,16 @@ class DownloadsManager:
             # Determine destination
             dest_dir = self.sources[source]
             
-            # Handle TFFB SOS position-specific files
-            if source == 'tffb_sos':
-                position = self._extract_tffb_position(file_info['name'])
+            # Handle SOS position-specific files
+            if source == 'sos':
+                position = self._extract_sos_position(file_info['name'])
                 if position:
-                    # Create position-specific filename
-                    base_name = f"tffb-sos-{position.lower()}"
+                    base_name = f"sos-{position.lower()}"
                 else:
-                    base_name = "tffb-sos"
+                    base_name = "sos"
             else:
                 base_name = source.replace('_', '-')
 
-            # Create standardized filename
             timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
             dest_filename = f"{base_name}_{timestamp}.csv"
             dest_path = dest_dir / dest_filename
@@ -297,7 +294,6 @@ class DownloadsManager:
                     'ready_for_upload': True
                 })
 
-        # Save manifest
         manifest_path = self.downloads_dir / "upload_manifest.json"
         with open(manifest_path, 'w') as f:
             json.dump(manifest, f, indent=2)
@@ -380,7 +376,6 @@ def main():
     if moved_files:
         print(f"\n✅ Successfully organized {len(moved_files)} file(s)")
 
-        # Create upload manifest
         manifest_path = manager.create_upload_manifest(moved_files)
         print(f"📋 Upload manifest created: {manifest_path.name}")
 

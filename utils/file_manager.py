@@ -24,7 +24,6 @@ def organize_downloads(quiet=False):
         print("🔄 Organizing downloaded files...")
 
     try:
-        # Get the utils directory and manage_downloads script
         utils_dir = Path(__file__).parent
         manage_script = utils_dir / "manage_downloads.py"
         project_root = utils_dir.parent

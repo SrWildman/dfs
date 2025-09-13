@@ -47,7 +47,6 @@ def example_custom_directory():
     print("\n📋 Example 3: Custom Directory")
     print("-" * 30)
 
-    # Create custom directory
     custom_dir = Path.home() / "nfl_odds_data"
     custom_dir.mkdir(exist_ok=True)
 
@@ -79,7 +78,6 @@ def example_programmatic_access():
 
     scraper = NFLOddsScraper()
 
-    # Get raw data
     raw_data = scraper.fetch_odds_data(week=1)
     if raw_data:
         print(f"✅ Fetched data for {len(raw_data)} entries")

@@ -2,26 +2,7 @@
 """
 DFS Configuration Management Utilities
 
-A centralized configuration management system for Daily Fantasy Sports (DFS) workflows.
-This module provides consistent configuration loading, validation, and scraper management
-across all DFS pipeline components.
-
-Key Features:
-    - Centralized configuration file management
-    - Standardized scraper configuration patterns
-    - Google Sheets integration configuration
-    - Comprehensive validation and error handling
-    - Support for both full and selective workflows
-
-Configuration Sources:
-    - config.json: Main application configuration
-    - Environment variables: Runtime configuration overrides
-    - Default values: Fallback configuration for missing settings
-
-Architecture:
-    This module follows the singleton pattern for configuration loading,
-    ensuring consistent state across all workflow components while
-    providing efficient caching of configuration data.
+Centralized configuration loading and validation for DFS workflows.
 """
 
 import json
@@ -47,25 +28,7 @@ SCRAPER_SETTINGS = {
 
 
 def load_config() -> Optional[ConfigDict]:
-    """
-    Load and parse the main application configuration from config.json.
-
-    This function provides centralized configuration loading with comprehensive
-    error handling and user feedback. It automatically resolves the config file
-    path relative to the project root.
-
-    Returns:
-        dict: Configuration dictionary containing all application settings,
-              or None if configuration loading failed
-
-    Raises:
-        None: All exceptions are caught and converted to user-friendly messages
-
-    Note:
-        The configuration file is expected to be in JSON format at the project
-        root level. Missing or malformed configuration files will result in
-        graceful degradation with appropriate error messages.
-    """
+    """Load and parse the main application configuration from config.json."""
     project_root = Path(__file__).parent.parent
     config_path = project_root / "config.json"
 
@@ -87,75 +50,31 @@ def load_config() -> Optional[ConfigDict]:
 
 
 def get_scraper_configs() -> ScraperConfigList:
-    """
-    Get the complete configuration for all available DFS scrapers.
-
-    This function provides the standard configuration for the full DFS workflow,
-    including all data sources required for comprehensive analysis.
-
-    Returns:
-        list: List of tuples containing (scraper_path, script_filename, description)
-              for all available scrapers in the recommended execution order
-
-    Note:
-        The scrapers are ordered by execution priority:
-        1. DraftKings (salary and contest information)
-        2. NFL Odds (betting lines and market data)
-        3. Fantasy Footballers (projections and analysis)
-    """
+    """Get the complete configuration for all available DFS scrapers."""
     project_root = Path(__file__).parent.parent
     base_dir = project_root / "scrapers"
 
     return [
         (base_dir / "draftkings", "scraper.py", "DraftKings Salaries"),
         (base_dir / "nfl_odds", "nfl_odds_scraper.py", "NFL Odds Data"),
-        (base_dir / "tffb_sos", "scraper.py", "TFFB Strength of Schedule"),
-        (base_dir / "fantasy_footballers", "scraper.py", "Fantasy Footballers Projections"),
+        (base_dir / "tffb_sos", "scraper.py", "Strength of Schedule"),
+        (base_dir / "fantasy_footballers", "scraper.py", "Projections"),
     ]
 
 
 def get_update_scrapers() -> ScraperConfigList:
-    """
-    Get configuration for frequently updated scrapers only.
-
-    This function provides an optimized scraper configuration for quick updates,
-    focusing on data sources that change multiple times per week. DraftKings
-    salaries are intentionally excluded as they typically update only once weekly.
-
-    Returns:
-        list: List of tuples containing (scraper_path, script_filename, description)
-              for frequently updated scrapers only
-
-    Performance:
-        This configuration reduces data collection time by approximately 50%
-        compared to the full scraper set, making it ideal for mid-week updates.
-
-    Note:
-        Excluded scrapers:
-        - DraftKings Salaries (updated weekly, typically Tuesday/Wednesday)
-    """
+    """Get configuration for frequently updated scrapers only (excludes DraftKings)."""
     project_root = Path(__file__).parent.parent
     base_dir = project_root / "scrapers"
 
     return [
         (base_dir / "nfl_odds", "nfl_odds_scraper.py", "NFL Odds Data"),
-        (base_dir / "fantasy_footballers", "scraper.py", "Fantasy Footballers Projections"),
+        (base_dir / "fantasy_footballers", "scraper.py", "Projections"),
     ]
 
 
 def get_scraper_settings(scraper_name: str) -> Dict[str, Union[str, int]]:
-    """
-    Get configuration settings for a specific scraper.
-    
-    Args:
-        scraper_name (str): Name of the scraper (e.g., 'nfl_odds')
-    
-    Returns:
-        dict: Configuration settings for the specified scraper
-    
-    Raises:
-        KeyError: If scraper_name is not found in SCRAPER_SETTINGS
-    """
+    """Get configuration settings for a specific scraper."""
     if scraper_name not in SCRAPER_SETTINGS:
         raise KeyError(f"Scraper '{scraper_name}' not found in configuration")
     
@@ -163,35 +82,7 @@ def get_scraper_settings(scraper_name: str) -> Dict[str, Union[str, int]]:
 
 
 def get_google_sheets_config() -> Optional[SheetsConfig]:
-    """
-    Extract and process Google Sheets configuration from main config.
-
-    This function provides a clean interface to Google Sheets settings,
-    including validation and default value handling for missing configurations.
-
-    Returns:
-        dict: Google Sheets configuration containing:
-              - sheet_id: Target Google Sheets document ID
-              - credentials_file: Path to Google API credentials
-              - tab_mappings: Mapping of data sources to sheet tabs
-              or None if main configuration loading failed
-
-    Configuration Structure:
-        {
-            'sheet_id': 'your_google_sheet_id_here',
-            'credentials_file': 'credentials.json',
-            'tab_mappings': {
-                'draftkings': 'DKSalRaw',
-                'fantasy_footballers': 'FFProjections',
-                'nfl_odds': 'oddsraw',
-                'tffb_sos_qb': 'SoSQB',
-                'tffb_sos_rb': 'SoSRB',
-                'tffb_sos_wr': 'SoSWr',
-                'tffb_sos_te': 'SoSTE',
-                'tffb_sos_dst': 'SoSDef'
-            }
-        }
-    """
+    """Extract and process Google Sheets configuration from main config."""
     config = load_config()
     if not config:
         return None
@@ -206,29 +97,7 @@ def get_google_sheets_config() -> Optional[SheetsConfig]:
 
 
 def validate_google_sheets_config(sheets_config: Optional[SheetsConfig]) -> bool:
-    """
-    Validate Google Sheets configuration for completeness and correctness.
-
-    This function performs comprehensive validation of Google Sheets settings,
-    including credential file existence and configuration completeness checks.
-
-    Args:
-        sheets_config: Google Sheets configuration dictionary from get_google_sheets_config()
-
-    Returns:
-        bool: True if configuration is valid and ready for use,
-              False if any validation checks fail
-
-    Validation Checks:
-        1. Configuration dictionary is not None/empty
-        2. Sheet ID is properly configured (not default placeholder)
-        3. Credentials file exists at specified location
-        4. Credentials file is readable
-
-    Note:
-        This function provides detailed error messages for each validation
-        failure to assist with configuration troubleshooting.
-    """
+    """Validate Google Sheets configuration for completeness and correctness."""
     if not sheets_config:
         print("❌ No Google Sheets configuration found in config.json")
         print("💡 Add 'google_sheets' section to your configuration")
@@ -257,12 +126,9 @@ def validate_google_sheets_config(sheets_config: Optional[SheetsConfig]) -> bool
 
 
 if __name__ == "__main__":
-    # Comprehensive testing suite for configuration module
     print("🧪 DFS Configuration Management - Testing Suite")
     print("=" * 60)
 
-    # Test main configuration loading
-    print("\n📋 Testing main configuration loading...")
     config = load_config()
     if config:
         print("✅ Main configuration loaded successfully")
@@ -270,15 +136,11 @@ if __name__ == "__main__":
     else:
         print("❌ Main configuration loading failed")
 
-    # Test scraper configurations
-    print("\n🔧 Testing scraper configurations...")
     full_scrapers = get_scraper_configs()
     update_scrapers = get_update_scrapers()
     print(f"📈 Full workflow scrapers: {len(full_scrapers)}")
     print(f"⚡ Quick update scrapers: {len(update_scrapers)}")
 
-    # Test Google Sheets configuration
-    print("\n📤 Testing Google Sheets configuration...")
     sheets_config = get_google_sheets_config()
     if sheets_config:
         is_valid = validate_google_sheets_config(sheets_config)

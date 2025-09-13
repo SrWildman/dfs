@@ -1,178 +1,90 @@
 #!/usr/bin/env python3
 """
-Fantasy Footballers Projections - Final Solution
+Projections Scraper
 
-The simplest, most reliable method:
+Simple manual approach that mirrors other scrapers:
 1. Opens page in Arc (uses your login & download preferences)
-2. Waits appropriate time for loading
-3. Uses a single, simple AppleScript command to automate clicking
-4. Checks for successful download
+2. Provides clear manual instructions
+3. Checks for successful download
 
 Usage:
-    python3 scraper.py
+    python3 scraper.py [--auto-skip]
 """
 
-import subprocess
 import sys
 import time
 import webbrowser
 from pathlib import Path
 
+# Add utils to path for imports
+sys.path.append(str(Path(__file__).parent.parent.parent / 'utils'))
+from scraper_common import (
+    check_downloads, close_arc_tab, simple_manual_approach,
+    BROWSER_WAIT_TIME, FILE_CHECK_TIMEOUT
+)
+
 # Configuration constants
-BROWSER_WAIT_TIME = 15  # Seconds to wait for page load
-FILE_CHECK_TIMEOUT = 10  # Seconds to wait for file download
-BROWSER_AUTOMATION_DELAY = 5  # Seconds between automation attempts
-DOWNLOAD_RECENT_WINDOW = 120  # Seconds window for recent file detection
 FANTASY_FOOTBALLERS_URL = "https://www.thefantasyfootballers.com/2025-ultimate-dfs-pass/dfs-pass-lineup-optimizer/"
 
-def check_downloads():
-    """
-    Check for new CSV files in Downloads folder.
-
-    Scans the ~/Downloads directory for CSV files modified in the last 2 minutes.
-
-    Returns:
-        list: List of Path objects for recent CSV files, sorted by modification time (newest first)
-    """
-    downloads_dir = Path.home() / "Downloads"
-    recent_csvs = []
-    now = time.time()
-
-    for file in downloads_dir.glob("*.csv"):
-        if now - file.stat().st_mtime < DOWNLOAD_RECENT_WINDOW:  # Use constant
-            recent_csvs.append(file)
-
-    return sorted(recent_csvs, key=lambda x: x.stat().st_mtime, reverse=True)
-
-def automate_download():
-    """
-    Attempt automated download using AppleScript.
-
-    Uses AppleScript to activate Arc browser and send keyboard commands
-    to navigate to and click the projections download button.
-
-    Returns:
-        bool: True if automation script executed successfully, False otherwise
-    """
-    print("🤖 Attempting automation...")
-
-    # Very simple AppleScript - just activate Arc and send some key presses
-    script = '''
-    tell application "Arc"
-        activate
-        delay 2
-    end tell
-    
-    tell application "System Events"
-        -- Send CMD+F to open find, then search for "Projections"
-        keystroke "f" using command down
-        delay 1
-        type text "Projections"
-        delay 1
-        key code 53  -- Escape to close find
-        delay 1
-        -- Try pressing Tab a few times to navigate to button, then Space to click
-        repeat 5 times
-            key code 48  -- Tab key
-            delay 0.3
-        end repeat
-        key code 49  -- Space bar to click
-        delay 2
-        -- Try clicking again for dropdown
-        key code 49  -- Space bar
-    end tell
-    '''
-
-    try:
-        result = subprocess.run(['osascript', '-e', script], 
-                              capture_output=True, text=True, timeout=30)
-        return result.returncode == 0
-    except:
-        return False
 
 def main():
     """
-    Main function for Fantasy Footballers projections scraper.
+    Main function for Projections scraper.
 
-    Opens the Fantasy Footballers optimizer page in Arc browser,
-    attempts automated download, handles manual fallback if needed,
-    and verifies successful download.
+    Opens the Projections optimizer page in Arc browser,
+    provides manual instructions, and verifies successful download.
 
     Returns:
         bool: True if projections were successfully downloaded, False otherwise
     """
-    print("🏈 Fantasy Footballers Projections - Final Version")
-    print("=" * 54)
+    print("🏈 Projections Scraper")
+    print("=" * 44)
 
-    # Open page in Arc
+    # Record initial download state
+    initial_files = check_downloads()
+
     print("🌐 Opening optimizer in Arc...")
     webbrowser.open(FANTASY_FOOTBALLERS_URL)
-
-    # Wait for loading
-    print("⏳ Waiting for page load...")
     time.sleep(BROWSER_WAIT_TIME)
-
-    # Try automation
-    automation_worked = automate_download()
 
     # Check for auto-skip mode (for automated workflows)
     auto_skip = "--auto-skip" in sys.argv
 
-    if not automation_worked:
-        if auto_skip:
-            print("⚠️  Manual step required but running in auto-skip mode")
-            print("   → Open Fantasy Footballers manually and click Projections button")
-            print("   → Re-run this script without --auto-skip when done")
-            # Still wait a bit in case user clicked manually
-            time.sleep(5)
-        else:
-            print("")
-            print("🎯 Quick manual step needed:")
-            print("   → Click the 'Projections' button (with download icon)")
-            print("   → Select 'Projections' from dropdown")
-            print("")
-            input("Press ENTER when done...")
+    # Use simple manual approach
+    if auto_skip:
+        print("⚠️  Manual interaction required but running in auto-skip mode")
+        print(f"   → Page was: {FANTASY_FOOTBALLERS_URL}")
+        manual_worked = False
+        time.sleep(2)  # Brief wait in auto-skip mode
+    else:
+        instructions = [
+            "Page is open in Arc",
+            "Click the 'Projections' button (with download icon)",
+            "Select 'Projections' from dropdown"
+        ]
+        manual_worked = simple_manual_approach(instructions)
 
-    # Close the browser window
-    print("🔄 Closing browser window...")
-    try:
-        close_script = '''
-        tell application "Arc"
-            activate
-            delay 0.5
-        end tell
-        
-        tell application "System Events"
-            tell process "Arc"
-                keystroke "w" using command down
-            end tell
-        end tell
-        '''
-        result = subprocess.run(['osascript', '-e', close_script],
-                              capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            print("✅ Arc tab closed successfully")
-        else:
-            print("⚠️ Could not close Arc tab automatically")
-    except Exception as e:
-        print(f"⚠️  Could not close browser window: {e}")
-        print("💡 You can close it manually with Cmd+W")
+    close_arc_tab("Arc tab")
 
-    # Check results
-    print("🔍 Checking downloads...")
-    time.sleep(2)
+    # Check for new files
+    if manual_worked:
+        print("   ⏳ Waiting for download to complete...")
+        time.sleep(FILE_CHECK_TIMEOUT)
+    else:
+        time.sleep(2)  # Brief wait in auto-skip mode
 
-    recent_files = check_downloads()
+    final_files = check_downloads()
+    new_files = [f for f in final_files if f not in initial_files]
 
-    if recent_files:
-        latest = recent_files[0]
-        print(f"✅ SUCCESS! Downloaded: {latest.name}")
+    if new_files:
+        latest_file = new_files[0]
+        print(f"✅ SUCCESS! Downloaded: {latest_file.name}")
 
         # Quick content check
         try:
-            content = latest.read_text(encoding='utf-8')[:200]
+            content = latest_file.read_text(encoding='utf-8')[:200]
             if 'ProjPts' in content:
-                print("🎯 Confirmed: Fantasy Footballers projections data!")
+                print("🎯 Confirmed: Projections data!")
             elif 'DraftKings' in content:
                 print("⚠️  This looks like DraftKings data, not projections")
             else:
@@ -182,14 +94,12 @@ def main():
 
         return True
     else:
-        print("❌ No recent downloads found")
-        print("💡 Try the manual method if automation failed")
+        if manual_worked:
+            print("❌ Manual process completed but no download detected")
+        else:
+            print("❌ Skipped in auto-skip mode")
         return False
 
 if __name__ == "__main__":
     success = main()
-    print("")
-    if success:
-        print("🏆 Projections download complete!")
-    else:
-        print("🔧 May need manual clicking, but Arc method works!")
+    sys.exit(0 if success else 1)

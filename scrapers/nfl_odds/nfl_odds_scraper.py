@@ -14,8 +14,8 @@ import requests
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from utils.config import get_scraper_settings
+from utils.scraper_common import get_current_nfl_week
 
-# Load configuration from centralized config
 config = get_scraper_settings("nfl_odds")
 ROTOWIRE_BASE_URL = config["rotowire_base_url"]
 DEFAULT_TIMEOUT = config["default_timeout"]
@@ -112,7 +112,6 @@ class NFLOddsScraper:
                 if not any([dk_moneyline, dk_spread, dk_ou]):
                     continue
 
-                # Format the odds data
                 formatted_moneyline = self._format_moneyline(dk_moneyline)
                 formatted_spread = self._format_spread(dk_spread)
                 team_points = str(dk_team_total_over) if dk_team_total_over else ""
@@ -249,7 +248,6 @@ class NFLOddsScraper:
                     print(f"  {entry['team']} ({entry['abbr']}) - {entry['home_away'].upper()}: "
                           f"ML={entry['moneyline']}, Spread={entry['spread']}, O/U={entry['total']}")
 
-            # Save to CSV
             output_file = self.save_to_csv(odds_data, week, season)
 
             if output_file:
@@ -273,30 +271,35 @@ def main():
     """
 
     parser = argparse.ArgumentParser(description='Scrape NFL DraftKings odds from Rotowire')
-    parser.add_argument('--week', '-w', type=int, default=1, help='NFL week (1-18)')
+    parser.add_argument('--week', '-w', type=int, default=None, help='NFL week (1-18, defaults to current week)')
     parser.add_argument('--season', '-s', type=int, help='NFL season year (default: current year)')
     parser.add_argument('--output-dir', '-o', help='Output directory (default: ~/Downloads)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
 
     args = parser.parse_args()
 
+    # Use current week if not specified
+    week = args.week if args.week is not None else get_current_nfl_week()
+
     # Validate week
-    if not MIN_NFL_WEEK <= args.week <= MAX_NFL_WEEK:
+    if not MIN_NFL_WEEK <= week <= MAX_NFL_WEEK:
         print(f"❌ Week must be between {MIN_NFL_WEEK} and {MAX_NFL_WEEK}")
         return
 
-    # Create scraper
+    if args.week is None:
+        print(f"🏈 Using auto-detected NFL Week {week}")
+
     scraper = NFLOddsScraper(output_dir=args.output_dir)
 
     # Scrape the specified week
     result = scraper.scrape_week(
-        week=args.week,
+        week=week,
         season=args.season,
         verbose=args.verbose
     )
 
     if result:
-        print(f"\n🔄 To scrape another week: python3 nfl_odds_scraper.py --week {args.week + 1}")
+        print(f"\n🔄 To scrape another week: python3 nfl_odds_scraper.py --week {week + 1}")
     else:
         print("\n💡 Try a different week or check your internet connection")
 

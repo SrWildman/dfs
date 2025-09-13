@@ -25,9 +25,9 @@ def run_scraper(scraper_path, scraper_file, description, args=None):
     """
     print(f"🔄 {description}...")
     try:
-        # Add auto-skip flag for Fantasy Footballers to prevent interactive prompt
+        # Add auto-skip flag for interactive scrapers to prevent prompt blocking
         cmd = ['python3', scraper_file]
-        if 'fantasy_footballers' in str(scraper_path):
+        if 'fantasy_footballers' in str(scraper_path) or 'tffb_sos' in str(scraper_path):
             cmd.append('--auto-skip')
         
         # Add any additional arguments passed to the scraper

@@ -8,7 +8,7 @@ and optional Google Sheets integration.
 
 Features:
     - Automated CSV cleanup for new week data refresh
-    - Multi-source data collection (Fantasy Footballers, DraftKings, NFL Odds)
+    - Multi-source data collection (Projections, DraftKings, NFL Odds)
     - Intelligent file organization and management
     - Google Sheets integration with error handling
     - Comprehensive progress reporting and error logging
@@ -56,7 +56,6 @@ def main() -> bool:
     Raises:
         SystemExit: If argument parsing fails (handled by argparse)
     """
-    # Configure and parse command line arguments
     parser = argparse.ArgumentParser(
         description='DFS Complete Workflow - Collect & Organize',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -74,15 +73,12 @@ def main() -> bool:
     )
     args = parser.parse_args()
 
-    # Display workflow header
     print_workflow_header()
 
-    # Step 1: Clear old CSV data for new week
     cleanup_success = clear_old_csvs()
     if not cleanup_success:
         print("⚠️  CSV cleanup encountered issues, but continuing with workflow...")
 
-    # Step 2: Execute all data collection scrapers
     scrapers = get_scraper_configs()
     scraper_args = []
     if args.week:
@@ -90,17 +86,14 @@ def main() -> bool:
     results = run_scrapers(scrapers, scraper_args)
     successful, total = print_results_summary(results, "Collection Summary")
 
-    # Step 3: Organize downloaded files
     organize_success = organize_files()
 
-    # Step 4: Optional Google Sheets upload
     upload_success = False
     if not args.no_upload:
         upload_success = upload_to_sheets()
     else:
         print("📊 Google Sheets upload skipped (--no-upload flag)")
 
-    # Step 5: Display comprehensive summary
     print_final_summary(
         successful,
         total,
