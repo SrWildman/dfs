@@ -62,7 +62,7 @@ def automate_download():
         activate
         delay 2
     end tell
-
+    
     tell application "System Events"
         -- Send CMD+F to open find, then search for "Projections"
         keystroke "f" using command down
@@ -84,7 +84,7 @@ def automate_download():
     '''
 
     try:
-        result = subprocess.run(['osascript', '-e', script],
+        result = subprocess.run(['osascript', '-e', script], 
                               capture_output=True, text=True, timeout=30)
         return result.returncode == 0
     except:
@@ -138,14 +138,22 @@ def main():
     try:
         close_script = '''
         tell application "Arc"
-            tell front window
-                close current tab
+            activate
+            delay 0.5
+        end tell
+        
+        tell application "System Events"
+            tell process "Arc"
+                keystroke "w" using command down
             end tell
         end tell
         '''
-        subprocess.run(['osascript', '-e', close_script],
-                      capture_output=True, text=True, timeout=10)
-        print("✅ Browser window closed")
+        result = subprocess.run(['osascript', '-e', close_script],
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            print("✅ Arc tab closed successfully")
+        else:
+            print("⚠️ Could not close Arc tab automatically")
     except Exception as e:
         print(f"⚠️  Could not close browser window: {e}")
         print("💡 You can close it manually with Cmd+W")
