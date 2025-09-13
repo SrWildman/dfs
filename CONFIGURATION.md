@@ -11,9 +11,14 @@ All DFS suite settings are centralized in `config.json`. This document explains 
     "sheet_id": "your-google-sheet-id",
     "credentials_file": "dfs-uploader-86ac915dfec5.json",
     "tab_mappings": {
-      "fantasy_footballers": "Projections",
+      "projections": "Projections",
       "draftkings": "Salaries",
-      "nfl_odds": "Odds"
+      "nfl_odds": "Odds",
+      "sos_qb": "SoSQB",
+      "sos_rb": "SoSRB",
+      "sos_wr": "SoSWr",
+      "sos_te": "SoSTE",
+      "sos_dst": "SoSDef"
     },
     "update_behavior": {
       "clear_before_upload": true,
@@ -52,25 +57,45 @@ All DFS suite settings are centralized in `config.json`. This document explains 
 
 ### 🎯 Individual Scrapers
 
-#### Fantasy Footballers
+#### Projections
 ```json
 {
   "scrapers": {
-    "fantasy_footballers": {
+    "projections": {
       "url": "https://www.thefantasyfootballers.com/2025-ultimate-dfs-pass/dfs-pass-lineup-optimizer/",
-      "browser_wait_time": 15,
-      "download_timeout": 10,
-      "automation_delay": 5
+      "browser_wait_time": 5,
+      "download_timeout": 3,
+      "automation_delay": 1
     }
   }
 }
 ```
 
 **Options:**
-- `url`: Fantasy Footballers optimizer URL
+- `url`: The Fantasy Footballers optimizer URL
 - `browser_wait_time`: Seconds to wait for page load
 - `download_timeout`: Seconds to wait for file download
 - `automation_delay`: Delay between automation attempts
+
+#### Strength of Schedule
+```json
+{
+  "scrapers": {
+    "tffb_sos": {
+      "base_url": "https://www.thefantasyfootballers.com/footclan/strength-of-schedule/",
+      "browser_wait_time": 5,
+      "automation_delay": 1,
+      "positions": ["QB", "RB", "WR", "TE", "D/ST"]
+    }
+  }
+}
+```
+
+**Options:**
+- `base_url`: The Fantasy Footballers Strength of Schedule base URL
+- `browser_wait_time`: Seconds to wait for page load per position
+- `automation_delay`: Delay between position scraping
+- `positions`: List of positions to scrape (QB, RB, WR, TE, D/ST)
 
 #### DraftKings
 ```json
@@ -157,9 +182,14 @@ Edit the `tab_mappings` section:
 {
   "google_sheets": {
     "tab_mappings": {
-      "fantasy_footballers": "FF Projections",
-      "draftkings": "DK Salaries", 
-      "nfl_odds": "Betting Lines"
+      "projections": "Projections",
+      "draftkings": "Salaries",
+      "nfl_odds": "Odds",
+      "sos_qb": "SoSQB",
+      "sos_rb": "SoSRB",
+      "sos_wr": "SoSWr",
+      "sos_te": "SoSTE",
+      "sos_dst": "SoSDef"
     }
   }
 }
@@ -188,13 +218,17 @@ Edit workflows section:
 ```
 
 ### Speed Up Browser Operations
-Edit Fantasy Footballers settings:
+Edit Projections and Strength of Schedule settings:
 ```json
 {
   "scrapers": {
-    "fantasy_footballers": {
-      "browser_wait_time": 10,
-      "automation_delay": 2
+    "projections": {
+      "browser_wait_time": 3,
+      "automation_delay": 1
+    },
+    "tffb_sos": {
+      "browser_wait_time": 3,
+      "automation_delay": 1
     }
   }
 }

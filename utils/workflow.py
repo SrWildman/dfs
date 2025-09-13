@@ -2,73 +2,25 @@
 """
 DFS Workflow Management Utilities
 
-A comprehensive workflow orchestration system for Daily Fantasy Sports (DFS) data pipelines.
-This module provides standardized, reusable workflow components that ensure consistent
-behavior across all DFS scripts and automation systems.
-
-Key Features:
-    - Centralized workflow orchestration
-    - Standardized progress reporting and user feedback
-    - Comprehensive error handling and recovery
-    - Google Sheets integration with robust validation
-    - File organization and management workflows
-    - Configurable output formatting and messaging
-
-Workflow Components:
-    - File Organization: Automated CSV file structuring and management
-    - Upload Management: Google Sheets integration with error handling
-    - Progress Reporting: Consistent status updates and summaries
-    - Header Generation: Standardized workflow identification
-
-Design Principles:
-    - Consistency: Uniform behavior across all workflow components
-    - Reliability: Comprehensive error handling and graceful degradation
-    - Modularity: Reusable components for different workflow contexts
-    - Transparency: Clear progress reporting and detailed logging
-
-Integration:
-    This module serves as the central orchestration layer for all DFS
-    workflows, providing consistent interfaces and behavior patterns
-    across the entire application ecosystem.
+Workflow orchestration system for DFS data pipelines.
 """
 
 import traceback
 
-from .config import get_google_sheets_config, validate_google_sheets_config
-from .file_manager import organize_downloads, show_organization_summary
-from .sheets_uploader import SheetsUploader, validate_credentials
+try:
+    # When imported as a module from main scripts
+    from utils.config import get_google_sheets_config, validate_google_sheets_config
+    from utils.file_manager import organize_downloads, show_organization_summary
+    from utils.sheets_uploader import SheetsUploader, validate_credentials
+except ImportError:
+    # When run directly from utils directory
+    from config import get_google_sheets_config, validate_google_sheets_config
+    from file_manager import organize_downloads, show_organization_summary
+    from sheets_uploader import SheetsUploader, validate_credentials
 
 
 def organize_files() -> bool:
-    """
-    Execute comprehensive file organization workflow for DFS data management.
-
-    This function orchestrates the complete file organization process, including
-    CSV file discovery, categorization, and structured placement within the
-    project directory hierarchy. It provides detailed progress reporting and
-    comprehensive error handling.
-
-    Organization Process:
-        1. Scans for recently downloaded CSV files
-        2. Categorizes files by data source (DraftKings, Fantasy Footballers, etc.)
-        3. Moves files to appropriate organized directory structure
-        4. Updates latest file symlinks for easy access
-        5. Generates upload manifest for Google Sheets integration
-
-    Returns:
-        bool: True if organization completed successfully,
-              False if any errors occurred during the process
-
-    Features:
-        - Automatic file type detection and categorization
-        - Duplicate file handling with timestamp-based naming
-        - Comprehensive progress reporting with visual indicators
-        - Graceful error handling with detailed diagnostics
-
-    Note:
-        This function provides extensive console output for monitoring
-        progress and debugging any organizational issues that may arise.
-    """
+    """Execute file organization workflow for DFS data management."""
     print("🔄 File Organization...")
 
     try:
@@ -94,44 +46,10 @@ def organize_files() -> bool:
 
 
 def upload_to_sheets() -> bool:
-    """
-    Execute comprehensive Google Sheets upload workflow for DFS data synchronization.
-
-    This function orchestrates the complete upload process, including configuration
-    validation, credential verification, file discovery, and batch upload operations
-    to Google Sheets. It provides robust error handling and detailed progress reporting.
-
-    Upload Process:
-        1. Loads and validates Google Sheets configuration
-        2. Verifies API credentials and permissions
-        3. Discovers available CSV files for upload
-        4. Maps files to appropriate sheet tabs based on configuration
-        5. Executes batch upload operations with error recovery
-        6. Provides comprehensive success/failure reporting
-
-    Returns:
-        bool: True if at least one file uploaded successfully,
-              False if all upload operations failed
-
-    Configuration Requirements:
-        - Valid Google Sheets API credentials (credentials.json)
-        - Properly configured sheet ID in config.json
-        - Tab mappings for data source routing
-
-    Error Handling:
-        - Graceful degradation on configuration issues
-        - Detailed error reporting for troubleshooting
-        - Automatic retry logic for transient failures
-
-    Note:
-        This function includes comprehensive error diagnostics and
-        detailed progress reporting to assist with troubleshooting
-        upload issues and configuration problems.
-    """
+    """Execute Google Sheets upload workflow for DFS data synchronization."""
     try:
         print("\n🔄 Google Sheets Upload...")
 
-        # Load and validate Google Sheets configuration
         sheets_config = get_google_sheets_config()
         if not validate_google_sheets_config(sheets_config):
             print("💡 Check your config.json file and ensure proper Google Sheets setup")
@@ -142,7 +60,6 @@ def upload_to_sheets() -> bool:
             print("💡 Ensure credentials.json is valid and has proper permissions")
             return False
 
-        # Initialize uploader and execute upload workflow
         uploader = SheetsUploader(
             sheets_config['credentials_file'],
             sheets_config['sheet_id'],
@@ -162,13 +79,7 @@ def upload_to_sheets() -> bool:
 
 
 def print_workflow_header(title="DFS Complete Workflow - Collect & Organize", include_cleanup=True):
-    """
-    Print a standardized workflow header.
-
-    Args:
-        title (str): Main title for the workflow
-        include_cleanup (bool): Whether to show CSV cleanup step
-    """
+    """Print a standardized workflow header."""
     print(f"🏈 {title}")
     print("=" * len(title))
     print("📊 This will:")
@@ -185,27 +96,17 @@ def print_workflow_header(title="DFS Complete Workflow - Collect & Organize", in
 
 
 def print_update_header():
-    """
-    Print the quick update header and description.
-    """
+    """Print the quick update header and description."""
     print("🔄 DFS Quick Update - Projections & Odds")
     print("=" * 45)
     print("📊 Running frequently updated data sources only...")
     print("💡 Skipping DraftKings salaries (updated weekly)")
-    print("⚠️  Note: Fantasy Footballers requires one manual click")
+    print("⚠️  Note: Projections requires one manual click")
     print()
 
 
 def print_update_summary(successful, total, upload_success=False, upload_skipped=False):
-    """
-    Print summary for update workflow.
-
-    Args:
-        successful (int): Number of successful scrapers
-        total (int): Total number of scrapers run
-        upload_success (bool): Whether Google Sheets upload succeeded
-        upload_skipped (bool): Whether upload was intentionally skipped
-    """
+    """Print summary for update workflow."""
     if successful == total:
         print("🏆 Quick update completed successfully!")
         print("📁 Files downloaded and organized")
@@ -223,16 +124,7 @@ def print_update_summary(successful, total, upload_success=False, upload_skipped
 
 
 def print_final_summary(successful, total, organize_success, upload_success=False, upload_skipped=False):
-    """
-    Print final workflow summary and next steps.
-
-    Args:
-        successful (int): Number of successful scrapers
-        total (int): Total number of scrapers
-        organize_success (bool): Whether file organization succeeded
-        upload_success (bool): Whether Google Sheets upload succeeded
-        upload_skipped (bool): Whether upload was intentionally skipped
-    """
+    """Print final workflow summary and next steps."""
     print("🎯 Workflow Summary:")
     print("-" * 25)
 
@@ -276,12 +168,9 @@ def print_final_summary(successful, total, organize_success, upload_success=Fals
 
 
 if __name__ == "__main__":
-    # Allow testing workflow functions
     print("🧪 Testing workflow utilities...")
-
     print_workflow_header("Test Workflow")
 
-    # Test config loading
     sheets_config = get_google_sheets_config()
     if sheets_config:
         print("✅ Configuration loaded successfully")

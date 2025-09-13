@@ -10,6 +10,7 @@ Usage:
 """
 
 import subprocess
+import sys
 import time
 import webbrowser
 import re
@@ -19,11 +20,13 @@ from datetime import datetime
 
 import requests
 
+# Add utils to path for imports
+sys.path.append(str(Path(__file__).parent.parent.parent / 'utils'))
+from scraper_common import DEFAULT_TIMEOUT, BROWSER_WAIT_TIME
+
 # Configuration constants
 DRAFTKINGS_API_URL = "https://api.draftkings.com/draftgroups/v1/"
 DRAFTKINGS_CSV_BASE_URL = "https://www.draftkings.com/lineup/getavailableplayerscsv"
-DEFAULT_TIMEOUT = 30  # Seconds for HTTP requests
-BROWSER_WAIT_TIME = 10  # Seconds to wait after opening browser
 DEFAULT_CSV_FILENAME = "DraftKings NFL Salaries.csv"
 
 
@@ -232,7 +235,6 @@ def get_current_nfl_contest():
         main_contest = main_contest_data['contest']
         game_count = main_contest_data['game_count']
 
-        # Build the CSV download URL
         draft_group_id = main_contest['draftGroupId']
         contest_type_id = main_contest['contestType']['contestTypeId']
         csv_url = (
@@ -335,7 +337,6 @@ def open_in_browser(csv_url):
         except KeyboardInterrupt:
             print("⏹️  Stopped by user")
 
-        # Close the browser window that was opened
         print("🔄 Closing browser window...")
         try:
             system = platform.system().lower()

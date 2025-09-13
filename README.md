@@ -21,34 +21,37 @@ python3 run_all.py --no-upload
 
 | Source | Data Type | Update Frequency | Output |
 |--------|-----------|------------------|---------|
-| **Fantasy Footballers** | Player projections | Multiple times daily | Projections with ownership % |
+| **Projections** | Player projections | Multiple times daily | Projections with ownership % |
 | **DraftKings** | Player salaries | Weekly (usually Tuesday) | Current slate pricing |
 | **NFL Odds** | Betting lines | Multiple times daily | Spreads, totals, moneylines |
+| **Strength of Schedule** | Matchup analysis | Weekly | Position-specific defensive rankings |
 
 ## 🏗️ Project Structure
 
 ```
 dfs/
-├── 🚀 run_all.py                   # Complete workflow (all 3 scrapers + upload)
-├── ⚡ run_update.py                 # Quick workflow (FF + odds + upload)
+├── 🚀 run_all.py                   # Complete workflow (all 4 scrapers + upload)
+├── ⚡ run_update.py                 # Quick workflow (Projections + odds + upload)
 ├── 📤 upload.py                    # Standalone Google Sheets upload
 ├── 📋 requirements.txt             # Python dependencies
 ├── 📚 docs/                        # Documentation
 │   ├── SHEETS_SETUP.md             # Google Sheets integration guide
 │   └── draftkings_guide.md         # DraftKings setup notes
 ├── 📁 downloads/                   # Organized CSV output
-│   ├── fantasy_footballers/        # FF projection CSVs
-│   ├── draftkings/                 # DK salary CSVs  
+│   ├── projections/               # Projections CSVs
+│   ├── draftkings/                 # DK salary CSVs
 │   ├── nfl_odds/                   # NFL odds CSVs
+│   ├── sos/                        # Strength of Schedule CSVs
 │   └── upload_manifest.json        # Upload status tracking
 ├── 🛠️ utils/                       # Core utilities
 │   ├── sheets_uploader.py          # Google Sheets integration
 │   ├── manage_downloads.py         # File organization
 │   └── file_manager.py             # Shared file utilities
 └── 🎯 scrapers/                    # Data collection modules
-    ├── fantasy_footballers/
+    ├── projections/
     ├── draftkings/
-    └── nfl_odds/
+    ├── nfl_odds/
+    └── tffb_sos/
 ```
 
 ## 📋 Setup
@@ -68,18 +71,18 @@ See [`docs/SHEETS_SETUP.md`](docs/SHEETS_SETUP.md) for complete setup guide.
 **Complete Pipeline:**
 ```bash
 python3 run_all.py
-# ✅ Runs all 3 scrapers
-# ✅ Auto-organizes files 
+# ✅ Runs all 4 scrapers (Projections, DraftKings, NFL Odds, Strength of Schedule)
+# ✅ Auto-organizes files
 # ✅ Uploads to Google Sheets
 ```
 
 **Quick Update:**
 ```bash
-python3 run_update.py  
-# ✅ Fantasy Footballers + NFL Odds only
+python3 run_update.py
+# ✅ Projections + NFL Odds only
 # ✅ Auto-organizes files
 # ✅ Uploads to Google Sheets
-# ⏭️ Skips DraftKings (updated weekly)
+# ⏭️ Skips DraftKings & Strength of Schedule (updated weekly)
 ```
 
 ### Individual Operations
@@ -98,9 +101,10 @@ python3 run_update.py --no-upload
 
 **Individual Scrapers:**
 ```bash
-cd scrapers/fantasy_footballers && python3 scraper.py
-cd scrapers/draftkings && python3 scraper.py  
+cd scrapers/projections && python3 scraper.py
+cd scrapers/draftkings && python3 scraper.py
 cd scrapers/nfl_odds && python3 nfl_odds_scraper.py
+cd scrapers/tffb_sos && python3 scraper.py
 ```
 
 ## 📤 Google Sheets Integration
@@ -115,9 +119,14 @@ cd scrapers/nfl_odds && python3 nfl_odds_scraper.py
 ### Default Tab Mapping
 | CSV Source | Google Sheets Tab |
 |------------|-------------------|
-| Fantasy Footballers | `Projections` |
+| Projections | `Projections` |
 | DraftKings | `Salaries` |
 | NFL Odds | `Odds` |
+| Strength of Schedule - QB | `SoSQB` |
+| Strength of Schedule - RB | `SoSRB` |
+| Strength of Schedule - WR | `SoSWr` |
+| Strength of Schedule - TE | `SoSTE` |
+| Strength of Schedule - D/ST | `SoSDef` |
 
 ### Setup
 1. **Follow setup guide**: [`docs/SHEETS_SETUP.md`](docs/SHEETS_SETUP.md)
@@ -130,20 +139,27 @@ cd scrapers/nfl_odds && python3 nfl_odds_scraper.py
 ### File Organization
 ```
 downloads/
-├── fantasy_footballers/
-│   ├── fantasy-footballers_latest.csv      # Always current
-│   └── fantasy-footballers_YYYYMMDD_HHMM.csv  # Timestamped
+├── projections/
+│   ├── projections_latest.csv              # Always current
+│   └── projections_YYYYMMDD_HHMM.csv        # Timestamped
 ├── draftkings/
 │   ├── draftkings_latest.csv
 │   └── draftkings_YYYYMMDD_HHMM.csv
-└── nfl_odds/
-    ├── nfl-odds_latest.csv  
-    └── nfl-odds_YYYYMMDD_HHMM.csv
+├── nfl_odds/
+│   ├── nfl-odds_latest.csv
+│   └── nfl-odds_YYYYMMDD_HHMM.csv
+└── sos/
+    ├── sos-qb_latest.csv       # QB Strength of Schedule
+    ├── sos-rb_latest.csv       # RB Strength of Schedule
+    ├── sos-wr_latest.csv       # WR Strength of Schedule
+    ├── sos-te_latest.csv       # TE Strength of Schedule
+    ├── sos-dst_latest.csv      # D/ST Strength of Schedule
+    └── sos-*_YYYYMMDD_HHMM.csv # Timestamped versions
 ```
 
 ### Data Formats
 
-**Fantasy Footballers** (`projections`):
+**Projections** (`projections`):
 ```csv
 Id,Name,Position,Team,ProjPts,ProjOwn
 39506991,Denver Broncos,DST,Broncos,10.70,8.90
@@ -162,14 +178,55 @@ Cowboys,2025-09-04 20:20:00,+320,+7.5,47.5
 Eagles,2025-09-04 20:20:00,-410,-7.5,47.5
 ```
 
+**Strength of Schedule** (`matchup analysis`):
+```csv
+Team,Opponent,Rank,Points_Allowed_Avg
+Buffalo Bills,Miami Dolphins,1,18.2
+Kansas City Chiefs,Cincinnati Bengals,2,19.5
+```
+
+## 🏈 Strength of Schedule Features
+
+### Multi-Position Support
+The system automatically scrapes Strength of Schedule data for all fantasy-relevant positions:
+- **QB**: Quarterback matchup analysis
+- **RB**: Running back defensive rankings
+- **WR**: Wide receiver coverage analysis
+- **TE**: Tight end matchup data
+- **D/ST**: Defense/Special Teams rankings
+
+### Automated Workflow
+- **Separate Browser Windows**: Each position opens in its own Arc window for easy manual interaction
+- **Position-Specific Files**: Each position generates its own CSV file (sos-qb_latest.csv, sos-rb_latest.csv, etc.)
+- **Google Sheets Integration**: Uploads to separate tabs (SoSQB, SoSRB, SoSWr, SoSTE, SoSDef)
+- **Organized Storage**: All SOS files stored in downloads/sos/ directory
+
+### Usage
+```bash
+# Run full pipeline including SOS
+python3 run_all.py
+
+# Run SOS scraper individually
+cd scrapers/tffb_sos && python3 scraper.py
+
+# Run SOS for specific week
+cd scrapers/tffb_sos && python3 scraper.py --week 3
+```
+
 ## 🔍 Troubleshooting
 
 ### Common Issues
 
-**Fantasy Footballers "Manual step required":**
+**Projections "Manual step required":**
 - Script opens page in Arc browser
 - Click "Projections" button with download icon
 - Select "Projections" from dropdown
+
+**Strength of Schedule "Manual step required":**
+- Script opens separate Arc window for each position (QB, RB, WR, TE, D/ST)
+- Select the correct position and week
+- Click "More" → "Download CSV"
+- Repeat for all 5 positions
 
 **DraftKings "Authentication required":**
 - Make sure you're logged into DraftKings
@@ -203,9 +260,14 @@ All settings are centralized in `config.json`. Key sections include:
     "sheet_id": "your-actual-sheet-id-here",
     "credentials_file": "dfs-uploader-86ac915dfec5.json",
     "tab_mappings": {
-      "fantasy_footballers": "Projections",
-      "draftkings": "Salaries", 
-      "nfl_odds": "Odds"
+      "projections": "Projections",
+      "draftkings": "Salaries",
+      "nfl_odds": "Odds",
+      "sos_qb": "SoSQB",
+      "sos_rb": "SoSRB",
+      "sos_wr": "SoSWr",
+      "sos_te": "SoSTE",
+      "sos_dst": "SoSDef"
     }
   }
 }
@@ -219,8 +281,12 @@ All settings are centralized in `config.json`. Key sections include:
       "default_week": 1,
       "default_season": 2025
     },
-    "fantasy_footballers": {
-      "browser_wait_time": 15
+    "projections": {
+      "browser_wait_time": 5
+    },
+    "tffb_sos": {
+      "browser_wait_time": 5,
+      "automation_delay": 1
     }
   }
 }

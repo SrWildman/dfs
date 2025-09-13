@@ -8,9 +8,14 @@
     "credentials_file": "dfs-uploader-86ac915dfec5.json",
     "tab_mappings": {
       "_description": "Maps data sources to Google Sheets tab names",
-      "fantasy_footballers": "Projections",
-      "draftkings": "Salaries", 
-      "nfl_odds": "Odds"
+      "projections": "Projections",
+      "draftkings": "Salaries",
+      "nfl_odds": "Odds",
+      "sos_qb": "SoSQB",
+      "sos_rb": "SoSRB",
+      "sos_wr": "SoSWr",
+      "sos_te": "SoSTE",
+      "sos_dst": "SoSDef"
     },
     "update_behavior": {
       "_description": "How to handle existing data in sheets",
@@ -30,12 +35,12 @@
   
   "scrapers": {
     "_description": "Individual scraper configuration",
-    "fantasy_footballers": {
-      "_description": "Fantasy Footballers projection scraper settings",
+    "projections": {
+      "_description": "Fantasy projections scraper settings",
       "url": "https://www.thefantasyfootballers.com/2025-ultimate-dfs-pass/dfs-pass-lineup-optimizer/",
-      "browser_wait_time": 15,
-      "download_timeout": 10,
-      "automation_delay": 5
+      "browser_wait_time": 5,
+      "download_timeout": 3,
+      "automation_delay": 1
     },
     "draftkings": {
       "_description": "DraftKings salary scraper settings", 
@@ -58,15 +63,12 @@
     "_description": "Main workflow behavior settings",
     "upload_by_default": true,
     "continue_on_scraper_failure": true,
-    "organize_files_after_scraping": true,
-    "show_detailed_progress": true
+    "organize_files_after_scraping": true
   },
   
   "advanced": {
     "_description": "Advanced settings - modify with caution",
     "retry_attempts": 3,
-    "retry_delay_seconds": 2,
-    "parallel_uploads": false,
-    "debug_mode": false
+    "retry_delay_seconds": 2
   }
 }

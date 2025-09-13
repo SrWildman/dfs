@@ -7,14 +7,14 @@ only the most frequently changing data sources. This script is optimized for
 mid-week updates when full data collection is unnecessary.
 
 Features:
-    - Selective scraper execution (Fantasy Footballers + NFL Odds only)
+    - Selective scraper execution (Projections + NFL Odds only)
     - Automatic file organization and management
     - Optional Google Sheets integration
     - Optimized for speed and efficiency
     - Smart skipping of weekly data (DraftKings salaries)
 
 Data Sources:
-    ✅ Fantasy Footballers projections (updated multiple times per week)
+    ✅ Projections (updated multiple times per week)
     ✅ NFL odds data (changes throughout the week)
     ⏭️  DraftKings salaries (updated weekly, skipped for efficiency)
 
@@ -54,7 +54,7 @@ def main() -> bool:
 
     Workflow steps:
     1. Parse command line arguments for configuration
-    2. Execute selective data collection (Fantasy Footballers + NFL Odds)
+    2. Execute selective data collection (Projections + NFL Odds)
     3. Organize downloaded files into proper structure
     4. Optionally upload fresh data to Google Sheets
     5. Provide update-specific status reporting
@@ -70,7 +70,6 @@ def main() -> bool:
         This function intentionally skips DraftKings salary data since
         salaries typically only change once per week (usually Monday).
     """
-    # Configure and parse command line arguments
     parser = argparse.ArgumentParser(
         description='DFS Quick Update - Projections & Odds',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -88,10 +87,8 @@ def main() -> bool:
     )
     args = parser.parse_args()
 
-    # Display update-specific header
     print_update_header()
 
-    # Step 1: Execute frequent update scrapers only
     scrapers = get_update_scrapers()
     scraper_args = []
     if args.week:
@@ -99,15 +96,12 @@ def main() -> bool:
     results = run_scrapers(scrapers, scraper_args)
     successful, total = print_results_summary(results, "Update Summary")
 
-    # Step 2: Organize downloaded files
     organize_files()
 
-    # Step 3: Optional Google Sheets upload
     upload_success = False
     if not args.no_upload:
         upload_success = upload_to_sheets()
 
-    # Step 4: Display update-specific summary
     print_update_summary(successful, total, upload_success, args.no_upload)
 
     return successful == total

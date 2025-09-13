@@ -12,10 +12,8 @@ Usage:
     uploader.upload_all_dfs_data()
 """
 
-import os
 import pandas as pd
 import gspread
-from google.auth import default
 from google.auth.exceptions import DefaultCredentialsError
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -30,7 +28,7 @@ class SheetsUploader:
 
     # Default tab mappings for DFS data sources
     DEFAULT_TAB_MAPPINGS = {
-        'fantasy_footballers': 'Projections',
+        'projections': 'Projections',
         'draftkings': 'Salaries',
         'nfl_odds': 'Odds'
     }
@@ -50,7 +48,6 @@ class SheetsUploader:
         self.client = None
         self.sheet = None
 
-        # Initialize connection
         self._authenticate()
 
     def _authenticate(self):
@@ -105,7 +102,6 @@ class SheetsUploader:
             df = df.replace([float('inf'), float('-inf')], '')  # Replace inf with empty strings
             df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col) # Trim Whitespace
 
-            # Get or create the worksheet
             try:
                 worksheet = self.sheet.worksheet(tab_name)
             except gspread.WorksheetNotFound:
@@ -141,13 +137,13 @@ class SheetsUploader:
         downloads_dir = Path(__file__).parent.parent / "downloads"
 
         for source, tab_name in self.tab_mappings.items():
-            # Handle TFFB SOS position-specific files
-            if source.startswith('tffb_sos_'):
-                position = source.replace('tffb_sos_', '').upper()
+            # Handle SOS position-specific files
+            if source.startswith('sos_'):
+                position = source.replace('sos_', '').upper()
                 if position == 'DST':
                     position = 'dst'  # Handle D/ST case
-                source_dir = downloads_dir / 'tffb_sos'
-                latest_file = source_dir / f"tffb-sos-{position.lower()}_latest.csv"
+                source_dir = downloads_dir / 'sos'
+                latest_file = source_dir / f"sos-{position.lower()}_latest.csv"
             else:
                 # Look for the latest CSV file for this source
                 source_dir = downloads_dir / source

@@ -52,9 +52,14 @@
          "sheet_id": "your-actual-sheet-id-here",
          "credentials_file": "dfs-uploader-86ac915dfec5.json",
          "tab_mappings": {
-           "fantasy_footballers": "Projections",
+           "projections": "Projections",
            "draftkings": "Salaries",
-           "nfl_odds": "Odds"
+           "nfl_odds": "Odds",
+           "sos_qb": "SoSQB",
+           "sos_rb": "SoSRB",
+           "sos_wr": "SoSWr",
+           "sos_te": "SoSTE",
+           "sos_dst": "SoSDef"
          }
        }
      }
@@ -76,11 +81,16 @@ python3 run_update.py
 ## Tab Names Expected
 
 The uploader expects these tab names in your Google Sheet:
-- **"Projections"** - Fantasy Footballers data
-- **"Salaries"** - DraftKings salary data  
+- **"Projections"** - Player projections data
+- **"Salaries"** - DraftKings salary data
 - **"Odds"** - NFL betting odds
+- **"SoSQB"** - QB Strength of Schedule data
+- **"SoSRB"** - RB Strength of Schedule data
+- **"SoSWr"** - WR Strength of Schedule data
+- **"SoSTE"** - TE Strength of Schedule data
+- **"SoSDef"** - D/ST Strength of Schedule data
 
-If your tabs have different names, edit the `DEFAULT_TAB_MAPPINGS` in `utils/sheets_uploader.py`
+If your tabs have different names, edit the `tab_mappings` section in `config.json`
 
 ## Security Notes
 
