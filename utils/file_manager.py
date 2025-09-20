@@ -64,17 +64,17 @@ def show_organization_summary():
             return
 
         # Count files in each category
-        categories = ['fantasy_footballers', 'draftkings', 'nfl_odds']
+        categories = ['projections', 'sos', 'draftkings', 'nfl_odds']
         file_counts = {}
 
         for category in categories:
             category_dir = downloads_dir / category
             if category_dir.exists():
                 csv_files = list(category_dir.glob("*.csv"))
-                latest_file = category_dir / f"{category.replace('_', '-')}_latest.csv"
+                latest_files = list(category_dir.glob(f"{category.replace('_', '-')}*_latest.csv"))
                 file_counts[category] = {
                     'total': len(csv_files),
-                    'has_latest': latest_file.exists()
+                    'has_latest': len(latest_files) > 0
                 }
             else:
                 file_counts[category] = {'total': 0, 'has_latest': False}

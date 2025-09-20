@@ -313,11 +313,12 @@ class DownloadsManager:
         total_files = 0
         for source, source_dir in self.sources.items():
             files = list(source_dir.glob("*.csv"))
-            latest_file = source_dir / f"{source.replace('_', '-')}_latest.csv"
+            latest_files = list(source_dir.glob(f"{source.replace('_', '-')}*_latest.csv"))
 
             print(f"\n🏈 {source.replace('_', ' ').title()}:")
 
-            if latest_file.exists():
+            if latest_files:
+                latest_file = latest_files[0]
                 mod_time = datetime.fromtimestamp(latest_file.stat().st_mtime)
                 size_mb = latest_file.stat().st_size / (1024 * 1024)
                 print(f"   📄 Latest: {latest_file.name}")
