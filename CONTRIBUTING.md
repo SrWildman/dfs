@@ -113,6 +113,39 @@ applied to. `test_sheet_links.py`'s
 live sheet currently depends on -- if it ever needs to change, that
 re-run has to happen first.
 
+## Keeping docs and the sheet's Instructions tab in sync
+
+This has already gone stale more than once: `EDGE_COLUMNS` gained columns
+that `README.md`/`docs/SHEET_REFERENCE.md` didn't mention, and the
+Instructions tab's "Weekly workflow" step-by-step and its EdgeRaw column
+list both fell behind `dfs week new`/`dfs sync --live`/`dfs lineups
+late-swap` being added -- caught only because someone went looking, not
+because anything forced the update. **Before considering a change done,
+if it touched any of the following, update every doc in its row**, not
+just the code:
+
+| You changed | Update |
+|---|---|
+| `EDGE_COLUMNS` (added/removed a column) | `README.md`'s "Edge layer" section, `docs/SHEET_REFERENCE.md`'s EdgeRaw table, the Instructions tab's EdgeRaw row (`B12` as of this writing) on **both** the live sheet and the template |
+| A CLI command's name, flags, or behavior | `README.md`'s Commands list and "Weekly workflow" section, the Instructions tab's "Weekly workflow" row (`B4`) on both sheets |
+| The weekly workflow itself (a step added, removed, or reordered) | Same two places as above, plus this file's own affected section if the change touched something documented here |
+| A new tab | Everywhere the "Adding a new data source" checklist above already says, **plus** a new Instructions tab row describing it |
+
+The Instructions tab is a real Google Sheet, not a file in this repo --
+update it with `SheetsClient.update_range` (see any `dfs sheets`/`dfs
+week` command for the pattern), once against the live sheet and once
+against the template (`--sheet-id` or a `model_copy(update=...)`'d
+config, same as `dfs sheets format-edge --sheet-id`). There's no test that
+catches this going stale, so it's on the honor system -- treat it as
+part of the change, not a follow-up.
+
+Also worth a periodic check regardless of what you just changed: any
+Instructions-tab `HYPERLINK` pointing at a repo file assumes that file is
+tracked and public. `docs/ROADMAP.md` used to be one of those links; once
+it was gitignored (session working notes, not public documentation), the
+link 404'd, and had to be found and removed by hand -- nothing flags a
+sheet formula pointing at a path git no longer tracks.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
