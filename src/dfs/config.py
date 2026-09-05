@@ -51,6 +51,13 @@ class LineupsConfig(BaseModel):
     upload_tab: str = "DK Upload"
     salary_cap: int = 50000
 
+    # Tabs `dfs lineups clear` resets at the start of a new week -- typed
+    # values (names/picks), not formulas, so they don't reset on their own
+    # when the sheet is duplicated from the template. See weekly_reset.py.
+    builder_tab: str = "Lineups"
+    player_pool_tab: str = "Player Pool"
+    scratch_tab: str = "Scratch"
+
 
 class EntryTableConfig(BaseModel):
     """One append-only entry ledger inside the bankroll tab: a header row,

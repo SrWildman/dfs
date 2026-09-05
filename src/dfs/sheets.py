@@ -11,6 +11,7 @@ belongs to the caller (dfs sync / dfs status), not buried in here.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import gspread
@@ -56,14 +57,27 @@ class SheetsClient:
             self._sheet = client.open_by_key(self._cfg.sheet_id)
         except gspread.exceptions.APIError as e:
             raise SheetsError(
-                f"Google Sheets API rejected the request: {e}\n"
-                f"Check that the sheet is shared with the service account's "
-                f"client_email."
+                f"Google Sheets API rejected the request for sheet {self._cfg.sheet_id}: {e}\n"
+                f"Share that sheet with the service account's email as an Editor: "
+                f"{self._service_account_email(creds)}"
             ) from e
         except Exception as e:
             raise SheetsError(f"Could not open sheet {self._cfg.sheet_id}: {e}") from e
 
         return self._sheet
+
+    @staticmethod
+    def _service_account_email(creds_path) -> str:
+        try:
+            return json.loads(creds_path.read_text()).get("client_email", "(unknown)")
+        except Exception:  # noqa: BLE001 - this only feeds an error message
+            return "(unknown -- check the credentials file's client_email field)"
+
+    def describe(self) -> tuple[str, str]:
+        """(title, url) of the connected sheet -- print this before any sync/
+        write so it's never ambiguous which sheet a command is about to touch."""
+        sheet = self._open()
+        return sheet.title, sheet.url
 
     def list_tabs(self) -> list[TabInfo]:
         sheet = self._open()
@@ -122,6 +136,16 @@ class SheetsClient:
         except gspread.WorksheetNotFound as e:
             raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
         return ws.get(a1_range)
+
+    def clear_ranges(self, tab_name: str, a1_ranges: list[str]) -> None:
+        """Clear cell values in the given ranges -- formatting (including
+        conditional formatting) is untouched, only content is removed."""
+        sheet = self._open()
+        try:
+            ws = sheet.worksheet(tab_name)
+        except gspread.WorksheetNotFound as e:
+            raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
+        ws.batch_clear(a1_ranges)
 
     def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
         """Write into a sub-range only -- never clears the tab, never touches

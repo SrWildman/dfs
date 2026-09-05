@@ -12,10 +12,12 @@ from __future__ import annotations
 from dfs.sources.base import Source
 from dfs.sources.dk_salaries import DkSalariesSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
+from dfs.sources.tffb_projections import TffbProjectionsSource
 
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
+    "projections": TffbProjectionsSource(),
 }
 
 

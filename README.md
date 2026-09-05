@@ -16,12 +16,15 @@ from the wrong file.
 |---|---|
 | DraftKings salaries | Working -- live, unauthenticated API |
 | NFL odds (Rotowire) | Working -- live, unauthenticated API |
+| TFFB projections (`ProjPts`/`ProjOwn`/Ceiling/Vegas context) | Working -- authenticated capture of the DFS Pass optimizer's own API (`dfs auth tffb` once) |
 | Lineup export & validation | Working, against a manually-paired entries tab |
+| Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
-| TFFB projections / Strength of Schedule | Not yet ported -- paywalled, needs a look at the real post-login page |
+| Strength of Schedule | Not yet ported -- see `legacy/README.md` |
+| Player ownership % (field consensus, not TFFB's own) | Not started -- see `docs/HANDOFF.md` |
 | Live DK contest history / entries (no manual export) | Not yet built -- needs `dfs auth dk` exercised first |
 
-See `legacy/README.md` for the two scrapers still pending a port.
+See `docs/HANDOFF.md` for session history, current state, and what's next.
 
 ## Setup
 
@@ -39,6 +42,14 @@ Copy the config template and fill in your own sheet:
 ```bash
 cp config.example.toml config.toml
 ```
+
+This project expects a Google Sheet shaped like the
+[weekly template](https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/edit)
+(tabs like `TFFBOptoRaw`, `PlayerPoolRaw`, `DkSalClean`, `SoS*`, etc., plus
+the formulas that tie them together) -- `File > Make a copy` it, don't sync
+into a blank sheet. In practice a new copy gets made every week (bankroll
+carryover between weeks isn't automated yet -- copy last week's numbers
+over by hand for now).
 
 `config.toml` is gitignored -- it holds your sheet ID and credentials
 filename, neither of which belong in version control. Edit it with:
@@ -74,6 +85,8 @@ dfs sync --week 3 --season 2026    # override auto-detected week/season
 
 dfs export -o lineups.csv          # validate + export DK bulk-upload CSV
 
+dfs lineups clear                  # wipe last week's typed lineups/picks (new sheet copy)
+
 dfs auth dk                        # one-time interactive DraftKings login
 dfs auth tffb                      # one-time interactive TFFB login
 
@@ -83,16 +96,27 @@ dfs bankroll sync --csv history.csv   # classify + append DK contest history
 Every command exits non-zero on real failure -- nothing here silently
 reports success when something failed.
 
+Since a new sheet gets copied every week, `dfs status`, `dfs sheets inspect`,
+and `dfs sync` (whenever it's actually about to write) all print the
+connected sheet's real title and URL before doing anything else -- a quick
+"is this actually this week's sheet, not last week's" check, since
+`config.toml`'s `sheet_id` is otherwise just an opaque ID you can't eyeball.
+
 ## Weekly workflow
 
-1. **Multiple times a week**: `dfs sync --only draftkings,nfl_odds` to
-   refresh salaries and odds as lines move.
-2. **Build lineups** in the sheet, as always.
-3. **Pair lineups to contest entries** in your DK-upload tab (this stays a
+1. **New week**: duplicate the [weekly template](https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/edit),
+   point `config.toml`'s `sheet_id` at the copy, then `dfs lineups clear`
+   to wipe last week's typed lineups/picks before rebuilding.
+2. **Sync everything**: `dfs sync` (salaries, odds, and TFFB projections --
+   the last needs `dfs auth tffb` done at least once). Re-run
+   `dfs sync --only draftkings,nfl_odds` multiple times through the week as
+   lines move.
+3. **Build lineups** in the sheet, as always.
+4. **Pair lineups to contest entries** in your DK-upload tab (this stays a
    manual step -- see below), then `dfs export -o lineups.csv` and upload
    that file to DraftKings.
-4. **Watch/adjust** through the week; re-sync and re-export as needed.
-5. **End of week**: export your contest history from DraftKings and run
+5. **Watch/adjust** through the week; re-sync and re-export as needed.
+6. **End of week**: export your contest history from DraftKings and run
    `dfs bankroll sync --csv <file>` to reconcile Cash and GPP results.
 
 ## Export lineups

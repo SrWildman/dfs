@@ -37,6 +37,15 @@ sos_dst = "SoSDef"
 upload_tab = "DK Upload"
 salary_cap = 50000
 
+# Tabs `dfs lineups clear` resets at the start of a new week: Lineups and
+# Player Pool have a typed-in Name column (everything else VLOOKUPs off
+# it); Scratch and DK Upload above are full grids of typed values with no
+# formulas at all. All four hold last week's data since a fresh sheet copy
+# doesn't reset them on its own.
+builder_tab = "Lineups"
+player_pool_tab = "Player Pool"
+scratch_tab = "Scratch"
+
 # `dfs bankroll sync` appends new contest entries into per-row ledger
 # tables that already exist in your bankroll tab (header row + a fixed
 # range of data rows, each with its own "% Paid"/"Place %" formulas

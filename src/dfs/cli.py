@@ -28,6 +28,7 @@ from dfs.sheets import SheetsClient, SheetsError
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
+from dfs.weekly_reset import clear_previous_week
 
 app = typer.Typer(
     name="dfs",
@@ -37,9 +38,11 @@ app = typer.Typer(
 sheets_app = typer.Typer(help="Inspect and manage the connected Google Sheet.")
 auth_app = typer.Typer(help="Log in to sites that require an authenticated session.")
 bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll tab.")
+lineups_app = typer.Typer(help="Manage the sheet's lineup-building tabs.")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
 app.add_typer(bankroll_app, name="bankroll")
+app.add_typer(lineups_app, name="lineups")
 
 console = Console()
 log = get_logger("cli")
@@ -67,6 +70,13 @@ def status() -> None:
         console.print(f"[green]OK[/green] credentials file found ({creds.name})")
     else:
         console.print(f"[yellow]missing[/yellow] credentials file not found: {creds}")
+
+    try:
+        title, url = SheetsClient(cfg.google_sheets).describe()
+        console.print(f"[green]OK[/green] connected sheet: [bold]{title}[/bold]\n         {url}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1)
 
     if not paths.MANIFEST_FILE.exists():
         console.print("[yellow]no data yet[/yellow] -- run `dfs sync` to pull sources")
@@ -104,13 +114,15 @@ def sheets_inspect() -> None:
     cfg = _load_config_or_exit()
     client = SheetsClient(cfg.google_sheets)
     try:
+        title, url = client.describe()
+        console.print(f"Connected sheet: [bold]{title}[/bold]\n{url}\n")
         tabs = client.list_tabs()
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1)
 
     known_tabs = set(cfg.google_sheets.tab_mappings.values())
-    table = Table(title=f"Tabs in sheet {cfg.google_sheets.sheet_id}")
+    table = Table(title=f"Tabs in {title!r}")
     table.add_column("tab")
     table.add_column("size")
     table.add_column("mapped?")
@@ -144,6 +156,16 @@ def sync(
         source_names = requested
     else:
         source_names = list(SOURCES)
+
+    if no_upload:
+        console.print("[dim]--no-upload: fetching and caching locally only, no Sheets contact.[/dim]")
+    else:
+        try:
+            title, url = SheetsClient(cfg.google_sheets).describe()
+        except SheetsError as e:
+            console.print(f"[red]Sheets error:[/red] {e}")
+            raise typer.Exit(code=1)
+        console.print(f"Writing to sheet: [bold]{title}[/bold]\n{url}\n")
 
     ctx = SyncContext.current(week=week, season=season)
     console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
@@ -220,6 +242,53 @@ def export(
     if invalid_count:
         console.print(f"[red]{invalid_count} entr{'y' if invalid_count == 1 else 'ies'} skipped due to validation errors above.[/red]")
         raise typer.Exit(code=1)
+
+
+@lineups_app.command("clear")
+def lineups_clear(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Clear last week's typed-in lineup data (Lineups/Player Pool name
+    columns, Scratch, DK Upload) so the sheet's ready for a new week.
+
+    Formulas and formatting (including conditional formatting) are left
+    untouched -- only the typed values a human enters while building
+    lineups get cleared. Run this once per new weekly sheet copy, before
+    rebuilding lineups for that week.
+    """
+    cfg = _load_config_or_exit()
+    client = SheetsClient(cfg.google_sheets)
+    try:
+        title, url = client.describe()
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    console.print(f"About to clear last week's lineup data from: [bold]{title}[/bold]\n{url}\n")
+    console.print(
+        f"  - {cfg.lineups.builder_tab}: Name column\n"
+        f"  - {cfg.lineups.player_pool_tab}: Name column\n"
+        f"  - {cfg.lineups.scratch_tab}: all data\n"
+        f"  - {cfg.lineups.upload_tab}: all data\n"
+    )
+    if not yes and not typer.confirm("Proceed?"):
+        console.print("Cancelled.")
+        raise typer.Exit(code=0)
+
+    try:
+        summary = clear_previous_week(
+            client,
+            lineups_tab=cfg.lineups.builder_tab,
+            player_pool_tab=cfg.lineups.player_pool_tab,
+            scratch_tab=cfg.lineups.scratch_tab,
+            dk_upload_tab=cfg.lineups.upload_tab,
+        )
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    for line in summary:
+        console.print(f"[green]OK[/green] {line}")
 
 
 @bankroll_app.command("sync")
