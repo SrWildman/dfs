@@ -87,6 +87,24 @@ class BankrollConfig(BaseModel):
     gpp: EntryTableConfig | None = None
 
 
+class ResultsConfig(BaseModel):
+    """The season-level Results log: a header row plus a fixed range of
+    data rows with two formula columns already built into every row
+    (`Cash Results`, `H2H %` -- columns D and G, see
+    `week.RESULTS_VALUE_COLUMN_RANGES`). Unlike Bankroll's per-week
+    entries, this tab isn't reset by a new weekly sheet copy at all --
+    `dfs week new` copies its typed-value columns from the outgoing sheet
+    to the new one so the season log keeps accumulating across copies
+    instead of resetting to empty every week."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tab: str = "Results"
+    header_row: int = 1
+    first_row: int = 2
+    last_row: int = 20
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -94,6 +112,7 @@ class Config(BaseModel):
     nfl_odds: NflOddsConfig = NflOddsConfig()
     lineups: LineupsConfig = LineupsConfig()
     bankroll: BankrollConfig = BankrollConfig()
+    results: ResultsConfig = ResultsConfig()
 
 
 def _missing_config_message() -> str:

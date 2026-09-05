@@ -119,6 +119,23 @@ def test_link_edge_columns_is_idempotent_when_already_linked():
     assert "skipped" in result
 
 
+def test_link_edge_columns_skips_when_linked_block_is_not_at_the_tail():
+    # The exact drift found on the old weekly template: LINKED_EDGE_COLUMNS
+    # is linked correctly, but two more columns (Venue, Ceil) sit after it
+    # because that sheet diverged from the one the tail-only check was
+    # written against. A tail-only check sees `[..., "Flag", "Venue",
+    # "Ceil"]` as not-yet-linked and appends a second copy; the fix must
+    # find the block anywhere in the row and skip.
+    header = ["Name", "Pos.", "Team", *LINKED_EDGE_COLUMNS, "Venue", "Ceil"]
+    client = SpySheetsClient(header_row=header)
+    result = link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
+
+    assert client.update_calls == []
+    assert client.color_scale_calls == []
+    assert client.group_calls == []
+    assert "skipped" in result
+
+
 def test_link_edge_columns_not_fooled_by_a_short_header():
     # A header shorter than LINKED_EDGE_COLUMNS can't possibly already be
     # linked -- must not raise or false-positive on the slice comparison.

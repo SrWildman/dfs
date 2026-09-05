@@ -70,7 +70,7 @@ one:
 6. **If the source writes to a new tab, add that tab to the canonical
    weekly template** (the sheet linked from README.md's Setup section --
    currently
-   `1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I`), not just to whatever
+   `10si1m87aaaSLloZa-Sht5dD6ZlG6dS8RDWjSzdxkhLA`), not just to whatever
    sheet your own `config.toml` happens to point at. The template is what
    `File > Make a copy` actually duplicates every week; a tab that only
    exists in your personal sheet is invisible to every future weekly copy
@@ -78,6 +78,36 @@ one:
    template with `--sheet-id <template-id>` (see `dfs sheets
    format-edge --help`) rather than editing `config.toml`, so you don't
    have to swap it back afterward.
+
+## The canonical template is rebuilt from the live sheet, not hand-patched
+
+The template used to be maintained by hand-patching it directly (adding a
+tab here, a column there) independently of whatever the live sheet had
+already accumulated. That's exactly how it drifted: an audit eventually
+found the live sheet at 28 tabs and the template at 24, with two tabs
+(`DK Upload`, `Scratch`) config.toml already assumed existed on every
+sheet -- meaning `dfs export`/`dfs lineups clear` would fail on the very
+next fresh copy -- plus `Venue`/`Ceil` sitting in different columns on
+each sheet (each internally consistent, so nothing local caught it), which
+in turn broke `link-edge`'s tail-only idempotency check (see below).
+
+The current template is instead a Google Drive copy of the live sheet,
+stripped back to empty with `dfs lineups clear --sheet-id <template-id>`
+plus a handful of manual tab clears (see `docs/ROADMAP.md` for the exact
+list, if it's still around when you read this). Rebuilding this way next
+time --  copy the live sheet, strip it -- is less error-prone than
+hand-patching a drifted template, since it starts from a layout you know
+the live sheet's formulas actually work with.
+
+**`dfs sheets doctor --sheet-id <id>`** is the check that would have
+caught the drift above before it shipped: every config-mapped tab exists,
+`EdgeRaw`'s header matches `derived.EDGE_COLUMNS`, the `link-edge` block
+is linked exactly once (not zero, not twice) on `Player Pool`/`Lineups`/
+`PlayerPoolRaw`, `Lineups`' header repeats fall where
+`LINEUPS_NAME_BLOCKS` expects, and Bankroll's configured header rows
+aren't blank. It's read-only, and `dfs week new` now runs it against every
+freshly-copied weekly sheet before writing anything -- run it by hand
+against the template too after any structural change to it.
 
 ## Live-sheet changes (formatting, new columns, conditional formatting)
 
@@ -113,6 +143,20 @@ applied to. `test_sheet_links.py`'s
 live sheet currently depends on -- if it ever needs to change, that
 re-run has to happen first.
 
+`link_edge_columns`'s own idempotency guard (the check that lets it be
+safely re-run) used to compare only the tab's *last* N header columns
+against `LINKED_EDGE_COLUMNS`, on the assumption that "already linked"
+always means "linked at the very end." That assumption broke the moment
+two sheets built from the same source diverged in total width: the old
+template had two extra trailing columns (`Venue`/`Ceil`) the live sheet
+didn't, so its tail no longer matched even though the columns were linked
+correctly earlier in the row -- `link-edge` would have appended a second
+copy on top of a real, working one. It now detects
+`LINKED_EDGE_COLUMNS` as a contiguous run **anywhere** in the header, not
+just at the tail (`sheet_links.find_all_contiguous`) --
+`test_link_edge_columns_skips_when_linked_block_is_not_at_the_tail` pins
+this exact scenario as a regression test.
+
 ## Keeping docs and the sheet's Instructions tab in sync
 
 This has already gone stale more than once: `EDGE_COLUMNS` gained columns
@@ -131,6 +175,7 @@ just the code:
 | A CLI command's name, flags, or behavior | `README.md`'s Commands list and "Weekly workflow" section, the Instructions tab's "Weekly workflow" row (`B4`) on both sheets |
 | The weekly workflow itself (a step added, removed, or reordered) | Same two places as above, plus this file's own affected section if the change touched something documented here |
 | A new tab | Everywhere the "Adding a new data source" checklist above already says, **plus** a new Instructions tab row describing it |
+| The template's tab set or a shared tab's column order (`PlayerPoolRaw`/`Player Pool`/`Lineups`) | Run `dfs sheets doctor` against **both** the live sheet and the template, `docs/SHEET_REFERENCE.md`'s canonical-column-order note, the Instructions tab's column-order row on both sheets |
 
 The Instructions tab is a real Google Sheet, not a file in this repo --
 update it with `SheetsClient.update_range` (see any `dfs sheets`/`dfs

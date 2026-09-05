@@ -1,6 +1,6 @@
 import pytest
 
-from dfs.week import parse_sheet_id_from_url, rewrite_sheet_id
+from dfs.week import extract_results_value_columns, parse_sheet_id_from_url, rewrite_sheet_id
 
 
 def test_parse_sheet_id_from_full_url():
@@ -73,3 +73,34 @@ def test_rewrite_sheet_id_preserves_comments_and_unrelated_lines():
 def test_rewrite_sheet_id_raises_when_no_sheet_id_line_present():
     with pytest.raises(ValueError, match="no `sheet_id"):
         rewrite_sheet_id('[google_sheets]\ncredentials_file = "x"\n', new_sheet_id="x", previous_sheet_id="y")
+
+
+def test_extract_results_value_columns_splits_out_formula_columns():
+    # A=Week, B=Cash Pts, C=Cash Line, D=Cash Results (formula), E=H2H
+    # Entered, F=H2H Win, G=H2H % (formula), H=Red, I=Blue, J=Black.
+    rows = [
+        ["1", "124.92", "115.38", "TRUE", "10", "7", "0.7", "139.72", "98.6", "78.72"],
+        ["2", "138.8", "136.24", "TRUE", "10", "6", "0.6", "102.26", "153.02", "127.64"],
+    ]
+    result = extract_results_value_columns(rows)
+
+    assert result["A"] == [["1"], ["2"]]
+    assert result["B:C"] == [["124.92", "115.38"], ["138.8", "136.24"]]
+    assert result["E:F"] == [["10", "7"], ["10", "6"]]
+    assert result["H:J"] == [["139.72", "98.6", "78.72"], ["102.26", "153.02", "127.64"]]
+    # D and G (the formula columns) never appear in any group.
+    all_values = [v for group in result.values() for row in group for v in row]
+    assert "TRUE" not in all_values
+    assert "0.7" not in all_values
+
+
+def test_extract_results_value_columns_handles_short_rows():
+    # A blank week's row can come back shorter than J if trailing cells are
+    # empty -- must not raise an IndexError.
+    rows = [["6"]]
+    result = extract_results_value_columns(rows)
+
+    assert result["A"] == [["6"]]
+    assert result["B:C"] == [["", ""]]
+    assert result["E:F"] == [["", ""]]
+    assert result["H:J"] == [["", "", ""]]

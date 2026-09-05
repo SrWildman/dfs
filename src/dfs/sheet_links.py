@@ -83,6 +83,29 @@ def edge_lookup_formula(row: int, edge_tab: str, column_name: str) -> str:
     return f"=IFNA({base})" if column_name in _OPTIONAL_LINKED_COLUMNS else f"={base}"
 
 
+def find_all_contiguous(header: list[str], block: list[str]) -> list[int]:
+    """Every index where `block` appears as a contiguous run in `header`.
+    Shared with `doctor.py`, which needs to tell "linked exactly once"
+    apart from "linked twice" (a duplicate append), not just "linked or
+    not"."""
+    n = len(block)
+    if n == 0:
+        return []
+    return [i for i in range(len(header) - n + 1) if header[i : i + n] == block]
+
+
+def _find_contiguous(header: list[str], block: list[str]) -> int | None:
+    """First index where `block` appears as a contiguous run in `header`,
+    or None. Two sheets built from the same source can still diverge in
+    total width (e.g. a template that's picked up an extra column of its
+    own), so LINKED_EDGE_COLUMNS can legitimately end up short of the
+    tab's last column -- checking only the *tail* missed that case and let
+    `link_edge_columns` append a second copy onto a sheet whose layout had
+    drifted from the one the tail-check was written against."""
+    positions = find_all_contiguous(header, block)
+    return positions[0] if positions else None
+
+
 def link_edge_columns(
     client: SheetsClient,
     tab: str,
@@ -95,19 +118,22 @@ def link_edge_columns(
     whatever's currently there, formulas filled for every row in every
     `name_blocks` range (inclusive). `header_repeats_at` re-prints the
     header text at additional rows (Lineups repeats its header once per
-    lineup slot). Idempotent: if the tab's last N columns already carry
-    these headers, does nothing and reports that it skipped -- checking
-    against the *current* header, not "the column after current width",
-    since that position is a moving target that's always blank right after
-    a successful run (that bug shipped one real duplicate append; don't
-    reintroduce it).
+    lineup slot). Idempotent: if LINKED_EDGE_COLUMNS already appears as a
+    contiguous run anywhere in the header, does nothing and reports that
+    it skipped -- checking anywhere in the header, not just the tail,
+    since a tail-only check silently appends a second copy the moment two
+    sheets built from the same source diverge in total width (this
+    happened for real: the old weekly template picked up two extra
+    trailing columns of its own, `Venue`/`Ceil`, so its tail no longer
+    matched even though the columns were already linked earlier in the
+    row).
     """
     header_row = client.read_range(tab, "A1:1")
     header = header_row[0] if header_row else []
 
     n = len(LINKED_EDGE_COLUMNS)
-    if len(header) >= n and header[-n:] == LINKED_EDGE_COLUMNS:
-        return f"{tab}: already linked (last {n} header columns match) -- skipped"
+    if _find_contiguous(header, LINKED_EDGE_COLUMNS) is not None:
+        return f"{tab}: already linked ({n} header columns match somewhere in the row) -- skipped"
 
     current_width = len(header)
     start_col = column_letter(current_width)

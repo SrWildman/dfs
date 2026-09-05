@@ -57,7 +57,7 @@ cp config.example.toml config.toml
 ```
 
 This project expects a Google Sheet shaped like the
-[weekly template](https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/edit)
+[weekly template](https://docs.google.com/spreadsheets/d/10si1m87aaaSLloZa-Sht5dD6ZlG6dS8RDWjSzdxkhLA/edit)
 (tabs like `TFFBOptoRaw`, `PlayerPoolRaw`, `DkSalClean`, `SoS*`, etc., plus
 the formulas that tie them together) -- `File > Make a copy` it, don't sync
 into a blank sheet. In practice a new copy gets made every week; run `dfs
@@ -90,6 +90,9 @@ filename, neither of which belong in version control. Edit it with:
 ```bash
 dfs status                        # config/credentials/data freshness at a glance
 dfs sheets inspect                 # list every tab in your sheet, with headers
+dfs sheets doctor                  # read-only structural check: tabs exist, EdgeRaw's
+                                    # header matches, linked columns aren't duplicated, etc.
+dfs sheets doctor --sheet-id <id>  # check a different sheet (e.g. before pointing at it)
 
 dfs week new <sheet-url>           # point config.toml at a new weekly sheet copy,
                                     # carry the bankroll forward, clear lineups, sync
@@ -114,6 +117,7 @@ dfs odds movement --top 5
 dfs export -o lineups.csv          # validate + export DK bulk-upload CSV
 
 dfs lineups clear                  # wipe last week's typed lineups/picks (new sheet copy)
+dfs lineups clear --sheet-id <id>  # apply to a different sheet (e.g. the template)
 dfs lineups late-swap              # gameday: which rostered players have locked,
                                     # which haven't, and who's still open at that slot
 dfs lineups late-swap --top 5
@@ -135,11 +139,13 @@ connected sheet's real title and URL before doing anything else -- a quick
 
 ## Weekly workflow
 
-1. **New week**: duplicate the [weekly template](https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/edit),
-   then `dfs week new <url-of-the-copy>` -- it points `config.toml` at the
-   copy, carries the Bankroll tab's Ending balances forward as the new
-   sheet's Starting balances, runs `dfs lineups clear`, and finishes with a
-   full `dfs sync`, all after one confirmation prompt. (`dfs lineups clear`
+1. **New week**: duplicate the [weekly template](https://docs.google.com/spreadsheets/d/10si1m87aaaSLloZa-Sht5dD6ZlG6dS8RDWjSzdxkhLA/edit),
+   then `dfs week new <url-of-the-copy>` -- it runs `dfs sheets doctor`
+   against the copy first (aborting before anything is written if the copy's
+   missing a tab or its layout has drifted), points `config.toml` at the
+   copy, carries the Bankroll tab's Ending balances and the season-level
+   Results log forward, runs `dfs lineups clear`, and finishes with a full
+   `dfs sync`, all after one confirmation prompt. (`dfs lineups clear`
    alone still exists if you only need that one step.)
 2. **Sync everything**: `dfs sync` (salaries, odds, TFFB projections, and
    the derived `edge` layer computed from them -- the last needs `dfs auth
@@ -234,7 +240,9 @@ right where lineups get built, not just in a separate tab. Always appends
 past whatever's currently there (never inserts -- see CONTRIBUTING.md's
 Phase 8 postmortem), groups the new columns so they can be collapsed from
 the sheet UI when you want the narrower view back, and is safe to re-run
-(a tab that's already linked is left alone).
+(a tab that's already linked is left alone -- detected anywhere in the
+header row, not just at the end, so a sheet whose layout has drifted
+doesn't get a silent duplicate append).
 
 **If you add a new tab like this to the pipeline, add it to the canonical
 template too** (the sheet linked above), not just your own weekly copy --

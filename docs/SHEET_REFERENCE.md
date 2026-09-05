@@ -144,6 +144,24 @@ See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column abo
 
 ## Derived hub tabs (formulas inside the sheet)
 
+**Canonical column order** (`PlayerPoolRaw`, `Player Pool`, and `Lineups`
+all share the same left-hand columns, in this order, before each tab's own
+extra columns and the `link-edge` block): `Name`(A) `Pos.`(B) `Team`(C)
+`DK Sal`(D) `O/U`(E) `Spread`(F) `Team Implied`(G) `Opp.`(H) `Venue`(I)
+`OppPosRank`(J) `Pts`(K) `Ceil`(L) `Val`(M) `Rstr%`(N). This is recorded
+explicitly here because it's the one thing that's already drifted once:
+two sheets built from the same source (the live sheet and an older copy
+of the template) ended up with `Venue`/`Ceil` in different positions after
+independent hand-edits, while each stayed internally consistent -- nothing
+caught it until a cross-sheet audit compared them directly. No Python code
+hardcodes these column positions (only the sheet's own formulas do), so
+this doesn't matter for `dfs` itself, but it matters for keeping the live
+sheet and the template from drifting apart again -- `dfs sheets doctor`
+checks the columns each sheet's formulas actually depend on (`EdgeRaw`'s
+header, the linked `EdgeRaw` block, header repeats), but it does not check
+this specific ordering, since nothing breaks if it moves as long as both
+sheets move together. If you ever reorder these, update this table.
+
 ### PlayerPoolRaw
 
 The sheet's own hub tab: one row per player, aligned 1:1 with `DkSalClean`
@@ -240,3 +258,17 @@ README.md's "Bankroll sync" section for the full behavior and the
 `[bankroll.cash]`/`[bankroll.gpp]` config shape) -- it only ever writes
 into its configured row range and dedupe-key column, never touching the
 summary figures or any other formula.
+
+### Results
+
+A season-level results log (Week, Cash Pts/Line, H2H Entered/Win, Red/
+Blue/Black), one row per week -- unlike every other tab here, this one is
+**not** reset by a new weekly sheet copy. Each row's `Cash Results`
+(column D) and `H2H %` (column G) are formulas already built in
+(`=IF(B, B>C, "")` / `=F/E`); every other column is typed by hand. `dfs
+week new` copies the typed-value columns from the outgoing sheet to the
+new one (config.toml's `[results]` table controls the row range) so this
+log keeps accumulating across weekly copies instead of resetting to empty
+every week -- see `dfs.week.extract_results_value_columns` and `dfs week
+new`'s own docstring for exactly which columns are carried and which
+formula columns are deliberately left alone.

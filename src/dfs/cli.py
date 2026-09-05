@@ -22,6 +22,7 @@ from dfs import paths, store
 from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
 from dfs.derived import EDGE_COLUMNS
+from dfs.doctor import run_doctor
 from dfs.late_swap import lineup_slot_status, swap_candidates
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
@@ -33,7 +34,12 @@ from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
-from dfs.week import BANKROLL_CARRYOVER_CELLS, parse_sheet_id_from_url, rewrite_sheet_id
+from dfs.week import (
+    BANKROLL_CARRYOVER_CELLS,
+    extract_results_value_columns,
+    parse_sheet_id_from_url,
+    rewrite_sheet_id,
+)
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS, clear_previous_week
 
 # EdgeRaw columns that get a color-scale conditional format by
@@ -275,6 +281,47 @@ def sheets_link_edge(
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
+
+
+@sheets_app.command("doctor")
+def sheets_doctor(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Check a different sheet instead of config.toml's -- e.g. a freshly made "
+        "weekly copy or the canonical template, before pointing anything at it.",
+    ),
+) -> None:
+    """Read-only structural check: every tab named in config.toml exists,
+    EdgeRaw's header matches derived.EDGE_COLUMNS, LINKED_EDGE_COLUMNS is
+    linked exactly once (not zero, not twice) on Player Pool/Lineups/
+    PlayerPoolRaw, Lineups' header repeats fall exactly where
+    LINEUPS_NAME_BLOCKS expects, and Bankroll's configured header rows
+    aren't blank. Never writes anything. Exits non-zero on any failure --
+    this is the check that would have caught a stale template's missing
+    tabs and drifted column positions before they broke `dfs export`/`dfs
+    lineups clear`/`dfs sheets link-edge` on a fresh weekly copy, instead
+    of surfacing three commands later as a crash or a silently wrong
+    formula.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Checking: [bold]{title}[/bold]\n{url}\n")
+        issues = run_doctor(client, cfg)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    if not issues:
+        console.print("[green]OK[/green] all structural checks passed")
+        return
+
+    for issue in issues:
+        console.print(f"[red]FAIL[/red] [{issue.check}] {issue.detail}")
+    raise typer.Exit(code=1)
 
 
 @app.command()
@@ -551,6 +598,12 @@ def export(
 @lineups_app.command("clear")
 def lineups_clear(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Clear a different sheet instead of config.toml's -- e.g. a fresh weekly "
+        "copy or the canonical template, before pointing config.toml at it.",
+    ),
 ) -> None:
     """Clear last week's typed-in lineup data (Lineups/Player Pool name
     columns, Scratch, DK Upload) so the sheet's ready for a new week.
@@ -561,7 +614,8 @@ def lineups_clear(
     rebuilding lineups for that week.
     """
     cfg = _load_config_or_exit()
-    client = SheetsClient(cfg.google_sheets)
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
     try:
         title, url = client.describe()
     except SheetsError as e:
@@ -698,7 +752,8 @@ def week_new(
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
 ) -> None:
-    """Move config.toml to a new week's sheet copy, carry the bankroll
+    """Move config.toml to a new week's sheet copy: check the new sheet's
+    structure (`dfs sheets doctor`), carry the bankroll and Results log
     forward, clear last week's lineups, and run a full sync -- in that
     order, with one confirmation before anything is written.
 
@@ -710,6 +765,18 @@ def week_new(
     Bankroll tab (weekly budget formulas, Deposited/Withdrawn) is either
     formula-driven and naturally resets, or a running total the user
     updates by hand -- neither needs code here.
+
+    Carrying Results forward means copying every already-typed week's row
+    (config.toml's `[results]` table -- Week, Cash Pts/Line, H2H Entered/
+    Win, Red/Blue/Black) from the current sheet to the new one, since
+    Results is a season-level log, not a per-week one -- a fresh weekly
+    copy's own Results tab starts with the template's empty pre-built
+    rows, and would otherwise lose the whole season's history on every
+    `dfs week new`. The two formula columns already built into each row
+    (Cash Results, H2H %) are never touched -- see
+    dfs.week.extract_results_value_columns. If the current sheet has no
+    Results tab at all (e.g. moving off a sheet that predates this), this
+    step is skipped with a note instead of failing.
     """
     cfg = _load_config_or_exit()
 
@@ -744,6 +811,23 @@ def week_new(
     console.print(f"Current sheet: [bold]{old_title}[/bold]\n{old_url}\n")
     console.print(f"New sheet:     [bold]{new_title}[/bold]\n{new_url}\n")
 
+    console.print("Checking the new sheet's structure before touching anything...")
+    try:
+        issues = run_doctor(new_client, cfg)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error checking the new sheet:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    if issues:
+        for issue in issues:
+            console.print(f"[red]FAIL[/red] [{issue.check}] {issue.detail}")
+        console.print(
+            "\n[red]The new sheet failed structural checks -- stopping before any write.[/red]\n"
+            "Fix the sheet (or its config.toml mapping) and re-run, or run "
+            f"`dfs sheets doctor --sheet-id {new_sheet_id}` for the same report on its own."
+        )
+        raise typer.Exit(code=1)
+    console.print("[green]OK[/green] new sheet passed structural checks\n")
+
     bankroll_tab = cfg.bankroll.tab
     carryover: list[tuple[str, str]] = []
     try:
@@ -758,6 +842,20 @@ def week_new(
     console.print("Bankroll to carry forward:")
     for (old_cell, _), (new_cell, value) in zip(BANKROLL_CARRYOVER_CELLS, carryover, strict=True):
         console.print(f"  {bankroll_tab}!{old_cell} -> {bankroll_tab}!{new_cell} = {value!r}")
+
+    results_cfg = cfg.results
+    results_rows: list[list[str]] = []
+    try:
+        results_rows = old_client.read_range(
+            results_cfg.tab, f"A{results_cfg.first_row}:J{results_cfg.last_row}"
+        )
+    except SheetsError:
+        console.print(
+            f"\n[yellow]No {results_cfg.tab!r} tab on the current sheet -- nothing to carry forward.[/yellow]"
+        )
+    weeks_found = [r[0] for r in results_rows if r and r[0].strip()]
+    if weeks_found:
+        console.print(f"\n{results_cfg.tab!r} weeks to carry forward: {', '.join(weeks_found)}")
 
     if not yes and not typer.confirm(
         "\nRewrite config.toml, carry the bankroll forward, clear last week's lineups, "
@@ -783,6 +881,19 @@ def week_new(
         console.print(f"[red]Could not write {bankroll_tab!r} on the new sheet:[/red] {e}")
         raise typer.Exit(code=1) from e
     console.print(f"[green]OK[/green] carried bankroll forward into {bankroll_tab!r}")
+
+    if results_rows:
+        try:
+            for col_range, values in extract_results_value_columns(results_rows).items():
+                start, _, end = col_range.partition(":")
+                end = end or start
+                new_client.update_range(
+                    results_cfg.tab, f"{start}{results_cfg.first_row}:{end}{results_cfg.last_row}", values
+                )
+        except SheetsError as e:
+            console.print(f"[red]Could not write {results_cfg.tab!r} on the new sheet:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        console.print(f"[green]OK[/green] carried {len(weeks_found)} week(s) of {results_cfg.tab!r} forward")
 
     try:
         summary = clear_previous_week(

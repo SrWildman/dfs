@@ -78,3 +78,17 @@ header_row = 63
 first_row = 64
 last_row = 149
 entry_key_column = "L"
+
+# The season-level Results log -- NOT reset by a new weekly sheet copy.
+# `dfs week new` copies its typed-value columns (Week, Cash Pts/Line, H2H
+# Entered/Win, Red/Blue/Black) from the outgoing sheet to the new one, so
+# the log keeps accumulating across weekly copies instead of resetting to
+# empty every week. The two formula columns already built into each row
+# (Cash Results, H2H %) are never touched. Defaults match the canonical
+# template; override if your Results tab's row layout differs.
+[results]
+tab = "Results"
+header_row = 1
+first_row = 2
+last_row = 20
+entry_key_column = "L"
