@@ -9,7 +9,7 @@ All DFS suite settings are centralized in `config.json`. This document explains 
 {
   "google_sheets": {
     "sheet_id": "your-google-sheet-id",
-    "credentials_file": "credentials.json",
+    "credentials_file": "your-service-account-credentials.json",
     "tab_mappings": {
       "projections": "Projections",
       "draftkings": "Salaries",

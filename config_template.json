@@ -4,10 +4,9 @@
   
   "google_sheets": {
     "_description": "Google Sheets integration settings",
-    "sheet_id": "1HtE7q3d6bENmrkbTjq4_5SvGfaXsPlRq1-4r9UGcEgc",
-    "credentials_file": "credentials.json",
+    "sheet_id": "your-actual-sheet-id-here",
+    "credentials_file": "your-service-account-credentials.json",
     "tab_mappings": {
-      "_description": "Maps data sources to Google Sheets tab names",
       "projections": "Projections",
       "draftkings": "Salaries",
       "nfl_odds": "Odds",

@@ -50,7 +50,7 @@
      {
        "google_sheets": {
          "sheet_id": "your-actual-sheet-id-here",
-         "credentials_file": "credentials.json",
+         "credentials_file": "your-service-account-credentials.json",
          "tab_mappings": {
            "projections": "Projections",
            "draftkings": "Salaries",
