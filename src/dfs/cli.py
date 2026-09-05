@@ -15,8 +15,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from dfs import paths
+from pathlib import Path
+
+from dfs import paths, store
 from dfs.config import Config, ConfigError, load_config
+from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
 from dfs.log import get_logger, setup_logging
 from dfs.sheets import SheetsClient, SheetsError
 from dfs.sources import SOURCES
@@ -158,6 +161,61 @@ def sync(
     console.print(table)
 
     if any_failed:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def export(
+    output: Path = typer.Option(..., "--output", "-o", help="Path to write the DK bulk-upload CSV."),
+) -> None:
+    """Validate paired lineups in the lineups tab and export DK's upload CSV."""
+    cfg = _load_config_or_exit()
+
+    try:
+        salary_df = store.load_current("draftkings")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(cfg.google_sheets)
+    try:
+        rows = client.read_tab(cfg.lineups.upload_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    entries = parse_entries(rows)
+    if not entries:
+        console.print(f"[yellow]No entries found in {cfg.lineups.upload_tab!r} (all rows blank).[/yellow]")
+        raise typer.Exit(code=1)
+
+    lookup = build_salary_lookup(salary_df)
+    results = [validate_entry(e, lookup, salary_cap=cfg.lineups.salary_cap) for e in entries]
+
+    table = Table(title=f"Lineups from {cfg.lineups.upload_tab!r}")
+    table.add_column("row")
+    table.add_column("entry id")
+    table.add_column("contest")
+    table.add_column("salary")
+    table.add_column("status")
+    for r in results:
+        if r.ok:
+            table.add_row(str(r.entry.row_number), r.entry.entry_id, r.entry.contest_name, str(r.salary_total), "[green]ok[/green]")
+        else:
+            table.add_row(
+                str(r.entry.row_number), r.entry.entry_id, r.entry.contest_name, "-",
+                "[red]" + "; ".join(r.errors) + "[/red]",
+            )
+    console.print(table)
+
+    valid = [r.entry for r in results if r.ok]
+    if valid:
+        n = export_csv(valid, output)
+        console.print(f"[green]Wrote {n} lineup(s) to {output}[/green]")
+
+    invalid_count = len(results) - len(valid)
+    if invalid_count:
+        console.print(f"[red]{invalid_count} entr{'y' if invalid_count == 1 else 'ies'} skipped due to validation errors above.[/red]")
         raise typer.Exit(code=1)
 
 

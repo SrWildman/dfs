@@ -29,3 +29,10 @@ sos_dst = "SoSDef"
 # computed automatically from the NFL schedule.
 # default_week = 1
 # default_season = 2025
+
+[lineups]
+# The tab where you pair finished lineups to DK contest entries (Entry ID,
+# Contest Name, Contest ID, Entry Fee, then the 9 roster slot columns --
+# DK's own "bulk edit entries" layout). `dfs export` reads this tab as-is.
+upload_tab = "DK Upload"
+salary_cap = 50000

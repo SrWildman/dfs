@@ -40,11 +40,24 @@ class NflOddsConfig(BaseModel):
     default_season: int | None = None
 
 
+class LineupsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The tab where you pair finished lineups to DK contest entries (DK's
+    # own "bulk edit entries" layout: Entry ID, Contest Name, Contest ID,
+    # Entry Fee, then the 9 roster slot columns). dfs export reads this
+    # tab as-is -- pairing lineups to entries stays a manual step in the
+    # sheet, per your workflow.
+    upload_tab: str = "DK Upload"
+    salary_cap: int = 50000
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     google_sheets: GoogleSheetsConfig
     nfl_odds: NflOddsConfig = NflOddsConfig()
+    lineups: LineupsConfig = LineupsConfig()
 
 
 def _missing_config_message() -> str:
