@@ -14,7 +14,7 @@ kept until something explicitly asks to prune it.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -22,7 +22,7 @@ from dfs.paths import CURRENT_DIR, MANIFEST_FILE, RAW_DIR, ensure_data_dirs
 
 
 def _now_stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def save(source_name: str, df: pd.DataFrame) -> None:
@@ -55,7 +55,7 @@ def _write_manifest(manifest: dict) -> None:
 def record_success(source_name: str, rows: int) -> None:
     manifest = read_manifest()
     manifest[source_name] = {
-        "synced_at": datetime.now(timezone.utc).isoformat(),
+        "synced_at": datetime.now(UTC).isoformat(),
         "rows": rows,
         "error": None,
     }
@@ -65,7 +65,7 @@ def record_success(source_name: str, rows: int) -> None:
 def record_failure(source_name: str, error: str) -> None:
     manifest = read_manifest()
     manifest[source_name] = {
-        "synced_at": datetime.now(timezone.utc).isoformat(),
+        "synced_at": datetime.now(UTC).isoformat(),
         "rows": None,
         "error": error,
     }

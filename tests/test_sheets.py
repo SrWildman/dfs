@@ -44,7 +44,7 @@ class FakeSpreadsheet:
         try:
             return self._worksheets[title]
         except KeyError:
-            raise gspread.WorksheetNotFound(title)
+            raise gspread.WorksheetNotFound(title) from None
 
     def add_worksheet(self, title: str, rows: int, cols: int) -> FakeWorksheet:
         ws = FakeWorksheet(title)
@@ -67,9 +67,10 @@ def _client_with_fake_sheet(cfg, monkeypatch, tmp_path) -> tuple[SheetsClient, F
     cfg = cfg.model_copy(update={"credentials_file": str(creds)})
 
     fake_sheet = FakeSpreadsheet()
-    monkeypatch.setattr("gspread.service_account", lambda filename: type(
-        "C", (), {"open_by_key": lambda self, key: fake_sheet}
-    )())
+    monkeypatch.setattr(
+        "gspread.service_account",
+        lambda filename: type("C", (), {"open_by_key": lambda self, key: fake_sheet})(),
+    )
 
     return SheetsClient(cfg), fake_sheet
 
@@ -96,9 +97,7 @@ def test_read_missing_tab_raises_sheets_error(cfg, monkeypatch, tmp_path):
 
 def test_list_tabs_reports_header_rows(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
-    fake_sheet._worksheets["Projections"] = FakeWorksheet(
-        "Projections", rows=[["Id", "Name", "Position"]]
-    )
+    fake_sheet._worksheets["Projections"] = FakeWorksheet("Projections", rows=[["Id", "Name", "Position"]])
     tabs = client.list_tabs()
     assert len(tabs) == 1
     assert tabs[0].title == "Projections"

@@ -40,9 +40,12 @@ def test_find_main_slate_picks_largest_sunday_afternoon_only_contest(httpx_mock)
 
 def test_find_main_slate_ignores_non_nfl_and_non_millionaire(httpx_mock):
     payload = _draftgroups_payload(
-        {"draftGroupId": 1, "draftGroupState": "Upcoming",
-         "contestType": {"sport": "NBA", "contestTypeId": 21},
-         "games": [{"startTime": SUNDAY_1PM}]},
+        {
+            "draftGroupId": 1,
+            "draftGroupState": "Upcoming",
+            "contestType": {"sport": "NBA", "contestTypeId": 21},
+            "games": [{"startTime": SUNDAY_1PM}],
+        },
         _nfl_contest(2, [SUNDAY_1PM], contest_type_id=5),  # wrong contest type
         _nfl_contest(3, [SUNDAY_1PM]),
     )
@@ -63,24 +66,28 @@ CSV_BODY = (
 
 
 def test_fetch_returns_salary_dataframe(httpx_mock):
-    httpx_mock.add_response(
-        url=DRAFTGROUPS_URL, json=_draftgroups_payload(_nfl_contest(42, [SUNDAY_1PM]))
-    )
+    httpx_mock.add_response(url=DRAFTGROUPS_URL, json=_draftgroups_payload(_nfl_contest(42, [SUNDAY_1PM])))
     httpx_mock.add_response(url=re.compile(re.escape(SALARY_CSV_URL)), text=CSV_BODY)
 
     df = DkSalariesSource().fetch(SyncContext(week=1, season=2026))
     assert list(df.columns) == [
-        "Position", "Name + ID", "Name", "ID", "Roster Position",
-        "Salary", "Game Info", "TeamAbbrev", "AvgPointsPerGame", "Status",
+        "Position",
+        "Name + ID",
+        "Name",
+        "ID",
+        "Roster Position",
+        "Salary",
+        "Game Info",
+        "TeamAbbrev",
+        "AvgPointsPerGame",
+        "Status",
     ]
     assert df.iloc[0]["Name"] == "Jahmyr Gibbs"
     assert df.iloc[0]["Salary"] == 8000
 
 
 def test_fetch_raises_on_locked_placeholder_data(httpx_mock):
-    httpx_mock.add_response(
-        url=DRAFTGROUPS_URL, json=_draftgroups_payload(_nfl_contest(42, [SUNDAY_1PM]))
-    )
+    httpx_mock.add_response(url=DRAFTGROUPS_URL, json=_draftgroups_payload(_nfl_contest(42, [SUNDAY_1PM])))
     httpx_mock.add_response(
         url=re.compile(re.escape(SALARY_CSV_URL)),
         text="Position,Name\n(LOCKED),(LOCKED)\n",

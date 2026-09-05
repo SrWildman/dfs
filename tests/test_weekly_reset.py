@@ -56,5 +56,5 @@ def test_lineups_blocks_skip_the_repeated_sub_header_row():
     # sub-header row's own "Name" label in column A never gets cleared.
     first_start, _ = LINEUPS_NAME_BLOCKS[0]
     assert first_start == 2
-    for (_, prev_end), (start, _) in zip(LINEUPS_NAME_BLOCKS, LINEUPS_NAME_BLOCKS[1:]):
+    for (_, prev_end), (start, _) in zip(LINEUPS_NAME_BLOCKS, LINEUPS_NAME_BLOCKS[1:], strict=False):
         assert start == prev_end + 4  # 3-row gap + 1 sub-header row skipped

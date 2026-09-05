@@ -55,7 +55,7 @@ class ValidationResult:
 
 
 def parse_player_cell(cell: str) -> tuple[str, str] | None:
-    """"Name (dkId)" -> (name, dkId). Blank cell -> None."""
+    """ "Name (dkId)" -> (name, dkId). Blank cell -> None."""
     cell = (cell or "").strip()
     if not cell:
         return None
@@ -75,8 +75,7 @@ def parse_entries(rows: list[list[str]]) -> list[ParsedEntry]:
         if not entry_id:
             continue  # blank template/reservation row
         slot_cells = [
-            row[_ENTRY_COLUMNS + j] if len(row) > _ENTRY_COLUMNS + j else ""
-            for j in range(len(ROSTER_SLOTS))
+            row[_ENTRY_COLUMNS + j] if len(row) > _ENTRY_COLUMNS + j else "" for j in range(len(ROSTER_SLOTS))
         ]
         entries.append(
             ParsedEntry(
@@ -118,7 +117,7 @@ def validate_entry(
     result = ValidationResult(entry=entry)
     seen_ids: set[str] = set()
 
-    for slot, cell in zip(ROSTER_SLOTS, entry.slot_cells):
+    for slot, cell in zip(ROSTER_SLOTS, entry.slot_cells, strict=True):
         parsed = parse_player_cell(cell)
         if parsed is None:
             result.errors.append(f"{slot} slot is empty or unparseable ({cell!r})")

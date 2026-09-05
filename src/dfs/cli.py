@@ -10,14 +10,12 @@ typer.Exit.
 from __future__ import annotations
 
 import json as _json
-
-import typer
-from rich.console import Console
-from rich.table import Table
-
 from pathlib import Path
 
 import pandas as pd
+import typer
+from rich.console import Console
+from rich.table import Table
 
 from dfs import paths, store
 from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
@@ -76,7 +74,7 @@ def status() -> None:
         console.print(f"[green]OK[/green] connected sheet: [bold]{title}[/bold]\n         {url}")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if not paths.MANIFEST_FILE.exists():
         console.print("[yellow]no data yet[/yellow] -- run `dfs sync` to pull sources")
@@ -94,9 +92,13 @@ def status() -> None:
         if entry is None:
             table.add_row(source, tab, "-", "-", "[yellow]never synced[/yellow]")
         elif entry.get("error"):
-            table.add_row(source, tab, entry.get("synced_at", "-"), "-", f"[red]failed: {entry['error']}[/red]")
+            table.add_row(
+                source, tab, entry.get("synced_at", "-"), "-", f"[red]failed: {entry['error']}[/red]"
+            )
         else:
-            table.add_row(source, tab, entry.get("synced_at", "-"), str(entry.get("rows", "-")), "[green]ok[/green]")
+            table.add_row(
+                source, tab, entry.get("synced_at", "-"), str(entry.get("rows", "-")), "[green]ok[/green]"
+            )
     console.print(table)
 
 
@@ -105,7 +107,7 @@ def _load_config_or_exit() -> Config:
         return load_config()
     except ConfigError as e:
         console.print(f"[red]Config error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 @sheets_app.command("inspect")
@@ -119,7 +121,7 @@ def sheets_inspect() -> None:
         tabs = client.list_tabs()
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     known_tabs = set(cfg.google_sheets.tab_mappings.values())
     table = Table(title=f"Tabs in {title!r}")
@@ -136,9 +138,7 @@ def sheets_inspect() -> None:
 
 @app.command()
 def sync(
-    only: str = typer.Option(
-        None, "--only", help="Comma-separated source names to sync (default: all)."
-    ),
+    only: str = typer.Option(None, "--only", help="Comma-separated source names to sync (default: all)."),
     no_upload: bool = typer.Option(False, "--no-upload", help="Fetch and store locally, skip Sheets."),
     week: int = typer.Option(None, "--week", help="Override auto-detected NFL week."),
     season: int = typer.Option(None, "--season", help="Override auto-detected NFL season."),
@@ -164,7 +164,7 @@ def sync(
             title, url = SheetsClient(cfg.google_sheets).describe()
         except SheetsError as e:
             console.print(f"[red]Sheets error:[/red] {e}")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
         console.print(f"Writing to sheet: [bold]{title}[/bold]\n{url}\n")
 
     ctx = SyncContext.current(week=week, season=season)
@@ -200,14 +200,14 @@ def export(
         salary_df = store.load_current("draftkings")
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     client = SheetsClient(cfg.google_sheets)
     try:
         rows = client.read_tab(cfg.lineups.upload_tab)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     entries = parse_entries(rows)
     if not entries:
@@ -225,10 +225,19 @@ def export(
     table.add_column("status")
     for r in results:
         if r.ok:
-            table.add_row(str(r.entry.row_number), r.entry.entry_id, r.entry.contest_name, str(r.salary_total), "[green]ok[/green]")
+            table.add_row(
+                str(r.entry.row_number),
+                r.entry.entry_id,
+                r.entry.contest_name,
+                str(r.salary_total),
+                "[green]ok[/green]",
+            )
         else:
             table.add_row(
-                str(r.entry.row_number), r.entry.entry_id, r.entry.contest_name, "-",
+                str(r.entry.row_number),
+                r.entry.entry_id,
+                r.entry.contest_name,
+                "-",
                 "[red]" + "; ".join(r.errors) + "[/red]",
             )
     console.print(table)
@@ -240,7 +249,8 @@ def export(
 
     invalid_count = len(results) - len(valid)
     if invalid_count:
-        console.print(f"[red]{invalid_count} entr{'y' if invalid_count == 1 else 'ies'} skipped due to validation errors above.[/red]")
+        entry_word = "entry" if invalid_count == 1 else "entries"
+        console.print(f"[red]{invalid_count} {entry_word} skipped due to validation errors above.[/red]")
         raise typer.Exit(code=1)
 
 
@@ -262,7 +272,7 @@ def lineups_clear(
         title, url = client.describe()
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     console.print(f"About to clear last week's lineup data from: [bold]{title}[/bold]\n{url}\n")
     console.print(
@@ -285,7 +295,7 @@ def lineups_clear(
         )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     for line in summary:
         console.print(f"[green]OK[/green] {line}")
@@ -321,7 +331,7 @@ def bankroll_sync(
         entries = parse_contest_history(df)
     except KeyError as e:
         console.print(f"[red]CSV is missing an expected column:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     cash_entries = [e for e in entries if classify_entry(e) == "cash"]
     gpp_entries = [e for e in entries if classify_entry(e) == "gpp"]
@@ -333,7 +343,7 @@ def bankroll_sync(
         gpp_result = sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.gpp, gpp_entries, "gpp")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     any_skipped = False
     for result in (cash_result, gpp_result):

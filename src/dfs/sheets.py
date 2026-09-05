@@ -113,7 +113,7 @@ class SheetsClient:
             ws = sheet.worksheet(tab_name)
         except gspread.WorksheetNotFound:
             if not create_if_missing:
-                raise SheetsError(f"Tab {tab_name!r} does not exist and create_if_missing=False.")
+                raise SheetsError(f"Tab {tab_name!r} does not exist and create_if_missing=False.") from None
             log.info("creating missing tab %r", tab_name)
             ws = sheet.add_worksheet(title=tab_name, rows=max(1000, len(rows) + 10), cols=26)
 

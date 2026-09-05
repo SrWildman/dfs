@@ -31,9 +31,26 @@ from __future__ import annotations
 from dfs.sheets import SheetsClient
 
 LINEUPS_NAME_BLOCKS = [
-    (2, 11), (15, 24), (28, 37), (41, 50), (54, 63), (67, 76), (80, 89), (93, 102),
-    (106, 115), (119, 128), (132, 141), (145, 154), (158, 167), (171, 180),
-    (184, 193), (197, 206), (210, 219), (223, 232), (236, 245), (249, 258),
+    (2, 11),
+    (15, 24),
+    (28, 37),
+    (41, 50),
+    (54, 63),
+    (67, 76),
+    (80, 89),
+    (93, 102),
+    (106, 115),
+    (119, 128),
+    (132, 141),
+    (145, 154),
+    (158, 167),
+    (171, 180),
+    (184, 193),
+    (197, 206),
+    (210, 219),
+    (223, 232),
+    (236, 245),
+    (249, 258),
 ]
 PLAYER_POOL_NAME_BLOCKS = [(2, 11), (13, 29), (31, 55), (57, 65), (67, 74)]
 
@@ -43,8 +60,9 @@ SCRATCH_RANGE = "A2:I1000"
 DK_UPLOAD_RANGE = "A2:M1000"
 
 
-def clear_previous_week(client: SheetsClient, lineups_tab: str, player_pool_tab: str,
-                         scratch_tab: str, dk_upload_tab: str) -> list[str]:
+def clear_previous_week(
+    client: SheetsClient, lineups_tab: str, player_pool_tab: str, scratch_tab: str, dk_upload_tab: str
+) -> list[str]:
     """Clear last week's lineup data. Returns a human-readable line per tab
     describing what was cleared, for CLI display."""
     summary = []

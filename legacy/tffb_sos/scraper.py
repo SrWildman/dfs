@@ -22,10 +22,14 @@ import webbrowser
 from pathlib import Path
 
 # Add utils to path for imports
-sys.path.append(str(Path(__file__).parent.parent.parent / 'utils'))
+sys.path.append(str(Path(__file__).parent.parent.parent / "utils"))
 from scraper_common import (
-    check_downloads, close_arc_tab, simple_manual_approach,
-    BROWSER_WAIT_TIME, FILE_CHECK_TIMEOUT, get_current_nfl_week
+    BROWSER_WAIT_TIME,
+    FILE_CHECK_TIMEOUT,
+    check_downloads,
+    close_arc_tab,
+    get_current_nfl_week,
+    simple_manual_approach,
 )
 
 # Configuration constants
@@ -33,13 +37,7 @@ BROWSER_AUTOMATION_DELAY = 1  # Seconds between automation attempts
 SOS_BASE_URL = "https://www.thefantasyfootballers.com/footclan/strength-of-schedule/"
 
 # Position configurations
-POSITIONS = {
-    'QB': 'QB',
-    'RB': 'RB',
-    'WR': 'WR',
-    'TE': 'TE',
-    'D/ST': 'D'
-}
+POSITIONS = {"QB": "QB", "RB": "RB", "WR": "WR", "TE": "TE", "D/ST": "D"}
 
 
 def scrape_position(position_name, position_code, week_number, auto_skip=False):
@@ -53,7 +51,7 @@ def scrape_position(position_name, position_code, week_number, auto_skip=False):
     # Record initial download state
     initial_files = check_downloads()
 
-    print(f"🌐 Opening SOS page in Arc...")
+    print("🌐 Opening SOS page in Arc...")
     webbrowser.open(url)
     time.sleep(BROWSER_WAIT_TIME)
 
@@ -67,7 +65,7 @@ def scrape_position(position_name, position_code, week_number, auto_skip=False):
             "Page is open in Arc",
             f"Select position: {position_name}",
             f"Select week: {week_number}",
-            "Click 'More' → 'Download CSV'"
+            "Click 'More' → 'Download CSV'",
         ]
         manual_worked = simple_manual_approach(instructions, f"for {position_name}")
 
@@ -85,7 +83,7 @@ def scrape_position(position_name, position_code, week_number, auto_skip=False):
         latest_file = new_files[0]
 
         # Sanitize position name for filesystem (e.g., D/ST → DST)
-        safe_position = position_name.replace('/', '')
+        safe_position = position_name.replace("/", "")
         new_name = f"SOS_{safe_position}_Week{week_number}_{latest_file.name}"
         new_path = latest_file.parent / new_name
 
@@ -113,11 +111,13 @@ def main():
     respective Strength of Schedule CSV files. Uses simple manual approach
     that mirrors Projections scraper.
     """
-    parser = argparse.ArgumentParser(description='Download Strength of Schedule data for all positions')
-    parser.add_argument('--week', '-w', type=int, default=None,
-                        help='NFL week number (1-18, defaults to current week)')
-    parser.add_argument('--auto-skip', action='store_true',
-                        help='Skip manual intervention prompts (for automated workflows)')
+    parser = argparse.ArgumentParser(description="Download Strength of Schedule data for all positions")
+    parser.add_argument(
+        "--week", "-w", type=int, default=None, help="NFL week number (1-18, defaults to current week)"
+    )
+    parser.add_argument(
+        "--auto-skip", action="store_true", help="Skip manual intervention prompts (for automated workflows)"
+    )
 
     args = parser.parse_args()
 

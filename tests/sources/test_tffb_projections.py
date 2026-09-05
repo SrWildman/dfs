@@ -92,6 +92,5 @@ def test_to_sheet_rows_rewrites_dst_team_to_nickname_only():
 
 def test_url_template_uses_season_for_product_year():
     assert OPTIMIZER_URL_TEMPLATE.format(season=2026) == (
-        "https://www.thefantasyfootballers.com/2026-ultimate-dfs-pass/"
-        "dfs-pass-lineup-optimizer/"
+        "https://www.thefantasyfootballers.com/2026-ultimate-dfs-pass/dfs-pass-lineup-optimizer/"
     )

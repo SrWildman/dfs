@@ -55,8 +55,7 @@ def run_sync(
                 tab = cfg.google_sheets.tab_mappings.get(name)
                 if tab is None:
                     raise SheetsError(
-                        f"No tab mapped for source {name!r} in config.toml "
-                        f"[google_sheets.tab_mappings]."
+                        f"No tab mapped for source {name!r} in config.toml [google_sheets.tab_mappings]."
                     )
                 rows = source.to_sheet_rows(df)
                 client.write_tab(tab, rows)

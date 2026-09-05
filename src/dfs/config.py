@@ -91,11 +91,7 @@ class Config(BaseModel):
 
 
 def _missing_config_message() -> str:
-    example = (
-        CONFIG_EXAMPLE_FILE.name
-        if CONFIG_EXAMPLE_FILE.exists()
-        else "config.example.toml"
-    )
+    example = CONFIG_EXAMPLE_FILE.name if CONFIG_EXAMPLE_FILE.exists() else "config.example.toml"
     return (
         f"No config.toml found at {CONFIG_FILE}.\n"
         f"Copy {example} to config.toml and fill in your sheet_id and "

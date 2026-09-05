@@ -64,11 +64,19 @@ def test_parse_contest_history_maps_dk_columns():
     df = pd.DataFrame(
         [
             {
-                "Sport": "NFL", "Game_Type": "Classic", "Entry_Key": "5050021727",
-                "Entry": "NFL $25K Engage Eight [5 Entry Max]", "Contest_Key": "187479226",
-                "Contest_Date_EST": "2026-09-13 13:00:00", "Place": 420, "Points": 159.46,
-                "Winnings_Non_Ticket": "$16.00", "Winnings_Ticket": "$0.00",
-                "Contest_Entries": 3676, "Entry_Fee": "$8.00", "Prize_Pool": "$25,000.00",
+                "Sport": "NFL",
+                "Game_Type": "Classic",
+                "Entry_Key": "5050021727",
+                "Entry": "NFL $25K Engage Eight [5 Entry Max]",
+                "Contest_Key": "187479226",
+                "Contest_Date_EST": "2026-09-13 13:00:00",
+                "Place": 420,
+                "Points": 159.46,
+                "Winnings_Non_Ticket": "$16.00",
+                "Winnings_Ticket": "$0.00",
+                "Contest_Entries": 3676,
+                "Entry_Fee": "$8.00",
+                "Prize_Pool": "$25,000.00",
                 "Places_Paid": 752,
             }
         ]
@@ -119,7 +127,7 @@ class FakeSheetsClient:
         import re
 
         m = re.match(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", a1_range)
-        col_start, row_start, col_end, row_end = m.group(1), int(m.group(2)), m.group(3), int(m.group(4))
+        col_start, row_start, col_end = m.group(1), int(m.group(2)), m.group(3)
         self.cells.setdefault(tab, {})
         for i, row_values in enumerate(rows):
             r = row_start + i

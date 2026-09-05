@@ -2,6 +2,8 @@
 name = "dfs-companion"
 version = "0.1.0"
 description = "Personal DFS data pipeline: sync scrapers into Google Sheets, export DK lineups, track results and bankroll."
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12",
@@ -20,6 +22,7 @@ dependencies = [
 dev = [
     "pytest>=8.2",
     "pytest-httpx>=0.30",
+    "ruff>=0.6",
 ]
 
 [project.scripts]
@@ -34,3 +37,14 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008: flags typer.Option(...)/typer.Argument(...) as defaults, which is
+# Typer's own required, documented pattern for declaring CLI options --
+# not a bug to fix, just how this framework works.
+ignore = ["B008"]

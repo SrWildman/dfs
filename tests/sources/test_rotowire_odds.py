@@ -55,9 +55,38 @@ def test_to_sheet_rows_matches_legacy_two_row_header():
     import pandas as pd
 
     df = pd.DataFrame(
-        [{"team": "Bills", "date": "2026-09-13", "moneyline": "-118", "spread": "-1.5", "total": "45.5", "team_points": "23.5"}]
+        [
+            {
+                "team": "Bills",
+                "date": "2026-09-13",
+                "moneyline": "-118",
+                "spread": "-1.5",
+                "total": "45.5",
+                "team_points": "23.5",
+            }
+        ]
     )
     rows = RotowireOddsSource().to_sheet_rows(df)
-    assert rows[0] == ["", "", "Win", "Cover", "Total Points", "Total Touchdowns", "Team Points", "Team TDs", "Team TDs"]
-    assert rows[1] == ["Team", "Date", "Moneyline", "Spread", "Over-Under", "Over-Under", "Over-Under", "Over-Under", "Over-Under"]
+    assert rows[0] == [
+        "",
+        "",
+        "Win",
+        "Cover",
+        "Total Points",
+        "Total Touchdowns",
+        "Team Points",
+        "Team TDs",
+        "Team TDs",
+    ]
+    assert rows[1] == [
+        "Team",
+        "Date",
+        "Moneyline",
+        "Spread",
+        "Over-Under",
+        "Over-Under",
+        "Over-Under",
+        "Over-Under",
+        "Over-Under",
+    ]
     assert rows[2] == ["Bills", "2026-09-13", "-118", "-1.5", "45.5", "", "23.5", "", ""]

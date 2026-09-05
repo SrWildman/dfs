@@ -9,8 +9,8 @@ other tabs/formulas that reference it (e.g. oddsFinal) keep working.
 
 from __future__ import annotations
 
-import pandas as pd
 import httpx
+import pandas as pd
 
 from dfs.log import get_logger
 from dfs.sources.base import Source, SyncContext
@@ -103,11 +103,33 @@ class RotowireOddsSource(Source):
 
     def to_sheet_rows(self, df: pd.DataFrame) -> list[list]:
         rows: list[list] = [
-            ["", "", "Win", "Cover", "Total Points", "Total Touchdowns", "Team Points", "Team TDs", "Team TDs"],
-            ["Team", "Date", "Moneyline", "Spread", "Over-Under", "Over-Under", "Over-Under", "Over-Under", "Over-Under"],
+            [
+                "",
+                "",
+                "Win",
+                "Cover",
+                "Total Points",
+                "Total Touchdowns",
+                "Team Points",
+                "Team TDs",
+                "Team TDs",
+            ],
+            [
+                "Team",
+                "Date",
+                "Moneyline",
+                "Spread",
+                "Over-Under",
+                "Over-Under",
+                "Over-Under",
+                "Over-Under",
+                "Over-Under",
+            ],
         ]
         for _, r in df.iterrows():
-            rows.append([r["team"], r["date"], r["moneyline"], r["spread"], r["total"], "", r["team_points"], "", ""])
+            rows.append(
+                [r["team"], r["date"], r["moneyline"], r["spread"], r["total"], "", r["team_points"], "", ""]
+            )
         return rows
 
     def post_upload(self, client, tab: str, df: pd.DataFrame) -> None:

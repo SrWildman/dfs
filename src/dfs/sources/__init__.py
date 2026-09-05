@@ -25,6 +25,4 @@ def get_source(name: str) -> Source:
     try:
         return SOURCES[name]
     except KeyError:
-        raise KeyError(
-            f"Unknown source {name!r}. Known sources: {', '.join(sorted(SOURCES))}"
-        ) from None
+        raise KeyError(f"Unknown source {name!r}. Known sources: {', '.join(sorted(SOURCES))}") from None

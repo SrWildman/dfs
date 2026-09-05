@@ -132,9 +132,7 @@ def sync_bucket(
 ) -> BucketSyncResult:
     key_col = table_cfg.entry_key_column
     key_range = f"{key_col}{table_cfg.first_row}:{key_col}{table_cfg.last_row}"
-    existing_keys = {
-        row[0] for row in client.read_range(tab, key_range) if row and row[0].strip()
-    }
+    existing_keys = {row[0] for row in client.read_range(tab, key_range) if row and row[0].strip()}
 
     already_synced = sum(1 for e in entries if e.entry_key in existing_keys)
 
@@ -156,7 +154,9 @@ def sync_bucket(
     if to_write:
         last_row = first_free_row + len(to_write) - 1
         client.update_range(tab, f"A{first_free_row}:H{last_row}", [_entry_row(e) for e in to_write])
-        client.update_range(tab, f"{key_col}{first_free_row}:{key_col}{last_row}", [[e.entry_key] for e in to_write])
+        client.update_range(
+            tab, f"{key_col}{first_free_row}:{key_col}{last_row}", [[e.entry_key] for e in to_write]
+        )
         log.info("wrote %d %s entries to %s!A%d:H%d", len(to_write), bucket, tab, first_free_row, last_row)
 
     return BucketSyncResult(

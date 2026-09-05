@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
 
-class Position(str, Enum):
+class Position(StrEnum):
     QB = "QB"
     RB = "RB"
     WR = "WR"
@@ -33,9 +33,7 @@ ROSTER_SLOTS: tuple[str, ...] = (
     "DST",
 )
 
-FLEX_ELIGIBLE: frozenset[Position] = frozenset(
-    {Position.RB, Position.WR, Position.TE}
-)
+FLEX_ELIGIBLE: frozenset[Position] = frozenset({Position.RB, Position.WR, Position.TE})
 
 
 class Player(BaseModel):

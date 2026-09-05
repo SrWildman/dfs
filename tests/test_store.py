@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from dfs import store
 
@@ -22,11 +23,8 @@ def test_save_writes_raw_and_current(monkeypatch, tmp_path):
 def test_load_current_missing_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "CURRENT_DIR", tmp_path / "current")
     (tmp_path / "current").mkdir()
-    try:
+    with pytest.raises(FileNotFoundError, match="nope"):
         store.load_current("nope")
-        assert False, "expected FileNotFoundError"
-    except FileNotFoundError as e:
-        assert "nope" in str(e)
 
 
 def test_record_success_then_failure_overwrites_entry(monkeypatch, tmp_path):

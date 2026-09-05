@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from dfs.config import Config, ConfigError, load_config
 
@@ -11,7 +12,7 @@ def test_load_config_missing_file(tmp_path, monkeypatch):
 
 
 def test_config_rejects_unknown_keys():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Config.model_validate(
             {
                 "google_sheets": {
@@ -25,7 +26,7 @@ def test_config_rejects_unknown_keys():
 
 
 def test_config_requires_sheet_id():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Config.model_validate(
             {
                 "google_sheets": {

@@ -21,10 +21,11 @@ from the wrong file.
 | Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
 | Strength of Schedule | Not yet ported -- see `legacy/README.md` |
-| Player ownership % (field consensus, not TFFB's own) | Not started -- see `docs/HANDOFF.md` |
+| Player ownership % (field consensus, not TFFB's own) | Not started |
 | Live DK contest history / entries (no manual export) | Not yet built -- needs `dfs auth dk` exercised first |
 
-See `docs/HANDOFF.md` for session history, current state, and what's next.
+See `CONTRIBUTING.md` before adding a source or touching the live sheet's
+structure.
 
 ## Setup
 

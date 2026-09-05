@@ -56,8 +56,7 @@ from dfs.sources.base import Source, SyncContext
 log = get_logger("sources.tffb_projections")
 
 OPTIMIZER_URL_TEMPLATE = (
-    "https://www.thefantasyfootballers.com/{season}-ultimate-dfs-pass/"
-    "dfs-pass-lineup-optimizer/"
+    "https://www.thefantasyfootballers.com/{season}-ultimate-dfs-pass/dfs-pass-lineup-optimizer/"
 )
 PLAYERS_ENDPOINT_MARKER = "players/dk/classic"
 
@@ -74,7 +73,7 @@ class TffbProjectionsFetchError(Exception):
 
 
 def _dst_nickname(full_team_name: str) -> str:
-    """"Los Angeles Chargers" -> "Chargers". Every NFL nickname is one word,
+    """ "Los Angeles Chargers" -> "Chargers". Every NFL nickname is one word,
     so the last token is always right. The API's Team column for DST rows
     is an abbreviation ("LAC"), but PlayerPoolRaw's DST VLOOKUP key is
     DraftKings' own DST naming (DkSalClean's Name column, e.g. "Chargers")
@@ -93,8 +92,7 @@ def players_to_df(players: list[dict]) -> pd.DataFrame:
     missing = [f for f in CORE_FIELDS if f not in players[0]]
     if missing:
         raise TffbProjectionsFetchError(
-            f"Optimizer player records are missing field(s) {missing}; "
-            "TFFB may have changed their API shape."
+            f"Optimizer player records are missing field(s) {missing}; TFFB may have changed their API shape."
         )
     fields = CORE_FIELDS + [f for f in EXTRA_FIELDS if f in players[0]]
     df = pd.DataFrame(players)[fields]
@@ -125,8 +123,7 @@ class TffbProjectionsSource(Source):
 
             if not resp.ok:
                 raise TffbProjectionsFetchError(
-                    f"Optimizer's player endpoint returned {resp.status}: "
-                    f"{resp.text()[:300]}"
+                    f"Optimizer's player endpoint returned {resp.status}: {resp.text()[:300]}"
                 )
             players = resp.json().get("players", [])
             page.close()

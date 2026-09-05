@@ -93,8 +93,12 @@ def find_main_slate_draft_group() -> int:
             continue
 
         starts = [
-            g.get("startTime") or g.get("startDate") or g.get("gameTime")
-            or g.get("date") or g.get("startDateTime") or ""
+            g.get("startTime")
+            or g.get("startDate")
+            or g.get("gameTime")
+            or g.get("date")
+            or g.get("startDateTime")
+            or ""
             for g in games
         ]
         sunday_afternoon = [_is_sunday_afternoon(s) for s in starts]

@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 
 from dfs.lineups import (
     build_salary_lookup,
@@ -80,9 +79,15 @@ def test_validate_entry_flags_salary_cap_violation():
 def test_validate_entry_flags_wrong_position_in_flex():
     lookup = build_salary_lookup(_salary_df())
     players = {
-        "QB": "Josh Allen (1)", "RB1": "Saquon Barkley (2)", "RB2": "Derrick Henry (3)",
-        "WR1": "Tyreek Hill (4)", "WR2": "Ja'Marr Chase (5)", "WR3": "Justin Jefferson (6)",
-        "TE": "Travis Kelce (7)", "FLEX": "Josh Allen (1)", "DST": "Ravens  (9)",
+        "QB": "Josh Allen (1)",
+        "RB1": "Saquon Barkley (2)",
+        "RB2": "Derrick Henry (3)",
+        "WR1": "Tyreek Hill (4)",
+        "WR2": "Ja'Marr Chase (5)",
+        "WR3": "Justin Jefferson (6)",
+        "TE": "Travis Kelce (7)",
+        "FLEX": "Josh Allen (1)",
+        "DST": "Ravens  (9)",
     }
     entries = parse_entries([HEADER, _lineup_row(players=players)])
     result = validate_entry(entries[0], lookup)
@@ -93,9 +98,15 @@ def test_validate_entry_flags_wrong_position_in_flex():
 def test_validate_entry_flags_duplicate_player():
     lookup = build_salary_lookup(_salary_df())
     players = {
-        "QB": "Josh Allen (1)", "RB1": "Saquon Barkley (2)", "RB2": "Saquon Barkley (2)",
-        "WR1": "Tyreek Hill (4)", "WR2": "Ja'Marr Chase (5)", "WR3": "Justin Jefferson (6)",
-        "TE": "Travis Kelce (7)", "FLEX": "CeeDee Lamb (8)", "DST": "Ravens  (9)",
+        "QB": "Josh Allen (1)",
+        "RB1": "Saquon Barkley (2)",
+        "RB2": "Saquon Barkley (2)",
+        "WR1": "Tyreek Hill (4)",
+        "WR2": "Ja'Marr Chase (5)",
+        "WR3": "Justin Jefferson (6)",
+        "TE": "Travis Kelce (7)",
+        "FLEX": "CeeDee Lamb (8)",
+        "DST": "Ravens  (9)",
     }
     entries = parse_entries([HEADER, _lineup_row(players=players)])
     result = validate_entry(entries[0], lookup)
@@ -106,9 +117,15 @@ def test_validate_entry_flags_duplicate_player():
 def test_validate_entry_flags_unknown_player_id():
     lookup = build_salary_lookup(_salary_df())
     players = {
-        "QB": "Someone Else (999)", "RB1": "Saquon Barkley (2)", "RB2": "Derrick Henry (3)",
-        "WR1": "Tyreek Hill (4)", "WR2": "Ja'Marr Chase (5)", "WR3": "Justin Jefferson (6)",
-        "TE": "Travis Kelce (7)", "FLEX": "CeeDee Lamb (8)", "DST": "Ravens  (9)",
+        "QB": "Someone Else (999)",
+        "RB1": "Saquon Barkley (2)",
+        "RB2": "Derrick Henry (3)",
+        "WR1": "Tyreek Hill (4)",
+        "WR2": "Ja'Marr Chase (5)",
+        "WR3": "Justin Jefferson (6)",
+        "TE": "Travis Kelce (7)",
+        "FLEX": "CeeDee Lamb (8)",
+        "DST": "Ravens  (9)",
     }
     entries = parse_entries([HEADER, _lineup_row(players=players)])
     result = validate_entry(entries[0], lookup)
