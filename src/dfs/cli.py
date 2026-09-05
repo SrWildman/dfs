@@ -722,6 +722,34 @@ def week_new(
         raise typer.Exit(code=1)
 
 
+@week_app.command("close")
+def week_close(
+    csv: Path = typer.Option(
+        ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
+    ),
+) -> None:
+    """End-of-week bankroll reconciliation -- currently a thin wrapper over
+    `dfs bankroll sync --csv`; see below for why it isn't more than that yet.
+
+    Investigated for this command: whether the authenticated browser
+    profile `dfs auth dk` already saves could pull contest history
+    directly, skipping the manual CSV export. It can't, today -- not
+    because it was tried and failed, but because doing so means probing
+    DraftKings' undocumented authenticated endpoints (the "My Contests"
+    page has no public API; whatever it calls internally isn't stable
+    enough to build against sight-unseen), and that's a live exploratory
+    scrape against your real logged-in session, not something to attempt
+    unattended in a coding session. If that gets revisited, it needs doing
+    with you present, watching real requests. Until then, exporting
+    contest history by hand (My Contests > export) and passing it here
+    stays the supported path -- this command exists mainly so "close the
+    week" has one name in the weekly workflow, not two.
+    """
+    cfg = _load_config_or_exit()
+    console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
+    _sync_bankroll_from_csv(cfg, csv)
+
+
 @bankroll_app.command("sync")
 def bankroll_sync(
     csv: Path = typer.Option(
@@ -735,7 +763,13 @@ def bankroll_sync(
     point this at the file.
     """
     cfg = _load_config_or_exit()
+    _sync_bankroll_from_csv(cfg, csv)
 
+
+def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:
+    """Shared by `bankroll sync` and `week close` -- see week_close's
+    docstring for why `week close` doesn't yet pull contest history itself
+    and still needs this same `--csv` export as an input."""
     if cfg.bankroll.cash is None or cfg.bankroll.gpp is None:
         console.print(
             "[red]config.toml is missing [bankroll.cash]/[bankroll.gpp][/red] "

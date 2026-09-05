@@ -25,10 +25,11 @@ from the wrong file.
 | New-week transition (`dfs week new`) | Working -- repoints `config.toml`, carries the bankroll forward, clears lineups, syncs |
 | Line movement (`dfs odds movement`, `LineMove`/`LINE↑`/`LINE↓`) | Working -- diffs the current `nfl_odds` sync against the previous one |
 | Live re-sync with a diff report (`dfs sync --live`) | Working -- re-syncs odds/DK status/weather + edge, prints EdgeRaw Flag changes |
+| End-of-week reconciliation (`dfs week close`) | Working, from a manually-exported DK CSV -- thin wrapper over `dfs bankroll sync` |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
 | Strength of Schedule | Not yet ported -- see `legacy/README.md` |
 | Player ownership % (field consensus, not TFFB's own) | Not started |
-| Live DK contest history / entries (no manual export) | Not yet built -- needs `dfs auth dk` exercised first, would back `dfs week close` |
+| Live DK contest history / entries (no manual export) | Investigated, not built -- would need probing DraftKings' undocumented authenticated endpoints live, with the user present; `dfs auth dk`'s saved session is unused until then |
 
 See `CONTRIBUTING.md` before adding a source or touching the live sheet's
 structure. See `docs/SHEET_REFERENCE.md` for what every tab and column in
@@ -89,6 +90,7 @@ dfs sheets inspect                 # list every tab in your sheet, with headers
 
 dfs week new <sheet-url>           # point config.toml at a new weekly sheet copy,
                                     # carry the bankroll forward, clear lineups, sync
+dfs week close --csv history.csv   # end-of-week bankroll reconciliation (see Bankroll sync below)
 
 dfs sync                           # fetch all sources, upload to Sheets
 dfs sync --only draftkings,nfl_odds
@@ -151,7 +153,9 @@ connected sheet's real title and URL before doing anything else -- a quick
    wind picking up, a last-minute line move -- instead of making you
    re-scan the whole sheet.
 6. **End of week**: export your contest history from DraftKings and run
-   `dfs bankroll sync --csv <file>` to reconcile Cash and GPP results.
+   `dfs week close --csv <file>` (a thin wrapper over `dfs bankroll sync
+   --csv` -- see "Bankroll sync" below for why it isn't more than that yet)
+   to reconcile Cash and GPP results.
 
 ## Edge layer
 
