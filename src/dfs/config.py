@@ -1,0 +1,86 @@
+"""Typed config, loaded from config.toml.
+
+Replaces utils/config.py + config.json. The old config.json was ~70% dead:
+file_management, advanced, workflows, and google_sheets.update_behavior had
+zero readers anywhere in the codebase, and scrapers.nfl_odds used key names
+(base_url, min_week, max_week) that the code never actually looked up (it
+read its own hardcoded SCRAPER_SETTINGS instead) -- the two had silently
+drifted apart. Pydantic's `extra="forbid"` here means a typo'd or dead key
+is a load-time error instead of a silent no-op, and a missing required key
+is a clear validation error instead of a KeyError three calls deep.
+"""
+
+from __future__ import annotations
+
+import sys
+import tomllib
+from functools import lru_cache
+
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from dfs.paths import CONFIG_EXAMPLE_FILE, CONFIG_FILE
+
+
+class ConfigError(Exception):
+    """Raised for any problem loading or validating config.toml."""
+
+
+class GoogleSheetsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sheet_id: str
+    credentials_file: str
+    tab_mappings: dict[str, str]
+
+
+class NflOddsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_week: int | None = None
+    default_season: int | None = None
+
+
+class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    google_sheets: GoogleSheetsConfig
+    nfl_odds: NflOddsConfig = NflOddsConfig()
+
+
+def _missing_config_message() -> str:
+    example = (
+        CONFIG_EXAMPLE_FILE.name
+        if CONFIG_EXAMPLE_FILE.exists()
+        else "config.example.toml"
+    )
+    return (
+        f"No config.toml found at {CONFIG_FILE}.\n"
+        f"Copy {example} to config.toml and fill in your sheet_id and "
+        f"credentials_file."
+    )
+
+
+@lru_cache(maxsize=1)
+def load_config() -> Config:
+    if not CONFIG_FILE.exists():
+        raise ConfigError(_missing_config_message())
+
+    try:
+        with CONFIG_FILE.open("rb") as f:
+            raw = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"config.toml is not valid TOML: {e}") from e
+
+    try:
+        return Config.model_validate(raw)
+    except ValidationError as e:
+        raise ConfigError(f"config.toml is invalid:\n{e}") from e
+
+
+if __name__ == "__main__":  # pragma: no cover
+    try:
+        cfg = load_config()
+    except ConfigError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    print(cfg.model_dump_json(indent=2))

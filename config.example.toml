@@ -1,0 +1,31 @@
+# Copy this file to config.toml and fill in your own values.
+# config.toml is gitignored -- it holds your personal sheet ID and
+# credentials filename, neither of which belong in version control.
+
+[google_sheets]
+# The ID segment from your sheet's URL:
+# https://docs.google.com/spreadsheets/d/<sheet_id>/edit
+sheet_id = "your-google-sheet-id"
+
+# Path to your Google service-account credentials JSON, relative to the
+# repo root (or an absolute path). See docs/SHEETS_SETUP.md to create one.
+credentials_file = "credentials.json"
+
+# Maps each data source to the tab name it should be written to in your
+# sheet. Rename the values (right-hand side) to match your own tabs --
+# the keys (left-hand side) must stay as-is, they're the source names.
+[google_sheets.tab_mappings]
+projections = "Projections"
+draftkings = "Salaries"
+nfl_odds = "Odds"
+sos_qb = "SoSQB"
+sos_rb = "SoSRB"
+sos_wr = "SoSWr"
+sos_te = "SoSTE"
+sos_dst = "SoSDef"
+
+[nfl_odds]
+# Optional overrides. Omit these and the current week/season are
+# computed automatically from the NFL schedule.
+# default_week = 1
+# default_season = 2025
