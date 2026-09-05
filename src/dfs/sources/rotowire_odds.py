@@ -109,3 +109,13 @@ class RotowireOddsSource(Source):
         for _, r in df.iterrows():
             rows.append([r["team"], r["date"], r["moneyline"], r["spread"], r["total"], "", r["team_points"], "", ""])
         return rows
+
+    def post_upload(self, client, tab: str, df: pd.DataFrame) -> None:
+        # Moneyline/Spread/Total/Team Points were written with USER_ENTERED so
+        # Sheets parses "+154"/"-3.5" as real numbers; this makes that explicit
+        # instead of relying on number-format metadata left over from a
+        # previous upload (which is all that was making them display cleanly
+        # before this hook existed).
+        num_rows = len(df) + 2  # + the 2-row header
+        if num_rows > 2:
+            client.format_number_range(tab, f"C3:I{num_rows}", pattern="0.0#")

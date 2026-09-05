@@ -19,6 +19,9 @@ from dfs import paths
 from dfs.config import Config, ConfigError, load_config
 from dfs.log import get_logger, setup_logging
 from dfs.sheets import SheetsClient, SheetsError
+from dfs.sources import SOURCES
+from dfs.sources.base import SyncContext
+from dfs.sync import run_sync
 
 app = typer.Typer(
     name="dfs",
@@ -111,6 +114,51 @@ def sheets_inspect() -> None:
         header = ", ".join(tab.header) if tab.header else "[dim](empty)[/dim]"
         table.add_row(tab.title, f"{tab.rows}x{tab.cols}", mapped, header)
     console.print(table)
+
+
+@app.command()
+def sync(
+    only: str = typer.Option(
+        None, "--only", help="Comma-separated source names to sync (default: all)."
+    ),
+    no_upload: bool = typer.Option(False, "--no-upload", help="Fetch and store locally, skip Sheets."),
+    week: int = typer.Option(None, "--week", help="Override auto-detected NFL week."),
+    season: int = typer.Option(None, "--season", help="Override auto-detected NFL season."),
+) -> None:
+    """Fetch data sources and upload them to the connected Google Sheet."""
+    cfg = _load_config_or_exit()
+
+    if only:
+        requested = [s.strip() for s in only.split(",") if s.strip()]
+        unknown = [s for s in requested if s not in SOURCES]
+        if unknown:
+            console.print(f"[red]Unknown source(s):[/red] {', '.join(unknown)}")
+            console.print(f"Known sources: {', '.join(sorted(SOURCES))}")
+            raise typer.Exit(code=1)
+        source_names = requested
+    else:
+        source_names = list(SOURCES)
+
+    ctx = SyncContext.current(week=week, season=season)
+    console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
+
+    results = run_sync(cfg, source_names, ctx, upload=not no_upload)
+
+    table = Table(title="Sync results")
+    table.add_column("source")
+    table.add_column("rows")
+    table.add_column("status")
+    any_failed = False
+    for r in results:
+        if r.ok:
+            table.add_row(r.source, str(r.rows), "[green]ok[/green]")
+        else:
+            any_failed = True
+            table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
+    console.print(table)
+
+    if any_failed:
+        raise typer.Exit(code=1)
 
 
 @auth_app.command("tffb")

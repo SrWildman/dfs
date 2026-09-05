@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from dfs import nfl_calendar
+from dfs.sheets import SheetsClient
 
 
 @dataclass
@@ -38,3 +39,7 @@ class Source(ABC):
         (header row included). Override for tabs with unusual layouts (e.g.
         nfl_odds' legacy 2-row header)."""
         return [list(df.columns)] + df.astype(object).where(df.notna(), "").values.tolist()
+
+    def post_upload(self, client: SheetsClient, tab: str, df: pd.DataFrame) -> None:
+        """Hook for anything beyond writing cell values (number formats,
+        etc). Default: nothing. Called after write_tab succeeds."""
