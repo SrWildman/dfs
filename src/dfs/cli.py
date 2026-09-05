@@ -10,15 +10,15 @@ typer.Exit.
 from __future__ import annotations
 
 import json as _json
-from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from dfs import paths
-from dfs.config import ConfigError, load_config
+from dfs.config import Config, ConfigError, load_config
 from dfs.log import get_logger, setup_logging
+from dfs.sheets import SheetsClient, SheetsError
 
 app = typer.Typer(
     name="dfs",
@@ -49,11 +49,7 @@ def main(
 @app.command()
 def status() -> None:
     """Show whether config is set up and how fresh each data source is."""
-    try:
-        cfg = load_config()
-    except ConfigError as e:
-        console.print(f"[red]Config error:[/red] {e}")
-        raise typer.Exit(code=1)
+    cfg = _load_config_or_exit()
 
     console.print(f"[green]OK[/green] config.toml loaded ({paths.CONFIG_FILE})")
 
@@ -82,6 +78,38 @@ def status() -> None:
             table.add_row(source, tab, entry.get("synced_at", "-"), "-", f"[red]failed: {entry['error']}[/red]")
         else:
             table.add_row(source, tab, entry.get("synced_at", "-"), str(entry.get("rows", "-")), "[green]ok[/green]")
+    console.print(table)
+
+
+def _load_config_or_exit() -> Config:
+    try:
+        return load_config()
+    except ConfigError as e:
+        console.print(f"[red]Config error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+
+@sheets_app.command("inspect")
+def sheets_inspect() -> None:
+    """List every tab in the connected sheet, with dimensions and header row."""
+    cfg = _load_config_or_exit()
+    client = SheetsClient(cfg.google_sheets)
+    try:
+        tabs = client.list_tabs()
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    known_tabs = set(cfg.google_sheets.tab_mappings.values())
+    table = Table(title=f"Tabs in sheet {cfg.google_sheets.sheet_id}")
+    table.add_column("tab")
+    table.add_column("size")
+    table.add_column("mapped?")
+    table.add_column("header row")
+    for tab in tabs:
+        mapped = "[green]yes[/green]" if tab.title in known_tabs else "[dim]no[/dim]"
+        header = ", ".join(tab.header) if tab.header else "[dim](empty)[/dim]"
+        table.add_row(tab.title, f"{tab.rows}x{tab.cols}", mapped, header)
     console.print(table)
 
 
