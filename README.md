@@ -22,10 +22,13 @@ from the wrong file.
 | Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/LineMove/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets format-edge`) |
 | Lineup export & validation | Working, against a manually-paired entries tab |
 | Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
+| New-week transition (`dfs week new`) | Working -- repoints `config.toml`, carries the bankroll forward, clears lineups, syncs |
+| Line movement (`dfs odds movement`, `LineMove`/`LINE↑`/`LINE↓`) | Working -- diffs the current `nfl_odds` sync against the previous one |
+| Live re-sync with a diff report (`dfs sync --live`) | Not started |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
 | Strength of Schedule | Not yet ported -- see `legacy/README.md` |
 | Player ownership % (field consensus, not TFFB's own) | Not started |
-| Live DK contest history / entries (no manual export) | Not yet built -- needs `dfs auth dk` exercised first |
+| Live DK contest history / entries (no manual export) | Not yet built -- needs `dfs auth dk` exercised first, would back `dfs week close` |
 
 See `CONTRIBUTING.md` before adding a source or touching the live sheet's
 structure. See `docs/SHEET_REFERENCE.md` for what every tab and column in
@@ -53,9 +56,9 @@ This project expects a Google Sheet shaped like the
 [weekly template](https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/edit)
 (tabs like `TFFBOptoRaw`, `PlayerPoolRaw`, `DkSalClean`, `SoS*`, etc., plus
 the formulas that tie them together) -- `File > Make a copy` it, don't sync
-into a blank sheet. In practice a new copy gets made every week (bankroll
-carryover between weeks isn't automated yet -- copy last week's numbers
-over by hand for now).
+into a blank sheet. In practice a new copy gets made every week; run `dfs
+week new <url-of-the-copy>` afterward to point `config.toml` at it and carry
+the bankroll forward automatically (see "Weekly workflow" below).
 
 `config.toml` is gitignored -- it holds your sheet ID and credentials
 filename, neither of which belong in version control. Edit it with:
@@ -83,6 +86,9 @@ filename, neither of which belong in version control. Edit it with:
 ```bash
 dfs status                        # config/credentials/data freshness at a glance
 dfs sheets inspect                 # list every tab in your sheet, with headers
+
+dfs week new <sheet-url>           # point config.toml at a new weekly sheet copy,
+                                    # carry the bankroll forward, clear lineups, sync
 
 dfs sync                           # fetch all sources, upload to Sheets
 dfs sync --only draftkings,nfl_odds
@@ -120,8 +126,11 @@ connected sheet's real title and URL before doing anything else -- a quick
 ## Weekly workflow
 
 1. **New week**: duplicate the [weekly template](https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/edit),
-   point `config.toml`'s `sheet_id` at the copy, then `dfs lineups clear`
-   to wipe last week's typed lineups/picks before rebuilding.
+   then `dfs week new <url-of-the-copy>` -- it points `config.toml` at the
+   copy, carries the Bankroll tab's Ending balances forward as the new
+   sheet's Starting balances, runs `dfs lineups clear`, and finishes with a
+   full `dfs sync`, all after one confirmation prompt. (`dfs lineups clear`
+   alone still exists if you only need that one step.)
 2. **Sync everything**: `dfs sync` (salaries, odds, TFFB projections, and
    the derived `edge` layer computed from them -- the last needs `dfs auth
    tffb` done at least once). Re-run `dfs sync --only draftkings,nfl_odds`

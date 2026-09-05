@@ -29,6 +29,7 @@ from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
+from dfs.week import BANKROLL_CARRYOVER_CELLS, parse_sheet_id_from_url, rewrite_sheet_id
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS, clear_previous_week
 
 # EdgeRaw columns that get a color-scale conditional format by
@@ -63,11 +64,13 @@ auth_app = typer.Typer(help="Log in to sites that require an authenticated sessi
 bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll tab.")
 lineups_app = typer.Typer(help="Manage the sheet's lineup-building tabs.")
 odds_app = typer.Typer(help="Inspect synced odds data.")
+week_app = typer.Typer(help="Move config.toml between weekly sheet copies.")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
 app.add_typer(bankroll_app, name="bankroll")
 app.add_typer(lineups_app, name="lineups")
 app.add_typer(odds_app, name="odds")
+app.add_typer(week_app, name="week")
 
 console = Console()
 log = get_logger("cli")
@@ -516,6 +519,136 @@ def lineups_clear(
 
     for line in summary:
         console.print(f"[green]OK[/green] {line}")
+
+
+@week_app.command("new")
+def week_new(
+    sheet_url: str = typer.Argument(
+        ..., help="URL (or bare ID) of this week's sheet, already copied from the template."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Move config.toml to a new week's sheet copy, carry the bankroll
+    forward, clear last week's lineups, and run a full sync -- in that
+    order, with one confirmation before anything is written.
+
+    Carrying the bankroll forward means reading the CURRENT sheet's Ending
+    balance for each of the three tracked bankrolls (main/DK, PP, UD) and
+    writing it as the NEW sheet's Starting balance -- see
+    dfs.week.BANKROLL_CARRYOVER_CELLS and docs/ROADMAP.md's Phase 4 section
+    for how those cell addresses were found. Everything else on the
+    Bankroll tab (weekly budget formulas, Deposited/Withdrawn) is either
+    formula-driven and naturally resets, or a running total the user
+    updates by hand -- neither needs code here.
+    """
+    cfg = _load_config_or_exit()
+
+    try:
+        new_sheet_id = parse_sheet_id_from_url(sheet_url)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+
+    old_sheet_id = cfg.google_sheets.sheet_id
+    if new_sheet_id == old_sheet_id:
+        console.print("[yellow]That's already the sheet config.toml points at -- nothing to do.[/yellow]")
+        raise typer.Exit(code=1)
+
+    old_client = SheetsClient(cfg.google_sheets)
+    new_gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": new_sheet_id})
+    new_client = SheetsClient(new_gs_cfg)
+
+    try:
+        old_title, old_url = old_client.describe()
+    except SheetsError as e:
+        console.print(f"[red]Could not open the current sheet ({old_sheet_id}):[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    try:
+        new_title, new_url = new_client.describe()
+    except SheetsError as e:
+        console.print(f"[red]Could not open the new sheet ({new_sheet_id}):[/red] {e}")
+        console.print("Make sure it's shared with the service account and try again.")
+        raise typer.Exit(code=1) from e
+
+    console.print(f"Current sheet: [bold]{old_title}[/bold]\n{old_url}\n")
+    console.print(f"New sheet:     [bold]{new_title}[/bold]\n{new_url}\n")
+
+    bankroll_tab = cfg.bankroll.tab
+    carryover: list[tuple[str, str]] = []
+    try:
+        for old_cell, new_cell in BANKROLL_CARRYOVER_CELLS:
+            value = old_client.read_range(bankroll_tab, old_cell)
+            resolved = value[0][0] if value and value[0] else ""
+            carryover.append((new_cell, resolved))
+    except SheetsError as e:
+        console.print(f"[red]Could not read {bankroll_tab!r} on the current sheet:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    console.print("Bankroll to carry forward:")
+    for (old_cell, _), (new_cell, value) in zip(BANKROLL_CARRYOVER_CELLS, carryover, strict=True):
+        console.print(f"  {bankroll_tab}!{old_cell} -> {bankroll_tab}!{new_cell} = {value!r}")
+
+    if not yes and not typer.confirm(
+        "\nRewrite config.toml, carry the bankroll forward, clear last week's lineups, "
+        "and run a full sync against the NEW sheet?"
+    ):
+        console.print("Cancelled -- nothing changed.")
+        raise typer.Exit(code=0)
+
+    try:
+        updated_text = rewrite_sheet_id(
+            paths.CONFIG_FILE.read_text(), new_sheet_id=new_sheet_id, previous_sheet_id=old_sheet_id
+        )
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    paths.CONFIG_FILE.write_text(updated_text)
+    console.print(f"[green]OK[/green] config.toml now points at {new_sheet_id} (previous: {old_sheet_id})")
+
+    try:
+        for new_cell, value in carryover:
+            new_client.update_range(bankroll_tab, new_cell, [[value]])
+    except SheetsError as e:
+        console.print(f"[red]Could not write {bankroll_tab!r} on the new sheet:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] carried bankroll forward into {bankroll_tab!r}")
+
+    try:
+        summary = clear_previous_week(
+            new_client,
+            lineups_tab=cfg.lineups.builder_tab,
+            player_pool_tab=cfg.lineups.player_pool_tab,
+            scratch_tab=cfg.lineups.scratch_tab,
+            dk_upload_tab=cfg.lineups.upload_tab,
+        )
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in summary:
+        console.print(f"[green]OK[/green] {line}")
+
+    load_config.cache_clear()
+    new_cfg = _load_config_or_exit()
+    ctx = SyncContext.current()
+    console.print(f"\nSyncing week {ctx.week}, season {ctx.season} ({len(SOURCES)} source(s))...")
+    results = run_sync(new_cfg, list(SOURCES), ctx, upload=True)
+
+    table = Table(title="Sync results")
+    table.add_column("source")
+    table.add_column("rows")
+    table.add_column("status")
+    any_failed = False
+    for r in results:
+        if r.ok:
+            table.add_row(r.source, str(r.rows), "[green]ok[/green]")
+        else:
+            any_failed = True
+            table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
+    console.print(table)
+
+    if any_failed:
+        raise typer.Exit(code=1)
 
 
 @bankroll_app.command("sync")

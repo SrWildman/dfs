@@ -32,6 +32,12 @@ class GoogleSheetsConfig(BaseModel):
     credentials_file: str
     tab_mappings: dict[str, str]
 
+    # Set automatically by `dfs week new` when it rewrites sheet_id above --
+    # the sheet that was current *before* that rewrite, so bankroll carryover
+    # and any other "diff against last week" logic doesn't need the user to
+    # paste last week's URL a second time. Not meant to be hand-edited.
+    previous_sheet_id: str | None = None
+
 
 class NflOddsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")

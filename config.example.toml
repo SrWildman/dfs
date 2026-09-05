@@ -11,6 +11,11 @@ sheet_id = "your-google-sheet-id"
 # repo root (or an absolute path). See docs/SHEETS_SETUP.md to create one.
 credentials_file = "credentials.json"
 
+# Set automatically by `dfs week new` -- records the sheet_id it just moved
+# you off of, so bankroll carryover doesn't need last week's URL pasted in
+# again. Not something you should set by hand.
+# previous_sheet_id = "..."
+
 # Maps each data source to the tab name it should be written to in your
 # sheet. Rename the values (right-hand side) to match your own tabs --
 # the keys (left-hand side) must stay as-is, they're the source names.

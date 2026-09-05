@@ -48,4 +48,19 @@ def test_config_valid_minimal():
         }
     )
     assert cfg.google_sheets.sheet_id == "abc123"
+    assert cfg.google_sheets.previous_sheet_id is None
     assert cfg.nfl_odds.default_week is None
+
+
+def test_config_accepts_previous_sheet_id():
+    cfg = Config.model_validate(
+        {
+            "google_sheets": {
+                "sheet_id": "abc123",
+                "previous_sheet_id": "old-id",
+                "credentials_file": "creds.json",
+                "tab_mappings": {},
+            }
+        }
+    )
+    assert cfg.google_sheets.previous_sheet_id == "old-id"
