@@ -1,497 +1,136 @@
-# DFS Data Collection Suite
+# DFS Companion
 
-> **Google Sheets Template:** https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/
+A personal CLI that handles the data-plumbing side of a weekly DFS
+routine: pulling projections/salaries/odds into a Google Sheet (the
+source of truth for actually building lineups), exporting finished
+lineups back out to DraftKings, and reconciling contest results into a
+bankroll tracker.
 
-Automated data collection pipeline for Daily Fantasy Sports (DFS) analysis. Collects player projections, salaries, and betting odds, then organizes and uploads to Google Sheets.
+Google Sheets stays where lineups get built. This tool exists so the data
+feeding that sheet is never stale, mislabeled, or manually copy-pasted
+from the wrong file.
 
----
+## Status
 
-## Table of Contents
-- [🚀 Quick Start](#-quick-start)
-- [📊 Data Sources](#-data-sources)
-- [🏗️ Project Structure](#-project-structure)
-- [📋 Setup](#-setup)
-- [🔧 Usage](#-usage)
-- [🖥️ Tauri Desktop UI](#-tauri-desktop-ui)
-- [📤 Google Sheets Integration](#-google-sheets-integration)
-- [📂 Data Output](#-data-output)
-- [🏈 Strength of Schedule Features](#-strength-of-schedule-features)
-- [🔍 Troubleshooting](#-troubleshooting)
-- [🔧 Configuration](#-configuration)
-- [🛡️ Security](#-security)
-- [📋 Dependencies](#-dependencies)
+| Area | State |
+|---|---|
+| DraftKings salaries | Working -- live, unauthenticated API |
+| NFL odds (Rotowire) | Working -- live, unauthenticated API |
+| Lineup export & validation | Working, against a manually-paired entries tab |
+| Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
+| TFFB projections / Strength of Schedule | Not yet ported -- paywalled, needs a look at the real post-login page |
+| Live DK contest history / entries (no manual export) | Not yet built -- needs `dfs auth dk` exercised first |
 
----
+See `legacy/README.md` for the two scrapers still pending a port.
 
-## 🚀 Quick Start
+## Setup
 
-```bash
-# Complete pipeline (scrape all + upload to Google Sheets)
-python3 run_all.py
-
-# Quick update (projections + odds only)
-python3 run_update.py
-
-# Skip Google Sheets upload
-python3 run_all.py --no-upload
-```
-
----
-
-## 📊 Data Sources
-
-| Source | Data Type | Update Frequency | Output |
-|--------|-----------|------------------|---------|
-| **Projections** | Player projections | Multiple times daily | Projections with ownership % |
-| **DraftKings** | Player salaries | Weekly (usually Tuesday) | Current slate pricing |
-| **NFL Odds** | Betting lines | Multiple times daily | Spreads, totals, moneylines |
-| **Strength of Schedule** | Matchup analysis | Weekly | Position-specific defensive rankings |
-
----
-
-## 🏗️ Project Structure
+Requires Python 3.11+ (developed against 3.14).
 
 ```bash
-dfs/
-├── 🚀 run_all.py                   # Complete workflow (all 4 scrapers + upload)
-├── ⚡ run_update.py                 # Quick workflow (Projections + odds + upload)
-├── 📤 upload.py                    # Standalone Google Sheets upload
-├── 📋 requirements.txt             # Python dependencies
-├── 📚 docs/                        # Documentation
-│   ├── SHEETS_SETUP.md             # Google Sheets integration guide
-│   └── draftkings_guide.md         # DraftKings setup notes
-├── 📁 downloads/                   # Organized CSV output
-│   ├── projections/               # Projections CSVs
-│   ├── draftkings/                 # DK salary CSVs
-│   ├── nfl_odds/                   # NFL odds CSVs
-│   ├── sos/                        # Strength of Schedule CSVs
-│   └── upload_manifest.json        # Upload status tracking
-├── 🛠️ utils/                       # Core utilities
-│   ├── sheets_uploader.py          # Google Sheets integration
-│   ├── manage_downloads.py         # File organization
-│   └── file_manager.py             # Shared file utilities
-└── 🎯 scrapers/                    # Data collection modules
-    ├── projections/
-    ├── draftkings/
-    ├── nfl_odds/
-    └── tffb_sos/
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+playwright install chromium   # only needed once TFFB/DK browser auth is used
 ```
 
----
+Copy the config template and fill in your own sheet:
 
-## 📋 Setup
-
-### 1. Install Dependencies
 ```bash
-pip3 install -r requirements.txt
+cp config.example.toml config.toml
 ```
 
-### 2. Google Sheets Integration (Optional)
-See [`docs/SHEETS_SETUP.md`](docs/SHEETS_SETUP.md) for complete setup guide.
+`config.toml` is gitignored -- it holds your sheet ID and credentials
+filename, neither of which belong in version control. Edit it with:
 
----
+- `google_sheets.sheet_id` -- the ID segment from your sheet's URL
+- `google_sheets.credentials_file` -- path to a Google service-account key
+  (see below)
+- `google_sheets.tab_mappings` -- which tab each data source writes to
+- `lineups.upload_tab` -- the tab holding your paired DK entries (see
+  "Export lineups" below)
+- `bankroll.cash` / `bankroll.gpp` -- row ranges of your bankroll ledger
+  tables, if you have them (see "Bankroll" below)
 
-## 🔧 Usage
+### Google service account
 
-### Main Workflows
+1. In the [Google Cloud Console](https://console.cloud.google.com), create
+   a project and enable the Google Sheets API.
+2. Create a service account, add a JSON key, and download it into the repo.
+3. Open the key file, copy its `client_email`, and share your Google Sheet
+   with that address (Editor access).
+4. Point `credentials_file` in `config.toml` at the key file's path.
 
-**Complete Pipeline:**
+## Commands
+
 ```bash
-python3 run_all.py
-# ✅ Runs all 4 scrapers (Projections, DraftKings, NFL Odds, Strength of Schedule)
-# ✅ Auto-organizes files
-# ✅ Uploads to Google Sheets
+dfs status                        # config/credentials/data freshness at a glance
+dfs sheets inspect                 # list every tab in your sheet, with headers
+
+dfs sync                           # fetch all sources, upload to Sheets
+dfs sync --only draftkings,nfl_odds
+dfs sync --no-upload               # fetch and store locally, skip Sheets
+dfs sync --week 3 --season 2026    # override auto-detected week/season
+
+dfs export -o lineups.csv          # validate + export DK bulk-upload CSV
+
+dfs auth dk                        # one-time interactive DraftKings login
+dfs auth tffb                      # one-time interactive TFFB login
+
+dfs bankroll sync --csv history.csv   # classify + append DK contest history
 ```
 
-**Quick Update:**
+Every command exits non-zero on real failure -- nothing here silently
+reports success when something failed.
+
+## Weekly workflow
+
+1. **Multiple times a week**: `dfs sync --only draftkings,nfl_odds` to
+   refresh salaries and odds as lines move.
+2. **Build lineups** in the sheet, as always.
+3. **Pair lineups to contest entries** in your DK-upload tab (this stays a
+   manual step -- see below), then `dfs export -o lineups.csv` and upload
+   that file to DraftKings.
+4. **Watch/adjust** through the week; re-sync and re-export as needed.
+5. **End of week**: export your contest history from DraftKings and run
+   `dfs bankroll sync --csv <file>` to reconcile Cash and GPP results.
+
+## Export lineups
+
+`dfs export` reads whatever's in `lineups.upload_tab` (DraftKings' own
+"bulk edit entries" layout: Entry ID, Contest Name, Contest ID, Entry Fee,
+then the 9 roster slot columns) and validates each row against your most
+recently synced salary data:
+
+- every player exists in the current slate (catches referencing a stale
+  or wrong week's IDs)
+- no player used twice in a lineup
+- each slot's position is legal (FLEX allows RB/WR/TE)
+- total salary is under `lineups.salary_cap` (default 50000)
+
+Rows with no errors are written to the output CSV; everything else is
+reported with a specific reason instead of failing silently. Pairing
+lineups to specific entries is a manual step in the sheet -- this tool
+validates and exports what's already there.
+
+## Bankroll sync
+
+Classifies each contest entry as Cash or GPP by payout shape (roughly
+half the field paid, or a straight head-to-head, counts as Cash;
+everything else is GPP) and appends new rows into your existing bankroll
+ledger tables -- never touching cells outside the configured row range,
+so any formulas already in the sheet (e.g. per-row "% Paid") are left
+alone. Re-running is safe: entries are deduped by a tracking column
+(`bankroll.cash.entry_key_column` / `bankroll.gpp.entry_key_column`), so
+nothing gets double-counted.
+
+If your sheet doesn't have ledger tables shaped like this,
+`dfs bankroll sync` will say so rather than guessing at where to write --
+leave `[bankroll.cash]`/`[bankroll.gpp]` out of `config.toml` and it'll
+tell you what's missing.
+
+## Development
+
 ```bash
-python3 run_update.py
-# ✅ Projections + NFL Odds only
-# ✅ Auto-organizes files
-# ✅ Uploads to Google Sheets
-# ⏭️ Skips DraftKings & Strength of Schedule (updated weekly)
+pytest              # offline; network sources are mocked, Sheets calls are faked
 ```
-
-### Individual Operations
-
-**Upload Only:**
-```bash
-python3 upload.py
-# Uploads existing CSV files to Google Sheets
-```
-
-**Skip Upload:**
-```bash
-python3 run_all.py --no-upload
-python3 run_update.py --no-upload
-```
-
-**Individual Scrapers:**
-```bash
-cd scrapers/projections && python3 scraper.py
-cd scrapers/draftkings && python3 scraper.py
-cd scrapers/nfl_odds && python3 nfl_odds_scraper.py
-cd scrapers/tffb_sos && python3 scraper.py
-```
-
----
-
-## 🖥️ Tauri Desktop UI
-
-A modern desktop application is available to manage this DFS data collection suite with a graphical interface. The Tauri + Vue.js application provides:
-
-- ✅ **Visual scraper management** - Configure, run, and monitor scrapers
-- ✅ **Google Sheets connection management** - Test connections, configure tab mappings
-- ✅ **Workflow scheduling** - Set up automated data collection workflows
-- ✅ **System notifications** - Get alerts for job completions and errors
-- ✅ **Dashboard overview** - View system status at a glance
-
-### Location
-The UI source code is located in the [`tauri-app/`](./tauri-app/) directory.
-
-### Prerequisites
-- Rust (latest stable)
-- Node.js (v18+)
-- Python 3.x (for the existing scrapers)
-- Google Sheets API credentials (service account JSON)
-
-### Setup
-1. Ensure the Python dependencies are installed (see [Setup](#-setup) above)
-2. Navigate to the UI directory:
-   ```bash
-   cd tauri-app
-   ```
-3. Install Node.js dependencies:
-   ```bash
-   npm install
-   ```
-4. Verify Rust is installed:
-   ```bash
-   rustc --version
-   ```
-5. Start the application in development mode:
-   ```bash
-   npm run dev
-   ```
-6. For production builds:
-   ```bash
-   npm run build
-   ```
-
-### Features
-- **Scraper Management**: View and control all scrapers with real-time output
-- **Google Sheets Management**: Configure connections, test authentication, manage tab mappings
-- **Scheduling Interface**: Cron-like interface for automating workflows
-- **System Tray**: Run in background with notifications
-- **Configuration Persistence**: Settings are saved and reused
-
-For detailed documentation, see the [`tauri-app/README.md`](./tauri-app/README.md).
-
----
-
-## 📤 Google Sheets Integration
-
-### Features
-- ✅ **Automatic upload** after data collection
-- ✅ **Secure authentication** using service accounts
-- ✅ **Partial uploads** - handles missing files gracefully  
-- ✅ **Tab management** - creates/updates specific tabs
-- ✅ **No personal credentials** - uses dedicated service account
-
-### Default Tab Mapping
-| CSV Source | Google Sheets Tab |
-|------------|-------------------|
-| Projections | `Projections` |
-| DraftKings | `Salaries` |
-| NFL Odds | `Odds` |
-| Strength of Schedule - QB | `SoSQB` |
-| Strength of Schedule - RB | `SoSRB` |
-| Strength of Schedule - WR | `SoSWr` |
-| Strength of Schedule - TE | `SoSTE` |
-| Strength of Schedule - D/ST | `SoSDef` |
-
-### Setup
-1. **Follow setup guide**: [`docs/SHEETS_SETUP.md`](docs/SHEETS_SETUP.md)
-2. **Download credentials**: Save as `credentials.json` in project root
-3. **Share your sheet**: With the service account email
-4. **Set sheet ID**: Environment variable or edit `upload.py`
-
----
-
-## 📂 Data Output
-
-### File Organization
-```bash
-downloads/
-├── projections/
-│   ├── projections_latest.csv              # Always current
-│   └── projections_YYYYMMDD_HHMM.csv        # Timestamped
-├── draftkings/
-│   ├── draftkings_latest.csv
-│   └── draftkings_YYYYMMDD_HHMM.csv
-├── nfl_odds/
-│   ├── nfl-odds_latest.csv
-│   └── nfl-odds_YYYYMMDD_HHMM.csv
-└── sos/
-    ├── sos-qb_latest.csv       # QB Strength of Schedule
-    ├── sos-rb_latest.csv       # RB Strength of Schedule
-    ├── sos-wr_latest.csv       # WR Strength of Schedule
-    ├── sos-te_latest.csv       # TE Strength of Schedule
-    ├── sos-dst_latest.csv      # D/ST Strength of Schedule
-    └── sos-*_YYYYMMDD_HHMM.csv # Timestamped versions
-```
-
-### Data Formats
-
-**Projections** (`projections`):
-```csv
-Id,Name,Position,Team,ProjPts,ProjOwn
-39506991,Denver Broncos,DST,Broncos,10.70,8.90
-```
-
-**DraftKings** (`salaries`):
-```csv
-Position,Name + ID,Name,ID,Roster Position,Salary,Game Info,TeamAbbrev
-QB,Josh Allen (123456),Josh Allen,123456,QB,8000,BUF@MIAUF@MIA 01/07 1:00PM ET,BUF
-```
-
-**NFL Odds** (`betting lines`):
-```csv
-Team,Date,Moneyline,Spread,Over-Under
-Cowboys,2025-09-04 20:20:00,+320,+7.5,47.5
-Eagles,2025-09-04 20:20:00,-410,-7.5,47.5
-```
-
-**Strength of Schedule** (`matchup analysis`):
-```csv
-Team,Opponent,Rank,Points_Allowed_Avg
-Buffalo Bills,Miami Dolphins,1,18.2
-Kansas City Chiefs,Cincinnati Bengals,2,19.5
-```
-
----
-
-## 🏈 Strength of Schedule Features
-
-### Multi-Position Support
-The system automatically scrapes Strength of Schedule data for all fantasy-relevant positions:
-- **QB**: Quarterback matchup analysis
-- **RB**: Running back defensive rankings
-- **WR**: Wide receiver coverage analysis
-- **TE**: Tight end matchup data
-- **D/ST**: Defense/Special Teams rankings
-
-### Automated Workflow
-- **Separate Browser Windows**: Each position opens in its own Arc window for easy manual interaction
-- **Position-Specific Files**: Each position generates its own CSV file (sos-qb_latest.csv, sos-rb_latest.csv, etc.)
-- **Google Sheets Integration**: Uploads to separate tabs (SoSQB, SoSRB, SoSWr, SoSTE, SoSDef)
-- **Organized Storage**: All SOS files stored in downloads/sos/ directory
-
-### Usage
-```bash
-# Run full pipeline including SOS
-python3 run_all.py
-
-# Run SOS scraper individually
-cd scrapers/tffb_sos && python3 scraper.py
-
-# Run SOS for specific week
-cd scrapers/tffb_sos && python3 scraper.py --week 3
-```
-
----
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**Projections "Manual step required":**
-- Script opens page in Arc browser
-- Click "Projections" button with download icon
-- Select "Projections" from dropdown
-
-**Strength of Schedule "Manual step required":**
-- Script opens separate Arc window for each position (QB, RB, WR, TE, D/ST)
-- Select the correct position and week
-- Click "More" → "Download CSV"
-- Repeat for all 5 positions
-
-**DraftKings "Authentication required":**
-- Make sure you're logged into DraftKings
-- Browser opens CSV URL automatically
-
-**Google Sheets "Permission denied":**
-- Verify sheet is shared with service account email
-- Check credentials.json exists and is valid
-
-**"No CSV files found":**
-- Run individual scrapers first
-- Check ~/Downloads folder for files
-- Verify scrapers completed successfully
-
-### Getting Help
-1. **Check logs** - scripts show detailed progress
-2. **Run individual components** - isolate the issue
-3. **Verify credentials** - especially for Google Sheets
-4. **Check file permissions** - ensure downloads folder is writable
-
----
-
-## 🔧 Configuration
-
-All settings are centralized in `config.json`. Copy `config_template.json` to `config.json` and customize.
-
-### Google Sheets Integration
-```json
-{
-  "google_sheets": {
-    "sheet_id": "your-actual-sheet-id-here",
-    "credentials_file": "your-service-account-credentials.json",
-    "tab_mappings": {
-      "projections": "Projections",
-      "draftkings": "Salaries",
-      "nfl_odds": "Odds",
-      "sos_qb": "SoSQB",
-      "sos_rb": "SoSRB",
-      "sos_wr": "SoSWr",
-      "sos_te": "SoSTE",
-      "sos_dst": "SoSDef"
-    },
-    "update_behavior": {
-      "clear_before_upload": true,
-      "create_missing_tabs": true,
-      "batch_upload": true
-    }
-  }
-}
-```
-
-### Scraper Settings
-```json
-{
-  "scrapers": {
-    "nfl_odds": {
-      "default_week": 1,
-      "default_season": 2025
-    },
-    "projections": {
-      "browser_wait_time": 5
-    },
-    "tffb_sos": {
-      "browser_wait_time": 5,
-      "automation_delay": 1
-    }
-  }
-}
-```
-
-### Workflow Behavior
-```json
-{
-  "workflows": {
-    "upload_by_default": true,
-    "continue_on_scraper_failure": true,
-    "organize_files_after_scraping": true
-  }
-}
-```
-
-See `config_template.json` for all available options with detailed descriptions.
-
----
-
-## 🛡️ Security
-
-### Google Sheets Credentials
-- ✅ `credentials.json` automatically git-ignored
-- ✅ Service account has minimal permissions
-- ✅ Only accesses sheets you explicitly share
-- ✅ Your personal Google account never used
-
-### Best Practices
-1. **Never commit credentials** to version control
-2. **Use service accounts** for automation
-3. **Limit sheet access** to what's needed
-
----
-
-## 📋 Dependencies
-
-```
-selenium>=4.15.0       # Browser automation
-webdriver-manager>=4.0.0  # Chrome driver management
-requests>=2.25.0       # HTTP requests
-gspread>=5.12.0        # Google Sheets API
-google-auth>=2.23.0    # Google authentication
-```
-
----
-
-## 📈 Workflow Diagram
-
-```mermaid
-flowchart TD
-    A[Start] --> B{Workflow Type}
-    B -->|Complete| C[Run All Scrapers]
-    B -->|Quick| D[Run Projections & Odds]
-    B -->|Individual| E[Run Specific Scraper]
-    C --> F[Projections Scraper]
-    C --> G[DraftKings Scraper]
-    C --> H[NFL Odds Scraper]
-    C --> I[SOS Scraper]
-    D --> F
-    D --> H
-    E --> F
-    E --> G
-    E --> H
-    E --> I
-    F --> J[Download & Save CSV]
-    G --> J
-    H --> J
-    I --> J
-    J --> K{Upload to Sheets?}
-    K -->|Yes| L[Upload to Google Sheets]
-    K -->|No| M[Skip Upload]
-    L --> N[Finish]
-    M --> N
-```
-
----
-
-## 🏗️ Architecture Diagram
-
-```mermaid
-flowchart LR
-    subgraph "DFS Data Collection Suite"
-        direction TB
-        A[Run Scripts] --> B[Scrapers]
-        B --> C[Projections]
-        B --> D[DraftKings]
-        B --> E[NFL Odds]
-        B --> F[Strength of Schedule]
-        C --> G[Downloads/Projections]
-        D --> G
-        E --> G
-        F --> G
-        G --> H[File Organization]
-        H --> I[Upload Manifest]
-        H --> J[Google Sheets Upload]
-        J --> K[Google Sheets]
-    end
-    subgraph "External Systems"
-        L[Fantasy Footballers Site]
-        M[DraftKings Site]
-        N[Rotowire Odds]
-        O[TFFB SOS Tool]
-        P[Google Sheets API]
-    end
-    C -->|Scrapes| L
-    D -->|Scrapes| M
-    E -->|Scrapes| N
-    F -->|Scrapes| O
-    J -->|Uses| P
-```
-
----
-
-> **Ready to collect some DFS data? Run `python3 run_all.py` to get started! 🚀**
