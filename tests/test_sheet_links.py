@@ -5,6 +5,7 @@ from dfs.sheet_links import (
     edge_lookup_formula,
     link_edge_columns,
 )
+from dfs.sheets import column_letter
 
 
 class SpySheetsClient:
@@ -33,12 +34,33 @@ class SpySheetsClient:
         self.group_calls.append((tab_name, first_col_a1, last_col_a1))
 
 
+def test_already_linked_columns_positions_never_move():
+    # `dfs sheets link-edge` writes VLOOKUP formulas into PlayerPoolRaw/
+    # Player Pool/Lineups with a HARDCODED column-index integer per column
+    # (see edge_lookup_formula/_vlookup_index) -- those formulas are plain
+    # text, not live references to EDGE_COLUMNS, so if a column already
+    # linked this way ever moves position in EDGE_COLUMNS, every
+    # already-written formula for every column *after* it silently starts
+    # reading the wrong data. This actually happened once (LineMove was
+    # inserted between GameEnv and Stadium instead of appended at the very
+    # end) and was only caught by re-verifying resolved values on the live
+    # sheet, not by any test -- this pins the exact positions the current
+    # live sheet's already-written formulas depend on, so it can't happen
+    # silently again. If this test ever needs to change, `dfs sheets
+    # link-edge` must be re-run (after clearing the old linked block) on
+    # every sheet it's been applied to.
+    assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+
+
 def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # Leverage sits at EDGE_COLUMNS index 12; within the Name-anchored
     # range (starting at "Name", index 1) that's VLOOKUP column 12 -- i.e.
     # spreadsheet column M, matching what `dfs sheets format-edge` reports.
+    # The range end letter tracks len(EDGE_COLUMNS) automatically -- update
+    # it here if a column is ever added/removed from EDGE_COLUMNS.
     assert EDGE_COLUMNS.index("Leverage") == 12
-    assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == "=VLOOKUP($A5,EdgeRaw!$B:$T,12,false)"
+    end_col = column_letter(len(EDGE_COLUMNS) - 1)
+    assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == f"=VLOOKUP($A5,EdgeRaw!$B:${end_col},12,false)"
 
 
 def test_edge_lookup_formula_wraps_optional_columns_in_ifna():

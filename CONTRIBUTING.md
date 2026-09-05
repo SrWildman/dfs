@@ -94,6 +94,25 @@ reasonable. If your change inserts rows/columns anywhere, re-check every
 formula elsewhere that used to point past the insertion point, and verify
 with real output, not a read-through.
 
+The same bug class exists purely in Python, no Sheets API involved: `dfs
+sheets link-edge` (`sheet_links.py`) writes formulas into `PlayerPoolRaw`/
+`Player Pool`/`Lineups` with a **hardcoded column-index integer per
+EdgeRaw column**, computed from `derived.EDGE_COLUMNS`'s position list at
+the time `link-edge` runs. Those formulas are plain text, not live
+references -- if `EDGE_COLUMNS` is ever reordered, or a new column is
+inserted anywhere but the very end, every already-written formula for
+every column *after* the change silently starts reading the wrong data,
+with no error. This actually happened once (see `docs/ROADMAP.md`'s
+Phase 3 section) and was caught only by re-checking resolved values on
+the live sheet, not by a test that existed at the time. **Any new
+`EDGE_COLUMNS` entry must be appended at the very end**, never inserted
+among existing ones, until `dfs sheets link-edge` is re-run (after
+clearing the old linked block by hand) against every sheet it's been
+applied to. `test_sheet_links.py`'s
+`test_already_linked_columns_positions_never_move` pins the positions the
+live sheet currently depends on -- if it ever needs to change, that
+re-run has to happen first.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

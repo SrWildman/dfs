@@ -19,7 +19,7 @@ from the wrong file.
 | TFFB projections (`ProjPts`/`ProjOwn`/Ceiling/Vegas context) | Working -- authenticated capture of the DFS Pass optimizer's own API (`dfs auth tffb` once) |
 | Game context (stadium/roof/surface/rest/closing lines, `GamesRaw` tab) | Working -- free, unauthenticated `nflverse` schedule data |
 | Weather (wind/gusts/precip/temp for outdoor games, `WeatherRaw` tab) | Working -- free, unauthenticated Open-Meteo, no API key |
-| Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets format-edge`) |
+| Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/LineMove/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets format-edge`) |
 | Lineup export & validation | Working, against a manually-paired entries tab |
 | Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
@@ -95,6 +95,9 @@ dfs sheets format-edge             # one-time: freeze header + color scales on t
 dfs sheets link-edge                # one-time: append EdgeRaw's columns to Player Pool/Lineups/PlayerPoolRaw
 dfs sheets format-edge --sheet-id <id>  # apply to a different sheet (e.g. the template)
 
+dfs odds movement                  # which teams' lines moved since the last nfl_odds sync
+dfs odds movement --top 5
+
 dfs export -o lineups.csv          # validate + export DK bulk-upload CSV
 
 dfs lineups clear                  # wipe last week's typed lineups/picks (new sheet copy)
@@ -167,8 +170,11 @@ descending, so the top of the tab is the answer:
   place.
 - `Avail` -- DraftKings' own `Status` (`Q`/`OUT`/`IR`).
 - `Flag` -- the one column meant to be read at a glance, in priority order:
-  `OUT` (from `Avail`), `WIND` (`Wind` over ~20mph), `LEVERAGE`, `CHALK`,
-  or blank.
+  `OUT` (from `Avail`), `WIND` (`Wind` over ~20mph), `LINE↑`/`LINE↓`
+  (`LineMove` past a threshold), `LEVERAGE`, `CHALK`, or blank.
+- `LineMove` -- this player's team's Vegas-implied point total, change
+  since the previous sync (`dfs odds movement` shows the same diff for
+  every team). Blank until two `nfl_odds` syncs have happened this week.
 
 `dfs edge [--top N] [--position POS]` prints the same thing to the
 terminal without opening the sheet. `dfs sheets format-edge` is a one-time
@@ -176,16 +182,17 @@ setup command (frozen header row, color scales on `Leverage`/`CeilVal`/
 `GameEnv`) -- re-running it is safe, and `--sheet-id <id>` points it at a
 different sheet (e.g. the canonical template) instead of `config.toml`'s.
 
-`dfs sheets link-edge` goes further: it appends `EdgeRaw`'s columns (all
-of the above except `Val`, which already exists elsewhere) onto the far
-right of `Player Pool`, `Lineups`, **and** `PlayerPoolRaw` -- the tab
-those two already read from for Pos./Team/Pts/etc. -- via the same
-VLOOKUP-by-Name join, so the signal shows up right where lineups get
-built, not just in a separate tab. Always appends past whatever's
-currently there (never inserts -- see CONTRIBUTING.md's Phase 8
-postmortem), groups the new columns so they can be collapsed from the
-sheet UI when you want the narrower view back, and is safe to re-run (a
-tab that's already linked is left alone).
+`dfs sheets link-edge` goes further: it appends most of `EdgeRaw`'s
+columns (all except `Val`, which already exists elsewhere, and `LineMove`,
+added after `link-edge` was last run against the live sheet -- see
+CONTRIBUTING.md) onto the far right of `Player Pool`, `Lineups`, **and**
+`PlayerPoolRaw` -- the tab those two already read from for Pos./Team/
+Pts/etc. -- via the same VLOOKUP-by-Name join, so the signal shows up
+right where lineups get built, not just in a separate tab. Always appends
+past whatever's currently there (never inserts -- see CONTRIBUTING.md's
+Phase 8 postmortem), groups the new columns so they can be collapsed from
+the sheet UI when you want the narrower view back, and is safe to re-run
+(a tab that's already linked is left alone).
 
 **If you add a new tab like this to the pipeline, add it to the canonical
 template too** (the sheet linked above), not just your own weekly copy --

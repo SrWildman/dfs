@@ -21,6 +21,7 @@ from dfs import paths, store
 from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
 from dfs.derived import EDGE_COLUMNS
+from dfs.line_movement import LineMovementError, diff_odds
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
 from dfs.log import get_logger, setup_logging
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
@@ -61,10 +62,12 @@ sheets_app = typer.Typer(help="Inspect and manage the connected Google Sheet.")
 auth_app = typer.Typer(help="Log in to sites that require an authenticated session.")
 bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll tab.")
 lineups_app = typer.Typer(help="Manage the sheet's lineup-building tabs.")
+odds_app = typer.Typer(help="Inspect synced odds data.")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
 app.add_typer(bankroll_app, name="bankroll")
 app.add_typer(lineups_app, name="lineups")
+app.add_typer(odds_app, name="odds")
 
 console = Console()
 log = get_logger("cli")
@@ -360,6 +363,44 @@ def edge(
             f"{r['ProjOwn']:.1f}",
             f"{r['Leverage']:.1f}" if pd.notna(r["Leverage"]) else "-",
             f"{r['GameEnv']:.1f}" if pd.notna(r["GameEnv"]) else "-",
+            r["Flag"] or "",
+        )
+    console.print(table)
+
+
+@odds_app.command("movement")
+def odds_movement(
+    top: int = typer.Option(10, "--top", "-n", help="Number of biggest moves to show."),
+) -> None:
+    """Diff the two most recent nfl_odds syncs and show which teams'
+    lines moved the most -- what to check before re-running a full sync
+    on Sunday. Needs at least two `dfs sync`/`dfs sync --only nfl_odds`
+    runs this week; the first one has nothing to diff against yet."""
+    try:
+        previous = store.load_previous("nfl_odds")
+        current = store.load_current("nfl_odds")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+
+    try:
+        df = diff_odds(previous, current)
+    except LineMovementError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+
+    table = Table(title="Line movement since the last sync")
+    for col in ("Team", "Spread", "ΔSpread", "Total", "ΔTotal", "Team Implied", "ΔImplied", "Flag"):
+        table.add_column(col)
+    for _, r in df.head(top).iterrows():
+        table.add_row(
+            r["Team"],
+            f"{r['SpreadCur']:+.1f}" if pd.notna(r["SpreadCur"]) else "-",
+            f"{r['SpreadDelta']:+.1f}" if pd.notna(r["SpreadDelta"]) else "-",
+            f"{r['TotalCur']:.1f}" if pd.notna(r["TotalCur"]) else "-",
+            f"{r['TotalDelta']:+.1f}" if pd.notna(r["TotalDelta"]) else "-",
+            f"{r['TeamPointsCur']:.1f}" if pd.notna(r["TeamPointsCur"]) else "-",
+            f"{r['TeamPointsDelta']:+.1f}" if pd.notna(r["TeamPointsDelta"]) else "-",
             r["Flag"] or "",
         )
     console.print(table)

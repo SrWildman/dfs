@@ -35,6 +35,12 @@ the exact same EdgeRaw column set, just with those columns blank, because
 a tab whose column *count* changes week to week is the precondition for
 the Phase 8 formula-shift bug (see CONTRIBUTING.md) if it's ever pasted
 into a sheet with hardcoded column references.
+
+LineMove, added in Phase 3, joins `line_movement.diff_odds()`'s output by
+team code (`Abbr`, already DK-compatible -- `rotowire_odds.py`'s own
+`abbr` field) directly onto `Team`, no intermediate game lookup needed.
+Also optional, same blank-not-omitted rule as everything else in this
+paragraph.
 """
 
 from __future__ import annotations
@@ -42,6 +48,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+
+from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
 
 # Leverage = CeilPct - ProjOwn once real ownership exists; while every
 # player's ProjOwn reads 0 (TFFB hasn't computed ownership yet this week),
@@ -94,6 +102,16 @@ EDGE_COLUMNS = [
     "Wind",
     "Avail",
     "Flag",
+    # LineMove is appended at the very end, not inserted among the
+    # existing columns above -- `dfs sheets link-edge` already wrote
+    # formulas into PlayerPoolRaw/Player Pool/Lineups with hardcoded
+    # column-index integers pointing at Stadium/Roof/Wind/Avail/Flag's
+    # *positions*. Inserting a column before them shifts every later
+    # column's position without updating those already-written formulas'
+    # hardcoded integers -- the exact Phase 8 bug class (see
+    # CONTRIBUTING.md). Anything new added here must go at the end until
+    # `dfs sheets link-edge` is re-run against a cleared block.
+    "LineMove",
 ]
 
 
@@ -157,6 +175,15 @@ def _attach_weather(merged: pd.DataFrame, weather: pd.DataFrame | None) -> pd.Da
     return merged
 
 
+def _attach_line_movement(merged: pd.DataFrame, line_movement: pd.DataFrame | None) -> pd.DataFrame:
+    if line_movement is None or line_movement.empty:
+        merged["LineMove"] = pd.NA
+        return merged
+    delta_by_team = line_movement.set_index("Abbr")["TeamPointsDelta"]
+    merged["LineMove"] = merged["Team"].map(delta_by_team)
+    return merged
+
+
 def _dst_nickname(full_team_name: str) -> str:
     """Mirrors sources/tffb_projections.py's `_dst_nickname` -- duplicated
     rather than imported for the same reason as WIND_FLAG_THRESHOLD_MPH
@@ -171,6 +198,10 @@ def _flag_for_row(row: pd.Series) -> str:
         return "OUT"
     if pd.notna(row["Wind"]) and row["Wind"] >= WIND_FLAG_THRESHOLD_MPH:
         return "WIND"
+    if pd.notna(row["LineMove"]) and row["LineMove"] >= LINE_MOVE_FLAG_THRESHOLD:
+        return "LINE↑"
+    if pd.notna(row["LineMove"]) and row["LineMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
+        return "LINE↓"
     is_real = row["LevBasis"] == LEV_BASIS_REAL
     threshold = LEVERAGE_FLAG_THRESHOLD_REAL if is_real else LEVERAGE_FLAG_THRESHOLD_PROXY
     if pd.notna(row["Leverage"]) and row["Leverage"] >= threshold:
@@ -183,9 +214,9 @@ def _flag_for_row(row: pd.Series) -> str:
 def build_edge_frame(
     projections: pd.DataFrame,
     salaries: pd.DataFrame,
-    odds: pd.DataFrame | None = None,  # accepted for future use, see module docstring
     games: pd.DataFrame | None = None,
     weather: pd.DataFrame | None = None,
+    line_movement: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -194,9 +225,10 @@ def build_edge_frame(
     `salaries` is the raw draftkings.csv shape (columns include `ID`,
     `Salary`, `Status`); `projections` is the raw projections.csv shape
     (columns include `Id`, `ProjPts`, `ProjOwn`, `Ceiling`, `OU`, `Spread`,
-    `Game`). `games`/`weather` are the GamesRaw/WeatherRaw shapes from
-    `nflverse_games.py`/`weather.py` -- both optional; see module docstring
-    for why a missing one blanks columns rather than omitting them.
+    `Game`). `games`/`weather`/`line_movement` are the GamesRaw/WeatherRaw
+    shapes from `nflverse_games.py`/`weather.py`, and `line_movement.
+    diff_odds()`'s output -- all three optional; see module docstring for
+    why a missing one blanks columns rather than omitting them.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -236,6 +268,7 @@ def build_edge_frame(
     merged = _attach_games(merged, games)
     merged = _attach_weather(merged, weather)
     merged = merged.drop(columns="GameId")
+    merged = _attach_line_movement(merged, line_movement)
 
     merged["Avail"] = merged["Status"].fillna("")
     merged = merged.drop(columns="Status")

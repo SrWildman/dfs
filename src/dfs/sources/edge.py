@@ -1,5 +1,6 @@
-"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, Avail, Flag)
-computed locally from already-synced sources -- no network call of its own.
+"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, LineMove, Avail,
+Flag) computed locally from already-synced sources -- no network call of
+its own.
 
 Registered last in `SOURCES` (see `sources/__init__.py`) so a full `dfs
 sync` computes this off the CSVs the earlier sources in that same run just
@@ -16,6 +17,7 @@ import pandas as pd
 
 from dfs import store
 from dfs.derived import build_edge_frame
+from dfs.line_movement import LineMovementError, diff_odds
 from dfs.log import get_logger
 from dfs.sources.base import Source, SyncContext
 
@@ -33,6 +35,22 @@ def _try_load_current(source_name: str) -> pd.DataFrame | None:
         return None
 
 
+def _try_diff_odds() -> pd.DataFrame | None:
+    """Line movement needs two nfl_odds snapshots -- None (not raised) on
+    the first sync of the week, when only one exists yet."""
+    try:
+        previous = store.load_previous("nfl_odds")
+        current = store.load_current("nfl_odds")
+    except FileNotFoundError:
+        log.info("not enough nfl_odds snapshots yet for line movement -- edge will compute without it")
+        return None
+    try:
+        return diff_odds(previous, current)
+    except LineMovementError as e:
+        log.warning("line movement diff failed: %s -- edge will compute without it", e)
+        return None
+
+
 class EdgeSource(Source):
     name = "edge"
 
@@ -42,8 +60,11 @@ class EdgeSource(Source):
         salaries = store.load_current("draftkings")
         games = _try_load_current("nflverse_games")
         weather = _try_load_current("weather")
+        line_movement = _try_diff_odds()
 
-        result = build_edge_frame(projections, salaries, games=games, weather=weather)
+        result = build_edge_frame(
+            projections, salaries, games=games, weather=weather, line_movement=line_movement
+        )
         if result.unmatched_names:
             log.warning(
                 "%d projected player(s) had no DraftKings salary match on the current "

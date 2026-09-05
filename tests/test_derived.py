@@ -328,3 +328,45 @@ def test_non_dst_names_are_left_untouched():
 
     row = build_edge_frame(proj, sal).frame.iloc[0]
     assert row["Name"] == "Ja'Marr Chase"
+
+
+def test_line_move_blank_when_not_provided():
+    proj = _projections([{"Id": "1", "Name": "P", "Team": "DET"}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert pd.isna(row["LineMove"])
+
+
+def test_line_move_joined_by_team_and_flagged():
+    proj = _projections(
+        [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
+    )
+    sal = _salaries([{"ID": "1"}])
+    line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": 2.5}])
+
+    row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
+    assert row["LineMove"] == 2.5
+    assert row["Flag"] == "LINE↑"
+
+
+def test_line_move_down_flag():
+    proj = _projections(
+        [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
+    )
+    sal = _salaries([{"ID": "1"}])
+    line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": -2.5}])
+
+    row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
+    assert row["Flag"] == "LINE↓"
+
+
+def test_out_flag_takes_priority_over_line_move_flag():
+    proj = _projections(
+        [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
+    )
+    sal = _salaries([{"ID": "1", "Status": "OUT"}])
+    line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": 2.5}])
+
+    row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
+    assert row["Flag"] == "OUT"
