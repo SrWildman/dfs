@@ -23,6 +23,8 @@ def clear_old_csvs() -> bool:
         project_root / "downloads" / "draftkings",
         project_root / "downloads" / "fantasy_footballers",
         project_root / "downloads" / "nfl_odds",
+        project_root / "downloads" / "projections",
+        project_root / "downloads" / "sos",
     ]
 
     # Process each target directory

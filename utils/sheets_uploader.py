@@ -90,7 +90,39 @@ class SheetsUploader:
                 print(f"⏭️  Skipping {tab_name}: CSV file not found ({csv_path.name})")
                 return False
 
-            # Read CSV file
+            # Read CSV file - handle multi-row headers for odds data
+            if 'odds' in csv_path.name.lower():
+                # Odds CSV has 2-row header, read as-is and upload raw
+                import csv
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    data = list(reader)
+                
+                # Upload directly without pandas processing
+                try:
+                    worksheet = self.sheet.worksheet(tab_name)
+                except gspread.WorksheetNotFound:
+                    print(f"📋 Creating new tab: {tab_name}")
+                    worksheet = self.sheet.add_worksheet(title=tab_name, rows=1000, cols=26)
+                
+                worksheet.clear()
+                # Upload data with USER_ENTERED to parse numbers but preserve formatting
+                worksheet.update(range_name='A1', values=data, value_input_option='USER_ENTERED')
+                
+                # Apply number formatting to data columns (C through I, starting from row 3)
+                if len(data) > 2:
+                    num_rows = len(data)
+                    # Format columns C-I (Moneyline through Over-Under columns) as numbers
+                    worksheet.format('C3:I' + str(num_rows), {
+                        'numberFormat': {
+                            'type': 'NUMBER',
+                            'pattern': '0.0#'
+                        }
+                    })
+                
+                print(f"✅ {tab_name}: Uploaded {len(data)-2} data rows with number formatting")
+                return True
+            
             df = pd.read_csv(csv_path)
 
             if df.empty:

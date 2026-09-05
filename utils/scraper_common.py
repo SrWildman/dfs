@@ -15,7 +15,7 @@ from typing import List
 # Configuration constants
 DOWNLOAD_RECENT_WINDOW = 120  # Seconds window for recent file detection
 BROWSER_WAIT_TIME = 5  # Seconds to wait for page load
-FILE_CHECK_TIMEOUT = 3  # Seconds to wait for file download
+FILE_CHECK_TIMEOUT = 5  # Seconds to wait for file download
 DEFAULT_TIMEOUT = 30  # Default timeout for API requests
 
 # NFL Season constants - update each year

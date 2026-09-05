@@ -76,7 +76,7 @@ def scrape_position(position_name, position_code, week_number, auto_skip=False):
         print(f"   ⏳ Waiting for {position_name} download to complete...")
         time.sleep(FILE_CHECK_TIMEOUT)
     else:
-        time.sleep(2)  # Brief wait in auto-skip mode
+        time.sleep(4)  # Brief wait in auto-skip mode
 
     final_files = check_downloads()
     new_files = [f for f in final_files if f not in initial_files]

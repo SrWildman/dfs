@@ -35,19 +35,38 @@ class NFLOddsScraper:
         self.output_dir = Path(output_dir) if output_dir else Path.home() / "Downloads"
         self.base_url = "https://www.rotowire.com/betting/nfl/tables/nfl-games-by-market.php"
 
+    def _get_current_nfl_season(self):
+        """
+        Determine the current NFL season year.
+        
+        The NFL season spans two calendar years (e.g., 2025-2026 season is called "2025").
+        - September through December: use current year
+        - January through August: use previous year (playoffs/offseason)
+        
+        Returns:
+            int: The current NFL season year
+        """
+        now = datetime.now()
+        # If we're in Jan-Jul, the season is the previous calendar year
+        # If we're in Aug-Dec, the season is the current calendar year
+        if now.month <= 7:
+            return now.year - 1
+        else:
+            return now.year
+
     def fetch_odds_data(self, week=1, season=None):
         """
         Fetch NFL odds data from Rotowire API.
 
         Args:
             week (int): NFL week number (1-18)
-            season (int, optional): NFL season year. Defaults to current year
+            season (int, optional): NFL season year. Defaults to current season year
 
         Returns:
             dict or None: JSON response from API, or None if request failed
         """
         if season is None:
-            season = datetime.now().year
+            season = self._get_current_nfl_season()
 
         params = {
             'week': str(week),
@@ -178,21 +197,21 @@ class NFLOddsScraper:
         Args:
             odds_data (list): List of formatted odds dictionaries
             week (int): NFL week number
-            season (int, optional): NFL season year. Defaults to current year
+            season (int, optional): NFL season year. Defaults to current season year
 
         Returns:
             str or None: Path to saved CSV file, or None if save failed
         """
         if season is None:
-            season = datetime.now().year
+            season = self._get_current_nfl_season()
 
         filename = self.output_dir / f"NFL_Odds_Week_{week}_{season}_DraftKings.csv"
 
         try:
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 # Write header matching required format
-                csvfile.write(',,Win,Cover,Total Points,Total Touchdowns,Team Points,Team TDs,Team TDs\n')
-                csvfile.write('Team,Date,Moneyline,Spread,Over-Under,Over-Under,Over-Under,Over-Under,Over-Under\n')
+                csvfile.write(",,Win,Cover,Total Points,Total Touchdowns,Team Points,Team TDs,Team TDs\n")
+                csvfile.write("Team,Date,Moneyline,Spread,Over-Under,Over-Under,Over-Under,Over-Under,Over-Under\n")
 
                 # Write data rows
                 for data in odds_data:
@@ -221,14 +240,14 @@ class NFLOddsScraper:
 
         Args:
             week (int): NFL week number (1-18)
-            season (int, optional): NFL season year. Defaults to current year
+            season (int, optional): NFL season year. Defaults to current season year
             verbose (bool): Whether to display detailed team-by-team odds
 
         Returns:
             str or None: Path to saved CSV file, or None if scrape failed
         """
         if season is None:
-            season = datetime.now().year
+            season = self._get_current_nfl_season()
 
         print(f"🏈 NFL ODDS SCRAPER - Week {week}, {season} Season")
         print("=" * 50)

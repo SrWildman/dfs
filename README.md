@@ -1,8 +1,27 @@
 # DFS Data Collection Suite
 
-Google Sheets Template: https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/
+> **Google Sheets Template:** https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/
 
 Automated data collection pipeline for Daily Fantasy Sports (DFS) analysis. Collects player projections, salaries, and betting odds, then organizes and uploads to Google Sheets.
+
+---
+
+## Table of Contents
+- [🚀 Quick Start](#-quick-start)
+- [📊 Data Sources](#-data-sources)
+- [🏗️ Project Structure](#-project-structure)
+- [📋 Setup](#-setup)
+- [🔧 Usage](#-usage)
+- [🖥️ Tauri Desktop UI](#-tauri-desktop-ui)
+- [📤 Google Sheets Integration](#-google-sheets-integration)
+- [📂 Data Output](#-data-output)
+- [🏈 Strength of Schedule Features](#-strength-of-schedule-features)
+- [🔍 Troubleshooting](#-troubleshooting)
+- [🔧 Configuration](#-configuration)
+- [🛡️ Security](#-security)
+- [📋 Dependencies](#-dependencies)
+
+---
 
 ## 🚀 Quick Start
 
@@ -17,6 +36,8 @@ python3 run_update.py
 python3 run_all.py --no-upload
 ```
 
+---
+
 ## 📊 Data Sources
 
 | Source | Data Type | Update Frequency | Output |
@@ -26,9 +47,11 @@ python3 run_all.py --no-upload
 | **NFL Odds** | Betting lines | Multiple times daily | Spreads, totals, moneylines |
 | **Strength of Schedule** | Matchup analysis | Weekly | Position-specific defensive rankings |
 
+---
+
 ## 🏗️ Project Structure
 
-```
+```bash
 dfs/
 ├── 🚀 run_all.py                   # Complete workflow (all 4 scrapers + upload)
 ├── ⚡ run_update.py                 # Quick workflow (Projections + odds + upload)
@@ -54,6 +77,8 @@ dfs/
     └── tffb_sos/
 ```
 
+---
+
 ## 📋 Setup
 
 ### 1. Install Dependencies
@@ -63,6 +88,8 @@ pip3 install -r requirements.txt
 
 ### 2. Google Sheets Integration (Optional)
 See [`docs/SHEETS_SETUP.md`](docs/SHEETS_SETUP.md) for complete setup guide.
+
+---
 
 ## 🔧 Usage
 
@@ -107,6 +134,61 @@ cd scrapers/nfl_odds && python3 nfl_odds_scraper.py
 cd scrapers/tffb_sos && python3 scraper.py
 ```
 
+---
+
+## 🖥️ Tauri Desktop UI
+
+A modern desktop application is available to manage this DFS data collection suite with a graphical interface. The Tauri + Vue.js application provides:
+
+- ✅ **Visual scraper management** - Configure, run, and monitor scrapers
+- ✅ **Google Sheets connection management** - Test connections, configure tab mappings
+- ✅ **Workflow scheduling** - Set up automated data collection workflows
+- ✅ **System notifications** - Get alerts for job completions and errors
+- ✅ **Dashboard overview** - View system status at a glance
+
+### Location
+The UI source code is located in the [`tauri-app/`](./tauri-app/) directory.
+
+### Prerequisites
+- Rust (latest stable)
+- Node.js (v18+)
+- Python 3.x (for the existing scrapers)
+- Google Sheets API credentials (service account JSON)
+
+### Setup
+1. Ensure the Python dependencies are installed (see [Setup](#-setup) above)
+2. Navigate to the UI directory:
+   ```bash
+   cd tauri-app
+   ```
+3. Install Node.js dependencies:
+   ```bash
+   npm install
+   ```
+4. Verify Rust is installed:
+   ```bash
+   rustc --version
+   ```
+5. Start the application in development mode:
+   ```bash
+   npm run dev
+   ```
+6. For production builds:
+   ```bash
+   npm run build
+   ```
+
+### Features
+- **Scraper Management**: View and control all scrapers with real-time output
+- **Google Sheets Management**: Configure connections, test authentication, manage tab mappings
+- **Scheduling Interface**: Cron-like interface for automating workflows
+- **System Tray**: Run in background with notifications
+- **Configuration Persistence**: Settings are saved and reused
+
+For detailed documentation, see the [`tauri-app/README.md`](./tauri-app/README.md).
+
+---
+
 ## 📤 Google Sheets Integration
 
 ### Features
@@ -134,10 +216,12 @@ cd scrapers/tffb_sos && python3 scraper.py
 3. **Share your sheet**: With the service account email
 4. **Set sheet ID**: Environment variable or edit `upload.py`
 
+---
+
 ## 📂 Data Output
 
 ### File Organization
-```
+```bash
 downloads/
 ├── projections/
 │   ├── projections_latest.csv              # Always current
@@ -168,7 +252,7 @@ Id,Name,Position,Team,ProjPts,ProjOwn
 **DraftKings** (`salaries`):
 ```csv
 Position,Name + ID,Name,ID,Roster Position,Salary,Game Info,TeamAbbrev
-QB,Josh Allen (123456),Josh Allen,123456,QB,8000,BUF@MIA 01/07 1:00PM ET,BUF
+QB,Josh Allen (123456),Josh Allen,123456,QB,8000,BUF@MIAUF@MIA 01/07 1:00PM ET,BUF
 ```
 
 **NFL Odds** (`betting lines`):
@@ -184,6 +268,8 @@ Team,Opponent,Rank,Points_Allowed_Avg
 Buffalo Bills,Miami Dolphins,1,18.2
 Kansas City Chiefs,Cincinnati Bengals,2,19.5
 ```
+
+---
 
 ## 🏈 Strength of Schedule Features
 
@@ -212,6 +298,8 @@ cd scrapers/tffb_sos && python3 scraper.py
 # Run SOS for specific week
 cd scrapers/tffb_sos && python3 scraper.py --week 3
 ```
+
+---
 
 ## 🔍 Troubleshooting
 
@@ -242,18 +330,18 @@ cd scrapers/tffb_sos && python3 scraper.py --week 3
 - Verify scrapers completed successfully
 
 ### Getting Help
-
 1. **Check logs** - scripts show detailed progress
 2. **Run individual components** - isolate the issue
 3. **Verify credentials** - especially for Google Sheets
 4. **Check file permissions** - ensure downloads folder is writable
 
+---
+
 ## 🔧 Configuration
 
-### Configuration File
-All settings are centralized in `config.json`. Key sections include:
+All settings are centralized in `config.json`. Copy `config_template.json` to `config.json` and customize.
 
-**Google Sheets Integration:**
+### Google Sheets Integration
 ```json
 {
   "google_sheets": {
@@ -268,12 +356,17 @@ All settings are centralized in `config.json`. Key sections include:
       "sos_wr": "SoSWr",
       "sos_te": "SoSTE",
       "sos_dst": "SoSDef"
+    },
+    "update_behavior": {
+      "clear_before_upload": true,
+      "create_missing_tabs": true,
+      "batch_upload": true
     }
   }
 }
 ```
 
-**Scraper Settings:**
+### Scraper Settings
 ```json
 {
   "scrapers": {
@@ -292,17 +385,20 @@ All settings are centralized in `config.json`. Key sections include:
 }
 ```
 
-**Workflow Behavior:**
+### Workflow Behavior
 ```json
 {
   "workflows": {
     "upload_by_default": true,
-    "continue_on_scraper_failure": true
+    "continue_on_scraper_failure": true,
+    "organize_files_after_scraping": true
   }
 }
 ```
 
 See `config_template.json` for all available options with detailed descriptions.
+
+---
 
 ## 🛡️ Security
 
@@ -317,6 +413,8 @@ See `config_template.json` for all available options with detailed descriptions.
 2. **Use service accounts** for automation
 3. **Limit sheet access** to what's needed
 
+---
+
 ## 📋 Dependencies
 
 ```
@@ -329,4 +427,71 @@ google-auth>=2.23.0    # Google authentication
 
 ---
 
-**Ready to collect some DFS data? Run `python3 run_all.py` to get started! 🚀**
+## 📈 Workflow Diagram
+
+```mermaid
+flowchart TD
+    A[Start] --> B{Workflow Type}
+    B -->|Complete| C[Run All Scrapers]
+    B -->|Quick| D[Run Projections & Odds]
+    B -->|Individual| E[Run Specific Scraper]
+    C --> F[Projections Scraper]
+    C --> G[DraftKings Scraper]
+    C --> H[NFL Odds Scraper]
+    C --> I[SOS Scraper]
+    D --> F
+    D --> H
+    E --> F
+    E --> G
+    E --> H
+    E --> I
+    F --> J[Download & Save CSV]
+    G --> J
+    H --> J
+    I --> J
+    J --> K{Upload to Sheets?}
+    K -->|Yes| L[Upload to Google Sheets]
+    K -->|No| M[Skip Upload]
+    L --> N[Finish]
+    M --> N
+```
+
+---
+
+## 🏗️ Architecture Diagram
+
+```mermaid
+flowchart LR
+    subgraph "DFS Data Collection Suite"
+        direction TB
+        A[Run Scripts] --> B[Scrapers]
+        B --> C[Projections]
+        B --> D[DraftKings]
+        B --> E[NFL Odds]
+        B --> F[Strength of Schedule]
+        C --> G[Downloads/Projections]
+        D --> G
+        E --> G
+        F --> G
+        G --> H[File Organization]
+        H --> I[Upload Manifest]
+        H --> J[Google Sheets Upload]
+        J --> K[Google Sheets]
+    end
+    subgraph "External Systems"
+        L[Fantasy Footballers Site]
+        M[DraftKings Site]
+        N[Rotowire Odds]
+        O[TFFB SOS Tool]
+        P[Google Sheets API]
+    end
+    C -->|Scrapes| L
+    D -->|Scrapes| M
+    E -->|Scrapes| N
+    F -->|Scrapes| O
+    J -->|Uses| P
+```
+
+---
+
+> **Ready to collect some DFS data? Run `python3 run_all.py` to get started! 🚀**

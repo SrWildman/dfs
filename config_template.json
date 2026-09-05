@@ -4,7 +4,7 @@
   
   "google_sheets": {
     "_description": "Google Sheets integration settings",
-    "sheet_id": "1sXCpdqzm0WNBf6LIyaHzs2qPj3RdzxwfYu6q1R8ptRU",
+    "sheet_id": "1HtE7q3d6bENmrkbTjq4_5SvGfaXsPlRq1-4r9UGcEgc",
     "credentials_file": "credentials.json",
     "tab_mappings": {
       "_description": "Maps data sources to Google Sheets tab names",
