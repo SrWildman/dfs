@@ -20,13 +20,37 @@ from rich.table import Table
 from dfs import paths, store
 from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
+from dfs.derived import EDGE_COLUMNS
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
 from dfs.log import get_logger, setup_logging
-from dfs.sheets import SheetsClient, SheetsError
+from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
+from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
-from dfs.weekly_reset import clear_previous_week
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS, clear_previous_week
+
+# EdgeRaw columns that get a color-scale conditional format by
+# `dfs sheets format-edge`, keyed to the (min, mid, max) colors of the
+# gradient -- red -> yellow -> green for "worth a look" columns.
+_EDGE_COLOR_SCALE_COLUMNS = {
+    "Leverage": (
+        {"red": 0.96, "green": 0.80, "blue": 0.80},
+        {"red": 1.0, "green": 1.0, "blue": 0.80},
+        {"red": 0.72, "green": 0.88, "blue": 0.72},
+    ),
+    "CeilVal": (
+        {"red": 0.96, "green": 0.80, "blue": 0.80},
+        {"red": 1.0, "green": 1.0, "blue": 0.80},
+        {"red": 0.72, "green": 0.88, "blue": 0.72},
+    ),
+    "GameEnv": (
+        {"red": 0.96, "green": 0.80, "blue": 0.80},
+        {"red": 1.0, "green": 1.0, "blue": 0.80},
+        {"red": 0.72, "green": 0.88, "blue": 0.72},
+    ),
+}
+_EDGE_FORMAT_LAST_ROW = 1000  # matches write_tab's default worksheet sizing
 
 app = typer.Typer(
     name="dfs",
@@ -136,6 +160,105 @@ def sheets_inspect() -> None:
     console.print(table)
 
 
+@sheets_app.command("format-edge")
+def sheets_format_edge(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Format a different sheet instead of config.toml's -- e.g. the canonical "
+        "weekly template, so new copies already have EdgeRaw formatted. See "
+        "CONTRIBUTING.md's 'Adding a new data source' checklist.",
+    ),
+    tab: str = typer.Option(None, "--tab", help="Tab name (default: config.toml's 'edge' tab mapping)."),
+) -> None:
+    """One-time formatting for the EdgeRaw tab: frozen header row and
+    color scales on Leverage/CeilVal/GameEnv. Re-running just re-applies
+    the same rules -- safe, since the tab holds no formulas of its own.
+    Run `dfs sync --only edge` at least once first so the tab exists.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    tab_name = tab or cfg.google_sheets.tab_mappings.get("edge")
+    if not tab_name:
+        console.print("[red]No tab mapped for 'edge' in config.toml, and no --tab given.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Formatting {tab_name!r} in: [bold]{title}[/bold]\n{url}\n")
+
+        client.freeze_header(tab_name)
+        console.print("[green]OK[/green] froze header row")
+
+        for column_name, (min_color, mid_color, max_color) in _EDGE_COLOR_SCALE_COLUMNS.items():
+            col = column_letter(EDGE_COLUMNS.index(column_name))
+            client.add_color_scale(
+                tab_name,
+                f"{col}2:{col}{_EDGE_FORMAT_LAST_ROW}",
+                min_color=min_color,
+                mid_color=mid_color,
+                max_color=max_color,
+            )
+            console.print(f"[green]OK[/green] color scale on {column_name} ({col})")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+@sheets_app.command("link-edge")
+def sheets_link_edge(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Link a different sheet instead of config.toml's -- e.g. the canonical "
+        "weekly template, so new copies already have EdgeRaw's columns linked in.",
+    ),
+) -> None:
+    """One-time setup: append EdgeRaw's derived columns (Leverage, Flag,
+    etc.) onto the far right of Player Pool, Lineups, AND PlayerPoolRaw
+    (the hub tab those two already VLOOKUP against for Pos./Team/Pts/etc.),
+    via the same VLOOKUP-by-Name join. Append-only: never inserts, so
+    nothing already there shifts (see CONTRIBUTING.md's Phase 8 postmortem
+    on why that matters). The new columns are grouped so they can be
+    collapsed from the sheet UI (the little +/- control above the column
+    letters) when you want the older, narrower view back. Safe to re-run --
+    a tab that's already linked is left alone, not duplicated.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(
+            f"Linking EdgeRaw into Player Pool/Lineups/PlayerPoolRaw in: [bold]{title}[/bold]\n{url}\n"
+        )
+
+        header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
+        results = [
+            link_edge_columns(client, PLAYER_POOL_RAW_TAB, PLAYER_POOL_RAW_BLOCK, edge_tab),
+            link_edge_columns(client, cfg.lineups.player_pool_tab, PLAYER_POOL_NAME_BLOCKS, edge_tab),
+            link_edge_columns(
+                client,
+                cfg.lineups.builder_tab,
+                LINEUPS_NAME_BLOCKS,
+                edge_tab,
+                header_repeats_at=header_repeats_at,
+            ),
+        ]
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
 @app.command()
 def sync(
     only: str = typer.Option(None, "--only", help="Comma-separated source names to sync (default: all)."),
@@ -187,6 +310,59 @@ def sync(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def edge(
+    top: int = typer.Option(20, "--top", "-n", help="Number of leverage plays to show."),
+    position: str = typer.Option(None, "--position", "-p", help="Filter to one position (e.g. RB)."),
+) -> None:
+    """Print the top leverage plays from the last `dfs sync` locally --
+    no Sheets round-trip, quick look without opening the sheet."""
+    try:
+        df = store.load_current("edge")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+
+    if position:
+        df = df[df["Position"].str.upper() == position.upper()]
+        if df.empty:
+            console.print(f"[yellow]No players at position {position!r}.[/yellow]")
+            raise typer.Exit(code=1)
+
+    basis = df["LevBasis"].iloc[0] if len(df) else "?"
+    console.print(f"Leverage basis: [bold]{basis}[/bold] (real ProjOwn until TFFB computes it midweek)\n")
+
+    table = Table(title="Top leverage plays")
+    columns = (
+        "Name",
+        "Position",
+        "Team",
+        "Opp",
+        "Salary",
+        "ProjPts",
+        "ProjOwn",
+        "Leverage",
+        "GameEnv",
+        "Flag",
+    )
+    for col in columns:
+        table.add_column(col)
+    for _, r in df.head(top).iterrows():
+        table.add_row(
+            r["Name"],
+            r["Position"],
+            r["Team"],
+            str(r["Opp"]),
+            str(r["Salary"]),
+            f"{r['ProjPts']:.1f}",
+            f"{r['ProjOwn']:.1f}",
+            f"{r['Leverage']:.1f}" if pd.notna(r["Leverage"]) else "-",
+            f"{r['GameEnv']:.1f}" if pd.notna(r["GameEnv"]) else "-",
+            r["Flag"] or "",
+        )
+    console.print(table)
 
 
 @app.command()

@@ -11,13 +11,23 @@ from __future__ import annotations
 
 from dfs.sources.base import Source
 from dfs.sources.dk_salaries import DkSalariesSource
+from dfs.sources.edge import EdgeSource
+from dfs.sources.nflverse_games import NflverseGamesSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
 from dfs.sources.tffb_projections import TffbProjectionsSource
+from dfs.sources.weather import WeatherSource
 
+# Order matters: run_sync iterates SOURCES in this insertion order.
+# "weather" reads the GamesRaw CSV "nflverse_games" just saved, and "edge"
+# reads the CSVs "projections"/"draftkings" just saved -- both must run
+# after their inputs.
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
     "projections": TffbProjectionsSource(),
+    "nflverse_games": NflverseGamesSource(),
+    "weather": WeatherSource(),
+    "edge": EdgeSource(),
 }
 
 

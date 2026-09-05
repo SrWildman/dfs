@@ -15,7 +15,7 @@ import json
 from dataclasses import dataclass
 
 import gspread
-from gspread.utils import ValueInputOption
+from gspread.utils import ValueInputOption, a1_range_to_grid_range
 
 from dfs.config import GoogleSheetsConfig
 from dfs.log import get_logger
@@ -26,6 +26,17 @@ log = get_logger("sheets")
 
 class SheetsError(Exception):
     """Raised for any Google Sheets auth/access problem."""
+
+
+def column_letter(index: int) -> str:
+    """0-indexed column position -> spreadsheet column letters (0 -> "A",
+    26 -> "AA")."""
+    letters = ""
+    n = index + 1
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
 
 
 @dataclass
@@ -157,3 +168,80 @@ class SheetsClient:
         except gspread.WorksheetNotFound as e:
             raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
         ws.update(range_name=a1_range, values=rows, value_input_option=ValueInputOption.user_entered)
+
+    def freeze_header(self, tab_name: str, rows: int = 1) -> None:
+        """Freeze the top `rows` row(s) so the header stays visible on scroll."""
+        sheet = self._open()
+        try:
+            ws = sheet.worksheet(tab_name)
+        except gspread.WorksheetNotFound as e:
+            raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
+        ws.freeze(rows=rows)
+
+    def add_color_scale(
+        self,
+        tab_name: str,
+        a1_range: str,
+        *,
+        min_color: dict,
+        mid_color: dict,
+        max_color: dict,
+    ) -> None:
+        """Apply a 3-point color-scale conditional format to `a1_range` --
+        like `update_range`/`clear_ranges`, this only ever touches the range
+        it's given, so it's safe to call repeatedly (each call adds one more
+        rule; call it once per tab as part of one-time setup, not per sync).
+        Colors are {"red": .., "green": .., "blue": ..} floats in 0-1."""
+        sheet = self._open()
+        try:
+            ws = sheet.worksheet(tab_name)
+        except gspread.WorksheetNotFound as e:
+            raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "addConditionalFormatRule": {
+                            "rule": {
+                                "ranges": [grid_range],
+                                "gradientRule": {
+                                    "minpoint": {"color": min_color, "type": "MIN"},
+                                    "midpoint": {"color": mid_color, "type": "PERCENTILE", "value": "50"},
+                                    "maxpoint": {"color": max_color, "type": "MAX"},
+                                },
+                            },
+                            "index": 0,
+                        }
+                    }
+                ]
+            }
+        )
+
+    def group_columns(self, tab_name: str, first_col_a1: str, last_col_a1: str) -> None:
+        """Group a column range so it can be collapsed/expanded from the
+        sheet UI (Data > Group columns) -- a display convenience only, does
+        not touch cell values or formatting. `first_col_a1`/`last_col_a1`
+        are plain column letters (e.g. "P", "Y"), not full A1 refs."""
+        sheet = self._open()
+        try:
+            ws = sheet.worksheet(tab_name)
+        except gspread.WorksheetNotFound as e:
+            raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
+        grid_range = a1_range_to_grid_range(f"{first_col_a1}1:{last_col_a1}1", ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "addDimensionGroup": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": grid_range["startColumnIndex"],
+                                "endIndex": grid_range["endColumnIndex"],
+                            }
+                        }
+                    }
+                ]
+            }
+        )

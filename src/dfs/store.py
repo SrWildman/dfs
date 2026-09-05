@@ -41,6 +41,24 @@ def load_current(source_name: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def load_previous(source_name: str) -> pd.DataFrame:
+    """The snapshot before the most recent one -- i.e. what `load_current`
+    would have returned right before the last sync. Snapshot filenames are
+    UTC timestamps (`_now_stamp`), so sorting them as strings already sorts
+    them chronologically. Used for line-movement diffing: this needs no new
+    storage, since `save()` has always kept every snapshot under
+    `data/raw/<source>/`."""
+    raw_dir = RAW_DIR / source_name
+    snapshots = sorted(raw_dir.glob("*.csv")) if raw_dir.exists() else []
+    if len(snapshots) < 2:
+        raise FileNotFoundError(
+            f"Only {len(snapshots)} synced snapshot(s) of {source_name!r} on disk -- "
+            "need at least two (sync again later to get a second) before there's a "
+            "previous one to diff against."
+        )
+    return pd.read_csv(snapshots[-2])
+
+
 def read_manifest() -> dict:
     if not MANIFEST_FILE.exists():
         return {}

@@ -67,6 +67,17 @@ one:
    already tried (a CSV-export button that never resolves in a fresh
    headless Playwright profile, and a non-iframe page with no ownership
    data) so you don't re-discover either the hard way.
+6. **If the source writes to a new tab, add that tab to the canonical
+   weekly template** (the sheet linked from README.md's Setup section --
+   currently
+   `1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I`), not just to whatever
+   sheet your own `config.toml` happens to point at. The template is what
+   `File > Make a copy` actually duplicates every week; a tab that only
+   exists in your personal sheet is invisible to every future weekly copy
+   and to anyone else using this repo. Point a one-off command at the
+   template with `--sheet-id <template-id>` (see `dfs sheets
+   format-edge --help`) rather than editing `config.toml`, so you don't
+   have to swap it back afterward.
 
 ## Live-sheet changes (formatting, new columns, conditional formatting)
 

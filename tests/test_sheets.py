@@ -4,17 +4,35 @@ from __future__ import annotations
 
 import gspread
 import pytest
+from gspread.utils import a1_range_to_grid_range
 
 from dfs.config import GoogleSheetsConfig
 from dfs.sheets import SheetsClient, SheetsError
 
 
 class FakeWorksheet:
+    """A grid-backed fake. Deliberately simpler than real Sheets: `get()`
+    returns the exact rectangle requested (no trimming of trailing blank
+    rows/columns the way gspread does), which is fine since our code never
+    relies on that trimming -- callers always know the shape they wrote."""
+
+    _next_id = 1
+
     def __init__(self, title: str, rows: list[list[str]] | None = None):
         self.title = title
+        self.id = FakeWorksheet._next_id
+        FakeWorksheet._next_id += 1
         self.row_count = 1000
         self.col_count = 26
-        self._rows = rows or []
+        self._rows: list[list[str]] = [list(r) for r in (rows or [])]
+        self.frozen_rows = 0
+        self.color_scale_calls: list[dict] = []
+        self.dimension_group_calls: list[dict] = []
+
+    def _cell(self, row: int, col: int) -> str:
+        if row - 1 < len(self._rows) and col - 1 < len(self._rows[row - 1]):
+            return self._rows[row - 1][col - 1]
+        return ""
 
     def row_values(self, n: int) -> list[str]:
         idx = n - 1
@@ -23,19 +41,61 @@ class FakeWorksheet:
     def get_all_values(self) -> list[list[str]]:
         return self._rows
 
+    def get(self, a1_range: str) -> list[list[str]]:
+        grid = a1_range_to_grid_range(a1_range)
+        row_start = grid.get("startRowIndex", 0)
+        row_end = grid.get("endRowIndex", len(self._rows))
+        col_start = grid.get("startColumnIndex", 0)
+        col_end = grid.get("endColumnIndex", max((len(r) for r in self._rows), default=0))
+        return [
+            [self._cell(r + 1, c + 1) for c in range(col_start, col_end)] for r in range(row_start, row_end)
+        ]
+
     def clear(self) -> None:
         self._rows = []
 
+    def batch_clear(self, a1_ranges: list[str]) -> None:
+        for a1_range in a1_ranges:
+            grid = a1_range_to_grid_range(a1_range)
+            row_start = grid.get("startRowIndex", 0)
+            row_end = grid.get("endRowIndex", len(self._rows))
+            col_start = grid.get("startColumnIndex", 0)
+            col_end = grid.get("endColumnIndex", col_start + 1)
+            for r in range(row_start, min(row_end, len(self._rows))):
+                for c in range(col_start, min(col_end, len(self._rows[r]))):
+                    self._rows[r][c] = ""
+
     def update(self, range_name: str, values, value_input_option=None) -> None:
-        self._rows = [list(map(str, row)) for row in values]
+        if range_name == "A1" and len(self._rows) <= len(values):
+            # Whole-tab overwrite (write_tab's usage pattern).
+            self._rows = [list(map(str, row)) for row in values]
+            return
+        grid = a1_range_to_grid_range(range_name)
+        row_start = grid.get("startRowIndex", 0)
+        col_start = grid.get("startColumnIndex", 0)
+        needed_rows = row_start + len(values)
+        while len(self._rows) < needed_rows:
+            self._rows.append([])
+        for i, row_values in enumerate(values):
+            row = self._rows[row_start + i]
+            needed_cols = col_start + len(row_values)
+            if len(row) < needed_cols:
+                row.extend([""] * (needed_cols - len(row)))
+            for j, value in enumerate(row_values):
+                row[col_start + j] = str(value)
 
     def format(self, a1_range: str, fmt: dict) -> None:
         pass
+
+    def freeze(self, rows: int | None = None, cols: int | None = None) -> None:
+        if rows is not None:
+            self.frozen_rows = rows
 
 
 class FakeSpreadsheet:
     def __init__(self):
         self._worksheets: dict[str, FakeWorksheet] = {}
+        self.batch_update_calls: list[dict] = []
 
     def worksheets(self) -> list[FakeWorksheet]:
         return list(self._worksheets.values())
@@ -50,6 +110,19 @@ class FakeSpreadsheet:
         ws = FakeWorksheet(title)
         self._worksheets[title] = ws
         return ws
+
+    def batch_update(self, body: dict) -> None:
+        self.batch_update_calls.append(body)
+        for request in body.get("requests", []):
+            if "addConditionalFormatRule" in request:
+                sheet_id = request["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"]
+                self._ws_by_id(sheet_id).color_scale_calls.append(request["addConditionalFormatRule"])
+            if "addDimensionGroup" in request:
+                sheet_id = request["addDimensionGroup"]["range"]["sheetId"]
+                self._ws_by_id(sheet_id).dimension_group_calls.append(request["addDimensionGroup"])
+
+    def _ws_by_id(self, sheet_id: int) -> FakeWorksheet:
+        return next(ws for ws in self._worksheets.values() if ws.id == sheet_id)
 
 
 @pytest.fixture
@@ -102,3 +175,57 @@ def test_list_tabs_reports_header_rows(cfg, monkeypatch, tmp_path):
     assert len(tabs) == 1
     assert tabs[0].title == "Projections"
     assert tabs[0].header == ["Id", "Name", "Position"]
+
+
+def test_read_range_returns_only_the_requested_rectangle(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["A", "B", "C"], ["1", "2", "3"], ["4", "5", "6"]])
+    assert client.read_range("T", "B1:C2") == [["B", "C"], ["2", "3"]]
+
+
+def test_update_range_does_not_touch_cells_outside_the_range(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["keep", "keep", "keep"]])
+    client.update_range("T", "C1:C1", [["new"]])
+    assert fake_sheet._worksheets["T"].row_values(1) == ["keep", "keep", "new"]
+
+
+def test_clear_ranges_only_clears_given_cells(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["keep", "wipe"], ["keep2", "wipe2"]])
+    client.clear_ranges("T", ["B1:B2"])
+    assert fake_sheet._worksheets["T"].get_all_values() == [["keep", ""], ["keep2", ""]]
+
+
+def test_freeze_header_sets_frozen_rows(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.freeze_header("T", rows=1)
+    assert fake_sheet._worksheets["T"].frozen_rows == 1
+
+
+def test_add_color_scale_targets_only_the_given_range(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.add_color_scale(
+        "T",
+        "M2:M100",
+        min_color={"red": 1, "green": 0, "blue": 0},
+        mid_color={"red": 1, "green": 1, "blue": 0},
+        max_color={"red": 0, "green": 1, "blue": 0},
+    )
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.color_scale_calls) == 1
+    grid_range = ws.color_scale_calls[0]["rule"]["ranges"][0]
+    assert grid_range["startColumnIndex"] == 12  # column M, 0-indexed
+    assert grid_range["startRowIndex"] == 1  # row 2, 0-indexed
+
+
+def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_columns("T", "P", "Y")
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.dimension_group_calls) == 1
+    r = ws.dimension_group_calls[0]["range"]
+    assert (r["startIndex"], r["endIndex"]) == (15, 25)  # P..Y, 0-indexed half-open

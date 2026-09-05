@@ -17,6 +17,9 @@ from the wrong file.
 | DraftKings salaries | Working -- live, unauthenticated API |
 | NFL odds (Rotowire) | Working -- live, unauthenticated API |
 | TFFB projections (`ProjPts`/`ProjOwn`/Ceiling/Vegas context) | Working -- authenticated capture of the DFS Pass optimizer's own API (`dfs auth tffb` once) |
+| Game context (stadium/roof/surface/rest/closing lines, `GamesRaw` tab) | Working -- free, unauthenticated `nflverse` schedule data |
+| Weather (wind/gusts/precip/temp for outdoor games, `WeatherRaw` tab) | Working -- free, unauthenticated Open-Meteo, no API key |
+| Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets format-edge`) |
 | Lineup export & validation | Working, against a manually-paired entries tab |
 | Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
@@ -25,7 +28,9 @@ from the wrong file.
 | Live DK contest history / entries (no manual export) | Not yet built -- needs `dfs auth dk` exercised first |
 
 See `CONTRIBUTING.md` before adding a source or touching the live sheet's
-structure.
+structure. See `docs/SHEET_REFERENCE.md` for what every tab and column in
+the actual Google Sheet means -- the sheet's own `Instructions` tab points
+here for anything beyond its one-line-per-tab summary.
 
 ## Setup
 
@@ -84,6 +89,12 @@ dfs sync --only draftkings,nfl_odds
 dfs sync --no-upload               # fetch and store locally, skip Sheets
 dfs sync --week 3 --season 2026    # override auto-detected week/season
 
+dfs edge                           # top leverage plays, printed locally (no Sheets round-trip)
+dfs edge --top 10 --position RB
+dfs sheets format-edge             # one-time: freeze header + color scales on the EdgeRaw tab
+dfs sheets link-edge                # one-time: append EdgeRaw's columns to Player Pool/Lineups/PlayerPoolRaw
+dfs sheets format-edge --sheet-id <id>  # apply to a different sheet (e.g. the template)
+
 dfs export -o lineups.csv          # validate + export DK bulk-upload CSV
 
 dfs lineups clear                  # wipe last week's typed lineups/picks (new sheet copy)
@@ -108,17 +119,77 @@ connected sheet's real title and URL before doing anything else -- a quick
 1. **New week**: duplicate the [weekly template](https://docs.google.com/spreadsheets/d/1ZSjMaRKRAXS-DmfOFePKaq_KemghmNQHsASSjttG97I/edit),
    point `config.toml`'s `sheet_id` at the copy, then `dfs lineups clear`
    to wipe last week's typed lineups/picks before rebuilding.
-2. **Sync everything**: `dfs sync` (salaries, odds, and TFFB projections --
-   the last needs `dfs auth tffb` done at least once). Re-run
-   `dfs sync --only draftkings,nfl_odds` multiple times through the week as
-   lines move.
-3. **Build lineups** in the sheet, as always.
+2. **Sync everything**: `dfs sync` (salaries, odds, TFFB projections, and
+   the derived `edge` layer computed from them -- the last needs `dfs auth
+   tffb` done at least once). Re-run `dfs sync --only draftkings,nfl_odds`
+   multiple times through the week as lines move (re-run with `edge` too,
+   or just `dfs sync`, to keep `EdgeRaw` current).
+3. **Build lineups** in the sheet, using `EdgeRaw`'s `Leverage` sort and
+   `Flag` column (`LEVERAGE`/`CHALK`/`OUT`/`WIND`) to find the plays worth
+   a second look, alongside the usual `Player Pool` view.
 4. **Pair lineups to contest entries** in your DK-upload tab (this stays a
    manual step -- see below), then `dfs export -o lineups.csv` and upload
    that file to DraftKings.
 5. **Watch/adjust** through the week; re-sync and re-export as needed.
 6. **End of week**: export your contest history from DraftKings and run
    `dfs bankroll sync --csv <file>` to reconcile Cash and GPP results.
+
+## Edge layer
+
+`EdgeRaw` is computed locally from your already-synced `projections` and
+`draftkings` data (joined exactly on DraftKings' own player ID -- no name
+matching), plus `nflverse_games`/`weather` if you've synced those too (both
+optional -- `EdgeRaw`'s columns are always the same regardless, just blank
+without them, so the tab's shape never changes week to week). None of this
+makes a network call of its own, so `dfs sync --only edge --no-upload`
+recomputes it offline any time. Rows are written pre-sorted by `Leverage`
+descending, so the top of the tab is the answer:
+
+- `Val` / `CeilVal` -- points (median / ceiling) per $1,000 salary.
+- `CeilPct` -- this player's `Ceiling` percentile rank within their
+  position; blank wherever TFFB hasn't given that player a `Ceiling` yet.
+- `Leverage` = `CeilPct - ProjOwn`. TFFB's `ProjOwn` reads 0 for everyone
+  until it computes real ownership midweek, so until then this degenerates
+  to `CeilPct` alone -- still useful as a pure ceiling proxy, but the
+  `LevBasis` column always says `real` or `proxy` so you know which one
+  you're looking at. Because a "proxy" score is really just a raw
+  percentile (0-100, centered around 50) rather than a gap from ownership
+  (-100..100, centered around 0), the `Flag` column uses a much higher bar
+  under `proxy` (top ~15% of position) than under `real` -- otherwise
+  almost every above-average player would get flagged before ownership
+  data even exists.
+- `GameEnv` -- 0-100 stacking-environment score per game, from that game's
+  total and spread (both already in `projections`).
+- `Stadium` / `Roof` -- from `GamesRaw`, joined by team code; blank if
+  `nflverse_games` hasn't been synced.
+- `Wind` -- from `WeatherRaw` (blank for dome games, or if `weather` hasn't
+  been synced); only computed for `Roof == outdoors` games in the first
+  place.
+- `Avail` -- DraftKings' own `Status` (`Q`/`OUT`/`IR`).
+- `Flag` -- the one column meant to be read at a glance, in priority order:
+  `OUT` (from `Avail`), `WIND` (`Wind` over ~20mph), `LEVERAGE`, `CHALK`,
+  or blank.
+
+`dfs edge [--top N] [--position POS]` prints the same thing to the
+terminal without opening the sheet. `dfs sheets format-edge` is a one-time
+setup command (frozen header row, color scales on `Leverage`/`CeilVal`/
+`GameEnv`) -- re-running it is safe, and `--sheet-id <id>` points it at a
+different sheet (e.g. the canonical template) instead of `config.toml`'s.
+
+`dfs sheets link-edge` goes further: it appends `EdgeRaw`'s columns (all
+of the above except `Val`, which already exists elsewhere) onto the far
+right of `Player Pool`, `Lineups`, **and** `PlayerPoolRaw` -- the tab
+those two already read from for Pos./Team/Pts/etc. -- via the same
+VLOOKUP-by-Name join, so the signal shows up right where lineups get
+built, not just in a separate tab. Always appends past whatever's
+currently there (never inserts -- see CONTRIBUTING.md's Phase 8
+postmortem), groups the new columns so they can be collapsed from the
+sheet UI when you want the narrower view back, and is safe to re-run (a
+tab that's already linked is left alone).
+
+**If you add a new tab like this to the pipeline, add it to the canonical
+template too** (the sheet linked above), not just your own weekly copy --
+see `CONTRIBUTING.md`'s "Adding a new data source" checklist.
 
 ## Export lineups
 
