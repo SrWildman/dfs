@@ -65,3 +65,6 @@ Thumbs.db
 # New CLI rebuild
 data/
 config.toml
+
+# Personal notes/strategy -- not for the public repo
+docs/HANDOFF.md
