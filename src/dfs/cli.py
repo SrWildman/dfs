@@ -113,5 +113,29 @@ def sheets_inspect() -> None:
     console.print(table)
 
 
+@auth_app.command("tffb")
+def auth_tffb() -> None:
+    """One-time interactive login to The Fantasy Footballers (DFS Pass)."""
+    from dfs.browser import interactive_login
+
+    interactive_login(
+        "tffb",
+        "https://www.thefantasyfootballers.com/2025-ultimate-dfs-pass/dfs-pass-lineup-optimizer/",
+        success_check="the DFS Lineup Optimizer, not a 'Get the DFS Pass to unlock' paywall",
+    )
+
+
+@auth_app.command("dk")
+def auth_dk() -> None:
+    """One-time interactive login to DraftKings."""
+    from dfs.browser import interactive_login
+
+    interactive_login(
+        "dk",
+        "https://www.draftkings.com/",
+        success_check="your DraftKings lobby/account menu, not a login prompt",
+    )
+
+
 if __name__ == "__main__":
     app()
