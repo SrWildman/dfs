@@ -24,7 +24,7 @@ from the wrong file.
 | Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
 | New-week transition (`dfs week new`) | Working -- repoints `config.toml`, carries the bankroll forward, clears lineups, syncs |
 | Line movement (`dfs odds movement`, `LineMove`/`LINE↑`/`LINE↓`) | Working -- diffs the current `nfl_odds` sync against the previous one |
-| Live re-sync with a diff report (`dfs sync --live`) | Not started |
+| Live re-sync with a diff report (`dfs sync --live`) | Working -- re-syncs odds/DK status/weather + edge, prints EdgeRaw Flag changes |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
 | Strength of Schedule | Not yet ported -- see `legacy/README.md` |
 | Player ownership % (field consensus, not TFFB's own) | Not started |
@@ -94,6 +94,8 @@ dfs sync                           # fetch all sources, upload to Sheets
 dfs sync --only draftkings,nfl_odds
 dfs sync --no-upload               # fetch and store locally, skip Sheets
 dfs sync --week 3 --season 2026    # override auto-detected week/season
+dfs sync --live                    # Sunday: re-sync odds/DK status/weather + edge,
+                                    # print what changed in EdgeRaw's Flag column
 
 dfs edge                           # top leverage plays, printed locally (no Sheets round-trip)
 dfs edge --top 10 --position RB
@@ -142,7 +144,12 @@ connected sheet's real title and URL before doing anything else -- a quick
 4. **Pair lineups to contest entries** in your DK-upload tab (this stays a
    manual step -- see below), then `dfs export -o lineups.csv` and upload
    that file to DraftKings.
-5. **Watch/adjust** through the week; re-sync and re-export as needed.
+5. **Watch/adjust** through the week; re-sync and re-export as needed. On
+   Sunday, `dfs sync --live` re-pulls just the fast-moving sources (odds,
+   DK status, weather), recomputes `EdgeRaw`, and prints a "what changed"
+   report of every `Flag` change since the last sync -- late inactives,
+   wind picking up, a last-minute line move -- instead of making you
+   re-scan the whole sheet.
 6. **End of week**: export your contest history from DraftKings and run
    `dfs bankroll sync --csv <file>` to reconcile Cash and GPP results.
 

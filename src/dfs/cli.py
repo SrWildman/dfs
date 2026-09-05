@@ -23,6 +23,7 @@ from dfs.config import Config, ConfigError, load_config
 from dfs.derived import EDGE_COLUMNS
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
+from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheets import SheetsClient, SheetsError, column_letter
@@ -53,6 +54,14 @@ _EDGE_COLOR_SCALE_COLUMNS = {
     ),
 }
 _EDGE_FORMAT_LAST_ROW = 1000  # matches write_tab's default worksheet sizing
+
+# `dfs sync --live` re-syncs only what actually moves within a game day:
+# odds (line movement), DK's own Status (late inactives), and weather
+# (forecast firming up as kickoff nears) -- then recomputes `edge` off
+# them. `projections` (needs `dfs auth tffb`, and TFFB's numbers don't
+# change hour to hour) and `nflverse_games` (stadium/roof/schedule --
+# static for the week) are deliberately left out.
+LIVE_SYNC_SOURCES = ["nfl_odds", "draftkings", "weather", "edge"]
 
 app = typer.Typer(
     name="dfs",
@@ -271,11 +280,26 @@ def sync(
     no_upload: bool = typer.Option(False, "--no-upload", help="Fetch and store locally, skip Sheets."),
     week: int = typer.Option(None, "--week", help="Override auto-detected NFL week."),
     season: int = typer.Option(None, "--season", help="Override auto-detected NFL season."),
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help="Re-sync only fast-moving sources (odds, DK statuses, weather) plus edge, "
+        "and print what changed in EdgeRaw's Flag column since the last sync. The "
+        "Sunday-afternoon command -- not a substitute for a full `dfs sync`.",
+    ),
 ) -> None:
     """Fetch data sources and upload them to the connected Google Sheet."""
     cfg = _load_config_or_exit()
 
-    if only:
+    if live and only:
+        console.print(
+            "[red]--live and --only are mutually exclusive[/red] -- --live already picks its own sources."
+        )
+        raise typer.Exit(code=1)
+
+    if live:
+        source_names = LIVE_SYNC_SOURCES
+    elif only:
         requested = [s.strip() for s in only.split(",") if s.strip()]
         unknown = [s for s in requested if s not in SOURCES]
         if unknown:
@@ -296,6 +320,13 @@ def sync(
             raise typer.Exit(code=1) from e
         console.print(f"Writing to sheet: [bold]{title}[/bold]\n{url}\n")
 
+    old_edge: pd.DataFrame | None = None
+    if live and "edge" in source_names:
+        try:
+            old_edge = store.load_current("edge")
+        except FileNotFoundError:
+            old_edge = None
+
     ctx = SyncContext.current(week=week, season=season)
     console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
 
@@ -314,8 +345,48 @@ def sync(
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
 
+    if live:
+        _print_live_flag_diff(old_edge)
+
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _print_live_flag_diff(old_edge: pd.DataFrame | None) -> None:
+    """Called only from `sync --live`, after `run_sync` -- compares
+    EdgeRaw's Flag column from right before this sync (`old_edge`, read
+    before `run_sync` ran) to right after, and prints the difference.
+    `store.load_previous`/`diff_odds`'s per-snapshot pattern isn't reused
+    here because "current" already means "the state this sync just
+    replaced" for `old_edge`, captured before the write happens -- no need
+    to reach back into raw snapshot history for it.
+    """
+    if old_edge is None:
+        console.print(
+            "\n[dim]No previous EdgeRaw snapshot to diff against -- this is the first live sync.[/dim]"
+        )
+        return
+
+    try:
+        new_edge = store.load_current("edge")
+    except FileNotFoundError:
+        return
+
+    changes = diff_edge_flags(old_edge, new_edge)
+    console.print()
+    if changes.empty:
+        console.print("[dim]No Flag changes since the last sync.[/dim]")
+        return
+
+    table = Table(title="What changed since the last sync")
+    table.add_column("Name")
+    table.add_column("Pos")
+    table.add_column("Team")
+    table.add_column("Old Flag")
+    table.add_column("New Flag")
+    for _, row in changes.iterrows():
+        table.add_row(row["Name"], row["Position"], row["Team"], row["OldFlag"] or "-", row["NewFlag"] or "-")
+    console.print(table)
 
 
 @app.command()
