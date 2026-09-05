@@ -14,15 +14,17 @@ kept until something explicitly asks to prune it.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
 from dfs.paths import CURRENT_DIR, MANIFEST_FILE, RAW_DIR, ensure_data_dirs
 
+_SNAPSHOT_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+
 
 def _now_stamp() -> str:
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime(_SNAPSHOT_STAMP_FORMAT)
 
 
 def save(source_name: str, df: pd.DataFrame) -> None:
@@ -57,6 +59,27 @@ def load_previous(source_name: str) -> pd.DataFrame:
             "previous one to diff against."
         )
     return pd.read_csv(snapshots[-2])
+
+
+def load_since(source_name: str, since: date) -> pd.DataFrame:
+    """The earliest snapshot of `source_name` saved on/after `since` -- the
+    "start of the week" baseline for tracking a full week's drift (see
+    `nfl_calendar.week_start_date`), as opposed to `load_previous`'s
+    "one sync ago" baseline. Falls back to the very earliest snapshot on
+    disk if none qualify (e.g. `since` is today and only today's sync has
+    happened yet), so a fresh week's first sync still returns something
+    sensible -- diffing a snapshot against itself is a valid "no movement
+    yet" answer, not an error."""
+    raw_dir = RAW_DIR / source_name
+    snapshots = sorted(raw_dir.glob("*.csv")) if raw_dir.exists() else []
+    if not snapshots:
+        raise FileNotFoundError(f"No synced data for {source_name!r} yet -- run `dfs sync`.")
+
+    for path in snapshots:
+        stamp = datetime.strptime(path.stem, _SNAPSHOT_STAMP_FORMAT).replace(tzinfo=UTC)
+        if stamp.date() >= since:
+            return pd.read_csv(path)
+    return pd.read_csv(snapshots[0])
 
 
 def read_manifest() -> dict:

@@ -10,6 +10,7 @@ typer.Exit.
 from __future__ import annotations
 
 import json as _json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -21,10 +22,12 @@ from dfs import paths, store
 from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
 from dfs.derived import EDGE_COLUMNS
+from dfs.late_swap import lineup_slot_status, swap_candidates
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
 from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
+from dfs.models import ROSTER_SLOTS
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
@@ -590,6 +593,102 @@ def lineups_clear(
 
     for line in summary:
         console.print(f"[green]OK[/green] {line}")
+
+
+def _sheet_cell(rows: list[list[str]], index: int) -> str:
+    """`rows` is a `read_range` result (0-indexed from the range's first
+    row); a blank cell can come back as a missing trailing row OR an empty
+    inner list depending on where it falls in the range, so both need
+    guarding, not just an IndexError on `rows[index]`."""
+    if index < 0 or index >= len(rows):
+        return ""
+    row = rows[index]
+    return row[0] if row else ""
+
+
+@lineups_app.command("late-swap")
+def lineups_late_swap(
+    top: int = typer.Option(3, "--top", "-n", help="Number of swap candidates to show per open slot."),
+) -> None:
+    """Check every built lineup in the Lineups tab against real kickoff
+    times: which of your rostered players have already locked and which
+    haven't, plus who's still available at each open slot right now.
+
+    Reads EdgeRaw locally (`store.load_current`) and the Lineups tab's
+    typed Name column -- no Sheets write, so nothing here needs
+    confirmation. Run `dfs sync --live` first for the freshest picture;
+    this command itself doesn't re-sync anything.
+    """
+    cfg = _load_config_or_exit()
+
+    try:
+        edge = store.load_current("edge")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+
+    client = SheetsClient(cfg.google_sheets)
+    try:
+        title, url = client.describe()
+        last_row = LINEUPS_NAME_BLOCKS[-1][1]
+        raw = client.read_range(cfg.lineups.builder_tab, f"A2:A{last_row}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    console.print(f"Checking lineups in: [bold]{title}[/bold]\n{url}\n")
+
+    now = datetime.now(UTC)
+    any_shown = False
+
+    for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
+        # Each block's first 9 rows are the roster (ROSTER_SLOTS order);
+        # its final row is a salary total, not a player -- see
+        # weekly_reset.py's LINEUPS_NAME_BLOCKS docstring.
+        offset = start - 2  # `raw` starts at row 2
+        names = [_sheet_cell(raw, offset + i) for i in range(len(ROSTER_SLOTS))]
+        if not any(n.strip() for n in names):
+            continue  # lineup not built yet
+
+        statuses = lineup_slot_status(names, edge, now=now)
+        if all(s.locked is True for s in statuses):
+            continue  # every slot found and locked -- nothing left to decide
+
+        any_shown = True
+        table = Table(title=f"Lineup {lineup_number}")
+        for col in ("Slot", "Name", "Status", "ProjPts", "Leverage", "Flag"):
+            table.add_column(col)
+        for s in statuses:
+            if not s.found:
+                status = "[yellow]?[/yellow]"
+            elif s.locked:
+                status = "[dim]LOCKED[/dim]"
+            else:
+                status = "[green]OPEN[/green]"
+            table.add_row(
+                s.slot,
+                s.name or "[dim](empty)[/dim]",
+                status,
+                f"{s.proj_pts:.1f}" if pd.notna(s.proj_pts) else "-",
+                f"{s.leverage:.1f}" if pd.notna(s.leverage) else "-",
+                s.flag or "",
+            )
+        console.print(table)
+
+        rostered = {s.name for s in statuses if s.name}
+        for s in statuses:
+            if s.found and s.locked is not False:
+                continue  # only suggest swaps for a confirmed-open or empty slot
+            candidates = swap_candidates(edge, s.slot, rostered, now=now, top=top)
+            if candidates.empty:
+                continue
+            console.print(f"  Swap candidates for {s.slot} ({s.name or 'empty'}):")
+            for _, c in candidates.iterrows():
+                console.print(f"    {c['Name']} ({c['Team']}) -- Leverage {c['Leverage']:.1f}")
+        console.print()
+
+    if not any_shown:
+        console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
 
 
 @week_app.command("new")

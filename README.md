@@ -19,12 +19,14 @@ from the wrong file.
 | TFFB projections (`ProjPts`/`ProjOwn`/Ceiling/Vegas context) | Working -- authenticated capture of the DFS Pass optimizer's own API (`dfs auth tffb` once) |
 | Game context (stadium/roof/surface/rest/closing lines, `GamesRaw` tab) | Working -- free, unauthenticated `nflverse` schedule data |
 | Weather (wind/gusts/precip/temp for outdoor games, `WeatherRaw` tab) | Working -- free, unauthenticated Open-Meteo, no API key |
-| Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/LineMove/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets format-edge`) |
+| Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/LineMove/WeekLineMove/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets format-edge`) |
 | Lineup export & validation | Working, against a manually-paired entries tab |
 | Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
 | New-week transition (`dfs week new`) | Working -- repoints `config.toml`, carries the bankroll forward, clears lineups, syncs |
-| Line movement (`dfs odds movement`, `LineMove`/`LINE↑`/`LINE↓`) | Working -- diffs the current `nfl_odds` sync against the previous one |
+| Line movement since last sync (`dfs odds movement`, `LineMove`/`LINE↑`/`LINE↓`) | Working -- diffs the current `nfl_odds` sync against the previous one |
+| Line movement over the whole week (`WeekLineMove`) | Working -- diffs the current sync against the week's opening snapshot |
 | Live re-sync with a diff report (`dfs sync --live`) | Working -- re-syncs odds/DK status/weather + edge, prints EdgeRaw Flag changes |
+| Gameday late-swap check (`dfs lineups late-swap`) | Working -- flags locked vs. open roster slots by real kickoff time, suggests open replacements |
 | End-of-week reconciliation (`dfs week close`) | Working, from a manually-exported DK CSV -- thin wrapper over `dfs bankroll sync` |
 | Bankroll sync (Cash/GPP) | Working, from a manually-exported DK CSV |
 | Strength of Schedule | Not yet ported -- see `legacy/README.md` |
@@ -111,6 +113,9 @@ dfs odds movement --top 5
 dfs export -o lineups.csv          # validate + export DK bulk-upload CSV
 
 dfs lineups clear                  # wipe last week's typed lineups/picks (new sheet copy)
+dfs lineups late-swap              # gameday: which rostered players have locked,
+                                    # which haven't, and who's still open at that slot
+dfs lineups late-swap --top 5
 
 dfs auth dk                        # one-time interactive DraftKings login
 dfs auth tffb                      # one-time interactive TFFB login
@@ -151,7 +156,11 @@ connected sheet's real title and URL before doing anything else -- a quick
    DK status, weather), recomputes `EdgeRaw`, and prints a "what changed"
    report of every `Flag` change since the last sync -- late inactives,
    wind picking up, a last-minute line move -- instead of making you
-   re-scan the whole sheet.
+   re-scan the whole sheet. As games kick off in waves, `dfs lineups
+   late-swap` checks each built lineup against real kickoff times and
+   shows, for anyone not locked yet, who else is still available at that
+   slot -- so you know when a late swap is actually worth making, and how
+   the lineup looks either way.
 6. **End of week**: export your contest history from DraftKings and run
    `dfs week close --csv <file>` (a thin wrapper over `dfs bankroll sync
    --csv` -- see "Bankroll sync" below for why it isn't more than that yet)
@@ -195,6 +204,15 @@ descending, so the top of the tab is the answer:
 - `LineMove` -- this player's team's Vegas-implied point total, change
   since the previous sync (`dfs odds movement` shows the same diff for
   every team). Blank until two `nfl_odds` syncs have happened this week.
+- `WeekLineMove` -- the same delta as `LineMove`, but against the *first*
+  `nfl_odds` snapshot of the current NFL week instead of the last sync --
+  the week's overall drift rather than the latest tick. A team's line can
+  sit still sync to sync while having still moved a full point since
+  Tuesday; this is what shows that. Doesn't factor into `Flag` (that's
+  still driven by the latest single move only).
+- `GameStart` -- this player's game's kickoff time (UTC), straight from
+  TFFB's projections. Backs `dfs lineups late-swap`'s lock-time check; not
+  something you'd read directly in the sheet.
 
 `dfs edge [--top N] [--position POS]` prints the same thing to the
 terminal without opening the sheet. `dfs sheets format-edge` is a one-time
@@ -203,9 +221,10 @@ setup command (frozen header row, color scales on `Leverage`/`CeilVal`/
 different sheet (e.g. the canonical template) instead of `config.toml`'s.
 
 `dfs sheets link-edge` goes further: it appends most of `EdgeRaw`'s
-columns (all except `Val`, which already exists elsewhere, and `LineMove`,
-added after `link-edge` was last run against the live sheet -- see
-CONTRIBUTING.md) onto the far right of `Player Pool`, `Lineups`, **and**
+columns (all except `Val`, which already exists elsewhere, and
+`LineMove`/`WeekLineMove`/`GameStart`, all added after `link-edge` was last
+run against the live sheet -- see CONTRIBUTING.md) onto the far right of
+`Player Pool`, `Lineups`, **and**
 `PlayerPoolRaw` -- the tab those two already read from for Pos./Team/
 Pts/etc. -- via the same VLOOKUP-by-Name join, so the signal shows up
 right where lineups get built, not just in a separate tab. Always appends

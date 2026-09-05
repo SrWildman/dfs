@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from dfs import nfl_calendar
 
@@ -27,3 +27,13 @@ def test_current_week_advances_weekly_after_kickoff():
 
 def test_current_week_caps_at_max():
     assert nfl_calendar.current_week(date(2027, 6, 1)) == nfl_calendar.MAX_WEEK
+
+
+def test_week_start_date_matches_kickoff_for_week_one():
+    assert nfl_calendar.week_start_date(1, 2026) == nfl_calendar.season_kickoff(2026)
+
+
+def test_week_start_date_advances_seven_days_per_week():
+    kickoff = nfl_calendar.season_kickoff(2026)
+    assert nfl_calendar.week_start_date(2, 2026) == kickoff + timedelta(days=7)
+    assert nfl_calendar.week_start_date(3, 2026) == kickoff + timedelta(days=14)

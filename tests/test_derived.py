@@ -370,3 +370,37 @@ def test_out_flag_takes_priority_over_line_move_flag():
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
     assert row["Flag"] == "OUT"
+
+
+def test_week_line_move_blank_when_not_provided():
+    proj = _projections([{"Id": "1", "Name": "P", "Team": "DET"}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert pd.isna(row["WeekLineMove"])
+
+
+def test_week_line_move_joined_by_team_independently_of_line_move():
+    # WeekLineMove and LineMove are the same diff_odds() shape joined
+    # against two different baselines -- confirm they're attached
+    # independently (a big move since Monday, nothing since the last sync).
+    proj = _projections(
+        [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
+    )
+    sal = _salaries([{"ID": "1"}])
+    line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": 0.0}])
+    week_line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": 4.0}])
+
+    row = build_edge_frame(
+        proj, sal, line_movement=line_movement, week_line_movement=week_line_movement
+    ).frame.iloc[0]
+    assert row["LineMove"] == 0.0
+    assert row["WeekLineMove"] == 4.0
+
+
+def test_game_start_passes_through_from_projections():
+    proj = _projections([{"Id": "1", "Name": "P", "GameStart": "2026-09-14T20:20:00Z"}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert row["GameStart"] == "2026-09-14T20:20:00Z"

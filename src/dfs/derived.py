@@ -41,6 +41,16 @@ team code (`Abbr`, already DK-compatible -- `rotowire_odds.py`'s own
 `abbr` field) directly onto `Team`, no intermediate game lookup needed.
 Also optional, same blank-not-omitted rule as everything else in this
 paragraph.
+
+WeekLineMove, added in Phase 5, is the same `diff_odds()` join reused with
+a different baseline: LineMove diffs against the last sync (`store.
+load_previous`), WeekLineMove against the earliest snapshot of the current
+NFL week (`store.load_since` + `nfl_calendar.week_start_date`) -- one shows
+the latest tick, the other the week's overall drift. `GameStart`, also
+added in Phase 5, needs no attach step at all: TFFB's projections.csv
+already carries it (an ISO-8601 UTC kickoff time) straight through the
+join, it just wasn't kept in EDGE_COLUMNS' final column selection before
+now. Both back `dfs lineups late-swap`'s lock-time check.
 """
 
 from __future__ import annotations
@@ -112,6 +122,10 @@ EDGE_COLUMNS = [
     # CONTRIBUTING.md). Anything new added here must go at the end until
     # `dfs sheets link-edge` is re-run against a cleared block.
     "LineMove",
+    # WeekLineMove/GameStart, added in Phase 5, follow the same append-only
+    # rule as LineMove above.
+    "WeekLineMove",
+    "GameStart",
 ]
 
 
@@ -175,12 +189,18 @@ def _attach_weather(merged: pd.DataFrame, weather: pd.DataFrame | None) -> pd.Da
     return merged
 
 
-def _attach_line_movement(merged: pd.DataFrame, line_movement: pd.DataFrame | None) -> pd.DataFrame:
+def _attach_line_movement(
+    merged: pd.DataFrame, line_movement: pd.DataFrame | None, *, column: str
+) -> pd.DataFrame:
+    """Shared by LineMove (since the last sync) and WeekLineMove (since the
+    start of the current NFL week) -- both are `line_movement.diff_odds()`
+    output, just diffed against a different baseline snapshot by the
+    caller (see sources/edge.py)."""
     if line_movement is None or line_movement.empty:
-        merged["LineMove"] = pd.NA
+        merged[column] = pd.NA
         return merged
     delta_by_team = line_movement.set_index("Abbr")["TeamPointsDelta"]
-    merged["LineMove"] = merged["Team"].map(delta_by_team)
+    merged[column] = merged["Team"].map(delta_by_team)
     return merged
 
 
@@ -217,6 +237,7 @@ def build_edge_frame(
     games: pd.DataFrame | None = None,
     weather: pd.DataFrame | None = None,
     line_movement: pd.DataFrame | None = None,
+    week_line_movement: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -225,10 +246,13 @@ def build_edge_frame(
     `salaries` is the raw draftkings.csv shape (columns include `ID`,
     `Salary`, `Status`); `projections` is the raw projections.csv shape
     (columns include `Id`, `ProjPts`, `ProjOwn`, `Ceiling`, `OU`, `Spread`,
-    `Game`). `games`/`weather`/`line_movement` are the GamesRaw/WeatherRaw
-    shapes from `nflverse_games.py`/`weather.py`, and `line_movement.
-    diff_odds()`'s output -- all three optional; see module docstring for
-    why a missing one blanks columns rather than omitting them.
+    `Game`, `GameStart`). `games`/`weather`/`line_movement`/
+    `week_line_movement` are the GamesRaw/WeatherRaw shapes from
+    `nflverse_games.py`/`weather.py`, and two separate `line_movement.
+    diff_odds()` calls -- one against the last sync, one against the start
+    of the current NFL week (see sources/edge.py) -- all four optional; see
+    module docstring for why a missing one blanks columns rather than
+    omitting them.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -268,7 +292,8 @@ def build_edge_frame(
     merged = _attach_games(merged, games)
     merged = _attach_weather(merged, weather)
     merged = merged.drop(columns="GameId")
-    merged = _attach_line_movement(merged, line_movement)
+    merged = _attach_line_movement(merged, line_movement, column="LineMove")
+    merged = _attach_line_movement(merged, week_line_movement, column="WeekLineMove")
 
     merged["Avail"] = merged["Status"].fillna("")
     merged = merged.drop(columns="Status")

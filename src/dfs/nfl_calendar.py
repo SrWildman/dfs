@@ -41,3 +41,12 @@ def current_week(today: date | None = None) -> int:
     days_in = (today - kickoff).days
     week = days_in // 7 + 1
     return max(MIN_WEEK, min(MAX_WEEK, week))
+
+
+def week_start_date(week: int, season: int) -> date:
+    """The calendar date a given week starts on -- used to tell which
+    locally-saved snapshots (see store.py) belong to the current week versus
+    a previous one, since snapshot filenames only carry a timestamp, not a
+    week number. Same 7-day cadence `current_week` assumes, from the same
+    kickoff anchor."""
+    return season_kickoff(season) + timedelta(weeks=week - 1)
