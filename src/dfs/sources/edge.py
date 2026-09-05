@@ -1,6 +1,6 @@
-"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, LineMove,
-WeekLineMove, Avail, Flag) computed locally from already-synced sources --
-no network call of its own.
+"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, LineMove, Avail,
+Flag) computed locally from already-synced sources -- no network call of
+its own.
 
 Registered last in `SOURCES` (see `sources/__init__.py`) so a full `dfs
 sync` computes this off the CSVs the earlier sources in that same run just
@@ -35,37 +35,23 @@ def _try_load_current(source_name: str) -> pd.DataFrame | None:
         return None
 
 
-def _try_diff_odds() -> pd.DataFrame | None:
-    """LineMove: since the last sync. Needs two nfl_odds snapshots -- None
-    (not raised) on the first sync of the week, when only one exists yet."""
-    try:
-        previous = store.load_previous("nfl_odds")
-        current = store.load_current("nfl_odds")
-    except FileNotFoundError:
-        log.info("not enough nfl_odds snapshots yet for line movement -- edge will compute without it")
-        return None
-    try:
-        return diff_odds(previous, current)
-    except LineMovementError as e:
-        log.warning("line movement diff failed: %s -- edge will compute without it", e)
-        return None
-
-
-def _try_diff_odds_since_week_start(ctx: SyncContext) -> pd.DataFrame | None:
-    """WeekLineMove: since the start of the current NFL week -- the whole
-    week's drift, not just the latest tick. `store.load_since` falls back
-    to the earliest snapshot on disk when the week just started, so this
-    only returns None when there's no nfl_odds data at all yet."""
+def _try_diff_odds(ctx: SyncContext) -> pd.DataFrame | None:
+    """LineMove: since the start of the current NFL week, not since the
+    last sync -- diffing against the last sync made the number depend on
+    how often `dfs sync` happens to get run, which isn't a real signal.
+    `store.load_since` falls back to the earliest snapshot on disk when
+    the week just started, so this only returns None when there's no
+    nfl_odds data at all yet."""
     try:
         baseline = store.load_since("nfl_odds", nfl_calendar.week_start_date(ctx.week, ctx.season))
         current = store.load_current("nfl_odds")
     except FileNotFoundError:
-        log.info("no nfl_odds snapshots yet for week line movement -- edge will compute without it")
+        log.info("no nfl_odds snapshots yet for line movement -- edge will compute without it")
         return None
     try:
         return diff_odds(baseline, current)
     except LineMovementError as e:
-        log.warning("week line movement diff failed: %s -- edge will compute without it", e)
+        log.warning("line movement diff failed: %s -- edge will compute without it", e)
         return None
 
 
@@ -77,16 +63,10 @@ class EdgeSource(Source):
         salaries = store.load_current("draftkings")
         games = _try_load_current("nflverse_games")
         weather = _try_load_current("weather")
-        line_movement = _try_diff_odds()
-        week_line_movement = _try_diff_odds_since_week_start(ctx)
+        line_movement = _try_diff_odds(ctx)
 
         result = build_edge_frame(
-            projections,
-            salaries,
-            games=games,
-            weather=weather,
-            line_movement=line_movement,
-            week_line_movement=week_line_movement,
+            projections, salaries, games=games, weather=weather, line_movement=line_movement
         )
         if result.unmatched_names:
             log.warning(

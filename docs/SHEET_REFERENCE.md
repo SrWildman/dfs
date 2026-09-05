@@ -137,9 +137,10 @@ actually matches.
 | `Wind` | From `WeatherRaw`, joined by game. Blank for dome games or if `weather` hasn't synced. |
 | `Avail` | DraftKings' own `Status` (`Q`/`OUT`/`IR`). |
 | `Flag` | The one column meant to be read at a glance. Priority order (first match wins): `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`LineMove` past a threshold) → `LEVERAGE` (`Leverage` above a basis-specific threshold -- 15 under "real", 85 under "proxy", since proxy-mode Leverage is a raw 0-100 percentile rather than a −100..100 gap, and a flat threshold would flag most of the slate) → `CHALK` (`ProjOwn` ≥ 20%, real basis only) → blank. |
-| `LineMove` | This player's team's Vegas-implied point total, change since the previous sync (needs two `nfl_odds` syncs this week -- blank on the first one). Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. |
-| `WeekLineMove` | Same delta as `LineMove`, but against the *first* `nfl_odds` snapshot of the current NFL week rather than the last sync -- the week's overall drift instead of the latest tick. Doesn't affect `Flag`. |
+| `LineMove` | This player's team's Vegas-implied point total, change since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
+
+See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
 
 ## Derived hub tabs (formulas inside the sheet)
 
@@ -162,7 +163,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Rstr%` | `TFFBOptoRaw`'s `ProjOwn`. |
-| `CeilVal`, `CeilPct`, `Leverage`, `LevBasis`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `Avail`, `Flag` | **Linked from `EdgeRaw`** by `dfs sheets link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Appended at the far right, grouped so they can be collapsed from the sheet UI. `LineMove`/`WeekLineMove`/`GameStart` (all added after `link-edge` was last run) are **not yet included here** -- adding any of them means re-running `link-edge` against a manually-cleared linked block on every sheet it's been applied to, not done yet. Until then, they're only visible on `EdgeRaw` itself (and `GameStart` has no reason to be linked here anyway -- `dfs lineups late-swap` reads it straight from `EdgeRaw` locally). |
+| `CeilVal`, `CeilPct`, `Leverage`, `LevBasis`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `Avail`, `Flag` | **Linked from `EdgeRaw`** by `dfs sheets link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Appended at the far right, grouped so they can be collapsed from the sheet UI. `LineMove`/`GameStart` (both added after `link-edge` was last run) are **not yet included here** -- adding either means re-running `link-edge` against a manually-cleared linked block on every sheet it's been applied to, not done yet. Until then, `LineMove` is only visible on `EdgeRaw` itself (and `GameStart` has no reason to be linked here anyway -- `dfs lineups late-swap` reads it straight from `EdgeRaw` locally). |
 
 ### Player Pool / Lineups
 
