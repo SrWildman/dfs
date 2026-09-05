@@ -52,12 +52,35 @@ class LineupsConfig(BaseModel):
     salary_cap: int = 50000
 
 
+class EntryTableConfig(BaseModel):
+    """One append-only entry ledger inside the bankroll tab: a header row,
+    a fixed range of data rows with pre-built per-row formulas already in
+    place (e.g. "% Paid"/"Place %"), and a spare column for our dedupe key.
+    Row numbers are sheet-specific -- set these to match your own tab."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    header_row: int
+    first_row: int
+    last_row: int
+    entry_key_column: str = "L"
+
+
+class BankrollConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tab: str = "Bankroll"
+    cash: EntryTableConfig | None = None
+    gpp: EntryTableConfig | None = None
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     google_sheets: GoogleSheetsConfig
     nfl_odds: NflOddsConfig = NflOddsConfig()
     lineups: LineupsConfig = LineupsConfig()
+    bankroll: BankrollConfig = BankrollConfig()
 
 
 def _missing_config_message() -> str:

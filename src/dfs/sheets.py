@@ -113,3 +113,23 @@ class SheetsClient:
         sheet = self._open()
         ws = sheet.worksheet(tab_name)
         ws.format(a1_range, {"numberFormat": {"type": "NUMBER", "pattern": pattern}})
+
+    def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:
+        """Read a sub-range without touching anything outside it."""
+        sheet = self._open()
+        try:
+            ws = sheet.worksheet(tab_name)
+        except gspread.WorksheetNotFound as e:
+            raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
+        return ws.get(a1_range)
+
+    def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
+        """Write into a sub-range only -- never clears the tab, never touches
+        cells outside `a1_range` (so existing formulas in adjacent columns
+        are left alone)."""
+        sheet = self._open()
+        try:
+            ws = sheet.worksheet(tab_name)
+        except gspread.WorksheetNotFound as e:
+            raise SheetsError(f"Tab {tab_name!r} does not exist in the sheet.") from e
+        ws.update(range_name=a1_range, values=rows, value_input_option=ValueInputOption.user_entered)

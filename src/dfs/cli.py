@@ -17,7 +17,10 @@ from rich.table import Table
 
 from pathlib import Path
 
+import pandas as pd
+
 from dfs import paths, store
+from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
 from dfs.log import get_logger, setup_logging
@@ -216,6 +219,69 @@ def export(
     invalid_count = len(results) - len(valid)
     if invalid_count:
         console.print(f"[red]{invalid_count} entr{'y' if invalid_count == 1 else 'ies'} skipped due to validation errors above.[/red]")
+        raise typer.Exit(code=1)
+
+
+@bankroll_app.command("sync")
+def bankroll_sync(
+    csv: Path = typer.Option(
+        ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
+    ),
+) -> None:
+    """Classify contest entries into Cash/GPP and append new ones to the bankroll tab.
+
+    Live DK auth (`dfs auth dk`) will eventually feed this automatically;
+    for now, export your contest history from DraftKings' website and
+    point this at the file.
+    """
+    cfg = _load_config_or_exit()
+
+    if cfg.bankroll.cash is None or cfg.bankroll.gpp is None:
+        console.print(
+            "[red]config.toml is missing [bankroll.cash]/[bankroll.gpp][/red] "
+            "-- see config.example.toml for the shape."
+        )
+        raise typer.Exit(code=1)
+
+    if not csv.exists():
+        console.print(f"[red]No such file:[/red] {csv}")
+        raise typer.Exit(code=1)
+
+    df = pd.read_csv(csv)
+    try:
+        entries = parse_contest_history(df)
+    except KeyError as e:
+        console.print(f"[red]CSV is missing an expected column:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    cash_entries = [e for e in entries if classify_entry(e) == "cash"]
+    gpp_entries = [e for e in entries if classify_entry(e) == "gpp"]
+    console.print(f"Parsed {len(entries)} entries: {len(cash_entries)} cash, {len(gpp_entries)} GPP.")
+
+    client = SheetsClient(cfg.google_sheets)
+    try:
+        cash_result = sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.cash, cash_entries, "cash")
+        gpp_result = sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.gpp, gpp_entries, "gpp")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    any_skipped = False
+    for result in (cash_result, gpp_result):
+        console.print(
+            f"\n[bold]{result.bucket}[/bold]: wrote {len(result.written_entries)}, "
+            f"already synced {result.already_synced}, skipped (table full) {result.skipped_full}"
+        )
+        for e in result.written_entries:
+            console.print(f"  + {e.entry} -- place {e.place}, {e.points} pts, net {e.net}")
+        any_skipped = any_skipped or result.skipped_full > 0
+
+    if any_skipped:
+        console.print(
+            "[yellow]Some entries were skipped -- their table ran out of configured rows. "
+            "Extend last_row in config.toml (and add matching formula rows in the sheet) "
+            "to fit more.[/yellow]"
+        )
         raise typer.Exit(code=1)
 
 

@@ -36,3 +36,28 @@ sos_dst = "SoSDef"
 # DK's own "bulk edit entries" layout). `dfs export` reads this tab as-is.
 upload_tab = "DK Upload"
 salary_cap = 50000
+
+# `dfs bankroll sync` appends new contest entries into per-row ledger
+# tables that already exist in your bankroll tab (header row + a fixed
+# range of data rows, each with its own "% Paid"/"Place %" formulas
+# already built in). It only ever writes into entry_key_column and the
+# 8 columns immediately after the header (Entry name, Place, Points,
+# Winnings, Entries, Entry Fee, Prize Pool, Places Paid) -- it never
+# touches formula columns or anything outside first_row..last_row.
+# Leave [bankroll.cash]/[bankroll.gpp] out entirely if you don't have
+# tables shaped like this; `dfs bankroll sync` will tell you what's
+# missing rather than guessing.
+[bankroll]
+tab = "Bankroll"
+
+[bankroll.cash]
+header_row = 16
+first_row = 17
+last_row = 59
+entry_key_column = "L"
+
+[bankroll.gpp]
+header_row = 63
+first_row = 64
+last_row = 149
+entry_key_column = "L"
