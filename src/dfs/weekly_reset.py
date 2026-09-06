@@ -26,15 +26,16 @@ start is offset by 1 to skip it. Confirmed once already: an earlier
 version of this file didn't do this and clearing wiped those 19 labels,
 restored by hand.
 
-Lineups' header itself moved from row 1 to row 15 when
-`sheet_pool_deck.py`'s `add_pool_deck` inserted 14 frozen rows above it (a
-real Sheets row insert, so every block below shifted down with it) --
-every row number in LINEUPS_NAME_BLOCKS reflects that. (This shipped in
-two steps, not one: a first attempt inserted only 7 rows for a names-only
-"Bench", superseded before it reached general use by a 14-row "pool deck"
-carrying full metric columns -- see CONTRIBUTING.md's changelog. The
-extra 7-row insert on top of the first is why the shift is +14 from the
-original template, not a clean single move.)
+Lineups' header itself moved from row 1 to row 11 when
+`sheet_pool_deck.py`'s `add_pool_deck` inserted `DECK_ROWS` frozen rows
+above it (a real Sheets row insert, so every block below shifted down
+with it) -- every row number in LINEUPS_NAME_BLOCKS reflects that. This
+shipped in three steps, not one -- a first attempt inserted 7 rows for a
+names-only "Bench", superseded by a 14-row "pool deck" carrying full
+metric columns, then shrunk to the current 10 rows after a live check
+showed two full lineup blocks didn't fit on screen below 14 -- see
+CONTRIBUTING.md's changelog for the full history. Only the final +10
+matters for this constant.
 """
 
 from __future__ import annotations
@@ -42,26 +43,26 @@ from __future__ import annotations
 from dfs.sheets import SheetsClient
 
 LINEUPS_NAME_BLOCKS = [
-    (16, 25),
-    (29, 38),
-    (42, 51),
-    (55, 64),
-    (68, 77),
-    (81, 90),
-    (94, 103),
-    (107, 116),
-    (120, 129),
-    (133, 142),
-    (146, 155),
-    (159, 168),
-    (172, 181),
-    (185, 194),
-    (198, 207),
-    (211, 220),
-    (224, 233),
-    (237, 246),
-    (250, 259),
-    (263, 272),
+    (12, 21),
+    (25, 34),
+    (38, 47),
+    (51, 60),
+    (64, 73),
+    (77, 86),
+    (90, 99),
+    (103, 112),
+    (116, 125),
+    (129, 138),
+    (142, 151),
+    (155, 164),
+    (168, 177),
+    (181, 190),
+    (194, 203),
+    (207, 216),
+    (220, 229),
+    (233, 242),
+    (246, 255),
+    (259, 268),
 ]
 PLAYER_POOL_NAME_BLOCKS = [(2, 11), (13, 29), (31, 55), (57, 65), (67, 74)]
 

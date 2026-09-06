@@ -93,7 +93,7 @@ dfs sheets inspect                 # list every tab in your sheet, with headers
 dfs sheets doctor                  # read-only structural check: tabs exist, EdgeRaw's
                                     # header matches, linked columns aren't duplicated, etc.
 dfs sheets doctor --sheet-id <id>  # check a different sheet (e.g. before pointing at it)
-dfs sheets add-pool-deck             # one-time: 14-row sortable/filterable Player Pool deck atop Lineups
+dfs sheets add-pool-deck             # one-time: 10-row sortable/filterable Player Pool deck atop Lineups
 dfs sheets add-pool-deck --sheet-id <id>  # apply to a different sheet (e.g. the template)
 
 dfs week new <sheet-url>           # point config.toml at a new weekly sheet copy,

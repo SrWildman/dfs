@@ -242,7 +242,21 @@ class SheetsClient:
         Rewriting a tab to "make room" does not do that and will silently
         corrupt whatever depended on the old row positions (see
         CONTRIBUTING.md's Phase 8 postmortem); this is the only safe way to
-        add rows above content a sheet already depends on."""
+        add rows above content a sheet already depends on.
+
+        `inheritFromBefore=False` is not "inherit nothing" -- there is no
+        such option. It means "inherit from the dimension *after* the
+        insertion point" (`True` means "before", and is invalid at
+        `at_row=1` since there is no row above it). Inserting at the very
+        top therefore always inherits the formatting of whatever row used
+        to be first and is now pushed below the new rows -- if that row
+        was formatted (e.g. a dark header fill), every newly inserted row
+        picks up the same fill. Callers that need blank-looking new rows
+        must explicitly reset their formatting afterward; this method only
+        does the structural part. (Found the hard way: see
+        CONTRIBUTING.md's changelog on the pool deck's inherited dark
+        background.)
+        """
         sheet, ws = self._ws(tab_name)
         sheet.batch_update(
             {
@@ -256,6 +270,29 @@ class SheetsClient:
                                 "endIndex": at_row - 1 + count,
                             },
                             "inheritFromBefore": False,
+                        }
+                    }
+                ]
+            }
+        )
+
+    def delete_rows(self, tab_name: str, *, at_row: int, count: int) -> None:
+        """Delete `count` rows starting at `at_row` (1-indexed) via a real
+        Sheets API `deleteDimension` request -- everything below shifts up
+        to fill the gap, same shifting guarantee as `insert_rows` in
+        reverse."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "ROWS",
+                                "startIndex": at_row - 1,
+                                "endIndex": at_row - 1 + count,
+                            }
                         }
                     }
                 ]

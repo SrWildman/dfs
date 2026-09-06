@@ -1,6 +1,8 @@
 from dfs.sheet_pool_deck import (
     _OLD_BENCH_ROWS,
     _OLD_BENCH_TITLE,
+    _OLD_DECK14_HEADER_ROW,
+    _OLD_DECK14_ROWS,
     DECK_ROWS,
     POOL_SORT_TAB,
     add_pool_deck,
@@ -37,10 +39,10 @@ _POOL_HEADER = [
 
 
 class FakeDeckClient:
-    def __init__(self, *, a1: str = "", a3: str = ""):
-        self._a1 = a1
-        self._a3 = a3
+    def __init__(self, *, cells: dict[str, str] | None = None):
+        self._cells = cells or {}
         self.insert_calls: list[tuple[str, int, int]] = []
+        self.delete_calls: list[tuple[str, int, int]] = []
         self.clear_calls: list[tuple[str, list[str]]] = []
         self.write_tab_calls: list[tuple[str, list[list]]] = []
         self.tab_properties_calls: list[tuple[str, bool | None]] = []
@@ -51,16 +53,18 @@ class FakeDeckClient:
         self.row_height_calls: list[tuple] = []
 
     def read_range(self, tab_name: str, a1_range: str):
-        if tab_name == "Lineups" and a1_range == "A3":
-            return [[self._a3]] if self._a3 else []
-        if tab_name == "Lineups" and a1_range == "A1":
-            return [[self._a1]] if self._a1 else []
         if tab_name == "Player Pool" and a1_range == "A1:Z1":
             return [_POOL_HEADER]
+        if tab_name == "Lineups":
+            value = self._cells.get(a1_range, "")
+            return [[value]] if value else []
         raise AssertionError(f"unexpected read_range: {tab_name!r} {a1_range!r}")
 
     def insert_rows(self, tab_name: str, *, at_row: int, count: int) -> None:
         self.insert_calls.append((tab_name, at_row, count))
+
+    def delete_rows(self, tab_name: str, *, at_row: int, count: int) -> None:
+        self.delete_calls.append((tab_name, at_row, count))
 
     def clear_ranges(self, tab_name: str, a1_ranges: list[str]) -> None:
         self.clear_calls.append((tab_name, a1_ranges))
@@ -89,34 +93,69 @@ class FakeDeckClient:
 
 
 def test_add_pool_deck_skips_when_deck_already_present():
-    client = FakeDeckClient(a3="Name")
+    client = FakeDeckClient(cells={f"A{DECK_ROWS + 1}": "Name"})
 
     result = add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     assert "already present" in result
     assert client.insert_calls == []
+    assert client.delete_calls == []
     assert client.clear_calls == []
     assert client.write_tab_calls == []
 
 
-def test_add_pool_deck_from_fresh_inserts_fourteen_rows_once():
+def test_add_pool_deck_from_fresh_inserts_deck_rows_once():
     client = FakeDeckClient()
 
     result = add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     assert client.insert_calls == [("Lineups", 1, DECK_ROWS)]
+    assert client.delete_calls == []
     assert client.clear_calls == []
     assert "scratch" in result
 
 
-def test_add_pool_deck_migrates_old_bench_by_clearing_then_inserting_the_remaining_seven():
-    client = FakeDeckClient(a1=_OLD_BENCH_TITLE)
+def test_add_pool_deck_migrates_old_bench_by_clearing_then_inserting_the_remainder():
+    client = FakeDeckClient(cells={"A1": _OLD_BENCH_TITLE})
 
     result = add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     assert client.clear_calls == [("Lineups", ["A1:Z7"])]
-    assert client.insert_calls == [("Lineups", 1, _OLD_BENCH_ROWS)]
+    assert client.insert_calls == [("Lineups", 1, DECK_ROWS - _OLD_BENCH_ROWS)]
+    assert client.delete_calls == []
     assert "bench migration" in result
+
+
+def test_add_pool_deck_shrinks_old_fourteen_row_deck_by_deleting_the_tail():
+    # The original 14-row deck's rows 1-9 already hold correct content at
+    # the new size (the first _WINDOW_SIZE window rows show the same
+    # ranks either way) -- only the now-unwanted tail needs removing.
+    client = FakeDeckClient(cells={f"A{_OLD_DECK14_HEADER_ROW}": "Name"})
+
+    result = add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    # Deletion must start right after the new window's last row (3 +
+    # _WINDOW_SIZE = 9), so the old blank separator row shifts up to
+    # land exactly on row DECK_ROWS -- verified below by checking what's
+    # now at that row, not just trusting the delete call's own math.
+    assert client.delete_calls == [("Lineups", DECK_ROWS, _OLD_DECK14_ROWS - DECK_ROWS)]
+    assert client.insert_calls == []
+    assert client.clear_calls == []
+    # Rows 1-9 are correct as-is: no need to rebuild PoolSort or controls.
+    assert client.write_tab_calls == []
+    assert client.update_calls == []
+    assert "14-row deck shrink" in result
+
+
+def test_add_pool_deck_shrink_still_refreezes_and_resets_background():
+    client = FakeDeckClient(cells={f"A{_OLD_DECK14_HEADER_ROW}": "Name"})
+
+    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    assert client.freeze_calls == [("Lineups", DECK_ROWS, None)]
+    assert ("Lineups", 3, 3 + 6, 18) in client.row_height_calls
+    bg_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
+    assert bg_call[1] == {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}
 
 
 def test_add_pool_deck_builds_pool_sort_hidden_tab_with_position_and_sort_formula():
@@ -144,7 +183,7 @@ def test_add_pool_deck_writes_controls_defaults_and_dropdowns():
     row = control_call[1][0]
     assert row[0:6] == ["Position", "QB", "Sort by", "CeilVal", "Start at", 1]
     assert "MATCH($D$1," in row[6]
-    assert '"in pool' in row[8] or "in pool" in row[8]
+    assert "in pool" in row[8]
 
     assert ("B1", ["ALL", "QB", "RB", "WR", "TE", "DST"]) in client.dropdown_calls
     assert ("D1", ["CeilVal", "Leverage", "Pts", "Ceil", "Val", "DK Sal", "Rstr%"]) in client.dropdown_calls
@@ -164,23 +203,25 @@ def test_add_pool_deck_window_formulas_skip_spacer_columns_and_offset_by_start_r
 
     add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
-    window_call = next(c for c in client.update_calls if c[0] == "A4:Z13")
+    window_call = next(c for c in client.update_calls if c[0] == "A4:Z9")
     rows = window_call[1]
-    assert len(rows) == 10
+    assert len(rows) == 6
     first_row = rows[0]  # deck row 4 -> PoolSort row 2 when F1=1
     assert "INDEX(PoolSort!A:A,$F$1+4-3)" in first_row[0]
     assert "INDEX(PoolSort!Q:Q,$F$1+4-3)" in first_row[16]  # column Q, index 16
     # O (spacer, index 14) and P (% of Rstr, index 15) are always blank.
     assert first_row[14] == ""
     assert first_row[15] == ""
-    last_row = rows[-1]  # deck row 13
-    assert "INDEX(PoolSort!A:A,$F$1+13-3)" in last_row[0]
+    last_row = rows[-1]  # deck row 9
+    assert "INDEX(PoolSort!A:A,$F$1+9-3)" in last_row[0]
 
 
-def test_add_pool_deck_freezes_and_sets_compact_row_heights():
+def test_add_pool_deck_freezes_sets_compact_row_heights_and_resets_background():
     client = FakeDeckClient()
 
     add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     assert client.freeze_calls == [("Lineups", DECK_ROWS, None)]
-    assert client.row_height_calls == [("Lineups", 3, 13, 18)]
+    assert client.row_height_calls == [("Lineups", 3, 9, 18)]
+    bg_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
+    assert bg_call[1] == {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}

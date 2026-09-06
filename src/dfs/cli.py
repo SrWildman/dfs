@@ -261,19 +261,20 @@ def sheets_add_pool_deck(
         "canonical weekly template, so new copies already have it.",
     ),
 ) -> None:
-    """One-time structural change: insert 14 frozen rows at the top of
-    Lineups holding a sortable, filterable window into Player Pool -- full
-    metric columns (Salary, Pts, Ceil, Val, CeilVal, Leverage, Flag, ...),
-    not just names, so a pick can be made without a second window open.
-    Superseded a first, names-only "Bench" attempt (see
+    """One-time structural change: insert DECK_ROWS frozen rows at the top
+    of Lineups holding a sortable, filterable window into Player Pool --
+    full metric columns (Salary, Pts, Ceil, Val, CeilVal, Leverage,
+    Flag, ...), not just names, so a pick can be made without a second
+    window open. Superseded a first, names-only "Bench" attempt (see
     `sheet_pool_deck.py`'s module docstring and CONTRIBUTING.md's
-    changelog); migrates a sheet still in that state automatically.
+    changelog); migrates a sheet still in that state -- or in the pool
+    deck's own original, taller size -- automatically.
 
     Uses a real Sheets row insert (not a tab rewrite), so every existing
     Lineups formula and conditional-format range shifts down with it.
     Also creates the hidden `PoolSort` helper tab the deck's window
-    formulas read from. Safe to re-run: a deck already present is left
-    alone, not inserted a second time.
+    formulas read from. Safe to re-run: a deck already at the current
+    size is left alone.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
