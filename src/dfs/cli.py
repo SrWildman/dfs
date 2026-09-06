@@ -30,6 +30,15 @@ from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
+from dfs.sheet_style import (
+    POOL_RAW_ROWS,
+    apply_tab_chrome,
+    polish_bankroll,
+    polish_builder_tab,
+    polish_edge,
+    style_view_tabs,
+)
+from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
 from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
@@ -199,6 +208,12 @@ def sheets_format_edge(
     color scales on Leverage/CeilVal/GameEnv. Re-running just re-applies
     the same rules -- safe, since the tab holds no formulas of its own.
     Run `dfs sync --only edge` at least once first so the tab exists.
+
+    Superseded by `dfs sheets polish`, which re-applies these same three
+    color scales as part of a larger pass and clears old conditional
+    formats first. Since this command does not clear first, running it
+    after `polish` stacks a second, redundant set of rules rather than
+    replacing the ones `polish` already added.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -211,6 +226,11 @@ def sheets_format_edge(
     try:
         title, url = client.describe()
         console.print(f"Formatting {tab_name!r} in: [bold]{title}[/bold]\n{url}\n")
+        console.print(
+            "[yellow]Note:[/yellow] `dfs sheets polish` supersedes this command and clears old "
+            "conditional formats before reapplying -- prefer it unless you specifically want just "
+            "these two effects.\n"
+        )
 
         client.freeze_header(tab_name)
         console.print("[green]OK[/green] froze header row")
@@ -228,6 +248,137 @@ def sheets_format_edge(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+
+
+@sheets_app.command("polish")
+def sheets_polish(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Style a different sheet instead of config.toml's -- e.g. the canonical "
+        "weekly template, so new copies are already styled.",
+    ),
+    skip_chrome: bool = typer.Option(
+        False, "--skip-chrome", help="Leave the tab strip alone (no reorder, recolour or hiding)."
+    ),
+) -> None:
+    """Presentation only: widths, freeze panes, number formats, header
+    treatment, Flag/Avail chips, and the tab strip ordered by phase of the
+    week.
+
+    Cannot break anything. Nothing here inserts, deletes, moves or renames
+    a column, row or tab, and nothing writes a cell value -- so no VLOOKUP
+    index, name block or config row range is affected. Safe to re-run: each
+    tab's conditional formats are cleared before its own are applied.
+
+    Supersedes `dfs sheets format-edge`, which this re-applies as part of a
+    larger pass. Run one or the other, not both.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    results: list[str] = []
+    try:
+        title, url = client.describe()
+        console.print(f"Styling: [bold]{title}[/bold]\n{url}\n")
+
+        results.append(polish_edge(client, edge_tab))
+        results.append(polish_builder_tab(client, PLAYER_POOL_RAW_TAB, last_row=POOL_RAW_ROWS))
+        pool_last = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
+        results.append(polish_builder_tab(client, cfg.lineups.player_pool_tab, last_row=pool_last))
+        lineups_last = max(end for _, end in LINEUPS_NAME_BLOCKS)
+        results.append(polish_builder_tab(client, cfg.lineups.builder_tab, last_row=lineups_last))
+        if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:
+            results.append(
+                polish_bankroll(
+                    client,
+                    cfg.bankroll.tab,
+                    cash=(
+                        cfg.bankroll.cash.header_row,
+                        cfg.bankroll.cash.first_row,
+                        cfg.bankroll.cash.last_row,
+                    ),
+                    gpp=(
+                        cfg.bankroll.gpp.header_row,
+                        cfg.bankroll.gpp.first_row,
+                        cfg.bankroll.gpp.last_row,
+                    ),
+                )
+            )
+        else:
+            results.append("Bankroll: no [bankroll.cash]/[bankroll.gpp] in config -- skipped")
+
+        # The four derived tabs, if `dfs sheets build-views` has made them.
+        # Skipped cleanly when it hasn't.
+        results.extend(style_view_tabs(client))
+
+        if not skip_chrome:
+            results.extend(apply_tab_chrome(client))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@sheets_app.command("build-views")
+def sheets_build_views(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build the view tabs in a different sheet instead of config.toml's.",
+    ),
+) -> None:
+    """Create (or rebuild) the four derived, read-only tabs: Board, Slate
+    Grid, Exposure and Movement.
+
+    All four are formula-driven off tabs that already exist and are written
+    to by nothing else, so creating them cannot affect any existing
+    position. Safe to re-run -- Exposure's typed Target column is read back
+    and restored rather than overwritten.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    mappings = cfg.google_sheets.tab_mappings
+    edge_tab = mappings.get("edge")
+    games_tab = mappings.get("nflverse_games")
+    weather_tab = mappings.get("weather")
+    if not (edge_tab and games_tab and weather_tab):
+        console.print("[red]config.toml needs 'edge', 'nflverse_games' and 'weather' tab mappings.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Building view tabs in: [bold]{title}[/bold]\n{url}\n")
+        results = [
+            build_board(client, edge_tab=edge_tab, games_tab=games_tab, weather_tab=weather_tab),
+            build_slate_grid(client, games_tab=games_tab, weather_tab=weather_tab),
+            build_exposure(
+                client,
+                edge_tab=edge_tab,
+                lineups_tab=cfg.lineups.builder_tab,
+                lineup_count=len(LINEUPS_NAME_BLOCKS),
+            ),
+            build_movement(client, edge_tab=edge_tab),
+        ]
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+    console.print(
+        "\n[dim]Run `dfs sheets polish` afterwards -- it styles these four tabs "
+        "and slots them into the tab strip.[/dim]"
+    )
 
 
 @sheets_app.command("link-edge")

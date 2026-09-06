@@ -96,11 +96,16 @@ class FakeSpreadsheet:
     def __init__(self):
         self._worksheets: dict[str, FakeWorksheet] = {}
         self.batch_update_calls: list[dict] = []
+        self.worksheet_lookup_calls: list[str] = []
 
     def worksheets(self) -> list[FakeWorksheet]:
         return list(self._worksheets.values())
 
     def worksheet(self, title: str) -> FakeWorksheet:
+        # Real gspread re-fetches the whole spreadsheet's metadata here --
+        # this counter is what test_ws_caches_a_tab_across_calls uses to
+        # pin that SheetsClient stops doing that after the first lookup.
+        self.worksheet_lookup_calls.append(title)
         try:
             return self._worksheets[title]
         except KeyError:
@@ -142,7 +147,7 @@ def _client_with_fake_sheet(cfg, monkeypatch, tmp_path) -> tuple[SheetsClient, F
     fake_sheet = FakeSpreadsheet()
     monkeypatch.setattr(
         "gspread.service_account",
-        lambda filename: type("C", (), {"open_by_key": lambda self, key: fake_sheet})(),
+        lambda filename, **_kwargs: type("C", (), {"open_by_key": lambda self, key: fake_sheet})(),
     )
 
     return SheetsClient(cfg), fake_sheet
@@ -229,3 +234,44 @@ def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path)
     assert len(ws.dimension_group_calls) == 1
     r = ws.dimension_group_calls[0]["range"]
     assert (r["startIndex"], r["endIndex"]) == (15, 25)  # P..Y, 0-indexed half-open
+
+
+def test_ws_caches_a_tab_across_calls_instead_of_re_resolving_every_time(cfg, monkeypatch, tmp_path):
+    # `dfs sheets polish` calls many presentation primitives against the
+    # same handful of tabs in one run (widths, freeze, N number formats, a
+    # handful of colour scales, boolean rules...). Each used to resolve
+    # its tab via `sheet.worksheet(tab_name)`, which re-fetches the WHOLE
+    # spreadsheet's metadata every time -- multiplying one command's read
+    # requests by however many formatting calls it makes, which is exactly
+    # what blew through Sheets' per-minute read quota running this against
+    # a real sheet. Resolving "EdgeRaw" five different ways here must only
+    # hit the fake's `worksheet()` once.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["EdgeRaw"] = FakeWorksheet("EdgeRaw", rows=[["h"]])
+
+    assert client.tab_exists("EdgeRaw") is True
+    client.freeze_header("EdgeRaw")
+    client.read_range("EdgeRaw", "A1:A1")
+    client.format_number_range("EdgeRaw", "A2:A10")
+    client.add_color_scale(
+        "EdgeRaw",
+        "M2:M10",
+        min_color={"red": 1, "green": 0, "blue": 0},
+        mid_color={"red": 1, "green": 1, "blue": 0},
+        max_color={"red": 0, "green": 1, "blue": 0},
+    )
+
+    # tab_exists() warms the cache via worksheets(), not worksheet(), so
+    # the fake's worksheet() should never have been called at all here.
+    assert fake_sheet.worksheet_lookup_calls == []
+
+
+def test_ws_resolves_and_caches_on_first_direct_lookup(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["EdgeRaw"] = FakeWorksheet("EdgeRaw", rows=[["h"]])
+
+    client.freeze_header("EdgeRaw")  # first touch: no tab_exists() call first
+    client.read_range("EdgeRaw", "A1:A1")
+    client.format_number_range("EdgeRaw", "A2:A10")
+
+    assert fake_sheet.worksheet_lookup_calls == ["EdgeRaw"]
