@@ -139,6 +139,7 @@ actually matches.
 | `Flag` | The one column meant to be read at a glance. Priority order (first match wins): `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`LineMove` past a threshold) → `LEVERAGE` (`Leverage` above a basis-specific threshold -- 15 under "real", 85 under "proxy", since proxy-mode Leverage is a raw 0-100 percentile rather than a −100..100 gap, and a flat threshold would flag most of the slate) → `CHALK` (`ProjOwn` ≥ 20%, real basis only) → blank. |
 | `LineMove` | This player's team's Vegas-implied point total, change since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
+| `Pool` | A real checkbox. Tick it to put this player into `Player Pool`'s matching position block -- see "Player Pool / Lineups" below. Survives every `dfs sync` (kept by Id, not row position -- this tab is sorted by `Leverage`, so row order shifts every sync). Deliberately **not** part of the column list above -- `derived.EDGE_COLUMNS` -- since every VLOOKUP linked into `Player Pool`/`Lineups`/`PlayerPoolRaw` hardcodes column-index integers against that exact list; `Pool` sits one column past it instead. |
 
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
 
@@ -185,13 +186,23 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 
 ### Player Pool / Lineups
 
-Where you actually build lineups. Both are shaped the same way: you type
-a player's name into the `Name` column, and every other column VLOOKUPs
-off that name against `PlayerPoolRaw` -- so typing a name is the only
-manual step; everything else fills in. `Player Pool` is one big list
-(grouped by position); `Lineups` repeats a 9-row roster block (QB, RB,
-RB, WR, WR, WR, TE, FLEX, DEF) once per lineup you're building, each with
-its own salary total row underneath.
+Where you actually build lineups. `Lineups` is still typed: type a
+player's name into the `Name` column of a roster slot, and every other
+column VLOOKUPs off that name against `PlayerPoolRaw`. `Lineups` repeats
+a 9-row roster block (QB, RB, RB, WR, WR, WR, TE, FLEX, DEF) once per
+lineup you're building, each with its own salary total row underneath.
+
+`Player Pool`'s `Name` column is **not typed** -- it's a
+`SORT(FILTER(...))` formula per position block, pulling in whichever
+players are ticked in `EdgeRaw`'s `Pool` checkbox column (see EdgeRaw's
+column docs above). Tick a player there instead of typing them here; the
+block fills in sorted by name, capped at that position's slot count (QB
+10, RB 20, WR 25, TE 10, DST 10), with an `Overflow` column (far right,
+`Z`) warning per position if more players are ticked than the block has
+room for -- a ticked player is never silently dropped. Every other
+column still VLOOKUPs off `Name` the same as before, so nothing past
+column A changed. See `sheet_pool_formulas.py`/`sources/edge.py` for the
+mechanism and `CONTRIBUTING.md`'s changelog for the block-resize history.
 
 Columns mirror `PlayerPoolRaw`'s, pulled the same way, plus the same
 linked `EdgeRaw` block at the far right (`dfs sheets link-edge`).
@@ -222,9 +233,11 @@ showed two full lineup blocks didn't fit below 14 frozen rows on a 16"
 laptop screen. Superseded a first, names-only "Bench" attempt at the
 same idea -- see CONTRIBUTING.md's changelog for the full history.
 
-`dfs lineups clear` wipes the typed-in `Name` columns (and `Scratch`/`DK
-Upload`, below) at the start of a new week -- everything else here is a
-formula and survives.
+`dfs lineups clear` wipes `Lineups`' typed-in `Name` columns (and
+`Scratch`/`DK Upload`, below) at the start of a new week. `Player Pool`'s
+`Name` column is skipped -- it's a formula now, not a typed value, and
+the actual per-week state (which players are ticked) lives in `EdgeRaw`,
+which `dfs sync` already rewrites every week regardless.
 
 On gameday, `dfs lineups late-swap` reads every built lineup's `Name`
 column here directly (not `PlayerPoolRaw`, not `DK Upload`) and checks
