@@ -29,6 +29,7 @@ class FakeWorksheet:
         self.color_scale_calls: list[dict] = []
         self.dimension_group_calls: list[dict] = []
         self.insert_dimension_calls: list[dict] = []
+        self.conditional_formats: list[dict] = []
 
     def _cell(self, row: int, col: int) -> str:
         if row - 1 < len(self._rows) and col - 1 < len(self._rows[row - 1]):
@@ -121,8 +122,18 @@ class FakeSpreadsheet:
         self.batch_update_calls.append(body)
         for request in body.get("requests", []):
             if "addConditionalFormatRule" in request:
-                sheet_id = request["addConditionalFormatRule"]["rule"]["ranges"][0]["sheetId"]
-                self._ws_by_id(sheet_id).color_scale_calls.append(request["addConditionalFormatRule"])
+                rule = request["addConditionalFormatRule"]["rule"]
+                ws = self._ws_by_id(rule["ranges"][0]["sheetId"])
+                ws.color_scale_calls.append(request["addConditionalFormatRule"])
+                # Real Sheets always inserts at the given index (0 here,
+                # per add_color_scale/add_boolean_rule), pushing existing
+                # rules down -- matching that is what let the corruption
+                # incident's repair correctly reconstruct which rules were
+                # the newly-added ones by index.
+                ws.conditional_formats.insert(request["addConditionalFormatRule"]["index"], rule)
+            if "deleteConditionalFormatRule" in request:
+                d = request["deleteConditionalFormatRule"]
+                del self._ws_by_id(d["sheetId"]).conditional_formats[d["index"]]
             if "addDimensionGroup" in request:
                 sheet_id = request["addDimensionGroup"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).dimension_group_calls.append(request["addDimensionGroup"])
@@ -132,6 +143,14 @@ class FakeSpreadsheet:
 
     def _ws_by_id(self, sheet_id: int) -> FakeWorksheet:
         return next(ws for ws in self._worksheets.values() if ws.id == sheet_id)
+
+    def fetch_sheet_metadata(self, params: dict | None = None) -> dict:
+        return {
+            "sheets": [
+                {"properties": {"sheetId": ws.id}, "conditionalFormats": ws.conditional_formats}
+                for ws in self._worksheets.values()
+            ]
+        }
 
 
 @pytest.fixture
@@ -228,6 +247,57 @@ def test_add_color_scale_targets_only_the_given_range(cfg, monkeypatch, tmp_path
     grid_range = ws.color_scale_calls[0]["rule"]["ranges"][0]
     assert grid_range["startColumnIndex"] == 12  # column M, 0-indexed
     assert grid_range["startRowIndex"] == 1  # row 2, 0-indexed
+
+
+def test_clear_conditional_formats_with_no_column_deletes_every_rule(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    for col in ("B", "D", "F"):
+        client.add_color_scale(
+            "T",
+            f"{col}2:{col}10",
+            min_color={"red": 1, "green": 0, "blue": 0},
+            mid_color={"red": 1, "green": 1, "blue": 0},
+            max_color={"red": 0, "green": 1, "blue": 0},
+        )
+
+    client.clear_conditional_formats("T")
+
+    assert fake_sheet._worksheets["T"].conditional_formats == []
+
+
+def test_clear_conditional_formats_with_column_only_deletes_rules_confined_to_it(cfg, monkeypatch, tmp_path):
+    # Lineups carries link_edge_columns' color scales on other columns
+    # alongside Guardrails' own column-O rules -- clearing "O" must never
+    # touch those other, unrelated rules. This is the regression for the
+    # corruption incident: a blind clear-then-readd on a shared tab
+    # silently destroys formatting nothing here is meant to touch.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.add_color_scale(
+        "T",
+        "Q2:Q10",
+        min_color={"red": 1, "green": 0, "blue": 0},
+        mid_color={"red": 1, "green": 1, "blue": 0},
+        max_color={"red": 0, "green": 1, "blue": 0},
+    )
+    client.add_boolean_rule(
+        "T", "O2:O10", condition_type="TEXT_EQ", values=["OK"], fmt={"backgroundColor": {"red": 0}}
+    )
+    client.add_boolean_rule(
+        "T",
+        "O2:O10",
+        condition_type="TEXT_CONTAINS",
+        values=["DUPLICATE"],
+        fmt={"backgroundColor": {"red": 1}},
+    )
+
+    client.clear_conditional_formats("T", column="O")
+
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.conditional_formats) == 1
+    remaining_range = ws.conditional_formats[0]["ranges"][0]
+    assert remaining_range["startColumnIndex"] == 16  # column Q, 0-indexed -- the survivor
 
 
 def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path):

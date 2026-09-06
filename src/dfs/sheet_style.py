@@ -350,6 +350,93 @@ def polish_builder_tab(
 
 
 # ---------------------------------------------------------------------------
+# Lineups Guardrails (Task L): per-lineup validation in the empty O column
+# ---------------------------------------------------------------------------
+
+_GUARDRAILS_COLUMN = "O"
+_GUARDRAILS_HEADER = "Check"
+_GUARDRAILS_CHIPS = [
+    ("TEXT_CONTAINS", "DUPLICATE", _chip(CRIT_BG, CRIT_FG)),
+    ("TEXT_CONTAINS", "OVER", _chip(CRIT_BG, CRIT_FG)),
+    ("TEXT_EQ", "OUT", _chip(CRIT_BG, CRIT_FG)),
+    ("TEXT_EQ", "IR", _chip(CRIT_BG, CRIT_FG)),
+    ("TEXT_EQ", "Q", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "INCOMPLETE", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_EQ", "OK", _chip(OK_BG, OK_FG)),
+]
+
+
+def _slot_check_formula(start: int, end: int, row: int, avail_col: str) -> str:
+    """Flags a name duplicated elsewhere in its own block, else surfaces
+    that pick's linked Avail flag (OUT/IR/Q) if it has one."""
+    last_slot = end - 1
+    return (
+        f'=IF($A{row}="","",'
+        f'IF(COUNTIF($A${start}:$A${last_slot},$A{row})>1,"DUPLICATE",'
+        f'IF(${avail_col}{row}<>"",${avail_col}{row},"")))'
+    )
+
+
+def _totals_check_formula(start: int, end: int, totals_row: int) -> str:
+    """Salary cap, roster completeness, or OK -- on the block's totals row."""
+    last_slot = end - 1
+    return (
+        f'=IF(COUNTA($A${start}:$A${last_slot})=0,"",'
+        f'IF(D{totals_row}>50000,"OVER "&TEXT(D{totals_row}-50000,"$#,##0"),'
+        f"IF(COUNTA($A${start}:$A${last_slot})<9,"
+        f'"INCOMPLETE "&COUNTA($A${start}:$A${last_slot})&"/9","OK")))'
+    )
+
+
+def polish_guardrails(
+    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+) -> str:
+    """Each lineup block currently checks exactly one thing (salary
+    remaining, via its own D/E-column formulas). This adds the checks that
+    actually catch mistakes, in column O -- the empty spacer immediately
+    left of the EdgeRaw-linked block, 2.4px wide until this widens it.
+
+    Per roster slot: DUPLICATE if the same name appears twice in that
+    lineup, else that pick's Avail flag (OUT/IR/Q) if it has one. On the
+    block's totals row: OVER the cap, INCOMPLETE (fewer than 9 picks), or
+    OK. The Avail column is found by header name, not a hardcoded letter
+    -- exactly the class of assumption that caused this feature's own
+    prerequisite bug (see CONTRIBUTING.md's changelog); skips cleanly if
+    `dfs sheets link-edge` hasn't run yet.
+
+    Writing here is safe regardless of what's linked at Q..Z: O sits
+    strictly to their left, so nothing here can collide with that block.
+    Re-runnable -- clears only O's own conditional-format rules first
+    (`column="O"`), never the tab's other rules, which
+    `sheet_links.link_edge_columns` already owns.
+    """
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_rows[0] if header_rows else []
+    if "Avail" not in header:
+        return f"{tab}: 'Avail' not linked yet (run `dfs sheets link-edge` first) -- skipped"
+    avail_col = column_letter(header.index("Avail"))
+
+    client.set_column_widths(tab, {_GUARDRAILS_COLUMN: 110})
+    client.update_range(tab, f"{_GUARDRAILS_COLUMN}{header_row}", [[_GUARDRAILS_HEADER]])
+
+    for start, end in name_blocks:
+        rows = [[_slot_check_formula(start, end, row, avail_col)] for row in range(start, end)]
+        rows.append([_totals_check_formula(start, end, end)])
+        client.update_range(tab, f"{_GUARDRAILS_COLUMN}{start}:{_GUARDRAILS_COLUMN}{end}", rows)
+
+    client.clear_conditional_formats(tab, column=_GUARDRAILS_COLUMN)
+    last_row = max(end for _, end in name_blocks)
+    a1_range = f"{_GUARDRAILS_COLUMN}2:{_GUARDRAILS_COLUMN}{last_row}"
+    for condition_type, value, fmt in _GUARDRAILS_CHIPS:
+        client.add_boolean_rule(tab, a1_range, condition_type=condition_type, values=[value], fmt=fmt)
+
+    return f"{tab}: guardrails applied to column {_GUARDRAILS_COLUMN} across {len(name_blocks)} lineup(s)"
+
+
+# ---------------------------------------------------------------------------
 # Bankroll (Direction G)
 # ---------------------------------------------------------------------------
 

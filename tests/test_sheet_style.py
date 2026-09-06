@@ -1,14 +1,21 @@
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_style import (
+    CRIT_BG,
+    CRIT_FG,
     EDGE_COLOR_SCALES,
     EDGE_COLUMN_GROUPS,
     EDGE_NUMBER_FORMATS,
     EDGE_WIDTHS,
     FAMILY_COLORS,
     HIDE_TABS,
+    OK_BG,
+    OK_FG,
+    WARN_BG,
+    WARN_FG,
     WEEK_ORDER,
     apply_tab_chrome,
     polish_edge,
+    polish_guardrails,
 )
 
 
@@ -88,3 +95,113 @@ def test_apply_tab_chrome_orders_present_tabs_then_hides_staging_tabs():
         assert color == FAMILY_COLORS["feed"]
         assert hidden is True
         assert index >= len(expected_order)
+
+
+class FakeGuardrailsClient:
+    def __init__(self, header: list[str], *, present: bool = True):
+        self._header = header
+        self._present = present
+        self.width_calls: list[dict] = []
+        self.update_calls: list[tuple[str, list[list]]] = []
+        self.clear_calls: list[str | None] = []
+        self.boolean_rule_calls: list[tuple[str, str, list[str], dict]] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return self._present
+
+    def read_range(self, tab_name: str, a1_range: str):
+        return [self._header] if self._header else []
+
+    def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
+        self.width_calls.append(widths)
+
+    def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
+        self.update_calls.append((a1_range, rows))
+
+    def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
+        self.clear_calls.append(column)
+
+    def add_boolean_rule(
+        self, tab_name: str, a1_range: str, *, condition_type: str, values, fmt: dict
+    ) -> None:
+        self.boolean_rule_calls.append((a1_range, condition_type, values, fmt))
+
+
+_HEADER_WITH_AVAIL_AT_Y = (
+    ["Name", "Pos.", "Team", "DK Sal", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts"]
+    + ["Ceil", "Val", "Rstr%", "", "% of Rstr", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
+    + ["Stadium", "Roof", "Wind", "Avail", "Flag"]
+)
+
+
+def test_polish_guardrails_skips_when_lineups_missing():
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
+    result = polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+    assert result == "Lineups: not present -- skipped"
+    assert client.update_calls == []
+
+
+def test_polish_guardrails_skips_when_avail_not_yet_linked():
+    client = FakeGuardrailsClient(["Name", "Pos.", "Team"])  # link-edge never run
+    result = polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+    assert "not linked yet" in result
+    assert client.update_calls == []
+    assert client.clear_calls == []
+
+
+def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avail_column():
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+    avail_index = _HEADER_WITH_AVAIL_AT_Y.index("Avail")
+    assert avail_index == 24  # column Y, 0-indexed -- confirms the fixture matches spec section 1.2
+
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+
+    header_call = next(c for c in client.update_calls if c[0] == "O8")
+    assert header_call[1] == [["Check"]]
+
+    block_call = next(c for c in client.update_calls if c[0] == "O9:O18")
+    rows = block_call[1]
+    assert len(rows) == 10  # 9 slots + 1 totals row
+
+    # Slot row 9: duplicate check over the block's own name range, then
+    # falls back to that row's own Avail cell.
+    assert rows[0] == ['=IF($A9="","",IF(COUNTIF($A$9:$A$17,$A9)>1,"DUPLICATE",IF($Y9<>"",$Y9,"")))']
+    # Totals row (18): cap / completeness / OK.
+    assert rows[-1] == [
+        '=IF(COUNTA($A$9:$A$17)=0,"",'
+        'IF(D18>50000,"OVER "&TEXT(D18-50000,"$#,##0"),'
+        'IF(COUNTA($A$9:$A$17)<9,"INCOMPLETE "&COUNTA($A$9:$A$17)&"/9","OK")))'
+    ]
+
+
+def test_polish_guardrails_widens_column_o_and_clears_only_its_own_rules():
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+
+    assert client.width_calls == [{"O": 110}]
+    assert client.clear_calls == ["O"]  # never a blanket clear of Lineups' other rules
+
+
+def _chip(bg: dict, fg: dict) -> dict:
+    return {"backgroundColor": bg, "textFormat": {"bold": True, "foregroundColor": fg}}
+
+
+def test_polish_guardrails_chips_cover_every_documented_state():
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+
+    by_value = {
+        values[0]: (condition_type, fmt) for _rng, condition_type, values, fmt in client.boolean_rule_calls
+    }
+    assert by_value["DUPLICATE"] == ("TEXT_CONTAINS", _chip(CRIT_BG, CRIT_FG))
+    assert by_value["OVER"] == ("TEXT_CONTAINS", _chip(CRIT_BG, CRIT_FG))
+    assert by_value["OUT"] == ("TEXT_EQ", _chip(CRIT_BG, CRIT_FG))
+    assert by_value["IR"] == ("TEXT_EQ", _chip(CRIT_BG, CRIT_FG))
+    assert by_value["Q"] == ("TEXT_EQ", _chip(WARN_BG, WARN_FG))
+    assert by_value["INCOMPLETE"] == ("TEXT_CONTAINS", _chip(WARN_BG, WARN_FG))
+    assert by_value["OK"] == ("TEXT_EQ", _chip(OK_BG, OK_FG))
+    # Every rule targets column O only, across the full block range given.
+    for a1_range, *_ in client.boolean_rule_calls:
+        assert a1_range == "O2:O18"

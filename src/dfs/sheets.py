@@ -387,34 +387,54 @@ class SheetsClient:
             }
         )
 
-    def clear_conditional_formats(self, tab_name: str) -> None:
-        """Delete every conditional-format rule on a tab. Needed to make
-        the styling commands re-runnable -- without it, running twice
-        stacks a second identical set of rules on top of the first, and
-        Sheets applies the most recently added matching rule, so the tab
-        slowly accumulates dead rules that are hard to reason about."""
+    def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
+        """Delete conditional-format rules on a tab. Needed to make the
+        styling commands re-runnable -- without it, running twice stacks a
+        second identical set of rules on top of the first, and Sheets
+        applies the most recently added matching rule, so the tab slowly
+        accumulates dead rules that are hard to reason about.
+
+        With `column` omitted, deletes every rule on the tab -- correct
+        when one function owns all of a tab's conditional formatting
+        (EdgeRaw, the four view tabs, Bankroll). Lineups is not one of
+        those: `sheet_links.link_edge_columns` already owns color-scale
+        rules on other columns there, so `polish_guardrails` passes
+        `column="O"` to only ever delete rules confined entirely to that
+        one column, leaving every other rule on the tab untouched. Blindly
+        clearing the whole tab there would silently destroy real,
+        already-correct formatting on every re-run -- exactly the kind of
+        mistake CONTRIBUTING.md's changelog now has an incident for.
+        """
         sheet, ws = self._ws(tab_name)
-        existing = (
-            ws.list_conditional_format_rules() if hasattr(ws, "list_conditional_format_rules") else None
-        )
-        count = len(existing) if existing is not None else self._count_conditional_rules(ws)
-        if not count:
+        rules = self._conditional_format_rules(sheet, ws)
+        if column is None:
+            indexes = list(range(len(rules)))
+        else:
+            col_index = a1_range_to_grid_range(f"{column}1:{column}1")["startColumnIndex"]
+            indexes = [
+                i
+                for i, rule in enumerate(rules)
+                if rule.get("ranges")
+                and all(
+                    r.get("startColumnIndex") == col_index and r.get("endColumnIndex") == col_index + 1
+                    for r in rule["ranges"]
+                )
+            ]
+        if not indexes:
             return
         # Delete from the end backwards: each delete reindexes the rest.
         requests = [
-            {"deleteConditionalFormatRule": {"sheetId": ws.id, "index": i}} for i in reversed(range(count))
+            {"deleteConditionalFormatRule": {"sheetId": ws.id, "index": i}} for i in reversed(indexes)
         ]
         sheet.batch_update({"requests": requests})
 
     @staticmethod
-    def _count_conditional_rules(ws) -> int:
-        meta = ws.spreadsheet.fetch_sheet_metadata(
-            params={"fields": "sheets(properties(sheetId),conditionalFormats)"}
-        )
+    def _conditional_format_rules(sheet, ws) -> list[dict]:
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),conditionalFormats)"})
         for s in meta.get("sheets", []):
             if s.get("properties", {}).get("sheetId") == ws.id:
-                return len(s.get("conditionalFormats", []) or [])
-        return 0
+                return s.get("conditionalFormats", []) or []
+        return []
 
     def set_tab_properties(
         self,
