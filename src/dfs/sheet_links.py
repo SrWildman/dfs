@@ -130,9 +130,9 @@ def link_edge_columns(
     row).
 
     `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but
-    not for Lineups once `sheet_bench.py`'s `add_bench` inserts a 7-row
-    bench above its header: reading/writing row 1 there finds the Bench
-    title instead of the real header, mistakes an already-linked tab for
+    not for Lineups once `sheet_pool_deck.py`'s `add_pool_deck` inserts
+    rows above its header: reading/writing row 1 there finds the deck's
+    controls instead of the real header, mistakes an already-linked tab for
     an unlinked one, and appends a *second*, wrongly-positioned copy of
     LINKED_EDGE_COLUMNS starting at column B -- overwriting every lineup
     block's Pos./Team/DK Sal/etc. data with a duplicate EdgeRaw lookup.

@@ -312,8 +312,8 @@ def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path)
 
 def test_insert_rows_issues_an_insert_dimension_request_not_a_rewrite(cfg, monkeypatch, tmp_path):
     # insertDimension (not write_tab/clear) is what makes Sheets itself
-    # shift existing formula ranges down -- see sheet_bench.py's docstring
-    # and CONTRIBUTING.md's Phase 8 postmortem.
+    # shift existing formula ranges down -- see sheet_pool_deck.py's
+    # docstring and CONTRIBUTING.md's Phase 8 postmortem.
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["existing"]])
     client.insert_rows("T", at_row=1, count=7)

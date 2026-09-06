@@ -26,10 +26,15 @@ start is offset by 1 to skip it. Confirmed once already: an earlier
 version of this file didn't do this and clearing wiped those 19 labels,
 restored by hand.
 
-Lineups' header itself moved from row 1 to row 8 when `sheet_bench.py`'s
-`add_bench` inserted 7 frozen rows above it (a real Sheets row insert, so
-every block below shifted down with it) -- every row number in
-LINEUPS_NAME_BLOCKS reflects that.
+Lineups' header itself moved from row 1 to row 15 when
+`sheet_pool_deck.py`'s `add_pool_deck` inserted 14 frozen rows above it (a
+real Sheets row insert, so every block below shifted down with it) --
+every row number in LINEUPS_NAME_BLOCKS reflects that. (This shipped in
+two steps, not one: a first attempt inserted only 7 rows for a names-only
+"Bench", superseded before it reached general use by a 14-row "pool deck"
+carrying full metric columns -- see CONTRIBUTING.md's changelog. The
+extra 7-row insert on top of the first is why the shift is +14 from the
+original template, not a clean single move.)
 """
 
 from __future__ import annotations
@@ -37,26 +42,26 @@ from __future__ import annotations
 from dfs.sheets import SheetsClient
 
 LINEUPS_NAME_BLOCKS = [
-    (9, 18),
-    (22, 31),
-    (35, 44),
-    (48, 57),
-    (61, 70),
-    (74, 83),
-    (87, 96),
-    (100, 109),
-    (113, 122),
-    (126, 135),
-    (139, 148),
-    (152, 161),
-    (165, 174),
-    (178, 187),
-    (191, 200),
-    (204, 213),
-    (217, 226),
-    (230, 239),
-    (243, 252),
-    (256, 265),
+    (16, 25),
+    (29, 38),
+    (42, 51),
+    (55, 64),
+    (68, 77),
+    (81, 90),
+    (94, 103),
+    (107, 116),
+    (120, 129),
+    (133, 142),
+    (146, 155),
+    (159, 168),
+    (172, 181),
+    (185, 194),
+    (198, 207),
+    (211, 220),
+    (224, 233),
+    (237, 246),
+    (250, 259),
+    (263, 272),
 ]
 PLAYER_POOL_NAME_BLOCKS = [(2, 11), (13, 29), (31, 55), (57, 65), (67, 74)]
 

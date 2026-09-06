@@ -54,10 +54,10 @@ def test_lineups_blocks_skip_the_repeated_sub_header_row():
     # First block has no sub-header (the tab's own header, immediately
     # above it, covers it); every later block must start one row after
     # where it'd naively be measured, so the sub-header row's own "Name"
-    # label in column A never gets cleared. First block starts at row 9
-    # (row 8 is the header) since sheet_bench.py's 7-row bench insert --
-    # see CONTRIBUTING.md's Bench changelog entry.
+    # label in column A never gets cleared. First block starts at row 16
+    # (row 15 is the header) since sheet_pool_deck.py's 14-row pool deck
+    # insert -- see CONTRIBUTING.md's changelog.
     first_start, _ = LINEUPS_NAME_BLOCKS[0]
-    assert first_start == 9
+    assert first_start == 16
     for (_, prev_end), (start, _) in zip(LINEUPS_NAME_BLOCKS, LINEUPS_NAME_BLOCKS[1:], strict=False):
         assert start == prev_end + 4  # 3-row gap + 1 sub-header row skipped

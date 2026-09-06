@@ -336,6 +336,56 @@ class SheetsClient:
         if requests:
             sheet.batch_update({"requests": requests})
 
+    def set_row_heights(self, tab_name: str, *, start_row: int, end_row: int, pixel_size: int) -> None:
+        """Set a pixel height for rows `start_row`..`end_row` (inclusive,
+        1-indexed) -- e.g. compacting a frozen control zone so it doesn't
+        eat too much vertical space."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "ROWS",
+                                "startIndex": start_row - 1,
+                                "endIndex": end_row,
+                            },
+                            "properties": {"pixelSize": pixel_size},
+                            "fields": "pixelSize",
+                        }
+                    }
+                ]
+            }
+        )
+
+    def set_dropdown_validation(self, tab_name: str, a1_range: str, options: list[str]) -> None:
+        """Restrict `a1_range` to a dropdown of `options` (Sheets'
+        ONE_OF_LIST data validation) -- a typed value outside the list is
+        rejected rather than silently accepted."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "setDataValidation": {
+                            "range": grid_range,
+                            "rule": {
+                                "condition": {
+                                    "type": "ONE_OF_LIST",
+                                    "values": [{"userEnteredValue": v} for v in options],
+                                },
+                                "showCustomUi": True,
+                                "strict": True,
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         """Apply a raw CellFormat dict to a range (fills, fonts, alignment,
         number formats). Passed straight through to the Sheets API."""

@@ -29,14 +29,15 @@ from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate
 from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
-from dfs.sheet_bench import BENCH_ROWS, add_bench
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
+from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
 from dfs.sheet_style import (
     POOL_RAW_ROWS,
     apply_tab_chrome,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
+    polish_guardrails,
     style_view_tabs,
 )
 from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
@@ -251,32 +252,38 @@ def sheets_format_edge(
         raise typer.Exit(code=1) from e
 
 
-@sheets_app.command("add-bench")
-def sheets_add_bench(
+@sheets_app.command("add-pool-deck")
+def sheets_add_pool_deck(
     sheet_id: str = typer.Option(
         None,
         "--sheet-id",
-        help="Add the bench to a different sheet instead of config.toml's -- e.g. the "
+        help="Add the pool deck to a different sheet instead of config.toml's -- e.g. the "
         "canonical weekly template, so new copies already have it.",
     ),
 ) -> None:
-    """One-time structural change: insert 7 frozen rows at the top of
-    Lineups holding Player Pool's roster, laid out horizontally by
-    position, so it stays on screen through all twenty lineup blocks below
-    instead of needing a second window.
+    """One-time structural change: insert 14 frozen rows at the top of
+    Lineups holding a sortable, filterable window into Player Pool -- full
+    metric columns (Salary, Pts, Ceil, Val, CeilVal, Leverage, Flag, ...),
+    not just names, so a pick can be made without a second window open.
+    Superseded a first, names-only "Bench" attempt (see
+    `sheet_pool_deck.py`'s module docstring and CONTRIBUTING.md's
+    changelog); migrates a sheet still in that state automatically.
 
     Uses a real Sheets row insert (not a tab rewrite), so every existing
-    Lineups formula and conditional-format range shifts down with it --
-    see CONTRIBUTING.md's Bench changelog entry. Safe to re-run: a bench
-    already present is left alone, not inserted a second time.
+    Lineups formula and conditional-format range shifts down with it.
+    Also creates the hidden `PoolSort` helper tab the deck's window
+    formulas read from. Safe to re-run: a deck already present is left
+    alone, not inserted a second time.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
     client = SheetsClient(gs_cfg)
     try:
         title, url = client.describe()
-        console.print(f"Adding bench to {cfg.lineups.builder_tab!r} in: [bold]{title}[/bold]\n{url}\n")
-        result = add_bench(client, lineups_tab=cfg.lineups.builder_tab, pool_tab=cfg.lineups.player_pool_tab)
+        console.print(f"Adding pool deck to {cfg.lineups.builder_tab!r} in: [bold]{title}[/bold]\n{url}\n")
+        result = add_pool_deck(
+            client, lineups_tab=cfg.lineups.builder_tab, pool_tab=cfg.lineups.player_pool_tab
+        )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -295,14 +302,19 @@ def sheets_polish(
         False, "--skip-chrome", help="Leave the tab strip alone (no reorder, recolour or hiding)."
     ),
 ) -> None:
-    """Presentation only: widths, freeze panes, number formats, header
+    """Mostly presentation: widths, freeze panes, number formats, header
     treatment, Flag/Avail chips, and the tab strip ordered by phase of the
-    week.
+    week -- none of which inserts, deletes, moves or renames a column, row
+    or tab, so no VLOOKUP index, name block or config row range is
+    affected. The one exception is Lineups' Guardrails column (O): those
+    are real formula values, not styling, but they're additive-only
+    (O sits strictly left of the EdgeRaw-linked block and was never
+    written to before) and safe to re-run the same way -- see
+    `sheet_style.polish_guardrails`.
 
-    Cannot break anything. Nothing here inserts, deletes, moves or renames
-    a column, row or tab, and nothing writes a cell value -- so no VLOOKUP
-    index, name block or config row range is affected. Safe to re-run: each
-    tab's conditional formats are cleared before its own are applied.
+    Safe to re-run: each tab's conditional formats are cleared before its
+    own are applied (Guardrails clears only column O's rules, never the
+    rest of Lineups' -- see `SheetsClient.clear_conditional_formats`).
 
     Supersedes `dfs sheets format-edge`, which this re-applies as part of a
     larger pass. Run one or the other, not both.
@@ -332,8 +344,16 @@ def sheets_polish(
                 cfg.lineups.builder_tab,
                 last_row=lineups_last,
                 header_row=lineups_header_row,
-                freeze_rows=BENCH_ROWS,
+                freeze_rows=DECK_ROWS,
                 freeze_cols=0,
+            )
+        )
+        results.append(
+            polish_guardrails(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
             )
         )
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:

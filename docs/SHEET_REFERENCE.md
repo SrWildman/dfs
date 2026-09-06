@@ -198,13 +198,27 @@ linked `EdgeRaw` block at the far right (`dfs sheets link-edge`).
 `Lineups` additionally has `% of Rstr` (this pick's `Rstr%` as a share of
 the lineup's total `Rstr%`) and a per-lineup salary-remaining row.
 
-`Lineups` also has a 7-row frozen "Bench" at the very top (`dfs sheets
-add-bench`): `Player Pool`'s roster, spilled horizontally by position, so
-it stays on screen through all twenty lineup blocks below instead of
-needing a second window. It's read-only (formulas only, no typed input)
+`Lineups`' column O ("Check", `dfs sheets polish`) is a per-lineup
+guardrail: on each roster slot, `DUPLICATE` if that name appears twice in
+the same lineup, else that pick's linked `Avail` flag (`OUT`/`IR`/`Q`) if
+it has one; on the totals row, `OVER` the salary cap, `INCOMPLETE` (fewer
+than 9 picks), or `OK`. Formula values, not just formatting -- but
+additive-only, since O was an empty spacer column nothing else wrote to.
+
+`Lineups` also has a 14-row frozen "pool deck" at the very top (`dfs
+sheets add-pool-deck`): a sortable, filterable window into `Player
+Pool` -- pick a position (B1) and a sort field (D1), set a starting rank
+(F1), and the ten rows below (4-13) show that slice of the pool with
+every metric column `Lineups` itself already has (Salary, Pts, Ceil,
+Val, CeilVal, Leverage, Flag, ...), not just names. Row 3 mirrors `Player
+Pool`'s header; a hidden `PoolSort` tab materializes the sorted/filtered
+result the window formulas index into (Sheets' INDEX needs a range
+reference, not a live array, to support "start at rank N"). Read-only
 and purely additive -- the header row and every lineup block moved down
-by exactly 7 rows to make room (`weekly_reset.LINEUPS_NAME_BLOCKS`), but
-nothing about how a lineup is built changed.
+by exactly 14 rows to make room (`weekly_reset.LINEUPS_NAME_BLOCKS`), but
+nothing about how a lineup is built changed. Superseded a first,
+names-only "Bench" attempt at the same idea -- see CONTRIBUTING.md's
+changelog for why.
 
 `dfs lineups clear` wipes the typed-in `Name` columns (and `Scratch`/`DK
 Upload`, below) at the start of a new week -- everything else here is a

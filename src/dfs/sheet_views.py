@@ -201,10 +201,11 @@ def build_exposure(
     down, which holds only typed names plus the repeated "Name" header --
     so it works regardless of how the twenty blocks are laid out, and keeps
     working if those blocks ever move. `lineups_data_start_row` defaults to
-    1 (the whole column) but must be passed as Lineups' own header row
-    (see `sheet_bench.py`) once a bench sits above it, since the bench's
-    position labels ("QB", "RB", ...) would otherwise get miscounted as
-    filled roster slots by the "?*" wildcard below.
+    1 (the whole column) but must be passed as Lineups' own header row (see
+    `sheet_pool_deck.py`) once the pool deck sits above it -- its window
+    rows show real player NAMES pulled from Player Pool for browsing, not
+    roster picks, and would otherwise get double-counted here as if every
+    player merely visible in the deck were actually rostered somewhere.
 
     Target is the one typed column in the tab. It's read back and restored
     before the rewrite so re-running this never costs you the targets you

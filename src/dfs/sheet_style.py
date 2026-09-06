@@ -307,14 +307,14 @@ def polish_builder_tab(
     given position.
 
     `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but not
-    for Lineups: `sheet_bench.py`'s `add_bench` inserted 7 rows above its
-    header, so its caller passes `header_row=8` (derived from
+    for Lineups: `sheet_pool_deck.py`'s `add_pool_deck` inserted 14 rows
+    above its header, so its caller passes `header_row=15` (derived from
     `LINEUPS_NAME_BLOCKS`, not hardcoded). `freeze_rows` defaults to
     freezing through the header row itself; Lineups instead passes its
-    bench row count, since freezing 8 rows would freeze past the header
+    deck row count, since freezing 15 rows would freeze past the header
     into the first lineup block. `freeze_cols` defaults to 1 (pin Name);
-    Lineups passes 0 so this doesn't fight the bench's own column-freeze
-    choice (see `sheet_bench.py`).
+    Lineups passes 0 so this doesn't fight the deck's own column-freeze
+    choice (see `sheet_pool_deck.py`).
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"

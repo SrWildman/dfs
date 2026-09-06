@@ -169,14 +169,14 @@ def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
     headers_by_tab = {t.title: t.header for t in tabs}
 
     # list_tabs()/TabInfo.header always reads row 1 -- true for every tab
-    # except Lineups, whose real header moved to row 8 when
-    # sheet_bench.py's add_bench inserted a 7-row bench above it. Without
-    # this override, _check_linked_edge_columns would read the Bench
-    # title as Lineups' "header", always report it unlinked, and (this
-    # happened for real, on the template) `dfs sheets link-edge` would
-    # append a second, wrongly-positioned copy of LINKED_EDGE_COLUMNS on
-    # top of lineup data that's already correctly linked -- see
-    # CONTRIBUTING.md's changelog.
+    # except Lineups, whose real header moved when sheet_pool_deck.py's
+    # add_pool_deck inserted rows above it. Without this override,
+    # _check_linked_edge_columns would read the deck's row-1 controls as
+    # Lineups' "header", always report it unlinked, and (this happened for
+    # real, on the template, during an earlier version of this row-insert)
+    # `dfs sheets link-edge` would append a second, wrongly-positioned copy
+    # of LINKED_EDGE_COLUMNS on top of lineup data that's already correctly
+    # linked -- see CONTRIBUTING.md's changelog.
     lineups_tab = cfg.lineups.builder_tab
     if lineups_tab in tab_titles:
         lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1

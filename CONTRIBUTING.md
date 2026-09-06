@@ -194,6 +194,18 @@ for the next row-insert-adjacent change: grep for *every* hardcoded
 `"A1:1"` / `row_values(1)` in the codebase before running anything live,
 not just the one function under active review.
 
+| 2026-09-06 | `Lineups` | The above row's 7-row "Bench" (names only) was superseded, same day, before general use: `sheet_bench.py` removed, replaced by `sheet_pool_deck.py`'s 14-row "pool deck" (`dfs sheets add-pool-deck`) -- a sortable/filterable window into Player Pool carrying every metric column (Salary/Pts/Ceil/Val/CeilVal/Leverage/Flag/...), not just names, since a names-only pinned list didn't remove the reason Sam was using split-screen in the first place. A sheet already migrated to the 7-row Bench was carried the rest of the way (clear its content, insert 7 *more* rows) rather than reverted and redone, so the net shift from the original template is +14, not a clean single move. | header row 8 (from the row above); blocks at 9, 22, 35 … 256 | header row 15; blocks at 16, 29, 42 … 263 | Live + Template | `weekly_reset.LINEUPS_NAME_BLOCKS` (now +14 from original), plus every symbol in the row above -- all of them are parameters *derived* from `LINEUPS_NAME_BLOCKS[0][0] - 1` (not hardcoded to 8), so this second shift required zero code changes to `polish_builder_tab`/`build_exposure`/`link_edge_columns`/`doctor`'s call sites beyond the constant itself. New: `sheet_pool_deck.DECK_ROWS`, `POOL_SORT_TAB` (a new hidden helper tab) |
+
+Verified end-to-end on both sheets after the second shift: `P16` reads
+`=D16/D$25` (was `=D9/D$18` before this, `=D2/D$11` originally) --
+confirming Sheets re-shifted every existing formula (Lineups' own,
+*and* the "Bench" row's `dfs sheets link-edge`/Guardrails formulas
+written in the meantime) a second time, correctly, with no code
+involved in that part at all. `dfs sheets doctor`/`link-edge` clean and
+idempotent on both sheets afterward; `add_pool_deck` itself is
+migration-aware (detects "fresh" / "bench" / "deck" state before
+touching anything) and idempotent once a deck is present.
+
 ## Keeping docs and the sheet's Instructions tab in sync
 
 This has already gone stale more than once: `EDGE_COLUMNS` gained columns
