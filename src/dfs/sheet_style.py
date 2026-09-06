@@ -82,6 +82,10 @@ _HEADER_FMT = {
     "verticalAlignment": "MIDDLE",
     "horizontalAlignment": "LEFT",
 }
+# Public alias -- sheet_pool_deck.py reuses this exact style for its own
+# mini-header row (row 3) so it visually matches every other header on
+# the sheet, without duplicating the color/weight choices in two places.
+HEADER_FMT = _HEADER_FMT
 
 
 def _chip(bg: dict, fg: dict) -> dict:
@@ -300,6 +304,7 @@ def polish_builder_tab(
     header_row: int = 1,
     freeze_rows: int | None = None,
     freeze_cols: int = 1,
+    header_repeats_at: list[int] | None = None,
 ) -> str:
     """Number formats, widths, header treatment and (by default) a pinned
     Name column on a tab whose header row names its columns. Reads the
@@ -307,14 +312,20 @@ def polish_builder_tab(
     given position.
 
     `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but not
-    for Lineups: `sheet_pool_deck.py`'s `add_pool_deck` inserted 14 rows
-    above its header, so its caller passes `header_row=15` (derived from
+    for Lineups: `sheet_pool_deck.py`'s `add_pool_deck` inserts frozen rows
+    above its header, so its caller passes the real row (derived from
     `LINEUPS_NAME_BLOCKS`, not hardcoded). `freeze_rows` defaults to
     freezing through the header row itself; Lineups instead passes its
-    deck row count, since freezing 15 rows would freeze past the header
-    into the first lineup block. `freeze_cols` defaults to 1 (pin Name);
-    Lineups passes 0 so this doesn't fight the deck's own column-freeze
-    choice (see `sheet_pool_deck.py`).
+    deck row count, since freezing past the header would freeze into the
+    first lineup block. `freeze_cols` defaults to 1 (pin Name); Lineups
+    passes 0 so this doesn't fight the deck's own column-freeze choice
+    (see `sheet_pool_deck.py`).
+
+    `header_repeats_at` styles Lineups' repeated sub-header rows (one per
+    lineup block after the first, see `weekly_reset.py`) the same dark
+    way as the real header, so every block reads consistently instead of
+    only the first one looking like a header. Player Pool/PlayerPoolRaw
+    have no repeats and pass nothing.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -326,6 +337,8 @@ def polish_builder_tab(
 
     last_col = column_letter(len(header) - 1)
     client.format_range(tab, f"A{header_row}:{last_col}{header_row}", _HEADER_FMT)
+    for repeat_row in header_repeats_at or []:
+        client.format_range(tab, f"A{repeat_row}:{last_col}{repeat_row}", _HEADER_FMT)
     client.freeze(tab, rows=freeze_rows if freeze_rows is not None else header_row, cols=freeze_cols)
 
     widths = {}

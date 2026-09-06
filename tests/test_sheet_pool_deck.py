@@ -7,6 +7,7 @@ from dfs.sheet_pool_deck import (
     POOL_SORT_TAB,
     add_pool_deck,
 )
+from dfs.sheet_style import HEADER_FMT
 
 _POOL_HEADER = [
     "Name",
@@ -48,6 +49,7 @@ class FakeDeckClient:
         self.tab_properties_calls: list[tuple[str, bool | None]] = []
         self.update_calls: list[tuple[str, list[list]]] = []
         self.dropdown_calls: list[tuple[str, list[str]]] = []
+        self.clear_validation_calls: list[str] = []
         self.format_calls: list[tuple[str, dict]] = []
         self.freeze_calls: list[tuple] = []
         self.row_height_calls: list[tuple] = []
@@ -82,6 +84,9 @@ class FakeDeckClient:
     def set_dropdown_validation(self, tab_name: str, a1_range: str, options: list[str]) -> None:
         self.dropdown_calls.append((a1_range, options))
 
+    def clear_data_validation(self, tab_name: str, a1_range: str) -> None:
+        self.clear_validation_calls.append(a1_range)
+
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         self.format_calls.append((a1_range, fmt))
 
@@ -92,16 +97,24 @@ class FakeDeckClient:
         self.row_height_calls.append((tab_name, start_row, end_row, pixel_size))
 
 
-def test_add_pool_deck_skips_when_deck_already_present():
+def test_add_pool_deck_already_present_skips_structure_but_still_refreshes_everything():
+    # Structurally a no-op, but every formatting/content fix found after
+    # this first shipped only reaches an already-migrated sheet because
+    # the rebuild below is unconditional -- an early return here once
+    # left exactly that gap (see CONTRIBUTING.md's changelog).
     client = FakeDeckClient(cells={f"A{DECK_ROWS + 1}": "Name"})
 
     result = add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
-    assert "already present" in result
+    assert "refresh" in result
     assert client.insert_calls == []
     assert client.delete_calls == []
     assert client.clear_calls == []
-    assert client.write_tab_calls == []
+    assert client.write_tab_calls != []  # PoolSort still gets rebuilt
+    reset_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
+    assert reset_call[1]["backgroundColor"] == {"red": 1, "green": 1, "blue": 1}
+    g1_call = next(c for c in client.format_calls if c[0] == "G1")
+    assert g1_call[1] == {"textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}}}
 
 
 def test_add_pool_deck_from_fresh_inserts_deck_rows_once():
@@ -127,35 +140,17 @@ def test_add_pool_deck_migrates_old_bench_by_clearing_then_inserting_the_remaind
 
 
 def test_add_pool_deck_shrinks_old_fourteen_row_deck_by_deleting_the_tail():
-    # The original 14-row deck's rows 1-9 already hold correct content at
-    # the new size (the first _WINDOW_SIZE window rows show the same
-    # ranks either way) -- only the now-unwanted tail needs removing.
     client = FakeDeckClient(cells={f"A{_OLD_DECK14_HEADER_ROW}": "Name"})
 
     result = add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     # Deletion must start right after the new window's last row (3 +
     # _WINDOW_SIZE = 9), so the old blank separator row shifts up to
-    # land exactly on row DECK_ROWS -- verified below by checking what's
-    # now at that row, not just trusting the delete call's own math.
+    # land exactly on row DECK_ROWS.
     assert client.delete_calls == [("Lineups", DECK_ROWS, _OLD_DECK14_ROWS - DECK_ROWS)]
     assert client.insert_calls == []
     assert client.clear_calls == []
-    # Rows 1-9 are correct as-is: no need to rebuild PoolSort or controls.
-    assert client.write_tab_calls == []
-    assert client.update_calls == []
     assert "14-row deck shrink" in result
-
-
-def test_add_pool_deck_shrink_still_refreezes_and_resets_background():
-    client = FakeDeckClient(cells={f"A{_OLD_DECK14_HEADER_ROW}": "Name"})
-
-    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
-
-    assert client.freeze_calls == [("Lineups", DECK_ROWS, None)]
-    assert ("Lineups", 3, 3 + 6, 18) in client.row_height_calls
-    bg_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
-    assert bg_call[1] == {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}
 
 
 def test_add_pool_deck_builds_pool_sort_hidden_tab_with_position_and_sort_formula():
@@ -189,13 +184,36 @@ def test_add_pool_deck_writes_controls_defaults_and_dropdowns():
     assert ("D1", ["CeilVal", "Leverage", "Pts", "Ceil", "Val", "DK Sal", "Rstr%"]) in client.dropdown_calls
 
 
-def test_add_pool_deck_copies_player_pool_header_into_row_three():
+def test_add_pool_deck_pool_count_readout_uses_countif_not_counta():
+    # PoolSort's IFERROR(SORT(FILTER(...)),"") falls back to a single ""
+    # cell when the pool is empty, which COUNTA counts as non-blank (a
+    # real Sheets gotcha) -- misreporting "1 in pool" on an empty pool.
+    # COUNTIF(...,"?*") requires at least one real character and doesn't
+    # have this problem.
+    client = FakeDeckClient()
+
+    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    control_call = next(c for c in client.update_calls if c[0] == "A1:I1")
+    readout = control_call[1][0][8]
+    assert "COUNTA" not in readout
+    assert readout.count('COUNTIF(PoolSort!$A$2:$A$74,"?*")') == 3
+    # "showing N-M" must be suppressed entirely when the count is 0,
+    # not rendered as a nonsensical "showing 1-0" (start past end).
+    assert 'IF(COUNTIF(PoolSort!$A$2:$A$74,"?*")=0,""' in readout
+
+
+def test_add_pool_deck_copies_player_pool_header_into_row_three_and_styles_it():
+    # Row 3 (the deck's own mini-header) must look like every other
+    # header on the sheet, not plain text -- previously unstyled.
     client = FakeDeckClient()
 
     add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     header_call = next(c for c in client.update_calls if c[0] == "A3:Z3")
     assert header_call[1] == [_POOL_HEADER]
+    format_call = next(c for c in client.format_calls if c[0] == "A3:Z3")
+    assert format_call[1] == HEADER_FMT
 
 
 def test_add_pool_deck_window_formulas_skip_spacer_columns_and_offset_by_start_row():
@@ -216,12 +234,56 @@ def test_add_pool_deck_window_formulas_skip_spacer_columns_and_offset_by_start_r
     assert "INDEX(PoolSort!A:A,$F$1+9-3)" in last_row[0]
 
 
-def test_add_pool_deck_freezes_sets_compact_row_heights_and_resets_background():
+def test_add_pool_deck_hides_g1_after_the_formatting_reset_not_before():
+    # _reset_deck_formatting repaints the whole zone including G1 -- if it
+    # ran after G1's own white-on-white hide instead of before, G1 would
+    # come back visible (black-on-white) despite still being load-bearing
+    # plumbing, not something meant to be read.
+    client = FakeDeckClient()
+
+    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    reset_index = next(i for i, c in enumerate(client.format_calls) if c[0] == f"A1:Z{DECK_ROWS}")
+    g1_index = next(i for i, c in enumerate(client.format_calls) if c[0] == "G1")
+    assert reset_index < g1_index
+    white_text = {"textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}}}
+    assert client.format_calls[g1_index][1] == white_text
+
+
+def test_add_pool_deck_shrink_also_rebuilds_controls_and_rehides_g1():
+    client = FakeDeckClient(cells={f"A{_OLD_DECK14_HEADER_ROW}": "Name"})
+
+    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    assert client.write_tab_calls != []  # PoolSort rebuilt even on the shrink path
+    g1_call = next(c for c in client.format_calls if c[0] == "G1")
+    assert g1_call[1] == {"textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}}}
+
+
+def test_add_pool_deck_clears_inherited_data_validation_from_the_whole_zone():
+    # Lineups' column A carries a pre-existing "must be a real player
+    # name" validation (looked up against PlayerPoolRaw) that every row
+    # this module has ever inserted also inherited, since insert_rows at
+    # the top has no way to insert rows without copying the formatting
+    # (and validation) of whatever gets pushed below them. A person
+    # typing into one of these cells got rejected by it even though no
+    # API-level check ever caught it -- see CONTRIBUTING.md's changelog.
+    client = FakeDeckClient()
+
+    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    assert client.clear_validation_calls == [f"A1:Z{DECK_ROWS}"]
+
+
+def test_add_pool_deck_freezes_sets_compact_row_heights_and_resets_formatting():
     client = FakeDeckClient()
 
     add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     assert client.freeze_calls == [("Lineups", DECK_ROWS, None)]
     assert client.row_height_calls == [("Lineups", 3, 9, 18)]
-    bg_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
-    assert bg_call[1] == {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}
+    reset_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
+    assert reset_call[1] == {
+        "backgroundColor": {"red": 1, "green": 1, "blue": 1},
+        "textFormat": {"foregroundColor": {"red": 0, "green": 0, "blue": 0}, "bold": False},
+    }

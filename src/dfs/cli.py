@@ -347,6 +347,7 @@ def sheets_polish(
                 header_row=lineups_header_row,
                 freeze_rows=DECK_ROWS,
                 freeze_cols=0,
+                header_repeats_at=[start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]],
             )
         )
         results.append(

@@ -423,6 +423,25 @@ class SheetsClient:
             }
         )
 
+    def clear_data_validation(self, tab_name: str, a1_range: str) -> None:
+        """Remove any data-validation rule from `a1_range` (a `setDataValidation`
+        request with no `rule` clears whatever's there). Needed alongside
+        `insert_rows`' formatting reset for the same reason: a new row
+        inserted at the top inherits not just the fill/text color of the
+        row pushed below it, but any data-validation rule on it too. A
+        Lineups column A that restricts entries to a real player name
+        (looked up against PlayerPoolRaw) is exactly the kind of rule
+        that would otherwise silently follow every inserted row into a
+        zone meant to hold something else entirely -- caught only when a
+        person tried to type into one of those cells in the browser and
+        got rejected; a script-driven write doesn't enforce `strict` the
+        way the interactive UI does, so this was invisible to every
+        API-level check. See CONTRIBUTING.md's changelog.
+        """
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        sheet.batch_update({"requests": [{"setDataValidation": {"range": grid_range}}]})
+
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         """Apply a raw CellFormat dict to a range (fills, fonts, alignment,
         number formats). Passed straight through to the Sheets API."""

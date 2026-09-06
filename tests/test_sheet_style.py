@@ -14,6 +14,7 @@ from dfs.sheet_style import (
     WARN_FG,
     WEEK_ORDER,
     apply_tab_chrome,
+    polish_builder_tab,
     polish_edge,
     polish_guardrails,
 )
@@ -181,6 +182,60 @@ def test_polish_guardrails_widens_column_o_and_clears_only_its_own_rules():
 
     assert client.width_calls == [{"O": 110}]
     assert client.clear_calls == ["O"]  # never a blanket clear of Lineups' other rules
+
+
+class FakeBuilderTabClient:
+    def __init__(self, header: list[str]):
+        self._header = header
+        self.format_calls: list[tuple[str, dict]] = []
+        self.freeze_calls: list[tuple] = []
+        self.width_calls: list[dict] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return True
+
+    def read_range(self, tab_name: str, a1_range: str):
+        return [self._header]
+
+    def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
+        self.format_calls.append((a1_range, fmt))
+
+    def freeze(self, tab_name: str, *, rows=None, cols=None) -> None:
+        self.freeze_calls.append((tab_name, rows, cols))
+
+    def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
+        self.width_calls.append(widths)
+
+
+def test_polish_builder_tab_styles_header_repeats_the_same_as_the_real_header():
+    # Lineups' repeated sub-headers (one per lineup block after the
+    # first) looked plain while only the real header was dark -- every
+    # block should read consistently, not just the first one.
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+
+    polish_builder_tab(
+        client,
+        "Lineups",
+        last_row=100,
+        header_row=11,
+        header_repeats_at=[24, 37],
+    )
+
+    by_range = dict(client.format_calls)
+    assert "A11:C11" in by_range
+    assert "A24:C24" in by_range
+    assert "A37:C37" in by_range
+    # All three get the identical dark header treatment, not a lesser one.
+    assert by_range["A11:C11"] == by_range["A24:C24"] == by_range["A37:C37"]
+
+
+def test_polish_builder_tab_skips_repeat_styling_when_none_given():
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    formatted_ranges = [a1 for a1, _fmt in client.format_calls]
+    assert formatted_ranges == ["A1:C1"]
 
 
 def _chip(bg: dict, fg: dict) -> dict:

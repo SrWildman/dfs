@@ -31,6 +31,7 @@ class FakeWorksheet:
         self.insert_dimension_calls: list[dict] = []
         self.delete_dimension_calls: list[dict] = []
         self.conditional_formats: list[dict] = []
+        self.data_validation_calls: list[dict] = []
 
     def _cell(self, row: int, col: int) -> str:
         if row - 1 < len(self._rows) and col - 1 < len(self._rows[row - 1]):
@@ -144,6 +145,9 @@ class FakeSpreadsheet:
             if "deleteDimension" in request:
                 sheet_id = request["deleteDimension"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).delete_dimension_calls.append(request["deleteDimension"])
+            if "setDataValidation" in request:
+                sheet_id = request["setDataValidation"]["range"]["sheetId"]
+                self._ws_by_id(sheet_id).data_validation_calls.append(request["setDataValidation"])
 
     def _ws_by_id(self, sheet_id: int) -> FakeWorksheet:
         return next(ws for ws in self._worksheets.values() if ws.id == sheet_id)
@@ -339,6 +343,31 @@ def test_delete_rows_issues_a_delete_dimension_request(cfg, monkeypatch, tmp_pat
     assert len(ws.delete_dimension_calls) == 1
     r = ws.delete_dimension_calls[0]["range"]
     assert (r["dimension"], r["startIndex"], r["endIndex"]) == ("ROWS", 9, 13)
+
+
+def test_set_dropdown_validation_targets_only_the_given_cell(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.set_dropdown_validation("T", "B1", ["ALL", "QB"])
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.data_validation_calls) == 1
+    call = ws.data_validation_calls[0]
+    assert call["range"]["startColumnIndex"] == 1  # column B, 0-indexed
+    assert call["rule"]["condition"]["type"] == "ONE_OF_LIST"
+    assert call["rule"]["strict"] is True
+
+
+def test_clear_data_validation_sends_no_rule(cfg, monkeypatch, tmp_path):
+    # A setDataValidation request with no `rule` is how the Sheets API
+    # clears an existing validation -- e.g. a rule inherited onto a new
+    # row by insert_rows that doesn't belong there (see
+    # SheetsClient.clear_data_validation's docstring).
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.clear_data_validation("T", "A1:Z10")
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.data_validation_calls) == 1
+    assert "rule" not in ws.data_validation_calls[0]
 
 
 def test_ws_caches_a_tab_across_calls_instead_of_re_resolving_every_time(cfg, monkeypatch, tmp_path):
