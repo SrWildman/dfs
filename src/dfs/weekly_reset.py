@@ -5,8 +5,21 @@ The sheet gets duplicated fresh from a template every week (see the
 weekly-template link in README.md), so most tabs start clean automatically.
 Four tabs don't, because they hold typed values a human enters while
 building lineups, not formulas: `Lineups` and `Player Pool` (a name column
-per row, everything else VLOOKUPs off it), and `Scratch`/`DK Upload` (full
-grids of typed player picks / contest entries with no formulas at all).
+per row, everything else VLOOKUPs off it -- though see Task K below,
+`Player Pool`'s Name column isn't actually typed anymore), and
+`Scratch`/`DK Upload` (full grids of typed player picks / contest entries
+with no formulas at all).
+
+Task K (4.3) made Player Pool's Name column a SORT/FILTER formula off
+EdgeRaw's Pool tick column instead of a typed value -- `clear_previous_week`
+detects this (a formula in the first block's first cell) and skips
+clearing Player Pool entirely rather than destroying the formula, since
+the actual per-week state (which players are ticked) lives in EdgeRaw,
+which `dfs sync` already rewrites every week regardless. A follow-up to
+4.3 (same session) then resized the RB/TE/DST blocks larger (Sam wanted
+headroom rather than a manual-override escape hatch) via a real
+`insertDimension`-based row insert -- see `sheet_pool_resize.py` -- which
+is why PLAYER_POOL_NAME_BLOCKS' row counts aren't uniform per position.
 
 The row blocks below are specific to this sheet's template layout -- they
 were measured directly off the live sheet (non-blank formula rows in each
@@ -64,7 +77,7 @@ LINEUPS_NAME_BLOCKS = [
     (246, 255),
     (259, 268),
 ]
-PLAYER_POOL_NAME_BLOCKS = [(2, 11), (13, 29), (31, 55), (57, 65), (67, 74)]
+PLAYER_POOL_NAME_BLOCKS = [(2, 11), (13, 32), (34, 58), (60, 69), (71, 80)]
 
 # Full-grid tabs: clear everything below the header, generously past any
 # row/column count actually seen so far.
@@ -83,9 +96,22 @@ def clear_previous_week(
     client.clear_ranges(lineups_tab, lineups_ranges)
     summary.append(f"{lineups_tab}: cleared Name column across {len(LINEUPS_NAME_BLOCKS)} lineup slot(s)")
 
-    pool_ranges = [f"A{s}:A{e}" for s, e in PLAYER_POOL_NAME_BLOCKS]
-    client.clear_ranges(player_pool_tab, pool_ranges)
-    summary.append(f"{player_pool_tab}: cleared Name column across {len(PLAYER_POOL_NAME_BLOCKS)} block(s)")
+    first_start, _ = PLAYER_POOL_NAME_BLOCKS[0]
+    first_cell = client.read_formula(player_pool_tab, f"A{first_start}")
+    is_formula_driven = bool(first_cell and first_cell[0] and str(first_cell[0][0]).startswith("="))
+    if is_formula_driven:
+        # Task K 4.3: Player Pool's Name column is a SORT/FILTER formula off
+        # EdgeRaw's Pool tick column, not a typed value -- clearing it would
+        # destroy the feature on the very first `dfs week new` after it
+        # ships. Nothing here needs clearing: the ticks live in EdgeRaw,
+        # which `dfs sync` already rewrites (and restores, see
+        # sources/edge.py) every week regardless.
+        summary.append(f"{player_pool_tab}: formula-driven (Task K), Name column left alone")
+    else:
+        pool_ranges = [f"A{s}:A{e}" for s, e in PLAYER_POOL_NAME_BLOCKS]
+        client.clear_ranges(player_pool_tab, pool_ranges)
+        n = len(PLAYER_POOL_NAME_BLOCKS)
+        summary.append(f"{player_pool_tab}: cleared Name column across {n} block(s)")
 
     client.clear_ranges(scratch_tab, [SCRATCH_RANGE])
     summary.append(f"{scratch_tab}: cleared {SCRATCH_RANGE}")

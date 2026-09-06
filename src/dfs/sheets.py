@@ -15,7 +15,7 @@ import json
 from dataclasses import dataclass
 
 import gspread
-from gspread.utils import ValueInputOption, a1_range_to_grid_range
+from gspread.utils import ValueInputOption, ValueRenderOption, a1_range_to_grid_range
 
 from dfs.config import GoogleSheetsConfig
 from dfs.log import get_logger
@@ -179,6 +179,15 @@ class SheetsClient:
         """Read a sub-range without touching anything outside it."""
         _, ws = self._ws(tab_name)
         return ws.get(a1_range)
+
+    def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
+        """Like `read_range`, but returns the literal formula text (e.g.
+        "=SUM(A1:A2)") instead of the resolved value for any formula cell --
+        needed to tell "a typed value" from "a formula that happens to
+        currently resolve to the same-looking text" (see
+        `weekly_reset.clear_previous_week`'s Player Pool formula check)."""
+        _, ws = self._ws(tab_name)
+        return ws.get(a1_range, value_render_option=ValueRenderOption.formula)
 
     def clear_ranges(self, tab_name: str, a1_ranges: list[str]) -> None:
         """Clear cell values in the given ranges -- formatting (including

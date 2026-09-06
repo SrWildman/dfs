@@ -45,7 +45,7 @@ class FakeWorksheet:
     def get_all_values(self) -> list[list[str]]:
         return self._rows
 
-    def get(self, a1_range: str) -> list[list[str]]:
+    def get(self, a1_range: str, value_render_option=None) -> list[list[str]]:
         grid = a1_range_to_grid_range(a1_range)
         row_start = grid.get("startRowIndex", 0)
         row_end = grid.get("endRowIndex", len(self._rows))
@@ -217,6 +217,12 @@ def test_read_range_returns_only_the_requested_rectangle(cfg, monkeypatch, tmp_p
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["A", "B", "C"], ["1", "2", "3"], ["4", "5", "6"]])
     assert client.read_range("T", "B1:C2") == [["B", "C"], ["2", "3"]]
+
+
+def test_read_formula_returns_the_requested_rectangle(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["=SUM(A1:A2)", "plain"]])
+    assert client.read_formula("T", "A1:B1") == [["=SUM(A1:A2)", "plain"]]
 
 
 def test_update_range_does_not_touch_cells_outside_the_range(cfg, monkeypatch, tmp_path):

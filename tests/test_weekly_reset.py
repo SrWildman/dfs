@@ -10,11 +10,15 @@ from dfs.weekly_reset import (
 class SpySheetsClient:
     """Records clear_ranges calls instead of touching a real sheet."""
 
-    def __init__(self):
+    def __init__(self, player_pool_a1_formula: str = ""):
         self.calls: list[tuple[str, list[str]]] = []
+        self._player_pool_a1_formula = player_pool_a1_formula
 
     def clear_ranges(self, tab_name, a1_ranges):
         self.calls.append((tab_name, list(a1_ranges)))
+
+    def read_formula(self, tab_name, a1_range):
+        return [[self._player_pool_a1_formula]]
 
 
 def test_clear_previous_week_targets_each_configured_tab():
@@ -48,6 +52,25 @@ def test_clear_previous_week_clears_full_grid_for_scratch_and_dk_upload():
 
     assert calls["Scratch"] == [SCRATCH_RANGE]
     assert calls["DK Upload"] == [DK_UPLOAD_RANGE]
+
+
+def test_clear_previous_week_skips_player_pool_when_name_column_is_a_formula():
+    # Task K 4.3: once Player Pool's Name column is SORT/FILTER-driven off
+    # EdgeRaw, clearing it on `dfs week new` would destroy the feature.
+    client = SpySheetsClient(player_pool_a1_formula='=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER(...)),"")')
+    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    tabs_touched = [tab for tab, _ in client.calls]
+
+    assert "Player Pool" not in tabs_touched
+    assert tabs_touched == ["Lineups", "Scratch", "DK Upload"]
+
+
+def test_clear_previous_week_still_clears_player_pool_when_it_holds_typed_values():
+    client = SpySheetsClient(player_pool_a1_formula="Patrick Mahomes")
+    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    calls = dict(client.calls)
+
+    assert calls["Player Pool"] == [f"A{s}:A{e}" for s, e in PLAYER_POOL_NAME_BLOCKS]
 
 
 def test_lineups_blocks_skip_the_repeated_sub_header_row():
