@@ -357,6 +357,18 @@ def test_set_dropdown_validation_targets_only_the_given_cell(cfg, monkeypatch, t
     assert call["rule"]["strict"] is True
 
 
+def test_set_checkbox_validation_uses_boolean_condition(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.set_checkbox_validation("T", "W2:W10")
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.data_validation_calls) == 1
+    call = ws.data_validation_calls[0]
+    assert call["range"]["startColumnIndex"] == 22  # column W, 0-indexed
+    assert call["rule"]["condition"]["type"] == "BOOLEAN"
+    assert call["rule"]["strict"] is True
+
+
 def test_clear_data_validation_sends_no_rule(cfg, monkeypatch, tmp_path):
     # A setDataValidation request with no `rule` is how the Sheets API
     # clears an existing validation -- e.g. a rule inherited onto a new

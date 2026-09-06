@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB, find_all_contiguous
+from dfs.sources.edge import POOL_HEADER
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
 
 # Column A of every repeated Lineups sub-header row is the literal text
@@ -73,13 +74,25 @@ def _check_edge_header(
     if not edge_tab or edge_tab not in tab_titles:
         return []
     header = headers_by_tab.get(edge_tab, [])
-    if header != EDGE_COLUMNS:
+    if header[: len(EDGE_COLUMNS)] != EDGE_COLUMNS:
         return [
             DoctorIssue(
                 "edgeraw-header",
                 f"{edge_tab!r} header does not match EDGE_COLUMNS.\n"
                 f"    expected: {EDGE_COLUMNS}\n"
-                f"    actual:   {header}",
+                f"    actual:   {header[: len(EDGE_COLUMNS)]}",
+            )
+        ]
+    # Pool (Task K) is a real column deliberately kept out of EDGE_COLUMNS
+    # -- see sources/edge.py's docstring on why -- so it's checked
+    # separately, just for the label being where sync always puts it.
+    pool_cell = header[len(EDGE_COLUMNS)] if len(header) > len(EDGE_COLUMNS) else None
+    if pool_cell is not None and pool_cell != POOL_HEADER:
+        return [
+            DoctorIssue(
+                "edgeraw-header",
+                f"{edge_tab!r} column {len(EDGE_COLUMNS) + 1} should be {POOL_HEADER!r} "
+                f"(the Pool tick column), found {pool_cell!r}.",
             )
         ]
     return []

@@ -423,6 +423,33 @@ class SheetsClient:
             }
         )
 
+    def set_checkbox_validation(self, tab_name: str, a1_range: str) -> None:
+        """Restrict `a1_range` to a real Sheets checkbox (`BOOLEAN` data
+        validation) -- renders as a clickable checkbox and round-trips
+        TRUE/FALSE. Per lesson learned this session: the Sheets API accepts
+        (and silently no-ops on) a malformed validation rule just as easily
+        as a correct one, so a caller relying on this for a hard guarantee
+        (e.g. EdgeRaw's Pool column driving Player Pool's formulas) should
+        still read the rule back and/or have it confirmed in the browser --
+        don't just trust that this call didn't raise."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "setDataValidation": {
+                            "range": grid_range,
+                            "rule": {
+                                "condition": {"type": "BOOLEAN"},
+                                "strict": True,
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+
     def clear_data_validation(self, tab_name: str, a1_range: str) -> None:
         """Remove any data-validation rule from `a1_range` (a `setDataValidation`
         request with no `rule` clears whatever's there). Needed alongside

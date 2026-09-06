@@ -57,9 +57,10 @@ def run_sync(
                     raise SheetsError(
                         f"No tab mapped for source {name!r} in config.toml [google_sheets.tab_mappings]."
                     )
+                preserved = source.pre_upload(client, tab)
                 rows = source.to_sheet_rows(df)
                 client.write_tab(tab, rows)
-                source.post_upload(client, tab, df)
+                source.post_upload(client, tab, df, preserved)
 
             record_success(name, len(df))
             results.append(SourceResult(name, True, len(df), None))

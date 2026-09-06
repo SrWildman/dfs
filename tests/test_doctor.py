@@ -116,6 +116,25 @@ def test_run_doctor_flags_edgeraw_header_mismatch():
     assert any(i.check == "edgeraw-header" for i in issues)
 
 
+def test_run_doctor_passes_when_edgeraw_has_a_correct_pool_column():
+    tabs = dict(_ALL_GOOD_TABS)
+    tabs["EdgeRaw"] = [*EDGE_COLUMNS, "Pool"]
+    cfg = _base_config()
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+
+    assert run_doctor(client, cfg) == []
+
+
+def test_run_doctor_flags_a_wrong_label_in_edgeraw_pool_column():
+    tabs = dict(_ALL_GOOD_TABS)
+    tabs["EdgeRaw"] = [*EDGE_COLUMNS, "SomethingElse"]
+    cfg = _base_config()
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+
+    issues = run_doctor(client, cfg)
+    assert any(i.check == "edgeraw-header" and "Pool" in i.detail for i in issues)
+
+
 def test_run_doctor_flags_missing_linked_edge_columns():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["Lineups"] = ["Name", "Pos."]  # never linked
