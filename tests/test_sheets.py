@@ -28,6 +28,7 @@ class FakeWorksheet:
         self.frozen_rows = 0
         self.color_scale_calls: list[dict] = []
         self.dimension_group_calls: list[dict] = []
+        self.insert_dimension_calls: list[dict] = []
 
     def _cell(self, row: int, col: int) -> str:
         if row - 1 < len(self._rows) and col - 1 < len(self._rows[row - 1]):
@@ -125,6 +126,9 @@ class FakeSpreadsheet:
             if "addDimensionGroup" in request:
                 sheet_id = request["addDimensionGroup"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).dimension_group_calls.append(request["addDimensionGroup"])
+            if "insertDimension" in request:
+                sheet_id = request["insertDimension"]["range"]["sheetId"]
+                self._ws_by_id(sheet_id).insert_dimension_calls.append(request["insertDimension"])
 
     def _ws_by_id(self, sheet_id: int) -> FakeWorksheet:
         return next(ws for ws in self._worksheets.values() if ws.id == sheet_id)
@@ -234,6 +238,23 @@ def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path)
     assert len(ws.dimension_group_calls) == 1
     r = ws.dimension_group_calls[0]["range"]
     assert (r["startIndex"], r["endIndex"]) == (15, 25)  # P..Y, 0-indexed half-open
+
+
+def test_insert_rows_issues_an_insert_dimension_request_not_a_rewrite(cfg, monkeypatch, tmp_path):
+    # insertDimension (not write_tab/clear) is what makes Sheets itself
+    # shift existing formula ranges down -- see sheet_bench.py's docstring
+    # and CONTRIBUTING.md's Phase 8 postmortem.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["existing"]])
+    client.insert_rows("T", at_row=1, count=7)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.insert_dimension_calls) == 1
+    req = ws.insert_dimension_calls[0]
+    assert req["inheritFromBefore"] is False
+    r = req["range"]
+    assert (r["dimension"], r["startIndex"], r["endIndex"]) == ("ROWS", 0, 7)
+    # Not a rewrite: existing content untouched by insert_rows itself.
+    assert ws.get_all_values() == [["existing"]]
 
 
 def test_ws_caches_a_tab_across_calls_instead_of_re_resolving_every_time(cfg, monkeypatch, tmp_path):

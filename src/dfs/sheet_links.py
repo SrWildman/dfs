@@ -112,6 +112,7 @@ def link_edge_columns(
     name_blocks: list[tuple[int, int]],
     edge_tab: str,
     *,
+    header_row: int = 1,
     header_repeats_at: list[int] | None = None,
 ) -> str:
     """Append LINKED_EDGE_COLUMNS to `tab`, starting one column past
@@ -127,9 +128,20 @@ def link_edge_columns(
     trailing columns of its own, `Venue`/`Ceil`, so its tail no longer
     matched even though the columns were already linked earlier in the
     row).
+
+    `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but
+    not for Lineups once `sheet_bench.py`'s `add_bench` inserts a 7-row
+    bench above its header: reading/writing row 1 there finds the Bench
+    title instead of the real header, mistakes an already-linked tab for
+    an unlinked one, and appends a *second*, wrongly-positioned copy of
+    LINKED_EDGE_COLUMNS starting at column B -- overwriting every lineup
+    block's Pos./Team/DK Sal/etc. data with a duplicate EdgeRaw lookup.
+    This happened for real on the template; see CONTRIBUTING.md's
+    changelog. The CLI passes Lineups' real header row explicitly rather
+    than hardcoding it.
     """
-    header_row = client.read_range(tab, "A1:1")
-    header = header_row[0] if header_row else []
+    header_row_values = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_row_values[0] if header_row_values else []
 
     n = len(LINKED_EDGE_COLUMNS)
     if _find_contiguous(header, LINKED_EDGE_COLUMNS) is not None:
@@ -139,7 +151,7 @@ def link_edge_columns(
     start_col = column_letter(current_width)
     end_col = column_letter(current_width + n - 1)
 
-    client.update_range(tab, f"{start_col}1:{end_col}1", [LINKED_EDGE_COLUMNS])
+    client.update_range(tab, f"{start_col}{header_row}:{end_col}{header_row}", [LINKED_EDGE_COLUMNS])
     for header_row_num in header_repeats_at or []:
         a1 = f"{start_col}{header_row_num}:{end_col}{header_row_num}"
         client.update_range(tab, a1, [LINKED_EDGE_COLUMNS])

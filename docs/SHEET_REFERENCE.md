@@ -198,6 +198,14 @@ linked `EdgeRaw` block at the far right (`dfs sheets link-edge`).
 `Lineups` additionally has `% of Rstr` (this pick's `Rstr%` as a share of
 the lineup's total `Rstr%`) and a per-lineup salary-remaining row.
 
+`Lineups` also has a 7-row frozen "Bench" at the very top (`dfs sheets
+add-bench`): `Player Pool`'s roster, spilled horizontally by position, so
+it stays on screen through all twenty lineup blocks below instead of
+needing a second window. It's read-only (formulas only, no typed input)
+and purely additive -- the header row and every lineup block moved down
+by exactly 7 rows to make room (`weekly_reset.LINEUPS_NAME_BLOCKS`), but
+nothing about how a lineup is built changed.
+
 `dfs lineups clear` wipes the typed-in `Name` columns (and `Scratch`/`DK
 Upload`, below) at the start of a new week -- everything else here is a
 formula and survives.

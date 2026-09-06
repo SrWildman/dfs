@@ -29,6 +29,7 @@ from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate
 from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
+from dfs.sheet_bench import BENCH_ROWS, add_bench
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheet_style import (
     POOL_RAW_ROWS,
@@ -250,6 +251,38 @@ def sheets_format_edge(
         raise typer.Exit(code=1) from e
 
 
+@sheets_app.command("add-bench")
+def sheets_add_bench(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Add the bench to a different sheet instead of config.toml's -- e.g. the "
+        "canonical weekly template, so new copies already have it.",
+    ),
+) -> None:
+    """One-time structural change: insert 7 frozen rows at the top of
+    Lineups holding Player Pool's roster, laid out horizontally by
+    position, so it stays on screen through all twenty lineup blocks below
+    instead of needing a second window.
+
+    Uses a real Sheets row insert (not a tab rewrite), so every existing
+    Lineups formula and conditional-format range shifts down with it --
+    see CONTRIBUTING.md's Bench changelog entry. Safe to re-run: a bench
+    already present is left alone, not inserted a second time.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Adding bench to {cfg.lineups.builder_tab!r} in: [bold]{title}[/bold]\n{url}\n")
+        result = add_bench(client, lineups_tab=cfg.lineups.builder_tab, pool_tab=cfg.lineups.player_pool_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] {result}")
+
+
 @sheets_app.command("polish")
 def sheets_polish(
     sheet_id: str = typer.Option(
@@ -292,7 +325,17 @@ def sheets_polish(
         pool_last = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
         results.append(polish_builder_tab(client, cfg.lineups.player_pool_tab, last_row=pool_last))
         lineups_last = max(end for _, end in LINEUPS_NAME_BLOCKS)
-        results.append(polish_builder_tab(client, cfg.lineups.builder_tab, last_row=lineups_last))
+        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+        results.append(
+            polish_builder_tab(
+                client,
+                cfg.lineups.builder_tab,
+                last_row=lineups_last,
+                header_row=lineups_header_row,
+                freeze_rows=BENCH_ROWS,
+                freeze_cols=0,
+            )
+        )
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:
             results.append(
                 polish_bankroll(
@@ -365,6 +408,7 @@ def sheets_build_views(
                 edge_tab=edge_tab,
                 lineups_tab=cfg.lineups.builder_tab,
                 lineup_count=len(LINEUPS_NAME_BLOCKS),
+                lineups_data_start_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
             ),
             build_movement(client, edge_tab=edge_tab),
         ]
@@ -415,6 +459,7 @@ def sheets_link_edge(
         )
 
         header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
+        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
         results = [
             link_edge_columns(client, PLAYER_POOL_RAW_TAB, PLAYER_POOL_RAW_BLOCK, edge_tab),
             link_edge_columns(client, cfg.lineups.player_pool_tab, PLAYER_POOL_NAME_BLOCKS, edge_tab),
@@ -423,6 +468,7 @@ def sheets_link_edge(
                 cfg.lineups.builder_tab,
                 LINEUPS_NAME_BLOCKS,
                 edge_tab,
+                header_row=lineups_header_row,
                 header_repeats_at=header_repeats_at,
             ),
         ]

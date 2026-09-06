@@ -157,6 +157,43 @@ just at the tail (`sheet_links.find_all_contiguous`) --
 `test_link_edge_columns_skips_when_linked_block_is_not_at_the_tail` pins
 this exact scenario as a regression test.
 
+## Structural changelog
+
+Every change that actually moves a row, column, or tab position on the
+live sheet and/or template gets a row here -- this is what lets a future
+change confirm "does anything still assume the old position" without
+re-deriving the whole history from git log. See "Live-sheet changes"
+above for why this matters; each row names the Python symbol(s) that
+encode the *new* position, so grepping for them finds every dependent.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-06 | `Lineups` | Header row + all 20 lineup blocks, pushed down by a new 7-row frozen "Bench" (`dfs sheets add-bench`, `sheet_bench.py`) inserted at the top via a real Sheets row insert | header row 1; blocks at 2, 15, 28 … 249 | header row 8; blocks at 9, 22, 35 … 256 | Live + Template | `weekly_reset.LINEUPS_NAME_BLOCKS`, `doctor._check_lineups_header_repeats`'s `expected_rows`, `sheet_style.polish_builder_tab`'s new `header_row`/`freeze_rows`/`freeze_cols` params (Lineups' `dfs sheets polish` call site in `cli.py`), `sheet_views.build_exposure`'s new `lineups_data_start_row` param (its "Slots filled" formula would otherwise miscount the Bench's own position labels as filled roster slots), `sheet_links.link_edge_columns`'s new `header_row` param and `doctor.run_doctor`'s override of `list_tabs()`'s always-row-1 header for Lineups specifically (see incident note below) |
+
+**Incident, same date:** `sheet_links.link_edge_columns` also hardcoded
+reading/writing a tab's header at row 1 -- a second, independent instance
+of the exact bug class `polish_builder_tab` had (and got fixed for) just
+above. It wasn't caught in review before running against the template:
+`dfs sheets link-edge --sheet-id <template>` read Lineups' new Bench
+title (row 1) as its "header," concluded Lineups wasn't linked yet, and
+appended a second, wrongly-positioned `LINKED_EDGE_COLUMNS` block
+starting at column B -- overwriting Pos./Team/DK Sal/O-U/Spread/Team
+Implied/Opp./Venue/OppPosRank/Pts across all 20 lineup blocks (rows
+9-265) on the **template only**. The mandated template-first order (see
+"Live-sheet changes" above) is exactly what kept this off the live sheet.
+Recovered by reading the still-correct original formulas off live's
+untouched pre-shift rows, shifting every row reference by +7, and writing
+them back to the template; the 3 erroneous conditional-format rules and
+the erroneous B:K column group the same bad run added were identified by
+inspecting the template's raw `conditionalFormats`/`columnGroups`
+metadata (not blind-cleared) and deleted individually, leaving the
+legitimate pre-existing ones untouched. Fixed at the root: `doctor.py`'s
+`run_doctor` no longer trusts `list_tabs()`'s row-1-only header for
+Lineups, and `link_edge_columns` takes an explicit `header_row`. Lesson
+for the next row-insert-adjacent change: grep for *every* hardcoded
+`"A1:1"` / `row_values(1)` in the codebase before running anything live,
+not just the one function under active review.
+
 ## Keeping docs and the sheet's Instructions tab in sync
 
 This has already gone stale more than once: `EDGE_COLUMNS` gained columns

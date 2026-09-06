@@ -22,8 +22,9 @@ from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB, find_all_c
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
 
 # Column A of every repeated Lineups sub-header row is the literal text
-# "Name" (see weekly_reset.py's module docstring) -- row 1's own header
-# also starts with this, so the same check covers both.
+# "Name" (see weekly_reset.py's module docstring) -- the tab's own header
+# row (immediately above the first block) also starts with this, so the
+# same check covers both.
 _LINEUPS_HEADER_MARKER = "Name"
 
 
@@ -113,7 +114,7 @@ def _check_lineups_header_repeats(
     if tab not in tab_titles:
         return []
 
-    expected_rows = [1] + [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
+    expected_rows = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS]
     last_row = max(expected_rows)
     raw = client.read_range(tab, f"A1:A{last_row}")
 
@@ -166,6 +167,21 @@ def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
     tabs = client.list_tabs()
     tab_titles = {t.title for t in tabs}
     headers_by_tab = {t.title: t.header for t in tabs}
+
+    # list_tabs()/TabInfo.header always reads row 1 -- true for every tab
+    # except Lineups, whose real header moved to row 8 when
+    # sheet_bench.py's add_bench inserted a 7-row bench above it. Without
+    # this override, _check_linked_edge_columns would read the Bench
+    # title as Lineups' "header", always report it unlinked, and (this
+    # happened for real, on the template) `dfs sheets link-edge` would
+    # append a second, wrongly-positioned copy of LINKED_EDGE_COLUMNS on
+    # top of lineup data that's already correctly linked -- see
+    # CONTRIBUTING.md's changelog.
+    lineups_tab = cfg.lineups.builder_tab
+    if lineups_tab in tab_titles:
+        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+        raw = client.read_range(lineups_tab, f"A{lineups_header_row}:{lineups_header_row}")
+        headers_by_tab[lineups_tab] = raw[0] if raw else []
 
     issues: list[DoctorIssue] = []
     issues += _check_tabs_exist(cfg, tab_titles)

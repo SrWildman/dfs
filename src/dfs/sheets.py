@@ -234,6 +234,34 @@ class SheetsClient:
             }
         )
 
+    def insert_rows(self, tab_name: str, *, at_row: int, count: int) -> None:
+        """Insert `count` blank rows starting at `at_row` (1-indexed) via a
+        real Sheets API `insertDimension` request -- unlike `write_tab`,
+        this makes Sheets shift every existing formula range and
+        conditional-format range on the tab down along with the insert.
+        Rewriting a tab to "make room" does not do that and will silently
+        corrupt whatever depended on the old row positions (see
+        CONTRIBUTING.md's Phase 8 postmortem); this is the only safe way to
+        add rows above content a sheet already depends on."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "insertDimension": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "ROWS",
+                                "startIndex": at_row - 1,
+                                "endIndex": at_row - 1 + count,
+                            },
+                            "inheritFromBefore": False,
+                        }
+                    }
+                ]
+            }
+        )
+
     def group_columns(self, tab_name: str, first_col_a1: str, last_col_a1: str) -> None:
         """Group a column range so it can be collapsed/expanded from the
         sheet UI (Data > Group columns) -- a display convenience only, does

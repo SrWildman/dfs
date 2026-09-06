@@ -292,22 +292,41 @@ BUILDER_NUMBER_FORMATS = {
 BUILDER_WIDTHS = {"Name": 165, "Pos.": 52, "Team": 54, "Opp.": 54, "Venue": 56, "DK Sal": 78}
 
 
-def polish_builder_tab(client: SheetsClient, tab: str, *, last_row: int, freeze_rows: int = 1) -> str:
-    """Number formats, widths, header treatment and a pinned Name column on
-    a tab whose header row names its columns. Reads the header first and
-    matches by name, so it never assumes a column is in a given position.
+def polish_builder_tab(
+    client: SheetsClient,
+    tab: str,
+    *,
+    last_row: int,
+    header_row: int = 1,
+    freeze_rows: int | None = None,
+    freeze_cols: int = 1,
+) -> str:
+    """Number formats, widths, header treatment and (by default) a pinned
+    Name column on a tab whose header row names its columns. Reads the
+    header first and matches by name, so it never assumes a column is in a
+    given position.
+
+    `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but not
+    for Lineups: `sheet_bench.py`'s `add_bench` inserted 7 rows above its
+    header, so its caller passes `header_row=8` (derived from
+    `LINEUPS_NAME_BLOCKS`, not hardcoded). `freeze_rows` defaults to
+    freezing through the header row itself; Lineups instead passes its
+    bench row count, since freezing 8 rows would freeze past the header
+    into the first lineup block. `freeze_cols` defaults to 1 (pin Name);
+    Lineups passes 0 so this doesn't fight the bench's own column-freeze
+    choice (see `sheet_bench.py`).
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
 
-    header_rows = client.read_range(tab, "A1:1")
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
     header = header_rows[0] if header_rows else []
     if not header:
         return f"{tab}: empty header row -- skipped"
 
     last_col = column_letter(len(header) - 1)
-    client.format_range(tab, f"A1:{last_col}1", _HEADER_FMT)
-    client.freeze(tab, rows=freeze_rows, cols=1)
+    client.format_range(tab, f"A{header_row}:{last_col}{header_row}", _HEADER_FMT)
+    client.freeze(tab, rows=freeze_rows if freeze_rows is not None else header_row, cols=freeze_cols)
 
     widths = {}
     for i, name in enumerate(header):
@@ -317,15 +336,17 @@ def polish_builder_tab(client: SheetsClient, tab: str, *, last_row: int, freeze_
         client.set_column_widths(tab, widths)
 
     applied = 0
+    data_start = header_row + 1
     for i, name in enumerate(header):
         fmt = BUILDER_NUMBER_FORMATS.get(name)
         if not fmt:
             continue
         letter = column_letter(i)
-        client.format_range(tab, f"{letter}2:{letter}{last_row}", fmt)
+        client.format_range(tab, f"{letter}{data_start}:{letter}{last_row}", fmt)
         applied += 1
 
-    return f"{tab}: header styled, Name pinned, {applied} column(s) number-formatted"
+    pin_note = "Name pinned" if freeze_cols else "no column pin"
+    return f"{tab}: header styled, {pin_note}, {applied} column(s) number-formatted"
 
 
 # ---------------------------------------------------------------------------

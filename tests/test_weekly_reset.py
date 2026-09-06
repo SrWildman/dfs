@@ -51,10 +51,13 @@ def test_clear_previous_week_clears_full_grid_for_scratch_and_dk_upload():
 
 
 def test_lineups_blocks_skip_the_repeated_sub_header_row():
-    # First block has no sub-header (row 1's header covers it); every later
-    # block must start one row after where it'd naively be measured, so the
-    # sub-header row's own "Name" label in column A never gets cleared.
+    # First block has no sub-header (the tab's own header, immediately
+    # above it, covers it); every later block must start one row after
+    # where it'd naively be measured, so the sub-header row's own "Name"
+    # label in column A never gets cleared. First block starts at row 9
+    # (row 8 is the header) since sheet_bench.py's 7-row bench insert --
+    # see CONTRIBUTING.md's Bench changelog entry.
     first_start, _ = LINEUPS_NAME_BLOCKS[0]
-    assert first_start == 2
+    assert first_start == 9
     for (_, prev_end), (start, _) in zip(LINEUPS_NAME_BLOCKS, LINEUPS_NAME_BLOCKS[1:], strict=False):
         assert start == prev_end + 4  # 3-row gap + 1 sub-header row skipped

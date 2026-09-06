@@ -93,7 +93,9 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     landmines = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f'{{{name},{pos}&" "&{team},{avail},{flag}}},{live},'
-        f'({avail}<>"")+({flag}="WIND")+({flag}="OUT")),3,TRUE),14,4),"")'
+        f'({avail}<>"")+({flag}="WIND")+({flag}="OUT")),'
+        f'FILTER({salary},{live},({avail}<>"")+({flag}="WIND")+({flag}="OUT")),'
+        f'FALSE),14,4),"")'
     )
 
     games = f'=IFERROR(COUNTA(FILTER({g}!$A$2:$A$40,{g}!$A$2:$A$40<>"")),0)'
@@ -184,14 +186,25 @@ def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str) 
 # ---------------------------------------------------------------------------
 
 
-def build_exposure(client: SheetsClient, *, edge_tab: str, lineups_tab: str, lineup_count: int) -> str:
+def build_exposure(
+    client: SheetsClient,
+    *,
+    edge_tab: str,
+    lineups_tab: str,
+    lineup_count: int,
+    lineups_data_start_row: int = 1,
+) -> str:
     """Fills the Exposure tab, which has been a documented feature and a
     single empty cell since the sheet was built.
 
-    Counts each player across the whole of Lineups column A, which holds
-    only typed names plus the repeated "Name" header -- so it works
-    regardless of how the twenty blocks are laid out, and keeps working if
-    those blocks ever move.
+    Counts each player across Lineups column A from `lineups_data_start_row`
+    down, which holds only typed names plus the repeated "Name" header --
+    so it works regardless of how the twenty blocks are laid out, and keeps
+    working if those blocks ever move. `lineups_data_start_row` defaults to
+    1 (the whole column) but must be passed as Lineups' own header row
+    (see `sheet_bench.py`) once a bench sits above it, since the bench's
+    position labels ("QB", "RB", ...) would otherwise get miscounted as
+    filled roster slots by the "?*" wildcard below.
 
     Target is the one typed column in the tab. It's read back and restored
     before the rewrite so re-running this never costs you the targets you
@@ -200,7 +213,7 @@ def build_exposure(client: SheetsClient, *, edge_tab: str, lineups_tab: str, lin
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     salary = _rng(edge_tab, "Salary")
-    lu = f"{_q(lineups_tab)}!$A:$A"
+    lu = f"{_q(lineups_tab)}!$A${lineups_data_start_row}:$A"
 
     # Preserve any targets already typed, keyed by player name.
     existing: dict[str, str] = {}
@@ -283,10 +296,17 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
     start = _rng(edge_tab, "GameStart") if "GameStart" in EDGE_COLUMNS else None
     flag = _rng(edge_tab, "Flag")
 
-    cond = f'{name}<>"",{move}<>""'
+    # An unmoved line is 0.0, not blank, so filtering on <>"" alone lets
+    # a whole page of zeros through and the empty-state message never
+    # fires. Require actual movement.
+    cond = f'{name}<>"",{move}<>"",ABS({move})>0'
     cols = f'{{{name},{pos}&" "&{team},{move},{flag}}}'
     if start:
-        cols = f'{{{name},{pos}&" "&{team},{move},{start},{flag}}}'
+        kickoff = (
+            f"IFERROR(TEXT(DATEVALUE(LEFT({start},10))+TIMEVALUE(MID({start},12,8)),"
+            f'"ddd h:mm")&" UTC",{start})'
+        )
+        cols = f'{{{name},{pos}&" "&{team},{move},{kickoff},{flag}}}'
 
     body = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({cols},{cond}),"

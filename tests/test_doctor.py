@@ -61,8 +61,16 @@ _ALL_GOOD_TABS = {
     "Results": [],
 }
 
-_LINEUPS_HEADER_ROWS = [1] + [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
+_LINEUPS_HEADER_ROWS = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS]
 _LINEUPS_HEADER_LAST_ROW = max(_LINEUPS_HEADER_ROWS)
+_LINEUPS_HEADER_ROW = _LINEUPS_HEADER_ROWS[0]  # row 8: Lineups' real header, post-Bench
+
+# run_doctor re-reads Lineups' header from this exact row (see doctor.py's
+# override of list_tabs()'s always-row-1 header) rather than trusting
+# _ALL_GOOD_TABS["Lineups"] the way every other tab's check does -- so
+# every test that wants the linked-edge-columns check to see Lineups as
+# correctly linked must supply this row too, not just tabs["Lineups"].
+_LINEUPS_HEADER_RANGE = f"A{_LINEUPS_HEADER_ROW}:{_LINEUPS_HEADER_ROW}"
 
 
 def _good_lineups_rows() -> list[list[str]]:
@@ -72,13 +80,18 @@ def _good_lineups_rows() -> list[list[str]]:
     return rows
 
 
+def _lineups_rows(header: list[str] | None = None) -> dict[tuple[str, str], list[list[str]]]:
+    rows = {("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows()}
+    if header is not None:
+        rows[("Lineups", _LINEUPS_HEADER_RANGE)] = [header]
+    return rows
+
+
 def test_run_doctor_reports_nothing_wrong_on_a_correct_sheet():
     cfg = _base_config()
     client = FakeDoctorClient(
         tabs=_ALL_GOOD_TABS,
-        rows={
-            ("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows(),
-        },
+        rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
     )
     assert run_doctor(client, cfg) == []
 
@@ -87,9 +100,7 @@ def test_run_doctor_flags_missing_tab():
     tabs = dict(_ALL_GOOD_TABS)
     del tabs["Scratch"]
     cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=tabs, rows={("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows()}
-    )
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "tab-exists" and "Scratch" in i.detail for i in issues)
@@ -99,9 +110,7 @@ def test_run_doctor_flags_edgeraw_header_mismatch():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["EdgeRaw"] = [*EDGE_COLUMNS[:-1], "SomethingElse"]
     cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=tabs, rows={("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows()}
-    )
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "edgeraw-header" for i in issues)
@@ -111,12 +120,38 @@ def test_run_doctor_flags_missing_linked_edge_columns():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["Lineups"] = ["Name", "Pos."]  # never linked
     cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=tabs, rows={("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows()}
-    )
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "linked-edge-columns" and "'Lineups'" in i.detail for i in issues)
+
+
+def test_run_doctor_flags_missing_linked_edge_columns_reading_lineups_real_header_row():
+    # Regression for the bug that shipped alongside the Bench feature:
+    # Lineups' header moved to row 8, but the linked-edge-columns check
+    # used to trust list_tabs()'s row-1-only header for every tab. A
+    # Lineups row 1 (the Bench title, one cell) that looks nothing like
+    # LINKED_EDGE_COLUMNS must not be mistaken for "not linked" when row 8
+    # actually has it -- and, conversely (this test), row 8 genuinely not
+    # having it must still be caught even though tabs["Lineups"] here
+    # (row-1-shaped, unused by the real check) looks irrelevant.
+    tabs = dict(_ALL_GOOD_TABS)
+    tabs["Lineups"] = ["BENCH title -- irrelevant to this check now"]
+    cfg = _base_config()
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(["Name", "Pos."]))  # row 8: never linked
+
+    issues = run_doctor(client, cfg)
+    assert any(i.check == "linked-edge-columns" and "'Lineups'" in i.detail for i in issues)
+
+
+def test_run_doctor_passes_linked_edge_columns_reading_lineups_real_header_row():
+    tabs = dict(_ALL_GOOD_TABS)
+    tabs["Lineups"] = ["BENCH title -- irrelevant to this check now"]
+    cfg = _base_config()
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(["Name", "Pos.", *LINKED_EDGE_COLUMNS]))
+
+    issues = run_doctor(client, cfg)
+    assert not any(i.check == "linked-edge-columns" and "'Lineups'" in i.detail for i in issues)
 
 
 def test_run_doctor_flags_duplicated_linked_edge_columns():
@@ -125,9 +160,7 @@ def test_run_doctor_flags_duplicated_linked_edge_columns():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["Player Pool"] = ["Name", *LINKED_EDGE_COLUMNS, "Venue", "Ceil", *LINKED_EDGE_COLUMNS]
     cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=tabs, rows={("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows()}
-    )
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
 
     issues = run_doctor(client, cfg)
     assert any(
@@ -140,9 +173,9 @@ def test_run_doctor_flags_lineups_header_repeats_drift():
     cfg = _base_config()
     bad_rows = _good_lineups_rows()
     bad_rows[_LINEUPS_HEADER_ROWS[1] - 1] = ["Aaron Rodgers"]  # a stale pick sitting where a header should be
-    client = FakeDoctorClient(
-        tabs=_ALL_GOOD_TABS, rows={("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): bad_rows}
-    )
+    rows = _lineups_rows(_ALL_GOOD_TABS["Lineups"])
+    rows[("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}")] = bad_rows
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "lineups-header-repeats" for i in issues)
@@ -155,13 +188,9 @@ def test_run_doctor_flags_blank_bankroll_header_row():
             "cash": {"header_row": 16, "first_row": 17, "last_row": 59},
         }
     )
-    client = FakeDoctorClient(
-        tabs=_ALL_GOOD_TABS,
-        rows={
-            ("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows(),
-            ("Bankroll", "A16:16"): [],
-        },
-    )
+    rows = _lineups_rows(_ALL_GOOD_TABS["Lineups"])
+    rows[("Bankroll", "A16:16")] = []
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "bankroll-header-row" and "cash" in i.detail for i in issues)
@@ -174,13 +203,9 @@ def test_run_doctor_passes_bankroll_header_row_when_present():
             "cash": {"header_row": 16, "first_row": 17, "last_row": 59},
         }
     )
-    client = FakeDoctorClient(
-        tabs=_ALL_GOOD_TABS,
-        rows={
-            ("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows(),
-            ("Bankroll", "A16:16"): [["Entry name"]],
-        },
-    )
+    rows = _lineups_rows(_ALL_GOOD_TABS["Lineups"])
+    rows[("Bankroll", "A16:16")] = [["Entry name"]]
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
 
     issues = run_doctor(client, cfg)
     assert not any(i.check == "bankroll-header-row" for i in issues)

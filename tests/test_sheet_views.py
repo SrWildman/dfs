@@ -123,6 +123,37 @@ def test_build_exposure_skips_restore_when_nothing_was_typed_before():
     assert client.update_calls == []  # nothing to restore, so no F-column write at all
 
 
+def test_build_exposure_slots_filled_excludes_rows_above_lineups_data_start_row():
+    # Once a bench sits above Lineups' header (sheet_bench.py), column A
+    # rows 1-7 hold the bench title and position labels ("QB", "RB", ...)
+    # -- counting the whole column would miscount those as filled roster
+    # slots via the "?*" wildcard. lineups_data_start_row cuts them out.
+    client = FakeSheetsClient(existing_rows=[], post_write_names=[])
+
+    build_exposure(
+        client,
+        edge_tab="EdgeRaw",
+        lineups_tab="Lineups",
+        lineup_count=20,
+        lineups_data_start_row=8,
+    )
+
+    tab_name, rows = client.write_tab_calls[0]
+    header = rows[0]
+    assert header[8] == "Slots filled"
+    assert "Lineups!$A$8:$A" in header[9]
+    assert "Lineups!$A$8:$A" in rows[1][3]  # per-row COUNTIF also respects it
+
+
+def test_build_exposure_defaults_to_whole_column_when_no_bench_present():
+    client = FakeSheetsClient(existing_rows=[], post_write_names=[])
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    tab_name, rows = client.write_tab_calls[0]
+    assert "Lineups!$A$1:$A" in rows[0][9]
+
+
 def test_build_movement_uses_edge_columns_positions_for_linemove_and_gamestart():
     assert "LineMove" in EDGE_COLUMNS and "GameStart" in EDGE_COLUMNS
 
