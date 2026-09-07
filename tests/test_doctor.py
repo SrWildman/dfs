@@ -4,31 +4,46 @@ from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
 from dfs.doctor import run_doctor
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
+from dfs.sheet_pool_deck import DECK_ROWS, POOL_SORT_TAB
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
 
 
 @dataclass
 class _FakeTab:
     title: str
     header: list[str]
+    frozen_rows: int = DECK_ROWS
 
 
 class FakeDoctorClient:
-    """Fakes just the two SheetsClient methods doctor.py calls -- list_tabs()
-    for tab existence + header rows, read_range() for the row-specific
-    checks (Lineups header repeats, Bankroll header rows)."""
+    """Fakes the SheetsClient methods doctor.py calls -- list_tabs() for tab
+    existence + header rows + frozen row counts, read_range()/read_formula()
+    for the row-specific checks (Lineups header repeats, Bankroll header
+    rows, the pool deck's PoolSort formula)."""
 
     def __init__(
-        self, tabs: dict[str, list[str]], rows: dict[tuple[str, str], list[list[str]]] | None = None
+        self,
+        tabs: dict[str, list[str]],
+        rows: dict[tuple[str, str], list[list[str]]] | None = None,
+        frozen_rows: dict[str, int] | None = None,
+        formulas: dict[tuple[str, str], list[list[str]]] | None = None,
     ):
         self._tabs = tabs
         self._rows = rows or {}
+        self._frozen_rows = frozen_rows or {}
+        self._formulas = formulas or {}
 
     def list_tabs(self):
-        return [_FakeTab(title=title, header=header) for title, header in self._tabs.items()]
+        return [
+            _FakeTab(title=title, header=header, frozen_rows=self._frozen_rows.get(title, DECK_ROWS))
+            for title, header in self._tabs.items()
+        ]
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:
         return self._rows.get((tab_name, a1_range), [])
+
+    def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
+        return self._formulas.get((tab_name, a1_range), [])
 
 
 def _base_config(**overrides) -> Config:
@@ -228,6 +243,95 @@ def test_run_doctor_passes_bankroll_header_row_when_present():
 
     issues = run_doctor(client, cfg)
     assert not any(i.check == "bankroll-header-row" for i in issues)
+
+
+_POOL_DECK_ROW_MAX = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
+
+
+def _pool_sort_formula(last_row: int) -> str:
+    return (
+        f"=IFERROR(SORT(FILTER('Player Pool'!$A$2:$Z${last_row},"
+        f"'Player Pool'!$A$2:$A${last_row}<>\"\","
+        f"(Lineups!$B$1=\"ALL\")+('Player Pool'!$B$2:$B${last_row}=Lineups!$B$1)),"
+        f'Lineups!$G$1,FALSE),"")'
+    )
+
+
+def test_run_doctor_passes_when_pool_sort_formula_reaches_the_current_block_extent():
+    tabs = dict(_ALL_GOOD_TABS)
+    tabs[POOL_SORT_TAB] = ["Name"]
+    cfg = _base_config()
+    client = FakeDoctorClient(
+        tabs=tabs,
+        rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
+        formulas={(POOL_SORT_TAB, "A2"): [[_pool_sort_formula(_POOL_DECK_ROW_MAX)]]},
+    )
+
+    issues = run_doctor(client, cfg)
+    assert not any(i.check == "pool-deck-range" for i in issues)
+
+
+def test_run_doctor_flags_pool_deck_range_that_has_fallen_behind_a_resize():
+    # The exact bug this session fixed in sheet_pool_deck.py: a resize grew
+    # PLAYER_POOL_NAME_BLOCKS' extent, but PoolSort's formula (here
+    # simulated as still pointing at the old, shorter extent) wasn't
+    # updated to match -- silently hiding every row past its own range.
+    stale_extent = _POOL_DECK_ROW_MAX - 6
+    tabs = dict(_ALL_GOOD_TABS)
+    tabs[POOL_SORT_TAB] = ["Name"]
+    tabs["Player Pool"] = ["Name", "Pos.", *LINKED_EDGE_COLUMNS]
+    cfg = _base_config()
+    client = FakeDoctorClient(
+        tabs=tabs,
+        rows={
+            **_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
+            ("Player Pool", f"B{PLAYER_POOL_NAME_BLOCKS[-1][0]}:B{PLAYER_POOL_NAME_BLOCKS[-1][0]}"): [
+                ["DST"]
+            ],
+        },
+        formulas={(POOL_SORT_TAB, "A2"): [[_pool_sort_formula(stale_extent)]]},
+    )
+
+    issues = run_doctor(client, cfg)
+    matches = [i for i in issues if i.check == "pool-deck-range"]
+    assert len(matches) == 1
+    assert str(stale_extent) in matches[0].detail
+    assert str(_POOL_DECK_ROW_MAX) in matches[0].detail
+    assert "DST" in matches[0].detail
+
+
+def test_run_doctor_skips_pool_deck_range_check_when_poolsort_tab_is_absent():
+    cfg = _base_config()
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]))
+
+    issues = run_doctor(client, cfg)
+    assert not any(i.check == "pool-deck-range" for i in issues)
+
+
+def test_run_doctor_flags_deck_block_alignment_when_first_subheader_is_wrong():
+    cfg = _base_config()
+    bad_header_row = ["Aaron Rodgers", "QB"]  # not "Name" -- deck/blocks drifted
+    client = FakeDoctorClient(
+        tabs=_ALL_GOOD_TABS,
+        rows=_lineups_rows(bad_header_row),
+    )
+
+    issues = run_doctor(client, cfg)
+    matches = [i for i in issues if i.check == "deck-block-alignment"]
+    assert any("column A" in i.detail for i in matches)
+
+
+def test_run_doctor_flags_deck_block_alignment_when_frozen_rows_mismatch_deck_rows():
+    cfg = _base_config()
+    client = FakeDoctorClient(
+        tabs=_ALL_GOOD_TABS,
+        rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
+        frozen_rows={"Lineups": DECK_ROWS - 1},
+    )
+
+    issues = run_doctor(client, cfg)
+    matches = [i for i in issues if i.check == "deck-block-alignment"]
+    assert any("frozen row count" in i.detail for i in matches)
 
 
 def test_run_doctor_skips_dependent_checks_for_a_missing_tab():

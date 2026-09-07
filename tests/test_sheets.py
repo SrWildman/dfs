@@ -95,6 +95,13 @@ class FakeWorksheet:
         if rows is not None:
             self.frozen_rows = rows
 
+    @property
+    def frozen_row_count(self) -> int:
+        """Real gspread's actual attribute name for this -- `list_tabs`
+        reads it directly, so the fake must expose the same name, not just
+        the `frozen_rows` this file already tracked internally."""
+        return self.frozen_rows
+
 
 class FakeSpreadsheet:
     def __init__(self):
@@ -207,10 +214,12 @@ def test_read_missing_tab_raises_sheets_error(cfg, monkeypatch, tmp_path):
 def test_list_tabs_reports_header_rows(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["Projections"] = FakeWorksheet("Projections", rows=[["Id", "Name", "Position"]])
+    fake_sheet._worksheets["Projections"].frozen_rows = 3
     tabs = client.list_tabs()
     assert len(tabs) == 1
     assert tabs[0].title == "Projections"
     assert tabs[0].header == ["Id", "Name", "Position"]
+    assert tabs[0].frozen_rows == 3
 
 
 def test_read_range_returns_only_the_requested_rectangle(cfg, monkeypatch, tmp_path):

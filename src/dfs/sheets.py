@@ -45,6 +45,7 @@ class TabInfo:
     rows: int
     cols: int
     header: list[str]
+    frozen_rows: int
 
 
 class SheetsClient:
@@ -139,7 +140,15 @@ class SheetsClient:
                 header = ws.row_values(1)
             except Exception as e:  # noqa: BLE001 - report, don't hide
                 log.warning("could not read header row for tab %r: %s", ws.title, e)
-            infos.append(TabInfo(title=ws.title, rows=ws.row_count, cols=ws.col_count, header=header))
+            infos.append(
+                TabInfo(
+                    title=ws.title,
+                    rows=ws.row_count,
+                    cols=ws.col_count,
+                    header=header,
+                    frozen_rows=ws.frozen_row_count,
+                )
+            )
         return infos
 
     def read_tab(self, tab_name: str) -> list[list[str]]:
