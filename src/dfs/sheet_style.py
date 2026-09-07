@@ -290,6 +290,14 @@ AVAIL_CHIPS = {
     "Q": _chip(WARN_BG, WARN_FG),
 }
 
+# Player Pool's Source column (Task 5.3): which of the two ways a player
+# got into the pool. Neutral, not OK/WARN/CRIT -- neither source is a
+# problem, this is provenance, not a state to react to.
+SOURCE_CHIPS = {
+    "EdgeRaw": _chip(FLAT_BG, FLAT_FG),
+    "Picks": _chip(OK_BG, OK_FG),
+}
+
 
 def _edge_letter(column_name: str) -> str | None:
     """Real EdgeRaw column letter for a column NAME, or None if that column
@@ -498,6 +506,7 @@ BUILDER_WIDTHS = {
     "Venue": 56,
     "DK Sal": 78,
     "% of Rstr": 72,
+    "Source": 64,
 }
 
 
@@ -555,13 +564,15 @@ def polish_builder_tab(
 
     applied = apply_field_formats(client, tab, header, header_row=header_row, last_row=last_row)
 
-    # Flag/Avail chips, same as EdgeRaw's own -- these two columns are
-    # never touched by `sheet_links.link_edge_columns`' own colour scales
-    # or `polish_guardrails`' column O, so a column-scoped clear here is
-    # safe (found missing entirely by `dfs sheets audit-style`).
+    # Flag/Avail chips, same as EdgeRaw's own (found missing entirely by
+    # `dfs sheets audit-style`), plus Player Pool's own Source column
+    # (Task 5.3). None of these three are ever colour-scaled by
+    # `sheet_links.link_edge_columns`, and `polish_guardrails` owns
+    # column O on Lineups, not Player Pool, so a column-scoped clear here
+    # is safe on both tabs.
     chipped = 0
     data_start = header_row + 1
-    for column_name, chips in (("Flag", FLAG_CHIPS), ("Avail", AVAIL_CHIPS)):
+    for column_name, chips in (("Flag", FLAG_CHIPS), ("Avail", AVAIL_CHIPS), ("Source", SOURCE_CHIPS)):
         if column_name not in header:
             continue
         letter = column_letter(header.index(column_name))

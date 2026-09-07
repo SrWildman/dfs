@@ -27,7 +27,25 @@ def test_writes_a_name_formula_and_overflow_formula_per_block_only():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     ranges_written = {a1 for _, a1, _ in client.update_calls}
-    assert ranges_written == {"Z1", "A2", "Z2", "A13", "Z13", "A31", "Z31", "A57", "Z57", "A67", "Z67"}
+    assert ranges_written == {
+        "O1",
+        "Z1",
+        "A2",
+        "Z2",
+        "O2:O11",
+        "A13",
+        "Z13",
+        "O13:O29",
+        "A31",
+        "Z31",
+        "O31:O55",
+        "A57",
+        "Z57",
+        "O57:O65",
+        "A67",
+        "Z67",
+        "O67:O74",
+    }
 
 
 def test_name_formula_uses_the_position_actually_read_from_the_sheet():
@@ -101,17 +119,39 @@ def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formul
     )
 
     ranges_written = {a1 for _, a1, _ in client.update_calls}
-    assert "A13" not in ranges_written and "Z13" not in ranges_written
+    assert "A13" not in ranges_written
+    assert "Z13" not in ranges_written
+    assert "O13:O29" not in ranges_written
     assert any("skipped" in line for line in result)
 
 
-def test_never_writes_outside_column_a_and_column_z():
-    # The Name formula and overflow warning are the only two columns this
-    # function is allowed to touch -- every other column (B..Y) already
-    # holds a VLOOKUP written by link_edge_columns and must never be
-    # rewritten with a blank/placeholder value.
+def test_never_writes_outside_columns_a_o_and_z():
+    # Name, Source and the overflow warning are the only three columns
+    # this function is allowed to touch -- every other column (P..Y)
+    # already holds a VLOOKUP written by link_edge_columns and must never
+    # be rewritten with a blank/placeholder value.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     for _, a1_range, _ in client.update_calls:
-        assert a1_range[0] in ("A", "Z")
+        assert a1_range[0] in ("A", "O", "Z")
+
+
+def test_source_formula_labels_edgeraw_ticks_and_pool_picks_typed_rows():
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    source_call = next(c for c in client.update_calls if c[1] == "O2:O11")
+    first_row_formula = source_call[2][0][0]
+    assert 'IF($A2="","",' in first_row_formula
+    assert '"EdgeRaw"' in first_row_formula
+    assert '"Picks"' in first_row_formula
+    assert f"EdgeRaw!${POOL_COLUMN}:${POOL_COLUMN}" in first_row_formula
+    assert "'Pool Picks'!$A$2:$A$101" in first_row_formula
+
+
+def test_source_column_header_is_written_once():
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+    header_call = next(c for c in client.update_calls if c[1] == "O1")
+    assert header_call[2] == [["Source"]]

@@ -26,6 +26,17 @@ counts against the block's cap and can still trigger the overflow
 warning below -- `_overflow_formula` counts both sources for the same
 reason silently dropping a Pool-Picks player past the cap would be the
 worst failure mode here.
+
+**Task 5.3 update:** each row also gets a narrow `Source` column (O --
+genuinely blank on both sheets, a stray "Cash" label that had been typed
+there by hand was cleared during the Task 2 design pass, so this reuses
+that slot instead of inserting a new one) stating whether that row's
+player came from ticking EdgeRaw or typing into Pool Picks. Deliberately
+placed LEFT of the EdgeRaw-linked block (P onward) rather than inserted
+into it, so `sheet_links.link_edge_columns`' own "is LINKED_EDGE_COLUMNS
+already a contiguous run somewhere in the header" idempotency check is
+completely unaffected -- confirmed by re-running `dfs sheets doctor`/
+`link-edge` after this shipped.
 """
 
 from __future__ import annotations
@@ -38,6 +49,8 @@ from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
 
 _NAME_COLUMN = "A"
 _POSITION_COLUMN = "B"
+_SOURCE_COLUMN = "O"
+_SOURCE_HEADER = "Source"
 _OVERFLOW_COLUMN = "Z"
 _OVERFLOW_HEADER = "Overflow"
 
@@ -72,6 +85,20 @@ def _name_formula(edge_tab: str, position: str, cap: int) -> str:
     return f'=IFERROR(ARRAY_CONSTRAIN(SORT(UNIQUE({union}),1,TRUE),{cap},1),"")'
 
 
+def _source_formula(edge_tab: str, row: int) -> str:
+    """EdgeRaw wins the label if a player somehow ends up both ticked and
+    typed (matching `_name_formula`'s own UNIQUE, which produces one row
+    either way, not two) -- EdgeRaw's checkbox is the primary mechanism,
+    Pool Picks the secondary one."""
+    name_cell = f"${_NAME_COLUMN}{row}"
+    edge_check = (
+        f"COUNTIFS({edge_tab}!${POOL_COLUMN}:${POOL_COLUMN},TRUE,"
+        f"{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_NAME_COL},{name_cell})"
+    )
+    picks_check = f"COUNTIF('{POOL_PICKS_TAB}'!{_PICKS_NAME_RANGE},{name_cell})"
+    return f'=IF({name_cell}="","",IF({edge_check}>0,"EdgeRaw",IF({picks_check}>0,"Picks","")))'
+
+
 def _overflow_formula(edge_tab: str, position: str, cap: int) -> str:
     # COUNTA(UNIQUE(...)), not two separate COUNTIFS added together --
     # a player both ticked in EdgeRaw AND typed into Pool Picks must
@@ -90,10 +117,11 @@ def write_pool_formulas(
     edge_tab: str,
     name_blocks: list[tuple[int, int]] = PLAYER_POOL_NAME_BLOCKS,
 ) -> list[str]:
-    """Write the SORT/FILTER/ARRAY_CONSTRAIN Name formula and an overflow
-    warning into each block, keyed off EdgeRaw's Pool tick column. Only
-    ever touches column A (Name) and column Z (Overflow) via `update_range`
-    -- never `write_tab` -- so the VLOOKUP columns B..Y already linked by
+    """Write the SORT/FILTER/ARRAY_CONSTRAIN Name formula, a per-row
+    Source label, and an overflow warning into each block, keyed off
+    EdgeRaw's Pool tick column. Only ever touches column A (Name), column
+    O (Source) and column Z (Overflow) via `update_range` -- never
+    `write_tab` -- so the VLOOKUP columns P..Y already linked by
     `link_edge_columns` are never at risk, matching every other
     presentation primitive's "only touches the range it's given" contract.
 
@@ -102,6 +130,7 @@ def write_pool_formulas(
     on why an early-return-on-no-op is the wrong default here.
     """
     summary = []
+    client.update_range(player_pool_tab, f"{_SOURCE_COLUMN}1", [[_SOURCE_HEADER]])
     client.update_range(player_pool_tab, f"{_OVERFLOW_COLUMN}1", [[_OVERFLOW_HEADER]])
 
     for start, end in name_blocks:
@@ -117,6 +146,10 @@ def write_pool_formulas(
         overflow_cell = f"{_OVERFLOW_COLUMN}{start}"
         client.update_range(player_pool_tab, name_cell, [[_name_formula(edge_tab, position, cap)]])
         client.update_range(player_pool_tab, overflow_cell, [[_overflow_formula(edge_tab, position, cap)]])
+
+        source_rows = [[_source_formula(edge_tab, row)] for row in range(start, end + 1)]
+        client.update_range(player_pool_tab, f"{_SOURCE_COLUMN}{start}:{_SOURCE_COLUMN}{end}", source_rows)
+
         summary.append(f"{player_pool_tab}!A{start}: {position} block ({cap} slots) now formula-driven")
 
     return summary

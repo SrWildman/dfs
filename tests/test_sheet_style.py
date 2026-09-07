@@ -468,6 +468,18 @@ def test_polish_builder_tab_chips_flag_and_avail_columns_when_present():
     assert "2 chip column(s)" in result
 
 
+def test_polish_builder_tab_chips_source_column_when_present():
+    from dfs.sheet_style import SOURCE_CHIPS
+
+    client = FakeBuilderTabClient(["Name", "Source"])
+    result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    assert client.clear_cf_calls == ["B"]
+    source_rules = [r for a1, r in client.boolean_rule_calls if a1 == "B2:B100"]
+    assert len(source_rules) == len(SOURCE_CHIPS)
+    assert "1 chip column(s)" in result
+
+
 def test_polish_builder_tab_skips_chips_when_flag_and_avail_absent():
     client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
 
