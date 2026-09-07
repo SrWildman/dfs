@@ -198,6 +198,45 @@ class SheetsClient:
         _, ws = self._ws(tab_name)
         return ws.get(a1_range, value_render_option=ValueRenderOption.formula)
 
+    def get_cell_formats(self, tab_name: str, a1_range: str) -> list[list[dict]]:
+        """Read back the resolved `userEnteredFormat` for every cell in
+        `a1_range` -- the read-side counterpart to `format_range`, needed
+        by `dfs sheets audit-style` to check what a tab actually looks
+        like rather than trusting a styling command's own "OK" output.
+        Never used by a writing command."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(
+            params={
+                "ranges": [f"'{tab_name}'!{a1_range}"],
+                "fields": "sheets(data(rowData(values(userEnteredFormat))))",
+            }
+        )
+        sheets_data = meta.get("sheets", [])
+        if not sheets_data or not sheets_data[0].get("data"):
+            return []
+        row_data = sheets_data[0]["data"][0].get("rowData", [])
+        return [[cell.get("userEnteredFormat", {}) for cell in row.get("values", [])] for row in row_data]
+
+    def get_column_widths(self, tab_name: str, last_col_a1: str) -> list[dict]:
+        """Read back `columnMetadata` (pixelSize, hiddenByUser) for every
+        column from A through `last_col_a1`, index-aligned (index 0 = A).
+        Sheets reports a `pixelSize` of 100 for a column that was never
+        explicitly widened -- that is the *default*, not a real choice --
+        so a caller checking "was this column actually set" should treat
+        exactly 100 as "no width set" rather than trusting the key's mere
+        presence, which every column has regardless."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(
+            params={
+                "ranges": [f"'{tab_name}'!A1:{last_col_a1}1"],
+                "fields": "sheets(data(columnMetadata))",
+            }
+        )
+        sheets_data = meta.get("sheets", [])
+        if not sheets_data or not sheets_data[0].get("data"):
+            return []
+        return sheets_data[0]["data"][0].get("columnMetadata", [])
+
     def clear_ranges(self, tab_name: str, a1_ranges: list[str]) -> None:
         """Clear cell values in the given ranges -- formatting (including
         conditional formatting) is untouched, only content is removed."""
@@ -566,6 +605,13 @@ class SheetsClient:
         _, ws = self._ws(tab_name)
         ws.freeze(rows=rows, cols=cols)
 
+    def frozen_rows(self, tab_name: str) -> int:
+        """How many rows are currently frozen -- the read-side counterpart
+        to `freeze`, for a caller (`dfs sheets audit-style`) that needs to
+        check rather than set it."""
+        _, ws = self._ws(tab_name)
+        return ws.frozen_row_count
+
     def add_boolean_rule(
         self,
         tab_name: str,
@@ -733,6 +779,27 @@ class SheetsClient:
             if s.get("properties", {}).get("sheetId") == ws.id:
                 return s.get("conditionalFormats", []) or []
         return []
+
+    def has_chip_rule(self, tab_name: str, column_a1: str, values: list[str]) -> bool:
+        """Whether `column_a1` carries at least one TEXT_EQ conditional-
+        format rule matching one of `values` -- used by `dfs sheets
+        audit-style` to check a Flag/Avail column actually has its chips,
+        not just that some conditional format exists somewhere on the
+        tab."""
+        sheet, ws = self._ws(tab_name)
+        rules = self._conditional_format_rules(sheet, ws)
+        col_index = a1_range_to_grid_range(f"{column_a1}1:{column_a1}1")["startColumnIndex"]
+        for rule in rules:
+            ranges = rule.get("ranges", [])
+            if not any(r.get("startColumnIndex") == col_index for r in ranges):
+                continue
+            condition = rule.get("booleanRule", {}).get("condition", {})
+            if condition.get("type") != "TEXT_EQ":
+                continue
+            rule_values = [v.get("userEnteredValue") for v in condition.get("values", [])]
+            if any(v in values for v in rule_values):
+                return True
+        return False
 
     def set_tab_properties(
         self,

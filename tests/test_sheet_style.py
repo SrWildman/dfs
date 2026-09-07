@@ -1,5 +1,6 @@
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_style import (
+    AVAIL_CHIPS,
     CRIT_BG,
     CRIT_FG,
     EDGE_COLOR_SCALES,
@@ -7,6 +8,10 @@ from dfs.sheet_style import (
     EDGE_WIDTHS,
     FAMILY_COLORS,
     FIELD_FORMATS,
+    FLAG_CHIPS,
+    GRAD_MAX,
+    GRAD_MIN,
+    HEADER_FMT,
     HIDE_TABS,
     OK_BG,
     OK_FG,
@@ -19,6 +24,10 @@ from dfs.sheet_style import (
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
+    style_flat_tab,
+    style_results,
+    style_sos_tab,
+    style_tier23_tabs,
 )
 
 
@@ -383,6 +392,8 @@ class FakeBuilderTabClient:
         self.format_calls: list[tuple[str, dict]] = []
         self.freeze_calls: list[tuple] = []
         self.width_calls: list[dict] = []
+        self.clear_cf_calls: list[str] = []
+        self.boolean_rule_calls: list[tuple[str, dict]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
@@ -398,6 +409,14 @@ class FakeBuilderTabClient:
 
     def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
         self.width_calls.append(widths)
+
+    def clear_conditional_formats(self, tab_name: str, *, column=None, row_range=None) -> None:
+        self.clear_cf_calls.append(column)
+
+    def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
+        self.boolean_rule_calls.append(
+            (a1_range, {"condition_type": condition_type, "values": values, "fmt": fmt})
+        )
 
 
 def test_polish_builder_tab_styles_header_repeats_the_same_as_the_real_header():
@@ -431,6 +450,34 @@ def test_polish_builder_tab_skips_repeat_styling_when_none_given():
     assert formatted_ranges == ["A1:C1"]
 
 
+def test_polish_builder_tab_chips_flag_and_avail_columns_when_present():
+    # PlayerPoolRaw/Player Pool/Lineups all carry the same linked Flag/
+    # Avail columns EdgeRaw has, but nothing applied their chips there --
+    # found by `dfs sheets audit-style`. Column-scoped clear, since
+    # link_edge_columns' own colour scales and polish_guardrails' column
+    # O live on this same tab and must not be touched.
+    client = FakeBuilderTabClient(["Name", "Flag", "Avail"])
+
+    result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    assert client.clear_cf_calls == ["B", "C"]
+    flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == "B2:B100"]
+    avail_rules = [r for a1, r in client.boolean_rule_calls if a1 == "C2:C100"]
+    assert len(flag_rules) == len(FLAG_CHIPS)
+    assert len(avail_rules) == len(AVAIL_CHIPS)
+    assert "2 chip column(s)" in result
+
+
+def test_polish_builder_tab_skips_chips_when_flag_and_avail_absent():
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+
+    result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    assert client.clear_cf_calls == []
+    assert client.boolean_rule_calls == []
+    assert "0 chip column(s)" in result
+
+
 def _chip(bg: dict, fg: dict) -> dict:
     return {"backgroundColor": bg, "textFormat": {"bold": True, "foregroundColor": fg}}
 
@@ -453,3 +500,118 @@ def test_polish_guardrails_chips_cover_every_documented_state():
     # Every rule targets column O only, across the full block range given.
     for a1_range, *_ in client.boolean_rule_calls:
         assert a1_range == "O2:O18"
+
+
+class FakeTier23Client:
+    def __init__(self, header: list[str] | None, *, present: bool = True):
+        self._header = header
+        self._present = present
+        self.format_calls: list[tuple[str, dict]] = []
+        self.freeze_calls: list[tuple] = []
+        self.width_calls: list[dict] = []
+        self.clear_cf_calls: int = 0
+        self.boolean_rule_calls: list[tuple[str, dict]] = []
+        self.color_scale_calls: list[tuple[str, dict]] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return self._present
+
+    def read_range(self, tab_name: str, a1_range: str):
+        return [self._header] if self._header else []
+
+    def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
+        self.format_calls.append((a1_range, fmt))
+
+    def freeze(self, tab_name: str, *, rows=None, cols=None) -> None:
+        self.freeze_calls.append((tab_name, rows, cols))
+
+    def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
+        self.width_calls.append(widths)
+
+    def clear_conditional_formats(self, tab_name: str, *, column=None, row_range=None) -> None:
+        self.clear_cf_calls += 1
+
+    def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
+        rule = {"condition_type": condition_type, "values": values, "fmt": fmt}
+        self.boolean_rule_calls.append((a1_range, rule))
+
+    def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
+        self.color_scale_calls.append((a1_range, kwargs))
+
+
+def test_style_flat_tab_skips_missing_tab():
+    result = style_flat_tab(FakeTier23Client(None, present=False), "Scratch", last_row=20)
+    assert result == "Scratch: not present -- skipped"
+
+
+def test_style_flat_tab_skips_empty_header():
+    result = style_flat_tab(FakeTier23Client([]), "SoSComb", last_row=40)
+    assert "empty header row" in result
+
+
+def test_style_flat_tab_styles_header_freezes_and_widths_every_column():
+    client = FakeTier23Client(["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST"])
+
+    style_flat_tab(client, "Scratch", last_row=20)
+
+    assert client.format_calls[0] == ("A1:I1", HEADER_FMT)
+    assert client.freeze_calls == [("Scratch", 1, None)]
+    widths = client.width_calls[0]
+    assert set(widths) == {column_letter_for(i) for i in range(9)}
+    # None of these header names are in BUILDER_WIDTHS -- every one falls
+    # back to the generic width, not Sheets' own 100px default.
+    assert all(px != 100 for px in widths.values())
+
+
+def column_letter_for(i: int) -> str:
+    from dfs.sheets import column_letter
+
+    return column_letter(i)
+
+
+def test_style_results_chips_cash_results_and_scales_h2h_pct():
+    header = ["Week", "Cash Pts", "Cash Line", "Cash Results", "H2H Entered", "H2H Win", "H2H %"]
+    client = FakeTier23Client(header)
+
+    result = style_results(client, last_row=30)
+
+    assert client.clear_cf_calls == 1
+    true_rule = next(r for a1, r in client.boolean_rule_calls if r["values"] == ["TRUE"])
+    false_rule = next(r for a1, r in client.boolean_rule_calls if r["values"] == ["FALSE"])
+    assert true_rule["fmt"] == _chip(OK_BG, OK_FG)
+    assert false_rule["fmt"] == _chip(CRIT_BG, CRIT_FG)
+    h2h_range, _ = client.color_scale_calls[0]
+    assert h2h_range == "G2:G30"  # H2H % is the 7th column
+    assert "Cash Results/H2H % coloured" in result
+
+
+def test_style_sos_tab_skips_when_nothing_pasted_yet():
+    result = style_sos_tab(FakeTier23Client([]), "SoSQB")
+    assert "nothing pasted yet" in result
+
+
+def test_style_sos_tab_scales_rank_reversed():
+    header = ["Team", "Team.1", "Rank", "Opp Avg", "PAE", "Week 1"]
+    client = FakeTier23Client(header)
+
+    result = style_sos_tab(client, "SoSQB")
+
+    rank_range, colors = client.color_scale_calls[0]
+    assert rank_range == "C2:C33"
+    # Reversed from the standard scale: max colour at the MIN end.
+    assert colors["min_color"] == GRAD_MAX
+    assert colors["max_color"] == GRAD_MIN
+    assert "Rank scaled (reversed)" in result
+
+
+def test_style_tier23_tabs_covers_every_expected_tab():
+    client = FakeTier23Client(["A", "B"])
+    results = style_tier23_tabs(
+        client,
+        scratch_last_row=20,
+        dk_upload_last_row=200,
+        dk_lineups_final_last_row=500,
+        results_last_row=30,
+        sos_comb_last_row=40,
+    )
+    assert len(results) == 10  # Scratch, DK Upload, DKLineupsFinal, Results, 5xSoS, SoSComb

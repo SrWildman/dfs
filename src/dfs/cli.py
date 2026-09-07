@@ -28,6 +28,7 @@ from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate
 from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
+from dfs.sheet_audit import SKIPPED_TABS, run_audit
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
 from dfs.sheet_style import (
@@ -38,6 +39,7 @@ from dfs.sheet_style import (
     polish_edge,
     polish_guardrails,
     polish_lineups_input_column,
+    style_tier23_tabs,
     style_view_tabs,
 )
 from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
@@ -301,6 +303,22 @@ def sheets_polish(
         # Skipped cleanly when it hasn't.
         results.extend(style_view_tabs(client))
 
+        # Tier 2/3: Scratch, DK Upload, DKLineupsFinal, Results, and the
+        # hand-pasted SoS tabs. Row bounds are generous, provisioned depth
+        # (same reasoning as EDGE_ROWS/POOL_RAW_ROWS) -- formatting past
+        # the real data costs nothing and each function reads its own
+        # header rather than assuming a row count matters structurally.
+        results.extend(
+            style_tier23_tabs(
+                client,
+                scratch_last_row=20,
+                dk_upload_last_row=200,
+                dk_lineups_final_last_row=500,
+                results_last_row=30,
+                sos_comb_last_row=40,
+            )
+        )
+
         if not skip_chrome:
             results.extend(apply_tab_chrome(client))
     except SheetsError as e:
@@ -460,6 +478,55 @@ def sheets_doctor(
     for issue in issues:
         console.print(f"[red]FAIL[/red] [{issue.check}] {issue.detail}")
     raise typer.Exit(code=1)
+
+
+@sheets_app.command("audit-style")
+def sheets_audit_style(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Audit a different sheet instead of config.toml's -- e.g. right after `dfs "
+        "sheets polish`, to confirm what actually landed.",
+    ),
+) -> None:
+    """Read-only style check: per tab, the header row carries the shared
+    dark fill, a freeze pane covers it, every column has an explicit
+    pixel width, every FIELD_FORMATS column isn't left on Sheets'
+    "Automatic" number format, and a Flag/Avail column has a matching
+    chip rule. Exists so `sheet_style.py`'s formatting can't quietly rot
+    the way its number-format dicts once did (see Task 2.1's
+    consolidation into `FIELD_FORMATS`) -- run this after `dfs sheets
+    polish` rather than trusting its own "OK" output. Never writes
+    anything. Exits non-zero if any audited tab has a finding.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Auditing: [bold]{title}[/bold]\n{url}\n")
+        results = run_audit(client)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for skipped in SKIPPED_TABS:
+        console.print(f"[dim]skipped[/dim] {skipped}")
+
+    any_issue = False
+    for audit in results:
+        if not audit.present:
+            console.print(f"[dim]--[/dim] {audit.tab}: not present -- skipped")
+            continue
+        if audit.clean:
+            console.print(f"[green]OK[/green] {audit.tab}")
+            continue
+        any_issue = True
+        for issue in audit.issues:
+            console.print(f"[red]FAIL[/red] [{audit.tab}] {issue}")
+
+    if any_issue:
+        raise typer.Exit(code=1)
 
 
 @app.command()

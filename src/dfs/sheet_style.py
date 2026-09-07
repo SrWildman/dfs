@@ -486,7 +486,19 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 # Player Pool / Lineups / PlayerPoolRaw -- number formats and freeze only
 # ---------------------------------------------------------------------------
 
-BUILDER_WIDTHS = {"Name": 165, "Pos.": 52, "Team": 54, "Opp.": 54, "Venue": 56, "DK Sal": 78}
+# EDGE_WIDTHS merged in so the EdgeRaw-linked block (CeilVal/Leverage/
+# GameEnv/Stadium/Roof/Wind/Avail/Flag/...) gets the same widths here as
+# on EdgeRaw itself, not left at Sheets' own default -- found missing by
+# `dfs sheets audit-style`. "Name"/"Team" appear in both dicts with
+# identical values, so the merge doesn't change either.
+BUILDER_WIDTHS = {
+    **EDGE_WIDTHS,
+    "Pos.": 52,
+    "Opp.": 54,
+    "Venue": 56,
+    "DK Sal": 78,
+    "% of Rstr": 72,
+}
 
 
 def polish_builder_tab(
@@ -543,8 +555,32 @@ def polish_builder_tab(
 
     applied = apply_field_formats(client, tab, header, header_row=header_row, last_row=last_row)
 
+    # Flag/Avail chips, same as EdgeRaw's own -- these two columns are
+    # never touched by `sheet_links.link_edge_columns`' own colour scales
+    # or `polish_guardrails`' column O, so a column-scoped clear here is
+    # safe (found missing entirely by `dfs sheets audit-style`).
+    chipped = 0
+    data_start = header_row + 1
+    for column_name, chips in (("Flag", FLAG_CHIPS), ("Avail", AVAIL_CHIPS)):
+        if column_name not in header:
+            continue
+        letter = column_letter(header.index(column_name))
+        client.clear_conditional_formats(tab, column=letter)
+        client.format_range(
+            tab, f"{letter}{data_start}:{letter}{last_row}", {"horizontalAlignment": "CENTER"}
+        )
+        for text, fmt in chips.items():
+            client.add_boolean_rule(
+                tab,
+                f"{letter}{data_start}:{letter}{last_row}",
+                condition_type="TEXT_EQ",
+                values=[text],
+                fmt=fmt,
+            )
+        chipped += 1
+
     pin_note = "Name pinned" if freeze_cols else "no column pin"
-    return f"{tab}: header styled, {pin_note}, {applied} column(s) number-formatted"
+    return f"{tab}: header styled, {pin_note}, {applied} column(s) number-formatted, {chipped} chip column(s)"
 
 
 # ---------------------------------------------------------------------------
@@ -1052,3 +1088,161 @@ def style_view_tabs(client: SheetsClient) -> list[str]:
         style_exposure(client),
         style_movement(client),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Tier 2/3 (Task 2.9): tabs that have never been styled at all
+# ---------------------------------------------------------------------------
+
+# Distinct from Sheets' own 100px column default (see
+# `SheetsClient.get_column_widths`'s docstring) so `dfs sheets audit-style`
+# recognizes a column here as deliberately set, not left untouched.
+_GENERIC_COLUMN_PX = 110
+
+
+def style_flat_tab(client: SheetsClient, tab: str, *, last_row: int, header_row: int = 1) -> str:
+    """The standard treatment -- dark header, frozen pane, a width on
+    every column, FIELD_FORMATS wherever a header matches -- for a tab
+    that has otherwise never been styled: Scratch, DK Upload,
+    DKLineupsFinal, SoSComb. Header-driven like `polish_builder_tab`, but
+    without that function's Name-pin/Flag-Avail-chip assumptions, which
+    don't apply to any of these (none have a Name, Flag or Avail column).
+    Skips cleanly on an empty header -- Scratch/DK Upload/DKLineupsFinal
+    always have one (their header is a fixed roster-slot or DK-export
+    label row), but SoSComb is hand-built and could be blank before Sam
+    has set it up for the week.
+    """
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: empty header row -- skipped"
+
+    last_col = column_letter(len(header) - 1)
+    client.format_range(tab, f"A{header_row}:{last_col}{header_row}", _HEADER_FMT)
+    client.freeze(tab, rows=header_row)
+
+    widths = {column_letter(i): BUILDER_WIDTHS.get(name, _GENERIC_COLUMN_PX) for i, name in enumerate(header)}
+    client.set_column_widths(tab, widths)
+
+    applied = apply_field_formats(client, tab, header, header_row=header_row, last_row=last_row)
+    return f"{tab}: header styled, frozen, widths set, {applied} column(s) number-formatted"
+
+
+def style_results(client: SheetsClient, tab: str = "Results", *, last_row: int) -> str:
+    """Results is a season-long log with real win/loss and H2H data and
+    had no header fill, no freeze, and no conditional formatting at all --
+    the standard treatment plus the two columns worth a glance at rather
+    than a read: `Cash Results` (TRUE/FALSE) chipped green/red, `H2H %`
+    colour-scaled like every other percentage-of-success metric in the
+    workbook. Column layout is `week.py`'s own documented one (Week,
+    Cash Pts, Cash Line, Cash Results, H2H Entered, H2H Win, H2H %, Red,
+    Blue, Black) but found by header name here too, not assumed.
+    """
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+
+    header_rows = client.read_range(tab, "A1:1")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: empty header row -- skipped"
+
+    last_col = column_letter(len(header) - 1)
+    client.clear_conditional_formats(tab)
+    client.format_range(tab, f"A1:{last_col}1", _HEADER_FMT)
+    client.freeze(tab, rows=1)
+
+    widths = {column_letter(i): BUILDER_WIDTHS.get(name, _GENERIC_COLUMN_PX) for i, name in enumerate(header)}
+    client.set_column_widths(tab, widths)
+
+    applied = apply_field_formats(client, tab, header, header_row=1, last_row=last_row)
+
+    if "Cash Results" in header:
+        letter = column_letter(header.index("Cash Results"))
+        a1 = f"{letter}2:{letter}{last_row}"
+        client.add_boolean_rule(tab, a1, condition_type="TEXT_EQ", values=["TRUE"], fmt=_chip(OK_BG, OK_FG))
+        client.add_boolean_rule(
+            tab, a1, condition_type="TEXT_EQ", values=["FALSE"], fmt=_chip(CRIT_BG, CRIT_FG)
+        )
+    if "H2H %" in header:
+        letter = column_letter(header.index("H2H %"))
+        client.add_color_scale(
+            tab, f"{letter}2:{letter}{last_row}", min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX
+        )
+
+    return f"{tab}: header styled, frozen, {applied} column(s) number-formatted, Cash Results/H2H % coloured"
+
+
+# The number of NFL teams -- a hard upper bound on how many data rows a
+# hand-pasted Strength-of-Schedule tab can ever have, used only to bound
+# how far down formatting is applied (harmless past the real data, same
+# reasoning as EDGE_ROWS/POOL_RAW_ROWS above).
+_SOS_MAX_ROWS = 32
+
+
+def style_sos_tab(client: SheetsClient, tab: str) -> str:
+    """SoSQB/SoSRB/SoSWr/SoSTE/SoSDef: hand-pasted Strength-of-Schedule
+    data, current week only (see the Instructions tab). Standard header/
+    freeze/widths, plus a colour scale on `Rank` -- REVERSED from every
+    other rank/value column in the workbook, since here a LOW rank is
+    the good matchup (an easy upcoming schedule), not a high one.
+    Skips cleanly if nothing's been pasted yet this week -- these are
+    entirely hand-built, not written by any `dfs` command, so an empty
+    header is the normal state between weeks, not a bug.
+    """
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+
+    header_rows = client.read_range(tab, "A1:1")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: empty -- nothing pasted yet this week, skipped"
+
+    last_col = column_letter(len(header) - 1)
+    client.clear_conditional_formats(tab)
+    client.format_range(tab, f"A1:{last_col}1", _HEADER_FMT)
+    client.freeze(tab, rows=1)
+
+    widths = {column_letter(i): BUILDER_WIDTHS.get(name, _GENERIC_COLUMN_PX) for i, name in enumerate(header)}
+    client.set_column_widths(tab, widths)
+
+    scaled = False
+    if "Rank" in header:
+        letter = column_letter(header.index("Rank"))
+        # Reversed: max colour (green) at the MIN end, min colour (red)
+        # at the MAX end -- a low rank is the good matchup here.
+        client.add_color_scale(
+            tab,
+            f"{letter}2:{letter}{_SOS_MAX_ROWS + 1}",
+            min_color=GRAD_MAX,
+            mid_color=GRAD_MID,
+            max_color=GRAD_MIN,
+        )
+        scaled = True
+
+    return f"{tab}: header styled, frozen, widths set{', Rank scaled (reversed)' if scaled else ''}"
+
+
+def style_tier23_tabs(
+    client: SheetsClient,
+    *,
+    scratch_last_row: int,
+    dk_upload_last_row: int,
+    dk_lineups_final_last_row: int,
+    results_last_row: int,
+    sos_comb_last_row: int,
+) -> list[str]:
+    """Every Tier 2/3 tab in one call, each skipped cleanly if the tab
+    doesn't exist or (for the hand-pasted SoS tabs) is currently empty."""
+    results = [
+        style_flat_tab(client, "Scratch", last_row=scratch_last_row),
+        style_flat_tab(client, "DK Upload", last_row=dk_upload_last_row),
+        style_flat_tab(client, "DKLineupsFinal", last_row=dk_lineups_final_last_row),
+        style_results(client, last_row=results_last_row),
+    ]
+    for tab in ("SoSQB", "SoSRB", "SoSWr", "SoSTE", "SoSDef"):
+        results.append(style_sos_tab(client, tab))
+    results.append(style_flat_tab(client, "SoSComb", last_row=sos_comb_last_row))
+    return results
