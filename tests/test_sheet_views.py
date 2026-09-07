@@ -65,7 +65,7 @@ class FakeSheetsClient:
 
 
 def test_col_and_rng_use_edge_columns_positions():
-    assert _col("Name") == "B"
+    assert _col("Name") == "C"  # index 1 + EDGE_DATA_OFFSET (Pool occupies column A)
     assert _col("NotAColumn") is None
 
 

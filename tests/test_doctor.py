@@ -5,6 +5,7 @@ from dfs.derived import EDGE_COLUMNS
 from dfs.doctor import run_doctor
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_deck import DECK_ROWS, POOL_SORT_TAB
+from dfs.sources.edge import POOL_HEADER
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
 
 
@@ -66,7 +67,7 @@ def _base_config(**overrides) -> Config:
 
 
 _ALL_GOOD_TABS = {
-    "EdgeRaw": EDGE_COLUMNS,
+    "EdgeRaw": [POOL_HEADER, *EDGE_COLUMNS],
     "DK Upload": ["Entry ID"],
     "Scratch": [],
     "Lineups": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
@@ -131,9 +132,9 @@ def test_run_doctor_flags_edgeraw_header_mismatch():
     assert any(i.check == "edgeraw-header" for i in issues)
 
 
-def test_run_doctor_passes_when_edgeraw_has_a_correct_pool_column():
+def test_run_doctor_passes_when_edgeraw_pool_column_is_correct():
     tabs = dict(_ALL_GOOD_TABS)
-    tabs["EdgeRaw"] = [*EDGE_COLUMNS, "Pool"]
+    tabs["EdgeRaw"] = [POOL_HEADER, *EDGE_COLUMNS]
     cfg = _base_config()
     client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
 
@@ -142,12 +143,25 @@ def test_run_doctor_passes_when_edgeraw_has_a_correct_pool_column():
 
 def test_run_doctor_flags_a_wrong_label_in_edgeraw_pool_column():
     tabs = dict(_ALL_GOOD_TABS)
-    tabs["EdgeRaw"] = [*EDGE_COLUMNS, "SomethingElse"]
+    tabs["EdgeRaw"] = ["SomethingElse", *EDGE_COLUMNS]
     cfg = _base_config()
     client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
 
     issues = run_doctor(client, cfg)
-    assert any(i.check == "edgeraw-header" and "Pool" in i.detail for i in issues)
+    assert any(i.check == "edgeraw-header" for i in issues)
+
+
+def test_run_doctor_flags_edgeraw_still_on_the_old_pool_appended_at_the_end_layout():
+    # Pool used to be appended after EDGE_COLUMNS, not prepended before it
+    # -- a sheet still in that old shape must fail loudly, not be silently
+    # tolerated as "close enough".
+    tabs = dict(_ALL_GOOD_TABS)
+    tabs["EdgeRaw"] = [*EDGE_COLUMNS, POOL_HEADER]
+    cfg = _base_config()
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+
+    issues = run_doctor(client, cfg)
+    assert any(i.check == "edgeraw-header" for i in issues)
 
 
 def test_run_doctor_flags_missing_linked_edge_columns():

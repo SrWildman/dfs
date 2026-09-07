@@ -20,7 +20,7 @@ typeable -- every player must be ticked in EdgeRaw first.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN
 from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
@@ -30,8 +30,8 @@ _POSITION_COLUMN = "B"
 _OVERFLOW_COLUMN = "Z"
 _OVERFLOW_HEADER = "Overflow"
 
-_EDGE_NAME_COL = column_letter(EDGE_COLUMNS.index("Name"))
-_EDGE_POSITION_COL = column_letter(EDGE_COLUMNS.index("Position"))
+_EDGE_NAME_COL = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+_EDGE_POSITION_COL = column_letter(EDGE_COLUMNS.index("Position") + EDGE_DATA_OFFSET)
 
 
 def _name_formula(edge_tab: str, position: str, cap: int) -> str:

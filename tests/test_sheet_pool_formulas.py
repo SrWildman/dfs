@@ -35,11 +35,11 @@ def test_name_formula_uses_the_position_actually_read_from_the_sheet():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert 'EdgeRaw!$C$2:$C="QB"' in formulas["A2"]
-    assert 'EdgeRaw!$C$2:$C="RB"' in formulas["A13"]
-    assert 'EdgeRaw!$C$2:$C="WR"' in formulas["A31"]
-    assert 'EdgeRaw!$C$2:$C="TE"' in formulas["A57"]
-    assert 'EdgeRaw!$C$2:$C="DST"' in formulas["A67"]
+    assert 'EdgeRaw!$D$2:$D="QB"' in formulas["A2"]
+    assert 'EdgeRaw!$D$2:$D="RB"' in formulas["A13"]
+    assert 'EdgeRaw!$D$2:$D="WR"' in formulas["A31"]
+    assert 'EdgeRaw!$D$2:$D="TE"' in formulas["A57"]
+    assert 'EdgeRaw!$D$2:$D="DST"' in formulas["A67"]
     assert f"EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}=TRUE" in formulas["A2"]
 
 
@@ -60,7 +60,9 @@ def test_overflow_formula_thresholds_on_the_same_cap():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert formulas["Z2"].startswith('=IF(COUNTIFS(EdgeRaw!$W:$W,TRUE,EdgeRaw!$C:$C,"QB")>10,')
+    assert formulas["Z2"].startswith(
+        f'=IF(COUNTIFS(EdgeRaw!${POOL_COLUMN}:${POOL_COLUMN},TRUE,EdgeRaw!$D:$D,"QB")>10,'
+    )
 
 
 def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formula():

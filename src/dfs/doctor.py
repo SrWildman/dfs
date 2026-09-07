@@ -100,25 +100,19 @@ def _check_edge_header(
     if not edge_tab or edge_tab not in tab_titles:
         return []
     header = headers_by_tab.get(edge_tab, [])
-    if header[: len(EDGE_COLUMNS)] != EDGE_COLUMNS:
+    # Pool (Task K) sits in column A, ahead of EDGE_COLUMNS -- see
+    # sources/edge.py's docstring on why it's a real column deliberately
+    # kept out of the EDGE_COLUMNS list itself. Checked together with
+    # EDGE_COLUMNS as one contiguous expected header, not separately, now
+    # that its position is load-bearing (not just appended past the end).
+    expected = [POOL_HEADER, *EDGE_COLUMNS]
+    if header[: len(expected)] != expected:
         return [
             DoctorIssue(
                 "edgeraw-header",
-                f"{edge_tab!r} header does not match EDGE_COLUMNS.\n"
-                f"    expected: {EDGE_COLUMNS}\n"
-                f"    actual:   {header[: len(EDGE_COLUMNS)]}",
-            )
-        ]
-    # Pool (Task K) is a real column deliberately kept out of EDGE_COLUMNS
-    # -- see sources/edge.py's docstring on why -- so it's checked
-    # separately, just for the label being where sync always puts it.
-    pool_cell = header[len(EDGE_COLUMNS)] if len(header) > len(EDGE_COLUMNS) else None
-    if pool_cell is not None and pool_cell != POOL_HEADER:
-        return [
-            DoctorIssue(
-                "edgeraw-header",
-                f"{edge_tab!r} column {len(EDGE_COLUMNS) + 1} should be {POOL_HEADER!r} "
-                f"(the Pool tick column), found {pool_cell!r}.",
+                f"{edge_tab!r} header does not match [Pool, *EDGE_COLUMNS].\n"
+                f"    expected: {expected}\n"
+                f"    actual:   {header[: len(expected)]}",
             )
         ]
     return []

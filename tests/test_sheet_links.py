@@ -1,4 +1,4 @@
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheet_links import (
     COLOR_SCALE_LINKED_COLUMNS,
     LINKED_EDGE_COLUMNS,
@@ -19,6 +19,7 @@ class SpySheetsClient:
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.color_scale_calls: list[tuple[str, str]] = []
         self.group_calls: list[tuple[str, str, str]] = []
+        self.clear_group_calls: list[str] = []
 
     def read_range(self, tab_name: str, a1_range: str):
         assert a1_range == "A1:1", f"link_edge_columns should only ever read A1:1, got {a1_range!r}"
@@ -32,6 +33,9 @@ class SpySheetsClient:
 
     def group_columns(self, tab_name, first_col_a1, last_col_a1):
         self.group_calls.append((tab_name, first_col_a1, last_col_a1))
+
+    def clear_column_groups(self, tab_name):
+        self.clear_group_calls.append(tab_name)
 
 
 def test_already_linked_columns_positions_never_move():
@@ -54,13 +58,18 @@ def test_already_linked_columns_positions_never_move():
 
 def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # Leverage sits at EDGE_COLUMNS index 12; within the Name-anchored
-    # range (starting at "Name", index 1) that's VLOOKUP column 12 -- i.e.
-    # spreadsheet column M, matching what `sheet_style.polish_edge` reports.
-    # The range end letter tracks len(EDGE_COLUMNS) automatically -- update
-    # it here if a column is ever added/removed from EDGE_COLUMNS.
+    # range that's still VLOOKUP column 12 regardless of EDGE_DATA_OFFSET
+    # (a uniform shift cancels out of a *relative* position) -- but the
+    # range's own start/end letters do shift by that offset, since Pool
+    # occupies column A ahead of EDGE_COLUMNS. Matches what
+    # `sheet_style.polish_edge` reports for the same columns.
     assert EDGE_COLUMNS.index("Leverage") == 12
-    end_col = column_letter(len(EDGE_COLUMNS) - 1)
-    assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == f"=VLOOKUP($A5,EdgeRaw!$B:${end_col},12,false)"
+    start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+    end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    assert (
+        edge_lookup_formula(5, "EdgeRaw", "Leverage")
+        == f"=VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},12,false)"
+    )
 
 
 def test_edge_lookup_formula_wraps_optional_columns_in_ifna():

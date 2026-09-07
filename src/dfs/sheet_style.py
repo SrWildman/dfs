@@ -29,7 +29,7 @@ drift risk).
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheets import SheetsClient, column_letter
 
 # Rows to format on the big tabs. EdgeRaw currently carries ~743 players;
@@ -146,10 +146,14 @@ EDGE_NUMBER_FORMATS = {
     "LineMove": _num('"+"0.0;"-"0.0;0.0'),
 }
 
-# Collapsed by default: the join key and the two stadium descriptors, which
-# matter to the code and almost never to you. Grouped, not hidden -- the
-# +/- control above the column letters brings them straight back.
-EDGE_COLUMN_GROUPS = [("Id", "Id"), ("Stadium", "Roof"), ("GameStart", "GameStart")]
+# Collapsed by default: the two stadium descriptors, which matter to the
+# code and almost never to you. Grouped, not hidden -- the +/- control
+# above the column letters brings them straight back. Id used to be a
+# third entry here, but it's genuinely never useful to look at (a raw
+# DraftKings player ID, not a human-meaningful value), so it's fully
+# hidden instead (see polish_edge's hide_columns call) -- a group would
+# just be a second click for something that never needs to come back.
+EDGE_COLUMN_GROUPS = [("Stadium", "Roof"), ("GameStart", "GameStart")]
 
 EDGE_COLOR_SCALES = ("CeilVal", "Leverage", "GameEnv")
 
@@ -170,25 +174,28 @@ AVAIL_CHIPS = {
 
 
 def _edge_letter(column_name: str) -> str | None:
-    """Column letter for an EdgeRaw column, or None if that column isn't in
-    EDGE_COLUMNS on this version of the CLI."""
+    """Real EdgeRaw column letter for a column NAME, or None if that column
+    isn't in EDGE_COLUMNS on this version of the CLI. Offset by
+    EDGE_DATA_OFFSET since column A is Pool, not the first EDGE_COLUMNS
+    entry -- see derived.py's own comment on EDGE_DATA_OFFSET."""
     if column_name not in EDGE_COLUMNS:
         return None
-    return column_letter(EDGE_COLUMNS.index(column_name))
+    return column_letter(EDGE_COLUMNS.index(column_name) + EDGE_DATA_OFFSET)
 
 
 def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     """Direction B: make EdgeRaw readable without moving anything.
 
-    Widths, a dark frozen header, Name pinned while you scroll right,
-    number formats on every numeric column, the three colour scales, Flag
-    and Avail as chips, and CeilPct greyed while Leverage is running on a
-    proxy so the two identical-looking columns stop competing.
+    Widths, a dark frozen header, Id hidden and Pool+Name pinned while you
+    scroll right, number formats on every numeric column, the three
+    colour scales, Flag and Avail as chips, and CeilPct greyed while
+    Leverage is running on a proxy so the two identical-looking columns
+    stop competing.
     """
     if not client.tab_exists(edge_tab):
         return f"{edge_tab}: not present -- skipped"
 
-    last_col = column_letter(len(EDGE_COLUMNS) - 1)
+    last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     client.clear_conditional_formats(edge_tab)
 
     widths = {}
@@ -199,8 +206,14 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     client.set_column_widths(edge_tab, widths)
 
     client.format_range(edge_tab, f"A1:{last_col}1", _HEADER_FMT)
-    # Name and Position pinned: scroll to Wind and you still know who.
-    name_idx = EDGE_COLUMNS.index("Name") if "Name" in EDGE_COLUMNS else 1
+    # Pool and Name pinned while you scroll right; Id (between them) is
+    # hidden outright rather than pinned -- a raw DraftKings ID is never
+    # worth looking at, hiding it also means Pool and Name end up visually
+    # adjacent despite Id physically sitting between them.
+    id_col = _edge_letter("Id")
+    if id_col:
+        client.hide_columns(edge_tab, id_col, id_col)
+    name_idx = EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET if "Name" in EDGE_COLUMNS else 1
     client.freeze(edge_tab, rows=1, cols=name_idx + 1)
 
     for name, fmt in EDGE_NUMBER_FORMATS.items():
@@ -263,6 +276,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
             {"textFormat": {"foregroundColor": INK_MUTED}, "horizontalAlignment": "CENTER"},
         )
 
+    client.clear_column_groups(edge_tab)
     for first, last in EDGE_COLUMN_GROUPS:
         a, b = _edge_letter(first), _edge_letter(last)
         if a and b:
@@ -540,7 +554,6 @@ WEEK_ORDER = [
     ("Board", "decide"),
     ("EdgeRaw", "decide"),
     ("Slate Grid", "decide"),
-    ("SoSComb", "decide"),
     ("Player Pool", "build"),
     ("Lineups", "build"),
     ("Scratch", "build"),
@@ -556,6 +569,7 @@ WEEK_ORDER = [
     ("SoSWr", "feed"),
     ("SoSTE", "feed"),
     ("SoSDef", "feed"),
+    ("SoSComb", "feed"),
     ("Instructions", "decide"),
     ("PlayerPoolRaw", "feed"),
 ]

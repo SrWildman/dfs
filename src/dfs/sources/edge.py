@@ -16,7 +16,7 @@ from __future__ import annotations
 import pandas as pd
 
 from dfs import nfl_calendar, store
-from dfs.derived import EDGE_COLUMNS, build_edge_frame
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, build_edge_frame
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.log import get_logger
 from dfs.sheets import SheetsClient, column_letter
@@ -24,16 +24,21 @@ from dfs.sources.base import Source, SyncContext
 
 log = get_logger("sources.edge")
 
-# First free column after EDGE_COLUMNS (currently V) -- computed rather
-# than hardcoded "W" so it tracks EDGE_COLUMNS automatically if that list
-# ever grows. Deliberately NOT added to EDGE_COLUMNS itself: every linked
+# Column A -- ahead of EDGE_COLUMNS (which start at EDGE_DATA_OFFSET), not
+# appended after them. Ticking is the thing Sam does every week; Id is
+# meaningless to look at and gets hidden right next to it (see
+# sheet_style.polish_edge), so Pool ends up visually beside Name once Id's
+# hidden. Deliberately NOT added to EDGE_COLUMNS itself: every linked
 # VLOOKUP elsewhere hardcodes column-index integers against
-# EdgeRaw!$B:$V (see sheet_links.py's docstring and CONTRIBUTING.md's
-# Phase 8 postmortem) -- coupling the tick to that range for no reason
-# would coincidentally be harmless today but coupling it anyway is the
-# exact hazard class that's bitten this project more than once.
-POOL_COLUMN = column_letter(len(EDGE_COLUMNS))
+# EdgeRaw!$<Name>:$<end> (see sheet_links.py's docstring and
+# CONTRIBUTING.md's Phase 8 postmortem) -- coupling the tick to that range
+# for no reason would coincidentally be harmless today but coupling it
+# anyway is the exact hazard class that's bitten this project more than
+# once. EDGE_DATA_OFFSET (derived.py) is what every *other* module adds
+# when turning an EDGE_COLUMNS index into a real EdgeRaw column letter.
+POOL_COLUMN = column_letter(0)
 POOL_HEADER = "Pool"
+_ID_COLUMN = column_letter(EDGE_COLUMNS.index("Id") + EDGE_DATA_OFFSET)
 # Matches write_tab's default worksheet sizing (see cli.py's
 # _EDGE_FORMAT_LAST_ROW) -- the range every EdgeRaw column operation uses.
 _LAST_ROW = 1000
@@ -93,13 +98,19 @@ class EdgeSource(Source):
         return result.frame
 
     def to_sheet_rows(self, df: pd.DataFrame) -> list[list]:
-        """EDGE_COLUMNS plus an extra, blank Pool header cell -- values are
-        never written here (pre_upload/post_upload restore ticks by Id
-        after write_tab clears the tab), only the header, so the column
-        exists and is labeled even on a brand-new EdgeRaw tab."""
+        """Pool prepended ahead of EDGE_COLUMNS on every row -- header gets
+        the real label, every data row gets an explicit blank Pool cell
+        (not simply a shorter row relying on Sheets' implicit trailing
+        blank, the way an *appended* column could -- a column at the
+        front needs every subsequent value pushed over for real, or Id's
+        value would silently land in column A under Pool's header).
+        Values are never the real tick here (pre_upload/post_upload
+        restore ticks by Id after write_tab clears the tab), only the
+        blank placeholder, so the column exists and is labeled even on a
+        brand-new EdgeRaw tab."""
         rows = super().to_sheet_rows(df)
-        rows[0] = [*rows[0], POOL_HEADER]
-        return rows
+        header, *data = rows
+        return [[POOL_HEADER, *header]] + [["", *row] for row in data]
 
     def pre_upload(self, client: SheetsClient, tab: str) -> dict[str, bool]:
         """Read which players are currently ticked, keyed by Id (not row
@@ -111,7 +122,7 @@ class EdgeSource(Source):
         if not client.tab_exists(tab):
             return {}
         try:
-            ids = client.read_range(tab, f"A2:A{_LAST_ROW}")
+            ids = client.read_range(tab, f"{_ID_COLUMN}2:{_ID_COLUMN}{_LAST_ROW}")
             ticks = client.read_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{_LAST_ROW}")
         except Exception:  # noqa: BLE001 - a malformed/missing prior tab must not block a sync
             return {}
@@ -138,7 +149,7 @@ class EdgeSource(Source):
             client.set_checkbox_validation(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}")
         if not preserved:
             return
-        ids = client.read_range(tab, f"A2:A{last_row}")
+        ids = client.read_range(tab, f"{_ID_COLUMN}2:{_ID_COLUMN}{last_row}")
         restore = [[True] if row and row[0].strip() in preserved else [""] for row in ids]
         if restore:
             client.update_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}", restore)

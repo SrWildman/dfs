@@ -97,8 +97,21 @@ OUT_STATUSES = frozenset({"OUT", "IR"})
 # other way around.
 WIND_FLAG_THRESHOLD_MPH = 20.0
 
-# The EdgeRaw tab's column order -- exposed so `sheet_style.polish_edge` can
-# locate a column by name without an extra round-trip read of the sheet.
+# EdgeRaw's real sheet layout is [Pool, *EDGE_COLUMNS] -- Pool sits in
+# column A (so it's beside Name once Id, immediately after it, is hidden),
+# not appended after EDGE_COLUMNS the way it first shipped. Every module
+# that turns an EDGE_COLUMNS index into an absolute EdgeRaw column letter
+# (sheet_links.py, sheet_style.py, sheet_pool_formulas.py, doctor.py) adds
+# this offset -- `sources/edge.py`'s own POOL_COLUMN is the one column
+# that ISN'T offset, since it's the thing the offset makes room for.
+# Purely relative math (e.g. sheet_links._vlookup_index, computed as a
+# distance from Name) is unaffected by a uniform shift and doesn't need it.
+EDGE_DATA_OFFSET = 1
+
+# The EdgeRaw tab's column order (as data columns; the real sheet position
+# of each is `EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET`) -- exposed so
+# `sheet_style.polish_edge` can locate a column by name without an extra
+# round-trip read of the sheet.
 EDGE_COLUMNS = [
     "Id",
     "Name",

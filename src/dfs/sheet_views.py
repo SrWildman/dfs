@@ -19,7 +19,7 @@ restored before the rewrite, so re-running never costs you your targets.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheets import SheetsClient, column_letter
 
 BOARD_TAB = "Board"
@@ -39,7 +39,7 @@ def _q(tab: str) -> str:
 def _col(name: str) -> str | None:
     if name not in EDGE_COLUMNS:
         return None
-    return column_letter(EDGE_COLUMNS.index(name))
+    return column_letter(EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET)
 
 
 def _rng(edge_tab: str, name: str) -> str:

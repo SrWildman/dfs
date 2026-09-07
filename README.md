@@ -156,7 +156,7 @@ connected sheet's real title and URL before doing anything else -- a quick
    multiple times through the week as lines move (re-run with `edge` too,
    or just `dfs sync`, to keep `EdgeRaw` current).
 3. **Tick players into the pool**: in `EdgeRaw`, tick the `Pool` checkbox
-   (column `W`) for anyone worth a look -- use the `Leverage` sort and
+   (column `A`, leftmost) for anyone worth a look -- use the `Leverage` sort and
    `Flag` column (`LEVERAGE`/`CHALK`/`OUT`/`WIND`) to find them. Each tick
    appears automatically in `Player Pool`'s matching position block
    (capped at QB 10/RB 20/WR 25/TE 10/DST 10; an `Overflow` column warns
@@ -238,11 +238,12 @@ faith.
 
 `dfs edge [--top N] [--position POS]` prints the same thing to the
 terminal without opening the sheet. `EdgeRaw` also has a `Pool` checkbox
-column (`W`): tick a player there to add them to `Player Pool`'s matching
-position block automatically -- see "Weekly workflow" above and `docs/
-SHEET_REFERENCE.md`'s "Player Pool / Lineups" section for the mechanism.
-`dfs sheets polish` applies `EdgeRaw`'s frozen header row and color scales
-on `Leverage`/`CeilVal`/`GameEnv` as part of a larger presentation pass --
+column (`A`, leftmost): tick a player there to add them to `Player Pool`'s
+matching position block automatically -- see "Weekly workflow" above and
+`docs/SHEET_REFERENCE.md`'s "Player Pool / Lineups" section for the
+mechanism. `dfs sheets polish` applies `EdgeRaw`'s frozen header row,
+hides `Id`, and adds color scales on `Leverage`/`CeilVal`/`GameEnv` as
+part of a larger presentation pass --
 re-running it is safe, and `--sheet-id <id>` points it at a different
 sheet (e.g. the canonical template) instead of `config.toml`'s.
 

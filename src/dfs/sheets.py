@@ -317,11 +317,39 @@ class SheetsClient:
             }
         )
 
+    def clear_column_groups(self, tab_name: str) -> None:
+        """Delete every existing column group on a tab before re-adding one
+        with `group_columns` -- without this, `addDimensionGroup` doesn't
+        replace an existing group over the same range, it stacks a new,
+        deeper nested one on top (Sheets caps nesting at depth 8, which is
+        exactly what a `dfs sheets polish` re-run without this ended up
+        doing for real: 8 identical nested groups over EdgeRaw's Id column
+        alone, visible in the UI as a wall of collapse controls above the
+        header with no way to tell they're all the same group). One
+        `deleteDimensionGroup` call per depth level actually present,
+        read from the sheet's own metadata rather than assumed."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),columnGroups)"})
+        groups = []
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                groups = s.get("columnGroups", []) or []
+                break
+        if not groups:
+            return
+        requests = [{"deleteDimensionGroup": {"range": group["range"]}} for group in groups]
+        sheet.batch_update({"requests": requests})
+
     def group_columns(self, tab_name: str, first_col_a1: str, last_col_a1: str) -> None:
         """Group a column range so it can be collapsed/expanded from the
         sheet UI (Data > Group columns) -- a display convenience only, does
         not touch cell values or formatting. `first_col_a1`/`last_col_a1`
-        are plain column letters (e.g. "P", "Y"), not full A1 refs."""
+        are plain column letters (e.g. "P", "Y"), not full A1 refs.
+
+        Does not replace an existing group over the same range -- it nests
+        a new, deeper one on top (see `clear_column_groups`). Callers that
+        re-run this on every `polish` pass must call `clear_column_groups`
+        first."""
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(f"{first_col_a1}1:{last_col_a1}1", ws.id)
         sheet.batch_update(
@@ -390,6 +418,35 @@ class SheetsClient:
             )
         if requests:
             sheet.batch_update({"requests": requests})
+
+    def hide_columns(
+        self, tab_name: str, first_col_a1: str, last_col_a1: str, *, hidden: bool = True
+    ) -> None:
+        """Hide (or unhide) a column range from the sheet UI -- a real
+        Sheets hide (`hiddenByUser`), not a zero-width column: still fully
+        readable/writable through the API, same as `set_tab_properties`'
+        tab-level `hidden`. Unlike a column *group* (`group_columns`),
+        there's no expand control left in the UI at all."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(f"{first_col_a1}1:{last_col_a1}1", ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": grid_range["startColumnIndex"],
+                                "endIndex": grid_range["endColumnIndex"],
+                            },
+                            "properties": {"hiddenByUser": hidden},
+                            "fields": "hiddenByUser",
+                        }
+                    }
+                ]
+            }
+        )
 
     def set_row_heights(self, tab_name: str, *, start_row: int, end_row: int, pixel_size: int) -> None:
         """Set a pixel height for rows `start_row`..`end_row` (inclusive,

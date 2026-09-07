@@ -58,6 +58,65 @@ def test_polish_edge_skips_a_missing_tab_without_touching_anything():
     assert result == "EdgeRaw: not present -- skipped"
 
 
+class FakeEdgeClient:
+    """Records calls; used to pin polish_edge's re-run behaviour, in
+    particular that it clears existing column groups before re-adding
+    them (see clear_column_groups's own docstring for the bug this
+    guards against -- 8 nested groups from repeated `dfs sheets polish`
+    runs, found live)."""
+
+    def __init__(self):
+        self.calls: list[str] = []
+        self.clear_group_calls: list[str] = []
+        self.group_calls: list[tuple[str, str, str]] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return True
+
+    def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
+        self.calls.append("clear_conditional_formats")
+
+    def set_column_widths(self, tab_name: str, widths: dict) -> None:
+        self.calls.append("set_column_widths")
+
+    def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
+        self.calls.append("format_range")
+
+    def freeze(self, tab_name: str, *, rows=None, cols=None) -> None:
+        self.calls.append("freeze")
+
+    def add_color_scale(self, tab_name: str, a1_range: str, **_colors) -> None:
+        self.calls.append("add_color_scale")
+
+    def add_boolean_rule(self, tab_name: str, a1_range: str, **_kwargs) -> None:
+        self.calls.append("add_boolean_rule")
+
+    def clear_column_groups(self, tab_name: str) -> None:
+        self.calls.append("clear_column_groups")
+        self.clear_group_calls.append(tab_name)
+
+    def hide_columns(
+        self, tab_name: str, first_col_a1: str, last_col_a1: str, *, hidden: bool = True
+    ) -> None:
+        self.calls.append("hide_columns")
+
+    def group_columns(self, tab_name: str, first_col_a1: str, last_col_a1: str) -> None:
+        self.calls.append("group_columns")
+        self.group_calls.append((tab_name, first_col_a1, last_col_a1))
+
+
+def test_polish_edge_clears_column_groups_before_re_adding_them():
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    assert client.clear_group_calls == ["EdgeRaw"]
+    assert len(client.group_calls) == len(EDGE_COLUMN_GROUPS)
+    # clear must run before any group is (re-)added.
+    clear_index = client.calls.index("clear_column_groups")
+    first_group_index = client.calls.index("group_columns")
+    assert clear_index < first_group_index
+
+
 class FakeChromeClient:
     def __init__(self, present_tabs: set[str]):
         self.present_tabs = present_tabs

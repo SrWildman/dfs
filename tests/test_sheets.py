@@ -28,6 +28,7 @@ class FakeWorksheet:
         self.frozen_rows = 0
         self.color_scale_calls: list[dict] = []
         self.dimension_group_calls: list[dict] = []
+        self.column_groups: list[dict] = []
         self.insert_dimension_calls: list[dict] = []
         self.delete_dimension_calls: list[dict] = []
         self.conditional_formats: list[dict] = []
@@ -144,8 +145,18 @@ class FakeSpreadsheet:
                 d = request["deleteConditionalFormatRule"]
                 del self._ws_by_id(d["sheetId"]).conditional_formats[d["index"]]
             if "addDimensionGroup" in request:
-                sheet_id = request["addDimensionGroup"]["range"]["sheetId"]
-                self._ws_by_id(sheet_id).dimension_group_calls.append(request["addDimensionGroup"])
+                rng = request["addDimensionGroup"]["range"]
+                ws = self._ws_by_id(rng["sheetId"])
+                ws.dimension_group_calls.append(request["addDimensionGroup"])
+                depth = 1 + sum(1 for g in ws.column_groups if g["range"] == rng)
+                ws.column_groups.append({"range": rng, "depth": depth})
+            if "deleteDimensionGroup" in request:
+                rng = request["deleteDimensionGroup"]["range"]
+                ws = self._ws_by_id(rng["sheetId"])
+                matches = [g for g in ws.column_groups if g["range"] == rng]
+                if matches:
+                    deepest = max(matches, key=lambda g: g["depth"])
+                    ws.column_groups.remove(deepest)
             if "insertDimension" in request:
                 sheet_id = request["insertDimension"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).insert_dimension_calls.append(request["insertDimension"])
@@ -162,7 +173,11 @@ class FakeSpreadsheet:
     def fetch_sheet_metadata(self, params: dict | None = None) -> dict:
         return {
             "sheets": [
-                {"properties": {"sheetId": ws.id}, "conditionalFormats": ws.conditional_formats}
+                {
+                    "properties": {"sheetId": ws.id},
+                    "conditionalFormats": ws.conditional_formats,
+                    "columnGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.column_groups],
+                }
                 for ws in self._worksheets.values()
             ]
         }
@@ -331,6 +346,61 @@ def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path)
     assert len(ws.dimension_group_calls) == 1
     r = ws.dimension_group_calls[0]["range"]
     assert (r["startIndex"], r["endIndex"]) == (15, 25)  # P..Y, 0-indexed half-open
+
+
+def test_group_columns_stacks_a_deeper_group_on_repeat_calls(cfg, monkeypatch, tmp_path):
+    # addDimensionGroup does not replace an existing group over the same
+    # range -- it nests a new, deeper one on top. Real Sheets caps this at
+    # depth 8; this pins that the fake (and therefore clear_column_groups,
+    # tested below) models that stacking behaviour realistically.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_columns("T", "P", "Y")
+    client.group_columns("T", "P", "Y")
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.dimension_group_calls) == 2
+    assert [g["depth"] for g in ws.column_groups] == [1, 2]
+
+
+def test_clear_column_groups_removes_every_stacked_level(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    for _ in range(8):
+        client.group_columns("T", "A", "A")
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.column_groups) == 8
+
+    client.clear_column_groups("T")
+    assert ws.column_groups == []
+
+
+def test_clear_column_groups_is_a_no_op_when_nothing_is_grouped(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.clear_column_groups("T")  # must not raise
+    assert fake_sheet._worksheets["T"].column_groups == []
+
+
+def test_hide_columns_sets_hidden_by_user_on_the_given_range(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.hide_columns("T", "B", "B")
+
+    request = fake_sheet.batch_update_calls[-1]["requests"][0]["updateDimensionProperties"]
+    assert request["properties"] == {"hiddenByUser": True}
+    assert request["fields"] == "hiddenByUser"
+    assert (request["range"]["startIndex"], request["range"]["endIndex"]) == (1, 2)  # B, 0-indexed
+
+
+def test_hide_columns_can_unhide(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.hide_columns("T", "B", "B", hidden=False)
+
+    request = fake_sheet.batch_update_calls[-1]["requests"][0]["updateDimensionProperties"]
+    assert request["properties"] == {"hiddenByUser": False}
 
 
 def test_insert_rows_issues_an_insert_dimension_request_not_a_rewrite(cfg, monkeypatch, tmp_path):

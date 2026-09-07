@@ -27,7 +27,10 @@ class SpySheetsClient:
 
     def read_range(self, tab_name: str, a1_range: str):
         col = a1_range[0]
-        values = self._id_column if col == "A" else self._pool_column
+        # Pool lives at column A, Id at B (Pool sits ahead of EDGE_COLUMNS,
+        # not appended after it -- see sources/edge.py's own comment on
+        # EDGE_DATA_OFFSET).
+        values = self._pool_column if col == POOL_COLUMN else self._id_column
         return [[v] if v else [] for v in values]
 
     def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
@@ -41,24 +44,29 @@ def _df(n: int) -> pd.DataFrame:
     return pd.DataFrame({c: [""] * n for c in EDGE_COLUMNS})
 
 
-def test_pool_column_is_first_free_column_after_edge_columns():
-    # EDGE_COLUMNS currently ends at V (index len-1 = 21); Pool must land
-    # one past that, at W -- and must track EDGE_COLUMNS automatically
-    # rather than being hardcoded, per the handoff's explicit warning that
-    # this might have changed.
-    assert POOL_COLUMN == "W"
+def test_pool_column_is_the_very_first_column():
+    # Pool sits ahead of EDGE_COLUMNS (column A), not appended after it --
+    # so it's visually beside Name once Id, immediately after it, is
+    # hidden. See derived.EDGE_DATA_OFFSET for what every other module
+    # adds to account for this.
+    assert POOL_COLUMN == "A"
 
 
-def test_to_sheet_rows_only_labels_the_header_not_data_rows():
+def test_to_sheet_rows_labels_the_header_and_blanks_every_data_row():
     source = EdgeSource()
     df = _df(2)
     rows = source.to_sheet_rows(df)
-    assert rows[0][-1] == POOL_HEADER
+    assert rows[0][0] == POOL_HEADER
     assert len(rows[0]) == len(EDGE_COLUMNS) + 1
-    # Data rows are untouched -- Pool values are restored separately by
+    # Every data row gets an explicit blank Pool placeholder too -- unlike
+    # an *appended* column, a column at the front can't rely on an
+    # implicit shorter row, or every subsequent value would silently land
+    # one column too far left. Real ticks are restored separately by
     # post_upload, never written here.
-    assert len(rows[1]) == len(EDGE_COLUMNS)
-    assert len(rows[2]) == len(EDGE_COLUMNS)
+    assert rows[1][0] == ""
+    assert rows[2][0] == ""
+    assert len(rows[1]) == len(EDGE_COLUMNS) + 1
+    assert len(rows[2]) == len(EDGE_COLUMNS) + 1
 
 
 def test_pre_upload_returns_empty_when_tab_does_not_exist_yet():

@@ -19,7 +19,7 @@ by hand first, since this only appends, never overwrites).
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheets import SheetsClient, column_letter
 
 # The EdgeRaw columns worth surfacing elsewhere -- excludes what Player
@@ -64,8 +64,8 @@ PLAYER_POOL_RAW_BLOCK = [(2, 987)]
 _OPTIONAL_LINKED_COLUMNS = {"Wind"}
 
 _EDGE_NAME_COLUMN = "Name"
-_EDGE_RANGE_START = column_letter(EDGE_COLUMNS.index(_EDGE_NAME_COLUMN))
-_EDGE_RANGE_END = column_letter(len(EDGE_COLUMNS) - 1)
+_EDGE_RANGE_START = column_letter(EDGE_COLUMNS.index(_EDGE_NAME_COLUMN) + EDGE_DATA_OFFSET)
+_EDGE_RANGE_END = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
 
 
 def _vlookup_index(column_name: str) -> int:
@@ -174,6 +174,7 @@ def link_edge_columns(
             max_color={"red": 0.72, "green": 0.88, "blue": 0.72},
         )
 
+    client.clear_column_groups(tab)
     client.group_columns(tab, start_col, end_col)
 
     return (
