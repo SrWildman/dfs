@@ -28,10 +28,13 @@ from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate
 from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
+from dfs.pool import clear_all, find_matches, read_players, set_pool
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
 from dfs.sheet_filters import add_all_filter_views
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
+from dfs.sheet_pool_formulas import write_pool_formulas
+from dfs.sheet_pool_picks import create_pool_picks_tab
 from dfs.sheet_style import (
     POOL_RAW_ROWS,
     apply_tab_chrome,
@@ -75,12 +78,14 @@ bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll ta
 lineups_app = typer.Typer(help="Manage the sheet's lineup-building tabs.")
 odds_app = typer.Typer(help="Inspect synced odds data.")
 week_app = typer.Typer(help="Move config.toml between weekly sheet copies.")
+pool_app = typer.Typer(help="Add/remove/list EdgeRaw Pool ticks by player name.")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
 app.add_typer(bankroll_app, name="bankroll")
 app.add_typer(lineups_app, name="lineups")
 app.add_typer(odds_app, name="odds")
 app.add_typer(week_app, name="week")
+app.add_typer(pool_app, name="pool")
 
 console = Console()
 log = get_logger("cli")
@@ -213,6 +218,53 @@ def sheets_add_pool_deck(
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
     console.print(f"[green]OK[/green] {result}")
+
+
+@sheets_app.command("add-pool-picks")
+def sheets_add_pool_picks(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Add/refresh Pool Picks on a different sheet instead of config.toml's -- e.g. "
+        "the canonical weekly template.",
+    ),
+) -> None:
+    """Task 4.2: create (or refresh) the `Pool Picks` tab -- a second way
+    to add a player to Player Pool by typing a name, for when that's
+    faster than scrolling EdgeRaw to tick a checkbox (the "Pool picking"
+    filter view, `dfs sheets add-filters`, is the third). Column A is the
+    only typed cell; a live search box (ONE_OF_RANGE validation) against
+    EdgeRaw's Name column goes there. Columns B-J are VLOOKUP/status
+    formulas, fully rewritten on every run -- but column A's typed values
+    are never touched, so this is safe to re-run any time, including as
+    part of a future `dfs sheets polish`.
+
+    Also re-runs `write_pool_formulas` against Player Pool -- its Name/
+    Overflow formulas need to change to read the UNION of EdgeRaw ticks
+    and Pool Picks rows (Task 4.3), and nothing else re-applies that
+    automatically (see `sheet_pool_formulas.py`; it has no standing
+    caller of its own in this CLI).
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Adding Pool Picks to: [bold]{title}[/bold]\n{url}\n")
+        results = [create_pool_picks_tab(client, edge_tab=edge_tab)]
+        results.extend(
+            write_pool_formulas(client, player_pool_tab=cfg.lineups.player_pool_tab, edge_tab=edge_tab)
+        )
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
 
 
 @sheets_app.command("polish")
@@ -1297,6 +1349,124 @@ def auth_dk() -> None:
         "https://www.draftkings.com/",
         success_check="your DraftKings lobby/account menu, not a login prompt",
     )
+
+
+def _pool_client_and_edge_tab() -> tuple[SheetsClient, str]:
+    cfg = _load_config_or_exit()
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+    return SheetsClient(cfg.google_sheets), edge_tab
+
+
+def _print_candidates(query: str, candidates: list) -> None:
+    console.print(f"[yellow]Multiple matches for {query!r} -- not guessing:[/yellow]")
+    table = Table()
+    table.add_column("Name")
+    table.add_column("Pos")
+    table.add_column("Salary")
+    for c in candidates:
+        table.add_row(c.name, c.position, c.salary)
+    console.print(table)
+
+
+@pool_app.command("add")
+def pool_add(names: list[str] = typer.Argument(..., help="Player name(s) or substrings to add.")) -> None:
+    """Tick EdgeRaw's Pool column for each name given, by exact match if
+    one exists, else by substring -- multiple matches are printed (name,
+    position, salary) and skipped rather than guessed at."""
+    client, edge_tab = _pool_client_and_edge_tab()
+    try:
+        players = read_players(client, edge_tab)
+        for query in names:
+            matches = find_matches(players, query)
+            if not matches:
+                console.print(f"[red]No match for {query!r}[/red]")
+            elif len(matches) > 1:
+                _print_candidates(query, matches)
+            else:
+                player = matches[0]
+                set_pool(client, edge_tab, player, True)
+                console.print(f"[green]OK[/green] added {player.name} ({player.position}, ${player.salary})")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+@pool_app.command("remove")
+def pool_remove(
+    names: list[str] = typer.Argument(..., help="Player name(s) or substrings to remove."),
+) -> None:
+    """Untick EdgeRaw's Pool column for each name given -- same matching
+    rules as `dfs pool add`."""
+    client, edge_tab = _pool_client_and_edge_tab()
+    try:
+        players = read_players(client, edge_tab)
+        for query in names:
+            matches = find_matches(players, query)
+            if not matches:
+                console.print(f"[red]No match for {query!r}[/red]")
+            elif len(matches) > 1:
+                _print_candidates(query, matches)
+            else:
+                player = matches[0]
+                set_pool(client, edge_tab, player, False)
+                console.print(f"[green]OK[/green] removed {player.name}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+@pool_app.command("list")
+def pool_list() -> None:
+    """Every currently-ticked EdgeRaw player, grouped by position."""
+    client, edge_tab = _pool_client_and_edge_tab()
+    try:
+        players = read_players(client, edge_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    ticked = [p for p in players if p.pooled]
+    if not ticked:
+        console.print("[yellow]Pool is empty.[/yellow]")
+        return
+
+    by_position: dict[str, list] = {}
+    for p in ticked:
+        by_position.setdefault(p.position, []).append(p)
+
+    for position in sorted(by_position):
+        picks = by_position[position]
+        console.print(f"\n[bold]{position}[/bold] ({len(picks)})")
+        for p in picks:
+            console.print(f"  {p.name} (${p.salary})")
+
+
+@pool_app.command("clear")
+def pool_clear(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Untick every currently-ticked EdgeRaw player. Confirms first
+    unless `--yes` is given -- this touches every ticked row at once."""
+    client, edge_tab = _pool_client_and_edge_tab()
+    try:
+        players = read_players(client, edge_tab)
+        ticked = [p for p in players if p.pooled]
+        if not ticked:
+            console.print("[yellow]Pool is already empty.[/yellow]")
+            return
+        if not yes:
+            confirmed = typer.confirm(f"Untick all {len(ticked)} pooled player(s)?")
+            if not confirmed:
+                console.print("Cancelled.")
+                raise typer.Exit(code=0)
+        count = clear_all(client, edge_tab, players)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] cleared {count} player(s)")
 
 
 if __name__ == "__main__":

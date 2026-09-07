@@ -52,6 +52,7 @@ AUDITED_TABS: list[tuple[str, int]] = [
     ("SoSTE", 1),
     ("SoSDef", 1),
     ("SoSComb", 1),
+    ("Pool Picks", 1),
 ]
 
 # A tab whose frozen rows deliberately don't equal its header row, so the

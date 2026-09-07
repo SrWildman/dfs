@@ -546,6 +546,41 @@ class SheetsClient:
             }
         )
 
+    def set_range_dropdown_validation(
+        self, tab_name: str, a1_range: str, *, source: str, strict: bool = False
+    ) -> None:
+        """Restrict `a1_range` to values found in `source` (a full A1
+        reference like `"EdgeRaw!$C$2:$C$1000"`) -- Sheets' ONE_OF_RANGE
+        data validation. Unlike `set_dropdown_validation`'s fixed list,
+        this renders a live type-ahead search box against whatever's
+        actually in that range right now, with no hardcoded option list
+        to keep in sync as the source tab's rows change week to week.
+        `strict=False` (the default here, opposite of
+        `set_dropdown_validation`'s) warns rather than rejects a value
+        outside the range -- a name that doesn't match yet (not on this
+        week's slate, a typo) should stay editable, not get locked out."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "setDataValidation": {
+                            "range": grid_range,
+                            "rule": {
+                                "condition": {
+                                    "type": "ONE_OF_RANGE",
+                                    "values": [{"userEnteredValue": f"={source}"}],
+                                },
+                                "showCustomUi": True,
+                                "strict": strict,
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+
     def set_checkbox_validation(self, tab_name: str, a1_range: str) -> None:
         """Restrict `a1_range` to a real Sheets checkbox (`BOOLEAN` data
         validation) -- renders as a clickable checkbox and round-trips

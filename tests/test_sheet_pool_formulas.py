@@ -60,9 +60,38 @@ def test_overflow_formula_thresholds_on_the_same_cap():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert formulas["Z2"].startswith(
-        f'=IF(COUNTIFS(EdgeRaw!${POOL_COLUMN}:${POOL_COLUMN},TRUE,EdgeRaw!$D:$D,"QB")>10,'
+    union = (
+        "{"
+        f'FILTER(EdgeRaw!$C$2:$C,EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}=TRUE,EdgeRaw!$D$2:$D="QB");'
+        "FILTER('Pool Picks'!$A$2:$A$101,'Pool Picks'!$A$2:$A$101<>\"\",'Pool Picks'!$B$2:$B$101=\"QB\")"
+        "}"
     )
+    count = f"IFERROR(COUNTA(UNIQUE({union})),0)"
+    assert formulas["Z2"] == f'=IF({count}>10,10&" QB slots, "&{count}&" ticked -- some are hidden","")'
+
+
+def test_name_formula_unions_edgeraw_ticks_with_pool_picks_typed_rows():
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
+    name_formula = formulas["A2"]
+    assert "UNIQUE({" in name_formula
+    assert "FILTER(EdgeRaw!$C$2:$C" in name_formula
+    assert "FILTER('Pool Picks'!$A$2:$A$101,'Pool Picks'!$A$2:$A$101<>\"\"," in name_formula
+    assert "'Pool Picks'!$B$2:$B$101=\"QB\"" in name_formula
+
+
+def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
+    # A player ticked in EdgeRaw AND typed into Pool Picks must count
+    # once toward the cap, not twice -- COUNTA(UNIQUE(...)), not two
+    # separate COUNTIFS added together.
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
+    assert "COUNTA(UNIQUE(" in formulas["Z2"]
+    assert "FILTER('Pool Picks'!" in formulas["Z2"]
 
 
 def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formula():
