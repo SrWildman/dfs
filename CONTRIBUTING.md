@@ -76,7 +76,7 @@ one:
    exists in your personal sheet is invisible to every future weekly copy
    and to anyone else using this repo. Point a one-off command at the
    template with `--sheet-id <template-id>` (see `dfs sheets
-   format-edge --help`) rather than editing `config.toml`, so you don't
+   polish --help`) rather than editing `config.toml`, so you don't
    have to swap it back afterward.
 
 ## The canonical template is rebuilt from the live sheet, not hand-patched
@@ -252,7 +252,7 @@ The Instructions tab is a real Google Sheet, not a file in this repo --
 update it with `SheetsClient.update_range` (see any `dfs sheets`/`dfs
 week` command for the pattern), once against the live sheet and once
 against the template (`--sheet-id` or a `model_copy(update=...)`'d
-config, same as `dfs sheets format-edge --sheet-id`). There's no test that
+config, same as `dfs sheets polish --sheet-id`). There's no test that
 catches this going stale, so it's on the honor system -- treat it as
 part of the change, not a follow-up.
 

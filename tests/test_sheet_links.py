@@ -55,7 +55,7 @@ def test_already_linked_columns_positions_never_move():
 def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # Leverage sits at EDGE_COLUMNS index 12; within the Name-anchored
     # range (starting at "Name", index 1) that's VLOOKUP column 12 -- i.e.
-    # spreadsheet column M, matching what `dfs sheets format-edge` reports.
+    # spreadsheet column M, matching what `sheet_style.polish_edge` reports.
     # The range end letter tracks len(EDGE_COLUMNS) automatically -- update
     # it here if a column is ever added/removed from EDGE_COLUMNS.
     assert EDGE_COLUMNS.index("Leverage") == 12

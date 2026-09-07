@@ -19,9 +19,12 @@ Re-runnable. Every styling function clears the tab's existing conditional
 formats before adding its own, so running twice leaves the same result as
 running once rather than stacking duplicate rules.
 
-Note that `polish_edge()` supersedes `dfs sheets format-edge`: it re-applies
-the same three colour scales that command adds, plus everything else. Run
-one or the other, not both.
+`polish_edge()` applies EdgeRaw's frozen header and its three colour
+scales (Leverage/CeilVal/GameEnv) as part of this pass -- the standalone
+`dfs sheets format-edge` command that used to apply just those two effects
+was removed once `polish` fully superseded it (nothing else called it, and
+maintaining two implementations of the same three colour scales was pure
+drift risk).
 """
 
 from __future__ import annotations
@@ -59,9 +62,8 @@ WARN_BG, WARN_FG = _rgb("#F7E9CF"), _rgb("#8F5406")
 CRIT_BG, CRIT_FG = _rgb("#F8DEDA"), _rgb("#A22C23")
 FLAT_BG, FLAT_FG = _rgb("#E7EBF0"), _rgb("#4A5563")
 
-# The existing red -> yellow -> green gradient from `dfs sheets format-edge`,
-# kept identical so the two commands don't disagree about what "good" looks
-# like.
+# The red -> yellow -> green gradient the now-removed `dfs sheets
+# format-edge` command originally introduced, kept identical here.
 GRAD_MIN = {"red": 0.96, "green": 0.80, "blue": 0.80}
 GRAD_MID = {"red": 1.0, "green": 1.0, "blue": 0.80}
 GRAD_MAX = {"red": 0.72, "green": 0.88, "blue": 0.72}

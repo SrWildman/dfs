@@ -21,7 +21,6 @@ from rich.table import Table
 from dfs import paths, store
 from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
-from dfs.derived import EDGE_COLUMNS
 from dfs.doctor import run_doctor
 from dfs.late_swap import lineup_slot_status, swap_candidates
 from dfs.line_movement import LineMovementError, diff_odds
@@ -41,7 +40,7 @@ from dfs.sheet_style import (
     style_view_tabs,
 )
 from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
-from dfs.sheets import SheetsClient, SheetsError, column_letter
+from dfs.sheets import SheetsClient, SheetsError
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
@@ -52,28 +51,6 @@ from dfs.week import (
     rewrite_sheet_id,
 )
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS, clear_previous_week
-
-# EdgeRaw columns that get a color-scale conditional format by
-# `dfs sheets format-edge`, keyed to the (min, mid, max) colors of the
-# gradient -- red -> yellow -> green for "worth a look" columns.
-_EDGE_COLOR_SCALE_COLUMNS = {
-    "Leverage": (
-        {"red": 0.96, "green": 0.80, "blue": 0.80},
-        {"red": 1.0, "green": 1.0, "blue": 0.80},
-        {"red": 0.72, "green": 0.88, "blue": 0.72},
-    ),
-    "CeilVal": (
-        {"red": 0.96, "green": 0.80, "blue": 0.80},
-        {"red": 1.0, "green": 1.0, "blue": 0.80},
-        {"red": 0.72, "green": 0.88, "blue": 0.72},
-    ),
-    "GameEnv": (
-        {"red": 0.96, "green": 0.80, "blue": 0.80},
-        {"red": 1.0, "green": 1.0, "blue": 0.80},
-        {"red": 0.72, "green": 0.88, "blue": 0.72},
-    ),
-}
-_EDGE_FORMAT_LAST_ROW = 1000  # matches write_tab's default worksheet sizing
 
 # `dfs sync --live` re-syncs only what actually moves within a game day:
 # odds (line movement), DK's own Status (late inactives), and weather
@@ -195,63 +172,6 @@ def sheets_inspect() -> None:
     console.print(table)
 
 
-@sheets_app.command("format-edge")
-def sheets_format_edge(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Format a different sheet instead of config.toml's -- e.g. the canonical "
-        "weekly template, so new copies already have EdgeRaw formatted. See "
-        "CONTRIBUTING.md's 'Adding a new data source' checklist.",
-    ),
-    tab: str = typer.Option(None, "--tab", help="Tab name (default: config.toml's 'edge' tab mapping)."),
-) -> None:
-    """One-time formatting for the EdgeRaw tab: frozen header row and
-    color scales on Leverage/CeilVal/GameEnv. Re-running just re-applies
-    the same rules -- safe, since the tab holds no formulas of its own.
-    Run `dfs sync --only edge` at least once first so the tab exists.
-
-    Superseded by `dfs sheets polish`, which re-applies these same three
-    color scales as part of a larger pass and clears old conditional
-    formats first. Since this command does not clear first, running it
-    after `polish` stacks a second, redundant set of rules rather than
-    replacing the ones `polish` already added.
-    """
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    tab_name = tab or cfg.google_sheets.tab_mappings.get("edge")
-    if not tab_name:
-        console.print("[red]No tab mapped for 'edge' in config.toml, and no --tab given.[/red]")
-        raise typer.Exit(code=1)
-
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Formatting {tab_name!r} in: [bold]{title}[/bold]\n{url}\n")
-        console.print(
-            "[yellow]Note:[/yellow] `dfs sheets polish` supersedes this command and clears old "
-            "conditional formats before reapplying -- prefer it unless you specifically want just "
-            "these two effects.\n"
-        )
-
-        client.freeze_header(tab_name)
-        console.print("[green]OK[/green] froze header row")
-
-        for column_name, (min_color, mid_color, max_color) in _EDGE_COLOR_SCALE_COLUMNS.items():
-            col = column_letter(EDGE_COLUMNS.index(column_name))
-            client.add_color_scale(
-                tab_name,
-                f"{col}2:{col}{_EDGE_FORMAT_LAST_ROW}",
-                min_color=min_color,
-                mid_color=mid_color,
-                max_color=max_color,
-            )
-            console.print(f"[green]OK[/green] color scale on {column_name} ({col})")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-
 @sheets_app.command("add-pool-deck")
 def sheets_add_pool_deck(
     sheet_id: str = typer.Option(
@@ -316,9 +236,6 @@ def sheets_polish(
     Safe to re-run: each tab's conditional formats are cleared before its
     own are applied (Guardrails clears only column O's rules, never the
     rest of Lineups' -- see `SheetsClient.clear_conditional_formats`).
-
-    Supersedes `dfs sheets format-edge`, which this re-applies as part of a
-    larger pass. Run one or the other, not both.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets

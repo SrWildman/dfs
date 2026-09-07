@@ -38,7 +38,7 @@ LINKED_EDGE_COLUMNS = [
     "Flag",
 ]
 
-# Color-scaled the same way EdgeRaw itself is (dfs sheets format-edge) --
+# Color-scaled the same way EdgeRaw itself is (sheet_style.polish_edge) --
 # these three are the ones actually worth scanning by eye.
 COLOR_SCALE_LINKED_COLUMNS = ("Leverage", "CeilVal", "GameEnv")
 

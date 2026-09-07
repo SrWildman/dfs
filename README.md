@@ -19,7 +19,7 @@ from the wrong file.
 | TFFB projections (`ProjPts`/`ProjOwn`/Ceiling/Vegas context) | Working -- authenticated capture of the DFS Pass optimizer's own API (`dfs auth tffb` once) |
 | Game context (stadium/roof/surface/rest/closing lines, `GamesRaw` tab) | Working -- free, unauthenticated `nflverse` schedule data |
 | Weather (wind/gusts/precip/temp for outdoor games, `WeatherRaw` tab) | Working -- free, unauthenticated Open-Meteo, no API key |
-| Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/LineMove/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets format-edge`) |
+| Edge layer (Leverage/CeilVal/GameEnv/Stadium/Roof/Wind/LineMove/Avail, `EdgeRaw` tab) | Working -- computed locally from already-synced sources, no network call of its own (see `dfs edge` / `dfs sheets polish`) |
 | Lineup export & validation | Working, against a manually-paired entries tab |
 | Weekly sheet reset (`dfs lineups clear`) | Working -- clears last week's typed lineups/picks, formulas and formatting untouched |
 | New-week transition (`dfs week new`) | Working -- repoints `config.toml`, carries the bankroll forward, clears lineups, syncs |
@@ -109,9 +109,10 @@ dfs sync --live                    # Sunday: re-sync odds/DK status/weather + ed
 
 dfs edge                           # top leverage plays, printed locally (no Sheets round-trip)
 dfs edge --top 10 --position RB
-dfs sheets format-edge             # one-time: freeze header + color scales on the EdgeRaw tab
 dfs sheets link-edge                # one-time: append EdgeRaw's columns to Player Pool/Lineups/PlayerPoolRaw
-dfs sheets format-edge --sheet-id <id>  # apply to a different sheet (e.g. the template)
+dfs sheets polish                  # re-apply presentation: widths, freeze panes, EdgeRaw's color
+                                    # scales, Guardrails, tab strip order/color
+dfs sheets polish --sheet-id <id>  # apply to a different sheet (e.g. the template)
 
 dfs odds movement                  # which teams' lines moved since the last nfl_odds sync
 dfs odds movement --top 5
@@ -154,23 +155,33 @@ connected sheet's real title and URL before doing anything else -- a quick
    tffb` done at least once). Re-run `dfs sync --only draftkings,nfl_odds`
    multiple times through the week as lines move (re-run with `edge` too,
    or just `dfs sync`, to keep `EdgeRaw` current).
-3. **Build lineups** in the sheet, using `EdgeRaw`'s `Leverage` sort and
-   `Flag` column (`LEVERAGE`/`CHALK`/`OUT`/`WIND`) to find the plays worth
-   a second look, alongside the usual `Player Pool` view.
-4. **Pair lineups to contest entries** in your DK-upload tab (this stays a
+3. **Tick players into the pool**: in `EdgeRaw`, tick the `Pool` checkbox
+   (column `W`) for anyone worth a look -- use the `Leverage` sort and
+   `Flag` column (`LEVERAGE`/`CHALK`/`OUT`/`WIND`) to find them. Each tick
+   appears automatically in `Player Pool`'s matching position block
+   (capped at QB 10/RB 20/WR 25/TE 10/DST 10; an `Overflow` column warns
+   instead of silently dropping anyone past the cap), and survives every
+   `dfs sync` since it's keyed by DraftKings player Id, not row position.
+4. **Build lineups** in `Lineups`: use the frozen "pool deck" at the top
+   (pick a position/sort field/starting rank, and the rows below show that
+   slice of `Player Pool` with every metric column) to browse, then type
+   names into each lineup block's `Name` column -- the only other typed
+   column in the whole workbook.
+5. **Pair lineups to contest entries** in your DK-upload tab (this stays a
    manual step -- see below), then `dfs export -o lineups.csv` and upload
    that file to DraftKings.
-5. **Watch/adjust** through the week; re-sync and re-export as needed. On
-   Sunday, `dfs sync --live` re-pulls just the fast-moving sources (odds,
-   DK status, weather), recomputes `EdgeRaw`, and prints a "what changed"
-   report of every `Flag` change since the last sync -- late inactives,
-   wind picking up, a last-minute line move -- instead of making you
-   re-scan the whole sheet. As games kick off in waves, `dfs lineups
-   late-swap` checks each built lineup against real kickoff times and
-   shows, for anyone not locked yet, who else is still available at that
-   slot -- so you know when a late swap is actually worth making, and how
-   the lineup looks either way.
-6. **End of week**: export your contest history from DraftKings and run
+6. **Watch/adjust** through the week; re-sync and re-export as needed --
+   your `EdgeRaw` ticks survive every `dfs sync`. On Sunday, `dfs sync
+   --live` re-pulls just the fast-moving sources (odds, DK status,
+   weather), recomputes `EdgeRaw`, and prints a "what changed" report of
+   every `Flag` change since the last sync -- late inactives, wind picking
+   up, a last-minute line move -- instead of making you re-scan the whole
+   sheet. As games kick off in waves, `dfs lineups late-swap` checks each
+   built lineup against real kickoff times and shows, for anyone not
+   locked yet, who else is still available at that slot -- so you know
+   when a late swap is actually worth making, and how the lineup looks
+   either way.
+7. **End of week**: export your contest history from DraftKings and run
    `dfs week close --csv <file>` (a thin wrapper over `dfs bankroll sync
    --csv` -- see "Bankroll sync" below for why it isn't more than that yet)
    to reconcile Cash and GPP results.
@@ -226,10 +237,14 @@ above, if you want to verify a number rather than take the description on
 faith.
 
 `dfs edge [--top N] [--position POS]` prints the same thing to the
-terminal without opening the sheet. `dfs sheets format-edge` is a one-time
-setup command (frozen header row, color scales on `Leverage`/`CeilVal`/
-`GameEnv`) -- re-running it is safe, and `--sheet-id <id>` points it at a
-different sheet (e.g. the canonical template) instead of `config.toml`'s.
+terminal without opening the sheet. `EdgeRaw` also has a `Pool` checkbox
+column (`W`): tick a player there to add them to `Player Pool`'s matching
+position block automatically -- see "Weekly workflow" above and `docs/
+SHEET_REFERENCE.md`'s "Player Pool / Lineups" section for the mechanism.
+`dfs sheets polish` applies `EdgeRaw`'s frozen header row and color scales
+on `Leverage`/`CeilVal`/`GameEnv` as part of a larger presentation pass --
+re-running it is safe, and `--sheet-id <id>` points it at a different
+sheet (e.g. the canonical template) instead of `config.toml`'s.
 
 `dfs sheets link-edge` goes further: it appends most of `EdgeRaw`'s
 columns (all except `Val`, which already exists elsewhere, and

@@ -97,7 +97,7 @@ OUT_STATUSES = frozenset({"OUT", "IR"})
 # other way around.
 WIND_FLAG_THRESHOLD_MPH = 20.0
 
-# The EdgeRaw tab's column order -- exposed so `dfs sheets format-edge` can
+# The EdgeRaw tab's column order -- exposed so `sheet_style.polish_edge` can
 # locate a column by name without an extra round-trip read of the sheet.
 EDGE_COLUMNS = [
     "Id",
