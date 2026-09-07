@@ -189,6 +189,27 @@ class SheetsClient:
         _, ws = self._ws(tab_name)
         return ws.get(a1_range)
 
+    def batch_read_ranges(self, specs: list[tuple[str, str]]) -> list[list[list[str]]]:
+        """Read several ranges (each `(tab_name, a1_range)`) in ONE Sheets
+        API round trip via `values_batch_get`, in the order given -- built
+        for the bare `dfs` launcher (Task 2.5), which needs pool ticks AND
+        lineup fill counts to render and has a 2-second budget, so two
+        separate `read_range` calls (two round trips, each paying Sheets'
+        latency and the client's own backoff-retry overhead) isn't good
+        enough. Returns one values-grid per spec, same shape as
+        `read_range`, in the same order -- a range with no data back comes
+        back as `[]`, matching `read_range`'s own behaviour for a blank
+        range."""
+        sheet = self._open()
+        ranges = [f"'{tab}'!{a1}" for tab, a1 in specs]
+        response = sheet.values_batch_get(ranges)
+        # Google echoes back a fully-qualified, requoted range string, so
+        # matching results to requests by POSITION (the API preserves
+        # request order) is simpler and safer than re-parsing that string
+        # back into (tab, a1).
+        value_ranges = response.get("valueRanges", [])
+        return [value_ranges[i].get("values", []) if i < len(value_ranges) else [] for i in range(len(specs))]
+
     def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
         """Like `read_range`, but returns the literal formula text (e.g.
         "=SUM(A1:A2)") instead of the resolved value for any formula cell --

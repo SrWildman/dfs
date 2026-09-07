@@ -127,6 +127,15 @@ class FakeSpreadsheet:
         except KeyError:
             raise gspread.WorksheetNotFound(title) from None
 
+    def values_batch_get(self, ranges: list[str]) -> dict:
+        value_ranges = []
+        for full_range in ranges:
+            tab_part, _, a1_part = full_range.rpartition("!")
+            title = tab_part.strip("'")
+            ws = self.worksheet(title)
+            value_ranges.append({"range": full_range, "values": ws.get(a1_part)})
+        return {"valueRanges": value_ranges}
+
     def add_worksheet(self, title: str, rows: int, cols: int) -> FakeWorksheet:
         ws = FakeWorksheet(title)
         self._worksheets[title] = ws
@@ -275,6 +284,14 @@ def test_read_formula_returns_the_requested_rectangle(cfg, monkeypatch, tmp_path
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["=SUM(A1:A2)", "plain"]])
     assert client.read_formula("T", "A1:B1") == [["=SUM(A1:A2)", "plain"]]
+
+
+def test_batch_read_ranges_reads_multiple_tabs_in_request_order(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T1"] = FakeWorksheet("T1", rows=[["a"], ["b"]])
+    fake_sheet._worksheets["T2"] = FakeWorksheet("T2", rows=[["1", "2"]])
+    result = client.batch_read_ranges([("T2", "A1:B1"), ("T1", "A1:A2")])
+    assert result == [[["1", "2"]], [["a"], ["b"]]]
 
 
 def test_update_range_does_not_touch_cells_outside_the_range(cfg, monkeypatch, tmp_path):

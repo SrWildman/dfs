@@ -10,6 +10,11 @@ typer.Exit.
 from __future__ import annotations
 
 import json as _json
+import shlex
+import shutil
+import subprocess
+import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +28,7 @@ from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
 from dfs.doctor import run_doctor
 from dfs.late_swap import lineup_slot_status, swap_candidates
+from dfs.launcher import LauncherState, header_lines, suggest_actions
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
 from dfs.live_diff import diff_edge_flags
@@ -37,6 +43,7 @@ from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheet_pool_picks import create_pool_picks_tab
 from dfs.sheet_protection import protect_workbook
 from dfs.sheet_style import (
+    EDGE_ROWS,
     POOL_RAW_ROWS,
     apply_tab_chrome,
     polish_bankroll,
@@ -61,6 +68,12 @@ from dfs.week import (
 )
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS, clear_previous_week
 
+# Rough NFL game length -- past this many hours since the LAST game of the
+# week kicked off, `dfs`'s launcher assumes the slate is done and suggests
+# closing the week rather than a mid-game action. A heuristic, not a real
+# schedule lookup (no source here carries game-end times).
+GAMES_FINISHED_AFTER_HOURS = 3.5
+
 # `dfs sync --live` re-syncs only what actually moves within a game day:
 # odds (line movement), DK's own Status (late inactives), and weather
 # (forecast firming up as kickoff nears) -- then recomputes `edge` off
@@ -72,15 +85,26 @@ LIVE_SYNC_SOURCES = ["nfl_odds", "draftkings", "weather", "edge"]
 app = typer.Typer(
     name="dfs",
     help="Sync DFS data into Google Sheets, export DK lineups, track results and bankroll.",
-    no_args_is_help=True,
 )
-sheets_app = typer.Typer(help="Inspect and manage the connected Google Sheet.")
+# One-time sheet construction -- the stuff you run once per template/sheet
+# copy, not during a normal week. See `setup_sheet` below for the composite
+# that runs all of it in the right order.
+setup_app = typer.Typer(help="One-time sheet construction: build, style and link a sheet from scratch.")
+# `dfs sheets X` used to be where all nine `setup_app` commands (plus
+# `doctor`, now promoted to top-level) lived. Kept around, hidden from
+# `--help`, as a compatibility shim -- 79 places across docs/tests/muscle
+# memory said `dfs sheets ...` before this reorganisation, and breaking
+# that silently (a renamed command that just says "no such command") is
+# worse than a deprecation notice. Remove this whole app once the season's
+# over and the old habit has had time to fade -- see CONTRIBUTING.md.
+sheets_app = typer.Typer(hidden=True)
 auth_app = typer.Typer(help="Log in to sites that require an authenticated session.")
 bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll tab.")
-lineups_app = typer.Typer(help="Manage the sheet's lineup-building tabs.")
-odds_app = typer.Typer(help="Inspect synced odds data.")
-week_app = typer.Typer(help="Move config.toml between weekly sheet copies.")
-pool_app = typer.Typer(help="Add/remove/list EdgeRaw Pool ticks by player name.")
+lineups_app = typer.Typer(help="Manage lineups: check late swaps, clear last week's picks.")
+odds_app = typer.Typer(help="Check how betting lines have moved since your last sync.")
+week_app = typer.Typer(help="Start a new week's sheet, or close out the one you're on.")
+pool_app = typer.Typer(help="Add or remove players from your pool without opening the sheet.")
+app.add_typer(setup_app, name="setup")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
 app.add_typer(bankroll_app, name="bankroll")
@@ -93,14 +117,165 @@ console = Console()
 log = get_logger("cli")
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show debug logging."),
     json_output: bool = typer.Option(
         False, "--json", help="Emit line-delimited JSON logs instead of console output."
     ),
 ) -> None:
     setup_logging(verbose=verbose, json_output=json_output)
+    if ctx.invoked_subcommand is None:
+        run_launcher()
+
+
+def gather_state() -> LauncherState:
+    """The impure half of the launcher (see launcher.py's docstring):
+    collects observed facts and nothing else -- no judgment about what
+    they mean lives here, that's `suggest_actions`'s job. Degrades field
+    by field rather than raising, so a half-working sheet (reachable but
+    slow, or missing the `edge` tab mapping) still renders a header instead
+    of a traceback (Task 2.6).
+
+    Performance (Task 2.5): everything before the first Sheets call is
+    local and instant (config, manifest, EdgeRaw's already-synced GameStart
+    column). Reaching the sheet costs exactly two round trips regardless of
+    state -- `describe()` (opens/caches the spreadsheet) and one
+    `batch_read_ranges` call covering both the pool tick column and every
+    lineup block's name cell -- never one read per fact.
+    """
+    state = LauncherState()
+    try:
+        cfg = load_config()
+    except ConfigError as e:
+        state.config_exists = False
+        state.config_error = str(e)
+        return state
+
+    state.week = SyncContext.current().week
+
+    manifest = store.read_manifest()
+    state.synced_sources = sum(1 for v in manifest.values() if not v.get("error"))
+    timestamps = [v["synced_at"] for v in manifest.values() if v.get("synced_at")]
+    if timestamps:
+        latest = max(datetime.fromisoformat(t) for t in timestamps)
+        state.freshest_sync_age_hours = (datetime.now(UTC) - latest).total_seconds() / 3600
+
+    try:
+        edge_df = store.load_current("edge")
+    except FileNotFoundError:
+        edge_df = None
+    if edge_df is not None and "GameStart" in edge_df.columns:
+        starts = pd.to_datetime(edge_df["GameStart"], utc=True, errors="coerce").dropna()
+        if len(starts):
+            now = pd.Timestamp.now(tz="UTC")
+            state.game_started = bool((starts <= now).any())
+            if state.game_started:
+                hours_since_last_kickoff = (now - starts.max()).total_seconds() / 3600
+                state.games_finished = hours_since_last_kickoff >= GAMES_FINISHED_AFTER_HOURS
+
+    try:
+        client = SheetsClient(cfg.google_sheets)
+        state.sheet_title, _url = client.describe()
+    except SheetsError as e:
+        state.sheet_error = str(e)
+        state.pool_error = state.lineups_error = str(e)
+        return state
+
+    state.lineups_total = len(LINEUPS_NAME_BLOCKS)
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        state.pool_error = "no 'edge' tab mapped in config.toml"
+        return state
+
+    try:
+        lineups_last_row = LINEUPS_NAME_BLOCKS[-1][1]
+        pool_values, lineups_values = client.batch_read_ranges(
+            [(edge_tab, f"A2:A{EDGE_ROWS}"), (cfg.lineups.builder_tab, f"A2:A{lineups_last_row}")]
+        )
+    except SheetsError as e:
+        state.pool_error = str(e)
+        state.lineups_error = str(e)
+        return state
+
+    state.pool_count = sum(1 for row in pool_values if row and row[0].strip().upper() == "TRUE")
+
+    filled = 0
+    for start, _end in LINEUPS_NAME_BLOCKS:
+        idx = start - 2  # lineups_values starts at row 2
+        cell = lineups_values[idx][0] if 0 <= idx < len(lineups_values) and lineups_values[idx] else ""
+        if cell.strip():
+            filled += 1
+    state.lineups_filled = filled
+
+    return state
+
+
+def _run_dfs_command(command: str) -> None:
+    """Reinvoke `dfs` as a fresh process for a suggestion picked from the
+    launcher's menu, rather than calling the target's typer-decorated
+    function directly in-process -- that function's own parameter defaults
+    are `typer.Option(...)` sentinel objects, only ever resolved to real
+    values by Click's own parsing, so calling it in-process without going
+    through that would pass those sentinels straight through instead of
+    e.g. `False`/`None`. Reinvoking `dfs` on PATH (the same console script
+    this launcher is itself running from) is simple and correctly inherits
+    the terminal for confirmation prompts and rich tables; falls back to
+    `python -m dfs.cli` if `dfs` isn't on PATH for some reason (e.g. run via
+    `python -m` directly)."""
+    args = shlex.split(command)
+    dfs_path = shutil.which("dfs")
+    argv = [dfs_path] + args[1:] if dfs_path else [sys.executable, "-m", "dfs.cli", *args[1:]]
+    subprocess.run(argv)
+
+
+def run_launcher() -> None:
+    """`dfs` with no subcommand: a compact "where am I" header plus the
+    actions that make sense right now (Task 2). Always shows the real `dfs
+    ...` command next to each choice -- the point is to make itself
+    unnecessary over time, not to become a menu Sam has to remember."""
+    state = gather_state()
+
+    for line in header_lines(state):
+        console.print(line)
+    console.print()
+
+    menu: list[tuple[str, str | None]] = [(a.label, a.command) for a in suggest_actions(state)]
+    if state.config_exists:
+        menu.append(("Check the sheet's structure", "dfs doctor"))
+        menu.append(("Full status", "dfs status"))
+
+    for i, (label, command) in enumerate(menu, start=1):
+        hint = f"[dim]{command}[/dim]" if command else "[dim](do this in the sheet)[/dim]"
+        console.print(f"  {i}  {label:<32} {hint}")
+    console.print("  q  Quit")
+    console.print()
+    console.print(
+        "[dim]Tip: `dfs --install-completion` sets up tab-completion for every command above.[/dim]"
+    )
+    console.print()
+
+    choice = typer.prompt("Choice", default="q", show_default=False).strip().lower()
+    if choice in ("", "q"):
+        return
+
+    try:
+        index = int(choice) - 1
+        label, command = menu[index]
+    except (ValueError, IndexError):
+        console.print(f"[yellow]Not a valid choice: {choice!r}[/yellow]")
+        return
+
+    if command is None:
+        console.print(f"[dim]{label} -- there's nothing to run; open the sheet.[/dim]")
+        return
+    if "<" in command:
+        console.print(f"[yellow]That needs an argument -- run it yourself:[/yellow] {command}")
+        return
+
+    console.print(f"[dim]$ {command}[/dim]")
+    _run_dfs_command(command)
 
 
 @app.command()
@@ -157,7 +332,7 @@ def _load_config_or_exit() -> Config:
         raise typer.Exit(code=1) from e
 
 
-@sheets_app.command("inspect")
+@setup_app.command("inspect")
 def sheets_inspect() -> None:
     """List every tab in the connected sheet, with dimensions and header row."""
     cfg = _load_config_or_exit()
@@ -183,7 +358,7 @@ def sheets_inspect() -> None:
     console.print(table)
 
 
-@sheets_app.command("add-pool-deck")
+@setup_app.command("add-pool-deck", short_help="Insert the pool deck into Lineups (one-time).")
 def sheets_add_pool_deck(
     sheet_id: str = typer.Option(
         None,
@@ -222,7 +397,7 @@ def sheets_add_pool_deck(
     console.print(f"[green]OK[/green] {result}")
 
 
-@sheets_app.command("add-pool-picks")
+@setup_app.command("add-pool-picks", short_help="Create/refresh the Pool Picks tab and its formulas.")
 def sheets_add_pool_picks(
     sheet_id: str = typer.Option(
         None,
@@ -234,12 +409,12 @@ def sheets_add_pool_picks(
     """Task 4.2: create (or refresh) the `Pool Picks` tab -- a second way
     to add a player to Player Pool by typing a name, for when that's
     faster than scrolling EdgeRaw to tick a checkbox (the "Pool picking"
-    filter view, `dfs sheets add-filters`, is the third). Column A is the
+    filter view, `dfs setup add-filters`, is the third). Column A is the
     only typed cell; a live search box (ONE_OF_RANGE validation) against
     EdgeRaw's Name column goes there. Columns B-J are VLOOKUP/status
     formulas, fully rewritten on every run -- but column A's typed values
     are never touched, so this is safe to re-run any time, including as
-    part of a future `dfs sheets polish`.
+    part of a future `dfs setup polish`.
 
     Also re-runs `write_pool_formulas` against Player Pool -- its Name/
     Overflow formulas need to change to read the UNION of EdgeRaw ticks
@@ -269,7 +444,7 @@ def sheets_add_pool_picks(
         console.print(f"[green]OK[/green] {line}")
 
 
-@sheets_app.command("polish")
+@setup_app.command("polish", short_help="Style the sheet: widths, freeze panes, formats, chips, tab order.")
 def sheets_polish(
     sheet_id: str = typer.Option(
         None,
@@ -355,7 +530,7 @@ def sheets_polish(
         else:
             results.append("Bankroll: no [bankroll.cash]/[bankroll.gpp] in config -- skipped")
 
-        # The four derived tabs, if `dfs sheets build-views` has made them.
+        # The four derived tabs, if `dfs setup build-views` has made them.
         # Skipped cleanly when it hasn't.
         results.extend(style_view_tabs(client))
 
@@ -385,7 +560,7 @@ def sheets_polish(
         console.print(f"[green]OK[/green] {line}")
 
 
-@sheets_app.command("build-views")
+@setup_app.command("build-views", short_help="Build Board/Slate Grid/Exposure/Movement.")
 def sheets_build_views(
     sheet_id: str = typer.Option(
         None,
@@ -435,12 +610,12 @@ def sheets_build_views(
         console.print(f"[green]OK[/green] {line}")
 
     console.print(
-        "\n[dim]Run `dfs sheets polish` afterwards -- it styles these four tabs "
+        "\n[dim]Run `dfs setup polish` afterwards -- it styles these four tabs "
         "and slots them into the tab strip.[/dim]"
     )
 
 
-@sheets_app.command("link-edge")
+@setup_app.command("link-edge", short_help="Append EdgeRaw derived columns onto Player Pool/Lineups.")
 def sheets_link_edge(
     sheet_id: str = typer.Option(
         None,
@@ -495,7 +670,7 @@ def sheets_link_edge(
         console.print(f"[green]OK[/green] {line}")
 
 
-@sheets_app.command("add-filters")
+@setup_app.command("add-filters", short_help="Add non-destructive filter views to EdgeRaw and the view tabs.")
 def sheets_add_filters(
     sheet_id: str = typer.Option(
         None,
@@ -535,7 +710,7 @@ def sheets_add_filters(
         console.print(f"[green]OK[/green] {line}")
 
 
-@sheets_app.command("protect")
+@setup_app.command("protect", short_help="Warning-only protection on every formula-driven tab.")
 def sheets_protect(
     sheet_id: str = typer.Option(
         None,
@@ -567,7 +742,7 @@ def sheets_protect(
         console.print(f"[green]OK[/green] {line}")
 
 
-@sheets_app.command("doctor")
+@app.command("doctor", short_help="Check the sheet structure is intact.")
 def sheets_doctor(
     sheet_id: str = typer.Option(
         None,
@@ -584,7 +759,7 @@ def sheets_doctor(
     aren't blank. Never writes anything. Exits non-zero on any failure --
     this is the check that would have caught a stale template's missing
     tabs and drifted column positions before they broke `dfs export`/`dfs
-    lineups clear`/`dfs sheets link-edge` on a fresh weekly copy, instead
+    lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead
     of surfacing three commands later as a crash or a silently wrong
     formula.
     """
@@ -608,7 +783,7 @@ def sheets_doctor(
     raise typer.Exit(code=1)
 
 
-@sheets_app.command("audit-style")
+@setup_app.command("audit-style", short_help="Check that polish actually landed everywhere it should.")
 def sheets_audit_style(
     sheet_id: str = typer.Option(
         None,
@@ -623,7 +798,7 @@ def sheets_audit_style(
     "Automatic" number format, and a Flag/Avail column has a matching
     chip rule. Exists so `sheet_style.py`'s formatting can't quietly rot
     the way its number-format dicts once did (see Task 2.1's
-    consolidation into `FIELD_FORMATS`) -- run this after `dfs sheets
+    consolidation into `FIELD_FORMATS`) -- run this after `dfs setup
     polish` rather than trusting its own "OK" output. Never writes
     anything. Exits non-zero if any audited tab has a finding.
     """
@@ -655,6 +830,163 @@ def sheets_audit_style(
 
     if any_issue:
         raise typer.Exit(code=1)
+
+
+@setup_app.command("sheet", short_help="Run the full one-time sheet build, in order.")
+def setup_sheet(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build a different sheet instead of config.toml's -- e.g. the canonical "
+        "weekly template, so new weekly copies inherit everything below.",
+    ),
+) -> None:
+    """Run the full one-time sheet build, in the order that actually works,
+    instead of the hand-ordered sequence that used to live only in
+    CONTRIBUTING.md's tribal knowledge. Stops at the first step that fails
+    -- nothing after it runs, so the sheet is left in a known, reported
+    state rather than partially built by whatever happened to come next.
+
+    THE ORDER, and why it's this order and not another:
+
+    1. `add-pool-deck` -- a real row INSERT into Lineups. Everything below
+       it (link-edge's header-row math, polish's freeze/header-repeat
+       params, build-views' lineups_data_start_row) is a parameter derived
+       from where this puts Lineups' header, so it has to happen first or
+       every later step derives the wrong row.
+    2. `add-pool-picks` -- creates the Pool Picks tab and repoints Player
+       Pool's Name/Overflow formulas at the union of it and EdgeRaw. No
+       structural dependency on 1, but both are "add a tab/rewrite a
+       formula" steps done before the purely additive ones below.
+    3. `build-views` -- creates Board/Slate Grid/Exposure/Movement. Must
+       come before `add-filters`, which adds filter views ONTO three of
+       those four tabs and would have nothing to attach to otherwise.
+    4. `link-edge` -- appends EdgeRaw's derived columns onto Player Pool/
+       Lineups/PlayerPoolRaw. Append-only, so it doesn't need 1-3 to have
+       happened first, but running it before the tab set is final would
+       mean re-deriving nothing extra -- no reason to run it earlier.
+    5. `add-filters` -- filter views on EdgeRaw plus the four view tabs
+       from step 3. Depends on 3 (see above).
+    6. `protect` -- warning-only protection on every fully formula-driven
+       tab, including the four view tabs and the pool deck. Runs after
+       every structural tab/column exists so it's protecting the real
+       final layout, not a moving target.
+    7. `polish` -- presentation only (widths, freeze, number formats,
+       chips, tab order). Never inserts/deletes/moves anything, so it's
+       safe last -- and running it last means it's styling the finished
+       structure, not something a later structural step would shift.
+    8. `audit-style` -- read-only check that `polish` actually landed
+       everywhere it should have, rather than trusting its own "OK" output.
+    9. `dfs doctor` -- the final structural sanity check. Deliberately
+       LAST, not first: several of its own checks (LINKED_EDGE_COLUMNS
+       present, the pool deck's block alignment) only pass once steps 1-7
+       have actually run, so using it as a pre-flight check here would
+       just fail before doing anything useful.
+
+    `inspect` (also moved under `setup`) isn't part of this sequence at
+    all -- it's a read-only tab lister you'd reach for anytime, not a
+    construction step, the same reason `doctor`/`audit-style` aren't
+    either except as this composite's own final checks.
+    """
+    steps: list[tuple[str, Callable[[], None]]] = [
+        ("add-pool-deck", lambda: sheets_add_pool_deck(sheet_id=sheet_id)),
+        ("add-pool-picks", lambda: sheets_add_pool_picks(sheet_id=sheet_id)),
+        ("build-views", lambda: sheets_build_views(sheet_id=sheet_id)),
+        ("link-edge", lambda: sheets_link_edge(sheet_id=sheet_id)),
+        ("add-filters", lambda: sheets_add_filters(sheet_id=sheet_id)),
+        ("protect", lambda: sheets_protect(sheet_id=sheet_id)),
+        ("polish", lambda: sheets_polish(sheet_id=sheet_id, skip_chrome=False)),
+        ("audit-style", lambda: sheets_audit_style(sheet_id=sheet_id)),
+        ("doctor", lambda: sheets_doctor(sheet_id=sheet_id)),
+    ]
+    for name, step in steps:
+        console.print(f"\n[bold]-- {name} --[/bold]")
+        try:
+            step()
+        except typer.Exit as e:
+            if e.exit_code:
+                console.print(f"\n[red]Stopped at {name!r} -- fix the above and re-run.[/red]")
+                raise
+    console.print("\n[green]OK[/green] sheet build complete.")
+
+
+# -- `dfs sheets ...` compatibility aliases -----------------------------
+#
+# Every one of the nine commands above moved to `dfs setup ...`, and
+# `doctor` moved to top-level `dfs doctor`, in this same reorganisation.
+# `sheets_app` (declared near the top of this file, `hidden=True`) keeps
+# every old spelling working: same function, same options, one notice
+# printed first. 79 places (docs, tests, muscle memory) said `dfs sheets
+# ...` before today -- a renamed command that just says "no such command"
+# is a worse outcome than a deprecation notice for the rest of this season.
+#
+# Remove this whole block (and `sheets_app`'s registration near the top)
+# once the season's over and the old habit's had time to fade.
+def _moved_notice(old: str, new: str) -> None:
+    console.print(f"[dim]`{old}` has moved to `{new}`.[/dim]")
+
+
+@sheets_app.command("inspect")
+def sheets_inspect_alias() -> None:
+    _moved_notice("dfs sheets inspect", "dfs setup inspect")
+    sheets_inspect()
+
+
+@sheets_app.command("add-pool-deck")
+def sheets_add_pool_deck_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets add-pool-deck", "dfs setup add-pool-deck")
+    sheets_add_pool_deck(sheet_id=sheet_id)
+
+
+@sheets_app.command("add-pool-picks")
+def sheets_add_pool_picks_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets add-pool-picks", "dfs setup add-pool-picks")
+    sheets_add_pool_picks(sheet_id=sheet_id)
+
+
+@sheets_app.command("polish")
+def sheets_polish_alias(
+    sheet_id: str = typer.Option(None, "--sheet-id"),
+    skip_chrome: bool = typer.Option(False, "--skip-chrome"),
+) -> None:
+    _moved_notice("dfs sheets polish", "dfs setup polish")
+    sheets_polish(sheet_id=sheet_id, skip_chrome=skip_chrome)
+
+
+@sheets_app.command("build-views")
+def sheets_build_views_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets build-views", "dfs setup build-views")
+    sheets_build_views(sheet_id=sheet_id)
+
+
+@sheets_app.command("link-edge")
+def sheets_link_edge_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets link-edge", "dfs setup link-edge")
+    sheets_link_edge(sheet_id=sheet_id)
+
+
+@sheets_app.command("add-filters")
+def sheets_add_filters_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets add-filters", "dfs setup add-filters")
+    sheets_add_filters(sheet_id=sheet_id)
+
+
+@sheets_app.command("protect")
+def sheets_protect_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets protect", "dfs setup protect")
+    sheets_protect(sheet_id=sheet_id)
+
+
+@sheets_app.command("doctor")
+def sheets_doctor_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets doctor", "dfs doctor")
+    sheets_doctor(sheet_id=sheet_id)
+
+
+@sheets_app.command("audit-style")
+def sheets_audit_style_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
+    _moved_notice("dfs sheets audit-style", "dfs setup audit-style")
+    sheets_audit_style(sheet_id=sheet_id)
 
 
 @app.command()
@@ -770,6 +1102,27 @@ def _print_live_flag_diff(old_edge: pd.DataFrame | None) -> None:
     for _, row in changes.iterrows():
         table.add_row(row["Name"], row["Position"], row["Team"], row["OldFlag"] or "-", row["NewFlag"] or "-")
     console.print(table)
+
+
+@app.command(short_help="Sync, check the sheet, and report what changed -- in one go.")
+def go() -> None:
+    """Sync, check the sheet, and report what changed -- the three
+    commands you'd otherwise run back to back every time anyway. Stops at
+    the first failure (a failed sync means nothing to check; a failed
+    doctor means don't trust what changed until it's fixed)."""
+    try:
+        old_edge = store.load_current("edge")
+    except FileNotFoundError:
+        old_edge = None
+
+    console.print("[bold]-- sync --[/bold]")
+    sync(only=None, no_upload=False, week=None, season=None, live=False)
+
+    console.print("\n[bold]-- doctor --[/bold]")
+    sheets_doctor(sheet_id=None)
+
+    console.print("\n[bold]-- what changed --[/bold]")
+    _print_live_flag_diff(old_edge)
 
 
 @app.command()
@@ -1078,7 +1431,7 @@ def lineups_late_swap(
         console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
 
 
-@week_app.command("new")
+@week_app.command("new", short_help="Point config.toml at a new weeks sheet copy and sync.")
 def week_new(
     sheet_url: str = typer.Argument(
         ..., help="URL (or bare ID) of this week's sheet, already copied from the template."
@@ -1086,7 +1439,7 @@ def week_new(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
 ) -> None:
     """Move config.toml to a new week's sheet copy: check the new sheet's
-    structure (`dfs sheets doctor`), carry the bankroll and Results log
+    structure (`dfs doctor`), carry the bankroll and Results log
     forward, clear last week's lineups, and run a full sync -- in that
     order, with one confirmation before anything is written.
 
@@ -1156,7 +1509,7 @@ def week_new(
         console.print(
             "\n[red]The new sheet failed structural checks -- stopping before any write.[/red]\n"
             "Fix the sheet (or its config.toml mapping) and re-run, or run "
-            f"`dfs sheets doctor --sheet-id {new_sheet_id}` for the same report on its own."
+            f"`dfs doctor --sheet-id {new_sheet_id}` for the same report on its own."
         )
         raise typer.Exit(code=1)
     console.print("[green]OK[/green] new sheet passed structural checks\n")
@@ -1265,7 +1618,7 @@ def week_new(
         raise typer.Exit(code=1)
 
 
-@week_app.command("close")
+@week_app.command("close", short_help="Reconcile bankroll from DK contest history.")
 def week_close(
     csv: Path = typer.Option(
         ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
