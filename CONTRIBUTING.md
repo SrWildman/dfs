@@ -249,12 +249,13 @@ just the code:
 
 | You changed | Update |
 |---|---|
-| `EDGE_COLUMNS` (added/removed a column) | `README.md`'s "Edge layer" section, `docs/SHEET_REFERENCE.md`'s EdgeRaw table, the Instructions tab's EdgeRaw row (`B12` as of this writing) on **both** the live sheet and the template |
+| `EDGE_COLUMNS` (added/removed a column) | `docs/SHEET_REFERENCE.md`'s EdgeRaw table, the Instructions tab's EdgeRaw row on **both** the live sheet and the template |
 | A formula or threshold (how a column is actually calculated, not just its name) | `docs/CALCULATIONS.md` -- the one place the exact math is supposed to live; don't let it drift into being "close enough" to what the code does |
-| A CLI command's name, flags, or behavior | `README.md`'s Commands list and "Weekly workflow" section, the Instructions tab's "Weekly workflow" row (`B4`) on both sheets |
+| A CLI command's name, flags, or behavior | `docs/WORKFLOW.md`, the Instructions tab's "Weekly workflow" row on both sheets |
 | The weekly workflow itself (a step added, removed, or reordered) | Same two places as above, plus this file's own affected section if the change touched something documented here |
-| A new tab | Everywhere the "Adding a new data source" checklist above already says, **plus** a new Instructions tab row describing it |
+| A new tab | Everywhere the "Adding a new data source" checklist above already says, **plus** a new Instructions tab row describing it, **plus** `docs/SHEET_REFERENCE.md` |
 | The template's tab set or a shared tab's column order (`PlayerPoolRaw`/`Player Pool`/`Lineups`) | Run `dfs sheets doctor` against **both** the live sheet and the template, `docs/SHEET_REFERENCE.md`'s canonical-column-order note, the Instructions tab's column-order row on both sheets |
+| A new symptom worth debugging by hand | `docs/TROUBLESHOOTING.md` |
 
 The Instructions tab is a real Google Sheet, not a file in this repo --
 update it with `SheetsClient.update_range` (see any `dfs sheets`/`dfs

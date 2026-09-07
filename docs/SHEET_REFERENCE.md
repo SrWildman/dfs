@@ -26,8 +26,8 @@ doc knowing.
 | `EdgeRaw` | Computed locally from the above -- no network call | `edge` |
 
 Your `config.toml`'s `[google_sheets.tab_mappings]` controls the actual tab
-names; the table above uses the defaults. See README.md's Commands section
-for the full `dfs sync` reference.
+names; the table above uses the defaults. Run `dfs sync --help` for the
+full `dfs sync` reference.
 
 ### TFFBOptoRaw
 
@@ -141,6 +141,15 @@ actually matches.
 | `LineMove` | This player's team's Vegas-implied point total, change since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 
+Four filter views (Data > Filter views, `dfs sheets add-filters`) sort/
+filter within the view only, never touching the stored rows: "Pool
+picking" (the whole tab, no preset -- the workhorse, since a filter
+view's own column header gets a type-ahead search box for free),
+"Leverage plays" (`Flag = LEVERAGE`), "Available only" (`Avail` blank),
+"In my pool" (`Pool = TRUE`). `EdgeRaw` itself is deliberately **not**
+protected (`dfs sheets protect`) -- ticking `Pool` is the tab's entire
+reason to exist.
+
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
 
 ## Derived hub tabs (formulas inside the sheet)
@@ -193,21 +202,34 @@ a 9-row roster block (QB, RB, RB, WR, WR, WR, TE, FLEX, DEF) once per
 lineup you're building, each with its own salary total row underneath.
 
 `Player Pool`'s `Name` column is **not typed** -- it's a
-`SORT(FILTER(...))` formula per position block, pulling in whichever
-players are ticked in `EdgeRaw`'s `Pool` checkbox column (see EdgeRaw's
-column docs above). Tick a player there instead of typing them here; the
-block fills in sorted by name, capped at that position's slot count (QB
-10, RB 20, WR 25, TE 10, DST 10), with an `Overflow` column (far right,
-`Z`) warning per position if more players are ticked than the block has
-room for -- a ticked player is never silently dropped. Every other
-column still VLOOKUPs off `Name` the same as before, so nothing past
-column A changed. See `sheet_pool_formulas.py`/`sources/edge.py` for the
-mechanism and `CONTRIBUTING.md`'s changelog for the block-resize history.
+`SORT(UNIQUE({...}))` formula per position block, pulling in the UNION of
+two sources: whichever players are ticked in `EdgeRaw`'s `Pool` checkbox
+column (see EdgeRaw's column docs above), and whichever names are typed
+into the `Pool Picks` tab (see "Manual / output tabs" below) for that
+position. `UNIQUE` dedupes a player who ends up both ticked and typed
+into one row, not two. Column `O` (`Source`) states which of the two
+sources each row actually came from -- `EdgeRaw` or `Picks` -- so you
+know where to go to remove one. The block fills in sorted, capped at
+that position's slot count (QB 10, RB 20, WR 25, TE 10, DST 10), with an
+`Overflow` column (far right, `Z`) warning per position if more players
+are ticked/typed than the block has room for (counting the same deduped
+union, so a player counted in both sources can't trigger a false
+warning) -- nobody is ever silently dropped. Every other column still
+VLOOKUPs off `Name` the same as before. `Player Pool` is fully protected
+(warning-only, `dfs sheets protect`) since none of it is meant to be
+typed into directly. See `sheet_pool_formulas.py`/`sources/edge.py`/
+`sheet_pool_picks.py` for the mechanism and `CONTRIBUTING.md`'s
+changelog for the block-resize history.
 
 Columns mirror `PlayerPoolRaw`'s, pulled the same way, plus the same
 linked `EdgeRaw` block at the far right (`dfs sheets link-edge`).
 `Lineups` additionally has `% of Rstr` (this pick's `Rstr%` as a share of
-the lineup's total `Rstr%`) and a per-lineup salary-remaining row.
+the lineup's total `Rstr%`) and a per-lineup salary-remaining row. Each
+lineup block's `Name` column (the only typed column on the tab besides
+the pool deck's own controls) has a live dropdown validated against
+`PlayerPoolRaw`'s real Name column (non-strict -- a warning, not a hard
+block) so a typo doesn't silently propagate as `#N/A` across the whole
+row; everything else on the tab is protected (warning-only).
 
 `Lineups`' column O ("Check", `dfs sheets polish`) is a per-lineup
 guardrail: on each roster slot, `DUPLICATE` if that name appears twice in
@@ -249,13 +271,30 @@ cross-referencing kickoff times against your roster.
 
 ## Manual / output tabs
 
+### Pool Picks
+
+A second, additive way to add a player to `Player Pool` by typing a
+name instead of ticking `EdgeRaw`. Column `A` (the only typed cell) is a
+live type-ahead search box (`ONE_OF_RANGE` validation, non-strict)
+against `EdgeRaw`'s own `Name` column. Columns `B`-`I` are read-only
+VLOOKUPs against `EdgeRaw` (`Pos`, `Team`, `Salary`, `Pts`, `Ceil`,
+`CeilVal`, `Leverage`, `Flag`) so a pick can be sanity-checked without
+leaving the tab; column `J` (`Status`) reads `NOT ON SLATE` if the typed
+name doesn't match this week's `EdgeRaw` at all, else `added`. To remove
+a pick, clear its cell in column `A` (or, for one that actually came
+from ticking `EdgeRaw` instead, untick it there -- `Player Pool`'s
+`Source` column, see below, says which). See `sheet_pool_picks.py` for
+the mechanism.
+
 ### SoSQB / SoSRB / SoSWr / SoSTE / SoSDef
 
 Strength-of-schedule rankings, pasted in by hand from The Fantasy
 Footballers' Foot Clan Premium each week (**not yet automated** -- see
 `legacy/README.md`). Each has a per-week opponent rank and points-allowed
-column; `SoSComb` combines all five into one lookup table keyed by team
-and position, which `PlayerPoolRaw`'s `OppPosRank` reads.
+column, colour-scaled REVERSED (a low rank is the good matchup here, the
+one place in the workbook where less is better); `SoSComb` combines all
+five into one lookup table keyed by team and position, which
+`PlayerPoolRaw`'s `OppPosRank` reads.
 
 ### Scratch
 
@@ -277,9 +316,9 @@ Contest-entry tracking, same roster-slot shape as `Lineups`/`DK Upload`.
 `EntriesRaw` is where you paste your exported DK contest history
 (`Import options: Replace Data at Selected Cell`, active cell A1);
 `GPPin`/`DKLineupsRaw`/`DKLineupsFinal` derive views from it. `dfs`
-doesn't read or write any of these yet -- see README.md's status table
-("Live DK contest history / entries" is the corresponding not-yet-built
-item).
+doesn't read or write any of these yet -- pulling contest history
+directly (no manual export) would need probing DraftKings' undocumented
+authenticated endpoints live, with you present; investigated, not built.
 
 ### Exposure
 
@@ -290,11 +329,17 @@ No `dfs` involvement.
 ### Bankroll
 
 Cash/GPP ledgers plus starting/ending bankroll summary figures.
-`dfs bankroll sync --csv <file>` appends new contest results here (see
-README.md's "Bankroll sync" section for the full behavior and the
-`[bankroll.cash]`/`[bankroll.gpp]` config shape) -- it only ever writes
-into its configured row range and dedupe-key column, never touching the
-summary figures or any other formula.
+`dfs bankroll sync --csv <file>` (or `dfs week close --csv <file>`, a
+thin wrapper over it) classifies each contest entry as Cash or GPP by
+payout shape (roughly half the field paid, or a straight head-to-head,
+counts as Cash; everything else is GPP) and appends new rows here -- it
+only ever writes into its configured row range and dedupe-key column
+(`[bankroll.cash]`/`[bankroll.gpp]`'s `entry_key_column` in
+`config.toml`), never touching the summary figures or any other formula,
+and re-running is safe since entries are deduped by that key. If your
+sheet has no ledger tables shaped like this, leave `[bankroll.cash]`/
+`[bankroll.gpp]` out of `config.toml` and the command says what's
+missing rather than guessing where to write.
 
 ### Results
 
