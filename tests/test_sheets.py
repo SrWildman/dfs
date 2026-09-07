@@ -35,6 +35,8 @@ class FakeWorksheet:
         self.data_validation_calls: list[dict] = []
         self.filter_views: list[dict] = []
         self.protected_ranges: list[dict] = []
+        self.basic_filter: dict | None = None
+        self.notes: dict[tuple[int, int], str] = {}
 
     def _cell(self, row: int, col: int) -> str:
         if row - 1 < len(self._rows) and col - 1 < len(self._rows[row - 1]):
@@ -189,6 +191,17 @@ class FakeSpreadsheet:
                 filter_id = request["deleteFilterView"]["filterId"]
                 for ws in self._worksheets.values():
                     ws.filter_views = [fv for fv in ws.filter_views if fv["filterViewId"] != filter_id]
+            if "setBasicFilter" in request:
+                rng = request["setBasicFilter"]["filter"]["range"]
+                self._ws_by_id(rng["sheetId"]).basic_filter = rng
+            if "clearBasicFilter" in request:
+                self._ws_by_id(request["clearBasicFilter"]["sheetId"]).basic_filter = None
+            if "updateCells" in request:
+                upd = request["updateCells"]
+                rng = upd["range"]
+                ws = self._ws_by_id(rng["sheetId"])
+                note = upd["rows"][0]["values"][0].get("note")
+                ws.notes[(rng["startRowIndex"], rng["startColumnIndex"])] = note
             if "addProtectedRange" in request:
                 pr = dict(request["addProtectedRange"]["protectedRange"])
                 ws = self._ws_by_id(pr["range"]["sheetId"])
@@ -655,6 +668,52 @@ def test_add_filter_view_is_re_runnable_via_clear_then_add(cfg, monkeypatch, tmp
     client.add_filter_view("T", title="Pool picking", a1_range="A1:W1000")
 
     assert len(fake_sheet._worksheets["T"].filter_views) == 1
+
+
+def test_set_basic_filter_puts_sort_search_arrows_on_the_given_range(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.set_basic_filter("T", "A1:W1000")
+
+    rng = fake_sheet._worksheets["T"].basic_filter
+    assert rng is not None
+    assert rng["startColumnIndex"] == 0
+    assert rng["endColumnIndex"] == 23
+
+
+def test_set_basic_filter_is_re_runnable_without_a_separate_clear(cfg, monkeypatch, tmp_path):
+    # Unlike filter views, a sheet has at most one basic filter and
+    # setBasicFilter always replaces it -- no clear-then-add needed.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.set_basic_filter("T", "A1:B10")
+    client.set_basic_filter("T", "A1:D20")
+
+    rng = fake_sheet._worksheets["T"].basic_filter
+    assert rng["endColumnIndex"] == 4
+
+
+def test_clear_basic_filter_removes_it(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.set_basic_filter("T", "A1:B10")
+
+    client.clear_basic_filter("T")
+
+    assert fake_sheet._worksheets["T"].basic_filter is None
+
+
+def test_set_note_attaches_metadata_without_touching_the_cell_value(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["Pool"]])
+
+    client.set_note("T", "A1", "Tick to add this player to your pool.")
+
+    ws = fake_sheet._worksheets["T"]
+    assert ws.notes[(0, 0)] == "Tick to add this player to your pool."
+    assert ws.get("A1:A1") == [["Pool"]]  # the cell's own value is untouched
 
 
 def test_protect_sheet_protects_the_whole_sheet_with_no_range_bounds(cfg, monkeypatch, tmp_path):

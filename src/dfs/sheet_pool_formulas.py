@@ -42,6 +42,8 @@ completely unaffected -- confirmed by re-running `dfs doctor`/
 from __future__ import annotations
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.sheet_pool_picks import FIRST_DATA_ROW as _PICKS_FIRST_DATA_ROW
+from dfs.sheet_pool_picks import LAST_ROW as _PICKS_LAST_ROW
 from dfs.sheet_pool_picks import POOL_PICKS_TAB
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN
@@ -57,10 +59,13 @@ _OVERFLOW_HEADER = "Overflow"
 _EDGE_NAME_COL = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
 _EDGE_POSITION_COL = column_letter(EDGE_COLUMNS.index("Position") + EDGE_DATA_OFFSET)
 
-# Pool Picks' own fixed layout (sheet_pool_picks.py): column A is the
-# typed name, column B its looked-up position, rows 2-101.
-_PICKS_NAME_RANGE = "$A$2:$A$101"
-_PICKS_POSITION_RANGE = "$B$2:$B$101"
+# Pool Picks' own fixed layout (sheet_pool_picks.py, Fix 3.1's title row
+# pushed this down by one from $A$2:$A$101): column A is the typed name,
+# column B its looked-up position, rows 3-102. Derived from that module's
+# own FIRST_DATA_ROW/LAST_ROW rather than retyped -- exactly the class of
+# cross-tab position CLAUDE.md's central hazard warns never to hardcode.
+_PICKS_NAME_RANGE = f"$A${_PICKS_FIRST_DATA_ROW}:$A${_PICKS_LAST_ROW}"
+_PICKS_POSITION_RANGE = f"$B${_PICKS_FIRST_DATA_ROW}:$B${_PICKS_LAST_ROW}"
 
 
 def _union_array(edge_tab: str, position: str) -> str:

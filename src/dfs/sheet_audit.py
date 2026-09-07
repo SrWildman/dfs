@@ -52,7 +52,7 @@ AUDITED_TABS: list[tuple[str, int]] = [
     ("SoSTE", 1),
     ("SoSDef", 1),
     ("SoSComb", 1),
-    ("Pool Picks", 1),
+    ("Pool Picks", 2),  # row 1 is Fix 3.1's plain-text title, not a header
 ]
 
 # A tab whose frozen rows deliberately don't equal its header row, so the

@@ -36,21 +36,25 @@ from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
 from dfs.pool import clear_all, find_matches, read_players, set_pool
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
-from dfs.sheet_filters import add_all_filter_views
+from dfs.sheet_filters import add_all_filter_views, add_basic_filters
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
+from dfs.sheet_pool_picks import HEADER_ROW as POOL_PICKS_HEADER_ROW
+from dfs.sheet_pool_picks import LAST_ROW as POOL_PICKS_LAST_ROW
 from dfs.sheet_pool_picks import create_pool_picks_tab
 from dfs.sheet_protection import protect_workbook
 from dfs.sheet_style import (
     EDGE_ROWS,
     POOL_RAW_ROWS,
     apply_tab_chrome,
+    apply_tab_notes,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
     polish_lineups_input_column,
+    polish_pool_deck,
     style_tier23_tabs,
     style_view_tabs,
 )
@@ -486,7 +490,14 @@ def sheets_polish(
         results.append(polish_edge(client, edge_tab))
         results.append(polish_builder_tab(client, PLAYER_POOL_RAW_TAB, last_row=POOL_RAW_ROWS))
         pool_last = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
-        results.append(polish_builder_tab(client, cfg.lineups.player_pool_tab, last_row=pool_last))
+        results.append(
+            polish_builder_tab(
+                client,
+                cfg.lineups.player_pool_tab,
+                last_row=pool_last,
+                band_blocks=PLAYER_POOL_NAME_BLOCKS,
+            )
+        )
         lineups_last = max(end for _, end in LINEUPS_NAME_BLOCKS)
         lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
         results.append(
@@ -498,7 +509,16 @@ def sheets_polish(
                 freeze_rows=DECK_ROWS,
                 freeze_cols=0,
                 header_repeats_at=[start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]],
+                band_blocks=LINEUPS_NAME_BLOCKS,
             )
+        )
+        # The pool deck's window (rows 4..DECK_ROWS-1) sits above these same
+        # blocks and isn't touched by polish_builder_tab -- Fix 2.4 gives it
+        # the identical treatment so the window and the blocks below it read
+        # as one surface. Must run after the Lineups call above, never
+        # before: that call's own whole-tab clear would otherwise wipe it.
+        results.append(
+            polish_pool_deck(client, cfg.lineups.builder_tab, header_row=3, window_end=DECK_ROWS - 1)
         )
         results.append(
             polish_guardrails(
@@ -552,6 +572,12 @@ def sheets_polish(
 
         if not skip_chrome:
             results.extend(apply_tab_chrome(client))
+
+        # Fix 3/1.5: a short cell note on every visible tab's A1 explaining
+        # what it's for (and, for the tabs that got a basic filter in `dfs
+        # setup add-filters`, how to sort/search it) -- pure metadata, so
+        # this is safe regardless of what else ran above.
+        results.extend(apply_tab_notes(client))
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -670,25 +696,35 @@ def sheets_link_edge(
         console.print(f"[green]OK[/green] {line}")
 
 
-@setup_app.command("add-filters", short_help="Add non-destructive filter views to EdgeRaw and the view tabs.")
+@setup_app.command(
+    "add-filters", short_help="Make sorting/searching visible: basic filters plus saved filter views."
+)
 def sheets_add_filters(
     sheet_id: str = typer.Option(
         None,
         "--sheet-id",
-        help="Add filter views to a different sheet instead of config.toml's -- e.g. the "
+        help="Add filters to a different sheet instead of config.toml's -- e.g. the "
         "canonical weekly template.",
     ),
 ) -> None:
-    """Per-user, non-destructive sort/filter views (Sheets' Data > Filter
-    views) on EdgeRaw and the read-only view/log tabs -- never the plain
-    "Create a filter" button, which is per-sheet and physically reorders
-    stored cells. EdgeRaw gets four named views ("Pool picking", "Leverage
-    plays", "Available only", "In my pool"); Slate Grid/Movement/Exposure/
-    Results/SoS* each get one plain sortable view. Deliberately NOT applied
-    to Player Pool, Lineups, PlayerPoolRaw or Board -- see
-    `sheet_filters.py`'s own docstring for why those stay on the pool
-    deck's own sort/filter instead. Safe to re-run: each view is deleted
-    by title before being re-added, never duplicated.
+    """Fix 1: sorting and searching are real features that were invisible
+    -- filter views live behind Data > Filter views, easy to never notice.
+
+    Two mechanisms, in order of what you'll actually see:
+    1. A VISIBLE basic filter (Data > Create a filter -- a dropdown arrow
+       in every header cell) on EdgeRaw, Pool Picks, Results, and the SoS
+       tabs. Safe only on plain-value tabs; `set_basic_filter` always
+       replaces whatever's there, so this is naturally re-runnable.
+    2. Saved filter views (Sheets' Data > Filter views), the secondary,
+       preset mechanism: EdgeRaw gets four named views ("Pool picking",
+       "Leverage plays", "Available only", "In my pool"); Slate Grid/
+       Movement/Exposure/Results/SoS* each get one plain sortable view.
+
+    Deliberately NOT applied to Player Pool, Lineups, PlayerPoolRaw or
+    Board -- see `sheet_filters.py`'s own docstring for why those stay on
+    the pool deck's own sort/filter instead. Filter views are safe to
+    re-run: each is deleted by title before being re-added, never
+    duplicated.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -700,8 +736,10 @@ def sheets_add_filters(
     client = SheetsClient(gs_cfg)
     try:
         title, url = client.describe()
-        console.print(f"Adding filter views to: [bold]{title}[/bold]\n{url}\n")
-        results = add_all_filter_views(client, edge_tab)
+        console.print(f"Adding filters to: [bold]{title}[/bold]\n{url}\n")
+        pool_picks_range = f"A{POOL_PICKS_HEADER_ROW}:J{POOL_PICKS_LAST_ROW}"
+        results = add_basic_filters(client, edge_tab=edge_tab, pool_picks_range=pool_picks_range)
+        results.extend(add_all_filter_views(client, edge_tab))
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e

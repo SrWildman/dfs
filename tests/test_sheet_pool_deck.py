@@ -94,6 +94,7 @@ class FakeDeckClient:
         self.row_height_calls: list[tuple] = []
         self.clear_cf_calls: list[str | None] = []
         self.color_scale_calls: list[tuple[str, dict]] = []
+        self.boolean_rule_calls: list[tuple[str, dict]] = []
 
     def read_range(self, tab_name: str, a1_range: str):
         if tab_name == "Player Pool" and a1_range == "A1:Z1":
@@ -158,6 +159,11 @@ class FakeDeckClient:
 
     def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
         self.color_scale_calls.append((a1_range, kwargs))
+
+    def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
+        self.boolean_rule_calls.append(
+            (a1_range, {"condition_type": condition_type, "values": values, "fmt": fmt})
+        )
 
 
 def test_add_pool_deck_already_present_skips_structure_but_still_refreshes_everything():

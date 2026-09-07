@@ -980,3 +980,45 @@ class SheetsClient:
         sheet.batch_update(
             {"requests": [{"updateSheetProperties": {"properties": props, "fields": ",".join(fields)}}]}
         )
+
+    def set_basic_filter(self, tab_name: str, a1_range: str) -> None:
+        """Data > Create a filter over `a1_range` -- a visible dropdown
+        arrow in every header cell of the range, the discoverable sort/
+        search mechanism filter views (see `add_filter_view`) don't give
+        you without opening Data > Filter views first. Only ever safe on a
+        tab of plain values (see `sheet_filters.py`'s own callers for
+        which); a basic filter physically reorders the tab's stored rows
+        for every viewer, which would corrupt a positional block.
+
+        A sheet can have at most one basic filter, and `setBasicFilter`
+        always replaces whatever's there -- unlike filter views/banding/
+        column groups elsewhere in this file, no separate clear-then-add
+        is needed for this to be re-runnable."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        sheet.batch_update({"requests": [{"setBasicFilter": {"filter": {"range": grid_range}}}]})
+
+    def clear_basic_filter(self, tab_name: str) -> None:
+        """Remove a tab's basic filter entirely, if it has one."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update({"requests": [{"clearBasicFilter": {"sheetId": ws.id}}]})
+
+    def set_note(self, tab_name: str, cell_a1: str, note: str) -> None:
+        """Attach a cell note (Insert > Note) -- pure metadata: no cell
+        value, formula or format is touched, so this is safe on a typed
+        cell (EdgeRaw's Pool header) as readily as a computed one."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(cell_a1, ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateCells": {
+                            "range": grid_range,
+                            "rows": [{"values": [{"note": note}]}],
+                            "fields": "note",
+                        }
+                    }
+                ]
+            }
+        )

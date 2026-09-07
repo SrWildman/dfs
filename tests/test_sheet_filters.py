@@ -1,5 +1,11 @@
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
-from dfs.sheet_filters import FULL_RANGE_FILTER_TABS, add_edge_filter_views, add_plain_filter_views
+from dfs.sheet_filters import (
+    BASIC_FILTER_PLAIN_TABS,
+    FULL_RANGE_FILTER_TABS,
+    add_basic_filters,
+    add_edge_filter_views,
+    add_plain_filter_views,
+)
 from dfs.sheets import column_letter
 
 
@@ -8,6 +14,7 @@ class FakeFilterClient:
         self._present = present
         self.clear_calls: list[tuple[str, str]] = []
         self.add_calls: list[tuple[str, str, str, dict | None]] = []
+        self.basic_filter_calls: list[tuple[str, str]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
@@ -19,6 +26,9 @@ class FakeFilterClient:
         self, tab_name: str, *, title: str, a1_range: str, criteria: dict | None = None
     ) -> None:
         self.add_calls.append((tab_name, title, a1_range, criteria))
+
+    def set_basic_filter(self, tab_name: str, a1_range: str) -> None:
+        self.basic_filter_calls.append((tab_name, a1_range))
 
 
 def test_add_edge_filter_views_skips_missing_tab():
@@ -109,4 +119,50 @@ def test_full_range_filter_tabs_excludes_the_formula_driven_tabs():
     # picks from its own totals row even though nothing underneath moves.
     tabs = {tab for tab, _rng in FULL_RANGE_FILTER_TABS}
     for excluded in ("Player Pool", "Lineups", "PlayerPoolRaw", "Board", "EdgeRaw"):
+        assert excluded not in tabs
+
+
+def test_add_basic_filters_covers_edgeraw_pool_picks_and_the_plain_tabs():
+    client = FakeFilterClient()
+    add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
+
+    tabs = [tab for tab, _rng in client.basic_filter_calls]
+    assert tabs == ["EdgeRaw", "Pool Picks", *[t for t, _r in BASIC_FILTER_PLAIN_TABS]]
+
+
+def test_add_basic_filters_edgeraw_spans_the_whole_real_range():
+    client = FakeFilterClient()
+    add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
+    _tab, a1_range = client.basic_filter_calls[0]
+    last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    assert a1_range.startswith(f"A1:{last_col}")
+
+
+def test_add_basic_filters_pool_picks_uses_the_given_range():
+    client = FakeFilterClient()
+    add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
+    assert ("Pool Picks", "A2:J102") in client.basic_filter_calls
+
+
+def test_add_basic_filters_skips_missing_tabs_without_erroring():
+    class SelectivelyMissing(FakeFilterClient):
+        def tab_exists(self, tab_name: str) -> bool:
+            return tab_name not in ("Pool Picks", "SoSQB")
+
+    client = SelectivelyMissing()
+    results = add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
+
+    assert any("Pool Picks: not present -- skipped" == r for r in results)
+    assert any("SoSQB: not present -- skipped" == r for r in results)
+    touched = [tab for tab, _rng in client.basic_filter_calls]
+    assert "Pool Picks" not in touched
+    assert "SoSQB" not in touched
+
+
+def test_basic_filter_plain_tabs_excludes_the_view_only_tabs():
+    # Slate Grid/Movement/Exposure keep their filter view as the only
+    # sort/search mechanism (Fix 1.3) -- a basic filter is not added there.
+    tabs = {tab for tab, _rng in BASIC_FILTER_PLAIN_TABS}
+    excluded_tabs = ("Player Pool", "Lineups", "PlayerPoolRaw", "Board", "Slate Grid", "Movement", "Exposure")
+    for excluded in excluded_tabs:
         assert excluded not in tabs

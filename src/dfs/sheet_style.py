@@ -41,7 +41,7 @@ function happens to touch it first.
   formula; if it isn't pale yellow, don't type into it.
 - Red -> yellow -> green (`GRAD_MIN`/`GRAD_MID`/`GRAD_MAX`, via
   `add_color_scale`) means "more is better," for the decision numbers
-  named in `EDGE_COLOR_SCALES`/`FIELD_FORMATS`. Reversed (max color at the
+  named in `FIELD_COLOR_SCALES`/`FIELD_FORMATS`. Reversed (max color at the
   low end) for a rank column, where 1st is best. A true diverging scale
   (`mid_type="NUMBER", mid_value="0"`, white midpoint) is for a signed
   delta where zero -- not the median -- is the meaningful center: LineMove
@@ -61,7 +61,6 @@ function happens to touch it first.
 from __future__ import annotations
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
-from dfs.sheet_links import COLOR_SCALE_LINKED_COLUMNS
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
 
@@ -127,6 +126,12 @@ _HEADER_FMT = {
 # mini-header row (row 3) so it visually matches every other header on
 # the sheet, without duplicating the color/weight choices in two places.
 HEADER_FMT = _HEADER_FMT
+
+_TITLE_FMT = {"textFormat": {"bold": True, "fontSize": 13, "foregroundColor": INK}}
+# Public alias -- sheet_pool_picks.py reuses this for Pool Picks' own
+# explanatory title row (Fix 3.1), the same style Board/Movement's titles
+# already use, so a tab-level title reads consistently everywhere it appears.
+TITLE_FMT = _TITLE_FMT
 
 
 def _chip(bg: dict, fg: dict) -> dict:
@@ -208,6 +213,88 @@ def apply_field_formats(
 
 
 # ---------------------------------------------------------------------------
+# FIELD_COLOR_SCALES -- the "one visual policy" (Fix 2.1): every tab that
+# shows a given field gets the SAME colour scale, found by header text the
+# same way FIELD_FORMATS already works. Before this existed, EdgeRaw,
+# Player Pool and Lineups each scaled a different set of columns -- some of
+# it written by this codebase (EdgeRaw's own six, plus the three
+# `sheet_links.link_edge_columns` puts on every EdgeRaw-linked block),
+# the rest hand-applied directly in the browser at various points and never
+# reconciled, including one rule that colour-scaled `Venue` (`H`/`R` text)
+# as if it were a quantity. Replaces the old per-tab `EDGE_COLOR_SCALES`
+# tuple entirely.
+_GRADIENT = "gradient"  # red -> yellow -> green, more is better
+_DIVERGING = "diverging"  # red -> white -> green, zero is the midpoint
+_REVERSED = "reversed"  # green -> yellow -> red, LOW is better
+
+FIELD_COLOR_SCALES = {
+    "ProjPts": _GRADIENT,
+    "Pts": _GRADIENT,
+    "Ceiling": _GRADIENT,
+    "Ceil": _GRADIENT,
+    "Val": _GRADIENT,
+    "CeilVal": _GRADIENT,
+    "Leverage": _GRADIENT,
+    "GameEnv": _GRADIENT,
+    "Team Implied": _GRADIENT,
+    "O/U": _GRADIENT,
+    "OU": _GRADIENT,
+    "Total": _GRADIENT,
+    "LineMove": _DIVERGING,
+    "Spread": _DIVERGING,
+    # A low OppPosRank is the tough matchup here (this opponent allows the
+    # FEWEST fantasy points at this position) -- same "1st is best"
+    # convention as the SoS tabs' own `Rank` column (`style_sos_tab`).
+    "OppPosRank": _REVERSED,
+}
+
+# Deliberately absent from FIELD_COLOR_SCALES: `Salary`/`DK Sal` (a
+# constraint, not a quality -- scaling it would imply cheap is good) and
+# `Rstr%` (has its own PERCENT format in FIELD_FORMATS, but ownership isn't
+# a "more/less is better" quantity on its own).
+
+
+def apply_field_color_scales(
+    client: SheetsClient, tab: str, header: list, *, header_row: int, last_row: int
+) -> int:
+    """Colour-scale every column in `header` whose text is a
+    FIELD_COLOR_SCALES key. Clears each matched column's own conditional
+    formats first (one column at a time) so this stays correct even when
+    called on its own against a column that previously carried a stray
+    rule -- though the real cleanup of a tab's pre-existing mess is its
+    caller's whole-tab `clear_conditional_formats` (see `polish_edge`/
+    `polish_builder_tab`), since a hand-applied rule can span multiple
+    columns at once and a column-scoped clear alone can't reliably catch
+    that. Returns how many columns matched, for callers' own status lines.
+    """
+    applied = 0
+    data_start = header_row + 1
+    for i, name in enumerate(header):
+        kind = FIELD_COLOR_SCALES.get(name)
+        if not kind:
+            continue
+        letter = column_letter(i)
+        a1 = f"{letter}{data_start}:{letter}{last_row}"
+        client.clear_conditional_formats(tab, column=letter)
+        if kind == _DIVERGING:
+            client.add_color_scale(
+                tab,
+                a1,
+                min_color=GRAD_MIN,
+                mid_color=WHITE,
+                max_color=GRAD_MAX,
+                mid_type="NUMBER",
+                mid_value="0",
+            )
+        elif kind == _REVERSED:
+            client.add_color_scale(tab, a1, min_color=GRAD_MAX, mid_color=GRAD_MID, max_color=GRAD_MIN)
+        else:
+            client.add_color_scale(tab, a1, min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX)
+        applied += 1
+    return applied
+
+
+# ---------------------------------------------------------------------------
 # EdgeRaw (Direction B)
 # ---------------------------------------------------------------------------
 
@@ -246,12 +333,6 @@ EDGE_WIDTHS = {
 # hidden instead (see polish_edge's hide_columns call) -- a group would
 # just be a second click for something that never needs to come back.
 EDGE_COLUMN_GROUPS = [("Stadium", "Roof"), ("GameStart", "GameStart")]
-
-# The decision set: every number Sam actually weighs a pick on. Salary is
-# deliberately excluded -- it's a constraint, not a quality, and scaling it
-# would imply cheap is good. LineMove is excluded too: it's a signed delta
-# scored with its own diverging scale below, not this red->yellow->green one.
-EDGE_COLOR_SCALES = ("ProjPts", "Ceiling", "Val", "CeilVal", "Leverage", "GameEnv")
 
 # Muted, per-position backgrounds -- just enough to see position boundaries
 # while scanning a list sorted by Leverage, not loud enough to compete with
@@ -298,6 +379,16 @@ SOURCE_CHIPS = {
     "Picks": _chip(OK_BG, OK_FG),
 }
 
+# Venue (Fix 2.1): `H`/`R` text, categorical only -- home/road is
+# provenance the same way Source is, not a quality to colour-scale (a
+# hand-applied scale on this column, found live, was exactly the bug this
+# replaces). Two distinct neutral tones so the two states still read at a
+# glance, neither tinted as good/bad.
+VENUE_CHIPS = {
+    "H": _chip(_rgb("#E5EEF7"), _rgb("#2E5A82")),
+    "R": _chip(_rgb("#F0EAE0"), _rgb("#8A6D3B")),
+}
+
 
 def _edge_letter(column_name: str) -> str | None:
     """Real EdgeRaw column letter for a column NAME, or None if that column
@@ -314,11 +405,12 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 
     Widths, a dark frozen header, Id hidden and Pool+Name pinned while you
     scroll right, light row banding, number formats on every numeric
-    column, six colour scales on the decision numbers (a diverging one for
-    LineMove), a muted per-position tint, a Wind chip matching Slate Grid's,
-    Flag/Avail as chips, the Name cell tinted when that player is already
-    pooled and bolded when Flag is set, and CeilPct greyed while Leverage is
-    running on a proxy so the two identical-looking columns stop competing.
+    column, FIELD_COLOR_SCALES applied to every matching column (a
+    diverging scale for LineMove, gradient for the rest), a muted
+    per-position tint, a Wind chip matching Slate Grid's, Flag/Avail as
+    chips, the Name cell tinted when that player is already pooled and
+    bolded when Flag is set, and CeilPct greyed while Leverage is running
+    on a proxy so the two identical-looking columns stop competing.
     """
     if not client.tab_exists(edge_tab):
         return f"{edge_tab}: not present -- skipped"
@@ -357,30 +449,12 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # read back, same as every other position in this function.
     apply_field_formats(client, edge_tab, [POOL_HEADER, *EDGE_COLUMNS], header_row=1, last_row=EDGE_ROWS)
 
-    for name in EDGE_COLOR_SCALES:
-        letter = _edge_letter(name)
-        if letter:
-            client.add_color_scale(
-                edge_tab,
-                f"{letter}2:{letter}{EDGE_ROWS}",
-                min_color=GRAD_MIN,
-                mid_color=GRAD_MID,
-                max_color=GRAD_MAX,
-            )
-
-    # Diverging, not the standard scale above: LineMove is a signed delta
-    # and zero (no movement) is the meaningful midpoint, not the median.
-    line_move_col = _edge_letter("LineMove")
-    if line_move_col:
-        client.add_color_scale(
-            edge_tab,
-            f"{line_move_col}2:{line_move_col}{EDGE_ROWS}",
-            min_color=GRAD_MIN,
-            mid_color=WHITE,
-            max_color=GRAD_MAX,
-            mid_type="NUMBER",
-            mid_value="0",
-        )
+    # FIELD_COLOR_SCALES (Fix 2.1) -- the one canonical policy every tab
+    # that shows a given field applies; on EdgeRaw that's ProjPts, Ceiling,
+    # Val, CeilVal, Leverage, GameEnv (gradient) and LineMove (diverging).
+    n_scaled = apply_field_color_scales(
+        client, edge_tab, [POOL_HEADER, *EDGE_COLUMNS], header_row=1, last_row=EDGE_ROWS
+    )
 
     wind_col = _edge_letter("Wind")
     if wind_col:
@@ -487,7 +561,10 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
         if a and b:
             client.group_columns(edge_tab, a, b)
 
-    return f"{edge_tab}: widths, header, banding, formats, 6 colour scales, position tint, chips applied"
+    return (
+        f"{edge_tab}: widths, header, banding, formats, {n_scaled} colour scale(s), "
+        "position tint, chips applied"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -519,11 +596,23 @@ def polish_builder_tab(
     freeze_rows: int | None = None,
     freeze_cols: int = 1,
     header_repeats_at: list[int] | None = None,
+    band_blocks: list[tuple[int, int]] | None = None,
 ) -> str:
-    """Number formats, widths, header treatment and (by default) a pinned
-    Name column on a tab whose header row names its columns. Reads the
-    header first and matches by name, so it never assumes a column is in a
-    given position.
+    """Number formats, widths, header treatment, colour scales, chips and
+    row banding on a tab whose header row names its columns -- the same
+    "one visual policy" (Fix 2) EdgeRaw itself gets via `polish_edge`.
+    Reads the header first and matches by name, so it never assumes a
+    column is in a given position.
+
+    Starts with a whole-tab `clear_conditional_formats`, same as
+    `polish_edge` -- necessary here specifically because Player Pool and
+    Lineups had accumulated hand-applied rules directly in the browser
+    (including one that colour-scaled `Venue`'s `H`/`R` text, and a couple
+    spanning two columns at once) that a narrower, column-scoped clear
+    can't reliably find. Callers that also own conditional formats outside
+    this function's reach on the same tab (`polish_guardrails`' column O,
+    `polish_pool_deck`'s deck-window rows) must re-run *after* this, not
+    before -- see `sheets_polish`'s own call order.
 
     `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but not
     for Lineups: `sheet_pool_deck.py`'s `add_pool_deck` inserts frozen rows
@@ -540,6 +629,13 @@ def polish_builder_tab(
     way as the real header, so every block reads consistently instead of
     only the first one looking like a header. Player Pool/PlayerPoolRaw
     have no repeats and pass nothing.
+
+    `band_blocks` (Fix 2.2) row-bands each block independently -- Player
+    Pool/Lineups' per-position/per-lineup blocks are separated by repeated
+    header rows and spacer rows that shouldn't be banded as if they were
+    data, so each block restarts its own alternating pattern. Omit for a
+    tab with no gaps (PlayerPoolRaw): the whole `header_row+1:last_row`
+    span is banded as one block.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -550,6 +646,13 @@ def polish_builder_tab(
         return f"{tab}: empty header row -- skipped"
 
     last_col = column_letter(len(header) - 1)
+    client.clear_conditional_formats(tab)
+    client.clear_banding(tab)
+    for start, end in band_blocks or [(header_row + 1, last_row)]:
+        client.add_row_banding(
+            tab, f"A{start}:{last_col}{end}", first_band_color=WHITE, second_band_color=BAND_BG
+        )
+
     client.format_range(tab, f"A{header_row}:{last_col}{header_row}", _HEADER_FMT)
     for repeat_row in header_repeats_at or []:
         client.format_range(tab, f"A{repeat_row}:{last_col}{repeat_row}", _HEADER_FMT)
@@ -563,16 +666,22 @@ def polish_builder_tab(
         client.set_column_widths(tab, widths)
 
     applied = apply_field_formats(client, tab, header, header_row=header_row, last_row=last_row)
+    scaled = apply_field_color_scales(client, tab, header, header_row=header_row, last_row=last_row)
 
-    # Flag/Avail chips, same as EdgeRaw's own (found missing entirely by
-    # `dfs setup audit-style`), plus Player Pool's own Source column
-    # (Task 5.3). None of these three are ever colour-scaled by
-    # `sheet_links.link_edge_columns`, and `polish_guardrails` owns
-    # column O on Lineups, not Player Pool, so a column-scoped clear here
-    # is safe on both tabs.
+    # Flag/Avail/Venue chips, same as EdgeRaw's own (Flag/Avail were found
+    # missing entirely by `dfs setup audit-style`; Venue is new -- Fix
+    # 2.1/2.3), plus Player Pool's own Source column (Task 5.3). The
+    # whole-tab clear above already removed any prior rule on these
+    # columns; the per-column clear here just keeps this loop safe to call
+    # on its own too.
     chipped = 0
     data_start = header_row + 1
-    for column_name, chips in (("Flag", FLAG_CHIPS), ("Avail", AVAIL_CHIPS), ("Source", SOURCE_CHIPS)):
+    for column_name, chips in (
+        ("Flag", FLAG_CHIPS),
+        ("Avail", AVAIL_CHIPS),
+        ("Source", SOURCE_CHIPS),
+        ("Venue", VENUE_CHIPS),
+    ):
         if column_name not in header:
             continue
         letter = column_letter(header.index(column_name))
@@ -591,7 +700,10 @@ def polish_builder_tab(
         chipped += 1
 
     pin_note = "Name pinned" if freeze_cols else "no column pin"
-    return f"{tab}: header styled, {pin_note}, {applied} column(s) number-formatted, {chipped} chip column(s)"
+    return (
+        f"{tab}: header styled, {pin_note}, banded, {applied} column(s) number-formatted, "
+        f"{scaled} colour scale(s), {chipped} chip column(s)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -608,13 +720,14 @@ def polish_pool_deck(client: SheetsClient, lineups_tab: str, *, header_row: int,
     blocks below it, but its window rows never got the block rows' own
     formatting: `Pts`/`Ceil`/`Val`/`Leverage` etc. showed as raw floats a
     few rows above block cells showing "0.0" for the identical field.
-    Applies the same FIELD_FORMATS the blocks get (found by header name off
-    row 3, not a literal column) plus the same colour scales
-    `sheet_links.link_edge_columns` already put on the block's CeilVal/
-    Leverage/GameEnv columns, so a number above the divider and the same
-    field below it read identically. Also gives B1/D1/F1 -- the deck's only
-    controls -- the workbook's one "you type here" treatment plus a border,
-    since as plain cells they gave no visual hint they were interactive.
+    Applies the same FIELD_FORMATS and FIELD_COLOR_SCALES the blocks get
+    below it (found by header name off row 3, not a literal column, and via
+    the same `apply_field_color_scales` every other tab uses -- Fix 2.4),
+    plus the Venue chip, so a number (or an H/R tag) above the divider and
+    the same field below it read identically. Also gives B1/D1/F1 -- the
+    deck's only controls -- the workbook's one "you type here" treatment
+    plus a border, since as plain cells they gave no visual hint they were
+    interactive.
 
     `header_row`/`window_end` come from `sheet_pool_deck.py`'s own
     constants (row 3, and `3 + _WINDOW_SIZE`) rather than being
@@ -647,22 +760,22 @@ def polish_pool_deck(client: SheetsClient, lineups_tab: str, *, header_row: int,
     # column, finds it either way.
     client.clear_conditional_formats(lineups_tab, row_range=(header_row + 1, window_end))
 
-    scaled = 0
-    for name in COLOR_SCALE_LINKED_COLUMNS:
-        if name not in header:
-            continue
-        letter = column_letter(header.index(name))
-        window_range = f"{letter}{header_row + 1}:{letter}{window_end}"
-        client.add_color_scale(
-            lineups_tab,
-            window_range,
-            min_color=GRAD_MIN,
-            mid_color=GRAD_MID,
-            max_color=GRAD_MAX,
-        )
-        scaled += 1
+    scaled = apply_field_color_scales(client, lineups_tab, header, header_row=header_row, last_row=window_end)
 
-    return f"{lineups_tab}: deck formatted ({applied} field(s), {scaled} colour scale(s)), controls marked"
+    chipped = False
+    if "Venue" in header:
+        letter = column_letter(header.index("Venue"))
+        a1 = f"{letter}{header_row + 1}:{letter}{window_end}"
+        client.format_range(lineups_tab, a1, {"horizontalAlignment": "CENTER"})
+        for text, fmt in VENUE_CHIPS.items():
+            client.add_boolean_rule(lineups_tab, a1, condition_type="TEXT_EQ", values=[text], fmt=fmt)
+        chipped = True
+
+    venue_note = ", Venue chipped" if chipped else ""
+    return (
+        f"{lineups_tab}: deck formatted ({applied} field(s), {scaled} colour scale(s){venue_note}), "
+        "controls marked"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -922,6 +1035,128 @@ def apply_tab_chrome(client: SheetsClient, *, hide_staging: bool = True) -> list
 
 
 # ---------------------------------------------------------------------------
+# Tab notes (Fix 3 + Fix 1.5): every visible tab explains itself
+# ---------------------------------------------------------------------------
+
+# A note, not a row -- nothing shifts, unlike Pool Picks' own title ROW
+# (Fix 3.1, `sheet_pool_picks.py`), which needed a real structural change
+# since it's a tab this codebase writes formulas into below row 1. Every
+# other tab gets its explanation as an A1 cell note (Insert > Note)
+# instead: pure metadata, safe on a typed cell (EdgeRaw's Pool header) or
+# a computed one alike. Grounded in `docs/SHEET_REFERENCE.md`'s per-tab
+# descriptions rather than invented here -- if a tab's behavior changes,
+# update that doc's entry first and this text second, not the reverse.
+_SORT_SEARCH_HINT = "Click any header arrow to sort or search. Saved views: Data > Filter views."
+_SAVED_VIEW_HINT = "Sort/filter via Data > Filter views (this tab's own cells stay untouched)."
+
+TAB_NOTES: dict[str, str] = {
+    "Board": (
+        "BOARD -- a read-only leverage/GameEnv snapshot across three ranked panels, "
+        "rebuilt by `dfs setup build-views`. Nothing here is typed."
+    ),
+    "EdgeRaw": (
+        "EDGERAW -- every synced player this week, sorted by Leverage. Type in the Pool "
+        f"column (the checkbox on the far left) to add a player to your pool. {_SORT_SEARCH_HINT}"
+    ),
+    "Slate Grid": (
+        "SLATE GRID -- one row per game: total, spread, wind, divisional flag. Read-only, "
+        f"rebuilt by `dfs setup build-views`. {_SAVED_VIEW_HINT}"
+    ),
+    "Player Pool": (
+        "PLAYER POOL -- everyone you've added, grouped by position. Fully computed from "
+        "EdgeRaw's Pool column and Pool Picks; nothing here is typed. Source says which of "
+        "the two a row came from; Overflow (far right) warns if a position has more picks "
+        "than room."
+    ),
+    "Pool Picks": (
+        "POOL PICKS -- a second way to add a player: type in column A (row 3 down) and "
+        f"pick from the dropdown. Adds to your Player Pool. {_SORT_SEARCH_HINT}"
+    ),
+    "Lineups": (
+        "LINEUPS -- build your rosters here. Rows 1-9 are a sortable window into Player "
+        "Pool (pick a position and sort field in row 1); type a player's name into column "
+        "A of a lineup block below to fill a slot. Check (column O) flags a duplicate, an "
+        "unavailable player, or a salary/roster problem per lineup."
+    ),
+    "Scratch": (
+        "SCRATCH -- a blank grid for your own notes or draft lineups. Nothing here is read by `dfs`."
+    ),
+    "DK Upload": (
+        "DK UPLOAD -- `dfs export` writes DraftKings' bulk-upload file here. Read-only "
+        "output; don't type into it."
+    ),
+    "Movement": (
+        "MOVEMENT -- how betting lines have shifted since your last sync "
+        f"(`dfs odds movement`). Read-only. {_SAVED_VIEW_HINT}"
+    ),
+    "Exposure": (
+        "EXPOSURE -- how much of your lineups each player is in. Type a target percentage "
+        f"into the Target column; everything else is computed. {_SAVED_VIEW_HINT}"
+    ),
+    "GPPin": "GPPIN -- a derived view of your pasted contest-entry history. Nothing here is typed.",
+    "DKLineupsFinal": (
+        "DKLINEUPSFINAL -- a derived view of your pasted contest-entry history. Nothing here is typed."
+    ),
+    "Bankroll": (
+        "BANKROLL -- Cash/GPP ledgers plus starting/ending bankroll. `dfs bankroll sync "
+        "--csv <file>` (or `dfs week close`) appends rows here; the summary figures are "
+        "formulas, not typed."
+    ),
+    "Results": (
+        "RESULTS -- a season-level results log, one row per week, NOT reset by a new "
+        f"weekly copy. Type into every column except Cash Results/H2H %. {_SORT_SEARCH_HINT}"
+    ),
+    "SoSQB": (
+        "SOSQB -- Strength-of-schedule for QBs, pasted in by hand each week. Rank is "
+        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+    ),
+    "SoSRB": (
+        "SOSRB -- Strength-of-schedule for RBs, pasted in by hand each week. Rank is "
+        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+    ),
+    "SoSWr": (
+        "SOSWR -- Strength-of-schedule for WRs, pasted in by hand each week. Rank is "
+        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+    ),
+    "SoSTE": (
+        "SOSTE -- Strength-of-schedule for TEs, pasted in by hand each week. Rank is "
+        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+    ),
+    "SoSDef": (
+        "SOSDEF -- Strength-of-schedule for DSTs, pasted in by hand each week. Rank is "
+        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+    ),
+    "SoSComb": (
+        "SOSCOMB -- combines all five SoS tabs into one lookup table by team and "
+        f"position, feeding Player Pool's OppPosRank. {_SORT_SEARCH_HINT}"
+    ),
+    "Instructions": (
+        "INSTRUCTIONS -- read this first. The weekly workflow lives here, row by row; "
+        "`docs/` in the repo has the full reference for anything beyond it."
+    ),
+    "PlayerPoolRaw": (
+        "PLAYERPOOLRAW -- the hub every other tab's VLOOKUPs read from. Left visible on "
+        "purpose so a broken lookup is easier to debug; nothing here is typed."
+    ),
+}
+
+
+def apply_tab_notes(client: SheetsClient, notes: dict[str, str] = TAB_NOTES) -> list[str]:
+    """One explanatory note on A1 of every tab in `notes` -- see TAB_NOTES'
+    own comment for why this is a note and not a row almost everywhere.
+    Pure metadata (no cell value, formula or format touched), safe to call
+    unconditionally as part of `dfs setup polish`."""
+    results = []
+    for tab, text in notes.items():
+        if not client.tab_exists(tab):
+            results.append(f"{tab}: not present -- skipped")
+            continue
+        client.set_note(tab, "A1", text)
+        results.append(f"{tab}: A1 note set")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # The derived view tabs (Directions A, E, F, H)
 # ---------------------------------------------------------------------------
 
@@ -933,7 +1168,6 @@ def apply_tab_chrome(client: SheetsClient, *, hide_staging: bool = True) -> list
 # defined by `sheet_views`, not discovered from the sheet. If you change a
 # layout there, change it here.
 
-_TITLE_FMT = {"textFormat": {"bold": True, "fontSize": 13, "foregroundColor": INK}}
 _PANEL_FMT = {
     "backgroundColor": HEADER_BG,
     "textFormat": {"bold": True, "foregroundColor": WHITE, "fontSize": 9},

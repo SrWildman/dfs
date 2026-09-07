@@ -1,12 +1,13 @@
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_style import (
     AVAIL_CHIPS,
+    BAND_BG,
     CRIT_BG,
     CRIT_FG,
-    EDGE_COLOR_SCALES,
     EDGE_COLUMN_GROUPS,
     EDGE_WIDTHS,
     FAMILY_COLORS,
+    FIELD_COLOR_SCALES,
     FIELD_FORMATS,
     FLAG_CHIPS,
     GRAD_MAX,
@@ -16,9 +17,11 @@ from dfs.sheet_style import (
     OK_BG,
     OK_FG,
     POSITION_TINTS,
+    VENUE_CHIPS,
     WARN_BG,
     WARN_FG,
     WEEK_ORDER,
+    WHITE,
     apply_field_formats,
     apply_tab_chrome,
     polish_builder_tab,
@@ -29,9 +32,10 @@ from dfs.sheet_style import (
     style_sos_tab,
     style_tier23_tabs,
 )
+from dfs.sources.edge import POOL_HEADER
 
 
-def test_edge_widths_and_scales_and_groups_only_name_real_edge_columns():
+def test_edge_widths_and_groups_only_name_real_edge_columns():
     # Each dict is keyed by EdgeRaw column NAME so a reordered EDGE_COLUMNS
     # still styles the right column -- but that only works if every key
     # actually is a current EDGE_COLUMNS entry. A typo'd or removed name
@@ -40,11 +44,21 @@ def test_edge_widths_and_scales_and_groups_only_name_real_edge_columns():
     # column list without anyone noticing.
     for name in EDGE_WIDTHS:
         assert name in EDGE_COLUMNS, f"{name!r} in EDGE_WIDTHS is not an EDGE_COLUMNS entry"
-    for name in EDGE_COLOR_SCALES:
-        assert name in EDGE_COLUMNS, f"{name!r} in EDGE_COLOR_SCALES is not an EDGE_COLUMNS entry"
     for first, last in EDGE_COLUMN_GROUPS:
         assert first in EDGE_COLUMNS
         assert last in EDGE_COLUMNS
+
+
+def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
+    # FIELD_COLOR_SCALES is shared across every tab (Fix 2.1), so it also
+    # carries builder-only header text ("Team Implied", "OppPosRank"...)
+    # that isn't a literal EDGE_COLUMNS name -- pin the EdgeRaw-side subset
+    # that matters instead of the whole dict.
+    edge_header = [POOL_HEADER, *EDGE_COLUMNS]
+    matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
+    assert matched == {"ProjPts", "Ceiling", "Val", "CeilVal", "Leverage", "GameEnv", "LineMove"}
+    assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
+    assert FIELD_COLOR_SCALES["LineMove"] == "diverging"  # scored separately, zero as the midpoint
 
 
 def test_field_formats_covers_every_edgeraw_numeric_column():
@@ -194,15 +208,15 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_six_decision_columns_not_salary():
-    assert len(EDGE_COLOR_SCALES) == 6
-    assert "Salary" not in EDGE_COLOR_SCALES  # a constraint, not a quality -- left neutral
-    assert "LineMove" not in EDGE_COLOR_SCALES  # scored separately, as a diverging scale
+def test_polish_edge_scales_seven_decision_columns_not_salary():
+    edge_header = [POOL_HEADER, *EDGE_COLUMNS]
+    matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
+    # 6 standard scales + 1 diverging LineMove scale = 7 matches.
+    assert len(matched) == 7
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    # 6 standard scales + 1 diverging LineMove scale = 7 add_color_scale calls.
     assert len(client.color_scale_calls) == 7
 
 
@@ -300,6 +314,40 @@ def test_apply_tab_chrome_orders_present_tabs_then_hides_staging_tabs():
         assert index >= len(expected_order)
 
 
+class FakeNotesClient:
+    def __init__(self, present_tabs: set[str]):
+        self.present_tabs = present_tabs
+        self.note_calls: list[tuple[str, str, str]] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return tab_name in self.present_tabs
+
+    def set_note(self, tab_name: str, cell_a1: str, note: str) -> None:
+        self.note_calls.append((tab_name, cell_a1, note))
+
+
+def test_apply_tab_notes_sets_a1_on_every_present_tab():
+    from dfs.sheet_style import TAB_NOTES, apply_tab_notes
+
+    client = FakeNotesClient(present_tabs=set(TAB_NOTES))
+    results = apply_tab_notes(client)
+
+    assert len(client.note_calls) == len(TAB_NOTES)
+    assert all(cell == "A1" for _tab, cell, _note in client.note_calls)
+    assert all("A1 note set" in r for r in results)
+
+
+def test_apply_tab_notes_skips_a_missing_tab_without_erroring():
+    from dfs.sheet_style import TAB_NOTES, apply_tab_notes
+
+    missing = next(iter(TAB_NOTES))
+    client = FakeNotesClient(present_tabs=set(TAB_NOTES) - {missing})
+    results = apply_tab_notes(client)
+
+    assert f"{missing}: not present -- skipped" in results
+    assert missing not in [tab for tab, _cell, _note in client.note_calls]
+
+
 class FakeGuardrailsClient:
     def __init__(self, header: list[str], *, present: bool = True):
         self._header = header
@@ -394,6 +442,8 @@ class FakeBuilderTabClient:
         self.width_calls: list[dict] = []
         self.clear_cf_calls: list[str] = []
         self.boolean_rule_calls: list[tuple[str, dict]] = []
+        self.banding_calls: list[tuple] = []
+        self.color_scale_calls: list[tuple[str, dict]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
@@ -412,6 +462,15 @@ class FakeBuilderTabClient:
 
     def clear_conditional_formats(self, tab_name: str, *, column=None, row_range=None) -> None:
         self.clear_cf_calls.append(column)
+
+    def clear_banding(self, tab_name: str) -> None:
+        pass
+
+    def add_row_banding(self, tab_name: str, a1_range: str, **kwargs) -> None:
+        self.banding_calls.append((a1_range, kwargs))
+
+    def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
+        self.color_scale_calls.append((a1_range, kwargs))
 
     def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
         self.boolean_rule_calls.append(
@@ -460,7 +519,9 @@ def test_polish_builder_tab_chips_flag_and_avail_columns_when_present():
 
     result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
-    assert client.clear_cf_calls == ["B", "C"]
+    # A leading `None` is the whole-tab clear every polish_builder_tab run
+    # opens with (Fix 2) -- before that, only the per-chip-column clears.
+    assert client.clear_cf_calls == [None, "B", "C"]
     flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == "B2:B100"]
     avail_rules = [r for a1, r in client.boolean_rule_calls if a1 == "C2:C100"]
     assert len(flag_rules) == len(FLAG_CHIPS)
@@ -474,9 +535,19 @@ def test_polish_builder_tab_chips_source_column_when_present():
     client = FakeBuilderTabClient(["Name", "Source"])
     result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
-    assert client.clear_cf_calls == ["B"]
+    assert client.clear_cf_calls == [None, "B"]
     source_rules = [r for a1, r in client.boolean_rule_calls if a1 == "B2:B100"]
     assert len(source_rules) == len(SOURCE_CHIPS)
+    assert "1 chip column(s)" in result
+
+
+def test_polish_builder_tab_chips_venue_column_when_present():
+    client = FakeBuilderTabClient(["Name", "Venue"])
+    result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    assert client.clear_cf_calls == [None, "B"]
+    venue_rules = [r for a1, r in client.boolean_rule_calls if a1 == "B2:B100"]
+    assert len(venue_rules) == len(VENUE_CHIPS)
     assert "1 chip column(s)" in result
 
 
@@ -485,9 +556,43 @@ def test_polish_builder_tab_skips_chips_when_flag_and_avail_absent():
 
     result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
-    assert client.clear_cf_calls == []
+    assert client.clear_cf_calls == [None]
     assert client.boolean_rule_calls == []
     assert "0 chip column(s)" in result
+
+
+def test_polish_builder_tab_clears_conditional_formats_whole_tab_first():
+    # Player Pool/Lineups had accumulated hand-applied rules (including a
+    # multi-column one) a column-scoped clear alone can't reliably catch
+    # -- this is what actually removes them (Fix 2).
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+    assert client.clear_cf_calls[0] is None
+
+
+def test_polish_builder_tab_bands_the_whole_span_when_no_band_blocks_given():
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+    polish_builder_tab(client, "PlayerPoolRaw", last_row=987, header_row=1)
+    assert client.banding_calls == [("A2:C987", {"first_band_color": WHITE, "second_band_color": BAND_BG})]
+
+
+def test_polish_builder_tab_bands_each_block_independently():
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+    polish_builder_tab(client, "Player Pool", last_row=80, header_row=1, band_blocks=[(2, 11), (13, 32)])
+    ranges = [a1 for a1, _kwargs in client.banding_calls]
+    assert ranges == ["A2:C11", "A13:C32"]
+
+
+def test_polish_builder_tab_color_scales_every_matching_column():
+    client = FakeBuilderTabClient(["Name", "Pts", "Leverage", "OppPosRank"])
+    result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    scaled_ranges = {a1 for a1, _kwargs in client.color_scale_calls}
+    assert scaled_ranges == {"B2:B100", "C2:C100", "D2:D100"}
+    # OppPosRank is reversed -- max colour at the MIN end.
+    opp_kwargs = next(kwargs for a1, kwargs in client.color_scale_calls if a1 == "D2:D100")
+    assert opp_kwargs["min_color"] == GRAD_MAX
+    assert "3 colour scale(s)" in result
 
 
 def _chip(bg: dict, fg: dict) -> dict:

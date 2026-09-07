@@ -122,3 +122,62 @@ def add_plain_filter_views(client: SheetsClient) -> list[str]:
 
 def add_all_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
     return add_edge_filter_views(client, edge_tab) + add_plain_filter_views(client)
+
+
+# ---------------------------------------------------------------------------
+# Basic filters (Fix 1): a VISIBLE dropdown arrow in every header cell --
+# filter views above are a real feature, but they're hidden behind Data >
+# Filter views and easy to never discover at all. A basic filter is Sheets'
+# plain "Data > Create a filter" -- exactly one per sheet, applied for every
+# viewer, and (unlike a filter view) it physically reorders the tab's
+# stored rows. Safe on the same plain-value tabs a filter view is safe on;
+# `setBasicFilter` always replaces whatever's already there, so this is
+# naturally re-runnable with no separate clear step.
+#
+# Deliberately a SUBSET of FULL_RANGE_FILTER_TABS above: Slate Grid,
+# Movement and Exposure are read-only formula views where the filter VIEW
+# stays the only sort/search mechanism (a basic filter reordering their
+# rows would still leave every formula correct, but there's no typed input
+# on those tabs for a reorder to visually separate from its own label the
+# way it would on a positional block, so this is a judgement call to keep
+# their existing mechanism the only one, not a structural constraint).
+BASIC_FILTER_PLAIN_TABS: list[tuple[str, str]] = [
+    ("Results", "A1:J30"),
+    ("SoSQB", "A1:F33"),
+    ("SoSRB", "A1:F33"),
+    ("SoSWr", "A1:F33"),
+    ("SoSTE", "A1:F33"),
+    ("SoSDef", "A1:F33"),
+    ("SoSComb", "A1:G40"),
+]
+
+
+def add_basic_filters(client: SheetsClient, *, edge_tab: str, pool_picks_range: str) -> list[str]:
+    """EdgeRaw (its full real range) plus Pool Picks and the plain-value
+    report tabs in BASIC_FILTER_PLAIN_TABS. `pool_picks_range` is passed in
+    rather than hardcoded here since Pool Picks' own row layout
+    (`sheet_pool_picks.py`) is its module's to own."""
+    results = []
+
+    if client.tab_exists(edge_tab):
+        last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+        edge_range = f"A1:{last_col}{EDGE_ROWS}"
+        client.set_basic_filter(edge_tab, edge_range)
+        results.append(f"{edge_tab}: basic filter added over {edge_range}")
+    else:
+        results.append(f"{edge_tab}: not present -- skipped")
+
+    if client.tab_exists("Pool Picks"):
+        client.set_basic_filter("Pool Picks", pool_picks_range)
+        results.append(f"Pool Picks: basic filter added over {pool_picks_range}")
+    else:
+        results.append("Pool Picks: not present -- skipped")
+
+    for tab, a1_range in BASIC_FILTER_PLAIN_TABS:
+        if not client.tab_exists(tab):
+            results.append(f"{tab}: not present -- skipped")
+            continue
+        client.set_basic_filter(tab, a1_range)
+        results.append(f"{tab}: basic filter added over {a1_range}")
+
+    return results

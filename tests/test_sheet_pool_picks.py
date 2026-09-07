@@ -1,4 +1,4 @@
-from dfs.sheet_pool_picks import _HEADER, _LAST_ROW, create_pool_picks_tab
+from dfs.sheet_pool_picks import _HEADER, _TITLE, FIRST_DATA_ROW, LAST_ROW, create_pool_picks_tab
 
 
 class FakePoolPicksClient:
@@ -46,46 +46,53 @@ class FakePoolPicksClient:
         self.boolean_rule_calls.append((a1_range, rule))
 
 
-def test_create_pool_picks_tab_writes_the_header_via_write_tab_when_new():
+_TITLE_ROW = [_TITLE] + [""] * (len(_HEADER) - 1)
+
+
+def test_create_pool_picks_tab_writes_the_title_and_header_via_write_tab_when_new():
     client = FakePoolPicksClient(present=False)
     create_pool_picks_tab(client, edge_tab="EdgeRaw")
-    assert client.write_tab_calls == [("Pool Picks", [_HEADER])]
-    assert ("A1:J1", [_HEADER]) not in client.update_calls  # not double-written
+    assert client.write_tab_calls == [("Pool Picks", [_TITLE_ROW, _HEADER])]
+    assert ("A2:J2", [_HEADER]) not in client.update_calls  # not double-written
 
 
-def test_create_pool_picks_tab_only_updates_the_header_row_when_already_present():
+def test_create_pool_picks_tab_only_updates_the_title_and_header_when_already_present():
     # Re-running against an existing tab must never call write_tab -- that
     # would clear() the whole sheet first, erasing every typed pick in
-    # column A rows 2-101.
+    # column A rows 3-102. The title write spans the whole row (A1:J1),
+    # not just A1 -- a sheet still on the pre-Fix-3.1 layout has old
+    # header text sitting in B1:J1 that a single-cell write would leave
+    # behind looking like a second, stray header under the title.
     client = FakePoolPicksClient(present=True)
     create_pool_picks_tab(client, edge_tab="EdgeRaw")
     assert client.write_tab_calls == []
-    assert ("A1:J1", [_HEADER]) in client.update_calls
+    assert ("A1:J1", [_TITLE_ROW]) in client.update_calls
+    assert ("A2:J2", [_HEADER]) in client.update_calls
 
 
 def test_create_pool_picks_tab_never_touches_column_a_data_rows():
     client = FakePoolPicksClient(present=True)
     create_pool_picks_tab(client, edge_tab="EdgeRaw")
     for a1_range, _rows in client.update_calls:
-        assert not a1_range.startswith("A2")
-        assert a1_range != f"A1:A{_LAST_ROW}"
+        assert not a1_range.startswith(f"A{FIRST_DATA_ROW}")
+        assert a1_range != f"A1:A{LAST_ROW}"
 
 
 def test_create_pool_picks_tab_writes_formulas_for_every_row():
     client = FakePoolPicksClient(present=True)
     create_pool_picks_tab(client, edge_tab="EdgeRaw")
-    body_call = next(c for c in client.update_calls if c[0] == f"B2:J{_LAST_ROW}")
+    body_call = next(c for c in client.update_calls if c[0] == f"B{FIRST_DATA_ROW}:J{LAST_ROW}")
     rows = body_call[1]
-    assert len(rows) == _LAST_ROW - 1
+    assert len(rows) == LAST_ROW - FIRST_DATA_ROW + 1
     assert all(len(row) == 9 for row in rows)  # B..J = 9 columns
 
 
 def test_create_pool_picks_tab_status_formula_flags_not_on_slate():
     client = FakePoolPicksClient(present=True)
     create_pool_picks_tab(client, edge_tab="EdgeRaw")
-    body_call = next(c for c in client.update_calls if c[0] == f"B2:J{_LAST_ROW}")
-    status_formula = body_call[1][0][-1]  # row 2's last column (J = Status)
-    assert 'IF($A2="","",' in status_formula
+    body_call = next(c for c in client.update_calls if c[0] == f"B{FIRST_DATA_ROW}:J{LAST_ROW}")
+    status_formula = body_call[1][0][-1]  # first data row's last column (J = Status)
+    assert f'IF($A{FIRST_DATA_ROW}="","",' in status_formula
     assert "NOT ON SLATE" in status_formula
     assert '"added"' in status_formula
 
@@ -94,14 +101,14 @@ def test_create_pool_picks_tab_validates_column_a_against_edgeraw_name_range():
     client = FakePoolPicksClient(present=True)
     create_pool_picks_tab(client, edge_tab="EdgeRaw")
     a1_range, source = client.validation_calls[0]
-    assert a1_range == f"A2:A{_LAST_ROW}"
+    assert a1_range == f"A{FIRST_DATA_ROW}:A{LAST_ROW}"
     assert source.startswith("EdgeRaw!$")
 
 
-def test_create_pool_picks_tab_freezes_header_row():
+def test_create_pool_picks_tab_freezes_through_the_header_row():
     client = FakePoolPicksClient(present=True)
     create_pool_picks_tab(client, edge_tab="EdgeRaw")
-    assert ("Pool Picks", 1, None) in client.freeze_calls
+    assert ("Pool Picks", 2, None) in client.freeze_calls
 
 
 def test_create_pool_picks_tab_number_formats_salary_pts_ceil_columns():
@@ -109,9 +116,9 @@ def test_create_pool_picks_tab_number_formats_salary_pts_ceil_columns():
     result = create_pool_picks_tab(client, edge_tab="EdgeRaw")
     formatted_ranges = {a1 for a1, _fmt in client.format_calls}
     # D=Salary, E=Pts, F=Ceil, G=CeilVal, H=Leverage
-    assert f"D2:D{_LAST_ROW}" in formatted_ranges
-    assert f"E2:E{_LAST_ROW}" in formatted_ranges
-    assert f"G2:G{_LAST_ROW}" in formatted_ranges
+    assert f"D{FIRST_DATA_ROW}:D{LAST_ROW}" in formatted_ranges
+    assert f"E{FIRST_DATA_ROW}:E{LAST_ROW}" in formatted_ranges
+    assert f"G{FIRST_DATA_ROW}:G{LAST_ROW}" in formatted_ranges
     assert "5 column(s) number-formatted" in result
 
 
@@ -129,6 +136,17 @@ def test_create_pool_picks_tab_chips_the_flag_column():
     client = FakePoolPicksClient(present=True)
     result = create_pool_picks_tab(client, edge_tab="EdgeRaw")
     assert client.clear_cf_calls == ["I"]  # Flag is column I
-    flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == f"I2:I{_LAST_ROW}"]
+    flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == f"I{FIRST_DATA_ROW}:I{LAST_ROW}"]
     assert len(flag_rules) == len(FLAG_CHIPS)
     assert "Flag chipped" in result
+
+
+def test_create_pool_picks_tab_title_gets_its_own_style_distinct_from_the_header():
+    from dfs.sheet_style import HEADER_FMT, TITLE_FMT
+
+    client = FakePoolPicksClient(present=True)
+    create_pool_picks_tab(client, edge_tab="EdgeRaw")
+    by_range = dict(client.format_calls)
+    assert by_range["A1"] == TITLE_FMT
+    assert by_range["A2:J2"] == HEADER_FMT
+    assert TITLE_FMT != HEADER_FMT
