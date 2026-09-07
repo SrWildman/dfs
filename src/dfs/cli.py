@@ -1388,7 +1388,7 @@ def pool_add(names: list[str] = typer.Argument(..., help="Player name(s) or subs
             else:
                 player = matches[0]
                 set_pool(client, edge_tab, player, True)
-                console.print(f"[green]OK[/green] added {player.name} ({player.position}, ${player.salary})")
+                console.print(f"[green]OK[/green] added {player.name} ({player.position}, {player.salary})")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -1441,7 +1441,7 @@ def pool_list() -> None:
         picks = by_position[position]
         console.print(f"\n[bold]{position}[/bold] ({len(picks)})")
         for p in picks:
-            console.print(f"  {p.name} (${p.salary})")
+            console.print(f"  {p.name} ({p.salary})")
 
 
 @pool_app.command("clear")
