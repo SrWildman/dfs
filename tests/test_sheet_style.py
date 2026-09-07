@@ -4,15 +4,17 @@ from dfs.sheet_style import (
     CRIT_FG,
     EDGE_COLOR_SCALES,
     EDGE_COLUMN_GROUPS,
-    EDGE_NUMBER_FORMATS,
     EDGE_WIDTHS,
     FAMILY_COLORS,
+    FIELD_FORMATS,
     HIDE_TABS,
     OK_BG,
     OK_FG,
+    POSITION_TINTS,
     WARN_BG,
     WARN_FG,
     WEEK_ORDER,
+    apply_field_formats,
     apply_tab_chrome,
     polish_builder_tab,
     polish_edge,
@@ -20,7 +22,7 @@ from dfs.sheet_style import (
 )
 
 
-def test_edge_widths_and_formats_and_scales_only_name_real_edge_columns():
+def test_edge_widths_and_scales_and_groups_only_name_real_edge_columns():
     # Each dict is keyed by EdgeRaw column NAME so a reordered EDGE_COLUMNS
     # still styles the right column -- but that only works if every key
     # actually is a current EDGE_COLUMNS entry. A typo'd or removed name
@@ -29,13 +31,51 @@ def test_edge_widths_and_formats_and_scales_only_name_real_edge_columns():
     # column list without anyone noticing.
     for name in EDGE_WIDTHS:
         assert name in EDGE_COLUMNS, f"{name!r} in EDGE_WIDTHS is not an EDGE_COLUMNS entry"
-    for name in EDGE_NUMBER_FORMATS:
-        assert name in EDGE_COLUMNS, f"{name!r} in EDGE_NUMBER_FORMATS is not an EDGE_COLUMNS entry"
     for name in EDGE_COLOR_SCALES:
         assert name in EDGE_COLUMNS, f"{name!r} in EDGE_COLOR_SCALES is not an EDGE_COLUMNS entry"
     for first, last in EDGE_COLUMN_GROUPS:
         assert first in EDGE_COLUMNS
         assert last in EDGE_COLUMNS
+
+
+def test_field_formats_covers_every_edgeraw_numeric_column():
+    # FIELD_FORMATS is shared across every tab now (the whole point of
+    # Task 2.1), so it also carries builder-only header text ("DK Sal",
+    # "Pts"...) that isn't a literal EDGE_COLUMNS name -- unlike the old,
+    # now-removed EDGE_NUMBER_FORMATS, this dict can't be pinned against
+    # EDGE_COLUMNS wholesale. Instead pin the EdgeRaw-side aliases that
+    # matter: every numeric EdgeRaw column must resolve to *some* format.
+    edge_numeric_columns = [
+        "Salary",
+        "ProjPts",
+        "ProjOwn",
+        "Ceiling",
+        "Val",
+        "CeilVal",
+        "CeilPct",
+        "Leverage",
+        "GameEnv",
+        "Wind",
+        "LineMove",
+    ]
+    for name in edge_numeric_columns:
+        assert name in FIELD_FORMATS, f"{name!r} (an EdgeRaw column) has no FIELD_FORMATS entry"
+
+
+def test_apply_field_formats_matches_by_header_text_not_position():
+    calls = []
+
+    class _Client:
+        def format_range(self, tab_name, a1_range, fmt):
+            calls.append((a1_range, fmt))
+
+    header = ["Name", "DK Sal", "Junk", "Pts"]
+    applied = apply_field_formats(_Client(), "Player Pool", header, header_row=1, last_row=50)
+
+    assert applied == 2
+    ranges = dict(calls)
+    assert ranges["B2:B50"] == FIELD_FORMATS["DK Sal"]
+    assert ranges["D2:D50"] == FIELD_FORMATS["Pts"]
 
 
 class _ExplodingClient:
@@ -69,12 +109,24 @@ class FakeEdgeClient:
         self.calls: list[str] = []
         self.clear_group_calls: list[str] = []
         self.group_calls: list[tuple[str, str, str]] = []
+        self.banding_calls: list[tuple] = []
+        self.color_scale_calls: list[tuple[str, dict]] = []
+        self.boolean_rule_calls: list[tuple[str, dict]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
 
-    def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
+    def clear_conditional_formats(
+        self, tab_name: str, *, column: str | None = None, row_range: tuple[int, int] | None = None
+    ) -> None:
         self.calls.append("clear_conditional_formats")
+
+    def clear_banding(self, tab_name: str) -> None:
+        self.calls.append("clear_banding")
+
+    def add_row_banding(self, tab_name: str, a1_range: str, **_kwargs) -> None:
+        self.calls.append("add_row_banding")
+        self.banding_calls.append((a1_range, _kwargs))
 
     def set_column_widths(self, tab_name: str, widths: dict) -> None:
         self.calls.append("set_column_widths")
@@ -85,11 +137,14 @@ class FakeEdgeClient:
     def freeze(self, tab_name: str, *, rows=None, cols=None) -> None:
         self.calls.append("freeze")
 
-    def add_color_scale(self, tab_name: str, a1_range: str, **_colors) -> None:
+    def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
         self.calls.append("add_color_scale")
+        self.color_scale_calls.append((a1_range, kwargs))
 
-    def add_boolean_rule(self, tab_name: str, a1_range: str, **_kwargs) -> None:
+    def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
         self.calls.append("add_boolean_rule")
+        rule = {"condition_type": condition_type, "values": values, "fmt": fmt}
+        self.boolean_rule_calls.append((a1_range, rule))
 
     def clear_column_groups(self, tab_name: str) -> None:
         self.calls.append("clear_column_groups")
@@ -115,6 +170,85 @@ def test_polish_edge_clears_column_groups_before_re_adding_them():
     clear_index = client.calls.index("clear_column_groups")
     first_group_index = client.calls.index("group_columns")
     assert clear_index < first_group_index
+
+
+def test_polish_edge_clears_banding_before_re_adding_it():
+    # Same idempotency hazard as column groups, different Sheets API: a
+    # re-run without clearing first would hit "range overlaps an existing
+    # banded range" rather than silently stacking, but the fix is the
+    # same clear-then-add shape.
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    assert client.calls.count("clear_banding") == 1
+    assert client.calls.count("add_row_banding") == 1
+    assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
+
+
+def test_polish_edge_scales_six_decision_columns_not_salary():
+    assert len(EDGE_COLOR_SCALES) == 6
+    assert "Salary" not in EDGE_COLOR_SCALES  # a constraint, not a quality -- left neutral
+    assert "LineMove" not in EDGE_COLOR_SCALES  # scored separately, as a diverging scale
+
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    # 6 standard scales + 1 diverging LineMove scale = 7 add_color_scale calls.
+    assert len(client.color_scale_calls) == 7
+
+
+def test_polish_edge_linemove_scale_is_diverging_at_zero():
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    diverging = [kwargs for _rng, kwargs in client.color_scale_calls if kwargs.get("mid_type") == "NUMBER"]
+    assert len(diverging) == 1
+    assert diverging[0]["mid_value"] == "0"
+
+
+def test_polish_edge_wind_chip_matches_slate_grid_threshold():
+    from dfs.sheet_style import WARN_BG, WARN_FG, WIND_CHIP_THRESHOLD
+
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    wind_rules = [
+        kwargs
+        for _rng, kwargs in client.boolean_rule_calls
+        if kwargs["condition_type"] == "NUMBER_GREATER" and kwargs["values"] == [WIND_CHIP_THRESHOLD]
+    ]
+    assert wind_rules
+    expected_fmt = {"backgroundColor": WARN_BG, "textFormat": {"bold": True, "foregroundColor": WARN_FG}}
+    assert wind_rules[0]["fmt"] == expected_fmt
+
+
+def test_polish_edge_tints_every_position_defined_in_position_tints():
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    tinted_positions = {
+        kwargs["values"][0]
+        for _rng, kwargs in client.boolean_rule_calls
+        if kwargs["condition_type"] == "TEXT_EQ" and kwargs["values"][0] in POSITION_TINTS
+    }
+    assert tinted_positions == set(POSITION_TINTS)
+
+
+def test_polish_edge_name_column_pool_and_flag_rules_are_mutually_exclusive():
+    from dfs.sources.edge import POOL_COLUMN
+
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    custom_formulas = [
+        kwargs["values"][0]
+        for _rng, kwargs in client.boolean_rule_calls
+        if kwargs["condition_type"] == "CUSTOM_FORMULA" and POOL_COLUMN in kwargs["values"][0]
+    ]
+    # 3 rules: pooled+flagged, pooled-only, flagged-only -- never a bare
+    # pooled rule and a bare flagged rule that could both match one cell.
+    assert len(custom_formulas) == 3
+    assert any("AND(" in f for f in custom_formulas)
 
 
 class FakeChromeClient:

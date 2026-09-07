@@ -37,6 +37,7 @@ from dfs.sheet_style import (
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
+    polish_lineups_input_column,
     style_view_tabs,
 )
 from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
@@ -275,6 +276,7 @@ def sheets_polish(
                 name_blocks=LINEUPS_NAME_BLOCKS,
             )
         )
+        results.append(polish_lineups_input_column(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:
             results.append(
                 polish_bankroll(

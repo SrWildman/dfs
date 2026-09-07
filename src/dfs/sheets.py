@@ -224,12 +224,21 @@ class SheetsClient:
         min_color: dict,
         mid_color: dict,
         max_color: dict,
+        mid_type: str = "PERCENTILE",
+        mid_value: str = "50",
     ) -> None:
         """Apply a 3-point color-scale conditional format to `a1_range` --
         like `update_range`/`clear_ranges`, this only ever touches the range
         it's given, so it's safe to call repeatedly (each call adds one more
         rule; call it once per tab as part of one-time setup, not per sync).
-        Colors are {"red": .., "green": .., "blue": ..} floats in 0-1."""
+        Colors are {"red": .., "green": .., "blue": ..} floats in 0-1.
+
+        `mid_type`/`mid_value` default to the statistical median (50th
+        percentile) -- right for a plain "more is better" scale. Pass
+        `mid_type="NUMBER", mid_value="0"` for a signed-delta column where
+        zero, not the median, is the meaningful midpoint (e.g. LineMove) --
+        a true diverging scale rather than one that happens to have three
+        colors."""
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
         sheet.batch_update(
@@ -241,7 +250,7 @@ class SheetsClient:
                                 "ranges": [grid_range],
                                 "gradientRule": {
                                     "minpoint": {"color": min_color, "type": "MIN"},
-                                    "midpoint": {"color": mid_color, "type": "PERCENTILE", "value": "50"},
+                                    "midpoint": {"color": mid_color, "type": mid_type, "value": mid_value},
                                     "maxpoint": {"color": max_color, "type": "MAX"},
                                 },
                             },
@@ -595,28 +604,109 @@ class SheetsClient:
             }
         )
 
-    def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
+    def clear_banding(self, tab_name: str) -> None:
+        """Delete every existing banded range on a tab before re-adding one
+        with `add_row_banding` -- Sheets rejects a new banded range that
+        overlaps an existing one rather than replacing it, so a re-runnable
+        caller must clear first, same pattern as `clear_column_groups`."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),bandedRanges)"})
+        bandings = []
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                bandings = s.get("bandedRanges", []) or []
+                break
+        if not bandings:
+            return
+        requests = [{"deleteBanding": {"bandedRangeId": b["bandedRangeId"]}} for b in bandings]
+        sheet.batch_update({"requests": requests})
+
+    def add_row_banding(
+        self,
+        tab_name: str,
+        a1_range: str,
+        *,
+        first_band_color: dict,
+        second_band_color: dict,
+        header_color: dict | None = None,
+    ) -> None:
+        """Apply alternating row banding to `a1_range` (Sheets' own Data >
+        Alternating colors, `addBanding`). Colors are {"red": .., "green":
+        .., "blue": ..} floats in 0-1, same convention as `add_color_scale`.
+        Callers that re-run this on every `polish` pass must call
+        `clear_banding` first -- Sheets errors on an overlapping banded
+        range rather than replacing it."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        row_properties: dict = {
+            "firstBandColor": first_band_color,
+            "secondBandColor": second_band_color,
+        }
+        if header_color is not None:
+            row_properties["headerColor"] = header_color
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "addBanding": {
+                            "bandedRange": {
+                                "range": grid_range,
+                                "rowProperties": row_properties,
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+
+    def clear_conditional_formats(
+        self,
+        tab_name: str,
+        *,
+        column: str | None = None,
+        row_range: tuple[int, int] | None = None,
+    ) -> None:
         """Delete conditional-format rules on a tab. Needed to make the
         styling commands re-runnable -- without it, running twice stacks a
         second identical set of rules on top of the first, and Sheets
         applies the most recently added matching rule, so the tab slowly
         accumulates dead rules that are hard to reason about.
 
-        With `column` omitted, deletes every rule on the tab -- correct
-        when one function owns all of a tab's conditional formatting
-        (EdgeRaw, the four view tabs, Bankroll). Lineups is not one of
-        those: `sheet_links.link_edge_columns` already owns color-scale
-        rules on other columns there, so `polish_guardrails` passes
-        `column="O"` to only ever delete rules confined entirely to that
-        one column, leaving every other rule on the tab untouched. Blindly
-        clearing the whole tab there would silently destroy real,
+        With `column` and `row_range` both omitted, deletes every rule on
+        the tab -- correct when one function owns all of a tab's
+        conditional formatting (EdgeRaw, the four view tabs, Bankroll).
+        Lineups is not one of those: `sheet_links.link_edge_columns` owns
+        color-scale rules on its linked block's rows, so `polish_guardrails`
+        passes `column="O"` to only delete rules confined entirely to that
+        one column (no other function ever touches O), and
+        `polish_pool_deck` passes `row_range` (e.g. `(4, 9)`, the deck
+        window's own rows) to delete only rules confined entirely to that
+        row band, regardless of which column they're on -- an exact
+        `column=letter, rows=X:Y` match was tried first and found not
+        idempotent for real: when which column held a given field changed
+        (Player Pool/Lineups header drift, see `sheet_pool_deck.py`), the
+        rule's column moved too, so an exact-range clear against the NEW
+        column never found the OLD one, leaving it orphaned. A row-band
+        clear finds it regardless of which column it ended up on. Blindly
+        clearing more than a function owns would silently destroy real,
         already-correct formatting on every re-run -- exactly the kind of
         mistake CONTRIBUTING.md's changelog now has an incident for.
         """
         sheet, ws = self._ws(tab_name)
         rules = self._conditional_format_rules(sheet, ws)
-        if column is None:
+        if column is None and row_range is None:
             indexes = list(range(len(rules)))
+        elif row_range is not None:
+            start_row, end_row = row_range[0] - 1, row_range[1]
+            indexes = [
+                i
+                for i, rule in enumerate(rules)
+                if rule.get("ranges")
+                and all(
+                    r.get("startRowIndex") == start_row and r.get("endRowIndex") == end_row
+                    for r in rule["ranges"]
+                )
+            ]
         else:
             col_index = a1_range_to_grid_range(f"{column}1:{column}1")["startColumnIndex"]
             indexes = [

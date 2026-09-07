@@ -338,6 +338,41 @@ def test_clear_conditional_formats_with_column_only_deletes_rules_confined_to_it
     assert remaining_range["startColumnIndex"] == 16  # column Q, 0-indexed -- the survivor
 
 
+def test_clear_conditional_formats_with_row_range_finds_a_rule_regardless_of_column(
+    cfg, monkeypatch, tmp_path
+):
+    # polish_pool_deck's own regression: an exact-range clear (column AND
+    # row) failed to find its own rule once the column it lived on
+    # changed between runs (header drift moved which column held a given
+    # field), leaving the old rule orphaned. A row-range clear finds it
+    # on whichever column it's actually on.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.add_color_scale(
+        "T",
+        "P4:P9",
+        min_color={"red": 1, "green": 0, "blue": 0},
+        mid_color={"red": 1, "green": 1, "blue": 0},
+        max_color={"red": 0, "green": 1, "blue": 0},
+    )
+    # A same-column, different-row rule (e.g. the real lineup block's own
+    # scale further down) must survive.
+    client.add_color_scale(
+        "T",
+        "P12:P21",
+        min_color={"red": 1, "green": 0, "blue": 0},
+        mid_color={"red": 1, "green": 1, "blue": 0},
+        max_color={"red": 0, "green": 1, "blue": 0},
+    )
+
+    client.clear_conditional_formats("T", row_range=(4, 9))
+
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.conditional_formats) == 1
+    remaining_range = ws.conditional_formats[0]["ranges"][0]
+    assert remaining_range["startRowIndex"] == 11  # row 12, 0-indexed -- the survivor
+
+
 def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])

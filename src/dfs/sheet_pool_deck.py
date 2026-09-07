@@ -19,10 +19,15 @@ Structure (DECK_ROWS total, frozen):
                      number for the window formulas below), I1 a
                      "X in pool, showing N-M" readout.
   Row 2              Blank.
-  Row 3              Player Pool's header row, copied verbatim.
+  Row 3              Lineups' own block header, copied verbatim -- not
+                     Player Pool's, which is not guaranteed to have the
+                     same column layout (see `_write_deck_controls`).
   Rows 4..3+WINDOW_SIZE  The window: each cell is an
                      IFERROR(IF(INDEX(...))) pull from PoolSort, offset
-                     by F1.
+                     by F1, matched into row 3's column by header NAME
+                     against Player Pool's own header (where PoolSort's
+                     data actually lives) -- a Lineups-only column
+                     (Check, % of Rstr) is left blank.
   Row DECK_ROWS      Blank separator.
 
 First shipped as a 14-row / 10-row-window design; shrunk to 10 rows / a
@@ -61,9 +66,9 @@ own docstring for why an early return on "deck" was tried and reverted.
 
 from __future__ import annotations
 
-from dfs.sheet_style import HEADER_FMT
+from dfs.sheet_style import HEADER_FMT, polish_pool_deck
 from dfs.sheets import SheetsClient, column_letter
-from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
 
 # Derived, never hardcoded: Player Pool's blocks were resized once
 # already (Task K raised the per-position caps) and a literal row
@@ -87,29 +92,12 @@ _OLD_BENCH_ROWS = 7
 _OLD_DECK14_HEADER_ROW = 15
 _OLD_DECK14_ROWS = 14
 
-# Player Pool / Lineups' shared column grammar (see CONTRIBUTING.md and
-# sheet_links.py's own docstring on this): both tabs' A..N are the same
-# hand-authored columns, Q..Z the same EdgeRaw-linked block. Deliberately
-# literal, not derived -- this is the template's authored layout, the
-# same class of exception style_board/style_slate_grid/etc. already
-# document in sheet_style.py.
-_WINDOW_COLUMNS = [*"ABCDEFGHIJKLMN", *"QRSTUVWXYZ"]  # skips O (spacer), P (% of Rstr)
-
 _SORT_OPTIONS = ["CeilVal", "Leverage", "Pts", "Ceil", "Val", "DK Sal", "Rstr%"]
 _POSITION_OPTIONS = ["ALL", "QB", "RB", "WR", "TE", "DST"]
 
 # Cells with at least one real character -- not COUNTA, see the I1
 # readout formula's own comment for why.
 _POOL_COUNT_FORMULA = f'COUNTIF({POOL_SORT_TAB}!$A$2:$A${_POOL_LAST_ROW},"?*")'
-
-# G1's MATCH array -- Player Pool's full A..Z header text, in order. Two
-# blanks at positions 15-16 (O, P) since sorting by the spacer or "% of
-# Rstr" is meaningless in a deck window that never populates either.
-_MATCH_ARRAY = (
-    '{"Name","Pos.","Team","DK Sal","O/U","Spread","Team Implied","Opp.","Venue","OppPosRank",'
-    '"Pts","Ceil","Val","Rstr%","","","CeilVal","CeilPct","Leverage","LevBasis","GameEnv",'
-    '"Stadium","Roof","Wind","Avail","Flag"}'
-)
 
 
 def _cell_equals(client: SheetsClient, tab: str, a1: str, expected: str) -> bool:
@@ -151,6 +139,22 @@ def _window_formula(col: str, row: int) -> str:
 
 
 def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) -> None:
+    pool_header_rows = client.read_range(pool_tab, "A1:Z1")
+    pool_header = pool_header_rows[0] if pool_header_rows else []
+    # G1's MATCH array, built from Player Pool's REAL header rather than a
+    # hardcoded snapshot of it -- a hardcoded array here once assumed two
+    # blank columns that a later Player Pool edit made stale (see below),
+    # silently shifting every column from CeilVal onward by one without
+    # changing the array. That made "Sort by: CeilVal" -- the deck's own
+    # default -- actually sort by CeilPct instead (found live: G1
+    # evaluated to 17, one past CeilVal's real position of 16). Deriving
+    # this from the header actually present makes it self-correcting the
+    # same way every other column position in this codebase is derived,
+    # not hardcoded. G1 feeds `_build_pool_sort`'s own SORT(...) call,
+    # which sorts Player Pool's A:Z range directly -- so this array must
+    # match Player Pool's header, not Lineups'.
+    match_array = "{" + ",".join(f'"{name}"' for name in pool_header) + "}"
+
     last_rank_offset = _WINDOW_SIZE - 1
     client.update_range(
         lineups_tab,
@@ -163,7 +167,7 @@ def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) 
                 "CeilVal",
                 "Start at",
                 1,
-                f"=MATCH($D$1,{_MATCH_ARRAY},0)",
+                f"=MATCH($D$1,{match_array},0)",
                 "",
                 # COUNTIF(...,"?*") counts cells with at least one real
                 # character, not COUNTA -- an empty pool makes PoolSort's
@@ -184,15 +188,48 @@ def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) 
     client.set_dropdown_validation(lineups_tab, "B1", _POSITION_OPTIONS)
     client.set_dropdown_validation(lineups_tab, "D1", _SORT_OPTIONS)
 
-    header = client.read_range(pool_tab, "A1:Z1")
-    header_row = header[0] if header else []
-    client.update_range(lineups_tab, "A3:Z3", [header_row])
+    # Row 3 (and the window under it) must align with LINEUPS' OWN block
+    # header below it, not Player Pool's -- the two tabs' column layouts
+    # are each independently derived (`sheet_links.link_edge_columns`
+    # appends its linked block one column past whatever a tab's own width
+    # happens to be when it first runs there) and are NOT guaranteed to
+    # match. They drifted apart for real: Lineups has a `Check`
+    # (guardrails) and `% of Rstr` column Player Pool has no equivalent
+    # of, so Player Pool's linked block sits one column left of Lineups'.
+    # Copying Player Pool's header verbatim onto Lineups' row 3 (the
+    # original approach) made row 3 say "CeilVal" directly above a block
+    # row further down that says "% of Rstr" in the same column -- a
+    # visible mismatch, not just a labeling one.
+    #
+    # Fix: read LINEUPS' real block header for row 3 (so labels always
+    # match what's below them), then for each of ITS column names look up
+    # that same name's position in PLAYER POOL's header (where PoolSort's
+    # data actually lives) to build that column's window formula. A
+    # Lineups-only column name with no Player Pool equivalent (`Check`,
+    # `% of Rstr`) gets no formula -- correctly blank, since there's no
+    # pool-wide value for either concept.
+    lineups_header_row_num = LINEUPS_NAME_BLOCKS[0][0] - 1
+    lineups_header_rows = client.read_range(
+        lineups_tab, f"A{lineups_header_row_num}:{lineups_header_row_num}"
+    )
+    lineups_header = lineups_header_rows[0] if lineups_header_rows else pool_header
+
+    client.update_range(lineups_tab, "A3:Z3", [lineups_header])
     client.format_range(lineups_tab, "A3:Z3", HEADER_FMT)
 
     window_rows = []
     for row in range(4, 4 + _WINDOW_SIZE):
-        cells_by_col = {col: _window_formula(col, row) for col in _WINDOW_COLUMNS}
-        window_rows.append([cells_by_col.get(column_letter(i), "") for i in range(26)])
+        cells = []
+        for name in lineups_header:
+            # `name` must be a real, non-blank header text to look up --
+            # a blank name matching another blank name in `pool_header`
+            # would cross-match two unrelated spacer columns.
+            if name and name in pool_header:
+                cells.append(_window_formula(column_letter(pool_header.index(name)), row))
+            else:
+                cells.append("")
+        cells += [""] * (26 - len(cells))
+        window_rows.append(cells)
     last_window_row = 3 + _WINDOW_SIZE
     client.update_range(lineups_tab, f"A4:Z{last_window_row}", window_rows)
 
@@ -273,6 +310,7 @@ def add_pool_deck(client: SheetsClient, *, lineups_tab: str, pool_tab: str) -> s
     _reset_deck_formatting(client, lineups_tab)
     _build_pool_sort(client, POOL_SORT_TAB, pool_tab, lineups_tab)
     _write_deck_controls(client, lineups_tab, pool_tab)
+    polish_pool_deck(client, lineups_tab, header_row=3, window_end=3 + _WINDOW_SIZE)
     _hide_g1(client, lineups_tab)
     client.freeze(lineups_tab, rows=DECK_ROWS)
     client.set_row_heights(lineups_tab, start_row=3, end_row=3 + _WINDOW_SIZE, pixel_size=18)
