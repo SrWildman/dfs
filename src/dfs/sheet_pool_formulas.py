@@ -35,7 +35,7 @@ player came from ticking EdgeRaw or typing into Pool Picks. Deliberately
 placed LEFT of the EdgeRaw-linked block (P onward) rather than inserted
 into it, so `sheet_links.link_edge_columns`' own "is LINKED_EDGE_COLUMNS
 already a contiguous run somewhere in the header" idempotency check is
-completely unaffected -- confirmed by re-running `dfs sheets doctor`/
+completely unaffected -- confirmed by re-running `dfs doctor`/
 `link-edge` after this shipped.
 """
 

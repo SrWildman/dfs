@@ -6,6 +6,11 @@ and what commonly goes wrong. For what a specific column or tab means,
 see [SHEET_REFERENCE.md](SHEET_REFERENCE.md); for symptom-first
 debugging, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
+Not sure what to run next? Just run `dfs` with no arguments -- it shows
+where you are in the week (sheet, sync freshness, pool/lineup counts) and
+the two or three commands that make sense right now, each one printed
+next to its real name so you learn it as you use it.
+
 ## 1. Start the week
 
 **Tabs:** none yet -- this points the CLI at a new sheet.
@@ -15,7 +20,7 @@ File > Make a copy of this template, name it for the week
 dfs week new <url-of-the-copy>
 ```
 
-`dfs week new` confirms before writing anything. It runs `dfs sheets
+`dfs week new` confirms before writing anything. It runs `dfs
 doctor` against the new copy first (catches a stale/malformed template
 before anything depends on it), rewrites `config.toml`'s `sheet_id`,
 carries Bankroll and Results forward from the outgoing sheet, clears last
@@ -38,6 +43,7 @@ copied every week.
 dfs sync              # re-run any time through the week as lines/injuries/weather move
 dfs sync --live       # gameday: odds/DK status/weather only, prints what changed
 dfs edge              # top leverage plays, in the terminal, no browser needed
+dfs go                # sync + dfs doctor + what changed, back to back
 ```
 
 Check Board first each week -- it's a landing view: top-leverage, best

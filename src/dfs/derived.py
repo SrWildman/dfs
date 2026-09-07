@@ -134,14 +134,14 @@ EDGE_COLUMNS = [
     "Avail",
     "Flag",
     # LineMove is appended at the very end, not inserted among the
-    # existing columns above -- `dfs sheets link-edge` already wrote
+    # existing columns above -- `dfs setup link-edge` already wrote
     # formulas into PlayerPoolRaw/Player Pool/Lineups with hardcoded
     # column-index integers pointing at Stadium/Roof/Wind/Avail/Flag's
     # *positions*. Inserting a column before them shifts every later
     # column's position without updating those already-written formulas'
     # hardcoded integers -- the exact Phase 8 bug class (see
     # CONTRIBUTING.md). Anything new added here must go at the end until
-    # `dfs sheets link-edge` is re-run against a cleared block.
+    # `dfs setup link-edge` is re-run against a cleared block.
     "LineMove",
     # GameStart, added in Phase 5, follows the same append-only rule.
     "GameStart",

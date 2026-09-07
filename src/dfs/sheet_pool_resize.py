@@ -18,7 +18,7 @@ exactly right here.
 `insertDimension` only creates blank rows -- it copies formatting and
 data validation, never formula text -- and `sheet_links.link_edge_columns`
 is idempotent-by-skipping (`"already linked ... skipped"`), so simply
-re-running `dfs sheets link-edge` after growing a block does NOT backfill
+re-running `dfs setup link-edge` after growing a block does NOT backfill
 the new rows' EdgeRaw-linked columns. Every new row's B..Y columns are
 therefore filled here by copying the row immediately above it byte-for-
 byte (read fresh via `read_formula`, since Sheets auto-adjusts THAT row's

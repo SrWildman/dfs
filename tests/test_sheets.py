@@ -548,7 +548,7 @@ def test_clear_data_validation_sends_no_rule(cfg, monkeypatch, tmp_path):
 
 
 def test_ws_caches_a_tab_across_calls_instead_of_re_resolving_every_time(cfg, monkeypatch, tmp_path):
-    # `dfs sheets polish` calls many presentation primitives against the
+    # `dfs setup polish` calls many presentation primitives against the
     # same handful of tabs in one run (widths, freeze, N number formats, a
     # handful of colour scales, boolean rules...). Each used to resolve
     # its tab via `sheet.worksheet(tab_name)`, which re-fetches the WHOLE

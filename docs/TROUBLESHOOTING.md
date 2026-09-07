@@ -6,6 +6,26 @@ Symptom, then cause, then fix. For the weekly grind, see
 
 ---
 
+**I don't know what to run next.**
+Cause: the weekly workflow has ~15 commands across setup/sync/pool/
+lineups/bankroll, and it's easy to lose track of where you are mid-week.
+Fix: just run `dfs` with no arguments -- it shows a compact status (sheet,
+sync freshness, pool/lineup counts) and the two or three commands that
+actually make sense right now, each printed next to its real name.
+
+---
+
+**A command you used to run says "No such command".**
+Cause: this project's CLI got reorganized (one-time sheet construction
+moved under `dfs setup ...`, `dfs sheets doctor` promoted to top-level
+`dfs doctor`) -- see README's Commands table or `dfs --help` for the
+current shape.
+Fix: `dfs sheets ...` (the old spelling) still works for one season as a
+deprecated alias and prints the new name the first time you use it; or
+just use the new name directly.
+
+---
+
 **Player Pool is empty (or a position block is empty).**
 Cause: nothing's been added to the pool for that position yet.
 Fix: three ways in -- tick players in EdgeRaw's Pool column, type a name
@@ -45,13 +65,13 @@ logic.
 
 ---
 
-**`dfs sheets link-edge` reports a column appended twice, or Player Pool/
+**`dfs setup link-edge` reports a column appended twice, or Player Pool/
 Lineups' EdgeRaw-linked columns look duplicated.**
 Cause: `link_edge_columns`'s own idempotency guard (skip if
 `LINKED_EDGE_COLUMNS` already appears as a contiguous run in the header)
 failed to recognize an existing link, usually because something inserted
 a column into the middle of that block.
-Fix: run `dfs sheets doctor` -- it checks for exactly this. If it fails,
+Fix: run `dfs doctor` -- it checks for exactly this. If it fails,
 do not re-run `link-edge` blindly; see `sheet_links.py`'s own docstring
 for the "clear the old linked columns by hand first" recovery path.
 
@@ -62,7 +82,7 @@ Cause: `PLAYER_POOL_NAME_BLOCKS` grew (a position cap was raised) but
 something in the deck/Player Pool chain still has the old, shorter range
 hardcoded -- this exact bug shipped twice before `doctor` had a check
 for it.
-Fix: run `dfs sheets doctor` -- its `pool-deck-range` and
+Fix: run `dfs doctor` -- its `pool-deck-range` and
 `deck-block-alignment` checks exist specifically to catch this loudly
 instead of letting it silently hide players.
 
@@ -71,7 +91,7 @@ instead of letting it silently hide players.
 **A number shows as `33.2900000001` instead of a clean decimal.**
 Cause: the cell has no number format applied (or the wrong one), so
 Sheets is showing a raw float.
-Fix: run `dfs sheets polish` -- every column whose header is a
+Fix: run `dfs setup polish` -- every column whose header is a
 `FIELD_FORMATS` key gets its format re-applied, safe to re-run any time.
 
 ---
@@ -79,11 +99,11 @@ Fix: run `dfs sheets polish` -- every column whose header is a
 **A tab looks unstyled (no dark header, no colours, default-width
 columns).**
 Cause: that tab was never styled, or a styling command didn't reach it
-(e.g. a SoS tab pasted after the last `dfs sheets polish` run).
-Fix: run `dfs sheets audit-style` -- it reports exactly which tabs and
+(e.g. a SoS tab pasted after the last `dfs setup polish` run).
+Fix: run `dfs setup audit-style` -- it reports exactly which tabs and
 which checks (header fill, freeze, widths, number formats, chips) are
 missing, per tab, without trusting any command's own "OK" output. Then
-run `dfs sheets polish` and check again.
+run `dfs setup polish` and check again.
 
 ---
 
@@ -99,7 +119,7 @@ before running `dfs sync` or anything else that writes.
 **A cell you're sure you didn't touch shows a "you're editing a
 protected range" warning.**
 Cause: working as intended -- most formula-driven tabs are protected
-(warning-only, see `dfs sheets protect`) so a stray keystroke doesn't
+(warning-only, see `dfs setup protect`) so a stray keystroke doesn't
 silently overwrite a working formula.
 Fix: the warning is dismissible, not a hard lock -- if you really meant
 to edit there, click through. If you didn't mean to, that's the warning

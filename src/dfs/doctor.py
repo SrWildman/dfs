@@ -1,4 +1,4 @@
-"""Read-only structural validator for a weekly sheet copy -- `dfs sheets doctor`.
+"""Read-only structural validator for a weekly sheet copy -- `dfs doctor`.
 
 Every check here is something that has already gone wrong silently at
 least once: a stale template missing a tab `dfs export`/`dfs lineups
@@ -224,7 +224,7 @@ def _check_pool_deck_range(client: DoctorClient, cfg: Config, tab_titles: set[st
             f"{POOL_SORT_TAB!r}'s filter formula only reaches row {formula_extent}, but "
             f"PLAYER_POOL_NAME_BLOCKS now extends to row {blocks_extent} -- "
             f"{', '.join(unreachable_positions)} player(s) past row {formula_extent} are "
-            f"invisible to the pool deck's 'Start at' window. Re-run `dfs sheets add-pool-deck`.",
+            f"invisible to the pool deck's 'Start at' window. Re-run `dfs setup add-pool-deck`.",
         )
     ]
 
@@ -279,7 +279,7 @@ def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
     # _check_linked_edge_columns would read the deck's row-1 controls as
     # Lineups' "header", always report it unlinked, and (this happened for
     # real, on the template, during an earlier version of this row-insert)
-    # `dfs sheets link-edge` would append a second, wrongly-positioned copy
+    # `dfs setup link-edge` would append a second, wrongly-positioned copy
     # of LINKED_EDGE_COLUMNS on top of lineup data that's already correctly
     # linked -- see CONTRIBUTING.md's changelog.
     lineups_tab = cfg.lineups.builder_tab

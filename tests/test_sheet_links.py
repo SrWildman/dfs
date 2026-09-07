@@ -39,7 +39,7 @@ class SpySheetsClient:
 
 
 def test_already_linked_columns_positions_never_move():
-    # `dfs sheets link-edge` writes VLOOKUP formulas into PlayerPoolRaw/
+    # `dfs setup link-edge` writes VLOOKUP formulas into PlayerPoolRaw/
     # Player Pool/Lineups with a HARDCODED column-index integer per column
     # (see edge_lookup_formula/_vlookup_index) -- those formulas are plain
     # text, not live references to EDGE_COLUMNS, so if a column already

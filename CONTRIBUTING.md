@@ -75,9 +75,22 @@ one:
    `File > Make a copy` actually duplicates every week; a tab that only
    exists in your personal sheet is invisible to every future weekly copy
    and to anyone else using this repo. Point a one-off command at the
-   template with `--sheet-id <template-id>` (see `dfs sheets
+   template with `--sheet-id <template-id>` (see `dfs setup
    polish --help`) rather than editing `config.toml`, so you don't
    have to swap it back afterward.
+
+## Building a sheet from scratch
+
+`dfs setup sheet --sheet-id <id>` runs the full one-time build (pool deck,
+Pool Picks, the four view tabs, EdgeRaw linking, filter views, protection,
+styling, and two verification passes) in the one order that actually
+works, stopping at the first step that fails. That order -- and why it's
+that order and not another -- lives in the command's own docstring
+(`setup_sheet` in `cli.py`), not duplicated here; this used to be
+undocumented tribal knowledge (run these nine commands, in your head, in
+roughly this order), which is exactly the kind of thing that goes stale
+silently. If the order ever needs to change, change it there and it stays
+the one place anyone (including a future Claude session) would look.
 
 ## The canonical template is rebuilt from the live sheet, not hand-patched
 
@@ -99,7 +112,7 @@ time --  copy the live sheet, strip it -- is less error-prone than
 hand-patching a drifted template, since it starts from a layout you know
 the live sheet's formulas actually work with.
 
-**`dfs sheets doctor --sheet-id <id>`** is the check that would have
+**`dfs doctor --sheet-id <id>`** is the check that would have
 caught the drift above before it shipped: every config-mapped tab exists,
 `EdgeRaw`'s header matches `derived.EDGE_COLUMNS`, the `link-edge` block
 is linked exactly once (not zero, not twice) on `Player Pool`/`Lineups`/
@@ -125,7 +138,7 @@ formula elsewhere that used to point past the insertion point, and verify
 with real output, not a read-through.
 
 The same bug class exists purely in Python, no Sheets API involved: `dfs
-sheets link-edge` (`sheet_links.py`) writes formulas into `PlayerPoolRaw`/
+setup link-edge` (`sheet_links.py`) writes formulas into `PlayerPoolRaw`/
 `Player Pool`/`Lineups` with a **hardcoded column-index integer per
 EdgeRaw column**, computed from `derived.EDGE_COLUMNS`'s position list at
 the time `link-edge` runs. Those formulas are plain text, not live
@@ -136,7 +149,7 @@ with no error. This actually happened once (see `docs/ROADMAP.md`'s
 Phase 3 section) and was caught only by re-checking resolved values on
 the live sheet, not by a test that existed at the time. **Any new
 `EDGE_COLUMNS` entry must be appended at the very end**, never inserted
-among existing ones, until `dfs sheets link-edge` is re-run (after
+among existing ones, until `dfs setup link-edge` is re-run (after
 clearing the old linked block by hand) against every sheet it's been
 applied to. `test_sheet_links.py`'s
 `test_already_linked_columns_positions_never_move` pins the positions the
@@ -254,14 +267,15 @@ just the code:
 | A CLI command's name, flags, or behavior | `docs/WORKFLOW.md`, the Instructions tab's "Weekly workflow" row on both sheets |
 | The weekly workflow itself (a step added, removed, or reordered) | Same two places as above, plus this file's own affected section if the change touched something documented here |
 | A new tab | Everywhere the "Adding a new data source" checklist above already says, **plus** a new Instructions tab row describing it, **plus** `docs/SHEET_REFERENCE.md` |
-| The template's tab set or a shared tab's column order (`PlayerPoolRaw`/`Player Pool`/`Lineups`) | Run `dfs sheets doctor` against **both** the live sheet and the template, `docs/SHEET_REFERENCE.md`'s canonical-column-order note, the Instructions tab's column-order row on both sheets |
+| The template's tab set or a shared tab's column order (`PlayerPoolRaw`/`Player Pool`/`Lineups`) | Run `dfs doctor` against **both** the live sheet and the template, `docs/SHEET_REFERENCE.md`'s canonical-column-order note, the Instructions tab's column-order row on both sheets |
 | A new symptom worth debugging by hand | `docs/TROUBLESHOOTING.md` |
+| A command's name, group, or behavior | README's Commands section, `CLAUDE.md`'s doc map, `docs/WORKFLOW.md`, the Instructions tab on both sheets, and every docstring/comment mentioning it (`grep -rn 'dfs ' src/`) |
 
 The Instructions tab is a real Google Sheet, not a file in this repo --
-update it with `SheetsClient.update_range` (see any `dfs sheets`/`dfs
+update it with `SheetsClient.update_range` (see any `dfs setup`/`dfs
 week` command for the pattern), once against the live sheet and once
 against the template (`--sheet-id` or a `model_copy(update=...)`'d
-config, same as `dfs sheets polish --sheet-id`). There's no test that
+config, same as `dfs setup polish --sheet-id`). There's no test that
 catches this going stale, so it's on the honor system -- treat it as
 part of the change, not a follow-up.
 

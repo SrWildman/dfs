@@ -58,7 +58,7 @@ once per sheet --
   "fresh"   None of the above: insert `DECK_ROWS` rows outright.
 Everything after that -- PoolSort, controls, row 3's header, formatting,
 freeze, row heights -- reruns unconditionally regardless of state,
-including "deck": it's fully idempotent (same pattern as `dfs sheets
+including "deck": it's fully idempotent (same pattern as `dfs setup
 polish`), and it's the only reason a formatting/content fix reaches a
 sheet whose deck was already at the current size -- see `add_pool_deck`'s
 own docstring for why an early return on "deck" was tried and reverted.
@@ -276,7 +276,7 @@ def add_pool_deck(client: SheetsClient, *, lineups_tab: str, pool_tab: str) -> s
     runs at most once per sheet. Everything after that -- PoolSort,
     controls, row 3's header, formatting, freeze, row heights -- always
     reruns regardless of state, deliberately: it's fully idempotent (same
-    pattern as `dfs sheets polish`), and every formatting/content fix
+    pattern as `dfs setup polish`), and every formatting/content fix
     found after this first shipped (inherited dark background, invisible
     white text, an unstyled row 3, a misleading empty-pool count -- see
     CONTRIBUTING.md's changelog) only reaches an already-migrated sheet

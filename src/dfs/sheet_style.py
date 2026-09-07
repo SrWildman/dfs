@@ -18,7 +18,7 @@ formatting the wrong column.
 Re-runnable. Every styling function clears the tab's existing conditional
 formats (and, where relevant, its column groups/banding) before adding its
 own, so running twice leaves the same result as running once rather than
-stacking duplicate rules -- verified directly by `dfs sheets audit-style`.
+stacking duplicate rules -- verified directly by `dfs setup audit-style`.
 
 `polish_edge()` applies EdgeRaw's frozen header and its colour scales as
 part of this pass -- the standalone `dfs sheets format-edge` command that
@@ -497,7 +497,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 # EDGE_WIDTHS merged in so the EdgeRaw-linked block (CeilVal/Leverage/
 # GameEnv/Stadium/Roof/Wind/Avail/Flag/...) gets the same widths here as
 # on EdgeRaw itself, not left at Sheets' own default -- found missing by
-# `dfs sheets audit-style`. "Name"/"Team" appear in both dicts with
+# `dfs setup audit-style`. "Name"/"Team" appear in both dicts with
 # identical values, so the merge doesn't change either.
 BUILDER_WIDTHS = {
     **EDGE_WIDTHS,
@@ -565,7 +565,7 @@ def polish_builder_tab(
     applied = apply_field_formats(client, tab, header, header_row=header_row, last_row=last_row)
 
     # Flag/Avail chips, same as EdgeRaw's own (found missing entirely by
-    # `dfs sheets audit-style`), plus Player Pool's own Source column
+    # `dfs setup audit-style`), plus Player Pool's own Source column
     # (Task 5.3). None of these three are ever colour-scaled by
     # `sheet_links.link_edge_columns`, and `polish_guardrails` owns
     # column O on Lineups, not Player Pool, so a column-scoped clear here
@@ -733,7 +733,7 @@ def polish_guardrails(
     OK. The Avail column is found by header name, not a hardcoded letter
     -- exactly the class of assumption that caused this feature's own
     prerequisite bug (see CONTRIBUTING.md's changelog); skips cleanly if
-    `dfs sheets link-edge` hasn't run yet.
+    `dfs setup link-edge` hasn't run yet.
 
     Writing here is safe regardless of what's linked at Q..Z: O sits
     strictly to their left, so nothing here can collide with that block.
@@ -747,7 +747,7 @@ def polish_guardrails(
     header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
     header = header_rows[0] if header_rows else []
     if "Avail" not in header:
-        return f"{tab}: 'Avail' not linked yet (run `dfs sheets link-edge` first) -- skipped"
+        return f"{tab}: 'Avail' not linked yet (run `dfs setup link-edge` first) -- skipped"
     avail_col = column_letter(header.index("Avail"))
 
     client.set_column_widths(tab, {_GUARDRAILS_COLUMN: 110})
@@ -1092,7 +1092,7 @@ def style_movement(client: SheetsClient, tab: str = "Movement") -> str:
 
 def style_view_tabs(client: SheetsClient) -> list[str]:
     """Style whichever of the four derived tabs exist. Each is skipped
-    cleanly if `dfs sheets build-views` hasn't created it yet, so `polish`
+    cleanly if `dfs setup build-views` hasn't created it yet, so `polish`
     is safe to run on a sheet that has none of them."""
     return [
         style_board(client),
@@ -1107,7 +1107,7 @@ def style_view_tabs(client: SheetsClient) -> list[str]:
 # ---------------------------------------------------------------------------
 
 # Distinct from Sheets' own 100px column default (see
-# `SheetsClient.get_column_widths`'s docstring) so `dfs sheets audit-style`
+# `SheetsClient.get_column_widths`'s docstring) so `dfs setup audit-style`
 # recognizes a column here as deliberately set, not left untouched.
 _GENERIC_COLUMN_PX = 110
 

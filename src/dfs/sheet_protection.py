@@ -1,4 +1,4 @@
-"""Task 5.1 -- `dfs sheets protect`: warning-only protection (Sheets'
+"""Task 5.1 -- `dfs setup protect`: warning-only protection (Sheets'
 "Protect sheet... except certain cells", never a hard lock) on every tab
 whose cells are entirely formula-driven, so a stray keystroke gets a
 dismissible warning instead of silently overwriting a working formula.
@@ -10,7 +10,7 @@ dismissible warnings elsewhere (`ONE_OF_RANGE` validation, non-strict)
 rather than hard blocks -- a mistake should stay reversible, not become a
 support ticket against his own sheet. It also never blocks this client's
 own service-account writes, so leaving protection on every formula tab
-is safe for every future `dfs sync`/`dfs sheets polish` run.
+is safe for every future `dfs sync`/`dfs setup polish` run.
 
 Exactly four things are typed by hand in the whole workbook (see
 `sheet_style.py`'s visual-grammar docstring): EdgeRaw's Pool column,
@@ -42,7 +42,7 @@ FULLY_PROTECTED_TABS = [
     POOL_SORT_TAB,
 ]
 
-_FORMULA_DESCRIPTION = "Formula-driven -- check before typing here (dfs sheets protect)"
+_FORMULA_DESCRIPTION = "Formula-driven -- check before typing here (dfs setup protect)"
 
 
 def protect_workbook(

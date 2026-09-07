@@ -55,7 +55,7 @@ class SheetsClient:
         # gspread's `Spreadsheet.worksheet(title)` re-fetches the WHOLE
         # spreadsheet's metadata (a full read) to resolve one tab by name,
         # every single time it's called -- there's no caching in gspread
-        # itself. A command like `dfs sheets polish`, which can call a
+        # itself. A command like `dfs setup polish`, which can call a
         # presentation primitive 100+ times across ~10 tabs in one run,
         # was reissuing that same full-metadata read before nearly every
         # call and blowing through Sheets' read-request-per-minute quota
@@ -78,7 +78,7 @@ class SheetsClient:
 
         try:
             # BackOffHTTPClient retries a 429/408/5xx with exponential
-            # backoff instead of raising straight away. `dfs sheets polish`
+            # backoff instead of raising straight away. `dfs setup polish`
             # can issue 100+ individual write requests in one run (each
             # format/freeze/colour-scale/boolean-rule call is its own
             # batchUpdate) -- comfortably past the default 60-per-minute
@@ -222,7 +222,7 @@ class SheetsClient:
     def get_cell_formats(self, tab_name: str, a1_range: str) -> list[list[dict]]:
         """Read back the resolved `userEnteredFormat` for every cell in
         `a1_range` -- the read-side counterpart to `format_range`, needed
-        by `dfs sheets audit-style` to check what a tab actually looks
+        by `dfs setup audit-style` to check what a tab actually looks
         like rather than trusting a styling command's own "OK" output.
         Never used by a writing command."""
         sheet, ws = self._ws(tab_name)
@@ -391,7 +391,7 @@ class SheetsClient:
         with `group_columns` -- without this, `addDimensionGroup` doesn't
         replace an existing group over the same range, it stacks a new,
         deeper nested one on top (Sheets caps nesting at depth 8, which is
-        exactly what a `dfs sheets polish` re-run without this ended up
+        exactly what a `dfs setup polish` re-run without this ended up
         doing for real: 8 identical nested groups over EdgeRaw's Id column
         alone, visible in the UI as a wall of collapse controls above the
         header with no way to tell they're all the same group). One
@@ -454,7 +454,7 @@ class SheetsClient:
         """True if `tab_name` is present. Lets callers skip work for tabs a
         given sheet doesn't have (the template and the live copy don't
         always agree) instead of raising. Also warms `_ws`'s cache for
-        every tab in the sheet, not just `tab_name` -- `dfs sheets polish`
+        every tab in the sheet, not just `tab_name` -- `dfs setup polish`
         calls this once per tab it might style, so by the second call the
         rest of the sheet's tabs are already resolved for free."""
         sheet = self._open()
@@ -707,7 +707,7 @@ class SheetsClient:
 
     def frozen_rows(self, tab_name: str) -> int:
         """How many rows are currently frozen -- the read-side counterpart
-        to `freeze`, for a caller (`dfs sheets audit-style`) that needs to
+        to `freeze`, for a caller (`dfs setup audit-style`) that needs to
         check rather than set it."""
         _, ws = self._ws(tab_name)
         return ws.frozen_row_count
@@ -882,7 +882,7 @@ class SheetsClient:
 
     def has_chip_rule(self, tab_name: str, column_a1: str, values: list[str]) -> bool:
         """Whether `column_a1` carries at least one TEXT_EQ conditional-
-        format rule matching one of `values` -- used by `dfs sheets
+        format rule matching one of `values` -- used by `dfs setup
         audit-style` to check a Flag/Avail column actually has its chips,
         not just that some conditional format exists somewhere on the
         tab."""
@@ -941,7 +941,7 @@ class SheetsClient:
         it just isn't silent. A warning-only protection never blocks an
         editor (including this client's own service account), so it's
         safe to leave on every formula-driven tab without risking a
-        future `dfs sync`/`dfs sheets polish` write being rejected."""
+        future `dfs sync`/`dfs setup polish` write being rejected."""
         sheet, ws = self._ws(tab_name)
         protected_range: dict = {"range": {"sheetId": ws.id}, "warningOnly": warning_only}
         if description:

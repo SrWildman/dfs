@@ -123,7 +123,7 @@ actually matches.
 | Column | Meaning |
 |---|---|
 | `Pool` | A real checkbox, column A -- tick it to put this player into `Player Pool`'s matching position block, see "Player Pool / Lineups" below. Survives every `dfs sync` (kept by Id, not row position -- this tab is sorted by `Leverage`, so row order shifts every sync). Deliberately **not** part of the column list below -- `derived.EDGE_COLUMNS` -- since every VLOOKUP linked into `Player Pool`/`Lineups`/`PlayerPoolRaw` hardcodes column-index integers against that exact list; `Pool` sits ahead of it instead (`derived.EDGE_DATA_OFFSET` is what every column-position calculation elsewhere adds to account for this). |
-| `Id` | DraftKings player ID, column B. Hidden by `dfs sheets polish` -- never a useful thing to look at, and hiding it (rather than grouping) puts `Pool` and `Name` visually side by side. |
+| `Id` | DraftKings player ID, column B. Hidden by `dfs setup polish` -- never a useful thing to look at, and hiding it (rather than grouping) puts `Pool` and `Name` visually side by side. |
 | `Name` | Player name, DK-nickname convention for DST. |
 | `Position`, `Team`, `Opp` | As above. |
 | `Salary` | DraftKings' own salary (authoritative) -- falls back to TFFB's figure only for the rare player TFFB projects who isn't on DK's main-slate salary list (e.g. a Thursday/Monday-only game). |
@@ -141,13 +141,13 @@ actually matches.
 | `LineMove` | This player's team's Vegas-implied point total, change since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 
-Four filter views (Data > Filter views, `dfs sheets add-filters`) sort/
+Four filter views (Data > Filter views, `dfs setup add-filters`) sort/
 filter within the view only, never touching the stored rows: "Pool
 picking" (the whole tab, no preset -- the workhorse, since a filter
 view's own column header gets a type-ahead search box for free),
 "Leverage plays" (`Flag = LEVERAGE`), "Available only" (`Avail` blank),
 "In my pool" (`Pool = TRUE`). `EdgeRaw` itself is deliberately **not**
-protected (`dfs sheets protect`) -- ticking `Pool` is the tab's entire
+protected (`dfs setup protect`) -- ticking `Pool` is the tab's entire
 reason to exist.
 
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
@@ -166,7 +166,7 @@ independent hand-edits, while each stayed internally consistent -- nothing
 caught it until a cross-sheet audit compared them directly. No Python code
 hardcodes these column positions (only the sheet's own formulas do), so
 this doesn't matter for `dfs` itself, but it matters for keeping the live
-sheet and the template from drifting apart again -- `dfs sheets doctor`
+sheet and the template from drifting apart again -- `dfs doctor`
 checks the columns each sheet's formulas actually depend on (`EdgeRaw`'s
 header, the linked `EdgeRaw` block, header repeats), but it does not check
 this specific ordering, since nothing breaks if it moves as long as both
@@ -191,7 +191,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Rstr%` | `TFFBOptoRaw`'s `ProjOwn`. |
-| `CeilVal`, `CeilPct`, `Leverage`, `LevBasis`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `Avail`, `Flag` | **Linked from `EdgeRaw`** by `dfs sheets link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Appended at the far right, grouped so they can be collapsed from the sheet UI. `LineMove`/`GameStart` (both added after `link-edge` was last run) are **not yet included here** -- adding either means re-running `link-edge` against a manually-cleared linked block on every sheet it's been applied to, not done yet. Until then, `LineMove` is only visible on `EdgeRaw` itself (and `GameStart` has no reason to be linked here anyway -- `dfs lineups late-swap` reads it straight from `EdgeRaw` locally). |
+| `CeilVal`, `CeilPct`, `Leverage`, `LevBasis`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `Avail`, `Flag` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Appended at the far right, grouped so they can be collapsed from the sheet UI. `LineMove`/`GameStart` (both added after `link-edge` was last run) are **not yet included here** -- adding either means re-running `link-edge` against a manually-cleared linked block on every sheet it's been applied to, not done yet. Until then, `LineMove` is only visible on `EdgeRaw` itself (and `GameStart` has no reason to be linked here anyway -- `dfs lineups late-swap` reads it straight from `EdgeRaw` locally). |
 
 ### Player Pool / Lineups
 
@@ -216,13 +216,13 @@ are ticked/typed than the block has room for (counting the same deduped
 union, so a player counted in both sources can't trigger a false
 warning) -- nobody is ever silently dropped. Every other column still
 VLOOKUPs off `Name` the same as before. `Player Pool` is fully protected
-(warning-only, `dfs sheets protect`) since none of it is meant to be
+(warning-only, `dfs setup protect`) since none of it is meant to be
 typed into directly. See `sheet_pool_formulas.py`/`sources/edge.py`/
 `sheet_pool_picks.py` for the mechanism and `CONTRIBUTING.md`'s
 changelog for the block-resize history.
 
 Columns mirror `PlayerPoolRaw`'s, pulled the same way, plus the same
-linked `EdgeRaw` block at the far right (`dfs sheets link-edge`).
+linked `EdgeRaw` block at the far right (`dfs setup link-edge`).
 `Lineups` additionally has `% of Rstr` (this pick's `Rstr%` as a share of
 the lineup's total `Rstr%`) and a per-lineup salary-remaining row. Each
 lineup block's `Name` column (the only typed column on the tab besides
@@ -231,7 +231,7 @@ the pool deck's own controls) has a live dropdown validated against
 block) so a typo doesn't silently propagate as `#N/A` across the whole
 row; everything else on the tab is protected (warning-only).
 
-`Lineups`' column O ("Check", `dfs sheets polish`) is a per-lineup
+`Lineups`' column O ("Check", `dfs setup polish`) is a per-lineup
 guardrail: on each roster slot, `DUPLICATE` if that name appears twice in
 the same lineup, else that pick's linked `Avail` flag (`OUT`/`IR`/`Q`) if
 it has one; on the totals row, `OVER` the salary cap, `INCOMPLETE` (fewer
@@ -239,7 +239,7 @@ than 9 picks), or `OK`. Formula values, not just formatting -- but
 additive-only, since O was an empty spacer column nothing else wrote to.
 
 `Lineups` also has a 10-row frozen "pool deck" at the very top (`dfs
-sheets add-pool-deck`): a sortable, filterable window into `Player
+setup add-pool-deck`): a sortable, filterable window into `Player
 Pool` -- pick a position (B1) and a sort field (D1), set a starting rank
 (F1), and the six rows below (4-9) show that slice of the pool with
 every metric column `Lineups` itself already has (Salary, Pts, Ceil,

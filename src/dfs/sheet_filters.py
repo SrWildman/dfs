@@ -1,4 +1,4 @@
-"""`dfs sheets add-filters` (Task 3): per-user, non-destructive sort/
+"""`dfs setup add-filters` (Task 3): per-user, non-destructive sort/
 filter views on tabs that are safe for it.
 
 Filter views (Sheets' Data > Filter views), never a plain filter: a

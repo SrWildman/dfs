@@ -1,4 +1,4 @@
-"""`dfs sheets audit-style` -- a read-only reporter that checks the workbook
+"""`dfs setup audit-style` -- a read-only reporter that checks the workbook
 actually looks the way `sheet_style.py` claims, rather than trusting any
 styling command's own "OK" output. Task 2.7's own mandate: number formats
 and chips already drifted apart once (Task 2.1's `FIELD_FORMATS`

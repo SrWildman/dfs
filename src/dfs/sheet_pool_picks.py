@@ -61,7 +61,7 @@ def create_pool_picks_tab(client: SheetsClient, *, edge_tab: str, tab: str = POO
     """Additive and idempotent: (re)writes the header and every formula
     column (B-J), and re-applies the Name-column validation/styling, but
     never touches column A's typed values -- a re-run must not erase a
-    name Sam already picked. Safe to call from `dfs sheets polish` on
+    name Sam already picked. Safe to call from `dfs setup polish` on
     every run, the same discipline as `add_pool_deck`/`polish_edge`.
     """
     if not client.tab_exists(tab):

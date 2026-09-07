@@ -111,7 +111,7 @@ class FakeEdgeClient:
     """Records calls; used to pin polish_edge's re-run behaviour, in
     particular that it clears existing column groups before re-adding
     them (see clear_column_groups's own docstring for the bug this
-    guards against -- 8 nested groups from repeated `dfs sheets polish`
+    guards against -- 8 nested groups from repeated `dfs setup polish`
     runs, found live)."""
 
     def __init__(self):
@@ -453,7 +453,7 @@ def test_polish_builder_tab_skips_repeat_styling_when_none_given():
 def test_polish_builder_tab_chips_flag_and_avail_columns_when_present():
     # PlayerPoolRaw/Player Pool/Lineups all carry the same linked Flag/
     # Avail columns EdgeRaw has, but nothing applied their chips there --
-    # found by `dfs sheets audit-style`. Column-scoped clear, since
+    # found by `dfs setup audit-style`. Column-scoped clear, since
     # link_edge_columns' own colour scales and polish_guardrails' column
     # O live on this same tab and must not be touched.
     client = FakeBuilderTabClient(["Name", "Flag", "Avail"])

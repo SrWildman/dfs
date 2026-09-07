@@ -19,6 +19,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 playwright install chromium   # only needed once TFFB/DK browser auth is used
+dfs --install-completion      # optional: tab-completion for every command below
 ```
 
 Copy the config template and fill in your own sheet:
@@ -44,6 +45,13 @@ working defaults.
    with that address (Editor access).
 4. Point `credentials_file` in `config.toml` at the key file's path.
 
+## Not sure what to run?
+
+Run `dfs` with no arguments. It shows a compact status (which sheet,
+how stale the data is, pool/lineup counts) and the two or three commands
+that make sense right now, each printed next to its real name -- the
+point is to make itself unnecessary once you know the commands below.
+
 ## The weekly loop
 
 ```bash
@@ -56,10 +64,31 @@ dfs week close --csv history.csv # end of week: reconcile Cash/GPP into Bankroll
 ```
 
 Every command exits non-zero on real failure -- nothing here silently
-reports success when something failed. Run `dfs --help` (or `dfs
-<command> --help`) for the full command reference; `dfs status` shows
-config/credential/data-freshness at a glance and prints which sheet
-you're actually pointed at, since a new one gets copied every week.
+reports success when something failed.
+
+## Commands
+
+Weekly-loop commands first, one-time setup last -- run `dfs --help` (or
+`dfs <command> --help`) for the full reference.
+
+| Command | Reach for it when... |
+|---|---|
+| `dfs status` | you want to know which sheet you're pointed at and how fresh each source is. |
+| `dfs sync` [`--live`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed. |
+| `dfs doctor` | you want to confirm the sheet's structure hasn't drifted -- run it after any structural edit, or when something looks wrong. |
+| `dfs edge` | a quick look at top leverage plays in the terminal, no sheet needed. |
+| `dfs go` | `sync` + `doctor` + what-changed, back to back -- the three you'd otherwise run in sequence anyway. |
+| `dfs export -o <file>` | your lineups are built and paired to DK entries, ready to upload. |
+| `dfs pool add\|remove\|list\|clear` | adding/removing players from your pool without opening the sheet. |
+| `dfs lineups late-swap\|clear` | checking which rostered players are still swappable; clearing last week's picks on a new sheet copy. |
+| `dfs odds movement` | checking how betting lines have moved since your last sync. |
+| `dfs bankroll sync --csv <file>` | reconciling DK contest history into your bankroll tab. |
+| `dfs week new <url>` / `dfs week close --csv <file>` | starting a new week's sheet, or closing out the one you're on. |
+| `dfs auth tffb\|dk` | one-time interactive login for a source that needs a real browser session. |
+| `dfs setup ...` | one-time sheet construction (pool deck, EdgeRaw linking, styling, protection, ...) -- see `dfs setup --help`; `dfs setup sheet` runs the whole thing in order. |
+
+`dfs sheets ...` (the pre-reorganisation spelling of every `setup`
+command, plus `doctor`) still works this season as a deprecated alias.
 
 ## Documentation
 

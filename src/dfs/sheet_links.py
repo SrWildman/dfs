@@ -13,7 +13,7 @@ so re-running it doesn't append a second copy.
 The written cells are plain formula *text*, not a living reference to
 `derived.EDGE_COLUMNS` -- if that list's order or membership ever changes,
 the already-written formulas in the sheet won't update themselves. Re-run
-`dfs sheets link-edge` after such a change (clearing the old linked columns
+`dfs setup link-edge` after such a change (clearing the old linked columns
 by hand first, since this only appends, never overwrites).
 """
 
