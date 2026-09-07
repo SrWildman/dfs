@@ -132,7 +132,7 @@ class RotowireOddsSource(Source):
             )
         return rows
 
-    def post_upload(self, client, tab: str, df: pd.DataFrame) -> None:
+    def post_upload(self, client, tab: str, df: pd.DataFrame, preserved: object | None) -> None:
         # Moneyline/Spread/Total/Team Points were written with USER_ENTERED so
         # Sheets parses "+154"/"-3.5" as real numbers; this makes that explicit
         # instead of relying on number-format metadata left over from a
