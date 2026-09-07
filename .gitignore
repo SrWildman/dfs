@@ -32,6 +32,18 @@ wheels/
 *.egg
 MANIFEST
 
+# Tool caches (pytest/ruff already drop their own .gitignore inside these,
+# but an explicit rule here means that still works even if that file is
+# ever deleted)
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv isn't this project's package manager (see README's `pip install -e
+# ".[dev]"` setup) -- if a lockfile shows up locally it's incidental, not
+# meant to be tracked.
+uv.lock
+
 # Virtual environments
 .env
 .venv
@@ -69,3 +81,4 @@ config.toml
 # Personal notes/strategy -- not for the public repo
 docs/HANDOFF.md
 docs/ROADMAP.md
+docs/V2_PLAN.md
