@@ -592,6 +592,50 @@ class SheetsClient:
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
         sheet.batch_update({"requests": [{"setDataValidation": {"range": grid_range}}]})
 
+    def clear_filter_view(self, tab_name: str, title: str) -> None:
+        """Delete any existing filter view on this tab with this exact
+        title. Sheets doesn't replace a filter view by title on a second
+        `addFilterView` call -- it adds a second view with the same name
+        -- so a re-runnable caller must clear first, same clear-then-add
+        shape as column groups/banding elsewhere in this file."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),filterViews)"})
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") != ws.id:
+                continue
+            for fv in s.get("filterViews", []) or []:
+                if fv.get("title") == title:
+                    sheet.batch_update({"requests": [{"deleteFilterView": {"filterId": fv["filterViewId"]}}]})
+            break
+
+    def add_filter_view(
+        self,
+        tab_name: str,
+        *,
+        title: str,
+        a1_range: str,
+        criteria: dict[int, dict] | None = None,
+    ) -> None:
+        """Add a named, per-user filter view (Data > Filter views) over
+        `a1_range`. Unlike the plain "Create a filter" button (one filter
+        per sheet, visible and applied for every viewer, and destructive
+        on a formula-driven tab whose cells a filter would reorder), a
+        filter view sorts/filters within the view only -- the underlying
+        cells, and any spilled-array formula among them, are untouched.
+
+        `criteria` maps a 0-indexed column number to a Sheets
+        `FilterCriteria` dict (e.g. `{5: {"condition": {"type": "TEXT_EQ",
+        "values": [{"userEnteredValue": "LEVERAGE"}]}}}`) -- omit for a
+        view that's just a sortable/filterable window with no preset.
+        Callers that re-run this must call `clear_filter_view` with the
+        same title first; this method only ever adds."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        filter_view: dict = {"title": title, "range": grid_range}
+        if criteria:
+            filter_view["criteria"] = {str(col): crit for col, crit in criteria.items()}
+        sheet.batch_update({"requests": [{"addFilterView": {"filter": filter_view}}]})
+
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         """Apply a raw CellFormat dict to a range (fills, fonts, alignment,
         number formats). Passed straight through to the Sheets API."""

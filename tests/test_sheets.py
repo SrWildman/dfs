@@ -33,6 +33,7 @@ class FakeWorksheet:
         self.delete_dimension_calls: list[dict] = []
         self.conditional_formats: list[dict] = []
         self.data_validation_calls: list[dict] = []
+        self.filter_views: list[dict] = []
 
     def _cell(self, row: int, col: int) -> str:
         if row - 1 < len(self._rows) and col - 1 < len(self._rows[row - 1]):
@@ -109,6 +110,7 @@ class FakeSpreadsheet:
         self._worksheets: dict[str, FakeWorksheet] = {}
         self.batch_update_calls: list[dict] = []
         self.worksheet_lookup_calls: list[str] = []
+        self._next_filter_id = 0
 
     def worksheets(self) -> list[FakeWorksheet]:
         return list(self._worksheets.values())
@@ -166,6 +168,16 @@ class FakeSpreadsheet:
             if "setDataValidation" in request:
                 sheet_id = request["setDataValidation"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).data_validation_calls.append(request["setDataValidation"])
+            if "addFilterView" in request:
+                fv = dict(request["addFilterView"]["filter"])
+                ws = self._ws_by_id(fv["range"]["sheetId"])
+                self._next_filter_id += 1
+                fv["filterViewId"] = self._next_filter_id
+                ws.filter_views.append(fv)
+            if "deleteFilterView" in request:
+                filter_id = request["deleteFilterView"]["filterId"]
+                for ws in self._worksheets.values():
+                    ws.filter_views = [fv for fv in ws.filter_views if fv["filterViewId"] != filter_id]
 
     def _ws_by_id(self, sheet_id: int) -> FakeWorksheet:
         return next(ws for ws in self._worksheets.values() if ws.id == sheet_id)
@@ -177,6 +189,7 @@ class FakeSpreadsheet:
                     "properties": {"sheetId": ws.id},
                     "conditionalFormats": ws.conditional_formats,
                     "columnGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.column_groups],
+                    "filterViews": ws.filter_views,
                 }
                 for ws in self._worksheets.values()
             ]
@@ -541,3 +554,72 @@ def test_ws_resolves_and_caches_on_first_direct_lookup(cfg, monkeypatch, tmp_pat
     client.format_number_range("EdgeRaw", "A2:A10")
 
     assert fake_sheet.worksheet_lookup_calls == ["EdgeRaw"]
+
+
+def test_add_filter_view_creates_a_named_view_over_the_given_range(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.add_filter_view("T", title="Pool picking", a1_range="A1:W1000")
+
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.filter_views) == 1
+    fv = ws.filter_views[0]
+    assert fv["title"] == "Pool picking"
+    assert "criteria" not in fv
+    assert fv["range"]["startColumnIndex"] == 0
+
+
+def test_add_filter_view_with_criteria_uses_string_column_index_keys(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.add_filter_view(
+        "T",
+        title="Leverage plays",
+        a1_range="A1:W1000",
+        criteria={19: {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": "LEVERAGE"}]}}},
+    )
+
+    fv = fake_sheet._worksheets["T"].filter_views[0]
+    # The Sheets API's criteria map is keyed by string column index in JSON.
+    assert list(fv["criteria"]) == ["19"]
+
+
+def test_clear_filter_view_removes_only_the_matching_title(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.add_filter_view("T", title="Pool picking", a1_range="A1:W1000")
+    client.add_filter_view("T", title="In my pool", a1_range="A1:W1000")
+
+    client.clear_filter_view("T", "Pool picking")
+
+    remaining = fake_sheet._worksheets["T"].filter_views
+    assert [fv["title"] for fv in remaining] == ["In my pool"]
+
+
+def test_clear_filter_view_is_a_no_op_when_no_view_has_that_title(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.add_filter_view("T", title="Pool picking", a1_range="A1:W1000")
+
+    client.clear_filter_view("T", "Nonexistent")
+
+    assert len(fake_sheet._worksheets["T"].filter_views) == 1
+
+
+def test_add_filter_view_is_re_runnable_via_clear_then_add(cfg, monkeypatch, tmp_path):
+    # The real-world bug this guards against: clear_filter_view once read
+    # the wrong dict key (filterId instead of filterViewId) off the
+    # FilterView object and raised on every call, silently breaking
+    # re-runnability entirely -- caught only by exercising the pair
+    # together, not either method alone.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.clear_filter_view("T", "Pool picking")
+    client.add_filter_view("T", title="Pool picking", a1_range="A1:W1000")
+    client.clear_filter_view("T", "Pool picking")
+    client.add_filter_view("T", title="Pool picking", a1_range="A1:W1000")
+
+    assert len(fake_sheet._worksheets["T"].filter_views) == 1

@@ -29,6 +29,7 @@ from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
+from dfs.sheet_filters import add_all_filter_views
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
 from dfs.sheet_style import (
@@ -431,6 +432,46 @@ def sheets_link_edge(
                 header_repeats_at=header_repeats_at,
             ),
         ]
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@sheets_app.command("add-filters")
+def sheets_add_filters(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Add filter views to a different sheet instead of config.toml's -- e.g. the "
+        "canonical weekly template.",
+    ),
+) -> None:
+    """Per-user, non-destructive sort/filter views (Sheets' Data > Filter
+    views) on EdgeRaw and the read-only view/log tabs -- never the plain
+    "Create a filter" button, which is per-sheet and physically reorders
+    stored cells. EdgeRaw gets four named views ("Pool picking", "Leverage
+    plays", "Available only", "In my pool"); Slate Grid/Movement/Exposure/
+    Results/SoS* each get one plain sortable view. Deliberately NOT applied
+    to Player Pool, Lineups, PlayerPoolRaw or Board -- see
+    `sheet_filters.py`'s own docstring for why those stay on the pool
+    deck's own sort/filter instead. Safe to re-run: each view is deleted
+    by title before being re-added, never duplicated.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Adding filter views to: [bold]{title}[/bold]\n{url}\n")
+        results = add_all_filter_views(client, edge_tab)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
