@@ -1,3 +1,4 @@
+import dfs.sheet_pool_deck as sheet_pool_deck
 from dfs.sheet_pool_deck import (
     _OLD_BENCH_ROWS,
     _OLD_BENCH_TITLE,
@@ -8,6 +9,7 @@ from dfs.sheet_pool_deck import (
     add_pool_deck,
 )
 from dfs.sheet_style import HEADER_FMT
+from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
 
 _POOL_HEADER = [
     "Name",
@@ -162,11 +164,35 @@ def test_add_pool_deck_builds_pool_sort_hidden_tab_with_position_and_sort_formul
     assert tab_name == POOL_SORT_TAB
     assert rows[0] == _POOL_HEADER
     formula = rows[1][0]
-    assert "'Player Pool'!$A$2:$Z$74" in formula
+    assert "'Player Pool'!$A$2:$Z$80" in formula
     assert 'Lineups!$B$1="ALL"' in formula
-    assert "'Player Pool'!$B$2:$B$74=Lineups!$B$1" in formula
+    assert "'Player Pool'!$B$2:$B$80=Lineups!$B$1" in formula
     assert "Lineups!$G$1" in formula  # sort column, from the dropdown's MATCH
     assert client.tab_properties_calls == [(POOL_SORT_TAB, True)]
+
+
+def test_pool_last_row_is_derived_from_player_pool_name_blocks_not_hardcoded():
+    # The deck once hardcoded 74 as Player Pool's last row; Task K's block
+    # resize silently truncated its view of the DST block to six of ten
+    # slots since nothing re-derived this from the blocks that moved. This
+    # asserts the constant tracks whatever weekly_reset currently defines,
+    # computed independently here (not by re-reading the module's own
+    # source).
+    assert sheet_pool_deck._POOL_LAST_ROW == max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
+
+
+def test_add_pool_deck_follows_pool_last_row_if_it_changes(monkeypatch):
+    # _POOL_COUNT_FORMULA is baked from _POOL_LAST_ROW at import time, so
+    # only PoolSort's own filter/sort formula (built fresh on every call)
+    # can be exercised by monkeypatching after import -- that's the exact
+    # formula this task's fix touched.
+    monkeypatch.setattr(sheet_pool_deck, "_POOL_LAST_ROW", 999)
+
+    client = FakeDeckClient()
+    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    formula = client.write_tab_calls[0][1][1][0]
+    assert "'Player Pool'!$A$2:$Z$999" in formula
 
 
 def test_add_pool_deck_writes_controls_defaults_and_dropdowns():
@@ -197,10 +223,10 @@ def test_add_pool_deck_pool_count_readout_uses_countif_not_counta():
     control_call = next(c for c in client.update_calls if c[0] == "A1:I1")
     readout = control_call[1][0][8]
     assert "COUNTA" not in readout
-    assert readout.count('COUNTIF(PoolSort!$A$2:$A$74,"?*")') == 3
+    assert readout.count('COUNTIF(PoolSort!$A$2:$A$80,"?*")') == 3
     # "showing N-M" must be suppressed entirely when the count is 0,
     # not rendered as a nonsensical "showing 1-0" (start past end).
-    assert 'IF(COUNTIF(PoolSort!$A$2:$A$74,"?*")=0,""' in readout
+    assert 'IF(COUNTIF(PoolSort!$A$2:$A$80,"?*")=0,""' in readout
 
 
 def test_add_pool_deck_copies_player_pool_header_into_row_three_and_styles_it():

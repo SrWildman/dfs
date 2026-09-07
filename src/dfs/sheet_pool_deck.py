@@ -63,6 +63,14 @@ from __future__ import annotations
 
 from dfs.sheet_style import HEADER_FMT
 from dfs.sheets import SheetsClient, column_letter
+from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
+
+# Derived, never hardcoded: Player Pool's blocks were resized once
+# already (Task K raised the per-position caps) and a literal row
+# number here silently truncated the deck's view of the last block --
+# exactly the failure mode CONTRIBUTING.md's Phase 8 postmortem
+# describes. If the blocks move again, this follows them.
+_POOL_LAST_ROW = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
 
 DECK_ROWS = 10
 _WINDOW_SIZE = 6
@@ -92,7 +100,7 @@ _POSITION_OPTIONS = ["ALL", "QB", "RB", "WR", "TE", "DST"]
 
 # Cells with at least one real character -- not COUNTA, see the I1
 # readout formula's own comment for why.
-_POOL_COUNT_FORMULA = f'COUNTIF({POOL_SORT_TAB}!$A$2:$A$74,"?*")'
+_POOL_COUNT_FORMULA = f'COUNTIF({POOL_SORT_TAB}!$A$2:$A${_POOL_LAST_ROW},"?*")'
 
 # G1's MATCH array -- Player Pool's full A..Z header text, in order. Two
 # blanks at positions 15-16 (O, P) since sorting by the spacer or "% of
@@ -123,9 +131,9 @@ def _build_pool_sort(client: SheetsClient, pool_sort_tab: str, pool_tab: str, li
     header = client.read_range(pool_tab, "A1:Z1")
     header_row = header[0] if header else []
     formula = (
-        f"=IFERROR(SORT(FILTER('{pool_tab}'!$A$2:$Z$74,"
-        f"'{pool_tab}'!$A$2:$A$74<>\"\","
-        f"({lineups_tab}!$B$1=\"ALL\")+('{pool_tab}'!$B$2:$B$74={lineups_tab}!$B$1)),"
+        f"=IFERROR(SORT(FILTER('{pool_tab}'!$A$2:$Z${_POOL_LAST_ROW},"
+        f"'{pool_tab}'!$A$2:$A${_POOL_LAST_ROW}<>\"\","
+        f"({lineups_tab}!$B$1=\"ALL\")+('{pool_tab}'!$B$2:$B${_POOL_LAST_ROW}={lineups_tab}!$B$1)),"
         f'{lineups_tab}!$G$1,FALSE),"")'
     )
     client.write_tab(pool_sort_tab, [header_row, [formula]])
