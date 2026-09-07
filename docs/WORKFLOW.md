@@ -50,9 +50,11 @@ Check Board first each week -- it's a landing view: top-leverage, best
 ceiling-value, and landmine panels plus a slate summary (games, highest
 total, max wind, injury counts). Slate Grid is the same slate one row per
 game instead of one row per player. EdgeRaw is where the real work
-happens: sorted by Leverage descending, six colour scales on the
-decision numbers, a muted position tint, banding to make one player's row
-readable across 22 columns.
+happens: sorted by Leverage descending, colour scales on every decision
+number, a muted position tint, banding to make one player's row readable
+across 22 columns, and a visible sort/search arrow in every header cell
+(click one to sort by any column, or search it -- Data > Filter views
+holds the saved presets).
 
 **Done looks like:** EdgeRaw has real data (not blank/zero rows), and
 Board's slate summary matches what you'd expect for the week (right
@@ -69,10 +71,10 @@ status` means real, incomplete data, not a warning to ignore.
 Three ways to add a player, use any mix:
 
 ```
-Tick the Pool checkbox in EdgeRaw (use the "Pool picking" filter view's
-  Name column search to find one fast, rather than scrolling 743 rows)
-Type a name into Pool Picks column A (live search against EdgeRaw's own
-  Name column)
+Tick the Pool checkbox in EdgeRaw (use its header arrow to sort/search,
+  or the "Pool picking" filter view, rather than scrolling 743 rows)
+Type a name into Pool Picks column A, row 3 down (live search against
+  EdgeRaw's own Name column -- row 1 explains the tab, row 2 is the header)
 dfs pool add "name" "name2" ...   # exact match wins; ambiguous names are
                                     # printed as candidates, never guessed
 ```

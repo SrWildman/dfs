@@ -116,6 +116,30 @@ before running `dfs sync` or anything else that writes.
 
 ---
 
+**I can't sort or search EdgeRaw, and I can't find a search bar.**
+Cause: both exist, but the wrong one is easy to miss and the right one
+is easy to never look for. `dfs setup add-filters` puts a saved preset
+under Data > Filter views, which is genuinely hidden if you've never
+opened that menu.
+Fix: click the dropdown arrow in any EdgeRaw header cell -- that's a
+basic filter (Data > Create a filter), on by default, and sorts/searches
+that column directly. The saved presets under Data > Filter views
+("Pool picking", "Leverage plays", ...) are the secondary, quick-preset
+mechanism, not the primary one.
+
+---
+
+**Player Pool's Venue column (or another column that's just a category,
+like Source) looks colour-scaled instead of chipped.**
+Cause: a colour scale hand-applied directly in the sheet at some point,
+before `sheet_style.FIELD_COLOR_SCALES` existed as the one canonical
+policy every tab follows.
+Fix: run `dfs setup polish` -- it clears a builder tab's conditional
+formats before reapplying them, so a stray manual rule doesn't survive a
+re-run.
+
+---
+
 **A cell you're sure you didn't touch shows a "you're editing a
 protected range" warning.**
 Cause: working as intended -- most formula-driven tabs are protected

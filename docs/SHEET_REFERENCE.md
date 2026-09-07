@@ -141,14 +141,16 @@ actually matches.
 | `LineMove` | This player's team's Vegas-implied point total, change since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 
-Four filter views (Data > Filter views, `dfs setup add-filters`) sort/
-filter within the view only, never touching the stored rows: "Pool
-picking" (the whole tab, no preset -- the workhorse, since a filter
-view's own column header gets a type-ahead search box for free),
-"Leverage plays" (`Flag = LEVERAGE`), "Available only" (`Avail` blank),
-"In my pool" (`Pool = TRUE`). `EdgeRaw` itself is deliberately **not**
-protected (`dfs setup protect`) -- ticking `Pool` is the tab's entire
-reason to exist.
+A basic filter (Data > Create a filter, `dfs setup add-filters`) puts a
+visible sort/search arrow in every header cell -- click one to sort or
+search that column, the primary and most discoverable mechanism. Four
+saved filter views (Data > Filter views, secondary) sort/filter within
+the view only, never touching the stored rows: "Pool picking" (the whole
+tab, no preset -- a filter view's own column header gets a type-ahead
+search box for free), "Leverage plays" (`Flag = LEVERAGE`), "Available
+only" (`Avail` blank), "In my pool" (`Pool = TRUE`). `EdgeRaw` itself is
+deliberately **not** protected (`dfs setup protect`) -- ticking `Pool` is
+the tab's entire reason to exist.
 
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
 
@@ -274,27 +276,32 @@ cross-referencing kickoff times against your roster.
 ### Pool Picks
 
 A second, additive way to add a player to `Player Pool` by typing a
-name instead of ticking `EdgeRaw`. Column `A` (the only typed cell) is a
-live type-ahead search box (`ONE_OF_RANGE` validation, non-strict)
-against `EdgeRaw`'s own `Name` column. Columns `B`-`I` are read-only
-VLOOKUPs against `EdgeRaw` (`Pos`, `Team`, `Salary`, `Pts`, `Ceil`,
-`CeilVal`, `Leverage`, `Flag`) so a pick can be sanity-checked without
-leaving the tab; column `J` (`Status`) reads `NOT ON SLATE` if the typed
-name doesn't match this week's `EdgeRaw` at all, else `added`. To remove
-a pick, clear its cell in column `A` (or, for one that actually came
-from ticking `EdgeRaw` instead, untick it there -- `Player Pool`'s
-`Source` column, see below, says which). See `sheet_pool_picks.py` for
-the mechanism.
+name instead of ticking `EdgeRaw`. Row 1 is a plain-text title
+explaining the tab in place (Fix 3.1 -- it used to show up with no
+explanation); the real header is row 2, and typed rows start at row 3.
+Column `A` (the only typed cell) is a live type-ahead search box
+(`ONE_OF_RANGE` validation, non-strict) against `EdgeRaw`'s own `Name`
+column. Columns `B`-`I` are read-only VLOOKUPs against `EdgeRaw` (`Pos`,
+`Team`, `Salary`, `Pts`, `Ceil`, `CeilVal`, `Leverage`, `Flag`) so a pick
+can be sanity-checked without leaving the tab; column `J` (`Status`)
+reads `NOT ON SLATE` if the typed name doesn't match this week's
+`EdgeRaw` at all, else `added`. To remove a pick, clear its cell in
+column `A` (or, for one that actually came from ticking `EdgeRaw`
+instead, untick it there -- `Player Pool`'s `Source` column, see below,
+says which). A basic filter (Data > Create a filter) sits over
+`A2:J102`. See `sheet_pool_picks.py` for the mechanism and its
+`FIRST_DATA_ROW`/`LAST_ROW` constants for the exact row layout.
 
 ### SoSQB / SoSRB / SoSWr / SoSTE / SoSDef
 
 Strength-of-schedule rankings, pasted in by hand from The Fantasy
 Footballers' Foot Clan Premium each week (**not yet automated** -- see
 `legacy/README.md`). Each has a per-week opponent rank and points-allowed
-column, colour-scaled REVERSED (a low rank is the good matchup here, the
-one place in the workbook where less is better); `SoSComb` combines all
-five into one lookup table keyed by team and position, which
-`PlayerPoolRaw`'s `OppPosRank` reads.
+column, colour-scaled REVERSED (a low rank is the good matchup here --
+`Player Pool`/`Lineups`/`PlayerPoolRaw`'s own `OppPosRank` gets the same
+REVERSED treatment, see `sheet_style.FIELD_COLOR_SCALES`); `SoSComb`
+combines all five into one lookup table keyed by team and position,
+which `PlayerPoolRaw`'s `OppPosRank` reads.
 
 ### Scratch
 
