@@ -857,6 +857,7 @@ WEEK_ORDER = [
     ("EdgeRaw", "decide"),
     ("Slate Grid", "decide"),
     ("Player Pool", "build"),
+    ("Pool Picks", "build"),
     ("Lineups", "build"),
     ("Scratch", "build"),
     ("DK Upload", "build"),
