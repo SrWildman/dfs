@@ -34,6 +34,7 @@ class FakeWorksheet:
         self.conditional_formats: list[dict] = []
         self.data_validation_calls: list[dict] = []
         self.filter_views: list[dict] = []
+        self.protected_ranges: list[dict] = []
 
     def _cell(self, row: int, col: int) -> str:
         if row - 1 < len(self._rows) and col - 1 < len(self._rows[row - 1]):
@@ -111,6 +112,7 @@ class FakeSpreadsheet:
         self.batch_update_calls: list[dict] = []
         self.worksheet_lookup_calls: list[str] = []
         self._next_filter_id = 0
+        self._next_protection_id = 0
 
     def worksheets(self) -> list[FakeWorksheet]:
         return list(self._worksheets.values())
@@ -178,6 +180,18 @@ class FakeSpreadsheet:
                 filter_id = request["deleteFilterView"]["filterId"]
                 for ws in self._worksheets.values():
                     ws.filter_views = [fv for fv in ws.filter_views if fv["filterViewId"] != filter_id]
+            if "addProtectedRange" in request:
+                pr = dict(request["addProtectedRange"]["protectedRange"])
+                ws = self._ws_by_id(pr["range"]["sheetId"])
+                self._next_protection_id += 1
+                pr["protectedRangeId"] = self._next_protection_id
+                ws.protected_ranges.append(pr)
+            if "deleteProtectedRange" in request:
+                protected_id = request["deleteProtectedRange"]["protectedRangeId"]
+                for ws in self._worksheets.values():
+                    ws.protected_ranges = [
+                        pr for pr in ws.protected_ranges if pr["protectedRangeId"] != protected_id
+                    ]
 
     def _ws_by_id(self, sheet_id: int) -> FakeWorksheet:
         return next(ws for ws in self._worksheets.values() if ws.id == sheet_id)
@@ -190,6 +204,7 @@ class FakeSpreadsheet:
                     "conditionalFormats": ws.conditional_formats,
                     "columnGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.column_groups],
                     "filterViews": ws.filter_views,
+                    "protectedRanges": ws.protected_ranges,
                 }
                 for ws in self._worksheets.values()
             ]
@@ -623,3 +638,59 @@ def test_add_filter_view_is_re_runnable_via_clear_then_add(cfg, monkeypatch, tmp
     client.add_filter_view("T", title="Pool picking", a1_range="A1:W1000")
 
     assert len(fake_sheet._worksheets["T"].filter_views) == 1
+
+
+def test_protect_sheet_protects_the_whole_sheet_with_no_range_bounds(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.protect_sheet("T", description="test")
+
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.protected_ranges) == 1
+    pr = ws.protected_ranges[0]
+    assert pr["range"] == {"sheetId": ws.id}  # no row/col bounds -- the whole sheet
+    assert pr["warningOnly"] is True
+    assert pr["description"] == "test"
+    assert "unprotectedRanges" not in pr
+
+
+def test_protect_sheet_with_unprotected_ranges_converts_each_to_a_grid_range(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.protect_sheet("T", unprotected_ranges=["B1", "F:F"])
+
+    pr = fake_sheet._worksheets["T"].protected_ranges[0]
+    assert len(pr["unprotectedRanges"]) == 2
+    assert pr["unprotectedRanges"][0]["startColumnIndex"] == 1  # B1
+
+
+def test_clear_protected_ranges_removes_every_existing_protection(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.protect_sheet("T")
+    client.protect_sheet("T", unprotected_ranges=["B1"])
+
+    client.clear_protected_ranges("T")
+
+    assert fake_sheet._worksheets["T"].protected_ranges == []
+
+
+def test_clear_protected_ranges_is_a_no_op_when_nothing_is_protected(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.clear_protected_ranges("T")  # must not raise
+    assert fake_sheet._worksheets["T"].protected_ranges == []
+
+
+def test_protect_sheet_is_re_runnable_via_clear_then_add(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.clear_protected_ranges("T")
+    client.protect_sheet("T")
+    client.clear_protected_ranges("T")
+    client.protect_sheet("T")
+
+    assert len(fake_sheet._worksheets["T"].protected_ranges) == 1

@@ -35,6 +35,7 @@ from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edg
 from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheet_pool_picks import create_pool_picks_tab
+from dfs.sheet_protection import protect_workbook
 from dfs.sheet_style import (
     POOL_RAW_ROWS,
     apply_tab_chrome,
@@ -46,6 +47,7 @@ from dfs.sheet_style import (
     style_tier23_tabs,
     style_view_tabs,
 )
+from dfs.sheet_typo_guard import add_lineups_typo_guard
 from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
 from dfs.sheets import SheetsClient, SheetsError
 from dfs.sources import SOURCES
@@ -332,6 +334,7 @@ def sheets_polish(
             )
         )
         results.append(polish_lineups_input_column(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
+        results.append(add_lineups_typo_guard(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:
             results.append(
                 polish_bankroll(
@@ -524,6 +527,38 @@ def sheets_add_filters(
         title, url = client.describe()
         console.print(f"Adding filter views to: [bold]{title}[/bold]\n{url}\n")
         results = add_all_filter_views(client, edge_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@sheets_app.command("protect")
+def sheets_protect(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Protect a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Warning-only protection (never a hard lock) on every fully
+    formula-driven tab -- Player Pool, PlayerPoolRaw, Board, Slate Grid,
+    Movement, PoolSort -- plus Exposure and Lineups protected everywhere
+    EXCEPT their own typed cells (Target; each lineup block's Name column
+    and the deck's B1/D1/F1 controls). EdgeRaw and Pool Picks are left
+    alone entirely -- see `sheet_protection.py`'s own docstring for why.
+    Safe to re-run: each tab's protected ranges are cleared before being
+    re-added, never stacked.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Protecting: [bold]{title}[/bold]\n{url}\n")
+        results = protect_workbook(client, lineups_tab=cfg.lineups.builder_tab)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e

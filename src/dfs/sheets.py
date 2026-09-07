@@ -880,6 +880,57 @@ class SheetsClient:
                 return True
         return False
 
+    def clear_protected_ranges(self, tab_name: str) -> None:
+        """Delete every existing protected range on this tab, so
+        `protect_sheet` is re-runnable without stacking duplicate
+        protections (each one would show its own redundant warning
+        dialog on the same edit) -- same clear-then-add shape as column
+        groups/banding/filter views elsewhere in this file."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),protectedRanges)"})
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") != ws.id:
+                continue
+            requests = [
+                {"deleteProtectedRange": {"protectedRangeId": pr["protectedRangeId"]}}
+                for pr in s.get("protectedRanges", []) or []
+            ]
+            if requests:
+                sheet.batch_update({"requests": requests})
+            break
+
+    def protect_sheet(
+        self,
+        tab_name: str,
+        *,
+        warning_only: bool = True,
+        unprotected_ranges: list[str] | None = None,
+        description: str | None = None,
+    ) -> None:
+        """Protect the ENTIRE tab (Sheets' own "Protect sheet... except
+        certain cells" mechanism) -- `unprotectedRanges` is only honored
+        by the API when a protected range spans a whole sheet, which
+        this always does, so it's the only way to say "protect
+        everything except these specific cells" in one rule rather than
+        constructing the geometric complement by hand.
+
+        `warning_only=True` (the default, and what this project always
+        wants) shows a dismissible "you're editing a protected range"
+        warning rather than a hard lock -- a mistake stays reversible,
+        it just isn't silent. A warning-only protection never blocks an
+        editor (including this client's own service account), so it's
+        safe to leave on every formula-driven tab without risking a
+        future `dfs sync`/`dfs sheets polish` write being rejected."""
+        sheet, ws = self._ws(tab_name)
+        protected_range: dict = {"range": {"sheetId": ws.id}, "warningOnly": warning_only}
+        if description:
+            protected_range["description"] = description
+        if unprotected_ranges:
+            protected_range["unprotectedRanges"] = [
+                a1_range_to_grid_range(r, ws.id) for r in unprotected_ranges
+            ]
+        sheet.batch_update({"requests": [{"addProtectedRange": {"protectedRange": protected_range}}]})
+
     def set_tab_properties(
         self,
         tab_name: str,
