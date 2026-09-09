@@ -1,7 +1,7 @@
 import pandas as pd
 
 from dfs.derived import EDGE_COLUMNS
-from dfs.sources.edge import POOL_COLUMN, POOL_HEADER, EdgeSource
+from dfs.sources.edge import _FILTER_RANGE, POOL_COLUMN, POOL_HEADER, EdgeSource
 
 
 class SpySheetsClient:
@@ -21,6 +21,8 @@ class SpySheetsClient:
         self._pool_column = pool_column or []
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.checkbox_calls: list[tuple[str, str]] = []
+        self.basic_filter_calls: list[tuple[str, str]] = []
+        self.call_order: list[str] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._exists
@@ -38,6 +40,11 @@ class SpySheetsClient:
 
     def set_checkbox_validation(self, tab_name: str, a1_range: str) -> None:
         self.checkbox_calls.append((tab_name, a1_range))
+        self.call_order.append("checkbox")
+
+    def set_basic_filter(self, tab_name: str, a1_range: str) -> None:
+        self.basic_filter_calls.append((tab_name, a1_range))
+        self.call_order.append("basic_filter")
 
 
 def _df(n: int) -> pd.DataFrame:
@@ -101,7 +108,13 @@ def test_post_upload_restores_ticks_by_id_across_a_row_order_change():
     client = SpySheetsClient(id_column=["333", "444", "111"])  # reordered, "222" dropped
     source.post_upload(client, "EdgeRaw", df, preserved)
 
+    assert client.basic_filter_calls == [("EdgeRaw", _FILTER_RANGE)]
     assert client.checkbox_calls == [("EdgeRaw", f"{POOL_COLUMN}2:{POOL_COLUMN}4")]
+    # The filter reset must land BEFORE the checkbox validation write --
+    # found live: a setDataValidation call silently no-ops on most of its
+    # range when the tab's basic filter still has an active sort (see
+    # post_upload's own docstring and CONTRIBUTING.md's changelog).
+    assert client.call_order == ["basic_filter", "checkbox"]
     [(_tab, a1_range, rows)] = client.update_calls
     assert a1_range == f"{POOL_COLUMN}2:{POOL_COLUMN}4"
     assert rows == [[True], [""], [True]]
@@ -113,6 +126,7 @@ def test_post_upload_with_nothing_preserved_still_sets_validation_but_skips_rest
     client = SpySheetsClient(id_column=["111", "222"])
     source.post_upload(client, "EdgeRaw", df, {})
 
+    assert client.basic_filter_calls == [("EdgeRaw", _FILTER_RANGE)]
     assert client.checkbox_calls == [("EdgeRaw", f"{POOL_COLUMN}2:{POOL_COLUMN}3")]
     assert client.update_calls == []
 
@@ -123,6 +137,7 @@ def test_post_upload_with_no_rows_skips_validation_entirely():
     client = SpySheetsClient()
     source.post_upload(client, "EdgeRaw", df, {})
 
+    assert client.basic_filter_calls == []
     assert client.checkbox_calls == []
     assert client.update_calls == []
 

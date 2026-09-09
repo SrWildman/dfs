@@ -42,6 +42,11 @@ _ID_COLUMN = column_letter(EDGE_COLUMNS.index("Id") + EDGE_DATA_OFFSET)
 # Matches write_tab's default worksheet sizing (see cli.py's
 # _EDGE_FORMAT_LAST_ROW) -- the range every EdgeRaw column operation uses.
 _LAST_ROW = 1000
+# Same range `sheet_filters.add_basic_filters` gives EdgeRaw's basic filter
+# -- duplicated here rather than imported (sheet_filters/sheet_style both
+# import FROM this module, so the reverse import would be circular) but
+# derived the same way, never a separate literal.
+_FILTER_RANGE = f"A1:{column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)}{_LAST_ROW}"
 
 
 def _try_load_current(source_name: str) -> pd.DataFrame | None:
@@ -142,10 +147,21 @@ class EdgeSource(Source):
         they're gone from the sheet entirely; new players start unticked),
         then (re)apply the checkbox validation -- cheap and idempotent, and
         guards against a first-ever sync leaving Pool with no validation at
-        all."""
+        all.
+
+        Resets EdgeRaw's basic filter (clearing any sort/hidden-position
+        filter a person left active) before touching data validation --
+        found live: a `setDataValidation` batch write silently no-ops on
+        most of its range (reproduced down to a clean 9-row range) whenever
+        the tab's basic filter has an active sort. Re-running `dfs setup
+        add-filters` restores the filter to its plain state after every
+        sync; a person's sort/hide choice doesn't survive a sync anyway,
+        since write_tab always rewrites the whole tab fresh. See
+        CONTRIBUTING.md's changelog."""
         preserved = preserved or {}
         last_row = len(df) + 1
         if last_row >= 2:
+            client.set_basic_filter(tab, _FILTER_RANGE)
             client.set_checkbox_validation(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}")
         if not preserved:
             return
