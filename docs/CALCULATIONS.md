@@ -64,32 +64,50 @@ QB, RB vs RB, etc.), 0-100. Implementation
 play at his position" -- a proxy for upside independent of ownership.
 `NaN` (missing `Ceiling`) stays `NaN` here too; pandas' `rank()` already
 excludes them from the ranking rather than treating them as the lowest
-value.
+value. `OwnPct` (below) is the same computation applied to `ProjOwn`.
 
-## Leverage and LevBasis
+## OwnPct, Leverage and LevBasis
 
-`Leverage = CeilPct − ProjOwn`
+`OwnPct` is `ProjOwn`'s percentile rank **within position**, computed the
+same way `CeilPct` is (`derived._percentile_within`). `Leverage = CeilPct
+− OwnPct` -- both sides are now the same kind of number (a 0-100
+percentile), so the subtraction is a real gap, roughly **-100..100**,
+centered near 0. A positive number means "this player's ceiling rank
+outpaces how much he'll be owned" -- genuine leverage.
 
-TFFB's `ProjOwn` (projected ownership %) reads **0 for every player**
-until TFFB computes real ownership, which usually happens midweek. While
-that's true, the formula above degenerates to `CeilPct` alone -- which is
-still a useful ceiling-only proxy, just not the same *kind* of number as
-the real gap-from-ownership metric.
+**This replaced a scale bug.** The original formula was `CeilPct −
+ProjOwn` -- subtracting `ProjOwn` *unranked*, as a raw ownership
+percentage. `CeilPct` is uniform 0-100 with mean 50; raw `ProjOwn` is
+heavily right-skewed, with most of a 743-player slate under 5% and a
+handful of chalk plays at 25-40%. Subtracting a raw percentage from a
+percentile doesn't cancel scales the way it looks like it should -- on a
+real slate the result centered near 45, not 0, so the `Flag` column's
+threshold of 15 was effectively flagging anyone above roughly the 15th
+percentile of ceiling: "just about every cell gets marked as leverage,"
+as reported against a real week with ownership published. The fix is to
+rank-normalize `ProjOwn` onto the same percentile scale before
+subtracting, exactly as `CeilPct` already does for `Ceiling`.
+
+TFFB's `ProjOwn` reads **0 for every player** until TFFB computes real
+ownership, which usually happens midweek. In that window there is no real
+ownership signal to rank against -- `OwnPct` and `Leverage` are left
+**BLANK** rather than showing a number that looks like leverage but
+isn't; a confident wrong number is worse than an empty cell. `EdgeRaw`'s
+row order still ranks usefully in that window (see below), it's only the
+`Leverage`/`OwnPct` *columns* that go blank.
 
 `LevBasis` names which case is in effect, computed once for the whole
 frame (not per player): `"real"` the moment *any* player that sync has
-non-zero `ProjOwn`, else `"proxy"`. This matters because the two modes
-produce numbers on different scales:
-- **real**: `CeilPct` (0-100) minus actual ownership (0-100) → roughly
-  **-100..100**, centered near 0. A positive number means "this player's
-  ceiling rank outpaces how much he'll be owned" -- genuine leverage.
-- **proxy**: `CeilPct` minus 0 → just `CeilPct` again, **0..100**,
-  centered around 50. This is *not* a gap from anything; it's a raw
-  percentile. Treating it like the real metric would call half the slate
-  "leverage."
+non-zero `ProjOwn`, else `"unpublished"`. It has exactly one job now: a
+data-freshness marker telling you whether ownership has been published
+yet, not a second formula to reason about.
 
-This is why the `Flag` column (below) uses two different thresholds
-depending on `LevBasis`.
+**Sort order.** `build_edge_frame` sorts the frame by `Leverage`
+descending once ownership is real, or by `CeilPct` descending while
+`LevBasis` is `"unpublished"` (sorting by an all-blank `Leverage` column
+would just return join order). The Board tab's "top leverage" panel
+trusts this order directly rather than re-sorting, so it automatically
+reflects whichever ranking is actually in effect.
 
 ## GameEnv
 
@@ -174,20 +192,25 @@ The one column meant to be read at a glance. Evaluated in order
 | 2 | `WIND` | `Wind ≥ 20` mph |
 | 3 | `LINE↑` | `LineMove ≥ +1.0` |
 | 3 | `LINE↓` | `LineMove ≤ −1.0` |
-| 4 | `LEVERAGE` | `Leverage ≥ 15` if `LevBasis == "real"`, or `Leverage ≥ 85` if `LevBasis == "proxy"` |
-| 5 | `CHALK` | `ProjOwn ≥ 20%` -- **real basis only**, never fires under proxy |
+| 4 | `LEVERAGE` | `Leverage ≥ 30` (blank `Leverage` while unpublished can never clear this) |
+| 5 | `CHALK` | `ProjOwn ≥ 20%` -- can only fire once ownership is real; `ProjOwn` reads 0 for everyone until then |
 | — | *(blank)* | none of the above |
 
-All five thresholds (`WIND_FLAG_THRESHOLD_MPH = 20.0`,
-`LINE_MOVE_FLAG_THRESHOLD = 1.0`, `LEVERAGE_FLAG_THRESHOLD_REAL = 15.0`,
-`LEVERAGE_FLAG_THRESHOLD_PROXY = 85.0`, `CHALK_OWNERSHIP_THRESHOLD =
-20.0`) are **starting points, not empirically derived** -- they're
-documented as such in `derived.py` directly. The proxy Leverage threshold
-in particular is set high (top ~15% of the position by raw ceiling
-percentile) specifically to avoid flagging half the slate before real
-ownership data exists partway through the week; the real-basis threshold
-was checked against a live slate and found to flag roughly 15% of each
-position, which was judged reasonable.
+`WIND_FLAG_THRESHOLD_MPH = 20.0` and `LINE_MOVE_FLAG_THRESHOLD = 1.0` are
+starting points, not empirically derived. `LEVERAGE_FLAG_THRESHOLD = 30.0`
+and `CHALK_OWNERSHIP_THRESHOLD = 20.0` **were** checked against a real
+744-player Week 1 slate with real ownership published, after the scale
+fix above: that slate's `Leverage` distribution was mean -0.01, std 16.7,
+min -56.2, max 68.7 (quartiles -9.4 / -3.1 / +6.1, 90th percentile +27.0).
+30.0 sits at roughly the 93rd percentile and flags 53/744 players (7.1%)
+-- inside the 5-10% target band. The old flat threshold of 15 (left over
+from before the scale fix, when it wasn't actually checked against a real
+gap-from-ownership number) would have flagged 149/744 (20.0%) under the
+corrected formula -- almost exactly the "reports everything" failure this
+column exists to avoid, and consistent with what got reported live once
+real ownership existed. `CHALK_OWNERSHIP_THRESHOLD = 20.0` flagged 5/744
+players (0.7%) on the same slate and is otherwise untouched by this fix --
+it's an absolute ownership percentage, not a percentile.
 
 ## Late-swap lock check (`dfs lineups late-swap`)
 

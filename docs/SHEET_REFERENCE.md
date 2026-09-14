@@ -131,13 +131,14 @@ actually matches.
 | `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. |
 | `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
-| `Leverage` | `CeilPct − ProjOwn`. While `ProjOwn` is all zeros (pre-midweek), this degenerates to `CeilPct` alone -- see `LevBasis`. |
-| `LevBasis` | `"real"` once any player has non-zero `ProjOwn` this week, else `"proxy"`. Tells you whether `Leverage` is the real gap-from-ownership metric or just a ceiling-percentile stand-in. |
+| `OwnPct` | Same computation applied to `ProjOwn` -- this player's ownership percentile rank within position. Blank while ownership is unpublished (see `LevBasis`). |
+| `Leverage` | `CeilPct − OwnPct` -- both are percentiles now, so this is a real gap, roughly −100..100, centered near 0. Blank while `ProjOwn` is all zeros (pre-midweek) -- see `LevBasis`. |
+| `LevBasis` | `"real"` once any player has non-zero `ProjOwn` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage`/`OwnPct` have a real number yet. |
 | `GameEnv` | 0-100 per-game score from that game's own `OU`/`Spread` (higher total + tighter spread scores higher -- more reason for both offenses to keep throwing). |
 | `Stadium` / `Roof` | From `GamesRaw`, joined by team code. Blank if `nflverse_games` hasn't synced this run. |
 | `Wind` | From `WeatherRaw`, joined by game. Blank for dome games or if `weather` hasn't synced. |
 | `Avail` | DraftKings' own `Status` (`Q`/`OUT`/`IR`). |
-| `Flag` | The one column meant to be read at a glance. Priority order (first match wins): `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`LineMove` past a threshold) → `LEVERAGE` (`Leverage` above a basis-specific threshold -- 15 under "real", 85 under "proxy", since proxy-mode Leverage is a raw 0-100 percentile rather than a −100..100 gap, and a flat threshold would flag most of the slate) → `CHALK` (`ProjOwn` ≥ 20%, real basis only) → blank. |
+| `Flag` | The one column meant to be read at a glance. Priority order (first match wins): `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`LineMove` past a threshold) → `LEVERAGE` (`Leverage` ≥ 30; blank `Leverage` while unpublished can never clear this) → `CHALK` (`ProjOwn` ≥ 20%, can only fire once ownership is real) → blank. |
 | `LineMove` | This player's team's Vegas-implied point total, change since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 

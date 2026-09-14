@@ -52,7 +52,7 @@ total, max wind, injury counts). Slate Grid is the same slate one row per
 game instead of one row per player. EdgeRaw is where the real work
 happens: sorted by Leverage descending, colour scales on every decision
 number, a muted position tint, banding to make one player's row readable
-across 22 columns, and a visible sort/search arrow in every header cell
+across 23 columns, and a visible sort/search arrow in every header cell
 (click one to sort by any column, or search it -- Data > Filter views
 holds the saved presets).
 

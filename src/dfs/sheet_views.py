@@ -59,12 +59,15 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     """A landing tab that answers "who am I looking at this week" without
     scrolling anything.
 
-    The leverage panel is capped at 12 and tiebroken by CeilVal, which
-    matters more than it sounds: while ProjOwn is all zeros every top
-    player's Leverage is pinned at exactly 100.0, so an untiebroken sort
-    returns whatever order the rows happened to arrive in. The proxy banner
-    in row 3 says so out loud rather than letting a proxy number read as
-    the real metric.
+    The leverage panel takes EdgeRaw's own row order rather than re-sorting
+    by Leverage itself: `derived.build_edge_frame` already writes EdgeRaw
+    pre-sorted by Leverage descending once ownership is real, or by CeilPct
+    descending while it's still unpublished (Leverage reads blank in that
+    window, not a stand-in number -- see derived.py). Trusting that order
+    here means this panel never needs its own basis-aware sort key. The
+    banner in row 3 still says out loud which case is in effect, since a
+    ceiling ranking and a leverage ranking answer different questions even
+    though they can share a column.
     """
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
@@ -83,8 +86,8 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     not_out = f'{flag}<>"OUT"'
 
     top_leverage = (
-        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-        f'{{{name},{pos}&" "&{team},{lev},{ceilval}}},{live},{not_out}),3,FALSE,4,FALSE),12,4),"")'
+        f"=IFERROR(ARRAY_CONSTRAIN(FILTER("
+        f'{{{name},{pos}&" "&{team},{lev},{ceilval}}},{live},{not_out}),12,4),"")'
     )
     best_value = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
@@ -108,17 +111,17 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     injuries = (
         f'=COUNTIF({avail},"OUT")&" out  /  "&COUNTIF({avail},"IR")&" IR  /  "&COUNTIF({avail},"Q")&" Q"'
     )
-    proxy_banner = (
-        f'=IF(COUNTIF({basis},"proxy")>0,'
-        f'"PROXY  —  ownership not published yet, so Leverage is showing CeilPct alone. '
-        f'Treat the ranking as a ceiling ranking, not a leverage ranking.",'
+    freshness_banner = (
+        f'=IF(COUNTIF({basis},"unpublished")>0,'
+        f'"UNPUBLISHED  —  ownership not out yet, so Leverage is blank. Ranked by ceiling '
+        f'percentile instead; treat it as a ceiling ranking, not a leverage ranking.",'
         f'"Leverage is running on real ownership.")'
     )
 
     rows = [
         ["THIS WEEK'S BOARD"],
         ["Games", games, "Highest total", top_total, "Max wind", max_wind, "Injuries", injuries],
-        [proxy_banner],
+        [freshness_banner],
         [],
         ["TOP LEVERAGE", "", "", "", "", "BEST CEILING VALUE", "", "", "", "", "LANDMINES"],
         # fmt: off

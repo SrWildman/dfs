@@ -3,10 +3,9 @@ import pandas as pd
 from dfs.derived import (
     CHALK_OWNERSHIP_THRESHOLD,
     EDGE_COLUMNS,
-    LEV_BASIS_PROXY,
     LEV_BASIS_REAL,
-    LEVERAGE_FLAG_THRESHOLD_PROXY,
-    LEVERAGE_FLAG_THRESHOLD_REAL,
+    LEV_BASIS_UNPUBLISHED,
+    LEVERAGE_FLAG_THRESHOLD,
     build_edge_frame,
 )
 
@@ -98,7 +97,7 @@ def test_ceilpct_is_blank_when_ceiling_missing():
     assert pd.isna(no_ceil_row["CeilPct"])
 
 
-def test_leverage_degenerates_to_ceilpct_when_all_projown_is_zero():
+def test_leverage_and_ownpct_are_blank_when_all_projown_is_zero():
     proj = _projections(
         [
             {"Id": "1", "Name": "Low ceiling", "Position": "RB", "Ceiling": 10.0, "ProjOwn": 0},
@@ -109,12 +108,14 @@ def test_leverage_degenerates_to_ceilpct_when_all_projown_is_zero():
 
     frame = build_edge_frame(proj, sal).frame
 
-    assert (frame["LevBasis"] == LEV_BASIS_PROXY).all()
-    for _, row in frame.iterrows():
-        assert row["Leverage"] == row["CeilPct"]
+    assert (frame["LevBasis"] == LEV_BASIS_UNPUBLISHED).all()
+    assert frame["Leverage"].isna().all()
+    assert frame["OwnPct"].isna().all()
+    # Blank Leverage isn't sortable, so the tab still ranks by CeilPct.
+    assert frame["Name"].tolist() == ["High ceiling", "Low ceiling"]
 
 
-def test_leverage_uses_real_ownership_once_any_player_has_nonzero_projown():
+def test_leverage_is_ceilpct_minus_ownpct_once_any_player_has_nonzero_projown():
     proj = _projections(
         [
             {"Id": "1", "Name": "A", "Position": "RB", "Ceiling": 40.0, "ProjOwn": 30.0},
@@ -126,8 +127,34 @@ def test_leverage_uses_real_ownership_once_any_player_has_nonzero_projown():
     frame = build_edge_frame(proj, sal).frame
 
     assert (frame["LevBasis"] == LEV_BASIS_REAL).all()
+    for _, row in frame.iterrows():
+        assert row["Leverage"] == round(row["CeilPct"] - row["OwnPct"], 1)
+
+
+def test_ownpct_is_percentile_rank_of_projown_within_position_not_raw_percentage():
+    # Raw ProjOwn subtraction was the bug: a percentile (0-100, mean 50) minus
+    # a raw right-skewed percentage (mostly under 5, a few 25-40) centers
+    # nowhere near 0. Rank-normalizing ProjOwn the same way Ceiling already
+    # is fixes that -- verify OwnPct actually lands on the percentile scale.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "A", "Position": "RB", "Ceiling": 10.0, "ProjOwn": 2.0},
+            {"Id": "2", "Name": "B", "Position": "RB", "Ceiling": 20.0, "ProjOwn": 4.0},
+            {"Id": "3", "Name": "C", "Position": "RB", "Ceiling": 30.0, "ProjOwn": 35.0},
+            {"Id": "4", "Name": "D", "Position": "RB", "Ceiling": 40.0, "ProjOwn": 3.0},
+        ]
+    )
+    sal = _salaries([{"ID": str(i)} for i in range(1, 5)])
+
+    frame = build_edge_frame(proj, sal).frame
+    c = frame[frame["Name"] == "C"].iloc[0]
     a = frame[frame["Name"] == "A"].iloc[0]
-    assert a["Leverage"] == round(a["CeilPct"] - 30.0, 1)
+    assert c["OwnPct"] == 100.0  # highest ProjOwn in the group
+    assert a["OwnPct"] == 25.0  # lowest ProjOwn in the group
+    # C has both the highest ceiling AND the highest ownership -- real
+    # leverage (a ceiling edge net of ownership) should be much lower than
+    # its raw CeilPct alone, since owning C isn't contrarian.
+    assert c["Leverage"] < c["CeilPct"]
 
 
 def test_avail_reflects_dk_status_and_out_flag_overrides_leverage():
@@ -142,40 +169,44 @@ def test_avail_reflects_dk_status_and_out_flag_overrides_leverage():
     assert row["Flag"] == "OUT"
 
 
-def test_leverage_flag_set_above_proxy_threshold_when_ownership_is_all_zero():
+def test_leverage_flag_never_fires_while_ownership_is_unpublished():
+    # Even the highest-ceiling player in the slate must not get flagged
+    # LEVERAGE before TFFB publishes real ownership -- Leverage is blank in
+    # that window (see test_leverage_and_ownpct_are_blank_when_all_projown_is_zero),
+    # and a blank can never clear a threshold.
     proj = _projections(
         [
-            {"Id": "1", "Name": "Leveraged", "Position": "RB", "Ceiling": 100.0, "ProjOwn": 0},
+            {"Id": "1", "Name": "Highest ceiling", "Position": "RB", "Ceiling": 100.0, "ProjOwn": 0},
             {"Id": "2", "Name": "Filler", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0},
         ]
     )
     sal = _salaries([{"ID": "1"}, {"ID": "2"}])
 
     frame = build_edge_frame(proj, sal).frame
-    top = frame.iloc[0]
-    assert top["Name"] == "Leveraged"
-    assert top["Leverage"] >= LEVERAGE_FLAG_THRESHOLD_PROXY
-    assert top["Flag"] == "LEVERAGE"
+    top = frame[frame["Name"] == "Highest ceiling"].iloc[0]
+    assert top["Flag"] == ""
 
 
-def test_leverage_flag_uses_a_much_higher_bar_under_proxy_than_real_basis():
-    # In proxy mode Leverage == CeilPct (0..100, centered ~50): 10 RBs so
-    # "Merely above average" (60th percentile ceiling) sits well above the
-    # median but must NOT get flagged, or every sync before TFFB computes
-    # real ownership would flag most of the slate.
+def test_leverage_flag_fires_at_threshold_under_real_ownership():
+    # 10 RBs, evenly spread ceiling and ownership but inversely ranked, so
+    # the lowest-owned/highest-ceiling player's gap clears the real threshold.
     rows = [
-        {"Id": str(i), "Name": f"Filler {i}", "Position": "RB", "Ceiling": float(i * 10), "ProjOwn": 0}
-        for i in range(1, 10)
-        if i != 6
+        {
+            "Id": str(i),
+            "Name": f"Player {i}",
+            "Position": "RB",
+            "Ceiling": float(i * 10),
+            "ProjOwn": float(110 - i * 10),
+        }
+        for i in range(1, 11)
     ]
-    rows.append({"Id": "6", "Name": "Merely above average", "Position": "RB", "Ceiling": 60.0, "ProjOwn": 0})
     proj = _projections(rows)
-    sal = _salaries([{"ID": str(i)} for i in range(1, 10)])
+    sal = _salaries([{"ID": str(i)} for i in range(1, 11)])
 
     frame = build_edge_frame(proj, sal).frame
-    top = frame[frame["Name"] == "Merely above average"].iloc[0]
-    assert top["Leverage"] < LEVERAGE_FLAG_THRESHOLD_PROXY
-    assert top["Flag"] == ""
+    top = frame[frame["Name"] == "Player 10"].iloc[0]  # highest ceiling, lowest ownership
+    assert top["Leverage"] >= LEVERAGE_FLAG_THRESHOLD
+    assert top["Flag"] == "LEVERAGE"
 
 
 def test_chalk_flag_set_for_high_ownership_under_real_basis():
@@ -201,7 +232,7 @@ def test_chalk_flag_set_for_high_ownership_under_real_basis():
 
     frame = build_edge_frame(proj, sal).frame
     chalky = frame[frame["Name"] == "Chalky"].iloc[0]
-    assert chalky["Leverage"] < LEVERAGE_FLAG_THRESHOLD_REAL
+    assert chalky["Leverage"] < LEVERAGE_FLAG_THRESHOLD
     assert chalky["Flag"] == "CHALK"
 
 
@@ -232,7 +263,7 @@ def test_game_env_scores_higher_total_and_tighter_spread_higher():
     assert shootout["GameEnv"] > blowout["GameEnv"]
 
 
-def test_frame_is_sorted_by_leverage_descending():
+def test_frame_falls_back_to_ceilpct_sort_when_ownership_unpublished():
     proj = _projections(
         [
             {"Id": "1", "Name": "Low", "Position": "RB", "Ceiling": 5.0, "ProjOwn": 0},
@@ -244,6 +275,20 @@ def test_frame_is_sorted_by_leverage_descending():
 
     frame = build_edge_frame(proj, sal).frame
     assert frame["Name"].tolist() == ["High", "Mid", "Low"]
+
+
+def test_frame_is_sorted_by_leverage_descending_once_ownership_is_real():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Low leverage", "Position": "RB", "Ceiling": 5.0, "ProjOwn": 40.0},
+            {"Id": "2", "Name": "High leverage", "Position": "RB", "Ceiling": 50.0, "ProjOwn": 1.0},
+            {"Id": "3", "Name": "Mid leverage", "Position": "RB", "Ceiling": 25.0, "ProjOwn": 20.0},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}])
+
+    frame = build_edge_frame(proj, sal).frame
+    assert frame["Name"].tolist() == ["High leverage", "Mid leverage", "Low leverage"]
 
 
 def _games(rows: list[dict]) -> pd.DataFrame:

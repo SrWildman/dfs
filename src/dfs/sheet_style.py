@@ -49,9 +49,10 @@ function happens to touch it first.
 - Chips (`_chip`, solid background + bold matching text) mark categorical
   STATE only -- Flag, Avail, the Guardrails column, position tints. Never
   put a chip on a number; that's what the colour scales are for.
-- Grey italic (`INK_MUTED`, `italic: True`) marks a value that's computed
-  but currently running on a degraded/proxy basis -- today, EdgeRaw's
-  CeilPct while `LevBasis` reads "proxy" (see `polish_edge`).
+- Grey (`INK_MUTED`) on `LevBasis` marks a data-freshness note, not a
+  value of its own -- it reads "unpublished" while ProjOwn (and therefore
+  Leverage/OwnPct) hasn't been populated by TFFB yet this week (see
+  `polish_edge`).
 - Colour that doesn't encode a value gets removed, full stop. Banding and
   the position tint are deliberately near-invisible for this reason: they
   carry structure (which row, which position), not a value, so they must
@@ -173,6 +174,7 @@ FIELD_FORMATS = {
     "Total": _num("0.0"),
     "Leverage": _num("0.0"),
     "CeilPct": _num("0.0"),
+    "OwnPct": _num("0.0"),
     "Spread": _num('"+"0.0;"-"0.0;0.0'),
     "LineMove": _num('"+"0.0;"-"0.0;0.0'),
     "Val": _num("0.00"),
@@ -323,6 +325,7 @@ EDGE_WIDTHS = {
     "Flag": 96,
     "LineMove": 78,
     "GameStart": 132,
+    "OwnPct": 68,
 }
 
 # Collapsed by default: the two stadium descriptors, which matter to the
@@ -409,8 +412,8 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     diverging scale for LineMove, gradient for the rest), a muted
     per-position tint, a Wind chip matching Slate Grid's, Flag/Avail as
     chips, the Name cell tinted when that player is already pooled and
-    bolded when Flag is set, and CeilPct greyed while Leverage is running
-    on a proxy so the two identical-looking columns stop competing.
+    bolded when Flag is set, and LevBasis greyed as the data-freshness
+    marker it is (see the module docstring's colour policy).
     """
     if not client.tab_exists(edge_tab):
         return f"{edge_tab}: not present -- skipped"
@@ -503,18 +506,14 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
                 fmt=fmt,
             )
 
-    # While ProjOwn is all zeros, LevBasis reads "proxy" and Leverage is a
-    # copy of CeilPct. Grey the copy rather than deleting it -- the CLI
-    # still writes it, you just stop reading the same number twice.
-    ceil_pct, lev_basis = _edge_letter("CeilPct"), _edge_letter("LevBasis")
-    if ceil_pct and lev_basis:
-        client.add_boolean_rule(
-            edge_tab,
-            f"{ceil_pct}2:{ceil_pct}{EDGE_ROWS}",
-            condition_type="CUSTOM_FORMULA",
-            values=[f'=${lev_basis}2="proxy"'],
-            fmt={"textFormat": {"foregroundColor": INK_MUTED, "italic": True}},
-        )
+    # LevBasis's one job now is a data-freshness marker: "unpublished" means
+    # ProjOwn is still all zeros this week, so Leverage/OwnPct read blank
+    # rather than a number that looks real but isn't. Grey the whole row
+    # via LevBasis itself rather than graying CeilPct -- CeilPct is a real,
+    # independent number regardless of ownership status, never a stand-in
+    # for Leverage anymore.
+    lev_basis = _edge_letter("LevBasis")
+    if lev_basis:
         client.format_range(
             edge_tab,
             f"{lev_basis}2:{lev_basis}{EDGE_ROWS}",

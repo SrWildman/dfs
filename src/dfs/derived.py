@@ -69,26 +69,32 @@ import pandas as pd
 
 from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
 
-# Leverage = CeilPct - ProjOwn once real ownership exists; while every
-# player's ProjOwn reads 0 (TFFB hasn't computed ownership yet this week),
-# that formula degenerates to CeilPct alone, which is already the proxy
-# we'd want -- but LevBasis names which case is in effect so a proxy number
-# is never mistaken for the real metric.
+# Leverage = CeilPct - OwnPct, both percentile ranks on the same 0-100
+# scale within position -- see the module docstring's "second scale/index
+# bug" postmortem for why this replaced a raw-percentage subtraction.
+# LevBasis's one remaining job: telling you whether ProjOwn has actually
+# been published yet. Until it has (every player reads 0), there is no
+# real ownership signal to rank against, so Leverage is left BLANK rather
+# than showing a number that looks like leverage but isn't -- a confident
+# wrong number is worse than an empty cell. The frame still sorts usefully
+# in that window, just by CeilPct instead (see build_edge_frame).
 LEV_BASIS_REAL = "real"
-LEV_BASIS_PROXY = "proxy"
+LEV_BASIS_UNPUBLISHED = "unpublished"
 
-# Heuristic thresholds for the Flag column. Not derived from anything
-# empirical -- starting points to tune once a week's worth of real ProjOwn
-# data exists. Leverage needs two different thresholds because it means two
-# different things depending on LevBasis: under "real" it's a gap (CeilPct
-# minus actual ownership, roughly -100..100, centered near 0), so 15 is a
-# meaningful edge. Under "proxy" it degenerates to CeilPct alone (0..100,
-# centered ~50) -- reusing the "real" threshold there would flag roughly
-# every above-average player as LEVERAGE, which is exactly the "reports
-# everything" failure this column exists to avoid. So proxy mode only flags
-# the actual top of the ceiling distribution.
-LEVERAGE_FLAG_THRESHOLD_REAL = 15.0
-LEVERAGE_FLAG_THRESHOLD_PROXY = 85.0
+# Re-tuned against a real Week 1 slate (744 players, real ProjOwn already
+# published) once both sides of Leverage were rank-normalized onto the same
+# 0-100 scale: that data's Leverage distribution was mean -0.01, std 16.7,
+# min -56.2, max 68.7 -- genuinely centered on 0, unlike the old raw-minus-
+# percentile formula this replaced (see docs/CALCULATIONS.md's postmortem).
+# 30.0 sits at that slate's ~93rd percentile, flagging 53/744 players
+# (7.1%) -- comfortably inside the 5-10% target band. 15.0 (the old flat
+# threshold, kept as a first guess before this data existed) would have
+# flagged 149/744 (20.0%), which is exactly the "reports everything"
+# failure this column exists to avoid.
+LEVERAGE_FLAG_THRESHOLD = 30.0
+# Confirmed against the same slate: 5/744 players (0.7%) clear this today.
+# An absolute ownership percentage, not a percentile -- correctly untouched
+# by the Leverage scale fix.
 CHALK_OWNERSHIP_THRESHOLD = 20.0
 OUT_STATUSES = frozenset({"OUT", "IR"})
 # Mirrors sources/weather.py's WIND_FLAG_THRESHOLD_MPH. Duplicated rather
@@ -145,6 +151,10 @@ EDGE_COLUMNS = [
     "LineMove",
     # GameStart, added in Phase 5, follows the same append-only rule.
     "GameStart",
+    # OwnPct, added when Leverage's scale bug was fixed, likewise appended
+    # rather than placed next to CeilPct where it reads more naturally --
+    # Phase 3's reorder is where columns finally move to a designed order.
+    "OwnPct",
 ]
 
 
@@ -235,11 +245,11 @@ def _flag_for_row(row: pd.Series) -> str:
         return "LINE↑"
     if pd.notna(row["LineMove"]) and row["LineMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
         return "LINE↓"
-    is_real = row["LevBasis"] == LEV_BASIS_REAL
-    threshold = LEVERAGE_FLAG_THRESHOLD_REAL if is_real else LEVERAGE_FLAG_THRESHOLD_PROXY
-    if pd.notna(row["Leverage"]) and row["Leverage"] >= threshold:
+    if pd.notna(row["Leverage"]) and row["Leverage"] >= LEVERAGE_FLAG_THRESHOLD:
         return "LEVERAGE"
-    if is_real and row["ProjOwn"] >= CHALK_OWNERSHIP_THRESHOLD:
+    # No `is_real` guard needed: ProjOwn reads 0 for everyone until TFFB
+    # publishes ownership, so this can't fire before then regardless.
+    if row["ProjOwn"] >= CHALK_OWNERSHIP_THRESHOLD:
         return "CHALK"
     return ""
 
@@ -294,9 +304,13 @@ def build_edge_frame(
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)
 
     has_real_ownership = merged["ProjOwn"].fillna(0).gt(0).any()
-    merged["LevBasis"] = LEV_BASIS_REAL if has_real_ownership else LEV_BASIS_PROXY
-    proj_own_for_leverage = merged["ProjOwn"] if has_real_ownership else 0
-    merged["Leverage"] = (merged["CeilPct"] - proj_own_for_leverage).round(1)
+    merged["LevBasis"] = LEV_BASIS_REAL if has_real_ownership else LEV_BASIS_UNPUBLISHED
+    if has_real_ownership:
+        merged["OwnPct"] = _percentile_within(merged["ProjOwn"], merged["Position"]).round(1)
+        merged["Leverage"] = (merged["CeilPct"] - merged["OwnPct"]).round(1)
+    else:
+        merged["OwnPct"] = pd.NA
+        merged["Leverage"] = pd.NA
 
     merged["GameEnv"] = _game_env_scores(merged["Game"], merged["OU"], merged["Spread"])
 
@@ -310,6 +324,12 @@ def build_edge_frame(
 
     merged["Flag"] = merged.apply(_flag_for_row, axis=1)
 
-    merged = merged.sort_values("Leverage", ascending=False, na_position="last").reset_index(drop=True)
+    # Leverage is blank for the whole frame until ownership publishes (see
+    # above), and sorting by an all-blank column just returns join order --
+    # fall back to CeilPct so the tab still ranks by *something* meaningful
+    # in that window, same as Flag/LEVERAGE already effectively did before
+    # this fix.
+    sort_key = "Leverage" if has_real_ownership else "CeilPct"
+    merged = merged.sort_values(sort_key, ascending=False, na_position="last").reset_index(drop=True)
 
     return EdgeBuildResult(frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names)
