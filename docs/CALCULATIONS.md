@@ -129,6 +129,16 @@ that source is keyed by team nickname/abbreviation rather than DK's team
 codes, and building a name-matching layer just to double-check numbers
 TFFB already provides wasn't judged worth the join risk.
 
+## OverUnder, Spread
+
+Straight passthrough from the same Vegas context `GameEnv` already
+computes from (TFFB's `OU`/`Spread` fields on `projections.csv`) --
+computed into `GameEnv` since the start, but never surfaced as their own
+columns until Fix 2.3. Named `OverUnder`, not `OU`, so its header doesn't
+collide with Player Pool/Lineups' own `O/U` column, which is sourced from
+a different tab (`oddsFinal` via `PlayerPoolRaw`) and isn't guaranteed to
+agree number-for-number with TFFB's figure.
+
 ## Stadium, Roof, Wind
 
 `Stadium`/`Roof` are looked up from `GamesRaw` by team code (each team's
@@ -138,10 +148,18 @@ from `WeatherRaw` by that game's `GameId` -- blank for dome games (weather
 is only fetched for `Roof == outdoors` games in the first place) or if
 `weather` hasn't synced.
 
-## LineMove
+## ImpMove, TotMove, SpdMove
 
-`LineMove` = `line_movement.diff_odds()`'s `TeamPointsDelta` for this
-player's team, joined onto `EdgeRaw` by team code.
+`ImpMove`/`TotMove`/`SpdMove` = `line_movement.diff_odds()`'s
+`TeamPointsDelta`/`TotalDelta`/`SpreadDelta` for this player's team,
+joined onto `EdgeRaw` by team code. All three were always computed by
+`diff_odds()`; before Fix 2.2 only `TeamPointsDelta` reached `EdgeRaw`,
+under the name `LineMove` -- a name that didn't say *which* line had
+moved once two more were added alongside it. `ImpMove` is the direct
+rename (team implied points, same number `LineMove` always was);
+`TotMove` (game total) and `SpdMove` (spread) are newly surfaced. The
+`Flag` column's `LINE↑`/`LINE↓` keys off `ImpMove` specifically --
+`TotMove`/`SpdMove` are shown for context but don't drive that flag.
 
 **Baseline**: the diff is `(current nfl_odds sync) − (the first nfl_odds
 snapshot of the current NFL week)`. This was originally diffed against
@@ -154,7 +172,8 @@ same real-world move always produces the same number regardless of how
 many times you've synced since. `dfs odds movement` is a separate,
 terminal-only report that still answers the different question "what
 moved since I last ran a sync" -- useful before deciding whether to
-re-sync, but not the same number as `EdgeRaw`'s `LineMove`.
+re-sync, but not the same numbers as `EdgeRaw`'s `ImpMove`/`TotMove`/
+`SpdMove`.
 
 **`diff_odds()` internals** (`line_movement.py`): joins two `nfl_odds`
 snapshots on `abbr` (Rotowire's own DK-compatible team code); computes
@@ -163,10 +182,10 @@ each; sorts by `|TeamPointsDelta|` descending. A team present in only one
 of the two snapshots (a bye week resolving, a rare mid-week schedule
 change) is dropped from the diff rather than guessed at.
 
-`TeamPointsDelta` specifically is the delta in this team's Vegas-implied
-point total (`total/2 ± spread/2`, computed upstream by Rotowire, not by
-this project) -- a team's *own* expected points changing, not just the
-game's total or spread moving in the abstract.
+`TeamPointsDelta` (`ImpMove`) specifically is the delta in this team's
+Vegas-implied point total (`total/2 ± spread/2`, computed upstream by
+Rotowire, not by this project) -- a team's *own* expected points
+changing, not just the game's total or spread moving in the abstract.
 
 ## GameStart
 
@@ -184,14 +203,20 @@ transformation.
 ## Flag
 
 The one column meant to be read at a glance. Evaluated in order
-(`derived._flag_for_row`); **first match wins**:
+(`derived._flag_for_row`), and **every condition that matches is
+included** -- space-separated, in priority order (e.g. a windy game with
+a leveraged player reads `WIND LEVERAGE`, not just `WIND`). This replaced
+a first-match-wins rule that silently hid every condition but the most
+urgent one; `sheet_style.FLAG_CHIPS` matches on `TEXT_CONTAINS` rather
+than `TEXT_EQ` accordingly (none of the six tokens below is a substring
+of another, so this can't cross-match):
 
 | Priority | Flag | Condition |
 |---|---|---|
 | 1 | `OUT` | `Avail` is `OUT` or `IR` |
 | 2 | `WIND` | `Wind ≥ 20` mph |
-| 3 | `LINE↑` | `LineMove ≥ +1.0` |
-| 3 | `LINE↓` | `LineMove ≤ −1.0` |
+| 3 | `LINE↑` | `ImpMove ≥ +1.0` |
+| 3 | `LINE↓` | `ImpMove ≤ −1.0` |
 | 4 | `LEVERAGE` | `Leverage ≥ 30` (blank `Leverage` while unpublished can never clear this) |
 | 5 | `CHALK` | `ProjOwn ≥ 20%` -- can only fire once ownership is real; `ProjOwn` reads 0 for everyone until then |
 | — | *(blank)* | none of the above |

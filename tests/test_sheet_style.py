@@ -22,11 +22,15 @@ from dfs.sheet_style import (
     WARN_FG,
     WEEK_ORDER,
     WHITE,
+    ZERO_GREY_BG,
+    apply_field_color_scales,
     apply_field_formats,
     apply_tab_chrome,
+    polish_bankroll,
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
+    polish_lineups_totals_rows,
     style_flat_tab,
     style_results,
     style_sos_tab,
@@ -56,9 +60,26 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     # that matters instead of the whole dict.
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
-    assert matched == {"ProjPts", "Ceiling", "Val", "CeilVal", "Leverage", "GameEnv", "LineMove"}
+    assert matched == {
+        "ProjPts",
+        "ProjOwn",
+        "Ceiling",
+        "Val",
+        "CeilVal",
+        "Leverage",
+        "GameEnv",
+        "ImpMove",
+        "TotMove",
+        "SpdMove",
+        "OverUnder",
+        "Spread",
+    }
     assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
-    assert FIELD_COLOR_SCALES["LineMove"] == "diverging"  # scored separately, zero as the midpoint
+    assert FIELD_COLOR_SCALES["ImpMove"] == "diverging"  # scored separately, zero as the midpoint
+    assert FIELD_COLOR_SCALES["TotMove"] == "diverging"
+    assert FIELD_COLOR_SCALES["SpdMove"] == "diverging"
+    assert FIELD_COLOR_SCALES["Spread"] == "diverging"  # signed, zero (pick'em) is the midpoint
+    assert FIELD_COLOR_SCALES["ProjOwn"] == "warm"  # high ownership is chalk, not "good" (Fix 2.8)
 
 
 def test_field_formats_covers_every_edgeraw_numeric_column():
@@ -79,7 +100,11 @@ def test_field_formats_covers_every_edgeraw_numeric_column():
         "Leverage",
         "GameEnv",
         "Wind",
-        "LineMove",
+        "ImpMove",
+        "TotMove",
+        "SpdMove",
+        "OverUnder",
+        "Spread",
     ]
     for name in edge_numeric_columns:
         assert name in FIELD_FORMATS, f"{name!r} (an EdgeRaw column) has no FIELD_FORMATS entry"
@@ -99,6 +124,65 @@ def test_apply_field_formats_matches_by_header_text_not_position():
     ranges = dict(calls)
     assert ranges["B2:B50"] == FIELD_FORMATS["DK Sal"]
     assert ranges["D2:D50"] == FIELD_FORMATS["Pts"]
+
+
+def test_apply_field_color_scales_excludes_zero_for_ownership_columns():
+    # Fix 2.7: a real, common zero (unpublished ownership) would otherwise
+    # anchor the gradient's low end. The minpoint must be computed over
+    # non-zero values only, and a flat grey rule added AFTER the gradient
+    # (so it wins -- see the insert-at-front note on FLAG_CHIPS) must cover
+    # exact zeros.
+    calls = []
+
+    class _Client:
+        def clear_conditional_formats(self, tab_name, column=None, row_range=None):
+            calls.append(("clear", column, row_range))
+
+        def add_color_scale(self, tab_name, a1_range, **kwargs):
+            calls.append(("scale", a1_range, kwargs))
+
+        def add_boolean_rule(self, tab_name, a1_range, *, condition_type, values, fmt):
+            calls.append(("bool", a1_range, condition_type, values, fmt))
+
+    apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "ProjOwn"], header_row=1, last_row=100)
+
+    kinds = [c[0] for c in calls]
+    assert kinds == ["clear", "scale", "bool"]  # scale added, THEN the zero rule, so it wins
+    # Fix A2: the clear is scoped to BOTH this column AND this exact data
+    # range -- a column-only clear would also delete a different caller's
+    # rule on the same column covering different rows (e.g. the pool
+    # deck's own narrower window vs. the real blocks below it).
+    assert calls[0] == ("clear", "B", (2, 100))
+
+    scale_call = calls[1]
+    assert scale_call[1] == "B2:B100"
+    assert scale_call[2]["min_type"] == "NUMBER"
+    assert scale_call[2]["min_value"] == '=MINIFS(B2:B100,B2:B100,"<>0")'
+
+    bool_call = calls[2]
+    assert bool_call[1] == "B2:B100"
+    assert bool_call[2] == "NUMBER_EQ"
+    assert bool_call[3] == ["0"]
+    assert bool_call[4] == {"backgroundColor": ZERO_GREY_BG}
+
+
+def test_apply_field_color_scales_no_zero_exclusion_for_ordinary_gradient_columns():
+    calls = []
+
+    class _Client:
+        def clear_conditional_formats(self, tab_name, column=None, row_range=None):
+            pass
+
+        def add_color_scale(self, tab_name, a1_range, **kwargs):
+            calls.append(kwargs)
+
+        def add_boolean_rule(self, tab_name, a1_range, **kwargs):
+            calls.append(kwargs)
+
+    apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "Pts"], header_row=1, last_row=100)
+
+    assert len(calls) == 1  # just the gradient, no extra zero rule
+    assert "min_type" not in calls[0]
 
 
 class _ExplodingClient:
@@ -208,25 +292,25 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_seven_decision_columns_not_salary():
+def test_polish_edge_scales_twelve_decision_columns_not_salary():
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
-    # 6 standard scales + 1 diverging LineMove scale = 7 matches.
-    assert len(matched) == 7
+    # 6 standard + ImpMove/TotMove/SpdMove/Spread (diverging) + OverUnder + ProjOwn (warm) = 12.
+    assert len(matched) == 12
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 7
+    assert len(client.color_scale_calls) == 12
 
 
-def test_polish_edge_linemove_scale_is_diverging_at_zero():
+def test_polish_edge_move_and_spread_scales_are_diverging_at_zero():
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
     diverging = [kwargs for _rng, kwargs in client.color_scale_calls if kwargs.get("mid_type") == "NUMBER"]
-    assert len(diverging) == 1
-    assert diverging[0]["mid_value"] == "0"
+    assert len(diverging) == 4  # ImpMove, TotMove, SpdMove, Spread
+    assert all(kwargs["mid_value"] == "0" for kwargs in diverging)
 
 
 def test_polish_edge_wind_chip_matches_slate_grid_threshold():
@@ -385,6 +469,93 @@ _HEADER_WITH_AVAIL_AT_Y = (
 )
 
 
+class FakeBankrollClient:
+    def __init__(self):
+        self._present = True
+        self.hide_calls: list[tuple[str, str]] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return self._present
+
+    def clear_conditional_formats(self, tab_name: str, **_kwargs) -> None:
+        pass
+
+    def hide_columns(self, tab_name: str, first_col: str, last_col: str) -> None:
+        self.hide_calls.append((first_col, last_col))
+
+    def format_range(self, *_args, **_kwargs) -> None:
+        pass
+
+    def add_boolean_rule(self, *_args, **_kwargs) -> None:
+        pass
+
+
+def test_polish_bankroll_hides_the_dedupe_key_column():
+    # Fix 2.17: "a stray column appears at L after sync" -- that's
+    # sync_bucket's dedupe key, hidden (not deleted) so it stops reading
+    # as an unexplained value in the middle of the ledger.
+    client = FakeBankrollClient()
+
+    polish_bankroll(client, "Bankroll", cash=(16, 17, 59), gpp=(63, 64, 149), entry_key_columns=("L", "L"))
+
+    assert client.hide_calls == [("L", "L")]  # deduped -- cash and gpp share the same column
+
+
+def test_polish_bankroll_hides_nothing_when_no_entry_key_columns_given():
+    client = FakeBankrollClient()
+    polish_bankroll(client, "Bankroll", cash=(16, 17, 59), gpp=(63, 64, 149))
+    assert client.hide_calls == []
+
+
+def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
+    # Fix 2.4. Uses the same fixture/fake as polish_guardrails below --
+    # Team=C, DK Sal=D, O/U=E, Spread=F, Venue=I, OppPosRank=J, Ceil=L,
+    # Val=M, and the whole linked block Q..Z.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    calls = {a1: rows for a1, rows in client.update_calls}
+    totals_row = 18  # end + 1
+
+    # Dead VLOOKUP columns cleared on the totals row only.
+    for letter in ("I", "J", "M", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"):
+        assert calls[f"{letter}{totals_row}"] == [[""]]
+
+    # Ceil summed, same shape as the pre-existing Pts/Salary sums.
+    assert calls[f"L{totals_row}"] == [["=SUM(L9:L17)"]]
+
+    # Labels: "Total" beside the Salary sum, "Remaining" beside the
+    # remaining-cap formula.
+    assert calls[f"C{totals_row}"] == [["Total"]]
+    assert calls[f"F{totals_row}"] == [["Remaining"]]
+
+    assert "1 totals row(s)" in result
+    assert "1 Ceil sum(s)" in result
+
+
+def test_polish_lineups_totals_rows_never_touches_salary_pts_or_issues():
+    # D (Salary) and K (Pts) already hold real SUM formulas; O (Issues)
+    # holds the real guardrail formula -- none of the three is a dead
+    # VLOOKUP and none should be cleared or overwritten here.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    touched = {a1 for a1, _ in client.update_calls}
+    assert "D18" not in touched
+    assert "K18" not in touched
+    assert "O18" not in touched
+    assert "N18" not in touched  # Rstr% -- also a real SUM, left alone
+
+
+def test_polish_lineups_totals_rows_skips_when_lineups_missing():
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
+    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    assert result == "Lineups: not present -- skipped"
+    assert client.update_calls == []
+
+
 def test_polish_guardrails_skips_when_lineups_missing():
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
     result = polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
@@ -401,14 +572,17 @@ def test_polish_guardrails_skips_when_avail_not_yet_linked():
 
 
 def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avail_column():
+    # Fix 2.4: `end` (17) is the block's own last REAL roster row now,
+    # not the totals row -- the totals row is `end + 1` (18), a separate
+    # row entirely.
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
     avail_index = _HEADER_WITH_AVAIL_AT_Y.index("Avail")
     assert avail_index == 24  # column Y, 0-indexed -- confirms the fixture matches spec section 1.2
 
-    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
 
     header_call = next(c for c in client.update_calls if c[0] == "O8")
-    assert header_call[1] == [["Check"]]
+    assert header_call[1] == [["Issues"]]
 
     block_call = next(c for c in client.update_calls if c[0] == "O9:O18")
     rows = block_call[1]
@@ -423,6 +597,19 @@ def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avai
         'IF(D18>50000,"OVER "&TEXT(D18-50000,"$#,##0"),'
         'IF(COUNTA($A$9:$A$17)<9,"INCOMPLETE "&COUNTA($A$9:$A$17)&"/9","OK")))'
     ]
+
+
+def test_polish_guardrails_repeats_header_at_every_block():
+    # Fix 2.6: the header was only ever written at `header_row`, so 19 of
+    # 20 lineup blocks were missing it entirely.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    polish_guardrails(
+        client, "Lineups", header_row=8, name_blocks=[(9, 18), (22, 31)], header_repeats_at=[21]
+    )
+
+    assert next(c for c in client.update_calls if c[0] == "O8")[1] == [["Issues"]]
+    assert next(c for c in client.update_calls if c[0] == "O21")[1] == [["Issues"]]
 
 
 def test_polish_guardrails_widens_column_o_and_clears_only_its_own_rules():
@@ -614,9 +801,10 @@ def test_polish_guardrails_chips_cover_every_documented_state():
     assert by_value["Q"] == ("TEXT_EQ", _chip(WARN_BG, WARN_FG))
     assert by_value["INCOMPLETE"] == ("TEXT_CONTAINS", _chip(WARN_BG, WARN_FG))
     assert by_value["OK"] == ("TEXT_EQ", _chip(OK_BG, OK_FG))
-    # Every rule targets column O only, across the full block range given.
+    # Every rule targets column O only, across the full block range given
+    # PLUS its totals row (19 = end + 1, Fix 2.4).
     for a1_range, *_ in client.boolean_rule_calls:
-        assert a1_range == "O2:O18"
+        assert a1_range == "O2:O19"
 
 
 class FakeTier23Client:

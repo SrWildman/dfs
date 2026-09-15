@@ -64,7 +64,9 @@ def test_add_edge_filter_views_leverage_plays_targets_flag_column():
     assert title == "Leverage plays"
     flag_idx = EDGE_COLUMNS.index("Flag") + EDGE_DATA_OFFSET
     assert list(criteria) == [flag_idx]
-    assert criteria[flag_idx]["condition"]["type"] == "TEXT_EQ"
+    # TEXT_CONTAINS, not TEXT_EQ: Flag can hold more than one
+    # space-separated token now (Fix 2.1), e.g. "WIND LEVERAGE".
+    assert criteria[flag_idx]["condition"]["type"] == "TEXT_CONTAINS"
     assert criteria[flag_idx]["condition"]["values"][0]["userEnteredValue"] == "LEVERAGE"
 
 
@@ -83,7 +85,10 @@ def test_add_edge_filter_views_in_my_pool_targets_column_a():
     _tab, title, _rng, criteria = client.add_calls[3]
     assert title == "In my pool"
     assert list(criteria) == [0]  # Pool is always column A
-    assert criteria[0]["condition"]["values"][0]["userEnteredValue"] == "TRUE"
+    # NOT_BLANK, not TEXT_EQ "TRUE": Pool is a blank/Cash/GPP/Both
+    # dropdown now, not a checkbox (Fix 2.11).
+    assert criteria[0]["condition"]["type"] == "NOT_BLANK"
+    assert "values" not in criteria[0]["condition"]
 
 
 def test_add_edge_filter_views_range_spans_every_edge_column():

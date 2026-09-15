@@ -174,10 +174,18 @@ def link_edge_columns(
             max_color={"red": 0.72, "green": 0.88, "blue": 0.72},
         )
 
+    # Fix 2.9: only weather (Stadium/Roof/Wind) collapses by default here --
+    # Sam wants the decision columns (CeilVal..GameEnv, Avail, Flag) always
+    # visible, unlike the old single group spanning the whole linked block.
+    # EdgeRaw itself leaves these three expanded (see sheet_style.py's
+    # EDGE_COLUMN_GROUPS); this collapsed default is Lineups/Player
+    # Pool-only, where the extra width matters more.
+    weather_start = column_letter(current_width + LINKED_EDGE_COLUMNS.index("Stadium"))
+    weather_end = column_letter(current_width + LINKED_EDGE_COLUMNS.index("Wind"))
     client.clear_column_groups(tab)
-    client.group_columns(tab, start_col, end_col)
+    client.group_columns(tab, weather_start, weather_end, collapsed=True)
 
     return (
         f"{tab}: linked {len(LINKED_EDGE_COLUMNS)} EdgeRaw column(s) "
-        f"at column {start_col} (grouped, collapsible)"
+        f"at column {start_col} (Stadium/Roof/Wind collapsed by default)"
     )

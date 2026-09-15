@@ -83,7 +83,14 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     w = _q(weather_tab)
 
     live = f'{name}<>""'
-    not_out = f'{flag}<>"OUT"'
+    # Flag can now hold more than one token space-separated (Fix 2.1 --
+    # e.g. "WIND LEVERAGE"), so an exact `="OUT"` no longer catches a
+    # player who is OUT and something else too. SEARCH-based substring
+    # matching does; none of the flag vocabulary (OUT/WIND/LINE↑/LINE↓/
+    # LEVERAGE/CHALK) is a substring of another, so this can't misfire.
+    not_out = f'NOT(ISNUMBER(SEARCH("OUT",{flag})))'
+    is_wind = f'ISNUMBER(SEARCH("WIND",{flag}))'
+    is_out = f'ISNUMBER(SEARCH("OUT",{flag}))'
 
     top_leverage = (
         f"=IFERROR(ARRAY_CONSTRAIN(FILTER("
@@ -96,8 +103,8 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     landmines = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f'{{{name},{pos}&" "&{team},{avail},{flag}}},{live},'
-        f'({avail}<>"")+({flag}="WIND")+({flag}="OUT")),'
-        f'FILTER({salary},{live},({avail}<>"")+({flag}="WIND")+({flag}="OUT")),'
+        f'({avail}<>"")+({is_wind})+({is_out})),'
+        f'FILTER({salary},{live},({avail}<>"")+({is_wind})+({is_out})),'
         f'FALSE),14,4),"")'
     )
 
@@ -285,18 +292,19 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
     """The hour before lock: players ranked by how far their team's implied
     total has moved since the start of the NFL week, with kickoff alongside.
 
-    LineMove is blank until at least one `nfl_odds` sync has happened this
-    week, so an unsynced sheet says so rather than showing a page of
+    ImpMove (team implied points move -- "LineMove" before Fix 2.2) is
+    blank until at least one `nfl_odds` sync has happened this week, so
+    an unsynced sheet says so rather than showing a page of
     convincing-looking zeros.
     """
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     team = _rng(edge_tab, "Team")
 
-    if "LineMove" not in EDGE_COLUMNS:
-        return f"{MOVEMENT_TAB}: skipped -- this version of EDGE_COLUMNS has no LineMove column"
+    if "ImpMove" not in EDGE_COLUMNS:
+        return f"{MOVEMENT_TAB}: skipped -- this version of EDGE_COLUMNS has no ImpMove column"
 
-    move = _rng(edge_tab, "LineMove")
+    move = _rng(edge_tab, "ImpMove")
     start = _rng(edge_tab, "GameStart") if "GameStart" in EDGE_COLUMNS else None
     flag = _rng(edge_tab, "Flag")
 

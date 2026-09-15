@@ -55,28 +55,42 @@ from __future__ import annotations
 
 from dfs.sheets import SheetsClient
 
+# Fix 2.4: each tuple is now the NINE REAL ROSTER ROWS ONLY (QB, RB, RB,
+# WR, WR, WR, TE, FLEX, DEF) -- `end` used to also be that block's totals
+# row (the SUM/remaining-salary row directly below the 9th slot), which
+# meant `dfs setup link-edge`/`polish_guardrails` treated it as a tenth
+# roster slot: a permanent #N/A tenth-player VLOOKUP that could never
+# resolve, since the totals row's own Name cell (column A) is always
+# blank. The totals row for a given block is now `LINEUPS_TOTALS_ROWS`'
+# corresponding entry (always `end + 1`) -- every consumer that used to
+# read `end` as "the totals row" and back out the last real slot via
+# `end - 1` now reads `end` directly as the last real slot, and reaches
+# for `LINEUPS_TOTALS_ROWS` (or an inline `end + 1`) for the totals row
+# itself. See CONTRIBUTING.md's structural changelog for the full list of
+# symbols this touched.
 LINEUPS_NAME_BLOCKS = [
-    (12, 21),
-    (25, 34),
-    (38, 47),
-    (51, 60),
-    (64, 73),
-    (77, 86),
-    (90, 99),
-    (103, 112),
-    (116, 125),
-    (129, 138),
-    (142, 151),
-    (155, 164),
-    (168, 177),
-    (181, 190),
-    (194, 203),
-    (207, 216),
-    (220, 229),
-    (233, 242),
-    (246, 255),
-    (259, 268),
+    (12, 20),
+    (25, 33),
+    (38, 46),
+    (51, 59),
+    (64, 72),
+    (77, 85),
+    (90, 98),
+    (103, 111),
+    (116, 124),
+    (129, 137),
+    (142, 150),
+    (155, 163),
+    (168, 176),
+    (181, 189),
+    (194, 202),
+    (207, 215),
+    (220, 228),
+    (233, 241),
+    (246, 254),
+    (259, 267),
 ]
+LINEUPS_TOTALS_ROWS = [end + 1 for _, end in LINEUPS_NAME_BLOCKS]
 PLAYER_POOL_NAME_BLOCKS = [(2, 11), (13, 32), (34, 58), (60, 69), (71, 80)]
 
 # Full-grid tabs: clear everything below the header, generously past any
@@ -119,4 +133,37 @@ def clear_previous_week(
     client.clear_ranges(dk_upload_tab, [DK_UPLOAD_RANGE])
     summary.append(f"{dk_upload_tab}: cleared {DK_UPLOAD_RANGE}")
 
+    return summary
+
+
+def clear_synced_tabs(
+    client: SheetsClient, tab_mappings: dict[str, str], source_names: list[str]
+) -> list[str]:
+    """Fix 2.14 -- Sam: "If it's not ready when we do our new week, blank
+    is better than bad." A synced source's own upload step already
+    clears its tab right before writing fresh data, but only on success
+    (`run_sync` continues past a failed source rather than stopping, so a
+    source that fails on `dfs week new`'s first-ever sync against a
+    brand-new sheet copy never touches its tab at all). That tab is then
+    left holding whatever the TEMPLATE happened to carry -- which can be
+    real-looking, wrong data, not an obvious blank: the canonical
+    template is periodically rebuilt from a real past week's live sheet
+    (see CONTRIBUTING.md), so its raw source tabs can still hold that
+    week's actual numbers.
+
+    Called unconditionally before the first sync a new week runs, this
+    blanks every tab a source in `source_names` is mapped to, so a
+    failure during that sync leaves a genuinely empty tab instead of a
+    stale-but-plausible one. `client.write_tab(tab, [])` is `ws.clear()`
+    with nothing written back -- the same clear every source's own
+    upload already does, just run for all of them up front rather than
+    one at a time on success.
+    """
+    summary = []
+    for name in source_names:
+        tab = tab_mappings.get(name)
+        if not tab:
+            continue
+        client.write_tab(tab, [], clear_first=True)
+        summary.append(f"{tab}: cleared before first sync ({name})")
     return summary

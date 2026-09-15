@@ -15,7 +15,7 @@ _LINEUPS_HEADER_ROW = LINEUPS_NAME_BLOCKS[0][0] - 1
 
 # Player Pool and Lineups' column layouts are each independently derived
 # (see `_write_deck_controls`'s own comment) and drifted apart for real:
-# Player Pool has no `Check`/`% of Rstr` equivalent (those are per-built-
+# Player Pool has no `Issues`/`% of Rstr` equivalent (those are per-built-
 # lineup concepts) but picked up an unrelated `Cash` column, so its
 # linked block sits one column left of Lineups' own. These two fixtures
 # mirror that real drift rather than assuming the two tabs match.
@@ -63,7 +63,7 @@ _LINEUPS_HEADER = [
     "Ceil",
     "Val",
     "Rstr%",
-    "Check",
+    "Issues",
     "% of Rstr",
     "CeilVal",
     "CeilPct",
@@ -300,7 +300,7 @@ def test_add_pool_deck_copies_lineups_own_header_into_row_three_and_styles_it():
     # Row 3 (the deck's own mini-header) must match LINEUPS' OWN block
     # header below it, not Player Pool's -- the two tabs' layouts are not
     # guaranteed to match (they drifted apart for real: Player Pool has
-    # no `Check`/`% of Rstr` columns Lineups has). Copying Player Pool's
+    # no `Issues`/`% of Rstr` columns Lineups has). Copying Player Pool's
     # header here would print "CeilVal" in row 3 directly above a block
     # row further down that says "% of Rstr" in the same column.
     client = FakeDeckClient()
@@ -315,7 +315,7 @@ def test_add_pool_deck_copies_lineups_own_header_into_row_three_and_styles_it():
 
 def test_add_pool_deck_window_formulas_match_by_header_name_not_position():
     # Player Pool's real header has `CeilVal` one column left of where
-    # Lineups' own header has it (Cash vs Check+% of Rstr) -- the window
+    # Lineups' own header has it (Cash vs Issues+% of Rstr) -- the window
     # must still pull CeilVal into the position CeilVal actually sits at
     # in row 3 (Lineups' header, index 16), reading from wherever
     # CeilVal actually is in Player Pool's header (index 15), not the
@@ -333,7 +333,7 @@ def test_add_pool_deck_window_formulas_match_by_header_name_not_position():
     # Player Pool's -- the formula must reference PoolSort's P column
     # (Player Pool's real CeilVal position), placed at window index 16.
     assert "INDEX(PoolSort!P:P,$F$1+4-3)" in first_row[16]
-    # Check (14) and % of Rstr (15) exist only on Lineups -- Player Pool
+    # Issues (14) and % of Rstr (15) exist only on Lineups -- Player Pool
     # has no equivalent, so these stay blank rather than pulling the
     # wrong column (Player Pool's Cash/CeilVal) under the wrong label.
     assert first_row[14] == ""

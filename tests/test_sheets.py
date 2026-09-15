@@ -28,6 +28,7 @@ class FakeWorksheet:
         self.frozen_rows = 0
         self.color_scale_calls: list[dict] = []
         self.dimension_group_calls: list[dict] = []
+        self.dimension_group_update_calls: list[dict] = []
         self.column_groups: list[dict] = []
         self.insert_dimension_calls: list[dict] = []
         self.delete_dimension_calls: list[dict] = []
@@ -164,7 +165,22 @@ class FakeSpreadsheet:
                 ws = self._ws_by_id(rng["sheetId"])
                 ws.dimension_group_calls.append(request["addDimensionGroup"])
                 depth = 1 + sum(1 for g in ws.column_groups if g["range"] == rng)
-                ws.column_groups.append({"range": rng, "depth": depth})
+                ws.column_groups.append({"range": rng, "depth": depth, "collapsed": False})
+            if "updateDimensionGroup" in request:
+                update = request["updateDimensionGroup"]
+                # Real Sheets rejects this request with no `depth` (or
+                # depth <= 0): "dimensionGroup.depth must be > 0" -- found
+                # live, modeled here so a regression fails a test instead
+                # of a real sheet.
+                if not update["dimensionGroup"].get("depth", 0) > 0:
+                    raise AssertionError("updateDimensionGroup requires dimensionGroup.depth > 0")
+                rng = update["dimensionGroup"]["range"]
+                ws = self._ws_by_id(rng["sheetId"])
+                ws.dimension_group_update_calls.append(update)
+                matches = [g for g in ws.column_groups if g["range"] == rng]
+                if matches:
+                    deepest = max(matches, key=lambda g: g["depth"])
+                    deepest["collapsed"] = update["dimensionGroup"]["collapsed"]
             if "deleteDimensionGroup" in request:
                 rng = request["deleteDimensionGroup"]["range"]
                 ws = self._ws_by_id(rng["sheetId"])
@@ -431,6 +447,37 @@ def test_clear_conditional_formats_with_row_range_finds_a_rule_regardless_of_col
     assert remaining_range["startRowIndex"] == 11  # row 12, 0-indexed -- the survivor
 
 
+def test_clear_conditional_formats_with_column_and_row_range_only_matches_both(cfg, monkeypatch, tmp_path):
+    # Fix A2, the actual root cause behind "highlighting missing from
+    # Lineups": apply_field_color_scales used to clear by `column` alone
+    # before adding its own scale. Called for the pool deck's own narrow
+    # window (rows 4-9), that deleted the SAME column's already-correct
+    # gradient covering the real lineup blocks below (rows 12-268) that
+    # `polish_builder_tab` had just written moments earlier -- on every
+    # single `dfs setup polish` run. Passing column AND row_range together
+    # must narrow to a rule matching both, leaving a same-column,
+    # different-row rule (or a different-column, same-row rule) alone.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    scale = dict(
+        min_color={"red": 1, "green": 0, "blue": 0},
+        mid_color={"red": 1, "green": 1, "blue": 0},
+        max_color={"red": 0, "green": 1, "blue": 0},
+    )
+    client.add_color_scale("T", "P4:P9", **scale)  # the deck's own window -- about to be cleared
+    client.add_color_scale("T", "P12:P268", **scale)  # same column, real blocks below -- must survive
+    client.add_color_scale("T", "Q4:Q9", **scale)  # different column, same rows -- must survive
+
+    client.clear_conditional_formats("T", column="P", row_range=(4, 9))
+
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.conditional_formats) == 2
+    surviving_ranges = {
+        (r["ranges"][0]["startColumnIndex"], r["ranges"][0]["startRowIndex"]) for r in ws.conditional_formats
+    }
+    assert surviving_ranges == {(15, 11), (16, 3)}  # P12 (col 15, row 11) and Q4 (col 16, row 3)
+
+
 def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
@@ -439,6 +486,33 @@ def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path)
     assert len(ws.dimension_group_calls) == 1
     r = ws.dimension_group_calls[0]["range"]
     assert (r["startIndex"], r["endIndex"]) == (15, 25)  # P..Y, 0-indexed half-open
+
+
+def test_group_columns_collapsed_folds_the_group_shut(cfg, monkeypatch, tmp_path):
+    # Fix 2.9: addDimensionGroup alone leaves the group expanded -- a
+    # column meant to default to hidden (weather on Lineups/Player Pool)
+    # needs the follow-up updateDimensionGroup this collapsed=True sends.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_columns("T", "P", "Y", collapsed=True)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.dimension_group_update_calls) == 1
+    # Real Sheets rejects this request without a `depth` -- caught live
+    # ("dimensionGroup.depth must be > 0") because the fake didn't model
+    # the requirement; asserted explicitly now so a regression fails here
+    # instead of on a real sheet.
+    assert ws.dimension_group_update_calls[0]["dimensionGroup"]["depth"] == 1
+    assert ws.dimension_group_update_calls[0]["dimensionGroup"]["collapsed"] is True
+    assert ws.column_groups[0]["collapsed"] is True
+
+
+def test_group_columns_not_collapsed_by_default(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_columns("T", "P", "Y")
+    ws = fake_sheet._worksheets["T"]
+    assert ws.dimension_group_update_calls == []
+    assert ws.column_groups[0]["collapsed"] is False
 
 
 def test_group_columns_stacks_a_deeper_group_on_repeat_calls(cfg, monkeypatch, tmp_path):

@@ -205,7 +205,7 @@ def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) 
     # match what's below them), then for each of ITS column names look up
     # that same name's position in PLAYER POOL's header (where PoolSort's
     # data actually lives) to build that column's window formula. A
-    # Lineups-only column name with no Player Pool equivalent (`Check`,
+    # Lineups-only column name with no Player Pool equivalent (`Issues`,
     # `% of Rstr`) gets no formula -- correctly blank, since there's no
     # pool-wide value for either concept.
     lineups_header_row_num = LINEUPS_NAME_BLOCKS[0][0] - 1

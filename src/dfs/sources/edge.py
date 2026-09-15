@@ -1,6 +1,6 @@
-"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, LineMove, Avail,
-Flag) computed locally from already-synced sources -- no network call of
-its own.
+"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, ImpMove/TotMove/
+SpdMove, Avail, Flag) computed locally from already-synced sources -- no
+network call of its own.
 
 Registered last in `SOURCES` (see `sources/__init__.py`) so a full `dfs
 sync` computes this off the CSVs the earlier sources in that same run just
@@ -38,6 +38,13 @@ log = get_logger("sources.edge")
 # when turning an EDGE_COLUMNS index into a real EdgeRaw column letter.
 POOL_COLUMN = column_letter(0)
 POOL_HEADER = "Pool"
+# Fix 2.11: a dropdown, not a checkbox -- blank/Cash/GPP/Both instead of
+# FALSE/TRUE, so ticking a player also says which contest type(s) they're
+# in the pool for. Any non-blank value means "in the pool" for Player
+# Pool's own formulas (sheet_pool_formulas.py); a blank cell still means
+# "not pooled", same as an unticked checkbox did. Blank is listed first
+# so it's the dropdown's own "clear this" option, not just an absence.
+POOL_TYPE_OPTIONS = ["", "Cash", "GPP", "Both"]
 _ID_COLUMN = column_letter(EDGE_COLUMNS.index("Id") + EDGE_DATA_OFFSET)
 # Matches write_tab's default worksheet sizing (see cli.py's
 # _EDGE_FORMAT_LAST_ROW) -- the range every EdgeRaw column operation uses.
@@ -61,7 +68,7 @@ def _try_load_current(source_name: str) -> pd.DataFrame | None:
 
 
 def _try_diff_odds(ctx: SyncContext) -> pd.DataFrame | None:
-    """LineMove: since the start of the current NFL week, not since the
+    """ImpMove/TotMove/SpdMove: since the start of the current NFL week, not since the
     last sync -- diffing against the last sync made the number depend on
     how often `dfs sync` happens to get run, which isn't a real signal.
     `store.load_since` falls back to the earliest snapshot on disk when
@@ -117,13 +124,23 @@ class EdgeSource(Source):
         header, *data = rows
         return [[POOL_HEADER, *header]] + [["", *row] for row in data]
 
-    def pre_upload(self, client: SheetsClient, tab: str) -> dict[str, bool]:
-        """Read which players are currently ticked, keyed by Id (not row
+    def pre_upload(self, client: SheetsClient, tab: str) -> dict[str, str]:
+        """Read each player's current Pool value (Fix 2.11: blank/Cash/
+        GPP/Both, not a TRUE/FALSE checkbox), keyed by Id (not row
         position or Name -- DST names aren't unique, see derived.py's own
         docstring, and EdgeRaw is sorted by Leverage so row order shifts
         between syncs) before write_tab's `ws.clear()` wipes both the Id
         and Pool columns. Same preserve-by-key pattern as
-        sheet_views.build_exposure's Target column."""
+        sheet_views.build_exposure's Target column.
+
+        Migrates a still-live TRUE/FALSE checkbox value from before Fix
+        2.11 (found on a sheet copied from a template last rebuilt before
+        this shipped): TRUE -> "Both", the closest equivalent to the old
+        checked state; FALSE is dropped, not preserved -- an unticked box
+        meant "not pooled", not a real dropdown selection, and preserving
+        the literal string "FALSE" forever would silently perpetuate a
+        value that was never one of POOL_TYPE_OPTIONS. Confirmed live:
+        exactly this was found on the template's own EdgeRaw."""
         if not client.tab_exists(tab):
             return {}
         try:
@@ -131,21 +148,26 @@ class EdgeSource(Source):
             ticks = client.read_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{_LAST_ROW}")
         except Exception:  # noqa: BLE001 - a malformed/missing prior tab must not block a sync
             return {}
-        preserved: dict[str, bool] = {}
+        preserved: dict[str, str] = {}
         for i, id_row in enumerate(ids):
             player_id = id_row[0].strip() if id_row and id_row[0] else ""
             if not player_id:
                 continue
             tick = ticks[i][0] if i < len(ticks) and ticks[i] else ""
-            if str(tick).strip().upper() == "TRUE":
-                preserved[player_id] = True
+            value = str(tick).strip()
+            if value.upper() == "FALSE":
+                continue
+            if value.upper() == "TRUE":
+                value = "Both"
+            if value:
+                preserved[player_id] = value
         return preserved
 
     def post_upload(self, client: SheetsClient, tab: str, df: pd.DataFrame, preserved: object | None) -> None:
-        """Restore ticks for any Id from `preserved` still present after the
-        rewrite (players no longer on the slate drop out silently -- correct,
-        they're gone from the sheet entirely; new players start unticked),
-        then (re)apply the checkbox validation -- cheap and idempotent, and
+        """Restore each Id from `preserved` to its previous Pool value
+        (players no longer on the slate drop out silently -- correct,
+        they're gone from the sheet entirely; new players start blank),
+        then (re)apply the dropdown validation -- cheap and idempotent, and
         guards against a first-ever sync leaving Pool with no validation at
         all.
 
@@ -162,10 +184,10 @@ class EdgeSource(Source):
         last_row = len(df) + 1
         if last_row >= 2:
             client.set_basic_filter(tab, _FILTER_RANGE)
-            client.set_checkbox_validation(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}")
+            client.set_dropdown_validation(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}", POOL_TYPE_OPTIONS)
         if not preserved:
             return
         ids = client.read_range(tab, f"{_ID_COLUMN}2:{_ID_COLUMN}{last_row}")
-        restore = [[True] if row and row[0].strip() in preserved else [""] for row in ids]
+        restore = [[preserved.get(row[0].strip(), "")] if row and row[0] else [""] for row in ids]
         if restore:
             client.update_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}", restore)

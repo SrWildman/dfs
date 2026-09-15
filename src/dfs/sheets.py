@@ -286,6 +286,8 @@ class SheetsClient:
         max_color: dict,
         mid_type: str = "PERCENTILE",
         mid_value: str = "50",
+        min_type: str = "MIN",
+        min_value: str | None = None,
     ) -> None:
         """Apply a 3-point color-scale conditional format to `a1_range` --
         like `update_range`/`clear_ranges`, this only ever touches the range
@@ -296,11 +298,22 @@ class SheetsClient:
         `mid_type`/`mid_value` default to the statistical median (50th
         percentile) -- right for a plain "more is better" scale. Pass
         `mid_type="NUMBER", mid_value="0"` for a signed-delta column where
-        zero, not the median, is the meaningful midpoint (e.g. LineMove) --
+        zero, not the median, is the meaningful midpoint (e.g. ImpMove) --
         a true diverging scale rather than one that happens to have three
-        colors."""
+        colors.
+
+        `min_type`/`min_value` default to the range's actual minimum. Pass
+        `min_type="NUMBER", min_value="=MINIFS(...)"` (Sheets accepts a
+        formula for a NUMBER-type interpolation point's value) to anchor
+        the low end somewhere other than the true minimum -- e.g. Fix
+        2.7's zero-exclusion, where a real 0 (unpublished ownership, a
+        dome's zero wind) would otherwise anchor the scale and compress
+        everyone else's real spread into a sliver of the gradient."""
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        minpoint = {"color": min_color, "type": min_type}
+        if min_value is not None:
+            minpoint["value"] = min_value
         sheet.batch_update(
             {
                 "requests": [
@@ -309,7 +322,7 @@ class SheetsClient:
                             "rule": {
                                 "ranges": [grid_range],
                                 "gradientRule": {
-                                    "minpoint": {"color": min_color, "type": "MIN"},
+                                    "minpoint": minpoint,
                                     "midpoint": {"color": mid_color, "type": mid_type, "value": mid_value},
                                     "maxpoint": {"color": max_color, "type": "MAX"},
                                 },
@@ -409,7 +422,9 @@ class SheetsClient:
         requests = [{"deleteDimensionGroup": {"range": group["range"]}} for group in groups]
         sheet.batch_update({"requests": requests})
 
-    def group_columns(self, tab_name: str, first_col_a1: str, last_col_a1: str) -> None:
+    def group_columns(
+        self, tab_name: str, first_col_a1: str, last_col_a1: str, *, collapsed: bool = False
+    ) -> None:
         """Group a column range so it can be collapsed/expanded from the
         sheet UI (Data > Group columns) -- a display convenience only, does
         not touch cell values or formatting. `first_col_a1`/`last_col_a1`
@@ -418,25 +433,37 @@ class SheetsClient:
         Does not replace an existing group over the same range -- it nests
         a new, deeper one on top (see `clear_column_groups`). Callers that
         re-run this on every `polish` pass must call `clear_column_groups`
-        first."""
+        first.
+
+        `collapsed=True` (Fix 2.9) also folds the group shut immediately --
+        `addDimensionGroup` alone only creates the +/- control, still
+        expanded, so a column meant to default to hidden (e.g. weather on
+        Lineups/Player Pool) would otherwise sit open until someone clicks
+        it once by hand. `updateDimensionGroup` requires `depth` to say
+        *which* nested group to fold (Sheets rejected a request without
+        one: "dimensionGroup.depth must be > 0") -- hardcoded to 1 here,
+        correct as long as the caller clears any existing group over this
+        exact range first (both current call sites do), so the group this
+        just added is the only, outermost one."""
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(f"{first_col_a1}1:{last_col_a1}1", ws.id)
-        sheet.batch_update(
-            {
-                "requests": [
-                    {
-                        "addDimensionGroup": {
-                            "range": {
-                                "sheetId": ws.id,
-                                "dimension": "COLUMNS",
-                                "startIndex": grid_range["startColumnIndex"],
-                                "endIndex": grid_range["endColumnIndex"],
-                            }
-                        }
+        dimension_range = {
+            "sheetId": ws.id,
+            "dimension": "COLUMNS",
+            "startIndex": grid_range["startColumnIndex"],
+            "endIndex": grid_range["endColumnIndex"],
+        }
+        requests = [{"addDimensionGroup": {"range": dimension_range}}]
+        if collapsed:
+            requests.append(
+                {
+                    "updateDimensionGroup": {
+                        "dimensionGroup": {"range": dimension_range, "depth": 1, "collapsed": True},
+                        "fields": "collapsed",
                     }
-                ]
-            }
-        )
+                }
+            )
+        sheet.batch_update({"requests": requests})
 
     # ------------------------------------------------------------------
     # Presentation primitives.
@@ -823,46 +850,63 @@ class SheetsClient:
         conditional formatting (EdgeRaw, the four view tabs, Bankroll).
         Lineups is not one of those: `sheet_links.link_edge_columns` owns
         color-scale rules on its linked block's rows, so `polish_guardrails`
-        passes `column="O"` to only delete rules confined entirely to that
-        one column (no other function ever touches O), and
-        `polish_pool_deck` passes `row_range` (e.g. `(4, 9)`, the deck
-        window's own rows) to delete only rules confined entirely to that
-        row band, regardless of which column they're on -- an exact
-        `column=letter, rows=X:Y` match was tried first and found not
-        idempotent for real: when which column held a given field changed
-        (Player Pool/Lineups header drift, see `sheet_pool_deck.py`), the
-        rule's column moved too, so an exact-range clear against the NEW
-        column never found the OLD one, leaving it orphaned. A row-band
-        clear finds it regardless of which column it ended up on. Blindly
-        clearing more than a function owns would silently destroy real,
-        already-correct formatting on every re-run -- exactly the kind of
-        mistake CONTRIBUTING.md's changelog now has an incident for.
+        passes `column="O"` alone to delete every rule confined entirely to
+        that one column regardless of row (no other function ever touches
+        O, and it spans many different row ranges -- one per lineup
+        block -- so a single row_range can't cover them all), and
+        `polish_pool_deck` passes `row_range` alone (e.g. `(4, 9)`, the deck
+        window's own rows) to delete rules confined entirely to that row
+        band regardless of column -- an exact `column=letter, rows=X:Y`
+        match was tried there first and found not idempotent for real: when
+        which column held a given field changed (Player Pool/Lineups header
+        drift, see `sheet_pool_deck.py`), the rule's column moved too, so a
+        column-scoped clear against the NEW column never found the OLD one,
+        leaving it orphaned.
+
+        Passing BOTH `column` and `row_range` together (as
+        `apply_field_color_scales` does -- Fix A2) narrows to a rule
+        matching both: found live as the actual cause of "highlighting
+        missing from Lineups" -- `apply_field_color_scales`, called for the
+        pool deck's own narrow window (rows 4-9) by `polish_pool_deck`,
+        used to clear by `column` ALONE before adding its own scale, which
+        deleted the SAME column's real, already-correct gradient covering
+        the 20 lineup blocks below (rows 12-268) moments after
+        `polish_builder_tab` had just written it -- on every single
+        `dfs setup polish` run, not a rare edge case. `column` alone or
+        `row_range` alone keep their original (deliberately wider) meaning
+        for every other caller; only a caller that passes both gets the
+        narrower, exact-range behavior. Blindly clearing more than a
+        function owns would silently destroy real, already-correct
+        formatting on every re-run -- exactly the kind of mistake
+        CONTRIBUTING.md's changelog now has an incident for.
         """
         sheet, ws = self._ws(tab_name)
         rules = self._conditional_format_rules(sheet, ws)
         if column is None and row_range is None:
             indexes = list(range(len(rules)))
-        elif row_range is not None:
-            start_row, end_row = row_range[0] - 1, row_range[1]
-            indexes = [
-                i
-                for i, rule in enumerate(rules)
-                if rule.get("ranges")
-                and all(
-                    r.get("startRowIndex") == start_row and r.get("endRowIndex") == end_row
-                    for r in rule["ranges"]
-                )
-            ]
         else:
-            col_index = a1_range_to_grid_range(f"{column}1:{column}1")["startColumnIndex"]
+            col_index = (
+                a1_range_to_grid_range(f"{column}1:{column}1")["startColumnIndex"]
+                if column is not None
+                else None
+            )
+            row_bounds = (row_range[0] - 1, row_range[1]) if row_range is not None else None
+
+            def _range_matches(r: dict) -> bool:
+                if col_index is not None and not (
+                    r.get("startColumnIndex") == col_index and r.get("endColumnIndex") == col_index + 1
+                ):
+                    return False
+                if row_bounds is not None and not (
+                    r.get("startRowIndex") == row_bounds[0] and r.get("endRowIndex") == row_bounds[1]
+                ):
+                    return False
+                return True
+
             indexes = [
                 i
                 for i, rule in enumerate(rules)
-                if rule.get("ranges")
-                and all(
-                    r.get("startColumnIndex") == col_index and r.get("endColumnIndex") == col_index + 1
-                    for r in rule["ranges"]
-                )
+                if rule.get("ranges") and all(_range_matches(r) for r in rule["ranges"])
             ]
         if not indexes:
             return
@@ -881,11 +925,13 @@ class SheetsClient:
         return []
 
     def has_chip_rule(self, tab_name: str, column_a1: str, values: list[str]) -> bool:
-        """Whether `column_a1` carries at least one TEXT_EQ conditional-
-        format rule matching one of `values` -- used by `dfs setup
-        audit-style` to check a Flag/Avail column actually has its chips,
-        not just that some conditional format exists somewhere on the
-        tab."""
+        """Whether `column_a1` carries at least one TEXT_EQ or
+        TEXT_CONTAINS conditional-format rule matching one of `values` --
+        used by `dfs setup audit-style` to check a Flag/Avail column
+        actually has its chips, not just that some conditional format
+        exists somewhere on the tab. Both condition types are accepted
+        since Flag (Fix 2.1: can hold more than one space-separated token)
+        uses TEXT_CONTAINS while Avail/Source/Venue still use TEXT_EQ."""
         sheet, ws = self._ws(tab_name)
         rules = self._conditional_format_rules(sheet, ws)
         col_index = a1_range_to_grid_range(f"{column_a1}1:{column_a1}1")["startColumnIndex"]
@@ -894,7 +940,7 @@ class SheetsClient:
             if not any(r.get("startColumnIndex") == col_index for r in ranges):
                 continue
             condition = rule.get("booleanRule", {}).get("condition", {})
-            if condition.get("type") != "TEXT_EQ":
+            if condition.get("type") not in ("TEXT_EQ", "TEXT_CONTAINS"):
                 continue
             rule_values = [v.get("userEnteredValue") for v in condition.get("values", [])]
             if any(v in values for v in rule_values):

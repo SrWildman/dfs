@@ -37,3 +37,20 @@ def test_week_start_date_advances_seven_days_per_week():
     kickoff = nfl_calendar.season_kickoff(2026)
     assert nfl_calendar.week_start_date(2, 2026) == kickoff + timedelta(days=7)
     assert nfl_calendar.week_start_date(3, 2026) == kickoff + timedelta(days=14)
+
+
+def test_week_for_date_matches_current_week_for_the_same_date():
+    # current_week is now just week_for_date(today, current_season(today)).
+    for d in (date(2026, 9, 4), date(2026, 9, 11), date(2026, 9, 24), date(2027, 6, 1)):
+        assert nfl_calendar.week_for_date(d, nfl_calendar.current_season(d)) == nfl_calendar.current_week(d)
+
+
+def test_week_for_date_sorts_a_multi_week_span_of_real_dates():
+    # Fix 2.17: a DK contest-history export spans many weeks -- each
+    # entry's own date determines its week, not the file as a whole.
+    season = 2026
+    kickoff = nfl_calendar.season_kickoff(season)
+    assert nfl_calendar.week_for_date(kickoff, season) == 1
+    assert nfl_calendar.week_for_date(kickoff + timedelta(days=6), season) == 1
+    assert nfl_calendar.week_for_date(kickoff + timedelta(days=7), season) == 2
+    assert nfl_calendar.week_for_date(kickoff + timedelta(days=21), season) == 4

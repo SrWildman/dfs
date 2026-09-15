@@ -61,9 +61,12 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
       the Name column's own filter-view header gets a type-ahead search
       box for free, the primary way to find a player without scrolling
       743 rows (see Task 4.1).
-    - "Leverage plays" -- Flag = LEVERAGE.
+    - "Leverage plays" -- Flag CONTAINS LEVERAGE (Fix 2.1: Flag can hold
+      more than one space-separated token, e.g. "WIND LEVERAGE", so an
+      exact match would miss it).
     - "Available only" -- Avail blank (no Q/OUT/IR).
-    - "In my pool" -- Pool = TRUE.
+    - "In my pool" -- Pool NOT BLANK (Fix 2.11: a blank/Cash/GPP/Both
+      dropdown, not a TRUE/FALSE checkbox).
     Re-runnable: each view is cleared by title before being re-added.
     """
     if not client.tab_exists(edge_tab):
@@ -79,7 +82,11 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
         views.append(
             (
                 "Leverage plays",
-                {flag_idx: {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": "LEVERAGE"}]}}},
+                {
+                    flag_idx: {
+                        "condition": {"type": "TEXT_CONTAINS", "values": [{"userEnteredValue": "LEVERAGE"}]}
+                    }
+                },
             )
         )
 
@@ -87,15 +94,10 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
     if avail_idx is not None:
         views.append(("Available only", {avail_idx: {"condition": {"type": "BLANK"}}}))
 
-    # POOL_COLUMN is EdgeRaw's Pool checkbox column -- its 0-indexed
-    # position for the Sheets API's criteria map.
+    # POOL_COLUMN is EdgeRaw's Pool column -- its 0-indexed position for
+    # the Sheets API's criteria map.
     pool_idx = ord(POOL_COLUMN) - ord("A")
-    views.append(
-        (
-            "In my pool",
-            {pool_idx: {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": "TRUE"}]}}},
-        )
-    )
+    views.append(("In my pool", {pool_idx: {"condition": {"type": "NOT_BLANK"}}}))
 
     results = []
     for title, criteria in views:

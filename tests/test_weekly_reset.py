@@ -4,6 +4,7 @@ from dfs.weekly_reset import (
     PLAYER_POOL_NAME_BLOCKS,
     SCRATCH_RANGE,
     clear_previous_week,
+    clear_synced_tabs,
 )
 
 
@@ -80,7 +81,46 @@ def test_lineups_blocks_skip_the_repeated_sub_header_row():
     # label in column A never gets cleared. First block starts at row 12
     # (row 11 is the header) since sheet_pool_deck.py's 10-row pool deck
     # insert -- see CONTRIBUTING.md's changelog.
+    #
+    # `end` is now the last REAL roster row (Fix 2.4 -- it used to also be
+    # that block's totals row), so the gap from one block's `end` to the
+    # next block's `start` is 5, not 4: totals row, the "avg salary
+    # remaining per unfilled slot" row directly below it, one blank
+    # spacer, then the next block's repeated sub-header.
     first_start, _ = LINEUPS_NAME_BLOCKS[0]
     assert first_start == 12
     for (_, prev_end), (start, _) in zip(LINEUPS_NAME_BLOCKS, LINEUPS_NAME_BLOCKS[1:], strict=False):
-        assert start == prev_end + 4  # 3-row gap + 1 sub-header row skipped
+        assert start == prev_end + 5
+
+
+class SpyTabClient:
+    def __init__(self):
+        self.write_tab_calls: list[tuple[str, list, bool]] = []
+
+    def write_tab(self, tab_name, rows, *, create_if_missing: bool = True, clear_first: bool = True):
+        self.write_tab_calls.append((tab_name, rows, clear_first))
+        return len(rows)
+
+
+def test_clear_synced_tabs_blanks_every_mapped_source_tab():
+    client = SpyTabClient()
+    mappings = {"projections": "TFFBOptoRaw", "draftkings": "DKSalRaw", "edge": "EdgeRaw"}
+
+    summary = clear_synced_tabs(client, mappings, ["projections", "draftkings", "edge"])
+
+    assert {tab for tab, _rows, _clear in client.write_tab_calls} == {
+        "TFFBOptoRaw",
+        "DKSalRaw",
+        "EdgeRaw",
+    }
+    assert all(rows == [] for _tab, rows, _clear in client.write_tab_calls)
+    assert all(clear_first is True for _tab, _rows, clear_first in client.write_tab_calls)
+    assert len(summary) == 3
+
+
+def test_clear_synced_tabs_skips_a_source_with_no_tab_mapping():
+    client = SpyTabClient()
+    summary = clear_synced_tabs(client, {"projections": "TFFBOptoRaw"}, ["projections", "unmapped_source"])
+
+    assert [tab for tab, _rows, _clear in client.write_tab_calls] == ["TFFBOptoRaw"]
+    assert len(summary) == 1

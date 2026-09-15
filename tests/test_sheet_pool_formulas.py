@@ -30,21 +30,27 @@ def test_writes_a_name_formula_and_overflow_formula_per_block_only():
     assert ranges_written == {
         "O1",
         "Z1",
+        "AA1",
         "A2",
         "Z2",
         "O2:O11",
+        "AA2:AA11",
         "A13",
         "Z13",
         "O13:O29",
+        "AA13:AA29",
         "A31",
         "Z31",
         "O31:O55",
+        "AA31:AA55",
         "A57",
         "Z57",
         "O57:O65",
+        "AA57:AA65",
         "A67",
         "Z67",
         "O67:O74",
+        "AA67:AA74",
     }
 
 
@@ -58,7 +64,7 @@ def test_name_formula_uses_the_position_actually_read_from_the_sheet():
     assert 'EdgeRaw!$D$2:$D="WR"' in formulas["A31"]
     assert 'EdgeRaw!$D$2:$D="TE"' in formulas["A57"]
     assert 'EdgeRaw!$D$2:$D="DST"' in formulas["A67"]
-    assert f"EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}=TRUE" in formulas["A2"]
+    assert f'EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}<>""' in formulas["A2"]
 
 
 def test_name_formula_caps_at_the_blocks_own_row_count():
@@ -73,18 +79,23 @@ def test_name_formula_caps_at_the_blocks_own_row_count():
     assert ",8,1)" in formulas["A67"]  # DST: 74-67+1 = 8
 
 
+_PICKS_NAMES = (
+    "FILTER('Pool Picks'!$A$3:$A$102,'Pool Picks'!$A$3:$A$102<>\"\",'Pool Picks'!$B$3:$B$102=\"QB\")"
+)
+
+
 def test_overflow_formula_thresholds_on_the_same_cap():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    union = (
-        "{"
-        f'FILTER(EdgeRaw!$C$2:$C,EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}=TRUE,EdgeRaw!$D$2:$D="QB");'
-        "FILTER('Pool Picks'!$A$3:$A$102,'Pool Picks'!$A$3:$A$102<>\"\",'Pool Picks'!$B$3:$B$102=\"QB\")"
-        "}"
+    edge_filter = (
+        f"FILTER({{EdgeRaw!$C$2:$C,EdgeRaw!$G$2:$G}},"
+        f'EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}<>"",EdgeRaw!$D$2:$D="QB")'
     )
-    count = f"IFERROR(COUNTA(UNIQUE({union})),0)"
+    picks_filter = f"{{{_PICKS_NAMES},IFERROR(VLOOKUP({_PICKS_NAMES},EdgeRaw!$C:$G,5,FALSE),0)}}"
+    union = f"{{{edge_filter};{picks_filter}}}"
+    count = f"IFERROR(COUNTA(INDEX(UNIQUE({union}),0,1)),0)"
     assert formulas["Z2"] == f'=IF({count}>10,10&" QB slots, "&{count}&" ticked -- some are hidden","")'
 
 
@@ -95,20 +106,32 @@ def test_name_formula_unions_edgeraw_ticks_with_pool_picks_typed_rows():
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
     name_formula = formulas["A2"]
     assert "UNIQUE({" in name_formula
-    assert "FILTER(EdgeRaw!$C$2:$C" in name_formula
+    assert "FILTER({EdgeRaw!$C$2:$C,EdgeRaw!$G$2:$G}" in name_formula
     assert "FILTER('Pool Picks'!$A$3:$A$102,'Pool Picks'!$A$3:$A$102<>\"\"," in name_formula
     assert "'Pool Picks'!$B$3:$B$102=\"QB\"" in name_formula
+    assert "VLOOKUP(" in name_formula  # Pool Picks' half looks Salary up against EdgeRaw
 
 
-def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
-    # A player ticked in EdgeRaw AND typed into Pool Picks must count
-    # once toward the cap, not twice -- COUNTA(UNIQUE(...)), not two
-    # separate COUNTIFS added together.
+def test_name_formula_sorts_by_salary_descending_not_alphabetically():
+    # Fix 2.10.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert "COUNTA(UNIQUE(" in formulas["Z2"]
+    assert "SORT(UNIQUE(" in formulas["A2"]
+    assert ",2,FALSE)" in formulas["A2"]  # sort key = column 2 (Salary), descending
+
+
+def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
+    # A player ticked in EdgeRaw AND typed into Pool Picks must count
+    # once toward the cap, not twice -- COUNTA(INDEX(UNIQUE(...),0,1)),
+    # not two separate COUNTIFS added together. INDEX(...,0,1) takes just
+    # the Name column back out of the (Name, Salary) pairs Fix 2.10 added.
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
+    assert "COUNTA(INDEX(UNIQUE(" in formulas["Z2"]
     assert "FILTER('Pool Picks'!" in formulas["Z2"]
 
 
@@ -122,19 +145,42 @@ def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formul
     assert "A13" not in ranges_written
     assert "Z13" not in ranges_written
     assert "O13:O29" not in ranges_written
+    assert "AA13:AA29" not in ranges_written
     assert any("skipped" in line for line in result)
 
 
-def test_never_writes_outside_columns_a_o_and_z():
-    # Name, Source and the overflow warning are the only three columns
-    # this function is allowed to touch -- every other column (P..Y)
-    # already holds a VLOOKUP written by link_edge_columns and must never
-    # be rewritten with a blank/placeholder value.
+def test_never_writes_outside_columns_a_o_z_and_aa():
+    # Name, Source, the overflow warning, and (Fix 2.11) the surfaced Pool
+    # value are the only columns this function is allowed to touch --
+    # every other column (P..Y) already holds a VLOOKUP written by
+    # link_edge_columns and must never be rewritten with a blank/
+    # placeholder value. "AA..." ranges start with "A" too, so this same
+    # check already covers them.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     for _, a1_range, _ in client.update_calls:
         assert a1_range[0] in ("A", "O", "Z")
+
+
+def test_pool_type_formula_looks_up_edgeraw_by_name_with_index_match():
+    # Fix 2.11: Pool (column A on EdgeRaw) sits LEFT of Name (column C),
+    # so this can't be a plain VLOOKUP -- it must be INDEX/MATCH.
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    pool_call = next(c for c in client.update_calls if c[1] == "AA2:AA11")
+    first_row_formula = pool_call[2][0][0]
+    assert 'IF($A2="","",' in first_row_formula
+    assert "INDEX(EdgeRaw!$A:$A," in first_row_formula
+    assert "MATCH($A2,EdgeRaw!$C:$C,0)" in first_row_formula
+
+
+def test_pool_type_column_header_is_written_once():
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+    header_call = next(c for c in client.update_calls if c[1] == "AA1")
+    assert header_call[2] == [["Pool"]]
 
 
 def test_source_formula_labels_edgeraw_ticks_and_pool_picks_typed_rows():

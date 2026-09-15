@@ -55,7 +55,7 @@ point is to make itself unnecessary once you know the commands below.
 ## The weekly loop
 
 ```bash
-dfs week new <url-of-the-copy>   # new week: point config.toml at a fresh sheet copy, sync
+dfs week new "<url-of-the-copy>" # new week: point config.toml at a fresh sheet copy, sync (quote the URL -- see below)
 dfs sync                         # re-run any time as lines/injuries/weather move
 # build the pool and lineups in the sheet (three ways in -- see WORKFLOW.md)
 dfs export -o lineups.csv        # validate + export DK's bulk-upload format
@@ -65,6 +65,10 @@ dfs week close --csv history.csv # end of week: reconcile Cash/GPP into Bankroll
 
 Every command exits non-zero on real failure -- nothing here silently
 reports success when something failed.
+
+`dfs week new` accepts either a full sheet URL (quote it -- the `?`/`#`
+it contains gets glob-expanded or dropped as a comment by zsh and some
+other shells if left bare) or just the bare sheet ID segment.
 
 ## Commands
 
@@ -83,7 +87,7 @@ Weekly-loop commands first, one-time setup last -- run `dfs --help` (or
 | `dfs lineups late-swap\|clear` | checking which rostered players are still swappable; clearing last week's picks on a new sheet copy. |
 | `dfs odds movement` | checking how betting lines have moved since your last sync. |
 | `dfs bankroll sync --csv <file>` | reconciling DK contest history into your bankroll tab. |
-| `dfs week new <url>` / `dfs week close --csv <file>` | starting a new week's sheet, or closing out the one you're on. |
+| `dfs week new "<url>"` / `dfs week close --csv <file>` | starting a new week's sheet, or closing out the one you're on. |
 | `dfs auth tffb\|dk` | one-time interactive login for a source that needs a real browser session. |
 | `dfs setup ...` | one-time sheet construction (pool deck, EdgeRaw linking, styling, protection, ...) -- see `dfs setup --help`; `dfs setup sheet` runs the whole thing in order. |
 

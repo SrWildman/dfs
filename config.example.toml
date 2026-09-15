@@ -91,4 +91,3 @@ tab = "Results"
 header_row = 1
 first_row = 2
 last_row = 20
-entry_key_column = "L"

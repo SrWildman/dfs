@@ -36,14 +36,18 @@ a tab whose column *count* changes week to week is the precondition for
 the Phase 8 formula-shift bug (see CONTRIBUTING.md) if it's ever pasted
 into a sheet with hardcoded column references.
 
-LineMove, added in Phase 3, joins `line_movement.diff_odds()`'s output by
-team code (`Abbr`, already DK-compatible -- `rotowire_odds.py`'s own
-`abbr` field) directly onto `Team`, no intermediate game lookup needed.
-Also optional, same blank-not-omitted rule as everything else in this
+ImpMove/TotMove/SpdMove (ImpMove added in Phase 3 as "LineMove", renamed
+and joined by TotMove/SpdMove in Fix 2.2) join `line_movement.diff_odds()`'s
+output by team code (`Abbr`, already DK-compatible -- `rotowire_odds.py`'s
+own `abbr` field) directly onto `Team`, no intermediate game lookup
+needed. `diff_odds()` always computed all three deltas (team implied
+points, game total, spread); only the first ever reached EdgeRaw before
+this fix, under a name that didn't say which line had moved. Also
+optional, same blank-not-omitted rule as everything else in this
 paragraph.
 
-LineMove originally diffed against the *last sync* (`store.load_previous`)
--- reverted in Phase 5 after real use showed that's the wrong baseline: it
+This diffs against the *last sync* originally (`store.load_previous`) --
+reverted in Phase 5 after real use showed that's the wrong baseline: it
 depends entirely on how often you happen to run `dfs sync`, so the exact
 same real move could show as a big number or nothing depending on sync
 cadence, which isn't a signal, it's noise. It now diffs against the
@@ -139,7 +143,8 @@ EDGE_COLUMNS = [
     "Wind",
     "Avail",
     "Flag",
-    # LineMove is appended at the very end, not inserted among the
+    # ImpMove (renamed from LineMove, Fix 2.2 -- still the team implied
+    # points move) is appended at the very end, not inserted among the
     # existing columns above -- `dfs setup link-edge` already wrote
     # formulas into PlayerPoolRaw/Player Pool/Lineups with hardcoded
     # column-index integers pointing at Stadium/Roof/Wind/Avail/Flag's
@@ -147,14 +152,26 @@ EDGE_COLUMNS = [
     # column's position without updating those already-written formulas'
     # hardcoded integers -- the exact Phase 8 bug class (see
     # CONTRIBUTING.md). Anything new added here must go at the end until
-    # `dfs setup link-edge` is re-run against a cleared block.
-    "LineMove",
+    # `dfs setup link-edge` is re-run against a cleared block. A rename in
+    # place (this one) is safe -- the position doesn't move, only the
+    # header text does, and nothing outside this file hardcodes that text.
+    "ImpMove",
     # GameStart, added in Phase 5, follows the same append-only rule.
     "GameStart",
     # OwnPct, added when Leverage's scale bug was fixed, likewise appended
     # rather than placed next to CeilPct where it reads more naturally --
     # Phase 3's reorder is where columns finally move to a designed order.
     "OwnPct",
+    # OverUnder/Spread (Fix 2.3): already computed into GameEnv, never
+    # surfaced directly. Same append-only rule as everything else here.
+    "OverUnder",
+    "Spread",
+    # TotMove/SpdMove (Fix 2.2): diff_odds() always computed these
+    # alongside what's now ImpMove; only ImpMove ever reached EdgeRaw.
+    # Appended, not placed next to ImpMove, for the same append-only
+    # reason as everything else in this tail.
+    "TotMove",
+    "SpdMove",
 ]
 
 
@@ -219,11 +236,20 @@ def _attach_weather(merged: pd.DataFrame, weather: pd.DataFrame | None) -> pd.Da
 
 
 def _attach_line_movement(merged: pd.DataFrame, line_movement: pd.DataFrame | None) -> pd.DataFrame:
+    """Fix 2.2: `diff_odds()` already computes all three deltas
+    (TeamPointsDelta, TotalDelta, SpreadDelta); only the first ever
+    reached EdgeRaw, under a name that didn't say which line moved. All
+    three are surfaced now: ImpMove (team implied points -- what LineMove
+    used to be), TotMove (game total), SpdMove (spread)."""
     if line_movement is None or line_movement.empty:
-        merged["LineMove"] = pd.NA
+        merged["ImpMove"] = pd.NA
+        merged["TotMove"] = pd.NA
+        merged["SpdMove"] = pd.NA
         return merged
-    delta_by_team = line_movement.set_index("Abbr")["TeamPointsDelta"]
-    merged["LineMove"] = merged["Team"].map(delta_by_team)
+    by_team = line_movement.set_index("Abbr")
+    merged["ImpMove"] = merged["Team"].map(by_team["TeamPointsDelta"])
+    merged["TotMove"] = merged["Team"].map(by_team["TotalDelta"])
+    merged["SpdMove"] = merged["Team"].map(by_team["SpreadDelta"])
     return merged
 
 
@@ -237,21 +263,30 @@ def _dst_nickname(full_team_name: str) -> str:
 
 
 def _flag_for_row(row: pd.Series) -> str:
+    """Every matching flag, space-separated in priority order -- a player
+    who is both WIND and LEVERAGE showed only WIND under the old
+    first-match-wins rule, silently hiding the second condition. All of
+    these can be simultaneously true of the same player, so all of them
+    are surfaced (`sheet_style.FLAG_CHIPS` matches on TEXT_CONTAINS
+    accordingly, not TEXT_EQ)."""
+    flags = []
     if row["Avail"] in OUT_STATUSES:
-        return "OUT"
+        flags.append("OUT")
     if pd.notna(row["Wind"]) and row["Wind"] >= WIND_FLAG_THRESHOLD_MPH:
-        return "WIND"
-    if pd.notna(row["LineMove"]) and row["LineMove"] >= LINE_MOVE_FLAG_THRESHOLD:
-        return "LINE↑"
-    if pd.notna(row["LineMove"]) and row["LineMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
-        return "LINE↓"
+        flags.append("WIND")
+    # LINE↑/↓ keys off ImpMove specifically (Fix 2.2) -- TotMove/SpdMove
+    # are shown for context but don't drive this flag.
+    if pd.notna(row["ImpMove"]) and row["ImpMove"] >= LINE_MOVE_FLAG_THRESHOLD:
+        flags.append("LINE↑")
+    if pd.notna(row["ImpMove"]) and row["ImpMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
+        flags.append("LINE↓")
     if pd.notna(row["Leverage"]) and row["Leverage"] >= LEVERAGE_FLAG_THRESHOLD:
-        return "LEVERAGE"
-    # No `is_real` guard needed: ProjOwn reads 0 for everyone until TFFB
-    # publishes ownership, so this can't fire before then regardless.
+        flags.append("LEVERAGE")
+    # No ownership-published guard needed: ProjOwn reads 0 for everyone
+    # until TFFB publishes it, so this can't fire before then regardless.
     if row["ProjOwn"] >= CHALK_OWNERSHIP_THRESHOLD:
-        return "CHALK"
-    return ""
+        flags.append("CHALK")
+    return " ".join(flags)
 
 
 def build_edge_frame(
@@ -313,6 +348,12 @@ def build_edge_frame(
         merged["Leverage"] = pd.NA
 
     merged["GameEnv"] = _game_env_scores(merged["Game"], merged["OU"], merged["Spread"])
+    # Fix 2.3: O/U and Spread were computed into GameEnv but never
+    # surfaced on EdgeRaw itself -- renamed OverUnder here (not OU) so its
+    # header doesn't collide with Player Pool/Lineups' own "O/U" header
+    # text sourced from a different tab (oddsFinal via PlayerPoolRaw).
+    # Spread needs no rename; TFFB's own field is already called that.
+    merged["OverUnder"] = merged["OU"]
 
     merged = _attach_games(merged, games)
     merged = _attach_weather(merged, weather)

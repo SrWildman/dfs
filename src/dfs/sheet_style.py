@@ -44,8 +44,24 @@ function happens to touch it first.
   named in `FIELD_COLOR_SCALES`/`FIELD_FORMATS`. Reversed (max color at the
   low end) for a rank column, where 1st is best. A true diverging scale
   (`mid_type="NUMBER", mid_value="0"`, white midpoint) is for a signed
-  delta where zero -- not the median -- is the meaningful center: LineMove
-  on EdgeRaw and Movement, nowhere else.
+  delta where zero -- not the median -- is the meaningful center: ImpMove,
+  TotMove, SpdMove and Spread, nowhere else.
+- White -> amber -> red (`WARM_MIN`/`WARM_MID`/`WARM_MAX`, kind `_WARM`) is
+  the ONE exception to "more is better": ownership (`ProjOwn` on EdgeRaw,
+  `Rstr%` on Player Pool/Lineups). High ownership is chalk -- a caution,
+  not a quality -- so it never gets the green=good treatment, and
+  deliberately reuses `WARN_BG`/`CRIT_BG`'s exact hues rather than
+  inventing a fourth palette, so it still reads as the workbook's existing
+  warning language.
+- Flat grey (`ZERO_GREY_BG`) on an exact `0` in a `ZERO_EXCLUDED_COLUMNS`
+  column (currently `ProjOwn`/`Rstr%`) means "no real value yet," not
+  "the worst of the range" -- a real, common zero (unpublished ownership
+  reads 0 for the whole slate until midweek) would otherwise anchor a
+  gradient's low end and compress everyone else's actual spread into a
+  sliver of it. The gradient's own minpoint for these columns is computed
+  over non-zero values only (a live `MINIFS` formula), and the grey chip
+  is added after the gradient so it wins on an exact zero -- both rely on
+  the same insert-at-front behavior described on `FLAG_CHIPS` below.
 - Chips (`_chip`, solid background + bold matching text) mark categorical
   STATE only -- Flag, Avail, the Guardrails column, position tints. Never
   put a chip on a number; that's what the colour scales are for.
@@ -62,6 +78,7 @@ function happens to touch it first.
 from __future__ import annotations
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.sheet_links import LINKED_EDGE_COLUMNS
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
 
@@ -169,6 +186,7 @@ FIELD_FORMATS = {
     "Ceiling": _num("0.0"),
     "O/U": _num("0.0"),
     "OU": _num("0.0"),
+    "OverUnder": _num("0.0"),
     "Team Implied": _num("0.0"),
     "GameEnv": _num("0.0"),
     "Total": _num("0.0"),
@@ -176,7 +194,9 @@ FIELD_FORMATS = {
     "CeilPct": _num("0.0"),
     "OwnPct": _num("0.0"),
     "Spread": _num('"+"0.0;"-"0.0;0.0'),
-    "LineMove": _num('"+"0.0;"-"0.0;0.0'),
+    "ImpMove": _num('"+"0.0;"-"0.0;0.0'),
+    "TotMove": _num('"+"0.0;"-"0.0;0.0'),
+    "SpdMove": _num('"+"0.0;"-"0.0;0.0'),
     "Val": _num("0.00"),
     "CeilVal": _num("0.00"),
     "Rstr%": _num("0.0%", "PERCENT"),
@@ -228,6 +248,16 @@ def apply_field_formats(
 _GRADIENT = "gradient"  # red -> yellow -> green, more is better
 _DIVERGING = "diverging"  # red -> white -> green, zero is the midpoint
 _REVERSED = "reversed"  # green -> yellow -> red, LOW is better
+# White -> amber -> red: ownership only. Deliberately NOT green=good --
+# Sam: high ownership is CHALK, caution rather than quality, and this is
+# the one place in the workbook where "more" isn't "better" (Fix 2.8).
+# Reuses WARN_BG/CRIT_BG's exact hues so it reads as the same warning
+# language as the rest of the workbook, just applied continuously.
+_WARM = "warm"
+
+WARM_MIN = WHITE
+WARM_MID = _rgb("#F7E9CF")  # == WARN_BG
+WARM_MAX = _rgb("#F8DEDA")  # == CRIT_BG
 
 FIELD_COLOR_SCALES = {
     "ProjPts": _GRADIENT,
@@ -241,19 +271,32 @@ FIELD_COLOR_SCALES = {
     "Team Implied": _GRADIENT,
     "O/U": _GRADIENT,
     "OU": _GRADIENT,
+    "OverUnder": _GRADIENT,
     "Total": _GRADIENT,
-    "LineMove": _DIVERGING,
+    "ImpMove": _DIVERGING,
+    "TotMove": _DIVERGING,
+    "SpdMove": _DIVERGING,
     "Spread": _DIVERGING,
     # A low OppPosRank is the tough matchup here (this opponent allows the
     # FEWEST fantasy points at this position) -- same "1st is best"
     # convention as the SoS tabs' own `Rank` column (`style_sos_tab`).
     "OppPosRank": _REVERSED,
+    "ProjOwn": _WARM,
+    "Rstr%": _WARM,
 }
 
-# Deliberately absent from FIELD_COLOR_SCALES: `Salary`/`DK Sal` (a
-# constraint, not a quality -- scaling it would imply cheap is good) and
-# `Rstr%` (has its own PERCENT format in FIELD_FORMATS, but ownership isn't
-# a "more/less is better" quantity on its own).
+# Deliberately absent from FIELD_COLOR_SCALES: `Salary`/`DK Sal` -- a
+# constraint, not a quality; scaling it would imply cheap is good.
+
+# Columns where a real, common zero would otherwise anchor a gradient's
+# low end and compress everyone else's actual spread into a sliver of the
+# scale (Fix 2.7) -- unpublished ownership reads 0 for the whole slate
+# until TFFB computes it midweek. Gets its own flat grey chip (added
+# after the gradient so it wins -- see the shared insert-at-front note on
+# FLAG_CHIPS above) and the gradient's own minpoint is computed over
+# non-zero values only via a live MINIFS formula, not the true minimum.
+ZERO_EXCLUDED_COLUMNS = frozenset({"ProjOwn", "Rstr%"})
+ZERO_GREY_BG = _rgb("#EDEEF1")
 
 
 def apply_field_color_scales(
@@ -261,13 +304,27 @@ def apply_field_color_scales(
 ) -> int:
     """Colour-scale every column in `header` whose text is a
     FIELD_COLOR_SCALES key. Clears each matched column's own conditional
-    formats first (one column at a time) so this stays correct even when
-    called on its own against a column that previously carried a stray
-    rule -- though the real cleanup of a tab's pre-existing mess is its
-    caller's whole-tab `clear_conditional_formats` (see `polish_edge`/
-    `polish_builder_tab`), since a hand-applied rule can span multiple
-    columns at once and a column-scoped clear alone can't reliably catch
-    that. Returns how many columns matched, for callers' own status lines.
+    formats first, scoped to BOTH that column AND this exact data range
+    (`header_row+1`..`last_row`) -- though the real cleanup of a tab's
+    pre-existing mess is its caller's whole-tab `clear_conditional_formats`
+    (see `polish_edge`/`polish_builder_tab`), since a hand-applied rule can
+    span multiple columns at once and a column-scoped clear alone can't
+    reliably catch that.
+
+    Fix A2, found live: a column-ONLY clear here (no row scoping) doesn't
+    just clear THIS call's own prior rule -- it deletes every rule on that
+    column regardless of row, including a DIFFERENT caller's rule covering
+    different rows on the exact same column. `polish_pool_deck` calls this
+    for the pool deck's own narrow window (rows 4-9) right after
+    `polish_builder_tab` has just color-scaled the same columns across the
+    20 real lineup blocks below (rows 12-268) -- a column-only clear from
+    the deck's own call silently deleted the blocks' already-correct
+    gradient on every single `dfs setup polish` run, which is why
+    Lineups' real blocks had chips (Flag/Avail/Venue, cleared by
+    `polish_guardrails`/`polish_builder_tab` itself with different scoping)
+    but never any colour scale. Scoping the clear to both column and row
+    range means each caller's own clear can only ever touch its own rule.
+    Returns how many columns matched, for callers' own status lines.
     """
     applied = 0
     data_start = header_row + 1
@@ -277,7 +334,16 @@ def apply_field_color_scales(
             continue
         letter = column_letter(i)
         a1 = f"{letter}{data_start}:{letter}{last_row}"
-        client.clear_conditional_formats(tab, column=letter)
+        client.clear_conditional_formats(tab, column=letter, row_range=(data_start, last_row))
+        # Fix 2.7: a real, common zero (unpublished ownership) would
+        # otherwise anchor the gradient's low end -- start it from the
+        # lowest NON-zero value instead, via a live MINIFS formula rather
+        # than a value computed once and left to go stale.
+        min_kwargs = (
+            {"min_type": "NUMBER", "min_value": f'=MINIFS({a1},{a1},"<>0")'}
+            if name in ZERO_EXCLUDED_COLUMNS
+            else {}
+        )
         if kind == _DIVERGING:
             client.add_color_scale(
                 tab,
@@ -290,8 +356,23 @@ def apply_field_color_scales(
             )
         elif kind == _REVERSED:
             client.add_color_scale(tab, a1, min_color=GRAD_MAX, mid_color=GRAD_MID, max_color=GRAD_MIN)
+        elif kind == _WARM:
+            client.add_color_scale(
+                tab, a1, min_color=WARM_MIN, mid_color=WARM_MID, max_color=WARM_MAX, **min_kwargs
+            )
         else:
-            client.add_color_scale(tab, a1, min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX)
+            client.add_color_scale(
+                tab, a1, min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX, **min_kwargs
+            )
+        if name in ZERO_EXCLUDED_COLUMNS:
+            # Added AFTER the gradient above, so it lands at index 0 and
+            # wins for any exact-zero cell -- see FLAG_CHIPS' comment on
+            # add_boolean_rule/add_color_scale's shared insert-at-front
+            # behavior, verified against a live sheet's raw
+            # conditionalFormats metadata.
+            client.add_boolean_rule(
+                tab, a1, condition_type="NUMBER_EQ", values=["0"], fmt={"backgroundColor": ZERO_GREY_BG}
+            )
         applied += 1
     return applied
 
@@ -322,20 +403,28 @@ EDGE_WIDTHS = {
     "Roof": 76,
     "Wind": 68,
     "Avail": 60,
-    "Flag": 96,
-    "LineMove": 78,
+    # Widened from 96: Flag can now hold multiple space-separated tokens
+    # (Fix 2.1), e.g. "WIND LINE↑ LEVERAGE".
+    "Flag": 170,
+    "ImpMove": 78,
+    "TotMove": 78,
+    "SpdMove": 78,
     "GameStart": 132,
     "OwnPct": 68,
+    "OverUnder": 62,
+    "Spread": 62,
 }
 
-# Collapsed by default: the two stadium descriptors, which matter to the
-# code and almost never to you. Grouped, not hidden -- the +/- control
-# above the column letters brings them straight back. Id used to be a
-# third entry here, but it's genuinely never useful to look at (a raw
-# DraftKings player ID, not a human-meaningful value), so it's fully
-# hidden instead (see polish_edge's hide_columns call) -- a group would
-# just be a second click for something that never needs to come back.
-EDGE_COLUMN_GROUPS = [("Stadium", "Roof"), ("GameStart", "GameStart")]
+# Stadium/Roof/Wind are deliberately NOT grouped here (Fix 2.9) -- Sam
+# wants weather visible by default on EdgeRaw itself, where it's the tab
+# you're actually reading closely; the collapsed-by-default treatment is
+# Lineups/Player Pool-only (see sheet_links.link_edge_columns), where the
+# extra width matters more than the extra detail. Id used to be grouped
+# here too, but it's genuinely never useful to look at (a raw DraftKings
+# player ID, not a human-meaningful value), so it's fully hidden instead
+# (see polish_edge's hide_columns call) -- a group would just be a second
+# click for something that never needs to come back.
+EDGE_COLUMN_GROUPS = [("GameStart", "GameStart")]
 
 # Muted, per-position backgrounds -- just enough to see position boundaries
 # while scanning a list sorted by Leverage, not loud enough to compete with
@@ -359,13 +448,27 @@ WIND_CHIP_THRESHOLD = "15"
 # player's row instead of coexisting with them.
 POOL_TINT_BG = _rgb("#EAF1FB")
 
+# Ordered LEAST urgent first, matching derived._flag_for_row's priority
+# (OUT, WIND, LINE↑/↓, LEVERAGE, CHALK) IN REVERSE. Verified empirically
+# against a live sheet's raw `conditionalFormats` metadata: both
+# `add_boolean_rule` and `add_color_scale` explicitly pass `"index": 0`,
+# so each new rule is inserted at the very FRONT of the sheet's rule list
+# -- the LAST one added ends up at index 0, which Sheets checks first.
+# That means, for a set of rules added in a loop over this dict, the
+# highest-priority entry has to be the one defined LAST, not first, or
+# the visual chip on an overlapping cell silently picks the wrong flag.
+# This matters now that Flag can hold more than one space-separated token
+# (Fix 2.1 -- e.g. "WIND LEVERAGE"): whichever of the matching rules was
+# added last wins the cell's colour, so this order must track priority in
+# reverse for that colour to actually match what the text says is most
+# urgent.
 FLAG_CHIPS = {
-    "OUT": _chip(CRIT_BG, CRIT_FG),
-    "WIND": _chip(WARN_BG, WARN_FG),
-    "LEVERAGE": _chip(OK_BG, OK_FG),
     "CHALK": _chip(FLAT_BG, FLAT_FG),
-    "LINE↑": _chip(OK_BG, OK_FG),
+    "LEVERAGE": _chip(OK_BG, OK_FG),
     "LINE↓": _chip(CRIT_BG, CRIT_FG),
+    "LINE↑": _chip(OK_BG, OK_FG),
+    "WIND": _chip(WARN_BG, WARN_FG),
+    "OUT": _chip(CRIT_BG, CRIT_FG),
 }
 
 AVAIL_CHIPS = {
@@ -380,6 +483,14 @@ AVAIL_CHIPS = {
 SOURCE_CHIPS = {
     "EdgeRaw": _chip(FLAT_BG, FLAT_FG),
     "Picks": _chip(OK_BG, OK_FG),
+}
+
+# Player Pool's own surfaced Pool value (Fix 2.11) -- categorical state,
+# same treatment as Source/Venue, never a colour scale.
+POOL_TYPE_CHIPS = {
+    "Cash": _chip(OK_BG, OK_FG),
+    "GPP": _chip(WARN_BG, WARN_FG),
+    "Both": _chip(FLAT_BG, FLAT_FG),
 }
 
 # Venue (Fix 2.1): `H`/`R` text, categorical only -- home/road is
@@ -409,7 +520,8 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     Widths, a dark frozen header, Id hidden and Pool+Name pinned while you
     scroll right, light row banding, number formats on every numeric
     column, FIELD_COLOR_SCALES applied to every matching column (a
-    diverging scale for LineMove, gradient for the rest), a muted
+    diverging scale for ImpMove/TotMove/SpdMove/Spread, gradient for the
+    rest), a muted
     per-position tint, a Wind chip matching Slate Grid's, Flag/Avail as
     chips, the Name cell tinted when that player is already pooled and
     bolded when Flag is set, and LevBasis greyed as the data-freshness
@@ -454,7 +566,8 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 
     # FIELD_COLOR_SCALES (Fix 2.1) -- the one canonical policy every tab
     # that shows a given field applies; on EdgeRaw that's ProjPts, Ceiling,
-    # Val, CeilVal, Leverage, GameEnv (gradient) and LineMove (diverging).
+    # Val, CeilVal, Leverage, GameEnv, OverUnder (gradient), ProjOwn (warm),
+    # and ImpMove/TotMove/SpdMove/Spread (diverging).
     n_scaled = apply_field_color_scales(
         client, edge_tab, [POOL_HEADER, *EDGE_COLUMNS], header_row=1, last_row=EDGE_ROWS
     )
@@ -483,11 +596,16 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     flag_col = _edge_letter("Flag")
     if flag_col:
         client.format_range(edge_tab, f"{flag_col}2:{flag_col}{EDGE_ROWS}", {"horizontalAlignment": "CENTER"})
+        # TEXT_CONTAINS, not TEXT_EQ: Flag can hold more than one
+        # space-separated token now (Fix 2.1). None of the six tokens is a
+        # substring of another (checked -- LINE↑/LINE↓ in particular don't
+        # collide, different trailing glyph), so substring matching can't
+        # misfire onto the wrong flag.
         for text, fmt in FLAG_CHIPS.items():
             client.add_boolean_rule(
                 edge_tab,
                 f"{flag_col}2:{flag_col}{EDGE_ROWS}",
-                condition_type="TEXT_EQ",
+                condition_type="TEXT_CONTAINS",
                 values=[text],
                 fmt=fmt,
             )
@@ -532,10 +650,12 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
         pooled_and_flagged = {"backgroundColor": POOL_TINT_BG, "textFormat": {"bold": True}}
         pooled_only = {"backgroundColor": POOL_TINT_BG}
         flagged_only = {"textFormat": {"bold": True}}
+        # Pool is a blank/Cash/GPP/Both dropdown now, not a TRUE/FALSE
+        # checkbox (Fix 2.11) -- any non-blank value counts as "pooled".
         rules = [
-            (f'=AND({pool_ref}=TRUE,{flag_ref}<>"")', pooled_and_flagged),
-            (f'=AND({pool_ref}=TRUE,{flag_ref}="")', pooled_only),
-            (f'=AND({pool_ref}<>TRUE,{flag_ref}<>"")', flagged_only),
+            (f'=AND({pool_ref}<>"",{flag_ref}<>"")', pooled_and_flagged),
+            (f'=AND({pool_ref}<>"",{flag_ref}="")', pooled_only),
+            (f'=AND({pool_ref}="",{flag_ref}<>"")', flagged_only),
         ]
         for formula, fmt in rules:
             client.add_boolean_rule(
@@ -550,7 +670,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
             edge_tab,
             f"{name_col}2:{name_col}{EDGE_ROWS}",
             condition_type="CUSTOM_FORMULA",
-            values=[f"=${POOL_COLUMN}2=TRUE"],
+            values=[f'=${POOL_COLUMN}2<>""'],
             fmt={"backgroundColor": POOL_TINT_BG},
         )
 
@@ -583,6 +703,7 @@ BUILDER_WIDTHS = {
     "DK Sal": 78,
     "% of Rstr": 72,
     "Source": 64,
+    "Pool": 64,
 }
 
 
@@ -680,6 +801,7 @@ def polish_builder_tab(
         ("Avail", AVAIL_CHIPS),
         ("Source", SOURCE_CHIPS),
         ("Venue", VENUE_CHIPS),
+        ("Pool", POOL_TYPE_CHIPS),
     ):
         if column_name not in header:
             continue
@@ -688,11 +810,14 @@ def polish_builder_tab(
         client.format_range(
             tab, f"{letter}{data_start}:{letter}{last_row}", {"horizontalAlignment": "CENTER"}
         )
+        # Flag alone can hold more than one space-separated token (Fix
+        # 2.1); Avail/Source/Venue are still single exact values.
+        condition_type = "TEXT_CONTAINS" if column_name == "Flag" else "TEXT_EQ"
         for text, fmt in chips.items():
             client.add_boolean_rule(
                 tab,
                 f"{letter}{data_start}:{letter}{last_row}",
-                condition_type="TEXT_EQ",
+                condition_type=condition_type,
                 values=[text],
                 fmt=fmt,
             )
@@ -782,7 +907,9 @@ def polish_pool_deck(client: SheetsClient, lineups_tab: str, *, header_row: int,
 # ---------------------------------------------------------------------------
 
 _GUARDRAILS_COLUMN = "O"
-_GUARDRAILS_HEADER = "Check"
+# Renamed from "Check" -- Sam asked what it was, since the old name didn't
+# say. Header text only; the column itself doesn't move (Fix A1).
+_GUARDRAILS_HEADER = "Issues"
 _GUARDRAILS_CHIPS = [
     ("TEXT_CONTAINS", "DUPLICATE", _chip(CRIT_BG, CRIT_FG)),
     ("TEXT_CONTAINS", "OVER", _chip(CRIT_BG, CRIT_FG)),
@@ -796,23 +923,26 @@ _GUARDRAILS_CHIPS = [
 
 def _slot_check_formula(start: int, end: int, row: int, avail_col: str) -> str:
     """Flags a name duplicated elsewhere in its own block, else surfaces
-    that pick's linked Avail flag (OUT/IR/Q) if it has one."""
-    last_slot = end - 1
+    that pick's linked Avail flag (OUT/IR/Q) if it has one. `end` is the
+    block's own last REAL roster row now (Fix 2.4 -- it used to also be
+    the totals row), so the duplicate check spans `start..end` directly,
+    no `-1` needed."""
     return (
         f'=IF($A{row}="","",'
-        f'IF(COUNTIF($A${start}:$A${last_slot},$A{row})>1,"DUPLICATE",'
+        f'IF(COUNTIF($A${start}:$A${end},$A{row})>1,"DUPLICATE",'
         f'IF(${avail_col}{row}<>"",${avail_col}{row},"")))'
     )
 
 
 def _totals_check_formula(start: int, end: int, totals_row: int) -> str:
-    """Salary cap, roster completeness, or OK -- on the block's totals row."""
-    last_slot = end - 1
+    """Salary cap, roster completeness, or OK -- on the block's totals
+    row (Fix 2.4: `totals_row` is `end + 1`, a real separate row now, not
+    `end` itself)."""
     return (
-        f'=IF(COUNTA($A${start}:$A${last_slot})=0,"",'
+        f'=IF(COUNTA($A${start}:$A${end})=0,"",'
         f'IF(D{totals_row}>50000,"OVER "&TEXT(D{totals_row}-50000,"$#,##0"),'
-        f"IF(COUNTA($A${start}:$A${last_slot})<9,"
-        f'"INCOMPLETE "&COUNTA($A${start}:$A${last_slot})&"/9","OK")))'
+        f"IF(COUNTA($A${start}:$A${end})<9,"
+        f'"INCOMPLETE "&COUNTA($A${start}:$A${end})&"/9","OK")))'
     )
 
 
@@ -831,8 +961,81 @@ def polish_lineups_input_column(client: SheetsClient, tab: str, name_blocks: lis
     return f"{tab}: column A marked as input across {len(name_blocks)} lineup block(s)"
 
 
-def polish_guardrails(
+def polish_lineups_totals_rows(
     client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+) -> str:
+    """Fix 2.4: every totals row (the row directly below each block's 9th
+    real slot) was being treated as a tenth roster slot by every
+    VLOOKUP-by-name column -- Venue, OppPosRank, Val, and the entire
+    EdgeRaw-linked block (CeilVal..Flag), all permanently `#N/A` since a
+    totals row's own Name cell (column A) is always blank. This clears
+    those dead cells, sums Ceil onto the totals row the same way Pts
+    already is (only Salary and Pts were summed before; Sam had been
+    hand-editing Ceil totals into lineups), and labels the row so it
+    reads as a footer rather than a broken slot. Rstr% and Issues (O) are
+    left alone -- both already hold real, working formulas on the totals
+    row (a real `SUM`, and the real cap/completeness check respectively),
+    not dead VLOOKUPs, despite superficially living in the same I..N
+    range the dead columns do.
+
+    Column positions are found from the tab's own header, never
+    hardcoded -- same reasoning as every other lookup-by-name function in
+    this file. Idempotent: every write here is a plain overwrite (a
+    formula, a label, or a cleared cell), safe to re-run.
+    """
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: no header found at row {header_row} -- skipped"
+
+    def col(name: str) -> str | None:
+        return column_letter(header.index(name)) if name in header else None
+
+    dead_columns = [c for c in ("Venue", "OppPosRank", "Val", *LINKED_EDGE_COLUMNS) if col(c)]
+    ceil_col = col("Ceil")
+    # "Total" immediately precedes the Salary SUM (Team's own column is
+    # blank on a totals row anyway); "Remaining" immediately FOLLOWS the
+    # remaining-cap formula, which itself sits in O/U's column position
+    # (repurposed there, pre-existing) with nothing free to its left --
+    # Spread's column, directly right of it, is the closest clear slot.
+    total_label_col = col("Team")
+    remaining_label_col = col("Spread")
+
+    cleared = 0
+    labeled = 0
+    summed = 0
+    for start, end in name_blocks:
+        totals_row = end + 1
+        for name in dead_columns:
+            letter = col(name)
+            client.update_range(tab, f"{letter}{totals_row}", [[""]])
+            cleared += 1
+        if ceil_col:
+            ceil_sum = f"=SUM({ceil_col}{start}:{ceil_col}{end})"
+            client.update_range(tab, f"{ceil_col}{totals_row}", [[ceil_sum]])
+            summed += 1
+        if total_label_col:
+            client.update_range(tab, f"{total_label_col}{totals_row}", [["Total"]])
+            labeled += 1
+        if remaining_label_col:
+            client.update_range(tab, f"{remaining_label_col}{totals_row}", [["Remaining"]])
+            labeled += 1
+
+    return (
+        f"{tab}: {len(name_blocks)} totals row(s) -- {cleared} dead VLOOKUP(s) cleared, "
+        f"{summed} Ceil sum(s) added, {labeled} label(s) written"
+    )
+
+
+def polish_guardrails(
+    client: SheetsClient,
+    tab: str,
+    *,
+    header_row: int,
+    name_blocks: list[tuple[int, int]],
+    header_repeats_at: list[int] | None = None,
 ) -> str:
     """Each lineup block currently checks exactly one thing (salary
     remaining, via its own D/E-column formulas). This adds the checks that
@@ -846,6 +1049,14 @@ def polish_guardrails(
     -- exactly the class of assumption that caused this feature's own
     prerequisite bug (see CONTRIBUTING.md's changelog); skips cleanly if
     `dfs setup link-edge` hasn't run yet.
+
+    `header_repeats_at` (Fix 2.6) re-prints the header at Lineups' repeated
+    sub-header rows too -- the original version only wrote it once, at
+    `header_row`, which is why 19 of 20 blocks were missing it (found by
+    Sam: "the Check header appears only on the pool and the first
+    lineup"). `link_edge_columns`/`polish_builder_tab` already take the
+    same parameter for the same reason; this was the one column that
+    hadn't caught up.
 
     Writing here is safe regardless of what's linked at Q..Z: O sits
     strictly to their left, so nothing here can collide with that block.
@@ -864,14 +1075,17 @@ def polish_guardrails(
 
     client.set_column_widths(tab, {_GUARDRAILS_COLUMN: 110})
     client.update_range(tab, f"{_GUARDRAILS_COLUMN}{header_row}", [[_GUARDRAILS_HEADER]])
+    for repeat_row in header_repeats_at or []:
+        client.update_range(tab, f"{_GUARDRAILS_COLUMN}{repeat_row}", [[_GUARDRAILS_HEADER]])
 
     for start, end in name_blocks:
-        rows = [[_slot_check_formula(start, end, row, avail_col)] for row in range(start, end)]
-        rows.append([_totals_check_formula(start, end, end)])
-        client.update_range(tab, f"{_GUARDRAILS_COLUMN}{start}:{_GUARDRAILS_COLUMN}{end}", rows)
+        totals_row = end + 1
+        rows = [[_slot_check_formula(start, end, row, avail_col)] for row in range(start, end + 1)]
+        rows.append([_totals_check_formula(start, end, totals_row)])
+        client.update_range(tab, f"{_GUARDRAILS_COLUMN}{start}:{_GUARDRAILS_COLUMN}{totals_row}", rows)
 
     client.clear_conditional_formats(tab, column=_GUARDRAILS_COLUMN)
-    last_row = max(end for _, end in name_blocks)
+    last_row = max(end for _, end in name_blocks) + 1
     a1_range = f"{_GUARDRAILS_COLUMN}2:{_GUARDRAILS_COLUMN}{last_row}"
     for condition_type, value, fmt in _GUARDRAILS_CHIPS:
         client.add_boolean_rule(tab, a1_range, condition_type=condition_type, values=[value], fmt=fmt)
@@ -900,6 +1114,7 @@ def polish_bankroll(
     *,
     cash: tuple[int, int, int],
     gpp: tuple[int, int, int],
+    entry_key_columns: tuple[str, ...] = (),
 ) -> str:
     """Direction G: the same ledger, read as a scoreboard.
 
@@ -908,11 +1123,20 @@ def polish_bankroll(
     columns formatted, and green/red on the net figures. `cash` and `gpp`
     are (header_row, first_row, last_row) straight from config, so no row
     number is written here.
+
+    `entry_key_columns` (Fix 2.17) hides `bankroll.sync_bucket`'s dedupe
+    key column(s) -- an unexplained value with no header sitting in the
+    middle of the ledger otherwise (Sam: "a stray column appears at L
+    after sync"). Hidden, not deleted or moved -- `sync_bucket` still
+    writes real dedupe keys there every sync; same "grouped/hidden, never
+    gone" treatment as EdgeRaw's own `Id` column.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
 
     client.clear_conditional_formats(tab)
+    for col in sorted(set(entry_key_columns)):
+        client.hide_columns(tab, col, col)
 
     for rng in BANKROLL_CURRENCY_CELLS:
         client.format_range(tab, rng, _CURRENCY)
@@ -964,27 +1188,31 @@ def polish_bankroll(
 # Left to right in the order the week actually runs: research, shortlist,
 # build, enter, monitor, reconcile. Tabs absent from a given sheet are
 # skipped, so this is safe on both the template and the live copy.
+# Fix 2.12: reordered to Sam's explicit most-used-first order. The phase
+# tag (second element, drives tab colour-coding) stays each tab's real
+# phase-of-week regardless of its new position -- this reorders the tab
+# STRIP only, it doesn't reclassify anything.
 WEEK_ORDER = [
     ("Board", "decide"),
     ("EdgeRaw", "decide"),
-    ("Slate Grid", "decide"),
     ("Player Pool", "build"),
     ("Pool Picks", "build"),
     ("Lineups", "build"),
-    ("Scratch", "build"),
-    ("DK Upload", "build"),
-    ("Movement", "contest"),
-    ("Exposure", "contest"),
-    ("GPPin", "contest"),
-    ("DKLineupsFinal", "contest"),
     ("Bankroll", "money"),
     ("Results", "money"),
+    ("Exposure", "contest"),
+    ("Slate Grid", "decide"),
+    ("Movement", "contest"),
+    ("GPPin", "contest"),
+    ("DKLineupsFinal", "contest"),
+    ("Scratch", "build"),
+    ("DK Upload", "build"),
+    ("SoSComb", "feed"),
     ("SoSQB", "feed"),
     ("SoSRB", "feed"),
     ("SoSWr", "feed"),
     ("SoSTE", "feed"),
     ("SoSDef", "feed"),
-    ("SoSComb", "feed"),
     ("Instructions", "decide"),
     ("PlayerPoolRaw", "feed"),
 ]
@@ -1074,7 +1302,7 @@ TAB_NOTES: dict[str, str] = {
     "Lineups": (
         "LINEUPS -- build your rosters here. Rows 1-9 are a sortable window into Player "
         "Pool (pick a position and sort field in row 1); type a player's name into column "
-        "A of a lineup block below to fill a slot. Check (column O) flags a duplicate, an "
+        "A of a lineup block below to fill a slot. Issues (column O) flags a duplicate, an "
         "unavailable player, or a salary/roster problem per lineup."
     ),
     "Scratch": (
@@ -1238,7 +1466,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     for rng in ("C7:C18", "D7:D18", "I7:I18"):
         client.add_color_scale(tab, rng, min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX)
     for text, fmt in FLAG_CHIPS.items():
-        client.add_boolean_rule(tab, "N7:N20", condition_type="TEXT_EQ", values=[text], fmt=fmt)
+        client.add_boolean_rule(tab, "N7:N20", condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
     for text, fmt in AVAIL_CHIPS.items():
         client.add_boolean_rule(tab, "M7:M20", condition_type="TEXT_EQ", values=[text], fmt=fmt)
     client.freeze(tab, rows=6)
@@ -1304,10 +1532,10 @@ def style_movement(client: SheetsClient, tab: str = "Movement") -> str:
     client.set_column_widths(tab, {"A": 165, "B": 92, "C": 92, "D": 152, "E": 96})
     client.format_range(tab, "A1", _TITLE_FMT)
     client.format_range(tab, "A3:E3", _HEADER_FMT)
-    client.format_range(tab, "C4:C60", FIELD_FORMATS["LineMove"])
+    client.format_range(tab, "C4:C60", FIELD_FORMATS["ImpMove"])
     # Diverging, not the standard red->yellow->green: this is a signed
     # delta and zero (no movement) is the meaningful midpoint, same
-    # reasoning as EdgeRaw's own LineMove column (see polish_edge).
+    # reasoning as EdgeRaw's own ImpMove column (see polish_edge).
     client.add_color_scale(
         tab,
         "C4:C60",
@@ -1318,7 +1546,7 @@ def style_movement(client: SheetsClient, tab: str = "Movement") -> str:
         mid_value="0",
     )
     for text, fmt in FLAG_CHIPS.items():
-        client.add_boolean_rule(tab, "E4:E60", condition_type="TEXT_EQ", values=[text], fmt=fmt)
+        client.add_boolean_rule(tab, "E4:E60", condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
     client.freeze(tab, rows=3, cols=1)
     return f"{tab}: styled (movement colour-scaled, flags chipped)"
 

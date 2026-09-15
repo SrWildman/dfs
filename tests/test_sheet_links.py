@@ -18,7 +18,7 @@ class SpySheetsClient:
         self.header_row = header_row
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.color_scale_calls: list[tuple[str, str]] = []
-        self.group_calls: list[tuple[str, str, str]] = []
+        self.group_calls: list[tuple[str, str, str, bool]] = []
         self.clear_group_calls: list[str] = []
 
     def read_range(self, tab_name: str, a1_range: str):
@@ -31,8 +31,8 @@ class SpySheetsClient:
     def add_color_scale(self, tab_name, a1_range, **_colors):
         self.color_scale_calls.append((tab_name, a1_range))
 
-    def group_columns(self, tab_name, first_col_a1, last_col_a1):
-        self.group_calls.append((tab_name, first_col_a1, last_col_a1))
+    def group_columns(self, tab_name, first_col_a1, last_col_a1, *, collapsed=False):
+        self.group_calls.append((tab_name, first_col_a1, last_col_a1, collapsed))
 
     def clear_column_groups(self, tab_name):
         self.clear_group_calls.append(tab_name)
@@ -160,10 +160,13 @@ def test_link_edge_columns_applies_color_scale_to_three_columns_only():
     assert len(client.color_scale_calls) == len(COLOR_SCALE_LINKED_COLUMNS)
 
 
-def test_link_edge_columns_groups_exactly_the_new_columns():
+def test_link_edge_columns_groups_and_collapses_only_the_weather_columns():
+    # Fix 2.9: only Stadium/Roof/Wind collapse by default here -- the
+    # decision columns before/after them (CeilVal..GameEnv, Avail/Flag)
+    # stay ungrouped and always visible.
     client = SpySheetsClient(header_row=["Name", "Pos."])  # width 2 -> next col C
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
-    assert client.group_calls == [("Player Pool", "C", "L")]
+    assert client.group_calls == [("Player Pool", "H", "J", True)]
 
 
 def test_link_edge_columns_run_twice_only_appends_once():

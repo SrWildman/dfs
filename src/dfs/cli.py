@@ -23,7 +23,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from dfs import paths, store
+from dfs import nfl_calendar, paths, store
 from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
 from dfs.doctor import run_doctor
@@ -35,6 +35,7 @@ from dfs.live_diff import diff_edge_flags
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
 from dfs.pool import clear_all, find_matches, read_players, set_pool
+from dfs.results_autofill import compute_week_results, write_results_updates
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
@@ -54,6 +55,7 @@ from dfs.sheet_style import (
     polish_edge,
     polish_guardrails,
     polish_lineups_input_column,
+    polish_lineups_totals_rows,
     polish_pool_deck,
     style_tier23_tabs,
     style_view_tabs,
@@ -70,7 +72,13 @@ from dfs.week import (
     parse_sheet_id_from_url,
     rewrite_sheet_id,
 )
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS, clear_previous_week
+from dfs.weekly_reset import (
+    LINEUPS_NAME_BLOCKS,
+    LINEUPS_TOTALS_ROWS,
+    PLAYER_POOL_NAME_BLOCKS,
+    clear_previous_week,
+    clear_synced_tabs,
+)
 
 # Rough NFL game length -- past this many hours since the LAST game of the
 # week kicked off, `dfs`'s launcher assumes the slate is done and suggests
@@ -203,7 +211,9 @@ def gather_state() -> LauncherState:
         state.lineups_error = str(e)
         return state
 
-    state.pool_count = sum(1 for row in pool_values if row and row[0].strip().upper() == "TRUE")
+    # Pool is a blank/Cash/GPP/Both dropdown now, not a TRUE/FALSE
+    # checkbox (Fix 2.11) -- any non-blank value counts as pooled.
+    state.pool_count = sum(1 for row in pool_values if row and row[0].strip())
 
     filled = 0
     for start, _end in LINEUPS_NAME_BLOCKS:
@@ -464,11 +474,13 @@ def sheets_polish(
     treatment, Flag/Avail chips, and the tab strip ordered by phase of the
     week -- none of which inserts, deletes, moves or renames a column, row
     or tab, so no VLOOKUP index, name block or config row range is
-    affected. The one exception is Lineups' Guardrails column (O): those
-    are real formula values, not styling, but they're additive-only
-    (O sits strictly left of the EdgeRaw-linked block and was never
-    written to before) and safe to re-run the same way -- see
-    `sheet_style.polish_guardrails`.
+    affected. Two exceptions write real formula values, not styling, but
+    both are safe to re-run the same way: Lineups' Guardrails column (O,
+    additive-only -- it sits strictly left of the EdgeRaw-linked block and
+    was never written to before, see `sheet_style.polish_guardrails`) and
+    each lineup block's totals row (clears the dead per-slot VLOOKUPs a
+    totals row was never a real 10th player for, sums Ceil, and labels
+    the row -- see `sheet_style.polish_lineups_totals_rows`).
 
     Safe to re-run: each tab's conditional formats are cleared before its
     own are applied (Guardrails clears only column O's rules, never the
@@ -498,8 +510,11 @@ def sheets_polish(
                 band_blocks=PLAYER_POOL_NAME_BLOCKS,
             )
         )
-        lineups_last = max(end for _, end in LINEUPS_NAME_BLOCKS)
+        # +1 past the last block's own last real row (Fix 2.4): the
+        # final totals row must still get FIELD_FORMATS/colour scales.
+        lineups_last = max(LINEUPS_TOTALS_ROWS)
         lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+        header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
         results.append(
             polish_builder_tab(
                 client,
@@ -508,7 +523,7 @@ def sheets_polish(
                 header_row=lineups_header_row,
                 freeze_rows=DECK_ROWS,
                 freeze_cols=0,
-                header_repeats_at=[start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]],
+                header_repeats_at=header_repeats_at,
                 band_blocks=LINEUPS_NAME_BLOCKS,
             )
         )
@@ -526,10 +541,19 @@ def sheets_polish(
                 cfg.lineups.builder_tab,
                 header_row=lineups_header_row,
                 name_blocks=LINEUPS_NAME_BLOCKS,
+                header_repeats_at=header_repeats_at,
             )
         )
         results.append(polish_lineups_input_column(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
         results.append(add_lineups_typo_guard(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
+        results.append(
+            polish_lineups_totals_rows(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:
             results.append(
                 polish_bankroll(
@@ -544,6 +568,10 @@ def sheets_polish(
                         cfg.bankroll.gpp.header_row,
                         cfg.bankroll.gpp.first_row,
                         cfg.bankroll.gpp.last_row,
+                    ),
+                    entry_key_columns=(
+                        cfg.bankroll.cash.entry_key_column,
+                        cfg.bankroll.gpp.entry_key_column,
                     ),
                 )
             )
@@ -1420,9 +1448,10 @@ def lineups_late_swap(
     any_shown = False
 
     for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
-        # Each block's first 9 rows are the roster (ROSTER_SLOTS order);
-        # its final row is a salary total, not a player -- see
-        # weekly_reset.py's LINEUPS_NAME_BLOCKS docstring.
+        # Each block IS the 9 roster rows now (ROSTER_SLOTS order) --
+        # the salary-total row directly below it is no longer part of the
+        # block at all (Fix 2.4) -- see weekly_reset.py's
+        # LINEUPS_NAME_BLOCKS docstring.
         offset = start - 2  # `raw` starts at row 2
         names = [_sheet_cell(raw, offset + i) for i in range(len(ROSTER_SLOTS))]
         if not any(n.strip() for n in names):
@@ -1633,6 +1662,18 @@ def week_new(
     for line in summary:
         console.print(f"[green]OK[/green] {line}")
 
+    # Fix 2.14: blank every synced source's tab BEFORE the first sync
+    # runs, not after -- a source that fails partway through must leave
+    # an empty tab, never the template's own stale (real-looking, but
+    # wrong) leftover data. See weekly_reset.clear_synced_tabs.
+    try:
+        cleared = clear_synced_tabs(new_client, cfg.google_sheets.tab_mappings, list(SOURCES))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in cleared:
+        console.print(f"[green]OK[/green] {line}")
+
     load_config.cache_clear()
     new_cfg = _load_config_or_exit()
     ctx = SyncContext.current()
@@ -1690,7 +1731,11 @@ def bankroll_sync(
         ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
     ),
 ) -> None:
-    """Classify contest entries into Cash/GPP and append new ones to the bankroll tab.
+    """Classify contest entries into Cash/GPP and append new ones to the
+    bankroll tab, then auto-fill Results (Week, Cash Pts, H2H Entered/Win --
+    Fix 2.16/2.17) from the same export, sorted into NFL weeks by each
+    entry's own contest date rather than assuming the file is one week's
+    worth. Cash Line and the team-colour columns in Results stay yours.
 
     Live DK auth (`dfs auth dk`) will eventually feed this automatically;
     for now, export your contest history from DraftKings' website and
@@ -1743,6 +1788,22 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:
         for e in result.written_entries:
             console.print(f"  + {e.entry} -- place {e.place}, {e.points} pts, net {e.net}")
         any_skipped = any_skipped or result.skipped_full > 0
+
+    # Fix 2.16/2.17: auto-fill Results (Week, Cash Pts, H2H Entered/Win)
+    # from the same parsed entries, grouped by the NFL week each entry's
+    # own contest date falls into -- not by assuming this CSV is one
+    # week's worth. A season-long export backfills every past week it
+    # has real data for in one pass; Cash Line and the team-colour
+    # columns are never touched (see results_autofill.write_results_updates).
+    week_results = compute_week_results(entries, nfl_calendar.current_season())
+    try:
+        written_weeks = write_results_updates(client, cfg.results, week_results)
+    except SheetsError as e:
+        console.print(f"[red]Could not write {cfg.results.tab!r}:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    if written_weeks:
+        weeks_str = ", ".join(str(w) for w in written_weeks)
+        console.print(f"\n[green]OK[/green] updated {cfg.results.tab!r} for week(s): {weeks_str}")
 
     if any_skipped:
         console.print(
@@ -1799,9 +1860,11 @@ def _print_candidates(query: str, candidates: list) -> None:
 
 @pool_app.command("add")
 def pool_add(names: list[str] = typer.Argument(..., help="Player name(s) or substrings to add.")) -> None:
-    """Tick EdgeRaw's Pool column for each name given, by exact match if
-    one exists, else by substring -- multiple matches are printed (name,
-    position, salary) and skipped rather than guessed at."""
+    """Set EdgeRaw's Pool column to "Both" for each name given, by exact
+    match if one exists, else by substring -- multiple matches are
+    printed (name, position, salary) and skipped rather than guessed at.
+    Refine to Cash-only or GPP-only afterward in the sheet itself; the CLI
+    doesn't have a flag for that yet."""
     client, edge_tab = _pool_client_and_edge_tab()
     try:
         players = read_players(client, edge_tab)
@@ -1813,7 +1876,7 @@ def pool_add(names: list[str] = typer.Argument(..., help="Player name(s) or subs
                 _print_candidates(query, matches)
             else:
                 player = matches[0]
-                set_pool(client, edge_tab, player, True)
+                set_pool(client, edge_tab, player, "Both")
                 console.print(f"[green]OK[/green] added {player.name} ({player.position}, {player.salary})")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -1824,7 +1887,7 @@ def pool_add(names: list[str] = typer.Argument(..., help="Player name(s) or subs
 def pool_remove(
     names: list[str] = typer.Argument(..., help="Player name(s) or substrings to remove."),
 ) -> None:
-    """Untick EdgeRaw's Pool column for each name given -- same matching
+    """Clear EdgeRaw's Pool column for each name given -- same matching
     rules as `dfs pool add`."""
     client, edge_tab = _pool_client_and_edge_tab()
     try:
@@ -1837,7 +1900,7 @@ def pool_remove(
                 _print_candidates(query, matches)
             else:
                 player = matches[0]
-                set_pool(client, edge_tab, player, False)
+                set_pool(client, edge_tab, player, "")
                 console.print(f"[green]OK[/green] removed {player.name}")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -1846,7 +1909,7 @@ def pool_remove(
 
 @pool_app.command("list")
 def pool_list() -> None:
-    """Every currently-ticked EdgeRaw player, grouped by position."""
+    """Every currently-pooled EdgeRaw player, grouped by position."""
     client, edge_tab = _pool_client_and_edge_tab()
     try:
         players = read_players(client, edge_tab)
@@ -1874,8 +1937,8 @@ def pool_list() -> None:
 def pool_clear(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
 ) -> None:
-    """Untick every currently-ticked EdgeRaw player. Confirms first
-    unless `--yes` is given -- this touches every ticked row at once."""
+    """Clear every currently-pooled EdgeRaw player. Confirms first
+    unless `--yes` is given -- this touches every pooled row at once."""
     client, edge_tab = _pool_client_and_edge_tab()
     try:
         players = read_players(client, edge_tab)

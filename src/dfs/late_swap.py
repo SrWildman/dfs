@@ -6,8 +6,9 @@ as swappable and one who's already locked doesn't.
 
 Slot order within one Lineups block follows `models.ROSTER_SLOTS` exactly.
 See `weekly_reset.py`'s `LINEUPS_NAME_BLOCKS` docstring for how a block's
-`(start, end)` maps to 9 player rows followed by a trailing salary-total
-row -- callers pass this module exactly the 9 player-row names, in
+`(start, end)` maps to exactly its 9 player rows (the salary-total row is
+a separate row directly below `end`, not part of the block -- Fix 2.4) --
+callers pass this module exactly the 9 player-row names, in
 `ROSTER_SLOTS` order, already sliced out of that range.
 """
 

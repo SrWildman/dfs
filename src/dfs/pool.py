@@ -37,7 +37,15 @@ class EdgePlayer:
     name: str
     position: str
     salary: str
-    pooled: bool
+    # Fix 2.11: Pool is a blank/Cash/GPP/Both dropdown now, not a TRUE/
+    # FALSE checkbox. `pooled` stays a plain bool property so every
+    # existing "is this player in the pool at all" call site (CLI list/
+    # clear commands) needs no change.
+    pool_value: str = ""
+
+    @property
+    def pooled(self) -> bool:
+        return bool(self.pool_value)
 
 
 def read_players(client: SheetsClient, edge_tab: str) -> list[EdgePlayer]:
@@ -58,7 +66,7 @@ def read_players(client: SheetsClient, edge_tab: str) -> list[EdgePlayer]:
                 name=name,
                 position=position,
                 salary=salary,
-                pooled=pool_val.strip().upper() == "TRUE",
+                pool_value=pool_val.strip(),
             )
         )
     return players
@@ -78,22 +86,25 @@ def find_matches(players: list[EdgePlayer], query: str) -> list[EdgePlayer]:
     return [p for p in players if q in p.name.lower()]
 
 
-def set_pool(client: SheetsClient, edge_tab: str, player: EdgePlayer, value: bool) -> None:
+def set_pool(client: SheetsClient, edge_tab: str, player: EdgePlayer, value: str) -> None:
+    """`value` is one of `sources.edge.POOL_TYPE_OPTIONS` -- "" to remove,
+    or "Cash"/"GPP"/"Both" to add. `dfs pool add` writes "Both" (closest
+    equivalent to the old checkbox's plain TRUE); refining to Cash-only or
+    GPP-only is a sheet edit, not a CLI flag, for now."""
     client.update_range(edge_tab, f"{POOL_COLUMN}{player.row}", [[value]])
 
 
 def clear_all(client: SheetsClient, edge_tab: str, players: list[EdgePlayer]) -> int:
-    """Untick every currently-ticked player. Returns how many were
+    """Untick every currently-pooled player. Returns how many were
     cleared. Callers should confirm with the user first -- this touches
-    every ticked row at once."""
+    every pooled row at once."""
     ticked = [p for p in players if p.pooled]
     if not ticked:
         return 0
-    rows = [[False] for _ in ticked]
-    # Cheaper as individual writes only if scattered; ticked rows are
+    # Cheaper as individual writes only if scattered; pooled rows are
     # rarely contiguous, so this stays one call per row like set_pool --
     # simplicity over a fragile "detect contiguous runs" optimization for
     # what's at most a couple hundred cells.
     for player in ticked:
-        client.update_range(edge_tab, f"{POOL_COLUMN}{player.row}", [[False]])
-    return len(rows)
+        client.update_range(edge_tab, f"{POOL_COLUMN}{player.row}", [[""]])
+    return len(ticked)

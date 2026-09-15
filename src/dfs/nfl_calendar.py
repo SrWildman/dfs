@@ -32,15 +32,23 @@ def season_kickoff(season: int) -> date:
     return labor_day + timedelta(days=3)
 
 
-def current_week(today: date | None = None) -> int:
-    today = today or date.today()
-    season = current_season(today)
+def week_for_date(d: date, season: int) -> int:
+    """Which NFL week `d` falls in, for a given `season` -- the same
+    7-day-cadence math `current_week` uses for "today", generalized to
+    any date (Fix 2.17: used to sort a DK contest-history export's real
+    entry dates into weeks, rather than assuming the whole export is one
+    week or asking the user which week it's for)."""
     kickoff = season_kickoff(season)
-    if today < kickoff:
+    if d < kickoff:
         return MIN_WEEK
-    days_in = (today - kickoff).days
+    days_in = (d - kickoff).days
     week = days_in // 7 + 1
     return max(MIN_WEEK, min(MAX_WEEK, week))
+
+
+def current_week(today: date | None = None) -> int:
+    today = today or date.today()
+    return week_for_date(today, current_season(today))
 
 
 def week_start_date(week: int, season: int) -> date:

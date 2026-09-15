@@ -337,7 +337,7 @@ def test_wind_joined_from_weather_by_game_and_flagged_over_threshold():
     assert row["Flag"] == "WIND"
 
 
-def test_out_flag_takes_priority_over_wind_flag():
+def test_out_and_wind_flags_both_shown_out_first():
     proj = _projections(
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
     )
@@ -346,7 +346,7 @@ def test_out_flag_takes_priority_over_wind_flag():
     weather = pd.DataFrame([{"GameId": "g1", "Wind": 25.0}])
 
     row = build_edge_frame(proj, sal, games=games, weather=weather).frame.iloc[0]
-    assert row["Flag"] == "OUT"
+    assert row["Flag"] == "OUT WIND"
 
 
 def test_dst_name_rewritten_to_dk_nickname_for_downstream_joins():
@@ -380,18 +380,26 @@ def test_line_move_blank_when_not_provided():
     sal = _salaries([{"ID": "1"}])
 
     row = build_edge_frame(proj, sal).frame.iloc[0]
-    assert pd.isna(row["LineMove"])
+    assert pd.isna(row["ImpMove"])
+    assert pd.isna(row["TotMove"])
+    assert pd.isna(row["SpdMove"])
 
 
 def test_line_move_joined_by_team_and_flagged():
+    # Fix 2.2: all three of diff_odds()'s deltas are surfaced now, not
+    # just the team-implied-points one (ImpMove, was "LineMove").
     proj = _projections(
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
     )
     sal = _salaries([{"ID": "1"}])
-    line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": 2.5}])
+    line_movement = pd.DataFrame(
+        [{"Abbr": "DET", "TeamPointsDelta": 2.5, "TotalDelta": 1.0, "SpreadDelta": -0.5}]
+    )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["LineMove"] == 2.5
+    assert row["ImpMove"] == 2.5
+    assert row["TotMove"] == 1.0
+    assert row["SpdMove"] == -0.5
     assert row["Flag"] == "LINE↑"
 
 
@@ -400,21 +408,61 @@ def test_line_move_down_flag():
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
     )
     sal = _salaries([{"ID": "1"}])
-    line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": -2.5}])
+    line_movement = pd.DataFrame(
+        [{"Abbr": "DET", "TeamPointsDelta": -2.5, "TotalDelta": 0.0, "SpreadDelta": 0.0}]
+    )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
     assert row["Flag"] == "LINE↓"
 
 
-def test_out_flag_takes_priority_over_line_move_flag():
+def test_line_move_flag_keys_off_impmove_not_totmove_or_spdmove():
+    # A big TotMove/SpdMove with a flat ImpMove must NOT trigger LINE↑/↓ --
+    # only ImpMove (team implied points) drives that flag (Fix 2.2).
+    proj = _projections(
+        [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
+    )
+    sal = _salaries([{"ID": "1"}])
+    line_movement = pd.DataFrame(
+        [{"Abbr": "DET", "TeamPointsDelta": 0.0, "TotalDelta": 5.0, "SpreadDelta": -5.0}]
+    )
+
+    row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
+    assert row["TotMove"] == 5.0
+    assert row["SpdMove"] == -5.0
+    assert row["Flag"] == ""
+
+
+def test_out_and_line_move_flags_both_shown_out_first():
     proj = _projections(
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
     )
     sal = _salaries([{"ID": "1", "Status": "OUT"}])
-    line_movement = pd.DataFrame([{"Abbr": "DET", "TeamPointsDelta": 2.5}])
+    line_movement = pd.DataFrame(
+        [{"Abbr": "DET", "TeamPointsDelta": 2.5, "TotalDelta": 0.0, "SpreadDelta": 0.0}]
+    )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["Flag"] == "OUT"
+    assert row["Flag"] == "OUT LINE↑"
+
+
+def test_multiple_flags_shown_in_priority_order():
+    # WIND, LEVERAGE and CHALK are independent conditions and can all be
+    # true of the same player at once (Fix 2.1 -- first-match-wins used to
+    # silently hide all but the first).
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Leveraged", "Position": "RB", "Ceiling": 100.0, "ProjOwn": 1.0},
+            {"Id": "2", "Name": "Filler", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 50.0},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    games = _games([{"GameId": "g1", "Away": "DET", "Home": "NO"}])
+    weather = pd.DataFrame([{"GameId": "g1", "Wind": 25.0}])
+
+    frame = build_edge_frame(proj, sal, games=games, weather=weather).frame
+    row = frame[frame["Name"] == "Leveraged"].iloc[0]
+    assert row["Flag"] == "WIND LEVERAGE"
 
 
 def test_game_start_passes_through_from_projections():
@@ -423,3 +471,16 @@ def test_game_start_passes_through_from_projections():
 
     row = build_edge_frame(proj, sal).frame.iloc[0]
     assert row["GameStart"] == "2026-09-14T20:20:00Z"
+
+
+def test_over_under_and_spread_surfaced_on_edgeraw():
+    # Fix 2.3: OU/Spread were already used to compute GameEnv but never
+    # exposed as their own EdgeRaw columns. Named OverUnder (not OU) so it
+    # doesn't collide with Player Pool/Lineups' own "O/U" header, which
+    # comes from a different tab (oddsFinal via PlayerPoolRaw).
+    proj = _projections([{"Id": "1", "Name": "P", "OU": 47.5, "Spread": -3.5}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert row["OverUnder"] == 47.5
+    assert row["Spread"] == -3.5

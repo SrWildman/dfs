@@ -17,7 +17,7 @@ next to its real name so you learn it as you use it.
 
 ```
 File > Make a copy of this template, name it for the week
-dfs week new <url-of-the-copy>
+dfs week new "<url-of-the-copy>"
 ```
 
 `dfs week new` confirms before writing anything. It runs `dfs
@@ -25,6 +25,12 @@ doctor` against the new copy first (catches a stale/malformed template
 before anything depends on it), rewrites `config.toml`'s `sheet_id`,
 carries Bankroll and Results forward from the outgoing sheet, clears last
 week's lineups, and runs a full `dfs sync`.
+
+**Quote the URL.** A Google Sheets URL contains `?` and `#`, which zsh
+(and some other shells) treat as glob/history characters rather than
+plain text -- pasting one unquoted fails with something like `zsh: no
+matches found: ...`. Quoting it (as above) always works. A bare sheet ID
+(just the id segment, no URL at all) works too, quoted or not.
 
 **Done looks like:** `dfs status` shows the new week's sheet title and
 URL, and every source in the table reads "ok", not "never synced" or
@@ -155,8 +161,12 @@ dfs week close --csv <exported-dk-contest-history.csv>
 Exports your DK contest history, classifies Cash vs GPP results, and
 appends them to Bankroll -- never touching the summary figures or
 anything outside its configured rows. Results (a season-long log, not
-reset week to week) gets the same update.
+reset week to week) auto-fills `Week`/`Cash Pts`/`H2H Entered`/`H2H Win`
+from the same export, sorted into NFL weeks by each entry's own contest
+date -- a full-season export backfills every past week it has real data
+for in one pass, not just the current one. `Cash Line` and the team-
+colour columns stay yours to fill in by hand.
 
 **Done looks like:** Bankroll's running total moved by the amount you'd
-expect from the week's actual results, and Results gained exactly one
-new row for the week.
+expect from the week's actual results, and Results' row for the week you
+just closed shows real `Cash Pts`/`H2H Entered`/`H2H Win` numbers.

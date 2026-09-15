@@ -155,8 +155,8 @@ def test_build_exposure_defaults_to_whole_column_when_no_pool_deck_present():
     assert "Lineups!$A$1:$A" in rows[0][9]
 
 
-def test_build_movement_uses_edge_columns_positions_for_linemove_and_gamestart():
-    assert "LineMove" in EDGE_COLUMNS and "GameStart" in EDGE_COLUMNS
+def test_build_movement_uses_edge_columns_positions_for_impmove_and_gamestart():
+    assert "ImpMove" in EDGE_COLUMNS and "GameStart" in EDGE_COLUMNS
 
     class NoopClient:
         def write_tab(self, tab_name, rows, **_kwargs):
@@ -169,7 +169,7 @@ def test_build_movement_uses_edge_columns_positions_for_linemove_and_gamestart()
     tab_name, rows = client.written
     assert tab_name == MOVEMENT_TAB
     body = rows[-1][0]
-    assert f"${_col('LineMove')}$2:${_col('LineMove')}" in body
+    assert f"${_col('ImpMove')}$2:${_col('ImpMove')}" in body
     assert f"${_col('GameStart')}$2:${_col('GameStart')}" in body
 
 
