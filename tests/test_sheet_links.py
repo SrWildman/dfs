@@ -3,7 +3,9 @@ from dfs.sheet_links import (
     COLOR_SCALE_LINKED_COLUMNS,
     LINKED_EDGE_COLUMNS,
     edge_lookup_formula,
+    edge_row_hyperlink_formula,
     link_edge_columns,
+    write_edge_row_links,
 )
 from dfs.sheets import column_letter
 
@@ -36,6 +38,9 @@ class SpySheetsClient:
 
     def clear_column_groups(self, tab_name):
         self.clear_group_calls.append(tab_name)
+
+    def tab_gid(self, tab_name):
+        return 999
 
 
 def test_already_linked_columns_positions_never_move():
@@ -290,3 +295,46 @@ def test_link_edge_columns_run_twice_only_appends_once():
     result = link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
     assert len(client.update_calls) == first_run_call_count  # no new writes
     assert "skipped" in result
+
+
+def test_edge_row_hyperlink_formula_targets_the_right_gid_and_column():
+    formula = edge_row_hyperlink_formula(5, "EdgeRaw", 999)
+    start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+    assert formula == (
+        f'=IF($A5="","",IFNA(HYPERLINK("#gid=999&range={start_col}"&'
+        f'MATCH($A5,EdgeRaw!${start_col}:${start_col},0),"Edge ↗"),"-"))'
+    )
+
+
+def test_edge_row_hyperlink_formula_guards_against_a_blank_name():
+    formula = edge_row_hyperlink_formula(5, "EdgeRaw", 999)
+    assert formula.startswith('=IF($A5="","",')
+
+
+def test_write_edge_row_links_skips_a_tab_with_no_edge_column():
+    client = SpySheetsClient(header_row=["Name", "Pos."])
+    result = write_edge_row_links(client, "Player Pool", [(2, 3)], "EdgeRaw")
+    assert "no 'Edge ↗' column" in result
+    assert client.update_calls == []
+
+
+def test_write_edge_row_links_writes_every_row_in_every_block():
+    client = SpySheetsClient(header_row=["Name", "Edge ↗", "Pos."])
+    result = write_edge_row_links(client, "Player Pool", [(2, 3), (5, 6)], "EdgeRaw")
+
+    ranges_written = {a1 for _, a1, _ in client.update_calls}
+    assert ranges_written == {"B2:B3", "B5:B6"}
+    assert "4 row(s)" in result
+
+
+def test_write_edge_row_links_honors_a_non_default_header_row():
+    client = SpySheetsClient(header_row=["Name", "Edge ↗"])
+
+    class HeaderRowSpy(SpySheetsClient):
+        def read_range(self, tab_name: str, a1_range: str):
+            assert a1_range == "A11:11"
+            return [self.header_row]
+
+    client = HeaderRowSpy(header_row=["Name", "Edge ↗"])
+    write_edge_row_links(client, "Lineups", [(12, 13)], "EdgeRaw", header_row=11)
+    assert {a1 for _, a1, _ in client.update_calls} == {"B12:B13"}

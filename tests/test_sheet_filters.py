@@ -127,40 +127,32 @@ def test_full_range_filter_tabs_excludes_the_formula_driven_tabs():
         assert excluded not in tabs
 
 
-def test_add_basic_filters_covers_edgeraw_pool_picks_and_the_plain_tabs():
+def test_add_basic_filters_covers_edgeraw_and_the_plain_tabs():
     client = FakeFilterClient()
-    add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
+    add_basic_filters(client, edge_tab="EdgeRaw")
 
     tabs = [tab for tab, _rng in client.basic_filter_calls]
-    assert tabs == ["EdgeRaw", "Pool Picks", *[t for t, _r in BASIC_FILTER_PLAIN_TABS]]
+    assert tabs == ["EdgeRaw", *[t for t, _r in BASIC_FILTER_PLAIN_TABS]]
 
 
 def test_add_basic_filters_edgeraw_spans_the_whole_real_range():
     client = FakeFilterClient()
-    add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
+    add_basic_filters(client, edge_tab="EdgeRaw")
     _tab, a1_range = client.basic_filter_calls[0]
     last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     assert a1_range.startswith(f"A1:{last_col}")
 
 
-def test_add_basic_filters_pool_picks_uses_the_given_range():
-    client = FakeFilterClient()
-    add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
-    assert ("Pool Picks", "A2:J102") in client.basic_filter_calls
-
-
 def test_add_basic_filters_skips_missing_tabs_without_erroring():
     class SelectivelyMissing(FakeFilterClient):
         def tab_exists(self, tab_name: str) -> bool:
-            return tab_name not in ("Pool Picks", "SoSQB")
+            return tab_name != "SoSQB"
 
     client = SelectivelyMissing()
-    results = add_basic_filters(client, edge_tab="EdgeRaw", pool_picks_range="A2:J102")
+    results = add_basic_filters(client, edge_tab="EdgeRaw")
 
-    assert any("Pool Picks: not present -- skipped" == r for r in results)
     assert any("SoSQB: not present -- skipped" == r for r in results)
     touched = [tab for tab, _rng in client.basic_filter_calls]
-    assert "Pool Picks" not in touched
     assert "SoSQB" not in touched
 
 

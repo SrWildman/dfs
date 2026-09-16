@@ -9,9 +9,10 @@ from dfs.sheet_pool_deck import (
     add_pool_deck,
 )
 from dfs.sheet_style import HEADER_FMT
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
 
 _LINEUPS_HEADER_ROW = LINEUPS_NAME_BLOCKS[0][0] - 1
+_POOL_HEADER_RANGE = f"A{PLAYER_POOL_HEADER_ROW}:Z{PLAYER_POOL_HEADER_ROW}"
 
 # Player Pool and Lineups' column layouts are each independently derived
 # (see `_write_deck_controls`'s own comment) and drifted apart for real:
@@ -97,7 +98,7 @@ class FakeDeckClient:
         self.boolean_rule_calls: list[tuple[str, dict]] = []
 
     def read_range(self, tab_name: str, a1_range: str):
-        if tab_name == "Player Pool" and a1_range == "A1:Z1":
+        if tab_name == "Player Pool" and a1_range == _POOL_HEADER_RANGE:
             return [_POOL_HEADER]
         if tab_name == "Lineups" and a1_range == f"A{_LINEUPS_HEADER_ROW}:{_LINEUPS_HEADER_ROW}":
             # Lineups' own real block header -- what _write_deck_controls
@@ -231,9 +232,9 @@ def test_add_pool_deck_builds_pool_sort_hidden_tab_with_position_and_sort_formul
     assert tab_name == POOL_SORT_TAB
     assert rows[0] == _POOL_HEADER
     formula = rows[1][0]
-    assert "'Player Pool'!$A$2:$Z$80" in formula
+    assert "'Player Pool'!$A$3:$Z$81" in formula
     assert 'Lineups!$B$1="ALL"' in formula
-    assert "'Player Pool'!$B$2:$B$80=Lineups!$B$1" in formula
+    assert "'Player Pool'!$B$3:$B$81=Lineups!$B$1" in formula
     assert "Lineups!$G$1" in formula  # sort column, from the dropdown's MATCH
     assert client.tab_properties_calls == [(POOL_SORT_TAB, True)]
 
@@ -259,7 +260,7 @@ def test_add_pool_deck_follows_pool_last_row_if_it_changes(monkeypatch):
     add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
     formula = client.write_tab_calls[0][1][1][0]
-    assert "'Player Pool'!$A$2:$Z$999" in formula
+    assert "'Player Pool'!$A$3:$Z$999" in formula
 
 
 def test_add_pool_deck_writes_controls_defaults_and_dropdowns():
@@ -290,10 +291,10 @@ def test_add_pool_deck_pool_count_readout_uses_countif_not_counta():
     control_call = next(c for c in client.update_calls if c[0] == "A1:I1")
     readout = control_call[1][0][8]
     assert "COUNTA" not in readout
-    assert readout.count('COUNTIF(PoolSort!$A$2:$A$80,"?*")') == 3
+    assert readout.count('COUNTIF(PoolSort!$A$2:$A$81,"?*")') == 3
     # "showing N-M" must be suppressed entirely when the count is 0,
     # not rendered as a nonsensical "showing 1-0" (start past end).
-    assert 'IF(COUNTIF(PoolSort!$A$2:$A$80,"?*")=0,""' in readout
+    assert 'IF(COUNTIF(PoolSort!$A$2:$A$81,"?*")=0,""' in readout
 
 
 def test_add_pool_deck_copies_lineups_own_header_into_row_three_and_styles_it():

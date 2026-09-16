@@ -98,6 +98,9 @@ class FakeWorksheet:
     def format(self, a1_range: str, fmt: dict) -> None:
         pass
 
+    def add_cols(self, n: int) -> None:
+        self.col_count += n
+
     def freeze(self, rows: int | None = None, cols: int | None = None) -> None:
         if rows is not None:
             self.frozen_rows = rows
@@ -144,6 +147,9 @@ class FakeSpreadsheet:
         ws = FakeWorksheet(title)
         self._worksheets[title] = ws
         return ws
+
+    def del_worksheet(self, ws: FakeWorksheet) -> None:
+        del self._worksheets[ws.title]
 
     def batch_update(self, body: dict) -> None:
         self.batch_update_calls.append(body)
@@ -319,6 +325,46 @@ def test_list_tabs_reports_header_rows(cfg, monkeypatch, tmp_path):
     assert tabs[0].title == "Projections"
     assert tabs[0].header == ["Id", "Name", "Position"]
     assert tabs[0].frozen_rows == 3
+
+
+def test_tab_gid_returns_the_worksheet_id(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["EdgeRaw"] = FakeWorksheet("EdgeRaw")
+    assert client.tab_gid("EdgeRaw") == fake_sheet._worksheets["EdgeRaw"].id
+
+
+def test_delete_tab_removes_the_worksheet(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["Pool Picks"] = FakeWorksheet("Pool Picks")
+    client.delete_tab("Pool Picks")
+    assert "Pool Picks" not in fake_sheet._worksheets
+    assert client.tab_exists("Pool Picks") is False
+
+
+def test_delete_tab_is_a_noop_when_already_gone(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    client.delete_tab("Never Existed")  # must not raise
+    assert fake_sheet._worksheets == {}
+
+
+def test_ensure_column_capacity_grows_a_too_narrow_grid(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    ws = FakeWorksheet("Player Pool")
+    ws.col_count = 37
+    fake_sheet._worksheets["Player Pool"] = ws
+
+    client.ensure_column_capacity("Player Pool", 38)
+    assert ws.col_count == 38
+
+
+def test_ensure_column_capacity_is_a_noop_when_already_wide_enough(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    ws = FakeWorksheet("Player Pool")
+    ws.col_count = 40
+    fake_sheet._worksheets["Player Pool"] = ws
+
+    client.ensure_column_capacity("Player Pool", 38)
+    assert ws.col_count == 40
 
 
 def test_read_range_returns_only_the_requested_rectangle(cfg, monkeypatch, tmp_path):

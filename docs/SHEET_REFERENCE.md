@@ -177,11 +177,15 @@ module is the source of truth if they ever disagree:
 | MOVEMENT | `ImpMove` `TotMove` `SpdMove` `GameStart` |
 | INTERNAL | `Id` `CeilPct` `OwnPct` `LevBasis` |
 
-`PlayerPoolRaw` is exactly this, A-AH (34 columns). `Player Pool` inserts
-`Source` right after `Venue` (F) and appends `Overflow`/`Pool` at the very
-end (AJ/AK, 37 total). `Lineups` inserts `% of Rstr` right after `Rstr%`
-(L) and `Issues` right after `Flag` (P), keeping everything else the same
-(36 total). `CeilVal`/`Leverage`/`Avail`/`Flag`/`GameEnv`/the whole
+`PlayerPoolRaw` is exactly this, 34 columns. `Player Pool` inserts
+`Source` and `Edge ↗` (A3) right after `Venue` and appends
+`Overflow`/`Pool` at the very end (38 total). `Lineups` inserts
+`% of Rstr` right after `Rstr%` and `Issues` then `Edge ↗` (A3) right
+after `Flag`, keeping everything else the same (37 total). Column
+letters aren't given here on purpose -- they move whenever a new column
+is inserted (most recently A3's "Edge ↗"); `sheet_columns.py`'s own
+lists are the only thing anything in this codebase actually depends on.
+`CeilVal`/`Leverage`/`Avail`/`Flag`/`GameEnv`/the whole
 WEATHER/MOVEMENT/INTERNAL zones are linked from `EdgeRaw` by `dfs setup
 link-edge` (`sheet_links.LINKED_EDGE_COLUMNS`); everything else in the
 table above is native to the tab itself.
@@ -240,31 +244,43 @@ haven't filled yet," blank once the lineup is complete. `weekly_reset.
 LINEUPS_TOTALS_ROWS` names the totals row for each block; the average-
 remaining row is always the one directly below it.
 
-`Player Pool`'s `Name` column is **not typed** -- it's a
-`SORT(UNIQUE({...}))` formula per position block, pulling in the UNION of
-two sources: whichever players have a non-blank `Pool` value on `EdgeRaw`
-(see EdgeRaw's column docs above), and whichever names are typed into the
-`Pool Picks` tab (see "Manual / output tabs" below) for that position.
-`UNIQUE` dedupes a player who ends up both ticked and typed into one row,
-not two. `Source` (column `F`, right after `Venue`) states which of the
-two sources each row actually came from -- `EdgeRaw` or `Picks` -- so you
-know where to go to remove one. `Pool` (the tab's very last column, Fix
-2.11) surfaces that player's actual `EdgeRaw` `Pool` value
-(`Cash`/`GPP`/`Both`) via `INDEX`/`MATCH` by name (`Pool` sits left of
-`Name` on `EdgeRaw`, so a plain `VLOOKUP` can't reach it). The block fills
-in sorted by **Salary descending** (Fix 2.10 -- not alphabetically; Pool
-Picks' half looks its Salary up against `EdgeRaw` by name, since that tab
-has no Salary column of its own), capped at that position's slot count
-(QB 10, RB 20, WR 25, TE 10, DST 10), with an `Overflow` column (second
-to last, right before `Pool`) warning per position if more players are
-ticked/typed than the block has room for (counting the same deduped
-union, so a player counted in both sources can't trigger a false
-warning) -- nobody is ever silently dropped. Every other column still
-VLOOKUPs off `Name` the same as before. `Player Pool` is fully protected
-(warning-only, `dfs setup protect`) since none of it is meant to be
-typed into directly. See `sheet_pool_formulas.py`/`sources/edge.py`/
-`sheet_pool_picks.py` for the mechanism and `CONTRIBUTING.md`'s
-changelog for the block-resize history.
+`Player Pool` (A3) has a one-row control strip pinned at the top: `A1` is
+a plain label ("Add a player"), `B1` is a live type-ahead search box
+(`ONE_OF_RANGE` validation, non-strict) against `EdgeRaw`'s own `Name`
+column -- typing a name there adds that player to the pool, the same as
+ticking them in `EdgeRaw`. This replaced a separate `Pool Picks` tab
+(removed -- see `CONTRIBUTING.md`'s A3 changelog entry); the real header
+now sits at row 2, with every position block one row lower than before
+Phase 3's own layout.
+
+`Player Pool`'s `Name` column is **not typed** (except that one control
+cell above it) -- it's a `SORT(UNIQUE({...}))` formula per position
+block, pulling in the UNION of two sources: whichever players have a
+non-blank `Pool` value on `EdgeRaw` (see EdgeRaw's column docs above),
+and whatever name is currently typed into the control cell, for that
+position. `UNIQUE` dedupes a player who ends up both ticked and typed
+into one row, not two. `Source` (right after `Venue`) states which of
+the two sources each row actually came from -- `EdgeRaw` or `Added` --
+and `Edge ↗` (right after `Source`) is a `HYPERLINK` jumping straight to
+that player's row on `EdgeRaw`, the fastest way to find and remove one
+(there's no in-place delete -- see A3's changelog entry for why not).
+`Pool` (the tab's very last column, Fix 2.11) surfaces that player's
+actual `EdgeRaw` `Pool` value (`Cash`/`GPP`/`Both`) via `INDEX`/`MATCH` by
+name (`Pool` sits left of `Name` on `EdgeRaw`, so a plain `VLOOKUP` can't
+reach it). The block fills in sorted by **Salary descending** (Fix 2.10
+-- not alphabetically; the control cell's half looks its Salary and
+Position up against `EdgeRaw` by name, since it carries neither of its
+own), capped at that position's slot count (QB 10, RB 20, WR 25, TE 10,
+DST 10), with an `Overflow` column (second to last, right before `Pool`)
+warning per position if more players are ticked/typed than the block has
+room for (counting the same deduped union, so a player counted in both
+sources can't trigger a false warning) -- nobody is ever silently
+dropped. Every other column still VLOOKUPs off `Name` the same as
+before. `Player Pool` is protected everywhere except that one control
+cell (warning-only, `dfs setup protect`) -- nothing else is meant to be
+typed into directly. See `sheet_pool_control.py`/`sheet_pool_formulas.py`/
+`sources/edge.py` for the mechanism and `CONTRIBUTING.md`'s changelog for
+the block-resize and A3 history.
 
 Columns mirror `PlayerPoolRaw`'s, pulled the same way, plus the same
 linked `EdgeRaw` block at the far right (`dfs setup link-edge`).
@@ -317,25 +333,6 @@ at that slot, so a late swap is a read of one report instead of manually
 cross-referencing kickoff times against your roster.
 
 ## Manual / output tabs
-
-### Pool Picks
-
-A second, additive way to add a player to `Player Pool` by typing a
-name instead of ticking `EdgeRaw`. Row 1 is a plain-text title
-explaining the tab in place (Fix 3.1 -- it used to show up with no
-explanation); the real header is row 2, and typed rows start at row 3.
-Column `A` (the only typed cell) is a live type-ahead search box
-(`ONE_OF_RANGE` validation, non-strict) against `EdgeRaw`'s own `Name`
-column. Columns `B`-`I` are read-only VLOOKUPs against `EdgeRaw` (`Pos`,
-`Team`, `Salary`, `Pts`, `Ceil`, `CeilVal`, `Leverage`, `Flag`) so a pick
-can be sanity-checked without leaving the tab; column `J` (`Status`)
-reads `NOT ON SLATE` if the typed name doesn't match this week's
-`EdgeRaw` at all, else `added`. To remove a pick, clear its cell in
-column `A` (or, for one that actually came from ticking `EdgeRaw`
-instead, untick it there -- `Player Pool`'s `Source` column, see below,
-says which). A basic filter (Data > Create a filter) sits over
-`A2:J102`. See `sheet_pool_picks.py` for the mechanism and its
-`FIRST_DATA_ROW`/`LAST_ROW` constants for the exact row layout.
 
 ### SoSQB / SoSRB / SoSWr / SoSTE / SoSDef
 

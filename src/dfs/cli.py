@@ -39,12 +39,15 @@ from dfs.results_autofill import compute_week_results, write_results_updates
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
-from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
+from dfs.sheet_links import (
+    PLAYER_POOL_RAW_BLOCK,
+    PLAYER_POOL_RAW_TAB,
+    link_edge_columns,
+    write_edge_row_links,
+)
+from dfs.sheet_pool_control import ensure_pool_control_row
 from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
-from dfs.sheet_pool_picks import HEADER_ROW as POOL_PICKS_HEADER_ROW
-from dfs.sheet_pool_picks import LAST_ROW as POOL_PICKS_LAST_ROW
-from dfs.sheet_pool_picks import create_pool_picks_tab
 from dfs.sheet_protection import protect_workbook
 from dfs.sheet_reorder import migrate_tab_to_designed_order
 from dfs.sheet_style import (
@@ -77,6 +80,7 @@ from dfs.week import (
 from dfs.weekly_reset import (
     LINEUPS_NAME_BLOCKS,
     LINEUPS_TOTALS_ROWS,
+    PLAYER_POOL_HEADER_ROW,
     PLAYER_POOL_NAME_BLOCKS,
     clear_previous_week,
     clear_synced_tabs,
@@ -413,30 +417,31 @@ def sheets_add_pool_deck(
     console.print(f"[green]OK[/green] {result}")
 
 
-@setup_app.command("add-pool-picks", short_help="Create/refresh the Pool Picks tab and its formulas.")
-def sheets_add_pool_picks(
+@setup_app.command("add-pool-control", short_help="Create/refresh Player Pool's add-a-player control row.")
+def sheets_add_pool_control(
     sheet_id: str = typer.Option(
         None,
         "--sheet-id",
-        help="Add/refresh Pool Picks on a different sheet instead of config.toml's -- e.g. "
-        "the canonical weekly template.",
+        help="Add/refresh the control row on a different sheet instead of config.toml's -- "
+        "e.g. the canonical weekly template.",
     ),
 ) -> None:
-    """Task 4.2: create (or refresh) the `Pool Picks` tab -- a second way
-    to add a player to Player Pool by typing a name, for when that's
-    faster than scrolling EdgeRaw to tick a checkbox (the "Pool picking"
-    filter view, `dfs setup add-filters`, is the third). Column A is the
-    only typed cell; a live search box (ONE_OF_RANGE validation) against
-    EdgeRaw's Name column goes there. Columns B-J are VLOOKUP/status
-    formulas, fully rewritten on every run -- but column A's typed values
-    are never touched, so this is safe to re-run any time, including as
-    part of a future `dfs setup polish`.
+    """A3: create (or refresh) Player Pool's own "add a player" row --
+    a live search box (ONE_OF_RANGE validation) against EdgeRaw's Name
+    column, pinned at the top of Player Pool itself, for when typing a
+    name is faster than scrolling EdgeRaw to tick a checkbox (the "Pool
+    picking" filter view, `dfs setup add-filters`, is the third way).
+    Replaces the old separate `Pool Picks` tab (see `sheet_pool_control.py`
+    and CONTRIBUTING.md's A3 changelog entry) -- Sam never wanted a
+    second tab for this. The structural row-insert runs at most once per
+    sheet (idempotent, see `ensure_pool_control_row`); safe to re-run any
+    time, including as part of a future `dfs setup polish`.
 
     Also re-runs `write_pool_formulas` against Player Pool -- its Name/
     Overflow formulas need to change to read the UNION of EdgeRaw ticks
-    and Pool Picks rows (Task 4.3), and nothing else re-applies that
-    automatically (see `sheet_pool_formulas.py`; it has no standing
-    caller of its own in this CLI).
+    and the control cell, and nothing else re-applies that automatically
+    (see `sheet_pool_formulas.py`; it has no standing caller of its own
+    in this CLI).
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -448,8 +453,8 @@ def sheets_add_pool_picks(
     client = SheetsClient(gs_cfg)
     try:
         title, url = client.describe()
-        console.print(f"Adding Pool Picks to: [bold]{title}[/bold]\n{url}\n")
-        results = [create_pool_picks_tab(client, edge_tab=edge_tab)]
+        console.print(f"Adding the pool control row to: [bold]{title}[/bold]\n{url}\n")
+        results = [ensure_pool_control_row(client, cfg.lineups.player_pool_tab, edge_tab)]
         results.extend(
             write_pool_formulas(client, player_pool_tab=cfg.lineups.player_pool_tab, edge_tab=edge_tab)
         )
@@ -458,6 +463,36 @@ def sheets_add_pool_picks(
         raise typer.Exit(code=1) from e
     for line in results:
         console.print(f"[green]OK[/green] {line}")
+
+
+@setup_app.command("remove-pool-picks", short_help="One-time: delete the retired Pool Picks tab.")
+def sheets_remove_pool_picks(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Delete Pool Picks from a different sheet instead of config.toml's -- ALWAYS "
+        "run against the canonical template first, verify with `dfs doctor`, then run again "
+        "against the live sheet.",
+    ),
+) -> None:
+    """A3.4: permanently deletes the `Pool Picks` tab, now that Player
+    Pool's own add-a-player control row (`add-pool-control`) replaces it.
+    No-op if the tab is already gone -- safe to run more than once, but
+    this is a one-time migration step, not part of the standing `dfs
+    setup sheet`/`polish` pipeline (a from-scratch sheet build never
+    creates Pool Picks in the first place any more)."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Removing Pool Picks from: [bold]{title}[/bold]\n{url}\n")
+        existed = client.tab_exists("Pool Picks")
+        client.delete_tab("Pool Picks")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] Pool Picks: {'deleted' if existed else 'not present -- skipped'}")
 
 
 @setup_app.command("polish", short_help="Style the sheet: widths, freeze panes, formats, chips, tab order.")
@@ -509,6 +544,7 @@ def sheets_polish(
                 client,
                 cfg.lineups.player_pool_tab,
                 last_row=pool_last,
+                header_row=PLAYER_POOL_HEADER_ROW,
                 band_blocks=PLAYER_POOL_NAME_BLOCKS,
             )
         )
@@ -721,7 +757,12 @@ def sheets_link_edge(
         results = [
             link_edge_columns(client, PLAYER_POOL_RAW_TAB, PLAYER_POOL_RAW_BLOCK, edge_tab, force=force),
             link_edge_columns(
-                client, cfg.lineups.player_pool_tab, PLAYER_POOL_NAME_BLOCKS, edge_tab, force=force
+                client,
+                cfg.lineups.player_pool_tab,
+                PLAYER_POOL_NAME_BLOCKS,
+                edge_tab,
+                header_row=PLAYER_POOL_HEADER_ROW,
+                force=force,
             ),
             link_edge_columns(
                 client,
@@ -731,6 +772,24 @@ def sheets_link_edge(
                 header_row=lineups_header_row,
                 header_repeats_at=header_repeats_at,
                 force=force,
+            ),
+            # A3: "Edge ↗" isn't an EdgeRaw-linked VLOOKUP column (not in
+            # LINKED_EDGE_COLUMNS), but it's the same "point back at
+            # EdgeRaw" family of work, so it's refreshed here rather than
+            # adding yet another standing CLI command.
+            write_edge_row_links(
+                client,
+                cfg.lineups.player_pool_tab,
+                PLAYER_POOL_NAME_BLOCKS,
+                edge_tab,
+                header_row=PLAYER_POOL_HEADER_ROW,
+            ),
+            write_edge_row_links(
+                client,
+                cfg.lineups.builder_tab,
+                LINEUPS_NAME_BLOCKS,
+                edge_tab,
+                header_row=lineups_header_row,
             ),
         ]
     except SheetsError as e:
@@ -805,6 +864,7 @@ def sheets_reorder_columns(
             PLAYER_POOL_COLUMN_ORDER,
             name_blocks=PLAYER_POOL_NAME_BLOCKS,
             edge_tab=edge_tab,
+            header_row=PLAYER_POOL_HEADER_ROW,
             rewrite_native=True,
         )
         results += migrate_tab_to_designed_order(
@@ -841,7 +901,7 @@ def sheets_add_filters(
 
     Two mechanisms, in order of what you'll actually see:
     1. A VISIBLE basic filter (Data > Create a filter -- a dropdown arrow
-       in every header cell) on EdgeRaw, Pool Picks, Results, and the SoS
+       in every header cell) on EdgeRaw, Results, and the SoS
        tabs. Safe only on plain-value tabs; `set_basic_filter` always
        replaces whatever's there, so this is naturally re-runnable.
     2. Saved filter views (Sheets' Data > Filter views), the secondary,
@@ -866,8 +926,7 @@ def sheets_add_filters(
     try:
         title, url = client.describe()
         console.print(f"Adding filters to: [bold]{title}[/bold]\n{url}\n")
-        pool_picks_range = f"A{POOL_PICKS_HEADER_ROW}:J{POOL_PICKS_LAST_ROW}"
-        results = add_basic_filters(client, edge_tab=edge_tab, pool_picks_range=pool_picks_range)
+        results = add_basic_filters(client, edge_tab=edge_tab)
         results.extend(add_all_filter_views(client, edge_tab))
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -886,13 +945,14 @@ def sheets_protect(
     ),
 ) -> None:
     """Warning-only protection (never a hard lock) on every fully
-    formula-driven tab -- Player Pool, PlayerPoolRaw, Board, Slate Grid,
-    Movement, PoolSort -- plus Exposure and Lineups protected everywhere
-    EXCEPT their own typed cells (Target; each lineup block's Name column
-    and the deck's B1/D1/F1 controls). EdgeRaw and Pool Picks are left
-    alone entirely -- see `sheet_protection.py`'s own docstring for why.
-    Safe to re-run: each tab's protected ranges are cleared before being
-    re-added, never stacked.
+    formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement,
+    PoolSort -- plus Player Pool, Exposure and Lineups protected
+    everywhere EXCEPT their own typed cells (Player Pool's add-a-player
+    control; Target; each lineup block's Name column and the deck's
+    B1/D1/F1 controls). EdgeRaw is left alone entirely -- see
+    `sheet_protection.py`'s own docstring for why. Safe to re-run: each
+    tab's protected ranges are cleared before being re-added, never
+    stacked.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -900,7 +960,9 @@ def sheets_protect(
     try:
         title, url = client.describe()
         console.print(f"Protecting: [bold]{title}[/bold]\n{url}\n")
-        results = protect_workbook(client, lineups_tab=cfg.lineups.builder_tab)
+        results = protect_workbook(
+            client, player_pool_tab=cfg.lineups.player_pool_tab, lineups_tab=cfg.lineups.builder_tab
+        )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -1021,10 +1083,11 @@ def setup_sheet(
        params, build-views' lineups_data_start_row) is a parameter derived
        from where this puts Lineups' header, so it has to happen first or
        every later step derives the wrong row.
-    2. `add-pool-picks` -- creates the Pool Picks tab and repoints Player
-       Pool's Name/Overflow formulas at the union of it and EdgeRaw. No
-       structural dependency on 1, but both are "add a tab/rewrite a
-       formula" steps done before the purely additive ones below.
+    2. `add-pool-control` -- inserts Player Pool's own add-a-player
+       control row and repoints its Name/Overflow formulas at the union
+       of it and EdgeRaw. No structural dependency on 1, but both are
+       "insert a row/rewrite a formula" steps done before the purely
+       additive ones below.
     3. `build-views` -- creates Board/Slate Grid/Exposure/Movement. Must
        come before `add-filters`, which adds filter views ONTO three of
        those four tabs and would have nothing to attach to otherwise.
@@ -1057,7 +1120,7 @@ def setup_sheet(
     """
     steps: list[tuple[str, Callable[[], None]]] = [
         ("add-pool-deck", lambda: sheets_add_pool_deck(sheet_id=sheet_id)),
-        ("add-pool-picks", lambda: sheets_add_pool_picks(sheet_id=sheet_id)),
+        ("add-pool-control", lambda: sheets_add_pool_control(sheet_id=sheet_id)),
         ("build-views", lambda: sheets_build_views(sheet_id=sheet_id)),
         ("link-edge", lambda: sheets_link_edge(sheet_id=sheet_id)),
         ("add-filters", lambda: sheets_add_filters(sheet_id=sheet_id)),
@@ -1107,8 +1170,12 @@ def sheets_add_pool_deck_alias(sheet_id: str = typer.Option(None, "--sheet-id"))
 
 @sheets_app.command("add-pool-picks")
 def sheets_add_pool_picks_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets add-pool-picks", "dfs setup add-pool-picks")
-    sheets_add_pool_picks(sheet_id=sheet_id)
+    console.print(
+        "[dim]`dfs sheets add-pool-picks` has moved AND changed: A3 replaced the separate "
+        "Pool Picks tab with a control row on Player Pool itself -- use `dfs setup "
+        "add-pool-control`.[/dim]"
+    )
+    sheets_add_pool_control(sheet_id=sheet_id)
 
 
 @sheets_app.command("polish")

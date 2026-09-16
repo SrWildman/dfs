@@ -66,8 +66,8 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
   `LINEUPS_NAME_BLOCKS` expects). Run this after any structural change,
   against both sheets. Never writes anything.
 - `dfs setup sheet --sheet-id <id>` -- the full one-time sheet build (pool
-  deck, Pool Picks, view tabs, EdgeRaw linking, filters, protection,
-  styling), in the one order that works; its own docstring
+  deck, Player Pool's add-a-player control row, view tabs, EdgeRaw linking,
+  filters, protection, styling), in the one order that works; its own docstring
   (`setup_sheet` in `cli.py`) explains why that order. Everything under
   `dfs setup ...` is also runnable as an individual step.
 - `dfs sheets ...` is a deprecated spelling of the `setup` commands (plus

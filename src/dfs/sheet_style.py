@@ -35,7 +35,8 @@ function happens to touch it first.
   table header." Nothing else in the workbook uses this fill.
 - Pale yellow (`INPUT_BG`, #FFFDF5) means "you type here" -- and is the
   ONLY thing that means that. Exactly five places carry it: EdgeRaw's Pool
-  column, Pool Picks' Name column, Lineups' block column A
+  column, Player Pool's own add-a-player control cell
+  (`sheet_pool_control.ensure_pool_control_row`), Lineups' block column A
   (`polish_lineups_input_column`), Exposure's Target column, and the pool
   deck's B1/D1/F1 controls (`polish_pool_deck`). Everywhere else is a
   formula; if it isn't pale yellow, don't type into it.
@@ -114,8 +115,9 @@ FLAT_BG, FLAT_FG = _rgb("#E7EBF0"), _rgb("#4A5563")
 
 # The ONE cue for "you type here", everywhere in the workbook -- see the
 # visual-grammar docstring below. Every typed cell uses this and nothing
-# else uses it: EdgeRaw's Pool column, Pool Picks column A, Lineups block
-# column A, Exposure's Target column, and the pool deck's B1/D1/F1 controls.
+# else uses it: EdgeRaw's Pool column, Player Pool's add-a-player control
+# cell, Lineups block column A, Exposure's Target column, and the pool
+# deck's B1/D1/F1 controls.
 INPUT_BG = _rgb("#FFFDF5")
 
 # The red -> yellow -> green gradient the now-removed `dfs sheets
@@ -146,10 +148,6 @@ _HEADER_FMT = {
 HEADER_FMT = _HEADER_FMT
 
 _TITLE_FMT = {"textFormat": {"bold": True, "fontSize": 13, "foregroundColor": INK}}
-# Public alias -- sheet_pool_picks.py reuses this for Pool Picks' own
-# explanatory title row (Fix 3.1), the same style Board/Movement's titles
-# already use, so a tab-level title reads consistently everywhere it appears.
-TITLE_FMT = _TITLE_FMT
 
 
 def _chip(bg: dict, fg: dict) -> dict:
@@ -723,6 +721,7 @@ BUILDER_WIDTHS = {
     "% of Rstr": 72,
     "Source": 64,
     "Pool": 64,
+    "Edge ↗": 64,
     # Reserved GAME-zone placeholders (Phase 3) -- narrow until the
     # strength-of-schedule work lands and gives them real content.
     "SoS 1": 56,
@@ -1285,7 +1284,6 @@ WEEK_ORDER = [
     ("Board", "decide"),
     ("EdgeRaw", "decide"),
     ("Player Pool", "build"),
-    ("Pool Picks", "build"),
     ("Lineups", "build"),
     ("Bankroll", "money"),
     ("Results", "money"),
@@ -1379,20 +1377,19 @@ TAB_NOTES: dict[str, str] = {
         f"rebuilt by `dfs setup build-views`. {_SAVED_VIEW_HINT}"
     ),
     "Player Pool": (
-        "PLAYER POOL -- everyone you've added, grouped by position. Fully computed from "
-        "EdgeRaw's Pool column and Pool Picks; nothing here is typed. Source says which of "
-        "the two a row came from; Overflow (far right) warns if a position has more picks "
-        "than room."
-    ),
-    "Pool Picks": (
-        "POOL PICKS -- a second way to add a player: type in column A (row 3 down) and "
-        f"pick from the dropdown. Adds to your Player Pool. {_SORT_SEARCH_HINT}"
+        "PLAYER POOL -- everyone you've added, grouped by position. Row 1: type a name "
+        "(with a search box) to add a player directly, the same as ticking Pool on "
+        "EdgeRaw. Everything below row 2 is computed. Source says whether a row came "
+        "from EdgeRaw or this row's own add box; Edge ↗ jumps straight to that player on "
+        "EdgeRaw (e.g. to remove them -- untick Pool there); Overflow (far right) warns "
+        "if a position has more picks than room."
     ),
     "Lineups": (
         "LINEUPS -- build your rosters here. Rows 1-9 are a sortable window into Player "
         "Pool (pick a position and sort field in row 1); type a player's name into column "
-        "A of a lineup block below to fill a slot. Issues (column O) flags a duplicate, an "
-        "unavailable player, or a salary/roster problem per lineup."
+        "A of a lineup block below to fill a slot. Issues flags a duplicate, an "
+        "unavailable player, or a salary/roster problem per lineup; Edge ↗ jumps straight "
+        "to that player on EdgeRaw."
     ),
     "Scratch": (
         "SCRATCH -- a blank grid for your own notes or draft lineups. Nothing here is read by `dfs`."

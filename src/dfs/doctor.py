@@ -22,7 +22,7 @@ from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_deck import DECK_ROWS, POOL_SORT_TAB
 from dfs.sources.edge import POOL_HEADER
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
 
 # Column A of every repeated Lineups sub-header row is the literal text
 # "Name" (see weekly_reset.py's module docstring) -- the tab's own header
@@ -291,6 +291,16 @@ def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
         lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
         raw = client.read_range(lineups_tab, f"A{lineups_header_row}:{lineups_header_row}")
         headers_by_tab[lineups_tab] = raw[0] if raw else []
+
+    # A3: same override, same reason -- Player Pool's real header moved
+    # from row 1 to PLAYER_POOL_HEADER_ROW when the add-a-player control
+    # row was inserted above it. Without this, _check_linked_edge_columns
+    # would read that control row as Player Pool's "header" and report
+    # every one of LINKED_EDGE_COLUMNS missing.
+    player_pool_tab = cfg.lineups.player_pool_tab
+    if player_pool_tab in tab_titles:
+        raw = client.read_range(player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}")
+        headers_by_tab[player_pool_tab] = raw[0] if raw else []
 
     issues: list[DoctorIssue] = []
     issues += _check_tabs_exist(cfg, tab_titles)

@@ -154,11 +154,9 @@ BASIC_FILTER_PLAIN_TABS: list[tuple[str, str]] = [
 ]
 
 
-def add_basic_filters(client: SheetsClient, *, edge_tab: str, pool_picks_range: str) -> list[str]:
-    """EdgeRaw (its full real range) plus Pool Picks and the plain-value
-    report tabs in BASIC_FILTER_PLAIN_TABS. `pool_picks_range` is passed in
-    rather than hardcoded here since Pool Picks' own row layout
-    (`sheet_pool_picks.py`) is its module's to own."""
+def add_basic_filters(client: SheetsClient, *, edge_tab: str) -> list[str]:
+    """EdgeRaw (its full real range) plus the plain-value report tabs in
+    BASIC_FILTER_PLAIN_TABS."""
     results = []
 
     if client.tab_exists(edge_tab):
@@ -168,12 +166,6 @@ def add_basic_filters(client: SheetsClient, *, edge_tab: str, pool_picks_range: 
         results.append(f"{edge_tab}: basic filter added over {edge_range}")
     else:
         results.append(f"{edge_tab}: not present -- skipped")
-
-    if client.tab_exists("Pool Picks"):
-        client.set_basic_filter("Pool Picks", pool_picks_range)
-        results.append(f"Pool Picks: basic filter added over {pool_picks_range}")
-    else:
-        results.append("Pool Picks: not present -- skipped")
 
     for tab, a1_range in BASIC_FILTER_PLAIN_TABS:
         if not client.tab_exists(tab):

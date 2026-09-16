@@ -28,9 +28,9 @@ just use the new name directly.
 
 **Player Pool is empty (or a position block is empty).**
 Cause: nothing's been added to the pool for that position yet.
-Fix: three ways in -- tick players in EdgeRaw's Pool column, type a name
-into Pool Picks, or `dfs pool add "name"`. Check `dfs pool list` to see
-what's currently ticked.
+Fix: three ways in -- set a player's Pool dropdown on EdgeRaw, type a
+name into Player Pool's own row 1 search box, or `dfs pool add "name"`.
+Check `dfs pool list` to see what's currently ticked.
 
 ---
 

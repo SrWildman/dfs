@@ -537,6 +537,39 @@ class SheetsClient:
                 found = True
         return found
 
+    def ensure_column_capacity(self, tab_name: str, min_cols: int) -> None:
+        """Grows `tab_name`'s actual grid (via gspread's `add_cols`, an
+        `appendDimension` request) to at least `min_cols` columns -- a
+        no-op if it's already wide enough. A tab's provisioned grid size
+        is independent of what's actually written into it; appending a
+        genuinely new column past the current width (`provision_missing_
+        columns`' fallback path) writes into a column the grid may not
+        have yet, which Sheets rejects outright ("exceeds grid limits")
+        rather than silently growing to fit -- found live provisioning
+        Player Pool's "Edge ↗" column past its 37-column grid."""
+        _, ws = self._ws(tab_name)
+        if ws.col_count < min_cols:
+            ws.add_cols(min_cols - ws.col_count)
+
+    def tab_gid(self, tab_name: str) -> int:
+        """The tab's stable `sheetId` (what Sheets calls a "gid" in URLs) --
+        for building a same-spreadsheet `HYPERLINK("#gid=...&range=...")`
+        formula (A3's "Edge ↗" column). Stable for the tab's lifetime;
+        only changes if the tab is deleted and recreated."""
+        _, ws = self._ws(tab_name)
+        return ws.id
+
+    def delete_tab(self, tab_name: str) -> None:
+        """Permanently deletes `tab_name` -- a one-time tab retirement (A3:
+        Pool Picks absorbed into Player Pool), never part of a regular
+        sync/polish path. No-op if the tab is already gone, so it's safe
+        to re-run."""
+        if not self.tab_exists(tab_name):
+            return
+        sheet, ws = self._ws(tab_name)
+        sheet.del_worksheet(ws)
+        self._ws_cache.pop(tab_name, None)
+
     def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
         """`widths` maps a column letter to a pixel width, e.g. {"B": 160}."""
         sheet, ws = self._ws(tab_name)

@@ -91,7 +91,19 @@ LINEUPS_NAME_BLOCKS = [
     (259, 267),
 ]
 LINEUPS_TOTALS_ROWS = [end + 1 for _, end in LINEUPS_NAME_BLOCKS]
-PLAYER_POOL_NAME_BLOCKS = [(2, 11), (13, 32), (34, 58), (60, 69), (71, 80)]
+
+# A3: row 1 became a real "add a player" control (a name search box, see
+# `sheet_pool_control.py`) via a real `insertDimension` -- every row below
+# shifted down by 1 from the pre-A3 layout `[(2, 11), (13, 32), (34, 58),
+# (60, 69), (71, 80)]`. `PLAYER_POOL_CONTROL_ROW`/`PLAYER_POOL_HEADER_ROW`
+# are the two new fixed positions this shift created; every consumer that
+# used to assume Player Pool's header sits at row 1 (`sheet_pool_deck.py`,
+# `sheet_reorder.py`'s callers, `sheet_links.link_edge_columns`, `doctor.py`)
+# now derives it from `PLAYER_POOL_HEADER_ROW` instead. See
+# CONTRIBUTING.md's structural changelog for the full list this touched.
+PLAYER_POOL_CONTROL_ROW = 1
+PLAYER_POOL_NAME_BLOCKS = [(3, 12), (14, 33), (35, 59), (61, 70), (72, 81)]
+PLAYER_POOL_HEADER_ROW = PLAYER_POOL_NAME_BLOCKS[0][0] - 1
 
 # Full-grid tabs: clear everything below the header, generously past any
 # row/column count actually seen so far.
@@ -109,6 +121,15 @@ def clear_previous_week(
     lineups_ranges = [f"A{s}:A{e}" for s, e in LINEUPS_NAME_BLOCKS]
     client.clear_ranges(lineups_tab, lineups_ranges)
     summary.append(f"{lineups_tab}: cleared Name column across {len(LINEUPS_NAME_BLOCKS)} lineup slot(s)")
+
+    # A3: the add-a-player control cell (row PLAYER_POOL_CONTROL_ROW) is a
+    # plain typed value, not a formula -- unlike the rest of Player Pool,
+    # `is_formula_driven` below doesn't cover it, and a name typed there
+    # last week (for a player who may not even be on this week's slate)
+    # must not survive into a new week any more than a stale Lineups pick
+    # would (Fix 2.14's "blank is better than bad").
+    client.clear_ranges(player_pool_tab, [f"B{PLAYER_POOL_CONTROL_ROW}"])
+    summary.append(f"{player_pool_tab}: cleared the add-a-player control (B{PLAYER_POOL_CONTROL_ROW})")
 
     first_start, _ = PLAYER_POOL_NAME_BLOCKS[0]
     first_cell = client.read_formula(player_pool_tab, f"A{first_start}")

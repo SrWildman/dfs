@@ -1,5 +1,5 @@
 from dfs.sheet_protection import FULLY_PROTECTED_TABS, protect_workbook
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
 
 
 class FakeProtectionClient:
@@ -73,11 +73,18 @@ def test_skips_a_missing_tab_without_erroring():
     assert "Board" not in [tab for tab, _ in client.protect_calls]
 
 
-def test_edgeraw_and_pool_picks_are_never_protected():
-    # EdgeRaw's whole point is that Sam types into it (Pool); Pool Picks
-    # is nothing but a typed column with lookups alongside it.
+def test_edgeraw_is_never_protected():
+    # EdgeRaw's whole point is that Sam types into it (Pool) constantly.
     client = FakeProtectionClient()
     protect_workbook(client, lineups_tab="Lineups")
     protected_tabs = {tab for tab, _ in client.protect_calls}
     assert "EdgeRaw" not in protected_tabs
-    assert "Pool Picks" not in protected_tabs
+
+
+def test_player_pool_leaves_only_the_add_a_player_control_unprotected():
+    client = FakeProtectionClient()
+    protect_workbook(client, lineups_tab="Lineups")
+
+    _tab, kwargs = next(c for c in client.protect_calls if c[0] == "Player Pool")
+    assert kwargs["unprotected_ranges"] == [f"B{PLAYER_POOL_CONTROL_ROW}"]
+    assert kwargs["warning_only"] is True

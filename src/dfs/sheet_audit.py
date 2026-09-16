@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 from dfs.sheet_style import AVAIL_CHIPS, FIELD_FORMATS, FLAG_CHIPS, HEADER_FMT
 from dfs.sheets import SheetsClient, column_letter
+from dfs.weekly_reset import PLAYER_POOL_HEADER_ROW
 
 # Sheets reports this for any column that was never explicitly widened --
 # see SheetsClient.get_column_widths' own docstring.
@@ -37,7 +38,8 @@ _HEADER_BG = HEADER_FMT["backgroundColor"]
 AUDITED_TABS: list[tuple[str, int]] = [
     ("EdgeRaw", 1),
     ("PlayerPoolRaw", 1),
-    ("Player Pool", 1),
+    # A3: real header moved to row 2 -- row 1 is the add-a-player control.
+    ("Player Pool", PLAYER_POOL_HEADER_ROW),
     ("Lineups", 11),
     ("Slate Grid", 1),
     ("Exposure", 1),
@@ -52,7 +54,6 @@ AUDITED_TABS: list[tuple[str, int]] = [
     ("SoSTE", 1),
     ("SoSDef", 1),
     ("SoSComb", 1),
-    ("Pool Picks", 2),  # row 1 is Fix 3.1's plain-text title, not a header
 ]
 
 # A tab whose frozen rows deliberately don't equal its header row, so the

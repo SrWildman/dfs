@@ -68,7 +68,7 @@ from __future__ import annotations
 
 from dfs.sheet_style import HEADER_FMT, polish_pool_deck
 from dfs.sheets import SheetsClient, column_letter
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
 
 # Derived, never hardcoded: Player Pool's blocks were resized once
 # already (Task K raised the per-position caps) and a literal row
@@ -115,13 +115,17 @@ def _deck_state(client: SheetsClient, lineups_tab: str) -> str:
     return "fresh"
 
 
+_POOL_DATA_START = PLAYER_POOL_HEADER_ROW + 1
+
+
 def _build_pool_sort(client: SheetsClient, pool_sort_tab: str, pool_tab: str, lineups_tab: str) -> None:
-    header = client.read_range(pool_tab, "A1:Z1")
+    header = client.read_range(pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:Z{PLAYER_POOL_HEADER_ROW}")
     header_row = header[0] if header else []
     formula = (
-        f"=IFERROR(SORT(FILTER('{pool_tab}'!$A$2:$Z${_POOL_LAST_ROW},"
-        f"'{pool_tab}'!$A$2:$A${_POOL_LAST_ROW}<>\"\","
-        f"({lineups_tab}!$B$1=\"ALL\")+('{pool_tab}'!$B$2:$B${_POOL_LAST_ROW}={lineups_tab}!$B$1)),"
+        f"=IFERROR(SORT(FILTER('{pool_tab}'!$A${_POOL_DATA_START}:$Z${_POOL_LAST_ROW},"
+        f"'{pool_tab}'!$A${_POOL_DATA_START}:$A${_POOL_LAST_ROW}<>\"\","
+        f"({lineups_tab}!$B$1=\"ALL\")+('{pool_tab}'!$B${_POOL_DATA_START}:$B${_POOL_LAST_ROW}"
+        f"={lineups_tab}!$B$1)),"
         f'{lineups_tab}!$G$1,FALSE),"")'
     )
     client.write_tab(pool_sort_tab, [header_row, [formula]])
@@ -139,7 +143,7 @@ def _window_formula(col: str, row: int) -> str:
 
 
 def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) -> None:
-    pool_header_rows = client.read_range(pool_tab, "A1:Z1")
+    pool_header_rows = client.read_range(pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:Z{PLAYER_POOL_HEADER_ROW}")
     pool_header = pool_header_rows[0] if pool_header_rows else []
     # G1's MATCH array, built from Player Pool's REAL header rather than a
     # hardcoded snapshot of it -- a hardcoded array here once assumed two

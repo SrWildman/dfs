@@ -32,7 +32,10 @@ def test_clear_previous_week_targets_each_configured_tab():
         dk_upload_tab="DK Upload",
     )
     tabs_touched = [tab for tab, _ in client.calls]
-    assert tabs_touched == ["Lineups", "Player Pool", "Scratch", "DK Upload"]
+    # Player Pool appears twice: once for the add-a-player control cell
+    # (always cleared, a plain typed value -- A3), once for the Name
+    # column (only when it isn't formula-driven, see the "skips" test).
+    assert tabs_touched == ["Lineups", "Player Pool", "Player Pool", "Scratch", "DK Upload"]
 
 
 def test_clear_previous_week_only_clears_column_a_for_name_columns():
@@ -62,8 +65,11 @@ def test_clear_previous_week_skips_player_pool_when_name_column_is_a_formula():
     clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
     tabs_touched = [tab for tab, _ in client.calls]
 
-    assert "Player Pool" not in tabs_touched
-    assert tabs_touched == ["Lineups", "Scratch", "DK Upload"]
+    # The Name column is skipped (still formula-driven), but the
+    # add-a-player control cell (a plain typed value, A3) is cleared
+    # regardless -- it's not part of the formula-driven-ness check.
+    assert tabs_touched == ["Lineups", "Player Pool", "Scratch", "DK Upload"]
+    assert client.calls[1] == ("Player Pool", ["B1"])
 
 
 def test_clear_previous_week_still_clears_player_pool_when_it_holds_typed_values():

@@ -6,7 +6,7 @@ from dfs.doctor import run_doctor
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_deck import DECK_ROWS, POOL_SORT_TAB
 from dfs.sources.edge import POOL_HEADER
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
 
 
 @dataclass
@@ -96,10 +96,23 @@ def _good_lineups_rows() -> list[list[str]]:
     return rows
 
 
-def _lineups_rows(header: list[str] | None = None) -> dict[tuple[str, str], list[list[str]]]:
+_PLAYER_POOL_HEADER_RANGE = f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
+
+
+def _lineups_rows(
+    header: list[str] | None = None, player_pool_header: list[str] | None = None
+) -> dict[tuple[str, str], list[list[str]]]:
+    # run_doctor re-reads Player Pool's header from PLAYER_POOL_HEADER_ROW
+    # too (A3: row 1 became the add-a-player control) -- defaults to
+    # _ALL_GOOD_TABS' own Player Pool header so every existing call site
+    # keeps working without having to know about this override; a test
+    # that deliberately varies Player Pool's header passes its own.
     rows = {("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows()}
     if header is not None:
         rows[("Lineups", _LINEUPS_HEADER_RANGE)] = [header]
+    rows[("Player Pool", _PLAYER_POOL_HEADER_RANGE)] = [
+        player_pool_header if player_pool_header is not None else _ALL_GOOD_TABS["Player Pool"]
+    ]
     return rows
 
 
@@ -208,7 +221,9 @@ def test_run_doctor_flags_duplicated_linked_edge_columns():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["Player Pool"] = ["Name", *LINKED_EDGE_COLUMNS, "Venue", "Ceil", *LINKED_EDGE_COLUMNS]
     cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+    client = FakeDoctorClient(
+        tabs=tabs, rows=_lineups_rows(tabs["Lineups"], player_pool_header=tabs["Player Pool"])
+    )
 
     issues = run_doctor(client, cfg)
     assert any(
@@ -298,7 +313,7 @@ def test_run_doctor_flags_pool_deck_range_that_has_fallen_behind_a_resize():
     client = FakeDoctorClient(
         tabs=tabs,
         rows={
-            **_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
+            **_lineups_rows(_ALL_GOOD_TABS["Lineups"], player_pool_header=tabs["Player Pool"]),
             ("Player Pool", f"B{PLAYER_POOL_NAME_BLOCKS[-1][0]}:B{PLAYER_POOL_NAME_BLOCKS[-1][0]}"): [
                 ["DST"]
             ],

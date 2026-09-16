@@ -4,10 +4,13 @@ from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_COLUMN
+from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW
 
 SOURCE_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Source"))
 OVERFLOW_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Overflow"))
 POOL_TYPE_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Pool"))
+_HEADER_A1 = f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
+_CONTROL_CELL = f"$B${PLAYER_POOL_CONTROL_ROW}"
 
 
 class SpySheetsClient:
@@ -21,7 +24,7 @@ class SpySheetsClient:
         self.update_calls: list[tuple[str, str, list[list]]] = []
 
     def read_range(self, tab_name: str, a1_range: str):
-        if a1_range == "A1:1":
+        if a1_range == _HEADER_A1:
             return [self._header]
         value = self._positions.get(a1_range, "")
         return [[value]] if value else [[]]
@@ -40,9 +43,9 @@ def test_writes_a_name_formula_and_overflow_formula_per_block_only():
 
     ranges_written = {a1 for _, a1, _ in client.update_calls}
     assert ranges_written == {
-        f"{SOURCE_COL}1",
-        f"{OVERFLOW_COL}1",
-        f"{POOL_TYPE_COL}1",
+        f"{SOURCE_COL}{PLAYER_POOL_HEADER_ROW}",
+        f"{OVERFLOW_COL}{PLAYER_POOL_HEADER_ROW}",
+        f"{POOL_TYPE_COL}{PLAYER_POOL_HEADER_ROW}",
         "A2",
         f"{OVERFLOW_COL}2",
         f"{SOURCE_COL}2:{SOURCE_COL}11",
@@ -102,8 +105,9 @@ def test_name_formula_caps_at_the_blocks_own_row_count():
     assert ",8,1)" in formulas["A67"]  # DST: 74-67+1 = 8
 
 
-_PICKS_NAMES = (
-    "FILTER('Pool Picks'!$A$3:$A$102,'Pool Picks'!$A$3:$A$102<>\"\",'Pool Picks'!$B$3:$B$102=\"QB\")"
+_CONTROL_NAMES = (
+    f'FILTER({_CONTROL_CELL}:{_CONTROL_CELL},{_CONTROL_CELL}<>"",'
+    f'IFERROR(VLOOKUP({_CONTROL_CELL},EdgeRaw!$B:$C,2,FALSE),"")="QB")'
 )
 
 
@@ -116,15 +120,15 @@ def test_overflow_formula_thresholds_on_the_same_cap():
         f"FILTER({{EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F}},"
         f'EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}<>"",EdgeRaw!$C$2:$C="QB")'
     )
-    picks_filter = f"{{{_PICKS_NAMES},IFERROR(VLOOKUP({_PICKS_NAMES},EdgeRaw!$B:$F,5,FALSE),0)}}"
-    union = f"{{{edge_filter};{picks_filter}}}"
+    control_filter = f"{{{_CONTROL_NAMES},IFERROR(VLOOKUP({_CONTROL_NAMES},EdgeRaw!$B:$F,5,FALSE),0)}}"
+    union = f"{{{edge_filter};{control_filter}}}"
     count = f"IFERROR(COUNTA(INDEX(UNIQUE({union}),0,1)),0)"
     assert formulas[f"{OVERFLOW_COL}2"] == (
         f'=IF({count}>10,10&" QB slots, "&{count}&" ticked -- some are hidden","")'
     )
 
 
-def test_name_formula_unions_edgeraw_ticks_with_pool_picks_typed_rows():
+def test_name_formula_unions_edgeraw_ticks_with_the_control_cell():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
@@ -132,9 +136,9 @@ def test_name_formula_unions_edgeraw_ticks_with_pool_picks_typed_rows():
     name_formula = formulas["A2"]
     assert "UNIQUE({" in name_formula
     assert "FILTER({EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F}" in name_formula
-    assert "FILTER('Pool Picks'!$A$3:$A$102,'Pool Picks'!$A$3:$A$102<>\"\"," in name_formula
-    assert "'Pool Picks'!$B$3:$B$102=\"QB\"" in name_formula
-    assert "VLOOKUP(" in name_formula  # Pool Picks' half looks Salary up against EdgeRaw
+    assert f'FILTER({_CONTROL_CELL}:{_CONTROL_CELL},{_CONTROL_CELL}<>"",' in name_formula
+    assert f'VLOOKUP({_CONTROL_CELL},EdgeRaw!$B:$C,2,FALSE),"")="QB"' in name_formula
+    assert "VLOOKUP(" in name_formula  # the control cell's half looks Salary up against EdgeRaw
 
 
 def test_name_formula_sorts_by_salary_descending_not_alphabetically():
@@ -148,8 +152,8 @@ def test_name_formula_sorts_by_salary_descending_not_alphabetically():
 
 
 def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
-    # A player ticked in EdgeRaw AND typed into Pool Picks must count
-    # once toward the cap, not twice -- COUNTA(INDEX(UNIQUE(...),0,1)),
+    # A player ticked in EdgeRaw AND typed into the control cell must
+    # count once toward the cap, not twice -- COUNTA(INDEX(UNIQUE(...),0,1)),
     # not two separate COUNTIFS added together. INDEX(...,0,1) takes just
     # the Name column back out of the (Name, Salary) pairs Fix 2.10 added.
     client = SpySheetsClient(_POSITIONS)
@@ -157,7 +161,7 @@ def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
     assert "COUNTA(INDEX(UNIQUE(" in formulas[f"{OVERFLOW_COL}2"]
-    assert "FILTER('Pool Picks'!" in formulas[f"{OVERFLOW_COL}2"]
+    assert _CONTROL_CELL in formulas[f"{OVERFLOW_COL}2"]
 
 
 def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formula():
@@ -204,11 +208,11 @@ def test_pool_type_formula_looks_up_edgeraw_by_name_with_index_match():
 def test_pool_type_column_header_is_written_once():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
-    header_call = next(c for c in client.update_calls if c[1] == f"{POOL_TYPE_COL}1")
+    header_call = next(c for c in client.update_calls if c[1] == f"{POOL_TYPE_COL}{PLAYER_POOL_HEADER_ROW}")
     assert header_call[2] == [["Pool"]]
 
 
-def test_source_formula_labels_edgeraw_ticks_and_pool_picks_typed_rows():
+def test_source_formula_labels_edgeraw_ticks_and_the_control_cell():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
@@ -216,13 +220,13 @@ def test_source_formula_labels_edgeraw_ticks_and_pool_picks_typed_rows():
     first_row_formula = source_call[2][0][0]
     assert 'IF($A2="","",' in first_row_formula
     assert '"EdgeRaw"' in first_row_formula
-    assert '"Picks"' in first_row_formula
+    assert '"Added"' in first_row_formula
     assert f"EdgeRaw!${POOL_COLUMN}:${POOL_COLUMN}" in first_row_formula
-    assert "'Pool Picks'!$A$3:$A$102" in first_row_formula
+    assert f"$A2={_CONTROL_CELL}" in first_row_formula
 
 
 def test_source_column_header_is_written_once():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
-    header_call = next(c for c in client.update_calls if c[1] == f"{SOURCE_COL}1")
+    header_call = next(c for c in client.update_calls if c[1] == f"{SOURCE_COL}{PLAYER_POOL_HEADER_ROW}")
     assert header_call[2] == [["Source"]]

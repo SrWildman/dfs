@@ -90,6 +90,54 @@ def edge_lookup_formula(row: int, edge_tab: str, column_name: str) -> str:
     return f'=IF($A{row}="","",{lookup})'
 
 
+def edge_row_hyperlink_formula(row: int, edge_tab: str, edge_gid: int) -> str:
+    """A3: `=HYPERLINK("#gid=...&range=...","Edge ↗")` jumping straight to
+    this row's own player on `edge_tab`, so removing someone from the pool
+    (unchecking EdgeRaw's Pool column) is one click away instead of a
+    scroll/search through 743 rows. `#gid=<id>&range=<a1>` is Sheets' own
+    same-spreadsheet navigation syntax -- no full URL needed, so this
+    keeps working if the spreadsheet itself is ever renamed or moved.
+    Blank-name guarded like `edge_lookup_formula`; `IFNA` guards a name
+    that doesn't currently match anything on EdgeRaw (a bye-week pick, a
+    stale add) so it reads as a dash rather than `#N/A`."""
+    match = f"MATCH($A{row},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_START},0)"
+    target = f'"#gid={edge_gid}&range={_EDGE_RANGE_START}"&{match}'
+    return f'=IF($A{row}="","",IFNA(HYPERLINK({target},"Edge ↗"),"-"))'
+
+
+def write_edge_row_links(
+    client: SheetsClient,
+    tab: str,
+    name_blocks: list[tuple[int, int]],
+    edge_tab: str,
+    *,
+    header_row: int = 1,
+) -> str:
+    """Fills the "Edge ↗" column (A3, if present in `tab`'s header) across
+    every row in `name_blocks` with `edge_row_hyperlink_formula`. Skips
+    cleanly if the tab has no "Edge ↗" column -- older sheets, or a tab
+    this feature was never asked for on. Always fully rewritten (same
+    idempotency stance as `sheet_pool_formulas.write_pool_formulas`):
+    there's no "already has it" state worth skipping, and `edge_gid` is
+    re-read fresh every call rather than cached, so a tab that was ever
+    deleted and recreated self-heals on the next `dfs setup polish` rather
+    than needing a manual fix.
+    """
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_rows[0] if header_rows else []
+    if "Edge ↗" not in header:
+        return f"{tab}: no 'Edge ↗' column -- skipped"
+
+    col = column_letter(header.index("Edge ↗"))
+    edge_gid = client.tab_gid(edge_tab)
+    for start, end in name_blocks:
+        rows = [[edge_row_hyperlink_formula(row, edge_tab, edge_gid)] for row in range(start, end + 1)]
+        client.update_range(tab, f"{col}{start}:{col}{end}", rows)
+
+    total_rows = sum(end - start + 1 for start, end in name_blocks)
+    return f"{tab}: 'Edge ↗' links written for {total_rows} row(s)"
+
+
 def link_edge_columns(
     client: SheetsClient,
     tab: str,

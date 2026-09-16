@@ -75,15 +75,16 @@ status` means real, incomplete data, not a warning to ignore.
 
 ## 3. Build the pool
 
-**Tabs:** EdgeRaw, Pool Picks, Player Pool.
+**Tabs:** EdgeRaw, Player Pool.
 
 Three ways to add a player, use any mix:
 
 ```
-Tick the Pool checkbox in EdgeRaw (use its header arrow to sort/search,
-  or the "Pool picking" filter view, rather than scrolling 743 rows)
-Type a name into Pool Picks column A, row 3 down (live search against
-  EdgeRaw's own Name column -- row 1 explains the tab, row 2 is the header)
+Set the Pool dropdown in EdgeRaw to Cash/GPP/Both (use its header arrow
+  to sort/search, or the "Pool picking" filter view, rather than
+  scrolling 743 rows)
+Type a name into Player Pool's own row 1 search box (live search against
+  EdgeRaw's own Name column -- row 2 is the real header, blocks start below it)
 dfs pool add "name" "name2" ...   # exact match wins; ambiguous names are
                                     # printed as candidates, never guessed
 ```
@@ -93,14 +94,16 @@ pool remove "name"` and `dfs pool clear` (asks to confirm) take players
 back out.
 
 **Done looks like:** Player Pool's blocks show the players you meant to
-add, at the position you expected, and the Overflow column (Z) is blank
-for every block -- a non-blank Overflow means you're over that
+add, at the position you expected, and the Overflow column (far right)
+is blank for every block -- a non-blank Overflow means you're over that
 position's cap and some picks are hidden, not dropped.
 
-**Commonly goes wrong:** typing into Player Pool directly. It's fully
-computed (and protected, warning-only) -- Player Pool's Source column
-tells you whether a given row came from EdgeRaw or Pool Picks, which is
-also the fastest way to find where to remove one.
+**Commonly goes wrong:** typing into Player Pool directly, anywhere other
+than row 1's search box. Every other cell is fully computed (and
+protected, warning-only) -- Player Pool's Source column tells you
+whether a given row came from EdgeRaw or that search box, and its "Edge
+↗" column jumps straight to that player's row on EdgeRaw, the fastest
+way to find and remove one (set their Pool dropdown back to blank).
 
 ## 4. Build lineups
 

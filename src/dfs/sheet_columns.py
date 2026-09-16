@@ -64,15 +64,20 @@ LINKED_COLUMNS = ["CeilVal", "Leverage", "Avail", "Flag", "GameEnv", *WEATHER, *
 # PlayerPoolRaw has no tab-specific extras -- BASE_COLUMN_ORDER exactly.
 PLAYER_POOL_RAW_COLUMN_ORDER = list(BASE_COLUMN_ORDER)
 
-# Player Pool: "Source" (which of EdgeRaw/Pool Picks a row came from)
-# belongs beside the other identity-ish columns, so it's inserted right
-# after Venue; "Pool" (Fix 2.11's surfaced Cash/GPP/Both value) and
-# "Overflow" (the over-the-cap warning) are both about *this tab's own
-# roster mechanics*, not a player attribute, so they stay appended at the
-# very end regardless of what else moves around them.
+# Player Pool: "Source" (which of EdgeRaw/the add-a-player row a row came
+# from) belongs beside the other identity-ish columns, so it's inserted
+# right after Venue; "Edge ↗" (A3: a HYPERLINK straight to this player's
+# row on EdgeRaw, so removing someone -- unchecking Pool there -- is one
+# click away instead of a scroll/search through 743 rows) sits right next
+# to it, since both are about managing this row rather than describing the
+# player; "Pool" (Fix 2.11's surfaced Cash/GPP/Both value) and "Overflow"
+# (the over-the-cap warning) are both about *this tab's own roster
+# mechanics*, not a player attribute, so they stay appended at the very
+# end regardless of what else moves around them.
 PLAYER_POOL_COLUMN_ORDER = [
     *IDENTITY,
     "Source",
+    "Edge ↗",
     *DECISION,
     *GAME,
     *WEATHER,
@@ -87,7 +92,10 @@ PLAYER_POOL_COLUMN_ORDER = [
 # "Issues" (A1: renamed from "Check") is the last thing you look at before
 # trusting a lineup, so it sits immediately after Flag -- the last member
 # of DECISION -- rather than at the tab's far right past three collapsed
-# groups nobody's about to expand just to see it.
+# groups nobody's about to expand just to see it. "Edge ↗" (A3, same
+# HYPERLINK-to-EdgeRaw as Player Pool's own column of the same name) sits
+# right after it -- Issues is exactly the moment you'd want to jump over
+# and check/fix something on EdgeRaw.
 LINEUPS_COLUMN_ORDER = [
     *IDENTITY,
     "DK Sal",
@@ -101,6 +109,7 @@ LINEUPS_COLUMN_ORDER = [
     "Avail",
     "Flag",
     "Issues",
+    "Edge ↗",
     *GAME,
     *WEATHER,
     *MOVEMENT,

@@ -59,6 +59,9 @@ class SpySheetsClient:
     def group_columns(self, tab_name, first_col_a1, last_col_a1, *, collapsed=False):
         pass
 
+    def ensure_column_capacity(self, tab_name, min_cols):
+        pass
+
     def clear_column_groups(self, tab_name):
         pass
 

@@ -14,14 +14,15 @@ is safe for every future `dfs sync`/`dfs setup polish` run.
 
 Exactly four things are typed by hand in the whole workbook (see
 `sheet_style.py`'s visual-grammar docstring): EdgeRaw's Pool column,
-Pool Picks' Name column, Lineups' block column A, and Exposure's Target
-column -- plus the pool deck's B1/D1/F1 controls. EdgeRaw and Pool Picks
-are deliberately absent from `protect_workbook` below: EdgeRaw's ENTIRE
-point is that Sam types into it (the Pool column) constantly, and Pool
-Picks is nothing BUT a typed column with read-only lookups alongside it
--- protecting either would mean protecting the one thing this task exists
-to make typeable. Exposure and Lineups need the `unprotectedRanges`
-carve-out instead of a blanket protection for exactly that reason.
+Player Pool's own add-a-player control cell (A3, `sheet_pool_control.py`
+-- replaced the old separate `Pool Picks` tab), Lineups' block column A,
+and Exposure's Target column -- plus the pool deck's B1/D1/F1 controls.
+EdgeRaw is deliberately absent from `protect_workbook` below: its ENTIRE
+point is that Sam types into it (the Pool column) constantly, protecting
+it would mean protecting the one thing this task exists to make
+typeable. Player Pool, Exposure and Lineups all need the
+`unprotectedRanges` carve-out instead of a blanket protection for the
+same reason.
 """
 
 from __future__ import annotations
@@ -29,12 +30,11 @@ from __future__ import annotations
 from dfs.sheet_links import PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_deck import POOL_SORT_TAB
 from dfs.sheets import SheetsClient
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
 
 # Whole tab, no exceptions -- entirely computed or spilled-array output,
 # nothing here is ever typed by hand.
 FULLY_PROTECTED_TABS = [
-    "Player Pool",
     PLAYER_POOL_RAW_TAB,
     "Board",
     "Slate Grid",
@@ -49,6 +49,7 @@ def protect_workbook(
     client: SheetsClient,
     *,
     exposure_tab: str = "Exposure",
+    player_pool_tab: str = "Player Pool",
     lineups_tab: str,
     name_blocks: list[tuple[int, int]] = LINEUPS_NAME_BLOCKS,
 ) -> list[str]:
@@ -64,6 +65,18 @@ def protect_workbook(
         client.clear_protected_ranges(tab)
         client.protect_sheet(tab, description=_FORMULA_DESCRIPTION)
         results.append(f"{tab}: whole tab protected (warning-only)")
+
+    if not client.tab_exists(player_pool_tab):
+        results.append(f"{player_pool_tab}: not present -- skipped")
+    else:
+        control_cell = f"B{PLAYER_POOL_CONTROL_ROW}"
+        client.clear_protected_ranges(player_pool_tab)
+        client.protect_sheet(
+            player_pool_tab,
+            unprotected_ranges=[control_cell],
+            description=f"{_FORMULA_DESCRIPTION} (except the add-a-player control, {control_cell})",
+        )
+        results.append(f"{player_pool_tab}: whole tab protected except the add-a-player control")
 
     if not client.tab_exists(exposure_tab):
         results.append(f"{exposure_tab}: not present -- skipped")

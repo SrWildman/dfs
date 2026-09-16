@@ -67,6 +67,7 @@ def provision_missing_columns(
 
     start_col = column_letter(len(header))
     end_col = column_letter(len(header) + len(missing) - 1)
+    client.ensure_column_capacity(tab, len(header) + len(missing))
     client.update_range(tab, f"{start_col}{header_row}:{end_col}{header_row}", [missing])
     for row_num in header_repeats_at or []:
         client.update_range(tab, f"{start_col}{row_num}:{end_col}{row_num}", [missing])
