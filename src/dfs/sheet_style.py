@@ -178,6 +178,22 @@ def _num(pattern: str, type_: str = "NUMBER") -> dict:
 # normalizing header text is a structural change this file deliberately
 # never makes (see the module docstring).
 FIELD_FORMATS = {
+    # Id is a raw DraftKings player ID, never meant to be looked at
+    # (hidden outright on EdgeRaw, collapsed into the INTERNAL group
+    # elsewhere) -- but it's also the exact string `sources/edge.py`'s
+    # pre_upload/post_upload match Pool ticks by across a sync, and with
+    # no explicit format here it silently inherited a stray "0.0" pattern
+    # from wherever it happened to sit before Phase 3 moved it (carried
+    # along by `moveDimension`, the same way a stale formula or column
+    # group can be -- see CONTRIBUTING.md's Phase 3 changelog). Every
+    # real Id rendered as e.g. "44133074.0" instead of "44133074", so a
+    # tick captured before a sync never matched the freshly-written Id
+    # string after it -- found live, a second real cause of the same
+    # "every Pool tick vanished" symptom `sheet_links.py`'s Id-position
+    # fix already covered once. A plain integer format closes this for
+    # good, the same "derive/set explicitly, never inherit" rule as
+    # every other field here.
+    "Id": _num("0"),
     "DK Sal": _num("$#,##0", "CURRENCY"),
     "Salary": _num("$#,##0", "CURRENCY"),
     "Pts": _num("0.0"),
@@ -549,10 +565,13 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # here" cue every other typed cell in the workbook uses (see the
     # visual-grammar docstring below).
     client.format_range(edge_tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{EDGE_ROWS}", {"backgroundColor": INPUT_BG})
-    # Pool and Name pinned while you scroll right; Id (between them) is
-    # hidden outright rather than pinned -- a raw DraftKings ID is never
-    # worth looking at, hiding it also means Pool and Name end up visually
-    # adjacent despite Id physically sitting between them.
+    # Pool and Name pinned while you scroll right; Id is hidden outright
+    # rather than pinned -- a raw DraftKings ID is never worth looking at.
+    # Phase 3 moved Id into EDGE_COLUMNS' INTERNAL zone (near the far
+    # right, folded in beside CeilPct/OwnPct/LevBasis) rather than
+    # keeping it as Pool's immediate neighbor; it's still individually
+    # hidden here regardless of where it physically sits, found by name
+    # like everything else in this function.
     id_col = _edge_letter("Id")
     if id_col:
         client.hide_columns(edge_tab, id_col, id_col)
@@ -704,6 +723,12 @@ BUILDER_WIDTHS = {
     "% of Rstr": 72,
     "Source": 64,
     "Pool": 64,
+    # Reserved GAME-zone placeholders (Phase 3) -- narrow until the
+    # strength-of-schedule work lands and gives them real content.
+    "SoS 1": 56,
+    "SoS 2": 56,
+    "SoS 3": 56,
+    "SoS 4": 56,
 }
 
 
@@ -903,12 +928,21 @@ def polish_pool_deck(client: SheetsClient, lineups_tab: str, *, header_row: int,
 
 
 # ---------------------------------------------------------------------------
-# Lineups Guardrails (Task L): per-lineup validation in the empty O column
+# Lineups Guardrails (Task L): per-lineup validation in the "Issues" column
 # ---------------------------------------------------------------------------
 
-_GUARDRAILS_COLUMN = "O"
 # Renamed from "Check" -- Sam asked what it was, since the old name didn't
-# say. Header text only; the column itself doesn't move (Fix A1).
+# say (Fix A1). Also the header text `polish_guardrails` finds ITS OWN
+# column by -- Phase 3 gave "Issues" a real, designed position of its own
+# in `sheet_columns.LINEUPS_COLUMN_ORDER`, so hardcoding a column letter
+# here (this used to be `_GUARDRAILS_COLUMN = "O"`, true only because
+# "Issues" happened to sit at O in the pre-Phase-3 layout) is exactly the
+# hazard CONTRIBUTING.md warns about: Phase 3's reorder moved "Issues" to
+# a new column, and this function kept writing to the OLD literal "O" --
+# which by then held "Flag" -- silently clobbering Flag's real EdgeRaw
+# formula with a duplicate copy of the guardrails header/formulas. Found
+# during Phase 3's own template verification pass; see CONTRIBUTING.md's
+# changelog.
 _GUARDRAILS_HEADER = "Issues"
 _GUARDRAILS_CHIPS = [
     ("TEXT_CONTAINS", "DUPLICATE", _chip(CRIT_BG, CRIT_FG)),
@@ -934,13 +968,16 @@ def _slot_check_formula(start: int, end: int, row: int, avail_col: str) -> str:
     )
 
 
-def _totals_check_formula(start: int, end: int, totals_row: int) -> str:
+def _totals_check_formula(start: int, end: int, totals_row: int, salary_col: str) -> str:
     """Salary cap, roster completeness, or OK -- on the block's totals
     row (Fix 2.4: `totals_row` is `end + 1`, a real separate row now, not
-    `end` itself)."""
+    `end` itself). `salary_col` is found by header name at the call site
+    (DK Sal), never hardcoded -- this used to read the literal column
+    `D`, true only because DK Sal happened to sit there before Phase 3's
+    reorder moved it."""
     return (
         f'=IF(COUNTA($A${start}:$A${end})=0,"",'
-        f'IF(D{totals_row}>50000,"OVER "&TEXT(D{totals_row}-50000,"$#,##0"),'
+        f'IF({salary_col}{totals_row}>50000,"OVER "&TEXT({salary_col}{totals_row}-50000,"$#,##0"),'
         f"IF(COUNTA($A${start}:$A${end})<9,"
         f'"INCOMPLETE "&COUNTA($A${start}:$A${end})&"/9","OK")))'
     )
@@ -966,17 +1003,43 @@ def polish_lineups_totals_rows(
 ) -> str:
     """Fix 2.4: every totals row (the row directly below each block's 9th
     real slot) was being treated as a tenth roster slot by every
-    VLOOKUP-by-name column -- Venue, OppPosRank, Val, and the entire
-    EdgeRaw-linked block (CeilVal..Flag), all permanently `#N/A` since a
-    totals row's own Name cell (column A) is always blank. This clears
-    those dead cells, sums Ceil onto the totals row the same way Pts
-    already is (only Salary and Pts were summed before; Sam had been
-    hand-editing Ceil totals into lineups), and labels the row so it
-    reads as a footer rather than a broken slot. Rstr% and Issues (O) are
-    left alone -- both already hold real, working formulas on the totals
-    row (a real `SUM`, and the real cap/completeness check respectively),
-    not dead VLOOKUPs, despite superficially living in the same I..N
-    range the dead columns do.
+    VLOOKUP-by-name column -- Venue, O/U, Spread, Team Implied,
+    OppPosRank, and the entire EdgeRaw-linked block (CeilVal..Flag), all
+    permanently `#N/A` since a totals row's own Name cell (column A) is
+    always blank. This clears those dead cells, sums Ceil onto the totals
+    row the same way Pts already is (only Salary and Pts were summed
+    before; Sam had been hand-editing Ceil totals into lineups), and
+    labels the row so it reads as a footer rather than a broken slot.
+    Rstr% and Issues are left alone -- both already hold real, working
+    formulas on the totals row (a real `SUM`, and the real cap/
+    completeness check respectively), not dead VLOOKUPs, despite sitting
+    near the columns that do.
+
+    "Total" and "Remaining" both sit close to the number they describe --
+    Opp. (left of the Salary sum) and Val (right of the Pts sum), both
+    otherwise-dead cells on a totals row. Phase 3 (see CONTRIBUTING.md's
+    changelog) used to instead reuse Team's and Spread's columns for
+    these two labels, which happened to sit right next to Salary under
+    the pre-Phase-3 order purely by coincidence; once Spread moved into
+    the GAME zone, "Remaining" (and the remaining-cap amount itself,
+    previously a hand-authored formula parked in O/U's column for the
+    same incidental reason) ended up stranded a dozen columns to the
+    right of the number it's about -- found live, from a screenshot,
+    right after the reorder shipped.
+
+    The remaining-cap NUMBER itself (no text) still has to land at
+    Venue's column specifically, not wherever's convenient: a separate,
+    genuinely hand-authored row directly below each totals row (the
+    "average remaining per slot" helper documented in docs/
+    SHEET_REFERENCE.md, never written by any `dfs` command) reads it via
+    `INDIRECT("E"&(ROW()-1))` -- a string-built reference `moveDimension`
+    cannot see or retarget, unlike a normal formula reference. Landing
+    anything but a bare number there breaks that row with `#VALUE!` --
+    found live, a second time, immediately after the first "Remaining"
+    fix shipped (self-labeling text at that exact cell divides-by-count
+    just as badly as the old stranded position did). `O/U`/`Spread`/
+    `Team Implied` are now just cleared like every other dead lookup
+    instead of being repurposed.
 
     Column positions are found from the tab's own header, never
     hardcoded -- same reasoning as every other lookup-by-name function in
@@ -993,25 +1056,32 @@ def polish_lineups_totals_rows(
     def col(name: str) -> str | None:
         return column_letter(header.index(name)) if name in header else None
 
-    dead_columns = [c for c in ("Venue", "OppPosRank", "Val", *LINKED_EDGE_COLUMNS) if col(c)]
+    dead_columns = [
+        c for c in ("O/U", "Spread", "Team Implied", "OppPosRank", *LINKED_EDGE_COLUMNS) if col(c)
+    ]
     ceil_col = col("Ceil")
-    # "Total" immediately precedes the Salary SUM (Team's own column is
-    # blank on a totals row anyway); "Remaining" immediately FOLLOWS the
-    # remaining-cap formula, which itself sits in O/U's column position
-    # (repurposed there, pre-existing) with nothing free to its left --
-    # Spread's column, directly right of it, is the closest clear slot.
-    total_label_col = col("Team")
-    remaining_label_col = col("Spread")
+    salary_col = col("DK Sal")
+    remaining_col = col("Venue")  # must stay a bare number -- see docstring
+    remaining_label_col = col("Val")
+    total_label_col = col("Opp.")
+    # Team's column carried "Total" (and Venue carried it too, briefly,
+    # before the INDIRECT("E"...) conflict was found) -- clear whatever's
+    # left at either from an earlier run so a re-polish doesn't leave a
+    # stray "Total" sitting where it no longer belongs.
+    stale_total_cols = [c for c in (col("Team"), col("Venue")) if c and c != total_label_col]
 
     cleared = 0
     labeled = 0
     summed = 0
+    reset = 0
     for start, end in name_blocks:
         totals_row = end + 1
         for name in dead_columns:
             letter = col(name)
             client.update_range(tab, f"{letter}{totals_row}", [[""]])
             cleared += 1
+        for stale_col in stale_total_cols:
+            client.update_range(tab, f"{stale_col}{totals_row}", [[""]])
         if ceil_col:
             ceil_sum = f"=SUM({ceil_col}{start}:{ceil_col}{end})"
             client.update_range(tab, f"{ceil_col}{totals_row}", [[ceil_sum]])
@@ -1019,13 +1089,26 @@ def polish_lineups_totals_rows(
         if total_label_col:
             client.update_range(tab, f"{total_label_col}{totals_row}", [["Total"]])
             labeled += 1
+        if remaining_col and salary_col:
+            remaining_formula = f'=IF(COUNTA($A${start}:$A${end})=0,"",50000-{salary_col}{totals_row})'
+            client.update_range(tab, f"{remaining_col}{totals_row}", [[remaining_formula]])
         if remaining_label_col:
             client.update_range(tab, f"{remaining_label_col}{totals_row}", [["Remaining"]])
             labeled += 1
+        # Column A (Name) on a totals row still carried the same input
+        # background AND typo-guard player dropdown as a real roster
+        # slot -- a leftover from before an earlier fix (2.4) shrank each
+        # block's own range to exclude the totals row, never retroactively
+        # cleaned up off the row it stopped covering. Found live, from a
+        # screenshot: the totals row showed the exact same dropdown arrow
+        # as the real slot above it.
+        client.clear_data_validation(tab, f"A{totals_row}")
+        client.format_range(tab, f"A{totals_row}", {"backgroundColor": WHITE})
+        reset += 1
 
     return (
         f"{tab}: {len(name_blocks)} totals row(s) -- {cleared} dead VLOOKUP(s) cleared, "
-        f"{summed} Ceil sum(s) added, {labeled} label(s) written"
+        f"{summed} Ceil sum(s) added, {labeled} label(s) written, {reset} Name cell(s) un-typo-guarded"
     )
 
 
@@ -1038,17 +1121,19 @@ def polish_guardrails(
     header_repeats_at: list[int] | None = None,
 ) -> str:
     """Each lineup block currently checks exactly one thing (salary
-    remaining, via its own D/E-column formulas). This adds the checks that
-    actually catch mistakes, in column O -- the empty spacer immediately
-    left of the EdgeRaw-linked block, 2.4px wide until this widens it.
+    remaining, via its own DK Sal-column formulas). This adds the checks
+    that actually catch mistakes, in the "Issues" column -- found by
+    header name (see the module-level note by `_GUARDRAILS_HEADER` on why
+    this was a hardcoded column letter before Phase 3 and why that broke).
 
     Per roster slot: DUPLICATE if the same name appears twice in that
     lineup, else that pick's Avail flag (OUT/IR/Q) if it has one. On the
     block's totals row: OVER the cap, INCOMPLETE (fewer than 9 picks), or
-    OK. The Avail column is found by header name, not a hardcoded letter
-    -- exactly the class of assumption that caused this feature's own
-    prerequisite bug (see CONTRIBUTING.md's changelog); skips cleanly if
-    `dfs setup link-edge` hasn't run yet.
+    OK. The Avail and DK Sal columns are both found by header name too, not
+    a hardcoded letter -- exactly the class of assumption that caused this
+    feature's own prerequisite bug (see CONTRIBUTING.md's changelog);
+    skips cleanly if `dfs setup link-edge` hasn't run yet, or if "Issues"/
+    "DK Sal" aren't in the header for some other reason.
 
     `header_repeats_at` (Fix 2.6) re-prints the header at Lineups' repeated
     sub-header rows too -- the original version only wrote it once, at
@@ -1058,10 +1143,8 @@ def polish_guardrails(
     same parameter for the same reason; this was the one column that
     hadn't caught up.
 
-    Writing here is safe regardless of what's linked at Q..Z: O sits
-    strictly to their left, so nothing here can collide with that block.
-    Re-runnable -- clears only O's own conditional-format rules first
-    (`column="O"`), never the tab's other rules, which
+    Re-runnable -- clears only the Issues column's own conditional-format
+    rules first, never the tab's other rules, which
     `sheet_links.link_edge_columns` already owns.
     """
     if not client.tab_exists(tab):
@@ -1071,26 +1154,32 @@ def polish_guardrails(
     header = header_rows[0] if header_rows else []
     if "Avail" not in header:
         return f"{tab}: 'Avail' not linked yet (run `dfs setup link-edge` first) -- skipped"
+    if _GUARDRAILS_HEADER not in header:
+        return f"{tab}: {_GUARDRAILS_HEADER!r} column not found in header -- skipped"
+    if "DK Sal" not in header:
+        return f"{tab}: 'DK Sal' column not found in header -- skipped"
     avail_col = column_letter(header.index("Avail"))
+    salary_col = column_letter(header.index("DK Sal"))
+    guardrails_col = column_letter(header.index(_GUARDRAILS_HEADER))
 
-    client.set_column_widths(tab, {_GUARDRAILS_COLUMN: 110})
-    client.update_range(tab, f"{_GUARDRAILS_COLUMN}{header_row}", [[_GUARDRAILS_HEADER]])
+    client.set_column_widths(tab, {guardrails_col: 110})
+    client.update_range(tab, f"{guardrails_col}{header_row}", [[_GUARDRAILS_HEADER]])
     for repeat_row in header_repeats_at or []:
-        client.update_range(tab, f"{_GUARDRAILS_COLUMN}{repeat_row}", [[_GUARDRAILS_HEADER]])
+        client.update_range(tab, f"{guardrails_col}{repeat_row}", [[_GUARDRAILS_HEADER]])
 
     for start, end in name_blocks:
         totals_row = end + 1
         rows = [[_slot_check_formula(start, end, row, avail_col)] for row in range(start, end + 1)]
-        rows.append([_totals_check_formula(start, end, totals_row)])
-        client.update_range(tab, f"{_GUARDRAILS_COLUMN}{start}:{_GUARDRAILS_COLUMN}{totals_row}", rows)
+        rows.append([_totals_check_formula(start, end, totals_row, salary_col)])
+        client.update_range(tab, f"{guardrails_col}{start}:{guardrails_col}{totals_row}", rows)
 
-    client.clear_conditional_formats(tab, column=_GUARDRAILS_COLUMN)
+    client.clear_conditional_formats(tab, column=guardrails_col)
     last_row = max(end for _, end in name_blocks) + 1
-    a1_range = f"{_GUARDRAILS_COLUMN}2:{_GUARDRAILS_COLUMN}{last_row}"
+    a1_range = f"{guardrails_col}2:{guardrails_col}{last_row}"
     for condition_type, value, fmt in _GUARDRAILS_CHIPS:
         client.add_boolean_rule(tab, a1_range, condition_type=condition_type, values=[value], fmt=fmt)
 
-    return f"{tab}: guardrails applied to column {_GUARDRAILS_COLUMN} across {len(name_blocks)} lineup(s)"
+    return f"{tab}: guardrails applied to column {guardrails_col} across {len(name_blocks)} lineup(s)"
 
 
 # ---------------------------------------------------------------------------

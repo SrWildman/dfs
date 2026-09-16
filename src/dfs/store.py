@@ -36,6 +36,29 @@ def save(source_name: str, df: pd.DataFrame) -> None:
     df.to_csv(CURRENT_DIR / f"{source_name}.csv", index=False)
 
 
+def clear_current() -> list[str]:
+    """Delete every `data/current/<source>.csv` convenience copy -- an
+    explicit prune, used once at the start of a new week (`dfs week new`)
+    so a source that hasn't synced yet under the new week reads as "no
+    data" (`load_current` raises `FileNotFoundError`) rather than
+    silently returning a previous week's now-stale numbers. Found live:
+    `EdgeRaw`'s Salary/Val came out visibly wrong because `derived.
+    build_edge_frame`'s projections<->salaries join was silently
+    matching zero IDs -- the local `current` caches for the two sources
+    were left over from different weeks, each internally valid but
+    mutually inconsistent, and nothing had ever told either one to leave.
+    Raw history under `data/raw/<source>/` is never touched here -- only
+    the "current" pointer, which is what everything else actually reads;
+    a fresh `dfs sync` right after this repopulates it from scratch."""
+    ensure_data_dirs()
+    removed = []
+    if CURRENT_DIR.exists():
+        for path in sorted(CURRENT_DIR.glob("*.csv")):
+            path.unlink()
+            removed.append(path.stem)
+    return removed
+
+
 def load_current(source_name: str) -> pd.DataFrame:
     path = CURRENT_DIR / f"{source_name}.csv"
     if not path.exists():

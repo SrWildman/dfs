@@ -158,23 +158,48 @@ See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column abo
 
 ## Derived hub tabs (formulas inside the sheet)
 
-**Canonical column order** (`PlayerPoolRaw`, `Player Pool`, and `Lineups`
-all share the same left-hand columns, in this order, before each tab's own
-extra columns and the `link-edge` block): `Name`(A) `Pos.`(B) `Team`(C)
-`DK Sal`(D) `O/U`(E) `Spread`(F) `Team Implied`(G) `Opp.`(H) `Venue`(I)
-`OppPosRank`(J) `Pts`(K) `Ceil`(L) `Val`(M) `Rstr%`(N). This is recorded
-explicitly here because it's the one thing that's already drifted once:
-two sheets built from the same source (the live sheet and an older copy
-of the template) ended up with `Venue`/`Ceil` in different positions after
-independent hand-edits, while each stayed internally consistent -- nothing
-caught it until a cross-sheet audit compared them directly. No Python code
-hardcodes these column positions (only the sheet's own formulas do), so
-this doesn't matter for `dfs` itself, but it matters for keeping the live
-sheet and the template from drifting apart again -- `dfs doctor`
-checks the columns each sheet's formulas actually depend on (`EdgeRaw`'s
-header, the linked `EdgeRaw` block, header repeats), but it does not check
-this specific ordering, since nothing breaks if it moves as long as both
-sheets move together. If you ever reorder these, update this table.
+**Canonical column order** (Phase 3, see CONTRIBUTING.md's changelog):
+`PlayerPoolRaw`, `Player Pool`, and `Lineups` all share the same base
+column order, grouped into six zones -- IDENTITY, DECISION, GAME,
+WEATHER (collapsed), MOVEMENT (collapsed), INTERNAL (collapsed) -- with
+each tab's own extra columns inserted at a deliberate spot rather than
+appended past the end. The exact order lives in `sheet_columns.py`
+(`PLAYER_POOL_RAW_COLUMN_ORDER`/`PLAYER_POOL_COLUMN_ORDER`/
+`LINEUPS_COLUMN_ORDER`) -- this table mirrors it for reference, but that
+module is the source of truth if they ever disagree:
+
+| Zone | Columns |
+|---|---|
+| IDENTITY | `Name` `Pos.` `Team` `Opp.` `Venue` |
+| DECISION | `DK Sal` `Pts` `Val` `Ceil` `CeilVal` `Rstr%` `Leverage` `Avail` `Flag` |
+| GAME | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` `SoS 1..4` (reserved, blank, for strength-of-schedule work landing later) |
+| WEATHER | `Stadium` `Roof` `Wind` |
+| MOVEMENT | `ImpMove` `TotMove` `SpdMove` `GameStart` |
+| INTERNAL | `Id` `CeilPct` `OwnPct` `LevBasis` |
+
+`PlayerPoolRaw` is exactly this, A-AH (34 columns). `Player Pool` inserts
+`Source` right after `Venue` (F) and appends `Overflow`/`Pool` at the very
+end (AJ/AK, 37 total). `Lineups` inserts `% of Rstr` right after `Rstr%`
+(L) and `Issues` right after `Flag` (P), keeping everything else the same
+(36 total). `CeilVal`/`Leverage`/`Avail`/`Flag`/`GameEnv`/the whole
+WEATHER/MOVEMENT/INTERNAL zones are linked from `EdgeRaw` by `dfs setup
+link-edge` (`sheet_links.LINKED_EDGE_COLUMNS`); everything else in the
+table above is native to the tab itself.
+
+This is recorded explicitly here because it's the one thing that's
+already drifted once before Phase 3 existed: two sheets built from the
+same source (the live sheet and an older copy of the template) ended up
+with `Venue`/`Ceil` in different positions after independent hand-edits,
+while each stayed internally consistent -- nothing caught it until a
+cross-sheet audit compared them directly. Phase 3 exists specifically so
+this reorder happens once, to a designed order with headroom (`SoS 1..4`)
+already built in, rather than needing to happen again piecemeal. `dfs
+doctor` checks the columns each sheet's formulas actually depend on
+(`EdgeRaw`'s header, every `LINKED_EDGE_COLUMNS` name present exactly
+once on each of these three tabs, header repeats) but does not check the
+NATIVE columns' relative order, since nothing breaks if it moves as long
+as both sheets move together. If you ever reorder these again, update
+this table and `sheet_columns.py` together.
 
 ### PlayerPoolRaw
 
@@ -195,7 +220,8 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Rstr%` | `TFFBOptoRaw`'s `ProjOwn`. |
-| `CeilVal`, `CeilPct`, `Leverage`, `LevBasis`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `Avail`, `Flag` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Appended at the far right; only `Stadium`/`Roof`/`Wind` are grouped so they can be collapsed from the sheet UI (Fix 2.9 -- the rest of this block stays always visible). `ImpMove`/`TotMove`/`SpdMove`/`GameStart` (all added after `link-edge` was last run) are **not yet included here** -- adding any means re-running `link-edge` against a manually-cleared linked block on every sheet it's been applied to, not done yet. Until then, those four are only visible on `EdgeRaw` itself (`GameStart` has no reason to be linked here anyway -- `dfs lineups late-swap` reads it straight from `EdgeRaw` locally). |
+| `CeilVal`, `Leverage`, `Avail`, `Flag`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `ImpMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `CeilPct`, `OwnPct`, `LevBasis` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Interleaved into their designed zones (see the canonical column order above), not appended -- `Stadium`/`Roof`/`Wind`, `ImpMove`/`TotMove`/`SpdMove`/`GameStart`, and `Id`/`CeilPct`/`OwnPct`/`LevBasis` are each grouped so they can be collapsed from the sheet UI; `CeilVal`/`Leverage`/`Avail`/`Flag`/`GameEnv` stay always visible. |
+| `SoS 1`, `SoS 2`, `SoS 3`, `SoS 4` | Reserved, blank placeholder columns in the GAME zone for the strength-of-schedule work landing in a few weeks -- not wired to anything yet. |
 
 ### Player Pool / Lineups
 
@@ -220,17 +246,18 @@ two sources: whichever players have a non-blank `Pool` value on `EdgeRaw`
 (see EdgeRaw's column docs above), and whichever names are typed into the
 `Pool Picks` tab (see "Manual / output tabs" below) for that position.
 `UNIQUE` dedupes a player who ends up both ticked and typed into one row,
-not two. Column `O` (`Source`) states which of the two sources each row
-actually came from -- `EdgeRaw` or `Picks` -- so you know where to go to
-remove one. Column `AA` (`Pool`, Fix 2.11) surfaces that player's actual
-`EdgeRaw` `Pool` value (`Cash`/`GPP`/`Both`) via `INDEX`/`MATCH` by name
-(`Pool` sits left of `Name` on `EdgeRaw`, so a plain `VLOOKUP` can't reach
-it). The block fills in sorted by **Salary descending** (Fix 2.10 -- not
-alphabetically; Pool Picks' half looks its Salary up against `EdgeRaw` by
-name, since that tab has no Salary column of its own), capped at that
-position's slot count (QB 10, RB 20, WR 25, TE 10, DST 10), with an
-`Overflow` column (far right, `Z`) warning per position if more players
-are ticked/typed than the block has room for (counting the same deduped
+not two. `Source` (column `F`, right after `Venue`) states which of the
+two sources each row actually came from -- `EdgeRaw` or `Picks` -- so you
+know where to go to remove one. `Pool` (the tab's very last column, Fix
+2.11) surfaces that player's actual `EdgeRaw` `Pool` value
+(`Cash`/`GPP`/`Both`) via `INDEX`/`MATCH` by name (`Pool` sits left of
+`Name` on `EdgeRaw`, so a plain `VLOOKUP` can't reach it). The block fills
+in sorted by **Salary descending** (Fix 2.10 -- not alphabetically; Pool
+Picks' half looks its Salary up against `EdgeRaw` by name, since that tab
+has no Salary column of its own), capped at that position's slot count
+(QB 10, RB 20, WR 25, TE 10, DST 10), with an `Overflow` column (second
+to last, right before `Pool`) warning per position if more players are
+ticked/typed than the block has room for (counting the same deduped
 union, so a player counted in both sources can't trigger a false
 warning) -- nobody is ever silently dropped. Every other column still
 VLOOKUPs off `Name` the same as before. `Player Pool` is fully protected
@@ -249,12 +276,14 @@ the pool deck's own controls) has a live dropdown validated against
 block) so a typo doesn't silently propagate as `#N/A` across the whole
 row; everything else on the tab is protected (warning-only).
 
-`Lineups`' column O ("Issues", `dfs setup polish`) is a per-lineup
-guardrail: on each roster slot, `DUPLICATE` if that name appears twice in
-the same lineup, else that pick's linked `Avail` flag (`OUT`/`IR`/`Q`) if
-it has one; on the totals row, `OVER` the salary cap, `INCOMPLETE` (fewer
-than 9 picks), or `OK`. Formula values, not just formatting -- but
-additive-only, since O was an empty spacer column nothing else wrote to.
+`Lineups`' `Issues` column (right after `Flag`, `dfs setup polish`) is a
+per-lineup guardrail: on each roster slot, `DUPLICATE` if that name
+appears twice in the same lineup, else that pick's linked `Avail` flag
+(`OUT`/`IR`/`Q`) if it has one; on the totals row, `OVER` the salary cap,
+`INCOMPLETE` (fewer than 9 picks), or `OK`. `sheet_style.
+polish_guardrails` finds this column (and `DK Sal`/`Avail`) by header
+name, never a hardcoded letter -- see CONTRIBUTING.md's Phase 3 changelog
+entry for the incident that happened when it didn't.
 
 `Lineups` also has a 10-row frozen "pool deck" at the very top (`dfs
 setup add-pool-deck`): a sortable, filterable window into `Player

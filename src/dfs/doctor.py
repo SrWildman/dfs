@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
-from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB, find_all_contiguous
+from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_deck import DECK_ROWS, POOL_SORT_TAB
 from dfs.sources.edge import POOL_HEADER
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
@@ -121,22 +121,26 @@ def _check_edge_header(
 def _check_linked_edge_columns(
     cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
 ) -> list[DoctorIssue]:
+    # Phase 3: LINKED_EDGE_COLUMNS no longer lands as one contiguous
+    # appended block (see sheet_links.py's rewrite) -- a designed order
+    # interleaves them with native columns, so this checks presence and
+    # uniqueness of each NAME independently instead of matching a run.
     issues = []
     for tab in (cfg.lineups.player_pool_tab, cfg.lineups.builder_tab, PLAYER_POOL_RAW_TAB):
         if tab not in tab_titles:
             continue
         header = headers_by_tab.get(tab, [])
-        positions = find_all_contiguous(header, LINKED_EDGE_COLUMNS)
-        if not positions:
-            issues.append(DoctorIssue("linked-edge-columns", f"{tab!r}: LINKED_EDGE_COLUMNS not found"))
-        elif len(positions) > 1:
-            issues.append(
-                DoctorIssue(
-                    "linked-edge-columns",
-                    f"{tab!r}: LINKED_EDGE_COLUMNS appears {len(positions)} times "
-                    f"(at header index {positions}) -- looks like a duplicate append",
+        for name in LINKED_EDGE_COLUMNS:
+            count = header.count(name)
+            if count == 0:
+                issues.append(DoctorIssue("linked-edge-columns", f"{tab!r}: {name!r} not found in header"))
+            elif count > 1:
+                issues.append(
+                    DoctorIssue(
+                        "linked-edge-columns",
+                        f"{tab!r}: {name!r} appears {count} times in header -- ambiguous",
+                    )
                 )
-            )
     return issues
 
 

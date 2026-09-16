@@ -22,6 +22,45 @@ def test_save_writes_raw_and_current(monkeypatch, tmp_path):
     assert len(raw_files) == 1
 
 
+def test_clear_current_deletes_every_current_csv_and_reports_names(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "CURRENT_DIR", tmp_path / "current")
+    current_dir = tmp_path / "current"
+    current_dir.mkdir()
+    (current_dir / "draftkings.csv").write_text("a,b\n1,2\n")
+    (current_dir / "projections.csv").write_text("a,b\n1,2\n")
+
+    removed = store.clear_current()
+
+    assert sorted(removed) == ["draftkings", "projections"]
+    assert list(current_dir.glob("*.csv")) == []
+
+
+def test_clear_current_leaves_raw_history_untouched(monkeypatch, tmp_path):
+    # The exact live incident this exists to prevent: a stale `current`
+    # cache from a previous week silently broke a cross-source ID join
+    # with no error. Raw snapshot history is a different concern (line-
+    # movement diffing needs it) and must survive this prune.
+    monkeypatch.setattr(store, "CURRENT_DIR", tmp_path / "current")
+    monkeypatch.setattr(store, "RAW_DIR", tmp_path / "raw")
+    (tmp_path / "current").mkdir()
+    (tmp_path / "current" / "draftkings.csv").write_text("a,b\n1,2\n")
+    raw_dir = tmp_path / "raw" / "draftkings"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "20260101T000000Z.csv").write_text("a,b\n1,2\n")
+
+    store.clear_current()
+
+    assert (raw_dir / "20260101T000000Z.csv").exists()
+
+
+def test_clear_current_is_a_noop_on_an_empty_or_missing_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "CURRENT_DIR", tmp_path / "current")
+    assert store.clear_current() == []  # directory doesn't even exist yet
+
+    (tmp_path / "current").mkdir()
+    assert store.clear_current() == []  # exists but empty
+
+
 def test_load_current_missing_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "CURRENT_DIR", tmp_path / "current")
     (tmp_path / "current").mkdir()

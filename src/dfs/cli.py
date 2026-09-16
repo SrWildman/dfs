@@ -37,6 +37,7 @@ from dfs.models import ROSTER_SLOTS
 from dfs.pool import clear_all, find_matches, read_players, set_pool
 from dfs.results_autofill import compute_week_results, write_results_updates
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
+from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB, link_edge_columns
 from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
@@ -45,6 +46,7 @@ from dfs.sheet_pool_picks import HEADER_ROW as POOL_PICKS_HEADER_ROW
 from dfs.sheet_pool_picks import LAST_ROW as POOL_PICKS_LAST_ROW
 from dfs.sheet_pool_picks import create_pool_picks_tab
 from dfs.sheet_protection import protect_workbook
+from dfs.sheet_reorder import migrate_tab_to_designed_order
 from dfs.sheet_style import (
     EDGE_ROWS,
     POOL_RAW_ROWS,
@@ -669,7 +671,7 @@ def sheets_build_views(
     )
 
 
-@setup_app.command("link-edge", short_help="Append EdgeRaw derived columns onto Player Pool/Lineups.")
+@setup_app.command("link-edge", short_help="Fill EdgeRaw derived columns into Player Pool/Lineups.")
 def sheets_link_edge(
     sheet_id: str = typer.Option(
         None,
@@ -677,16 +679,28 @@ def sheets_link_edge(
         help="Link a different sheet instead of config.toml's -- e.g. the canonical "
         "weekly template, so new copies already have EdgeRaw's columns linked in.",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Refresh every linked column's formula even where the tab is already fully linked -- "
+        "needed after `edge_lookup_formula`'s own generation logic changes (not a position change), "
+        "since the normal 'something's missing' trigger never fires on an already-linked tab.",
+    ),
 ) -> None:
-    """One-time setup: append EdgeRaw's derived columns (Leverage, Flag,
-    etc.) onto the far right of Player Pool, Lineups, AND PlayerPoolRaw
-    (the hub tab those two already VLOOKUP against for Pos./Team/Pts/etc.),
-    via the same VLOOKUP-by-Name join. Append-only: never inserts, so
-    nothing already there shifts (see CONTRIBUTING.md's Phase 8 postmortem
-    on why that matters). The new columns are grouped so they can be
+    """Fill in EdgeRaw's derived columns (Leverage, Flag, etc.) on Player
+    Pool, Lineups, AND PlayerPoolRaw (the hub tab those two already
+    VLOOKUP against for Pos./Team/Pts/etc.), via the same VLOOKUP-by-Name
+    join. Writes into whatever column already carries a given name in the
+    header (Phase 3's designed order interleaves these with native
+    columns; see `sheet_links.py`'s module docstring) and only creates
+    (appends) a column for a name genuinely absent -- a fresh sheet build
+    that hasn't been through `dfs setup reorder-columns` yet. The three
+    always-linked groups (Stadium/Roof/Wind, ImpMove/TotMove/SpdMove/
+    GameStart, Id/CeilPct/OwnPct/LevBasis) are grouped so they can be
     collapsed from the sheet UI (the little +/- control above the column
-    letters) when you want the older, narrower view back. Safe to re-run --
-    a tab that's already linked is left alone, not duplicated.
+    letters) when you want a narrower view. Safe to re-run -- a tab where
+    every linked column already exists is left alone, not duplicated,
+    unless `--force` is given.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -705,8 +719,10 @@ def sheets_link_edge(
         header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
         lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
         results = [
-            link_edge_columns(client, PLAYER_POOL_RAW_TAB, PLAYER_POOL_RAW_BLOCK, edge_tab),
-            link_edge_columns(client, cfg.lineups.player_pool_tab, PLAYER_POOL_NAME_BLOCKS, edge_tab),
+            link_edge_columns(client, PLAYER_POOL_RAW_TAB, PLAYER_POOL_RAW_BLOCK, edge_tab, force=force),
+            link_edge_columns(
+                client, cfg.lineups.player_pool_tab, PLAYER_POOL_NAME_BLOCKS, edge_tab, force=force
+            ),
             link_edge_columns(
                 client,
                 cfg.lineups.builder_tab,
@@ -714,10 +730,95 @@ def sheets_link_edge(
                 edge_tab,
                 header_row=lineups_header_row,
                 header_repeats_at=header_repeats_at,
+                force=force,
             ),
         ]
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@setup_app.command(
+    "reorder-columns",
+    short_help="One-time: move PlayerPoolRaw/Player Pool/Lineups into the Phase 3 designed order.",
+)
+def sheets_reorder_columns(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Reorder a different sheet instead of config.toml's -- ALWAYS run against the "
+        "canonical template first, verify with `dfs doctor`, then run again against the "
+        "live sheet.",
+    ),
+) -> None:
+    """Phase 3, one-time: moves PlayerPoolRaw, Player Pool and Lineups
+    into `sheet_columns.py`'s designed column order (IDENTITY/DECISION/
+    GAME/WEATHER/MOVEMENT/INTERNAL zones, with four blank `SoS n` columns
+    reserved for the strength-of-schedule work landing later) -- the
+    reorder CONTRIBUTING.md's central hazard section says must happen
+    exactly once, to a designed order with headroom already built in,
+    never again piecemeal.
+
+    Runs each tab through `sheet_reorder.migrate_tab_to_designed_order`,
+    in the one order that's correct: PlayerPoolRaw first and entirely
+    (provision -> link EdgeRaw in -> reorder), since Player Pool/Lineups'
+    native PlayerPoolRaw-lookup formulas depend on PlayerPoolRaw's
+    FINISHED layout; then Player Pool and Lineups, each provisioned,
+    EdgeRaw-linked, native-formula-regenerated, and reordered in turn.
+
+    Re-run `dfs setup polish` and `dfs doctor` afterward -- this command
+    only moves/creates columns and fills formulas; it doesn't touch
+    widths, freeze panes, or conditional formatting.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(
+            f"Reordering PlayerPoolRaw/Player Pool/Lineups into the designed order in: "
+            f"[bold]{title}[/bold]\n{url}\n"
+        )
+
+        header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
+        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+
+        results = migrate_tab_to_designed_order(
+            client,
+            PLAYER_POOL_RAW_TAB,
+            PLAYER_POOL_RAW_COLUMN_ORDER,
+            name_blocks=PLAYER_POOL_RAW_BLOCK,
+            edge_tab=edge_tab,
+            rewrite_native=False,
+        )
+        results += migrate_tab_to_designed_order(
+            client,
+            cfg.lineups.player_pool_tab,
+            PLAYER_POOL_COLUMN_ORDER,
+            name_blocks=PLAYER_POOL_NAME_BLOCKS,
+            edge_tab=edge_tab,
+            rewrite_native=True,
+        )
+        results += migrate_tab_to_designed_order(
+            client,
+            cfg.lineups.builder_tab,
+            LINEUPS_COLUMN_ORDER,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            edge_tab=edge_tab,
+            header_row=lineups_header_row,
+            header_repeats_at=header_repeats_at,
+            rewrite_native=True,
+        )
+    except (SheetsError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from e
 
     for line in results:
@@ -1673,6 +1774,19 @@ def week_new(
         raise typer.Exit(code=1) from e
     for line in cleared:
         console.print(f"[green]OK[/green] {line}")
+
+    # Same reasoning as the sheet-side clear above, applied to the LOCAL
+    # cache `run_sync` actually reads from (`store.load_current`): found
+    # live, a stale `data/current/<source>.csv` left over from a previous
+    # week silently broke `edge`'s projections<->salaries ID join (each
+    # cache was internally valid, just for different weeks) with no
+    # error -- `build_edge_frame` doesn't know "this data is old", only
+    # "this data is what's there." Clearing it here means a source that
+    # fails to sync under the new week reads as no-data-yet, never a
+    # previous week's now-mismatched numbers.
+    removed = store.clear_current()
+    if removed:
+        console.print(f"[green]OK[/green] cleared {len(removed)} local synced-data cache(s): {removed}")
 
     load_config.cache_clear()
     new_cfg = _load_config_or_exit()

@@ -144,7 +144,23 @@ class EdgeSource(Source):
         if not client.tab_exists(tab):
             return {}
         try:
-            ids = client.read_range(tab, f"{_ID_COLUMN}2:{_ID_COLUMN}{_LAST_ROW}")
+            # Found by reading the sheet's OWN current header, never
+            # `_ID_COLUMN` -- that constant reflects EDGE_COLUMNS' TARGET
+            # order, which is exactly wrong here the moment that order
+            # changes: `pre_upload` runs BEFORE `write_tab` rewrites the
+            # tab to match, so the sheet still has Id at its OLD position
+            # at the instant this reads. Trusting the target position
+            # here silently harvested a real live-sheet incident: every
+            # Pool tick was captured as blank (the module-level constant
+            # pointed at whatever field used to sit at Id's NEW position
+            # under the OLD layout) and none were restored after the
+            # rewrite. See CONTRIBUTING.md's Phase 3 changelog entry.
+            header_rows = client.read_range(tab, "A1:1")
+            header = header_rows[0] if header_rows else []
+            if "Id" not in header:
+                return {}
+            id_col = column_letter(header.index("Id"))
+            ids = client.read_range(tab, f"{id_col}2:{id_col}{_LAST_ROW}")
             ticks = client.read_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{_LAST_ROW}")
         except Exception:  # noqa: BLE001 - a malformed/missing prior tab must not block a sync
             return {}

@@ -122,56 +122,59 @@ EDGE_DATA_OFFSET = 1
 # of each is `EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET`) -- exposed so
 # `sheet_style.polish_edge` can locate a column by name without an extra
 # round-trip read of the sheet.
+#
+# Phase 3: a designed, one-time order instead of the append-only history
+# below it -- grouped IDENTITY / DECISION / GAME / WEATHER (collapsed) /
+# MOVEMENT (collapsed) / INTERNAL (collapsed), the same grammar
+# `sheet_links.PLAYER_POOL_RAW_COLUMN_ORDER` uses for PlayerPoolRaw/Player
+# Pool/Lineups (those three interleave native-only fields like Venue/
+# OppPosRank into the same zones -- EdgeRaw has no native equivalent for
+# either, so its own DECISION/GAME zones are shorter). EdgeRaw itself
+# holds no formulas (pure synced values, fully rewritten every `dfs
+# sync`), so reordering this list needed no live-sheet column move at
+# all -- the next sync just writes the new order directly. Every name
+# below already existed; this only changed position. See
+# CONTRIBUTING.md's structural changelog for the full before/after and
+# every symbol this invalidated on the tabs that DO need a real move.
 EDGE_COLUMNS = [
-    "Id",
+    # IDENTITY
     "Name",
     "Position",
     "Team",
     "Opp",
+    # DECISION
     "Salary",
     "ProjPts",
-    "ProjOwn",
-    "Ceiling",
     "Val",
+    "Ceiling",
     "CeilVal",
-    "CeilPct",
+    "ProjOwn",
     "Leverage",
-    "LevBasis",
+    "Avail",
+    "Flag",
+    # GAME
+    "OverUnder",
+    "Spread",
     "GameEnv",
+    # WEATHER (collapsed)
     "Stadium",
     "Roof",
     "Wind",
-    "Avail",
-    "Flag",
-    # ImpMove (renamed from LineMove, Fix 2.2 -- still the team implied
-    # points move) is appended at the very end, not inserted among the
-    # existing columns above -- `dfs setup link-edge` already wrote
-    # formulas into PlayerPoolRaw/Player Pool/Lineups with hardcoded
-    # column-index integers pointing at Stadium/Roof/Wind/Avail/Flag's
-    # *positions*. Inserting a column before them shifts every later
-    # column's position without updating those already-written formulas'
-    # hardcoded integers -- the exact Phase 8 bug class (see
-    # CONTRIBUTING.md). Anything new added here must go at the end until
-    # `dfs setup link-edge` is re-run against a cleared block. A rename in
-    # place (this one) is safe -- the position doesn't move, only the
-    # header text does, and nothing outside this file hardcodes that text.
+    # MOVEMENT (collapsed)
     "ImpMove",
-    # GameStart, added in Phase 5, follows the same append-only rule.
-    "GameStart",
-    # OwnPct, added when Leverage's scale bug was fixed, likewise appended
-    # rather than placed next to CeilPct where it reads more naturally --
-    # Phase 3's reorder is where columns finally move to a designed order.
-    "OwnPct",
-    # OverUnder/Spread (Fix 2.3): already computed into GameEnv, never
-    # surfaced directly. Same append-only rule as everything else here.
-    "OverUnder",
-    "Spread",
-    # TotMove/SpdMove (Fix 2.2): diff_odds() always computed these
-    # alongside what's now ImpMove; only ImpMove ever reached EdgeRaw.
-    # Appended, not placed next to ImpMove, for the same append-only
-    # reason as everything else in this tail.
     "TotMove",
     "SpdMove",
+    "GameStart",
+    # INTERNAL (collapsed) -- Id moved out of column A's neighbor slot and
+    # into this group; it's no longer individually hidden (see
+    # `sheet_style.EDGE_COLUMN_GROUPS`), just folded into INTERNAL like
+    # the other three. Pool (column A, ahead of this whole list) ends up
+    # directly beside Name as a result, with no column between them at
+    # all -- an improvement on the old "hidden Id in between" layout.
+    "Id",
+    "CeilPct",
+    "OwnPct",
+    "LevBasis",
 ]
 
 

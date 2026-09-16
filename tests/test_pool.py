@@ -14,13 +14,15 @@ class FakePoolClient:
         self.update_calls.append((a1_range, rows))
 
 
-# Columns A..G: Pool, Id, Name, Position, Team, Opp, Salary. Pool is a
-# blank/Cash/GPP/Both dropdown (Fix 2.11), not a TRUE/FALSE checkbox.
+# Columns A..F: Pool, Name, Position, Team, Opp, Salary (Phase 3 moved Id
+# out of this early range into the INTERNAL group near the end of
+# EDGE_COLUMNS, so it's no longer read here). Pool is a blank/Cash/GPP/
+# Both dropdown (Fix 2.11), not a TRUE/FALSE checkbox.
 _ROWS = [
-    ["Both", "1", "Chase Brown", "RB", "CIN", "BAL", "6800"],
-    ["", "2", "Ja'Marr Chase", "WR", "CIN", "BAL", "9200"],
-    ["", "3", "Chase Edmonds", "RB", "TB", "NO", "4200"],
-    ["", "4", "Justin Jefferson", "WR", "MIN", "GB", "9000"],
+    ["Both", "Chase Brown", "RB", "CIN", "BAL", "6800"],
+    ["", "Ja'Marr Chase", "WR", "CIN", "BAL", "9200"],
+    ["", "Chase Edmonds", "RB", "TB", "NO", "4200"],
+    ["", "Justin Jefferson", "WR", "MIN", "GB", "9000"],
 ]
 
 

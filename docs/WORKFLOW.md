@@ -24,7 +24,10 @@ dfs week new "<url-of-the-copy>"
 doctor` against the new copy first (catches a stale/malformed template
 before anything depends on it), rewrites `config.toml`'s `sheet_id`,
 carries Bankroll and Results forward from the outgoing sheet, clears last
-week's lineups, and runs a full `dfs sync`.
+week's lineups, blanks every synced tab AND every local synced-data cache
+(so a source that fails on the first sync reads as no-data-yet rather
+than a previous week's now-mismatched numbers), and runs a full `dfs
+sync`.
 
 **Quote the URL.** A Google Sheets URL contains `?` and `#`, which zsh
 (and some other shells) treat as glob/history characters rather than
@@ -108,14 +111,14 @@ deck: set Position (B1), Sort by (D1), Start at (F1) to window into
 Player Pool without leaving Lineups. Type names into column A starting
 at row 12, one 9-player block per lineup (QB, RB, RB, WR, WR, WR, TE,
 FLEX, DEF) -- the dropdown there is a typo guard, not just a search box.
-Column O shows per-lineup guardrails (duplicate player, OUT/IR/Q, over
-cap, incomplete).
+The `Issues` column shows per-lineup guardrails (duplicate player,
+OUT/IR/Q, over cap, incomplete).
 
-**Done looks like:** every lineup block's column O reads OK, and the
-salary-remaining row isn't negative.
+**Done looks like:** every lineup block's `Issues` column reads OK, and
+the salary-remaining row isn't negative.
 
 **Commonly goes wrong:** a lineup that looked fine yesterday now shows
-OUT/IR/Q in column O -- re-run `dfs sync` (or `dfs sync --live` on
+OUT/IR/Q in `Issues` -- re-run `dfs sync` (or `dfs sync --live` on
 gameday) to refresh Avail flags before finalizing.
 
 ## 5. Enter

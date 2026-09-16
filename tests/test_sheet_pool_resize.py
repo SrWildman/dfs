@@ -8,8 +8,13 @@ class SpySheetsClient:
     small in-memory grid -- same convention as this repo's other Spy*
     fakes (test_sheet_links.py, test_sheet_pool_deck.py)."""
 
-    def __init__(self, rows: dict[int, list[str]]):
-        self._rows = rows  # {row_number: [B, C, ..., Y]}
+    def __init__(self, rows: dict[int, list[str]], header: list[str] | None = None):
+        self._rows = rows  # {row_number: [B, C, ..., last]}
+        # Last column is derived from this header's own width (see
+        # grow_block's docstring on why it used to be hardcoded to "Y" --
+        # a real Phase-3-triggered bug); 6 columns here (A-F) matches
+        # _rb_row_29()'s 5 formula cells (B-F) below.
+        self._header = header or ["Name", "Pos.", "Team", "CeilVal", "Leverage", "GameEnv"]
         self.insert_calls: list[tuple[int, int]] = []
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.conditional_format_calls: list[tuple[str, str | None]] = []
@@ -26,7 +31,7 @@ class SpySheetsClient:
         self.update_calls.append((tab_name, a1_range, rows))
 
     def read_range(self, tab_name: str, a1_range: str):
-        return [["Name", "Pos.", "Team", "CeilVal", "Leverage", "GameEnv"]]
+        return [self._header]
 
     def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
         self.conditional_format_calls.append((tab_name, column))
@@ -36,8 +41,9 @@ class SpySheetsClient:
 
 
 def _rb_row_29():
-    # B..Y for a real RB row, trimmed to a few representative formula
-    # shapes actually seen on the live template.
+    # B..(the fake header's last column) for a real RB row, trimmed to a
+    # few representative formula shapes actually seen on the live
+    # template.
     return [
         "RB",
         "=VLOOKUP(A29,PlayerPoolRaw!A:C,3,false)",
@@ -64,17 +70,29 @@ def test_grow_block_writes_position_label_and_substitutes_row_number_only():
     grow_block(client, "Player Pool", position="RB", current_last_row=29, count=2)
 
     ranges_written = {a1 for _, a1, _ in client.update_calls}
-    assert ranges_written == {"B30:Y30", "B31:Y31"}
+    assert ranges_written == {"B30:F30", "B31:F31"}
 
     written = {a1: rows[0] for _, a1, rows in client.update_calls}
-    row30 = written["B30:Y30"]
+    row30 = written["B30:F30"]
     assert row30[0] == "RB"
     assert row30[1] == "=VLOOKUP(A30,PlayerPoolRaw!A:C,3,false)"
     assert row30[3] == "=VLOOKUP($A30,EdgeRaw!$B:$T,10,false)"
     assert row30[4] == "=IFNA(VLOOKUP($A30,EdgeRaw!$B:$T,17,false))"
 
-    row31 = written["B31:Y31"]
+    row31 = written["B31:F31"]
     assert row31[1] == "=VLOOKUP(A31,PlayerPoolRaw!A:C,3,false)"
+
+
+def test_grow_block_derives_its_last_column_from_the_header_not_a_hardcode():
+    # The exact regression this guards against: `grow_block` used to
+    # hardcode "Y" as the last formula column -- true only under the
+    # pre-Phase-3 layout. A wider header (more columns than the old Y)
+    # must extend the copied range past Y, not silently stop there and
+    # leave the new rows missing everything beyond it.
+    header = [*"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "AA", "AB"]  # 28 columns -> last is AB
+    client = SpySheetsClient({29: _rb_row_29()}, header=header)
+    grow_block(client, "Player Pool", position="RB", current_last_row=29, count=1)
+    assert {a1 for _, a1, _ in client.update_calls} == {"B30:AB30"}
 
 
 def test_grow_block_with_zero_count_is_not_expected_to_be_called_but_would_no_op():

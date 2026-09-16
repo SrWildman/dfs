@@ -27,16 +27,17 @@ warning below -- `_overflow_formula` counts both sources for the same
 reason silently dropping a Pool-Picks player past the cap would be the
 worst failure mode here.
 
-**Task 5.3 update:** each row also gets a narrow `Source` column (O --
-genuinely blank on both sheets, a stray "Cash" label that had been typed
-there by hand was cleared during the Task 2 design pass, so this reuses
-that slot instead of inserting a new one) stating whether that row's
-player came from ticking EdgeRaw or typing into Pool Picks. Deliberately
-placed LEFT of the EdgeRaw-linked block (P onward) rather than inserted
-into it, so `sheet_links.link_edge_columns`' own "is LINKED_EDGE_COLUMNS
-already a contiguous run somewhere in the header" idempotency check is
-completely unaffected -- confirmed by re-running `dfs doctor`/
-`link-edge` after this shipped.
+**Task 5.3 update:** each row also gets a narrow `Source` column stating
+whether that row's player came from ticking EdgeRaw or typing into Pool
+Picks. `Source`/`Overflow`/`Pool`'s column letters are found by header
+name (`sheet_columns.PLAYER_POOL_COLUMN_ORDER` places `Source` right
+after `Venue` and appends `Overflow`/`Pool` at the tab's very end), never
+hardcoded -- this used to hardcode `Source`=O/`Overflow`=Z/`Pool`=AA,
+true only under the pre-Phase-3 append-only layout; Phase 3's reorder
+moved real EdgeRaw-linked columns (Flag/Roof/Wind) onto those exact
+letters, so a hardcoded version of this module would silently clobber
+them the same way `sheet_style.polish_guardrails` once did. See
+CONTRIBUTING.md's Phase 3 changelog entry.
 
 **Fix 2.10 update:** each block now sorts by Salary descending, not
 alphabetically by name -- see `_union_array`'s own docstring for how
@@ -56,15 +57,10 @@ from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
 
 _NAME_COLUMN = "A"
 _POSITION_COLUMN = "B"
-_SOURCE_COLUMN = "O"
 _SOURCE_HEADER = "Source"
-_OVERFLOW_COLUMN = "Z"
 _OVERFLOW_HEADER = "Overflow"
 # Fix 2.11: surfaces EdgeRaw's own Pool value (blank/Cash/GPP/Both) on
-# Player Pool too. Appended past Overflow (the tab's current last column)
-# rather than inserted anywhere -- same append-only reasoning as every
-# other addition documented in CLAUDE.md's central hazard section.
-_POOL_TYPE_COLUMN = "AA"
+# Player Pool too.
 _POOL_TYPE_HEADER = "Pool"
 
 _EDGE_NAME_COL = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
@@ -145,8 +141,8 @@ def _source_formula(edge_tab: str, row: int) -> str:
 def _pool_type_formula(edge_tab: str, row: int) -> str:
     """This row's EdgeRaw Pool value (blank/Cash/GPP/Both), by Name --
     INDEX/MATCH rather than VLOOKUP, since Pool (column A) sits to the
-    LEFT of Name (column C) on EdgeRaw and plain VLOOKUP can only look
-    rightward of its lookup column."""
+    LEFT of Name on EdgeRaw and plain VLOOKUP can only look rightward of
+    its lookup column."""
     name_cell = f"${_NAME_COLUMN}{row}"
     match = f"MATCH({name_cell},{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_NAME_COL},0)"
     return f'=IF({name_cell}="","",IFERROR(INDEX({edge_tab}!${POOL_COLUMN}:${POOL_COLUMN},{match}),""))'
@@ -175,20 +171,31 @@ def write_pool_formulas(
 ) -> list[str]:
     """Write the SORT/FILTER/ARRAY_CONSTRAIN Name formula, a per-row
     Source label, and an overflow warning into each block, keyed off
-    EdgeRaw's Pool tick column. Only ever touches column A (Name), column
-    O (Source) and column Z (Overflow) via `update_range` -- never
-    `write_tab` -- so the VLOOKUP columns P..Y already linked by
-    `link_edge_columns` are never at risk, matching every other
-    presentation primitive's "only touches the range it's given" contract.
+    EdgeRaw's Pool tick column. `Source`/`Overflow`/`Pool`'s columns are
+    found by header name (never hardcoded -- see the module docstring),
+    so this only ever touches column A (Name) and those three, never the
+    EdgeRaw-linked columns `link_edge_columns` owns.
 
     Always fully rewritten (idempotent, safe to rerun) rather than
     gated on "already formula-driven" -- see docs/HANDOFF.md's lesson #4
     on why an early-return-on-no-op is the wrong default here.
     """
+    header_rows = client.read_range(player_pool_tab, "A1:1")
+    header = header_rows[0] if header_rows else []
+    missing = [name for name in (_SOURCE_HEADER, _OVERFLOW_HEADER, _POOL_TYPE_HEADER) if name not in header]
+    if missing:
+        raise ValueError(
+            f"{player_pool_tab!r} header is missing column(s) {missing} -- "
+            "run `dfs setup reorder-columns` first"
+        )
+    source_col = column_letter(header.index(_SOURCE_HEADER))
+    overflow_col = column_letter(header.index(_OVERFLOW_HEADER))
+    pool_type_col = column_letter(header.index(_POOL_TYPE_HEADER))
+
     summary = []
-    client.update_range(player_pool_tab, f"{_SOURCE_COLUMN}1", [[_SOURCE_HEADER]])
-    client.update_range(player_pool_tab, f"{_OVERFLOW_COLUMN}1", [[_OVERFLOW_HEADER]])
-    client.update_range(player_pool_tab, f"{_POOL_TYPE_COLUMN}1", [[_POOL_TYPE_HEADER]])
+    client.update_range(player_pool_tab, f"{source_col}1", [[_SOURCE_HEADER]])
+    client.update_range(player_pool_tab, f"{overflow_col}1", [[_OVERFLOW_HEADER]])
+    client.update_range(player_pool_tab, f"{pool_type_col}1", [[_POOL_TYPE_HEADER]])
 
     for start, end in name_blocks:
         cap = end - start + 1
@@ -200,17 +207,15 @@ def write_pool_formulas(
             continue
 
         name_cell = f"{_NAME_COLUMN}{start}"
-        overflow_cell = f"{_OVERFLOW_COLUMN}{start}"
+        overflow_cell = f"{overflow_col}{start}"
         client.update_range(player_pool_tab, name_cell, [[_name_formula(edge_tab, position, cap)]])
         client.update_range(player_pool_tab, overflow_cell, [[_overflow_formula(edge_tab, position, cap)]])
 
         source_rows = [[_source_formula(edge_tab, row)] for row in range(start, end + 1)]
-        client.update_range(player_pool_tab, f"{_SOURCE_COLUMN}{start}:{_SOURCE_COLUMN}{end}", source_rows)
+        client.update_range(player_pool_tab, f"{source_col}{start}:{source_col}{end}", source_rows)
 
         pool_type_rows = [[_pool_type_formula(edge_tab, row)] for row in range(start, end + 1)]
-        client.update_range(
-            player_pool_tab, f"{_POOL_TYPE_COLUMN}{start}:{_POOL_TYPE_COLUMN}{end}", pool_type_rows
-        )
+        client.update_range(player_pool_tab, f"{pool_type_col}{start}:{pool_type_col}{end}", pool_type_rows)
 
         summary.append(f"{player_pool_tab}!A{start}: {position} block ({cap} slots) now formula-driven")
 

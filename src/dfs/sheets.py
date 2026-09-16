@@ -399,6 +399,51 @@ class SheetsClient:
             }
         )
 
+    def move_columns(self, tab_name: str, *, from_index: int, to_index: int) -> None:
+        """Move the single column at `from_index` (0-based) to `to_index`
+        (0-based, in `list.pop`/`list.insert` terms: "as if `from_index`
+        were removed first, then inserted at `to_index`") via a real
+        Sheets API `moveDimension` request.
+
+        `moveDimension`'s own `destinationIndex` is NOT the same number as
+        `to_index` -- it's specified in the ORIGINAL, pre-removal index
+        space, so it must be shifted by +1 when moving something later in
+        the sheet (removing the source column first shifts everything
+        after it left by one, so "insert before old-index N" and "insert
+        before new-index N" point at different places once N > from_index).
+        Verified empirically against a disposable scratch tab before this
+        was ever trusted against a real tab's structure (Phase 3): moving
+        column index 1 to index 3 in a 4-column sheet requires
+        `destinationIndex=4`, not `3` -- `to_index + 1` when moving right,
+        `to_index` unchanged when moving left (`to_index <= from_index`).
+
+        Like `insert_rows`/`delete_rows`, this makes Sheets shift every
+        formula RANGE reference and conditional-format range elsewhere in
+        the workbook to follow the moved column -- it does NOT rewrite a
+        hardcoded integer argument inside a formula (e.g. a VLOOKUP
+        index), which still needs `sheet_pool_formulas.py`'s own
+        regeneration step.
+        """
+        sheet, ws = self._ws(tab_name)
+        destination_index = to_index + 1 if to_index > from_index else to_index
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "moveDimension": {
+                            "source": {
+                                "sheetId": ws.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": from_index,
+                                "endIndex": from_index + 1,
+                            },
+                            "destinationIndex": destination_index,
+                        }
+                    }
+                ]
+            }
+        )
+
     def clear_column_groups(self, tab_name: str) -> None:
         """Delete every existing column group on a tab before re-adding one
         with `group_columns` -- without this, `addDimensionGroup` doesn't

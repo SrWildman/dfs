@@ -19,18 +19,19 @@ exactly right here.
 data validation, never formula text -- and `sheet_links.link_edge_columns`
 is idempotent-by-skipping (`"already linked ... skipped"`), so simply
 re-running `dfs setup link-edge` after growing a block does NOT backfill
-the new rows' EdgeRaw-linked columns. Every new row's B..Y columns are
-therefore filled here by copying the row immediately above it byte-for-
-byte (read fresh via `read_formula`, since Sheets auto-adjusts THAT row's
-own self-references when an earlier insert shifts it down) and
+the new rows' EdgeRaw-linked columns. Every new row's B..(last column)
+is therefore filled here by copying the row immediately above it byte-
+for-byte (read fresh via `read_formula`, since Sheets auto-adjusts THAT
+row's own self-references when an earlier insert shifts it down) and
 substituting only the `A<row>` self-reference for the new row number --
-never reconstructed from `sheet_links.edge_lookup_formula`, because the
-live sheet's already-written formulas turned out to reference an older,
-narrower EdgeRaw range (`$B:$T`) than today's `derived.EDGE_COLUMNS`
-would generate (`$B:$V`) -- still correct (VLOOKUP only needs the range
-to reach its target column), just a harmless historical artifact that
-reconstructing from scratch would have overwritten with a cosmetically
-different (but not more correct) pattern.
+never reconstructed from `sheet_links.edge_lookup_formula`, because a
+copied formula is still correct regardless of which EdgeRaw range it
+happens to reference (VLOOKUP only needs the range to reach its target
+column), and reconstructing from scratch risks overwriting a working
+pattern with a cosmetically different one for no reason. The "last
+column" itself is read fresh from the tab's own header on every call
+(`grow_block`), not hardcoded -- see its own docstring for why that
+specifically was a real, Phase-3-triggered bug here once.
 
 The three EdgeRaw-linked color scales (`sheet_links.COLOR_SCALE_LINKED_COLUMNS`)
 are a separate hazard: they were written once, by `link_edge_columns`, to
@@ -52,7 +53,6 @@ from dfs.sheet_links import COLOR_SCALE_LINKED_COLUMNS
 from dfs.sheets import SheetsClient, column_letter
 
 _POSITION_COLUMN = "B"
-_LAST_FORMULA_COLUMN = "Y"
 
 # Matches sheet_links.link_edge_columns' own color-scale colors exactly --
 # these three ranges are corrected in place here, not reinvented.
@@ -85,9 +85,18 @@ def grow_block(
     `current_last_row`. Caller must pass the block's CURRENT last row (not
     a precomputed one) -- an earlier `grow_block` call on a block above
     this one shifts every row number below it. Returns the block's new
-    last row, for the caller to feed into the next `grow_block` call."""
+    last row, for the caller to feed into the next `grow_block` call.
+
+    The tab's last formula-bearing column is read fresh from its own
+    header every call, never hardcoded -- Phase 3's reorder moved real
+    EdgeRaw-linked columns (Roof/Wind/...) onto what used to be this
+    tab's actual last column (`Y`), so a hardcoded version of this
+    function would silently leave every newly-inserted row missing
+    everything from that point on instead of copying it."""
+    header = client.read_range(tab, "A1:1")[0]
+    last_formula_col = column_letter(len(header) - 1)
     template_row = client.read_formula(
-        tab, f"{_POSITION_COLUMN}{current_last_row}:{_LAST_FORMULA_COLUMN}{current_last_row}"
+        tab, f"{_POSITION_COLUMN}{current_last_row}:{last_formula_col}{current_last_row}"
     )[0]
 
     insert_at = current_last_row + 1
@@ -98,7 +107,7 @@ def grow_block(
         new_values = [position] + [
             _substitute_self_reference(cell, current_last_row, new_row) for cell in template_row[1:]
         ]
-        client.update_range(tab, f"{_POSITION_COLUMN}{new_row}:{_LAST_FORMULA_COLUMN}{new_row}", [new_values])
+        client.update_range(tab, f"{_POSITION_COLUMN}{new_row}:{last_formula_col}{new_row}", [new_values])
 
     return current_last_row + count
 

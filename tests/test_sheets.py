@@ -32,6 +32,7 @@ class FakeWorksheet:
         self.column_groups: list[dict] = []
         self.insert_dimension_calls: list[dict] = []
         self.delete_dimension_calls: list[dict] = []
+        self.move_dimension_calls: list[dict] = []
         self.conditional_formats: list[dict] = []
         self.data_validation_calls: list[dict] = []
         self.filter_views: list[dict] = []
@@ -191,6 +192,23 @@ class FakeSpreadsheet:
             if "insertDimension" in request:
                 sheet_id = request["insertDimension"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).insert_dimension_calls.append(request["insertDimension"])
+            if "moveDimension" in request:
+                move = request["moveDimension"]
+                sheet_id = move["source"]["sheetId"]
+                ws = self._ws_by_id(sheet_id)
+                ws.move_dimension_calls.append(move)
+                # Real column-shift semantics, empirically verified against
+                # a live scratch tab before being trusted here (Phase 3):
+                # destinationIndex is in the PRE-removal index space.
+                start, end = move["source"]["startIndex"], move["source"]["endIndex"]
+                dest = move["destinationIndex"]
+                insert_at = dest if dest <= start else dest - (end - start)
+                for row in ws._rows:
+                    if len(row) < end:
+                        continue
+                    moved = row[start:end]
+                    del row[start:end]
+                    row[insert_at:insert_at] = moved
             if "deleteDimension" in request:
                 sheet_id = request["deleteDimension"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).delete_dimension_calls.append(request["deleteDimension"])
@@ -476,6 +494,49 @@ def test_clear_conditional_formats_with_column_and_row_range_only_matches_both(c
         (r["ranges"][0]["startColumnIndex"], r["ranges"][0]["startRowIndex"]) for r in ws.conditional_formats
     }
     assert surviving_ranges == {(15, 11), (16, 3)}  # P12 (col 15, row 11) and Q4 (col 16, row 3)
+
+
+def test_move_columns_destination_index_rightward_move(cfg, monkeypatch, tmp_path):
+    # Empirically verified against a live scratch tab (Phase 3): moving
+    # column index 1 to index 3 in a 4-column row (["A","B","C","D"])
+    # produces ["A","C","D","B"] -- destinationIndex must be to_index+1
+    # for a rightward move (it's in the PRE-removal index space).
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["A", "B", "C", "D"]])
+
+    client.move_columns("T", from_index=1, to_index=3)
+
+    ws = fake_sheet._worksheets["T"]
+    assert ws.move_dimension_calls[0]["destinationIndex"] == 4
+    assert ws.get("A1:D1")[0] == ["A", "C", "D", "B"]
+
+
+def test_move_columns_destination_index_leftward_move(cfg, monkeypatch, tmp_path):
+    # Same empirical check, leftward: destinationIndex equals to_index
+    # unchanged when moving something earlier in the sheet.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["A", "C", "D", "B"]])
+
+    client.move_columns("T", from_index=3, to_index=0)
+
+    ws = fake_sheet._worksheets["T"]
+    assert ws.move_dimension_calls[0]["destinationIndex"] == 0
+    assert ws.get("A1:D1")[0] == ["B", "A", "C", "D"]
+
+
+def test_move_columns_full_reorder_sequence_matches_compute_column_moves(cfg, monkeypatch, tmp_path):
+    from dfs.column_reorder import compute_column_moves
+
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    current = ["Name", "Pos", "Team", "Salary", "Pts", "Val"]
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[list(current)])
+    target = ["Val", "Name", "Salary", "Pos", "Pts", "Team"]
+
+    for from_i, to_i in compute_column_moves(current, target):
+        client.move_columns("T", from_index=from_i, to_index=to_i)
+
+    ws = fake_sheet._worksheets["T"]
+    assert ws.get("A1:F1")[0] == target
 
 
 def test_group_columns_groups_only_the_given_columns(cfg, monkeypatch, tmp_path):

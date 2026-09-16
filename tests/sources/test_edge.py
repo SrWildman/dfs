@@ -15,10 +15,17 @@ class SpySheetsClient:
         exists: bool = True,
         id_column: list[str] | None = None,
         pool_column: list[str] | None = None,
+        header: list[str] | None = None,
     ):
         self._exists = exists
         self._id_column = id_column or []
         self._pool_column = pool_column or []
+        # Minimal default: Pool at A, Id at B -- matches every existing
+        # test's implicit assumption. Override to prove `pre_upload` finds
+        # Id by reading THIS header, not by trusting EDGE_COLUMNS' target
+        # position (see test_pre_upload_finds_id_at_its_current_sheet_
+        # position_not_the_target_one below).
+        self._header = header or ["Pool", "Id"]
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.dropdown_calls: list[tuple[str, str, list[str]]] = []
         self.basic_filter_calls: list[tuple[str, str]] = []
@@ -28,10 +35,11 @@ class SpySheetsClient:
         return self._exists
 
     def read_range(self, tab_name: str, a1_range: str):
+        if a1_range == "A1:1":
+            return [self._header]
         col = a1_range[0]
-        # Pool lives at column A, Id at B (Pool sits ahead of EDGE_COLUMNS,
-        # not appended after it -- see sources/edge.py's own comment on
-        # EDGE_DATA_OFFSET).
+        # Pool lives at column A; any other column letter is treated as
+        # wherever the test says Id currently sits.
         values = self._pool_column if col == POOL_COLUMN else self._id_column
         return [[v] if v else [] for v in values]
 
@@ -95,6 +103,30 @@ def test_pre_upload_ignores_blank_id_rows():
     source = EdgeSource()
     client = SpySheetsClient(id_column=["", "222"], pool_column=["Both", "GPP"])
     assert source.pre_upload(client, "EdgeRaw") == {"222": "GPP"}
+
+
+def test_pre_upload_finds_id_at_its_current_sheet_position_not_the_target_one():
+    # The exact live incident this guards against: right before a reorder
+    # of EDGE_COLUMNS takes effect, the sheet still has Id at its OLD
+    # position while the Python-side EDGE_COLUMNS constant already
+    # reflects the NEW one. `pre_upload` runs BEFORE `write_tab` rewrites
+    # the tab, so it must read Id from wherever the header ACTUALLY says
+    # it is right now -- here, column D, nowhere near Id's usual spot --
+    # not from a position derived off EDGE_COLUMNS. Getting this wrong
+    # silently wiped every real Pool tick on the live sheet once.
+    source = EdgeSource()
+    client = SpySheetsClient(
+        header=["Pool", "Name", "Team", "Id"],
+        id_column=["111", "222"],
+        pool_column=["Cash", "GPP"],
+    )
+    assert source.pre_upload(client, "EdgeRaw") == {"111": "Cash", "222": "GPP"}
+
+
+def test_pre_upload_returns_empty_when_id_is_not_in_the_header_at_all():
+    source = EdgeSource()
+    client = SpySheetsClient(header=["Pool", "Name", "Team"], id_column=["111"], pool_column=["Cash"])
+    assert source.pre_upload(client, "EdgeRaw") == {}
 
 
 def test_pre_upload_migrates_a_leftover_true_checkbox_value_to_both():

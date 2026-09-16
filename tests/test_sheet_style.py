@@ -36,6 +36,7 @@ from dfs.sheet_style import (
     style_sos_tab,
     style_tier23_tabs,
 )
+from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
 
 
@@ -108,6 +109,16 @@ def test_field_formats_covers_every_edgeraw_numeric_column():
     ]
     for name in edge_numeric_columns:
         assert name in FIELD_FORMATS, f"{name!r} (an EdgeRaw column) has no FIELD_FORMATS entry"
+
+
+def test_field_formats_gives_id_a_plain_integer_pattern():
+    # Found live: with no explicit entry, Id inherited a stray "0.0"
+    # number format from wherever it sat before Phase 3 moved it,
+    # rendering every value as e.g. "44133074.0" -- which broke Pool-tick
+    # preservation across a sync, since `sources/edge.py` matches ticks
+    # by this exact string. Must be a plain integer, no decimal point.
+    fmt = FIELD_FORMATS["Id"]
+    assert "." not in fmt["numberFormat"]["pattern"]
 
 
 def test_apply_field_formats_matches_by_header_text_not_position():
@@ -440,6 +451,8 @@ class FakeGuardrailsClient:
         self.update_calls: list[tuple[str, list[list]]] = []
         self.clear_calls: list[str | None] = []
         self.boolean_rule_calls: list[tuple[str, str, list[str], dict]] = []
+        self.format_calls: list[tuple[str, dict]] = []
+        self.clear_validation_calls: list[str] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
@@ -461,11 +474,27 @@ class FakeGuardrailsClient:
     ) -> None:
         self.boolean_rule_calls.append((a1_range, condition_type, values, fmt))
 
+    def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
+        self.format_calls.append((a1_range, fmt))
+
+    def clear_data_validation(self, tab_name: str, a1_range: str) -> None:
+        self.clear_validation_calls.append(a1_range)
+
 
 _HEADER_WITH_AVAIL_AT_Y = (
     ["Name", "Pos.", "Team", "DK Sal", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts"]
     + ["Ceil", "Val", "Rstr%", "", "% of Rstr", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
     + ["Stadium", "Roof", "Wind", "Avail", "Flag"]
+)
+
+# For polish_guardrails specifically: DK Sal and Issues are deliberately
+# NOT at their old pre-Phase-3 letters (D and O) -- proves the by-name
+# derivation the Phase 3 fix added, rather than coincidentally passing
+# because a fixture still matches the old layout.
+_HEADER_FOR_GUARDRAILS = (
+    ["Name", "Team", "Pos.", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts", "DK Sal"]
+    + ["Ceil", "Val", "Rstr%", "% of Rstr", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
+    + ["Stadium", "Roof", "Wind", "Avail", "Flag", "Issues"]
 )
 
 
@@ -508,9 +537,10 @@ def test_polish_bankroll_hides_nothing_when_no_entry_key_columns_given():
 
 
 def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
-    # Fix 2.4. Uses the same fixture/fake as polish_guardrails below --
-    # Team=C, DK Sal=D, O/U=E, Spread=F, Venue=I, OppPosRank=J, Ceil=L,
-    # Val=M, and the whole linked block Q..Z.
+    # Fix 2.4 / Phase 3. Uses the same fixture/fake as polish_guardrails
+    # below -- Team=C, DK Sal=D, O/U=E, Spread=F, Team Implied=G, Opp.=H,
+    # Venue=I, OppPosRank=J, Ceil=L, Val=M, and the linked columns
+    # scattered at Q,R,S,T,U,V,W,X,Y,Z.
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
     result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
@@ -518,20 +548,65 @@ def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
     calls = {a1: rows for a1, rows in client.update_calls}
     totals_row = 18  # end + 1
 
-    # Dead VLOOKUP columns cleared on the totals row only.
-    for letter in ("I", "J", "M", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"):
+    # Dead VLOOKUP columns cleared on the totals row only -- native
+    # lookups (O/U, Spread, Team Implied, OppPosRank) alongside the
+    # linked block. Venue is NOT cleared/repurposed as a label any more --
+    # it holds the real remaining-cap number a separate hand-authored row
+    # depends on (see this function's own docstring).
+    for letter in ("E", "F", "G", "J", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"):
         assert calls[f"{letter}{totals_row}"] == [[""]]
 
     # Ceil summed, same shape as the pre-existing Pts/Salary sums.
     assert calls[f"L{totals_row}"] == [["=SUM(L9:L17)"]]
 
-    # Labels: "Total" beside the Salary sum, "Remaining" beside the
-    # remaining-cap formula.
-    assert calls[f"C{totals_row}"] == [["Total"]]
-    assert calls[f"F{totals_row}"] == [["Remaining"]]
+    # "Total" goes at Opp.'s column (H); the remaining-cap NUMBER (no
+    # text -- a hand-authored row below reads it via INDIRECT) goes at
+    # Venue's column (I); "Remaining" is a plain text label at Val's
+    # column (M). All found by header name, so they land correctly
+    # regardless of this fixture's scrambled layout, not stranded next to
+    # Spread/O-U the way a hardcoded version once would have been.
+    assert calls[f"H{totals_row}"] == [["Total"]]
+    assert calls[f"I{totals_row}"] == [['=IF(COUNTA($A$9:$A$17)=0,"",50000-D18)']]
+    assert calls[f"M{totals_row}"] == [["Remaining"]]
 
     assert "1 totals row(s)" in result
     assert "1 Ceil sum(s)" in result
+
+
+def test_polish_lineups_totals_rows_puts_a_bare_number_at_venue_never_text():
+    # The exact regression this guards against: a separate, genuinely
+    # hand-authored row directly below the totals row (documented in
+    # docs/SHEET_REFERENCE.md, never written by any `dfs` command) reads
+    # Venue's totals-row cell via `INDIRECT("E"&(ROW()-1))` and divides it
+    # by a count -- a string-built reference `moveDimension` can't see or
+    # retarget. Any text there (a label, or a self-labeled "Remaining
+    # $X" string) produces #VALUE! on that row instead of a real number.
+    # Found live, twice: once when Venue held "Total", and again when the
+    # very first fix for that put self-labeled text there instead.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    calls = {a1: rows for a1, rows in client.update_calls}
+    venue_value = calls["I18"][0][0]
+    assert venue_value.startswith("=IF(")
+    assert "Remaining" not in venue_value
+    assert "Total" not in venue_value
+
+
+def test_polish_lineups_totals_rows_clears_the_totals_row_name_cells_typo_guard():
+    # The totals row's Name cell (column A) still carried the same input
+    # background and typo-guard player dropdown as a real roster slot --
+    # a leftover from Fix 2.4 shrinking each block's own range to exclude
+    # the totals row, never retroactively cleaned up off the row it
+    # stopped covering. Found live, from a screenshot.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    assert client.clear_validation_calls == ["A18"]
+    assert client.format_calls == [("A18", {"backgroundColor": WHITE})]
+    assert "1 Name cell(s) un-typo-guarded" in result
 
 
 def test_polish_lineups_totals_rows_never_touches_salary_pts_or_issues():
@@ -557,7 +632,7 @@ def test_polish_lineups_totals_rows_skips_when_lineups_missing():
 
 
 def test_polish_guardrails_skips_when_lineups_missing():
-    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS, present=False)
     result = polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
     assert result == "Lineups: not present -- skipped"
     assert client.update_calls == []
@@ -571,30 +646,69 @@ def test_polish_guardrails_skips_when_avail_not_yet_linked():
     assert client.clear_calls == []
 
 
-def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avail_column():
-    # Fix 2.4: `end` (17) is the block's own last REAL roster row now,
-    # not the totals row -- the totals row is `end + 1` (18), a separate
-    # row entirely.
-    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
-    avail_index = _HEADER_WITH_AVAIL_AT_Y.index("Avail")
-    assert avail_index == 24  # column Y, 0-indexed -- confirms the fixture matches spec section 1.2
+def test_polish_guardrails_skips_when_issues_column_not_found():
+    # The exact regression this guards against: Phase 3 moved "Issues" to
+    # a new column, and this function used to write to a hardcoded "O"
+    # regardless -- clobbering whatever real column now sits at O (Flag,
+    # after Phase 3) with a duplicate copy of the guardrails header and
+    # formulas. Now it must refuse instead of guessing.
+    header = [name for name in _HEADER_FOR_GUARDRAILS if name != "Issues"]
+    client = FakeGuardrailsClient(header)
+    result = polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+    assert "'Issues' column not found" in result
+    assert client.update_calls == []
+
+
+def test_polish_guardrails_skips_when_dk_sal_column_not_found():
+    header = [name for name in _HEADER_FOR_GUARDRAILS if name != "DK Sal"]
+    client = FakeGuardrailsClient(header)
+    result = polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
+    assert "'DK Sal' column not found" in result
+    assert client.update_calls == []
+
+
+def test_polish_guardrails_never_touches_a_column_other_than_issues():
+    # Direct regression test for the real incident: Flag sits at a
+    # DIFFERENT column than Issues in this fixture -- polish_guardrails
+    # must never write there.
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    flag_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Flag"))
 
     polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
 
-    header_call = next(c for c in client.update_calls if c[0] == "O8")
+    assert not any(a1.startswith(flag_col) for a1, _rows in client.update_calls)
+
+
+def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avail_column():
+    # Fix 2.4: `end` (17) is the block's own last REAL roster row now,
+    # not the totals row -- the totals row is `end + 1` (18), a separate
+    # row entirely. Avail/DK Sal/Issues are all found by header name here
+    # (columns X/K/Z in this fixture -- deliberately not their old D/O
+    # letters, see `_HEADER_FOR_GUARDRAILS`).
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    avail_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Avail"))
+    salary_col = column_letter(_HEADER_FOR_GUARDRAILS.index("DK Sal"))
+    guardrails_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Issues"))
+    assert (avail_col, salary_col, guardrails_col) == ("X", "K", "Z")
+
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    header_call = next(c for c in client.update_calls if c[0] == f"{guardrails_col}8")
     assert header_call[1] == [["Issues"]]
 
-    block_call = next(c for c in client.update_calls if c[0] == "O9:O18")
+    block_call = next(c for c in client.update_calls if c[0] == f"{guardrails_col}9:{guardrails_col}18")
     rows = block_call[1]
     assert len(rows) == 10  # 9 slots + 1 totals row
 
     # Slot row 9: duplicate check over the block's own name range, then
     # falls back to that row's own Avail cell.
-    assert rows[0] == ['=IF($A9="","",IF(COUNTIF($A$9:$A$17,$A9)>1,"DUPLICATE",IF($Y9<>"",$Y9,"")))']
-    # Totals row (18): cap / completeness / OK.
+    assert rows[0] == [
+        f'=IF($A9="","",IF(COUNTIF($A$9:$A$17,$A9)>1,"DUPLICATE",IF(${avail_col}9<>"",${avail_col}9,"")))'
+    ]
+    # Totals row (18): cap / completeness / OK, against DK Sal's column.
     assert rows[-1] == [
         '=IF(COUNTA($A$9:$A$17)=0,"",'
-        'IF(D18>50000,"OVER "&TEXT(D18-50000,"$#,##0"),'
+        f'IF({salary_col}18>50000,"OVER "&TEXT({salary_col}18-50000,"$#,##0"),'
         'IF(COUNTA($A$9:$A$17)<9,"INCOMPLETE "&COUNTA($A$9:$A$17)&"/9","OK")))'
     ]
 
@@ -602,23 +716,25 @@ def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avai
 def test_polish_guardrails_repeats_header_at_every_block():
     # Fix 2.6: the header was only ever written at `header_row`, so 19 of
     # 20 lineup blocks were missing it entirely.
-    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    guardrails_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Issues"))
 
     polish_guardrails(
         client, "Lineups", header_row=8, name_blocks=[(9, 18), (22, 31)], header_repeats_at=[21]
     )
 
-    assert next(c for c in client.update_calls if c[0] == "O8")[1] == [["Issues"]]
-    assert next(c for c in client.update_calls if c[0] == "O21")[1] == [["Issues"]]
+    assert next(c for c in client.update_calls if c[0] == f"{guardrails_col}8")[1] == [["Issues"]]
+    assert next(c for c in client.update_calls if c[0] == f"{guardrails_col}21")[1] == [["Issues"]]
 
 
-def test_polish_guardrails_widens_column_o_and_clears_only_its_own_rules():
-    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+def test_polish_guardrails_widens_its_own_column_and_clears_only_its_own_rules():
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    guardrails_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Issues"))
 
     polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
 
-    assert client.width_calls == [{"O": 110}]
-    assert client.clear_calls == ["O"]  # never a blanket clear of Lineups' other rules
+    assert client.width_calls == [{guardrails_col: 110}]
+    assert client.clear_calls == [guardrails_col]  # never a blanket clear of Lineups' other rules
 
 
 class FakeBuilderTabClient:
@@ -787,7 +903,8 @@ def _chip(bg: dict, fg: dict) -> dict:
 
 
 def test_polish_guardrails_chips_cover_every_documented_state():
-    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    guardrails_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Issues"))
 
     polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
 
@@ -801,10 +918,10 @@ def test_polish_guardrails_chips_cover_every_documented_state():
     assert by_value["Q"] == ("TEXT_EQ", _chip(WARN_BG, WARN_FG))
     assert by_value["INCOMPLETE"] == ("TEXT_CONTAINS", _chip(WARN_BG, WARN_FG))
     assert by_value["OK"] == ("TEXT_EQ", _chip(OK_BG, OK_FG))
-    # Every rule targets column O only, across the full block range given
-    # PLUS its totals row (19 = end + 1, Fix 2.4).
+    # Every rule targets the Issues column only, across the full block
+    # range given PLUS its totals row (19 = end + 1, Fix 2.4).
     for a1_range, *_ in client.boolean_rule_calls:
-        assert a1_range == "O2:O19"
+        assert a1_range == f"{guardrails_col}2:{guardrails_col}19"
 
 
 class FakeTier23Client:
