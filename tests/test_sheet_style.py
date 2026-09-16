@@ -5,6 +5,7 @@ from dfs.sheet_style import (
     CRIT_BG,
     CRIT_FG,
     EDGE_COLUMN_GROUPS,
+    EDGE_UNSCALED_PLAYER_METRICS,
     EDGE_WIDTHS,
     FAMILY_COLORS,
     FIELD_COLOR_SCALES,
@@ -12,6 +13,7 @@ from dfs.sheet_style import (
     FLAG_CHIPS,
     GRAD_MAX,
     GRAD_MIN,
+    GROUPED_TAB_UNSCALED_COLUMNS,
     HEADER_FMT,
     HIDE_TABS,
     OK_BG,
@@ -22,9 +24,12 @@ from dfs.sheet_style import (
     WARN_FG,
     WEEK_ORDER,
     WHITE,
+    ZERO_EXCLUDED_COLUMNS,
     ZERO_GREY_BG,
+    apply_deck_color_scales,
     apply_field_color_scales,
     apply_field_formats,
+    apply_grouped_color_scales,
     apply_tab_chrome,
     polish_bankroll,
     polish_builder_tab,
@@ -74,6 +79,8 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "SpdMove",
         "OverUnder",
         "Spread",
+        "CeilPct",
+        "OwnPct",
     }
     assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
     assert FIELD_COLOR_SCALES["ImpMove"] == "diverging"  # scored separately, zero as the midpoint
@@ -303,16 +310,24 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_twelve_decision_columns_not_salary():
+def test_polish_edge_scales_ten_columns_skipping_raw_player_metrics():
+    # Phase 4 (4.1): EdgeRaw isn't position-grouped, so ProjPts/Ceiling/
+    # Val/CeilVal (EDGE_UNSCALED_PLAYER_METRICS) are skipped there --
+    # CeilPct/OwnPct/Leverage (already percentile) stand in for them.
+    # 12 raw FIELD_COLOR_SCALES matches, minus 4 skipped, plus 2 newly
+    # added (CeilPct/OwnPct) = 10.
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
-    matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
-    # 6 standard + ImpMove/TotMove/SpdMove/Spread (diverging) + OverUnder + ProjOwn (warm) = 12.
-    assert len(matched) == 12
+    matched = [
+        name
+        for name in edge_header
+        if name in FIELD_COLOR_SCALES and name not in EDGE_UNSCALED_PLAYER_METRICS
+    ]
+    assert len(matched) == 10
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 12
+    assert len(client.color_scale_calls) == 10
 
 
 def test_polish_edge_move_and_spread_scales_are_diverging_at_zero():
@@ -775,10 +790,139 @@ class FakeBuilderTabClient:
     def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
         self.color_scale_calls.append((a1_range, kwargs))
 
+    def add_color_scales(self, tab_name: str, specs: list[dict]) -> None:
+        for spec in specs:
+            spec = dict(spec)
+            self.color_scale_calls.append((spec.pop("a1_range"), spec))
+
     def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
         self.boolean_rule_calls.append(
             (a1_range, {"condition_type": condition_type, "values": values, "fmt": fmt})
         )
+
+    def add_boolean_rules(self, tab_name: str, specs: list[dict]) -> None:
+        for spec in specs:
+            spec = dict(spec)
+            a1_range = spec.pop("a1_range")
+            self.boolean_rule_calls.append((a1_range, spec))
+
+
+def test_apply_grouped_color_scales_writes_one_rule_per_column_per_group():
+    # Phase 4 (4.1/4.2): 3 scaled columns x 2 groups = 6 gradient rules --
+    # verified live that one rule can't independently scale multiple
+    # groups (see CONTRIBUTING.md's Phase 4 changelog), so this is
+    # genuinely len(groups) * matched_columns, not a smaller number.
+    client = FakeBuilderTabClient(["Name", "Pts", "Ceil", "Val"])
+    applied = apply_grouped_color_scales(client, "Player Pool", client._header, [(3, 12), (14, 33)])
+
+    assert applied == 6
+    ranges = {a1 for a1, _kwargs in client.color_scale_calls}
+    assert ranges == {"B3:B12", "C3:C12", "D3:D12", "B14:B33", "C14:C33", "D14:D33"}
+
+
+def test_apply_grouped_color_scales_skips_the_grouped_tab_unscaled_columns():
+    client = FakeBuilderTabClient(["Name", "Pts", "CeilPct", "OwnPct"])
+    applied = apply_grouped_color_scales(
+        client, "Player Pool", client._header, [(3, 12)], skip=GROUPED_TAB_UNSCALED_COLUMNS
+    )
+
+    assert applied == 1
+    assert {a1 for a1, _ in client.color_scale_calls} == {"B3:B12"}
+    assert GROUPED_TAB_UNSCALED_COLUMNS == {"CeilPct", "OwnPct"}
+
+
+def test_apply_grouped_color_scales_scopes_zero_exclusion_to_each_groups_own_range():
+    # Rstr% is zero-excluded (Fix 2.7) -- per-block, the MINIFS formula
+    # must read that BLOCK's own range, not the whole tab, or one
+    # position's unpublished-ownership zeros would pollute another's.
+    assert "Rstr%" in ZERO_EXCLUDED_COLUMNS
+    client = FakeBuilderTabClient(["Name", "Rstr%"])
+    apply_grouped_color_scales(client, "Player Pool", client._header, [(3, 12), (14, 33)])
+
+    scales_by_range = dict(client.color_scale_calls)
+    assert scales_by_range["B3:B12"]["min_value"] == '=MINIFS(B3:B12,B3:B12,"<>0")'
+    assert scales_by_range["B14:B33"]["min_value"] == '=MINIFS(B14:B33,B14:B33,"<>0")'
+    # A zero-exclusion grey chip lands per group too, same range each.
+    zero_ranges = {a1 for a1, _ in client.boolean_rule_calls}
+    assert zero_ranges == {"B3:B12", "B14:B33"}
+
+
+def test_apply_grouped_color_scales_honors_skip_argument():
+    client = FakeBuilderTabClient(["Name", "Pts", "Leverage"])
+    applied = apply_grouped_color_scales(
+        client, "Player Pool", client._header, [(3, 12)], skip=frozenset({"Leverage"})
+    )
+    assert applied == 1
+    assert {a1 for a1, _ in client.color_scale_calls} == {"B3:B12"}
+
+
+class FakeDeckColorScaleClient:
+    def __init__(self):
+        self.clear_cf_calls: list[tuple] = []
+        self.color_scale_calls: list[tuple[str, dict]] = []
+        self.boolean_rule_calls: list[tuple[str, dict]] = []
+
+    def clear_conditional_formats(self, tab_name: str, *, column=None, row_range=None) -> None:
+        self.clear_cf_calls.append((column, row_range))
+
+    def add_color_scales(self, tab_name: str, specs: list[dict]) -> None:
+        for spec in specs:
+            spec = dict(spec)
+            self.color_scale_calls.append((spec.pop("a1_range"), spec))
+
+    def add_boolean_rules(self, tab_name: str, specs: list[dict]) -> None:
+        for spec in specs:
+            spec = dict(spec)
+            self.boolean_rule_calls.append((spec.pop("a1_range"), spec))
+
+
+def test_apply_deck_color_scales_anchors_min_max_at_pool_sort_not_the_window():
+    # Phase 4 (4.4): the window (rows 4-9) must scale against PoolSort's
+    # FULL range for that field, not its own 6 visible rows -- otherwise
+    # colour re-scales as you page through with "Start at".
+    # Also pins the discovered constraint (see CONTRIBUTING.md's Phase 4
+    # changelog): a gradient's NUMBER-type endpoint can't reference
+    # another sheet directly, so min/max must point at same-tab helper
+    # cells (sheet_pool_deck.MIN_HELPER_ROW/MAX_HELPER_ROW) instead of a
+    # PoolSort formula written straight into the rule.
+    client = FakeDeckColorScaleClient()
+    deck_header = ["Name", "Pts"]
+    pool_sort_header = ["Name", "Pts"]
+
+    applied = apply_deck_color_scales(
+        client,
+        "Lineups",
+        deck_header,
+        pool_sort_header,
+        header_row=3,
+        window_end=9,
+        min_helper_row=2,
+        max_helper_row=10,
+    )
+
+    assert applied == 1
+    a1, kwargs = client.color_scale_calls[0]
+    assert a1 == "B4:B9"
+    assert kwargs["min_value"] == "=$B$2"
+    assert kwargs["max_value"] == "=$B$10"
+
+
+def test_apply_deck_color_scales_skips_a_deck_only_name_with_no_pool_sort_equivalent():
+    # "Issues"/"% of Rstr" exist on Lineups' deck header but have no
+    # Player Pool/PoolSort column to anchor against.
+    client = FakeDeckColorScaleClient()
+    applied = apply_deck_color_scales(
+        client,
+        "Lineups",
+        ["Name", "Leverage"],
+        ["Name"],  # PoolSort has no Leverage column in this fixture
+        header_row=3,
+        window_end=9,
+        min_helper_row=2,
+        max_helper_row=10,
+    )
+    assert applied == 0
+    assert client.color_scale_calls == []
 
 
 def test_polish_builder_tab_styles_header_repeats_the_same_as_the_real_header():

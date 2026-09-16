@@ -39,6 +39,51 @@ def column_letter(index: int) -> str:
     return letters
 
 
+def _gradient_rule(
+    grid_range: dict,
+    *,
+    min_color: dict,
+    mid_color: dict,
+    max_color: dict,
+    mid_type: str,
+    mid_value: str,
+    min_type: str,
+    min_value: str | None,
+    max_type: str,
+    max_value: str | None,
+) -> dict:
+    """Builds one `ConditionalFormatRule` dict for a gradient (colour
+    scale) rule -- shared by `add_color_scale` (one HTTP call) and
+    `add_color_scales` (many rules, one call) so the two never drift."""
+    minpoint = {"color": min_color, "type": min_type}
+    if min_value is not None:
+        minpoint["value"] = min_value
+    maxpoint = {"color": max_color, "type": max_type}
+    if max_value is not None:
+        maxpoint["value"] = max_value
+    return {
+        "ranges": [grid_range],
+        "gradientRule": {
+            "minpoint": minpoint,
+            "midpoint": {"color": mid_color, "type": mid_type, "value": mid_value},
+            "maxpoint": maxpoint,
+        },
+    }
+
+
+def _boolean_rule(grid_range: dict, *, condition_type: str, values: list[str], fmt: dict) -> dict:
+    """Builds one `ConditionalFormatRule` dict for a boolean rule --
+    shared by `add_boolean_rule` and `add_boolean_rules` (see
+    `_gradient_rule`'s own docstring for why)."""
+    return {
+        "ranges": [grid_range],
+        "booleanRule": {
+            "condition": {"type": condition_type, "values": [{"userEnteredValue": v} for v in values]},
+            "format": fmt,
+        },
+    }
+
+
 @dataclass
 class TabInfo:
     title: str
@@ -288,6 +333,8 @@ class SheetsClient:
         mid_value: str = "50",
         min_type: str = "MIN",
         min_value: str | None = None,
+        max_type: str = "MAX",
+        max_value: str | None = None,
     ) -> None:
         """Apply a 3-point color-scale conditional format to `a1_range` --
         like `update_range`/`clear_ranges`, this only ever touches the range
@@ -302,37 +349,79 @@ class SheetsClient:
         a true diverging scale rather than one that happens to have three
         colors.
 
-        `min_type`/`min_value` default to the range's actual minimum. Pass
+        `min_type`/`min_value` (and `max_type`/`max_value`, same shape)
+        default to the range's own actual minimum/maximum. Pass
         `min_type="NUMBER", min_value="=MINIFS(...)"` (Sheets accepts a
         formula for a NUMBER-type interpolation point's value) to anchor
-        the low end somewhere other than the true minimum -- e.g. Fix
-        2.7's zero-exclusion, where a real 0 (unpublished ownership, a
-        dome's zero wind) would otherwise anchor the scale and compress
-        everyone else's real spread into a sliver of the gradient."""
+        an endpoint somewhere other than `a1_range`'s own true min/max --
+        e.g. Fix 2.7's zero-exclusion (min anchored past a real 0), or
+        Phase 4's per-group scaling (both endpoints anchored to a
+        DIFFERENT range than `a1_range` itself -- verified live that a
+        gradient's min/mid/max are each evaluated ONCE, from a fixed
+        reference, not per-cell-relative like a custom boolean formula
+        would be; a formula-anchored endpoint can point anywhere, but one
+        rule still can't self-scope independently across multiple groups
+        within its own range -- see CONTRIBUTING.md's Phase 4 changelog).
+        """
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
-        minpoint = {"color": min_color, "type": min_type}
-        if min_value is not None:
-            minpoint["value"] = min_value
-        sheet.batch_update(
-            {
-                "requests": [
-                    {
-                        "addConditionalFormatRule": {
-                            "rule": {
-                                "ranges": [grid_range],
-                                "gradientRule": {
-                                    "minpoint": minpoint,
-                                    "midpoint": {"color": mid_color, "type": mid_type, "value": mid_value},
-                                    "maxpoint": {"color": max_color, "type": "MAX"},
-                                },
-                            },
-                            "index": 0,
-                        }
-                    }
-                ]
-            }
+        rule = _gradient_rule(
+            grid_range,
+            min_color=min_color,
+            mid_color=mid_color,
+            max_color=max_color,
+            mid_type=mid_type,
+            mid_value=mid_value,
+            min_type=min_type,
+            min_value=min_value,
+            max_type=max_type,
+            max_value=max_value,
         )
+        sheet.batch_update({"requests": [{"addConditionalFormatRule": {"rule": rule, "index": 0}}]})
+
+    def add_color_scales(self, tab_name: str, specs: list[dict]) -> None:
+        """Same rule as `add_color_scale`, one call per item in `specs`
+        (each a kwargs dict matching `add_color_scale`'s own signature,
+        keyed `a1_range`/`min_color`/.../`max_value`) -- but issued as
+        ONE `batchUpdate` covering every rule, not one HTTP round-trip
+        per rule. Needed once `apply_grouped_color_scales` (Phase 4)
+        started generating a rule per `(column, group)` pair: 14 scaled
+        columns x 20 Lineups blocks is 280 gradient rules (plus ~20 more
+        zero-exclusion boolean rules), and `add_color_scale`'s one-
+        request-per-call shape -- fine for a handful of whole-tab rules
+        -- would mean hundreds of sequential round-trips through
+        `BackOffHTTPClient`'s retry/backoff, each one a real chance to
+        eat the write-quota window `dfs setup polish` already runs close
+        to. All rules land at `index: 0` -- correct since a single
+        `batchUpdate`'s requests apply in order (so the *last* rule here
+        ends up at index 0, earlier ones pushed down), and safe since
+        none of Phase 4's per-group rules overlap in range with each
+        other, so their relative priority against one another never
+        matters -- only priority against a DIFFERENT rule that already
+        exists (e.g. a zero-exclusion chip added afterward) does, and
+        that ordering is unaffected by how many rules land in between.
+        """
+        if not specs:
+            return
+        _, ws = self._ws(tab_name)
+        requests = []
+        for spec in specs:
+            grid_range = a1_range_to_grid_range(spec["a1_range"], ws.id)
+            rule = _gradient_rule(
+                grid_range,
+                min_color=spec["min_color"],
+                mid_color=spec["mid_color"],
+                max_color=spec["max_color"],
+                mid_type=spec.get("mid_type", "PERCENTILE"),
+                mid_value=spec.get("mid_value", "50"),
+                min_type=spec.get("min_type", "MIN"),
+                min_value=spec.get("min_value"),
+                max_type=spec.get("max_type", "MAX"),
+                max_value=spec.get("max_value"),
+            )
+            requests.append({"addConditionalFormatRule": {"rule": rule, "index": 0}})
+        sheet, _ = self._ws(tab_name)
+        sheet.batch_update({"requests": requests})
 
     def insert_rows(self, tab_name: str, *, at_row: int, count: int) -> None:
         """Insert `count` blank rows starting at `at_row` (1-indexed) via a
@@ -833,27 +922,34 @@ class SheetsClient:
         this is one-time setup, not something to run per sync."""
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
-        sheet.batch_update(
+        rule = _boolean_rule(grid_range, condition_type=condition_type, values=values, fmt=fmt)
+        sheet.batch_update({"requests": [{"addConditionalFormatRule": {"rule": rule, "index": 0}}]})
+
+    def add_boolean_rules(self, tab_name: str, specs: list[dict]) -> None:
+        """Same rule as `add_boolean_rule`, one call per item in `specs`
+        (each keyed `a1_range`/`condition_type`/`values`/`fmt`), issued as
+        ONE `batchUpdate` -- see `add_color_scales`' docstring for why
+        (Phase 4's per-group zero-exclusion chips, one per scaled block,
+        are exactly the same "many small rules from one polish run"
+        shape)."""
+        if not specs:
+            return
+        sheet, ws = self._ws(tab_name)
+        requests = [
             {
-                "requests": [
-                    {
-                        "addConditionalFormatRule": {
-                            "rule": {
-                                "ranges": [grid_range],
-                                "booleanRule": {
-                                    "condition": {
-                                        "type": condition_type,
-                                        "values": [{"userEnteredValue": v} for v in values],
-                                    },
-                                    "format": fmt,
-                                },
-                            },
-                            "index": 0,
-                        }
-                    }
-                ]
+                "addConditionalFormatRule": {
+                    "rule": _boolean_rule(
+                        a1_range_to_grid_range(spec["a1_range"], ws.id),
+                        condition_type=spec["condition_type"],
+                        values=spec["values"],
+                        fmt=spec["fmt"],
+                    ),
+                    "index": 0,
+                }
             }
-        )
+            for spec in specs
+        ]
+        sheet.batch_update({"requests": requests})
 
     def clear_banding(self, tab_name: str) -> None:
         """Delete every existing banded range on a tab before re-adding one

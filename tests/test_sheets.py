@@ -425,6 +425,88 @@ def test_add_color_scale_targets_only_the_given_range(cfg, monkeypatch, tmp_path
     assert grid_range["startRowIndex"] == 1  # row 2, 0-indexed
 
 
+def test_add_color_scales_issues_one_batch_update_for_every_rule(cfg, monkeypatch, tmp_path):
+    # Phase 4: apply_grouped_color_scales can generate hundreds of rules
+    # (14 columns x 20 Lineups blocks) -- must be one HTTP round-trip,
+    # not one per rule.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    specs = [
+        {
+            "a1_range": f"{col}2:{col}10",
+            "min_color": {"red": 1, "green": 0, "blue": 0},
+            "mid_color": {"red": 1, "green": 1, "blue": 0},
+            "max_color": {"red": 0, "green": 1, "blue": 0},
+        }
+        for col in ("B", "C", "D")
+    ]
+    calls_before = len(fake_sheet.batch_update_calls)
+    client.add_color_scales("T", specs)
+
+    assert len(fake_sheet.batch_update_calls) == calls_before + 1
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.color_scale_calls) == 3
+
+
+def test_add_color_scales_with_min_max_formulas_carries_them_through(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.add_color_scales(
+        "T",
+        [
+            {
+                "a1_range": "B2:B10",
+                "min_color": {"red": 1, "green": 0, "blue": 0},
+                "mid_color": {"red": 1, "green": 1, "blue": 0},
+                "max_color": {"red": 0, "green": 1, "blue": 0},
+                "min_type": "NUMBER",
+                "min_value": "=MIN('PoolSort'!$B$2:$B$80)",
+                "max_type": "NUMBER",
+                "max_value": "=MAX('PoolSort'!$B$2:$B$80)",
+            }
+        ],
+    )
+    rule = fake_sheet._worksheets["T"].color_scale_calls[0]["rule"]["gradientRule"]
+    assert rule["minpoint"]["value"] == "=MIN('PoolSort'!$B$2:$B$80)"
+    assert rule["maxpoint"]["value"] == "=MAX('PoolSort'!$B$2:$B$80)"
+
+
+def test_add_color_scales_is_a_noop_on_an_empty_list(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    calls_before = len(fake_sheet.batch_update_calls)
+    client.add_color_scales("T", [])
+    assert len(fake_sheet.batch_update_calls) == calls_before
+
+
+def test_add_boolean_rules_issues_one_batch_update_for_every_rule(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    specs = [
+        {
+            "a1_range": f"{col}2:{col}10",
+            "condition_type": "NUMBER_EQ",
+            "values": ["0"],
+            "fmt": {"backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}},
+        }
+        for col in ("B", "C")
+    ]
+    calls_before = len(fake_sheet.batch_update_calls)
+    client.add_boolean_rules("T", specs)
+
+    assert len(fake_sheet.batch_update_calls) == calls_before + 1
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.color_scale_calls) == 2  # the fake tracks boolean rules on the same list
+
+
+def test_add_boolean_rules_is_a_noop_on_an_empty_list(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    calls_before = len(fake_sheet.batch_update_calls)
+    client.add_boolean_rules("T", [])
+    assert len(fake_sheet.batch_update_calls) == calls_before
+
+
 def test_clear_conditional_formats_with_no_column_deletes_every_rule(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])

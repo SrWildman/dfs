@@ -297,7 +297,35 @@ FIELD_COLOR_SCALES = {
     "OppPosRank": _REVERSED,
     "ProjOwn": _WARM,
     "Rstr%": _WARM,
+    # Phase 4 (4.1): already percentile-within-position, 0-100 regardless
+    # of which positions happen to be mixed into the range they're scaled
+    # over -- unlike raw Pts/Ceil/Val/CeilVal, scaling these doesn't need
+    # a position-grouped range to mean something. See
+    # EDGE_UNSCALED_PLAYER_METRICS/GROUPED_TAB_UNSCALED_COLUMNS below for
+    # why EdgeRaw keeps these two and Player Pool/Lineups skip them.
+    "CeilPct": _GRADIENT,
+    "OwnPct": _GRADIENT,
 }
+
+# Phase 4 (4.1): EdgeRaw is sorted by Leverage, not grouped by position --
+# one gradient across the whole 743-row tab paints every DST red next to
+# a QB's real 27 points. Rather than add a second per-position-scaled
+# copy of these columns, EdgeRaw skips scaling its raw, position-skewed
+# player-performance metrics entirely and relies on the already-
+# percentile CeilPct/OwnPct/Leverage instead (recommended over adding new
+# percentile columns for Pts/Ceil, since those already exist). Player
+# Pool/Lineups don't need this exclusion -- they scale per position/
+# lineup block (`apply_grouped_color_scales`), where a raw Pts/Ceil
+# comparison is exactly the right one.
+EDGE_UNSCALED_PLAYER_METRICS = frozenset({"ProjPts", "Ceiling", "Val", "CeilVal"})
+
+# Phase 4 (4.1): the reverse exclusion -- CeilPct/OwnPct are EdgeRaw's
+# substitute for position-grouping (see above), which Player Pool/Lineups
+# don't need (their own Pts/Ceil/etc. are already grouped for real). Both
+# also sit in the collapsed INTERNAL zone there, rarely expanded -- not
+# worth 5 (Player Pool) or 20 (Lineups) more conditional-format rules per
+# column for something that reads correctly-but-redundantly if skipped.
+GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct", "OwnPct"})
 
 # Deliberately absent from FIELD_COLOR_SCALES: `Salary`/`DK Sal` -- a
 # constraint, not a quality; scaling it would imply cheap is good.
@@ -314,10 +342,17 @@ ZERO_GREY_BG = _rgb("#EDEEF1")
 
 
 def apply_field_color_scales(
-    client: SheetsClient, tab: str, header: list, *, header_row: int, last_row: int
+    client: SheetsClient,
+    tab: str,
+    header: list,
+    *,
+    header_row: int,
+    last_row: int,
+    skip: frozenset[str] = frozenset(),
 ) -> int:
     """Colour-scale every column in `header` whose text is a
-    FIELD_COLOR_SCALES key. Clears each matched column's own conditional
+    FIELD_COLOR_SCALES key (except any name in `skip` -- see
+    EDGE_UNSCALED_PLAYER_METRICS). Clears each matched column's own conditional
     formats first, scoped to BOTH that column AND this exact data range
     (`header_row+1`..`last_row`) -- though the real cleanup of a tab's
     pre-existing mess is its caller's whole-tab `clear_conditional_formats`
@@ -344,51 +379,160 @@ def apply_field_color_scales(
     data_start = header_row + 1
     for i, name in enumerate(header):
         kind = FIELD_COLOR_SCALES.get(name)
-        if not kind:
+        if not kind or name in skip:
             continue
         letter = column_letter(i)
         a1 = f"{letter}{data_start}:{letter}{last_row}"
         client.clear_conditional_formats(tab, column=letter, row_range=(data_start, last_row))
-        # Fix 2.7: a real, common zero (unpublished ownership) would
-        # otherwise anchor the gradient's low end -- start it from the
-        # lowest NON-zero value instead, via a live MINIFS formula rather
-        # than a value computed once and left to go stale.
-        min_kwargs = (
-            {"min_type": "NUMBER", "min_value": f'=MINIFS({a1},{a1},"<>0")'}
-            if name in ZERO_EXCLUDED_COLUMNS
-            else {}
-        )
-        if kind == _DIVERGING:
-            client.add_color_scale(
-                tab,
-                a1,
-                min_color=GRAD_MIN,
-                mid_color=WHITE,
-                max_color=GRAD_MAX,
-                mid_type="NUMBER",
-                mid_value="0",
-            )
-        elif kind == _REVERSED:
-            client.add_color_scale(tab, a1, min_color=GRAD_MAX, mid_color=GRAD_MID, max_color=GRAD_MIN)
-        elif kind == _WARM:
-            client.add_color_scale(
-                tab, a1, min_color=WARM_MIN, mid_color=WARM_MID, max_color=WARM_MAX, **min_kwargs
-            )
-        else:
-            client.add_color_scale(
-                tab, a1, min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX, **min_kwargs
-            )
-        if name in ZERO_EXCLUDED_COLUMNS:
-            # Added AFTER the gradient above, so it lands at index 0 and
-            # wins for any exact-zero cell -- see FLAG_CHIPS' comment on
-            # add_boolean_rule/add_color_scale's shared insert-at-front
-            # behavior, verified against a live sheet's raw
-            # conditionalFormats metadata.
-            client.add_boolean_rule(
-                tab, a1, condition_type="NUMBER_EQ", values=["0"], fmt={"backgroundColor": ZERO_GREY_BG}
-            )
+        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, name, zero_exclude_range=a1)
+        client.add_color_scale(tab, gradient_spec.pop("a1_range"), **gradient_spec)
+        if boolean_spec is not None:
+            client.add_boolean_rule(tab, boolean_spec.pop("a1_range"), **boolean_spec)
         applied += 1
     return applied
+
+
+def _scale_rule_specs(
+    a1: str,
+    kind: str,
+    name: str,
+    *,
+    zero_exclude_range: str,
+    min_value: str | None = None,
+    max_value: str | None = None,
+) -> tuple[dict, dict | None]:
+    """Shared dispatch building the rule SPECS (kwargs dicts for
+    `SheetsClient.add_color_scale`/`add_boolean_rule`, each carrying its
+    own `a1_range`) for one column -- never calls the client itself, so
+    callers can either apply a spec immediately (`apply_field_color_
+    scales`, a handful of whole-tab rules) or collect many and apply them
+    in one batched `add_color_scales`/`add_boolean_rules` call
+    (`apply_grouped_color_scales`/`apply_deck_color_scales`, which can
+    generate hundreds -- see `add_color_scales`' own docstring for why
+    that matters). Used by both `apply_field_color_scales` (one rule
+    spanning `a1`'s own full range) and `apply_grouped_color_scales` (one
+    rule per group, `min_value`/`max_value` anchored to that group's own
+    range rather than `a1`'s implicit MIN/MAX -- see that function's own
+    docstring for why a single rule can't do this across multiple groups
+    at once).
+
+    Fix 2.7's zero-exclusion MINIFS formula reads over `zero_exclude_range`
+    (the range whose non-zero minimum actually matters -- `a1` itself for
+    a whole-tab scale, but a group's own narrower range when this is
+    called per-group), never `a1` when the two differ, and only replaces
+    an explicit `min_value` when the caller didn't already provide one.
+    Returns `(gradient_spec, boolean_spec_or_None)`.
+    """
+    min_kwargs: dict = {}
+    if min_value is not None:
+        min_kwargs = {"min_type": "NUMBER", "min_value": min_value}
+    elif name in ZERO_EXCLUDED_COLUMNS:
+        min_kwargs = {
+            "min_type": "NUMBER",
+            "min_value": f'=MINIFS({zero_exclude_range},{zero_exclude_range},"<>0")',
+        }
+    max_kwargs = {"max_type": "NUMBER", "max_value": max_value} if max_value is not None else {}
+
+    if kind == _DIVERGING:
+        gradient_spec = {
+            "a1_range": a1,
+            "min_color": GRAD_MIN,
+            "mid_color": WHITE,
+            "max_color": GRAD_MAX,
+            "mid_type": "NUMBER",
+            "mid_value": "0",
+            **min_kwargs,
+            **max_kwargs,
+        }
+    elif kind == _REVERSED:
+        gradient_spec = {
+            "a1_range": a1,
+            "min_color": GRAD_MAX,
+            "mid_color": GRAD_MID,
+            "max_color": GRAD_MIN,
+            **min_kwargs,
+            **max_kwargs,
+        }
+    elif kind == _WARM:
+        gradient_spec = {
+            "a1_range": a1,
+            "min_color": WARM_MIN,
+            "mid_color": WARM_MID,
+            "max_color": WARM_MAX,
+            **min_kwargs,
+            **max_kwargs,
+        }
+    else:
+        gradient_spec = {
+            "a1_range": a1,
+            "min_color": GRAD_MIN,
+            "mid_color": GRAD_MID,
+            "max_color": GRAD_MAX,
+            **min_kwargs,
+            **max_kwargs,
+        }
+
+    boolean_spec = None
+    if name in ZERO_EXCLUDED_COLUMNS:
+        # Added AFTER the gradient above (later in the same batch, or a
+        # later individual call), so it lands at index 0 and wins for any
+        # exact-zero cell -- see FLAG_CHIPS' comment on add_boolean_rule/
+        # add_color_scale's shared insert-at-front behavior, verified
+        # against a live sheet's raw conditionalFormats metadata.
+        boolean_spec = {
+            "a1_range": a1,
+            "condition_type": "NUMBER_EQ",
+            "values": ["0"],
+            "fmt": {"backgroundColor": ZERO_GREY_BG},
+        }
+    return gradient_spec, boolean_spec
+
+
+def apply_grouped_color_scales(
+    client: SheetsClient,
+    tab: str,
+    header: list,
+    groups: list[tuple[int, int]],
+    *,
+    skip: frozenset[str] = frozenset(),
+) -> int:
+    """Phase 4 (4.1/4.2): the per-position (Player Pool) / per-lineup
+    (Lineups) version of `apply_field_color_scales` -- one gradient rule
+    PER `(column, group)` pair, each scoped to that group's own actual
+    min/max, so a QB's real 27 points and a DST's real 10 don't share one
+    scale that paints every DST red.
+
+    Verified live before writing this (see CONTRIBUTING.md's Phase 4
+    changelog): a single gradient rule's minpoint/midpoint/maxpoint are
+    each evaluated ONCE from a fixed formula/reference, not row-relative
+    like a custom boolean condition -- so one rule spanning multiple
+    groups, even with a formula-anchored endpoint, cannot independently
+    scale each group; it just anchors the whole range to whichever
+    group's range the formula happens to reference. There is therefore no
+    way to do this in fewer than `len(groups)` rules per column -- 4.3's
+    "try a formula-anchored single rule first" doesn't reduce the count
+    here, confirmed rather than assumed. Rule count is exactly
+    `len(groups) * (matched column count)`; returned as the total so
+    callers can report it (4.3's other ask).
+    """
+    gradient_specs = []
+    boolean_specs = []
+    for start, end in groups:
+        for i, name in enumerate(header):
+            kind = FIELD_COLOR_SCALES.get(name)
+            if not kind or name in skip:
+                continue
+            letter = column_letter(i)
+            a1 = f"{letter}{start}:{letter}{end}"
+            client.clear_conditional_formats(tab, column=letter, row_range=(start, end))
+            gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, name, zero_exclude_range=a1)
+            gradient_specs.append(gradient_spec)
+            if boolean_spec is not None:
+                boolean_specs.append(boolean_spec)
+
+    client.add_color_scales(tab, gradient_specs)
+    client.add_boolean_rules(tab, boolean_specs)
+    return len(gradient_specs)
 
 
 # ---------------------------------------------------------------------------
@@ -533,9 +677,11 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 
     Widths, a dark frozen header, Id hidden and Pool+Name pinned while you
     scroll right, light row banding, number formats on every numeric
-    column, FIELD_COLOR_SCALES applied to every matching column (a
-    diverging scale for ImpMove/TotMove/SpdMove/Spread, gradient for the
-    rest), a muted
+    column, FIELD_COLOR_SCALES applied to every matching column except
+    EDGE_UNSCALED_PLAYER_METRICS (a diverging scale for ImpMove/TotMove/
+    SpdMove/Spread, gradient for the rest -- see Phase 4's own comment
+    below on why raw Pts/Ceil/Val/CeilVal are skipped here specifically),
+    a muted
     per-position tint, a Wind chip matching Slate Grid's, Flag/Avail as
     chips, the Name cell tinted when that player is already pooled and
     bolded when Flag is set, and LevBasis greyed as the data-freshness
@@ -585,8 +731,19 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # that shows a given field applies; on EdgeRaw that's ProjPts, Ceiling,
     # Val, CeilVal, Leverage, GameEnv, OverUnder (gradient), ProjOwn (warm),
     # and ImpMove/TotMove/SpdMove/Spread (diverging).
+    # Phase 4 (4.1): EdgeRaw is sorted by Leverage, not grouped by
+    # position, so its raw player-performance metrics (Pts/Ceil/Val/
+    # CeilVal) are skipped here -- one gradient across all 743 players
+    # would paint every DST red next to a QB's real 27 points. The
+    # already-percentile CeilPct/OwnPct/Leverage stay scaled; they don't
+    # need position-grouping to mean something.
     n_scaled = apply_field_color_scales(
-        client, edge_tab, [POOL_HEADER, *EDGE_COLUMNS], header_row=1, last_row=EDGE_ROWS
+        client,
+        edge_tab,
+        [POOL_HEADER, *EDGE_COLUMNS],
+        header_row=1,
+        last_row=EDGE_ROWS,
+        skip=EDGE_UNSCALED_PLAYER_METRICS,
     )
 
     wind_col = _edge_letter("Wind")
@@ -741,6 +898,7 @@ def polish_builder_tab(
     freeze_cols: int = 1,
     header_repeats_at: list[int] | None = None,
     band_blocks: list[tuple[int, int]] | None = None,
+    color_scale_groups: list[tuple[int, int]] | None = None,
 ) -> str:
     """Number formats, widths, header treatment, colour scales, chips and
     row banding on a tab whose header row names its columns -- the same
@@ -780,6 +938,13 @@ def polish_builder_tab(
     data, so each block restarts its own alternating pattern. Omit for a
     tab with no gaps (PlayerPoolRaw): the whole `header_row+1:last_row`
     span is banded as one block.
+
+    `color_scale_groups` (Phase 4, 4.1/4.2): scales colour-scaled columns
+    PER GROUP (`apply_grouped_color_scales`) instead of once across the
+    whole tab -- Player Pool's 5 position blocks, Lineups' 20 lineup
+    blocks, each skipping `GROUPED_TAB_UNSCALED_COLUMNS`. Omit (the
+    default) for a tab that isn't naturally grouped (PlayerPoolRaw),
+    which keeps the original whole-tab `apply_field_color_scales`.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -810,7 +975,12 @@ def polish_builder_tab(
         client.set_column_widths(tab, widths)
 
     applied = apply_field_formats(client, tab, header, header_row=header_row, last_row=last_row)
-    scaled = apply_field_color_scales(client, tab, header, header_row=header_row, last_row=last_row)
+    if color_scale_groups is not None:
+        scaled = apply_grouped_color_scales(
+            client, tab, header, color_scale_groups, skip=GROUPED_TAB_UNSCALED_COLUMNS
+        )
+    else:
+        scaled = apply_field_color_scales(client, tab, header, header_row=header_row, last_row=last_row)
 
     # Flag/Avail/Venue chips, same as EdgeRaw's own (Flag/Avail were found
     # missing entirely by `dfs setup audit-style`; Venue is new -- Fix
@@ -863,24 +1033,107 @@ def polish_builder_tab(
 _CONTROL_BORDER = {"style": "SOLID_MEDIUM", "color": INK_MUTED}
 
 
-def polish_pool_deck(client: SheetsClient, lineups_tab: str, *, header_row: int, window_end: int) -> str:
+def apply_deck_color_scales(
+    client: SheetsClient,
+    tab: str,
+    deck_header: list,
+    pool_sort_header: list,
+    *,
+    header_row: int,
+    window_end: int,
+    min_helper_row: int,
+    max_helper_row: int,
+) -> int:
+    """Phase 4 (4.4): the deck window used to scale colour against
+    whichever 6 rows happened to be visible (`apply_field_color_scales`'s
+    ordinary MIN/MAX, computed over the window's own tiny range) --
+    paging through a position with `Start at` re-scaled the same numbers
+    as you scrolled, so a player's colour changed based on who else
+    happened to be on screen, actively misleading.
+
+    Anchors min/max at `min_helper_row`/`max_helper_row` instead -- two
+    otherwise-blank deck rows (`sheet_pool_deck._write_deck_scale_
+    helpers` writes `=MIN(PoolSort!<col>...)`/`=MAX(...)` into them, same
+    column as each scaled field, white-on-white like G1) holding
+    PoolSort's true min/max for whatever position is currently selected.
+    NOT a direct cross-sheet reference in the gradient rule itself --
+    verified live that Sheets rejects a `NUMBER`-type interpolation point
+    whose formula references another sheet at all (`APIError: Invalid
+    InterpolationPoint.value`), same-sheet or not otherwise unrestricted;
+    see CONTRIBUTING.md's Phase 4 changelog. Routing through a same-tab
+    helper cell that itself holds a normal cross-sheet formula sidesteps
+    that restriction entirely.
+
+    `deck_header` (row 3, mirrors Lineups' own shape) says what to scale;
+    `pool_sort_header` (mirrors Player Pool's shape, which can differ --
+    see `sheet_pool_deck._write_deck_controls`'s own comment) says
+    whether a given deck column has a PoolSort equivalent at all -- a
+    deck-only name with none (`Issues`, `% of Rstr`) is skipped, same as
+    the window's own value formulas and the helper-writer above.
+    """
+    gradient_specs = []
+    boolean_specs = []
+    data_start = header_row + 1
+    for i, name in enumerate(deck_header):
+        kind = FIELD_COLOR_SCALES.get(name)
+        if not kind or name in GROUPED_TAB_UNSCALED_COLUMNS or name not in pool_sort_header:
+            continue
+        letter = column_letter(i)
+        a1 = f"{letter}{data_start}:{letter}{window_end}"
+        client.clear_conditional_formats(tab, column=letter, row_range=(data_start, window_end))
+        gradient_spec, boolean_spec = _scale_rule_specs(
+            a1,
+            kind,
+            name,
+            zero_exclude_range=a1,  # unused: min_value is always explicit below
+            min_value=f"=${letter}${min_helper_row}",
+            max_value=f"=${letter}${max_helper_row}",
+        )
+        gradient_specs.append(gradient_spec)
+        if boolean_spec is not None:
+            boolean_specs.append(boolean_spec)
+
+    client.add_color_scales(tab, gradient_specs)
+    client.add_boolean_rules(tab, boolean_specs)
+    return len(gradient_specs)
+
+
+def polish_pool_deck(
+    client: SheetsClient,
+    lineups_tab: str,
+    *,
+    pool_sort_tab: str,
+    header_row: int,
+    window_end: int,
+    min_helper_row: int,
+    max_helper_row: int,
+) -> str:
     """The deck (rows 1..DECK_ROWS) was built to align with the lineup
     blocks below it, but its window rows never got the block rows' own
     formatting: `Pts`/`Ceil`/`Val`/`Leverage` etc. showed as raw floats a
     few rows above block cells showing "0.0" for the identical field.
-    Applies the same FIELD_FORMATS and FIELD_COLOR_SCALES the blocks get
-    below it (found by header name off row 3, not a literal column, and via
-    the same `apply_field_color_scales` every other tab uses -- Fix 2.4),
-    plus the Venue chip, so a number (or an H/R tag) above the divider and
-    the same field below it read identically. Also gives B1/D1/F1 -- the
-    deck's only controls -- the workbook's one "you type here" treatment
-    plus a border, since as plain cells they gave no visual hint they were
-    interactive.
+    Applies the same FIELD_FORMATS the blocks get below it (found by
+    header name off row 3, not a literal column -- Fix 2.4), colour
+    scales via `apply_deck_color_scales` (Phase 4 4.4 -- scaled against
+    PoolSort's full range via same-tab helper cells, not the visible
+    window), plus the Venue chip, so a number (or an H/R tag) above the
+    divider and the same field below it read identically. Also gives
+    B1/D1/F1 -- the deck's only controls -- the workbook's one "you type
+    here" treatment plus a border, since as plain cells they gave no
+    visual hint they were interactive.
 
-    `header_row`/`window_end` come from `sheet_pool_deck.py`'s own
-    constants (row 3, and `3 + _WINDOW_SIZE`) rather than being
-    re-derived here, same discipline as everywhere else column/row
-    positions cross a module boundary in this codebase.
+    `header_row`/`window_end`/`min_helper_row`/`max_helper_row` come from
+    `sheet_pool_deck.py`'s own constants (row 3, `3 + _WINDOW_SIZE`, row
+    2, `DECK_ROWS`) rather than being re-derived here, same discipline as
+    everywhere else column/row positions cross a module boundary in this
+    codebase. `pool_sort_tab` is only read here (its own header, to know
+    which deck columns have a scalable equivalent) -- the helper cells
+    that actually reference it are written by `sheet_pool_deck.
+    _write_deck_scale_helpers`, which must run before this. In practice
+    that means `dfs setup add-pool-deck` (which calls it) needs to have
+    run at least once since Phase 4 shipped; the helper cells are live
+    formulas, not snapshotted values, so a later `dfs setup polish` on
+    its own keeps them current without needing to rewrite them.
     """
     if not client.tab_exists(lineups_tab):
         return f"{lineups_tab}: not present -- skipped"
@@ -908,7 +1161,18 @@ def polish_pool_deck(client: SheetsClient, lineups_tab: str, *, header_row: int,
     # column, finds it either way.
     client.clear_conditional_formats(lineups_tab, row_range=(header_row + 1, window_end))
 
-    scaled = apply_field_color_scales(client, lineups_tab, header, header_row=header_row, last_row=window_end)
+    pool_sort_header_rows = client.read_range(pool_sort_tab, "A1:1")
+    pool_sort_header = pool_sort_header_rows[0] if pool_sort_header_rows else []
+    scaled = apply_deck_color_scales(
+        client,
+        lineups_tab,
+        header,
+        pool_sort_header,
+        header_row=header_row,
+        window_end=window_end,
+        min_helper_row=min_helper_row,
+        max_helper_row=max_helper_row,
+    )
 
     chipped = False
     if "Venue" in header:

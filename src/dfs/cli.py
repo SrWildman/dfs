@@ -46,7 +46,7 @@ from dfs.sheet_links import (
     write_edge_row_links,
 )
 from dfs.sheet_pool_control import ensure_pool_control_row
-from dfs.sheet_pool_deck import DECK_ROWS, add_pool_deck
+from dfs.sheet_pool_deck import DECK_ROWS, MAX_HELPER_ROW, MIN_HELPER_ROW, POOL_SORT_TAB, add_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheet_protection import protect_workbook
 from dfs.sheet_reorder import migrate_tab_to_designed_order
@@ -546,6 +546,7 @@ def sheets_polish(
                 last_row=pool_last,
                 header_row=PLAYER_POOL_HEADER_ROW,
                 band_blocks=PLAYER_POOL_NAME_BLOCKS,
+                color_scale_groups=PLAYER_POOL_NAME_BLOCKS,
             )
         )
         # +1 past the last block's own last real row (Fix 2.4): the
@@ -563,6 +564,7 @@ def sheets_polish(
                 freeze_cols=0,
                 header_repeats_at=header_repeats_at,
                 band_blocks=LINEUPS_NAME_BLOCKS,
+                color_scale_groups=LINEUPS_NAME_BLOCKS,
             )
         )
         # The pool deck's window (rows 4..DECK_ROWS-1) sits above these same
@@ -571,7 +573,15 @@ def sheets_polish(
         # as one surface. Must run after the Lineups call above, never
         # before: that call's own whole-tab clear would otherwise wipe it.
         results.append(
-            polish_pool_deck(client, cfg.lineups.builder_tab, header_row=3, window_end=DECK_ROWS - 1)
+            polish_pool_deck(
+                client,
+                cfg.lineups.builder_tab,
+                pool_sort_tab=POOL_SORT_TAB,
+                header_row=3,
+                window_end=DECK_ROWS - 1,
+                min_helper_row=MIN_HELPER_ROW,
+                max_helper_row=MAX_HELPER_ROW,
+            )
         )
         results.append(
             polish_guardrails(

@@ -18,7 +18,11 @@ Structure (DECK_ROWS total, frozen):
                      hidden helper (maps D1's label to a PoolSort column
                      number for the window formulas below), I1 a
                      "X in pool, showing N-M" readout.
-  Row 2              Blank.
+  Row 2              MIN_HELPER_ROW (Phase 4, 4.4): white-on-white
+                     `=MIN(PoolSort!...)` (or MINIFS, zero-excluded
+                     columns) per scaled column -- the window's colour
+                     scale anchors here instead of the visible 6 rows.
+                     Reads blank otherwise.
   Row 3              Lineups' own block header, copied verbatim -- not
                      Player Pool's, which is not guaranteed to have the
                      same column layout (see `_write_deck_controls`).
@@ -28,7 +32,7 @@ Structure (DECK_ROWS total, frozen):
                      against Player Pool's own header (where PoolSort's
                      data actually lives) -- a Lineups-only column
                      (Check, % of Rstr) is left blank.
-  Row DECK_ROWS      Blank separator.
+  Row DECK_ROWS      MAX_HELPER_ROW: same idea as row 2, `=MAX(...)`.
 
 First shipped as a 14-row / 10-row-window design; shrunk to 10 rows / a
 6-row window after a live check on a 16" MacBook showed two full lineup
@@ -66,7 +70,13 @@ own docstring for why an early return on "deck" was tried and reverted.
 
 from __future__ import annotations
 
-from dfs.sheet_style import HEADER_FMT, polish_pool_deck
+from dfs.sheet_style import (
+    FIELD_COLOR_SCALES,
+    GROUPED_TAB_UNSCALED_COLUMNS,
+    HEADER_FMT,
+    ZERO_EXCLUDED_COLUMNS,
+    polish_pool_deck,
+)
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
 
@@ -80,6 +90,18 @@ _POOL_LAST_ROW = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
 DECK_ROWS = 10
 _WINDOW_SIZE = 6
 POOL_SORT_TAB = "PoolSort"
+
+# Phase 4 (4.4): the two blank separator rows (module docstring: "Row 2
+# Blank", "Row DECK_ROWS Blank separator") double as hidden helper cells
+# for the deck window's colour scale -- MIN in row 2, MAX in row
+# DECK_ROWS, white-on-white like G1. A gradient rule's NUMBER-type
+# endpoint can't reference another sheet directly (verified live --
+# APIError: Invalid InterpolationPoint.value -- see CONTRIBUTING.md's
+# Phase 4 changelog), so these hold the real `=MIN(PoolSort!...)`/
+# `=MAX(...)` formulas and the gradient itself points at these same-tab
+# cells instead.
+MIN_HELPER_ROW = 2
+MAX_HELPER_ROW = DECK_ROWS
 
 # The old Bench's exact title text (sheet_bench.py, removed) -- kept here
 # only to recognize a sheet still in that state during migration.
@@ -119,10 +141,18 @@ _POOL_DATA_START = PLAYER_POOL_HEADER_ROW + 1
 
 
 def _build_pool_sort(client: SheetsClient, pool_sort_tab: str, pool_tab: str, lineups_tab: str) -> None:
-    header = client.read_range(pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:Z{PLAYER_POOL_HEADER_ROW}")
+    # Bare row-to-row read (no hardcoded end column) -- a "...Z..." bound
+    # here once silently truncated Player Pool's real header (38 columns
+    # post-A3) to its first 26, and the SAME bound in the FILTER formula
+    # below silently dropped every column past Z from PoolSort entirely
+    # (Overflow, Pool, half of INTERNAL) rather than erroring, since
+    # FILTER/SORT don't care that the range they're given is narrower
+    # than the sheet actually is. See CONTRIBUTING.md's Phase 4 changelog.
+    header = client.read_range(pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}")
     header_row = header[0] if header else []
+    last_col = column_letter(len(header_row) - 1) if header_row else "Z"
     formula = (
-        f"=IFERROR(SORT(FILTER('{pool_tab}'!$A${_POOL_DATA_START}:$Z${_POOL_LAST_ROW},"
+        f"=IFERROR(SORT(FILTER('{pool_tab}'!$A${_POOL_DATA_START}:${last_col}${_POOL_LAST_ROW},"
         f"'{pool_tab}'!$A${_POOL_DATA_START}:$A${_POOL_LAST_ROW}<>\"\","
         f"({lineups_tab}!$B$1=\"ALL\")+('{pool_tab}'!$B${_POOL_DATA_START}:$B${_POOL_LAST_ROW}"
         f"={lineups_tab}!$B$1)),"
@@ -143,7 +173,14 @@ def _window_formula(col: str, row: int) -> str:
 
 
 def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) -> None:
-    pool_header_rows = client.read_range(pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:Z{PLAYER_POOL_HEADER_ROW}")
+    # Bare row-to-row range (no end column), same idiom every other reader
+    # of a full header row in this codebase uses -- a hardcoded "...Z..."
+    # end column here once silently truncated Player Pool's real header
+    # (38 columns post-A3) to its first 26, since a too-narrow READ fails
+    # silently (missing names) rather than erroring the way a too-narrow
+    # WRITE does (see the write-side fix below, found live from that
+    # error). See CONTRIBUTING.md's Phase 4 changelog.
+    pool_header_rows = client.read_range(pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}")
     pool_header = pool_header_rows[0] if pool_header_rows else []
     # G1's MATCH array, built from Player Pool's REAL header rather than a
     # hardcoded snapshot of it -- a hardcoded array here once assumed two
@@ -217,9 +254,16 @@ def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) 
         lineups_tab, f"A{lineups_header_row_num}:{lineups_header_row_num}"
     )
     lineups_header = lineups_header_rows[0] if lineups_header_rows else pool_header
+    # Every write below targets exactly `len(lineups_header)` columns --
+    # a hardcoded "...Z..." end column here (26) once broke outright the
+    # moment Lineups genuinely had more than 26 columns (37, post-Phase-3/
+    # A3): `update_range` errors loudly on a value-count/range-width
+    # mismatch, unlike the read-side truncation above. See
+    # CONTRIBUTING.md's Phase 4 changelog.
+    last_col = column_letter(len(lineups_header) - 1)
 
-    client.update_range(lineups_tab, "A3:Z3", [lineups_header])
-    client.format_range(lineups_tab, "A3:Z3", HEADER_FMT)
+    client.update_range(lineups_tab, f"A3:{last_col}3", [lineups_header])
+    client.format_range(lineups_tab, f"A3:{last_col}3", HEADER_FMT)
 
     window_rows = []
     for row in range(4, 4 + _WINDOW_SIZE):
@@ -232,10 +276,62 @@ def _write_deck_controls(client: SheetsClient, lineups_tab: str, pool_tab: str) 
                 cells.append(_window_formula(column_letter(pool_header.index(name)), row))
             else:
                 cells.append("")
-        cells += [""] * (26 - len(cells))
         window_rows.append(cells)
     last_window_row = 3 + _WINDOW_SIZE
-    client.update_range(lineups_tab, f"A4:Z{last_window_row}", window_rows)
+    client.update_range(lineups_tab, f"A4:{last_col}{last_window_row}", window_rows)
+
+    _write_deck_scale_helpers(client, lineups_tab, lineups_header, pool_header, last_col=last_col)
+
+
+def _write_deck_scale_helpers(
+    client: SheetsClient,
+    lineups_tab: str,
+    lineups_header: list[str],
+    pool_header: list[str],
+    *,
+    last_col: str,
+) -> None:
+    """Phase 4 (4.4): one MIN formula per scaled column in `MIN_HELPER_
+    ROW`, one MAX in `MAX_HELPER_ROW` -- see those constants' own comment
+    for why this indirection exists. Same column-matching rule as the
+    window formulas above (`lineups_header`'s position, `pool_header`'s
+    equivalent) since these live in the identical columns as the window
+    they're scaling. Only a name in `FIELD_COLOR_SCALES`, not in
+    `GROUPED_TAB_UNSCALED_COLUMNS`, and with a real Player Pool/PoolSort
+    equivalent gets a formula; everything else's helper cells stay blank
+    (cleared by `_reset_deck_formatting`, never written here). `last_col`
+    is `_write_deck_controls`' own derived width -- these rows share the
+    window's exact column count, never a hardcoded one.
+    """
+    width = len(lineups_header)
+    min_row = [""] * width
+    max_row = [""] * width
+    for i, name in enumerate(lineups_header):
+        if not name or name not in pool_header:
+            continue
+        if name not in FIELD_COLOR_SCALES or name in GROUPED_TAB_UNSCALED_COLUMNS:
+            continue
+        pool_sort_col = column_letter(pool_header.index(name))
+        pool_sort_range = f"{POOL_SORT_TAB}!{pool_sort_col}2:{pool_sort_col}{_POOL_LAST_ROW}"
+        if name in ZERO_EXCLUDED_COLUMNS:
+            min_row[i] = f'=MINIFS({pool_sort_range},{pool_sort_range},"<>0")'
+        else:
+            min_row[i] = f"=MIN({pool_sort_range})"
+        max_row[i] = f"=MAX({pool_sort_range})"
+
+    client.update_range(lineups_tab, f"A{MIN_HELPER_ROW}:{last_col}{MIN_HELPER_ROW}", [min_row])
+    client.update_range(lineups_tab, f"A{MAX_HELPER_ROW}:{last_col}{MAX_HELPER_ROW}", [max_row])
+    white = {"red": 1, "green": 1, "blue": 1}
+    client.format_range(
+        lineups_tab,
+        f"A{MIN_HELPER_ROW}:{last_col}{MIN_HELPER_ROW}",
+        {"textFormat": {"foregroundColor": white}},
+    )
+    client.format_range(
+        lineups_tab,
+        f"A{MAX_HELPER_ROW}:{last_col}{MAX_HELPER_ROW}",
+        {"textFormat": {"foregroundColor": white}},
+    )
 
 
 def _reset_deck_formatting(client: SheetsClient, lineups_tab: str) -> None:
@@ -256,15 +352,21 @@ def _reset_deck_formatting(client: SheetsClient, lineups_tab: str) -> None:
     docstring and CONTRIBUTING.md's changelog for the full history.
 
     Runs before `_write_deck_controls`/`_hide_g1` so their own deliberate
-    formatting (G1's white-on-white, B1/D1's dropdowns) is applied after
-    this clean slate, not wiped by it.
+    formatting (G1's white-on-white, B1/D1's dropdowns, the MIN/MAX
+    helper rows' own white-on-white) is applied after this clean slate,
+    not wiped by it.
     """
+    # A:AZ (52 columns), not a tight fit to Lineups' current real width --
+    # deliberately generous headroom (same reasoning as EDGE_ROWS/
+    # POOL_RAW_ROWS elsewhere in this codebase), since this runs BEFORE
+    # `_write_deck_controls` reads the real header and has no width of
+    # its own to derive from yet.
     normal = {
         "backgroundColor": {"red": 1, "green": 1, "blue": 1},
         "textFormat": {"foregroundColor": {"red": 0, "green": 0, "blue": 0}, "bold": False},
     }
-    client.format_range(lineups_tab, f"A1:Z{DECK_ROWS}", normal)
-    client.clear_data_validation(lineups_tab, f"A1:Z{DECK_ROWS}")
+    client.format_range(lineups_tab, f"A1:AZ{DECK_ROWS}", normal)
+    client.clear_data_validation(lineups_tab, f"A1:AZ{DECK_ROWS}")
 
 
 def _hide_g1(client: SheetsClient, lineups_tab: str) -> None:
@@ -314,7 +416,15 @@ def add_pool_deck(client: SheetsClient, *, lineups_tab: str, pool_tab: str) -> s
     _reset_deck_formatting(client, lineups_tab)
     _build_pool_sort(client, POOL_SORT_TAB, pool_tab, lineups_tab)
     _write_deck_controls(client, lineups_tab, pool_tab)
-    polish_pool_deck(client, lineups_tab, header_row=3, window_end=3 + _WINDOW_SIZE)
+    polish_pool_deck(
+        client,
+        lineups_tab,
+        pool_sort_tab=POOL_SORT_TAB,
+        header_row=3,
+        window_end=3 + _WINDOW_SIZE,
+        min_helper_row=MIN_HELPER_ROW,
+        max_helper_row=MAX_HELPER_ROW,
+    )
     _hide_g1(client, lineups_tab)
     client.freeze(lineups_tab, rows=DECK_ROWS)
     client.set_row_heights(lineups_tab, start_row=3, end_row=3 + _WINDOW_SIZE, pixel_size=18)

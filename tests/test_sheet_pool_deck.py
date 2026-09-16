@@ -4,15 +4,19 @@ from dfs.sheet_pool_deck import (
     _OLD_BENCH_TITLE,
     _OLD_DECK14_HEADER_ROW,
     _OLD_DECK14_ROWS,
+    _POOL_LAST_ROW,
     DECK_ROWS,
+    MAX_HELPER_ROW,
+    MIN_HELPER_ROW,
     POOL_SORT_TAB,
+    _write_deck_scale_helpers,
     add_pool_deck,
 )
 from dfs.sheet_style import HEADER_FMT
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
 
 _LINEUPS_HEADER_ROW = LINEUPS_NAME_BLOCKS[0][0] - 1
-_POOL_HEADER_RANGE = f"A{PLAYER_POOL_HEADER_ROW}:Z{PLAYER_POOL_HEADER_ROW}"
+_POOL_HEADER_RANGE = f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
 
 # Player Pool and Lineups' column layouts are each independently derived
 # (see `_write_deck_controls`'s own comment) and drifted apart for real:
@@ -100,6 +104,9 @@ class FakeDeckClient:
     def read_range(self, tab_name: str, a1_range: str):
         if tab_name == "Player Pool" and a1_range == _POOL_HEADER_RANGE:
             return [_POOL_HEADER]
+        if tab_name == POOL_SORT_TAB and a1_range == "A1:1":
+            # PoolSort mirrors Player Pool's header verbatim (_build_pool_sort).
+            return [_POOL_HEADER]
         if tab_name == "Lineups" and a1_range == f"A{_LINEUPS_HEADER_ROW}:{_LINEUPS_HEADER_ROW}":
             # Lineups' own real block header -- what _write_deck_controls
             # reads to build row 3 and the window from (see its own
@@ -161,10 +168,22 @@ class FakeDeckClient:
     def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
         self.color_scale_calls.append((a1_range, kwargs))
 
+    def add_color_scales(self, tab_name: str, specs: list[dict]) -> None:
+        for spec in specs:
+            spec = dict(spec)
+            a1_range = spec.pop("a1_range")
+            self.color_scale_calls.append((a1_range, spec))
+
     def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
         self.boolean_rule_calls.append(
             (a1_range, {"condition_type": condition_type, "values": values, "fmt": fmt})
         )
+
+    def add_boolean_rules(self, tab_name: str, specs: list[dict]) -> None:
+        for spec in specs:
+            spec = dict(spec)
+            a1_range = spec.pop("a1_range")
+            self.boolean_rule_calls.append((a1_range, spec))
 
 
 def test_add_pool_deck_already_present_skips_structure_but_still_refreshes_everything():
@@ -181,7 +200,7 @@ def test_add_pool_deck_already_present_skips_structure_but_still_refreshes_every
     assert client.delete_calls == []
     assert client.clear_calls == []
     assert client.write_tab_calls != []  # PoolSort still gets rebuilt
-    reset_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
+    reset_call = next(c for c in client.format_calls if c[0] == f"A1:AZ{DECK_ROWS}")
     assert reset_call[1]["backgroundColor"] == {"red": 1, "green": 1, "blue": 1}
     g1_call = next(c for c in client.format_calls if c[0] == "G1")
     assert g1_call[1] == {"textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}}}
@@ -343,6 +362,60 @@ def test_add_pool_deck_window_formulas_match_by_header_name_not_position():
     assert "INDEX(PoolSort!A:A,$F$1+9-3)" in last_row[0]
 
 
+def test_add_pool_deck_writes_min_max_helper_rows_for_scaled_columns():
+    # Phase 4 (4.4): row 2 (MIN) / row DECK_ROWS (MAX) hold same-tab
+    # helper formulas the deck's colour scale anchors against -- see
+    # MIN_HELPER_ROW/MAX_HELPER_ROW's own comment for why a gradient rule
+    # can't reference PoolSort directly.
+    client = FakeDeckClient()
+    add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
+
+    min_row = next(c for c in client.update_calls if c[0] == f"A{MIN_HELPER_ROW}:Z{MIN_HELPER_ROW}")[1][0]
+    max_row = next(c for c in client.update_calls if c[0] == f"A{MAX_HELPER_ROW}:Z{MAX_HELPER_ROW}")[1][0]
+
+    # Pts sits at Lineups header index 10 (see _LINEUPS_HEADER); Player
+    # Pool has the same name at the same real column (P == 15 there, but
+    # PoolSort mirrors Player Pool -- the helper must reference wherever
+    # Pts actually sits in Player Pool's own header).
+    pool_pts_col = sheet_pool_deck.column_letter(_POOL_HEADER.index("Pts"))
+    assert min_row[10] == f"=MIN(PoolSort!{pool_pts_col}2:{pool_pts_col}{_POOL_LAST_ROW})"
+    assert max_row[10] == f"=MAX(PoolSort!{pool_pts_col}2:{pool_pts_col}{_POOL_LAST_ROW})"
+
+    # Both helper rows get the invisible white-on-white treatment.
+    white_calls = [
+        a1
+        for a1, fmt in client.format_calls
+        if fmt == {"textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}}}
+    ]
+    assert f"A{MIN_HELPER_ROW}:Z{MIN_HELPER_ROW}" in white_calls
+    assert f"A{MAX_HELPER_ROW}:Z{MAX_HELPER_ROW}" in white_calls
+
+
+def test_write_deck_scale_helpers_leaves_unscaled_or_unmatched_columns_blank():
+    client = FakeDeckClient()
+    lineups_header = ["Name", "Pts", "Issues"]  # Issues has no Player Pool equivalent
+    pool_header = ["Name", "Pts"]
+
+    _write_deck_scale_helpers(client, "Lineups", lineups_header, pool_header, last_col="C")
+
+    min_row = next(c for c in client.update_calls if c[0] == f"A{MIN_HELPER_ROW}:C{MIN_HELPER_ROW}")[1][0]
+    assert min_row[0] == ""  # Name isn't in FIELD_COLOR_SCALES
+    assert min_row[2] == ""  # Issues has no Player Pool column to anchor against
+    assert min_row[1] != ""  # Pts is scaled and matched
+
+
+def test_write_deck_scale_helpers_uses_minifs_for_zero_excluded_columns():
+    client = FakeDeckClient()
+    lineups_header = ["Name", "Rstr%"]
+    pool_header = ["Name", "Rstr%"]
+
+    _write_deck_scale_helpers(client, "Lineups", lineups_header, pool_header, last_col="B")
+
+    min_row = next(c for c in client.update_calls if c[0] == f"A{MIN_HELPER_ROW}:B{MIN_HELPER_ROW}")[1][0]
+    assert "MINIFS(" in min_row[1]
+    assert '"<>0"' in min_row[1]
+
+
 def test_add_pool_deck_hides_g1_after_the_formatting_reset_not_before():
     # _reset_deck_formatting repaints the whole zone including G1 -- if it
     # ran after G1's own white-on-white hide instead of before, G1 would
@@ -352,7 +425,7 @@ def test_add_pool_deck_hides_g1_after_the_formatting_reset_not_before():
 
     add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
-    reset_index = next(i for i, c in enumerate(client.format_calls) if c[0] == f"A1:Z{DECK_ROWS}")
+    reset_index = next(i for i, c in enumerate(client.format_calls) if c[0] == f"A1:AZ{DECK_ROWS}")
     g1_index = next(i for i, c in enumerate(client.format_calls) if c[0] == "G1")
     assert reset_index < g1_index
     white_text = {"textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}}}
@@ -381,7 +454,7 @@ def test_add_pool_deck_clears_inherited_data_validation_from_the_whole_zone():
 
     add_pool_deck(client, lineups_tab="Lineups", pool_tab="Player Pool")
 
-    assert client.clear_validation_calls == [f"A1:Z{DECK_ROWS}"]
+    assert client.clear_validation_calls == [f"A1:AZ{DECK_ROWS}"]
 
 
 def test_add_pool_deck_freezes_sets_compact_row_heights_and_resets_formatting():
@@ -391,7 +464,7 @@ def test_add_pool_deck_freezes_sets_compact_row_heights_and_resets_formatting():
 
     assert client.freeze_calls == [("Lineups", DECK_ROWS, None)]
     assert client.row_height_calls == [("Lineups", 3, 9, 18)]
-    reset_call = next(c for c in client.format_calls if c[0] == f"A1:Z{DECK_ROWS}")
+    reset_call = next(c for c in client.format_calls if c[0] == f"A1:AZ{DECK_ROWS}")
     assert reset_call[1] == {
         "backgroundColor": {"red": 1, "green": 1, "blue": 1},
         "textFormat": {"foregroundColor": {"red": 0, "green": 0, "blue": 0}, "bold": False},
