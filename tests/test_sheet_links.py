@@ -1,12 +1,9 @@
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
-from dfs.sheet_columns import INTERNAL, MOVEMENT, WEATHER
 from dfs.sheet_links import (
     COLOR_SCALE_LINKED_COLUMNS,
     LINKED_EDGE_COLUMNS,
-    VEGAS_GROUP_COLUMNS,
     edge_lookup_formula,
     edge_row_hyperlink_formula,
-    group_lineups_columns,
     link_edge_columns,
     write_edge_row_links,
 )
@@ -80,14 +77,23 @@ def test_already_linked_columns_positions_never_move():
     # -> 9/11) while everything from Leverage onward shifted +2. Then a
     # native `OppPosRank` was added right after `GameEnv` (Sam: "all data
     # should be in edge raw") -- everything from `Stadium` onward shifted
-    # a further +1. This pins the NEW positions; `link-edge` must be (and
-    # was) re-run on both sheets after each of these reorders.
+    # a further +1.
+    #
+    # Phase 6, Part 2 (2026-09-17): redesigned into a shared spine +
+    # collapsed groups (Game, Ceiling detail, Movement, Weather). ProjOwn
+    # (was a linked-nowhere native/spine value) is renamed to Own% and
+    # stays out of LINKED_EDGE_COLUMNS entirely; Leverage moves off the
+    # spine into the Ceiling detail group (Part 7.1, folded into this
+    # reorder). This pins the NEW positions; `link-edge --force` must be
+    # (and was) re-run on both sheets after this reorder.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         8,
-        12,
-        13,
+        10,
+        11,
         14,
+        16,
         17,
+        18,
         19,
         20,
         21,
@@ -96,26 +102,24 @@ def test_already_linked_columns_positions_never_move():
         24,
         25,
         26,
-        9,
-        11,
         27,
     ]
 
 
 def test_edge_lookup_formula_uses_correct_range_and_column_index():
-    # Leverage sits at EDGE_COLUMNS index 12 post Phase-5 CeilPct/OwnPct
-    # move (was 10 post Phase-3-reorder; CeilPct/OwnPct pulled in ahead of
-    # it add +2); within the Name-anchored range that's VLOOKUP column 13
-    # (1-based, relative to Name at index 0) regardless of EDGE_DATA_OFFSET
-    # (a uniform shift cancels out of a *relative* position) -- but the
-    # range's own start/end letters do shift by that offset, since Pool
-    # occupies column A ahead of EDGE_COLUMNS. Matches what
-    # `sheet_style.polish_edge` reports for the same columns.
-    assert EDGE_COLUMNS.index("Leverage") == 12
+    # Phase 6, Part 2: Leverage moves off the spine into the collapsed
+    # Ceiling detail group, landing at EDGE_COLUMNS index 18 (was 12); the
+    # Name-anchored range that's VLOOKUP column 19 (1-based, relative to
+    # Name at index 0) regardless of EDGE_DATA_OFFSET (a uniform shift
+    # cancels out of a *relative* position) -- but the range's own start/
+    # end letters do shift by that offset, since Pool occupies column A
+    # ahead of EDGE_COLUMNS. Matches what `sheet_style.polish_edge`
+    # reports for the same columns.
+    assert EDGE_COLUMNS.index("Leverage") == 18
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
     end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},13,false))'
+        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},19,false))'
     )
 
 
@@ -260,23 +264,28 @@ def test_link_edge_columns_applies_color_scale_to_three_columns_only():
     assert len(client.color_scale_calls) == len(COLOR_SCALE_LINKED_COLUMNS)
 
 
-def test_link_edge_columns_groups_and_collapses_weather_movement_and_internal():
-    # 3.3: WEATHER (Stadium/Roof/Wind), MOVEMENT (ImpliedMove/TotMove/SpdMove/
-    # GameStart) and INTERNAL (Id/CeilPct/OwnPct/LevBasis) all collapse by
-    # default -- the decision columns before them (CeilVal/Leverage/Avail/
-    # Flag/GameEnv) stay ungrouped and always visible. These three zones
-    # sit back-to-back with nothing between them, so they must land as
-    # ONE combined group (H-R), not three separate `group_columns` calls
+def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and_weather():
+    # Phase 6, Part 2: GAME (GameEnv is the only linked member -- O/U,
+    # Spread, Team Implied, OppPosRank are native, absent from this
+    # minimal fixture), CEILING DETAIL (CeilPct/OwnPct/Leverage/LevBasis),
+    # MOVEMENT (ImpliedMove/TotMove/SpdMove/GameStart) and WEATHER
+    # (Stadium/Roof/Wind -- Venue is native, also absent here) all
+    # collapse by default -- CeilVal/Avail/Flag stay ungrouped and always
+    # visible. These four zones sit back-to-back with nothing between
+    # them (in this fixture, GameEnv lands immediately before CeilPct
+    # once all 16 missing linked columns are appended together), so they
+    # land as ONE combined group, not four separate `group_columns` calls
     # -- Sheets silently extends an existing group to cover an adjacent
-    # `addDimensionGroup`, so three independent calls at adjacent ranges
-    # made the second/third call's own collapse-fold request fail
-    # outright ("no group spans exactly that range"). Found live, on the
-    # template, the first time MOVEMENT/INTERNAL were added as their own
-    # groups next to the pre-existing WEATHER one.
+    # `addDimensionGroup`, so independent calls at adjacent ranges make a
+    # later call's own collapse-fold request fail outright ("no group
+    # spans exactly that range"). Found live, on the template, the first
+    # time MOVEMENT/INTERNAL were added as their own groups next to the
+    # pre-existing WEATHER one (Phase 3); re-confirmed here now that a
+    # fourth zone (GAME) joins the same merge.
     client = SpySheetsClient(header_row=["Name", "Pos."])  # width 2 -> next col C
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
     assert client.group_calls == [
-        ("Player Pool", "H", "R", True),  # Stadium..LevBasis, merged
+        ("Player Pool", "F", "Q", True),  # GameEnv..Wind, merged
     ]
 
 
@@ -355,45 +364,11 @@ def test_write_edge_row_links_writes_every_row_in_every_block():
     assert "4 row(s)" in result
 
 
-class GroupSpyClient(SpySheetsClient):
-    def read_range(self, tab_name: str, a1_range: str):
-        assert a1_range == f"A{self._header_row}:{self._header_row}"
-        return [self.header_row] if self.header_row else []
-
-
-def test_group_lineups_columns_groups_vegas_and_merges_weather_movement_internal():
-    from dfs.sheet_columns import LINEUPS_COLUMN_ORDER
-
-    client = GroupSpyClient(header_row=list(LINEUPS_COLUMN_ORDER))
-    client._header_row = 11
-
-    result = group_lineups_columns(client, "Lineups", header_row=11)
-
-    assert client.clear_group_calls == ["Lineups"]
-    vegas_start = column_letter(min(LINEUPS_COLUMN_ORDER.index(n) for n in VEGAS_GROUP_COLUMNS))
-    vegas_end = column_letter(max(LINEUPS_COLUMN_ORDER.index(n) for n in VEGAS_GROUP_COLUMNS))
-    assert (vegas_start, vegas_end) in [(a, b) for _, a, b, _ in client.group_calls]
-
-    merged_indices = sorted(LINEUPS_COLUMN_ORDER.index(n) for n in (*WEATHER, *MOVEMENT, *INTERNAL))
-    merged_start = column_letter(merged_indices[0])
-    merged_end = column_letter(merged_indices[-1])
-    assert (merged_start, merged_end) in [(a, b) for _, a, b, _ in client.group_calls]
-
-    # Vegas and the merged tail must NOT be adjacent -- if they were,
-    # Sheets would silently fold them into one group instead of two
-    # independently collapsible ones (see the function's own docstring).
-    assert column_letter(LINEUPS_COLUMN_ORDER.index(VEGAS_GROUP_COLUMNS[-1]) + 1) != merged_start
-    assert "2 column group(s)" in result
-
-
-def test_group_lineups_columns_skips_when_header_empty():
-    client = GroupSpyClient(header_row=[])
-    client._header_row = 11
-
-    result = group_lineups_columns(client, "Lineups", header_row=11)
-
-    assert "empty header row" in result
-    assert client.clear_group_calls == []
+# group_lineups_columns/VEGAS_GROUP_COLUMNS removed in Phase 6, Part 2 --
+# GAME is now one of the four groups link_edge_columns itself builds
+# identically on every tab (see test_link_edge_columns_groups_and_
+# collapses_game_ceiling_detail_movement_and_weather below), superseding
+# Lineups' own separate "Vegas" group entirely.
 
 
 def test_write_edge_row_links_honors_a_non_default_header_row():

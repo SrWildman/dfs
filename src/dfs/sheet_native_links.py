@@ -31,7 +31,7 @@ NATIVE_LOOKUP_COLUMNS = [
     "Pts",
     "Val",
     "Ceil",
-    "Rstr%",
+    "Own%",
     "O/U",
     "Spread",
     "Team Implied",

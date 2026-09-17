@@ -42,7 +42,6 @@ from dfs.sheet_filters import add_all_filter_views, add_basic_filters
 from dfs.sheet_links import (
     PLAYER_POOL_RAW_BLOCK,
     PLAYER_POOL_RAW_TAB,
-    group_lineups_columns,
     link_edge_columns,
     write_edge_row_links,
 )
@@ -52,7 +51,7 @@ from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheet_pool_raw_sos import rewrite_opp_pos_rank
 from dfs.sheet_pool_usage import write_pool_usage_columns
 from dfs.sheet_protection import protect_workbook
-from dfs.sheet_reorder import migrate_tab_to_designed_order, remove_header_columns
+from dfs.sheet_reorder import migrate_tab_to_designed_order, remove_header_columns, rename_header_column
 from dfs.sheet_style import (
     EDGE_ROWS,
     POOL_RAW_ROWS,
@@ -63,7 +62,8 @@ from dfs.sheet_style import (
     polish_edge,
     polish_guardrails,
     polish_lineups_input_column,
-    polish_lineups_pct_of_rstr,
+    polish_lineups_pct_of_own,
+    polish_lineups_remaining_per_slot_helper,
     polish_lineups_totals_rows,
     style_tier23_tabs,
     style_view_tabs,
@@ -509,29 +509,30 @@ def sheets_fix_opp_pos_rank(
 
 
 @setup_app.command(
-    "fix-pct-of-rstr", short_help="One-time: guard Lineups' '% of Rstr' against #DIV/0! on an empty block."
+    "fix-pct-of-own", short_help="One-time: guard Lineups' '% of Own' against #DIV/0! on an empty block."
 )
-def sheets_fix_pct_of_rstr(
+def sheets_fix_pct_of_own(
     sheet_id: str = typer.Option(
         None,
         "--sheet-id",
         help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
     ),
 ) -> None:
-    """Found live 2026-09-17: `Lineups`' `% of Rstr` column
-    (`=F<row>/F$<totals_row>`, this player's DK Sal as a share of the
-    lineup's own running salary total) divides by zero on every roster
+    """Found live 2026-09-17: `Lineups`' `% of Rstr` column (renamed to
+    `% of Own` in Phase 6, Part 2 -- see `sheet_columns.py`) --
+    `=F<row>/F$<totals_row>`, this player's DK Sal as a share of the
+    lineup's own running salary total -- divides by zero on every roster
     slot until at least one name is typed in that block -- `#DIV/0!` on
     all 180 slot rows on a fresh week. Rewrites every row's formula,
     guarded to yield blank rather than 0 or an error
-    (`sheet_style.polish_lineups_pct_of_rstr`)."""
+    (`sheet_style.polish_lineups_pct_of_own`)."""
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
     client = SheetsClient(gs_cfg)
     try:
         title, url = client.describe()
-        console.print(f"Fixing '% of Rstr' in: [bold]{title}[/bold]\n{url}\n")
-        result = polish_lineups_pct_of_rstr(
+        console.print(f"Fixing '% of Own' in: [bold]{title}[/bold]\n{url}\n")
+        result = polish_lineups_pct_of_own(
             client,
             cfg.lineups.builder_tab,
             header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
@@ -678,6 +679,14 @@ def sheets_polish(
                 cfg.lineups.builder_tab,
                 header_row=lineups_header_row,
                 name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
+        results.append(
+            polish_lineups_remaining_per_slot_helper(
+                client,
+                cfg.lineups.builder_tab,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+                last_col="AZ",
             )
         )
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:
@@ -895,11 +904,6 @@ def sheets_link_edge(
                 cfg.lineups.builder_tab,
                 header_row=PLAYER_POOL_HEADER_ROW,
             ),
-            # Phase 5D: Lineups' own Vegas column group, run last so it's
-            # never wiped by `link_edge_columns`' own group call just above
-            # (see `group_lineups_columns`' docstring on why one function
-            # has to own the full recreate).
-            group_lineups_columns(client, cfg.lineups.builder_tab, header_row=lineups_header_row),
         ]
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -922,15 +926,23 @@ def sheets_reorder_columns(
         "live sheet.",
     ),
 ) -> None:
-    """Phase 3, one-time: moves PlayerPoolRaw, Player Pool and Lineups
-    into `sheet_columns.py`'s designed column order (IDENTITY/DECISION/
-    GAME/WEATHER/MOVEMENT/INTERNAL zones, with four blank `SoS n` columns
-    reserved for the strength-of-schedule work landing later) -- the
-    reorder CONTRIBUTING.md's central hazard section says must happen
-    exactly once, to a designed order with headroom already built in,
-    never again piecemeal.
+    """Phase 3/6, one-time: moves PlayerPoolRaw, Player Pool and Lineups
+    into `sheet_columns.py`'s designed column order (a shared spine plus
+    the Game/Ceiling detail/Movement/Weather collapsed groups, Phase 6
+    Part 2) -- the reorder CONTRIBUTING.md's central hazard section says
+    must happen exactly once, to a designed order with headroom already
+    built in, never again piecemeal.
 
-    Runs each tab through `sheet_reorder.migrate_tab_to_designed_order`,
+    First renames `Rstr%` -> `Own%` and `% of Rstr` -> `% of Own` in
+    place on every tab that still has the old text (Part 2: a shared
+    spine can't have a column that changes name per tab) -- must run
+    BEFORE the reorder below, same reasoning as Section F's `ImpMove` ->
+    `ImpliedMove` rename: every column-finding function locates by name,
+    so reordering first would make `migrate_tab_to_designed_order` see
+    `Own%` as genuinely missing and append a duplicate. No-ops per tab if
+    already renamed (`rename_header_column`'s own idempotency).
+
+    Then runs each tab through `sheet_reorder.migrate_tab_to_designed_order`,
     in the one order that's correct: PlayerPoolRaw first and entirely
     (provision -> link EdgeRaw in -> reorder), since Player Pool/Lineups'
     native PlayerPoolRaw-lookup formulas depend on PlayerPoolRaw's
@@ -938,8 +950,8 @@ def sheets_reorder_columns(
     EdgeRaw-linked, native-formula-regenerated, and reordered in turn.
 
     Re-run `dfs setup polish` and `dfs doctor` afterward -- this command
-    only moves/creates columns and fills formulas; it doesn't touch
-    widths, freeze panes, or conditional formatting.
+    only renames/moves/creates columns and fills formulas; it doesn't
+    touch widths, freeze panes, or conditional formatting.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -958,6 +970,28 @@ def sheets_reorder_columns(
 
         header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
         lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+
+        rename_targets = [
+            (PLAYER_POOL_RAW_TAB, 1, None),
+            (cfg.lineups.player_pool_tab, PLAYER_POOL_HEADER_ROW, None),
+            (cfg.lineups.builder_tab, lineups_header_row, header_repeats_at),
+        ]
+        renamed = 0
+        for tab, row, repeats in rename_targets:
+            if rename_header_column(client, tab, "Rstr%", "Own%", header_row=row, header_repeats_at=repeats):
+                renamed += 1
+        if rename_header_column(
+            client,
+            cfg.lineups.builder_tab,
+            "% of Rstr",
+            "% of Own",
+            header_row=lineups_header_row,
+            header_repeats_at=header_repeats_at,
+        ):
+            renamed += 1
+        console.print(
+            f"[green]OK[/green] renamed {renamed} header cell(s) (Rstr% -> Own%, % of Rstr -> % of Own)"
+        )
 
         results = migrate_tab_to_designed_order(
             client,
@@ -1468,7 +1502,7 @@ def edge(
             raise typer.Exit(code=1)
 
     basis = df["LevBasis"].iloc[0] if len(df) else "?"
-    console.print(f"Leverage basis: [bold]{basis}[/bold] (real ProjOwn until TFFB computes it midweek)\n")
+    console.print(f"Leverage basis: [bold]{basis}[/bold] (real Own% until TFFB computes it midweek)\n")
 
     table = Table(title="Top leverage plays")
     columns = (
@@ -1478,7 +1512,7 @@ def edge(
         "Opp",
         "Salary",
         "ProjPts",
-        "ProjOwn",
+        "Own%",
         "Leverage",
         "GameEnv",
         "Flag",
@@ -1493,7 +1527,10 @@ def edge(
             str(r["Opp"]),
             str(r["Salary"]),
             f"{r['ProjPts']:.1f}",
-            f"{r['ProjOwn']:.1f}",
+            # Phase 6, Part 2: Own% is now a true fraction (0.146), not a
+            # raw percentage-as-number (14.6) -- :.1% does the *100 for
+            # display, matching the sheet's own PERCENT-format rendering.
+            f"{r['Own%']:.1%}",
             f"{r['Leverage']:.1f}" if pd.notna(r["Leverage"]) else "-",
             f"{r['GameEnv']:.1f}" if pd.notna(r["GameEnv"]) else "-",
             r["Flag"] or "",

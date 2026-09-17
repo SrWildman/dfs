@@ -68,6 +68,20 @@ value. `OwnPct` (below) is the same computation applied to `ProjOwn`.
 
 ## OwnPct, Leverage and LevBasis
 
+**A note on names, Phase 6, Part 2 (2026-09-17):** this section (and
+`CeilPct`'s own note above) still says `ProjOwn` throughout, because
+that's `build_edge_frame`'s own internal column name for TFFB's raw
+projected-ownership figure right up until the function's very last line
+-- the formulas below operate on it under that name. The column actually
+written to `EdgeRaw` is called `Own%`, rescaled from `ProjOwn`'s original
+0-100 number to a 0-1 fraction (`merged["ProjOwn"] = merged["ProjOwn"] /
+100`, then renamed) so it matches the already-0-1 `Own%` on
+`PlayerPoolRaw`/`Player Pool`/`Lineups` -- one shared name, one shared
+scale, across every tab. `_percentile_within` (what computes `OwnPct`,
+just below) is scale-invariant by construction, so this rescale changed
+nothing about `OwnPct`/`Leverage`'s own math -- only `CHALK_OWNERSHIP_
+THRESHOLD` (see the `Flag` section below) needed a matching unit change.
+
 `OwnPct` is `ProjOwn`'s percentile rank **within position**, computed the
 same way `CeilPct` is (`derived._percentile_within`). `Leverage = CeilPct
 − OwnPct` -- both sides are now the same kind of number (a 0-100
@@ -228,7 +242,7 @@ of another, so this can't cross-match):
 | 3 | `LINE↑` | `ImpliedMove ≥ +6.0` |
 | 3 | `LINE↓` | `ImpliedMove ≤ −6.0` |
 | 4 | `LEVERAGE` | `Leverage ≥ 30` (blank `Leverage` while unpublished can never clear this) |
-| 5 | `CHALK` | `ProjOwn ≥ 20%` -- can only fire once ownership is real; `ProjOwn` reads 0 for everyone until then |
+| 5 | `CHALK` | `Own% ≥ 0.20` (20%) -- can only fire once ownership is real; `Own%` reads 0 for everyone until then |
 | — | *(blank)* | none of the above |
 
 `WIND_FLAG_THRESHOLD_MPH = 20.0` is a starting point, not empirically
@@ -247,7 +261,7 @@ around a threshold tuned from history, not a sign it needs re-tuning
 again from a single moment's read.
 
 `LEVERAGE_FLAG_THRESHOLD = 30.0`
-and `CHALK_OWNERSHIP_THRESHOLD = 20.0` **were** checked against a real
+and `CHALK_OWNERSHIP_THRESHOLD = 0.20` **were** checked against a real
 744-player Week 1 slate with real ownership published, after the scale
 fix above: that slate's `Leverage` distribution was mean -0.01, std 16.7,
 min -56.2, max 68.7 (quartiles -9.4 / -3.1 / +6.1, 90th percentile +27.0).
@@ -257,9 +271,16 @@ from before the scale fix, when it wasn't actually checked against a real
 gap-from-ownership number) would have flagged 149/744 (20.0%) under the
 corrected formula -- almost exactly the "reports everything" failure this
 column exists to avoid, and consistent with what got reported live once
-real ownership existed. `CHALK_OWNERSHIP_THRESHOLD = 20.0` flagged 5/744
-players (0.7%) on the same slate and is otherwise untouched by this fix --
-it's an absolute ownership percentage, not a percentile.
+real ownership existed. `CHALK_OWNERSHIP_THRESHOLD` flagged 5/744 players
+(0.7%) on the same slate and is otherwise untouched by this fix -- it's an
+absolute ownership percentage, not a percentile. **Phase 6, Part 2
+(2026-09-17):** the constant itself changed from `20.0` to `0.20` when
+`Own%` (the sheet-facing name for what this section still calls `ProjOwn`
+below -- see the note at the top of the `OwnPct, Leverage and LevBasis`
+section) was rescaled from a 0-100 number to a 0-1 fraction to match its
+already-0-1 scale on `PlayerPoolRaw`/`Player Pool`/`Lineups`. The
+threshold's real-world meaning (20% ownership) and the 5/744 flag rate
+above are both unchanged -- only the number's own units moved.
 
 ## Late-swap lock check (`dfs lineups late-swap`)
 

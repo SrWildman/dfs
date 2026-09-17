@@ -98,8 +98,10 @@ LEV_BASIS_UNPUBLISHED = "unpublished"
 LEVERAGE_FLAG_THRESHOLD = 30.0
 # Confirmed against the same slate: 5/744 players (0.7%) clear this today.
 # An absolute ownership percentage, not a percentile -- correctly untouched
-# by the Leverage scale fix.
-CHALK_OWNERSHIP_THRESHOLD = 20.0
+# by the Leverage scale fix. On the fraction scale (Phase 6, Part 2 --
+# ProjOwn is now 0-1, not 0-100, to share one stored scale with
+# PlayerPoolRaw's native Own%/Rstr%): 20% is 0.20, not 20.0.
+CHALK_OWNERSHIP_THRESHOLD = 0.20
 # Phase 6, Part 1.4: `has_real_ownership` used to be `.any()` -- a single
 # non-zero ProjOwn (one early-published player, a data glitch, a bye-week
 # artifact) flipped the WHOLE slate to "real," computing OwnPct/Leverage as
@@ -132,49 +134,41 @@ EDGE_DATA_OFFSET = 1
 # `sheet_style.polish_edge` can locate a column by name without an extra
 # round-trip read of the sheet.
 #
-# Phase 3: a designed, one-time order instead of the append-only history
-# below it -- grouped IDENTITY / DECISION / GAME / WEATHER (collapsed) /
-# MOVEMENT (collapsed) / INTERNAL (collapsed), the same grammar
-# `sheet_links.PLAYER_POOL_RAW_COLUMN_ORDER` uses for PlayerPoolRaw/Player
-# Pool/Lineups (those three interleave native-only fields like Venue/
-# OppPosRank into the same zones -- EdgeRaw has no native equivalent for
-# either, so its own DECISION/GAME zones are shorter). EdgeRaw itself
-# holds no formulas (pure synced values, fully rewritten every `dfs
-# sync`), so reordering this list needed no live-sheet column move at
-# all -- the next sync just writes the new order directly. Every name
-# below already existed; this only changed position. See
-# CONTRIBUTING.md's structural changelog for the full before/after and
-# every symbol this invalidated on the tabs that DO need a real move.
+# Phase 6, Part 2 (2026-09-17): redesigned into a shared SPINE (Name/
+# Position/Team/Opp/Salary/ProjPts/Val/Ceiling/CeilVal/Own%/Avail/Flag --
+# `sheet_columns.py`'s DECISION for the other three tabs, same grammar,
+# each tab's own established spelling) visible identically across
+# EdgeRaw/Player Pool/Lineups, with everything else behind collapsed
+# groups in Sam's own fixed left-to-right order: GAME, CEILING DETAIL,
+# MOVEMENT, WEATHER. `Id` stays hidden outright, not part of any visible
+# group. `Own%` is the one deliberately shared name -- this column was
+# `ProjOwn` here and `Rstr%` on the other three tabs, "the same value
+# under two names" a shared spine can't have; renamed to `Own%`
+# EVERYWHERE. Internally this module still computes and reasons about a
+# `ProjOwn` pandas column throughout (TFFB's own field name, the real
+# external data source) -- the rename to `Own%` happens ONLY at the very
+# end, selecting into this list (see `build_edge_frame`'s return), so
+# every internal formula/threshold/test below is unaffected. `Leverage`
+# moves into the collapsed CEILING DETAIL group (Part 7.1's decision,
+# folded into this same reorder -- see `sheet_columns.py`'s own docstring
+# for why). Nothing deleted; every name below already existed, just
+# renamed/repositioned. See CONTRIBUTING.md's structural changelog for
+# the full before/after.
 EDGE_COLUMNS = [
-    # IDENTITY
+    # SPINE
     "Name",
     "Position",
     "Team",
     "Opp",
-    # DECISION -- CeilPct/OwnPct sit right beside their raw counterparts
-    # (Ceiling/CeilVal and ProjOwn) rather than folded into the far-right
-    # INTERNAL zone. Sam's own workflow is filtering EdgeRaw down to one
-    # position and scanning it -- CeilPct/OwnPct are ALREADY computed as
-    # percentile-within-position (see `_percentile_within` below), so
-    # unlike raw Pts/Ceiling/Val/CeilVal (skipped from colour scaling
-    # here entirely, see `EDGE_UNSCALED_PLAYER_METRICS` and
-    # `sheet_style.polish_edge`'s own comment on why), they read
-    # correctly coloured under any position filter with no recompute
-    # needed -- moving them next to Ceiling/ProjOwn just makes that
-    # already-fair signal visible instead of requiring a scroll past
-    # Stadium/Roof/Wind/ImpliedMove/TotMove/SpdMove/GameStart/Id first.
     "Salary",
     "ProjPts",
     "Val",
     "Ceiling",
     "CeilVal",
-    "CeilPct",
-    "ProjOwn",
-    "OwnPct",
-    "Leverage",
+    "Own%",
     "Avail",
     "Flag",
-    # GAME
+    # GAME (collapsed)
     "OverUnder",
     "Spread",
     "GameEnv",
@@ -184,23 +178,26 @@ EDGE_COLUMNS = [
     # a live Sheets formula, matching EdgeRaw's own "computed locally, no
     # live formulas" design. See `_attach_opp_pos_rank` below.
     "OppPosRank",
-    # WEATHER (collapsed)
-    "Stadium",
-    "Roof",
-    "Wind",
+    # CEILING DETAIL (collapsed) -- CeilPct/OwnPct/LevBasis were already
+    # collapsed together (the old INTERNAL group); Leverage joins them
+    # here now that it's off the spine (Part 7.1).
+    "CeilPct",
+    "OwnPct",
+    "Leverage",
+    "LevBasis",
     # MOVEMENT (collapsed)
     "ImpliedMove",
     "TotMove",
     "SpdMove",
     "GameStart",
-    # INTERNAL (collapsed) -- Id moved out of column A's neighbor slot and
-    # into this group; it's no longer individually hidden (see
-    # `sheet_style.EDGE_COLUMN_GROUPS`), just folded into INTERNAL like
-    # LevBasis. Pool (column A, ahead of this whole list) ends up directly
-    # beside Name as a result, with no column between them at all -- an
-    # improvement on the old "hidden Id in between" layout.
+    # WEATHER (collapsed)
+    "Stadium",
+    "Roof",
+    "Wind",
+    # Id stays hidden outright, not part of any visible group -- Pool
+    # (column A, ahead of this whole list) sits directly beside Name with
+    # no column between them.
     "Id",
-    "LevBasis",
 ]
 
 
@@ -399,6 +396,15 @@ def build_edge_frame(
     is_dst = merged["Position"] == "DST"
     merged.loc[is_dst, "Name"] = merged.loc[is_dst, "Name"].apply(_dst_nickname)
 
+    # Phase 6, Part 2: TFFB's own ProjOwn is a raw percentage-as-number
+    # (14.6 meaning 14.6%) -- converted to a true fraction (0.146) here so
+    # it shares one stored scale with PlayerPoolRaw's native Rstr% (which
+    # divides by 100 in its own formula, `=(...)/100`), now that both are
+    # renamed to the same "Own%" name and need to share one PERCENT-type
+    # sheet format. CHALK_OWNERSHIP_THRESHOLD is on this same fraction
+    # scale as a result (0.20, not 20.0) -- see its own comment.
+    merged["ProjOwn"] = merged["ProjOwn"] / 100
+
     merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
     merged["CeilVal"] = (merged["Ceiling"] / (merged["Salary"] / 1000)).round(2)
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)
@@ -438,5 +444,13 @@ def build_edge_frame(
     # this fix.
     sort_key = "Leverage" if has_real_ownership else "CeilPct"
     merged = merged.sort_values(sort_key, ascending=False, na_position="last").reset_index(drop=True)
+
+    # Phase 6, Part 2: renamed to Own% ONLY here, at the very last step --
+    # every computation above (has_real_ownership, OwnPct, Leverage,
+    # CHALK's ProjOwn check) still reasons in terms of ProjOwn, TFFB's own
+    # field name for this value. EDGE_COLUMNS lists the OUTPUT name
+    # (Own%), which is why the rename has to land after every internal use
+    # of "ProjOwn" and right before this final column selection.
+    merged = merged.rename(columns={"ProjOwn": "Own%"})
 
     return EdgeBuildResult(frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names)

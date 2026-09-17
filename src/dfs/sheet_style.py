@@ -48,14 +48,15 @@ function happens to touch it first.
   delta where zero -- not the median -- is the meaningful center: ImpliedMove,
   TotMove, SpdMove and Spread, nowhere else.
 - White -> amber -> red (`WARM_MIN`/`WARM_MID`/`WARM_MAX`, kind `_WARM`) is
-  the ONE exception to "more is better": ownership (`ProjOwn` on EdgeRaw,
-  `Rstr%` on Player Pool/Lineups). High ownership is chalk -- a caution,
+  the ONE exception to "more is better": ownership (`Own%` -- Phase 6,
+  Part 2 unified EdgeRaw's own `ProjOwn` and Player Pool/Lineups' own
+  `Rstr%` into this one shared name). High ownership is chalk -- a caution,
   not a quality -- so it never gets the green=good treatment, and
   deliberately reuses `WARN_BG`/`CRIT_BG`'s exact hues rather than
   inventing a fourth palette, so it still reads as the workbook's existing
   warning language.
 - Flat grey (`ZERO_GREY_BG`) on an exact `0` in a `ZERO_EXCLUDED_COLUMNS`
-  column (currently `ProjOwn`/`Rstr%`) means "no real value yet," not
+  column (`Own%`) means "no real value yet," not
   "the worst of the range" -- a real, common zero (unpublished ownership
   reads 0 for the whole slate until midweek) would otherwise anchor a
   gradient's low end and compress everyone else's actual spread into a
@@ -67,7 +68,7 @@ function happens to touch it first.
   STATE only -- Flag, Avail, the Guardrails column, position tints. Never
   put a chip on a number; that's what the colour scales are for.
 - Grey (`INK_MUTED`) on `LevBasis` marks a data-freshness note, not a
-  value of its own -- it reads "unpublished" while ProjOwn (and therefore
+  value of its own -- it reads "unpublished" while Own% (and therefore
   Leverage/OwnPct) hasn't been populated by TFFB yet this week (see
   `polish_edge`).
 - Colour that doesn't encode a value gets removed, full stop. Banding and
@@ -226,18 +227,21 @@ FIELD_FORMATS = {
     "SpdMove": _num('"+"0.0;"-"0.0;0.0'),
     "Val": _num("0.00"),
     "CeilVal": _num("0.00"),
-    "Rstr%": _num("0.0%", "PERCENT"),
-    "% of Rstr": _num("0.0%", "PERCENT"),
+    # Phase 6, Part 2: EdgeRaw's own ProjOwn and the other three tabs'
+    # native Rstr% are unified into one shared "Own%" name -- previously
+    # two different stored scales (EdgeRaw: a raw percentage-as-number;
+    # the others: a true fraction, `.../100` in their own native formula)
+    # under two different formats. `derived.build_edge_frame` now divides
+    # EdgeRaw's own value by 100 too, so both sides are true fractions and
+    # can share this one PERCENT format.
+    "Own%": _num("0.0%", "PERCENT"),
+    "% of Own": _num("0.0%", "PERCENT"),
     "Exposure": _num("0.0%", "PERCENT"),
     "Target": _num("0.0%", "PERCENT"),
     "vs Target": _num("0.0%", "PERCENT"),
     "H2H %": _num("0.0%", "PERCENT"),
     "Wind": _num('0" mph"'),
     "Gust": _num('0" mph"'),
-    # ProjOwn is a raw 0-100 number in EdgeRaw (Rstr%/Exposure above are
-    # true fractions), so it gets a literal "%" suffix rather than a
-    # PERCENT type, which would multiply it by 100 again.
-    "ProjOwn": _num('0.0"%"'),
 }
 
 
@@ -308,8 +312,7 @@ FIELD_COLOR_SCALES = {
     # FEWEST fantasy points at this position) -- same "1st is best"
     # convention as the SoS tabs' own `Rank` column (`style_sos_tab`).
     "OppPosRank": _REVERSED,
-    "ProjOwn": _WARM,
-    "Rstr%": _WARM,
+    "Own%": _WARM,
     # Phase 4 (4.1): already percentile-within-position, 0-100 regardless
     # of which positions happen to be mixed into the range they're scaled
     # over -- unlike raw Pts/Ceil/Val/CeilVal, scaling these doesn't need
@@ -323,8 +326,8 @@ FIELD_COLOR_SCALES = {
     # heavily-used player earning the deepest colour is exactly the point.
     # Zero is also this column's overwhelmingly common value (most pool
     # players are rostered nowhere), so it's in ZERO_EXCLUDED_COLUMNS too
-    # for the same reason ProjOwn/Rstr% are: an unrostered player is
-    # normal, not the bottom of a gradient.
+    # for the same reason Own% is: an unrostered player is normal, not the
+    # bottom of a gradient.
     "Used": _GRADIENT,
 }
 
@@ -358,7 +361,7 @@ GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct", "OwnPct"})
 # after the gradient so it wins -- see the shared insert-at-front note on
 # FLAG_CHIPS above) and the gradient's own minpoint is computed over
 # non-zero values only via a live MINIFS formula, not the true minimum.
-ZERO_EXCLUDED_COLUMNS = frozenset({"ProjOwn", "Rstr%", "Used"})
+ZERO_EXCLUDED_COLUMNS = frozenset({"Own%", "Used"})
 ZERO_GREY_BG = _rgb("#EDEEF1")
 
 
@@ -580,7 +583,10 @@ EDGE_WIDTHS = {
     "Opp": 54,
     "Salary": 78,
     "ProjPts": 85,
-    "ProjOwn": 85,
+    # Phase 6, Part 2: renamed from ProjOwn (EdgeRaw's own former name for
+    # this column, unified with the other three tabs' Rstr% into one
+    # shared "Own%").
+    "Own%": 85,
     "Ceiling": 85,
     # Widened from 58 -- found by looking at Lineups' own totals row, not
     # the width-truncation heuristic (which only checks header text):
@@ -618,16 +624,25 @@ EDGE_WIDTHS = {
     "Spread": 78,
 }
 
-# Stadium/Roof/Wind are deliberately NOT grouped here (Fix 2.9) -- Sam
-# wants weather visible by default on EdgeRaw itself, where it's the tab
-# you're actually reading closely; the collapsed-by-default treatment is
-# Lineups/Player Pool-only (see sheet_links.link_edge_columns), where the
-# extra width matters more than the extra detail. Id used to be grouped
-# here too, but it's genuinely never useful to look at (a raw DraftKings
-# player ID, not a human-meaningful value), so it's fully hidden instead
-# (see polish_edge's hide_columns call) -- a group would just be a second
-# click for something that never needs to come back.
-EDGE_COLUMN_GROUPS = [("GameStart", "GameStart")]
+# Phase 6, Part 2 (2026-09-17) overrides Fix 2.9: Stadium/Roof/Wind used
+# to be deliberately left ungrouped on EdgeRaw specifically ("Sam wants
+# weather visible by default on EdgeRaw itself, where it's the tab you're
+# actually reading closely"), unlike the collapsed-by-default treatment
+# Lineups/Player Pool already had. Part 2's own goal -- EdgeRaw/Player
+# Pool/Lineups look identical, spine visible, everything else one click
+# away -- explicitly overrides that: Game/Ceiling detail/Movement/Weather
+# all collapse on EdgeRaw now too. All four zones sit back-to-back in
+# EDGE_COLUMNS with nothing native between them (unlike the other three
+# tabs, EdgeRaw has no native-only columns to interleave), so this is one
+# merged group (OverUnder..Wind), the same "adjacent zones merge into
+# one" reality `sheet_links.link_edge_columns` already works around.
+#
+# Id used to be grouped here too, but it's genuinely never useful to look
+# at (a raw DraftKings player ID, not a human-meaningful value), so it's
+# fully hidden instead (see polish_edge's hide_columns call) -- a group
+# would just be a second click for something that never needs to come
+# back.
+EDGE_COLUMN_GROUPS = [("OverUnder", "Wind")]
 
 # Muted, per-position backgrounds -- just enough to see position boundaries
 # while scanning a list sorted by Leverage, not loud enough to compete with
@@ -878,7 +893,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 
     # FIELD_COLOR_SCALES (Fix 2.1) -- the one canonical policy every tab
     # that shows a given field applies; on EdgeRaw that's ProjPts, Ceiling,
-    # Val, CeilVal, Leverage, GameEnv, OverUnder (gradient), ProjOwn (warm),
+    # Val, CeilVal, Leverage, GameEnv, OverUnder (gradient), Own% (warm),
     # and ImpliedMove/TotMove/SpdMove/Spread (diverging).
     # Phase 4 (4.1): EdgeRaw is sorted by Leverage, not grouped by
     # position, so its raw player-performance metrics (Pts/Ceil/Val/
@@ -932,7 +947,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
             )
 
     # LevBasis's one job now is a data-freshness marker: "unpublished" means
-    # ProjOwn is still all zeros this week, so Leverage/OwnPct read blank
+    # Own% is still all zeros this week, so Leverage/OwnPct read blank
     # rather than a number that looks real but isn't. Grey the whole row
     # via LevBasis itself rather than graying CeilPct -- CeilPct is a real,
     # independent number regardless of ownership status, never a stand-in
@@ -950,7 +965,10 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     for first, last in EDGE_COLUMN_GROUPS:
         a, b = _edge_letter(first), _edge_letter(last)
         if a and b:
-            client.group_columns(edge_tab, a, b)
+            # Phase 6, Part 2 override of Fix 2.9 -- collapsed by default
+            # now, matching Player Pool/Lineups (see EDGE_COLUMN_GROUPS'
+            # own comment).
+            client.group_columns(edge_tab, a, b, collapsed=True)
 
     return (
         f"{edge_tab}: widths, header, banding, formats, {n_scaled} colour scale(s), "
@@ -976,8 +994,9 @@ BUILDER_WIDTHS = {
     # Widened from 72 -- Phase 6, Part 1.5's own audit-style check (built
     # for EdgeRaw) also caught this one truncating live once run against
     # every audited tab, the same bug class just outside 1.5's original
-    # scope.
-    "% of Rstr": 90,
+    # scope. Renamed from "% of Rstr" in Part 2, alongside Rstr%'s own
+    # rename to Own%.
+    "% of Own": 90,
     "Source": 64,
     "Pool": 64,
     "Edge ↗": 64,
@@ -1296,7 +1315,7 @@ def polish_lineups_totals_rows(
     ]
     ceil_col = col("Ceil")
     pts_col = col("Pts")
-    rstr_col = col("Rstr%")
+    rstr_col = col("Own%")
     salary_col = col("DK Sal")
     remaining_col = col("Venue")  # must stay a bare number -- see docstring
     remaining_label_col = col("Val")
@@ -1353,12 +1372,83 @@ def polish_lineups_totals_rows(
 
     return (
         f"{tab}: {len(name_blocks)} totals row(s) -- {cleared} dead VLOOKUP(s) cleared, "
-        f"{summed} sum(s) written (Ceil/Pts/Rstr%), {labeled} label(s) written, "
+        f"{summed} sum(s) written (Ceil/Pts/Own%), {labeled} label(s) written, "
         f"{reset} Name cell(s) un-typo-guarded"
     )
 
 
-def polish_lineups_pct_of_rstr(
+def polish_lineups_remaining_per_slot_helper(
+    client: SheetsClient, tab: str, *, name_blocks: list[tuple[int, int]], last_col: str
+) -> str:
+    """Phase 6, Part 2: the "average remaining per slot" helper row
+    (directly below each totals row, documented in
+    docs/SHEET_REFERENCE.md, never written by any `dfs` command until
+    now) reads the remaining-cap NUMBER via `INDIRECT("E"&(ROW()-1))` --
+    hardcoding column E because that's where `polish_lineups_totals_rows`
+    happens to write it (`Venue`'s column). The exact same INDIRECT/
+    `moveDimension` hazard this module has already hit twice before
+    (`polish_lineups_totals_rows`'s own docstring): a string-built
+    reference doesn't move when the column it names does. Part 2 moves
+    `Venue` out of `IDENTITY` into the collapsed `WEATHER` group, which
+    would otherwise leave this formula silently reading whatever new
+    column lands on E -- no error, just a wrong number, on all 20 blocks,
+    both sheets.
+
+    This row has no header of its own (it's a hand-authored cell below
+    the totals row, not a managed column), so its own CURRENT column
+    can't be found by name the way everything else in this file is --
+    found instead by reading each block's helper row and locating
+    whichever cell already holds an `INDIRECT` formula, then overwriting
+    that exact cell in place (same position, corrected references). Both
+    letters inside the formula ARE derived: `Name`'s column (for the
+    `COUNTBLANK` range) and `Venue`'s column (for the remaining-cap
+    lookup) are found fresh from the tab's own real header, matching
+    `polish_lineups_totals_rows`'s own `remaining_col = col("Venue")`.
+    No-ops per block if that block's helper row has no such formula
+    (already fixed, or never had one).
+    """
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    header_rows = client.read_range(tab, "A1:1")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: no header found -- skipped"
+
+    def col(name: str) -> str | None:
+        return column_letter(header.index(name)) if name in header else None
+
+    name_col = col("Name")
+    remaining_col = col("Venue")
+    if not (name_col and remaining_col):
+        return f"{tab}: 'Name'/'Venue' not both present -- skipped"
+
+    written = 0
+    skipped = 0
+    for start, end in name_blocks:
+        helper_row = end + 2
+        row = client.read_formula(tab, f"A{helper_row}:{last_col}{helper_row}")
+        cells = row[0] if row else []
+        existing_col = next(
+            (column_letter(i) for i, cell in enumerate(cells) if "INDIRECT" in (cell or "")), None
+        )
+        if not existing_col:
+            skipped += 1
+            continue
+        to_start = helper_row - start
+        to_end = helper_row - end
+        name_range = f'INDIRECT("{name_col}"&(ROW()-{to_start})&":{name_col}"&(ROW()-{to_end}))'
+        formula = (
+            f'=IF(COUNTBLANK({name_range})=0,"",'
+            f'INDIRECT("{remaining_col}"&(ROW()-1))/COUNTBLANK({name_range}))'
+        )
+        client.update_range(tab, f"{existing_col}{helper_row}", [[formula]])
+        written += 1
+
+    note = f", {skipped} block(s) had no existing formula to fix -- skipped" if skipped else ""
+    return f"{tab}: 'average remaining per slot' helper regenerated for {written} block(s){note}"
+
+
+def polish_lineups_pct_of_own(
     client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
 ) -> str:
     """Phase 6, Part 1.2: `% of Rstr` (`=F<row>/F$<totals_row>`, this
@@ -1368,7 +1458,9 @@ def polish_lineups_pct_of_rstr(
     `#DIV/0!` on all 180 slot rows. Not written by any `dfs` command (a
     genuinely hand-authored template formula, like the "average remaining
     per slot" helper documented in docs/SHEET_REFERENCE.md); this is the
-    first Python-side rewrite of it.
+    first Python-side rewrite of it. Renamed to `% of Own` in Part 2,
+    alongside `Rstr%`'s own rename to `Own%` (Part 2's own instruction:
+    "`% of Rstr`'s derivation ... should be renamed to match").
 
     Guarded two ways, both yielding blank rather than 0 -- "an empty slot
     has no share" (Sam's own framing for this bug), not zero, which reads
@@ -1377,13 +1469,14 @@ def polish_lineups_pct_of_rstr(
     the same block ARE filled (`$A<row>=""`, which would otherwise
     silently compute a real 0% for a slot nobody's picked yet).
 
-    `% of Rstr` is a temporary name -- Part 7.9 renames this column to
-    `% of Cap` and changes the denominator to the salary cap entirely,
-    which makes the block-empty guard here moot (a constant denominator
-    can't divide by zero) but leaves the blank-slot guard still needed.
-    This function's own formula gets fully superseded then; kept here,
-    not folded into the standing `dfs setup polish` pipeline, since it's
-    a one-time fix for a formula this codebase doesn't already own.
+    `% of Own` is still a temporary name -- Part 7.9 renames this column
+    again, to `% of Cap`, and changes the denominator to the salary cap
+    entirely, which makes the block-empty guard here moot (a constant
+    denominator can't divide by zero) but leaves the blank-slot guard
+    still needed. This function's own formula gets fully superseded then;
+    kept here, not folded into the standing `dfs setup polish` pipeline,
+    since it's a one-time fix for a formula this codebase doesn't already
+    own.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -1397,9 +1490,9 @@ def polish_lineups_pct_of_rstr(
 
     name_col = col("Name")
     salary_col = col("DK Sal")
-    pct_col = col("% of Rstr")
+    pct_col = col("% of Own")
     if not (name_col and salary_col and pct_col):
-        return f"{tab}: 'Name'/'DK Sal'/'% of Rstr' not all present -- skipped"
+        return f"{tab}: 'Name'/'DK Sal'/'% of Own' not all present -- skipped"
 
     written = 0
     for start, end in name_blocks:
@@ -1412,7 +1505,7 @@ def polish_lineups_pct_of_rstr(
             client.update_range(tab, f"{pct_col}{row}", [[formula]])
             written += 1
 
-    return f"{tab}: '% of Rstr' guarded against #DIV/0! for {written} row(s)"
+    return f"{tab}: '% of Own' guarded against #DIV/0! for {written} row(s)"
 
 
 def polish_guardrails(

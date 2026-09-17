@@ -47,8 +47,10 @@ EdgeRaw, one click away via this tab's new "Edge ↗" column.
 whether that row's player came from ticking EdgeRaw or typing into the
 add-a-player control cell. `Source`/`Overflow`/`Pool`'s column letters are found by header
 name (`sheet_columns.PLAYER_POOL_COLUMN_ORDER` places `Source` right
-after `Venue` and appends `Overflow`/`Pool` at the tab's very end), never
-hardcoded -- this used to hardcode `Source`=O/`Overflow`=Z/`Pool`=AA,
+after `Opp.` -- Phase 6, Part 2 moved `Venue` itself out of that
+neighborhood entirely, into the collapsed Weather group -- and appends
+`Overflow`/`Pool` at the tab's very end), never hardcoded -- this used to
+hardcode `Source`=O/`Overflow`=Z/`Pool`=AA,
 true only under the pre-Phase-3 append-only layout; Phase 3's reorder
 moved real EdgeRaw-linked columns (Flag/Roof/Wind) onto those exact
 letters, so a hardcoded version of this module would silently clobber

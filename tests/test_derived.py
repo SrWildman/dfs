@@ -246,7 +246,12 @@ def test_chalk_flag_set_for_high_ownership_under_real_basis():
                 "Name": "Chalky",
                 "Position": "RB",
                 "Ceiling": 5.0,
-                "ProjOwn": CHALK_OWNERSHIP_THRESHOLD + 5,
+                # Raw TFFB-style input (a percentage-as-number, matching the
+                # other rows' "1.0" meaning 1%) -- build_edge_frame divides
+                # this by 100 before comparing against
+                # CHALK_OWNERSHIP_THRESHOLD, which is on the resulting
+                # fraction scale (0.20, not 20.0).
+                "ProjOwn": (CHALK_OWNERSHIP_THRESHOLD + 0.05) * 100,
             },
             {"Id": "2", "Name": "B", "Position": "RB", "Ceiling": 20.0, "ProjOwn": 1.0},
             {"Id": "3", "Name": "C", "Position": "RB", "Ceiling": 30.0, "ProjOwn": 1.0},

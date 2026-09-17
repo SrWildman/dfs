@@ -26,6 +26,7 @@ from dfs.sheet_style import (
     WHITE,
     ZERO_EXCLUDED_COLUMNS,
     ZERO_GREY_BG,
+    _edge_letter,
     apply_field_color_scales,
     apply_field_formats,
     apply_grouped_color_scales,
@@ -34,7 +35,8 @@ from dfs.sheet_style import (
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
-    polish_lineups_pct_of_rstr,
+    polish_lineups_pct_of_own,
+    polish_lineups_remaining_per_slot_helper,
     polish_lineups_totals_rows,
     style_flat_tab,
     style_movement,
@@ -71,7 +73,7 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
     assert matched == {
         "ProjPts",
-        "ProjOwn",
+        "Own%",
         "Ceiling",
         "Val",
         "CeilVal",
@@ -91,7 +93,7 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     assert FIELD_COLOR_SCALES["TotMove"] == "diverging"
     assert FIELD_COLOR_SCALES["SpdMove"] == "diverging"
     assert FIELD_COLOR_SCALES["Spread"] == "diverging"  # signed, zero (pick'em) is the midpoint
-    assert FIELD_COLOR_SCALES["ProjOwn"] == "warm"  # high ownership is chalk, not "good" (Fix 2.8)
+    assert FIELD_COLOR_SCALES["Own%"] == "warm"  # high ownership is chalk, not "good" (Fix 2.8)
     assert FIELD_COLOR_SCALES["OppPosRank"] == "reversed"  # 1 (toughest matchup) is best, not worst
 
 
@@ -105,7 +107,7 @@ def test_field_formats_covers_every_edgeraw_numeric_column():
     edge_numeric_columns = [
         "Salary",
         "ProjPts",
-        "ProjOwn",
+        "Own%",
         "Ceiling",
         "Val",
         "CeilVal",
@@ -167,7 +169,7 @@ def test_apply_field_color_scales_excludes_zero_for_ownership_columns():
         def add_boolean_rule(self, tab_name, a1_range, *, condition_type, values, fmt):
             calls.append(("bool", a1_range, condition_type, values, fmt))
 
-    apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "ProjOwn"], header_row=1, last_row=100)
+    apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "Own%"], header_row=1, last_row=100)
 
     kinds = [c[0] for c in calls]
     assert kinds == ["clear", "scale", "bool"]  # scale added, THEN the zero rule, so it wins
@@ -238,7 +240,7 @@ class FakeEdgeClient:
     def __init__(self):
         self.calls: list[str] = []
         self.clear_group_calls: list[str] = []
-        self.group_calls: list[tuple[str, str, str]] = []
+        self.group_calls: list[tuple[str, str, str, bool]] = []
         self.banding_calls: list[tuple] = []
         self.color_scale_calls: list[tuple[str, dict]] = []
         self.boolean_rule_calls: list[tuple[str, dict]] = []
@@ -285,9 +287,11 @@ class FakeEdgeClient:
     ) -> None:
         self.calls.append("hide_columns")
 
-    def group_columns(self, tab_name: str, first_col_a1: str, last_col_a1: str) -> None:
+    def group_columns(
+        self, tab_name: str, first_col_a1: str, last_col_a1: str, *, collapsed: bool = False
+    ) -> None:
         self.calls.append("group_columns")
-        self.group_calls.append((tab_name, first_col_a1, last_col_a1))
+        self.group_calls.append((tab_name, first_col_a1, last_col_a1, collapsed))
 
 
 def test_polish_edge_clears_column_groups_before_re_adding_them():
@@ -300,6 +304,21 @@ def test_polish_edge_clears_column_groups_before_re_adding_them():
     clear_index = client.calls.index("clear_column_groups")
     first_group_index = client.calls.index("group_columns")
     assert clear_index < first_group_index
+
+
+def test_polish_edge_groups_game_through_weather_collapsed_by_default():
+    # Phase 6, Part 2 overrides Fix 2.9: EdgeRaw's Game/Ceiling detail/
+    # Movement/Weather zones all collapse by default now too, matching
+    # Player Pool/Lineups -- previously only GameStart alone was grouped,
+    # and not collapsed. All four zones sit back-to-back in EDGE_COLUMNS
+    # with nothing native between them, so this lands as ONE merged group
+    # (OverUnder..Wind), not four independent ones.
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    start_col = _edge_letter("OverUnder")
+    end_col = _edge_letter("Wind")
+    assert client.group_calls == [("EdgeRaw", start_col, end_col, True)]
 
 
 def test_polish_edge_clears_banding_before_re_adding_it():
@@ -466,9 +485,12 @@ def test_apply_tab_notes_skips_a_missing_tab_without_erroring():
 
 
 class FakeGuardrailsClient:
-    def __init__(self, header: list[str], *, present: bool = True):
+    def __init__(
+        self, header: list[str], *, present: bool = True, formulas: dict[str, list[list]] | None = None
+    ):
         self._header = header
         self._present = present
+        self._formulas = formulas or {}
         self.width_calls: list[dict] = []
         self.update_calls: list[tuple[str, list[list]]] = []
         self.clear_calls: list[str | None] = []
@@ -481,6 +503,9 @@ class FakeGuardrailsClient:
 
     def read_range(self, tab_name: str, a1_range: str):
         return [self._header] if self._header else []
+
+    def read_formula(self, tab_name: str, a1_range: str):
+        return self._formulas.get(a1_range, [[]])
 
     def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
         self.width_calls.append(widths)
@@ -505,7 +530,7 @@ class FakeGuardrailsClient:
 
 _HEADER_WITH_AVAIL_AT_Y = (
     ["Name", "Pos.", "Team", "DK Sal", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts"]
-    + ["Ceil", "Val", "Rstr%", "", "% of Rstr", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
+    + ["Ceil", "Val", "Own%", "", "% of Own", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
     + ["Stadium", "Roof", "Wind", "Avail", "Flag"]
 )
 
@@ -515,7 +540,7 @@ _HEADER_WITH_AVAIL_AT_Y = (
 # because a fixture still matches the old layout.
 _HEADER_FOR_GUARDRAILS = (
     ["Name", "Team", "Pos.", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts", "DK Sal"]
-    + ["Ceil", "Val", "Rstr%", "% of Rstr", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
+    + ["Ceil", "Val", "Own%", "% of Own", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
     + ["Stadium", "Roof", "Wind", "Avail", "Flag", "Issues"]
 )
 
@@ -669,29 +694,30 @@ def test_polish_lineups_totals_rows_self_heals_a_corrupted_pts_or_rstr_total():
     calls = {a1: rows for a1, rows in client.update_calls}
     assert calls["K18"] == [["=SUM(K9:K17)"]]
     assert calls["N18"] == [["=SUM(N9:N17)"]]
-    assert "3 sum(s) written (Ceil/Pts/Rstr%)" in result
+    assert "3 sum(s) written (Ceil/Pts/Own%)" in result
 
 
-def test_polish_lineups_pct_of_rstr_guards_against_div_by_zero():
-    # Phase 6, Part 1.2: `% of Rstr` = DK Sal / block's own salary total
-    # (D/D$<totals_row>) divided by zero on every roster slot until at
-    # least one name is typed -- #DIV/0! on all 180 slot rows live.
+def test_polish_lineups_pct_of_own_guards_against_div_by_zero():
+    # Phase 6, Part 1.2: `% of Own` (renamed from `% of Rstr` in Part 2)
+    # = DK Sal / block's own salary total (D/D$<totals_row>) divided by
+    # zero on every roster slot until at least one name is typed --
+    # #DIV/0! on all 180 slot rows live.
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
-    result = polish_lineups_pct_of_rstr(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    result = polish_lineups_pct_of_own(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
 
     calls = {a1: rows for a1, rows in client.update_calls}
-    # DK Sal = D, % of Rstr = P, totals row = 18 (end + 1).
+    # DK Sal = D, % of Own = P, totals row = 18 (end + 1).
     assert calls["P9"] == [['=IF(OR(A9="",D$18=0),"",D9/D$18)']]
     assert calls["P17"] == [['=IF(OR(A17="",D$18=0),"",D17/D$18)']]
     assert "9 row(s)" in result
 
 
-def test_polish_lineups_pct_of_rstr_skips_when_column_missing():
-    header = [h for h in _HEADER_WITH_AVAIL_AT_Y if h != "% of Rstr"]
+def test_polish_lineups_pct_of_own_skips_when_column_missing():
+    header = [h for h in _HEADER_WITH_AVAIL_AT_Y if h != "% of Own"]
     client = FakeGuardrailsClient(header)
 
-    result = polish_lineups_pct_of_rstr(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    result = polish_lineups_pct_of_own(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
 
     assert client.update_calls == []
     assert "not all present" in result
@@ -700,6 +726,52 @@ def test_polish_lineups_pct_of_rstr_skips_when_column_missing():
 def test_polish_lineups_totals_rows_skips_when_lineups_missing():
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
     result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    assert result == "Lineups: not present -- skipped"
+    assert client.update_calls == []
+
+
+def test_polish_lineups_remaining_per_slot_helper_regenerates_with_derived_letters():
+    # Phase 6, Part 2: moving Venue out of IDENTITY breaks the hand-typed
+    # "average remaining per slot" helper row's `INDIRECT("E"&...)`
+    # reference (E was Venue's old column). Simulate the existing
+    # formula sitting at some arbitrary column (R here, not E -- proving
+    # this is found by content, not assumed position) and confirm it's
+    # rewritten in place with BOTH letters re-derived from the header.
+    header = _HEADER_WITH_AVAIL_AT_Y  # Name=A, Venue=I
+    helper_row = 19  # end (17) + 2
+    old_formula = (
+        '=IF(COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2)))=0,"",'
+        'INDIRECT("E"&(ROW()-1))/COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2))))'
+    )
+    formulas = {f"A{helper_row}:Z{helper_row}": [[""] * 17 + [old_formula] + [""] * (len(header) - 18)]}
+    client = FakeGuardrailsClient(header, formulas=formulas)
+
+    result = polish_lineups_remaining_per_slot_helper(client, "Lineups", name_blocks=[(9, 17)], last_col="Z")
+
+    calls = {a1: rows for a1, rows in client.update_calls}
+    assert calls["R19"] == [
+        [
+            '=IF(COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2)))=0,"",'
+            'INDIRECT("I"&(ROW()-1))/COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2))))'
+        ]
+    ]
+    assert "1 block(s)" in result
+
+
+def test_polish_lineups_remaining_per_slot_helper_skips_a_block_with_no_existing_formula():
+    header = _HEADER_WITH_AVAIL_AT_Y
+    client = FakeGuardrailsClient(header, formulas={})
+
+    result = polish_lineups_remaining_per_slot_helper(client, "Lineups", name_blocks=[(9, 17)], last_col="Z")
+
+    assert client.update_calls == []
+    assert "0 block(s)" in result
+    assert "1 block(s) had no existing formula" in result
+
+
+def test_polish_lineups_remaining_per_slot_helper_skips_when_lineups_missing():
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
+    result = polish_lineups_remaining_per_slot_helper(client, "Lineups", name_blocks=[(9, 17)], last_col="Z")
     assert result == "Lineups: not present -- skipped"
     assert client.update_calls == []
 
@@ -890,11 +962,12 @@ def test_apply_grouped_color_scales_skips_the_grouped_tab_unscaled_columns():
 
 
 def test_apply_grouped_color_scales_scopes_zero_exclusion_to_each_groups_own_range():
-    # Rstr% is zero-excluded (Fix 2.7) -- per-block, the MINIFS formula
-    # must read that BLOCK's own range, not the whole tab, or one
-    # position's unpublished-ownership zeros would pollute another's.
-    assert "Rstr%" in ZERO_EXCLUDED_COLUMNS
-    client = FakeBuilderTabClient(["Name", "Rstr%"])
+    # Own% (renamed from Rstr% in Part 2) is zero-excluded (Fix 2.7) --
+    # per-block, the MINIFS formula must read that BLOCK's own range, not
+    # the whole tab, or one position's unpublished-ownership zeros would
+    # pollute another's.
+    assert "Own%" in ZERO_EXCLUDED_COLUMNS
+    client = FakeBuilderTabClient(["Name", "Own%"])
     apply_grouped_color_scales(client, "Player Pool", client._header, [(3, 12), (14, 33)])
 
     scales_by_range = dict(client.color_scale_calls)
