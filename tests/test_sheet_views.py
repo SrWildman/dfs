@@ -240,6 +240,47 @@ def test_board_header_row_matches_style_boards_column_assumptions():
     assert header[13] == "Flag"
 
 
+def test_best_ceiling_value_ranks_within_position_not_across_the_whole_slate():
+    # Phase 6, Part 1.3: BEST CEILING VALUE used to be one flat SORT by
+    # CeilVal across the whole slate, which reads as ~11 QBs of 12 rows
+    # live (CeilVal is points-per-$1,000 and QBs mechanically dominate it
+    # cross-position). Fixed as 5 independent per-position blocks.
+    client = _CapturingClient()
+    build_board(client, edge_tab="EdgeRaw", games_tab="GamesRaw", weather_tab="WeatherRaw")
+    best_value = client.rows[6][5]  # row 7, panel 2's formula cell (F)
+
+    assert best_value.startswith("={")
+    for position in ("QB", "RB", "WR", "TE", "DST"):
+        assert f'{_rng("EdgeRaw", "Position")}="{position}"' in best_value
+    # Each position's own block is independently constrained -- not one
+    # combined constrain that could still cut a whole position off.
+    assert best_value.count("ARRAY_CONSTRAIN") == 5
+    assert best_value.count(",2,4)") == 5  # 2 rows x 4 cols per position block
+
+
+def test_top_leverage_and_landmines_reference_current_edge_columns():
+    # Phase 6, Part 1.3: found live that Board's formulas go stale the
+    # moment EdgeRaw's own column order changes underneath them (the Sept
+    # 16 CeilPct/OwnPct reorder), since a written formula string doesn't
+    # follow a later column move. This test only pins that build_board
+    # generates against EDGE_COLUMNS at call time -- it can't catch a
+    # regenerate never having been re-run after a real reorder; that's a
+    # process discipline (re-run build-views after any EdgeRaw reorder),
+    # not something a unit test can enforce.
+    client = _CapturingClient()
+    build_board(client, edge_tab="EdgeRaw", games_tab="GamesRaw", weather_tab="WeatherRaw")
+    top_leverage = client.rows[6][0]
+    landmines = client.rows[6][10]
+
+    assert _rng("EdgeRaw", "Leverage") in top_leverage
+    assert _rng("EdgeRaw", "Avail") in landmines
+    assert _rng("EdgeRaw", "Flag") in landmines
+    # The exact stale-reference bug: LANDMINES must never read OwnPct or
+    # Leverage's own columns as a stand-in for Avail/Flag.
+    assert _rng("EdgeRaw", "OwnPct") not in landmines
+    assert _rng("EdgeRaw", "Leverage") not in landmines
+
+
 def test_slate_grid_header_row_matches_style_slate_grids_column_assumptions():
     client = _CapturingClient()
     build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw")

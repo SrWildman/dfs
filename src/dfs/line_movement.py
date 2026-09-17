@@ -16,9 +16,20 @@ from __future__ import annotations
 
 import pandas as pd
 
-# How much a team's Vegas-implied point total has to move before it's
-# flagged -- not derived from anything empirical, a starting point to tune.
-LINE_MOVE_FLAG_THRESHOLD = 1.0
+# Retuned 2026-09-17 (Phase 6, Part 1.1) the same way LEVERAGE_FLAG_THRESHOLD
+# was: against real data, not intuition. The old flat 1.0 fired on 29/30
+# real per-team |TeamPointsDelta| values (96.7%) from the live Week 2 odds
+# history in data/raw/nfl_odds/ (baseline = earliest snapshot on disk,
+# current = latest -- the same fallback dfs sync itself uses when no
+# snapshot exists yet at/after the configured week's own start date) --
+# because derived._flag_for_row returns on the FIRST match and LINE sits
+# above LEVERAGE/CHALK, this was suppressing nearly every other flag in
+# the system. That distribution: mean 2.87, std 1.94, min 0, max 8
+# (quartiles 1.0 / 3.0 / 4.0; sorted values 8,7,5,5,5,5,4,4,4,4,3,3,3,3,3,
+# 3,2,2,2,2,1x8,0 -- a real gap between 5 and 7 with nothing at 6). 6.0
+# sits in that gap and flags 2/30 (6.7%) -- inside the 5-10% target band,
+# same shape of fix as LEVERAGE_FLAG_THRESHOLD's own comment above.
+LINE_MOVE_FLAG_THRESHOLD = 6.0
 
 
 class LineMovementError(Exception):

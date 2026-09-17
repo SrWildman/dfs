@@ -565,20 +565,38 @@ def apply_grouped_color_scales(
 EDGE_WIDTHS = {
     "Id": 90,
     "Name": 165,
-    "Position": 52,
-    "Team": 54,
+    # Phase 6, Part 1.5: Position/ProjPts/Ceiling/CeilPct/ProjOwn/Leverage/
+    # OverUnder/Spread/GameEnv/OppPosRank all clipped live at their old
+    # widths ("Posi", "ProjPt", "Ceilinc", "CeilPc", "ProjO", "Leverag",
+    # "OverU", "Spreac", "GameEn", "OppPosRar") -- nothing checked a
+    # column's width against its own rendered header text. Widened here;
+    # `sheet_audit.py` now has a check so this can't silently regress.
+    "Position": 92,
+    # Widened from 54 -- NOT in the originally-reported list, but found by
+    # actually looking at the rendered sheet (not trusting the pixel
+    # heuristic, which said this one was fine): "Team" clipped to "Tearr"
+    # live.
+    "Team": 66,
     "Opp": 54,
     "Salary": 78,
-    "ProjPts": 62,
-    "ProjOwn": 62,
-    "Ceiling": 64,
-    "Val": 58,
+    "ProjPts": 85,
+    "ProjOwn": 85,
+    "Ceiling": 85,
+    # Widened from 58 -- found by looking at Lineups' own totals row, not
+    # the width-truncation heuristic (which only checks header text):
+    # "Remaining" (polish_lineups_totals_rows' text label, placed in this
+    # column specifically -- see that function's own docstring) clipped
+    # to "Remainin" live. A short numeric Val (e.g. "3.45") never needed
+    # this much room; the totals-row label did.
+    "Val": 80,
     "CeilVal": 68,
-    "CeilPct": 64,
-    "Leverage": 72,
-    "LevBasis": 74,
-    "GameEnv": 76,
-    "OppPosRank": 96,
+    "CeilPct": 85,
+    "Leverage": 92,
+    # Widened from 74 -- same as Team above, found by looking, not by the
+    # heuristic: "LevBasis" clipped to "LevBasi" live.
+    "LevBasis": 90,
+    "GameEnv": 90,
+    "OppPosRank": 115,
     "Stadium": 150,
     "Roof": 76,
     "Wind": 68,
@@ -586,13 +604,18 @@ EDGE_WIDTHS = {
     # Widened from 96: Flag can now hold multiple space-separated tokens
     # (Fix 2.1), e.g. "WIND LINE↑ LEVERAGE".
     "Flag": 170,
-    "ImpliedMove": 78,
+    # Widened from 78 (same width as TotMove/SpdMove, 7 chars each) --
+    # "ImpliedMove" is 11 characters; Fix 2.2 renamed it from the
+    # 8-character "LineMove" without widening its column to match.
+    "ImpliedMove": 105,
     "TotMove": 78,
     "SpdMove": 78,
     "GameStart": 132,
-    "OwnPct": 68,
-    "OverUnder": 62,
-    "Spread": 62,
+    # Widened from 68 -- same as Team/LevBasis above: "OwnPct" clipped to
+    # "OwnPc" live despite passing the width-floor heuristic.
+    "OwnPct": 82,
+    "OverUnder": 105,
+    "Spread": 78,
 }
 
 # Stadium/Roof/Wind are deliberately NOT grouped here (Fix 2.9) -- Sam
@@ -950,12 +973,28 @@ BUILDER_WIDTHS = {
     "Opp.": 54,
     "Venue": 56,
     "DK Sal": 78,
-    "% of Rstr": 72,
+    # Widened from 72 -- Phase 6, Part 1.5's own audit-style check (built
+    # for EdgeRaw) also caught this one truncating live once run against
+    # every audited tab, the same bug class just outside 1.5's original
+    # scope.
+    "% of Rstr": 90,
     "Source": 64,
     "Pool": 64,
     "Edge ↗": 64,
     "Used": 52,
     "In": 96,
+    # "Team Implied"/"Ceil"/"Overflow" had NO entry here at all before this
+    # -- PlayerPoolRaw/Player Pool/Lineups' own `polish_builder_tab` only
+    # sets a width for a name it finds IN this dict (see its own width
+    # loop below), so an absent entry means "whatever the column
+    # currently is," never actively managed. Found live: "Team Implied"
+    # sat at two DIFFERENT widths on PlayerPoolRaw (81px) and Player Pool
+    # (57px), both too narrow -- consistent with nothing ever having set
+    # either on purpose. Added explicitly so all three tabs converge to
+    # the same, sufficient width and self-heal on every future polish run.
+    "Team Implied": 115,
+    "Ceil": 56,
+    "Overflow": 88,
 }
 
 
@@ -1193,10 +1232,23 @@ def polish_lineups_totals_rows(
     row the same way Pts already is (only Salary and Pts were summed
     before; Sam had been hand-editing Ceil totals into lineups), and
     labels the row so it reads as a footer rather than a broken slot.
-    Rstr% and Issues are left alone -- both already hold real, working
-    formulas on the totals row (a real `SUM`, and the real cap/
-    completeness check respectively), not dead VLOOKUPs, despite sitting
-    near the columns that do.
+    Issues is left alone -- it already holds the real cap/completeness
+    check, not a dead VLOOKUP, despite sitting near the columns that do.
+
+    Phase 6, Part 1 (2026-09-17): Pts and Rstr%'s totals-row cells are
+    ALSO now unconditionally overwritten with a real `SUM`, not left
+    alone. They were assumed (see the paragraph above, before this fix)
+    to "already hold real, working formulas" -- verified false live: only
+    5 of 20 blocks (0, 1, 2, 3, 6) actually had `=SUM(...)`; the other 15
+    had `=VLOOKUP($A<row>,PlayerPoolRaw!$A:S,11,false)` /
+    `,14,false)` sitting in Pts/Rstr% instead -- a lookup against the
+    totals row's own permanently-blank Name cell, which resolves to
+    `#N/A` the moment a lineup in one of those blocks is built. Not
+    written by any `dfs` command (same as Salary's own totals-row SUM,
+    which was and still is correct on every block) -- likely a stale
+    hand-edit or an incomplete copy/paste, not a code defect. Fixed the
+    same self-healing way Ceil already was: derived from `name_blocks`,
+    rewritten unconditionally on every call.
 
     "Total" and "Remaining" both sit close to the number they describe --
     Opp. (left of the Salary sum) and Val (right of the Pts sum), both
@@ -1243,6 +1295,8 @@ def polish_lineups_totals_rows(
         c for c in ("O/U", "Spread", "Team Implied", "OppPosRank", *LINKED_EDGE_COLUMNS) if col(c)
     ]
     ceil_col = col("Ceil")
+    pts_col = col("Pts")
+    rstr_col = col("Rstr%")
     salary_col = col("DK Sal")
     remaining_col = col("Venue")  # must stay a bare number -- see docstring
     remaining_label_col = col("Val")
@@ -1269,6 +1323,14 @@ def polish_lineups_totals_rows(
             ceil_sum = f"=SUM({ceil_col}{start}:{ceil_col}{end})"
             client.update_range(tab, f"{ceil_col}{totals_row}", [[ceil_sum]])
             summed += 1
+        if pts_col:
+            pts_sum = f"=SUM({pts_col}{start}:{pts_col}{end})"
+            client.update_range(tab, f"{pts_col}{totals_row}", [[pts_sum]])
+            summed += 1
+        if rstr_col:
+            rstr_sum = f"=SUM({rstr_col}{start}:{rstr_col}{end})"
+            client.update_range(tab, f"{rstr_col}{totals_row}", [[rstr_sum]])
+            summed += 1
         if total_label_col:
             client.update_range(tab, f"{total_label_col}{totals_row}", [["Total"]])
             labeled += 1
@@ -1291,8 +1353,66 @@ def polish_lineups_totals_rows(
 
     return (
         f"{tab}: {len(name_blocks)} totals row(s) -- {cleared} dead VLOOKUP(s) cleared, "
-        f"{summed} Ceil sum(s) added, {labeled} label(s) written, {reset} Name cell(s) un-typo-guarded"
+        f"{summed} sum(s) written (Ceil/Pts/Rstr%), {labeled} label(s) written, "
+        f"{reset} Name cell(s) un-typo-guarded"
     )
+
+
+def polish_lineups_pct_of_rstr(
+    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+) -> str:
+    """Phase 6, Part 1.2: `% of Rstr` (`=F<row>/F$<totals_row>`, this
+    player's DK Sal as a share of the lineup's own running salary total)
+    divided by zero on every roster slot of a fresh lineup, since the
+    block's total salary is 0 until at least one name is typed --
+    `#DIV/0!` on all 180 slot rows. Not written by any `dfs` command (a
+    genuinely hand-authored template formula, like the "average remaining
+    per slot" helper documented in docs/SHEET_REFERENCE.md); this is the
+    first Python-side rewrite of it.
+
+    Guarded two ways, both yielding blank rather than 0 -- "an empty slot
+    has no share" (Sam's own framing for this bug), not zero, which reads
+    as a real value: the whole block being empty (`F$<totals_row>=0`,
+    the #DIV/0! case), and an individual blank slot once other slots in
+    the same block ARE filled (`$A<row>=""`, which would otherwise
+    silently compute a real 0% for a slot nobody's picked yet).
+
+    `% of Rstr` is a temporary name -- Part 7.9 renames this column to
+    `% of Cap` and changes the denominator to the salary cap entirely,
+    which makes the block-empty guard here moot (a constant denominator
+    can't divide by zero) but leaves the blank-slot guard still needed.
+    This function's own formula gets fully superseded then; kept here,
+    not folded into the standing `dfs setup polish` pipeline, since it's
+    a one-time fix for a formula this codebase doesn't already own.
+    """
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: no header found at row {header_row} -- skipped"
+
+    def col(name: str) -> str | None:
+        return column_letter(header.index(name)) if name in header else None
+
+    name_col = col("Name")
+    salary_col = col("DK Sal")
+    pct_col = col("% of Rstr")
+    if not (name_col and salary_col and pct_col):
+        return f"{tab}: 'Name'/'DK Sal'/'% of Rstr' not all present -- skipped"
+
+    written = 0
+    for start, end in name_blocks:
+        totals_row = end + 1
+        for row in range(start, end + 1):
+            formula = (
+                f'=IF(OR({name_col}{row}="",{salary_col}${totals_row}=0),"",'
+                f"{salary_col}{row}/{salary_col}${totals_row})"
+            )
+            client.update_range(tab, f"{pct_col}{row}", [[formula]])
+            written += 1
+
+    return f"{tab}: '% of Rstr' guarded against #DIV/0! for {written} row(s)"
 
 
 def polish_guardrails(
@@ -1692,9 +1812,20 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         {
             "A": 160,
             "B": 74,
-            "C": 64,
+            # Widened from 64 -- Phase 6, Part 1.3: row 2's "Highest total"
+            # label clipped to "Highest tota" live. C doubles as panel 1's
+            # narrower "Lev" body column (rows 7+), which this widening
+            # affects too -- a minor, acceptable tradeoff (Part 3 rebuilds
+            # this whole tab regardless), not worth a second, row-specific
+            # width mechanism this codebase doesn't otherwise have.
+            "C": 110,
             "D": 72,
-            "E": 24,
+            # Widened from 24 -- Phase 6, Part 1.3: row 2's "Max wind"
+            # label clipped to "Max" live. E also doubles as the visual
+            # spacer between panels 1 and 2 (rows 5+, see the spacer-fill
+            # loop below) -- a wider gap there is a smaller cosmetic cost
+            # than a clipped label, and again temporary (see C above).
+            "E": 75,
             "F": 160,
             "G": 74,
             "H": 82,
@@ -1798,7 +1929,10 @@ def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:
 _MOVEMENT_WIDTHS = {
     "Player": 165,
     "Pos": 92,
-    "Implied move": 92,
+    # Widened from 92 -- Phase 6, Part 1.5's own audit-style check caught
+    # this one truncating live ("Implied move" is longer than "Total
+    # move"/"Spread move", the only one of the three that didn't fit).
+    "Implied move": 110,
     "Total move": 92,
     "Spread move": 92,
     "Kickoff (UTC)": 152,

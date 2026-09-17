@@ -97,10 +97,20 @@ row order still ranks usefully in that window (see below), it's only the
 `Leverage`/`OwnPct` *columns* that go blank.
 
 `LevBasis` names which case is in effect, computed once for the whole
-frame (not per player): `"real"` the moment *any* player that sync has
-non-zero `ProjOwn`, else `"unpublished"`. It has exactly one job now: a
-data-freshness marker telling you whether ownership has been published
-yet, not a second formula to reason about.
+frame (not per player): `"real"` once ownership is published for **more
+than half the slate** (`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`), else
+`"unpublished"`. It has exactly one job now: a data-freshness marker
+telling you whether ownership has been published yet, not a second
+formula to reason about.
+
+**Phase 6, Part 1.4 (2026-09-17):** this used to be `.any()` -- a single
+non-zero `ProjOwn` (one early-published player, a data glitch, a bye-week
+artifact) flipped the WHOLE slate to `"real"`, computing `OwnPct`/
+`Leverage` as a percentile over a column that was still ~99% zeros for
+everyone else. Reproduced live before the fix: `LevBasis` read `"real"`
+while every `ProjOwn` on `EdgeRaw` still read `0.0%` and every `Leverage`
+cell was blank. A share threshold requires ownership to be genuinely
+published for a majority of the slate, not just present for one player.
 
 **Sort order.** `build_edge_frame` sorts the frame by `Leverage`
 descending once ownership is real, or by `CeilPct` descending while
@@ -215,14 +225,28 @@ of another, so this can't cross-match):
 |---|---|---|
 | 1 | `OUT` | `Avail` is `OUT` or `IR` |
 | 2 | `WIND` | `Wind ≥ 20` mph |
-| 3 | `LINE↑` | `ImpliedMove ≥ +1.0` |
-| 3 | `LINE↓` | `ImpliedMove ≤ −1.0` |
+| 3 | `LINE↑` | `ImpliedMove ≥ +6.0` |
+| 3 | `LINE↓` | `ImpliedMove ≤ −6.0` |
 | 4 | `LEVERAGE` | `Leverage ≥ 30` (blank `Leverage` while unpublished can never clear this) |
 | 5 | `CHALK` | `ProjOwn ≥ 20%` -- can only fire once ownership is real; `ProjOwn` reads 0 for everyone until then |
 | — | *(blank)* | none of the above |
 
-`WIND_FLAG_THRESHOLD_MPH = 20.0` and `LINE_MOVE_FLAG_THRESHOLD = 1.0` are
-starting points, not empirically derived. `LEVERAGE_FLAG_THRESHOLD = 30.0`
+`WIND_FLAG_THRESHOLD_MPH = 20.0` is a starting point, not empirically
+derived. `LINE_MOVE_FLAG_THRESHOLD = 6.0` **was** retuned (Phase 6, Part
+1.1, 2026-09-17) the same way `LEVERAGE_FLAG_THRESHOLD` below was: the old
+flat `1.0` fired on **95.7% of the real live Week 2 slate** (605 players
+with a real `ImpliedMove`) -- because `_flag_for_row` returns every
+matching flag but LINE sits above LEVERAGE/CHALK in read priority, this
+was drowning out every other flag. Retuned against the real odds-snapshot
+history in `data/raw/nfl_odds/` (30 real per-team `|TeamPointsDelta|`
+values: mean 2.87, std 1.94, quartiles 1.0/3.0/4.0, a real gap between 5
+and 7 with nothing at 6) to `6.0`, which re-synced live to **4.5%** --
+just under the 5-10% target band on that one day's real pull (6.7% on the
+historical sample used to pick it), which is expected day-to-day variance
+around a threshold tuned from history, not a sign it needs re-tuning
+again from a single moment's read.
+
+`LEVERAGE_FLAG_THRESHOLD = 30.0`
 and `CHALK_OWNERSHIP_THRESHOLD = 20.0` **were** checked against a real
 744-player Week 1 slate with real ownership published, after the scale
 fix above: that slate's `Leverage` distribution was mean -0.01, std 16.7,

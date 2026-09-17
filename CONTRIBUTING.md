@@ -345,6 +345,166 @@ Final rule counts, read back live on both sheets (not asserted from the code): `
 1. **Row 1's dark header fill leaking onto columns that should be plain white.** `sheet_pool_control.ensure_pool_control_row`'s original reset-to-white step only ever ran ONCE (gated behind `if not migrated`) and only ever covered a hardcoded `A:Z` -- both correct assumptions the one time this shipped (Phase 5A, when the tab was exactly that wide), neither true any more. Every column added or moved since (`Edge ↗`'s own insert, the whole WEATHER/MOVEMENT/INTERNAL zone, `Used`/`In`, this session's `OppPosRank`) could inherit a stray dark fill into its own row-1 cell via `insertDimension`'s inherit-from-neighbor behavior or a reorder's `moveDimension` carrying formatting along with a column -- and nothing ever reset it again. Invisible the entire time Player Pool was empty (nothing to look at up there); visible the instant real players filled the rows below and drew the eye upward. Fixed at the root: the reset now runs on EVERY call (not just first migration) and covers the tab's own CURRENT width, read fresh from row 2's real header each time (`column_letter(max(len(header), 26) - 1)`, so a genuinely-narrow fresh tab still gets the original generous `A:Z` floor) -- self-healing for whatever gets added next, rather than needing a fourth incident to notice again. Applied live via a direct call to `ensure_pool_control_row` (not the full `dfs setup polish`) on both sheets; re-verified via `get_cell_formats` that every row-1 cell reads plain white except `A1`/`B1`'s own intentional styling.
 2. **`Player Pool`'s `In` column showing "L1, L2, ..., L20" on rows with no player at all.** `sheet_pool_usage._in_formula` was missing the exact blank-name guard `_used_formula` right next to it already has -- `COUNTIF(range, "")` counts truly EMPTY cells in `range` as matches, so a blank Player Pool name cell matched every still-empty Lineups block (all 20, since no real lineups exist yet this week) and printed every lineup label instead of nothing. Invisible until a genuinely-blank row sat next to a real, non-blank one for someone to compare against and notice the blank one wasn't actually blank. Fixed by wrapping the whole formula in the same `IF({name_cell}="","",...)` guard `_used_formula` uses. Verified live: a blank row's `In` cell now reads empty; the two real pooled players (still rostered nowhere, since no real lineups are built yet) correctly read empty too, not "in every lineup."
 
+## Phase 6, Part 1 (2026-09-17): the five bugs, shipped as their own commit before any structural work
+
+Sam's own instruction: land and verify this before touching Part 2 (the
+column spine reorder), so that work isn't building on top of broken
+cells. No structural move in this part -- no changelog table row -- but
+enough real findings to warrant a full write-up, the same as Phase 4/5's
+non-structural incidents above.
+
+**1.1 -- `LINE_MOVE_FLAG_THRESHOLD` retuned, 1.0 -> 6.0.** See
+`docs/CALCULATIONS.md`'s `Flag` section for the full distribution and the
+before/after numbers (95.7% -> 4.5% on the real live Week 2 slate,
+verified by re-running `dfs sync --only edge` and reading `ImpliedMove`
+back directly, not by trusting the sync's own "ok" status).
+
+**1.2 -- `Lineups`' `% of Rstr` `#DIV/0!`, and a new one-time repair
+command.** Verified live first: `L2 = =F2/F$11`, dividing by the block's
+own running salary total, which is 0 until a name is typed -- `#DIV/0!`
+on all 180 slot rows on a fresh week. Not written by any `dfs` command
+(hand-authored in the template, like the "average remaining per slot"
+helper documented in `docs/SHEET_REFERENCE.md`), so this is the first
+Python-side ownership of it: new `sheet_style.polish_lineups_pct_of_rstr`
+/ `dfs setup fix-pct-of-rstr`, guarding both the whole-block-empty case
+and the individual-blank-slot case (an empty slot reads blank now, not a
+real-looking `0.0%`). Run against both sheets; verified live afterward by
+reading `Lineups!L2`'s actual formula back, not just the command's "OK."
+
+**1.3 -- Board's three panels, two different failure classes.**
+
+1. **`TOP LEVERAGE` and `LANDMINES` were reading stale EdgeRaw column
+   references, not a formatting bug.** The spec's own diagnosis for
+   `TOP LEVERAGE` ("blank Leverage renders as 0.0 due to number format")
+   turned out to be wrong when checked against the tab's real formula:
+   `build_board` bakes `EDGE_COLUMNS` positions into a written formula
+   string at the moment it's called, and hadn't been re-run since the
+   Sept 16 `CeilPct`/`OwnPct` reorder shifted every column after
+   `CeilVal`/`ProjOwn` two slots right. `TOP LEVERAGE`'s "Lev" column was
+   silently reading `ProjOwn` (genuinely 0.0 pre-midweek, which is
+   exactly what made the wrong diagnosis look plausible), and
+   `LANDMINES`'s filter was reading `OwnPct`/`Leverage` (numbers) where
+   it expected `Avail`/`Flag` (text), so its `SEARCH("WIND"/"OUT", ...)`
+   conditions essentially never matched -- explaining "renders 0.0" and
+   "is empty" without either being a formatting issue at all. Fixed by
+   re-running `dfs setup build-views` (regenerates every formula fresh
+   against the CURRENT `EDGE_COLUMNS`), verified live: real Leverage
+   numbers, and `LANDMINES` populated with real `OUT`/`Q`/`D` players and
+   their flags on the live Week 2 slate. **Standing lesson for Part 2's
+   own reorder:** any tab whose formulas were generated by baking in
+   `EDGE_COLUMNS` positions at write time (Board is not the only one)
+   must be regenerated again after that reorder ships, not just after
+   this one.
+2. **`BEST CEILING VALUE` was a real design bug, not stale data.**
+   `CeilVal` (points per $1,000) isn't comparable across positions, so a
+   flat `SORT` by `CeilVal` read as ~11 QBs of 12 rows on a real slate.
+   Rebuilt as five independent per-position blocks (`_best_value_block`),
+   2 rows each, vertically stacked -- verified live: exactly QB, QB, RB,
+   RB, WR, WR, TE, TE, DST, DST.
+3. **Row 2's summary labels, a genuine layout conflict, not just a width
+   fix.** `style_board` reuses the same physical columns for row 2's
+   summary stats (`C`/`E` hold "Highest total"/"Max wind") that the
+   panels below use for `Lev`/a visual spacer -- so `C`/`E` were sized for
+   the panel, not the label, and "Highest total"/"Max wind" clipped to
+   "Highest tota"/"Max" live. Widened `C` (64 -> 110) and `E` (24 -> 75);
+   accepted as a temporary, minor cosmetic cost to the panel/spacer below
+   (Part 3 rebuilds this whole tab again shortly).
+
+**1.4 -- `has_real_ownership` was `.any()`, not a share.** See
+`docs/CALCULATIONS.md`'s `OwnPct, Leverage and LevBasis` section. New
+`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`.
+
+**1.5 -- truncated EdgeRaw headers, and a lesson about trusting a pixel
+heuristic over actually looking.** The ten headers named in the spec
+(`Position`/`ProjPts`/`Ceiling`/`CeilPct`/`ProjOwn`/`Leverage`/
+`OverUnder`/`Spread`/`GameEnv`/`OppPosRank`) were widened in `EDGE_WIDTHS`,
+and a new `sheet_audit.py` check (`_min_header_width_px`, a deliberately
+low-calibrated floor -- see its own comment) flags any column whose width
+falls below what its header text needs. Sam, mid-fix: **"Make sure you're
+visibly validating these widths too. Not just using numbers. I'll never
+see the numbers, only the sheet."** That instinct caught real bugs the
+heuristic missed on both sides:
+
+- **False negatives** (heuristic said "fine," the live sheet did not):
+  `Team` (54px) clipped to "Tearr", `OwnPct` (68px) to "OwnPc", `LevBasis`
+  (74px) to "LevBasi" -- none of the three were in the originally-reported
+  list, all three found only by opening the template in a browser and
+  zooming into the real rendered header row. Widened to 66/82/90px.
+- **A related, non-header truncation found the same way**: `Lineups`'
+  totals-row "Remaining" label (written by `polish_lineups_totals_rows`
+  into the `Val` column) clipped to "Remainin" -- `Val`'s 58px width was
+  sized for a short number, never for the 9-character label a totals row
+  puts there. Widened `Val` to 80px.
+- **A false positive** (heuristic said "truncated," the live sheet did
+  not): `Player Pool`'s `O/U` (33px, heuristic floor ~37px) renders in
+  full -- a short two-character-plus-slash header needs less room than
+  the floor assumes. Left as-is; the check stays deliberately generous
+  rather than chasing every few-pixel margin.
+- **Extended scope, per Sam's own call** ("widen those too" over scoping
+  the check back to EdgeRaw only): the identical pattern existed on
+  `BUILDER_WIDTHS` (shared by `PlayerPoolRaw`/`Player Pool`/`Lineups`) and
+  `_MOVEMENT_WIDTHS`. `Team Implied` had NO entry in `BUILDER_WIDTHS` at
+  all (only ever managed by `EDGE_WIDTHS`'s own spread) and sat at two
+  DIFFERENT widths on two tabs (81px, 57px) -- consistent with nothing
+  ever having set either on purpose; same story for `Ceil`/`Overflow`.
+  `Movement`'s `Implied move` (92px, 11 characters) had never been
+  widened past `Total move`/`Spread move`'s own width (7 characters each)
+  when Fix 2.2 renamed it from the 8-character `LineMove`.
+- **Not fixed, out of scope on purpose:** `Results`' `Black/White/Purple`
+  header (110px, genuinely clipped to "Black/White/P" live) is Sam's own
+  hand-typed team-colour label on a column `dfs` code has never managed
+  the width of (`docs/SHEET_REFERENCE.md`: columns H/I/J on `Results`
+  "stay yours to maintain by hand"). The audit check still reports it --
+  correctly, since it IS truncated -- but widening it isn't this
+  codebase's call to make unilaterally for a hand-typed label. Flagged to
+  Sam; his to fix by hand if he wants it wider.
+
+**A live rate-limit lesson, same shape as Section J's, worth repeating
+for the next `dfs setup polish`-heavy session:** several consecutive full
+`dfs setup polish` runs in a short window (three total, chasing three
+rounds of width fixes) escalated from gspread's normal patient backoff
+into hard `ConnectionError`s (ended a wait, immediately re-hit `[429]
+Quota exceeded ... Write requests per minute per user`) -- worse than the
+plain 429-and-wait pattern documented earlier, and it did not clear on
+its own within the next couple of minutes either. Recovered two ways:
+waiting several real minutes before the next attempt, and -- the more
+effective fix, same lesson as Section J's `polish_edge`-alone recovery --
+calling `polish_edge`/`polish_builder_tab` directly for only the four
+width-affected tabs instead of the full pipeline, which finished in
+seconds. A process left running 50+ minutes with only ~10 seconds of real
+CPU time (`ps`'s own `TIME` column, not `ELAPSED`) is the tell that it's
+stuck in this pattern rather than doing real work -- worth checking
+before assuming a long-running `dfs setup polish` is merely slow.
+
+**Also found and fixed, not in the original five/six but caught verifying
+1.2's own block formulas -- a real, live correctness bug affecting most
+of Sam's lineup slots.** `Lineups`' per-block totals row is supposed to
+sum `Pts`/`Rstr%` across that block (`=SUM(...)`, same shape as the
+already-correct `Salary`/`Ceil` sums) -- verified live that only 5 of 20
+blocks (0, 1, 2, 3, 6) actually had that. The other 15 had
+`=VLOOKUP($A<totals_row>,PlayerPoolRaw!$A:S,11,false)` (or `,14,false` for
+Rstr%) instead -- a lookup against the totals row's own permanently-blank
+Name cell, which resolves to `#N/A` the moment a lineup in one of those
+blocks is built. Not written by any `dfs` command --
+`polish_lineups_totals_rows`'s own docstring had assumed (before this
+fix) that Pts/Rstr% "already hold real, working formulas," which was true
+for only a quarter of the blocks; likely a stale hand-edit or an
+incomplete copy/paste, not a code defect. Fixed the same self-healing way
+`Ceil`'s own sum already was: unconditionally rewritten from
+`name_blocks` on every call. Verified live on all 20 blocks post-fix
+(`dfs setup polish`'s own summary: "60 sum(s) written (Ceil/Pts/Rstr%)"),
+and spot-checked the previously-corrupted last block directly
+(`Lineups!G258`/`K258`, both real `SUM`s now, not the old `VLOOKUP`).
+
+**1.6 -- dead CLI commands removed.** `dfs sheets add-pool-deck` and `dfs
+sheets add-pool-picks` (both `sheets_app` compatibility aliases that had
+drifted to mean something different from their own names -- "add" a deck
+that no longer exists, redirecting to remove it) and `dfs setup
+remove-pool-picks` (the `Pool Picks` tab itself is long gone) are deleted
+outright. `dfs setup remove-pool-deck` is kept -- unlike the other three,
+a real un-migrated sheet could still have a deck on it -- with its
+short-help/docstring now saying so explicitly.
+
 This has already gone stale more than once: `EDGE_COLUMNS` gained columns
 that `README.md`/`docs/SHEET_REFERENCE.md` didn't mention, and the
 Instructions tab's "Weekly workflow" step-by-step and its EdgeRaw column

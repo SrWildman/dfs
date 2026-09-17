@@ -31,6 +31,34 @@ from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 # see SheetsClient.get_column_widths' own docstring.
 _DEFAULT_COLUMN_PX = 100
 
+# Rough floor for the pixel width a bold header label needs to render in
+# full at Sheets' default zoom -- Phase 6, Part 1.5: EDGE_WIDTHS set a
+# pixel width per column but nothing checked it against the actual
+# rendered header text, so ten headers truncated live ("Posi", "ProjPt",
+# "Ceilinc", "CeilPc", "ProjO", "Leverag", "OverU", "Spreac", "GameEn",
+# "OppPosRar") with nothing to catch it.
+#
+# Calibrated deliberately LOW, not to reproduce Sheets' exact per-glyph
+# rendering (impossible from a character count alone -- e.g. "CeilVal" at
+# 68px renders fine live while "Ceiling"/"CeilPct" at 64px, also 7
+# characters, both clip: the real boundary is per-glyph, not per-count)
+# but so every column ALREADY known to render fine live (Avail 60px/5ch,
+# Team 54px/4ch, Opp 54px/3ch, Val 58px/3ch, Salary 78px/6ch, CeilVal
+# 68px/7ch, LevBasis 74px/8ch, Roof 76px/4ch, Wind 68px/4ch, OwnPct
+# 68px/6ch) stays comfortably above this floor. A false negative (real
+# truncation this floor is too generous to catch) is possible at that
+# same fine margin; a false positive (flagging a column that's actually
+# fine) is not, by construction against the data above -- and either way
+# this catches a column shrunk well below where it needs to be, which is
+# the actual regression this check exists to catch.
+_HEADER_PX_PER_CHAR = 6.5
+_HEADER_PX_PADDING = 18
+
+
+def _min_header_width_px(text: str) -> int:
+    return int(_HEADER_PX_PADDING + _HEADER_PX_PER_CHAR * len(text))
+
+
 _HEADER_BG = HEADER_FMT["backgroundColor"]
 
 # (tab, header_row) for every tab this audit's single-header-row model
@@ -136,6 +164,17 @@ def audit_tab(client: SheetsClient, tab: str, *, header_row: int) -> TabAudit:
     ]
     if no_width:
         audit.issues.append(f"no explicit width: {', '.join(no_width)}")
+
+    too_narrow = []
+    for i, name in enumerate(header):
+        if not name or (i < len(widths) and widths[i].get("hiddenByUser")):
+            continue
+        pixel_size = widths[i].get("pixelSize", _DEFAULT_COLUMN_PX) if i < len(widths) else _DEFAULT_COLUMN_PX
+        needed = _min_header_width_px(name)
+        if pixel_size < needed:
+            too_narrow.append(f"{column_letter(i)} ({name!r}: {pixel_size}px < ~{needed}px)")
+    if too_narrow:
+        audit.issues.append(f"header text likely truncated: {', '.join(too_narrow)}")
 
     data_row = header_row + 1
     data_fmt = client.get_cell_formats(tab, f"A{data_row}:{last_col}{data_row}")

@@ -6,6 +6,7 @@ from dfs.derived import (
     LEV_BASIS_REAL,
     LEV_BASIS_UNPUBLISHED,
     LEVERAGE_FLAG_THRESHOLD,
+    LINE_MOVE_FLAG_THRESHOLD,
     build_edge_frame,
 )
 
@@ -115,20 +116,45 @@ def test_leverage_and_ownpct_are_blank_when_all_projown_is_zero():
     assert frame["Name"].tolist() == ["High ceiling", "Low ceiling"]
 
 
-def test_leverage_is_ceilpct_minus_ownpct_once_any_player_has_nonzero_projown():
+def test_leverage_is_ceilpct_minus_ownpct_once_ownership_is_published_for_most_of_the_slate():
     proj = _projections(
         [
             {"Id": "1", "Name": "A", "Position": "RB", "Ceiling": 40.0, "ProjOwn": 30.0},
-            {"Id": "2", "Name": "B", "Position": "RB", "Ceiling": 10.0, "ProjOwn": 0},
+            {"Id": "2", "Name": "B", "Position": "RB", "Ceiling": 10.0, "ProjOwn": 5.0},
+            {"Id": "3", "Name": "C", "Position": "RB", "Ceiling": 20.0, "ProjOwn": 0},
         ]
     )
-    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}])
 
     frame = build_edge_frame(proj, sal).frame
 
     assert (frame["LevBasis"] == LEV_BASIS_REAL).all()
     for _, row in frame.iterrows():
         assert row["Leverage"] == round(row["CeilPct"] - row["OwnPct"], 1)
+
+
+def test_a_single_early_nonzero_projown_does_not_flip_the_whole_slate_to_real():
+    # Phase 6, Part 1.4: `.any()` used to mean one early-published (or
+    # glitched) non-zero ProjOwn switched the ENTIRE slate to "real" --
+    # reproduced live: LevBasis read "real" while every other ProjOwn on
+    # EdgeRaw still read 0.0% and every Leverage cell was blank. A share
+    # threshold (more than half the slate) requires ownership to be
+    # genuinely published, not just present for one player.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "A", "Position": "RB", "Ceiling": 40.0, "ProjOwn": 30.0},
+            {"Id": "2", "Name": "B", "Position": "RB", "Ceiling": 10.0, "ProjOwn": 0},
+            {"Id": "3", "Name": "C", "Position": "RB", "Ceiling": 20.0, "ProjOwn": 0},
+            {"Id": "4", "Name": "D", "Position": "RB", "Ceiling": 30.0, "ProjOwn": 0},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}, {"ID": "4"}])
+
+    frame = build_edge_frame(proj, sal).frame
+
+    assert (frame["LevBasis"] == LEV_BASIS_UNPUBLISHED).all()
+    assert frame["Leverage"].isna().all()
+    assert frame["OwnPct"].isna().all()
 
 
 def test_ownpct_is_percentile_rank_of_projown_within_position_not_raw_percentage():
@@ -393,12 +419,13 @@ def test_line_move_joined_by_team_and_flagged():
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
     )
     sal = _salaries([{"ID": "1"}])
+    delta = LINE_MOVE_FLAG_THRESHOLD
     line_movement = pd.DataFrame(
-        [{"Abbr": "DET", "TeamPointsDelta": 2.5, "TotalDelta": 1.0, "SpreadDelta": -0.5}]
+        [{"Abbr": "DET", "TeamPointsDelta": delta, "TotalDelta": 1.0, "SpreadDelta": -0.5}]
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["ImpliedMove"] == 2.5
+    assert row["ImpliedMove"] == delta
     assert row["TotMove"] == 1.0
     assert row["SpdMove"] == -0.5
     assert row["Flag"] == "LINE↑"
@@ -410,7 +437,7 @@ def test_line_move_down_flag():
     )
     sal = _salaries([{"ID": "1"}])
     line_movement = pd.DataFrame(
-        [{"Abbr": "DET", "TeamPointsDelta": -2.5, "TotalDelta": 0.0, "SpreadDelta": 0.0}]
+        [{"Abbr": "DET", "TeamPointsDelta": -LINE_MOVE_FLAG_THRESHOLD, "TotalDelta": 0.0, "SpreadDelta": 0.0}]
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
@@ -440,7 +467,7 @@ def test_out_and_line_move_flags_both_shown_out_first():
     )
     sal = _salaries([{"ID": "1", "Status": "OUT"}])
     line_movement = pd.DataFrame(
-        [{"Abbr": "DET", "TeamPointsDelta": 2.5, "TotalDelta": 0.0, "SpreadDelta": 0.0}]
+        [{"Abbr": "DET", "TeamPointsDelta": LINE_MOVE_FLAG_THRESHOLD, "TotalDelta": 0.0, "SpreadDelta": 0.0}]
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]

@@ -81,6 +81,28 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     banner in row 3 still says out loud which case is in effect, since a
     ceiling ranking and a leverage ranking answer different questions even
     though they can share a column.
+
+    Phase 6, Part 1.3 (2026-09-17): `BEST CEILING VALUE` used to be one
+    flat `SORT` by `CeilVal` descending across the whole slate --
+    `CeilVal` (points per $1,000) isn't comparable across positions, so
+    it read 11 QBs out of 12 rows on a real slate, not "best value at
+    each position." Rebuilt as five independent per-position blocks
+    (`_best_value_block`), each ranking `CeilVal` within its own position
+    only, vertically stacked -- the same fix class `sheet_style.
+    apply_grouped_color_scales` already applies to colour scales for the
+    identical reason. Every panel here (this one included) is regenerated
+    fresh every call against the CURRENT `EDGE_COLUMNS` layout via `_rng`/
+    `_col` -- this function must be re-run after any EdgeRaw column
+    reorder (Part 2 does one), since a formula string, once written, does
+    NOT follow a later column move the way a live formula reference would
+    -- found live 2026-09-17: the Sept 16 CeilPct/OwnPct reorder shifted
+    every EdgeRaw column after CeilVal/ProjOwn two slots right, and
+    because this tab was never regenerated afterward, `TOP LEVERAGE` was
+    silently reading `ProjOwn` (coincidentally also 0.0 pre-midweek, which
+    is what made it look like a formatting bug) and `LANDMINES` was
+    silently reading `OwnPct`/`Leverage` where it expected `Avail`/`Flag`
+    -- explaining both "renders 0.0" and "is empty" without either being
+    what the original bug report assumed.
     """
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
@@ -109,10 +131,24 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
         f"=IFERROR(ARRAY_CONSTRAIN(FILTER("
         f'{{{name},{pos}&" "&{team},{lev},{ceilval}}},{live},{not_out}),12,4),"")'
     )
-    best_value = (
-        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-        f'{{{name},{pos}&" "&{team},{salary},{ceilval}}},{live},{not_out}),4,FALSE),12,4),"")'
-    )
+    # Ranked WITHIN position, not across the whole slate -- see this
+    # function's docstring. 2 rows per position (5 positions = 10 rows) is
+    # a plain vertical count, not a total cut: unlike ARRAY_CONSTRAIN-ing
+    # ONE combined 12-row result (which would still show whichever
+    # position happens to sort first, cutting off the rest), stacking
+    # fixed-size per-position blocks guarantees every position is
+    # represented every time.
+    _BEST_VALUE_ROWS_PER_POSITION = 2
+
+    def _best_value_block(position: str) -> str:
+        is_position = f'{pos}="{position}"'
+        return (
+            f"IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
+            f'{{{name},{pos}&" "&{team},{salary},{ceilval}}},{live},{not_out},{is_position}),4,FALSE),'
+            f'{_BEST_VALUE_ROWS_PER_POSITION},4),{{"","","",""}})'
+        )
+
+    best_value = "={" + ";".join(_best_value_block(p) for p in ("QB", "RB", "WR", "TE", "DST")) + "}"
     landmines = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f'{{{name},{pos}&" "&{team},{avail},{flag}}},{live},'

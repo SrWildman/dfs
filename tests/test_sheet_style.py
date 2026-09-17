@@ -34,6 +34,7 @@ from dfs.sheet_style import (
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
+    polish_lineups_pct_of_rstr,
     polish_lineups_totals_rows,
     style_flat_tab,
     style_movement,
@@ -577,8 +578,13 @@ def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
     for letter in ("E", "F", "G", "J", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"):
         assert calls[f"{letter}{totals_row}"] == [[""]]
 
-    # Ceil summed, same shape as the pre-existing Pts/Salary sums.
+    # Ceil, Pts and Rstr% all (re)summed unconditionally -- Phase 6, Part 1:
+    # Pts/Rstr% turned out NOT to already hold real sums on most live
+    # blocks (found live: a stale VLOOKUP-against-blank sitting there
+    # instead), so both are now self-healed the same way Ceil already was.
     assert calls[f"L{totals_row}"] == [["=SUM(L9:L17)"]]
+    assert calls[f"K{totals_row}"] == [["=SUM(K9:K17)"]]
+    assert calls[f"N{totals_row}"] == [["=SUM(N9:N17)"]]
 
     # "Total" goes at Opp.'s column (H); the remaining-cap NUMBER (no
     # text -- a hand-authored row below reads it via INDIRECT) goes at
@@ -591,7 +597,7 @@ def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
     assert calls[f"M{totals_row}"] == [["Remaining"]]
 
     assert "1 totals row(s)" in result
-    assert "1 Ceil sum(s)" in result
+    assert "3 sum(s) written" in result
 
 
 def test_polish_lineups_totals_rows_puts_a_bare_number_at_venue_never_text():
@@ -630,19 +636,65 @@ def test_polish_lineups_totals_rows_clears_the_totals_row_name_cells_typo_guard(
     assert "1 Name cell(s) un-typo-guarded" in result
 
 
-def test_polish_lineups_totals_rows_never_touches_salary_pts_or_issues():
-    # D (Salary) and K (Pts) already hold real SUM formulas; O (Issues)
-    # holds the real guardrail formula -- none of the three is a dead
-    # VLOOKUP and none should be cleared or overwritten here.
+def test_polish_lineups_totals_rows_never_touches_salary_or_issues():
+    # D (Salary) already holds a real SUM formula this function has never
+    # needed to touch; O (Issues) holds the real guardrail formula --
+    # neither is a dead VLOOKUP and neither should be cleared or
+    # overwritten here. Pts (K) and Rstr% (N) are NOT in this list any
+    # more -- Phase 6, Part 1 found live that they don't reliably already
+    # hold a real sum, so both are now unconditionally rewritten (see
+    # test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels).
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
     polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
 
     touched = {a1 for a1, _ in client.update_calls}
     assert "D18" not in touched
-    assert "K18" not in touched
     assert "O18" not in touched
-    assert "N18" not in touched  # Rstr% -- also a real SUM, left alone
+
+
+def test_polish_lineups_totals_rows_self_heals_a_corrupted_pts_or_rstr_total():
+    # The exact live bug found 2026-09-17: 15 of 20 real Lineups blocks had
+    # `=VLOOKUP($A<totals_row>,PlayerPoolRaw!$A:S,11,false)` (or `,14,false`
+    # for Rstr%) sitting in the totals row's Pts/Rstr% cells instead of a
+    # SUM -- a lookup against the totals row's own always-blank Name cell,
+    # which resolves to #N/A the instant a lineup in that block is built.
+    # This function doesn't need to detect that specific formula: it
+    # always overwrites both cells with a real SUM, so whatever was there
+    # before (correct or corrupted) self-heals the same way on every call.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    calls = {a1: rows for a1, rows in client.update_calls}
+    assert calls["K18"] == [["=SUM(K9:K17)"]]
+    assert calls["N18"] == [["=SUM(N9:N17)"]]
+    assert "3 sum(s) written (Ceil/Pts/Rstr%)" in result
+
+
+def test_polish_lineups_pct_of_rstr_guards_against_div_by_zero():
+    # Phase 6, Part 1.2: `% of Rstr` = DK Sal / block's own salary total
+    # (D/D$<totals_row>) divided by zero on every roster slot until at
+    # least one name is typed -- #DIV/0! on all 180 slot rows live.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    result = polish_lineups_pct_of_rstr(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    calls = {a1: rows for a1, rows in client.update_calls}
+    # DK Sal = D, % of Rstr = P, totals row = 18 (end + 1).
+    assert calls["P9"] == [['=IF(OR(A9="",D$18=0),"",D9/D$18)']]
+    assert calls["P17"] == [['=IF(OR(A17="",D$18=0),"",D17/D$18)']]
+    assert "9 row(s)" in result
+
+
+def test_polish_lineups_pct_of_rstr_skips_when_column_missing():
+    header = [h for h in _HEADER_WITH_AVAIL_AT_Y if h != "% of Rstr"]
+    client = FakeGuardrailsClient(header)
+
+    result = polish_lineups_pct_of_rstr(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    assert client.update_calls == []
+    assert "not all present" in result
 
 
 def test_polish_lineups_totals_rows_skips_when_lineups_missing():

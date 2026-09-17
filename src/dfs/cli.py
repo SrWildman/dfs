@@ -63,6 +63,7 @@ from dfs.sheet_style import (
     polish_edge,
     polish_guardrails,
     polish_lineups_input_column,
+    polish_lineups_pct_of_rstr,
     polish_lineups_totals_rows,
     style_tier23_tabs,
     style_view_tabs,
@@ -380,7 +381,10 @@ def sheets_inspect() -> None:
     console.print(table)
 
 
-@setup_app.command("remove-pool-deck", short_help="One-time: delete the retired pool deck from Lineups.")
+@setup_app.command(
+    "remove-pool-deck",
+    short_help="One-time repair: delete a still-present pool deck. Kept only for an un-migrated sheet.",
+)
 def sheets_remove_pool_deck(
     sheet_id: str = typer.Option(
         None,
@@ -395,6 +399,11 @@ def sheets_remove_pool_deck(
     used it week 1 and it was a pain," and on the "where is this player"
     jump control alone -- "doesn't get me much. Cut it." Player Pool's own
     colour scales/chips/`Used`/`In` columns cover the browsing job now.
+
+    Kept around (unlike `add-pool-deck`/`add-pool-picks`/`remove-pool-picks`,
+    removed in Phase 6 Part 1.6) only in case some un-migrated sheet still
+    has a deck sitting on it -- not part of the standing `dfs setup
+    sheet`/`polish` pipeline, and a from-scratch build never creates one.
 
     Deletes the deck's rows (a real Sheets row delete, so every Lineups
     block shifts up with it) and the hidden `PoolSort` helper tab. No-op
@@ -499,6 +508,41 @@ def sheets_fix_opp_pos_rank(
         raise typer.Exit(code=1) from e
 
 
+@setup_app.command(
+    "fix-pct-of-rstr", short_help="One-time: guard Lineups' '% of Rstr' against #DIV/0! on an empty block."
+)
+def sheets_fix_pct_of_rstr(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Found live 2026-09-17: `Lineups`' `% of Rstr` column
+    (`=F<row>/F$<totals_row>`, this player's DK Sal as a share of the
+    lineup's own running salary total) divides by zero on every roster
+    slot until at least one name is typed in that block -- `#DIV/0!` on
+    all 180 slot rows on a fresh week. Rewrites every row's formula,
+    guarded to yield blank rather than 0 or an error
+    (`sheet_style.polish_lineups_pct_of_rstr`)."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Fixing '% of Rstr' in: [bold]{title}[/bold]\n{url}\n")
+        result = polish_lineups_pct_of_rstr(
+            client,
+            cfg.lineups.builder_tab,
+            header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+        )
+        console.print(f"[green]OK[/green] {result}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
 @setup_app.command("add-pool-control", short_help="Create/refresh Player Pool's add-a-player control row.")
 def sheets_add_pool_control(
     sheet_id: str = typer.Option(
@@ -545,36 +589,6 @@ def sheets_add_pool_control(
         raise typer.Exit(code=1) from e
     for line in results:
         console.print(f"[green]OK[/green] {line}")
-
-
-@setup_app.command("remove-pool-picks", short_help="One-time: delete the retired Pool Picks tab.")
-def sheets_remove_pool_picks(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Delete Pool Picks from a different sheet instead of config.toml's -- ALWAYS "
-        "run against the canonical template first, verify with `dfs doctor`, then run again "
-        "against the live sheet.",
-    ),
-) -> None:
-    """A3.4: permanently deletes the `Pool Picks` tab, now that Player
-    Pool's own add-a-player control row (`add-pool-control`) replaces it.
-    No-op if the tab is already gone -- safe to run more than once, but
-    this is a one-time migration step, not part of the standing `dfs
-    setup sheet`/`polish` pipeline (a from-scratch sheet build never
-    creates Pool Picks in the first place any more)."""
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Removing Pool Picks from: [bold]{title}[/bold]\n{url}\n")
-        existed = client.tab_exists("Pool Picks")
-        client.delete_tab("Pool Picks")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-    console.print(f"[green]OK[/green] Pool Picks: {'deleted' if existed else 'not present -- skipped'}")
 
 
 @setup_app.command("polish", short_help="Style the sheet: widths, freeze panes, formats, chips, tab order.")
@@ -1251,26 +1265,6 @@ def _moved_notice(old: str, new: str) -> None:
 def sheets_inspect_alias() -> None:
     _moved_notice("dfs sheets inspect", "dfs setup inspect")
     sheets_inspect()
-
-
-@sheets_app.command("add-pool-deck")
-def sheets_add_pool_deck_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    console.print(
-        "[dim]`dfs sheets add-pool-deck` has moved AND changed: the pool deck itself was "
-        "retired (Phase 5, 2026-09-16) -- use `dfs setup remove-pool-deck` on a sheet that "
-        "still has one.[/dim]"
-    )
-    sheets_remove_pool_deck(sheet_id=sheet_id)
-
-
-@sheets_app.command("add-pool-picks")
-def sheets_add_pool_picks_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    console.print(
-        "[dim]`dfs sheets add-pool-picks` has moved AND changed: A3 replaced the separate "
-        "Pool Picks tab with a control row on Player Pool itself -- use `dfs setup "
-        "add-pool-control`.[/dim]"
-    )
-    sheets_add_pool_control(sheet_id=sheet_id)
 
 
 @sheets_app.command("polish")

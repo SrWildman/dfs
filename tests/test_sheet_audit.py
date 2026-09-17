@@ -165,6 +165,41 @@ def test_audit_tab_flags_default_width_columns_but_not_hidden_ones():
     assert "C" in width_issue and "D" in width_issue and "E" in width_issue
 
 
+def test_audit_tab_flags_a_header_narrower_than_its_own_text_needs():
+    # Phase 6, Part 1.5: EDGE_WIDTHS set a pixel width per column but
+    # nothing checked it against the rendered header text -- "Position"
+    # clipped to "Posi" at 52px live, with nothing to catch it.
+    client = FakeAuditClient(header=["Name", "Position", "Pts"], widths={"A": 165, "B": 52, "C": 62})
+    audit = audit_tab(client, "T", header_row=1)
+    issue = next(i for i in audit.issues if "truncated" in i)
+    assert "B" in issue and "Position" in issue
+    assert "Name" not in issue and "Pts" not in issue
+
+
+def test_audit_tab_does_not_flag_known_good_narrow_headers():
+    # Calibration check: every column already known to render fine live
+    # (from EDGE_WIDTHS) must stay clean under the truncation floor, even
+    # though some are only a few pixels above genuinely-clipped neighbors
+    # of the same character count (CeilVal at 68px vs Ceiling/CeilPct at
+    # 64px, all 7 characters) -- the floor is calibrated low on purpose.
+    header = ["Avail", "Team", "Opp", "Val", "Salary", "CeilVal", "LevBasis", "Roof", "Wind", "OwnPct"]
+    widths = {
+        "A": 60,
+        "B": 54,
+        "C": 54,
+        "D": 58,
+        "E": 78,
+        "F": 68,
+        "G": 74,
+        "H": 76,
+        "I": 68,
+        "J": 68,
+    }
+    client = FakeAuditClient(header=header, widths=widths)
+    audit = audit_tab(client, "T", header_row=1)
+    assert not any("truncated" in i for i in audit.issues)
+
+
 def test_audit_tab_flags_general_number_format_on_a_field_formats_column():
     client = FakeAuditClient(
         header=["Name", "DK Sal", "Pts"],

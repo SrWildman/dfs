@@ -100,6 +100,15 @@ LEVERAGE_FLAG_THRESHOLD = 30.0
 # An absolute ownership percentage, not a percentile -- correctly untouched
 # by the Leverage scale fix.
 CHALK_OWNERSHIP_THRESHOLD = 20.0
+# Phase 6, Part 1.4: `has_real_ownership` used to be `.any()` -- a single
+# non-zero ProjOwn (one early-published player, a data glitch, a bye-week
+# artifact) flipped the WHOLE slate to "real," computing OwnPct/Leverage as
+# a percentile over a column that's still ~99% zeros for everyone else.
+# Live symptom, reproduced before this fix: LevBasis read "real" while
+# every ProjOwn on EdgeRaw still read 0.0% and every Leverage cell was
+# blank. A share threshold instead requires ownership to be genuinely
+# published for a majority of the slate before trusting it.
+OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5
 OUT_STATUSES = frozenset({"OUT", "IR"})
 # Mirrors sources/weather.py's WIND_FLAG_THRESHOLD_MPH. Duplicated rather
 # than imported so derived.py (pure, source-agnostic logic) never depends
@@ -394,7 +403,7 @@ def build_edge_frame(
     merged["CeilVal"] = (merged["Ceiling"] / (merged["Salary"] / 1000)).round(2)
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)
 
-    has_real_ownership = merged["ProjOwn"].fillna(0).gt(0).any()
+    has_real_ownership = merged["ProjOwn"].fillna(0).gt(0).mean() > OWNERSHIP_PUBLISHED_SHARE_THRESHOLD
     merged["LevBasis"] = LEV_BASIS_REAL if has_real_ownership else LEV_BASIS_UNPUBLISHED
     if has_real_ownership:
         merged["OwnPct"] = _percentile_within(merged["ProjOwn"], merged["Position"]).round(1)
