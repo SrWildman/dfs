@@ -15,16 +15,26 @@ from dfs.sources.edge import EdgeSource
 from dfs.sources.nflverse_games import NflverseGamesSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
 from dfs.sources.tffb_projections import TffbProjectionsSource
+from dfs.sources.tffb_sos import TffbSosSource
 from dfs.sources.weather import WeatherSource
 
 # Order matters: run_sync iterates SOURCES in this insertion order.
 # "weather" reads the GamesRaw CSV "nflverse_games" just saved, and "edge"
 # reads the CSVs "projections"/"draftkings" just saved -- both must run
-# after their inputs.
+# after their inputs. The five "sos_*" sources write straight to their own
+# hand-pasted-turned-synced tabs (SoSQB/RB/Wr/TE/Def) and feed nothing else
+# in this list -- `edge`/`OppPosRank` still reach them the same way they
+# always have, a live sheet formula (VLOOKUP chain) reading real data now
+# instead of a blank paste.
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
     "projections": TffbProjectionsSource(),
+    "sos_qb": TffbSosSource("QB"),
+    "sos_rb": TffbSosSource("RB"),
+    "sos_wr": TffbSosSource("WR"),
+    "sos_te": TffbSosSource("TE"),
+    "sos_dst": TffbSosSource("DST"),
     "nflverse_games": NflverseGamesSource(),
     "weather": WeatherSource(),
     "edge": EdgeSource(),
