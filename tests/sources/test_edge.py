@@ -1,7 +1,14 @@
 import pandas as pd
 
 from dfs.derived import EDGE_COLUMNS
-from dfs.sources.edge import _FILTER_RANGE, POOL_COLUMN, POOL_HEADER, POOL_TYPE_OPTIONS, EdgeSource
+from dfs.sources.edge import (
+    _FILTER_RANGE,
+    POOL_COLUMN,
+    POOL_HEADER,
+    POOL_TYPE_OPTIONS,
+    EdgeSource,
+    _canonical_id,
+)
 
 
 class SpySheetsClient:
@@ -34,14 +41,32 @@ class SpySheetsClient:
     def tab_exists(self, tab_name: str) -> bool:
         return self._exists
 
-    def read_range(self, tab_name: str, a1_range: str):
-        if a1_range == "A1:1":
-            return [self._header]
-        col = a1_range[0]
+    def _column_values(self, a1_range: str) -> list[list]:
+        # Column letters can be more than one character (e.g. "AA") once
+        # EDGE_COLUMNS grows past 26 entries -- take the leading letters of
+        # the range's first cell only, not just its first character (that
+        # misreads "AA" as "A") and not every letter in the whole range
+        # string (that picks up the "AA" a second time from the far end).
+        first_cell = a1_range.split(":")[0]
+        col = "".join(ch for ch in first_cell if ch.isalpha())
         # Pool lives at column A; any other column letter is treated as
         # wherever the test says Id currently sits.
         values = self._pool_column if col == POOL_COLUMN else self._id_column
         return [[v] if v else [] for v in values]
+
+    def read_range(self, tab_name: str, a1_range: str):
+        if a1_range == "A1:1":
+            return [self._header]
+        return self._column_values(a1_range)
+
+    def read_range_unformatted(self, tab_name: str, a1_range: str):
+        # Production code only ever calls this for the Id column -- real
+        # Sheets would return raw JSON numbers/strings here, not
+        # formatted display text; tests that need to exercise a mangled
+        # formatted-vs-unformatted mismatch pass id_column values that
+        # already look like what UNFORMATTED_VALUE would actually return
+        # (an int/float), same as `read_range` would for any other column.
+        return self._column_values(a1_range)
 
     def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
         self.update_calls.append((tab_name, a1_range, rows))
@@ -209,3 +234,44 @@ def test_pool_value_survives_a_full_simulated_sync_round_trip():
 
     [(_tab, _range, rows)] = new_client.update_calls
     assert rows == [[""], ["GPP"]]  # "222" stays blank, "111" keeps its value at its new row
+
+
+def test_canonical_id_strips_a_whole_number_floats_stray_decimal():
+    # Google returns a purely-numeric-looking cell as an actual JSON
+    # number once written -- a whole-number float round-trips through
+    # Python with a stray ".0" that a raw string comparison would choke on.
+    assert _canonical_id(44132966.0) == "44132966"
+
+
+def test_canonical_id_leaves_a_genuinely_fractional_number_alone():
+    assert _canonical_id(44132966.5) == "44132966.5"
+
+
+def test_canonical_id_passes_through_a_plain_string_unchanged():
+    assert _canonical_id("111") == "111"
+
+
+def test_canonical_id_blank_for_none_or_empty():
+    assert _canonical_id(None) == ""
+    assert _canonical_id("") == ""
+
+
+def test_pool_value_survives_when_id_is_read_back_as_a_real_number():
+    # The actual bug (2026-09-16): read_range's FORMATTED rendering can
+    # bake a stale per-column number format into a clean numeric Id (e.g.
+    # "+44132966.0" instead of "44132966") after an EdgeRaw column
+    # reorder, silently breaking this exact join. pre_upload/post_upload
+    # now read Id via read_range_unformatted, which (like the real Sheets
+    # API) hands back a raw Python float for a numeric-looking cell, not
+    # a pre-formatted string -- this proves the join still matches.
+    source = EdgeSource()
+    old_client = SpySheetsClient(id_column=[44132966.0, 44133446.0], pool_column=["GPP", "Cash"])
+    preserved = source.pre_upload(old_client, "EdgeRaw")
+    assert preserved == {"44132966": "GPP", "44133446": "Cash"}
+
+    new_df = _df(2)
+    new_client = SpySheetsClient(id_column=[44133446.0, 44132966.0])  # order flipped
+    source.post_upload(new_client, "EdgeRaw", new_df, preserved)
+
+    [(_tab, _range, rows)] = new_client.update_calls
+    assert rows == [["Cash"], ["GPP"]]

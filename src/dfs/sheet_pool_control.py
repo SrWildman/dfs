@@ -33,11 +33,15 @@ from __future__ import annotations
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheet_style import INPUT_BG
 from dfs.sheets import SheetsClient, column_letter
-from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW
+from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW
 
 _LABEL_CELL = f"A{PLAYER_POOL_CONTROL_ROW}"
 _INPUT_CELL = f"B{PLAYER_POOL_CONTROL_ROW}"
 _LABEL_TEXT = "Add a player"
+_NORMAL_ROW1_FORMAT = {
+    "backgroundColor": {"red": 1, "green": 1, "blue": 1},
+    "textFormat": {"foregroundColor": {"red": 0, "green": 0, "blue": 0}, "bold": False},
+}
 
 _edge_name_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
 
@@ -54,23 +58,41 @@ def ensure_pool_control_row(client: SheetsClient, player_pool_tab: str, edge_tab
     everything else reruns" split `add_pool_deck` uses, for the same
     reason (a formatting fix made after this first shipped should still
     reach an already-migrated sheet).
+
+    The row-1 background/text reset below runs EVERY call, not just on
+    first migration, and covers the tab's own CURRENT width (read from
+    row 2's real header), not a hardcoded guess -- found live,
+    2026-09-16: the original version only ever reset A:Z, once, at
+    `insertDimension` time. Every column added or inserted after that
+    (`Edge ↗`, the whole WEATHER/MOVEMENT/INTERNAL zone, `Used`/`In`, this
+    session's `OppPosRank`) could inherit a stray dark header fill into
+    its own row-1 cell (from `insertDimension`'s own inherit-from-
+    neighbor behavior, or a reorder's `moveDimension` carrying formatting
+    along with a column) with nothing ever cleaning it up again --
+    visible live as a solid dark bar across most of row 1, exactly the
+    "black boxes" symptom Sam reported once the pool actually had players
+    in it to look at.
     """
     migrated = _already_migrated(client, player_pool_tab)
     if not migrated:
         client.insert_rows(player_pool_tab, at_row=PLAYER_POOL_CONTROL_ROW, count=1)
-        # insertDimension's inheritFromBefore=False inherits the row now
-        # pushed below it -- here, the tab's own real header, with its
-        # dark fill/bold white text and its own data validation (if any).
-        # Reset before writing this row's own content, same discipline as
-        # sheet_pool_deck.py's _reset_deck_formatting.
-        normal = {
-            "backgroundColor": {"red": 1, "green": 1, "blue": 1},
-            "textFormat": {"foregroundColor": {"red": 0, "green": 0, "blue": 0}, "bold": False},
-        }
-        last_col = column_letter(25)  # Z -- generous, matches insert_rows' own blank-row width
-        control_row_range = f"A{PLAYER_POOL_CONTROL_ROW}:{last_col}{PLAYER_POOL_CONTROL_ROW}"
-        client.format_range(player_pool_tab, control_row_range, normal)
-        client.clear_data_validation(player_pool_tab, control_row_range)
+
+    # insertDimension's inheritFromBefore=False inherits the row now
+    # pushed below it -- here, the tab's own real header, with its dark
+    # fill/bold white text and its own data validation (if any). Reset
+    # before writing this row's own content, same discipline as
+    # sheet_pool_deck.py's _reset_deck_formatting -- and re-applied on
+    # every call (not gated behind `not migrated`) so a column added
+    # later, which this reset never covered the first time, self-heals
+    # the next time `dfs setup polish`/`add-pool-control` runs.
+    header_row_values = client.read_range(
+        player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
+    )
+    header = header_row_values[0] if header_row_values else []
+    last_col = column_letter(max(len(header), 26) - 1)
+    control_row_range = f"A{PLAYER_POOL_CONTROL_ROW}:{last_col}{PLAYER_POOL_CONTROL_ROW}"
+    client.format_range(player_pool_tab, control_row_range, _NORMAL_ROW1_FORMAT)
+    client.clear_data_validation(player_pool_tab, control_row_range)
 
     client.update_range(player_pool_tab, _LABEL_CELL, [[_LABEL_TEXT]])
     client.set_range_dropdown_validation(

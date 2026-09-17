@@ -255,6 +255,27 @@ class SheetsClient:
         value_ranges = response.get("valueRanges", [])
         return [value_ranges[i].get("values", []) if i < len(value_ranges) else [] for i in range(len(specs))]
 
+    def read_range_unformatted(self, tab_name: str, a1_range: str) -> list[list]:
+        """Like `read_range`, but returns each cell's raw underlying
+        value (a JSON number/string/bool) rather than its FORMATTED
+        display text. Needed for anything read back and used as an exact
+        match key across a sync -- `read_range`'s default (formatted)
+        rendering bakes in whatever number format the cell's PHYSICAL
+        position happens to carry, which can silently change a purely
+        numeric-looking string (a DraftKings player Id, say) into
+        something like `"+44132966.0"` if that column ever inherits a
+        stale signed/decimal format left over from a different field that
+        used to occupy the same physical column before a reorder (`dfs
+        sync` rewrites values, never formatting) -- found live,
+        2026-09-16, silently breaking `sources/edge.py`'s Pool-tick
+        preserve-by-Id join across an EdgeRaw column reorder. Values come
+        back as Python `int`/`float`/`str`/`bool`, not pre-stringified --
+        callers that need a stable string key should normalize (e.g.
+        `int(x)` before `str()`, to drop a `.0` a whole-number float would
+        otherwise carry)."""
+        _, ws = self._ws(tab_name)
+        return ws.get(a1_range, value_render_option=ValueRenderOption.unformatted)
+
     def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
         """Like `read_range`, but returns the literal formula text (e.g.
         "=SUM(A1:A2)") instead of the resolved value for any formula cell --
@@ -345,7 +366,7 @@ class SheetsClient:
         `mid_type`/`mid_value` default to the statistical median (50th
         percentile) -- right for a plain "more is better" scale. Pass
         `mid_type="NUMBER", mid_value="0"` for a signed-delta column where
-        zero, not the median, is the meaningful midpoint (e.g. ImpMove) --
+        zero, not the median, is the meaningful midpoint (e.g. ImpliedMove) --
         a true diverging scale rather than one that happens to have three
         colors.
 
@@ -481,6 +502,29 @@ class SheetsClient:
                                 "dimension": "ROWS",
                                 "startIndex": at_row - 1,
                                 "endIndex": at_row - 1 + count,
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+
+    def delete_columns(self, tab_name: str, *, at_index: int, count: int) -> None:
+        """Delete `count` columns starting at `at_index` (0-based) via a
+        real Sheets API `deleteDimension` request -- everything to the
+        right shifts left to fill the gap, same shifting guarantee as
+        `delete_rows`'s row-dimension equivalent."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": at_index,
+                                "endIndex": at_index + count,
                             }
                         }
                     }
@@ -761,6 +805,40 @@ class SheetsClient:
             }
         )
 
+    def set_number_range_validation(
+        self, tab_name: str, a1_range: str, *, minimum: int, maximum: int, strict: bool = False
+    ) -> None:
+        """Restrict `a1_range` to a number between `minimum` and `maximum`
+        (Sheets' NUMBER_BETWEEN data validation). `strict=False` (the
+        default) warns rather than rejects a value outside the range --
+        matching `set_range_dropdown_validation`'s reasoning: a caller that
+        clamps this value in its own formula (rather than trusting the cell
+        is always in-range) should let an out-of-range typed value stay
+        editable and visible, not get silently rejected."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "setDataValidation": {
+                            "range": grid_range,
+                            "rule": {
+                                "condition": {
+                                    "type": "NUMBER_BETWEEN",
+                                    "values": [
+                                        {"userEnteredValue": str(minimum)},
+                                        {"userEnteredValue": str(maximum)},
+                                    ],
+                                },
+                                "strict": strict,
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+
     def set_range_dropdown_validation(
         self, tab_name: str, a1_range: str, *, source: str, strict: bool = False
     ) -> None:
@@ -1028,23 +1106,20 @@ class SheetsClient:
         that one column regardless of row (no other function ever touches
         O, and it spans many different row ranges -- one per lineup
         block -- so a single row_range can't cover them all), and
-        `polish_pool_deck` passes `row_range` alone (e.g. `(4, 9)`, the deck
-        window's own rows) to delete rules confined entirely to that row
-        band regardless of column -- an exact `column=letter, rows=X:Y`
-        match was tried there first and found not idempotent for real: when
-        which column held a given field changed (Player Pool/Lineups header
-        drift, see `sheet_pool_deck.py`), the rule's column moved too, so a
-        column-scoped clear against the NEW column never found the OLD one,
-        leaving it orphaned.
+        `row_range` alone (no current caller -- the pool deck that used to
+        pass it, e.g. `(4, 9)` for its own window rows, was removed
+        entirely, Phase 5, 2026-09-16) deletes rules confined to that row
+        band regardless of column; kept as a mode since a future narrow
+        row-band owner could need it again, same reasoning `column` alone
+        serves `polish_guardrails` today.
 
         Passing BOTH `column` and `row_range` together (as
         `apply_field_color_scales` does -- Fix A2) narrows to a rule
         matching both: found live as the actual cause of "highlighting
-        missing from Lineups" -- `apply_field_color_scales`, called for the
-        pool deck's own narrow window (rows 4-9) by `polish_pool_deck`,
-        used to clear by `column` ALONE before adding its own scale, which
-        deleted the SAME column's real, already-correct gradient covering
-        the 20 lineup blocks below (rows 12-268) moments after
+        missing from Lineups" -- the pool deck's own narrow window (rows
+        4-9) used to clear by `column` ALONE before adding its own scale,
+        which deleted the SAME column's real, already-correct gradient
+        covering the 20 lineup blocks below (rows 12-268) moments after
         `polish_builder_tab` had just written it -- on every single
         `dfs setup polish` run, not a rare edge case. `column` alone or
         `row_range` alone keep their original (deliberately wider) meaning

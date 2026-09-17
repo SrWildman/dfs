@@ -4,47 +4,36 @@ from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
 from dfs.doctor import run_doctor
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
-from dfs.sheet_pool_deck import DECK_ROWS, POOL_SORT_TAB
+from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sources.edge import POOL_HEADER
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
 
 @dataclass
 class _FakeTab:
     title: str
     header: list[str]
-    frozen_rows: int = DECK_ROWS
 
 
 class FakeDoctorClient:
     """Fakes the SheetsClient methods doctor.py calls -- list_tabs() for tab
-    existence + header rows + frozen row counts, read_range()/read_formula()
-    for the row-specific checks (Lineups header repeats, Bankroll header
-    rows, the pool deck's PoolSort formula)."""
+    existence + header rows, read_range() for the row-specific checks
+    (Lineups header repeats, Bankroll header rows, Exposure's lineup-count
+    cell)."""
 
     def __init__(
         self,
         tabs: dict[str, list[str]],
         rows: dict[tuple[str, str], list[list[str]]] | None = None,
-        frozen_rows: dict[str, int] | None = None,
-        formulas: dict[tuple[str, str], list[list[str]]] | None = None,
     ):
         self._tabs = tabs
         self._rows = rows or {}
-        self._frozen_rows = frozen_rows or {}
-        self._formulas = formulas or {}
 
     def list_tabs(self):
-        return [
-            _FakeTab(title=title, header=header, frozen_rows=self._frozen_rows.get(title, DECK_ROWS))
-            for title, header in self._tabs.items()
-        ]
+        return [_FakeTab(title=title, header=header) for title, header in self._tabs.items()]
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:
         return self._rows.get((tab_name, a1_range), [])
-
-    def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
-        return self._formulas.get((tab_name, a1_range), [])
 
 
 def _base_config(**overrides) -> Config:
@@ -75,18 +64,16 @@ _ALL_GOOD_TABS = {
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Bankroll": [],
     "Results": [],
+    EXPOSURE_TAB: [],
 }
 
+# Lineups' header sits at row 1 (the pool deck that used to sit above it,
+# shifting it to row 11, was removed entirely -- Phase 5, 2026-09-16). No
+# override is needed any more for list_tabs()'s own header read; the
+# per-row column-A check below (_check_lineups_header_repeats) still needs
+# every LINEUPS_NAME_BLOCKS row spelled out, including row 1 itself.
 _LINEUPS_HEADER_ROWS = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS]
 _LINEUPS_HEADER_LAST_ROW = max(_LINEUPS_HEADER_ROWS)
-_LINEUPS_HEADER_ROW = _LINEUPS_HEADER_ROWS[0]  # row 8: Lineups' real header, post-Bench
-
-# run_doctor re-reads Lineups' header from this exact row (see doctor.py's
-# override of list_tabs()'s always-row-1 header) rather than trusting
-# _ALL_GOOD_TABS["Lineups"] the way every other tab's check does -- so
-# every test that wants the linked-edge-columns check to see Lineups as
-# correctly linked must supply this row too, not just tabs["Lineups"].
-_LINEUPS_HEADER_RANGE = f"A{_LINEUPS_HEADER_ROW}:{_LINEUPS_HEADER_ROW}"
 
 
 def _good_lineups_rows() -> list[list[str]]:
@@ -99,29 +86,27 @@ def _good_lineups_rows() -> list[list[str]]:
 _PLAYER_POOL_HEADER_RANGE = f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
 
 
-def _lineups_rows(
-    header: list[str] | None = None, player_pool_header: list[str] | None = None
-) -> dict[tuple[str, str], list[list[str]]]:
+def _lineups_rows(player_pool_header: list[str] | None = None) -> dict[tuple[str, str], list[list[str]]]:
     # run_doctor re-reads Player Pool's header from PLAYER_POOL_HEADER_ROW
-    # too (A3: row 1 became the add-a-player control) -- defaults to
+    # (A3: row 1 became the add-a-player control) -- defaults to
     # _ALL_GOOD_TABS' own Player Pool header so every existing call site
     # keeps working without having to know about this override; a test
     # that deliberately varies Player Pool's header passes its own.
     rows = {("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}"): _good_lineups_rows()}
-    if header is not None:
-        rows[("Lineups", _LINEUPS_HEADER_RANGE)] = [header]
     rows[("Player Pool", _PLAYER_POOL_HEADER_RANGE)] = [
         player_pool_header if player_pool_header is not None else _ALL_GOOD_TABS["Player Pool"]
     ]
+    # Exposure!H1, the lineup-count cell _check_lineup_count_cell reads --
+    # default to a valid in-range value so every existing call site stays
+    # "all good" without knowing about this check; a test that
+    # deliberately wants a bad H1 overrides this entry itself.
+    rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [["6"]]
     return rows
 
 
 def test_run_doctor_reports_nothing_wrong_on_a_correct_sheet():
     cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=_ALL_GOOD_TABS,
-        rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
-    )
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=_lineups_rows())
     assert run_doctor(client, cfg) == []
 
 
@@ -129,7 +114,7 @@ def test_run_doctor_flags_missing_tab():
     tabs = dict(_ALL_GOOD_TABS)
     del tabs["Scratch"]
     cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "tab-exists" and "Scratch" in i.detail for i in issues)
@@ -139,7 +124,7 @@ def test_run_doctor_flags_edgeraw_header_mismatch():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["EdgeRaw"] = [*EDGE_COLUMNS[:-1], "SomethingElse"]
     cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "edgeraw-header" for i in issues)
@@ -149,7 +134,7 @@ def test_run_doctor_passes_when_edgeraw_pool_column_is_correct():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["EdgeRaw"] = [POOL_HEADER, *EDGE_COLUMNS]
     cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     assert run_doctor(client, cfg) == []
 
@@ -158,7 +143,7 @@ def test_run_doctor_flags_a_wrong_label_in_edgeraw_pool_column():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["EdgeRaw"] = ["SomethingElse", *EDGE_COLUMNS]
     cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "edgeraw-header" for i in issues)
@@ -171,7 +156,7 @@ def test_run_doctor_flags_edgeraw_still_on_the_old_pool_appended_at_the_end_layo
     tabs = dict(_ALL_GOOD_TABS)
     tabs["EdgeRaw"] = [*EDGE_COLUMNS, POOL_HEADER]
     cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "edgeraw-header" for i in issues)
@@ -181,38 +166,10 @@ def test_run_doctor_flags_missing_linked_edge_columns():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["Lineups"] = ["Name", "Pos."]  # never linked
     cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(tabs["Lineups"]))
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "linked-edge-columns" and "'Lineups'" in i.detail for i in issues)
-
-
-def test_run_doctor_flags_missing_linked_edge_columns_reading_lineups_real_header_row():
-    # Regression for the bug that shipped alongside the Bench feature:
-    # Lineups' header moved to row 8, but the linked-edge-columns check
-    # used to trust list_tabs()'s row-1-only header for every tab. A
-    # Lineups row 1 (the Bench title, one cell) that looks nothing like
-    # LINKED_EDGE_COLUMNS must not be mistaken for "not linked" when row 8
-    # actually has it -- and, conversely (this test), row 8 genuinely not
-    # having it must still be caught even though tabs["Lineups"] here
-    # (row-1-shaped, unused by the real check) looks irrelevant.
-    tabs = dict(_ALL_GOOD_TABS)
-    tabs["Lineups"] = ["BENCH title -- irrelevant to this check now"]
-    cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(["Name", "Pos."]))  # row 8: never linked
-
-    issues = run_doctor(client, cfg)
-    assert any(i.check == "linked-edge-columns" and "'Lineups'" in i.detail for i in issues)
-
-
-def test_run_doctor_passes_linked_edge_columns_reading_lineups_real_header_row():
-    tabs = dict(_ALL_GOOD_TABS)
-    tabs["Lineups"] = ["BENCH title -- irrelevant to this check now"]
-    cfg = _base_config()
-    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(["Name", "Pos.", *LINKED_EDGE_COLUMNS]))
-
-    issues = run_doctor(client, cfg)
-    assert not any(i.check == "linked-edge-columns" and "'Lineups'" in i.detail for i in issues)
 
 
 def test_run_doctor_flags_duplicated_linked_edge_columns():
@@ -221,9 +178,7 @@ def test_run_doctor_flags_duplicated_linked_edge_columns():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["Player Pool"] = ["Name", *LINKED_EDGE_COLUMNS, "Venue", "Ceil", *LINKED_EDGE_COLUMNS]
     cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=tabs, rows=_lineups_rows(tabs["Lineups"], player_pool_header=tabs["Player Pool"])
-    )
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows(player_pool_header=tabs["Player Pool"]))
 
     issues = run_doctor(client, cfg)
     assert any(
@@ -236,12 +191,28 @@ def test_run_doctor_flags_lineups_header_repeats_drift():
     cfg = _base_config()
     bad_rows = _good_lineups_rows()
     bad_rows[_LINEUPS_HEADER_ROWS[1] - 1] = ["Aaron Rodgers"]  # a stale pick sitting where a header should be
-    rows = _lineups_rows(_ALL_GOOD_TABS["Lineups"])
+    rows = _lineups_rows()
     rows[("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}")] = bad_rows
     client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
 
     issues = run_doctor(client, cfg)
     assert any(i.check == "lineups-header-repeats" for i in issues)
+
+
+def test_run_doctor_flags_lineups_header_wrong_at_row_one():
+    # Row 1 is LINEUPS_NAME_BLOCKS' own first "header row" entry now that
+    # the pool deck (which used to sit above it) is gone -- the same
+    # header-repeats check catches a wrong row 1 as it would any other.
+    cfg = _base_config()
+    bad_rows = _good_lineups_rows()
+    bad_rows[0] = ["Aaron Rodgers"]  # row 1 should read "Name"
+    rows = _lineups_rows()
+    rows[("Lineups", f"A1:A{_LINEUPS_HEADER_LAST_ROW}")] = bad_rows
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+
+    issues = run_doctor(client, cfg)
+    matches = [i for i in issues if i.check == "lineups-header-repeats"]
+    assert any("1" in i.detail for i in matches)
 
 
 def test_run_doctor_flags_blank_bankroll_header_row():
@@ -251,7 +222,7 @@ def test_run_doctor_flags_blank_bankroll_header_row():
             "cash": {"header_row": 16, "first_row": 17, "last_row": 59},
         }
     )
-    rows = _lineups_rows(_ALL_GOOD_TABS["Lineups"])
+    rows = _lineups_rows()
     rows[("Bankroll", "A16:16")] = []
     client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
 
@@ -266,7 +237,7 @@ def test_run_doctor_passes_bankroll_header_row_when_present():
             "cash": {"header_row": 16, "first_row": 17, "last_row": 59},
         }
     )
-    rows = _lineups_rows(_ALL_GOOD_TABS["Lineups"])
+    rows = _lineups_rows()
     rows[("Bankroll", "A16:16")] = [["Entry name"]]
     client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
 
@@ -274,93 +245,36 @@ def test_run_doctor_passes_bankroll_header_row_when_present():
     assert not any(i.check == "bankroll-header-row" for i in issues)
 
 
-_POOL_DECK_ROW_MAX = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
+def test_run_doctor_flags_lineup_count_cell_when_non_numeric():
+    cfg = _base_config()
+    rows = _lineups_rows()
+    rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [[""]]
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+
+    issues = run_doctor(client, cfg)
+    matches = [i for i in issues if i.check == "lineup-count-cell"]
+    assert any("not a number" in i.detail for i in matches)
 
 
-def _pool_sort_formula(last_row: int) -> str:
-    return (
-        f"=IFERROR(SORT(FILTER('Player Pool'!$A$2:$Z${last_row},"
-        f"'Player Pool'!$A$2:$A${last_row}<>\"\","
-        f"(Lineups!$B$1=\"ALL\")+('Player Pool'!$B$2:$B${last_row}=Lineups!$B$1)),"
-        f'Lineups!$G$1,FALSE),"")'
-    )
+def test_run_doctor_flags_lineup_count_cell_when_out_of_range():
+    cfg = _base_config()
+    rows = _lineups_rows()
+    rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [[str(len(LINEUPS_NAME_BLOCKS) + 1)]]
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+
+    issues = run_doctor(client, cfg)
+    matches = [i for i in issues if i.check == "lineup-count-cell"]
+    assert any("expected 1.." in i.detail for i in matches)
 
 
-def test_run_doctor_passes_when_pool_sort_formula_reaches_the_current_block_extent():
+def test_run_doctor_skips_lineup_count_cell_when_exposure_tab_absent():
     tabs = dict(_ALL_GOOD_TABS)
-    tabs[POOL_SORT_TAB] = ["Name"]
+    del tabs[EXPOSURE_TAB]
     cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=tabs,
-        rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
-        formulas={(POOL_SORT_TAB, "A2"): [[_pool_sort_formula(_POOL_DECK_ROW_MAX)]]},
-    )
+    client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     issues = run_doctor(client, cfg)
-    assert not any(i.check == "pool-deck-range" for i in issues)
-
-
-def test_run_doctor_flags_pool_deck_range_that_has_fallen_behind_a_resize():
-    # The exact bug this session fixed in sheet_pool_deck.py: a resize grew
-    # PLAYER_POOL_NAME_BLOCKS' extent, but PoolSort's formula (here
-    # simulated as still pointing at the old, shorter extent) wasn't
-    # updated to match -- silently hiding every row past its own range.
-    stale_extent = _POOL_DECK_ROW_MAX - 6
-    tabs = dict(_ALL_GOOD_TABS)
-    tabs[POOL_SORT_TAB] = ["Name"]
-    tabs["Player Pool"] = ["Name", "Pos.", *LINKED_EDGE_COLUMNS]
-    cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=tabs,
-        rows={
-            **_lineups_rows(_ALL_GOOD_TABS["Lineups"], player_pool_header=tabs["Player Pool"]),
-            ("Player Pool", f"B{PLAYER_POOL_NAME_BLOCKS[-1][0]}:B{PLAYER_POOL_NAME_BLOCKS[-1][0]}"): [
-                ["DST"]
-            ],
-        },
-        formulas={(POOL_SORT_TAB, "A2"): [[_pool_sort_formula(stale_extent)]]},
-    )
-
-    issues = run_doctor(client, cfg)
-    matches = [i for i in issues if i.check == "pool-deck-range"]
-    assert len(matches) == 1
-    assert str(stale_extent) in matches[0].detail
-    assert str(_POOL_DECK_ROW_MAX) in matches[0].detail
-    assert "DST" in matches[0].detail
-
-
-def test_run_doctor_skips_pool_deck_range_check_when_poolsort_tab_is_absent():
-    cfg = _base_config()
-    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]))
-
-    issues = run_doctor(client, cfg)
-    assert not any(i.check == "pool-deck-range" for i in issues)
-
-
-def test_run_doctor_flags_deck_block_alignment_when_first_subheader_is_wrong():
-    cfg = _base_config()
-    bad_header_row = ["Aaron Rodgers", "QB"]  # not "Name" -- deck/blocks drifted
-    client = FakeDoctorClient(
-        tabs=_ALL_GOOD_TABS,
-        rows=_lineups_rows(bad_header_row),
-    )
-
-    issues = run_doctor(client, cfg)
-    matches = [i for i in issues if i.check == "deck-block-alignment"]
-    assert any("column A" in i.detail for i in matches)
-
-
-def test_run_doctor_flags_deck_block_alignment_when_frozen_rows_mismatch_deck_rows():
-    cfg = _base_config()
-    client = FakeDoctorClient(
-        tabs=_ALL_GOOD_TABS,
-        rows=_lineups_rows(_ALL_GOOD_TABS["Lineups"]),
-        frozen_rows={"Lineups": DECK_ROWS - 1},
-    )
-
-    issues = run_doctor(client, cfg)
-    matches = [i for i in issues if i.check == "deck-block-alignment"]
-    assert any("frozen row count" in i.detail for i in matches)
+    assert not any(i.check == "lineup-count-cell" for i in issues)
 
 
 def test_run_doctor_skips_dependent_checks_for_a_missing_tab():

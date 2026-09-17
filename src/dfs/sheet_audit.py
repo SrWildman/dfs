@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 from dfs.sheet_style import AVAIL_CHIPS, FIELD_FORMATS, FLAG_CHIPS, HEADER_FMT
 from dfs.sheets import SheetsClient, column_letter
-from dfs.weekly_reset import PLAYER_POOL_HEADER_ROW
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
 # Sheets reports this for any column that was never explicitly widened --
 # see SheetsClient.get_column_widths' own docstring.
@@ -40,7 +40,13 @@ AUDITED_TABS: list[tuple[str, int]] = [
     ("PlayerPoolRaw", 1),
     # A3: real header moved to row 2 -- row 1 is the add-a-player control.
     ("Player Pool", PLAYER_POOL_HEADER_ROW),
-    ("Lineups", 11),
+    # Sat at row 11 while the pool deck occupied the rows above it
+    # (2026-09-06 through 2026-09-16); derived, not hardcoded, so this
+    # self-corrects if the header ever moves again -- a literal `11` here
+    # once shipped anyway and silently mis-audited Lineups the moment the
+    # deck was removed, caught only by re-reading this list, not by any
+    # test (nothing here was exercised against the real constant).
+    ("Lineups", LINEUPS_NAME_BLOCKS[0][0] - 1),
     ("Slate Grid", 1),
     ("Exposure", 1),
     ("Movement", 3),
@@ -57,13 +63,11 @@ AUDITED_TABS: list[tuple[str, int]] = [
 ]
 
 # A tab whose frozen rows deliberately don't equal its header row, so the
-# generic "frozen >= header_row" check would false-positive. Lineups
-# freezes exactly DECK_ROWS (10) -- the pool deck sits above the real
-# header at row 11, and freezing through the header itself would freeze
-# into the first lineup block too (see sheet_pool_deck.py's own docstring
-# on why `polish_builder_tab`'s Lineups call passes `freeze_rows=DECK_ROWS`
-# instead of the default). Value is the minimum acceptable frozen-row count.
-FREEZE_OVERRIDES: dict[str, int] = {"Lineups": 10}
+# generic "frozen >= header_row" check would false-positive. Empty since
+# the pool deck (Lineups' own former reason for one) was removed entirely
+# -- Phase 5, 2026-09-16, see sheet_pool_deck.py's module docstring.
+# Kept as a mechanism in case a future tab needs it again.
+FREEZE_OVERRIDES: dict[str, int] = {}
 
 # A tab whose real table header is narrower than its full header ROW.
 # Exposure's row 1 has 7 real column headers (A-G) plus a spacer and a

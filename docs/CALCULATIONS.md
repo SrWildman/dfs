@@ -148,17 +148,17 @@ from `WeatherRaw` by that game's `GameId` -- blank for dome games (weather
 is only fetched for `Roof == outdoors` games in the first place) or if
 `weather` hasn't synced.
 
-## ImpMove, TotMove, SpdMove
+## ImpliedMove, TotMove, SpdMove
 
-`ImpMove`/`TotMove`/`SpdMove` = `line_movement.diff_odds()`'s
+`ImpliedMove`/`TotMove`/`SpdMove` = `line_movement.diff_odds()`'s
 `TeamPointsDelta`/`TotalDelta`/`SpreadDelta` for this player's team,
 joined onto `EdgeRaw` by team code. All three were always computed by
 `diff_odds()`; before Fix 2.2 only `TeamPointsDelta` reached `EdgeRaw`,
 under the name `LineMove` -- a name that didn't say *which* line had
-moved once two more were added alongside it. `ImpMove` is the direct
+moved once two more were added alongside it. `ImpliedMove` is the direct
 rename (team implied points, same number `LineMove` always was);
 `TotMove` (game total) and `SpdMove` (spread) are newly surfaced. The
-`Flag` column's `LINE↑`/`LINE↓` keys off `ImpMove` specifically --
+`Flag` column's `LINE↑`/`LINE↓` keys off `ImpliedMove` specifically --
 `TotMove`/`SpdMove` are shown for context but don't drive that flag.
 
 **Baseline**: the diff is `(current nfl_odds sync) − (the first nfl_odds
@@ -172,7 +172,7 @@ same real-world move always produces the same number regardless of how
 many times you've synced since. `dfs odds movement` is a separate,
 terminal-only report that still answers the different question "what
 moved since I last ran a sync" -- useful before deciding whether to
-re-sync, but not the same numbers as `EdgeRaw`'s `ImpMove`/`TotMove`/
+re-sync, but not the same numbers as `EdgeRaw`'s `ImpliedMove`/`TotMove`/
 `SpdMove`.
 
 **`diff_odds()` internals** (`line_movement.py`): joins two `nfl_odds`
@@ -182,7 +182,7 @@ each; sorts by `|TeamPointsDelta|` descending. A team present in only one
 of the two snapshots (a bye week resolving, a rare mid-week schedule
 change) is dropped from the diff rather than guessed at.
 
-`TeamPointsDelta` (`ImpMove`) specifically is the delta in this team's
+`TeamPointsDelta` (`ImpliedMove`) specifically is the delta in this team's
 Vegas-implied point total (`total/2 ± spread/2`, computed upstream by
 Rotowire, not by this project) -- a team's *own* expected points
 changing, not just the game's total or spread moving in the abstract.
@@ -215,8 +215,8 @@ of another, so this can't cross-match):
 |---|---|---|
 | 1 | `OUT` | `Avail` is `OUT` or `IR` |
 | 2 | `WIND` | `Wind ≥ 20` mph |
-| 3 | `LINE↑` | `ImpMove ≥ +1.0` |
-| 3 | `LINE↓` | `ImpMove ≤ −1.0` |
+| 3 | `LINE↑` | `ImpliedMove ≥ +1.0` |
+| 3 | `LINE↓` | `ImpliedMove ≤ −1.0` |
 | 4 | `LEVERAGE` | `Leverage ≥ 30` (blank `Leverage` while unpublished can never clear this) |
 | 5 | `CHALK` | `ProjOwn ≥ 20%` -- can only fire once ownership is real; `ProjOwn` reads 0 for everyone until then |
 | — | *(blank)* | none of the above |

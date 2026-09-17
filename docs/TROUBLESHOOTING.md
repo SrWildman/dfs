@@ -77,17 +77,6 @@ for the "clear the old linked columns by hand first" recovery path.
 
 ---
 
-**The Lineups pool deck shows fewer players than you know are ticked.**
-Cause: `PLAYER_POOL_NAME_BLOCKS` grew (a position cap was raised) but
-something in the deck/Player Pool chain still has the old, shorter range
-hardcoded -- this exact bug shipped twice before `doctor` had a check
-for it.
-Fix: run `dfs doctor` -- its `pool-deck-range` and
-`deck-block-alignment` checks exist specifically to catch this loudly
-instead of letting it silently hide players.
-
----
-
 **A number shows as `33.2900000001` instead of a clean decimal.**
 Cause: the cell has no number format applied (or the wrong one), so
 Sheets is showing a raw float.

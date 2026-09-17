@@ -26,7 +26,6 @@ from dfs.sheet_style import (
     WHITE,
     ZERO_EXCLUDED_COLUMNS,
     ZERO_GREY_BG,
-    apply_deck_color_scales,
     apply_field_color_scales,
     apply_field_formats,
     apply_grouped_color_scales,
@@ -37,6 +36,7 @@ from dfs.sheet_style import (
     polish_guardrails,
     polish_lineups_totals_rows,
     style_flat_tab,
+    style_movement,
     style_results,
     style_sos_tab,
     style_tier23_tabs,
@@ -61,9 +61,11 @@ def test_edge_widths_and_groups_only_name_real_edge_columns():
 
 def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     # FIELD_COLOR_SCALES is shared across every tab (Fix 2.1), so it also
-    # carries builder-only header text ("Team Implied", "OppPosRank"...)
-    # that isn't a literal EDGE_COLUMNS name -- pin the EdgeRaw-side subset
-    # that matters instead of the whole dict.
+    # carries builder-only header text ("Team Implied"...) that isn't a
+    # literal EDGE_COLUMNS name -- pin the EdgeRaw-side subset that
+    # matters instead of the whole dict. `OppPosRank` WAS builder-only
+    # too, until Phase 5 (2026-09-16, "all data should be in edge raw")
+    # added it natively to EDGE_COLUMNS as well.
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
     assert matched == {
@@ -74,7 +76,8 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "CeilVal",
         "Leverage",
         "GameEnv",
-        "ImpMove",
+        "OppPosRank",
+        "ImpliedMove",
         "TotMove",
         "SpdMove",
         "OverUnder",
@@ -83,11 +86,12 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "OwnPct",
     }
     assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
-    assert FIELD_COLOR_SCALES["ImpMove"] == "diverging"  # scored separately, zero as the midpoint
+    assert FIELD_COLOR_SCALES["ImpliedMove"] == "diverging"  # scored separately, zero as the midpoint
     assert FIELD_COLOR_SCALES["TotMove"] == "diverging"
     assert FIELD_COLOR_SCALES["SpdMove"] == "diverging"
     assert FIELD_COLOR_SCALES["Spread"] == "diverging"  # signed, zero (pick'em) is the midpoint
     assert FIELD_COLOR_SCALES["ProjOwn"] == "warm"  # high ownership is chalk, not "good" (Fix 2.8)
+    assert FIELD_COLOR_SCALES["OppPosRank"] == "reversed"  # 1 (toughest matchup) is best, not worst
 
 
 def test_field_formats_covers_every_edgeraw_numeric_column():
@@ -108,7 +112,7 @@ def test_field_formats_covers_every_edgeraw_numeric_column():
         "Leverage",
         "GameEnv",
         "Wind",
-        "ImpMove",
+        "ImpliedMove",
         "TotMove",
         "SpdMove",
         "OverUnder",
@@ -310,24 +314,26 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_ten_columns_skipping_raw_player_metrics():
+def test_polish_edge_scales_eleven_columns_skipping_raw_player_metrics():
     # Phase 4 (4.1): EdgeRaw isn't position-grouped, so ProjPts/Ceiling/
     # Val/CeilVal (EDGE_UNSCALED_PLAYER_METRICS) are skipped there --
     # CeilPct/OwnPct/Leverage (already percentile) stand in for them.
-    # 12 raw FIELD_COLOR_SCALES matches, minus 4 skipped, plus 2 newly
-    # added (CeilPct/OwnPct) = 10.
+    # 12 raw FIELD_COLOR_SCALES matches, minus 4 skipped, plus 2 (CeilPct/
+    # OwnPct) plus 1 more (OppPosRank, Phase 5, 2026-09-16 -- already
+    # comparable across positions the same way CeilPct/OwnPct are, so it
+    # needs no position-grouping either) = 11.
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = [
         name
         for name in edge_header
         if name in FIELD_COLOR_SCALES and name not in EDGE_UNSCALED_PLAYER_METRICS
     ]
-    assert len(matched) == 10
+    assert len(matched) == 11
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 10
+    assert len(client.color_scale_calls) == 11
 
 
 def test_polish_edge_move_and_spread_scales_are_diverging_at_zero():
@@ -335,7 +341,7 @@ def test_polish_edge_move_and_spread_scales_are_diverging_at_zero():
     polish_edge(client, "EdgeRaw")
 
     diverging = [kwargs for _rng, kwargs in client.color_scale_calls if kwargs.get("mid_type") == "NUMBER"]
-    assert len(diverging) == 4  # ImpMove, TotMove, SpdMove, Spread
+    assert len(diverging) == 4  # ImpliedMove, TotMove, SpdMove, Spread
     assert all(kwargs["mid_value"] == "0" for kwargs in diverging)
 
 
@@ -856,75 +862,6 @@ def test_apply_grouped_color_scales_honors_skip_argument():
     assert {a1 for a1, _ in client.color_scale_calls} == {"B3:B12"}
 
 
-class FakeDeckColorScaleClient:
-    def __init__(self):
-        self.clear_cf_calls: list[tuple] = []
-        self.color_scale_calls: list[tuple[str, dict]] = []
-        self.boolean_rule_calls: list[tuple[str, dict]] = []
-
-    def clear_conditional_formats(self, tab_name: str, *, column=None, row_range=None) -> None:
-        self.clear_cf_calls.append((column, row_range))
-
-    def add_color_scales(self, tab_name: str, specs: list[dict]) -> None:
-        for spec in specs:
-            spec = dict(spec)
-            self.color_scale_calls.append((spec.pop("a1_range"), spec))
-
-    def add_boolean_rules(self, tab_name: str, specs: list[dict]) -> None:
-        for spec in specs:
-            spec = dict(spec)
-            self.boolean_rule_calls.append((spec.pop("a1_range"), spec))
-
-
-def test_apply_deck_color_scales_anchors_min_max_at_pool_sort_not_the_window():
-    # Phase 4 (4.4): the window (rows 4-9) must scale against PoolSort's
-    # FULL range for that field, not its own 6 visible rows -- otherwise
-    # colour re-scales as you page through with "Start at".
-    # Also pins the discovered constraint (see CONTRIBUTING.md's Phase 4
-    # changelog): a gradient's NUMBER-type endpoint can't reference
-    # another sheet directly, so min/max must point at same-tab helper
-    # cells (sheet_pool_deck.MIN_HELPER_ROW/MAX_HELPER_ROW) instead of a
-    # PoolSort formula written straight into the rule.
-    client = FakeDeckColorScaleClient()
-    deck_header = ["Name", "Pts"]
-    pool_sort_header = ["Name", "Pts"]
-
-    applied = apply_deck_color_scales(
-        client,
-        "Lineups",
-        deck_header,
-        pool_sort_header,
-        header_row=3,
-        window_end=9,
-        min_helper_row=2,
-        max_helper_row=10,
-    )
-
-    assert applied == 1
-    a1, kwargs = client.color_scale_calls[0]
-    assert a1 == "B4:B9"
-    assert kwargs["min_value"] == "=$B$2"
-    assert kwargs["max_value"] == "=$B$10"
-
-
-def test_apply_deck_color_scales_skips_a_deck_only_name_with_no_pool_sort_equivalent():
-    # "Issues"/"% of Rstr" exist on Lineups' deck header but have no
-    # Player Pool/PoolSort column to anchor against.
-    client = FakeDeckColorScaleClient()
-    applied = apply_deck_color_scales(
-        client,
-        "Lineups",
-        ["Name", "Leverage"],
-        ["Name"],  # PoolSort has no Leverage column in this fixture
-        header_row=3,
-        window_end=9,
-        min_helper_row=2,
-        max_helper_row=10,
-    )
-    assert applied == 0
-    assert client.color_scale_calls == []
-
-
 def test_polish_builder_tab_styles_header_repeats_the_same_as_the_real_header():
     # Lineups' repeated sub-headers (one per lineup block after the
     # first) looked plain while only the real header was dark -- every
@@ -1004,8 +941,40 @@ def test_polish_builder_tab_skips_chips_when_flag_and_avail_absent():
     result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
     assert client.clear_cf_calls == [None]
-    assert client.boolean_rule_calls == []
+    # Position tint still fires (Pos. is present) -- only the FLAG_CHIPS/
+    # AVAIL_CHIPS/etc chip loop is skipped when its own columns are absent.
+    assert all(a1.startswith("B") for a1, _ in client.boolean_rule_calls)
+    assert len(client.boolean_rule_calls) == 5  # one per POSITION_TINTS entry
     assert "0 chip column(s)" in result
+
+
+def test_polish_builder_tab_applies_wind_chip_when_present():
+    client = FakeBuilderTabClient(["Name", "Wind"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    wind_rules = [r for a1, r in client.boolean_rule_calls if a1 == "B2:B100"]
+    assert len(wind_rules) == 1
+    assert wind_rules[0]["condition_type"] == "NUMBER_GREATER"
+
+
+def test_polish_builder_tab_greys_lev_basis_when_present():
+    client = FakeBuilderTabClient(["Name", "LevBasis"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    formatted = [rng for rng, _ in client.format_calls if rng == "B2:B100"]
+    assert formatted, "LevBasis column should be formatted"
+
+
+def test_polish_builder_tab_bolds_name_on_flag_without_pool_tint():
+    # Player Pool/Lineups have no unpooled rows to tint against (every row
+    # is already a pool pick or roster slot) -- unlike EdgeRaw, this must
+    # be a plain bold-on-Flag rule, not the three-way pooled/flagged split.
+    client = FakeBuilderTabClient(["Name", "Flag"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    name_rules = [r for a1, r in client.boolean_rule_calls if a1 == "A2:A100"]
+    assert len(name_rules) == 1
+    assert name_rules[0]["fmt"] == {"textFormat": {"bold": True}}
 
 
 def test_polish_builder_tab_clears_conditional_formats_whole_tab_first():
@@ -1168,6 +1137,43 @@ def test_style_sos_tab_scales_rank_reversed():
     assert colors["min_color"] == GRAD_MAX
     assert colors["max_color"] == GRAD_MIN
     assert "Rank scaled (reversed)" in result
+
+
+def test_style_movement_finds_columns_by_name_not_position():
+    # Section F: build_movement's header is now 4-7 columns wide depending
+    # on which optional columns EdgeRaw/GameStart provide, so this must be
+    # header-name-driven, not a hardcoded A:E range.
+    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Total move", "Spread move", "Flag"])
+
+    result = style_movement(client, "Movement")
+
+    scale_ranges = {a1 for a1, _ in client.color_scale_calls}
+    assert scale_ranges == {"C4:C60", "D4:D60", "E4:E60"}
+    flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == "F4:F60"]
+    assert len(flag_rules) == len(FLAG_CHIPS)
+    assert "3 movement column(s) colour-scaled" in result
+
+
+def test_style_movement_handles_the_narrower_no_kickoff_no_extras_shape():
+    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Flag"])
+
+    result = style_movement(client, "Movement")
+
+    scale_ranges = {a1 for a1, _ in client.color_scale_calls}
+    assert scale_ranges == {"C4:C60"}
+    flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == "D4:D60"]
+    assert len(flag_rules) == len(FLAG_CHIPS)
+    assert "1 movement column(s) colour-scaled" in result
+
+
+def test_style_movement_skips_when_tab_absent():
+    class AbsentClient(FakeBuilderTabClient):
+        def tab_exists(self, tab_name: str) -> bool:
+            return False
+
+    client = AbsentClient(["Player"])
+    result = style_movement(client, "Movement")
+    assert "not present" in result
 
 
 def test_style_tier23_tabs_covers_every_expected_tab():

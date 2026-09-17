@@ -7,21 +7,23 @@ grammar; this module is its counterpart for the three tabs that hold real
 hand-authored formulas (and so need actual `moveDimension` calls, not just
 a `dfs sync` rewrite -- see `column_reorder.py`).
 
-Same six zones everywhere: IDENTITY, DECISION, GAME (with four blank `SoS
-n` columns reserved for the strength-of-schedule work landing in a few
-weeks -- adding them now means that future column-order change never has
-to happen either), WEATHER (collapsed), MOVEMENT (collapsed), INTERNAL
-(collapsed). Header text matches each tab's own already-established
-spelling (`Pos.`/`Opp.`/`DK Sal`/`Pts`/`Ceil`/`Rstr%`, not EdgeRaw's
-`Position`/`Opp`/`Salary`/`ProjPts`/`Ceiling`/`ProjOwn`) -- normalizing
-that text is a structural change this codebase deliberately never makes
-(see `sheet_style.py`'s FIELD_FORMATS docstring).
+Same six zones everywhere: IDENTITY, DECISION, GAME, WEATHER (collapsed),
+MOVEMENT (collapsed), INTERNAL (collapsed). GAME used to also carry four
+blank `SoS 1..4` placeholders reserved for the strength-of-schedule work
+before that data existed -- removed in Phase 5 (2026-09-16) once the real
+sync (`sources/tffb_sos.py`) landed straight into `OppPosRank` and Sam
+confirmed the four reserved slots served no purpose beyond it ("Why still
+sos 1-4. Should only be one per player"). Header text matches each tab's
+own already-established spelling (`Pos.`/`Opp.`/`DK Sal`/`Pts`/`Ceil`/
+`Rstr%`, not EdgeRaw's `Position`/`Opp`/`Salary`/`ProjPts`/`Ceiling`/
+`ProjOwn`) -- normalizing that text is a structural change this codebase
+deliberately never makes (see `sheet_style.py`'s FIELD_FORMATS docstring).
 
 `LINKED_COLUMNS` is the subset of each zone that's a VLOOKUP-by-Name
 against EdgeRaw (`sheet_links.link_edge_columns` fills these); everything
 else in a zone is a native column PlayerPoolRaw/Player Pool/Lineups
-already compute for themselves (a direct source formula, or in the two
-GAME-zone/blank-`SoS n` case, not wired to anything yet). Every linked
+already compute for themselves (a direct source formula, or for
+`OppPosRank`, a VLOOKUP against SoSComb rather than EdgeRaw). Every linked
 name here is spelled exactly as it appears in `derived.EDGE_COLUMNS` --
 unlike the native columns, the linked ones were introduced by
 `link_edge_columns` using EdgeRaw's own names directly, so there's no
@@ -40,14 +42,19 @@ IDENTITY = ["Name", "Pos.", "Team", "Opp.", "Venue"]
 DECISION = ["DK Sal", "Pts", "Val", "Ceil", "CeilVal", "Rstr%", "Leverage", "Avail", "Flag"]
 
 # O/U/Spread/Team Implied/OppPosRank are native (VLOOKUP against oddsFinal/
-# SoSComb); GameEnv is linked; the four `SoS n` columns are blank
-# placeholders reserved for strength-of-schedule, not wired to anything
-# yet -- see the module docstring.
-GAME = ["O/U", "Spread", "Team Implied", "GameEnv", "OppPosRank", "SoS 1", "SoS 2", "SoS 3", "SoS 4"]
+# SoSComb); GameEnv is linked. The four `SoS 1..4` placeholders that used
+# to sit here (Phase 3, reserved for strength-of-schedule before that data
+# existed) are gone -- Phase 5 (2026-09-16) landed the real SoS sync
+# (`sources/tffb_sos.py`) straight into `OppPosRank` itself, and Sam:
+# "Why still sos 1-4. Should only be one per player" -- confirming the
+# four reserved slots never had a real per-position use once the actual
+# per-player value existed. See CONTRIBUTING.md's changelog for the real
+# column deletion this required on PlayerPoolRaw/Player Pool/Lineups.
+GAME = ["O/U", "Spread", "Team Implied", "GameEnv", "OppPosRank"]
 
 # All three collapsed groups are entirely linked.
 WEATHER = ["Stadium", "Roof", "Wind"]
-MOVEMENT = ["ImpMove", "TotMove", "SpdMove", "GameStart"]
+MOVEMENT = ["ImpliedMove", "TotMove", "SpdMove", "GameStart"]
 INTERNAL = ["Id", "CeilPct", "OwnPct", "LevBasis"]
 
 # Shared by all three tabs -- see PLAYER_POOL_RAW_COLUMN_ORDER/
@@ -73,7 +80,11 @@ PLAYER_POOL_RAW_COLUMN_ORDER = list(BASE_COLUMN_ORDER)
 # player; "Pool" (Fix 2.11's surfaced Cash/GPP/Both value) and "Overflow"
 # (the over-the-cap warning) are both about *this tab's own roster
 # mechanics*, not a player attribute, so they stay appended at the very
-# end regardless of what else moves around them.
+# end regardless of what else moves around them. "Used"/"In" (Phase 5B:
+# how many of THIS WEEK'S lineups roster this player, and which ones) are
+# the newest addition and append-only past everything else, per
+# `sheet_links.link_edge_columns`'s own append convention --
+# `sheet_pool_usage.py` writes their formulas.
 PLAYER_POOL_COLUMN_ORDER = [
     *IDENTITY,
     "Source",
@@ -85,6 +96,8 @@ PLAYER_POOL_COLUMN_ORDER = [
     *INTERNAL,
     "Overflow",
     "Pool",
+    "Used",
+    "In",
 ]
 
 # Lineups: "% of Rstr" is a direct derivative of Rstr% (this lineup's

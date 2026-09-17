@@ -14,42 +14,20 @@ the eye. This module only reads; nothing here ever writes to the sheet.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
-from dfs.sheet_pool_deck import DECK_ROWS, POOL_SORT_TAB
+from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sources.edge import POOL_HEADER
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
 # Column A of every repeated Lineups sub-header row is the literal text
 # "Name" (see weekly_reset.py's module docstring) -- the tab's own header
 # row (immediately above the first block) also starts with this, so the
 # same check covers both.
 _LINEUPS_HEADER_MARKER = "Name"
-
-# PoolSort's A2 filter formula (sheet_pool_deck._build_pool_sort) always
-# references Player Pool with explicit row numbers, e.g.
-# 'Player Pool'!$A$2:$Z$80 or a single-cell 'Player Pool'!$A$2<>"" --
-# _POOL_DECK_RANGE_RE grabs the whole $COL$ROW[:$COL$ROW] reference right
-# after each 'Player Pool'! (a plain "match every $\d+" would also catch,
-# say, a row number embedded in a *different* sheet's reference elsewhere
-# in the formula); _ROW_NUM_RE then pulls every row number out of that
-# captured reference. Taking the max across all of them is how this check
-# independently re-derives what the deck can actually see, without
-# importing sheet_pool_deck's own _POOL_LAST_ROW (that would just verify
-# the module agrees with itself).
-_POOL_DECK_RANGE_RE = re.compile(r"'Player Pool'!((?:\$[A-Z]+\$\d+:?)+)")
-_ROW_NUM_RE = re.compile(r"\$(\d+)")
-
-
-def _player_pool_rows_referenced(formula: str) -> list[int]:
-    rows: list[int] = []
-    for match in _POOL_DECK_RANGE_RE.finditer(formula):
-        rows.extend(int(n) for n in _ROW_NUM_RE.findall(match.group(1)))
-    return rows
 
 
 @dataclass
@@ -67,9 +45,6 @@ class DoctorClient:
         raise NotImplementedError
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:  # pragma: no cover
-        raise NotImplementedError
-
-    def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -196,75 +171,40 @@ def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[s
     return issues
 
 
-def _check_pool_deck_range(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
-    if POOL_SORT_TAB not in tab_titles:
+def _check_lineup_count_cell(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
+    """Phase 5A (moved to Exposure when the pool deck was removed
+    entirely, Phase 5-removal): `Exposure!H1` is Exposure's own live
+    divisor (the "how many lineups this week" control) -- a blank/zero/
+    non-numeric H1 falls back safely to full capacity in the formula
+    itself, so this can't corrupt Exposure, but a value outside
+    1..capacity is still a sign the control was typed into wrong (or
+    overwritten by something that doesn't know what it is) and is worth
+    flagging."""
+    if EXPOSURE_TAB not in tab_titles:
         return []
 
-    raw = client.read_formula(POOL_SORT_TAB, "A2")
-    formula = raw[0][0] if raw and raw[0] else ""
-    referenced_rows = _player_pool_rows_referenced(formula)
-    if not referenced_rows:
-        # Formula shape has changed enough that this check can't parse it --
-        # not this check's job to flag that; nothing to compare here.
-        return []
-
-    formula_extent = max(referenced_rows)
-    blocks_extent = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
-    if formula_extent >= blocks_extent:
-        return []
-
-    pool_tab = cfg.lineups.player_pool_tab
-    unreachable_positions = []
-    for start, end in PLAYER_POOL_NAME_BLOCKS:
-        if end <= formula_extent:
-            continue
-        label_cell = client.read_range(pool_tab, f"B{start}:B{start}") if pool_tab in tab_titles else []
-        position = label_cell[0][0] if label_cell and label_cell[0] else f"rows {start}-{end}"
-        unreachable_positions.append(position)
-
-    return [
-        DoctorIssue(
-            "pool-deck-range",
-            f"{POOL_SORT_TAB!r}'s filter formula only reaches row {formula_extent}, but "
-            f"PLAYER_POOL_NAME_BLOCKS now extends to row {blocks_extent} -- "
-            f"{', '.join(unreachable_positions)} player(s) past row {formula_extent} are "
-            f"invisible to the pool deck's 'Start at' window. Re-run `dfs setup add-pool-deck`.",
-        )
-    ]
-
-
-def _check_deck_block_alignment(
-    cfg: Config,
-    tab_titles: set[str],
-    headers_by_tab: dict[str, list[str]],
-    frozen_rows_by_tab: dict[str, int],
-) -> list[DoctorIssue]:
-    tab = cfg.lineups.builder_tab
-    if tab not in tab_titles:
-        return []
-
-    issues = []
-    header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
-    first_cell = (headers_by_tab.get(tab) or [""])[0]
-    if first_cell != _LINEUPS_HEADER_MARKER:
-        issues.append(
+    raw = client.read_range(EXPOSURE_TAB, LINEUP_COUNT_CELL)
+    value = raw[0][0] if raw and raw[0] else ""
+    capacity = len(LINEUPS_NAME_BLOCKS)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return [
             DoctorIssue(
-                "deck-block-alignment",
-                f"{tab!r}: expected column A == {_LINEUPS_HEADER_MARKER!r} at row {header_row} "
-                f"(the first sub-header, directly below the pool deck), found {first_cell!r}",
+                "lineup-count-cell",
+                f"{EXPOSURE_TAB!r}: {LINEUP_COUNT_CELL} (lineup count, Exposure's own divisor) "
+                f"is {value!r}, not a number",
             )
-        )
-
-    frozen = frozen_rows_by_tab.get(tab)
-    if frozen is not None and frozen != DECK_ROWS:
-        issues.append(
+        ]
+    if not (1 <= number <= capacity):
+        return [
             DoctorIssue(
-                "deck-block-alignment",
-                f"{tab!r}: frozen row count is {frozen}, expected DECK_ROWS ({DECK_ROWS}) -- "
-                f"the deck and the lineup blocks have drifted apart",
+                "lineup-count-cell",
+                f"{EXPOSURE_TAB!r}: {LINEUP_COUNT_CELL} (lineup count, Exposure's own divisor) "
+                f"is {number!r}, expected 1..{capacity}",
             )
-        )
-    return issues
+        ]
+    return []
 
 
 def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
@@ -275,28 +215,16 @@ def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
     tabs = client.list_tabs()
     tab_titles = {t.title for t in tabs}
     headers_by_tab = {t.title: t.header for t in tabs}
-    frozen_rows_by_tab = {t.title: t.frozen_rows for t in tabs}
 
     # list_tabs()/TabInfo.header always reads row 1 -- true for every tab
-    # except Lineups, whose real header moved when sheet_pool_deck.py's
-    # add_pool_deck inserted rows above it. Without this override,
-    # _check_linked_edge_columns would read the deck's row-1 controls as
-    # Lineups' "header", always report it unlinked, and (this happened for
-    # real, on the template, during an earlier version of this row-insert)
-    # `dfs setup link-edge` would append a second, wrongly-positioned copy
-    # of LINKED_EDGE_COLUMNS on top of lineup data that's already correctly
-    # linked -- see CONTRIBUTING.md's changelog.
-    lineups_tab = cfg.lineups.builder_tab
-    if lineups_tab in tab_titles:
-        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
-        raw = client.read_range(lineups_tab, f"A{lineups_header_row}:{lineups_header_row}")
-        headers_by_tab[lineups_tab] = raw[0] if raw else []
-
-    # A3: same override, same reason -- Player Pool's real header moved
-    # from row 1 to PLAYER_POOL_HEADER_ROW when the add-a-player control
-    # row was inserted above it. Without this, _check_linked_edge_columns
+    # except Player Pool, whose real header moved from row 1 to
+    # PLAYER_POOL_HEADER_ROW when A3's add-a-player control row was
+    # inserted above it. Without this override, _check_linked_edge_columns
     # would read that control row as Player Pool's "header" and report
-    # every one of LINKED_EDGE_COLUMNS missing.
+    # every one of LINKED_EDGE_COLUMNS missing. Lineups needed the same
+    # override for as long as the pool deck sat above ITS header too --
+    # removed along with the deck itself; Lineups' header is back at row 1,
+    # matching list_tabs()'s own default the same as every other tab.
     player_pool_tab = cfg.lineups.player_pool_tab
     if player_pool_tab in tab_titles:
         raw = client.read_range(player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}")
@@ -308,6 +236,5 @@ def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
     issues += _check_linked_edge_columns(cfg, tab_titles, headers_by_tab)
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
-    issues += _check_pool_deck_range(client, cfg, tab_titles)
-    issues += _check_deck_block_alignment(cfg, tab_titles, headers_by_tab, frozen_rows_by_tab)
+    issues += _check_lineup_count_cell(client, cfg, tab_titles)
     return issues

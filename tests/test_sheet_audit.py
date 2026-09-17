@@ -135,18 +135,22 @@ def test_audit_tab_flags_missing_freeze():
     assert any("freeze pane" in i for i in audit.issues)
 
 
-def test_audit_tab_uses_freeze_override_for_lineups():
-    # Lineups' pool deck freezes exactly DECK_ROWS (10), not through its
-    # real header at row 11 -- the generic "frozen >= header_row" check
-    # would false-positive there by design, not by a real gap.
+def test_audit_tab_freeze_override_mechanism_works_when_populated(monkeypatch):
+    # FREEZE_OVERRIDES is empty now that Lineups' pool deck (its one real
+    # user, freezing exactly DECK_ROWS/10 rather than through its real
+    # header) was removed entirely -- this pins the mechanism itself
+    # still works, generically, in case a future tab needs it again.
+    import dfs.sheet_audit as sheet_audit
+
+    monkeypatch.setitem(sheet_audit.FREEZE_OVERRIDES, "SomeTab", 10)
     client = FakeAuditClient(header_row=11, frozen=10, widths={"A": 165, "B": 78, "C": 62, "D": 96, "E": 60})
-    audit = audit_tab(client, "Lineups", header_row=11)
+    audit = audit_tab(client, "SomeTab", header_row=11)
     assert not any("freeze pane" in i for i in audit.issues)
 
     client_short = FakeAuditClient(
         header_row=11, frozen=9, widths={"A": 165, "B": 78, "C": 62, "D": 96, "E": 60}
     )
-    audit_short = audit_tab(client_short, "Lineups", header_row=11)
+    audit_short = audit_tab(client_short, "SomeTab", header_row=11)
     assert any("freeze pane" in i for i in audit_short.issues)
 
 
@@ -198,3 +202,15 @@ def test_run_audit_covers_every_registered_tab():
     results = run_audit(client)
     assert [r.tab for r in results] == [tab for tab, _ in AUDITED_TABS]
     assert all(isinstance(r, TabAudit) for r in results)
+
+
+def test_audited_tabs_lineups_header_row_is_derived_not_hardcoded():
+    # A literal `11` shipped here once and silently mis-audited Lineups
+    # the moment the pool deck that used to justify it was removed
+    # entirely (Phase 5, 2026-09-16) -- nothing caught it until a real
+    # `dfs setup audit-style` run against a live sheet did. Pin the real
+    # relationship so a future header move can't silently desync again.
+    from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
+
+    lineups_header_row = next(row for tab, row in AUDITED_TABS if tab == "Lineups")
+    assert lineups_header_row == LINEUPS_NAME_BLOCKS[0][0] - 1

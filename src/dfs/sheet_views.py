@@ -12,9 +12,10 @@ Like `sheet_style.py`, EdgeRaw column references are derived from
 to that list moves these formulas with it instead of silently pointing them
 at the wrong column.
 
-Re-runnable: each builder overwrites its own tab. The one piece of typed
-user input across all four -- Exposure's Target column -- is read back and
-restored before the rewrite, so re-running never costs you your targets.
+Re-runnable: each builder overwrites its own tab. Two pieces of typed
+user input across all four are read back and restored before the
+rewrite, so re-running never costs them: Exposure's Target column, and
+`LINEUP_COUNT_CELL` below.
 """
 
 from __future__ import annotations
@@ -29,6 +30,18 @@ MOVEMENT_TAB = "Movement"
 
 # How far down the source tabs the formulas look. EdgeRaw runs ~743 rows.
 _EXPOSURE_ROWS = 180
+
+# Phase 5A (originally) / Phase 5-removal (relocated here, 2026-09-16):
+# "how many lineups are you building this week" -- Exposure's own
+# divisor, typed by Sam, defaulting to 6. Originally lived on `Lineups!H1`
+# (the one free cell in the pool deck's row-1 control strip); moved here
+# when the deck was removed entirely -- it was never really about the
+# deck, just parked in its row 1 for lack of anywhere better, and
+# Exposure is the one tab that actually reads it. H1 is free on Exposure
+# too (row 1 is all column headers -- A "Name" through G "vs Target", I
+# "Slots filled" -- H sits between G and I with nothing of its own).
+LINEUP_COUNT_CELL = "H1"
+DEFAULT_LINEUP_COUNT = 6
 
 
 def _q(tab: str) -> str:
@@ -202,32 +215,40 @@ def build_exposure(
     edge_tab: str,
     lineups_tab: str,
     lineup_count: int,
-    lineups_data_start_row: int = 1,
 ) -> str:
     """Fills the Exposure tab, which has been a documented feature and a
     single empty cell since the sheet was built.
 
-    Counts each player across Lineups column A from `lineups_data_start_row`
-    down, which holds only typed names plus the repeated "Name" header --
-    so it works regardless of how the twenty blocks are laid out, and keeps
-    working if those blocks ever move. `lineups_data_start_row` defaults to
-    1 (the whole column) but must be passed as Lineups' own header row (see
-    `sheet_pool_deck.py`) once the pool deck sits above it -- its window
-    rows show real player NAMES pulled from Player Pool for browsing, not
-    roster picks, and would otherwise get double-counted here as if every
-    player merely visible in the deck were actually rostered somewhere.
+    Counts each player across the whole of Lineups column A, which holds
+    only typed names plus the repeated "Name" header -- a literal string
+    that can never collide with a real player name, so this works
+    regardless of how the twenty blocks are laid out or move.
 
-    Target is the one typed column in the tab. It's read back and restored
-    before the rewrite so re-running this never costs you the targets you
-    set.
+    Two typed inputs survive a rebuild: Target (column F, read back and
+    restored before the rewrite) and `LINEUP_COUNT_CELL` (`H1`, read back
+    and re-placed into the new row 1 below).
+
+    Exposure's divisor is `LINEUP_COUNT_CELL` ("how many lineups this
+    week," Sam's own typed number, defaulting to `DEFAULT_LINEUP_COUNT`),
+    not `lineup_count` (the sheet's fixed capacity,
+    `len(LINEUPS_NAME_BLOCKS)`). Dividing by capacity instead of actual
+    usage was a live bug -- a player rostered in every one of a 6-lineup
+    build read as 30% (6/20) instead of 100%. `lineup_count` is kept as
+    the divisor's fallback (a blank or zero `H1` must never produce
+    `#DIV/0!` or silently divide by 1).
     """
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     salary = _rng(edge_tab, "Salary")
-    lu = f"{_q(lineups_tab)}!$A${lineups_data_start_row}:$A"
+    lu = f"{_q(lineups_tab)}!$A$1:$A"
 
-    # Preserve any targets already typed, keyed by player name.
+    usage_cell = f"${LINEUP_COUNT_CELL[0]}${LINEUP_COUNT_CELL[1:]}"
+    divisor = f"IF(N({usage_cell})>0,N({usage_cell}),{lineup_count})"
+
+    # Preserve any targets already typed, keyed by player name, and the
+    # typed lineup count -- both read back before the rewrite below.
     existing: dict[str, str] = {}
+    lineup_count_value: str = str(DEFAULT_LINEUP_COUNT)
     if client.tab_exists(EXPOSURE_TAB):
         try:
             current = client.read_range(EXPOSURE_TAB, f"A2:F{_EXPOSURE_ROWS}")
@@ -236,6 +257,12 @@ def build_exposure(
                     existing[row[0].strip()] = row[5]
         except Exception:  # noqa: BLE001 - a malformed old tab must not block a rebuild
             existing = {}
+        try:
+            current_count = client.read_range(EXPOSURE_TAB, LINEUP_COUNT_CELL)
+            if current_count and current_count[0] and current_count[0][0].strip():
+                lineup_count_value = current_count[0][0]
+        except Exception:  # noqa: BLE001 - a malformed old tab must not block a rebuild
+            pass
 
     roster = f'=IFERROR(SORT(FILTER({{{name},{pos},{salary}}},{name}<>"",COUNTIF({lu},{name})>0),3,FALSE),"")'
 
@@ -248,11 +275,11 @@ def build_exposure(
             "Exposure",
             "Target",
             "vs Target",
-            "",
+            lineup_count_value,
             "Slots filled",
             f'=COUNTIF({lu},"?*")-COUNTIF({lu},"Name")',
         ],
-        [roster, "", "", f'=IF($A2="","",COUNTIF({lu},$A2))', f'=IF($A2="","",D2/{lineup_count})', "", ""],
+        [roster, "", "", f'=IF($A2="","",COUNTIF({lu},$A2))', f'=IF($A2="","",D2/({divisor}))', "", ""],
     ]
     for r in range(3, _EXPOSURE_ROWS + 1):
         rows.append(
@@ -261,7 +288,7 @@ def build_exposure(
                 "",
                 "",
                 f'=IF($A{r}="","",COUNTIF({lu},$A{r}))',
-                f'=IF($A{r}="","",D{r}/{lineup_count})',
+                f'=IF($A{r}="","",D{r}/({divisor}))',
                 "",
                 "",
             ]
@@ -279,8 +306,24 @@ def build_exposure(
             restored.append([""])
         client.update_range(EXPOSURE_TAB, f"F2:F{_EXPOSURE_ROWS}", restored)
 
+    # H1 has no room for a separate label cell in this header row -- a
+    # note stands in for one, same reasoning as the deck's old H1 had.
+    # Kept non-strict (warn, not reject): the divisor above already
+    # clamps a blank/zero/out-of-range H1 to full capacity rather than
+    # dividing by it, so a temporarily "wrong" H1 degrades to a safe
+    # number, not a broken one.
+    client.set_note(
+        EXPOSURE_TAB,
+        LINEUP_COUNT_CELL,
+        "How many lineups are you building this week? Exposure divides by this, not by capacity.",
+    )
+    client.set_number_range_validation(EXPOSURE_TAB, LINEUP_COUNT_CELL, minimum=1, maximum=lineup_count)
+
     note = f", {len(existing)} target(s) preserved" if existing else ""
-    return f"{EXPOSURE_TAB}: built off {lineups_tab} (out of {lineup_count} lineups){note}"
+    return (
+        f"{EXPOSURE_TAB}: built off {lineups_tab} "
+        f"(divisor: {EXPOSURE_TAB}!{LINEUP_COUNT_CELL}, falling back to {lineup_count}-lineup capacity){note}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -292,45 +335,63 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
     """The hour before lock: players ranked by how far their team's implied
     total has moved since the start of the NFL week, with kickoff alongside.
 
-    ImpMove (team implied points move -- "LineMove" before Fix 2.2) is
-    blank until at least one `nfl_odds` sync has happened this week, so
-    an unsynced sheet says so rather than showing a page of
+    Sorted/filtered on ImpliedMove alone (team implied points move --
+    "LineMove" before Fix 2.2, and the one `derived._flag_for_row`'s
+    LINE↑/LINE↓ actually keys off) -- TotMove/SpdMove ride along as extra
+    DISPLAY columns once a row already qualifies, not a second way to
+    qualify one, so "biggest movers" keeps one unambiguous meaning. This
+    is a VIEW, so its headers are prose ("Implied move"/"Total move"/
+    "Spread move") rather than the EDGE_COLUMNS contract names Section F
+    renamed -- a reader here shouldn't need to know that EdgeRaw's own
+    header spells it `ImpliedMove`.
+
+    ImpliedMove is blank until at least one `nfl_odds` sync has happened
+    this week, so an unsynced sheet says so rather than showing a page of
     convincing-looking zeros.
     """
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     team = _rng(edge_tab, "Team")
 
-    if "ImpMove" not in EDGE_COLUMNS:
-        return f"{MOVEMENT_TAB}: skipped -- this version of EDGE_COLUMNS has no ImpMove column"
+    if "ImpliedMove" not in EDGE_COLUMNS:
+        return f"{MOVEMENT_TAB}: skipped -- this version of EDGE_COLUMNS has no ImpliedMove column"
 
-    move = _rng(edge_tab, "ImpMove")
+    move = _rng(edge_tab, "ImpliedMove")
+    tot_move = _rng(edge_tab, "TotMove") if "TotMove" in EDGE_COLUMNS else None
+    spd_move = _rng(edge_tab, "SpdMove") if "SpdMove" in EDGE_COLUMNS else None
     start = _rng(edge_tab, "GameStart") if "GameStart" in EDGE_COLUMNS else None
     flag = _rng(edge_tab, "Flag")
 
     # An unmoved line is 0.0, not blank, so filtering on <>"" alone lets
     # a whole page of zeros through and the empty-state message never
-    # fires. Require actual movement.
+    # fires. Require actual movement -- ImpliedMove specifically, per the
+    # docstring above.
     cond = f'{name}<>"",{move}<>"",ABS({move})>0'
-    cols = f'{{{name},{pos}&" "&{team},{move},{flag}}}'
+
+    header = ["Player", "Pos", "Implied move"]
+    col_terms = [name, f'{pos}&" "&{team}', move]
+    if tot_move:
+        header.append("Total move")
+        col_terms.append(tot_move)
+    if spd_move:
+        header.append("Spread move")
+        col_terms.append(spd_move)
     if start:
-        kickoff = (
+        header.append("Kickoff (UTC)")
+        col_terms.append(
             f"IFERROR(TEXT(DATEVALUE(LEFT({start},10))+TIMEVALUE(MID({start},12,8)),"
             f'"ddd h:mm")&" UTC",{start})'
         )
-        cols = f'{{{name},{pos}&" "&{team},{move},{kickoff},{flag}}}'
+    header.append("Flag")
+    col_terms.append(flag)
+    cols = "{" + ",".join(col_terms) + "}"
 
     body = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({cols},{cond}),"
-        f"ABS(FILTER({move},{cond})),FALSE),40,{5 if start else 4}),"
+        f"ABS(FILTER({move},{cond})),FALSE),40,{len(header)}),"
         f'"No line movement recorded yet — run dfs sync at least once this week.")'
     )
 
-    header = (
-        ["Player", "Pos", "Line Move", "Kickoff (UTC)", "Flag"]
-        if start
-        else ["Player", "Pos", "Line Move", "Flag"]
-    )
     rows = [
         ["MOVEMENT DESK — biggest line moves since the start of the NFL week"],
         [],
@@ -338,4 +399,4 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
         [body],
     ]
     client.write_tab(MOVEMENT_TAB, rows)
-    return f"{MOVEMENT_TAB}: built (top 40 by absolute line movement)"
+    return f"{MOVEMENT_TAB}: built (top 40 by absolute implied-move, {len(header)} column(s))"

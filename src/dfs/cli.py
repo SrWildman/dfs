@@ -24,7 +24,7 @@ from rich.console import Console
 from rich.table import Table
 
 from dfs import nfl_calendar, paths, store
-from dfs.bankroll import classify_entry, parse_contest_history, sync_bucket
+from dfs.bankroll import backfill_entry_keys, classify_entry, parse_contest_history, sync_bucket
 from dfs.config import Config, ConfigError, load_config
 from dfs.doctor import run_doctor
 from dfs.late_swap import lineup_slot_status, swap_candidates
@@ -42,14 +42,17 @@ from dfs.sheet_filters import add_all_filter_views, add_basic_filters
 from dfs.sheet_links import (
     PLAYER_POOL_RAW_BLOCK,
     PLAYER_POOL_RAW_TAB,
+    group_lineups_columns,
     link_edge_columns,
     write_edge_row_links,
 )
 from dfs.sheet_pool_control import ensure_pool_control_row
-from dfs.sheet_pool_deck import DECK_ROWS, MAX_HELPER_ROW, MIN_HELPER_ROW, POOL_SORT_TAB, add_pool_deck
+from dfs.sheet_pool_deck import remove_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
+from dfs.sheet_pool_raw_sos import rewrite_opp_pos_rank
+from dfs.sheet_pool_usage import write_pool_usage_columns
 from dfs.sheet_protection import protect_workbook
-from dfs.sheet_reorder import migrate_tab_to_designed_order
+from dfs.sheet_reorder import migrate_tab_to_designed_order, remove_header_columns
 from dfs.sheet_style import (
     EDGE_ROWS,
     POOL_RAW_ROWS,
@@ -61,7 +64,6 @@ from dfs.sheet_style import (
     polish_guardrails,
     polish_lineups_input_column,
     polish_lineups_totals_rows,
-    polish_pool_deck,
     style_tier23_tabs,
     style_view_tabs,
 )
@@ -378,43 +380,123 @@ def sheets_inspect() -> None:
     console.print(table)
 
 
-@setup_app.command("add-pool-deck", short_help="Insert the pool deck into Lineups (one-time).")
-def sheets_add_pool_deck(
+@setup_app.command("remove-pool-deck", short_help="One-time: delete the retired pool deck from Lineups.")
+def sheets_remove_pool_deck(
     sheet_id: str = typer.Option(
         None,
         "--sheet-id",
-        help="Add the pool deck to a different sheet instead of config.toml's -- e.g. the "
-        "canonical weekly template, so new copies already have it.",
+        help="Remove the pool deck from a different sheet instead of config.toml's -- e.g. the "
+        "canonical weekly template.",
     ),
 ) -> None:
-    """One-time structural change: insert DECK_ROWS frozen rows at the top
-    of Lineups holding a sortable, filterable window into Player Pool --
-    full metric columns (Salary, Pts, Ceil, Val, CeilVal, Leverage,
-    Flag, ...), not just names, so a pick can be made without a second
-    window open. Superseded a first, names-only "Bench" attempt (see
-    `sheet_pool_deck.py`'s module docstring and CONTRIBUTING.md's
-    changelog); migrates a sheet still in that state -- or in the pool
-    deck's own original, taller size -- automatically.
+    """Phase 5 (2026-09-16): the pool deck -- frozen rows at the top of
+    Lineups holding a sortable/filterable window into Player Pool -- is
+    retired. Sam, after a week building real lineups against it: "I've
+    used it week 1 and it was a pain," and on the "where is this player"
+    jump control alone -- "doesn't get me much. Cut it." Player Pool's own
+    colour scales/chips/`Used`/`In` columns cover the browsing job now.
 
-    Uses a real Sheets row insert (not a tab rewrite), so every existing
-    Lineups formula and conditional-format range shifts down with it.
-    Also creates the hidden `PoolSort` helper tab the deck's window
-    formulas read from. Safe to re-run: a deck already at the current
-    size is left alone.
+    Deletes the deck's rows (a real Sheets row delete, so every Lineups
+    block shifts up with it) and the hidden `PoolSort` helper tab. No-op
+    if the deck isn't present (already removed, or never built). See
+    `sheet_pool_deck.py`'s module docstring and CONTRIBUTING.md's
+    changelog for the full history and what depended on it.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
     client = SheetsClient(gs_cfg)
     try:
         title, url = client.describe()
-        console.print(f"Adding pool deck to {cfg.lineups.builder_tab!r} in: [bold]{title}[/bold]\n{url}\n")
-        result = add_pool_deck(
-            client, lineups_tab=cfg.lineups.builder_tab, pool_tab=cfg.lineups.player_pool_tab
+        console.print(
+            f"Removing pool deck from {cfg.lineups.builder_tab!r} in: [bold]{title}[/bold]\n{url}\n"
         )
+        result = remove_pool_deck(client, cfg.lineups.builder_tab)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
     console.print(f"[green]OK[/green] {result}")
+
+
+@setup_app.command(
+    "remove-sos-placeholders", short_help="One-time: delete the retired blank SoS 1..4 columns."
+)
+def sheets_remove_sos_placeholders(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Remove the placeholders from a different sheet instead of config.toml's -- e.g. the "
+        "canonical weekly template.",
+    ),
+) -> None:
+    """Phase 5 (2026-09-16): `SoS 1`/`SoS 2`/`SoS 3`/`SoS 4` -- four blank
+    GAME-zone columns reserved on PlayerPoolRaw/Player Pool/Lineups back
+    when strength-of-schedule data didn't exist yet -- are retired now
+    that the real sync (`sources/tffb_sos.py`) landed straight into
+    `OppPosRank` instead. Sam: "Why still sos 1-4. Should only be one per
+    player." Deletes all four columns (a real Sheets column delete, so
+    everything to their right shifts left) from each of the three tabs.
+    No-op per tab if none of the four are present (already removed, or a
+    sheet built after this migration already shipped without them). See
+    `sheet_reorder.remove_header_columns` and CONTRIBUTING.md's changelog.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    sos_columns = ["SoS 1", "SoS 2", "SoS 3", "SoS 4"]
+    try:
+        title, url = client.describe()
+        console.print(f"Removing SoS 1..4 placeholders in: [bold]{title}[/bold]\n{url}\n")
+        # Player Pool's real header sits at PLAYER_POOL_HEADER_ROW (row 1
+        # is the "Add a player" control cell), unlike PlayerPoolRaw/
+        # Lineups, which both default to row 1 -- passing the wrong row
+        # here would read the control row instead and conclude (wrongly)
+        # that none of the four columns are present.
+        tabs = [
+            (PLAYER_POOL_RAW_TAB, 1),
+            (cfg.lineups.player_pool_tab, PLAYER_POOL_HEADER_ROW),
+            (cfg.lineups.builder_tab, 1),
+        ]
+        for tab, header_row in tabs:
+            result = remove_header_columns(client, tab, sos_columns, header_row=header_row)
+            console.print(f"[green]OK[/green] {result}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+@setup_app.command(
+    "fix-opp-pos-rank", short_help="One-time: fix PlayerPoolRaw's OppPosRank (was keyed on Team, not Opp.)."
+)
+def sheets_fix_opp_pos_rank(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Found live 2026-09-16, the first time real strength-of-schedule
+    data ever flowed through it: `PlayerPoolRaw`'s `OppPosRank` -- a
+    hand-typed `VLOOKUP`+`HLOOKUP` against `SoSComb` that nothing in this
+    codebase previously regenerated -- was keyed on this row's own `Team`
+    column instead of `Opp.`, so every value measured how tough a
+    player's OWN defense is, never their actual opponent's. Rewrites
+    every row's formula, keyed correctly this time (`sheet_pool_raw_sos.
+    rewrite_opp_pos_rank`). Player Pool/Lineups need no separate fix --
+    both already VLOOKUP their own `OppPosRank` off PlayerPoolRaw by
+    Name, so they self-heal the moment PlayerPoolRaw's own value is
+    correct.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Fixing OppPosRank in: [bold]{title}[/bold]\n{url}\n")
+        result = rewrite_opp_pos_rank(client, PLAYER_POOL_RAW_TAB, last_row=POOL_RAW_ROWS)
+        console.print(f"[green]OK[/green] {result}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
 
 
 @setup_app.command("add-pool-control", short_help="Create/refresh Player Pool's add-a-player control row.")
@@ -560,27 +642,9 @@ def sheets_polish(
                 cfg.lineups.builder_tab,
                 last_row=lineups_last,
                 header_row=lineups_header_row,
-                freeze_rows=DECK_ROWS,
-                freeze_cols=0,
                 header_repeats_at=header_repeats_at,
                 band_blocks=LINEUPS_NAME_BLOCKS,
                 color_scale_groups=LINEUPS_NAME_BLOCKS,
-            )
-        )
-        # The pool deck's window (rows 4..DECK_ROWS-1) sits above these same
-        # blocks and isn't touched by polish_builder_tab -- Fix 2.4 gives it
-        # the identical treatment so the window and the blocks below it read
-        # as one surface. Must run after the Lineups call above, never
-        # before: that call's own whole-tab clear would otherwise wipe it.
-        results.append(
-            polish_pool_deck(
-                client,
-                cfg.lineups.builder_tab,
-                pool_sort_tab=POOL_SORT_TAB,
-                header_row=3,
-                window_end=DECK_ROWS - 1,
-                min_helper_row=MIN_HELPER_ROW,
-                max_helper_row=MAX_HELPER_ROW,
             )
         )
         results.append(
@@ -700,7 +764,6 @@ def sheets_build_views(
                 edge_tab=edge_tab,
                 lineups_tab=cfg.lineups.builder_tab,
                 lineup_count=len(LINEUPS_NAME_BLOCKS),
-                lineups_data_start_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
             ),
             build_movement(client, edge_tab=edge_tab),
         ]
@@ -741,12 +804,18 @@ def sheets_link_edge(
     columns; see `sheet_links.py`'s module docstring) and only creates
     (appends) a column for a name genuinely absent -- a fresh sheet build
     that hasn't been through `dfs setup reorder-columns` yet. The three
-    always-linked groups (Stadium/Roof/Wind, ImpMove/TotMove/SpdMove/
+    always-linked groups (Stadium/Roof/Wind, ImpliedMove/TotMove/SpdMove/
     GameStart, Id/CeilPct/OwnPct/LevBasis) are grouped so they can be
     collapsed from the sheet UI (the little +/- control above the column
     letters) when you want a narrower view. Safe to re-run -- a tab where
     every linked column already exists is left alone, not duplicated,
     unless `--force` is given.
+
+    Also refreshes Player Pool's "Used"/"In" columns (Phase 5B: how many
+    of this week's lineups roster a given pool player, and which ones) --
+    native formulas referencing Lineups, not EdgeRaw, but the same
+    "per-row formula that needs rewriting whenever the row layout moves"
+    family of work.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -801,6 +870,22 @@ def sheets_link_edge(
                 edge_tab,
                 header_row=lineups_header_row,
             ),
+            # Phase 5B: "Used"/"In" reference Lineups, not EdgeRaw, but
+            # they're the same "native per-row formula that needs
+            # refreshing whenever the row layout changes" family of work
+            # as the two calls above, so they're refreshed here too rather
+            # than adding yet another standing CLI command.
+            write_pool_usage_columns(
+                client,
+                cfg.lineups.player_pool_tab,
+                cfg.lineups.builder_tab,
+                header_row=PLAYER_POOL_HEADER_ROW,
+            ),
+            # Phase 5D: Lineups' own Vegas column group, run last so it's
+            # never wiped by `link_edge_columns`' own group call just above
+            # (see `group_lineups_columns`' docstring on why one function
+            # has to own the full recreate).
+            group_lineups_columns(client, cfg.lineups.builder_tab, header_row=lineups_header_row),
         ]
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -955,14 +1040,13 @@ def sheets_protect(
     ),
 ) -> None:
     """Warning-only protection (never a hard lock) on every fully
-    formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement,
-    PoolSort -- plus Player Pool, Exposure and Lineups protected
-    everywhere EXCEPT their own typed cells (Player Pool's add-a-player
-    control; Target; each lineup block's Name column and the deck's
-    B1/D1/F1 controls). EdgeRaw is left alone entirely -- see
-    `sheet_protection.py`'s own docstring for why. Safe to re-run: each
-    tab's protected ranges are cleared before being re-added, never
-    stacked.
+    formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement --
+    plus Player Pool, Exposure and Lineups protected everywhere EXCEPT
+    their own typed cells (Player Pool's add-a-player control; Exposure's
+    Target and lineup-count cell; each lineup block's Name column).
+    EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own
+    docstring for why. Safe to re-run: each tab's protected ranges are
+    cleared before being re-added, never stacked.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -1088,48 +1172,45 @@ def setup_sheet(
 
     THE ORDER, and why it's this order and not another:
 
-    1. `add-pool-deck` -- a real row INSERT into Lineups. Everything below
-       it (link-edge's header-row math, polish's freeze/header-repeat
-       params, build-views' lineups_data_start_row) is a parameter derived
-       from where this puts Lineups' header, so it has to happen first or
-       every later step derives the wrong row.
-    2. `add-pool-control` -- inserts Player Pool's own add-a-player
-       control row and repoints its Name/Overflow formulas at the union
-       of it and EdgeRaw. No structural dependency on 1, but both are
-       "insert a row/rewrite a formula" steps done before the purely
-       additive ones below.
-    3. `build-views` -- creates Board/Slate Grid/Exposure/Movement. Must
+    1. `add-pool-control` -- a real row INSERT into Player Pool (its own
+       add-a-player control row), repointing its Name/Overflow formulas at
+       the union of it and EdgeRaw. The pool deck that used to occupy this
+       same "step 1, a structural row insert everything else derives its
+       header row from" slot on Lineups was retired (Phase 5, 2026-09-16
+       -- see `sheet_pool_deck.py`'s module docstring); Lineups' header
+       sits at row 1 unconditionally now, nothing left to derive.
+    2. `build-views` -- creates Board/Slate Grid/Exposure/Movement. Must
        come before `add-filters`, which adds filter views ONTO three of
        those four tabs and would have nothing to attach to otherwise.
-    4. `link-edge` -- appends EdgeRaw's derived columns onto Player Pool/
-       Lineups/PlayerPoolRaw. Append-only, so it doesn't need 1-3 to have
+    3. `link-edge` -- appends EdgeRaw's derived columns onto Player Pool/
+       Lineups/PlayerPoolRaw. Append-only, so it doesn't need 1-2 to have
        happened first, but running it before the tab set is final would
        mean re-deriving nothing extra -- no reason to run it earlier.
-    5. `add-filters` -- filter views on EdgeRaw plus the four view tabs
-       from step 3. Depends on 3 (see above).
-    6. `protect` -- warning-only protection on every fully formula-driven
-       tab, including the four view tabs and the pool deck. Runs after
-       every structural tab/column exists so it's protecting the real
-       final layout, not a moving target.
-    7. `polish` -- presentation only (widths, freeze, number formats,
+    4. `add-filters` -- filter views on EdgeRaw plus the four view tabs
+       from step 2. Depends on 2 (see above).
+    5. `protect` -- warning-only protection on every fully formula-driven
+       tab, including the four view tabs. Runs after every structural
+       tab/column exists so it's protecting the real final layout, not a
+       moving target.
+    6. `polish` -- presentation only (widths, freeze, number formats,
        chips, tab order). Never inserts/deletes/moves anything, so it's
        safe last -- and running it last means it's styling the finished
        structure, not something a later structural step would shift.
-    8. `audit-style` -- read-only check that `polish` actually landed
+    7. `audit-style` -- read-only check that `polish` actually landed
        everywhere it should have, rather than trusting its own "OK" output.
-    9. `dfs doctor` -- the final structural sanity check. Deliberately
+    8. `dfs doctor` -- the final structural sanity check. Deliberately
        LAST, not first: several of its own checks (LINKED_EDGE_COLUMNS
-       present, the pool deck's block alignment) only pass once steps 1-7
-       have actually run, so using it as a pre-flight check here would
-       just fail before doing anything useful.
+       present) only pass once steps 1-6 have actually run, so using it as
+       a pre-flight check here would just fail before doing anything useful.
 
     `inspect` (also moved under `setup`) isn't part of this sequence at
     all -- it's a read-only tab lister you'd reach for anytime, not a
     construction step, the same reason `doctor`/`audit-style` aren't
-    either except as this composite's own final checks.
+    either except as this composite's own final checks. `remove-pool-deck`
+    isn't part of it either -- a one-time repair for a sheet that still
+    has the retired deck, not something a fresh build ever creates.
     """
     steps: list[tuple[str, Callable[[], None]]] = [
-        ("add-pool-deck", lambda: sheets_add_pool_deck(sheet_id=sheet_id)),
         ("add-pool-control", lambda: sheets_add_pool_control(sheet_id=sheet_id)),
         ("build-views", lambda: sheets_build_views(sheet_id=sheet_id)),
         ("link-edge", lambda: sheets_link_edge(sheet_id=sheet_id)),
@@ -1174,8 +1255,12 @@ def sheets_inspect_alias() -> None:
 
 @sheets_app.command("add-pool-deck")
 def sheets_add_pool_deck_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets add-pool-deck", "dfs setup add-pool-deck")
-    sheets_add_pool_deck(sheet_id=sheet_id)
+    console.print(
+        "[dim]`dfs sheets add-pool-deck` has moved AND changed: the pool deck itself was "
+        "retired (Phase 5, 2026-09-16) -- use `dfs setup remove-pool-deck` on a sheet that "
+        "still has one.[/dim]"
+    )
+    sheets_remove_pool_deck(sheet_id=sheet_id)
 
 
 @sheets_app.command("add-pool-picks")
@@ -1697,6 +1782,23 @@ def week_new(
     formula-driven and naturally resets, or a running total the user
     updates by hand -- neither needs code here.
 
+    Bankroll's own CONTEST rows (Cash/GPP entry ledgers) are cleared too --
+    see `weekly_reset.clear_previous_week`'s `bankroll_*` params -- but only
+    AFTER the carryover read above, and only the ledgers' typed columns
+    (never the "% Paid"/"Place %" formula columns, and never the Starting/
+    Ending balance cells `BANKROLL_CARRYOVER_CELLS` already carried
+    forward). Reversed order would read a zeroed Ending balance off a
+    sheet whose contest rows were already wiped and carry that forward
+    instead -- this function's own call sequence (carryover, THEN
+    `clear_previous_week`) is what keeps that from happening; there is no
+    separate guard enforcing it.
+
+    `EntriesRaw` (hand-pasted DK contest history, if the tab exists) is
+    cleared here too, same "typed input must not survive into a new week
+    looking current" reasoning -- see `weekly_reset.ENTRIES_RAW_TAB`'s own
+    comment for why this was found and how `GPPin`/`DKLineupsRaw`/
+    `DKLineupsFinal` (entirely formula-driven off it) are unaffected.
+
     Carrying Results forward means copying every already-typed week's row
     (config.toml's `[results]` table -- Week, Cash Pts/Line, H2H Entered/
     Win, Red/Blue/Black) from the current sheet to the new one, since
@@ -1833,6 +1935,9 @@ def week_new(
             player_pool_tab=cfg.lineups.player_pool_tab,
             scratch_tab=cfg.lineups.scratch_tab,
             dk_upload_tab=cfg.lineups.upload_tab,
+            bankroll_tab=cfg.bankroll.tab,
+            bankroll_cash=cfg.bankroll.cash,
+            bankroll_gpp=cfg.bankroll.gpp,
         )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -1934,6 +2039,72 @@ def bankroll_sync(
     """
     cfg = _load_config_or_exit()
     _sync_bankroll_from_csv(cfg, csv)
+
+
+@bankroll_app.command("backfill-keys")
+def bankroll_backfill_keys(
+    csv: Path = typer.Option(
+        ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
+    ),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Repair a different sheet instead of config.toml's -- e.g. a past week's sheet, "
+        "since this is a one-time repair for rows that predate the dedupe key, not a standing "
+        "per-week command.",
+    ),
+) -> None:
+    """One-time repair: fills in the dedupe-key column for existing
+    Bankroll rows that don't have one -- confirmed live (2026-09-16) that
+    rows written before this key existed, or by some path that skipped
+    it, are invisible to `sync_bucket`'s dedupe check, so a later sync of
+    overlapping contest history re-appends them as duplicates. Matches
+    each keyless row to exactly one CSV entry by its Place/Entries/
+    Entry Fee/Prize Pool/Places Paid (fields that round-trip exactly
+    through Sheets' own display formatting); a row matching zero or more
+    than one entry is left alone and reported, never guessed. Never
+    touches a row's own A-H data or an already-populated key. Safe to
+    run against a CSV that also contains entries already fully synced --
+    only blank key cells are ever written.
+    """
+    cfg = _load_config_or_exit()
+    if cfg.bankroll.cash is None or cfg.bankroll.gpp is None:
+        console.print(
+            "[red]config.toml is missing [bankroll.cash]/[bankroll.gpp][/red] "
+            "-- see config.example.toml for the shape."
+        )
+        raise typer.Exit(code=1)
+    if not csv.exists():
+        console.print(f"[red]No such file:[/red] {csv}")
+        raise typer.Exit(code=1)
+
+    df = pd.read_csv(csv)
+    try:
+        entries = parse_contest_history(df)
+    except KeyError as e:
+        console.print(f"[red]CSV is missing an expected column:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Backfilling dedupe keys in: [bold]{title}[/bold]\n{url}\n")
+        cash_result = backfill_entry_keys(client, cfg.bankroll.tab, cfg.bankroll.cash, entries, "cash")
+        gpp_result = backfill_entry_keys(client, cfg.bankroll.tab, cfg.bankroll.gpp, entries, "gpp")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for result in (cash_result, gpp_result):
+        console.print(
+            f"[bold]{result.bucket}[/bold]: backfilled {len(result.backfilled)} row(s), "
+            f"{len(result.ambiguous_rows)} ambiguous, {len(result.unmatched_rows)} unmatched"
+        )
+        if result.ambiguous_rows:
+            console.print(f"  ambiguous rows (multiple CSV matches, left alone): {result.ambiguous_rows}")
+        if result.unmatched_rows:
+            console.print(f"  unmatched rows (no CSV match, left alone): {result.unmatched_rows}")
 
 
 def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:

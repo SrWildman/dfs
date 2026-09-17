@@ -136,11 +136,12 @@ actually matches.
 | `LevBasis` | `"real"` once any player has non-zero `ProjOwn` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage`/`OwnPct` have a real number yet. |
 | `GameEnv` | 0-100 per-game score from that game's own `OU`/`Spread` (higher total + tighter spread scores higher -- more reason for both offenses to keep throwing). |
 | `OverUnder`, `Spread` | Straight passthrough of the same TFFB Vegas fields `GameEnv` is computed from. `OverUnder` (not `OU`) so it doesn't collide with Player Pool/Lineups' own `O/U`, sourced from a different tab. |
+| `OppPosRank` | This player's OPPONENT's strength-of-schedule rank at this player's own position (1 = toughest matchup). Computed natively in Python from the already-synced `sos_qb`/`sos_rb`/`sos_wr`/`sos_te`/`sos_dst` frames (Phase 5, 2026-09-16, Sam: "all data should be in edge raw") -- the same value `PlayerPoolRaw`'s own `OppPosRank` computes via a `SoSComb` formula, just computed here without a live Sheets lookup. Blank for a position whose TFFB sync hasn't run yet, same graceful-degradation treatment as `Stadium`/`Roof`/`Wind`. |
 | `Stadium` / `Roof` | From `GamesRaw`, joined by team code. Blank if `nflverse_games` hasn't synced this run. |
 | `Wind` | From `WeatherRaw`, joined by game. Blank for dome games or if `weather` hasn't synced. |
 | `Avail` | DraftKings' own `Status` (`Q`/`OUT`/`IR`). |
-| `Flag` | The one column meant to be read at a glance. Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`ImpMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (`Leverage` ≥ 30; blank `Leverage` while unpublished can never clear this) → `CHALK` (`ProjOwn` ≥ 20%, can only fire once ownership is real) → blank. |
-| `ImpMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
+| `Flag` | The one column meant to be read at a glance. Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`ImpliedMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (`Leverage` ≥ 30; blank `Leverage` while unpublished can never clear this) → `CHALK` (`ProjOwn` ≥ 20%, can only fire once ownership is real) → blank. |
+| `ImpliedMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpliedMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Appended at the very end of the column list rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 
 A basic filter (Data > Create a filter, `dfs setup add-filters`) puts a
@@ -172,16 +173,22 @@ module is the source of truth if they ever disagree:
 |---|---|
 | IDENTITY | `Name` `Pos.` `Team` `Opp.` `Venue` |
 | DECISION | `DK Sal` `Pts` `Val` `Ceil` `CeilVal` `Rstr%` `Leverage` `Avail` `Flag` |
-| GAME | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` `SoS 1..4` (reserved, blank, for strength-of-schedule work landing later) |
+| GAME | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` |
 | WEATHER | `Stadium` `Roof` `Wind` |
-| MOVEMENT | `ImpMove` `TotMove` `SpdMove` `GameStart` |
+| MOVEMENT | `ImpliedMove` `TotMove` `SpdMove` `GameStart` |
 | INTERNAL | `Id` `CeilPct` `OwnPct` `LevBasis` |
 
-`PlayerPoolRaw` is exactly this, 34 columns. `Player Pool` inserts
-`Source` and `Edge ↗` (A3) right after `Venue` and appends
-`Overflow`/`Pool` at the very end (38 total). `Lineups` inserts
-`% of Rstr` right after `Rstr%` and `Issues` then `Edge ↗` (A3) right
-after `Flag`, keeping everything else the same (37 total). Column
+`PlayerPoolRaw` is exactly this, 30 columns (was 34 through Phase 5H --
+Phase 5, Section I removed the four reserved-but-never-wired `SoS 1..4`
+placeholders once the real strength-of-schedule sync landed straight into
+`OppPosRank` instead; see CONTRIBUTING.md's changelog). `Player Pool`
+inserts `Source` and `Edge ↗` (A3) right after `Venue` and appends
+`Overflow`/`Pool`/`Used`/`In` at the very end (36 total; `Used`/`In` are
+Phase 5B, see below). `Lineups` inserts `% of Rstr` right after `Rstr%`
+and `Issues` then `Edge ↗` (A3) right after `Flag`, keeping everything
+else the same (33 total). Lineups also groups `O/U`/`Spread`/`Team
+Implied` (Phase 5D) behind their own +/- control, same idea as the
+already-collapsed WEATHER/MOVEMENT/INTERNAL zones -- see below. Column
 letters aren't given here on purpose -- they move whenever a new column
 is inserted (most recently A3's "Edge ↗"); `sheet_columns.py`'s own
 lists are the only thing anything in this codebase actually depends on.
@@ -196,8 +203,10 @@ same source (the live sheet and an older copy of the template) ended up
 with `Venue`/`Ceil` in different positions after independent hand-edits,
 while each stayed internally consistent -- nothing caught it until a
 cross-sheet audit compared them directly. Phase 3 exists specifically so
-this reorder happens once, to a designed order with headroom (`SoS 1..4`)
-already built in, rather than needing to happen again piecemeal. `dfs
+this reorder happens once, to a designed order, rather than needing to
+happen again piecemeal (the designed order originally included headroom
+for a `SoS 1..4` placeholder block, since removed -- see Phase 5, Section
+I in CONTRIBUTING.md's changelog). `dfs
 doctor` checks the columns each sheet's formulas actually depend on
 (`EdgeRaw`'s header, every `LINKED_EDGE_COLUMNS` name present exactly
 once on each of these three tabs, header repeats) but does not check the
@@ -220,12 +229,11 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `O/U`, `Spread`, `Team Implied` | `oddsFinal`, VLOOKUP by team. |
 | `Opp.` | `DkSalClean`. |
 | `Venue` | `TFFBOptoRaw`, VLOOKUP by Name (DST rows look up against `TFFBOptoRaw`'s Team column instead of Name, since DK's DST name doesn't match TFFB's own Name field for DST -- the same mismatch `EdgeRaw` fixes at its source instead). |
-| `OppPosRank` | `SoSComb`, this player's opponent's strength-of-schedule rank at this position. |
+| `OppPosRank` | `SoSComb`, this player's opponent's strength-of-schedule rank at this position -- `VLOOKUP`'d by `Opp.` (see `sheet_pool_raw_sos.py`; fixed 2026-09-16 -- the formula had been keyed on `Team` instead for as long as it existed, measuring a player's own defense rather than their opponent's, invisible until real SoS data existed to expose it). |
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Rstr%` | `TFFBOptoRaw`'s `ProjOwn`. |
-| `CeilVal`, `Leverage`, `Avail`, `Flag`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `ImpMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `CeilPct`, `OwnPct`, `LevBasis` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Interleaved into their designed zones (see the canonical column order above), not appended -- `Stadium`/`Roof`/`Wind`, `ImpMove`/`TotMove`/`SpdMove`/`GameStart`, and `Id`/`CeilPct`/`OwnPct`/`LevBasis` are each grouped so they can be collapsed from the sheet UI; `CeilVal`/`Leverage`/`Avail`/`Flag`/`GameEnv` stay always visible. |
-| `SoS 1`, `SoS 2`, `SoS 3`, `SoS 4` | Reserved, blank placeholder columns in the GAME zone for the strength-of-schedule work landing in a few weeks -- not wired to anything yet. |
+| `CeilVal`, `Leverage`, `Avail`, `Flag`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `CeilPct`, `OwnPct`, `LevBasis` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means. Interleaved into their designed zones (see the canonical column order above), not appended -- `Stadium`/`Roof`/`Wind`, `ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`, and `Id`/`CeilPct`/`OwnPct`/`LevBasis` are each grouped so they can be collapsed from the sheet UI; `CeilVal`/`Leverage`/`Avail`/`Flag`/`GameEnv` stay always visible. |
 
 ### Player Pool / Lineups
 
@@ -264,10 +272,19 @@ the two sources each row actually came from -- `EdgeRaw` or `Added` --
 and `Edge ↗` (right after `Source`) is a `HYPERLINK` jumping straight to
 that player's row on `EdgeRaw`, the fastest way to find and remove one
 (there's no in-place delete -- see A3's changelog entry for why not).
-`Pool` (the tab's very last column, Fix 2.11) surfaces that player's
-actual `EdgeRaw` `Pool` value (`Cash`/`GPP`/`Both`) via `INDEX`/`MATCH` by
-name (`Pool` sits left of `Name` on `EdgeRaw`, so a plain `VLOOKUP` can't
-reach it). The block fills in sorted by **Salary descending** (Fix 2.10
+`Pool` surfaces that player's actual `EdgeRaw` `Pool` value (`Cash`/`GPP`/
+`Both`) via `INDEX`/`MATCH` by name (`Pool` sits left of `Name` on
+`EdgeRaw`, so a plain `VLOOKUP` can't reach it). `Used`/`In` (Phase 5B,
+appended past `Pool`) answer the one thing a second browser window can't
+on its own: `Used` is a plain `COUNTIF` of how many of THIS WEEK's
+`Lineups` roster this player (against the whole of `Lineups!A:A`, so a
+repeated sub-header row's literal "Name" text can never be mistaken for a
+pick); `In` lists WHICH ones (`L1, L3, L7`), one `TEXTJOIN`'d term per
+`LINEUPS_NAME_BLOCKS` entry, generated in Python from that constant
+(`sheet_pool_usage.py`) rather than hand-typed. `Used` is colour-scaled
+like every other count on the tab (zero unstyled -- an unrostered pool
+player is normal, not a low value on a scale). The block fills in sorted
+by **Salary descending** (Fix 2.10
 -- not alphabetically; the control cell's half looks its Salary and
 Position up against `EdgeRaw` by name, since it carries neither of its
 own), capped at that position's slot count (QB 10, RB 20, WR 25, TE 10,
@@ -286,11 +303,11 @@ Columns mirror `PlayerPoolRaw`'s, pulled the same way, plus the same
 linked `EdgeRaw` block at the far right (`dfs setup link-edge`).
 `Lineups` additionally has `% of Rstr` (this pick's `Rstr%` as a share of
 the lineup's total `Rstr%`) and a per-lineup salary-remaining row. Each
-lineup block's `Name` column (the only typed column on the tab besides
-the pool deck's own controls) has a live dropdown validated against
-`PlayerPoolRaw`'s real Name column (non-strict -- a warning, not a hard
-block) so a typo doesn't silently propagate as `#N/A` across the whole
-row; everything else on the tab is protected (warning-only).
+lineup block's `Name` column (the only typed column on the tab) has a
+live dropdown validated against `PlayerPoolRaw`'s real Name column
+(non-strict -- a warning, not a hard block) so a typo doesn't silently
+propagate as `#N/A` across the whole row; everything else on the tab is
+protected (warning-only).
 
 `Lineups`' `Issues` column (right after `Flag`, `dfs setup polish`) is a
 per-lineup guardrail: on each roster slot, `DUPLICATE` if that name
@@ -301,22 +318,16 @@ polish_guardrails` finds this column (and `DK Sal`/`Avail`) by header
 name, never a hardcoded letter -- see CONTRIBUTING.md's Phase 3 changelog
 entry for the incident that happened when it didn't.
 
-`Lineups` also has a 10-row frozen "pool deck" at the very top (`dfs
-setup add-pool-deck`): a sortable, filterable window into `Player
-Pool` -- pick a position (B1) and a sort field (D1), set a starting rank
-(F1), and the six rows below (4-9) show that slice of the pool with
-every metric column `Lineups` itself already has (Salary, Pts, Ceil,
-Val, CeilVal, Leverage, Flag, ...), not just names. Row 3 mirrors `Player
-Pool`'s header; a hidden `PoolSort` tab materializes the sorted/filtered
-result the window formulas index into (Sheets' INDEX needs a range
-reference, not a live array, to support "start at rank N"). Read-only
-and purely additive -- the header row and every lineup block moved down
-by exactly 10 rows to make room (`weekly_reset.LINEUPS_NAME_BLOCKS`), but
-nothing about how a lineup is built changed. Sized this way (not the
-14-row / 10-row-window size it first shipped as) after a live check
-showed two full lineup blocks didn't fit below 14 frozen rows on a 16"
-laptop screen. Superseded a first, names-only "Bench" attempt at the
-same idea -- see CONTRIBUTING.md's changelog for the full history.
+`Lineups`' real header sits at row 1. It didn't always -- a "pool deck"
+(frozen rows above the header holding a sortable/filterable window into
+Player Pool) occupied that space from 2026-09-06 to 2026-09-16, resized
+twice, then removed entirely after a week of real use: Sam found it "a
+pain" and, on the one piece worth keeping (a "where is this player"
+jump), "doesn't get me much. Cut it." Player Pool's own colour scales/
+chips/`Used`/`In` columns (below) now cover the browsing job the deck
+existed for. `dfs setup remove-pool-deck` is the one-time repair for a
+sheet that still has the retired deck; see CONTRIBUTING.md's changelog
+for the full history and `sheet_pool_deck.py`'s module docstring.
 
 `dfs lineups clear` wipes `Lineups`' typed-in `Name` columns (and
 `Scratch`/`DK Upload`, below) at the start of a new week. `Player Pool`'s
@@ -332,18 +343,35 @@ current `ProjPts`/`Leverage`/`Flag` plus the best still-open alternatives
 at that slot, so a late swap is a read of one report instead of manually
 cross-referencing kickoff times against your roster.
 
-## Manual / output tabs
+## Synced / output tabs
 
 ### SoSQB / SoSRB / SoSWr / SoSTE / SoSDef
 
-Strength-of-schedule rankings, pasted in by hand from The Fantasy
-Footballers' Foot Clan Premium each week (**not yet automated** -- see
-`legacy/README.md`). Each has a per-week opponent rank and points-allowed
-column, colour-scaled REVERSED (a low rank is the good matchup here --
+Strength-of-schedule rankings from The Fantasy Footballers' FootClan
+Strength of Schedule page -- automated by `dfs sync` (sources `sos_qb`/
+`sos_rb`/`sos_wr`/`sos_te`/`sos_dst`, `sources/tffb_sos.py`) as of
+2026-09-16; previously hand-pasted. Reuses the same `dfs auth tffb`
+session `projections` already depends on -- no separate login. Header is
+`Team | Team.1 | Rank | FPA | Opp` (5 columns; the source has no `PAE`
+field, and the old `Week N`/`Week N Opp` labels are gone since the sync
+always reflects whatever week is current -- no header text to go stale).
+`Rank` is colour-scaled REVERSED (a low rank is the good matchup here --
 `Player Pool`/`Lineups`/`PlayerPoolRaw`'s own `OppPosRank` gets the same
 REVERSED treatment, see `sheet_style.FIELD_COLOR_SCALES`); `SoSComb`
-combines all five into one lookup table keyed by team and position,
-which `PlayerPoolRaw`'s `OppPosRank` reads.
+combines all five into one lookup table keyed by team and position
+(`VLOOKUP`ing each tab's column C, unaffected by the header/column
+changes above since `Rank` stayed column C), which `PlayerPoolRaw`'s
+`OppPosRank` reads. Verified live: 100% `OppPosRank` fill rate across
+every real player on the pool once this was wired up.
+
+**"Current week" here is deliberately not `nfl_calendar.current_week()`**
+-- this reads TFFB's own page default (the lower bound of its own
+"Weeks N-18" filter label) instead, since the two can legitimately
+disagree by one week in the Tue/Wed window between one week's Monday
+night game and the next week's Thursday kickoff (`nfl_calendar`'s
+definition is correct for ITS OWN uses -- contest-history week-sorting,
+line-movement baselines -- just not this one). See `tffb_sos.py`'s own
+module docstring for the live-verified specifics.
 
 ### Scratch
 
@@ -364,21 +392,63 @@ upload-ready CSV. Pairing lineups to entries stays a manual step.
 Contest-entry tracking, same roster-slot shape as `Lineups`/`DK Upload`.
 `EntriesRaw` is where you paste your exported DK contest history
 (`Import options: Replace Data at Selected Cell`, active cell A1);
-`GPPin`/`DKLineupsRaw`/`DKLineupsFinal` derive views from it. `dfs`
-doesn't read or write any of these yet -- pulling contest history
-directly (no manual export) would need probing DraftKings' undocumented
-authenticated endpoints live, with you present; investigated, not built.
+`GPPin`/`DKLineupsRaw`/`DKLineupsFinal` derive views from it, entirely by
+formula -- `dfs` itself doesn't read or write any of these; pulling
+contest history directly (no manual export) would need probing
+DraftKings' undocumented authenticated endpoints live, with you present;
+investigated, not built. `dfs week new` does clear `EntriesRaw`'s data
+rows (Fix 5G) if the tab exists, the same "typed input must not survive
+into a new week looking current" reasoning as `Lineups`/`Bankroll` --
+`GPPin`/`DKLineupsRaw`/`DKLineupsFinal`'s formulas just resolve blank/
+`#N/A` against an empty `EntriesRaw`, same as before you ever pasted
+anything.
 
 ### Exposure
 
-A pivot-style count of how many times each typed-in `Name` appears across
-`Lineups` -- how concentrated your week's lineups are on a given player.
-No `dfs` involvement.
+Built/rebuilt by `dfs setup build-views` (`sheet_views.build_exposure`) --
+a pivot-style count of how many times each `EdgeRaw`-sourced player name
+appears across `Lineups`, how concentrated your week's lineups are on a
+given player. `Exposure = # Lineups / H1`, not the sheet's 20-lineup
+capacity -- dividing by capacity was a live bug (Phase 5A): a player
+rostered in every one of a 6-lineup build read as 30% instead of 100%. A
+blank/zero/out-of-range `H1` falls back to capacity in the formula
+itself, so it can't produce `#DIV/0!` or silently read as 100%.
+
+Two typed inputs on this tab survive a rebuild -- both read back before
+`build-views` rewrites the tab, and re-placed into the fresh copy:
+`Target` (column F, the one typed input for setting exposure targets),
+and `H1` (how many lineups you're actually building this week, defaulting
+to 6, with a note carrying the label since row 1 is otherwise all column
+headers with nothing free next to it, and a warn-only 1..20 range check).
+`H1` originally lived on `Lineups` itself (the one free cell in the pool
+deck's row-1 control strip) -- moved here when the deck was removed
+entirely (2026-09-16); it was never really about the deck, just parked
+there for lack of anywhere better, and this is the one tab that actually
+reads it. `H1` survives `dfs week new` too (nothing here clears it) --
+it's still the right number until you change it.
+
+### Movement
+
+Built by `dfs setup build-views` (`sheet_views.build_movement`), styled by
+`dfs setup polish` (`sheet_style.style_movement`, header-name-driven --
+see Section F's own changelog entry for why). The top 40 players by
+absolute `ImpliedMove` since the start of the current NFL week, with
+`TotMove`/`SpdMove` riding along as extra columns once a row already
+qualifies (sorting/filtering is on `ImpliedMove` alone -- the same
+signal `Flag`'s `LINE↑`/`LINE↓` keys off, so "biggest movers" keeps one
+meaning). Prose headers (`Implied move`/`Total move`/`Spread move`) since
+this is a view, not a contract -- a reader here shouldn't need to know
+EdgeRaw's own header spells it `ImpliedMove`. Shows an explicit
+empty-state message ("No line movement recorded yet") rather than a page
+of real `0.0`s until at least one `nfl_odds` sync has happened this week.
 
 ### Bankroll
 
 Cash/GPP ledgers plus starting/ending bankroll summary figures.
-`dfs bankroll sync --csv <file>` (or `dfs week close --csv <file>`, a
+`dfs week new` clears each bucket's typed entry columns (A-H) and its
+dedupe-key column when moving to a new week (Fix 5H) -- the two formula
+columns per row (`% Paid`/`Place %`) and the Starting/Ending balance
+cells are never touched. `dfs bankroll sync --csv <file>` (or `dfs week close --csv <file>`, a
 thin wrapper over it) classifies each contest entry as Cash or GPP by
 payout shape (roughly half the field paid, or a straight head-to-head,
 counts as Cash; everything else is GPP) and appends new rows here -- it

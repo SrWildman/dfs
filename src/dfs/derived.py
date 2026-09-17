@@ -36,7 +36,7 @@ a tab whose column *count* changes week to week is the precondition for
 the Phase 8 formula-shift bug (see CONTRIBUTING.md) if it's ever pasted
 into a sheet with hardcoded column references.
 
-ImpMove/TotMove/SpdMove (ImpMove added in Phase 3 as "LineMove", renamed
+ImpliedMove/TotMove/SpdMove (ImpliedMove added in Phase 3 as "LineMove", renamed
 and joined by TotMove/SpdMove in Fix 2.2) join `line_movement.diff_odds()`'s
 output by team code (`Abbr`, already DK-compatible -- `rotowire_odds.py`'s
 own `abbr` field) directly onto `Team`, no intermediate game lookup
@@ -142,13 +142,26 @@ EDGE_COLUMNS = [
     "Position",
     "Team",
     "Opp",
-    # DECISION
+    # DECISION -- CeilPct/OwnPct sit right beside their raw counterparts
+    # (Ceiling/CeilVal and ProjOwn) rather than folded into the far-right
+    # INTERNAL zone. Sam's own workflow is filtering EdgeRaw down to one
+    # position and scanning it -- CeilPct/OwnPct are ALREADY computed as
+    # percentile-within-position (see `_percentile_within` below), so
+    # unlike raw Pts/Ceiling/Val/CeilVal (skipped from colour scaling
+    # here entirely, see `EDGE_UNSCALED_PLAYER_METRICS` and
+    # `sheet_style.polish_edge`'s own comment on why), they read
+    # correctly coloured under any position filter with no recompute
+    # needed -- moving them next to Ceiling/ProjOwn just makes that
+    # already-fair signal visible instead of requiring a scroll past
+    # Stadium/Roof/Wind/ImpliedMove/TotMove/SpdMove/GameStart/Id first.
     "Salary",
     "ProjPts",
     "Val",
     "Ceiling",
     "CeilVal",
+    "CeilPct",
     "ProjOwn",
+    "OwnPct",
     "Leverage",
     "Avail",
     "Flag",
@@ -156,24 +169,28 @@ EDGE_COLUMNS = [
     "OverUnder",
     "Spread",
     "GameEnv",
+    # Sam: "all data should be in edge raw" -- computed the same way
+    # PlayerPoolRaw's own (now-fixed) `OppPosRank` is, but natively in
+    # Python from the already-synced sos_qb/rb/wr/te/dst CSVs rather than
+    # a live Sheets formula, matching EdgeRaw's own "computed locally, no
+    # live formulas" design. See `_attach_opp_pos_rank` below.
+    "OppPosRank",
     # WEATHER (collapsed)
     "Stadium",
     "Roof",
     "Wind",
     # MOVEMENT (collapsed)
-    "ImpMove",
+    "ImpliedMove",
     "TotMove",
     "SpdMove",
     "GameStart",
     # INTERNAL (collapsed) -- Id moved out of column A's neighbor slot and
     # into this group; it's no longer individually hidden (see
     # `sheet_style.EDGE_COLUMN_GROUPS`), just folded into INTERNAL like
-    # the other three. Pool (column A, ahead of this whole list) ends up
-    # directly beside Name as a result, with no column between them at
-    # all -- an improvement on the old "hidden Id in between" layout.
+    # LevBasis. Pool (column A, ahead of this whole list) ends up directly
+    # beside Name as a result, with no column between them at all -- an
+    # improvement on the old "hidden Id in between" layout.
     "Id",
-    "CeilPct",
-    "OwnPct",
     "LevBasis",
 ]
 
@@ -238,19 +255,51 @@ def _attach_weather(merged: pd.DataFrame, weather: pd.DataFrame | None) -> pd.Da
     return merged
 
 
+def _attach_opp_pos_rank(
+    merged: pd.DataFrame, sos_by_position: dict[str, pd.DataFrame] | None
+) -> pd.DataFrame:
+    """This player's OPPONENT's strength-of-schedule rank at THIS
+    player's own position -- the same value `PlayerPoolRaw`'s own
+    `OppPosRank` computes (via a `SoSComb` VLOOKUP, keyed by `Opp.`, not
+    `Team` -- see `sheet_pool_raw_sos.py`'s docstring for the bug that
+    inverted that one for months), computed here natively from each
+    position's own already-synced `sos_<position>` frame instead
+    (`Team.1`/`Rank` columns -- see `sources/tffb_sos.py`).
+
+    `sos_by_position` is a dict of ONLY the positions that synced
+    successfully this run (`sources/edge.py` builds it the same
+    graceful-degradation way `games`/`weather` are already optional) --
+    a position missing from it blanks just that position's players,
+    never the whole column, since one position's TFFB page failing
+    shouldn't hide every other position's real data."""
+    if not sos_by_position:
+        merged["OppPosRank"] = pd.NA
+        return merged
+    rank_by_team = {position: df.set_index("Team.1")["Rank"] for position, df in sos_by_position.items()}
+
+    def _rank_for_row(row: pd.Series) -> object:
+        lookup = rank_by_team.get(row["Position"])
+        if lookup is None:
+            return pd.NA
+        return lookup.get(row["Opp"], pd.NA)
+
+    merged["OppPosRank"] = merged.apply(_rank_for_row, axis=1)
+    return merged
+
+
 def _attach_line_movement(merged: pd.DataFrame, line_movement: pd.DataFrame | None) -> pd.DataFrame:
     """Fix 2.2: `diff_odds()` already computes all three deltas
     (TeamPointsDelta, TotalDelta, SpreadDelta); only the first ever
     reached EdgeRaw, under a name that didn't say which line moved. All
-    three are surfaced now: ImpMove (team implied points -- what LineMove
+    three are surfaced now: ImpliedMove (team implied points -- what LineMove
     used to be), TotMove (game total), SpdMove (spread)."""
     if line_movement is None or line_movement.empty:
-        merged["ImpMove"] = pd.NA
+        merged["ImpliedMove"] = pd.NA
         merged["TotMove"] = pd.NA
         merged["SpdMove"] = pd.NA
         return merged
     by_team = line_movement.set_index("Abbr")
-    merged["ImpMove"] = merged["Team"].map(by_team["TeamPointsDelta"])
+    merged["ImpliedMove"] = merged["Team"].map(by_team["TeamPointsDelta"])
     merged["TotMove"] = merged["Team"].map(by_team["TotalDelta"])
     merged["SpdMove"] = merged["Team"].map(by_team["SpreadDelta"])
     return merged
@@ -277,11 +326,11 @@ def _flag_for_row(row: pd.Series) -> str:
         flags.append("OUT")
     if pd.notna(row["Wind"]) and row["Wind"] >= WIND_FLAG_THRESHOLD_MPH:
         flags.append("WIND")
-    # LINE↑/↓ keys off ImpMove specifically (Fix 2.2) -- TotMove/SpdMove
+    # LINE↑/↓ keys off ImpliedMove specifically (Fix 2.2) -- TotMove/SpdMove
     # are shown for context but don't drive this flag.
-    if pd.notna(row["ImpMove"]) and row["ImpMove"] >= LINE_MOVE_FLAG_THRESHOLD:
+    if pd.notna(row["ImpliedMove"]) and row["ImpliedMove"] >= LINE_MOVE_FLAG_THRESHOLD:
         flags.append("LINE↑")
-    if pd.notna(row["ImpMove"]) and row["ImpMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
+    if pd.notna(row["ImpliedMove"]) and row["ImpliedMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
         flags.append("LINE↓")
     if pd.notna(row["Leverage"]) and row["Leverage"] >= LEVERAGE_FLAG_THRESHOLD:
         flags.append("LEVERAGE")
@@ -298,6 +347,7 @@ def build_edge_frame(
     games: pd.DataFrame | None = None,
     weather: pd.DataFrame | None = None,
     line_movement: pd.DataFrame | None = None,
+    sos_by_position: dict[str, pd.DataFrame] | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -309,9 +359,12 @@ def build_edge_frame(
     `Game`, `GameStart`). `games`/`weather`/`line_movement` are the
     GamesRaw/WeatherRaw shapes from `nflverse_games.py`/`weather.py`, and
     `line_movement.diff_odds()`'s output diffed against the start of the
-    current NFL week (see sources/edge.py) -- all three optional; see
-    module docstring for why a missing one blanks columns rather than
-    omitting them.
+    current NFL week (see sources/edge.py) -- all optional; see module
+    docstring for why a missing one blanks columns rather than omitting
+    them. `sos_by_position` is `{"QB": sos_qb_frame, ...}` -- each
+    position's own already-synced `sources/tffb_sos.py` shape -- for
+    however many positions synced successfully this run; see
+    `_attach_opp_pos_rank`.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -362,6 +415,7 @@ def build_edge_frame(
     merged = _attach_weather(merged, weather)
     merged = merged.drop(columns="GameId")
     merged = _attach_line_movement(merged, line_movement)
+    merged = _attach_opp_pos_rank(merged, sos_by_position)
 
     merged["Avail"] = merged["Status"].fillna("")
     merged = merged.drop(columns="Status")

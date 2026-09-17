@@ -306,6 +306,7 @@ def test_columns_present_and_blank_when_games_and_weather_not_synced():
     assert pd.isna(row["Stadium"])
     assert pd.isna(row["Roof"])
     assert pd.isna(row["Wind"])
+    assert pd.isna(row["OppPosRank"])
 
 
 def test_stadium_and_roof_joined_from_games_by_team_code():
@@ -380,14 +381,14 @@ def test_line_move_blank_when_not_provided():
     sal = _salaries([{"ID": "1"}])
 
     row = build_edge_frame(proj, sal).frame.iloc[0]
-    assert pd.isna(row["ImpMove"])
+    assert pd.isna(row["ImpliedMove"])
     assert pd.isna(row["TotMove"])
     assert pd.isna(row["SpdMove"])
 
 
 def test_line_move_joined_by_team_and_flagged():
     # Fix 2.2: all three of diff_odds()'s deltas are surfaced now, not
-    # just the team-implied-points one (ImpMove, was "LineMove").
+    # just the team-implied-points one (ImpliedMove, was "LineMove").
     proj = _projections(
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
     )
@@ -397,7 +398,7 @@ def test_line_move_joined_by_team_and_flagged():
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["ImpMove"] == 2.5
+    assert row["ImpliedMove"] == 2.5
     assert row["TotMove"] == 1.0
     assert row["SpdMove"] == -0.5
     assert row["Flag"] == "LINE↑"
@@ -417,8 +418,8 @@ def test_line_move_down_flag():
 
 
 def test_line_move_flag_keys_off_impmove_not_totmove_or_spdmove():
-    # A big TotMove/SpdMove with a flat ImpMove must NOT trigger LINE↑/↓ --
-    # only ImpMove (team implied points) drives that flag (Fix 2.2).
+    # A big TotMove/SpdMove with a flat ImpliedMove must NOT trigger LINE↑/↓ --
+    # only ImpliedMove (team implied points) drives that flag (Fix 2.2).
     proj = _projections(
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
     )
@@ -484,3 +485,73 @@ def test_over_under_and_spread_surfaced_on_edgeraw():
     row = build_edge_frame(proj, sal).frame.iloc[0]
     assert row["OverUnder"] == 47.5
     assert row["Spread"] == -3.5
+
+
+def _sos(rows: list[dict]) -> pd.DataFrame:
+    # sources/tffb_sos.py's own output shape: Team is the full name (not
+    # used for this join), Team.1 is the DK-compatible abbreviation this
+    # join keys on, Rank is the schedule rank this join actually reads.
+    base = {"Team": "", "Team.1": "", "Rank": 1, "FPA": 0.0, "Opp": ""}
+    return pd.DataFrame([{**base, **r} for r in rows])
+
+
+def test_opp_pos_rank_blank_when_no_sos_data_synced_at_all():
+    proj = _projections([{"Id": "1", "Name": "P", "Position": "RB", "Opp": "NO"}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert pd.isna(row["OppPosRank"])
+
+
+def test_opp_pos_rank_reads_the_opponents_rank_not_the_players_own_team():
+    # The exact bug PlayerPoolRaw's own hand-typed formula had (see
+    # sheet_pool_raw_sos.py): this must key on Opp, never Team.
+    proj = _projections([{"Id": "1", "Name": "P", "Position": "RB", "Team": "DET", "Opp": "NO"}])
+    sal = _salaries([{"ID": "1"}])
+    sos_rb = _sos([{"Team.1": "DET", "Rank": 30}, {"Team.1": "NO", "Rank": 4}])
+
+    row = build_edge_frame(proj, sal, sos_by_position={"RB": sos_rb}).frame.iloc[0]
+    assert row["OppPosRank"] == 4  # NO's rank (the opponent), not DET's (30, the player's own team)
+
+
+def test_opp_pos_rank_uses_the_row_own_position_sos_frame():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "RB player", "Position": "RB", "Opp": "NO"},
+            {"Id": "2", "Name": "WR player", "Position": "WR", "Opp": "NO"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    sos_rb = _sos([{"Team.1": "NO", "Rank": 4}])
+    sos_wr = _sos([{"Team.1": "NO", "Rank": 17}])
+
+    frame = build_edge_frame(proj, sal, sos_by_position={"RB": sos_rb, "WR": sos_wr}).frame
+    assert frame.loc[frame["Name"] == "RB player", "OppPosRank"].iloc[0] == 4
+    assert frame.loc[frame["Name"] == "WR player", "OppPosRank"].iloc[0] == 17
+
+
+def test_opp_pos_rank_blank_for_just_the_positions_missing_their_own_sos_sync():
+    # One position's TFFB sync failing shouldn't hide every other
+    # position's real data -- same graceful-degradation contract as
+    # games/weather.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "RB player", "Position": "RB", "Opp": "NO"},
+            {"Id": "2", "Name": "WR player", "Position": "WR", "Opp": "NO"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    sos_rb = _sos([{"Team.1": "NO", "Rank": 4}])
+
+    frame = build_edge_frame(proj, sal, sos_by_position={"RB": sos_rb}).frame
+    assert frame.loc[frame["Name"] == "RB player", "OppPosRank"].iloc[0] == 4
+    assert pd.isna(frame.loc[frame["Name"] == "WR player", "OppPosRank"].iloc[0])
+
+
+def test_opp_pos_rank_blank_when_opponent_not_found_in_its_sos_frame():
+    proj = _projections([{"Id": "1", "Name": "P", "Position": "RB", "Opp": "ZZ"}])
+    sal = _salaries([{"ID": "1"}])
+    sos_rb = _sos([{"Team.1": "NO", "Rank": 4}])
+
+    row = build_edge_frame(proj, sal, sos_by_position={"RB": sos_rb}).frame.iloc[0]
+    assert pd.isna(row["OppPosRank"])

@@ -45,7 +45,7 @@ function happens to touch it first.
   named in `FIELD_COLOR_SCALES`/`FIELD_FORMATS`. Reversed (max color at the
   low end) for a rank column, where 1st is best. A true diverging scale
   (`mid_type="NUMBER", mid_value="0"`, white midpoint) is for a signed
-  delta where zero -- not the median -- is the meaningful center: ImpMove,
+  delta where zero -- not the median -- is the meaningful center: ImpliedMove,
   TotMove, SpdMove and Spread, nowhere else.
 - White -> amber -> red (`WARM_MIN`/`WARM_MID`/`WARM_MAX`, kind `_WARM`) is
   the ONE exception to "more is better": ownership (`ProjOwn` on EdgeRaw,
@@ -142,9 +142,9 @@ _HEADER_FMT = {
     "verticalAlignment": "MIDDLE",
     "horizontalAlignment": "LEFT",
 }
-# Public alias -- sheet_pool_deck.py reuses this exact style for its own
-# mini-header row (row 3) so it visually matches every other header on
-# the sheet, without duplicating the color/weight choices in two places.
+# Public alias -- sheet_audit.py reuses this exact style so it can check
+# a header's colour against what polish actually applied, without
+# duplicating the color/weight choices in two places.
 HEADER_FMT = _HEADER_FMT
 
 _TITLE_FMT = {"textFormat": {"bold": True, "fontSize": 13, "foregroundColor": INK}}
@@ -207,8 +207,21 @@ FIELD_FORMATS = {
     "Leverage": _num("0.0"),
     "CeilPct": _num("0.0"),
     "OwnPct": _num("0.0"),
+    # Third real instance of the exact incident described in `Id`'s own
+    # comment above (2026-09-16): OppPosRank, newly added to EDGE_COLUMNS
+    # right before Stadium, landed on the physical column two prior
+    # reorders had left Stadium sitting on -- itself carrying a STALE
+    # "0 \"mph\"" format inherited from Wind's position two reorders
+    # before that. Invisible the whole time Stadium (plain text) sat
+    # there, since a number format never affects how text renders; it
+    # surfaced the instant a real NUMBER (OppPosRank's rank) occupied
+    # that cell, rendering a real rank like 11 as "11 mph". A plain
+    # integer format here means every future reorder resets it via
+    # `apply_field_formats`, rather than silently inheriting whatever a
+    # stale physical column happened to carry.
+    "OppPosRank": _num("0"),
     "Spread": _num('"+"0.0;"-"0.0;0.0'),
-    "ImpMove": _num('"+"0.0;"-"0.0;0.0'),
+    "ImpliedMove": _num('"+"0.0;"-"0.0;0.0'),
     "TotMove": _num('"+"0.0;"-"0.0;0.0'),
     "SpdMove": _num('"+"0.0;"-"0.0;0.0'),
     "Val": _num("0.00"),
@@ -287,7 +300,7 @@ FIELD_COLOR_SCALES = {
     "OU": _GRADIENT,
     "OverUnder": _GRADIENT,
     "Total": _GRADIENT,
-    "ImpMove": _DIVERGING,
+    "ImpliedMove": _DIVERGING,
     "TotMove": _DIVERGING,
     "SpdMove": _DIVERGING,
     "Spread": _DIVERGING,
@@ -305,6 +318,14 @@ FIELD_COLOR_SCALES = {
     # why EdgeRaw keeps these two and Player Pool/Lineups skip them.
     "CeilPct": _GRADIENT,
     "OwnPct": _GRADIENT,
+    # Phase 5B: a count (0..however many lineups H1 says are being built),
+    # same "more is better" reading as everything else in _GRADIENT -- a
+    # heavily-used player earning the deepest colour is exactly the point.
+    # Zero is also this column's overwhelmingly common value (most pool
+    # players are rostered nowhere), so it's in ZERO_EXCLUDED_COLUMNS too
+    # for the same reason ProjOwn/Rstr% are: an unrostered player is
+    # normal, not the bottom of a gradient.
+    "Used": _GRADIENT,
 }
 
 # Phase 4 (4.1): EdgeRaw is sorted by Leverage, not grouped by position --
@@ -337,7 +358,7 @@ GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct", "OwnPct"})
 # after the gradient so it wins -- see the shared insert-at-front note on
 # FLAG_CHIPS above) and the gradient's own minpoint is computed over
 # non-zero values only via a live MINIFS formula, not the true minimum.
-ZERO_EXCLUDED_COLUMNS = frozenset({"ProjOwn", "Rstr%"})
+ZERO_EXCLUDED_COLUMNS = frozenset({"ProjOwn", "Rstr%", "Used"})
 ZERO_GREY_BG = _rgb("#EDEEF1")
 
 
@@ -557,6 +578,7 @@ EDGE_WIDTHS = {
     "Leverage": 72,
     "LevBasis": 74,
     "GameEnv": 76,
+    "OppPosRank": 96,
     "Stadium": 150,
     "Roof": 76,
     "Wind": 68,
@@ -564,7 +586,7 @@ EDGE_WIDTHS = {
     # Widened from 96: Flag can now hold multiple space-separated tokens
     # (Fix 2.1), e.g. "WIND LINE↑ LEVERAGE".
     "Flag": 170,
-    "ImpMove": 78,
+    "ImpliedMove": 78,
     "TotMove": 78,
     "SpdMove": 78,
     "GameStart": 132,
@@ -672,13 +694,116 @@ def _edge_letter(column_name: str) -> str | None:
     return column_letter(EDGE_COLUMNS.index(column_name) + EDGE_DATA_OFFSET)
 
 
+# ---------------------------------------------------------------------------
+# Phase 5C: the four pieces of EdgeRaw's own look (Wind chip, per-position
+# tint, LevBasis's grey freshness marker, Name bold-on-Flag) that
+# `polish_builder_tab` didn't yet apply to Player Pool/Lineups -- pulled out
+# so `polish_edge` and `polish_builder_tab` share one implementation instead
+# of a second copy drifting the moment one of them changes. Each takes
+# `header`/a column letter looked up BY NAME (never a hardcoded position,
+# same discipline as every other function in this module) so either caller
+# can pass its own header shape -- EdgeRaw's `[POOL_HEADER, *EDGE_COLUMNS]`
+# or a builder tab's own read-back row.
+# ---------------------------------------------------------------------------
+
+
+def _apply_wind_chip(client: SheetsClient, tab: str, header: list, *, data_start: int, last_row: int) -> None:
+    if "Wind" not in header:
+        return
+    letter = column_letter(header.index("Wind"))
+    client.add_boolean_rule(
+        tab,
+        f"{letter}{data_start}:{letter}{last_row}",
+        condition_type="NUMBER_GREATER",
+        values=[WIND_CHIP_THRESHOLD],
+        fmt=_chip(WARN_BG, WARN_FG),
+    )
+
+
+def _apply_position_tint(
+    client: SheetsClient, tab: str, header: list, *, column_name: str, data_start: int, last_row: int
+) -> None:
+    if column_name not in header:
+        return
+    letter = column_letter(header.index(column_name))
+    for position, bg in POSITION_TINTS.items():
+        client.add_boolean_rule(
+            tab,
+            f"{letter}{data_start}:{letter}{last_row}",
+            condition_type="TEXT_EQ",
+            values=[position],
+            fmt={"backgroundColor": bg},
+        )
+
+
+def _apply_lev_basis_marker(
+    client: SheetsClient, tab: str, header: list, *, data_start: int, last_row: int
+) -> None:
+    if "LevBasis" not in header:
+        return
+    letter = column_letter(header.index("LevBasis"))
+    client.format_range(
+        tab,
+        f"{letter}{data_start}:{letter}{last_row}",
+        {"textFormat": {"foregroundColor": INK_MUTED}, "horizontalAlignment": "CENTER"},
+    )
+
+
+def _apply_name_flag_style(
+    client: SheetsClient,
+    tab: str,
+    header: list,
+    *,
+    data_start: int,
+    last_row: int,
+    pool_column: str | None = None,
+) -> None:
+    """Bolds the Name cell when Flag is set. On EdgeRaw (`pool_column`
+    given -- the one tab spanning both pooled and unpooled players) also
+    tints it when the row is pooled, as three mutually-exclusive
+    combinations (Sheets renders only one matching rule per cell, so two
+    overlapping single-condition rules would silently hide one cue).
+    Player Pool/Lineups have no unpooled rows to distinguish -- every row
+    on either tab is already someone's pool pick or roster slot -- so
+    `pool_column=None` there skips the tint dimension entirely and just
+    bolds on Flag.
+    """
+    if "Name" not in header or "Flag" not in header:
+        return
+    name_col = column_letter(header.index("Name"))
+    flag_col = column_letter(header.index("Flag"))
+    rng = f"{name_col}{data_start}:{name_col}{last_row}"
+    flag_ref = f"${flag_col}{data_start}"
+
+    if pool_column and pool_column in header:
+        pool_ref = f"${column_letter(header.index(pool_column))}{data_start}"
+        pooled_and_flagged = {"backgroundColor": POOL_TINT_BG, "textFormat": {"bold": True}}
+        pooled_only = {"backgroundColor": POOL_TINT_BG}
+        flagged_only = {"textFormat": {"bold": True}}
+        rules = [
+            (f'=AND({pool_ref}<>"",{flag_ref}<>"")', pooled_and_flagged),
+            (f'=AND({pool_ref}<>"",{flag_ref}="")', pooled_only),
+            (f'=AND({pool_ref}="",{flag_ref}<>"")', flagged_only),
+        ]
+        for formula, fmt in rules:
+            client.add_boolean_rule(tab, rng, condition_type="CUSTOM_FORMULA", values=[formula], fmt=fmt)
+    else:
+        client.add_boolean_rule(
+            tab,
+            rng,
+            condition_type="CUSTOM_FORMULA",
+            values=[f'={flag_ref}<>""'],
+            fmt={"textFormat": {"bold": True}},
+        )
+
+
 def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     """Direction B: make EdgeRaw readable without moving anything.
 
     Widths, a dark frozen header, Id hidden and Pool+Name pinned while you
     scroll right, light row banding, number formats on every numeric
     column, FIELD_COLOR_SCALES applied to every matching column except
-    EDGE_UNSCALED_PLAYER_METRICS (a diverging scale for ImpMove/TotMove/
+    EDGE_UNSCALED_PLAYER_METRICS (a diverging scale for ImpliedMove/TotMove/
     SpdMove/Spread, gradient for the rest -- see Phase 4's own comment
     below on why raw Pts/Ceil/Val/CeilVal are skipped here specifically),
     a muted
@@ -690,6 +815,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     if not client.tab_exists(edge_tab):
         return f"{edge_tab}: not present -- skipped"
 
+    edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     client.clear_conditional_formats(edge_tab)
     client.clear_banding(edge_tab)
@@ -725,12 +851,12 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # EdgeRaw's real header is `[POOL_HEADER, *EDGE_COLUMNS]` by construction
     # (see `sources/edge.py`'s `to_sheet_rows`) -- built here rather than
     # read back, same as every other position in this function.
-    apply_field_formats(client, edge_tab, [POOL_HEADER, *EDGE_COLUMNS], header_row=1, last_row=EDGE_ROWS)
+    apply_field_formats(client, edge_tab, edge_header, header_row=1, last_row=EDGE_ROWS)
 
     # FIELD_COLOR_SCALES (Fix 2.1) -- the one canonical policy every tab
     # that shows a given field applies; on EdgeRaw that's ProjPts, Ceiling,
     # Val, CeilVal, Leverage, GameEnv, OverUnder (gradient), ProjOwn (warm),
-    # and ImpMove/TotMove/SpdMove/Spread (diverging).
+    # and ImpliedMove/TotMove/SpdMove/Spread (diverging).
     # Phase 4 (4.1): EdgeRaw is sorted by Leverage, not grouped by
     # position, so its raw player-performance metrics (Pts/Ceil/Val/
     # CeilVal) are skipped here -- one gradient across all 743 players
@@ -740,32 +866,16 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     n_scaled = apply_field_color_scales(
         client,
         edge_tab,
-        [POOL_HEADER, *EDGE_COLUMNS],
+        edge_header,
         header_row=1,
         last_row=EDGE_ROWS,
         skip=EDGE_UNSCALED_PLAYER_METRICS,
     )
 
-    wind_col = _edge_letter("Wind")
-    if wind_col:
-        client.add_boolean_rule(
-            edge_tab,
-            f"{wind_col}2:{wind_col}{EDGE_ROWS}",
-            condition_type="NUMBER_GREATER",
-            values=[WIND_CHIP_THRESHOLD],
-            fmt=_chip(WARN_BG, WARN_FG),
-        )
-
-    position_col = _edge_letter("Position")
-    if position_col:
-        for position, bg in POSITION_TINTS.items():
-            client.add_boolean_rule(
-                edge_tab,
-                f"{position_col}2:{position_col}{EDGE_ROWS}",
-                condition_type="TEXT_EQ",
-                values=[position],
-                fmt={"backgroundColor": bg},
-            )
+    _apply_wind_chip(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
+    _apply_position_tint(
+        client, edge_tab, edge_header, column_name="Position", data_start=2, last_row=EDGE_ROWS
+    )
 
     flag_col = _edge_letter("Flag")
     if flag_col:
@@ -804,49 +914,14 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # via LevBasis itself rather than graying CeilPct -- CeilPct is a real,
     # independent number regardless of ownership status, never a stand-in
     # for Leverage anymore.
-    lev_basis = _edge_letter("LevBasis")
-    if lev_basis:
-        client.format_range(
-            edge_tab,
-            f"{lev_basis}2:{lev_basis}{EDGE_ROWS}",
-            {"textFormat": {"foregroundColor": INK_MUTED}, "horizontalAlignment": "CENTER"},
-        )
+    _apply_lev_basis_marker(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
 
-    # "Already in my pool" + "flagged" on the Name cell, as the three
-    # mutually-exclusive combinations rather than two independent rules --
-    # Sheets renders only one matching conditional-format rule per cell, so
-    # two overlapping single-condition rules would silently hide one cue
-    # instead of showing both on a player that's pooled AND flagged.
-    name_col = _edge_letter("Name")
-    if name_col and flag_col:
-        pool_ref = f"${POOL_COLUMN}2"
-        flag_ref = f"${flag_col}2"
-        pooled_and_flagged = {"backgroundColor": POOL_TINT_BG, "textFormat": {"bold": True}}
-        pooled_only = {"backgroundColor": POOL_TINT_BG}
-        flagged_only = {"textFormat": {"bold": True}}
-        # Pool is a blank/Cash/GPP/Both dropdown now, not a TRUE/FALSE
-        # checkbox (Fix 2.11) -- any non-blank value counts as "pooled".
-        rules = [
-            (f'=AND({pool_ref}<>"",{flag_ref}<>"")', pooled_and_flagged),
-            (f'=AND({pool_ref}<>"",{flag_ref}="")', pooled_only),
-            (f'=AND({pool_ref}="",{flag_ref}<>"")', flagged_only),
-        ]
-        for formula, fmt in rules:
-            client.add_boolean_rule(
-                edge_tab,
-                f"{name_col}2:{name_col}{EDGE_ROWS}",
-                condition_type="CUSTOM_FORMULA",
-                values=[formula],
-                fmt=fmt,
-            )
-    elif name_col:
-        client.add_boolean_rule(
-            edge_tab,
-            f"{name_col}2:{name_col}{EDGE_ROWS}",
-            condition_type="CUSTOM_FORMULA",
-            values=[f'=${POOL_COLUMN}2<>""'],
-            fmt={"backgroundColor": POOL_TINT_BG},
-        )
+    # "Already in my pool" + "flagged" on the Name cell -- Pool is a
+    # blank/Cash/GPP/Both dropdown now, not a TRUE/FALSE checkbox (Fix
+    # 2.11), so any non-blank value counts as "pooled".
+    _apply_name_flag_style(
+        client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS, pool_column=POOL_HEADER
+    )
 
     client.clear_column_groups(edge_tab)
     for first, last in EDGE_COLUMN_GROUPS:
@@ -879,12 +954,8 @@ BUILDER_WIDTHS = {
     "Source": 64,
     "Pool": 64,
     "Edge ↗": 64,
-    # Reserved GAME-zone placeholders (Phase 3) -- narrow until the
-    # strength-of-schedule work lands and gives them real content.
-    "SoS 1": 56,
-    "SoS 2": 56,
-    "SoS 3": 56,
-    "SoS 4": 56,
+    "Used": 52,
+    "In": 96,
 }
 
 
@@ -912,19 +983,16 @@ def polish_builder_tab(
     (including one that colour-scaled `Venue`'s `H`/`R` text, and a couple
     spanning two columns at once) that a narrower, column-scoped clear
     can't reliably find. Callers that also own conditional formats outside
-    this function's reach on the same tab (`polish_guardrails`' column O,
-    `polish_pool_deck`'s deck-window rows) must re-run *after* this, not
-    before -- see `sheets_polish`'s own call order.
+    this function's reach on the same tab (`polish_guardrails`' column O)
+    must re-run *after* this, not before -- see `sheets_polish`'s own call
+    order.
 
-    `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but not
-    for Lineups: `sheet_pool_deck.py`'s `add_pool_deck` inserts frozen rows
-    above its header, so its caller passes the real row (derived from
-    `LINEUPS_NAME_BLOCKS`, not hardcoded). `freeze_rows` defaults to
-    freezing through the header row itself; Lineups instead passes its
-    deck row count, since freezing past the header would freeze into the
-    first lineup block. `freeze_cols` defaults to 1 (pin Name); Lineups
-    passes 0 so this doesn't fight the deck's own column-freeze choice
-    (see `sheet_pool_deck.py`).
+    `header_row` defaults to 1, true for every tab this function styles --
+    Lineups' own header sat at row 11 while the (now-removed) pool deck
+    occupied the rows above it; back at row 1 like everything else since
+    Phase 5's removal (2026-09-16, see `sheet_pool_deck.py`'s module
+    docstring). `freeze_rows`/`freeze_cols` default to freezing through
+    the header row and pinning Name (column A), same as every other tab.
 
     `header_repeats_at` styles Lineups' repeated sub-header rows (one per
     lineup block after the first, see `weekly_reset.py`) the same dark
@@ -945,6 +1013,14 @@ def polish_builder_tab(
     blocks, each skipping `GROUPED_TAB_UNSCALED_COLUMNS`. Omit (the
     default) for a tab that isn't naturally grouped (PlayerPoolRaw),
     which keeps the original whole-tab `apply_field_color_scales`.
+
+    Phase 5C: also applies the rest of EdgeRaw's own look wherever the
+    matching column exists in `header` -- a Wind chip, a muted
+    per-position tint (`Pos.`, EdgeRaw's own equivalent column is
+    `Position`), LevBasis greyed as the data-freshness marker it is, and
+    Name bolded when Flag is set -- via the same shared helpers
+    `polish_edge` itself calls (see the module-level comment just above
+    `polish_edge`), so the two never drift into two different policies.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -1017,176 +1093,20 @@ def polish_builder_tab(
             )
         chipped += 1
 
+    # Phase 5C: the rest of EdgeRaw's own look (Wind chip, per-position
+    # tint, LevBasis's grey freshness marker, Name bold-on-Flag) --
+    # `pool_column=None` since Player Pool/Lineups/PlayerPoolRaw have no
+    # unpooled rows to distinguish the way EdgeRaw does (see
+    # `_apply_name_flag_style`'s own docstring).
+    _apply_wind_chip(client, tab, header, data_start=data_start, last_row=last_row)
+    _apply_position_tint(client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row)
+    _apply_lev_basis_marker(client, tab, header, data_start=data_start, last_row=last_row)
+    _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
+
     pin_note = "Name pinned" if freeze_cols else "no column pin"
     return (
         f"{tab}: header styled, {pin_note}, banded, {applied} column(s) number-formatted, "
         f"{scaled} colour scale(s), {chipped} chip column(s)"
-    )
-
-
-# ---------------------------------------------------------------------------
-# The pool deck's window (sheet_pool_deck.py): make the numbers above the
-# divider mean the same thing as the numbers below it
-# ---------------------------------------------------------------------------
-
-
-_CONTROL_BORDER = {"style": "SOLID_MEDIUM", "color": INK_MUTED}
-
-
-def apply_deck_color_scales(
-    client: SheetsClient,
-    tab: str,
-    deck_header: list,
-    pool_sort_header: list,
-    *,
-    header_row: int,
-    window_end: int,
-    min_helper_row: int,
-    max_helper_row: int,
-) -> int:
-    """Phase 4 (4.4): the deck window used to scale colour against
-    whichever 6 rows happened to be visible (`apply_field_color_scales`'s
-    ordinary MIN/MAX, computed over the window's own tiny range) --
-    paging through a position with `Start at` re-scaled the same numbers
-    as you scrolled, so a player's colour changed based on who else
-    happened to be on screen, actively misleading.
-
-    Anchors min/max at `min_helper_row`/`max_helper_row` instead -- two
-    otherwise-blank deck rows (`sheet_pool_deck._write_deck_scale_
-    helpers` writes `=MIN(PoolSort!<col>...)`/`=MAX(...)` into them, same
-    column as each scaled field, white-on-white like G1) holding
-    PoolSort's true min/max for whatever position is currently selected.
-    NOT a direct cross-sheet reference in the gradient rule itself --
-    verified live that Sheets rejects a `NUMBER`-type interpolation point
-    whose formula references another sheet at all (`APIError: Invalid
-    InterpolationPoint.value`), same-sheet or not otherwise unrestricted;
-    see CONTRIBUTING.md's Phase 4 changelog. Routing through a same-tab
-    helper cell that itself holds a normal cross-sheet formula sidesteps
-    that restriction entirely.
-
-    `deck_header` (row 3, mirrors Lineups' own shape) says what to scale;
-    `pool_sort_header` (mirrors Player Pool's shape, which can differ --
-    see `sheet_pool_deck._write_deck_controls`'s own comment) says
-    whether a given deck column has a PoolSort equivalent at all -- a
-    deck-only name with none (`Issues`, `% of Rstr`) is skipped, same as
-    the window's own value formulas and the helper-writer above.
-    """
-    gradient_specs = []
-    boolean_specs = []
-    data_start = header_row + 1
-    for i, name in enumerate(deck_header):
-        kind = FIELD_COLOR_SCALES.get(name)
-        if not kind or name in GROUPED_TAB_UNSCALED_COLUMNS or name not in pool_sort_header:
-            continue
-        letter = column_letter(i)
-        a1 = f"{letter}{data_start}:{letter}{window_end}"
-        client.clear_conditional_formats(tab, column=letter, row_range=(data_start, window_end))
-        gradient_spec, boolean_spec = _scale_rule_specs(
-            a1,
-            kind,
-            name,
-            zero_exclude_range=a1,  # unused: min_value is always explicit below
-            min_value=f"=${letter}${min_helper_row}",
-            max_value=f"=${letter}${max_helper_row}",
-        )
-        gradient_specs.append(gradient_spec)
-        if boolean_spec is not None:
-            boolean_specs.append(boolean_spec)
-
-    client.add_color_scales(tab, gradient_specs)
-    client.add_boolean_rules(tab, boolean_specs)
-    return len(gradient_specs)
-
-
-def polish_pool_deck(
-    client: SheetsClient,
-    lineups_tab: str,
-    *,
-    pool_sort_tab: str,
-    header_row: int,
-    window_end: int,
-    min_helper_row: int,
-    max_helper_row: int,
-) -> str:
-    """The deck (rows 1..DECK_ROWS) was built to align with the lineup
-    blocks below it, but its window rows never got the block rows' own
-    formatting: `Pts`/`Ceil`/`Val`/`Leverage` etc. showed as raw floats a
-    few rows above block cells showing "0.0" for the identical field.
-    Applies the same FIELD_FORMATS the blocks get below it (found by
-    header name off row 3, not a literal column -- Fix 2.4), colour
-    scales via `apply_deck_color_scales` (Phase 4 4.4 -- scaled against
-    PoolSort's full range via same-tab helper cells, not the visible
-    window), plus the Venue chip, so a number (or an H/R tag) above the
-    divider and the same field below it read identically. Also gives
-    B1/D1/F1 -- the deck's only controls -- the workbook's one "you type
-    here" treatment plus a border, since as plain cells they gave no
-    visual hint they were interactive.
-
-    `header_row`/`window_end`/`min_helper_row`/`max_helper_row` come from
-    `sheet_pool_deck.py`'s own constants (row 3, `3 + _WINDOW_SIZE`, row
-    2, `DECK_ROWS`) rather than being re-derived here, same discipline as
-    everywhere else column/row positions cross a module boundary in this
-    codebase. `pool_sort_tab` is only read here (its own header, to know
-    which deck columns have a scalable equivalent) -- the helper cells
-    that actually reference it are written by `sheet_pool_deck.
-    _write_deck_scale_helpers`, which must run before this. In practice
-    that means `dfs setup add-pool-deck` (which calls it) needs to have
-    run at least once since Phase 4 shipped; the helper cells are live
-    formulas, not snapshotted values, so a later `dfs setup polish` on
-    its own keeps them current without needing to rewrite them.
-    """
-    if not client.tab_exists(lineups_tab):
-        return f"{lineups_tab}: not present -- skipped"
-
-    control_borders = {side: _CONTROL_BORDER for side in ("top", "bottom", "left", "right")}
-    for cell in ("B1", "D1", "F1"):
-        client.format_range(lineups_tab, cell, {"backgroundColor": INPUT_BG, "borders": control_borders})
-
-    header_rows = client.read_range(lineups_tab, f"A{header_row}:{header_row}")
-    header = header_rows[0] if header_rows else []
-    if not header:
-        return f"{lineups_tab}: controls marked, deck header row {header_row} empty -- skipped"
-
-    applied = apply_field_formats(client, lineups_tab, header, header_row=header_row, last_row=window_end)
-
-    # Row-band clear, not `column=letter`: that column also carries
-    # `sheet_links.link_edge_columns`' own scale on the real lineup blocks
-    # further down, which this function does not own and must not delete
-    # on every `add_pool_deck` re-run. And not an exact-range clear either
-    # -- which column ends up holding a given field can change (Player
-    # Pool/Lineups header drift, see `sheet_pool_deck.py`), which moved
-    # this exact rule's column on a real re-run and left the old one
-    # orphaned since an exact-range match against the NEW range never
-    # found it. Clearing the whole window row band once, regardless of
-    # column, finds it either way.
-    client.clear_conditional_formats(lineups_tab, row_range=(header_row + 1, window_end))
-
-    pool_sort_header_rows = client.read_range(pool_sort_tab, "A1:1")
-    pool_sort_header = pool_sort_header_rows[0] if pool_sort_header_rows else []
-    scaled = apply_deck_color_scales(
-        client,
-        lineups_tab,
-        header,
-        pool_sort_header,
-        header_row=header_row,
-        window_end=window_end,
-        min_helper_row=min_helper_row,
-        max_helper_row=max_helper_row,
-    )
-
-    chipped = False
-    if "Venue" in header:
-        letter = column_letter(header.index("Venue"))
-        a1 = f"{letter}{header_row + 1}:{letter}{window_end}"
-        client.format_range(lineups_tab, a1, {"horizontalAlignment": "CENTER"})
-        for text, fmt in VENUE_CHIPS.items():
-            client.add_boolean_rule(lineups_tab, a1, condition_type="TEXT_EQ", values=[text], fmt=fmt)
-        chipped = True
-
-    venue_note = ", Venue chipped" if chipped else ""
-    return (
-        f"{lineups_tab}: deck formatted ({applied} field(s), {scaled} colour scale(s){venue_note}), "
-        "controls marked"
     )
 
 
@@ -1875,30 +1795,74 @@ def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:
     return f"{tab}: styled (Target marked as input, over/under target flagged)"
 
 
+_MOVEMENT_WIDTHS = {
+    "Player": 165,
+    "Pos": 92,
+    "Implied move": 92,
+    "Total move": 92,
+    "Spread move": 92,
+    "Kickoff (UTC)": 152,
+    "Flag": 96,
+}
+
+# Diverging, not the standard red->yellow->green: each is a signed delta
+# and zero (no movement) is the meaningful midpoint, same reasoning as
+# EdgeRaw's own ImpliedMove/TotMove/SpdMove columns (see polish_edge).
+_MOVEMENT_SCALED_COLUMNS = ("Implied move", "Total move", "Spread move")
+
+
 def style_movement(client: SheetsClient, tab: str = "Movement") -> str:
+    """Section F: `build_movement`'s header can now be anywhere from 4 to
+    7 columns wide (Total move/Spread move/Kickoff are each included only
+    when EdgeRaw/GameStart actually have them) -- styling by a hardcoded
+    A:E range assumed the old fixed 5-column shape and silently
+    mis-styled (or under-styled) the tab the moment that shape changed.
+    Read row 3's real header instead and match every styled column by
+    NAME, same discipline as `polish_builder_tab`.
+    """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
+
+    header_rows = client.read_range(tab, "A3:3")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: empty header row -- skipped"
+
+    last_col = column_letter(len(header) - 1)
     client.clear_conditional_formats(tab)
-    client.set_column_widths(tab, {"A": 165, "B": 92, "C": 92, "D": 152, "E": 96})
+    widths = {
+        column_letter(i): _MOVEMENT_WIDTHS[name] for i, name in enumerate(header) if name in _MOVEMENT_WIDTHS
+    }
+    client.set_column_widths(tab, widths)
     client.format_range(tab, "A1", _TITLE_FMT)
-    client.format_range(tab, "A3:E3", _HEADER_FMT)
-    client.format_range(tab, "C4:C60", FIELD_FORMATS["ImpMove"])
-    # Diverging, not the standard red->yellow->green: this is a signed
-    # delta and zero (no movement) is the meaningful midpoint, same
-    # reasoning as EdgeRaw's own ImpMove column (see polish_edge).
-    client.add_color_scale(
-        tab,
-        "C4:C60",
-        min_color=GRAD_MIN,
-        mid_color=WHITE,
-        max_color=GRAD_MAX,
-        mid_type="NUMBER",
-        mid_value="0",
-    )
-    for text, fmt in FLAG_CHIPS.items():
-        client.add_boolean_rule(tab, "E4:E60", condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
+    client.format_range(tab, f"A3:{last_col}3", _HEADER_FMT)
+
+    scaled = 0
+    for name in _MOVEMENT_SCALED_COLUMNS:
+        if name not in header:
+            continue
+        letter = column_letter(header.index(name))
+        rng = f"{letter}4:{letter}60"
+        client.format_range(tab, rng, FIELD_FORMATS["ImpliedMove"])
+        client.add_color_scale(
+            tab,
+            rng,
+            min_color=GRAD_MIN,
+            mid_color=WHITE,
+            max_color=GRAD_MAX,
+            mid_type="NUMBER",
+            mid_value="0",
+        )
+        scaled += 1
+
+    if "Flag" in header:
+        letter = column_letter(header.index("Flag"))
+        rng = f"{letter}4:{letter}60"
+        for text, fmt in FLAG_CHIPS.items():
+            client.add_boolean_rule(tab, rng, condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
+
     client.freeze(tab, rows=3, cols=1)
-    return f"{tab}: styled (movement colour-scaled, flags chipped)"
+    return f"{tab}: styled ({scaled} movement column(s) colour-scaled, flags chipped)"
 
 
 def style_view_tabs(client: SheetsClient) -> list[str]:

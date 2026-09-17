@@ -74,6 +74,51 @@ def provision_missing_columns(
     return missing
 
 
+def rename_header_column(
+    client: SheetsClient,
+    tab: str,
+    old_name: str,
+    new_name: str,
+    *,
+    header_row: int = 1,
+    header_repeats_at: list[int] | None = None,
+) -> bool:
+    """A pure text rename of one header cell, IN PLACE -- no position
+    changes, so this is deliberately NOT `provision_missing_columns` +
+    `link_edge_columns`. Every column-finding function in this codebase
+    (`link_edge_columns`, `provision_missing_columns`, `polish_builder_
+    tab`, ...) locates a column by NAME, so simply changing a name on the
+    Python side (e.g. Section F's `ImpMove` -> `ImpliedMove`) makes every
+    one of them see the OLD sheet text as "genuinely missing" the moment
+    they next run -- `link_edge_columns` in particular then tries to
+    APPEND a brand-new column under the new name, past the tab's current
+    width (hitting `ensure_column_capacity`'s exact "exceeds grid limits"
+    failure mode if the tab was already fully linked, found live running
+    this), while the real, formula-bearing OLD column sits orphaned under
+    its old name. Call this FIRST, before any reorder/link/provision step
+    touches a renamed column, so every later name-based lookup finds the
+    new name already sitting in the column that was always there.
+
+    No-ops (returns False) if `old_name` isn't present -- either the
+    rename already happened, or this tab predates the column entirely.
+    Returns True if a cell was actually rewritten.
+    """
+    header_row_values = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = list(header_row_values[0]) if header_row_values else []
+    if old_name not in header:
+        return False
+
+    col = column_letter(header.index(old_name))
+    client.update_range(tab, f"{col}{header_row}", [[new_name]])
+    for row_num in header_repeats_at or []:
+        repeat_row = client.read_range(tab, f"A{row_num}:{row_num}")
+        repeat_header = list(repeat_row[0]) if repeat_row else []
+        if old_name in repeat_header:
+            repeat_col = column_letter(repeat_header.index(old_name))
+            client.update_range(tab, f"{repeat_col}{row_num}", [[new_name]])
+    return True
+
+
 def resync_header_repeats(
     client: SheetsClient, tab: str, *, header_row: int = 1, header_repeats_at: list[int] | None = None
 ) -> int:
@@ -183,3 +228,32 @@ def migrate_tab_to_designed_order(
         report.append(f"{tab}: resynced {resynced} repeated header row(s) to match the primary header")
 
     return report
+
+
+def remove_header_columns(client: SheetsClient, tab: str, names: list[str], *, header_row: int = 1) -> str:
+    """Permanently delete each column in `names` from `tab`, found by
+    current header text (never a hardcoded position). Unlike
+    `rename_header_column`'s per-repeat-row patching, a real
+    `deleteDimension` on COLUMNS removes the column across the tab's
+    entire height in one shot, so a repeated header row (Lineups reprints
+    its header once per lineup block) needs no separate handling here --
+    the column is just gone from every row at once, repeats included.
+
+    A name genuinely absent from the header is skipped, not an error --
+    same idempotent-migration contract as `sheet_pool_deck.
+    remove_pool_deck`: safe to re-run on a tab that's already had this
+    applied, or one that never had these columns at all (e.g. a sheet
+    built after this migration already shipped). Deletes right-to-left
+    (highest index first) so removing one column can't shift the
+    still-pending indices for the others -- the one real hazard in
+    deleting several columns from the same header in a single pass.
+    """
+    header_row_values = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = list(header_row_values[0]) if header_row_values else []
+    indices = sorted((header.index(name) for name in names if name in header), reverse=True)
+    if not indices:
+        return f"{tab}: none of {names} present -- skipped"
+    for index in indices:
+        client.delete_columns(tab, at_index=index, count=1)
+    removed = [name for name in names if name in header]
+    return f"{tab}: removed {len(indices)} column(s): {removed}"

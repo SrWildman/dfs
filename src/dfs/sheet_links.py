@@ -168,16 +168,19 @@ def link_edge_columns(
     already fully linked, so nothing would otherwise pick up the new
     formula shape.
 
-    `header_row` defaults to 1, true for Player Pool/PlayerPoolRaw, but
-    not for Lineups once `sheet_pool_deck.py`'s `add_pool_deck` inserts
-    rows above its header: reading/writing row 1 there finds the deck's
-    controls instead of the real header, mistakes an already-linked tab for
-    an unlinked one, and appends a *second*, wrongly-positioned copy of
+    `header_row` defaults to 1, true for every tab this function links now
+    -- Lineups' own header briefly sat elsewhere while the pool deck
+    occupied the rows above it (2026-09-06 through 2026-09-16, removed
+    entirely -- see `sheet_pool_deck.py`'s module docstring); reading/
+    writing row 1 there during that window found the deck's controls
+    instead of the real header, mistook an already-linked tab for an
+    unlinked one, and appended a *second*, wrongly-positioned copy of
     LINKED_EDGE_COLUMNS starting at column B -- overwriting every lineup
     block's Pos./Team/DK Sal/etc. data with a duplicate EdgeRaw lookup.
     This happened for real on the template; see CONTRIBUTING.md's
-    changelog. The CLI passes Lineups' real header row explicitly rather
-    than hardcoding it.
+    changelog. The CLI still passes Lineups' header row explicitly
+    (derived from `LINEUPS_NAME_BLOCKS`, currently 1) rather than
+    hardcoding it, so this stays correct if it ever moves again.
     """
     header_row_values = client.read_range(tab, f"A{header_row}:{header_row}")
     header = list(header_row_values[0]) if header_row_values else []
@@ -190,6 +193,14 @@ def link_edge_columns(
         created_start = column_letter(len(header))
         header.extend(missing)
         created_end = column_letter(len(header) - 1)
+        # A tab already at its provisioned grid width (e.g. fully linked
+        # before a rename made one name look "missing" again -- see
+        # `sheet_reorder.rename_header_column`, which exists so a pure
+        # rename never reaches this append path in the first place)
+        # otherwise raises "exceeds grid limits" the instant this tries
+        # to write past the current column count. Same fix as
+        # `provision_missing_columns`.
+        client.ensure_column_capacity(tab, len(header))
         client.update_range(tab, f"{created_start}{header_row}:{created_end}{header_row}", [missing])
         for header_row_num in header_repeats_at or []:
             a1 = f"{created_start}{header_row_num}:{created_end}{header_row_num}"
@@ -268,3 +279,72 @@ def link_edge_columns(
         client.group_columns(tab, column_letter(start), column_letter(end), collapsed=True)
 
     return f"{tab}: linked {len(LINKED_EDGE_COLUMNS)} EdgeRaw column(s) ({len(missing)} newly created)"
+
+
+# Phase 5D: the Vegas-odds trio Lineups collapses on top of the
+# WEATHER/MOVEMENT/INTERNAL group `link_edge_columns` already creates
+# above. Verified by real column NAME against the live header (never a
+# hardcoded letter, per this codebase's central hazard) rather than the
+# task's own original "E:H" guess, which was checked against the current
+# designed order and found stale -- O/U/Spread/Team Implied actually sit
+# at R:T post-Phase-3, not E:H.
+VEGAS_GROUP_COLUMNS = ["O/U", "Spread", "Team Implied"]
+
+
+def group_lineups_columns(client: SheetsClient, tab: str, *, header_row: int = 1) -> str:
+    """Lineups-specific column groups: `VEGAS_GROUP_COLUMNS` PLUS a
+    from-scratch redo of the WEATHER/MOVEMENT/INTERNAL merge
+    `link_edge_columns` already applies to every linked tab -- not because
+    that merge is wrong, but because `SheetsClient.clear_column_groups`
+    wipes EVERY group on a tab (see its own docstring), so anything this
+    function adds after `link_edge_columns` has already run would be
+    silently destroyed the next time `link_edge_columns` re-runs, unless
+    this function is the one that (re)creates the full set, last, every
+    time. Call this right after `link_edge_columns` in the same command,
+    Lineups only -- Player Pool/PlayerPoolRaw are untouched, still solely
+    governed by `link_edge_columns`' own group call.
+
+    A second, originally-requested "Venue" group (GameEnv onward) is
+    deliberately NOT created: GameEnv sits immediately adjacent to the
+    WEATHER/MOVEMENT/INTERNAL block once Phase 3's reorder has run, and
+    Sheets does not keep two `addDimensionGroup` calls at the same depth
+    independent when their ranges are adjacent -- it silently EXTENDS the
+    first to cover the second (verified live, same failure `link_
+    edge_columns`' own merge logic already works around for its three
+    zones). Grouping GameEnv onward here would therefore silently merge
+    with WEATHER/MOVEMENT/INTERNAL into one much larger block rather than
+    staying independently collapsible, defeating the point of having two
+    separate toggles. Left visible instead; a real second group would need
+    a design change (an ungrouped column between them) this task doesn't
+    make.
+    """
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_rows[0] if header_rows else []
+    if not header:
+        return f"{tab}: empty header row -- column groups skipped"
+
+    zone_ranges: list[tuple[int, int]] = []
+    vegas_indices = [header.index(name) for name in VEGAS_GROUP_COLUMNS if name in header]
+    if len(vegas_indices) == len(VEGAS_GROUP_COLUMNS):
+        vegas_indices.sort()
+        if vegas_indices == list(range(vegas_indices[0], vegas_indices[0] + len(vegas_indices))):
+            zone_ranges.append((vegas_indices[0], vegas_indices[-1]))
+
+    for group in (WEATHER, MOVEMENT, INTERNAL):
+        indices = sorted(header.index(name) for name in group if name in header)
+        if indices and indices == list(range(indices[0], indices[0] + len(indices))):
+            zone_ranges.append((indices[0], indices[-1]))
+
+    zone_ranges.sort()
+    merged_ranges: list[tuple[int, int]] = []
+    for start, end in zone_ranges:
+        if merged_ranges and merged_ranges[-1][1] + 1 == start:
+            merged_ranges[-1] = (merged_ranges[-1][0], end)
+        else:
+            merged_ranges.append((start, end))
+
+    client.clear_column_groups(tab)
+    for start, end in merged_ranges:
+        client.group_columns(tab, column_letter(start), column_letter(end), collapsed=True)
+
+    return f"{tab}: {len(merged_ranges)} column group(s) applied"

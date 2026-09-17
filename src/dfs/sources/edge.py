@@ -1,4 +1,4 @@
-"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, ImpMove/TotMove/
+"""Derived edge-layer signals (Leverage, CeilVal, GameEnv, ImpliedMove/TotMove/
 SpdMove, Avail, Flag) computed locally from already-synced sources -- no
 network call of its own.
 
@@ -55,6 +55,29 @@ _LAST_ROW = 1000
 # derived the same way, never a separate literal.
 _FILTER_RANGE = f"A1:{column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)}{_LAST_ROW}"
 
+# Matches sources/tffb_sos.py's own SOURCES registry keys -- one optional
+# input per position, same graceful-degradation treatment as games/weather
+# (see _try_load_current): a position whose TFFB sync failed or hasn't run
+# yet just blanks that position's players in OppPosRank, not the column.
+_SOS_SOURCE_BY_POSITION = {"QB": "sos_qb", "RB": "sos_rb", "WR": "sos_wr", "TE": "sos_te", "DST": "sos_dst"}
+
+
+def _canonical_id(raw: object) -> str:
+    """Normalizes one raw (UNFORMATTED_VALUE) Id cell reading to a stable
+    string key. Google returns a purely-numeric-looking cell as an actual
+    JSON number once it's been written, and a whole-number float round-
+    trips through Python with a stray `.0` -- stripped here so
+    `pre_upload`'s and `post_upload`'s reads of the SAME Id always
+    produce the SAME key, even though they read it from two different
+    physical columns (Id's position before vs. after this sync's own
+    `write_tab` rewrite -- see `pre_upload`'s own docstring for why that
+    matters) that may carry different inherited cell formats."""
+    if raw is None or raw == "":
+        return ""
+    if isinstance(raw, float):
+        return str(int(raw)) if raw.is_integer() else str(raw)
+    return str(raw).strip()
+
 
 def _try_load_current(source_name: str) -> pd.DataFrame | None:
     """Like store.load_current, but None (not a raised error) when that
@@ -68,7 +91,7 @@ def _try_load_current(source_name: str) -> pd.DataFrame | None:
 
 
 def _try_diff_odds(ctx: SyncContext) -> pd.DataFrame | None:
-    """ImpMove/TotMove/SpdMove: since the start of the current NFL week, not since the
+    """ImpliedMove/TotMove/SpdMove: since the start of the current NFL week, not since the
     last sync -- diffing against the last sync made the number depend on
     how often `dfs sync` happens to get run, which isn't a real signal.
     `store.load_since` falls back to the earliest snapshot on disk when
@@ -96,9 +119,19 @@ class EdgeSource(Source):
         games = _try_load_current("nflverse_games")
         weather = _try_load_current("weather")
         line_movement = _try_diff_odds(ctx)
+        sos_by_position = {
+            position: df
+            for position, source_name in _SOS_SOURCE_BY_POSITION.items()
+            if (df := _try_load_current(source_name)) is not None
+        }
 
         result = build_edge_frame(
-            projections, salaries, games=games, weather=weather, line_movement=line_movement
+            projections,
+            salaries,
+            games=games,
+            weather=weather,
+            line_movement=line_movement,
+            sos_by_position=sos_by_position,
         )
         if result.unmatched_names:
             log.warning(
@@ -140,33 +173,62 @@ class EdgeSource(Source):
         meant "not pooled", not a real dropdown selection, and preserving
         the literal string "FALSE" forever would silently perpetuate a
         value that was never one of POOL_TYPE_OPTIONS. Confirmed live:
-        exactly this was found on the template's own EdgeRaw."""
+        exactly this was found on the template's own EdgeRaw.
+
+        Deliberately does NOT catch a broad `Exception` around the reads
+        below (a prior version did, "so a malformed/missing prior tab
+        can't block a sync") -- that also silently swallowed a real
+        Sheets API failure (a rate limit, mid-request network blip, etc.)
+        as if the tab were merely empty, which on a real sync silently
+        WIPED every Pool tick with no error and no warning (found live,
+        2026-09-16: a `dfs setup link-edge --force` immediately followed
+        by a second `dfs sync --only edge` lost two real ticks this way).
+        The two legitimate "nothing to preserve yet" cases -- tab doesn't
+        exist, or exists but has no `Id` column yet -- are both already
+        handled explicitly above/below with their own early return; a
+        real exception past those two checks means something is actually
+        wrong and should fail the sync loudly, the same "raise, don't
+        return partial data" contract this module's own docstring
+        already claims for itself.
+
+        Reads Id via `read_range_unformatted`, not `read_range` -- found
+        live the SAME day, a second, independent way this exact join
+        silently loses ticks: a plain formatted read bakes in whatever
+        number format Id's PHYSICAL column happens to carry, which can
+        turn a clean numeric Id into `"+44132966.0"` if that column
+        inherited a stale signed/decimal format left over from a
+        different field that used to sit at the same physical position
+        before an EdgeRaw reorder (`dfs sync` rewrites values, never
+        formatting). `post_upload` reads Id from a DIFFERENT physical
+        column (its position AFTER this sync's reorder), which may or may
+        not carry the same stale format -- when it doesn't, the two reads
+        of the "same" Id mangle differently and the join silently misses,
+        exactly what happened live re-syncing right after adding
+        `OppPosRank` to `EDGE_COLUMNS`. `_canonical_id` normalizes both
+        sides so this can't recur regardless of either column's format."""
         if not client.tab_exists(tab):
             return {}
-        try:
-            # Found by reading the sheet's OWN current header, never
-            # `_ID_COLUMN` -- that constant reflects EDGE_COLUMNS' TARGET
-            # order, which is exactly wrong here the moment that order
-            # changes: `pre_upload` runs BEFORE `write_tab` rewrites the
-            # tab to match, so the sheet still has Id at its OLD position
-            # at the instant this reads. Trusting the target position
-            # here silently harvested a real live-sheet incident: every
-            # Pool tick was captured as blank (the module-level constant
-            # pointed at whatever field used to sit at Id's NEW position
-            # under the OLD layout) and none were restored after the
-            # rewrite. See CONTRIBUTING.md's Phase 3 changelog entry.
-            header_rows = client.read_range(tab, "A1:1")
-            header = header_rows[0] if header_rows else []
-            if "Id" not in header:
-                return {}
-            id_col = column_letter(header.index("Id"))
-            ids = client.read_range(tab, f"{id_col}2:{id_col}{_LAST_ROW}")
-            ticks = client.read_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{_LAST_ROW}")
-        except Exception:  # noqa: BLE001 - a malformed/missing prior tab must not block a sync
+        # Found by reading the sheet's OWN current header, never
+        # `_ID_COLUMN` -- that constant reflects EDGE_COLUMNS' TARGET
+        # order, which is exactly wrong here the moment that order
+        # changes: `pre_upload` runs BEFORE `write_tab` rewrites the
+        # tab to match, so the sheet still has Id at its OLD position
+        # at the instant this reads. Trusting the target position
+        # here silently harvested a real live-sheet incident: every
+        # Pool tick was captured as blank (the module-level constant
+        # pointed at whatever field used to sit at Id's NEW position
+        # under the OLD layout) and none were restored after the
+        # rewrite. See CONTRIBUTING.md's Phase 3 changelog entry.
+        header_rows = client.read_range(tab, "A1:1")
+        header = header_rows[0] if header_rows else []
+        if "Id" not in header:
             return {}
+        id_col = column_letter(header.index("Id"))
+        ids = client.read_range_unformatted(tab, f"{id_col}2:{id_col}{_LAST_ROW}")
+        ticks = client.read_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{_LAST_ROW}")
         preserved: dict[str, str] = {}
         for i, id_row in enumerate(ids):
-            player_id = id_row[0].strip() if id_row and id_row[0] else ""
+            player_id = _canonical_id(id_row[0]) if id_row else ""
             if not player_id:
                 continue
             tick = ticks[i][0] if i < len(ticks) and ticks[i] else ""
@@ -195,7 +257,12 @@ class EdgeSource(Source):
         add-filters` restores the filter to its plain state after every
         sync; a person's sort/hide choice doesn't survive a sync anyway,
         since write_tab always rewrites the whole tab fresh. See
-        CONTRIBUTING.md's changelog."""
+        CONTRIBUTING.md's changelog.
+
+        Reads Id via `read_range_unformatted` + `_canonical_id`, same as
+        `pre_upload` -- see that method's own docstring for why a plain
+        formatted read of Id is exactly what let a real column reorder
+        silently break this join (twice, same day)."""
         preserved = preserved or {}
         last_row = len(df) + 1
         if last_row >= 2:
@@ -203,7 +270,7 @@ class EdgeSource(Source):
             client.set_dropdown_validation(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}", POOL_TYPE_OPTIONS)
         if not preserved:
             return
-        ids = client.read_range(tab, f"{_ID_COLUMN}2:{_ID_COLUMN}{last_row}")
-        restore = [[preserved.get(row[0].strip(), "")] if row and row[0] else [""] for row in ids]
+        ids = client.read_range_unformatted(tab, f"{_ID_COLUMN}2:{_ID_COLUMN}{last_row}")
+        restore = [[preserved.get(_canonical_id(row[0]), "")] if row else [""] for row in ids]
         if restore:
             client.update_range(tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{last_row}", restore)

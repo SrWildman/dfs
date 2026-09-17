@@ -1,9 +1,12 @@
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.sheet_columns import INTERNAL, MOVEMENT, WEATHER
 from dfs.sheet_links import (
     COLOR_SCALE_LINKED_COLUMNS,
     LINKED_EDGE_COLUMNS,
+    VEGAS_GROUP_COLUMNS,
     edge_lookup_formula,
     edge_row_hyperlink_formula,
+    group_lineups_columns,
     link_edge_columns,
     write_edge_row_links,
 )
@@ -22,6 +25,7 @@ class SpySheetsClient:
         self.color_scale_calls: list[tuple[str, str]] = []
         self.group_calls: list[tuple[str, str, str, bool]] = []
         self.clear_group_calls: list[str] = []
+        self.ensure_capacity_calls: list[tuple[str, int]] = []
 
     def read_range(self, tab_name: str, a1_range: str):
         assert a1_range == "A1:1", f"link_edge_columns should only ever read A1:1, got {a1_range!r}"
@@ -42,6 +46,9 @@ class SpySheetsClient:
     def tab_gid(self, tab_name):
         return 999
 
+    def ensure_column_capacity(self, tab_name, min_cols):
+        self.ensure_capacity_calls.append((tab_name, min_cols))
+
 
 def test_already_linked_columns_positions_never_move():
     # `dfs setup link-edge` writes VLOOKUP formulas into PlayerPoolRaw/
@@ -60,22 +67,27 @@ def test_already_linked_columns_positions_never_move():
     # every sheet it's been applied to.
     # Phase 3 reordered EDGE_COLUMNS into designed IDENTITY/DECISION/GAME/
     # WEATHER/MOVEMENT/INTERNAL zones (see derived.py) and expanded
-    # LINKED_EDGE_COLUMNS from 10 to 16 members (Id/OwnPct/ImpMove/
+    # LINKED_EDGE_COLUMNS from 10 to 16 members (Id/OwnPct/ImpliedMove/
     # TotMove/SpdMove/GameStart newly surfaced onto Player Pool/Lineups/
     # PlayerPoolRaw) -- that's fine, since `edge_lookup_formula` derives
     # each column's VLOOKUP index from its own position relative to Name,
     # not from LINKED_EDGE_COLUMNS being contiguous within EDGE_COLUMNS.
-    # This pins the NEW positions post-reorder; `link-edge` must be (and
-    # was) re-run on both sheets.
+    # Phase 5 (2026-09-16) pulled CeilPct/OwnPct out of the tail INTERTAL
+    # zone and next to Ceiling/CeilVal and ProjOwn respectively (so
+    # EdgeRaw's own position-fair percentile columns are visible while
+    # filtering by position, instead of requiring a scroll past
+    # Stadium..Id first) -- their EDGE_COLUMNS index dropped a lot (25/26
+    # -> 9/11) while everything from Leverage onward shifted +2. Then a
+    # native `OppPosRank` was added right after `GameEnv` (Sam: "all data
+    # should be in edge raw") -- everything from `Stadium` onward shifted
+    # a further +1. This pins the NEW positions; `link-edge` must be (and
+    # was) re-run on both sheets after each of these reorders.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         8,
-        10,
-        11,
         12,
-        15,
-        16,
+        13,
+        14,
         17,
-        18,
         19,
         20,
         21,
@@ -84,22 +96,26 @@ def test_already_linked_columns_positions_never_move():
         24,
         25,
         26,
+        9,
+        11,
+        27,
     ]
 
 
 def test_edge_lookup_formula_uses_correct_range_and_column_index():
-    # Leverage sits at EDGE_COLUMNS index 10 post Phase-3-reorder; within
-    # the Name-anchored range that's still VLOOKUP column 11 (1-based,
-    # relative to Name at index 0) regardless of EDGE_DATA_OFFSET (a
-    # uniform shift cancels out of a *relative* position) -- but the
+    # Leverage sits at EDGE_COLUMNS index 12 post Phase-5 CeilPct/OwnPct
+    # move (was 10 post Phase-3-reorder; CeilPct/OwnPct pulled in ahead of
+    # it add +2); within the Name-anchored range that's VLOOKUP column 13
+    # (1-based, relative to Name at index 0) regardless of EDGE_DATA_OFFSET
+    # (a uniform shift cancels out of a *relative* position) -- but the
     # range's own start/end letters do shift by that offset, since Pool
     # occupies column A ahead of EDGE_COLUMNS. Matches what
     # `sheet_style.polish_edge` reports for the same columns.
-    assert EDGE_COLUMNS.index("Leverage") == 10
+    assert EDGE_COLUMNS.index("Leverage") == 12
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
     end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},11,false))'
+        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},13,false))'
     )
 
 
@@ -132,6 +148,18 @@ def test_link_edge_columns_writes_header_at_first_free_column():
     # LINKED_EDGE_COLUMNS' own order -- one contiguous run, E through T.
     header_call = next(c for c in client.update_calls if c[1] == "E1:T1")
     assert header_call[2] == [LINKED_EDGE_COLUMNS]
+
+
+def test_link_edge_columns_grows_grid_capacity_before_appending():
+    # Live bug (Phase 5F): a tab already at its provisioned grid width --
+    # e.g. fully linked already, with one name suddenly "missing" because
+    # a rename changed what Python looks for -- raised "exceeds grid
+    # limits" the instant this tried to write past the current column
+    # count, since a sheet's grid width doesn't auto-grow for a write.
+    client = SpySheetsClient(header_row=["Name", "Pos.", "Team", "DK Sal"])
+    link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
+
+    assert ("Player Pool", 4 + len(LINKED_EDGE_COLUMNS)) in client.ensure_capacity_calls
 
 
 def test_link_edge_columns_fills_every_row_in_every_block():
@@ -233,7 +261,7 @@ def test_link_edge_columns_applies_color_scale_to_three_columns_only():
 
 
 def test_link_edge_columns_groups_and_collapses_weather_movement_and_internal():
-    # 3.3: WEATHER (Stadium/Roof/Wind), MOVEMENT (ImpMove/TotMove/SpdMove/
+    # 3.3: WEATHER (Stadium/Roof/Wind), MOVEMENT (ImpliedMove/TotMove/SpdMove/
     # GameStart) and INTERNAL (Id/CeilPct/OwnPct/LevBasis) all collapse by
     # default -- the decision columns before them (CeilVal/Leverage/Avail/
     # Flag/GameEnv) stay ungrouped and always visible. These three zones
@@ -325,6 +353,47 @@ def test_write_edge_row_links_writes_every_row_in_every_block():
     ranges_written = {a1 for _, a1, _ in client.update_calls}
     assert ranges_written == {"B2:B3", "B5:B6"}
     assert "4 row(s)" in result
+
+
+class GroupSpyClient(SpySheetsClient):
+    def read_range(self, tab_name: str, a1_range: str):
+        assert a1_range == f"A{self._header_row}:{self._header_row}"
+        return [self.header_row] if self.header_row else []
+
+
+def test_group_lineups_columns_groups_vegas_and_merges_weather_movement_internal():
+    from dfs.sheet_columns import LINEUPS_COLUMN_ORDER
+
+    client = GroupSpyClient(header_row=list(LINEUPS_COLUMN_ORDER))
+    client._header_row = 11
+
+    result = group_lineups_columns(client, "Lineups", header_row=11)
+
+    assert client.clear_group_calls == ["Lineups"]
+    vegas_start = column_letter(min(LINEUPS_COLUMN_ORDER.index(n) for n in VEGAS_GROUP_COLUMNS))
+    vegas_end = column_letter(max(LINEUPS_COLUMN_ORDER.index(n) for n in VEGAS_GROUP_COLUMNS))
+    assert (vegas_start, vegas_end) in [(a, b) for _, a, b, _ in client.group_calls]
+
+    merged_indices = sorted(LINEUPS_COLUMN_ORDER.index(n) for n in (*WEATHER, *MOVEMENT, *INTERNAL))
+    merged_start = column_letter(merged_indices[0])
+    merged_end = column_letter(merged_indices[-1])
+    assert (merged_start, merged_end) in [(a, b) for _, a, b, _ in client.group_calls]
+
+    # Vegas and the merged tail must NOT be adjacent -- if they were,
+    # Sheets would silently fold them into one group instead of two
+    # independently collapsible ones (see the function's own docstring).
+    assert column_letter(LINEUPS_COLUMN_ORDER.index(VEGAS_GROUP_COLUMNS[-1]) + 1) != merged_start
+    assert "2 column group(s)" in result
+
+
+def test_group_lineups_columns_skips_when_header_empty():
+    client = GroupSpyClient(header_row=[])
+    client._header_row = 11
+
+    result = group_lineups_columns(client, "Lineups", header_row=11)
+
+    assert "empty header row" in result
+    assert client.clear_group_calls == []
 
 
 def test_write_edge_row_links_honors_a_non_default_header_row():

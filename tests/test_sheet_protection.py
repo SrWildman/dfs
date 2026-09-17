@@ -1,4 +1,5 @@
 from dfs.sheet_protection import FULLY_PROTECTED_TABS, protect_workbook
+from dfs.sheet_views import LINEUP_COUNT_CELL
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
 
 
@@ -45,23 +46,23 @@ def test_clears_before_protecting_every_tab():
         assert client.clear_calls.index(tab) < len(client.clear_calls)
 
 
-def test_exposure_leaves_target_column_unprotected():
+def test_exposure_leaves_target_and_lineup_count_cell_unprotected():
     client = FakeProtectionClient()
     protect_workbook(client, lineups_tab="Lineups")
 
     _tab, kwargs = next(c for c in client.protect_calls if c[0] == "Exposure")
-    assert kwargs["unprotected_ranges"] == ["F:F"]
+    assert kwargs["unprotected_ranges"] == ["F:F", LINEUP_COUNT_CELL]
 
 
-def test_lineups_leaves_deck_controls_and_every_block_name_column_unprotected():
+def test_lineups_leaves_every_block_name_column_unprotected():
     client = FakeProtectionClient()
     protect_workbook(client, lineups_tab="Lineups")
 
     _tab, kwargs = next(c for c in client.protect_calls if c[0] == "Lineups")
     unprotected = kwargs["unprotected_ranges"]
-    assert "B1" in unprotected
-    assert "D1" in unprotected
-    assert "F1" in unprotected
+    # No more deck controls (B1/D1/F1) to carve out -- the pool deck was
+    # removed entirely; only each block's own Name column stays typeable.
+    assert "B1" not in unprotected
     for start, end in LINEUPS_NAME_BLOCKS:
         assert f"A{start}:A{end}" in unprotected
 

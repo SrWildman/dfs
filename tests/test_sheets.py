@@ -379,6 +379,12 @@ def test_read_formula_returns_the_requested_rectangle(cfg, monkeypatch, tmp_path
     assert client.read_formula("T", "A1:B1") == [["=SUM(A1:A2)", "plain"]]
 
 
+def test_read_range_unformatted_returns_the_requested_rectangle(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["A", "B"], [44132966.0, "GPP"]])
+    assert client.read_range_unformatted("T", "A2:B2") == [[44132966.0, "GPP"]]
+
+
 def test_batch_read_ranges_reads_multiple_tabs_in_request_order(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T1"] = FakeWorksheet("T1", rows=[["a"], ["b"]])
@@ -786,6 +792,16 @@ def test_delete_rows_issues_a_delete_dimension_request(cfg, monkeypatch, tmp_pat
     assert (r["dimension"], r["startIndex"], r["endIndex"]) == ("ROWS", 9, 13)
 
 
+def test_delete_columns_issues_a_delete_dimension_request(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["existing"]])
+    client.delete_columns("T", at_index=5, count=2)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.delete_dimension_calls) == 1
+    r = ws.delete_dimension_calls[0]["range"]
+    assert (r["dimension"], r["startIndex"], r["endIndex"]) == ("COLUMNS", 5, 7)
+
+
 def test_set_dropdown_validation_targets_only_the_given_cell(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
@@ -808,6 +824,22 @@ def test_set_checkbox_validation_uses_boolean_condition(cfg, monkeypatch, tmp_pa
     assert call["range"]["startColumnIndex"] == 22  # column W, 0-indexed
     assert call["rule"]["condition"]["type"] == "BOOLEAN"
     assert call["rule"]["strict"] is True
+
+
+def test_set_number_range_validation_uses_number_between_condition(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.set_number_range_validation("T", "H1", minimum=1, maximum=20)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.data_validation_calls) == 1
+    call = ws.data_validation_calls[0]
+    assert call["range"]["startColumnIndex"] == 7  # column H, 0-indexed
+    assert call["rule"]["condition"]["type"] == "NUMBER_BETWEEN"
+    assert call["rule"]["condition"]["values"] == [
+        {"userEnteredValue": "1"},
+        {"userEnteredValue": "20"},
+    ]
+    assert call["rule"]["strict"] is False  # warn, not reject -- caller clamps in its own formula
 
 
 def test_clear_data_validation_sends_no_rule(cfg, monkeypatch, tmp_path):

@@ -1,6 +1,8 @@
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_views import (
+    DEFAULT_LINEUP_COUNT,
     EXPOSURE_TAB,
+    LINEUP_COUNT_CELL,
     MOVEMENT_TAB,
     _col,
     _rng,
@@ -40,16 +42,23 @@ class FakeSheetsClient:
     logic -- not Sheets' recalculation -- is what's under test here.
     """
 
-    def __init__(self, *, existing_rows: list[list[str]], post_write_names: list[str]):
+    def __init__(
+        self, *, existing_rows: list[list[str]], post_write_names: list[str], existing_lineup_count: str = ""
+    ):
         self.existing_rows = existing_rows
         self.post_write_names = post_write_names
+        self.existing_lineup_count = existing_lineup_count
         self.write_tab_calls: list[tuple[str, list[list]]] = []
         self.update_calls: list[tuple[str, str, list[list]]] = []
+        self.note_calls: list[tuple[str, str]] = []
+        self.number_range_validation_calls: list[tuple[str, int, int]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
 
     def read_range(self, tab_name: str, a1_range: str):
+        if a1_range == LINEUP_COUNT_CELL:
+            return [[self.existing_lineup_count]] if self.existing_lineup_count else []
         if a1_range.startswith("A2:F"):
             return self.existing_rows
         if a1_range.startswith("A2:A"):
@@ -62,6 +71,14 @@ class FakeSheetsClient:
 
     def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
         self.update_calls.append((tab_name, a1_range, rows))
+
+    def set_note(self, tab_name: str, cell_a1: str, note: str) -> None:
+        self.note_calls.append((cell_a1, note))
+
+    def set_number_range_validation(
+        self, tab_name: str, a1_range: str, *, minimum: int, maximum: int, strict: bool = False
+    ) -> None:
+        self.number_range_validation_calls.append((a1_range, minimum, maximum))
 
 
 def test_col_and_rng_use_edge_columns_positions():
@@ -114,6 +131,50 @@ def test_build_exposure_preserves_typed_targets_keyed_by_name_across_rebuild():
     assert restored[2] == [""]  # Brand New Guy never had a target
 
 
+def test_build_exposure_divides_by_lineup_count_cell_not_capacity():
+    # Phase 5A: the old bug divided by lineup_count (capacity, 20) even
+    # though Sam builds far fewer lineups than that -- the live divisor
+    # must be Exposure's own H1 (LINEUP_COUNT_CELL), with lineup_count
+    # only as the fallback for a blank/zero H1.
+    client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    tab_name, rows = client.write_tab_calls[0]
+    row2_exposure = rows[1][4]
+    assert "$H$1" in row2_exposure
+    assert "20" in row2_exposure  # capacity fallback still present
+    row3_exposure = rows[2][4]
+    assert "$H$1" in row3_exposure
+
+
+def test_build_exposure_defaults_lineup_count_cell_when_blank():
+    client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    tab_name, rows = client.write_tab_calls[0]
+    assert rows[0][7] == str(DEFAULT_LINEUP_COUNT)
+
+
+def test_build_exposure_preserves_typed_lineup_count_across_rebuild():
+    client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"], existing_lineup_count="4")
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    tab_name, rows = client.write_tab_calls[0]
+    assert rows[0][7] == "4"
+
+
+def test_build_exposure_sets_note_and_validation_on_lineup_count_cell():
+    client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    assert client.note_calls and client.note_calls[0][0] == LINEUP_COUNT_CELL
+    assert client.number_range_validation_calls == [(LINEUP_COUNT_CELL, 1, 20)]
+
+
 def test_build_exposure_skips_restore_when_nothing_was_typed_before():
     client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
 
@@ -123,30 +184,9 @@ def test_build_exposure_skips_restore_when_nothing_was_typed_before():
     assert client.update_calls == []  # nothing to restore, so no F-column write at all
 
 
-def test_build_exposure_slots_filled_excludes_rows_above_lineups_data_start_row():
-    # Once the pool deck sits above Lineups' header (sheet_pool_deck.py),
-    # column A rows 1-10 hold the deck's controls and real player names
-    # pulled from the pool for browsing -- counting the whole column would
-    # miscount those as filled roster slots (or worse, as rostered
-    # players) via the "?*" wildcard. lineups_data_start_row cuts them out.
-    client = FakeSheetsClient(existing_rows=[], post_write_names=[])
-
-    build_exposure(
-        client,
-        edge_tab="EdgeRaw",
-        lineups_tab="Lineups",
-        lineup_count=20,
-        lineups_data_start_row=11,
-    )
-
-    tab_name, rows = client.write_tab_calls[0]
-    header = rows[0]
-    assert header[8] == "Slots filled"
-    assert "Lineups!$A$11:$A" in header[9]
-    assert "Lineups!$A$11:$A" in rows[1][3]  # per-row COUNTIF also respects it
-
-
-def test_build_exposure_defaults_to_whole_column_when_no_pool_deck_present():
+def test_build_exposure_counts_the_whole_lineups_column():
+    # No pool deck sits above Lineups any more (removed entirely) -- the
+    # whole column is always the right range, no start-row parameter needed.
     client = FakeSheetsClient(existing_rows=[], post_write_names=[])
 
     build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
@@ -156,7 +196,7 @@ def test_build_exposure_defaults_to_whole_column_when_no_pool_deck_present():
 
 
 def test_build_movement_uses_edge_columns_positions_for_impmove_and_gamestart():
-    assert "ImpMove" in EDGE_COLUMNS and "GameStart" in EDGE_COLUMNS
+    assert "ImpliedMove" in EDGE_COLUMNS and "GameStart" in EDGE_COLUMNS
 
     class NoopClient:
         def write_tab(self, tab_name, rows, **_kwargs):
@@ -169,7 +209,7 @@ def test_build_movement_uses_edge_columns_positions_for_impmove_and_gamestart():
     tab_name, rows = client.written
     assert tab_name == MOVEMENT_TAB
     body = rows[-1][0]
-    assert f"${_col('ImpMove')}$2:${_col('ImpMove')}" in body
+    assert f"${_col('ImpliedMove')}$2:${_col('ImpliedMove')}" in body
     assert f"${_col('GameStart')}$2:${_col('GameStart')}" in body
 
 
@@ -221,9 +261,15 @@ def test_exposure_header_row_matches_style_exposures_column_assumptions():
     assert header[6] == "vs Target"  # style_exposure chips G on over/under
 
 
-def test_movement_header_row_matches_style_movements_column_assumptions():
+def test_movement_header_row_has_the_names_style_movement_looks_up():
+    # style_movement (sheet_style.py) is header-NAME-driven now (Section
+    # F), not a hardcoded A:E range -- this just confirms build_movement
+    # still produces the names it looks for, wherever they land.
     client = _CapturingClient()
     build_movement(client, edge_tab="EdgeRaw")
-    header = client.rows[2]  # row 3: style_movement's _HEADER_FMT range
-    assert header[2] == "Line Move"  # style_movement colour-scales C
-    assert header[4] == "Flag"  # style_movement chips E
+    header = client.rows[2]  # row 3
+    assert "Implied move" in header
+    assert "Total move" in header
+    assert "Spread move" in header
+    assert "Flag" in header
+    assert "Line Move" not in header  # Section F: renamed away from the ambiguous old label
