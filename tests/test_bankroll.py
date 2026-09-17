@@ -6,6 +6,7 @@ import pytest
 from dfs.bankroll import (
     CASH_PAYOUT_RATIO_HIGH,
     CASH_PAYOUT_RATIO_LOW,
+    backfill_entry_keys,
     classify_entry,
     parse_contest_history,
     sync_bucket,
@@ -200,3 +201,80 @@ def test_sync_bucket_never_writes_beyond_column_h(table_cfg):
     sync_bucket(client, "Bankroll", table_cfg, entries, "cash")
     row = client.cells["Bankroll"][17]
     assert set(row.keys()) <= {"A", "B", "C", "D", "E", "F", "G", "H", "L"}
+
+
+# Confirmed live (2026-09-16): a real synced sheet had zero dedupe keys
+# despite `sync_bucket` supposedly writing one per row -- a later sync of
+# overlapping contest history re-appended those rows as duplicates, since
+# `sync_bucket`'s own dedupe can only ever check the key column.
+# `backfill_entry_keys` repairs existing keyless rows from a CSV export.
+
+
+def test_backfill_entry_keys_fills_a_blank_key_from_the_one_matching_entry(table_cfg):
+    client = FakeSheetsClient()
+    e = _entry(
+        entry_key="E1",
+        entry="Contest A",
+        place=5,
+        entries=100,
+        places_paid=50,
+        entry_fee=Decimal("5"),
+        prize_pool=Decimal("400"),
+    )
+    sync_bucket(client, "Bankroll", table_cfg, [e], "cash")
+    del client.cells["Bankroll"][17]["L"]  # simulate a legacy row: key never got written
+
+    result = backfill_entry_keys(client, "Bankroll", table_cfg, [e], "cash")
+
+    assert result.backfilled == [(17, "E1")]
+    assert result.ambiguous_rows == []
+    assert result.unmatched_rows == []
+    assert client.cells["Bankroll"][17]["L"] == "E1"
+
+
+def test_backfill_entry_keys_never_touches_an_already_keyed_row(table_cfg):
+    client = FakeSheetsClient()
+    e = _entry(entry_key="E1", entry="Contest A", place=5, entries=100, places_paid=50)
+    sync_bucket(client, "Bankroll", table_cfg, [e], "cash")
+
+    result = backfill_entry_keys(client, "Bankroll", table_cfg, [e], "cash")
+
+    assert result.backfilled == []
+    assert client.cells["Bankroll"][17]["L"] == "E1"
+
+
+def test_backfill_entry_keys_skips_a_row_matching_zero_entries(table_cfg):
+    client = FakeSheetsClient()
+    e = _entry(entry_key="E1", entry="Contest A", place=5, entries=100, places_paid=50)
+    sync_bucket(client, "Bankroll", table_cfg, [e], "cash")
+    del client.cells["Bankroll"][17]["L"]
+
+    other = _entry(entry_key="E2", entry="A Totally Different Contest", place=99)
+    result = backfill_entry_keys(client, "Bankroll", table_cfg, [other], "cash")
+
+    assert result.backfilled == []
+    assert result.unmatched_rows == [17]
+    assert "L" not in client.cells["Bankroll"][17]
+
+
+def test_backfill_entry_keys_skips_a_row_matching_multiple_entries(table_cfg):
+    client = FakeSheetsClient()
+    e = _entry(
+        entry_key="E1", entry="Contest A", place=5, entries=100, places_paid=50, entry_fee=Decimal("5")
+    )
+    sync_bucket(client, "Bankroll", table_cfg, [e], "cash")
+    del client.cells["Bankroll"][17]["L"]
+
+    # Two distinct CSV entries share the exact same signature the row
+    # would match on -- ambiguous, must not guess.
+    dupe1 = _entry(
+        entry_key="E1", entry="Contest A", place=5, entries=100, places_paid=50, entry_fee=Decimal("5")
+    )
+    dupe2 = _entry(
+        entry_key="E2", entry="Contest A", place=5, entries=100, places_paid=50, entry_fee=Decimal("5")
+    )
+    result = backfill_entry_keys(client, "Bankroll", table_cfg, [dupe1, dupe2], "cash")
+
+    assert result.backfilled == []
+    assert result.ambiguous_rows == [17]
+    assert "L" not in client.cells["Bankroll"][17]

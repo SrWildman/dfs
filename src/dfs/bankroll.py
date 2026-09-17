@@ -162,3 +162,94 @@ def sync_bucket(
     return BucketSyncResult(
         bucket=bucket, written_entries=to_write, already_synced=already_synced, skipped_full=skipped_full
     )
+
+
+def _money_value(s: str) -> Decimal:
+    s = s.replace("$", "").replace(",", "").strip()
+    try:
+        return Decimal(s) if s else Decimal("0")
+    except InvalidOperation:
+        return Decimal("0")
+
+
+def _int_value(s: str) -> int | None:
+    s = s.replace(",", "").strip()
+    return int(s) if s else None
+
+
+def _row_signature(row: list[str]) -> tuple:
+    """A sheet row's identity, from fields that survive Sheets' own
+    DISPLAY formatting (comma-grouped integers, `$`-prefixed currency)
+    round-tripping through `Decimal`/`int` cleanly -- unlike `Points`
+    (one decimal place shown, more precision stored) or `Winnings` (a
+    sum of two source fields), neither used here since a formatted
+    round-trip can't be trusted to reproduce the original value exactly.
+    """
+    padded = row + [""] * (8 - len(row))
+    return (
+        padded[0].strip(),
+        _int_value(padded[1]),
+        _int_value(padded[4]),
+        _money_value(padded[5]),
+        _money_value(padded[6]),
+        _int_value(padded[7]),
+    )
+
+
+def _entry_signature(e: ContestEntry) -> tuple:
+    return (e.entry.strip(), e.place, e.contest_entries, e.entry_fee, e.prize_pool, e.places_paid)
+
+
+@dataclass
+class BackfillResult:
+    bucket: str
+    backfilled: list[tuple[int, str]] = field(default_factory=list)  # (row, entry_key)
+    ambiguous_rows: list[int] = field(default_factory=list)
+    unmatched_rows: list[int] = field(default_factory=list)
+
+
+def backfill_entry_keys(
+    client: SheetsClient, tab: str, table_cfg: EntryTableConfig, entries: list[ContestEntry], bucket: str
+) -> BackfillResult:
+    """One-time repair for rows written before the dedupe-key column
+    existed (or by some path that skipped it) -- confirmed live: a real
+    synced sheet had zero entries in its `entry_key_column` despite
+    `sync_bucket` supposedly writing one per row, and a later sync of
+    overlapping DK contest history re-appended those same entries as if
+    they were new, since `sync_bucket`'s dedupe can only ever check the
+    key column. This never rewrites A-H (the row's own data) or an
+    already-populated key -- only fills a genuinely blank key cell, and
+    only when exactly one CSV entry's `_entry_signature` matches that
+    row's `_row_signature`. A row matching zero or multiple entries is
+    left alone and reported, never guessed.
+    """
+    key_col = table_cfg.entry_key_column
+    rows = client.read_range(tab, f"A{table_cfg.first_row}:H{table_cfg.last_row}")
+    keys = client.read_range(tab, f"{key_col}{table_cfg.first_row}:{key_col}{table_cfg.last_row}")
+
+    by_signature: dict[tuple, list[ContestEntry]] = {}
+    for e in entries:
+        by_signature.setdefault(_entry_signature(e), []).append(e)
+
+    result = BackfillResult(bucket=bucket)
+    to_write: list[tuple[int, str]] = []
+    for i, row in enumerate(rows):
+        if not row or not row[0].strip():
+            continue
+        row_num = table_cfg.first_row + i
+        existing_key = keys[i][0] if i < len(keys) and keys[i] else ""
+        if existing_key.strip():
+            continue
+        candidates = by_signature.get(_row_signature(row), [])
+        if len(candidates) == 1:
+            to_write.append((row_num, candidates[0].entry_key))
+        elif len(candidates) > 1:
+            result.ambiguous_rows.append(row_num)
+        else:
+            result.unmatched_rows.append(row_num)
+
+    for row_num, key in to_write:
+        client.update_range(tab, f"{key_col}{row_num}:{key_col}{row_num}", [[key]])
+        result.backfilled.append((row_num, key))
+
+    return result
