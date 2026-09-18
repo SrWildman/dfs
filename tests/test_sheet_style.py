@@ -237,22 +237,34 @@ class FakeEdgeClient:
     guards against -- 8 nested groups from repeated `dfs setup polish`
     runs, found live)."""
 
-    def __init__(self, grouped_column_indices: set[int] | None = None):
+    def __init__(
+        self, grouped_column_indices: set[int] | None = None, position_rows: list[list[str]] | None = None
+    ):
         self.calls: list[str] = []
         self.clear_group_calls: list[str] = []
         self.group_calls: list[tuple[str, str, str, bool]] = []
+        self.group_control_before_calls: list[str] = []
         self.banding_calls: list[tuple] = []
         self.color_scale_calls: list[tuple[str, dict]] = []
+        self.multi_range_color_scale_calls: list[dict] = []
         self.boolean_rule_calls: list[tuple[str, dict]] = []
         self.format_range_calls: list[tuple[str, dict]] = []
         self.hide_calls: list[tuple[str, str, bool]] = []
         self._grouped_column_indices = grouped_column_indices or set()
+        self._position_rows = position_rows if position_rows is not None else []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
 
     def get_grouped_column_indices(self, tab_name: str) -> set[int]:
         return self._grouped_column_indices
+
+    def read_range(self, tab_name: str, a1_range: str):
+        return self._position_rows
+
+    def add_color_scales_multi_range(self, tab_name: str, specs: list[dict]) -> None:
+        self.calls.append("add_color_scales_multi_range")
+        self.multi_range_color_scale_calls.extend(specs)
 
     def clear_conditional_formats(
         self, tab_name: str, *, column: str | None = None, row_range: tuple[int, int] | None = None
@@ -289,6 +301,10 @@ class FakeEdgeClient:
         self.calls.append("clear_column_groups")
         self.clear_group_calls.append(tab_name)
 
+    def set_column_group_control_before(self, tab_name: str) -> None:
+        self.calls.append("set_column_group_control_before")
+        self.group_control_before_calls.append(tab_name)
+
     def hide_columns(
         self, tab_name: str, first_col_a1: str, last_col_a1: str, *, hidden: bool = True
     ) -> None:
@@ -312,6 +328,21 @@ def test_polish_edge_clears_column_groups_before_re_adding_them():
     clear_index = client.calls.index("clear_column_groups")
     first_group_index = client.calls.index("group_columns")
     assert clear_index < first_group_index
+
+
+def test_polish_edge_sets_column_group_control_before_the_group():
+    # 2026-09-18: Sheets' default toggle placement (after the group) reads
+    # as belonging to the *next* zone's label under this tab's
+    # label-before-zone design -- see set_column_group_control_before's
+    # own docstring. Must run before any group is added, same ordering
+    # requirement as clear_column_groups.
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    assert client.group_control_before_calls == ["EdgeRaw"]
+    control_index = client.calls.index("set_column_group_control_before")
+    first_group_index = client.calls.index("group_columns")
+    assert control_index < first_group_index
 
 
 def test_polish_edge_groups_game_through_weather_collapsed_by_default():
@@ -412,6 +443,33 @@ def test_polish_edge_scales_ten_columns_skipping_raw_player_metrics():
     polish_edge(client, "EdgeRaw")
 
     assert len(client.color_scale_calls) == 10
+
+
+def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
+    # Sam, 2026-09-18: filtering EdgeRaw to a position and sorting by a raw
+    # stat should let him spot outliers -- "everything being white numbers
+    # makes that very hard." EdgeRaw isn't grouped into position blocks
+    # (it's one flat list sorted by Leverage/CeilPct), so a position's rows
+    # are scattered non-contiguously -- verified live that one gradient
+    # rule's `ranges` can hold multiple non-contiguous GridRanges with a
+    # shared min/max computed only over their union.
+    position_rows = [["QB"], ["RB"], ["QB"], ["WR"]]  # rows 2, 3, 4, 5
+    client = FakeEdgeClient(position_rows=position_rows)
+    polish_edge(client, "EdgeRaw")
+
+    # 4 EDGE_UNSCALED_PLAYER_METRICS x 3 distinct positions (QB, RB, WR).
+    assert len(client.multi_range_color_scale_calls) == 12
+
+    proj_pts_col = _edge_letter("ProjPts")
+    qb_spec = next(
+        spec
+        for spec in client.multi_range_color_scale_calls
+        if spec["a1_ranges"][0].startswith(f"{proj_pts_col}2")
+    )
+    # QB occupies rows 2 and 4 -- non-contiguous, so two separate 1-row
+    # ranges, not one run spanning 2-4 (which would wrongly include RB's
+    # own row 3).
+    assert qb_spec["a1_ranges"] == [f"{proj_pts_col}2:{proj_pts_col}2", f"{proj_pts_col}4:{proj_pts_col}4"]
 
 
 def test_polish_edge_move_and_spread_scales_are_diverging_at_zero():

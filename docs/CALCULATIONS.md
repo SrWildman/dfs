@@ -55,6 +55,35 @@ populate `Ceiling` for every player (roughly 40-60% coverage depending on
 the week), and a blank is left blank rather than treated as zero, since a
 missing ceiling isn't the same claim as "this player has no ceiling."
 
+## Per-position highlighting (ProjPts, Val, Ceiling, CeilVal)
+
+These four are `derived.EDGE_UNSCALED_PLAYER_METRICS` -- deliberately
+excluded from EdgeRaw's ordinary whole-tab colour scales
+(`sheet_style.FIELD_COLOR_SCALES`), since a flat scale across every
+position at once is misleading (a QB's real `ProjPts` and a DST's aren't
+comparable). Instead, `sheet_style.apply_edge_position_scales` builds one
+3-point (red -> yellow -> green) gradient rule per (metric, position)
+pair: reads `Position` once, groups EdgeRaw's data rows by that value,
+and for each group writes a Sheets conditional-format rule whose
+`ranges` is that position's rows only (merged into contiguous runs
+first) -- so a QB's cells are scaled only against other QBs' cells in
+that same column, independent of every other position.
+
+This relies on a single gradient rule's `ranges` accepting multiple
+non-contiguous `GridRange`s with one min/mid/max computed over their
+union -- confirmed empirically against the template's Scratch tab before
+being trusted (two interleaved fake "positions" with very different
+magnitudes; only one's ranges were included in the rule, and only that
+one's cells picked up the gradient). `SheetsClient.add_color_scales_
+multi_range` is the primitive; `EDGE_COLUMN_GROUPS`/Phase 4's
+`apply_grouped_color_scales` couldn't be reused here since that
+mechanism needs each group to already be one CONTIGUOUS row range, and
+EdgeRaw's rows are sorted by `Leverage`, not grouped by position.
+
+`Salary`/`DK Sal` are never colour-scaled anywhere on any tab -- a
+constraint on a lineup, not a quality worth ranking; colouring it would
+imply cheap is inherently good.
+
 ## CeilPct
 
 This player's `Ceiling` percentile rank **within their position** (QB vs

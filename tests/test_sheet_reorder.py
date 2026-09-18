@@ -67,6 +67,9 @@ class SpySheetsClient:
     def clear_column_groups(self, tab_name):
         pass
 
+    def set_column_group_control_before(self, tab_name):
+        pass
+
 
 def test_provision_missing_columns_creates_nothing_already_present():
     client = SpySheetsClient(header_row=["A", "B", "C"])

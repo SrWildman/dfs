@@ -830,6 +830,101 @@ columns_already_inside_a_group` in `test_sheet_style.py`) pin both halves
 of the fix: the reset unhides what it should, and never touches what a
 group already owns.
 
+## Per-position raw-metric highlighting on EdgeRaw (2026-09-18)
+
+**The ask.** Sam's actual workflow: filter EdgeRaw to a position or two,
+sort by `ProjPts`/`Val`/`Ceiling`/`CeilVal`/`Salary`, and look for
+outliers. Every one of those columns rendered as plain white numbers --
+`EDGE_UNSCALED_PLAYER_METRICS` (`ProjPts`, `Ceiling`, `Val`, `CeilVal`)
+had been deliberately excluded from the flat whole-tab colour scale
+(`FIELD_COLOR_SCALES`) since a QB's real 27 points and a DST's real 10
+points aren't comparable on one scale -- but "excluded" had never been
+followed up with a real per-position alternative, so those four columns
+just sat uncoloured. `Salary`/`DK Sal` stay deliberately unscaled
+everywhere, unchanged by this work -- a constraint, not a quality;
+colouring it would imply cheap is good.
+
+**Why not a grouped-tab scale (Phase 4's own mechanism).** Phase 4's
+`apply_grouped_color_scales` already independently rescales the SAME
+column across multiple contiguous row blocks (used for Player Pool/
+Lineups, which are laid out as literal per-position blocks). EdgeRaw
+isn't laid out that way -- it's one flat list sorted by `Leverage`, every
+position interleaved row by row -- so "QB's own rows" is a scattered set
+of row indices, not one contiguous range. Never verified until this
+session whether a single gradient rule's `ranges` field even accepts
+multiple non-contiguous `GridRange`s with one shared min/max computed
+over their union. Tested for real on the template's Scratch tab
+(`scratchpad/test_multirange_gradient.py`, two interleaved "positions"
+with wildly different magnitudes, 10-50 vs 1000-5000): confirmed a
+single rule's `ranges` list DOES accept multiple disjoint ranges, and
+min/mid/max are computed over their union only, completely independent
+of every other cell on the sheet. That's the only mechanism that can
+scope a gradient to "just the QB rows" when those rows aren't contiguous.
+
+**The fix.** New `sheets.SheetsClient.add_color_scales_multi_range`
+(list of specs, each spec's `a1_ranges` --plural-- becoming one rule's
+`ranges` list; one batchUpdate for every spec) and new
+`sheet_style.apply_edge_position_scales`: reads the `Position` column
+once, buckets data rows by position value, then for each of the four
+unscaled metrics builds one 3-point gradient rule per position, its
+`ranges` merged into contiguous runs first (`_merge_contiguous`) to keep
+the request small. Called from `polish_edge` right after
+`apply_field_color_scales`; its own return count feeds `polish_edge`'s
+summary string ("N per-position scale(s)").
+
+**Verifying it actually worked -- a real dead end.** `polish_edge`
+reported success (20 rules applied) but a `get_cell_formats` read of
+`ProjPts` showed no background colour at all on every sampled row.
+Turned out to be a bug in the VERIFICATION, not the feature:
+`get_cell_formats` reads `userEnteredFormat`, which conditional-format
+colour scales never populate -- they're a computed overlay that only
+ever shows up in `effectiveFormat`. Re-reading with
+`fields: "...effectiveFormat(backgroundColor)"` (the same field
+`test_multirange_gradient.py` already used) showed real, distinct
+per-row colours immediately. Confirmed by directly listing the sheet's
+`conditionalFormats` metadata too: 20 real `gradientRule` entries exist,
+each scoped to one position's rows in one metric column. A screenshot of
+the template's EdgeRaw tab confirmed it visually as well -- colours vary
+sensibly within a position even with positions interleaved by the
+Leverage sort. Lesson for next time a colour-scale write needs
+verifying: always read `effectiveFormat`, never `userEnteredFormat`.
+
+Applied to the template first, verified (`dfs doctor`/
+`dfs setup audit-style` clean, screenshot), then to the live sheet the
+same way. Tests: `test_polish_edge_scales_raw_metrics_per_position_via_
+multi_range_rules` in `test_sheet_style.py`;
+`test_add_color_scales_multi_range_*` in `test_sheets.py`.
+
+## Column-group toggle position, EdgeRaw + linked tabs (2026-09-18)
+
+**The bug.** Sam looked at the live sheet after the zone-label rollout
+and flagged that the collapsed-group `+` toggles looked like they
+belonged to the wrong zone -- e.g. the toggle that expands GAME's own
+hidden columns rendered floating in front of `CEIL`'s label instead of
+next to `GAME`'s. Root cause: Google Sheets' own per-sheet
+`gridProperties.columnGroupControlAfter` defaults to `true`, which
+places a collapsed group's toggle immediately AFTER its last column --
+and since this codebase's zone-label design puts each zone's label
+column immediately BEFORE its own group (see the zone-labels section
+above), "after zone N" is the same cell as "immediately before zone
+N+1's label." Confirmed live: `gridProperties` on EdgeRaw explicitly
+carried `columnGroupControlAfter: true`.
+
+**The fix.** New `SheetsClient.set_column_group_control_before`, a thin
+`updateSheetProperties` call flipping that one boolean to `false` per
+tab. Called once at the top of both grouping call sites, before
+`clear_column_groups`/`group_columns` run: `polish_edge` (EdgeRaw) and
+`sheet_links.link_edge_columns` (PlayerPoolRaw/Player Pool/Lineups --
+the three tabs that get the same zone groups linked onto them). Purely a
+rendering setting: doesn't move a cell, value, or group, and is safe to
+set on every polish/link-edge re-run. Verified the write round-trips
+correctly against a real sheet (Scratch, template) before wiring it in.
+Tests: `test_set_column_group_control_before_flips_the_per_sheet_toggle_
+position` (`test_sheets.py`), `test_polish_edge_sets_column_group_
+control_before_the_group` (`test_sheet_style.py`),
+`test_link_edge_columns_sets_column_group_control_before_the_group`
+(`test_sheet_links.py`).
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

@@ -513,6 +513,69 @@ def _scale_rule_specs(
     return gradient_spec, boolean_spec
 
 
+def apply_edge_position_scales(
+    client: SheetsClient, tab: str, header: list, *, position_column: str, data_start: int, last_row: int
+) -> int:
+    """Real per-position highlighting for EdgeRaw's raw player-performance
+    metrics (`EDGE_UNSCALED_PLAYER_METRICS` -- ProjPts/Ceiling/Val/
+    CeilVal), which `apply_field_color_scales` deliberately skips there
+    (see that constant's own comment: a flat whole-tab gradient can't
+    tell a QB's real 27 points from a DST's real 10 without misleadingly
+    comparing them). EdgeRaw isn't grouped into position blocks the way
+    Player Pool/Lineups are (`apply_grouped_color_scales` needs fixed,
+    contiguous row ranges per group) -- it's one flat list sorted by
+    Leverage/CeilPct, so a given position's rows are scattered
+    non-contiguously and change position every sync.
+
+    Sam, 2026-09-18, looking at a freshly-filtered, freshly-sorted
+    EdgeRaw: "everything being white numbers makes [spotting outliers]
+    very hard." His actual workflow -- filter to a position or two, sort
+    by a raw stat, look for outliers -- needs exactly this: CeilPct/
+    Leverage answer a different question (ceiling upside net of
+    ownership), not "does this specific Pts/Val/Ceiling number stand out
+    for this position."
+
+    Works via `SheetsClient.add_color_scales_multi_range` -- verified live
+    on the template's Scratch tab that one rule's min/mid/max are computed
+    over the union of every range it's given, independent of anything else
+    on the sheet (see that method's own docstring). Reads the tab's
+    CURRENT `Position` column to find each position's actual row numbers
+    right now, merges each position's rows into contiguous runs to keep
+    the request compact, and issues one gradient rule per (position,
+    metric) pair scoped to just that position's own rows. Must be re-run
+    after every sync for the ranges to stay correct, since row order
+    shifts with Leverage/CeilPct -- `dfs setup polish` (via `polish_edge`)
+    is the existing hook that already runs after a sync and already owns
+    EdgeRaw's other colour scales, so no new standing command is needed.
+    Returns the number of (position, metric) rules applied.
+    """
+    if position_column not in header:
+        return 0
+    pos_letter = column_letter(header.index(position_column))
+    pos_rows = client.read_range(tab, f"{pos_letter}{data_start}:{pos_letter}{last_row}")
+
+    rows_by_position: dict[str, list[int]] = {}
+    for offset, row in enumerate(pos_rows):
+        position = row[0] if row else ""
+        if not position:
+            continue
+        rows_by_position.setdefault(position, []).append(data_start + offset)
+
+    specs = []
+    for name in EDGE_UNSCALED_PLAYER_METRICS:
+        if name not in header:
+            continue
+        letter = column_letter(header.index(name))
+        for rows in rows_by_position.values():
+            a1_ranges = [f"{letter}{start}:{letter}{end}" for start, end in _merge_contiguous(rows)]
+            specs.append(
+                {"a1_ranges": a1_ranges, "min_color": GRAD_MIN, "mid_color": GRAD_MID, "max_color": GRAD_MAX}
+            )
+
+    client.add_color_scales_multi_range(tab, specs)
+    return len(specs)
+
+
 def apply_grouped_color_scales(
     client: SheetsClient,
     tab: str,
@@ -770,6 +833,21 @@ def _edge_letter(column_name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _merge_contiguous(values: list[int]) -> list[tuple[int, int]]:
+    """Sorts `values` and merges consecutive runs into (start, end) pairs
+    -- e.g. [2, 3, 4, 9, 11, 12] -> [(2, 4), (9, 9), (11, 12)]. Shared by
+    `_unhide_ungrouped_columns` (column indices) and
+    `apply_edge_position_scales` (row numbers) -- same merge, different
+    axis, kept in one place so the two never drift."""
+    runs: list[tuple[int, int]] = []
+    for v in sorted(values):
+        if runs and runs[-1][1] + 1 == v:
+            runs[-1] = (runs[-1][0], v)
+        else:
+            runs.append((v, v))
+    return runs
+
+
 def _unhide_ungrouped_columns(client: SheetsClient, tab: str, total_width: int) -> None:
     """Unhides every column NOT currently covered by a collapsed group,
     across the tab's full known width -- the fix for a real, three-times-
@@ -791,13 +869,7 @@ def _unhide_ungrouped_columns(client: SheetsClient, tab: str, total_width: int) 
     few lines later, same as every other polish run."""
     grouped = client.get_grouped_column_indices(tab)
     ungrouped = [i for i in range(total_width) if i not in grouped]
-    runs: list[tuple[int, int]] = []
-    for i in ungrouped:
-        if runs and runs[-1][1] + 1 == i:
-            runs[-1] = (runs[-1][0], i)
-        else:
-            runs.append((i, i))
-    for start, end in runs:
+    for start, end in _merge_contiguous(ungrouped):
         client.hide_columns(tab, column_letter(start), column_letter(end), hidden=False)
 
 
@@ -937,8 +1009,11 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     column, FIELD_COLOR_SCALES applied to every matching column except
     EDGE_UNSCALED_PLAYER_METRICS (a diverging scale for ImpliedMove/TotMove/
     SpdMove/Spread, gradient for the rest -- see Phase 4's own comment
-    below on why raw Pts/Ceil/Val/CeilVal are skipped here specifically),
-    a muted
+    below on why a flat WHOLE-TAB scale on raw Pts/Ceil/Val/CeilVal would
+    be misleading). Those four get a REAL per-position scale instead
+    (`apply_edge_position_scales`, 2026-09-18) -- Sam's actual workflow is
+    filtering to a position and sorting by a raw stat to spot outliers,
+    which a flat scale (or none at all) can't support. Also a muted
     per-position tint, a Wind chip matching Slate Grid's, Flags/Avail as
     chips, the Name cell tinted when that player is already pooled and
     bolded when Flag is set, and OwnStatus greyed as the data-freshness
@@ -1014,6 +1089,9 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
         last_row=EDGE_ROWS,
         skip=EDGE_UNSCALED_PLAYER_METRICS,
     )
+    n_position_scaled = apply_edge_position_scales(
+        client, edge_tab, edge_header, position_column="Position", data_start=2, last_row=EDGE_ROWS
+    )
 
     _apply_wind_chip(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
     _apply_position_tint(
@@ -1070,6 +1148,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     )
 
     client.clear_column_groups(edge_tab)
+    client.set_column_group_control_before(edge_tab)
     for first, last in EDGE_COLUMN_GROUPS:
         a, b = _edge_letter(first), _edge_letter(last)
         if a and b:
@@ -1080,7 +1159,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 
     return (
         f"{edge_tab}: widths, header, banding, formats, {n_scaled} colour scale(s), "
-        "position tint, chips applied"
+        f"{n_position_scaled} per-position scale(s), position tint, chips applied"
     )
 
 

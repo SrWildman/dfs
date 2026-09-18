@@ -40,7 +40,7 @@ def column_letter(index: int) -> str:
 
 
 def _gradient_rule(
-    grid_range: dict,
+    grid_ranges: list[dict],
     *,
     min_color: dict,
     mid_color: dict,
@@ -53,8 +53,15 @@ def _gradient_rule(
     max_value: str | None,
 ) -> dict:
     """Builds one `ConditionalFormatRule` dict for a gradient (colour
-    scale) rule -- shared by `add_color_scale` (one HTTP call) and
-    `add_color_scales` (many rules, one call) so the two never drift."""
+    scale) rule -- shared by `add_color_scale`/`add_color_scales` (single-
+    range) and `add_color_scale_multi_range` (Phase 6: EdgeRaw's own
+    per-position highlighting, where a position's rows aren't contiguous)
+    so all three never drift. `grid_ranges` can hold more than one
+    GridRange -- verified live (template Scratch tab) that a single rule's
+    min/mid/max are computed over the UNION of every range in the list,
+    completely independent of any other cell on the sheet, not just the
+    first range -- exactly what lets one rule scope a gradient to "only
+    this position's rows" even when they're scattered non-contiguously."""
     minpoint = {"color": min_color, "type": min_type}
     if min_value is not None:
         minpoint["value"] = min_value
@@ -62,7 +69,7 @@ def _gradient_rule(
     if max_value is not None:
         maxpoint["value"] = max_value
     return {
-        "ranges": [grid_range],
+        "ranges": grid_ranges,
         "gradientRule": {
             "minpoint": minpoint,
             "midpoint": {"color": mid_color, "type": mid_type, "value": mid_value},
@@ -387,7 +394,7 @@ class SheetsClient:
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
         rule = _gradient_rule(
-            grid_range,
+            [grid_range],
             min_color=min_color,
             mid_color=mid_color,
             max_color=max_color,
@@ -429,7 +436,46 @@ class SheetsClient:
         for spec in specs:
             grid_range = a1_range_to_grid_range(spec["a1_range"], ws.id)
             rule = _gradient_rule(
-                grid_range,
+                [grid_range],
+                min_color=spec["min_color"],
+                mid_color=spec["mid_color"],
+                max_color=spec["max_color"],
+                mid_type=spec.get("mid_type", "PERCENTILE"),
+                mid_value=spec.get("mid_value", "50"),
+                min_type=spec.get("min_type", "MIN"),
+                min_value=spec.get("min_value"),
+                max_type=spec.get("max_type", "MAX"),
+                max_value=spec.get("max_value"),
+            )
+            requests.append({"addConditionalFormatRule": {"rule": rule, "index": 0}})
+        sheet, _ = self._ws(tab_name)
+        sheet.batch_update({"requests": requests})
+
+    def add_color_scales_multi_range(self, tab_name: str, specs: list[dict]) -> None:
+        """Same shape as `add_color_scales`, but each spec's key is
+        `a1_ranges` (plural -- a list of A1 range strings, e.g. every row
+        currently holding one position on EdgeRaw) instead of a single
+        `a1_range`. One `ConditionalFormatRule` per spec, its min/mid/max
+        computed over the UNION of that spec's own ranges only -- verified
+        live that this is a real, independent computation per rule, not
+        influenced by any cell outside its own `ranges` (see
+        `_gradient_rule`'s own docstring). This is what makes true
+        per-position highlighting possible on a tab like EdgeRaw, whose
+        rows aren't grouped into position blocks the way Player Pool/
+        Lineups are -- a plain `add_color_scales` call could only scope a
+        rule to one CONTIGUOUS range, which a scattered position's rows
+        never are. Issued as one `batchUpdate`, same reasoning as
+        `add_color_scales` (a full slate's worth of these -- 5 positions x
+        however many raw metrics -- would otherwise be a real chunk of the
+        session's own write-quota window per `dfs setup polish` run)."""
+        if not specs:
+            return
+        _, ws = self._ws(tab_name)
+        requests = []
+        for spec in specs:
+            grid_ranges = [a1_range_to_grid_range(a1, ws.id) for a1 in spec["a1_ranges"]]
+            rule = _gradient_rule(
+                grid_ranges,
                 min_color=spec["min_color"],
                 mid_color=spec["mid_color"],
                 max_color=spec["max_color"],
@@ -640,6 +686,38 @@ class SheetsClient:
             return
         requests = [{"deleteDimensionGroup": {"range": group["range"]}} for group in groups]
         sheet.batch_update({"requests": requests})
+
+    def set_column_group_control_before(self, tab_name: str) -> None:
+        """Move a tab's collapsed-column-group +/- toggle to sit BEFORE
+        each group instead of Sheets' own default (after). Only matters
+        because of this project's zone-label design: a real, always-
+        visible label column (`GAME`/`CEIL`/`MOVE`/`WX`, see
+        `sheet_columns.py`) sits immediately before each collapsible zone
+        so Sam can tell what a collapsed group is. Under Sheets' default
+        `columnGroupControlAfter=True`, the toggle for zone N renders
+        immediately after zone N's own hidden columns -- which is to say,
+        immediately before zone N+1's *label*, reading as if it belongs
+        to the wrong zone (confirmed confusing Sam on the live sheet:
+        2026-09-18). Flipping this per-tab property puts each toggle
+        right after its own label instead, where it visually reads as
+        "GAME [+]" rather than floating in front of "CEIL". Purely a
+        rendering setting -- doesn't move a cell, value or group."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": ws.id,
+                                "gridProperties": {"columnGroupControlAfter": False},
+                            },
+                            "fields": "gridProperties.columnGroupControlAfter",
+                        }
+                    }
+                ]
+            }
+        )
 
     def group_columns(
         self, tab_name: str, first_col_a1: str, last_col_a1: str, *, collapsed: bool = False

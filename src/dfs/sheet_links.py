@@ -284,6 +284,7 @@ def link_edge_columns(
             merged_ranges.append((start, end))
 
     client.clear_column_groups(tab)
+    client.set_column_group_control_before(tab)
     for start, end in merged_ranges:
         client.group_columns(tab, column_letter(start), column_letter(end), collapsed=True)
 

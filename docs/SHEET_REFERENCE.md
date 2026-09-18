@@ -128,9 +128,9 @@ actually matches.
 | `Name` | Player name, DK-nickname convention for DST. |
 | `Position`, `Team`, `Opp` | As above. |
 | `Salary` | DraftKings' own salary (authoritative) -- falls back to TFFB's figure only for the rare player TFFB projects who isn't on DK's main-slate salary list (e.g. a Thursday/Monday-only game). |
-| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. |
-| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. |
-| `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. |
+| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` get the per-position colour scale described below `Own%` does not. |
+| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Per-position colour scale, below. |
+| `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Per-position colour scale, below. |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
 | `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is all zeros (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
 | `OwnStatus` | Renamed from `LevBasis` in Phase 6, Part 7.9 (Leverage's own demotion left this marker gating `Own%`, a spine column, not describing Leverage -- the old name no longer said what it does). `"real"` once any player has non-zero `Own%` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage` has a real number yet. |
@@ -155,6 +155,20 @@ search box for free), "Leverage plays" (`Flag = LEVERAGE`), "Available
 only" (`Avail` blank), "In my pool" (`Pool = TRUE`). `EdgeRaw` itself is
 deliberately **not** protected (`dfs setup protect`) -- ticking `Pool` is
 the tab's entire reason to exist.
+
+**Per-position colour scales** (2026-09-18): `ProjPts`/`Val`/`Ceiling`/
+`CeilVal` each get a real red-to-green colour gradient, computed
+independently **within each position** rather than across the whole
+column -- a QB's real point totals and a DST's aren't on the same scale,
+so one flat gradient across all 742 rows would be misleading (this is
+exactly why these four were excluded from every other column's
+whole-tab scale in the first place). Built for Sam's actual workflow:
+filter to a position, sort by one of these, look for outliers -- a flat
+white column made that hard. Every other field with a colour scale
+(`GameEnv`, `CeilPct`, `Leverage`, `OppPosRank`, `OverUnder`, `Spread`,
+`ImpliedMove`/`TotMove`/`SpdMove`) already scales sensibly across the
+whole tab and is unaffected. `Salary` is never colour-scaled anywhere on
+this sheet -- see the Ceiling/Val note in `docs/CALCULATIONS.md`.
 
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
 

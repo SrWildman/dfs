@@ -497,6 +497,41 @@ def test_add_color_scales_with_min_max_formulas_carries_them_through(cfg, monkey
     assert rule["maxpoint"]["value"] == "=MAX('PoolSort'!$B$2:$B$80)"
 
 
+def test_add_color_scales_multi_range_puts_every_range_in_one_rule(cfg, monkeypatch, tmp_path):
+    # Phase 6 (2026-09-18): EdgeRaw's per-position highlighting needs one
+    # rule per (position, metric) pair, scoped to that position's own
+    # SCATTERED rows -- verified live (template Scratch tab) that a
+    # single rule's `ranges` can hold multiple non-contiguous GridRanges,
+    # with min/mid/max computed over their union only.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.add_color_scales_multi_range(
+        "T",
+        [
+            {
+                "a1_ranges": ["B2:B2", "B4:B4", "B9:B11"],
+                "min_color": {"red": 1, "green": 0, "blue": 0},
+                "mid_color": {"red": 1, "green": 1, "blue": 0},
+                "max_color": {"red": 0, "green": 1, "blue": 0},
+            }
+        ],
+    )
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.color_scale_calls) == 1
+    ranges = ws.color_scale_calls[0]["rule"]["ranges"]
+    assert len(ranges) == 3
+    assert (ranges[0]["startRowIndex"], ranges[0]["endRowIndex"]) == (1, 2)  # B2, 0-indexed
+    assert (ranges[2]["startRowIndex"], ranges[2]["endRowIndex"]) == (8, 11)  # B9:B11
+
+
+def test_add_color_scales_multi_range_is_a_noop_on_an_empty_list(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    calls_before = len(fake_sheet.batch_update_calls)
+    client.add_color_scales_multi_range("T", [])
+    assert len(fake_sheet.batch_update_calls) == calls_before
+
+
 def test_add_color_scales_is_a_noop_on_an_empty_list(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
@@ -761,6 +796,27 @@ def test_clear_column_groups_is_a_no_op_when_nothing_is_grouped(cfg, monkeypatch
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
     client.clear_column_groups("T")  # must not raise
     assert fake_sheet._worksheets["T"].column_groups == []
+
+
+def test_set_column_group_control_before_flips_the_per_sheet_toggle_position(cfg, monkeypatch, tmp_path):
+    # Sheets' own default (columnGroupControlAfter=True) puts a collapsed
+    # group's +/- toggle right after the group -- which, given this
+    # project's label-before-zone design, lands the toggle right in front
+    # of the *next* zone's label instead of its own (confirmed confusing
+    # Sam on the live sheet, 2026-09-18). This flips it to render before
+    # the group -- right after its own label -- instead.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    ws = fake_sheet._worksheets["T"]
+
+    client.set_column_group_control_before("T")
+
+    requests = fake_sheet.batch_update_calls[-1]["requests"]
+    assert len(requests) == 1
+    update = requests[0]["updateSheetProperties"]
+    assert update["properties"]["sheetId"] == ws.id
+    assert update["properties"]["gridProperties"]["columnGroupControlAfter"] is False
+    assert update["fields"] == "gridProperties.columnGroupControlAfter"
 
 
 def test_get_grouped_column_indices_returns_every_index_covered_by_any_group(cfg, monkeypatch, tmp_path):

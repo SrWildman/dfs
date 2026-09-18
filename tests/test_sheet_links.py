@@ -23,6 +23,7 @@ class SpySheetsClient:
         self.color_scale_calls: list[tuple[str, str]] = []
         self.group_calls: list[tuple[str, str, str, bool]] = []
         self.clear_group_calls: list[str] = []
+        self.group_control_before_calls: list[str] = []
         self.ensure_capacity_calls: list[tuple[str, int]] = []
 
     def read_range(self, tab_name: str, a1_range: str):
@@ -40,6 +41,9 @@ class SpySheetsClient:
 
     def clear_column_groups(self, tab_name):
         self.clear_group_calls.append(tab_name)
+
+    def set_column_group_control_before(self, tab_name):
+        self.group_control_before_calls.append(tab_name)
 
     def tab_gid(self, tab_name):
         return 999
@@ -332,6 +336,18 @@ def test_link_edge_columns_groups_independently_once_zone_labels_separate_them()
         (column_letter(header.index("Venue")), column_letter(header.index("Wind"))),
     ]
     assert [(start, end) for _tab, start, end, _collapsed in client.group_calls] == expected
+
+
+def test_link_edge_columns_sets_column_group_control_before_the_group():
+    # 2026-09-18 usability fix: Sheets' default toggle placement (after
+    # the group) reads as belonging to the *next* zone's label under this
+    # tab's label-before-zone design -- see
+    # SheetsClient.set_column_group_control_before's own docstring.
+    header = list(PLAYER_POOL_COLUMN_ORDER)
+    client = SpySheetsClient(header_row=header)
+    link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw", force=True)
+
+    assert client.group_control_before_calls == ["Player Pool"]
 
 
 def test_link_edge_columns_writes_into_an_interleaved_designed_position():
