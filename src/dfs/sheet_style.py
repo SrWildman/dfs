@@ -65,12 +65,12 @@ function happens to touch it first.
   is added after the gradient so it wins on an exact zero -- both rely on
   the same insert-at-front behavior described on `FLAG_CHIPS` below.
 - Chips (`_chip`, solid background + bold matching text) mark categorical
-  STATE only -- Flag, Avail, the Guardrails column, position tints. Never
+  STATE only -- Flags, Avail, the Guardrails column, position tints. Never
   put a chip on a number; that's what the colour scales are for.
-- Grey (`INK_MUTED`) on `LevBasis` marks a data-freshness note, not a
-  value of its own -- it reads "unpublished" while Own% (and therefore
-  Leverage/OwnPct) hasn't been populated by TFFB yet this week (see
-  `polish_edge`).
+- Grey (`INK_MUTED`) on `OwnStatus` (renamed from `LevBasis`, Part 7.9)
+  marks a data-freshness note, not a value of its own -- it reads
+  "unpublished" while Own% (and therefore Leverage) hasn't been populated
+  by TFFB yet this week (see `polish_edge`).
 - Colour that doesn't encode a value gets removed, full stop. Banding and
   the position tint are deliberately near-invisible for this reason: they
   carry structure (which row, which position), not a value, so they must
@@ -207,7 +207,6 @@ FIELD_FORMATS = {
     "Total": _num("0.0"),
     "Leverage": _num("0.0"),
     "CeilPct": _num("0.0"),
-    "OwnPct": _num("0.0"),
     # Third real instance of the exact incident described in `Id`'s own
     # comment above (2026-09-16): OppPosRank, newly added to EDGE_COLUMNS
     # right before Stadium, landed on the physical column two prior
@@ -235,7 +234,7 @@ FIELD_FORMATS = {
     # EdgeRaw's own value by 100 too, so both sides are true fractions and
     # can share this one PERCENT format.
     "Own%": _num("0.0%", "PERCENT"),
-    "% of Own": _num("0.0%", "PERCENT"),
+    "% of Cap": _num("0.0%", "PERCENT"),
     "Exposure": _num("0.0%", "PERCENT"),
     "Target": _num("0.0%", "PERCENT"),
     "vs Target": _num("0.0%", "PERCENT"),
@@ -320,7 +319,6 @@ FIELD_COLOR_SCALES = {
     # EDGE_UNSCALED_PLAYER_METRICS/GROUPED_TAB_UNSCALED_COLUMNS below for
     # why EdgeRaw keeps these two and Player Pool/Lineups skip them.
     "CeilPct": _GRADIENT,
-    "OwnPct": _GRADIENT,
     # Phase 5B: a count (0..however many lineups H1 says are being built),
     # same "more is better" reading as everything else in _GRADIENT -- a
     # heavily-used player earning the deepest colour is exactly the point.
@@ -336,20 +334,23 @@ FIELD_COLOR_SCALES = {
 # a QB's real 27 points. Rather than add a second per-position-scaled
 # copy of these columns, EdgeRaw skips scaling its raw, position-skewed
 # player-performance metrics entirely and relies on the already-
-# percentile CeilPct/OwnPct/Leverage instead (recommended over adding new
+# percentile CeilPct/Leverage instead (recommended over adding new
 # percentile columns for Pts/Ceil, since those already exist). Player
 # Pool/Lineups don't need this exclusion -- they scale per position/
 # lineup block (`apply_grouped_color_scales`), where a raw Pts/Ceil
 # comparison is exactly the right one.
 EDGE_UNSCALED_PLAYER_METRICS = frozenset({"ProjPts", "Ceiling", "Val", "CeilVal"})
 
-# Phase 4 (4.1): the reverse exclusion -- CeilPct/OwnPct are EdgeRaw's
-# substitute for position-grouping (see above), which Player Pool/Lineups
-# don't need (their own Pts/Ceil/etc. are already grouped for real). Both
-# also sit in the collapsed INTERNAL zone there, rarely expanded -- not
-# worth 5 (Player Pool) or 20 (Lineups) more conditional-format rules per
-# column for something that reads correctly-but-redundantly if skipped.
-GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct", "OwnPct"})
+# Phase 4 (4.1): the reverse exclusion -- CeilPct is EdgeRaw's substitute
+# for position-grouping (see above), which Player Pool/Lineups don't need
+# (their own Pts/Ceil/etc. are already grouped for real). It also sits in
+# the collapsed Ceiling detail zone there, rarely expanded -- not worth 5
+# (Player Pool) or 20 (Lineups) more conditional-format rules per column
+# for something that reads correctly-but-redundantly if skipped. `OwnPct`
+# used to sit here too; dropped entirely from the sheet in Part 7.9 (its
+# only consumer was the Leverage formula), so there's nothing left to
+# exclude it from.
+GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct"})
 
 # Deliberately absent from FIELD_COLOR_SCALES: `Salary`/`DK Sal` -- a
 # constraint, not a quality; scaling it would imply cheap is good.
@@ -599,17 +600,20 @@ EDGE_WIDTHS = {
     "CeilPct": 85,
     "Leverage": 92,
     # Widened from 74 -- same as Team above, found by looking, not by the
-    # heuristic: "LevBasis" clipped to "LevBasi" live.
-    "LevBasis": 90,
+    # heuristic: "LevBasis" clipped to "LevBasi" live. Renamed from
+    # LevBasis (Part 7.9).
+    "OwnStatus": 90,
     "GameEnv": 90,
     "OppPosRank": 115,
     "Stadium": 150,
     "Roof": 76,
     "Wind": 68,
     "Avail": 60,
-    # Widened from 96: Flag can now hold multiple space-separated tokens
-    # (Fix 2.1), e.g. "WIND LINE↑ LEVERAGE".
-    "Flag": 170,
+    # Widened from 96: can hold multiple space-separated tokens (Fix 2.1),
+    # e.g. "WIND LINE↑ LEVERAGE". Renamed from Flag (Part 7.9) -- "Flag"
+    # itself is hidden now, single-highest-priority-token only, and
+    # doesn't need a width entry.
+    "Flags": 170,
     # Widened from 78 (same width as TotMove/SpdMove, 7 chars each) --
     # "ImpliedMove" is 11 characters; Fix 2.2 renamed it from the
     # 8-character "LineMove" without widening its column to match.
@@ -617,9 +621,6 @@ EDGE_WIDTHS = {
     "TotMove": 78,
     "SpdMove": 78,
     "GameStart": 132,
-    # Widened from 68 -- same as Team/LevBasis above: "OwnPct" clipped to
-    # "OwnPc" live despite passing the width-floor heuristic.
-    "OwnPct": 82,
     "OverUnder": 105,
     "Spread": 78,
 }
@@ -734,8 +735,9 @@ def _edge_letter(column_name: str) -> str | None:
 
 # ---------------------------------------------------------------------------
 # Phase 5C: the four pieces of EdgeRaw's own look (Wind chip, per-position
-# tint, LevBasis's grey freshness marker, Name bold-on-Flag) that
-# `polish_builder_tab` didn't yet apply to Player Pool/Lineups -- pulled out
+# tint, OwnStatus's grey freshness marker (renamed from LevBasis, Part
+# 7.9), Name bold-on-Flag) that `polish_builder_tab` didn't yet apply to
+# Player Pool/Lineups -- pulled out
 # so `polish_edge` and `polish_builder_tab` share one implementation instead
 # of a second copy drifting the moment one of them changes. Each takes
 # `header`/a column letter looked up BY NAME (never a hardcoded position,
@@ -774,12 +776,14 @@ def _apply_position_tint(
         )
 
 
-def _apply_lev_basis_marker(
+def _apply_own_status_marker(
     client: SheetsClient, tab: str, header: list, *, data_start: int, last_row: int
 ) -> None:
-    if "LevBasis" not in header:
+    """Renamed from `_apply_lev_basis_marker` (Part 7.9, alongside the
+    `LevBasis` -> `OwnStatus` column rename)."""
+    if "OwnStatus" not in header:
         return
-    letter = column_letter(header.index("LevBasis"))
+    letter = column_letter(header.index("OwnStatus"))
     client.format_range(
         tab,
         f"{letter}{data_start}:{letter}{last_row}",
@@ -845,9 +849,9 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     SpdMove/Spread, gradient for the rest -- see Phase 4's own comment
     below on why raw Pts/Ceil/Val/CeilVal are skipped here specifically),
     a muted
-    per-position tint, a Wind chip matching Slate Grid's, Flag/Avail as
+    per-position tint, a Wind chip matching Slate Grid's, Flags/Avail as
     chips, the Name cell tinted when that player is already pooled and
-    bolded when Flag is set, and LevBasis greyed as the data-freshness
+    bolded when Flag is set, and OwnStatus greyed as the data-freshness
     marker it is (see the module docstring's colour policy).
     """
     if not client.tab_exists(edge_tab):
@@ -873,16 +877,19 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # here" cue every other typed cell in the workbook uses (see the
     # visual-grammar docstring below).
     client.format_range(edge_tab, f"{POOL_COLUMN}2:{POOL_COLUMN}{EDGE_ROWS}", {"backgroundColor": INPUT_BG})
-    # Pool and Name pinned while you scroll right; Id is hidden outright
-    # rather than pinned -- a raw DraftKings ID is never worth looking at.
-    # Phase 3 moved Id into EDGE_COLUMNS' INTERNAL zone (near the far
-    # right, folded in beside CeilPct/OwnPct/LevBasis) rather than
-    # keeping it as Pool's immediate neighbor; it's still individually
-    # hidden here regardless of where it physically sits, found by name
-    # like everything else in this function.
-    id_col = _edge_letter("Id")
-    if id_col:
-        client.hide_columns(edge_tab, id_col, id_col)
+    # Pool and Name pinned while you scroll right; Id/Flag are hidden
+    # outright rather than pinned -- a raw DraftKings ID is never worth
+    # looking at, and Flag (Part 7.9's single-highest-priority token) is
+    # superseded for reading by the visible "Flags" column. Phase 3 moved
+    # Id into EDGE_COLUMNS' INTERNAL zone (near the far right, now shared
+    # with Flag -- Part 7.9) rather than keeping it as Pool's immediate
+    # neighbor; both are still individually hidden here regardless of
+    # where they physically sit, found by name like everything else in
+    # this function.
+    for hidden_name in ("Id", "Flag"):
+        letter = _edge_letter(hidden_name)
+        if letter:
+            client.hide_columns(edge_tab, letter, letter)
     name_idx = EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET if "Name" in EDGE_COLUMNS else 1
     client.freeze(edge_tab, rows=1, cols=name_idx + 1)
 
@@ -915,11 +922,13 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
         client, edge_tab, edge_header, column_name="Position", data_start=2, last_row=EDGE_ROWS
     )
 
-    flag_col = _edge_letter("Flag")
+    # Part 7.9: chips go on "Flags" (visible, every matching token) --
+    # "Flag" (singular) is hidden now, single-highest-priority-token only.
+    flag_col = _edge_letter("Flags")
     if flag_col:
         client.format_range(edge_tab, f"{flag_col}2:{flag_col}{EDGE_ROWS}", {"horizontalAlignment": "CENTER"})
-        # TEXT_CONTAINS, not TEXT_EQ: Flag can hold more than one
-        # space-separated token now (Fix 2.1). None of the six tokens is a
+        # TEXT_CONTAINS, not TEXT_EQ: Flags can hold more than one
+        # space-separated token (Fix 2.1). None of the six tokens is a
         # substring of another (checked -- LINE↑/LINE↓ in particular don't
         # collide, different trailing glyph), so substring matching can't
         # misfire onto the wrong flag.
@@ -946,13 +955,13 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
                 fmt=fmt,
             )
 
-    # LevBasis's one job now is a data-freshness marker: "unpublished" means
-    # Own% is still all zeros this week, so Leverage/OwnPct read blank
-    # rather than a number that looks real but isn't. Grey the whole row
-    # via LevBasis itself rather than graying CeilPct -- CeilPct is a real,
-    # independent number regardless of ownership status, never a stand-in
-    # for Leverage anymore.
-    _apply_lev_basis_marker(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
+    # OwnStatus's one job (renamed from LevBasis, Part 7.9) is a
+    # data-freshness marker: "unpublished" means Own% is still all zeros
+    # this week, so Leverage reads blank rather than a number that looks
+    # real but isn't. Grey the whole row via OwnStatus itself rather than
+    # graying CeilPct -- CeilPct is a real, independent number regardless
+    # of ownership status, never a stand-in for Leverage anymore.
+    _apply_own_status_marker(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
 
     # "Already in my pool" + "flagged" on the Name cell -- Pool is a
     # blank/Cash/GPP/Both dropdown now, not a TRUE/FALSE checkbox (Fix
@@ -994,9 +1003,11 @@ BUILDER_WIDTHS = {
     # Widened from 72 -- Phase 6, Part 1.5's own audit-style check (built
     # for EdgeRaw) also caught this one truncating live once run against
     # every audited tab, the same bug class just outside 1.5's original
-    # scope. Renamed from "% of Rstr" in Part 2, alongside Rstr%'s own
-    # rename to Own%.
-    "% of Own": 90,
+    # scope. Renamed "% of Rstr" -> "% of Own" in Part 2 (alongside Rstr%'s
+    # own rename to Own%), then "% of Own" -> "% of Cap" in Part 7.9 (its
+    # denominator changed from the lineup's own running salary total to
+    # the salary cap constant -- see `polish_lineups_pct_of_cap`).
+    "% of Cap": 90,
     "Source": 64,
     "Pool": 64,
     "Edge ↗": 64,
@@ -1075,10 +1086,15 @@ def polish_builder_tab(
     Phase 5C: also applies the rest of EdgeRaw's own look wherever the
     matching column exists in `header` -- a Wind chip, a muted
     per-position tint (`Pos.`, EdgeRaw's own equivalent column is
-    `Position`), LevBasis greyed as the data-freshness marker it is, and
+    `Position`), OwnStatus greyed as the data-freshness marker it is, and
     Name bolded when Flag is set -- via the same shared helpers
     `polish_edge` itself calls (see the module-level comment just above
     `polish_edge`), so the two never drift into two different policies.
+
+    Part 7.9: also hides `Id`/`Flag` outright by name, same as
+    `polish_edge` already did for EdgeRaw's own `Id` -- neither was ever
+    hidden here before this, since both sit past the collapsed group's own
+    range (see this function's body for why).
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -1100,6 +1116,19 @@ def polish_builder_tab(
     for repeat_row in header_repeats_at or []:
         client.format_range(tab, f"A{repeat_row}:{last_col}{repeat_row}", _HEADER_FMT)
     client.freeze(tab, rows=freeze_rows if freeze_rows is not None else header_row, cols=freeze_cols)
+
+    # Id/Flag hidden outright, same treatment as `polish_edge`'s own
+    # EdgeRaw -- both sit in `sheet_columns.INTERNAL`, past the collapsed
+    # Game/Ceiling detail/Movement/Weather group, so neither is inside
+    # that group's own range and both would otherwise sit fully visible
+    # right before this tab's own trailing columns (Overflow/Pool/Used/In
+    # on Player Pool, nothing on PlayerPoolRaw/Lineups). Found missing
+    # entirely on all three tabs while wiring up Part 7.9's Flag/Flags
+    # split -- EdgeRaw was the only tab that ever actually hid Id.
+    for hidden_name in ("Id", "Flag"):
+        if hidden_name in header:
+            letter = column_letter(header.index(hidden_name))
+            client.hide_columns(tab, letter, letter)
 
     widths = {}
     for i, name in enumerate(header):
@@ -1125,7 +1154,7 @@ def polish_builder_tab(
     chipped = 0
     data_start = header_row + 1
     for column_name, chips in (
-        ("Flag", FLAG_CHIPS),
+        ("Flags", FLAG_CHIPS),
         ("Avail", AVAIL_CHIPS),
         ("Source", SOURCE_CHIPS),
         ("Venue", VENUE_CHIPS),
@@ -1138,9 +1167,9 @@ def polish_builder_tab(
         client.format_range(
             tab, f"{letter}{data_start}:{letter}{last_row}", {"horizontalAlignment": "CENTER"}
         )
-        # Flag alone can hold more than one space-separated token (Fix
+        # Flags alone can hold more than one space-separated token (Fix
         # 2.1); Avail/Source/Venue are still single exact values.
-        condition_type = "TEXT_CONTAINS" if column_name == "Flag" else "TEXT_EQ"
+        condition_type = "TEXT_CONTAINS" if column_name == "Flags" else "TEXT_EQ"
         for text, fmt in chips.items():
             client.add_boolean_rule(
                 tab,
@@ -1152,13 +1181,13 @@ def polish_builder_tab(
         chipped += 1
 
     # Phase 5C: the rest of EdgeRaw's own look (Wind chip, per-position
-    # tint, LevBasis's grey freshness marker, Name bold-on-Flag) --
+    # tint, OwnStatus's grey freshness marker, Name bold-on-Flag) --
     # `pool_column=None` since Player Pool/Lineups/PlayerPoolRaw have no
     # unpooled rows to distinguish the way EdgeRaw does (see
     # `_apply_name_flag_style`'s own docstring).
     _apply_wind_chip(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_position_tint(client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row)
-    _apply_lev_basis_marker(client, tab, header, data_start=data_start, last_row=last_row)
+    _apply_own_status_marker(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
 
     pin_note = "Name pinned" if freeze_cols else "no column pin"
@@ -1448,35 +1477,35 @@ def polish_lineups_remaining_per_slot_helper(
     return f"{tab}: 'average remaining per slot' helper regenerated for {written} block(s){note}"
 
 
-def polish_lineups_pct_of_own(
-    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+def polish_lineups_pct_of_cap(
+    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]], salary_cap: int
 ) -> str:
-    """Phase 6, Part 1.2: `% of Rstr` (`=F<row>/F$<totals_row>`, this
-    player's DK Sal as a share of the lineup's own running salary total)
-    divided by zero on every roster slot of a fresh lineup, since the
-    block's total salary is 0 until at least one name is typed --
-    `#DIV/0!` on all 180 slot rows. Not written by any `dfs` command (a
-    genuinely hand-authored template formula, like the "average remaining
-    per slot" helper documented in docs/SHEET_REFERENCE.md); this is the
-    first Python-side rewrite of it. Renamed to `% of Own` in Part 2,
-    alongside `Rstr%`'s own rename to `Own%` (Part 2's own instruction:
-    "`% of Rstr`'s derivation ... should be renamed to match").
+    """Phase 6, Part 1.2 gave this column (`% of Rstr` at the time)
+    `=F<row>/F$<totals_row>` -- this player's DK Sal as a share of the
+    lineup's own running salary total -- and guarded it against dividing
+    by zero on a fresh lineup, since the block's total salary is 0 until
+    at least one name is typed. Not written by any `dfs` command before
+    that (a genuinely hand-authored template formula, like the "average
+    remaining per slot" helper documented in docs/SHEET_REFERENCE.md).
 
-    Guarded two ways, both yielding blank rather than 0 -- "an empty slot
-    has no share" (Sam's own framing for this bug), not zero, which reads
-    as a real value: the whole block being empty (`F$<totals_row>=0`,
-    the #DIV/0! case), and an individual blank slot once other slots in
-    the same block ARE filled (`$A<row>=""`, which would otherwise
-    silently compute a real 0% for a slot nobody's picked yet).
+    Part 7.9 found that fix was patching the wrong problem: Sam confirmed
+    the intended meaning is "what share of my total lineup salary is this
+    player taking up" -- cap allocation, not rostership share, and not a
+    running total either (`F$<totals_row>` lurches as slots fill: three
+    players in, each reads ~33%, meaningful only once the lineup is
+    complete, which is exactly when it stops being needed). Renamed
+    `Rstr%` -> `Own%` -> unrelated; this column itself went `% of Rstr` ->
+    `% of Own` (Part 2, name-matching Own%'s own rename) -> `% of Cap`
+    (Part 7.9, once the real meaning was confirmed) -- the name changed
+    twice while the bug underneath was still there both times.
 
-    `% of Own` is still a temporary name -- Part 7.9 renames this column
-    again, to `% of Cap`, and changes the denominator to the salary cap
-    entirely, which makes the block-empty guard here moot (a constant
-    denominator can't divide by zero) but leaves the blank-slot guard
-    still needed. This function's own formula gets fully superseded then;
-    kept here, not folded into the standing `dfs setup polish` pipeline,
-    since it's a one-time fix for a formula this codebase doesn't already
-    own.
+    Dividing by the salary cap (`config.toml`'s `[lineups] salary_cap`,
+    never hardcoded 50000) instead of the block's own running total fixes
+    the #DIV/0! at the source -- a constant denominator can't divide by
+    zero, so the old whole-block-empty guard is gone, not just redundant.
+    Still guards the individual blank-slot case (`$A<row>=""`) -- "an
+    empty slot has no share" (Sam's own framing for the original bug), not
+    a real 0% for a slot nobody's picked yet.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -1490,22 +1519,18 @@ def polish_lineups_pct_of_own(
 
     name_col = col("Name")
     salary_col = col("DK Sal")
-    pct_col = col("% of Own")
+    pct_col = col("% of Cap")
     if not (name_col and salary_col and pct_col):
-        return f"{tab}: 'Name'/'DK Sal'/'% of Own' not all present -- skipped"
+        return f"{tab}: 'Name'/'DK Sal'/'% of Cap' not all present -- skipped"
 
     written = 0
     for start, end in name_blocks:
-        totals_row = end + 1
         for row in range(start, end + 1):
-            formula = (
-                f'=IF(OR({name_col}{row}="",{salary_col}${totals_row}=0),"",'
-                f"{salary_col}{row}/{salary_col}${totals_row})"
-            )
+            formula = f'=IF({name_col}{row}="","",{salary_col}{row}/{salary_cap})'
             client.update_range(tab, f"{pct_col}{row}", [[formula]])
             written += 1
 
-    return f"{tab}: '% of Own' guarded against #DIV/0! for {written} row(s)"
+    return f"{tab}: '% of Cap' set against the {salary_cap} salary cap for {written} row(s)"
 
 
 def polish_guardrails(
@@ -2029,7 +2054,7 @@ _MOVEMENT_WIDTHS = {
     "Total move": 92,
     "Spread move": 92,
     "Kickoff (UTC)": 152,
-    "Flag": 96,
+    "Flags": 96,
 }
 
 # Diverging, not the standard red->yellow->green: each is a signed delta
@@ -2082,8 +2107,8 @@ def style_movement(client: SheetsClient, tab: str = "Movement") -> str:
         )
         scaled += 1
 
-    if "Flag" in header:
-        letter = column_letter(header.index("Flag"))
+    if "Flags" in header:
+        letter = column_letter(header.index("Flags"))
         rng = f"{letter}4:{letter}60"
         for text, fmt in FLAG_CHIPS.items():
             client.add_boolean_rule(tab, rng, condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)

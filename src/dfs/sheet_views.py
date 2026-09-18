@@ -110,19 +110,22 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
     lev = _rng(edge_tab, "Leverage")
     ceilval = _rng(edge_tab, "CeilVal")
     avail = _rng(edge_tab, "Avail")
-    flag = _rng(edge_tab, "Flag")
-    basis = _rng(edge_tab, "LevBasis")
+    # Part 7.9: "Flags" is every matching condition -- deliberately not the
+    # hidden, top-priority-only "Flag" -- since LANDMINES below needs to
+    # catch a player who is OUT and something else too.
+    flag = _rng(edge_tab, "Flags")
+    basis = _rng(edge_tab, "OwnStatus")
     salary = _rng(edge_tab, "Salary")
 
     g = _q(games_tab)
     w = _q(weather_tab)
 
     live = f'{name}<>""'
-    # Flag can now hold more than one token space-separated (Fix 2.1 --
-    # e.g. "WIND LEVERAGE"), so an exact `="OUT"` no longer catches a
-    # player who is OUT and something else too. SEARCH-based substring
-    # matching does; none of the flag vocabulary (OUT/WIND/LINE↑/LINE↓/
-    # LEVERAGE/CHALK) is a substring of another, so this can't misfire.
+    # Flags can hold more than one token space-separated (Fix 2.1 -- e.g.
+    # "WIND LEVERAGE"), so an exact `="OUT"` no longer catches a player who
+    # is OUT and something else too. SEARCH-based substring matching does;
+    # none of the flag vocabulary (OUT/WIND/LINE↑/LINE↓/LEVERAGE/CHALK) is
+    # a substring of another, so this can't misfire.
     not_out = f'NOT(ISNUMBER(SEARCH("OUT",{flag})))'
     is_wind = f'ISNUMBER(SEARCH("WIND",{flag}))'
     is_out = f'ISNUMBER(SEARCH("OUT",{flag}))'
@@ -195,7 +198,7 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
             "Player",
             "Pos",
             "Avail",
-            "Flag",
+            "Flags",
         ],
         [top_leverage, "", "", "", "", best_value, "", "", "", "", landmines],
         # fmt: on
@@ -396,7 +399,9 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
     tot_move = _rng(edge_tab, "TotMove") if "TotMove" in EDGE_COLUMNS else None
     spd_move = _rng(edge_tab, "SpdMove") if "SpdMove" in EDGE_COLUMNS else None
     start = _rng(edge_tab, "GameStart") if "GameStart" in EDGE_COLUMNS else None
-    flag = _rng(edge_tab, "Flag")
+    # Part 7.9: "Flags" (everything that fired), not the hidden,
+    # top-priority-only "Flag".
+    flag = _rng(edge_tab, "Flags")
 
     # An unmoved line is 0.0, not blank, so filtering on <>"" alone lets
     # a whole page of zeros through and the empty-state message never
@@ -418,7 +423,7 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
             f"IFERROR(TEXT(DATEVALUE(LEFT({start},10))+TIMEVALUE(MID({start},12,8)),"
             f'"ddd h:mm")&" UTC",{start})'
         )
-    header.append("Flag")
+    header.append("Flags")
     col_terms.append(flag)
     cols = "{" + ",".join(col_terms) + "}"
 

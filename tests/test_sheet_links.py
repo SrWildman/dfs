@@ -86,6 +86,13 @@ def test_already_linked_columns_positions_never_move():
     # spine into the Ceiling detail group (Part 7.1, folded into this
     # reorder). This pins the NEW positions; `link-edge --force` must be
     # (and was) re-run on both sheets after this reorder.
+    #
+    # Part 7.9 (2026-09-17) changed LINKED_EDGE_COLUMNS' actual membership
+    # again -- OwnPct dropped, LevBasis renamed OwnStatus, Flag/Flags
+    # split -- but by coincidence landed on this SAME index list (Flag
+    # moved into INTERNAL, past where OwnPct used to sit, backfilling the
+    # gap it left). Still worth re-verifying by hand whenever this dict
+    # changes, not trusting a coincidence to hold next time.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         8,
         10,
@@ -107,19 +114,21 @@ def test_already_linked_columns_positions_never_move():
 
 
 def test_edge_lookup_formula_uses_correct_range_and_column_index():
-    # Phase 6, Part 2: Leverage moves off the spine into the collapsed
-    # Ceiling detail group, landing at EDGE_COLUMNS index 18 (was 12); the
-    # Name-anchored range that's VLOOKUP column 19 (1-based, relative to
-    # Name at index 0) regardless of EDGE_DATA_OFFSET (a uniform shift
-    # cancels out of a *relative* position) -- but the range's own start/
-    # end letters do shift by that offset, since Pool occupies column A
-    # ahead of EDGE_COLUMNS. Matches what `sheet_style.polish_edge`
-    # reports for the same columns.
-    assert EDGE_COLUMNS.index("Leverage") == 18
+    # Phase 6, Part 2 moved Leverage off the spine into the collapsed
+    # Ceiling detail group; Part 7.9 then dropped OwnPct entirely (one
+    # fewer column ahead of it) and reordered Ceiling detail itself
+    # (CeilPct, Leverage, OwnStatus) -- landing Leverage at EDGE_COLUMNS
+    # index 17. The Name-anchored range is VLOOKUP column 18 (1-based,
+    # relative to Name at index 0) regardless of EDGE_DATA_OFFSET (a
+    # uniform shift cancels out of a *relative* position) -- but the
+    # range's own start/end letters do shift by that offset, since Pool
+    # occupies column A ahead of EDGE_COLUMNS. Matches what
+    # `sheet_style.polish_edge` reports for the same columns.
+    assert EDGE_COLUMNS.index("Leverage") == 17
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
     end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},19,false))'
+        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},18,false))'
     )
 
 
@@ -267,25 +276,28 @@ def test_link_edge_columns_applies_color_scale_to_three_columns_only():
 def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and_weather():
     # Phase 6, Part 2: GAME (GameEnv is the only linked member -- O/U,
     # Spread, Team Implied, OppPosRank are native, absent from this
-    # minimal fixture), CEILING DETAIL (CeilPct/OwnPct/Leverage/LevBasis),
-    # MOVEMENT (ImpliedMove/TotMove/SpdMove/GameStart) and WEATHER
-    # (Stadium/Roof/Wind -- Venue is native, also absent here) all
-    # collapse by default -- CeilVal/Avail/Flag stay ungrouped and always
-    # visible. These four zones sit back-to-back with nothing between
-    # them (in this fixture, GameEnv lands immediately before CeilPct
-    # once all 16 missing linked columns are appended together), so they
-    # land as ONE combined group, not four separate `group_columns` calls
-    # -- Sheets silently extends an existing group to cover an adjacent
-    # `addDimensionGroup`, so independent calls at adjacent ranges make a
-    # later call's own collapse-fold request fail outright ("no group
-    # spans exactly that range"). Found live, on the template, the first
-    # time MOVEMENT/INTERNAL were added as their own groups next to the
-    # pre-existing WEATHER one (Phase 3); re-confirmed here now that a
-    # fourth zone (GAME) joins the same merge.
+    # minimal fixture), CEILING DETAIL, MOVEMENT (ImpliedMove/TotMove/
+    # SpdMove/GameStart) and WEATHER (Stadium/Roof/Wind -- Venue is
+    # native, also absent here) all collapse by default -- CeilVal/Avail/
+    # Flags stay ungrouped and always visible, and Id/Flag (INTERNAL,
+    # Part 7.9) sit past this merged group, hidden outright rather than
+    # grouped. CEILING DETAIL is CeilPct/Leverage/OwnStatus now (Part
+    # 7.9 dropped OwnPct, renamed LevBasis to OwnStatus) -- one column
+    # narrower than before. These four zones sit back-to-back with
+    # nothing between them (in this fixture, GameEnv lands immediately
+    # before CeilPct once all 16 missing linked columns are appended
+    # together), so they land as ONE combined group, not four separate
+    # `group_columns` calls -- Sheets silently extends an existing group
+    # to cover an adjacent `addDimensionGroup`, so independent calls at
+    # adjacent ranges make a later call's own collapse-fold request fail
+    # outright ("no group spans exactly that range"). Found live, on the
+    # template, the first time MOVEMENT/INTERNAL were added as their own
+    # groups next to the pre-existing WEATHER one (Phase 3); re-confirmed
+    # here now that a fourth zone (GAME) joins the same merge.
     client = SpySheetsClient(header_row=["Name", "Pos."])  # width 2 -> next col C
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
     assert client.group_calls == [
-        ("Player Pool", "F", "Q", True),  # GameEnv..Wind, merged
+        ("Player Pool", "F", "P", True),  # GameEnv..Wind, merged
     ]
 
 

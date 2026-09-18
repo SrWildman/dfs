@@ -26,16 +26,29 @@ where the Board itself gets rebuilt (Part 3/7.6).
 
 `Venue` moves out of IDENTITY into the Weather group -- it's demoted the
 same as everything else not in the spine, and the spine deliberately does
-not include it (see the spine list below). `ValAdj` (Part 7.2) and
-`Flags` (Part 5) are NOT added here as placeholder columns -- both are
-named in Part 2's own spine list as forward references to work that
-hasn't shipped yet ("`Flags` is Part 5's new column; `ValAdj` is Part
-7.2's"), and Sam has already rejected the reserved-placeholder pattern
-once (the `SoS 1..4` removal, Phase 5 Section K: "Why still sos 1-4.
-Should only be one per player"). Each will insert itself into the spine
-at build time via the same `sheet_reorder.migrate_tab_to_designed_order`
-mechanism that already knows how to insert and place a new column name
-into a designed order (used for `Edge ↗`/`Used`/`In` in earlier phases).
+not include it (see the spine list below). `ValAdj` (Part 7.2) is NOT
+added here as a placeholder column -- named in Part 2's own spine list
+only as a forward reference to work that hadn't shipped yet, and Sam has
+already rejected the reserved-placeholder pattern once (the `SoS 1..4`
+removal, Phase 5 Section K: "Why still sos 1-4. Should only be one per
+player"). It inserts itself into the spine at build time via the same
+`sheet_reorder.migrate_tab_to_designed_order` mechanism that already
+knows how to insert and place a new column name into a designed order
+(used for `Edge ↗`/`Used`/`In` in earlier phases). `Flags` is no longer a
+forward reference -- Part 7.9 built it for real (see `DECISION` below):
+`Flag` (singular) turned out, when checked, to already carry every
+matching condition rather than the single first-match value Part 7.9's
+own spec assumed, so the split is real, not just a rename.
+
+Phase 6, Part 7.9 (2026-09-17), three more changes on top of Part 2's own
+reorder: `OwnPct` dropped entirely (its only consumer anywhere in this
+codebase was the Leverage formula in `derived.py`, verified by grep);
+`LevBasis` renamed to `OwnStatus` (Leverage's demotion left it gating
+`Own%`, a spine column, not describing Leverage); and `Flag`/`Flags`
+split for real -- `Flags` (every matching condition, space-separated)
+takes `Flag`'s old spine slot, while `Flag` (the single highest-priority
+token) moves to the hidden zone alongside `Id`, kept rather than deleted
+since other formatting/filtering logic keys off it as a boolean value.
 
 Header text still matches each tab's own already-established spelling
 (`Pos.`/`Opp.`/`DK Sal`/`Pts`/`Ceil`/`Own%`, not EdgeRaw's `Position`/
@@ -68,11 +81,14 @@ from dfs.derived import EDGE_COLUMNS
 IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 
 # DK Sal/Pts/Val/Ceil/Own% are native (read straight off DkSalClean/
-# TFFBOptoRaw, or self-computed for Val); CeilVal/Avail/Flag are linked
+# TFFBOptoRaw, or self-computed for Val); CeilVal/Avail/Flags are linked
 # (VLOOKUP against EdgeRaw). Leverage is NOT here -- Part 7.1 demotes it
 # off the spine into the collapsed Ceiling detail group below, folded
-# into this same reorder (see this module's own docstring).
-DECISION = ["DK Sal", "Pts", "Val", "Ceil", "CeilVal", "Own%", "Avail", "Flag"]
+# into this same reorder (see this module's own docstring). "Flags" (not
+# "Flag" -- Part 7.9) is every matching condition, space-separated; the
+# single highest-priority token lives on hidden "Flag" instead, in
+# INTERNAL below.
+DECISION = ["DK Sal", "Pts", "Val", "Ceil", "CeilVal", "Own%", "Avail", "Flags"]
 
 # O/U/Spread/Team Implied/OppPosRank are native (VLOOKUP against oddsFinal/
 # SoSComb); GameEnv is linked. The four `SoS 1..4` placeholders that used
@@ -85,10 +101,15 @@ DECISION = ["DK Sal", "Pts", "Val", "Ceil", "CeilVal", "Own%", "Avail", "Flag"]
 # column deletion this required on PlayerPoolRaw/Player Pool/Lineups.
 GAME = ["O/U", "Spread", "Team Implied", "GameEnv", "OppPosRank"]
 
-# Phase 6, Part 2 + 7.1: CeilPct/OwnPct/LevBasis were already collapsed
-# (the old INTERNAL zone below); Leverage joins them here now that it's
-# off the spine. All four are linked (VLOOKUP against EdgeRaw).
-CEILING_DETAIL = ["CeilPct", "OwnPct", "Leverage", "LevBasis"]
+# Phase 6, Part 2 + 7.1: CeilPct/LevBasis were already collapsed (the old
+# INTERNAL zone below); Leverage joins them here now that it's off the
+# spine. All three are linked (VLOOKUP against EdgeRaw). `OwnPct` used to
+# sit here too -- dropped entirely in Part 7.9 (its only consumer
+# anywhere in this codebase was the Leverage formula, verified by grep);
+# `LevBasis` renamed to `OwnStatus` in that same pass (Leverage's own
+# demotion left it gating `Own%`, a spine column, not describing
+# Leverage -- the old name no longer said what it does).
+CEILING_DETAIL = ["CeilPct", "Leverage", "OwnStatus"]
 
 # All linked (VLOOKUP against EdgeRaw).
 MOVEMENT = ["ImpliedMove", "TotMove", "SpdMove", "GameStart"]
@@ -96,11 +117,14 @@ MOVEMENT = ["ImpliedMove", "TotMove", "SpdMove", "GameStart"]
 # Venue is native (see module docstring); Stadium/Roof/Wind are linked.
 WEATHER = ["Venue", "Stadium", "Roof", "Wind"]
 
-# Id stays hidden outright, not part of any visible collapsed group
-# (Part 2's own table lists it separately from the four numbered groups
-# for exactly this reason) -- linked (VLOOKUP against EdgeRaw, same as
-# every other column that used to share the old INTERNAL zone with it).
-INTERNAL = ["Id"]
+# Id/Flag stay hidden outright, not part of any visible collapsed group
+# (Part 2's own table lists Id separately from the four numbered groups
+# for exactly this reason) -- both linked (VLOOKUP against EdgeRaw). Flag
+# joined Id here in Part 7.9, once "Flags" (in DECISION above) took over
+# its old visible spine slot -- kept, not deleted, since other
+# formatting/filtering logic keys off Flag's single-highest-priority
+# value as a boolean/categorical key.
+INTERNAL = ["Id", "Flag"]
 
 # Shared by all three tabs -- see PLAYER_POOL_RAW_COLUMN_ORDER/
 # PLAYER_POOL_COLUMN_ORDER/LINEUPS_COLUMN_ORDER below for each tab's full
@@ -117,7 +141,7 @@ BASE_COLUMN_ORDER = [*IDENTITY, *DECISION, *GAME, *CEILING_DETAIL, *MOVEMENT, *W
 LINKED_COLUMNS = [
     "CeilVal",
     "Avail",
-    "Flag",
+    "Flags",
     "GameEnv",
     *CEILING_DETAIL,
     *MOVEMENT,

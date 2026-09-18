@@ -61,9 +61,10 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
       the Name column's own filter-view header gets a type-ahead search
       box for free, the primary way to find a player without scrolling
       743 rows (see Task 4.1).
-    - "Leverage plays" -- Flag CONTAINS LEVERAGE (Fix 2.1: Flag can hold
+    - "Leverage plays" -- Flags CONTAINS LEVERAGE (Fix 2.1: Flags can hold
       more than one space-separated token, e.g. "WIND LEVERAGE", so an
-      exact match would miss it).
+      exact match would miss it; Part 7.9 hid the single-priority "Flag"
+      and renamed the all-matches column to "Flags").
     - "Available only" -- Avail blank (no Q/OUT/IR).
     - "In my pool" -- Pool NOT BLANK (Fix 2.11: a blank/Cash/GPP/Both
       dropdown, not a TRUE/FALSE checkbox).
@@ -77,7 +78,7 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
 
     views: list[tuple[str, dict[int, dict] | None]] = [("Pool picking", None)]
 
-    flag_idx = _edge_col_index("Flag")
+    flag_idx = _edge_col_index("Flags")
     if flag_idx is not None:
         views.append(
             (

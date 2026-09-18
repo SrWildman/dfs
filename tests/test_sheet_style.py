@@ -35,7 +35,7 @@ from dfs.sheet_style import (
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
-    polish_lineups_pct_of_own,
+    polish_lineups_pct_of_cap,
     polish_lineups_remaining_per_slot_helper,
     polish_lineups_totals_rows,
     style_flat_tab,
@@ -86,7 +86,6 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "OverUnder",
         "Spread",
         "CeilPct",
-        "OwnPct",
     }
     assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
     assert FIELD_COLOR_SCALES["ImpliedMove"] == "diverging"  # scored separately, zero as the midpoint
@@ -334,26 +333,25 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_eleven_columns_skipping_raw_player_metrics():
+def test_polish_edge_scales_ten_columns_skipping_raw_player_metrics():
     # Phase 4 (4.1): EdgeRaw isn't position-grouped, so ProjPts/Ceiling/
     # Val/CeilVal (EDGE_UNSCALED_PLAYER_METRICS) are skipped there --
-    # CeilPct/OwnPct/Leverage (already percentile) stand in for them.
-    # 12 raw FIELD_COLOR_SCALES matches, minus 4 skipped, plus 2 (CeilPct/
-    # OwnPct) plus 1 more (OppPosRank, Phase 5, 2026-09-16 -- already
-    # comparable across positions the same way CeilPct/OwnPct are, so it
-    # needs no position-grouping either) = 11.
+    # CeilPct/Leverage (already percentile) stand in for them, same as
+    # OppPosRank (Phase 5, 2026-09-16 -- already comparable across
+    # positions, needs no position-grouping either). `OwnPct` used to be
+    # one of these too; dropped entirely from EDGE_COLUMNS in Part 7.9.
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = [
         name
         for name in edge_header
         if name in FIELD_COLOR_SCALES and name not in EDGE_UNSCALED_PLAYER_METRICS
     ]
-    assert len(matched) == 11
+    assert len(matched) == 10
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 11
+    assert len(client.color_scale_calls) == 10
 
 
 def test_polish_edge_move_and_spread_scales_are_diverging_at_zero():
@@ -530,8 +528,8 @@ class FakeGuardrailsClient:
 
 _HEADER_WITH_AVAIL_AT_Y = (
     ["Name", "Pos.", "Team", "DK Sal", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts"]
-    + ["Ceil", "Val", "Own%", "", "% of Own", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
-    + ["Stadium", "Roof", "Wind", "Avail", "Flag"]
+    + ["Ceil", "Val", "Own%", "", "% of Cap", "CeilVal", "CeilPct", "Leverage", "OwnStatus", "GameEnv"]
+    + ["Stadium", "Roof", "Wind", "Avail", "Flags"]
 )
 
 # For polish_guardrails specifically: DK Sal and Issues are deliberately
@@ -540,8 +538,8 @@ _HEADER_WITH_AVAIL_AT_Y = (
 # because a fixture still matches the old layout.
 _HEADER_FOR_GUARDRAILS = (
     ["Name", "Team", "Pos.", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts", "DK Sal"]
-    + ["Ceil", "Val", "Own%", "% of Own", "CeilVal", "CeilPct", "Leverage", "LevBasis", "GameEnv"]
-    + ["Stadium", "Roof", "Wind", "Avail", "Flag", "Issues"]
+    + ["Ceil", "Val", "Own%", "% of Cap", "CeilVal", "CeilPct", "Leverage", "OwnStatus", "GameEnv"]
+    + ["Stadium", "Roof", "Wind", "Avail", "Flags", "Issues"]
 )
 
 
@@ -697,27 +695,33 @@ def test_polish_lineups_totals_rows_self_heals_a_corrupted_pts_or_rstr_total():
     assert "3 sum(s) written (Ceil/Pts/Own%)" in result
 
 
-def test_polish_lineups_pct_of_own_guards_against_div_by_zero():
-    # Phase 6, Part 1.2: `% of Own` (renamed from `% of Rstr` in Part 2)
-    # = DK Sal / block's own salary total (D/D$<totals_row>) divided by
-    # zero on every roster slot until at least one name is typed --
-    # #DIV/0! on all 180 slot rows live.
+def test_polish_lineups_pct_of_cap_divides_by_the_salary_cap():
+    # Part 7.9: `% of Cap` (renamed from `% of Own`, Part 2's own `% of
+    # Rstr` before that) is this player's DK Sal as a share of the
+    # SALARY CAP, not the lineup's own running total -- Sam confirmed the
+    # intended meaning is cap allocation. A constant denominator can't
+    # divide by zero, so unlike Part 1.2's original fix, only the
+    # blank-slot guard remains.
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
-    result = polish_lineups_pct_of_own(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    result = polish_lineups_pct_of_cap(
+        client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000
+    )
 
     calls = {a1: rows for a1, rows in client.update_calls}
-    # DK Sal = D, % of Own = P, totals row = 18 (end + 1).
-    assert calls["P9"] == [['=IF(OR(A9="",D$18=0),"",D9/D$18)']]
-    assert calls["P17"] == [['=IF(OR(A17="",D$18=0),"",D17/D$18)']]
+    # DK Sal = D, % of Cap = P.
+    assert calls["P9"] == [['=IF(A9="","",D9/50000)']]
+    assert calls["P17"] == [['=IF(A17="","",D17/50000)']]
     assert "9 row(s)" in result
 
 
-def test_polish_lineups_pct_of_own_skips_when_column_missing():
-    header = [h for h in _HEADER_WITH_AVAIL_AT_Y if h != "% of Own"]
+def test_polish_lineups_pct_of_cap_skips_when_column_missing():
+    header = [h for h in _HEADER_WITH_AVAIL_AT_Y if h != "% of Cap"]
     client = FakeGuardrailsClient(header)
 
-    result = polish_lineups_pct_of_own(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    result = polish_lineups_pct_of_cap(
+        client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000
+    )
 
     assert client.update_calls == []
     assert "not all present" in result
@@ -817,7 +821,7 @@ def test_polish_guardrails_never_touches_a_column_other_than_issues():
     # DIFFERENT column than Issues in this fixture -- polish_guardrails
     # must never write there.
     client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
-    flag_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Flag"))
+    flag_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Flags"))
 
     polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
 
@@ -892,12 +896,18 @@ class FakeBuilderTabClient:
         self.boolean_rule_calls: list[tuple[str, dict]] = []
         self.banding_calls: list[tuple] = []
         self.color_scale_calls: list[tuple[str, dict]] = []
+        self.hide_calls: list[tuple[str, str]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
 
     def read_range(self, tab_name: str, a1_range: str):
         return [self._header]
+
+    def hide_columns(
+        self, tab_name: str, first_col_a1: str, last_col_a1: str, *, hidden: bool = True
+    ) -> None:
+        self.hide_calls.append((first_col_a1, last_col_a1))
 
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         self.format_calls.append((a1_range, fmt))
@@ -951,14 +961,17 @@ def test_apply_grouped_color_scales_writes_one_rule_per_column_per_group():
 
 
 def test_apply_grouped_color_scales_skips_the_grouped_tab_unscaled_columns():
-    client = FakeBuilderTabClient(["Name", "Pts", "CeilPct", "OwnPct"])
+    # `OwnPct` used to sit in GROUPED_TAB_UNSCALED_COLUMNS too; dropped
+    # entirely from the sheet in Part 7.9, so `CeilPct` alone demonstrates
+    # the skip now.
+    client = FakeBuilderTabClient(["Name", "Pts", "CeilPct"])
     applied = apply_grouped_color_scales(
         client, "Player Pool", client._header, [(3, 12)], skip=GROUPED_TAB_UNSCALED_COLUMNS
     )
 
     assert applied == 1
     assert {a1 for a1, _ in client.color_scale_calls} == {"B3:B12"}
-    assert GROUPED_TAB_UNSCALED_COLUMNS == {"CeilPct", "OwnPct"}
+    assert GROUPED_TAB_UNSCALED_COLUMNS == {"CeilPct"}
 
 
 def test_apply_grouped_color_scales_scopes_zero_exclusion_to_each_groups_own_range():
@@ -1019,12 +1032,12 @@ def test_polish_builder_tab_skips_repeat_styling_when_none_given():
 
 
 def test_polish_builder_tab_chips_flag_and_avail_columns_when_present():
-    # PlayerPoolRaw/Player Pool/Lineups all carry the same linked Flag/
+    # PlayerPoolRaw/Player Pool/Lineups all carry the same linked Flags/
     # Avail columns EdgeRaw has, but nothing applied their chips there --
     # found by `dfs setup audit-style`. Column-scoped clear, since
     # link_edge_columns' own colour scales and polish_guardrails' column
     # O live on this same tab and must not be touched.
-    client = FakeBuilderTabClient(["Name", "Flag", "Avail"])
+    client = FakeBuilderTabClient(["Name", "Flags", "Avail"])
 
     result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
@@ -1082,12 +1095,12 @@ def test_polish_builder_tab_applies_wind_chip_when_present():
     assert wind_rules[0]["condition_type"] == "NUMBER_GREATER"
 
 
-def test_polish_builder_tab_greys_lev_basis_when_present():
-    client = FakeBuilderTabClient(["Name", "LevBasis"])
+def test_polish_builder_tab_greys_own_status_when_present():
+    client = FakeBuilderTabClient(["Name", "OwnStatus"])
     polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
     formatted = [rng for rng, _ in client.format_calls if rng == "B2:B100"]
-    assert formatted, "LevBasis column should be formatted"
+    assert formatted, "OwnStatus column should be formatted"
 
 
 def test_polish_builder_tab_bolds_name_on_flag_without_pool_tint():
@@ -1268,7 +1281,7 @@ def test_style_movement_finds_columns_by_name_not_position():
     # Section F: build_movement's header is now 4-7 columns wide depending
     # on which optional columns EdgeRaw/GameStart provide, so this must be
     # header-name-driven, not a hardcoded A:E range.
-    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Total move", "Spread move", "Flag"])
+    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Total move", "Spread move", "Flags"])
 
     result = style_movement(client, "Movement")
 
@@ -1280,7 +1293,7 @@ def test_style_movement_finds_columns_by_name_not_position():
 
 
 def test_style_movement_handles_the_narrower_no_kickoff_no_extras_shape():
-    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Flag"])
+    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Flags"])
 
     result = style_movement(client, "Movement")
 

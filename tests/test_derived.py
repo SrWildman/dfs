@@ -3,10 +3,11 @@ import pandas as pd
 from dfs.derived import (
     CHALK_OWNERSHIP_THRESHOLD,
     EDGE_COLUMNS,
-    LEV_BASIS_REAL,
-    LEV_BASIS_UNPUBLISHED,
     LEVERAGE_FLAG_THRESHOLD,
     LINE_MOVE_FLAG_THRESHOLD,
+    OWN_STATUS_REAL,
+    OWN_STATUS_UNPUBLISHED,
+    _percentile_within,
     build_edge_frame,
 )
 
@@ -109,14 +110,17 @@ def test_leverage_and_ownpct_are_blank_when_all_projown_is_zero():
 
     frame = build_edge_frame(proj, sal).frame
 
-    assert (frame["LevBasis"] == LEV_BASIS_UNPUBLISHED).all()
+    assert (frame["OwnStatus"] == OWN_STATUS_UNPUBLISHED).all()
     assert frame["Leverage"].isna().all()
-    assert frame["OwnPct"].isna().all()
     # Blank Leverage isn't sortable, so the tab still ranks by CeilPct.
     assert frame["Name"].tolist() == ["High ceiling", "Low ceiling"]
 
 
 def test_leverage_is_ceilpct_minus_ownpct_once_ownership_is_published_for_most_of_the_slate():
+    # Part 7.9 dropped OwnPct from the sheet-facing frame (its only
+    # consumer anywhere was this one subtraction) -- recompute it here,
+    # the same way `build_edge_frame` does internally, to verify Leverage
+    # independently rather than reading a value the frame no longer has.
     proj = _projections(
         [
             {"Id": "1", "Name": "A", "Position": "RB", "Ceiling": 40.0, "ProjOwn": 30.0},
@@ -127,19 +131,23 @@ def test_leverage_is_ceilpct_minus_ownpct_once_ownership_is_published_for_most_o
     sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}])
 
     frame = build_edge_frame(proj, sal).frame
+    assert "OwnPct" not in frame.columns
 
-    assert (frame["LevBasis"] == LEV_BASIS_REAL).all()
+    by_id = proj.set_index("Id")
+    expected_own_pct = _percentile_within(by_id["ProjOwn"] / 100, by_id["Position"])
+    assert (frame["OwnStatus"] == OWN_STATUS_REAL).all()
     for _, row in frame.iterrows():
-        assert row["Leverage"] == round(row["CeilPct"] - row["OwnPct"], 1)
+        assert row["Leverage"] == round(row["CeilPct"] - expected_own_pct.round(1)[row["Id"]], 1)
 
 
 def test_a_single_early_nonzero_projown_does_not_flip_the_whole_slate_to_real():
     # Phase 6, Part 1.4: `.any()` used to mean one early-published (or
     # glitched) non-zero ProjOwn switched the ENTIRE slate to "real" --
-    # reproduced live: LevBasis read "real" while every other ProjOwn on
-    # EdgeRaw still read 0.0% and every Leverage cell was blank. A share
-    # threshold (more than half the slate) requires ownership to be
-    # genuinely published, not just present for one player.
+    # reproduced live: OwnStatus (LevBasis at the time) read "real" while
+    # every other ProjOwn on EdgeRaw still read 0.0% and every Leverage
+    # cell was blank. A share threshold (more than half the slate)
+    # requires ownership to be genuinely published, not just present for
+    # one player.
     proj = _projections(
         [
             {"Id": "1", "Name": "A", "Position": "RB", "Ceiling": 40.0, "ProjOwn": 30.0},
@@ -152,16 +160,17 @@ def test_a_single_early_nonzero_projown_does_not_flip_the_whole_slate_to_real():
 
     frame = build_edge_frame(proj, sal).frame
 
-    assert (frame["LevBasis"] == LEV_BASIS_UNPUBLISHED).all()
+    assert (frame["OwnStatus"] == OWN_STATUS_UNPUBLISHED).all()
     assert frame["Leverage"].isna().all()
-    assert frame["OwnPct"].isna().all()
 
 
 def test_ownpct_is_percentile_rank_of_projown_within_position_not_raw_percentage():
     # Raw ProjOwn subtraction was the bug: a percentile (0-100, mean 50) minus
     # a raw right-skewed percentage (mostly under 5, a few 25-40) centers
     # nowhere near 0. Rank-normalizing ProjOwn the same way Ceiling already
-    # is fixes that -- verify OwnPct actually lands on the percentile scale.
+    # is fixes that -- verify Leverage against an independently-computed
+    # OwnPct (Part 7.9 dropped OwnPct itself from the sheet-facing frame;
+    # its only consumer anywhere was this one subtraction).
     proj = _projections(
         [
             {"Id": "1", "Name": "A", "Position": "RB", "Ceiling": 10.0, "ProjOwn": 2.0},
@@ -173,10 +182,14 @@ def test_ownpct_is_percentile_rank_of_projown_within_position_not_raw_percentage
     sal = _salaries([{"ID": str(i)} for i in range(1, 5)])
 
     frame = build_edge_frame(proj, sal).frame
+    assert "OwnPct" not in frame.columns
+
+    by_id = proj.set_index("Id")
+    expected_own_pct = _percentile_within(by_id["ProjOwn"] / 100, by_id["Position"])
+    assert expected_own_pct["3"] == 100.0  # highest ProjOwn in the group (C)
+    assert expected_own_pct["1"] == 25.0  # lowest ProjOwn in the group (A)
+
     c = frame[frame["Name"] == "C"].iloc[0]
-    a = frame[frame["Name"] == "A"].iloc[0]
-    assert c["OwnPct"] == 100.0  # highest ProjOwn in the group
-    assert a["OwnPct"] == 25.0  # lowest ProjOwn in the group
     # C has both the highest ceiling AND the highest ownership -- real
     # leverage (a ceiling edge net of ownership) should be much lower than
     # its raw CeilPct alone, since owning C isn't contrarian.
@@ -192,7 +205,7 @@ def test_avail_reflects_dk_status_and_out_flag_overrides_leverage():
     row = build_edge_frame(proj, sal).frame.iloc[0]
 
     assert row["Avail"] == "OUT"
-    assert row["Flag"] == "OUT"
+    assert row["Flags"] == "OUT"
 
 
 def test_leverage_flag_never_fires_while_ownership_is_unpublished():
@@ -210,7 +223,7 @@ def test_leverage_flag_never_fires_while_ownership_is_unpublished():
 
     frame = build_edge_frame(proj, sal).frame
     top = frame[frame["Name"] == "Highest ceiling"].iloc[0]
-    assert top["Flag"] == ""
+    assert top["Flags"] == ""
 
 
 def test_leverage_flag_fires_at_threshold_under_real_ownership():
@@ -232,7 +245,7 @@ def test_leverage_flag_fires_at_threshold_under_real_ownership():
     frame = build_edge_frame(proj, sal).frame
     top = frame[frame["Name"] == "Player 10"].iloc[0]  # highest ceiling, lowest ownership
     assert top["Leverage"] >= LEVERAGE_FLAG_THRESHOLD
-    assert top["Flag"] == "LEVERAGE"
+    assert top["Flags"] == "LEVERAGE"
 
 
 def test_chalk_flag_set_for_high_ownership_under_real_basis():
@@ -264,7 +277,7 @@ def test_chalk_flag_set_for_high_ownership_under_real_basis():
     frame = build_edge_frame(proj, sal).frame
     chalky = frame[frame["Name"] == "Chalky"].iloc[0]
     assert chalky["Leverage"] < LEVERAGE_FLAG_THRESHOLD
-    assert chalky["Flag"] == "CHALK"
+    assert chalky["Flags"] == "CHALK"
 
 
 def test_game_env_scores_higher_total_and_tighter_spread_higher():
@@ -366,7 +379,7 @@ def test_wind_joined_from_weather_by_game_and_flagged_over_threshold():
 
     row = build_edge_frame(proj, sal, games=games, weather=weather).frame.iloc[0]
     assert row["Wind"] == 25.0
-    assert row["Flag"] == "WIND"
+    assert row["Flags"] == "WIND"
 
 
 def test_out_and_wind_flags_both_shown_out_first():
@@ -378,7 +391,10 @@ def test_out_and_wind_flags_both_shown_out_first():
     weather = pd.DataFrame([{"GameId": "g1", "Wind": 25.0}])
 
     row = build_edge_frame(proj, sal, games=games, weather=weather).frame.iloc[0]
-    assert row["Flag"] == "OUT WIND"
+    assert row["Flags"] == "OUT WIND"
+    # Part 7.9: "Flag" (singular, hidden) is just the first/highest-priority
+    # token -- "Flags" (visible) is every matching condition.
+    assert row["Flag"] == "OUT"
 
 
 def test_dst_name_rewritten_to_dk_nickname_for_downstream_joins():
@@ -433,7 +449,7 @@ def test_line_move_joined_by_team_and_flagged():
     assert row["ImpliedMove"] == delta
     assert row["TotMove"] == 1.0
     assert row["SpdMove"] == -0.5
-    assert row["Flag"] == "LINE↑"
+    assert row["Flags"] == "LINE↑"
 
 
 def test_line_move_down_flag():
@@ -446,7 +462,7 @@ def test_line_move_down_flag():
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["Flag"] == "LINE↓"
+    assert row["Flags"] == "LINE↓"
 
 
 def test_line_move_flag_keys_off_impmove_not_totmove_or_spdmove():
@@ -463,7 +479,7 @@ def test_line_move_flag_keys_off_impmove_not_totmove_or_spdmove():
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
     assert row["TotMove"] == 5.0
     assert row["SpdMove"] == -5.0
-    assert row["Flag"] == ""
+    assert row["Flags"] == ""
 
 
 def test_out_and_line_move_flags_both_shown_out_first():
@@ -476,7 +492,7 @@ def test_out_and_line_move_flags_both_shown_out_first():
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["Flag"] == "OUT LINE↑"
+    assert row["Flags"] == "OUT LINE↑"
 
 
 def test_multiple_flags_shown_in_priority_order():
@@ -495,7 +511,24 @@ def test_multiple_flags_shown_in_priority_order():
 
     frame = build_edge_frame(proj, sal, games=games, weather=weather).frame
     row = frame[frame["Name"] == "Leveraged"].iloc[0]
-    assert row["Flag"] == "WIND LEVERAGE"
+    assert row["Flags"] == "WIND LEVERAGE"
+    # Part 7.9: "Flag" (singular, hidden) is just the first/highest-priority
+    # token of the same list -- "Flags" (visible) is everything.
+    assert row["Flag"] == "WIND"
+
+
+def test_flag_is_hidden_single_top_priority_token_flags_is_everything():
+    # Part 7.9: verified live that "Flag" already held every matching
+    # condition space-separated, not the single first-match value 7.9's
+    # own spec assumed (Fix 2.1, an earlier session) -- so this split had
+    # to be built for real rather than just renamed. No conditions at all
+    # -> both columns blank, not "" vs NaN inconsistency.
+    proj = _projections([{"Id": "1", "Name": "P", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert row["Flag"] == ""
+    assert row["Flags"] == ""
 
 
 def test_game_start_passes_through_from_projections():

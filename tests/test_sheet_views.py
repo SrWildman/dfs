@@ -235,9 +235,9 @@ def test_board_header_row_matches_style_boards_column_assumptions():
     # Panel 2 (F-I): Player, Pos, Salary, CeilVal -- style_board currency-formats H (Salary).
     assert header[7] == "Salary"
     assert header[8] == "CeilVal"
-    # Panel 3 (K-N): Player, Pos, Avail, Flag -- style_board chips M (Avail) and N (Flag).
+    # Panel 3 (K-N): Player, Pos, Avail, Flags -- style_board chips M (Avail) and N (Flags).
     assert header[12] == "Avail"
-    assert header[13] == "Flag"
+    assert header[13] == "Flags"
 
 
 def test_best_ceiling_value_ranks_within_position_not_across_the_whole_slate():
@@ -274,10 +274,13 @@ def test_top_leverage_and_landmines_reference_current_edge_columns():
 
     assert _rng("EdgeRaw", "Leverage") in top_leverage
     assert _rng("EdgeRaw", "Avail") in landmines
-    assert _rng("EdgeRaw", "Flag") in landmines
-    # The exact stale-reference bug: LANDMINES must never read OwnPct or
-    # Leverage's own columns as a stand-in for Avail/Flag.
-    assert _rng("EdgeRaw", "OwnPct") not in landmines
+    # Part 7.9: LANDMINES reads "Flags" (every matching condition), not
+    # the hidden, top-priority-only "Flag".
+    assert _rng("EdgeRaw", "Flags") in landmines
+    # The exact stale-reference bug: LANDMINES must never read Leverage's
+    # own column as a stand-in for Avail/Flags. (OwnPct, the other half of
+    # the original stale-reference incident, no longer exists at all --
+    # dropped entirely from EDGE_COLUMNS in Part 7.9.)
     assert _rng("EdgeRaw", "Leverage") not in landmines
 
 
@@ -312,5 +315,5 @@ def test_movement_header_row_has_the_names_style_movement_looks_up():
     assert "Implied move" in header
     assert "Total move" in header
     assert "Spread move" in header
-    assert "Flag" in header
+    assert "Flags" in header
     assert "Line Move" not in header  # Section F: renamed away from the ambiguous old label

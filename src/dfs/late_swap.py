@@ -77,7 +77,9 @@ def lineup_slot_status(names: list[str], edge: pd.DataFrame, *, now: datetime) -
                 team=row.get("Team"),
                 proj_pts=row.get("ProjPts"),
                 leverage=row.get("Leverage"),
-                flag=(row.get("Flag") or None),
+                # Part 7.9: "Flags" is every matching condition -- "Flag"
+                # (singular) is hidden, top-priority-only, not useful here.
+                flag=(row.get("Flags") or None),
             )
         )
     return statuses

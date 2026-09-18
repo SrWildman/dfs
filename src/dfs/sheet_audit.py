@@ -189,10 +189,10 @@ def audit_tab(client: SheetsClient, tab: str, *, header_row: int) -> TabAudit:
     if general_fields:
         audit.issues.append(f"General number format despite FIELD_FORMATS entry: {', '.join(general_fields)}")
 
-    if "Flag" in header:
-        letter = column_letter(header.index("Flag"))
+    if "Flags" in header:
+        letter = column_letter(header.index("Flags"))
         if not client.has_chip_rule(tab, letter, list(FLAG_CHIPS)):
-            audit.issues.append(f"Flag column ({letter}) has no matching chip rule")
+            audit.issues.append(f"Flags column ({letter}) has no matching chip rule")
     if "Avail" in header:
         letter = column_letter(header.index("Avail"))
         if not client.has_chip_rule(tab, letter, list(AVAIL_CHIPS)):

@@ -4,7 +4,7 @@ from dfs.live_diff import diff_edge_flags
 
 
 def _edge_row(id_, name, position, team, flag):
-    return {"Id": id_, "Name": name, "Position": position, "Team": team, "Flag": flag}
+    return {"Id": id_, "Name": name, "Position": position, "Team": team, "Flags": flag}
 
 
 def test_diff_edge_flags_reports_only_changed_rows():

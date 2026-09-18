@@ -76,14 +76,21 @@ from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
 # Leverage = CeilPct - OwnPct, both percentile ranks on the same 0-100
 # scale within position -- see the module docstring's "second scale/index
 # bug" postmortem for why this replaced a raw-percentage subtraction.
-# LevBasis's one remaining job: telling you whether ProjOwn has actually
+# `OwnPct` itself is dropped from EDGE_COLUMNS (Part 7.9: its only
+# consumer anywhere in this codebase was this one subtraction -- verified
+# by grep before removing) but stays a real pandas column here, computed
+# and used exactly as before; only the sheet-facing output changed.
+# OwnStatus's one remaining job: telling you whether ProjOwn has actually
 # been published yet. Until it has (every player reads 0), there is no
 # real ownership signal to rank against, so Leverage is left BLANK rather
 # than showing a number that looks like leverage but isn't -- a confident
 # wrong number is worse than an empty cell. The frame still sorts usefully
 # in that window, just by CeilPct instead (see build_edge_frame).
-LEV_BASIS_REAL = "real"
-LEV_BASIS_UNPUBLISHED = "unpublished"
+# Renamed from LevBasis (Part 7.9): with Leverage demoted off the spine
+# (Part 7.1), this marker's real job is gating `Own%`, a spine column --
+# the old name no longer said what it does.
+OWN_STATUS_REAL = "real"
+OWN_STATUS_UNPUBLISHED = "unpublished"
 
 # Re-tuned against a real Week 1 slate (744 players, real ProjOwn already
 # published) once both sides of Leverage were rank-normalized onto the same
@@ -167,7 +174,13 @@ EDGE_COLUMNS = [
     "CeilVal",
     "Own%",
     "Avail",
-    "Flag",
+    # Part 7.9: "Flag" (below, hidden) turned out to ALREADY be every
+    # matching condition, space-separated (Fix 2.1, an earlier session) --
+    # not the first-match-only value 7.9's own text assumed. Verified with
+    # Sam directly rather than guessed: split for real, not just renamed.
+    # "Flags" is the one on the spine now -- everything that fired, for
+    # reading.
+    "Flags",
     # GAME (collapsed)
     "OverUnder",
     "Spread",
@@ -178,13 +191,13 @@ EDGE_COLUMNS = [
     # a live Sheets formula, matching EdgeRaw's own "computed locally, no
     # live formulas" design. See `_attach_opp_pos_rank` below.
     "OppPosRank",
-    # CEILING DETAIL (collapsed) -- CeilPct/OwnPct/LevBasis were already
+    # CEILING DETAIL (collapsed) -- CeilPct/OwnStatus were already
     # collapsed together (the old INTERNAL group); Leverage joins them
-    # here now that it's off the spine (Part 7.1).
+    # here now that it's off the spine (Part 7.1). `OwnPct` dropped
+    # entirely (Part 7.9) -- see the constant section above.
     "CeilPct",
-    "OwnPct",
     "Leverage",
-    "LevBasis",
+    "OwnStatus",
     # MOVEMENT (collapsed)
     "ImpliedMove",
     "TotMove",
@@ -194,10 +207,14 @@ EDGE_COLUMNS = [
     "Stadium",
     "Roof",
     "Wind",
-    # Id stays hidden outright, not part of any visible group -- Pool
+    # Id/Flag stay hidden outright, not part of any visible group -- Pool
     # (column A, ahead of this whole list) sits directly beside Name with
-    # no column between them.
+    # no column between them. "Flag" (Part 7.9) is the single
+    # highest-priority token only -- kept, not deleted, since other
+    # formatting/filtering logic keys off it as a boolean/categorical
+    # value; "Flags" (on the spine, above) is what a person reads.
     "Id",
+    "Flag",
 ]
 
 
@@ -320,13 +337,14 @@ def _dst_nickname(full_team_name: str) -> str:
     return full_team_name.strip().rsplit(" ", 1)[-1]
 
 
-def _flag_for_row(row: pd.Series) -> str:
-    """Every matching flag, space-separated in priority order -- a player
-    who is both WIND and LEVERAGE showed only WIND under the old
+def _flags_for_row(row: pd.Series) -> list[str]:
+    """Every matching flag, in priority order (most urgent first) -- a
+    player who is both WIND and LEVERAGE showed only WIND under the old
     first-match-wins rule, silently hiding the second condition. All of
     these can be simultaneously true of the same player, so all of them
-    are surfaced (`sheet_style.FLAG_CHIPS` matches on TEXT_CONTAINS
-    accordingly, not TEXT_EQ)."""
+    are computed here; `build_edge_frame` derives both sheet columns from
+    this one list (`Flags` = every token space-separated, for reading;
+    `Flag` = just the first / highest-priority one, Part 7.9)."""
     flags = []
     if row["Avail"] in OUT_STATUSES:
         flags.append("OUT")
@@ -344,7 +362,7 @@ def _flag_for_row(row: pd.Series) -> str:
     # until TFFB publishes it, so this can't fire before then regardless.
     if row["ProjOwn"] >= CHALK_OWNERSHIP_THRESHOLD:
         flags.append("CHALK")
-    return " ".join(flags)
+    return flags
 
 
 def build_edge_frame(
@@ -410,7 +428,7 @@ def build_edge_frame(
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)
 
     has_real_ownership = merged["ProjOwn"].fillna(0).gt(0).mean() > OWNERSHIP_PUBLISHED_SHARE_THRESHOLD
-    merged["LevBasis"] = LEV_BASIS_REAL if has_real_ownership else LEV_BASIS_UNPUBLISHED
+    merged["OwnStatus"] = OWN_STATUS_REAL if has_real_ownership else OWN_STATUS_UNPUBLISHED
     if has_real_ownership:
         merged["OwnPct"] = _percentile_within(merged["ProjOwn"], merged["Position"]).round(1)
         merged["Leverage"] = (merged["CeilPct"] - merged["OwnPct"]).round(1)
@@ -435,7 +453,11 @@ def build_edge_frame(
     merged["Avail"] = merged["Status"].fillna("")
     merged = merged.drop(columns="Status")
 
-    merged["Flag"] = merged.apply(_flag_for_row, axis=1)
+    flag_lists = merged.apply(_flags_for_row, axis=1)
+    merged["Flags"] = flag_lists.apply(" ".join)
+    # Part 7.9: "Flag" is just the single highest-priority token (empty
+    # string, not NaN, when nothing fired -- consistent with "Flags").
+    merged["Flag"] = flag_lists.apply(lambda flags: flags[0] if flags else "")
 
     # Leverage is blank for the whole frame until ownership publishes (see
     # above), and sorting by an all-blank column just returns join order --

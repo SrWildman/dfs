@@ -22,8 +22,12 @@ class FakeWorksheet:
         self.title = title
         self.id = FakeWorksheet._next_id
         FakeWorksheet._next_id += 1
-        self.row_count = 1000
-        self.col_count = 26
+        # Mirrors real gspread's own shape (`Worksheet._properties["gridProperties"]`)
+        # rather than plain attributes, so a real `SheetsClient` method that pokes
+        # `ws._properties` directly (delete_columns's own cache-staleness fix, see
+        # its docstring) behaves the same against this fake as against the real
+        # thing.
+        self._properties = {"gridProperties": {"rowCount": 1000, "columnCount": 26}}
         self._rows: list[list[str]] = [list(r) for r in (rows or [])]
         self.frozen_rows = 0
         self.color_scale_calls: list[dict] = []
@@ -97,6 +101,22 @@ class FakeWorksheet:
 
     def format(self, a1_range: str, fmt: dict) -> None:
         pass
+
+    @property
+    def row_count(self) -> int:
+        return self._properties["gridProperties"]["rowCount"]
+
+    @row_count.setter
+    def row_count(self, value: int) -> None:
+        self._properties["gridProperties"]["rowCount"] = value
+
+    @property
+    def col_count(self) -> int:
+        return self._properties["gridProperties"]["columnCount"]
+
+    @col_count.setter
+    def col_count(self, value: int) -> None:
+        self._properties["gridProperties"]["columnCount"] = value
 
     def add_cols(self, n: int) -> None:
         self.col_count += n
@@ -800,6 +820,28 @@ def test_delete_columns_issues_a_delete_dimension_request(cfg, monkeypatch, tmp_
     assert len(ws.delete_dimension_calls) == 1
     r = ws.delete_dimension_calls[0]["range"]
     assert (r["dimension"], r["startIndex"], r["endIndex"]) == ("COLUMNS", 5, 7)
+
+
+def test_delete_columns_keeps_cached_col_count_correct_for_a_later_ensure_capacity_call(
+    cfg, monkeypatch, tmp_path
+):
+    # Found live migrating Part 7.9's OwnPct removal: a raw `deleteDimension`
+    # request doesn't go through gspread's own `resize`/`add_cols`, the only
+    # methods that update the cached `col_count` gspread's own docs warn is
+    # otherwise stale. Left uncorrected, `ensure_column_capacity` right after
+    # a `delete_columns` in the same script compares against the OLD, now-
+    # too-wide count, skips growing the grid, and the next provisioning write
+    # past the new (shrunk) edge fails outright ("exceeds grid limits").
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["existing"]])
+    ws = fake_sheet._worksheets["T"]
+    ws.col_count = 29
+
+    client.delete_columns("T", at_index=18, count=1)
+    assert ws.col_count == 28
+
+    client.ensure_column_capacity("T", 29)
+    assert ws.col_count == 29
 
 
 def test_set_dropdown_validation_targets_only_the_given_cell(cfg, monkeypatch, tmp_path):

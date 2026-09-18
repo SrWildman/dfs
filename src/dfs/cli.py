@@ -62,7 +62,7 @@ from dfs.sheet_style import (
     polish_edge,
     polish_guardrails,
     polish_lineups_input_column,
-    polish_lineups_pct_of_own,
+    polish_lineups_pct_of_cap,
     polish_lineups_remaining_per_slot_helper,
     polish_lineups_totals_rows,
     style_tier23_tabs,
@@ -509,36 +509,51 @@ def sheets_fix_opp_pos_rank(
 
 
 @setup_app.command(
-    "fix-pct-of-own", short_help="One-time: guard Lineups' '% of Own' against #DIV/0! on an empty block."
+    "fix-pct-of-cap",
+    short_help="One-time: rebuild Lineups' '% of Cap' against the salary cap, not the running total.",
 )
-def sheets_fix_pct_of_own(
+def sheets_fix_pct_of_cap(
     sheet_id: str = typer.Option(
         None,
         "--sheet-id",
         help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
     ),
 ) -> None:
-    """Found live 2026-09-17: `Lineups`' `% of Rstr` column (renamed to
-    `% of Own` in Phase 6, Part 2 -- see `sheet_columns.py`) --
-    `=F<row>/F$<totals_row>`, this player's DK Sal as a share of the
-    lineup's own running salary total -- divides by zero on every roster
-    slot until at least one name is typed in that block -- `#DIV/0!` on
-    all 180 slot rows on a fresh week. Rewrites every row's formula,
-    guarded to yield blank rather than 0 or an error
-    (`sheet_style.polish_lineups_pct_of_own`)."""
+    """Part 7.9 (2026-09-17): `Lineups`' `% of Own` column (renamed from
+    `% of Rstr` in Phase 6, Part 2) was really cap allocation misnamed and
+    mis-derived -- `=F<row>/F$<totals_row>`, this player's DK Sal as a
+    share of the lineup's own running salary total, not its rostership.
+    Renames the header to `% of Cap` in place first (`rename_header_
+    column`, same "rename before any name-based lookup touches it" order
+    as every other column rename in this codebase), then redivides by the
+    salary cap (`config.toml`'s `[lineups] salary_cap`) instead, which
+    also removes the `#DIV/0!` Part 1.2 previously guarded against -- a
+    constant denominator can't divide by zero
+    (`sheet_style.polish_lineups_pct_of_cap`)."""
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
     client = SheetsClient(gs_cfg)
     try:
         title, url = client.describe()
-        console.print(f"Fixing '% of Own' in: [bold]{title}[/bold]\n{url}\n")
-        result = polish_lineups_pct_of_own(
+        console.print(f"Fixing '% of Cap' in: [bold]{title}[/bold]\n{url}\n")
+        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+        header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
+        renamed = rename_header_column(
             client,
             cfg.lineups.builder_tab,
-            header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
-            name_blocks=LINEUPS_NAME_BLOCKS,
+            "% of Own",
+            "% of Cap",
+            header_row=lineups_header_row,
+            header_repeats_at=header_repeats_at,
         )
-        console.print(f"[green]OK[/green] {result}")
+        result = polish_lineups_pct_of_cap(
+            client,
+            cfg.lineups.builder_tab,
+            header_row=lineups_header_row,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            salary_cap=cfg.lineups.salary_cap,
+        )
+        console.print(f"[green]OK[/green] renamed: {renamed}; {result}")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -819,20 +834,20 @@ def sheets_link_edge(
         "since the normal 'something's missing' trigger never fires on an already-linked tab.",
     ),
 ) -> None:
-    """Fill in EdgeRaw's derived columns (Leverage, Flag, etc.) on Player
+    """Fill in EdgeRaw's derived columns (Leverage, Flags, etc.) on Player
     Pool, Lineups, AND PlayerPoolRaw (the hub tab those two already
     VLOOKUP against for Pos./Team/Pts/etc.), via the same VLOOKUP-by-Name
     join. Writes into whatever column already carries a given name in the
-    header (Phase 3's designed order interleaves these with native
+    header (Part 2's designed order interleaves these with native
     columns; see `sheet_links.py`'s module docstring) and only creates
     (appends) a column for a name genuinely absent -- a fresh sheet build
-    that hasn't been through `dfs setup reorder-columns` yet. The three
-    always-linked groups (Stadium/Roof/Wind, ImpliedMove/TotMove/SpdMove/
-    GameStart, Id/CeilPct/OwnPct/LevBasis) are grouped so they can be
-    collapsed from the sheet UI (the little +/- control above the column
-    letters) when you want a narrower view. Safe to re-run -- a tab where
-    every linked column already exists is left alone, not duplicated,
-    unless `--force` is given.
+    that hasn't been through `dfs setup reorder-columns` yet. The four
+    collapsed zones (Game, Ceiling detail, Movement, Weather -- Part 2)
+    are grouped so they can be collapsed from the sheet UI (the little
+    +/- control above the column letters) when you want a narrower view;
+    `Id`/`Flag` (Part 7.9) are hidden outright instead, not grouped. Safe
+    to re-run -- a tab where every linked column already exists is left
+    alone, not duplicated, unless `--force` is given.
 
     Also refreshes Player Pool's "Used"/"In" columns (Phase 5B: how many
     of this week's lineups roster a given pool player, and which ones) --
@@ -992,6 +1007,115 @@ def sheets_reorder_columns(
         console.print(
             f"[green]OK[/green] renamed {renamed} header cell(s) (Rstr% -> Own%, % of Rstr -> % of Own)"
         )
+
+        results = migrate_tab_to_designed_order(
+            client,
+            PLAYER_POOL_RAW_TAB,
+            PLAYER_POOL_RAW_COLUMN_ORDER,
+            name_blocks=PLAYER_POOL_RAW_BLOCK,
+            edge_tab=edge_tab,
+            rewrite_native=False,
+        )
+        results += migrate_tab_to_designed_order(
+            client,
+            cfg.lineups.player_pool_tab,
+            PLAYER_POOL_COLUMN_ORDER,
+            name_blocks=PLAYER_POOL_NAME_BLOCKS,
+            edge_tab=edge_tab,
+            header_row=PLAYER_POOL_HEADER_ROW,
+            rewrite_native=True,
+        )
+        results += migrate_tab_to_designed_order(
+            client,
+            cfg.lineups.builder_tab,
+            LINEUPS_COLUMN_ORDER,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            edge_tab=edge_tab,
+            header_row=lineups_header_row,
+            header_repeats_at=header_repeats_at,
+            rewrite_native=True,
+        )
+    except (SheetsError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@setup_app.command(
+    "fix-flag-split",
+    short_help="One-time: split Flag/Flags, drop OwnPct, rename LevBasis -> OwnStatus (Part 7.9).",
+)
+def sheets_fix_flag_split(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Fix a different sheet instead of config.toml's -- ALWAYS run against the "
+        "canonical template first, verify with `dfs doctor`, then run again against the "
+        "live sheet.",
+    ),
+) -> None:
+    """Part 7.9 (2026-09-17), three changes to `PlayerPoolRaw`/`Player
+    Pool`/`Lineups`, run together since all three touch the same
+    Ceiling-detail/spine region:
+
+    1. `LevBasis` -> `OwnStatus` (renamed in place -- Leverage's own
+       demotion off the spine left this marker gating `Own%` instead, the
+       old name no longer said what it does).
+    2. `Flag` (already every matching condition, space-separated, despite
+       7.9's own spec assuming a stale first-match-only value -- see
+       CONTRIBUTING.md) -> `Flags`, renamed in place, taking over `Flag`'s
+       old visible spine slot; a NEW `Flag` column (single
+       highest-priority token only) is then provisioned and moved into
+       the hidden zone beside `Id`.
+    3. `OwnPct` removed entirely (a real column delete) -- its only
+       consumer anywhere in this codebase was the Leverage formula in
+       `derived.py`, verified by grep before removing.
+
+    Renames and the delete run FIRST (same "rename/delete before any
+    name-based lookup touches it" order as every other migration in this
+    codebase), then each tab runs through `sheet_reorder.migrate_tab_to_
+    designed_order` again to provision the new `Flag` column, re-link
+    every EdgeRaw formula against the current column set, and fix Ceiling
+    detail's own internal order (CeilPct/Leverage/OwnStatus, was CeilPct/
+    OwnPct/Leverage/LevBasis).
+
+    Re-run `dfs setup link-edge --force`, `dfs setup polish`, and `dfs
+    doctor` afterward -- this command only renames/removes/moves/creates
+    columns; it doesn't touch widths, hiding, or conditional formatting.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Fixing Flag/Flags/OwnPct/OwnStatus in: [bold]{title}[/bold]\n{url}\n")
+
+        header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
+        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+        rename_targets = [
+            (PLAYER_POOL_RAW_TAB, 1, None),
+            (cfg.lineups.player_pool_tab, PLAYER_POOL_HEADER_ROW, None),
+            (cfg.lineups.builder_tab, lineups_header_row, header_repeats_at),
+        ]
+        renamed = 0
+        for tab, row, repeats in rename_targets:
+            kwargs = {"header_row": row, "header_repeats_at": repeats}
+            if rename_header_column(client, tab, "LevBasis", "OwnStatus", **kwargs):
+                renamed += 1
+            if rename_header_column(client, tab, "Flag", "Flags", **kwargs):
+                renamed += 1
+        console.print(f"[green]OK[/green] renamed {renamed} header cell(s)")
+
+        for tab, row, _repeats in rename_targets:
+            removed = remove_header_columns(client, tab, ["OwnPct"], header_row=row)
+            console.print(f"[green]OK[/green] {removed}")
 
         results = migrate_tab_to_designed_order(
             client,
@@ -1501,8 +1625,8 @@ def edge(
             console.print(f"[yellow]No players at position {position!r}.[/yellow]")
             raise typer.Exit(code=1)
 
-    basis = df["LevBasis"].iloc[0] if len(df) else "?"
-    console.print(f"Leverage basis: [bold]{basis}[/bold] (real Own% until TFFB computes it midweek)\n")
+    basis = df["OwnStatus"].iloc[0] if len(df) else "?"
+    console.print(f"Ownership status: [bold]{basis}[/bold] (real Own% until TFFB computes it midweek)\n")
 
     table = Table(title="Top leverage plays")
     columns = (
@@ -1515,7 +1639,7 @@ def edge(
         "Own%",
         "Leverage",
         "GameEnv",
-        "Flag",
+        "Flags",
     )
     for col in columns:
         table.add_column(col)
@@ -1533,7 +1657,9 @@ def edge(
             f"{r['Own%']:.1%}",
             f"{r['Leverage']:.1f}" if pd.notna(r["Leverage"]) else "-",
             f"{r['GameEnv']:.1f}" if pd.notna(r["GameEnv"]) else "-",
-            r["Flag"] or "",
+            # Part 7.9: "Flags" is every matching condition, space-separated
+            # -- "Flag" (singular) is now hidden, top-priority-only.
+            r["Flags"] or "",
         )
     console.print(table)
 
@@ -1757,7 +1883,7 @@ def lineups_late_swap(
 
         any_shown = True
         table = Table(title=f"Lineup {lineup_number}")
-        for col in ("Slot", "Name", "Status", "ProjPts", "Leverage", "Flag"):
+        for col in ("Slot", "Name", "Status", "ProjPts", "Leverage", "Flags"):
             table.add_column(col)
         for s in statuses:
             if not s.found:

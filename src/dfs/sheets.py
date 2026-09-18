@@ -513,7 +513,25 @@ class SheetsClient:
         """Delete `count` columns starting at `at_index` (0-based) via a
         real Sheets API `deleteDimension` request -- everything to the
         right shifts left to fill the gap, same shifting guarantee as
-        `delete_rows`'s row-dimension equivalent."""
+        `delete_rows`'s row-dimension equivalent.
+
+        Found live migrating Part 7.9's `OwnPct` removal: a raw
+        `deleteDimension` request bypasses gspread's own dimension-
+        changing methods (`resize`/`add_cols`), which are the only things
+        that update the cached `Worksheet._properties["gridProperties"]
+        ["columnCount"]` gspread's own `col_count` property reads --
+        gspread's own docs even warn `col_count` "is not dynamically
+        updated when adding columns, yet". Left uncorrected, a column
+        actually shrinks by `count` while this client's cached `ws` object
+        (held for the rest of this `SheetsClient` instance's lifetime, see
+        `_ws`'s own docstring) still reports the OLD, now-too-wide count --
+        so a later `ensure_column_capacity` call in the same script
+        compares against stale data, concludes the grid is already wide
+        enough, skips growing it, and the next write past the new
+        (shrunk) edge fails outright ("exceeds grid limits"). Updating the
+        cache here, the same way gspread's own `resize()` does after a
+        successful call, keeps every later `col_count`/`ensure_column_
+        capacity` read in this same script correct."""
         sheet, ws = self._ws(tab_name)
         sheet.batch_update(
             {
@@ -531,6 +549,7 @@ class SheetsClient:
                 ]
             }
         )
+        ws._properties["gridProperties"]["columnCount"] -= count
 
     def move_columns(self, tab_name: str, *, from_index: int, to_index: int) -> None:
         """Move the single column at `from_index` (0-based) to `to_index`

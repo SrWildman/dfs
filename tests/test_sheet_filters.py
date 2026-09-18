@@ -62,9 +62,9 @@ def test_add_edge_filter_views_leverage_plays_targets_flag_column():
     add_edge_filter_views(client, "EdgeRaw")
     _tab, title, _rng, criteria = client.add_calls[1]
     assert title == "Leverage plays"
-    flag_idx = EDGE_COLUMNS.index("Flag") + EDGE_DATA_OFFSET
+    flag_idx = EDGE_COLUMNS.index("Flags") + EDGE_DATA_OFFSET
     assert list(criteria) == [flag_idx]
-    # TEXT_CONTAINS, not TEXT_EQ: Flag can hold more than one
+    # TEXT_CONTAINS, not TEXT_EQ: Flags can hold more than one
     # space-separated token now (Fix 2.1), e.g. "WIND LEVERAGE".
     assert criteria[flag_idx]["condition"]["type"] == "TEXT_CONTAINS"
     assert criteria[flag_idx]["condition"]["values"][0]["userEnteredValue"] == "LEVERAGE"

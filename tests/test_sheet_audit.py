@@ -214,13 +214,15 @@ def test_audit_tab_flags_general_number_format_on_a_field_formats_column():
 
 
 def test_audit_tab_flags_flag_and_avail_columns_with_no_chip_rule():
+    # Part 7.9: chip-rule coverage is checked against "Flags" (visible,
+    # every matching condition) now -- "Flag" (singular) is hidden.
     client = FakeAuditClient(
-        header=["Name", "Flag", "Avail"],
+        header=["Name", "Flags", "Avail"],
         widths={"A": 165, "B": 96, "C": 60},
         chip_columns=set(),
     )
     audit = audit_tab(client, "T", header_row=1)
-    assert any("Flag column" in i for i in audit.issues)
+    assert any("Flags column" in i for i in audit.issues)
     assert any("Avail column" in i for i in audit.issues)
 
 
