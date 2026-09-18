@@ -101,6 +101,7 @@ from dfs.derived import (
     MOVEMENT_LABEL,
     WEATHER_LABEL,
 )
+from dfs.sheet_lineup_metrics import LINEUP_METRIC_HEADERS
 
 IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 
@@ -250,15 +251,20 @@ PLAYER_POOL_COLUMN_ORDER = [
 # "% of Own" (Part 2) -> "% of Cap" (Part 7.9, once the real cap-
 # allocation meaning was confirmed) -- position unchanged both times.
 # "Issues" (A1: renamed from "Check") is the last thing you look at
-# before trusting a lineup, so it sits right after "% of Cap"; "Edge ↗"
-# (A3, same HYPERLINK-to-EdgeRaw as Player Pool's own column of the same
-# name) sits right after that -- Issues is exactly the moment you'd want
-# to jump over and check/fix something on EdgeRaw.
+# before trusting a lineup, so it sits right after "% of Cap". Part 7.5's
+# six lineup-metrics columns (`sheet_lineup_metrics.
+# LINEUP_METRIC_HEADERS`) sit right after Issues -- same "read this
+# before trusting a lineup" neighborhood, a natural continuation of it
+# rather than a second unrelated block -- with "Edge ↗" (A3, same
+# HYPERLINK-to-EdgeRaw as Player Pool's own column of the same name)
+# still last in this run, since it's about managing THIS row, not
+# describing the lineup.
 LINEUPS_COLUMN_ORDER = [
     *IDENTITY,
     *DECISION,
     "% of Cap",
     "Issues",
+    *LINEUP_METRIC_HEADERS,
     "Edge ↗",
     GAME_LABEL,
     *GAME,

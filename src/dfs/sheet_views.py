@@ -254,6 +254,7 @@ def build_exposure(
     edge_tab: str,
     lineups_tab: str,
     lineup_count: int,
+    lineups_header_row: int = 1,
 ) -> str:
     """Fills the Exposure tab, which has been a documented feature and a
     single empty cell since the sheet was built.
@@ -275,11 +276,27 @@ def build_exposure(
     build read as 30% (6/20) instead of 100%. `lineup_count` is kept as
     the divisor's fallback (a blank or zero `H1` must never produce
     `#DIV/0!` or silently divide by 1).
+
+    Part 7.5's portfolio-level headline: distinct QBs used and distinct
+    games represented, across the WHOLE build (not per-lineup, which is
+    Part 7.5's other half, `sheet_lineup_metrics.py`), plus a plain
+    Yes/No flag when two lineups share a QB. Found by reading `Lineups`'
+    OWN header (`lineups_header_row`) for its real `Pos.`/`GameID`
+    column letters -- never assumed to be EdgeRaw's own letters, since
+    the two tabs' column orders differ.
     """
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     salary = _rng(edge_tab, "Salary")
     lu = f"{_q(lineups_tab)}!$A$1:$A"
+
+    lineups_header = client.read_range(lineups_tab, f"A{lineups_header_row}:{lineups_header_row}")
+    lineups_header = lineups_header[0] if lineups_header else []
+    portfolio_cols: dict[str, str] = {}
+    if lineups_header:
+        for col_name in ("Pos.", "GameID"):
+            if col_name in lineups_header:
+                portfolio_cols[col_name] = column_letter(lineups_header.index(col_name))
 
     usage_cell = f"${LINEUP_COUNT_CELL[0]}${LINEUP_COUNT_CELL[1:]}"
     divisor = f"IF(N({usage_cell})>0,N({usage_cell}),{lineup_count})"
@@ -305,6 +322,20 @@ def build_exposure(
 
     roster = f'=IFERROR(SORT(FILTER({{{name},{pos},{salary}}},{name}<>"",COUNTIF({lu},{name})>0),3,FALSE),"")'
 
+    # Part 7.5: portfolio headline, K1:P1 -- blank (not a broken formula)
+    # if Lineups hasn't been through `dfs setup reorder-columns` yet and
+    # doesn't have Pos./GameID linked.
+    if "Pos." in portfolio_cols and "GameID" in portfolio_cols:
+        lu_pos = f"{_q(lineups_tab)}!${portfolio_cols['Pos.']}$1:${portfolio_cols['Pos.']}"
+        lu_gameid = f"{_q(lineups_tab)}!${portfolio_cols['GameID']}$1:${portfolio_cols['GameID']}"
+        qb_names = f'UNIQUE(FILTER({lu},{lu_pos}="QB"))'
+        distinct_qbs = f"=COUNTA({qb_names})"
+        qb_slots_filled = f'COUNTIF({lu_pos},"QB")'
+        shared_qb = f'=IF({qb_slots_filled}>COUNTA({qb_names}),"Yes","No")'
+        distinct_games = f'=COUNTA(UNIQUE(FILTER({lu_gameid},{lu_gameid}<>"")))'
+    else:
+        distinct_qbs = shared_qb = distinct_games = ""
+
     rows = [
         [
             "Name",
@@ -317,6 +348,12 @@ def build_exposure(
             lineup_count_value,
             "Slots filled",
             f'=COUNTIF({lu},"?*")-COUNTIF({lu},"Name")',
+            "Distinct QBs",
+            distinct_qbs,
+            "Shared QB?",
+            shared_qb,
+            "Distinct games",
+            distinct_games,
         ],
         [roster, "", "", f'=IF($A2="","",COUNTIF({lu},$A2))', f'=IF($A2="","",D2/({divisor}))', "", ""],
     ]
@@ -359,9 +396,15 @@ def build_exposure(
     client.set_number_range_validation(EXPOSURE_TAB, LINEUP_COUNT_CELL, minimum=1, maximum=lineup_count)
 
     note = f", {len(existing)} target(s) preserved" if existing else ""
+    portfolio_note = (
+        ", portfolio headline (Distinct QBs/Shared QB?/Distinct games)"
+        if distinct_qbs
+        else ", portfolio headline skipped -- Lineups' Pos./GameID not linked yet"
+    )
     return (
         f"{EXPOSURE_TAB}: built off {lineups_tab} "
-        f"(divisor: {EXPOSURE_TAB}!{LINEUP_COUNT_CELL}, falling back to {lineup_count}-lineup capacity){note}"
+        f"(divisor: {EXPOSURE_TAB}!{LINEUP_COUNT_CELL}, falling back to {lineup_count}-lineup capacity)"
+        f"{note}{portfolio_note}"
     )
 
 

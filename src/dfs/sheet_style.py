@@ -247,6 +247,13 @@ FIELD_FORMATS = {
     "H2H %": _num("0.0%", "PERCENT"),
     "Wind": _num('0" mph"'),
     "Gust": _num('0" mph"'),
+    # Part 7.5: Lineups-only lineup-metrics block. "Stack"/"Bring-back"
+    # are text (a signature string, "Yes"/"No"/blank) -- no format entry
+    # needed, same as any other text column.
+    "Games": _num("0"),
+    "Own% Used": _num("0.0%", "PERCENT"),
+    "Sub-10%": _num("0"),
+    "Min Unique": _num("0"),
 }
 
 
@@ -1276,6 +1283,15 @@ BUILDER_WIDTHS = {
     # rather than waiting for the next reorder to expose it too.
     "O/U": 60,
     "Pts": 65,
+    # Part 7.5: Lineups-only, the lineup-metrics block
+    # (`sheet_lineup_metrics.LINEUP_METRIC_HEADERS`). "Stack" holds
+    # strings up to "QB+3 (KC) + 2 bring-back"-length.
+    "Stack": 180,
+    "Games": 56,
+    "Bring-back": 92,
+    "Own% Used": 92,
+    "Sub-10%": 72,
+    "Min Unique": 92,
 }
 
 

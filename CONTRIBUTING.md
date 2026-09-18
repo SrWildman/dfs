@@ -1138,6 +1138,74 @@ shape" and "Stack candidates" panels cover this same need with a clearer
 spec to build against). Sam: fold it into the Board rebuild rather than
 build a standalone tab now that would likely need rework days later.
 
+## Phase 6, Part 7.5 (2026-09-18): the lineup-level metrics block
+
+Sam's own spec called this "the highest impact-per-effort item
+available" -- every published DFS target (ownership, stacking,
+uniqueness) is a LINEUP property, and the tool had been entirely
+player-level until now. Pure formula work, no new data source.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-18 | `Lineups` | Six new columns inserted right after `Issues`: `Stack`, `Games`, `Bring-back`, `Own% Used`, `Sub-10%`, `Min Unique` (new `sheet_lineup_metrics.LINEUP_METRIC_HEADERS`). Everything from `Edge ↗` onward shifts six positions right. `Exposure`'s header row (not a structural move, but changed the same day) gains three portfolio cells at K1:P1: `Distinct QBs`, `Shared QB?`, `Distinct games`. | `sheet_columns.LINEUPS_COLUMN_ORDER` 40 columns, `Issues` at index 14, `Edge ↗` at 15. `Exposure`'s header row: A-J only (`Slots filled` the last pair, I1/J1). | `LINEUPS_COLUMN_ORDER` 46 columns, `Issues` still at 14, `Stack` at 15 through `Min Unique` at 20, `Edge ↗` now at 21. `Exposure`'s header row: A-P, K1:P1 the new portfolio headline. | Live + Template | New `sheet_lineup_metrics.py` (whole module), `sheet_columns.LINEUPS_COLUMN_ORDER`, `sheet_views.build_exposure` (new `lineups_header_row` param, reads `Lineups`' own header for `Pos.`/`GameID` letters rather than assuming EdgeRaw's), `cli.py`'s `sheets_polish`/`sheets_build_views` call sites. |
+
+**The six per-lineup columns**, all written once per lineup block onto
+its own TOTALS row (blank on every slot row, same convention `Issues`/
+`% of Cap` already use for a whole-lineup property):
+
+- **`Stack`** -- e.g. `"QB+2 (KC) + 1 bring-back"`, `"QB+0 (KC)"` (no
+  stack), `"no QB"` (still-partial lineup). Stack count is every OTHER
+  rostered player (any position) on the QB's own team; bring-back count
+  is every rostered player in the QB's own `GameID` but on the OPPONENT's
+  team.
+- **`Games`** -- distinct `GameID`s across the 9 picks.
+- **`Bring-back`** -- Yes/No, a plain-language mirror of `Stack`'s own
+  bring-back count for a reader scanning the column rather than parsing
+  the string.
+- **`Own% Used`** -- summed projected ownership. Blank (not a
+  confidently-wrong 0%) until `OwnStatus` says ownership is real --
+  same policy `Leverage` already established.
+- **`Sub-10%`** -- count of picks under 10% projected ownership (Part
+  7.5's own explicit threshold, `SUB_10_OWNERSHIP_THRESHOLD = 0.10`, not
+  invented). Same ownership-published guard as `Own% Used` -- otherwise
+  every player reads exactly 0% pre-publish, making this read "9/9"
+  every single week before Tuesday.
+- **`Min Unique`** -- the smallest count of this lineup's own picks
+  ABSENT from some other lineup, minimized over every other lineup in
+  the build. Answers "how different is my most similar other lineup" --
+  `O(lineups^2)` in lineup-block count (each lineup's own formula names
+  every OTHER block's range once), fine at the 20-lineup scale this
+  sheet is built for.
+
+**Portfolio-level, on `Exposure`** (not `Lineups` -- Exposure is already
+the portfolio-analysis tab): `Distinct QBs` and `Distinct games` used
+across the WHOLE build, plus a plain `Shared QB?` Yes/No (a QB rostered
+in more than one lineup) -- found by reading `Lineups`' own real header
+for `Pos.`/`GameID`'s column letters, never EdgeRaw's.
+
+**Two genuinely new Sheets-formula mechanisms, both confirmed empirically
+on the template's Scratch tab before shipping:**
+
+1. `COUNTIFS(range, "<>"&formula_expression)` -- "not equal to" a
+   FORMULA-computed value (the QB's own team), not a literal or a plain
+   cell reference. Confirmed this concatenates and evaluates correctly,
+   same as it would with a literal.
+2. The cross-lineup `MIN` -- `9 - SUMPRODUCT(COUNTIF(other_range,
+   this_range) > 0)` per other lineup, wrapped in one `MIN(...)` --
+   tested against three small (3-player) mock lineups with a known
+   overlap pattern, confirmed the resolved minimum matched the
+   hand-computed expected value.
+
+**Deliberately NOT built, per Part 7.4's own text (restated here since
+7.5 is where a reader would look for it):** player-level exposure caps --
+"at 4-8 lineups they are actively harmful, they force Sam off his best
+plays for no portfolio benefit." Exposure stays a REPORT, never a
+constraint. Stack SHAPE (QB+1 vs QB+2 vs QB+3, a real GPP-target finding
+from the underlying review) is reported via `Stack` here, never warned
+about in `Issues` -- there's no cash/GPP tag per lineup (Part 7.3), so a
+shape warning would fire wrongly on a lineup that should have no stack
+at all.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

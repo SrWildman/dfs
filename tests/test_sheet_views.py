@@ -43,11 +43,20 @@ class FakeSheetsClient:
     """
 
     def __init__(
-        self, *, existing_rows: list[list[str]], post_write_names: list[str], existing_lineup_count: str = ""
+        self,
+        *,
+        existing_rows: list[list[str]],
+        post_write_names: list[str],
+        existing_lineup_count: str = "",
+        lineups_header: list[str] | None = None,
     ):
         self.existing_rows = existing_rows
         self.post_write_names = post_write_names
         self.existing_lineup_count = existing_lineup_count
+        # Part 7.5: Lineups' own header row, for the portfolio headline's
+        # Pos./GameID column lookup -- empty by default (most existing
+        # tests predate Part 7.4/7.5 and don't care about it).
+        self.lineups_header = lineups_header or []
         self.write_tab_calls: list[tuple[str, list[list]]] = []
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.note_calls: list[tuple[str, str]] = []
@@ -63,6 +72,9 @@ class FakeSheetsClient:
             return self.existing_rows
         if a1_range.startswith("A2:A"):
             return [[n] for n in self.post_write_names]
+        if a1_range.split(":")[0][1:] == a1_range.split(":")[1] and a1_range[0] == "A":
+            # A full header-row read, e.g. "A1:1" -- Lineups' own header.
+            return [self.lineups_header] if self.lineups_header else []
         raise AssertionError(f"unexpected read_range call: {a1_range!r}")
 
     def write_tab(self, tab_name: str, rows: list[list], **_kwargs) -> int:
@@ -193,6 +205,46 @@ def test_build_exposure_counts_the_whole_lineups_column():
 
     tab_name, rows = client.write_tab_calls[0]
     assert "Lineups!$A$1:$A" in rows[0][9]
+
+
+def test_build_exposure_adds_portfolio_headline_when_lineups_pos_and_gameid_linked():
+    client = FakeSheetsClient(
+        existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
+    )
+
+    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    header = client.write_tab_calls[0][1][0]
+    assert header[10:16] == [
+        "Distinct QBs",
+        '=COUNTA(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB")))',
+        "Shared QB?",
+        '=IF(COUNTIF(Lineups!$B$1:$B,"QB")>COUNTA(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB"))),"Yes","No")',
+        "Distinct games",
+        '=COUNTA(UNIQUE(FILTER(Lineups!$C$1:$C,Lineups!$C$1:$C<>"")))',
+    ]
+    assert "portfolio headline (Distinct QBs" in result
+
+
+def test_build_exposure_skips_portfolio_headline_when_gameid_not_linked_yet():
+    client = FakeSheetsClient(existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos."])
+
+    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    header = client.write_tab_calls[0][1][0]
+    assert header[10:16] == ["Distinct QBs", "", "Shared QB?", "", "Distinct games", ""]
+    assert "portfolio headline skipped" in result
+
+
+def test_build_exposure_reads_lineups_own_header_row_not_row_1():
+    client = FakeSheetsClient(
+        existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
+    )
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20, lineups_header_row=8)
+
+    header = client.write_tab_calls[0][1][0]
+    assert "QB" in header[11]  # formula still built -- read succeeded against row 8, not row 1
 
 
 def test_build_movement_uses_edge_columns_positions_for_impmove_and_gamestart():

@@ -256,8 +256,10 @@ after IDENTITY, since `Venue` no longer sits there) and appends
 `Overflow`/`Pool`/`Used`/`In` at the very end (43 total; `Used`/`In` are
 Phase 5B, see below). `Lineups` inserts `% of Cap` (renamed from `% of
 Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
-the full spine, then `Issues` then `Edge ↗` (A3), before the collapsed
-groups begin (40 total). Lineups also groups
+the full spine, then `Issues`, then Part 7.5's six lineup-metrics
+columns (`Stack` through `Min Unique`, see above), then `Edge ↗` (A3),
+before the collapsed groups begin (46 total, was 40 before Part 7.5).
+Lineups also groups
 `O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
 Game/Ceiling detail/Movement/Weather zones above -- see below. Column
@@ -426,6 +428,18 @@ polish_guardrails` finds every one of these columns by header name,
 never a hardcoded letter -- see CONTRIBUTING.md's Phase 3 changelog
 entry for the incident that happened when it didn't. See
 `docs/CALCULATIONS.md` for the formula mechanics.
+
+Right after `Issues` sit Part 7.5's six lineup-metrics columns
+(`sheet_lineup_metrics.py`), one value per lineup on its own totals row:
+`Stack` (a signature like `"QB+2 (KC) + 1 bring-back"`), `Games`
+(distinct games represented), `Bring-back` (Yes/No), `Own% Used` (summed
+projected ownership, blank pre-publish), `Sub-10%` (count of picks under
+10% owned, same pre-publish guard), and `Min Unique` (the smallest count
+of this lineup's own picks absent from some other lineup -- how
+different is your MOST similar other lineup). See `docs/CALCULATIONS.md`
+for the exact formulas. `Exposure`'s own header row (K1:P1) carries the
+portfolio-level counterpart: `Distinct QBs`, `Shared QB?` (Yes/No), and
+`Distinct games`, across the whole lineup build rather than one lineup.
 
 `Lineups`' real header sits at row 1. It didn't always -- a "pool deck"
 (frozen rows above the header holding a sortable/filterable window into

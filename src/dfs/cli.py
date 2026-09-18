@@ -39,6 +39,7 @@ from dfs.results_autofill import compute_week_results, write_results_updates
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
+from dfs.sheet_lineup_metrics import write_lineup_metrics
 from dfs.sheet_links import (
     PLAYER_POOL_RAW_BLOCK,
     PLAYER_POOL_RAW_TAB,
@@ -686,6 +687,14 @@ def sheets_polish(
                 header_repeats_at=header_repeats_at,
             )
         )
+        results.append(
+            write_lineup_metrics(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
         results.append(polish_lineups_input_column(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
         results.append(add_lineups_typo_guard(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
         results.append(
@@ -802,6 +811,7 @@ def sheets_build_views(
                 edge_tab=edge_tab,
                 lineups_tab=cfg.lineups.builder_tab,
                 lineup_count=len(LINEUPS_NAME_BLOCKS),
+                lineups_header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
             ),
             build_movement(client, edge_tab=edge_tab),
         ]

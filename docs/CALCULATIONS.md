@@ -542,6 +542,99 @@ source (a fixed denominator can't divide by zero) -- the only guard still
 needed is the blank-slot case (`$A<row>=""`), not the whole-block-empty
 case.
 
+## Lineup-level metrics block (Part 7.5, 2026-09-18)
+
+Sam's own spec: "the highest impact-per-effort item available" -- every
+published DFS target is a LINEUP property, and the tool had been
+entirely player-level. Six columns, `sheet_lineup_metrics.py`, each
+written once per lineup block onto its own TOTALS row.
+
+**`Stack`** -- `"QB+2 (KC) + 1 bring-back"` / `"QB+0 (KC)"` / `"no QB"`:
+
+```
+qb_team = INDEX(Team_range, MATCH("QB", Position_range, 0))
+qb_game = INDEX(GameID_range, MATCH("QB", Position_range, 0))
+stack_count = COUNTIFS(Team_range, qb_team, Position_range, "<>QB")
+bring_back_count = COUNTIFS(GameID_range, qb_game, Team_range, "<>"&qb_team)
+```
+
+`stack_count` is every OTHER rostered player (any position) on the QB's
+own team; `bring_back_count` is every rostered player in the QB's own
+game but on the OPPONENT's team -- the two can never double-count each
+other, since a bring-back is on the opposing team by definition. Both
+`INDEX`/`MATCH` lookups are `IFERROR`-guarded to `""` for a still-partial
+lineup missing a QB.
+
+**`Games`** -- `COUNTA(UNIQUE(FILTER(GameID_range, GameID_range<>"")))`,
+distinct `GameID`s across the 9 picks.
+
+**`Bring-back`** -- `"Yes"`/`"No"`, the same `bring_back_count` as
+`Stack` above, just as a plain flag rather than parsed out of a string.
+
+**`Own% Used`** -- `SUM(Own%_range)`, blank until `OwnStatus = "real"`
+(same policy `Leverage` already established -- summing an all-zero
+pre-publish `Own%` column would read as a confident "0% owned," which
+isn't a real claim yet).
+
+**`Sub-10%`** -- `COUNTIFS(Own%_range, "<0.10")`. `0.10` is Part 7.5's
+own explicit spec text ("Count of players under 10% owned"), not an
+invented threshold -- `sheet_lineup_metrics.SUB_10_OWNERSHIP_THRESHOLD`.
+Same `OwnStatus = "real"` guard as `Own% Used`, for the identical reason:
+every player reads exactly 0% pre-publish, which would make this column
+read "9/9" every week before Tuesday -- a real-looking number that isn't.
+
+**`Min Unique`** -- the smallest count of this lineup's own picks absent
+from some OTHER lineup, minimized over every other lineup in the build:
+
+```
+= MIN( (9 - SUMPRODUCT(COUNTIF(other_lineup_1_range, this_range) > 0)),
+       (9 - SUMPRODUCT(COUNTIF(other_lineup_2_range, this_range) > 0)),
+       ... one term per other lineup block )
+```
+
+Answers "how different is my most similar other lineup" -- a portfolio-
+diversification question a simple "how many total distinct players
+across all lineups" count can't answer (two 9-player lineups sharing 8
+picks and differing in exactly 1 slot look identical to that simpler
+count as two lineups that share nothing at all, if the totals happen to
+match). `O(lineups^2)` in the number of lineup blocks (each lineup's own
+formula names every OTHER block's range once) -- fine at the 20-lineup
+scale this sheet is built for, not something to scale past without
+reconsidering the approach.
+
+**A formula subtlety confirmed empirically before shipping:** `COUNTIFS`
+accepting `"<>"&formula_expression` as a criteria argument (not a literal
+string, not a plain cell reference -- a nested `INDEX`/`MATCH` result)
+concatenates and evaluates correctly, exactly as it would with a literal.
+Tested on the template's Scratch tab with a real 3-player mock lineup
+before trusting it in the `Stack`/`Bring-back` formulas above.
+
+**Portfolio-level, on `Exposure`** (not `Lineups` -- Exposure is already
+the portfolio-analysis tab, `sheet_views.build_exposure`): `Distinct QBs`
+and `Distinct games` used across the WHOLE lineup build, plus a plain
+`Shared QB?` Yes/No (a QB rostered in more than one lineup):
+
+```
+qb_names       = UNIQUE(FILTER(Lineups!Name, Lineups!Pos.="QB"))
+Distinct QBs   = COUNTA(qb_names)
+Shared QB?     = IF(COUNTIF(Lineups!Pos.,"QB") > COUNTA(qb_names), "Yes", "No")
+Distinct games = COUNTA(UNIQUE(FILTER(Lineups!GameID, Lineups!GameID<>"")))
+```
+
+`Shared QB?` compares the count of FILLED QB slots (one per lineup)
+against the count of DISTINCT QB names -- if fewer distinct names than
+filled slots, at least one QB repeats across lineups. Deliberately
+doesn't name WHICH QB repeats -- Part 7.5's own spec text just asks for
+a flag ("Flag when two lineups share a QB"), and a plain Yes/No is
+simpler and more robust than enumerating names via a second array
+formula for a fact Sam can see at a glance by scanning `Lineups`' own
+`Stack` column once flagged.
+
+**Deliberately NOT built** (Part 7.4's own text, restated since 7.5 is
+where a reader would look for it): player-level exposure caps -- "at
+4-8 lineups they are actively harmful, they force Sam off his best plays
+for no portfolio benefit." Exposure stays a REPORT, never a constraint.
+
 ## Late-swap lock check (`dfs lineups late-swap`)
 
 Not a column in `EdgeRaw` -- computed on demand, reading `EdgeRaw` plus
