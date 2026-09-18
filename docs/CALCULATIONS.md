@@ -387,6 +387,51 @@ scale on `PlayerPoolRaw`/`Player Pool`/`Lineups`. The threshold's
 real-world meaning (20% ownership) and the 5/744 flag rate above are both
 unchanged -- only the number's own units moved.
 
+## Player Pool ordering: tag group, then salary (Part 7.10)
+
+Sam, 2026-09-17: *"The pool should order players by position by salary
+high to low, but grouped by Both, Cash, GPP."*
+
+Each of Player Pool's five position blocks sorts on two keys, in this
+order:
+
+1. **Pool tag rank**, ascending -- `Both`, then `Cash`, then `GPP`, per
+   `sources.edge.POOL_TYPE_SORT_ORDER`. A `Both` player is usable in
+   either contest type, so he's core and sits first.
+2. **Salary**, descending -- within each tag group.
+
+Mechanically, `sheet_pool_formulas._union_array` builds each row as a
+(Name, Salary, TagRank) triple, and `_name_formula` sorts on it:
+
+```
+SORT(UNIQUE(union), 3, TRUE, 2, FALSE)
+```
+
+`TagRank` comes from `MATCH(pool_tag, {"Both","Cash","GPP"}, 0)` --
+generated from `POOL_TYPE_SORT_ORDER`, never hand-written into the
+formula string, so renaming or adding a tag only ever means editing that
+one Python list. **This is deliberately a separate list from
+`POOL_TYPE_OPTIONS`** (the dropdown's own order, `["", "Cash", "GPP",
+"Both"]`): `"Both" < "Cash" < "GPP"` sorts correctly alphabetically too,
+by coincidence -- relying on that would silently break the moment a tag
+is renamed or a fourth one added, with nothing to indicate it broke.
+
+A row whose Pool tag doesn't match any of the three (the control cell's
+typed name, when its EdgeRaw lookup comes back blank or the player isn't
+in EdgeRaw at all) gets `_UNKNOWN_TAG_RANK` (`len(POOL_TYPE_SORT_ORDER) +
+1` = 4) -- sorts after every real tag group, never into an arbitrary
+position among them.
+
+**A Sheets-formula subtlety worth knowing before touching this again:**
+`MATCH` does not broadcast elementwise against a multi-cell range on its
+own -- `{range, MATCH(range, {...}, 0)}` resolves to `#REF!`. It only
+broadcasts correctly when it's itself one of `FILTER`'s own array
+arguments (confirmed empirically on the template's Scratch tab before
+this shipped), which is why the tag-rank column is computed INSIDE
+`_union_array`'s existing `FILTER(...)` call rather than joined on
+afterward. The control cell's own tag lookup is a scalar (one cell, not a
+range), so it needs no such handling.
+
 ## % of Cap (Lineups only)
 
 `Lineups`' `% of Cap` (renamed from `% of Own` in Phase 6, Part 7.9,

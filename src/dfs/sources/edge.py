@@ -45,6 +45,19 @@ POOL_HEADER = "Pool"
 # "not pooled", same as an unticked checkbox did. Blank is listed first
 # so it's the dropdown's own "clear this" option, not just an absence.
 POOL_TYPE_OPTIONS = ["", "Cash", "GPP", "Both"]
+# Part 7.10 (2026-09-18), Sam: "The pool should order players by position
+# by salary high to low, but grouped by Both, Cash, GPP." Deliberately a
+# SEPARATE constant from POOL_TYPE_OPTIONS above, not a re-sort of it --
+# that one is the dropdown's own order, this is Player Pool's own display/
+# grouping order (a `Both` player is usable in either lineup type, so he's
+# core and sits first within his position). `"Both" < "Cash" < "GPP"` is
+# alphabetically true too, by coincidence -- do not rely on that; rename a
+# tag or add a fourth and alphabetical order silently stops matching this
+# one with nothing to indicate it broke. Consumed by
+# `sheet_pool_formulas.py`, which builds a Sheets MATCH() rank against
+# this list's own order -- never hand-write the array into a formula
+# string, so this one list is still the only place the order is decided.
+POOL_TYPE_SORT_ORDER = ["Both", "Cash", "GPP"]
 _ID_COLUMN = column_letter(EDGE_COLUMNS.index("Id") + EDGE_DATA_OFFSET)
 # Matches write_tab's default worksheet sizing (see cli.py's
 # _EDGE_FORMAT_LAST_ROW) -- the range every EdgeRaw column operation uses.

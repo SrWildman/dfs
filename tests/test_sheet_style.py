@@ -19,6 +19,7 @@ from dfs.sheet_style import (
     HIDE_TABS,
     OK_BG,
     OK_FG,
+    POOL_TAG_TINTS,
     POSITION_TINTS,
     VENUE_CHIPS,
     WARN_BG,
@@ -1213,6 +1214,33 @@ def test_polish_builder_tab_skips_chips_when_flag_and_avail_absent():
     assert all(a1.startswith("B") for a1, _ in client.boolean_rule_calls)
     assert len(client.boolean_rule_calls) == 5  # one per POSITION_TINTS entry
     assert "0 chip column(s)" in result
+
+
+def test_polish_builder_tab_tints_every_pool_tag_defined_in_pool_tag_tints():
+    # Part 7.10: bands Player Pool's own `Pool` column by tag
+    # (Both/Cash/GPP) so the new sort groups read visually.
+    client = FakeBuilderTabClient(["Name", "Pool"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    tinted_tags = {
+        kwargs["values"][0]
+        for a1, kwargs in client.boolean_rule_calls
+        if a1 == "B2:B100" and kwargs["condition_type"] == "TEXT_EQ" and kwargs["values"][0] in POOL_TAG_TINTS
+    }
+    assert tinted_tags == set(POOL_TAG_TINTS)
+
+
+def test_polish_builder_tab_skips_pool_tag_tint_when_pool_column_absent():
+    # PlayerPoolRaw/Lineups have no `Pool` column -- only Player Pool
+    # surfaces the tag (see `_apply_pool_tag_tint`'s own docstring).
+    client = FakeBuilderTabClient(["Name", "Pos."])
+    polish_builder_tab(client, "PlayerPoolRaw", last_row=100, header_row=1)
+
+    assert not any(
+        kwargs["values"][0] in POOL_TAG_TINTS
+        for _a1, kwargs in client.boolean_rule_calls
+        if kwargs["condition_type"] == "TEXT_EQ"
+    )
 
 
 def test_polish_builder_tab_applies_wind_chip_when_present():

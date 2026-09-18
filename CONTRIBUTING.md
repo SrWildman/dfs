@@ -986,6 +986,85 @@ control_before_the_group` (`test_sheet_style.py`),
 `test_link_edge_columns_sets_column_group_control_before_the_group`
 (`test_sheet_links.py`).
 
+## Phase 6, Part 7.10 (2026-09-18): Player Pool ordering -- tag group, then salary
+
+Sam, 2026-09-17: *"The pool should order players by position by salary
+high to low, but grouped by Both, Cash, GPP."* Not a structural move (no
+column moved or was added) -- pure formula work in
+`sheet_pool_formulas.py`, changing how each of Player Pool's five
+position blocks sorts internally.
+
+**The design.** `_union_array` (Fix 2.10's Name+Salary pairs) grows a
+third column: each row's Pool tag turned into a rank via `MATCH` against
+a new `sources.edge.POOL_TYPE_SORT_ORDER = ["Both", "Cash", "GPP"]` --
+deliberately a SEPARATE list from `POOL_TYPE_OPTIONS` (the dropdown's own
+order), per the spec's own explicit warning: `"Both" < "Cash" < "GPP"`
+alphabetically gives the right answer by coincidence; renaming a tag or
+adding a fourth would silently stop matching it. `_name_formula`'s `SORT`
+becomes two keys (tag rank ascending, then Salary descending);
+`ARRAY_CONSTRAIN(...,cap,1)` still drops every helper column back out
+regardless of how many there now are. `_overflow_formula` needed no
+change at all -- `INDEX(...,0,1)` always takes column 1 (Name), whatever
+else rides alongside it.
+
+**A real Sheets-formula bug caught before it ever touched a real
+formula.** `MATCH` does not broadcast elementwise against a multi-cell
+range on its own in Google Sheets -- `{range, MATCH(range, {...}, 0)}`
+resolves to `#REF!`. Confirmed empirically on the template's Scratch tab
+(a controlled 4-row test) before writing a single line of the real
+formula: bare `{}` fails, `ARRAYFORMULA(...)` wrapping the whole
+expression works, and -- the pattern actually used here, since the
+existing code has no `ARRAYFORMULA` anywhere -- `MATCH` broadcasts
+correctly when it's ITSELF one of `FILTER`'s own array arguments. The
+tag-rank column lives inside `_union_array`'s existing `FILTER(...)` call
+for exactly this reason. The control cell's own tag lookup needed no such
+handling: it reads one cell, not a range, so a plain scalar `MATCH` works
+everywhere.
+
+**The control cell has no Pool tag of its own.** Looked up against
+EdgeRaw by name via `INDEX`/`MATCH` (not `VLOOKUP` -- Pool sits to the
+LEFT of Name on EdgeRaw, same reason `_pool_type_formula` already uses
+INDEX/MATCH instead of VLOOKUP), with `IFERROR` degrading a non-match (a
+typed name EdgeRaw doesn't carry a tag for) to `_UNKNOWN_TAG_RANK`
+(`len(POOL_TYPE_SORT_ORDER) + 1` = 4) -- sorts after every real tag,
+never into an arbitrary position.
+
+**Showing the groups.** New `sheet_style.POOL_TAG_TINTS` (Both/Cash/GPP,
+the same muted "don't compete with the Flag chips" palette
+`POSITION_TINTS` uses) and `_apply_pool_tag_tint`, called from
+`polish_builder_tab` -- no-ops on PlayerPoolRaw/Lineups, which have no
+`Pool` column of their own, same guard pattern `_apply_position_tint`
+already uses for its own optional column.
+
+**Verified live on the template**, not just via fakes, per the spec's own
+"Verify" step: ticked 4 EdgeRaw QB rows across all three tags with
+distinct salaries, ran the real `dfs setup add-pool-control` (the actual
+`write_pool_formulas` call site), read Player Pool's QB block back and
+got exactly the predicted order (`Both` descending by salary, then
+`Cash`, then `GPP`); repeated for RB with the same result. Separately
+verified the control-cell half: typed an UNTICKED player's name into the
+add-a-player cell for WR alongside two tagged EdgeRaw ticks -- it sorted
+after both tagged players, confirming the unknown-tag-sorts-last
+fallback actually works, not just compiles. All test ticks/typed name
+reverted afterward; `dfs doctor`/`dfs setup audit-style` clean on the
+template before and after.
+
+**Incidental regression, found and fixed in the same session:** an
+earlier `ws.clear()` call against the template's `Scratch` tab (cleaning
+up an UNRELATED empirical formula test, see above) wiped its real header
+row (`QB, RB, RB, WR, WR, WR, TE, FLEX, DST` -- a genuine DK roster-slot
+layout, not throwaway content), which `dfs setup audit-style` caught
+(`style_flat_tab` skips styling a tab with an empty header entirely, so
+the header loss went unstyled rather than erroring). Recovered by
+reading the still-correct header off the LIVE sheet's own `Scratch` tab
+(never touched) and writing it back to the template, then re-running
+`dfs setup polish`. Lesson: `ws.clear()` on any tab that might hold real
+content (not just formatted-but-empty test cells) needs the same
+"read live, verify it wasn't real data" caution as any other cross-sheet
+recovery in this file -- Scratch specifically is used for empirical
+Sheets-behavior tests throughout this project's history and had
+accumulated a real, load-bearing header along the way.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

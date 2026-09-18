@@ -1,7 +1,7 @@
 import pytest
 
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
-from dfs.sheet_pool_formulas import write_pool_formulas
+from dfs.sheet_pool_formulas import _TAG_RANK_ARRAY, _UNKNOWN_TAG_RANK, write_pool_formulas
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_COLUMN
 from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW
@@ -117,10 +117,17 @@ def test_overflow_formula_thresholds_on_the_same_cap():
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
     edge_filter = (
-        f"FILTER({{EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F}},"
+        f"FILTER({{EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F,"
+        f"MATCH(EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN},{_TAG_RANK_ARRAY},0)}},"
         f'EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}<>"",EdgeRaw!$C$2:$C="QB")'
     )
-    control_filter = f"{{{_CONTROL_NAMES},IFERROR(VLOOKUP({_CONTROL_NAMES},EdgeRaw!$B:$F,5,FALSE),0)}}"
+    control_pool_tag = (
+        f'IFERROR(INDEX(EdgeRaw!${POOL_COLUMN}:${POOL_COLUMN},MATCH({_CONTROL_CELL},EdgeRaw!$B:$B,0)),"")'
+    )
+    control_tag_rank = f"IFERROR(MATCH({control_pool_tag},{_TAG_RANK_ARRAY},0),{_UNKNOWN_TAG_RANK})"
+    control_filter = (
+        f"{{{_CONTROL_NAMES},IFERROR(VLOOKUP({_CONTROL_NAMES},EdgeRaw!$B:$F,5,FALSE),0),{control_tag_rank}}}"
+    )
     union = f"{{{edge_filter};{control_filter}}}"
     count = f"IFERROR(COUNTA(INDEX(UNIQUE({union}),0,1)),0)"
     assert formulas[f"{OVERFLOW_COL}2"] == (
@@ -135,27 +142,39 @@ def test_name_formula_unions_edgeraw_ticks_with_the_control_cell():
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
     name_formula = formulas["A2"]
     assert "UNIQUE({" in name_formula
-    assert "FILTER({EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F}" in name_formula
+    assert "FILTER({EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F,MATCH(" in name_formula
     assert f'FILTER({_CONTROL_CELL}:{_CONTROL_CELL},{_CONTROL_CELL}<>"",' in name_formula
     assert f'VLOOKUP({_CONTROL_CELL},EdgeRaw!$B:$C,2,FALSE),"")="QB"' in name_formula
     assert "VLOOKUP(" in name_formula  # the control cell's half looks Salary up against EdgeRaw
 
 
-def test_name_formula_sorts_by_salary_descending_not_alphabetically():
-    # Fix 2.10.
+def test_name_formula_sorts_by_tag_rank_then_salary_descending():
+    # Fix 2.10 (Salary) + Part 7.10 (tag rank), Sam: "The pool should
+    # order players by position by salary high to low, but grouped by
+    # Both, Cash, GPP." Tag rank (column 3) is the primary ascending key
+    # -- Both/Cash/GPP in that order -- Salary (column 2) descending
+    # breaks ties within a tag group.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
     assert "SORT(UNIQUE(" in formulas["A2"]
-    assert ",2,FALSE)" in formulas["A2"]  # sort key = column 2 (Salary), descending
+    assert ",3,TRUE,2,FALSE)" in formulas["A2"]
+
+
+def test_tag_rank_array_matches_pool_type_sort_order_not_hand_written():
+    from dfs.sources.edge import POOL_TYPE_SORT_ORDER
+
+    assert _TAG_RANK_ARRAY == "{" + ",".join(f'"{tag}"' for tag in POOL_TYPE_SORT_ORDER) + "}"
+    assert _UNKNOWN_TAG_RANK == len(POOL_TYPE_SORT_ORDER) + 1
 
 
 def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
     # A player ticked in EdgeRaw AND typed into the control cell must
     # count once toward the cap, not twice -- COUNTA(INDEX(UNIQUE(...),0,1)),
     # not two separate COUNTIFS added together. INDEX(...,0,1) takes just
-    # the Name column back out of the (Name, Salary) pairs Fix 2.10 added.
+    # the Name column back out of the (Name, Salary, TagRank) triples Fix
+    # 2.10/Part 7.10 added.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 

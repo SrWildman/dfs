@@ -122,7 +122,7 @@ actually matches.
 
 | Column | Meaning |
 |---|---|
-| `Pool` | A dropdown, column A -- blank / `Cash` / `GPP` / `Both` (Fix 2.11; was a plain checkbox). Any non-blank value puts this player into `Player Pool`'s matching position block, see "Player Pool / Lineups" below -- picking `Cash` or `GPP` specifically is a per-week note to yourself about which contest type(s) you want them in for, not enforced anywhere else yet. Survives every `dfs sync` (kept by Id, not row position -- this tab is sorted by `Leverage`, so row order shifts every sync). Deliberately **not** part of the column list below -- `derived.EDGE_COLUMNS` -- since every VLOOKUP linked into `Player Pool`/`Lineups`/`PlayerPoolRaw` hardcodes column-index integers against that exact list; `Pool` sits ahead of it instead (`derived.EDGE_DATA_OFFSET` is what every column-position calculation elsewhere adds to account for this). |
+| `Pool` | A dropdown, column A -- blank / `Cash` / `GPP` / `Both` (Fix 2.11; was a plain checkbox). Any non-blank value puts this player into `Player Pool`'s matching position block, see "Player Pool / Lineups" below -- picking `Cash` or `GPP` specifically is a per-week note to yourself about which contest type(s) you want them in for, not enforced anywhere else yet. Survives every `dfs sync` (kept by Id, not row position -- this tab is sorted by `ValAdj`, so row order shifts every sync). Deliberately **not** part of the column list below -- `derived.EDGE_COLUMNS` -- since every VLOOKUP linked into `Player Pool`/`Lineups`/`PlayerPoolRaw` hardcodes column-index integers against that exact list; `Pool` sits ahead of it instead (`derived.EDGE_DATA_OFFSET` is what every column-position calculation elsewhere adds to account for this). |
 | `Id` | DraftKings player ID, column B. Hidden by `dfs setup polish` -- never a useful thing to look at, and hiding it (rather than grouping) puts `Pool` and `Name` visually side by side. |
 | `Flag` | Hidden (Phase 6, Part 7.9) -- just the single highest-priority matching condition (see `Flags` below for the full list). Kept, not deleted, since other formatting/filtering logic keys off it as a boolean/categorical value; nobody reads this one directly. |
 | `Name` | Player name, DK-nickname convention for DST. |
@@ -366,17 +366,26 @@ pick); `In` lists WHICH ones (`L1, L3, L7`), one `TEXTJOIN`'d term per
 `LINEUPS_NAME_BLOCKS` entry, generated in Python from that constant
 (`sheet_pool_usage.py`) rather than hand-typed. `Used` is colour-scaled
 like every other count on the tab (zero unstyled -- an unrostered pool
-player is normal, not a low value on a scale). The block fills in sorted
-by **Salary descending** (Fix 2.10
--- not alphabetically; the control cell's half looks its Salary and
-Position up against `EdgeRaw` by name, since it carries neither of its
-own), capped at that position's slot count (QB 10, RB 20, WR 25, TE 10,
-DST 10), with an `Overflow` column (second to last, right before `Pool`)
+player is normal, not a low value on a scale). The block fills in sorted by **Pool tag group, then Salary descending**
+within each group (Part 7.10, Sam: "The pool should order players by
+position by salary high to low, but grouped by Both, Cash, GPP") --
+`Both` first (usable in either contest type, so core), then `Cash`, then
+`GPP`, per `sources.edge.POOL_TYPE_SORT_ORDER` -- not alphabetically, and
+not the dropdown's own `POOL_TYPE_OPTIONS` order; the control cell's half
+looks its own Salary, Position AND Pool tag up against `EdgeRaw` by name,
+since it carries none of its own, and a typed name with no matching
+EdgeRaw tag sorts after every real tag rather than into an arbitrary
+position. See `docs/CALCULATIONS.md` for the formula mechanics. Capped at
+that position's slot count (QB 10, RB 20, WR 25, TE 10, DST 10), with an
+`Overflow` column (second to last, right before `Pool`)
 warning per position if more players are ticked/typed than the block has
 room for (counting the same deduped union, so a player counted in both
 sources can't trigger a false warning) -- nobody is ever silently
-dropped. Every other column still VLOOKUPs off `Name` the same as
-before. `Player Pool` is protected everywhere except that one control
+dropped. `Player Pool`'s own `Pool` column gets a light per-tag tint
+(`sheet_style.POOL_TAG_TINTS`) so the three sort groups read as bands at
+a glance, not just by scrolling and reading the text. Every other column
+still VLOOKUPs off `Name` the same as before. `Player Pool` is protected
+everywhere except that one control
 cell (warning-only, `dfs setup protect`) -- nothing else is meant to be
 typed into directly. See `sheet_pool_control.py`/`sheet_pool_formulas.py`/
 `sources/edge.py` for the mechanism and `CONTRIBUTING.md`'s changelog for

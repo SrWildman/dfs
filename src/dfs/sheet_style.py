@@ -760,6 +760,20 @@ POSITION_TINTS = {
 # style_slate_grid) -- one number, one meaning, everywhere it appears.
 WIND_CHIP_THRESHOLD = "15"
 
+# Part 7.10 (2026-09-18): a light per-tag tint on Player Pool's own
+# `Pool` column, so the three sort groups (Both/Cash/GPP, in that order --
+# see `sources.edge.POOL_TYPE_SORT_ORDER`) read as bands at a glance,
+# same "muted, don't compete with the Flag chips" policy as
+# `POSITION_TINTS` above. A blank Pool cell (shouldn't happen on a real
+# Player Pool row -- every row is already someone's pick -- but a
+# control-cell add whose EdgeRaw tag lookup came back empty is possible)
+# is deliberately left untinted rather than guessed at.
+POOL_TAG_TINTS = {
+    "Both": _rgb("#E5F1E8"),
+    "Cash": _rgb("#E5EEF7"),
+    "GPP": _rgb("#FBEEE0"),
+}
+
 # Soft accent used only for "this player is already in your pool" -- applied
 # to the Name column alone. A full-row tint was tried and rejected: Sheets
 # shows exactly one conditional-format rule per cell, so tinting the whole
@@ -912,6 +926,28 @@ def _apply_position_tint(
             f"{letter}{data_start}:{letter}{last_row}",
             condition_type="TEXT_EQ",
             values=[position],
+            fmt={"backgroundColor": bg},
+        )
+
+
+def _apply_pool_tag_tint(
+    client: SheetsClient, tab: str, header: list, *, column_name: str, data_start: int, last_row: int
+) -> None:
+    """Part 7.10: bands Player Pool's `Pool` column by tag (Both/Cash/
+    GPP) so the sort groups `sheet_pool_formulas.py` now produces read
+    visually, not just by scrolling and reading the text. No-ops on any
+    tab without a `Pool` column (PlayerPoolRaw/Lineups have no such
+    column -- only Player Pool surfaces the tag), same guard
+    `_apply_position_tint` already uses for its own optional column."""
+    if column_name not in header:
+        return
+    letter = column_letter(header.index(column_name))
+    for tag, bg in POOL_TAG_TINTS.items():
+        client.add_boolean_rule(
+            tab,
+            f"{letter}{data_start}:{letter}{last_row}",
+            condition_type="TEXT_EQ",
+            values=[tag],
             fmt={"backgroundColor": bg},
         )
 
@@ -1385,6 +1421,7 @@ def polish_builder_tab(
     # `_apply_name_flag_style`'s own docstring).
     _apply_wind_chip(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_position_tint(client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row)
+    _apply_pool_tag_tint(client, tab, header, column_name="Pool", data_start=data_start, last_row=last_row)
     _apply_own_status_marker(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_zone_label_style(client, tab, header, data_start=data_start, last_row=last_row)
