@@ -770,6 +770,37 @@ def _edge_letter(column_name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _unhide_ungrouped_columns(client: SheetsClient, tab: str, total_width: int) -> None:
+    """Unhides every column NOT currently covered by a collapsed group,
+    across the tab's full known width -- the fix for a real, three-times-
+    repeated live incident (Name; Avail/Flags; GAME/CEIL/MOVE, all on
+    EdgeRaw) where a killed/retried polish run left a stray column hidden
+    that should never have been: `polish_edge`/`polish_builder_tab`'s own
+    hide-Id/Flag loop only ever ADDS a hide, so a stale one from an
+    earlier, superseded run (computed against a header that was mid-
+    reorder at the time) survives every later run unless something
+    explicitly undoes it.
+
+    Deliberately skips any column inside an EXISTING group rather than
+    unhiding the whole width in one call -- verified live (see `SheetsClient.
+    get_grouped_column_indices`'s own docstring) that explicitly unhiding a
+    grouped range's columns makes them visible while the group's own
+    metadata still says `collapsed: true`, desyncing the UI. Called
+    BEFORE the specific Id/Flag hide below, so it's harmless that this
+    pass leaves Id/Flag visible too -- they're about to be hidden again a
+    few lines later, same as every other polish run."""
+    grouped = client.get_grouped_column_indices(tab)
+    ungrouped = [i for i in range(total_width) if i not in grouped]
+    runs: list[tuple[int, int]] = []
+    for i in ungrouped:
+        if runs and runs[-1][1] + 1 == i:
+            runs[-1] = (runs[-1][0], i)
+        else:
+            runs.append((i, i))
+    for start, end in runs:
+        client.hide_columns(tab, column_letter(start), column_letter(end), hidden=False)
+
+
 def _apply_wind_chip(client: SheetsClient, tab: str, header: list, *, data_start: int, last_row: int) -> None:
     if "Wind" not in header:
         return
@@ -800,26 +831,33 @@ def _apply_position_tint(
 
 
 def _apply_zone_label_style(
-    client: SheetsClient, tab: str, header: list, *, header_row: int, last_row: int
+    client: SheetsClient, tab: str, header: list, *, data_start: int, last_row: int
 ) -> None:
     """Zone labels (2026-09-17 usability fix -- see `sheet_columns.py`'s
-    own module docstring): a light, neutral tint down the WHOLE column,
-    header row included, same `FLAT_BG`/`FLAT_FG` pairing as other
-    categorical/neutral chips (`CHALK`, Player Pool's `Source`), so each
-    label reads as a solid divider strip rather than a data column that
-    happens to be blank. Centered so a short word doesn't look
-    left-stranded in a narrow column. Styling the header row too (unlike
-    every other `_apply_*` helper here) is deliberate: the whole point of
-    a zone label is to stay visually distinct even from the tab's own
-    dark header treatment, which would otherwise make it look like just
-    another ordinary column heading."""
+    own module docstring): a light, neutral tint down the DATA rows only,
+    same `FLAT_BG`/`FLAT_FG` pairing as other categorical/neutral chips
+    (`CHALK`, Player Pool's `Source`), so each label reads as a solid
+    divider strip while scrolling through hundreds of player rows, not a
+    data column that happens to be blank.
+
+    Deliberately does NOT touch the header row -- first tried that (a
+    lighter background there too, to stand out even more), and `dfs
+    setup audit-style` immediately caught the real problem with it: it
+    silently overwrote the shared dark header fill every other column's
+    header cell gets, which the audit's own "shared dark fill" check
+    treats as a real defect, not a style choice, because normally it is
+    one. The label TEXT itself (`GAME`/`CEIL`/`MOVE`/`WX`, short and in
+    all caps) already reads as distinct from an ordinary column heading
+    without needing a different background too -- the data-row tint below
+    it is what actually needs to be different, since that's the part that
+    would otherwise look like an unexplained blank column."""
     for name in ZONE_LABELS:
         if name not in header:
             continue
         letter = column_letter(header.index(name))
         client.format_range(
             tab,
-            f"{letter}{header_row}:{letter}{last_row}",
+            f"{letter}{data_start}:{letter}{last_row}",
             {
                 "backgroundColor": FLAT_BG,
                 "textFormat": {"foregroundColor": FLAT_FG, "bold": True},
@@ -938,6 +976,14 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # neighbor; both are still individually hidden here regardless of
     # where they physically sit, found by name like everything else in
     # this function.
+    #
+    # Reset every non-grouped column visible first, THEN hide only Id/Flag
+    # -- found live, three separate times in one session (Name;
+    # Avail/Flags; GAME/CEIL/MOVE), that a killed/retried polish run can
+    # leave a STALE hide behind (see `_unhide_ungrouped_columns`'s own
+    # docstring for the mechanism). Makes this call idempotent and
+    # self-correcting instead of purely additive.
+    _unhide_ungrouped_columns(client, edge_tab, len(EDGE_COLUMNS) + EDGE_DATA_OFFSET)
     for hidden_name in ("Id", "Flag"):
         letter = _edge_letter(hidden_name)
         if letter:
@@ -1014,7 +1060,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # graying CeilPct -- CeilPct is a real, independent number regardless
     # of ownership status, never a stand-in for Leverage anymore.
     _apply_own_status_marker(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
-    _apply_zone_label_style(client, edge_tab, edge_header, header_row=1, last_row=EDGE_ROWS)
+    _apply_zone_label_style(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
 
     # "Already in my pool" + "flagged" on the Name cell -- Pool is a
     # blank/Cash/GPP/Both dropdown now, not a TRUE/FALSE checkbox (Fix
@@ -1178,6 +1224,12 @@ def polish_builder_tab(
     # on Player Pool, nothing on PlayerPoolRaw/Lineups). Found missing
     # entirely on all three tabs while wiring up Part 7.9's Flag/Flags
     # split -- EdgeRaw was the only tab that ever actually hid Id.
+    #
+    # Reset every non-grouped column visible first, same reasoning and
+    # same fix as `polish_edge`'s own reset just above it -- a
+    # killed/retried run can otherwise leave a stale hide on the wrong
+    # column behind forever.
+    _unhide_ungrouped_columns(client, tab, len(header))
     for hidden_name in ("Id", "Flag"):
         if hidden_name in header:
             letter = column_letter(header.index(hidden_name))
@@ -1242,7 +1294,7 @@ def polish_builder_tab(
     _apply_position_tint(client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row)
     _apply_own_status_marker(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
-    _apply_zone_label_style(client, tab, header, header_row=header_row, last_row=last_row)
+    _apply_zone_label_style(client, tab, header, data_start=data_start, last_row=last_row)
 
     pin_note = "Name pinned" if freeze_cols else "no column pin"
     return (

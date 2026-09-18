@@ -237,7 +237,7 @@ class FakeEdgeClient:
     guards against -- 8 nested groups from repeated `dfs setup polish`
     runs, found live)."""
 
-    def __init__(self):
+    def __init__(self, grouped_column_indices: set[int] | None = None):
         self.calls: list[str] = []
         self.clear_group_calls: list[str] = []
         self.group_calls: list[tuple[str, str, str, bool]] = []
@@ -245,9 +245,14 @@ class FakeEdgeClient:
         self.color_scale_calls: list[tuple[str, dict]] = []
         self.boolean_rule_calls: list[tuple[str, dict]] = []
         self.format_range_calls: list[tuple[str, dict]] = []
+        self.hide_calls: list[tuple[str, str, bool]] = []
+        self._grouped_column_indices = grouped_column_indices or set()
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
+
+    def get_grouped_column_indices(self, tab_name: str) -> set[int]:
+        return self._grouped_column_indices
 
     def clear_conditional_formats(
         self, tab_name: str, *, column: str | None = None, row_range: tuple[int, int] | None = None
@@ -288,6 +293,7 @@ class FakeEdgeClient:
         self, tab_name: str, first_col_a1: str, last_col_a1: str, *, hidden: bool = True
     ) -> None:
         self.calls.append("hide_columns")
+        self.hide_calls.append((first_col_a1, last_col_a1, hidden))
 
     def group_columns(
         self, tab_name: str, first_col_a1: str, last_col_a1: str, *, collapsed: bool = False
@@ -336,10 +342,42 @@ def test_polish_edge_styles_each_zone_label_column():
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
+    # Data rows only, not the header (see `_apply_zone_label_style`'s own
+    # docstring for why: tinting the header cell too silently overwrote
+    # the shared dark header fill, which `dfs setup audit-style` correctly
+    # flags as a real defect).
     tinted_ranges = [a1 for a1, fmt in client.format_range_calls if fmt.get("backgroundColor") == FLAT_BG]
     for label in ZONE_LABELS:
         letter = _edge_letter(label)
-        assert any(a1.startswith(f"{letter}1:") for a1 in tinted_ranges), label
+        assert any(a1.startswith(f"{letter}2:") for a1 in tinted_ranges), label
+
+
+def _letter_to_index(letter: str) -> int:
+    n = 0
+    for ch in letter:
+        n = n * 26 + (ord(ch) - ord("A") + 1)
+    return n - 1
+
+
+def test_polish_edge_reset_before_hide_skips_columns_already_inside_a_group():
+    # Real live incident, three times in one session (Name; Avail/Flags;
+    # GAME/CEIL/MOVE, all on EdgeRaw): a killed/retried polish run left a
+    # stray column hidden that should never have been, because the old
+    # hide-Id/Flag loop only ever ADDED a hide, never reset a stale one.
+    # The fix resets every non-grouped column visible first -- but must
+    # skip columns already inside an EXISTING collapsed group, or it
+    # desyncs the group (verified live: explicitly unhiding a grouped
+    # range's columns makes them visible while the group's own metadata
+    # still says collapsed=true). Columns 14-16 here (0-indexed) simulate
+    # OverUnder/Spread/GameEnv already sitting inside a real group.
+    client = FakeEdgeClient(grouped_column_indices={14, 15, 16})
+    polish_edge(client, "EdgeRaw")
+
+    unhide_calls = [(a, b) for a, b, hidden in client.hide_calls if hidden is False]
+    touched = set()
+    for start, end in unhide_calls:
+        touched.update(range(_letter_to_index(start), _letter_to_index(end) + 1))
+    assert not touched & {14, 15, 16}
 
 
 def test_polish_edge_clears_banding_before_re_adding_it():
@@ -909,7 +947,7 @@ def test_polish_guardrails_widens_its_own_column_and_clears_only_its_own_rules()
 
 
 class FakeBuilderTabClient:
-    def __init__(self, header: list[str]):
+    def __init__(self, header: list[str], grouped_column_indices: set[int] | None = None):
         self._header = header
         self.format_calls: list[tuple[str, dict]] = []
         self.freeze_calls: list[tuple] = []
@@ -918,10 +956,14 @@ class FakeBuilderTabClient:
         self.boolean_rule_calls: list[tuple[str, dict]] = []
         self.banding_calls: list[tuple] = []
         self.color_scale_calls: list[tuple[str, dict]] = []
-        self.hide_calls: list[tuple[str, str]] = []
+        self.hide_calls: list[tuple[str, str, bool]] = []
+        self._grouped_column_indices = grouped_column_indices or set()
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
+
+    def get_grouped_column_indices(self, tab_name: str) -> set[int]:
+        return self._grouped_column_indices
 
     def read_range(self, tab_name: str, a1_range: str):
         return [self._header]
@@ -929,7 +971,7 @@ class FakeBuilderTabClient:
     def hide_columns(
         self, tab_name: str, first_col_a1: str, last_col_a1: str, *, hidden: bool = True
     ) -> None:
-        self.hide_calls.append((first_col_a1, last_col_a1))
+        self.hide_calls.append((first_col_a1, last_col_a1, hidden))
 
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         self.format_calls.append((a1_range, fmt))
@@ -1129,9 +1171,25 @@ def test_polish_builder_tab_styles_zone_label_columns():
     client = FakeBuilderTabClient(["Name", "GAME", "CEIL", "MOVE", "WX"])
     polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
+    # Data rows only (2:100), not the header row -- see
+    # `_apply_zone_label_style`'s own docstring for why.
     tinted = {rng for rng, fmt in client.format_calls if fmt.get("backgroundColor") == FLAT_BG}
     for letter in ("B", "C", "D", "E"):
-        assert f"{letter}1:{letter}100" in tinted
+        assert f"{letter}2:{letter}100" in tinted
+
+
+def test_polish_builder_tab_reset_before_hide_skips_columns_already_inside_a_group():
+    # Same fix, same reasoning as polish_edge's own version -- see that
+    # test's docstring. Column B (index 1) simulates a column already
+    # inside a real collapsed group; the reset pass must not touch it.
+    client = FakeBuilderTabClient(["Name", "O/U", "Id"], grouped_column_indices={1})
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    unhide_calls = [(a, b) for a, b, hidden in client.hide_calls if hidden is False]
+    touched = set()
+    for start, end in unhide_calls:
+        touched.update(range(_letter_to_index(start), _letter_to_index(end) + 1))
+    assert 1 not in touched
 
 
 def test_polish_builder_tab_bolds_name_on_flag_without_pool_tint():

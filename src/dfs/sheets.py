@@ -596,6 +596,28 @@ class SheetsClient:
             }
         )
 
+    def get_grouped_column_indices(self, tab_name: str) -> set[int]:
+        """Every 0-indexed column currently covered by ANY column group on
+        `tab_name`, collapsed or not. Used to tell "this column is
+        deliberately hidden as part of a collapsed group" apart from "this
+        column is stray-hidden and shouldn't be" -- a blanket unhide (see
+        `polish_edge`/`polish_builder_tab`'s own reset-before-hide fix)
+        must skip the first kind or it desyncs the group: verified live
+        that explicitly unhiding a grouped range's columns makes them
+        visible while the group's own metadata still reports
+        `collapsed: true`, so the UI shows an expand control for a group
+        that's already expanded."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),columnGroups)"})
+        indices: set[int] = set()
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                for group in s.get("columnGroups", []) or []:
+                    rng = group["range"]
+                    indices.update(range(rng["startIndex"], rng["endIndex"]))
+                break
+        return indices
+
     def clear_column_groups(self, tab_name: str) -> None:
         """Delete every existing column group on a tab before re-adding one
         with `group_columns` -- without this, `addDimensionGroup` doesn't

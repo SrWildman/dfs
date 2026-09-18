@@ -763,6 +763,23 @@ def test_clear_column_groups_is_a_no_op_when_nothing_is_grouped(cfg, monkeypatch
     assert fake_sheet._worksheets["T"].column_groups == []
 
 
+def test_get_grouped_column_indices_returns_every_index_covered_by_any_group(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    client.group_columns("T", "C", "E")  # 0-indexed 2, 3, 4
+    client.group_columns("T", "H", "H")  # 0-indexed 7
+
+    assert client.get_grouped_column_indices("T") == {2, 3, 4, 7}
+
+
+def test_get_grouped_column_indices_empty_when_nothing_grouped(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+
+    assert client.get_grouped_column_indices("T") == set()
+
+
 def test_hide_columns_sets_hidden_by_user_on_the_given_range(cfg, monkeypatch, tmp_path):
     client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])

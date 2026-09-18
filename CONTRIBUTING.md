@@ -776,6 +776,60 @@ _apply_zone_label_style`'s tint applied to all four label columns on
 every tab (confirmed via a direct `format_range` read-back, not the
 command's own success message).
 
+## Stale-hidden-column bug, found and fixed during the zone-label rollout (2026-09-18)
+
+Not a structural move -- no changelog table row -- but a real, three-times-
+repeated live incident worth documenting in full, since it's a genuine
+gap in a mechanism (`polish_edge`/`polish_builder_tab`'s hide-Id/Flag
+step) this codebase already relies on elsewhere.
+
+**The bug.** `hide_columns(letter, letter)` for `Id`/`Flag` only ever
+ADDS a hide; nothing ever undoes one that shouldn't be there. During the
+zone-label migration's own rate-limit-driven kill/retry cycles (this
+session's heaviest write night), a `polish_edge` invocation that got
+interrupted mid-reorder computed `Id`/`Flag`'s letter against a header
+that hadn't finished moving yet, and hid whatever ACTUALLY sat at that
+letter at that moment instead. Found live three separate times on
+EdgeRaw across one session: `Name` (an old Part 2-era instance, found
+while verifying this same class of bug); `Avail`/`Flags`; and
+`GAME`/`CEIL`/`MOVE`. Every instance was only caught by direct
+`get_column_widths` reads, never by a command's own success message or
+by `dfs doctor` (which checks header TEXT order, not visibility).
+
+**The fix, and why it isn't just "unhide everything first."** The
+obvious fix -- reset the whole tab visible, then hide only `Id`/`Flag`
+-- was tested on the template's Scratch tab before trusting it (a
+collapsed group's own member columns already show `hiddenByUser: true`
+as an intrinsic side effect of being collapsed, established earlier this
+session): explicitly calling `hide_columns(..., hidden=False)` over a
+grouped range genuinely un-hides those columns while the group's own
+`columnGroups` metadata still reports `collapsed: true` -- a real desync,
+not a hypothetical one. A blanket reset would have silently broken every
+collapsed group the next time `dfs setup polish` ran after `dfs setup
+link-edge`.
+
+Fixed with new `SheetsClient.get_grouped_column_indices` (reads the
+tab's current `columnGroups` metadata, same pattern `clear_column_groups`
+already uses) and new `sheet_style._unhide_ungrouped_columns`, called
+first thing in both `polish_edge` and `polish_builder_tab`: unhides every
+column NOT currently covered by an existing group, batched into
+contiguous runs to keep the API call count reasonable, before the
+existing Id/Flag-specific hide runs. Makes the whole operation
+idempotent and self-correcting instead of purely additive -- a
+killed/retried run can no longer leave a permanent stale hide behind.
+
+Verified on a real sheet (the template), not just via fakes: ran the
+fixed `polish_edge` and confirmed directly that `Avail`/`Flags`/`GAME`/
+`CEIL`/`MOVE`/`WX` all read visible afterward AND the four collapsed
+groups still report `collapsed: true` with their original ranges,
+undisturbed. `dfs doctor`/`dfs setup audit-style` clean on the template
+afterward. New tests (`test_get_grouped_column_indices_*` in
+`test_sheets.py`; `test_polish_edge_reset_before_hide_skips_columns_
+already_inside_a_group`/`test_polish_builder_tab_reset_before_hide_skips_
+columns_already_inside_a_group` in `test_sheet_style.py`) pin both halves
+of the fix: the reset unhides what it should, and never touches what a
+group already owns.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
