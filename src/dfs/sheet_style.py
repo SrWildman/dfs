@@ -760,7 +760,13 @@ EDGE_WIDTHS = {
 # hide_columns call) -- a group would just be a second click for
 # something that never needs to come back.
 EDGE_COLUMN_GROUPS = [
-    ("OverUnder", "OppPosRank"),
+    # Part 7.4 (2026-09-18) added GameID/TmRank to EDGE_COLUMNS right
+    # after OppPosRank -- this tuple's own "last" member missed updating
+    # at the time, leaving both sitting outside the collapsed GAME range
+    # on EdgeRaw specifically (found live: visible immediately after the
+    # collapsed group instead of folded into it, unlike Player Pool/
+    # Lineups, where `sheet_columns.GAME` already included them).
+    ("OverUnder", "TmRank"),
     ("CeilPct", "OwnStatus"),
     ("ImpliedMove", "GameStart"),
     ("Stadium", "Wind"),

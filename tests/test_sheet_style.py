@@ -356,12 +356,16 @@ def test_polish_edge_groups_game_through_weather_collapsed_by_default():
     # independent ranges the same day once each zone got its own real
     # label column ahead of it (the zone-label usability fix) -- a label
     # sits outside its own zone's range, so the four ranges are no longer
-    # adjacent and Sheets keeps them independently collapsible.
+    # adjacent and Sheets keeps them independently collapsible. GAME's own
+    # range ends at TmRank, not OppPosRank -- Part 7.4 added GameID/TmRank
+    # right after OppPosRank in EDGE_COLUMNS, and EDGE_COLUMN_GROUPS'
+    # first tuple missed updating at the time, leaving both outside the
+    # collapsed range on EdgeRaw specifically until this fix (2026-09-18).
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
     assert client.group_calls == [
-        ("EdgeRaw", _edge_letter("OverUnder"), _edge_letter("OppPosRank"), True),
+        ("EdgeRaw", _edge_letter("OverUnder"), _edge_letter("TmRank"), True),
         ("EdgeRaw", _edge_letter("CeilPct"), _edge_letter("OwnStatus"), True),
         ("EdgeRaw", _edge_letter("ImpliedMove"), _edge_letter("GameStart"), True),
         ("EdgeRaw", _edge_letter("Stadium"), _edge_letter("Wind"), True),
