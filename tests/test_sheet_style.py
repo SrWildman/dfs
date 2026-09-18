@@ -1,4 +1,4 @@
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, ZONE_LABELS
 from dfs.sheet_style import (
     AVAIL_CHIPS,
     BAND_BG,
@@ -11,6 +11,7 @@ from dfs.sheet_style import (
     FIELD_COLOR_SCALES,
     FIELD_FORMATS,
     FLAG_CHIPS,
+    FLAT_BG,
     GRAD_MAX,
     GRAD_MIN,
     GROUPED_TAB_UNSCALED_COLUMNS,
@@ -243,6 +244,7 @@ class FakeEdgeClient:
         self.banding_calls: list[tuple] = []
         self.color_scale_calls: list[tuple[str, dict]] = []
         self.boolean_rule_calls: list[tuple[str, dict]] = []
+        self.format_range_calls: list[tuple[str, dict]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
@@ -264,6 +266,7 @@ class FakeEdgeClient:
 
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         self.calls.append("format_range")
+        self.format_range_calls.append((a1_range, fmt))
 
     def freeze(self, tab_name: str, *, rows=None, cols=None) -> None:
         self.calls.append("freeze")
@@ -309,15 +312,34 @@ def test_polish_edge_groups_game_through_weather_collapsed_by_default():
     # Phase 6, Part 2 overrides Fix 2.9: EdgeRaw's Game/Ceiling detail/
     # Movement/Weather zones all collapse by default now too, matching
     # Player Pool/Lineups -- previously only GameStart alone was grouped,
-    # and not collapsed. All four zones sit back-to-back in EDGE_COLUMNS
-    # with nothing native between them, so this lands as ONE merged group
-    # (OverUnder..Wind), not four independent ones.
+    # and not collapsed. Originally landed as one merged group (Sheets
+    # merges adjacent same-depth groups regardless), then split into four
+    # independent ranges the same day once each zone got its own real
+    # label column ahead of it (the zone-label usability fix) -- a label
+    # sits outside its own zone's range, so the four ranges are no longer
+    # adjacent and Sheets keeps them independently collapsible.
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    start_col = _edge_letter("OverUnder")
-    end_col = _edge_letter("Wind")
-    assert client.group_calls == [("EdgeRaw", start_col, end_col, True)]
+    assert client.group_calls == [
+        ("EdgeRaw", _edge_letter("OverUnder"), _edge_letter("OppPosRank"), True),
+        ("EdgeRaw", _edge_letter("CeilPct"), _edge_letter("OwnStatus"), True),
+        ("EdgeRaw", _edge_letter("ImpliedMove"), _edge_letter("GameStart"), True),
+        ("EdgeRaw", _edge_letter("Stadium"), _edge_letter("Wind"), True),
+    ]
+
+
+def test_polish_edge_styles_each_zone_label_column():
+    # Each zone label (GAME/CEIL/MOVE/WX) sits OUTSIDE the collapsed range
+    # it names (see EDGE_COLUMN_GROUPS' own comment) and gets a distinct,
+    # always-visible tint so it reads as a divider, not a data column.
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    tinted_ranges = [a1 for a1, fmt in client.format_range_calls if fmt.get("backgroundColor") == FLAT_BG]
+    for label in ZONE_LABELS:
+        letter = _edge_letter(label)
+        assert any(a1.startswith(f"{letter}1:") for a1 in tinted_ranges), label
 
 
 def test_polish_edge_clears_banding_before_re_adding_it():
@@ -1101,6 +1123,15 @@ def test_polish_builder_tab_greys_own_status_when_present():
 
     formatted = [rng for rng, _ in client.format_calls if rng == "B2:B100"]
     assert formatted, "OwnStatus column should be formatted"
+
+
+def test_polish_builder_tab_styles_zone_label_columns():
+    client = FakeBuilderTabClient(["Name", "GAME", "CEIL", "MOVE", "WX"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    tinted = {rng for rng, fmt in client.format_calls if fmt.get("backgroundColor") == FLAT_BG}
+    for letter in ("B", "C", "D", "E"):
+        assert f"{letter}1:{letter}100" in tinted
 
 
 def test_polish_builder_tab_bolds_name_on_flag_without_pool_tint():

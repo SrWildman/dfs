@@ -1,4 +1,5 @@
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_links import (
     COLOR_SCALE_LINKED_COLUMNS,
     LINKED_EDGE_COLUMNS,
@@ -89,27 +90,31 @@ def test_already_linked_columns_positions_never_move():
     #
     # Part 7.9 (2026-09-17) changed LINKED_EDGE_COLUMNS' actual membership
     # again -- OwnPct dropped, LevBasis renamed OwnStatus, Flag/Flags
-    # split -- but by coincidence landed on this SAME index list (Flag
-    # moved into INTERNAL, past where OwnPct used to sit, backfilling the
-    # gap it left). Still worth re-verifying by hand whenever this dict
-    # changes, not trusting a coincidence to hold next time.
+    # split -- but by coincidence landed on the same index list that
+    # existed right after Part 2. That coincidence broke the same day:
+    # the zone-label usability fix (GAME_LABEL/CEILING_DETAIL_LABEL/
+    # MOVEMENT_LABEL/WEATHER_LABEL, one native column inserted before each
+    # collapsed zone) shifts every linked column from GAME onward, since
+    # each is now one position further right than before. Computed
+    # programmatically, not by hand, to avoid exactly the arithmetic
+    # mistake this comment's own history warns about.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         8,
         10,
         11,
-        14,
-        16,
-        17,
+        15,
         18,
         19,
         20,
-        21,
         22,
         23,
         24,
         25,
-        26,
         27,
+        28,
+        29,
+        30,
+        31,
     ]
 
 
@@ -117,18 +122,21 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # Phase 6, Part 2 moved Leverage off the spine into the collapsed
     # Ceiling detail group; Part 7.9 then dropped OwnPct entirely (one
     # fewer column ahead of it) and reordered Ceiling detail itself
-    # (CeilPct, Leverage, OwnStatus) -- landing Leverage at EDGE_COLUMNS
-    # index 17. The Name-anchored range is VLOOKUP column 18 (1-based,
-    # relative to Name at index 0) regardless of EDGE_DATA_OFFSET (a
-    # uniform shift cancels out of a *relative* position) -- but the
-    # range's own start/end letters do shift by that offset, since Pool
-    # occupies column A ahead of EDGE_COLUMNS. Matches what
-    # `sheet_style.polish_edge` reports for the same columns.
-    assert EDGE_COLUMNS.index("Leverage") == 17
+    # (CeilPct, Leverage, OwnStatus). The same-day zone-label usability
+    # fix then inserted GAME_LABEL and CEILING_DETAIL_LABEL ahead of
+    # Leverage's own zone -- landing it at EDGE_COLUMNS index 19. The
+    # Name-anchored range is VLOOKUP column 20 (1-based, relative to Name
+    # at index 0) regardless of EDGE_DATA_OFFSET (a uniform shift cancels
+    # out of a *relative* position) -- but the range's own start/end
+    # letters do shift by that offset, since Pool occupies column A ahead
+    # of EDGE_COLUMNS, and the range's own END letter also grows by one
+    # per zone label added. Matches what `sheet_style.polish_edge` reports
+    # for the same columns.
+    assert EDGE_COLUMNS.index("Leverage") == 19
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
     end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},18,false))'
+        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},20,false))'
     )
 
 
@@ -299,6 +307,31 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
     assert client.group_calls == [
         ("Player Pool", "F", "P", True),  # GameEnv..Wind, merged
     ]
+
+
+def test_link_edge_columns_groups_independently_once_zone_labels_separate_them():
+    # The test above exercises `link_edge_columns` against a header that's
+    # missing its native zone-label columns (GAME/CEIL/MOVE/WX) -- exactly
+    # what happens before `migrate_tab_to_designed_order`'s own native-
+    # provisioning step has run. Once a tab is FULLY provisioned (this
+    # test's header is the real `PLAYER_POOL_COLUMN_ORDER`, labels
+    # included), each zone's own real gap column keeps the four ranges
+    # apart -- confirming the zone-label usability fix is what actually
+    # delivers independent per-zone collapse, not just a workaround for a
+    # not-yet-fully-migrated tab.
+    header = list(PLAYER_POOL_COLUMN_ORDER)
+    client = SpySheetsClient(header_row=header)
+    link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw", force=True)
+
+    assert len(client.group_calls) == 4
+    assert all(collapsed is True for _tab, _start, _end, collapsed in client.group_calls)
+    expected = [
+        (column_letter(header.index("O/U")), column_letter(header.index("OppPosRank"))),
+        (column_letter(header.index("CeilPct")), column_letter(header.index("OwnStatus"))),
+        (column_letter(header.index("ImpliedMove")), column_letter(header.index("GameStart"))),
+        (column_letter(header.index("Venue")), column_letter(header.index("Wind"))),
+    ]
+    assert [(start, end) for _tab, start, end, _collapsed in client.group_calls] == expected
 
 
 def test_link_edge_columns_writes_into_an_interleaved_designed_position():

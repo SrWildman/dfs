@@ -79,7 +79,7 @@ function happens to touch it first.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, ZONE_LABELS
 from dfs.sheet_links import LINKED_EDGE_COLUMNS
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
@@ -623,6 +623,14 @@ EDGE_WIDTHS = {
     "GameStart": 132,
     "OverUnder": 105,
     "Spread": 78,
+    # Zone labels (2026-09-17): narrow but readable at their own short
+    # text -- see `sheet_style._apply_zone_label_style` for the rest of
+    # their look (centered, muted, a light tint to read as a divider
+    # rather than a data column).
+    "GAME": 52,
+    "CEIL": 52,
+    "MOVE": 56,
+    "WX": 44,
 }
 
 # Phase 6, Part 2 (2026-09-17) overrides Fix 2.9: Stadium/Roof/Wind used
@@ -632,18 +640,33 @@ EDGE_WIDTHS = {
 # Lineups/Player Pool already had. Part 2's own goal -- EdgeRaw/Player
 # Pool/Lineups look identical, spine visible, everything else one click
 # away -- explicitly overrides that: Game/Ceiling detail/Movement/Weather
-# all collapse on EdgeRaw now too. All four zones sit back-to-back in
-# EDGE_COLUMNS with nothing native between them (unlike the other three
-# tabs, EdgeRaw has no native-only columns to interleave), so this is one
-# merged group (OverUnder..Wind), the same "adjacent zones merge into
-# one" reality `sheet_links.link_edge_columns` already works around.
+# all collapse on EdgeRaw now too.
 #
-# Id used to be grouped here too, but it's genuinely never useful to look
-# at (a raw DraftKings player ID, not a human-meaningful value), so it's
-# fully hidden instead (see polish_edge's hide_columns call) -- a group
-# would just be a second click for something that never needs to come
-# back.
-EDGE_COLUMN_GROUPS = [("OverUnder", "Wind")]
+# 2026-09-17, later the same day: originally one merged group (OverUnder
+# through Wind), since all four zones sat back-to-back with nothing
+# native between them and Sheets merges adjacent same-depth groups into
+# one regardless (the same reality `sheet_links.link_edge_columns` works
+# around for the other three tabs). Split into four independent ranges
+# once each zone got its own real label column (`derived.GAME_LABEL`
+# etc., see `sheet_columns.py`'s module docstring) immediately before it
+# -- a usability fix, not in the original spec: Sam wanted to be able to
+# expand just Weather, or just Game, without guessing which unlabeled `+`
+# is which. The label itself sits OUTSIDE each tuple's own range,
+# deliberately -- collapsing hides everything inside a group's range,
+# label included, so a label can only stay visible by never being part of
+# what it's labeling.
+#
+# Id/Flag used to be grouped here too, but neither is genuinely useful to
+# look at (a raw DraftKings player ID; a single-token internal duplicate
+# of Flags), so both are fully hidden instead (see polish_edge's
+# hide_columns call) -- a group would just be a second click for
+# something that never needs to come back.
+EDGE_COLUMN_GROUPS = [
+    ("OverUnder", "OppPosRank"),
+    ("CeilPct", "OwnStatus"),
+    ("ImpliedMove", "GameStart"),
+    ("Stadium", "Wind"),
+]
 
 # Muted, per-position backgrounds -- just enough to see position boundaries
 # while scanning a list sorted by Leverage, not loud enough to compete with
@@ -773,6 +796,35 @@ def _apply_position_tint(
             condition_type="TEXT_EQ",
             values=[position],
             fmt={"backgroundColor": bg},
+        )
+
+
+def _apply_zone_label_style(
+    client: SheetsClient, tab: str, header: list, *, header_row: int, last_row: int
+) -> None:
+    """Zone labels (2026-09-17 usability fix -- see `sheet_columns.py`'s
+    own module docstring): a light, neutral tint down the WHOLE column,
+    header row included, same `FLAT_BG`/`FLAT_FG` pairing as other
+    categorical/neutral chips (`CHALK`, Player Pool's `Source`), so each
+    label reads as a solid divider strip rather than a data column that
+    happens to be blank. Centered so a short word doesn't look
+    left-stranded in a narrow column. Styling the header row too (unlike
+    every other `_apply_*` helper here) is deliberate: the whole point of
+    a zone label is to stay visually distinct even from the tab's own
+    dark header treatment, which would otherwise make it look like just
+    another ordinary column heading."""
+    for name in ZONE_LABELS:
+        if name not in header:
+            continue
+        letter = column_letter(header.index(name))
+        client.format_range(
+            tab,
+            f"{letter}{header_row}:{letter}{last_row}",
+            {
+                "backgroundColor": FLAT_BG,
+                "textFormat": {"foregroundColor": FLAT_FG, "bold": True},
+                "horizontalAlignment": "CENTER",
+            },
         )
 
 
@@ -962,6 +1014,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # graying CeilPct -- CeilPct is a real, independent number regardless
     # of ownership status, never a stand-in for Leverage anymore.
     _apply_own_status_marker(client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS)
+    _apply_zone_label_style(client, edge_tab, edge_header, header_row=1, last_row=EDGE_ROWS)
 
     # "Already in my pool" + "flagged" on the Name cell -- Pool is a
     # blank/Cash/GPP/Both dropdown now, not a TRUE/FALSE checkbox (Fix
@@ -1189,6 +1242,7 @@ def polish_builder_tab(
     _apply_position_tint(client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row)
     _apply_own_status_marker(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
+    _apply_zone_label_style(client, tab, header, header_row=header_row, last_row=last_row)
 
     pin_note = "Name pinned" if freeze_cols else "no column pin"
     return (

@@ -7,6 +7,7 @@ from dfs.derived import (
     LINE_MOVE_FLAG_THRESHOLD,
     OWN_STATUS_REAL,
     OWN_STATUS_UNPUBLISHED,
+    ZONE_LABELS,
     _percentile_within,
     build_edge_frame,
 )
@@ -620,3 +621,22 @@ def test_opp_pos_rank_blank_when_opponent_not_found_in_its_sos_frame():
 
     row = build_edge_frame(proj, sal, sos_by_position={"RB": sos_rb}).frame.iloc[0]
     assert pd.isna(row["OppPosRank"])
+
+
+def test_zone_labels_present_and_blank_for_every_row():
+    # Zone labels (GAME/CEIL/MOVE/WX) carry no per-row data -- the text
+    # lives in the header only (`sheet_style._apply_zone_label_style`
+    # writes it there); every real player row must read blank, not a
+    # repeated copy of the label word.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "A", "Position": "RB"},
+            {"Id": "2", "Name": "B", "Position": "WR"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+
+    frame = build_edge_frame(proj, sal).frame
+    assert list(frame.columns) == EDGE_COLUMNS
+    for label in ZONE_LABELS:
+        assert (frame[label] == "").all()

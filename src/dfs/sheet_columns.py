@@ -50,6 +50,22 @@ takes `Flag`'s old spine slot, while `Flag` (the single highest-priority
 token) moves to the hidden zone alongside `Id`, kept rather than deleted
 since other formatting/filtering logic keys off it as a boolean value.
 
+Zone labels (2026-09-17, a usability fix raised mid-session, not in the
+original spec): each of the four collapsed groups gets a real, always-
+visible label column immediately before it (`derived.GAME_LABEL` = "GAME",
+`CEILING_DETAIL_LABEL` = "CEIL", `MOVEMENT_LABEL` = "MOVE",
+`WEATHER_LABEL` = "WX") -- Sam: "make sure I know what group is what
+somehow and I'm not just clicking random stuff." Deliberately NOT members
+of `GAME`/`CEILING_DETAIL`/`MOVEMENT`/`WEATHER` themselves (see those
+lists' own definitions below) so `link_edge_columns`'s grouping never
+folds a label into the range it collapses -- a label has to sit OUTSIDE
+its own zone's range, since collapsing hides every cell inside it,
+label included. This is also what makes the four zones independently
+collapsible at all: verified live (a raw `addDimensionGroup` test on the
+template's Scratch tab) that Sheets merges any adjacent same-depth column
+groups into one, nesting included -- a real gap column is the only way to
+get four separate `+`/`-` controls instead of one.
+
 Header text still matches each tab's own already-established spelling
 (`Pos.`/`Opp.`/`DK Sal`/`Pts`/`Ceil`/`Own%`, not EdgeRaw's `Position`/
 `Opp`/`Salary`/`ProjPts`/`Ceiling`/`Own%`) -- normalizing that text is a
@@ -76,7 +92,13 @@ separate alias to track.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import (
+    CEILING_DETAIL_LABEL,
+    EDGE_COLUMNS,
+    GAME_LABEL,
+    MOVEMENT_LABEL,
+    WEATHER_LABEL,
+)
 
 IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 
@@ -130,8 +152,26 @@ INTERNAL = ["Id", "Flag"]
 # PLAYER_POOL_COLUMN_ORDER/LINEUPS_COLUMN_ORDER below for each tab's full
 # header, including its own extra columns. Group order (GAME, CEILING_
 # DETAIL, MOVEMENT, WEATHER) is Sam's own, left to right -- do not re-sort
-# it (Part 2's explicit instruction).
-BASE_COLUMN_ORDER = [*IDENTITY, *DECISION, *GAME, *CEILING_DETAIL, *MOVEMENT, *WEATHER, *INTERNAL]
+# it (Part 2's explicit instruction). Each zone's own label constant
+# (GAME_LABEL, ...) sits immediately before it, OUTSIDE the zone's own
+# list -- deliberately not a member of GAME/CEILING_DETAIL/MOVEMENT/
+# WEATHER, so `sheet_links.link_edge_columns`'s grouping (which reads
+# those lists directly) never includes a label in the collapsed range it
+# names. The label's real job -- see `derived.ZONE_LABELS`' own comment --
+# is to be the thing that's NOT collapsed, so it has to stay outside.
+BASE_COLUMN_ORDER = [
+    *IDENTITY,
+    *DECISION,
+    GAME_LABEL,
+    *GAME,
+    CEILING_DETAIL_LABEL,
+    *CEILING_DETAIL,
+    MOVEMENT_LABEL,
+    *MOVEMENT,
+    WEATHER_LABEL,
+    *WEATHER,
+    *INTERNAL,
+]
 
 # The linked (EdgeRaw-VLOOKUP) subset of BASE_COLUMN_ORDER, in header
 # order -- `sheet_links.LINKED_EDGE_COLUMNS` re-exports this list; kept
@@ -174,9 +214,13 @@ PLAYER_POOL_COLUMN_ORDER = [
     "Source",
     "Edge ↗",
     *DECISION,
+    GAME_LABEL,
     *GAME,
+    CEILING_DETAIL_LABEL,
     *CEILING_DETAIL,
+    MOVEMENT_LABEL,
     *MOVEMENT,
+    WEATHER_LABEL,
     *WEATHER,
     *INTERNAL,
     "Overflow",
@@ -185,25 +229,31 @@ PLAYER_POOL_COLUMN_ORDER = [
     "In",
 ]
 
-# Lineups: Part 2 moves "% of Own" (renamed from "% of Rstr") OUT of its
-# old interspersed position (directly after Rstr%, inside DECISION) to
-# sit with Lineups' other tab-specific columns, immediately after the
-# full spine -- Part 2's own instruction: tab-specific columns sit
-# "immediately after the spine, before the collapsed groups." "Issues"
-# (A1: renamed from "Check") is the last thing you look at before
-# trusting a lineup, so it sits right after "% of Own"; "Edge ↗" (A3,
-# same HYPERLINK-to-EdgeRaw as Player Pool's own column of the same name)
-# sits right after that -- Issues is exactly the moment you'd want to
-# jump over and check/fix something on EdgeRaw.
+# Lineups: Part 2 moved "% of Rstr" OUT of its old interspersed position
+# (directly after Rstr%, inside DECISION) to sit with Lineups' other
+# tab-specific columns, immediately after the full spine -- Part 2's own
+# instruction: tab-specific columns sit "immediately after the spine,
+# before the collapsed groups." Part 7.9 renamed it again, "% of Rstr" ->
+# "% of Own" (Part 2) -> "% of Cap" (Part 7.9, once the real cap-
+# allocation meaning was confirmed) -- position unchanged both times.
+# "Issues" (A1: renamed from "Check") is the last thing you look at
+# before trusting a lineup, so it sits right after "% of Cap"; "Edge ↗"
+# (A3, same HYPERLINK-to-EdgeRaw as Player Pool's own column of the same
+# name) sits right after that -- Issues is exactly the moment you'd want
+# to jump over and check/fix something on EdgeRaw.
 LINEUPS_COLUMN_ORDER = [
     *IDENTITY,
     *DECISION,
-    "% of Own",
+    "% of Cap",
     "Issues",
     "Edge ↗",
+    GAME_LABEL,
     *GAME,
+    CEILING_DETAIL_LABEL,
     *CEILING_DETAIL,
+    MOVEMENT_LABEL,
     *MOVEMENT,
+    WEATHER_LABEL,
     *WEATHER,
     *INTERNAL,
 ]

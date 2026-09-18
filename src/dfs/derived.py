@@ -161,6 +161,25 @@ EDGE_DATA_OFFSET = 1
 # for why). Nothing deleted; every name below already existed, just
 # renamed/repositioned. See CONTRIBUTING.md's structural changelog for
 # the full before/after.
+# Zone labels (2026-09-17, post-Part-7.9 usability fix): a real, always-
+# visible column immediately before each collapsed zone, naming what's
+# inside -- Sam: "make sure I know what group is what somehow and I'm not
+# just clicking random stuff." A label CANNOT live inside the zone it
+# names (collapsing a group hides every cell in its range, the label
+# included), and it can't be a blank spacer either (an unlabeled `+`
+# control is exactly the "guess and click" problem being fixed) -- so
+# each zone gets its own narrow, native, no-formula label column, text
+# only in the header row, blank below. This also happens to be what makes
+# independent per-zone collapse possible at all: verified live (a raw
+# `addDimensionGroup` test on the template's Scratch tab, depth 1 wrapping
+# a range and depth 2 per-zone inside it) that Sheets merges adjacent
+# same-depth groups into one regardless of nesting -- there is no way to
+# get 4 independently-collapsible zones without a REAL gap between them.
+GAME_LABEL = "GAME"
+CEILING_DETAIL_LABEL = "CEIL"
+MOVEMENT_LABEL = "MOVE"
+WEATHER_LABEL = "WX"
+
 EDGE_COLUMNS = [
     # SPINE
     "Name",
@@ -181,7 +200,9 @@ EDGE_COLUMNS = [
     # "Flags" is the one on the spine now -- everything that fired, for
     # reading.
     "Flags",
-    # GAME (collapsed)
+    # GAME (collapsed) -- GAME_LABEL sits immediately before it, outside
+    # the collapsed range, always visible.
+    GAME_LABEL,
     "OverUnder",
     "Spread",
     "GameEnv",
@@ -195,15 +216,18 @@ EDGE_COLUMNS = [
     # collapsed together (the old INTERNAL group); Leverage joins them
     # here now that it's off the spine (Part 7.1). `OwnPct` dropped
     # entirely (Part 7.9) -- see the constant section above.
+    CEILING_DETAIL_LABEL,
     "CeilPct",
     "Leverage",
     "OwnStatus",
     # MOVEMENT (collapsed)
+    MOVEMENT_LABEL,
     "ImpliedMove",
     "TotMove",
     "SpdMove",
     "GameStart",
     # WEATHER (collapsed)
+    WEATHER_LABEL,
     "Stadium",
     "Roof",
     "Wind",
@@ -216,6 +240,11 @@ EDGE_COLUMNS = [
     "Id",
     "Flag",
 ]
+
+# The four zone labels, in the same left-to-right order they appear --
+# used wherever code needs "all the label columns" as a group (e.g. to
+# exclude them from formatting that only makes sense for real metrics).
+ZONE_LABELS = (GAME_LABEL, CEILING_DETAIL_LABEL, MOVEMENT_LABEL, WEATHER_LABEL)
 
 
 @dataclass
@@ -474,5 +503,10 @@ def build_edge_frame(
     # (Own%), which is why the rename has to land after every internal use
     # of "ProjOwn" and right before this final column selection.
     merged = merged.rename(columns={"ProjOwn": "Own%"})
+
+    # Zone labels carry no per-row data -- text lives in the header only
+    # (see ZONE_LABELS' own comment for why they exist at all).
+    for label in ZONE_LABELS:
+        merged[label] = ""
 
     return EdgeBuildResult(frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names)

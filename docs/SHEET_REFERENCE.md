@@ -143,6 +143,7 @@ actually matches.
 | `Flags` | The one column meant to be read at a glance (renamed from `Flag` in Phase 6, Part 7.9 -- see the hidden `Flag`, above, for the single-highest-priority counterpart). Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`ImpliedMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (`Leverage` ≥ 30; blank `Leverage` while unpublished can never clear this) → `CHALK` (`Own%` ≥ 0.20 (20%), can only fire once ownership is real) → blank. |
 | `ImpliedMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpliedMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Sits in its own collapsed Movement group (Phase 6, Part 2) rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
+| `GAME`, `CEIL`, `MOVE`, `WX` | Zone labels, not data -- one sits immediately before each collapsed group (Game/Ceiling detail/Movement/Weather) it names, always visible, blank in every row below the header. See the canonical column order section (Player Pool/Lineups, above) for the full rationale; EdgeRaw has the same four for the same reason. |
 
 A basic filter (Data > Create a filter, `dfs setup add-filters`) puts a
 visible sort/search arrow in every header cell -- click one to sort or
@@ -176,11 +177,33 @@ disagree:
 |---|---|
 | IDENTITY (spine) | `Name` `Pos.` `Team` `Opp.` |
 | DECISION (spine) | `DK Sal` `Pts` `Val` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
+| — label `GAME` — | (always visible, not part of any group) |
 | GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` |
+| — label `CEIL` — | (always visible, not part of any group) |
 | CEILING DETAIL (collapsed) | `CeilPct` `Leverage` `OwnStatus` |
+| — label `MOVE` — | (always visible, not part of any group) |
 | MOVEMENT (collapsed) | `ImpliedMove` `TotMove` `SpdMove` `GameStart` |
+| — label `WX` — | (always visible, not part of any group) |
 | WEATHER (collapsed) | `Venue` `Stadium` `Roof` `Wind` |
 | INTERNAL (hidden, not grouped) | `Id` `Flag` |
+
+**Zone labels** (added the same day as Part 7.9, a usability fix Sam
+raised mid-session rather than something in the original spec): each
+collapsed zone now has a real, always-visible one-word label column
+immediately before it -- `GAME`/`CEIL`/`MOVE`/`WX` -- so you can tell
+which `+`/`-` control is which without clicking to find out. A label
+can't sit INSIDE the zone it names (collapsing hides every cell in a
+group's range, label included), and it can't be a blank spacer either
+(an unlabeled `+` is the exact "guess and click" problem being fixed).
+This is also what makes the four zones independently collapsible at
+all -- verified live (a raw `addDimensionGroup`/depth-nesting test on the
+template's Scratch tab) that Sheets merges any adjacent same-depth column
+groups into one regardless of nesting, so a real gap column between
+zones is the only way to get four separate controls instead of one
+merged region. No data lives in a label column below its own header
+text -- it's a pure visual divider, styled with a light neutral tint
+(`sheet_style._apply_zone_label_style`) so it reads as one rather than an
+unexpectedly-blank data column.
 
 `Own%` is the one column that changed **name**, not just position --
 `Rstr%` on these three tabs, `ProjOwn` on `EdgeRaw`, both became one
@@ -201,19 +224,20 @@ spine slot, and `Flag` (just the single highest-priority token) moved
 into INTERNAL beside `Id`, hidden, kept only because other
 formatting/filtering logic keys off it as a boolean value.
 
-`PlayerPoolRaw` is exactly this, 30 columns (was 34 through Phase 5H --
-Phase 5, Section I removed the four reserved-but-never-wired `SoS 1..4`
-placeholders once the real strength-of-schedule sync landed straight into
-`OppPosRank` instead; see CONTRIBUTING.md's changelog -- Part 7.9's
-`OwnPct` removal and `Flag`/`Flags` split net to the same 30-column
-total, since one column was dropped and one was added). `Player Pool`
-inserts `Source` and `Edge ↗` (A3) right after `Opp.` (i.e. right after
-IDENTITY, since `Venue` no longer sits there) and appends
-`Overflow`/`Pool`/`Used`/`In` at the very end (36 total; `Used`/`In` are
-Phase 5B, see below). `Lineups` inserts `% of Cap` (renamed from `% of
-Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
-the full spine, then `Issues` then `Edge ↗` (A3), before the collapsed
-groups begin (33 total). Lineups also groups `O/U`/`Spread`/`Team
+`PlayerPoolRaw` is exactly this, 34 columns (was 30 right after Part 7.9's
+metric audit, 34 through Phase 5H before that -- Phase 5, Section I
+removed the four reserved-but-never-wired `SoS 1..4` placeholders once
+the real strength-of-schedule sync landed straight into `OppPosRank`
+instead; see CONTRIBUTING.md's changelog -- the zone-label usability fix
+then added the four label columns above, landing back at 34 by
+coincidence). `Player Pool` inserts `Source` and `Edge ↗` (A3) right
+after `Opp.` (i.e. right after IDENTITY, since `Venue` no longer sits
+there) and appends `Overflow`/`Pool`/`Used`/`In` at the very end (40
+total; `Used`/`In` are Phase 5B, see below). `Lineups` inserts `% of Cap`
+(renamed from `% of Own` in Part 7.9, `% of Rstr` before that in Part 2)
+immediately after the full spine, then `Issues` then `Edge ↗` (A3),
+before the collapsed groups begin (37 total). Lineups also groups
+`O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
 Game/Ceiling detail/Movement/Weather zones above -- see below. Column
 letters aren't given here on purpose -- they move whenever a new column

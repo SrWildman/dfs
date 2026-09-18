@@ -251,22 +251,25 @@ def link_edge_columns(
     # creates a column, so a fresh/partially-reordered sheet doesn't get
     # an accidental collapse spanning unrelated columns in between.
     #
-    # These four zones sit back-to-back in the designed order (see
-    # sheet_columns.BASE_COLUMN_ORDER) with nothing native between them,
-    # so their column ranges are themselves adjacent -- and Sheets does
-    # NOT create four independent groups for four adjacent
-    # `addDimensionGroup` calls at the same depth; it silently EXTENDS the
-    # first group to cover the later ones, which then makes a later
-    # call's own `updateDimensionGroup` (folding shut) fail outright
+    # These four zones used to sit back-to-back with nothing native
+    # between them, so their column ranges were themselves adjacent -- and
+    # Sheets does NOT create independent groups for adjacent
+    # `addDimensionGroup` calls at the same depth (nesting doesn't help
+    # either, verified live on the template's Scratch tab); it silently
+    # EXTENDS the first group to cover the later ones, which then makes a
+    # later call's own `updateDimensionGroup` (folding shut) fail outright
     # ("no group spans exactly that range"). Found running this live
     # (originally with three zones, Phase 3) -- WEATHER alone (the only
     # group that existed before Phase 3) had never hit this since nothing
-    # used to sit adjacent to it. Fixed by merging adjacent zone ranges
-    # into one combined group before ever calling `group_columns`, rather
-    # than assuming each zone is independently groupable -- which also
-    # means Sam can't toggle these four independently once they're
-    # adjacent; they collapse/expand as one region, same as the three
-    # already did before this phase.
+    # used to sit adjacent to it. Fixed two ways, stacked: the merge logic
+    # below combines any ranges that STILL end up touching (belt and
+    # suspenders, and the only thing standing between Sam and one big
+    # merged group before the zone-label fix); and each zone now has its
+    # own real label column (`sheet_columns.GAME_LABEL` etc.) immediately
+    # before it, which is what actually keeps the four ranges apart in
+    # practice and lets Sam independently expand/collapse each one --
+    # see `sheet_columns.py`'s own module docstring for why a label can't
+    # live inside the range it names.
     zone_ranges: list[tuple[int, int]] = []
     for group in (GAME, CEILING_DETAIL, MOVEMENT, WEATHER):
         indices = sorted(header.index(name) for name in group if name in header)

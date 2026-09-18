@@ -697,6 +697,85 @@ Chase`/GPP, `Colston Loveland`/Cash) survived every resync; every
 relinked VLOOKUP formula's index checked programmatically against
 `derived.EDGE_COLUMNS`, not eyeballed.
 
+## Phase 6, zone labels (2026-09-17): a usability fix, not in the original spec
+
+Raised mid-session, after Part 7.9 shipped: Sam, looking at the four
+collapsed zones (Game/Ceiling detail/Movement/Weather) Part 2 built,
+"Like, I should be able to open just game details or just weather" --
+and, once told that requires a real structural change: "Make sure I know
+what group is what somehow and I'm not just clicking random stuff.
+Always check and think about the usability of things."
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-17 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | A real, always-visible, native (no-formula) label column added immediately before each of the four collapsed zones -- `GAME`, `CEIL`, `MOVE`, `WX` -- naming what's inside. Deliberately not a member of the zone's own `sheet_columns.py` list, so the label sits OUTSIDE the range that collapses. | Four zones sat back-to-back with nothing between them; Sheets merges adjacent same-depth column groups into one, so all four collapsed as a single region with one unlabeled `+`. | Each zone flanked by its own label, now independently collapsible -- four separate `+`/`-` controls, each named. | Live + Template | `derived.GAME_LABEL`/`CEILING_DETAIL_LABEL`/`MOVEMENT_LABEL`/`WEATHER_LABEL`/`ZONE_LABELS`, `derived.EDGE_COLUMNS` (4 new entries, one before each zone -- every already-linked column from the first zone member onward shifts by 1-4 positions, depending how many labels precede it), `derived.build_edge_frame` (writes `""` for every zone label on every row -- text lives in the header only), `sheet_columns.BASE_COLUMN_ORDER`/`PLAYER_POOL_COLUMN_ORDER`/`LINEUPS_COLUMN_ORDER` (labels inserted the same way), `sheet_style.EDGE_COLUMN_GROUPS` (one merged tuple -> four independent tuples), new `sheet_style._apply_zone_label_style` (called from both `polish_edge` and `polish_builder_tab`), `sheet_style.EDGE_WIDTHS` (`GAME`/`CEIL`/`MOVE`/`WX` entries) |
+
+**Tested empirically before writing any implementation code, per this
+codebase's own "verify live, don't assume" discipline:** nesting was the
+first idea (a depth-1 group wrapping all four zones, four depth-2 groups
+inside it, one per zone) -- if Sheets treats nested same-depth siblings
+differently from top-level adjacent ones, no structural change would be
+needed at all. Built a real test on the template's Scratch tab (same
+methodology as Phase 4.3's own live conditional-format test): created
+the outer depth-1 group, then four adjacent depth-2 zone groups inside
+it, read the metadata back. Result: Sheets merged all four depth-2
+requests into ONE depth-2 group spanning the entire outer range anyway --
+confirmed by the fold attempt's own error message (`There is no group at
+dimensionGroup.depth 2 that spans exactly ... Scratch!G:J; it is over
+... Scratch!C:R`). Nesting depth doesn't change the merge behavior at
+all; a real physical gap between zones is the only fix. Cleaned up the
+test groups from Scratch immediately after.
+
+**Why a label, not a blank spacer.** A collapsed group hides every cell
+in its range -- a label placed INSIDE the zone it names would disappear
+the moment someone collapses it, which is exactly the information the
+fix exists to preserve. A blank spacer would keep the zones independently
+collapsible but wouldn't solve the actual problem Sam raised (which `+`
+is which) -- an unlabeled control is still "clicking random stuff."
+
+**How the fix actually delivers independent collapse, mechanically:**
+`sheet_links.link_edge_columns`'s existing zone-range computation reads
+each zone's OWN member list (`GAME`, `CEILING_DETAIL`, `MOVEMENT`,
+`WEATHER` in `sheet_columns.py`) to find contiguous index runs, then
+merges any runs that end up touching. Since the label constants are
+deliberately NOT members of those lists, a zone's own real column span no
+longer starts immediately after the previous zone's last column -- there's
+now a one-column gap (the next zone's own label) in between, so the
+existing merge-adjacent-ranges check (`prev_end + 1 == next_start`)
+naturally stops firing. No change was needed to the merge logic itself --
+inserting the labels into the column layout was the whole fix. Verified
+with a new test (`test_link_edge_columns_groups_independently_once_zone_
+labels_separate_them`) feeding `link_edge_columns` the tab's real, fully
+zone-labeled `PLAYER_POOL_COLUMN_ORDER` header and confirming it produces
+four independent `group_columns` calls, not four merged, and not one.
+`sheet_style.polish_edge`'s own `EDGE_COLUMN_GROUPS` needed a literal
+change (one merged tuple -> four explicit ones), since that path never
+merged ranges to begin with -- there was nothing for the labels to
+"naturally" fix there; it just needed the four ranges spelled out
+correctly with the labels excluded, which was always true of `EdgeRaw`'s
+zones once the labels existed, merged or not.
+
+**A real bug found and fixed in passing, unrelated to this change
+itself:** `sheet_columns.LINEUPS_COLUMN_ORDER` still literally said
+`"% of Own"` -- Part 7.9's live rename to `% of Cap` used `rename_header_
+column` directly against the sheet, which never consults this constant,
+so nothing had caught the list itself going stale. Left as-is, the next
+`dfs setup reorder-columns` (or this zone-label migration, which reuses
+the same `migrate_tab_to_designed_order` machinery) would have seen
+`"% of Own"` as genuinely missing from a header that actually says
+`"% of Cap"` and appended a duplicate near-miss column. Caught before
+touching either sheet, while inserting the zone labels into this same
+list -- fixed to `"% of Cap"` in the same edit.
+
+Verified live and on template, same standard as every other structural
+change here: header order matches `sheet_columns.py` exactly on all four
+tabs, `dfs doctor`/`dfs setup audit-style` clean, column-group metadata
+shows four independent collapsed ranges (not one merged) with widths
+matching `EDGE_WIDTHS`, both real Pool ticks intact, `sheet_style.
+_apply_zone_label_style`'s tint applied to all four label columns on
+every tab (confirmed via a direct `format_range` read-back, not the
+command's own success message).
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
