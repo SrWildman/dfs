@@ -1497,6 +1497,23 @@ def test_style_flat_tab_styles_header_freezes_and_widths_every_column():
     assert all(px != 100 for px in widths.values())
 
 
+def test_builder_widths_covers_every_base_column_order_name():
+    # Part 7.4 (2026-09-18): "O/U" had no entry at all -- `polish_builder_
+    # tab` only sets a width for a name it finds in this dict (see its own
+    # width loop), so an absent entry means "whatever a past reorder
+    # happened to leave the physical column at," never actively managed.
+    # Caught live: Part 7.4's own GameID/TmRank insert shifted "O/U" onto
+    # a too-narrow physical column on Player Pool. "Pts" had the identical
+    # gap, fixed alongside it pre-emptively. `Flag` is the one deliberate
+    # exception -- hidden outright (`sheet_columns.INTERNAL`) on every tab
+    # this dict serves, so its width can never be visible.
+    from dfs.sheet_columns import BASE_COLUMN_ORDER
+    from dfs.sheet_style import BUILDER_WIDTHS
+
+    missing = {name for name in BASE_COLUMN_ORDER if name not in BUILDER_WIDTHS} - {"Flag"}
+    assert missing == set()
+
+
 def column_letter_for(i: int) -> str:
     from dfs.sheets import column_letter
 

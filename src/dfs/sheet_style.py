@@ -1267,6 +1267,15 @@ BUILDER_WIDTHS = {
     "Team Implied": 115,
     "Ceil": 56,
     "Overflow": 88,
+    # Same gap, found live during Part 7.4's own reorder (2026-09-18):
+    # inserting GameID/TmRank shifted "O/U" onto a physical column that
+    # had previously held something narrower, and nothing had ever set
+    # its width on purpose either -- `dfs setup audit-style` caught it
+    # truncating on Player Pool (33px, needs ~37px). "Pts" has the exact
+    # same gap (no entry, so no active management) -- added preemptively
+    # rather than waiting for the next reorder to expose it too.
+    "O/U": 60,
+    "Pts": 65,
 }
 
 
@@ -1515,7 +1524,16 @@ def _stack_check_formula(
        Confirmed elementwise-safe inside `SUMPRODUCT` on the template's
        Scratch tab before shipping -- unlike `MATCH`, which does NOT
        broadcast the same way inside a plain array literal (see
-       `sheet_pool_formulas.py`'s own docstring for that one).
+       `sheet_pool_formulas.py`'s own docstring for that one). Also
+       confirmed live that this does NOT false-positive when `GameID` is
+       blank (un-synced `nflverse_games` data, same graceful-degradation
+       case as `Stadium`/`Roof`/`Wind`): a self-referential `COUNTIFS`
+       criteria that RESOLVES to blank does not match another blank cell
+       the way an explicit `""` literal criteria would -- two RBs both
+       missing `GameID` never trigger this, verified empirically rather
+       than assumed, since the two behave differently in real Sheets and
+       getting this wrong would mean the check fires spuriously on
+       *every* still-un-synced week.
 
     Deliberately NOT a QB+RB rule (7.4's own text: sources disagree
     wildly, 0.07 to 0.43, and the two that measured it carefully call it

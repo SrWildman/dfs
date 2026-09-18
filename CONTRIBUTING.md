@@ -1111,7 +1111,14 @@ Scratch tab before shipping**, not assumed: the self-referential
 `COUNTIFS`-inside-`SUMPRODUCT` duplicate-detection idiom, and the
 `INDEX`/`MATCH` cross-lookup, each tested with both a violating and a
 clean lineup shape and read back to confirm the resolved value in both
-directions.
+directions. A third case tested along the way, because it's a real,
+not-hypothetical scenario: two RBs both with a genuinely BLANK `GameID`
+(an un-synced `nflverse_games` week) do NOT spuriously trigger `RB/GAME`
+-- confirmed a self-referential `COUNTIFS` criteria that resolves to
+blank behaves differently from an explicit `""` literal criteria (the
+latter matches blank cells; the former doesn't), which is exactly the
+opposite of what an assumption would have guessed and would have meant
+the check fired on every still-un-synced week if gotten wrong.
 
 **Deliberately NOT built, per the spec's own text:** a QB+RB stack rule
 (sources disagree wildly, 0.07 to 0.43 correlation, and the two that
