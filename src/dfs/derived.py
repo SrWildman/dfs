@@ -69,6 +69,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
@@ -189,6 +190,11 @@ EDGE_COLUMNS = [
     "Salary",
     "ProjPts",
     "Val",
+    # Part 7.2: `Val` is salary- and position-biased (cheap players and
+    # QBs both artificially outrank better plays), so it stays but is no
+    # longer the tool's primary sort -- `ValAdj` is. See
+    # `_val_adj_within_position` below for the regression.
+    "ValAdj",
     "Ceiling",
     "CeilVal",
     "Own%",
@@ -258,6 +264,59 @@ def _percentile_within(series: pd.Series, group: pd.Series) -> pd.Series:
     inputs stay NaN in the output -- pandas' rank() already skips them,
     which is exactly what we want for Ceiling's ~40% missing rows."""
     return series.groupby(group).rank(pct=True) * 100
+
+
+def _val_adj_within_position(proj_pts: pd.Series, salary: pd.Series, position: pd.Series) -> pd.Series:
+    """Part 7.2: `ValAdj = ProjPts - E[ProjPts | Salary, Position]` --
+    `Val`'s replacement as EdgeRaw's primary sort, since `Val` (points per
+    $1k) is both salary-biased (cheap players outrank better-but-pricier
+    ones) and position-biased (QBs dominate any points-per-dollar
+    leaderboard regardless of slate). Version 1 (this one) needs no
+    accumulated history: fit a plain OLS line of `ProjPts` on `Salary`
+    *within each position, on this slate's own projections*, and take
+    the residual -- "is this player projected above what this slate's
+    own pricing implies for his position," available from week one.
+    Version 2 (refit against realized points once the results loop
+    exists, additionally surfacing where the market is systematically
+    wrong) is a deliberate later step, not built here.
+
+    A position with fewer than two usable rows, or one where every row
+    shares the same `Salary` (can't fit a slope from a single price
+    point), gets a residual of 0 for that whole group -- there's no
+    "expectation" to measure against yet, and 0 reads as "no signal"
+    rather than a fabricated number. A row with a missing `ProjPts`
+    stays blank (NaN), consistent with this codebase's "blank is not
+    zero" rule -- it is never coerced into 0.
+
+    Deliberately NOT `groupby(...).apply(...)`: with exactly one
+    position present (a real case -- position-scoped debugging, or a
+    hypothetical single-position slate), pandas' own `apply` collapses
+    the per-row result into a single aggregate row instead of returning
+    it row-aligned, silently corrupting every value. Iterating positions
+    explicitly and writing into a pre-sized result Series sidesteps that
+    entirely and is easier to reason about besides."""
+    proj_pts = pd.to_numeric(proj_pts, errors="coerce")
+    salary = pd.to_numeric(salary, errors="coerce")
+    result = pd.Series(np.nan, index=proj_pts.index, dtype=float)
+
+    for pos_value in position.unique():
+        idx = position.index[position == pos_value]
+        pts = proj_pts.loc[idx].to_numpy(dtype=float)
+        sal = salary.loc[idx].to_numpy(dtype=float)
+        usable = ~(np.isnan(pts) | np.isnan(sal))
+        if usable.sum() < 2 or np.ptp(sal[usable]) == 0:
+            # No fittable slope for this position -- 0 for every row that
+            # actually has a ProjPts to compare; a genuinely missing
+            # ProjPts stays NaN rather than being coerced to a fabricated
+            # 0 (see docstring).
+            residual = np.where(np.isnan(pts), np.nan, 0.0)
+        else:
+            slope, intercept = np.polyfit(sal[usable], pts[usable], 1)
+            predicted = intercept + slope * sal
+            residual = pts - predicted
+        result.loc[idx] = residual
+
+    return result.round(2)
 
 
 def _game_env_scores(game: pd.Series, ou: pd.Series, spread: pd.Series) -> pd.Series:
@@ -453,6 +512,7 @@ def build_edge_frame(
     merged["ProjOwn"] = merged["ProjOwn"] / 100
 
     merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
+    merged["ValAdj"] = _val_adj_within_position(merged["ProjPts"], merged["Salary"], merged["Position"])
     merged["CeilVal"] = (merged["Ceiling"] / (merged["Salary"] / 1000)).round(2)
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)
 
@@ -488,13 +548,14 @@ def build_edge_frame(
     # string, not NaN, when nothing fired -- consistent with "Flags").
     merged["Flag"] = flag_lists.apply(lambda flags: flags[0] if flags else "")
 
-    # Leverage is blank for the whole frame until ownership publishes (see
-    # above), and sorting by an all-blank column just returns join order --
-    # fall back to CeilPct so the tab still ranks by *something* meaningful
-    # in that window, same as Flag/LEVERAGE already effectively did before
-    # this fix.
-    sort_key = "Leverage" if has_real_ownership else "CeilPct"
-    merged = merged.sort_values(sort_key, ascending=False, na_position="last").reset_index(drop=True)
+    # Part 7.2: `ValAdj` is EdgeRaw's default sort now -- Part 7.1 demoted
+    # `Leverage` off the spine specifically because it's no longer a
+    # primary sort anywhere (TFFB's ownership projection is large-field,
+    # wrong-shaped for Sam's small-field contests; see docs/CALCULATIONS.
+    # md). Unlike the old Leverage/CeilPct fallback, `ValAdj` never
+    # depends on ownership having published, so no fallback branch is
+    # needed here.
+    merged = merged.sort_values("ValAdj", ascending=False, na_position="last").reset_index(drop=True)
 
     # Phase 6, Part 2: renamed to Own% ONLY here, at the very last step --
     # every computation above (has_real_ownership, OwnPct, Leverage,

@@ -830,6 +830,67 @@ columns_already_inside_a_group` in `test_sheet_style.py`) pin both halves
 of the fix: the reset unhides what it should, and never touches what a
 group already owns.
 
+## Phase 6, Part 7.2 (2026-09-18): `ValAdj`, EdgeRaw's new default sort
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-18 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | New column `ValAdj` inserted into the shared spine, immediately after `Val` -- every column from `Ceiling`/`Ceil` onward shifts one position right. Linked (VLOOKUP against EdgeRaw) on the three builder tabs, same as `CeilVal`, since it's a whole-slate regression residual, not a per-row native formula. | `derived.EDGE_COLUMNS` 32 columns (`Val` at index 6, `Ceiling` at 7). `sheet_columns.DECISION` = `DK Sal, Pts, Val, Ceil, CeilVal, Own%, Avail, Flags` (8). `LINKED_COLUMNS` 16 members. `PLAYER_POOL_RAW_COLUMN_ORDER` 34 cols, `PLAYER_POOL_COLUMN_ORDER` 40, `LINEUPS_COLUMN_ORDER` 37. | `derived.EDGE_COLUMNS` 33 columns (`Val` still at 6, new `ValAdj` at 7, `Ceiling` now at 8). `DECISION` = `DK Sal, Pts, Val, ValAdj, Ceil, CeilVal, Own%, Avail, Flags` (9). `LINKED_COLUMNS` 17 members (`ValAdj` first). `PLAYER_POOL_RAW_COLUMN_ORDER` 35, `PLAYER_POOL_COLUMN_ORDER` 41, `LINEUPS_COLUMN_ORDER` 38. | Live + Template | `derived.EDGE_COLUMNS`, new `derived._val_adj_within_position`, `derived.build_edge_frame` (new `ValAdj` column; default sort changed from `Leverage`/`CeilPct` fallback to `ValAdj` unconditionally), `sheet_columns.DECISION`/`LINKED_COLUMNS` (both gain `ValAdj`), `sheet_style.EDGE_WIDTHS`/`FIELD_FORMATS`/`FIELD_COLOR_SCALES`/`EDGE_UNSCALED_PLAYER_METRICS` (unaffected -- `ValAdj` deliberately excluded)/`GROUPED_TAB_UNSCALED_COLUMNS` (gains `ValAdj`, alongside `CeilPct`), every EDGE_COLUMNS-index-pinning test in `tests/test_sheet_links.py` (`test_already_linked_columns_positions_never_move`, `test_edge_lookup_formula_uses_correct_range_and_column_index`, and the several tests hardcoding `LINKED_EDGE_COLUMNS`' width as a literal column-letter range -- all updated, not just re-asserted, per their own docstrings' instructions). |
+
+**Why not native.** `Val` is a native per-row formula (`Pts / (DK Sal /
+1000)`) on PlayerPoolRaw/Player Pool/Lineups -- each row only needs its
+own two numbers. `ValAdj` can't work that way: the regression it's a
+residual FROM needs every other row at that position on the same slate,
+which is exactly the kind of whole-tab computation this codebase already
+keeps in Python rather than Sheets formulas (see `CeilPct`/`Leverage`/
+`GameEnv`, all computed once in `derived.py` and linked out). So `ValAdj`
+is computed on `EdgeRaw` only, in `_val_adj_within_position`, and joins
+`LINKED_COLUMNS` like every other EdgeRaw-computed signal.
+
+**The regression, and its edge cases.** Per position, on the slate's own
+`ProjPts`/`Salary` only (no accumulated history needed) -- `numpy.polyfit`
+degree 1, residual = actual minus predicted. Two edge cases needed
+explicit handling, both found by writing a docstring-first spec before
+the implementation and then testing against it: a position with fewer
+than two usable rows, or a constant `Salary` within a position (nothing
+to fit a slope against), gets `0` for every row in that group rather than
+raising or fabricating a number; a genuinely missing `ProjPts` stays
+`NaN` in every case, including that degenerate one, never coerced to 0.
+
+**A real pandas bug, found before it ever reached a real sheet.** The
+first implementation used `frame.groupby("Position", group_keys=False).
+apply(_residual)`, which is idiomatic pandas for "compute something per
+group, keep row alignment." It silently breaks with exactly ONE group
+present (which happens often here -- test fixtures with a single
+position, and legitimately possible on a very short real slate too):
+pandas' `apply` collapses the per-row Series into a single aggregate row
+and reinterprets its own row-index (0, 1, 2, ...) as new COLUMN labels,
+returning a transposed one-row DataFrame instead of a row-aligned Series
+-- caught immediately by the offline test suite (`ValueError: Cannot set
+a DataFrame with multiple columns to the single column ValAdj`), not live,
+because `pytest -q` ran before any sheet was touched (see this repo's own
+"offline first" testing principle). Fixed by iterating positions
+explicitly with boolean masks and writing into a pre-sized result Series
+-- see `_val_adj_within_position`'s own docstring for why `groupby(...)
+.apply(...)` is deliberately avoided here.
+
+**Sort order.** `build_edge_frame` sorted by `Leverage` descending (with a
+`CeilPct` fallback while ownership was unpublished) before this change --
+Part 7.1 had already decided Leverage should no longer be a primary sort
+anywhere, but left the actual sort-key swap for Part 7.2 to land, since
+`ValAdj` is what replaces it. Now sorts by `ValAdj` descending,
+unconditionally -- no ownership-dependent fallback branch needed, since
+`ValAdj` never depends on `Own%` having published.
+
+**`Val` itself is unchanged and still present** -- kept for its
+`>= 3.0` cash-line threshold (Part 7.3), just no longer the sort key.
+
+Verified: `pytest -q`/`ruff check`/`ruff format --check` clean (541
+tests). Applied to the template first, then live, via the normal
+`dfs setup link-edge --force` (regenerates every VLOOKUP, including the
+newly-shifted ones past `ValAdj`) followed by `dfs setup polish`
+(re-applies `ValAdj`'s own colour scale/width/format) -- `dfs doctor`/
+`dfs setup audit-style` clean on both sheets afterward.
+
 ## Per-position raw-metric highlighting on EdgeRaw (2026-09-18)
 
 **The ask.** Sam's actual workflow: filter EdgeRaw to a position or two,

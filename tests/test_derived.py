@@ -113,8 +113,6 @@ def test_leverage_and_ownpct_are_blank_when_all_projown_is_zero():
 
     assert (frame["OwnStatus"] == OWN_STATUS_UNPUBLISHED).all()
     assert frame["Leverage"].isna().all()
-    # Blank Leverage isn't sortable, so the tab still ranks by CeilPct.
-    assert frame["Name"].tolist() == ["High ceiling", "Low ceiling"]
 
 
 def test_leverage_is_ceilpct_minus_ownpct_once_ownership_is_published_for_most_of_the_slate():
@@ -308,32 +306,81 @@ def test_game_env_scores_higher_total_and_tighter_spread_higher():
     assert shootout["GameEnv"] > blowout["GameEnv"]
 
 
-def test_frame_falls_back_to_ceilpct_sort_when_ownership_unpublished():
-    proj = _projections(
+def test_frame_is_sorted_by_valadj_descending_regardless_of_ownership_status():
+    # Part 7.1/7.2: Leverage is no longer a primary sort anywhere, and its
+    # old CeilPct fallback (for the ownership-unpublished window) goes
+    # with it -- ValAdj is EdgeRaw's one default sort now, and (unlike
+    # Leverage) never depends on ownership having published at all. Same
+    # ProjPts/Salary combination -- with real, non-uniform Salary so each
+    # position's own regression actually has something to fit against --
+    # produces the identical order whether ProjOwn is all zero
+    # (unpublished) or varied (published): "Overperformer" (Salary 5500,
+    # ProjPts 20) projects well above what this trio's own pricing
+    # implies for RB; "Underperformer" (Salary 6000, ProjPts 11) is the
+    # most expensive and the weakest projected -- clearly worst value;
+    # "Baseline" (Salary 4000, ProjPts 8) sits in between.
+    # DK's own Salary (from `sal`, below) is authoritative and overrides
+    # TFFB's own Salary field wherever both exist -- so the distinct
+    # salaries that matter here are set on `sal`, not on `rows`.
+    rows = [
+        {"Id": "1", "Name": "Baseline", "Position": "RB", "ProjPts": 8.0},
+        {"Id": "2", "Name": "Overperformer", "Position": "RB", "ProjPts": 20.0},
+        {"Id": "3", "Name": "Underperformer", "Position": "RB", "ProjPts": 11.0},
+    ]
+    sal = _salaries(
         [
-            {"Id": "1", "Name": "Low", "Position": "RB", "Ceiling": 5.0, "ProjOwn": 0},
-            {"Id": "2", "Name": "High", "Position": "RB", "Ceiling": 50.0, "ProjOwn": 0},
-            {"Id": "3", "Name": "Mid", "Position": "RB", "Ceiling": 25.0, "ProjOwn": 0},
+            {"ID": "1", "Salary": 4000},
+            {"ID": "2", "Salary": 5500},
+            {"ID": "3", "Salary": 6000},
         ]
     )
-    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}])
 
-    frame = build_edge_frame(proj, sal).frame
-    assert frame["Name"].tolist() == ["High", "Mid", "Low"]
+    unpublished = build_edge_frame(_projections([{**r, "ProjOwn": 0} for r in rows]), sal).frame
+    assert unpublished["Name"].tolist() == ["Overperformer", "Baseline", "Underperformer"]
+
+    published = build_edge_frame(
+        _projections([{**r, "ProjOwn": own} for r, own in zip(rows, [40.0, 1.0, 20.0], strict=True)]),
+        sal,
+    ).frame
+    assert published["Name"].tolist() == ["Overperformer", "Baseline", "Underperformer"]
 
 
-def test_frame_is_sorted_by_leverage_descending_once_ownership_is_real():
+def test_valadj_is_zero_not_nan_when_a_positions_salary_never_varies():
+    # A position with every row at the same Salary has no slope to fit --
+    # `_val_adj_within_position` deliberately reads that as "no signal"
+    # (0), not a fabricated regression, and never raises. Real case: a
+    # thin position (DST, or a short slate) where DK happens to price
+    # every rostered player identically.
     proj = _projections(
         [
-            {"Id": "1", "Name": "Low leverage", "Position": "RB", "Ceiling": 5.0, "ProjOwn": 40.0},
-            {"Id": "2", "Name": "High leverage", "Position": "RB", "Ceiling": 50.0, "ProjOwn": 1.0},
-            {"Id": "3", "Name": "Mid leverage", "Position": "RB", "Ceiling": 25.0, "ProjOwn": 20.0},
+            {"Id": "1", "Name": "A", "Position": "TE", "ProjPts": 5.0},
+            {"Id": "2", "Name": "B", "Position": "TE", "ProjPts": 9.0},
         ]
     )
-    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}])
+    sal = _salaries([{"ID": "1", "Salary": 3000}, {"ID": "2", "Salary": 3000}])
 
     frame = build_edge_frame(proj, sal).frame
-    assert frame["Name"].tolist() == ["High leverage", "Mid leverage", "Low leverage"]
+    assert (frame["ValAdj"] == 0.0).all()
+
+
+def test_valadj_stays_blank_when_projpts_is_missing_even_in_a_degenerate_group():
+    # Same degenerate (constant-Salary) group as above, but one row's
+    # ProjPts is genuinely missing -- it must stay NaN (blank), never
+    # coerced to the group's 0.0 fallback. "Blank is not zero" applies to
+    # ValAdj same as everywhere else in this codebase.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Has points", "Position": "TE", "ProjPts": 5.0},
+            {"Id": "2", "Name": "No points", "Position": "TE", "ProjPts": float("nan")},
+        ]
+    )
+    sal = _salaries([{"ID": "1", "Salary": 3000}, {"ID": "2", "Salary": 3000}])
+
+    frame = build_edge_frame(proj, sal).frame
+    has_points = frame[frame["Name"] == "Has points"].iloc[0]
+    no_points = frame[frame["Name"] == "No points"].iloc[0]
+    assert has_points["ValAdj"] == 0.0
+    assert pd.isna(no_points["ValAdj"])
 
 
 def _games(rows: list[dict]) -> pd.DataFrame:

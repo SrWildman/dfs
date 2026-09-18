@@ -129,7 +129,8 @@ actually matches.
 | `Position`, `Team`, `Opp` | As above. |
 | `Salary` | DraftKings' own salary (authoritative) -- falls back to TFFB's figure only for the rare player TFFB projects who isn't on DK's main-slate salary list (e.g. a Thursday/Monday-only game). |
 | `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` get the per-position colour scale described below `Own%` does not. |
-| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Per-position colour scale, below. |
+| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Per-position colour scale, below. No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
+| `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Ordinary whole-tab colour scale (already position-comparable by construction), not the per-position one below. |
 | `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Per-position colour scale, below. |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
 | `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is all zeros (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
@@ -165,9 +166,11 @@ exactly why these four were excluded from every other column's
 whole-tab scale in the first place). Built for Sam's actual workflow:
 filter to a position, sort by one of these, look for outliers -- a flat
 white column made that hard. Every other field with a colour scale
-(`GameEnv`, `CeilPct`, `Leverage`, `OppPosRank`, `OverUnder`, `Spread`,
-`ImpliedMove`/`TotMove`/`SpdMove`) already scales sensibly across the
-whole tab and is unaffected. `Salary` is never colour-scaled anywhere on
+(`GameEnv`, `CeilPct`, `ValAdj`, `Leverage`, `OppPosRank`, `OverUnder`,
+`Spread`, `ImpliedMove`/`TotMove`/`SpdMove`) already scales sensibly
+across the whole tab and is unaffected -- `ValAdj` in particular is
+already a per-position residual by construction, so a flat scale on it
+is correct, not a gap. `Salary` is never colour-scaled anywhere on
 this sheet -- see the Ceiling/Val note in `docs/CALCULATIONS.md`.
 
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
@@ -190,7 +193,7 @@ disagree:
 | Zone | Columns |
 |---|---|
 | IDENTITY (spine) | `Name` `Pos.` `Team` `Opp.` |
-| DECISION (spine) | `DK Sal` `Pts` `Val` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
+| DECISION (spine) | `DK Sal` `Pts` `Val` `ValAdj` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
 | — label `GAME` — | (always visible, not part of any group) |
 | GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` |
 | — label `CEIL` — | (always visible, not part of any group) |
@@ -238,26 +241,27 @@ spine slot, and `Flag` (just the single highest-priority token) moved
 into INTERNAL beside `Id`, hidden, kept only because other
 formatting/filtering logic keys off it as a boolean value.
 
-`PlayerPoolRaw` is exactly this, 34 columns (was 30 right after Part 7.9's
+`PlayerPoolRaw` is exactly this, 35 columns (was 30 right after Part 7.9's
 metric audit, 34 through Phase 5H before that -- Phase 5, Section I
 removed the four reserved-but-never-wired `SoS 1..4` placeholders once
 the real strength-of-schedule sync landed straight into `OppPosRank`
 instead; see CONTRIBUTING.md's changelog -- the zone-label usability fix
 then added the four label columns above, landing back at 34 by
-coincidence). `Player Pool` inserts `Source` and `Edge ↗` (A3) right
-after `Opp.` (i.e. right after IDENTITY, since `Venue` no longer sits
-there) and appends `Overflow`/`Pool`/`Used`/`In` at the very end (40
-total; `Used`/`In` are Phase 5B, see below). `Lineups` inserts `% of Cap`
-(renamed from `% of Own` in Part 7.9, `% of Rstr` before that in Part 2)
-immediately after the full spine, then `Issues` then `Edge ↗` (A3),
-before the collapsed groups begin (37 total). Lineups also groups
+coincidence; Part 7.2 then added `ValAdj`, one more, to 35). `Player
+Pool` inserts `Source` and `Edge ↗` (A3) right after `Opp.` (i.e. right
+after IDENTITY, since `Venue` no longer sits there) and appends
+`Overflow`/`Pool`/`Used`/`In` at the very end (41 total; `Used`/`In` are
+Phase 5B, see below). `Lineups` inserts `% of Cap` (renamed from `% of
+Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
+the full spine, then `Issues` then `Edge ↗` (A3), before the collapsed
+groups begin (38 total). Lineups also groups
 `O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
 Game/Ceiling detail/Movement/Weather zones above -- see below. Column
 letters aren't given here on purpose -- they move whenever a new column
 is inserted (most recently A3's "Edge ↗"); `sheet_columns.py`'s own
 lists are the only thing anything in this codebase actually depends on.
-`CeilVal`/`Avail`/`Flags`/`GameEnv`/the whole CEILING DETAIL/MOVEMENT/
+`ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/the whole CEILING DETAIL/MOVEMENT/
 WEATHER zones (all but `Venue`, which is native) plus hidden `Id`/`Flag`
 are linked from `EdgeRaw` by `dfs setup link-edge`
 (`sheet_links.LINKED_EDGE_COLUMNS`); everything else in the table above
@@ -304,7 +308,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Own%` | `TFFBOptoRaw`'s `ProjOwn`, already a 0-1 fraction here (unlike `EdgeRaw`'s own `Own%`, which needed a Part 2 rescale to match -- see EdgeRaw's column docs above). |
-| `CeilVal`, `Avail`, `Flags`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `CeilVal`/`Avail`/`Flags`/`GameEnv` stay on the visible spine/Game zone. |
+| `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv` stay on the visible spine/Game zone. `ValAdj` is linked (not native, unlike `Val`) since it's a whole-slate per-position regression, not a per-row formula. |
 
 ### Player Pool / Lineups
 

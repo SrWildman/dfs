@@ -55,6 +55,52 @@ populate `Ceiling` for every player (roughly 40-60% coverage depending on
 the week), and a blank is left blank rather than treated as zero, since a
 missing ceiling isn't the same claim as "this player has no ceiling."
 
+## ValAdj (Part 7.2, 2026-09-18) -- EdgeRaw's default sort
+
+`ValAdj = ProjPts - E[ProjPts | Salary, Position]`
+
+`Val` is both salary-biased (a cheap player outranks a better, pricier one
+just for being cheap) and position-biased (QBs project the most points on
+any slate, so they dominate a raw points-per-dollar leaderboard regardless
+of who's actually the better play). `ValAdj` answers the real question
+instead: is this player projected *above what this slate's own pricing
+implies for his position*?
+
+**Version 1 (this one), needs no accumulated history.** For each position,
+fit an ordinary least-squares line of `ProjPts` on `Salary` across THIS
+SLATE's own projections only -- `derived._val_adj_within_position` -- and
+take the residual (actual minus the line's prediction at that salary).
+Refit fresh every sync; nothing carries over week to week. A position with
+fewer than two usable rows, or where every row shares the exact same
+`Salary` (nothing to fit a slope against), gets `0` for every row in that
+group -- read as "no signal available," not a real computed value. A row
+missing `ProjPts` stays blank (NaN), never coerced to 0, in every case
+including that degenerate one.
+
+*Version 2*, refitting against realized points once the results-tracking
+loop exists, would additionally show where the market is systematically
+wrong -- a deliberate later step, not built yet.
+
+**`ValAdj` is EdgeRaw's default sort** (`build_edge_frame` sorts
+descending by it, unconditionally). This replaces the old Leverage-
+descending sort (with a CeilPct fallback while ownership was unpublished)
+-- see "Leverage and OwnStatus" below for why Leverage was demoted off
+every primary sort in the first place. Unlike that old sort, `ValAdj`
+never depends on whether TFFB has published real ownership yet, so there
+is no fallback branch any more.
+
+**Keep `Val`.** It didn't go away -- `Val >= 3.0` (3 points per $1,000,
+roughly 150 points, which wins DK cash lineups about 90% of the time) is
+a real, useful cash threshold. Bad sort key, good filter line.
+
+Already comparable across positions by construction (a within-position
+residual, same as `CeilPct` is a within-position percentile) -- so unlike
+raw `ProjPts`/`Val`/`Ceiling`/`CeilVal`, `ValAdj` gets EdgeRaw's ordinary
+flat, whole-tab colour scale rather than the newer per-position one (see
+"Per-position highlighting" below), and Player Pool/Lineups skip
+re-scaling it per position block for the same reason (`sheet_style.
+GROUPED_TAB_UNSCALED_COLUMNS`).
+
 ## Per-position highlighting (ProjPts, Val, Ceiling, CeilVal)
 
 These four are `derived.EDGE_UNSCALED_PLAYER_METRICS` -- deliberately
@@ -166,12 +212,13 @@ the time) read `"real"` while every `ProjOwn` on `EdgeRaw` still read
 ownership to be genuinely published for a majority of the slate, not just
 present for one player.
 
-**Sort order.** `build_edge_frame` sorts the frame by `Leverage`
-descending once ownership is real, or by `CeilPct` descending while
-`OwnStatus` is `"unpublished"` (sorting by an all-blank `Leverage` column
-would just return join order). The Board tab's "top leverage" panel
-trusts this order directly rather than re-sorting, so it automatically
-reflects whichever ranking is actually in effect.
+**Sort order.** `Leverage` is no longer a primary sort anywhere (Part
+7.1) -- `build_edge_frame` sorts the frame by `ValAdj` descending instead
+(Part 7.2, see "ValAdj" above), unconditionally, regardless of whether
+`OwnStatus` is `"real"` or `"unpublished"`. Revisit no earlier than a full
+season of ownership logs (Part 7.8) -- TFFB's ownership projection is
+large-field, Sam plays small-field, so treat `Leverage` as directional at
+best until that gap has been measured.
 
 ## GameEnv
 

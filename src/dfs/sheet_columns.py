@@ -26,17 +26,19 @@ where the Board itself gets rebuilt (Part 3/7.6).
 
 `Venue` moves out of IDENTITY into the Weather group -- it's demoted the
 same as everything else not in the spine, and the spine deliberately does
-not include it (see the spine list below). `ValAdj` (Part 7.2) is NOT
-added here as a placeholder column -- named in Part 2's own spine list
-only as a forward reference to work that hadn't shipped yet, and Sam has
-already rejected the reserved-placeholder pattern once (the `SoS 1..4`
+not include it (see the spine list below). `ValAdj` was originally left
+out of this module's spine list entirely (named only in Part 2's own
+prose as a forward reference to work that hadn't shipped yet -- Sam had
+already rejected the reserved-placeholder pattern once, the `SoS 1..4`
 removal, Phase 5 Section K: "Why still sos 1-4. Should only be one per
-player"). It inserts itself into the spine at build time via the same
-`sheet_reorder.migrate_tab_to_designed_order` mechanism that already
-knows how to insert and place a new column name into a designed order
-(used for `Edge ↗`/`Used`/`In` in earlier phases). `Flags` is no longer a
-forward reference -- Part 7.9 built it for real (see `DECISION` below):
-`Flag` (singular) turned out, when checked, to already carry every
+player"). Part 7.2 (2026-09-18) built it for real: it's now a genuine
+`DECISION` member, right after `Val`, linked (VLOOKUP against EdgeRaw,
+`LINKED_COLUMNS` below) since it's a whole-slate regression residual, not
+a per-row native formula -- inserted into an already-designed order via
+the same `sheet_reorder.migrate_tab_to_designed_order` mechanism used for
+`Edge ↗`/`Used`/`In` in earlier phases. `Flags` is no longer a
+forward reference either -- Part 7.9 built it for real (see `DECISION`
+below): `Flag` (singular) turned out, when checked, to already carry every
 matching condition rather than the single first-match value Part 7.9's
 own spec assumed, so the split is real, not just a rename.
 
@@ -103,14 +105,19 @@ from dfs.derived import (
 IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 
 # DK Sal/Pts/Val/Ceil/Own% are native (read straight off DkSalClean/
-# TFFBOptoRaw, or self-computed for Val); CeilVal/Avail/Flags are linked
-# (VLOOKUP against EdgeRaw). Leverage is NOT here -- Part 7.1 demotes it
-# off the spine into the collapsed Ceiling detail group below, folded
-# into this same reorder (see this module's own docstring). "Flags" (not
-# "Flag" -- Part 7.9) is every matching condition, space-separated; the
-# single highest-priority token lives on hidden "Flag" instead, in
-# INTERNAL below.
-DECISION = ["DK Sal", "Pts", "Val", "Ceil", "CeilVal", "Own%", "Avail", "Flags"]
+# TFFBOptoRaw, or self-computed for Val); ValAdj/CeilVal/Avail/Flags are
+# linked (VLOOKUP against EdgeRaw). Leverage is NOT here -- Part 7.1
+# demotes it off the spine into the collapsed Ceiling detail group below,
+# folded into this same reorder (see this module's own docstring). "Flags"
+# (not "Flag" -- Part 7.9) is every matching condition, space-separated;
+# the single highest-priority token lives on hidden "Flag" instead, in
+# INTERNAL below. "ValAdj" (Part 7.2) sits right after "Val" -- `Val`'s
+# replacement as the tool's primary sort, since `Val` is both salary- and
+# position-biased. Unlike `Val` it can't be a native per-row formula: it's
+# a per-position regression residual over the WHOLE slate, computed once
+# in Python (`derived._val_adj_within_position`) and linked here like
+# every other EdgeRaw-computed signal.
+DECISION = ["DK Sal", "Pts", "Val", "ValAdj", "Ceil", "CeilVal", "Own%", "Avail", "Flags"]
 
 # O/U/Spread/Team Implied/OppPosRank are native (VLOOKUP against oddsFinal/
 # SoSComb); GameEnv is linked. The four `SoS 1..4` placeholders that used
@@ -179,6 +186,7 @@ BASE_COLUMN_ORDER = [
 # instead of duplicated by hand in sheet_links.py. Venue deliberately
 # excluded (native, see module docstring) despite sitting inside WEATHER.
 LINKED_COLUMNS = [
+    "ValAdj",
     "CeilVal",
     "Avail",
     "Flags",

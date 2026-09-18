@@ -225,6 +225,7 @@ FIELD_FORMATS = {
     "TotMove": _num('"+"0.0;"-"0.0;0.0'),
     "SpdMove": _num('"+"0.0;"-"0.0;0.0'),
     "Val": _num("0.00"),
+    "ValAdj": _num("0.00"),
     "CeilVal": _num("0.00"),
     # Phase 6, Part 2: EdgeRaw's own ProjOwn and the other three tabs'
     # native Rstr% are unified into one shared "Own%" name -- previously
@@ -296,6 +297,13 @@ FIELD_COLOR_SCALES = {
     "Ceil": _GRADIENT,
     "Val": _GRADIENT,
     "CeilVal": _GRADIENT,
+    # Part 7.2: unlike Val/CeilVal, already a per-position residual
+    # (Position-regressed against Salary on EdgeRaw itself), so -- same
+    # reasoning as CeilPct just below -- a flat whole-tab scale is
+    # already meaningful; see EDGE_UNSCALED_PLAYER_METRICS/
+    # GROUPED_TAB_UNSCALED_COLUMNS for why EdgeRaw scales this one but
+    # Player Pool/Lineups skip re-grouping it.
+    "ValAdj": _GRADIENT,
     "Leverage": _GRADIENT,
     "GameEnv": _GRADIENT,
     "Team Implied": _GRADIENT,
@@ -349,8 +357,10 @@ EDGE_UNSCALED_PLAYER_METRICS = frozenset({"ProjPts", "Ceiling", "Val", "CeilVal"
 # for something that reads correctly-but-redundantly if skipped. `OwnPct`
 # used to sit here too; dropped entirely from the sheet in Part 7.9 (its
 # only consumer was the Leverage formula), so there's nothing left to
-# exclude it from.
-GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct"})
+# exclude it from. `ValAdj` (Part 7.2) joins it for the same reason: it's
+# already a per-position residual computed once on EdgeRaw, so re-scaling
+# it again per position-block here would be redundant, not wrong.
+GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct", "ValAdj"})
 
 # Deliberately absent from FIELD_COLOR_SCALES: `Salary`/`DK Sal` -- a
 # constraint, not a quality; scaling it would imply cheap is good.
@@ -659,6 +669,10 @@ EDGE_WIDTHS = {
     # to "Remainin" live. A short numeric Val (e.g. "3.45") never needed
     # this much room; the totals-row label did.
     "Val": 80,
+    # Part 7.2: signed residual (e.g. "-3.45"), plus the 6-character
+    # header itself -- not in a totals row like Val, no extra padding
+    # needed for that.
+    "ValAdj": 72,
     "CeilVal": 68,
     "CeilPct": 85,
     "Leverage": 92,

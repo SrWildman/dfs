@@ -77,6 +77,7 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "Own%",
         "Ceiling",
         "Val",
+        "ValAdj",
         "CeilVal",
         "Leverage",
         "GameEnv",
@@ -424,25 +425,29 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_ten_columns_skipping_raw_player_metrics():
+def test_polish_edge_scales_eleven_columns_skipping_raw_player_metrics():
     # Phase 4 (4.1): EdgeRaw isn't position-grouped, so ProjPts/Ceiling/
     # Val/CeilVal (EDGE_UNSCALED_PLAYER_METRICS) are skipped there --
     # CeilPct/Leverage (already percentile) stand in for them, same as
     # OppPosRank (Phase 5, 2026-09-16 -- already comparable across
     # positions, needs no position-grouping either). `OwnPct` used to be
     # one of these too; dropped entirely from EDGE_COLUMNS in Part 7.9.
+    # `ValAdj` (Part 7.2) joins this scaled set too -- already a
+    # per-position residual, not a raw player metric, so it's excluded
+    # from EDGE_UNSCALED_PLAYER_METRICS on purpose (see that constant's
+    # own comment).
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = [
         name
         for name in edge_header
         if name in FIELD_COLOR_SCALES and name not in EDGE_UNSCALED_PLAYER_METRICS
     ]
-    assert len(matched) == 10
+    assert len(matched) == 11
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 10
+    assert len(client.color_scale_calls) == 11
 
 
 def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
@@ -1084,8 +1089,10 @@ def test_apply_grouped_color_scales_writes_one_rule_per_column_per_group():
 
 def test_apply_grouped_color_scales_skips_the_grouped_tab_unscaled_columns():
     # `OwnPct` used to sit in GROUPED_TAB_UNSCALED_COLUMNS too; dropped
-    # entirely from the sheet in Part 7.9, so `CeilPct` alone demonstrates
-    # the skip now.
+    # entirely from the sheet in Part 7.9. `ValAdj` (Part 7.2) joins
+    # `CeilPct` here now -- also already a per-position value computed
+    # once on EdgeRaw, so re-grouping it per position block here would be
+    # redundant.
     client = FakeBuilderTabClient(["Name", "Pts", "CeilPct"])
     applied = apply_grouped_color_scales(
         client, "Player Pool", client._header, [(3, 12)], skip=GROUPED_TAB_UNSCALED_COLUMNS
@@ -1093,7 +1100,7 @@ def test_apply_grouped_color_scales_skips_the_grouped_tab_unscaled_columns():
 
     assert applied == 1
     assert {a1 for a1, _ in client.color_scale_calls} == {"B3:B12"}
-    assert GROUPED_TAB_UNSCALED_COLUMNS == {"CeilPct"}
+    assert GROUPED_TAB_UNSCALED_COLUMNS == {"CeilPct", "ValAdj"}
 
 
 def test_apply_grouped_color_scales_scopes_zero_exclusion_to_each_groups_own_range():
