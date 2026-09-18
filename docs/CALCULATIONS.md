@@ -311,6 +311,90 @@ different CSV.
 DraftKings' own `Status` field, verbatim (`Q`/`OUT`/`IR`/blank). No
 transformation.
 
+## GameID and TmRank (Part 7.4, 2026-09-18) -- making stacks visible
+
+`GameID` is `nflverse_games`' own game identifier (`"2026_02_DET_BUF"`),
+already computed internally (as the join key that attaches `Stadium`/
+`Roof`/`Wind`) but never surfaced before this -- kept now, renamed to
+this column's own header text. Two players sharing this value are in the
+same game, which is what makes a stack (or a same-game guardrail
+violation) computable at all.
+
+`TmRank = ` this player's rank by `Salary` descending within his own
+`Team` AND `Position`, ties broken by `Name` ascending for a
+deterministic result regardless of the frame's own row order (which
+changes every sync, since `EdgeRaw` sorts by `ValAdj`). 1 is the
+highest-salaried player at that position on that team -- read alongside
+`Position`, a `TmRank` of 1 at `WR` means "this team's WR1."
+
+**This is a proxy, not a measurement.** Salary reflects the market's own
+belief about a player's usage, not his actual target share -- two
+different things that happen to correlate loosely. Never read `TmRank`
+as "this player gets N% of targets"; it answers "how does the market
+price this player relative to his own teammates at the position," which
+is a usable stand-in for target hierarchy but not the same claim. This is
+also why `TmRank` gets no colour scale (`sheet_style.FIELD_COLOR_SCALES`)
+-- scaling it would visually imply it's a ranked quality worth optimizing
+toward, the exact framing this section warns against.
+
+## Lineups guardrails: DST vs. own QB, and one RB per game (Part 7.4)
+
+Two of Part 7.4's three stacking rules are simply correct for both cash
+and GPP lineups alike, so they're real `Issues`-column warnings (the
+third, stack SHAPE -- QB+1 vs QB+2 vs QB+3 -- is a judgment call that
+depends on contest type Sam doesn't tag per lineup, so it's REPORTED in
+the lineup-metrics block instead, never warned about -- see Part 7.5).
+
+**1. Never roster a DST against your own QB's team.** Correlation -0.46
+in the underlying review -- the single largest coefficient anywhere in
+it. When this DST scores well (sacks, turnovers, a defensive/special-
+teams score), it is specifically at the expense of the offense it just
+beat, which is exactly the QB you rostered if he plays for that
+opponent.
+
+```
+qb_team = INDEX(Team_range, MATCH("QB", Position_range, 0))
+dst_opp = INDEX(Opp_range, MATCH("DST", Position_range, 0))
+violation = qb_team <> "" AND dst_opp <> "" AND qb_team = dst_opp
+```
+
+Both `INDEX`/`MATCH` lookups are wrapped in `IFERROR` -- a still-partial
+lineup missing a QB or a DST degrades to "no violation possible yet,"
+never a broken `#N/A` cell.
+
+**2. Max one RB per game.** A self-referential `COUNTIFS` inside
+`SUMPRODUCT` -- for every RB row, count how many RB rows (including
+itself) share its `GameID`; a violation exists if any such count exceeds
+1:
+
+```
+= SUMPRODUCT((Position_range="RB") * (COUNTIFS(Position_range,"RB",GameID_range,GameID_range) > 1)) > 0
+```
+
+Both formulas were confirmed empirically on the template's Scratch tab
+before shipping -- a violating lineup shape and a clean one, read back
+both directions -- since `COUNTIFS` accepting a RANGE (not a single
+value) as its own criteria argument, correctly broadcasting elementwise
+inside `SUMPRODUCT`, was worth verifying rather than assuming, the same
+"verify live" discipline this project applies to any new Sheets-formula
+mechanism (see `sheet_pool_formulas.py`'s own `MATCH`-broadcast note for
+a case where the equivalent assumption would have been WRONG).
+
+**Combining with the existing cap/completeness check.** A real stack
+violation is appended alongside whatever `OVER`/`INCOMPLETE`/`OK` the
+totals row already resolved to -- e.g. `"OVER $500 RB/GAME"` -- rather
+than replacing it, so one real problem can never silently hide another
+(the same principle `Flags` already established, after Part 1.1's
+`LINE_MOVE_FLAG_THRESHOLD` bug suppressed every other flag on ~95% of a
+real slate). `"OK"` specifically IS replaced by a real violation (there's
+nothing to combine it with -- "OK" just means nothing else fired).
+
+**Deliberately not built: a QB+RB stack rule.** Sources in the
+underlying review disagree wildly on this correlation (0.07 to 0.43),
+and the two sources that measured it most carefully both call it
+functionally zero -- not worth a rule that would flag real, harmless
+lineups.
+
 ## Flags (and Flag)
 
 The one column meant to be read at a glance. Evaluated in order

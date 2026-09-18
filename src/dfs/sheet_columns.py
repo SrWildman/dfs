@@ -128,7 +128,10 @@ DECISION = ["DK Sal", "Pts", "Val", "ValAdj", "Ceil", "CeilVal", "Own%", "Avail"
 # four reserved slots never had a real per-position use once the actual
 # per-player value existed. See CONTRIBUTING.md's changelog for the real
 # column deletion this required on PlayerPoolRaw/Player Pool/Lineups.
-GAME = ["O/U", "Spread", "Team Implied", "GameEnv", "OppPosRank"]
+# `GameID`/`TmRank` (Part 7.4, 2026-09-18) are both linked -- whole-slate
+# Python computations (a team-code join, a per-team-and-position salary
+# rank), not per-row native formulas.
+GAME = ["O/U", "Spread", "Team Implied", "GameEnv", "OppPosRank", "GameID", "TmRank"]
 
 # Phase 6, Part 2 + 7.1: CeilPct/LevBasis were already collapsed (the old
 # INTERNAL zone below); Leverage joins them here now that it's off the
@@ -191,6 +194,8 @@ LINKED_COLUMNS = [
     "Avail",
     "Flags",
     "GameEnv",
+    "GameID",
+    "TmRank",
     *CEILING_DETAIL,
     *MOVEMENT,
     "Stadium",

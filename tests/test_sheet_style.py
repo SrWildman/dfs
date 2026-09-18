@@ -1010,6 +1010,85 @@ def test_polish_guardrails_widens_its_own_column_and_clears_only_its_own_rules()
     assert client.clear_calls == [guardrails_col]  # never a blanket clear of Lineups' other rules
 
 
+# Part 7.4: adds GameID to _HEADER_FOR_GUARDRAILS so the stack checks have
+# everything they need (Pos./Team/Opp. were already present).
+_HEADER_FOR_GUARDRAILS_WITH_GAMEID = [*_HEADER_FOR_GUARDRAILS, "GameID"]
+
+
+def test_stack_check_formula_flags_dst_against_the_lineups_own_qb():
+    from dfs.sheet_style import _stack_check_formula
+
+    formula = _stack_check_formula(9, 17, position_col="B", team_col="C", opp_col="H", gameid_col="AA")
+    qb_team = 'IFERROR(INDEX($C$9:$C$17,MATCH("QB",$B$9:$B$17,0)),"")'
+    dst_opp = 'IFERROR(INDEX($H$9:$H$17,MATCH("DST",$B$9:$B$17,0)),"")'
+    assert f'IF(AND({qb_team}<>"",{dst_opp}<>"",{qb_team}={dst_opp}),"DST/QB","")' in formula
+
+
+def test_stack_check_formula_flags_more_than_one_rb_sharing_a_gameid():
+    from dfs.sheet_style import _stack_check_formula
+
+    formula = _stack_check_formula(9, 17, position_col="B", team_col="C", opp_col="H", gameid_col="AA")
+    assert (
+        'IF(SUMPRODUCT(($B$9:$B$17="RB")*(COUNTIFS($B$9:$B$17,"RB",'
+        '$AA$9:$AA$17,$AA$9:$AA$17)>1))>0,"RB/GAME","")' in formula
+    )
+
+
+def test_totals_check_formula_replaces_ok_with_the_real_stack_violation():
+    from dfs.sheet_style import _totals_check_formula
+
+    base = _totals_check_formula(9, 17, 18, "K")[1:]  # strip leading "="
+    formula = _totals_check_formula(9, 17, 18, "K", stack_check='"DST/QB"')
+    assert formula == (
+        f'=IF(({base})="","",IF("DST/QB"="",({base}),IF(({base})="OK","DST/QB",({base})&" "&"DST/QB")))'
+    )
+
+
+def test_totals_check_formula_appends_stack_check_without_masking_an_over_or_incomplete():
+    from dfs.sheet_style import _totals_check_formula
+
+    base = _totals_check_formula(9, 17, 18, "K")[1:]  # strip leading "="
+    formula = _totals_check_formula(9, 17, 18, "K", stack_check='"RB/GAME"')
+    # The exact prior cap/completeness formula is embedded verbatim, not
+    # rewritten -- Part 7.4 is additive on top of it, and the "&" concat
+    # branch (an OVER/INCOMPLETE result, not "OK") is what appends rather
+    # than replaces.
+    assert base in formula
+    assert f'({base})&" "&"RB/GAME"' in formula
+
+
+def test_totals_check_formula_none_stack_check_reproduces_prior_behaviour_exactly():
+    from dfs.sheet_style import _totals_check_formula
+
+    assert _totals_check_formula(9, 17, 18, "K", stack_check=None) == _totals_check_formula(9, 17, 18, "K")
+
+
+def test_polish_guardrails_adds_stack_checks_when_position_team_opp_gameid_all_linked():
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS_WITH_GAMEID)
+    guardrails_col = column_letter(_HEADER_FOR_GUARDRAILS_WITH_GAMEID.index("Issues"))
+
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    block_call = next(c for c in client.update_calls if c[0] == f"{guardrails_col}9:{guardrails_col}18")
+    totals_formula = block_call[1][-1][0]
+    assert "DST/QB" in totals_formula
+    assert "RB/GAME" in totals_formula
+
+
+def test_polish_guardrails_omits_stack_checks_when_gameid_not_yet_linked():
+    # _HEADER_FOR_GUARDRAILS (no GameID) -- exact prior behaviour, no
+    # stack tokens anywhere in the totals formula.
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    guardrails_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Issues"))
+
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    block_call = next(c for c in client.update_calls if c[0] == f"{guardrails_col}9:{guardrails_col}18")
+    totals_formula = block_call[1][-1][0]
+    assert "DST/QB" not in totals_formula
+    assert "RB/GAME" not in totals_formula
+
+
 class FakeBuilderTabClient:
     def __init__(self, header: list[str], grouped_column_indices: set[int] | None = None):
         self._header = header

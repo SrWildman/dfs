@@ -1065,6 +1065,72 @@ recovery in this file -- Scratch specifically is used for empirical
 Sheets-behavior tests throughout this project's history and had
 accumulated a real, load-bearing header along the way.
 
+## Phase 6, Part 7.4 (2026-09-18): make stacks visible -- data + guardrails
+
+The largest gap the review identified, per Sam's own words in the spec:
+"the sheet currently cannot show you a stack at all." No solver, no
+optimizer -- just the data and two hard correctness rules.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-18 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | Two new columns, `GameID` and `TmRank`, inserted into the GAME zone right after `OppPosRank`. `GameID` existed already as an internal join key (`GameId`, used to attach Stadium/Roof/Wind) but was dropped before reaching the sheet -- now kept and renamed to its own header text. `TmRank` is new: salary rank within team+position. | `derived.EDGE_COLUMNS` 33 columns, GAME zone ends at `OppPosRank`. `sheet_columns.GAME` = `O/U, Spread, Team Implied, GameEnv, OppPosRank` (5). `LINKED_COLUMNS` 17 members. `PLAYER_POOL_RAW_COLUMN_ORDER` 35, `PLAYER_POOL_COLUMN_ORDER` 41, `LINEUPS_COLUMN_ORDER` 38. | `EDGE_COLUMNS` 35 columns (`GameID` at 18, `TmRank` at 19). `GAME` = 7 members (adds `GameID`, `TmRank`). `LINKED_COLUMNS` 19 members. `PLAYER_POOL_RAW_COLUMN_ORDER` 37, `PLAYER_POOL_COLUMN_ORDER` 43, `LINEUPS_COLUMN_ORDER` 40. | Live + Template | `derived.EDGE_COLUMNS`, new `derived._tm_rank_within_team_position`, `derived.build_edge_frame` (keeps `GameId`, renamed `GameID`; new `TmRank` column), `sheet_columns.GAME`/`LINKED_COLUMNS`, `sheet_style.EDGE_WIDTHS`/`FIELD_FORMATS` (both gain `GameID`/`TmRank`; deliberately absent from `FIELD_COLOR_SCALES` -- see that constant's own comment), every `EDGE_COLUMNS`-index-pinning test in `tests/test_sheet_links.py` (updated, not just re-asserted, per their own docstrings). |
+
+**`TmRank`, and why it's a proxy, not a measurement.** Salary rank within
+a player's own team AND position -- 1 is the highest-salaried player at
+that position on that team (read alongside `Position`: "WR1", "RB1").
+Computed once in `derived._tm_rank_within_team_position`, ranked by
+Salary descending with ties broken by Name ascending (deterministic
+regardless of the frame's own row order, which changes every sync since
+EdgeRaw sorts by `ValAdj`). **This is a crude proxy for target hierarchy,
+not a measured one** -- salary reflects the market's own belief about
+usage, not actual target share -- so it deliberately gets no colour
+scale (scaling it would visually imply it's a ranked quality) and
+`docs/CALCULATIONS.md` says so explicitly.
+
+**Two new Lineups `Issues` guardrails, both real warnings (not the
+reported-only stack-shape metric -- see Part 7.5):**
+
+1. **Never roster a DST against your own QB's team** -- correlation
+   -0.46, the largest single coefficient anywhere in the underlying
+   review; when this DST does well, it's specifically at this QB's
+   expense.
+2. **Max one RB per game.**
+
+New `sheet_style._stack_check_formula` (an `INDEX`/`MATCH` lookup for
+rule 1, a `SUMPRODUCT`/self-referential `COUNTIFS` duplicate-count for
+rule 2), wired additively into `_totals_check_formula` -- a real
+violation is appended alongside whatever OVER/INCOMPLETE/OK the
+cap/completeness check already produced, never silently masked by it
+(same "don't let one condition hide another" principle `Flags` already
+established after Part 1.1's LINE-suppresses-everything bug).
+`polish_guardrails` degrades gracefully (skips the two new checks, exact
+prior behaviour) if Position/Team/Opp./GameID aren't all linked yet.
+
+**Both new formula mechanisms confirmed empirically on the template's
+Scratch tab before shipping**, not assumed: the self-referential
+`COUNTIFS`-inside-`SUMPRODUCT` duplicate-detection idiom, and the
+`INDEX`/`MATCH` cross-lookup, each tested with both a violating and a
+clean lineup shape and read back to confirm the resolved value in both
+directions.
+
+**Deliberately NOT built, per the spec's own text:** a QB+RB stack rule
+(sources disagree wildly, 0.07 to 0.43 correlation, and the two that
+measured it carefully call it functionally zero); stack SHAPE (QB+1 vs
+QB+2 vs QB+3) as an `Issues` warning -- it's reported, not warned about,
+in the lineup-metrics block instead (Part 7.5), since there's no cash/GPP
+tag per lineup (Part 7.3) and a QB+2 warning would fire wrongly on a cash
+lineup that should have no stack at all.
+
+**The "game-grouped view" (players grouped by GameID, games sorted by
+total, physical adjacency for spotting stacks) is DEFERRED, not built**
+-- asked Sam directly (2026-09-18) rather than guess at the real design
+decisions it needs (row budget per game, which positions to include, how
+to rank games) that the spec's own terse text doesn't pin down, and that
+overlap heavily with Part 3/7.6's upcoming Board rebuild (its own "Slate
+shape" and "Stack candidates" panels cover this same need with a clearer
+spec to build against). Sam: fold it into the Board rebuild rather than
+build a standalone tab now that would likely need rework days later.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

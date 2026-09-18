@@ -220,6 +220,11 @@ FIELD_FORMATS = {
     # `apply_field_formats`, rather than silently inheriting whatever a
     # stale physical column happened to carry.
     "OppPosRank": _num("0"),
+    # Part 7.4: a plain integer rank (1, 2, 3...), same reasoning as
+    # OppPosRank above -- a future reorder resets this via
+    # apply_field_formats rather than inheriting a stale physical
+    # column's format.
+    "TmRank": _num("0"),
     "Spread": _num('"+"0.0;"-"0.0;0.0'),
     "ImpliedMove": _num('"+"0.0;"-"0.0;0.0'),
     "TotMove": _num('"+"0.0;"-"0.0;0.0'),
@@ -364,6 +369,11 @@ GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct", "ValAdj"})
 
 # Deliberately absent from FIELD_COLOR_SCALES: `Salary`/`DK Sal` -- a
 # constraint, not a quality; scaling it would imply cheap is good.
+# `GameID`/`TmRank` (Part 7.4) too -- GameID is an identifier, not a
+# quantity; TmRank is a crude target-hierarchy PROXY (salary rank within
+# team+position), and colour-scaling it would visually imply it's a
+# measured quality worth ranking by, which docs/CALCULATIONS.md
+# explicitly warns against reading it as.
 
 # Columns where a real, common zero would otherwise anchor a gradient's
 # low end and compress everyone else's actual spread into a sliver of the
@@ -682,6 +692,10 @@ EDGE_WIDTHS = {
     "OwnStatus": 90,
     "GameEnv": 90,
     "OppPosRank": 115,
+    # nflverse's own GameId format is "2026_02_DET_BUF" -- season, week,
+    # away, home -- up to 15 characters.
+    "GameID": 130,
+    "TmRank": 70,
     "Stadium": 150,
     "Roof": 76,
     "Wind": 68,
@@ -1453,6 +1467,13 @@ _GUARDRAILS_HEADER = "Issues"
 _GUARDRAILS_CHIPS = [
     ("TEXT_CONTAINS", "DUPLICATE", _chip(CRIT_BG, CRIT_FG)),
     ("TEXT_CONTAINS", "OVER", _chip(CRIT_BG, CRIT_FG)),
+    # Part 7.4: both real Issues warnings (not the reported-only stack
+    # shape, see `_stack_check_formula`'s own docstring) -- same CRIT
+    # severity as DUPLICATE/OVER, since both are simply correct for cash
+    # and GPP alike, not a judgment call. TEXT_CONTAINS since the totals
+    # cell may combine this with an unrelated OVER/INCOMPLETE token.
+    ("TEXT_CONTAINS", "DST/QB", _chip(CRIT_BG, CRIT_FG)),
+    ("TEXT_CONTAINS", "RB/GAME", _chip(CRIT_BG, CRIT_FG)),
     ("TEXT_EQ", "OUT", _chip(CRIT_BG, CRIT_FG)),
     ("TEXT_EQ", "IR", _chip(CRIT_BG, CRIT_FG)),
     ("TEXT_EQ", "Q", _chip(WARN_BG, WARN_FG)),
@@ -1474,18 +1495,83 @@ def _slot_check_formula(start: int, end: int, row: int, avail_col: str) -> str:
     )
 
 
-def _totals_check_formula(start: int, end: int, totals_row: int, salary_col: str) -> str:
+def _stack_check_formula(
+    start: int, end: int, *, position_col: str, team_col: str, opp_col: str, gameid_col: str
+) -> str:
+    """Part 7.4's two "real Issues warnings" stack rules -- both simply
+    correct for cash and GPP alike (unlike stack SHAPE, which is
+    REPORTED, never warned about -- see the lineup-metrics block, Part
+    7.5, and 7.4's own spec text on why a QB+2/QB+1/no-stack judgment
+    call doesn't belong here). Computed once per lineup block's totals
+    row. `IFERROR` degrades a position genuinely absent from a still-
+    partial lineup (no QB rostered yet, say) to "no violation possible
+    yet" rather than a broken `#N/A` cell.
+
+    1. Never roster a DST against your own QB's team -- correlation
+       -0.46, the largest single coefficient in the whole review; when
+       this DST does well, it's specifically at this QB's expense.
+    2. Max one RB per game -- `COUNTIFS(GameID_range, GameID_range, ...)`
+       inside `SUMPRODUCT`, a self-referential duplicate-count idiom.
+       Confirmed elementwise-safe inside `SUMPRODUCT` on the template's
+       Scratch tab before shipping -- unlike `MATCH`, which does NOT
+       broadcast the same way inside a plain array literal (see
+       `sheet_pool_formulas.py`'s own docstring for that one).
+
+    Deliberately NOT a QB+RB rule (7.4's own text: sources disagree
+    wildly, 0.07 to 0.43, and the two that measured it carefully call it
+    functionally zero)."""
+    qb_team = (
+        f"IFERROR(INDEX(${team_col}${start}:${team_col}${end},"
+        f'MATCH("QB",${position_col}${start}:${position_col}${end},0)),"")'
+    )
+    dst_opp = (
+        f"IFERROR(INDEX(${opp_col}${start}:${opp_col}${end},"
+        f'MATCH("DST",${position_col}${start}:${position_col}${end},0)),"")'
+    )
+    dst_vs_own_qb = f'IF(AND({qb_team}<>"",{dst_opp}<>"",{qb_team}={dst_opp}),"DST/QB","")'
+
+    rb_per_game = (
+        f'IF(SUMPRODUCT((${position_col}${start}:${position_col}${end}="RB")*'
+        f'(COUNTIFS(${position_col}${start}:${position_col}${end},"RB",'
+        f"${gameid_col}${start}:${gameid_col}${end},${gameid_col}${start}:${gameid_col}${end})>1))>0,"
+        f'"RB/GAME","")'
+    )
+    return f'TEXTJOIN(" ",TRUE,{dst_vs_own_qb},{rb_per_game})'
+
+
+def _totals_check_formula(
+    start: int, end: int, totals_row: int, salary_col: str, *, stack_check: str | None = None
+) -> str:
     """Salary cap, roster completeness, or OK -- on the block's totals
     row (Fix 2.4: `totals_row` is `end + 1`, a real separate row now, not
     `end` itself). `salary_col` is found by header name at the call site
     (DK Sal), never hardcoded -- this used to read the literal column
     `D`, true only because DK Sal happened to sit there before Phase 3's
-    reorder moved it."""
-    return (
-        f'=IF(COUNTA($A${start}:$A${end})=0,"",'
+    reorder moved it.
+
+    `stack_check` (Part 7.4, `_stack_check_formula`'s own output, passed
+    in rather than built here so this function's own cap/completeness
+    logic stays independently testable) is appended ADDITIVELY --
+    "OVER $500 RB/GAME", say -- rather than replacing whatever OVER/
+    INCOMPLETE/OK already resolved to, so a real stack violation is never
+    silently masked by an unrelated cap/completeness issue (the same
+    "don't let one condition hide another" principle `Flags` already
+    established after Part 1.1's LINE-suppresses-everything bug). `None`
+    (the caller's default when Position/Team/Opp/GameID aren't all
+    linked yet) reproduces the exact prior behaviour."""
+    cap_or_completeness = (
+        f'IF(COUNTA($A${start}:$A${end})=0,"",'
         f'IF({salary_col}{totals_row}>50000,"OVER "&TEXT({salary_col}{totals_row}-50000,"$#,##0"),'
         f"IF(COUNTA($A${start}:$A${end})<9,"
         f'"INCOMPLETE "&COUNTA($A${start}:$A${end})&"/9","OK")))'
+    )
+    if not stack_check:
+        return f"={cap_or_completeness}"
+    base = f"({cap_or_completeness})"
+    return (
+        f'=IF({base}="","",'
+        f'IF({stack_check}="",{base},'
+        f'IF({base}="OK",{stack_check},{base}&" "&{stack_check})))'
     )
 
 
@@ -1785,12 +1871,18 @@ def polish_guardrails(
 
     Per roster slot: DUPLICATE if the same name appears twice in that
     lineup, else that pick's Avail flag (OUT/IR/Q) if it has one. On the
-    block's totals row: OVER the cap, INCOMPLETE (fewer than 9 picks), or
-    OK. The Avail and DK Sal columns are both found by header name too, not
-    a hardcoded letter -- exactly the class of assumption that caused this
-    feature's own prerequisite bug (see CONTRIBUTING.md's changelog);
-    skips cleanly if `dfs setup link-edge` hasn't run yet, or if "Issues"/
-    "DK Sal" aren't in the header for some other reason.
+    block's totals row: OVER the cap, INCOMPLETE (fewer than 9 picks),
+    Part 7.4's two stack-rule violations (DST/QB, RB/GAME -- see
+    `_stack_check_formula`), any combination of those additively, or OK.
+    The Avail/DK Sal/Pos./Team/Opp./GameID columns are all found by
+    header name, never a hardcoded letter -- exactly the class of
+    assumption that caused this feature's own prerequisite bug (see
+    CONTRIBUTING.md's changelog); skips cleanly if `dfs setup link-edge`
+    hasn't run yet, or if "Issues"/"DK Sal" aren't in the header for some
+    other reason. The two stack checks specifically degrade gracefully
+    (no crash, just skipped) if Position/Team/Opp./GameID aren't all
+    linked yet -- they're additive on top of the cap/completeness check,
+    never a hard requirement for this function to run at all.
 
     `header_repeats_at` (Fix 2.6) re-prints the header at Lineups' repeated
     sub-header rows too -- the original version only wrote it once, at
@@ -1819,6 +1911,17 @@ def polish_guardrails(
     salary_col = column_letter(header.index("DK Sal"))
     guardrails_col = column_letter(header.index(_GUARDRAILS_HEADER))
 
+    # Part 7.4: the two stack checks are additive, not required -- a
+    # Lineups build that predates `GameID` being linked (or mid-migration)
+    # still gets its cap/completeness check exactly as before.
+    stack_cols = ("Pos.", "Team", "Opp.", "GameID")
+    stack_ready = all(name in header for name in stack_cols)
+    position_col, team_col, opp_col, gameid_col = (
+        (column_letter(header.index(name)) for name in stack_cols)
+        if stack_ready
+        else (None, None, None, None)
+    )
+
     client.set_column_widths(tab, {guardrails_col: 110})
     client.update_range(tab, f"{guardrails_col}{header_row}", [[_GUARDRAILS_HEADER]])
     for repeat_row in header_repeats_at or []:
@@ -1827,7 +1930,19 @@ def polish_guardrails(
     for start, end in name_blocks:
         totals_row = end + 1
         rows = [[_slot_check_formula(start, end, row, avail_col)] for row in range(start, end + 1)]
-        rows.append([_totals_check_formula(start, end, totals_row, salary_col)])
+        stack_check = (
+            _stack_check_formula(
+                start,
+                end,
+                position_col=position_col,
+                team_col=team_col,
+                opp_col=opp_col,
+                gameid_col=gameid_col,
+            )
+            if stack_ready
+            else None
+        )
+        rows.append([_totals_check_formula(start, end, totals_row, salary_col, stack_check=stack_check)])
         client.update_range(tab, f"{guardrails_col}{start}:{guardrails_col}{totals_row}", rows)
 
     client.clear_conditional_formats(tab, column=guardrails_col)

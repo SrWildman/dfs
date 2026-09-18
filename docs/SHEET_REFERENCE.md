@@ -138,6 +138,8 @@ actually matches.
 | `GameEnv` | 0-100 per-game score from that game's own `OU`/`Spread` (higher total + tighter spread scores higher -- more reason for both offenses to keep throwing). |
 | `OverUnder`, `Spread` | Straight passthrough of the same TFFB Vegas fields `GameEnv` is computed from. `OverUnder` (not `OU`) so it doesn't collide with Player Pool/Lineups' own `O/U`, sourced from a different tab. |
 | `OppPosRank` | This player's OPPONENT's strength-of-schedule rank at this player's own position (1 = toughest matchup). Computed natively in Python from the already-synced `sos_qb`/`sos_rb`/`sos_wr`/`sos_te`/`sos_dst` frames (Phase 5, 2026-09-16, Sam: "all data should be in edge raw") -- the same value `PlayerPoolRaw`'s own `OppPosRank` computes via a `SoSComb` formula, just computed here without a live Sheets lookup. Blank for a position whose TFFB sync hasn't run yet, same graceful-degradation treatment as `Stadium`/`Roof`/`Wind`. |
+| `GameID` | Part 7.4: this player's game, `nflverse_games`' own ID format (`"2026_02_DET_BUF"` -- season, week, away, home). Was already computed internally to join `Stadium`/`Roof`/`Wind`, just never surfaced before now. What makes a stack visible: two players sharing this value are in the same game. |
+| `TmRank` | Part 7.4: this player's salary rank within his own team AND position -- 1 is the highest-salaried player at that position on that team (read alongside `Position`: "WR1", "RB1"). **A crude proxy for target hierarchy, not a measurement of it** -- salary reflects the market's own belief, not actual target share. No colour scale, deliberately -- see `docs/CALCULATIONS.md`. |
 | `Stadium` / `Roof` | From `GamesRaw`, joined by team code. Blank if `nflverse_games` hasn't synced this run. |
 | `Wind` | From `WeatherRaw`, joined by game. Blank for dome games or if `weather` hasn't synced. |
 | `Avail` | DraftKings' own `Status` (`Q`/`OUT`/`IR`). |
@@ -195,7 +197,7 @@ disagree:
 | IDENTITY (spine) | `Name` `Pos.` `Team` `Opp.` |
 | DECISION (spine) | `DK Sal` `Pts` `Val` `ValAdj` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
 | — label `GAME` — | (always visible, not part of any group) |
-| GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` |
+| GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` `GameID` `TmRank` |
 | — label `CEIL` — | (always visible, not part of any group) |
 | CEILING DETAIL (collapsed) | `CeilPct` `Leverage` `OwnStatus` |
 | — label `MOVE` — | (always visible, not part of any group) |
@@ -241,20 +243,21 @@ spine slot, and `Flag` (just the single highest-priority token) moved
 into INTERNAL beside `Id`, hidden, kept only because other
 formatting/filtering logic keys off it as a boolean value.
 
-`PlayerPoolRaw` is exactly this, 35 columns (was 30 right after Part 7.9's
+`PlayerPoolRaw` is exactly this, 37 columns (was 30 right after Part 7.9's
 metric audit, 34 through Phase 5H before that -- Phase 5, Section I
 removed the four reserved-but-never-wired `SoS 1..4` placeholders once
 the real strength-of-schedule sync landed straight into `OppPosRank`
 instead; see CONTRIBUTING.md's changelog -- the zone-label usability fix
 then added the four label columns above, landing back at 34 by
-coincidence; Part 7.2 then added `ValAdj`, one more, to 35). `Player
+coincidence; Part 7.2 then added `ValAdj`, one more, to 35; Part 7.4 then
+added `GameID`/`TmRank`, two more, to 37). `Player
 Pool` inserts `Source` and `Edge ↗` (A3) right after `Opp.` (i.e. right
 after IDENTITY, since `Venue` no longer sits there) and appends
-`Overflow`/`Pool`/`Used`/`In` at the very end (41 total; `Used`/`In` are
+`Overflow`/`Pool`/`Used`/`In` at the very end (43 total; `Used`/`In` are
 Phase 5B, see below). `Lineups` inserts `% of Cap` (renamed from `% of
 Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
 the full spine, then `Issues` then `Edge ↗` (A3), before the collapsed
-groups begin (38 total). Lineups also groups
+groups begin (40 total). Lineups also groups
 `O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
 Game/Ceiling detail/Movement/Weather zones above -- see below. Column
@@ -308,7 +311,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Own%` | `TFFBOptoRaw`'s `ProjOwn`, already a 0-1 fraction here (unlike `EdgeRaw`'s own `Own%`, which needed a Part 2 rescale to match -- see EdgeRaw's column docs above). |
-| `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `Stadium`, `Roof`, `Wind`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv` stay on the visible spine/Game zone. `ValAdj` is linked (not native, unlike `Val`) since it's a whole-slate per-position regression, not a per-row formula. |
+| `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `GameID`, `TmRank`, `Stadium`, `Roof`, `Wind`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/`GameID`/`TmRank` stay on the visible spine/Game zone. `ValAdj`/`GameID`/`TmRank` are linked (not native, unlike `Val`) since each is a whole-slate computation, not a per-row formula. |
 
 ### Player Pool / Lineups
 
@@ -411,10 +414,18 @@ protected (warning-only).
 per-lineup guardrail: on each roster slot, `DUPLICATE` if that name
 appears twice in the same lineup, else that pick's linked `Avail` flag
 (`OUT`/`IR`/`Q`) if it has one; on the totals row, `OVER` the salary cap,
-`INCOMPLETE` (fewer than 9 picks), or `OK`. `sheet_style.
-polish_guardrails` finds this column (and `DK Sal`/`Avail`) by header
-name, never a hardcoded letter -- see CONTRIBUTING.md's Phase 3 changelog
-entry for the incident that happened when it didn't.
+`INCOMPLETE` (fewer than 9 picks), Part 7.4's two stack-rule violations
+(`DST/QB` -- your rostered DST is playing against your own rostered QB's
+team; `RB/GAME` -- more than one rostered RB shares a game), any
+combination of those additively (e.g. `"OVER $500 RB/GAME"` -- a real
+violation is never silently masked by an unrelated one), or `OK`. The
+two stack checks need `Pos.`/`Team`/`Opp.`/`GameID` all linked -- they
+degrade gracefully (skipped, exact prior behaviour) otherwise, never
+blocking the cap/completeness check from running. `sheet_style.
+polish_guardrails` finds every one of these columns by header name,
+never a hardcoded letter -- see CONTRIBUTING.md's Phase 3 changelog
+entry for the incident that happened when it didn't. See
+`docs/CALCULATIONS.md` for the formula mechanics.
 
 `Lineups`' real header sits at row 1. It didn't always -- a "pool deck"
 (frozen rows above the header holding a sortable/filterable window into

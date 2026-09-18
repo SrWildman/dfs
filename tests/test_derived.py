@@ -415,6 +415,64 @@ def test_stadium_and_roof_joined_from_games_by_team_code():
     for _, row in frame.iterrows():
         assert row["Stadium"] == "Caesars Superdome"
         assert row["Roof"] == "dome"
+        # Part 7.4: GameID used to be computed as an internal join key
+        # (GameId) then dropped before this -- now kept, renamed to match
+        # its own header text.
+        assert row["GameID"] == "g1"
+
+
+def test_gameid_blank_when_games_not_synced():
+    proj = _projections([{"Id": "1", "Name": "P", "Team": "DET"}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert pd.isna(row["GameID"])
+
+
+def test_tmrank_is_salary_rank_within_team_and_position():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "WR1 candidate", "Position": "WR", "Team": "DET"},
+            {"Id": "2", "Name": "WR2 candidate", "Position": "WR", "Team": "DET"},
+            # Different team, same position -- must not affect DET's own ranks.
+            {"Id": "3", "Name": "Other team WR", "Position": "WR", "Team": "NO"},
+            # Different position, same team -- must not affect WR ranks.
+            {"Id": "4", "Name": "Team's RB1", "Position": "RB", "Team": "DET"},
+        ]
+    )
+    sal = _salaries(
+        [
+            {"ID": "1", "Salary": 8000},
+            {"ID": "2", "Salary": 5000},
+            {"ID": "3", "Salary": 9000},
+            {"ID": "4", "Salary": 7000},
+        ]
+    )
+
+    frame = build_edge_frame(proj, sal).frame
+    by_name = frame.set_index("Name")
+    assert by_name.loc["WR1 candidate", "TmRank"] == 1
+    assert by_name.loc["WR2 candidate", "TmRank"] == 2
+    assert by_name.loc["Other team WR", "TmRank"] == 1  # own team's WR1, despite higher salary
+    assert by_name.loc["Team's RB1", "TmRank"] == 1  # own position group, unaffected by DET's WRs
+
+
+def test_tmrank_breaks_a_salary_tie_by_name_not_row_order():
+    # Two players at the identical salary and team/position must still get
+    # a deterministic (not arbitrary/row-order-dependent) 1/2 split --
+    # broken by Name ascending.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Zeb Backup", "Position": "QB", "Team": "DET"},
+            {"Id": "2", "Name": "Andy Backup", "Position": "QB", "Team": "DET"},
+        ]
+    )
+    sal = _salaries([{"ID": "1", "Salary": 4000}, {"ID": "2", "Salary": 4000}])
+
+    frame = build_edge_frame(proj, sal).frame
+    by_name = frame.set_index("Name")
+    assert by_name.loc["Andy Backup", "TmRank"] == 1
+    assert by_name.loc["Zeb Backup", "TmRank"] == 2
 
 
 def test_wind_joined_from_weather_by_game_and_flagged_over_threshold():

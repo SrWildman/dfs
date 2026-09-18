@@ -218,6 +218,17 @@ EDGE_COLUMNS = [
     # a live Sheets formula, matching EdgeRaw's own "computed locally, no
     # live formulas" design. See `_attach_opp_pos_rank` below.
     "OppPosRank",
+    # Part 7.4 (2026-09-18): makes stacks visible. `GameID` was already
+    # computed internally (`_attach_games`, as `GameId`) to join Stadium/
+    # Roof/Wind, then dropped before this -- now kept and renamed to match
+    # this column's own header text. `TmRank` is new: this player's
+    # salary rank within his own team AND position (1 = highest-salaried
+    # at that position on that team -- "WR1", "RB1", read alongside
+    # Position) -- a crude but serviceable proxy for target hierarchy,
+    # not a measured one. See `_tm_rank_within_team_position` below and
+    # docs/CALCULATIONS.md for why it's labelled a proxy.
+    "GameID",
+    "TmRank",
     # CEILING DETAIL (collapsed) -- CeilPct/OwnStatus were already
     # collapsed together (the old INTERNAL group); Leverage joins them
     # here now that it's off the spine (Part 7.1). `OwnPct` dropped
@@ -264,6 +275,29 @@ def _percentile_within(series: pd.Series, group: pd.Series) -> pd.Series:
     inputs stay NaN in the output -- pandas' rank() already skips them,
     which is exactly what we want for Ceiling's ~40% missing rows."""
     return series.groupby(group).rank(pct=True) * 100
+
+
+def _tm_rank_within_team_position(
+    salary: pd.Series, name: pd.Series, team: pd.Series, position: pd.Series
+) -> pd.Series:
+    """Part 7.4: this player's salary rank within his own TEAM and
+    POSITION -- 1 is the highest-salaried player at that position on that
+    team ("WR1", "RB1", read alongside `Position`). A crude but
+    serviceable proxy for target hierarchy -- salary reflects the
+    market's OWN belief about usage, not a measured target share -- see
+    docs/CALCULATIONS.md for why this is never to be read as the latter.
+
+    Ranked by Salary descending, ties broken by Name ascending so the
+    result is deterministic regardless of the frame's own row order
+    (which itself changes every sync, since EdgeRaw is sorted by
+    `ValAdj`) -- two players priced identically at the same team/position
+    is rare but real (a full slate of backups at the veteran minimum),
+    and an arbitrary tiebreak would make "WR1"/"WR2" flip between syncs
+    for no real-world reason."""
+    frame = pd.DataFrame({"Salary": salary, "Name": name, "Team": team, "Position": position})
+    ordered = frame.sort_values(["Salary", "Name"], ascending=[False, True])
+    ordered["TmRank"] = ordered.groupby(["Team", "Position"]).cumcount() + 1
+    return ordered["TmRank"].reindex(frame.index)
 
 
 def _val_adj_within_position(proj_pts: pd.Series, salary: pd.Series, position: pd.Series) -> pd.Series:
@@ -535,9 +569,16 @@ def build_edge_frame(
 
     merged = _attach_games(merged, games)
     merged = _attach_weather(merged, weather)
-    merged = merged.drop(columns="GameId")
+    # Part 7.4: GameId used to be dropped right after Stadium/Roof/Wind
+    # were joined off it -- an internal join key, never surfaced. Now
+    # kept and renamed to GameID (this column's own header text) so
+    # stacks (players sharing a game) are visible on EdgeRaw itself.
+    merged = merged.rename(columns={"GameId": "GameID"})
     merged = _attach_line_movement(merged, line_movement)
     merged = _attach_opp_pos_rank(merged, sos_by_position)
+    merged["TmRank"] = _tm_rank_within_team_position(
+        merged["Salary"], merged["Name"], merged["Team"], merged["Position"]
+    )
 
     merged["Avail"] = merged["Status"].fillna("")
     merged = merged.drop(columns="Status")

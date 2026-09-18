@@ -104,27 +104,31 @@ def test_already_linked_columns_positions_never_move():
     # Part 7.2 (2026-09-18) added `ValAdj` to EDGE_COLUMNS right after
     # `Val`, and to LINKED_EDGE_COLUMNS as its new first member (it's a
     # whole-slate regression residual, not a native per-row formula) --
-    # shifting every OTHER linked column one further right too. Computed
-    # programmatically, not by hand, to avoid exactly the arithmetic
-    # mistake this comment's own history warns about.
+    # shifting every OTHER linked column one further right too. Part 7.4
+    # (same day) added `GameID`/`TmRank` right after `OppPosRank` --
+    # shifting everything from `CeilPct` onward two further right.
+    # Computed programmatically, not by hand, to avoid exactly the
+    # arithmetic mistake this comment's own history warns about.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         7,
         9,
         11,
         12,
         16,
+        18,
         19,
-        20,
         21,
+        22,
         23,
-        24,
         25,
         26,
+        27,
         28,
-        29,
         30,
         31,
         32,
+        33,
+        34,
     ]
 
 
@@ -135,20 +139,21 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # (CeilPct, Leverage, OwnStatus). The same-day zone-label usability
     # fix then inserted GAME_LABEL and CEILING_DETAIL_LABEL ahead of
     # Leverage's own zone. Part 7.2 (2026-09-18) then inserted `ValAdj`
-    # right after `Val`, well before Leverage's own zone -- landing
-    # Leverage at EDGE_COLUMNS index 20. The Name-anchored range is
-    # VLOOKUP column 21 (1-based, relative to Name at index 0) regardless
-    # of EDGE_DATA_OFFSET (a uniform shift cancels out of a *relative*
-    # position) -- but the range's own start/end letters do shift by that
-    # offset, since Pool occupies column A ahead of EDGE_COLUMNS, and the
-    # range's own END letter also grows by one per column ValAdj/a zone
-    # label added. Matches what `sheet_style.polish_edge` reports for the
-    # same columns.
-    assert EDGE_COLUMNS.index("Leverage") == 20
+    # right after `Val`, well before Leverage's own zone. Part 7.4 (same
+    # day) inserted `GameID`/`TmRank` right after `OppPosRank`, also
+    # ahead of Leverage's own zone -- landing Leverage at EDGE_COLUMNS
+    # index 22. The Name-anchored range is VLOOKUP column 23 (1-based,
+    # relative to Name at index 0) regardless of EDGE_DATA_OFFSET (a
+    # uniform shift cancels out of a *relative* position) -- but the
+    # range's own start/end letters do shift by that offset, since Pool
+    # occupies column A ahead of EDGE_COLUMNS, and the range's own END
+    # letter also grows by one per column added. Matches what
+    # `sheet_style.polish_edge` reports for the same columns.
+    assert EDGE_COLUMNS.index("Leverage") == 22
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
     end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},21,false))'
+        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},23,false))'
     )
 
 
@@ -180,7 +185,7 @@ def test_link_edge_columns_writes_header_at_first_free_column():
     # All 17 names are missing, so they're all created (appended) in
     # LINKED_EDGE_COLUMNS' own order -- one contiguous run, E through U
     # (Part 7.2 added `ValAdj`, one more than before).
-    header_call = next(c for c in client.update_calls if c[1] == "E1:U1")
+    header_call = next(c for c in client.update_calls if c[1] == "E1:W1")
     assert header_call[2] == [LINKED_EDGE_COLUMNS]
 
 
@@ -204,11 +209,11 @@ def test_link_edge_columns_fills_every_row_in_every_block():
     # `ValAdj` one wider than before) since they're all newly appended
     # together, so each name_block still writes in one `update_range`
     # call, just a wider one than the old 10-column block.
-    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 not in ("B1:R1",)}
-    assert "B2:R3" in block_calls
-    assert len(block_calls["B2:R3"]) == 2  # rows 2 and 3
-    assert "B5:R5" in block_calls
-    assert len(block_calls["B5:R5"]) == 1
+    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 not in ("B1:T1",)}
+    assert "B2:T3" in block_calls
+    assert len(block_calls["B2:T3"]) == 2  # rows 2 and 3
+    assert "B5:T5" in block_calls
+    assert len(block_calls["B5:T5"]) == 1
 
 
 def test_link_edge_columns_repeats_header_at_given_rows():
@@ -216,9 +221,9 @@ def test_link_edge_columns_repeats_header_at_given_rows():
     link_edge_columns(client, "Lineups", [(2, 5)], "EdgeRaw", header_repeats_at=[14, 27])
 
     repeated = [a1 for _, a1, rows in client.update_calls if rows == [LINKED_EDGE_COLUMNS]]
-    assert "B1:R1" in repeated
-    assert "B14:R14" in repeated
-    assert "B27:R27" in repeated
+    assert "B1:T1" in repeated
+    assert "B14:T14" in repeated
+    assert "B27:T27" in repeated
 
 
 def test_link_edge_columns_is_idempotent_when_already_linked():
@@ -318,11 +323,13 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
     # here now that a fourth zone (GAME) joins the same merge. Part 7.2's
     # `ValAdj` sits earlier in the header (right after Val, well before
     # this merged block) so it shifts the whole merged range one column
-    # right (F..P -> G..Q) without changing its width.
+    # right (F..P -> G..Q); Part 7.4's `GameID`/`TmRank` (linked, joining
+    # GameEnv inside GAME itself) then widen the merged range by two more
+    # columns (G..Q -> G..S).
     client = SpySheetsClient(header_row=["Name", "Pos."])  # width 2 -> next col C
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
     assert client.group_calls == [
-        ("Player Pool", "G", "Q", True),  # GameEnv..Wind, merged
+        ("Player Pool", "G", "S", True),  # GameEnv..Wind, merged
     ]
 
 
@@ -343,7 +350,7 @@ def test_link_edge_columns_groups_independently_once_zone_labels_separate_them()
     assert len(client.group_calls) == 4
     assert all(collapsed is True for _tab, _start, _end, collapsed in client.group_calls)
     expected = [
-        (column_letter(header.index("O/U")), column_letter(header.index("OppPosRank"))),
+        (column_letter(header.index("O/U")), column_letter(header.index("TmRank"))),
         (column_letter(header.index("CeilPct")), column_letter(header.index("OwnStatus"))),
         (column_letter(header.index("ImpliedMove")), column_letter(header.index("GameStart"))),
         (column_letter(header.index("Venue")), column_letter(header.index("Wind"))),
@@ -388,7 +395,7 @@ def test_link_edge_columns_only_creates_the_names_actually_missing():
     created_names = {name for row in header_writes for name in row}
     assert "GameEnv" not in created_names
     assert created_names == set(LINKED_EDGE_COLUMNS) - {"GameEnv"}
-    assert "16 newly created" in result
+    assert "18 newly created" in result
 
 
 def test_link_edge_columns_run_twice_only_appends_once():
