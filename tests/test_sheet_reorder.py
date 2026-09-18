@@ -31,6 +31,7 @@ class SpySheetsClient:
         self.header_row = header_row
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.move_calls: list[tuple[str, int, int]] = []
+        self.group_calls: list[tuple[str, str]] = []
 
     def read_range(self, tab_name: str, a1_range: str):
         return [self.header_row] if self.header_row else []
@@ -59,7 +60,7 @@ class SpySheetsClient:
         pass
 
     def group_columns(self, tab_name, first_col_a1, last_col_a1, *, collapsed=False):
-        pass
+        self.group_calls.append((first_col_a1, last_col_a1))
 
     def ensure_column_capacity(self, tab_name, min_cols):
         pass
@@ -187,6 +188,43 @@ def test_migrate_tab_to_designed_order_lands_on_the_target_header():
     )
 
     assert client.header_row == PLAYER_POOL_RAW_COLUMN_ORDER
+
+
+def test_migrate_tab_to_designed_order_groups_a_zone_that_just_gained_a_new_member():
+    # The real live incident (2026-09-18, Part 7.4's GameID/TmRank
+    # rollout): a name newly added to LINKED_COLUMNS (here, simulated by
+    # omitting GameID/TmRank from the starting header, exactly as they
+    # were before Part 7.4 existed) gets appended past the end of the
+    # header by `link_edge_columns`'s own missing-name fallback -- not yet
+    # physically adjacent to the rest of GAME (O/U..OppPosRank), so that
+    # function's own contiguity check correctly declines to group GAME at
+    # that moment. `reorder_tab_columns` then moves everything into its
+    # final designed position, but nothing used to re-derive the grouping
+    # afterward -- GAME silently ended up with NO collapsible group at
+    # all, while zones with no membership change (Ceiling detail/
+    # Movement/Weather) were unaffected. Fixed by re-running
+    # `link_edge_columns(force=True)` after the reorder.
+    from dfs.sheet_columns import GAME
+    from dfs.sheets import column_letter
+
+    old_header = [name for name in PLAYER_POOL_RAW_COLUMN_ORDER if name not in LINKED_COLUMNS] + [
+        name for name in LINKED_COLUMNS if name not in ("GameID", "TmRank")
+    ]
+    client = SpySheetsClient(header_row=old_header)
+
+    migrate_tab_to_designed_order(
+        client,
+        "PlayerPoolRaw",
+        PLAYER_POOL_RAW_COLUMN_ORDER,
+        name_blocks=[(2, 3)],
+        edge_tab="EdgeRaw",
+        rewrite_native=False,
+    )
+
+    assert client.header_row == PLAYER_POOL_RAW_COLUMN_ORDER
+    game_start = column_letter(PLAYER_POOL_RAW_COLUMN_ORDER.index(GAME[0]))
+    game_end = column_letter(PLAYER_POOL_RAW_COLUMN_ORDER.index(GAME[-1]))
+    assert (game_start, game_end) in client.group_calls
 
 
 def test_migrate_tab_to_designed_order_refreshes_every_linked_formula_not_just_new_ones():

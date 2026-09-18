@@ -223,6 +223,35 @@ def migrate_tab_to_designed_order(
     moves = reorder_tab_columns(client, tab, target_order, header_row=header_row)
     report.append(f"{tab}: applied {len(moves)} column move(s)")
 
+    # Found live (2026-09-18, Part 7.4's GameID/TmRank rollout): a name
+    # NEWLY appended to `LINKED_EDGE_COLUMNS` (as opposed to one already
+    # present from an earlier run) lands at the far end of the header --
+    # `link_edge_columns`'s OWN zone-grouping check above correctly
+    # requires a zone's members to already be physically contiguous
+    # before grouping it (see that function's own comment on why), which
+    # a column appended moments ago and not yet moved into place never
+    # is. The move above fixes the position but never re-derives the
+    # grouping, so a zone that just gained a member -- GAME, gaining
+    # GameID/TmRank -- silently lost its collapsible group entirely,
+    # while zones with no membership change (Ceiling detail/Movement/
+    # Weather) were unaffected. Re-running `link_edge_columns` here, now
+    # that every column is in its FINAL position, re-derives every zone's
+    # grouping correctly; `force=True` since every name is already
+    # present (nothing "missing" to trigger the normal path) -- safe and
+    # idempotent, same formula text written a second time, per this
+    # function's own established re-run guarantee.
+    report.append(
+        link_edge_columns(
+            client,
+            tab,
+            name_blocks,
+            edge_tab,
+            header_row=header_row,
+            header_repeats_at=header_repeats_at,
+            force=True,
+        )
+    )
+
     resynced = resync_header_repeats(client, tab, header_row=header_row, header_repeats_at=header_repeats_at)
     if resynced:
         report.append(f"{tab}: resynced {resynced} repeated header row(s) to match the primary header")

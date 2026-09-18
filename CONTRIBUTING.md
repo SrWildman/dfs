@@ -1206,6 +1206,63 @@ about in `Issues` -- there's no cash/GPP tag per lineup (Part 7.3), so a
 shape warning would fire wrongly on a lineup that should have no stack
 at all.
 
+## Column-group regression, found live right after Part 7.5 shipped (2026-09-18)
+
+Sam noticed the GAME zone's `GameID`/`TmRank` columns weren't inside
+EdgeRaw's own collapsible group, then separately asked whether every
+zone was correctly collapsible on all the tabs it should be -- a
+question worth actually checking rather than assuming, given the first
+half had just turned out to be true.
+
+**Two distinct bugs, same root cause: GAME gained new members (Part
+7.4's `GameID`/`TmRank`) after every other zone's own membership had
+been stable for a while.**
+
+1. **EdgeRaw specifically:** `sheet_style.EDGE_COLUMN_GROUPS`' own
+   `("OverUnder", "OppPosRank")` tuple (a hardcoded first/last boundary,
+   unlike the other three tabs' self-deriving-from-the-header approach)
+   never got updated when `GameID`/`TmRank` were added to `EDGE_COLUMNS`
+   right after `OppPosRank` -- both sat outside the collapsed range,
+   always visible regardless of the group's own state. Fixed:
+   `("OverUnder", "TmRank")`.
+2. **PlayerPoolRaw/Player Pool/Lineups:** checked directly against the
+   live sheet's own `columnGroups` metadata (not assumed) -- GAME had
+   **no group at all**, while Ceiling detail/Movement/Weather (no
+   membership change) were fine. Root cause: `sheet_links.
+   link_edge_columns` computes each zone's grouping from the header
+   BEFORE `sheet_reorder.migrate_tab_to_designed_order`'s own subsequent
+   `reorder_tab_columns` call physically moves a newly-appended column
+   into its designed position -- `link_edge_columns`'s own contiguity
+   check (deliberately conservative, see its comment) correctly declines
+   to group a zone whose members aren't YET physically adjacent, but
+   nothing ever re-derived the grouping after the move that would have
+   made them adjacent. `GameID`/`TmRank`, freshly appended past the end
+   of the header at the moment `link_edge_columns` ran, meant GAME's
+   `indices` weren't contiguous at that instant -- so it was silently
+   skipped rather than merged incorrectly, which is the right failure
+   mode for the WRONG problem (this project's history has plenty of
+   "silently wrong" incidents; "silently skipped" is a first).
+
+   Fixed in `migrate_tab_to_designed_order`: re-run `link_edge_columns
+   (force=True)` AFTER `reorder_tab_columns`, once every column is in
+   its final position -- re-derives every zone's grouping correctly,
+   idempotent (same formula text written a second time, matching this
+   function's own established re-run guarantee).
+
+**Verified the collapse/expand MECHANISM itself still works correctly**
+(not just the membership bug) by testing it directly, live, on EdgeRaw:
+expanded the (still-buggy-at-the-time) GAME group, confirmed the `-`
+toggle appeared and worked, collapsed it again successfully. This ruled
+out a UI-mechanism regression from the earlier column-group-toggle-
+position fix and confirmed the actual problem was purely a group-
+membership gap.
+
+A real regression test (`test_migrate_tab_to_designed_order_groups_a_
+zone_that_just_gained_a_new_member`) reproduces the exact incident using
+a header that omits `GameID`/`TmRank` from the start (matching the real
+pre-Part-7.4 state) -- confirmed it fails without the fix (GAME's group
+missing entirely from `group_calls`) and passes with it.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
