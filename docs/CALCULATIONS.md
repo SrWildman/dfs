@@ -66,21 +66,31 @@ play at his position" -- a proxy for upside independent of ownership.
 excludes them from the ranking rather than treating them as the lowest
 value. `OwnPct` (below) is the same computation applied to `ProjOwn`.
 
-## OwnPct, Leverage and LevBasis
+## Leverage and OwnStatus
 
-**A note on names, Phase 6, Part 2 (2026-09-17):** this section (and
-`CeilPct`'s own note above) still says `ProjOwn` throughout, because
-that's `build_edge_frame`'s own internal column name for TFFB's raw
-projected-ownership figure right up until the function's very last line
--- the formulas below operate on it under that name. The column actually
-written to `EdgeRaw` is called `Own%`, rescaled from `ProjOwn`'s original
-0-100 number to a 0-1 fraction (`merged["ProjOwn"] = merged["ProjOwn"] /
-100`, then renamed) so it matches the already-0-1 `Own%` on
-`PlayerPoolRaw`/`Player Pool`/`Lineups` -- one shared name, one shared
-scale, across every tab. `_percentile_within` (what computes `OwnPct`,
-just below) is scale-invariant by construction, so this rescale changed
-nothing about `OwnPct`/`Leverage`'s own math -- only `CHALK_OWNERSHIP_
-THRESHOLD` (see the `Flag` section below) needed a matching unit change.
+**A note on names, Phase 6, Parts 2 and 7.9 (2026-09-17):** this section
+(and `CeilPct`'s own note above) still says `ProjOwn`/`OwnPct` throughout,
+because those are `build_edge_frame`'s own internal pandas column names
+for TFFB's raw projected-ownership figure and its percentile rank --
+`OwnPct` is still computed exactly this way internally, right up until
+the function's very last line, and used for nothing except the Leverage
+subtraction below. **`OwnPct` itself is not written to `EdgeRaw` any
+more** -- Part 7.9 dropped it from the sheet-facing output entirely,
+since this Leverage formula was its only consumer anywhere in the
+codebase (verified by grep before removing). `LevBasis` (further below)
+was renamed to `OwnStatus` in that same pass, once Leverage's own
+demotion (Part 7.1) left it gating `Own%`, a spine column, rather than
+describing Leverage.
+
+The column actually written to `EdgeRaw` for ownership itself is called
+`Own%`, rescaled from `ProjOwn`'s original 0-100 number to a 0-1 fraction
+(`merged["ProjOwn"] = merged["ProjOwn"] / 100`, then renamed) so it
+matches the already-0-1 `Own%` on `PlayerPoolRaw`/`Player Pool`/`Lineups`
+-- one shared name, one shared scale, across every tab. `_percentile_
+within` (what computes `OwnPct`, just below) is scale-invariant by
+construction, so this rescale changed nothing about `OwnPct`/`Leverage`'s
+own math -- only `CHALK_OWNERSHIP_THRESHOLD` (see the `Flags` section
+below) needed a matching unit change.
 
 `OwnPct` is `ProjOwn`'s percentile rank **within position**, computed the
 same way `CeilPct` is (`derived._percentile_within`). `Leverage = CeilPct
@@ -110,25 +120,26 @@ isn't; a confident wrong number is worse than an empty cell. `EdgeRaw`'s
 row order still ranks usefully in that window (see below), it's only the
 `Leverage`/`OwnPct` *columns* that go blank.
 
-`LevBasis` names which case is in effect, computed once for the whole
-frame (not per player): `"real"` once ownership is published for **more
-than half the slate** (`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`), else
-`"unpublished"`. It has exactly one job now: a data-freshness marker
-telling you whether ownership has been published yet, not a second
-formula to reason about.
+`OwnStatus` (`LevBasis` before Part 7.9's rename) names which case is in
+effect, computed once for the whole frame (not per player): `"real"` once
+ownership is published for **more than half the slate**
+(`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`), else `"unpublished"`. It
+has exactly one job now: a data-freshness marker telling you whether
+ownership has been published yet, not a second formula to reason about.
 
 **Phase 6, Part 1.4 (2026-09-17):** this used to be `.any()` -- a single
 non-zero `ProjOwn` (one early-published player, a data glitch, a bye-week
 artifact) flipped the WHOLE slate to `"real"`, computing `OwnPct`/
 `Leverage` as a percentile over a column that was still ~99% zeros for
-everyone else. Reproduced live before the fix: `LevBasis` read `"real"`
-while every `ProjOwn` on `EdgeRaw` still read `0.0%` and every `Leverage`
-cell was blank. A share threshold requires ownership to be genuinely
-published for a majority of the slate, not just present for one player.
+everyone else. Reproduced live before the fix: this marker (`LevBasis` at
+the time) read `"real"` while every `ProjOwn` on `EdgeRaw` still read
+`0.0%` and every `Leverage` cell was blank. A share threshold requires
+ownership to be genuinely published for a majority of the slate, not just
+present for one player.
 
 **Sort order.** `build_edge_frame` sorts the frame by `Leverage`
 descending once ownership is real, or by `CeilPct` descending while
-`LevBasis` is `"unpublished"` (sorting by an all-blank `Leverage` column
+`OwnStatus` is `"unpublished"` (sorting by an all-blank `Leverage` column
 would just return join order). The Board tab's "top leverage" panel
 trusts this order directly rather than re-sorting, so it automatically
 reflects whichever ranking is actually in effect.
@@ -182,7 +193,7 @@ under the name `LineMove` -- a name that didn't say *which* line had
 moved once two more were added alongside it. `ImpliedMove` is the direct
 rename (team implied points, same number `LineMove` always was);
 `TotMove` (game total) and `SpdMove` (spread) are newly surfaced. The
-`Flag` column's `LINE↑`/`LINE↓` keys off `ImpliedMove` specifically --
+`Flags` column's `LINE↑`/`LINE↓` keys off `ImpliedMove` specifically --
 `TotMove`/`SpdMove` are shown for context but don't drive that flag.
 
 **Baseline**: the diff is `(current nfl_odds sync) − (the first nfl_odds
@@ -224,16 +235,34 @@ different CSV.
 DraftKings' own `Status` field, verbatim (`Q`/`OUT`/`IR`/blank). No
 transformation.
 
-## Flag
+## Flags (and Flag)
 
 The one column meant to be read at a glance. Evaluated in order
-(`derived._flag_for_row`), and **every condition that matches is
+(`derived._flags_for_row`), and **every condition that matches is
 included** -- space-separated, in priority order (e.g. a windy game with
 a leveraged player reads `WIND LEVERAGE`, not just `WIND`). This replaced
 a first-match-wins rule that silently hid every condition but the most
 urgent one; `sheet_style.FLAG_CHIPS` matches on `TEXT_CONTAINS` rather
 than `TEXT_EQ` accordingly (none of the six tokens below is a substring
-of another, so this can't cross-match):
+of another, so this can't cross-match).
+
+**Phase 6, Part 7.9 (2026-09-17): split into two sheet columns.** 7.9's
+own spec assumed `Flag` was still the old first-match-only value and
+asked to hide it in favor of a new all-matches `Flags` column -- verified
+live first, per Rule Zero, and found that premise was already false
+(`_flags_for_row`'s "every condition that matches" behavior above
+predates this Part). Resolved with Sam directly: split for real rather
+than just renaming. `Flags` (every matching token, exactly the behavior
+described above) took over the visible spine slot; `Flag` (just
+`flags[0]`, the single highest-priority token, empty string when nothing
+fired) moved to the hidden zone beside `Id` -- kept, not deleted, since
+`sheet_style._apply_name_flag_style`'s Name-bold-on-Flag check and a few
+other boolean/categorical lookups still key off it. Every reading
+consumer (Board's `LANDMINES` panel, the Movement view, `dfs edge`'s
+terminal report, `dfs lineups late-swap`, `dfs sync --live`'s diff
+report, the "Leverage plays" filter view) was repointed at `Flags`;
+nothing needed the single-token `Flag` for anything except that one
+boolean check.
 
 | Priority | Flag | Condition |
 |---|---|---|
@@ -276,11 +305,37 @@ real ownership existed. `CHALK_OWNERSHIP_THRESHOLD` flagged 5/744 players
 absolute ownership percentage, not a percentile. **Phase 6, Part 2
 (2026-09-17):** the constant itself changed from `20.0` to `0.20` when
 `Own%` (the sheet-facing name for what this section still calls `ProjOwn`
-below -- see the note at the top of the `OwnPct, Leverage and LevBasis`
-section) was rescaled from a 0-100 number to a 0-1 fraction to match its
-already-0-1 scale on `PlayerPoolRaw`/`Player Pool`/`Lineups`. The
-threshold's real-world meaning (20% ownership) and the 5/744 flag rate
-above are both unchanged -- only the number's own units moved.
+-- see the note at the top of the `Leverage and OwnStatus` section) was
+rescaled from a 0-100 number to a 0-1 fraction to match its already-0-1
+scale on `PlayerPoolRaw`/`Player Pool`/`Lineups`. The threshold's
+real-world meaning (20% ownership) and the 5/744 flag rate above are both
+unchanged -- only the number's own units moved.
+
+## % of Cap (Lineups only)
+
+`Lineups`' `% of Cap` (renamed from `% of Own` in Phase 6, Part 7.9,
+`% of Rstr` before that in Part 2) is this player's `DK Sal` as a share
+of the **salary cap** -- `config.toml`'s `[lineups] salary_cap`, never
+hardcoded 50000:
+
+```
+= IF($A<row>="", "", <DK Sal cell> / <salary_cap>)
+```
+
+This column had never been documented anywhere before Part 7.9, which is
+how it stayed mislabeled this long. It is **not** derived from `Own%` or
+rostership despite its old names implying that -- Sam confirmed live,
+2026-09-17, that the intended meaning is cap allocation: "what percentage
+of my total lineup salary is this player taking up." The original
+formula (`=F<row>/F$<totals_row>`, Part 1.2) divided by the block's own
+running salary TOTAL instead of the cap -- correct only once a lineup was
+complete, and actively misleading before then: three players typed in, a
+$24,000 combined salary, each read `~33%` of that partial total rather
+than its true `~16%` share of a $50,000 cap. Dividing by the cap constant
+also removes the `#DIV/0!` Part 1.2 previously guarded against at the
+source (a fixed denominator can't divide by zero) -- the only guard still
+needed is the blank-slot case (`$A<row>=""`), not the whole-block-empty
+case.
 
 ## Late-swap lock check (`dfs lineups late-swap`)
 

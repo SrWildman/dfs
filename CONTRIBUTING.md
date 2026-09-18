@@ -575,6 +575,128 @@ broken cells).
 
 **Verification, both sheets, real reads rather than tool-return-value trust throughout:** `dfs doctor` clean on both; `dfs setup audit-style` clean on both (only the pre-existing, out-of-scope `Results` "Black/White/Purple" hand-typed-column finding from Part 1's 1.5 remains); Board's three panels spot-checked via direct formula reads on both sheets; both real Pool ticks (`Ja'Marr Chase`/GPP, `Colston Loveland`/Cash) confirmed surviving the live `dfs sync --only edge` resync; a live sweep of every tab for hardcoded `VLOOKUP`s found no new instances of this reorder's own hazard class (only pre-existing, already-known letter-based array formulas on `TFFBOptoRaw`). Column-group collapse state confirmed persistent via a direct `fetch_sheet_metadata` read on both sheets (`EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups` each show exactly one collapsed group spanning Game through Weather) -- re-verified around a real sync to confirm `dfs sync` does not reset it, then confirmed visually in the browser on the live sheet: EdgeRaw's spine (Pool through Flag) sits left of a collapsed `+` group jumping straight to `Id`; Player Pool's spine (Name through Flag) sits left of its own collapsed group, with `Overflow`/`Pool`/`Used`/`In` reappearing after it; `Own%` renders as a real percent on both. Test suite: the reorder cascaded roughly 21 failures across `test_sheet_links.py`/`test_sheet_native_links.py`/`test_sheet_reorder.py`/`test_sheet_style.py`/`test_doctor.py`, all fixed by updating fixtures/pinned indices to the new order (computed programmatically, not by hand, to avoid a second arithmetic error on top of the first) -- 524 tests passing, `ruff` clean, before either sheet was touched.
 
+## Phase 6, Part 7.9 (2026-09-17): the metric audit
+
+Sam reviewed every EdgeRaw/shared-tab metric and decided three concrete
+changes, landed together since all three touch the same Ceiling-detail/
+spine region Part 2 just finished redesigning.
+
+| Date | Tab | What moved | Old position/name | New position/name | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-17 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | `OwnPct` dropped entirely from the sheet-facing column set (its only consumer anywhere in the codebase was the Leverage formula, verified by grep before removing -- it stays a real internal pandas column in `derived.py`, just not written to the sheet); `LevBasis` renamed to `OwnStatus`; `Flag`/`Flags` split for real, not just renamed -- `Flags` (every matching condition, space-separated) took `Flag`'s old visible spine slot, and `Flag` (just the single highest-priority token) moved into the hidden zone beside `Id`, kept rather than deleted since other formatting/filtering logic keys off it as a boolean value. | CEILING DETAIL: `CeilPct, OwnPct, Leverage, LevBasis` (4 cols). Spine ended in visible `Flag`. | CEILING DETAIL: `CeilPct, Leverage, OwnStatus` (3 cols). Spine ends in visible `Flags`; hidden `Flag` joins `Id` in INTERNAL. | Live + Template | `derived.EDGE_COLUMNS` (`OwnPct` gone, `LevBasis`→`OwnStatus`, `Flag`→`Flags` on the spine + new hidden `Flag` in INTERNAL), `derived.OWN_STATUS_REAL`/`OWN_STATUS_UNPUBLISHED` (renamed from `LEV_BASIS_REAL`/`UNPUBLISHED`), `derived._flags_for_row` (renamed from `_flag_for_row`, now returns a list consumed twice), `sheet_columns.CEILING_DETAIL`/`INTERNAL`/`DECISION`/`LINKED_COLUMNS`, `sheet_style._apply_own_status_marker` (renamed from `_apply_lev_basis_marker`), `sheet_style.EDGE_WIDTHS`/`FIELD_FORMATS`/`FIELD_COLOR_SCALES`/`GROUPED_TAB_UNSCALED_COLUMNS` (all lost their `OwnPct`/`LevBasis` entries, gained `OwnStatus`/`Flags`), new `dfs setup fix-flag-split` command |
+| 2026-09-17 | `Lineups` | `% of Own` (Part 2's rename of `% of Rstr`) renamed again to `% of Cap`, and its denominator changed from the lineup's own running salary total to the salary cap constant | `=IF(OR($A<row>="",<totals row>=0),"",<DK Sal>/<running total>)` | `=IF($A<row>="","",<DK Sal>/<salary_cap>)` | Live + Template | `sheet_style.polish_lineups_pct_of_cap` (renamed from `polish_lineups_pct_of_own`), new `dfs setup fix-pct-of-cap` command, `config.toml`'s `[lineups] salary_cap` now a real formula input, not just a Python-side constraint check |
+
+**Rule Zero trigger, resolved before touching anything:** 7.9's own spec
+text described `Flag` as "the single highest-priority value (first match
+wins)" -- checked against the real code first, per the standing rule, and
+found that premise was already false: `_flags_for_row`'s "every matching
+condition, space-separated" behavior (Fix 2.1, an earlier session)
+predates this Part entirely. Two live-verified outcomes were possible --
+just rename the existing all-matches column to `Flags` and stop, or split
+it for real into a genuine single-token `Flag` plus all-matches `Flags`
+-- with materially different blast radius (a real split touches ~10
+reading consumers: Board's `LANDMINES` panel, the Movement view, `dfs
+edge`'s terminal report, `dfs lineups late-swap`, `dfs sync --live`'s
+diff report, the "Leverage plays" filter view, `sheet_audit`'s chip-rule
+check). Asked Sam directly rather than guessing either way: "Split it for
+real." Every one of those ~10 consumers was individually re-pointed at
+`Flags` (all of them wanted "everything that fired," none wanted the
+single-token value) except `_apply_name_flag_style`'s Name-bold-on-Flag
+check, which is a pure boolean test and correctly still reads the hidden
+`Flag` per Sam's own "keep it, it's still a formatting key" framing.
+
+**A real gspread bug found migrating this, unrelated to the metric audit
+itself but blocking it:** `SheetsClient.delete_columns` issues a raw
+`deleteDimension` request directly via `sheet.batch_update(...)`,
+bypassing gspread's own dimension-changing methods (`resize`/`add_cols`)
+-- the only things that update the cached `Worksheet._properties
+["gridProperties"]["columnCount"]` gspread's own `col_count` property
+reads (gspread's own docs: "not dynamically updated when adding columns,
+yet"). Deleting `OwnPct` shrank the real grid by one column while the
+cached `SheetsClient` instance's `ws.col_count` still reported the OLD,
+now-too-wide count for the rest of that script's run -- so the very next
+`provision_missing_columns` call (adding the new `Flag` column) compared
+against stale data, concluded the grid was already wide enough, skipped
+`add_cols`, and the actual write failed outright ("exceeds grid limits").
+Fixed at the root: `delete_columns` now decrements the cached grid
+property itself after a successful delete, the same way gspread's own
+`resize()` updates it after a successful resize -- not a workaround, the
+missing half of the same convention gspread already uses everywhere else.
+
+**Three more incidents, all found and fixed during the template/live
+migration itself, none from the metric-audit code:**
+
+1. **Template: `EdgeRaw`'s `Name` column was found hidden**, discovered
+   only because Part 7.9's own hidden-column verification (checking
+   `Id`/`Flag` landed correctly) happened to also read `Name`'s state.
+   Root cause: an old Part 2 incident (`polish_edge` run before the
+   template's manual `EdgeRaw` reorder had finished) applied `hide_
+   columns("Id")` against a not-yet-correct physical layout, which at
+   that moment resolved to `Name`'s column instead. Live's own `Name` was
+   already correct (confirmed via the same check) -- template-only.
+   Fixed by unhiding it directly, verified via `get_column_widths`.
+2. **Live: `EdgeRaw` was never actually resynced before the other three
+   tabs got relinked against it.** `dfs setup fix-flag-split` only
+   touches `PlayerPoolRaw`/`Player Pool`/`Lineups` -- `EdgeRaw` needed a
+   real `dfs sync --only edge` to pick up the new column set (the same
+   "gets it for free" mechanism Part 2 relied on for the live sheet),
+   which was skipped this time. `dfs setup link-edge --force` then wrote
+   new VLOOKUP formulas assuming `EdgeRaw`'s NEW column positions while
+   the real sheet still had the OLD ones -- every newly-relinked column
+   briefly pointed at the wrong `EdgeRaw` field. Caught by a genuinely
+   confusing moment: a direct width/hidden-state read looked
+   coincidentally consistent with the new shape (the old `Flag` column
+   happened to share `Flags`' own pixel width, and `Id` is unconditionally
+   hidden either way), which delayed noticing until `dfs doctor` reported
+   the header mismatch directly. Fixed by running the real sync, then
+   re-running `link-edge --force`, then re-polishing `EdgeRaw` -- verified
+   every relinked formula (`Flags`, `Leverage`, `OwnStatus`) resolves to
+   the correct column by computing the expected VLOOKUP index
+   programmatically and comparing, not by eye. **Lesson for the next
+   EdgeRaw-adjacent live change:** verify a structural assumption by
+   reading the ACTUAL current state (header text, or a resolved formula),
+   never by inference from a coincidentally-matching side effect like a
+   pixel width.
+3. **Live: `Lineups`' own chip-application step had been cut short** by
+   one of several background `dfs setup polish`/narrow-script runs killed
+   mid-flight while recovering from a sustained Google Sheets API write
+   rate-limit (this session's heaviest write night yet: the Flag/Flags
+   split alone relinks 16 columns across 3 tabs, plus a 180-row `% of
+   Cap` rewrite, plus polish's ~280 conditional-format rules on `Lineups`
+   alone). Widths/hiding had already landed from an earlier kill (each
+   `polish_builder_tab` step writes independently, so a mid-function kill
+   still leaves whatever ran before the kill point in place), but the
+   chip loop -- the last step in the function -- hadn't. Caught by `dfs
+   setup audit-style`, not assumed clean from the process's own exit
+   code; fixed with one direct re-run of `polish_builder_tab` for
+   `Lineups` alone.
+
+**A rate-limit lesson worth stating plainly, since it cost real time
+tonight:** low CPU time relative to elapsed time on a running `dfs setup
+polish`-family process is NOT reliable evidence of "stuck in backoff" on
+its own -- it looks identical to "blocked on one legitimately large
+batchUpdate" from `ps`'s perspective, and repeatedly killing+restarting a
+script that's actually making real, landing progress just discards that
+progress and extends the total time to done. The Google Cloud Console's
+own Sheets API quota page (APIs & Services > Quotas, and > Metrics for a
+request-volume/error-rate view) is the actual ground truth -- checking it
+directly settled a multi-attempt stuck/not-stuck question this session's
+own `ps`-based heuristic alone couldn't. When a `dfs setup polish`-family
+command looks stuck, verify against the SHEET's own current state (a
+direct `get_column_widths`/header read) before assuming a restart is
+free -- tonight's restarts were each silently redoing already-landed work
+rather than resuming from nothing.
+
+Verified live and on template, end to end, after all of the above:
+`dfs doctor`/`dfs setup audit-style` clean on both (only the
+pre-existing, unrelated `Results` hand-typed-header finding remains on
+live); column groups on all four tabs shrank by exactly one column
+(`OwnPct`'s removal), confirmed via direct `columnGroups` metadata reads
+matching between template and live; both real Pool ticks (`Ja'Marr
+Chase`/GPP, `Colston Loveland`/Cash) survived every resync; every
+relinked VLOOKUP formula's index checked programmatically against
+`derived.EDGE_COLUMNS`, not eyeballed.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
