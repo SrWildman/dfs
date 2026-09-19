@@ -1559,6 +1559,22 @@ def test_style_sos_tab_scales_rank_reversed():
     assert "Rank scaled (reversed)" in result
 
 
+def test_style_exposure_sets_widths_for_the_portfolio_headline_columns():
+    # Part 7.5: K1:P1 (Distinct QBs/Shared QB?/Distinct games) had no
+    # width entry at all when first added -- same "no entry means
+    # Sheets' own 100px default" gap Part 7.4 already hit for O/U/Pts --
+    # caught live: "Distinct games" (14 characters) truncated at 100px.
+    from dfs.sheet_style import style_exposure
+
+    client = FakeBuilderTabClient(["Name"])
+    style_exposure(client, "Exposure")
+
+    widths = client.width_calls[0]
+    for col in ("K", "L", "M", "N", "O", "P"):
+        assert col in widths
+        assert widths[col] != 100
+
+
 def test_style_movement_finds_columns_by_name_not_position():
     # Section F: build_movement's header is now 4-7 columns wide depending
     # on which optional columns EdgeRaw/GameStart provide, so this must be

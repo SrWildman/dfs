@@ -2412,10 +2412,39 @@ def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:
         return f"{tab}: not present -- skipped"
     client.clear_conditional_formats(tab)
     client.set_column_widths(
-        tab, {"A": 165, "B": 52, "C": 78, "D": 84, "E": 84, "F": 84, "G": 88, "H": 24, "I": 96, "J": 72}
+        tab,
+        {
+            "A": 165,
+            "B": 52,
+            "C": 78,
+            "D": 84,
+            "E": 84,
+            "F": 84,
+            "G": 88,
+            "H": 24,
+            "I": 96,
+            "J": 72,
+            # Part 7.5's portfolio headline (K1:P1) -- label/value pairs,
+            # same "no entry means Sheets' own 100px default" gap this
+            # whole function exists to avoid for A-J. "Distinct games"
+            # (14 characters) is the widest label and needs more than
+            # the 100px default to avoid truncating.
+            "K": 96,
+            "L": 40,
+            "M": 84,
+            "N": 40,
+            "O": 110,
+            "P": 40,
+        },
     )
     client.format_range(tab, "A1:G1", _HEADER_FMT)
     client.format_range(tab, "I1", {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
+    # Part 7.5's portfolio headline labels -- same muted treatment as I1
+    # ("Slots filled") above, not the dark spine header style, since
+    # these are a second, unrelated row-1 label/value strip.
+    client.format_range(tab, "K1", {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
+    client.format_range(tab, "M1", {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
+    client.format_range(tab, "O1", {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
     client.format_range(tab, "C2:C180", FIELD_FORMATS["Salary"])
     client.format_range(tab, "D2:D180", _num("0"))
     client.format_range(tab, "E2:E180", FIELD_FORMATS["Exposure"])
