@@ -59,7 +59,19 @@ def test_stack_signature_formula_counts_teammates_and_bring_back():
 
 def test_distinct_games_formula_counts_unique_nonblank_gameids():
     formula = distinct_games_formula(2, 10, gameid_col="H")
-    assert formula == '=IFERROR(COUNTA(UNIQUE(FILTER($H$2:$H$10,$H$2:$H$10<>""))),0)'
+    assert formula == '=IFERROR(ROWS(UNIQUE(FILTER($H$2:$H$10,$H$2:$H$10<>""))),0)'
+
+
+def test_distinct_games_formula_uses_rows_not_counta():
+    """Found live (2026-09-19): with a genuinely empty range, FILTER
+    errors (#N/A) and COUNTA absorbs that error into a valid count of 1
+    -- an error value still "counts" as present -- before IFERROR ever
+    sees an error to catch, so this silently read 1, not 0, for every
+    still-empty lineup. `ROWS` propagates the error instead, so
+    `IFERROR(ROWS(...),0)` genuinely degrades to 0."""
+    formula = distinct_games_formula(2, 10, gameid_col="H")
+    assert "ROWS(" in formula
+    assert "COUNTA(" not in formula
 
 
 def test_bring_back_present_formula_yes_no_blank():

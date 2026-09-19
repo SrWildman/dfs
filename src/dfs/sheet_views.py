@@ -330,9 +330,38 @@ def build_exposure(
         lu_gameid = f"{_q(lineups_tab)}!${portfolio_cols['GameID']}$1:${portfolio_cols['GameID']}"
         qb_names = f'UNIQUE(FILTER({lu},{lu_pos}="QB"))'
         distinct_qbs = f"=COUNTA({qb_names})"
-        qb_slots_filled = f'COUNTIF({lu_pos},"QB")'
+        # Found live (2026-09-19), same static-label pitfall as Lineups'
+        # stale "DEF" bug: `Pos.` is the FIXED slot label, always "QB" for
+        # one row per block regardless of whether a name is typed there,
+        # so `COUNTIF(lu_pos,"QB")` was always 20 (the block count), never
+        # "how many QB slots are actually filled." That made `shared_qb`
+        # read "Yes" even with zero real QBs rostered anywhere (20 > 0).
+        # `lu,"<>"` requires the Name cell itself (typed by hand, so
+        # genuinely blank when empty -- not a formula-blank like GameID)
+        # to be non-blank too.
+        qb_slots_filled = f'COUNTIFS({lu_pos},"QB",{lu},"<>")'
         shared_qb = f'=IF({qb_slots_filled}>COUNTA({qb_names}),"Yes","No")'
-        distinct_games = f'=COUNTA(UNIQUE(FILTER({lu_gameid},{lu_gameid}<>"")))'
+        # Same header-repeat-text gotcha "Slots filled" (above) already
+        # guards against: `lu_gameid` spans every block including each
+        # one's own repeated header row, whose GameID cell reads the
+        # literal text "GameID" -- a real, non-blank string that passed
+        # the old `<>""` filter and always counted as one phantom
+        # "distinct game" even with zero real lineups built. Found live
+        # (2026-09-19) right after fixing that: with the header text
+        # correctly excluded, zero real games in progress makes FILTER's
+        # own result set genuinely empty, which FILTER errors on (`#N/A`)
+        # rather than returning nothing -- and plain `IFERROR(COUNTA(...),
+        # 0)` does NOT catch it, since `COUNTA` absorbs the error into a
+        # valid count of 1 (an error value still "counts" as present)
+        # *before* IFERROR ever sees an error to catch -- confirmed this
+        # was ALSO silently wrong in the already-shipped per-lineup
+        # version of this exact idiom (`sheet_lineup_metrics.
+        # distinct_games_formula`), fixed there too. `ROWS` does not
+        # absorb the error -- it propagates it, so `IFERROR(ROWS(...),0)`
+        # genuinely degrades to 0.
+        distinct_games = (
+            f'=IFERROR(ROWS(UNIQUE(FILTER({lu_gameid},{lu_gameid}<>"",{lu_gameid}<>"GameID"))),0)'
+        )
     else:
         distinct_qbs = shared_qb = distinct_games = ""
 

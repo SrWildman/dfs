@@ -113,8 +113,19 @@ def stack_signature_formula(
 
 
 def distinct_games_formula(start: int, end: int, *, gameid_col: str) -> str:
+    # Found live (2026-09-19), auditing the portfolio-level version of this
+    # exact idiom in `sheet_views.build_exposure`: a lineup with NO real
+    # GameID typed anywhere makes FILTER's own result set genuinely empty,
+    # which FILTER errors on (`#N/A`) -- but `COUNTA` absorbs that error
+    # into a valid count of 1 (an error value still "counts" as present)
+    # *before* IFERROR ever sees an error to catch, so this block's own
+    # "Games" column was silently reading 1, not 0, for every still-empty
+    # lineup since Part 7.5 shipped. `ROWS` does NOT absorb the error --
+    # it propagates it, so `IFERROR(ROWS(...),0)` genuinely degrades to 0
+    # -- confirmed empirically on the template's Scratch tab, both for a
+    # truly-empty range (0) and a real multi-game range (correct count).
     rng = f"${gameid_col}${start}:${gameid_col}${end}"
-    return f'=IFERROR(COUNTA(UNIQUE(FILTER({rng},{rng}<>""))),0)'
+    return f'=IFERROR(ROWS(UNIQUE(FILTER({rng},{rng}<>""))),0)'
 
 
 def bring_back_present_formula(

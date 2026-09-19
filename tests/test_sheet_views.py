@@ -219,11 +219,74 @@ def test_build_exposure_adds_portfolio_headline_when_lineups_pos_and_gameid_link
         "Distinct QBs",
         '=COUNTA(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB")))',
         "Shared QB?",
-        '=IF(COUNTIF(Lineups!$B$1:$B,"QB")>COUNTA(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB"))),"Yes","No")',
+        '=IF(COUNTIFS(Lineups!$B$1:$B,"QB",Lineups!$A$1:$A,"<>")'
+        '>COUNTA(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB"))),"Yes","No")',
         "Distinct games",
-        '=COUNTA(UNIQUE(FILTER(Lineups!$C$1:$C,Lineups!$C$1:$C<>"")))',
+        '=IFERROR(ROWS(UNIQUE(FILTER(Lineups!$C$1:$C,Lineups!$C$1:$C<>"",Lineups!$C$1:$C<>"GameID"))),0)',
     ]
     assert "portfolio headline (Distinct QBs" in result
+
+
+def test_build_exposure_shared_qb_is_no_when_zero_real_qbs_are_rostered():
+    """Found live (2026-09-19): `Pos.` is Lineups' fixed slot label, one
+    "QB" row per block regardless of whether a name is typed there, so the
+    old `COUNTIF(lu_pos,"QB")` was always the block count (e.g. 20) --
+    `shared_qb` read "Yes" even with zero real QBs anywhere. Fixed by also
+    requiring the Name cell non-blank (`lu,"<>"`), matching a filled slot
+    rather than a labeled one."""
+    client = FakeSheetsClient(
+        existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
+    )
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    header = client.write_tab_calls[0][1][0]
+    shared_qb_formula = header[13]
+    assert 'COUNTIFS(Lineups!$B$1:$B,"QB",Lineups!$A$1:$A,"<>")' in shared_qb_formula
+
+
+def test_build_exposure_distinct_games_excludes_the_gameid_header_repeat_text():
+    """Found live (2026-09-19): every lineup block repeats its own header
+    row, so Lineups' GameID column literally contains the text "GameID"
+    once per block -- a real, non-blank string that the old `<>""` filter
+    let through, always counting one phantom "distinct game" even with
+    zero real lineups built. Same header-repeat-exclusion idiom "Slots
+    filled" already uses (`COUNTIF(lu,"?*")-COUNTIF(lu,"Name")`), applied
+    here as an extra FILTER criterion instead."""
+    client = FakeSheetsClient(
+        existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
+    )
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    header = client.write_tab_calls[0][1][0]
+    distinct_games_formula = header[15]
+    assert 'Lineups!$C$1:$C<>"GameID"' in distinct_games_formula
+
+
+def test_build_exposure_distinct_games_degrades_to_zero_not_an_na_error():
+    """Found live (2026-09-19), right after fixing the header-repeat
+    false-match above: with that excluded, zero real games in progress
+    makes FILTER's own result set genuinely empty, and FILTER errors
+    (`#N/A`) on an empty result rather than returning nothing. A first
+    fix attempt, `IFERROR(COUNTA(...),0)`, did NOT work: `COUNTA` absorbs
+    the error into a valid count of 1 (an error value still "counts" as
+    present) *before* IFERROR ever sees an error to catch -- confirmed
+    empirically live, and that the already-shipped per-lineup
+    `sheet_lineup_metrics.distinct_games_formula` had the identical bug.
+    `ROWS` does not absorb the error -- it propagates it, so
+    `IFERROR(ROWS(...),0)` genuinely degrades to 0."""
+    client = FakeSheetsClient(
+        existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
+    )
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    header = client.write_tab_calls[0][1][0]
+    distinct_games_formula = header[15]
+    assert distinct_games_formula.startswith("=IFERROR(ROWS(")
+    assert distinct_games_formula.endswith(",0)")
+    assert "COUNTA(" not in distinct_games_formula
 
 
 def test_build_exposure_skips_portfolio_headline_when_gameid_not_linked_yet():
