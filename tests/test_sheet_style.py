@@ -1093,9 +1093,22 @@ def test_stack_check_formula_flags_more_than_one_rb_sharing_a_gameid():
 
     formula = _stack_check_formula(9, 17, position_col="B", team_col="C", opp_col="H", gameid_col="AA")
     assert (
-        'IF(SUMPRODUCT(($B$9:$B$17="RB")*(COUNTIFS($B$9:$B$17,"RB",'
+        'IF(SUMPRODUCT(($B$9:$B$17="RB")*($AA$9:$AA$17<>"")*(COUNTIFS($B$9:$B$17,"RB",'
         '$AA$9:$AA$17,$AA$9:$AA$17)>1))>0,"RB/GAME","")' in formula
     )
+
+
+def test_stack_check_formula_rb_per_game_excludes_formula_blank_gameid():
+    """Found live (2026-09-18): Lineups' GameID is always a FORMULA cell
+    (blank when its slot has no name), and a formula-produced "" DOES
+    self-match another formula-produced "" inside COUNTIFS -- unlike two
+    genuinely-blank (never-typed) cells, which don't. Without the
+    `<>""` term, two unfilled RB slots (the normal state of an
+    incomplete lineup) would always false-positive as RB/GAME."""
+    from dfs.sheet_style import _stack_check_formula
+
+    formula = _stack_check_formula(9, 17, position_col="B", team_col="C", opp_col="H", gameid_col="AA")
+    assert '($AA$9:$AA$17<>"")' in formula
 
 
 def test_totals_check_formula_replaces_ok_with_the_real_stack_violation():

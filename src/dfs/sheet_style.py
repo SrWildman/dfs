@@ -1556,16 +1556,33 @@ def _stack_check_formula(
        Confirmed elementwise-safe inside `SUMPRODUCT` on the template's
        Scratch tab before shipping -- unlike `MATCH`, which does NOT
        broadcast the same way inside a plain array literal (see
-       `sheet_pool_formulas.py`'s own docstring for that one). Also
-       confirmed live that this does NOT false-positive when `GameID` is
-       blank (un-synced `nflverse_games` data, same graceful-degradation
-       case as `Stadium`/`Roof`/`Wind`): a self-referential `COUNTIFS`
-       criteria that RESOLVES to blank does not match another blank cell
-       the way an explicit `""` literal criteria would -- two RBs both
-       missing `GameID` never trigger this, verified empirically rather
-       than assumed, since the two behave differently in real Sheets and
-       getting this wrong would mean the check fires spuriously on
-       *every* still-un-synced week.
+       `sheet_pool_formulas.py`'s own docstring for that one).
+
+       Found live testing a real lineup (2026-09-18, right after the
+       "DEF"->"DST" fix): the earlier Scratch verification of the blank-
+       `GameID` case was WRONG -- it tested two rows with BOTH `Position`
+       and `GameID` genuinely blank (never-typed cells), which trivially
+       can't match since `Position="RB"` is already false for a blank
+       cell. It never exercised the REAL shape: two fixed roster slots
+       whose `Position` is a real, non-blank `"RB"` label (Lineups' `Pos.`
+       column is static text per slot, filled or not) while `GameID` is a
+       FORMULA cell (`=IF($A="","",...)`) that RESOLVES to `""` when the
+       slot has no name typed. A formula-produced `""` is NOT the same as
+       a truly empty cell to `COUNTIFS`: `COUNTIFS(range, range)` DOES
+       treat two formula-blank `""` cells as matching each other (unlike
+       two genuinely-blank cells, which don't match) -- confirmed
+       directly on Scratch. That made `rb_per_game` fire on every
+       lineup with 2+ unfilled RB slots, i.e. almost every incomplete
+       lineup -- a real, active false positive.
+
+       Fixed by multiplying in a direct `GameID_range<>""` SUMPRODUCT
+       term (not a `COUNTIFS` `"<>"` criterion -- also confirmed on
+       Scratch that `COUNTIFS(range,"<>")` treats a formula-blank cell as
+       *non*-blank, since the cell holds a formula, so that pattern does
+       NOT filter these rows out). Direct cell inequality (`<>""`) does
+       correctly evaluate `FALSE` for a formula-blank cell, zeroing out
+       any row with no real `GameID` before it can self-match, while
+       still catching two RBs that genuinely share a real `GameID`.
 
     Deliberately NOT a QB+RB rule (7.4's own text: sources disagree
     wildly, 0.07 to 0.43, and the two that measured it carefully call it
@@ -1582,6 +1599,7 @@ def _stack_check_formula(
 
     rb_per_game = (
         f'IF(SUMPRODUCT((${position_col}${start}:${position_col}${end}="RB")*'
+        f'(${gameid_col}${start}:${gameid_col}${end}<>"")*'
         f'(COUNTIFS(${position_col}${start}:${position_col}${end},"RB",'
         f"${gameid_col}${start}:${gameid_col}${end},${gameid_col}${start}:${gameid_col}${end})>1))>0,"
         f'"RB/GAME","")'
