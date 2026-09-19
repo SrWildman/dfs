@@ -1019,6 +1019,66 @@ def test_polish_guardrails_widens_its_own_column_and_clears_only_its_own_rules()
 _HEADER_FOR_GUARDRAILS_WITH_GAMEID = [*_HEADER_FOR_GUARDRAILS, "GameID"]
 
 
+class FakeDstLabelClient:
+    """Per-cell read_range (unlike FakeGuardrailsClient's fixed-header-
+    regardless-of-range fake) -- fix_lineups_dst_slot_label reads each
+    block's own last row individually, so the fake needs to answer
+    differently per cell."""
+
+    def __init__(self, cell_values: dict[str, str], *, present: bool = True):
+        self._cell_values = cell_values
+        self._present = present
+        self.update_calls: list[tuple[str, list[list]]] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return self._present
+
+    def read_range(self, tab_name: str, a1_range: str):
+        value = self._cell_values.get(a1_range, "")
+        return [[value]] if value else [[]]
+
+    def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
+        self.update_calls.append((a1_range, rows))
+        self._cell_values[a1_range] = rows[0][0]
+
+
+def test_fix_lineups_dst_slot_label_corrects_every_stale_def_and_leaves_dst_alone():
+    from dfs.sheet_style import fix_lineups_dst_slot_label
+
+    # Block 1 (ends row 10) still says the stale "DEF"; block 2 (ends row
+    # 23) was already fixed (or never wrong) and already says "DST".
+    client = FakeDstLabelClient({"B10": "DEF", "B23": "DST"})
+
+    result = fix_lineups_dst_slot_label(client, "Lineups", position_col="B", name_blocks=[(2, 10), (13, 23)])
+
+    assert client.update_calls == [("B10", [["DST"]])]
+    assert client._cell_values["B23"] == "DST"  # untouched, no update_range call for it
+    assert "1 'DEF' -> 'DST' fix(es), 1 already correct" in result
+
+
+def test_fix_lineups_dst_slot_label_never_overwrites_an_unexpected_value():
+    from dfs.sheet_style import fix_lineups_dst_slot_label
+
+    # A block whose last row says neither DEF nor DST (a malformed/
+    # unexpected sheet state) must be reported, not silently clobbered.
+    client = FakeDstLabelClient({"B10": "FLEX"})
+
+    result = fix_lineups_dst_slot_label(client, "Lineups", position_col="B", name_blocks=[(2, 10)])
+
+    assert client.update_calls == []
+    assert "unexpected value(s)" in result
+    assert "(10, 'FLEX')" in result
+
+
+def test_fix_lineups_dst_slot_label_skips_when_tab_absent():
+    from dfs.sheet_style import fix_lineups_dst_slot_label
+
+    client = FakeDstLabelClient({}, present=False)
+    result = fix_lineups_dst_slot_label(client, "Lineups", position_col="B", name_blocks=[(2, 10)])
+    assert result == "Lineups: not present -- skipped"
+    assert client.update_calls == []
+
+
 def test_stack_check_formula_flags_dst_against_the_lineups_own_qb():
     from dfs.sheet_style import _stack_check_formula
 

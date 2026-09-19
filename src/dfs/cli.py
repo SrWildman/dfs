@@ -58,6 +58,7 @@ from dfs.sheet_style import (
     POOL_RAW_ROWS,
     apply_tab_chrome,
     apply_tab_notes,
+    fix_lineups_dst_slot_label,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
@@ -71,7 +72,7 @@ from dfs.sheet_style import (
 )
 from dfs.sheet_typo_guard import add_lineups_typo_guard
 from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
-from dfs.sheets import SheetsClient, SheetsError
+from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
@@ -555,6 +556,46 @@ def sheets_fix_pct_of_cap(
             salary_cap=cfg.lineups.salary_cap,
         )
         console.print(f"[green]OK[/green] renamed: {renamed}; {result}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+@setup_app.command(
+    "fix-lineups-dst-label",
+    short_help="One-time: correct Lineups' stale 'DEF' defense-slot label to 'DST'.",
+)
+def sheets_fix_lineups_dst_label(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Found live (2026-09-18) verifying Part 7.4's DST-vs-own-QB
+    guardrail with a real test lineup: it never fired. `Lineups`' own
+    `Pos.` column is static text, one fixed roster-slot label per row --
+    the defense slot says `"DEF"` on every block, both sheets, instead of
+    `"DST"` (this codebase's own convention everywhere else), so the
+    guardrail's own `MATCH("DST", ...)` could never find it
+    (`sheet_style.fix_lineups_dst_slot_label`)."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Fixing Lineups' DST slot label in: [bold]{title}[/bold]\n{url}\n")
+        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+        header = client.read_range(cfg.lineups.builder_tab, f"A{lineups_header_row}:{lineups_header_row}")
+        header = header[0] if header else []
+        if "Pos." not in header:
+            console.print("[red]'Pos.' column not found in Lineups' header.[/red]")
+            raise typer.Exit(code=1)
+        position_col = column_letter(header.index("Pos."))
+        result = fix_lineups_dst_slot_label(
+            client, cfg.lineups.builder_tab, position_col=position_col, name_blocks=LINEUPS_NAME_BLOCKS
+        )
+        console.print(f"[green]OK[/green] {result}")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e

@@ -1263,6 +1263,48 @@ a header that omits `GameID`/`TmRank` from the start (matching the real
 pre-Part-7.4 state) -- confirmed it fails without the fix (GAME's group
 missing entirely from `group_calls`) and passes with it.
 
+## Lineups' stale "DEF" slot label silently disabled the DST/QB guardrail (2026-09-18)
+
+Found verifying Part 7.4's DST-vs-own-QB guardrail against a real test
+lineup on live (typed a real QB + a real teammate + a real opponent from
+the same game, per this project's own "verify by reading resolved
+values" discipline): the check never fired.
+
+**Root cause has nothing to do with the guardrail's own formula.**
+`Lineups`' `Pos.` column is STATIC TEXT, not a formula (confirmed with a
+real `value_render_option="FORMULA"` read) -- one fixed DK roster-slot
+label per row (`QB, RB, RB, WR, WR, WR, TE, FLEX, DST`), written once,
+presumably by hand, well before this codebase's own "DST" convention
+existed everywhere else (`derived.EDGE_COLUMNS`, Player Pool's own DST
+block, every reference in `sheet_style.py`/`sheet_lineup_metrics.py`).
+The defense slot's own label reads `"DEF"` instead, on all 20 blocks, on
+both sheets -- confirmed by reading every single block's own last row
+directly, not assumed from one instance. `_stack_check_formula`'s
+`MATCH("DST", Position_range, 0)` can never find a slot literally
+labelled `"DEF"`, so its own `IFERROR` guard silently degrades `dst_opp`
+to `""` every time -- the check LOOKS like a working guardrail that
+simply hasn't found a violation yet, which is exactly why it went
+unnoticed until tested against real data instead of Scratch mock data
+(where I'd typed "DST" myself, matching my own assumption rather than
+the sheet's real, stale value).
+
+Fixed with new `sheet_style.fix_lineups_dst_slot_label` / `dfs setup
+fix-lineups-dst-label` -- verify-then-overwrite per block (only a cell
+that actually still says `"DEF"` gets touched; anything else is reported,
+never silently clobbered), same pattern as `fix-flag-split`/
+`fix-pct-of-cap`.
+
+**A known, separate, NOT-yet-fixed limitation surfaced by this same
+investigation:** the "max one RB per game" check reads `Position_range
+="RB"` -- which correctly identifies the two dedicated RB slots, but
+CANNOT see a real RB rostered in the `FLEX` slot (a common real
+construction; `FLEX`'s own label is always `"FLEX"`, never revealing
+which position actually occupies it). Fixing this properly needs each
+row's REAL player position (an inline lookup against `EdgeRaw` by name,
+not the slot label) -- a genuinely new array-formula mechanism this
+session hadn't verified yet. Flagged to Sam rather than shipped
+half-verified; see whatever follow-up entry (if any) resolves it.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

@@ -1895,6 +1895,55 @@ def polish_lineups_pct_of_cap(
     return f"{tab}: '% of Cap' set against the {salary_cap} salary cap for {written} row(s)"
 
 
+def fix_lineups_dst_slot_label(
+    client: SheetsClient, tab: str, *, position_col: str, name_blocks: list[tuple[int, int]]
+) -> str:
+    """Found live (2026-09-18) verifying Part 7.4's new DST-vs-own-QB
+    guardrail with a real test lineup: it never fired, on either sheet,
+    for any block. Root cause has nothing to do with that guardrail's own
+    formula -- `Lineups`' own `Pos.` column is STATIC TEXT (never a
+    formula, confirmed via a real formula-mode read), one fixed roster-
+    slot label per row (`QB, RB, RB, WR, WR, WR, TE, FLEX, DST` in DK's
+    own classic-contest order) written once, presumably by hand, before
+    this codebase's own "DST" convention (`derived.EDGE_COLUMNS`, Player
+    Pool's own DST block, EVERY other reference anywhere in this project)
+    existed. The defense slot's own label reads `"DEF"` instead, on every
+    single one of 20 blocks, both sheets -- confirmed by reading every
+    block's own last row directly rather than assuming a single instance
+    generalizes. `_stack_check_formula`'s `MATCH("DST", Position_range,
+    0)` can never find a slot literally labelled `"DEF"`, so `dst_opp`
+    always resolves to `""` via its own `IFERROR` guard, and the whole
+    check silently never fires -- not a formula bug, a stale-data one,
+    invisible until tested against a real lineup because an untested
+    guardrail LOOKS identical to a working one that just hasn't found a
+    violation yet.
+
+    Verify-then-overwrite, never blind: only touches a row that actually
+    still says `"DEF"`, so a block already fixed (or one that was never
+    wrong) is left untouched and reported as such, not silently
+    re-written."""
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+
+    fixed = 0
+    already_correct = 0
+    unexpected: list[tuple[int, str]] = []
+    for _start, end in name_blocks:
+        cell = f"{position_col}{end}"
+        current = client.read_range(tab, cell)
+        value = current[0][0].strip() if current and current[0] else ""
+        if value == "DST":
+            already_correct += 1
+        elif value == "DEF":
+            client.update_range(tab, cell, [["DST"]])
+            fixed += 1
+        else:
+            unexpected.append((end, value))
+
+    note = f", {len(unexpected)} unexpected value(s) left untouched: {unexpected}" if unexpected else ""
+    return f"{tab}: {fixed} 'DEF' -> 'DST' fix(es), {already_correct} already correct{note}"
+
+
 def polish_guardrails(
     client: SheetsClient,
     tab: str,
