@@ -1298,16 +1298,6 @@ BUILDER_WIDTHS = {
     "Own% Used": 92,
     "Sub-10%": 72,
     "Min Unique": 92,
-    # Same no-entry-means-unmanaged gap, found live via `dfs setup
-    # audit-style` on `Results` (2026-09-18, right after the RB/GAME fix
-    # rollout): "Black/White/Purple" (`week.py`'s real header text for
-    # what `style_results`'s own docstring shorthands as "Black") sat at
-    # the generic 110px default, truncating. "Red/Orange"/"Blue/Green"
-    # happen to fit already, but adding all three keeps the one group
-    # actively managed together rather than two of three being luck.
-    "Red/Orange": 96,
-    "Blue/Green": 96,
-    "Black/White/Purple": 140,
 }
 
 
