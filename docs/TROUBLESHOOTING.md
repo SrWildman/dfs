@@ -47,9 +47,11 @@ match exactly.
 **Added a player but they're not showing in Player Pool.**
 Cause: that position's block is at its cap (QB 10 / RB 20 / WR 25 / TE
 10 / DST 10) -- the extra is hidden, not dropped.
-Fix: check that block's Overflow column (Z) for a warning naming the cap
-and how many are actually ticked/typed. Remove someone else at that
-position first, or accept the cap.
+Fix: check that block's Overflow column (near the far right of the tab
+-- its exact letter shifts as columns are added, so look it up by header
+name rather than assuming a position) for a warning naming the cap and
+how many are actually ticked/typed. Remove someone else at that position
+first, or accept the cap.
 
 ---
 
@@ -137,3 +139,46 @@ silently overwrite a working formula.
 Fix: the warning is dismissible, not a hard lock -- if you really meant
 to edit there, click through. If you didn't mean to, that's the warning
 doing its job; undo (Ctrl+Z) instead of confirming.
+
+---
+
+**A guardrail formula involving `GameID` (or any other linked column
+that blanks itself out via a formula) fires on an incomplete lineup when
+it shouldn't, or two "blank" cells seem to match each other in a
+`COUNTIFS`/`FILTER` self-reference.**
+Cause: a linked column like `GameID` is never a genuinely empty cell,
+even on an unfilled roster slot -- it's a FORMULA
+(`=IF($A="","",VLOOKUP(...))`) that RESOLVES to `""`. `COUNTIFS`/`FILTER`
+treat a formula-produced `""` differently from a truly blank (never-
+typed) cell: two formula-blank cells DO match each other in a
+self-referential `COUNTIFS` criteria, but two genuinely-blank cells
+don't. Found live (2026-09-19) in the RB/GAME guardrail (`sheet_style.
+_stack_check_formula`'s `rb_per_game`), which fired on almost every
+incomplete lineup with 2+ unfilled RB slots until fixed.
+Fix: add a direct inequality term against the linked column itself
+(`GameID_range<>""`) as an extra `SUMPRODUCT`/`FILTER` criterion --
+`COUNTIFS`' own `"<>"` criteria pattern does NOT work here, since it
+treats a formula-holding cell as non-blank regardless of what it
+resolves to. A direct cell/range comparison (`<>""`) correctly evaluates
+`FALSE` for a formula-blank cell; a genuinely-typed (non-formula) column
+like `Lineups!Name` doesn't have this problem at all, since an untyped
+cell there really is blank.
+
+---
+
+**A `COUNTA(UNIQUE(FILTER(...)))`-style formula reads 1 instead of 0
+when its range is genuinely empty of real values.**
+Cause: `FILTER` errors (`#N/A`) when NOTHING in its range satisfies its
+own criteria -- an empty result isn't returned as "nothing," it's a
+hard error. `COUNTA` then silently absorbs that error into a valid
+count of 1 (an error value still "counts" as present to `COUNTA`)
+*before* `IFERROR` ever gets a chance to catch it, so a naive
+`IFERROR(COUNTA(UNIQUE(FILTER(...))),0)` never actually degrades to 0.
+Found live (2026-09-19) in both the per-lineup `Games` column
+(`sheet_lineup_metrics.distinct_games_formula`) and Exposure's portfolio
+`Distinct games` headline (`sheet_views.build_exposure`) -- both showed
+a phantom "1" for every still-empty lineup/build.
+Fix: use `ROWS` instead of `COUNTA` as the outermost function --
+`IFERROR(ROWS(UNIQUE(FILTER(...))),0)`. `ROWS` does not absorb the
+error the way `COUNTA` does; it propagates it, so `IFERROR` finally has
+something real to catch and correctly degrades to 0.

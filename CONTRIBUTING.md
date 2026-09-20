@@ -1305,6 +1305,102 @@ not the slot label) -- a genuinely new array-formula mechanism this
 session hadn't verified yet. Flagged to Sam rather than shipped
 half-verified; see whatever follow-up entry (if any) resolves it.
 
+## RB/GAME false-positive: a formula-blank GameID self-matched another formula-blank GameID (2026-09-19)
+
+Found immediately after the "DEF"->"DST" fix above, verifying the SAME
+test lineup on live: `Issues` correctly showed `DST/QB` (confirming that
+fix worked) but ALSO showed `RB/GAME`, even though the test lineup had
+zero real RB players -- only a QB and a DST typed, every RB slot left
+blank.
+
+**This directly contradicted Part 7.4's own "confirmed live" claim**
+(see that section above) that a self-referential `COUNTIFS` criteria
+resolving to blank does not match another blank cell. That claim was
+real, but the test behind it was wrong: it used two rows with BOTH
+`Position` and `GameID` genuinely blank (never-typed cells), which
+trivially cannot match `_stack_check_formula`'s own
+`Position_range="RB"` term regardless of what `GameID` does. It never
+exercised the REAL shape sitting on live: `Lineups`' two dedicated RB
+slots have a real, non-blank `"RB"` label (the fixed DK roster-slot
+text, present whether or not a name is typed -- same static-label fact
+as the DEF/DST bug above) while `GameID` is a FORMULA cell
+(`=IF($A="","",VLOOKUP(...))`) that RESOLVES to `""` when the slot has
+no name. Confirmed directly on the template's Scratch tab: a
+self-referential `COUNTIFS` DOES treat two formula-produced `""`
+results as matching each other, unlike two genuinely-blank (never-typed)
+cells, which don't match. That made `rb_per_game` fire on almost every
+incomplete lineup with 2+ unfilled RB slots -- i.e. the normal state of
+a lineup still being built.
+
+Also confirmed on Scratch that the obvious-looking alternative,
+`COUNTIFS(range,"<>")` as a blank-exclusion criterion, does NOT fix
+this: that pattern treats a cell holding a formula as non-blank
+regardless of what it resolves to, so it doesn't filter these rows out.
+The fix that does work: a direct cell/range inequality
+(`GameID_range<>""`) multiplied in as its own `SUMPRODUCT` term --
+direct comparison correctly evaluates `FALSE` for a formula-blank cell,
+unlike `COUNTIFS`' own `"<>"` criteria syntax.
+
+Fixed in `sheet_style._stack_check_formula`'s `rb_per_game`; re-verified
+against the same real test lineup, whose `Issues` then correctly read
+`INCOMPLETE 2/9 DST/QB` with no `RB/GAME`. Test data cleared from live
+`Lineups` afterward.
+
+## Exposure/Lineups portfolio metrics: two bugs found auditing Part 7.5's new headline (2026-09-19)
+
+Live end-to-end verification of the RB/GAME fix above surfaced two
+unrelated bugs in Part 7.5's portfolio-level Exposure headline
+(`sheet_views.build_exposure`), both only visible against a genuinely
+EMPTY `Lineups` (no real names typed anywhere) -- exactly the state a
+sheet is in right after a weekly reset, which is why neither showed up
+during the original Part 7.5 rollout (tested against a partially-built
+lineup, not an empty one).
+
+**1. `Shared QB?` always read `"Yes"`, even with zero real QBs
+rostered.** `qb_slots_filled` was `COUNTIF(Lineups!Pos.,"QB")` -- but
+`Pos.` is the FIXED slot label, one `"QB"` row per lineup block
+regardless of whether a name is typed there (same static-label fact as
+the two bugs above), so this was always the block count (e.g. 20),
+never "how many QB slots are actually filled." `20 > 0` is always true,
+so `Shared QB?` read `"Yes"` unconditionally. Fixed by also requiring
+the `Name` cell non-blank: `COUNTIFS(Lineups!Pos.,"QB",Lineups!Name,
+"<>")`. `Name` is typed by hand, not a formula, so it's genuinely blank
+when empty -- no formula-blank complication like `GameID` has.
+
+**2. `Distinct games` always read `1` instead of `0` -- twice, for two
+different reasons, found one after the other.** First: every lineup
+block repeats its own header row, and that repeated row's `GameID` cell
+literally contains the text `"GameID"` -- a real, non-blank string that
+passed the original `GameID_range<>""` filter and always counted as one
+phantom "distinct game." Fixed by excluding that literal text too:
+`GameID_range<>"GameID"`. That fix exposed a SECOND, subtler bug: with
+the header text now correctly excluded and genuinely zero real games in
+progress, `FILTER`'s own result set is truly empty, and `FILTER` errors
+on an empty result (`#N/A`) rather than returning nothing. `COUNTA`
+silently absorbs that error into a valid count of `1` (an error value
+still "counts" as present to `COUNTA`) *before* `IFERROR` ever gets a
+chance to catch it -- so `IFERROR(COUNTA(...),0)` never actually
+degrades to `0`. Confirmed step-by-step on the template's Scratch tab:
+the bare `FILTER` call itself correctly returned `#N/A`, but wrapping it
+in `COUNTA` (even with no `IFERROR` at all) silently turned that `#N/A`
+into `1`. `ROWS` does not have this problem -- it propagates the error
+instead of absorbing it, so `IFERROR(ROWS(UNIQUE(FILTER(...))),0)`
+genuinely degrades to `0`.
+
+**The second bug pre-dated this session and wasn't new to the portfolio
+headline** -- `sheet_lineup_metrics.distinct_games_formula` (the
+already-shipped PER-LINEUP `Games` column, live since Part 7.5) used
+the identical `IFERROR(COUNTA(...),0)` idiom and had the same silent
+flaw, showing `1` instead of `0` for every still-empty lineup block
+since it shipped. Fixed there too, not just in the new code -- a real
+correctness fix to existing functionality, discovered only because
+fixing the portfolio version required understanding exactly why the
+first "fix" attempt (`IFERROR(COUNTA(...),0)`) hadn't worked.
+
+All four values (`Distinct QBs`, `Shared QB?`, `Distinct games`, and the
+per-lineup `Games` column) reconfirmed correct live against a genuinely
+empty `Lineups` tab after both fixes shipped.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

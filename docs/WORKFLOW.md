@@ -59,7 +59,7 @@ Check Board first each week -- it's a landing view: top-leverage, best
 ceiling-value, and landmine panels plus a slate summary (games, highest
 total, max wind, injury counts). Slate Grid is the same slate one row per
 game instead of one row per player. EdgeRaw is where the real work
-happens: sorted by Leverage descending, colour scales on every decision
+happens: sorted by ValAdj descending, colour scales on every decision
 number, a muted position tint, banding to make one player's row readable
 across 23 columns, and a visible sort/search arrow in every header cell
 (click one to sort by any column, or search it -- Data > Filter views
@@ -109,11 +109,10 @@ way to find and remove one (set their Pool dropdown back to blank).
 
 **Tabs:** Lineups.
 
-No commands -- this is done in the sheet. Rows 1-10 are the frozen pool
-deck: set Position (B1), Sort by (D1), Start at (F1) to window into
-Player Pool without leaving Lineups. Type names into column A starting
-at row 12, one 9-player block per lineup (QB, RB, RB, WR, WR, WR, TE,
-FLEX, DEF) -- the dropdown there is a typo guard, not just a search box.
+No commands -- this is done in the sheet. Type names into column A
+starting at row 2, one 9-player block per lineup (QB, RB, RB, WR, WR,
+WR, TE, FLEX, DST) -- the dropdown there is a typo guard, not just a
+search box.
 The `Issues` column shows per-lineup guardrails (duplicate player,
 OUT/IR/Q, over cap, incomplete).
 

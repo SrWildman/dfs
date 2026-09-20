@@ -320,7 +320,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 Where you actually build lineups. `Lineups` is still typed: type a
 player's name into the `Name` column of a roster slot, and every other
 column VLOOKUPs off that name against `PlayerPoolRaw`. `Lineups` repeats
-a 9-row roster block (QB, RB, RB, WR, WR, WR, TE, FLEX, DEF) once per
+a 9-row roster block (QB, RB, RB, WR, WR, WR, TE, FLEX, DST) once per
 lineup you're building, each with its own **totals row** directly below
 it (Salary, Pts and Ceil summed, `Total`/`Remaining` labeled -- Fix 2.4;
 `dfs setup polish` writes this via `sheet_style.polish_lineups_totals_rows`)

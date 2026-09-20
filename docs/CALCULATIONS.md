@@ -368,8 +368,21 @@ itself) share its `GameID`; a violation exists if any such count exceeds
 1:
 
 ```
-= SUMPRODUCT((Position_range="RB") * (COUNTIFS(Position_range,"RB",GameID_range,GameID_range) > 1)) > 0
+= SUMPRODUCT((Position_range="RB") * (GameID_range<>"") * (COUNTIFS(Position_range,"RB",GameID_range,GameID_range) > 1)) > 0
 ```
+
+The `GameID_range<>""` term is load-bearing, not defensive filler: found
+live (2026-09-19) that Lineups' `GameID` is always a FORMULA cell
+(`=IF($A="","",VLOOKUP(...))`), so an unfilled slot's `GameID` is a
+formula-produced `""`, not a genuinely blank cell -- and `COUNTIFS`
+treats two formula-blank `""` cells as matching each other, unlike two
+truly-blank (never-typed) cells, which don't match. Without this term,
+the check fired on almost every incomplete lineup with 2+ unfilled RB
+slots (the two fixed RB-slot rows, both blank). An earlier verification
+pass on the template's Scratch tab had tested the wrong shape (both
+`Position` and `GameID` genuinely blank, which trivially can't match
+since `Position="RB"` is already false for a blank cell) and wrongly
+concluded the un-guarded formula was safe.
 
 Both formulas were confirmed empirically on the template's Scratch tab
 before shipping -- a violating lineup shape and a clean one, read back
@@ -565,8 +578,18 @@ other, since a bring-back is on the opposing team by definition. Both
 `INDEX`/`MATCH` lookups are `IFERROR`-guarded to `""` for a still-partial
 lineup missing a QB.
 
-**`Games`** -- `COUNTA(UNIQUE(FILTER(GameID_range, GameID_range<>"")))`,
-distinct `GameID`s across the 9 picks.
+**`Games`** -- `IFERROR(ROWS(UNIQUE(FILTER(GameID_range, GameID_range<>""))),0)`,
+distinct `GameID`s across the 9 picks. `ROWS`, not `COUNTA`, and the
+`IFERROR(...,0)` wrapper are both load-bearing: found live (2026-09-19)
+that with zero real `GameID`s in the block (nothing rostered yet),
+`FILTER`'s result set is genuinely empty, which `FILTER` errors on
+(`#N/A`) rather than returning nothing -- and `COUNTA` silently absorbs
+that error into a valid count of 1 (an error value still "counts" as
+present to `COUNTA`) *before* `IFERROR` ever sees an error to catch, so
+`IFERROR(COUNTA(...),0)` never actually degrades to 0. `ROWS` does not
+absorb the error -- it propagates it, so `IFERROR(ROWS(...),0)`
+genuinely degrades to 0 for an empty block while still counting real
+distinct games correctly once any exist.
 
 **`Bring-back`** -- `"Yes"`/`"No"`, the same `bring_back_count` as
 `Stack` above, just as a plain flag rather than parsed out of a string.
@@ -617,18 +640,31 @@ and `Distinct games` used across the WHOLE lineup build, plus a plain
 ```
 qb_names       = UNIQUE(FILTER(Lineups!Name, Lineups!Pos.="QB"))
 Distinct QBs   = COUNTA(qb_names)
-Shared QB?     = IF(COUNTIF(Lineups!Pos.,"QB") > COUNTA(qb_names), "Yes", "No")
-Distinct games = COUNTA(UNIQUE(FILTER(Lineups!GameID, Lineups!GameID<>"")))
+Shared QB?     = IF(COUNTIFS(Lineups!Pos.,"QB",Lineups!Name,"<>") > COUNTA(qb_names), "Yes", "No")
+Distinct games = IFERROR(ROWS(UNIQUE(FILTER(Lineups!GameID, Lineups!GameID<>"", Lineups!GameID<>"GameID"))),0)
 ```
 
-`Shared QB?` compares the count of FILLED QB slots (one per lineup)
-against the count of DISTINCT QB names -- if fewer distinct names than
-filled slots, at least one QB repeats across lineups. Deliberately
-doesn't name WHICH QB repeats -- Part 7.5's own spec text just asks for
-a flag ("Flag when two lineups share a QB"), and a plain Yes/No is
-simpler and more robust than enumerating names via a second array
-formula for a fact Sam can see at a glance by scanning `Lineups`' own
-`Stack` column once flagged.
+`Shared QB?` compares the count of FILLED QB slots against the count of
+DISTINCT QB names -- if fewer distinct names than filled slots, at least
+one QB repeats across lineups. Deliberately doesn't name WHICH QB
+repeats -- Part 7.5's own spec text just asks for a flag ("Flag when two
+lineups share a QB"), and a plain Yes/No is simpler and more robust than
+enumerating names via a second array formula for a fact Sam can see at a
+glance by scanning `Lineups`' own `Stack` column once flagged.
+
+Both formulas needed a second pass, found live (2026-09-19) auditing this
+exact section: `Lineups!Pos.` is the FIXED slot label, one "QB" row per
+block regardless of whether a name is typed there, so a bare
+`COUNTIF(Lineups!Pos.,"QB")` was always the block count (e.g. 20), never
+"how many QB slots are actually filled" -- `Shared QB?` read "Yes" even
+with zero real QBs rostered anywhere (20 > 0). The `Lineups!Name,"<>"`
+criterion fixes it, since `Name` is typed by hand and genuinely blank
+when empty (unlike `GameID`, a formula cell). Separately, `Distinct
+games` needed BOTH the same header-repeat exclusion as `Games` above
+(`Lineups!GameID<>"GameID"`, since every lineup block repeats its own
+header row and that repeat's `GameID` cell reads the literal text
+"GameID") AND the same `ROWS`-instead-of-`COUNTA` fix for the
+FILTER-empty-result/`IFERROR` issue described under `Games`.
 
 **Deliberately NOT built** (Part 7.4's own text, restated since 7.5 is
 where a reader would look for it): player-level exposure caps -- "at
