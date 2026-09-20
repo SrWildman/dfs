@@ -57,7 +57,7 @@ from dfs.config import EntryTableConfig
 from dfs.sheets import SheetsClient
 
 # Fix 2.4: each tuple is now the NINE REAL ROSTER ROWS ONLY (QB, RB, RB,
-# WR, WR, WR, TE, FLEX, DEF) -- `end` used to also be that block's totals
+# WR, WR, WR, TE, FLEX, DST) -- `end` used to also be that block's totals
 # row (the SUM/remaining-salary row directly below the 9th slot), which
 # meant `dfs setup link-edge`/`polish_guardrails` treated it as a tenth
 # roster slot: a permanent #N/A tenth-player VLOOKUP that could never

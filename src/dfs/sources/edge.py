@@ -174,7 +174,7 @@ class EdgeSource(Source):
         """Read each player's current Pool value (Fix 2.11: blank/Cash/
         GPP/Both, not a TRUE/FALSE checkbox), keyed by Id (not row
         position or Name -- DST names aren't unique, see derived.py's own
-        docstring, and EdgeRaw is sorted by Leverage so row order shifts
+        docstring, and EdgeRaw is sorted by ValAdj so row order shifts
         between syncs) before write_tab's `ws.clear()` wipes both the Id
         and Pool columns. Same preserve-by-key pattern as
         sheet_views.build_exposure's Target column.

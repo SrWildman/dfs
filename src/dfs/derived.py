@@ -497,7 +497,7 @@ def build_edge_frame(
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
-    Leverage descending, so the top of the tab is the answer.
+    ValAdj descending, so the top of the tab is the answer.
 
     `salaries` is the raw draftkings.csv shape (columns include `ID`,
     `Salary`, `Status`); `projections` is the raw projections.csv shape
