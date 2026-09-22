@@ -24,7 +24,13 @@ from rich.console import Console
 from rich.table import Table
 
 from dfs import nfl_calendar, paths, store
-from dfs.bankroll import backfill_entry_keys, classify_entry, parse_contest_history, sync_bucket
+from dfs.bankroll import (
+    backfill_entry_keys,
+    classify_entry,
+    entries_for_week,
+    parse_contest_history,
+    sync_bucket,
+)
 from dfs.config import Config, ConfigError, load_config
 from dfs.doctor import run_doctor
 from dfs.late_swap import lineup_slot_status, swap_candidates
@@ -2337,9 +2343,31 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:
         console.print(f"[red]CSV is missing an expected column:[/red] {e}")
         raise typer.Exit(code=1) from e
 
-    cash_entries = [e for e in entries if classify_entry(e) == "cash"]
-    gpp_entries = [e for e in entries if classify_entry(e) == "gpp"]
-    console.print(f"Parsed {len(entries)} entries: {len(cash_entries)} cash, {len(gpp_entries)} GPP.")
+    console.print(f"Parsed {len(entries)} entries from {csv}.")
+
+    # Fix 2.18 (found live 2026-09-22): the Bankroll cash/GPP ledger ranges
+    # are cleared fresh every week by `dfs week new` (weekly_reset.
+    # clear_previous_week), and each week lives on its own spreadsheet --
+    # so an earlier week's entries are never in the new sheet's dedupe-key
+    # column and `sync_bucket`'s dedupe alone can't tell them apart from
+    # this week's. Narrow to this week's entries before appending to the
+    # ledger; `compute_week_results` below still uses the full, unfiltered
+    # `entries` for its season-long Results backfill -- see
+    # bankroll.entries_for_week's docstring for why those two need
+    # different scopes.
+    season = nfl_calendar.current_season()
+    week = nfl_calendar.current_week()
+    ledger_entries = entries_for_week(entries, week, season)
+    if len(ledger_entries) != len(entries):
+        console.print(
+            f"Week {week}: {len(ledger_entries)} of {len(entries)} entries belong to this week's "
+            "ledger -- the rest are earlier weeks, already recorded on their own sheets, and are "
+            "skipped here (but still included in the Results backfill below)."
+        )
+
+    cash_entries = [e for e in ledger_entries if classify_entry(e) == "cash"]
+    gpp_entries = [e for e in ledger_entries if classify_entry(e) == "gpp"]
+    console.print(f"This week: {len(cash_entries)} cash, {len(gpp_entries)} GPP.")
 
     client = SheetsClient(cfg.google_sheets)
     try:

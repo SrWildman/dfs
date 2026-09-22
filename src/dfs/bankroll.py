@@ -24,6 +24,7 @@ from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 
+from dfs import nfl_calendar
 from dfs.config import EntryTableConfig
 from dfs.log import get_logger
 from dfs.models import ContestEntry
@@ -37,6 +38,32 @@ CASH_PAYOUT_RATIO_HIGH = 0.60
 
 class BankrollError(Exception):
     pass
+
+
+def entries_for_week(entries: list[ContestEntry], week: int, season: int) -> list[ContestEntry]:
+    """Narrow a (typically season-long) DK contest-history export down to
+    just the entries whose own contest date falls in `week`.
+
+    Found live 2026-09-22: this filter didn't exist anywhere, so
+    `sync_bucket` (below) was appending EVERY not-yet-synced entry in the
+    export into whatever week's sheet `bankroll sync`/`week close` was run
+    against -- including entries from earlier weeks. That's the "bankroll
+    sync took entries from the wrong week" bug, and it's a separate
+    mechanism from the `nfl_calendar` anchor bug (see
+    `nfl_calendar.WEEK_ROLLOVER_LEAD_DAYS`), even though both are rooted in
+    "how do we know what week it is": the Bankroll cash/GPP ledger ranges
+    are cleared fresh every week by `weekly_reset.clear_previous_week`
+    (called from `dfs week new`), each week gets its own spreadsheet, so
+    an earlier week's entries are never in the new sheet's dedupe-key
+    column and always look "new" to `sync_bucket`'s dedupe -- there was
+    nothing stopping them from being appended into a week's ledger they
+    don't belong to.
+
+    Deliberately NOT used for `results_autofill.compute_week_results`,
+    whose season-long backfill across every past week's own Results ROW
+    is the intended behaviour -- this filter only applies to the ledger
+    append, which is scoped to "this week" by design."""
+    return [e for e in entries if nfl_calendar.week_for_date(e.contest_date.date(), season) == week]
 
 
 def classify_entry(entry: ContestEntry) -> str:

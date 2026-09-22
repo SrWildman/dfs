@@ -8,6 +8,7 @@ from dfs.bankroll import (
     CASH_PAYOUT_RATIO_LOW,
     backfill_entry_keys,
     classify_entry,
+    entries_for_week,
     parse_contest_history,
     sync_bucket,
 )
@@ -28,6 +29,24 @@ def _entry(entries=100, places_paid=50, **kw) -> ContestEntry:
     )
     defaults.update(kw)
     return ContestEntry(**defaults)
+
+
+def test_entries_for_week_keeps_only_the_matching_weeks_entries():
+    # Found live 2026-09-22: a season-long export was fed straight to
+    # sync_bucket with no week filter at all, so an earlier week's
+    # entries -- never in the new, freshly-cleared week's dedupe-key
+    # column -- looked "new" and got appended into the wrong week's
+    # ledger. `_entry`'s default contest_date (2026-09-13) is a week 1
+    # Sunday; add a week 2 Sunday (2026-09-20) alongside it.
+    week1 = _entry(entry_key="w1", contest_date="2026-09-13T13:00:00")
+    week2 = _entry(entry_key="w2", contest_date="2026-09-20T13:00:00")
+    assert entries_for_week([week1, week2], week=2, season=2026) == [week2]
+    assert entries_for_week([week1, week2], week=1, season=2026) == [week1]
+
+
+def test_entries_for_week_empty_when_nothing_matches():
+    week1 = _entry(entry_key="w1", contest_date="2026-09-13T13:00:00")
+    assert entries_for_week([week1], week=5, season=2026) == []
 
 
 def test_classify_double_up_is_cash():
