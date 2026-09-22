@@ -40,11 +40,21 @@ from dfs.sheet_style import (
     polish_guardrails,
     polish_lineups_pct_of_cap,
     polish_lineups_totals_rows,
+    style_board,
     style_flat_tab,
     style_movement,
     style_results,
     style_sos_tab,
     style_tier23_tabs,
+)
+from dfs.sheet_views import (
+    BOARD_CHALK_HEADER_ROW,
+    BOARD_LEADERS_COLHEADER_ROW,
+    BOARD_LEADERS_LAST_ROW,
+    BOARD_QUEUE_COLHEADER_ROW,
+    BOARD_QUEUE_LAST_ROW,
+    BOARD_SLATE_COLHEADER_ROW,
+    BOARD_SLATE_LAST_ROW,
 )
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
@@ -687,6 +697,86 @@ class FakeGuardrailsClient:
 
     def clear_data_validation(self, tab_name: str, a1_range: str) -> None:
         self.clear_validation_calls.append(a1_range)
+
+
+class FakeBoardClient:
+    def __init__(self, *, present: bool = True):
+        self._present = present
+        self.row_group_calls: list[tuple[int, int, bool]] = []
+        self.cleared_row_groups = False
+        self.format_calls: list[tuple[str, dict]] = []
+        self.freeze_calls: list[int] = []
+        self.width_calls: list[dict] = []
+        self.color_scale_calls: list[str] = []
+
+    def tab_exists(self, tab_name: str) -> bool:
+        return self._present
+
+    def clear_conditional_formats(self, tab_name: str) -> None:
+        pass
+
+    def clear_row_groups(self, tab_name: str) -> None:
+        self.cleared_row_groups = True
+
+    def group_rows(self, tab_name: str, first_row: int, last_row: int, *, collapsed: bool = False) -> None:
+        self.row_group_calls.append((first_row, last_row, collapsed))
+
+    def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
+        self.width_calls.append(widths)
+
+    def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
+        self.format_calls.append((a1_range, fmt))
+
+    def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
+        self.color_scale_calls.append(a1_range)
+
+    def freeze(self, tab_name: str, *, rows: int) -> None:
+        self.freeze_calls.append(rows)
+
+
+def test_style_board_skips_cleanly_when_tab_absent():
+    client = FakeBoardClient(present=False)
+    result = style_board(client)
+    assert "not present" in result
+    assert client.row_group_calls == []
+
+
+def test_style_board_clears_existing_row_groups_before_regrouping():
+    # Same reason clear_column_groups exists elsewhere -- re-running
+    # group_rows over an already-grouped range nests a deeper group
+    # instead of replacing it.
+    client = FakeBoardClient()
+    style_board(client)
+    assert client.cleared_row_groups is True
+
+
+def test_style_board_leaves_queue_and_slate_shape_expanded():
+    client = FakeBoardClient()
+    style_board(client)
+    grouped_ranges = {(first, last): collapsed for first, last, collapsed in client.row_group_calls}
+    assert grouped_ranges[(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW)] is False
+    assert grouped_ranges[(BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW)] is False
+
+
+def test_style_board_collapses_everything_after_slate_shape():
+    client = FakeBoardClient()
+    style_board(client)
+    grouped_ranges = {(first, last): collapsed for first, last, collapsed in client.row_group_calls}
+    assert grouped_ranges[(BOARD_LEADERS_COLHEADER_ROW, BOARD_LEADERS_LAST_ROW)] is True
+    # Chalk map's one placeholder row is grouped/collapsed too, even
+    # though it has no separate column-header row of its own.
+    assert any(
+        collapsed and first == BOARD_CHALK_HEADER_ROW + 1 for first, _, collapsed in client.row_group_calls
+    )
+
+
+def test_style_board_freezes_only_the_title_and_summary_banner():
+    # Rebuilt design: the old subheader-row freeze (rows=6) no longer
+    # applies -- Queue's own header/column-header are part of the
+    # collapsible content now, not something that needs to stay pinned.
+    client = FakeBoardClient()
+    style_board(client)
+    assert client.freeze_calls == [3]
 
 
 _HEADER_WITH_AVAIL_AT_Y = (

@@ -1,5 +1,20 @@
+import pandas as pd
+
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_views import (
+    BOARD_CHALK_HEADER_ROW,
+    BOARD_CHALK_PLACEHOLDER_ROW,
+    BOARD_LEADERS_FIRST_ROW,
+    BOARD_LEADERS_HEADER_ROW,
+    BOARD_POOL_FIRST_ROW,
+    BOARD_POOL_HEADER_ROW,
+    BOARD_PUNT_FIRST_ROW,
+    BOARD_PUNT_HEADER_ROW,
+    BOARD_QUEUE_FIRST_ROW,
+    BOARD_QUEUE_HEADER_ROW,
+    BOARD_SLATE_HEADER_ROW,
+    BOARD_STACK_FIRST_ROW,
+    BOARD_STACK_HEADER_ROW,
     DEFAULT_LINEUP_COUNT,
     EXPOSURE_TAB,
     LINEUP_COUNT_CELL,
@@ -10,6 +25,7 @@ from dfs.sheet_views import (
     build_exposure,
     build_movement,
     build_slate_grid,
+    write_queue_section,
 )
 
 
@@ -340,63 +356,127 @@ def test_build_movement_uses_edge_columns_positions_for_impmove_and_gamestart():
 # ---------------------------------------------------------------------------
 
 
-def test_board_header_row_matches_style_boards_column_assumptions():
-    client = _CapturingClient()
-    build_board(client, edge_tab="EdgeRaw", games_tab="GamesRaw", weather_tab="WeatherRaw")
-    header = client.rows[5]  # row 6: style_board formats this as each panel's sub-header
-    # Panel 1 (A-D): Player, Pos, Lev, CeilVal -- style_board colour-scales C (Lev) and D (CeilVal).
-    assert header[2] == "Lev"
-    assert header[3] == "CeilVal"
-    # Panel 2 (F-I): Player, Pos, Salary, CeilVal -- style_board currency-formats H (Salary).
-    assert header[7] == "Salary"
-    assert header[8] == "CeilVal"
-    # Panel 3 (K-N): Player, Pos, Avail, Flags -- style_board chips M (Avail) and N (Flags).
-    assert header[12] == "Avail"
-    assert header[13] == "Flags"
+def _build_board(client=None, **overrides):
+    client = client or _CapturingClient()
+    kwargs = {
+        "edge_tab": "EdgeRaw",
+        "games_tab": "GamesRaw",
+        "weather_tab": "WeatherRaw",
+        "player_pool_tab": "Player Pool",
+        **overrides,
+    }
+    build_board(client, **kwargs)
+    return client
 
 
-def test_best_ceiling_value_ranks_within_position_not_across_the_whole_slate():
-    # Phase 6, Part 1.3: BEST CEILING VALUE used to be one flat SORT by
-    # CeilVal across the whole slate, which reads as ~11 QBs of 12 rows
-    # live (CeilVal is points-per-$1,000 and QBs mechanically dominate it
-    # cross-position). Fixed as 5 independent per-position blocks.
-    client = _CapturingClient()
-    build_board(client, edge_tab="EdgeRaw", games_tab="GamesRaw", weather_tab="WeatherRaw")
-    best_value = client.rows[6][5]  # row 7, panel 2's formula cell (F)
+def test_board_writes_every_section_header_at_its_own_row():
+    client = _build_board()
+    # Row numbers come from sheet_views' own BOARD_* constants (1-indexed;
+    # client.rows is 0-indexed) so a change to those constants that
+    # silently detaches a header from its section fails a test instead of
+    # only being caught by eye on a real sheet.
+    assert client.rows[BOARD_QUEUE_HEADER_ROW - 1][0].startswith("QUEUE")
+    assert client.rows[BOARD_SLATE_HEADER_ROW - 1][0].startswith("SLATE SHAPE")
+    assert client.rows[BOARD_LEADERS_HEADER_ROW - 1][0].startswith("PER-POSITION LEADERS")
+    assert client.rows[BOARD_PUNT_HEADER_ROW - 1][0].startswith("PUNT FINDER")
+    assert client.rows[BOARD_STACK_HEADER_ROW - 1][0].startswith("STACK CANDIDATES")
+    assert client.rows[BOARD_POOL_HEADER_ROW - 1][0].startswith("POOL DIAGNOSTICS")
+    assert client.rows[BOARD_CHALK_HEADER_ROW - 1][0].startswith("CHALK MAP")
 
-    assert best_value.startswith("={")
+
+def test_per_position_leaders_rank_within_position_not_across_the_whole_slate():
+    # Phase 6, Part 1.3 (kept alive through the Part 3 rebuild, 7.6 changed
+    # the sort key from CeilVal to ValAdj): BEST VALUE used to be one flat
+    # SORT across the whole slate, which reads as ~11 QBs of 12 rows live
+    # (a salary ratio mechanically favours cheap positions). Fixed as 5
+    # independent per-position blocks, still true after the rebuild.
+    client = _build_board()
+    best_valadj = client.rows[BOARD_LEADERS_FIRST_ROW - 1][0]  # block 1 (column A)
+
+    assert best_valadj.startswith("={")
     for position in ("QB", "RB", "WR", "TE", "DST"):
-        assert f'{_rng("EdgeRaw", "Position")}="{position}"' in best_value
-    # Each position's own block is independently constrained -- not one
-    # combined constrain that could still cut a whole position off.
-    assert best_value.count("ARRAY_CONSTRAIN") == 5
-    assert best_value.count(",2,4)") == 5  # 2 rows x 4 cols per position block
+        assert f'{_rng("EdgeRaw", "Position")}="{position}"' in best_valadj
+    assert best_valadj.count("ARRAY_CONSTRAIN") == 5
+    assert best_valadj.count(",2,4)") == 5  # 2 rows x 4 cols per position block
+    assert _rng("EdgeRaw", "ValAdj") in best_valadj
 
 
-def test_top_leverage_and_landmines_reference_current_edge_columns():
-    # Phase 6, Part 1.3: found live that Board's formulas go stale the
-    # moment EdgeRaw's own column order changes underneath them (the Sept
-    # 16 CeilPct/OwnPct reorder), since a written formula string doesn't
-    # follow a later column move. This test only pins that build_board
-    # generates against EDGE_COLUMNS at call time -- it can't catch a
-    # regenerate never having been re-run after a real reorder; that's a
-    # process discipline (re-run build-views after any EdgeRaw reorder),
-    # not something a unit test can enforce.
-    client = _CapturingClient()
-    build_board(client, edge_tab="EdgeRaw", games_tab="GamesRaw", weather_tab="WeatherRaw")
-    top_leverage = client.rows[6][0]
-    landmines = client.rows[6][10]
+def test_per_position_leaders_second_block_sorts_by_projpts():
+    # 7.6's actual ask: ValAdj for "best value", ProjPts for "highest
+    # projection" -- two different sort keys, not the same one twice.
+    client = _build_board()
+    highest_proj = client.rows[BOARD_LEADERS_FIRST_ROW - 1][5]  # block 2 starts at column F
 
-    assert _rng("EdgeRaw", "Leverage") in top_leverage
-    assert _rng("EdgeRaw", "Avail") in landmines
-    # Part 7.9: LANDMINES reads "Flags" (every matching condition), not
-    # the hidden, top-priority-only "Flag".
-    assert _rng("EdgeRaw", "Flags") in landmines
-    # The exact stale-reference bug: LANDMINES must never read Leverage's
-    # own column as a stand-in for Avail/Flags. (OwnPct, the other half of
-    # the original stale-reference incident, no longer exists at all --
-    # dropped entirely from EDGE_COLUMNS in Part 7.9.)
-    assert _rng("EdgeRaw", "Leverage") not in landmines
+    assert _rng("EdgeRaw", "ProjPts") in highest_proj
+    assert _rng("EdgeRaw", "ValAdj") not in highest_proj
+
+
+def test_punt_finder_filters_under_the_salary_ceiling():
+    client = _build_board()
+    punt_finder = client.rows[BOARD_PUNT_FIRST_ROW - 1][0]
+
+    assert f"{_rng('EdgeRaw', 'Salary')}<4000" in punt_finder
+    assert punt_finder.count("ARRAY_CONSTRAIN") == 5
+    assert punt_finder.count(",1,4)") == 5  # 1 row x 4 cols per position block
+
+
+def test_stack_candidates_reference_current_edge_columns():
+    # Same discipline the pre-rebuild leverage/landmines panels had:
+    # found live that a written formula string doesn't follow a later
+    # EdgeRaw column reorder, so this only pins that build_board
+    # generates against EDGE_COLUMNS at call time.
+    client = _build_board()
+    stack_row = client.rows[BOARD_STACK_FIRST_ROW - 1]
+    team_list = stack_row[0]
+    qb_formula = stack_row[1]
+
+    assert _rng("EdgeRaw", "OverUnder") in team_list
+    assert _rng("EdgeRaw", "Team") in qb_formula
+    assert _rng("EdgeRaw", "TmRank") in stack_row[3]  # WR1 column
+
+
+def test_pool_diagnostics_reads_player_pool_not_edgeraw():
+    client = _build_board()
+    qb_row = client.rows[BOARD_POOL_FIRST_ROW - 1]
+
+    assert qb_row[0] == "QB"
+    assert "Player Pool" in qb_row[1]
+    assert "EdgeRaw" not in qb_row[1]
+
+
+def test_chalk_map_is_a_labelled_placeholder_with_no_formula():
+    client = _build_board()
+    placeholder = client.rows[BOARD_CHALK_PLACEHOLDER_ROW - 1][0]
+
+    assert "CHALK MAP" in client.rows[BOARD_CHALK_HEADER_ROW - 1][0]
+    assert not placeholder.startswith("=")
+
+
+def test_build_board_preserves_existing_queue_rows_on_rebuild():
+    # A routine dfs setup build-views re-run (e.g. after an EdgeRaw
+    # reorder) must not wipe whatever the last `dfs sync --live` wrote
+    # into Queue -- same "typed/live input survives a rebuild" contract
+    # this module already has for Exposure's Target column.
+    existing = [["Player A", "RB", "KC", "Avail -> Q"]]
+
+    class _ClientWithQueue(_CapturingClient):
+        def tab_exists(self, tab_name):
+            return True
+
+        def read_range(self, tab_name, a1_range):
+            return existing
+
+    client = _build_board(client=_ClientWithQueue())
+    assert client.rows[BOARD_QUEUE_FIRST_ROW - 1][:4] == existing[0]
+
+
+def test_old_top_leverage_and_landmines_panels_are_gone():
+    # Part 3 replaced the old leverage/landmines panels; guard against a
+    # careless partial revert leaving old text behind.
+    client = _build_board()
+    flat = [str(cell) for row in client.rows for cell in row]
+    assert not any("LANDMINES" in cell for cell in flat)
+    assert not any("TOP LEVERAGE" in cell for cell in flat)
 
 
 def test_slate_grid_header_row_matches_style_slate_grids_column_assumptions():
@@ -466,3 +546,100 @@ def test_movement_header_row_has_the_names_style_movement_looks_up():
     assert "Spread move" in header
     assert "Flags" in header
     assert "Line Move" not in header  # Section F: renamed away from the ambiguous old label
+
+
+class _QueueSectionClient:
+    """Just enough of SheetsClient for write_queue_section: a real
+    EdgeRaw header/Id column/Pool column, and a Board tab it can write
+    the Queue body into."""
+
+    def __init__(self, header, ids, pool_ticks, *, board_present=True, edge_present=True):
+        self._header = header
+        self._ids = ids
+        self._pool_ticks = pool_ticks
+        self._board_present = board_present
+        self._edge_present = edge_present
+        self.update_calls: list[tuple[str, list[list]]] = []
+
+    def tab_exists(self, tab_name):
+        return self._board_present if tab_name == "Board" else self._edge_present
+
+    def read_range(self, tab_name, a1_range):
+        if a1_range == "A1:1":
+            return [self._header]
+        if a1_range == "A2:A1000":
+            return [[t] for t in self._pool_ticks]
+        return []
+
+    def read_range_unformatted(self, tab_name, a1_range):
+        return [[i] for i in self._ids]
+
+    def update_range(self, tab_name, a1_range, rows):
+        self.update_calls.append((a1_range, rows))
+
+
+def _queue_changes_df(*rows):
+    return pd.DataFrame(rows, columns=["Id", "Name", "Position", "Team", "Reason"])
+
+
+def test_write_queue_section_filters_to_pooled_players_only():
+    client = _QueueSectionClient(
+        header=["Pool", "Name", "Position", "Team", "Id"],
+        ids=["1", "2"],
+        pool_ticks=["Both", ""],  # player 1 pooled, player 2 not
+    )
+    changes = _queue_changes_df(
+        ("1", "Player A", "RB", "KC", "Avail -> Q"),
+        ("2", "Player B", "WR", "SF", "Salary 6000 -> 5800"),
+    )
+
+    result = write_queue_section(client, changes, "EdgeRaw")
+
+    assert "1 pooled change" in result
+    a1_range, body = client.update_calls[0]
+    assert body[0] == ["Player A", "RB", "KC", "Avail -> Q"]
+    assert all(row == ["", "", "", ""] for row in body[1:])
+
+
+def test_write_queue_section_shows_a_message_when_nothing_pooled_changed():
+    client = _QueueSectionClient(
+        header=["Pool", "Name", "Position", "Team", "Id"],
+        ids=["1"],
+        pool_ticks=["Both"],
+    )
+    changes = _queue_changes_df(("2", "Player B", "WR", "SF", "Salary 6000 -> 5800"))
+
+    write_queue_section(client, changes, "EdgeRaw")
+
+    _, body = client.update_calls[0]
+    assert "No changes" in body[0][0]
+
+
+def test_write_queue_section_notes_overflow_past_the_row_cap():
+    header = ["Pool", "Name", "Position", "Team", "Id"]
+    ids = [str(i) for i in range(1, 25)]
+    pool_ticks = ["Both"] * len(ids)
+    changes = _queue_changes_df(
+        *[(str(i), f"Player {i}", "RB", "KC", "Salary changed") for i in range(1, 25)]
+    )
+    client = _QueueSectionClient(header=header, ids=ids, pool_ticks=pool_ticks)
+
+    write_queue_section(client, changes, "EdgeRaw")
+
+    _, body = client.update_calls[0]
+    assert len(body) == 20  # BOARD_QUEUE_ROWS
+    assert "more not shown" in body[-1][3]
+
+
+def test_write_queue_section_skips_cleanly_when_board_absent():
+    client = _QueueSectionClient(header=["Pool", "Name", "Id"], ids=[], pool_ticks=[], board_present=False)
+    result = write_queue_section(client, _queue_changes_df(), "EdgeRaw")
+    assert "not present" in result
+    assert client.update_calls == []
+
+
+def test_write_queue_section_skips_cleanly_when_edgeraw_has_no_id_column():
+    client = _QueueSectionClient(header=["Pool", "Name"], ids=[], pool_ticks=[])
+    result = write_queue_section(client, _queue_changes_df(), "EdgeRaw")
+    assert "no Id column" in result
+    assert client.update_calls == []

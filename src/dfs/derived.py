@@ -126,6 +126,14 @@ OUT_STATUSES = frozenset({"OUT", "IR"})
 # other way around.
 WIND_FLAG_THRESHOLD_MPH = 20.0
 
+# Phase 6, Part 3 (2026-09-22): the Board's "Slate shape" section flags a
+# game as a probable shootout by its Vegas total. 48 is a standard DFS
+# heuristic, not measured against real data the way `LEVERAGE_FLAG_
+# THRESHOLD` was re-tuned against a real slate -- a first-pass number
+# Sam should sanity-check once he's looked at a few real weeks, same as
+# that one was.
+SHOOTOUT_TOTAL_THRESHOLD = 48.0
+
 # Week 3 feedback (A3): weight given to raw projected-points percentile
 # vs. the price-edge residual percentile in ValAdj's blend -- see
 # `_val_adj_blend`'s docstring for why a plain residual isn't enough on

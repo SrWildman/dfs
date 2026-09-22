@@ -37,7 +37,7 @@ from dfs.late_swap import lineup_slot_status, swap_candidates
 from dfs.launcher import LauncherState, header_lines, suggest_actions
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
-from dfs.live_diff import diff_edge_flags
+from dfs.live_diff import diff_edge_flags, diff_queue_changes
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
 from dfs.pool import clear_all, find_matches, read_players, set_pool
@@ -77,7 +77,7 @@ from dfs.sheet_style import (
 )
 from dfs.sheet_tab_removal import remove_retired_tabs
 from dfs.sheet_typo_guard import add_lineups_typo_guard
-from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
+from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid, write_queue_section
 from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
@@ -893,7 +893,13 @@ def sheets_build_views(
         title, url = client.describe()
         console.print(f"Building view tabs in: [bold]{title}[/bold]\n{url}\n")
         results = [
-            build_board(client, edge_tab=edge_tab, games_tab=games_tab, weather_tab=weather_tab),
+            build_board(
+                client,
+                edge_tab=edge_tab,
+                games_tab=games_tab,
+                weather_tab=weather_tab,
+                player_pool_tab=cfg.lineups.player_pool_tab,
+            ),
             build_slate_grid(client, games_tab=games_tab, weather_tab=weather_tab, edge_tab=edge_tab),
             build_exposure(
                 client,
@@ -1605,11 +1611,13 @@ def sync(
     else:
         source_names = list(SOURCES)
 
+    live_client: SheetsClient | None = None
     if no_upload:
         console.print("[dim]--no-upload: fetching and caching locally only, no Sheets contact.[/dim]")
     else:
+        live_client = SheetsClient(cfg.google_sheets)
         try:
-            title, url = SheetsClient(cfg.google_sheets).describe()
+            title, url = live_client.describe()
         except SheetsError as e:
             console.print(f"[red]Sheets error:[/red] {e}")
             raise typer.Exit(code=1) from e
@@ -1655,20 +1663,29 @@ def sync(
             console.print(f"[yellow]Could not check the add-a-player control cell:[/yellow] {e}")
 
     if live:
-        _print_live_flag_diff(old_edge)
+        _print_live_flag_diff(
+            old_edge, client=live_client, edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
+        )
 
     if any_failed:
         raise typer.Exit(code=1)
 
 
-def _print_live_flag_diff(old_edge: pd.DataFrame | None) -> None:
-    """Called only from `sync --live`, after `run_sync` -- compares
-    EdgeRaw's Flag column from right before this sync (`old_edge`, read
-    before `run_sync` ran) to right after, and prints the difference.
-    `store.load_previous`/`diff_odds`'s per-snapshot pattern isn't reused
-    here because "current" already means "the state this sync just
-    replaced" for `old_edge`, captured before the write happens -- no need
-    to reach back into raw snapshot history for it.
+def _print_live_flag_diff(
+    old_edge: pd.DataFrame | None, client: SheetsClient | None = None, edge_tab: str = "EdgeRaw"
+) -> None:
+    """Called only from `sync --live`/`dfs go`, after `run_sync` --
+    compares EdgeRaw's Flag column from right before this sync
+    (`old_edge`, read before `run_sync` ran) to right after, and prints
+    the difference. `store.load_previous`/`diff_odds`'s per-snapshot
+    pattern isn't reused here because "current" already means "the state
+    this sync just replaced" for `old_edge`, captured before the write
+    happens -- no need to reach back into raw snapshot history for it.
+
+    Phase 6, Part 3: when `client` is given (omitted under `--no-upload`,
+    where nothing should touch the live sheet), also populates the
+    Board's Queue section via `write_queue_section` -- this diff used to
+    only ever reach the terminal.
     """
     if old_edge is None:
         console.print(
@@ -1685,17 +1702,26 @@ def _print_live_flag_diff(old_edge: pd.DataFrame | None) -> None:
     console.print()
     if changes.empty:
         console.print("[dim]No Flag changes since the last sync.[/dim]")
-        return
+    else:
+        table = Table(title="What changed since the last sync")
+        table.add_column("Name")
+        table.add_column("Pos")
+        table.add_column("Team")
+        table.add_column("Old Flag")
+        table.add_column("New Flag")
+        for _, row in changes.iterrows():
+            table.add_row(
+                row["Name"], row["Position"], row["Team"], row["OldFlag"] or "-", row["NewFlag"] or "-"
+            )
+        console.print(table)
 
-    table = Table(title="What changed since the last sync")
-    table.add_column("Name")
-    table.add_column("Pos")
-    table.add_column("Team")
-    table.add_column("Old Flag")
-    table.add_column("New Flag")
-    for _, row in changes.iterrows():
-        table.add_row(row["Name"], row["Position"], row["Team"], row["OldFlag"] or "-", row["NewFlag"] or "-")
-    console.print(table)
+    if client is not None:
+        queue_changes = diff_queue_changes(old_edge, new_edge)
+        try:
+            result = write_queue_section(client, queue_changes, edge_tab)
+            console.print(f"[green]OK[/green] {result}")
+        except SheetsError as e:
+            console.print(f"[yellow]Could not update the Board's Queue section:[/yellow] {e}")
 
 
 @app.command(short_help="Sync, check the sheet, and report what changed -- in one go.")
@@ -1704,6 +1730,7 @@ def go() -> None:
     commands you'd otherwise run back to back every time anyway. Stops at
     the first failure (a failed sync means nothing to check; a failed
     doctor means don't trust what changed until it's fixed)."""
+    cfg = _load_config_or_exit()
     try:
         old_edge = store.load_current("edge")
     except FileNotFoundError:
@@ -1716,7 +1743,11 @@ def go() -> None:
     sheets_doctor(sheet_id=None)
 
     console.print("\n[bold]-- what changed --[/bold]")
-    _print_live_flag_diff(old_edge)
+    _print_live_flag_diff(
+        old_edge,
+        client=SheetsClient(cfg.google_sheets),
+        edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw"),
+    )
 
 
 @app.command()

@@ -81,6 +81,32 @@ from __future__ import annotations
 
 from dfs.derived import CHALK_OWNERSHIP_THRESHOLD, EDGE_COLUMNS, EDGE_DATA_OFFSET, ZONE_LABELS
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
+from dfs.sheet_views import (
+    BOARD_CHALK_HEADER_ROW,
+    BOARD_LEADERS_COLHEADER_ROW,
+    BOARD_LEADERS_FIRST_ROW,
+    BOARD_LEADERS_HEADER_ROW,
+    BOARD_LEADERS_LAST_ROW,
+    BOARD_POOL_COLHEADER_ROW,
+    BOARD_POOL_FIRST_ROW,
+    BOARD_POOL_HEADER_ROW,
+    BOARD_POOL_LAST_ROW,
+    BOARD_PUNT_COLHEADER_ROW,
+    BOARD_PUNT_FIRST_ROW,
+    BOARD_PUNT_HEADER_ROW,
+    BOARD_PUNT_LAST_ROW,
+    BOARD_QUEUE_COLHEADER_ROW,
+    BOARD_QUEUE_HEADER_ROW,
+    BOARD_QUEUE_LAST_ROW,
+    BOARD_SLATE_COLHEADER_ROW,
+    BOARD_SLATE_FIRST_ROW,
+    BOARD_SLATE_HEADER_ROW,
+    BOARD_SLATE_LAST_ROW,
+    BOARD_STACK_COLHEADER_ROW,
+    BOARD_STACK_FIRST_ROW,
+    BOARD_STACK_HEADER_ROW,
+    BOARD_STACK_LAST_ROW,
+)
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
 
@@ -2453,42 +2479,33 @@ _BANNER_FMT = {
     "textFormat": {"bold": True, "foregroundColor": WARN_FG, "fontSize": 10},
 }
 
+
 # Board panels: (first column, last column) for each of the three.
-_BOARD_PANELS = [("A", "D"), ("F", "I"), ("K", "N")]
-
-
 def style_board(client: SheetsClient, tab: str = "Board") -> str:
+    """Phase 6, Part 3 (2026-09-22) rebuild: seven collapsible ROW sections
+    instead of three fixed side-by-side panels. Row positions come from
+    `sheet_views`' own `BOARD_*` constants -- the single source of truth
+    `build_board` writes against, imported here rather than re-counted by
+    hand so the two can't drift the way EdgeRaw's column order once did.
+    Queue and Slate shape are grouped but left expanded (open by default,
+    per spec); everything after is grouped AND collapsed.
+    """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
     client.clear_conditional_formats(tab)
+    client.clear_row_groups(tab)
     client.set_column_widths(
         tab,
         {
-            "A": 160,
-            "B": 74,
-            # Widened from 64 -- Phase 6, Part 1.3: row 2's "Highest total"
-            # label clipped to "Highest tota" live. C doubles as panel 1's
-            # narrower "Lev" body column (rows 7+), which this widening
-            # affects too -- a minor, acceptable tradeoff (Part 3 rebuilds
-            # this whole tab regardless), not worth a second, row-specific
-            # width mechanism this codebase doesn't otherwise have.
-            "C": 110,
-            "D": 72,
-            # Widened from 24 -- Phase 6, Part 1.3: row 2's "Max wind"
-            # label clipped to "Max" live. E also doubles as the visual
-            # spacer between panels 1 and 2 (rows 5+, see the spacer-fill
-            # loop below) -- a wider gap there is a smaller cosmetic cost
-            # than a clipped label, and again temporary (see C above).
-            "E": 75,
-            "F": 160,
-            "G": 74,
-            "H": 82,
-            "I": 72,
-            "J": 24,
-            "K": 160,
-            "L": 74,
-            "M": 62,
-            "N": 96,
+            "A": 170,
+            "B": 90,
+            "C": 90,
+            "D": 170,
+            "E": 90,
+            "F": 90,
+            "G": 90,
+            "H": 90,
+            "I": 130,
         },
     )
     client.format_range(tab, "A1", _TITLE_FMT)
@@ -2497,35 +2514,75 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         client.format_range(tab, label, {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
     for value in ("B2", "D2", "F2", "H2"):
         client.format_range(tab, value, {"textFormat": {"bold": True, "foregroundColor": INK}})
-    client.format_range(tab, "A3:N3", _BANNER_FMT)
+    client.format_range(tab, "A3:I3", _BANNER_FMT)
 
-    # A visible break between the three panels -- narrow columns E and J
-    # were spacers already, but an unstyled spacer reads the same as a
-    # panel column at a glance. A muted grey fill makes them read as a
-    # deliberate rule instead.
-    for spacer in ("E", "J"):
-        client.format_range(tab, f"{spacer}5:{spacer}20", {"backgroundColor": FLAT_BG})
+    def _section(
+        header_row: int, colheader_row: int, last_row: int, *, last_col: str, collapsed: bool
+    ) -> None:
+        client.format_range(tab, f"A{header_row}:{last_col}{header_row}", _PANEL_FMT)
+        client.format_range(tab, f"A{colheader_row}:{last_col}{colheader_row}", _SUBHEAD_FMT)
+        client.group_rows(tab, colheader_row, last_row, collapsed=collapsed)
 
-    for first, last in _BOARD_PANELS:
-        client.format_range(tab, f"{first}5:{last}5", _PANEL_FMT)
-        client.format_range(tab, f"{first}6:{last}6", _SUBHEAD_FMT)
+    _section(
+        BOARD_QUEUE_HEADER_ROW, BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW, last_col="D", collapsed=False
+    )
+    _section(
+        BOARD_SLATE_HEADER_ROW, BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW, last_col="D", collapsed=False
+    )
+    _section(
+        BOARD_LEADERS_HEADER_ROW,
+        BOARD_LEADERS_COLHEADER_ROW,
+        BOARD_LEADERS_LAST_ROW,
+        last_col="I",
+        collapsed=True,
+    )
+    _section(
+        BOARD_PUNT_HEADER_ROW, BOARD_PUNT_COLHEADER_ROW, BOARD_PUNT_LAST_ROW, last_col="D", collapsed=True
+    )
+    _section(
+        BOARD_STACK_HEADER_ROW, BOARD_STACK_COLHEADER_ROW, BOARD_STACK_LAST_ROW, last_col="G", collapsed=True
+    )
+    _section(
+        BOARD_POOL_HEADER_ROW, BOARD_POOL_COLHEADER_ROW, BOARD_POOL_LAST_ROW, last_col="I", collapsed=True
+    )
+    client.format_range(tab, f"A{BOARD_CHALK_HEADER_ROW}:I{BOARD_CHALK_HEADER_ROW}", _PANEL_FMT)
+    client.group_rows(tab, BOARD_CHALK_HEADER_ROW + 1, BOARD_CHALK_HEADER_ROW + 1, collapsed=True)
 
-    # Panel bodies: 12 rows for the two ranked panels, 14 for landmines. Same
-    # FIELD_FORMATS entries the rest of the workbook uses for Pts/CeilVal/
-    # Salary -- this tab's columns are literal (an authored view, not a
-    # discovered header) but the format for a given field must still match.
-    client.format_range(tab, "C7:C18", FIELD_FORMATS["Pts"])
-    client.format_range(tab, "D7:D18", FIELD_FORMATS["CeilVal"])
-    client.format_range(tab, "H7:H18", FIELD_FORMATS["Salary"])
-    client.format_range(tab, "I7:I18", FIELD_FORMATS["CeilVal"])
-    for rng in ("C7:C18", "D7:D18", "I7:I18"):
+    # Slate shape: Total (FIELD_FORMATS' own "Total"), Wind.
+    client.format_range(tab, f"B{BOARD_SLATE_FIRST_ROW}:B{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Total"])
+    client.format_range(tab, f"C{BOARD_SLATE_FIRST_ROW}:C{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Wind"])
+
+    # Per-position leaders: Salary/ValAdj (block 1), Salary/ProjPts (block 2).
+    client.format_range(tab, f"C{BOARD_LEADERS_FIRST_ROW}:C{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["Salary"])
+    client.format_range(tab, f"D{BOARD_LEADERS_FIRST_ROW}:D{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["ValAdj"])
+    client.format_range(tab, f"H{BOARD_LEADERS_FIRST_ROW}:H{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["Salary"])
+    client.format_range(
+        tab, f"I{BOARD_LEADERS_FIRST_ROW}:I{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["ProjPts"]
+    )
+    for rng in (
+        f"D{BOARD_LEADERS_FIRST_ROW}:D{BOARD_LEADERS_LAST_ROW}",
+        f"I{BOARD_LEADERS_FIRST_ROW}:I{BOARD_LEADERS_LAST_ROW}",
+    ):
         client.add_color_scale(tab, rng, min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX)
-    for text, fmt in FLAG_CHIPS.items():
-        client.add_boolean_rule(tab, "N7:N20", condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
-    for text, fmt in AVAIL_CHIPS.items():
-        client.add_boolean_rule(tab, "M7:M20", condition_type="TEXT_EQ", values=[text], fmt=fmt)
-    client.freeze(tab, rows=6)
-    return f"{tab}: styled (3 panels, banner, colour scales)"
+
+    # Punt finder: Salary/ValAdj.
+    client.format_range(tab, f"C{BOARD_PUNT_FIRST_ROW}:C{BOARD_PUNT_LAST_ROW}", FIELD_FORMATS["Salary"])
+    client.format_range(tab, f"D{BOARD_PUNT_FIRST_ROW}:D{BOARD_PUNT_LAST_ROW}", FIELD_FORMATS["ValAdj"])
+
+    # Stack candidates: two Salary columns (QB, WR1's own Salary col is E,
+    # TE1's is G -- see build_board's column layout for this section).
+    for col in ("C", "E", "G"):
+        client.format_range(
+            tab, f"{col}{BOARD_STACK_FIRST_ROW}:{col}{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Salary"]
+        )
+
+    # Pool diagnostics: Min/Max/Avg/Cheapest Salary.
+    for col in ("B", "C", "D", "F"):
+        client.format_range(
+            tab, f"{col}{BOARD_POOL_FIRST_ROW}:{col}{BOARD_POOL_FIRST_ROW + 4}", FIELD_FORMATS["Salary"]
+        )
+    client.freeze(tab, rows=3)
+    return f"{tab}: styled (7 collapsible sections, banner, colour scales)"
 
 
 def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:

@@ -20,9 +20,14 @@ rewrite, so re-running never costs them: Exposure's Target column, and
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+import pandas as pd
+
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, SHOOTOUT_TOTAL_THRESHOLD
+from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheets import SheetsClient, column_letter
+from dfs.sources.edge import POOL_COLUMN, _canonical_id
 from dfs.sources.weather import WEATHER_COLUMNS
+from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
 
 BOARD_TAB = "Board"
 SLATE_TAB = "Slate Grid"
@@ -65,102 +70,139 @@ def _rng(edge_tab: str, name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Board (Direction A)
+# Board (Phase 6, Part 3 + 7.6 rebuild)
 # ---------------------------------------------------------------------------
 
+# One shared source of truth for the Board's row layout -- both
+# `build_board` (what gets written) and `sheet_style.style_board` (how
+# it's grouped/coloured) import these, so the two can't silently drift
+# the way EdgeRaw's own column order once did (CONTRIBUTING.md's Phase 8
+# postmortem). Every section is: one always-visible header row, one
+# column-header row, then a collapsible body -- each row number computed
+# from the one before it, never re-counted by hand.
+BOARD_TITLE_ROW = 1
+BOARD_BANNER_ROW = 2
+BOARD_FRESHNESS_ROW = 3
 
-def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_tab: str) -> str:
-    """A landing tab that answers "who am I looking at this week" without
-    scrolling anything.
+BOARD_QUEUE_HEADER_ROW = 5
+BOARD_QUEUE_COLHEADER_ROW = BOARD_QUEUE_HEADER_ROW + 1
+BOARD_QUEUE_FIRST_ROW = BOARD_QUEUE_COLHEADER_ROW + 1
+BOARD_QUEUE_ROWS = 20
+BOARD_QUEUE_LAST_ROW = BOARD_QUEUE_FIRST_ROW + BOARD_QUEUE_ROWS - 1
 
-    The leverage panel takes EdgeRaw's own row order rather than re-sorting
-    by Leverage itself: `derived.build_edge_frame` already writes EdgeRaw
-    pre-sorted by Leverage descending once ownership is real, or by CeilPct
-    descending while it's still unpublished (Leverage reads blank in that
-    window, not a stand-in number -- see derived.py). Trusting that order
-    here means this panel never needs its own basis-aware sort key. The
-    banner in row 3 still says out loud which case is in effect, since a
-    ceiling ranking and a leverage ranking answer different questions even
-    though they can share a column.
+BOARD_SLATE_HEADER_ROW = BOARD_QUEUE_LAST_ROW + 2
+BOARD_SLATE_COLHEADER_ROW = BOARD_SLATE_HEADER_ROW + 1
+BOARD_SLATE_FIRST_ROW = BOARD_SLATE_COLHEADER_ROW + 1
+BOARD_SLATE_ROWS = 16
+BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
 
-    Phase 6, Part 1.3 (2026-09-17): `BEST CEILING VALUE` used to be one
-    flat `SORT` by `CeilVal` descending across the whole slate --
-    `CeilVal` (points per $1,000) isn't comparable across positions, so
-    it read 11 QBs out of 12 rows on a real slate, not "best value at
-    each position." Rebuilt as five independent per-position blocks
-    (`_best_value_block`), each ranking `CeilVal` within its own position
-    only, vertically stacked -- the same fix class `sheet_style.
-    apply_grouped_color_scales` already applies to colour scales for the
-    identical reason. Every panel here (this one included) is regenerated
-    fresh every call against the CURRENT `EDGE_COLUMNS` layout via `_rng`/
-    `_col` -- this function must be re-run after any EdgeRaw column
-    reorder (Part 2 does one), since a formula string, once written, does
-    NOT follow a later column move the way a live formula reference would
-    -- found live 2026-09-17: the Sept 16 CeilPct/OwnPct reorder shifted
-    every EdgeRaw column after CeilVal/ProjOwn two slots right, and
-    because this tab was never regenerated afterward, `TOP LEVERAGE` was
-    silently reading `ProjOwn` (coincidentally also 0.0 pre-midweek, which
-    is what made it look like a formatting bug) and `LANDMINES` was
-    silently reading `OwnPct`/`Leverage` where it expected `Avail`/`Flag`
-    -- explaining both "renders 0.0" and "is empty" without either being
-    what the original bug report assumed.
+BOARD_LEADERS_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
+BOARD_LEADERS_COLHEADER_ROW = BOARD_LEADERS_HEADER_ROW + 1
+BOARD_LEADERS_FIRST_ROW = BOARD_LEADERS_COLHEADER_ROW + 1
+_POSITIONS = ("QB", "RB", "WR", "TE", "DST")
+_LEADERS_ROWS_PER_POSITION = 2
+BOARD_LEADERS_ROWS = _LEADERS_ROWS_PER_POSITION * len(_POSITIONS)
+BOARD_LEADERS_LAST_ROW = BOARD_LEADERS_FIRST_ROW + BOARD_LEADERS_ROWS - 1
+
+BOARD_PUNT_HEADER_ROW = BOARD_LEADERS_LAST_ROW + 2
+BOARD_PUNT_COLHEADER_ROW = BOARD_PUNT_HEADER_ROW + 1
+BOARD_PUNT_FIRST_ROW = BOARD_PUNT_COLHEADER_ROW + 1
+_PUNT_ROWS_PER_POSITION = 1
+BOARD_PUNT_ROWS = _PUNT_ROWS_PER_POSITION * len(_POSITIONS)
+BOARD_PUNT_LAST_ROW = BOARD_PUNT_FIRST_ROW + BOARD_PUNT_ROWS - 1
+PUNT_SALARY_CEILING = 4000
+
+BOARD_STACK_HEADER_ROW = BOARD_PUNT_LAST_ROW + 2
+BOARD_STACK_COLHEADER_ROW = BOARD_STACK_HEADER_ROW + 1
+BOARD_STACK_FIRST_ROW = BOARD_STACK_COLHEADER_ROW + 1
+_STACK_GAMES = 5
+BOARD_STACK_ROWS = _STACK_GAMES * 2  # two teams per game
+BOARD_STACK_LAST_ROW = BOARD_STACK_FIRST_ROW + BOARD_STACK_ROWS - 1
+
+BOARD_POOL_HEADER_ROW = BOARD_STACK_LAST_ROW + 2
+BOARD_POOL_NOTICE_ROW = BOARD_POOL_HEADER_ROW + 1
+BOARD_POOL_COLHEADER_ROW = BOARD_POOL_NOTICE_ROW + 1
+BOARD_POOL_FIRST_ROW = BOARD_POOL_COLHEADER_ROW + 1
+BOARD_POOL_POSITION_ROWS = len(_POSITIONS)
+BOARD_POOL_SUMMARY_ROW = BOARD_POOL_FIRST_ROW + BOARD_POOL_POSITION_ROWS
+BOARD_POOL_LAST_ROW = BOARD_POOL_SUMMARY_ROW
+
+BOARD_CHALK_HEADER_ROW = BOARD_POOL_LAST_ROW + 2
+BOARD_CHALK_PLACEHOLDER_ROW = BOARD_CHALK_HEADER_ROW + 1
+BOARD_LAST_ROW = BOARD_CHALK_PLACEHOLDER_ROW
+
+
+def _pp_col(name: str) -> str:
+    if name not in PLAYER_POOL_COLUMN_ORDER:
+        raise KeyError(f"{name!r} is not in PLAYER_POOL_COLUMN_ORDER -- cannot build a view referencing it.")
+    return column_letter(PLAYER_POOL_COLUMN_ORDER.index(name))
+
+
+def _pp_rng(pool_tab: str, name: str, start_row: int, end_row: int) -> str:
+    """`Player Pool!$D$3:$D$12` for a named Player Pool column, restricted
+    to one position's own fixed row block (`weekly_reset.
+    PLAYER_POOL_NAME_BLOCKS`) -- Player Pool's header names differ from
+    EdgeRaw's own for the native columns (`DK Sal` not `Salary`, `Pts` not
+    `ProjPts`), so this is a separate lookup from `_rng`/`_col`, not a
+    reuse of them."""
+    letter = _pp_col(name)
+    return f"{_q(pool_tab)}!${letter}${start_row}:${letter}${end_row}"
+
+
+def build_board(
+    client: SheetsClient, *, edge_tab: str, games_tab: str, weather_tab: str, player_pool_tab: str
+) -> str:
+    """Phase 6, Part 3 (2026-09-22): rebuilt from three ranked player
+    panels (a question Sam already answered the moment he ticked his
+    pool -- "it ranks 744 players") into one tab, seven sections, each a
+    collapsible row group (Queue and Slate shape open by default,
+    everything else collapsed). See `docs/PROMPT_PHASE6.md` Part 3 and
+    7.6 for the spec; row positions come from the `BOARD_*` constants
+    above, shared with `sheet_style.style_board`.
+
+    Every EdgeRaw-derived panel is regenerated fresh every call against
+    the CURRENT `EDGE_COLUMNS` layout via `_rng`/`_col` (same contract
+    the pre-rebuild Board already had, and the same reason it must be
+    re-run after any EdgeRaw column reorder -- see CONTRIBUTING.md's
+    Phase 3 changelog entry for what happens when it isn't). Player
+    Pool-derived panels (Pool diagnostics) are the same idea against
+    `sheet_columns.PLAYER_POOL_COLUMN_ORDER` instead, via `_pp_rng`.
+
+    Queue's body (`BOARD_QUEUE_FIRST_ROW..LAST_ROW`) is populated by
+    `write_queue_section`, called from `dfs sync --live`/`dfs go`, NOT by
+    this function -- a Sheets formula cannot see yesterday's values, only
+    a Python diff against the last snapshot can. Read back and restored
+    here before the rewrite (same "typed/live input survives a rebuild"
+    pattern `sheet_views.py`'s own module docstring already documents for
+    Exposure's Target and `LINEUP_COUNT_CELL`), so a routine `dfs setup
+    build-views` re-run (e.g. after an EdgeRaw reorder) doesn't wipe
+    whatever Queue was showing until the next live sync repopulates it.
     """
+    existing_queue = (
+        client.read_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:D{BOARD_QUEUE_LAST_ROW}")
+        if client.tab_exists(BOARD_TAB)
+        else []
+    )
+
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     team = _rng(edge_tab, "Team")
-    lev = _rng(edge_tab, "Leverage")
-    ceilval = _rng(edge_tab, "CeilVal")
+    salary = _rng(edge_tab, "Salary")
+    projpts = _rng(edge_tab, "ProjPts")
+    valadj = _rng(edge_tab, "ValAdj")
     avail = _rng(edge_tab, "Avail")
-    # Part 7.9: "Flags" is every matching condition -- deliberately not the
-    # hidden, top-priority-only "Flag" -- since LANDMINES below needs to
-    # catch a player who is OUT and something else too.
     flag = _rng(edge_tab, "Flags")
     basis = _rng(edge_tab, "OwnStatus")
-    salary = _rng(edge_tab, "Salary")
+    overunder = _rng(edge_tab, "OverUnder")
+    tmrank = _rng(edge_tab, "TmRank")
 
     g = _q(games_tab)
     w = _q(weather_tab)
 
     live = f'{name}<>""'
-    # Flags can hold more than one token space-separated (Fix 2.1 -- e.g.
-    # "WIND LEVERAGE"), so an exact `="OUT"` no longer catches a player who
-    # is OUT and something else too. SEARCH-based substring matching does;
-    # none of the flag vocabulary (OUT/WIND/LINE↑/LINE↓/LEVERAGE/CHALK) is
-    # a substring of another, so this can't misfire.
     not_out = f'NOT(ISNUMBER(SEARCH("OUT",{flag})))'
-    is_wind = f'ISNUMBER(SEARCH("WIND",{flag}))'
-    is_out = f'ISNUMBER(SEARCH("OUT",{flag}))'
 
-    top_leverage = (
-        f"=IFERROR(ARRAY_CONSTRAIN(FILTER("
-        f'{{{name},{pos}&" "&{team},{lev},{ceilval}}},{live},{not_out}),12,4),"")'
-    )
-    # Ranked WITHIN position, not across the whole slate -- see this
-    # function's docstring. 2 rows per position (5 positions = 10 rows) is
-    # a plain vertical count, not a total cut: unlike ARRAY_CONSTRAIN-ing
-    # ONE combined 12-row result (which would still show whichever
-    # position happens to sort first, cutting off the rest), stacking
-    # fixed-size per-position blocks guarantees every position is
-    # represented every time.
-    _BEST_VALUE_ROWS_PER_POSITION = 2
-
-    def _best_value_block(position: str) -> str:
-        is_position = f'{pos}="{position}"'
-        return (
-            f"IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-            f'{{{name},{pos}&" "&{team},{salary},{ceilval}}},{live},{not_out},{is_position}),4,FALSE),'
-            f'{_BEST_VALUE_ROWS_PER_POSITION},4),{{"","","",""}})'
-        )
-
-    best_value = "={" + ";".join(_best_value_block(p) for p in ("QB", "RB", "WR", "TE", "DST")) + "}"
-    landmines = (
-        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-        f'{{{name},{pos}&" "&{team},{avail},{flag}}},{live},'
-        f'({avail}<>"")+({is_wind})+({is_out})),'
-        f'FILTER({salary},{live},({avail}<>"")+({is_wind})+({is_out})),'
-        f'FALSE),14,4),"")'
-    )
-
+    # ---- Summary banner (rows 2-3, unchanged from the pre-rebuild Board) --
     games = f'=IFERROR(COUNTA(FILTER({g}!$A$2:$A$40,{g}!$A$2:$A$40<>"")),0)'
     top_total = (
         f'=IFERROR(INDEX(SORT(FILTER({{{g}!$B$2:$B$40&" / "&{g}!$C$2:$C$40,{g}!$M$2:$M$40}},'
@@ -178,34 +220,258 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
         f'"Leverage is running on real ownership.")'
     )
 
-    rows = [
-        ["THIS WEEK'S BOARD"],
+    # ---- Section 3: per-position leaders (ValAdj / ProjPts, 7.6) --------
+    def _ranked_position_block(
+        position: str, *, sort_metric: str, rows_per_position: int, extra: str = ""
+    ) -> str:
+        # Ranked WITHIN position, not across the whole slate -- this is
+        # the actual fix for the 11-of-12-QBs bug (a flat sort by a
+        # salary ratio isn't comparable across positions). Stacking a
+        # FIXED number of rows per position, rather than cutting one
+        # combined ranking to a total row count, guarantees every
+        # position is represented every time instead of whichever one
+        # happens to sort first crowding out the rest.
+        is_position = f'{pos}="{position}"'
+        filters = f"{live},{not_out},{is_position}" + (f",{extra}" if extra else "")
+        return (
+            f"IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
+            f'{{{name},{pos}&" "&{team},{salary},{sort_metric}}},{filters}),4,FALSE),'
+            f'{rows_per_position},4),{{"","","",""}})'
+        )
+
+    best_valadj = (
+        "={"
+        + ";".join(
+            _ranked_position_block(p, sort_metric=valadj, rows_per_position=_LEADERS_ROWS_PER_POSITION)
+            for p in _POSITIONS
+        )
+        + "}"
+    )
+    highest_proj = (
+        "={"
+        + ";".join(
+            _ranked_position_block(p, sort_metric=projpts, rows_per_position=_LEADERS_ROWS_PER_POSITION)
+            for p in _POSITIONS
+        )
+        + "}"
+    )
+
+    # ---- Section 4: punt finder ------------------------------------------
+    punt_finder = (
+        "={"
+        + ";".join(
+            _ranked_position_block(
+                p,
+                sort_metric=valadj,
+                rows_per_position=_PUNT_ROWS_PER_POSITION,
+                extra=f"{salary}<{PUNT_SALARY_CEILING}",
+            )
+            for p in _POSITIONS
+        )
+        + "}"
+    )
+
+    # ---- Section 5: stack candidates (replaces the old leverage panel, 7.6) --
+    # Two teams sharing a game share the identical OverUnder value, so
+    # sorting individual teams by it is enough to keep them adjacent --
+    # no need to join back through GamesRaw for a game grouping.
+    team_list = (
+        f"=IFERROR(ARRAY_CONSTRAIN(SORT(UNIQUE(FILTER({{{team},{overunder}}},{live})),2,FALSE),"
+        f'{BOARD_STACK_ROWS},1),"")'
+    )
+
+    def _stack_row_formulas(row: int) -> list[str]:
+        team_cell = f"$A{row}"
+        qb_filter = f'({team}={team_cell})*({pos}="QB")'
+        wr1_filter = f'({team}={team_cell})*({pos}="WR")*({tmrank}=1)'
+        te1_filter = f'({team}={team_cell})*({pos}="TE")*({tmrank}=1)'
+        return [
+            f'=IFERROR(INDEX(FILTER({name},{qb_filter}),1),"")',
+            f'=IFERROR(INDEX(FILTER({salary},{qb_filter}),1),"")',
+            f'=IFERROR(INDEX(FILTER({name},{wr1_filter}),1),"")',
+            f'=IFERROR(INDEX(FILTER({salary},{wr1_filter}),1),"")',
+            f'=IFERROR(INDEX(FILTER({name},{te1_filter}),1),"")',
+            f'=IFERROR(INDEX(FILTER({salary},{te1_filter}),1),"")',
+        ]
+
+    # ---- Section 6: pool diagnostics (reads Player Pool, not EdgeRaw) ----
+    pp_all_names = (
+        "{" + ";".join(_pp_rng(player_pool_tab, "Name", s, e) for s, e in PLAYER_POOL_NAME_BLOCKS) + "}"
+    )
+    pool_empty_notice = f'=IF(COUNTA({pp_all_names})=0,"Tick players into your pool to see diagnostics.","")'
+
+    def _pool_diagnostics_row(position: str, start: int, end: int) -> list[str]:
+        pp_name = _pp_rng(player_pool_tab, "Name", start, end)
+        pp_salary = _pp_rng(player_pool_tab, "DK Sal", start, end)
+        pp_flags = _pp_rng(player_pool_tab, "Flags", start, end)
+        pooled = f'{pp_name}<>""'
+        cheapest = f"SORT(FILTER({{{pp_name},{pp_salary}}},{pooled}),2,TRUE)"
+        return [
+            position,
+            f'=IFERROR(MIN(FILTER({pp_salary},{pooled})),"")',
+            f'=IFERROR(MAX(FILTER({pp_salary},{pooled})),"")',
+            f'=IFERROR(AVERAGE(FILTER({pp_salary},{pooled})),"")',
+            f'=IFERROR(INDEX({cheapest},1,1),"")',
+            f'=IFERROR(INDEX({cheapest},1,2),"")',
+            f'=COUNTIF({pp_flags},"*CHALK*")',
+            f'=COUNTIF({pp_flags},"*LEVERAGE*")',
+            f'=IF(COUNTIF(FILTER({pp_salary},{pooled}),"<{PUNT_SALARY_CEILING}")=0,'
+            f'"No {position} under ${PUNT_SALARY_CEILING:,}","")',
+        ]
+
+    pp_all_gameids = (
+        "{" + ";".join(_pp_rng(player_pool_tab, "GameID", s, e) for s, e in PLAYER_POOL_NAME_BLOCKS) + "}"
+    )
+    _pp_pooled_gameids = f'FILTER({pp_all_gameids},{pp_all_names}<>"")'
+    pool_concentration = (
+        f'=IFERROR("Most pooled players sharing one game: "&'
+        f'MAX(COUNTIF({_pp_pooled_gameids},{_pp_pooled_gameids})),"")'
+    )
+
+    # ---- Assemble ---------------------------------------------------------
+    rows: list[list[str]] = [[] for _ in range(BOARD_LAST_ROW)]
+
+    def _set(row: int, values: list[str], start_col: int = 0) -> None:
+        r = rows[row - 1]
+        needed = start_col + len(values)
+        if len(r) < needed:
+            r.extend([""] * (needed - len(r)))
+        for i, v in enumerate(values):
+            r[start_col + i] = v
+
+    _set(BOARD_TITLE_ROW, ["THIS WEEK'S BOARD"])
+    _set(
+        BOARD_BANNER_ROW,
         ["Games", games, "Highest total", top_total, "Max wind", max_wind, "Injuries", injuries],
-        [freshness_banner],
-        [],
-        ["TOP LEVERAGE", "", "", "", "", "BEST CEILING VALUE", "", "", "", "", "LANDMINES"],
-        # fmt: off
+    )
+    _set(BOARD_FRESHNESS_ROW, [freshness_banner])
+
+    _set(BOARD_QUEUE_HEADER_ROW, ["QUEUE  —  changes since the last sync, pooled players only"])
+    _set(BOARD_QUEUE_COLHEADER_ROW, ["Player", "Pos", "Team", "What changed"])
+    for i, existing_row in enumerate(existing_queue):
+        _set(BOARD_QUEUE_FIRST_ROW + i, list(existing_row))
+
+    _set(BOARD_SLATE_HEADER_ROW, ["SLATE SHAPE  —  where do I want exposure this week"])
+    _set(BOARD_SLATE_COLHEADER_ROW, ["Matchup", "Total", "Wind", "Shootout?"])
+    wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
+    wind_idx = WEATHER_COLUMNS.index("Wind") + 1
+    for i in range(BOARD_SLATE_ROWS):
+        r = BOARD_SLATE_FIRST_ROW + i
+        gr = 2 + i  # GamesRaw's own data rows start at 2
+        guard = f'IF({g}!$A{gr}="","",'
+        _set(
+            r,
+            [
+                f'={guard}{g}!$B{gr}&" @ "&{g}!$C{gr})',
+                f"={guard}{g}!$M{gr})",
+                f'={guard}IFERROR(VLOOKUP({g}!$A{gr},{w}!$A:${wind_end_col},{wind_idx},FALSE),""))',
+                f'={guard}IF({g}!$M{gr}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
+            ],
+        )
+
+    _set(BOARD_LEADERS_HEADER_ROW, ["PER-POSITION LEADERS  —  ranked within position, never across it"])
+    _set(
+        BOARD_LEADERS_COLHEADER_ROW,
+        ["Player", "Pos", "Salary", "ValAdj", "", "Player", "Pos", "Salary", "ProjPts"],
+    )
+    _set(BOARD_LEADERS_FIRST_ROW, [best_valadj], start_col=0)
+    _set(BOARD_LEADERS_FIRST_ROW, [highest_proj], start_col=5)
+
+    _set(
+        BOARD_PUNT_HEADER_ROW, [f"PUNT FINDER  —  best play under ${PUNT_SALARY_CEILING:,} at each position"]
+    )
+    _set(BOARD_PUNT_COLHEADER_ROW, ["Player", "Pos", "Salary", "ValAdj"])
+    _set(BOARD_PUNT_FIRST_ROW, [punt_finder])
+
+    _set(BOARD_STACK_HEADER_ROW, ["STACK CANDIDATES  —  QB + top pass-catchers, highest-total games first"])
+    _set(BOARD_STACK_COLHEADER_ROW, ["Team", "QB", "Salary", "WR1", "Salary", "TE1", "Salary"])
+    _set(BOARD_STACK_FIRST_ROW, [team_list])
+    for i in range(BOARD_STACK_ROWS):
+        r = BOARD_STACK_FIRST_ROW + i
+        _set(r, _stack_row_formulas(r), start_col=1)
+
+    _set(BOARD_POOL_HEADER_ROW, ["POOL DIAGNOSTICS  —  reads your pool, not the slate"])
+    _set(BOARD_POOL_NOTICE_ROW, [pool_empty_notice])
+    _set(
+        BOARD_POOL_COLHEADER_ROW,
+        ["Pos", "Min Sal", "Max Sal", "Avg Sal", "Cheapest", "Cheapest Sal", "Chalk#", "Leverage#", "Gap"],
+    )
+    for i, (position, (start, end)) in enumerate(zip(_POSITIONS, PLAYER_POOL_NAME_BLOCKS, strict=True)):
+        _set(BOARD_POOL_FIRST_ROW + i, _pool_diagnostics_row(position, start, end))
+    _set(BOARD_POOL_SUMMARY_ROW, [pool_concentration])
+
+    _set(BOARD_CHALK_HEADER_ROW, ["CHALK MAP  —  deferred"])
+    _set(
+        BOARD_CHALK_PLACEHOLDER_ROW,
         [
-            "Player",
-            "Pos",
-            "Lev",
-            "CeilVal",
-            "",
-            "Player",
-            "Pos",
-            "Salary",
-            "CeilVal",
-            "",
-            "Player",
-            "Pos",
-            "Avail",
-            "Flags",
+            "Where the field concentrates -- only meaningful once ownership publishes "
+            "(TFFB's ProjOwn reads 0 pre-midweek). See docs/PROMPT_DATA.md's Move 2 / "
+            "7.8's actual-ownership logging."
         ],
-        [top_leverage, "", "", "", "", best_value, "", "", "", "", landmines],
-        # fmt: on
-    ]
+    )
+
     client.write_tab(BOARD_TAB, rows)
-    return f"{BOARD_TAB}: built (3 ranked panels + slate summary, all read-only)"
+    return (
+        f"{BOARD_TAB}: built (Queue, Slate shape, Per-position leaders, Punt finder, "
+        "Stack candidates, Pool diagnostics, Chalk map placeholder)"
+    )
+
+
+def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: str) -> str:
+    """Populates Board's Queue body (`BOARD_QUEUE_FIRST_ROW..LAST_ROW`)
+    from `live_diff.diff_queue_changes`' output, filtered to players
+    currently ticked into the pool. Called from `dfs sync --live`/`dfs
+    go` right after the diff is computed -- NOT from `build_board`, since
+    a Sheets formula can't see yesterday's values, only this Python diff
+    can. `changes` is expected to carry `Id`/`Name`/`Position`/`Team`/
+    `Reason` columns, `diff_queue_changes`'s own output shape.
+
+    The pool tick itself lives only on the live sheet, never in the local
+    diff dataframe (`sources/edge.py`'s `fetch()` never includes it --
+    see that module's `pre_upload`/`post_upload` docstrings for why), so
+    it's read here the same way `pre_upload` reads it: by Id, off
+    EdgeRaw's own current header and Pool column, never assumed from
+    `EDGE_DATA_OFFSET`'s TARGET layout (this can run between an EdgeRaw
+    reorder's `write_tab` and the next `dfs setup polish`, same hazard
+    `pre_upload`'s own docstring documents at length).
+    """
+    if not client.tab_exists(BOARD_TAB):
+        return f"{BOARD_TAB}: not present -- skipped"
+    if not client.tab_exists(edge_tab):
+        return f"{BOARD_TAB}: Queue skipped -- {edge_tab} not present"
+
+    header_rows = client.read_range(edge_tab, "A1:1")
+    header = header_rows[0] if header_rows else []
+    if "Id" not in header:
+        return f"{BOARD_TAB}: Queue skipped -- {edge_tab} has no Id column yet"
+    id_col = column_letter(header.index("Id"))
+    ids = client.read_range_unformatted(edge_tab, f"{id_col}2:{id_col}1000")
+    ticks = client.read_range(edge_tab, f"{POOL_COLUMN}2:{POOL_COLUMN}1000")
+    pooled_ids = {
+        _canonical_id(ids[i][0])
+        for i in range(len(ids))
+        if ids[i] and ids[i][0] != "" and i < len(ticks) and ticks[i] and ticks[i][0]
+    }
+
+    if changes.empty:
+        pooled_changes = changes
+    else:
+        pooled_changes = changes[changes["Id"].map(_canonical_id).isin(pooled_ids)]
+
+    body = [
+        [row["Name"], row["Position"], row["Team"], row["Reason"]]
+        for _, row in pooled_changes.head(BOARD_QUEUE_ROWS).iterrows()
+    ]
+    overflow = len(pooled_changes) - len(body)
+    if body and overflow > 0:
+        body[-1][3] = f"{body[-1][3]} (+{overflow} more not shown)"
+    if not body:
+        body = [["No changes since the last sync for pooled players.", "", "", ""]]
+    while len(body) < BOARD_QUEUE_ROWS:
+        body.append(["", "", "", ""])
+
+    client.update_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:D{BOARD_QUEUE_LAST_ROW}", body)
+    return f"{BOARD_TAB}: Queue updated ({len(pooled_changes)} pooled change(s))"
 
 
 # ---------------------------------------------------------------------------
