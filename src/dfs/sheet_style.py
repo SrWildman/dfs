@@ -874,10 +874,10 @@ POOL_TYPE_CHIPS = {
 }
 
 # Venue (Fix 2.1): `H`/`R` text, categorical only -- home/road is
-# provenance the same way Source is, not a quality to colour-scale (a
-# hand-applied scale on this column, found live, was exactly the bug this
-# replaces). Two distinct neutral tones so the two states still read at a
-# glance, neither tinted as good/bad.
+# provenance, not a quality to colour-scale (a hand-applied scale on this
+# column, found live, was exactly the bug this replaces). Two distinct
+# neutral tones so the two states still read at a glance, neither tinted
+# as good/bad.
 VENUE_CHIPS = {
     "H": _chip(_rgb("#E5EEF7"), _rgb("#2E5A82")),
     "R": _chip(_rgb("#F0EAE0"), _rgb("#8A6D3B")),
