@@ -33,7 +33,12 @@ from __future__ import annotations
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheet_style import INPUT_BG
 from dfs.sheets import SheetsClient, column_letter
-from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW
+from dfs.weekly_reset import (
+    PLAYER_POOL_ADDED_NAMES_HEADER,
+    PLAYER_POOL_ADDED_NAMES_ROWS,
+    PLAYER_POOL_CONTROL_ROW,
+    PLAYER_POOL_HEADER_ROW,
+)
 
 _LABEL_CELL = f"A{PLAYER_POOL_CONTROL_ROW}"
 _INPUT_CELL = f"B{PLAYER_POOL_CONTROL_ROW}"
@@ -102,3 +107,64 @@ def ensure_pool_control_row(client: SheetsClient, player_pool_tab: str, edge_tab
 
     origin = "refresh" if migrated else "inserted"
     return f"{player_pool_tab}: add-a-player control row ({origin}), input at {_INPUT_CELL}"
+
+
+def drain_control_cell_into_added_names(client: SheetsClient, player_pool_tab: str) -> str:
+    """A6 (2026-09-22): "Adding a player in row one of the pool works, but
+    only once. If you try and add a second in the same spot, the first is
+    deleted." The control cell (`_INPUT_CELL`) holds one typed name --
+    `sheet_pool_formulas._union_array` used to read only that cell, so a
+    second typed name replaced the first in every formula that depended
+    on it. Fix: called from `dfs sync`, this reads the control cell and,
+    if it holds a name, appends it to the next free row of the `Added`
+    accumulator column (see `weekly_reset.PLAYER_POOL_ADDED_NAMES_HEADER`)
+    and blanks the control cell -- so the NEXT typed name has an empty
+    cell to land in, and the previous one keeps showing up (via
+    `_union_array`'s third source) instead of vanishing.
+
+    A name already present in the accumulator (the control cell wasn't
+    re-cleared for some reason, or `dfs sync` ran twice back to back) is
+    not appended a second time -- the control cell is still cleared, but
+    nothing new is written; `_union_array`'s `UNIQUE` would have
+    deduplicated a re-add anyway, so this is a courtesy against the list
+    filling up with repeats, not a correctness requirement. A full
+    accumulator (all `PLAYER_POOL_ADDED_NAMES_ROWS` rows already used)
+    leaves the control cell UNTOUCHED (not cleared) so the pending name
+    isn't silently lost -- same "don't destroy real state" instinct as
+    everywhere else in this codebase; the caller's own message says so.
+    """
+    control_value = client.read_range(player_pool_tab, _INPUT_CELL)
+    name = control_value[0][0].strip() if control_value and control_value[0] else ""
+    if not name:
+        return f"{player_pool_tab}: no pending add-a-player name"
+
+    header_row_values = client.read_range(
+        player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
+    )
+    header = header_row_values[0] if header_row_values else []
+    if PLAYER_POOL_ADDED_NAMES_HEADER not in header:
+        raise ValueError(
+            f"{player_pool_tab!r} header is missing {PLAYER_POOL_ADDED_NAMES_HEADER!r} -- "
+            "run `dfs setup reorder-columns` first"
+        )
+    added_col = column_letter(header.index(PLAYER_POOL_ADDED_NAMES_HEADER))
+    first_row = PLAYER_POOL_HEADER_ROW + 1
+    last_row = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
+
+    existing_rows = client.read_range(player_pool_tab, f"{added_col}{first_row}:{added_col}{last_row}")
+    existing_names = [row[0].strip() for row in existing_rows if row and row[0] and row[0].strip()]
+
+    if name in existing_names:
+        client.clear_ranges(player_pool_tab, [_INPUT_CELL])
+        return f"{player_pool_tab}: {name!r} already on the add-a-player list -- control cell cleared"
+
+    next_row = first_row + len(existing_names)
+    if next_row > last_row:
+        return (
+            f"{player_pool_tab}: add-a-player list is full ({PLAYER_POOL_ADDED_NAMES_ROWS} slots) -- "
+            f"{name!r} NOT added, control cell left as-is"
+        )
+
+    client.update_range(player_pool_tab, f"{added_col}{next_row}", [[name]])
+    client.clear_ranges(player_pool_tab, [_INPUT_CELL])
+    return f"{player_pool_tab}: {name!r} added to the pool ({added_col}{next_row})"

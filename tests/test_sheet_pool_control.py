@@ -1,9 +1,20 @@
+import pytest
+
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
-from dfs.sheet_pool_control import ensure_pool_control_row
+from dfs.sheet_pool_control import drain_control_cell_into_added_names, ensure_pool_control_row
 from dfs.sheets import column_letter
-from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW
+from dfs.weekly_reset import (
+    PLAYER_POOL_ADDED_NAMES_HEADER,
+    PLAYER_POOL_ADDED_NAMES_ROWS,
+    PLAYER_POOL_CONTROL_ROW,
+    PLAYER_POOL_HEADER_ROW,
+)
 
 _EDGE_NAME_COL = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+_INPUT_CELL = f"B{PLAYER_POOL_CONTROL_ROW}"
+_ADDED_COL = "Z"
+_ADDED_FIRST_ROW = PLAYER_POOL_HEADER_ROW + 1
+_ADDED_LAST_ROW = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
 
 
 class SpyClient:
@@ -111,3 +122,78 @@ def test_reset_range_never_shrinks_below_the_original_a_to_z_width():
 
     control_row_range = f"A{PLAYER_POOL_CONTROL_ROW}:Z{PLAYER_POOL_CONTROL_ROW}"
     assert any(a1 == control_row_range for a1, _fmt in client.format_calls)
+
+
+class DrainSpyClient:
+    """Fake for `drain_control_cell_into_added_names` -- "Added" always
+    sits at column Z here (any fixed position works, since the function
+    finds it by header name)."""
+
+    def __init__(self, control_value: str = "", existing_added: list[str] | None = None, header=None):
+        self._control_value = control_value
+        self._existing_added = existing_added or []
+        self._header = (
+            header if header is not None else ["Name"] + [""] * 24 + [PLAYER_POOL_ADDED_NAMES_HEADER]
+        )
+        self.update_calls: list[tuple[str, list[list]]] = []
+        self.clear_calls: list[list[str]] = []
+
+    def read_range(self, tab_name: str, a1_range: str):
+        if a1_range == _INPUT_CELL:
+            return [[self._control_value]] if self._control_value else []
+        if a1_range == f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}":
+            return [self._header]
+        if a1_range == f"{_ADDED_COL}{_ADDED_FIRST_ROW}:{_ADDED_COL}{_ADDED_LAST_ROW}":
+            return [[name] for name in self._existing_added]
+        raise AssertionError(f"unexpected read_range: {a1_range!r}")
+
+    def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
+        self.update_calls.append((a1_range, rows))
+
+    def clear_ranges(self, tab_name: str, a1_ranges: list[str]) -> None:
+        self.clear_calls.append(list(a1_ranges))
+
+
+def test_drain_does_nothing_when_control_cell_is_blank():
+    client = DrainSpyClient(control_value="")
+    result = drain_control_cell_into_added_names(client, "Player Pool")
+
+    assert client.update_calls == []
+    assert client.clear_calls == []
+    assert "no pending" in result
+
+
+def test_drain_appends_a_typed_name_and_clears_the_control_cell():
+    client = DrainSpyClient(control_value="Cooper Kupp", existing_added=["Existing Player"])
+    result = drain_control_cell_into_added_names(client, "Player Pool")
+
+    # First free row is right after the one existing name.
+    assert client.update_calls == [(f"{_ADDED_COL}{_ADDED_FIRST_ROW + 1}", [["Cooper Kupp"]])]
+    assert client.clear_calls == [[_INPUT_CELL]]
+    assert "Cooper Kupp" in result
+
+
+def test_drain_skips_re_adding_a_name_already_on_the_list_but_still_clears():
+    client = DrainSpyClient(control_value="Cooper Kupp", existing_added=["Cooper Kupp"])
+    result = drain_control_cell_into_added_names(client, "Player Pool")
+
+    assert client.update_calls == []
+    assert client.clear_calls == [[_INPUT_CELL]]
+    assert "already" in result
+
+
+def test_drain_leaves_a_full_list_and_the_control_cell_untouched():
+    full = [f"Player {i}" for i in range(PLAYER_POOL_ADDED_NAMES_ROWS)]
+    client = DrainSpyClient(control_value="One More Guy", existing_added=full)
+    result = drain_control_cell_into_added_names(client, "Player Pool")
+
+    assert client.update_calls == []
+    assert client.clear_calls == []  # control cell left as-is, name not lost
+    assert "full" in result
+    assert "NOT added" in result
+
+
+def test_drain_raises_when_added_column_is_missing():
+    client = DrainSpyClient(control_value="Cooper Kupp", header=["Name", "Overflow", "Pool"])
+    with pytest.raises(ValueError, match="Added"):
+        drain_control_cell_into_added_names(client, "Player Pool")

@@ -57,6 +57,13 @@ letters, so a hardcoded version of this module would silently clobber
 them the same way `sheet_style.polish_guardrails` once did. See
 CONTRIBUTING.md's Phase 3 changelog entry.
 
+**Week 3 feedback (A4) update, 2026-09-22:** the `Source` column above is
+removed entirely -- Sam: "No need for source column. In the pool."
+`_source_formula` and its write-loop entry are gone along with
+`PLAYER_POOL_COLUMN_ORDER`'s `"Source"` entry, `sheet_style.SOURCE_CHIPS`,
+and its width/chip-column registrations; nothing else in the codebase
+read it (confirmed by grep before removing).
+
 **Fix 2.10 update:** each block now sorts by Salary descending, not
 alphabetically by name -- see `_union_array`'s own docstring for how
 Salary rides alongside Name through both sources so `SORT` has something
@@ -89,11 +96,16 @@ from __future__ import annotations
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_TYPE_SORT_ORDER
-from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import (
+    PLAYER_POOL_ADDED_NAMES_HEADER,
+    PLAYER_POOL_ADDED_NAMES_ROWS,
+    PLAYER_POOL_CONTROL_ROW,
+    PLAYER_POOL_HEADER_ROW,
+    PLAYER_POOL_NAME_BLOCKS,
+)
 
 _NAME_COLUMN = "A"
 _POSITION_COLUMN = "B"
-_SOURCE_HEADER = "Source"
 _OVERFLOW_HEADER = "Overflow"
 # Fix 2.11: surfaces EdgeRaw's own Pool value (blank/Cash/GPP/Both) on
 # Player Pool too.
@@ -122,8 +134,50 @@ _TAG_RANK_ARRAY = "{" + ",".join(f'"{tag}"' for tag in POOL_TYPE_SORT_ORDER) + "
 _UNKNOWN_TAG_RANK = len(POOL_TYPE_SORT_ORDER) + 1
 
 
-def _union_array(edge_tab: str, position: str) -> str:
-    """Both name sources for `position`, stacked as one Sheets array
+def _added_names_filter(edge_tab: str, added_range: str, position: str) -> str:
+    """A6 (2026-09-22): the (Name, Salary, TagRank) triple for every name
+    accumulated in the add-a-player list (`added_range`, a same-tab range
+    -- see `weekly_reset.PLAYER_POOL_ADDED_NAMES_HEADER`) that matches
+    `position`. Same shape as `_union_array`'s other two members, and the
+    same reasoning as `control_names`/`control_position` for why a typed
+    name's Salary/Position/Pool tag are all looked up against EdgeRaw by
+    Name rather than carried on the accumulator row itself.
+
+    Generalizes `control_filter`'s single-cell lookups to a whole range --
+    confirmed empirically on the template's Scratch tab before shipping
+    this (same discipline this module's own docstring used for the
+    tag-rank MATCH): a plain `VLOOKUP(range, ...)` DOES broadcast
+    elementwise the same way `MATCH` does, but only when it's itself one
+    of `FILTER`'s own array arguments, same restriction. Unlike the
+    control cell's `INDEX(EdgeRaw!$Pool,MATCH(cell,EdgeRaw!$Name,0))`
+    (scalar-only -- `INDEX`/`MATCH` do NOT broadcast, confirmed by the
+    same live test, since `MATCH` there sits inside `INDEX`, not directly
+    inside `FILTER`), the Pool tag here is read via `VLOOKUP` against a
+    virtual `{Name, Pool}` array (`{edge_tab!$Name:$Name,edge_tab!$Pool:
+    $Pool}`) -- reordering the two columns in-formula is what lets
+    `VLOOKUP` look "leftward" for Pool while still broadcasting."""
+    position_lookup = (
+        f"IFERROR(VLOOKUP({added_range},{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_POSITION_COL},"
+        f'{_EDGE_POSITION_VLOOKUP_INDEX},FALSE),"")'
+    )
+    salary_lookup = (
+        f"IFERROR(VLOOKUP({added_range},{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_SALARY_COL},"
+        f"{_EDGE_SALARY_VLOOKUP_INDEX},FALSE),0)"
+    )
+    pool_tag_lookup = (
+        f"IFERROR(VLOOKUP({added_range},"
+        f"{{{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_NAME_COL},{edge_tab}!${POOL_COLUMN}:${POOL_COLUMN}}},"
+        f'2,FALSE),"")'
+    )
+    tag_rank = f"IFERROR(MATCH({pool_tag_lookup},{_TAG_RANK_ARRAY},0),{_UNKNOWN_TAG_RANK})"
+    return (
+        f"FILTER({{{added_range},{salary_lookup},{tag_rank}}},"
+        f'{added_range}<>"",{position_lookup}="{position}")'
+    )
+
+
+def _union_array(edge_tab: str, position: str, added_range: str) -> str:
+    """All three name sources for `position`, stacked as one Sheets array
     literal, each row a (Name, Salary, TagRank) triple -- shared by the
     Name formula and the overflow count so the two can never disagree
     about what's actually in the pool. Salary/TagRank ride along so
@@ -135,7 +189,14 @@ def _union_array(edge_tab: str, position: str) -> str:
     because the cell's own dropdown only offers names that are already
     in EdgeRaw, and IFERROR degrades a typed name EdgeRaw doesn't
     currently carry (a bye week, a stale add) to "doesn't match this
-    position" / "sorts last" rather than breaking the whole block."""
+    position" / "sorts last" rather than breaking the whole block.
+
+    A6 (2026-09-22): `added_range` (the accumulated add-a-player list --
+    see `_added_names_filter`) is a THIRD source, alongside EdgeRaw's own
+    ticks and the control cell. The control cell is kept even though
+    `dfs sync` drains it into `added_range` right after, so a name shows
+    up here the INSTANT it's typed (before any sync has run), not just
+    after."""
     # Fix 2.11: Pool is a blank/Cash/GPP/Both dropdown now, not a TRUE/
     # FALSE checkbox -- any non-blank value means "in the pool" here.
     # Every row this FILTER keeps already satisfies Pool<>"", so its own
@@ -173,32 +234,18 @@ def _union_array(edge_tab: str, position: str) -> str:
         f"{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_SALARY_COL},{_EDGE_SALARY_VLOOKUP_INDEX},FALSE),0),"
         f"{control_tag_rank}}}"
     )
-    return f"{{{edge_filter};{control_filter}}}"
+    added_filter = _added_names_filter(edge_tab, added_range, position)
+    return f"{{{edge_filter};{control_filter};{added_filter}}}"
 
 
-def _name_formula(edge_tab: str, position: str, cap: int) -> str:
+def _name_formula(edge_tab: str, position: str, cap: int, added_range: str) -> str:
     # Fix 2.10 + Part 7.10: sorted by TagRank (column 3 of the union
     # array) ascending first -- Both, then Cash, then GPP -- then Salary
     # (column 2) descending within each tag group. ARRAY_CONSTRAIN(...,
     # cap,1) both applies the position cap AND drops every helper column
     # back out -- Player Pool's Name column only ever shows the name.
-    union = _union_array(edge_tab, position)
+    union = _union_array(edge_tab, position, added_range)
     return f'=IFERROR(ARRAY_CONSTRAIN(SORT(UNIQUE({union}),3,TRUE,2,FALSE),{cap},1),"")'
-
-
-def _source_formula(edge_tab: str, row: int) -> str:
-    """EdgeRaw wins the label if a player somehow ends up both ticked and
-    typed (matching `_name_formula`'s own UNIQUE, which produces one row
-    either way, not two) -- EdgeRaw's Pool dropdown is the primary
-    mechanism, the add-a-player control cell the secondary one. Any
-    non-blank Pool value counts (Fix 2.11 -- blank/Cash/GPP/Both, not a
-    TRUE/FALSE checkbox)."""
-    name_cell = f"${_NAME_COLUMN}{row}"
-    edge_check = (
-        f'COUNTIFS({edge_tab}!${POOL_COLUMN}:${POOL_COLUMN},"<>",'
-        f"{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_NAME_COL},{name_cell})"
-    )
-    return f'=IF({name_cell}="","",IF({edge_check}>0,"EdgeRaw",IF({name_cell}={_CONTROL_CELL},"Added","")))'
 
 
 def _pool_type_formula(edge_tab: str, row: int) -> str:
@@ -211,7 +258,7 @@ def _pool_type_formula(edge_tab: str, row: int) -> str:
     return f'=IF({name_cell}="","",IFERROR(INDEX({edge_tab}!${POOL_COLUMN}:${POOL_COLUMN},{match}),""))'
 
 
-def _overflow_formula(edge_tab: str, position: str, cap: int) -> str:
+def _overflow_formula(edge_tab: str, position: str, cap: int, added_range: str) -> str:
     # COUNTA(INDEX(UNIQUE(...),0,1)), not two separate COUNTIFS added
     # together -- a player both ticked in EdgeRaw AND typed into the
     # add-a-player cell must count once, not twice, or this would warn
@@ -223,7 +270,7 @@ def _overflow_formula(edge_tab: str, position: str, cap: int) -> str:
     # is always Name. IFERROR guards the case where FILTER finds nothing
     # at all for this position (an empty pool), which UNIQUE/COUNTA
     # would otherwise propagate as an error instead of 0.
-    count = f"IFERROR(COUNTA(INDEX(UNIQUE({_union_array(edge_tab, position)}),0,1)),0)"
+    count = f"IFERROR(COUNTA(INDEX(UNIQUE({_union_array(edge_tab, position, added_range)}),0,1)),0)"
     return f'=IF({count}>{cap},{cap}&" {position} slots, "&{count}&" ticked -- some are hidden","")'
 
 
@@ -235,12 +282,13 @@ def write_pool_formulas(
     name_blocks: list[tuple[int, int]] = PLAYER_POOL_NAME_BLOCKS,
     header_row: int = PLAYER_POOL_HEADER_ROW,
 ) -> list[str]:
-    """Write the SORT/FILTER/ARRAY_CONSTRAIN Name formula, a per-row
-    Source label, and an overflow warning into each block, keyed off
-    EdgeRaw's Pool tick column. `Source`/`Overflow`/`Pool`'s columns are
-    found by header name (never hardcoded -- see the module docstring),
-    so this only ever touches column A (Name) and those three, never the
-    EdgeRaw-linked columns `link_edge_columns` owns.
+    """Write the SORT/FILTER/ARRAY_CONSTRAIN Name formula and an overflow
+    warning into each block, keyed off EdgeRaw's Pool tick column, the
+    add-a-player control cell, and the accumulated add-a-player list
+    (A6). `Overflow`/`Pool`/`Added`'s columns are found by header name
+    (never hardcoded -- see the module docstring), so this only ever
+    touches column A (Name) and those three, never the EdgeRaw-linked
+    columns `link_edge_columns` owns.
 
     `header_row` defaults to `PLAYER_POOL_HEADER_ROW` (A3 moved Player
     Pool's real header from row 1 to row 2 to make room for the
@@ -252,20 +300,27 @@ def write_pool_formulas(
     """
     header_rows = client.read_range(player_pool_tab, f"A{header_row}:{header_row}")
     header = header_rows[0] if header_rows else []
-    missing = [name for name in (_SOURCE_HEADER, _OVERFLOW_HEADER, _POOL_TYPE_HEADER) if name not in header]
+    missing = [
+        name
+        for name in (_OVERFLOW_HEADER, _POOL_TYPE_HEADER, PLAYER_POOL_ADDED_NAMES_HEADER)
+        if name not in header
+    ]
     if missing:
         raise ValueError(
             f"{player_pool_tab!r} header is missing column(s) {missing} -- "
             "run `dfs setup reorder-columns` first"
         )
-    source_col = column_letter(header.index(_SOURCE_HEADER))
     overflow_col = column_letter(header.index(_OVERFLOW_HEADER))
     pool_type_col = column_letter(header.index(_POOL_TYPE_HEADER))
+    added_col = column_letter(header.index(PLAYER_POOL_ADDED_NAMES_HEADER))
+    added_first_row = header_row + 1
+    added_last_row = header_row + PLAYER_POOL_ADDED_NAMES_ROWS
+    added_range = f"${added_col}${added_first_row}:${added_col}${added_last_row}"
 
     summary = []
-    client.update_range(player_pool_tab, f"{source_col}{header_row}", [[_SOURCE_HEADER]])
     client.update_range(player_pool_tab, f"{overflow_col}{header_row}", [[_OVERFLOW_HEADER]])
     client.update_range(player_pool_tab, f"{pool_type_col}{header_row}", [[_POOL_TYPE_HEADER]])
+    client.update_range(player_pool_tab, f"{added_col}{header_row}", [[PLAYER_POOL_ADDED_NAMES_HEADER]])
 
     for start, end in name_blocks:
         cap = end - start + 1
@@ -278,11 +333,12 @@ def write_pool_formulas(
 
         name_cell = f"{_NAME_COLUMN}{start}"
         overflow_cell = f"{overflow_col}{start}"
-        client.update_range(player_pool_tab, name_cell, [[_name_formula(edge_tab, position, cap)]])
-        client.update_range(player_pool_tab, overflow_cell, [[_overflow_formula(edge_tab, position, cap)]])
-
-        source_rows = [[_source_formula(edge_tab, row)] for row in range(start, end + 1)]
-        client.update_range(player_pool_tab, f"{source_col}{start}:{source_col}{end}", source_rows)
+        client.update_range(
+            player_pool_tab, name_cell, [[_name_formula(edge_tab, position, cap, added_range)]]
+        )
+        client.update_range(
+            player_pool_tab, overflow_cell, [[_overflow_formula(edge_tab, position, cap, added_range)]]
+        )
 
         pool_type_rows = [[_pool_type_formula(edge_tab, row)] for row in range(start, end + 1)]
         client.update_range(player_pool_tab, f"{pool_type_col}{start}:{pool_type_col}{end}", pool_type_rows)

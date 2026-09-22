@@ -52,7 +52,7 @@ from dfs.sheet_links import (
     link_edge_columns,
     write_edge_row_links,
 )
-from dfs.sheet_pool_control import ensure_pool_control_row
+from dfs.sheet_pool_control import drain_control_cell_into_added_names, ensure_pool_control_row
 from dfs.sheet_pool_deck import remove_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheet_pool_raw_sos import rewrite_opp_pos_rank
@@ -1597,6 +1597,20 @@ def sync(
             any_failed = True
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
+
+    # A6 (2026-09-22): drain any pending add-a-player name into the
+    # accumulated list before it can be overwritten by a second typed
+    # name -- see `sheet_pool_control.drain_control_cell_into_added_names`.
+    # A live-sheet step, so skipped under --no-upload; failure here
+    # shouldn't fail an otherwise-successful sync.
+    if not no_upload:
+        try:
+            drain_result = drain_control_cell_into_added_names(
+                SheetsClient(cfg.google_sheets), cfg.lineups.player_pool_tab
+            )
+            console.print(f"[green]OK[/green] {drain_result}")
+        except SheetsError as e:
+            console.print(f"[yellow]Could not check the add-a-player control cell:[/yellow] {e}")
 
     if live:
         _print_live_flag_diff(old_edge)

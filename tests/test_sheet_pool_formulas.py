@@ -4,18 +4,25 @@ from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_pool_formulas import _TAG_RANK_ARRAY, _UNKNOWN_TAG_RANK, write_pool_formulas
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_COLUMN
-from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW
+from dfs.weekly_reset import (
+    PLAYER_POOL_ADDED_NAMES_ROWS,
+    PLAYER_POOL_CONTROL_ROW,
+    PLAYER_POOL_HEADER_ROW,
+)
 
-SOURCE_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Source"))
 OVERFLOW_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Overflow"))
 POOL_TYPE_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Pool"))
+ADDED_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Added"))
 _HEADER_A1 = f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
 _CONTROL_CELL = f"$B${PLAYER_POOL_CONTROL_ROW}"
+_ADDED_FIRST_ROW = PLAYER_POOL_HEADER_ROW + 1
+_ADDED_LAST_ROW = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
+_ADDED_RANGE = f"${ADDED_COL}${_ADDED_FIRST_ROW}:${ADDED_COL}${_ADDED_LAST_ROW}"
 
 
 class SpySheetsClient:
     """Records update_range calls and fakes read_range for the header row
-    (Source/Overflow/Pool lookup) and the Position column lookup -- same
+    (Overflow/Pool lookup) and the Position column lookup -- same
     convention as test_sheet_links.py's spy."""
 
     def __init__(self, positions: dict[str, str], header: list[str] = PLAYER_POOL_COLUMN_ORDER):
@@ -43,37 +50,32 @@ def test_writes_a_name_formula_and_overflow_formula_per_block_only():
 
     ranges_written = {a1 for _, a1, _ in client.update_calls}
     assert ranges_written == {
-        f"{SOURCE_COL}{PLAYER_POOL_HEADER_ROW}",
         f"{OVERFLOW_COL}{PLAYER_POOL_HEADER_ROW}",
         f"{POOL_TYPE_COL}{PLAYER_POOL_HEADER_ROW}",
+        f"{ADDED_COL}{PLAYER_POOL_HEADER_ROW}",
         "A2",
         f"{OVERFLOW_COL}2",
-        f"{SOURCE_COL}2:{SOURCE_COL}11",
         f"{POOL_TYPE_COL}2:{POOL_TYPE_COL}11",
         "A13",
         f"{OVERFLOW_COL}13",
-        f"{SOURCE_COL}13:{SOURCE_COL}29",
         f"{POOL_TYPE_COL}13:{POOL_TYPE_COL}29",
         "A31",
         f"{OVERFLOW_COL}31",
-        f"{SOURCE_COL}31:{SOURCE_COL}55",
         f"{POOL_TYPE_COL}31:{POOL_TYPE_COL}55",
         "A57",
         f"{OVERFLOW_COL}57",
-        f"{SOURCE_COL}57:{SOURCE_COL}65",
         f"{POOL_TYPE_COL}57:{POOL_TYPE_COL}65",
         "A67",
         f"{OVERFLOW_COL}67",
-        f"{SOURCE_COL}67:{SOURCE_COL}74",
         f"{POOL_TYPE_COL}67:{POOL_TYPE_COL}74",
     }
 
 
-def test_raises_when_source_overflow_or_pool_column_is_missing():
-    # The exact regression this guards against: Phase 3 moved Source/
-    # Overflow/Pool off their old hardcoded O/Z/AA letters -- those
-    # letters now hold real EdgeRaw-linked columns (Flag/Roof/Wind).
-    # write_pool_formulas must refuse rather than clobber them.
+def test_raises_when_overflow_or_pool_column_is_missing():
+    # The exact regression this guards against: Phase 3 moved Overflow/
+    # Pool off their old hardcoded Z/AA letters -- those letters now hold
+    # real EdgeRaw-linked columns (Roof/Wind). write_pool_formulas must
+    # refuse rather than clobber them.
     header = [name for name in PLAYER_POOL_COLUMN_ORDER if name != "Overflow"]
     client = SpySheetsClient(_POSITIONS, header=header)
     with pytest.raises(ValueError, match="Overflow"):
@@ -111,6 +113,14 @@ _CONTROL_NAMES = (
 )
 
 
+def _added_filter_for_qb() -> str:
+    position_lookup = f'IFERROR(VLOOKUP({_ADDED_RANGE},EdgeRaw!$B:$C,2,FALSE),"")'
+    salary_lookup = f"IFERROR(VLOOKUP({_ADDED_RANGE},EdgeRaw!$B:$F,5,FALSE),0)"
+    pool_tag_lookup = f'IFERROR(VLOOKUP({_ADDED_RANGE},{{EdgeRaw!$B:$B,EdgeRaw!$A:$A}},2,FALSE),"")'
+    tag_rank = f"IFERROR(MATCH({pool_tag_lookup},{_TAG_RANK_ARRAY},0),{_UNKNOWN_TAG_RANK})"
+    return f'FILTER({{{_ADDED_RANGE},{salary_lookup},{tag_rank}}},{_ADDED_RANGE}<>"",{position_lookup}="QB")'
+
+
 def test_overflow_formula_thresholds_on_the_same_cap():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
@@ -128,11 +138,20 @@ def test_overflow_formula_thresholds_on_the_same_cap():
     control_filter = (
         f"{{{_CONTROL_NAMES},IFERROR(VLOOKUP({_CONTROL_NAMES},EdgeRaw!$B:$F,5,FALSE),0),{control_tag_rank}}}"
     )
-    union = f"{{{edge_filter};{control_filter}}}"
+    union = f"{{{edge_filter};{control_filter};{_added_filter_for_qb()}}}"
     count = f"IFERROR(COUNTA(INDEX(UNIQUE({union}),0,1)),0)"
     assert formulas[f"{OVERFLOW_COL}2"] == (
         f'=IF({count}>10,10&" QB slots, "&{count}&" ticked -- some are hidden","")'
     )
+
+
+def test_name_formula_includes_the_accumulated_add_a_player_list():
+    # A6: the third union source -- see _added_filter_for_qb above.
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
+    assert _added_filter_for_qb() in formulas["A2"]
 
 
 def test_name_formula_unions_edgeraw_ticks_with_the_control_cell():
@@ -192,21 +211,19 @@ def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formul
     ranges_written = {a1 for _, a1, _ in client.update_calls}
     assert "A13" not in ranges_written
     assert f"{OVERFLOW_COL}13" not in ranges_written
-    assert f"{SOURCE_COL}13:{SOURCE_COL}29" not in ranges_written
     assert f"{POOL_TYPE_COL}13:{POOL_TYPE_COL}29" not in ranges_written
     assert any("skipped" in line for line in result)
 
 
-def test_never_writes_outside_name_source_overflow_and_pool_columns():
-    # Name, Source, the overflow warning, and (Fix 2.11) the surfaced Pool
-    # value are the only columns this function is allowed to touch --
-    # every other column already holds a VLOOKUP written by
-    # link_edge_columns and must never be rewritten with a blank/
-    # placeholder value.
+def test_never_writes_outside_name_overflow_and_pool_columns():
+    # Name, the overflow warning, and (Fix 2.11) the surfaced Pool value
+    # are the only columns this function is allowed to touch -- every
+    # other column already holds a VLOOKUP written by link_edge_columns
+    # and must never be rewritten with a blank/placeholder value.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
-    allowed_first_letters = {"A", SOURCE_COL[0], OVERFLOW_COL[0], POOL_TYPE_COL[0]}
+    allowed_first_letters = {"A", OVERFLOW_COL[0], POOL_TYPE_COL[0]}
     for _, a1_range, _ in client.update_calls:
         assert a1_range[0] in allowed_first_letters
 
@@ -229,23 +246,3 @@ def test_pool_type_column_header_is_written_once():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
     header_call = next(c for c in client.update_calls if c[1] == f"{POOL_TYPE_COL}{PLAYER_POOL_HEADER_ROW}")
     assert header_call[2] == [["Pool"]]
-
-
-def test_source_formula_labels_edgeraw_ticks_and_the_control_cell():
-    client = SpySheetsClient(_POSITIONS)
-    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
-
-    source_call = next(c for c in client.update_calls if c[1] == f"{SOURCE_COL}2:{SOURCE_COL}11")
-    first_row_formula = source_call[2][0][0]
-    assert 'IF($A2="","",' in first_row_formula
-    assert '"EdgeRaw"' in first_row_formula
-    assert '"Added"' in first_row_formula
-    assert f"EdgeRaw!${POOL_COLUMN}:${POOL_COLUMN}" in first_row_formula
-    assert f"$A2={_CONTROL_CELL}" in first_row_formula
-
-
-def test_source_column_header_is_written_once():
-    client = SpySheetsClient(_POSITIONS)
-    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
-    header_call = next(c for c in client.update_calls if c[1] == f"{SOURCE_COL}{PLAYER_POOL_HEADER_ROW}")
-    assert header_call[2] == [["Source"]]

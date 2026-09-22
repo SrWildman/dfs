@@ -1454,7 +1454,10 @@ def polish_builder_tab(
     # killed/retried run can otherwise leave a stale hide on the wrong
     # column behind forever.
     _unhide_ungrouped_columns(client, tab, len(header))
-    for hidden_name in ("Id", "Flag"):
+    # "Added" (A6, 2026-09-22) joins Id/Flag here -- Player Pool's own
+    # hidden add-a-player accumulator, never meant to be looked at
+    # directly (see `weekly_reset.PLAYER_POOL_ADDED_NAMES_HEADER`).
+    for hidden_name in ("Id", "Flag", "Added"):
         if hidden_name in header:
             letter = column_letter(header.index(hidden_name))
             client.hide_columns(tab, letter, letter)

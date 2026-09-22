@@ -54,7 +54,7 @@ the removal's own details.
 from __future__ import annotations
 
 from dfs.config import EntryTableConfig
-from dfs.sheets import SheetsClient
+from dfs.sheets import SheetsClient, column_letter
 
 # Fix 2.4: each tuple is now the NINE REAL ROSTER ROWS ONLY (QB, RB, RB,
 # WR, WR, WR, TE, FLEX, DST) -- `end` used to also be that block's totals
@@ -105,6 +105,28 @@ LINEUPS_TOTALS_ROWS = [end + 1 for _, end in LINEUPS_NAME_BLOCKS]
 PLAYER_POOL_CONTROL_ROW = 1
 PLAYER_POOL_NAME_BLOCKS = [(3, 12), (14, 33), (35, 59), (61, 70), (72, 81)]
 PLAYER_POOL_HEADER_ROW = PLAYER_POOL_NAME_BLOCKS[0][0] - 1
+
+# Week 3 feedback (A6), 2026-09-22: "Adding a player in row one of the
+# pool works, but only once. If you try and add a second in the same
+# spot, the first is deleted." Correct -- the control cell holds one
+# typed name and `sheet_pool_formulas._union_array` only ever read that
+# one cell, so a second entry replaced the first. Fix: a hidden,
+# position-agnostic column (`Added`, appended past `In` -- see
+# `sheet_columns.PLAYER_POOL_COLUMN_ORDER`) accumulates every name ever
+# typed into the control cell this week. `dfs sync` drains the control
+# cell into the next free row here and blanks it
+# (`sheet_pool_control.drain_control_cell_into_added_names`);
+# `_union_array` unions EdgeRaw's ticks, the (now almost-always-blank)
+# control cell, AND this whole range, so a name shows up immediately
+# after typing (still via the live control-cell branch) and keeps
+# showing up after the next sync drains it here. 50 rows is generously
+# past realistic weekly use -- position caps sum to 75, and most adds go
+# through ticking EdgeRaw directly; this only needs to hold the ones
+# that don't. Cleared every week by `clear_previous_week`,
+# same "typed state must not survive into a new week" reasoning as the
+# control cell itself.
+PLAYER_POOL_ADDED_NAMES_HEADER = "Added"
+PLAYER_POOL_ADDED_NAMES_ROWS = 50
 
 # Full-grid tabs: clear everything below the header, generously past any
 # row/column count actually seen so far.
@@ -190,6 +212,21 @@ def clear_previous_week(
     # would (Fix 2.14's "blank is better than bad").
     client.clear_ranges(player_pool_tab, [f"B{PLAYER_POOL_CONTROL_ROW}"])
     summary.append(f"{player_pool_tab}: cleared the add-a-player control (B{PLAYER_POOL_CONTROL_ROW})")
+
+    # A6: the accumulated add-a-player list is typed weekly state too --
+    # found by header name (never hardcoded, may not exist on an
+    # older/not-yet-migrated sheet, hence the guard).
+    header_row_values = client.read_range(
+        player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
+    )
+    header = header_row_values[0] if header_row_values else []
+    if PLAYER_POOL_ADDED_NAMES_HEADER in header:
+        added_col = column_letter(header.index(PLAYER_POOL_ADDED_NAMES_HEADER))
+        first_row = PLAYER_POOL_HEADER_ROW + 1
+        last_row = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
+        added_range = f"{added_col}{first_row}:{added_col}{last_row}"
+        client.clear_ranges(player_pool_tab, [added_range])
+        summary.append(f"{player_pool_tab}: cleared the accumulated add-a-player list ({added_range})")
 
     first_start, _ = PLAYER_POOL_NAME_BLOCKS[0]
     first_cell = client.read_formula(player_pool_tab, f"A{first_start}")

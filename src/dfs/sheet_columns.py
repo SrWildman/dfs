@@ -243,6 +243,7 @@ PLAYER_POOL_COLUMN_ORDER = [
     "Pool",
     "Used",
     "In",
+    "Added",
 ]
 
 # Lineups: Part 2 moved "% of Rstr" OUT of its old interspersed position
