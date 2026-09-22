@@ -483,7 +483,7 @@ sheet that still has the retired deck; see CONTRIBUTING.md's changelog
 for the full history and `sheet_pool_deck.py`'s module docstring.
 
 `dfs lineups clear` wipes `Lineups`' typed-in `Name` columns (and
-`Scratch`/`DK Upload`, below) at the start of a new week. `Player Pool`'s
+`DK Upload`, below) at the start of a new week. `Player Pool`'s
 `Name` column is skipped -- it's a formula now, not a typed value, and
 the actual per-week state (which players are ticked) lives in `EdgeRaw`,
 which `dfs sync` already rewrites every week regardless.
@@ -526,12 +526,6 @@ definition is correct for ITS OWN uses -- contest-history week-sorting,
 line-movement baselines -- just not this one). See `tffb_sos.py`'s own
 module docstring for the live-verified specifics.
 
-### Scratch
-
-A blank grid (same roster-slot columns as `Lineups`) for drafting a
-lineup idea before committing it to a real `Lineups` slot. No formulas;
-`dfs lineups clear` wipes it each week.
-
 ### DK Upload
 
 Where you pair a finished lineup to a real DK contest entry: DraftKings'
@@ -540,21 +534,12 @@ Fee, then the 9 roster-slot columns). `dfs export` reads this tab as-is,
 validates it against the current salary data, and writes DK's own
 upload-ready CSV. Pairing lineups to entries stays a manual step.
 
-### EntriesRaw / GPPin / DKLineupsRaw / DKLineupsFinal
-
-Contest-entry tracking, same roster-slot shape as `Lineups`/`DK Upload`.
-`EntriesRaw` is where you paste your exported DK contest history
-(`Import options: Replace Data at Selected Cell`, active cell A1);
-`GPPin`/`DKLineupsRaw`/`DKLineupsFinal` derive views from it, entirely by
-formula -- `dfs` itself doesn't read or write any of these; pulling
-contest history directly (no manual export) would need probing
-DraftKings' undocumented authenticated endpoints live, with you present;
-investigated, not built. `dfs week new` does clear `EntriesRaw`'s data
-rows (Fix 5G) if the tab exists, the same "typed input must not survive
-into a new week looking current" reasoning as `Lineups`/`Bankroll` --
-`GPPin`/`DKLineupsRaw`/`DKLineupsFinal`'s formulas just resolve blank/
-`#N/A` against an empty `EntriesRaw`, same as before you ever pasted
-anything.
+`Scratch` (a blank drafting grid) and `EntriesRaw`/`GPPin`/`DKLineupsRaw`/
+`DKLineupsFinal` (the hand-paste DK contest-history chain) were removed
+entirely in Part 4b (2026-09-22) -- see CONTRIBUTING.md's structural
+changelog for what each did and why. Roster-slot detail for past contest
+entries now lives only in the DK export CSVs on disk (`data/raw/`),
+nowhere in the sheet.
 
 ### Exposure
 

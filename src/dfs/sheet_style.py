@@ -1372,6 +1372,13 @@ BUILDER_WIDTHS = {
     "Own% Used": 92,
     "Sub-10%": 72,
     "Min Unique": 92,
+    # Results-only. Found live during Part 4b's own verification pass
+    # (2026-09-22): no Results column had ever had an explicit width --
+    # `style_results` falls back to `_GENERIC_COLUMN_PX` for anything not
+    # in this dict -- and that generic width truncates this one header.
+    # 150 = `sheet_audit._min_header_width_px("Black/White/Purple")` (135)
+    # plus a small margin, same convention as "Edge ↗" above.
+    "Black/White/Purple": 150,
 }
 
 
@@ -2216,34 +2223,40 @@ def polish_bankroll(
 # Tab chrome (Direction M, plus D's colours and hiding -- no renames)
 # ---------------------------------------------------------------------------
 
-# Left to right in the order the week actually runs: research, shortlist,
-# build, enter, monitor, reconcile. Tabs absent from a given sheet are
-# skipped, so this is safe on both the template and the live copy.
-# Fix 2.12: reordered to Sam's explicit most-used-first order. The phase
-# tag (second element, drives tab colour-coding) stays each tab's real
-# phase-of-week regardless of its new position -- this reorders the tab
-# STRIP only, it doesn't reclassify anything.
+# Part 4 (2026-09-22): position used to encode frequency (Fix 2.12's
+# most-used-first reorder) while colour encoded phase-of-week, and they
+# disagreed -- e.g. `Slate Grid` ("decide") sat physically among the
+# `contest`-coloured tabs. Committed to week order instead: research,
+# shortlist, build, enter, monitor, reconcile, one contiguous colour band
+# per phase. `Instructions` moved first -- it explains the sheet and used
+# to sit 20th of 21. Tabs absent from a given sheet are skipped, so this
+# is safe on both the template and the live copy.
+#
+# 13 visible tabs, down from 21: `SoSQB`/`SoSRB`/`SoSWr`/`SoSTE`/`SoSDef`
+# moved into `HIDE_TABS` below (a synced feed nobody opens directly,
+# `SoSComb` stays as the visible lookup); `Scratch`/`EntriesRaw`/`GPPin`/
+# `DKLineupsRaw`/`DKLineupsFinal` removed entirely (Part 4b, see
+# CONTRIBUTING.md's changelog).
+#
+# `Movement`/`Slate Grid`'s family tags were flagged as possibly wrong
+# independent of ordering (`Movement` is a Thu/Sun research tab, tagged
+# `contest`; `Slate Grid` is tagged `decide` but used to sit with the
+# `contest` tabs) -- reported to Sam rather than silently retagged; this
+# reorder alone already puts `Slate Grid` back among its own `decide`
+# family, which was the visible half of that mismatch.
 WEEK_ORDER = [
+    ("Instructions", "decide"),
     ("Board", "decide"),
     ("EdgeRaw", "decide"),
+    ("Slate Grid", "decide"),
     ("Player Pool", "build"),
     ("Lineups", "build"),
+    ("DK Upload", "build"),
+    ("Exposure", "contest"),
+    ("Movement", "contest"),
     ("Bankroll", "money"),
     ("Results", "money"),
-    ("Exposure", "contest"),
-    ("Slate Grid", "decide"),
-    ("Movement", "contest"),
-    ("GPPin", "contest"),
-    ("DKLineupsFinal", "contest"),
-    ("Scratch", "build"),
-    ("DK Upload", "build"),
     ("SoSComb", "feed"),
-    ("SoSQB", "feed"),
-    ("SoSRB", "feed"),
-    ("SoSWr", "feed"),
-    ("SoSTE", "feed"),
-    ("SoSDef", "feed"),
-    ("Instructions", "decide"),
     ("PlayerPoolRaw", "feed"),
 ]
 
@@ -2251,6 +2264,14 @@ WEEK_ORDER = [
 # perfectly happily, so `dfs sync` is unaffected. PlayerPoolRaw stays
 # visible on purpose: it's the hub every other tab reads, and hiding it
 # makes a broken lookup much harder to debug.
+#
+# Part 4 (2026-09-22): `SoSQB`/`SoSRB`/`SoSWr`/`SoSTE`/`SoSDef` joined
+# this list -- they became a synced source in Phase 5 Section I, so
+# they're feeds nobody opens directly; `SoSComb` (the combined lookup
+# every other tab actually reads) stays visible in `WEEK_ORDER` above.
+# `EntriesRaw`/`DKLineupsRaw` DROPPED from this list (Part 4b): both are
+# removed entirely now (template) or hidden by the same removal step
+# itself (live), not by this generic staging-hide mechanism.
 HIDE_TABS = [
     "DKSalRaw",
     "DkSalClean",
@@ -2259,8 +2280,11 @@ HIDE_TABS = [
     "TFFBOptoRaw",
     "GamesRaw",
     "WeatherRaw",
-    "EntriesRaw",
-    "DKLineupsRaw",
+    "SoSQB",
+    "SoSRB",
+    "SoSWr",
+    "SoSTE",
+    "SoSDef",
 ]
 
 
@@ -2322,20 +2346,15 @@ TAB_NOTES: dict[str, str] = {
     "Player Pool": (
         "PLAYER POOL -- everyone you've added, grouped by position. Row 1: type a name "
         "(with a search box) to add a player directly, the same as ticking Pool on "
-        "EdgeRaw. Everything below row 2 is computed. Source says whether a row came "
-        "from EdgeRaw or this row's own add box; Edge ↗ jumps straight to that player on "
-        "EdgeRaw (e.g. to remove them -- untick Pool there); Overflow (far right) warns "
-        "if a position has more picks than room."
+        "EdgeRaw. Everything below row 2 is computed. Edge ↗ jumps straight to that "
+        "player on EdgeRaw (e.g. to remove them -- untick Pool there); Overflow (far "
+        "right) warns if a position has more picks than room."
     ),
     "Lineups": (
-        "LINEUPS -- build your rosters here. Rows 1-9 are a sortable window into Player "
-        "Pool (pick a position and sort field in row 1); type a player's name into column "
-        "A of a lineup block below to fill a slot. Issues flags a duplicate, an "
-        "unavailable player, or a salary/roster problem per lineup; Edge ↗ jumps straight "
-        "to that player on EdgeRaw."
-    ),
-    "Scratch": (
-        "SCRATCH -- a blank grid for your own notes or draft lineups. Nothing here is read by `dfs`."
+        "LINEUPS -- build your rosters here. One 9-player block per lineup (QB, RB, RB, "
+        "WR, WR, WR, TE, FLEX, DST); type a player's name into column A of a block to "
+        "fill a slot. Issues flags a duplicate, an unavailable player, or a salary/roster "
+        "problem per lineup; Edge ↗ jumps straight to that player on EdgeRaw."
     ),
     "DK Upload": (
         "DK UPLOAD -- `dfs export` writes DraftKings' bulk-upload file here. Read-only "
@@ -2348,10 +2367,6 @@ TAB_NOTES: dict[str, str] = {
     "Exposure": (
         "EXPOSURE -- how much of your lineups each player is in. Type a target percentage "
         f"into the Target column; everything else is computed. {_SAVED_VIEW_HINT}"
-    ),
-    "GPPin": "GPPIN -- a derived view of your pasted contest-entry history. Nothing here is typed.",
-    "DKLineupsFinal": (
-        "DKLINEUPSFINAL -- a derived view of your pasted contest-entry history. Nothing here is typed."
     ),
     "Bankroll": (
         "BANKROLL -- Cash/GPP ledgers plus starting/ending bankroll. `dfs bankroll sync "
@@ -2725,14 +2740,13 @@ _GENERIC_COLUMN_PX = 110
 def style_flat_tab(client: SheetsClient, tab: str, *, last_row: int, header_row: int = 1) -> str:
     """The standard treatment -- dark header, frozen pane, a width on
     every column, FIELD_FORMATS wherever a header matches -- for a tab
-    that has otherwise never been styled: Scratch, DK Upload,
-    DKLineupsFinal, SoSComb. Header-driven like `polish_builder_tab`, but
-    without that function's Name-pin/Flag-Avail-chip assumptions, which
-    don't apply to any of these (none have a Name, Flag or Avail column).
-    Skips cleanly on an empty header -- Scratch/DK Upload/DKLineupsFinal
-    always have one (their header is a fixed roster-slot or DK-export
-    label row), but SoSComb is hand-built and could be blank before Sam
-    has set it up for the week.
+    that has otherwise never been styled: DK Upload, SoSComb.
+    Header-driven like `polish_builder_tab`, but without that function's
+    Name-pin/Flag-Avail-chip assumptions, which don't apply to either
+    (neither has a Name, Flag or Avail column). Skips cleanly on an empty
+    header -- DK Upload always has one (a fixed DK-export label row), but
+    SoSComb is hand-built and could be blank before Sam has set it up for
+    the week.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -2850,18 +2864,14 @@ def style_sos_tab(client: SheetsClient, tab: str) -> str:
 def style_tier23_tabs(
     client: SheetsClient,
     *,
-    scratch_last_row: int,
     dk_upload_last_row: int,
-    dk_lineups_final_last_row: int,
     results_last_row: int,
     sos_comb_last_row: int,
 ) -> list[str]:
     """Every Tier 2/3 tab in one call, each skipped cleanly if the tab
     doesn't exist or (for the hand-pasted SoS tabs) is currently empty."""
     results = [
-        style_flat_tab(client, "Scratch", last_row=scratch_last_row),
         style_flat_tab(client, "DK Upload", last_row=dk_upload_last_row),
-        style_flat_tab(client, "DKLineupsFinal", last_row=dk_lineups_final_last_row),
         style_results(client, last_row=results_last_row),
     ]
     for tab in ("SoSQB", "SoSRB", "SoSWr", "SoSTE", "SoSDef"):

@@ -62,7 +62,6 @@ class LineupsConfig(BaseModel):
     # when the sheet is duplicated from the template. See weekly_reset.py.
     builder_tab: str = "Lineups"
     player_pool_tab: str = "Player Pool"
-    scratch_tab: str = "Scratch"
 
 
 class EntryTableConfig(BaseModel):

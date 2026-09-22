@@ -45,7 +45,6 @@ def _base_config(**overrides) -> Config:
         },
         "lineups": {
             "upload_tab": "DK Upload",
-            "scratch_tab": "Scratch",
             "builder_tab": "Lineups",
             "player_pool_tab": "Player Pool",
         },
@@ -58,7 +57,6 @@ def _base_config(**overrides) -> Config:
 _ALL_GOOD_TABS = {
     "EdgeRaw": [POOL_HEADER, *EDGE_COLUMNS],
     "DK Upload": ["Entry ID"],
-    "Scratch": [],
     "Lineups": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Player Pool": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
@@ -112,12 +110,12 @@ def test_run_doctor_reports_nothing_wrong_on_a_correct_sheet():
 
 def test_run_doctor_flags_missing_tab():
     tabs = dict(_ALL_GOOD_TABS)
-    del tabs["Scratch"]
+    del tabs["Bankroll"]
     cfg = _base_config()
     client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 
     issues = run_doctor(client, cfg)
-    assert any(i.check == "tab-exists" and "Scratch" in i.detail for i in issues)
+    assert any(i.check == "tab-exists" and "Bankroll" in i.detail for i in issues)
 
 
 def test_run_doctor_flags_edgeraw_header_mismatch():

@@ -1413,6 +1413,83 @@ empty `Lineups` tab after both fixes shipped.
 |---|---|---|---|---|---|---|
 | 2026-09-22 | `Player Pool` | New hidden column `Added`, appended past `In` -- Sam: "Adding a player in row one of the pool works, but only once. If you try and add a second in the same spot, the first is deleted." Root cause: the add-a-player control cell held one typed name and `sheet_pool_formulas._union_array` only ever read that one cell, so a second entry replaced the first in every formula depending on it. `Added` accumulates every name ever typed into the control cell this week (50 rows of capacity); `dfs sync` drains the control cell into it and blanks the cell (`sheet_pool_control.drain_control_cell_into_added_names`). Provisioned via `sheet_reorder.provision_missing_columns` (blank header text, appended, no data), then `dfs setup add-pool-control` writes its header text and wires the new formulas; hidden the same way `Id`/`Flag` are. | `sheet_columns.PLAYER_POOL_COLUMN_ORDER` 42 columns, ends at `In`. | `PLAYER_POOL_COLUMN_ORDER` 43 columns, `Added` appended after `In`. | Live + Template | `sheet_columns.PLAYER_POOL_COLUMN_ORDER` (`"Added"` appended), `weekly_reset.PLAYER_POOL_ADDED_NAMES_HEADER`/`PLAYER_POOL_ADDED_NAMES_ROWS` (new), `weekly_reset.clear_previous_week` (clears the accumulated list, same "typed weekly state" reasoning as the control cell itself), `sheet_pool_formulas._union_array`/new `_added_names_filter` (third union source, alongside EdgeRaw's ticks and the control cell), `sheet_pool_formulas.write_pool_formulas` (writes the `Added` header, computes and threads `added_range` through), new `sheet_pool_control.drain_control_cell_into_added_names`, `cli.py`'s `sync` command (calls the drain function after every live sync), `sheet_style.polish_builder_tab` (hides `Added` alongside `Id`/`Flag`). Provisioned live via `sheet_reorder.provision_missing_columns`, template first then live; `VLOOKUP`'s broadcast-inside-`FILTER` behavior (needed for the accumulator's per-row Salary/Position/Pool-tag lookups) confirmed empirically on the template's Scratch tab before shipping, same discipline this module's own docstring already used for the tag-rank `MATCH`. |
 
+## Phase 6, Part 4 (2026-09-22): tab strip reordered by week phase, not Fix-2.12's frequency
+
+`WEEK_ORDER`'s tab position used to encode Fix-2.12's "most-used-first"
+frequency ordering while its own second tuple element (the family/colour
+tag) encoded actual phase-of-week -- the two disagreed for at least one
+tab (`Slate Grid`, tagged `decide`, sat physically among `contest`-tagged
+tabs), which is exactly the kind of "colour says one thing, position says
+another" mismatch `apply_tab_chrome`'s colour-coding exists to prevent.
+Rewritten to the phase-of-week order Sam gave directly: `Instructions`
+first, then one contiguous colour band per phase (decide -> build ->
+contest -> money -> feed) with no interleaving. `SoSQB`/`SoSRB`/`SoSWr`/
+`SoSTE`/`SoSDef` moved out of the visible strip into `HIDE_TABS` (still
+fully styled/audited, just not competing for tab-strip space -- `SoSComb`,
+the combined lookup everything else actually reads, stays visible).
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-22 | tab strip | Visible tab order/colour rewritten from a 21-tab, frequency-ordered list to the 13-tab, phase-ordered list Sam specified; the 5 individual SoS tabs moved from the visible strip into the hidden-staging group. No row/column inside any tab moved -- `set_tab_properties`' `index`/`hidden`/`color` only, same "order, colour and visibility only" contract `apply_tab_chrome`'s own docstring already states. | `sheet_style.WEEK_ORDER` (21 entries, position encoding frequency) | `sheet_style.WEEK_ORDER` (13 entries, position encoding week phase); `sheet_style.HIDE_TABS` gains the 5 SoS tabs | Live + Template | `sheet_style.WEEK_ORDER`, `sheet_style.HIDE_TABS`. Applied via `dfs setup polish` (`apply_tab_chrome`), template first then live; re-verified with `dfs doctor` clean on both afterward (structural checks only -- tab order/colour aren't something `doctor` inspects, so this was also eyeballed directly on both sheets). |
+
+One judgment call flagged rather than silently made: Part 4's own given
+table tags `Movement` as `contest`, but it is arguably a Thu/Sun research
+tab (line movement since the week opened) closer in spirit to `decide`.
+Left as `contest` per the table as given -- reordering fixed `Slate
+Grid`'s visible mismatch, which was the actual complaint; `Movement`'s tag
+is a smaller, more debatable case and changing it wasn't asked for.
+
+## Phase 6, Part 4b (2026-09-22): five unused tabs removed
+
+Sam confirmed on 2026-09-17 he does not use `Scratch` (a blank drafting
+grid, no formulas) or the `EntriesRaw`/`GPPin`/`DKLineupsRaw`/
+`DKLineupsFinal` hand-paste DK-contest-history chain -- `dfs` never read
+or wrote any of the five except to clear/style them (`EntriesRaw`'s
+contest history flows into Bankroll/Results via a CSV file on disk,
+`dfs week close --csv` / `parse_contest_history`, not via this tab chain).
+Grepped to confirm nothing else in the codebase referenced any of the
+five before removing them.
+
+Asymmetric by design, per Sam's own instruction: **template -- delete the
+tabs outright** (a real Sheets tab delete, so a future weekly copy starts
+clean). **Live sheet -- hide, don't delete** (`EntriesRaw` may hold real
+pasted contest history a delete can't recover; a hidden tab is still
+fully readable/writable by `dfs sync`, so hiding costs nothing). Both
+paths share one function (`sheet_tab_removal.remove_retired_tabs`,
+`mode="delete"` vs `mode="hide"`) so the two sheets can't drift onto
+different tab lists.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-22 | `Scratch` | Deleted (template) / hidden (live). No formula anywhere referenced it. | Present, visible in `HIDE_TABS`'s complement | Template: absent. Live: present, hidden. | Template: deleted. Live: hidden. | `config.LineupsConfig.scratch_tab` (removed), `config.example.toml`'s `scratch_tab` line (removed), `weekly_reset.SCRATCH_RANGE` (removed), `clear_previous_week`'s `scratch_tab` param and call sites in `cli.py` (removed), `doctor._expected_tabs`' `cfg.lineups.scratch_tab` entry (removed), `sheet_audit.AUDITED_TABS`' `("Scratch", 1)` entry (removed), `sheet_style.WEEK_ORDER`/`TAB_NOTES` entries (removed), `style_tier23_tabs`' `scratch_last_row` param and its `style_flat_tab(client, "Scratch", ...)` call (removed) |
+| 2026-09-22 | `EntriesRaw` / `GPPin` / `DKLineupsRaw` / `DKLineupsFinal` | Deleted (template) / hidden (live). Pre-CLI parallel path, superseded by the CSV-based results path. | Present (`EntriesRaw`/`DKLineupsRaw` also in `HIDE_TABS`) | Template: absent. Live: present, hidden. | Template: deleted. Live: hidden. | `weekly_reset.ENTRIES_RAW_TAB`/`ENTRIES_RAW_RANGE` and the Fix-5G clearing block (removed -- moot once the tab is gone), `sheet_style.HIDE_TABS`' `EntriesRaw`/`DKLineupsRaw` entries (removed -- Part 4b's dedicated removal step handles them instead of the generic staging-hide list), `sheet_audit.AUDITED_TABS`' `("DKLineupsFinal", 1)` entry (removed), `sheet_style.TAB_NOTES` entries for `GPPin`/`DKLineupsFinal` (removed) |
+
+New: `sheet_tab_removal.py` (`RETIRED_TABS`, `remove_retired_tabs`), CLI
+command `dfs setup remove-retired-tabs --mode delete|hide [--sheet-id]`.
+Executed and verified: `remove-retired-tabs --mode delete` against the
+template, `--mode hide` against the live sheet, then `dfs setup polish`
+(the `WEEK_ORDER` reorder above) against both, then `dfs doctor` clean on
+both (aside from a pre-existing, unrelated `EdgeRaw`-empty failure --
+today's `projections` sync failed upstream at TFFB's Optimizer endpoint
+before any of this work started, so `edge` had nothing to compute from;
+not caused by and not fixed by this change).
+
+`docs/SHEET_REFERENCE.md`'s sections for all five tabs removed, replaced
+with a pointer to this changelog entry. `EntriesRaw` was the only place
+in the sheet holding a past contest entry's roster-slot detail (which
+players were in which entry) -- `docs/PROMPT_DATA.md` now documents that
+this detail lives only in the DK export CSVs on disk going forward, for
+whichever session eventually builds the results loop.
+
+**Unrelated find during this verification pass, fixed in passing:**
+`audit-style` flagged `Results`' `Black/White/Purple` column truncating
+(110px < ~135px) on the live sheet -- no `Results` column had ever had an
+explicit width in `BUILDER_WIDTHS` (`style_results` falls back to the
+generic column width for anything not in the dict), and this one text
+happened to be long enough to actually truncate. Added `"Black/White/
+Purple": 150` to `BUILDER_WIDTHS`, same fix shape as `"Edge ↗"` above;
+re-verified clean via `audit-style` on the live sheet afterward.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

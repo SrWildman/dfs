@@ -75,6 +75,7 @@ from dfs.sheet_style import (
     style_tier23_tabs,
     style_view_tabs,
 )
+from dfs.sheet_tab_removal import remove_retired_tabs
 from dfs.sheet_typo_guard import add_lineups_typo_guard
 from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid
 from dfs.sheets import SheetsClient, SheetsError, column_letter
@@ -434,6 +435,54 @@ def sheets_remove_pool_deck(
 
 
 @setup_app.command(
+    "remove-retired-tabs",
+    short_help="One-time: remove Scratch/EntriesRaw/GPPin/DKLineupsRaw/DKLineupsFinal.",
+)
+def sheets_remove_retired_tabs(
+    mode: str = typer.Option(
+        ...,
+        "--mode",
+        help="'delete' (template -- future weekly copies start clean) or 'hide' (live sheet -- "
+        "EntriesRaw may hold real pasted history a delete can't recover; a hidden tab is still "
+        "fully readable/writable by dfs sync). See Part 4b in CONTRIBUTING.md's changelog.",
+    ),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Act on a different sheet instead of config.toml's -- e.g. the canonical weekly "
+        "template (pass --mode delete there; the live sheet should get --mode hide).",
+    ),
+) -> None:
+    """Phase 6 Part 4b (2026-09-22): `Scratch` (a blank drafting grid, no
+    formulas) and the `EntriesRaw`/`GPPin`/`DKLineupsRaw`/`DKLineupsFinal`
+    hand-paste DK-contest-history chain (superseded by `dfs week close
+    --csv`'s CSV-based path) are retired -- Sam confirmed he does not use
+    any of the five, and `dfs` never read or wrote them except to
+    clear/style them. Asymmetric by design: run this with `--mode delete`
+    against the template and `--mode hide` against the live sheet -- never
+    delete on live, `EntriesRaw` may hold real pasted history. Idempotent
+    either way. See `sheet_tab_removal.py`'s module docstring and
+    `docs/PROMPT_DATA.md` for where a past entry's roster-slot detail
+    lives now that `EntriesRaw` is gone (the DK export CSVs on disk).
+    """
+    if mode not in ("delete", "hide"):
+        console.print(f"[red]Error:[/red] --mode must be 'delete' or 'hide', got {mode!r}")
+        raise typer.Exit(code=1)
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Removing retired tabs (--mode {mode}) in: [bold]{title}[/bold]\n{url}\n")
+        results = remove_retired_tabs(client, mode=mode)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@setup_app.command(
     "remove-sos-placeholders", short_help="One-time: delete the retired blank SoS 1..4 columns."
 )
 def sheets_remove_sos_placeholders(
@@ -780,17 +829,15 @@ def sheets_polish(
         # Skipped cleanly when it hasn't.
         results.extend(style_view_tabs(client))
 
-        # Tier 2/3: Scratch, DK Upload, DKLineupsFinal, Results, and the
-        # hand-pasted SoS tabs. Row bounds are generous, provisioned depth
-        # (same reasoning as EDGE_ROWS/POOL_RAW_ROWS) -- formatting past
-        # the real data costs nothing and each function reads its own
-        # header rather than assuming a row count matters structurally.
+        # Tier 2/3: DK Upload, Results, and the hand-pasted SoS tabs. Row
+        # bounds are generous, provisioned depth (same reasoning as
+        # EDGE_ROWS/POOL_RAW_ROWS) -- formatting past the real data costs
+        # nothing and each function reads its own header rather than
+        # assuming a row count matters structurally.
         results.extend(
             style_tier23_tabs(
                 client,
-                scratch_last_row=20,
                 dk_upload_last_row=200,
-                dk_lineups_final_last_row=500,
                 results_last_row=30,
                 sos_comb_last_row=40,
             )
@@ -1841,7 +1888,7 @@ def lineups_clear(
     ),
 ) -> None:
     """Clear last week's typed-in lineup data (Lineups/Player Pool name
-    columns, Scratch, DK Upload) so the sheet's ready for a new week.
+    columns, DK Upload) so the sheet's ready for a new week.
 
     Formulas and formatting (including conditional formatting) are left
     untouched -- only the typed values a human enters while building
@@ -1861,7 +1908,6 @@ def lineups_clear(
     console.print(
         f"  - {cfg.lineups.builder_tab}: Name column\n"
         f"  - {cfg.lineups.player_pool_tab}: Name column\n"
-        f"  - {cfg.lineups.scratch_tab}: all data\n"
         f"  - {cfg.lineups.upload_tab}: all data\n"
     )
     if not yes and not typer.confirm("Proceed?"):
@@ -1873,7 +1919,6 @@ def lineups_clear(
             client,
             lineups_tab=cfg.lineups.builder_tab,
             player_pool_tab=cfg.lineups.player_pool_tab,
-            scratch_tab=cfg.lineups.scratch_tab,
             dk_upload_tab=cfg.lineups.upload_tab,
         )
     except SheetsError as e:
@@ -2013,11 +2058,10 @@ def week_new(
     `clear_previous_week`) is what keeps that from happening; there is no
     separate guard enforcing it.
 
-    `EntriesRaw` (hand-pasted DK contest history, if the tab exists) is
-    cleared here too, same "typed input must not survive into a new week
-    looking current" reasoning -- see `weekly_reset.ENTRIES_RAW_TAB`'s own
-    comment for why this was found and how `GPPin`/`DKLineupsRaw`/
-    `DKLineupsFinal` (entirely formula-driven off it) are unaffected.
+    `EntriesRaw`/`GPPin`/`DKLineupsRaw`/`DKLineupsFinal` (the hand-paste
+    chain this superseded) and `Scratch` are removed entirely as of Part
+    4b (2026-09-22, see CONTRIBUTING.md's changelog) -- nothing left here
+    to clear for any of the five.
 
     Carrying Results forward means copying every already-typed week's row
     (config.toml's `[results]` table -- Week, Cash Pts/Line, H2H Entered/
@@ -2153,7 +2197,6 @@ def week_new(
             new_client,
             lineups_tab=cfg.lineups.builder_tab,
             player_pool_tab=cfg.lineups.player_pool_tab,
-            scratch_tab=cfg.lineups.scratch_tab,
             dk_upload_tab=cfg.lineups.upload_tab,
             bankroll_tab=cfg.bankroll.tab,
             bankroll_cash=cfg.bankroll.cash,

@@ -1703,10 +1703,8 @@ def test_style_tier23_tabs_covers_every_expected_tab():
     client = FakeTier23Client(["A", "B"])
     results = style_tier23_tabs(
         client,
-        scratch_last_row=20,
         dk_upload_last_row=200,
-        dk_lineups_final_last_row=500,
         results_last_row=30,
         sos_comb_last_row=40,
     )
-    assert len(results) == 10  # Scratch, DK Upload, DKLineupsFinal, Results, 5xSoS, SoSComb
+    assert len(results) == 8  # DK Upload, Results, 5xSoS, SoSComb

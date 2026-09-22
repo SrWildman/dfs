@@ -2,7 +2,7 @@
 
 Every check here is something that has already gone wrong silently at
 least once: a stale template missing a tab `dfs export`/`dfs lineups
-clear` needs (`DK Upload`, `Scratch`), a duplicate `LINKED_EDGE_COLUMNS`
+clear` needs (`DK Upload`), a duplicate `LINKED_EDGE_COLUMNS`
 append caused by the tail-only idempotency check `sheet_links.py` used to
 have, an `EdgeRaw` header that's drifted from `derived.EDGE_COLUMNS`, or a
 `Lineups`/`Bankroll` row layout that's shifted from what the hardcoded row
@@ -51,7 +51,6 @@ class DoctorClient:
 def _expected_tabs(cfg: Config) -> set[str]:
     tabs = set(cfg.google_sheets.tab_mappings.values())
     tabs.add(cfg.lineups.upload_tab)
-    tabs.add(cfg.lineups.scratch_tab)
     tabs.add(cfg.lineups.builder_tab)
     tabs.add(cfg.lineups.player_pool_tab)
     tabs.add(cfg.bankroll.tab)

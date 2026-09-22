@@ -3,12 +3,13 @@ every formula and all formatting (conditional formatting included) intact.
 
 The sheet gets duplicated fresh from a template every week (see the
 weekly-template link in README.md), so most tabs start clean automatically.
-Four tabs don't, because they hold typed values a human enters while
+Three tabs don't, because they hold typed values a human enters while
 building lineups, not formulas: `Lineups` and `Player Pool` (a name column
 per row, everything else VLOOKUPs off it -- though see Task K below,
 `Player Pool`'s Name column isn't actually typed anymore), and
-`Scratch`/`DK Upload` (full grids of typed player picks / contest entries
-with no formulas at all).
+`DK Upload` (a full grid of typed contest entries with no formulas at
+all). `Scratch` used to be a fourth (an empty grid, no formulas) -- removed
+entirely in Part 4b (2026-09-22), see CONTRIBUTING.md's changelog.
 
 Task K (4.3) made Player Pool's Name column a SORT/FILTER formula off
 EdgeRaw's Pool tick column instead of a typed value -- `clear_previous_week`
@@ -128,29 +129,9 @@ PLAYER_POOL_HEADER_ROW = PLAYER_POOL_NAME_BLOCKS[0][0] - 1
 PLAYER_POOL_ADDED_NAMES_HEADER = "Added"
 PLAYER_POOL_ADDED_NAMES_ROWS = 50
 
-# Full-grid tabs: clear everything below the header, generously past any
+# Full-grid tab: clear everything below the header, generously past any
 # row/column count actually seen so far.
-SCRATCH_RANGE = "A2:I1000"
 DK_UPLOAD_RANGE = "A2:M1000"
-
-# Phase 5G: `EntriesRaw` (hand-pasted DK contest-history export -- see
-# docs/SHEET_REFERENCE.md's "EntriesRaw / GPPin / DKLineupsRaw /
-# DKLineupsFinal") is the one other genuinely TYPED tab `dfs week new`
-# never cleared -- found auditing every tab for the same "survives into a
-# new week looking current" risk Bankroll's contest rows had (see
-# CONTRIBUTING.md's changelog). `GPPin`/`DKLineupsRaw`/`DKLineupsFinal`
-# are confirmed entirely formula-driven off it (verified via
-# `value_render_option="FORMULA"`, see docs/ROADMAP.md's Phase 4
-# postmortem) -- clearing EntriesRaw's data rows only ever makes their
-# formulas resolve to blank/#N/A, the same "blank is better than bad"
-# outcome Fix 2.14 already established for every synced source tab.
-# Column count (A:M, 13) is not a guess -- SHEET_REFERENCE.md documents
-# EntriesRaw's real shape as "same roster-slot shape as Lineups/DK
-# Upload": Entry ID/Contest Name/Contest ID/Entry Fee (4) plus the 9
-# roster slots, and `DK_UPLOAD_RANGE` above is that same shape's own
-# already-verified range.
-ENTRIES_RAW_TAB = "EntriesRaw"
-ENTRIES_RAW_RANGE = "A2:M1000"
 
 
 def _clear_bankroll_bucket(
@@ -175,7 +156,6 @@ def clear_previous_week(
     client: SheetsClient,
     lineups_tab: str,
     player_pool_tab: str,
-    scratch_tab: str,
     dk_upload_tab: str,
     *,
     bankroll_tab: str | None = None,
@@ -195,8 +175,14 @@ def clear_previous_week(
     THEN `clear_previous_week`) rather than anything enforced here; see
     `cli.py`'s `week_new` docstring. Sam: "New week should clear out
     everything" -- `clear_previous_week` cleared Lineups/Player Pool/
-    Scratch/DK Upload already but never Bankroll, so a fresh weekly copy
-    opened showing last week's contests as if they were this week's.
+    DK Upload already but never Bankroll, so a fresh weekly copy opened
+    showing last week's contests as if they were this week's.
+
+    Part 4b (2026-09-22): `Scratch` and the `EntriesRaw`/`GPPin`/
+    `DKLineupsRaw`/`DKLineupsFinal` chain are removed entirely (see
+    CONTRIBUTING.md's changelog) -- neither this function nor anything
+    else in `dfs` reads or writes any of the five, so there is nothing
+    left here to clear for them.
     """
     summary = []
 
@@ -245,15 +231,8 @@ def clear_previous_week(
         n = len(PLAYER_POOL_NAME_BLOCKS)
         summary.append(f"{player_pool_tab}: cleared Name column across {n} block(s)")
 
-    client.clear_ranges(scratch_tab, [SCRATCH_RANGE])
-    summary.append(f"{scratch_tab}: cleared {SCRATCH_RANGE}")
-
     client.clear_ranges(dk_upload_tab, [DK_UPLOAD_RANGE])
     summary.append(f"{dk_upload_tab}: cleared {DK_UPLOAD_RANGE}")
-
-    if client.tab_exists(ENTRIES_RAW_TAB):
-        client.clear_ranges(ENTRIES_RAW_TAB, [ENTRIES_RAW_RANGE])
-        summary.append(f"{ENTRIES_RAW_TAB}: cleared {ENTRIES_RAW_RANGE}")
 
     if bankroll_tab and bankroll_cash:
         summary.append(_clear_bankroll_bucket(client, bankroll_tab, "cash", bankroll_cash))

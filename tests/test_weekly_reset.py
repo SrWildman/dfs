@@ -1,11 +1,8 @@
 from dfs.config import EntryTableConfig
 from dfs.weekly_reset import (
     DK_UPLOAD_RANGE,
-    ENTRIES_RAW_RANGE,
-    ENTRIES_RAW_TAB,
     LINEUPS_NAME_BLOCKS,
     PLAYER_POOL_NAME_BLOCKS,
-    SCRATCH_RANGE,
     clear_previous_week,
     clear_synced_tabs,
 )
@@ -17,12 +14,10 @@ class SpySheetsClient:
     def __init__(
         self,
         player_pool_a1_formula: str = "",
-        entries_raw_exists: bool = True,
         player_pool_header: list[str] | None = None,
     ):
         self.calls: list[tuple[str, list[str]]] = []
         self._player_pool_a1_formula = player_pool_a1_formula
-        self._entries_raw_exists = entries_raw_exists
         # "Added" at column Z by default -- any fixed position works,
         # since clear_previous_week finds it by header name, not letter.
         self._player_pool_header = player_pool_header or ["Name"] + [""] * 24 + ["Added"]
@@ -37,7 +32,7 @@ class SpySheetsClient:
         return [self._player_pool_header]
 
     def tab_exists(self, tab_name):
-        return tab_name != ENTRIES_RAW_TAB or self._entries_raw_exists
+        return True
 
 
 def test_clear_previous_week_targets_each_configured_tab():
@@ -46,7 +41,6 @@ def test_clear_previous_week_targets_each_configured_tab():
         client,
         lineups_tab="Lineups",
         player_pool_tab="Player Pool",
-        scratch_tab="Scratch",
         dk_upload_tab="DK Upload",
     )
     tabs_touched = [tab for tab, _ in client.calls]
@@ -59,45 +53,29 @@ def test_clear_previous_week_targets_each_configured_tab():
         "Player Pool",
         "Player Pool",
         "Player Pool",
-        "Scratch",
         "DK Upload",
-        "EntriesRaw",
     ]
-
-
-def test_clear_previous_week_clears_entries_raw_when_present():
-    client = SpySheetsClient()
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
-    calls = dict(client.calls)
-    assert calls[ENTRIES_RAW_TAB] == [ENTRIES_RAW_RANGE]
-
-
-def test_clear_previous_week_skips_entries_raw_when_tab_absent():
-    client = SpySheetsClient(entries_raw_exists=False)
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
-    tabs_touched = [tab for tab, _ in client.calls]
-    assert ENTRIES_RAW_TAB not in tabs_touched
 
 
 def test_clear_previous_week_clears_the_accumulated_add_a_player_list():
     # A6: "Added" found by header name (column Z in the fake's header --
     # see SpySheetsClient), never hardcoded.
     client = SpySheetsClient()
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     calls = [ranges for tab, ranges in client.calls if tab == "Player Pool"]
     assert ["Z3:Z52"] in calls
 
 
 def test_clear_previous_week_skips_the_added_list_when_column_is_absent():
     client = SpySheetsClient(player_pool_header=["Name"])
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     calls = [ranges for tab, ranges in client.calls if tab == "Player Pool"]
     assert not any(r[0].startswith("Z") for r in calls)
 
 
 def test_clear_previous_week_only_clears_column_a_for_name_columns():
     client = SpySheetsClient()
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     calls = dict(client.calls)
 
     assert calls["Lineups"] == [f"A{s}:A{e}" for s, e in LINEUPS_NAME_BLOCKS]
@@ -106,12 +84,11 @@ def test_clear_previous_week_only_clears_column_a_for_name_columns():
     assert all(r.startswith("A") and ":A" in r for r in calls["Player Pool"])
 
 
-def test_clear_previous_week_clears_full_grid_for_scratch_and_dk_upload():
+def test_clear_previous_week_clears_full_grid_for_dk_upload():
     client = SpySheetsClient()
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     calls = dict(client.calls)
 
-    assert calls["Scratch"] == [SCRATCH_RANGE]
     assert calls["DK Upload"] == [DK_UPLOAD_RANGE]
 
 
@@ -119,20 +96,20 @@ def test_clear_previous_week_skips_player_pool_when_name_column_is_a_formula():
     # Task K 4.3: once Player Pool's Name column is SORT/FILTER-driven off
     # EdgeRaw, clearing it on `dfs week new` would destroy the feature.
     client = SpySheetsClient(player_pool_a1_formula='=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER(...)),"")')
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     tabs_touched = [tab for tab, _ in client.calls]
 
     # The Name column is skipped (still formula-driven), but the
     # add-a-player control cell (a plain typed value, A3) and the
     # accumulated add-a-player list (A6) are cleared regardless -- neither
     # is part of the formula-driven-ness check.
-    assert tabs_touched == ["Lineups", "Player Pool", "Player Pool", "Scratch", "DK Upload", "EntriesRaw"]
+    assert tabs_touched == ["Lineups", "Player Pool", "Player Pool", "DK Upload"]
     assert client.calls[1] == ("Player Pool", ["B1"])
 
 
 def test_clear_previous_week_still_clears_player_pool_when_it_holds_typed_values():
     client = SpySheetsClient(player_pool_a1_formula="Patrick Mahomes")
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     calls = dict(client.calls)
 
     assert calls["Player Pool"] == [f"A{s}:A{e}" for s, e in PLAYER_POOL_NAME_BLOCKS]
@@ -140,7 +117,7 @@ def test_clear_previous_week_still_clears_player_pool_when_it_holds_typed_values
 
 def test_clear_previous_week_skips_bankroll_when_not_configured():
     client = SpySheetsClient()
-    clear_previous_week(client, "Lineups", "Player Pool", "Scratch", "DK Upload")
+    clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     tabs_touched = [tab for tab, _ in client.calls]
     assert "Bankroll" not in tabs_touched
 
@@ -154,7 +131,6 @@ def test_clear_previous_week_clears_bankroll_typed_columns_only():
         client,
         "Lineups",
         "Player Pool",
-        "Scratch",
         "DK Upload",
         bankroll_tab="Bankroll",
         bankroll_cash=cash,
@@ -184,7 +160,6 @@ def test_clear_previous_week_skips_a_bucket_that_is_configured_none():
         client,
         "Lineups",
         "Player Pool",
-        "Scratch",
         "DK Upload",
         bankroll_tab="Bankroll",
         bankroll_cash=cash,
