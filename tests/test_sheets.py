@@ -34,6 +34,7 @@ class FakeWorksheet:
         self.dimension_group_calls: list[dict] = []
         self.dimension_group_update_calls: list[dict] = []
         self.column_groups: list[dict] = []
+        self.row_groups: list[dict] = []
         self.insert_dimension_calls: list[dict] = []
         self.delete_dimension_calls: list[dict] = []
         self.move_dimension_calls: list[dict] = []
@@ -191,8 +192,9 @@ class FakeSpreadsheet:
                 rng = request["addDimensionGroup"]["range"]
                 ws = self._ws_by_id(rng["sheetId"])
                 ws.dimension_group_calls.append(request["addDimensionGroup"])
-                depth = 1 + sum(1 for g in ws.column_groups if g["range"] == rng)
-                ws.column_groups.append({"range": rng, "depth": depth, "collapsed": False})
+                groups = ws.row_groups if rng["dimension"] == "ROWS" else ws.column_groups
+                depth = 1 + sum(1 for g in groups if g["range"] == rng)
+                groups.append({"range": rng, "depth": depth, "collapsed": False})
             if "updateDimensionGroup" in request:
                 update = request["updateDimensionGroup"]
                 # Real Sheets rejects this request with no `depth` (or
@@ -204,17 +206,19 @@ class FakeSpreadsheet:
                 rng = update["dimensionGroup"]["range"]
                 ws = self._ws_by_id(rng["sheetId"])
                 ws.dimension_group_update_calls.append(update)
-                matches = [g for g in ws.column_groups if g["range"] == rng]
+                groups = ws.row_groups if rng["dimension"] == "ROWS" else ws.column_groups
+                matches = [g for g in groups if g["range"] == rng]
                 if matches:
                     deepest = max(matches, key=lambda g: g["depth"])
                     deepest["collapsed"] = update["dimensionGroup"]["collapsed"]
             if "deleteDimensionGroup" in request:
                 rng = request["deleteDimensionGroup"]["range"]
                 ws = self._ws_by_id(rng["sheetId"])
-                matches = [g for g in ws.column_groups if g["range"] == rng]
+                groups = ws.row_groups if rng["dimension"] == "ROWS" else ws.column_groups
+                matches = [g for g in groups if g["range"] == rng]
                 if matches:
                     deepest = max(matches, key=lambda g: g["depth"])
-                    ws.column_groups.remove(deepest)
+                    groups.remove(deepest)
             if "insertDimension" in request:
                 sheet_id = request["insertDimension"]["range"]["sheetId"]
                 self._ws_by_id(sheet_id).insert_dimension_calls.append(request["insertDimension"])
@@ -285,6 +289,7 @@ class FakeSpreadsheet:
                     "properties": {"sheetId": ws.id},
                     "conditionalFormats": ws.conditional_formats,
                     "columnGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.column_groups],
+                    "rowGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.row_groups],
                     "filterViews": ws.filter_views,
                     "protectedRanges": ws.protected_ranges,
                 }
@@ -796,6 +801,79 @@ def test_clear_column_groups_is_a_no_op_when_nothing_is_grouped(cfg, monkeypatch
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
     client.clear_column_groups("T")  # must not raise
     assert fake_sheet._worksheets["T"].column_groups == []
+
+
+def test_group_rows_groups_only_the_given_rows(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_rows("T", 5, 12)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.dimension_group_calls) == 1
+    r = ws.dimension_group_calls[0]["range"]
+    assert r["dimension"] == "ROWS"
+    assert (r["startIndex"], r["endIndex"]) == (4, 12)  # rows 5..12, 0-indexed half-open
+
+
+def test_group_rows_collapsed_folds_the_group_shut(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_rows("T", 5, 12, collapsed=True)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.dimension_group_update_calls) == 1
+    assert ws.dimension_group_update_calls[0]["dimensionGroup"]["depth"] == 1
+    assert ws.dimension_group_update_calls[0]["dimensionGroup"]["collapsed"] is True
+    assert ws.row_groups[0]["collapsed"] is True
+
+
+def test_group_rows_not_collapsed_by_default(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_rows("T", 5, 12)
+    ws = fake_sheet._worksheets["T"]
+    assert ws.dimension_group_update_calls == []
+    assert ws.row_groups[0]["collapsed"] is False
+
+
+def test_group_rows_does_not_affect_column_groups(cfg, monkeypatch, tmp_path):
+    # Row and column groups are tracked separately -- grouping rows must
+    # not be mistaken for (or interfere with) a column group over the
+    # "same" range indices.
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_columns("T", "A", "H")
+    client.group_rows("T", 1, 8)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.column_groups) == 1
+    assert len(ws.row_groups) == 1
+
+
+def test_group_rows_stacks_a_deeper_group_on_repeat_calls(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_rows("T", 5, 12)
+    client.group_rows("T", 5, 12)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.dimension_group_calls) == 2
+    assert [g["depth"] for g in ws.row_groups] == [1, 2]
+
+
+def test_clear_row_groups_removes_every_stacked_level(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    for _ in range(8):
+        client.group_rows("T", 1, 1)
+    ws = fake_sheet._worksheets["T"]
+    assert len(ws.row_groups) == 8
+
+    client.clear_row_groups("T")
+    assert ws.row_groups == []
+
+
+def test_clear_row_groups_is_a_no_op_when_nothing_is_grouped(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.clear_row_groups("T")  # must not raise
+    assert fake_sheet._worksheets["T"].row_groups == []
 
 
 def test_set_column_group_control_before_flips_the_per_sheet_toggle_position(cfg, monkeypatch, tmp_path):

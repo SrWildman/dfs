@@ -762,6 +762,50 @@ class SheetsClient:
             )
         sheet.batch_update({"requests": requests})
 
+    def clear_row_groups(self, tab_name: str) -> None:
+        """Row-dimension twin of `clear_column_groups` -- same reason it
+        exists (`addDimensionGroup` nests a new group over an already-
+        grouped range instead of replacing it), read from the sheet's own
+        `rowGroups` metadata rather than assumed."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),rowGroups)"})
+        groups = []
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                groups = s.get("rowGroups", []) or []
+                break
+        if not groups:
+            return
+        requests = [{"deleteDimensionGroup": {"range": group["range"]}} for group in groups]
+        sheet.batch_update({"requests": requests})
+
+    def group_rows(self, tab_name: str, first_row: int, last_row: int, *, collapsed: bool = False) -> None:
+        """Row-dimension twin of `group_columns` -- groups `first_row`
+        through `last_row` (1-indexed, inclusive) so they can be
+        collapsed/expanded from the sheet UI (Data > Group rows). Same
+        "does not replace an existing group" caveat as `group_columns`:
+        callers that re-run this on every rebuild must call
+        `clear_row_groups` first. `collapsed=True` folds the group shut
+        immediately, same `updateDimensionGroup`-with-`depth=1` mechanism."""
+        sheet, ws = self._ws(tab_name)
+        dimension_range = {
+            "sheetId": ws.id,
+            "dimension": "ROWS",
+            "startIndex": first_row - 1,
+            "endIndex": last_row,
+        }
+        requests = [{"addDimensionGroup": {"range": dimension_range}}]
+        if collapsed:
+            requests.append(
+                {
+                    "updateDimensionGroup": {
+                        "dimensionGroup": {"range": dimension_range, "depth": 1, "collapsed": True},
+                        "fields": "collapsed",
+                    }
+                }
+            )
+        sheet.batch_update({"requests": requests})
+
     # ------------------------------------------------------------------
     # Presentation primitives.
     #
