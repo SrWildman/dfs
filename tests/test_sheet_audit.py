@@ -89,12 +89,61 @@ def test_audit_tab_reports_not_present():
 
 
 def test_audit_tab_clean_when_everything_matches():
+    # Real EdgeRaw column names now that the widths-audit extension checks
+    # every header name against EDGE_WIDTHS -- "DK Sal"/"Pts" (the earlier
+    # fixture's own aliases) aren't real EdgeRaw columns, so they'd always
+    # fail that check regardless of width. "Flag" is genuinely absent
+    # from EDGE_WIDTHS on purpose (hidden internal column, never sized),
+    # so it must be marked hidden here or the new check would flag it too.
     client = FakeAuditClient(
-        header=["Name", "DK Sal", "Pts", "Flag", "Avail"],
-        widths={"A": 165, "B": 78, "C": 62, "D": 96, "E": 60},
+        header=["Name", "Salary", "ProjPts", "Flag", "Avail"],
+        widths={"A": 165, "B": 78, "C": 85, "D": 96, "E": 60},
+        hidden_cols={"D"},
     )
     audit = audit_tab(client, "EdgeRaw", header_row=1)
     assert audit.clean, audit.issues
+
+
+def test_audit_tab_flags_a_column_missing_from_its_widths_dict():
+    # Part B widths-audit extension (2026-09-22): closes the class behind
+    # the historical `Team Implied`/`Ceil`/`Overflow` (missing from
+    # BUILDER_WIDTHS) and EdgeRaw's own `Pool` (missing from EDGE_WIDTHS)
+    # incidents -- a column can have SOME live width and still be
+    # entirely untracked in code, which `_min_header_width_px` alone
+    # can't see (it only checks the header text against whatever width
+    # is already there, however that width got set).
+    client = FakeAuditClient(
+        header=["Name", "Salary", "Not A Real Column"],
+        widths={"A": 165, "B": 78, "C": 100},
+    )
+    audit = audit_tab(client, "EdgeRaw", header_row=1)
+    assert any("no width entry in code for" in i and "Not A Real Column" in i for i in audit.issues)
+
+
+def test_audit_tab_skips_hidden_columns_for_the_widths_dict_check():
+    # Id/Flag/Added are deliberately hidden and deliberately absent from
+    # EDGE_WIDTHS/BUILDER_WIDTHS -- a hidden column's width is invisible
+    # by design, so it isn't a real gap to flag.
+    client = FakeAuditClient(
+        header=["Name", "Salary", "Flag"],
+        widths={"A": 165, "B": 78, "C": 100},
+        hidden_cols={"C"},
+    )
+    audit = audit_tab(client, "EdgeRaw", header_row=1)
+    assert not any("no width entry in code for" in i for i in audit.issues)
+
+
+def test_audit_tab_widths_dict_check_only_applies_to_tabs_that_have_one():
+    # Slate Grid/Exposure/Movement/etc manage widths by column LETTER
+    # inside their own style_* function -- no header-name-keyed dict
+    # exists to compare against, so this check must not fire there at
+    # all (never mind flag every column as "missing").
+    client = FakeAuditClient(
+        header=["Name", "Not A Real Column Either"],
+        widths={"A": 165, "B": 100},
+    )
+    audit = audit_tab(client, "Slate Grid", header_row=1)
+    assert not any("no width entry in code for" in i for i in audit.issues)
 
 
 def test_audit_tab_flags_unstyled_header():

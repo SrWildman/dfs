@@ -686,6 +686,12 @@ def apply_grouped_color_scales(
 # EDGE_COLUMNS still gets the right width on the right column.
 EDGE_WIDTHS = {
     "Id": 90,
+    # Part B widths-audit extension (2026-09-22): EdgeRaw's own checkbox
+    # column had NO explicit width anywhere in code -- the exact
+    # "unmanaged column" class the new sheet_audit.py check exists to
+    # catch. Matches its actual current live width (found fine, not
+    # truncated), just centralizes it instead of leaving it to chance.
+    "Pool": 90,
     "Name": 165,
     # Phase 6, Part 1.5: Position/ProjPts/Ceiling/CeilPct/ProjOwn/Leverage/
     # OverUnder/Spread/GameEnv/OppPosRank all clipped live at their old
@@ -888,7 +894,17 @@ def _edge_letter(column_name: str) -> str | None:
     """Real EdgeRaw column letter for a column NAME, or None if that column
     isn't in EDGE_COLUMNS on this version of the CLI. Offset by
     EDGE_DATA_OFFSET since column A is Pool, not the first EDGE_COLUMNS
-    entry -- see derived.py's own comment on EDGE_DATA_OFFSET."""
+    entry -- see derived.py's own comment on EDGE_DATA_OFFSET.
+
+    Part B widths-audit extension (2026-09-22): `POOL_HEADER` special-
+    cased to `POOL_COLUMN` (both fixed, real constants -- not a guess) so
+    `EDGE_WIDTHS["Pool"]` actually resolves to something instead of
+    silently doing nothing (`Pool` isn't in `EDGE_COLUMNS` -- that's the
+    whole reason `EDGE_DATA_OFFSET` exists -- so the plain lookup below
+    always returned None for it, which is exactly why EdgeRaw's own Pool
+    column had no code-managed width at all before this)."""
+    if column_name == POOL_HEADER:
+        return POOL_COLUMN
     if column_name not in EDGE_COLUMNS:
         return None
     return column_letter(EDGE_COLUMNS.index(column_name) + EDGE_DATA_OFFSET)
@@ -1306,6 +1322,14 @@ BUILDER_WIDTHS = {
     # denominator changed from the lineup's own running salary total to
     # the salary cap constant -- see `polish_lineups_pct_of_cap`).
     "% of Cap": 90,
+    # Part B widths-audit extension (2026-09-22): Lineups' own "Issues"
+    # column was already given an explicit width (110px), but via a
+    # one-off `set_column_widths` call inside `polish_guardrails` rather
+    # than this dict -- correct live, but invisible to the new
+    # sheet_audit.py check that everything else's width is tracked
+    # through. Centralized here to match; `polish_guardrails`'s own call
+    # is redundant now but harmless (same value, set twice).
+    "Issues": 110,
     "Pool": 64,
     # Week 3 feedback (A5): shrunk from 64. The per-row cell text is just
     # the arrow now (`edge_row_hyperlink_formula`), which alone would fit

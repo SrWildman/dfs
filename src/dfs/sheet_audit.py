@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from dfs.sheet_style import AVAIL_CHIPS, FIELD_FORMATS, FLAG_CHIPS, HEADER_FMT
+from dfs.sheet_style import AVAIL_CHIPS, BUILDER_WIDTHS, EDGE_WIDTHS, FIELD_FORMATS, FLAG_CHIPS, HEADER_FMT
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
@@ -108,6 +108,29 @@ FREEZE_OVERRIDES: dict[str, int] = {}
 # "Slots filled" never triggers them regardless of this override.
 HEADER_STYLE_WIDTH_OVERRIDES: dict[str, int] = {"Exposure": 7}
 
+# Part B widths-audit extension (2026-09-22): `_min_header_width_px`
+# only ever checked that a column's width fits its own HEADER text --
+# it says nothing about whether the column is being tracked at all. The
+# real incidents this closes (`Team Implied`/`Ceil`/`Overflow` missing
+# from `BUILDER_WIDTHS` entirely, EdgeRaw's own `Pool` never in
+# `EDGE_WIDTHS`, Lineups' `Issues` width set by a one-off call instead of
+# the dict -- see CONTRIBUTING.md's Part 1.5 entry and this session's own
+# fixes) all shared one shape: a column with SOME width, live, that
+# nothing in code was actually responsible for, so the next person to
+# touch that width had no dict entry to find or update -- silent until
+# someone happens to look at the rendered sheet. Only tabs whose widths
+# are centrally tracked by one of these two header-name-keyed dicts can
+# be checked this way; Slate Grid/Exposure/Movement/Results/etc manage
+# their own widths by column LETTER inside their own `style_*` function,
+# with no name-keyed dict to compare against -- not checked here, not a
+# gap this specific extension is scoped to close.
+WIDTHS_DICT_BY_TAB: dict[str, dict[str, int]] = {
+    "EdgeRaw": EDGE_WIDTHS,
+    "PlayerPoolRaw": BUILDER_WIDTHS,
+    "Player Pool": BUILDER_WIDTHS,
+    "Lineups": BUILDER_WIDTHS,
+}
+
 SKIPPED_TABS = [
     "Board (three side-by-side panels, no single header row)",
     "Bankroll (KPI block + two ledgers)",
@@ -175,6 +198,16 @@ def audit_tab(client: SheetsClient, tab: str, *, header_row: int) -> TabAudit:
             too_narrow.append(f"{column_letter(i)} ({name!r}: {pixel_size}px < ~{needed}px)")
     if too_narrow:
         audit.issues.append(f"header text likely truncated: {', '.join(too_narrow)}")
+
+    widths_dict = WIDTHS_DICT_BY_TAB.get(tab)
+    if widths_dict is not None:
+        unmanaged = [
+            name
+            for i, name in enumerate(header)
+            if name and name not in widths_dict and not (i < len(widths) and widths[i].get("hiddenByUser"))
+        ]
+        if unmanaged:
+            audit.issues.append(f"no width entry in code for: {', '.join(unmanaged)}")
 
     data_row = header_row + 1
     data_fmt = client.get_cell_formats(tab, f"A{data_row}:{last_col}{data_row}")

@@ -56,8 +56,13 @@ def test_edge_widths_and_groups_only_name_real_edge_columns():
     # actually is a current EDGE_COLUMNS entry. A typo'd or removed name
     # here doesn't error, it just silently styles nothing (_edge_letter
     # returns None), so this pins the dicts against drifting from the
-    # column list without anyone noticing.
+    # column list without anyone noticing. "Pool" is the one deliberate
+    # exception (Part B widths-audit extension): it's EdgeRaw's own fixed
+    # column A, never an EDGE_COLUMNS entry (that's the whole reason
+    # EDGE_DATA_OFFSET exists) -- _edge_letter special-cases it directly.
     for name in EDGE_WIDTHS:
+        if name == "Pool":
+            continue
         assert name in EDGE_COLUMNS, f"{name!r} in EDGE_WIDTHS is not an EDGE_COLUMNS entry"
     for first, last in EDGE_COLUMN_GROUPS:
         assert first in EDGE_COLUMNS
