@@ -1063,13 +1063,46 @@ def test_stack_check_formula_flags_dst_against_the_lineups_own_qb():
 
 
 def test_stack_check_formula_flags_more_than_one_rb_sharing_a_gameid():
+    # Part B (2026-09-22): rebuilt as a TRANSPOSE pairwise-matrix
+    # comparison, not COUNTIFS(range,range) -- COUNTIFS can't take a
+    # computed array (resolved_pos, below), only a real cell range. See
+    # _stack_check_formula's own docstring for the full derivation,
+    # confirmed empirically against Scratch.
     from dfs.sheet_style import _stack_check_formula
 
     formula = _stack_check_formula(9, 17, position_col="B", team_col="C", opp_col="H", gameid_col="AA")
-    assert (
-        'IF(SUMPRODUCT(($B$9:$B$17="RB")*($AA$9:$AA$17<>"")*(COUNTIFS($B$9:$B$17,"RB",'
-        '$AA$9:$AA$17,$AA$9:$AA$17)>1))>0,"RB/GAME","")' in formula
+    resolved_pos = (
+        'IF($B$9:$B$17="FLEX",IFERROR(VLOOKUP($A$9:$A$17,PlayerPoolRaw!$A:$B,2,FALSE),""),$B$9:$B$17)'
     )
+    is_rb = f'({resolved_pos}="RB")'
+    pair_matches = (
+        f'SUMPRODUCT(($AA$9:$AA$17=TRANSPOSE($AA$9:$AA$17))*($AA$9:$AA$17<>"")*{is_rb}*TRANSPOSE({is_rb}*1))'
+    )
+    self_matches = f'SUMPRODUCT({is_rb}*($AA$9:$AA$17<>"")*1)'
+    assert f'IF({pair_matches}-{self_matches}>0,"RB/GAME","")' in formula
+
+
+def test_stack_check_formula_resolves_flex_to_the_players_real_position():
+    # Part B (2026-09-22), found live: "Pos." is a FIXED per-slot label
+    # ("FLEX", never "RB"), so an RB rostered in the FLEX slot was
+    # invisible to the old Position="RB" check -- the exact same
+    # static-label-vs-real-data confusion this codebase has hit before
+    # (RB/GAME's formula-blank GameID, the DST/QB slot-label bug). QB/DST
+    # never need this treatment -- neither can legally sit in FLEX.
+    from dfs.sheet_style import _stack_check_formula
+
+    formula = _stack_check_formula(9, 17, position_col="B", team_col="C", opp_col="H", gameid_col="AA")
+    assert 'IF($B$9:$B$17="FLEX"' in formula
+    assert "VLOOKUP($A$9:$A$17,PlayerPoolRaw!$A:$B,2,FALSE)" in formula
+
+
+def test_stack_check_formula_raw_tab_is_overridable():
+    from dfs.sheet_style import _stack_check_formula
+
+    formula = _stack_check_formula(
+        9, 17, position_col="B", team_col="C", opp_col="H", gameid_col="AA", raw_tab="TemplateRaw"
+    )
+    assert "TemplateRaw!$A:$B" in formula
 
 
 def test_stack_check_formula_rb_per_game_excludes_formula_blank_gameid():

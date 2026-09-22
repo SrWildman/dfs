@@ -80,7 +80,7 @@ function happens to touch it first.
 from __future__ import annotations
 
 from dfs.derived import CHALK_OWNERSHIP_THRESHOLD, EDGE_COLUMNS, EDGE_DATA_OFFSET, ZONE_LABELS
-from dfs.sheet_links import LINKED_EDGE_COLUMNS
+from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
 
@@ -1579,7 +1579,14 @@ def _slot_check_formula(start: int, end: int, row: int, avail_col: str) -> str:
 
 
 def _stack_check_formula(
-    start: int, end: int, *, position_col: str, team_col: str, opp_col: str, gameid_col: str
+    start: int,
+    end: int,
+    *,
+    position_col: str,
+    team_col: str,
+    opp_col: str,
+    gameid_col: str,
+    raw_tab: str = PLAYER_POOL_RAW_TAB,
 ) -> str:
     """Part 7.4's two "real Issues warnings" stack rules -- both simply
     correct for cash and GPP alike (unlike stack SHAPE, which is
@@ -1628,7 +1635,35 @@ def _stack_check_formula(
 
     Deliberately NOT a QB+RB rule (7.4's own text: sources disagree
     wildly, 0.07 to 0.43, and the two that measured it carefully call it
-    functionally zero)."""
+    functionally zero).
+
+    Part B (2026-09-22): `rb_per_game` read `${position_col}` (Lineups'
+    `Pos.`, a FIXED per-slot label -- "QB, RB, RB, WR, WR, WR, TE, FLEX,
+    DST" -- filled or not) directly, so it was blind to an RB rostered in
+    the FLEX slot: that row's label reads "FLEX", never "RB", regardless
+    of which position actually sits there. `lineups.py`/`late_swap.py`
+    already resolve a FLEX slot's real position from the roster data
+    (`player.position`) rather than trusting the slot label; this mirrors
+    that in a formula via `resolved_pos` below: FLEX resolves to the
+    named player's real position (`raw_tab`'s own `Pos.` column, VLOOKUP
+    by Name), every other slot keeps its own label (QB/DST can never
+    legally sit in FLEX, so trusting their own slot label is always
+    correct -- this fix only mattered for RB).
+
+    `COUNTIFS(range,range)`'s self-referential duplicate-count trick (the
+    ORIGINAL implementation, still used elsewhere in this codebase, e.g.
+    `sheet_pool_formulas.py`) requires a real cell RANGE argument, not a
+    computed array -- `resolved_pos` is a formula result, not a range, so
+    COUNTIFS can't take it. Rebuilt as a matrix comparison instead:
+    `(gameid_range = TRANSPOSE(gameid_range))` broadcasts to an NxN
+    pairwise-equality matrix (confirmed empirically on the template's
+    Scratch tab, same discipline as every other array-broadcast finding
+    this session), multiplied by both a normal and a transposed copy of
+    the RB mask to keep only RB-vs-RB pairs with a real (non-blank)
+    shared GameID, summed, then the N self-matches (i==j, every RB
+    trivially shares a GameID with itself) subtracted back out. A
+    strictly positive remainder means at least one off-diagonal RB pair
+    shares a game."""
     qb_team = (
         f"IFERROR(INDEX(${team_col}${start}:${team_col}${end},"
         f'MATCH("QB",${position_col}${start}:${position_col}${end},0)),"")'
@@ -1639,13 +1674,19 @@ def _stack_check_formula(
     )
     dst_vs_own_qb = f'IF(AND({qb_team}<>"",{dst_opp}<>"",{qb_team}={dst_opp}),"DST/QB","")'
 
-    rb_per_game = (
-        f'IF(SUMPRODUCT((${position_col}${start}:${position_col}${end}="RB")*'
-        f'(${gameid_col}${start}:${gameid_col}${end}<>"")*'
-        f'(COUNTIFS(${position_col}${start}:${position_col}${end},"RB",'
-        f"${gameid_col}${start}:${gameid_col}${end},${gameid_col}${start}:${gameid_col}${end})>1))>0,"
-        f'"RB/GAME","")'
+    position_rng = f"${position_col}${start}:${position_col}${end}"
+    gameid_rng = f"${gameid_col}${start}:${gameid_col}${end}"
+    resolved_pos = (
+        f'IF({position_rng}="FLEX",'
+        f'IFERROR(VLOOKUP($A${start}:$A${end},{raw_tab}!$A:$B,2,FALSE),""),'
+        f"{position_rng})"
     )
+    is_rb = f'({resolved_pos}="RB")'
+    rb_pair_matches = (
+        f'SUMPRODUCT(({gameid_rng}=TRANSPOSE({gameid_rng}))*({gameid_rng}<>"")*{is_rb}*TRANSPOSE({is_rb}*1))'
+    )
+    rb_self_matches = f'SUMPRODUCT({is_rb}*({gameid_rng}<>"")*1)'
+    rb_per_game = f'IF({rb_pair_matches}-{rb_self_matches}>0,"RB/GAME","")'
     return f'TEXTJOIN(" ",TRUE,{dst_vs_own_qb},{rb_per_game})'
 
 
