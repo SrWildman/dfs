@@ -100,10 +100,9 @@ position's cap and some picks are hidden, not dropped.
 
 **Commonly goes wrong:** typing into Player Pool directly, anywhere other
 than row 1's search box. Every other cell is fully computed (and
-protected, warning-only) -- Player Pool's Source column tells you
-whether a given row came from EdgeRaw or that search box, and its "Edge
-↗" column jumps straight to that player's row on EdgeRaw, the fastest
-way to find and remove one (set their Pool dropdown back to blank).
+protected, warning-only) -- its "Edge ↗" column jumps straight to that
+player's row on EdgeRaw, the fastest way to find and remove one (set
+their Pool dropdown back to blank).
 
 ## 4. Build lineups
 

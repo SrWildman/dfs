@@ -210,23 +210,24 @@ LINKED_COLUMNS = [
 PLAYER_POOL_RAW_COLUMN_ORDER = list(BASE_COLUMN_ORDER)
 
 # Player Pool: "Source" (which of EdgeRaw/the add-a-player row a row came
-# from) belongs beside the other identity-ish columns, so it's inserted
-# right after Opp. (Venue no longer sits in IDENTITY -- see module
-# docstring); "Edge ↗" (A3: a HYPERLINK straight to this player's row on
-# EdgeRaw, so removing someone -- unchecking Pool there -- is one click
-# away instead of a scroll/search through 743 rows) sits right next to
-# it, since both are about managing this row rather than describing the
-# player; "Pool" (Fix 2.11's surfaced Cash/GPP/Both value) and "Overflow"
-# (the over-the-cap warning) are both about *this tab's own roster
-# mechanics*, not a player attribute, so they stay appended at the very
-# end regardless of what else moves around them. "Used"/"In" (Phase 5B:
-# how many of THIS WEEK'S lineups roster this player, and which ones) are
-# the newest addition and append-only past everything else, per
-# `sheet_links.link_edge_columns`'s own append convention --
-# `sheet_pool_usage.py` writes their formulas.
+# from) used to sit right after IDENTITY here -- removed entirely (Week 3
+# feedback, A4, 2026-09-22): Sam had no use for it. "Edge ↗" (A3: a
+# HYPERLINK straight to this player's row on EdgeRaw, so removing someone
+# -- unchecking Pool there -- is one click away instead of a scroll/search
+# through 743 rows) sits right after IDENTITY now, since it's about
+# managing this row rather than describing the player; "Pool" (Fix 2.11's
+# surfaced Cash/GPP/Both value) and "Overflow" (the over-the-cap warning)
+# are both about *this tab's own roster mechanics*, not a player
+# attribute, so they stay appended at the very end regardless of what
+# else moves around them. "Used"/"In" (Phase 5B: how many of THIS WEEK'S
+# lineups roster this player, and which ones) are the newest addition and
+# append-only past everything else, per `sheet_links.link_edge_columns`'s
+# own append convention -- `sheet_pool_usage.py` writes their formulas.
+# "Added" (Week 3 feedback, A6, 2026-09-22) is hidden outright, same
+# treatment as `Id`/`Flag` in INTERNAL -- see `weekly_reset.
+# PLAYER_POOL_ADDED_NAMES_HEADER`'s own comment for what it holds.
 PLAYER_POOL_COLUMN_ORDER = [
     *IDENTITY,
-    "Source",
     "Edge ↗",
     *DECISION,
     GAME_LABEL,

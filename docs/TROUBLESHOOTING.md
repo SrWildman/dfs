@@ -121,7 +121,7 @@ mechanism, not the primary one.
 ---
 
 **Player Pool's Venue column (or another column that's just a category,
-like Source) looks colour-scaled instead of chipped.**
+like Pool) looks colour-scaled instead of chipped.**
 Cause: a colour scale hand-applied directly in the sheet at some point,
 before `sheet_style.FIELD_COLOR_SCALES` existed as the one canonical
 policy every tab follows.

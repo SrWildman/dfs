@@ -1368,18 +1368,6 @@ def test_polish_builder_tab_chips_flag_and_avail_columns_when_present():
     assert "2 chip column(s)" in result
 
 
-def test_polish_builder_tab_chips_source_column_when_present():
-    from dfs.sheet_style import SOURCE_CHIPS
-
-    client = FakeBuilderTabClient(["Name", "Source"])
-    result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
-
-    assert client.clear_cf_calls == [None, "B"]
-    source_rules = [r for a1, r in client.boolean_rule_calls if a1 == "B2:B100"]
-    assert len(source_rules) == len(SOURCE_CHIPS)
-    assert "1 chip column(s)" in result
-
-
 def test_polish_builder_tab_chips_venue_column_when_present():
     client = FakeBuilderTabClient(["Name", "Venue"])
     result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
@@ -1445,6 +1433,20 @@ def test_polish_builder_tab_greys_own_status_when_present():
 
     formatted = [rng for rng, _ in client.format_calls if rng == "B2:B100"]
     assert formatted, "OwnStatus column should be formatted"
+
+
+def test_polish_builder_tab_shrinks_and_mutes_the_edge_link_when_present():
+    # Week 3 feedback (A5): a quiet affordance, not a call to action --
+    # smaller, muted text; the column WIDTH is BUILDER_WIDTHS' job, this
+    # is only about the cell's own text formatting.
+    from dfs.sheet_style import INK_MUTED
+
+    client = FakeBuilderTabClient(["Name", "Edge ↗"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+
+    edge_link_fmt = next(fmt for rng, fmt in client.format_calls if rng == "B2:B100")
+    assert edge_link_fmt["textFormat"]["foregroundColor"] == INK_MUTED
+    assert edge_link_fmt["textFormat"]["fontSize"] < 10
 
 
 def test_polish_builder_tab_styles_zone_label_columns():

@@ -865,14 +865,6 @@ AVAIL_CHIPS = {
     "Q": _chip(WARN_BG, WARN_FG),
 }
 
-# Player Pool's Source column (Task 5.3): which of the two ways a player
-# got into the pool. Neutral, not OK/WARN/CRIT -- neither source is a
-# problem, this is provenance, not a state to react to.
-SOURCE_CHIPS = {
-    "EdgeRaw": _chip(FLAT_BG, FLAT_FG),
-    "Picks": _chip(OK_BG, OK_FG),
-}
-
 # Player Pool's own surfaced Pool value (Fix 2.11) -- categorical state,
 # same treatment as Source/Venue, never a colour scale.
 POOL_TYPE_CHIPS = {
@@ -1055,6 +1047,29 @@ def _apply_own_status_marker(
         tab,
         f"{letter}{data_start}:{letter}{last_row}",
         {"textFormat": {"foregroundColor": INK_MUTED}, "horizontalAlignment": "CENTER"},
+    )
+
+
+def _apply_edge_link_style(
+    client: SheetsClient, tab: str, header: list, *, data_start: int, last_row: int
+) -> None:
+    """Week 3 feedback (A5), 2026-09-22: Sam: "Can we make the link a
+    little smaller, it's distracting to look at in its current state."
+    Shrinks "Edge ↗"'s font and mutes its colour so it reads as a quiet
+    affordance in the corner of the eye, not a call to action competing
+    with real decision columns -- the same visual demotion `INK_MUTED`
+    already gives `OwnStatus` just above. Column WIDTH is handled
+    separately, by `BUILDER_WIDTHS["Edge ↗"]` (this function only touches
+    text formatting); the hyperlink's own target/behaviour is untouched --
+    `edge_row_hyperlink_formula` shortened the displayed text itself
+    (`"Edge ↗"` -> `"↗"`) so a glyph-width column doesn't clip it."""
+    if "Edge ↗" not in header:
+        return
+    letter = column_letter(header.index("Edge ↗"))
+    client.format_range(
+        tab,
+        f"{letter}{data_start}:{letter}{last_row}",
+        {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 8}, "horizontalAlignment": "CENTER"},
     )
 
 
@@ -1291,9 +1306,16 @@ BUILDER_WIDTHS = {
     # denominator changed from the lineup's own running salary total to
     # the salary cap constant -- see `polish_lineups_pct_of_cap`).
     "% of Cap": 90,
-    "Source": 64,
     "Pool": 64,
-    "Edge ↗": 64,
+    # Week 3 feedback (A5): shrunk from 64. The per-row cell text is just
+    # the arrow now (`edge_row_hyperlink_formula`), which alone would fit
+    # in ~28px, but the HEADER cell still reads "Edge ↗" in full (the
+    # column's own lookup-by-name key, used everywhere -- renaming it
+    # would be a much bigger, out-of-scope change) -- found by
+    # `dfs setup audit-style` flagging 28px as truncating that header
+    # text. 60 is `sheet_audit._min_header_width_px("Edge ↗")` (57) plus
+    # a small margin, still meaningfully narrower than the original 64.
+    "Edge ↗": 60,
     "Used": 52,
     "In": 96,
     # "Team Implied"/"Ceil"/"Overflow" had NO entry here at all before this
@@ -1452,18 +1474,16 @@ def polish_builder_tab(
     else:
         scaled = apply_field_color_scales(client, tab, header, header_row=header_row, last_row=last_row)
 
-    # Flag/Avail/Venue chips, same as EdgeRaw's own (Flag/Avail were found
-    # missing entirely by `dfs setup audit-style`; Venue is new -- Fix
-    # 2.1/2.3), plus Player Pool's own Source column (Task 5.3). The
-    # whole-tab clear above already removed any prior rule on these
-    # columns; the per-column clear here just keeps this loop safe to call
-    # on its own too.
+    # Flag/Avail/Venue/Pool chips, same as EdgeRaw's own (Flag/Avail were
+    # found missing entirely by `dfs setup audit-style`; Venue is new --
+    # Fix 2.1/2.3). The whole-tab clear above already removed any prior
+    # rule on these columns; the per-column clear here just keeps this
+    # loop safe to call on its own too.
     chipped = 0
     data_start = header_row + 1
     for column_name, chips in (
         ("Flags", FLAG_CHIPS),
         ("Avail", AVAIL_CHIPS),
-        ("Source", SOURCE_CHIPS),
         ("Venue", VENUE_CHIPS),
         ("Pool", POOL_TYPE_CHIPS),
     ):
@@ -1475,7 +1495,7 @@ def polish_builder_tab(
             tab, f"{letter}{data_start}:{letter}{last_row}", {"horizontalAlignment": "CENTER"}
         )
         # Flags alone can hold more than one space-separated token (Fix
-        # 2.1); Avail/Source/Venue are still single exact values.
+        # 2.1); Avail/Venue/Pool are still single exact values.
         condition_type = "TEXT_CONTAINS" if column_name == "Flags" else "TEXT_EQ"
         for text, fmt in chips.items():
             client.add_boolean_rule(
@@ -1496,6 +1516,7 @@ def polish_builder_tab(
     _apply_position_tint(client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row)
     _apply_pool_tag_tint(client, tab, header, column_name="Pool", data_start=data_start, last_row=last_row)
     _apply_own_status_marker(client, tab, header, data_start=data_start, last_row=last_row)
+    _apply_edge_link_style(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_zone_label_style(client, tab, header, data_start=data_start, last_row=last_row)
 

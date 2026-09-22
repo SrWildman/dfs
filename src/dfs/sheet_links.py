@@ -91,18 +91,26 @@ def edge_lookup_formula(row: int, edge_tab: str, column_name: str) -> str:
 
 
 def edge_row_hyperlink_formula(row: int, edge_tab: str, edge_gid: int) -> str:
-    """A3: `=HYPERLINK("#gid=...&range=...","Edge ↗")` jumping straight to
-    this row's own player on `edge_tab`, so removing someone from the pool
+    """A3: `=HYPERLINK("#gid=...&range=...","↗")` jumping straight to this
+    row's own player on `edge_tab`, so removing someone from the pool
     (unchecking EdgeRaw's Pool column) is one click away instead of a
     scroll/search through 743 rows. `#gid=<id>&range=<a1>` is Sheets' own
     same-spreadsheet navigation syntax -- no full URL needed, so this
     keeps working if the spreadsheet itself is ever renamed or moved.
     Blank-name guarded like `edge_lookup_formula`; `IFNA` guards a name
     that doesn't currently match anything on EdgeRaw (a bye-week pick, a
-    stale add) so it reads as a dash rather than `#N/A`."""
+    stale add) so it reads as a dash rather than `#N/A`.
+
+    Week 3 feedback (A5), 2026-09-22: displayed text shortened from
+    `"Edge ↗"` to just `"↗"` -- Sam found the full label distracting, and
+    a glyph-only label is what lets `sheet_style.BUILDER_WIDTHS["Edge ↗"]`
+    narrow the column to roughly a glyph's width without clipping it. The
+    header text itself (the column's NAME, "Edge ↗", used everywhere this
+    codebase finds the column by header) is unchanged -- only the cell
+    VALUE each row's HYPERLINK displays."""
     match = f"MATCH($A{row},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_START},0)"
     target = f'"#gid={edge_gid}&range={_EDGE_RANGE_START}"&{match}'
-    return f'=IF($A{row}="","",IFNA(HYPERLINK({target},"Edge ↗"),"-"))'
+    return f'=IF($A{row}="","",IFNA(HYPERLINK({target},"↗"),"-"))'
 
 
 def write_edge_row_links(

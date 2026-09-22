@@ -418,9 +418,12 @@ def test_link_edge_columns_run_twice_only_appends_once():
 def test_edge_row_hyperlink_formula_targets_the_right_gid_and_column():
     formula = edge_row_hyperlink_formula(5, "EdgeRaw", 999)
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+    # Week 3 feedback (A5): displayed text shortened to just "↗" -- the
+    # column's own HEADER text stays "Edge ↗" (see sheet_columns.py),
+    # only this per-row HYPERLINK's visible label changed.
     assert formula == (
         f'=IF($A5="","",IFNA(HYPERLINK("#gid=999&range={start_col}"&'
-        f'MATCH($A5,EdgeRaw!${start_col}:${start_col},0),"Edge ↗"),"-"))'
+        f'MATCH($A5,EdgeRaw!${start_col}:${start_col},0),"↗"),"-"))'
     )
 
 
