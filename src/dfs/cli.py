@@ -461,9 +461,12 @@ def sheets_remove_retired_tabs(
     clear/style them. Asymmetric by design: run this with `--mode delete`
     against the template and `--mode hide` against the live sheet -- never
     delete on live, `EntriesRaw` may hold real pasted history. Idempotent
-    either way. See `sheet_tab_removal.py`'s module docstring and
-    `docs/PROMPT_DATA.md` for where a past entry's roster-slot detail
-    lives now that `EntriesRaw` is gone (the DK export CSVs on disk).
+    either way. Also removes these five's own rows from the `Instructions`
+    tab on whichever sheet this runs against, regardless of `--mode` --
+    the documentation should read correctly on both. See
+    `sheet_tab_removal.py`'s module docstring and `docs/PROMPT_DATA.md`
+    for where a past entry's roster-slot detail lives now that
+    `EntriesRaw` is gone (the DK export CSVs on disk).
     """
     if mode not in ("delete", "hide"):
         console.print(f"[red]Error:[/red] --mode must be 'delete' or 'hide', got {mode!r}")

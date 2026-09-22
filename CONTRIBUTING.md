@@ -1490,6 +1490,16 @@ happened to be long enough to actually truncate. Added `"Black/White/
 Purple": 150` to `BUILDER_WIDTHS`, same fix shape as `"Edge ↗"` above;
 re-verified clean via `audit-style` on the live sheet afterward.
 
+**Instructions tab, both sheets:** `remove-retired-tabs` also deletes
+these five's own rows from `Instructions` (matched by column A text, not
+a hardcoded row number, so it isn't thrown off by the tab's other rows
+shifting over time), regardless of `--mode` -- the documentation should
+read correctly on both sheets even though one deletes the tabs and the
+other only hides them. Verified by reading `Instructions` back on both:
+4 rows removed on each (`Scratch`; `EntriesRaw`; `GPPin`; the combined
+`DKLineupsRaw / DKLineupsFinal` row), everything below shifted up
+correctly, nothing else touched.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
