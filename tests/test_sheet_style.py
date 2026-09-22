@@ -22,6 +22,7 @@ from dfs.sheet_style import (
     POOL_TAG_TINTS,
     POSITION_TINTS,
     VENUE_CHIPS,
+    WARM_MID,
     WARN_BG,
     WARN_FG,
     WEEK_ORDER,
@@ -94,7 +95,11 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     assert FIELD_COLOR_SCALES["ImpliedMove"] == "diverging"  # scored separately, zero as the midpoint
     assert FIELD_COLOR_SCALES["TotMove"] == "diverging"
     assert FIELD_COLOR_SCALES["SpdMove"] == "diverging"
-    assert FIELD_COLOR_SCALES["Spread"] == "diverging"  # signed, zero (pick'em) is the midpoint
+    # Week 3 feedback, A1 (2026-09-22): NOT diverging -- a more negative Spread always
+    # means a bigger favorite, a fixed monotonic reading (unlike the
+    # Move columns just above, where "which way is good" is contextual),
+    # same "lower is better" shape as OppPosRank below.
+    assert FIELD_COLOR_SCALES["Spread"] == "reversed"
     assert FIELD_COLOR_SCALES["Own%"] == "warm"  # high ownership is chalk, not "good" (Fix 2.8)
     assert FIELD_COLOR_SCALES["OppPosRank"] == "reversed"  # 1 (toughest matchup) is best, not worst
 
@@ -482,13 +487,39 @@ def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
     assert qb_spec["a1_ranges"] == [f"{proj_pts_col}2:{proj_pts_col}2", f"{proj_pts_col}4:{proj_pts_col}4"]
 
 
-def test_polish_edge_move_and_spread_scales_are_diverging_at_zero():
+def test_polish_edge_move_scales_are_diverging_at_zero():
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    diverging = [kwargs for _rng, kwargs in client.color_scale_calls if kwargs.get("mid_type") == "NUMBER"]
-    assert len(diverging) == 4  # ImpliedMove, TotMove, SpdMove, Spread
-    assert all(kwargs["mid_value"] == "0" for kwargs in diverging)
+    # mid_value == "0" specifically -- excludes A2's Own% fixed-at-chalk
+    # midpoint below, which is also mid_type "NUMBER" but not zero.
+    diverging = [
+        kwargs
+        for _rng, kwargs in client.color_scale_calls
+        if kwargs.get("mid_type") == "NUMBER" and kwargs.get("mid_value") == "0"
+    ]
+    # Week 3 feedback, A1: Spread moved OFF this list -- it's a fixed
+    # monotonic "lower is better" reading (a more negative spread is
+    # always a bigger favorite), not a direction-agnostic delta like the
+    # three Move columns, so it's REVERSED now, not diverging-at-zero.
+    assert len(diverging) == 3  # ImpliedMove, TotMove, SpdMove
+
+
+def test_polish_edge_own_pct_midpoint_is_the_chalk_threshold_not_the_median():
+    # Week 3 feedback (A2): Sam found the ownership scale hard to read --
+    # min/max were already adaptive (Fix 2.7), but the midpoint defaulted
+    # to the statistical median, which sits low for a right-skewed
+    # ownership distribution and crushes the real spread into one end.
+    # Anchoring it at CHALK_OWNERSHIP_THRESHOLD instead gives the amber
+    # transition real meaning (the same line `Flag`'s CHALK token uses).
+    from dfs.derived import CHALK_OWNERSHIP_THRESHOLD
+
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+
+    own_pct = next(kwargs for _rng, kwargs in client.color_scale_calls if kwargs["mid_color"] == WARM_MID)
+    assert own_pct["mid_type"] == "NUMBER"
+    assert own_pct["mid_value"] == str(CHALK_OWNERSHIP_THRESHOLD)
 
 
 def test_polish_edge_wind_chip_matches_slate_grid_threshold():

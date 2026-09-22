@@ -79,7 +79,7 @@ function happens to touch it first.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, ZONE_LABELS
+from dfs.derived import CHALK_OWNERSHIP_THRESHOLD, EDGE_COLUMNS, EDGE_DATA_OFFSET, ZONE_LABELS
 from dfs.sheet_links import LINKED_EDGE_COLUMNS
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
@@ -326,7 +326,16 @@ FIELD_COLOR_SCALES = {
     "ImpliedMove": _DIVERGING,
     "TotMove": _DIVERGING,
     "SpdMove": _DIVERGING,
-    "Spread": _DIVERGING,
+    # Week 3 feedback (A1), found live 2026-09-22: Spread was already here,
+    # but as _DIVERGING -- zero as a neutral midpoint, negative (this
+    # team's own favorite side) mapped to red, positive (underdog) mapped
+    # to green. That's backwards for what Spread actually means: unlike
+    # ImpliedMove/TotMove/SpdMove (direction-agnostic deltas, where
+    # "which way is good" depends on who you rostered), a more negative
+    # Spread always means a bigger favorite -- the same fixed, monotonic
+    # "lower is better" reading OppPosRank already gets below. Sam:
+    # "Spread syntax highlighting is backwards, lower numbers are better."
+    "Spread": _REVERSED,
     # A low OppPosRank is the tough matchup here (this opponent allows the
     # FEWEST fantasy points at this position) -- same "1st is best"
     # convention as the SoS tabs' own `Rank` column (`style_sos_tab`).
@@ -506,11 +515,27 @@ def _scale_rule_specs(
             **max_kwargs,
         }
     elif kind == _WARM:
+        # Week 3 feedback (A2), 2026-09-22: Sam: "Ownership highlighting is
+        # hard to discern differences." Min/max were already adaptive to
+        # the slate (non-zero MINIFS / real MAX -- Fix 2.7), so the actual
+        # problem was the MIDPOINT: it defaulted (like every other scale
+        # here) to the statistical median, but ownership is right-skewed
+        # -- most players sit low, a few chalk plays sit high -- so the
+        # median lands low too, and the entire "meaningfully different"
+        # low-ownership majority gets crushed into the white-to-amber
+        # third of the scale while the amber-to-red two-thirds is spent on
+        # a handful of outliers. Anchoring the midpoint at
+        # `CHALK_OWNERSHIP_THRESHOLD` instead (the same 20% line `Flag`
+        # already calls out as CHALK) fixes that AND gives the transition
+        # real meaning: white-to-amber is "below the chalk line," amber-
+        # to-red is "how far past it."
         gradient_spec = {
             "a1_range": a1,
             "min_color": WARM_MIN,
             "mid_color": WARM_MID,
             "max_color": WARM_MAX,
+            "mid_type": "NUMBER",
+            "mid_value": str(CHALK_OWNERSHIP_THRESHOLD),
             **min_kwargs,
             **max_kwargs,
         }
