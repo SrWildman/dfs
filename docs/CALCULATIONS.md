@@ -55,31 +55,49 @@ populate `Ceiling` for every player (roughly 40-60% coverage depending on
 the week), and a blank is left blank rather than treated as zero, since a
 missing ceiling isn't the same claim as "this player has no ceiling."
 
-## ValAdj (Part 7.2, 2026-09-18) -- EdgeRaw's default sort
+## ValAdj (Part 7.2, 2026-09-18; reworked Week 3 feedback A3, 2026-09-22) -- EdgeRaw's default sort
 
-`ValAdj = ProjPts - E[ProjPts | Salary, Position]`
+```
+residual     = ProjPts - E[ProjPts | Salary, Position]         (derived._val_adj_residual_within_position)
+PtsPct_pos   = percentile rank of ProjPts within position       (derived._percentile_within)
+EdgePct_pos  = percentile rank of residual within position      (derived._percentile_within)
+ValAdj       = VAL_ADJ_PROJECTION_WEIGHT * PtsPct_pos
+             + (1 - VAL_ADJ_PROJECTION_WEIGHT) * EdgePct_pos     (derived._val_adj_blend)
+```
 
-`Val` is both salary-biased (a cheap player outranks a better, pricier one
-just for being cheap) and position-biased (QBs project the most points on
-any slate, so they dominate a raw points-per-dollar leaderboard regardless
-of who's actually the better play). `ValAdj` answers the real question
-instead: is this player projected *above what this slate's own pricing
-implies for his position*?
+`VAL_ADJ_PROJECTION_WEIGHT = 0.5`, a named module constant in
+`derived.py` rather than a literal -- Sam may want to shift it toward
+projection later without a code review to find the number.
 
-**Version 1 (this one), needs no accumulated history.** For each position,
-fit an ordinary least-squares line of `ProjPts` on `Salary` across THIS
-SLATE's own projections only -- `derived._val_adj_within_position` -- and
-take the residual (actual minus the line's prediction at that salary).
-Refit fresh every sync; nothing carries over week to week. A position with
-fewer than two usable rows, or where every row shares the exact same
-`Salary` (nothing to fit a slope against), gets `0` for every row in that
-group -- read as "no signal available," not a real computed value. A row
-missing `ProjPts` stays blank (NaN), never coerced to 0, in every case
-including that degenerate one.
+**Why this changed.** `Val` (points per $1,000) is salary- and
+position-biased -- a cheap player outranks a better, pricier one just for
+being cheap, and QBs dominate any points-per-dollar leaderboard
+regardless of slate. Part 7.2's `ValAdj` (the `residual` line above, used
+alone, unblended) fixed the position bias by regressing within position,
+but introduced a subtler version of the same salary problem: a residual
+is scale-free, so a $3,200 RB projected 9.0 against a 7.7 par (residual
++1.3) outranked an $8,200 RB projected 19.5 against a 19.7 par (residual
+-0.2) -- the cheap player "beats his price" by more, but can't plausibly
+win a lineup the way the expensive one can. Found live 2026-09-22 (Sam:
+"cheap players float too high").
 
-*Version 2*, refitting against realized points once the results-tracking
-loop exists, would additionally show where the market is systematically
-wrong -- a deliberate later step, not built yet.
+**The fix blends in scale.** `PtsPct_pos` (a straight percentile rank of
+raw `ProjPts` within position) restores the "bigger number is better"
+signal `EdgePct_pos` alone was missing, at a 50/50 weight by default.
+Worked example (illustrative, not a real slate):
+
+| Player | ProjPts | Residual | PtsPct | EdgePct | ValAdj |
+|---|---|---|---|---|---|
+| RB $8,200 | 19.5 | -0.2 | 98 | 45 | **71.5** |
+| RB $3,200 | 9.0 | +1.3 | 30 | 85 | **57.5** |
+
+The expensive back now wins, which is the intended behaviour.
+
+**Version 2** of the residual itself, refitting against realized points
+once the results-tracking loop exists (additionally surfacing where the
+market is systematically wrong), is still a deliberate later step, not
+built yet -- unaffected by this rework, since it only changes the input
+to `EdgePct_pos`.
 
 **`ValAdj` is EdgeRaw's default sort** (`build_edge_frame` sorts
 descending by it, unconditionally). This replaces the old Leverage-
@@ -93,13 +111,20 @@ is no fallback branch any more.
 roughly 150 points, which wins DK cash lineups about 90% of the time) is
 a real, useful cash threshold. Bad sort key, good filter line.
 
-Already comparable across positions by construction (a within-position
-residual, same as `CeilPct` is a within-position percentile) -- so unlike
-raw `ProjPts`/`Val`/`Ceiling`/`CeilVal`, `ValAdj` gets EdgeRaw's ordinary
-flat, whole-tab colour scale rather than the newer per-position one (see
-"Per-position highlighting" below), and Player Pool/Lineups skip
-re-scaling it per position block for the same reason (`sheet_style.
-GROUPED_TAB_UNSCALED_COLUMNS`).
+**Within-position, not cross-position.** Both percentiles feeding the
+blend are ranked within each player's own position (same convention as
+`CeilPct`) -- so unlike raw `ProjPts`/`Val`/`Ceiling`/`CeilVal`, `ValAdj`
+gets EdgeRaw's ordinary flat, whole-tab colour scale rather than the
+per-position one (see "Per-position highlighting" below), and Player
+Pool/Lineups skip re-scaling it per position block for the same reason
+(`sheet_style.GROUPED_TAB_UNSCALED_COLUMNS`). This also means a thin
+position's best player can post a very high `ValAdj` on a raw production
+level an average player at a deeper position would beat easily (a real
+top-15 pulled from a recent real slate put several $3,200-3,900 TEs
+projected ~10-11 points above a $6,400 QB projected 26.0) -- the fix
+targeted comparing players WITHIN the same position fairly, and does not
+promise `ValAdj` is a fair cross-position ranking. Reported to Sam as
+part of the A3 rework rather than silently tuned further.
 
 ## Per-position highlighting (ProjPts, Val, Ceiling, CeilVal)
 

@@ -126,6 +126,13 @@ OUT_STATUSES = frozenset({"OUT", "IR"})
 # other way around.
 WIND_FLAG_THRESHOLD_MPH = 20.0
 
+# Week 3 feedback (A3): weight given to raw projected-points percentile
+# vs. the price-edge residual percentile in ValAdj's blend -- see
+# `_val_adj_blend`'s docstring for why a plain residual isn't enough on
+# its own. A named constant, not a literal, since Sam may want to shift
+# it toward projection later without a code review to find the number.
+VAL_ADJ_PROJECTION_WEIGHT = 0.5
+
 # EdgeRaw's real sheet layout is [Pool, *EDGE_COLUMNS] -- Pool sits in
 # column A (so it's beside Name once Id, immediately after it, is hidden),
 # not appended after EDGE_COLUMNS the way it first shipped. Every module
@@ -193,7 +200,7 @@ EDGE_COLUMNS = [
     # Part 7.2: `Val` is salary- and position-biased (cheap players and
     # QBs both artificially outrank better plays), so it stays but is no
     # longer the tool's primary sort -- `ValAdj` is. See
-    # `_val_adj_within_position` below for the regression.
+    # `_val_adj_blend` below for the current (Week 3, A3) formula.
     "ValAdj",
     "Ceiling",
     "CeilVal",
@@ -300,19 +307,26 @@ def _tm_rank_within_team_position(
     return ordered["TmRank"].reindex(frame.index)
 
 
-def _val_adj_within_position(proj_pts: pd.Series, salary: pd.Series, position: pd.Series) -> pd.Series:
-    """Part 7.2: `ValAdj = ProjPts - E[ProjPts | Salary, Position]` --
-    `Val`'s replacement as EdgeRaw's primary sort, since `Val` (points per
-    $1k) is both salary-biased (cheap players outrank better-but-pricier
-    ones) and position-biased (QBs dominate any points-per-dollar
-    leaderboard regardless of slate). Version 1 (this one) needs no
-    accumulated history: fit a plain OLS line of `ProjPts` on `Salary`
-    *within each position, on this slate's own projections*, and take
-    the residual -- "is this player projected above what this slate's
-    own pricing implies for his position," available from week one.
-    Version 2 (refit against realized points once the results loop
-    exists, additionally surfacing where the market is systematically
+def _val_adj_residual_within_position(
+    proj_pts: pd.Series, salary: pd.Series, position: pd.Series
+) -> pd.Series:
+    """Part 7.2: `residual = ProjPts - E[ProjPts | Salary, Position]` --
+    fit a plain OLS line of `ProjPts` on `Salary` *within each position, on
+    this slate's own projections*, and take the residual: "is this player
+    projected above what this slate's own pricing implies for his
+    position." Version 2 (refit against realized points once the results
+    loop exists, additionally surfacing where the market is systematically
     wrong) is a deliberate later step, not built here.
+
+    Week 3 feedback (A3), found live: this residual used to BE `ValAdj`
+    directly, and that was the bug Sam flagged -- "cheap players float too
+    high." A residual is scale-free, so a $3,200 RB beating his price by
+    +1.3 outranked an $8,200 RB missing his by -0.2, even though the cheap
+    player can't win a lineup and the expensive one can. This function's
+    output is now only an internal input to `_val_adj_blend` (via its own
+    within-position percentile, `EdgePct`) -- see that function for the
+    fix. Still called "residual," not "ValAdj," to make that clear at
+    every call site.
 
     A position with fewer than two usable rows, or one where every row
     shares the same `Salary` (can't fit a slope from a single price
@@ -351,6 +365,26 @@ def _val_adj_within_position(proj_pts: pd.Series, salary: pd.Series, position: p
         result.loc[idx] = residual
 
     return result.round(2)
+
+
+def _val_adj_blend(pts_pct: pd.Series, edge_pct: pd.Series) -> pd.Series:
+    """Week 3 feedback (A3): `ValAdj = VAL_ADJ_PROJECTION_WEIGHT * PtsPct
+    + (1 - VAL_ADJ_PROJECTION_WEIGHT) * EdgePct`, both within-position
+    percentile ranks (0-100, via `_percentile_within` -- `PtsPct` of raw
+    `ProjPts`, `EdgePct` of `_val_adj_residual_within_position`'s output).
+
+    Worked example that motivated this (illustrative percentiles, not a
+    real slate): an $8,200 RB projected 19.5 against a 19.7 par (residual
+    -0.2) has PtsPct 98, EdgePct 45 -> ValAdj 71.5. A $3,200 RB projected
+    9.0 against a 7.7 par (residual +1.3) "beats his price" more --
+    PtsPct 30, EdgePct 85 -> ValAdj 57.5. The expensive back now wins,
+    which is the point: a residual alone (old ValAdj) ranked the cheap
+    back above the expensive one, even though the cheap back can't
+    plausibly win a GPP lineup and the expensive one can. Blending in raw
+    `ProjPts`' own percentile keeps scale in the picture without losing
+    the price-edge signal `EdgePct` alone provides. See
+    docs/CALCULATIONS.md for the full worked example."""
+    return (VAL_ADJ_PROJECTION_WEIGHT * pts_pct + (1 - VAL_ADJ_PROJECTION_WEIGHT) * edge_pct).round(1)
 
 
 def _game_env_scores(game: pd.Series, ou: pd.Series, spread: pd.Series) -> pd.Series:
@@ -546,7 +580,12 @@ def build_edge_frame(
     merged["ProjOwn"] = merged["ProjOwn"] / 100
 
     merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
-    merged["ValAdj"] = _val_adj_within_position(merged["ProjPts"], merged["Salary"], merged["Position"])
+    val_adj_residual = _val_adj_residual_within_position(
+        merged["ProjPts"], merged["Salary"], merged["Position"]
+    )
+    val_adj_pts_pct = _percentile_within(merged["ProjPts"], merged["Position"])
+    val_adj_edge_pct = _percentile_within(val_adj_residual, merged["Position"])
+    merged["ValAdj"] = _val_adj_blend(val_adj_pts_pct, val_adj_edge_pct)
     merged["CeilVal"] = (merged["Ceiling"] / (merged["Salary"] / 1000)).round(2)
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)
 

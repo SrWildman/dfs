@@ -345,12 +345,19 @@ def test_frame_is_sorted_by_valadj_descending_regardless_of_ownership_status():
     assert published["Name"].tolist() == ["Overperformer", "Baseline", "Underperformer"]
 
 
-def test_valadj_is_zero_not_nan_when_a_positions_salary_never_varies():
+def test_valadj_still_differentiates_when_a_positions_salary_never_varies():
     # A position with every row at the same Salary has no slope to fit --
-    # `_val_adj_within_position` deliberately reads that as "no signal"
-    # (0), not a fabricated regression, and never raises. Real case: a
-    # thin position (DST, or a short slate) where DK happens to price
-    # every rostered player identically.
+    # `_val_adj_residual_within_position` deliberately reads that as "no
+    # signal" (residual 0 for both rows here), never a fabricated
+    # regression. But A3's blend also folds in raw ProjPts' own
+    # percentile, so ValAdj still differentiates B (the better raw
+    # projection) from A even though their EdgePct ties at 75 (both
+    # residuals are 0, so they share the average rank of a tie): B's
+    # higher PtsPct (100 vs A's 50) pulls its ValAdj above A's --
+    # 0.5*100+0.5*75=87.5 vs 0.5*50+0.5*75=62.5. Real case this matters
+    # for: a thin position (DST, or a short slate) where DK happens to
+    # price every rostered player identically -- ValAdj should still
+    # reward the better projection, not go flat.
     proj = _projections(
         [
             {"Id": "1", "Name": "A", "Position": "TE", "ProjPts": 5.0},
@@ -360,7 +367,10 @@ def test_valadj_is_zero_not_nan_when_a_positions_salary_never_varies():
     sal = _salaries([{"ID": "1", "Salary": 3000}, {"ID": "2", "Salary": 3000}])
 
     frame = build_edge_frame(proj, sal).frame
-    assert (frame["ValAdj"] == 0.0).all()
+    a = frame[frame["Name"] == "A"].iloc[0]
+    b = frame[frame["Name"] == "B"].iloc[0]
+    assert a["ValAdj"] == 62.5
+    assert b["ValAdj"] == 87.5
 
 
 def test_valadj_stays_blank_when_projpts_is_missing_even_in_a_degenerate_group():
@@ -379,7 +389,10 @@ def test_valadj_stays_blank_when_projpts_is_missing_even_in_a_degenerate_group()
     frame = build_edge_frame(proj, sal).frame
     has_points = frame[frame["Name"] == "Has points"].iloc[0]
     no_points = frame[frame["Name"] == "No points"].iloc[0]
-    assert has_points["ValAdj"] == 0.0
+    # The lone valid row is the only usable value in its position group for
+    # both PtsPct and EdgePct, so each percentile-ranks to 100 -- ValAdj
+    # 100.0, not the old raw-residual 0.0.
+    assert has_points["ValAdj"] == 100.0
     assert pd.isna(no_points["ValAdj"])
 
 

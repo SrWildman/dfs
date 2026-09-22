@@ -230,7 +230,10 @@ FIELD_FORMATS = {
     "TotMove": _num('"+"0.0;"-"0.0;0.0'),
     "SpdMove": _num('"+"0.0;"-"0.0;0.0'),
     "Val": _num("0.00"),
-    "ValAdj": _num("0.00"),
+    # A3 (2026-09-22): ValAdj is a 0-100 within-position percentile blend
+    # now, not a raw points residual -- same one-decimal format as
+    # CeilPct/GameEnv, its fellow 0-100 scores, not Val/CeilVal's 0.00.
+    "ValAdj": _num("0.0"),
     "CeilVal": _num("0.00"),
     # Phase 6, Part 2: EdgeRaw's own ProjOwn and the other three tabs'
     # native Rstr% are unified into one shared "Own%" name -- previously

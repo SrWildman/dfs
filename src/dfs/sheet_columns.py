@@ -116,8 +116,9 @@ IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 # replacement as the tool's primary sort, since `Val` is both salary- and
 # position-biased. Unlike `Val` it can't be a native per-row formula: it's
 # a per-position regression residual over the WHOLE slate, computed once
-# in Python (`derived._val_adj_within_position`) and linked here like
-# every other EdgeRaw-computed signal.
+# in Python (Week 3, A3: a blend of within-position ProjPts/price-edge
+# percentiles, `derived._val_adj_blend`) and linked here like every other
+# EdgeRaw-computed signal.
 DECISION = ["DK Sal", "Pts", "Val", "ValAdj", "Ceil", "CeilVal", "Own%", "Avail", "Flags"]
 
 # O/U/Spread/Team Implied/OppPosRank are native (VLOOKUP against oddsFinal/
