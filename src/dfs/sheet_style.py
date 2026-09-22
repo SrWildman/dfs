@@ -1701,7 +1701,7 @@ def polish_lineups_input_column(client: SheetsClient, tab: str, name_blocks: lis
 
 
 def polish_lineups_totals_rows(
-    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]], salary_cap: int
 ) -> str:
     """Fix 2.4: every totals row (the row directly below each block's 9th
     real slot) was being treated as a tenth roster slot by every
@@ -1730,31 +1730,37 @@ def polish_lineups_totals_rows(
     same self-healing way Ceil already was: derived from `name_blocks`,
     rewritten unconditionally on every call.
 
-    "Total" and "Remaining" both sit close to the number they describe --
-    Opp. (left of the Salary sum) and Val (right of the Pts sum), both
-    otherwise-dead cells on a totals row. Phase 3 (see CONTRIBUTING.md's
-    changelog) used to instead reuse Team's and Spread's columns for
-    these two labels, which happened to sit right next to Salary under
-    the pre-Phase-3 order purely by coincidence; once Spread moved into
-    the GAME zone, "Remaining" (and the remaining-cap amount itself,
-    previously a hand-authored formula parked in O/U's column for the
-    same incidental reason) ended up stranded a dozen columns to the
-    right of the number it's about -- found live, from a screenshot,
-    right after the reorder shipped.
+    "Total" sits at Opp.'s column (left of the Salary sum), an otherwise-
+    dead cell on a totals row -- unchanged since Phase 3. "Remaining" used
+    to sit a dozen columns away at Venue (the number) and Val (the label),
+    both incidental leftovers of an even older, pre-Phase-3 layout -- Fix
+    2.4/Phase 3's own history is in CONTRIBUTING.md's changelog.
 
-    The remaining-cap NUMBER itself (no text) still has to land at
-    Venue's column specifically, not wherever's convenient: a separate,
-    genuinely hand-authored row directly below each totals row (the
-    "average remaining per slot" helper documented in docs/
-    SHEET_REFERENCE.md, never written by any `dfs` command) reads it via
-    `INDIRECT("E"&(ROW()-1))` -- a string-built reference `moveDimension`
-    cannot see or retarget, unlike a normal formula reference. Landing
-    anything but a bare number there breaks that row with `#VALUE!` --
-    found live, a second time, immediately after the first "Remaining"
-    fix shipped (self-labeling text at that exact cell divides-by-count
-    just as badly as the old stranded position did). `O/U`/`Spread`/
-    `Team Implied` are now just cleared like every other dead lookup
-    instead of being repurposed.
+    Week 3 feedback (A8), 2026-09-22: Sam: "In lineups, I'd like remaining
+    under the total, not off to the side (I manually did it this week)."
+    Found live: no code had ever actually written the documented "average
+    remaining per slot" helper row either (docs/SHEET_REFERENCE.md
+    described `polish_lineups_remaining_per_slot_helper` as regenerating
+    a genuinely hand-authored `INDIRECT` formula -- but that formula was
+    never actually present on the template OR the live sheet, so that
+    function silently no-op'd on every single call it ever made; verified
+    directly before touching anything, not assumed). Sam's own hand-edit
+    on the live sheet matched exactly what's built here: `Remaining` now
+    lives ONE ROW BELOW the totals row, in the SAME column as `Total`'s
+    own Salary sum (`salary_col`) -- read directly off that row rather
+    than an `INDIRECT`-built reference, since this function writes it
+    fresh every time rather than trying to preserve a hand-authored
+    formula's position across a reorder; there is nothing left to
+    preserve. Its own "Remaining" label sits directly below "Total"'s,
+    same column (`total_label_col`). `Venue`'s old totals-row cell and
+    Val's old "Remaining" label are both now genuinely dead and cleared
+    like any other stale cell.
+
+    Average remaining per unfilled slot (A8's second ask) rides on the
+    SAME new row, in `Pts`'s column (otherwise dead there) --
+    `remaining / COUNTBLANK(this block's Name cells)`, blank (not a
+    divide-by-zero error) once every slot is filled, same "blank over a
+    confusing error" instinct as `% of Cap`'s own guard.
 
     Column positions are found from the tab's own header, never
     hardcoded -- same reasoning as every other lookup-by-name function in
@@ -1778,14 +1784,13 @@ def polish_lineups_totals_rows(
     pts_col = col("Pts")
     rstr_col = col("Own%")
     salary_col = col("DK Sal")
-    remaining_col = col("Venue")  # must stay a bare number -- see docstring
-    remaining_label_col = col("Val")
     total_label_col = col("Opp.")
-    # Team's column carried "Total" (and Venue carried it too, briefly,
-    # before the INDIRECT("E"...) conflict was found) -- clear whatever's
-    # left at either from an earlier run so a re-polish doesn't leave a
-    # stray "Total" sitting where it no longer belongs.
-    stale_total_cols = [c for c in (col("Team"), col("Venue")) if c and c != total_label_col]
+    # A8: Venue's old remaining-cap NUMBER and Val's old "Remaining" LABEL
+    # are both genuinely dead now that both live one row below instead --
+    # cleared alongside Team's old "Total" leftover, same reasoning. A
+    # plain set: Venue shows up in both original reasons, only worth
+    # clearing once.
+    stale_total_cols = {c for c in (col("Team"), col("Venue"), col("Val")) if c and c != total_label_col}
 
     cleared = 0
     labeled = 0
@@ -1793,11 +1798,12 @@ def polish_lineups_totals_rows(
     reset = 0
     for start, end in name_blocks:
         totals_row = end + 1
+        remaining_row = totals_row + 1
         for name in dead_columns:
             letter = col(name)
             client.update_range(tab, f"{letter}{totals_row}", [[""]])
             cleared += 1
-        for stale_col in stale_total_cols:
+        for stale_col in sorted(stale_total_cols):
             client.update_range(tab, f"{stale_col}{totals_row}", [[""]])
         if ceil_col:
             ceil_sum = f"=SUM({ceil_col}{start}:{ceil_col}{end})"
@@ -1814,12 +1820,23 @@ def polish_lineups_totals_rows(
         if total_label_col:
             client.update_range(tab, f"{total_label_col}{totals_row}", [["Total"]])
             labeled += 1
-        if remaining_col and salary_col:
-            remaining_formula = f'=IF(COUNTA($A${start}:$A${end})=0,"",50000-{salary_col}{totals_row})'
-            client.update_range(tab, f"{remaining_col}{totals_row}", [[remaining_formula]])
-        if remaining_label_col:
-            client.update_range(tab, f"{remaining_label_col}{totals_row}", [["Remaining"]])
+        # A8: Remaining -- value and label both -- now sits directly below
+        # Total, in the same two columns, rather than off to the side.
+        if salary_col:
+            remaining_formula = f"={salary_cap}-{salary_col}{totals_row}"
+            client.update_range(tab, f"{salary_col}{remaining_row}", [[remaining_formula]])
+        if total_label_col:
+            client.update_range(tab, f"{total_label_col}{remaining_row}", [["Remaining"]])
             labeled += 1
+        # A8: average remaining per unfilled slot, same new row, Pts'
+        # column (otherwise dead there) -- blank once the block is full
+        # rather than a #DIV/0! error.
+        if pts_col and salary_col:
+            name_range = f"$A${start}:$A${end}"
+            avg_formula = (
+                f'=IF(COUNTBLANK({name_range})=0,"",{salary_col}{remaining_row}/COUNTBLANK({name_range}))'
+            )
+            client.update_range(tab, f"{pts_col}{remaining_row}", [[avg_formula]])
         # Column A (Name) on a totals row still carried the same input
         # background AND typo-guard player dropdown as a real roster
         # slot -- a leftover from before an earlier fix (2.4) shrank each
@@ -1836,77 +1853,6 @@ def polish_lineups_totals_rows(
         f"{summed} sum(s) written (Ceil/Pts/Own%), {labeled} label(s) written, "
         f"{reset} Name cell(s) un-typo-guarded"
     )
-
-
-def polish_lineups_remaining_per_slot_helper(
-    client: SheetsClient, tab: str, *, name_blocks: list[tuple[int, int]], last_col: str
-) -> str:
-    """Phase 6, Part 2: the "average remaining per slot" helper row
-    (directly below each totals row, documented in
-    docs/SHEET_REFERENCE.md, never written by any `dfs` command until
-    now) reads the remaining-cap NUMBER via `INDIRECT("E"&(ROW()-1))` --
-    hardcoding column E because that's where `polish_lineups_totals_rows`
-    happens to write it (`Venue`'s column). The exact same INDIRECT/
-    `moveDimension` hazard this module has already hit twice before
-    (`polish_lineups_totals_rows`'s own docstring): a string-built
-    reference doesn't move when the column it names does. Part 2 moves
-    `Venue` out of `IDENTITY` into the collapsed `WEATHER` group, which
-    would otherwise leave this formula silently reading whatever new
-    column lands on E -- no error, just a wrong number, on all 20 blocks,
-    both sheets.
-
-    This row has no header of its own (it's a hand-authored cell below
-    the totals row, not a managed column), so its own CURRENT column
-    can't be found by name the way everything else in this file is --
-    found instead by reading each block's helper row and locating
-    whichever cell already holds an `INDIRECT` formula, then overwriting
-    that exact cell in place (same position, corrected references). Both
-    letters inside the formula ARE derived: `Name`'s column (for the
-    `COUNTBLANK` range) and `Venue`'s column (for the remaining-cap
-    lookup) are found fresh from the tab's own real header, matching
-    `polish_lineups_totals_rows`'s own `remaining_col = col("Venue")`.
-    No-ops per block if that block's helper row has no such formula
-    (already fixed, or never had one).
-    """
-    if not client.tab_exists(tab):
-        return f"{tab}: not present -- skipped"
-    header_rows = client.read_range(tab, "A1:1")
-    header = header_rows[0] if header_rows else []
-    if not header:
-        return f"{tab}: no header found -- skipped"
-
-    def col(name: str) -> str | None:
-        return column_letter(header.index(name)) if name in header else None
-
-    name_col = col("Name")
-    remaining_col = col("Venue")
-    if not (name_col and remaining_col):
-        return f"{tab}: 'Name'/'Venue' not both present -- skipped"
-
-    written = 0
-    skipped = 0
-    for start, end in name_blocks:
-        helper_row = end + 2
-        row = client.read_formula(tab, f"A{helper_row}:{last_col}{helper_row}")
-        cells = row[0] if row else []
-        existing_col = next(
-            (column_letter(i) for i, cell in enumerate(cells) if "INDIRECT" in (cell or "")), None
-        )
-        if not existing_col:
-            skipped += 1
-            continue
-        to_start = helper_row - start
-        to_end = helper_row - end
-        name_range = f'INDIRECT("{name_col}"&(ROW()-{to_start})&":{name_col}"&(ROW()-{to_end}))'
-        formula = (
-            f'=IF(COUNTBLANK({name_range})=0,"",'
-            f'INDIRECT("{remaining_col}"&(ROW()-1))/COUNTBLANK({name_range}))'
-        )
-        client.update_range(tab, f"{existing_col}{helper_row}", [[formula]])
-        written += 1
-
-    note = f", {skipped} block(s) had no existing formula to fix -- skipped" if skipped else ""
-    return f"{tab}: 'average remaining per slot' helper regenerated for {written} block(s){note}"
 
 
 def polish_lineups_pct_of_cap(

@@ -71,7 +71,6 @@ from dfs.sheet_style import (
     polish_guardrails,
     polish_lineups_input_column,
     polish_lineups_pct_of_cap,
-    polish_lineups_remaining_per_slot_helper,
     polish_lineups_totals_rows,
     style_tier23_tabs,
     style_view_tabs,
@@ -750,14 +749,7 @@ def sheets_polish(
                 cfg.lineups.builder_tab,
                 header_row=lineups_header_row,
                 name_blocks=LINEUPS_NAME_BLOCKS,
-            )
-        )
-        results.append(
-            polish_lineups_remaining_per_slot_helper(
-                client,
-                cfg.lineups.builder_tab,
-                name_blocks=LINEUPS_NAME_BLOCKS,
-                last_col="AZ",
+                salary_cap=cfg.lineups.salary_cap,
             )
         )
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:

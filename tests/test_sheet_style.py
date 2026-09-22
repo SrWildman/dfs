@@ -39,7 +39,6 @@ from dfs.sheet_style import (
     polish_edge,
     polish_guardrails,
     polish_lineups_pct_of_cap,
-    polish_lineups_remaining_per_slot_helper,
     polish_lineups_totals_rows,
     style_flat_tab,
     style_movement,
@@ -741,23 +740,26 @@ def test_polish_bankroll_hides_nothing_when_no_entry_key_columns_given():
 
 
 def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
-    # Fix 2.4 / Phase 3. Uses the same fixture/fake as polish_guardrails
-    # below -- Team=C, DK Sal=D, O/U=E, Spread=F, Team Implied=G, Opp.=H,
-    # Venue=I, OppPosRank=J, Ceil=L, Val=M, and the linked columns
-    # scattered at Q,R,S,T,U,V,W,X,Y,Z.
+    # Fix 2.4 / Phase 3, reworked A8 (2026-09-22). Uses the same fixture/
+    # fake as polish_guardrails below -- Team=C, DK Sal=D, O/U=E,
+    # Spread=F, Team Implied=G, Opp.=H, Venue=I, OppPosRank=J, Pts=K,
+    # Ceil=L, Val=M, Own%=N, and the linked columns scattered at
+    # Q,R,S,T,U,V,W,X,Y,Z.
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
-    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    result = polish_lineups_totals_rows(
+        client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000
+    )
 
     calls = {a1: rows for a1, rows in client.update_calls}
     totals_row = 18  # end + 1
+    remaining_row = 19  # totals_row + 1 -- A8's new "Remaining" row
 
-    # Dead VLOOKUP columns cleared on the totals row only -- native
-    # lookups (O/U, Spread, Team Implied, OppPosRank) alongside the
-    # linked block. Venue is NOT cleared/repurposed as a label any more --
-    # it holds the real remaining-cap number a separate hand-authored row
-    # depends on (see this function's own docstring).
-    for letter in ("E", "F", "G", "J", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"):
+    # Dead VLOOKUP columns cleared on the totals row -- native lookups
+    # (O/U, Spread, Team Implied, OppPosRank) alongside the linked block,
+    # PLUS Team/Venue/Val now that Remaining moved off Venue/Val (A8) --
+    # all three are genuinely dead on the totals row now.
+    for letter in ("C", "E", "F", "G", "I", "J", "M", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"):
         assert calls[f"{letter}{totals_row}"] == [[""]]
 
     # Ceil, Pts and Rstr% all (re)summed unconditionally -- Phase 6, Part 1:
@@ -768,39 +770,20 @@ def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
     assert calls[f"K{totals_row}"] == [["=SUM(K9:K17)"]]
     assert calls[f"N{totals_row}"] == [["=SUM(N9:N17)"]]
 
-    # "Total" goes at Opp.'s column (H); the remaining-cap NUMBER (no
-    # text -- a hand-authored row below reads it via INDIRECT) goes at
-    # Venue's column (I); "Remaining" is a plain text label at Val's
-    # column (M). All found by header name, so they land correctly
-    # regardless of this fixture's scrambled layout, not stranded next to
-    # Spread/O-U the way a hardcoded version once would have been.
+    # "Total" at Opp.'s column (H), same row as the Salary sum (D18).
     assert calls[f"H{totals_row}"] == [["Total"]]
-    assert calls[f"I{totals_row}"] == [['=IF(COUNTA($A$9:$A$17)=0,"",50000-D18)']]
-    assert calls[f"M{totals_row}"] == [["Remaining"]]
+
+    # A8: "Remaining" -- value AND label -- sits one row below, in the
+    # SAME two columns as Total's own value/label (D/H), not off to the
+    # side. Average remaining per unfilled slot rides the same new row,
+    # in Pts' column (otherwise dead there), guarded against a full
+    # lineup's divide-by-zero.
+    assert calls[f"D{remaining_row}"] == [["=50000-D18"]]
+    assert calls[f"H{remaining_row}"] == [["Remaining"]]
+    assert calls[f"K{remaining_row}"] == [['=IF(COUNTBLANK($A$9:$A$17)=0,"",D19/COUNTBLANK($A$9:$A$17))']]
 
     assert "1 totals row(s)" in result
     assert "3 sum(s) written" in result
-
-
-def test_polish_lineups_totals_rows_puts_a_bare_number_at_venue_never_text():
-    # The exact regression this guards against: a separate, genuinely
-    # hand-authored row directly below the totals row (documented in
-    # docs/SHEET_REFERENCE.md, never written by any `dfs` command) reads
-    # Venue's totals-row cell via `INDIRECT("E"&(ROW()-1))` and divides it
-    # by a count -- a string-built reference `moveDimension` can't see or
-    # retarget. Any text there (a label, or a self-labeled "Remaining
-    # $X" string) produces #VALUE! on that row instead of a real number.
-    # Found live, twice: once when Venue held "Total", and again when the
-    # very first fix for that put self-labeled text there instead.
-    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
-
-    polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
-
-    calls = {a1: rows for a1, rows in client.update_calls}
-    venue_value = calls["I18"][0][0]
-    assert venue_value.startswith("=IF(")
-    assert "Remaining" not in venue_value
-    assert "Total" not in venue_value
 
 
 def test_polish_lineups_totals_rows_clears_the_totals_row_name_cells_typo_guard():
@@ -811,7 +794,9 @@ def test_polish_lineups_totals_rows_clears_the_totals_row_name_cells_typo_guard(
     # stopped covering. Found live, from a screenshot.
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
-    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    result = polish_lineups_totals_rows(
+        client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000
+    )
 
     assert client.clear_validation_calls == ["A18"]
     assert client.format_calls == [("A18", {"backgroundColor": WHITE})]
@@ -828,7 +813,7 @@ def test_polish_lineups_totals_rows_never_touches_salary_or_issues():
     # test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels).
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
-    polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000)
 
     touched = {a1 for a1, _ in client.update_calls}
     assert "D18" not in touched
@@ -846,7 +831,9 @@ def test_polish_lineups_totals_rows_self_heals_a_corrupted_pts_or_rstr_total():
     # before (correct or corrupted) self-heals the same way on every call.
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
 
-    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    result = polish_lineups_totals_rows(
+        client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000
+    )
 
     calls = {a1: rows for a1, rows in client.update_calls}
     assert calls["K18"] == [["=SUM(K9:K17)"]]
@@ -888,53 +875,9 @@ def test_polish_lineups_pct_of_cap_skips_when_column_missing():
 
 def test_polish_lineups_totals_rows_skips_when_lineups_missing():
     client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
-    result = polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
-    assert result == "Lineups: not present -- skipped"
-    assert client.update_calls == []
-
-
-def test_polish_lineups_remaining_per_slot_helper_regenerates_with_derived_letters():
-    # Phase 6, Part 2: moving Venue out of IDENTITY breaks the hand-typed
-    # "average remaining per slot" helper row's `INDIRECT("E"&...)`
-    # reference (E was Venue's old column). Simulate the existing
-    # formula sitting at some arbitrary column (R here, not E -- proving
-    # this is found by content, not assumed position) and confirm it's
-    # rewritten in place with BOTH letters re-derived from the header.
-    header = _HEADER_WITH_AVAIL_AT_Y  # Name=A, Venue=I
-    helper_row = 19  # end (17) + 2
-    old_formula = (
-        '=IF(COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2)))=0,"",'
-        'INDIRECT("E"&(ROW()-1))/COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2))))'
+    result = polish_lineups_totals_rows(
+        client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000
     )
-    formulas = {f"A{helper_row}:Z{helper_row}": [[""] * 17 + [old_formula] + [""] * (len(header) - 18)]}
-    client = FakeGuardrailsClient(header, formulas=formulas)
-
-    result = polish_lineups_remaining_per_slot_helper(client, "Lineups", name_blocks=[(9, 17)], last_col="Z")
-
-    calls = {a1: rows for a1, rows in client.update_calls}
-    assert calls["R19"] == [
-        [
-            '=IF(COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2)))=0,"",'
-            'INDIRECT("I"&(ROW()-1))/COUNTBLANK(INDIRECT("A"&(ROW()-10)&":A"&(ROW()-2))))'
-        ]
-    ]
-    assert "1 block(s)" in result
-
-
-def test_polish_lineups_remaining_per_slot_helper_skips_a_block_with_no_existing_formula():
-    header = _HEADER_WITH_AVAIL_AT_Y
-    client = FakeGuardrailsClient(header, formulas={})
-
-    result = polish_lineups_remaining_per_slot_helper(client, "Lineups", name_blocks=[(9, 17)], last_col="Z")
-
-    assert client.update_calls == []
-    assert "0 block(s)" in result
-    assert "1 block(s) had no existing formula" in result
-
-
-def test_polish_lineups_remaining_per_slot_helper_skips_when_lineups_missing():
-    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y, present=False)
-    result = polish_lineups_remaining_per_slot_helper(client, "Lineups", name_blocks=[(9, 17)], last_col="Z")
     assert result == "Lineups: not present -- skipped"
     assert client.update_calls == []
 
