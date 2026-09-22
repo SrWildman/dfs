@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheets import SheetsClient, column_letter
+from dfs.sources.weather import WEATHER_COLUMNS
 
 BOARD_TAB = "Board"
 SLATE_TAB = "Slate Grid"
@@ -212,15 +213,65 @@ def build_board(client: SheetsClient, *, edge_tab: str, games_tab: str, weather_
 # ---------------------------------------------------------------------------
 
 
-def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str) -> str:
+def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str, edge_tab: str) -> str:
     """One row per game instead of one row per player.
 
     Surfaces AwayRest/HomeRest and DivGame, which `nflverse_games` already
     syncs into GamesRaw and which nothing in the sheet currently displays
     anywhere.
+
+    A9 (2026-09-22): the Wind/Gust VLOOKUPs against `weather_tab` used to
+    hardcode both the lookup RANGE's end column and the result INDEX (6
+    and 7) -- the last surviving instance of the hardcoded-index bug class
+    CLAUDE.md's central hazard section warns about (correct only because
+    `sources.weather.WEATHER_COLUMNS`' order happens to match today; a
+    reorder there would silently pull the wrong field with no error).
+    Both are now derived from `WEATHER_COLUMNS` itself.
+
+    A9's second ask, same day: per-game line movement, appended as `Total
+    move`/`Spread move` (same header text `style_movement`'s own
+    `_MOVEMENT_SCALED_COLUMNS` already uses). Sourced from `edge_tab`'s
+    already-computed per-PLAYER `TotMove`/`SpdMove` -- both are actually
+    team-level joins (`derived._attach_line_movement`, keyed by `Team`),
+    so any one player on a team carries that team's own value; the HOME
+    team's row is used for both, consistently, since `SpdMove` is
+    directional (a team's own spread moving one way is the opponent's
+    moving the other) and `GamesRaw!$L` (`Spread`, this tab's existing
+    column) is already reported from the home team's perspective --
+    matching that convention rather than picking a side arbitrarily.
+    `TotMove` (the game's total) is identical either way. Confirmed with
+    Sam (2026-09-22) that "over the week" means since the slate opened,
+    not since the last sync -- which this inherits for free: `edge_tab`'s
+    own `TotMove`/`SpdMove` already diff against `nfl_calendar.
+    week_start_date` (`sources/edge.py`), not the last sync, so nothing
+    new needed building here beyond surfacing the existing columns.
     """
-    g, w = _q(games_tab), _q(weather_tab)
-    rows = [["Matchup", "Kickoff", "Total", "Spread", "Roof", "Wind", "Gust", "Rest (A/H)", "Div", "Stadium"]]
+    g, w, e = _q(games_tab), _q(weather_tab), _q(edge_tab)
+    wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
+    wind_idx = WEATHER_COLUMNS.index("Wind") + 1
+    gust_end_col = column_letter(WEATHER_COLUMNS.index("Gust"))
+    gust_idx = WEATHER_COLUMNS.index("Gust") + 1
+    team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
+    tot_move_end_col = column_letter(EDGE_COLUMNS.index("TotMove") + EDGE_DATA_OFFSET)
+    tot_move_idx = EDGE_COLUMNS.index("TotMove") - EDGE_COLUMNS.index("Team") + 1
+    spd_move_end_col = column_letter(EDGE_COLUMNS.index("SpdMove") + EDGE_DATA_OFFSET)
+    spd_move_idx = EDGE_COLUMNS.index("SpdMove") - EDGE_COLUMNS.index("Team") + 1
+    rows = [
+        [
+            "Matchup",
+            "Kickoff",
+            "Total",
+            "Spread",
+            "Roof",
+            "Wind",
+            "Gust",
+            "Rest (A/H)",
+            "Div",
+            "Stadium",
+            "Total move",
+            "Spread move",
+        ]
+    ]
     for r in range(2, 20):
         guard = f'IF({g}!$A{r}="","",'
         rows.append(
@@ -232,15 +283,19 @@ def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str) 
                 f"={guard}{g}!$M{r})",
                 f"={guard}{g}!$L{r})",
                 f"={guard}{g}!$G{r})",
-                f'={guard}IFERROR(VLOOKUP({g}!$A{r},{w}!$A:$F,6,FALSE),""))',
-                f'={guard}IFERROR(VLOOKUP({g}!$A{r},{w}!$A:$G,7,FALSE),""))',
+                f'={guard}IFERROR(VLOOKUP({g}!$A{r},{w}!$A:${wind_end_col},{wind_idx},FALSE),""))',
+                f'={guard}IFERROR(VLOOKUP({g}!$A{r},{w}!$A:${gust_end_col},{gust_idx},FALSE),""))',
                 f'={guard}{g}!$I{r}&" / "&{g}!$J{r})',
                 f'={guard}IF({g}!$K{r}=1,"DIV",""))',
                 f"={guard}{g}!$F{r})",
+                f"={guard}IFERROR(VLOOKUP({g}!$C{r},{e}!${team_col}:${tot_move_end_col},"
+                f'{tot_move_idx},FALSE),""))',
+                f"={guard}IFERROR(VLOOKUP({g}!$C{r},{e}!${team_col}:${spd_move_end_col},"
+                f'{spd_move_idx},FALSE),""))',
             ]
         )
     client.write_tab(SLATE_TAB, rows)
-    return f"{SLATE_TAB}: built (18 game rows off GamesRaw + WeatherRaw)"
+    return f"{SLATE_TAB}: built (18 game rows off GamesRaw + WeatherRaw + EdgeRaw)"
 
 
 # ---------------------------------------------------------------------------

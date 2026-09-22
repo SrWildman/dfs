@@ -2454,9 +2454,25 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
     client.clear_conditional_formats(tab)
     client.set_column_widths(
         tab,
-        {"A": 140, "B": 116, "C": 64, "D": 72, "E": 84, "F": 72, "G": 72, "H": 84, "I": 52, "J": 160},
+        {
+            "A": 140,
+            "B": 116,
+            "C": 64,
+            "D": 72,
+            "E": 84,
+            "F": 72,
+            "G": 72,
+            "H": 84,
+            "I": 52,
+            "J": 160,
+            # A9 (2026-09-22): per-game line movement, appended past the
+            # original 10 columns -- same widths `style_movement` already
+            # uses for these two header names.
+            "K": 92,
+            "L": 92,
+        },
     )
-    client.format_range(tab, "A1:J1", _HEADER_FMT)
+    client.format_range(tab, "A1:L1", _HEADER_FMT)
     client.format_range(tab, "C2:C19", FIELD_FORMATS["Total"])
     client.format_range(tab, "D2:D19", FIELD_FORMATS["Spread"])
     client.format_range(tab, "F2:G19", FIELD_FORMATS["Wind"])
@@ -2468,8 +2484,25 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
     client.add_boolean_rule(
         tab, "I2:I19", condition_type="TEXT_EQ", values=["DIV"], fmt=_chip(FLAT_BG, FLAT_FG)
     )
+    # A9: same diverging-at-zero treatment `style_movement` gives these
+    # exact two column names -- zero is the meaningful midpoint, not the
+    # statistical median. Two separate rules, one per column (not one
+    # rule spanning K:L), same reasoning `style_movement` already
+    # documents: Total move and Spread move are different metrics and
+    # each needs its own min/max, not a shared one across both.
+    client.format_range(tab, "K2:L19", FIELD_FORMATS["ImpliedMove"])
+    for col in ("K", "L"):
+        client.add_color_scale(
+            tab,
+            f"{col}2:{col}19",
+            min_color=GRAD_MIN,
+            mid_color=WHITE,
+            max_color=GRAD_MAX,
+            mid_type="NUMBER",
+            mid_value="0",
+        )
     client.freeze(tab, rows=1, cols=1)
-    return f"{tab}: styled (totals colour-scaled, high wind flagged)"
+    return f"{tab}: styled (totals colour-scaled, high wind flagged, movement scaled)"
 
 
 def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:

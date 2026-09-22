@@ -401,13 +401,47 @@ def test_top_leverage_and_landmines_reference_current_edge_columns():
 
 def test_slate_grid_header_row_matches_style_slate_grids_column_assumptions():
     client = _CapturingClient()
-    build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw")
+    build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw")
     header = client.rows[0]
     assert header[2] == "Total"  # style_slate_grid colour-scales C
     assert header[3] == "Spread"  # style_slate_grid number-formats D
     assert header[5] == "Wind"  # style_slate_grid flags F/G over 15
     assert header[6] == "Gust"
     assert header[8] == "Div"  # style_slate_grid chips I on "DIV"
+    assert header[10] == "Total move"  # style_slate_grid colour-scales K
+    assert header[11] == "Spread move"  # style_slate_grid colour-scales L
+
+
+def test_slate_grid_movement_columns_read_the_home_teams_edgeraw_row():
+    # A9 (2026-09-22): TotMove/SpdMove are team-level joins on EdgeRaw
+    # (derived._attach_line_movement) -- SpdMove is directional, so the
+    # HOME team's row is used consistently (matching GamesRaw!$L's own
+    # home-team-perspective convention for the static Spread column),
+    # keyed off GamesRaw's own Home column (C), not Away (B).
+    client = _CapturingClient()
+    build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw")
+    row = client.rows[1]
+    assert "VLOOKUP(GamesRaw!$C2," in row[10]
+    assert "VLOOKUP(GamesRaw!$C2," in row[11]
+    assert "EdgeRaw!$D:$AB" in row[10]  # Team through TotMove
+    assert "EdgeRaw!$D:$AC" in row[11]  # Team through SpdMove
+
+
+def test_slate_grid_wind_gust_vlookups_derive_from_weather_columns_not_hardcoded():
+    # A9 (2026-09-22): the last surviving hardcoded-VLOOKUP-index instance
+    # (CLAUDE.md's central hazard) -- both the range end letter and the
+    # result index must track sources.weather.WEATHER_COLUMNS, not a
+    # literal "6"/"7" that would silently break if that list ever
+    # reorders.
+    from dfs.sources.weather import WEATHER_COLUMNS
+
+    client = _CapturingClient()
+    build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw")
+    wind_idx = WEATHER_COLUMNS.index("Wind") + 1
+    gust_idx = WEATHER_COLUMNS.index("Gust") + 1
+    row = client.rows[1]
+    assert f"WeatherRaw!$A:$F,{wind_idx},FALSE" in row[5]
+    assert f"WeatherRaw!$A:$G,{gust_idx},FALSE" in row[6]
 
 
 def test_exposure_header_row_matches_style_exposures_column_assumptions():

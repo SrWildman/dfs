@@ -844,7 +844,7 @@ def sheets_build_views(
         console.print(f"Building view tabs in: [bold]{title}[/bold]\n{url}\n")
         results = [
             build_board(client, edge_tab=edge_tab, games_tab=games_tab, weather_tab=weather_tab),
-            build_slate_grid(client, games_tab=games_tab, weather_tab=weather_tab),
+            build_slate_grid(client, games_tab=games_tab, weather_tab=weather_tab, edge_tab=edge_tab),
             build_exposure(
                 client,
                 edge_tab=edge_tab,
