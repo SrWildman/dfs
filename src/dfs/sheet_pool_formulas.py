@@ -196,7 +196,29 @@ def _union_array(edge_tab: str, position: str, added_range: str) -> str:
     ticks and the control cell. The control cell is kept even though
     `dfs sync` drains it into `added_range` right after, so a name shows
     up here the INSTANT it's typed (before any sync has run), not just
-    after."""
+    after.
+
+    Found and fixed while verifying Fix 3 (A7, 2026-09-23), not itself
+    part of that fix's spec, but the same code path and about to bite
+    Sam the moment he ticks his first Week 3 player: `FILTER` raises
+    `#N/A` when a source has zero matches (this codebase's well-known
+    "FILTER of nothing" failure mode -- see CONTRIBUTING.md), and
+    stacking a healthy piece with an erroring one via `{a;b;c}`
+    propagates that single error to the ENTIRE combined array --
+    verified empirically on the template's own throwaway scratch tab.
+    On today's live Week 3 sheet, right now, the control cell and the
+    added-names list are BOTH genuinely empty (nobody's used add-a-player
+    yet this week) -- so the instant Sam ticks even one EdgeRaw checkbox,
+    `control_filter`/`added_filter` would each independently error, and
+    that error would blank out the WHOLE block despite the real tick
+    existing. Each of the three pieces below is now individually
+    `IFERROR`-guarded to a same-shaped blank placeholder row (`{"",0,0}`)
+    instead, so the combined stack can never throw -- callers (`UNIQUE`
+    then either grouping or counting) must still treat a blank-Name row
+    as "nothing here," never a real entry; see
+    `_grouped_with_separators_formula`'s own `uArr` step and
+    `_overflow_formula`'s `SUMPRODUCT` for how each does that."""
+    placeholder = '{"",0,0}'
     # Fix 2.11: Pool is a blank/Cash/GPP/Both dropdown now, not a TRUE/
     # FALSE checkbox -- any non-blank value means "in the pool" here.
     # Every row this FILTER keeps already satisfies Pool<>"", so its own
@@ -235,17 +257,110 @@ def _union_array(edge_tab: str, position: str, added_range: str) -> str:
         f"{control_tag_rank}}}"
     )
     added_filter = _added_names_filter(edge_tab, added_range, position)
-    return f"{{{edge_filter};{control_filter};{added_filter}}}"
+    return (
+        f"{{IFERROR({edge_filter},{placeholder});"
+        f"IFERROR({control_filter},{placeholder});"
+        f"IFERROR({added_filter},{placeholder})}}"
+    )
+
+
+def _grouped_with_separators_formula(union: str) -> str:
+    """Week 3 fixes, Fix 3 (A7, 2026-09-23). Sam: "I like the blank line
+    between cash/gpp/both blocks in the pool, but it doesn't seem to
+    consistently work." Root cause: there was no separator logic
+    anywhere in this file -- what he saw was an artifact of how `SORT`
+    happened to lay out ties, not deliberate. This emits exactly one
+    blank row between each pair of ADJACENT NON-EMPTY tag groups (Both/
+    Cash/GPP, `sources.edge.POOL_TYPE_SORT_ORDER`'s order) -- skipping
+    the separator entirely next to an empty group, so (for example) an
+    empty "Both" group this week never leaves a stray leading blank row
+    before Cash's names. Still purely inside the array -- never a real
+    inserted row, so `PLAYER_POOL_NAME_BLOCKS`' fixed ranges don't move.
+    Each separator still consumes one row of the block's own capacity;
+    `_name_formula`'s `ARRAY_CONSTRAIN` below applies the same `cap` it
+    always did, now against this pre-grouped array.
+
+    Verified empirically on the template's own throwaway scratch tab
+    before shipping (this codebase's standing discipline for non-obvious
+    array-formula behavior -- see CONTRIBUTING.md), which surfaced two
+    findings not obvious from Sheets' own docs: `IFS`, and a single
+    `IF` used as one argument of another function, do NOT reliably
+    return a spilled multi-row array result (silently `#VALUE!`) the way
+    a bare array does, or the way a plain `IF` used as a top-level
+    formula result does -- every branch below is therefore a nested
+    plain `IF`, never `IFS`. And a `LET` variable name that happens to
+    read as a cell reference (e.g. `g1`, which collides with cell G1)
+    resolves to `#NAME?` even though it's syntactically a normal
+    identifier -- every name below is deliberately not cell-shaped.
+
+    Generalized only as far as Sam's actual 3-tag order needs (3 nested
+    `IF`s, one per tag's presence) -- if `POOL_TYPE_SORT_ORDER` ever
+    grows past 3 tags, this needs rewriting, not reusing as-is (guarded
+    below, not silently mismatched).
+
+    A 4th, unlabeled catch-all group (`grpOther`) holds any row whose tag
+    rank ISN'T one of the 3 known tags -- `_UNKNOWN_TAG_RANK`, which
+    `_union_array`'s control-cell/added-names sources fall back to for a
+    typed name EdgeRaw can't currently match a real Pool tag for (a bye
+    week, a stale add typed before EdgeRaw's own tick). The original flat
+    `SORT(UNIQUE(union),3,TRUE,2,FALSE)` included these rows too (sorted
+    last); a first version of this rewrite silently dropped them by only
+    ever filtering for tag ranks 1-3, found and fixed before shipping.
+    `grpOther` is appended after the three known groups, with its own
+    leading separator only when at least one known group has content
+    (skipping the same leading-blank problem the 3 known groups already
+    avoid).
+
+    `rawArr,UNIQUE(union)` can now include `_union_array`'s own blank
+    (`{"",0,0}`) placeholder rows for a source that had nothing (see that
+    function's docstring) -- `uArr` filters those back out before any
+    grouping happens, so a placeholder never gets miscategorized as a
+    real "unknown tag" row in `grpOther`. Falls back to the same
+    placeholder, not an error, when NOTHING real survives that filter --
+    the has-checks below already treat that as "empty"."""
+    if len(POOL_TYPE_SORT_ORDER) != 3:
+        raise ValueError(
+            "_grouped_with_separators_formula's separator logic hardcodes exactly 3 pool "
+            f"tags; POOL_TYPE_SORT_ORDER now has {len(POOL_TYPE_SORT_ORDER)} -- needs "
+            "rewriting for the new count, not reusing as-is."
+        )
+    sep = '{"",0,0}'
+    return (
+        "LET("
+        f"rawArr,UNIQUE({union}),"
+        f'uArr,IFERROR(FILTER(rawArr,INDEX(rawArr,0,1)<>""),{sep}),'
+        f"grpOne,IFERROR(SORT(FILTER(uArr,INDEX(uArr,0,3)=1),2,FALSE),{sep}),"
+        f"grpTwo,IFERROR(SORT(FILTER(uArr,INDEX(uArr,0,3)=2),2,FALSE),{sep}),"
+        f"grpThree,IFERROR(SORT(FILTER(uArr,INDEX(uArr,0,3)=3),2,FALSE),{sep}),"
+        "grpOther,IFERROR(SORT(FILTER(uArr,INDEX(uArr,0,3)<>1,INDEX(uArr,0,3)<>2,"
+        f"INDEX(uArr,0,3)<>3),2,FALSE),{sep}),"
+        'hasOne,INDEX(grpOne,1,1)<>"",'
+        'hasTwo,INDEX(grpTwo,1,1)<>"",'
+        'hasThree,INDEX(grpThree,1,1)<>"",'
+        'hasOther,INDEX(grpOther,1,1)<>"",'
+        f"sepRow,{sep},"
+        "known,IF(hasOne,"
+        "IF(hasTwo,IF(hasThree,{grpOne;sepRow;grpTwo;sepRow;grpThree},{grpOne;sepRow;grpTwo}),"
+        "IF(hasThree,{grpOne;sepRow;grpThree},grpOne)),"
+        "IF(hasTwo,IF(hasThree,{grpTwo;sepRow;grpThree},grpTwo),IF(hasThree,grpThree,sepRow))"
+        "),"
+        "hasKnown,OR(hasOne,hasTwo,hasThree),"
+        "IF(hasOther,IF(hasKnown,{known;sepRow;grpOther},grpOther),known)"
+        ")"
+    )
 
 
 def _name_formula(edge_tab: str, position: str, cap: int, added_range: str) -> str:
-    # Fix 2.10 + Part 7.10: sorted by TagRank (column 3 of the union
-    # array) ascending first -- Both, then Cash, then GPP -- then Salary
-    # (column 2) descending within each tag group. ARRAY_CONSTRAIN(...,
-    # cap,1) both applies the position cap AND drops every helper column
-    # back out -- Player Pool's Name column only ever shows the name.
+    # Fix 2.10 + Part 7.10 + Fix 3 (A7): grouped by TagRank (Both, then
+    # Cash, then GPP), Salary descending within each group, one blank
+    # row between adjacent non-empty groups (see
+    # `_grouped_with_separators_formula`). ARRAY_CONSTRAIN(...,cap,1)
+    # both applies the position cap AND drops every helper column back
+    # out -- Player Pool's Name column only ever shows the name (or a
+    # blank, for a separator row).
     union = _union_array(edge_tab, position, added_range)
-    return f'=IFERROR(ARRAY_CONSTRAIN(SORT(UNIQUE({union}),3,TRUE,2,FALSE),{cap},1),"")'
+    grouped = _grouped_with_separators_formula(union)
+    return f'=IFERROR(ARRAY_CONSTRAIN({grouped},{cap},1),"")'
 
 
 def _pool_type_formula(edge_tab: str, row: int) -> str:
@@ -259,18 +374,28 @@ def _pool_type_formula(edge_tab: str, row: int) -> str:
 
 
 def _overflow_formula(edge_tab: str, position: str, cap: int, added_range: str) -> str:
-    # COUNTA(INDEX(UNIQUE(...),0,1)), not two separate COUNTIFS added
-    # together -- a player both ticked in EdgeRaw AND typed into the
-    # add-a-player cell must count once, not twice, or this would warn
-    # about an overflow that isn't real. INDEX(...,0,1) takes just the
-    # Name column back out of the (Name, Salary, TagRank) triples Fix
-    # 2.10/Part 7.10 added -- COUNTA over every column would double- (or
-    # triple-) count every real row, and this stays correct regardless
-    # of how many helper columns `_union_array` carries, since column 1
-    # is always Name. IFERROR guards the case where FILTER finds nothing
-    # at all for this position (an empty pool), which UNIQUE/COUNTA
-    # would otherwise propagate as an error instead of 0.
-    count = f"IFERROR(COUNTA(INDEX(UNIQUE({_union_array(edge_tab, position, added_range)}),0,1)),0)"
+    # SUMPRODUCT((name column<>"")*1), not COUNTA -- a player both ticked
+    # in EdgeRaw AND typed into the add-a-player cell must count once,
+    # not twice, or this would warn about an overflow that isn't real.
+    # INDEX(...,0,1) takes just the Name column back out of the (Name,
+    # Salary, TagRank) triples Fix 2.10/Part 7.10 added -- counting over
+    # every column would double- (or triple-) count every real row, and
+    # this stays correct regardless of how many helper columns
+    # `_union_array` carries, since column 1 is always Name.
+    #
+    # COUNTA specifically (not SUMPRODUCT) is this codebase's own "FILTER
+    # of nothing" trap (see CONTRIBUTING.md's Board changelog entry):
+    # `_union_array`'s own per-source IFERROR guards (Fix 3, 2026-09-23)
+    # mean an empty position's union can still resolve to a formula-
+    # produced blank ("") placeholder row rather than a genuine error --
+    # and COUNTA counts a formula's own "" result as present, same as it
+    # did for Board's empty-state guards. SUMPRODUCT never touches
+    # FILTER's own error path so it never has that problem, and correctly
+    # reads a placeholder-only union as 0. The outer IFERROR is kept
+    # anyway as cheap insurance, not because it's still load-bearing.
+    count = (
+        f'IFERROR(SUMPRODUCT((INDEX(UNIQUE({_union_array(edge_tab, position, added_range)}),0,1)<>"")*1),0)'
+    )
     return f'=IF({count}>{cap},{cap}&" {position} slots, "&{count}&" ticked -- some are hidden","")'
 
 

@@ -1798,6 +1798,86 @@ or hand-tuning. Flagged for Sam rather than adjusted further, per the fix
 prompt's own instruction ("if you can't [reproduce], stop and ask rather
 than tuning").
 
+## Week 3 fixes, Fix 3 (2026-09-23): A7's blank row between pool tag groups, actually built
+
+Sam: *"I like the blank line between cash/gpp/both blocks in the pool, but
+it doesn't seem to consistently work."* Root cause: there was no
+separator logic in `sheet_pool_formulas.py` at all -- Sam was seeing an
+artifact of how `SORT` happened to lay out ties, not anything deliberate.
+`docs/planning/HANDOFF.md` had also listed "A7/A8" as done, describing
+only A8's content -- A7 itself was never built.
+
+**The fix.** `_name_formula`'s flat `SORT(UNIQUE(union),3,TRUE,2,FALSE)`
+is replaced by new `_grouped_with_separators_formula`: each of the three
+pool tags (Both/Cash/GPP) becomes its own sorted sub-array, and a single
+blank (`{"",0,0}`) row is inserted between adjacent NON-EMPTY groups only
+-- skipping the separator entirely next to an empty group, so (for
+example) a week where nobody's tagged "Both" at a position never leaves a
+stray leading blank row before Cash's names. A 4th, unlabeled catch-all
+group holds any row whose tag rank isn't one of the three known ones
+(`_UNKNOWN_TAG_RANK` -- a typed control-cell/add-a-player name EdgeRaw
+can't currently match a real Pool tag for), appended last with its own
+conditional separator; the original flat sort included these rows too
+(sorted last), and a first draft of this rewrite silently dropped them by
+only filtering tag ranks 1-3, caught before shipping. Still purely inside
+the array -- no real row insert, so `PLAYER_POOL_NAME_BLOCKS`' fixed
+ranges never move; each separator still consumes one row of the block's
+own capacity, same as any real player would.
+
+**Two Sheets-formula findings, not documented anywhere obvious, verified
+empirically on the template's own throwaway scratch tab before shipping**
+(this codebase's standing discipline for non-obvious array-formula
+behavior -- Scratch itself was removed in Part 4b, so a fresh tab was
+created and deleted for this): `IFS`, and a plain `IF` used as one
+argument of another function, do NOT reliably return a spilled multi-row
+array result -- they silently give `#VALUE!` where a bare array, or a
+plain `IF` used as a formula's own top-level result, spills correctly.
+Every branch is therefore built from nested top-level `IF`s. And a `LET`
+variable name that happens to read as a cell reference (`g1`, which
+collides with cell G1) resolves to `#NAME?` even though it's a
+syntactically ordinary identifier -- every name in the final formula
+(`uArr`, `grpOne`, `hasBoth`, ...) is deliberately not cell-shaped.
+
+**A second, more serious bug found during that same verification, not in
+Fix 3's spec, but fixed because it sits in the exact code this rewrite
+touches and was about to actively break Sam's Week 3 pool:**
+`_union_array` stacks three sources (EdgeRaw ticks, the add-a-player
+control cell, the accumulated added-names list) with `{a;b;c}`. `FILTER`
+raises `#N/A` when a source has zero matches (this codebase's well-known
+"FILTER of nothing" failure mode -- see the Board rebuild entries above),
+and vertical-concatenating a healthy piece with an erroring one
+propagates that single error to the ENTIRE combined array -- verified
+directly: `{{"X",1;"Y",2};FILTER({"Z",3},FALSE)}` resolves to `#VALUE!`,
+not the two real rows plus nothing extra. On the live Week 3 sheet, right
+now, neither the control cell nor the added-names list has anything in
+them (nobody's used add-a-player yet this week) -- so the moment Sam
+ticked his first EdgeRaw checkbox, `control_filter`/`added_filter` would
+each independently error and blank out the WHOLE block despite the real
+tick existing. Confirmed this was pre-existing, not introduced by Fix 3:
+the OLD flat-sort formula shape has the identical failure under the same
+test. Fixed by individually `IFERROR`-guarding each of the three sources
+in `_union_array` to a same-shaped blank placeholder row, with
+`_grouped_with_separators_formula`'s new `uArr` step filtering that
+placeholder back out before grouping (so it's never miscategorized as a
+real "unknown tag" row), and `_overflow_formula` switched from
+`COUNTA(...)` to `SUMPRODUCT((...<>"")*1)` -- COUNTA counts a
+formula-produced `""` placeholder as present, the exact same class of bug
+Board's empty-state guards hit; SUMPRODUCT doesn't.
+
+**Capacity check** (as the fix prompt asked): each separator consumes one
+row of a block's own cap. Worst case (all 3 tags populated, both
+separators fire): QB 10 -> 8 real slots, RB 20 -> 18, WR 25 -> 23, TE 10
+-> 8, DST 10 -> 8. All comfortably above what a normal week's pool uses;
+no resize needed or made.
+
+**Verified:** all three empty/non-empty group combinations plus the
+all-empty and unknown-tag-rank cases, live on the template's scratch tab;
+`dfs setup add-pool-control` re-applied to template then live; a real
+3-tag tick across two real positions (QB and WR) on the LIVE sheet read
+back with exactly one blank row between each tag group, then un-ticked;
+`dfs doctor` clean on both sheets afterward. `docs/planning/HANDOFF.md`'s A7/A8
+lettering also corrected (see Fix 3 in the session's own report to Sam).
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

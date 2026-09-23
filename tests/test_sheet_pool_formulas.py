@@ -1,7 +1,7 @@
 import pytest
 
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
-from dfs.sheet_pool_formulas import _TAG_RANK_ARRAY, _UNKNOWN_TAG_RANK, write_pool_formulas
+from dfs.sheet_pool_formulas import _TAG_RANK_ARRAY, _UNKNOWN_TAG_RANK, _union_array, write_pool_formulas
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_COLUMN
 from dfs.weekly_reset import (
@@ -122,24 +122,19 @@ def _added_filter_for_qb() -> str:
 
 
 def test_overflow_formula_thresholds_on_the_same_cap():
+    # Fix 3 (2026-09-23): SUMPRODUCT, not COUNTA -- `_union_array`'s own
+    # per-source IFERROR guards mean an empty position's union can now
+    # resolve to a blank ("") placeholder row instead of erroring, and
+    # COUNTA counts a formula-produced "" as present (this codebase's
+    # well-known "FILTER of nothing" trap). Built from the real
+    # `_union_array` output rather than hand-reconstructed, so this stays
+    # in sync with that function automatically.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    edge_filter = (
-        f"FILTER({{EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F,"
-        f"MATCH(EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN},{_TAG_RANK_ARRAY},0)}},"
-        f'EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}<>"",EdgeRaw!$C$2:$C="QB")'
-    )
-    control_pool_tag = (
-        f'IFERROR(INDEX(EdgeRaw!${POOL_COLUMN}:${POOL_COLUMN},MATCH({_CONTROL_CELL},EdgeRaw!$B:$B,0)),"")'
-    )
-    control_tag_rank = f"IFERROR(MATCH({control_pool_tag},{_TAG_RANK_ARRAY},0),{_UNKNOWN_TAG_RANK})"
-    control_filter = (
-        f"{{{_CONTROL_NAMES},IFERROR(VLOOKUP({_CONTROL_NAMES},EdgeRaw!$B:$F,5,FALSE),0),{control_tag_rank}}}"
-    )
-    union = f"{{{edge_filter};{control_filter};{_added_filter_for_qb()}}}"
-    count = f"IFERROR(COUNTA(INDEX(UNIQUE({union}),0,1)),0)"
+    union = _union_array("EdgeRaw", "QB", _ADDED_RANGE)
+    count = f'IFERROR(SUMPRODUCT((INDEX(UNIQUE({union}),0,1)<>"")*1),0)'
     assert formulas[f"{OVERFLOW_COL}2"] == (
         f'=IF({count}>10,10&" QB slots, "&{count}&" ticked -- some are hidden","")'
     )
@@ -167,18 +162,85 @@ def test_name_formula_unions_edgeraw_ticks_with_the_control_cell():
     assert "VLOOKUP(" in name_formula  # the control cell's half looks Salary up against EdgeRaw
 
 
+def test_union_array_guards_each_source_so_the_whole_stack_never_errors():
+    # Found while verifying Fix 3, not itself part of that fix's spec:
+    # `{a;b;c}` vertical concatenation propagates a single erroring piece
+    # (FILTER-of-nothing raises #N/A) to the WHOLE combined array --
+    # verified empirically. On the live Week 3 sheet, right now, neither
+    # the control cell nor the added-names list has anything in it yet,
+    # so the moment Sam ticks his first EdgeRaw checkbox this week,
+    # control_filter/added_filter would each independently error and
+    # blank out the whole block despite the real tick existing. Each of
+    # the three sources must be individually IFERROR-guarded to the same
+    # blank placeholder shape.
+    union = _union_array("EdgeRaw", "QB", "$AQ$3:$AQ$52")
+    assert union.count("IFERROR(") >= 3
+    assert union.count('{"",0,0}') == 3
+    assert union.startswith("{IFERROR(FILTER(")
+
+
 def test_name_formula_sorts_by_tag_rank_then_salary_descending():
     # Fix 2.10 (Salary) + Part 7.10 (tag rank), Sam: "The pool should
     # order players by position by salary high to low, but grouped by
-    # Both, Cash, GPP." Tag rank (column 3) is the primary ascending key
-    # -- Both/Cash/GPP in that order -- Salary (column 2) descending
-    # breaks ties within a tag group.
+    # Both, Cash, GPP." Tag rank (column 3, via each tag's own LET group)
+    # is the primary grouping -- Both/Cash/GPP in that order -- Salary
+    # (column 2) descending breaks ties within a tag group. Fix 3 (A7)
+    # replaced the single flat SORT(UNIQUE(...),3,TRUE,2,FALSE) with a
+    # per-tag SORT inside a LET, so this checks the per-group SORT/UNIQUE
+    # calls rather than that literal string.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert "SORT(UNIQUE(" in formulas["A2"]
-    assert ",3,TRUE,2,FALSE)" in formulas["A2"]
+    name_formula = formulas["A2"]
+    assert "LET(rawArr,UNIQUE(" in name_formula
+    assert "SORT(FILTER(uArr,INDEX(uArr,0,3)=1),2,FALSE)" in name_formula
+    assert "SORT(FILTER(uArr,INDEX(uArr,0,3)=2),2,FALSE)" in name_formula
+    assert "SORT(FILTER(uArr,INDEX(uArr,0,3)=3),2,FALSE)" in name_formula
+
+
+def test_name_formula_emits_one_blank_row_between_tag_groups():
+    # Fix 3 (A7, 2026-09-23): "I like the blank line between cash/gpp/both
+    # blocks in the pool, but it doesn't seem to consistently work." The
+    # separator is a same-shape (Name, Salary, TagRank) blank row --
+    # {"",0,0} -- inserted between adjacent groups via nested IF/hasX
+    # checks, never a real inserted sheet row.
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
+    name_formula = formulas["A2"]
+    assert 'sepRow,{"",0,0}' in name_formula
+    assert "IF(hasOne,IF(hasTwo,IF(hasThree,{grpOne;sepRow;grpTwo;sepRow;grpThree}" in name_formula
+
+
+def test_name_formula_does_not_silently_drop_an_unknown_tag_rank_row():
+    # A typed (control-cell/added-list) name EdgeRaw can't currently match
+    # a real Pool tag for falls back to _UNKNOWN_TAG_RANK (4) -- an
+    # earlier version of Fix 3 only ever filtered for tag ranks 1-3 and
+    # silently dropped these rows from the pool entirely, a regression
+    # from the pre-Fix-3 flat SORT(UNIQUE(...)) which included them
+    # (sorted last). `grpOther` must still catch anything that isn't 1,
+    # 2, or 3.
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
+    name_formula = formulas["A2"]
+    assert "grpOther,IFERROR(SORT(FILTER(uArr,INDEX(uArr,0,3)<>1,INDEX(uArr,0,3)<>2,INDEX(uArr,0,3)<>3)" in (
+        name_formula
+    )
+    assert "IF(hasOther,IF(hasKnown,{known;sepRow;grpOther},grpOther),known)" in name_formula
+
+
+def test_grouped_separator_formula_raises_if_pool_tag_count_ever_changes(monkeypatch):
+    # Guarded, not silently mismatched -- the 3-way nested IF only makes
+    # sense for exactly the 3 tags it was built for.
+    import dfs.sheet_pool_formulas as pool_formulas
+
+    monkeypatch.setattr(pool_formulas, "POOL_TYPE_SORT_ORDER", ["Both", "Cash", "GPP", "Extra"])
+    with pytest.raises(ValueError, match="hardcodes exactly 3 pool tags"):
+        pool_formulas._grouped_with_separators_formula("{1,2,3}")
 
 
 def test_tag_rank_array_matches_pool_type_sort_order_not_hand_written():
@@ -190,15 +252,17 @@ def test_tag_rank_array_matches_pool_type_sort_order_not_hand_written():
 
 def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
     # A player ticked in EdgeRaw AND typed into the control cell must
-    # count once toward the cap, not twice -- COUNTA(INDEX(UNIQUE(...),0,1)),
-    # not two separate COUNTIFS added together. INDEX(...,0,1) takes just
-    # the Name column back out of the (Name, Salary, TagRank) triples Fix
-    # 2.10/Part 7.10 added.
+    # count once toward the cap, not twice -- SUMPRODUCT over
+    # INDEX(UNIQUE(...),0,1), not two separate COUNTIFS added together.
+    # INDEX(...,0,1) takes just the Name column back out of the (Name,
+    # Salary, TagRank) triples Fix 2.10/Part 7.10 added. SUMPRODUCT, not
+    # COUNTA, since Fix 3 (2026-09-23): see
+    # test_overflow_formula_thresholds_on_the_same_cap.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert "COUNTA(INDEX(UNIQUE(" in formulas[f"{OVERFLOW_COL}2"]
+    assert "SUMPRODUCT((INDEX(UNIQUE(" in formulas[f"{OVERFLOW_COL}2"]
     assert _CONTROL_CELL in formulas[f"{OVERFLOW_COL}2"]
 
 
