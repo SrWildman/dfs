@@ -466,9 +466,11 @@ described above) took over the visible spine slot; `Flag` (just
 fired) moved to the hidden zone beside `Id` -- kept, not deleted, since
 `sheet_style._apply_name_flag_style`'s Name-bold-on-Flag check and a few
 other boolean/categorical lookups still key off it. Every reading
-consumer (Board's `LANDMINES` panel, the Movement view, `dfs edge`'s
-terminal report, `dfs lineups late-swap`, `dfs sync --live`'s diff
-report, the "Leverage plays" filter view) was repointed at `Flags`;
+consumer at the time (Board's `LANDMINES` panel -- since replaced
+entirely by the Part 3/7.6 Board rebuild, see `CONTRIBUTING.md`'s
+changelog -- plus the Movement view, `dfs edge`'s terminal report,
+`dfs lineups late-swap`, `dfs sync --live`'s diff report, the "Leverage
+plays" filter view) was repointed at `Flags`;
 nothing needed the single-token `Flag` for anything except that one
 boolean check.
 
