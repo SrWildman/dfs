@@ -2374,13 +2374,24 @@ _SORT_SEARCH_HINT = "Click any header arrow to sort or search. Saved views: Data
 _SAVED_VIEW_HINT = "Sort/filter via Data > Filter views (this tab's own cells stay untouched)."
 
 TAB_NOTES: dict[str, str] = {
+    # Fix 4 follow-up (Week 3 fixes, 2026-09-23): this note had the same
+    # staleness the Instructions tab did, unnoticed because being
+    # code-generated (`apply_tab_notes`) regenerates the CELL every run,
+    # not the STRING inside it -- the mechanism can't catch a fact that
+    # changed in the string itself. Corrected to Part 7.6's 7-section
+    # rebuild (was still describing the old 3-panel ranked-player Board).
     "Board": (
-        "BOARD -- a read-only leverage/GameEnv snapshot across three ranked panels, "
-        "rebuilt by `dfs setup build-views`. Nothing here is typed."
+        "BOARD -- a read-only landing tab across seven collapsible sections (Queue, "
+        "Slate shape, Per-position leaders, Punt finder, Stack candidates, Pool "
+        "diagnostics, Chalk map placeholder), rebuilt by `dfs setup build-views`. "
+        "Nothing here is typed."
     ),
+    # Fix 4 follow-up: "sorted by Leverage" (pre-Part-7.2) and "the
+    # checkbox" (Pool was a TRUE/FALSE checkbox before Fix 2.11 made it a
+    # blank/Cash/GPP/Both dropdown) were both stale.
     "EdgeRaw": (
-        "EDGERAW -- every synced player this week, sorted by Leverage. Type in the Pool "
-        f"column (the checkbox on the far left) to add a player to your pool. {_SORT_SEARCH_HINT}"
+        "EDGERAW -- every synced player this week, sorted by ValAdj. Set the Pool "
+        f"dropdown (blank/Cash/GPP/Both, far left) to add a player to your pool. {_SORT_SEARCH_HINT}"
     ),
     "Slate Grid": (
         "SLATE GRID -- one row per game: total, spread, wind, divisional flag. Read-only, "
@@ -2420,25 +2431,28 @@ TAB_NOTES: dict[str, str] = {
         "RESULTS -- a season-level results log, one row per week, NOT reset by a new "
         f"weekly copy. Type into every column except Cash Results/H2H %. {_SORT_SEARCH_HINT}"
     ),
+    # Fix 4 follow-up: "pasted in by hand each week" was true before
+    # Phase 5 automated the sos_qb/sos_rb/sos_wr/sos_te/sos_dst sync
+    # sources -- all five entries had this exact stale claim.
     "SoSQB": (
-        "SOSQB -- Strength-of-schedule for QBs, pasted in by hand each week. Rank is "
-        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+        "SOSQB -- Strength-of-schedule for QBs, synced automatically each week "
+        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
     ),
     "SoSRB": (
-        "SOSRB -- Strength-of-schedule for RBs, pasted in by hand each week. Rank is "
-        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+        "SOSRB -- Strength-of-schedule for RBs, synced automatically each week "
+        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
     ),
     "SoSWr": (
-        "SOSWR -- Strength-of-schedule for WRs, pasted in by hand each week. Rank is "
-        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+        "SOSWR -- Strength-of-schedule for WRs, synced automatically each week "
+        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
     ),
     "SoSTE": (
-        "SOSTE -- Strength-of-schedule for TEs, pasted in by hand each week. Rank is "
-        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+        "SOSTE -- Strength-of-schedule for TEs, synced automatically each week "
+        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
     ),
     "SoSDef": (
-        "SOSDEF -- Strength-of-schedule for DSTs, pasted in by hand each week. Rank is "
-        f"colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
+        "SOSDEF -- Strength-of-schedule for DSTs, synced automatically each week "
+        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
     ),
     "SoSComb": (
         "SOSCOMB -- combines all five SoS tabs into one lookup table by team and "
