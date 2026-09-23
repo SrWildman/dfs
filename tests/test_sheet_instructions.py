@@ -37,11 +37,10 @@ def test_writes_title_and_every_general_row():
     build_instructions_tab(client)
     cells = _cells(client)
 
-    assert cells["A1"] == ["How this sheet works"]
+    assert cells["A1:B1"] == ["How this sheet works", ""]
     assert cells["A2:B2"][0] == "THE ONE THING TO KNOW"
     assert cells["A5:B5"][0] == "Reading the colours"
     # Row 6 (the divider before "Tab-by-tab reference") is never touched.
-    assert "A6" not in cells
     assert "A6:B6" not in cells
 
 
@@ -54,7 +53,6 @@ def test_writes_the_tab_header_and_every_tab_row_at_the_expected_positions():
     assert cells["A8:B8"][0] == "Board"
     # 18 tab rows, 8 through 25.
     assert cells["A25:B25"][0] == "Results"
-    assert "A26:B26" not in cells  # doc links header is a single-column write
 
 
 def test_writes_the_doc_links_header_and_all_five_link_rows():
@@ -62,9 +60,9 @@ def test_writes_the_doc_links_header_and_all_five_link_rows():
     build_instructions_tab(client)
     cells = _cells(client)
 
-    assert cells["A26"] == ["Full documentation"]
-    assert cells["B26"][0] == _DOC_LINK_ROWS[0]
-    assert cells["B30"][0] == _DOC_LINK_ROWS[4]
+    assert cells["A26:B26"] == ["Full documentation", _DOC_LINK_ROWS[0]]
+    assert cells["A27:B27"] == ["", _DOC_LINK_ROWS[1]]
+    assert cells["A30:B30"] == ["", _DOC_LINK_ROWS[4]]
 
 
 def test_player_pool_row_derives_caps_and_column_letters_not_hardcoded():

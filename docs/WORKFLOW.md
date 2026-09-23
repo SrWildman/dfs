@@ -16,18 +16,26 @@ next to its real name so you learn it as you use it.
 **Tabs:** none yet -- this points the CLI at a new sheet.
 
 ```
-File > Make a copy of this template, name it for the week
+File > Make a copy of this template
 dfs week new "<url-of-the-copy>"
 ```
 
-`dfs week new` confirms before writing anything. It runs `dfs
-doctor` against the new copy first (catches a stale/malformed template
-before anything depends on it), rewrites `config.toml`'s `sheet_id`,
-carries Bankroll and Results forward from the outgoing sheet, clears last
-week's lineups, blanks every synced tab AND every local synced-data cache
-(so a source that fails on the first sync reads as no-data-yet rather
-than a previous week's now-mismatched numbers), and runs a full `dfs
-sync`.
+No need to rename the copy yourself -- `dfs week new` titles it "Week
+<n>" for you (from the current NFL week; pass `--week N` to override).
+It confirms before writing anything, including the title it's about to
+set. It also runs `dfs doctor` against the new copy first (catches a
+stale/malformed template before anything depends on it, and now checks
+the title itself parses -- see below), rewrites `config.toml`'s
+`sheet_id`, carries Bankroll and Results forward from the outgoing sheet,
+clears last week's lineups, blanks every synced tab AND every local
+synced-data cache (so a source that fails on the first sync reads as
+no-data-yet rather than a previous week's now-mismatched numbers), and
+runs a full `dfs sync`.
+
+If the copy is somehow already titled `Week <n>` and `<n>` disagrees with
+what `dfs week new` derives, it stops and asks rather than overwriting a
+title that might have been deliberate -- pass `--week` to say which one
+is right.
 
 **Quote the URL.** A Google Sheets URL contains `?` and `#`, which zsh
 (and some other shells) treat as glob/history characters rather than
@@ -175,7 +183,7 @@ colour columns stay yours to fill in by hand.
 expect from the week's actual results, and Results' row for the week you
 just closed shows real `Cash Pts`/`H2H Entered`/`H2H Win` numbers.
 
-## 8. Log actual ownership (optional, builds toward a future calibration)
+## 8. Log actual ownership (optional -- a standalone record, not a calibration pipeline)
 
 **Files:** `data/ownership_log.csv` (local, gitignored -- never leaves
 your machine).
@@ -196,9 +204,14 @@ safe. Pass `--week N` for anything other than the current week -- this
 export has no date of its own, unlike the contest-history one. This is
 file-based on purpose (an automated per-contest fetch was investigated
 and deliberately not built -- see `ownership.py`'s module docstring);
-there's no requirement to log every contest, but the more you log, the
-sooner a real ProjOwn-vs-actual calibration (`docs/planning/PROMPT_DATA.md`'s Move
-2, Phase 6 Part 7.8) has real data to work with.
+there's no requirement to log every contest. **The ProjOwn-vs-actual
+calibration this was originally meant to build toward is dropped** (Week
+3 follow-ups, Item 3, 2026-09-23 -- see `docs/planning/PROMPT_DATA.md`'s
+7.8 entry and `docs/planning/ROADMAP.md`'s "Deliberately not doing"
+section): it needed a hand-logging volume Sam isn't going to do without
+automation, and the automated path stays off over real account risk. Log
+a contest here if you're curious about it on its own terms; nothing
+downstream is waiting on it.
 
 **Done looks like:** the command reports how many players it logged and
 how big the contest's field was; nothing on the sheet changes.

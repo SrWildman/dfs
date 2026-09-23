@@ -182,6 +182,17 @@ class SheetsClient:
         sheet = self._open()
         return sheet.title, sheet.url
 
+    def set_title(self, title: str) -> None:
+        """Week 3 follow-ups, Item 1: renames the SPREADSHEET FILE itself
+        (the same title `describe()` reads, an `updateSpreadsheetProperties`
+        call under gspread's own `Spreadsheet.update_title`) -- not a tab
+        name. `dfs week new` calls this so Sam no longer has to type the
+        week number into Drive's rename box by hand, the step that used to
+        produce titles like `Week4`/`Copy of Template` that only failed at
+        Tuesday's `week close`."""
+        sheet = self._open()
+        sheet.update_title(title)
+
     def list_tabs(self) -> list[TabInfo]:
         sheet = self._open()
         infos: list[TabInfo] = []

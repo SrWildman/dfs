@@ -90,6 +90,7 @@ from dfs.week import (
     extract_results_value_columns,
     parse_sheet_id_from_url,
     parse_week_from_title,
+    resolve_week_title,
     rewrite_sheet_id,
 )
 from dfs.weekly_reset import (
@@ -734,7 +735,11 @@ def sheets_polish(
     was never written to before, see `sheet_style.polish_guardrails`) and
     each lineup block's totals row (clears the dead per-slot VLOOKUPs a
     totals row was never a real 10th player for, sums Ceil, and labels
-    the row -- see `sheet_style.polish_lineups_totals_rows`).
+    the row -- see `sheet_style.polish_lineups_totals_rows`). A third,
+    Instructions -- fully rewritten from `sheet_instructions.py` every
+    run (Week 3 follow-ups, Item 2), so it can't drift the way the old
+    hand-typed version did; `dfs doctor` also checks it for drift on its
+    own, independent of this command.
 
     Safe to re-run: each tab's conditional formats are cleared before its
     own are applied (Guardrails clears only column O's rules, never the
@@ -860,6 +865,13 @@ def sheets_polish(
         # setup add-filters`, how to sort/search it) -- pure metadata, so
         # this is safe regardless of what else ran above.
         results.extend(apply_tab_notes(client))
+
+        # Week 3 follow-ups, Item 2: polish is the command already run
+        # after every structural change, so it's the natural place to
+        # bring Instructions back in sync with sheet_instructions.py
+        # rather than relying on someone remembering the standalone
+        # `dfs setup instructions` command.
+        results.append(build_instructions_tab(client))
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -1409,7 +1421,7 @@ def sheets_doctor(
     try:
         title, url = client.describe()
         console.print(f"Checking: [bold]{title}[/bold]\n{url}\n")
-        issues = run_doctor(client, cfg)
+        issues = run_doctor(client, cfg, title=title)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -2105,12 +2117,25 @@ def week_new(
     sheet_url: str = typer.Argument(
         ..., help="URL (or bare ID) of this week's sheet, already copied from the template."
     ),
+    week: int = typer.Option(
+        None, "--week", help="Override the auto-detected NFL week used to title the new sheet."
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
 ) -> None:
     """Move config.toml to a new week's sheet copy: check the new sheet's
     structure (`dfs doctor`), carry the bankroll and Results log
     forward, clear last week's lineups, and run a full sync -- in that
     order, with one confirmation before anything is written.
+
+    Week 3 follow-ups, Item 1: also TITLES the new sheet itself (a real
+    spreadsheet rename, `SheetsClient.set_title`) as "Week <n>", derived
+    from `nfl_calendar.current_week()` (or `--week`) -- Sam no longer
+    needs to type the week number into Drive's rename box by hand,
+    closing the gap where a title like `Week4`/`Copy of Template` used to
+    go unnoticed until it broke Tuesday's `week close` (Fix 1). If the
+    copy is ALREADY titled `Week <n>` and `<n>` disagrees with the
+    derived week, this stops and asks rather than silently overwriting a
+    title that might have been deliberate.
 
     Carrying the bankroll forward means reading the CURRENT sheet's Ending
     balance for each of the three tracked bankrolls (main/DK, PP, UD) and
@@ -2182,9 +2207,28 @@ def week_new(
     console.print(f"Current sheet: [bold]{old_title}[/bold]\n{old_url}\n")
     console.print(f"New sheet:     [bold]{new_title}[/bold]\n{new_url}\n")
 
+    # Week 3 follow-ups, Item 1: resolve the new sheet's title before
+    # running doctor at all -- `nfl_calendar.current_week()` is correct
+    # here specifically because `week new` runs on Tuesday, after that
+    # week's own rollover (see nfl_calendar.WEEK_ROLLOVER_LEAD_DAYS).
+    resolved_week = week if week is not None else nfl_calendar.current_week()
+    try:
+        title_resolution = resolve_week_title(new_title, resolved_week)
+    except ValueError as e:
+        console.print(
+            f"[red]{e}[/red]\nNot overwriting -- pass --week to confirm which one is right, or "
+            "rename the sheet yourself first if neither is."
+        )
+        raise typer.Exit(code=1) from e
+    target_title = title_resolution.target_title
+    needs_rename = title_resolution.needs_rename
+
     console.print("Checking the new sheet's structure before touching anything...")
     try:
-        issues = run_doctor(new_client, cfg)
+        # check_title=False: the copy isn't renamed yet at this point (see
+        # above) -- doctor.py's own title check is for a sheet already in
+        # use, not a fresh copy `week new` itself is about to title.
+        issues = run_doctor(new_client, cfg, title=new_title, check_title=False)
     except SheetsError as e:
         console.print(f"[red]Sheets error checking the new sheet:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -2228,12 +2272,28 @@ def week_new(
     if weeks_found:
         console.print(f"\n{results_cfg.tab!r} weeks to carry forward: {', '.join(weeks_found)}")
 
-    if not yes and not typer.confirm(
-        "\nRewrite config.toml, carry the bankroll forward, clear last week's lineups, "
-        "and run a full sync against the NEW sheet?"
-    ):
+    if needs_rename:
+        confirm_prompt = (
+            f'\nThis sheet will be titled "{target_title}" (currently "{new_title}"). Rewrite '
+            "config.toml, carry the bankroll forward, clear last week's lineups, and run a full "
+            "sync against the NEW sheet?"
+        )
+    else:
+        confirm_prompt = (
+            "\nRewrite config.toml, carry the bankroll forward, clear last week's lineups, "
+            "and run a full sync against the NEW sheet?"
+        )
+    if not yes and not typer.confirm(confirm_prompt):
         console.print("Cancelled -- nothing changed.")
         raise typer.Exit(code=0)
+
+    if needs_rename:
+        try:
+            new_client.set_title(target_title)
+        except SheetsError as e:
+            console.print(f"[red]Could not rename the new sheet:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        console.print(f'[green]OK[/green] titled the new sheet "{target_title}" (was "{new_title}")')
 
     try:
         updated_text = rewrite_sheet_id(
@@ -2473,12 +2533,14 @@ def ownership_log(
     season: int = typer.Option(None, "--season", help="Defaults to the current season."),
 ) -> None:
     """Logs one contest's actual per-player ownership into the durable
-    local ownership log (`data/ownership_log.csv`) for later calibration
-    against archived `ProjOwn` (Phase 6, Part 7.8). File-based on
-    purpose, not automated -- see `ownership.py`'s module docstring for
-    why an automated per-contest fetch was investigated and deliberately
-    not shipped. Safe to re-run against the same file: replaces that
-    contest's rows rather than duplicating them.
+    local ownership log (`data/ownership_log.csv`) -- a standalone record,
+    not a calibration pipeline (the ProjOwn-vs-actual calibration this was
+    originally meant to feed is dropped, Week 3 follow-ups Item 3; see
+    `ownership.py`'s module docstring). File-based on purpose, not
+    automated -- see that same docstring for why an automated per-contest
+    fetch was investigated and deliberately not shipped. Safe to re-run
+    against the same file: replaces that contest's rows rather than
+    duplicating them.
 
     This export has no date of its own (unlike the account-level contest-
     history export `dfs bankroll sync` reads), so week/season can't be

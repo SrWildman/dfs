@@ -13,6 +13,7 @@ next to it, leaving everything else byte-for-byte as the user wrote it.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 _URL_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 _SHEET_ID_LINE_RE = re.compile(r'^sheet_id\s*=\s*".*"\s*$', re.MULTILINE)
@@ -98,6 +99,40 @@ def parse_week_from_title(title: str) -> int:
             "can't tell which week's ledger this is. Pass --week explicitly."
         )
     return int(match.group(1))
+
+
+@dataclass
+class WeekTitleResolution:
+    target_title: str
+    needs_rename: bool
+
+
+def resolve_week_title(current_title: str, resolved_week: int) -> WeekTitleResolution:
+    """Week 3 follow-ups, Item 1 (2026-09-23): what `dfs week new` should
+    title the fresh copy, given the week it's already resolved (from
+    `--week` or `nfl_calendar.current_week()`) -- pure decision logic,
+    split out of cli.py's own Sheets-touching wrapper the same way every
+    other `week new` calculation here is, so it can be tested without a
+    real sheet.
+
+    Raises `ValueError` if `current_title` ALREADY parses as `Week <n>`
+    for a DIFFERENT `n` -- `week_new` must stop and ask rather than
+    silently overwrite a title that might have been deliberate (a sheet
+    reused on purpose, or a typo Sam already caught and fixed by hand).
+    A title that doesn't parse at all (`Copy of Template`, blank, a typo)
+    is NOT a conflict -- that's the expected, common state of a sheet
+    fresh out of Drive's "make a copy," and gets renamed freely."""
+    target_title = f"Week {resolved_week}"
+    try:
+        existing_week = parse_week_from_title(current_title)
+    except ValueError:
+        existing_week = None
+    if existing_week is not None and existing_week != resolved_week:
+        raise ValueError(
+            f'Sheet is already titled "{current_title}" (Week {existing_week}), but the '
+            f"derived week is {resolved_week}."
+        )
+    return WeekTitleResolution(target_title=target_title, needs_rename=current_title != target_title)
 
 
 def rewrite_sheet_id(config_text: str, *, new_sheet_id: str, previous_sheet_id: str) -> str:

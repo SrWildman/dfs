@@ -18,9 +18,11 @@ from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
+from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sources.edge import POOL_HEADER
+from dfs.week import parse_week_from_title
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
 # Column A of every repeated Lineups sub-header row is the literal text
@@ -28,6 +30,20 @@ from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 # row (immediately above the first block) also starts with this, so the
 # same check covers both.
 _LINEUPS_HEADER_MARKER = "Name"
+
+# Week 3 follow-ups, Item 1 (2026-09-23): the one title that is
+# deliberately NOT required to parse as "Week <n>" -- confirmed live
+# (both sheets' own `describe()`) to be the template's actual, fixed
+# title. There is no other signal in this codebase that distinguishes
+# "this is the template" from "this is a weekly copy" (no dedicated
+# sheet-id constant, no config flag) -- the title is the only thing that
+# already reliably identifies it, which is also exactly the thing
+# `parse_week_from_title` itself already treats as the boundary case
+# (see that function's own docstring). Doctor runs against the template
+# constantly as part of the "template first" verification workflow,
+# so without this exemption every one of those runs would report a
+# permanent, un-fixable failure.
+_TEMPLATE_TITLE = "Template"
 
 
 @dataclass
@@ -46,6 +62,66 @@ class DoctorClient:
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:  # pragma: no cover
         raise NotImplementedError
+
+
+def _check_sheet_title(title: str) -> list[DoctorIssue]:
+    """Week 3 follow-ups, Item 1: catches a bad weekly-copy title (`Week4`,
+    `week 4`, `Week 4 DFS`, `Copy of Template`, ...) the moment `week new`
+    runs `dfs doctor` against the fresh copy -- not at Tuesday's `week
+    close`, which is where this used to fail instead (Fix 1). Reuses
+    `week.parse_week_from_title` itself, so this can never drift from
+    the exact rule `week close`/`bankroll sync` depend on."""
+    if title == _TEMPLATE_TITLE:
+        return []
+    try:
+        parse_week_from_title(title)
+    except ValueError as e:
+        return [DoctorIssue("sheet-title", str(e))]
+    return []
+
+
+def _check_instructions_drift(client: DoctorClient, tab_titles: set[str]) -> list[DoctorIssue]:
+    """Week 3 follow-ups, Item 2: `sheet_instructions.build_instructions_tab`
+    only ever runs when someone remembers to call it (`dfs setup
+    instructions`, or `dfs setup polish`) -- the exact same "correct in
+    code, stale on the sheet until someone reruns it" drift class every
+    other check in this file exists to catch. Renders the same grid
+    `build_instructions_tab` would write (`render_instructions_grid`,
+    shared so the two can never disagree about what "correct" looks
+    like) and diffs it against one bulk read of the live tab -- a single
+    `A1:B<last row>` read, not one read per row, since this tab is
+    ~29 rows and a doctor check shouldn't cost that many round trips.
+    Every fact this tab generates comes from a static Python constant
+    (no sheet title, URL, or date embedded anywhere in it -- confirmed
+    by reading through `sheet_instructions.py` before writing this
+    check), so the comparison needs no per-sheet normalisation: the
+    exact same grid is correct on the template and on every weekly copy."""
+    if INSTRUCTIONS_TAB not in tab_titles:
+        return []
+
+    expected = render_instructions_grid()
+    raw = client.read_range(INSTRUCTIONS_TAB, f"A1:B{INSTRUCTIONS_LAST_ROW}")
+
+    def actual_row(row_num: int) -> tuple[str, str]:
+        idx = row_num - 1
+        if idx >= len(raw) or not raw[idx]:
+            return ("", "")
+        row = raw[idx]
+        a = row[0] if len(row) > 0 else ""
+        b = row[1] if len(row) > 1 else ""
+        return (a, b)
+
+    drifted_rows = [row_num for row_num, values in expected.items() if actual_row(row_num) != values]
+    if drifted_rows:
+        return [
+            DoctorIssue(
+                "instructions-drift",
+                f"{INSTRUCTIONS_TAB!r} differs from what sheet_instructions.py generates at "
+                f"row(s) {sorted(drifted_rows)} -- run `dfs setup instructions` "
+                "(or `dfs setup polish`) to bring it back in sync.",
+            )
+        ]
+    return []
 
 
 def _expected_tabs(cfg: Config) -> set[str]:
@@ -206,11 +282,30 @@ def _check_lineup_count_cell(client: DoctorClient, cfg: Config, tab_titles: set[
     return []
 
 
-def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
+def run_doctor(
+    client: DoctorClient, cfg: Config, *, title: str, check_title: bool = True
+) -> list[DoctorIssue]:
     """Every check below only reads. Order matters for readability, not
     correctness -- later checks on a tab that's missing entirely are
     skipped rather than raising, since `_check_tabs_exist` already reports
-    that failure once."""
+    that failure once.
+
+    `title` is the connected sheet's own title (`SheetsClient.describe()`'s
+    first element) -- the caller already fetches it to print "Checking:
+    <title>" before calling this, so it's threaded through as a plain
+    argument rather than pulled a second time via a `describe()` method
+    on `DoctorClient`'s own narrow interface.
+
+    `check_title=False` skips `_check_sheet_title` -- for exactly one
+    caller, `dfs week new`'s own pre-flight doctor call, which runs
+    BEFORE it has renamed the fresh copy (Week 3 follow-ups, Item 1):
+    the copy's current title (`Copy of Template`, or whatever Drive's
+    "make a copy" dialog left it as) is expected to not parse yet at
+    that point, and `week new` validates/resolves the title itself via
+    `week.parse_week_from_title` directly, with its own ask-on-conflict
+    logic, rather than treating that as a doctor failure. Every other
+    caller (plain `dfs doctor`) leaves this at the default and gets the
+    real check."""
     tabs = client.list_tabs()
     tab_titles = {t.title for t in tabs}
     headers_by_tab = {t.title: t.header for t in tabs}
@@ -230,7 +325,10 @@ def run_doctor(client: DoctorClient, cfg: Config) -> list[DoctorIssue]:
         headers_by_tab[player_pool_tab] = raw[0] if raw else []
 
     issues: list[DoctorIssue] = []
+    if check_title:
+        issues += _check_sheet_title(title)
     issues += _check_tabs_exist(cfg, tab_titles)
+    issues += _check_instructions_drift(client, tab_titles)
     issues += _check_edge_header(cfg, tab_titles, headers_by_tab)
     issues += _check_linked_edge_columns(cfg, tab_titles, headers_by_tab)
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)

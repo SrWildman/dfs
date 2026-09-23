@@ -132,11 +132,12 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "Weekly workflow",
         "0) Not sure what to run? Just run `dfs` with no arguments -- it shows where "
         "you are in the week and the commands that make sense right now.  1) File > "
-        "Make a copy of this template for the new week, then run `dfs week new "
+        "Make a copy of this template (no need to rename it), then run `dfs week new "
         '"<url-of-the-copy>"` -- checks the copy\'s structure first (`dfs doctor`), '
-        "points config.toml at it, carries your bankroll and Results log forward, "
-        "clears last week's lineups, and runs a full sync, all in one step (asks for "
-        "confirmation first).  2) Build the pool, any combination of three ways: "
+        'titles it "Week <n>" for you, points config.toml at it, carries your '
+        "bankroll and Results log forward, clears last week's lineups, and runs a "
+        "full sync, all in one step (asks for confirmation first, including the "
+        "title it's about to set).  2) Build the pool, any combination of three ways: "
         'tick players in EdgeRaw\'s Pool column (use the "Pool picking" filter '
         "view's Name search to find one fast); type a name into Player Pool's own "
         'row 1 search box; or run `dfs pool add "name"` from the terminal. All '
@@ -355,6 +356,29 @@ _DOC_LINK_ROWS: list[str] = [
 ]
 
 
+INSTRUCTIONS_LAST_ROW = _DOC_LINKS_HEADER_ROW + len(_DOC_LINK_ROWS) - 1
+
+
+def render_instructions_grid() -> dict[int, tuple[str, str]]:
+    """Row number -> (column A, column B) for every row this tab
+    generates -- the one shared source of truth `build_instructions_tab`
+    (the writer) and `dfs doctor`'s drift check (Week 3 follow-ups, Item
+    2) both build on, so the two can never disagree about what "correct"
+    looks like. A blank string in either slot means that column is
+    genuinely blank for this row (e.g. column B under the title) -- not
+    "not checked"."""
+    grid: dict[int, tuple[str, str]] = {_TITLE_ROW: (_TITLE, "")}
+    for offset, (label, body) in enumerate(_GENERAL_ROWS):
+        grid[_GENERAL_FIRST_ROW + offset] = (label, body)
+    grid[_TAB_HEADER_ROW] = _TAB_HEADER
+    for offset, (tab_name, body) in enumerate(_TAB_ROWS):
+        grid[_TAB_FIRST_ROW + offset] = (tab_name, body)
+    grid[_DOC_LINKS_HEADER_ROW] = (_DOC_LINKS_HEADER, _DOC_LINK_ROWS[0])
+    for offset, body in enumerate(_DOC_LINK_ROWS[1:], start=1):
+        grid[_DOC_LINKS_HEADER_ROW + offset] = ("", body)
+    return grid
+
+
 def build_instructions_tab(client: SheetsClient, tab: str = INSTRUCTIONS_TAB) -> str:
     """Rewrites every content row of the Instructions tab. Never inserts
     or deletes a row -- see this module's docstring for why the row
@@ -363,23 +387,11 @@ def build_instructions_tab(client: SheetsClient, tab: str = INSTRUCTIONS_TAB) ->
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
 
-    client.update_range(tab, f"A{_TITLE_ROW}", [[_TITLE]])
+    grid = render_instructions_grid()
+    for row_num, (a_value, b_value) in grid.items():
+        client.update_range(tab, f"A{row_num}:B{row_num}", [[a_value, b_value]])
 
-    for offset, (label, body) in enumerate(_GENERAL_ROWS):
-        row = _GENERAL_FIRST_ROW + offset
-        client.update_range(tab, f"A{row}:B{row}", [[label, body]])
-
-    client.update_range(tab, f"A{_TAB_HEADER_ROW}:B{_TAB_HEADER_ROW}", [list(_TAB_HEADER)])
-
-    for offset, (tab_name, body) in enumerate(_TAB_ROWS):
-        row = _TAB_FIRST_ROW + offset
-        client.update_range(tab, f"A{row}:B{row}", [[tab_name, body]])
-
-    client.update_range(tab, f"A{_DOC_LINKS_HEADER_ROW}", [[_DOC_LINKS_HEADER]])
-    doc_links_first_row = _DOC_LINKS_HEADER_ROW
-    for offset, body in enumerate(_DOC_LINK_ROWS):
-        row = doc_links_first_row + offset
-        client.update_range(tab, f"B{row}", [[body]])
+    return f"{tab}: {len(grid)} row(s) written"
 
     total_rows = 1 + len(_GENERAL_ROWS) + 1 + len(_TAB_ROWS) + len(_DOC_LINK_ROWS)
     return f"{tab}: {total_rows} row(s) written"

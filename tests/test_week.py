@@ -4,6 +4,7 @@ from dfs.week import (
     extract_results_value_columns,
     parse_sheet_id_from_url,
     parse_week_from_title,
+    resolve_week_title,
     rewrite_sheet_id,
 )
 
@@ -28,6 +29,40 @@ def test_parse_week_from_title_rejects_non_matching_title():
 def test_parse_week_from_title_rejects_empty_string():
     with pytest.raises(ValueError, match="does not match"):
         parse_week_from_title("")
+
+
+# Week 3 follow-ups, Item 1 (2026-09-23): resolve_week_title's own tests.
+
+
+def test_resolve_week_title_sets_the_title_when_missing():
+    # The common case: a fresh "Copy of Template" (or anything else that
+    # doesn't parse as "Week <n>") gets titled freely, no conflict.
+    resolution = resolve_week_title("Copy of Template", 4)
+    assert resolution.target_title == "Week 4"
+    assert resolution.needs_rename is True
+
+
+def test_resolve_week_title_no_rename_needed_when_already_correct():
+    resolution = resolve_week_title("Week 4", 4)
+    assert resolution.target_title == "Week 4"
+    assert resolution.needs_rename is False
+
+
+def test_resolve_week_title_raises_on_a_real_mismatch_rather_than_overwriting():
+    # The sheet is ALREADY titled "Week <n>" for a DIFFERENT n -- this
+    # must stop and ask, not silently overwrite a title that might have
+    # been deliberate.
+    with pytest.raises(ValueError, match='already titled "Week 3"'):
+        resolve_week_title("Week 3", 4)
+
+
+def test_resolve_week_title_honours_an_explicit_week_override():
+    # --week 4 passed by the caller (simulated here by just passing 4
+    # directly, since the CLI's own --week-vs-current_week() choice
+    # happens before this function is ever called) resolves the same way
+    # regardless of what "today" would have derived.
+    resolution = resolve_week_title("Copy of Template", 4)
+    assert resolution.target_title == "Week 4"
 
 
 def test_parse_sheet_id_from_full_url():

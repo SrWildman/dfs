@@ -1691,6 +1691,14 @@ history) exists. See that doc's own Section 7.8 note for the join
 details a future session will need (name-matching, no DK player ID in
 this particular export).
 
+**Update, Week 3 follow-ups Item 3 (2026-09-23): dropped, not just "not
+yet built."** The hand-logging volume this needed isn't coming -- Sam:
+*"if we can't automate it, I'm not doing it,"* and automation stays off
+over the same account risk described above. See `docs/planning/PROMPT_DATA.md`'s
+7.8 entry and `docs/planning/ROADMAP.md`'s "Deliberately not doing"
+section (also updated the same day to demote `Leverage` indefinitely,
+since its own revisit condition was "a full season of ownership logs").
+
 ## Week 3 fixes, Fix 1 (2026-09-23): `week close`/`bankroll sync` dropped the week just played
 
 Found by an independent review of the Week 3 session, before it caused
@@ -2108,6 +2116,121 @@ layout (now 7 sections), EdgeRaw's still said "sorted by Leverage" (now
 `ValAdj`) and called Pool "the checkbox" (a dropdown since Fix 2.11), and
 all five SoS notes still said "pasted in by hand" (automated since Phase
 5). Deployed via `apply_tab_notes` directly, template then live.
+
+## Week 3 follow-ups (2026-09-23): three gaps left by `5206e50`
+
+An independent review of `5206e50` (the Instructions code-generation
+commit) found it clean, but flagged three gaps it left open. All three
+closed the same day.
+
+**Item 1 -- a bad sheet title used to fail at Tuesday's `week close`, not
+at `week new`.** Fix 1 made `week close`/`bankroll sync` derive the week
+from the sheet's own title (`week.parse_week_from_title`, strict, no
+fallback -- correctly). But Sam still had to TYPE that title by hand when
+copying the template, and nothing checked it was right until the ledger
+scoping itself failed on it days later. Two changes:
+
+- `dfs doctor` gained a title check (`doctor._check_sheet_title`) -- the
+  sheet's title must parse as `Week <n>`, with the template's own literal
+  title (`"Template"`) exempted (there is no OTHER signal in this
+  codebase that distinguishes "this is the template" from "this is a
+  weekly copy" -- no dedicated sheet-id constant, no config flag -- so
+  the title, the very thing being validated, is also the only thing
+  available to make that exemption).
+- `dfs week new` now TITLES the new sheet itself -- a real spreadsheet
+  rename, new `SheetsClient.set_title` (`gspread.Spreadsheet.
+  update_title`, a real `updateSpreadsheetProperties` call) -- derived
+  from `nfl_calendar.current_week()` (or `--week`, new option). Sam no
+  longer types the week number into Drive's rename box. The actual
+  decision logic (compute the target title, refuse to silently overwrite
+  an EXISTING `Week <n>` title that disagrees with the derived week) is
+  a new pure function, `week.resolve_week_title` -- split out of cli.py's
+  own wrapper the same way `parse_sheet_id_from_url`/`rewrite_sheet_id`
+  already are, specifically so it has real unit tests rather than only
+  being exercised by a real `dfs week new` run.
+
+`week new`'s own pre-flight `dfs doctor` call runs BEFORE the rename (it
+has to -- the confirmation, which includes the new title, comes first),
+so at that moment the copy's title is expected to not parse yet (`Copy
+of Template`, whatever Drive's dialog left it as) -- that's normal, not
+a doctor failure. `run_doctor` gained `check_title: bool = True` so this
+one caller can opt out of that specific check while every other check
+(and every OTHER `dfs doctor` caller) still runs it for real.
+
+WORKFLOW.md, the generated Instructions "Weekly workflow" row, and
+`week new`'s own docstring updated so none of them tell Sam to name the
+copy by hand any more (README's quickstart never did -- it only said
+"File > Make a copy", no naming instruction to fix).
+
+Not verified live: `SheetsClient.set_title` itself, against a real
+sheet -- doing so would have meant renaming the actual template or the
+live Week 3 sheet away from a title other code (this same check
+included) depends on, or standing up a throwaway spreadsheet solely to
+rename it, which felt disproportionate for a one-line wrapper around
+gspread's own well-established `update_title`. Everything upstream of
+the actual API call (`resolve_week_title`'s decision logic, `dfs
+doctor`'s title check both exempting the template and flagging a bad
+title) is unit- and live-tested.
+
+**Item 2 -- the generated Instructions tab could still drift.** `5206e50`
+built `sheet_instructions.py`, but nothing regenerated it except the
+standalone `dfs setup instructions` command someone has to remember to
+run -- the same "correct in code, stale on the sheet" drift class every
+other `dfs doctor` check exists to catch, just not yet applied here.
+
+- `sheet_instructions.py` refactored around one shared function,
+  `render_instructions_grid() -> dict[row_num, (col_a, col_b)]` -- the
+  single source of truth both the writer (`build_instructions_tab`) and
+  the new doctor check build on, so the two can never disagree about
+  what "correct" looks like.
+- `dfs doctor` gained `doctor._check_instructions_drift`: one bulk
+  `A1:B<last row>` read (not one read per row -- this tab is ~29 rows,
+  and a doctor check shouldn't cost that many round trips), diffed
+  row-by-row against the rendered grid.
+- `dfs setup polish` now also calls `build_instructions_tab` -- polish is
+  already the command run after every structural change, so it's the
+  natural place to bring Instructions back in sync rather than relying
+  on the standalone command.
+- Checked first (per the review's own instruction) whether anything
+  generated is legitimately sheet-specific (a title, a URL, a date) and
+  would need normalising out of the drift comparison: nothing is --
+  every fact `sheet_instructions.py` writes comes from a static Python
+  constant, confirmed by reading through the whole module before writing
+  the check. The comparison needs no per-sheet special-casing.
+
+Verified live, end to end, on the template: hand-edited one cell
+(Board's row body), confirmed `dfs doctor` failed with exactly that row
+number named, ran `dfs setup instructions`, confirmed `dfs doctor` passed
+clean again. Both sheets pass the new title check and the new drift
+check as of this session.
+
+**Item 3 -- docs only, recording that ownership calibration is off the
+table.** Sam, 2026-09-23: *"if we can't automate it, I'm not doing it."*
+The weekly hand-logging of DK ownership CSVs the ProjOwn-vs-actual
+calibration plan depended on was never going to happen at the volume it
+needed, now made explicit rather than left as an open "not yet built."
+
+- `docs/planning/PROMPT_DATA.md`: Phase 6 Section 7.8's Step 3 (the
+  calibration itself) marked DROPPED, with the reasoning and Sam's quote.
+  Step 7.7 (Ceiling instrumentation) is untouched -- it depends on
+  nflverse results data, not ownership logs, and still stands.
+- `docs/planning/ROADMAP.md`: new entry in "Deliberately not doing (and
+  why)" -- `Leverage`'s demotion (`PROMPT_PHASE6.md` 7.1) had one
+  explicit revisit condition, "no earlier than a full season of
+  ownership logs." That condition can no longer be met, so the demotion
+  is now indefinite, not pending. `PROMPT_PHASE6.md` itself is left
+  as-is (a historical record of what was decided, not a living doc).
+- `dfs ownership log` itself is unchanged -- it works, it's tested, and
+  Sam may still use it occasionally. Every doc that described it as
+  feeding a future calibration (`ownership.py`'s module docstring,
+  `docs/WORKFLOW.md` step 8, README's command table, the `dfs ownership
+  log` command's own docstring) updated to describe it as a standalone
+  record instead. `CONTRIBUTING.md`'s own Part 7.8 changelog entry above
+  gets a short update note rather than a rewrite -- it's a historical
+  record of what happened at the time, same reasoning as leaving
+  `PROMPT_PHASE6.md` alone.
+
+No sheet changes for this item, as specified.
 
 ## Commit messages / PR descriptions
 

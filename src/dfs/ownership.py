@@ -31,13 +31,18 @@ isn't sold commercially, and exactly the thing TFFB's large-field
   pace is sustainable for you. Revisit the automated path only if Sam
   explicitly asks to reconsider that tradeoff.
 
-**Not yet built:** the calibration view (ActualOwn - ProjOwn by ownership
-decile and position, Part 7.8's own Step 3) -- that needs the archived
-`ProjOwn` snapshot for the SAME player-week cross-referenced against this
-log, and is only a meaningful analysis once several weeks of contests are
-logged. This module's job stops at making that data exist and queryable;
-`docs/planning/PROMPT_DATA.md`'s Move 1 (a queryable history over `data/raw/`) is
-the natural home for the eventual cross-reference once it's built.
+**Dropped, not "not yet built":** the calibration view (ActualOwn -
+ProjOwn by ownership decile and position, Part 7.8's own Step 3) needed
+several weeks of hand-logged contests to be a meaningful analysis. Week 3
+follow-ups, Item 3 (2026-09-23): Sam, *"if we can't automate it, I'm not
+doing it"* -- with the automated path already ruled out above, that
+hand-logging volume isn't coming, so this module's job stops at what it
+already does (making one contest's real ownership exist locally, queryable,
+for whoever wants to look at it directly). See `docs/planning/PROMPT_DATA.md`'s
+7.8 entry and `docs/planning/ROADMAP.md`'s "Deliberately not doing"
+section for the full reasoning. `dfs ownership log` itself is unaffected
+-- it works, it's tested, and Sam may still use it occasionally; nothing
+downstream is waiting on it any more.
 """
 
 from __future__ import annotations
