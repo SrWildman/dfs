@@ -21,7 +21,7 @@ _PREVIOUS_SHEET_ID_LINE_RE = re.compile(r'^previous_sheet_id\s*=\s*".*"\s*$', re
 # Cells `dfs week new` copies from the outgoing sheet's Bankroll tab to the
 # new one -- the Ending balance of each of the three parallel bankrolls
 # (main/DK, PP, UD) becomes the new sheet's Starting balance. See
-# docs/ROADMAP.md's Phase 4 section for how these cell addresses were found;
+# docs/planning/ROADMAP.md's Phase 4 section for how these cell addresses were found;
 # they're specific to the current template layout, not derived from anything
 # self-describing in the sheet.
 BANKROLL_CARRYOVER_CELLS = [("B2", "B1"), ("I2", "I1"), ("L2", "L1")]

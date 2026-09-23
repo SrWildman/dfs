@@ -13,7 +13,7 @@ live template read to be a static per-row label, independent of Name)
 rather than assumed, so a future reordering of the blocks can't silently
 mismatch a block to the wrong position the way a hardcoded list could.
 
-**Trade-off, must be confirmed before this ships (see docs/HANDOFF.md
+**Trade-off, must be confirmed before this ships (see docs/planning/HANDOFF.md
 4.5):** once applied, Player Pool's Name column stops being freely
 typeable -- every player must be ticked in EdgeRaw first.
 
@@ -295,7 +295,7 @@ def write_pool_formulas(
     add-a-player control row above it).
 
     Always fully rewritten (idempotent, safe to rerun) rather than
-    gated on "already formula-driven" -- see docs/HANDOFF.md's lesson #4
+    gated on "already formula-driven" -- see docs/planning/HANDOFF.md's lesson #4
     on why an early-return-on-no-op is the wrong default here.
     """
     header_rows = client.read_range(player_pool_tab, f"A{header_row}:{header_row}")

@@ -171,7 +171,7 @@ def build_board(
     panels (a question Sam already answered the moment he ticked his
     pool -- "it ranks 744 players") into one tab, seven sections, each a
     collapsible row group (Queue and Slate shape open by default,
-    everything else collapsed). See `docs/PROMPT_PHASE6.md` Part 3 and
+    everything else collapsed). See `docs/planning/PROMPT_PHASE6.md` Part 3 and
     7.6 for the spec; row positions come from the `BOARD_*` constants
     above, shared with `sheet_style.style_board`.
 
@@ -476,7 +476,7 @@ def build_board(
         BOARD_CHALK_PLACEHOLDER_ROW,
         [
             "Where the field concentrates -- only meaningful once ownership publishes "
-            "(TFFB's ProjOwn reads 0 pre-midweek). See docs/PROMPT_DATA.md's Move 2 / "
+            "(TFFB's ProjOwn reads 0 pre-midweek). See docs/planning/PROMPT_DATA.md's Move 2 / "
             "7.8's actual-ownership logging."
         ],
     )

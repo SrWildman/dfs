@@ -106,7 +106,7 @@ in turn broke `link-edge`'s tail-only idempotency check (see below).
 
 The current template is instead a Google Drive copy of the live sheet,
 stripped back to empty with `dfs lineups clear --sheet-id <template-id>`
-plus a handful of manual tab clears (see `docs/ROADMAP.md` for the exact
+plus a handful of manual tab clears (see `docs/planning/ROADMAP.md` for the exact
 list, if it's still around when you read this). Rebuilding this way next
 time --  copy the live sheet, strip it -- is less error-prone than
 hand-patching a drifted template, since it starts from a layout you know
@@ -145,7 +145,7 @@ the time `link-edge` runs. Those formulas are plain text, not live
 references -- if `EDGE_COLUMNS` is ever reordered, or a new column is
 inserted anywhere but the very end, every already-written formula for
 every column *after* the change silently starts reading the wrong data,
-with no error. This actually happened once (see `docs/ROADMAP.md`'s
+with no error. This actually happened once (see `docs/planning/ROADMAP.md`'s
 Phase 3 section) and was caught only by re-checking resolved values on
 the live sheet, not by a test that existed at the time. **Any new
 `EDGE_COLUMNS` entry must be appended at the very end**, never inserted
@@ -309,7 +309,7 @@ Final rule counts, read back live on both sheets (not asserted from the code): `
 
 **Phase 5, Section C: Player Pool/Lineups given the rest of EdgeRaw's own look.** No structural move. `polish_builder_tab` (used by all three of PlayerPoolRaw/Player Pool/Lineups) previously covered `FIELD_FORMATS`/colour scales/Flag-Avail-Source-Venue-Pool chips -- but not `polish_edge`'s Wind chip, per-position tint, `LevBasis` grey freshness marker, or Name-bold-on-Flag, which had been EdgeRaw-only. Extracted those four into shared helpers (`_apply_wind_chip`/`_apply_position_tint`/`_apply_lev_basis_marker`/`_apply_name_flag_style`, all header-NAME-driven) that `polish_edge` and `polish_builder_tab` now both call, rather than writing a second copy -- `polish_edge` itself was refactored to call them too, so there is exactly one implementation of each going forward. `_apply_name_flag_style` takes an optional `pool_column`: EdgeRaw (the one tab spanning both pooled and unpooled players) still gets the three-way pooled/flagged tint; Player Pool/Lineups/PlayerPoolRaw (every row already someone's pool pick or roster slot -- no "unpooled" row to distinguish) get a plain bold-on-Flag instead.
 
-**Phase 5, Section D: a `Lineups`-only "Vegas" column group.** No structural move (grouping is presentation metadata, not a row/column/tab position change). New `sheet_links.group_lineups_columns`, called right after `link_edge_columns` in `dfs setup link-edge`, Lineups only: groups `O/U`/`Spread`/`Team Implied` behind their own +/- control, verified by real column NAME against the live header (the task's own original "E:H" letter guess was checked against the current designed order and found stale -- those three columns actually sit at `R:T` post-Phase-3). Also fully recomputes the pre-existing WEATHER/MOVEMENT/INTERNAL merge `link_edge_columns` already applies, because `SheetsClient.clear_column_groups` wipes EVERY group on a tab -- anything added after `link_edge_columns` runs would be silently destroyed the next time it re-runs unless one function owns the full recreate, every time. A second, originally-requested group (`GameEnv` onward, provisionally labeled "Venue") was **not built**: `GameEnv` sits immediately adjacent to the already-collapsed WEATHER/MOVEMENT/INTERNAL block, and Sheets does not keep two `addDimensionGroup` calls at the same depth independent when their ranges are adjacent -- it silently EXTENDS the first to cover the second (the same failure mode `link_edge_columns`' own merge logic already works around for its three zones, re-verified live here). Left visible instead of force-merging it into one much larger group; see `docs/ROADMAP.md`'s "Proposed, awaiting a decision" for the costed writeup.
+**Phase 5, Section D: a `Lineups`-only "Vegas" column group.** No structural move (grouping is presentation metadata, not a row/column/tab position change). New `sheet_links.group_lineups_columns`, called right after `link_edge_columns` in `dfs setup link-edge`, Lineups only: groups `O/U`/`Spread`/`Team Implied` behind their own +/- control, verified by real column NAME against the live header (the task's own original "E:H" letter guess was checked against the current designed order and found stale -- those three columns actually sit at `R:T` post-Phase-3). Also fully recomputes the pre-existing WEATHER/MOVEMENT/INTERNAL merge `link_edge_columns` already applies, because `SheetsClient.clear_column_groups` wipes EVERY group on a tab -- anything added after `link_edge_columns` runs would be silently destroyed the next time it re-runs unless one function owns the full recreate, every time. A second, originally-requested group (`GameEnv` onward, provisionally labeled "Venue") was **not built**: `GameEnv` sits immediately adjacent to the already-collapsed WEATHER/MOVEMENT/INTERNAL block, and Sheets does not keep two `addDimensionGroup` calls at the same depth independent when their ranges are adjacent -- it silently EXTENDS the first to cover the second (the same failure mode `link_edge_columns`' own merge logic already works around for its three zones, re-verified live here). Left visible instead of force-merging it into one much larger group; see `docs/planning/ROADMAP.md`'s "Proposed, awaiting a decision" for the costed writeup.
 
 **Phase 5, Section F: `ImpMove` -> `ImpliedMove` (rename in place -- no VLOOKUP index or range shift).** The literal instruction ("rename `LineMove` to `ImpliedMove`") was itself stale: a prior session had already split the old `LineMove` into `ImpMove`/`TotMove`/`SpdMove` (2026-09-15's Phase 3 reorder), so the rename actually applied was `ImpMove` -> `ImpliedMove` -- the same ambiguity concern Sam raised, one abbreviation short of fully resolved. Every reference renamed together: `derived.EDGE_COLUMNS`/`_attach_line_movement`/`_flag_for_row`, `sheet_columns.MOVEMENT`, `sheet_style.FIELD_FORMATS`/`FIELD_COLOR_SCALES`/`EDGE_WIDTHS`, `sheet_views.build_movement`, `docs/CALCULATIONS.md`, `docs/SHEET_REFERENCE.md`. `LINE_MOVE_FLAG_THRESHOLD`/the `LINE↑`/`LINE↓` flag text were deliberately left as-is (Section F's own instruction -- the flag is about a line moving, still accurate). `doctor._check_edge_header` needed no code change (it already compares against `EDGE_COLUMNS` by name). Beyond the rename, `sheet_views.build_movement` was rebuilt to show all three prose columns ("Implied move"/"Total move"/"Spread move") instead of just the one ambiguous "Line Move" header it shipped with -- sorting/filtering stays on `ImpliedMove` alone (what `LINE↑`/`LINE↓` actually keys off), `TotMove`/`SpdMove` ride along as extra display columns once a row already qualifies. `sheet_style.style_movement` was rewritten header-NAME-driven (it previously hardcoded an A:E, 5-column range, which broke the moment the header could be 4-7 columns wide depending on which optional columns exist).
 
@@ -535,7 +535,7 @@ part of the change, not a follow-up.
 
 Also worth a periodic check regardless of what you just changed: any
 Instructions-tab `HYPERLINK` pointing at a repo file assumes that file is
-tracked and public. `docs/ROADMAP.md` used to be one of those links; once
+tracked and public. `docs/planning/ROADMAP.md` used to be one of those links; once
 it was gitignored (session working notes, not public documentation), the
 link 404'd, and had to be found and removed by hand -- nothing flags a
 sheet formula pointing at a path git no longer tracks.
@@ -1477,7 +1477,7 @@ not caused by and not fixed by this change).
 `docs/SHEET_REFERENCE.md`'s sections for all five tabs removed, replaced
 with a pointer to this changelog entry. `EntriesRaw` was the only place
 in the sheet holding a past contest entry's roster-slot detail (which
-players were in which entry) -- `docs/PROMPT_DATA.md` now documents that
+players were in which entry) -- `docs/planning/PROMPT_DATA.md` now documents that
 this detail lives only in the DK export CSVs on disk going forward, for
 whichever session eventually builds the results loop.
 
@@ -1635,7 +1635,7 @@ with an actual visual open of the live sheet, not just another round of
 
 ## Phase 6, Part 7.8 (2026-09-23): actual DK ownership logging, investigated then deliberately scoped down
 
-Step 1/2's investigation (per `docs/HANDOFF_PHASE6.md`'s own "investigate
+Step 1/2's investigation (per `docs/planning/HANDOFF_PHASE6.md`'s own "investigate
 first" instruction) happened live, with Sam present, checking his real
 DraftKings account -- not guessed:
 
@@ -1686,7 +1686,7 @@ rather than doubling it.
 **Not yet built:** the calibration view itself (`ActualOwn - ProjOwn` by
 decile/position) -- needs several weeks of logged contests plus the
 archived `ProjOwn` snapshot cross-referenced by player-week, which is
-only meaningful once `docs/PROMPT_DATA.md`'s Move 1/2 (a queryable
+only meaningful once `docs/planning/PROMPT_DATA.md`'s Move 1/2 (a queryable
 history) exists. See that doc's own Section 7.8 note for the join
 details a future session will need (name-matching, no DK player ID in
 this particular export).

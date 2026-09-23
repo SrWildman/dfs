@@ -1,6 +1,6 @@
 """Pure functions computing the "edge" signals from already-synced sources.
 
-Design principle from docs/ROADMAP.md Phase 1: a column that shows two
+Design principle from docs/planning/ROADMAP.md Phase 1: a column that shows two
 numbers is worse than one that says *look at this*. Every score computed
 here ends up sortable (Leverage, CeilVal, GameEnv) or turned into a short
 flag token (Avail, Flag) -- not just a raw number restated.

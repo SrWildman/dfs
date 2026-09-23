@@ -6,7 +6,7 @@ either need to really reconsider it or get rid of it," and on the one
 piece worth keeping (a "where is this player" jump, no browsing) --
 "Where do they sit in the pool doesn't get me much. Cut it."
 
-This superseded `docs/ROADMAP.md`'s own "shrink to a jump control"
+This superseded `docs/planning/ROADMAP.md`'s own "shrink to a jump control"
 proposal (written before this feedback landed) -- full removal, not a
 smaller deck. The pool-browsing job it existed for is now covered by
 Player Pool's own colour scales/chips/`Used`/`In` columns (Phase 5

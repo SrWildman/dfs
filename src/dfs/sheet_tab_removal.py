@@ -14,7 +14,7 @@ tabs as fully readable/writable). Both are handled by the same function
 here, selected by the `mode` argument, so the two calls this needs (one
 per sheet) can't drift into different tab lists.
 
-See `docs/PROMPT_DATA.md` for where a past entry's roster-slot detail --
+See `docs/planning/PROMPT_DATA.md` for where a past entry's roster-slot detail --
 the one thing only `EntriesRaw` held -- lives now that the tab is gone
 (the DK export CSVs already on disk), and CONTRIBUTING.md's structural
 changelog for the full before/after.

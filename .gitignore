@@ -78,16 +78,7 @@ Thumbs.db
 data/
 config.toml
 
-# Personal notes/strategy -- not for the public repo
-docs/HANDOFF.md
-docs/ROADMAP.md
-docs/V2_PLAN.md
-
-# Working prompts for the code session -- not for the public repo
-docs/PROMPT_NEXT.md
-docs/PROMPT_DATA.md
-docs/PROPOSAL_USABILITY.md
-docs/PROMPT_PHASE6.md
-docs/EXPERT_REVIEW.md
-docs/HANDOFF_PHASE6.md
-docs/PROMPT_WEEK3.md
+# Personal notes/strategy/session-prompts -- not for the public repo.
+# One folder, not a per-file list, so a new planning doc never needs a
+# new gitignore entry -- just create it under docs/planning/.
+docs/planning/

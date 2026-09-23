@@ -468,7 +468,7 @@ def sheets_remove_retired_tabs(
     either way. Also removes these five's own rows from the `Instructions`
     tab on whichever sheet this runs against, regardless of `--mode` --
     the documentation should read correctly on both. See
-    `sheet_tab_removal.py`'s module docstring and `docs/PROMPT_DATA.md`
+    `sheet_tab_removal.py`'s module docstring and `docs/planning/PROMPT_DATA.md`
     for where a past entry's roster-slot detail lives now that
     `EntriesRaw` is gone (the DK export CSVs on disk).
     """
@@ -2079,7 +2079,7 @@ def week_new(
     Carrying the bankroll forward means reading the CURRENT sheet's Ending
     balance for each of the three tracked bankrolls (main/DK, PP, UD) and
     writing it as the NEW sheet's Starting balance -- see
-    dfs.week.BANKROLL_CARRYOVER_CELLS and docs/ROADMAP.md's Phase 4 section
+    dfs.week.BANKROLL_CARRYOVER_CELLS and docs/planning/ROADMAP.md's Phase 4 section
     for how those cell addresses were found. Everything else on the
     Bankroll tab (weekly budget formulas, Deposited/Withdrawn) is either
     formula-driven and naturally resets, or a running total the user

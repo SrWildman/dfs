@@ -1,6 +1,6 @@
 """Wind/precipitation/temperature for this week's outdoor games, from
 Open-Meteo -- free, no API key at all (unlike WeatherAPI.com, which
-docs/HANDOFF.md originally suggested).
+docs/planning/HANDOFF.md originally suggested).
 
 Depends on `nflverse_games` having synced first (reads `GamesRaw` via
 `store.load_current`, same pattern as `edge.py`) -- `Roof == "outdoors"` is

@@ -36,7 +36,7 @@ decile and position, Part 7.8's own Step 3) -- that needs the archived
 `ProjOwn` snapshot for the SAME player-week cross-referenced against this
 log, and is only a meaningful analysis once several weeks of contests are
 logged. This module's job stops at making that data exist and queryable;
-`docs/PROMPT_DATA.md`'s Move 1 (a queryable history over `data/raw/`) is
+`docs/planning/PROMPT_DATA.md`'s Move 1 (a queryable history over `data/raw/`) is
 the natural home for the eventual cross-reference once it's built.
 """
 

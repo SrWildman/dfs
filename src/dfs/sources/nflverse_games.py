@@ -2,7 +2,7 @@
 nflverse's free, unauthenticated `games.csv`.
 
 Verified live (2026-09-05): this single free CSV already carries what
-docs/HANDOFF.md assumed would need a hand-built stadium table -- roof and
+docs/planning/HANDOFF.md assumed would need a hand-built stadium table -- roof and
 surface per game, plus rest days and closing spread/total. No API key, no
 auth, no browser.
 

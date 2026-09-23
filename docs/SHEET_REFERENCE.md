@@ -109,7 +109,7 @@ Open-Meteo forecast for every `GamesRaw` row where `Roof == outdoors`
 The derived "which players are actually worth a look" tab -- computed
 locally by joining the tabs above, no network call of its own. Rows are
 pre-sorted by `Leverage` descending. Full design rationale in
-`docs/ROADMAP.md`'s Phase 1/2; summarized here as what each column means.
+`docs/planning/ROADMAP.md`'s Phase 1/2; summarized here as what each column means.
 
 **The join**: TFFB's `Id` *is* DraftKings' own player ID -- verified an
 exact match, no name-matching needed for the projections↔salaries join.
@@ -144,7 +144,7 @@ actually matches.
 | `Wind` | From `WeatherRaw`, joined by game. Blank for dome games or if `weather` hasn't synced. |
 | `Avail` | DraftKings' own `Status` (`Q`/`OUT`/`IR`). |
 | `Flags` | The one column meant to be read at a glance (renamed from `Flag` in Phase 6, Part 7.9 -- see the hidden `Flag`, above, for the single-highest-priority counterpart). Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`ImpliedMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (`Leverage` ≥ 30; blank `Leverage` while unpublished can never clear this) → `CHALK` (`Own%` ≥ 0.20 (20%), can only fire once ownership is real) → blank. |
-| `ImpliedMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpliedMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Sits in its own collapsed Movement group (Phase 6, Part 2) rather than grouped near `GameEnv` -- see `docs/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
+| `ImpliedMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpliedMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Sits in its own collapsed Movement group (Phase 6, Part 2) rather than grouped near `GameEnv` -- see `docs/planning/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 | `GAME`, `CEIL`, `MOVE`, `WX` | Zone labels, not data -- one sits immediately before each collapsed group (Game/Ceiling detail/Movement/Weather) it names, always visible, blank in every row below the header. See the canonical column order section (Player Pool/Lineups, above) for the full rationale; EdgeRaw has the same four for the same reason. |
 
@@ -565,7 +565,7 @@ shape open by default, everything else collapsed):
   pooled.
 - **Chalk map** -- a labelled, empty placeholder. Meaningless until
   ownership actually publishes (TFFB's `ProjOwn` reads 0 pre-midweek);
-  see `docs/PROMPT_DATA.md`'s Move 2 / 7.8 for the actual-ownership
+  see `docs/planning/PROMPT_DATA.md`'s Move 2 / 7.8 for the actual-ownership
   logging work this is waiting on.
 
 Every EdgeRaw-derived section is regenerated fresh against the CURRENT

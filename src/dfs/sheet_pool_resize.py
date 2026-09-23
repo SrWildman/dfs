@@ -1,6 +1,6 @@
 """One-time structural resize of Player Pool's position-block row counts.
 
-Follow-up to Task K 4.3 (see docs/HANDOFF.md 4.5): once Player Pool's Name
+Follow-up to Task K 4.3 (see docs/planning/HANDOFF.md 4.5): once Player Pool's Name
 column became tick-driven instead of typed, Sam asked to raise the
 per-position caps rather than add a manual-override escape hatch, so a
 deep tick list is never silently hidden by the overflow warning (4.3

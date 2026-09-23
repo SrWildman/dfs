@@ -197,7 +197,7 @@ export has no date of its own, unlike the contest-history one. This is
 file-based on purpose (an automated per-contest fetch was investigated
 and deliberately not built -- see `ownership.py`'s module docstring);
 there's no requirement to log every contest, but the more you log, the
-sooner a real ProjOwn-vs-actual calibration (`docs/PROMPT_DATA.md`'s Move
+sooner a real ProjOwn-vs-actual calibration (`docs/planning/PROMPT_DATA.md`'s Move
 2, Phase 6 Part 7.8) has real data to work with.
 
 **Done looks like:** the command reports how many players it logged and

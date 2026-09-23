@@ -17,7 +17,7 @@ still exists, just renamed (`Rstr%`/`ProjOwn` -> `Own%`, `% of Rstr` ->
 `% of Own`) and/or repositioned. `Leverage`'s new home (the collapsed
 Ceiling detail group) is Part 7.1's decision, folded into this same
 reorder rather than run as a second pass shortly after -- 7.1 is not
-scheduled as its own step anywhere in `docs/HANDOFF_PHASE6.md`'s 7-step
+scheduled as its own step anywhere in `docs/planning/HANDOFF_PHASE6.md`'s 7-step
 order, it's the same category of change as this Part (column
 positioning), and reordering the same three tabs twice in quick
 succession is strictly more risk for no benefit. 7.1's OTHER pieces (the

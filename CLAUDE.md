@@ -87,9 +87,9 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
 | `docs/TROUBLESHOOTING.md` | Something looks wrong on the sheet and you want symptom -> cause -> fix. |
 | `docs/SHEET_REFERENCE.md` | You need to know what a specific tab or column means, or the canonical column order for a shared tab. |
 | `docs/CALCULATIONS.md` | You want the exact formula/threshold behind a computed column -- the one place the math is supposed to live; don't let a docstring's summary of it drift into "close enough." |
-| `docs/HANDOFF.md` | **Gitignored, personal.** A session-by-session log of what actually happened, written in the past tense. Useful for context; never edit it as if it were forward-looking documentation, and don't try to `git add` it. |
-| `docs/ROADMAP.md` | **Gitignored, personal.** Proposals and phase-by-phase project history/planning. Same rule as HANDOFF.md: don't try to commit it. |
-| `docs/V2_PLAN.md` | **Gitignored, personal.** A separate, larger redesign track -- unrelated to day-to-day fixes unless a task explicitly says otherwise. |
+| `docs/planning/HANDOFF.md` | **Gitignored, personal.** A session-by-session log of what actually happened, written in the past tense. Useful for context; never edit it as if it were forward-looking documentation, and don't try to `git add` it. |
+| `docs/planning/ROADMAP.md` | **Gitignored, personal.** Proposals and phase-by-phase project history/planning. Same rule as HANDOFF.md: don't try to commit it. |
+| `docs/planning/V2_PLAN.md` | **Gitignored, personal.** A separate, larger redesign track -- unrelated to day-to-day fixes unless a task explicitly says otherwise. |
 
 If you change a command's name, group, or behavior, update all of:
 README's Commands section, this file's command list above, `docs/
