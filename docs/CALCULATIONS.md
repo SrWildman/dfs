@@ -275,6 +275,16 @@ collide with Player Pool/Lineups' own `O/U` column, which is sourced from
 a different tab (`oddsFinal` via `PlayerPoolRaw`) and isn't guaranteed to
 agree number-for-number with TFFB's figure.
 
+## Board's "Shootout?" flag (Slate shape, Part 3, 2026-09-22)
+
+`derived.SHOOTOUT_TOTAL_THRESHOLD = 48.0` -- a game's Vegas total (the
+same `Total`/`OverUnder` figure documented above, read off `GamesRaw` for
+this panel) at or above this reads "Shootout" on the Board's Slate shape
+section. A standard DFS heuristic, **not** empirically tuned against a
+real slate the way `LEVERAGE_FLAG_THRESHOLD` below was -- a first-pass
+number Sam should sanity-check once he's looked at a few real weeks and
+compared "flagged as a shootout" against how those games actually played.
+
 ## Stadium, Roof, Wind
 
 `Stadium`/`Roof` are looked up from `GamesRaw` by team code (each team's

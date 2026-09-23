@@ -2,14 +2,19 @@ import pandas as pd
 
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_views import (
+    BOARD_BANNER_ROW,
     BOARD_CHALK_HEADER_ROW,
     BOARD_CHALK_PLACEHOLDER_ROW,
     BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_HEADER_ROW,
     BOARD_POOL_FIRST_ROW,
     BOARD_POOL_HEADER_ROW,
+    BOARD_POOL_NOTICE_ROW,
+    BOARD_POOL_SUMMARY_ROW,
     BOARD_PUNT_FIRST_ROW,
     BOARD_PUNT_HEADER_ROW,
+    BOARD_QUEUE_COLHEADER,
+    BOARD_QUEUE_COLHEADER_ROW,
     BOARD_QUEUE_FIRST_ROW,
     BOARD_QUEUE_HEADER_ROW,
     BOARD_SLATE_HEADER_ROW,
@@ -452,22 +457,75 @@ def test_chalk_map_is_a_labelled_placeholder_with_no_formula():
     assert not placeholder.startswith("=")
 
 
+def test_pool_empty_notice_and_concentration_never_use_counta_or_countif_of_filter():
+    # Verified live (2026-09-22, template sheet, nobody pooled): COUNTA
+    # and COUNTIF do not propagate a FILTER-of-nothing's #N/A the way
+    # MIN/MAX/AVERAGE/ARRAY_CONSTRAIN do -- they count the single error
+    # as "1 item present," so an outer IFERROR/IF(...=0,...) built on
+    # COUNTA(FILTER(...)) or COUNTIF(FILTER(...),FILTER(...)) never
+    # reaches its empty-pool branch. Both must gate on SUMPRODUCT
+    # instead, which never touches FILTER and so never errors.
+    client = _build_board()
+    notice = client.rows[BOARD_POOL_NOTICE_ROW - 1][0]
+    summary = client.rows[BOARD_POOL_SUMMARY_ROW - 1][0]
+
+    assert "SUMPRODUCT" in notice
+    assert "COUNTA(" not in notice
+    assert "SUMPRODUCT" in summary
+    assert not summary.startswith("=IFERROR(")
+
+
+def test_games_banner_uses_sumproduct_not_counta_of_filter():
+    # Same COUNTA/COUNTIF-of-an-erroring-FILTER trap as the pool notice
+    # above -- found live via this exact formula (an empty GamesRaw read
+    # "1" instead of the intended IFERROR(...,0) fallback).
+    client = _build_board()
+    games_formula = client.rows[BOARD_BANNER_ROW - 1][1]
+
+    assert "SUMPRODUCT" in games_formula
+    assert "COUNTA(" not in games_formula
+
+
 def test_build_board_preserves_existing_queue_rows_on_rebuild():
     # A routine dfs setup build-views re-run (e.g. after an EdgeRaw
     # reorder) must not wipe whatever the last `dfs sync --live` wrote
     # into Queue -- same "typed/live input survives a rebuild" contract
     # this module already has for Exposure's Target column.
     existing = [["Player A", "RB", "KC", "Avail -> Q"]]
+    colheader_range = f"A{BOARD_QUEUE_COLHEADER_ROW}:D{BOARD_QUEUE_COLHEADER_ROW}"
 
     class _ClientWithQueue(_CapturingClient):
         def tab_exists(self, tab_name):
             return True
 
         def read_range(self, tab_name, a1_range):
+            if a1_range == colheader_range:
+                return [BOARD_QUEUE_COLHEADER]
             return existing
 
     client = _build_board(client=_ClientWithQueue())
     assert client.rows[BOARD_QUEUE_FIRST_ROW - 1][:4] == existing[0]
+
+
+def test_build_board_discards_stale_pre_rebuild_data_sitting_in_queues_rows():
+    # A Board still on the pre-rebuild 3-panel design has TOP LEVERAGE's
+    # own data occupying Queue's row range by coincidence -- reading that
+    # forward as if it were real Queue data (found live, 2026-09-22)
+    # produced garbage. The column-header check must reject it.
+    stale_leverage_panel_data = [["Some Player", "RB KC", "12.3", "4.5"]]
+
+    class _ClientWithStaleBoard(_CapturingClient):
+        def tab_exists(self, tab_name):
+            return True
+
+        def read_range(self, tab_name, a1_range):
+            return stale_leverage_panel_data  # wrong header AND wrong body
+
+    client = _build_board(client=_ClientWithStaleBoard())
+    # No stale data copied forward -- the row is simply never populated
+    # (an untouched row, not four blank strings, but equally blank once
+    # written to a real sheet).
+    assert not any(client.rows[BOARD_QUEUE_FIRST_ROW - 1])
 
 
 def test_old_top_leverage_and_landmines_panels_are_gone():

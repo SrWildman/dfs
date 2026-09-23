@@ -1500,6 +1500,104 @@ other only hides them. Verified by reading `Instructions` back on both:
 `DKLineupsRaw / DKLineupsFinal` row), everything below shifted up
 correctly, nothing else touched.
 
+## Phase 6, Part 3 + 7.6 (2026-09-22): the Board rebuilt
+
+The old Board ranked all 744 players on the slate -- a question Sam
+already answers the moment he ticks his pool. Replaced entirely: one tab,
+seven collapsible row sections (Queue and Slate shape open by default,
+everything else collapsed) instead of three fixed side-by-side ranked
+panels. Not a structural-changelog entry (the row/column-position table
+above) -- nothing else in the codebase reads Board's cells, so there is
+no downstream position for this rebuild to invalidate, unlike every
+change in that table.
+
+Two things made this bigger than a normal view rewrite:
+
+- **Row groups didn't exist yet.** Every other collapsible section in
+  this sheet groups *columns* (`sheets.group_columns`/
+  `clear_column_groups`). New `sheets.group_rows`/`clear_row_groups`
+  mirror them exactly (same `addDimensionGroup`/`deleteDimensionGroup`
+  API, `dimension: "ROWS"` instead), committed separately first since
+  it's pure, zero-sheet-risk infrastructure.
+- **Queue can't be a pure formula.** "What changed since the last sync"
+  only exists as a diff between two point-in-time snapshots -- a Sheets
+  formula can't see yesterday's values. New `live_diff.
+  diff_queue_changes` covers two gaps the existing `diff_edge_flags`
+  couldn't: a move to `Avail = Q` (only `OUT`/`IR` ever set the `OUT`
+  flag token) and a plain `Salary` change (never reflected in `Flags` at
+  all). New `sheet_views.write_queue_section`, called from `dfs sync
+  --live`/`dfs go` right after the diff is computed (NOT from
+  `build_board` -- a routine `dfs setup build-views` re-run reads
+  Queue's existing body back and restores it, same "typed/live input
+  survives a rebuild" contract this module already has for Exposure's
+  Target column). The pool tick itself isn't even in the local diff
+  dataframe -- `sources/edge.py`'s `fetch()` never includes it, only
+  `pre_upload`/`post_upload` read/write it directly against the live
+  sheet -- so `write_queue_section` reads it the same way, by Id, off
+  EdgeRaw's own current header.
+
+New sections, replacing the old three panels:
+
+| Section | Reads | Notes |
+|---|---|---|
+| Queue | EdgeRaw diff (Python) | Pooled players only; populated by live sync, not build-views |
+| Slate shape | GamesRaw, WeatherRaw | New shootout flag, `derived.SHOOTOUT_TOTAL_THRESHOLD` |
+| Per-position leaders | EdgeRaw | `ValAdj` + `ProjPts` blocks (7.6: was `CeilVal` only) |
+| Punt finder | EdgeRaw | `ValAdj`, `Salary < 4000` |
+| Stack candidates | EdgeRaw | Replaces the old leverage panel (7.6); QB + `TmRank=1` WR/TE per team, highest-`OverUnder` games first |
+| Pool diagnostics | **Player Pool**, not EdgeRaw | New; salary spread, chalk/leverage counts, structural-gap checks |
+| Chalk map | -- | Labelled placeholder; deferred until ownership publishes |
+
+Row positions live as `BOARD_*` constants in `sheet_views.py` (`build_board`) and are
+imported directly into `sheet_style.style_board`, so the two can't drift
+the way EdgeRaw's own column order once did (this file's Phase 8
+postmortem). Every EdgeRaw-derived section is regenerated fresh against
+`derived.EDGE_COLUMNS` at call time via `sheet_views._rng`/`_col`, same
+contract the pre-rebuild Board already had -- re-run `build-views` after
+any EdgeRaw column reorder. Pool diagnostics is the same idea against
+`sheet_columns.PLAYER_POOL_COLUMN_ORDER` via a new `_pp_rng`/`_pp_col`.
+
+`docs/SHEET_REFERENCE.md` gained a `### Board` section (it had none
+before this, an existing gap); `docs/CALCULATIONS.md` documents the new
+shootout threshold next to `OverUnder`/`Spread`.
+
+**Two real bugs, found live against the template, fixed before this
+shipped to the live sheet:**
+
+1. **Queue's rebuild-preserve read stale pre-rebuild data as if it were
+   real Queue data.** A Board still on the OLD 3-panel design has TOP
+   LEVERAGE's own rows sitting in exactly the row range the NEW Queue
+   section now occupies -- the very first post-rebuild `build-views` run
+   copied that stale data forward as if a live sync had written it.
+   Fixed by checking the live column-header row against a new
+   `BOARD_QUEUE_COLHEADER` constant before trusting anything below it;
+   only genuinely matches on a sheet already on the new layout.
+2. **`COUNTA`/`COUNTIF` do not propagate a `FILTER`-of-nothing's `#N/A`
+   the way `MIN`/`MAX`/`AVERAGE`/`ARRAY_CONSTRAIN` do -- they count the
+   single error as "1 item present."** Three formulas built on
+   `IFERROR(COUNTA(FILTER(...)),0)` or an outer `IFERROR` around
+   `COUNTIF(FILTER(...),FILTER(...))` never reached their empty-state
+   fallback: the Board's own "Games" count read `1` against a genuinely
+   empty `GamesRaw` (this bug predates the rebuild -- it was already in
+   the pre-existing summary-banner formula, just never noticed since
+   `GamesRaw` is rarely actually empty), `pool_empty_notice` never fired
+   with an empty pool, and `pool_concentration` read "Most pooled players
+   sharing one game: 1" with nobody pooled. All three rebuilt on
+   `SUMPRODUCT((range<>"")*1)`, which never touches `FILTER` and so never
+   generates an error to (fail to) catch. See `sheet_views.py`'s inline
+   comments at each fix for the exact empirical repro.
+
+`sheet_audit.SKIPPED_TABS`'s Board entry also had it still describing
+the pre-rebuild "three side-by-side panels" shape -- corrected to
+describe the new multi-section layout; Board stays skipped from the
+generic header/width audit either way (still not a uniform
+header-driven table).
+
+Verified against the template: `dfs setup build-views`/`polish`, real
+cell reads confirming both fixes (Games banner reads `0`, not `1`; the
+empty-pool notice fires; Queue starts genuinely empty), `dfs doctor`/
+`dfs setup audit-style` clean.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

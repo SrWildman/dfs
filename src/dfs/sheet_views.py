@@ -89,6 +89,14 @@ BOARD_QUEUE_COLHEADER_ROW = BOARD_QUEUE_HEADER_ROW + 1
 BOARD_QUEUE_FIRST_ROW = BOARD_QUEUE_COLHEADER_ROW + 1
 BOARD_QUEUE_ROWS = 20
 BOARD_QUEUE_LAST_ROW = BOARD_QUEUE_FIRST_ROW + BOARD_QUEUE_ROWS - 1
+# Checked against the live column-header row before trusting whatever
+# sits below it as real Queue data to preserve (see build_board's own
+# docstring) -- a sheet still on the pre-rebuild 3-panel Board has
+# TOP LEVERAGE's own data occupying these exact rows by coincidence,
+# and reading that forward into the new Queue section on the very first
+# post-rebuild `build-views` run produced garbage (found live,
+# 2026-09-22, against the template).
+BOARD_QUEUE_COLHEADER = ["Player", "Pos", "Team", "What changed"]
 
 BOARD_SLATE_HEADER_ROW = BOARD_QUEUE_LAST_ROW + 2
 BOARD_SLATE_COLHEADER_ROW = BOARD_SLATE_HEADER_ROW + 1
@@ -178,11 +186,14 @@ def build_board(
     build-views` re-run (e.g. after an EdgeRaw reorder) doesn't wipe
     whatever Queue was showing until the next live sync repopulates it.
     """
-    existing_queue = (
-        client.read_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:D{BOARD_QUEUE_LAST_ROW}")
-        if client.tab_exists(BOARD_TAB)
-        else []
-    )
+    existing_queue = []
+    if client.tab_exists(BOARD_TAB):
+        colheader_rows = client.read_range(
+            BOARD_TAB, f"A{BOARD_QUEUE_COLHEADER_ROW}:D{BOARD_QUEUE_COLHEADER_ROW}"
+        )
+        colheader = colheader_rows[0] if colheader_rows else []
+        if colheader == BOARD_QUEUE_COLHEADER:
+            existing_queue = client.read_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:D{BOARD_QUEUE_LAST_ROW}")
 
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
@@ -203,7 +214,18 @@ def build_board(
     not_out = f'NOT(ISNUMBER(SEARCH("OUT",{flag})))'
 
     # ---- Summary banner (rows 2-3, unchanged from the pre-rebuild Board) --
-    games = f'=IFERROR(COUNTA(FILTER({g}!$A$2:$A$40,{g}!$A$2:$A$40<>"")),0)'
+    # NOT `COUNTA(FILTER(...))` -- verified live (2026-09-22, template
+    # sheet, empty GamesRaw): when FILTER finds zero matching rows it
+    # returns #N/A, and COUNTA/COUNTIF do NOT propagate that error the
+    # way MIN/MAX/AVERAGE/ARRAY_CONSTRAIN do -- they count a single
+    # error value as "1 item present," so `IFERROR(COUNTA(FILTER(...)),
+    # 0)` never actually reaches its 0 fallback and reads "1" on a
+    # genuinely empty GamesRaw. SUMPRODUCT never errors in the first
+    # place (it multiplies a boolean array, never touches FILTER), so
+    # this is the correct empty-safe row count -- same fix applied below
+    # to `pool_empty_notice`/`pool_concentration`, which hit the exact
+    # same COUNTA/COUNTIF-on-an-erroring-FILTER trap.
+    games = f'=SUMPRODUCT(({g}!$A$2:$A$40<>"")*1)'
     top_total = (
         f'=IFERROR(INDEX(SORT(FILTER({{{g}!$B$2:$B$40&" / "&{g}!$C$2:$C$40,{g}!$M$2:$M$40}},'
         f'{g}!$A$2:$A$40<>""),2,FALSE),1,1)&"  "&'
@@ -298,7 +320,18 @@ def build_board(
     pp_all_names = (
         "{" + ";".join(_pp_rng(player_pool_tab, "Name", s, e) for s, e in PLAYER_POOL_NAME_BLOCKS) + "}"
     )
-    pool_empty_notice = f'=IF(COUNTA({pp_all_names})=0,"Tick players into your pool to see diagnostics.","")'
+    # NOT `COUNTA(pp_all_names)=0` -- verified live (2026-09-22, template
+    # sheet, nobody pooled): each of the 5 stacked blocks' own first cell
+    # is an `IFERROR(ARRAY_CONSTRAIN(...),"")`-driven formula, and a
+    # formula that resolves to the empty STRING "" still counts as
+    # present under COUNTA (only a truly untouched cell doesn't) -- so
+    # COUNTA saw 5 "non-blank" cells even with an empty pool and the
+    # notice never fired. SUMPRODUCT correctly treats a `""` result the
+    # same as a genuinely blank cell, since it compares VALUE (`<>""`),
+    # not presence.
+    pool_empty_notice = (
+        f'=IF(SUMPRODUCT(({pp_all_names}<>"")*1)=0,"Tick players into your pool to see diagnostics.","")'
+    )
 
     def _pool_diagnostics_row(position: str, start: int, end: int) -> list[str]:
         pp_name = _pp_rng(player_pool_tab, "Name", start, end)
@@ -323,9 +356,19 @@ def build_board(
         "{" + ";".join(_pp_rng(player_pool_tab, "GameID", s, e) for s, e in PLAYER_POOL_NAME_BLOCKS) + "}"
     )
     _pp_pooled_gameids = f'FILTER({pp_all_gameids},{pp_all_names}<>"")'
+    # NOT a bare `IFERROR(...,"")` around `MAX(COUNTIF(FILTER(...),
+    # FILTER(...)))` -- verified live (2026-09-22, template sheet,
+    # nobody pooled): FILTER-of-nothing returns #N/A, and COUNTIF (like
+    # COUNTA above) does not propagate that error, it counts the single
+    # #N/A as "1 matching item" -- so the outer IFERROR never catches
+    # anything and this read "Most pooled players sharing one game: 1"
+    # with an empty pool. Gated on the same SUMPRODUCT emptiness check as
+    # `pool_empty_notice` instead, so the FILTER-of-nothing case is never
+    # reached at all.
     pool_concentration = (
-        f'=IFERROR("Most pooled players sharing one game: "&'
-        f'MAX(COUNTIF({_pp_pooled_gameids},{_pp_pooled_gameids})),"")'
+        f'=IF(SUMPRODUCT(({pp_all_names}<>"")*1)=0,"",'
+        f'"Most pooled players sharing one game: "&'
+        f"MAX(COUNTIF({_pp_pooled_gameids},{_pp_pooled_gameids})))"
     )
 
     # ---- Assemble ---------------------------------------------------------
@@ -347,7 +390,7 @@ def build_board(
     _set(BOARD_FRESHNESS_ROW, [freshness_banner])
 
     _set(BOARD_QUEUE_HEADER_ROW, ["QUEUE  —  changes since the last sync, pooled players only"])
-    _set(BOARD_QUEUE_COLHEADER_ROW, ["Player", "Pos", "Team", "What changed"])
+    _set(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_COLHEADER)
     for i, existing_row in enumerate(existing_queue):
         _set(BOARD_QUEUE_FIRST_ROW + i, list(existing_row))
 

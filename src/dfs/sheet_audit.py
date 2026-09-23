@@ -130,7 +130,12 @@ WIDTHS_DICT_BY_TAB: dict[str, dict[str, int]] = {
 }
 
 SKIPPED_TABS = [
-    "Board (three side-by-side panels, no single header row)",
+    # Phase 6 Part 3 (2026-09-22): rebuilt from three side-by-side panels
+    # into seven stacked row sections -- still not a uniform header-driven
+    # table (each section has its own column meanings), so it stays out
+    # of scope for this generic header/width audit, same reasoning as
+    # Bankroll below.
+    "Board (multiple row sections, each with its own header, no single discoverable header row)",
     "Bankroll (KPI block + two ledgers)",
 ]
 

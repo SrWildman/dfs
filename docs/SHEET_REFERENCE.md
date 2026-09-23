@@ -526,6 +526,54 @@ definition is correct for ITS OWN uses -- contest-history week-sorting,
 line-movement baselines -- just not this one). See `tffb_sos.py`'s own
 module docstring for the live-verified specifics.
 
+### Board
+
+Read-only landing tab, built/rebuilt by `dfs setup build-views`
+(`sheet_views.build_board`, styled by `sheet_style.style_board`). Rebuilt
+entirely in Phase 6 Part 3/7.6 (2026-09-22) -- the old design ranked all
+744 players on the slate, which Sam had already answered for himself the
+moment he ticked his pool. Now one tab, seven collapsible row sections
+(Data > collapse/expand a section's `+`/`-` control; Queue and Slate
+shape open by default, everything else collapsed):
+
+- **Queue** -- what changed since the last sync, restricted to players
+  in Sam's pool. Populated by `dfs sync --live`/`dfs go`
+  (`sheet_views.write_queue_section`), NOT by `build-views` -- a Sheets
+  formula can't see yesterday's values, only the Python diff
+  (`live_diff.diff_queue_changes`) that runs at sync time can. A rebuild
+  reads back and restores whatever Queue last showed, so it survives a
+  routine `dfs setup build-views` re-run untouched until the next live
+  sync. Empty ("No changes since the last sync for pooled players.")
+  until something actually changes.
+- **Slate shape** -- games ranked by total, with wind and a shootout
+  flag (`derived.SHOOTOUT_TOTAL_THRESHOLD`, currently 48 -- a first-pass
+  DFS heuristic, not yet tuned against a real slate).
+- **Per-position leaders** -- best `ValAdj` and highest `ProjPts`, each
+  ranked *within* position (never across it -- the actual fix for the
+  old "11 QBs out of 12 rows" bug, a salary-ratio metric mechanically
+  favouring cheap positions if sorted across the whole slate).
+- **Punt finder** -- best `ValAdj` play under $4,000 at each position.
+- **Stack candidates** (replaces the old leverage panel, 7.6) -- for the
+  highest-`OverUnder` games, each team's QB plus its `TmRank = 1` WR and
+  TE (the "top pass-catcher" proxy already used elsewhere, see 7.4's
+  `TmRank` note above).
+- **Pool diagnostics** -- reads **Player Pool**, not EdgeRaw: salary
+  spread and cheapest play per position, a chalk-vs-leverage count (via
+  `Flags`), a per-position "no <POS> under $4,000" gap check, and how
+  many pooled players share their most-crowded single game. Empty
+  ("Tick players into your pool to see diagnostics.") before anything is
+  pooled.
+- **Chalk map** -- a labelled, empty placeholder. Meaningless until
+  ownership actually publishes (TFFB's `ProjOwn` reads 0 pre-midweek);
+  see `docs/PROMPT_DATA.md`'s Move 2 / 7.8 for the actual-ownership
+  logging work this is waiting on.
+
+Every EdgeRaw-derived section is regenerated fresh against the CURRENT
+`derived.EDGE_COLUMNS` layout every time `build-views` runs (via
+`sheet_views._rng`/`_col`) -- re-run it after any EdgeRaw column reorder,
+same requirement the pre-rebuild Board already had. Pool diagnostics is
+the same idea against `sheet_columns.PLAYER_POOL_COLUMN_ORDER` instead.
+
 ### DK Upload
 
 Where you pair a finished lineup to a real DK contest entry: DraftKings'
