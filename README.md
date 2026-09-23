@@ -10,9 +10,11 @@ Google Sheets stays where lineups get built. This tool exists so the data
 feeding that sheet is never stale, mislabeled, or manually copy-pasted
 from the wrong file.
 
-## Setup
+## Quickstart
 
-Requires Python 3.11+ (developed against 3.14).
+Requires Python 3.11+ (developed against 3.14). This is the full path
+from nothing to a synced sheet -- every step below has actually been run,
+in this order, against a real sheet.
 
 ```bash
 python3 -m venv .venv
@@ -22,28 +24,39 @@ playwright install chromium   # only needed once TFFB/DK browser auth is used
 dfs --install-completion      # optional: tab-completion for every command below
 ```
 
-Copy the config template and fill in your own sheet:
-
-```bash
-cp config.example.toml config.toml
-```
-
-This project expects a Google Sheet shaped like the
-[weekly template](https://docs.google.com/spreadsheets/d/10si1m87aaaSLloZa-Sht5dD6ZlG6dS8RDWjSzdxkhLA/edit)
--- `File > Make a copy` it, don't sync into a blank sheet. Fill in
-`config.toml`'s `google_sheets.sheet_id` (the ID segment from your
-sheet's URL) and `google_sheets.credentials_file` (a Google
-service-account key -- see below); the rest of `config.toml` has
-working defaults.
-
-### Google service account
+**Google credentials**, before touching `config.toml`:
 
 1. In the [Google Cloud Console](https://console.cloud.google.com), create
    a project and enable the Google Sheets API.
 2. Create a service account, add a JSON key, and download it into the repo.
 3. Open the key file, copy its `client_email`, and share your Google Sheet
    with that address (Editor access).
-4. Point `credentials_file` in `config.toml` at the key file's path.
+
+**Your sheet:** `File > Make a copy` of the
+[weekly template](https://docs.google.com/spreadsheets/d/10si1m87aaaSLloZa-Sht5dD6ZlG6dS8RDWjSzdxkhLA/edit)
+-- don't sync into a blank sheet, the structure has to already match.
+
+**`config.toml`:**
+
+```bash
+cp config.example.toml config.toml
+```
+
+Fill in `google_sheets.sheet_id` (the ID segment from your sheet copy's
+URL) and `google_sheets.credentials_file` (the key file's path from
+above); the rest of `config.toml` has working defaults.
+
+**Verify, then sync:**
+
+```bash
+dfs doctor   # confirms the sheet copy's structure matches what dfs expects
+dfs sync     # pulls projections/salaries/odds into it
+```
+
+`dfs doctor` failing here almost always means the sheet wasn't copied
+from the template (a blank sheet, or one missing a tab) -- fix that
+before `sync`, not after. From here on, the weekly loop below is what
+you'll actually run week to week.
 
 ## Not sure what to run?
 
@@ -53,6 +66,11 @@ that make sense right now, each printed next to its real name -- the
 point is to make itself unnecessary once you know the commands below.
 
 ## The weekly loop
+
+Once you've done the Quickstart above once, this is what every
+subsequent week looks like -- `dfs week new` replaces the manual
+`config.toml` edit from Quickstart, carrying your bankroll and Results
+log forward from the sheet you're leaving:
 
 ```bash
 dfs week new "<url-of-the-copy>" # new week: point config.toml at a fresh sheet copy, sync (quote the URL -- see below)

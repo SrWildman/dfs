@@ -83,6 +83,7 @@ from dfs.derived import CHALK_OWNERSHIP_THRESHOLD, EDGE_COLUMNS, EDGE_DATA_OFFSE
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_views import (
     BOARD_CHALK_HEADER_ROW,
+    BOARD_LAST_ROW,
     BOARD_LEADERS_COLHEADER_ROW,
     BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_HEADER_ROW,
@@ -2494,6 +2495,17 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         return f"{tab}: not present -- skipped"
     client.clear_conditional_formats(tab)
     client.clear_row_groups(tab)
+    # The pre-rebuild 3-panel Board painted plain (non-conditional)
+    # background fills on spacer columns E/J -- `clear_conditional_
+    # formats` only clears conditional-format RULES, not a plain fill
+    # `format_range` already set, so those old grey bands were still
+    # visible live after this rebuild shipped (found visually, 2026-09-
+    # 23, opening the actual sheet -- an API cell-value read alone never
+    # would have caught a leftover fill with no corresponding value).
+    # Reset to white first, past the tab's current widest/tallest
+    # section, so every section's own formatting below starts from a
+    # clean sheet regardless of what an earlier design left behind.
+    client.format_range(tab, f"A1:N{BOARD_LAST_ROW + 10}", {"backgroundColor": WHITE})
     client.set_column_widths(
         tab,
         {

@@ -1616,6 +1616,23 @@ Re-verified against both sheets afterward: live's Slate shape now reads
 54.5 down to 39.5 in strict descending order with Wind correctly
 attached to each game.
 
+**A fourth bug, found by actually opening the sheet in a browser rather
+than only reading cell values back:** a leftover plain (non-conditional)
+grey background fill sat in column E, a spacer column between two of the
+pre-rebuild Board's three side-by-side panels -- `clear_conditional_
+formats` only clears conditional-format RULES, not a fill `format_range`
+already set directly, so this survived the rebuild invisibly to every
+cell-VALUE check run so far. Fixed by resetting `style_board`'s entire
+working range to white before applying any of its own formatting, so a
+future redesign can't leave the same kind of residue behind either. Also
+fixed while looking: the `Instructions` tab's own `Board` row, on both
+sheets, still described the pre-rebuild three-panel design -- updated to
+name the seven sections. Neither of these two would have been caught by
+`dfs doctor`/`audit-style` or a resolved-value API read -- both are
+presentation-layer facts, not data -- which is why this pass finished
+with an actual visual open of the live sheet, not just another round of
+`read_range` calls.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

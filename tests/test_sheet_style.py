@@ -792,6 +792,21 @@ def test_style_board_hides_the_slate_shape_gameid_join_key():
     assert ("J", "J") in client.hide_columns_calls
 
 
+def test_style_board_resets_background_before_applying_new_formatting():
+    # Found live (2026-09-23, visually opening the actual sheet): the
+    # pre-rebuild 3-panel Board painted a plain (non-conditional) grey
+    # fill on spacer columns E/J, which clear_conditional_formats can't
+    # touch (it only clears conditional-format RULES) -- so the old
+    # bands were still visible after this rebuild shipped. The very
+    # first format_range call must reset to white, before any
+    # section-specific formatting is applied.
+    client = FakeBoardClient()
+    style_board(client)
+    first_range, first_fmt = client.format_calls[0]
+    assert first_fmt == {"backgroundColor": WHITE}
+    assert first_range.startswith("A1:N")
+
+
 _HEADER_WITH_AVAIL_AT_Y = (
     ["Name", "Pos.", "Team", "DK Sal", "O/U", "Spread", "Team Implied", "Opp.", "Venue", "OppPosRank", "Pts"]
     + ["Ceil", "Val", "Own%", "", "% of Cap", "CeilVal", "CeilPct", "Leverage", "OwnStatus", "GameEnv"]

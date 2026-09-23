@@ -574,6 +574,30 @@ Every EdgeRaw-derived section is regenerated fresh against the CURRENT
 same requirement the pre-rebuild Board already had. Pool diagnostics is
 the same idea against `sheet_columns.PLAYER_POOL_COLUMN_ORDER` instead.
 
+### Slate Grid
+
+Read-only, built/rebuilt by `dfs setup build-views` (`sheet_views.
+build_slate_grid`), styled by `dfs setup polish` (`sheet_style.
+style_slate_grid`). One row per game (up to 18), instead of one row per
+player -- everything here comes straight off `GamesRaw`/`WeatherRaw`/
+`EdgeRaw`, nothing computed locally.
+
+| Column | Meaning |
+|---|---|
+| `Matchup` | `Away @ Home`, from `GamesRaw`. |
+| `Kickoff` | Day + local kickoff time, from `GamesRaw`'s `Date`/`Time`. |
+| `Total` / `Spread` | `GamesRaw`'s own closing line (nflverse), independent of `oddsraw`. |
+| `Roof` | As `GamesRaw`. |
+| `Wind` / `Gust` | From `WeatherRaw`, joined by `GameId` -- both column indices derived from `sources.weather.WEATHER_COLUMNS` (A9, 2026-09-22), not hardcoded, after the hardcoded-index version of this exact lookup was found and fixed. Blank for dome games. |
+| `Rest (A/H)` | `GamesRaw`'s `AwayRest`/`HomeRest`, as `"A / H"`. |
+| `Div` | `DIV` if `GamesRaw.DivGame = 1`, else blank. |
+| `Stadium` | As `GamesRaw`. |
+| `Total move` / `Spread move` | A9 (2026-09-22): this game's `TotMove`/`SpdMove` off `EdgeRaw`, looked up by the HOME team (both are actually team-level joins keyed by `Team` -- any player on that team carries the same value; the home team's row is used consistently, matching `Spread`'s own home-team-perspective convention). `TotMove` is the same number either way; `SpdMove` is directional, so the choice of team matters. Blank until at least one `nfl_odds` sync has moved a line since the week started. |
+
+No empty-state guard beyond a blank `IF($A{row}="",...)` per cell --
+unlike `Board`/`Movement`, there's no "not synced yet" message here,
+just blank rows once `GamesRaw` runs out of games.
+
 ### DK Upload
 
 Where you pair a finished lineup to a real DK contest entry: DraftKings'
