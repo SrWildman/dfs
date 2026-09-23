@@ -118,6 +118,19 @@ CHALK_OWNERSHIP_THRESHOLD = 0.20
 # every ProjOwn on EdgeRaw still read 0.0% and every Leverage cell was
 # blank. A share threshold instead requires ownership to be genuinely
 # published for a majority of the slate before trusting it.
+#
+# Week 3 follow-ups, Item 4 (2026-09-23): "majority of the slate" was still
+# measured over every player DraftKings lists, not the VAL_ADJ_ROSTERABLE_
+# TOP_N pool -- but TFFB only ever publishes ownership for players who will
+# actually be rostered, so that share tops out around 38% and can never
+# cross 0.5. Live symptom: OwnStatus read "unpublished" and Leverage was
+# blank all season, on every snapshot, even ones where ownership had
+# clearly published. Verified on the real 2026-09-20 15:51 UTC snapshot
+# (`data/raw/edge/20260920T155118Z.csv`, 668 players, 255 with ProjOwn >
+# 0): 38% over the whole list (reads unpublished) vs. 90% over the 250-
+# player rosterable pool (clearly published). Same denominator mistake as
+# ValAdj (Fix 2) and the same fix: measure the share against the pool, not
+# the full DK list.
 OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5
 OUT_STATUSES = frozenset({"OUT", "IR"})
 # Mirrors sources/weather.py's WIND_FLAG_THRESHOLD_MPH. Duplicated rather
@@ -674,7 +687,12 @@ def build_edge_frame(
     merged["CeilVal"] = (merged["Ceiling"] / (merged["Salary"] / 1000)).round(2)
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)
 
-    has_real_ownership = merged["ProjOwn"].fillna(0).gt(0).mean() > OWNERSHIP_PUBLISHED_SHARE_THRESHOLD
+    # Week 3 follow-ups, Item 4: measured over `val_adj_pool` (the same
+    # VAL_ADJ_ROSTERABLE_TOP_N reference population ValAdj uses), not every
+    # player DK lists -- see OWNERSHIP_PUBLISHED_SHARE_THRESHOLD's own
+    # comment for why the full-list denominator can never cross 0.5.
+    pool_projown = merged.loc[val_adj_pool, "ProjOwn"]
+    has_real_ownership = pool_projown.fillna(0).gt(0).mean() > OWNERSHIP_PUBLISHED_SHARE_THRESHOLD
     merged["OwnStatus"] = OWN_STATUS_REAL if has_real_ownership else OWN_STATUS_UNPUBLISHED
     if has_real_ownership:
         merged["OwnPct"] = _percentile_within(merged["ProjOwn"], merged["Position"]).round(1)

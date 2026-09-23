@@ -166,6 +166,76 @@ def test_a_single_early_nonzero_projown_does_not_flip_the_whole_slate_to_real():
     assert frame["Leverage"].isna().all()
 
 
+def test_ownership_published_share_is_measured_against_the_rosterable_pool_not_the_whole_list():
+    # Week 3 follow-ups, Item 4: TFFB only ever publishes ownership for
+    # players who'll actually be rostered, so a share measured over every
+    # player DK lists tops out around 38% and can never cross 0.5 (the
+    # real symptom, live all season: OwnStatus stuck "unpublished" and
+    # Leverage blank even with ownership clearly out). Reproduced here with
+    # a shrunk RB cap (3): 2 of the 3 pool players have real ProjOwn (a
+    # 66.7% pool share, published), but 3 zero-ProjOwn backups sitting
+    # outside the pool dilute the whole-list share to 2/6 = 33.3% --
+    # exactly the shape that used to read "unpublished."
+    proj = _projections(
+        [
+            {
+                "Id": "1",
+                "Name": "Pool A",
+                "Position": "RB",
+                "ProjPts": 30.0,
+                "Ceiling": 40.0,
+                "ProjOwn": 25.0,
+            },
+            {
+                "Id": "2",
+                "Name": "Pool B",
+                "Position": "RB",
+                "ProjPts": 25.0,
+                "Ceiling": 20.0,
+                "ProjOwn": 10.0,
+            },
+            {"Id": "3", "Name": "Pool C", "Position": "RB", "ProjPts": 20.0, "Ceiling": 15.0, "ProjOwn": 0},
+            {"Id": "4", "Name": "Backup A", "Position": "RB", "ProjPts": 2.0, "Ceiling": 5.0, "ProjOwn": 0},
+            {"Id": "5", "Name": "Backup B", "Position": "RB", "ProjPts": 1.5, "Ceiling": 4.0, "ProjOwn": 0},
+            {"Id": "6", "Name": "Backup C", "Position": "RB", "ProjPts": 1.0, "Ceiling": 3.0, "ProjOwn": 0},
+        ]
+    )
+    sal = _salaries([{"ID": str(i)} for i in range(1, 7)])
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 3}
+        frame = build_edge_frame(proj, sal).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    assert (frame["OwnStatus"] == OWN_STATUS_REAL).all()
+    assert not frame["Leverage"].isna().all()
+
+
+def test_ownership_published_share_still_reads_unpublished_when_the_whole_pool_is_zero():
+    # The all-zeros case must still read unpublished once the denominator
+    # is pool-scoped -- this isn't just "a smaller list always passes."
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "A", "Position": "RB", "ProjPts": 30.0, "Ceiling": 40.0, "ProjOwn": 0},
+            {"Id": "2", "Name": "B", "Position": "RB", "ProjPts": 25.0, "Ceiling": 20.0, "ProjOwn": 0},
+            {"Id": "3", "Name": "C", "Position": "RB", "ProjPts": 20.0, "Ceiling": 15.0, "ProjOwn": 0},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}])
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 3}
+        frame = build_edge_frame(proj, sal).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    assert (frame["OwnStatus"] == OWN_STATUS_UNPUBLISHED).all()
+    assert frame["Leverage"].isna().all()
+
+
 def test_ownpct_is_percentile_rank_of_projown_within_position_not_raw_percentage():
     # Raw ProjOwn subtraction was the bug: a percentile (0-100, mean 50) minus
     # a raw right-skewed percentage (mostly under 5, a few 25-40) centers

@@ -258,10 +258,12 @@ row order still ranks usefully in that window (see below), it's only the
 
 `OwnStatus` (`LevBasis` before Part 7.9's rename) names which case is in
 effect, computed once for the whole frame (not per player): `"real"` once
-ownership is published for **more than half the slate**
-(`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`), else `"unpublished"`. It
-has exactly one job now: a data-freshness marker telling you whether
-ownership has been published yet, not a second formula to reason about.
+ownership is published for **more than half of the rosterable pool**
+(`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`, measured over
+`VAL_ADJ_ROSTERABLE_TOP_N`, the same reference population `ValAdj` uses),
+else `"unpublished"`. It has exactly one job now: a data-freshness marker
+telling you whether ownership has been published yet, not a second
+formula to reason about.
 
 **Phase 6, Part 1.4 (2026-09-17):** this used to be `.any()` -- a single
 non-zero `ProjOwn` (one early-published player, a data glitch, a bye-week
@@ -273,13 +275,25 @@ the time) read `"real"` while every `ProjOwn` on `EdgeRaw` still read
 ownership to be genuinely published for a majority of the slate, not just
 present for one player.
 
+**Week 3 follow-ups, Item 4 (2026-09-23):** "majority of the slate" was
+still measured over every player DraftKings lists, not the rosterable
+pool -- but TFFB only ever publishes ownership for players who'll
+actually be rostered, so that share tops out around 38% and can never
+cross 0.5. Live symptom, all season: `OwnStatus` read `"unpublished"` and
+`Leverage` was blank even on a Sunday with ownership clearly out.
+Verified on the real 2026-09-20 snapshot: 38% over the whole 668-player
+list (reads unpublished) vs. 90% over the 250-player rosterable pool
+(clearly published). Same denominator mistake as `ValAdj` (Fix 2), same
+fix: measure the share against the pool.
+
 **Sort order.** `Leverage` is no longer a primary sort anywhere (Part
 7.1) -- `build_edge_frame` sorts the frame by `ValAdj` descending instead
 (Part 7.2, see "ValAdj" above), unconditionally, regardless of whether
-`OwnStatus` is `"real"` or `"unpublished"`. Revisit no earlier than a full
-season of ownership logs (Part 7.8) -- TFFB's ownership projection is
-large-field, Sam plays small-field, so treat `Leverage` as directional at
-best until that gap has been measured.
+`OwnStatus` is `"real"` or `"unpublished"`. Its demotion is indefinite,
+not "revisit after a full season of ownership logs" -- that revisit
+condition depended on hand-logged DK ownership CSVs that aren't coming
+(Week 3 follow-ups, Item 3; see `docs/planning/ROADMAP.md`'s "Deliberately
+not doing" section). Treat `Leverage` as directional at best.
 
 ## GameEnv
 
