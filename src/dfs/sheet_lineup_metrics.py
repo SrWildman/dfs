@@ -89,21 +89,45 @@ def stack_signature_formula(
     start: int, end: int, *, position_col: str, team_col: str, gameid_col: str
 ) -> str:
     """ "QB+2 (KC) + 1 bring-back" / "QB+0 (KC)" / "no QB". Stack count is
-    every OTHER rostered player (any position) on the QB's own team;
-    bring-back count is every rostered player in the QB's own GAME but on
-    the OPPONENT's team -- neither excludes a bring-back from also being
-    counted if he happens to be... there's no double-count risk here,
-    since a bring-back is on the OPPOSING team by definition, disjoint
-    from the QB's own team's stack count."""
+    every OTHER rostered QB/RB/WR/TE (Week 3 fixes, Fix 5 -- see below) on
+    the QB's own team; bring-back count is every non-DST rostered player
+    in the QB's own GAME but on the OPPONENT's team -- neither excludes a
+    bring-back from also being counted if he happens to be... there's no
+    double-count risk here, since a bring-back is on the OPPOSING team by
+    definition, disjoint from the QB's own team's stack count.
+
+    Week 3 fixes, Fix 5 (2026-09-23): this used to count "every other
+    rostered player, any position," which included a same-team DST -- a
+    QB plus his own defense (no real stack piece at all) read as "QB+1",
+    indistinguishable from an actual one-player stack. Sam's decision:
+    keep counting RBs (deliberate -- narrowing to just WR/TE was
+    considered and rejected), stop counting the DST. Implemented as a
+    denylist (`"<>QB"` already excluded the QB himself; `"<>DST"` is the
+    one line added) rather than an allowlist of `{"RB","WR","TE"}` --
+    `d08b0b3`'s own commit message already analyzed this exact function
+    when it fixed the RB/GAME guardrail's FLEX blind spot, and concluded
+    a denylist here needs no FLEX-to-real-position resolution: `position_
+    col` (Lineups' `Pos.`) is a FIXED per-slot label, and DraftKings'
+    FLEX slot can never legally hold a QB or a DST, so a FLEX-rostered
+    RB/WR/TE's own slot label ("FLEX") already satisfies both `"<>QB"`
+    and `"<>DST"` without any lookup. An ALLOWLIST of `{"RB","WR","TE"}`
+    would have needed that resolution -- a FLEX row's label is never
+    literally "RB"/"WR"/"TE", so it would have silently dropped every
+    FLEX-rostered stack piece. Same exclusion applied to `bring_back_
+    count` below (and its standalone twin, `bring_back_present_formula`)
+    -- an opposing DST isn't a real "bring-back" bet either, and it fed
+    the same displayed count."""
     qb_team = _qb_team_formula(start, end, position_col=position_col, team_col=team_col)
     qb_game = _qb_game_formula(start, end, position_col=position_col, gameid_col=gameid_col)
     stack_count = (
         f"COUNTIFS(${team_col}${start}:${team_col}${end},{qb_team},"
-        f'${position_col}${start}:${position_col}${end},"<>QB")'
+        f'${position_col}${start}:${position_col}${end},"<>QB",'
+        f'${position_col}${start}:${position_col}${end},"<>DST")'
     )
     bring_back_count = (
         f"COUNTIFS(${gameid_col}${start}:${gameid_col}${end},{qb_game},"
-        f'${team_col}${start}:${team_col}${end},"<>"&{qb_team})'
+        f'${team_col}${start}:${team_col}${end},"<>"&{qb_team},'
+        f'${position_col}${start}:${position_col}${end},"<>DST")'
     )
     return (
         f'=IF({qb_team}="","no QB",'
@@ -131,11 +155,18 @@ def distinct_games_formula(start: int, end: int, *, gameid_col: str) -> str:
 def bring_back_present_formula(
     start: int, end: int, *, position_col: str, team_col: str, gameid_col: str
 ) -> str:
+    """Standalone Yes/No mirror of `stack_signature_formula`'s own
+    `bring_back_count` -- Fix 5's DST exclusion is duplicated here rather
+    than shared, since the two formulas' surrounding shape differs too
+    much to factor out (this one wraps in IF(...,"Yes","No"); the other
+    builds an inline "+N bring-back" string) -- see that function's own
+    docstring for the exclusion's reasoning."""
     qb_team = _qb_team_formula(start, end, position_col=position_col, team_col=team_col)
     qb_game = _qb_game_formula(start, end, position_col=position_col, gameid_col=gameid_col)
     bring_back_count = (
         f"COUNTIFS(${gameid_col}${start}:${gameid_col}${end},{qb_game},"
-        f'${team_col}${start}:${team_col}${end},"<>"&{qb_team})'
+        f'${team_col}${start}:${team_col}${end},"<>"&{qb_team},'
+        f'${position_col}${start}:${position_col}${end},"<>DST")'
     )
     return f'=IF({qb_team}="","",IF({bring_back_count}>0,"Yes","No"))'
 

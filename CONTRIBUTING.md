@@ -1959,6 +1959,44 @@ roughly 300-400 lines total, on the order of half a day's focused work.
 Not started; needs Sam's go-ahead before building, per Rule Zero (a
 sheet-generation redesign, not a bug fix).
 
+## Week 3 fixes, Fix 5 (2026-09-23): stack signature no longer counts the DST
+
+`sheet_lineup_metrics.stack_signature_formula` counted "every other
+rostered player, any position, on the QB's own team" toward the stack
+count -- which included a same-team DST, so a QB plus his own defense
+(no real stack piece at all) read as `QB+1`, indistinguishable from an
+actual one-player stack. Sam's decision: keep counting RBs (deliberate --
+narrowing to just WR/TE was considered and rejected), just stop counting
+the DST.
+
+**Implemented as a denylist**, not an allowlist: `stack_count`'s
+`COUNTIFS` already excluded `"<>QB"`; `"<>DST"` is the one criterion
+added, on the same static `Pos.` column. Same exclusion added to `bring_
+back_count` (an opposing DST isn't a real "bring-back" bet either, and it
+fed the exact same displayed count) -- both in `stack_signature_formula`
+itself and its standalone Yes/No twin, `bring_back_present_formula`.
+
+**Why no FLEX-to-real-position resolution was needed here, unlike
+`d08b0b3`'s RB/GAME guardrail fix:** that commit's own message already
+analyzed this exact function while fixing a DIFFERENT guardrail's FLEX
+blind spot, and concluded the stack signature's existing "any non-QB
+teammate" denylist shape was already safe for FLEX -- DraftKings' FLEX
+slot can never legally hold a QB or a DST, so a FLEX-rostered player's
+own static slot label ("FLEX") already satisfies both `"<>QB"` and the
+new `"<>DST"` without needing to look up his real position. The trap
+`d08b0b3` actually warned against is the opposite shape: an ALLOWLIST of
+`{"RB","WR","TE"}` would have needed FLEX resolution, since a FLEX row's
+label is never literally "RB"/"WR"/"TE" and would have silently dropped
+every FLEX-rostered stack piece from the count. A test
+(`test_stack_and_bring_back_exclude_dst_not_via_an_rb_wr_te_allowlist`)
+guards against that regression by asserting the formula never contains a
+literal `"RB"`/`"WR"`/`"TE"` string.
+
+Deployed directly via `write_lineup_metrics` (not the full `dfs setup
+polish`, which touches unrelated formatting), template first then live;
+formula text read back from both sheets to confirm the added `"<>DST"`
+criterion landed exactly as intended.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
