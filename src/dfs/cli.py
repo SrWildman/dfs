@@ -47,6 +47,7 @@ from dfs.results_autofill import compute_week_results, write_results_updates
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
+from dfs.sheet_instructions import build_instructions_tab
 from dfs.sheet_lineup_metrics import write_lineup_metrics
 from dfs.sheet_links import (
     PLAYER_POOL_RAW_BLOCK,
@@ -926,6 +927,40 @@ def sheets_build_views(
         "\n[dim]Run `dfs setup polish` afterwards -- it styles these four tabs "
         "and slots them into the tab strip.[/dim]"
     )
+
+
+@setup_app.command("instructions", short_help="Regenerate the Instructions tab from code.")
+def sheets_instructions(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Regenerate Instructions on a different sheet instead of config.toml's -- "
+        "e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Rewrites every row of the Instructions tab from
+    `sheet_instructions.py` -- see that module's own docstring for why
+    this exists (an independent review found the hand-typed version
+    badly stale, Week 3 fixes, Fix 4) and what it does and doesn't fix
+    (numbers/letters/names with a real Python constant behind them are
+    derived; the surrounding English prose is still hand-written and can
+    still describe behavior incorrectly if a feature changes and nobody
+    updates this file).
+
+    Never inserts or deletes a row, so this is safe to re-run any time;
+    idempotent, like every other `dfs setup` step.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Regenerating Instructions in: [bold]{title}[/bold]\n{url}\n")
+        result = build_instructions_tab(client)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] {result}")
 
 
 @setup_app.command("link-edge", short_help="Fill EdgeRaw derived columns into Player Pool/Lineups.")

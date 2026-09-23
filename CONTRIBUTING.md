@@ -2060,6 +2060,55 @@ Deployed via `dfs setup build-views` (6.1) then `dfs setup polish`
 first then live; `dfs doctor` and `dfs setup audit-style` clean on both
 afterward.
 
+## Post-Week-3-fixes: Instructions generated from code; TAB_NOTES' own staleness fixed (2026-09-23)
+
+Fix 4's own proposal, approved by Sam after the fact: new `sheet_instructions.py`
+generates the whole Instructions tab (`dfs setup instructions`), replacing
+the hand-typed prose that had drifted stale enough to need Fix 4 in the
+first place. Every fact with a real Python constant behind it is now
+derived, not retyped: Player Pool's per-position caps
+(`weekly_reset.PLAYER_POOL_NAME_BLOCKS`), Lineups' roster slot order and
+block count (`models.ROSTER_SLOTS`, `weekly_reset.LINEUPS_NAME_BLOCKS`),
+Player Pool's Overflow/Pool column letters
+(`sheet_columns.PLAYER_POOL_COLUMN_ORDER`), and the pool tag-group order
+(`sources.edge.POOL_TYPE_SORT_ORDER`). Which tabs get a row and in what
+order stays an editorial choice, same shape as `sheet_style.TAB_NOTES`'
+own explicit dict -- not derived from `WEEK_ORDER`/`HIDE_TABS`, since
+Instructions documents several hidden "raw" sync tabs a reader needs
+explained even though they're not in the visible tab strip.
+
+**Verified by diffing the generated content against the live sheet's own
+(already Fix-4-corrected) text, cell for cell, before ever writing
+anything:** 29 of 30 rows matched exactly. The one mismatch was a real
+bug -- `PlayerPoolRaw`'s own row still said `LevBasis` (renamed
+`OwnStatus`, Part 7.9) on the live sheet, missed during Fix 4's manual
+pass because that pass touched EdgeRaw/Player Pool/Lineups/SoS but never
+PlayerPoolRaw's own description. This module fixes it as a side effect
+of being freshly written from scratch rather than edited in place --
+codified as its own test
+(`test_playerpoolraw_row_says_ownstatus_not_the_stale_levbasis`).
+
+Deliberately does NOT use a full-tab `write_tab` clear+rewrite -- targeted
+per-row `update_range` calls instead, since Instructions' bold header
+row, wrapped text, and column widths are hand-styled on the template and
+no other `dfs` command ever touches them; a blanket clear risks stripping
+formatting nothing else would restore. Never inserts or deletes a row.
+Deployed template first then live; `dfs doctor` clean on both; column
+widths (3826px on the body-text column) confirmed unchanged after the
+write, since `values.update` cannot alter them regardless.
+
+**What this doesn't fix, on purpose:** the surrounding English prose is
+still hand-written and can still describe behavior incorrectly the
+moment a feature changes and nobody updates this file -- generating the
+ROWS from code doesn't generate the FACTS inside them. `sheet_style.
+TAB_NOTES` hit this exact limit already (its own code-generation
+mechanism didn't stop ITS strings from going stale) -- also fixed, same
+session: Board's note still described the old 3-panel ranked-player
+layout (now 7 sections), EdgeRaw's still said "sorted by Leverage" (now
+`ValAdj`) and called Pool "the checkbox" (a dropdown since Fix 2.11), and
+all five SoS notes still said "pasted in by hand" (automated since Phase
+5). Deployed via `apply_tab_notes` directly, template then live.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
