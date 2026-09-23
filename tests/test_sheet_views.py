@@ -5,6 +5,7 @@ from dfs.sheet_views import (
     BOARD_BANNER_ROW,
     BOARD_CHALK_HEADER_ROW,
     BOARD_CHALK_PLACEHOLDER_ROW,
+    BOARD_FRESHNESS_ROW,
     BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_HEADER_ROW,
     BOARD_POOL_FIRST_ROW,
@@ -512,6 +513,19 @@ def test_games_banner_uses_sumproduct_not_counta_of_filter():
 
     assert "SUMPRODUCT" in games_formula
     assert "COUNTA(" not in games_formula
+
+
+def test_freshness_banner_no_longer_describes_the_removed_ranked_leverage_panel():
+    # Fix 6.1 (Week 3 fixes, 2026-09-23): the old text described a ranked
+    # ceiling-percentile panel Part 7.6's Board rebuild removed entirely.
+    # Replaced with Part 7.1's ownership caveat, present either way.
+    client = _build_board()
+    banner = client.rows[BOARD_FRESHNESS_ROW - 1][0]
+
+    assert "ceiling percentile" not in banner
+    assert "ranked" not in banner.lower()
+    assert banner.count("large-field projection used in small-field contests") == 2
+    assert banner.count("directional") == 2
 
 
 def test_build_board_preserves_existing_queue_rows_on_rebuild():

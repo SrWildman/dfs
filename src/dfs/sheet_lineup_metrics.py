@@ -116,7 +116,14 @@ def stack_signature_formula(
     FLEX-rostered stack piece. Same exclusion applied to `bring_back_
     count` below (and its standalone twin, `bring_back_present_formula`)
     -- an opposing DST isn't a real "bring-back" bet either, and it fed
-    the same displayed count."""
+    the same displayed count.
+
+    Week 3 fixes, Fix 6.4 (2026-09-23): "no QB" used to show for a
+    genuinely EMPTY block too (nobody typed in yet), reading as a warning
+    on a lineup nobody has started building. Blank now until at least
+    one name is typed in the block; "no QB" is still shown once the
+    block has SOME picks but none of them is a QB -- that case is a real,
+    useful warning."""
     qb_team = _qb_team_formula(start, end, position_col=position_col, team_col=team_col)
     qb_game = _qb_game_formula(start, end, position_col=position_col, gameid_col=gameid_col)
     stack_count = (
@@ -129,10 +136,12 @@ def stack_signature_formula(
         f'${team_col}${start}:${team_col}${end},"<>"&{qb_team},'
         f'${position_col}${start}:${position_col}${end},"<>DST")'
     )
+    block_empty = f"COUNTA($A${start}:$A${end})=0"
     return (
-        f'=IF({qb_team}="","no QB",'
+        f'=IF({block_empty},"",'
+        f'IF({qb_team}="","no QB",'
         f'"QB+"&{stack_count}&" ("&{qb_team}&")"'
-        f'&IF({bring_back_count}>0," + "&{bring_back_count}&" bring-back",""))'
+        f'&IF({bring_back_count}>0," + "&{bring_back_count}&" bring-back","")))'
     )
 
 
@@ -182,9 +191,18 @@ def own_used_formula(start: int, end: int, totals_row: int, *, own_col: str, own
 def sub_10_percent_formula(
     start: int, end: int, totals_row: int, *, own_col: str, own_status_col: str
 ) -> str:
+    """Week 3 fixes, Fix 6.4 (2026-09-23): found while checking every
+    lineup-metric cell for the same "reads as a warning on an empty
+    block" bug Stack had. `COUNTIFS(...,"<0.10")` treats a genuinely
+    blank cell as satisfying "< 0.10" (Sheets coerces a blank to 0 for a
+    numeric COUNTIF criterion) -- so an entirely EMPTY lineup, once
+    ownership is published, read "9" here: every unfilled slot counted
+    as a sub-10%-owned pick, a false signal, not just an uninformative
+    zero. Guarded the same way `stack_signature_formula` now is."""
     own_status = f"${own_status_col}{totals_row}"
+    block_empty = f"COUNTA($A${start}:$A${end})=0"
     count = f'COUNTIFS(${own_col}${start}:${own_col}${end},"<{SUB_10_OWNERSHIP_THRESHOLD}")'
-    return f'=IF({own_status}<>"real","",{count})'
+    return f'=IF(OR({own_status}<>"real",{block_empty}),"",{count})'
 
 
 def min_unique_formula(
@@ -201,16 +219,27 @@ def min_unique_formula(
 
     Blank with no other lineups to compare against (the build's first
     lineup, or a one-lineup week) -- there's no "most similar other
-    lineup" to report."""
+    lineup" to report.
+
+    Week 3 fixes, Fix 6.4 (2026-09-23): also blank while THIS block is
+    entirely empty. Found while checking every lineup-metric cell for
+    Stack's own "warning on an empty block" bug: `COUNTIF(other_rng,
+    this_rng)` treats a blank cell in `this_rng` as matching any blank
+    cell in `other_rng` (both are "no value"), so an unbuilt lineup
+    compared against any OTHER still-unbuilt lineup (near-universal
+    early in the week) read `Min Unique: 0` -- indistinguishable from
+    "these two lineups are complete duplicates," when neither is built
+    at all."""
     if not other_blocks:
         return '=""'
     this_rng = f"$A${this_start}:$A${this_end}"
+    block_empty = f"COUNTA({this_rng})=0"
     terms = []
     for other_start, other_end in other_blocks:
         other_rng = f"${name_col}${other_start}:${name_col}${other_end}"
         picks = this_end - this_start + 1
         terms.append(f"({picks}-SUMPRODUCT(COUNTIF({other_rng},{this_rng})>0))")
-    return f"=MIN({','.join(terms)})"
+    return f'=IF({block_empty},"",MIN({",".join(terms)}))'
 
 
 def write_lineup_metrics(

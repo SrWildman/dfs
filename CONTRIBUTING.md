@@ -1997,6 +1997,69 @@ polish`, which touches unrelated formatting), template first then live;
 formula text read back from both sheets to confirm the added `"<>DST"`
 criterion landed exactly as intended.
 
+## Week 3 fixes, Fix 6 (2026-09-23): five smaller items, all verified live
+
+**6.1 -- Board's row-3 banner was stale.** It described a ranked
+ceiling-percentile panel Part 7.6's Board rebuild removed entirely
+("ranked by ceiling percentile instead; treat it as a ceiling ranking,
+not a leverage ranking" -- there's no ranked panel left to describe).
+Replaced with Part 7.1's own caveat (TFFB's ownership is a large-field
+projection, Sam plays small-field, so Leverage wherever it's still shown
+is directional at best), present regardless of publish status rather
+than only in the unpublished branch.
+
+**6.2 -- Lineups' "Remaining" label clipped to "Remaini".** A8 moved the
+totals row's "Total"/"Remaining" labels into the `Opp.` column
+(`polish_lineups_totals_rows`), but nothing widened `Opp.` for its new
+content -- it was still sized for a 4-character "Opp." header.
+`BUILDER_WIDTHS["Opp."]` widened 54 -> 80, reusing the exact value
+already proven for this same "Remaining" text on `Val` (from before A8
+moved the label off that column).
+
+**6.3 -- average-remaining-per-slot showed a raw "5555.6".** That cell
+lives in `Pts`'s column (otherwise dead on a totals row), whose
+column-wide format is `"0.0"` (points) -- it needed its own per-cell
+currency format (`FIELD_FORMATS["DK Sal"]`) to match "$5,556" one row
+up, matching Val/DK Sal's own convention rather than the points format
+it happened to inherit.
+
+**6.4 -- an empty lineup block showed "no QB" and other false readings.**
+`stack_signature_formula` showed "no QB" for a genuinely EMPTY block
+(nobody's typed anything in yet), reading as a warning on a lineup
+nobody has started -- now blank until at least one name is typed, with
+"no QB" reserved for a block that has SOME picks but none of them a QB
+(a real, useful warning). Checking every other lineup-metric cell for
+the same class of bug turned up two more, both fixed the same way:
+`sub_10_percent_formula`'s `COUNTIFS(...,"<0.10")` treats a blank cell
+as satisfying "< 0.10" (Sheets coerces blank to 0 for a numeric COUNTIF
+criterion), so an empty lineup with ownership published read "9" --
+every unfilled slot miscounted as a sub-10%-owned pick, not just an
+uninformative zero. `min_unique_formula`'s `COUNTIF(other_rng,
+this_rng)` treats a blank cell in `this_rng` as matching any blank cell
+in `other_rng`, so an unbuilt lineup compared against another
+still-unbuilt one (near-universal early in the week, before every
+lineup is filled) read "Min Unique: 0" -- indistinguishable from two
+complete duplicates. Both now also blank while their own block is empty.
+
+**6.5 -- the Edge ↗ column was still effectively full width.** A5
+(Week 3 feedback) narrowed it from 64px to 60px, constrained by its own
+header text ("Edge ↗" -- the column's lookup-by-name key everywhere in
+this codebase, so renaming it is out of scope) needing at least ~57px to
+avoid `dfs setup audit-style`'s own truncation check flagging it. 60px
+is not "roughly a glyph's width" the way A5 originally asked for --
+narrowed further to 28px (matching the per-row cell's own already-
+glyph-only content, and the exact ~28px estimate A5's own code comment
+already worked out), accepting that the HEADER text now visibly clips --
+a deliberate trade-off for this one utility column. New `sheet_audit.
+TRUNCATION_EXEMPT_COLUMNS` stops the audit tool from re-flagging this
+specific, intentional case as a regression on every future run.
+
+Deployed via `dfs setup build-views` (6.1) then `dfs setup polish`
+(6.2-6.5, since `write_lineup_metrics`/`polish_lineups_totals_rows`/
+`polish_builder_tab` are all called from that one command), template
+first then live; `dfs doctor` and `dfs setup audit-style` clean on both
+afterward.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

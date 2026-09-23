@@ -922,8 +922,24 @@ def test_polish_lineups_totals_rows_clears_the_totals_row_name_cells_typo_guard(
     )
 
     assert client.clear_validation_calls == ["A18"]
-    assert client.format_calls == [("A18", {"backgroundColor": WHITE})]
+    # Fix 6.3 also formats the average-remaining cell (K19) as currency in
+    # this same call -- assert containment, not exact equality, since
+    # that's a separate concern from this test's own typo-guard check.
+    assert ("A18", {"backgroundColor": WHITE}) in client.format_calls
     assert "1 Name cell(s) un-typo-guarded" in result
+
+
+def test_polish_lineups_totals_rows_formats_average_remaining_as_currency():
+    # Fix 6.3 (Week 3 fixes, 2026-09-23): the average-remaining-per-slot
+    # cell lives in Pts' column (K here), whose own column-wide format is
+    # "0.0" (points) -- rendering a real dollar figure as a raw "5555.6"
+    # instead of matching Remaining's own "$5,556" one row up. Formatted
+    # directly, per-cell, to match DK Sal's own currency format.
+    client = FakeGuardrailsClient(_HEADER_WITH_AVAIL_AT_Y)
+
+    polish_lineups_totals_rows(client, "Lineups", header_row=8, name_blocks=[(9, 17)], salary_cap=50000)
+
+    assert ("K19", FIELD_FORMATS["DK Sal"]) in client.format_calls
 
 
 def test_polish_lineups_totals_rows_never_touches_salary_or_issues():

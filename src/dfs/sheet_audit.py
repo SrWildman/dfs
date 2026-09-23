@@ -95,6 +95,18 @@ AUDITED_TABS: list[tuple[str, int]] = [
 # Kept as a mechanism in case a future tab needs it again.
 FREEZE_OVERRIDES: dict[str, int] = {}
 
+# Column names deliberately narrower than their own header text needs
+# (Week 3 fixes, Fix 6.5, 2026-09-23). "Edge ↗" is a utility link column,
+# read once per player at most -- its header text is the column's own
+# lookup-by-name key everywhere in this codebase (renaming it is a much
+# bigger, out-of-scope change; see `sheet_links.edge_row_hyperlink_
+# formula`'s own docstring), so it can't shrink like the per-row cells
+# already have (glyph-only, "↗"). A5 got this to "meaningfully narrower"
+# (60px) but that's still nowhere near "roughly a glyph's width," which
+# needs the header text itself to clip -- an intentional trade-off for
+# this one utility column, not a regression to keep re-flagging.
+TRUNCATION_EXEMPT_COLUMNS: set[str] = {"Edge ↗"}
+
 # A tab whose real table header is narrower than its full header ROW.
 # Exposure's row 1 has 7 real column headers (A-G) plus a spacer and a
 # small-text "Slots filled" readout (H-J, deliberately muted, never dark
@@ -193,7 +205,8 @@ def audit_tab(client: SheetsClient, tab: str, *, header_row: int) -> TabAudit:
 
     too_narrow = []
     for i, name in enumerate(header):
-        if not name or (i < len(widths) and widths[i].get("hiddenByUser")):
+        hidden = i < len(widths) and widths[i].get("hiddenByUser")
+        if not name or name in TRUNCATION_EXEMPT_COLUMNS or hidden:
             continue
         pixel_size = widths[i].get("pixelSize", _DEFAULT_COLUMN_PX) if i < len(widths) else _DEFAULT_COLUMN_PX
         needed = _min_header_width_px(name)

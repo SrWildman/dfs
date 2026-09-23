@@ -225,6 +225,16 @@ def test_audit_tab_flags_a_header_narrower_than_its_own_text_needs():
     assert "Name" not in issue and "Pts" not in issue
 
 
+def test_audit_tab_does_not_flag_the_deliberately_truncated_edge_link_column():
+    # Fix 6.5 (Week 3 fixes, 2026-09-23): "Edge ↗" is intentionally
+    # narrowed below what its own header text needs (28px, genuine
+    # glyph-width) -- TRUNCATION_EXEMPT_COLUMNS stops this from being
+    # re-flagged as a regression every audit run.
+    client = FakeAuditClient(header=["Name", "Edge ↗", "Pts"], widths={"A": 165, "B": 28, "C": 62})
+    audit = audit_tab(client, "T", header_row=1)
+    assert not any("truncated" in i for i in audit.issues)
+
+
 def test_audit_tab_does_not_flag_known_good_narrow_headers():
     # Calibration check: every column already known to render fine live
     # (from EDGE_WIDTHS) must stay clean under the truncation floor, even

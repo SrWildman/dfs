@@ -242,11 +242,21 @@ def build_board(
     injuries = (
         f'=COUNTIF({avail},"OUT")&" out  /  "&COUNTIF({avail},"IR")&" IR  /  "&COUNTIF({avail},"Q")&" Q"'
     )
+    # Fix 6.1 (Week 3 fixes, 2026-09-23): the old text described a ranked
+    # leverage panel that Part 7.6's Board rebuild removed entirely
+    # ("ranked by ceiling percentile instead" no longer describes
+    # anything on this tab). Replaced with Part 7.1's own caveat, present
+    # regardless of publish status: TFFB's ownership projection is
+    # large-field, Sam plays small-field, so Leverage (wherever it's
+    # still shown, e.g. Per-position leaders) is directional at best --
+    # see docs/CALCULATIONS.md's "Sort order" note for the same wording.
     freshness_banner = (
         f'=IF(COUNTIF({basis},"unpublished")>0,'
-        f'"UNPUBLISHED  —  ownership not out yet, so Leverage is blank. Ranked by ceiling '
-        f'percentile instead; treat it as a ceiling ranking, not a leverage ranking.",'
-        f'"Leverage is running on real ownership.")'
+        f'"UNPUBLISHED  —  ownership not out yet, so Leverage is blank. Once it is, '
+        f"remember ownership is a large-field projection used in small-field contests "
+        f'— treat it as directional.",'
+        f'"Leverage is running on real ownership — still a large-field projection used '
+        f'in small-field contests, so treat it as directional.")'
     )
 
     # ---- Section 3: per-position leaders (ValAdj / ProjPts, 7.6) --------

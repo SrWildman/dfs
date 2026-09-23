@@ -1338,7 +1338,14 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 BUILDER_WIDTHS = {
     **EDGE_WIDTHS,
     "Pos.": 52,
-    "Opp.": 54,
+    # Widened from 54 (Week 3 fixes, Fix 6.2, 2026-09-23): A8 moved the
+    # totals row's "Total"/"Remaining" labels into THIS column
+    # (`polish_lineups_totals_rows`' `total_label_col`), but nothing
+    # widened it for its new content -- "Remaining" (9 characters)
+    # clipped to "Remaini" live. Same value already proven for this
+    # exact text on "Val" below (Fix 2.4-era, back when the label used
+    # to live there instead) -- reused rather than re-guessed.
+    "Opp.": 80,
     "Venue": 56,
     "DK Sal": 78,
     # Widened from 72 -- Phase 6, Part 1.5's own audit-style check (built
@@ -1358,15 +1365,17 @@ BUILDER_WIDTHS = {
     # is redundant now but harmless (same value, set twice).
     "Issues": 110,
     "Pool": 64,
-    # Week 3 feedback (A5): shrunk from 64. The per-row cell text is just
-    # the arrow now (`edge_row_hyperlink_formula`), which alone would fit
-    # in ~28px, but the HEADER cell still reads "Edge ↗" in full (the
-    # column's own lookup-by-name key, used everywhere -- renaming it
-    # would be a much bigger, out-of-scope change) -- found by
-    # `dfs setup audit-style` flagging 28px as truncating that header
-    # text. 60 is `sheet_audit._min_header_width_px("Edge ↗")` (57) plus
-    # a small margin, still meaningfully narrower than the original 64.
-    "Edge ↗": 60,
+    # Week 3 fixes, Fix 6.5 (2026-09-23): shrunk further, from A5's 60 to
+    # the actual glyph-width A5 originally asked for -- Sam: "still full
+    # width." The per-row cell text is just the arrow (`edge_row_
+    # hyperlink_formula`), which alone fits in ~28px; the HEADER cell
+    # still reads "Edge ↗" in full (the column's own lookup-by-name key,
+    # used everywhere -- renaming it is a much bigger, out-of-scope
+    # change) and WILL clip at this width -- a deliberate trade-off for
+    # this one utility column now, not a regression: see `sheet_audit.
+    # TRUNCATION_EXEMPT_COLUMNS`, which stops `dfs setup audit-style` from
+    # re-flagging it every run.
+    "Edge ↗": 28,
     "Used": 52,
     "In": 96,
     # "Team Implied"/"Ceil"/"Overflow" had NO entry here at all before this
@@ -1936,6 +1945,13 @@ def polish_lineups_totals_rows(
                 f'=IF(COUNTBLANK({name_range})=0,"",{salary_col}{remaining_row}/COUNTBLANK({name_range}))'
             )
             client.update_range(tab, f"{pts_col}{remaining_row}", [[avg_formula]])
+            # Fix 6.3 (Week 3 fixes, 2026-09-23): this cell holds a dollar
+            # value, not points -- Pts' own column-wide format (FIELD_
+            # FORMATS["Pts"], "0.0") rendered it as a raw "5555.6" instead
+            # of matching Remaining's own "$5,556" one row up. A direct
+            # per-cell override, since the rest of the Pts column must
+            # stay in the "0.0" points format.
+            client.format_range(tab, f"{pts_col}{remaining_row}", FIELD_FORMATS["DK Sal"])
         # Column A (Name) on a totals row still carried the same input
         # background AND typo-guard player dropdown as a real roster
         # slot -- a leftover from before an earlier fix (2.4) shrank each

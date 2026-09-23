@@ -47,16 +47,19 @@ _BLOCKS = [(2, 10), (13, 21), (24, 32)]
 def test_stack_signature_formula_counts_teammates_and_bring_back():
     # Fix 5 (2026-09-23): both counts now also exclude DST ("<>DST"), not
     # just QB -- a same-team DST used to read as a stack piece ("QB+1"
-    # for a QB plus his own defense, no real stack at all).
+    # for a QB plus his own defense, no real stack at all). Fix 6.4
+    # (2026-09-23): the whole thing is also blank while the block is
+    # entirely empty, not just "no QB".
     formula = stack_signature_formula(2, 10, position_col="B", team_col="C", gameid_col="H")
     qb_team = 'IFERROR(INDEX($C$2:$C$10,MATCH("QB",$B$2:$B$10,0)),"")'
     qb_game = 'IFERROR(INDEX($H$2:$H$10,MATCH("QB",$B$2:$B$10,0)),"")'
     stack_count = f'COUNTIFS($C$2:$C$10,{qb_team},$B$2:$B$10,"<>QB",$B$2:$B$10,"<>DST")'
     bring_back_count = f'COUNTIFS($H$2:$H$10,{qb_game},$C$2:$C$10,"<>"&{qb_team},$B$2:$B$10,"<>DST")'
     assert formula == (
-        f'=IF({qb_team}="","no QB",'
+        f'=IF(COUNTA($A$2:$A$10)=0,"",'
+        f'IF({qb_team}="","no QB",'
         f'"QB+"&{stack_count}&" ("&{qb_team}&")"'
-        f'&IF({bring_back_count}>0," + "&{bring_back_count}&" bring-back",""))'
+        f'&IF({bring_back_count}>0," + "&{bring_back_count}&" bring-back","")))'
     )
 
 
@@ -118,18 +121,39 @@ def test_own_used_formula_blank_until_ownership_is_real():
 def test_sub_10_percent_formula_uses_the_documented_threshold_blank_pre_publish():
     formula = sub_10_percent_formula(2, 10, 11, own_col="F", own_status_col="G")
     assert SUB_10_OWNERSHIP_THRESHOLD == 0.10
-    assert formula == f'=IF($G11<>"real","",COUNTIFS($F$2:$F$10,"<{SUB_10_OWNERSHIP_THRESHOLD}"))'
+    assert formula == (
+        f'=IF(OR($G11<>"real",COUNTA($A$2:$A$10)=0),"",COUNTIFS($F$2:$F$10,"<{SUB_10_OWNERSHIP_THRESHOLD}"))'
+    )
+
+
+def test_sub_10_percent_formula_blank_on_an_empty_block_even_if_ownership_is_real():
+    # Fix 6.4 (2026-09-23): COUNTIFS(...,"<0.10") treats a blank cell as
+    # satisfying "< 0.10" -- an entirely empty lineup, once ownership is
+    # published, read "9" (every unfilled slot miscounted as sub-10%-
+    # owned) instead of blank.
+    formula = sub_10_percent_formula(2, 10, 11, own_col="F", own_status_col="G")
+    assert "COUNTA($A$2:$A$10)=0" in formula
 
 
 def test_min_unique_formula_blank_with_no_other_lineups():
     assert min_unique_formula(2, 10, []) == '=""'
 
 
+def test_min_unique_formula_blank_while_this_block_is_empty():
+    # Fix 6.4 (2026-09-23): COUNTIF(other_rng, this_rng) treats a blank
+    # cell in this_rng as matching any blank cell in other_rng, so an
+    # unbuilt lineup compared against another still-unbuilt one read
+    # "Min Unique: 0" -- indistinguishable from two complete duplicates.
+    formula = min_unique_formula(2, 10, [(13, 21)])
+    assert formula.startswith('=IF(COUNTA($A$2:$A$10)=0,"",MIN(')
+
+
 def test_min_unique_formula_one_term_per_other_lineup():
     formula = min_unique_formula(2, 10, [(13, 21), (24, 32)])
     assert formula == (
-        "=MIN((9-SUMPRODUCT(COUNTIF($A$13:$A$21,$A$2:$A$10)>0)),"
-        "(9-SUMPRODUCT(COUNTIF($A$24:$A$32,$A$2:$A$10)>0)))"
+        '=IF(COUNTA($A$2:$A$10)=0,"",MIN('
+        "(9-SUMPRODUCT(COUNTIF($A$13:$A$21,$A$2:$A$10)>0)),"
+        "(9-SUMPRODUCT(COUNTIF($A$24:$A$32,$A$2:$A$10)>0))))"
     )
 
 
