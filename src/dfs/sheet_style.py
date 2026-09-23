@@ -2516,6 +2516,13 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         client.format_range(tab, value, {"textFormat": {"bold": True, "foregroundColor": INK}})
     client.format_range(tab, "A3:I3", _BANNER_FMT)
 
+    # Slate shape's GameId join key (sheet_views.BOARD_SLATE_GAMEID_COL) --
+    # meaningless to look at, same treatment as EdgeRaw's own hidden Id.
+    # Column J, past every other section's own rightmost visible column
+    # (I), so this can't hide real content belonging to a different
+    # section that happens to share the same letter.
+    client.hide_columns(tab, "J", "J")
+
     def _section(
         header_row: int, colheader_row: int, last_row: int, *, last_col: str, collapsed: bool
     ) -> None:

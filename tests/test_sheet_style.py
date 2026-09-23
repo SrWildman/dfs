@@ -708,9 +708,13 @@ class FakeBoardClient:
         self.freeze_calls: list[int] = []
         self.width_calls: list[dict] = []
         self.color_scale_calls: list[str] = []
+        self.hide_columns_calls: list[tuple[str, str]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
+
+    def hide_columns(self, tab_name: str, first_col: str, last_col: str, *, hidden: bool = True) -> None:
+        self.hide_columns_calls.append((first_col, last_col))
 
     def clear_conditional_formats(self, tab_name: str) -> None:
         pass
@@ -777,6 +781,15 @@ def test_style_board_freezes_only_the_title_and_summary_banner():
     client = FakeBoardClient()
     style_board(client)
     assert client.freeze_calls == [3]
+
+
+def test_style_board_hides_the_slate_shape_gameid_join_key():
+    # Column J, past every other section's own rightmost visible column
+    # (I) -- must never collide with a real column belonging to a
+    # different section that happens to share the same letter.
+    client = FakeBoardClient()
+    style_board(client)
+    assert ("J", "J") in client.hide_columns_calls
 
 
 _HEADER_WITH_AVAIL_AT_Y = (

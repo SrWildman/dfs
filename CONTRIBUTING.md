@@ -1598,6 +1598,24 @@ cell reads confirming both fixes (Games banner reads `0`, not `1`; the
 empty-pool notice fires; Queue starts genuinely empty), `dfs doctor`/
 `dfs setup audit-style` clean.
 
+**A third bug, found verifying against the LIVE sheet** (the template's
+own `GamesRaw` is empty, so this one only became visible once real game
+data was present): Slate shape was never actually sorted by total --
+the first cut was a straight per-row passthrough of `GamesRaw`'s own row
+order, contradicting both the spec and what `docs/SHEET_REFERENCE.md`
+already said about it. Fixed with a real `SORT`, which then needed a
+second, independent `SORT` on the identical key (`Total`) to produce a
+parallel `GameId` column (`sheet_views.BOARD_SLATE_GAMEID_COL`, column
+J -- one past every other section's own rightmost visible column, so
+hiding it can't hide real content belonging to a different section) as
+a join key for the per-row Wind lookup, since a sorted row's `GameId`
+can no longer be assumed to match its original `GamesRaw` row number.
+Verified live that two `SORT`s on the same key preserve identical
+relative order for tied values, so the two columns stay row-aligned.
+Re-verified against both sheets afterward: live's Slate shape now reads
+54.5 down to 39.5 in strict descending order with Wind correctly
+attached to each game.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

@@ -103,6 +103,13 @@ BOARD_SLATE_COLHEADER_ROW = BOARD_SLATE_HEADER_ROW + 1
 BOARD_SLATE_FIRST_ROW = BOARD_SLATE_COLHEADER_ROW + 1
 BOARD_SLATE_ROWS = 16
 BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
+# A hidden join-key column (GameId, for the per-row Wind VLOOKUP -- see
+# build_board's Slate shape section) -- column J, one past every other
+# section's rightmost visible column (I, Per-position leaders/Pool
+# diagnostics), so hiding it can't hide real content belonging to a
+# DIFFERENT section that happens to share the same column letter.
+BOARD_SLATE_GAMEID_COL = "J"
+BOARD_SLATE_GAMEID_COL_INDEX = 9
 
 BOARD_LEADERS_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
 BOARD_LEADERS_COLHEADER_ROW = BOARD_LEADERS_HEADER_ROW + 1
@@ -398,18 +405,39 @@ def build_board(
     _set(BOARD_SLATE_COLHEADER_ROW, ["Matchup", "Total", "Wind", "Shootout?"])
     wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
+    # One spilling SORT, not a per-row passthrough of GamesRaw's own
+    # (unsorted) row order -- "games ranked by total" is the actual ask.
+    # A second, independent SORT on the exact same key (Total) fills a
+    # parallel GameId column at BOARD_SLATE_GAMEID_COL, well past every
+    # other section's rightmost visible column so hiding it (style_board)
+    # can't hide real content elsewhere -- needed as a join key for the
+    # per-row Wind lookup below, since WeatherRaw is keyed on GameId, not
+    # the sorted Matchup text. Verified live (2026-09-22, template) that
+    # two SORTs on the same key preserve identical relative order for
+    # tied values, so the two columns stay row-aligned.
+    slate_sorted = (
+        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
+        f'{{{g}!$B$2:$B$40&" @ "&{g}!$C$2:$C$40,{g}!$M$2:$M$40}},'
+        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},2),"")'
+    )
+    slate_gameid = (
+        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
+        f"{{{g}!$A$2:$A$40,{g}!$M$2:$M$40}},"
+        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+    )
+    _set(BOARD_SLATE_FIRST_ROW, [slate_sorted])
+    _set(BOARD_SLATE_FIRST_ROW, [slate_gameid], start_col=BOARD_SLATE_GAMEID_COL_INDEX)
     for i in range(BOARD_SLATE_ROWS):
         r = BOARD_SLATE_FIRST_ROW + i
-        gr = 2 + i  # GamesRaw's own data rows start at 2
-        guard = f'IF({g}!$A{gr}="","",'
+        guard = f'IF($A{r}="","",'
         _set(
             r,
             [
-                f'={guard}{g}!$B{gr}&" @ "&{g}!$C{gr})',
-                f"={guard}{g}!$M{gr})",
-                f'={guard}IFERROR(VLOOKUP({g}!$A{gr},{w}!$A:${wind_end_col},{wind_idx},FALSE),""))',
-                f'={guard}IF({g}!$M{gr}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
+                f"={guard}IFERROR(VLOOKUP(${BOARD_SLATE_GAMEID_COL}{r},{w}!$A:${wind_end_col},"
+                f'{wind_idx},FALSE),""))',
+                f'={guard}IF($B{r}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
             ],
+            start_col=2,
         )
 
     _set(BOARD_LEADERS_HEADER_ROW, ["PER-POSITION LEADERS  —  ranked within position, never across it"])

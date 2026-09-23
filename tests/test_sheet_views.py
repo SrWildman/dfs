@@ -17,6 +17,9 @@ from dfs.sheet_views import (
     BOARD_QUEUE_COLHEADER_ROW,
     BOARD_QUEUE_FIRST_ROW,
     BOARD_QUEUE_HEADER_ROW,
+    BOARD_SLATE_FIRST_ROW,
+    BOARD_SLATE_GAMEID_COL,
+    BOARD_SLATE_GAMEID_COL_INDEX,
     BOARD_SLATE_HEADER_ROW,
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
@@ -387,6 +390,31 @@ def test_board_writes_every_section_header_at_its_own_row():
     assert client.rows[BOARD_STACK_HEADER_ROW - 1][0].startswith("STACK CANDIDATES")
     assert client.rows[BOARD_POOL_HEADER_ROW - 1][0].startswith("POOL DIAGNOSTICS")
     assert client.rows[BOARD_CHALK_HEADER_ROW - 1][0].startswith("CHALK MAP")
+
+
+def test_slate_shape_sorts_by_total_not_gamesraws_own_row_order():
+    # Found live (2026-09-22, live sheet): the first cut of this section
+    # was a straight per-row passthrough of GamesRaw's own (unsorted) row
+    # order -- "games ranked by total" was never actually true. Must be a
+    # SORT, not a plain per-row VLOOKUP loop.
+    client = _build_board()
+    slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
+
+    assert slate_row[0].startswith("=")
+    assert "SORT(" in slate_row[0]
+    assert "GamesRaw!$M$2:$M$40" in slate_row[0]  # Total is the sort key
+
+
+def test_slate_shape_wind_lookup_joins_on_a_parallel_gameid_column_not_matchup_text():
+    client = _build_board()
+    slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
+    wind_formula = slate_row[2]
+
+    # The GameId column (a second, independent SORT on the same key) is
+    # what Wind's VLOOKUP joins against -- not the human-readable Matchup
+    # text in column A, which WeatherRaw has no way to match against.
+    assert f"${BOARD_SLATE_GAMEID_COL}" in wind_formula
+    assert "SORT(" in slate_row[BOARD_SLATE_GAMEID_COL_INDEX]
 
 
 def test_per_position_leaders_rank_within_position_not_across_the_whole_slate():
