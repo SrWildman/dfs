@@ -88,6 +88,7 @@ from dfs.week import (
     BANKROLL_CARRYOVER_CELLS,
     extract_results_value_columns,
     parse_sheet_id_from_url,
+    parse_week_from_title,
     rewrite_sheet_id,
 )
 from dfs.weekly_reset import (
@@ -2299,6 +2300,12 @@ def week_close(
     csv: Path = typer.Option(
         ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
     ),
+    week: int = typer.Option(
+        None,
+        "--week",
+        help="Reconcile this week's ledger instead of the week the connected sheet's own "
+        "title says it is. Only needed to hand-reconcile a specific week.",
+    ),
 ) -> None:
     """End-of-week bankroll reconciliation -- currently a thin wrapper over
     `dfs bankroll sync --csv`; see below for why it isn't more than that yet.
@@ -2317,13 +2324,19 @@ def week_close(
     """
     cfg = _load_config_or_exit()
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
-    _sync_bankroll_from_csv(cfg, csv)
+    _sync_bankroll_from_csv(cfg, csv, week=week)
 
 
 @bankroll_app.command("sync")
 def bankroll_sync(
     csv: Path = typer.Option(
         ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
+    ),
+    week: int = typer.Option(
+        None,
+        "--week",
+        help="Reconcile this week's ledger instead of the week the connected sheet's own "
+        "title says it is. Only needed to hand-reconcile a specific week.",
     ),
 ) -> None:
     """Classify contest entries into Cash/GPP and append new ones to the
@@ -2338,7 +2351,7 @@ def bankroll_sync(
     built.
     """
     cfg = _load_config_or_exit()
-    _sync_bankroll_from_csv(cfg, csv)
+    _sync_bankroll_from_csv(cfg, csv, week=week)
 
 
 @bankroll_app.command("backfill-keys")
@@ -2471,10 +2484,14 @@ def ownership_log(
     )
 
 
-def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:
+def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None) -> None:
     """Shared by `bankroll sync` and `week close` -- see week_close's
     docstring for why `week close` doesn't yet pull contest history itself
-    and still needs this same `--csv` export as an input."""
+    and still needs this same `--csv` export as an input.
+
+    `week`, when given, overrides the week the ledger is scoped to (see
+    below) -- for the rare case of reconciling a specific week by hand.
+    """
     if cfg.bankroll.cash is None or cfg.bankroll.gpp is None:
         console.print(
             "[red]config.toml is missing [bankroll.cash]/[bankroll.gpp][/red] "
@@ -2495,6 +2512,38 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:
 
     console.print(f"Parsed {len(entries)} entries from {csv}.")
 
+    client = SheetsClient(cfg.google_sheets)
+    try:
+        title, url = client.describe()
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"Sheet: [bold]{title}[/bold]\n{url}\n")
+
+    # Fix 1 (found live 2026-09-23): this used to scope the ledger filter to
+    # `nfl_calendar.current_week()` -- TODAY's calendar week -- instead of
+    # the week the TARGET SHEET represents. `current_week()` rolls over on
+    # Tuesday (WEEK_ROLLOVER_LEAD_DAYS); Sam runs `week close` on Tuesday,
+    # right after Monday Night Football, so by the time he runs it
+    # `current_week()` has already moved on to next week and the filter
+    # kept ZERO of the week just played. The sheet's own title ("Week N")
+    # is unambiguous about which week its ledger is, so that's the scope
+    # now -- with no fallback to current_week() if it doesn't parse (see
+    # `week.parse_week_from_title`), since that fallback is exactly how
+    # this broke. `--week` (passed through as `week` here) overrides it
+    # for the rare hand-reconciliation case.
+    season = nfl_calendar.current_season()
+    if week is not None:
+        resolved_week = week
+        source = "--week override"
+    else:
+        try:
+            resolved_week = parse_week_from_title(title)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(code=1) from e
+        source = f'from sheet title "{title}"'
+
     # Fix 2.18 (found live 2026-09-22): the Bankroll cash/GPP ledger ranges
     # are cleared fresh every week by `dfs week new` (weekly_reset.
     # clear_previous_week), and each week lives on its own spreadsheet --
@@ -2505,21 +2554,21 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:
     # `entries` for its season-long Results backfill -- see
     # bankroll.entries_for_week's docstring for why those two need
     # different scopes.
-    season = nfl_calendar.current_season()
-    week = nfl_calendar.current_week()
-    ledger_entries = entries_for_week(entries, week, season)
+    ledger_entries = entries_for_week(entries, resolved_week, season)
+    console.print(
+        f"Closing Week {resolved_week} ({source}) -- {len(ledger_entries)} of {len(entries)} "
+        "entries belong to this week."
+    )
     if len(ledger_entries) != len(entries):
         console.print(
-            f"Week {week}: {len(ledger_entries)} of {len(entries)} entries belong to this week's "
-            "ledger -- the rest are earlier weeks, already recorded on their own sheets, and are "
-            "skipped here (but still included in the Results backfill below)."
+            "  (the rest are earlier weeks, already recorded on their own sheets, and are "
+            "skipped here -- but still included in the Results backfill below)."
         )
 
     cash_entries = [e for e in ledger_entries if classify_entry(e) == "cash"]
     gpp_entries = [e for e in ledger_entries if classify_entry(e) == "gpp"]
     console.print(f"This week: {len(cash_entries)} cash, {len(gpp_entries)} GPP.")
 
-    client = SheetsClient(cfg.google_sheets)
     try:
         cash_result = sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.cash, cash_entries, "cash")
         gpp_result = sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.gpp, gpp_entries, "gpp")

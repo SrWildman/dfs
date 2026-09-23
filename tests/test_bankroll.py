@@ -49,6 +49,57 @@ def test_entries_for_week_empty_when_nothing_matches():
     assert entries_for_week([week1], week=5, season=2026) == []
 
 
+# Fix 1 regression (found live 2026-09-23): `week close`/`bankroll sync`
+# used to scope this filter to `nfl_calendar.current_week()` -- TODAY's
+# calendar week -- instead of the week the TARGET SHEET represents.
+# `current_week()` rolls over on Tuesday (two days before Thursday
+# kickoff), but Sam runs `week close` on Tuesday, right after Monday
+# Night Football -- so by the time he runs it, `current_week()` has
+# already moved on and the filter kept ZERO of the week just played.
+# Reproduced here against the real `nfl_calendar` code for a real Week 3
+# slate (Sunday 9/27, MNF Monday 9/28): this test fails against the old
+# `week = nfl_calendar.current_week()` line and passes with the fix
+# (`week = week.parse_week_from_title(sheet_title)`).
+def test_week_close_ledger_scope_survives_the_tuesday_rollover():
+    from datetime import date
+
+    from dfs import nfl_calendar
+    from dfs.week import parse_week_from_title
+
+    sunday = _entry(entry_key="sun", contest_date="2026-09-27T13:00:00")
+    monday_night = _entry(entry_key="mnf", contest_date="2026-09-28T20:15:00")
+    entries = [sunday, monday_night]
+    season = 2026
+    sheet_title = "Week 3"
+
+    # The fix: the week comes from the sheet's own title, never "today".
+    fixed_week = parse_week_from_title(sheet_title)
+    for today in (date(2026, 9, 28), date(2026, 9, 29), date(2026, 9, 30)):
+        assert entries_for_week(entries, fixed_week, season) == entries, (
+            f"title-scoped week close dropped entries when run on {today}"
+        )
+
+    # The bug this replaces: scoping by today's calendar week instead.
+    # Monday night (still week 3) is fine, but Tuesday/Wednesday (after
+    # the rollover) silently keep nothing.
+    monday = nfl_calendar.current_week(date(2026, 9, 28))
+    assert entries_for_week(entries, monday, season) == entries
+
+    for today in (date(2026, 9, 29), date(2026, 9, 30)):
+        broken_week = nfl_calendar.current_week(today)
+        assert entries_for_week(entries, broken_week, season) == [], (
+            "this demonstrates the Fix 1 bug (today()-scoped filter) is "
+            "still broken if reintroduced -- it should NOT be used"
+        )
+
+
+def test_week_close_week_override_bypasses_title_parsing():
+    # `--week` lets Sam hand-reconcile a specific week regardless of the
+    # connected sheet's own title.
+    entry = _entry(entry_key="w3", contest_date="2026-09-27T13:00:00")
+    assert entries_for_week([entry], week=3, season=2026) == [entry]
+
+
 def test_classify_double_up_is_cash():
     # real ratio from the user's own history: 1000/2298 = 0.435
     e = _entry(entries=2298, places_paid=1000)

@@ -1,6 +1,33 @@
 import pytest
 
-from dfs.week import extract_results_value_columns, parse_sheet_id_from_url, rewrite_sheet_id
+from dfs.week import (
+    extract_results_value_columns,
+    parse_sheet_id_from_url,
+    parse_week_from_title,
+    rewrite_sheet_id,
+)
+
+
+def test_parse_week_from_title():
+    assert parse_week_from_title("Week 3") == 3
+    assert parse_week_from_title("Week 12") == 12
+
+
+def test_parse_week_from_title_strips_whitespace():
+    assert parse_week_from_title("  Week 3  ") == 3
+
+
+def test_parse_week_from_title_rejects_non_matching_title():
+    # The template's own title -- nobody should be scoping a bankroll
+    # close against it, and this must not silently fall back to
+    # current_week() (that fallback is the Fix 1 bug).
+    with pytest.raises(ValueError, match="does not match"):
+        parse_week_from_title("Template")
+
+
+def test_parse_week_from_title_rejects_empty_string():
+    with pytest.raises(ValueError, match="does not match"):
+        parse_week_from_title("")
 
 
 def test_parse_sheet_id_from_full_url():

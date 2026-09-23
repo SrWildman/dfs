@@ -17,6 +17,7 @@ import re
 _URL_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 _SHEET_ID_LINE_RE = re.compile(r'^sheet_id\s*=\s*".*"\s*$', re.MULTILINE)
 _PREVIOUS_SHEET_ID_LINE_RE = re.compile(r'^previous_sheet_id\s*=\s*".*"\s*$', re.MULTILINE)
+_WEEK_TITLE_RE = re.compile(r"^Week (\d+)$")
 
 # Cells `dfs week new` copies from the outgoing sheet's Bankroll tab to the
 # new one -- the Ending balance of each of the three parallel bankrolls
@@ -71,6 +72,32 @@ def parse_sheet_id_from_url(url_or_id: str) -> str:
             f"(https://docs.google.com/spreadsheets/d/<id>/edit) or just the ID segment."
         )
     return candidate
+
+
+def parse_week_from_title(title: str) -> int:
+    """Which week a sheet's own title claims to be ("Week 3" -> 3).
+
+    Week-3-fixes Fix 1 (2026-09-23): `week close`/`bankroll sync` used to
+    scope their ledger filter to `nfl_calendar.current_week()` -- today's
+    calendar week -- rather than the week the TARGET SHEET represents.
+    That breaks the normal Tuesday `week close` run: by Tuesday,
+    `current_week()` has already rolled to the next week (see
+    `nfl_calendar.WEEK_ROLLOVER_LEAD_DAYS`), so the filter kept zero
+    entries from the week that was just played -- they never reach the
+    ledger, silently, for either command. The sheet's own title is
+    unambiguous about which week it is, so it's the correct scope. There
+    is deliberately no fallback to `current_week()` when the title
+    doesn't parse -- that fallback is exactly how this broke. The
+    template's own title ("Template") correctly raises here too: nobody
+    should be running a bankroll close against it.
+    """
+    match = _WEEK_TITLE_RE.match(title.strip())
+    if not match:
+        raise ValueError(
+            f'Sheet title {title!r} does not match the expected "Week <n>" format -- '
+            "can't tell which week's ledger this is. Pass --week explicitly."
+        )
+    return int(match.group(1))
 
 
 def rewrite_sheet_id(config_text: str, *, new_sheet_id: str, previous_sheet_id: str) -> str:

@@ -1691,6 +1691,54 @@ history) exists. See that doc's own Section 7.8 note for the join
 details a future session will need (name-matching, no DK player ID in
 this particular export).
 
+## Week 3 fixes, Fix 1 (2026-09-23): `week close`/`bankroll sync` dropped the week just played
+
+Found by an independent review of the Week 3 session, before it caused
+real data loss. Commit `e8bf3d5` fixed the wrong-week bugs from that same
+session with two mechanisms, each correct alone but broken together:
+`nfl_calendar.current_week()` now rolls the week number over on Tuesday
+(`WEEK_ROLLOVER_LEAD_DAYS`, two days before that week's own Thursday
+kickoff, matching how DK/Vegas/the waiver wire treat weeks industry-wide),
+and `_sync_bankroll_from_csv`'s ledger filter (`entries_for_week`) was
+scoped to `nfl_calendar.current_week()` -- **today's** calendar week.
+
+Sam runs `week close` on Tuesday, right after Monday Night Football, once
+the DK contest-history export is available. By Tuesday, `current_week()`
+has already rolled over to the *next* week, so the filter kept **zero**
+of the entries from the week that was just played -- and the next week
+those same entries look like "an earlier week" and get skipped again.
+They never reach the Bankroll ledger; nothing errors. Reproduced against
+the real `nfl_calendar` code for a real Week 3 slate (Sunday 9/27, MNF
+Monday 9/28): entries kept dropped from 2-of-2 (run Monday night) to
+0-of-2 (run Tuesday or Wednesday). No data was actually lost yet -- Week
+2's ledger was fully populated before this was caught -- but Week 3's
+close, due the following Tuesday, would have been silently empty.
+
+**The fix:** the ledger must be scoped to the week the *target sheet*
+represents, not to today's date. Sheets are titled `Week N`
+(`week.parse_week_from_title`, new); `_sync_bankroll_from_csv` reads the
+connected sheet's own title via `client.describe()` and derives the week
+from that instead of `current_week()`. If the title doesn't match `Week
+<n>` (e.g. the template, titled `Template`), this raises rather than
+falling back to `current_week()` -- that silent fallback is exactly the
+shape of bug this replaces. `week close`/`bankroll sync` both gained a
+`--week` override for hand-reconciling a specific week. Verified live:
+the connected Week 3 sheet's title reads exactly `"Week 3"` (parses to
+3); the template's title reads `"Template"` (correctly raises).
+
+**`current_week()` caller audit** (Sam asked for the full list before
+touching anything beyond this fix):
+
+| Caller | Means | Verdict |
+|---|---|---|
+| `cli.py`'s `_sync_bankroll_from_csv` (`week close`/`bankroll sync`) | "the week just played" | **Was wrong, now fixed above** -- scoped by sheet title, not `current_week()`. |
+| `sources/base.py`'s `SyncContext.current()` default | "the week being built" (what `dfs sync` should fetch data for) | Correct as-is. The Tuesday rollover moving this forward *is* the intended fix from `e8bf3d5` -- Tuesday should fetch the new week's odds/salaries. |
+| `cli.py`'s no-arg launcher status (`state.week = SyncContext.current().week`) | "the week being built," shown for orientation | Correct as-is, same reasoning. |
+| `cli.py`'s `dfs sync`/`dfs week new` (`ctx = SyncContext.current(...)`) | "the week being built" | Correct as-is, same reasoning. |
+| `cli.py`'s `ownership_log` (`dfs ownership log`) default `--week` | Ambiguous -- logging a contest that already happened, like `week close`, but a purely local/optional file (`data/ownership_log.csv`), not the money ledger, and it never opens a sheet connection to read a title from. | **Flagged, not changed.** Same Tuesday/Wednesday gap could mislabel a logged contest's week if run late, but the command already documents "pass `--week` explicitly for anything other than the current week," the write is idempotent per-contest (safe to re-run with the right `--week` if a wrong one slips in), and there's no natural sheet title to derive from without adding a sheet round-trip to a command that otherwise makes none. Left as `current_week()`; revisit if Sam wants it scoped differently. |
+
+No other `current_week()` callers exist in `src/dfs/` (grepped to confirm).
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
