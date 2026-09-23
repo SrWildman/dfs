@@ -1739,6 +1739,65 @@ touching anything beyond this fix):
 
 No other `current_week()` callers exist in `src/dfs/` (grepped to confirm).
 
+## Week 3 fixes, Fix 2 (2026-09-23): ValAdj's reference population narrowed to rosterable players
+
+Sam's complaint on the A3 rework (previous entry): "cheap players float
+too high." That rework moved the problem rather than fixing it -- on the
+live Week 3 EdgeRaw, sorted by `ValAdj` (the default sort), the top 15
+contained six tight ends, six players at $4,000 or less, and Mason
+Taylor, a $2,500 TE projecting 5.7 points, at #14. Root cause: `PtsPct`
+and `EdgePct` were both percentile ranks computed across **every** player
+DraftKings lists at the position, backups included. Measured on the
+2026-09-23 snapshot, 71% of listed TEs project under 2 points -- against
+that pile, a 5.7-pt player looks like the 82nd percentile at TE, vs. only
+66th at WR (57% of WRs project under 2). The metric was measuring "better
+than the backup pile," not "a good play," and the deeper a position's
+backup pile, the worse the inflation.
+
+**The fix (decided by Sam, 2026-09-23):** keep the 50/50 blend, narrow
+the reference population both percentiles AND the residual's own OLS fit
+are computed against to rosterable players only --
+`VAL_ADJ_ROSTERABLE_TOP_N = {"QB": 32, "RB": 64, "WR": 96, "TE": 32,
+"DST": 32}`, a new named constant in `derived.py`. New
+`derived._rosterable_pool_mask` (top N by `ProjPts` within position, or
+everyone if the position is thinner than its own N); new
+`derived._percentile_against_pool` replaces `_percentile_within` for
+`PtsPct`/`EdgePct` specifically (still scores every row, pool or not --
+"no blanks," a true backup just sorts naturally toward the bottom);
+`_val_adj_residual_within_position` gained a `pool_mask` parameter so its
+regression line is fit on the pool only, then applied to every row.
+`docs/CALCULATIONS.md`'s ValAdj section rewritten with the population
+rule, the before/after percentile table, and the constant.
+
+**Reproduction against the reference snapshot,** exactly as the fix
+prompt specified (`data/raw/edge/20260923T115601Z.csv`, the same
+population counts confirmed: QB 85, RB 153, WR 247, TE 147, DST 26):
+
+```
+ 1 Kenneth Walker III   RB  $7,400  26.4      9 Seahawks            DST $3,800  10.7
+ 2 Jaxon Smith-Njigba   WR  $8,600  24.1     10 Chase Brown         RB  $6,600  17.6
+ 3 Sam LaPorta          TE  $4,300  13.0     11 Malik Nabers        WR  $6,500  17.0
+ 4 Texans               DST $3,200   9.1     12 Jalen Coker         WR  $5,500  14.7
+ 5 Garrett Wilson       WR  $6,300  17.1     13 Brock Purdy         QB  $6,500  23.1
+ 6 Dalton Kincaid       TE  $5,500  15.0     14 Travis Kelce        TE  $4,500  11.9
+ 7 Chris Olave          WR  $7,200  19.1     15 Derrick Henry       RB  $7,700  21.2
+ 8 Parker Washington    WR  $6,000  16.3
+```
+
+13 of Sam's 15 reference names appear, in nearly the same order, and no
+punts survive -- the fix works. **One honest discrepancy, reported rather
+than tuned away:** Sam's reference list has no QB in the top 15 at all;
+this reproduction has Brock Purdy at #13, and Adonai Mitchell (Sam's
+#14) doesn't appear here in the top 15. The fix prompt's own text flags
+"no QBs in the top 15" as something for Sam to eyeball, not a hard
+invariant, and this implementation follows the spec's literal algorithm
+(pool = top N by `ProjPts`; OLS fit on pool; percentile of every row
+against the pool, generalized to non-pool rows via the same average-rank
+formula `pandas.rank(pct=True)` already uses) with no invented thresholds
+or hand-tuning. Flagged for Sam rather than adjusted further, per the fix
+prompt's own instruction ("if you can't [reproduce], stop and ask rather
+than tuning").
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

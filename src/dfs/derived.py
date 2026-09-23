@@ -141,6 +141,21 @@ SHOOTOUT_TOTAL_THRESHOLD = 48.0
 # it toward projection later without a code review to find the number.
 VAL_ADJ_PROJECTION_WEIGHT = 0.5
 
+# Week 3 fixes, Fix 2 (2026-09-23): the reference population ValAdj's two
+# percentiles (PtsPct, EdgePct) and its price-edge regression line are
+# computed against -- roughly the starters league-wide at each position.
+# Found live: both percentiles used to be computed across EVERY player
+# DraftKings lists at the position, including backups projecting near
+# zero -- the deeper a position's backup pile, the more its mid-tier
+# players get inflated (measured on the 2026-09-23 slate: a 5.7-pt TE
+# landed at the 82nd percentile at TE, where 71% of listed TEs project
+# under 2 pts, vs. 66th at WR, where only 57% do -- the metric was
+# measuring "better than the backup pile," not "a good play"). Sam's
+# fix, decided live: rank against ROSTERABLE players only. If a position
+# has fewer players than its own N (DST had 26 on that slate), the pool
+# is simply all of them -- see `_rosterable_pool_mask`.
+VAL_ADJ_ROSTERABLE_TOP_N = {"QB": 32, "RB": 64, "WR": 96, "TE": 32, "DST": 32}
+
 # EdgeRaw's real sheet layout is [Pool, *EDGE_COLUMNS] -- Pool sits in
 # column A (so it's beside Name once Id, immediately after it, is hidden),
 # not appended after EDGE_COLUMNS the way it first shipped. Every module
@@ -315,8 +330,26 @@ def _tm_rank_within_team_position(
     return ordered["TmRank"].reindex(frame.index)
 
 
+def _rosterable_pool_mask(proj_pts: pd.Series, position: pd.Series) -> pd.Series:
+    """True for the top `VAL_ADJ_ROSTERABLE_TOP_N[position]` players by
+    `ProjPts` within each position -- the reference population ValAdj's
+    percentiles and residual regression are computed against (Fix 2). A
+    position with fewer players than its own N (e.g. DST) gets every row
+    marked True -- the pool is simply all of them. Ties at the cutoff
+    aren't specially expanded; a stable sort keeps this deterministic run
+    to run for a fixed input frame."""
+    proj_pts = pd.to_numeric(proj_pts, errors="coerce")
+    mask = pd.Series(False, index=proj_pts.index)
+    for pos_value in position.unique():
+        idx = position.index[position == pos_value]
+        n = VAL_ADJ_ROSTERABLE_TOP_N[pos_value]
+        top_idx = proj_pts.loc[idx].sort_values(ascending=False, na_position="last").index[:n]
+        mask.loc[top_idx] = True
+    return mask
+
+
 def _val_adj_residual_within_position(
-    proj_pts: pd.Series, salary: pd.Series, position: pd.Series
+    proj_pts: pd.Series, salary: pd.Series, position: pd.Series, pool_mask: pd.Series
 ) -> pd.Series:
     """Part 7.2: `residual = ProjPts - E[ProjPts | Salary, Position]` --
     fit a plain OLS line of `ProjPts` on `Salary` *within each position, on
@@ -336,13 +369,21 @@ def _val_adj_residual_within_position(
     fix. Still called "residual," not "ValAdj," to make that clear at
     every call site.
 
-    A position with fewer than two usable rows, or one where every row
-    shares the same `Salary` (can't fit a slope from a single price
-    point), gets a residual of 0 for that whole group -- there's no
-    "expectation" to measure against yet, and 0 reads as "no signal"
-    rather than a fabricated number. A row with a missing `ProjPts`
-    stays blank (NaN), consistent with this codebase's "blank is not
-    zero" rule -- it is never coerced into 0.
+    Week 3 fixes, Fix 2 (2026-09-23): the OLS line is fit on `pool_mask`
+    (`VAL_ADJ_ROSTERABLE_TOP_N`, roughly the starters league-wide) ONLY,
+    not the whole position -- fitting against a position's full backup
+    pile pulled the line toward players who were never going to play,
+    distorting the "expectation" every real play gets compared to. Every
+    row still gets a residual predicted off that line, pool member or
+    not -- only the fit itself is pool-scoped, not the scoring.
+
+    A position with fewer than two usable (pool) rows, or one where every
+    pool row shares the same `Salary` (can't fit a slope from a single
+    price point), gets a residual of 0 for every row in that whole
+    position group -- there's no "expectation" to measure against yet,
+    and 0 reads as "no signal" rather than a fabricated number. A row
+    with a missing `ProjPts` stays blank (NaN), consistent with this
+    codebase's "blank is not zero" rule -- it is never coerced into 0.
 
     Deliberately NOT `groupby(...).apply(...)`: with exactly one
     position present (a real case -- position-scoped debugging, or a
@@ -359,12 +400,13 @@ def _val_adj_residual_within_position(
         idx = position.index[position == pos_value]
         pts = proj_pts.loc[idx].to_numpy(dtype=float)
         sal = salary.loc[idx].to_numpy(dtype=float)
-        usable = ~(np.isnan(pts) | np.isnan(sal))
+        pool = pool_mask.loc[idx].to_numpy()
+        usable = pool & ~(np.isnan(pts) | np.isnan(sal))
         if usable.sum() < 2 or np.ptp(sal[usable]) == 0:
-            # No fittable slope for this position -- 0 for every row that
-            # actually has a ProjPts to compare; a genuinely missing
-            # ProjPts stays NaN rather than being coerced to a fabricated
-            # 0 (see docstring).
+            # No fittable slope for this position's pool -- 0 for every
+            # row that actually has a ProjPts to compare (pool or not);
+            # a genuinely missing ProjPts stays NaN rather than being
+            # coerced to a fabricated 0 (see docstring).
             residual = np.where(np.isnan(pts), np.nan, 0.0)
         else:
             slope, intercept = np.polyfit(sal[usable], pts[usable], 1)
@@ -375,23 +417,57 @@ def _val_adj_residual_within_position(
     return result.round(2)
 
 
+def _percentile_against_pool(series: pd.Series, group: pd.Series, pool_mask: pd.Series) -> pd.Series:
+    """Percentile rank (0-100) of `series` within each `group` value,
+    measured against only the `pool_mask` members of that group (Fix 2's
+    `VAL_ADJ_ROSTERABLE_TOP_N` reference population) -- but every row in
+    the group still gets a score, pool member or not, so a true backup
+    sorts naturally toward the bottom instead of getting a blank.
+
+    Same average-rank convention `pandas.Series.rank(pct=True)` uses for
+    a value that IS a pool member (`rank = (count-below + count-at-or-
+    below + 1) / 2`, `pct = rank / pool_size`), generalized to a value
+    that ISN'T a pool member by the same formula -- it isn't a special
+    case, just what that formula already gives for a value with zero
+    exact ties in the reference set. NaN inputs stay NaN."""
+    values = pd.to_numeric(series, errors="coerce")
+    result = pd.Series(np.nan, index=values.index, dtype=float)
+    for group_value in group.unique():
+        idx = group.index[group == group_value]
+        pool_idx = idx[pool_mask.loc[idx].to_numpy()]
+        pool_values = np.sort(values.loc[pool_idx].dropna().to_numpy())
+        n = len(pool_values)
+        if n == 0:
+            continue
+        group_values = values.loc[idx].to_numpy()
+        below = np.searchsorted(pool_values, group_values, side="left")
+        at_or_below = np.searchsorted(pool_values, group_values, side="right")
+        pct = (below + at_or_below + 1) / 2 / n * 100
+        result.loc[idx] = np.where(np.isnan(group_values), np.nan, pct)
+    return result
+
+
 def _val_adj_blend(pts_pct: pd.Series, edge_pct: pd.Series) -> pd.Series:
     """Week 3 feedback (A3): `ValAdj = VAL_ADJ_PROJECTION_WEIGHT * PtsPct
-    + (1 - VAL_ADJ_PROJECTION_WEIGHT) * EdgePct`, both within-position
-    percentile ranks (0-100, via `_percentile_within` -- `PtsPct` of raw
-    `ProjPts`, `EdgePct` of `_val_adj_residual_within_position`'s output).
+    + (1 - VAL_ADJ_PROJECTION_WEIGHT) * EdgePct`, both percentile ranks
+    (0-100, via `_percentile_against_pool` -- `PtsPct` of raw `ProjPts`,
+    `EdgePct` of `_val_adj_residual_within_position`'s output) measured
+    within each position against Fix 2's rosterable reference population
+    (`VAL_ADJ_ROSTERABLE_TOP_N`), not every player DK lists at the
+    position.
 
-    Worked example that motivated this (illustrative percentiles, not a
-    real slate): an $8,200 RB projected 19.5 against a 19.7 par (residual
-    -0.2) has PtsPct 98, EdgePct 45 -> ValAdj 71.5. A $3,200 RB projected
-    9.0 against a 7.7 par (residual +1.3) "beats his price" more --
-    PtsPct 30, EdgePct 85 -> ValAdj 57.5. The expensive back now wins,
-    which is the point: a residual alone (old ValAdj) ranked the cheap
-    back above the expensive one, even though the cheap back can't
-    plausibly win a GPP lineup and the expensive one can. Blending in raw
-    `ProjPts`' own percentile keeps scale in the picture without losing
-    the price-edge signal `EdgePct` alone provides. See
-    docs/CALCULATIONS.md for the full worked example."""
+    Worked example that motivated the original 50/50 blend (illustrative
+    percentiles, not a real slate): an $8,200 RB projected 19.5 against a
+    19.7 par (residual -0.2) has PtsPct 98, EdgePct 45 -> ValAdj 71.5. A
+    $3,200 RB projected 9.0 against a 7.7 par (residual +1.3) "beats his
+    price" more -- PtsPct 30, EdgePct 85 -> ValAdj 57.5. The expensive
+    back now wins, which is the point: a residual alone (old ValAdj)
+    ranked the cheap back above the expensive one, even though the cheap
+    back can't plausibly win a GPP lineup and the expensive one can.
+    Blending in raw `ProjPts`' own percentile keeps scale in the picture
+    without losing the price-edge signal `EdgePct` alone provides. See
+    docs/CALCULATIONS.md for the full worked example and Fix 2's
+    reference-population rule."""
     return (VAL_ADJ_PROJECTION_WEIGHT * pts_pct + (1 - VAL_ADJ_PROJECTION_WEIGHT) * edge_pct).round(1)
 
 
@@ -588,11 +664,12 @@ def build_edge_frame(
     merged["ProjOwn"] = merged["ProjOwn"] / 100
 
     merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
+    val_adj_pool = _rosterable_pool_mask(merged["ProjPts"], merged["Position"])
     val_adj_residual = _val_adj_residual_within_position(
-        merged["ProjPts"], merged["Salary"], merged["Position"]
+        merged["ProjPts"], merged["Salary"], merged["Position"], val_adj_pool
     )
-    val_adj_pts_pct = _percentile_within(merged["ProjPts"], merged["Position"])
-    val_adj_edge_pct = _percentile_within(val_adj_residual, merged["Position"])
+    val_adj_pts_pct = _percentile_against_pool(merged["ProjPts"], merged["Position"], val_adj_pool)
+    val_adj_edge_pct = _percentile_against_pool(val_adj_residual, merged["Position"], val_adj_pool)
     merged["ValAdj"] = _val_adj_blend(val_adj_pts_pct, val_adj_edge_pct)
     merged["CeilVal"] = (merged["Ceiling"] / (merged["Salary"] / 1000)).round(2)
     merged["CeilPct"] = _percentile_within(merged["Ceiling"], merged["Position"]).round(1)

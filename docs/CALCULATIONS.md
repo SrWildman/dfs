@@ -55,19 +55,52 @@ populate `Ceiling` for every player (roughly 40-60% coverage depending on
 the week), and a blank is left blank rather than treated as zero, since a
 missing ceiling isn't the same claim as "this player has no ceiling."
 
-## ValAdj (Part 7.2, 2026-09-18; reworked Week 3 feedback A3, 2026-09-22) -- EdgeRaw's default sort
+## ValAdj (Part 7.2, 2026-09-18; reworked Week 3 feedback A3, 2026-09-22; reference population fixed Week 3 fixes Fix 2, 2026-09-23) -- EdgeRaw's default sort
 
 ```
-residual     = ProjPts - E[ProjPts | Salary, Position]         (derived._val_adj_residual_within_position)
-PtsPct_pos   = percentile rank of ProjPts within position       (derived._percentile_within)
-EdgePct_pos  = percentile rank of residual within position      (derived._percentile_within)
-ValAdj       = VAL_ADJ_PROJECTION_WEIGHT * PtsPct_pos
-             + (1 - VAL_ADJ_PROJECTION_WEIGHT) * EdgePct_pos     (derived._val_adj_blend)
+pool          = top VAL_ADJ_ROSTERABLE_TOP_N[position] players by ProjPts,
+                within position (or everyone, if the position has fewer)   (derived._rosterable_pool_mask)
+residual      = ProjPts - E[ProjPts | Salary, Position],
+                the line fit on POOL rows only, scored for every row       (derived._val_adj_residual_within_position)
+PtsPct_pos    = percentile rank of ProjPts against the POOL, within
+                position -- every row scored, pool member or not          (derived._percentile_against_pool)
+EdgePct_pos   = percentile rank of residual against the POOL, within
+                position -- every row scored, pool member or not          (derived._percentile_against_pool)
+ValAdj        = VAL_ADJ_PROJECTION_WEIGHT * PtsPct_pos
+              + (1 - VAL_ADJ_PROJECTION_WEIGHT) * EdgePct_pos              (derived._val_adj_blend)
 ```
 
 `VAL_ADJ_PROJECTION_WEIGHT = 0.5`, a named module constant in
 `derived.py` rather than a literal -- Sam may want to shift it toward
 projection later without a code review to find the number.
+
+**The reference population (Fix 2, 2026-09-23).** `VAL_ADJ_ROSTERABLE_TOP_N
+= {"QB": 32, "RB": 64, "WR": 96, "TE": 32, "DST": 32}` -- roughly the
+starters league-wide at each position. Both percentiles above, and the
+residual's own regression line, used to be computed across **every**
+player DraftKings lists at the position, including backups projecting
+near zero. Found live: the deeper a position's backup pile, the more its
+mid-tier players got inflated, because the percentile was really
+measuring "better than the backup pile," not "a good play." Measured on
+the 2026-09-23 snapshot:
+
+| Pos | Players | Projecting < 2 pts | A 5.7-pt player's percentile | A 13-pt player's percentile |
+|---|---|---|---|---|
+| QB | 85 | 61% | 68th | 69th |
+| RB | 153 | 46% | 64th | 88th |
+| WR | 247 | 57% | 66th | 90th |
+| TE | 147 | 71% | 82nd | 98th |
+| DST | 26 | 0% | 35th | 100th |
+
+TE's deep backup pile (71% projecting under 2 points) is why a $2,500 TE
+projecting 5.7 points sat 14th on EdgeRaw's default sort, ahead of nearly
+every real play on the slate. Restricting the reference population to
+`VAL_ADJ_ROSTERABLE_TOP_N` fixes this without changing the 50/50 blend
+weight -- a true backup outside the pool still gets a `ValAdj` (never
+blank), scored against the pool's distribution, so it sorts naturally to
+the bottom instead of inflating anyone above it. If a position has fewer
+players than its own N (DST had 26 that week), the pool is simply all of
+them.
 
 **Why this changed.** `Val` (points per $1,000) is salary- and
 position-biased -- a cheap player outranks a better, pricier one just for
@@ -119,12 +152,15 @@ per-position one (see "Per-position highlighting" below), and Player
 Pool/Lineups skip re-scaling it per position block for the same reason
 (`sheet_style.GROUPED_TAB_UNSCALED_COLUMNS`). This also means a thin
 position's best player can post a very high `ValAdj` on a raw production
-level an average player at a deeper position would beat easily (a real
-top-15 pulled from a recent real slate put several $3,200-3,900 TEs
-projected ~10-11 points above a $6,400 QB projected 26.0) -- the fix
-targeted comparing players WITHIN the same position fairly, and does not
-promise `ValAdj` is a fair cross-position ranking. Reported to Sam as
-part of the A3 rework rather than silently tuned further.
+level an average player at a deeper position would beat easily -- the
+fix targeted comparing players WITHIN the same position fairly, and does
+not promise `ValAdj` is a fair cross-position ranking. (A previous, more
+extreme version of this -- several $3,200-3,900 TEs projected ~10-11
+points outranking a $6,400 QB projected 26.0 -- was actually the Fix 2
+backup-pile-inflation bug above, not this structural point on its own;
+that specific case is fixed. This paragraph's weaker claim, that a thin
+position's TOP player can still rank ahead of a deeper position's
+average one on raw production, remains true by design.)
 
 ## Per-position highlighting (ProjPts, Val, Ceiling, CeilVal)
 

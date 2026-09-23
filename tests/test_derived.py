@@ -1,5 +1,6 @@
 import pandas as pd
 
+from dfs import derived
 from dfs.derived import (
     CHALK_OWNERSHIP_THRESHOLD,
     EDGE_COLUMNS,
@@ -8,7 +9,9 @@ from dfs.derived import (
     OWN_STATUS_REAL,
     OWN_STATUS_UNPUBLISHED,
     ZONE_LABELS,
+    _percentile_against_pool,
     _percentile_within,
+    _rosterable_pool_mask,
     build_edge_frame,
 )
 
@@ -371,6 +374,118 @@ def test_valadj_still_differentiates_when_a_positions_salary_never_varies():
     b = frame[frame["Name"] == "B"].iloc[0]
     assert a["ValAdj"] == 62.5
     assert b["ValAdj"] == 87.5
+
+
+def test_rosterable_pool_mask_keeps_only_top_n_by_projpts_within_position():
+    position = pd.Series(["RB", "RB", "RB", "RB", "WR"])
+    proj_pts = pd.Series([25.0, 15.0, 10.0, 2.0, 8.0])
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 3}
+        mask = _rosterable_pool_mask(proj_pts, position)
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    # Top 3 RBs by ProjPts (25, 15, 10) are in the pool; the 2.0 backup
+    # isn't. The lone WR is under its own (real, much larger) cap, so
+    # it's in by default.
+    assert mask.tolist() == [True, True, True, False, True]
+
+
+def test_rosterable_pool_mask_includes_everyone_when_position_is_thinner_than_its_cap():
+    # DST's real cap (32) comfortably exceeds a normal week's DST count
+    # (Fix 2's spec case: 26 real DST on the 2026-09-23 slate) -- the
+    # pool is simply everyone at that position.
+    position = pd.Series(["DST", "DST", "DST"])
+    proj_pts = pd.Series([9.0, 7.0, 5.0])
+    mask = _rosterable_pool_mask(proj_pts, position)
+    assert mask.tolist() == [True, True, True]
+
+
+def test_percentile_against_pool_scores_non_pool_rows_without_blanks():
+    # Fix 2: "score every player against the pool's distribution ...
+    # players outside the pool still get a score, ranked against the
+    # pool, so true backups sort naturally to the bottom -- no blanks."
+    group = pd.Series(["RB"] * 5)
+    values = pd.Series([25.0, 15.0, 10.0, 2.0, 0.5])
+    pool_mask = pd.Series([True, True, True, False, False])
+
+    pct = _percentile_against_pool(values, group, pool_mask)
+
+    assert not pct.isna().any()
+    # Pool members rank against each other exactly as a plain
+    # percentile-of-3 would: 25 is the max (100), 10 is the min (100/3).
+    assert pct.iloc[0] == 100.0
+    assert round(pct.iloc[2], 1) == round(100 / 3, 1)
+    # Non-pool rows (2.0, 0.5) are both below every pool member -- a
+    # rank-based percentile can't distinguish two values that are both
+    # below the whole reference set, so they tie at the same low score,
+    # but it's a real low score, never a blank/0-by-fiat.
+    assert pct.iloc[3] < pct.iloc[2]
+    assert pct.iloc[4] == pct.iloc[3]
+    assert pct.iloc[3] > 0
+
+
+def test_valadj_no_longer_inflated_by_a_position_s_backup_pile():
+    # Fix 2 regression, reproducing the exact failure mode Sam flagged:
+    # a mid-tier player's PtsPct/EdgePct climbing as MORE near-zero
+    # backups get added below him, even though nothing about his own
+    # projection or price changed -- "the metric measures better than
+    # the backup pile, not a good play." Monkeypatch a small RB cap (3)
+    # so a handful of synthetic backups is enough to exercise it.
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 3}
+
+        few_backups = _projections(
+            [
+                {"Id": "1", "Name": "Star", "Position": "RB", "ProjPts": 25.0},
+                {"Id": "2", "Name": "Mid", "Position": "RB", "ProjPts": 15.0},
+                {"Id": "3", "Name": "Low", "Position": "RB", "ProjPts": 10.0},
+                {"Id": "4", "Name": "Backup1", "Position": "RB", "ProjPts": 2.0},
+            ]
+        )
+        sal_few = _salaries(
+            [
+                {"ID": "1", "Salary": 8000},
+                {"ID": "2", "Salary": 6000},
+                {"ID": "3", "Salary": 4000},
+                {"ID": "4", "Salary": 3000},
+            ]
+        )
+
+        many_backups = _projections(
+            [
+                {"Id": "1", "Name": "Star", "Position": "RB", "ProjPts": 25.0},
+                {"Id": "2", "Name": "Mid", "Position": "RB", "ProjPts": 15.0},
+                {"Id": "3", "Name": "Low", "Position": "RB", "ProjPts": 10.0},
+                {"Id": "4", "Name": "Backup1", "Position": "RB", "ProjPts": 2.0},
+                {"Id": "5", "Name": "Backup2", "Position": "RB", "ProjPts": 1.5},
+                {"Id": "6", "Name": "Backup3", "Position": "RB", "ProjPts": 1.0},
+                {"Id": "7", "Name": "Backup4", "Position": "RB", "ProjPts": 0.5},
+            ]
+        )
+        sal_many = _salaries(
+            [
+                {"ID": "1", "Salary": 8000},
+                {"ID": "2", "Salary": 6000},
+                {"ID": "3", "Salary": 4000},
+                {"ID": "4", "Salary": 3000},
+                {"ID": "5", "Salary": 3000},
+                {"ID": "6", "Salary": 3000},
+                {"ID": "7", "Salary": 3000},
+            ]
+        )
+
+        frame_few = build_edge_frame(few_backups, sal_few).frame
+        frame_many = build_edge_frame(many_backups, sal_many).frame
+
+        mid_few = frame_few[frame_few["Name"] == "Mid"].iloc[0]["ValAdj"]
+        mid_many = frame_many[frame_many["Name"] == "Mid"].iloc[0]["ValAdj"]
+        assert mid_few == mid_many
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
 
 def test_valadj_stays_blank_when_projpts_is_missing_even_in_a_degenerate_group():
