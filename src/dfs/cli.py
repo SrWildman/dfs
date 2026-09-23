@@ -10,6 +10,7 @@ typer.Exit.
 from __future__ import annotations
 
 import json as _json
+import re
 import shlex
 import shutil
 import subprocess
@@ -40,6 +41,7 @@ from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate
 from dfs.live_diff import diff_edge_flags, diff_queue_changes
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
+from dfs.ownership import append_ownership, parse_ownership_export
 from dfs.pool import clear_all, find_matches, read_players, set_pool
 from dfs.results_autofill import compute_week_results, write_results_updates
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
@@ -133,6 +135,7 @@ lineups_app = typer.Typer(help="Manage lineups: check late swaps, clear last wee
 odds_app = typer.Typer(help="Check how betting lines have moved since your last sync.")
 week_app = typer.Typer(help="Start a new week's sheet, or close out the one you're on.")
 pool_app = typer.Typer(help="Add or remove players from your pool without opening the sheet.")
+ownership_app = typer.Typer(help="Log actual DK contest ownership (Phase 6, Part 7.8).")
 app.add_typer(setup_app, name="setup")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
@@ -141,6 +144,7 @@ app.add_typer(lineups_app, name="lineups")
 app.add_typer(odds_app, name="odds")
 app.add_typer(week_app, name="week")
 app.add_typer(pool_app, name="pool")
+app.add_typer(ownership_app, name="ownership")
 
 console = Console()
 log = get_logger("cli")
@@ -2301,17 +2305,15 @@ def week_close(
 
     Investigated for this command: whether the authenticated browser
     profile `dfs auth dk` already saves could pull contest history
-    directly, skipping the manual CSV export. It can't, today -- not
-    because it was tried and failed, but because doing so means probing
-    DraftKings' undocumented authenticated endpoints (the "My Contests"
-    page has no public API; whatever it calls internally isn't stable
-    enough to build against sight-unseen), and that's a live exploratory
-    scrape against your real logged-in session, not something to attempt
-    unattended in a coding session. If that gets revisited, it needs doing
-    with you present, watching real requests. Until then, exporting
-    contest history by hand (My Contests > export) and passing it here
-    stays the supported path -- this command exists mainly so "close the
-    week" has one name in the weekly workflow, not two.
+    directly, skipping the manual CSV export. It can, technically -- a
+    real per-account export URL was found live (2026-09-23, Sam
+    present, inspecting the real button) -- but Sam decided against
+    automating requests against his own real-money DK account
+    (`dfs auth dk`'s session already triggered DK's own bot/geo
+    detection once during that same investigation), so this stays a
+    manual export deliberately, not because the technical path doesn't
+    exist. Revisit only if Sam explicitly asks to reconsider that
+    tradeoff -- this is his account, his call.
     """
     cfg = _load_config_or_exit()
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
@@ -2330,9 +2332,10 @@ def bankroll_sync(
     entry's own contest date rather than assuming the file is one week's
     worth. Cash Line and the team-colour columns in Results stay yours.
 
-    Live DK auth (`dfs auth dk`) will eventually feed this automatically;
-    for now, export your contest history from DraftKings' website and
-    point this at the file.
+    Exporting contest history by hand (My Contests > export) and passing
+    it here stays the supported path -- see `week_close`'s own docstring
+    for why an automated fetch was investigated and deliberately not
+    built.
     """
     cfg = _load_config_or_exit()
     _sync_bankroll_from_csv(cfg, csv)
@@ -2402,6 +2405,70 @@ def bankroll_backfill_keys(
             console.print(f"  ambiguous rows (multiple CSV matches, left alone): {result.ambiguous_rows}")
         if result.unmatched_rows:
             console.print(f"  unmatched rows (no CSV match, left alone): {result.unmatched_rows}")
+
+
+@ownership_app.command("log")
+def ownership_log(
+    csv: Path = typer.Option(
+        ...,
+        "--csv",
+        help="Path to a DK 'export full standings' CSV, downloaded from a real "
+        "contest's results page (a per-contest export, not the account-level contest-history one).",
+    ),
+    contest_id: str = typer.Option(
+        None,
+        "--contest-id",
+        help="Defaults to the CSV filename's own contest ID (DK names these "
+        "contest-standings-<id>.csv) -- pass this only if the file's been renamed.",
+    ),
+    week: int = typer.Option(None, "--week", help="Defaults to the current NFL week."),
+    season: int = typer.Option(None, "--season", help="Defaults to the current season."),
+) -> None:
+    """Logs one contest's actual per-player ownership into the durable
+    local ownership log (`data/ownership_log.csv`) for later calibration
+    against archived `ProjOwn` (Phase 6, Part 7.8). File-based on
+    purpose, not automated -- see `ownership.py`'s module docstring for
+    why an automated per-contest fetch was investigated and deliberately
+    not shipped. Safe to re-run against the same file: replaces that
+    contest's rows rather than duplicating them.
+
+    This export has no date of its own (unlike the account-level contest-
+    history export `dfs bankroll sync` reads), so week/season can't be
+    inferred from the file -- pass `--week` explicitly for anything other
+    than the current week.
+    """
+    if not csv.exists():
+        console.print(f"[red]No such file:[/red] {csv}")
+        raise typer.Exit(code=1)
+
+    resolved_contest_id = contest_id
+    if resolved_contest_id is None:
+        match = re.search(r"(\d+)", csv.stem)
+        if not match:
+            console.print(
+                f"[red]Could not find a contest ID in the filename {csv.name!r}[/red] -- pass "
+                "--contest-id explicitly."
+            )
+            raise typer.Exit(code=1)
+        resolved_contest_id = match.group(1)
+
+    df = pd.read_csv(csv)
+    try:
+        rows = parse_ownership_export(df)
+    except KeyError as e:
+        console.print(f"[red]CSV is missing an expected column:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    resolved_week = week if week is not None else nfl_calendar.current_week()
+    resolved_season = season if season is not None else nfl_calendar.current_season()
+
+    written = append_ownership(
+        rows, season=resolved_season, week=resolved_week, contest_id=resolved_contest_id
+    )
+    console.print(
+        f"[green]OK[/green] contest {resolved_contest_id}, week {resolved_week}: logged {written} "
+        f"player(s) ({int(rows['contest_entries'].iloc[0])} entries in the field)."
+    )
 
 
 def _sync_bankroll_from_csv(cfg: Config, csv: Path) -> None:

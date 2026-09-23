@@ -1633,6 +1633,64 @@ presentation-layer facts, not data -- which is why this pass finished
 with an actual visual open of the live sheet, not just another round of
 `read_range` calls.
 
+## Phase 6, Part 7.8 (2026-09-23): actual DK ownership logging, investigated then deliberately scoped down
+
+Step 1/2's investigation (per `docs/HANDOFF_PHASE6.md`'s own "investigate
+first" instruction) happened live, with Sam present, checking his real
+DraftKings account -- not guessed:
+
+- DK's per-contest "export full standings" CSV has real per-player
+  ownership (`%Drafted`), found on a real completed contest's results
+  page. Two side-by-side tables share the same rows (an unrelated entry
+  leaderboard in columns A-F, per-player ownership in H-K) -- confirmed
+  on a real 100-entry contest that a player used in more than one
+  roster-slot TYPE across the field (e.g. some entries at `RB`, others in
+  `FLEX`) gets one row per slot type, each a partial share; total
+  ownership is the sum, not any single row.
+- Weeks 1-2 history is still reachable on DK's site.
+- A real per-contest export URL exists
+  (`.../contest/exportfullstandingscsv/<id>`), found by inspecting the
+  actual download button -- and DK's account-level contest-history
+  export (the file `dfs bankroll sync --csv` already reads) has one too
+  (`.../mycontests/historycsv?...`). Both could technically be automated
+  via `dfs auth dk`'s already-existing authenticated browser profile.
+
+**Built, then a real risk surfaced, then deliberately scoped back down.**
+An automated per-contest fetch was built (a new `browser.
+authenticated_get` helper, `bankroll.fetch_contest_history_csv`,
+`ownership.fetch_standings_csv`, and optional-`--csv` auto-fetch modes
+for `bankroll sync`/`week close`) -- then, exercising `dfs auth dk`'s
+saved session during this same investigation, DraftKings' own site
+returned a bot/geo-detection error ("you're off our grid") against the
+authenticated Playwright browser. Sam decided the risk of automated,
+repeated requests against his real-money account wasn't worth solving
+"downloading CSVs by hand is tedious" -- **all of that automation was
+reverted**, on his explicit instruction, before it ever shipped. `dfs
+bankroll sync`/`week close` are unchanged (still `--csv`-only); their
+docstrings now record that the automated path was built and investigated,
+not just "not gotten to yet," so a future session doesn't rediscover the
+same risk by re-attempting it.
+
+**What shipped instead:** `src/dfs/ownership.py`
+(`parse_ownership_export`, `append_ownership`, `already_logged_contest_ids`)
+and `dfs ownership log --csv <file> [--week N] [--season Y]` --
+purely local, file-based, no network call of any kind. Logs one
+contest's real per-player ownership into `data/ownership_log.csv`
+(gitignored, keyed by season/week/contest_id/player, idempotent re-runs
+replace rather than duplicate). Verified against a real downloaded
+export: 126 unique players correctly merged from 155 raw rows, a known
+split-roster-slot player's ownership summed correctly (0.51 + 0.04 =
+0.55), re-running the same file left the log at the same row count
+rather than doubling it.
+
+**Not yet built:** the calibration view itself (`ActualOwn - ProjOwn` by
+decile/position) -- needs several weeks of logged contests plus the
+archived `ProjOwn` snapshot cross-referenced by player-week, which is
+only meaningful once `docs/PROMPT_DATA.md`'s Move 1/2 (a queryable
+history) exists. See that doc's own Section 7.8 note for the join
+details a future session will need (name-matching, no DK player ID in
+this particular export).
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

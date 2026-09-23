@@ -174,3 +174,31 @@ colour columns stay yours to fill in by hand.
 **Done looks like:** Bankroll's running total moved by the amount you'd
 expect from the week's actual results, and Results' row for the week you
 just closed shows real `Cash Pts`/`H2H Entered`/`H2H Win` numbers.
+
+## 8. Log actual ownership (optional, builds toward a future calibration)
+
+**Files:** `data/ownership_log.csv` (local, gitignored -- never leaves
+your machine).
+
+For each contest you want in the log, download that contest's own
+"export full standings" CSV from its results page on DraftKings (a
+per-contest file, `contest-standings-<id>.csv` -- not the account-level
+contest-history export Reconcile uses above), then:
+
+```
+dfs ownership log --csv <contest-standings-file.csv>
+```
+
+Logs every player's real ownership % in that contest (summed across any
+roster-slot split DK's export tracks separately, e.g. a player used at
+both `RB` and `FLEX`), keyed by contest so re-running the same file is
+safe. Pass `--week N` for anything other than the current week -- this
+export has no date of its own, unlike the contest-history one. This is
+file-based on purpose (an automated per-contest fetch was investigated
+and deliberately not built -- see `ownership.py`'s module docstring);
+there's no requirement to log every contest, but the more you log, the
+sooner a real ProjOwn-vs-actual calibration (`docs/PROMPT_DATA.md`'s Move
+2, Phase 6 Part 7.8) has real data to work with.
+
+**Done looks like:** the command reports how many players it logged and
+how big the contest's field was; nothing on the sheet changes.

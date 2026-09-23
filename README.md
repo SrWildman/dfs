@@ -106,6 +106,7 @@ Weekly-loop commands first, one-time setup last -- run `dfs --help` (or
 | `dfs odds movement` | checking how betting lines have moved since your last sync. |
 | `dfs bankroll sync --csv <file>` | reconciling DK contest history into your bankroll tab. |
 | `dfs week new "<url>"` / `dfs week close --csv <file>` | starting a new week's sheet, or closing out the one you're on. |
+| `dfs ownership log --csv <file>` | logging a contest's real DK ownership locally, toward a future ProjOwn calibration -- see `docs/WORKFLOW.md` step 8. |
 | `dfs auth tffb\|dk` | one-time interactive login for a source that needs a real browser session. |
 | `dfs setup ...` | one-time sheet construction (add-a-player control, EdgeRaw linking, styling, protection, ...) -- see `dfs setup --help`; `dfs setup sheet` runs the whole thing in order. |
 

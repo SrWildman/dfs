@@ -22,6 +22,11 @@ RAW_DIR = DATA_DIR / "raw"
 CURRENT_DIR = DATA_DIR / "current"
 PROFILES_DIR = DATA_DIR / "profiles"
 MANIFEST_FILE = DATA_DIR / "manifest.json"
+# Phase 6, Part 7.8: actual per-contest DK ownership, logged across weeks
+# and seasons -- a durable, ever-growing record (never superseded the way
+# a synced source's "current" snapshot is), so it lives outside
+# RAW_DIR/CURRENT_DIR's own "one source, one current copy" model.
+OWNERSHIP_LOG_FILE = DATA_DIR / "ownership_log.csv"
 
 
 def credentials_path(filename: str) -> Path:
