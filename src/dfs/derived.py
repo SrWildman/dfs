@@ -67,6 +67,7 @@ formula for anyone who just wants to verify a number.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -93,17 +94,25 @@ from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
 OWN_STATUS_REAL = "real"
 OWN_STATUS_UNPUBLISHED = "unpublished"
 
-# Re-tuned against a real Week 1 slate (744 players, real ProjOwn already
-# published) once both sides of Leverage were rank-normalized onto the same
-# 0-100 scale: that data's Leverage distribution was mean -0.01, std 16.7,
-# min -56.2, max 68.7 -- genuinely centered on 0, unlike the old raw-minus-
-# percentile formula this replaced (see docs/CALCULATIONS.md's postmortem).
-# 30.0 sits at that slate's ~93rd percentile, flagging 53/744 players
-# (7.1%) -- comfortably inside the 5-10% target band. 15.0 (the old flat
-# threshold, kept as a first guess before this data existed) would have
-# flagged 149/744 (20.0%), which is exactly the "reports everything"
-# failure this column exists to avoid.
-LEVERAGE_FLAG_THRESHOLD = 30.0
+# LEVERAGE flag (2026-09-24): a fixed threshold on Leverage mixed two
+# problems. First, it was never restricted to the rosterable pool -- on
+# the 2026-09-20 15:51 UTC snapshot, 10 of 30 flags at threshold 30 were
+# backup players outside `VAL_ADJ_ROSTERABLE_TOP_N` (nine $2,500-$2,800
+# backup TEs plus one injury-limited Brock Bowers), all with CeilPct
+# inflated by the same backup-pile problem ValAdj's Fix 2 already solved
+# for ValAdj itself -- CeilPct/OwnPct are percentiles across every player
+# DK lists, so a backup projecting 4.5 points looks like a ~75th-
+# percentile ceiling. Second, even restricted to the pool, a fixed
+# threshold drifted week to week: at 30, the pool fire rate was 12-15% in
+# Week 1 (9/10-9/15 snapshots) and 5-8% in Week 2 (9/19-9/20 snapshots) --
+# the same failure mode LINE had before it was retuned.
+#
+# Fix: only pool members are eligible, and the flag goes to the top
+# `LEVERAGE_FLAG_TOP_SHARE` of the pool by Leverage each week (see
+# `_leverage_flag_cutoff`), not a fixed number. That's self-correcting by
+# construction -- roughly 17-18 of 250 pool players every week, whatever
+# the raw Leverage distribution looks like that week.
+LEVERAGE_FLAG_TOP_SHARE = 0.07
 # Confirmed against the same slate: 5/744 players (0.7%) clear this today.
 # An absolute ownership percentage, not a percentile -- correctly untouched
 # by the Leverage scale fix. On the fraction scale (Phase 6, Part 2 --
@@ -361,6 +370,27 @@ def _rosterable_pool_mask(proj_pts: pd.Series, position: pd.Series) -> pd.Series
     return mask
 
 
+def _leverage_flag_eligible(leverage: pd.Series, pool_mask: pd.Series) -> pd.Series:
+    """True for pool members (`pool_mask`) in the top `LEVERAGE_FLAG_
+    TOP_SHARE` of the pool by `Leverage`, slate-wide (not per position --
+    PROMPT_LEVERAGE_FLAG.md doesn't scope this by position the way
+    ValAdj's pool is built per position). Non-pool players are never
+    eligible whatever their Leverage. `k = ceil(pool_size * LEVERAGE_FLAG_TOP_SHARE)`
+    (minimum 1 if the pool has any non-blank Leverage at all); the cutoff
+    is the k-th largest pool Leverage value, and every pool row at or
+    above that value is eligible -- so a tie at the cutoff is included,
+    not arbitrarily broken, and the flagged count can run slightly above
+    k when there's a tie there."""
+    pool_leverage = pd.to_numeric(leverage, errors="coerce").loc[pool_mask.index[pool_mask]].dropna()
+    eligible = pd.Series(False, index=leverage.index)
+    if pool_leverage.empty:
+        return eligible
+    k = max(1, math.ceil(len(pool_leverage) * LEVERAGE_FLAG_TOP_SHARE))
+    cutoff = pool_leverage.nlargest(k).min()
+    eligible.loc[pool_leverage.index] = pool_leverage >= cutoff
+    return eligible
+
+
 def _val_adj_residual_within_position(
     proj_pts: pd.Series, salary: pd.Series, position: pd.Series, pool_mask: pd.Series
 ) -> pd.Series:
@@ -609,7 +639,7 @@ def _flags_for_row(row: pd.Series) -> list[str]:
         flags.append("LINE↑")
     if pd.notna(row["ImpliedMove"]) and row["ImpliedMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
         flags.append("LINE↓")
-    if pd.notna(row["Leverage"]) and row["Leverage"] >= LEVERAGE_FLAG_THRESHOLD:
+    if row["_LeverageFlagEligible"]:
         flags.append("LEVERAGE")
     # No ownership-published guard needed: ProjOwn reads 0 for everyone
     # until TFFB publishes it, so this can't fire before then regardless.
@@ -700,6 +730,13 @@ def build_edge_frame(
     else:
         merged["OwnPct"] = pd.NA
         merged["Leverage"] = pd.NA
+
+    # LEVERAGE flag (2026-09-24): eligibility-and-cutoff computed here,
+    # slate-wide, before `_flags_for_row` runs -- that function only ever
+    # sees one row, so it can't compute a quantile itself. When ownership
+    # is unpublished, Leverage is entirely blank and this is all False,
+    # same as before.
+    merged["_LeverageFlagEligible"] = _leverage_flag_eligible(merged["Leverage"], val_adj_pool)
 
     merged["GameEnv"] = _game_env_scores(merged["Game"], merged["OU"], merged["Spread"])
     # Fix 2.3: O/U and Spread were computed into GameEnv but never

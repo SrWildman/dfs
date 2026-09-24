@@ -4,7 +4,7 @@ from dfs import derived
 from dfs.derived import (
     CHALK_OWNERSHIP_THRESHOLD,
     EDGE_COLUMNS,
-    LEVERAGE_FLAG_THRESHOLD,
+    LEVERAGE_FLAG_TOP_SHARE,
     LINE_MOVE_FLAG_THRESHOLD,
     OWN_STATUS_REAL,
     OWN_STATUS_UNPUBLISHED,
@@ -316,13 +316,15 @@ def test_leverage_flag_fires_at_threshold_under_real_ownership():
 
     frame = build_edge_frame(proj, sal).frame
     top = frame[frame["Name"] == "Player 10"].iloc[0]  # highest ceiling, lowest ownership
-    assert top["Leverage"] >= LEVERAGE_FLAG_THRESHOLD
     assert top["Flags"] == "LEVERAGE"
+    # 10-player pool, top 7% rounds up to 1 -- only the single best player
+    # by Leverage should ever be flagged here.
+    assert (frame["Flags"] == "LEVERAGE").sum() == 1
 
 
 def test_chalk_flag_set_for_high_ownership_under_real_basis():
     # 5 RBs so Chalky's rock-bottom ceiling lands at the 20th percentile,
-    # keeping Leverage (CeilPct - ProjOwn) well under LEVERAGE_FLAG_THRESHOLD_REAL
+    # keeping Leverage (CeilPct - ProjOwn) far from the top of the pool
     # despite high ownership -- otherwise LEVERAGE would win first.
     proj = _projections(
         [
@@ -348,8 +350,116 @@ def test_chalk_flag_set_for_high_ownership_under_real_basis():
 
     frame = build_edge_frame(proj, sal).frame
     chalky = frame[frame["Name"] == "Chalky"].iloc[0]
-    assert chalky["Leverage"] < LEVERAGE_FLAG_THRESHOLD
     assert chalky["Flags"] == "CHALK"
+
+
+def test_leverage_flag_never_fires_outside_the_rosterable_pool():
+    # PROMPT_LEVERAGE_FLAG.md's real bug: CeilPct/OwnPct (and so Leverage)
+    # are percentiles over EVERY player DK lists, not just the pool -- so a
+    # cheap backup with a tiny ProjPts can still post the single highest
+    # Leverage on the whole slate. It must never be flagged; only pool
+    # members are eligible, whatever their Leverage.
+    proj = _projections(
+        [
+            {
+                "Id": "1",
+                "Name": "Pool A",
+                "Position": "RB",
+                "ProjPts": 30.0,
+                "Ceiling": 20.0,
+                "ProjOwn": 15.0,
+            },
+            {
+                "Id": "2",
+                "Name": "Pool B",
+                "Position": "RB",
+                "ProjPts": 25.0,
+                "Ceiling": 15.0,
+                "ProjOwn": 20.0,
+            },
+            {
+                "Id": "3",
+                "Name": "Backup with highest Leverage",
+                "Position": "RB",
+                "ProjPts": 1.0,
+                "Ceiling": 100.0,
+                "ProjOwn": 0.1,
+            },
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}])
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 2}
+        frame = build_edge_frame(proj, sal).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    backup = frame[frame["Name"] == "Backup with highest Leverage"].iloc[0]
+    assert backup["Leverage"] == frame["Leverage"].max()
+    assert "LEVERAGE" not in backup["Flags"]
+    assert (frame["Flags"] == "LEVERAGE").sum() == 1
+
+
+def test_leverage_flag_fires_for_exactly_the_top_share_of_the_pool():
+    # 200 pool players with strictly increasing Leverage -- top 7% is
+    # exactly ceil(200 * 0.07) = 14 players, no ties to complicate it.
+    n = 200
+    rows = [
+        {
+            "Id": str(i),
+            "Name": f"Player {i}",
+            "Position": "RB",
+            "ProjPts": 10.0 + i * 0.01,  # keeps rank order stable, all in pool
+            "Ceiling": float(i),
+            "ProjOwn": float(n + 1 - i),
+        }
+        for i in range(1, n + 1)
+    ]
+    proj = _projections(rows)
+    sal = _salaries([{"ID": str(i)} for i in range(1, n + 1)])
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n}
+        frame = build_edge_frame(proj, sal).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    import math
+
+    expected_count = math.ceil(n * LEVERAGE_FLAG_TOP_SHARE)
+    flagged = frame[frame["Flags"] == "LEVERAGE"]
+    assert len(flagged) == expected_count
+    expected_names = {f"Player {i}" for i in range(n - expected_count + 1, n + 1)}
+    assert set(flagged["Name"]) == expected_names
+
+
+def test_leverage_flag_includes_ties_at_the_cutoff():
+    # Two pool players tied for the single highest Leverage -- both must be
+    # flagged even though the top share alone (ceil(5 * 0.07) = 1) would
+    # only ask for one.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Tied A", "Position": "RB", "ProjPts": 30.0, "Ceiling": 50.0, "ProjOwn": 5.0},
+            {"Id": "2", "Name": "Tied B", "Position": "RB", "ProjPts": 29.0, "Ceiling": 50.0, "ProjOwn": 5.0},
+            {"Id": "3", "Name": "C", "Position": "RB", "ProjPts": 20.0, "Ceiling": 30.0, "ProjOwn": 15.0},
+            {"Id": "4", "Name": "D", "Position": "RB", "ProjPts": 15.0, "Ceiling": 20.0, "ProjOwn": 25.0},
+            {"Id": "5", "Name": "E", "Position": "RB", "ProjPts": 10.0, "Ceiling": 10.0, "ProjOwn": 35.0},
+        ]
+    )
+    sal = _salaries([{"ID": str(i)} for i in range(1, 6)])
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 5}
+        frame = build_edge_frame(proj, sal).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    flagged = frame[frame["Flags"] == "LEVERAGE"]
+    assert set(flagged["Name"]) == {"Tied A", "Tied B"}
 
 
 def test_game_env_scores_higher_total_and_tighter_spread_higher():

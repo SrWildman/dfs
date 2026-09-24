@@ -530,7 +530,7 @@ boolean check.
 | 2 | `WIND` | `Wind ≥ 20` mph |
 | 3 | `LINE↑` | `ImpliedMove ≥ +6.0` |
 | 3 | `LINE↓` | `ImpliedMove ≤ −6.0` |
-| 4 | `LEVERAGE` | `Leverage ≥ 30` (blank `Leverage` while unpublished can never clear this) |
+| 4 | `LEVERAGE` | rosterable-pool member, in the top `LEVERAGE_FLAG_TOP_SHARE` (7%) of the pool by `Leverage` this week (blank `Leverage` while unpublished can never clear this) |
 | 5 | `CHALK` | `Own% ≥ 0.20` (20%) -- can only fire once ownership is real; `Own%` reads 0 for everyone until then |
 | — | *(blank)* | none of the above |
 
@@ -549,27 +549,48 @@ historical sample used to pick it), which is expected day-to-day variance
 around a threshold tuned from history, not a sign it needs re-tuning
 again from a single moment's read.
 
-`LEVERAGE_FLAG_THRESHOLD = 30.0`
-and `CHALK_OWNERSHIP_THRESHOLD = 0.20` **were** checked against a real
-744-player Week 1 slate with real ownership published, after the scale
-fix above: that slate's `Leverage` distribution was mean -0.01, std 16.7,
-min -56.2, max 68.7 (quartiles -9.4 / -3.1 / +6.1, 90th percentile +27.0).
-30.0 sits at roughly the 93rd percentile and flags 53/744 players (7.1%)
--- inside the 5-10% target band. The old flat threshold of 15 (left over
-from before the scale fix, when it wasn't actually checked against a real
-gap-from-ownership number) would have flagged 149/744 (20.0%) under the
-corrected formula -- almost exactly the "reports everything" failure this
-column exists to avoid, and consistent with what got reported live once
-real ownership existed. `CHALK_OWNERSHIP_THRESHOLD` flagged 5/744 players
-(0.7%) on the same slate and is otherwise untouched by this fix -- it's an
-absolute ownership percentage, not a percentile. **Phase 6, Part 2
-(2026-09-17):** the constant itself changed from `20.0` to `0.20` when
-`Own%` (the sheet-facing name for what this section still calls `ProjOwn`
--- see the note at the top of the `Leverage and OwnStatus` section) was
-rescaled from a 0-100 number to a 0-1 fraction to match its already-0-1
-scale on `PlayerPoolRaw`/`Player Pool`/`Lineups`. The threshold's
-real-world meaning (20% ownership) and the 5/744 flag rate above are both
-unchanged -- only the number's own units moved.
+`LEVERAGE_FLAG_THRESHOLD = 30.0` (a fixed threshold on `Leverage`, no pool
+restriction) **was replaced, 2026-09-24, with `LEVERAGE_FLAG_TOP_SHARE =
+0.07`** (see `PROMPT_LEVERAGE_FLAG.md`). Two problems with the fixed
+threshold, both found live: `CeilPct`/`OwnPct` (and so `Leverage`) are
+percentiles over *every* player DK lists, not just the rosterable pool
+(`VAL_ADJ_ROSTERABLE_TOP_N`) -- so on the 2026-09-20 snapshot, 10 of 30
+flags at threshold 30 were players outside the pool (nine $2,500-$2,800
+backup TEs plus one injury-limited player projecting ~4.5 points, whose
+tiny ceiling still looked like a ~75th-percentile ceiling against the
+league-wide backup pile). And even restricted to the pool, a fixed
+threshold drifted week to week: at 30, the pool fire rate was 12-15% in
+Week 1 (9/10-9/15 snapshots) and 5-8% in Week 2 (9/19-9/20 snapshots) --
+the same failure mode `LINE_MOVE_FLAG_THRESHOLD` had before it was
+retuned.
+
+The fix: only rosterable-pool members are eligible for `LEVERAGE` at all,
+and among them the flag goes to the top `LEVERAGE_FLAG_TOP_SHARE` (7%) by
+`Leverage` each week, not a fixed number -- self-correcting by
+construction rather than something that needs re-tuning as the slate's
+`Leverage` distribution shifts. Ties at the cutoff are included (so the
+flagged count can run slightly above the nominal 7%, not below it).
+Verified against two real snapshots after the fix: 19 flagged on both
+`data/raw/edge/20260920T155118Z.csv` (250-player pool) and
+`data/raw/edge/20260913T152236Z.csv` (248-player pool), zero outside the
+pool either time -- both slates had several genuine ties right at the
+cutoff, which is why the count reads 19 rather than exactly 17-18.
+
+`CHALK_OWNERSHIP_THRESHOLD = 0.20` was checked against a real 744-player
+Week 1 slate with real ownership published, after the `Leverage` scale
+fix that predates the change above: that slate's `Leverage` distribution
+was mean -0.01, std 16.7, min -56.2, max 68.7 (quartiles -9.4 / -3.1 /
++6.1, 90th percentile +27.0), and `CHALK_OWNERSHIP_THRESHOLD` flagged
+5/744 players (0.7%) on it -- it's an absolute ownership percentage, not
+a percentile, so it's untouched by either the pool restriction or the
+top-share change above. **Phase 6, Part 2 (2026-09-17):** the constant
+itself changed from `20.0` to `0.20` when `Own%` (the sheet-facing name
+for what this section still calls `ProjOwn` -- see the note at the top of
+the `Leverage and OwnStatus` section) was rescaled from a 0-100 number to
+a 0-1 fraction to match its already-0-1 scale on `PlayerPoolRaw`/`Player
+Pool`/`Lineups`. The threshold's real-world meaning (20% ownership) and
+the 5/744 flag rate above are both unchanged -- only the number's own
+units moved.
 
 ## Player Pool ordering: tag group, then salary (Part 7.10)
 

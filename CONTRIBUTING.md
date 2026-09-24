@@ -2232,6 +2232,55 @@ needed, now made explicit rather than left as an open "not yet built."
 
 No sheet changes for this item, as specified.
 
+**Item 4 -- "ownership published" could never become true (found and
+fixed 2026-09-23, same day as Items 1-3, own commit `eb861c3`).**
+`has_real_ownership`'s share was still measured over every player DK
+lists, not the `VAL_ADJ_ROSTERABLE_TOP_N` pool Fix 2 had already scoped
+`ValAdj`'s own percentiles to -- but TFFB only ever publishes ownership
+for players who'll actually be rostered, so that share topped out around
+38% and could never cross `OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`.
+Live symptom: `OwnStatus` read `unpublished` and `Leverage` was blank all
+season, on every snapshot, even ones where ownership had clearly
+published. Verified on the real 2026-09-20 15:51 UTC snapshot
+(`data/raw/edge/20260920T155118Z.csv`, 668 players, 255 with `ProjOwn` >
+0): 38% over the whole list vs. 90% over the 250-player rosterable pool.
+Fix: `has_real_ownership` now measures its share against `val_adj_pool`
+(the same mask `ValAdj` uses), not the full DK list. `derived.py` and
+`docs/CALCULATIONS.md` updated; two new tests in `tests/test_derived.py`.
+No sheet-structure change.
+
+## LEVERAGE flag: rosterable pool only, top 7% each week (2026-09-24)
+
+Decided by Sam; see `docs/planning/PROMPT_LEVERAGE_FLAG.md` for the full
+brief. A follow-up to Item 4 above: once `OwnStatus` could actually read
+`real`, `LEVERAGE_FLAG_THRESHOLD = 30.0` (a fixed threshold, no pool
+restriction) turned out to have two problems, both found live. First,
+`CeilPct`/`OwnPct` (and so `Leverage`) are percentiles over every player
+DK lists, not just the rosterable pool -- on the 2026-09-20 snapshot, 10
+of 30 flags at threshold 30 were players outside the pool (nine
+$2,500-$2,800 backup TEs plus one injury-limited player, all looking like
+a high-percentile ceiling only because the reference population included
+the whole backup pile). Second, even pool-restricted, a fixed threshold
+drifted week to week: the pool fire rate at 30 was 12-15% in Week 1
+(9/10-9/15 snapshots) and 5-8% in Week 2 (9/19-9/20) -- the same failure
+mode `LINE_MOVE_FLAG_THRESHOLD` had before it was retuned (Phase 6, Part
+1.1).
+
+Fix: `LEVERAGE_FLAG_THRESHOLD` removed. New `LEVERAGE_FLAG_TOP_SHARE =
+0.07` -- only rosterable-pool members are eligible at all, and among them
+the flag goes to the top 7% by `Leverage` each week (`derived.
+_leverage_flag_eligible`, computed slate-wide inside `build_edge_frame`
+before `_flags_for_row` runs, since that function only ever sees one
+row). Ties at the cutoff are included, so the flagged count can run
+slightly above the nominal 7%. Verified against two real snapshots after
+the fix: 19 flagged on both the 2026-09-20 snapshot (250-player pool) and
+a 2026-09-13 Week 1 snapshot (248-player pool), zero outside the pool
+either time -- both slates had genuine ties right at the cutoff.
+`derived.py`, `docs/CALCULATIONS.md`, and `tests/test_derived.py` (three
+new tests: outside-pool exclusion, exact top-share count with no ties,
+ties-at-cutoff inclusion). No sheet-structure change -- `Flags`/`Flag`
+already existed as columns; only which rows populate `LEVERAGE` changed.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
