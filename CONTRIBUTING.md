@@ -2343,6 +2343,63 @@ C4 (FantasyPros) and C5/C5b/C6/C7 continue in a later session.
   -- satisfies C3's "make it skippable" instruction (a full `dfs sync`
   includes it, `dfs sync --live` doesn't) with no new flag needed.
 
+## Part C, C4 (2026-09-24): FantasyPros, gated then unblocked by a real login
+
+FantasyPros' anonymous projection pages cap at exactly 10 players per
+position behind a `<div id="registration-module">` paywall -- confirmed
+live on all five position pages (QB/RB/WR/TE/DST), nowhere near the
+rosterable pool C2's validation and C5b's SPLIT tuning both need, and a
+real gap from what C4's "server-rendered HTML, `pandas.read_html()` works
+directly" premise assumed. Stopped and asked Sam per Rule Zero rather
+than guessing around it; his call: authenticate. New `dfs auth
+fantasypros` (`cli.py`, same interactive-login pattern as `dfs auth
+tffb`/`dk`) opens a real browser window for Sam to log in by hand -- once
+he did, confirmed live the gate disappears entirely (80 QBs, 124 RBs, 208
+WRs, 123 TEs, 32 DSTs, no gate markup at all).
+
+- `src/dfs/sources/fantasypros_projections.py` (source `"fantasypros"`):
+  loads each position page inside that authenticated Playwright profile
+  (`browser.persistent_context`, not a plain `httpx` GET, which would
+  still hit the anonymous gate) and parses the rendered HTML with
+  `pandas.read_html`. Honours `robots.txt`'s `Crawl-delay: 5` with a real
+  `time.sleep(5)` between the five position requests (~25s total) --
+  same as `sleeper_projections.py`, deliberately left OUT of `cli.py`'s
+  `LIVE_SYNC_SOURCES` (C4's own "make it skippable" instruction, no new
+  flag needed).
+- Team codes: FantasyPros' own codes already match DK's for every
+  offensive position except `JAC` vs DK's `JAX` (confirmed live),
+  handled by `player_join.TEAM_ALIASES`. DST rows have no team-code
+  column at all -- the `Player` cell IS the full team name ("Kansas City
+  Chiefs"), converted via a hardcoded `FULL_TEAM_NAME_TO_CODE` (all 32
+  teams, stable season to season, sourced from nflverse's own
+  `teams.csv`).
+- Found live, same underlying problem C2 already found in Sleeper's data
+  (`stats` dict present but empty), encoded differently here: FantasyPros
+  pads every position's page out to its full rostered depth, not just
+  the players it has a real weekly projection for -- 11 of 80 QBs, 8 of
+  124 RBs, 30 of 208 WRs, 10 of 123 TEs came back with EVERY page-sourced
+  stat at exactly 0.0 (real example: Caleb Williams, a starting QB TFFB
+  projects at 22.0, showed up as a literal 0.0 across the board). Fixed
+  the same way: `_blank_unprojected_rows` treats an all-zero real row as
+  no projection at all (`NaN`, excluded from the aggregate), never a
+  fabricated 0.
+- No 2-point-conversion column on any FantasyPros page, and no
+  blocked-kick column on the DST page -- both set to a real, always-0.0
+  value for every row (not this codebase's usual "blank is not zero"
+  treatment, since there's no FantasyPros signal to be blank ABOUT; the
+  field simply isn't part of what this source publishes at all).
+- Match rate against the real 2026-09-20 rosterable pool (245/250,
+  98.0%): QB 31/32, RB 63/64, WR 95/96, TE 30/32, DST 26/26. Calibration
+  vs. TFFB after the zero-projection fix: TE -0.14, DST -0.69 (fine); QB
+  -1.21 (borderline); RB -1.78, WR -1.56 (both outside the ~1-point
+  band, same direction and similar magnitude to Sleeper's own RB/WR gap)
+  -- consistent with Sam's existing call on Sleeper (ship it, document
+  the caveat in `docs/CALCULATIONS.md` once C5's aggregate lands), so not
+  re-asked for FantasyPros specifically.
+- New `FantasyProsRaw` tab (Template then Live, per the two-sheet rule)
+  holds the raw fetch -- written and read back for real on both sheets,
+  `dfs doctor` clean on both afterward.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

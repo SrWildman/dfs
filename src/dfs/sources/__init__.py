@@ -12,6 +12,7 @@ from __future__ import annotations
 from dfs.sources.base import Source
 from dfs.sources.dk_salaries import DkSalariesSource
 from dfs.sources.edge import EdgeSource
+from dfs.sources.fantasypros_projections import FantasyProsProjectionsSource
 from dfs.sources.nflverse_games import NflverseGamesSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
 from dfs.sources.sleeper_projections import SleeperProjectionsSource
@@ -28,14 +29,17 @@ from dfs.sources.weather import WeatherSource
 # reach them the same way they always have, a live sheet formula (VLOOKUP
 # chain) reading real data now instead of a blank paste.
 #
-# Part C, C3: "sleeper" is deliberately NOT in cli.py's LIVE_SYNC_SOURCES
-# -- a full `dfs sync` includes it, `dfs sync --live` doesn't, which is
-# C3's own "make it skippable" instruction satisfied with no new flag.
+# Part C, C3/C4: "sleeper"/"fantasypros" are deliberately NOT in cli.py's
+# LIVE_SYNC_SOURCES -- a full `dfs sync` includes them, `dfs sync --live`
+# doesn't, which is each one's own "make it skippable" instruction
+# satisfied with no new flag (FantasyPros' own ~25s Crawl-delay makes this
+# doubly important for it).
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
     "projections": TffbProjectionsSource(),
     "sleeper": SleeperProjectionsSource(),
+    "fantasypros": FantasyProsProjectionsSource(),
     "sos_qb": TffbSosSource("QB"),
     "sos_rb": TffbSosSource("RB"),
     "sos_wr": TffbSosSource("WR"),
