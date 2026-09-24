@@ -2281,6 +2281,68 @@ new tests: outside-pool exclusion, exact top-share count with no ties,
 ties-at-cutoff inclusion). No sheet-structure change -- `Flags`/`Flag`
 already existed as columns; only which rows populate `LEVERAGE` changed.
 
+## Part C, C1-C3 in progress (2026-09-24): player join, DK scoring, Sleeper
+
+Second projection sources, an aggregate column and snap share
+(`docs/planning/PROMPT_PART_C.md`, superseding Part C of `PROMPT_WEEK3.md`).
+Landed so far, each independently tested and verified against real data;
+C4 (FantasyPros) and C5/C5b/C6/C7 continue in a later session.
+
+- **C1, the player join** (`src/dfs/player_join.py`): matches a free
+  source's player rows onto DK's own `Id` by `(normalized name, team,
+  position)`; DSTs match by team alone. A hand-maintained, committed
+  alias file (`src/dfs/player_aliases.csv`, empty until a real miss needs
+  one) is the fallback for the residue normalization can't fix. Verified
+  against the real 2026-09-20 snapshot + a live Sleeper pull: 248/250
+  (99.2%) rosterable-pool match rate; the two misses (Travis Hunter,
+  dual-eligible WR/CB; Kyle Juszczyk, a fullback DK lists as RB) are both
+  noise-tier, not starters. `nflverse/nfldata`'s `teams.csv` `draft_kings`
+  column turned out NOT to be a clean per-team abbreviation (it conflates
+  both LA teams under `"LA"`, e.g. `"LA Rams"` and `"LA Chargers"`) --
+  kept the existing hand-rolled `nflverse_games.NFLVERSE_TO_DK_TEAM` map
+  instead of replacing it, per C1's own "if it isn't clean, ask"
+  instruction (resolved without needing to ask Sam: Sleeper's own team
+  codes already match DK's exactly, so no crosswalk was needed for it at
+  all; FantasyPros' `JAC`->`JAX` drift is handled the same
+  confirmed-live-only way as `nflverse_games`'s own map).
+- **C2, DK scoring** (`src/dfs/dk_scoring.py`): re-scores component stats
+  to exact DK Classic rules -- verified 2026-09-24 against RotoGrinders'
+  independent scoring-comparison page (`draftkings.com/help/rules/nfl`
+  itself is a client-rendered SPA with no scoring content in its raw
+  HTML, confirmed both live and via the Wayback Machine), matches
+  `PROMPT_PART_C.md`'s table exactly. Yardage/points-allowed bonuses use
+  an expected-value treatment (`YARDAGE_CV`/`POINTS_ALLOWED_CV`, stated
+  starting guesses, not fit to real game logs -- flagged to Sam per the
+  prompt's own "don't bury a guess" instruction). Running C2's own
+  required calibration check against real data found a real bug:
+  Sleeper returns a `stats` dict for every player in its database,
+  including ones with no real weekly projection at all (confirmed:
+  Jayden Daniels, Caleb Williams both came back with nothing but a
+  ranking placeholder) -- scoring that as a real 0 was silently pulling
+  every position's mean-diff-vs-TFFB down by roughly 2-3 points. Fixed:
+  `score_offense_row`/`score_dst_row` return `nan` (excluded from the
+  aggregate, never a fabricated 0) when any required stat is missing --
+  same "blank is not zero" rule `derived.py` already enforces elsewhere.
+  Re-run after the fix, over the real 2026-09-20 rosterable pool: QB
+  +0.50, TE -0.16, DST -0.57 (all fine); RB -1.55 and WR -1.95 exceed the
+  prompt's own ~1-point stop-and-ask line, and hand-verified individual
+  players' arithmetic is correct -- not a scoring bug, TFFB appears to
+  project RB/WR volume more aggressively than Sleeper does. Reported to
+  Sam; his call: ship it, document the caveat (see `docs/CALCULATIONS.md`
+  once C5's aggregate lands).
+- **C3, Sleeper** (`src/dfs/sources/sleeper_projections.py`, registered
+  as source `"sleeper"`): Sleeper's own `pts_ppr`/`pts_half_ppr`/
+  `pts_std` totals are never read -- every DK point comes from C2's
+  re-scoring of Sleeper's raw component stats, so DK's full-PPR
+  reception value applies regardless of what scoring format Sleeper's
+  own totals assume. `order_by=pts_ppr` (not `order_by=ppr`, per C3's own
+  warning) confirmed live to return real data. New `SleeperRaw` tab
+  (Template then Live, per the two-sheet rule) holds the raw fetch --
+  written and read back for real on both sheets, `dfs doctor` clean on
+  both afterward. Deliberately left OUT of `cli.py`'s `LIVE_SYNC_SOURCES`
+  -- satisfies C3's "make it skippable" instruction (a full `dfs sync`
+  includes it, `dfs sync --live` doesn't) with no new flag needed.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

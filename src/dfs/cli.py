@@ -2732,6 +2732,20 @@ def auth_dk() -> None:
     )
 
 
+@auth_app.command("fantasypros")
+def auth_fantasypros() -> None:
+    """One-time interactive login to FantasyPros (Part C -- anonymous
+    projection pages cap at 10 players/position behind a registration
+    wall; a logged-in session is required for full weekly projections)."""
+    from dfs.browser import interactive_login
+
+    interactive_login(
+        "fantasypros",
+        "https://www.fantasypros.com/nfl/projections/qb.php",
+        success_check="more than 10 rows in the QB projections table, not a 'Create a free account' gate",
+    )
+
+
 def _pool_client_and_edge_tab() -> tuple[SheetsClient, str]:
     cfg = _load_config_or_exit()
     edge_tab = cfg.google_sheets.tab_mappings.get("edge")

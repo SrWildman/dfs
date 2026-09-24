@@ -14,22 +14,28 @@ from dfs.sources.dk_salaries import DkSalariesSource
 from dfs.sources.edge import EdgeSource
 from dfs.sources.nflverse_games import NflverseGamesSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
+from dfs.sources.sleeper_projections import SleeperProjectionsSource
 from dfs.sources.tffb_projections import TffbProjectionsSource
 from dfs.sources.tffb_sos import TffbSosSource
 from dfs.sources.weather import WeatherSource
 
 # Order matters: run_sync iterates SOURCES in this insertion order.
 # "weather" reads the GamesRaw CSV "nflverse_games" just saved, and "edge"
-# reads the CSVs "projections"/"draftkings" just saved -- both must run
-# after their inputs. The five "sos_*" sources write straight to their own
-# hand-pasted-turned-synced tabs (SoSQB/RB/Wr/TE/Def) and feed nothing else
-# in this list -- `edge`/`OppPosRank` still reach them the same way they
-# always have, a live sheet formula (VLOOKUP chain) reading real data now
-# instead of a blank paste.
+# reads the CSVs "projections"/"draftkings"/"sleeper" just saved -- all
+# three must run after their inputs. The five "sos_*" sources write
+# straight to their own hand-pasted-turned-synced tabs (SoSQB/RB/Wr/TE/
+# Def) and feed nothing else in this list -- `edge`/`OppPosRank` still
+# reach them the same way they always have, a live sheet formula (VLOOKUP
+# chain) reading real data now instead of a blank paste.
+#
+# Part C, C3: "sleeper" is deliberately NOT in cli.py's LIVE_SYNC_SOURCES
+# -- a full `dfs sync` includes it, `dfs sync --live` doesn't, which is
+# C3's own "make it skippable" instruction satisfied with no new flag.
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
     "projections": TffbProjectionsSource(),
+    "sleeper": SleeperProjectionsSource(),
     "sos_qb": TffbSosSource("QB"),
     "sos_rb": TffbSosSource("RB"),
     "sos_wr": TffbSosSource("WR"),

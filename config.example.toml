@@ -22,6 +22,7 @@ credentials_file = "credentials.json"
 [google_sheets.tab_mappings]
 projections = "Projections"
 draftkings = "Salaries"
+sleeper = "SleeperRaw"
 nfl_odds = "Odds"
 nflverse_games = "GamesRaw"
 weather = "WeatherRaw"
