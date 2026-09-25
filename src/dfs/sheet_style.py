@@ -224,6 +224,7 @@ FIELD_FORMATS = {
     "Salary": _num("$#,##0", "CURRENCY"),
     "Pts": _num("0.0"),
     "ProjPts": _num("0.0"),
+    "AggPts": _num("0.0"),
     "Ceil": _num("0.0"),
     "Ceiling": _num("0.0"),
     "O/U": _num("0.0"),
@@ -334,6 +335,7 @@ WARM_MAX = _rgb("#F8DEDA")  # == CRIT_BG
 
 FIELD_COLOR_SCALES = {
     "ProjPts": _GRADIENT,
+    "AggPts": _GRADIENT,
     "Pts": _GRADIENT,
     "Ceiling": _GRADIENT,
     "Ceil": _GRADIENT,
@@ -398,7 +400,7 @@ FIELD_COLOR_SCALES = {
 # Pool/Lineups don't need this exclusion -- they scale per position/
 # lineup block (`apply_grouped_color_scales`), where a raw Pts/Ceil
 # comparison is exactly the right one.
-EDGE_UNSCALED_PLAYER_METRICS = frozenset({"ProjPts", "Ceiling", "Val", "CeilVal"})
+EDGE_UNSCALED_PLAYER_METRICS = frozenset({"ProjPts", "AggPts", "Ceiling", "Val", "CeilVal"})
 
 # Phase 4 (4.1): the reverse exclusion -- CeilPct is EdgeRaw's substitute
 # for position-grouping (see above), which Player Pool/Lineups don't need
@@ -735,6 +737,7 @@ EDGE_WIDTHS = {
     "Opp": 54,
     "Salary": 78,
     "ProjPts": 85,
+    "AggPts": 85,  # Part C, C5: same width as ProjPts, right beside it
     # Phase 6, Part 2: renamed from ProjOwn (EdgeRaw's own former name for
     # this column, unified with the other three tabs' Rstr% into one
     # shared "Own%").
@@ -1399,6 +1402,7 @@ BUILDER_WIDTHS = {
     # rather than waiting for the next reorder to expose it too.
     "O/U": 60,
     "Pts": 65,
+    "AggPts": 65,  # Part C, C5: same width as Pts, right beside it
     # Part 7.5: Lineups-only, the lineup-metrics block
     # (`sheet_lineup_metrics.LINEUP_METRIC_HEADERS`). "Stack" holds
     # strings up to "QB+3 (KC) + 2 bring-back"-length.

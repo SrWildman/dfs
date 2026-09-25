@@ -19,6 +19,8 @@ from dfs import nfl_calendar, store
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, build_edge_frame
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.log import get_logger
+from dfs.paths import CURRENT_DIR
+from dfs.player_join import match_rate_report
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.base import Source, SyncContext
 
@@ -123,6 +125,31 @@ def _try_diff_odds(ctx: SyncContext) -> pd.DataFrame | None:
         return None
 
 
+def _report_agg_pts_joins(agg_pts_joins: dict) -> None:
+    """Part C, C1's own "never fail silently" rule: print the match rate
+    per source per position over the rosterable pool on every sync, and
+    write each source's unmatched rosterable players to a file -- a
+    missed third-string TE is noise, a missed starter is a bug, and
+    nobody notices a quiet 80% match rate unless it's printed every time.
+    A no-op when neither source synced this run (`agg_pts_joins` empty)."""
+    if not agg_pts_joins:
+        return
+    report = match_rate_report(agg_pts_joins)
+    if not report.empty:
+        log.info("Part C match rates (rosterable pool):\n%s", report.to_string(index=False))
+    for source, result in agg_pts_joins.items():
+        if result.unmatched_pool_names:
+            log.warning(
+                "%s: %d rosterable pool player(s) with no match: %s",
+                source,
+                len(result.unmatched_pool_names),
+                ", ".join(result.unmatched_pool_names),
+            )
+        pd.DataFrame({"Name": result.unmatched_pool_names}).to_csv(
+            CURRENT_DIR / f"unmatched_{source}.csv", index=False
+        )
+
+
 class EdgeSource(Source):
     name = "edge"
 
@@ -137,6 +164,8 @@ class EdgeSource(Source):
             for position, source_name in _SOS_SOURCE_BY_POSITION.items()
             if (df := _try_load_current(source_name)) is not None
         }
+        sleeper = _try_load_current("sleeper")
+        fantasypros = _try_load_current("fantasypros")
 
         result = build_edge_frame(
             projections,
@@ -145,6 +174,8 @@ class EdgeSource(Source):
             weather=weather,
             line_movement=line_movement,
             sos_by_position=sos_by_position,
+            sleeper=sleeper,
+            fantasypros=fantasypros,
         )
         if result.unmatched_names:
             log.warning(
@@ -153,6 +184,7 @@ class EdgeSource(Source):
                 len(result.unmatched_names),
                 ", ".join(result.unmatched_names),
             )
+        _report_agg_pts_joins(result.agg_pts_joins)
         return result.frame
 
     def to_sheet_rows(self, df: pd.DataFrame) -> list[list]:

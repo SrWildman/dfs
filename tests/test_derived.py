@@ -709,6 +709,69 @@ def test_columns_present_and_blank_when_games_and_weather_not_synced():
     assert pd.isna(row["OppPosRank"])
 
 
+def test_aggpts_equals_projpts_when_no_external_source_available():
+    proj = _projections([{"Id": "1", "Name": "P", "Team": "DET", "ProjPts": 15.0}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert row["AggPts"] == 15.0
+
+
+def test_aggpts_is_equal_weight_mean_of_every_available_source():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 12.0}])
+    sal = _salaries([{"ID": "1"}])
+    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 15.0}])
+    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 18.0}])
+
+    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
+    assert row["AggPts"] == 15.0  # mean(12, 15, 18)
+
+
+def test_aggpts_averages_over_whatever_is_available_when_one_source_is_missing():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 20.0}])
+
+    row = build_edge_frame(proj, sal, sleeper=sleeper).frame.iloc[0]
+    assert row["AggPts"] == 15.0  # mean(10, 20), fantasypros not synced
+
+
+def test_aggpts_ignores_a_source_with_no_real_projection_for_this_player():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    # Sleeper matches the player but has no real projection this week --
+    # a NaN DkPts, same shape sleeper_projections.py's own fix produces.
+    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": float("nan")}])
+
+    row = build_edge_frame(proj, sal, sleeper=sleeper).frame.iloc[0]
+    assert row["AggPts"] == 10.0  # falls back to ProjPts alone
+
+
+def test_aggpts_unmatched_source_row_does_not_affect_other_players():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Matched Guy", "Team": "DET", "ProjPts": 10.0},
+            {"Id": "2", "Name": "No Sleeper Data", "Team": "DET", "ProjPts": 20.0},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    sleeper = pd.DataFrame([{"Name": "Matched Guy", "Team": "DET", "Position": "RB", "DkPts": 14.0}])
+
+    frame = build_edge_frame(proj, sal, sleeper=sleeper).frame
+    assert frame.set_index("Name").loc["Matched Guy", "AggPts"] == 12.0  # mean(10, 14)
+    assert frame.set_index("Name").loc["No Sleeper Data", "AggPts"] == 20.0  # ProjPts alone
+
+
+def test_aggpts_join_results_exposed_on_edge_build_result_for_match_rate_reporting():
+    proj = _projections([{"Id": "1", "Name": "Matched Guy", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    sleeper = pd.DataFrame([{"Name": "Matched Guy", "Team": "DET", "Position": "RB", "DkPts": 14.0}])
+
+    result = build_edge_frame(proj, sal, sleeper=sleeper)
+    assert set(result.agg_pts_joins) == {"sleeper"}
+    assert result.agg_pts_joins["sleeper"].pool_matched == 1
+
+
 def test_stadium_and_roof_joined_from_games_by_team_code():
     proj = _projections(
         [

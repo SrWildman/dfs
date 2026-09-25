@@ -2400,6 +2400,44 @@ WRs, 123 TEs, 32 DSTs, no gate markup at all).
   holds the raw fetch -- written and read back for real on both sheets,
   `dfs doctor` clean on both afterward.
 
+## Part C, C5 (2026-09-24): `AggPts`, a new spine column
+
+`AggPts` -- the equal-weight mean of every DK-scored source with a real
+projection for a player (TFFB's `ProjPts`, Sleeper, FantasyPros) --
+inserted into the shared spine immediately after `Pts`/`ProjPts`, per
+Sam's own instruction. Linked (VLOOKUP against EdgeRaw), same treatment
+as `ValAdj`, since it's a whole-slate join/average, not a per-row native
+formula. Feeds nothing else: `ValAdj`/`Val`/`CeilVal`/the Board/every
+guardrail still key off `ProjPts` alone, unchanged.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-24 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | New column `AggPts` inserted into the shared spine, immediately after `Pts`/`ProjPts` -- every column from `Val`/`ValAdj` onward shifts one position right. Linked (VLOOKUP against EdgeRaw) on the three builder tabs, same as `ValAdj`. | `derived.EDGE_COLUMNS` 35 columns (`ProjPts` at index 5, `Val` at 6). `sheet_columns.DECISION` = `DK Sal, Pts, Val, ValAdj, Ceil, CeilVal, Own%, Avail, Flags` (9). `LINKED_COLUMNS` 19 members (`ValAdj` first). | `derived.EDGE_COLUMNS` 36 columns (`ProjPts` still at 5, new `AggPts` at 6, `Val` now at 7). `DECISION` = `DK Sal, Pts, AggPts, Val, ValAdj, Ceil, CeilVal, Own%, Avail, Flags` (10). `LINKED_COLUMNS` 20 members (`AggPts` first). | Live + Template | `derived.EDGE_COLUMNS`, new `derived._attach_agg_pts` + `EdgeBuildResult.agg_pts_joins`, `derived.build_edge_frame` (new `sleeper`/`fantasypros` params), `sheet_columns.DECISION`/`LINKED_COLUMNS` (both gain `AggPts`), `sheet_style.FIELD_FORMATS`/`FIELD_COLOR_SCALES`/`EDGE_UNSCALED_PLAYER_METRICS`/`BUILDER_WIDTHS`/`EDGE_WIDTHS` (all gain `AggPts`), every EDGE_COLUMNS-index-pinning test in `tests/test_sheet_links.py` (same set ValAdj's own row above named) and `tests/test_sheet_views.py`'s slate-grid VLOOKUP-range test, `tests/test_sheet_style.py`'s multi-range-scale count. |
+
+**Applied via the same mechanism `ValAdj` used** (`sheet_reorder.
+migrate_tab_to_designed_order`, run through `dfs setup reorder-columns`):
+provision the header name if missing, link it against EdgeRaw, physically
+move it into position with a real `moveDimension` call, rewrite every
+native PlayerPoolRaw-lookup formula whose own position shifted as a
+result. Verified both sheets structurally identical before starting
+(`PlayerPoolRaw`/`Player Pool`/`Lineups` headers checked against
+`sheet_columns.py`'s designed order, minus `AggPts`, on both -- exact
+match, no pre-existing drift to worry about).
+
+**Verification, both sheets:** `EdgeRaw` rebuilt first (a full sync
+naturally carries the new column since it's a plain rewrite, no formulas
+involved); `dfs setup reorder-columns` reported exactly 1 newly-created +
+1 column-move per tab, as expected; real formula reads (not resolved
+values) confirmed `AggPts`'s VLOOKUP lands on EdgeRaw's own column 7 and
+`Val`'s formula correctly re-derived its shifted PlayerPoolRaw column
+index (8, not the old 7); real resolved-value reads cross-checked three
+players (Jahmyr Gibbs, Jaxon Smith-Njigba, Christian McCaffrey) on
+`PlayerPoolRaw` against `EdgeRaw`'s own row for the same player -- exact
+match on `AggPts`/`Val`/`ValAdj` for all three. `dfs setup polish` +
+`dfs doctor` + `dfs setup audit-style` all clean on both sheets afterward
+(the pre-existing `SoSQB`/`SoSRB`/`SoSWr`/`SoSTE`/`SoSDef` "empty this
+week" skips are unrelated -- nothing pasted into them yet this week).
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

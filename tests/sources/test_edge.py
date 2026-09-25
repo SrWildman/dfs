@@ -1,6 +1,7 @@
 import pandas as pd
 
 from dfs.derived import EDGE_COLUMNS
+from dfs.player_join import JoinResult
 from dfs.sources.edge import (
     _FILTER_RANGE,
     POOL_COLUMN,
@@ -8,6 +9,7 @@ from dfs.sources.edge import (
     POOL_TYPE_OPTIONS,
     EdgeSource,
     _canonical_id,
+    _report_agg_pts_joins,
 )
 
 
@@ -275,3 +277,36 @@ def test_pool_value_survives_when_id_is_read_back_as_a_real_number():
 
     [(_tab, _range, rows)] = new_client.update_calls
     assert rows == [["Cash"], ["GPP"]]
+
+
+def test_report_agg_pts_joins_is_a_noop_with_no_sources(tmp_path, monkeypatch):
+    monkeypatch.setattr("dfs.sources.edge.CURRENT_DIR", tmp_path)
+    _report_agg_pts_joins({})
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_report_agg_pts_joins_writes_one_unmatched_file_per_source(tmp_path, monkeypatch):
+    monkeypatch.setattr("dfs.sources.edge.CURRENT_DIR", tmp_path)
+    joins = {
+        "sleeper": JoinResult(
+            matched=pd.DataFrame(),
+            pool_total=2,
+            pool_matched=1,
+            unmatched_pool_names=["Missed Guy"],
+            by_position={"RB": (1, 2)},
+        ),
+        "fantasypros": JoinResult(
+            matched=pd.DataFrame(),
+            pool_total=2,
+            pool_matched=2,
+            unmatched_pool_names=[],
+            by_position={"RB": (2, 2)},
+        ),
+    }
+
+    _report_agg_pts_joins(joins)
+
+    sleeper_csv = pd.read_csv(tmp_path / "unmatched_sleeper.csv")
+    assert sleeper_csv["Name"].tolist() == ["Missed Guy"]
+    fantasypros_csv = pd.read_csv(tmp_path / "unmatched_fantasypros.csv")
+    assert fantasypros_csv.empty

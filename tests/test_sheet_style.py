@@ -90,6 +90,7 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
     assert matched == {
         "ProjPts",
+        "AggPts",
         "Own%",
         "Ceiling",
         "Val",
@@ -486,8 +487,8 @@ def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
     client = FakeEdgeClient(position_rows=position_rows)
     polish_edge(client, "EdgeRaw")
 
-    # 4 EDGE_UNSCALED_PLAYER_METRICS x 3 distinct positions (QB, RB, WR).
-    assert len(client.multi_range_color_scale_calls) == 12
+    # 5 EDGE_UNSCALED_PLAYER_METRICS x 3 distinct positions (QB, RB, WR).
+    assert len(client.multi_range_color_scale_calls) == 15
 
     proj_pts_col = _edge_letter("ProjPts")
     qb_spec = next(

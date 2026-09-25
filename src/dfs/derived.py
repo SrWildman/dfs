@@ -74,6 +74,7 @@ import numpy as np
 import pandas as pd
 
 from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
+from dfs.player_join import JoinResult, join_source_to_dk
 
 # Leverage = CeilPct - OwnPct, both percentile ranks on the same 0-100
 # scale within position -- see the module docstring's "second scale/index
@@ -241,6 +242,15 @@ EDGE_COLUMNS = [
     "Opp",
     "Salary",
     "ProjPts",
+    # Part C, C5 (2026-09-24): equal-weight mean of every DK-scored source
+    # with a real projection for this player (TFFB/`ProjPts`, Sleeper,
+    # FantasyPros) -- see `_attach_agg_pts`. Placed immediately after
+    # `ProjPts` per Sam's own instruction (PROMPT_PART_C.md); every column
+    # from `Val` onward shifts one position right on PlayerPoolRaw/Player
+    # Pool/Lineups (see CONTRIBUTING.md's structural changelog). Feeds
+    # nothing else -- ValAdj/Val/CeilVal/the Board/every guardrail still
+    # key off `ProjPts` alone, unchanged.
+    "AggPts",
     "Val",
     # Part 7.2: `Val` is salary- and position-biased (cheap players and
     # QBs both artificially outrank better plays), so it stays but is no
@@ -320,6 +330,14 @@ ZONE_LABELS = (GAME_LABEL, CEILING_DETAIL_LABEL, MOVEMENT_LABEL, WEATHER_LABEL)
 class EdgeBuildResult:
     frame: pd.DataFrame
     unmatched_names: list[str]
+    # Part C, C1: one JoinResult per external source actually passed to
+    # `build_edge_frame` (keyed "sleeper"/"fantasypros") -- lets the
+    # caller (sources/edge.py) print C1's own required "match rate per
+    # source per position" report and write unmatched rosterable players
+    # to a file, without re-running the join itself. Empty when neither
+    # source was passed in (e.g. `dfs sync --only edge` before either has
+    # ever synced).
+    agg_pts_joins: dict[str, JoinResult]
 
 
 def _percentile_within(series: pd.Series, group: pd.Series) -> pd.Series:
@@ -611,6 +629,64 @@ def _attach_line_movement(merged: pd.DataFrame, line_movement: pd.DataFrame | No
     return merged
 
 
+def _attach_agg_pts(
+    merged: pd.DataFrame,
+    sleeper: pd.DataFrame | None,
+    fantasypros: pd.DataFrame | None,
+    pool_mask: pd.Series,
+) -> tuple[pd.Series, dict[str, JoinResult]]:
+    """Part C, C5: `AggPts` is the equal-weight mean of every DK-scored
+    source with a real projection for this player -- TFFB's own `ProjPts`
+    (always present, this frame's own column), Sleeper's `DkPts`,
+    FantasyPros' `DkPts`. A player missing one source (not synced this
+    run, or a real "no projection this week" NaN from that source --
+    see sources/sleeper_projections.py's/fantasypros_projections.py's own
+    docstrings for why that's NaN, never a fabricated 0) is averaged over
+    whatever's left; with neither external source available, `AggPts`
+    equals `ProjPts` exactly. Feeds nothing else -- `ValAdj`/`Val`/
+    `CeilVal`/the Board/every guardrail still key off `ProjPts` alone.
+
+    Joins each source independently by (name, team, position) via
+    `player_join.join_source_to_dk`, keyed on `merged`'s own Id/Name/
+    Team/Position (DST names already rewritten to DK's nickname by this
+    point in `build_edge_frame`) -- never against each other, so a name
+    one source can't match doesn't cost the other's own independent
+    match. Returns the `AggPts` series (aligned to `merged`'s index) plus
+    one `JoinResult` per source actually passed in, so the caller
+    (`sources/edge.py`) can report C1's own required per-source,
+    per-position match rate without re-running the join itself.
+    `pool_mask` (the same `VAL_ADJ_ROSTERABLE_TOP_N` mask ValAdj uses)
+    scopes every `JoinResult`'s match-rate counts to the rosterable pool,
+    per C1's own instruction -- it does NOT restrict what gets averaged
+    into `AggPts` itself; a non-pool player still gets every source's
+    real number blended in, same as `ProjPts` itself is never pool-
+    restricted."""
+    dk_frame = merged[["Id", "Name", "Team", "Position"]]
+    scores = [pd.to_numeric(merged["ProjPts"], errors="coerce")]
+    joins: dict[str, JoinResult] = {}
+
+    for source_name, source_df in (("sleeper", sleeper), ("fantasypros", fantasypros)):
+        if source_df is None:
+            continue
+        result = join_source_to_dk(
+            dk_frame,
+            source_df,
+            source_name_col="Name",
+            source_team_col="Team",
+            source_position_col="Position",
+            source=source_name,
+            pool_mask=pool_mask,
+        )
+        joins[source_name] = result
+        matched = result.matched[["Id", "DkPts"]].drop_duplicates(subset="Id", keep="first")
+        score = dk_frame.merge(matched, on="Id", how="left")["DkPts"]
+        score.index = merged.index
+        scores.append(pd.to_numeric(score, errors="coerce"))
+
+    agg_pts = pd.concat(scores, axis=1).mean(axis=1, skipna=True).round(2)
+    return agg_pts, joins
+
+
 def _dst_nickname(full_team_name: str) -> str:
     """Mirrors sources/tffb_projections.py's `_dst_nickname` -- duplicated
     rather than imported for the same reason as WIND_FLAG_THRESHOLD_MPH
@@ -655,6 +731,8 @@ def build_edge_frame(
     weather: pd.DataFrame | None = None,
     line_movement: pd.DataFrame | None = None,
     sos_by_position: dict[str, pd.DataFrame] | None = None,
+    sleeper: pd.DataFrame | None = None,
+    fantasypros: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -671,7 +749,12 @@ def build_edge_frame(
     them. `sos_by_position` is `{"QB": sos_qb_frame, ...}` -- each
     position's own already-synced `sources/tffb_sos.py` shape -- for
     however many positions synced successfully this run; see
-    `_attach_opp_pos_rank`.
+    `_attach_opp_pos_rank`. `sleeper`/`fantasypros` are those sources' own
+    already-DK-scored shapes (`sources/sleeper_projections.py`/
+    `fantasypros_projections.py`, columns include `Name`/`Team`/
+    `Position`/`DkPts`) -- optional, feed only `AggPts` (see
+    `_attach_agg_pts`); missing either (or both) degrades gracefully, same
+    as every other optional input here.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -706,8 +789,9 @@ def build_edge_frame(
     # scale as a result (0.20, not 20.0) -- see its own comment.
     merged["ProjOwn"] = merged["ProjOwn"] / 100
 
-    merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
     val_adj_pool = _rosterable_pool_mask(merged["ProjPts"], merged["Position"])
+    merged["AggPts"], agg_pts_joins = _attach_agg_pts(merged, sleeper, fantasypros, val_adj_pool)
+    merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
     val_adj_residual = _val_adj_residual_within_position(
         merged["ProjPts"], merged["Salary"], merged["Position"], val_adj_pool
     )
@@ -790,4 +874,6 @@ def build_edge_frame(
     for label in ZONE_LABELS:
         merged[label] = ""
 
-    return EdgeBuildResult(frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names)
+    return EdgeBuildResult(
+        frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names, agg_pts_joins=agg_pts_joins
+    )

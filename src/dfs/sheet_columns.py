@@ -119,7 +119,12 @@ IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 # in Python (Week 3, A3: a blend of within-position ProjPts/price-edge
 # percentiles, `derived._val_adj_blend`) and linked here like every other
 # EdgeRaw-computed signal.
-DECISION = ["DK Sal", "Pts", "Val", "ValAdj", "Ceil", "CeilVal", "Own%", "Avail", "Flags"]
+# Part C, C5 (2026-09-24): `AggPts` inserted right after `Pts`, per Sam's
+# own instruction (PROMPT_PART_C.md) -- linked (VLOOKUP against EdgeRaw,
+# `LINKED_COLUMNS` below), since it's a whole-slate join/average over
+# multiple sources, not a per-row native formula. Same insertion pattern
+# `ValAdj` used right after `Val` (Part 7.2).
+DECISION = ["DK Sal", "Pts", "AggPts", "Val", "ValAdj", "Ceil", "CeilVal", "Own%", "Avail", "Flags"]
 
 # O/U/Spread/Team Implied/OppPosRank are native (VLOOKUP against oddsFinal/
 # SoSComb); GameEnv is linked. The four `SoS 1..4` placeholders that used
@@ -191,6 +196,7 @@ BASE_COLUMN_ORDER = [
 # instead of duplicated by hand in sheet_links.py. Venue deliberately
 # excluded (native, see module docstring) despite sitting inside WEATHER.
 LINKED_COLUMNS = [
+    "AggPts",
     "ValAdj",
     "CeilVal",
     "Avail",

@@ -107,28 +107,34 @@ def test_already_linked_columns_positions_never_move():
     # shifting every OTHER linked column one further right too. Part 7.4
     # (same day) added `GameID`/`TmRank` right after `OppPosRank` --
     # shifting everything from `CeilPct` onward two further right.
-    # Computed programmatically, not by hand, to avoid exactly the
-    # arithmetic mistake this comment's own history warns about.
+    # Part C, C5 (2026-09-24) added `AggPts` right after `ProjPts`, well
+    # before every other linked column, and to LINKED_EDGE_COLUMNS as its
+    # new first member (also linked, a whole-slate join/average, not a
+    # native per-row formula) -- shifting every OTHER linked column one
+    # further right again. Computed programmatically, not by hand, to
+    # avoid exactly the arithmetic mistake this comment's own history
+    # warns about.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
-        7,
-        9,
-        11,
+        6,
+        8,
+        10,
         12,
-        16,
-        18,
+        13,
+        17,
         19,
-        21,
+        20,
         22,
         23,
-        25,
+        24,
         26,
         27,
         28,
-        30,
+        29,
         31,
         32,
         33,
         34,
+        35,
     ]
 
 
@@ -142,18 +148,20 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # right after `Val`, well before Leverage's own zone. Part 7.4 (same
     # day) inserted `GameID`/`TmRank` right after `OppPosRank`, also
     # ahead of Leverage's own zone -- landing Leverage at EDGE_COLUMNS
-    # index 22. The Name-anchored range is VLOOKUP column 23 (1-based,
-    # relative to Name at index 0) regardless of EDGE_DATA_OFFSET (a
-    # uniform shift cancels out of a *relative* position) -- but the
-    # range's own start/end letters do shift by that offset, since Pool
-    # occupies column A ahead of EDGE_COLUMNS, and the range's own END
-    # letter also grows by one per column added. Matches what
-    # `sheet_style.polish_edge` reports for the same columns.
-    assert EDGE_COLUMNS.index("Leverage") == 22
+    # index 22. Part C, C5 (2026-09-24) inserted `AggPts` right after
+    # `ProjPts`, also ahead of Leverage's own zone -- shifting it one
+    # further right, to index 23. The Name-anchored range is VLOOKUP
+    # column 24 (1-based, relative to Name at index 0) regardless of
+    # EDGE_DATA_OFFSET (a uniform shift cancels out of a *relative*
+    # position) -- but the range's own start/end letters do shift by that
+    # offset, since Pool occupies column A ahead of EDGE_COLUMNS, and the
+    # range's own END letter also grows by one per column added. Matches
+    # what `sheet_style.polish_edge` reports for the same columns.
+    assert EDGE_COLUMNS.index("Leverage") == 23
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
     end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},23,false))'
+        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},24,false))'
     )
 
 
@@ -182,10 +190,10 @@ def test_link_edge_columns_writes_header_at_first_free_column():
     client = SpySheetsClient(header_row=["Name", "Pos.", "Team", "DK Sal"])  # width 4 -> next col E
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
 
-    # All 17 names are missing, so they're all created (appended) in
-    # LINKED_EDGE_COLUMNS' own order -- one contiguous run, E through U
-    # (Part 7.2 added `ValAdj`, one more than before).
-    header_call = next(c for c in client.update_calls if c[1] == "E1:W1")
+    # All 20 names are missing, so they're all created (appended) in
+    # LINKED_EDGE_COLUMNS' own order -- one contiguous run, E through X
+    # (Part C's `AggPts` one more than before).
+    header_call = next(c for c in client.update_calls if c[1] == "E1:X1")
     assert header_call[2] == [LINKED_EDGE_COLUMNS]
 
 
@@ -205,15 +213,15 @@ def test_link_edge_columns_fills_every_row_in_every_block():
     client = SpySheetsClient(header_row=["Name"])  # width 1 -> next col B
     link_edge_columns(client, "Player Pool", [(2, 3), (5, 5)], "EdgeRaw")
 
-    # All 17 created columns land contiguous (B through R, Part 7.2's
-    # `ValAdj` one wider than before) since they're all newly appended
+    # All 20 created columns land contiguous (B through U, Part C's
+    # `AggPts` one wider than before) since they're all newly appended
     # together, so each name_block still writes in one `update_range`
     # call, just a wider one than the old 10-column block.
-    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 not in ("B1:T1",)}
-    assert "B2:T3" in block_calls
-    assert len(block_calls["B2:T3"]) == 2  # rows 2 and 3
-    assert "B5:T5" in block_calls
-    assert len(block_calls["B5:T5"]) == 1
+    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 not in ("B1:U1",)}
+    assert "B2:U3" in block_calls
+    assert len(block_calls["B2:U3"]) == 2  # rows 2 and 3
+    assert "B5:U5" in block_calls
+    assert len(block_calls["B5:U5"]) == 1
 
 
 def test_link_edge_columns_repeats_header_at_given_rows():
@@ -221,9 +229,9 @@ def test_link_edge_columns_repeats_header_at_given_rows():
     link_edge_columns(client, "Lineups", [(2, 5)], "EdgeRaw", header_repeats_at=[14, 27])
 
     repeated = [a1 for _, a1, rows in client.update_calls if rows == [LINKED_EDGE_COLUMNS]]
-    assert "B1:T1" in repeated
-    assert "B14:T14" in repeated
-    assert "B27:T27" in repeated
+    assert "B1:U1" in repeated
+    assert "B14:U14" in repeated
+    assert "B27:U27" in repeated
 
 
 def test_link_edge_columns_is_idempotent_when_already_linked():
@@ -325,11 +333,13 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
     # this merged block) so it shifts the whole merged range one column
     # right (F..P -> G..Q); Part 7.4's `GameID`/`TmRank` (linked, joining
     # GameEnv inside GAME itself) then widen the merged range by two more
-    # columns (G..Q -> G..S).
+    # columns (G..Q -> G..S). Part C's `AggPts` sits earlier still (right
+    # after ProjPts, well before this merged block too) so it shifts the
+    # whole merged range one column further right (G..S -> H..T).
     client = SpySheetsClient(header_row=["Name", "Pos."])  # width 2 -> next col C
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
     assert client.group_calls == [
-        ("Player Pool", "G", "S", True),  # GameEnv..Wind, merged
+        ("Player Pool", "H", "T", True),  # GameEnv..Wind, merged
     ]
 
 
@@ -395,7 +405,7 @@ def test_link_edge_columns_only_creates_the_names_actually_missing():
     created_names = {name for row in header_writes for name in row}
     assert "GameEnv" not in created_names
     assert created_names == set(LINKED_EDGE_COLUMNS) - {"GameEnv"}
-    assert "18 newly created" in result
+    assert "19 newly created" in result
 
 
 def test_link_edge_columns_run_twice_only_appends_once():

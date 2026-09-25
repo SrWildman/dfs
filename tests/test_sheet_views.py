@@ -603,8 +603,8 @@ def test_slate_grid_movement_columns_read_the_home_teams_edgeraw_row():
     row = client.rows[1]
     assert "VLOOKUP(GamesRaw!$C2," in row[10]
     assert "VLOOKUP(GamesRaw!$C2," in row[11]
-    assert "EdgeRaw!$D:$AB" in row[10]  # Team through TotMove
-    assert "EdgeRaw!$D:$AC" in row[11]  # Team through SpdMove
+    assert "EdgeRaw!$D:$AC" in row[10]  # Team through TotMove
+    assert "EdgeRaw!$D:$AD" in row[11]  # Team through SpdMove
 
 
 def test_slate_grid_wind_gust_vlookups_derive_from_weather_columns_not_hardcoded():
