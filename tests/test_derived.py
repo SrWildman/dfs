@@ -768,8 +768,8 @@ def test_aggpts_join_results_exposed_on_edge_build_result_for_match_rate_reporti
     sleeper = pd.DataFrame([{"Name": "Matched Guy", "Team": "DET", "Position": "RB", "DkPts": 14.0}])
 
     result = build_edge_frame(proj, sal, sleeper=sleeper)
-    assert set(result.agg_pts_joins) == {"sleeper"}
-    assert result.agg_pts_joins["sleeper"].pool_matched == 1
+    assert set(result.source_joins) == {"sleeper"}
+    assert result.source_joins["sleeper"].pool_matched == 1
 
 
 def test_split_flag_fires_down_when_other_sources_are_far_below_tffb():
@@ -1195,6 +1195,57 @@ def test_opp_pos_rank_blank_when_opponent_not_found_in_its_sos_frame():
 
     row = build_edge_frame(proj, sal, sos_by_position={"RB": sos_rb}).frame.iloc[0]
     assert pd.isna(row["OppPosRank"])
+
+
+def test_snap_pct_blank_when_not_synced():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET"}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert pd.isna(row["Snap%"])
+
+
+def test_snap_pct_joined_by_name_team_position():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "Position": "RB"}])
+    sal = _salaries([{"ID": "1"}])
+    snaps = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "Snap%": 0.65}])
+
+    row = build_edge_frame(proj, sal, snaps=snaps).frame.iloc[0]
+    assert row["Snap%"] == 0.65
+
+
+def test_snap_pct_keeps_a_real_recorded_zero_not_blank():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "Position": "RB"}])
+    sal = _salaries([{"ID": "1"}])
+    snaps = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "Snap%": 0.0}])
+
+    row = build_edge_frame(proj, sal, snaps=snaps).frame.iloc[0]
+    assert row["Snap%"] == 0.0
+
+
+def test_snap_pct_blank_for_a_player_absent_from_the_snaps_source():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Has Snaps", "Team": "DET", "Position": "RB"},
+            {"Id": "2", "Name": "No Snaps Data", "Team": "DET", "Position": "RB"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    snaps = pd.DataFrame([{"Name": "Has Snaps", "Team": "DET", "Position": "RB", "Snap%": 0.5}])
+
+    frame = build_edge_frame(proj, sal, snaps=snaps).frame
+    assert frame.set_index("Name").loc["Has Snaps", "Snap%"] == 0.5
+    assert pd.isna(frame.set_index("Name").loc["No Snaps Data", "Snap%"])
+
+
+def test_snap_pct_join_result_exposed_on_edge_build_result():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "Position": "RB"}])
+    sal = _salaries([{"ID": "1"}])
+    snaps = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "Snap%": 0.5}])
+
+    result = build_edge_frame(proj, sal, snaps=snaps)
+    assert "snaps" in result.source_joins
+    assert result.source_joins["snaps"].pool_matched == 1
 
 
 def test_zone_labels_present_and_blank_for_every_row():

@@ -2459,6 +2459,55 @@ good/bad news the way `LINE↑`/`LINE↓` genuinely is). No sheet-structure
 change -- `Flags`/`Flag` already existed; only which rows populate them
 changed, same shape of change as the `LEVERAGE` retune.
 
+## Part C, C6/C7 (2026-09-24): `Snap%`, a fifth collapsed group, and storage
+
+`Snap%` -- offensive snap share from nflverse's free `snap_counts_
+{season}.csv` release (`src/dfs/sources/nflverse_snaps.py`, source
+`"snaps"`) -- inserted as a new **Usage** collapsed group, positioned
+after Weather per Sam's own instruction. New `derived.USAGE_LABEL`
+zone-label constant, joining `GAME_LABEL`/`CEILING_DETAIL_LABEL`/
+`MOVEMENT_LABEL`/`WEATHER_LABEL`. C6 described routing this through a
+pfr->gsis crosswalk; verified live the release already carries name/
+team/position directly, so it joins the same way every other Part C
+source does (`player_join.join_source_to_dk`), no crosswalk needed.
+"Most recent completed week" resolved per player, not one global week
+number -- see `docs/CALCULATIONS.md`'s own Part C section for why (a
+real Thursday-night-game edge case, confirmed live the same day).
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-24 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | New collapsed group `USAGE` (label + `Snap%`) inserted after `WEATHER`, before `INTERNAL` (`Id`/`Flag`) -- both shift two positions right. Linked (VLOOKUP against EdgeRaw) on the three builder tabs, same as every other collapsed-group metric. | `derived.EDGE_COLUMNS` 36 columns (`Wind` at index 33, `Id` at 34). `sheet_columns.LINKED_COLUMNS` 20 members. `PLAYER_POOL_RAW_COLUMN_ORDER` 38 cols, `PLAYER_POOL_COLUMN_ORDER` 44, `LINEUPS_COLUMN_ORDER` 47. | `derived.EDGE_COLUMNS` 38 columns (`Wind` still at 33, new `USAGE_LABEL`/`Snap%` at 34/35, `Id` now at 36). `LINKED_COLUMNS` 21 members (`Snap%` last, right before `INTERNAL`). `PLAYER_POOL_RAW_COLUMN_ORDER` 40, `PLAYER_POOL_COLUMN_ORDER` 46, `LINEUPS_COLUMN_ORDER` 49. | Live + Template | `derived.EDGE_COLUMNS`, `derived.USAGE_LABEL`, `derived.ZONE_LABELS` (gains `USAGE_LABEL`), new `derived._attach_snaps`, `derived.build_edge_frame` (new `snaps` param), `sheet_columns.USAGE`/`LINKED_COLUMNS`/`BASE_COLUMN_ORDER`/`PLAYER_POOL_COLUMN_ORDER`/`LINEUPS_COLUMN_ORDER` (all gain the new zone), `sheet_style.FIELD_FORMATS`/`EDGE_WIDTHS` (gain `Snap%`/`USAGE`), every EDGE_COLUMNS-index-pinning test in `tests/test_sheet_links.py`. |
+
+**Applied via the same `dfs setup reorder-columns` mechanism** as
+`AggPts` -- provisioned the `USAGE` label as a native placeholder (it's
+not itself a VLOOKUP, just header text), linked `Snap%` against EdgeRaw,
+moved both into position with 2 real column moves per tab (label +
+data), rewrote every native PlayerPoolRaw-lookup formula whose position
+shifted. Template first, then live, both `dfs doctor`/`dfs setup
+audit-style` clean afterward (pre-existing empty-SoS-tab skips
+unrelated).
+
+**One real verification catch, not a data bug:** immediately after the
+reorder, `PlayerPoolRaw`'s displayed `Snap%` read `"1"` for a player
+whose real value was `0.67` -- traced to `dfs setup polish` not yet
+having run against the live sheet in this pass, so the newly-moved
+column still carried whatever number format used to live at that
+physical position (rounding 0.67 to the nearest whole number for
+display). The underlying stored value was correct the whole time
+(confirmed via `read_range_unformatted` on both `PlayerPoolRaw` and
+`EdgeRaw` -- both read `0.67`); running `polish` applied the real
+`0.0%` format and the display corrected itself. Same class of "stale
+inherited format at a moved position" issue `FIELD_FORMATS`'s own `Id`
+comment already documents -- **`dfs setup polish` is not optional after
+`reorder-columns`**, confirmed live rather than assumed.
+
+**C7, storage:** no new code needed -- `sleeper`/`fantasypros`/`snaps`
+are ordinary registry sources (`sources/__init__.py`'s `SOURCES` dict),
+so `sync.run_sync`'s existing `store.save(name, df)` call already
+snapshots each one to `data/raw/<source>/<timestamp>.csv` and
+`data/current/<source>.csv` on every sync, the same as every source that
+predates Part C.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

@@ -125,19 +125,19 @@ def _try_diff_odds(ctx: SyncContext) -> pd.DataFrame | None:
         return None
 
 
-def _report_agg_pts_joins(agg_pts_joins: dict) -> None:
+def _report_source_joins(source_joins: dict) -> None:
     """Part C, C1's own "never fail silently" rule: print the match rate
     per source per position over the rosterable pool on every sync, and
     write each source's unmatched rosterable players to a file -- a
     missed third-string TE is noise, a missed starter is a bug, and
     nobody notices a quiet 80% match rate unless it's printed every time.
-    A no-op when neither source synced this run (`agg_pts_joins` empty)."""
-    if not agg_pts_joins:
+    A no-op when neither source synced this run (`source_joins` empty)."""
+    if not source_joins:
         return
-    report = match_rate_report(agg_pts_joins)
+    report = match_rate_report(source_joins)
     if not report.empty:
         log.info("Part C match rates (rosterable pool):\n%s", report.to_string(index=False))
-    for source, result in agg_pts_joins.items():
+    for source, result in source_joins.items():
         if result.unmatched_pool_names:
             log.warning(
                 "%s: %d rosterable pool player(s) with no match: %s",
@@ -166,6 +166,7 @@ class EdgeSource(Source):
         }
         sleeper = _try_load_current("sleeper")
         fantasypros = _try_load_current("fantasypros")
+        snaps = _try_load_current("snaps")
 
         result = build_edge_frame(
             projections,
@@ -176,6 +177,7 @@ class EdgeSource(Source):
             sos_by_position=sos_by_position,
             sleeper=sleeper,
             fantasypros=fantasypros,
+            snaps=snaps,
         )
         if result.unmatched_names:
             log.warning(
@@ -184,7 +186,7 @@ class EdgeSource(Source):
                 len(result.unmatched_names),
                 ", ".join(result.unmatched_names),
             )
-        _report_agg_pts_joins(result.agg_pts_joins)
+        _report_source_joins(result.source_joins)
         return result.frame
 
     def to_sheet_rows(self, df: pd.DataFrame) -> list[list]:

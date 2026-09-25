@@ -9,7 +9,7 @@ from dfs.sources.edge import (
     POOL_TYPE_OPTIONS,
     EdgeSource,
     _canonical_id,
-    _report_agg_pts_joins,
+    _report_source_joins,
 )
 
 
@@ -279,13 +279,13 @@ def test_pool_value_survives_when_id_is_read_back_as_a_real_number():
     assert rows == [["Cash"], ["GPP"]]
 
 
-def test_report_agg_pts_joins_is_a_noop_with_no_sources(tmp_path, monkeypatch):
+def test_report_source_joins_is_a_noop_with_no_sources(tmp_path, monkeypatch):
     monkeypatch.setattr("dfs.sources.edge.CURRENT_DIR", tmp_path)
-    _report_agg_pts_joins({})
+    _report_source_joins({})
     assert list(tmp_path.iterdir()) == []
 
 
-def test_report_agg_pts_joins_writes_one_unmatched_file_per_source(tmp_path, monkeypatch):
+def test_report_source_joins_writes_one_unmatched_file_per_source(tmp_path, monkeypatch):
     monkeypatch.setattr("dfs.sources.edge.CURRENT_DIR", tmp_path)
     joins = {
         "sleeper": JoinResult(
@@ -304,7 +304,7 @@ def test_report_agg_pts_joins_writes_one_unmatched_file_per_source(tmp_path, mon
         ),
     }
 
-    _report_agg_pts_joins(joins)
+    _report_source_joins(joins)
 
     sleeper_csv = pd.read_csv(tmp_path / "unmatched_sleeper.csv")
     assert sleeper_csv["Name"].tolist() == ["Missed Guy"]

@@ -271,6 +271,7 @@ FIELD_FORMATS = {
     # EdgeRaw's own value by 100 too, so both sides are true fractions and
     # can share this one PERCENT format.
     "Own%": _num("0.0%", "PERCENT"),
+    "Snap%": _num("0.0%", "PERCENT"),
     "% of Cap": _num("0.0%", "PERCENT"),
     "Exposure": _num("0.0%", "PERCENT"),
     "Target": _num("0.0%", "PERCENT"),
@@ -793,6 +794,8 @@ EDGE_WIDTHS = {
     "CEIL": 52,
     "MOVE": 56,
     "WX": 44,
+    "USAGE": 56,  # Part C, C6 -- a full word, not a 2-4 letter abbreviation like the others
+    "Snap%": 78,
 }
 
 # Phase 6, Part 2 (2026-09-17) overrides Fix 2.9: Stadium/Roof/Wind used

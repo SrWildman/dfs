@@ -254,6 +254,12 @@ GAME_LABEL = "GAME"
 CEILING_DETAIL_LABEL = "CEIL"
 MOVEMENT_LABEL = "MOVE"
 WEATHER_LABEL = "WX"
+# Part C, C6 (2026-09-24): a fifth collapsed group, positioned after
+# WEATHER per Sam's own instruction -- his existing Game/Ceiling detail/
+# Movement/Weather left-to-right order is untouched; he can move Usage
+# later if he wants. Un-abbreviated like GAME (not a 2-4 letter shorthand
+# like CEIL/MOVE/WX) since "Usage" is already short.
+USAGE_LABEL = "USAGE"
 
 EDGE_COLUMNS = [
     # SPINE
@@ -331,6 +337,13 @@ EDGE_COLUMNS = [
     "Stadium",
     "Roof",
     "Wind",
+    # USAGE (collapsed, Part C, C6, 2026-09-24) -- positioned after
+    # WEATHER per Sam's own instruction. Linked (VLOOKUP against EdgeRaw),
+    # like every other collapsed-group metric here: a whole-slate-and-
+    # history join against nflverse's own snap-count release, not a
+    # per-row native formula.
+    USAGE_LABEL,
+    "Snap%",
     # Id/Flag stay hidden outright, not part of any visible group -- Pool
     # (column A, ahead of this whole list) sits directly beside Name with
     # no column between them. "Flag" (Part 7.9) is the single
@@ -344,7 +357,7 @@ EDGE_COLUMNS = [
 # The four zone labels, in the same left-to-right order they appear --
 # used wherever code needs "all the label columns" as a group (e.g. to
 # exclude them from formatting that only makes sense for real metrics).
-ZONE_LABELS = (GAME_LABEL, CEILING_DETAIL_LABEL, MOVEMENT_LABEL, WEATHER_LABEL)
+ZONE_LABELS = (GAME_LABEL, CEILING_DETAIL_LABEL, MOVEMENT_LABEL, WEATHER_LABEL, USAGE_LABEL)
 
 
 @dataclass
@@ -352,13 +365,13 @@ class EdgeBuildResult:
     frame: pd.DataFrame
     unmatched_names: list[str]
     # Part C, C1: one JoinResult per external source actually passed to
-    # `build_edge_frame` (keyed "sleeper"/"fantasypros") -- lets the
-    # caller (sources/edge.py) print C1's own required "match rate per
-    # source per position" report and write unmatched rosterable players
-    # to a file, without re-running the join itself. Empty when neither
-    # source was passed in (e.g. `dfs sync --only edge` before either has
-    # ever synced).
-    agg_pts_joins: dict[str, JoinResult]
+    # `build_edge_frame` (keyed "sleeper"/"fantasypros"/"snaps") -- lets
+    # the caller (sources/edge.py) print C1's own required "match rate
+    # per source per position" report and write unmatched rosterable
+    # players to a file, without re-running the join itself. Empty when
+    # no source was passed in (e.g. `dfs sync --only edge` before any
+    # has ever synced).
+    source_joins: dict[str, JoinResult]
 
 
 def _percentile_within(series: pd.Series, group: pd.Series) -> pd.Series:
@@ -749,6 +762,35 @@ def _attach_agg_pts(
     return agg_pts, split_flags, joins
 
 
+def _attach_snaps(
+    merged: pd.DataFrame, snaps: pd.DataFrame | None, pool_mask: pd.Series
+) -> tuple[pd.Series, JoinResult | None]:
+    """Part C, C6: `Snap%` via the same (name, team, position) join every
+    other external source in this module uses (`player_join.
+    join_source_to_dk`). `snaps` is already resolved to each player's own
+    most recently completed week by `sources/nflverse_snaps.py` -- this
+    function only joins it onto DK's own Id, same as `_attach_agg_pts`
+    does for Sleeper/FantasyPros. Missing entirely (not synced this run)
+    blanks `Snap%` for every row and returns `None` for the join result,
+    same fail-soft contract as every other optional input here."""
+    if snaps is None:
+        return pd.Series(float("nan"), index=merged.index, dtype="float64"), None
+    dk_frame = merged[["Id", "Name", "Team", "Position"]]
+    result = join_source_to_dk(
+        dk_frame,
+        snaps,
+        source_name_col="Name",
+        source_team_col="Team",
+        source_position_col="Position",
+        source="snaps",
+        pool_mask=pool_mask,
+    )
+    matched = result.matched[["Id", "Snap%"]].drop_duplicates(subset="Id", keep="first")
+    snap_pct = dk_frame.merge(matched, on="Id", how="left")["Snap%"]
+    snap_pct.index = merged.index
+    return pd.to_numeric(snap_pct, errors="coerce"), result
+
+
 def _dst_nickname(full_team_name: str) -> str:
     """Mirrors sources/tffb_projections.py's `_dst_nickname` -- duplicated
     rather than imported for the same reason as WIND_FLAG_THRESHOLD_MPH
@@ -801,6 +843,7 @@ def build_edge_frame(
     sos_by_position: dict[str, pd.DataFrame] | None = None,
     sleeper: pd.DataFrame | None = None,
     fantasypros: pd.DataFrame | None = None,
+    snaps: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -822,7 +865,11 @@ def build_edge_frame(
     `fantasypros_projections.py`, columns include `Name`/`Team`/
     `Position`/`DkPts`) -- optional, feed only `AggPts` (see
     `_attach_agg_pts`); missing either (or both) degrades gracefully, same
-    as every other optional input here.
+    as every other optional input here. `snaps` is `sources/
+    nflverse_snaps.py`'s own shape (`Name`/`Team`/`Position`/`Snap%`,
+    each player's own most recently completed week already resolved) --
+    optional, feeds only `Snap%` (see `_attach_snaps`); missing it blanks
+    `Snap%` for every row, same as everything else optional here.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -858,7 +905,7 @@ def build_edge_frame(
     merged["ProjOwn"] = merged["ProjOwn"] / 100
 
     val_adj_pool = _rosterable_pool_mask(merged["ProjPts"], merged["Position"])
-    merged["AggPts"], merged["_SplitFlag"], agg_pts_joins = _attach_agg_pts(
+    merged["AggPts"], merged["_SplitFlag"], source_joins = _attach_agg_pts(
         merged, sleeper, fantasypros, val_adj_pool
     )
     merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
@@ -909,6 +956,9 @@ def build_edge_frame(
     merged = merged.rename(columns={"GameId": "GameID"})
     merged = _attach_line_movement(merged, line_movement)
     merged = _attach_opp_pos_rank(merged, sos_by_position)
+    merged["Snap%"], snaps_join = _attach_snaps(merged, snaps, val_adj_pool)
+    if snaps_join is not None:
+        source_joins["snaps"] = snaps_join
     merged["TmRank"] = _tm_rank_within_team_position(
         merged["Salary"], merged["Name"], merged["Team"], merged["Position"]
     )
@@ -945,5 +995,5 @@ def build_edge_frame(
         merged[label] = ""
 
     return EdgeBuildResult(
-        frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names, agg_pts_joins=agg_pts_joins
+        frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names, source_joins=source_joins
     )

@@ -14,6 +14,7 @@ from dfs.sources.dk_salaries import DkSalariesSource
 from dfs.sources.edge import EdgeSource
 from dfs.sources.fantasypros_projections import FantasyProsProjectionsSource
 from dfs.sources.nflverse_games import NflverseGamesSource
+from dfs.sources.nflverse_snaps import NflverseSnapsSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
 from dfs.sources.sleeper_projections import SleeperProjectionsSource
 from dfs.sources.tffb_projections import TffbProjectionsSource
@@ -33,13 +34,16 @@ from dfs.sources.weather import WeatherSource
 # LIVE_SYNC_SOURCES -- a full `dfs sync` includes them, `dfs sync --live`
 # doesn't, which is each one's own "make it skippable" instruction
 # satisfied with no new flag (FantasyPros' own ~25s Crawl-delay makes this
-# doubly important for it).
+# doubly important for it). "snaps" (C6) is the same -- a snap-count
+# release only changes once a week's games are actually played, not
+# worth re-fetching on every fast live-sync pass.
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
     "projections": TffbProjectionsSource(),
     "sleeper": SleeperProjectionsSource(),
     "fantasypros": FantasyProsProjectionsSource(),
+    "snaps": NflverseSnapsSource(),
     "sos_qb": TffbSosSource("QB"),
     "sos_rb": TffbSosSource("RB"),
     "sos_wr": TffbSosSource("WR"),

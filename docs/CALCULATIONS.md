@@ -668,6 +668,31 @@ are new this session, so there's no second week's history the way
 `LEVERAGE`/`LINE` had when they were tuned. Re-check both constants once
 a second week's Sleeper/FantasyPros pull exists.
 
+## `Snap%` (Part C, C6, 2026-09-24)
+
+Offensive snap share from nflverse's free `snap_counts_{season}.csv`
+release (`sources/nflverse_snaps.py`), joined onto DK's Id the same way
+as every other Part C source (`player_join.join_source_to_dk`, by
+normalized name/team/position -- no separate crosswalk step turned out
+to be needed; the release already carries name/team/position directly).
+
+**"Most recent completed week" is per player, not one global week
+number.** Confirmed live (2026-09-25, week 3): the release already
+carried a lone Thursday-night week-3 game alongside every other team's
+week-1/2 rows -- a single "current week minus one" filter would have
+served that game's own players stale week-2 data. Grouped by
+`pfr_player_id`, each player's own latest available week wins.
+
+**Blank vs. zero, same rule as everywhere else in this codebase:** a
+player nflverse has never recorded (a rookie, a bye week, DST -- defenses
+have no individual snap share) reads blank, never a fabricated 0. A
+player with a real recorded 0% (inactive/DNP in their own latest game)
+keeps that real 0% -- it's a known fact, not missing data.
+
+Placed in its own collapsed **Usage** group, positioned after Weather,
+on EdgeRaw/Player Pool/Lineups. Feeds nothing else computed on this
+sheet -- a read-only usage signal, not an input to any flag or score.
+
 ## Player Pool ordering: tag group, then salary (Part 7.10)
 
 Sam, 2026-09-17: *"The pool should order players by position by salary

@@ -99,6 +99,7 @@ from dfs.derived import (
     EDGE_COLUMNS,
     GAME_LABEL,
     MOVEMENT_LABEL,
+    USAGE_LABEL,
     WEATHER_LABEL,
 )
 from dfs.sheet_lineup_metrics import LINEUP_METRIC_HEADERS
@@ -156,6 +157,11 @@ MOVEMENT = ["ImpliedMove", "TotMove", "SpdMove", "GameStart"]
 # Venue is native (see module docstring); Stadium/Roof/Wind are linked.
 WEATHER = ["Venue", "Stadium", "Roof", "Wind"]
 
+# Part C, C6 (2026-09-24): positioned after WEATHER, per Sam's own
+# instruction -- linked (VLOOKUP against EdgeRaw, a join against
+# nflverse's own snap-count release, not a per-row native formula).
+USAGE = ["Snap%"]
+
 # Id/Flag stay hidden outright, not part of any visible collapsed group
 # (Part 2's own table lists Id separately from the four numbered groups
 # for exactly this reason) -- both linked (VLOOKUP against EdgeRaw). Flag
@@ -187,6 +193,8 @@ BASE_COLUMN_ORDER = [
     *MOVEMENT,
     WEATHER_LABEL,
     *WEATHER,
+    USAGE_LABEL,
+    *USAGE,
     *INTERNAL,
 ]
 
@@ -209,6 +217,7 @@ LINKED_COLUMNS = [
     "Stadium",
     "Roof",
     "Wind",
+    *USAGE,
     *INTERNAL,
 ]
 
@@ -244,6 +253,8 @@ PLAYER_POOL_COLUMN_ORDER = [
     *MOVEMENT,
     WEATHER_LABEL,
     *WEATHER,
+    USAGE_LABEL,
+    *USAGE,
     *INTERNAL,
     "Overflow",
     "Pool",
@@ -283,6 +294,8 @@ LINEUPS_COLUMN_ORDER = [
     *MOVEMENT,
     WEATHER_LABEL,
     *WEATHER,
+    USAGE_LABEL,
+    *USAGE,
     *INTERNAL,
 ]
 

@@ -111,9 +111,11 @@ def test_already_linked_columns_positions_never_move():
     # before every other linked column, and to LINKED_EDGE_COLUMNS as its
     # new first member (also linked, a whole-slate join/average, not a
     # native per-row formula) -- shifting every OTHER linked column one
-    # further right again. Computed programmatically, not by hand, to
-    # avoid exactly the arithmetic mistake this comment's own history
-    # warns about.
+    # further right again. Part C, C6 (same day) appended `Snap%` after
+    # WEATHER's own three linked columns (Stadium/Roof/Wind), as its own
+    # new last member before INTERNAL (Id/Flag) -- nothing before it
+    # shifts. Computed programmatically, not by hand, to avoid exactly
+    # the arithmetic mistake this comment's own history warns about.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         6,
         8,
@@ -133,8 +135,9 @@ def test_already_linked_columns_positions_never_move():
         31,
         32,
         33,
-        34,
         35,
+        36,
+        37,
     ]
 
 
@@ -190,10 +193,10 @@ def test_link_edge_columns_writes_header_at_first_free_column():
     client = SpySheetsClient(header_row=["Name", "Pos.", "Team", "DK Sal"])  # width 4 -> next col E
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
 
-    # All 20 names are missing, so they're all created (appended) in
-    # LINKED_EDGE_COLUMNS' own order -- one contiguous run, E through X
-    # (Part C's `AggPts` one more than before).
-    header_call = next(c for c in client.update_calls if c[1] == "E1:X1")
+    # All 21 names are missing, so they're all created (appended) in
+    # LINKED_EDGE_COLUMNS' own order -- one contiguous run, E through Y
+    # (Part C's `AggPts`/`Snap%` two more than before).
+    header_call = next(c for c in client.update_calls if c[1] == "E1:Y1")
     assert header_call[2] == [LINKED_EDGE_COLUMNS]
 
 
@@ -213,15 +216,15 @@ def test_link_edge_columns_fills_every_row_in_every_block():
     client = SpySheetsClient(header_row=["Name"])  # width 1 -> next col B
     link_edge_columns(client, "Player Pool", [(2, 3), (5, 5)], "EdgeRaw")
 
-    # All 20 created columns land contiguous (B through U, Part C's
-    # `AggPts` one wider than before) since they're all newly appended
-    # together, so each name_block still writes in one `update_range`
-    # call, just a wider one than the old 10-column block.
-    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 not in ("B1:U1",)}
-    assert "B2:U3" in block_calls
-    assert len(block_calls["B2:U3"]) == 2  # rows 2 and 3
-    assert "B5:U5" in block_calls
-    assert len(block_calls["B5:U5"]) == 1
+    # All 21 created columns land contiguous (B through V, Part C's
+    # `AggPts`/`Snap%` two wider than before) since they're all newly
+    # appended together, so each name_block still writes in one
+    # `update_range` call, just a wider one than the old 10-column block.
+    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 not in ("B1:V1",)}
+    assert "B2:V3" in block_calls
+    assert len(block_calls["B2:V3"]) == 2  # rows 2 and 3
+    assert "B5:V5" in block_calls
+    assert len(block_calls["B5:V5"]) == 1
 
 
 def test_link_edge_columns_repeats_header_at_given_rows():
@@ -229,9 +232,9 @@ def test_link_edge_columns_repeats_header_at_given_rows():
     link_edge_columns(client, "Lineups", [(2, 5)], "EdgeRaw", header_repeats_at=[14, 27])
 
     repeated = [a1 for _, a1, rows in client.update_calls if rows == [LINKED_EDGE_COLUMNS]]
-    assert "B1:U1" in repeated
-    assert "B14:U14" in repeated
-    assert "B27:U27" in repeated
+    assert "B1:V1" in repeated
+    assert "B14:V14" in repeated
+    assert "B27:V27" in repeated
 
 
 def test_link_edge_columns_is_idempotent_when_already_linked():
@@ -405,7 +408,7 @@ def test_link_edge_columns_only_creates_the_names_actually_missing():
     created_names = {name for row in header_writes for name in row}
     assert "GameEnv" not in created_names
     assert created_names == set(LINKED_EDGE_COLUMNS) - {"GameEnv"}
-    assert "19 newly created" in result
+    assert "20 newly created" in result
 
 
 def test_link_edge_columns_run_twice_only_appends_once():

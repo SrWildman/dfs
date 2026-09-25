@@ -23,6 +23,9 @@ doc knowing.
 | `oddsraw` | Rotowire's DK odds feed | `nfl_odds` |
 | `GamesRaw` | nflverse, free/unauthenticated | `nflverse_games` |
 | `WeatherRaw` | Open-Meteo, free/no key | `weather` |
+| `SleeperRaw` | Sleeper's free, undocumented projections API | `sleeper` |
+| `FantasyProsRaw` | FantasyPros' projection pages (needs `dfs auth fantasypros` -- anonymous pages cap at 10 rows/position) | `fantasypros` |
+| `SnapsRaw` | nflverse's free snap-count release | `snaps` |
 | `EdgeRaw` | Computed locally from the above -- no network call | `edge` |
 
 Your `config.toml`'s `[google_sheets.tab_mappings]` controls the actual tab
@@ -129,6 +132,7 @@ actually matches.
 | `Position`, `Team`, `Opp` | As above. |
 | `Salary` | DraftKings' own salary (authoritative) -- falls back to TFFB's figure only for the rare player TFFB projects who isn't on DK's main-slate salary list (e.g. a Thursday/Monday-only game). |
 | `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` get the per-position colour scale described below `Own%` does not. |
+| `AggPts` | Part C, C5 (2026-09-24): equal-weight mean of every DK-scored source with a real projection for this player -- `ProjPts`, Sleeper, FantasyPros (`sources/sleeper_projections.py`/`fantasypros_projections.py`, re-scored to exact DK rules -- see `docs/CALCULATIONS.md`). A missing source (not synced, or a genuine "no projection this week") is excluded from that player's own average, never treated as 0. With only TFFB available, equals `ProjPts` exactly. Feeds nothing else -- a second opinion to read, not an input to `ValAdj`/anything downstream. |
 | `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Per-position colour scale, below. No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
 | `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Ordinary whole-tab colour scale (already position-comparable by construction), not the per-position one below. |
 | `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Per-position colour scale, below. |
@@ -143,10 +147,11 @@ actually matches.
 | `Stadium` / `Roof` | From `GamesRaw`, joined by team code. Blank if `nflverse_games` hasn't synced this run. |
 | `Wind` | From `WeatherRaw`, joined by game. Blank for dome games or if `weather` hasn't synced. |
 | `Avail` | DraftKings' own `Status` (`Q`/`OUT`/`IR`). |
-| `Flags` | The one column meant to be read at a glance (renamed from `Flag` in Phase 6, Part 7.9 -- see the hidden `Flag`, above, for the single-highest-priority counterpart). Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`ImpliedMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (`Leverage` ≥ 30; blank `Leverage` while unpublished can never clear this) → `CHALK` (`Own%` ≥ 0.20 (20%), can only fire once ownership is real) → blank. |
+| `Flags` | The one column meant to be read at a glance (renamed from `Flag` in Phase 6, Part 7.9 -- see the hidden `Flag`, above, for the single-highest-priority counterpart). Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`ImpliedMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (rosterable-pool member, top 7% of the pool by `Leverage` this week) → `CHALK` (`Own%` ≥ 0.20 (20%), can only fire once ownership is real) → `SPLIT↑`/`SPLIT↓` (Part C, C5b: rosterable-pool member whose `ProjPts` disagrees sharply with the mean of Sleeper/FantasyPros -- see `docs/CALCULATIONS.md`) → blank. |
 | `ImpliedMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpliedMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Sits in its own collapsed Movement group (Phase 6, Part 2) rather than grouped near `GameEnv` -- see `docs/planning/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
-| `GAME`, `CEIL`, `MOVE`, `WX` | Zone labels, not data -- one sits immediately before each collapsed group (Game/Ceiling detail/Movement/Weather) it names, always visible, blank in every row below the header. See the canonical column order section (Player Pool/Lineups, above) for the full rationale; EdgeRaw has the same four for the same reason. |
+| `Snap%` | Part C, C6 (2026-09-24): this player's own most recently completed week's offensive snap share, from nflverse's free snap-count release (`sources/nflverse_snaps.py`), joined by name/team/position. Blank for a player nflverse hasn't recorded at all (a rookie, a bye, DST -- defenses have no individual snap share); a real recorded 0% (inactive/DNP) stays a real 0%, not blanked. |
+| `GAME`, `CEIL`, `MOVE`, `WX`, `USAGE` | Zone labels, not data -- one sits immediately before each collapsed group (Game/Ceiling detail/Movement/Weather/Usage) it names, always visible, blank in every row below the header. See the canonical column order section (Player Pool/Lineups, above) for the full rationale; EdgeRaw has the same five for the same reason. |
 
 A basic filter (Data > Create a filter, `dfs setup add-filters`) puts a
 visible sort/search arrow in every header cell -- click one to sort or
@@ -195,7 +200,7 @@ disagree:
 | Zone | Columns |
 |---|---|
 | IDENTITY (spine) | `Name` `Pos.` `Team` `Opp.` |
-| DECISION (spine) | `DK Sal` `Pts` `Val` `ValAdj` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
+| DECISION (spine) | `DK Sal` `Pts` `AggPts` `Val` `ValAdj` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
 | — label `GAME` — | (always visible, not part of any group) |
 | GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `OppPosRank` `GameID` `TmRank` |
 | — label `CEIL` — | (always visible, not part of any group) |
@@ -204,23 +209,26 @@ disagree:
 | MOVEMENT (collapsed) | `ImpliedMove` `TotMove` `SpdMove` `GameStart` |
 | — label `WX` — | (always visible, not part of any group) |
 | WEATHER (collapsed) | `Venue` `Stadium` `Roof` `Wind` |
+| — label `USAGE` — | (always visible, not part of any group) |
+| USAGE (collapsed) | `Snap%` |
 | INTERNAL (hidden, not grouped) | `Id` `Flag` |
 
 **Zone labels** (added the same day as Part 7.9, a usability fix Sam
 raised mid-session rather than something in the original spec): each
 collapsed zone now has a real, always-visible one-word label column
-immediately before it -- `GAME`/`CEIL`/`MOVE`/`WX` -- so you can tell
-which `+`/`-` control is which without clicking to find out. A label
-can't sit INSIDE the zone it names (collapsing hides every cell in a
-group's range, label included), and it can't be a blank spacer either
-(an unlabeled `+` is the exact "guess and click" problem being fixed).
-This is also what makes the four zones independently collapsible at
-all -- verified live (a raw `addDimensionGroup`/depth-nesting test on the
-template's Scratch tab) that Sheets merges any adjacent same-depth column
-groups into one regardless of nesting, so a real gap column between
-zones is the only way to get four separate controls instead of one
-merged region. No data lives in a label column below its own header
-text -- it's a pure visual divider, styled with a light neutral tint
+immediately before it -- `GAME`/`CEIL`/`MOVE`/`WX`/`USAGE` (the fifth,
+Part C's C6, 2026-09-24) -- so you can tell which `+`/`-` control is
+which without clicking to find out. A label can't sit INSIDE the zone it
+names (collapsing hides every cell in a group's range, label included),
+and it can't be a blank spacer either (an unlabeled `+` is the exact
+"guess and click" problem being fixed). This is also what makes the
+zones independently collapsible at all -- verified live (a raw
+`addDimensionGroup`/depth-nesting test on the template's Scratch tab)
+that Sheets merges any adjacent same-depth column groups into one
+regardless of nesting, so a real gap column between zones is the only
+way to get separate controls instead of one merged region. No data lives
+in a label column below its own header text -- it's a pure visual
+divider, styled with a light neutral tint
 (`sheet_style._apply_zone_label_style`) so it reads as one rather than an
 unexpectedly-blank data column.
 
@@ -243,17 +251,14 @@ spine slot, and `Flag` (just the single highest-priority token) moved
 into INTERNAL beside `Id`, hidden, kept only because other
 formatting/filtering logic keys off it as a boolean value.
 
-`PlayerPoolRaw` is exactly this, 37 columns (was 30 right after Part 7.9's
-metric audit, 34 through Phase 5H before that -- Phase 5, Section I
-removed the four reserved-but-never-wired `SoS 1..4` placeholders once
-the real strength-of-schedule sync landed straight into `OppPosRank`
-instead; see CONTRIBUTING.md's changelog -- the zone-label usability fix
-then added the four label columns above, landing back at 34 by
-coincidence; Part 7.2 then added `ValAdj`, one more, to 35; Part 7.4 then
-added `GameID`/`TmRank`, two more, to 37). `Player
+`PlayerPoolRaw` is exactly this, 40 columns (37 through Part 7.4 -- see
+CONTRIBUTING.md's changelog for that history; Part C, C5 then added
+`AggPts`, one more, to 38; Part C, C6 added the `USAGE` label and `Snap%`,
+two more, to 40). `Player
 Pool` inserts `Edge ↗` (A3) right after `Opp.` (i.e. right after
 IDENTITY, since `Venue` no longer sits there) and appends
-`Overflow`/`Pool`/`Used`/`In`/`Added` at the very end (43 total; `Used`/
+`Overflow`/`Pool`/`Used`/`In`/`Added` at the very end (46 total, up from
+43 the same way `PlayerPoolRaw` did; `Used`/
 `In` are Phase 5B, `Added` is Week 3 feedback's A6 -- a HIDDEN column
 accumulating every name typed into the add-a-player control cell this
 week, see below). `Source`, which used to sit right before `Edge ↗`
@@ -262,7 +267,8 @@ in that same spot, was removed entirely in Week 3 feedback (A4,
 Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
 the full spine, then `Issues`, then Part 7.5's six lineup-metrics
 columns (`Stack` through `Min Unique`, see above), then `Edge ↗` (A3),
-before the collapsed groups begin (46 total, was 40 before Part 7.5).
+before the collapsed groups begin (49 total, up from 46 the same way the
+other two tabs grew via Part C).
 Lineups also groups
 `O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
@@ -317,7 +323,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Own%` | `TFFBOptoRaw`'s `ProjOwn`, already a 0-1 fraction here (unlike `EdgeRaw`'s own `Own%`, which needed a Part 2 rescale to match -- see EdgeRaw's column docs above). |
-| `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `GameID`, `TmRank`, `Stadium`, `Roof`, `Wind`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/`GameID`/`TmRank` stay on the visible spine/Game zone. `ValAdj`/`GameID`/`TmRank` are linked (not native, unlike `Val`) since each is a whole-slate computation, not a per-row formula. |
+| `AggPts`, `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `GameID`, `TmRank`, `Stadium`, `Roof`, `Wind`, `Snap%`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Usage (`Snap%`, Part C, C6), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `AggPts`/`ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/`GameID`/`TmRank` stay on the visible spine/Game zone. `AggPts`/`ValAdj`/`GameID`/`TmRank`/`Snap%` are linked (not native, unlike `Val`) since each is a whole-slate computation or external join, not a per-row formula. |
 
 ### Player Pool / Lineups
 
