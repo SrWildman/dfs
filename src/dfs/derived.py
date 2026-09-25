@@ -120,6 +120,27 @@ LEVERAGE_FLAG_TOP_SHARE = 0.07
 # ProjOwn is now 0-1, not 0-100, to share one stored scale with
 # PlayerPoolRaw's native Own%/Rstr%): 20% is 0.20, not 20.0.
 CHALK_OWNERSHIP_THRESHOLD = 0.20
+
+# Part C, C5b (2026-09-24): SPLIT↑/SPLIT↓ fires when TFFB's own ProjPts
+# disagrees sharply with the mean of the OTHER two sources (Sleeper,
+# FantasyPros) -- deliberately NOT AggPts, which already includes TFFB
+# and would hide a third of the real disagreement. Tuned against the
+# real 2026-09-20 rosterable pool (241 of 250 pool players had at least
+# one other source): gap = mean(other sources) - ProjPts had quartiles
+# -2.83 / -1.41 / +0.27, and |gap| quantiles of 0.80/2.63, 0.90/3.86,
+# 0.95/4.52. `SPLIT_ABS_FLOOR = 4.0` with `SPLIT_REL_THRESHOLD = 0.20`
+# (20% of ProjPts) fires on 20/250 (8.0%) -- inside the 5-10% band.
+# HONEST CAVEAT, not buried: on that same snapshot this fired ENTIRELY
+# in one direction (20 SPLIT↓, 0 SPLIT↑) -- the systematic RB/WR gap C2
+# already found and Sam already accepted (Sleeper/FantasyPros running
+# ~1.5-2pts below TFFB at those positions) dominates the distribution, so
+# SPLIT reads more like "TFFB is bullish here" than a symmetric
+# disagreement signal right now. Also tuned against only ONE real
+# snapshot (both external sources are new this session, so there's no
+# second week's data yet the way LEVERAGE/LINE had) -- re-check once a
+# second week's Sleeper/FantasyPros pull exists.
+SPLIT_ABS_FLOOR = 4.0
+SPLIT_REL_THRESHOLD = 0.20
 # Phase 6, Part 1.4: `has_real_ownership` used to be `.any()` -- a single
 # non-zero ProjOwn (one early-published player, a data glitch, a bye-week
 # artifact) flipped the WHOLE slate to "real," computing OwnPct/Leverage as
@@ -629,13 +650,23 @@ def _attach_line_movement(merged: pd.DataFrame, line_movement: pd.DataFrame | No
     return merged
 
 
+def _split_flag_for_gap(gap: float, threshold: float) -> str:
+    if pd.isna(gap) or pd.isna(threshold):
+        return ""
+    if gap >= threshold:
+        return "SPLIT↑"
+    if gap <= -threshold:
+        return "SPLIT↓"
+    return ""
+
+
 def _attach_agg_pts(
     merged: pd.DataFrame,
     sleeper: pd.DataFrame | None,
     fantasypros: pd.DataFrame | None,
     pool_mask: pd.Series,
-) -> tuple[pd.Series, dict[str, JoinResult]]:
-    """Part C, C5: `AggPts` is the equal-weight mean of every DK-scored
+) -> tuple[pd.Series, pd.Series, dict[str, JoinResult]]:
+    """Part C, C5/C5b: `AggPts` is the equal-weight mean of every DK-scored
     source with a real projection for this player -- TFFB's own `ProjPts`
     (always present, this frame's own column), Sleeper's `DkPts`,
     FantasyPros' `DkPts`. A player missing one source (not synced this
@@ -646,23 +677,34 @@ def _attach_agg_pts(
     equals `ProjPts` exactly. Feeds nothing else -- `ValAdj`/`Val`/
     `CeilVal`/the Board/every guardrail still key off `ProjPts` alone.
 
+    Also computes C5b's `SPLIT↑`/`SPLIT↓` eligibility: `gap = mean(Sleeper,
+    FantasyPros) - ProjPts` -- deliberately NOT `AggPts`, which already
+    includes `ProjPts` and would hide a third of the real disagreement --
+    fires when `|gap| >= max(SPLIT_ABS_FLOOR, SPLIT_REL_THRESHOLD *
+    ProjPts)`, restricted to `pool_mask` (a $2,500 backup's disagreement
+    is noise, same restriction the LEVERAGE flag got) and to players with
+    at least one of those two sources available (no source -> no flag,
+    never flag on missing data).
+
     Joins each source independently by (name, team, position) via
     `player_join.join_source_to_dk`, keyed on `merged`'s own Id/Name/
     Team/Position (DST names already rewritten to DK's nickname by this
     point in `build_edge_frame`) -- never against each other, so a name
     one source can't match doesn't cost the other's own independent
-    match. Returns the `AggPts` series (aligned to `merged`'s index) plus
-    one `JoinResult` per source actually passed in, so the caller
+    match. Returns `(agg_pts, split_flags, joins)`: the `AggPts` series,
+    the `SPLIT↑`/`SPLIT↓`/`""` series (both aligned to `merged`'s index),
+    and one `JoinResult` per source actually passed in, so the caller
     (`sources/edge.py`) can report C1's own required per-source,
     per-position match rate without re-running the join itself.
     `pool_mask` (the same `VAL_ADJ_ROSTERABLE_TOP_N` mask ValAdj uses)
-    scopes every `JoinResult`'s match-rate counts to the rosterable pool,
-    per C1's own instruction -- it does NOT restrict what gets averaged
-    into `AggPts` itself; a non-pool player still gets every source's
-    real number blended in, same as `ProjPts` itself is never pool-
-    restricted."""
+    scopes every `JoinResult`'s match-rate counts to the rosterable pool
+    -- it does NOT restrict what gets averaged into `AggPts` itself; a
+    non-pool player still gets every source's real number blended in,
+    same as `ProjPts` itself is never pool-restricted."""
     dk_frame = merged[["Id", "Name", "Team", "Position"]]
-    scores = [pd.to_numeric(merged["ProjPts"], errors="coerce")]
+    proj_pts = pd.to_numeric(merged["ProjPts"], errors="coerce")
+    scores = [proj_pts]
+    other_scores = []
     joins: dict[str, JoinResult] = {}
 
     for source_name, source_df in (("sleeper", sleeper), ("fantasypros", fantasypros)):
@@ -681,10 +723,30 @@ def _attach_agg_pts(
         matched = result.matched[["Id", "DkPts"]].drop_duplicates(subset="Id", keep="first")
         score = dk_frame.merge(matched, on="Id", how="left")["DkPts"]
         score.index = merged.index
-        scores.append(pd.to_numeric(score, errors="coerce"))
+        score = pd.to_numeric(score, errors="coerce")
+        scores.append(score)
+        other_scores.append(score)
 
     agg_pts = pd.concat(scores, axis=1).mean(axis=1, skipna=True).round(2)
-    return agg_pts, joins
+
+    if other_scores:
+        other_mean = pd.concat(other_scores, axis=1).mean(axis=1, skipna=True)
+        gap = other_mean - proj_pts
+        threshold = pd.concat(
+            [pd.Series(SPLIT_ABS_FLOOR, index=merged.index), SPLIT_REL_THRESHOLD * proj_pts], axis=1
+        ).max(axis=1)
+        eligible = pool_mask.reindex(merged.index, fill_value=False)
+        split_flags = pd.Series(
+            [
+                _split_flag_for_gap(g, t) if elig else ""
+                for g, t, elig in zip(gap, threshold, eligible, strict=True)
+            ],
+            index=merged.index,
+        )
+    else:
+        split_flags = pd.Series("", index=merged.index)
+
+    return agg_pts, split_flags, joins
 
 
 def _dst_nickname(full_team_name: str) -> str:
@@ -721,6 +783,12 @@ def _flags_for_row(row: pd.Series) -> list[str]:
     # until TFFB publishes it, so this can't fire before then regardless.
     if row["ProjOwn"] >= CHALK_OWNERSHIP_THRESHOLD:
         flags.append("CHALK")
+    # Part C, C5b: lowest priority, below CHALK -- "look closer," not
+    # "danger," and per the spec's own explicit instruction, a new flag
+    # must never mask an existing one in the singular `Flag` column
+    # (exactly the bug the LINE flag caused by sitting too high).
+    if row["_SplitFlag"]:
+        flags.append(row["_SplitFlag"])
     return flags
 
 
@@ -790,7 +858,9 @@ def build_edge_frame(
     merged["ProjOwn"] = merged["ProjOwn"] / 100
 
     val_adj_pool = _rosterable_pool_mask(merged["ProjPts"], merged["Position"])
-    merged["AggPts"], agg_pts_joins = _attach_agg_pts(merged, sleeper, fantasypros, val_adj_pool)
+    merged["AggPts"], merged["_SplitFlag"], agg_pts_joins = _attach_agg_pts(
+        merged, sleeper, fantasypros, val_adj_pool
+    )
     merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
     val_adj_residual = _val_adj_residual_within_position(
         merged["ProjPts"], merged["Salary"], merged["Position"], val_adj_pool

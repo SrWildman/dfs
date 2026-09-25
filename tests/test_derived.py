@@ -772,6 +772,104 @@ def test_aggpts_join_results_exposed_on_edge_build_result_for_match_rate_reporti
     assert result.agg_pts_joins["sleeper"].pool_matched == 1
 
 
+def test_split_flag_fires_down_when_other_sources_are_far_below_tffb():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 5.0}])
+    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 5.5}])
+
+    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
+    # mean(other) = 5.25, gap = -4.75, threshold = max(4.0, 0.2*10) = 4.0
+    assert "SPLIT↓" in row["Flags"]
+
+
+def test_split_flag_fires_up_when_other_sources_are_far_above_tffb():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 15.0}])
+    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 14.5}])
+
+    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
+    assert "SPLIT↑" in row["Flags"]
+
+
+def test_split_flag_does_not_fire_within_threshold():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 11.0}])
+    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 12.0}])
+
+    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
+    assert "SPLIT" not in row["Flags"]
+
+
+def test_split_flag_never_fires_with_no_other_source_data():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+
+    row = build_edge_frame(proj, sal).frame.iloc[0]
+    assert "SPLIT" not in row["Flags"]
+
+
+def test_split_flag_only_eligible_inside_the_rosterable_pool():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Pool Guy", "Position": "RB", "ProjPts": 30.0, "Ceiling": 20.0},
+            {
+                "Id": "2",
+                "Name": "Backup Outside Pool",
+                "Position": "RB",
+                "ProjPts": 1.0,
+                "Ceiling": 5.0,
+            },
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    sleeper = pd.DataFrame(
+        [
+            {"Name": "Pool Guy", "Team": "DET", "Position": "RB", "DkPts": 30.0},  # no gap, won't fire
+            {"Name": "Backup Outside Pool", "Team": "DET", "Position": "RB", "DkPts": 20.0},  # huge gap
+        ]
+    )
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 1}
+        frame = build_edge_frame(proj, sal, sleeper=sleeper).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    backup = frame[frame["Name"] == "Backup Outside Pool"].iloc[0]
+    assert "SPLIT" not in backup["Flags"]
+
+
+def test_split_flag_compares_against_other_sources_mean_not_aggpts():
+    # AggPts blends TFFB in too, which would understate the real gap by a
+    # third -- SPLIT must compare against mean(Sleeper, FantasyPros) alone.
+    # ProjPts=10, other mean=15.5 -> gap vs AggPts's own blend (mean of all
+    # three, ~13.5) would be only +3.5 (under the 4.0 floor, no fire), but
+    # the real other-sources-only gap is +5.5 (clears it).
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 15.0}])
+    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 16.0}])
+
+    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
+    assert "SPLIT↑" in row["Flags"]
+
+
+def test_split_flag_never_masks_a_higher_priority_flag_in_the_singular_flag_column():
+    proj = _projections([{"Id": "1", "Name": "Windy Split Guy", "Team": "DET", "ProjPts": 10.0}])
+    sal = _salaries([{"ID": "1"}])
+    games = _games([{"GameId": "g1", "Away": "DET", "Home": "NO"}])
+    weather = pd.DataFrame([{"GameId": "g1", "Wind": 25.0}])
+    sleeper = pd.DataFrame([{"Name": "Windy Split Guy", "Team": "DET", "Position": "RB", "DkPts": 5.0}])
+
+    row = build_edge_frame(proj, sal, games=games, weather=weather, sleeper=sleeper).frame.iloc[0]
+    assert row["Flags"] == "WIND SPLIT↓"
+    assert row["Flag"] == "WIND"
+
+
 def test_stadium_and_roof_joined_from_games_by_team_code():
     proj = _projections(
         [

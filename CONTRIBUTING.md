@@ -2438,6 +2438,27 @@ match on `AggPts`/`Val`/`ValAdj` for all three. `dfs setup polish` +
 (the pre-existing `SoSQB`/`SoSRB`/`SoSWr`/`SoSTE`/`SoSDef` "empty this
 week" skips are unrelated -- nothing pasted into them yet this week).
 
+## Part C, C5b (2026-09-24): `SPLIT↑`/`SPLIT↓` flag
+
+No new column -- `SPLIT↑`/`SPLIT↓` join the existing `Flags`/`Flag`
+system (`derived._flags_for_row`), lowest priority, below `CHALK`, so it
+can never mask a higher-priority flag in the singular `Flag` column (the
+exact bug the LINE flag caused once by sitting too high in that chain).
+Compares TFFB's `ProjPts` against the mean of the *other* two sources
+(Sleeper, FantasyPros) -- deliberately not `AggPts`, which already
+includes TFFB. Rosterable-pool only, same restriction the `LEVERAGE` flag
+got on 2026-09-24 (see that day's own entry above), for the same reason.
+New `SPLIT_ABS_FLOOR`/`SPLIT_REL_THRESHOLD` constants, tuned against the
+real 2026-09-20 rosterable pool to an 8.0% fire rate -- full distribution,
+the constants' values, and the honest one-sided-firing caveat (the RB/WR
+calibration gap C2 found dominates the fire pattern right now) are all in
+`docs/CALCULATIONS.md`'s own Part C section, not repeated here. New chip
+in `sheet_style.FLAG_CHIPS` (`_chip(FLAT_BG, FLAT_FG)`, the same muted
+tone `CHALK` uses -- SPLIT is direction-neutral information, not
+good/bad news the way `LINE↑`/`LINE↓` genuinely is). No sheet-structure
+change -- `Flags`/`Flag` already existed; only which rows populate them
+changed, same shape of change as the `LEVERAGE` retune.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

@@ -893,6 +893,13 @@ FLAG_CHIPS = {
     "LINE↑": _chip(OK_BG, OK_FG),
     "WIND": _chip(WARN_BG, WARN_FG),
     "OUT": _chip(CRIT_BG, CRIT_FG),
+    # Part C, C5b: "look closer," not "danger" -- same flat/neutral tone
+    # CHALK uses, not a valence colour (unlike LINE↑/↓, which really is
+    # good/bad news, SPLIT is direction-neutral: sources disagreeing isn't
+    # itself good or bad). Both arrows share this one tone; the text
+    # itself carries the direction, same as LINE's own token text does.
+    "SPLIT↑": _chip(FLAT_BG, FLAT_FG),
+    "SPLIT↓": _chip(FLAT_BG, FLAT_FG),
 }
 
 AVAIL_CHIPS = {

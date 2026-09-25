@@ -532,6 +532,7 @@ boolean check.
 | 3 | `LINE↓` | `ImpliedMove ≤ −6.0` |
 | 4 | `LEVERAGE` | rosterable-pool member, in the top `LEVERAGE_FLAG_TOP_SHARE` (7%) of the pool by `Leverage` this week (blank `Leverage` while unpublished can never clear this) |
 | 5 | `CHALK` | `Own% ≥ 0.20` (20%) -- can only fire once ownership is real; `Own%` reads 0 for everyone until then |
+| 6 | `SPLIT↑` / `SPLIT↓` | rosterable-pool member with at least one of Sleeper/FantasyPros available, `\|mean(Sleeper, FantasyPros) − ProjPts\| ≥ max(SPLIT_ABS_FLOOR, SPLIT_REL_THRESHOLD × ProjPts)` -- see Part C's own section below |
 | — | *(blank)* | none of the above |
 
 `WIND_FLAG_THRESHOLD_MPH = 20.0` is a starting point, not empirically
@@ -591,6 +592,81 @@ a 0-1 fraction to match its already-0-1 scale on `PlayerPoolRaw`/`Player
 Pool`/`Lineups`. The threshold's real-world meaning (20% ownership) and
 the 5/744 flag rate above are both unchanged -- only the number's own
 units moved.
+
+## Part C: `AggPts` and `SPLIT` (second projection sources, 2026-09-24)
+
+`docs/planning/PROMPT_PART_C.md`. Two free sources (Sleeper, FantasyPros)
+are re-scored to exact DraftKings rules (`dk_scoring.py`) and joined onto
+DK's own player Id by normalized name/team/position (`player_join.py`,
+DSTs by team alone). Every source's own fantasy-point total is discarded
+-- only its component stats (yards, TDs, receptions, ...) are re-scored,
+so DK's real rules (including the 300/100/100-yard bonuses, treated as an
+expected value rather than a hard cliff -- see `dk_scoring.py`'s own
+`YARDAGE_CV`/`expected_yardage_bonus` docstrings) apply uniformly no
+matter which source a number came from.
+
+**`AggPts`** (EdgeRaw, Player Pool, Lineups -- immediately after
+`Pts`/`ProjPts`) is the equal-weight mean of every source with a real
+projection for that player: TFFB, Sleeper, FantasyPros. A source missing
+this player (not synced, or a genuine "no real projection this week" --
+both Sleeper and FantasyPros pad their player lists past what they
+actually project, see their own source-module docstrings for how each is
+detected and blanked to `NaN` rather than scored as a fabricated 0) is
+excluded from that player's own average, not treated as a 0. With only
+TFFB available, `AggPts` equals `ProjPts` exactly. It feeds nothing else
+-- `ValAdj`/`Val`/`CeilVal`/the Board/every guardrail still key off
+`ProjPts` alone; `AggPts` is a column Sam reads, not an input to anything
+computed.
+
+**Honest caveat on the blend itself:** the published research behind
+"average several projection sources" is that the gain is *consistency*
+(fewer wild single-source misses), not a large accuracy improvement over
+any one good source. Don't read `AggPts` as more accurate than `ProjPts`
+by construction -- it's a second opinion, not a better one.
+
+**RB/WR calibration gap, not a scoring bug.** C2's own required
+calibration check (compare each source to TFFB per position over the
+rosterable pool after re-scoring) found QB/TE/DST agree with TFFB within
+about a point on the real 2026-09-20 snapshot, but RB and WR run
+systematically **1.5-2 points below** TFFB on both Sleeper and
+FantasyPros independently (mean diff -1.55/-1.78 respectively for RB,
+-1.95/-1.56 for WR; 71-87% of individual players negative, not a few
+outliers dragging the mean). Hand-verified several players' scoring
+arithmetic directly -- it's correct. This reads as TFFB genuinely
+projecting more RB/WR volume than the market consensus, not a bug in
+either scoring engine. Sam's call when this was reported: ship it as-is
+and document the caveat here, rather than exclude either source from the
+RB/WR aggregate. Practical effect: `AggPts` for a RB/WR pulls slightly
+below `ProjPts` more often than not, and `SPLIT↓` (below) fires on RB/WR
+far more than `SPLIT↑` as a direct consequence.
+
+**`SPLIT↑`/`SPLIT↓`** (in `Flags`, lowest priority in the hidden `Flag`,
+below `CHALK`) fires when TFFB's own `ProjPts` disagrees sharply with the
+*other two* sources' mean -- deliberately not `AggPts`, which already
+includes `ProjPts` and would understate the real disagreement by a
+third. Rosterable-pool only (same restriction `LEVERAGE` got, for the
+same reason: a $2,500 backup's disagreement is noise); no flag when
+neither other source has a real number for that player.
+
+```
+gap       = mean(Sleeper, FantasyPros) − ProjPts
+threshold = max(SPLIT_ABS_FLOOR, SPLIT_REL_THRESHOLD × ProjPts)
+fires if  |gap| ≥ threshold
+```
+
+Tuned against the real 2026-09-20 rosterable pool (241 of 250 pool
+players had at least one other source): `gap` quartiles were
+-2.83/-1.41/+0.27, and `|gap|` sat at 2.63/3.86/4.52 at the 80th/90th/95th
+percentiles. `SPLIT_ABS_FLOOR = 4.0` with `SPLIT_REL_THRESHOLD = 0.20`
+(20% of `ProjPts`) fires on 20/250 (**8.0%**) -- inside the 5-10% target
+band. **Not buried:** on that same snapshot every one of those 20 fired
+`SPLIT↓`, zero `SPLIT↑` -- the RB/WR calibration gap above dominates the
+distribution completely at this threshold, so right now `SPLIT` reads
+more like "TFFB is bullish here" than a symmetric disagreement signal.
+Also tuned against only **one** real snapshot -- both external sources
+are new this session, so there's no second week's history the way
+`LEVERAGE`/`LINE` had when they were tuned. Re-check both constants once
+a second week's Sleeper/FantasyPros pull exists.
 
 ## Player Pool ordering: tag group, then salary (Part 7.10)
 
