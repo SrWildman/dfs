@@ -396,7 +396,21 @@ def _overflow_formula(edge_tab: str, position: str, cap: int, added_range: str) 
     count = (
         f'IFERROR(SUMPRODUCT((INDEX(UNIQUE({_union_array(edge_tab, position, added_range)}),0,1)<>"")*1),0)'
     )
-    return f'=IF({count}>{cap},{cap}&" {position} slots, "&{count}&" ticked -- some are hidden","")'
+    # PROMPT_BOARD_FIXES.md item 8 (2026-09-25): the old check compared
+    # PLAYER count against the ROW cap, ignoring that `_grouped_with_
+    # separators_formula` also spends up to 2 of those same rows on blank
+    # separators (Both/Cash/GPP). 10 QBs split across all three groups
+    # need 12 rows in a 10-row block -- 2 are silently cut off by
+    # `_name_formula`'s own ARRAY_CONSTRAIN, yet 10 is not greater than
+    # 10, so no warning ever fired. Fixed by comparing the cap against
+    # `ROWS(...)` of the SAME grouped-with-separators array `_name_
+    # formula` actually constrains -- the true row count that array needs
+    # (players plus whatever separators this week's own group mix
+    # requires), not a recomputation of the separator count that could
+    # drift from the real grouping logic.
+    grouped = _grouped_with_separators_formula(_union_array(edge_tab, position, added_range))
+    needed_rows = f"ROWS({grouped})"
+    return f'=IF({needed_rows}>{cap},{cap}&" {position} slots, "&{count}&" ticked -- some are hidden","")'
 
 
 def write_pool_formulas(

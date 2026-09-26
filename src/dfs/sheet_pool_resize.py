@@ -75,6 +75,7 @@ def grow_block(
     position: str,
     current_last_row: int,
     count: int,
+    header_row: int = 1,
 ) -> int:
     """Grow one position block by `count` rows, inserted immediately after
     `current_last_row`. Caller must pass the block's CURRENT last row (not
@@ -87,8 +88,28 @@ def grow_block(
     EdgeRaw-linked columns (Roof/Wind/...) onto what used to be this
     tab's actual last column (`Y`), so a hardcoded version of this
     function would silently leave every newly-inserted row missing
-    everything from that point on instead of copying it."""
-    header = client.read_range(tab, "A1:1")[0]
+    everything from that point on instead of copying it.
+
+    PROMPT_BOARD_FIXES.md item 8 (2026-09-26), found live: `header_row`
+    used to be hardcoded to row 1 here (correct when this was first
+    written, 2026-09-06 -- Player Pool's header really was row 1 then).
+    The 2026-09-16 add-a-player control row pushed it to row 2 without
+    this function ever being revisited, since nothing called `grow_block`
+    again until this item. Reading `A1:1` then returns the 1-cell control
+    row ("Add a player") instead of the real header, so `last_formula_col`
+    collapses to `column_letter(0) = "A"` -- BELOW `_POSITION_COLUMN =
+    "B"`. The resulting `f"{_POSITION_COLUMN}{row}:{last_formula_col}{row}"`
+    range string (e.g. `"B13:A13"`) is inverted, gets silently
+    re-ordered to `A13:B13`, and every new row ends up with the position
+    label written into columns A AND B, nothing else -- silently missing
+    every real EdgeRaw-linked formula from C onward. Caught by real cell
+    reads after growing the live sheet for real, not by this file's own
+    unit tests (whose fake client, like `fix_color_scale_ranges`' before
+    it, ignores the requested range and always returns the same header
+    regardless of which row was asked for). `header_row` now defaults to
+    1 (correct for a tab whose header really is there) but every real
+    caller must pass its own tab's actual header row explicitly."""
+    header = client.read_range(tab, f"A{header_row}:{header_row}")[0]
     last_formula_col = column_letter(len(header) - 1)
     template_row = client.read_formula(
         tab, f"{_POSITION_COLUMN}{current_last_row}:{last_formula_col}{current_last_row}"
@@ -114,6 +135,7 @@ def resize_player_pool(
     blocks: list[tuple[int, int]],
     positions: list[str],
     target_sizes: list[int],
+    header_row: int = 1,
 ) -> list[tuple[int, int]]:
     """Grow each block in `blocks` (in order, top to bottom) to its
     `target_sizes` count, returning the new block boundaries -- callers
@@ -122,7 +144,11 @@ def resize_player_pool(
     a structural layout once and pinning it as a literal (see
     weekly_reset.py's own docstring). Shrinking is deliberately
     unsupported -- deleting rows that may hold real ticks/formulas is a
-    different, much riskier operation this function doesn't attempt."""
+    different, much riskier operation this function doesn't attempt.
+
+    `header_row` is threaded straight through to `grow_block` -- see its
+    own docstring (PROMPT_BOARD_FIXES.md item 8, 2026-09-26) for the real
+    header-row-1 bug this guards against on Player Pool specifically."""
     new_blocks = []
     shift = 0
     for (start, end), position, target in zip(blocks, positions, target_sizes, strict=True):
@@ -132,16 +158,39 @@ def resize_player_pool(
             raise ValueError(f"{position}: target {target} is smaller than current size {current_size}")
         grow_by = target - current_size
         if grow_by:
-            end = grow_block(client, player_pool_tab, position=position, current_last_row=end, count=grow_by)
+            end = grow_block(
+                client,
+                player_pool_tab,
+                position=position,
+                current_last_row=end,
+                count=grow_by,
+                header_row=header_row,
+            )
             shift += grow_by
         new_blocks.append((start, end))
     return new_blocks
 
 
-def fix_color_scale_ranges(client: SheetsClient, player_pool_tab: str, *, last_row: int) -> None:
-    """Re-point the three EdgeRaw-linked color scales at `2:last_row`,
-    deleting and re-adding rather than trusting Sheets to have
+def fix_color_scale_ranges(
+    client: SheetsClient, player_pool_tab: str, *, last_row: int, header_row: int = 1
+) -> None:
+    """Re-point the three EdgeRaw-linked color scales at `header_row+1:
+    last_row`, deleting and re-adding rather than trusting Sheets to have
     auto-extended them through every insert (see module docstring).
+
+    PROMPT_BOARD_FIXES.md item 8 (2026-09-25): found live, running this
+    against the real template for the first time since Player Pool's own
+    header moved off row 1 (A3, "the add-a-player control row" -- see
+    `weekly_reset.PLAYER_POOL_HEADER_ROW`) -- this hardcoded `"A1:1"`/
+    `"2:last_row"`, which happened to still work for a tab whose header
+    genuinely sits at row 1, but raised `ValueError: 'Leverage' is not in
+    list` the moment it ran for real against Player Pool (header row 2).
+    Never caught by this file's own unit tests because the fake client
+    they use ignores the requested range and always returns the same
+    canned header regardless -- a real "verify by reading cells back"
+    catch, not a mock-covered one. `header_row` now defaults to 1 (correct
+    for a tab whose header really is there) but every real caller must
+    pass its own tab's actual header row explicitly.
 
     PROMPT_BOARD_FIXES.md item 7 (2026-09-25): routed through the shared
     `_scale_rule_specs` dispatch (`sheet_color_scales.py`) instead of the
@@ -149,11 +198,12 @@ def fix_color_scale_ranges(client: SheetsClient, player_pool_tab: str, *, last_r
     (now also routed the same way) -- picks up the same zero-exclusion
     every other scaled column in the workbook now gets.
     """
-    header = client.read_range(player_pool_tab, "A1:1")[0]
+    header = client.read_range(player_pool_tab, f"A{header_row}:{header_row}")[0]
+    data_start = header_row + 1
     for column_name in COLOR_SCALE_LINKED_COLUMNS:
         col = column_letter(header.index(column_name))
         client.clear_conditional_formats(player_pool_tab, column=col)
-        a1 = f"{col}2:{col}{last_row}"
+        a1 = f"{col}{data_start}:{col}{last_row}"
         kind = FIELD_COLOR_SCALES[column_name]
         gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, column_name, zero_exclude_range=a1)
         client.add_color_scale(player_pool_tab, gradient_spec.pop("a1_range"), **gradient_spec)

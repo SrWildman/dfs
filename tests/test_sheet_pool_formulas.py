@@ -1,7 +1,13 @@
 import pytest
 
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
-from dfs.sheet_pool_formulas import _TAG_RANK_ARRAY, _UNKNOWN_TAG_RANK, _union_array, write_pool_formulas
+from dfs.sheet_pool_formulas import (
+    _TAG_RANK_ARRAY,
+    _UNKNOWN_TAG_RANK,
+    _grouped_with_separators_formula,
+    _union_array,
+    write_pool_formulas,
+)
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_COLUMN
 from dfs.weekly_reset import (
@@ -135,9 +141,40 @@ def test_overflow_formula_thresholds_on_the_same_cap():
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
     union = _union_array("EdgeRaw", "QB", _ADDED_RANGE)
     count = f'IFERROR(SUMPRODUCT((INDEX(UNIQUE({union}),0,1)<>"")*1),0)'
+    # PROMPT_BOARD_FIXES.md item 8 (2026-09-25): the threshold is now
+    # ROWS() of the SAME grouped-with-separators array `_name_formula`
+    # itself constrains -- not the player count alone -- so a block that
+    # needs separator rows to fit its own group mix is compared against
+    # its TRUE row need, not just how many players are in it. See
+    # test_overflow_formula_fires_when_separators_alone_push_past_the_cap
+    # for the case this replaces (10 players, exactly at the old flat
+    # count-only cap, that the old formula silently missed).
+    grouped = _grouped_with_separators_formula(union)
+    needed_rows = f"ROWS({grouped})"
     assert formulas[f"{OVERFLOW_COL}2"] == (
-        f'=IF({count}>10,10&" QB slots, "&{count}&" ticked -- some are hidden","")'
+        f'=IF({needed_rows}>10,10&" QB slots, "&{count}&" ticked -- some are hidden","")'
     )
+
+
+def test_overflow_formula_fires_when_separators_alone_push_past_the_cap():
+    # PROMPT_BOARD_FIXES.md item 8's own named bug: 10 QBs split across
+    # all three Both/Cash/GPP groups need 12 rows (10 players + 2
+    # separators) in a 10-row block -- 2 are silently cut off by
+    # ARRAY_CONSTRAIN, yet the OLD check (`count > cap`, 10 > 10) never
+    # fired. The formula must now compare the array's own real row need
+    # (ROWS(grouped), which already accounts for however many separators
+    # this exact group mix needs) against the cap, not the player count.
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+
+    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
+    overflow_formula = formulas[f"{OVERFLOW_COL}2"]
+    # The comparison is against ROWS(...), never a bare player count --
+    # this is what actually fixes the bug (ROWS already includes whatever
+    # separators this week's own group mix needs, so 10 players spread
+    # across all 3 groups correctly evaluates to 12 > 10).
+    assert overflow_formula.startswith("=IF(ROWS(")
+    assert "IF(ROWS(LET(" in overflow_formula
 
 
 def test_name_formula_includes_the_accumulated_add_a_player_list():

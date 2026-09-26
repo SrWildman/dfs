@@ -8,13 +8,22 @@ class SpySheetsClient:
     small in-memory grid -- same convention as this repo's other Spy*
     fakes (test_sheet_links.py, test_sheet_pool_deck.py)."""
 
-    def __init__(self, rows: dict[int, list[str]], header: list[str] | None = None):
+    def __init__(self, rows: dict[int, list[str]], header: list[str] | None = None, header_row: int = 1):
         self._rows = rows  # {row_number: [B, C, ..., last]}
         # Last column is derived from this header's own width (see
         # grow_block's docstring on why it used to be hardcoded to "Y" --
         # a real Phase-3-triggered bug); 6 columns here (A-F) matches
         # _rb_row_29()'s 5 formula cells (B-F) below.
         self._header = header or ["Name", "Pos.", "Team", "CeilVal", "Leverage", "GameEnv"]
+        # PROMPT_BOARD_FIXES.md item 8: the header doesn't ALWAYS sit at
+        # row 1 (Player Pool's real one sits at row 2, past the
+        # add-a-player control row) -- only returning it for the row it
+        # actually claims to be at (blank otherwise) is what makes a wrong
+        # `header_row` argument fail realistically here, the same way it
+        # failed for real against the live template (`ValueError:
+        # 'Leverage' is not in list`), rather than a fake that returns the
+        # same canned header regardless of which row was asked for.
+        self._header_row = header_row
         self.insert_calls: list[tuple[int, int]] = []
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.conditional_format_calls: list[tuple[str, str | None]] = []
@@ -32,7 +41,8 @@ class SpySheetsClient:
         self.update_calls.append((tab_name, a1_range, rows))
 
     def read_range(self, tab_name: str, a1_range: str):
-        return [self._header]
+        row_num = int(a1_range.split(":")[0][1:])
+        return [self._header] if row_num == self._header_row else [[]]
 
     def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
         self.conditional_format_calls.append((tab_name, column))
@@ -99,6 +109,29 @@ def test_grow_block_derives_its_last_column_from_the_header_not_a_hardcode():
     assert {a1 for _, a1, _ in client.update_calls} == {"B30:AB30"}
 
 
+def test_grow_block_reads_the_header_from_its_own_real_row():
+    # PROMPT_BOARD_FIXES.md item 8, found live (2026-09-26): `header_row`
+    # used to be hardcoded to row 1 -- correct when this was first written
+    # (2026-09-06, Player Pool's header really was row 1 then), but the
+    # 2026-09-16 add-a-player control row pushed it to row 2 without this
+    # function ever being revisited. Reading row 1 then returns the
+    # 1-cell control row instead of the real header, so `last_formula_col`
+    # collapses to `column_letter(0) = "A"` -- BELOW `_POSITION_COLUMN =
+    # "B"`, producing an inverted "B{row}:A{row}" range that silently
+    # reorders to "A{row}:B{row}" and writes the position label into
+    # BOTH Name and Pos., losing every real formula from C onward. Caught
+    # for real on the live sheet: every newly-grown row across all five
+    # blocks was missing its EdgeRaw-linked VLOOKUPs entirely.
+    client = SpySheetsClient({29: _rb_row_29()}, header_row=2)
+    grow_block(client, "Player Pool", position="RB", current_last_row=29, count=1, header_row=2)
+    ranges_written = {a1 for _, a1, _ in client.update_calls}
+    assert ranges_written == {"B30:F30"}
+    written = {a1: rows[0] for _, a1, rows in client.update_calls}
+    row30 = written["B30:F30"]
+    assert row30[0] == "RB"
+    assert row30[1] == "=VLOOKUP(A30,PlayerPoolRaw!A:C,3,false)"
+
+
 def test_grow_block_with_zero_count_is_not_expected_to_be_called_but_would_no_op():
     client = SpySheetsClient({29: _rb_row_29()})
     new_last = grow_block(client, "Player Pool", position="RB", current_last_row=29, count=0)
@@ -133,6 +166,25 @@ def test_resize_player_pool_only_grows_blocks_that_need_it_and_shifts_the_rest()
     assert client.insert_calls == [(30, 3), (69, 1), (79, 2)]
 
 
+def test_resize_player_pool_threads_header_row_through_to_grow_block():
+    # Same shape as the header-row regression above, but through the
+    # public `resize_player_pool` entry point -- this is what
+    # `dfs setup resize-player-pool` actually calls, so a header_row that
+    # gets dropped here is just as live-breaking as in `grow_block` itself.
+    client = SpySheetsClient({29: _rb_row_29()}, header_row=2)
+    new_blocks = resize_player_pool(
+        client,
+        player_pool_tab="Player Pool",
+        blocks=[(13, 29)],
+        positions=["RB"],
+        target_sizes=[18],
+        header_row=2,
+    )
+    assert new_blocks == [(13, 30)]
+    written = {a1: rows[0] for _, a1, rows in client.update_calls}
+    assert written["B30:F30"][1] == "=VLOOKUP(A30,PlayerPoolRaw!A:C,3,false)"
+
+
 def test_resize_player_pool_rejects_a_shrink():
     client = SpySheetsClient({11: _rb_row_29()})
     with pytest.raises(ValueError, match="smaller than current size"):
@@ -153,3 +205,18 @@ def test_fix_color_scale_ranges_clears_and_readds_each_linked_column_to_the_new_
     assert cleared_columns == {"D", "E", "F"}  # CeilVal, Leverage, GameEnv per the fake header
     ranges_added = {a1 for _, a1 in client.color_scale_calls}
     assert ranges_added == {"D2:D80", "E2:E80", "F2:F80"}
+
+
+def test_fix_color_scale_ranges_reads_the_header_from_its_own_real_row():
+    # PROMPT_BOARD_FIXES.md item 8, found live: this used to hardcode
+    # "A1:1" regardless of caller -- correct for a tab whose header really
+    # is row 1, but Player Pool's own header sits at row 2 (past the
+    # add-a-player control row), and the old hardcoded version raised
+    # `ValueError: 'Leverage' is not in list` the first time this actually
+    # ran against it. `header_row` must be threaded through to both the
+    # header read AND the scale range's own data-start row.
+    client = SpySheetsClient({}, header_row=2)
+    fix_color_scale_ranges(client, "Player Pool", last_row=101, header_row=2)
+
+    ranges_added = {a1 for _, a1 in client.color_scale_calls}
+    assert ranges_added == {"D3:D101", "E3:E101", "F3:F101"}
