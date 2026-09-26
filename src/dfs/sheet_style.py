@@ -254,6 +254,9 @@ FIELD_FORMATS = {
     "Pace": _num('0.0" s"'),
     "PROE": _num("0.0"),
     "Expl%": _num('0.0"%"'),
+    # GPS (2026-09-26): a model-implied team total, same shape/format as
+    # "Team Implied" just above (a points number, not a fraction/percent).
+    "ModelImplied": _num("0.0"),
     "Total": _num("0.0"),
     "Leverage": _num("0.0"),
     "CeilPct": _num("0.0"),
@@ -279,6 +282,15 @@ FIELD_FORMATS = {
     "ImpliedMove": _num('"+"0.0;"-"0.0;0.0'),
     "TotMove": _num('"+"0.0;"-"0.0;0.0'),
     "SpdMove": _num('"+"0.0;"-"0.0;0.0'),
+    # PROMPT_GPS.md, Slate Grid/Board Slate shape only: GPS is a 1-5 score
+    # (never negative); Model Tot plain like Total; Tot Δ/Model Spd/Spd Δ
+    # signed, same "+"/"-" shape as ImpliedMove/TotMove/SpdMove above --
+    # Model Spd can read negative (away favoured) just like those.
+    "GPS": _num("0.00"),
+    "Model Tot": _num("0.0"),
+    "Tot Δ": _num('"+"0.0;"-"0.0;0.0'),
+    "Model Spd": _num('"+"0.0;"-"0.0;0.0'),
+    "Spd Δ": _num('"+"0.0;"-"0.0;0.0'),
     "Val": _num("0.00"),
     # A3 (2026-09-22): ValAdj is a 0-100 within-position percentile blend
     # now, not a raw points residual -- same one-decimal format as
@@ -624,6 +636,7 @@ EDGE_WIDTHS = {
     "Pace": 70,
     "PROE": 70,
     "Expl%": 70,
+    "ModelImplied": 115,
     "OppPosRank": 115,
     # nflverse's own GameId format is "2026_02_DET_BUF" -- season, week,
     # away, home -- up to 15 characters.
@@ -2198,6 +2211,10 @@ HIDE_TABS = [
     "TFFBOptoRaw",
     "GamesRaw",
     "WeatherRaw",
+    # GPS (2026-09-26): a feed nobody opens directly (Slate Grid/Board's
+    # Slate shape and EdgeRaw's own ModelImplied read it), same treatment
+    # as GamesRaw/WeatherRaw just above.
+    "GPSRaw",
     "SoSQB",
     "SoSRB",
     "SoSWr",
@@ -2473,7 +2490,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         BOARD_QUEUE_HEADER_ROW, BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW, last_col="D", collapsed=False
     )
     _section(
-        BOARD_SLATE_HEADER_ROW, BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW, last_col="G", collapsed=False
+        BOARD_SLATE_HEADER_ROW, BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW, last_col="I", collapsed=False
     )
     # PROMPT_BOARD_FIXES.md item 2: a sub-label row (naming each block's
     # own sort) sits between the section header and the column header now
@@ -2549,7 +2566,11 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     client.format_range(tab, f"D{BOARD_SLATE_FIRST_ROW}:D{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Spread"])
     client.format_range(tab, f"E{BOARD_SLATE_FIRST_ROW}:E{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Pace"])
     client.format_range(tab, f"F{BOARD_SLATE_FIRST_ROW}:F{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Wind"])
-    for col, field_name in (("B", "Total"), ("D", "Spread"), ("E", "Pace")):
+    # PROMPT_GPS.md: GPS/Tot Δ appended after Shootout?, same "scaled
+    # across the whole section" treatment as Total/Spread/Pace above.
+    client.format_range(tab, f"H{BOARD_SLATE_FIRST_ROW}:H{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["GPS"])
+    client.format_range(tab, f"I{BOARD_SLATE_FIRST_ROW}:I{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Tot Δ"])
+    for col, field_name in (("B", "Total"), ("D", "Spread"), ("E", "Pace"), ("H", "GPS"), ("I", "Tot Δ")):
         _scaled(f"{col}{BOARD_SLATE_FIRST_ROW}:{col}{BOARD_SLATE_LAST_ROW}", field_name)
 
     # Per-position leaders: Salary/ValAdj (block 1), Salary/ProjPts (block
@@ -2616,9 +2637,15 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
             # uses for these two header names.
             "K": 92,
             "L": 92,
+            # GPS (2026-09-26): appended past line movement.
+            "M": 52,
+            "N": 84,
+            "O": 72,
+            "P": 84,
+            "Q": 72,
         },
     )
-    client.format_range(tab, "A1:L1", _HEADER_FMT)
+    client.format_range(tab, "A1:Q1", _HEADER_FMT)
     client.format_range(tab, "C2:C19", FIELD_FORMATS["Total"])
     client.format_range(tab, "D2:D19", FIELD_FORMATS["Spread"])
     client.format_range(tab, "F2:G19", FIELD_FORMATS["Wind"])
@@ -2647,8 +2674,30 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
             mid_type="NUMBER",
             mid_value="0",
         )
+    # PROMPT_GPS.md: GPS/Model Tot gradient like Total (higher = more
+    # scoring/higher score is "better" to look at); Tot Δ/Spd Δ diverging
+    # at 0, same shape as Total move/Spread move above; Model Spd gets NO
+    # colour at all, per the prompt's own spec -- it's a plain number, not
+    # a quality to rank.
+    client.format_range(tab, "M2:M19", FIELD_FORMATS["GPS"])
+    client.format_range(tab, "N2:N19", FIELD_FORMATS["Total"])
+    client.format_range(tab, "O2:Q19", FIELD_FORMATS["ImpliedMove"])
+    for col in ("M", "N"):
+        client.add_color_scale(
+            tab, f"{col}2:{col}19", min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX
+        )
+    for col in ("O", "Q"):
+        client.add_color_scale(
+            tab,
+            f"{col}2:{col}19",
+            min_color=GRAD_MIN,
+            mid_color=WHITE,
+            max_color=GRAD_MAX,
+            mid_type="NUMBER",
+            mid_value="0",
+        )
     client.freeze(tab, rows=1, cols=1)
-    return f"{tab}: styled (totals colour-scaled, high wind flagged, movement scaled)"
+    return f"{tab}: styled (totals colour-scaled, high wind flagged, movement scaled, GPS scaled)"
 
 
 def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:

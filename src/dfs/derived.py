@@ -335,6 +335,12 @@ EDGE_COLUMNS = [
     "Pace",
     "PROE",
     "Expl%",
+    # GPS (2026-09-26): this player's own team's model-implied total from
+    # Kyle Borgognoni's TFFB Pace of Play worksheet (`sources/tffb_gps.py`)
+    # -- a pace/EPA model's own team score, not a market, placed beside
+    # the other GAME-group per-team metrics it's computed the same way as
+    # (`_attach_gps`). Append-only per PROMPT_GPS.md's own instruction.
+    "ModelImplied",
     # Sam: "all data should be in edge raw" -- computed the same way
     # PlayerPoolRaw's own (now-fixed) `OppPosRank` is, but natively in
     # Python from the already-synced sos_qb/rb/wr/te/dst CSVs rather than
@@ -624,6 +630,24 @@ def _attach_team_metrics(merged: pd.DataFrame, team_metrics: pd.DataFrame | None
     merged["Pace"] = merged["Team"].map(by_team["Pace"])
     merged["PROE"] = merged["Team"].map(by_team["PROE"])
     merged["Expl%"] = merged["Team"].map(by_team["Expl%"])
+    return merged
+
+
+def _attach_gps(merged: pd.DataFrame, gps: pd.DataFrame | None) -> pd.DataFrame:
+    """`ModelImplied` joined onto each player's row by his own `Team` --
+    `gps` is `sources/tffb_gps.py`'s own shape (`Team`/`ImpliedTotal`/
+    `GPS`), a whole-slate Python join exactly like `_attach_team_metrics`'s.
+    Only `ImpliedTotal` is surfaced on EdgeRaw (as `ModelImplied`) -- `GPS`
+    itself is a per-GAME score, not a per-player one, and belongs on
+    Slate Grid/Board's Slate shape (see `sheet_views.py`), not here.
+    Missing entirely (the article isn't published yet, or the fetch
+    failed) blanks `ModelImplied` for every row -- same fail-soft contract
+    as every other optional input here."""
+    if gps is None:
+        merged["ModelImplied"] = pd.NA
+        return merged
+    by_team = gps.set_index("Team")
+    merged["ModelImplied"] = merged["Team"].map(by_team["ImpliedTotal"])
     return merged
 
 
@@ -1003,6 +1027,7 @@ def build_edge_frame(
     fantasypros: pd.DataFrame | None = None,
     snaps: pd.DataFrame | None = None,
     team_metrics: pd.DataFrame | None = None,
+    gps: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -1035,7 +1060,10 @@ def build_edge_frame(
     `GameEnv` indirectly (see `_game_env_scores`); missing it blanks the
     three team-metric columns and `GameEnv` silently reduces to its
     pre-C7, Vegas-only formula, same fail-soft contract as everything else
-    optional here.
+    optional here. `gps` is `sources/tffb_gps.py`'s own shape (`Team`/
+    `ImpliedTotal`/`GPS`) -- optional, feeds only `ModelImplied` (see
+    `_attach_gps`); missing it blanks `ModelImplied` for every row, same
+    fail-soft contract as everything else optional here.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -1106,6 +1134,7 @@ def build_edge_frame(
     merged["_LeverageFlagEligible"] = _leverage_flag_eligible(merged["Leverage"], val_adj_pool)
 
     merged = _attach_team_metrics(merged, team_metrics)
+    merged = _attach_gps(merged, gps)
     merged["GameEnv"] = _game_env_scores(
         merged["Game"], merged["OU"], merged["Spread"], merged["Team"], merged["Pace"], merged["PROE"]
     )

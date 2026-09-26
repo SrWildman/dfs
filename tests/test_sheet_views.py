@@ -21,6 +21,7 @@ from dfs.sheet_views import (
     BOARD_QUEUE_HEADER_ROW,
     BOARD_SLATE_AWAY_COL,
     BOARD_SLATE_AWAY_COL_INDEX,
+    BOARD_SLATE_COLHEADER_ROW,
     BOARD_SLATE_FIRST_ROW,
     BOARD_SLATE_GAMEID_COL,
     BOARD_SLATE_GAMEID_COL_INDEX,
@@ -376,6 +377,7 @@ def _build_board(client=None, **overrides):
         "edge_tab": "EdgeRaw",
         "games_tab": "GamesRaw",
         "weather_tab": "WeatherRaw",
+        "gps_tab": "GPSRaw",
         "player_pool_tab": "Player Pool",
         **overrides,
     }
@@ -643,7 +645,9 @@ def test_old_top_leverage_and_landmines_panels_are_gone():
 
 def test_slate_grid_header_row_matches_style_slate_grids_column_assumptions():
     client = _CapturingClient()
-    build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw")
+    build_slate_grid(
+        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
+    )
     header = client.rows[0]
     assert header[2] == "Total"  # style_slate_grid colour-scales C
     assert header[3] == "Spread"  # style_slate_grid number-formats D
@@ -661,12 +665,14 @@ def test_slate_grid_movement_columns_read_the_home_teams_edgeraw_row():
     # home-team-perspective convention for the static Spread column),
     # keyed off GamesRaw's own Home column (C), not Away (B).
     client = _CapturingClient()
-    build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw")
+    build_slate_grid(
+        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
+    )
     row = client.rows[1]
     assert "VLOOKUP(GamesRaw!$C2," in row[10]
     assert "VLOOKUP(GamesRaw!$C2," in row[11]
-    assert "EdgeRaw!$D:$AF" in row[10]  # Team through TotMove
-    assert "EdgeRaw!$D:$AG" in row[11]  # Team through SpdMove
+    assert "EdgeRaw!$D:$AG" in row[10]  # Team through TotMove
+    assert "EdgeRaw!$D:$AH" in row[11]  # Team through SpdMove
 
 
 def test_slate_grid_wind_gust_vlookups_derive_from_weather_columns_not_hardcoded():
@@ -678,12 +684,79 @@ def test_slate_grid_wind_gust_vlookups_derive_from_weather_columns_not_hardcoded
     from dfs.sources.weather import WEATHER_COLUMNS
 
     client = _CapturingClient()
-    build_slate_grid(client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw")
+    build_slate_grid(
+        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
+    )
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
     gust_idx = WEATHER_COLUMNS.index("Gust") + 1
     row = client.rows[1]
     assert f"WeatherRaw!$A:$F,{wind_idx},FALSE" in row[5]
     assert f"WeatherRaw!$A:$G,{gust_idx},FALSE" in row[6]
+
+
+def test_slate_grid_gps_columns_read_gpsraw_not_edgeraw():
+    # PROMPT_GPS.md: GPS itself (the 1-5 score) never made it onto EdgeRaw
+    # (a per-GAME score, not per-player) -- Slate Grid's GPS/Model Tot/
+    # Tot Δ/Model Spd/Spd Δ all read GPSRaw directly, keyed by team code
+    # off GamesRaw's own Away ($B)/Home ($C) columns, not EdgeRaw.
+    client = _CapturingClient()
+    build_slate_grid(
+        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
+    )
+    header = client.rows[0]
+    assert header[12:17] == ["GPS", "Model Tot", "Tot Δ", "Model Spd", "Spd Δ"]
+    row = client.rows[1]
+    for col in range(12, 17):
+        assert "GPSRaw!$A:$C" in row[col], f"column {col} should read GPSRaw"
+    assert "VLOOKUP(GamesRaw!$B2," in row[12] or "VLOOKUP(GamesRaw!$C2," in row[12]
+
+
+def test_slate_grid_model_tot_and_deltas_blank_when_either_team_missing_gps():
+    # Never a fabricated 0 -- if either team's ImpliedTotal lookup comes
+    # back blank (GPS not synced, or a team code miss), Model Tot/Tot Δ/
+    # Model Spd/Spd Δ must all blank out entirely rather than silently
+    # computing off a coerced zero.
+    client = _CapturingClient()
+    build_slate_grid(
+        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
+    )
+    row = client.rows[1]
+    model_tot, tot_delta, model_spd, spd_delta = row[13], row[14], row[15], row[16]
+    for formula in (model_tot, tot_delta, model_spd, spd_delta):
+        assert "IF(OR(" in formula
+        assert formula.count('=""') >= 2  # both away/home blank-checks present
+
+
+def test_slate_grid_model_spd_matches_games_raws_home_favoured_sign_convention():
+    # `Model Spd` = home - away ImpliedTotal, the SAME sign convention
+    # GamesRaw's own Spread column already uses (positive = home
+    # favoured -- confirmed against nflverse_games.py's own docstring,
+    # the same fact PROMPT_BOARD_FIXES.md item 1's Fav/Spread derivation
+    # relies on) -- so Spd Δ is a plain subtraction, no sign flip.
+    client = _CapturingClient()
+    build_slate_grid(
+        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
+    )
+    row = client.rows[1]
+    model_spd = row[15]
+    # The final arithmetic (after the blank-guard) must be home - away --
+    # the LAST "$C2 ... - ... $B2" occurrence, not the guard clause (which
+    # mentions both in away-then-home order first, for the blank check).
+    home_pos = model_spd.rindex("GamesRaw!$C2")
+    away_pos = model_spd.rindex("GamesRaw!$B2")
+    assert home_pos < away_pos  # home term appears first, i.e. home - away
+
+
+def test_board_slate_shape_gps_and_tot_delta_appended_after_shootout():
+    client = _build_board()
+    header = client.rows[BOARD_SLATE_COLHEADER_ROW - 1]
+    assert header[7:9] == ["GPS", "Tot Δ"]
+    row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
+    assert "GPSRaw!$A:$C" in row[7]
+    assert f"${BOARD_SLATE_HOME_COL}" in row[7]  # GPS read off the home team's row
+    assert "GPSRaw!$A:$C" in row[8]
+    assert f"${BOARD_SLATE_AWAY_COL}" in row[8]
+    assert f"${BOARD_SLATE_HOME_COL}" in row[8]  # Tot Δ needs both away and home
 
 
 def test_exposure_header_row_matches_style_exposures_column_assumptions():

@@ -2710,6 +2710,89 @@ found rolling it out:**
     (Geno Smith, tagged GPP) that the old 10-row QB cap had been silently
     cutting off -- exactly the failure mode this item exists to fix.
 
+## GPS: Kyle Borgognoni's TFFB Pace of Play score, next to Vegas (2026-09-26)
+
+New source `tffb_gps` (`sources/tffb_gps.py`), gated behind a Step 0
+inspection (real Week 2/3 CSVs fetched through the authenticated `tffb`
+profile) before anything was built -- confirmed live: plain UTF-8 (the
+proxy/generic-fetch "binary" read elsewhere was the tooling choking on
+the CDN's `content-type: application/octet-stream`, not the actual
+bytes), model-implied team totals genuinely in the CSV (`Implied Total`;
+Week 3's JAX/NE rows read 29.0/17.5, exactly Sam's own worked example),
+GPS itself its own column, teams keyed by DK-standard code, columns
+identical across both weeks checked. Discovers the article from TFFB's
+own `/dfs/` listing every time (never a constructed slug -- confirmed
+live that neither the slug nor the CSV filename follows a stable
+pattern), matched on a real word boundary (`week[\s-]{N}(?![0-9])`) so
+week 1 can never match week 10-19. Not in `LIVE_SYNC_SOURCES` (weekly
+cadence, same as `sos_*`/`snaps`/`pbp`). "Not published yet" raises like
+any other fetch failure -- `sync.py`'s existing catch-and-`record_failure`
+path already means "log a warning and move on," so no separate mechanism
+was needed for that case specifically.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-26 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | New member `ModelImplied` inserted into the `GAME` group right after `Expl%`, before `OppPosRank` -- everything from `OppPosRank` onward shifts one position right. Linked (VLOOKUP against EdgeRaw) on the three builder tabs, same as `Pace`/`PROE`/`Expl%`. New tab `GPSRaw` (one row per team: `Team`/`ImpliedTotal`/`GPS`), added to `[google_sheets.tab_mappings]` as `tffb_gps`, hidden into staging (`sheet_style.HIDE_TABS`). | `derived.EDGE_COLUMNS` 41 columns (`Expl%` at 20, `OppPosRank` 21, `Wind` 36, `Id` 39, `Flag` 40). `sheet_links.LINKED_EDGE_COLUMNS` 24 members. `PLAYER_POOL_RAW_COLUMN_ORDER` 43 cols, `PLAYER_POOL_COLUMN_ORDER` 49, `LINEUPS_COLUMN_ORDER` 52. No `GPSRaw` tab. | `derived.EDGE_COLUMNS` 42 columns (`Expl%` still at 20, new `ModelImplied` at 21, `OppPosRank` now 22, `Wind` 37, `Id` 40, `Flag` 41). `LINKED_COLUMNS` 25 members (`ModelImplied` inserted right after `Expl%`). `PLAYER_POOL_RAW_COLUMN_ORDER` 44, `PLAYER_POOL_COLUMN_ORDER` 50, `LINEUPS_COLUMN_ORDER` 53. `GPSRaw` tab exists on both sheets. | Live + Template | `derived.EDGE_COLUMNS`, new `derived._attach_gps`, `derived.build_edge_frame` (new `gps` param), `sheet_columns.GAME`/`LINKED_COLUMNS` (gain `ModelImplied`), `sheet_color_scales.FIELD_COLOR_SCALES` (gains `ModelImplied`/`GPS`/`Model Tot`/`Tot Δ`/`Spd Δ`), `sheet_style.FIELD_FORMATS`/`EDGE_WIDTHS`/`HIDE_TABS`, `sheet_views.build_slate_grid` (new `gps_tab` param, 5 new columns), `sheet_views.build_board`/`BOARD_SLATE_COLHEADER` (new `gps_tab` param, 2 new columns), `sources/tffb_gps.py` (whole module), `sources/edge.py` (loads `tffb_gps`), every EDGE_COLUMNS-index-pinning test in `tests/test_sheet_links.py`/`test_sheet_style.py`/`test_sheet_views.py`. |
+
+**Where it shows, per the prompt's own spec:** EdgeRaw's `ModelImplied`
+(per-player, this player's own team's score); Slate Grid's `GPS`/`Model
+Tot`/`Tot Δ`/`Model Spd`/`Spd Δ` (the full detail, reading `GPSRaw`
+directly since `GPS` itself -- a per-GAME score -- never lands on
+EdgeRaw); Board's Slate shape gets `GPS`/`Tot Δ` only ("just the
+signal," per the prompt's own instruction -- `Model Spd`/`Spd Δ` live on
+Slate Grid only). `Model Tot` is computed as home + away `ImpliedTotal`
+on the sheet side rather than trusted from the CSV's own separately-
+computed `TOTAL` column (see `tffb_gps.py`'s module docstring). `Model
+Spd` uses the SAME sign convention `GamesRaw!Spread` already does
+(positive = home favoured, confirmed against `nflverse_games.py`'s own
+docstring -- the same fact `PROMPT_BOARD_FIXES.md` item 1 relies on), so
+`Spd Δ` needs no sign flip. Every delta/sum blanks out entirely (never a
+fabricated 0) if either team's `ImpliedTotal` lookup misses.
+
+**A real live blocker found rolling this out, not in the plan:**
+`dfs setup polish` crashed (`APIError: Cannot update a column that
+doesn't exist... only 42 columns`) trying to set `ModelImplied`'s width
+on EdgeRaw -- `reorder-columns` grows PlayerPoolRaw/Player Pool/Lineups'
+grids automatically, but EdgeRaw's own header only ever changes via a
+*real* `edge` sync (never touched by any structural command), so its
+physical grid was still provisioned at the pre-GPS width. Fixed by
+`SheetsClient.ensure_column_capacity` (already existed, written for the
+exact same class of issue during Player Pool's own provisioning) --
+grown to 43 columns on both sheets before re-running polish, no data
+touched. EdgeRaw's own header will genuinely show `ModelImplied` the
+next time a real `dfs sync` runs; until then `dfs doctor` correctly (and
+expectedly) flags the mismatch -- this is the same self-resolving gap
+every other `EDGE_COLUMNS` addition leaves on a sheet that hasn't been
+resynced since.
+
+**A second real bug found rolling this out, unrelated to GPS itself:**
+`sheet_instructions.py`'s `_DOC_LINKS_HEADER_ROW` is a hardcoded literal
+that must equal `_TAB_FIRST_ROW + len(_TAB_ROWS)` -- adding `GPSRaw`'s
+own row to `_TAB_ROWS` (18 -> 19 entries) without also updating it would
+have silently overwritten the last tab row ("Results") with the
+doc-links header the next time `build_instructions_tab` ran, a dict-key
+collision, not a raised error. Caught before it ever wrote to a real
+sheet, by manually reproducing the write and noticing "Results" never
+appeared. Fixed the constant (26 -> 27) and added a `render_
+instructions_grid`-time assertion (`_DOC_LINKS_HEADER_ROW ==
+_TAB_FIRST_ROW + len(_TAB_ROWS)`) so the next person who adds a
+`_TAB_ROWS` entry gets a loud, immediate failure instead of quietly
+losing a row. Since this module "never inserts or deletes a row" itself
+by design, the fix also required a REAL one-row `insertDimension` on the
+Instructions tab (at row 15, ahead of where GPSRaw's own row belongs) on
+both sheets, verified by reading every row back before re-running
+`build_instructions_tab`.
+
+**Incidental finding, unrelated to GPS, not fixed (flagged for Sam to
+decide):** `pbp` (Part C, C7) has no `tab_mappings` entry in either
+`config.toml` or `config.example.toml` -- a full `dfs sync` (not
+`--live`) would raise `SheetsError: No tab mapped for source 'pbp'` the
+moment it reaches `pbp` in `SOURCES`, since `run_sync` requires a tab
+mapping for every source when `upload=True`. Never hit this session
+because every real sync so far has been `--live` (which excludes `pbp`)
+or a targeted single-source script. `tffb_gps` was given a real tab
+(`GPSRaw`) specifically to avoid the same gap.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

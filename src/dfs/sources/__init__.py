@@ -18,6 +18,7 @@ from dfs.sources.nflverse_pbp import NflversePbpSource
 from dfs.sources.nflverse_snaps import NflverseSnapsSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
 from dfs.sources.sleeper_projections import SleeperProjectionsSource
+from dfs.sources.tffb_gps import TffbGpsSource
 from dfs.sources.tffb_projections import TffbProjectionsSource
 from dfs.sources.tffb_sos import TffbSosSource
 from dfs.sources.weather import WeatherSource
@@ -41,7 +42,10 @@ from dfs.sources.weather import WeatherSource
 # treatment for the same reason, plus its own: it fetches two full-season
 # parquet files (~20-40MB combined, verified live 2026-09-25) every run,
 # real bandwidth/time `dfs sync --live`'s whole "fast pass" purpose
-# shouldn't pay for on every quick re-sync.
+# shouldn't pay for on every quick re-sync. "tffb_gps" (GPS, 2026-09-26)
+# gets the same treatment for the same reason -- Kyle Borg's Pace of Play
+# article only changes once a week (published Wednesday), so a fast
+# live-sync pass has nothing new to gain from re-fetching it.
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
@@ -50,6 +54,7 @@ SOURCES: dict[str, Source] = {
     "fantasypros": FantasyProsProjectionsSource(),
     "snaps": NflverseSnapsSource(),
     "pbp": NflversePbpSource(),
+    "tffb_gps": TffbGpsSource(),
     "sos_qb": TffbSosSource("QB"),
     "sos_rb": TffbSosSource("RB"),
     "sos_wr": TffbSosSource("WR"),

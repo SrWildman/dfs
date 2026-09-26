@@ -104,6 +104,7 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "Pace",
         "PROE",
         "Expl%",
+        "ModelImplied",
         "OppPosRank",
         "ImpliedMove",
         "TotMove",
@@ -476,7 +477,7 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_fourteen_columns_skipping_raw_player_metrics():
+def test_polish_edge_scales_fifteen_columns_skipping_raw_player_metrics():
     # Phase 4 (4.1): EdgeRaw isn't position-grouped, so ProjPts/Ceiling/
     # Val/CeilVal (EDGE_UNSCALED_PLAYER_METRICS) are skipped there --
     # CeilPct/Leverage (already percentile) stand in for them, same as
@@ -486,19 +487,20 @@ def test_polish_edge_scales_fourteen_columns_skipping_raw_player_metrics():
     # `ValAdj` (Part 7.2) joins this scaled set too -- already a
     # per-position residual, not a raw player metric, so it's excluded
     # from EDGE_UNSCALED_PLAYER_METRICS on purpose (see that constant's
-    # own comment).
+    # own comment). GPS's `ModelImplied` (2026-09-26) joins it too, same
+    # reasoning as `Pace`/`Team Implied` (team-level, not player-skewed).
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = [
         name
         for name in edge_header
         if name in FIELD_COLOR_SCALES and name not in EDGE_UNSCALED_PLAYER_METRICS
     ]
-    assert len(matched) == 14
+    assert len(matched) == 15
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 14
+    assert len(client.color_scale_calls) == 15
 
 
 def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
@@ -865,9 +867,10 @@ def test_style_board_scales_leaders_and_punt_per_position_not_across_the_whole_b
     style_board(client)
 
     # 5 positions x (ValAdj + ProjPts) in Leaders, + 5 positions x ValAdj
-    # in Punt = 15 per-position gradient rules, plus Slate shape's 3
-    # (Total/Spread/Pace) and Stack's 1 (Total) = 19 total.
-    assert len(client.color_scale_calls) == 19
+    # in Punt = 15 per-position gradient rules, plus Slate shape's 5
+    # (Total/Spread/Pace/GPS/Tot Δ, GPS's own PROMPT_GPS.md addition) and
+    # Stack's 1 (Total) = 21 total.
+    assert len(client.color_scale_calls) == 21
 
     def _row_span(a1: str) -> int:
         start, end = a1.split(":")

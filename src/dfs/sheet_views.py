@@ -27,6 +27,7 @@ from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, _canonical_id
 from dfs.sources.nflverse_games import GAMES_COLUMNS
+from dfs.sources.tffb_gps import GPS_COLUMNS
 from dfs.sources.weather import WEATHER_COLUMNS
 from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
 
@@ -122,7 +123,11 @@ BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
 # `Total` -- two columns, not one "KC -3.5" text cell, since text can't be
 # colour-scaled (item 6 scales `Spread`). `Pace` (Part C, C7) stays where
 # it was relative to Wind/Shootout, just shifted two further right.
-BOARD_SLATE_COLHEADER = ["Matchup", "Total", "Fav", "Spread", "Pace", "Wind", "Shootout?"]
+# PROMPT_GPS.md (2026-09-26): `GPS`/`Tot Δ` appended after the columns
+# PROMPT_BOARD_FIXES.md added, per its own "just the signal" instruction
+# (no `Model Spd`/`Spd Δ` here -- that pair lives on Slate Grid's fuller
+# detail view instead).
+BOARD_SLATE_COLHEADER = ["Matchup", "Total", "Fav", "Spread", "Pace", "Wind", "Shootout?", "GPS", "Tot Δ"]
 
 BOARD_LEADERS_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
 # PROMPT_BOARD_FIXES.md item 2: a sub-label row naming each block's own
@@ -265,7 +270,13 @@ def _pp_rng(pool_tab: str, name: str, start_row: int, end_row: int) -> str:
 
 
 def build_board(
-    client: SheetsClient, *, edge_tab: str, games_tab: str, weather_tab: str, player_pool_tab: str
+    client: SheetsClient,
+    *,
+    edge_tab: str,
+    games_tab: str,
+    weather_tab: str,
+    gps_tab: str,
+    player_pool_tab: str,
 ) -> str:
     """Phase 6, Part 3 (2026-09-22): rebuilt from three ranked player
     panels (a question Sam already answered the moment he ticked his
@@ -317,6 +328,7 @@ def build_board(
     g = _q(games_tab)
     w = _q(weather_tab)
     e = _q(edge_tab)
+    gp = _q(gps_tab)
 
     live = f'{name}<>""'
     not_out = f'NOT(ISNUMBER(SEARCH("OUT",{flag})))'
@@ -557,6 +569,16 @@ def build_board(
     team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
     pace_col = column_letter(EDGE_COLUMNS.index("Pace") + EDGE_DATA_OFFSET)
     pace_idx = EDGE_COLUMNS.index("Pace") - EDGE_COLUMNS.index("Team") + 1
+    # PROMPT_GPS.md: GPS/Tot Δ read GPSRaw directly (one row per team,
+    # `sources/tffb_gps.py`), not EdgeRaw's own `ModelImplied` -- GPS
+    # itself (the 1-5 score) never made it onto EdgeRaw at all, a
+    # per-GAME score, not a per-player one (see `derived._attach_gps`'s
+    # docstring). `Model Tot` for `Tot Δ` is home + away `ImpliedTotal`
+    # computed here, same reasoning as Slate Grid's own `Model Tot`
+    # (`build_slate_grid`'s docstring covers why, not repeated here).
+    gps_end_col = column_letter(len(GPS_COLUMNS) - 1)
+    gps_implied_idx = GPS_COLUMNS.index("ImpliedTotal") + 1
+    gps_score_idx = GPS_COLUMNS.index("GPS") + 1
     # PROMPT_BOARD_FIXES.md item 1: `Fav`/`Spread` sourced from the SAME
     # place `Total` already is (GamesRaw, nflverse `spread_line` -- positive
     # means the HOME team is favoured, confirmed against `nflverse_games.py`'s
@@ -608,6 +630,13 @@ def build_board(
     for i in range(BOARD_SLATE_ROWS):
         r = BOARD_SLATE_FIRST_ROW + i
         guard = f'IF($A{r}="","",'
+        away_implied = (
+            f'IFERROR(VLOOKUP(${BOARD_SLATE_AWAY_COL}{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
+        )
+        home_implied = (
+            f'IFERROR(VLOOKUP(${BOARD_SLATE_HOME_COL}{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
+        )
+        both_implied_known = f'OR({away_implied}="",{home_implied}="")'
         _set(
             r,
             [
@@ -617,6 +646,9 @@ def build_board(
                 f"={guard}IFERROR(VLOOKUP(${BOARD_SLATE_GAMEID_COL}{r},{w}!$A:${wind_end_col},"
                 f'{wind_idx},FALSE),""))',
                 f'={guard}IF($B{r}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
+                f"={guard}IFERROR(VLOOKUP(${BOARD_SLATE_HOME_COL}{r},{gp}!$A:${gps_end_col},"
+                f'{gps_score_idx},FALSE),""))',
+                f'={guard}IF({both_implied_known},"",({away_implied}+{home_implied})-$B{r}))',
             ],
             start_col=4,
         )
@@ -730,7 +762,9 @@ def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: s
 # ---------------------------------------------------------------------------
 
 
-def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str, edge_tab: str) -> str:
+def build_slate_grid(
+    client: SheetsClient, *, games_tab: str, weather_tab: str, edge_tab: str, gps_tab: str
+) -> str:
     """One row per game instead of one row per player.
 
     Surfaces AwayRest/HomeRest and DivGame, which `nflverse_games` already
@@ -762,8 +796,30 @@ def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str, 
     own `TotMove`/`SpdMove` already diff against `nfl_calendar.
     week_start_date` (`sources/edge.py`), not the last sync, so nothing
     new needed building here beyond surfacing the existing columns.
+
+    GPS (2026-09-26): `GPS`/`Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ`,
+    sourced from `gps_tab` (`sources/tffb_gps.py`'s own `GPSRaw`, one row
+    per team) rather than EdgeRaw's `ModelImplied` -- `GPS` itself (the
+    1-5 score) never made it onto EdgeRaw at all (a per-GAME score, not a
+    per-player one; see `derived._attach_gps`'s own docstring for why),
+    so this tab's own per-game shape needs the raw per-team source
+    either way. `Model Tot` is home + away `ImpliedTotal` computed here
+    (not the CSV's own separately-computed `TOTAL` column, which this
+    source deliberately drops -- see `tffb_gps.py`'s module docstring for
+    why trusting a recomputation from the same two inputs is preferred
+    over trusting the CSV's own agreement with it). `Model Spd` is the
+    home margin (`home_implied - away_implied`) in the SAME sign
+    convention `GamesRaw!$L` already uses (positive = home favoured --
+    confirmed against `nflverse_games.py`'s own module docstring, same
+    fact `PROMPT_BOARD_FIXES.md` item 1's `Fav`/`Spread` derivation relies
+    on), so `Spd Δ` is a plain subtraction, no sign flip needed. Both
+    deltas -- and `Model Tot`/`Model Spd` themselves -- blank out
+    entirely (never a fabricated 0) if either team's `ImpliedTotal`
+    lookup comes back blank (GPS not synced yet, or a team code that
+    doesn't match), rather than trusting `N()`-style zero-coercion, which
+    would silently read "no GPS data" as "a real 0-point model total."
     """
-    g, w, e = _q(games_tab), _q(weather_tab), _q(edge_tab)
+    g, w, e, gp = _q(games_tab), _q(weather_tab), _q(edge_tab), _q(gps_tab)
     wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
     gust_end_col = column_letter(WEATHER_COLUMNS.index("Gust"))
@@ -773,6 +829,11 @@ def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str, 
     tot_move_idx = EDGE_COLUMNS.index("TotMove") - EDGE_COLUMNS.index("Team") + 1
     spd_move_end_col = column_letter(EDGE_COLUMNS.index("SpdMove") + EDGE_DATA_OFFSET)
     spd_move_idx = EDGE_COLUMNS.index("SpdMove") - EDGE_COLUMNS.index("Team") + 1
+    gps_end_col = column_letter(len(GPS_COLUMNS) - 1)
+    gps_implied_idx = GPS_COLUMNS.index("ImpliedTotal") + 1
+    gps_score_idx = GPS_COLUMNS.index("GPS") + 1
+    games_total_col = _games_col("Total")
+    games_spread_col = _games_col("Spread")
     rows = [
         [
             "Matchup",
@@ -787,18 +848,26 @@ def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str, 
             "Stadium",
             "Total move",
             "Spread move",
+            "GPS",
+            "Model Tot",
+            "Tot Δ",
+            "Model Spd",
+            "Spd Δ",
         ]
     ]
     for r in range(2, 20):
         guard = f'IF({g}!$A{r}="","",'
+        away_implied = f'IFERROR(VLOOKUP({g}!$B{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
+        home_implied = f'IFERROR(VLOOKUP({g}!$C{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
+        both_implied_known = f'OR({away_implied}="",{home_implied}="")'
         rows.append(
             [
                 f'={guard}{g}!$B{r}&" @ "&{g}!$C{r})',
                 f"={guard}"
                 f'IFERROR(TEXT({g}!$D{r},"ddd")&" "&TEXT({g}!$E{r},"h:mm am/pm"),'
                 f'{g}!$D{r}&" "&{g}!$E{r}))',
-                f"={guard}{g}!$M{r})",
-                f"={guard}{g}!$L{r})",
+                f"={guard}{g}!${games_total_col}{r})",
+                f"={guard}{g}!${games_spread_col}{r})",
                 f"={guard}{g}!$G{r})",
                 f'={guard}IFERROR(VLOOKUP({g}!$A{r},{w}!$A:${wind_end_col},{wind_idx},FALSE),""))',
                 f'={guard}IFERROR(VLOOKUP({g}!$A{r},{w}!$A:${gust_end_col},{gust_idx},FALSE),""))',
@@ -809,10 +878,17 @@ def build_slate_grid(client: SheetsClient, *, games_tab: str, weather_tab: str, 
                 f'{tot_move_idx},FALSE),""))',
                 f"={guard}IFERROR(VLOOKUP({g}!$C{r},{e}!${team_col}:${spd_move_end_col},"
                 f'{spd_move_idx},FALSE),""))',
+                f'={guard}IFERROR(VLOOKUP({g}!$C{r},{gp}!$A:${gps_end_col},{gps_score_idx},FALSE),""))',
+                f'={guard}IF({both_implied_known},"",{away_implied}+{home_implied}))',
+                f'={guard}IF({both_implied_known},"",'
+                f"({away_implied}+{home_implied})-{g}!${games_total_col}{r}))",
+                f'={guard}IF({both_implied_known},"",{home_implied}-{away_implied}))',
+                f'={guard}IF({both_implied_known},"",'
+                f"({home_implied}-{away_implied})-{g}!${games_spread_col}{r}))",
             ]
         )
     client.write_tab(SLATE_TAB, rows)
-    return f"{SLATE_TAB}: built (18 game rows off GamesRaw + WeatherRaw + EdgeRaw)"
+    return f"{SLATE_TAB}: built (18 game rows off GamesRaw + WeatherRaw + EdgeRaw + GPSRaw)"
 
 
 # ---------------------------------------------------------------------------

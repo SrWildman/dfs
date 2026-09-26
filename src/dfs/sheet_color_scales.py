@@ -85,6 +85,9 @@ FIELD_COLOR_SCALES = {
     "Pace": _REVERSED,
     "PROE": _GRADIENT,
     "Expl%": _GRADIENT,
+    # GPS (2026-09-26): team-level model-implied total, same reasoning as
+    # "Team Implied" just below (every player on a team shares one value).
+    "ModelImplied": _GRADIENT,
     "Team Implied": _GRADIENT,
     "O/U": _GRADIENT,
     "OU": _GRADIENT,
@@ -93,6 +96,16 @@ FIELD_COLOR_SCALES = {
     "ImpliedMove": _DIVERGING,
     "TotMove": _DIVERGING,
     "SpdMove": _DIVERGING,
+    # PROMPT_GPS.md, Slate Grid/Board Slate shape only (never EdgeRaw --
+    # GPS/Model Tot/Tot Δ/Spd Δ don't live there): GPS/Model Tot are
+    # gradient like Total; Tot Δ/Spd Δ are diverging at 0, same shape as
+    # TotMove/SpdMove above. `Model Spd` is deliberately absent -- no
+    # colour at all, per the prompt's own spec (a plain number, not a
+    # quality to rank).
+    "GPS": _GRADIENT,
+    "Model Tot": _GRADIENT,
+    "Tot Δ": _DIVERGING,
+    "Spd Δ": _DIVERGING,
     # Week 3 feedback (A1), found live 2026-09-22: Spread was already here,
     # but as _DIVERGING -- zero as a neutral midpoint, negative (this
     # team's own favorite side) mapped to red, positive (underdog) mapped

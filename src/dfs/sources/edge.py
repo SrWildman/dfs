@@ -173,6 +173,11 @@ class EdgeSource(Source):
                 "pbp not synced yet -- Pace/PROE/Expl%% will be blank and GameEnv falls back to "
                 "its Vegas-only formula"
             )
+        gps = _try_load_current("tffb_gps")
+        if gps is None:
+            log.warning(
+                "tffb_gps not synced yet (not published, or the fetch failed) -- ModelImplied will be blank"
+            )
 
         result = build_edge_frame(
             projections,
@@ -185,6 +190,7 @@ class EdgeSource(Source):
             fantasypros=fantasypros,
             snaps=snaps,
             team_metrics=team_metrics,
+            gps=gps,
         )
         if result.unmatched_names:
             log.warning(

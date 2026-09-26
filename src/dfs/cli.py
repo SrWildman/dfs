@@ -976,8 +976,11 @@ def sheets_build_views(
     edge_tab = mappings.get("edge")
     games_tab = mappings.get("nflverse_games")
     weather_tab = mappings.get("weather")
-    if not (edge_tab and games_tab and weather_tab):
-        console.print("[red]config.toml needs 'edge', 'nflverse_games' and 'weather' tab mappings.[/red]")
+    gps_tab = mappings.get("tffb_gps")
+    if not (edge_tab and games_tab and weather_tab and gps_tab):
+        console.print(
+            "[red]config.toml needs 'edge', 'nflverse_games', 'weather' and 'tffb_gps' tab mappings.[/red]"
+        )
         raise typer.Exit(code=1)
 
     client = SheetsClient(gs_cfg)
@@ -990,9 +993,12 @@ def sheets_build_views(
                 edge_tab=edge_tab,
                 games_tab=games_tab,
                 weather_tab=weather_tab,
+                gps_tab=gps_tab,
                 player_pool_tab=cfg.lineups.player_pool_tab,
             ),
-            build_slate_grid(client, games_tab=games_tab, weather_tab=weather_tab, edge_tab=edge_tab),
+            build_slate_grid(
+                client, games_tab=games_tab, weather_tab=weather_tab, edge_tab=edge_tab, gps_tab=gps_tab
+            ),
             build_exposure(
                 client,
                 edge_tab=edge_tab,

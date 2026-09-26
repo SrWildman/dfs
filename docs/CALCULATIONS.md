@@ -407,6 +407,78 @@ source list (`sources/__init__.py`), same treatment `sleeper`/
 barely changes between two live-sync passes on the same day and isn't
 worth the extra bandwidth/time on the "fast pass."
 
+## GPS and ModelImplied (2026-09-26)
+
+Kyle Borgognoni's (@kyle_borg) weekly "Pace of Play: Matchups & Stacks for
+Week N" article on TFFB (Sam's existing subscription -- not a new paid
+source). Each week he publishes a CSV alongside the article, one row per
+team (`sources/tffb_gps.py`), with two numbers that show up here:
+
+```
+GPS          = 1-5, this game's overall pace/scoring-environment score.
+ImpliedTotal = this team's own model-implied point total (a pace/EPA
+               model's output, e.g. "JAX 29" -- the model's answer to
+               "how many points will this team score," independent of
+               Vegas).
+```
+
+**GPS is not purely mechanical.** It blends team implied totals, neutral
+pace, EPA per dropback and per rush, and PROE, but the published 1-5
+score also folds in the author's own judgement -- treat it the way you'd
+treat any expert's rating, not a formula you could reproduce from the raw
+inputs alone.
+
+**The model totals are a pace/EPA model, not a market.** Vegas' own
+number (`Total`/`Spread` on GamesRaw, `OverUnder`/`Spread` on EdgeRaw) is
+a market price that reacts to real money and real news within minutes.
+Kyle's model updates once a week and has no idea a starting QB got hurt
+Thursday night. Early in the season (Weeks 1-4 especially) its own EPA
+inputs rest on just 1-3 games per team -- noisy on their own terms, before
+you even get to the news-lag problem. **A large gap between the model and
+Vegas is exactly as likely to mean "the model is missing news" as "Vegas
+is wrong."** Read the delta columns below as a prompt to go look, never
+as a verdict on their own -- there's deliberately no automated flag for
+disagreement here (13-16 games a week is too few to tune a fire rate on,
+the same reasoning that kept `PROMPT_BOARD_FIXES.md` from adding one).
+
+**Where it shows, and how each number is built:**
+
+- **EdgeRaw's `ModelImplied`** (own column, Game group, right after
+  `Expl%`) -- this player's own team's `ImpliedTotal`, joined by Team
+  exactly like `Pace`/`PROE`/`Expl%` (`derived._attach_gps`). A pure
+  passthrough, no further computation.
+- **Slate Grid's `GPS`/`Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ`** -- read
+  `GPSRaw` directly (not `ModelImplied`; `GPS` itself never lands on
+  EdgeRaw, since it's a per-GAME score, not a per-player one). `Model Tot
+  = home ImpliedTotal + away ImpliedTotal`, computed fresh from the two
+  team lookups rather than trusted from the CSV's own separately-computed
+  `TOTAL` column (see `tffb_gps.py`'s module docstring for why). `Tot Δ =
+  Model Tot − Total` (GamesRaw's own closing line). `Model Spd = home
+  ImpliedTotal − away ImpliedTotal`, in the SAME sign convention
+  GamesRaw's own `Spread` already uses (positive = home favoured --
+  confirmed against `nflverse_games.py`'s own module docstring, the same
+  fact `PROMPT_BOARD_FIXES.md` item 1's `Fav`/`Spread` split relies on),
+  so `Spd Δ = Model Spd − Spread` needs no sign flip.
+- **Board's Slate shape `GPS`/`Tot Δ`** -- same two formulas as Slate
+  Grid's own, just placed after the columns `PROMPT_BOARD_FIXES.md` added
+  ("just the signal," per that prompt's own instruction -- `Model Spd`/
+  `Spd Δ` live on Slate Grid's fuller detail view only).
+
+**Never a fabricated 0.** Every delta/sum above blanks out entirely if
+either team's `ImpliedTotal` lookup comes back blank (GPS not synced this
+week, or a team code miss) -- checked explicitly, not via `N()`-style
+zero-coercion, which would silently read "no GPS data yet" as "a real
+0-point model total" and produce a nonsense delta against Vegas' real
+number.
+
+**Fail-soft, timing.** The article publishes Wednesday; if this week's
+isn't up yet, `tffb_gps.py` raises (never guesses a slug, never falls
+back to last week's file -- `dfs week new` already clears
+`data/current/`), `sync.py`'s normal failure path logs it and moves on,
+and every column above simply reads blank until the next sync after
+publication. Not in `LIVE_SYNC_SOURCES` -- like `sos_*`/`snaps`/`pbp`, a
+weekly-cadence source has nothing new to gain from a fast live-sync pass.
+
 ## OverUnder, Spread
 
 Straight passthrough from the same Vegas context `GameEnv` already

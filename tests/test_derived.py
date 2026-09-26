@@ -543,6 +543,30 @@ def test_game_env_without_team_metrics_matches_pre_c7_formula():
     assert blowout["GameEnv"] == 25.0
 
 
+def test_gps_blank_when_not_synced():
+    proj = _projections([{"Id": "1", "Name": "A", "Team": "DET"}])
+    sal = _salaries([{"ID": "1"}])
+    frame = build_edge_frame(proj, sal, gps=None).frame
+    row = frame[frame["Name"] == "A"].iloc[0]
+    assert pd.isna(row["ModelImplied"])
+
+
+def test_gps_model_implied_attached_by_team():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "A", "Team": "JAX"},
+            {"Id": "2", "Name": "B", "Team": "NE"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    gps = pd.DataFrame({"Team": ["JAX", "NE"], "ImpliedTotal": [29.0, 17.5], "GPS": [2.75, 2.75]})
+    frame = build_edge_frame(proj, sal, gps=gps).frame
+    jax = frame[frame["Name"] == "A"].iloc[0]
+    ne = frame[frame["Name"] == "B"].iloc[0]
+    assert jax["ModelImplied"] == 29.0
+    assert ne["ModelImplied"] == 17.5
+
+
 def test_game_env_uses_combined_team_pace_and_proe_not_player_weighted():
     # Two games, identical OU/Spread, so any GameEnv difference must come
     # from Pace/PROE alone. Game A's two teams are both fast/pass-heavy

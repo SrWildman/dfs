@@ -23,6 +23,7 @@ doc knowing.
 | `oddsraw` | Rotowire's DK odds feed | `nfl_odds` |
 | `GamesRaw` | nflverse, free/unauthenticated | `nflverse_games` |
 | `WeatherRaw` | Open-Meteo, free/no key | `weather` |
+| `GPSRaw` | TFFB's Pace of Play worksheet (Kyle Borgognoni), weekly only | `tffb_gps` |
 | `SleeperRaw` | Sleeper's free, undocumented projections API | `sleeper` |
 | `FantasyProsRaw` | FantasyPros' projection pages (needs `dfs auth fantasypros` -- anonymous pages cap at 10 rows/position) | `fantasypros` |
 | `SnapsRaw` | nflverse's free snap-count release | `snaps` |
@@ -107,6 +108,26 @@ Open-Meteo forecast for every `GamesRaw` row where `Roof == outdoors`
 | `Precip` | Forecast precipitation (inches) in that hour. |
 | `Flag` | `WIND` if `Wind` is at/above ~20mph, else blank. |
 
+### GPSRaw
+
+Kyle Borgognoni's weekly TFFB "Pace of Play" worksheet (GPS, 2026-09-26)
+-- one row per NFL team, discovered via TFFB's own `/dfs/` article
+listing each week, never a constructed URL slug (see `sources/
+tffb_gps.py`'s module docstring). Weekly-cadence only -- not part of
+`dfs sync --live`.
+
+| Column | Meaning |
+|---|---|
+| `Team` | DK-standard team code. |
+| `ImpliedTotal` | This team's own model-implied point total (a pace/EPA model's output, not a market). |
+| `GPS` | 1-5, this game's overall score -- includes the author's own judgement, not purely mechanical. |
+
+Blank (the whole tab) if this week's article isn't published yet --
+never falls back to last week's file. See `docs/CALCULATIONS.md`'s GPS
+section for where each of `ImpliedTotal`/`GPS` shows up elsewhere
+(EdgeRaw's `ModelImplied`, Slate Grid's and Board's own GPS columns) and
+the full model-vs-market caveat.
+
 ### EdgeRaw
 
 The derived "which players are actually worth a look" tab -- computed
@@ -142,6 +163,7 @@ actually matches.
 | `GameEnv` | Rebuilt Part C, C7 (2026-09-25): 0-100 per-game score, an equal-weight percentile blend of total, spread tightness, combined pace and combined pass-rate-over-expected (`Pace`/`PROE`, below) -- higher total, tighter spread, faster pace and a pass-heavier tendency all score higher. Falls back to the pre-C7 total/spread-only formula automatically if `pbp` hasn't synced (see `docs/CALCULATIONS.md`). |
 | `OverUnder`, `Spread` | Straight passthrough of the same TFFB Vegas fields `GameEnv` is computed from. `OverUnder` (not `OU`) so it doesn't collide with Player Pool/Lineups' own `O/U`, sourced from a different tab. |
 | `Pace`, `PROE`, `Expl%` | Part C, C7 (2026-09-25): this player's own team's season-to-date offense tempo (mean seconds/snap, neutral script -- lower is faster, colour scale reversed), pass rate over expected (neutral script), and explosive-play rate (all scrimmage plays, ≥20 pass or ≥10 rush yards) -- all three from nflverse's free play-by-play, blended with last season's full-season value early on. `Pace`/`PROE` feed `GameEnv`; `Expl%` is a readable column on its own, deliberately not one of GameEnv's inputs. See `docs/CALCULATIONS.md` for the full formulas and the early-season blend. |
+| `ModelImplied` | GPS (2026-09-26): this player's own team's model-implied point total, from Kyle Borgognoni's TFFB Pace of Play worksheet (`GPSRaw`, joined by `Team`) -- a pace/EPA model's own output, not a market. Blank until this week's article publishes. See `docs/CALCULATIONS.md`'s GPS section for the full model-vs-Vegas caveat. |
 | `OppPosRank` | This player's OPPONENT's strength-of-schedule rank at this player's own position (1 = toughest matchup). Computed natively in Python from the already-synced `sos_qb`/`sos_rb`/`sos_wr`/`sos_te`/`sos_dst` frames (Phase 5, 2026-09-16, Sam: "all data should be in edge raw") -- the same value `PlayerPoolRaw`'s own `OppPosRank` computes via a `SoSComb` formula, just computed here without a live Sheets lookup. Blank for a position whose TFFB sync hasn't run yet, same graceful-degradation treatment as `Stadium`/`Roof`/`Wind`. |
 | `GameID` | Part 7.4: this player's game, `nflverse_games`' own ID format (`"2026_02_DET_BUF"` -- season, week, away, home). Was already computed internally to join `Stadium`/`Roof`/`Wind`, just never surfaced before now. What makes a stack visible: two players sharing this value are in the same game. |
 | `TmRank` | Part 7.4: this player's salary rank within his own team AND position -- 1 is the highest-salaried player at that position on that team (read alongside `Position`: "WR1", "RB1"). **A crude proxy for target hierarchy, not a measurement of it** -- salary reflects the market's own belief, not actual target share. No colour scale, deliberately -- see `docs/CALCULATIONS.md`. |
@@ -203,7 +225,7 @@ disagree:
 | IDENTITY (spine) | `Name` `Pos.` `Team` `Opp.` |
 | DECISION (spine) | `DK Sal` `Pts` `AggPts` `Val` `ValAdj` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
 | — label `GAME` — | (always visible, not part of any group) |
-| GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `Pace` `PROE` `Expl%` `OppPosRank` `GameID` `TmRank` |
+| GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `Pace` `PROE` `Expl%` `ModelImplied` `OppPosRank` `GameID` `TmRank` |
 | — label `CEIL` — | (always visible, not part of any group) |
 | CEILING DETAIL (collapsed) | `CeilPct` `Leverage` `OwnStatus` |
 | — label `MOVE` — | (always visible, not part of any group) |
@@ -252,14 +274,14 @@ spine slot, and `Flag` (just the single highest-priority token) moved
 into INTERNAL beside `Id`, hidden, kept only because other
 formatting/filtering logic keys off it as a boolean value.
 
-`PlayerPoolRaw` is exactly this, 43 columns (37 through Part 7.4 -- see
+`PlayerPoolRaw` is exactly this, 44 columns (37 through Part 7.4 -- see
 CONTRIBUTING.md's changelog for that history; Part C, C5 then added
 `AggPts`, one more, to 38; Part C, C6 added the `USAGE` label and `Snap%`,
 two more, to 40; Part C, C7 added `Pace`/`PROE`/`Expl%`, three more, to
-43). `Player
+43; GPS added `ModelImplied`, one more, to 44). `Player
 Pool` inserts `Edge ↗` (A3) right after `Opp.` (i.e. right after
 IDENTITY, since `Venue` no longer sits there) and appends
-`Overflow`/`Pool`/`Used`/`In`/`Added` at the very end (49 total, up from
+`Overflow`/`Pool`/`Used`/`In`/`Added` at the very end (50 total, up from
 46 the same way `PlayerPoolRaw` did; `Used`/
 `In` are Phase 5B, `Added` is Week 3 feedback's A6 -- a HIDDEN column
 accumulating every name typed into the add-a-player control cell this
@@ -269,8 +291,8 @@ in that same spot, was removed entirely in Week 3 feedback (A4,
 Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
 the full spine, then `Issues`, then Part 7.5's six lineup-metrics
 columns (`Stack` through `Min Unique`, see above), then `Edge ↗` (A3),
-before the collapsed groups begin (52 total, up from 49 the same way the
-other two tabs grew via Part C).
+before the collapsed groups begin (53 total, up from 49 the same way the
+other two tabs grew via Part C and GPS).
 Lineups also groups
 `O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
@@ -325,7 +347,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Own%` | `TFFBOptoRaw`'s `ProjOwn`, already a 0-1 fraction here (unlike `EdgeRaw`'s own `Own%`, which needed a Part 2 rescale to match -- see EdgeRaw's column docs above). |
-| `AggPts`, `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `Pace`, `PROE`, `Expl%`, `GameID`, `TmRank`, `Stadium`, `Roof`, `Wind`, `Snap%`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Usage (`Snap%`, Part C, C6), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `AggPts`/`ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/`Pace`/`PROE`/`Expl%`/`GameID`/`TmRank` stay on the visible spine/Game zone. `AggPts`/`ValAdj`/`GameID`/`TmRank`/`Snap%`/`Pace`/`PROE`/`Expl%` are linked (not native, unlike `Val`) since each is a whole-slate computation or external join, not a per-row formula. |
+| `AggPts`, `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `Pace`, `PROE`, `Expl%`, `ModelImplied`, `GameID`, `TmRank`, `Stadium`, `Roof`, `Wind`, `Snap%`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Usage (`Snap%`, Part C, C6), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `AggPts`/`ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/`Pace`/`PROE`/`Expl%`/`ModelImplied`/`GameID`/`TmRank` stay on the visible spine/Game zone. `AggPts`/`ValAdj`/`GameID`/`TmRank`/`Snap%`/`Pace`/`PROE`/`Expl%`/`ModelImplied` are linked (not native, unlike `Val`) since each is a whole-slate computation or external join, not a per-row formula. |
 
 ### Player Pool / Lineups
 
@@ -568,7 +590,11 @@ shape open by default, everything else collapsed):
   C7, 2026-09-25 -- the mean of both teams' own `Pace` off EdgeRaw, looked
   up by team code), wind, and a shootout flag (`derived.
   SHOOTOUT_TOTAL_THRESHOLD`, currently 48 -- a first-pass DFS heuristic,
-  not yet tuned against a real slate). Sort stays by Total, unchanged.
+  not yet tuned against a real slate), and `GPS`/`Tot Δ` (GPS, 2026-09-26
+  -- Kyle Borgognoni's TFFB Pace of Play score and model-vs-Vegas total
+  delta, off `GPSRaw`; `Model Spd`/`Spd Δ` live on Slate Grid's fuller
+  detail view instead, per that prompt's own "just the signal"
+  instruction). Sort stays by Total, unchanged.
 - **Per-position leaders** -- best `ValAdj` and highest `ProjPts`, each
   ranked *within* position (never across it -- the actual fix for the
   old "11 QBs out of 12 rows" bug, a salary-ratio metric mechanically
@@ -615,7 +641,7 @@ Read-only, built/rebuilt by `dfs setup build-views` (`sheet_views.
 build_slate_grid`), styled by `dfs setup polish` (`sheet_style.
 style_slate_grid`). One row per game (up to 18), instead of one row per
 player -- everything here comes straight off `GamesRaw`/`WeatherRaw`/
-`EdgeRaw`, nothing computed locally.
+`EdgeRaw`/`GPSRaw`, nothing computed locally.
 
 | Column | Meaning |
 |---|---|
@@ -628,6 +654,7 @@ player -- everything here comes straight off `GamesRaw`/`WeatherRaw`/
 | `Div` | `DIV` if `GamesRaw.DivGame = 1`, else blank. |
 | `Stadium` | As `GamesRaw`. |
 | `Total move` / `Spread move` | A9 (2026-09-22): this game's `TotMove`/`SpdMove` off `EdgeRaw`, looked up by the HOME team (both are actually team-level joins keyed by `Team` -- any player on that team carries the same value; the home team's row is used consistently, matching `Spread`'s own home-team-perspective convention). `TotMove` is the same number either way; `SpdMove` is directional, so the choice of team matters. Blank until at least one `nfl_odds` sync has moved a line since the week started. |
+| `GPS` / `Model Tot` / `Tot Δ` / `Model Spd` / `Spd Δ` | GPS (2026-09-26): Kyle Borgognoni's TFFB Pace of Play score/model, off `GPSRaw` (one row per team) keyed by `GamesRaw`'s own Away/Home. `Model Tot` = home + away `ImpliedTotal`, computed fresh rather than trusted from the CSV's own `TOTAL` column. `Model Spd` = home − away `ImpliedTotal`, same sign convention as `Spread` (positive = home favoured). Both deltas subtract Vegas' own `Total`/`Spread`. All five blank out (never a fabricated 0) if either team's GPS lookup misses. See `docs/CALCULATIONS.md`'s GPS section for the full reasoning, including why a large delta isn't automatically "Vegas is wrong." |
 
 No empty-state guard beyond a blank `IF($A{row}="",...)` per cell --
 unlike `Board`/`Movement`, there's no "not synced yet" message here,
