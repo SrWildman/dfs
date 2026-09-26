@@ -34,8 +34,8 @@ stop its own strings from describing a Board that no longer existed.
 the same shape as `TAB_NOTES`' own explicit dict, not derived from
 `sheet_style.WEEK_ORDER`/`HIDE_TABS`. Instructions documents several
 tabs that are hidden from the visible strip (the raw sync tabs --
-TFFBOptoRaw, DKSalRaw, oddsraw, GamesRaw, WeatherRaw, the five SoS
-tabs), because a reader trying to understand what feeds the sheet needs
+TFFBOptoRaw, DKSalRaw, oddsraw, GamesRaw, WeatherRaw, GPSRaw, the five
+SoS tabs), because a reader trying to understand what feeds the sheet needs
 them explained even though they're not in the tab strip day to day; it
 also skips a couple of pure-plumbing tabs (DkSalClean, oddsFinal)
 nobody needs to understand to use the sheet. If that curation ever needs
@@ -69,7 +69,13 @@ _GENERAL_FIRST_ROW = 2
 _DIVIDER_ROW = 6
 _TAB_HEADER_ROW = 7
 _TAB_FIRST_ROW = 8
-_DOC_LINKS_HEADER_ROW = 26
+# GPS (2026-09-26): _TAB_ROWS grew from 18 to 19 entries (GPSRaw's own
+# row) -- this shifted from 26 to 27. Asserted against `_TAB_FIRST_ROW +
+# len(_TAB_ROWS)` right after _TAB_ROWS is defined below (this module
+# never inserts/deletes a sheet row itself -- see the module docstring --
+# so a mismatch here means the ACTUAL Instructions tab needs a real row
+# inserted/deleted to match, not just this constant edited).
+_DOC_LINKS_HEADER_ROW = 27
 
 # Per-position pool caps (Player Pool's own block sizes), in the same
 # QB/RB/WR/TE/DST order PLAYER_POOL_NAME_BLOCKS itself is written in --
@@ -235,6 +241,14 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Wind, Gust, Precip, Flag (WIND if windy).",
     ),
     (
+        "GPSRaw",
+        "Synced by `dfs sync` (`tffb_gps` source, weekly only -- skipped on "
+        "`dfs sync --live`), Kyle Borgognoni's TFFB Pace of Play worksheet. One row "
+        "per team: Team, ImpliedTotal (a pace/EPA model's own team score, not a "
+        "market), GPS (1-5, includes the author's judgement). Blank if the article "
+        "isn't published yet -- never falls back to last week's file.",
+    ),
+    (
         "EdgeRaw",
         "Synced by `dfs sync` (`edge` source) -- computed locally from the tabs "
         'above, no network call. The "which players are actually worth a look" tab, '
@@ -344,6 +358,15 @@ _TAB_ROWS: list[tuple[str, str]] = [
         'sheet automatically. A sortable filter view ("All") is available.',
     ),
 ]
+
+# Catches exactly the bug found live (2026-09-26): adding a `_TAB_ROWS`
+# entry (GPSRaw) without also updating `_DOC_LINKS_HEADER_ROW` silently
+# overwrote the last tab row ("Results") with the doc-links header, since
+# `render_instructions_grid` writes the tab-rows loop first and the
+# doc-links header second at the SAME (now-colliding) row number -- a
+# dict key collision, not a raised error, so nothing failed loudly on
+# its own.
+assert _DOC_LINKS_HEADER_ROW == _TAB_FIRST_ROW + len(_TAB_ROWS)  # noqa: S101 - drift guard, not a test
 
 _DOC_LINKS_HEADER = "Full documentation"
 _DOC_LINK_ROWS: list[str] = [

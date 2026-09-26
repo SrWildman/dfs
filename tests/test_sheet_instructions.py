@@ -51,8 +51,8 @@ def test_writes_the_tab_header_and_every_tab_row_at_the_expected_positions():
 
     assert cells["A7:B7"] == ["Tab-by-tab reference", "Columns / what to do"]
     assert cells["A8:B8"][0] == "Board"
-    # 18 tab rows, 8 through 25.
-    assert cells["A25:B25"][0] == "Results"
+    # 19 tab rows, 8 through 26 (GPSRaw, 2026-09-26, added one more).
+    assert cells["A26:B26"][0] == "Results"
 
 
 def test_writes_the_doc_links_header_and_all_five_link_rows():
@@ -60,9 +60,9 @@ def test_writes_the_doc_links_header_and_all_five_link_rows():
     build_instructions_tab(client)
     cells = _cells(client)
 
-    assert cells["A26:B26"] == ["Full documentation", _DOC_LINK_ROWS[0]]
-    assert cells["A27:B27"] == ["", _DOC_LINK_ROWS[1]]
-    assert cells["A30:B30"] == ["", _DOC_LINK_ROWS[4]]
+    assert cells["A27:B27"] == ["Full documentation", _DOC_LINK_ROWS[0]]
+    assert cells["A28:B28"] == ["", _DOC_LINK_ROWS[1]]
+    assert cells["A31:B31"] == ["", _DOC_LINK_ROWS[4]]
 
 
 def test_player_pool_row_derives_caps_and_column_letters_not_hardcoded():
