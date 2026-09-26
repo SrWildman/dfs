@@ -295,25 +295,117 @@ condition depended on hand-logged DK ownership CSVs that aren't coming
 (Week 3 follow-ups, Item 3; see `docs/planning/ROADMAP.md`'s "Deliberately
 not doing" section). Treat `Leverage` as directional at best.
 
-## GameEnv
+## GameEnv (rebuilt Part C, C7, 2026-09-25)
 
 Computed once per unique game (`derived._game_env_scores`), then broadcast
-to every player in it:
+to every player in it. Originally pure Vegas (total + spread tightness);
+C7 adds two real game-environment inputs now that they're computed
+(`Pace`/`PROE`, below), an equal-weight percentile blend of four inputs:
 
 ```
 ou_pct        = this game's Over/Under, percentile rank across every game on the slate
 tightness_pct = (1 − |Spread| percentile rank across every game on the slate)
-GameEnv       = (ou_pct + tightness_pct) / 2
+pace_pct      = (1 − combined Pace percentile rank across every game on the slate)  -- faster = higher
+proe_pct      = combined PROE percentile rank across every game on the slate         -- pass-heavier = higher
+GameEnv       = weighted mean of the four above, GAME_ENV_WEIGHTS = 0.25 each, renormalized over
+                whichever inputs aren't blank for a given game
 ```
 
-Higher total (more expected scoring) and a tighter spread (more
-competitive, more reason for the trailing team to keep throwing) both
-push `GameEnv` up. Uses only the Vegas context TFFB already attaches to
-each player (`OU`/`Spread` on `projections.csv`) -- deliberately *not*
-cross-referenced against the separately-synced `nfl_odds` source, since
-that source is keyed by team nickname/abbreviation rather than DK's team
-codes, and building a name-matching layer just to double-check numbers
-TFFB already provides wasn't judged worth the join risk.
+"Combined" Pace/PROE is the mean of both teams' own value in that game
+(`team_metrics.combined_by_game`) -- never player-count-weighted (a team
+with 20 rostered players and a team with 15 both count once). Equal
+weighting is the starting point Sam asked for, not a tuned result.
+
+**Fail-soft, by construction, not a special case:** `derived.
+_game_env_scores` renormalizes the weighted mean over whatever inputs
+aren't `NaN` for a given game (`team_metrics.weighted_mean_skipna`). If
+`pbp` didn't sync this run, `Pace`/`PROE` are blank for every game, and
+the renormalized mean of just `total`/`spread_tightness` **is** the exact
+pre-C7 formula -- no separate fallback branch needed, and no printed
+warning needed beyond the one `sources/edge.py` already prints when `pbp`
+itself fails to load.
+
+Higher total (more expected scoring), a tighter spread (more competitive,
+more reason for the trailing team to keep throwing), faster pace and a
+higher pass rate over expected all push `GameEnv` up. `OU`/`Spread` are
+still the Vegas context TFFB already attaches to each player
+(`projections.csv`) -- deliberately *not* cross-referenced against the
+separately-synced `nfl_odds` source, for the reason already given before
+C7: that source is keyed by team nickname/abbreviation rather than DK's
+team codes, and a name-matching layer just to double-check numbers TFFB
+already provides isn't worth the join risk.
+
+`Expl%` (below) is deliberately **not** one of GameEnv's four inputs --
+Sam's own instruction: it stays a readable column on its own.
+
+## Pace, PROE, Expl% (Part C, C7, 2026-09-25)
+
+Season-to-date per-TEAM offense metrics from nflverse's free play-by-play
+release (`sources/nflverse_pbp.py`, pure math in `team_metrics.py`), one
+value per team broadcast to every player on it (`derived.
+_attach_team_metrics`). Placed in the collapsed **Game** group,
+immediately after `GameEnv` (all three feed it except `Expl%`, which
+doesn't feed anything -- see above).
+
+**Neutral-script filter**, for `Pace`/`PROE` only: `0.2 ≤ wp ≤ 0.8` (the
+*possession* team's own win probability -- verified live that a road
+team's own early-game snap reads close to 0.5, not the home team's
+complement), `qtr ≤ 3`, and `half_seconds_remaining > 120` (excludes the
+hurry-up/clock-killing final two minutes of a half). Blowouts and
+two-minute drills distort both pace and play-calling independent of a
+team's real identity.
+
+```
+Pace  = mean seconds between consecutive real offensive snaps (play_type in {pass, run})
+        within the same drive, neutral script only. Lower is faster; colour scale reversed.
+PROE  = mean pass_oe (nflverse's own pass-rate-over-expected model) over the same
+        neutral-script scrimmage plays. Higher = pass-heavier than the situation implies.
+Expl% = share of ALL scrimmage plays (every game state) gaining ≥20 yards on a pass
+        (nflverse's own `pass` indicator, not a play_type string match) or ≥10 on a rush
+        (`rush` indicator). Naturally excludes kneels/spikes/no-play penalties, since
+        none of those are `play_type in {pass, run}`.
+```
+
+**Early-season blend**, all three metrics, per team:
+
+```
+weight_current = games_played / (games_played + PBP_PRIOR_WEIGHT_GAMES)
+value          = weight_current * this_season + (1 − weight_current) * last_season_full_season_value
+```
+
+`PBP_PRIOR_WEIGHT_GAMES = 4.0` -- a defensible starting value, not fit to
+anything (only one week of this data exists so far): at 2 games played
+(most teams, week 3), `weight_current` = 2/6 = 33%, mostly last season's
+shape; at 8 games (roughly mid-season) it's already 67%; it never fully
+reaches 100% (81% at a full 17-game season), which is the right shape --
+a small-sample current season should never fully drown out the prior one,
+even late. A team missing one side of the blend (no current-season
+neutral-script sample yet; or, not expected for an existing franchise but
+handled anyway, no prior-season row) falls back to whichever side it has,
+never a fabricated average against a 0. **Known limitation, stated rather
+than hidden:** a team with major coaching/scheme turnover makes last
+season a poor prior for *this* team specifically -- not detectable from
+the data itself, so this blend can't correct for it. Re-tune
+`PBP_PRIOR_WEIGHT_GAMES` once a full season of real week-over-week data
+exists, the same way `LEVERAGE_FLAG_TOP_SHARE`/`LINE_MOVE_FLAG_THRESHOLD`
+were.
+
+**Fail-soft:** `pbp` failing to fetch this run blanks all three columns
+for every row (never a fabricated value), and `sources/edge.py` prints a
+warning; `GameEnv` degrades as described above rather than going blank in
+turn.
+
+Data source: nflverse's play-by-play parquet release (`https://github.com/
+nflverse/nflverse-data/releases/download/pbp/play_by_play_{season}.parquet`),
+current season plus the prior season for the blend above -- release-asset
+URLs only (a `.../raw/...` URL 403s in some environments). Verified live
+(2026-09-25): the 2026 file, three weeks in, is 2.5MB; the completed 2025
+season is 19MB. Refetched in full on every `dfs sync`, same as every other
+Part C source -- `pbp` is deliberately excluded from `dfs sync --live`'s
+source list (`sources/__init__.py`), same treatment `sleeper`/
+`fantasypros`/`snaps` already get, since a season-to-date team aggregate
+barely changes between two live-sync passes on the same day and isn't
+worth the extra bandwidth/time on the "fast pass."
 
 ## OverUnder, Spread
 
@@ -532,7 +624,7 @@ boolean check.
 | 3 | `LINE↓` | `ImpliedMove ≤ −6.0` |
 | 4 | `LEVERAGE` | rosterable-pool member, in the top `LEVERAGE_FLAG_TOP_SHARE` (7%) of the pool by `Leverage` this week (blank `Leverage` while unpublished can never clear this) |
 | 5 | `CHALK` | `Own% ≥ 0.20` (20%) -- can only fire once ownership is real; `Own%` reads 0 for everyone until then |
-| 6 | `SPLIT↑` / `SPLIT↓` | rosterable-pool member with at least one of Sleeper/FantasyPros available, `\|mean(Sleeper, FantasyPros) − ProjPts\| ≥ max(SPLIT_ABS_FLOOR, SPLIT_REL_THRESHOLD × ProjPts)` -- see Part C's own section below |
+| 6 | `SPLIT↑` / `SPLIT↓` | rosterable-pool member with at least one of Sleeper/FantasyPros available, in the top `SPLIT_FLAG_TOP_SHARE` (7%) of the pool by `\|residual\|` (gap vs. this position's own trend line, not raw points) AND `\|residual\| ≥ SPLIT_MIN_RESIDUAL` -- see Part C's own section below |
 | — | *(blank)* | none of the above |
 
 `WIND_FLAG_THRESHOLD_MPH = 20.0` is a starting point, not empirically
@@ -637,36 +729,67 @@ projecting more RB/WR volume than the market consensus, not a bug in
 either scoring engine. Sam's call when this was reported: ship it as-is
 and document the caveat here, rather than exclude either source from the
 RB/WR aggregate. Practical effect: `AggPts` for a RB/WR pulls slightly
-below `ProjPts` more often than not, and `SPLIT↓` (below) fires on RB/WR
-far more than `SPLIT↑` as a direct consequence.
+below `ProjPts` more often than not -- and, as first built, `SPLIT`
+(below) fired on this backup-pile difference almost exclusively, which is
+exactly what the 2026-09-25 rework fixes.
 
 **`SPLIT↑`/`SPLIT↓`** (in `Flags`, lowest priority in the hidden `Flag`,
-below `CHALK`) fires when TFFB's own `ProjPts` disagrees sharply with the
-*other two* sources' mean -- deliberately not `AggPts`, which already
-includes `ProjPts` and would understate the real disagreement by a
-third. Rosterable-pool only (same restriction `LEVERAGE` got, for the
-same reason: a $2,500 backup's disagreement is noise); no flag when
-neither other source has a real number for that player.
+below `CHALK`) flags disagreement **beyond the usual gap for a position
+and projection level**, not raw points -- reworked 2026-09-25 after the
+original raw-gap rule (`SPLIT_ABS_FLOOR`/`SPLIT_REL_THRESHOLD`, both now
+removed) turned out to fire almost entirely on the RB/WR calibration gap
+above: 15 fires on `data/raw/edge/20260925T191419Z.csv`, 12 of them
+`SPLIT↓` on $3,400-$4,800 backups -- the same handful of players every
+week, not a "look closer" signal.
 
 ```
-gap       = mean(Sleeper, FantasyPros) − ProjPts
-threshold = max(SPLIT_ABS_FLOOR, SPLIT_REL_THRESHOLD × ProjPts)
-fires if  |gap| ≥ threshold
+gap       = mean(Sleeper, FantasyPros) − ProjPts                     (unchanged)
+resid     = gap − fitted(ProjPts)   -- OLS line of gap~ProjPts, fit PER POSITION
+                                        over rosterable-pool players with a source
+fires if  |resid| is in the top SPLIT_FLAG_TOP_SHARE (7%) of the pool by |resid|
+          AND |resid| ≥ SPLIT_MIN_RESIDUAL (2.0 points)
 ```
 
-Tuned against the real 2026-09-20 rosterable pool (241 of 250 pool
-players had at least one other source): `gap` quartiles were
--2.83/-1.41/+0.27, and `|gap|` sat at 2.63/3.86/4.52 at the 80th/90th/95th
-percentiles. `SPLIT_ABS_FLOOR = 4.0` with `SPLIT_REL_THRESHOLD = 0.20`
-(20% of `ProjPts`) fires on 20/250 (**8.0%**) -- inside the 5-10% target
-band. **Not buried:** on that same snapshot every one of those 20 fired
-`SPLIT↓`, zero `SPLIT↑` -- the RB/WR calibration gap above dominates the
-distribution completely at this threshold, so right now `SPLIT` reads
-more like "TFFB is bullish here" than a symmetric disagreement signal.
-Also tuned against only **one** real snapshot -- both external sources
-are new this session, so there's no second week's history the way
-`LEVERAGE`/`LINE` had when they were tuned. Re-check both constants once
-a second week's Sleeper/FantasyPros pull exists.
+Same idea as `ValAdj`'s own price-edge residual (`_val_adj_residual_
+within_position`): fit what "normal" looks like for this position at this
+projection level, then flag departures from THAT, not from zero. A
+position with fewer than `SPLIT_MIN_FIT_PLAYERS` (8) rosterable-pool
+players carrying a source doesn't get a fitted line at all -- too few
+points to trust a slope, so it's skipped entirely (no flag, a printed
+warning) rather than fit against a handful of players. Still rosterable-
+pool only (same restriction `LEVERAGE` got: a $2,500 backup's
+disagreement is noise); still no flag when neither other source has a
+real number for that player. Direction comes from the sign of `resid`:
+`SPLIT↑` means the other sources are higher than usual for a player at
+this position/level relative to TFFB, `SPLIT↓` means lower.
+
+**Why both a quantile AND a floor:** the quantile alone would flag ~7% of
+the pool even in a week where every source agrees closely (manufacturing
+noise); the floor alone would flag however many players clear 2 points
+in a week with unusually wide disagreement (no longer "look closer,"
+"look at almost everyone"). Both conditions together, same discipline
+`LEVERAGE_FLAG_TOP_SHARE`'s own tuning used.
+
+Verified against the real 2026-09-23/24 inputs feeding EdgeRaw's
+2026-09-25 sync (`data/raw/projections/20260923T041654Z.csv`,
+`data/raw/draftkings/20260923T115552Z.csv`, and the one Sleeper/
+FantasyPros snapshot each has, `20260924T...`): **19 fires (10 `SPLIT↑`,
+9 `SPLIT↓`)** across a 250-player rosterable pool, zero outside it, every
+position had >= `SPLIT_MIN_FIT_PLAYERS` and got a real fit (`split_
+skipped_positions` empty). Match rates: Sleeper 96.9-100% and FantasyPros
+96.9-100% per position over the pool (DST/QB/TE/WR all 100% or 96.9-100%,
+RB 98.4% both sources) -- see C1's own match-rate table for the exact
+per-position numbers. Includes real starters the old raw-gap rule missed
+entirely (`Jonathan Taylor ↑`, `De'Von Achane ↑`, `DJ Moore ↑`, `Kenneth
+Walker III ↓`) while keeping the obvious news-driven cases (`Tyrone Tracy
+Jr. ↓`, `Sam Darnold ↑`, `Rico Dowdle ↑`) -- all seven cross-checked
+against Sam's own independent rough run (16 fires, 9↑/7↓) beforehand, and
+all seven landed with the same direction here. Sleeper's QB match rate is
+a clean 32/32 (100%) -- the four QBs Sam's own rough pass found missing
+Sleeper data (Darnold, Jayden Daniels, Carson Wentz, Shedeur Sanders) are
+real rows in Sleeper's own file with a correct name/team/position match,
+just a genuinely blank projection (Sleeper simply hasn't projected them
+this week) -- confirmed **not** a join miss.
 
 ## `Snap%` (Part C, C6, 2026-09-24)
 

@@ -489,6 +489,87 @@ def test_game_env_scores_higher_total_and_tighter_spread_higher():
     assert shootout["GameEnv"] > blowout["GameEnv"]
 
 
+def test_team_metrics_blank_when_pbp_unavailable():
+    proj = _projections([{"Id": "1", "Name": "A", "Team": "DET"}])
+    sal = _salaries([{"ID": "1"}])
+    frame = build_edge_frame(proj, sal, team_metrics=None).frame
+    row = frame[frame["Name"] == "A"].iloc[0]
+    assert pd.isna(row["Pace"])
+    assert pd.isna(row["PROE"])
+    assert pd.isna(row["Expl%"])
+
+
+def test_team_metrics_attached_by_team():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "A", "Team": "DET"},
+            {"Id": "2", "Name": "B", "Team": "NO"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    team_metrics = pd.DataFrame(
+        {"Team": ["DET", "NO"], "Pace": [30.0, 40.0], "PROE": [5.0, -5.0], "Expl%": [10.0, 8.0]}
+    )
+    frame = build_edge_frame(proj, sal, team_metrics=team_metrics).frame
+    det = frame[frame["Name"] == "A"].iloc[0]
+    no = frame[frame["Name"] == "B"].iloc[0]
+    assert det["Pace"] == 30.0
+    assert det["PROE"] == 5.0
+    assert det["Expl%"] == 10.0
+    assert no["Pace"] == 40.0
+    assert no["PROE"] == -5.0
+    assert no["Expl%"] == 8.0
+
+
+def test_game_env_without_team_metrics_matches_pre_c7_formula():
+    # Fail-soft: missing team_metrics entirely must renormalize to exactly
+    # the old 50/50 total/spread-tightness formula, not merely "close."
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Shootout", "Game": "G1", "OU": 55.0, "Spread": -1.0, "Team": "DET"},
+            {"Id": "2", "Name": "Blowout", "Game": "G2", "OU": 38.0, "Spread": -14.0, "Team": "NO"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+    frame = build_edge_frame(proj, sal).frame
+    shootout = frame[frame["Name"] == "Shootout"].iloc[0]
+    blowout = frame[frame["Name"] == "Blowout"].iloc[0]
+    # Only two games -> pandas' rank(pct=True) over 2 values gives the
+    # loser 1/2=50% and the winner 2/2=100%, not 0%/100%. Shootout wins
+    # both total (ou_pct 100) and tightness (tightness_pct 50, since its
+    # own |spread|=1 is the tighter of the two) -> (100+50)/2 = 75; the
+    # exact pre-C7 formula's own answer for these same two axes.
+    assert shootout["GameEnv"] == 75.0
+    assert blowout["GameEnv"] == 25.0
+
+
+def test_game_env_uses_combined_team_pace_and_proe_not_player_weighted():
+    # Two games, identical OU/Spread, so any GameEnv difference must come
+    # from Pace/PROE alone. Game A's two teams are both fast/pass-heavy
+    # (good for GameEnv); Game B's are both slow/run-heavy.
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "A1", "Game": "GameA", "OU": 45.0, "Spread": -3.0, "Team": "DET"},
+            {"Id": "2", "Name": "A2", "Game": "GameA", "OU": 45.0, "Spread": -3.0, "Team": "NO"},
+            {"Id": "3", "Name": "B1", "Game": "GameB", "OU": 45.0, "Spread": -3.0, "Team": "KC"},
+            {"Id": "4", "Name": "B2", "Game": "GameB", "OU": 45.0, "Spread": -3.0, "Team": "DEN"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}, {"ID": "3"}, {"ID": "4"}])
+    team_metrics = pd.DataFrame(
+        {
+            "Team": ["DET", "NO", "KC", "DEN"],
+            "Pace": [28.0, 28.0, 40.0, 40.0],
+            "PROE": [10.0, 10.0, -10.0, -10.0],
+            "Expl%": [10.0, 10.0, 10.0, 10.0],
+        }
+    )
+    frame = build_edge_frame(proj, sal, team_metrics=team_metrics).frame
+    game_a = frame[frame["Name"] == "A1"].iloc[0]
+    game_b = frame[frame["Name"] == "B1"].iloc[0]
+    assert game_a["GameEnv"] > game_b["GameEnv"]
+
+
 def test_frame_is_sorted_by_valadj_descending_regardless_of_ownership_status():
     # Part 7.1/7.2: Leverage is no longer a primary sort anywhere, and its
     # old CeilPct fallback (for the ownership-unpublished window) goes
@@ -772,35 +853,110 @@ def test_aggpts_join_results_exposed_on_edge_build_result_for_match_rate_reporti
     assert result.source_joins["sleeper"].pool_matched == 1
 
 
-def test_split_flag_fires_down_when_other_sources_are_far_below_tffb():
-    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
-    sal = _salaries([{"ID": "1"}])
-    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 5.0}])
-    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 5.5}])
+def _uniform_gap_backups(
+    position: str, n: int, gap: float, start_proj: float = 2.0
+) -> tuple[list, list, list]:
+    """`n` pool players at `position`, evenly spaced `ProjPts`, each with
+    the SAME `gap` (mean(Sleeper, FantasyPros) - ProjPts) -- an OLS fit of
+    gap~ProjPts over a population like this has ~zero slope and intercept
+    ~= gap, so every one of these backups gets a residual near zero (the
+    "uniform backup gap alone never fires" case). Returns (proj_rows,
+    sleeper_rows, fantasypros_rows)."""
+    proj_rows, sleeper_rows, fantasypros_rows = [], [], []
+    for i in range(n):
+        proj_pts = start_proj + i * (18.0 / max(n - 1, 1))
+        name = f"{position} Backup {i}"
+        proj_rows.append(
+            {
+                "Id": f"{position}-bk-{i}",
+                "Name": name,
+                "Position": position,
+                "Team": "DET",
+                "ProjPts": proj_pts,
+            }
+        )
+        other = proj_pts + gap
+        sleeper_rows.append({"Name": name, "Team": "DET", "Position": position, "DkPts": other})
+        fantasypros_rows.append({"Name": name, "Team": "DET", "Position": position, "DkPts": other})
+    return proj_rows, sleeper_rows, fantasypros_rows
 
-    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
-    # mean(other) = 5.25, gap = -4.75, threshold = max(4.0, 0.2*10) = 4.0
-    assert "SPLIT↓" in row["Flags"]
+
+def _split_pool(position: str, n_backups: int, backup_gap: float, extra_rows: list[dict] | None = None):
+    """Assembles a full `build_edge_frame` input for SPLIT tests: `n_backups`
+    uniform-gap players at `position` (see `_uniform_gap_backups`) plus any
+    `extra_rows` (each a dict with `proj`/`sleeper`/`fantasypros` sub-dicts
+    for one additional player), with `VAL_ADJ_ROSTERABLE_TOP_N[position]`
+    set to include everyone passed in as a pool member."""
+    proj_rows, sleeper_rows, fantasypros_rows = _uniform_gap_backups(position, n_backups, backup_gap)
+    for extra in extra_rows or []:
+        proj_rows.append(extra["proj"])
+        if "sleeper" in extra:
+            sleeper_rows.append(extra["sleeper"])
+        if "fantasypros" in extra:
+            fantasypros_rows.append(extra["fantasypros"])
+    proj = _projections(proj_rows)
+    sal = _salaries([{"ID": r["Id"]} for r in proj_rows])
+    sleeper = pd.DataFrame(sleeper_rows)
+    fantasypros = pd.DataFrame(fantasypros_rows)
+    return proj, sal, sleeper, fantasypros, len(proj_rows)
 
 
-def test_split_flag_fires_up_when_other_sources_are_far_above_tffb():
-    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
-    sal = _salaries([{"ID": "1"}])
-    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 15.0}])
-    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 14.5}])
+def test_split_flag_uniform_backup_gap_does_not_fire_alone():
+    # Every backup carries the SAME -3 gap -- a real, stable per-position
+    # difference (exactly what C2 found for real RB/WR), not a reason to
+    # flag any one of them individually.
+    proj, sal, sleeper, fantasypros, n = _split_pool("RB", 20, backup_gap=-3.0)
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n}
+        frame = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
-    assert "SPLIT↑" in row["Flags"]
+    assert not frame["Flags"].str.contains("SPLIT").any()
 
 
-def test_split_flag_does_not_fire_within_threshold():
-    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
-    sal = _salaries([{"ID": "1"}])
-    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 11.0}])
-    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 12.0}])
+def test_split_flag_fires_on_a_starter_off_the_positions_own_trend():
+    # 20 backups all at gap -3; one "starter" at a similar ProjPts level
+    # to several backups but with a real gap of +3 -- six points off what
+    # this position's own trend line predicts for him. He should be
+    # flagged SPLIT↑ (others higher than usual relative to TFFB); nobody
+    # else should be.
+    starter = {
+        "proj": {"Id": "starter", "Name": "Starter", "Position": "RB", "Team": "DET", "ProjPts": 15.0},
+        "sleeper": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 18.0},
+        "fantasypros": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 18.0},
+    }
+    proj, sal, sleeper, fantasypros, n = _split_pool("RB", 20, backup_gap=-3.0, extra_rows=[starter])
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n}
+        frame = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
-    assert "SPLIT" not in row["Flags"]
+    flagged = frame[frame["Flags"].str.contains("SPLIT")]
+    assert set(flagged["Name"]) == {"Starter"}
+    assert flagged.iloc[0]["Flags"] == "SPLIT↑"
+
+
+def test_split_flag_fires_down_in_the_opposite_direction():
+    starter = {
+        "proj": {"Id": "starter", "Name": "Starter", "Position": "RB", "Team": "DET", "ProjPts": 15.0},
+        "sleeper": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 3.0},
+        "fantasypros": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 3.0},
+    }
+    proj, sal, sleeper, fantasypros, n = _split_pool("RB", 20, backup_gap=3.0, extra_rows=[starter])
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n}
+        frame = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    flagged = frame[frame["Flags"].str.contains("SPLIT")]
+    assert set(flagged["Name"]) == {"Starter"}
+    assert flagged.iloc[0]["Flags"] == "SPLIT↓"
 
 
 def test_split_flag_never_fires_with_no_other_source_data():
@@ -811,61 +967,122 @@ def test_split_flag_never_fires_with_no_other_source_data():
     assert "SPLIT" not in row["Flags"]
 
 
-def test_split_flag_only_eligible_inside_the_rosterable_pool():
-    proj = _projections(
-        [
-            {"Id": "1", "Name": "Pool Guy", "Position": "RB", "ProjPts": 30.0, "Ceiling": 20.0},
-            {
-                "Id": "2",
-                "Name": "Backup Outside Pool",
-                "Position": "RB",
-                "ProjPts": 1.0,
-                "Ceiling": 5.0,
-            },
-        ]
-    )
-    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
-    sleeper = pd.DataFrame(
-        [
-            {"Name": "Pool Guy", "Team": "DET", "Position": "RB", "DkPts": 30.0},  # no gap, won't fire
-            {"Name": "Backup Outside Pool", "Team": "DET", "Position": "RB", "DkPts": 20.0},  # huge gap
-        ]
-    )
-
+def test_split_flag_not_eligible_outside_the_rosterable_pool():
+    # A huge residual on a player the pool mask excludes must never fire,
+    # no matter how large the disagreement.
+    outsider = {
+        "proj": {"Id": "outsider", "Name": "Outsider", "Position": "RB", "Team": "DET", "ProjPts": 0.5},
+        "sleeper": {"Name": "Outsider", "Team": "DET", "Position": "RB", "DkPts": 15.5},
+        "fantasypros": {"Name": "Outsider", "Team": "DET", "Position": "RB", "DkPts": 15.5},
+    }
+    proj, sal, sleeper, fantasypros, n = _split_pool("RB", 20, backup_gap=-3.0, extra_rows=[outsider])
     original = derived.VAL_ADJ_ROSTERABLE_TOP_N
     try:
-        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": 1}
-        frame = build_edge_frame(proj, sal, sleeper=sleeper).frame
+        # The pool mask ranks by ProjPts, top N -- "Outsider"'s ProjPts
+        # (0.5) is the lowest of anyone here, so a pool sized to the 20
+        # backups alone (all >= 2.0) excludes him regardless of his own
+        # huge disagreement.
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n - 1}
+        frame = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame
     finally:
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    backup = frame[frame["Name"] == "Backup Outside Pool"].iloc[0]
-    assert "SPLIT" not in backup["Flags"]
+    outsider_row = frame[frame["Name"] == "Outsider"].iloc[0]
+    assert "SPLIT" not in outsider_row["Flags"]
+
+
+def test_split_flag_skips_a_position_with_too_few_fit_players_and_warns():
+    # Only 3 pool RBs with a source -- below SPLIT_MIN_FIT_PLAYERS (8) --
+    # even though one of them disagrees by a lot. No fit, no flag, and the
+    # position is reported back so the caller can warn.
+    starter = {
+        "proj": {"Id": "starter", "Name": "Starter", "Position": "RB", "Team": "DET", "ProjPts": 15.0},
+        "sleeper": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 30.0},
+        "fantasypros": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 30.0},
+    }
+    proj, sal, sleeper, fantasypros, n = _split_pool("RB", 2, backup_gap=-3.0, extra_rows=[starter])
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n}
+        result = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros)
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    assert not result.frame["Flags"].str.contains("SPLIT").any()
+    assert "RB" in result.split_skipped_positions
+
+
+def test_split_flag_residual_under_the_floor_does_not_fire():
+    # A tight, clean fit (tiny noise, well under SPLIT_MIN_RESIDUAL) --
+    # even the single largest |residual| in the pool must not fire just to
+    # fill the top-share quota.
+    proj_rows, sleeper_rows, fantasypros_rows = _uniform_gap_backups("RB", 20, gap=-3.0)
+    # Nudge one backup's gap by +1 point -- real disagreement, but nowhere
+    # near the 2.0-point floor.
+    fantasypros_rows[5]["DkPts"] += 1.0
+    proj = _projections(proj_rows)
+    sal = _salaries([{"ID": r["Id"]} for r in proj_rows])
+    sleeper = pd.DataFrame(sleeper_rows)
+    fantasypros = pd.DataFrame(fantasypros_rows)
+
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": len(proj_rows)}
+        frame = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    assert not frame["Flags"].str.contains("SPLIT").any()
 
 
 def test_split_flag_compares_against_other_sources_mean_not_aggpts():
     # AggPts blends TFFB in too, which would understate the real gap by a
-    # third -- SPLIT must compare against mean(Sleeper, FantasyPros) alone.
-    # ProjPts=10, other mean=15.5 -> gap vs AggPts's own blend (mean of all
-    # three, ~13.5) would be only +3.5 (under the 4.0 floor, no fire), but
-    # the real other-sources-only gap is +5.5 (clears it).
-    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "ProjPts": 10.0}])
-    sal = _salaries([{"ID": "1"}])
-    sleeper = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 15.0}])
-    fantasypros = pd.DataFrame([{"Name": "Player One", "Team": "DET", "Position": "RB", "DkPts": 16.0}])
+    # third -- SPLIT's own `gap` must come from mean(Sleeper, FantasyPros)
+    # alone. Backups agree with TFFB exactly (gap 0); the starter's other-
+    # sources-only gap is +11, which must survive into a real flag.
+    starter = {
+        "proj": {"Id": "starter", "Name": "Starter", "Position": "RB", "Team": "DET", "ProjPts": 15.0},
+        "sleeper": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 26.0},
+        "fantasypros": {"Name": "Starter", "Team": "DET", "Position": "RB", "DkPts": 26.0},
+    }
+    proj, sal, sleeper, fantasypros, n = _split_pool("RB", 20, backup_gap=0.0, extra_rows=[starter])
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n}
+        frame = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    row = build_edge_frame(proj, sal, sleeper=sleeper, fantasypros=fantasypros).frame.iloc[0]
-    assert "SPLIT↑" in row["Flags"]
+    starter_row = frame[frame["Name"] == "Starter"].iloc[0]
+    assert starter_row["Flags"] == "SPLIT↑"
 
 
 def test_split_flag_never_masks_a_higher_priority_flag_in_the_singular_flag_column():
-    proj = _projections([{"Id": "1", "Name": "Windy Split Guy", "Team": "DET", "ProjPts": 10.0}])
-    sal = _salaries([{"ID": "1"}])
+    starter = {
+        "proj": {
+            "Id": "starter",
+            "Name": "Windy Split Guy",
+            "Position": "RB",
+            "Team": "DET",
+            "ProjPts": 15.0,
+        },
+        "sleeper": {"Name": "Windy Split Guy", "Team": "DET", "Position": "RB", "DkPts": 3.0},
+        "fantasypros": {"Name": "Windy Split Guy", "Team": "DET", "Position": "RB", "DkPts": 3.0},
+    }
+    proj, sal, sleeper, fantasypros, n = _split_pool("RB", 20, backup_gap=3.0, extra_rows=[starter])
     games = _games([{"GameId": "g1", "Away": "DET", "Home": "NO"}])
     weather = pd.DataFrame([{"GameId": "g1", "Wind": 25.0}])
-    sleeper = pd.DataFrame([{"Name": "Windy Split Guy", "Team": "DET", "Position": "RB", "DkPts": 5.0}])
 
-    row = build_edge_frame(proj, sal, games=games, weather=weather, sleeper=sleeper).frame.iloc[0]
+    original = derived.VAL_ADJ_ROSTERABLE_TOP_N
+    try:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = {**original, "RB": n}
+        frame = build_edge_frame(
+            proj, sal, games=games, weather=weather, sleeper=sleeper, fantasypros=fantasypros
+        ).frame
+    finally:
+        derived.VAL_ADJ_ROSTERABLE_TOP_N = original
+
+    row = frame[frame["Name"] == "Windy Split Guy"].iloc[0]
     assert row["Flags"] == "WIND SPLIT↓"
     assert row["Flag"] == "WIND"
 

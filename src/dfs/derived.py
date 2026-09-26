@@ -75,6 +75,7 @@ import pandas as pd
 
 from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
 from dfs.player_join import JoinResult, join_source_to_dk
+from dfs.team_metrics import GAME_ENV_WEIGHTS, combined_by_game, weighted_mean_skipna
 
 # Leverage = CeilPct - OwnPct, both percentile ranks on the same 0-100
 # scale within position -- see the module docstring's "second scale/index
@@ -121,26 +122,49 @@ LEVERAGE_FLAG_TOP_SHARE = 0.07
 # PlayerPoolRaw's native Own%/Rstr%): 20% is 0.20, not 20.0.
 CHALK_OWNERSHIP_THRESHOLD = 0.20
 
-# Part C, C5b (2026-09-24): SPLIT↑/SPLIT↓ fires when TFFB's own ProjPts
-# disagrees sharply with the mean of the OTHER two sources (Sleeper,
-# FantasyPros) -- deliberately NOT AggPts, which already includes TFFB
-# and would hide a third of the real disagreement. Tuned against the
-# real 2026-09-20 rosterable pool (241 of 250 pool players had at least
-# one other source): gap = mean(other sources) - ProjPts had quartiles
-# -2.83 / -1.41 / +0.27, and |gap| quantiles of 0.80/2.63, 0.90/3.86,
-# 0.95/4.52. `SPLIT_ABS_FLOOR = 4.0` with `SPLIT_REL_THRESHOLD = 0.20`
-# (20% of ProjPts) fires on 20/250 (8.0%) -- inside the 5-10% band.
-# HONEST CAVEAT, not buried: on that same snapshot this fired ENTIRELY
-# in one direction (20 SPLIT↓, 0 SPLIT↑) -- the systematic RB/WR gap C2
-# already found and Sam already accepted (Sleeper/FantasyPros running
-# ~1.5-2pts below TFFB at those positions) dominates the distribution, so
-# SPLIT reads more like "TFFB is bullish here" than a symmetric
-# disagreement signal right now. Also tuned against only ONE real
-# snapshot (both external sources are new this session, so there's no
-# second week's data yet the way LEVERAGE/LINE had) -- re-check once a
-# second week's Sleeper/FantasyPros pull exists.
-SPLIT_ABS_FLOOR = 4.0
-SPLIT_REL_THRESHOLD = 0.20
+# SPLIT rework (2026-09-25): the original C5b rule (raw gap vs. a fixed
+# floor/percentage-of-ProjPts threshold) fired almost entirely on backups,
+# not on real disagreement. CORRECTION, since a prior comment here was
+# wrong and stated as fact: that comment claimed "the systematic RB/WR gap
+# ... Sam already accepted" as the reason for the one-sided firing -- Sam
+# had accepted that the RB/WR calibration gap EXISTS and that AggPts
+# should ship with it (2026-09-24, "ship it, note the caveat" -- see
+# docs/CALCULATIONS.md's own AggPts section), but nobody had separately
+# decided whether it was fine for that gap to dominate SPLIT specifically.
+# Nobody had, until this rework.
+#
+# The actual finding (2026-09-25, `data/raw/edge/20260925T191419Z.csv`):
+# TFFB agrees closely with Sleeper/FantasyPros on STARTERS (RB ranks 1-12
+# differ by about +0.3 points) but runs systematically higher than both on
+# deep RB/WR backups (ranks 41-64 differ by about -3.0) -- a real, stable
+# difference between the models at the roster's bottom, not a scoring bug
+# (hand-checked `dk_scoring` against stored components directly). Raw-gap
+# SPLIT fired 15 times on that snapshot; 12 of the 15 were SPLIT↓ on
+# $3,400-$4,800 RBs/WRs -- the same handful of backups every week, not a
+# useful "look closer" signal.
+#
+# Fix: flag disagreement beyond the USUAL gap for a position and
+# projection level, not raw points -- fit `gap ~ ProjPts` per position
+# (OLS, over rosterable-pool players with a source, the same shape
+# `_val_adj_residual_within_position` already uses for ValAdj), and flag
+# on the RESIDUAL from that line (`_split_residual_within_position`), not
+# the gap itself. `SPLIT_ABS_FLOOR`/`SPLIT_REL_THRESHOLD` are gone --
+# nothing reads them any more.
+#
+# `SPLIT_FLAG_TOP_SHARE = 0.07`: the top 7% of pool players with a
+# residual, by |residual|, slate-wide (not per position) -- same quantile
+# shape `LEVERAGE_FLAG_TOP_SHARE` already uses, ties at the cutoff
+# included. `SPLIT_MIN_RESIDUAL = 2.0`: an absolute floor below the
+# quantile -- a week where every source agrees closely shouldn't
+# manufacture flags just to fill 7%. `SPLIT_MIN_FIT_PLAYERS = 8`: a
+# position with fewer than this many pool players carrying a source
+# doesn't get a fitted line at all (too few points to trust a slope) --
+# skipped entirely (no residual, no flag, a printed warning), rather than
+# fit against a handful of players and pretend the resulting line means
+# anything.
+SPLIT_FLAG_TOP_SHARE = 0.07
+SPLIT_MIN_RESIDUAL = 2.0
+SPLIT_MIN_FIT_PLAYERS = 8
 # Phase 6, Part 1.4: `has_real_ownership` used to be `.any()` -- a single
 # non-zero ProjOwn (one early-published player, a data glitch, a bye-week
 # artifact) flipped the WHOLE slate to "real," computing OwnPct/Leverage as
@@ -301,6 +325,16 @@ EDGE_COLUMNS = [
     "OverUnder",
     "Spread",
     "GameEnv",
+    # Part C, C7 (2026-09-25): this player's own TEAM's season-to-date
+    # offense metrics from nflverse play-by-play, blended with last
+    # season's full-season value early on -- see `sources/nflverse_pbp.py`/
+    # `team_metrics.py`. Placed right after `GameEnv` since all three feed
+    # it (see `_game_env_scores`); `Expl%` stays a readable column on its
+    # own and is deliberately NOT one of GameEnv's inputs (C7's own
+    # instruction).
+    "Pace",
+    "PROE",
+    "Expl%",
     # Sam: "all data should be in edge raw" -- computed the same way
     # PlayerPoolRaw's own (now-fixed) `OppPosRank` is, but natively in
     # Python from the already-synced sos_qb/rb/wr/te/dst CSVs rather than
@@ -372,6 +406,12 @@ class EdgeBuildResult:
     # no source was passed in (e.g. `dfs sync --only edge` before any
     # has ever synced).
     source_joins: dict[str, JoinResult]
+    # SPLIT rework (2026-09-25): positions `_split_residual_within_position`
+    # skipped for having fewer than `SPLIT_MIN_FIT_PLAYERS` rosterable-pool
+    # players with a source -- lets the caller print a warning rather than
+    # silently never flagging that position. Empty in the common case
+    # (every position has enough data, or neither external source synced).
+    split_skipped_positions: list[str]
 
 
 def _percentile_within(series: pd.Series, group: pd.Series) -> pd.Series:
@@ -566,18 +606,70 @@ def _val_adj_blend(pts_pct: pd.Series, edge_pct: pd.Series) -> pd.Series:
     return (VAL_ADJ_PROJECTION_WEIGHT * pts_pct + (1 - VAL_ADJ_PROJECTION_WEIGHT) * edge_pct).round(1)
 
 
-def _game_env_scores(game: pd.Series, ou: pd.Series, spread: pd.Series) -> pd.Series:
-    """0-100 per game: half from total (higher = more scoring expected),
-    half from spread tightness (smaller |spread| = more competitive, more
-    reason for both teams to keep throwing). Computed once per unique game
-    and broadcast back to every player in it."""
+def _attach_team_metrics(merged: pd.DataFrame, team_metrics: pd.DataFrame | None) -> pd.DataFrame:
+    """Part C, C7: `Pace`/`PROE`/`Expl%` joined onto each player's row by
+    his own `Team` -- `team_metrics` is `sources/nflverse_pbp.py`'s own
+    already-blended per-team output (`Team`/`Pace`/`PROE`/`Expl%`), a
+    whole-slate Python join exactly like `_attach_snaps`'s. Missing
+    entirely (pbp couldn't be fetched this run) blanks all three columns
+    for every row -- same fail-soft contract as every other optional input
+    here; `_game_env_scores` (below) is what makes `GameEnv` itself
+    degrade gracefully from this rather than going blank in turn."""
+    if team_metrics is None:
+        merged["Pace"] = pd.NA
+        merged["PROE"] = pd.NA
+        merged["Expl%"] = pd.NA
+        return merged
+    by_team = team_metrics.set_index("Team")
+    merged["Pace"] = merged["Team"].map(by_team["Pace"])
+    merged["PROE"] = merged["Team"].map(by_team["PROE"])
+    merged["Expl%"] = merged["Team"].map(by_team["Expl%"])
+    return merged
+
+
+def _game_env_scores(
+    game: pd.Series, ou: pd.Series, spread: pd.Series, team: pd.Series, pace: pd.Series, proe: pd.Series
+) -> pd.Series:
+    """Part C, C7 rebuild: 0-100 per game, an equal-weight (`GAME_ENV_
+    WEIGHTS`) percentile blend of four inputs -- total (higher = more
+    scoring expected), spread tightness (smaller |spread| = more
+    competitive), combined pace of both offenses (faster = higher --
+    `Pace` itself reads lower-is-faster, so this percentile is inverted),
+    and combined PROE of both offenses (pass-heavier = higher). `Expl%` is
+    a readable column on its own and is deliberately NOT one of these
+    four, per C7's own instruction.
+
+    Computed once per unique game (`Game`, TFFB's own field -- see module
+    docstring for why this deliberately isn't cross-joined against
+    `nflverse_games`'s own `GameId`) and broadcast back to every player in
+    it, same as before C7. `pace`/`proe` are combined via `team_metrics.
+    combined_by_game` (the mean of the two TEAMS' own values, never
+    player-count-weighted) before being folded in here.
+
+    Fail-soft: `weighted_mean_skipna` renormalizes over whatever inputs
+    aren't NaN for a given game, so a pbp outage that leaves `Pace`/`PROE`
+    blank for every row doesn't blank `GameEnv` -- it silently reduces to
+    the exact pre-C7 formula (a plain 50/50 of total/spread tightness),
+    with no separate fallback branch needed."""
     games = pd.DataFrame({"Game": game, "OU": pd.to_numeric(ou, errors="coerce")})
     games["AbsSpread"] = pd.to_numeric(spread, errors="coerce").abs()
     games = games.drop_duplicates(subset="Game").set_index("Game")
 
-    ou_pct = games["OU"].rank(pct=True) * 100
-    tightness_pct = (1 - games["AbsSpread"].rank(pct=True)) * 100
-    game_env = ((ou_pct + tightness_pct) / 2).round(1)
+    combined_pace = combined_by_game(game, team, pace)
+    combined_proe = combined_by_game(game, team, proe)
+    games["Pace"] = combined_pace.reindex(games.index)
+    games["PROE"] = combined_proe.reindex(games.index)
+
+    components = pd.DataFrame(
+        {
+            "total": games["OU"].rank(pct=True) * 100,
+            "spread_tightness": (1 - games["AbsSpread"].rank(pct=True)) * 100,
+            "pace": (1 - games["Pace"].rank(pct=True)) * 100,
+            "proe": games["PROE"].rank(pct=True) * 100,
+        },
+        index=games.index,
+    )
+    game_env = weighted_mean_skipna(components, GAME_ENV_WEIGHTS)
 
     return game.map(game_env)
 
@@ -663,14 +755,75 @@ def _attach_line_movement(merged: pd.DataFrame, line_movement: pd.DataFrame | No
     return merged
 
 
-def _split_flag_for_gap(gap: float, threshold: float) -> str:
-    if pd.isna(gap) or pd.isna(threshold):
+def _split_residual_within_position(
+    gap: pd.Series, proj_pts: pd.Series, position: pd.Series, eligible: pd.Series
+) -> tuple[pd.Series, list[str]]:
+    """SPLIT rework: `resid = gap - E[gap | ProjPts, Position]` -- an OLS
+    line of `gap` on `ProjPts`, fit PER POSITION over only `eligible` rows
+    (rosterable-pool members with at least one of Sleeper/FantasyPros
+    available), the same "fit against the reference population" shape
+    `_val_adj_residual_within_position` already uses for ValAdj. Unlike
+    that function, only `eligible` rows are ever SCORED too, not every row
+    in the position -- a non-pool player, or a pool player missing both
+    other sources, never gets a residual at all (`NaN`), matching "still
+    pool-only" and "no flag on missing data" directly rather than scoring
+    a row this flag can never apply to anyway.
+
+    A position with fewer than `SPLIT_MIN_FIT_PLAYERS` eligible rows (or
+    where every eligible row shares the same `ProjPts`, so no slope can be
+    fit) is skipped entirely -- NaN for every row in it, and its name is
+    returned in the second element of the tuple so the caller can log a
+    warning; too few points to trust a fitted line, and Sam's own
+    instruction is "don't fit it and don't flag it" for exactly this
+    case, not "fit it anyway with weaker data."""
+    gap = pd.to_numeric(gap, errors="coerce")
+    proj_pts = pd.to_numeric(proj_pts, errors="coerce")
+    result = pd.Series(np.nan, index=gap.index, dtype=float)
+    skipped_positions: list[str] = []
+
+    for pos_value in position.unique():
+        idx = position.index[position == pos_value]
+        elig = eligible.loc[idx].to_numpy()
+        g = gap.loc[idx].to_numpy(dtype=float)
+        p = proj_pts.loc[idx].to_numpy(dtype=float)
+        usable = elig & ~(np.isnan(g) | np.isnan(p))
+        if usable.sum() < SPLIT_MIN_FIT_PLAYERS or np.ptp(p[usable]) == 0:
+            skipped_positions.append(pos_value)
+            continue
+        slope, intercept = np.polyfit(p[usable], g[usable], 1)
+        predicted = intercept + slope * p
+        residual = np.where(usable, g - predicted, np.nan)
+        result.loc[idx] = residual
+
+    return result.round(2), skipped_positions
+
+
+def _split_flag_eligible(residual: pd.Series) -> pd.Series:
+    """True for rows in the top `SPLIT_FLAG_TOP_SHARE` of every row WITH a
+    residual, slate-wide (not per position -- same shape `_leverage_flag_
+    eligible` uses), by `|residual|`, AND clearing the absolute
+    `SPLIT_MIN_RESIDUAL` floor -- both conditions required, per Sam's own
+    "flag the top 7%... [and] add an absolute floor" instruction (the
+    floor keeps a low-disagreement week from manufacturing flags just to
+    fill 7%; the quantile keeps a high-disagreement week from flagging way
+    more than intended). Ties at the cutoff are included, same as
+    LEVERAGE's own quantile."""
+    abs_resid = residual.abs().dropna()
+    eligible = pd.Series(False, index=residual.index)
+    if abs_resid.empty:
+        return eligible
+    k = max(1, math.ceil(len(abs_resid) * SPLIT_FLAG_TOP_SHARE))
+    cutoff = abs_resid.nlargest(k).min()
+    in_top_share = abs_resid >= cutoff
+    clears_floor = abs_resid >= SPLIT_MIN_RESIDUAL
+    eligible.loc[abs_resid.index] = in_top_share & clears_floor
+    return eligible
+
+
+def _split_flag_for_residual(resid: float, eligible: bool) -> str:
+    if not eligible or pd.isna(resid):
         return ""
-    if gap >= threshold:
-        return "SPLIT↑"
-    if gap <= -threshold:
-        return "SPLIT↓"
-    return ""
+    return "SPLIT↑" if resid > 0 else "SPLIT↓"
 
 
 def _attach_agg_pts(
@@ -678,37 +831,41 @@ def _attach_agg_pts(
     sleeper: pd.DataFrame | None,
     fantasypros: pd.DataFrame | None,
     pool_mask: pd.Series,
-) -> tuple[pd.Series, pd.Series, dict[str, JoinResult]]:
-    """Part C, C5/C5b: `AggPts` is the equal-weight mean of every DK-scored
-    source with a real projection for this player -- TFFB's own `ProjPts`
-    (always present, this frame's own column), Sleeper's `DkPts`,
-    FantasyPros' `DkPts`. A player missing one source (not synced this
-    run, or a real "no projection this week" NaN from that source --
+) -> tuple[pd.Series, pd.Series, dict[str, JoinResult], list[str]]:
+    """Part C, C5/SPLIT rework: `AggPts` is the equal-weight mean of every
+    DK-scored source with a real projection for this player -- TFFB's own
+    `ProjPts` (always present, this frame's own column), Sleeper's
+    `DkPts`, FantasyPros' `DkPts`. A player missing one source (not synced
+    this run, or a real "no projection this week" NaN from that source --
     see sources/sleeper_projections.py's/fantasypros_projections.py's own
     docstrings for why that's NaN, never a fabricated 0) is averaged over
     whatever's left; with neither external source available, `AggPts`
     equals `ProjPts` exactly. Feeds nothing else -- `ValAdj`/`Val`/
     `CeilVal`/the Board/every guardrail still key off `ProjPts` alone.
 
-    Also computes C5b's `SPLIT↑`/`SPLIT↓` eligibility: `gap = mean(Sleeper,
+    Also computes `SPLIT↑`/`SPLIT↓` eligibility (reworked 2026-09-25 -- see
+    `SPLIT_FLAG_TOP_SHARE`'s own comment for why): `gap = mean(Sleeper,
     FantasyPros) - ProjPts` -- deliberately NOT `AggPts`, which already
     includes `ProjPts` and would hide a third of the real disagreement --
-    fires when `|gap| >= max(SPLIT_ABS_FLOOR, SPLIT_REL_THRESHOLD *
-    ProjPts)`, restricted to `pool_mask` (a $2,500 backup's disagreement
-    is noise, same restriction the LEVERAGE flag got) and to players with
-    at least one of those two sources available (no source -> no flag,
-    never flag on missing data).
+    then `_split_residual_within_position` fits `gap ~ ProjPts` per
+    position over the rosterable pool, and `_split_flag_eligible` flags
+    the top share of |residual|, above an absolute floor. Restricted to
+    `pool_mask` (a $2,500 backup's disagreement is noise, same restriction
+    the LEVERAGE flag got) and to players with at least one of those two
+    sources available (no source -> no flag, never flag on missing data).
 
     Joins each source independently by (name, team, position) via
     `player_join.join_source_to_dk`, keyed on `merged`'s own Id/Name/
     Team/Position (DST names already rewritten to DK's nickname by this
     point in `build_edge_frame`) -- never against each other, so a name
     one source can't match doesn't cost the other's own independent
-    match. Returns `(agg_pts, split_flags, joins)`: the `AggPts` series,
-    the `SPLIT↑`/`SPLIT↓`/`""` series (both aligned to `merged`'s index),
-    and one `JoinResult` per source actually passed in, so the caller
-    (`sources/edge.py`) can report C1's own required per-source,
-    per-position match rate without re-running the join itself.
+    match. Returns `(agg_pts, split_flags, joins, split_skipped_positions)`:
+    the `AggPts` series, the `SPLIT↑`/`SPLIT↓`/`""` series (both aligned to
+    `merged`'s index), one `JoinResult` per source actually passed in (so
+    the caller, `sources/edge.py`, can report C1's own required per-source,
+    per-position match rate without re-running the join itself), and the
+    list of positions `_split_residual_within_position` skipped for having
+    too few eligible players to fit (so the caller can print a warning).
     `pool_mask` (the same `VAL_ADJ_ROSTERABLE_TOP_N` mask ValAdj uses)
     scopes every `JoinResult`'s match-rate counts to the rosterable pool
     -- it does NOT restrict what gets averaged into `AggPts` itself; a
@@ -745,21 +902,22 @@ def _attach_agg_pts(
     if other_scores:
         other_mean = pd.concat(other_scores, axis=1).mean(axis=1, skipna=True)
         gap = other_mean - proj_pts
-        threshold = pd.concat(
-            [pd.Series(SPLIT_ABS_FLOOR, index=merged.index), SPLIT_REL_THRESHOLD * proj_pts], axis=1
-        ).max(axis=1)
-        eligible = pool_mask.reindex(merged.index, fill_value=False)
+        has_other_source = other_mean.notna()
+        pool = pool_mask.reindex(merged.index, fill_value=False)
+        eligible_for_fit = pool & has_other_source
+        residual, split_skipped_positions = _split_residual_within_position(
+            gap, proj_pts, merged["Position"], eligible_for_fit
+        )
+        split_eligible = _split_flag_eligible(residual)
         split_flags = pd.Series(
-            [
-                _split_flag_for_gap(g, t) if elig else ""
-                for g, t, elig in zip(gap, threshold, eligible, strict=True)
-            ],
+            [_split_flag_for_residual(r, elig) for r, elig in zip(residual, split_eligible, strict=True)],
             index=merged.index,
         )
     else:
         split_flags = pd.Series("", index=merged.index)
+        split_skipped_positions = []
 
-    return agg_pts, split_flags, joins
+    return agg_pts, split_flags, joins, split_skipped_positions
 
 
 def _attach_snaps(
@@ -844,6 +1002,7 @@ def build_edge_frame(
     sleeper: pd.DataFrame | None = None,
     fantasypros: pd.DataFrame | None = None,
     snaps: pd.DataFrame | None = None,
+    team_metrics: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -870,6 +1029,13 @@ def build_edge_frame(
     each player's own most recently completed week already resolved) --
     optional, feeds only `Snap%` (see `_attach_snaps`); missing it blanks
     `Snap%` for every row, same as everything else optional here.
+    `team_metrics` is `sources/nflverse_pbp.py`'s own already-blended shape
+    (`Team`/`Pace`/`PROE`/`Expl%` -- see `team_metrics.py`) -- optional,
+    feeds `Pace`/`PROE`/`Expl%` directly (see `_attach_team_metrics`) and
+    `GameEnv` indirectly (see `_game_env_scores`); missing it blanks the
+    three team-metric columns and `GameEnv` silently reduces to its
+    pre-C7, Vegas-only formula, same fail-soft contract as everything else
+    optional here.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -905,7 +1071,7 @@ def build_edge_frame(
     merged["ProjOwn"] = merged["ProjOwn"] / 100
 
     val_adj_pool = _rosterable_pool_mask(merged["ProjPts"], merged["Position"])
-    merged["AggPts"], merged["_SplitFlag"], source_joins = _attach_agg_pts(
+    merged["AggPts"], merged["_SplitFlag"], source_joins, split_skipped_positions = _attach_agg_pts(
         merged, sleeper, fantasypros, val_adj_pool
     )
     merged["Val"] = (merged["ProjPts"] / (merged["Salary"] / 1000)).round(2)
@@ -939,7 +1105,10 @@ def build_edge_frame(
     # same as before.
     merged["_LeverageFlagEligible"] = _leverage_flag_eligible(merged["Leverage"], val_adj_pool)
 
-    merged["GameEnv"] = _game_env_scores(merged["Game"], merged["OU"], merged["Spread"])
+    merged = _attach_team_metrics(merged, team_metrics)
+    merged["GameEnv"] = _game_env_scores(
+        merged["Game"], merged["OU"], merged["Spread"], merged["Team"], merged["Pace"], merged["PROE"]
+    )
     # Fix 2.3: O/U and Spread were computed into GameEnv but never
     # surfaced on EdgeRaw itself -- renamed OverUnder here (not OU) so its
     # header doesn't collide with Player Pool/Lineups' own "O/U" header
@@ -995,5 +1164,8 @@ def build_edge_frame(
         merged[label] = ""
 
     return EdgeBuildResult(
-        frame=merged[EDGE_COLUMNS], unmatched_names=unmatched_names, source_joins=source_joins
+        frame=merged[EDGE_COLUMNS],
+        unmatched_names=unmatched_names,
+        source_joins=source_joins,
+        split_skipped_positions=split_skipped_positions,
     )

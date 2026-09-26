@@ -110,6 +110,17 @@ BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
 # DIFFERENT section that happens to share the same column letter.
 BOARD_SLATE_GAMEID_COL = "J"
 BOARD_SLATE_GAMEID_COL_INDEX = 9
+# Part C, C7 (2026-09-25): two more hidden join keys, right past GameId --
+# each row's own Away/Home team code, needed to look up that game's
+# combined Pace off EdgeRaw (keyed by Team, not GameId). Derived from
+# BOARD_SLATE_GAMEID_COL_INDEX rather than a second hardcoded literal, so
+# a future relocation of the whole hidden-helper block (PROMPT_BOARD_
+# FIXES.md item 5 flags that Stack candidates will eventually grow into
+# this same column) only has to move one number.
+BOARD_SLATE_AWAY_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 1
+BOARD_SLATE_HOME_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 2
+BOARD_SLATE_AWAY_COL = column_letter(BOARD_SLATE_AWAY_COL_INDEX)
+BOARD_SLATE_HOME_COL = column_letter(BOARD_SLATE_HOME_COL_INDEX)
 
 BOARD_LEADERS_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
 BOARD_LEADERS_COLHEADER_ROW = BOARD_LEADERS_HEADER_ROW + 1
@@ -216,6 +227,7 @@ def build_board(
 
     g = _q(games_tab)
     w = _q(weather_tab)
+    e = _q(edge_tab)
 
     live = f'{name}<>""'
     not_out = f'NOT(ISNUMBER(SEARCH("OUT",{flag})))'
@@ -412,19 +424,35 @@ def build_board(
         _set(BOARD_QUEUE_FIRST_ROW + i, list(existing_row))
 
     _set(BOARD_SLATE_HEADER_ROW, ["SLATE SHAPE  —  where do I want exposure this week"])
-    _set(BOARD_SLATE_COLHEADER_ROW, ["Matchup", "Total", "Wind", "Shootout?"])
+    _set(BOARD_SLATE_COLHEADER_ROW, ["Matchup", "Total", "Pace", "Wind", "Shootout?"])
     wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
+    # Part C, C7 (2026-09-25): "the Board's Slate shape section ranks games
+    # by total 'and pace'; it can now use real pace. Update it" -- read as
+    # "surface the newly-available Pace signal," not "change the sort key"
+    # (Total stays the sort, unchanged; PROMPT_BOARD_FIXES.md's own item 1
+    # keeps building on top of Total too). Each game's own combined Pace
+    # (mean of both teams' EdgeRaw Pace, the same "combined pace of both
+    # offenses" _game_env_scores already computes) is looked up via two
+    # more VLOOKUPs against EdgeRaw, keyed by team code -- Pace is a
+    # per-TEAM column there, shared identically by both teams' rows isn't
+    # true (each team has its OWN Pace), so both sides are looked up and
+    # averaged, unlike Wind below (one game-level value, keyed by GameId).
+    team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
+    pace_col = column_letter(EDGE_COLUMNS.index("Pace") + EDGE_DATA_OFFSET)
+    pace_idx = EDGE_COLUMNS.index("Pace") - EDGE_COLUMNS.index("Team") + 1
     # One spilling SORT, not a per-row passthrough of GamesRaw's own
     # (unsorted) row order -- "games ranked by total" is the actual ask.
-    # A second, independent SORT on the exact same key (Total) fills a
-    # parallel GameId column at BOARD_SLATE_GAMEID_COL, well past every
-    # other section's rightmost visible column so hiding it (style_board)
-    # can't hide real content elsewhere -- needed as a join key for the
-    # per-row Wind lookup below, since WeatherRaw is keyed on GameId, not
-    # the sorted Matchup text. Verified live (2026-09-22, template) that
-    # two SORTs on the same key preserve identical relative order for
-    # tied values, so the two columns stay row-aligned.
+    # Three more independent SORTs on the exact same key (Total) fill
+    # parallel GameId/Away/Home columns starting at BOARD_SLATE_GAMEID_COL,
+    # well past every other section's rightmost visible column so hiding
+    # them (style_board) can't hide real content elsewhere -- GameId is
+    # the join key for the per-row Wind lookup below (WeatherRaw is keyed
+    # on GameId, not the sorted Matchup text); Away/Home are the join keys
+    # for the per-row Pace lookup (EdgeRaw is keyed on Team). Verified live
+    # (2026-09-22, template) that multiple SORTs on the same key preserve
+    # identical relative order for tied values, so all four columns stay
+    # row-aligned.
     slate_sorted = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f'{{{g}!$B$2:$B$40&" @ "&{g}!$C$2:$C$40,{g}!$M$2:$M$40}},'
@@ -435,14 +463,29 @@ def build_board(
         f"{{{g}!$A$2:$A$40,{g}!$M$2:$M$40}},"
         f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
+    slate_away = (
+        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
+        f"{{{g}!$B$2:$B$40,{g}!$M$2:$M$40}},"
+        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+    )
+    slate_home = (
+        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
+        f"{{{g}!$C$2:$C$40,{g}!$M$2:$M$40}},"
+        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+    )
     _set(BOARD_SLATE_FIRST_ROW, [slate_sorted])
     _set(BOARD_SLATE_FIRST_ROW, [slate_gameid], start_col=BOARD_SLATE_GAMEID_COL_INDEX)
+    _set(BOARD_SLATE_FIRST_ROW, [slate_away], start_col=BOARD_SLATE_AWAY_COL_INDEX)
+    _set(BOARD_SLATE_FIRST_ROW, [slate_home], start_col=BOARD_SLATE_HOME_COL_INDEX)
     for i in range(BOARD_SLATE_ROWS):
         r = BOARD_SLATE_FIRST_ROW + i
         guard = f'IF($A{r}="","",'
         _set(
             r,
             [
+                f"={guard}IFERROR(AVERAGE("
+                f"VLOOKUP(${BOARD_SLATE_AWAY_COL}{r},{e}!${team_col}:${pace_col},{pace_idx},FALSE),"
+                f'VLOOKUP(${BOARD_SLATE_HOME_COL}{r},{e}!${team_col}:${pace_col},{pace_idx},FALSE)),""))',
                 f"={guard}IFERROR(VLOOKUP(${BOARD_SLATE_GAMEID_COL}{r},{w}!$A:${wind_end_col},"
                 f'{wind_idx},FALSE),""))',
                 f'={guard}IF($B{r}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',

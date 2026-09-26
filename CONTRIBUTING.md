@@ -2459,7 +2459,14 @@ good/bad news the way `LINE↑`/`LINE↓` genuinely is). No sheet-structure
 change -- `Flags`/`Flag` already existed; only which rows populate them
 changed, same shape of change as the `LEVERAGE` retune.
 
-## Part C, C6/C7 (2026-09-24): `Snap%`, a fifth collapsed group, and storage
+## Part C, C6/C8 (2026-09-24): `Snap%`, a fifth collapsed group, and storage
+
+**Renumbered 2026-09-25:** `PROMPT_PART_C.md` was updated on 2026-09-24
+after this commit landed -- storage moved from **C7** to **C8**, and a
+new **C7** (team metrics from nflverse play-by-play, a rebuilt `GameEnv`)
+was added, which this commit did not build (see the section below this
+one). The heading and the "C7, storage" text below are corrected to say
+C8; nothing about what was actually built changed.
 
 `Snap%` -- offensive snap share from nflverse's free `snap_counts_
 {season}.csv` release (`src/dfs/sources/nflverse_snaps.py`, source
@@ -2501,12 +2508,91 @@ inherited format at a moved position" issue `FIELD_FORMATS`'s own `Id`
 comment already documents -- **`dfs setup polish` is not optional after
 `reorder-columns`**, confirmed live rather than assumed.
 
-**C7, storage:** no new code needed -- `sleeper`/`fantasypros`/`snaps`
+**C8, storage:** no new code needed -- `sleeper`/`fantasypros`/`snaps`
 are ordinary registry sources (`sources/__init__.py`'s `SOURCES` dict),
 so `sync.run_sync`'s existing `store.save(name, df)` call already
 snapshots each one to `data/raw/<source>/<timestamp>.csv` and
 `data/current/<source>.csv` on every sync, the same as every source that
 predates Part C.
+
+## Part C, C7 (2026-09-25): `Pace`/`PROE`/`Expl%` and a rebuilt `GameEnv`
+
+New pure module `team_metrics.py` (neutral-script filter, the three
+per-team metrics, the prior-season blend, and the `GameEnv` combination
+math) plus a new thin source `sources/nflverse_pbp.py` (fetches the
+current + prior season's play-by-play parquet, reduces to a small
+per-team table). Registered as `"pbp"` in `sources/__init__.py`,
+deliberately excluded from `cli.py`'s `LIVE_SYNC_SOURCES` (same treatment
+`sleeper`/`fantasypros`/`snaps` already get -- two full-season parquet
+downloads, ~20-40MB combined, isn't worth paying on every fast live-sync
+pass). New dependency: `pyarrow` (`pd.read_parquet`).
+
+`GameEnv` (`derived._game_env_scores`) is rebuilt to an equal-weight
+percentile blend of four inputs (total, spread tightness, combined pace,
+combined PROE) via a new `team_metrics.weighted_mean_skipna` helper that
+renormalizes over whatever inputs aren't blank for a game -- this is what
+makes the fail-soft behaviour (pbp unavailable -> `GameEnv` reduces to
+its exact pre-C7 total/spread-only formula) fall out for free, with no
+separate fallback branch. See `docs/CALCULATIONS.md`'s GameEnv/Pace
+sections for the full formulas, the neutral-script filter, and the
+`PBP_PRIOR_WEIGHT_GAMES = 4.0` blend constant's own rationale.
+
+Board's Slate shape (`sheet_views.build_board`) gains a `Pace` column
+(each game's combined Pace, looked up by two new hidden helper columns --
+`BOARD_SLATE_AWAY_COL`/`BOARD_SLATE_HOME_COL`, right after the existing
+`BOARD_SLATE_GAMEID_COL`) -- the sort stays by Total, unchanged; this is
+a new column to look at, not a new sort key (see `docs/planning/
+PROMPT_PART_C7.md`'s own "ranks games by total 'and pace'... update it"
+instruction, read as "surface the newly-available signal").
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-25 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | New members `Pace`/`PROE`/`Expl%` inserted into the `GAME` group right after `GameEnv`, before `OppPosRank` -- everything from `OppPosRank` onward shifts three positions right. Linked (VLOOKUP against EdgeRaw) on the three builder tabs, same as `GameID`/`TmRank`. | `derived.EDGE_COLUMNS` 38 columns (`GameEnv` at 17, `OppPosRank` at 18, `GameID` 19, `TmRank` 20, `Wind` 33, `Id` 36, `Flag` 37). `sheet_columns.LINKED_COLUMNS` 21 members. `PLAYER_POOL_RAW_COLUMN_ORDER` 40 cols, `PLAYER_POOL_COLUMN_ORDER` 46, `LINEUPS_COLUMN_ORDER` 49. | `derived.EDGE_COLUMNS` 41 columns (`GameEnv` still at 17, new `Pace`/`PROE`/`Expl%` at 18/19/20, `OppPosRank` now 21, `GameID` 22, `TmRank` 23, `Wind` 36, `Id` 39, `Flag` 40). `LINKED_COLUMNS` 24 members (`Pace`/`PROE`/`Expl%` inserted right after `GameEnv`, before `GameID`). `PLAYER_POOL_RAW_COLUMN_ORDER` 43, `PLAYER_POOL_COLUMN_ORDER` 49, `LINEUPS_COLUMN_ORDER` 52. | Live + Template | `derived.EDGE_COLUMNS`, new `derived._attach_team_metrics`, rebuilt `derived._game_env_scores` (new `team`/`pace`/`proe` params), `derived.build_edge_frame` (new `team_metrics` param), `sheet_columns.GAME`/`LINKED_COLUMNS`/`BASE_COLUMN_ORDER`/`PLAYER_POOL_COLUMN_ORDER`/`LINEUPS_COLUMN_ORDER` (all gain the three new members), `sheet_style.FIELD_FORMATS`/`FIELD_COLOR_SCALES`/`EDGE_WIDTHS` (gain `Pace`/`PROE`/`Expl%`), `sheet_views.BOARD_SLATE_AWAY_COL(_INDEX)`/`BOARD_SLATE_HOME_COL(_INDEX)` (new), every EDGE_COLUMNS-index-pinning test in `tests/test_sheet_links.py`/`test_sheet_style.py`/`test_sheet_views.py`. |
+
+**Applied via the same `dfs setup reorder-columns` mechanism** as
+`AggPts`/`Snap%` -- template first, then live; verified with `dfs doctor`
+and real cell reads (see the report for exact numbers and any caveats
+found live).
+
+## SPLIT rework (2026-09-25): disagreement beyond the usual gap, not raw points
+
+**The problem, found live.** TFFB projects backups and depth players well
+above Sleeper/FantasyPros -- a real, stable difference between the
+models at the roster's bottom (RB ranks 1-12 differ by about +0.3 points;
+ranks 41-64 differ by about -3.0; hand-checked `dk_scoring` against
+stored components directly, it's correct). The original C5b rule (raw
+`gap` vs. a fixed floor/percentage threshold) fired on this backup-pile
+difference almost every time: 15 fires on `data/raw/edge/
+20260925T191419Z.csv`, 12 of them `SPLIT↓` on $3,400-$4,800 RBs/WRs -- the
+same handful of backups every week, not a "look closer" signal.
+**Correction to a prior comment:** `derived.py` used to say Sam "already
+accepted" this specific outcome -- he'd accepted that the RB/WR
+calibration gap exists and that `AggPts` should ship with it regardless
+(2026-09-24), but nobody had separately decided whether it was fine for
+that gap to dominate `SPLIT`. Nobody had, until this rework.
+
+**The fix.** `SPLIT_ABS_FLOOR`/`SPLIT_REL_THRESHOLD` are gone. `gap =
+mean(Sleeper, FantasyPros) - ProjPts` is unchanged, but it's no longer
+compared to a flat threshold -- instead, `derived.
+_split_residual_within_position` fits `gap ~ ProjPts` per position (OLS,
+over rosterable-pool players with a source, the same shape `_val_adj_
+residual_within_position` already uses for `ValAdj`), and `SPLIT` fires
+on the *residual* from that fitted line, not the raw gap. `derived.
+_split_flag_eligible` flags the top `SPLIT_FLAG_TOP_SHARE = 0.07` of
+players with a residual, slate-wide, by `|residual|` (same quantile shape
+`LEVERAGE_FLAG_TOP_SHARE` uses), AND requires `|residual| >=
+SPLIT_MIN_RESIDUAL = 2.0` -- both conditions, so a low-disagreement week
+doesn't manufacture flags just to fill 7%. A position with fewer than
+`SPLIT_MIN_FIT_PLAYERS = 8` eligible players doesn't get a fitted line at
+all -- skipped entirely, and `EdgeBuildResult.split_skipped_positions`
+(new field) lets `sources/edge.py` print a warning rather than silently
+never flagging that position.
+
+See the report for this session's real fire counts/direction split on
+both real snapshots, and `docs/CALCULATIONS.md`'s own SPLIT section for
+the full rule and tuning discussion. No structural (column/tab) change --
+`SPLIT↑`/`SPLIT↓` still live inside the existing `Flags`/`Flag` columns,
+same as before this rework.
 
 ## Commit messages / PR descriptions
 

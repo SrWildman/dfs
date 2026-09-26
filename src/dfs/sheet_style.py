@@ -232,6 +232,18 @@ FIELD_FORMATS = {
     "OverUnder": _num("0.0"),
     "Team Implied": _num("0.0"),
     "GameEnv": _num("0.0"),
+    # Part C, C7 (2026-09-25): Pace is a real seconds-per-snap number
+    # (typically 25-40). PROE is a raw points-of-pass-rate-over-expected
+    # number (can be negative), same "no % sign" convention CeilPct/
+    # ValAdj/GameEnv already use for a 0-100-ish score that isn't a true
+    # fraction. Expl% IS a literal share, already on a 0-100 scale
+    # (`team_metrics.team_explosive_pct` multiplies by 100 itself) rather
+    # than the 0-1 fraction PERCENT-type formatting expects (Own%/Snap%) --
+    # a literal "%" suffix text on the plain number, same pattern Wind's
+    # own `mph` suffix uses, avoids Sheets re-multiplying it by 100.
+    "Pace": _num('0.0" s"'),
+    "PROE": _num("0.0"),
+    "Expl%": _num('0.0"%"'),
     "Total": _num("0.0"),
     "Leverage": _num("0.0"),
     "CeilPct": _num("0.0"),
@@ -351,6 +363,15 @@ FIELD_COLOR_SCALES = {
     "ValAdj": _GRADIENT,
     "Leverage": _GRADIENT,
     "GameEnv": _GRADIENT,
+    # Part C, C7: team-level, not player/position-skewed (every player on
+    # a team shares one value, same as GameEnv/OverUnder/Spread just
+    # above/below) -- a flat whole-tab scale is meaningful on EdgeRaw with
+    # no EDGE_UNSCALED_PLAYER_METRICS exclusion needed, unlike raw Pts/
+    # Ceil/Val. Pace alone is reversed per C7's own instruction: lower
+    # (faster) is the interesting/good direction.
+    "Pace": _REVERSED,
+    "PROE": _GRADIENT,
+    "Expl%": _GRADIENT,
     "Team Implied": _GRADIENT,
     "O/U": _GRADIENT,
     "OU": _GRADIENT,
@@ -763,6 +784,9 @@ EDGE_WIDTHS = {
     # LevBasis (Part 7.9).
     "OwnStatus": 90,
     "GameEnv": 90,
+    "Pace": 70,
+    "PROE": 70,
+    "Expl%": 70,
     "OppPosRank": 115,
     # nflverse's own GameId format is "2026_02_DET_BUF" -- season, week,
     # away, home -- up to 15 characters.
@@ -2572,12 +2596,13 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         client.format_range(tab, value, {"textFormat": {"bold": True, "foregroundColor": INK}})
     client.format_range(tab, "A3:I3", _BANNER_FMT)
 
-    # Slate shape's GameId join key (sheet_views.BOARD_SLATE_GAMEID_COL) --
-    # meaningless to look at, same treatment as EdgeRaw's own hidden Id.
-    # Column J, past every other section's own rightmost visible column
-    # (I), so this can't hide real content belonging to a different
-    # section that happens to share the same letter.
-    client.hide_columns(tab, "J", "J")
+    # Slate shape's GameId/Away/Home join keys (sheet_views.
+    # BOARD_SLATE_GAMEID_COL/AWAY_COL/HOME_COL, Part C, C7 added the latter
+    # two) -- meaningless to look at, same treatment as EdgeRaw's own
+    # hidden Id. Columns J-L, past every other section's own rightmost
+    # visible column (I), so this can't hide real content belonging to a
+    # different section that happens to share the same letter.
+    client.hide_columns(tab, "J", "L")
 
     def _section(
         header_row: int, colheader_row: int, last_row: int, *, last_col: str, collapsed: bool
@@ -2590,7 +2615,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         BOARD_QUEUE_HEADER_ROW, BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW, last_col="D", collapsed=False
     )
     _section(
-        BOARD_SLATE_HEADER_ROW, BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW, last_col="D", collapsed=False
+        BOARD_SLATE_HEADER_ROW, BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW, last_col="E", collapsed=False
     )
     _section(
         BOARD_LEADERS_HEADER_ROW,
@@ -2611,9 +2636,10 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     client.format_range(tab, f"A{BOARD_CHALK_HEADER_ROW}:I{BOARD_CHALK_HEADER_ROW}", _PANEL_FMT)
     client.group_rows(tab, BOARD_CHALK_HEADER_ROW + 1, BOARD_CHALK_HEADER_ROW + 1, collapsed=True)
 
-    # Slate shape: Total (FIELD_FORMATS' own "Total"), Wind.
+    # Slate shape: Total (FIELD_FORMATS' own "Total"), Pace (Part C, C7), Wind.
     client.format_range(tab, f"B{BOARD_SLATE_FIRST_ROW}:B{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Total"])
-    client.format_range(tab, f"C{BOARD_SLATE_FIRST_ROW}:C{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Wind"])
+    client.format_range(tab, f"C{BOARD_SLATE_FIRST_ROW}:C{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Pace"])
+    client.format_range(tab, f"D{BOARD_SLATE_FIRST_ROW}:D{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Wind"])
 
     # Per-position leaders: Salary/ValAdj (block 1), Salary/ProjPts (block 2).
     client.format_range(tab, f"C{BOARD_LEADERS_FIRST_ROW}:C{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["Salary"])

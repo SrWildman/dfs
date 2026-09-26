@@ -98,6 +98,9 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "CeilVal",
         "Leverage",
         "GameEnv",
+        "Pace",
+        "PROE",
+        "Expl%",
         "OppPosRank",
         "ImpliedMove",
         "TotMove",
@@ -450,7 +453,7 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_eleven_columns_skipping_raw_player_metrics():
+def test_polish_edge_scales_fourteen_columns_skipping_raw_player_metrics():
     # Phase 4 (4.1): EdgeRaw isn't position-grouped, so ProjPts/Ceiling/
     # Val/CeilVal (EDGE_UNSCALED_PLAYER_METRICS) are skipped there --
     # CeilPct/Leverage (already percentile) stand in for them, same as
@@ -467,12 +470,12 @@ def test_polish_edge_scales_eleven_columns_skipping_raw_player_metrics():
         for name in edge_header
         if name in FIELD_COLOR_SCALES and name not in EDGE_UNSCALED_PLAYER_METRICS
     ]
-    assert len(matched) == 11
+    assert len(matched) == 14
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 11
+    assert len(client.color_scale_calls) == 14
 
 
 def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
@@ -785,12 +788,13 @@ def test_style_board_freezes_only_the_title_and_summary_banner():
 
 
 def test_style_board_hides_the_slate_shape_gameid_join_key():
-    # Column J, past every other section's own rightmost visible column
-    # (I) -- must never collide with a real column belonging to a
-    # different section that happens to share the same letter.
+    # Columns J-L (GameId, then Part C, C7's Away/Home helpers), past
+    # every other section's own rightmost visible column (I) -- must never
+    # collide with a real column belonging to a different section that
+    # happens to share the same letter.
     client = FakeBoardClient()
     style_board(client)
-    assert ("J", "J") in client.hide_columns_calls
+    assert ("J", "L") in client.hide_columns_calls
 
 
 def test_style_board_resets_background_before_applying_new_formatting():

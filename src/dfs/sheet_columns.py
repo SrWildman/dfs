@@ -139,7 +139,12 @@ DECISION = ["DK Sal", "Pts", "AggPts", "Val", "ValAdj", "Ceil", "CeilVal", "Own%
 # `GameID`/`TmRank` (Part 7.4, 2026-09-18) are both linked -- whole-slate
 # Python computations (a team-code join, a per-team-and-position salary
 # rank), not per-row native formulas.
-GAME = ["O/U", "Spread", "Team Implied", "GameEnv", "OppPosRank", "GameID", "TmRank"]
+# `Pace`/`PROE`/`Expl%` (Part C, C7, 2026-09-25) sit right after `GameEnv`,
+# which all three feed -- linked (VLOOKUP against EdgeRaw), a whole-slate
+# join against nflverse's own play-by-play release, same as `GameID`/
+# `TmRank`. Placed in GAME (not the spine, not USAGE) per Sam's own
+# instruction: "all three go into the collapsed Game group."
+GAME = ["O/U", "Spread", "Team Implied", "GameEnv", "Pace", "PROE", "Expl%", "OppPosRank", "GameID", "TmRank"]
 
 # Phase 6, Part 2 + 7.1: CeilPct/LevBasis were already collapsed (the old
 # INTERNAL zone below); Leverage joins them here now that it's off the
@@ -210,6 +215,9 @@ LINKED_COLUMNS = [
     "Avail",
     "Flags",
     "GameEnv",
+    "Pace",
+    "PROE",
+    "Expl%",
     "GameID",
     "TmRank",
     *CEILING_DETAIL,

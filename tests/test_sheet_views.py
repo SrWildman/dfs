@@ -18,10 +18,14 @@ from dfs.sheet_views import (
     BOARD_QUEUE_COLHEADER_ROW,
     BOARD_QUEUE_FIRST_ROW,
     BOARD_QUEUE_HEADER_ROW,
+    BOARD_SLATE_AWAY_COL,
+    BOARD_SLATE_AWAY_COL_INDEX,
     BOARD_SLATE_FIRST_ROW,
     BOARD_SLATE_GAMEID_COL,
     BOARD_SLATE_GAMEID_COL_INDEX,
     BOARD_SLATE_HEADER_ROW,
+    BOARD_SLATE_HOME_COL,
+    BOARD_SLATE_HOME_COL_INDEX,
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
     DEFAULT_LINEUP_COUNT,
@@ -409,13 +413,33 @@ def test_slate_shape_sorts_by_total_not_gamesraws_own_row_order():
 def test_slate_shape_wind_lookup_joins_on_a_parallel_gameid_column_not_matchup_text():
     client = _build_board()
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
-    wind_formula = slate_row[2]
+    # Part C, C7 inserted a Pace column at index 2 (column C), pushing Wind
+    # to index 3 (column D).
+    wind_formula = slate_row[3]
 
     # The GameId column (a second, independent SORT on the same key) is
     # what Wind's VLOOKUP joins against -- not the human-readable Matchup
     # text in column A, which WeatherRaw has no way to match against.
     assert f"${BOARD_SLATE_GAMEID_COL}" in wind_formula
     assert "SORT(" in slate_row[BOARD_SLATE_GAMEID_COL_INDEX]
+
+
+def test_slate_shape_pace_averages_away_and_home_team_lookups():
+    # Part C, C7: Pace is a per-TEAM EdgeRaw column, so both the away and
+    # home team codes (two more parallel hidden SORT columns) are looked
+    # up and averaged -- unlike Wind, which is one game-level value keyed
+    # by GameId alone.
+    client = _build_board()
+    slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
+    pace_formula = slate_row[2]
+
+    assert pace_formula.startswith("=IF($A")
+    assert "AVERAGE(" in pace_formula
+    assert f"${BOARD_SLATE_AWAY_COL}" in pace_formula
+    assert f"${BOARD_SLATE_HOME_COL}" in pace_formula
+    assert "EdgeRaw!" in pace_formula
+    assert "SORT(" in slate_row[BOARD_SLATE_AWAY_COL_INDEX]
+    assert "SORT(" in slate_row[BOARD_SLATE_HOME_COL_INDEX]
 
 
 def test_per_position_leaders_rank_within_position_not_across_the_whole_slate():
@@ -603,8 +627,8 @@ def test_slate_grid_movement_columns_read_the_home_teams_edgeraw_row():
     row = client.rows[1]
     assert "VLOOKUP(GamesRaw!$C2," in row[10]
     assert "VLOOKUP(GamesRaw!$C2," in row[11]
-    assert "EdgeRaw!$D:$AC" in row[10]  # Team through TotMove
-    assert "EdgeRaw!$D:$AD" in row[11]  # Team through SpdMove
+    assert "EdgeRaw!$D:$AF" in row[10]  # Team through TotMove
+    assert "EdgeRaw!$D:$AG" in row[11]  # Team through SpdMove
 
 
 def test_slate_grid_wind_gust_vlookups_derive_from_weather_columns_not_hardcoded():

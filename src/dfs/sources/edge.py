@@ -167,6 +167,12 @@ class EdgeSource(Source):
         sleeper = _try_load_current("sleeper")
         fantasypros = _try_load_current("fantasypros")
         snaps = _try_load_current("snaps")
+        team_metrics = _try_load_current("pbp")
+        if team_metrics is None:
+            log.warning(
+                "pbp not synced yet -- Pace/PROE/Expl%% will be blank and GameEnv falls back to "
+                "its Vegas-only formula"
+            )
 
         result = build_edge_frame(
             projections,
@@ -178,6 +184,7 @@ class EdgeSource(Source):
             sleeper=sleeper,
             fantasypros=fantasypros,
             snaps=snaps,
+            team_metrics=team_metrics,
         )
         if result.unmatched_names:
             log.warning(
@@ -187,6 +194,12 @@ class EdgeSource(Source):
                 ", ".join(result.unmatched_names),
             )
         _report_source_joins(result.source_joins)
+        if result.split_skipped_positions:
+            log.warning(
+                "SPLIT: skipped %s -- fewer than the required rosterable-pool players with a "
+                "source to fit a line (no flags possible there this run)",
+                ", ".join(result.split_skipped_positions),
+            )
         return result.frame
 
     def to_sheet_rows(self, df: pd.DataFrame) -> list[list]:
