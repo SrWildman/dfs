@@ -63,15 +63,20 @@ dfs edge              # top leverage plays, in the terminal, no browser needed
 dfs go                # sync + dfs doctor + what changed, back to back
 ```
 
-Check Board first each week -- it's a landing view: top-leverage, best
-ceiling-value, and landmine panels plus a slate summary (games, highest
-total, max wind, injury counts). Slate Grid is the same slate one row per
-game instead of one row per player. EdgeRaw is where the real work
-happens: sorted by ValAdj descending, colour scales on every decision
-number, a muted position tint, banding to make one player's row readable
-across 23 columns, and a visible sort/search arrow in every header cell
-(click one to sort by any column, or search it -- Data > Filter views
-holds the saved presets).
+Check Board first each week -- it's a landing view, seven collapsible
+sections: Queue (what changed since the last sync, pooled players only),
+Slate shape (games ranked by total, with Fav/Spread/Pace/wind/shootout
+flag), Per-position leaders (best ValAdj and highest ProjPts, ranked
+within position), Punt finder (best value within $1,000 of each
+position's own slate minimum), Stack candidates (QB + WR1/WR2/WR3/TE1/RB1
+for the highest-total games), Pool diagnostics (reads your ticked pool,
+not the slate), and a Chalk map placeholder (waiting on ownership data).
+Slate Grid is the same slate one row per game instead of one row per
+player. EdgeRaw is where the real work happens: sorted by ValAdj
+descending, colour scales on every decision number, a muted position
+tint, banding to make one player's row readable across 23 columns, and a
+visible sort/search arrow in every header cell (click one to sort by any
+column, or search it -- Data > Filter views holds the saved presets).
 
 **Done looks like:** EdgeRaw has real data (not blank/zero rows), and
 Board's slate summary matches what you'd expect for the week (right

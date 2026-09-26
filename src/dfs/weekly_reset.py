@@ -104,8 +104,28 @@ LINEUPS_TOTALS_ROWS = [end + 1 for _, end in LINEUPS_NAME_BLOCKS]
 # now derives it from `PLAYER_POOL_HEADER_ROW` instead. See
 # CONTRIBUTING.md's structural changelog for the full list this touched.
 PLAYER_POOL_CONTROL_ROW = 1
-PLAYER_POOL_NAME_BLOCKS = [(3, 12), (14, 33), (35, 59), (61, 70), (72, 81)]
+# PROMPT_BOARD_FIXES.md item 8 (2026-09-25): grown from
+# `[(3, 12), (14, 33), (35, 59), (61, 70), (72, 81)]` via `dfs setup
+# resize-player-pool` -- verified against a real cell read on the
+# template (`B` column's own position labels, contiguous QB/RB/WR/TE/DST
+# runs) before pinning here, same convention `resize_player_pool`'s own
+# docstring describes.
+PLAYER_POOL_NAME_BLOCKS = [(3, 19), (21, 42), (44, 70), (72, 88), (90, 101)]
 PLAYER_POOL_HEADER_ROW = PLAYER_POOL_NAME_BLOCKS[0][0] - 1
+
+# PROMPT_BOARD_FIXES.md item 8 (2026-09-25): each block's real PLAYER
+# capacity vs. the ROW count it needs -- the gap is `sheet_pool_formulas.
+# _grouped_with_separators_formula`'s own blank separator rows between the
+# Both/Cash/GPP groups (up to 2 per block, Fix 3/A7). Sam's own decided
+# table: QB/TE go to 15 (were 10), RB/WR/DST each grow by 2 to restore the
+# slots the old row counts had already been silently losing to separators.
+# `dfs setup resize-player-pool` grows `PLAYER_POOL_NAME_BLOCKS` to these
+# row counts (via `sheet_pool_resize.resize_player_pool`); the resulting
+# block boundaries are then pinned here as a literal, same convention
+# `resize_player_pool`'s own docstring describes -- this dict is the
+# TARGET fed into that command, not a live-computed value itself.
+PLAYER_POOL_BLOCK_CAPACITIES = {"QB": 15, "RB": 20, "WR": 25, "TE": 15, "DST": 10}
+PLAYER_POOL_BLOCK_ROWS = {"QB": 17, "RB": 22, "WR": 27, "TE": 17, "DST": 12}
 
 # Week 3 feedback (A6), 2026-09-22: "Adding a player in row one of the
 # pool works, but only once. If you try and add a second in the same

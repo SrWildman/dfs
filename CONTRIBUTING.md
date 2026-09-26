@@ -2594,6 +2594,122 @@ the full rule and tuning discussion. No structural (column/tab) change --
 `SPLIT↑`/`SPLIT↓` still live inside the existing `Flags`/`Flag` columns,
 same as before this rework.
 
+## Board Fixes (2026-09-25/26): 8 approved items, plus a real bug found rolling item 8 out
+
+**Items 1-5 (Board layout, narrative only -- nothing else in the codebase
+reads Board's own cells, so there's no downstream position for a
+structural-table row to invalidate):**
+
+1. Slate shape gains `Fav`/`Spread` beside `Total`, sourced from the same
+   `GamesRaw` place as `Total` -- every `GamesRaw` column letter in
+   `sheet_views.build_board` is now derived from `nflverse_games.
+   GAMES_COLUMNS`, not hardcoded.
+2. A sub-label row above each Per-position leaders block names its own
+   sort ("Best ValAdj" / "Highest ProjPts") -- previously indistinguishable
+   without checking column headers across the tab.
+3. `sheet_views.BOARD_ROWS_PER_POSITION = {"QB": 5, "RB": 8, "WR": 10,
+   "TE": 5, "DST": 5}` replaces a flat 5-per-position count for both
+   Leaders and Punt finder; Stack candidates grows to `_STACK_GAMES = 8`
+   games; a thin top border separates each position's block.
+4. Punt finder (and Pool diagnostics' `Gap` column) switch from a flat
+   `PUNT_SALARY_CEILING = 4000` (below DK's own QB/RB salary floor, so it
+   could never fire for those two positions) to `PUNT_SALARY_WINDOW =
+   1000` -- within $1,000 of *that position's own* live per-slate minimum
+   salary (`MINIFS`). Verified against real data on the template: QB/RB
+   punt candidates now genuinely appear (e.g. Geno Smith $4,900, Braelon
+   Allen $4,400), which the old ceiling made structurally impossible.
+5. Stack candidates gains WR2/WR3/RB1 and a `Total` column (14 columns,
+   A-N); the hidden Slate-shape join-key columns (`BOARD_SLATE_GAMEID_COL_
+   INDEX`/`AWAY_COL_INDEX`/`HOME_COL_INDEX`) move past this new width,
+   derived from `BOARD_MAX_VISIBLE_COL_INDEX` rather than a hardcoded
+   letter.
+
+See `docs/CALCULATIONS.md`'s new "Board's Punt finder / Stack candidates /
+per-position row counts" section for the exact constants and reasoning.
+
+**Items 6/7 (colour scales, project-wide):** every colour-scaled column
+now excludes zero from both its minimum AND its median midpoint (not just
+the minimum), via a new shared dispatch (`sheet_color_scales._scale_rule_
+specs`, its own module specifically to avoid a circular import between
+`sheet_style.py` <-> `sheet_links.py`/`sheet_pool_resize.py`). The
+`MEDIAN(FILTER(...))` midpoint formula was prototyped on the template and
+confirmed live (via `conditionalFormats` metadata, not the CLI's own "OK"
+output) to compute the mathematically correct value before being applied
+broadly. Board's own Leaders/Punt blocks are scaled PER POSITION, never
+across a whole stacked block (confirmed live: `ProjPts` on Player Pool,
+`Ceiling` on EdgeRaw, and `ProjPts` in Board leaders each independently
+carry `MINIFS`-min/`MEDIAN(FILTER(...))`-mid/`MAX`-max gradient rules plus
+a zero-background boolean rule, one set per position block). Call sites
+routed through `_scale_rule_specs`: `sheet_style.apply_field_color_
+scales`, `apply_edge_position_scales`, `apply_grouped_color_scales`,
+`style_board`; `sheet_links.link_edge_columns`; `sheet_pool_resize.
+fix_color_scale_ranges` -- together covering all ~33 real `add_color_
+scale` call sites in the workbook.
+
+**Item 8 (Player Pool: restore the lost slots, QB/TE to 15) -- and the bug
+found rolling it out:**
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-26 | `Player Pool` | Five position blocks grown to restore player capacity that A7's separator rows had been silently eating into (each block's row count now = player capacity + separator rows for however many of Both/Cash/GPP actually appear). QB/TE go to 15 players (17 rows); RB/WR/DST capacity unchanged but rows grown to fit their separators (RB 20->22, WR 25->27, DST 10->12 rows). Grown via `sheet_pool_resize.resize_player_pool`/`grow_block` (real `insertDimension`, inserted mid-block so a real in-block row is always available to inherit formatting from). | QB (3,12), RB (14,33), WR (35,59), TE (61,70), DST (72,81) | QB (3,19), RB (21,42), WR (44,70), TE (72,88), DST (90,101) | Live + Template | `weekly_reset.PLAYER_POOL_NAME_BLOCKS`, `PLAYER_POOL_BLOCK_CAPACITIES`/`PLAYER_POOL_BLOCK_ROWS` (new), `sheet_pool_formulas._overflow_formula` (rewritten, see below), new `dfs setup resize-player-pool` CLI command |
+
+- **Latent bug fixed (as specified):** `_overflow_formula` compared the
+  **player** count to the **row** count, ignoring separator rows -- a
+  10-row QB block with 10 real QBs split across all three Both/Cash/GPP
+  groups needs 12 rows (10 + 2 separators), silently hiding 2 players
+  while showing no warning (`10 > 10` is false). Fixed to compare
+  `ROWS(grouped)` (the same separator-inclusive count `_name_formula`
+  itself is constrained by) against the cap. **Verified against real
+  data** on the template: 15 real QBs across all three groups (17-row/
+  15-player cap)
+  shows no warning; 16 shows `"17 QB slots, 16 ticked -- some are
+  hidden"` and the Name column visibly truncates the GPP group by
+  exactly one player -- the boundary is exact, not approximate.
+- **A second, more serious bug found live, not in the plan:**
+  `sheet_pool_resize.grow_block` hardcoded its header read to `"A1:1"` --
+  correct when this function was first written (2026-09-06, Player
+  Pool's header really was row 1 then), but the 2026-09-16 add-a-player
+  control row pushed the real header to row 2 without `grow_block` ever
+  being revisited, since nothing called it again until this item. Reading
+  row 1 returns the 1-cell control row (`"Add a player"`) instead of the
+  49-column real header, so `last_formula_col` collapsed to `column_
+  letter(0) = "A"` -- BELOW `_POSITION_COLUMN = "B"`. The resulting
+  `f"B{row}:A{row}"` range is inverted, silently reorders to `A{row}:
+  B{row}`, and every newly-inserted row got its position label written
+  into BOTH Name and Pos., with every real EdgeRaw-linked formula from C
+  onward silently missing entirely. Not caught by this file's own unit
+  tests (whose fake client, like `fix_color_scale_ranges`' header-row bug
+  before it, ignored the requested range and always returned the same
+  header regardless) -- caught only by reading real cells back after
+  growing the live sheet for real: every one of the 20 newly-grown rows
+  across all five blocks, on both sheets, was missing its formulas, and a
+  handful had literal position-label text ("QB", "RB", ... one block even
+  showing the *wrong* neighboring position's label) sitting in the Name
+  column where a real player name or blank belongs.
+  - **Fix:** `grow_block`/`resize_player_pool` now take a `header_row`
+    parameter (mirroring `fix_color_scale_ranges`' own fix for the same
+    class of bug), threaded from `PLAYER_POOL_HEADER_ROW` at every real
+    call site.
+  - **Repair (not a re-grow):** the rows already created by the buggy
+    run were fixed in place -- for each block, one known-good row's B
+    through the real last column (`AW`, 49-column header) was copied into
+    every broken row with self-references substituted to that row's own
+    number, and the stray Name-column text cleared. **Found and fixed a
+    second mistake while repairing:** the `Overflow` formula lives ONLY
+    in each block's anchor row (`write_pool_formulas` only ever writes it
+    to `{col}{start}`) -- the first repair pass copied it into every
+    repaired row too, since the copy source (the anchor row) legitimately
+    carries it. Caught by reading a known-good *non-anchor* row's
+    `Overflow` cell for comparison (confirmed genuinely blank there) and
+    cleared from all 20 repaired rows on both sheets.
+  - Verified on live with real data throughout: every real ticked player
+    (Josh Allen through Patrick Mahomes, Jahmyr Gibbs through Ryan
+    Flournoy, Mark Andrews through George Kittle, Titans through
+    Buccaneers) stayed in place, unmodified, through the resize and
+    repair. The resize itself surfaced a real, previously-hidden tick
+    (Geno Smith, tagged GPP) that the old 10-row QB cap had been silently
+    cutting off -- exactly the failure mode this item exists to fix.
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

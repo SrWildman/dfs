@@ -427,6 +427,43 @@ real slate the way `LEVERAGE_FLAG_THRESHOLD` below was -- a first-pass
 number Sam should sanity-check once he's looked at a few real weeks and
 compared "flagged as a shootout" against how those games actually played.
 
+## Board's Punt finder / Stack candidates / per-position row counts (Board Fixes, 2026-09-25)
+
+**Punt finder** used to flag `Salary < PUNT_SALARY_CEILING = 4000` flat --
+a ceiling DK's own QB/RB pricing floor sits above, so it could never fire
+for those two positions. `sheet_views.PUNT_SALARY_WINDOW = 1000` replaces
+it: a play is a punt if its `Salary` is within `PUNT_SALARY_WINDOW` of
+**that position's own** live per-slate minimum salary (`MINIFS` over
+EdgeRaw's pooled rows for the position), so the window moves with
+whatever the slate actually costs at each position instead of a single
+number tuned for RB/WR/TE/DST. Pool diagnostics' `Gap` column ("No <POS>
+within $1,000 of the slate min") uses the same threshold, same reasoning.
+
+**Stack candidates** covers `sheet_views._STACK_GAMES = 8` games (the
+highest-`OverUnder` games on the slate, same source as Slate shape's own
+sort), two rows per game (one per team): QB, WR1/WR2/WR3 (by `TmRank`
+within the team's own WRs), TE1, RB1, and a `Total` column repeating that
+game's OverUnder for at-a-glance sorting -- 14 columns (`BOARD_STACK_COLHEADER`),
+up from the original QB+WR1+TE1 3-slot version. The hidden Slate-shape
+join-key columns (`BOARD_SLATE_GAMEID_COL_INDEX`/`AWAY_COL_INDEX`/
+`HOME_COL_INDEX`) sit past this block's width, derived from
+`BOARD_MAX_VISIBLE_COL_INDEX` rather than a hardcoded column letter, so a
+future width change can't silently collide with them again.
+
+**Per-position leaders / Punt finder row counts** used to be a flat 5 rows
+per position for Leaders (Punt finder inherited whatever Leaders used).
+`sheet_views.BOARD_ROWS_PER_POSITION = {"QB": 5, "RB": 8, "WR": 10, "TE":
+5, "DST": 5}` replaces the flat count for both panels -- deeper for
+RB/WR since those positions have more real rostering options per slate
+than QB/TE/DST -- with a thin top border between each position's block so
+the boundary reads at a glance without needing the sub-label row (below)
+for it.
+
+A sub-label row above each Per-position leaders block now names its own
+sort ("Best ValAdj" / "Highest ProjPts") -- Leaders stacks two
+differently-sorted blocks side by side and there was previously no way to
+tell which was which without checking column headers across the tab.
+
 ## Stadium, Roof, Wind
 
 `Stadium`/`Roof` are looked up from `GamesRaw` by team code (each team's

@@ -59,6 +59,7 @@ from dfs.sheet_pool_control import drain_control_cell_into_added_names, ensure_p
 from dfs.sheet_pool_deck import remove_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheet_pool_raw_sos import rewrite_opp_pos_rank
+from dfs.sheet_pool_resize import fix_color_scale_ranges, resize_player_pool
 from dfs.sheet_pool_usage import write_pool_usage_columns
 from dfs.sheet_protection import protect_workbook
 from dfs.sheet_reorder import migrate_tab_to_designed_order, remove_header_columns, rename_header_column
@@ -96,6 +97,7 @@ from dfs.week import (
 from dfs.weekly_reset import (
     LINEUPS_NAME_BLOCKS,
     LINEUPS_TOTALS_ROWS,
+    PLAYER_POOL_BLOCK_ROWS,
     PLAYER_POOL_HEADER_ROW,
     PLAYER_POOL_NAME_BLOCKS,
     clear_previous_week,
@@ -620,6 +622,78 @@ def sheets_fix_pct_of_cap(
             salary_cap=cfg.lineups.salary_cap,
         )
         console.print(f"[green]OK[/green] renamed: {renamed}; {result}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+@setup_app.command(
+    "resize-player-pool",
+    short_help="One-time: grow Player Pool's QB/RB/WR/TE/DST blocks (PROMPT_BOARD_FIXES.md item 8).",
+)
+def sheets_resize_player_pool(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Resize a different sheet instead of config.toml's -- ALWAYS run against the "
+        "canonical template first, verify with real cell reads, then run again against the "
+        "live sheet.",
+    ),
+) -> None:
+    """PROMPT_BOARD_FIXES.md item 8 (2026-09-25): grows each of Player
+    Pool's five position blocks to `weekly_reset.PLAYER_POOL_BLOCK_ROWS`'
+    row counts (QB/TE 10->17, RB 20->22, WR 25->27, DST 10->12) via real
+    `insertDimension` calls (`sheet_pool_resize.resize_player_pool`) --
+    restoring the player capacity `sheet_pool_formulas._grouped_with_
+    separators_formula`'s own blank separator rows (Fix 3/A7) had been
+    silently eating into.
+
+    Prints the new block boundaries -- these must be hand-verified against
+    a real cell read (not trusted from this output alone) and then pinned
+    into `weekly_reset.PLAYER_POOL_NAME_BLOCKS` as a literal, the same
+    convention `resize_player_pool`'s own docstring describes. Also
+    rewrites the Name/Overflow formulas for the grown blocks (the old
+    formulas have last week's row cap baked into their own `ARRAY_
+    CONSTRAIN` call, which growing the block's physical size does not
+    update on its own) and re-points the three EdgeRaw-linked colour
+    scales (`sheet_pool_resize.fix_color_scale_ranges`) at the new last
+    row. `dfs setup polish` must still be re-run afterward, same standing
+    rule as `reorder-columns` -- this command only does the structural
+    part.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Resizing Player Pool in: [bold]{title}[/bold]\n{url}\n")
+        positions = list(PLAYER_POOL_BLOCK_ROWS)
+        target_sizes = [PLAYER_POOL_BLOCK_ROWS[p] for p in positions]
+        new_blocks = resize_player_pool(
+            client,
+            player_pool_tab=cfg.lineups.player_pool_tab,
+            blocks=PLAYER_POOL_NAME_BLOCKS,
+            positions=positions,
+            target_sizes=target_sizes,
+            header_row=PLAYER_POOL_HEADER_ROW,
+        )
+        console.print(f"[green]OK[/green] grew blocks -- new boundaries: {new_blocks}")
+        console.print(
+            "[yellow]Verify these against a real cell read, then pin them into "
+            "weekly_reset.PLAYER_POOL_NAME_BLOCKS.[/yellow]"
+        )
+        formula_result = write_pool_formulas(
+            client,
+            player_pool_tab=cfg.lineups.player_pool_tab,
+            edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw"),
+            name_blocks=new_blocks,
+        )
+        console.print(f"[green]OK[/green] {'; '.join(formula_result)}")
+        last_row = max(end for _, end in new_blocks)
+        fix_color_scale_ranges(
+            client, cfg.lineups.player_pool_tab, last_row=last_row, header_row=PLAYER_POOL_HEADER_ROW
+        )
+        console.print(f"[green]OK[/green] colour scales re-pointed through row {last_row}")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e

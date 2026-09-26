@@ -419,12 +419,20 @@ looks its own Salary, Position AND Pool tag up against `EdgeRaw` by name,
 since it carries none of its own, and a typed name with no matching
 EdgeRaw tag sorts after every real tag rather than into an arbitrary
 position. See `docs/CALCULATIONS.md` for the formula mechanics. Capped at
-that position's slot count (QB 10, RB 20, WR 25, TE 10, DST 10), with an
+that position's player capacity (Board Fixes item 8, 2026-09-26 --
+`weekly_reset.PLAYER_POOL_BLOCK_CAPACITIES`: QB 15, RB 20, WR 25, TE 15,
+DST 10; up from QB/TE 10 -- a block's row count is capacity plus rows for
+however many of Both/Cash/GPP's separators actually appear, so
+`PLAYER_POOL_BLOCK_ROWS` -- QB 17, RB 22, WR 27, TE 17, DST 12 -- runs
+slightly ahead of capacity), with an
 `Overflow` column (second to last, right before `Pool`)
-warning per position if more players are ticked/typed than the block has
-room for (counting the same deduped union, so a player counted in both
-sources can't trigger a false warning) -- nobody is ever silently
-dropped. `Player Pool`'s own `Pool` column gets a light per-tag tint
+warning per position if players plus the separators they need exceed the
+block's rows (counting the same deduped union, so a player counted in
+both sources can't trigger a false warning) -- nobody is ever silently
+dropped. This was a real bug before Board Fixes item 8: the old check
+compared player count directly to row count, ignoring separators, so a
+block could silently hide up to 2 players with no warning shown.
+`Player Pool`'s own `Pool` column gets a light per-tag tint
 (`sheet_style.POOL_TAG_TINTS`) so the three sort groups read as bands at
 a glance, not just by scrolling and reading the text. Every other column
 still VLOOKUPs off `Name` the same as before. `Player Pool` is protected
@@ -553,27 +561,43 @@ shape open by default, everything else collapsed):
   routine `dfs setup build-views` re-run untouched until the next live
   sync. Empty ("No changes since the last sync for pooled players.")
   until something actually changes.
-- **Slate shape** -- games ranked by total, with each game's combined
-  Pace (Part C, C7, 2026-09-25 -- the mean of both teams' own `Pace` off
-  EdgeRaw, looked up by team code), wind, and a shootout flag
-  (`derived.SHOOTOUT_TOTAL_THRESHOLD`, currently 48 -- a first-pass DFS
-  heuristic, not yet tuned against a real slate). Sort stays by Total,
-  unchanged -- Pace is a new column to look at, not a new sort key.
+- **Slate shape** -- games ranked by total, with each game's `Fav`/
+  `Spread` (Board Fixes item 1, 2026-09-25 -- sourced from the same
+  `GamesRaw` place as `Total`, every column letter derived from
+  `nflverse_games.GAMES_COLUMNS`, never hardcoded), combined Pace (Part C,
+  C7, 2026-09-25 -- the mean of both teams' own `Pace` off EdgeRaw, looked
+  up by team code), wind, and a shootout flag (`derived.
+  SHOOTOUT_TOTAL_THRESHOLD`, currently 48 -- a first-pass DFS heuristic,
+  not yet tuned against a real slate). Sort stays by Total, unchanged.
 - **Per-position leaders** -- best `ValAdj` and highest `ProjPts`, each
   ranked *within* position (never across it -- the actual fix for the
   old "11 QBs out of 12 rows" bug, a salary-ratio metric mechanically
-  favouring cheap positions if sorted across the whole slate).
-- **Punt finder** -- best `ValAdj` play under $4,000 at each position.
-- **Stack candidates** (replaces the old leverage panel, 7.6) -- for the
-  highest-`OverUnder` games, each team's QB plus its `TmRank = 1` WR and
-  TE (the "top pass-catcher" proxy already used elsewhere, see 7.4's
-  `TmRank` note above).
+  favouring cheap positions if sorted across the whole slate). A
+  sub-label row above each block names its own sort. Row counts per
+  position (Board Fixes item 3, 2026-09-25) come from `sheet_views.
+  BOARD_ROWS_PER_POSITION = {"QB": 5, "RB": 8, "WR": 10, "TE": 5, "DST":
+  5}`, not a flat count -- with a thin top border between each position's
+  block.
+- **Punt finder** -- best `ValAdj` play within `sheet_views.
+  PUNT_SALARY_WINDOW = $1,000` of *that position's own* live per-slate
+  minimum salary (Board Fixes item 4, 2026-09-25 -- replaces a flat
+  `$4,000` ceiling that sat below DK's own QB/RB salary floor and so
+  could never fire for those two positions). Same `BOARD_ROWS_PER_
+  POSITION` row counts as Leaders.
+- **Stack candidates** (replaces the old leverage panel, 7.6; widened to
+  14 columns in Board Fixes item 5, 2026-09-25) -- for the top
+  `sheet_views._STACK_GAMES = 8` `OverUnder` games, each team's QB, its
+  `TmRank`-ordered WR1/WR2/WR3, TE1, RB1, and a `Total` column repeating
+  the game's OverUnder. The hidden Slate-shape join-key columns sit past
+  this block's width, derived from `BOARD_MAX_VISIBLE_COL_INDEX` rather
+  than a hardcoded letter.
 - **Pool diagnostics** -- reads **Player Pool**, not EdgeRaw: salary
   spread and cheapest play per position, a chalk-vs-leverage count (via
-  `Flags`), a per-position "no <POS> under $4,000" gap check, and how
-  many pooled players share their most-crowded single game. Empty
-  ("Tick players into your pool to see diagnostics.") before anything is
-  pooled.
+  `Flags`), a per-position "no <POS> within `PUNT_SALARY_WINDOW` of the
+  slate min" gap check (same threshold as Punt finder, Board Fixes item
+  4), and how many pooled players share their most-crowded single game.
+  Empty ("Tick players into your pool to see diagnostics.") before
+  anything is pooled.
 - **Chalk map** -- a labelled, empty placeholder. Meaningless until
   ownership actually publishes (TFFB's `ProjOwn` reads 0 pre-midweek);
   see `docs/planning/PROMPT_DATA.md`'s Move 2 / 7.8 for the actual-ownership
