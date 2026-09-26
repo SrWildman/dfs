@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from dfs.column_reorder import group_into_contiguous_runs
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.sheet_color_scales import FIELD_COLOR_SCALES, _scale_rule_specs
 from dfs.sheet_columns import CEILING_DETAIL, GAME, LINKED_COLUMNS, MOVEMENT, WEATHER
 from dfs.sheets import SheetsClient, column_letter
 
@@ -234,16 +235,21 @@ def link_edge_columns(
             ]
             client.update_range(tab, f"{start_col}{start}:{end_col}{end}", rows)
 
+    # PROMPT_BOARD_FIXES.md item 7 (2026-09-25): routed through the shared
+    # `_scale_rule_specs` dispatch (`sheet_color_scales.py`) instead of a
+    # hand-rolled gradient dict, so these three pick up the same zero-
+    # exclusion (CeilVal/GameEnv both have real zeros -- an OUT/deep-
+    # backup player's own Ceiling projects to 0, and GameEnv per-position
+    # ties can too) every other scaled column in the workbook now gets.
     last_row = max(end for _, end in name_blocks)
     for column_name in COLOR_SCALE_LINKED_COLUMNS:
         col = column_letter(columns[column_name])
-        client.add_color_scale(
-            tab,
-            f"{col}2:{col}{last_row}",
-            min_color={"red": 0.96, "green": 0.80, "blue": 0.80},
-            mid_color={"red": 1.0, "green": 1.0, "blue": 0.80},
-            max_color={"red": 0.72, "green": 0.88, "blue": 0.72},
-        )
+        a1 = f"{col}2:{col}{last_row}"
+        kind = FIELD_COLOR_SCALES[column_name]
+        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, column_name, zero_exclude_range=a1)
+        client.add_color_scale(tab, gradient_spec.pop("a1_range"), **gradient_spec)
+        if boolean_spec is not None:
+            client.add_boolean_rule(tab, boolean_spec.pop("a1_range"), **boolean_spec)
 
     # Phase 6, Part 2: GAME/CEILING DETAIL/MOVEMENT/WEATHER all collapse by
     # default now (Sam's own fixed left-to-right order) -- the spine

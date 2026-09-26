@@ -19,6 +19,7 @@ class SpySheetsClient:
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.conditional_format_calls: list[tuple[str, str | None]] = []
         self.color_scale_calls: list[tuple[str, str]] = []
+        self.boolean_rule_calls: list[tuple[str, str]] = []
 
     def read_formula(self, tab_name: str, a1_range: str):
         row_num = int(a1_range.split(":")[0][1:])
@@ -38,6 +39,9 @@ class SpySheetsClient:
 
     def add_color_scale(self, tab_name, a1_range, **_colors):
         self.color_scale_calls.append((tab_name, a1_range))
+
+    def add_boolean_rule(self, tab_name, a1_range, **_kwargs):
+        self.boolean_rule_calls.append((tab_name, a1_range))
 
 
 def _rb_row_29():

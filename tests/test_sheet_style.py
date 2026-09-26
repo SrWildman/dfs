@@ -1,4 +1,13 @@
 from dfs.derived import EDGE_COLUMNS, ZONE_LABELS
+from dfs.sheet_color_scales import (
+    FIELD_COLOR_SCALES,
+    GRAD_MAX,
+    GRAD_MIN,
+    WARM_MID,
+    WHITE,
+    ZERO_EXCLUDED_COLUMNS,
+    ZERO_GREY_BG,
+)
 from dfs.sheet_style import (
     AVAIL_CHIPS,
     BAND_BG,
@@ -8,12 +17,9 @@ from dfs.sheet_style import (
     EDGE_UNSCALED_PLAYER_METRICS,
     EDGE_WIDTHS,
     FAMILY_COLORS,
-    FIELD_COLOR_SCALES,
     FIELD_FORMATS,
     FLAG_CHIPS,
     FLAT_BG,
-    GRAD_MAX,
-    GRAD_MIN,
     GROUPED_TAB_UNSCALED_COLUMNS,
     HEADER_FMT,
     HIDE_TABS,
@@ -22,13 +28,9 @@ from dfs.sheet_style import (
     POOL_TAG_TINTS,
     POSITION_TINTS,
     VENUE_CHIPS,
-    WARM_MID,
     WARN_BG,
     WARN_FG,
     WEEK_ORDER,
-    WHITE,
-    ZERO_EXCLUDED_COLUMNS,
-    ZERO_GREY_BG,
     _edge_letter,
     apply_field_color_scales,
     apply_field_formats,
@@ -49,8 +51,9 @@ from dfs.sheet_style import (
 )
 from dfs.sheet_views import (
     BOARD_CHALK_HEADER_ROW,
-    BOARD_LEADERS_COLHEADER_ROW,
+    BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_LAST_ROW,
+    BOARD_LEADERS_SUBLABEL_ROW,
     BOARD_QUEUE_COLHEADER_ROW,
     BOARD_QUEUE_LAST_ROW,
     BOARD_SLATE_COLHEADER_ROW,
@@ -216,7 +219,11 @@ def test_apply_field_color_scales_excludes_zero_for_ownership_columns():
     assert bool_call[4] == {"backgroundColor": ZERO_GREY_BG}
 
 
-def test_apply_field_color_scales_no_zero_exclusion_for_ordinary_gradient_columns():
+def test_apply_field_color_scales_excludes_zero_for_every_gradient_column():
+    # PROMPT_BOARD_FIXES.md item 7 (2026-09-25): generalized from Own%/Used
+    # only to every non-diverging scaled column -- a common real zero
+    # (363/658 ProjPts zeros, mostly OUT/deep-backup players) anchors the
+    # gradient's low end and drags its median midpoint down with it.
     calls = []
 
     class _Client:
@@ -231,8 +238,13 @@ def test_apply_field_color_scales_no_zero_exclusion_for_ordinary_gradient_column
 
     apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "Pts"], header_row=1, last_row=100)
 
-    assert len(calls) == 1  # just the gradient, no extra zero rule
-    assert "min_type" not in calls[0]
+    assert len(calls) == 2  # the gradient, plus the zero-grey boolean rule
+    gradient_spec, boolean_spec = calls
+    assert gradient_spec["min_type"] == "NUMBER"
+    assert "MINIFS(" in gradient_spec["min_value"]
+    assert gradient_spec["mid_type"] == "NUMBER"
+    assert "MEDIAN(FILTER(" in gradient_spec["mid_value"]
+    assert boolean_spec["condition_type"] == "NUMBER_EQ"
 
 
 class _ExplodingClient:
@@ -321,6 +333,17 @@ class FakeEdgeClient:
         self.calls.append("add_boolean_rule")
         rule = {"condition_type": condition_type, "values": values, "fmt": fmt}
         self.boolean_rule_calls.append((a1_range, rule))
+
+    def add_boolean_rules(self, tab_name: str, specs: list[dict]) -> None:
+        self.calls.append("add_boolean_rules")
+        for spec in specs:
+            self.add_boolean_rule(
+                tab_name,
+                spec["a1_range"],
+                condition_type=spec["condition_type"],
+                values=spec["values"],
+                fmt=spec["fmt"],
+            )
 
     def clear_column_groups(self, tab_name: str) -> None:
         self.calls.append("clear_column_groups")
@@ -503,6 +526,19 @@ def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
     # ranges, not one run spanning 2-4 (which would wrongly include RB's
     # own row 3).
     assert qb_spec["a1_ranges"] == [f"{proj_pts_col}2:{proj_pts_col}2", f"{proj_pts_col}4:{proj_pts_col}4"]
+
+    # PROMPT_BOARD_FIXES.md item 7 (2026-09-25): routed through the shared
+    # zero-exclusion dispatch -- the min/mid formulas must combine BOTH of
+    # QB's own scattered ranges (never just one, and never RB's/WR's).
+    assert "MINIFS(" in qb_spec["min_value"]
+    assert f"{proj_pts_col}2:{proj_pts_col}2" in qb_spec["min_value"]
+    assert f"{proj_pts_col}4:{proj_pts_col}4" in qb_spec["min_value"]
+    assert "MEDIAN(" in qb_spec["mid_value"]
+    # Also a real zero-grey boolean chip per contiguous run (no multi-range
+    # boolean primitive needed -- an exact-zero check is per-cell).
+    boolean_a1s = {a1 for a1, _ in client.boolean_rule_calls}
+    assert f"{proj_pts_col}2:{proj_pts_col}2" in boolean_a1s
+    assert f"{proj_pts_col}4:{proj_pts_col}4" in boolean_a1s
 
 
 def test_polish_edge_move_scales_are_diverging_at_zero():
@@ -712,6 +748,7 @@ class FakeBoardClient:
         self.freeze_calls: list[int] = []
         self.width_calls: list[dict] = []
         self.color_scale_calls: list[str] = []
+        self.boolean_rule_calls: list[str] = []
         self.hide_columns_calls: list[tuple[str, str]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
@@ -737,6 +774,9 @@ class FakeBoardClient:
 
     def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
         self.color_scale_calls.append(a1_range)
+
+    def add_boolean_rule(self, tab_name: str, a1_range: str, **kwargs) -> None:
+        self.boolean_rule_calls.append(a1_range)
 
     def freeze(self, tab_name: str, *, rows: int) -> None:
         self.freeze_calls.append(rows)
@@ -770,7 +810,11 @@ def test_style_board_collapses_everything_after_slate_shape():
     client = FakeBoardClient()
     style_board(client)
     grouped_ranges = {(first, last): collapsed for first, last, collapsed in client.row_group_calls}
-    assert grouped_ranges[(BOARD_LEADERS_COLHEADER_ROW, BOARD_LEADERS_LAST_ROW)] is True
+    # PROMPT_BOARD_FIXES.md item 2: the group now starts at the new
+    # sub-label row (added right after the section header, before the
+    # column header), not the column header row itself, so collapsing the
+    # section hides the sub-label too.
+    assert grouped_ranges[(BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW)] is True
     # Chalk map's one placeholder row is grouped/collapsed too, even
     # though it has no separate column-header row of its own.
     assert any(
@@ -788,13 +832,14 @@ def test_style_board_freezes_only_the_title_and_summary_banner():
 
 
 def test_style_board_hides_the_slate_shape_gameid_join_key():
-    # Columns J-L (GameId, then Part C, C7's Away/Home helpers), past
-    # every other section's own rightmost visible column (I) -- must never
-    # collide with a real column belonging to a different section that
-    # happens to share the same letter.
+    # PROMPT_BOARD_FIXES.md item 5: GameId/Away/Home now sit past Stack
+    # candidates' own 14-column width (A-N), the widest section -- columns
+    # O-Q, not the old J-L -- derived from BOARD_MAX_VISIBLE_COL_INDEX so
+    # this can't collide with a real column belonging to a different
+    # section that happens to share the same letter.
     client = FakeBoardClient()
     style_board(client)
-    assert ("J", "L") in client.hide_columns_calls
+    assert ("O", "Q") in client.hide_columns_calls
 
 
 def test_style_board_resets_background_before_applying_new_formatting():
@@ -810,6 +855,50 @@ def test_style_board_resets_background_before_applying_new_formatting():
     first_range, first_fmt = client.format_calls[0]
     assert first_fmt == {"backgroundColor": WHITE}
     assert first_range.startswith("A1:N")
+
+
+def test_style_board_scales_leaders_and_punt_per_position_not_across_the_whole_block():
+    # PROMPT_BOARD_FIXES.md item 6: "a QB's ProjPts should never sit on the
+    # same gradient as a DST's" -- one colour-scale rule per position's own
+    # row range, not one flat rule spanning the whole 33-row stacked block.
+    client = FakeBoardClient()
+    style_board(client)
+
+    # 5 positions x (ValAdj + ProjPts) in Leaders, + 5 positions x ValAdj
+    # in Punt = 15 per-position gradient rules, plus Slate shape's 3
+    # (Total/Spread/Pace) and Stack's 1 (Total) = 19 total.
+    assert len(client.color_scale_calls) == 19
+
+    def _row_span(a1: str) -> int:
+        start, end = a1.split(":")
+        return int(end[1:]) - int(start[1:]) + 1
+
+    # Every rule touching a row inside Leaders/Punt (D or I column, at or
+    # past BOARD_LEADERS_FIRST_ROW) spans at most 10 rows (WR, the widest
+    # position) -- never the whole 33-row stacked block.
+    position_ranked_ranges = [
+        a1
+        for a1 in client.color_scale_calls
+        if a1[0] in ("D", "I") and int(a1[1 : a1.index(":")]) >= BOARD_LEADERS_FIRST_ROW
+    ]
+    assert len(position_ranked_ranges) == 15
+    for a1 in position_ranked_ranges:
+        assert _row_span(a1) <= 10, f"{a1} spans {_row_span(a1)} rows -- not scoped to one position"
+
+
+def test_style_board_puts_a_top_border_between_positions_not_before_the_first():
+    # PROMPT_BOARD_FIXES.md item 3: "a thin visual break between
+    # positions... a top border on each position's first row" -- QB (the
+    # first position, right under the column header) doesn't need one.
+    client = FakeBoardClient()
+    style_board(client)
+
+    border_ranges = [a1 for a1, fmt in client.format_calls if "borders" in fmt]
+    # 4 borders per block (RB/WR/TE/DST, not QB) x 2 Leaders blocks + 1
+    # Punt block = 12.
+    assert len(border_ranges) == 12
+    # The very first Leaders row (QB's own first row) must never get one.
+    assert not any(a1.startswith(f"A{BOARD_LEADERS_FIRST_ROW}:") for a1 in border_ranges)
 
 
 _HEADER_WITH_AVAIL_AT_Y = (

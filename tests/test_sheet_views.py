@@ -8,6 +8,7 @@ from dfs.sheet_views import (
     BOARD_FRESHNESS_ROW,
     BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_HEADER_ROW,
+    BOARD_LEADERS_SUBLABEL_ROW,
     BOARD_POOL_FIRST_ROW,
     BOARD_POOL_HEADER_ROW,
     BOARD_POOL_NOTICE_ROW,
@@ -410,12 +411,26 @@ def test_slate_shape_sorts_by_total_not_gamesraws_own_row_order():
     assert "GamesRaw!$M$2:$M$40" in slate_row[0]  # Total is the sort key
 
 
+def test_slate_shape_fav_and_spread_columns_derive_from_games_columns():
+    # PROMPT_BOARD_FIXES.md item 1: Fav/Spread inserted right after Total
+    # (columns C/D), sourced from the same GamesRaw range Total already
+    # is, with every letter derived from GAMES_COLUMNS rather than
+    # hardcoded -- Spread shows the ABSOLUTE line; Fav's sign check picks
+    # the favoured team code (or "PK").
+    client = _build_board()
+    slate_formula = client.rows[BOARD_SLATE_FIRST_ROW - 1][0]
+
+    assert "GamesRaw!$L$2:$L$40" in slate_formula  # Spread is GAMES_COLUMNS' own column L
+    assert 'IF(GamesRaw!$L$2:$L$40=0,"PK"' in slate_formula
+    assert "ABS(GamesRaw!$L$2:$L$40)" in slate_formula
+
+
 def test_slate_shape_wind_lookup_joins_on_a_parallel_gameid_column_not_matchup_text():
     client = _build_board()
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
-    # Part C, C7 inserted a Pace column at index 2 (column C), pushing Wind
-    # to index 3 (column D).
-    wind_formula = slate_row[3]
+    # PROMPT_BOARD_FIXES.md item 1 inserted Fav/Spread at indices 2/3,
+    # pushing Pace to 4 and Wind to 5.
+    wind_formula = slate_row[5]
 
     # The GameId column (a second, independent SORT on the same key) is
     # what Wind's VLOOKUP joins against -- not the human-readable Matchup
@@ -431,7 +446,7 @@ def test_slate_shape_pace_averages_away_and_home_team_lookups():
     # by GameId alone.
     client = _build_board()
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
-    pace_formula = slate_row[2]
+    pace_formula = slate_row[4]
 
     assert pace_formula.startswith("=IF($A")
     assert "AVERAGE(" in pace_formula
@@ -455,7 +470,11 @@ def test_per_position_leaders_rank_within_position_not_across_the_whole_slate():
     for position in ("QB", "RB", "WR", "TE", "DST"):
         assert f'{_rng("EdgeRaw", "Position")}="{position}"' in best_valadj
     assert best_valadj.count("ARRAY_CONSTRAIN") == 5
-    assert best_valadj.count(",2,4)") == 5  # 2 rows x 4 cols per position block
+    # PROMPT_BOARD_FIXES.md item 3: each position gets its own row count
+    # now (BOARD_ROWS_PER_POSITION), not a flat 2 -- QB=5, RB=8, WR=10,
+    # TE=5, DST=5, all 4 columns wide.
+    for rows_per_position in (5, 8, 10, 5, 5):
+        assert f",{rows_per_position},4)" in best_valadj
     assert _rng("EdgeRaw", "ValAdj") in best_valadj
 
 
@@ -469,13 +488,30 @@ def test_per_position_leaders_second_block_sorts_by_projpts():
     assert _rng("EdgeRaw", "ValAdj") not in highest_proj
 
 
-def test_punt_finder_filters_under_the_salary_ceiling():
+def test_leaders_sublabel_row_names_each_blocks_own_sort():
+    # PROMPT_BOARD_FIXES.md item 2: nothing on the sheet said which block
+    # was sorted by which metric -- a sub-label row above each fixes that.
+    client = _build_board()
+    sublabel_row = client.rows[BOARD_LEADERS_SUBLABEL_ROW - 1]
+
+    assert sublabel_row[0] == "Best value — sorted by ValAdj, high to low"
+    assert sublabel_row[5] == "Highest projection — sorted by ProjPts, high to low"
+
+
+def test_punt_finder_filters_within_the_salary_window_per_position():
+    # PROMPT_BOARD_FIXES.md item 4: a per-position window off the slate's
+    # own live MINIFS, not a flat $4,000 ceiling (DK's own floor for
+    # QB/RB, which could never be "under").
     client = _build_board()
     punt_finder = client.rows[BOARD_PUNT_FIRST_ROW - 1][0]
 
-    assert f"{_rng('EdgeRaw', 'Salary')}<4000" in punt_finder
+    salary = _rng("EdgeRaw", "Salary")
+    pos = _rng("EdgeRaw", "Position")
+    assert f'{salary}<=MINIFS({salary},{pos},"QB")+1000' in punt_finder
     assert punt_finder.count("ARRAY_CONSTRAIN") == 5
-    assert punt_finder.count(",1,4)") == 5  # 1 row x 4 cols per position block
+    # PROMPT_BOARD_FIXES.md item 3: same per-position row counts as leaders.
+    for rows_per_position in (5, 8, 10, 5, 5):
+        assert f",{rows_per_position},4)" in punt_finder
 
 
 def test_stack_candidates_reference_current_edge_columns():
@@ -486,11 +522,13 @@ def test_stack_candidates_reference_current_edge_columns():
     client = _build_board()
     stack_row = client.rows[BOARD_STACK_FIRST_ROW - 1]
     team_list = stack_row[0]
-    qb_formula = stack_row[1]
+    # PROMPT_BOARD_FIXES.md item 5: Total now spills into column B, so the
+    # QB name formula starts at column C (index 2).
+    qb_formula = stack_row[2]
 
     assert _rng("EdgeRaw", "OverUnder") in team_list
     assert _rng("EdgeRaw", "Team") in qb_formula
-    assert _rng("EdgeRaw", "TmRank") in stack_row[3]  # WR1 column
+    assert _rng("EdgeRaw", "TmRank") in stack_row[4]  # WR1 column
 
 
 def test_pool_diagnostics_reads_player_pool_not_edgeraw():

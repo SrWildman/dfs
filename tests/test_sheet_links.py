@@ -21,6 +21,7 @@ class SpySheetsClient:
         self.header_row = header_row
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.color_scale_calls: list[tuple[str, str]] = []
+        self.boolean_rule_calls: list[tuple[str, str]] = []
         self.group_calls: list[tuple[str, str, str, bool]] = []
         self.clear_group_calls: list[str] = []
         self.group_control_before_calls: list[str] = []
@@ -35,6 +36,9 @@ class SpySheetsClient:
 
     def add_color_scale(self, tab_name, a1_range, **_colors):
         self.color_scale_calls.append((tab_name, a1_range))
+
+    def add_boolean_rule(self, tab_name, a1_range, **_kwargs):
+        self.boolean_rule_calls.append((tab_name, a1_range))
 
     def group_columns(self, tab_name, first_col_a1, last_col_a1, *, collapsed=False):
         self.group_calls.append((tab_name, first_col_a1, last_col_a1, collapsed))

@@ -79,7 +79,15 @@ function happens to touch it first.
 
 from __future__ import annotations
 
-from dfs.derived import CHALK_OWNERSHIP_THRESHOLD, EDGE_COLUMNS, EDGE_DATA_OFFSET, ZONE_LABELS
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, ZONE_LABELS
+from dfs.sheet_color_scales import (
+    FIELD_COLOR_SCALES,
+    GRAD_MAX,
+    GRAD_MID,
+    GRAD_MIN,
+    WHITE,
+    _scale_rule_specs,
+)
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_views import (
     BOARD_CHALK_HEADER_ROW,
@@ -88,6 +96,8 @@ from dfs.sheet_views import (
     BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_HEADER_ROW,
     BOARD_LEADERS_LAST_ROW,
+    BOARD_LEADERS_SUBLABEL_ROW,
+    BOARD_MAX_VISIBLE_COL_INDEX,
     BOARD_POOL_COLHEADER_ROW,
     BOARD_POOL_FIRST_ROW,
     BOARD_POOL_HEADER_ROW,
@@ -101,12 +111,15 @@ from dfs.sheet_views import (
     BOARD_QUEUE_LAST_ROW,
     BOARD_SLATE_COLHEADER_ROW,
     BOARD_SLATE_FIRST_ROW,
+    BOARD_SLATE_GAMEID_COL_INDEX,
     BOARD_SLATE_HEADER_ROW,
+    BOARD_SLATE_HOME_COL_INDEX,
     BOARD_SLATE_LAST_ROW,
     BOARD_STACK_COLHEADER_ROW,
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
     BOARD_STACK_LAST_ROW,
+    _position_block_rows,
 )
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
@@ -132,7 +145,8 @@ def _rgb(hex_str: str) -> dict:
 
 INK = _rgb("#12161C")
 INK_MUTED = _rgb("#798494")
-WHITE = _rgb("#FFFFFF")
+# WHITE lives in sheet_color_scales.py now (imported above) -- shared with
+# every diverging-scale rule's own white midpoint.
 HEADER_BG = _rgb("#20262F")
 BAND_BG = _rgb("#F7F8FA")
 
@@ -148,11 +162,7 @@ FLAT_BG, FLAT_FG = _rgb("#E7EBF0"), _rgb("#4A5563")
 # deck's B1/D1/F1 controls.
 INPUT_BG = _rgb("#FFFDF5")
 
-# The red -> yellow -> green gradient the now-removed `dfs sheets
-# format-edge` command originally introduced, kept identical here.
-GRAD_MIN = {"red": 0.96, "green": 0.80, "blue": 0.80}
-GRAD_MID = {"red": 1.0, "green": 1.0, "blue": 0.80}
-GRAD_MAX = {"red": 0.72, "green": 0.88, "blue": 0.72}
+# GRAD_MIN/MID/MAX live in sheet_color_scales.py now (imported above).
 
 # Tab families -- the same four-way taxonomy already in the sheet, just
 # desaturated so the strip reads as a system instead of a highlighter set.
@@ -332,86 +342,14 @@ def apply_field_formats(
 # reconciled, including one rule that colour-scaled `Venue` (`H`/`R` text)
 # as if it were a quantity. Replaces the old per-tab `EDGE_COLOR_SCALES`
 # tuple entirely.
-_GRADIENT = "gradient"  # red -> yellow -> green, more is better
-_DIVERGING = "diverging"  # red -> white -> green, zero is the midpoint
-_REVERSED = "reversed"  # green -> yellow -> red, LOW is better
-# White -> amber -> red: ownership only. Deliberately NOT green=good --
-# Sam: high ownership is CHALK, caution rather than quality, and this is
-# the one place in the workbook where "more" isn't "better" (Fix 2.8).
-# Reuses WARN_BG/CRIT_BG's exact hues so it reads as the same warning
-# language as the rest of the workbook, just applied continuously.
-_WARM = "warm"
-
-WARM_MIN = WHITE
-WARM_MID = _rgb("#F7E9CF")  # == WARN_BG
-WARM_MAX = _rgb("#F8DEDA")  # == CRIT_BG
-
-FIELD_COLOR_SCALES = {
-    "ProjPts": _GRADIENT,
-    "AggPts": _GRADIENT,
-    "Pts": _GRADIENT,
-    "Ceiling": _GRADIENT,
-    "Ceil": _GRADIENT,
-    "Val": _GRADIENT,
-    "CeilVal": _GRADIENT,
-    # Part 7.2: unlike Val/CeilVal, already a per-position residual
-    # (Position-regressed against Salary on EdgeRaw itself), so -- same
-    # reasoning as CeilPct just below -- a flat whole-tab scale is
-    # already meaningful; see EDGE_UNSCALED_PLAYER_METRICS/
-    # GROUPED_TAB_UNSCALED_COLUMNS for why EdgeRaw scales this one but
-    # Player Pool/Lineups skip re-grouping it.
-    "ValAdj": _GRADIENT,
-    "Leverage": _GRADIENT,
-    "GameEnv": _GRADIENT,
-    # Part C, C7: team-level, not player/position-skewed (every player on
-    # a team shares one value, same as GameEnv/OverUnder/Spread just
-    # above/below) -- a flat whole-tab scale is meaningful on EdgeRaw with
-    # no EDGE_UNSCALED_PLAYER_METRICS exclusion needed, unlike raw Pts/
-    # Ceil/Val. Pace alone is reversed per C7's own instruction: lower
-    # (faster) is the interesting/good direction.
-    "Pace": _REVERSED,
-    "PROE": _GRADIENT,
-    "Expl%": _GRADIENT,
-    "Team Implied": _GRADIENT,
-    "O/U": _GRADIENT,
-    "OU": _GRADIENT,
-    "OverUnder": _GRADIENT,
-    "Total": _GRADIENT,
-    "ImpliedMove": _DIVERGING,
-    "TotMove": _DIVERGING,
-    "SpdMove": _DIVERGING,
-    # Week 3 feedback (A1), found live 2026-09-22: Spread was already here,
-    # but as _DIVERGING -- zero as a neutral midpoint, negative (this
-    # team's own favorite side) mapped to red, positive (underdog) mapped
-    # to green. That's backwards for what Spread actually means: unlike
-    # ImpliedMove/TotMove/SpdMove (direction-agnostic deltas, where
-    # "which way is good" depends on who you rostered), a more negative
-    # Spread always means a bigger favorite -- the same fixed, monotonic
-    # "lower is better" reading OppPosRank already gets below. Sam:
-    # "Spread syntax highlighting is backwards, lower numbers are better."
-    "Spread": _REVERSED,
-    # A low OppPosRank is the tough matchup here (this opponent allows the
-    # FEWEST fantasy points at this position) -- same "1st is best"
-    # convention as the SoS tabs' own `Rank` column (`style_sos_tab`).
-    "OppPosRank": _REVERSED,
-    "Own%": _WARM,
-    # Phase 4 (4.1): already percentile-within-position, 0-100 regardless
-    # of which positions happen to be mixed into the range they're scaled
-    # over -- unlike raw Pts/Ceil/Val/CeilVal, scaling these doesn't need
-    # a position-grouped range to mean something. See
-    # EDGE_UNSCALED_PLAYER_METRICS/GROUPED_TAB_UNSCALED_COLUMNS below for
-    # why EdgeRaw keeps these two and Player Pool/Lineups skip them.
-    "CeilPct": _GRADIENT,
-    # Phase 5B: a count (0..however many lineups H1 says are being built),
-    # same "more is better" reading as everything else in _GRADIENT -- a
-    # heavily-used player earning the deepest colour is exactly the point.
-    # Zero is also this column's overwhelmingly common value (most pool
-    # players are rostered nowhere), so it's in ZERO_EXCLUDED_COLUMNS too
-    # for the same reason Own% is: an unrostered player is normal, not the
-    # bottom of a gradient.
-    "Used": _GRADIENT,
-}
-
+#
+# `_GRADIENT`/`_DIVERGING`/`_REVERSED`/`_WARM`/`WARM_MIN`/`WARM_MID`/
+# `WARM_MAX`/`FIELD_COLOR_SCALES`/`ZERO_EXCLUDED_COLUMNS`/`ZERO_GREY_BG` all
+# live in `sheet_color_scales.py` now (imported above) -- see that
+# module's own docstring for why (PROMPT_BOARD_FIXES.md item 7,
+# 2026-09-25: `sheet_links.py`/`sheet_pool_resize.py` need the same
+# `_scale_rule_specs` dispatch, and importing it FROM here would be
+# circular).
 # Phase 4 (4.1): EdgeRaw is sorted by Leverage, not grouped by position --
 # one gradient across the whole 743-row tab paints every DST red next to
 # a QB's real 27 points. Rather than add a second per-position-scaled
@@ -445,15 +383,8 @@ GROUPED_TAB_UNSCALED_COLUMNS = frozenset({"CeilPct", "ValAdj"})
 # measured quality worth ranking by, which docs/CALCULATIONS.md
 # explicitly warns against reading it as.
 
-# Columns where a real, common zero would otherwise anchor a gradient's
-# low end and compress everyone else's actual spread into a sliver of the
-# scale (Fix 2.7) -- unpublished ownership reads 0 for the whole slate
-# until TFFB computes it midweek. Gets its own flat grey chip (added
-# after the gradient so it wins -- see the shared insert-at-front note on
-# FLAG_CHIPS above) and the gradient's own minpoint is computed over
-# non-zero values only via a live MINIFS formula, not the true minimum.
-ZERO_EXCLUDED_COLUMNS = frozenset({"Own%", "Used"})
-ZERO_GREY_BG = _rgb("#EDEEF1")
+# ZERO_EXCLUDED_COLUMNS/ZERO_GREY_BG live in sheet_color_scales.py now
+# (imported above), alongside FIELD_COLOR_SCALES itself.
 
 
 def apply_field_color_scales(
@@ -507,118 +438,6 @@ def apply_field_color_scales(
     return applied
 
 
-def _scale_rule_specs(
-    a1: str,
-    kind: str,
-    name: str,
-    *,
-    zero_exclude_range: str,
-    min_value: str | None = None,
-    max_value: str | None = None,
-) -> tuple[dict, dict | None]:
-    """Shared dispatch building the rule SPECS (kwargs dicts for
-    `SheetsClient.add_color_scale`/`add_boolean_rule`, each carrying its
-    own `a1_range`) for one column -- never calls the client itself, so
-    callers can either apply a spec immediately (`apply_field_color_
-    scales`, a handful of whole-tab rules) or collect many and apply them
-    in one batched `add_color_scales`/`add_boolean_rules` call
-    (`apply_grouped_color_scales`/`apply_deck_color_scales`, which can
-    generate hundreds -- see `add_color_scales`' own docstring for why
-    that matters). Used by both `apply_field_color_scales` (one rule
-    spanning `a1`'s own full range) and `apply_grouped_color_scales` (one
-    rule per group, `min_value`/`max_value` anchored to that group's own
-    range rather than `a1`'s implicit MIN/MAX -- see that function's own
-    docstring for why a single rule can't do this across multiple groups
-    at once).
-
-    Fix 2.7's zero-exclusion MINIFS formula reads over `zero_exclude_range`
-    (the range whose non-zero minimum actually matters -- `a1` itself for
-    a whole-tab scale, but a group's own narrower range when this is
-    called per-group), never `a1` when the two differ, and only replaces
-    an explicit `min_value` when the caller didn't already provide one.
-    Returns `(gradient_spec, boolean_spec_or_None)`.
-    """
-    min_kwargs: dict = {}
-    if min_value is not None:
-        min_kwargs = {"min_type": "NUMBER", "min_value": min_value}
-    elif name in ZERO_EXCLUDED_COLUMNS:
-        min_kwargs = {
-            "min_type": "NUMBER",
-            "min_value": f'=MINIFS({zero_exclude_range},{zero_exclude_range},"<>0")',
-        }
-    max_kwargs = {"max_type": "NUMBER", "max_value": max_value} if max_value is not None else {}
-
-    if kind == _DIVERGING:
-        gradient_spec = {
-            "a1_range": a1,
-            "min_color": GRAD_MIN,
-            "mid_color": WHITE,
-            "max_color": GRAD_MAX,
-            "mid_type": "NUMBER",
-            "mid_value": "0",
-            **min_kwargs,
-            **max_kwargs,
-        }
-    elif kind == _REVERSED:
-        gradient_spec = {
-            "a1_range": a1,
-            "min_color": GRAD_MAX,
-            "mid_color": GRAD_MID,
-            "max_color": GRAD_MIN,
-            **min_kwargs,
-            **max_kwargs,
-        }
-    elif kind == _WARM:
-        # Week 3 feedback (A2), 2026-09-22: Sam: "Ownership highlighting is
-        # hard to discern differences." Min/max were already adaptive to
-        # the slate (non-zero MINIFS / real MAX -- Fix 2.7), so the actual
-        # problem was the MIDPOINT: it defaulted (like every other scale
-        # here) to the statistical median, but ownership is right-skewed
-        # -- most players sit low, a few chalk plays sit high -- so the
-        # median lands low too, and the entire "meaningfully different"
-        # low-ownership majority gets crushed into the white-to-amber
-        # third of the scale while the amber-to-red two-thirds is spent on
-        # a handful of outliers. Anchoring the midpoint at
-        # `CHALK_OWNERSHIP_THRESHOLD` instead (the same 20% line `Flag`
-        # already calls out as CHALK) fixes that AND gives the transition
-        # real meaning: white-to-amber is "below the chalk line," amber-
-        # to-red is "how far past it."
-        gradient_spec = {
-            "a1_range": a1,
-            "min_color": WARM_MIN,
-            "mid_color": WARM_MID,
-            "max_color": WARM_MAX,
-            "mid_type": "NUMBER",
-            "mid_value": str(CHALK_OWNERSHIP_THRESHOLD),
-            **min_kwargs,
-            **max_kwargs,
-        }
-    else:
-        gradient_spec = {
-            "a1_range": a1,
-            "min_color": GRAD_MIN,
-            "mid_color": GRAD_MID,
-            "max_color": GRAD_MAX,
-            **min_kwargs,
-            **max_kwargs,
-        }
-
-    boolean_spec = None
-    if name in ZERO_EXCLUDED_COLUMNS:
-        # Added AFTER the gradient above (later in the same batch, or a
-        # later individual call), so it lands at index 0 and wins for any
-        # exact-zero cell -- see FLAG_CHIPS' comment on add_boolean_rule/
-        # add_color_scale's shared insert-at-front behavior, verified
-        # against a live sheet's raw conditionalFormats metadata.
-        boolean_spec = {
-            "a1_range": a1,
-            "condition_type": "NUMBER_EQ",
-            "values": ["0"],
-            "fmt": {"backgroundColor": ZERO_GREY_BG},
-        }
-    return gradient_spec, boolean_spec
-
-
 def apply_edge_position_scales(
     client: SheetsClient, tab: str, header: list, *, position_column: str, data_start: int, last_row: int
 ) -> int:
@@ -667,19 +486,37 @@ def apply_edge_position_scales(
             continue
         rows_by_position.setdefault(position, []).append(data_start + offset)
 
-    specs = []
+    # PROMPT_BOARD_FIXES.md item 7 (2026-09-25): routed through the shared
+    # `_scale_rule_specs` dispatch, same as everywhere else -- ProjPts/
+    # Ceiling/Val/CeilVal are exactly the columns item 7's own report used
+    # as the motivating example (363/658 ProjPts zeros, mostly OUT/deep-
+    # backup players). The gradient's min/mid are computed over the UNION
+    # of a position's own (possibly scattered) row runs (`_scale_rule_
+    # specs` accepts a list for `zero_exclude_range` for exactly this);
+    # the zero-grey boolean chip doesn't need that -- an exact-zero
+    # condition is evaluated per cell, so one plain single-range rule per
+    # contiguous run gives the identical visual result without needing a
+    # multi-range boolean primitive.
+    gradient_specs = []
+    boolean_specs = []
     for name in EDGE_UNSCALED_PLAYER_METRICS:
         if name not in header:
             continue
         letter = column_letter(header.index(name))
+        kind = FIELD_COLOR_SCALES[name]
         for rows in rows_by_position.values():
             a1_ranges = [f"{letter}{start}:{letter}{end}" for start, end in _merge_contiguous(rows)]
-            specs.append(
-                {"a1_ranges": a1_ranges, "min_color": GRAD_MIN, "mid_color": GRAD_MID, "max_color": GRAD_MAX}
-            )
+            gradient_spec, boolean_spec = _scale_rule_specs("", kind, name, zero_exclude_range=a1_ranges)
+            del gradient_spec["a1_range"]
+            gradient_spec["a1_ranges"] = a1_ranges
+            gradient_specs.append(gradient_spec)
+            if boolean_spec is not None:
+                for run_a1 in a1_ranges:
+                    boolean_specs.append({**boolean_spec, "a1_range": run_a1})
 
-    client.add_color_scales_multi_range(tab, specs)
-    return len(specs)
+    client.add_color_scales_multi_range(tab, gradient_specs)
+    client.add_boolean_rules(tab, boolean_specs)
+    return len(gradient_specs)
 
 
 def apply_grouped_color_scales(
@@ -2558,6 +2395,15 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     hand so the two can't drift the way EdgeRaw's column order once did.
     Queue and Slate shape are grouped but left expanded (open by default,
     per spec); everything after is grouped AND collapsed.
+
+    PROMPT_BOARD_FIXES.md items 2/3/6 (2026-09-25): a sub-label row above
+    each Leaders block naming its own sort, a thin top border between
+    positions in the Leaders/Punt blocks, and full colour-scale coverage
+    (position-ranked sections scaled per position, never across it;
+    Slate shape/Stack candidates scaled across their whole section) --
+    every scale routed through the shared `_scale_rule_specs` dispatch
+    (`sheet_color_scales.py`) so the same zero-exclusion every other
+    scaled column in the workbook gets applies here too.
     """
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
@@ -2573,19 +2419,29 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     # Reset to white first, past the tab's current widest/tallest
     # section, so every section's own formatting below starts from a
     # clean sheet regardless of what an earlier design left behind.
-    client.format_range(tab, f"A1:N{BOARD_LAST_ROW + 10}", {"backgroundColor": WHITE})
+    # PROMPT_BOARD_FIXES.md item 5: last visible column is now derived
+    # (`BOARD_MAX_VISIBLE_COL_INDEX`, Stack candidates' own 14-column
+    # width), not a hardcoded "N" -- which happens to be the same letter
+    # today, but stops being a coincidence.
+    last_visible_col = column_letter(BOARD_MAX_VISIBLE_COL_INDEX)
+    client.format_range(tab, f"A1:{last_visible_col}{BOARD_LAST_ROW + 10}", {"backgroundColor": WHITE})
     client.set_column_widths(
         tab,
         {
             "A": 170,
             "B": 90,
             "C": 90,
-            "D": 170,
+            "D": 90,
             "E": 90,
             "F": 90,
             "G": 90,
             "H": 90,
-            "I": 130,
+            "I": 90,
+            "J": 90,
+            "K": 90,
+            "L": 90,
+            "M": 90,
+            "N": 90,
         },
     )
     client.format_range(tab, "A1", _TITLE_FMT)
@@ -2594,15 +2450,17 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         client.format_range(tab, label, {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
     for value in ("B2", "D2", "F2", "H2"):
         client.format_range(tab, value, {"textFormat": {"bold": True, "foregroundColor": INK}})
-    client.format_range(tab, "A3:I3", _BANNER_FMT)
+    client.format_range(tab, f"A3:{last_visible_col}3", _BANNER_FMT)
 
     # Slate shape's GameId/Away/Home join keys (sheet_views.
-    # BOARD_SLATE_GAMEID_COL/AWAY_COL/HOME_COL, Part C, C7 added the latter
-    # two) -- meaningless to look at, same treatment as EdgeRaw's own
-    # hidden Id. Columns J-L, past every other section's own rightmost
-    # visible column (I), so this can't hide real content belonging to a
-    # different section that happens to share the same letter.
-    client.hide_columns(tab, "J", "L")
+    # BOARD_SLATE_GAMEID_COL/AWAY_COL/HOME_COL) -- meaningless to look at,
+    # same treatment as EdgeRaw's own hidden Id. Derived from
+    # BOARD_MAX_VISIBLE_COL_INDEX (item 5), past every section's own
+    # rightmost visible column, so this can't hide real content belonging
+    # to a different section that happens to share the same letter.
+    hide_first = column_letter(BOARD_SLATE_GAMEID_COL_INDEX)
+    hide_last = column_letter(BOARD_SLATE_HOME_COL_INDEX)
+    client.hide_columns(tab, hide_first, hide_last)
 
     def _section(
         header_row: int, colheader_row: int, last_row: int, *, last_col: str, collapsed: bool
@@ -2615,20 +2473,30 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         BOARD_QUEUE_HEADER_ROW, BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW, last_col="D", collapsed=False
     )
     _section(
-        BOARD_SLATE_HEADER_ROW, BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW, last_col="E", collapsed=False
+        BOARD_SLATE_HEADER_ROW, BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW, last_col="G", collapsed=False
     )
-    _section(
-        BOARD_LEADERS_HEADER_ROW,
-        BOARD_LEADERS_COLHEADER_ROW,
-        BOARD_LEADERS_LAST_ROW,
-        last_col="I",
-        collapsed=True,
+    # PROMPT_BOARD_FIXES.md item 2: a sub-label row (naming each block's
+    # own sort) sits between the section header and the column header now
+    # -- grouped along with the rest of the section's body, same as the
+    # column header row already was, so collapsing the section hides it
+    # too rather than leaving an orphaned label visible.
+    client.format_range(tab, f"A{BOARD_LEADERS_HEADER_ROW}:I{BOARD_LEADERS_HEADER_ROW}", _PANEL_FMT)
+    client.format_range(
+        tab,
+        f"A{BOARD_LEADERS_SUBLABEL_ROW}:I{BOARD_LEADERS_SUBLABEL_ROW}",
+        {"textFormat": {"italic": True, "foregroundColor": INK_MUTED, "fontSize": 9}},
     )
+    client.format_range(tab, f"A{BOARD_LEADERS_COLHEADER_ROW}:I{BOARD_LEADERS_COLHEADER_ROW}", _SUBHEAD_FMT)
+    client.group_rows(tab, BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW, collapsed=True)
     _section(
         BOARD_PUNT_HEADER_ROW, BOARD_PUNT_COLHEADER_ROW, BOARD_PUNT_LAST_ROW, last_col="D", collapsed=True
     )
     _section(
-        BOARD_STACK_HEADER_ROW, BOARD_STACK_COLHEADER_ROW, BOARD_STACK_LAST_ROW, last_col="G", collapsed=True
+        BOARD_STACK_HEADER_ROW,
+        BOARD_STACK_COLHEADER_ROW,
+        BOARD_STACK_LAST_ROW,
+        last_col=last_visible_col,
+        collapsed=True,
     )
     _section(
         BOARD_POOL_HEADER_ROW, BOARD_POOL_COLHEADER_ROW, BOARD_POOL_LAST_ROW, last_col="I", collapsed=True
@@ -2636,36 +2504,88 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     client.format_range(tab, f"A{BOARD_CHALK_HEADER_ROW}:I{BOARD_CHALK_HEADER_ROW}", _PANEL_FMT)
     client.group_rows(tab, BOARD_CHALK_HEADER_ROW + 1, BOARD_CHALK_HEADER_ROW + 1, collapsed=True)
 
-    # Slate shape: Total (FIELD_FORMATS' own "Total"), Pace (Part C, C7), Wind.
-    client.format_range(tab, f"B{BOARD_SLATE_FIRST_ROW}:B{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Total"])
-    client.format_range(tab, f"C{BOARD_SLATE_FIRST_ROW}:C{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Pace"])
-    client.format_range(tab, f"D{BOARD_SLATE_FIRST_ROW}:D{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Wind"])
+    def _scaled(a1: str, field_name: str) -> None:
+        """One `_scale_rule_specs`-built rule, applied immediately --
+        Board's own sections are small enough (dozens of rules total,
+        never hundreds) that per-call application is fine, unlike
+        EdgeRaw/Player Pool/Lineups' own batched paths."""
+        kind = FIELD_COLOR_SCALES[field_name]
+        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, field_name, zero_exclude_range=a1)
+        client.add_color_scale(tab, gradient_spec.pop("a1_range"), **gradient_spec)
+        if boolean_spec is not None:
+            client.add_boolean_rule(tab, boolean_spec.pop("a1_range"), **boolean_spec)
 
-    # Per-position leaders: Salary/ValAdj (block 1), Salary/ProjPts (block 2).
+    def _scaled_per_position(col: str, field_name: str, first_row: int) -> None:
+        """PROMPT_BOARD_FIXES.md item 6: "a QB's ProjPts should never sit
+        on the same gradient as a DST's" -- one rule per position's own
+        contiguous row range within a stacked Leaders/Punt block, via
+        `sheet_views._position_block_rows` (the same row math `build_board`
+        used to write the block in the first place, so the two can't
+        drift)."""
+        for start, end in _position_block_rows(first_row).values():
+            _scaled(f"{col}{start}:{col}{end}", field_name)
+
+    def _position_top_borders(first_row: int, first_col: str, last_col: str) -> None:
+        """PROMPT_BOARD_FIXES.md item 3: "a thin visual break between
+        positions... a top border on each position's first row" -- skips
+        the very first position (QB), which already sits directly under
+        the column header row and needs no further separator."""
+        blocks = list(_position_block_rows(first_row).values())
+        for start, _ in blocks[1:]:
+            client.format_range(
+                tab,
+                f"{first_col}{start}:{last_col}{start}",
+                {"borders": {"top": {"style": "SOLID", "width": 1, "color": INK_MUTED}}},
+            )
+
+    # Slate shape: Total/Fav/Spread/Pace/Wind. Fav is text (no scale, no
+    # format); the rest are FIELD_FORMATS' own formats. Scaled across the
+    # whole section (item 6: not position-ranked, so no per-position
+    # split makes sense here) -- Wind keeps its existing chip treatment
+    # (style_slate_grid's own high-wind boolean rule doesn't apply on
+    # Board, which has never chipped Wind; item 6 only says "keep" it
+    # where it already existed).
+    client.format_range(tab, f"B{BOARD_SLATE_FIRST_ROW}:B{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Total"])
+    client.format_range(tab, f"D{BOARD_SLATE_FIRST_ROW}:D{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Spread"])
+    client.format_range(tab, f"E{BOARD_SLATE_FIRST_ROW}:E{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Pace"])
+    client.format_range(tab, f"F{BOARD_SLATE_FIRST_ROW}:F{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS["Wind"])
+    for col, field_name in (("B", "Total"), ("D", "Spread"), ("E", "Pace")):
+        _scaled(f"{col}{BOARD_SLATE_FIRST_ROW}:{col}{BOARD_SLATE_LAST_ROW}", field_name)
+
+    # Per-position leaders: Salary/ValAdj (block 1), Salary/ProjPts (block
+    # 2) -- Salary stays unscaled (existing policy: a constraint, not a
+    # quality). Both ValAdj and ProjPts are scaled PER POSITION now (item
+    # 6), not once across all 33 stacked rows.
     client.format_range(tab, f"C{BOARD_LEADERS_FIRST_ROW}:C{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["Salary"])
     client.format_range(tab, f"D{BOARD_LEADERS_FIRST_ROW}:D{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["ValAdj"])
     client.format_range(tab, f"H{BOARD_LEADERS_FIRST_ROW}:H{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["Salary"])
     client.format_range(
         tab, f"I{BOARD_LEADERS_FIRST_ROW}:I{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["ProjPts"]
     )
-    for rng in (
-        f"D{BOARD_LEADERS_FIRST_ROW}:D{BOARD_LEADERS_LAST_ROW}",
-        f"I{BOARD_LEADERS_FIRST_ROW}:I{BOARD_LEADERS_LAST_ROW}",
-    ):
-        client.add_color_scale(tab, rng, min_color=GRAD_MIN, mid_color=GRAD_MID, max_color=GRAD_MAX)
+    _scaled_per_position("D", "ValAdj", BOARD_LEADERS_FIRST_ROW)
+    _scaled_per_position("I", "ProjPts", BOARD_LEADERS_FIRST_ROW)
+    _position_top_borders(BOARD_LEADERS_FIRST_ROW, "A", "D")
+    _position_top_borders(BOARD_LEADERS_FIRST_ROW, "F", "I")
 
-    # Punt finder: Salary/ValAdj.
+    # Punt finder: Salary/ValAdj -- same per-position scaling as Leaders.
     client.format_range(tab, f"C{BOARD_PUNT_FIRST_ROW}:C{BOARD_PUNT_LAST_ROW}", FIELD_FORMATS["Salary"])
     client.format_range(tab, f"D{BOARD_PUNT_FIRST_ROW}:D{BOARD_PUNT_LAST_ROW}", FIELD_FORMATS["ValAdj"])
+    _scaled_per_position("D", "ValAdj", BOARD_PUNT_FIRST_ROW)
+    _position_top_borders(BOARD_PUNT_FIRST_ROW, "A", "D")
 
-    # Stack candidates: two Salary columns (QB, WR1's own Salary col is E,
-    # TE1's is G -- see build_board's column layout for this section).
-    for col in ("C", "E", "G"):
+    # Stack candidates: Total (item 5/6 -- scaled across the whole
+    # section, it's per-game, not position-ranked) plus every Salary
+    # column staying unscaled (QB/WR1/WR2/WR3/TE1/RB1's own Sal columns
+    # are D/F/H/J/L/N -- see build_board's own column layout).
+    client.format_range(tab, f"B{BOARD_STACK_FIRST_ROW}:B{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Total"])
+    _scaled(f"B{BOARD_STACK_FIRST_ROW}:B{BOARD_STACK_LAST_ROW}", "Total")
+    for col in ("D", "F", "H", "J", "L", "N"):
         client.format_range(
             tab, f"{col}{BOARD_STACK_FIRST_ROW}:{col}{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Salary"]
         )
 
-    # Pool diagnostics: Min/Max/Avg/Cheapest Salary.
+    # Pool diagnostics: Min/Max/Avg/Cheapest Salary -- all unscaled
+    # (Salary, same policy as everywhere else).
     for col in ("B", "C", "D", "F"):
         client.format_range(
             tab, f"{col}{BOARD_POOL_FIRST_ROW}:{col}{BOARD_POOL_FIRST_ROW + 4}", FIELD_FORMATS["Salary"]

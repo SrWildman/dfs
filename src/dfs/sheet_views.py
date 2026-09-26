@@ -26,8 +26,23 @@ from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, SHOOTOUT_TOTAL_THRESHOLD
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, _canonical_id
+from dfs.sources.nflverse_games import GAMES_COLUMNS
 from dfs.sources.weather import WEATHER_COLUMNS
 from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
+
+# PROMPT_BOARD_FIXES.md item 1: GamesRaw's own column order, for anything
+# that needs a GamesRaw letter without hardcoding one -- `GAMES_COLUMNS`
+# is keyed by nflverse's raw field name; this is keyed by the tab's own
+# header text (what every caller here actually has in hand), in the same
+# order.
+_GAMES_HEADER = list(GAMES_COLUMNS.values())
+
+
+def _games_col(name: str) -> str:
+    if name not in _GAMES_HEADER:
+        raise KeyError(f"{name!r} is not in GAMES_COLUMNS -- cannot build a view referencing it.")
+    return column_letter(_GAMES_HEADER.index(name))
+
 
 BOARD_TAB = "Board"
 SLATE_TAB = "Slate Grid"
@@ -103,45 +118,85 @@ BOARD_SLATE_COLHEADER_ROW = BOARD_SLATE_HEADER_ROW + 1
 BOARD_SLATE_FIRST_ROW = BOARD_SLATE_COLHEADER_ROW + 1
 BOARD_SLATE_ROWS = 16
 BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
-# A hidden join-key column (GameId, for the per-row Wind VLOOKUP -- see
-# build_board's Slate shape section) -- column J, one past every other
-# section's rightmost visible column (I, Per-position leaders/Pool
-# diagnostics), so hiding it can't hide real content belonging to a
-# DIFFERENT section that happens to share the same column letter.
-BOARD_SLATE_GAMEID_COL = "J"
-BOARD_SLATE_GAMEID_COL_INDEX = 9
-# Part C, C7 (2026-09-25): two more hidden join keys, right past GameId --
-# each row's own Away/Home team code, needed to look up that game's
-# combined Pace off EdgeRaw (keyed by Team, not GameId). Derived from
-# BOARD_SLATE_GAMEID_COL_INDEX rather than a second hardcoded literal, so
-# a future relocation of the whole hidden-helper block (PROMPT_BOARD_
-# FIXES.md item 5 flags that Stack candidates will eventually grow into
-# this same column) only has to move one number.
-BOARD_SLATE_AWAY_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 1
-BOARD_SLATE_HOME_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 2
-BOARD_SLATE_AWAY_COL = column_letter(BOARD_SLATE_AWAY_COL_INDEX)
-BOARD_SLATE_HOME_COL = column_letter(BOARD_SLATE_HOME_COL_INDEX)
+# PROMPT_BOARD_FIXES.md item 1: `Fav`/`Spread` inserted right after
+# `Total` -- two columns, not one "KC -3.5" text cell, since text can't be
+# colour-scaled (item 6 scales `Spread`). `Pace` (Part C, C7) stays where
+# it was relative to Wind/Shootout, just shifted two further right.
+BOARD_SLATE_COLHEADER = ["Matchup", "Total", "Fav", "Spread", "Pace", "Wind", "Shootout?"]
 
 BOARD_LEADERS_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
-BOARD_LEADERS_COLHEADER_ROW = BOARD_LEADERS_HEADER_ROW + 1
+# PROMPT_BOARD_FIXES.md item 2: a sub-label row naming each block's own
+# sort -- nothing on the sheet said so before.
+BOARD_LEADERS_SUBLABEL_ROW = BOARD_LEADERS_HEADER_ROW + 1
+BOARD_LEADERS_COLHEADER_ROW = BOARD_LEADERS_SUBLABEL_ROW + 1
 BOARD_LEADERS_FIRST_ROW = BOARD_LEADERS_COLHEADER_ROW + 1
 _POSITIONS = ("QB", "RB", "WR", "TE", "DST")
-_LEADERS_ROWS_PER_POSITION = 2
-BOARD_LEADERS_ROWS = _LEADERS_ROWS_PER_POSITION * len(_POSITIONS)
+# PROMPT_BOARD_FIXES.md item 3: replaces the old flat `_LEADERS_ROWS_PER_
+# POSITION`/`_PUNT_ROWS_PER_POSITION` ints (both were 2/1) -- every
+# section is collapsible now, so length is cheap, and each position gets
+# sized to its own real depth (QB is shallow, WR is deep). Both the
+# leaders blocks AND punt finder share this same distribution -- Sam's
+# own table gives them identical counts.
+BOARD_ROWS_PER_POSITION = {"QB": 5, "RB": 8, "WR": 10, "TE": 5, "DST": 5}
+BOARD_LEADERS_COLHEADER = ["Player", "Pos", "Salary", "ValAdj", "", "Player", "Pos", "Salary", "ProjPts"]
+BOARD_LEADERS_ROWS = sum(BOARD_ROWS_PER_POSITION.values())
 BOARD_LEADERS_LAST_ROW = BOARD_LEADERS_FIRST_ROW + BOARD_LEADERS_ROWS - 1
+
+
+def _position_block_rows(first_row: int) -> dict[str, tuple[int, int]]:
+    """Each position's own `(start_row, end_row)` within a stacked
+    per-position block beginning at `first_row` (Leaders or Punt finder,
+    both use `BOARD_ROWS_PER_POSITION`'s counts in `_POSITIONS` order) --
+    shared by `build_board` (writing the stacked array) and `style_board`
+    (the top-border/colour-scale ranges item 3/6 need), so the two can't
+    silently drift apart the way EdgeRaw's own column order once did."""
+    rows: dict[str, tuple[int, int]] = {}
+    r = first_row
+    for p in _POSITIONS:
+        n = BOARD_ROWS_PER_POSITION[p]
+        rows[p] = (r, r + n - 1)
+        r += n
+    return rows
+
 
 BOARD_PUNT_HEADER_ROW = BOARD_LEADERS_LAST_ROW + 2
 BOARD_PUNT_COLHEADER_ROW = BOARD_PUNT_HEADER_ROW + 1
 BOARD_PUNT_FIRST_ROW = BOARD_PUNT_COLHEADER_ROW + 1
-_PUNT_ROWS_PER_POSITION = 1
-BOARD_PUNT_ROWS = _PUNT_ROWS_PER_POSITION * len(_POSITIONS)
+BOARD_PUNT_COLHEADER = ["Player", "Pos", "Salary", "ValAdj"]
+BOARD_PUNT_ROWS = sum(BOARD_ROWS_PER_POSITION.values())
 BOARD_PUNT_LAST_ROW = BOARD_PUNT_FIRST_ROW + BOARD_PUNT_ROWS - 1
-PUNT_SALARY_CEILING = 4000
+# PROMPT_BOARD_FIXES.md item 4: the old `PUNT_SALARY_CEILING` (a flat
+# $4,000) is DraftKings' own FLOOR for QB/RB, so "under $4,000" could
+# never match either position. Replaced with a window measured off each
+# position's own cheapest salary ON THIS SLATE (a live MINIFS in the
+# formula, never a hardcoded floor per position).
+PUNT_SALARY_WINDOW = 1000
 
 BOARD_STACK_HEADER_ROW = BOARD_PUNT_LAST_ROW + 2
 BOARD_STACK_COLHEADER_ROW = BOARD_STACK_HEADER_ROW + 1
 BOARD_STACK_FIRST_ROW = BOARD_STACK_COLHEADER_ROW + 1
-_STACK_GAMES = 5
+# PROMPT_BOARD_FIXES.md item 3: "at least 8 games (16 teams); all games if
+# the slate is smaller." A smaller slate leaves the tail blank (same
+# fallback every other section here already uses); a bigger one shows the
+# 8 highest-total games, matching this section's own "highest-total games
+# first" framing.
+_STACK_GAMES = 8
+BOARD_STACK_COLHEADER = [
+    "Team",
+    "Total",
+    "QB",
+    "Sal",
+    "WR1",
+    "Sal",
+    "WR2",
+    "Sal",
+    "WR3",
+    "Sal",
+    "TE1",
+    "Sal",
+    "RB1",
+    "Sal",
+]
 BOARD_STACK_ROWS = _STACK_GAMES * 2  # two teams per game
 BOARD_STACK_LAST_ROW = BOARD_STACK_FIRST_ROW + BOARD_STACK_ROWS - 1
 
@@ -152,10 +207,44 @@ BOARD_POOL_FIRST_ROW = BOARD_POOL_COLHEADER_ROW + 1
 BOARD_POOL_POSITION_ROWS = len(_POSITIONS)
 BOARD_POOL_SUMMARY_ROW = BOARD_POOL_FIRST_ROW + BOARD_POOL_POSITION_ROWS
 BOARD_POOL_LAST_ROW = BOARD_POOL_SUMMARY_ROW
+BOARD_POOL_COLHEADER = [
+    "Pos",
+    "Min Sal",
+    "Max Sal",
+    "Avg Sal",
+    "Cheapest",
+    "Cheapest Sal",
+    "Chalk#",
+    "Leverage#",
+    "Gap",
+]
 
 BOARD_CHALK_HEADER_ROW = BOARD_POOL_LAST_ROW + 2
 BOARD_CHALK_PLACEHOLDER_ROW = BOARD_CHALK_HEADER_ROW + 1
 BOARD_LAST_ROW = BOARD_CHALK_PLACEHOLDER_ROW
+
+# PROMPT_BOARD_FIXES.md item 5: the hidden Slate-shape join-key columns
+# (GameId, then Part C's Away/Home) must sit past the rightmost column
+# ANY section uses -- Stack candidates' own 14 columns (A-N) are now the
+# widest, wider than they were when column J was originally past
+# everything. Derived from every section's own header width, not a
+# second hardcoded literal, so a future width change anywhere just moves
+# this automatically.
+BOARD_MAX_VISIBLE_COL_INDEX = (
+    max(
+        len(BOARD_SLATE_COLHEADER),
+        len(BOARD_LEADERS_COLHEADER),
+        len(BOARD_STACK_COLHEADER),
+        len(BOARD_POOL_COLHEADER),
+    )
+    - 1
+)
+BOARD_SLATE_GAMEID_COL_INDEX = BOARD_MAX_VISIBLE_COL_INDEX + 1
+BOARD_SLATE_AWAY_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 1
+BOARD_SLATE_HOME_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 2
+BOARD_SLATE_GAMEID_COL = column_letter(BOARD_SLATE_GAMEID_COL_INDEX)
+BOARD_SLATE_AWAY_COL = column_letter(BOARD_SLATE_AWAY_COL_INDEX)
+BOARD_SLATE_HOME_COL = column_letter(BOARD_SLATE_HOME_COL_INDEX)
 
 
 def _pp_col(name: str) -> str:
@@ -244,11 +333,28 @@ def build_board(
     # this is the correct empty-safe row count -- same fix applied below
     # to `pool_empty_notice`/`pool_concentration`, which hit the exact
     # same COUNTA/COUNTIF-on-an-erroring-FILTER trap.
-    games = f'=SUMPRODUCT(({g}!$A$2:$A$40<>"")*1)'
+    # PROMPT_BOARD_FIXES.md item 1: every GamesRaw letter below is derived
+    # from `GAMES_COLUMNS` (via `_games_col`) rather than hardcoded --
+    # `$B`/`$C`/`$M` happened to be Away/Home/Total today, but nothing
+    # tied them to those fields; a future GamesRaw column insert would
+    # have silently pointed these at the wrong data with no error.
+    games_id_col = _games_col("GameId")
+    games_away_col = _games_col("Away")
+    games_home_col = _games_col("Home")
+    games_total_col = _games_col("Total")
+    games_spread_col = _games_col("Spread")
+    games_id_range = f"{g}!${games_id_col}$2:${games_id_col}$40"
+    games_away_range = f"{g}!${games_away_col}$2:${games_away_col}$40"
+    games_home_range = f"{g}!${games_home_col}$2:${games_home_col}$40"
+    games_total_range = f"{g}!${games_total_col}$2:${games_total_col}$40"
+    games_spread_range = f"{g}!${games_spread_col}$2:${games_spread_col}$40"
+    games_live = f'{games_id_range}<>""'
+
+    games = f'=SUMPRODUCT(({games_id_range}<>"")*1)'
     top_total = (
-        f'=IFERROR(INDEX(SORT(FILTER({{{g}!$B$2:$B$40&" / "&{g}!$C$2:$C$40,{g}!$M$2:$M$40}},'
-        f'{g}!$A$2:$A$40<>""),2,FALSE),1,1)&"  "&'
-        f'TEXT(MAX(FILTER({g}!$M$2:$M$40,{g}!$A$2:$A$40<>"")),"0.0"),"--")'
+        f'=IFERROR(INDEX(SORT(FILTER({{{games_away_range}&" / "&{games_home_range},{games_total_range}}},'
+        f'{games_live}),2,FALSE),1,1)&"  "&'
+        f'TEXT(MAX(FILTER({games_total_range},{games_live})),"0.0"),"--")'
     )
     max_wind = f'=IFERROR(MAX(FILTER({w}!$F$2:$F$40,{w}!$A$2:$A$40<>""))&" mph","--")'
     injuries = (
@@ -272,52 +378,43 @@ def build_board(
     )
 
     # ---- Section 3: per-position leaders (ValAdj / ProjPts, 7.6) --------
-    def _ranked_position_block(
-        position: str, *, sort_metric: str, rows_per_position: int, extra: str = ""
-    ) -> str:
+    def _ranked_position_block(position: str, *, sort_metric: str, extra: str = "") -> str:
         # Ranked WITHIN position, not across the whole slate -- this is
         # the actual fix for the 11-of-12-QBs bug (a flat sort by a
         # salary ratio isn't comparable across positions). Stacking a
-        # FIXED number of rows per position, rather than cutting one
-        # combined ranking to a total row count, guarantees every
-        # position is represented every time instead of whichever one
-        # happens to sort first crowding out the rest.
+        # FIXED number of rows per position (PROMPT_BOARD_FIXES.md item 3:
+        # `BOARD_ROWS_PER_POSITION`, no longer a single flat count), rather
+        # than cutting one combined ranking to a total row count,
+        # guarantees every position is represented every time instead of
+        # whichever one happens to sort first crowding out the rest.
         is_position = f'{pos}="{position}"'
         filters = f"{live},{not_out},{is_position}" + (f",{extra}" if extra else "")
+        rows_per_position = BOARD_ROWS_PER_POSITION[position]
         return (
             f"IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
             f'{{{name},{pos}&" "&{team},{salary},{sort_metric}}},{filters}),4,FALSE),'
             f'{rows_per_position},4),{{"","","",""}})'
         )
 
-    best_valadj = (
-        "={"
-        + ";".join(
-            _ranked_position_block(p, sort_metric=valadj, rows_per_position=_LEADERS_ROWS_PER_POSITION)
-            for p in _POSITIONS
-        )
-        + "}"
-    )
-    highest_proj = (
-        "={"
-        + ";".join(
-            _ranked_position_block(p, sort_metric=projpts, rows_per_position=_LEADERS_ROWS_PER_POSITION)
-            for p in _POSITIONS
-        )
-        + "}"
-    )
+    best_valadj = "={" + ";".join(_ranked_position_block(p, sort_metric=valadj) for p in _POSITIONS) + "}"
+    highest_proj = "={" + ";".join(_ranked_position_block(p, sort_metric=projpts) for p in _POSITIONS) + "}"
 
     # ---- Section 4: punt finder ------------------------------------------
+    # PROMPT_BOARD_FIXES.md item 4: `PUNT_SALARY_CEILING` (a flat $4,000)
+    # was DraftKings' own FLOOR for QB/RB, so "under $4,000" could never
+    # match either position -- a punt is now "within `PUNT_SALARY_WINDOW`
+    # of this position's own cheapest salary on this slate," computed live
+    # via MINIFS (scoped to the position, across the whole slate, not just
+    # live/available players -- DK's own price floor doesn't care about
+    # injury status).
+    def _punt_salary_extra(position: str) -> str:
+        floor = f'MINIFS({salary},{pos},"{position}")'
+        return f"{salary}<={floor}+{PUNT_SALARY_WINDOW}"
+
     punt_finder = (
         "={"
         + ";".join(
-            _ranked_position_block(
-                p,
-                sort_metric=valadj,
-                rows_per_position=_PUNT_ROWS_PER_POSITION,
-                extra=f"{salary}<{PUNT_SALARY_CEILING}",
-            )
-            for p in _POSITIONS
+            _ranked_position_block(p, sort_metric=valadj, extra=_punt_salary_extra(p)) for p in _POSITIONS
         )
         + "}"
     )
@@ -326,24 +423,37 @@ def build_board(
     # Two teams sharing a game share the identical OverUnder value, so
     # sorting individual teams by it is enough to keep them adjacent --
     # no need to join back through GamesRaw for a game grouping.
+    # PROMPT_BOARD_FIXES.md item 5: constrained to 2 columns now (not 1) so
+    # the same spilling-array trick Slate shape uses fills `Total` (the
+    # game's own OverUnder, sorted descending) directly into column B,
+    # rather than discarding it after sorting by it.
     team_list = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(UNIQUE(FILTER({{{team},{overunder}}},{live})),2,FALSE),"
-        f'{BOARD_STACK_ROWS},1),"")'
+        f'{BOARD_STACK_ROWS},2),"")'
     )
 
     def _stack_row_formulas(row: int) -> list[str]:
+        # PROMPT_BOARD_FIXES.md item 5: WR2/WR3 (TmRank 2/3) and RB1 (RB,
+        # TmRank 1) join WR1/TE1 -- RB1 is display only, no guardrail (Part
+        # 7.4's "no QB+RB stack rule" still stands).
         team_cell = f"$A{row}"
-        qb_filter = f'({team}={team_cell})*({pos}="QB")'
-        wr1_filter = f'({team}={team_cell})*({pos}="WR")*({tmrank}=1)'
-        te1_filter = f'({team}={team_cell})*({pos}="TE")*({tmrank}=1)'
-        return [
-            f'=IFERROR(INDEX(FILTER({name},{qb_filter}),1),"")',
-            f'=IFERROR(INDEX(FILTER({salary},{qb_filter}),1),"")',
-            f'=IFERROR(INDEX(FILTER({name},{wr1_filter}),1),"")',
-            f'=IFERROR(INDEX(FILTER({salary},{wr1_filter}),1),"")',
-            f'=IFERROR(INDEX(FILTER({name},{te1_filter}),1),"")',
-            f'=IFERROR(INDEX(FILTER({salary},{te1_filter}),1),"")',
+
+        def _slot_filter(position: str, tm_rank: int) -> str:
+            return f'({team}={team_cell})*({pos}="{position}")*({tmrank}={tm_rank})'
+
+        slots = [
+            _slot_filter("QB", 1),
+            _slot_filter("WR", 1),
+            _slot_filter("WR", 2),
+            _slot_filter("WR", 3),
+            _slot_filter("TE", 1),
+            _slot_filter("RB", 1),
         ]
+        formulas = []
+        for slot_filter in slots:
+            formulas.append(f'=IFERROR(INDEX(FILTER({name},{slot_filter}),1),"")')
+            formulas.append(f'=IFERROR(INDEX(FILTER({salary},{slot_filter}),1),"")')
+        return formulas
 
     # ---- Section 6: pool diagnostics (reads Player Pool, not EdgeRaw) ----
     pp_all_names = (
@@ -368,6 +478,12 @@ def build_board(
         pp_flags = _pp_rng(player_pool_tab, "Flags", start, end)
         pooled = f'{pp_name}<>""'
         cheapest = f"SORT(FILTER({{{pp_name},{pp_salary}}},{pooled}),2,TRUE)"
+        # PROMPT_BOARD_FIXES.md item 4: same per-position window as Punt
+        # finder (`PUNT_SALARY_WINDOW` off this position's own slate-wide
+        # cheapest salary via EdgeRaw's `salary`/`pos`, not a hardcoded
+        # $4,000 floor that could never fire for QB/RB).
+        punt_floor = f'MINIFS({salary},{pos},"{position}")'
+        gap_threshold = f"{punt_floor}+{PUNT_SALARY_WINDOW}"
         return [
             position,
             f'=IFERROR(MIN(FILTER({pp_salary},{pooled})),"")',
@@ -377,8 +493,8 @@ def build_board(
             f'=IFERROR(INDEX({cheapest},1,2),"")',
             f'=COUNTIF({pp_flags},"*CHALK*")',
             f'=COUNTIF({pp_flags},"*LEVERAGE*")',
-            f'=IF(COUNTIF(FILTER({pp_salary},{pooled}),"<{PUNT_SALARY_CEILING}")=0,'
-            f'"No {position} under ${PUNT_SALARY_CEILING:,}","")',
+            f'=IF(COUNTIF(FILTER({pp_salary},{pooled}),"<="&({gap_threshold}))=0,'
+            f'"No {position} within ${PUNT_SALARY_WINDOW:,} of the slate min","")',
         ]
 
     pp_all_gameids = (
@@ -424,7 +540,7 @@ def build_board(
         _set(BOARD_QUEUE_FIRST_ROW + i, list(existing_row))
 
     _set(BOARD_SLATE_HEADER_ROW, ["SLATE SHAPE  —  where do I want exposure this week"])
-    _set(BOARD_SLATE_COLHEADER_ROW, ["Matchup", "Total", "Pace", "Wind", "Shootout?"])
+    _set(BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_COLHEADER)
     wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
     # Part C, C7 (2026-09-25): "the Board's Slate shape section ranks games
@@ -441,37 +557,49 @@ def build_board(
     team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
     pace_col = column_letter(EDGE_COLUMNS.index("Pace") + EDGE_DATA_OFFSET)
     pace_idx = EDGE_COLUMNS.index("Pace") - EDGE_COLUMNS.index("Team") + 1
-    # One spilling SORT, not a per-row passthrough of GamesRaw's own
-    # (unsorted) row order -- "games ranked by total" is the actual ask.
-    # Three more independent SORTs on the exact same key (Total) fill
-    # parallel GameId/Away/Home columns starting at BOARD_SLATE_GAMEID_COL,
-    # well past every other section's rightmost visible column so hiding
-    # them (style_board) can't hide real content elsewhere -- GameId is
-    # the join key for the per-row Wind lookup below (WeatherRaw is keyed
-    # on GameId, not the sorted Matchup text); Away/Home are the join keys
-    # for the per-row Pace lookup (EdgeRaw is keyed on Team). Verified live
-    # (2026-09-22, template) that multiple SORTs on the same key preserve
-    # identical relative order for tied values, so all four columns stay
-    # row-aligned.
+    # PROMPT_BOARD_FIXES.md item 1: `Fav`/`Spread` sourced from the SAME
+    # place `Total` already is (GamesRaw, nflverse `spread_line` -- positive
+    # means the HOME team is favoured, confirmed against `nflverse_games.py`'s
+    # own module docstring) so the three agree. `Fav` is computed
+    # elementwise inside the array literal below (a team code, or "PK" for
+    # a pick'em); `Spread` itself displays the absolute line (e.g. 3.5),
+    # per Sam's own spec -- the sign only decides who's favoured.
+    fav_expr = (
+        f'IF({games_spread_range}=0,"PK",IF({games_spread_range}>0,{games_home_range},{games_away_range}))'
+    )
+    abs_spread_expr = f"ABS({games_spread_range})"
+    # One spilling SORT (now four columns: Matchup/Total/Fav/Spread), not a
+    # per-row passthrough of GamesRaw's own (unsorted) row order -- "games
+    # ranked by total" is the actual ask. Three more independent SORTs on
+    # the exact same key (Total) fill parallel GameId/Away/Home columns
+    # starting at BOARD_SLATE_GAMEID_COL, well past every other section's
+    # rightmost visible column so hiding them (style_board) can't hide
+    # real content elsewhere -- GameId is the join key for the per-row
+    # Wind lookup below (WeatherRaw is keyed on GameId, not the sorted
+    # Matchup text); Away/Home are the join keys for the per-row Pace
+    # lookup (EdgeRaw is keyed on Team). Verified live (2026-09-22,
+    # template) that multiple SORTs on the same key preserve identical
+    # relative order for tied values, so all four formulas stay row-aligned.
     slate_sorted = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-        f'{{{g}!$B$2:$B$40&" @ "&{g}!$C$2:$C$40,{g}!$M$2:$M$40}},'
-        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},2),"")'
+        f'{{{games_away_range}&" @ "&{games_home_range},{games_total_range},'
+        f"{fav_expr},{abs_spread_expr}}},"
+        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},4),"")'
     )
     slate_gameid = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-        f"{{{g}!$A$2:$A$40,{g}!$M$2:$M$40}},"
-        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+        f"{{{games_id_range},{games_total_range}}},"
+        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
     slate_away = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-        f"{{{g}!$B$2:$B$40,{g}!$M$2:$M$40}},"
-        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+        f"{{{games_away_range},{games_total_range}}},"
+        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
     slate_home = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-        f"{{{g}!$C$2:$C$40,{g}!$M$2:$M$40}},"
-        f'{g}!$A$2:$A$40<>""),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+        f"{{{games_home_range},{games_total_range}}},"
+        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
     _set(BOARD_SLATE_FIRST_ROW, [slate_sorted])
     _set(BOARD_SLATE_FIRST_ROW, [slate_gameid], start_col=BOARD_SLATE_GAMEID_COL_INDEX)
@@ -490,36 +618,35 @@ def build_board(
                 f'{wind_idx},FALSE),""))',
                 f'={guard}IF($B{r}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
             ],
-            start_col=2,
+            start_col=4,
         )
 
     _set(BOARD_LEADERS_HEADER_ROW, ["PER-POSITION LEADERS  —  ranked within position, never across it"])
-    _set(
-        BOARD_LEADERS_COLHEADER_ROW,
-        ["Player", "Pos", "Salary", "ValAdj", "", "Player", "Pos", "Salary", "ProjPts"],
-    )
+    # PROMPT_BOARD_FIXES.md item 2: a sub-label row naming each block's own
+    # sort -- nothing on the sheet said so before.
+    _set(BOARD_LEADERS_SUBLABEL_ROW, ["Best value — sorted by ValAdj, high to low"], start_col=0)
+    _set(BOARD_LEADERS_SUBLABEL_ROW, ["Highest projection — sorted by ProjPts, high to low"], start_col=5)
+    _set(BOARD_LEADERS_COLHEADER_ROW, BOARD_LEADERS_COLHEADER)
     _set(BOARD_LEADERS_FIRST_ROW, [best_valadj], start_col=0)
     _set(BOARD_LEADERS_FIRST_ROW, [highest_proj], start_col=5)
 
     _set(
-        BOARD_PUNT_HEADER_ROW, [f"PUNT FINDER  —  best play under ${PUNT_SALARY_CEILING:,} at each position"]
+        BOARD_PUNT_HEADER_ROW,
+        [f"PUNT FINDER  —  within ${PUNT_SALARY_WINDOW:,} of each position's minimum, by ValAdj"],
     )
-    _set(BOARD_PUNT_COLHEADER_ROW, ["Player", "Pos", "Salary", "ValAdj"])
+    _set(BOARD_PUNT_COLHEADER_ROW, BOARD_PUNT_COLHEADER)
     _set(BOARD_PUNT_FIRST_ROW, [punt_finder])
 
     _set(BOARD_STACK_HEADER_ROW, ["STACK CANDIDATES  —  QB + top pass-catchers, highest-total games first"])
-    _set(BOARD_STACK_COLHEADER_ROW, ["Team", "QB", "Salary", "WR1", "Salary", "TE1", "Salary"])
+    _set(BOARD_STACK_COLHEADER_ROW, BOARD_STACK_COLHEADER)
     _set(BOARD_STACK_FIRST_ROW, [team_list])
     for i in range(BOARD_STACK_ROWS):
         r = BOARD_STACK_FIRST_ROW + i
-        _set(r, _stack_row_formulas(r), start_col=1)
+        _set(r, _stack_row_formulas(r), start_col=2)
 
     _set(BOARD_POOL_HEADER_ROW, ["POOL DIAGNOSTICS  —  reads your pool, not the slate"])
     _set(BOARD_POOL_NOTICE_ROW, [pool_empty_notice])
-    _set(
-        BOARD_POOL_COLHEADER_ROW,
-        ["Pos", "Min Sal", "Max Sal", "Avg Sal", "Cheapest", "Cheapest Sal", "Chalk#", "Leverage#", "Gap"],
-    )
+    _set(BOARD_POOL_COLHEADER_ROW, BOARD_POOL_COLHEADER)
     for i, (position, (start, end)) in enumerate(zip(_POSITIONS, PLAYER_POOL_NAME_BLOCKS, strict=True)):
         _set(BOARD_POOL_FIRST_ROW + i, _pool_diagnostics_row(position, start, end))
     _set(BOARD_POOL_SUMMARY_ROW, [pool_concentration])

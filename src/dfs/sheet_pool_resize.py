@@ -49,16 +49,11 @@ from __future__ import annotations
 
 import re
 
+from dfs.sheet_color_scales import FIELD_COLOR_SCALES, _scale_rule_specs
 from dfs.sheet_links import COLOR_SCALE_LINKED_COLUMNS
 from dfs.sheets import SheetsClient, column_letter
 
 _POSITION_COLUMN = "B"
-
-# Matches sheet_links.link_edge_columns' own color-scale colors exactly --
-# these three ranges are corrected in place here, not reinvented.
-_MIN_COLOR = {"red": 0.96, "green": 0.80, "blue": 0.80}
-_MID_COLOR = {"red": 1.0, "green": 1.0, "blue": 0.80}
-_MAX_COLOR = {"red": 0.72, "green": 0.88, "blue": 0.72}
 
 
 def _substitute_self_reference(formula: str, old_row: int, new_row: int) -> str:
@@ -146,15 +141,21 @@ def resize_player_pool(
 def fix_color_scale_ranges(client: SheetsClient, player_pool_tab: str, *, last_row: int) -> None:
     """Re-point the three EdgeRaw-linked color scales at `2:last_row`,
     deleting and re-adding rather than trusting Sheets to have
-    auto-extended them through every insert (see module docstring)."""
+    auto-extended them through every insert (see module docstring).
+
+    PROMPT_BOARD_FIXES.md item 7 (2026-09-25): routed through the shared
+    `_scale_rule_specs` dispatch (`sheet_color_scales.py`) instead of the
+    hand-rolled colours this used to match against `sheet_links.py`'s own
+    (now also routed the same way) -- picks up the same zero-exclusion
+    every other scaled column in the workbook now gets.
+    """
     header = client.read_range(player_pool_tab, "A1:1")[0]
     for column_name in COLOR_SCALE_LINKED_COLUMNS:
         col = column_letter(header.index(column_name))
         client.clear_conditional_formats(player_pool_tab, column=col)
-        client.add_color_scale(
-            player_pool_tab,
-            f"{col}2:{col}{last_row}",
-            min_color=_MIN_COLOR,
-            mid_color=_MID_COLOR,
-            max_color=_MAX_COLOR,
-        )
+        a1 = f"{col}2:{col}{last_row}"
+        kind = FIELD_COLOR_SCALES[column_name]
+        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, column_name, zero_exclude_range=a1)
+        client.add_color_scale(player_pool_tab, gradient_spec.pop("a1_range"), **gradient_spec)
+        if boolean_spec is not None:
+            client.add_boolean_rule(player_pool_tab, boolean_spec.pop("a1_range"), **boolean_spec)
