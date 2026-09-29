@@ -22,7 +22,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from dfs.log import get_logger
 from dfs.paths import REPO_ROOT
+
+log = get_logger("player_join")
 
 # Committed, hand-maintained residue file for the join misses normalization
 # and team/position matching can't fix: apostrophes a source drops, a
@@ -73,10 +76,31 @@ def normalize_team(team: object) -> str:
     return TEAM_ALIASES.get(code, code)
 
 
+# Sleeper and nflverse call a fullback "FB" and (nflverse) some backs "HB";
+# DraftKings calls all of them "RB". Round 5 item 6: without this, Kyle
+# Juszczyk, Hunter Luepke, Alec Ingold, Samaje Perine and Chase Brown never
+# joined. `DB` (Sleeper's label for the two-way Travis Hunter) is deliberately
+# NOT here -- see CONTRIBUTING.md's Round 5 item 6 entry.
+POSITION_ALIASES = {"FB": "RB", "HB": "RB"}
+
+
+def normalize_position(position: object) -> str:
+    code = str(position).strip().upper()
+    return POSITION_ALIASES.get(code, code)
+
+
 def join_key(name: object, team: object, position: object) -> str:
     """The (normalized name, team, position) tuple as a single string key --
     never name alone (same-name players exist across teams/positions)."""
-    return f"{normalize_name(name)}|{normalize_team(team)}|{str(position).strip().upper()}"
+    return f"{normalize_name(name)}|{normalize_team(team)}|{normalize_position(position)}"
+
+
+def _last_name_key(name: object, team: object, position: object) -> str:
+    """Nickname-fallback key: last name + team + position. `normalize_name`
+    already dropped Jr/III, so "Kenneth Walker III" -> last token "walker"."""
+    tokens = normalize_name(name).split()
+    last = tokens[-1] if tokens else ""
+    return f"{last}|{normalize_team(team)}|{normalize_position(position)}"
 
 
 def dst_join_key(team: object) -> str:
@@ -131,6 +155,7 @@ def join_source_to_dk(
     dk_team_col: str = "Team",
     dk_position_col: str = "Position",
     pool_mask: pd.Series | None = None,
+    expect_dst: bool = True,
 ) -> JoinResult:
     """Match every `source_frame` row to a DK player Id in `dk_frame`.
 
@@ -145,6 +170,16 @@ def join_source_to_dk(
     to the rosterable pool (`VAL_ADJ_ROSTERABLE_TOP_N`) -- per C1, a missed
     third-string TE is noise, a missed starter is a bug. When omitted,
     every `dk_frame` row counts.
+
+    Third and last chance (Round 5 item 6): a nickname fallback -- `Josh`
+    vs `Joshua`, `Kenny` vs `Kenneth`. An unmatched DK player matches a source
+    row by LAST NAME + TEAM + POSITION only when exactly one unmatched DK
+    player and exactly one unclaimed source row share that key on the slate,
+    and every such match is logged at INFO so a wrong one is visible.
+
+    `expect_dst=False` for a source that never carries defenses (snap counts):
+    DSTs are left out of the pool counts and the unmatched report rather than
+    listing all 32 as misses.
 
     Never fails silently: an unmatched ROSTERABLE player is named in
     `unmatched_pool_names`, meant to be printed and/or written to a file
@@ -190,6 +225,41 @@ def join_source_to_dk(
                     merged.at[idx, target_col] = src_row[col]
                 merged.at[idx, "_merge"] = "both"
 
+    unmatched_mask = merged["_merge"] == "left_only"
+    if unmatched_mask.any():
+        claimed = set(merged.loc[merged["_merge"] == "both", "_join_key"])
+        unclaimed_src = src[~src["_join_key"].isin(set(dk["_join_key"])) & ~src_is_dst]
+        src_by_last: dict[str, list[pd.Series]] = {}
+        for _, row in unclaimed_src.iterrows():
+            key = _last_name_key(row[source_name_col], row[source_team_col], row[source_position_col])
+            src_by_last.setdefault(key, []).append(row)
+        dk_by_last: dict[str, list[int]] = {}
+        for idx in merged.index[unmatched_mask]:
+            if str(merged.at[idx, dk_position_col]).upper() == "DST":
+                continue
+            key = _last_name_key(
+                merged.at[idx, dk_name_col], merged.at[idx, dk_team_col], merged.at[idx, dk_position_col]
+            )
+            dk_by_last.setdefault(key, []).append(idx)
+        for key, dk_idxs in dk_by_last.items():
+            candidates = src_by_last.get(key, [])
+            if len(dk_idxs) != 1 or len(candidates) != 1 or candidates[0]["_join_key"] in claimed:
+                continue
+            idx, src_row = dk_idxs[0], candidates[0]
+            for col in src.columns:
+                if col == "_join_key":
+                    continue
+                target_col = col if col not in dk.columns else f"{col}_src"
+                merged.at[idx, target_col] = src_row[col]
+            merged.at[idx, "_merge"] = "both"
+            claimed.add(src_row["_join_key"])
+            log.info(
+                "%s: nickname fallback matched DK %r -> source %r (last name + team + position)",
+                source,
+                merged.at[idx, dk_name_col],
+                src_row[source_name_col],
+            )
+
     matched_mask = merged["_merge"] == "both"
     merged = merged.drop(columns=["_join_key", "_merge"])
 
@@ -197,10 +267,14 @@ def join_source_to_dk(
         in_pool = pool_mask.reindex(dk_frame.index, fill_value=False).to_numpy()
     else:
         in_pool = pd.Series(True, index=dk_frame.index).to_numpy()
+    if not expect_dst:
+        in_pool = in_pool & (dk_frame[dk_position_col].astype(str).str.upper() != "DST").to_numpy()
     matched_arr = matched_mask.to_numpy()
 
     by_position: dict[str, tuple[int, int]] = {}
     for pos in sorted(dk_frame[dk_position_col].unique()):
+        if pos == "DST" and not expect_dst:
+            continue
         pos_mask = (dk_frame[dk_position_col] == pos).to_numpy() & in_pool
         by_position[pos] = (int((matched_arr & pos_mask).sum()), int(pos_mask.sum()))
 

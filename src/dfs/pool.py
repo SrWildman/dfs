@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.player_join import normalize_name
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN
 
@@ -83,6 +84,16 @@ def find_matches(players: list[EdgePlayer], query: str) -> list[EdgePlayer]:
     exact = [p for p in players if p.name.lower() == q]
     if exact:
         return exact
+    # Round 5 item 6: the same normalization the sheet uses (punctuation,
+    # Jr/III suffixes, extra spaces), so "kenneth walker" or "aj brown" finds
+    # "Kenneth Walker III" / "A.J. Brown" -- exact-normalized wins outright,
+    # otherwise a substring of the normalized name.
+    key = normalize_name(query)
+    if key:
+        exact = [p for p in players if normalize_name(p.name) == key]
+        if exact:
+            return exact
+        return [p for p in players if key in normalize_name(p.name)]
     return [p for p in players if q in p.name.lower()]
 
 

@@ -197,3 +197,98 @@ def test_match_rate_report_builds_one_row_per_source_and_position():
     assert rb_row["Matched"] == 1
     assert rb_row["Pool"] == 2
     assert rb_row["Rate"] == 50.0
+
+
+def _join(dk_rows, src_rows, **kw):
+    dk = _dk_frame(dk_rows)
+    src = pd.DataFrame(src_rows)
+    return join_source_to_dk(
+        dk,
+        src,
+        source_name_col="n",
+        source_team_col="t",
+        source_position_col="p",
+        source="unit-test-source",  # no alias rows for this source
+        **kw,
+    )
+
+
+def test_fb_and_hb_join_to_dks_rb():
+    result = _join(
+        [
+            {"Id": "1", "Name": "Kyle Juszczyk", "Team": "SF", "Position": "RB"},
+            {"Id": "2", "Name": "Chase Brown", "Team": "CIN", "Position": "RB"},
+        ],
+        [
+            {"n": "Kyle Juszczyk", "t": "SF", "p": "FB", "v": 1},
+            {"n": "Chase Brown", "t": "CIN", "p": "HB", "v": 2},
+        ],
+    )
+    assert result.pool_matched == 2
+
+
+def test_two_way_db_is_not_silently_treated_as_a_receiver():
+    """Travis Hunter is DK `WR` but Sleeper `DB`: NOT joined (a DB projection
+    would carry IDP scoring, not his offensive line)."""
+    result = _join(
+        [{"Id": "1", "Name": "Travis Hunter", "Team": "JAX", "Position": "WR"}],
+        [{"n": "Travis Hunter", "t": "JAX", "p": "DB", "v": 1.6}],
+    )
+    assert result.pool_matched == 0
+
+
+def test_nickname_fallback_matches_a_unique_last_name_team_position(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="dfs.player_join"):
+        result = _join(
+            [{"Id": "1", "Name": "Kenny Gainwell", "Team": "TB", "Position": "RB"}],
+            [{"n": "Kenneth Gainwell", "t": "TB", "p": "RB", "v": 0.46}],
+        )
+    assert result.pool_matched == 1
+    assert result.matched.iloc[0]["v"] == 0.46
+    assert any("nickname fallback" in r.message for r in caplog.records)  # every fallback is logged
+
+
+def test_nickname_fallback_refuses_an_ambiguous_last_name():
+    """Two unmatched DK players share last name + team + position, so a lone
+    source row can't be assigned to either -- guessing would be a bad join."""
+    result = _join(
+        [
+            {"Id": "1", "Name": "Jon Palmer", "Team": "HOU", "Position": "WR"},
+            {"Id": "2", "Name": "Jeff Palmer", "Team": "HOU", "Position": "WR"},
+        ],
+        [{"n": "Joshua Palmer", "t": "HOU", "p": "WR", "v": 1}],
+    )
+    assert result.pool_matched == 0
+
+
+def test_nickname_fallback_never_reuses_a_source_row_already_matched_exactly():
+    result = _join(
+        [
+            {"Id": "1", "Name": "Josh Palmer", "Team": "BUF", "Position": "WR"},
+            {"Id": "2", "Name": "Joshua Palmer", "Team": "BUF", "Position": "WR"},
+        ],
+        [{"n": "Josh Palmer", "t": "BUF", "p": "WR", "v": 1}],
+    )
+    assert result.pool_matched == 1
+    assert result.matched.iloc[0]["Id"] == "1"
+
+
+def test_expect_dst_false_leaves_defenses_out_of_the_report():
+    dk_rows = [
+        {"Id": "1", "Name": "Chiefs", "Team": "KC", "Position": "DST"},
+        {"Id": "2", "Name": "Some Guy", "Team": "KC", "Position": "WR"},
+    ]
+    src_rows = [{"n": "Some Guy", "t": "KC", "p": "WR", "v": 1}]
+    with_dst = _join(dk_rows, src_rows)
+    without = _join(dk_rows, src_rows, expect_dst=False)
+    assert "Chiefs" in with_dst.unmatched_pool_names
+    assert without.unmatched_pool_names == []
+    assert "DST" not in without.by_position and without.pool_total == 1
+
+
+def test_committed_alias_file_resolves_joshua_palmer_for_snaps():
+    from dfs.player_join import load_player_aliases
+
+    assert any(a.source == "snaps" and a.alias_name == "Josh Palmer" for a in load_player_aliases())
