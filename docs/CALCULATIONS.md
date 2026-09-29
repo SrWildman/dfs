@@ -146,11 +146,10 @@ a real, useful cash threshold. Bad sort key, good filter line.
 
 **Within-position, not cross-position.** Both percentiles feeding the
 blend are ranked within each player's own position (same convention as
-`CeilPct`) -- so unlike raw `ProjPts`/`Val`/`Ceiling`/`CeilVal`, `ValAdj`
-gets EdgeRaw's ordinary flat, whole-tab colour scale rather than the
-per-position one (see "Per-position highlighting" below), and Player
-Pool/Lineups skip re-scaling it per position block for the same reason
-(`sheet_style.GROUPED_TAB_UNSCALED_COLUMNS`). This also means a thin
+`CeilPct`) -- so `ValAdj` is already comparable across positions and is
+banded on its own value (see "Highlighting: five bands" below), where
+the raw `ProjPts`/`Val`/`Ceiling`/`CeilVal` are banded through their hidden
+within-position percentile helpers. This also means a thin
 position's best player can post a very high `ValAdj` on a raw production
 level an average player at a deeper position would beat easily -- the
 fix targeted comparing players WITHIN the same position fairly, and does
@@ -162,30 +161,62 @@ that specific case is fixed. This paragraph's weaker claim, that a thin
 position's TOP player can still rank ahead of a deeper position's
 average one on raw production, remains true by design.)
 
-## Per-position highlighting (ProjPts, Val, Ceiling, CeilVal)
+## Highlighting: five bands, driven by a percentile (Round 5 item 3, 2026-09-29)
 
-These four are `derived.EDGE_UNSCALED_PLAYER_METRICS` -- deliberately
-excluded from EdgeRaw's ordinary whole-tab colour scales
-(`sheet_style.FIELD_COLOR_SCALES`), since a flat scale across every
-position at once is misleading (a QB's real `ProjPts` and a DST's aren't
-comparable). Instead, `sheet_style.apply_edge_position_scales` builds one
-3-point (red -> yellow -> green) gradient rule per (metric, position)
-pair: reads `Position` once, groups EdgeRaw's data rows by that value,
-and for each group writes a Sheets conditional-format rule whose
-`ranges` is that position's rows only (merged into contiguous runs
-first) -- so a QB's cells are scaled only against other QBs' cells in
-that same column, independent of every other position.
+Every scaled column is coloured by the same five-band rule, and **zeros and
+blanks are never coloured by it** -- they are neither in the reference
+distribution nor given a band. (A real zero gets only the flat grey chip,
+`ZERO_GREY_BG`, added last so it wins; Sam zeroes promo/bonus rows by hand
+and they must not skew the real numbers.)
 
-This relies on a single gradient rule's `ranges` accepting multiple
-non-contiguous `GridRange`s with one min/mid/max computed over their
-union -- confirmed empirically against the template's Scratch tab before
-being trusted (two interleaved fake "positions" with very different
-magnitudes; only one's ranges were included in the rule, and only that
-one's cells picked up the gradient). `SheetsClient.add_color_scales_
-multi_range` is the primitive; `EDGE_COLUMN_GROUPS`/Phase 4's
-`apply_grouped_color_scales` couldn't be reused here since that
-mechanism needs each group to already be one CONTIGUOUS row range, and
-EdgeRaw's rows are sorted by `Leverage`, not grouped by position.
+| Band | Percentile |
+|---|---|
+| strong green | >= 90 |
+| light green | 70 to < 90 |
+| (none) | 30 to < 70 |
+| light red | 10 to < 30 |
+| strong red | < 10 |
+
+Colours reuse the old gradient's palette (`GRAD_MAX`/`GRAD_MIN`; the light
+bands are a 50% tint toward white). Cut-offs are `sheet_color_scales`'s
+band constants. The rules are CUSTOM_FORMULA rules with *relative* row
+references (`=AND(ISNUMBER($AS2),$AS2>=90)`), so a colour follows its row
+through any sort or filter -- the old per-position `GridRange` rules did not.
+
+**Which number is banded** is set per column by
+`sheet_color_scales.FIELD_COLOR_SCALES`:
+
+- `pct` -- `ProjPts`, `AggPts`, `Pts`, `Ceiling`/`Ceil`, `Val`, `CeilVal`.
+  Banded by a hidden **within-position percentile helper column**
+  (`derived.PLAYER_METRIC_PCT_COLUMNS`: `ProjPts%ile`, `AggPts%ile`,
+  `Ceiling%ile`, `Val%ile`, `CeilVal%ile`), computed once in `derived.py`
+  over the rosterable pool (`_rosterable_pool_mask`, the same pool ValAdj
+  uses), zeros/blanks excluded, then linked onto Player Pool, Lineups and
+  PlayerPoolRaw through the INTERNAL group, so a player is the same colour on
+  every tab. A QB is compared with QBs only.
+- `score` -- `ValAdj`, `CeilPct`, `GameEnv`: already 0-100, banded on their
+  own value.
+- `leverage` -- `Leverage` (CeilPct - OwnPct, -100..+100): strong at
+  +/-40, light at +/-15 (`LEVERAGE_BANDS`; **provisional**, chosen by
+  Claude when the prompt said to ask if the range was not 0-100).
+- `rank` -- `OppPosRank`, low is the tough matchup: bands at 4/10/23/29
+  (`RANK_BANDS`).
+- `game` / `game_reversed` -- per-game/team columns (`Pace`, `PROE`,
+  `Expl%`, `Team Implied`, `O/U`, `Total`, `GPS`, `OppEPA`; `Spread` and
+  `Pace` reversed, low is good): `PERCENTRANK` against the column's own
+  range, live, so it needs no helper. `Spread` allows a real 0 (a pick'em).
+- `diverging`/`warm`/`reversed` -- unchanged: the movement columns, `Own%`,
+  `Exposure`.
+
+The old machinery (`apply_edge_position_scales`, one gradient rule per
+metric x position with a multi-range `GridRange`) is gone;
+`EDGE_UNSCALED_PLAYER_METRICS` and `GROUPED_TAB_UNSCALED_COLUMNS` are now
+empty sets kept so callers do not break. Rule count on the template went
+2,605 -> 607 (EdgeRaw 1,491 -> 104).
+
+**Known limitations.** A Slate Grid `Spread` column is signed
+home-perspective and is not banded. Lineups' duplicate-lineup and Exposure
+counts compare the typed text, so two spellings of one name count as two.
 
 `Salary`/`DK Sal` are never colour-scaled anywhere on any tab -- a
 constraint on a lineup, not a quality worth ranking; colouring it would
@@ -407,77 +438,121 @@ source list (`sources/__init__.py`), same treatment `sleeper`/
 barely changes between two live-sync passes on the same day and isn't
 worth the extra bandwidth/time on the "fast pass."
 
-## GPS and ModelImplied (2026-09-26)
+## GPS (2026-09-26; corrected Round 5 item 5c, 2026-09-29)
 
 Kyle Borgognoni's (@kyle_borg) weekly "Pace of Play: Matchups & Stacks for
 Week N" article on TFFB (Sam's existing subscription -- not a new paid
 source). Each week he publishes a CSV alongside the article, one row per
-team (`sources/tffb_gps.py`), with two numbers that show up here:
+team (`sources/tffb_gps.py`). Two numbers matter here:
 
 ```
 GPS          = 1-5, this game's overall pace/scoring-environment score.
-ImpliedTotal = this team's own model-implied point total (a pace/EPA
-               model's output, e.g. "JAX 29" -- the model's answer to
-               "how many points will this team score," independent of
-               Vegas).
+ImpliedTotal = this team's "Implied Total" column.
 ```
 
+**`Implied Total` is Vegas, not a model.** The original build treated it as
+a pace/EPA model's own team score and surfaced `ModelImplied` (EdgeRaw) and
+`Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ` (Slate Grid/Board) as a "model vs
+market" comparison. Checked against the Week 3 worksheet: it matches the
+Vegas total and spread exactly for 12 of 16 games, and the other four are
+two PAIRS OF ROWS SWAPPED in the source (NE@JAX ↔ KC@MIA, TEN@NYG ↔
+SEA@WAS) -- our own odds snapshots had those lines set since Monday,
+before the article went up. So there was never a model signal in it, and
+the deltas only measured how out of date Vegas was. **All five columns
+were removed.** `GPS` itself stays.
+
 **GPS is not purely mechanical.** It blends team implied totals, neutral
-pace, EPA per dropback and per rush, and PROE, but the published 1-5
-score also folds in the author's own judgement -- treat it the way you'd
-treat any expert's rating, not a formula you could reproduce from the raw
-inputs alone.
+pace, EPA per dropback and per rush, and PROE, but the published 1-5 score
+also folds in the author's own judgement -- treat it the way you'd treat
+any expert's rating, not a formula you could reproduce from the raw inputs
+alone.
 
-**The model totals are a pace/EPA model, not a market.** Vegas' own
-number (`Total`/`Spread` on GamesRaw, `OverUnder`/`Spread` on EdgeRaw) is
-a market price that reacts to real money and real news within minutes.
-Kyle's model updates once a week and has no idea a starting QB got hurt
-Thursday night. Early in the season (Weeks 1-4 especially) its own EPA
-inputs rest on just 1-3 games per team -- noisy on their own terms, before
-you even get to the news-lag problem. **A large gap between the model and
-Vegas is exactly as likely to mean "the model is missing news" as "Vegas
-is wrong."** Read the delta columns below as a prompt to go look, never
-as a verdict on their own -- there's deliberately no automated flag for
-disagreement here (13-16 games a week is too few to tune a fire rate on,
-the same reasoning that kept `PROMPT_BOARD_FIXES.md` from adding one).
+**Where it shows.** Slate Grid's `GPS` and the Board's Slate shape `GPS`
+read `GPSRaw` directly, off the HOME team's row (`GPS` is a per-GAME score,
+never an EdgeRaw column). Both are colour-scaled like `Total`.
 
-**Where it shows, and how each number is built:**
+**`ImpliedTotal` stays in the snapshot as a sanity check only**
+(`gps_check.py`). A row swap in the source means a game's `GPS` describes
+the wrong game, and it shows up as a big miss against our own odds. Vegas
+implied points come from GamesRaw's `Total`/`Spread` (positive `Spread` =
+home favoured):
 
-- **EdgeRaw's `ModelImplied`** (own column, Game group, right after
-  `Expl%`) -- this player's own team's `ImpliedTotal`, joined by Team
-  exactly like `Pace`/`PROE`/`Expl%` (`derived._attach_gps`). A pure
-  passthrough, no further computation.
-- **Slate Grid's `GPS`/`Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ`** -- read
-  `GPSRaw` directly (not `ModelImplied`; `GPS` itself never lands on
-  EdgeRaw, since it's a per-GAME score, not a per-player one). `Model Tot
-  = home ImpliedTotal + away ImpliedTotal`, computed fresh from the two
-  team lookups rather than trusted from the CSV's own separately-computed
-  `TOTAL` column (see `tffb_gps.py`'s module docstring for why). `Tot Δ =
-  Model Tot − Total` (GamesRaw's own closing line). `Model Spd = home
-  ImpliedTotal − away ImpliedTotal`, in the SAME sign convention
-  GamesRaw's own `Spread` already uses (positive = home favoured --
-  confirmed against `nflverse_games.py`'s own module docstring, the same
-  fact `PROMPT_BOARD_FIXES.md` item 1's `Fav`/`Spread` split relies on),
-  so `Spd Δ = Model Spd − Spread` needs no sign flip.
-- **Board's Slate shape `GPS`/`Tot Δ`** -- same two formulas as Slate
-  Grid's own, just placed after the columns `PROMPT_BOARD_FIXES.md` added
-  ("just the signal," per that prompt's own instruction -- `Model Spd`/
-  `Spd Δ` live on Slate Grid's fuller detail view only).
+```
+home implied = (Total + Spread) / 2        away implied = (Total - Spread) / 2
+```
 
-**Never a fabricated 0.** Every delta/sum above blanks out entirely if
-either team's `ImpliedTotal` lookup comes back blank (GPS not synced this
-week, or a team code miss) -- checked explicitly, not via `N()`-style
-zero-coercion, which would silently read "no GPS data yet" as "a real
-0-point model total" and produce a nonsense delta against Vegas' real
-number.
+A game is flagged when EITHER team's `ImpliedTotal` is off its Vegas
+implied total by more than **`GPS_IMPLIED_MISMATCH_PTS = 1.5`** points:
+
+- `dfs sync` logs a warning naming the game (`sources/edge.py`,
+  `gps_check.find_gps_mismatches`);
+- the game's `GPS` cell gets a muted amber chip. The chip reads a hidden
+  helper (`GPS off Vegas` on Slate Grid, a hidden column past the Board's
+  join keys) because a conditional-format rule can't reference `GPSRaw`
+  directly; the helper is the sheet-side twin of the Python check
+  (`sheet_views._gps_mismatch_formula`). It is blank -- never a fabricated
+  0 -- when GPS or the line is missing.
 
 **Fail-soft, timing.** The article publishes Wednesday; if this week's
-isn't up yet, `tffb_gps.py` raises (never guesses a slug, never falls
-back to last week's file -- `dfs week new` already clears
-`data/current/`), `sync.py`'s normal failure path logs it and moves on,
-and every column above simply reads blank until the next sync after
-publication. Not in `LIVE_SYNC_SOURCES` -- like `sos_*`/`snaps`/`pbp`, a
-weekly-cadence source has nothing new to gain from a fast live-sync pass.
+isn't up yet, `tffb_gps.py` raises (never guesses a slug, never falls back
+to last week's file -- `dfs week new` already clears `data/current/`),
+`sync.py`'s normal failure path logs it and moves on, and `GPS` simply reads
+blank until the next sync after publication. Not in `LIVE_SYNC_SOURCES` --
+like `sos_*`/`snaps`/`pbp`, a weekly-cadence source has nothing new to gain
+from a fast live-sync pass.
+
+## OppEPA (Round 5 item 9, 2026-09-29)
+
+`OppPosRank` is TFFB's fantasy-points-allowed rank, and after three weeks
+it is very noisy. `OppEPA` is a steadier matchup signal from the SAME
+nflverse play-by-play the offensive metrics already use -- no new source.
+One column, in the collapsed **Game** group right beside `OppPosRank`;
+`OppPosRank` stays.
+
+**Per-defense inputs** (`team_metrics.py`, per `defteam`, season to date):
+
+```
+DefEPA/Pass = mean epa on pass plays allowed   (pass == 1)
+DefEPA/Rush = mean epa on rush plays allowed   (rush == 1)
+DefSucc%    = mean success allowed, as 0-100
+OffEPA/Play = mean epa per scrimmage play an OFFENSE produced (posteam)
+```
+
+Same real-scrimmage-snap filter as the offensive metrics (`play_type` in
+{pass, run}: no kneels, spikes or no-plays). Unlike `Pace`/`PROE` these use
+**all game states** -- no neutral-script filter -- because a defense's
+efficiency allowed is what it is regardless of the score. Each is blended
+with last season's full-season value exactly as `Pace`/`PROE` are
+(`blend_with_prior`, `PBP_PRIOR_WEIGHT_GAMES = 4`); EPA keeps three decimals
+(`EPA_DECIMALS`), success/pace two.
+
+**Each player's row takes his opponent's value -- higher always means a
+softer matchup:**
+
+| Position | `OppEPA` is |
+|---|---|
+| QB, WR, TE | the opponent defense's `DefEPA/Pass` |
+| RB | the opponent defense's `DefEPA/Rush` |
+| DST | **minus** the opposing OFFENSE's `OffEPA/Play` |
+
+A bad offense (negative EPA/play) is a good matchup for a defense, so the
+DST's sign is flipped to keep "higher = better matchup" for every position.
+A team missing from the pbp data -- or pbp not synced at all -- leaves
+`OppEPA` blank, never 0. Coloured with the same gradient as `Pace`/`PROE`
+(`FIELD_COLOR_SCALES["OppEPA"]`), formatted to three decimals.
+
+**One-time cross-check against SumerSports** (2026-09-29, current season
+through Week 3, unblended, all plays): our EPA/play tracks theirs closely
+in rank (r = 0.99 for offense and defense, 0.96 for success %) but sits a
+near-constant **+0.04 EPA/play higher** for every team, almost all of it on
+pass plays (+0.065 EPA/pass; EPA/rush is -0.01). After removing that offset
+the largest miss is 0.046. Our league mean is +0.007 (as expected for
+scrimmage plays); theirs is -0.033. Including penalty (`no_play`) snaps,
+kneels and spikes did NOT reproduce their per-team totals, so the offset is
+not explained by those filters alone (likely a different EPA model/
+population on their side). The filters were deliberately not tuned to match.
+Because `OppEPA` is only ever compared across the slate, a uniform offset
+doesn't change what it says.
 
 ## OverUnder, Spread
 
@@ -1000,24 +1075,14 @@ case.
 
 Sam's own spec: "the highest impact-per-effort item available" -- every
 published DFS target is a LINEUP property, and the tool had been
-entirely player-level. Six columns, `sheet_lineup_metrics.py`, each
-written once per lineup block onto its own TOTALS row.
+entirely player-level. Two columns remain, `sheet_lineup_metrics.py`,
+each written once per lineup block onto its own TOTALS row.
 
-**`Stack`** -- `"QB+2 (KC) + 1 bring-back"` / `"QB+0 (KC)"` / `"no QB"`:
-
-```
-qb_team = INDEX(Team_range, MATCH("QB", Position_range, 0))
-qb_game = INDEX(GameID_range, MATCH("QB", Position_range, 0))
-stack_count = COUNTIFS(Team_range, qb_team, Position_range, "<>QB")
-bring_back_count = COUNTIFS(GameID_range, qb_game, Team_range, "<>"&qb_team)
-```
-
-`stack_count` is every OTHER rostered player (any position) on the QB's
-own team; `bring_back_count` is every rostered player in the QB's own
-game but on the OPPONENT's team -- the two can never double-count each
-other, since a bring-back is on the opposing team by definition. Both
-`INDEX`/`MATCH` lookups are `IFERROR`-guarded to `""` for a still-partial
-lineup missing a QB.
+**Removed, Round 5 item 1c (2026-09-29):** `Stack`, `Bring-back`,
+`Own% Used` and `Sub-10%` (Sam doesn't use them; `Sub-10%` never worked
+to his eye). Stack shape is shown by subtle correlation tints on the
+pick rows instead (item 4). `dfs setup remove-lineup-metrics` deletes
+them from a sheet that still has them.
 
 **`Games`** -- `IFERROR(ROWS(UNIQUE(FILTER(GameID_range, GameID_range<>""))),0)`,
 distinct `GameID`s across the 9 picks. `ROWS`, not `COUNTA`, and the
@@ -1031,21 +1096,6 @@ present to `COUNTA`) *before* `IFERROR` ever sees an error to catch, so
 absorb the error -- it propagates it, so `IFERROR(ROWS(...),0)`
 genuinely degrades to 0 for an empty block while still counting real
 distinct games correctly once any exist.
-
-**`Bring-back`** -- `"Yes"`/`"No"`, the same `bring_back_count` as
-`Stack` above, just as a plain flag rather than parsed out of a string.
-
-**`Own% Used`** -- `SUM(Own%_range)`, blank until `OwnStatus = "real"`
-(same policy `Leverage` already established -- summing an all-zero
-pre-publish `Own%` column would read as a confident "0% owned," which
-isn't a real claim yet).
-
-**`Sub-10%`** -- `COUNTIFS(Own%_range, "<0.10")`. `0.10` is Part 7.5's
-own explicit spec text ("Count of players under 10% owned"), not an
-invented threshold -- `sheet_lineup_metrics.SUB_10_OWNERSHIP_THRESHOLD`.
-Same `OwnStatus = "real"` guard as `Own% Used`, for the identical reason:
-every player reads exactly 0% pre-publish, which would make this column
-read "9/9" every week before Tuesday -- a real-looking number that isn't.
 
 **`Min Unique`** -- the smallest count of this lineup's own picks absent
 from some OTHER lineup, minimized over every other lineup in the build:
@@ -1066,13 +1116,6 @@ formula names every OTHER block's range once) -- fine at the 20-lineup
 scale this sheet is built for, not something to scale past without
 reconsidering the approach.
 
-**A formula subtlety confirmed empirically before shipping:** `COUNTIFS`
-accepting `"<>"&formula_expression` as a criteria argument (not a literal
-string, not a plain cell reference -- a nested `INDEX`/`MATCH` result)
-concatenates and evaluates correctly, exactly as it would with a literal.
-Tested on the template's Scratch tab with a real 3-player mock lineup
-before trusting it in the `Stack`/`Bring-back` formulas above.
-
 **Portfolio-level, on `Exposure`** (not `Lineups` -- Exposure is already
 the portfolio-analysis tab, `sheet_views.build_exposure`): `Distinct QBs`
 and `Distinct games` used across the WHOLE lineup build, plus a plain
@@ -1091,7 +1134,7 @@ one QB repeats across lineups. Deliberately doesn't name WHICH QB
 repeats -- Part 7.5's own spec text just asks for a flag ("Flag when two
 lineups share a QB"), and a plain Yes/No is simpler and more robust than
 enumerating names via a second array formula for a fact Sam can see at a
-glance by scanning `Lineups`' own `Stack` column once flagged.
+glance by scanning `Lineups`' own QB rows once flagged.
 
 Both formulas needed a second pass, found live (2026-09-19) auditing this
 exact section: `Lineups!Pos.` is the FIXED slot label, one "QB" row per
@@ -1134,3 +1177,94 @@ in the future, then sorts by `Leverage` descending and returns the top N.
 A player with a missing/unparseable `GameStart` is **excluded**, not
 included -- better to under-suggest than recommend a swap into a player
 whose lock status can't actually be confirmed.
+
+## Betting ledger (`sheet_bankroll_view.py`, Round 5 item 7, 2026-09-28)
+
+**Odds** (American odds from Odds %, a per-row Sheet formula, `column C`):
+`p` is Odds % normalized to a 0-1 fraction (`IF(x>1, x/100, x)`, so `53.3`,
+`53.3%`, and `0.533` all resolve to `p = 0.533`):
+
+- `p > 0.5` (favorite): `-ROUND(100 * p / (1 - p))`
+- `p < 0.5` (underdog): `+ROUND(100 * (1 - p) / p)`
+- `p = 0.5`: `+100`
+
+Worked examples (matches `tests/test_sheet_bankroll_view.py`): 53.3% ->
+-114, 50% -> +100, 40% -> +150, 75% -> -300, 20% -> +400. Blank when
+Odds % is blank.
+
+**Net** (`column F`): `Won - Entered`, blank while `Won` is blank
+(pending). A loss writes `Won = 0`.
+
+**Win / loss / push classification** (row 14's Record, and
+`sheet_bankroll_view.compute_weekly_betting_stats`' Python equivalent for
+the Season tab): a settled bet (`Won` non-blank) is a **win** if
+`Won > Entered`; a **push** if `Won = Entered` AND `Entered > 0` (a real
+stake came back even); a **loss** otherwise -- `Won < Entered`, OR
+`Won = Entered = 0` (Sam, 2026-09-28: "loss, but no money lost" -- a
+$0-entered promo/free bet that pays out $0 has no real stake to "push"
+back, so it's scored as not having won, not as a tie). `Entered = 0` can
+never itself satisfy `Won < Entered` (no negative payout), which is why
+this needs its own clause rather than falling out by exclusion.
+
+**Weekly Betting summary** (row 14) is built to the EXACT shape and
+formula pattern rows 12/13 (Weekly Cash %/GPP %) already use, not a
+separately-invented one (Sam, 2026-09-28: "I want to see the same
+metrics... don't reinvent the wheel"):
+
+- **%** (`B14 = D14/B7`): Betting Cost's share of `B7` (Weekly Cost) --
+  same pattern as `B12 = D12/B7`.
+- **Cost** (`D14`): `SUM` of settled bets' `Entered`, same `SUMPRODUCT`
+  guard `entered_formula` always used.
+- **Winnings** (`F14`): plain `SUM` of the ledger's `Won` column --
+  blank (pending) cells are skipped by `SUM` itself, no guard needed,
+  same as Cash/GPP's own `F12 = SUM(D17:D59)`-shaped Winnings cell.
+- **Net** (`H14 = F14 - D14`): Winnings minus Cost, same pattern as
+  `H12 = F12 - D12` -- not a `SUM` of the ledger's own `Net` column
+  (mathematically equal, but this matches Cash/GPP's own formula shape
+  exactly rather than an equivalent-but-different one).
+- **Record** (`I14`/`J14`, `W-L-P`): the one field Cash/GPP don't have,
+  placed immediately after the four that match. ROI and expected-vs-
+  actual wins were dropped from this row entirely -- Sam: "Dont need roi
+  and expected" (both still exist on the Season tab's year-to-date
+  block, where they're meaningful across a whole season rather than one
+  week).
+
+**Wired into the existing Weekly Cost and Weekly Net rollups, not a
+separate bankroll**: `B7` (Weekly Cost, the `%` denominator every row's
+`%` cell divides by) was widened from `SUM(D12:D13)` to `SUM(D12:D14)` --
+without this, `B14`'s own `%` is `#DIV/0!` on any week with no Cash/GPP
+activity yet, and Cash/GPP's `%` readings would keep excluding a real
+category of spend. `B9` (Weekly Net) was separately widened from
+`SUM(H12:H13)` to `SUM(H12:H14)`. `B2` (Ending Bankroll = `B1 + B9`)
+picks up Betting automatically with no change of its own. The separate
+DK/PP/UD "parallel bankroll" carryover (`week.BANKROLL_CARRYOVER_CELLS`)
+is untouched -- Betting is the same DK wallet as Cash/GPP, not a fourth
+account.
+
+## Season tab (Round 5, item 7d, 2026-09-28)
+
+**Total Net** (`E`, per week): `=B+C+D` (Cash + GPP + Betting Net). Blank
+inputs act as 0 in Sheets' own `+`, so a week with no bets yet still
+totals correctly from just Cash/GPP.
+
+**Cumulative columns** (`N`-`Q`, chart source only): each a running
+`SUM($col$2:col{row})` -- e.g. `N5 = SUM($B$2:B5)`. `Cum. Total` is the
+three cumulative columns added together (`=N+O+P`), not its own running
+sum of `E`, so it can never drift from the per-bucket cumulatives even if
+a row's `E` and `B+C+D` were ever briefly out of sync mid-edit.
+
+**Year-to-date ROI** (`D23:D26`): `Net / Risked` for that bucket, over
+the full season range (`SUM(B2:B19)/SUM(G2:G19)` for Cash, etc.) --
+`#DIV/0!` before any risked amount exists, same convention the Bankroll
+tab's own Weekly `%` cells already use.
+
+**Betting's YTD record/expected-vs-actual** (`E25`/`F25`): `SUM` of the
+weekly `Wins`/`Losses`/`Pushes`/`Exp. Wins` columns (`J`-`M`) -- these are
+NUMBERS, unlike the Bankroll tab's own weekly summary row (which only
+ever holds the formatted TEXT `"1-1-1"`/`"1.5 vs 1"` and can't be summed
+across weeks). `sheet_bankroll_view.compute_weekly_betting_stats` is what
+turns the closing week's raw ledger rows into those numbers at `dfs week
+close` time -- a pure-Python re-derivation of the same arithmetic
+`record_formula`/`expected_vs_actual_formula` compute on the sheet,
+verified against the same real 4-bet example (win/loss/push/pending) used
+to verify those formulas live.

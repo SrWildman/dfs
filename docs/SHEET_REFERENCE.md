@@ -125,8 +125,8 @@ tffb_gps.py`'s module docstring). Weekly-cadence only -- not part of
 Blank (the whole tab) if this week's article isn't published yet --
 never falls back to last week's file. See `docs/CALCULATIONS.md`'s GPS
 section for where each of `ImpliedTotal`/`GPS` shows up elsewhere
-(EdgeRaw's `ModelImplied`, Slate Grid's and Board's own GPS columns) and
-the full model-vs-market caveat.
+(Slate Grid's and Board's own GPS columns) and why `ImpliedTotal` is now
+only a sanity check against Vegas, not a model (Round 5 item 5c).
 
 ### EdgeRaw
 
@@ -163,7 +163,7 @@ actually matches.
 | `GameEnv` | Rebuilt Part C, C7 (2026-09-25): 0-100 per-game score, an equal-weight percentile blend of total, spread tightness, combined pace and combined pass-rate-over-expected (`Pace`/`PROE`, below) -- higher total, tighter spread, faster pace and a pass-heavier tendency all score higher. Falls back to the pre-C7 total/spread-only formula automatically if `pbp` hasn't synced (see `docs/CALCULATIONS.md`). |
 | `OverUnder`, `Spread` | Straight passthrough of the same TFFB Vegas fields `GameEnv` is computed from. `OverUnder` (not `OU`) so it doesn't collide with Player Pool/Lineups' own `O/U`, sourced from a different tab. |
 | `Pace`, `PROE`, `Expl%` | Part C, C7 (2026-09-25): this player's own team's season-to-date offense tempo (mean seconds/snap, neutral script -- lower is faster, colour scale reversed), pass rate over expected (neutral script), and explosive-play rate (all scrimmage plays, ≥20 pass or ≥10 rush yards) -- all three from nflverse's free play-by-play, blended with last season's full-season value early on. `Pace`/`PROE` feed `GameEnv`; `Expl%` is a readable column on its own, deliberately not one of GameEnv's inputs. See `docs/CALCULATIONS.md` for the full formulas and the early-season blend. |
-| `ModelImplied` | GPS (2026-09-26): this player's own team's model-implied point total, from Kyle Borgognoni's TFFB Pace of Play worksheet (`GPSRaw`, joined by `Team`) -- a pace/EPA model's own output, not a market. Blank until this week's article publishes. See `docs/CALCULATIONS.md`'s GPS section for the full model-vs-Vegas caveat. |
+| `OppEPA` | Round 5 item 9: the opponent's EPA-per-play efficiency, from our own play-by-play -- QB/WR/TE see the opponent defense's EPA allowed per pass play, RB per rush play, DST the opposing offense's EPA/play with the sign flipped. Higher = a softer matchup for every position. Sits beside `OppPosRank` in the Game group. Blank when the opponent is missing from the pbp data, never 0. See `docs/CALCULATIONS.md`'s OppEPA section. (`ModelImplied` used to sit here; removed in item 5c -- GPS's "Implied Total" is Vegas, not a model.) |
 | `OppPosRank` | This player's OPPONENT's strength-of-schedule rank at this player's own position (1 = toughest matchup). Computed natively in Python from the already-synced `sos_qb`/`sos_rb`/`sos_wr`/`sos_te`/`sos_dst` frames (Phase 5, 2026-09-16, Sam: "all data should be in edge raw") -- the same value `PlayerPoolRaw`'s own `OppPosRank` computes via a `SoSComb` formula, just computed here without a live Sheets lookup. Blank for a position whose TFFB sync hasn't run yet, same graceful-degradation treatment as `Stadium`/`Roof`/`Wind`. |
 | `GameID` | Part 7.4: this player's game, `nflverse_games`' own ID format (`"2026_02_DET_BUF"` -- season, week, away, home). Was already computed internally to join `Stadium`/`Roof`/`Wind`, just never surfaced before now. What makes a stack visible: two players sharing this value are in the same game. |
 | `TmRank` | Part 7.4: this player's salary rank within his own team AND position -- 1 is the highest-salaried player at that position on that team (read alongside `Position`: "WR1", "RB1"). **A crude proxy for target hierarchy, not a measurement of it** -- salary reflects the market's own belief, not actual target share. No colour scale, deliberately -- see `docs/CALCULATIONS.md`. |
@@ -225,7 +225,7 @@ disagree:
 | IDENTITY (spine) | `Name` `Pos.` `Team` `Opp.` |
 | DECISION (spine) | `DK Sal` `Pts` `AggPts` `Val` `ValAdj` `Ceil` `CeilVal` `Own%` `Avail` `Flags` |
 | — label `GAME` — | (always visible, not part of any group) |
-| GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `Pace` `PROE` `Expl%` `ModelImplied` `OppPosRank` `GameID` `TmRank` |
+| GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `Pace` `PROE` `Expl%` `OppPosRank` `OppEPA` `GameID` `TmRank` |
 | — label `CEIL` — | (always visible, not part of any group) |
 | CEILING DETAIL (collapsed) | `CeilPct` `Leverage` `OwnStatus` |
 | — label `MOVE` — | (always visible, not part of any group) |
@@ -234,7 +234,7 @@ disagree:
 | WEATHER (collapsed) | `Venue` `Stadium` `Roof` `Wind` |
 | — label `USAGE` — | (always visible, not part of any group) |
 | USAGE (collapsed) | `Snap%` |
-| INTERNAL (hidden, not grouped) | `Id` `Flag` |
+| INTERNAL (hidden, not grouped) | `Id` `Flag` `ProjPts%ile` `AggPts%ile` `Ceiling%ile` `Val%ile` `CeilVal%ile` |
 
 **Zone labels** (added the same day as Part 7.9, a usability fix Sam
 raised mid-session rather than something in the original spec): each
@@ -278,7 +278,7 @@ formatting/filtering logic keys off it as a boolean value.
 CONTRIBUTING.md's changelog for that history; Part C, C5 then added
 `AggPts`, one more, to 38; Part C, C6 added the `USAGE` label and `Snap%`,
 two more, to 40; Part C, C7 added `Pace`/`PROE`/`Expl%`, three more, to
-43; GPS added `ModelImplied`, one more, to 44). `Player
+43; GPS added `ModelImplied`, one more, to 44; Round 5 item 5c removed it again, to 43, and item 9 added `OppEPA`, back to 44). `Player
 Pool` inserts `Edge ↗` (A3) right after `Opp.` (i.e. right after
 IDENTITY, since `Venue` no longer sits there) and appends
 `Overflow`/`Pool`/`Used`/`In`/`Added` at the very end (50 total, up from
@@ -289,10 +289,9 @@ week, see below). `Source`, which used to sit right before `Edge ↗`
 in that same spot, was removed entirely in Week 3 feedback (A4,
 2026-09-22) -- Sam had no use for it. `Lineups` inserts `% of Cap` (renamed from `% of
 Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
-the full spine, then `Issues`, then Part 7.5's six lineup-metrics
-columns (`Stack` through `Min Unique`, see above), then `Edge ↗` (A3),
-before the collapsed groups begin (53 total, up from 49 the same way the
-other two tabs grew via Part C and GPS).
+the full spine, then `Issues`, then the two lineup-metrics columns
+(`Games`, `Min Unique`, see above), then `Edge ↗` (A3), before the
+collapsed groups begin (49 total after Round 5 item 1c removed four).
 Lineups also groups
 `O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
@@ -347,7 +346,7 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 | `Pts`, `Ceil` | `TFFBOptoRaw`'s `ProjPts`/`Ceiling`, same DST special-casing as `Venue`. |
 | `Val` | `Pts / (DK Sal / 1000)`, computed in-sheet (independent of `EdgeRaw`'s own `Val`, though they should agree). |
 | `Own%` | `TFFBOptoRaw`'s `ProjOwn`, already a 0-1 fraction here (unlike `EdgeRaw`'s own `Own%`, which needed a Part 2 rescale to match -- see EdgeRaw's column docs above). |
-| `AggPts`, `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `Pace`, `PROE`, `Expl%`, `ModelImplied`, `GameID`, `TmRank`, `Stadium`, `Roof`, `Wind`, `Snap%`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Usage (`Snap%`, Part C, C6), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `AggPts`/`ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/`Pace`/`PROE`/`Expl%`/`ModelImplied`/`GameID`/`TmRank` stay on the visible spine/Game zone. `AggPts`/`ValAdj`/`GameID`/`TmRank`/`Snap%`/`Pace`/`PROE`/`Expl%`/`ModelImplied` are linked (not native, unlike `Val`) since each is a whole-slate computation or external join, not a per-row formula. |
+| `AggPts`, `ValAdj`, `CeilVal`, `Avail`, `Flags`, `GameEnv`, `Pace`, `PROE`, `Expl%`, `OppEPA`, `GameID`, `TmRank`, `Stadium`, `Roof`, `Wind`, `Snap%`, `ImpliedMove`, `TotMove`, `SpdMove`, `GameStart`, `Id`, `Flag`, `CeilPct`, `Leverage`, `OwnStatus` | **Linked from `EdgeRaw`** by `dfs setup link-edge` (VLOOKUP by Name) -- see EdgeRaw's own column docs above for what each means (`Venue`, listed separately above, is native, not linked, despite sitting in the same Weather group). Interleaved into their designed zones (see the canonical column order above), not appended -- Weather (`Venue`/`Stadium`/`Roof`/`Wind`), Usage (`Snap%`, Part C, C6), Movement (`ImpliedMove`/`TotMove`/`SpdMove`/`GameStart`), and Ceiling detail (`CeilPct`/`Leverage`/`OwnStatus`) are each grouped so they can be collapsed from the sheet UI; `Id`/`Flag` are hidden outright, not grouped. `AggPts`/`ValAdj`/`CeilVal`/`Avail`/`Flags`/`GameEnv`/`Pace`/`PROE`/`Expl%`/`OppEPA`/`GameID`/`TmRank` stay on the visible spine/Game zone. `AggPts`/`ValAdj`/`GameID`/`TmRank`/`Snap%`/`Pace`/`PROE`/`Expl%`/`OppEPA` are linked (not native, unlike `Val`) since each is a whole-slate computation or external join, not a per-row formula. |
 
 ### Player Pool / Lineups
 
@@ -497,14 +496,12 @@ never a hardcoded letter -- see CONTRIBUTING.md's Phase 3 changelog
 entry for the incident that happened when it didn't. See
 `docs/CALCULATIONS.md` for the formula mechanics.
 
-Right after `Issues` sit Part 7.5's six lineup-metrics columns
+Right after `Issues` sit two lineup-metrics columns
 (`sheet_lineup_metrics.py`), one value per lineup on its own totals row:
-`Stack` (a signature like `"QB+2 (KC) + 1 bring-back"`), `Games`
-(distinct games represented), `Bring-back` (Yes/No), `Own% Used` (summed
-projected ownership, blank pre-publish), `Sub-10%` (count of picks under
-10% owned, same pre-publish guard), and `Min Unique` (the smallest count
+`Games` (distinct games represented) and `Min Unique` (the smallest count
 of this lineup's own picks absent from some other lineup -- how
-different is your MOST similar other lineup). See `docs/CALCULATIONS.md`
+different is your MOST similar other lineup). `Stack`, `Bring-back`,
+`Own% Used` and `Sub-10%` were removed in Round 5 item 1c. See `docs/CALCULATIONS.md`
 for the exact formulas. `Exposure`'s own header row (K1:P1) carries the
 portfolio-level counterpart: `Distinct QBs`, `Shared QB?` (Yes/No), and
 `Distinct games`, across the whole lineup build rather than one lineup.
@@ -586,15 +583,15 @@ shape open by default, everything else collapsed):
 - **Slate shape** -- games ranked by total, with each game's `Fav`/
   `Spread` (Board Fixes item 1, 2026-09-25 -- sourced from the same
   `GamesRaw` place as `Total`, every column letter derived from
-  `nflverse_games.GAMES_COLUMNS`, never hardcoded), combined Pace (Part C,
-  C7, 2026-09-25 -- the mean of both teams' own `Pace` off EdgeRaw, looked
-  up by team code), wind, and a shootout flag (`derived.
+  `nflverse_games.GAMES_COLUMNS`, never hardcoded), then `Pace`, `PROE`,
+  `Expl%` and `GameEnv` (Round 5 item 5b -- each the mean of both teams'
+  own value off EdgeRaw, looked up by team code, the same "combined per
+  game" shape `Pace` always had), wind, a shootout flag (`derived.
   SHOOTOUT_TOTAL_THRESHOLD`, currently 48 -- a first-pass DFS heuristic,
-  not yet tuned against a real slate), and `GPS`/`Tot Δ` (GPS, 2026-09-26
-  -- Kyle Borgognoni's TFFB Pace of Play score and model-vs-Vegas total
-  delta, off `GPSRaw`; `Model Spd`/`Spd Δ` live on Slate Grid's fuller
-  detail view instead, per that prompt's own "just the signal"
-  instruction). Sort stays by Total, unchanged.
+  not yet tuned against a real slate), and `GPS` (Kyle Borgognoni's 1-5
+  score, off `GPSRaw`; a muted amber chip marks a game whose worksheet
+  implied totals are far off Vegas -- see `docs/CALCULATIONS.md`'s GPS
+  section). `Tot Δ` was removed in item 5c. Sort stays by Total.
 - **Per-position leaders** -- best `ValAdj` and highest `ProjPts`, each
   ranked *within* position (never across it -- the actual fix for the
   old "11 QBs out of 12 rows" bug, a salary-ratio metric mechanically
@@ -654,7 +651,7 @@ player -- everything here comes straight off `GamesRaw`/`WeatherRaw`/
 | `Div` | `DIV` if `GamesRaw.DivGame = 1`, else blank. |
 | `Stadium` | As `GamesRaw`. |
 | `Total move` / `Spread move` | A9 (2026-09-22): this game's `TotMove`/`SpdMove` off `EdgeRaw`, looked up by the HOME team (both are actually team-level joins keyed by `Team` -- any player on that team carries the same value; the home team's row is used consistently, matching `Spread`'s own home-team-perspective convention). `TotMove` is the same number either way; `SpdMove` is directional, so the choice of team matters. Blank until at least one `nfl_odds` sync has moved a line since the week started. |
-| `GPS` / `Model Tot` / `Tot Δ` / `Model Spd` / `Spd Δ` | GPS (2026-09-26): Kyle Borgognoni's TFFB Pace of Play score/model, off `GPSRaw` (one row per team) keyed by `GamesRaw`'s own Away/Home. `Model Tot` = home + away `ImpliedTotal`, computed fresh rather than trusted from the CSV's own `TOTAL` column. `Model Spd` = home − away `ImpliedTotal`, same sign convention as `Spread` (positive = home favoured). Both deltas subtract Vegas' own `Total`/`Spread`. All five blank out (never a fabricated 0) if either team's GPS lookup misses. See `docs/CALCULATIONS.md`'s GPS section for the full reasoning, including why a large delta isn't automatically "Vegas is wrong." |
+| `GPS` | Kyle Borgognoni's TFFB Pace of Play 1-5 score, off `GPSRaw` (one row per team) via the home team's row. A muted amber chip marks a game whose worksheet implied totals are more than 1.5 pts off Vegas (a swapped row in the source), driven by a hidden `GPS off Vegas` helper column. `Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ` were removed in Round 5 item 5c: the worksheet's "Implied Total" is Vegas, not a model. See `docs/CALCULATIONS.md`'s GPS section. |
 
 No empty-state guard beyond a blank `IF($A{row}="",...)` per cell --
 unlike `Board`/`Movement`, there's no "not synced yet" message here,
@@ -716,21 +713,63 @@ of real `0.0`s until at least one `nfl_odds` sync has happened this week.
 
 ### Bankroll
 
-Cash/GPP ledgers plus starting/ending bankroll summary figures.
-`dfs week new` clears each bucket's typed entry columns (A-H) and its
-dedupe-key column when moving to a new week (Fix 5H) -- the two formula
-columns per row (`% Paid`/`Place %`) and the Starting/Ending balance
-cells are never touched. `dfs bankroll sync --csv <file>` (or `dfs week close --csv <file>`, a
-thin wrapper over it) classifies each contest entry as Cash or GPP by
-payout shape (roughly half the field paid, or a straight head-to-head,
-counts as Cash; everything else is GPP) and appends new rows here -- it
-only ever writes into its configured row range and dedupe-key column
-(`[bankroll.cash]`/`[bankroll.gpp]`'s `entry_key_column` in
-`config.toml`), never touching the summary figures or any other formula,
-and re-running is safe since entries are deduped by that key. If your
-sheet has no ledger tables shaped like this, leave `[bankroll.cash]`/
-`[bankroll.gpp]` out of `config.toml` and the command says what's
-missing rather than guessing where to write.
+Top to bottom: the starting/ending bankroll summary (rows 1-13, including
+the DK/PP/UD "parallel bankrolls" `week.BANKROLL_CARRYOVER_CELLS` carries
+forward and the Weekly Cash/GPP/Betting summary row), then the **Betting**
+ledger, then **Cash**, then **GPP** -- Betting sits above Cash (not below
+GPP) so GPP, the bottom-most block, can grow downward without ever having
+to move anything else out of the way again (Round 5 item 7, 2026-09-28;
+see `sheet_bankroll_view.py`'s module docstring for the full reasoning and
+before/after row numbers).
+
+**Betting** (`[bankroll.bets]`, header row 16, data rows 17-36 -- 20 bet
+slots, Sam: "max 20 spots for bets"): a hand-entered ledger for Sam's DK
+Sportsbook bets -- Name, Odds % (typed, accepts `53.3`, `53.3%`, or
+`0.533`, displayed with a literal `%` suffix that doesn't affect the
+stored value -- a true Percent-type format would auto-divide bare-number
+input by 100 and break the `0.533` case), Odds (formula, American odds
+derived from Odds %), Entered (typed stake -- **0 for a promo/free bet**,
+Sam's own convention, and blank behaves identically since every formula
+treats a blank Entered as 0), Won (typed payout -- **blank means still
+pending**, excluded from every total; a push writes Won = Entered). A
+$0-entered bet that pays out $0 is a **loss**, not a push ("loss, but no
+money lost") -- a push only means a real stake (Entered > 0) came back
+even. Net (formula, `Won - Entered`, blank while pending). No CSV sync or
+dedupe key -- there is no DK Sportsbook export, so Sam types every row by
+hand; `dfs week new` clears only the typed columns (A, B, D, E), never
+the Odds/Net formulas.
+
+Row 14 (Weekly Betting summary) mirrors row 12/13's own shape and formula
+pattern exactly -- `%`/Cost/Winnings/Net in columns A-H (`B14=D14/B7`,
+`H14=F14-D14`, same as Cash/GPP's `B12=D12/B7`/`H12=F12-D12`), plus the
+W-L-P record in I/J, the one addition Cash/GPP don't have. `B7` (Weekly
+Cost, the `%` denominator) was widened from `SUM(D12:D13)` to
+`SUM(D12:D14)` so Betting's own `%` isn't `#DIV/0!` on a week with no
+Cash/GPP activity, and so Cash/GPP's own `%` readings reflect a true
+three-way split. Row 15 is a one-line note explaining the pending
+convention.  The Weekly Net rollup (`B9`) sums Cash + GPP + Betting
+(`H12:H14`), so `B2`'s Ending Bankroll includes Betting automatically.
+
+**Cash/GPP** (`[bankroll.cash]`/`[bankroll.gpp]`): ledgers plus their own
+`% Paid`/`Place %` formula columns per row. `dfs week new` clears each
+bucket's typed entry columns (A-H) and its dedupe-key column when moving
+to a new week (Fix 5H) -- the two formula columns per row and the
+Starting/Ending balance cells are never touched. `dfs bankroll sync --csv
+<file>` (or `dfs week close --csv <file>`, a thin wrapper over it)
+classifies each contest entry as Cash or GPP by payout shape (roughly half
+the field paid, or a straight head-to-head, counts as Cash; everything
+else is GPP) and appends new rows here -- it only ever writes into its
+configured row range and dedupe-key column (`[bankroll.cash]`/
+`[bankroll.gpp]`'s `entry_key_column` in `config.toml`), never touching
+the summary figures or any other formula, and re-running is safe since
+entries are deduped by that key. If your sheet has no ledger tables shaped
+like this, leave `[bankroll.cash]`/`[bankroll.gpp]` out of `config.toml`
+and the command says what's missing rather than guessing where to write.
+
+GPP's real extent can outgrow its configured `last_row` over time (Sam:
+"GPP could grow") -- when it does, insert real rows at the bottom (never
+rewrite the tab), fill down its `% Paid`/`Place %` formulas onto the new
+rows, and bump `[bankroll.gpp].last_row` in `config.toml` to match.
 
 ### Results
 
@@ -756,3 +795,64 @@ every past week it has real data for in one pass. `Cash Line` (column C)
 and the three team-colour columns (H/I/J) stay yours to maintain by hand;
 `write_results_updates` never touches them, and never blanks `Cash Pts`
 for a week that hasn't finished scoring yet.
+
+### Season
+
+Round 5, item 7d (2026-09-28). A year-at-a-glance rollup -- one pre-built
+row per NFL week 1-`nfl_calendar.MAX_WEEK` (`sheet_season_view.py`), plus a
+year-to-date block and a cumulative-net-by-week line chart. Same "not
+reset by a new weekly copy, carried forward by `dfs week new`" rule as
+Results (`season.extract_season_value_columns`).
+
+Columns: `Week` | `Cash Net` | `GPP Net` | `Betting Net` | `Total Net`
+(formula, `=B+C+D`) | `Ending Bankroll` | `Cash Risked` | `GPP Risked` |
+`Betting Risked` | `Betting Wins`/`Losses`/`Pushes` | `Betting Exp. Wins`
+| four cumulative columns (`Cum. Cash`/`GPP`/`Betting`/`Total`, running
+`SUM`s -- chart source only, not meant to be read directly).
+
+**Cash/GPP** (`B`/`C`, plus `G`/`H` risked): backfilled the same way
+Results is, from the same DK contest-history export -- `dfs bankroll sync
+--csv`/`dfs week close --csv` call `season.compute_week_bankroll_net`
+(same `nfl_calendar.week_for_date` bucketing as
+`results_autofill.compute_week_results`) and `season.write_season_cash_gpp`
+every time, regardless of which command.
+
+**Betting** (`D`, `F`, `I`-`M`): there is no DK Sportsbook export, so
+these are only ever written at `dfs week close` (never a plain `bankroll
+sync`) -- `season.write_season_betting_and_ending`, fed by
+`sheet_bankroll_view.compute_weekly_betting_stats` reading the closing
+week's own Bankroll tab (its Betting ledger's raw Odds %/Entered/Won, and
+`B2` for Ending Bankroll). A week with no bets, or an Ending balance not
+yet known, is left blank -- never invented. A $0-entered bet that pays
+out $0 (a promo/free bet that didn't hit) counts toward `Losses`, not
+`Pushes` -- see the Bankroll tab's own Betting section above.
+
+**Past weeks with no Betting ledger of their own** (weeks before this
+Round 5 change): recorded by hand from the confirmed misfiled-bet list
+(item 7c) directly into the Season row -- e.g. Week 2's one bet
+("Predictionns" in the Cash ledger, Entered $19.66 / Won $22.00), net
+$2.34, Ending read from that week's own `Bankroll!B2` ($196.45, matching
+Week 3's Starting balance). The old sheet itself is never edited.
+
+**Year-to-date block** (rows 21-26, formulas only): per bucket (Cash,
+GPP, Betting, Total) -- Net, amount Risked, ROI (`Net/Risked`); Betting
+also shows its W-L-P record and expected-vs-actual wins (`SUM` of the
+weekly wins/losses/pushes/expected-wins columns).
+
+## Hidden helpers added in Round 5 (2026-09-29)
+
+- **`ProjPts%ile`, `AggPts%ile`, `Ceiling%ile`, `Val%ile`, `CeilVal%ile`** --
+  EdgeRaw columns, linked (hidden, INTERNAL) onto Player Pool, Lineups and
+  PlayerPoolRaw. Each is that player's percentile within his position over the
+  rosterable pool, zeros/blanks excluded; the highlighting rules read them
+  (see `docs/CALCULATIONS.md`, "Highlighting: five bands"). Never sort or
+  type in them.
+- **`NameKey`** -- EdgeRaw's last column, hidden: `player_join.normalize_name(Name)`.
+  Typed names (Lineups, Player Pool's add-a-player box) are normalised the same
+  way and matched against it, so "Amon-Ra St Brown" or "Kenneth Walker" resolves
+  to the DK spelling.
+- **`NameAlias`** (hidden tab) -- DST spellings ("Broncos", "Denver D/ST") ->
+  the DK name, built by `dfs setup build-views` (`sheet_names.build_name_alias_tab`).
+- **Board** -- two hidden helper columns past the join keys: the GPS-vs-Vegas
+  check (`BOARD_SLATE_GPSCHK_COL_INDEX`) and the leaders' `ProjPts%ile` lookup
+  (`BOARD_LEADERS_PCT_COL_INDEX`).

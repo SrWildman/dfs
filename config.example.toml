@@ -70,15 +70,24 @@ player_pool_tab = "Player Pool"
 [bankroll]
 tab = "Bankroll"
 
-[bankroll.cash]
+# Round 5, item 7: a hand-entered Betting ledger, above Cash (see
+# sheet_bankroll_view.py's module docstring for why above Cash rather than
+# below GPP). No entry_key_column -- there's no CSV sync/dedupe for
+# hand-typed bets.
+[bankroll.bets]
 header_row = 16
 first_row = 17
-last_row = 59
+last_row = 36
+
+[bankroll.cash]
+header_row = 38
+first_row = 39
+last_row = 83
 entry_key_column = "L"
 
 [bankroll.gpp]
-header_row = 63
-first_row = 64
+header_row = 85
+first_row = 86
 last_row = 149
 entry_key_column = "L"
 

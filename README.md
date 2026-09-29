@@ -96,7 +96,8 @@ Weekly-loop commands first, one-time setup last -- run `dfs --help` (or
 | Command | Reach for it when... |
 |---|---|
 | `dfs status` | you want to know which sheet you're pointed at and how fresh each source is. |
-| `dfs sync` [`--live`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed. |
+| `dfs sync` [`--live`] [`--sheet-id ID`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed; `--sheet-id` points it at another sheet (e.g. the template). |
+| `dfs --profile <command>` | a command feels slow: prints wall-clock, API request count and the slowest phases when it exits (same as `DFS_PROFILE=1`). |
 | `dfs doctor` | you want to confirm the sheet's structure hasn't drifted -- run it after any structural edit, or when something looks wrong. |
 | `dfs edge` | a quick look at top leverage plays in the terminal, no sheet needed. |
 | `dfs go` | `sync` + `doctor` + what-changed, back to back -- the three you'd otherwise run in sequence anyway. |

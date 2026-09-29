@@ -2793,6 +2793,419 @@ because every real sync so far has been `--live` (which excludes `pbp`)
 or a targeted single-source script. `tffb_gps` was given a real tab
 (`GPSRaw`) specifically to avoid the same gap.
 
+## Round 5, item 7: a hand-entered Betting ledger, above Cash (2026-09-28)
+
+Sam bets DK Sportsbook, same account/wallet as DFS, no export -- he types
+every bet in by hand and had been putting them in the Cash ledger, which
+mixed sportsbook results into the DFS cash-game numbers. New Betting
+ledger (Name/Odds %/Odds/Entered/Won/Net -- see `sheet_bankroll_view.py`,
+`docs/CALCULATIONS.md`'s new section for the Odds-conversion math)
+inserted as its own block, verified with real formulas read back (not
+trusted from the insert's own return value) on both sheets: a win at
+53.3% (-114 odds, correct Net), a loss at 40% (+150 odds), a push (Net =
+0, not blank), and a pending bet (Odds computed, Net correctly blank,
+excluded from the weekly summary) -- all typed, read back, then cleared
+before leaving each sheet in its real starting state.
+
+**Placement decided live, not as originally sketched:** the prompt said
+"below GPP"; Sam changed this to "above Cash" once GPP's row range was
+found to be wrong in both directions (see below) -- Betting above Cash
+means GPP, the bottom-most block on the tab, can be extended downward by
+a plain row-insert later without ever having to move Betting or Cash out
+of the way again ("Gpp could grow").
+
+**A real, pre-existing `config.toml`/`config.example.toml` bug found
+while scoping this, on BOTH sheets:** Cash's `% Paid`/`Place %` formula
+pattern actually ran rows 17-61, not 17-59 as configured (`last_row` was
+2 short); GPP's actually ran 64-127, not 64-149 (`last_row` was 22 rows
+*too long* -- rows 128-149 have no formulas at all). No real entries had
+ever reached the missing GPP rows, so nothing was silently corrupted, but
+`bankroll.sync_bucket` could have written into cells with no `%`-formula
+if a sync ever needed more than 64 GPP rows. Confirmed identical on the
+template and the live Week 3 sheet (a real `read_formula`, not
+`read_range`, to tell "a formula" from "a blank cell that resolves to
+nothing"). Corrected as part of this change (see table below) rather than
+carried forward.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-28 | `Bankroll` | New Betting block (header + 40 data rows + 1 blank separator, 42 rows total) inserted via a real `insertDimension` at row 16, ahead of the Cash ledger. Cash and GPP -- and every formula elsewhere on the tab that already referenced their ranges (`B7`/`B9`/`B12`/`B13`'s `SUM`s) -- shifted down by 42 rows automatically; nothing about them was rewritten by hand. Weekly summary row 14 (previously blank) now holds the Weekly Betting figures; row 15 (previously blank) now holds a one-line pending-bet note. `B9` (Weekly Net) widened from `SUM(H12:H13)` to `SUM(H12:H14)`. | `[bankroll.cash]`: header 16, rows 17-61 (config previously said 59, wrong). `[bankroll.gpp]`: header 63, rows 64-127 (config previously said 149, wrong). No `[bankroll.bets]`. `B9 = SUM(H12:H13)`. | `[bankroll.bets]`: header 16, rows 17-56 (new). `[bankroll.cash]`: header 58, rows 59-103. `[bankroll.gpp]`: header 105, rows 106-169 (real extent as of this change -- GPP is expected to grow past this; see `docs/SHEET_REFERENCE.md`'s note on bumping `last_row`). `B9 = SUM(H12:H14)`. | Live (Week 3) + Template | `config.toml`/`config.example.toml`'s `[bankroll.cash]`/`[bankroll.gpp]`/new `[bankroll.bets]`, `config.BankrollConfig` (new `bets` field), new `sheet_bankroll_view.py` (whole module), `cli.py`'s new `dfs bankroll build-betting-ledger` command, `doctor._check_bankroll_headers` (now also checks `bets`), `weekly_reset.py`'s new `_clear_bankroll_bets` + `clear_previous_week`'s new `bankroll_bets` param, `cli.py`'s `week new` call site. |
+
+**Wiring `dfs week new`:** Betting's typed columns are A (Name), B
+(Odds %), D (Entered), E (Won) -- not contiguous, since C (Odds) and F
+(Net) are formulas sitting between them, unlike Cash/GPP's single A-H
+block. New `weekly_reset._clear_bankroll_bets` clears `A{first}:B{last}`
+and `D{first}:E{last}` as two ranges rather than reusing
+`_clear_bankroll_bucket`'s single-range shape.
+
+**Deliberately NOT folded in:** the `$100` Weekly Budget/Usage tracker
+(rows 6-8, `B7`'s `SUM(D12:D13)`) stays Cash+GPP only -- it's DK contest
+entry spend specifically, and folding sportsbook stakes into it would
+silently redefine what "Weekly Budget Usage" means without being asked
+to. Only the Weekly Net rollup (`B9`, which feeds Ending Bankroll) was
+widened.
+
+## Round 5, item 7c/7d: misfiled-bet checkpoint, and the Season tab (2026-09-28)
+
+**7c, the checkpoint Sam confirmed before anything was written:** current
+week (Week 3 live) had nothing to migrate -- Cash ledger was empty. Week
+2's Cash ledger had exactly one candidate (found by eye: no dedupe key,
+no contest-shaped fields, unlike every other row in that ledger, which
+all had real DK keys) -- `"Predictionns"`, Winnings $22.00, Entry Fee
+$19.66. Sam confirmed: Entry Fee is Entered, Winnings is Won (Net
+$2.34). No Week 1 betting, so Week 1 wasn't checked further. Per the
+prompt's own instruction, Week 2's sheet was never edited -- the
+confirmed net was recorded straight into the new Season tab instead (see
+below), read-only against the old sheet (`Bankroll!B1:B2`) for its real
+Ending balance ($196.45, which matches Week 3's own Starting balance, a
+real cross-check that the carryover chain is intact).
+
+**7d, new tab `Season`:** one pre-built row per NFL week (1-`nfl_calendar.
+MAX_WEEK`, `sheet_season_view.py`), a year-to-date block, and a
+cumulative-net line chart -- built from scratch with `write_tab` (unlike
+Bankroll's surgical insert, nothing here existed before, so a full
+rewrite is safe). New `season.py`: `compute_week_bankroll_net` (same
+`nfl_calendar.week_for_date` bucketing as `results_autofill.
+compute_week_results`, dollar net/risked instead of points/H2H counts),
+wired into `dfs bankroll sync --csv`/`dfs week close --csv` unconditionally
+(same as Results' own autofill); `write_season_betting_and_ending`,
+gated to `dfs week close` only (a new `close: bool` param on
+`_sync_bankroll_from_csv`) since Betting net/Ending Bankroll only mean
+anything once the week is actually done. `extract_season_value_columns`
+mirrors `week.extract_results_value_columns` for `dfs week new`'s
+carry-forward, skipping the formula columns (`E` Total Net, `N`-`Q`
+cumulative).
+
+Verified on the template with real typed data across two weeks (Cash/GPP/
+Betting net + risked + Ending, entered into separate ranges -- see the
+caution below), read back: `Total Net` summed correctly per row,
+cumulative columns tracked running sums correctly, and every YTD figure
+(Net/Risked/ROI per bucket, Betting's record and expected-vs-actual)
+matched hand-computed expectations exactly. Same verification repeated
+on the live Week 3 sheet, then cleared.
+
+**A caution for anyone editing this tab by hand or by script:** writing a
+single contiguous range across `B:M` on a week row clobbers `E` (`Total
+Net`, a formula) with whatever literal value lands there -- found live
+writing this changelog's own verification data, by my own mistake, fixed
+by restoring `E`'s formula and re-verifying. `season.py`'s own write
+functions never do this (each writes `B:D`, `F`, and `G:M` as three
+separate ranges, unit-tested to confirm `E` is never touched) -- this is
+a warning for a future ad-hoc script, not a defect in the shipped code.
+
+**Instructions tab:** a real one-row `insertDimension` at row 27 on both
+sheets (this module never inserts/deletes a row itself), then a new
+`_TAB_ROWS` entry for `Season` and `_DOC_LINKS_HEADER_ROW` bumped 27 -> 28
+to match -- the same drift-guard `assert` from the GPS incident caught
+this immediately in the test suite (a hardcoded row number in
+`test_sheet_instructions.py` had to move too).
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-28 | `Instructions` | One row inserted at row 27 for a new `Season` tab-row entry; everything from the old row 27 (`"Full documentation"`, the doc-links header) onward shifts down by 1. | `_DOC_LINKS_HEADER_ROW = 27`, `_TAB_ROWS` has no `Season` entry. | `_DOC_LINKS_HEADER_ROW = 28`, `_TAB_ROWS` gains `Season` right after `Results`. | Live (Week 3) + Template | `sheet_instructions._TAB_ROWS`, `_DOC_LINKS_HEADER_ROW`, `test_sheet_instructions.py`'s hardcoded `A28`/`A29`/`A32` row-number assertions. |
+| 2026-09-28 | `Season` (new tab) | Whole tab created (didn't exist before). | No `Season` tab on either sheet. | `Season` tab: header row 1, week rows 2-19, YTD block rows 21-26, chart anchored at A28. | Live (Week 3) + Template | New `config.SeasonConfig`, `Config.season`, new `season.py` + `sheet_season_view.py` (whole modules), `doctor._expected_tabs` (now checks `Season` exists), `cli.py`'s new `dfs setup build-season` command and its `_sync_bankroll_from_csv`/`week new` wiring, new `SheetsClient.add_line_chart`. |
+
+## Betting ledger corrections, found live right after item 7 shipped (2026-09-28)
+
+Sam caught three real problems on first look, after typing this week's 8
+real bets in -- a screenshot showing a large dark block over the ledger's
+data area, and the weekly summary row's labels visibly clipped. All three
+were display-only; his real bet data and every dollar figure downstream
+of it were correct throughout (verified by hand: 3-2-3 record, $14.63
+entered, $12.37 net, matching Weekly Net and Ending Bankroll exactly)
+before any of this was fixed.
+
+**1. Dark-fill bleed wasn't limited to A:F.** `insert_rows`'s
+inherit-from-the-row-after behavior (see the item 7 changelog entry
+above) copies the Cash header's FULL width, not just the columns a
+caller happens to reformat afterward -- Cash's header has real content
+out to column J (`% Paid`/`Place %`), so G:J stayed dark on every row
+`build_betting_ledger` touched (header, all 20 data rows, and the
+separator), because only A:F was ever explicitly reset. Fixed by
+resetting G:J across the whole inserted range too (`_BLEED_COLUMNS`).
+
+**2. Column B (Odds %) inherited a CURRENCY format from the same
+bleed**, rendering `53.3` as `"$53.30"` -- present since the very first
+build and missed in verification (a value like `$53.30` still resolves
+correctly to `53.3` for `odds_formula`'s own math, so the Odds/Net
+figures were never wrong, only the Odds % column's own display). Fixed
+with a literal `%`-suffix NUMBER pattern (`0.0"%"`), deliberately NOT a
+true PERCENT-type format -- Percent format auto-divides bare-number
+input by 100, which would silently break the `0.533` input case the
+spec explicitly asks to accept.
+
+**3. Row 14's labels clipped, and one value landed in a hidden
+column.** Row 14 was blank before this change but not unformatted --
+found bold instead of matching row 12/13's muted gray style, and
+columns I/M (never used anywhere else on this tab) still had default
+pixel widths too narrow for `"Weekly ROI"`/`"Weekly Exp. Wins"` once a
+non-blank neighbor cell blocked text overflow. Separately, the Weekly
+Exp. Wins VALUE had been placed in column L -- Sam's own hidden
+dedupe-key column, hidden tab-wide, not just on Cash/GPP's rows, so
+that figure was invisible no matter what. Fixed: labels now explicitly
+match row 12/13's format; L is never used for anything meant to be
+seen; Exp. Wins moved to M/N; C/I/J/M widened.
+
+**Also, Sam: "max 20 spots for bets."** `LAST_ROW` 56 -> 36 (20 data
+rows instead of 40); the extra 20 (confirmed empty on both sheets, and
+well below his 8 real bets, which sit in rows 17-24) were removed with a
+real `delete_rows`, which auto-shifted Cash/GPP up by 20 the same way
+`insert_rows` shifted them down.
+
+**A genuinely new case, handled correctly with no code change:** some
+of Sam's real bets are promo/free bets with a blank Entered column.
+Every formula already treats blank as `0` (Sheets' own arithmetic
+convention, and `compute_weekly_betting_stats`'s `ent = ent or 0.0`) --
+confirmed live: a promo bet that wins reads a positive Net equal to its
+payout, one that returns exactly its (zero) stake reads as a push, not
+a loss. Flagged for Sam, not changed: a $0-entered bet that pays out
+$0 currently counts as a PUSH (Won == Entered == 0), which may or may
+not be what "the promo bet lost" should mean for the W-L-P record --
+worth confirming if it matters to him.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-28 | `Bankroll` | 20 rows deleted from the Betting block's bottom (real `deleteDimension` at row 37, count 20) -- Cash and GPP, and every formula referencing their ranges, shifted UP by 20. | `[bankroll.bets]` rows 17-56. `[bankroll.cash]`: header 58, rows 59-103. `[bankroll.gpp]`: header 105, rows 106-169. | `[bankroll.bets]` rows 17-36. `[bankroll.cash]`: header 38, rows 39-83. `[bankroll.gpp]`: header 85, rows 86-149. | Live (Week 3) + Template | `config.toml`/`config.example.toml`'s `[bankroll.cash]`/`[bankroll.gpp]`/`[bankroll.bets]`, `sheet_bankroll_view.LAST_ROW`/`BLANK_SEPARATOR_ROW`/`BLOCK_ROWS`. |
+
+## Betting weekly summary redesign, and the promo-bet ruling (2026-09-28, same day)
+
+Sam, after the corrections above: "loss, but no money lost" (resolves the
+flagged promo-bet ambiguity), "I want to see the same metrics that I have
+for cash nd gpp. Weekly %, cost, winnings, nnet. We can have the record in
+the rightmost column aafter the ones tha tmatch. Dont need roi and
+expected."
+
+**Classification rule changed**, in both the sheet formula
+(`losses_formula`/`pushes_formula`) and its Python re-derivation
+(`compute_weekly_betting_stats`): a $0-entered bet that pays out $0 now
+counts as a **loss**, not a push -- a push requires a real stake
+(`Entered > 0`) to come back even. `wins_formula` needed no change (`Won
+> Entered` already correctly counts a $0-entered bet that pays out
+anything as a win). Sam separately confirmed he'll type a literal `0`
+for promo bets' Entered rather than leaving it blank -- functionally
+identical (every formula already treats blank as 0), just his own
+convention going forward.
+
+**Row 14 rebuilt to Cash/GPP's own shape, not a separately-invented
+one.** Dropped: `Weekly Bets Settled` (A/B), `Weekly ROI` (was I/J),
+`Weekly Exp. Wins` (was M/N, and the `settled_formula`/
+`expected_vs_actual_formula`/`net_sum_formula` sheet-formula generators
+that only that removed content used -- deleted from `sheet_bankroll_view.py`
+along with their tests, since nothing calls them any more; the
+underlying Python stats -- `compute_weekly_betting_stats`' `settled`/
+`expected_wins` fields -- are unaffected and still feed the Season tab's
+own YTD tracking). New A-J shape: `%`/Cost/Winnings/Net (A-H, same
+formula PATTERN as `B12=D12/B7`/`H12=F12-D12`, not just the same
+labels), then `Weekly Record (W-L-P)` at I/J. `B7` (Weekly Cost) widened
+from `SUM(D12:D13)` to `SUM(D12:D14)` so `B14`'s own `%` isn't
+`#DIV/0!` on a week with no Cash/GPP activity (and so Cash/GPP's `%`
+readings reflect the true three-way split) -- the same reasoning that
+already justified widening `B9` for Ending Bankroll.
+
+**A real styling mismatch Sam caught by eye, verified with a cell-format
+diff rather than more screenshots -- fixed twice, the second time for
+real.** `D12`/`D13` (Cash/GPP's own "Cost" value cells) carried the SAME
+muted gray/`fontSize:9` treatment as their own labels -- an apparent
+copy-paste artifact in Sam's original rows, since `F12`/`H12` (Winnings/
+Net) never had it. First pass: copied `D12`'s exact (quirky) format onto
+`D14` rather than "correcting" `D12`/`D13`, reasoning row 14 should match
+what 12/13 actually looked like, not what they arguably should. Sam then
+pointed at the Cost-vs-Winnings size/colour difference directly ("umerrs
+i winnninds formatted differennt than cost") -- the quirk itself was the
+thing to fix, not something to replicate a third time. Corrected `D12`,
+`D13`, AND `D14` to the same plain style `F`/`H` already use, on both
+sheets; `build_betting_ledger`'s own D/F/H formatting loop unified to
+match.
+
+**A sequencing bug in the corrections above, found from a fourth
+screenshot:** the G:J dark-bleed fix (previous section) was run BEFORE
+`delete_rows` on the live sheet, using the ALREADY-updated
+`BLANK_SEPARATOR_ROW=37` -- at that moment the sheet still had the old
+42-row layout, so the reset only reached what was then a data row (37),
+not the TRUE separator (still at row 57 pre-delete). Deleting rows 37-56
+afterward shifted that never-fixed row 57 up to become the new row 37,
+carrying its dark G:J with it -- a blank row with no text, but visually
+fused to the real Cash header directly below it (also dark), reading as
+one oversized dark block. Fixed directly (`G37:J37` reset) on both
+sheets; the template had done these two steps in the opposite order and
+never had the bug. Lesson for next time a fix and a resize land in the
+same session: finish resizing FIRST, or re-run the position-dependent
+fix again AFTER any row insert/delete that could move its target.
+
+## Round 5 close-out fixes and item 1 (2026-09-29)
+
+**Week 3 close, found live.** Sam's export reaches back to 2021, and
+`nfl_calendar.week_for_date` clamps every date before this season's week-1
+start into week 1 (right for "what week is today", wrong for bucketing an
+export). Season's Week 1 row therefore read +$209.60 Cash / -$699.62 GPP
+(~2,945 old entries deep) and Results' Week 1 read 621 H2H entries.
+`nfl_calendar.season_week_for_date` returns `None` for a pre-season date;
+`season.compute_week_bankroll_net`, `results_autofill.compute_week_results`
+and `bankroll.entries_for_week` skip those. Week 1 now reads -$29.40 Cash /
+-$65.00 GPP, 20 H2H entries. **Also found:** a stray `$` number format on two
+dedupe-key cells (`Bankroll!L39`, `L89`) made a formatted read return
+`"$5,269,229,435.00"`, so re-running `week close` appended the first entry
+of each ledger a second time. `bankroll.sync_bucket`/`backfill_entry_keys`
+now read keys UNFORMATTED (`_read_entry_keys`/`_key_text`) so a display
+format can never break the dedupe again.
+
+**Season chart starts at $0.** Chart data moved to a helper block `S1:W20`
+(`sheet_season_view.add_season_chart`): Week 0 = $0 baseline, then each week
+mirrors `N:Q`, with `#N/A` (a gap, not a flat line) for weeks with no
+Cash/GPP/Betting net yet. `SheetsClient.delete_charts` added so the chart can
+be rebuilt. Season's own `A:Q` layout is unchanged. `Season` is now in
+`sheet_style.WEEK_ORDER` (right after `Bankroll`), and `Weekly Betting Net`
+(`Bankroll!H14`) gets the same green/red rules as `H12:H13`
+(`polish_bankroll`, `build_betting_ledger`).
+
+**Item 1a.** `Source.uploads_to_sheet` (default `True`); `pbp` sets it
+`False`, so `run_sync` skips the upload and records success with no
+`tab_mappings` entry (Sam's hand-added `pbp = "PBP"` line removed from
+`config.toml`). `dfs sync` gained `--sheet-id` like the other write commands.
+A `PBP` tab still exists on the template and Week 3 -- left alone pending
+Sam's OK to delete it.
+
+**Item 1b.** `USAGE` (`Snap%`) was never grouped at all; the "arrow" Sam
+saw beside it is the hidden `Id`/`Flag` columns. It is now a real collapsed
+group on EdgeRaw (`EDGE_COLUMN_GROUPS`, `sheet_style.apply_edge_column_groups`)
+and Player Pool/Lineups (`sheet_links.link_edge_columns`'s zone loop).
+
+**Item 1c.** Lineups' `Stack`, `Bring-back`, `Own% Used` and `Sub-10%`
+removed (`dfs setup remove-lineup-metrics`, via
+`sheet_reorder.remove_header_columns`); `Games` and `Min Unique` stay.
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-09-29 | `Lineups` | Four columns deleted (real `deleteDimension`): `Stack`, `Bring-back`, `Own% Used`, `Sub-10%`. Everything right of them shifted left by 4; repeated per-block header rows went with them. | 53 columns; `GameID` at `AH`. | 49 columns; `GameID` at `AD`; groups now `U:AE`, `AG:AI`, `AK:AN`, `AP:AS`, `AU` (USAGE). | Template (Week 4 inherits via `week new`; Week 3 untouched, it is closed) | `sheet_lineup_metrics.LINEUP_METRIC_HEADERS` (now `Games`, `Min Unique`), `sheet_columns.LINEUPS_COLUMN_ORDER`, `sheet_style` width/format dicts, `cli.RETIRED_LINEUP_METRICS`. |
+| 2026-09-29 | `EdgeRaw`, `Player Pool`, `Lineups` | New collapsed USAGE column group over `Snap%`. | 4 groups each. | 5 groups each. | Template | `sheet_style.EDGE_COLUMN_GROUPS`, `sheet_links.link_edge_columns`. |
+| 2026-09-29 | `Season` | Chart-data block added at `S1:W20`; chart rebuilt to read it. | Chart read `A:A` and `N:Q` directly. | Chart reads `S:W`. | Live (Week 3) + Template | `sheet_season_view.CHART_COLS`, `add_season_chart`. |
+
+## Round 5, items 2, 4, 5b/5c, 6 (Python side) and 9 (2026-09-29)
+
+**Item 2 -- performance is round trips, not quota.** `perf.py`: an
+`InstrumentedHTTPClient` that `SheetsClient` hands to gspread counts and
+times every request (`--profile` / `DFS_PROFILE=1` prints wall-clock,
+request count and the slowest phases), retries 429/408/5xx and network
+errors with exponential backoff plus jitter (honouring `Retry-After`), and
+-- inside `SheetsClient.batched()` -- QUEUES formatting `batchUpdate`
+requests (`perf.QUEUEABLE_REQUEST_TYPES`) and cell-value writes, sending
+them as few `batchUpdate`/`values:batchUpdate` calls as the size limits
+allow. Every read and every shape-changing write (`insertDimension`,
+`deleteDimension`, ...) flushes the queue first, so order (including
+conditional-format rule order) and read-after-write are identical to
+sending each request immediately. `DFS_NO_BATCH=1` restores the old
+behaviour. The other real cause was `apply_grouped_color_scales` (and its
+siblings) calling `clear_conditional_formats` once per column per lineup
+block, re-reading the tab's whole rule list each time: 216 reads on
+Lineups alone, enough to trip the per-minute read quota and crash a polish
+run. `SheetsClient.clear_conditional_formats_for` does one read and one
+delete for all targets (equivalence pinned in `tests/test_sheets.py`).
+Wrapped in `batched()`: `polish`, `link-edge`, `reorder-columns`,
+`build-views`, `add-filters`, `protect`, `instructions`.
+
+**Item 4 -- Lineups correlation tints** (`sheet_lineup_tints.py`): three
+custom-formula rules per lineup block on Name/Pos./Team only -- blue for
+the QB and his non-DST teammates, amber for the QB's opponent, lavender for
+any other game with 2+ non-DST players. Added BEFORE the guardrail rules in
+`polish` so a red warning still wins. The legend is in Lineups' A1 note
+(there is no free row above block 1 without moving `LINEUPS_NAME_BLOCKS`).
+
+**Item 5b/5c -- Board slate shape, GPS correction.** Board Slate shape is
+now Matchup, Total, Fav, Spread, Pace, PROE, Expl%, GameEnv, Wind,
+Shootout?, GPS (`sheet_views.BOARD_SLATE_COLHEADER`; letters in
+`style_board` derived from it, not typed). GPS's "Implied Total" is Vegas,
+not a model (`gps_check.py`): `ModelImplied` removed from EdgeRaw and its
+three linked copies (`dfs setup remove-model-implied`, then `dfs sync --only
+edge`, then `dfs setup link-edge --force`), `Model Tot`/`Tot Δ`/`Model
+Spd`/`Spd Δ` removed from Slate Grid, `Tot Δ` from the Board. The implied
+totals stay as a sanity check (`GPS_IMPLIED_MISMATCH_PTS = 1.5`): a warning
+in `sync` and a muted chip on the game's `GPS` cell, driven by a hidden
+helper (`GPS off Vegas` on Slate Grid; a hidden column past the Board's
+GameId/Away/Home join keys, `BOARD_SLATE_GPSCHK_COL_INDEX`).
+
+**Item 6, Python side.** `player_join`: `FB`/`HB` join as `RB` (Sleeper and
+nflverse label Juszczyk, Luepke, Ingold, Perine, Chase Brown that way); a
+nickname fallback (last name + team + position, only when exactly one
+unmatched DK player and one unclaimed source row share the key, every match
+logged); `player_aliases.csv` gains `Joshua Palmer`/snaps; DSTs are left out
+of the snaps report (`expect_dst=False`). Travis Hunter is DK `WR` but
+Sleeper `DB` and is deliberately NOT joined -- a DB projection carries IDP
+scoring, not his offensive line. Sheet side (a hidden `NameKey`, DST
+aliases) is not built yet -- see the open question in the session notes.
+
+**Item 9 -- `OppEPA`.** `team_metrics`: `DefEPA/Pass`, `DefEPA/Rush`,
+`DefSucc%`, `OffEPA/Play` per team, all game states, blended with last
+season exactly as Pace/PROE are (`blend_with_prior(..., decimals=3)` for
+EPA). `derived._attach_opp_epa` gives each player his opponent's value --
+QB/WR/TE pass, RB rush, DST minus the opposing offense's EPA/play, so
+higher is always a softer matchup; blank (never 0) for a missing team.
+`EDGE_COLUMNS` gains `OppEPA` right after `OppPosRank`.
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-09-29 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | `ModelImplied` deleted (item 5c). | 44 EdgeRaw columns (`ModelImplied` at 21). | 43; everything from `OppPosRank` on one column left. | Template | `derived.EDGE_COLUMNS`, `sheet_columns.GAME`/`LINKED_COLUMNS`, `sheet_color_scales.FIELD_COLOR_SCALES`, `sheet_style.FIELD_FORMATS`/`EDGE_WIDTHS`, `tests/test_sheet_links.py`'s pinned index list. |
+| 2026-09-29 | `Slate Grid` | `Model Tot`, `Tot Δ`, `Model Spd`, `Spd Δ` removed; hidden `GPS off Vegas` helper added. | 17 columns (A-Q). | 14 columns (A-N; N hidden). | Template | `sheet_views.SLATE_HEADER`, `style_slate_grid`. |
+| 2026-09-29 | `Board` | Slate shape columns: `Tot Δ` out; `PROE`, `Expl%`, `GameEnv` in; hidden GPS-check helper past the join keys. | 9 visible slate columns. | 11 visible slate columns; helper at `BOARD_SLATE_GPSCHK_COL_INDEX`. | Template | `sheet_views.BOARD_SLATE_COLHEADER`/`BOARD_SLATE_GPSCHK_COL_INDEX`, `style_board`. |
+
+## Round 5, item 3 (highlighting), item 6 (sheet side), Season-follows-ledger, template restores (2026-09-29)
+
+**Item 3 -- highlighting.** Every scaled column now uses five formula-driven
+bands (top 10% strong green, 70-90 light green, 10-30 light red, bottom 10%
+strong red) that ignore zeros/blanks; a real zero keeps only the grey chip.
+`ProjPts`/`AggPts`/`Ceiling`/`Val`/`CeilVal` band off five hidden
+within-position percentile columns (`derived.PLAYER_METRIC_PCT_COLUMNS`,
+computed in `derived.py` over the rosterable pool by
+`_percentile_against_pool`), which sit in `sheet_columns.INTERNAL` and are
+linked onto Player Pool/Lineups/PlayerPoolRaw. Rules are custom formulas with
+relative row references, so colours follow rows through sort and filter
+(verified in the browser: sort by ProjPts, filter WR, filter QB+TE).
+`sheet_color_scales.band_rule_specs`/`column_rule_specs` build them.
+`sheet_style.apply_edge_position_scales` is deleted;
+`EDGE_UNSCALED_PLAYER_METRICS` and `GROUPED_TAB_UNSCALED_COLUMNS` are empty
+frozensets kept for compatibility. `Exposure` joined the shared system.
+Rule counts: template 2,605 -> 607, EdgeRaw 1,491 -> 104. **Leverage cut-offs
+(+/-15, +/-40, `LEVERAGE_BANDS`) were chosen by Claude, not Sam.**
+
+**Item 6, sheet side -- typed names resolve.** EdgeRaw gains a hidden last
+column `NameKey` (= `player_join.normalize_name(Name)`); a hidden `NameAlias`
+tab carries DST spellings (`sheet_names.build_name_alias_tab`, built by
+`build-views`, hidden through `sheet_style.HIDE_TABS`). Every typed-name lookup
+-- `sheet_links` and `sheet_native_links` VLOOKUPs, `sheet_pool_control`'s
+add-a-player drain (writes the canonical DK name), `pool.find_matches` --
+goes through `sheet_names.resolve_name_expr`. Parity check against the
+Python normaliser: 0 mismatches over 618 rows; the five example spellings from
+the prompt resolve in Lineups and in add-a-player. **Limitation:** Lineups'
+duplicate-lineup check and Exposure counts still compare the typed text.
+
+**Season follows the ledger, not the DK CSV.** Sam zeroes promo fees by hand
+in the ledger, so `season.read_ledger_week_totals(client, bankroll_tab, week)`
+reads `Bankroll!D/H` rows 12/13 (`sheet_bankroll_view.CASH_SUMMARY_ROW`,
+`GPP_SUMMARY_ROW`, `SUMMARY_COST_COLUMN`, `SUMMARY_NET_COLUMN`) at `week close`
+and replaces `compute_week_bankroll_net`. Week 1-3 corrected; Week 3 ending
+bankroll $249.61.
+
+**Template gaps found and restored (template AND Week 4).** `Results!D`/`G`
+formulas (copied from Week 3) and `DkSalClean` row formulas rows 2-1000
+(copied from Week 3); without the latter, PlayerPoolRaw's natives (and so
+Player Pool/Lineups) read blank. `dfs doctor` does not check either.
+
+**Player Pool duplicate names.** Stray name formulas at Player Pool rows 37/63
+(template gap) doubled RB/WR names inside the spill. `write_pool_formulas`
+now clears each block's spill area (`A{start+1}:A{end}`, from
+`weekly_reset.PLAYER_POOL_NAME_BLOCKS`) before writing.
+
+**Board unhide.** A previous hidden `J:L` stayed hidden and swallowed
+`Shootout?`/`GPS`; `style_board` now unhides `A..(GAMEID col - 1)` before
+hiding `GAMEID..LEADERS_PCT` (`sheet_views.BOARD_LEADERS_PCT_COL_INDEX`).
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-09-29 | `EdgeRaw`, `PlayerPoolRaw`, `Player Pool`, `Lineups` | Five hidden `*%ile` percentile columns added after `Flag` (INTERNAL). | INTERNAL = `Id`, `Flag`. | INTERNAL = `Id`, `Flag`, five `%ile` columns. | Template, Week 4 | `derived.PLAYER_METRIC_PCT_COLUMNS`, `derived.EDGE_COLUMNS`, `sheet_columns.INTERNAL`, `sheet_color_scales.PCT_HELPER_FOR_FIELD`. |
+| 2026-09-29 | `EdgeRaw` | Hidden `NameKey` appended as the last column. | Last column = `%ile` block. | `NameKey` last. | Template, Week 4 | `derived.EDGE_COLUMNS`, `sheet_names.resolve_name_expr`. |
+| 2026-09-29 | `NameAlias` | New hidden tab of DST aliases. | -- | Two columns (alias key, DK name). | Template, Week 4 | `sheet_names.ALIAS_TAB`, `doctor` expected-tab list, `sheet_style.HIDE_TABS`. |
+| 2026-09-29 | `Board` | Hidden `ProjPts%ile` lookup helper for the Per-position leaders block. | One hidden helper. | Two (`GPS` check, leaders percentile). | Template, Week 4 | `sheet_views.BOARD_LEADERS_PCT_COL_INDEX`, `style_board`. |
+| 2026-09-29 | `PBP` | Tab deleted (the source no longer uploads). | Present. | Gone. | Template, Week 4 (Week 3 left as is: closed) | `Source.uploads_to_sheet`. |
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and
