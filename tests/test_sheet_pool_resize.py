@@ -47,11 +47,23 @@ class SpySheetsClient:
     def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
         self.conditional_format_calls.append((tab_name, column))
 
+    def clear_conditional_formats_for(self, tab_name, targets) -> None:
+        for column, _row_range in targets:
+            self.clear_conditional_formats(tab_name, column=column)
+
     def add_color_scale(self, tab_name, a1_range, **_colors):
         self.color_scale_calls.append((tab_name, a1_range))
 
     def add_boolean_rule(self, tab_name, a1_range, **_kwargs):
         self.boolean_rule_calls.append((tab_name, a1_range))
+
+    def add_color_scales(self, tab_name, specs):
+        for spec in specs:
+            self.color_scale_calls.append((tab_name, spec["a1_range"]))
+
+    def add_boolean_rules(self, tab_name, specs):
+        for spec in specs:
+            self.boolean_rule_calls.append((tab_name, spec["a1_range"]))
 
 
 def _rb_row_29():
@@ -203,7 +215,7 @@ def test_fix_color_scale_ranges_clears_and_readds_each_linked_column_to_the_new_
 
     cleared_columns = {col for _, col in client.conditional_format_calls}
     assert cleared_columns == {"D", "E", "F"}  # CeilVal, Leverage, GameEnv per the fake header
-    ranges_added = {a1 for _, a1 in client.color_scale_calls}
+    ranges_added = {a1 for _, a1 in client.boolean_rule_calls}
     assert ranges_added == {"D2:D80", "E2:E80", "F2:F80"}
 
 
@@ -218,5 +230,5 @@ def test_fix_color_scale_ranges_reads_the_header_from_its_own_real_row():
     client = SpySheetsClient({}, header_row=2)
     fix_color_scale_ranges(client, "Player Pool", last_row=101, header_row=2)
 
-    ranges_added = {a1 for _, a1 in client.color_scale_calls}
+    ranges_added = {a1 for _, a1 in client.boolean_rule_calls}
     assert ranges_added == {"D3:D101", "E3:E101", "F3:F101"}

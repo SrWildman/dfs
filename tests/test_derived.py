@@ -8,6 +8,7 @@ from dfs.derived import (
     LINE_MOVE_FLAG_THRESHOLD,
     OWN_STATUS_REAL,
     OWN_STATUS_UNPUBLISHED,
+    PLAYER_METRIC_PCT_COLUMNS,
     ZONE_LABELS,
     _percentile_against_pool,
     _percentile_within,
@@ -543,28 +544,14 @@ def test_game_env_without_team_metrics_matches_pre_c7_formula():
     assert blowout["GameEnv"] == 25.0
 
 
-def test_gps_blank_when_not_synced():
+def test_model_implied_is_gone_from_the_edge_frame():
+    """Round 5 item 5c: GPS's "Implied Total" is Vegas, not a model, so the
+    per-player `ModelImplied` column was removed (see `gps_check.py`)."""
     proj = _projections([{"Id": "1", "Name": "A", "Team": "DET"}])
     sal = _salaries([{"ID": "1"}])
-    frame = build_edge_frame(proj, sal, gps=None).frame
-    row = frame[frame["Name"] == "A"].iloc[0]
-    assert pd.isna(row["ModelImplied"])
-
-
-def test_gps_model_implied_attached_by_team():
-    proj = _projections(
-        [
-            {"Id": "1", "Name": "A", "Team": "JAX"},
-            {"Id": "2", "Name": "B", "Team": "NE"},
-        ]
-    )
-    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
-    gps = pd.DataFrame({"Team": ["JAX", "NE"], "ImpliedTotal": [29.0, 17.5], "GPS": [2.75, 2.75]})
-    frame = build_edge_frame(proj, sal, gps=gps).frame
-    jax = frame[frame["Name"] == "A"].iloc[0]
-    ne = frame[frame["Name"] == "B"].iloc[0]
-    assert jax["ModelImplied"] == 29.0
-    assert ne["ModelImplied"] == 17.5
+    frame = build_edge_frame(proj, sal).frame
+    assert "ModelImplied" not in frame.columns
+    assert "ModelImplied" not in EDGE_COLUMNS
 
 
 def test_game_env_uses_combined_team_pace_and_proe_not_player_weighted():
@@ -1506,3 +1493,45 @@ def test_zone_labels_present_and_blank_for_every_row():
     assert list(frame.columns) == EDGE_COLUMNS
     for label in ZONE_LABELS:
         assert (frame[label] == "").all()
+
+
+# --- Round 5 item 3: within-position percentile helpers ---------------------------------------------
+
+
+def _pct_frame():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "RB1", "Position": "RB", "ProjPts": 10.0},
+            {"Id": "2", "Name": "RB2", "Position": "RB", "ProjPts": 20.0},
+            {"Id": "3", "Name": "RB3", "Position": "RB", "ProjPts": 30.0},
+            {"Id": "4", "Name": "RB0", "Position": "RB", "ProjPts": 0.0},
+            {"Id": "5", "Name": "QB1", "Position": "QB", "ProjPts": 18.0},
+            {"Id": "6", "Name": "QB2", "Position": "QB", "ProjPts": 24.0},
+        ]
+    )
+    sal = _salaries(
+        [{"ID": str(i), "Position": p} for i, p in enumerate(["RB", "RB", "RB", "RB", "QB", "QB"], 1)]
+    )
+    return build_edge_frame(proj, sal).frame.set_index("Name")
+
+
+def test_percentile_helpers_exist_on_the_edge_frame_for_every_player_metric():
+    frame = _pct_frame()
+    for pct_column in PLAYER_METRIC_PCT_COLUMNS.values():
+        assert pct_column in frame.columns and pct_column in EDGE_COLUMNS
+
+
+def test_percentile_is_within_position_not_across_positions():
+    frame = _pct_frame()
+    # RB3 (30) tops the RBs; QB2 (24) tops the QBs even though 24 < 30 -- each position on its own.
+    assert frame.loc["RB3", "ProjPts%ile"] > frame.loc["RB2", "ProjPts%ile"] > frame.loc["RB1", "ProjPts%ile"]
+    assert frame.loc["QB2", "ProjPts%ile"] > frame.loc["QB1", "ProjPts%ile"]
+    assert frame.loc["QB2", "ProjPts%ile"] == frame.loc["RB3", "ProjPts%ile"]  # both the best in their group
+
+
+def test_a_zero_or_blank_metric_gets_no_percentile_and_does_not_skew_the_others():
+    frame = _pct_frame()
+    assert pd.isna(frame.loc["RB0", "ProjPts%ile"])  # zero -> blank -> never coloured
+    # the same RB percentiles with and without the zero row present
+    without = _pct_frame().drop(index="RB0")
+    assert frame.loc["RB1", "ProjPts%ile"] == without.loc["RB1", "ProjPts%ile"]

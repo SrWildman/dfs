@@ -8,6 +8,7 @@ from dfs.sheet_links import (
     link_edge_columns,
     write_edge_row_links,
 )
+from dfs.sheet_names import resolve_name_expr
 from dfs.sheets import column_letter
 
 
@@ -39,6 +40,14 @@ class SpySheetsClient:
 
     def add_boolean_rule(self, tab_name, a1_range, **_kwargs):
         self.boolean_rule_calls.append((tab_name, a1_range))
+
+    def add_color_scales(self, tab_name, specs):
+        for spec in specs:
+            self.color_scale_calls.append((tab_name, spec["a1_range"]))
+
+    def add_boolean_rules(self, tab_name, specs):
+        for spec in specs:
+            self.boolean_rule_calls.append((tab_name, spec["a1_range"]))
 
     def group_columns(self, tab_name, first_col_a1, last_col_a1, *, collapsed=False):
         self.group_calls.append((tab_name, first_col_a1, last_col_a1, collapsed))
@@ -128,7 +137,13 @@ def test_already_linked_columns_positions_never_move():
     # GPS (2026-09-26) inserted `ModelImplied` right after `Expl%` (also
     # linked, a whole-slate join against TFFB's Pace of Play worksheet, not
     # a native per-row formula) -- shifting `GameID`/`TmRank` and everything
-    # in Ceiling detail/Movement/Weather/Usage one further right.
+    # in Ceiling detail/Movement/Weather/Usage one further right. Round 5
+    # item 5c (2026-09-29) REMOVED it again (the worksheet's "Implied
+    # Total" is Vegas, not a model), shifting all of those one back left;
+    # item 9 (same day) then inserted `OppEPA` right after `OppPosRank`,
+    # shifting `GameID`/`TmRank` and everything after one right again.
+    # Round 5 item 3 appended five hidden `*%ile` percentile helpers right
+    # after `Flag` (linked, INTERNAL) -- nothing before them moves.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         6,
         8,
@@ -139,7 +154,7 @@ def test_already_linked_columns_positions_never_move():
         18,
         19,
         20,
-        21,
+        22,
         23,
         24,
         26,
@@ -155,6 +170,11 @@ def test_already_linked_columns_positions_never_move():
         39,
         40,
         41,
+        42,
+        43,
+        44,
+        45,
+        46,
     ]
 
 
@@ -175,7 +195,8 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # Leverage's own zone -- shifting it three further right, to index 26.
     # GPS (2026-09-26) then inserted `ModelImplied` right after `Expl%`,
     # also ahead of Leverage's own zone -- shifting it one further right,
-    # to index 27. The Name-anchored range is VLOOKUP column 28 (1-based,
+    # to index 27 (and item 5c's removal of it put it back at 26). The
+    # Name-anchored range is VLOOKUP column 28 (1-based,
     # relative to Name at index 0) regardless of EDGE_DATA_OFFSET (a
     # uniform shift cancels out of a *relative* position) -- but the
     # range's own start/end letters do shift by that offset, since Pool
@@ -185,8 +206,9 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     assert EDGE_COLUMNS.index("Leverage") == 27
     start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
     end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    key = resolve_name_expr("$A5", "EdgeRaw")
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP($A5,EdgeRaw!${start_col}:${end_col},28,false))'
+        f'=IF($A5="","",VLOOKUP({key},EdgeRaw!${start_col}:${end_col},28,false))'
     )
 
 
@@ -219,7 +241,8 @@ def test_link_edge_columns_writes_header_at_first_free_column():
     # LINKED_EDGE_COLUMNS' own order -- one contiguous run, E through AC
     # (Part C's `AggPts`/`Snap%`/`Pace`/`PROE`/`Expl%` plus GPS's
     # `ModelImplied`, six more than before Part C started).
-    header_call = next(c for c in client.update_calls if c[1] == "E1:AC1")
+    last = column_letter(4 + len(LINKED_EDGE_COLUMNS) - 1)  # E is the first free column
+    header_call = next(c for c in client.update_calls if c[1] == f"E1:{last}1")
     assert header_call[2] == [LINKED_EDGE_COLUMNS]
 
 
@@ -244,11 +267,12 @@ def test_link_edge_columns_fills_every_row_in_every_block():
     # wider than before Part C started) since they're all newly appended
     # together, so each name_block still writes in one `update_range` call,
     # just a wider one than the old 10-column block.
-    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 not in ("B1:Z1",)}
-    assert "B2:Z3" in block_calls
-    assert len(block_calls["B2:Z3"]) == 2  # rows 2 and 3
-    assert "B5:Z5" in block_calls
-    assert len(block_calls["B5:Z5"]) == 1
+    last = column_letter(len(LINKED_EDGE_COLUMNS))  # B is the first free column
+    block_calls = {a1: rows for _, a1, rows in client.update_calls if a1 != f"B1:{last}1"}
+    assert f"B2:{last}3" in block_calls
+    assert len(block_calls[f"B2:{last}3"]) == 2  # rows 2 and 3
+    assert f"B5:{last}5" in block_calls
+    assert len(block_calls[f"B5:{last}5"]) == 1
 
 
 def test_link_edge_columns_repeats_header_at_given_rows():
@@ -256,9 +280,10 @@ def test_link_edge_columns_repeats_header_at_given_rows():
     link_edge_columns(client, "Lineups", [(2, 5)], "EdgeRaw", header_repeats_at=[14, 27])
 
     repeated = [a1 for _, a1, rows in client.update_calls if rows == [LINKED_EDGE_COLUMNS]]
-    assert "B1:Z1" in repeated
-    assert "B14:Z14" in repeated
-    assert "B27:Z27" in repeated
+    last = column_letter(len(LINKED_EDGE_COLUMNS))
+    assert f"B1:{last}1" in repeated
+    assert f"B14:{last}14" in repeated
+    assert f"B27:{last}27" in repeated
 
 
 def test_link_edge_columns_is_idempotent_when_already_linked():
@@ -332,7 +357,11 @@ def test_link_edge_columns_not_fooled_by_a_short_header():
 def test_link_edge_columns_applies_color_scale_to_three_columns_only():
     client = SpySheetsClient(header_row=["Name"])
     link_edge_columns(client, "Player Pool", [(2, 10)], "EdgeRaw")
-    assert len(client.color_scale_calls) == len(COLOR_SCALE_LINKED_COLUMNS)
+    # Round 5 item 3: formula bands (plus the grey zero chip) on exactly those columns.
+    assert len({a1.split(":")[0][0] for _tab, a1 in client.boolean_rule_calls}) == len(
+        COLOR_SCALE_LINKED_COLUMNS
+    )
+    assert client.color_scale_calls == []
 
 
 def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and_weather():
@@ -371,7 +400,9 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
     client = SpySheetsClient(header_row=["Name", "Pos."])  # width 2 -> next col C
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
     assert client.group_calls == [
-        ("Player Pool", "H", "X", True),  # GameEnv..Wind, merged
+        # GameEnv..Wind merged, plus USAGE's Snap% (Round 5 1b): this
+        # fixture has no USAGE label column between them, so they merge too.
+        ("Player Pool", "H", "Y", True),
     ]
 
 
@@ -381,7 +412,7 @@ def test_link_edge_columns_groups_independently_once_zone_labels_separate_them()
     # what happens before `migrate_tab_to_designed_order`'s own native-
     # provisioning step has run. Once a tab is FULLY provisioned (this
     # test's header is the real `PLAYER_POOL_COLUMN_ORDER`, labels
-    # included), each zone's own real gap column keeps the four ranges
+    # included), each zone's own real gap column keeps the five ranges
     # apart -- confirming the zone-label usability fix is what actually
     # delivers independent per-zone collapse, not just a workaround for a
     # not-yet-fully-migrated tab.
@@ -389,13 +420,14 @@ def test_link_edge_columns_groups_independently_once_zone_labels_separate_them()
     client = SpySheetsClient(header_row=header)
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw", force=True)
 
-    assert len(client.group_calls) == 4
+    assert len(client.group_calls) == 5
     assert all(collapsed is True for _tab, _start, _end, collapsed in client.group_calls)
     expected = [
         (column_letter(header.index("O/U")), column_letter(header.index("TmRank"))),
         (column_letter(header.index("CeilPct")), column_letter(header.index("OwnStatus"))),
         (column_letter(header.index("ImpliedMove")), column_letter(header.index("GameStart"))),
         (column_letter(header.index("Venue")), column_letter(header.index("Wind"))),
+        (column_letter(header.index("Snap%")), column_letter(header.index("Snap%"))),  # USAGE
     ]
     assert [(start, end) for _tab, start, end, _collapsed in client.group_calls] == expected
 
@@ -437,7 +469,7 @@ def test_link_edge_columns_only_creates_the_names_actually_missing():
     created_names = {name for row in header_writes for name in row}
     assert "GameEnv" not in created_names
     assert created_names == set(LINKED_EDGE_COLUMNS) - {"GameEnv"}
-    assert "24 newly created" in result
+    assert f"{len(LINKED_EDGE_COLUMNS) - 1} newly created" in result
 
 
 def test_link_edge_columns_run_twice_only_appends_once():
@@ -465,7 +497,7 @@ def test_edge_row_hyperlink_formula_targets_the_right_gid_and_column():
     # only this per-row HYPERLINK's visible label changed.
     assert formula == (
         f'=IF($A5="","",IFNA(HYPERLINK("#gid=999&range={start_col}"&'
-        f'MATCH($A5,EdgeRaw!${start_col}:${start_col},0),"↗"),"-"))'
+        f'MATCH({resolve_name_expr("$A5", "EdgeRaw")},EdgeRaw!${start_col}:${start_col},0),"↗"),"-"))'
     )
 
 

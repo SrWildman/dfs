@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import re
 
-from dfs.sheet_color_scales import FIELD_COLOR_SCALES, _scale_rule_specs
+from dfs.sheet_color_scales import column_rule_specs
 from dfs.sheet_links import COLOR_SCALE_LINKED_COLUMNS
 from dfs.sheets import SheetsClient, column_letter
 
@@ -200,12 +200,18 @@ def fix_color_scale_ranges(
     """
     header = client.read_range(player_pool_tab, f"A{header_row}:{header_row}")[0]
     data_start = header_row + 1
+    client.clear_conditional_formats_for(
+        player_pool_tab,
+        [(column_letter(header.index(name)), None) for name in COLOR_SCALE_LINKED_COLUMNS],
+    )
+    gradient_specs: list[dict] = []
+    boolean_specs: list[dict] = []
     for column_name in COLOR_SCALE_LINKED_COLUMNS:
-        col = column_letter(header.index(column_name))
-        client.clear_conditional_formats(player_pool_tab, column=col)
-        a1 = f"{col}{data_start}:{col}{last_row}"
-        kind = FIELD_COLOR_SCALES[column_name]
-        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, column_name, zero_exclude_range=a1)
-        client.add_color_scale(player_pool_tab, gradient_spec.pop("a1_range"), **gradient_spec)
-        if boolean_spec is not None:
-            client.add_boolean_rule(player_pool_tab, boolean_spec.pop("a1_range"), **boolean_spec)
+        # Round 5 item 3: the shared band dispatch (formula rules plus the grey zero chip).
+        gradients, booleans = column_rule_specs(
+            column_name, column_letter(header.index(column_name)), data_start, last_row, header=header
+        )
+        gradient_specs += gradients
+        boolean_specs += booleans
+    client.add_color_scales(player_pool_tab, gradient_specs)
+    client.add_boolean_rules(player_pool_tab, boolean_specs)

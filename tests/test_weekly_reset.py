@@ -152,6 +152,30 @@ def test_clear_previous_week_clears_bankroll_typed_columns_only():
     assert any("GPP" in line and "64-149" in line for line in summary)
 
 
+def test_clear_previous_week_clears_bets_typed_columns_only():
+    # Round 5, item 7: Betting's typed columns are A/B/D/E, NOT contiguous
+    # -- C (Odds) and F (Net) are formulas sitting between them, unlike
+    # Cash/GPP's single A-H block.
+    bets = EntryTableConfig(header_row=16, first_row=17, last_row=56)
+    client = SpySheetsClient()
+
+    summary = clear_previous_week(
+        client,
+        "Lineups",
+        "Player Pool",
+        "DK Upload",
+        bankroll_tab="Bankroll",
+        bankroll_bets=bets,
+    )
+
+    bankroll_calls = [ranges for tab, ranges in client.calls if tab == "Bankroll"]
+    assert bankroll_calls == [["A17:B56", "D17:E56"]]
+    for ranges in bankroll_calls:
+        for r in ranges:
+            assert not r.startswith("C") and not r.startswith("F")
+    assert any("betting" in line and "17-56" in line for line in summary)
+
+
 def test_clear_previous_week_skips_a_bucket_that_is_configured_none():
     cash = EntryTableConfig(header_row=16, first_row=17, last_row=59, entry_key_column="L")
     client = SpySheetsClient()

@@ -31,6 +31,7 @@ without re-inserting a row it already inserted.
 from __future__ import annotations
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.sheet_names import resolve_typed_name
 from dfs.sheet_style import INPUT_BG
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import (
@@ -109,7 +110,9 @@ def ensure_pool_control_row(client: SheetsClient, player_pool_tab: str, edge_tab
     return f"{player_pool_tab}: add-a-player control row ({origin}), input at {_INPUT_CELL}"
 
 
-def drain_control_cell_into_added_names(client: SheetsClient, player_pool_tab: str) -> str:
+def drain_control_cell_into_added_names(
+    client: SheetsClient, player_pool_tab: str, edge_tab: str | None = None
+) -> str:
     """A6 (2026-09-22): "Adding a player in row one of the pool works, but
     only once. If you try and add a second in the same spot, the first is
     deleted." The control cell (`_INPUT_CELL`) holds one typed name --
@@ -137,6 +140,17 @@ def drain_control_cell_into_added_names(client: SheetsClient, player_pool_tab: s
     name = control_value[0][0].strip() if control_value and control_value[0] else ""
     if not name:
         return f"{player_pool_tab}: no pending add-a-player name"
+
+    # Round 5 item 6: store DK's canonical spelling ("kenneth walker" ->
+    # "Kenneth Walker III", "KC DST" -> "Chiefs"), so every later lookup keys
+    # on a name that matches exactly. An unmatched name is kept as typed.
+    if edge_tab is not None:
+        edge_names = [
+            row[0]
+            for row in client.read_range(edge_tab, f"{_edge_name_col}2:{_edge_name_col}")
+            if row and row[0]
+        ]
+        name = resolve_typed_name(name, edge_names) or name
 
     header_row_values = client.read_range(
         player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"

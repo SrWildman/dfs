@@ -24,7 +24,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from dfs import nfl_calendar, paths, store
+from dfs import nfl_calendar, paths, perf, store
 from dfs.bankroll import (
     backfill_entry_keys,
     classify_entry,
@@ -44,17 +44,32 @@ from dfs.models import ROSTER_SLOTS
 from dfs.ownership import append_ownership, parse_ownership_export
 from dfs.pool import clear_all, find_matches, read_players, set_pool
 from dfs.results_autofill import compute_week_results, write_results_updates
+from dfs.season import (
+    extract_season_value_columns,
+    read_ledger_week_totals,
+    write_season_betting_and_ending,
+    write_season_cash_gpp,
+)
 from dfs.sheet_audit import SKIPPED_TABS, run_audit
+from dfs.sheet_bankroll_view import (
+    BETTING_LEDGER_HEADER,
+    BLOCK_ROWS,
+    HEADER_ROW,
+    build_betting_ledger,
+    compute_weekly_betting_stats,
+)
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
 from dfs.sheet_instructions import build_instructions_tab
 from dfs.sheet_lineup_metrics import write_lineup_metrics
+from dfs.sheet_lineup_tints import apply_lineup_tints
 from dfs.sheet_links import (
     PLAYER_POOL_RAW_BLOCK,
     PLAYER_POOL_RAW_TAB,
     link_edge_columns,
     write_edge_row_links,
 )
+from dfs.sheet_names import build_name_alias_tab
 from dfs.sheet_pool_control import drain_control_cell_into_added_names, ensure_pool_control_row
 from dfs.sheet_pool_deck import remove_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
@@ -63,6 +78,7 @@ from dfs.sheet_pool_resize import fix_color_scale_ranges, resize_player_pool
 from dfs.sheet_pool_usage import write_pool_usage_columns
 from dfs.sheet_protection import protect_workbook
 from dfs.sheet_reorder import migrate_tab_to_designed_order, remove_header_columns, rename_header_column
+from dfs.sheet_season_view import build_season_tab
 from dfs.sheet_style import (
     EDGE_ROWS,
     POOL_RAW_ROWS,
@@ -162,8 +178,16 @@ def main(
     json_output: bool = typer.Option(
         False, "--json", help="Emit line-delimited JSON logs instead of console output."
     ),
+    profile: bool = typer.Option(
+        False,
+        "--profile",
+        help="Print wall-clock, API request count and the slowest phases when the command exits "
+        "(same as DFS_PROFILE=1).",
+    ),
 ) -> None:
     setup_logging(verbose=verbose, json_output=json_output)
+    if profile or perf.profile_requested():
+        perf.enable_report_at_exit(" ".join(sys.argv[1:]))
     if ctx.invoked_subcommand is None:
         run_launcher()
 
@@ -349,7 +373,9 @@ def status() -> None:
     table.add_column("last synced")
     table.add_column("rows")
     table.add_column("status")
-    for source, tab in cfg.google_sheets.tab_mappings.items():
+    shown = dict(cfg.google_sheets.tab_mappings)
+    shown.update({name: "(no tab)" for name, src in SOURCES.items() if not src.uploads_to_sheet})
+    for source, tab in shown.items():
         entry = manifest.get(source)
         if entry is None:
             table.add_row(source, tab, "-", "-", "[yellow]never synced[/yellow]")
@@ -535,6 +561,82 @@ def sheets_remove_sos_placeholders(
         ]
         for tab, header_row in tabs:
             result = remove_header_columns(client, tab, sos_columns, header_row=header_row)
+            console.print(f"[green]OK[/green] {result}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+RETIRED_LINEUP_METRICS = ["Stack", "Bring-back", "Own% Used", "Sub-10%"]
+
+
+@setup_app.command(
+    "remove-lineup-metrics",
+    short_help="One-time: delete Lineups' Stack, Bring-back, Own% Used and Sub-10% columns.",
+)
+def sheets_remove_lineup_metrics(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Remove the columns from a different sheet instead of config.toml's -- e.g. the "
+        "canonical weekly template.",
+    ),
+) -> None:
+    """Round 5 item 1c (2026-09-29): Sam doesn't use `Stack`, `Bring-back`
+    or `Own% Used`, and `Sub-10%` never worked to his eye. Deletes all
+    four from Lineups (a real Sheets column delete -- everything to their
+    right shifts left, and the repeated per-block header rows go with
+    them). `Games` and `Min Unique` stay. No-op if none are present.
+    See `sheet_reorder.remove_header_columns` and CONTRIBUTING.md's
+    changelog; run `dfs doctor` afterwards."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Removing retired Lineups metrics in: [bold]{title}[/bold]\n{url}\n")
+        header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
+        result = remove_header_columns(
+            client, cfg.lineups.builder_tab, RETIRED_LINEUP_METRICS, header_row=header_row
+        )
+        console.print(f"[green]OK[/green] {result}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+@setup_app.command(
+    "remove-model-implied",
+    short_help="One-time: delete the retired ModelImplied column from the three builder tabs.",
+)
+def sheets_remove_model_implied(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Remove the column from a different sheet instead of config.toml's -- e.g. the "
+        "canonical weekly template.",
+    ),
+) -> None:
+    """Round 5 item 5c (2026-09-29): GPS's `Implied Total` is Vegas, not a
+    model (`gps_check.py`), so EdgeRaw's `ModelImplied` and its linked
+    copies on PlayerPoolRaw/Player Pool/Lineups are retired. This deletes the
+    three linked columns (a real Sheets column delete -- everything to their
+    right shifts left). EdgeRaw itself just needs a fresh `dfs sync --only
+    edge`, and `dfs setup link-edge --force` then re-derives every VLOOKUP
+    index. Run in that order; no-op per tab if the column is already gone."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Removing ModelImplied in: [bold]{title}[/bold]\n{url}\n")
+        tabs = [
+            (PLAYER_POOL_RAW_TAB, 1),
+            (cfg.lineups.player_pool_tab, PLAYER_POOL_HEADER_ROW),
+            (cfg.lineups.builder_tab, 1),
+        ]
+        for tab, header_row in tabs:
+            result = remove_header_columns(client, tab, ["ModelImplied"], header_row=header_row)
             console.print(f"[green]OK[/green] {result}")
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -828,6 +930,8 @@ def sheets_polish(
 
     client = SheetsClient(gs_cfg)
     results: list[str] = []
+    batch = client.batched()  # item 2: queue formatting requests, send them together
+    batch.__enter__()
     try:
         title, url = client.describe()
         console.print(f"Styling: [bold]{title}[/bold]\n{url}\n")
@@ -859,6 +963,16 @@ def sheets_polish(
                 header_repeats_at=header_repeats_at,
                 band_blocks=LINEUPS_NAME_BLOCKS,
                 color_scale_groups=LINEUPS_NAME_BLOCKS,
+            )
+        )
+        # Correlation tints go in BEFORE the guardrails: rules added later
+        # sit higher in priority, so a red warning still beats a tint.
+        results.append(
+            apply_lineup_tints(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
             )
         )
         results.append(
@@ -949,6 +1063,8 @@ def sheets_polish(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)  # flush anything still queued
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
@@ -984,6 +1100,8 @@ def sheets_build_views(
         raise typer.Exit(code=1)
 
     client = SheetsClient(gs_cfg)
+    batch = client.batched()  # item 2: queue writes, send them together
+    batch.__enter__()
     try:
         title, url = client.describe()
         console.print(f"Building view tabs in: [bold]{title}[/bold]\n{url}\n")
@@ -1007,10 +1125,13 @@ def sheets_build_views(
                 lineups_header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
             ),
             build_movement(client, edge_tab=edge_tab),
+            build_name_alias_tab(client),
         ]
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)  # flush anything still queued
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
@@ -1045,10 +1166,55 @@ def sheets_instructions(
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
     client = SheetsClient(gs_cfg)
+    batch = client.batched()  # item 2: queue writes, send them together
+    batch.__enter__()
     try:
         title, url = client.describe()
         console.print(f"Regenerating Instructions in: [bold]{title}[/bold]\n{url}\n")
         result = build_instructions_tab(client)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)  # flush anything still queued
+    console.print(f"[green]OK[/green] {result}")
+
+
+@setup_app.command("build-season", short_help="One-time build of the Season tab.")
+def sheets_build_season(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build on a different sheet instead of config.toml's -- template first, then live, "
+        "per the two-sheet rule.",
+    ),
+) -> None:
+    """Round 5, item 7d: creates (or completely rewrites) the Season tab --
+    one pre-built row per NFL week, a year-to-date rollup, and a
+    cumulative-net-by-week chart. See `sheet_season_view.py`'s module
+    docstring for the full column layout.
+
+    NOT safe to re-run against a sheet that already has real weekly data
+    in it -- this always rewrites the whole tab from scratch. It's a
+    one-time setup step, not a per-week command; `season.py`'s
+    `write_season_cash_gpp`/`write_season_betting_and_ending` (wired into
+    `dfs bankroll sync`/`dfs week close`) are what update it after this.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Building {cfg.season.tab!r} on: [bold]{title}[/bold]\n{url}\n")
+        if client.tab_exists(cfg.season.tab):
+            existing = client.read_range(cfg.season.tab, f"A{cfg.season.first_row}:B{cfg.season.first_row}")
+            if existing and existing[0] and any(v.strip() for v in existing[0][1:2]):
+                console.print(
+                    f"[red]{cfg.season.tab!r} row {cfg.season.first_row} already has data in it -- "
+                    "refusing to rewrite a tab that looks already in use.[/red]"
+                )
+                raise typer.Exit(code=1)
+        result = build_season_tab(client, cfg.season.tab)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -1100,6 +1266,8 @@ def sheets_link_edge(
         raise typer.Exit(code=1)
 
     client = SheetsClient(gs_cfg)
+    batch = client.batched()  # item 2: queue writes, send them together
+    batch.__enter__()
     try:
         title, url = client.describe()
         console.print(
@@ -1160,6 +1328,8 @@ def sheets_link_edge(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)  # flush anything still queued
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
@@ -1213,6 +1383,8 @@ def sheets_reorder_columns(
         raise typer.Exit(code=1)
 
     client = SheetsClient(gs_cfg)
+    batch = client.batched()  # item 2: queue writes, send them together
+    batch.__enter__()
     try:
         title, url = client.describe()
         console.print(
@@ -1275,6 +1447,8 @@ def sheets_reorder_columns(
     except (SheetsError, ValueError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)  # flush anything still queued
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
@@ -1427,6 +1601,8 @@ def sheets_add_filters(
         raise typer.Exit(code=1)
 
     client = SheetsClient(gs_cfg)
+    batch = client.batched()  # item 2: queue writes, send them together
+    batch.__enter__()
     try:
         title, url = client.describe()
         console.print(f"Adding filters to: [bold]{title}[/bold]\n{url}\n")
@@ -1435,6 +1611,8 @@ def sheets_add_filters(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)  # flush anything still queued
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
@@ -1460,6 +1638,8 @@ def sheets_protect(
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
     client = SheetsClient(gs_cfg)
+    batch = client.batched()  # item 2: queue writes, send them together
+    batch.__enter__()
     try:
         title, url = client.describe()
         console.print(f"Protecting: [bold]{title}[/bold]\n{url}\n")
@@ -1469,6 +1649,8 @@ def sheets_protect(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)  # flush anything still queued
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
@@ -1720,9 +1902,16 @@ def sync(
         "and print what changed in EdgeRaw's Flag column since the last sync. The "
         "Sunday-afternoon command -- not a substitute for a full `dfs sync`.",
     ),
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Write to this sheet instead of config.toml's (e.g. the template)."
+    ),
 ) -> None:
     """Fetch data sources and upload them to the connected Google Sheet."""
     cfg = _load_config_or_exit()
+    if sheet_id:
+        cfg = cfg.model_copy(
+            update={"google_sheets": cfg.google_sheets.model_copy(update={"sheet_id": sheet_id})}
+        )
 
     if live and only:
         console.print(
@@ -1788,7 +1977,9 @@ def sync(
     if not no_upload:
         try:
             drain_result = drain_control_cell_into_added_names(
-                SheetsClient(cfg.google_sheets), cfg.lineups.player_pool_tab
+                SheetsClient(cfg.google_sheets),
+                cfg.lineups.player_pool_tab,
+                edge_tab=cfg.google_sheets.tab_mappings.get("edge"),
             )
             console.print(f"[green]OK[/green] {drain_result}")
         except SheetsError as e:
@@ -2352,6 +2543,15 @@ def week_new(
     if weeks_found:
         console.print(f"\n{results_cfg.tab!r} weeks to carry forward: {', '.join(weeks_found)}")
 
+    season_cfg = cfg.season
+    season_rows: list[list[str]] = []
+    try:
+        season_rows = old_client.read_range(season_cfg.tab, f"A{season_cfg.first_row}:M{season_cfg.last_row}")
+    except SheetsError:
+        console.print(
+            f"\n[yellow]No {season_cfg.tab!r} tab on the current sheet -- nothing to carry forward.[/yellow]"
+        )
+
     if needs_rename:
         confirm_prompt = (
             f'\nThis sheet will be titled "{target_title}" (currently "{new_title}"). Rewrite '
@@ -2406,6 +2606,19 @@ def week_new(
             raise typer.Exit(code=1) from e
         console.print(f"[green]OK[/green] carried {len(weeks_found)} week(s) of {results_cfg.tab!r} forward")
 
+    if season_rows:
+        try:
+            for col_range, values in extract_season_value_columns(season_rows).items():
+                start, _, end = col_range.partition(":")
+                end = end or start
+                new_client.update_range(
+                    season_cfg.tab, f"{start}{season_cfg.first_row}:{end}{season_cfg.last_row}", values
+                )
+        except SheetsError as e:
+            console.print(f"[red]Could not write {season_cfg.tab!r} on the new sheet:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        console.print(f"[green]OK[/green] carried {season_cfg.tab!r} forward")
+
     try:
         summary = clear_previous_week(
             new_client,
@@ -2415,6 +2628,7 @@ def week_new(
             bankroll_tab=cfg.bankroll.tab,
             bankroll_cash=cfg.bankroll.cash,
             bankroll_gpp=cfg.bankroll.gpp,
+            bankroll_bets=cfg.bankroll.bets,
         )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -2499,7 +2713,7 @@ def week_close(
     """
     cfg = _load_config_or_exit()
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
-    _sync_bankroll_from_csv(cfg, csv, week=week)
+    _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
 
 
 @bankroll_app.command("sync")
@@ -2595,6 +2809,58 @@ def bankroll_backfill_keys(
             console.print(f"  unmatched rows (no CSV match, left alone): {result.unmatched_rows}")
 
 
+@bankroll_app.command("build-betting-ledger")
+def bankroll_build_betting_ledger(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build on a different sheet instead of config.toml's -- template first, then live, "
+        "per the two-sheet rule. This is a one-time structural build, not a per-week command.",
+    ),
+) -> None:
+    """Round 5, item 7a: insert the hand-entered Betting ledger above the
+    Cash ledger (see `sheet_bankroll_view.py`'s module docstring for why
+    above Cash rather than below GPP), wire its Net into the existing
+    Weekly Net rollup, and add the weekly summary row + pending-bet note.
+
+    One-time and NOT safe to re-run against a sheet that already has the
+    block -- it always inserts, never checks first. Run `dfs doctor`
+    afterward; it will report a blank `bankroll.bets.header_row` if this
+    was never run.
+    """
+    cfg = _load_config_or_exit()
+    if cfg.bankroll.bets is None:
+        console.print(
+            "[red]config.toml is missing [bankroll.bets][/red] -- add it (see "
+            "config.example.toml) with the post-insert row numbers before running this."
+        )
+        raise typer.Exit(code=1)
+
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Building Betting ledger on: [bold]{title}[/bold]\n{url}\n")
+        existing_header = client.read_range(cfg.bankroll.tab, f"A{HEADER_ROW}:A{HEADER_ROW}")
+        existing_value = existing_header[0][0] if existing_header and existing_header[0] else ""
+        if existing_value.strip() == BETTING_LEDGER_HEADER[0]:
+            console.print(
+                f"[red]{cfg.bankroll.tab}!A{HEADER_ROW} is already {existing_value!r} -- "
+                "the Betting ledger looks already built here. Refusing to insert a second time."
+            )
+            raise typer.Exit(code=1)
+        build_betting_ledger(client, cfg.bankroll.tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    console.print(
+        f"Inserted {BLOCK_ROWS} rows at row {HEADER_ROW}. Cash/GPP shifted down by "
+        f"{BLOCK_ROWS} rows -- update config.toml's [bankroll.cash]/[bankroll.gpp] row numbers "
+        f"to match (old value + {BLOCK_ROWS}), then run `dfs doctor`."
+    )
+
+
 @ownership_app.command("log")
 def ownership_log(
     csv: Path = typer.Option(
@@ -2661,13 +2927,19 @@ def ownership_log(
     )
 
 
-def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None) -> None:
+def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, close: bool = False) -> None:
     """Shared by `bankroll sync` and `week close` -- see week_close's
     docstring for why `week close` doesn't yet pull contest history itself
     and still needs this same `--csv` export as an input.
 
     `week`, when given, overrides the week the ledger is scoped to (see
     below) -- for the rare case of reconciling a specific week by hand.
+
+    `close`, set only by `week close`, gates the Season tab's Betting net/
+    risked/record and Ending Bankroll write (Round 5, item 7d) -- those
+    only mean "the week is done," so a mid-week `bankroll sync` re-run
+    must not write a still-incomplete Ending balance into the Season row.
+    Season's Cash/GPP net backfill runs either way, same as Results.
     """
     if cfg.bankroll.cash is None or cfg.bankroll.gpp is None:
         console.print(
@@ -2778,6 +3050,73 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None) 
     if written_weeks:
         weeks_str = ", ".join(str(w) for w in written_weeks)
         console.print(f"\n[green]OK[/green] updated {cfg.results.tab!r} for week(s): {weeks_str}")
+
+    # Round 5, item 7d (revised 2026-09-29): Season follows the LEDGER. This
+    # week's Cash/GPP net and cost come from the Bankroll tab's own weekly
+    # summary (so a promo entry Sam zeroed stays zero), and past weeks are
+    # never re-derived from the export. Betting net/risked/record and Ending
+    # are gated to `week close` (`close=True`): mid-week they'd be incomplete.
+    try:
+        season_written = write_season_cash_gpp(
+            client,
+            cfg.season,
+            {resolved_week: read_ledger_week_totals(client, cfg.bankroll.tab, resolved_week)},
+        )
+    except SheetsError as e:
+        console.print(f"[red]Could not write {cfg.season.tab!r}:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    if season_written:
+        console.print(
+            f"[green]OK[/green] updated {cfg.season.tab!r} Cash/GPP for week {resolved_week} "
+            "from this sheet's ledger"
+        )
+
+    if close and cfg.bankroll.bets is not None:
+        bets_cfg = cfg.bankroll.bets
+        try:
+            # Unformatted reads -- Odds %/Entered/Won carry currency/percent
+            # DISPLAY formats (see sheet_bankroll_view.py), and a formatted
+            # read would hand back strings like "$10.00"/"53.3%" that
+            # compute_weekly_betting_stats expects as plain floats.
+            ledger_rows = client.read_range_unformatted(
+                cfg.bankroll.tab, f"B{bets_cfg.first_row}:E{bets_cfg.last_row}"
+            )
+            ending_rows = client.read_range_unformatted(cfg.bankroll.tab, "B2")
+        except SheetsError as e:
+            console.print(f"[red]Could not read {cfg.bankroll.tab!r} for the Season close:[/red] {e}")
+            raise typer.Exit(code=1) from e
+
+        def _cell(row: list, idx: int) -> float | None:
+            if idx >= len(row):
+                return None
+            v = row[idx]
+            return v if isinstance(v, (int, float)) else None
+
+        betting_rows = [(_cell(r, 0), _cell(r, 2), _cell(r, 3)) for r in ledger_rows]
+        betting_stats = compute_weekly_betting_stats(betting_rows)
+        ending_bankroll = _cell(ending_rows[0], 0) if ending_rows and ending_rows[0] else None
+
+        try:
+            closed = write_season_betting_and_ending(
+                client,
+                cfg.season,
+                resolved_week,
+                betting_stats=betting_stats,
+                ending_bankroll=ending_bankroll,
+            )
+        except SheetsError as e:
+            console.print(f"[red]Could not write {cfg.season.tab!r} Betting/Ending:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        if closed:
+            console.print(
+                f"[green]OK[/green] {cfg.season.tab!r} week {resolved_week}: betting net "
+                f"{betting_stats.net:.2f}, ending bankroll {ending_bankroll}"
+            )
+        else:
+            console.print(
+                f"[yellow]{cfg.season.tab!r} has no row for week {resolved_week} -- Betting/Ending not "
+                "written.[/yellow]"
+            )
 
     if any_skipped:
         console.print(

@@ -172,6 +172,20 @@ def _clear_bankroll_bucket(
     return f"{bankroll_tab}: cleared {label} contest rows {table_cfg.first_row}-{table_cfg.last_row}"
 
 
+def _clear_bankroll_bets(client: SheetsClient, bankroll_tab: str, table_cfg: EntryTableConfig) -> str:
+    # Round 5, item 7: the Betting ledger's typed columns are A (Name), B
+    # (Odds %), D (Entered), E (Won) -- NOT contiguous, since C (Odds) and
+    # F (Net) are formulas sitting between them (see
+    # `sheet_bankroll_view.py`). Unlike Cash/GPP's single A-H block, this
+    # needs two separate ranges so the formula columns are never touched.
+    ranges = [
+        f"A{table_cfg.first_row}:B{table_cfg.last_row}",
+        f"D{table_cfg.first_row}:E{table_cfg.last_row}",
+    ]
+    client.clear_ranges(bankroll_tab, ranges)
+    return f"{bankroll_tab}: cleared betting rows {table_cfg.first_row}-{table_cfg.last_row}"
+
+
 def clear_previous_week(
     client: SheetsClient,
     lineups_tab: str,
@@ -181,6 +195,7 @@ def clear_previous_week(
     bankroll_tab: str | None = None,
     bankroll_cash: EntryTableConfig | None = None,
     bankroll_gpp: EntryTableConfig | None = None,
+    bankroll_bets: EntryTableConfig | None = None,
 ) -> list[str]:
     """Clear last week's lineup data. Returns a human-readable line per tab
     describing what was cleared, for CLI display.
@@ -258,6 +273,8 @@ def clear_previous_week(
         summary.append(_clear_bankroll_bucket(client, bankroll_tab, "cash", bankroll_cash))
     if bankroll_tab and bankroll_gpp:
         summary.append(_clear_bankroll_bucket(client, bankroll_tab, "GPP", bankroll_gpp))
+    if bankroll_tab and bankroll_bets:
+        summary.append(_clear_bankroll_bets(client, bankroll_tab, bankroll_bets))
 
     return summary
 

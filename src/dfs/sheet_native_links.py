@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dfs.column_reorder import group_into_contiguous_runs
 from dfs.sheet_columns import PLAYER_POOL_RAW_COLUMN_ORDER
+from dfs.sheet_names import resolve_name_expr
 from dfs.sheets import SheetsClient, column_letter
 
 NATIVE_LOOKUP_COLUMNS = [
@@ -44,7 +45,7 @@ NATIVE_LOOKUP_COLUMNS = [
 _OPTIONAL_NATIVE_COLUMNS = {"O/U", "Spread", "Team Implied"}
 
 
-def native_lookup_formula(row: int, column_name: str) -> str:
+def native_lookup_formula(row: int, column_name: str, edge_tab: str = "EdgeRaw") -> str:
     """The VLOOKUP-by-Name formula for one cell on Player Pool/Lineups,
     pulling `column_name` off PlayerPoolRaw -- `row`'s player Name (this
     tab's own column A) looked up against PlayerPoolRaw, range always
@@ -55,7 +56,8 @@ def native_lookup_formula(row: int, column_name: str) -> str:
     columns)."""
     index = PLAYER_POOL_RAW_COLUMN_ORDER.index(column_name) + 1  # 1-based, range starts at A
     col = column_letter(index - 1)
-    base = f"VLOOKUP($A{row},PlayerPoolRaw!$A:${col},{index},false)"
+    # Round 5 item 6: resolve the typed name to DK's canonical spelling first.
+    base = f"VLOOKUP({resolve_name_expr(f'$A{row}', edge_tab)},PlayerPoolRaw!$A:${col},{index},false)"
     lookup = f"IFNA({base})" if column_name in _OPTIONAL_NATIVE_COLUMNS else base
     return f'=IF($A{row}="","",{lookup})'
 

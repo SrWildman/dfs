@@ -60,9 +60,9 @@ def test_writes_the_doc_links_header_and_all_five_link_rows():
     build_instructions_tab(client)
     cells = _cells(client)
 
-    assert cells["A27:B27"] == ["Full documentation", _DOC_LINK_ROWS[0]]
-    assert cells["A28:B28"] == ["", _DOC_LINK_ROWS[1]]
-    assert cells["A31:B31"] == ["", _DOC_LINK_ROWS[4]]
+    assert cells["A28:B28"] == ["Full documentation", _DOC_LINK_ROWS[0]]
+    assert cells["A29:B29"] == ["", _DOC_LINK_ROWS[1]]
+    assert cells["A32:B32"] == ["", _DOC_LINK_ROWS[4]]
 
 
 def test_player_pool_row_derives_caps_and_column_letters_not_hardcoded():

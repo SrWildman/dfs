@@ -20,6 +20,7 @@ from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
+from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sources.edge import POOL_HEADER
 from dfs.week import parse_week_from_title
@@ -131,6 +132,8 @@ def _expected_tabs(cfg: Config) -> set[str]:
     tabs.add(cfg.lineups.player_pool_tab)
     tabs.add(cfg.bankroll.tab)
     tabs.add(cfg.results.tab)
+    tabs.add(cfg.season.tab)
+    tabs.add(ALIAS_TAB)
     tabs.add(PLAYER_POOL_RAW_TAB)
     return tabs
 
@@ -230,7 +233,7 @@ def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[s
         return []
 
     issues = []
-    for label, table in (("cash", cfg.bankroll.cash), ("gpp", cfg.bankroll.gpp)):
+    for label, table in (("cash", cfg.bankroll.cash), ("gpp", cfg.bankroll.gpp), ("bets", cfg.bankroll.bets)):
         if table is None:
             continue
         row = client.read_range(tab, f"A{table.header_row}:{table.header_row}")

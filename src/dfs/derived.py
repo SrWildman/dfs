@@ -74,7 +74,7 @@ import numpy as np
 import pandas as pd
 
 from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
-from dfs.player_join import JoinResult, join_source_to_dk
+from dfs.player_join import JoinResult, join_source_to_dk, normalize_name
 from dfs.team_metrics import GAME_ENV_WEIGHTS, combined_by_game, weighted_mean_skipna
 
 # Leverage = CeilPct - OwnPct, both percentile ranks on the same 0-100
@@ -285,6 +285,17 @@ WEATHER_LABEL = "WX"
 # like CEIL/MOVE/WX) since "Usage" is already short.
 USAGE_LABEL = "USAGE"
 
+# Round 5 item 3: `metric -> hidden percentile column` (within-position, over the
+# rosterable pool `_rosterable_pool_mask`, zeros/blanks excluded). The five
+# player-performance metrics whose raw value is NOT comparable across positions.
+PLAYER_METRIC_PCT_COLUMNS = {
+    "ProjPts": "ProjPts%ile",
+    "AggPts": "AggPts%ile",
+    "Ceiling": "Ceiling%ile",
+    "Val": "Val%ile",
+    "CeilVal": "CeilVal%ile",
+}
+
 EDGE_COLUMNS = [
     # SPINE
     "Name",
@@ -335,18 +346,21 @@ EDGE_COLUMNS = [
     "Pace",
     "PROE",
     "Expl%",
-    # GPS (2026-09-26): this player's own team's model-implied total from
-    # Kyle Borgognoni's TFFB Pace of Play worksheet (`sources/tffb_gps.py`)
-    # -- a pace/EPA model's own team score, not a market, placed beside
-    # the other GAME-group per-team metrics it's computed the same way as
-    # (`_attach_gps`). Append-only per PROMPT_GPS.md's own instruction.
-    "ModelImplied",
+    # `ModelImplied` (GPS, 2026-09-26) was REMOVED in Round 5 item 5c: the
+    # worksheet's `Implied Total` turned out to be Vegas, not a model (see
+    # `gps_check.py`), so the column only ever repeated the market.
     # Sam: "all data should be in edge raw" -- computed the same way
     # PlayerPoolRaw's own (now-fixed) `OppPosRank` is, but natively in
     # Python from the already-synced sos_qb/rb/wr/te/dst CSVs rather than
     # a live Sheets formula, matching EdgeRaw's own "computed locally, no
     # live formulas" design. See `_attach_opp_pos_rank` below.
     "OppPosRank",
+    # Round 5 item 9: a steadier matchup signal than `OppPosRank` (TFFB's
+    # fantasy-points-allowed rank, very noisy this early) -- the opponent's
+    # EPA-per-play efficiency from our own play-by-play. One column, the input
+    # depends on position; see `_attach_opp_epa` and docs/CALCULATIONS.md.
+    # Higher = a softer matchup for EVERY position.
+    "OppEPA",
     # Part 7.4 (2026-09-18): makes stacks visible. `GameID` was already
     # computed internally (`_attach_games`, as `GameId`) to join Stadium/
     # Roof/Wind, then dropped before this -- now kept and renamed to match
@@ -392,6 +406,12 @@ EDGE_COLUMNS = [
     # value; "Flags" (on the spine, above) is what a person reads.
     "Id",
     "Flag",
+    # Round 5 item 3: each player metric's standing within his position, hidden
+    # helpers the highlighting rules read (see `PLAYER_METRIC_PCT_COLUMNS`).
+    *PLAYER_METRIC_PCT_COLUMNS.values(),
+    # Round 5 item 6: `player_join.normalize_name(Name)` -- the key typed names
+    # are matched against (see `sheet_names.py`). Hidden, appended last.
+    "NameKey",
 ]
 
 # The four zone labels, in the same left-to-right order they appear --
@@ -633,24 +653,6 @@ def _attach_team_metrics(merged: pd.DataFrame, team_metrics: pd.DataFrame | None
     return merged
 
 
-def _attach_gps(merged: pd.DataFrame, gps: pd.DataFrame | None) -> pd.DataFrame:
-    """`ModelImplied` joined onto each player's row by his own `Team` --
-    `gps` is `sources/tffb_gps.py`'s own shape (`Team`/`ImpliedTotal`/
-    `GPS`), a whole-slate Python join exactly like `_attach_team_metrics`'s.
-    Only `ImpliedTotal` is surfaced on EdgeRaw (as `ModelImplied`) -- `GPS`
-    itself is a per-GAME score, not a per-player one, and belongs on
-    Slate Grid/Board's Slate shape (see `sheet_views.py`), not here.
-    Missing entirely (the article isn't published yet, or the fetch
-    failed) blanks `ModelImplied` for every row -- same fail-soft contract
-    as every other optional input here."""
-    if gps is None:
-        merged["ModelImplied"] = pd.NA
-        return merged
-    by_team = gps.set_index("Team")
-    merged["ModelImplied"] = merged["Team"].map(by_team["ImpliedTotal"])
-    return merged
-
-
 def _game_env_scores(
     game: pd.Series, ou: pd.Series, spread: pd.Series, team: pd.Series, pace: pd.Series, proe: pd.Series
 ) -> pd.Series:
@@ -758,6 +760,36 @@ def _attach_opp_pos_rank(
         return lookup.get(row["Opp"], pd.NA)
 
     merged["OppPosRank"] = merged.apply(_rank_for_row, axis=1)
+    return merged
+
+
+def _attach_opp_epa(merged: pd.DataFrame, team_metrics: pd.DataFrame | None) -> pd.DataFrame:
+    """Round 5 item 9: `OppEPA`, ONE column whose input depends on position --
+    higher always means a softer matchup:
+
+    - QB/WR/TE: the opponent defense's `DefEPA/Pass` (EPA per pass play allowed);
+    - RB: the opponent defense's `DefEPA/Rush`;
+    - DST: the OPPOSING OFFENSE's `OffEPA/Play` with the sign FLIPPED -- a
+      bad offense (negative EPA) is a good matchup for a defense, so
+      `-OffEPA/Play` keeps "higher = better" for every position.
+
+    Keyed by the player's `Opp` (a DK team code, like `team_metrics.Team`). A
+    team missing from the pbp data -- or pbp not synced at all -- leaves
+    `OppEPA` blank, never 0 (blank is not zero, same rule as every other
+    optional input)."""
+    if team_metrics is None or "DefEPA/Pass" not in team_metrics.columns:
+        merged["OppEPA"] = pd.NA
+        return merged
+    by_team = team_metrics.set_index("Team")
+    pass_allowed = merged["Opp"].map(by_team["DefEPA/Pass"])
+    rush_allowed = merged["Opp"].map(by_team["DefEPA/Rush"])
+    dst_matchup = -merged["Opp"].map(by_team["OffEPA/Play"])
+    position = merged["Position"].astype(str).str.upper()
+    oppepa = pd.Series(pd.NA, index=merged.index, dtype="object")
+    oppepa = oppepa.mask(position.isin(["QB", "WR", "TE"]), pass_allowed)
+    oppepa = oppepa.mask(position == "RB", rush_allowed)
+    oppepa = oppepa.mask(position == "DST", dst_matchup)
+    merged["OppEPA"] = pd.to_numeric(oppepa, errors="coerce")
     return merged
 
 
@@ -966,6 +998,7 @@ def _attach_snaps(
         source_position_col="Position",
         source="snaps",
         pool_mask=pool_mask,
+        expect_dst=False,  # defenses have no snap counts by design
     )
     matched = result.matched[["Id", "Snap%"]].drop_duplicates(subset="Id", keep="first")
     snap_pct = dk_frame.merge(matched, on="Id", how="left")["Snap%"]
@@ -1027,7 +1060,6 @@ def build_edge_frame(
     fantasypros: pd.DataFrame | None = None,
     snaps: pd.DataFrame | None = None,
     team_metrics: pd.DataFrame | None = None,
-    gps: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -1060,10 +1092,7 @@ def build_edge_frame(
     `GameEnv` indirectly (see `_game_env_scores`); missing it blanks the
     three team-metric columns and `GameEnv` silently reduces to its
     pre-C7, Vegas-only formula, same fail-soft contract as everything else
-    optional here. `gps` is `sources/tffb_gps.py`'s own shape (`Team`/
-    `ImpliedTotal`/`GPS`) -- optional, feeds only `ModelImplied` (see
-    `_attach_gps`); missing it blanks `ModelImplied` for every row, same
-    fail-soft contract as everything else optional here.
+    optional here.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -1134,7 +1163,6 @@ def build_edge_frame(
     merged["_LeverageFlagEligible"] = _leverage_flag_eligible(merged["Leverage"], val_adj_pool)
 
     merged = _attach_team_metrics(merged, team_metrics)
-    merged = _attach_gps(merged, gps)
     merged["GameEnv"] = _game_env_scores(
         merged["Game"], merged["OU"], merged["Spread"], merged["Team"], merged["Pace"], merged["PROE"]
     )
@@ -1154,6 +1182,7 @@ def build_edge_frame(
     merged = merged.rename(columns={"GameId": "GameID"})
     merged = _attach_line_movement(merged, line_movement)
     merged = _attach_opp_pos_rank(merged, sos_by_position)
+    merged = _attach_opp_epa(merged, team_metrics)
     merged["Snap%"], snaps_join = _attach_snaps(merged, snaps, val_adj_pool)
     if snaps_join is not None:
         source_joins["snaps"] = snaps_join
@@ -1169,6 +1198,16 @@ def build_edge_frame(
     # Part 7.9: "Flag" is just the single highest-priority token (empty
     # string, not NaN, when nothing fired -- consistent with "Flags").
     merged["Flag"] = flag_lists.apply(lambda flags: flags[0] if flags else "")
+    merged["NameKey"] = merged["Name"].map(normalize_name)
+    # Round 5 item 3: within-position percentile of each player metric over the
+    # rosterable pool, zeros and blanks excluded (they are neither in the
+    # reference distribution nor given a percentile), computed ONCE so the same
+    # player reads the same colour on every tab. Highlighting rules key off these.
+    for metric, pct_column in PLAYER_METRIC_PCT_COLUMNS.items():
+        values = pd.to_numeric(merged[metric], errors="coerce")
+        merged[pct_column] = _percentile_against_pool(
+            values.where(values != 0), merged["Position"], val_adj_pool
+        ).round(1)
 
     # Part 7.2: `ValAdj` is EdgeRaw's default sort now -- Part 7.1 demoted
     # `Leverage` off the spine specifically because it's no longer a

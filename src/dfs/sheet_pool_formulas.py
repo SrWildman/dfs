@@ -94,6 +94,7 @@ everywhere, no `FILTER` needed.
 from __future__ import annotations
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.sheet_names import resolve_name_expr
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_TYPE_SORT_ORDER
 from dfs.weekly_reset import (
@@ -234,13 +235,14 @@ def _union_array(edge_tab: str, position: str, added_range: str) -> str:
         f'{edge_tab}!${POOL_COLUMN}$2:${POOL_COLUMN}<>"",'
         f'{edge_tab}!${_EDGE_POSITION_COL}$2:${_EDGE_POSITION_COL}="{position}")'
     )
+    # Round 5 item 6: whatever is typed in the control cell is resolved to DK's
+    # canonical name first, so "kenneth walker" adds Kenneth Walker III.
+    control_resolved = resolve_name_expr(_CONTROL_CELL, edge_tab)
     control_position = (
-        f"IFERROR(VLOOKUP({_CONTROL_CELL},{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_POSITION_COL},"
+        f"IFERROR(VLOOKUP({control_resolved},{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_POSITION_COL},"
         f'{_EDGE_POSITION_VLOOKUP_INDEX},FALSE),"")'
     )
-    control_names = (
-        f'FILTER({_CONTROL_CELL}:{_CONTROL_CELL},{_CONTROL_CELL}<>"",{control_position}="{position}")'
-    )
+    control_names = f'FILTER({{{control_resolved}}},{_CONTROL_CELL}<>"",{control_position}="{position}")'
     # Pool (EdgeRaw column A) sits to the LEFT of Name -- plain VLOOKUP
     # can only look rightward of its own lookup column, same reason
     # `_pool_type_formula` below uses INDEX/MATCH instead of VLOOKUP.
@@ -248,7 +250,7 @@ def _union_array(edge_tab: str, position: str, added_range: str) -> str:
     # this MATCH needs no FILTER wrapper to broadcast correctly.
     control_pool_tag = (
         f"IFERROR(INDEX({edge_tab}!${POOL_COLUMN}:${POOL_COLUMN},"
-        f'MATCH({_CONTROL_CELL},{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_NAME_COL},0)),"")'
+        f'MATCH({control_resolved},{edge_tab}!${_EDGE_NAME_COL}:${_EDGE_NAME_COL},0)),"")'
     )
     control_tag_rank = f"IFERROR(MATCH({control_pool_tag},{_TAG_RANK_ARRAY},0),{_UNKNOWN_TAG_RANK})"
     control_filter = (
@@ -472,6 +474,12 @@ def write_pool_formulas(
 
         name_cell = f"{_NAME_COLUMN}{start}"
         overflow_cell = f"{overflow_col}{start}"
+        # The block's name formula SPILLS down its own slots, so every cell below the
+        # start must hold nothing typed. A stray formula left there by an older block
+        # layout (found live: leftover name formulas at rows 37 and 63 of the template's
+        # RB and WR blocks) shows the same players a second time.
+        if end > start:
+            client.clear_ranges(player_pool_tab, [f"{_NAME_COLUMN}{start + 1}:{_NAME_COLUMN}{end}"])
         client.update_range(
             player_pool_tab, name_cell, [[_name_formula(edge_tab, position, cap, added_range)]]
         )

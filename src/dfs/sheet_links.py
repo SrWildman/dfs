@@ -26,10 +26,12 @@ by hand first).
 
 from __future__ import annotations
 
+from dfs import perf
 from dfs.column_reorder import group_into_contiguous_runs
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
-from dfs.sheet_color_scales import FIELD_COLOR_SCALES, _scale_rule_specs
-from dfs.sheet_columns import CEILING_DETAIL, GAME, LINKED_COLUMNS, MOVEMENT, WEATHER
+from dfs.sheet_color_scales import column_rule_specs
+from dfs.sheet_columns import CEILING_DETAIL, GAME, LINKED_COLUMNS, MOVEMENT, USAGE, WEATHER
+from dfs.sheet_names import resolve_name_expr
 from dfs.sheets import SheetsClient, column_letter
 
 # The EdgeRaw columns worth surfacing elsewhere -- excludes what Player
@@ -86,7 +88,10 @@ def edge_lookup_formula(row: int, edge_tab: str, column_name: str) -> str:
     with more capacity than actual picks showed a wall of `#N/A` across
     every linked column instead of just sitting empty."""
     index = _vlookup_index(column_name)
-    base = f"VLOOKUP($A{row},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_END},{index},false)"
+    # Round 5 item 6: the typed name is resolved to DK's canonical spelling first
+    # (`sheet_names.resolve_name_expr`), so "kenneth walker" finds Kenneth Walker III.
+    key = resolve_name_expr(f"$A{row}", edge_tab)
+    base = f"VLOOKUP({key},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_END},{index},false)"
     lookup = f"IFNA({base})" if column_name in _OPTIONAL_LINKED_COLUMNS else base
     return f'=IF($A{row}="","",{lookup})'
 
@@ -109,7 +114,8 @@ def edge_row_hyperlink_formula(row: int, edge_tab: str, edge_gid: int) -> str:
     header text itself (the column's NAME, "Edge ↗", used everywhere this
     codebase finds the column by header) is unchanged -- only the cell
     VALUE each row's HYPERLINK displays."""
-    match = f"MATCH($A{row},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_START},0)"
+    typed = resolve_name_expr(f"$A{row}", edge_tab)
+    match = f"MATCH({typed},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_START},0)"
     target = f'"#gid={edge_gid}&range={_EDGE_RANGE_START}"&{match}'
     return f'=IF($A{row}="","",IFNA(HYPERLINK({target},"↗"),"-"))'
 
@@ -147,6 +153,7 @@ def write_edge_row_links(
     return f"{tab}: 'Edge ↗' links written for {total_rows} row(s)"
 
 
+@perf.timed()
 def link_edge_columns(
     client: SheetsClient,
     tab: str,
@@ -242,14 +249,17 @@ def link_edge_columns(
     # backup player's own Ceiling projects to 0, and GameEnv per-position
     # ties can too) every other scaled column in the workbook now gets.
     last_row = max(end for _, end in name_blocks)
+    gradient_specs: list[dict] = []
+    boolean_specs: list[dict] = []
     for column_name in COLOR_SCALE_LINKED_COLUMNS:
-        col = column_letter(columns[column_name])
-        a1 = f"{col}2:{col}{last_row}"
-        kind = FIELD_COLOR_SCALES[column_name]
-        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, column_name, zero_exclude_range=a1)
-        client.add_color_scale(tab, gradient_spec.pop("a1_range"), **gradient_spec)
-        if boolean_spec is not None:
-            client.add_boolean_rule(tab, boolean_spec.pop("a1_range"), **boolean_spec)
+        # Round 5 item 3: the shared band dispatch (formula rules, plus the grey zero chip).
+        gradients, booleans = column_rule_specs(
+            column_name, column_letter(columns[column_name]), 2, last_row, header=header
+        )
+        gradient_specs += gradients
+        boolean_specs += booleans
+    client.add_color_scales(tab, gradient_specs)
+    client.add_boolean_rules(tab, boolean_specs)
 
     # Phase 6, Part 2: GAME/CEILING DETAIL/MOVEMENT/WEATHER all collapse by
     # default now (Sam's own fixed left-to-right order) -- the spine
@@ -285,7 +295,7 @@ def link_edge_columns(
     # see `sheet_columns.py`'s own module docstring for why a label can't
     # live inside the range it names.
     zone_ranges: list[tuple[int, int]] = []
-    for group in (GAME, CEILING_DETAIL, MOVEMENT, WEATHER):
+    for group in (GAME, CEILING_DETAIL, MOVEMENT, WEATHER, USAGE):
         indices = sorted(header.index(name) for name in group if name in header)
         if indices and indices == list(range(indices[0], indices[0] + len(indices))):
             zone_ranges.append((indices[0], indices[-1]))

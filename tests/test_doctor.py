@@ -63,6 +63,8 @@ _ALL_GOOD_TABS = {
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Bankroll": [],
     "Results": [],
+    "Season": [],
+    "NameAlias": [],
     EXPOSURE_TAB: [],
 }
 

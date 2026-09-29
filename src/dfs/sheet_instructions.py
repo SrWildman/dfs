@@ -75,7 +75,7 @@ _TAB_FIRST_ROW = 8
 # never inserts/deletes a sheet row itself -- see the module docstring --
 # so a mismatch here means the ACTUAL Instructions tab needs a real row
 # inserted/deleted to match, not just this constant edited).
-_DOC_LINKS_HEADER_ROW = 27
+_DOC_LINKS_HEADER_ROW = 28
 
 # Per-position pool caps (Player Pool's own block sizes), in the same
 # QB/RB/WR/TE/DST order PLAYER_POOL_NAME_BLOCKS itself is written in --
@@ -167,10 +167,16 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "Reading the colours",
         'One system, used everywhere: a dark header row always means "this is a '
         'table header", nothing else does. Pale yellow always means "you type '
-        'here" (see above) -- the only cue for that. Red-to-green shading on a '
-        "number means more is better (reversed on rank-style columns (SoS Rank, "
-        "Player Pool/Lineups' own OppPosRank), where a LOW rank is the good "
-        "matchup); a signed number like ImpMove/TotMove/SpdMove or Spread shades "
+        'here" (see above) -- the only cue for that. Green/red shading on a '
+        "number means better/worse: the top 10% of its column is strong green, "
+        "the next 20% light green, the bottom 10% strong red, the 20% above that "
+        "light red, and the middle 40% is left plain. Player stats (ProjPts, Val, "
+        "Ceiling, CeilVal, AggPts) are ranked against players at the SAME "
+        "position, so a QB is only ever compared with QBs. Zeros and blanks are "
+        "never coloured (a zero gets a flat grey cell). The shading follows the "
+        "player through any sort or filter. Rank-style columns are reversed "
+        "(SoS Rank, OppPosRank), where a LOW rank is the good "
+        "matchup; a signed number like ImpMove/TotMove/SpdMove shades "
         "from red through white at zero to green, since zero -- not the middle of "
         'the range -- is what "no change" means. Ownership (ProjOwn on EdgeRaw, '
         'Rstr% on Player Pool/Lineups) is the one exception to "more is better": '
@@ -345,10 +351,12 @@ _TAB_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Bankroll",
-        "Cash/GPP results ledgers plus starting/ending bankroll totals. `dfs week "
-        "close --csv <file>` (or `dfs bankroll sync --csv <file>` directly) appends "
-        "new results here after each week -- never touches the summary figures or "
-        "anything outside its configured rows.",
+        "Betting/Cash/GPP results ledgers plus starting/ending bankroll totals. "
+        "Betting is hand-entered (no export exists) -- type Name/Odds %/Entered/Won, "
+        "leave Won blank while a bet is pending. `dfs week close --csv <file>` (or "
+        "`dfs bankroll sync --csv <file>` directly) appends new Cash/GPP results here "
+        "after each week -- never touches the summary figures or anything outside its "
+        "configured rows.",
     ),
     (
         "Results",
@@ -356,6 +364,15 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Red/Blue/Black) -- Cash Results chipped green/red, H2H % colour-scaled. "
         "NOT reset each week -- `dfs week new` carries it forward from the outgoing "
         'sheet automatically. A sortable filter view ("All") is available.',
+    ),
+    (
+        "Season",
+        "Year-at-a-glance rollup: one row per week (Cash/GPP/Betting net, amount "
+        "risked, Ending bankroll), a year-to-date block per bucket, and a "
+        "cumulative-net-by-week chart. Cash/GPP net backfill automatically from "
+        "`dfs bankroll sync --csv`/`dfs week close --csv`; Betting net only fills "
+        "in at `dfs week close`. NOT reset each week -- carried forward like "
+        "Results.",
     ),
 ]
 

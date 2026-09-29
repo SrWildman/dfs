@@ -14,7 +14,7 @@ from dfs.sheet_style import (
     CRIT_BG,
     CRIT_FG,
     EDGE_COLUMN_GROUPS,
-    EDGE_UNSCALED_PLAYER_METRICS,
+    EDGE_ROWS,
     EDGE_WIDTHS,
     FAMILY_COLORS,
     FIELD_FORMATS,
@@ -53,10 +53,13 @@ from dfs.sheet_views import (
     BOARD_CHALK_HEADER_ROW,
     BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_LAST_ROW,
+    BOARD_LEADERS_PCT_COL_INDEX,
     BOARD_LEADERS_SUBLABEL_ROW,
     BOARD_QUEUE_COLHEADER_ROW,
     BOARD_QUEUE_LAST_ROW,
+    BOARD_ROWS_PER_POSITION,
     BOARD_SLATE_COLHEADER_ROW,
+    BOARD_SLATE_GAMEID_COL_INDEX,
     BOARD_SLATE_LAST_ROW,
 )
 from dfs.sheets import column_letter
@@ -85,10 +88,7 @@ def test_edge_widths_and_groups_only_name_real_edge_columns():
 def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     # FIELD_COLOR_SCALES is shared across every tab (Fix 2.1), so it also
     # carries builder-only header text ("Team Implied"...) that isn't a
-    # literal EDGE_COLUMNS name -- pin the EdgeRaw-side subset that
-    # matters instead of the whole dict. `OppPosRank` WAS builder-only
-    # too, until Phase 5 (2026-09-16, "all data should be in edge raw")
-    # added it natively to EDGE_COLUMNS as well.
+    # literal EDGE_COLUMNS name -- pin the EdgeRaw-side subset that matters.
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
     assert matched == {
@@ -104,8 +104,8 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "Pace",
         "PROE",
         "Expl%",
-        "ModelImplied",
         "OppPosRank",
+        "OppEPA",
         "ImpliedMove",
         "TotMove",
         "SpdMove",
@@ -114,16 +114,22 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "CeilPct",
     }
     assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
-    assert FIELD_COLOR_SCALES["ImpliedMove"] == "diverging"  # scored separately, zero as the midpoint
-    assert FIELD_COLOR_SCALES["TotMove"] == "diverging"
-    assert FIELD_COLOR_SCALES["SpdMove"] == "diverging"
-    # Week 3 feedback, A1 (2026-09-22): NOT diverging -- a more negative Spread always
-    # means a bigger favorite, a fixed monotonic reading (unlike the
-    # Move columns just above, where "which way is good" is contextual),
-    # same "lower is better" shape as OppPosRank below.
-    assert FIELD_COLOR_SCALES["Spread"] == "reversed"
-    assert FIELD_COLOR_SCALES["Own%"] == "warm"  # high ownership is chalk, not "good" (Fix 2.8)
-    assert FIELD_COLOR_SCALES["OppPosRank"] == "reversed"  # 1 (toughest matchup) is best, not worst
+    # Rule 5 (kept): movement diverges around zero, Own% is the warm chalk scale.
+    for name in ("ImpliedMove", "TotMove", "SpdMove"):
+        assert FIELD_COLOR_SCALES[name] == "diverging"
+    assert FIELD_COLOR_SCALES["Own%"] == "warm"
+    # Rule 1: the five player metrics are banded by their hidden percentile helper.
+    for name in ("ProjPts", "AggPts", "Ceiling", "Val", "CeilVal", "Pts", "Ceil"):
+        assert FIELD_COLOR_SCALES[name] == "pct"
+    # Rule 3: already 0-100 (or centred) scores are banded on their own value.
+    for name in ("ValAdj", "CeilPct", "GameEnv"):
+        assert FIELD_COLOR_SCALES[name] == "score"
+    assert FIELD_COLOR_SCALES["Leverage"] == "leverage"
+    # Rule 4: game metrics are PERCENTRANK'd; Pace/Spread read LOW = good (faster, bigger favourite).
+    assert FIELD_COLOR_SCALES["Spread"] == "game_reversed"
+    assert FIELD_COLOR_SCALES["Pace"] == "game_reversed"
+    assert FIELD_COLOR_SCALES["Total"] == "game"
+    assert FIELD_COLOR_SCALES["OppPosRank"] == "rank"  # 1 (toughest matchup) is the low end
 
 
 def test_field_formats_covers_every_edgeraw_numeric_column():
@@ -192,11 +198,25 @@ def test_apply_field_color_scales_excludes_zero_for_ownership_columns():
         def clear_conditional_formats(self, tab_name, column=None, row_range=None):
             calls.append(("clear", column, row_range))
 
+        def clear_conditional_formats_for(self, tab_name, targets):
+            for column, row_range in targets:
+                self.clear_conditional_formats(tab_name, column=column, row_range=row_range)
+
         def add_color_scale(self, tab_name, a1_range, **kwargs):
             calls.append(("scale", a1_range, kwargs))
 
+        def add_color_scales(self, tab_name, specs):
+            for spec in specs:
+                spec = dict(spec)
+                self.add_color_scale(tab_name, spec.pop("a1_range"), **spec)
+
         def add_boolean_rule(self, tab_name, a1_range, *, condition_type, values, fmt):
             calls.append(("bool", a1_range, condition_type, values, fmt))
+
+        def add_boolean_rules(self, tab_name, specs):
+            for spec in specs:
+                spec = dict(spec)
+                self.add_boolean_rule(tab_name, spec.pop("a1_range"), **spec)
 
     apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "Own%"], header_row=1, last_row=100)
 
@@ -231,21 +251,25 @@ def test_apply_field_color_scales_excludes_zero_for_every_gradient_column():
         def clear_conditional_formats(self, tab_name, column=None, row_range=None):
             pass
 
-        def add_color_scale(self, tab_name, a1_range, **kwargs):
-            calls.append(kwargs)
+        def clear_conditional_formats_for(self, tab_name, targets):
+            pass
 
-        def add_boolean_rule(self, tab_name, a1_range, **kwargs):
-            calls.append(kwargs)
+        def add_color_scales(self, tab_name, specs):
+            pass
 
-    apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "Pts"], header_row=1, last_row=100)
+        def add_boolean_rules(self, tab_name, specs):
+            calls.extend(specs)
 
-    assert len(calls) == 2  # the gradient, plus the zero-grey boolean rule
-    gradient_spec, boolean_spec = calls
-    assert gradient_spec["min_type"] == "NUMBER"
-    assert "MINIFS(" in gradient_spec["min_value"]
-    assert gradient_spec["mid_type"] == "NUMBER"
-    assert "MEDIAN(FILTER(" in gradient_spec["mid_value"]
-    assert boolean_spec["condition_type"] == "NUMBER_EQ"
+    # Round 5 item 3 (Sam: keep the grey zero, but exclude zeros from the rest of the
+    # highlighting): a banded column gets four formula bands that never match a zero
+    # (ISNUMBER + <>0 or a blank percentile), then the grey zero chip, added LAST.
+    apply_field_color_scales(_Client(), "EdgeRaw", ["Name", "Pts", "ProjPts%ile"], header_row=1, last_row=100)
+
+    assert len(calls) == 5  # four bands + the zero-grey chip
+    *bands, chip = calls
+    assert all(b["condition_type"] == "CUSTOM_FORMULA" for b in bands)
+    assert all("ISNUMBER(" in b["values"][0] for b in bands)
+    assert chip["condition_type"] == "NUMBER_EQ" and chip["values"] == ["0"]
 
 
 class _ExplodingClient:
@@ -309,6 +333,10 @@ class FakeEdgeClient:
     ) -> None:
         self.calls.append("clear_conditional_formats")
 
+    def clear_conditional_formats_for(self, tab_name, targets) -> None:
+        # One recorded call per batched clear (the whole point of item 2), not one per target.
+        self.calls.append("clear_conditional_formats")
+
     def clear_banding(self, tab_name: str) -> None:
         self.calls.append("clear_banding")
 
@@ -329,6 +357,11 @@ class FakeEdgeClient:
     def add_color_scale(self, tab_name: str, a1_range: str, **kwargs) -> None:
         self.calls.append("add_color_scale")
         self.color_scale_calls.append((a1_range, kwargs))
+
+    def add_color_scales(self, tab_name: str, specs: list[dict]) -> None:
+        for spec in specs:
+            spec = dict(spec)
+            self.add_color_scale(tab_name, spec.pop("a1_range"), **spec)
 
     def add_boolean_rule(self, tab_name: str, a1_range: str, *, condition_type, values, fmt) -> None:
         self.calls.append("add_boolean_rule")
@@ -416,6 +449,7 @@ def test_polish_edge_groups_game_through_weather_collapsed_by_default():
         ("EdgeRaw", _edge_letter("CeilPct"), _edge_letter("OwnStatus"), True),
         ("EdgeRaw", _edge_letter("ImpliedMove"), _edge_letter("GameStart"), True),
         ("EdgeRaw", _edge_letter("Stadium"), _edge_letter("Wind"), True),
+        ("EdgeRaw", _edge_letter("Snap%"), _edge_letter("Snap%"), True),  # USAGE, Round 5 1b
     ]
 
 
@@ -477,70 +511,47 @@ def test_polish_edge_clears_banding_before_re_adding_it():
     assert client.calls.index("clear_banding") < client.calls.index("add_row_banding")
 
 
-def test_polish_edge_scales_fifteen_columns_skipping_raw_player_metrics():
-    # Phase 4 (4.1): EdgeRaw isn't position-grouped, so ProjPts/Ceiling/
-    # Val/CeilVal (EDGE_UNSCALED_PLAYER_METRICS) are skipped there --
-    # CeilPct/Leverage (already percentile) stand in for them, same as
-    # OppPosRank (Phase 5, 2026-09-16 -- already comparable across
-    # positions, needs no position-grouping either). `OwnPct` used to be
-    # one of these too; dropped entirely from EDGE_COLUMNS in Part 7.9.
-    # `ValAdj` (Part 7.2) joins this scaled set too -- already a
-    # per-position residual, not a raw player metric, so it's excluded
-    # from EDGE_UNSCALED_PLAYER_METRICS on purpose (see that constant's
-    # own comment). GPS's `ModelImplied` (2026-09-26) joins it too, same
-    # reasoning as `Pace`/`Team Implied` (team-level, not player-skewed).
+def test_polish_edge_highlights_every_scaled_column_with_formula_rules_not_per_position_runs():
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
-    matched = [
-        name
-        for name in edge_header
-        if name in FIELD_COLOR_SCALES and name not in EDGE_UNSCALED_PLAYER_METRICS
-    ]
-    assert len(matched) == 15
+    matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
+    assert len(matched) == 20  # nothing is skipped on EdgeRaw any more (Round 5 item 3)
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert len(client.color_scale_calls) == 15
+    # Only the non-band kinds (Own% warm, three movement columns) still use a gradient.
+    assert len(client.color_scale_calls) == 4
+    assert client.multi_range_color_scale_calls == []  # the per-position row-run rules are gone
+    band_rules = [k for _a1, k in client.boolean_rule_calls if k["condition_type"] == "CUSTOM_FORMULA"]
+    assert len(band_rules) >= 4 * 16  # four bands for each of the band columns
+    # ...and the whole point: a handful of rules per column, not ~1,400 in total.
+    assert len(client.boolean_rule_calls) < 200
 
 
-def test_polish_edge_scales_raw_metrics_per_position_via_multi_range_rules():
-    # Sam, 2026-09-18: filtering EdgeRaw to a position and sorting by a raw
-    # stat should let him spot outliers -- "everything being white numbers
-    # makes that very hard." EdgeRaw isn't grouped into position blocks
-    # (it's one flat list sorted by Leverage/CeilPct), so a position's rows
-    # are scattered non-contiguously -- verified live that one gradient
-    # rule's `ranges` can hold multiple non-contiguous GridRanges with a
-    # shared min/max computed only over their union.
-    position_rows = [["QB"], ["RB"], ["QB"], ["WR"]]  # rows 2, 3, 4, 5
-    client = FakeEdgeClient(position_rows=position_rows)
+def test_polish_edge_bands_player_metrics_off_their_hidden_percentile_column():
+    # Rule 1/2 (Round 5 item 3): ProjPts is coloured by `ProjPts%ile` -- a hidden helper
+    # holding the player's standing within his position -- via a custom formula with a
+    # RELATIVE row reference, so the colour follows the row through any sort or filter.
+    client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    # 5 EDGE_UNSCALED_PLAYER_METRICS x 3 distinct positions (QB, RB, WR).
-    assert len(client.multi_range_color_scale_calls) == 15
-
-    proj_pts_col = _edge_letter("ProjPts")
-    qb_spec = next(
-        spec
-        for spec in client.multi_range_color_scale_calls
-        if spec["a1_ranges"][0].startswith(f"{proj_pts_col}2")
-    )
-    # QB occupies rows 2 and 4 -- non-contiguous, so two separate 1-row
-    # ranges, not one run spanning 2-4 (which would wrongly include RB's
-    # own row 3).
-    assert qb_spec["a1_ranges"] == [f"{proj_pts_col}2:{proj_pts_col}2", f"{proj_pts_col}4:{proj_pts_col}4"]
-
-    # PROMPT_BOARD_FIXES.md item 7 (2026-09-25): routed through the shared
-    # zero-exclusion dispatch -- the min/mid formulas must combine BOTH of
-    # QB's own scattered ranges (never just one, and never RB's/WR's).
-    assert "MINIFS(" in qb_spec["min_value"]
-    assert f"{proj_pts_col}2:{proj_pts_col}2" in qb_spec["min_value"]
-    assert f"{proj_pts_col}4:{proj_pts_col}4" in qb_spec["min_value"]
-    assert "MEDIAN(" in qb_spec["mid_value"]
-    # Also a real zero-grey boolean chip per contiguous run (no multi-range
-    # boolean primitive needed -- an exact-zero check is per-cell).
-    boolean_a1s = {a1 for a1, _ in client.boolean_rule_calls}
-    assert f"{proj_pts_col}2:{proj_pts_col}2" in boolean_a1s
-    assert f"{proj_pts_col}4:{proj_pts_col}4" in boolean_a1s
+    header = [POOL_HEADER, *EDGE_COLUMNS]
+    proj_col = column_letter(header.index("ProjPts"))
+    pct_col = column_letter(header.index("ProjPts%ile"))
+    mine = [(a1, k) for a1, k in client.boolean_rule_calls if a1.startswith(f"{proj_col}2:")]
+    formulas = [k["values"][0] for _a1, k in mine if k["condition_type"] == "CUSTOM_FORMULA"]
+    assert formulas == [
+        f"=AND(ISNUMBER(${pct_col}2),${pct_col}2>=90)",
+        f"=AND(ISNUMBER(${pct_col}2),${pct_col}2>=70,${pct_col}2<90)",
+        f"=AND(ISNUMBER(${pct_col}2),${pct_col}2>=10,${pct_col}2<30)",
+        f"=AND(ISNUMBER(${pct_col}2),${pct_col}2<10)",
+    ]
+    # Every band spans the WHOLE column (one rule per band, not one per position run).
+    assert {a1 for a1, k in mine if k["condition_type"] == "CUSTOM_FORMULA"} == {
+        f"{proj_col}2:{proj_col}{EDGE_ROWS}"
+    }
+    # The grey zero chip survives, added last so it wins an exact zero.
+    assert mine[-1][1]["condition_type"] == "NUMBER_EQ" and mine[-1][1]["values"] == ["0"]
 
 
 def test_polish_edge_move_scales_are_diverging_at_zero():
@@ -615,7 +626,8 @@ def test_polish_edge_name_column_pool_and_flag_rules_are_mutually_exclusive():
     custom_formulas = [
         kwargs["values"][0]
         for _rng, kwargs in client.boolean_rule_calls
-        if kwargs["condition_type"] == "CUSTOM_FORMULA" and POOL_COLUMN in kwargs["values"][0]
+        if kwargs["condition_type"] == "CUSTOM_FORMULA"
+        and kwargs["values"][0].startswith(f"=AND(${POOL_COLUMN}2")
     ]
     # 3 rules: pooled+flagged, pooled-only, flagged-only -- never a bare
     # pooled rule and a bare flagged rule that could both match one cell.
@@ -729,6 +741,10 @@ class FakeGuardrailsClient:
     def clear_conditional_formats(self, tab_name: str, *, column: str | None = None) -> None:
         self.clear_calls.append(column)
 
+    def clear_conditional_formats_for(self, tab_name, targets) -> None:
+        for column, _row_range in targets:
+            self.clear_conditional_formats(tab_name, column=column)
+
     def add_boolean_rule(
         self, tab_name: str, a1_range: str, *, condition_type: str, values, fmt: dict
     ) -> None:
@@ -834,14 +850,16 @@ def test_style_board_freezes_only_the_title_and_summary_banner():
 
 
 def test_style_board_hides_the_slate_shape_gameid_join_key():
-    # PROMPT_BOARD_FIXES.md item 5: GameId/Away/Home now sit past Stack
-    # candidates' own 14-column width (A-N), the widest section -- columns
-    # O-Q, not the old J-L -- derived from BOARD_MAX_VISIBLE_COL_INDEX so
-    # this can't collide with a real column belonging to a different
-    # section that happens to share the same letter.
+    # PROMPT_BOARD_FIXES.md item 5: GameId/Away/Home sit past Stack candidates' own
+    # 14-column width (the widest section), derived from BOARD_MAX_VISIBLE_COL_INDEX so
+    # this can't collide with a real column belonging to a different section.
     client = FakeBoardClient()
     style_board(client)
-    assert ("O", "Q") in client.hide_columns_calls
+    # Three join keys (GameId/Away/Home), item 5c's GPS-check helper, and item 3's
+    # ProjPts-percentile helper -- one contiguous hidden run.
+    assert (column_letter(BOARD_SLATE_GAMEID_COL_INDEX), column_letter(BOARD_LEADERS_PCT_COL_INDEX)) in (
+        client.hide_columns_calls
+    )
 
 
 def test_style_board_resets_background_before_applying_new_formatting():
@@ -855,38 +873,33 @@ def test_style_board_resets_background_before_applying_new_formatting():
     client = FakeBoardClient()
     style_board(client)
     first_range, first_fmt = client.format_calls[0]
-    assert first_fmt == {"backgroundColor": WHITE}
+    assert first_fmt["backgroundColor"] == WHITE
     assert first_range.startswith("A1:N")
 
 
-def test_style_board_scales_leaders_and_punt_per_position_not_across_the_whole_block():
-    # PROMPT_BOARD_FIXES.md item 6: "a QB's ProjPts should never sit on the
-    # same gradient as a DST's" -- one colour-scale rule per position's own
-    # row range, not one flat rule spanning the whole 33-row stacked block.
+def test_style_board_reset_also_clears_stale_white_text_so_player_rows_never_vanish():
+    # Round 5 item 5a, found live: an old layout's dark header rows left white bold text
+    # behind, and real player rows that later landed on them rendered white-on-white.
+    client = FakeBoardClient()
+    style_board(client)
+    _, first_fmt = client.format_calls[0]
+    text = first_fmt["textFormat"]
+    assert text["foregroundColor"] != WHITE and text["bold"] is False
+
+
+def test_style_board_bands_leaders_and_punt_with_one_rule_set_per_column():
+    # Round 5 item 3: no more per-position gradient ranges (a colour there depended on
+    # which rows a position happened to occupy). ValAdj is banded on its own value and
+    # ProjPts on a hidden percentile lookup, one set of formula rules over the whole block.
     client = FakeBoardClient()
     style_board(client)
 
-    # 5 positions x (ValAdj + ProjPts) in Leaders, + 5 positions x ValAdj
-    # in Punt = 15 per-position gradient rules, plus Slate shape's 5
-    # (Total/Spread/Pace/GPS/Tot Δ, GPS's own PROMPT_GPS.md addition) and
-    # Stack's 1 (Total) = 21 total.
-    assert len(client.color_scale_calls) == 21
-
-    def _row_span(a1: str) -> int:
-        start, end = a1.split(":")
-        return int(end[1:]) - int(start[1:]) + 1
-
-    # Every rule touching a row inside Leaders/Punt (D or I column, at or
-    # past BOARD_LEADERS_FIRST_ROW) spans at most 10 rows (WR, the widest
-    # position) -- never the whole 33-row stacked block.
-    position_ranked_ranges = [
-        a1
-        for a1 in client.color_scale_calls
-        if a1[0] in ("D", "I") and int(a1[1 : a1.index(":")]) >= BOARD_LEADERS_FIRST_ROW
-    ]
-    assert len(position_ranked_ranges) == 15
-    for a1 in position_ranked_ranges:
-        assert _row_span(a1) <= 10, f"{a1} spans {_row_span(a1)} rows -- not scoped to one position"
+    assert client.color_scale_calls == []  # every Board scale is a band now
+    leaders_last = BOARD_LEADERS_FIRST_ROW + sum(BOARD_ROWS_PER_POSITION.values()) - 1
+    d_ranges = [a1 for a1 in client.boolean_rule_calls if a1.startswith("D") and ":" in a1]
+    assert f"D{BOARD_LEADERS_FIRST_ROW}:D{leaders_last}" in d_ranges
+    i_ranges = [a1 for a1 in client.boolean_rule_calls if a1.startswith("I")]
+    assert set(i_ranges) == {f"I{BOARD_LEADERS_FIRST_ROW}:I{leaders_last}"}
 
 
 def test_style_board_puts_a_top_border_between_positions_not_before_the_first():
@@ -1448,6 +1461,10 @@ class FakeBuilderTabClient:
     def clear_conditional_formats(self, tab_name: str, *, column=None, row_range=None) -> None:
         self.clear_cf_calls.append(column)
 
+    def clear_conditional_formats_for(self, tab_name, targets) -> None:
+        for column, row_range in targets:
+            self.clear_conditional_formats(tab_name, column=column, row_range=row_range)
+
     def clear_banding(self, tab_name: str) -> None:
         pass
 
@@ -1474,59 +1491,49 @@ class FakeBuilderTabClient:
             self.boolean_rule_calls.append((a1_range, spec))
 
 
-def test_apply_grouped_color_scales_writes_one_rule_per_column_per_group():
-    # Phase 4 (4.1/4.2): 3 scaled columns x 2 groups = 6 gradient rules --
-    # verified live that one rule can't independently scale multiple
-    # groups (see CONTRIBUTING.md's Phase 4 changelog), so this is
-    # genuinely len(groups) * matched_columns, not a smaller number.
-    client = FakeBuilderTabClient(["Name", "Pts", "Ceil", "Val"])
-    applied = apply_grouped_color_scales(client, "Player Pool", client._header, [(3, 12), (14, 33)])
+def test_apply_grouped_color_scales_writes_one_rule_set_per_column_over_the_whole_span():
+    # Round 5 item 3: one set of formula rules per column across every block's span --
+    # not one gradient per (column, block), which is what made the same number a
+    # different colour on each tab and put hundreds of rules on Lineups.
+    client = FakeBuilderTabClient(["Name", "Pts", "Ceil", "Val", "ProjPts%ile", "Ceiling%ile", "Val%ile"])
+    header = client._header
+    applied = apply_grouped_color_scales(client, "Player Pool", header, [(3, 12), (14, 33)])
 
-    assert applied == 6
-    ranges = {a1 for a1, _kwargs in client.color_scale_calls}
-    assert ranges == {"B3:B12", "C3:C12", "D3:D12", "B14:B33", "C14:C33", "D14:D33"}
+    assert applied == 3  # Pts, Ceil, Val
+    assert client.color_scale_calls == []  # band kinds have no gradient
+    band_ranges = {a1 for a1, k in client.boolean_rule_calls if k["condition_type"] == "CUSTOM_FORMULA"}
+    assert band_ranges == {"B3:B33", "C3:C33", "D3:D33"}  # first block start .. last block end
 
 
-def test_apply_grouped_color_scales_skips_the_grouped_tab_unscaled_columns():
-    # `OwnPct` used to sit in GROUPED_TAB_UNSCALED_COLUMNS too; dropped
-    # entirely from the sheet in Part 7.9. `ValAdj` (Part 7.2) joins
-    # `CeilPct` here now -- also already a per-position value computed
-    # once on EdgeRaw, so re-grouping it per position block here would be
-    # redundant.
-    client = FakeBuilderTabClient(["Name", "Pts", "CeilPct"])
+def test_apply_grouped_color_scales_no_longer_skips_ceilpct_or_valadj():
+    # Round 5 item 3: banded on their own 0-100 value with one rule per column, so they
+    # cost nothing on the builder tabs and now read the same as on EdgeRaw.
+    client = FakeBuilderTabClient(["Name", "Pts", "CeilPct", "ProjPts%ile"])
     applied = apply_grouped_color_scales(
         client, "Player Pool", client._header, [(3, 12)], skip=GROUPED_TAB_UNSCALED_COLUMNS
     )
-
-    assert applied == 1
-    assert {a1 for a1, _ in client.color_scale_calls} == {"B3:B12"}
-    assert GROUPED_TAB_UNSCALED_COLUMNS == {"CeilPct", "ValAdj"}
+    assert applied == 2
+    assert GROUPED_TAB_UNSCALED_COLUMNS == frozenset()
 
 
-def test_apply_grouped_color_scales_scopes_zero_exclusion_to_each_groups_own_range():
-    # Own% (renamed from Rstr% in Part 2) is zero-excluded (Fix 2.7) --
-    # per-block, the MINIFS formula must read that BLOCK's own range, not
-    # the whole tab, or one position's unpublished-ownership zeros would
-    # pollute another's.
+def test_apply_grouped_color_scales_keeps_the_grey_zero_chip_and_the_warm_scale_for_ownership():
+    # Own% is a warm gradient, NOT banded (Rule 5), and its exact zeros keep the grey chip.
     assert "Own%" in ZERO_EXCLUDED_COLUMNS
     client = FakeBuilderTabClient(["Name", "Own%"])
     apply_grouped_color_scales(client, "Player Pool", client._header, [(3, 12), (14, 33)])
 
-    scales_by_range = dict(client.color_scale_calls)
-    assert scales_by_range["B3:B12"]["min_value"] == '=MINIFS(B3:B12,B3:B12,"<>0")'
-    assert scales_by_range["B14:B33"]["min_value"] == '=MINIFS(B14:B33,B14:B33,"<>0")'
-    # A zero-exclusion grey chip lands per group too, same range each.
-    zero_ranges = {a1 for a1, _ in client.boolean_rule_calls}
-    assert zero_ranges == {"B3:B12", "B14:B33"}
+    scales = dict(client.color_scale_calls)
+    assert scales["B3:B33"]["min_value"] == '=MINIFS(B3:B33,B3:B33,"<>0")'
+    assert {a1 for a1, _ in client.boolean_rule_calls} == {"B3:B33"}
 
 
 def test_apply_grouped_color_scales_honors_skip_argument():
-    client = FakeBuilderTabClient(["Name", "Pts", "Leverage"])
+    client = FakeBuilderTabClient(["Name", "Pts", "Leverage", "ProjPts%ile"])
     applied = apply_grouped_color_scales(
         client, "Player Pool", client._header, [(3, 12)], skip=frozenset({"Leverage"})
     )
     assert applied == 1
-    assert {a1 for a1, _ in client.color_scale_calls} == {"B3:B12"}
+    assert {a1 for a1, _ in client.boolean_rule_calls} == {"B3:B12"}
 
 
 def test_polish_builder_tab_styles_header_repeats_the_same_as_the_real_header():
@@ -1720,16 +1727,14 @@ def test_polish_builder_tab_bands_each_block_independently():
     assert ranges == ["A2:C11", "A13:C32"]
 
 
-def test_polish_builder_tab_color_scales_every_matching_column():
-    client = FakeBuilderTabClient(["Name", "Pts", "Leverage", "OppPosRank"])
+def test_polish_builder_tab_highlights_every_matching_column():
+    client = FakeBuilderTabClient(["Name", "Pts", "Leverage", "OppPosRank", "ProjPts%ile"])
     result = polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
-    scaled_ranges = {a1 for a1, _kwargs in client.color_scale_calls}
-    assert scaled_ranges == {"B2:B100", "C2:C100", "D2:D100"}
-    # OppPosRank is reversed -- max colour at the MIN end.
-    opp_kwargs = next(kwargs for a1, kwargs in client.color_scale_calls if a1 == "D2:D100")
-    assert opp_kwargs["min_color"] == GRAD_MAX
-    assert "3 colour scale(s)" in result
+    band_ranges = {a1 for a1, k in client.boolean_rule_calls if k["condition_type"] == "CUSTOM_FORMULA"}
+    assert band_ranges == {"B2:B100", "C2:C100", "D2:D100"}
+    assert client.color_scale_calls == []
+    assert "3 highlighted column(s)" in result or "3 colour scale(s)" in result
 
 
 def _chip(bg: dict, fg: dict) -> dict:
@@ -1939,3 +1944,41 @@ def test_style_tier23_tabs_covers_every_expected_tab():
         sos_comb_last_row=40,
     )
     assert len(results) == 8  # DK Upload, Results, 5xSoS, SoSComb
+
+
+def test_highlight_rules_follow_header_order_so_two_runs_are_identical():
+    """Rule order must not depend on the process hash seed (a frozenset used to be
+    iterated here), or two identical polish runs would add rules in a different order."""
+    client = FakeBuilderTabClient(
+        ["Name", "CeilVal", "Ceil", "Pts", "Val", "CeilVal%ile", "Ceiling%ile", "ProjPts%ile", "Val%ile"]
+    )  # deliberately not alphabetical
+    apply_field_color_scales(client, "Player Pool", client._header, header_row=1, last_row=10)
+    columns = list(
+        dict.fromkeys(
+            a1.split(":")[0][0]
+            for a1, k in client.boolean_rule_calls
+            if k["condition_type"] == "CUSTOM_FORMULA"
+        )
+    )
+    assert columns == [column_letter(i) for i in range(1, 5)]  # CeilVal, Ceil, Pts, Val -- header order
+
+
+def test_style_board_unhides_the_visible_range_before_hiding_the_helper_block():
+    """Found live: columns hidden by an OLDER Board layout (the old join keys at J:L) stayed
+    hidden after the slate shape grew, swallowing Shootout?/GPS."""
+
+    class Recording(FakeBoardClient):
+        def __init__(self):
+            super().__init__()
+            self.hide_events: list[tuple[str, str, bool]] = []
+
+        def hide_columns(self, tab_name, first_col, last_col, *, hidden=True):
+            self.hide_events.append((first_col, last_col, hidden))
+
+    client = Recording()
+    style_board(client)
+    unhide_last = column_letter(BOARD_SLATE_GAMEID_COL_INDEX - 1)
+    assert ("A", unhide_last, False) in client.hide_events
+    assert client.hide_events.index(("A", unhide_last, False)) < next(
+        i for i, e in enumerate(client.hide_events) if e[2] is True
+    )

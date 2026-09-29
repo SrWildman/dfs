@@ -62,6 +62,12 @@ class SpySheetsClient:
     def add_boolean_rule(self, tab_name, a1_range, **_kwargs):
         pass
 
+    def add_color_scales(self, tab_name, specs):
+        pass
+
+    def add_boolean_rules(self, tab_name, specs):
+        pass
+
     def group_columns(self, tab_name, first_col_a1, last_col_a1, *, collapsed=False):
         self.group_calls.append((first_col_a1, last_col_a1))
 

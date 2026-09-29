@@ -22,6 +22,7 @@ a gradient rule itself needs live here.
 from __future__ import annotations
 
 from dfs.derived import CHALK_OWNERSHIP_THRESHOLD
+from dfs.sheets import column_letter
 
 
 def _rgb(hex_str: str) -> dict:
@@ -42,6 +43,15 @@ GRAD_MID = {"red": 1.0, "green": 1.0, "blue": 0.80}
 GRAD_MAX = {"red": 0.72, "green": 0.88, "blue": 0.72}
 
 _GRADIENT = "gradient"  # red -> yellow -> green, more is better
+# Round 5 item 3: FIVE-BAND formula rules (see `band_rule_specs`) replace the gradient for
+# most columns. Bands are driven by a PERCENTILE, follow the row through any sort or
+# filter, and never colour a zero or a blank.
+_PCT = "pct"  # a player metric: banded by its hidden within-position percentile helper
+_SCORE = "score"  # already 0-100 (ValAdj, CeilPct, GameEnv): banded on its own value
+_LEVERAGE = "leverage"  # centred on 0 (CeilPct - OwnPct, -100..+100)
+_RANK = "rank"  # a 1-32 matchup rank, LOW is better
+_GAME = "game"  # a per-game/team metric: PERCENTRANK against the tab's own column, high is good
+_GAME_REVERSED = "game_reversed"  # same, LOW is good (Pace, Spread)
 _DIVERGING = "diverging"  # red -> white -> green, zero is the midpoint
 _REVERSED = "reversed"  # green -> yellow -> red, LOW is better
 # White -> amber -> red -- the one exception to "more is better" (Own%):
@@ -60,75 +70,49 @@ WARM_MAX = _rgb("#F8DEDA")  # == CRIT_BG
 # reuse EdgeRaw's own field names (ValAdj, ProjPts, Salary, ...) for their
 # column headers.
 FIELD_COLOR_SCALES = {
-    "ProjPts": _GRADIENT,
-    "AggPts": _GRADIENT,
-    "Pts": _GRADIENT,
-    "Ceiling": _GRADIENT,
-    "Ceil": _GRADIENT,
-    "Val": _GRADIENT,
-    "CeilVal": _GRADIENT,
-    # Part 7.2: unlike Val/CeilVal, already a per-position residual
-    # (Position-regressed against Salary on EdgeRaw itself), so -- same
-    # reasoning as CeilPct just below -- a flat whole-tab scale is
-    # already meaningful; see EDGE_UNSCALED_PLAYER_METRICS/
-    # GROUPED_TAB_UNSCALED_COLUMNS (sheet_style.py) for why EdgeRaw scales
-    # this one but Player Pool/Lineups skip re-grouping it.
-    "ValAdj": _GRADIENT,
-    "Leverage": _GRADIENT,
-    "GameEnv": _GRADIENT,
-    # Part C, C7: team-level, not player/position-skewed (every player on
-    # a team shares one value, same as GameEnv/OverUnder/Spread just
-    # above/below) -- a flat whole-tab scale is meaningful on EdgeRaw with
-    # no EDGE_UNSCALED_PLAYER_METRICS exclusion needed, unlike raw Pts/
-    # Ceil/Val. Pace alone is reversed per C7's own instruction: lower
-    # (faster) is the interesting/good direction.
-    "Pace": _REVERSED,
-    "PROE": _GRADIENT,
-    "Expl%": _GRADIENT,
-    # GPS (2026-09-26): team-level model-implied total, same reasoning as
-    # "Team Implied" just below (every player on a team shares one value).
-    "ModelImplied": _GRADIENT,
-    "Team Implied": _GRADIENT,
-    "O/U": _GRADIENT,
-    "OU": _GRADIENT,
-    "OverUnder": _GRADIENT,
-    "Total": _GRADIENT,
+    # Round 5 item 3: the five player-performance metrics are banded by their
+    # within-position percentile helper (`derived.PLAYER_METRIC_PCT_COLUMNS`), the
+    # same number on every tab, so a player looks identical everywhere and a sort
+    # or filter can never move a colour onto the wrong player.
+    "ProjPts": _PCT,
+    "AggPts": _PCT,
+    "Pts": _PCT,
+    "Ceiling": _PCT,
+    "Ceil": _PCT,
+    "Val": _PCT,
+    "CeilVal": _PCT,
+    # Already 0-100 scores/percentiles: banded on their own value (Rule 3).
+    "ValAdj": _SCORE,
+    "CeilPct": _SCORE,
+    "GameEnv": _SCORE,
+    # CeilPct - OwnPct, so -100..+100 and centred on 0 (Rule 3 -- see `LEVERAGE_BANDS`).
+    "Leverage": _LEVERAGE,
+    # Game/team metrics: PERCENTRANK against the tab's own column, live (Rule 4).
+    # Pace is faster-is-better (lower), Spread lower-is-better (a bigger favourite).
+    "Pace": _GAME_REVERSED,
+    "PROE": _GAME,
+    "Expl%": _GAME,
+    "Team Implied": _GAME,
+    "O/U": _GAME,
+    "OU": _GAME,
+    "OverUnder": _GAME,
+    "Total": _GAME,
+    "GPS": _GAME,
+    "Spread": _GAME_REVERSED,
+    # OppPosRank is a 1-32 rank where LOW is the tough matchup (this opponent allows
+    # the FEWEST fantasy points at the position): bands on the rank itself.
+    "OppPosRank": _RANK,
+    # Round 5 item 9: higher = softer matchup for every position (DST sign-flipped).
+    "OppEPA": _GAME,
+    # Rule 5: kept as they were -- movement diverges around zero, Own% is the warm scale.
     "ImpliedMove": _DIVERGING,
     "TotMove": _DIVERGING,
     "SpdMove": _DIVERGING,
-    # PROMPT_GPS.md, Slate Grid/Board Slate shape only (never EdgeRaw --
-    # GPS/Model Tot/Tot Δ/Spd Δ don't live there): GPS/Model Tot are
-    # gradient like Total; Tot Δ/Spd Δ are diverging at 0, same shape as
-    # TotMove/SpdMove above. `Model Spd` is deliberately absent -- no
-    # colour at all, per the prompt's own spec (a plain number, not a
-    # quality to rank).
-    "GPS": _GRADIENT,
-    "Model Tot": _GRADIENT,
-    "Tot Δ": _DIVERGING,
-    "Spd Δ": _DIVERGING,
-    # Week 3 feedback (A1), found live 2026-09-22: Spread was already here,
-    # but as _DIVERGING -- zero as a neutral midpoint, negative (this
-    # team's own favorite side) mapped to red, positive (underdog) mapped
-    # to green. That's backwards for what Spread actually means: unlike
-    # ImpliedMove/TotMove/SpdMove (direction-agnostic deltas, where
-    # "which way is good" depends on who you rostered), a more negative
-    # Spread always means a bigger favorite -- the same fixed, monotonic
-    # "lower is better" reading OppPosRank already gets below. Sam:
-    # "Spread syntax highlighting is backwards, lower numbers are better."
-    "Spread": _REVERSED,
-    # A low OppPosRank is the tough matchup here (this opponent allows the
-    # FEWEST fantasy points at this position) -- same "1st is best"
-    # convention as the SoS tabs' own `Rank` column (`style_sos_tab`).
-    "OppPosRank": _REVERSED,
     "Own%": _WARM,
-    # Phase 4 (4.1): already percentile-within-position, 0-100 regardless
-    # of which positions happen to be mixed into the range they're scaled
-    # over -- unlike raw Pts/Ceil/Val/CeilVal, scaling these doesn't need
-    # a position-grouped range to mean something. See
-    # EDGE_UNSCALED_PLAYER_METRICS/GROUPED_TAB_UNSCALED_COLUMNS
-    # (sheet_style.py) for why EdgeRaw keeps these two and Player
-    # Pool/Lineups skip them.
-    "CeilPct": _GRADIENT,
+    # Item 1d (Exposure zeros): Exposure's share column joins the shared system so its
+    # zero-heavy column stops anchoring the gradient. Low is comfortable, high is
+    # concentration, so it stays a reversed gradient.
+    "Exposure": _REVERSED,
     # Phase 5B: a count (0..however many lineups H1 says are being built),
     # same "more is better" reading as everything else in _GRADIENT -- a
     # heavily-used player earning the deepest colour is exactly the point.
@@ -324,3 +308,174 @@ def _scale_rule_specs(
             "fmt": {"backgroundColor": ZERO_GREY_BG},
         }
     return gradient_spec, boolean_spec
+
+
+# ---------------------------------------------------------------------------
+# Round 5 item 3: five-band formula rules
+# ---------------------------------------------------------------------------
+#
+# Percentile | Colour
+#   >= 90    | strong green
+#   70 - 90  | light green
+#   30 - 70  | none
+#   10 - 30  | light red
+#   < 10     | red
+#   0/blank  | none  (an exact zero keeps its grey chip, see `ZERO_GREY_BG`)
+#
+# Every rule is a custom formula with RELATIVE row references, applied to a whole
+# column, so it moves with the row through any sort, filter or sync -- no per-block
+# ranges, no re-polish needed after a sync. No new hues: the two strong colours are the
+# existing gradient ends (`GRAD_MAX`/`GRAD_MIN`), the light ones a 50% tint of each.
+
+
+def _tint(color: dict, amount: float = 0.5) -> dict:
+    return {k: round(1 - amount * (1 - v), 4) for k, v in color.items()}
+
+
+BAND_STRONG_GREEN = GRAD_MAX
+BAND_LIGHT_GREEN = _tint(GRAD_MAX)
+BAND_LIGHT_RED = _tint(GRAD_MIN)
+BAND_STRONG_RED = GRAD_MIN
+
+# Cut-offs on a 0-100 percentile (`PERCENTRANK * 100` for game metrics).
+PCT_STRONG, PCT_LIGHT, PCT_LIGHT_LOW, PCT_STRONG_LOW = 90, 70, 30, 10
+
+# Rule 3, `Leverage` (CeilPct - OwnPct) is centred on 0 and spans -100..+100, not
+# 0-100, so its bands are on the value itself: +40/+15 above, -15/-40 below.
+LEVERAGE_BANDS = (40, 15, -15, -40)
+
+# `OppPosRank` is 1-32 (LOW = tough matchup): the 90/70/30/10 cut-offs, expressed as
+# ranks over 32 teams -- the top ~10% (<= 4), top ~30% (<= 10), bottom ~30% (>= 23),
+# bottom ~10% (>= 29).
+RANK_BANDS = (4, 10, 23, 29)
+
+
+def _bool_spec(a1_range: str, formula: str, color: dict) -> dict:
+    return {
+        "a1_range": a1_range,
+        "condition_type": "CUSTOM_FORMULA",
+        "values": [formula],
+        "fmt": {"backgroundColor": color},
+    }
+
+
+def band_rule_specs(
+    kind: str,
+    letter: str,
+    first_row: int,
+    last_row: int,
+    *,
+    pct_letter: str | None = None,
+    allow_zero: bool = False,
+) -> list[dict]:
+    """The four coloured bands (the middle band is deliberately no colour) for one
+    column, as boolean-rule specs over `letter{first_row}:letter{last_row}`.
+
+    `kind` picks what is compared: `_PCT` reads the row's hidden percentile helper
+    (`pct_letter`), `_SCORE`/`_LEVERAGE`/`_RANK` compare the cell itself, and
+    `_GAME`/`_GAME_REVERSED` compare `PERCENTRANK` of the cell against the column
+    (`_GAME_REVERSED`: LOW is good). A zero or a non-number never matches any band
+    (unless `allow_zero`, for `Spread`, where 0 is a real pick'em)."""
+    a1 = f"{letter}{first_row}:{letter}{last_row}"
+    cell = f"${letter}{first_row}"
+    numeric = f"ISNUMBER({cell})" if allow_zero else f"ISNUMBER({cell}),{cell}<>0"
+
+    if kind == _PCT:
+        if pct_letter is None:
+            return []
+        p = f"${pct_letter}{first_row}"
+        guard = f"ISNUMBER({p})"
+        sg = f"=AND({guard},{p}>={PCT_STRONG})"
+        lg = f"=AND({guard},{p}>={PCT_LIGHT},{p}<{PCT_STRONG})"
+        lr = f"=AND({guard},{p}>={PCT_STRONG_LOW},{p}<{PCT_LIGHT_LOW})"
+        sr = f"=AND({guard},{p}<{PCT_STRONG_LOW})"
+    elif kind == _SCORE:
+        sg = f"=AND({numeric},{cell}>={PCT_STRONG})"
+        lg = f"=AND({numeric},{cell}>={PCT_LIGHT},{cell}<{PCT_STRONG})"
+        lr = f"=AND({numeric},{cell}>={PCT_STRONG_LOW},{cell}<{PCT_LIGHT_LOW})"
+        sr = f"=AND({numeric},{cell}<{PCT_STRONG_LOW})"
+    elif kind == _LEVERAGE:
+        a, b, c, d = LEVERAGE_BANDS
+        sg = f"=AND({numeric},{cell}>={a})"
+        lg = f"=AND({numeric},{cell}>={b},{cell}<{a})"
+        lr = f"=AND({numeric},{cell}<={c},{cell}>{d})"
+        sr = f"=AND({numeric},{cell}<={d})"
+    elif kind == _RANK:
+        a, b, c, d = RANK_BANDS
+        sg = f"=AND({numeric},{cell}<={a})"
+        lg = f"=AND({numeric},{cell}>{a},{cell}<={b})"
+        lr = f"=AND({numeric},{cell}>={c},{cell}<{d})"
+        sr = f"=AND({numeric},{cell}>={d})"
+    elif kind in (_GAME, _GAME_REVERSED):
+        rank = f"PERCENTRANK(${letter}${first_row}:${letter}${last_row},{cell})"
+        # High-is-good reads `PERCENTRANK * 100`; low-is-good mirrors it.
+        hi = lo = f"{rank}*100" if kind == _GAME else f"(1-{rank})*100"
+        sg = f"=AND({numeric},{hi}>={PCT_STRONG})"
+        lg = f"=AND({numeric},{hi}>={PCT_LIGHT},{hi}<{PCT_STRONG})"
+        lr = f"=AND({numeric},{lo}>={PCT_STRONG_LOW},{lo}<{PCT_LIGHT_LOW})"
+        sr = f"=AND({numeric},{lo}<{PCT_STRONG_LOW})"
+    else:
+        return []
+    return [
+        _bool_spec(a1, sg, BAND_STRONG_GREEN),
+        _bool_spec(a1, lg, BAND_LIGHT_GREEN),
+        _bool_spec(a1, lr, BAND_LIGHT_RED),
+        _bool_spec(a1, sr, BAND_STRONG_RED),
+    ]
+
+
+BAND_KINDS = frozenset({_PCT, _SCORE, _LEVERAGE, _RANK, _GAME, _GAME_REVERSED})
+
+# Every player metric's hidden within-position percentile column on EdgeRaw, keyed by
+# the header text that metric carries on ANY tab (Player Pool/Lineups call ProjPts
+# "Pts" and Ceiling "Ceil").
+PCT_HELPER_FOR_FIELD = {
+    "ProjPts": "ProjPts%ile",
+    "Pts": "ProjPts%ile",
+    "AggPts": "AggPts%ile",
+    "Ceiling": "Ceiling%ile",
+    "Ceil": "Ceiling%ile",
+    "Val": "Val%ile",
+    "CeilVal": "CeilVal%ile",
+}
+
+
+def column_rule_specs(
+    name: str,
+    letter: str,
+    first_row: int,
+    last_row: int,
+    *,
+    header: list | None = None,
+    pct_letter: str | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """`(gradient_specs, boolean_specs)` for one `FIELD_COLOR_SCALES` column over
+    `letter{first_row}:letter{last_row}` -- the single dispatch every call site uses.
+
+    A band kind gives no gradient and its four bands plus the grey zero chip
+    (added LAST, so it wins any exact-zero cell); every other kind (Own%, movement,
+    Exposure) gives its gradient and chip exactly as `_scale_rule_specs` always did.
+    `pct_letter` overrides the helper column found by name in `header` (Board's
+    hidden lookup column)."""
+    kind = FIELD_COLOR_SCALES[name]
+    a1 = f"{letter}{first_row}:{letter}{last_row}"
+    if kind not in BAND_KINDS:
+        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, name, zero_exclude_range=a1)
+        return [gradient_spec], ([boolean_spec] if boolean_spec is not None else [])
+    if kind == _PCT and pct_letter is None and header is not None:
+        helper = PCT_HELPER_FOR_FIELD.get(name)
+        if helper in header:
+            pct_letter = column_letter(header.index(helper))
+    booleans = band_rule_specs(
+        kind, letter, first_row, last_row, pct_letter=pct_letter, allow_zero=(name == "Spread")
+    )
+    if name in ZERO_EXCLUDED_COLUMNS:
+        booleans.append(
+            {
+                "a1_range": a1,
+                "condition_type": "NUMBER_EQ",
+                "values": ["0"],
+                "fmt": {"backgroundColor": ZERO_GREY_BG},
+            }
+        )
+    return [], booleans

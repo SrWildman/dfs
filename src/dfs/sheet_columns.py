@@ -99,6 +99,7 @@ from dfs.derived import (
     EDGE_COLUMNS,
     GAME_LABEL,
     MOVEMENT_LABEL,
+    PLAYER_METRIC_PCT_COLUMNS,
     USAGE_LABEL,
     WEATHER_LABEL,
 )
@@ -152,8 +153,9 @@ GAME = [
     "Pace",
     "PROE",
     "Expl%",
-    "ModelImplied",
     "OppPosRank",
+    # Round 5 item 9: the opponent's EPA-per-play efficiency, beside OppPosRank.
+    "OppEPA",
     "GameID",
     "TmRank",
 ]
@@ -186,7 +188,10 @@ USAGE = ["Snap%"]
 # its old visible spine slot -- kept, not deleted, since other
 # formatting/filtering logic keys off Flag's single-highest-priority
 # value as a boolean/categorical key.
-INTERNAL = ["Id", "Flag"]
+# Round 5 item 3: the five hidden percentile helpers join them -- each player
+# metric's within-position standing, linked so the highlighting rules on every
+# tab read the SAME number for the same player.
+INTERNAL = ["Id", "Flag", *PLAYER_METRIC_PCT_COLUMNS.values()]
 
 # Shared by all three tabs -- see PLAYER_POOL_RAW_COLUMN_ORDER/
 # PLAYER_POOL_COLUMN_ORDER/LINEUPS_COLUMN_ORDER below for each tab's full
@@ -230,7 +235,7 @@ LINKED_COLUMNS = [
     "Pace",
     "PROE",
     "Expl%",
-    "ModelImplied",
+    "OppEPA",
     "GameID",
     "TmRank",
     *CEILING_DETAIL,
@@ -293,7 +298,7 @@ PLAYER_POOL_COLUMN_ORDER = [
 # allocation meaning was confirmed) -- position unchanged both times.
 # "Issues" (A1: renamed from "Check") is the last thing you look at
 # before trusting a lineup, so it sits right after "% of Cap". Part 7.5's
-# six lineup-metrics columns (`sheet_lineup_metrics.
+# lineup-metrics columns (Games, Min Unique; `sheet_lineup_metrics.
 # LINEUP_METRIC_HEADERS`) sit right after Issues -- same "read this
 # before trusting a lineup" neighborhood, a natural continuation of it
 # rather than a second unrelated block -- with "Edge ↗" (A3, same

@@ -1,6 +1,7 @@
 import pytest
 
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
+from dfs.sheet_names import resolve_name_expr
 from dfs.sheet_pool_formulas import (
     _TAG_RANK_ARRAY,
     _UNKNOWN_TAG_RANK,
@@ -35,6 +36,10 @@ class SpySheetsClient:
         self._positions = positions  # {"B2": "QB", "B13": "RB", ...}
         self._header = header
         self.update_calls: list[tuple[str, str, list[list]]] = []
+        self.clear_calls: list[tuple[str, list[str]]] = []
+
+    def clear_ranges(self, tab_name: str, ranges: list[str]) -> None:
+        self.clear_calls.append((tab_name, ranges))
 
     def read_range(self, tab_name: str, a1_range: str):
         if a1_range == _HEADER_A1:
@@ -194,8 +199,12 @@ def test_name_formula_unions_edgeraw_ticks_with_the_control_cell():
     name_formula = formulas["A2"]
     assert "UNIQUE({" in name_formula
     assert "FILTER({EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F,MATCH(" in name_formula
-    assert f'FILTER({_CONTROL_CELL}:{_CONTROL_CELL},{_CONTROL_CELL}<>"",' in name_formula
-    assert f'VLOOKUP({_CONTROL_CELL},EdgeRaw!$B:$C,2,FALSE),"")="QB"' in name_formula
+    # Round 5 item 6: the control cell's typed name is resolved to DK's spelling first.
+    assert f'FILTER({{{resolve_name_expr(_CONTROL_CELL, "EdgeRaw")}}},{_CONTROL_CELL}<>"",' in name_formula
+    assert (
+        f'VLOOKUP({resolve_name_expr(_CONTROL_CELL, "EdgeRaw")},EdgeRaw!$B:$C,2,FALSE),"")="QB"'
+        in name_formula
+    )
     assert "VLOOKUP(" in name_formula  # the control cell's half looks Salary up against EdgeRaw
 
 
@@ -324,9 +333,14 @@ def test_never_writes_outside_name_overflow_and_pool_columns():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
-    allowed_first_letters = {"A", OVERFLOW_COL[0], POOL_TYPE_COL[0]}
+    import re
+
+    added_col = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Added"))  # the add-a-player accumulator
+    allowed_columns = {"A", OVERFLOW_COL, POOL_TYPE_COL, added_col}
     for _, a1_range, _ in client.update_calls:
-        assert a1_range[0] in allowed_first_letters
+        # Whole column letters (not first characters): past column Z the first letter
+        # of "AZ"/"BA" stops identifying a column.
+        assert re.match(r"[A-Z]+", a1_range).group(0) in allowed_columns
 
 
 def test_pool_type_formula_looks_up_edgeraw_by_name_with_index_match():
@@ -347,3 +361,13 @@ def test_pool_type_column_header_is_written_once():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
     header_call = next(c for c in client.update_calls if c[1] == f"{POOL_TYPE_COL}{PLAYER_POOL_HEADER_ROW}")
     assert header_call[2] == [["Pool"]]
+
+
+def test_each_blocks_spill_area_is_cleared_of_stray_formulas():
+    """Found live: leftover name formulas at rows 37/63 of the template's RB/WR blocks made
+    every RB and WR show twice. A block's formula spills, so the cells below its start must
+    hold nothing typed."""
+    client = SpySheetsClient(_POSITIONS)
+    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
+    cleared = [rng for _tab, ranges in client.clear_calls for rng in ranges]
+    assert cleared == [f"A{start + 1}:A{end}" for start, end in _BLOCKS]

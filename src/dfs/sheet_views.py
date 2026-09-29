@@ -23,6 +23,7 @@ from __future__ import annotations
 import pandas as pd
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, SHOOTOUT_TOTAL_THRESHOLD
+from dfs.gps_check import GPS_IMPLIED_MISMATCH_PTS
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, _canonical_id
@@ -85,6 +86,21 @@ def _rng(edge_tab: str, name: str) -> str:
     return f"{_q(edge_tab)}!${letter}$2:${letter}"
 
 
+def _gps_mismatch_formula(away_implied: str, home_implied: str, *, total_ref: str, spread_ref: str) -> str:
+    """TRUE when either team's GPS worksheet implied total is more than
+    `GPS_IMPLIED_MISMATCH_PTS` off its Vegas implied total, blank when GPS
+    (or the line) is missing -- the sheet-side twin of
+    `gps_check.find_gps_mismatches`. `spread_ref` is the SIGNED spread from the
+    home team's perspective (positive = home favoured), so Vegas implied is
+    (total - spread)/2 for the away team and (total + spread)/2 for home."""
+    t = GPS_IMPLIED_MISMATCH_PTS
+    return (
+        f'IF(OR({away_implied}="",{home_implied}="",{total_ref}="",{spread_ref}=""),"",'
+        f"OR(ABS({away_implied}-({total_ref}-{spread_ref})/2)>{t},"
+        f"ABS({home_implied}-({total_ref}+{spread_ref})/2)>{t}))"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Board (Phase 6, Part 3 + 7.6 rebuild)
 # ---------------------------------------------------------------------------
@@ -123,11 +139,23 @@ BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
 # `Total` -- two columns, not one "KC -3.5" text cell, since text can't be
 # colour-scaled (item 6 scales `Spread`). `Pace` (Part C, C7) stays where
 # it was relative to Wind/Shootout, just shifted two further right.
-# PROMPT_GPS.md (2026-09-26): `GPS`/`Tot Δ` appended after the columns
-# PROMPT_BOARD_FIXES.md added, per its own "just the signal" instruction
-# (no `Model Spd`/`Spd Δ` here -- that pair lives on Slate Grid's fuller
-# detail view instead).
-BOARD_SLATE_COLHEADER = ["Matchup", "Total", "Fav", "Spread", "Pace", "Wind", "Shootout?", "GPS", "Tot Δ"]
+# Round 5 item 5b: `PROE`/`Expl%`/`GameEnv` join `Pace` (each the mean of both
+# teams' values, the same "combined per game" shape Pace already had) and item
+# 5c dropped `Tot Δ` (GPS's "Implied Total" is Vegas, not a model -- see
+# `gps_check.py`). Total stays the sort key.
+BOARD_SLATE_COLHEADER = [
+    "Matchup",
+    "Total",
+    "Fav",
+    "Spread",
+    "Pace",
+    "PROE",
+    "Expl%",
+    "GameEnv",
+    "Wind",
+    "Shootout?",
+    "GPS",
+]
 
 BOARD_LEADERS_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
 # PROMPT_BOARD_FIXES.md item 2: a sub-label row naming each block's own
@@ -247,9 +275,39 @@ BOARD_MAX_VISIBLE_COL_INDEX = (
 BOARD_SLATE_GAMEID_COL_INDEX = BOARD_MAX_VISIBLE_COL_INDEX + 1
 BOARD_SLATE_AWAY_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 1
 BOARD_SLATE_HOME_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 2
+# Hidden per-row helper: TRUE when this game's GPS worksheet implied totals are
+# more than `GPS_IMPLIED_MISMATCH_PTS` off Vegas (a conditional-format rule on
+# the visible GPS cell reads it -- CF can't reference GPSRaw directly).
+BOARD_SLATE_GPSCHK_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 3
 BOARD_SLATE_GAMEID_COL = column_letter(BOARD_SLATE_GAMEID_COL_INDEX)
 BOARD_SLATE_AWAY_COL = column_letter(BOARD_SLATE_AWAY_COL_INDEX)
 BOARD_SLATE_HOME_COL = column_letter(BOARD_SLATE_HOME_COL_INDEX)
+BOARD_SLATE_GPSCHK_COL = column_letter(BOARD_SLATE_GPSCHK_COL_INDEX)
+# Hidden helper (Round 5 item 3): the `ProjPts%ile` of each "Highest projection"
+# leader, looked up by name, so the Board's ProjPts column is banded by the SAME
+# within-position percentile every other tab uses. Spills down from the first
+# Leaders row, aligned with the ProjPts block.
+BOARD_LEADERS_PCT_COL_INDEX = BOARD_SLATE_GPSCHK_COL_INDEX + 1
+BOARD_LEADERS_PCT_COL = column_letter(BOARD_LEADERS_PCT_COL_INDEX)
+
+# Slate Grid's hidden GPS sanity-check column (see `build_slate_grid`).
+SLATE_GPS_CHECK_HEADER = "GPS off Vegas"
+SLATE_HEADER = [
+    "Matchup",
+    "Kickoff",
+    "Total",
+    "Spread",
+    "Roof",
+    "Wind",
+    "Gust",
+    "Rest (A/H)",
+    "Div",
+    "Stadium",
+    "Total move",
+    "Spread move",
+    "GPS",
+    SLATE_GPS_CHECK_HEADER,
+]
 
 
 def _pp_col(name: str) -> str:
@@ -567,15 +625,24 @@ def build_board(
     # true (each team has its OWN Pace), so both sides are looked up and
     # averaged, unlike Wind below (one game-level value, keyed by GameId).
     team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
-    pace_col = column_letter(EDGE_COLUMNS.index("Pace") + EDGE_DATA_OFFSET)
-    pace_idx = EDGE_COLUMNS.index("Pace") - EDGE_COLUMNS.index("Team") + 1
-    # PROMPT_GPS.md: GPS/Tot Δ read GPSRaw directly (one row per team,
-    # `sources/tffb_gps.py`), not EdgeRaw's own `ModelImplied` -- GPS
-    # itself (the 1-5 score) never made it onto EdgeRaw at all, a
-    # per-GAME score, not a per-player one (see `derived._attach_gps`'s
-    # docstring). `Model Tot` for `Tot Δ` is home + away `ImpliedTotal`
-    # computed here, same reasoning as Slate Grid's own `Model Tot`
-    # (`build_slate_grid`'s docstring covers why, not repeated here).
+
+    def _team_pair_mean(metric: str, away_ref: str, home_ref: str) -> str:
+        """Mean of both teams' EdgeRaw value for `metric` (Pace/PROE/Expl%/
+        GameEnv are per-team columns there, so both sides are looked up and
+        averaged -- the same "combined per game" shape Pace always had). The
+        column letter and VLOOKUP index are derived from EDGE_COLUMNS, never
+        typed."""
+        metric_col = column_letter(EDGE_COLUMNS.index(metric) + EDGE_DATA_OFFSET)
+        idx = EDGE_COLUMNS.index(metric) - EDGE_COLUMNS.index("Team") + 1
+        return (
+            f"IFERROR(AVERAGE("
+            f"VLOOKUP({away_ref},{e}!${team_col}:${metric_col},{idx},FALSE),"
+            f'VLOOKUP({home_ref},{e}!${team_col}:${metric_col},{idx},FALSE)),"")'
+        )
+
+    # GPS's 1-5 score (and the sanity-check inputs) read GPSRaw directly (one
+    # row per team, `sources/tffb_gps.py`) -- GPS is a per-GAME score and was
+    # never an EdgeRaw column.
     gps_end_col = column_letter(len(GPS_COLUMNS) - 1)
     gps_implied_idx = GPS_COLUMNS.index("ImpliedTotal") + 1
     gps_score_idx = GPS_COLUMNS.index("GPS") + 1
@@ -630,27 +697,38 @@ def build_board(
     for i in range(BOARD_SLATE_ROWS):
         r = BOARD_SLATE_FIRST_ROW + i
         guard = f'IF($A{r}="","",'
-        away_implied = (
-            f'IFERROR(VLOOKUP(${BOARD_SLATE_AWAY_COL}{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
-        )
-        home_implied = (
-            f'IFERROR(VLOOKUP(${BOARD_SLATE_HOME_COL}{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
-        )
-        both_implied_known = f'OR({away_implied}="",{home_implied}="")'
+        away_ref, home_ref = f"${BOARD_SLATE_AWAY_COL}{r}", f"${BOARD_SLATE_HOME_COL}{r}"
+        away_implied = f'IFERROR(VLOOKUP({away_ref},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
+        home_implied = f'IFERROR(VLOOKUP({home_ref},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
+        # The Board shows |spread| (col D) and the favourite (col C), so the
+        # signed home-perspective spread `gps_check.py` needs is rebuilt from
+        # them: +|spread| when the home team is the favourite, -|spread| when
+        # the away team is, 0 for a pick'em.
+        home_spread = f"IF($C{r}={home_ref},$D{r},IF($C{r}={away_ref},-$D{r},0))"
         _set(
             r,
             [
-                f"={guard}IFERROR(AVERAGE("
-                f"VLOOKUP(${BOARD_SLATE_AWAY_COL}{r},{e}!${team_col}:${pace_col},{pace_idx},FALSE),"
-                f'VLOOKUP(${BOARD_SLATE_HOME_COL}{r},{e}!${team_col}:${pace_col},{pace_idx},FALSE)),""))',
+                f"={guard}{_team_pair_mean('Pace', away_ref, home_ref)})",
+                f"={guard}{_team_pair_mean('PROE', away_ref, home_ref)})",
+                f"={guard}{_team_pair_mean('Expl%', away_ref, home_ref)})",
+                f"={guard}{_team_pair_mean('GameEnv', away_ref, home_ref)})",
                 f"={guard}IFERROR(VLOOKUP(${BOARD_SLATE_GAMEID_COL}{r},{w}!$A:${wind_end_col},"
                 f'{wind_idx},FALSE),""))',
                 f'={guard}IF($B{r}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
-                f"={guard}IFERROR(VLOOKUP(${BOARD_SLATE_HOME_COL}{r},{gp}!$A:${gps_end_col},"
-                f'{gps_score_idx},FALSE),""))',
-                f'={guard}IF({both_implied_known},"",({away_implied}+{home_implied})-$B{r}))',
+                f'={guard}IFERROR(VLOOKUP({home_ref},{gp}!$A:${gps_end_col},{gps_score_idx},FALSE),""))',
             ],
             start_col=4,
+        )
+        _set(
+            r,
+            [
+                f"={guard}"
+                + _gps_mismatch_formula(
+                    away_implied, home_implied, total_ref=f"$B{r}", spread_ref=home_spread
+                )
+                + ")"
+            ],
+            start_col=BOARD_SLATE_GPSCHK_COL_INDEX,
         )
 
     _set(BOARD_LEADERS_HEADER_ROW, ["PER-POSITION LEADERS  —  ranked within position, never across it"])
@@ -661,6 +739,18 @@ def build_board(
     _set(BOARD_LEADERS_COLHEADER_ROW, BOARD_LEADERS_COLHEADER)
     _set(BOARD_LEADERS_FIRST_ROW, [best_valadj], start_col=0)
     _set(BOARD_LEADERS_FIRST_ROW, [highest_proj], start_col=5)
+    # Round 5 item 3: hidden per-row percentile for the ProjPts leaders (names are column F).
+    edge_name_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+    edge_pct_col = column_letter(EDGE_COLUMNS.index("ProjPts%ile") + EDGE_DATA_OFFSET)
+    pct_idx = EDGE_COLUMNS.index("ProjPts%ile") - EDGE_COLUMNS.index("Name") + 1
+    proj_names = f"F{BOARD_LEADERS_FIRST_ROW}:F{BOARD_LEADERS_LAST_ROW}"
+    _set(
+        BOARD_LEADERS_FIRST_ROW,
+        [
+            f'=ARRAYFORMULA(IFERROR(VLOOKUP({proj_names},{e}!${edge_name_col}:${edge_pct_col},{pct_idx},FALSE),""))'
+        ],
+        start_col=BOARD_LEADERS_PCT_COL_INDEX,
+    )
 
     _set(
         BOARD_PUNT_HEADER_ROW,
@@ -797,27 +887,16 @@ def build_slate_grid(
     week_start_date` (`sources/edge.py`), not the last sync, so nothing
     new needed building here beyond surfacing the existing columns.
 
-    GPS (2026-09-26): `GPS`/`Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ`,
-    sourced from `gps_tab` (`sources/tffb_gps.py`'s own `GPSRaw`, one row
-    per team) rather than EdgeRaw's `ModelImplied` -- `GPS` itself (the
-    1-5 score) never made it onto EdgeRaw at all (a per-GAME score, not a
-    per-player one; see `derived._attach_gps`'s own docstring for why),
-    so this tab's own per-game shape needs the raw per-team source
-    either way. `Model Tot` is home + away `ImpliedTotal` computed here
-    (not the CSV's own separately-computed `TOTAL` column, which this
-    source deliberately drops -- see `tffb_gps.py`'s module docstring for
-    why trusting a recomputation from the same two inputs is preferred
-    over trusting the CSV's own agreement with it). `Model Spd` is the
-    home margin (`home_implied - away_implied`) in the SAME sign
-    convention `GamesRaw!$L` already uses (positive = home favoured --
-    confirmed against `nflverse_games.py`'s own module docstring, same
-    fact `PROMPT_BOARD_FIXES.md` item 1's `Fav`/`Spread` derivation relies
-    on), so `Spd Δ` is a plain subtraction, no sign flip needed. Both
-    deltas -- and `Model Tot`/`Model Spd` themselves -- blank out
-    entirely (never a fabricated 0) if either team's `ImpliedTotal`
-    lookup comes back blank (GPS not synced yet, or a team code that
-    doesn't match), rather than trusting `N()`-style zero-coercion, which
-    would silently read "no GPS data" as "a real 0-point model total."
+    GPS: `GPS` (the 1-5 score) is read per game from `gps_tab` (`sources/
+    tffb_gps.py`'s `GPSRaw`, one row per team) via the HOME team's row --
+    it is a per-GAME score, never an EdgeRaw column. Round 5 item 5c REMOVED
+    `Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ`: the worksheet's `Implied Total`
+    is Vegas, not a model (see `gps_check.py`), so those four columns only
+    ever restated the market. The implied totals are kept as a SANITY
+    CHECK: a hidden `GPS off Vegas` column is TRUE when either team's
+    implied total is more than `GPS_IMPLIED_MISMATCH_PTS` off Vegas, and a
+    conditional-format chip on the visible `GPS` cell reads it (a row swap
+    in the source means that game's GPS describes the wrong game).
     """
     g, w, e, gp = _q(games_tab), _q(weather_tab), _q(edge_tab), _q(gps_tab)
     wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
@@ -834,32 +913,11 @@ def build_slate_grid(
     gps_score_idx = GPS_COLUMNS.index("GPS") + 1
     games_total_col = _games_col("Total")
     games_spread_col = _games_col("Spread")
-    rows = [
-        [
-            "Matchup",
-            "Kickoff",
-            "Total",
-            "Spread",
-            "Roof",
-            "Wind",
-            "Gust",
-            "Rest (A/H)",
-            "Div",
-            "Stadium",
-            "Total move",
-            "Spread move",
-            "GPS",
-            "Model Tot",
-            "Tot Δ",
-            "Model Spd",
-            "Spd Δ",
-        ]
-    ]
+    rows = [list(SLATE_HEADER)]
     for r in range(2, 20):
         guard = f'IF({g}!$A{r}="","",'
         away_implied = f'IFERROR(VLOOKUP({g}!$B{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
         home_implied = f'IFERROR(VLOOKUP({g}!$C{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
-        both_implied_known = f'OR({away_implied}="",{home_implied}="")'
         rows.append(
             [
                 f'={guard}{g}!$B{r}&" @ "&{g}!$C{r})',
@@ -879,12 +937,14 @@ def build_slate_grid(
                 f"={guard}IFERROR(VLOOKUP({g}!$C{r},{e}!${team_col}:${spd_move_end_col},"
                 f'{spd_move_idx},FALSE),""))',
                 f'={guard}IFERROR(VLOOKUP({g}!$C{r},{gp}!$A:${gps_end_col},{gps_score_idx},FALSE),""))',
-                f'={guard}IF({both_implied_known},"",{away_implied}+{home_implied}))',
-                f'={guard}IF({both_implied_known},"",'
-                f"({away_implied}+{home_implied})-{g}!${games_total_col}{r}))",
-                f'={guard}IF({both_implied_known},"",{home_implied}-{away_implied}))',
-                f'={guard}IF({both_implied_known},"",'
-                f"({home_implied}-{away_implied})-{g}!${games_spread_col}{r}))",
+                f"={guard}"
+                + _gps_mismatch_formula(
+                    away_implied,
+                    home_implied,
+                    total_ref=f"{g}!${games_total_col}{r}",
+                    spread_ref=f"{g}!${games_spread_col}{r}",
+                )
+                + ")",
             ]
         )
     client.write_tab(SLATE_TAB, rows)

@@ -1,6 +1,7 @@
 import pytest
 
 from dfs.sheet_columns import PLAYER_POOL_RAW_COLUMN_ORDER
+from dfs.sheet_names import resolve_name_expr
 from dfs.sheet_native_links import (
     NATIVE_LOOKUP_COLUMNS,
     native_lookup_formula,
@@ -25,7 +26,7 @@ def test_native_lookup_formula_derives_range_and_index_from_column_order():
     index = PLAYER_POOL_RAW_COLUMN_ORDER.index("Team") + 1
     col = column_letter(index - 1)
     assert native_lookup_formula(5, "Team") == (
-        f'=IF($A5="","",VLOOKUP($A5,PlayerPoolRaw!$A:${col},{index},false))'
+        f'=IF($A5="","",VLOOKUP({resolve_name_expr("$A5", "EdgeRaw")},PlayerPoolRaw!$A:${col},{index},false))'
     )
 
 

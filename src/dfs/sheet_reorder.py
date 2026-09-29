@@ -36,6 +36,7 @@ that specific ordering trap is the one this module exists to avoid.
 
 from __future__ import annotations
 
+from dfs import perf
 from dfs.column_reorder import compute_column_moves
 from dfs.sheet_columns import LINKED_COLUMNS
 from dfs.sheet_links import link_edge_columns
@@ -173,6 +174,7 @@ def reorder_tab_columns(
     return moves
 
 
+@perf.timed()
 def migrate_tab_to_designed_order(
     client: SheetsClient,
     tab: str,

@@ -84,6 +84,12 @@ class BankrollConfig(BaseModel):
     tab: str = "Bankroll"
     cash: EntryTableConfig | None = None
     gpp: EntryTableConfig | None = None
+    # Round 5, item 7: the hand-entered Betting ledger, above Cash on the
+    # tab (see sheet_bankroll_view.py's module docstring for why). Reuses
+    # EntryTableConfig for its header/first/last row shape even though
+    # there's no CSV sync or dedupe key for hand-typed bets --
+    # `entry_key_column` is simply unused for this bucket.
+    bets: EntryTableConfig | None = None
 
 
 class ResultsConfig(BaseModel):
@@ -104,6 +110,22 @@ class ResultsConfig(BaseModel):
     last_row: int = 20
 
 
+class SeasonConfig(BaseModel):
+    """Round 5, item 7d: the season-level Betting/Cash/GPP net rollup --
+    one pre-built row per NFL week (1-`nfl_calendar.MAX_WEEK`), found by
+    matching column A against the week number, same convention as
+    `ResultsConfig`/`results_autofill.py`. Also not reset by a new weekly
+    sheet copy -- see `sheet_season_view.py`'s module docstring for the
+    full column layout."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tab: str = "Season"
+    header_row: int = 1
+    first_row: int = 2
+    last_row: int = 19
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -112,6 +134,7 @@ class Config(BaseModel):
     lineups: LineupsConfig = LineupsConfig()
     bankroll: BankrollConfig = BankrollConfig()
     results: ResultsConfig = ResultsConfig()
+    season: SeasonConfig = SeasonConfig()
 
 
 def _missing_config_message() -> str:
