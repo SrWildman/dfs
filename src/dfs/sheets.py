@@ -311,6 +311,11 @@ class SheetsClient:
         _, ws = self._ws(tab_name)
         return ws.get(a1_range, value_render_option=ValueRenderOption.unformatted)
 
+    def row_count(self, tab_name: str) -> int:
+        """The tab's grid height (how many rows exist, filled or not)."""
+        _, ws = self._ws(tab_name)
+        return ws.row_count
+
     def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
         """Like `read_range`, but returns the literal formula text (e.g.
         "=SUM(A1:A2)") instead of the resolved value for any formula cell --

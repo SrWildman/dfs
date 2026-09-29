@@ -1,13 +1,24 @@
+import re
 from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
 from dfs.doctor import run_doctor
+from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
+from dfs.sheet_season_view import HEADER as SEASON_HEADER
 from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
+from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
+
+
+def column_index(letters: str) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
 
 
 @dataclass
@@ -26,15 +37,27 @@ class FakeDoctorClient:
         self,
         tabs: dict[str, list[str]],
         rows: dict[tuple[str, str], list[list[str]]] | None = None,
+        formulas: dict[tuple[str, str], list[list[str]]] | None = None,
     ):
         self._tabs = tabs
         self._rows = rows or {}
+        self._formulas = formulas or {}
 
     def list_tabs(self):
         return [_FakeTab(title=title, header=header) for title, header in self._tabs.items()]
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:
         return self._rows.get((tab_name, a1_range), [])
+
+    def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
+        """Default: a healthy grid (row N's every cell is `=X{N}`), so existing tests see
+        no formula-range findings; a test that wants a gap passes its own grid."""
+        if (tab_name, a1_range) in self._formulas:
+            return self._formulas[(tab_name, a1_range)]
+        m = re.fullmatch(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", a1_range)
+        first, last = int(m.group(2)), int(m.group(4))
+        width = column_index(m.group(3)) + 1
+        return [[f"=X{r}"] * width for r in range(first, last + 1)]
 
 
 def _base_config(**overrides) -> Config:
@@ -62,8 +85,17 @@ _ALL_GOOD_TABS = {
     "Player Pool": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Bankroll": [],
-    "Results": [],
-    "Season": [],
+    "Results": [
+        "Week",
+        "Cash Pts",
+        "Cash Line",
+        RESULTS_FORMULA_HEADERS[0],
+        "H2H Entered",
+        "H2H Win",
+        RESULTS_FORMULA_HEADERS[1],
+    ],
+    "Season": list(SEASON_HEADER),
+    DKSALCLEAN_TAB: ["Position", "Team", "ID", "Name", "Salary", "Team", "OPP"],
     "NameAlias": [],
     EXPOSURE_TAB: [],
 }
@@ -362,3 +394,61 @@ def test_run_doctor_skips_dependent_checks_for_a_missing_tab():
     issues = run_doctor(client, cfg, title="Week 1")
     assert any(i.check == "tab-exists" and "Lineups" in i.detail for i in issues)
     assert not any(i.check == "lineups-header-repeats" for i in issues)
+
+
+# --- Round 5 follow-up item 2: per-row formula ranges -------------------------------------
+
+
+def _formula_check_client(formulas):
+    return FakeDoctorClient(_ALL_GOOD_TABS, {**_lineups_rows()}, formulas=formulas)
+
+
+def _range_for(tab: str):
+    (spec,) = [s for s in formula_ranges(_base_config(), dict(_ALL_GOOD_TABS)) if s.tab == tab]
+    return spec, f"A{spec.first_row}:{column_letter(max(spec.columns))}{spec.last_row}"
+
+
+def _good_grid(spec):
+    width = max(spec.columns) + 1
+    return [[f"=X{r}"] * width for r in range(spec.first_row, spec.last_row + 1)]
+
+
+def test_run_doctor_flags_a_results_formula_column_with_a_blank_row():
+    spec, rng = _range_for("Results")
+    grid = _good_grid(spec)
+    h2h = [i for i, h in spec.columns.items() if h == RESULTS_FORMULA_HEADERS[1]][0]
+    grid[5][h2h] = ""  # row 7
+    issues = run_doctor(_formula_check_client({("Results", rng): grid}), _base_config(), title="Week 4")
+    (issue,) = [i for i in issues if i.check == "formula-ranges"]
+    assert "'Results'" in issue.detail and "row(s) 7 have no formula" in issue.detail
+
+
+def test_run_doctor_flags_dksalclean_rows_that_are_missing_or_read_another_row():
+    spec, rng = _range_for(DKSALCLEAN_TAB)
+    grid = _good_grid(spec)
+    for r in range(746, 988):
+        grid[r - spec.first_row][6] = ""  # OPP missing from 746 on
+    for r in range(802, 988):
+        grid[r - spec.first_row][0] = f"=DKSalRaw!A{r + 2083}"  # the old row-deletion artifact
+    issues = run_doctor(_formula_check_client({(DKSALCLEAN_TAB, rng): grid}), _base_config(), title="Week 4")
+    details = [i.detail for i in issues if i.check == "formula-ranges"]
+    assert any("column G (OPP): row(s) 746-987 have no formula" in d for d in details)
+    assert any(
+        "column A (Position): row(s) 802-987 hold a formula pointing at another row" in d for d in details
+    )
+
+
+def test_run_doctor_does_not_flag_playerpoolraws_permuted_identity_columns():
+    spec, rng = _range_for(PLAYER_POOL_RAW_TAB)
+    grid = _good_grid(spec)
+    grid[14][0] = "=DkSalClean!D17"  # row 16 reads DkSalClean row 17 -- deliberate
+    issues = run_doctor(
+        _formula_check_client({(PLAYER_POOL_RAW_TAB, rng): grid}), _base_config(), title="Week 4"
+    )
+    assert [i for i in issues if i.check == "formula-ranges"] == []
+
+
+def test_run_doctor_flags_a_missing_dksalclean_tab():
+    tabs = {k: v for k, v in _ALL_GOOD_TABS.items() if k != DKSALCLEAN_TAB}
+    issues = run_doctor(FakeDoctorClient(tabs, {**_lineups_rows()}), _base_config(), title="Week 4")
+    assert any(i.check == "tab-exists" and DKSALCLEAN_TAB in i.detail for i in issues)

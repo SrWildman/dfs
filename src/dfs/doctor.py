@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
+from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
@@ -62,6 +63,9 @@ class DoctorClient:
         raise NotImplementedError
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:  # pragma: no cover
+        raise NotImplementedError
+
+    def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -135,6 +139,7 @@ def _expected_tabs(cfg: Config) -> set[str]:
     tabs.add(cfg.season.tab)
     tabs.add(ALIAS_TAB)
     tabs.add(PLAYER_POOL_RAW_TAB)
+    tabs.add(DKSALCLEAN_TAB)
     return tabs
 
 
@@ -285,6 +290,29 @@ def _check_lineup_count_cell(client: DoctorClient, cfg: Config, tab_titles: set[
     return []
 
 
+def _check_formula_ranges(
+    client: DoctorClient, cfg: Config, headers_by_tab: dict[str, list[str]]
+) -> list[DoctorIssue]:
+    """Round 5 follow-up item 2: the hand-built per-row formula ranges nothing else
+    writes (Results' `Cash Results`/`H2H %`, DkSalClean, PlayerPoolRaw, Season's totals)
+    must have a formula on every row, and -- where row N must read row N -- not one
+    pointing at another row. Both a missing DkSalClean formula and a blank Results
+    column went unnoticed through several sessions before this existed."""
+    issues = []
+    for spec in formula_ranges(cfg, headers_by_tab):
+        if not spec.columns:
+            issues.append(
+                DoctorIssue(
+                    "formula-ranges",
+                    f"{spec.tab!r}: none of the expected formula columns were found in its header row",
+                )
+            )
+            continue
+        for gap in find_gaps(client, spec):
+            issues.append(DoctorIssue("formula-ranges", describe_gap(gap)))
+    return issues
+
+
 def run_doctor(
     client: DoctorClient, cfg: Config, *, title: str, check_title: bool = True
 ) -> list[DoctorIssue]:
@@ -337,4 +365,5 @@ def run_doctor(
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
+    issues += _check_formula_ranges(client, cfg, headers_by_tab)
     return issues
