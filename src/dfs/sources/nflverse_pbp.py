@@ -45,8 +45,13 @@ from dfs.log import get_logger
 from dfs.sources.base import Source, SyncContext
 from dfs.sources.nflverse_games import NFLVERSE_TO_DK_TEAM
 from dfs.team_metrics import (
+    EPA_DECIMALS,
     PBP_PRIOR_WEIGHT_GAMES,
     blend_with_prior,
+    defense_epa_pass,
+    defense_epa_rush,
+    defense_success_pct,
+    offense_epa_per_play,
     team_explosive_pct,
     team_games_played,
     team_pace,
@@ -59,7 +64,17 @@ PBP_URL_TEMPLATE = (
     "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_{season}.parquet"
 )
 
-TEAM_METRIC_COLUMNS = ["Team", "Pace", "PROE", "Expl%"]
+# Round 5 item 9 appended the four defensive/matchup columns.
+TEAM_METRIC_COLUMNS = [
+    "Team",
+    "Pace",
+    "PROE",
+    "Expl%",
+    "DefEPA/Pass",
+    "DefEPA/Rush",
+    "DefSucc%",
+    "OffEPA/Play",
+]
 
 
 class NflversePbpFetchError(Exception):
@@ -90,22 +105,32 @@ def build_team_metrics(current_pbp: pd.DataFrame, prior_pbp: pd.DataFrame | None
     found (`{"LA": "LAR"}`) -- imported from there rather than
     re-verified, since it's the same underlying fact about the same
     upstream data, not a second independent finding."""
-    current_pace = team_pace(current_pbp)
-    current_proe = team_proe(current_pbp)
-    current_expl = team_explosive_pct(current_pbp)
     games_played = team_games_played(current_pbp)
 
-    if prior_pbp is not None:
-        prior_pace = team_pace(prior_pbp)
-        prior_proe = team_proe(prior_pbp)
-        prior_expl = team_explosive_pct(prior_pbp)
-        pace = blend_with_prior(current_pace, prior_pace, games_played, PBP_PRIOR_WEIGHT_GAMES)
-        proe = blend_with_prior(current_proe, prior_proe, games_played, PBP_PRIOR_WEIGHT_GAMES)
-        expl = blend_with_prior(current_expl, prior_expl, games_played, PBP_PRIOR_WEIGHT_GAMES)
-    else:
-        pace, proe, expl = current_pace, current_proe, current_expl
+    # (column, function, decimals): offensive Pace/PROE/Expl% (Part C, C7) plus
+    # Round 5 item 9's defensive matchup metrics. Every one is blended with
+    # last season's full-season value the same way (`blend_with_prior`,
+    # `PBP_PRIOR_WEIGHT_GAMES`).
+    metrics = [
+        ("Pace", team_pace, 2),
+        ("PROE", team_proe, 2),
+        ("Expl%", team_explosive_pct, 2),
+        ("DefEPA/Pass", defense_epa_pass, EPA_DECIMALS),
+        ("DefEPA/Rush", defense_epa_rush, EPA_DECIMALS),
+        ("DefSucc%", defense_success_pct, 2),
+        ("OffEPA/Play", offense_epa_per_play, EPA_DECIMALS),
+    ]
+    columns: dict[str, pd.Series] = {}
+    for column, fn, decimals in metrics:
+        current = fn(current_pbp)
+        if prior_pbp is not None:
+            columns[column] = blend_with_prior(
+                current, fn(prior_pbp), games_played, PBP_PRIOR_WEIGHT_GAMES, decimals=decimals
+            )
+        else:
+            columns[column] = current
 
-    frame = pd.DataFrame({"Pace": pace, "PROE": proe, "Expl%": expl})
+    frame = pd.DataFrame(columns)
     frame.index.name = "Team"
     frame = frame.reset_index()
     frame["Team"] = frame["Team"].replace(NFLVERSE_TO_DK_TEAM)
@@ -114,6 +139,7 @@ def build_team_metrics(current_pbp: pd.DataFrame, prior_pbp: pd.DataFrame | None
 
 class NflversePbpSource(Source):
     name = "pbp"
+    uploads_to_sheet = False
 
     def fetch(self, ctx: SyncContext) -> pd.DataFrame:
         log.info("fetching nflverse play-by-play for season %s", ctx.season)

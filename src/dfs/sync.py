@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dfs import perf
 from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheets import SheetsClient, SheetsError
@@ -48,19 +49,21 @@ def run_sync(
 
         log.info("syncing %s", name)
         try:
-            df = source.fetch(ctx)
+            with perf.phase(f"fetch {name}"):
+                df = source.fetch(ctx)
             save(name, df)
 
-            if upload:
+            if upload and source.uploads_to_sheet:
                 tab = cfg.google_sheets.tab_mappings.get(name)
                 if tab is None:
                     raise SheetsError(
                         f"No tab mapped for source {name!r} in config.toml [google_sheets.tab_mappings]."
                     )
-                preserved = source.pre_upload(client, tab)
-                rows = source.to_sheet_rows(df)
-                client.write_tab(tab, rows)
-                source.post_upload(client, tab, df, preserved)
+                with perf.phase(f"upload {name}"):
+                    preserved = source.pre_upload(client, tab)
+                    rows = source.to_sheet_rows(df)
+                    client.write_tab(tab, rows)
+                    source.post_upload(client, tab, df, preserved)
 
             record_success(name, len(df))
             results.append(SourceResult(name, True, len(df), None))

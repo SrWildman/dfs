@@ -21,6 +21,8 @@ def _play(game_id, posteam, defteam, home_team, away_team, drive, play_id, play_
         "pass": 1 if play_type == "pass" else 0,
         "rush": 1 if play_type == "run" else 0,
         "pass_oe": 2.0,
+        "epa": 0.1,
+        "success": 1,
     }
 
 
@@ -43,7 +45,10 @@ def test_build_team_metrics_without_prior_uses_current_alone():
     current = _pbp("KC", "DEN")
     metrics = build_team_metrics(current, None)
     row = metrics[metrics["Team"] == "KC"].iloc[0]
-    assert row.notna().all()
+    assert row[["Pace", "PROE", "Expl%", "OffEPA/Play"]].notna().all()
+    # `_pbp` only has KC on offense, so only DEN's defense has plays to measure.
+    den = metrics[metrics["Team"] == "DEN"].iloc[0]
+    assert den[["DefEPA/Pass", "DefEPA/Rush", "DefSucc%"]].notna().all()
 
 
 def test_build_team_metrics_blends_with_prior_early_in_season():

@@ -27,6 +27,11 @@ class SyncContext:
 class Source(ABC):
     name: str
     needs_auth: bool = False
+    # False for a source that feeds other sources straight from its saved
+    # `data/current/<name>.csv` and has no sheet tab (`pbp`: team Pace/PROE/
+    # Expl% reach the sheet through EdgeRaw, never as raw rows). `run_sync`
+    # skips the upload and records success; no `tab_mappings` entry needed.
+    uploads_to_sheet: bool = True
 
     @abstractmethod
     def fetch(self, ctx: SyncContext) -> pd.DataFrame:

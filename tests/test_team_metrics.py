@@ -220,3 +220,157 @@ def test_weighted_mean_skipna_all_missing_is_nan():
     weights = {"total": 0.25, "spread_tightness": 0.25, "pace": 0.25, "proe": 0.25}
     result = weighted_mean_skipna(components, weights)
     assert math.isnan(result.iloc[0])
+
+
+# --- Round 5 item 9: defensive matchup efficiency (DefEPA/Pass, DefEPA/Rush, DefSucc%) -----------------
+
+
+def _plays(rows):
+    """rows: (posteam, defteam, kind, epa, success[, play_type])."""
+    out = []
+    for i, r in enumerate(rows):
+        posteam, defteam, kind, epa, success = r[:5]
+        play_type = r[5] if len(r) > 5 else ("pass" if kind == "pass" else "run")
+        out.append(
+            {
+                "game_id": "g1",
+                "posteam": posteam,
+                "defteam": defteam,
+                "home_team": defteam,
+                "away_team": posteam,
+                "play_type": play_type,
+                "pass": 1 if kind == "pass" else 0,
+                "rush": 1 if kind == "rush" else 0,
+                "epa": epa,
+                "success": success,
+                "play_id": i,
+                # Present so `build_team_metrics` (Pace/PROE/Expl%) can run too.
+                "drive": 1,
+                "game_seconds_remaining": 3600 - 30 * i,
+                "wp": 0.5,
+                "qtr": 1,
+                "half_seconds_remaining": 900.0,
+                "yards_gained": 5.0,
+                "pass_oe": 1.0,
+            }
+        )
+    return pd.DataFrame(out)
+
+
+def test_defensive_epa_means_per_defense_split_by_pass_and_rush():
+    from dfs.team_metrics import defense_epa_pass, defense_epa_rush
+
+    pbp = _plays(
+        [
+            ("KC", "DEN", "pass", 0.5, 1),
+            ("KC", "DEN", "pass", 0.1, 0),  # DEN allowed pass EPA mean (0.5 + 0.1) / 2 = 0.3
+            ("KC", "DEN", "rush", -0.2, 0),  # DEN allowed rush EPA -0.2
+            ("DEN", "KC", "pass", -0.4, 0),  # KC allowed pass EPA -0.4
+            ("DEN", "KC", "rush", 0.1, 1),
+            ("DEN", "KC", "rush", 0.3, 1),  # KC allowed rush EPA mean 0.2
+        ]
+    )
+    assert defense_epa_pass(pbp)["DEN"] == 0.3
+    assert defense_epa_pass(pbp)["KC"] == -0.4
+    assert defense_epa_rush(pbp)["DEN"] == -0.2
+    assert defense_epa_rush(pbp)["KC"] == 0.2
+
+
+def test_defensive_success_pct_is_zero_to_one_hundred():
+    from dfs.team_metrics import defense_success_pct
+
+    pbp = _plays(
+        [("KC", "DEN", "pass", 0.0, 1), ("KC", "DEN", "rush", 0.0, 1), ("KC", "DEN", "pass", 0.0, 0)]
+        + [("KC", "DEN", "rush", 0.0, 0)]
+    )
+    assert defense_success_pct(pbp)["DEN"] == 50.0
+
+
+def test_only_real_scrimmage_plays_count_and_all_game_states_are_used():
+    """A kneel/no_play is excluded like the offensive metrics; a blowout-margin
+    play is NOT (no neutral-script filter -- all game states, on purpose)."""
+    from dfs.team_metrics import defense_epa_pass
+
+    pbp = _plays(
+        [
+            ("KC", "DEN", "pass", 0.6, 1),
+            ("KC", "DEN", "pass", -9.0, 0, "no_play"),  # excluded
+            ("KC", "DEN", "pass", 0.2, 1),
+        ]
+    )
+    pbp["wp"] = [0.99, 0.5, 0.01]  # garbage-time win probabilities must not filter anything
+    assert defense_epa_pass(pbp)["DEN"] == 0.4
+
+
+def test_offense_epa_per_play_is_all_scrimmage_plays():
+    from dfs.team_metrics import offense_epa_per_play
+
+    pbp = _plays([("KC", "DEN", "pass", 0.4, 1), ("KC", "DEN", "rush", 0.0, 0)])
+    assert offense_epa_per_play(pbp)["KC"] == 0.2
+
+
+def test_epa_blend_applies_the_prior_weight_and_keeps_three_decimals():
+    from dfs.team_metrics import PBP_PRIOR_WEIGHT_GAMES, blend_with_prior
+
+    current = pd.Series({"DEN": 0.30})
+    prior = pd.Series({"DEN": -0.10})
+    games = pd.Series({"DEN": 1})
+    w = 1 / (1 + PBP_PRIOR_WEIGHT_GAMES)  # current-season weight after one game
+    blended = blend_with_prior(current, prior, games, PBP_PRIOR_WEIGHT_GAMES, decimals=3)
+    assert blended["DEN"] == round(w * 0.30 + (1 - w) * -0.10, 3)
+
+
+def test_build_team_metrics_carries_the_defensive_columns_through_the_blend():
+    from dfs.sources.nflverse_pbp import TEAM_METRIC_COLUMNS, build_team_metrics
+    from dfs.team_metrics import PBP_PRIOR_WEIGHT_GAMES
+
+    current = _plays([("KC", "DEN", "pass", 0.5, 1), ("DEN", "KC", "pass", 0.1, 0)])
+    prior = _plays([("KC", "DEN", "pass", -0.1, 0), ("DEN", "KC", "pass", 0.3, 1)])
+    for frame in (current, prior):
+        frame["home_team"] = frame["defteam"]
+    metrics = build_team_metrics(current, prior)
+    assert set(TEAM_METRIC_COLUMNS) <= set(metrics.columns)
+    den = metrics.set_index("Team").loc["DEN"]
+    w = 1 / (1 + PBP_PRIOR_WEIGHT_GAMES)  # both teams played one game
+    assert den["DefEPA/Pass"] == round(w * 0.5 + (1 - w) * -0.1, 3)
+
+
+def _edge_rows(rows):
+    return pd.DataFrame(rows, columns=["Position", "Opp"])
+
+
+def _metrics():
+    return pd.DataFrame(
+        {
+            "Team": ["DEN", "KC"],
+            "DefEPA/Pass": [0.20, -0.10],
+            "DefEPA/Rush": [0.05, -0.02],
+            "OffEPA/Play": [-0.15, 0.12],
+        }
+    )
+
+
+def test_opp_epa_each_position_reads_the_right_input_and_dst_flips_sign():
+    from dfs.derived import _attach_opp_epa
+
+    merged = _edge_rows(
+        [("QB", "DEN"), ("WR", "DEN"), ("TE", "DEN"), ("RB", "DEN"), ("DST", "DEN"), ("DST", "KC")]
+    )
+    out = _attach_opp_epa(merged, _metrics())["OppEPA"].tolist()
+    assert out[0] == out[1] == out[2] == 0.20  # QB/WR/TE -> DEN's EPA allowed per PASS
+    assert out[3] == 0.05  # RB -> DEN's EPA allowed per RUSH
+    assert out[4] == 0.15  # DST vs DEN's offense: -(-0.15), a bad offense is a good matchup
+    assert out[5] == -0.12  # DST vs KC's good offense: -(0.12), a tough matchup
+
+
+def test_opp_epa_is_blank_not_zero_for_a_team_missing_from_pbp():
+    from dfs.derived import _attach_opp_epa
+
+    out = _attach_opp_epa(_edge_rows([("WR", "ZZZ"), ("DST", "ZZZ")]), _metrics())["OppEPA"]
+    assert out.isna().all()
+
+
+def test_opp_epa_is_blank_when_pbp_did_not_sync():
+    from dfs.derived import _attach_opp_epa
+
+    assert _attach_opp_epa(_edge_rows([("QB", "DEN")]), None)["OppEPA"].isna().all()

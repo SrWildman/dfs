@@ -17,6 +17,7 @@ import pandas as pd
 
 from dfs import nfl_calendar, store
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, build_edge_frame
+from dfs.gps_check import find_gps_mismatches
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.log import get_logger
 from dfs.paths import CURRENT_DIR
@@ -173,11 +174,28 @@ class EdgeSource(Source):
                 "pbp not synced yet -- Pace/PROE/Expl%% will be blank and GameEnv falls back to "
                 "its Vegas-only formula"
             )
+        if team_metrics is not None and "DefEPA/Pass" not in team_metrics.columns:
+            log.warning(
+                "pbp snapshot predates OppEPA (no DefEPA/Pass column) -- run `dfs sync --only pbp`; "
+                "OppEPA will be blank until then"
+            )
         gps = _try_load_current("tffb_gps")
         if gps is None:
-            log.warning(
-                "tffb_gps not synced yet (not published, or the fetch failed) -- ModelImplied will be blank"
-            )
+            log.warning("tffb_gps not synced yet (not published, or the fetch failed) -- no GPS this run")
+        elif games is not None:
+            # GPS's "Implied Total" is Vegas, not a model (`gps_check.py`); a big
+            # miss against our own odds means a swapped row in the source.
+            for m in find_gps_mismatches(gps, games):
+                log.warning(
+                    "GPS: %s -- worksheet implied totals (%.1f / %.1f) are %.1f pts off Vegas "
+                    "(%.1f / %.1f); the article may have swapped rows, so treat this game's GPS as suspect",
+                    m.game,
+                    m.away_gps,
+                    m.home_gps,
+                    m.worst_miss,
+                    m.away_vegas,
+                    m.home_vegas,
+                )
 
         result = build_edge_frame(
             projections,
@@ -190,7 +208,6 @@ class EdgeSource(Source):
             fantasypros=fantasypros,
             snaps=snaps,
             team_metrics=team_metrics,
-            gps=gps,
         )
         if result.unmatched_names:
             log.warning(

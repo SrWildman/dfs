@@ -151,8 +151,62 @@ def team_games_played(pbp: pd.DataFrame) -> pd.Series:
     return games.groupby("Team")["game_id"].nunique()
 
 
+# Round 5 item 9: defensive matchup efficiency from the SAME play-by-play the
+# offensive metrics use. EPA is per-play expected points added; nflverse's own
+# `epa`/`success` columns. Unlike Pace/PROE these use ALL game states -- no
+# neutral-script filter -- because a defense's efficiency allowed is what it is
+# regardless of score; garbage-time plays are part of the sample on purpose
+# (this is a matchup signal, not a play-calling one). The same real-scrimmage-
+# snap filter as the offensive metrics still applies (no kneels/spikes/no-plays).
+EPA_DECIMALS = 3
+
+
+def _epa_by_side(pbp: pd.DataFrame, side: str, kind: str) -> pd.Series:
+    """Mean `epa` per team over real scrimmage plays, all game states.
+    `side` is `"defteam"` (what a defense allowed) or `"posteam"` (what an
+    offense produced); `kind` is `"play"` (every scrimmage play), `"pass"`
+    (`pass == 1`, so a scramble counts as a pass, matching nflverse) or
+    `"rush"` (`rush == 1`). Indexed by nflverse's own team code."""
+    plays = pbp[_scrimmage_mask(pbp)]
+    if kind == "pass":
+        plays = plays[pd.to_numeric(plays["pass"], errors="coerce").fillna(0) == 1]
+    elif kind == "rush":
+        plays = plays[pd.to_numeric(plays["rush"], errors="coerce").fillna(0) == 1]
+    epa = pd.to_numeric(plays["epa"], errors="coerce")
+    return epa.groupby(plays[side]).mean().round(EPA_DECIMALS)
+
+
+def defense_epa_pass(pbp: pd.DataFrame) -> pd.Series:
+    """`DefEPA/Pass`: mean EPA on pass plays a defense allowed."""
+    return _epa_by_side(pbp, "defteam", "pass")
+
+
+def defense_epa_rush(pbp: pd.DataFrame) -> pd.Series:
+    """`DefEPA/Rush`: mean EPA on rush plays a defense allowed."""
+    return _epa_by_side(pbp, "defteam", "rush")
+
+
+def defense_success_pct(pbp: pd.DataFrame) -> pd.Series:
+    """`DefSucc%`: mean nflverse `success` allowed, as 0-100."""
+    plays = pbp[_scrimmage_mask(pbp)]
+    success = pd.to_numeric(plays["success"], errors="coerce")
+    return (success.groupby(plays["defteam"]).mean() * 100).round(1)
+
+
+def offense_epa_per_play(pbp: pd.DataFrame) -> pd.Series:
+    """`OffEPA/Play`: mean EPA per scrimmage play an OFFENSE produced. A DST's
+    matchup is the opposing offense, so `derived._attach_opp_epa` reads this
+    (sign-flipped) for defenses."""
+    return _epa_by_side(pbp, "posteam", "play")
+
+
 def blend_with_prior(
-    current: pd.Series, prior: pd.Series, games_played: pd.Series, prior_weight_games: float
+    current: pd.Series,
+    prior: pd.Series,
+    games_played: pd.Series,
+    prior_weight_games: float,
+    *,
+    decimals: int = 2,
 ) -> pd.Series:
     """`value = weight_current * current + (1 - weight_current) * prior`,
     `weight_current = games_played / (games_played + prior_weight_games)`
@@ -178,7 +232,7 @@ def blend_with_prior(
     blended = blended.mask(only_current, current)
     blended = blended.mask(only_prior, prior)
     blended = blended.mask(both_missing, float("nan"))
-    return blended.round(2)
+    return blended.round(decimals)
 
 
 def combined_by_game(game: pd.Series, team: pd.Series, metric: pd.Series) -> pd.Series:

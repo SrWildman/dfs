@@ -139,3 +139,60 @@ def test_partial_sync_after_clear_synced_tabs_leaves_failed_source_tab_empty(mon
     # with anything, stale or otherwise.
     assert client.tabs["Good"] != []
     assert client.tabs["Bad"] == []
+
+
+class FakeNoTabSource(FakeGoodSource):
+    name = "notab"
+    uploads_to_sheet = False
+
+
+class _RecordingClient:
+    def __init__(self):
+        self.written: list[str] = []
+
+    def write_tab(self, tab, rows):
+        self.written.append(tab)
+
+
+def _patch_store(monkeypatch, tmp_path):
+    import dfs.store as store
+
+    monkeypatch.setattr(store, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(store, "CURRENT_DIR", tmp_path / "current")
+    monkeypatch.setattr(store, "MANIFEST_FILE", tmp_path / "manifest.json")
+    (tmp_path / "current").mkdir()
+
+
+def test_run_sync_source_without_a_tab_skips_upload_and_succeeds(monkeypatch, tmp_path):
+    """`pbp` declares `uploads_to_sheet = False`: no tab mapping is needed and
+    nothing is written, but the sync still records success."""
+    _patch_store(monkeypatch, tmp_path)
+    cfg = Config.model_validate(
+        {"google_sheets": {"sheet_id": "fake", "credentials_file": "creds.json", "tab_mappings": {}}}
+    )
+    client = _RecordingClient()
+    monkeypatch.setattr("dfs.sync.get_source", lambda name: FakeNoTabSource())
+    monkeypatch.setattr("dfs.sync.SheetsClient", lambda cfg: client)
+
+    results = run_sync(cfg, ["notab"], SyncContext(week=1, season=2026), upload=True)
+    assert results[0].ok is True
+    assert results[0].rows == 3
+    assert client.written == []
+
+
+def test_run_sync_normal_source_still_uploads_to_its_tab(monkeypatch, cfg, tmp_path):
+    _patch_store(monkeypatch, tmp_path)
+    client = _RecordingClient()
+    monkeypatch.setattr("dfs.sync.get_source", lambda name: FakeGoodSource())
+    monkeypatch.setattr("dfs.sync.SheetsClient", lambda cfg: client)
+
+    results = run_sync(cfg, ["good"], SyncContext(week=1, season=2026), upload=True)
+    assert results[0].ok is True
+    assert client.written == ["Good"]
+
+
+def test_pbp_source_declares_no_sheet_tab():
+    from dfs.sources import SOURCES
+
+    assert SOURCES["pbp"].uploads_to_sheet is False
+    assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name != "pbp")
