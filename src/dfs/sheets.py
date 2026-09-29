@@ -12,6 +12,7 @@ belongs to the caller (dfs sync / dfs status), not buried in here.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import gspread
@@ -20,6 +21,7 @@ from gspread.utils import ValueInputOption, ValueRenderOption, a1_range_to_grid_
 from dfs.config import GoogleSheetsConfig
 from dfs.log import get_logger
 from dfs.paths import credentials_path
+from dfs.perf import InstrumentedHTTPClient, batching_disabled
 
 log = get_logger("sheets")
 
@@ -104,6 +106,7 @@ class SheetsClient:
     def __init__(self, cfg: GoogleSheetsConfig) -> None:
         self._cfg = cfg
         self._sheet: gspread.Spreadsheet | None = None
+        self._http = None
         # gspread's `Spreadsheet.worksheet(title)` re-fetches the WHOLE
         # spreadsheet's metadata (a full read) to resolve one tab by name,
         # every single time it's called -- there's no caching in gspread
@@ -117,6 +120,29 @@ class SheetsClient:
         # than calling `sheet.worksheet(tab_name)` inline.
         self._ws_cache: dict[str, gspread.Worksheet] = {}
 
+    @contextmanager
+    def batched(self):  # noqa: ANN201
+        """Queue formatting/metadata `batchUpdate` requests made inside this
+        block and send them together (`perf.QUEUEABLE_REQUEST_TYPES`). Every
+        read and every non-queueable write flushes the queue first, so the
+        sheet ends up exactly as if each call had been sent immediately, in
+        the same order -- there are just far fewer round trips. Errors in a
+        queued request surface at the flush (next read, or block exit)."""
+        self._open()
+        http = self._http
+        if http is None or not hasattr(http, "flush") or batching_disabled():  # doubles / escape hatch
+            yield self
+            return
+        already = http.batching
+        http.batching = True
+        try:
+            yield self
+        finally:
+            try:
+                http.flush()
+            finally:
+                http.batching = already
+
     def _open(self) -> gspread.Spreadsheet:
         if self._sheet is not None:
             return self._sheet
@@ -129,21 +155,12 @@ class SheetsClient:
             )
 
         try:
-            # BackOffHTTPClient retries a 429/408/5xx with exponential
-            # backoff instead of raising straight away. `dfs setup polish`
-            # can issue 100+ individual write requests in one run (each
-            # format/freeze/colour-scale/boolean-rule call is its own
-            # batchUpdate) -- comfortably past the default 60-per-minute
-            # write quota on any real sheet, even after the `_ws` cache
-            # above cut the matching read-request multiplication. Retrying
-            # is the honest fix here (the request always succeeds once
-            # quota frees up); there is no smaller number of requests to
-            # send without merging every style call in a run into one
-            # giant batchUpdate, which would lose the "one call = one
-            # documented effect" shape the rest of this file relies on.
-            client = gspread.service_account(
-                filename=str(creds), http_client=gspread.http_client.BackOffHTTPClient
-            )
+            # InstrumentedHTTPClient (`perf.py`) counts/times every request and
+            # retries 429/408/5xx and network errors with exponential backoff
+            # plus jitter -- `dfs setup polish` used to send hundreds of
+            # individual requests past the default per-minute write quota.
+            client = gspread.service_account(filename=str(creds), http_client=InstrumentedHTTPClient)
+            self._http = getattr(client, "http_client", None)
             self._sheet = client.open_by_key(self._cfg.sheet_id)
         except gspread.exceptions.APIError as e:
             raise SheetsError(
@@ -1303,34 +1320,60 @@ class SheetsClient:
         formatting on every re-run -- exactly the kind of mistake
         CONTRIBUTING.md's changelog now has an incident for.
         """
+        self.clear_conditional_formats_for(tab_name, [(column, row_range)])
+
+    def clear_conditional_formats_for(
+        self, tab_name: str, targets: list[tuple[str | None, tuple[int, int] | None]]
+    ) -> None:
+        """`clear_conditional_formats` for MANY `(column, row_range)` targets
+        with ONE metadata read and ONE delete request (Round 5 item 2).
+
+        Callers used to loop `clear_conditional_formats(tab, column=c,
+        row_range=r)` once per column per lineup block -- each call re-read
+        the whole tab's rule list (216 reads on Lineups alone, enough to
+        trip the per-minute read quota). Equivalent to calling the single
+        version for each target in turn, PROVIDED no rule matching a later
+        target is added between the calls -- true for every caller (adds
+        for column X never match column Y's exact range), which is why they
+        gather their targets, clear once, then add.
+        """
+        if not targets:
+            return
+        if batching_disabled() and len(targets) > 1:
+            for column, row_range in targets:
+                self.clear_conditional_formats_for(tab_name, [(column, row_range)])
+            return
         sheet, ws = self._ws(tab_name)
         rules = self._conditional_format_rules(sheet, ws)
-        if column is None and row_range is None:
-            indexes = list(range(len(rules)))
-        else:
+        matchers = []
+        for column, row_range in targets:
             col_index = (
                 a1_range_to_grid_range(f"{column}1:{column}1")["startColumnIndex"]
                 if column is not None
                 else None
             )
             row_bounds = (row_range[0] - 1, row_range[1]) if row_range is not None else None
+            matchers.append((col_index, row_bounds))
 
-            def _range_matches(r: dict) -> bool:
-                if col_index is not None and not (
-                    r.get("startColumnIndex") == col_index and r.get("endColumnIndex") == col_index + 1
-                ):
-                    return False
-                if row_bounds is not None and not (
-                    r.get("startRowIndex") == row_bounds[0] and r.get("endRowIndex") == row_bounds[1]
-                ):
-                    return False
-                return True
+        def _range_matches(r: dict, col_index, row_bounds) -> bool:
+            if col_index is not None and not (
+                r.get("startColumnIndex") == col_index and r.get("endColumnIndex") == col_index + 1
+            ):
+                return False
+            if row_bounds is not None and not (
+                r.get("startRowIndex") == row_bounds[0] and r.get("endRowIndex") == row_bounds[1]
+            ):
+                return False
+            return True
 
-            indexes = [
-                i
-                for i, rule in enumerate(rules)
-                if rule.get("ranges") and all(_range_matches(r) for r in rule["ranges"])
-            ]
+        indexes = []
+        for i, rule in enumerate(rules):
+            if any(c is None and r is None for c, r in matchers):
+                indexes.append(i)  # a whole-tab target matches every rule
+            elif rule.get("ranges") and any(
+                all(_range_matches(rg, c, r) for rg in rule["ranges"]) for c, r in matchers
+            ):
+                indexes.append(i)
         if not indexes:
             return
         # Delete from the end backwards: each delete reindexes the rest.
@@ -1491,3 +1534,72 @@ class SheetsClient:
                 ]
             }
         )
+
+    def delete_charts(self, tab_name: str) -> int:
+        """Remove every embedded chart on `tab_name`; returns how many.
+        Season's chart is rebuilt (not edited) when its data range moves."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),charts(chartId))"})
+        ids = [
+            chart["chartId"]
+            for s_ in meta.get("sheets", [])
+            if s_.get("properties", {}).get("sheetId") == ws.id
+            for chart in s_.get("charts", []) or []
+        ]
+        if ids:
+            sheet.batch_update({"requests": [{"deleteEmbeddedObject": {"objectId": i}} for i in ids]})
+        return len(ids)
+
+    def add_line_chart(
+        self,
+        tab_name: str,
+        *,
+        title: str,
+        domain_a1: str,
+        series_a1: list[str],
+        anchor_cell_a1: str,
+        width: int = 600,
+        height: int = 300,
+    ) -> None:
+        """Add a `LINE` chart (Season tab's cumulative-net-by-week chart,
+        Round 5 item 7d) -- `domain_a1` is the x-axis range (Week), each
+        entry in `series_a1` becomes one line, and the chart is anchored at
+        `anchor_cell_a1`'s top-left corner. One call per chart; re-running
+        this adds another chart rather than replacing one -- callers that
+        rebuild a tab from scratch should not call this on a tab that
+        might already have one (no `clear_charts` exists; this is a
+        brand-new tab's one-time build, not a per-sync operation)."""
+        sheet, ws = self._ws(tab_name)
+        domain_range = a1_range_to_grid_range(domain_a1, ws.id)
+        anchor_range = a1_range_to_grid_range(anchor_cell_a1, ws.id)
+        series = [
+            {"series": {"sourceRange": {"sources": [a1_range_to_grid_range(a1, ws.id)]}}} for a1 in series_a1
+        ]
+        request = {
+            "addChart": {
+                "chart": {
+                    "spec": {
+                        "title": title,
+                        "basicChart": {
+                            "chartType": "LINE",
+                            "legendPosition": "BOTTOM_LEGEND",
+                            "domains": [{"domain": {"sourceRange": {"sources": [domain_range]}}}],
+                            "series": series,
+                            "headerCount": 1,
+                        },
+                    },
+                    "position": {
+                        "overlayPosition": {
+                            "anchorCell": {
+                                "sheetId": anchor_range["sheetId"],
+                                "rowIndex": anchor_range["startRowIndex"],
+                                "columnIndex": anchor_range["startColumnIndex"],
+                            },
+                            "widthPixels": width,
+                            "heightPixels": height,
+                        }
+                    },
+                }
+            }
+        }
+        sheet.batch_update({"requests": [request]})

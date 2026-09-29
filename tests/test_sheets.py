@@ -1258,3 +1258,60 @@ def test_protect_sheet_is_re_runnable_via_clear_then_add(cfg, monkeypatch, tmp_p
     client.protect_sheet("T")
 
     assert len(fake_sheet._worksheets["T"].protected_ranges) == 1
+
+
+def _scale(client, a1):
+    client.add_color_scale(
+        "T",
+        a1,
+        min_color={"red": 1, "green": 0, "blue": 0},
+        mid_color={"red": 1, "green": 1, "blue": 0},
+        max_color={"red": 0, "green": 1, "blue": 0},
+    )
+
+
+def test_clear_conditional_formats_for_matches_looping_the_single_version_in_one_delete(
+    cfg, monkeypatch, tmp_path
+):
+    """Item 2: `apply_grouped_color_scales` used to clear one (column, block)
+    at a time, re-reading the tab's rules each time. The batched version must
+    leave exactly the same rules, in the same order, with one delete request."""
+
+    def build():
+        client, fake = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+        fake._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+        for rng in ("B2:B10", "B13:B21", "D2:D10", "D13:D21", "F2:F10", "Q2:Q10"):
+            _scale(client, rng)
+        return client, fake
+
+    targets = [("B", (2, 10)), ("D", (13, 21)), ("F", (2, 10))]
+
+    looped_client, looped = build()
+    for column, row_range in targets:
+        looped_client.clear_conditional_formats("T", column=column, row_range=row_range)
+
+    batched_client, batched = build()
+    calls_before = len(batched.batch_update_calls)
+    batched_client.clear_conditional_formats_for("T", targets)
+
+    def _without_sheet_id(rules):
+        return [
+            {**r, "ranges": [{k: v for k, v in rg.items() if k != "sheetId"} for rg in r["ranges"]]}
+            for r in rules
+        ]
+
+    assert _without_sheet_id(batched._worksheets["T"].conditional_formats) == _without_sheet_id(
+        looped._worksheets["T"].conditional_formats
+    )
+    assert len(batched._worksheets["T"].conditional_formats) == 3  # B13, D2, Q2 survive
+    delete_calls = batched.batch_update_calls[calls_before:]
+    assert len(delete_calls) == 1
+    assert len(delete_calls[0]["requests"]) == 3
+
+
+def test_clear_conditional_formats_for_with_no_targets_touches_nothing(cfg, monkeypatch, tmp_path):
+    client, fake = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    before = len(fake.batch_update_calls)
+    client.clear_conditional_formats_for("T", [])
+    assert len(fake.batch_update_calls) == before
