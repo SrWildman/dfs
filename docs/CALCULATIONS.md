@@ -214,9 +214,8 @@ metric x position with a multi-range `GridRange`) is gone;
 empty sets kept so callers do not break. Rule count on the template went
 2,605 -> 607 (EdgeRaw 1,491 -> 104).
 
-**Known limitations.** A Slate Grid `Spread` column is signed
-home-perspective and is not banded. Lineups' duplicate-lineup and Exposure
-counts compare the typed text, so two spellings of one name count as two.
+**Known limitation.** A Slate Grid `Spread` column is signed
+home-perspective and is not banded.
 
 `Salary`/`DK Sal` are never colour-scaled anywhere on any tab -- a
 constraint on a lineup, not a quality worth ranking; colouring it would
@@ -388,7 +387,8 @@ team's real identity.
 
 ```
 Pace  = mean seconds between consecutive real offensive snaps (play_type in {pass, run})
-        within the same drive, neutral script only. Lower is faster; colour scale reversed.
+        within the same drive, neutral script only. Lower is faster, so its bands are reversed
+        (the fastest teams are green -- see "Highlighting: five bands").
 PROE  = mean pass_oe (nflverse's own pass-rate-over-expected model) over the same
         neutral-script scrimmage plays. Higher = pass-heavier than the situation implies.
 Expl% = share of ALL scrimmage plays (every game state) gaining ≥20 yards on a pass
@@ -469,7 +469,8 @@ alone.
 
 **Where it shows.** Slate Grid's `GPS` and the Board's Slate shape `GPS`
 read `GPSRaw` directly, off the HOME team's row (`GPS` is a per-GAME score,
-never an EdgeRaw column). Both are colour-scaled like `Total`.
+never an EdgeRaw column). Both are banded like `Total` (the `game` bands: a live
+`PERCENTRANK` against the column's own range -- see "Highlighting: five bands").
 
 **`ImpliedTotal` stays in the snapshot as a sanity check only**
 (`gps_check.py`). A row swap in the source means a game's `GPS` describes
@@ -538,10 +539,11 @@ softer matchup:**
 A bad offense (negative EPA/play) is a good matchup for a defense, so the
 DST's sign is flipped to keep "higher = better matchup" for every position.
 A team missing from the pbp data -- or pbp not synced at all -- leaves
-`OppEPA` blank, never 0. Coloured with the same gradient as `Pace`/`PROE`
-(`FIELD_COLOR_SCALES["OppEPA"]`), formatted to three decimals.
+`OppEPA` blank, never 0. Coloured with the `game` bands, like `PROE`/`Expl%`
+(`FIELD_COLOR_SCALES["OppEPA"]`; higher = greener -- see "Highlighting: five
+bands"), formatted to three decimals.
 
-**One-time cross-check against SumerSports** (2026-09-29, current season
+**One-time cross-check against a public team-stats site** (2026-09-29, current season
 through Week 3, unblended, all plays): our EPA/play tracks theirs closely
 in rank (r = 0.99 for offense and defense, 0.96 for success %) but sits a
 near-constant **+0.04 EPA/play higher** for every team, almost all of it on
@@ -1105,6 +1107,17 @@ from some OTHER lineup, minimized over every other lineup in the build:
        (9 - SUMPRODUCT(COUNTIF(other_lineup_2_range, this_range) > 0)),
        ... one term per other lineup block )
 ```
+
+"This lineup's picks" and "that lineup's picks" are compared on Lineups' hidden
+`Player Key` (DK's canonical name for whatever was typed -- Round 5 follow-up item 3),
+so `kenneth walker` in one lineup and `Kenneth Walker III` in another are the same
+player and two lineups that differ only by spelling read `Min Unique = 0`. The
+"is this block empty?" test still reads the typed column: a formula-blank key cell
+would count as non-empty. The same key drives the in-lineup `DUPLICATE` flag,
+Exposure's counts and `Distinct QBs`, and Player Pool's `Used`/`In`; where nothing
+resolves the key is the typed text itself, so two identical unresolved names still
+count as duplicates. Note the counts are per SLOT: a player entered twice in one
+lineup (which `DUPLICATE` flags) counts twice.
 
 Answers "how different is my most similar other lineup" -- a portfolio-
 diversification question a simple "how many total distinct players

@@ -152,17 +152,17 @@ actually matches.
 | `Name` | Player name, DK-nickname convention for DST. |
 | `Position`, `Team`, `Opp` | As above. |
 | `Salary` | DraftKings' own salary (authoritative) -- falls back to TFFB's figure only for the rare player TFFB projects who isn't on DK's main-slate salary list (e.g. a Thursday/Monday-only game). |
-| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` get the per-position colour scale described below `Own%` does not. |
+| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` are highlighted by their within-position percentile ("Highlighting", below); `Own%` keeps its own white-to-amber-to-red scale. |
 | `AggPts` | Part C, C5 (2026-09-24): equal-weight mean of every DK-scored source with a real projection for this player -- `ProjPts`, Sleeper, FantasyPros (`sources/sleeper_projections.py`/`fantasypros_projections.py`, re-scored to exact DK rules -- see `docs/CALCULATIONS.md`). A missing source (not synced, or a genuine "no projection this week") is excluded from that player's own average, never treated as 0. With only TFFB available, equals `ProjPts` exactly. Feeds nothing else -- a second opinion to read, not an input to `ValAdj`/anything downstream. |
-| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Per-position colour scale, below. No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
-| `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Ordinary whole-tab colour scale (already position-comparable by construction), not the per-position one below. |
-| `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Per-position colour scale, below. |
+| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Highlighted by its within-position percentile ("Highlighting", below). No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
+| `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Banded on its own value (already a 0-100, position-comparable score by construction), not through a percentile helper -- see "Highlighting", below. |
+| `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Highlighted by its within-position percentile ("Highlighting", below). |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
 | `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is all zeros (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
 | `OwnStatus` | Renamed from `LevBasis` in Phase 6, Part 7.9 (Leverage's own demotion left this marker gating `Own%`, a spine column, not describing Leverage -- the old name no longer said what it does). `"real"` once any player has non-zero `Own%` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage` has a real number yet. |
 | `GameEnv` | Rebuilt Part C, C7 (2026-09-25): 0-100 per-game score, an equal-weight percentile blend of total, spread tightness, combined pace and combined pass-rate-over-expected (`Pace`/`PROE`, below) -- higher total, tighter spread, faster pace and a pass-heavier tendency all score higher. Falls back to the pre-C7 total/spread-only formula automatically if `pbp` hasn't synced (see `docs/CALCULATIONS.md`). |
 | `OverUnder`, `Spread` | Straight passthrough of the same TFFB Vegas fields `GameEnv` is computed from. `OverUnder` (not `OU`) so it doesn't collide with Player Pool/Lineups' own `O/U`, sourced from a different tab. |
-| `Pace`, `PROE`, `Expl%` | Part C, C7 (2026-09-25): this player's own team's season-to-date offense tempo (mean seconds/snap, neutral script -- lower is faster, colour scale reversed), pass rate over expected (neutral script), and explosive-play rate (all scrimmage plays, ≥20 pass or ≥10 rush yards) -- all three from nflverse's free play-by-play, blended with last season's full-season value early on. `Pace`/`PROE` feed `GameEnv`; `Expl%` is a readable column on its own, deliberately not one of GameEnv's inputs. See `docs/CALCULATIONS.md` for the full formulas and the early-season blend. |
+| `Pace`, `PROE`, `Expl%` | Part C, C7 (2026-09-25): this player's own team's season-to-date offense tempo (mean seconds/snap, neutral script -- lower is faster, so its bands are reversed), pass rate over expected (neutral script), and explosive-play rate (all scrimmage plays, ≥20 pass or ≥10 rush yards) -- all three from nflverse's free play-by-play, blended with last season's full-season value early on. `Pace`/`PROE` feed `GameEnv`; `Expl%` is a readable column on its own, deliberately not one of GameEnv's inputs. See `docs/CALCULATIONS.md` for the full formulas and the early-season blend. |
 | `OppEPA` | Round 5 item 9: the opponent's EPA-per-play efficiency, from our own play-by-play -- QB/WR/TE see the opponent defense's EPA allowed per pass play, RB per rush play, DST the opposing offense's EPA/play with the sign flipped. Higher = a softer matchup for every position. Sits beside `OppPosRank` in the Game group. Blank when the opponent is missing from the pbp data, never 0. See `docs/CALCULATIONS.md`'s OppEPA section. (`ModelImplied` used to sit here; removed in item 5c -- GPS's "Implied Total" is Vegas, not a model.) |
 | `OppPosRank` | This player's OPPONENT's strength-of-schedule rank at this player's own position (1 = toughest matchup). Computed natively in Python from the already-synced `sos_qb`/`sos_rb`/`sos_wr`/`sos_te`/`sos_dst` frames (Phase 5, 2026-09-16, Sam: "all data should be in edge raw") -- the same value `PlayerPoolRaw`'s own `OppPosRank` computes via a `SoSComb` formula, just computed here without a live Sheets lookup. Blank for a position whose TFFB sync hasn't run yet, same graceful-degradation treatment as `Stadium`/`Roof`/`Wind`. |
 | `GameID` | Part 7.4: this player's game, `nflverse_games`' own ID format (`"2026_02_DET_BUF"` -- season, week, away, home). Was already computed internally to join `Stadium`/`Roof`/`Wind`, just never surfaced before now. What makes a stack visible: two players sharing this value are in the same game. |
@@ -187,21 +187,20 @@ only" (`Avail` blank), "In my pool" (`Pool = TRUE`). `EdgeRaw` itself is
 deliberately **not** protected (`dfs setup protect`) -- ticking `Pool` is
 the tab's entire reason to exist.
 
-**Per-position colour scales** (2026-09-18): `ProjPts`/`Val`/`Ceiling`/
-`CeilVal` each get a real red-to-green colour gradient, computed
-independently **within each position** rather than across the whole
-column -- a QB's real point totals and a DST's aren't on the same scale,
-so one flat gradient across all 742 rows would be misleading (this is
-exactly why these four were excluded from every other column's
-whole-tab scale in the first place). Built for Sam's actual workflow:
-filter to a position, sort by one of these, look for outliers -- a flat
-white column made that hard. Every other field with a colour scale
-(`GameEnv`, `CeilPct`, `ValAdj`, `Leverage`, `OppPosRank`, `OverUnder`,
-`Spread`, `ImpliedMove`/`TotMove`/`SpdMove`) already scales sensibly
-across the whole tab and is unaffected -- `ValAdj` in particular is
-already a per-position residual by construction, so a flat scale on it
-is correct, not a gap. `Salary` is never colour-scaled anywhere on
-this sheet -- see the Ceiling/Val note in `docs/CALCULATIONS.md`.
+**Highlighting** (five bands, Round 5 item 3, 2026-09-29; replaces the per-position
+gradients of 2026-09-18): the top 10% of a column is strong green, the next 20% light
+green, the middle 40% plain, then light red and strong red for the 20% and 10% at the
+bottom. Zeros and blanks are never coloured (a zero gets a flat grey chip). Rules are
+formulas that follow each row through any sort or filter.
+`ProjPts`/`AggPts`/`Ceiling`/`Val`/`CeilVal` are ranked **within position** -- a QB
+against QBs -- through five hidden percentile columns (`ProjPts%ile`, `AggPts%ile`,
+`Ceiling%ile`, `Val%ile`, `CeilVal%ile`), so a QB's real point totals and a DST's are
+never compared. `ValAdj`, `CeilPct` and `GameEnv` are already 0-100 and band on their own
+value; `Leverage` bands around zero; `OppPosRank` on the rank itself (low is the tough
+matchup); per-game columns (`Pace`, `PROE`, `Expl%`, `OppEPA`, `Total`, `GPS`, `Spread`)
+by `PERCENTRANK` against their own column. `Salary` is never highlighted anywhere on this
+sheet. The exact cut-offs and the reason for each choice are in `docs/CALCULATIONS.md`,
+"Highlighting: five bands".
 
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
 
@@ -544,8 +543,8 @@ session `projections` already depends on -- no separate login. Header is
 field, and the old `Week N`/`Week N Opp` labels are gone since the sync
 always reflects whatever week is current -- no header text to go stale).
 `Rank` is colour-scaled REVERSED (a low rank is the good matchup here --
-`Player Pool`/`Lineups`/`PlayerPoolRaw`'s own `OppPosRank` gets the same
-REVERSED treatment, see `sheet_style.FIELD_COLOR_SCALES`); `SoSComb`
+`Player Pool`/`Lineups`/`PlayerPoolRaw`'s own `OppPosRank` is banded on the rank
+itself, low = green, see `sheet_color_scales.FIELD_COLOR_SCALES`); `SoSComb`
 combines all five into one lookup table keyed by team and position
 (`VLOOKUP`ing each tab's column C, unaffected by the header/column
 changes above since `Rank` stayed column C), which `PlayerPoolRaw`'s
@@ -580,7 +579,10 @@ shape open by default, everything else collapsed):
   routine `dfs setup build-views` re-run untouched until the next live
   sync. Empty ("No changes since the last sync for pooled players.")
   until something actually changes.
-- **Slate shape** -- games ranked by total, with each game's `Fav`/
+- **Slate shape** -- games ranked by total, **only games with players on EdgeRaw**
+  (Round 5 follow-up item 1: a game with none isn't on DK's main slate; all four
+  spills -- Matchup, GameId, Away, Home -- share one filter so rows stay aligned;
+  `Slate Grid` keeps every game, dimmed), with each game's `Fav`/
   `Spread` (Board Fixes item 1, 2026-09-25 -- sourced from the same
   `GamesRaw` place as `Total`, every column letter derived from
   `nflverse_games.GAMES_COLUMNS`, never hardcoded), then `Pace`, `PROE`,
@@ -638,7 +640,12 @@ Read-only, built/rebuilt by `dfs setup build-views` (`sheet_views.
 build_slate_grid`), styled by `dfs setup polish` (`sheet_style.
 style_slate_grid`). One row per game (up to 18), instead of one row per
 player -- everything here comes straight off `GamesRaw`/`WeatherRaw`/
-`EdgeRaw`/`GPSRaw`, nothing computed locally.
+`EdgeRaw`/`GPSRaw`, nothing computed locally. **Every game of the week stays
+listed**; a game with no players on `EdgeRaw` (not on the DraftKings main
+slate -- Week 4: PIT@CLE, IND@WAS, DET@CAR, ATL@NO) is dimmed in muted italics,
+driven by a hidden `On DK slate` helper column (the last column, hidden along
+with `GPS off Vegas`; TRUE when either team has a player). The Board's Slate
+shape drops those games instead.
 
 | Column | Meaning |
 |---|---|
@@ -853,6 +860,13 @@ weekly wins/losses/pushes/expected-wins columns).
   to the DK spelling.
 - **`NameAlias`** (hidden tab) -- DST spellings ("Broncos", "Denver D/ST") ->
   the DK name, built by `dfs setup build-views` (`sheet_names.build_name_alias_tab`).
+- **`Player Key`** -- Lineups' last column, hidden: DK's canonical name for
+  whatever is typed in column A of that row (`sheet_names.resolve_name_expr`),
+  or the typed text when nothing matches. The DUPLICATE flag, `Min Unique`,
+  Exposure and Player Pool's `Used`/`In` compare it instead of the typed text
+  (`sheet_lineup_keys.py`); written by `dfs setup polish`, provisioned by
+  `dfs setup reorder-columns`.
+- **Slate Grid** -- hidden `GPS off Vegas` and `On DK slate` columns.
 - **Board** -- two hidden helper columns past the join keys: the GPS-vs-Vegas
   check (`BOARD_SLATE_GPSCHK_COL_INDEX`) and the leaders' `ProjPts%ile` lookup
   (`BOARD_LEADERS_PCT_COL_INDEX`).

@@ -63,8 +63,11 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
-  `LINEUPS_NAME_BLOCKS` expects). Run this after any structural change,
-  against both sheets. Never writes anything.
+  `LINEUPS_NAME_BLOCKS` expects, and the hand-built per-row formula ranges on
+  Results, Season, DkSalClean and PlayerPoolRaw have a formula on every row).
+  Run this after any structural change, against both sheets. Never writes
+  anything. `dfs setup repair-formula-ranges [--sheet-id <id>]` rewrites the
+  gaps it reports.
 - `dfs setup sheet --sheet-id <id>` -- the full one-time sheet build (pool
   deck, Player Pool's add-a-player control row, view tabs, EdgeRaw linking,
   filters, protection, styling), in the one order that works; its own docstring

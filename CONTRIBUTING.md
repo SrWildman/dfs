@@ -3206,6 +3206,79 @@ hiding `GAMEID..LEADERS_PCT` (`sheet_views.BOARD_LEADERS_PCT_COL_INDEX`).
 | 2026-09-29 | `Board` | Hidden `ProjPts%ile` lookup helper for the Per-position leaders block. | One hidden helper. | Two (`GPS` check, leaders percentile). | Template, Week 4 | `sheet_views.BOARD_LEADERS_PCT_COL_INDEX`, `style_board`. |
 | 2026-09-29 | `PBP` | Tab deleted (the source no longer uploads). | Present. | Gone. | Template, Week 4 (Week 3 left as is: closed) | `Source.uploads_to_sheet`. |
 
+## Round 5 follow-ups, items 0-4 (2026-09-29)
+
+**Item 1 -- Board Slate shape shows only main-slate games.** A game with no
+players on EdgeRaw (Week 4: PIT@CLE, IND@WAS, DET@CAR, ATL@NO -- DK's salary
+file has 24 teams) is filtered out of the Board's Slate shape by ONE shared
+condition (`sheet_views.build_board`'s `slate_live`: `ISNUMBER(MATCH(team,
+EdgeRaw!Team, 0))` on either side) used by all four spills, so Matchup/GameId/
+Away/Home cannot drift apart (cross-checked live: 12 rows, 0 mismatches against
+Slate Grid on Total and Wind). `Slate Grid` keeps every game; a hidden last
+column `On DK slate` (`sheet_views.SLATE_ON_SLATE_COL_INDEX`) drives a muted
+italic rule on the visible cells (`sheet_style.style_slate_grid`, added last so it
+wins). Sam then asked for the Board's banner (`Games`, `Highest total`, `Max wind`) to
+describe the same set: it reads the same `slate_live` condition (Wind is per GameId, so
+the weather rows are restricted to the slate's own games); Week 4 now reads `Games 12`.
+
+**Slate Grid movement colours (found while checking item 1).** `Total move`/`Spread move`
+zeros rendered solid red/green: a zero-centred scale's ends default to the column's own
+min/max, and a column with no negatives has its min AT the zero midpoint.
+`sheet_color_scales.diverging_anchor_kwargs` now anchors the ends symmetrically at
+-m/+m (m = largest absolute value), used by the shared diverging rule
+(`ImpliedMove`/`TotMove`/`SpdMove`), Slate Grid's two columns and the Movement tab. The
+anchor formulas MUST use absolute references: Sheets shifts a relative formula per row,
+and a first attempt left every zero below the column's one non-zero value green (its
+window contained no non-zero value, so the anchors collapsed onto the midpoint) --
+caught only by looking at the sheet. **Same hazard, not fixed:** the zero-exclusion
+`MINIFS`/`MEDIAN(FILTER(...))` anchors on the remaining gradient columns (`Own%`,
+`Exposure`, `Used`, ...) are also relative (`_zero_exclude_formula`).
+
+**Item 2 -- `dfs doctor` guards hand-built per-row formula ranges.** New
+`sheet_formula_ranges.py`: Results' `Cash Results`/`H2H %` (rows from
+`cfg.results`), Season's five total/cumulative columns, and every DkSalClean and
+PlayerPoolRaw column (rows 2..`PLAYER_POOL_RAW_BLOCK`'s last), found by header
+name. Doctor reports a row with no formula and -- on Results/Season/DkSalClean, where
+row N must read row N -- a formula pointing at another row. PlayerPoolRaw is checked
+for presence only: its `Name`/`Pos.`/`Team`/`Opp.`/`DK Sal` cells read DkSalClean in a
+deliberately permuted order (row 16 reads DkSalClean 17). `DkSalClean` is now an
+expected tab. `dfs setup repair-formula-ranges` rewrites gaps from the nearest healthy
+row and clears formulas left below the last row on the hub tabs. **Found and fixed
+live** (template + Week 4): Results G blank on rows 7/12/16/20; DkSalClean G stopped at
+745; DkSalClean A:F rows 802-1000 read `DKSalRaw` +2083 rows (an old row-deletion
+artifact -- row 1000 read `DKSalRaw!A3083`); PlayerPoolRaw `Ceil` (J) and `Venue` (AK)
+stopped at 745; stale formulas past row 987 in F/H/L (L's read two deleted tabs,
+`RstrRaw`/`DRstrRaw`). Not added to doctor (no derivable extent, or written by code
+and unit-tested): Lineups per-slot natives, Player Pool blocks, SoSComb and oddsFinal
+(32 rows each, hand-built), Bankroll's dedupe-key helper columns, Exposure, Instructions
+(already drift-checked), Board/Slate Grid/Movement (rebuilt by `build-views`).
+
+**Item 3 -- duplicates and Exposure compare resolved names.** New hidden Lineups
+column `Player Key` (`sheet_lineup_keys.py`): DK's canonical name for what is typed
+in column A (`sheet_names.resolve_name_expr`), or the typed text when nothing
+matches. Compared by: the in-lineup `DUPLICATE` flag
+(`sheet_style._slot_check_formula`), `Min Unique`
+(`sheet_lineup_metrics.min_unique_formula`), Exposure's counts and `Distinct QBs`
+(`sheet_views.build_exposure`), and Player Pool's `Used`/`In`
+(`sheet_pool_usage`, same defect, same fix -- not named in the prompt). Blank-ness
+tests stay on typed column A. Verified live (template and Week 4) with three test
+lineups: before, Kenneth Walker III read 2 lineups and Vikings 2 (3 each in truth),
+Min Unique read 1/2/1 on two lineups that differ only by spelling, and a lineup
+holding Walker under two spellings had no DUPLICATE; after, 3/3, Min Unique 0, and
+both slots flagged. Counts stay per SLOT (a player entered twice counts twice).
+
+**Item 4 -- docs.** The `OppEPA` colouring sentence and every other
+pre-bands "gradient" wording in `docs/CALCULATIONS.md`/`docs/SHEET_REFERENCE.md`
+now describes the bands. **Item 0** -- a third-party site's name removed from
+`docs/CALCULATIONS.md` (history of an already-pushed commit not rewritten).
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-09-29 | `Slate Grid` | Hidden `On DK slate` column appended. | 14 columns (A-N; N hidden). | 15 columns (A-O; N:O hidden). | Template, Week 4 | `sheet_views.SLATE_HEADER`/`SLATE_ON_SLATE_COL_INDEX`, `sheet_style.style_slate_grid`. |
+| 2026-09-29 | `Board` | Slate shape spills filtered to games with players. | 16 game rows max, all games. | Same 16-row block, main-slate games only. | Template, Week 4 | `sheet_views.build_board` (`slate_live`). |
+| 2026-09-29 | `Lineups` | Hidden `Player Key` column appended after `CeilVal%ile`; repeated header rows resynced. | 49 columns (`GameID` at `AD`). | 50 columns; `Player Key` last, hidden. | Template, Week 4 | `sheet_columns.LINEUPS_COLUMN_ORDER`, `sheet_lineup_keys.LINEUP_KEY_HEADER`. |
+| 2026-09-29 | `DkSalClean`, `PlayerPoolRaw`, `Results` | Formula ranges regularised (see item 2). | Ragged extents; DkSalClean tail read +2083 rows. | Every column rows 2-987 (Results 2-20); nothing below. | Template, Week 4 | `sheet_formula_ranges.formula_ranges`, `PLAYER_POOL_RAW_BLOCK`. |
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

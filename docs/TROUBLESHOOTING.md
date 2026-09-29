@@ -26,6 +26,17 @@ just use the new name directly.
 
 ---
 
+**`dfs doctor` says a column has "no formula" on some rows, or "a formula pointing at another row".**
+Cause: a hand-built per-row formula range (Results' `Cash Results`/`H2H %`, Season's
+totals, DkSalClean, PlayerPoolRaw) lost formulas -- usually a template copy or a
+row delete/sort -- so the cells read blank or read the wrong row. Player Pool,
+Lineups and PlayerPoolRaw then look empty or wrong with no error anywhere.
+Fix: run `dfs setup repair-formula-ranges --sheet-id <template>` first, then the
+same command on the live sheet, then `dfs doctor` on both. It rewrites only the
+cells doctor flagged, from the nearest healthy row.
+
+---
+
 **Player Pool is empty (or a position block is empty).**
 Cause: nothing's been added to the pool for that position yet.
 Fix: three ways in -- set a player's Pool dropdown on EdgeRaw, type a
