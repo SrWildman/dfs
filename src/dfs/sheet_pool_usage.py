@@ -9,7 +9,8 @@ PLAYER_POOL_COLUMN_ORDER`'s own tail) the same append-only way
 `sheet_links.link_edge_columns` treats its own linked block -- never
 inserted, so nothing to the left ever shifts.
 
-`Used` is a plain `COUNTIF` against the whole of `Lineups!$A:$A` --
+`Used` is a plain `COUNTIF` against the whole of Lineups' hidden `Player Key`
+column (round 5 follow-up item 3; it was `$A:$A`, the typed names) --
 deliberately the whole column, not just the real slot rows
 (`LINEUPS_NAME_BLOCKS`), because every repeated sub-header row's own
 column A holds the literal text "Name" (see `weekly_reset.py`'s module
@@ -30,6 +31,7 @@ reference changes) before any row is written.
 from __future__ import annotations
 
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
+from dfs.sheet_lineup_keys import lineup_key_letter
 from dfs.sheet_reorder import provision_missing_columns
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
@@ -43,11 +45,14 @@ IN_COLUMN = "In"
 _MAX_IN_FORMULA_LEN = 40_000
 
 
-def _used_formula(name_cell: str, lineups_tab: str) -> str:
-    return f'=IF({name_cell}="","",COUNTIF({lineups_tab}!$A:$A,{name_cell}))'
+def _used_formula(name_cell: str, lineups_tab: str, key_col: str = "A") -> str:
+    """Round 5 follow-up item 3: counts against Lineups' hidden `Player Key` (DK's
+    canonical name for whatever was typed), so a player typed as "kenneth walker" is
+    still "used"; `key_col` is "A" (the typed column) if the key column doesn't exist."""
+    return f'=IF({name_cell}="","",COUNTIF({lineups_tab}!${key_col}:${key_col},{name_cell}))'
 
 
-def _in_formula(name_cell: str, lineups_tab: str) -> str:
+def _in_formula(name_cell: str, lineups_tab: str, key_col: str = "A") -> str:
     """Found live, 2026-09-16: missing the same blank-name guard
     `_used_formula` already has -- `COUNTIF(range, "")` counts truly
     EMPTY cells in `range` as matches, so a blank Player Pool row (no
@@ -59,7 +64,7 @@ def _in_formula(name_cell: str, lineups_tab: str) -> str:
     anywhere yet."""
     terms = []
     for i, (start, end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
-        rng = f"{lineups_tab}!$A${start}:$A${end}"
+        rng = f"{lineups_tab}!${key_col}${start}:${key_col}${end}"
         terms.append(f'IF(COUNTIF({rng},{name_cell})>0,"L{i}","")')
     return f'=IF({name_cell}="","",IFERROR(TEXTJOIN(", ",TRUE,{",".join(terms)}),""))'
 
@@ -81,18 +86,19 @@ def write_pool_usage_columns(
     name_col = column_letter(header.index("Name"))
     used_col = column_letter(header.index(USED_COLUMN))
     in_col = column_letter(header.index(IN_COLUMN)) if IN_COLUMN in header else None
+    key_col = lineup_key_letter(client, lineups_tab) or "A"
 
     # The formula shape (not its cell reference) is what can get too long,
     # and it's identical at every row -- checked once here against a
     # representative cell rather than re-checked per row.
-    sample_in_formula = _in_formula(f"${name_col}3", lineups_tab)
+    sample_in_formula = _in_formula(f"${name_col}3", lineups_tab, key_col)
     in_too_long = len(sample_in_formula) > _MAX_IN_FORMULA_LEN
 
     for start, end in PLAYER_POOL_NAME_BLOCKS:
-        used_rows = [[_used_formula(f"${name_col}{r}", lineups_tab)] for r in range(start, end + 1)]
+        used_rows = [[_used_formula(f"${name_col}{r}", lineups_tab, key_col)] for r in range(start, end + 1)]
         client.update_range(player_pool_tab, f"{used_col}{start}:{used_col}{end}", used_rows)
         if in_col and not in_too_long:
-            in_rows = [[_in_formula(f"${name_col}{r}", lineups_tab)] for r in range(start, end + 1)]
+            in_rows = [[_in_formula(f"${name_col}{r}", lineups_tab, key_col)] for r in range(start, end + 1)]
             client.update_range(player_pool_tab, f"{in_col}{start}:{in_col}{end}", in_rows)
 
     total_rows = sum(end - start + 1 for start, end in PLAYER_POOL_NAME_BLOCKS)

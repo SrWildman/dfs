@@ -60,7 +60,9 @@ from dfs.sheet_bankroll_view import (
 )
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
+from dfs.sheet_formula_ranges import repair_formula_ranges
 from dfs.sheet_instructions import build_instructions_tab
+from dfs.sheet_lineup_keys import write_lineup_keys
 from dfs.sheet_lineup_metrics import write_lineup_metrics
 from dfs.sheet_lineup_tints import apply_lineup_tints
 from dfs.sheet_links import (
@@ -606,6 +608,41 @@ def sheets_remove_lineup_metrics(
 
 
 @setup_app.command(
+    "repair-formula-ranges",
+    short_help="Rewrite gaps in the hand-built per-row formula ranges that `dfs doctor` checks.",
+)
+def sheets_repair_formula_ranges(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Repair a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Round 5 follow-up item 2 (2026-09-29): `dfs doctor` now requires a formula on every
+    row of Results' `Cash Results`/`H2H %`, Season's total/cumulative columns, and every
+    DkSalClean/PlayerPoolRaw column (rows 2 to `PLAYER_POOL_RAW_BLOCK`'s last), and -- on
+    Results/Season/DkSalClean -- that row N reads row N. This rewrites each gap from the
+    nearest healthy row and clears formulas left below the documented last row on
+    DkSalClean/PlayerPoolRaw. Only flagged cells are written; healthy ones are never
+    touched. Template first, then the live sheet; run `dfs doctor` afterwards."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Repairing formula ranges in: [bold]{title}[/bold]\n{url}\n")
+        headers = {t.title: t.header for t in client.list_tabs()}
+        report = repair_formula_ranges(client, cfg, headers)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    if not report:
+        console.print("[green]OK[/green] nothing to repair")
+    for line in report:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@setup_app.command(
     "remove-model-implied",
     short_help="One-time: delete the retired ModelImplied column from the three builder tabs.",
 )
@@ -973,6 +1010,15 @@ def sheets_polish(
                 cfg.lineups.builder_tab,
                 header_row=lineups_header_row,
                 name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
+        results.append(
+            write_lineup_keys(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+                edge_tab=edge_tab,
             )
         )
         results.append(

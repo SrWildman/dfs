@@ -1,7 +1,10 @@
+import re
+
 import pandas as pd
 
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.gps_check import GPS_IMPLIED_MISMATCH_PTS
+from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_views import (
     BOARD_BANNER_ROW,
     BOARD_CHALK_HEADER_ROW,
@@ -38,6 +41,8 @@ from dfs.sheet_views import (
     LINEUP_COUNT_CELL,
     MOVEMENT_TAB,
     SLATE_GPS_CHECK_HEADER,
+    SLATE_ON_SLATE_COL_INDEX,
+    SLATE_ON_SLATE_HEADER,
     _col,
     _rng,
     build_board,
@@ -243,6 +248,29 @@ def test_build_exposure_counts_the_whole_lineups_column():
     assert "Lineups!$A$1:$A" in rows[0][9]
 
 
+def test_build_exposure_counts_resolved_names_when_lineups_has_a_player_key_column():
+    """Round 5 follow-up item 3: two spellings of one player must count as one, so every
+    'same player?' count reads the hidden Player Key column, not the typed column A --
+    while 'is this slot filled?' still reads the genuinely-blank typed column."""
+    client = FakeSheetsClient(
+        existing_rows=[],
+        post_write_names=[],
+        lineups_header=["Name", "Pos.", "GameID", LINEUP_KEY_HEADER],
+    )
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+
+    header, roster_row = client.write_tab_calls[0][1][0], client.write_tab_calls[0][1][1]
+    key = "Lineups!$D$1:$D"
+    assert f"COUNTIF({key},EdgeRaw!" in roster_row[0]  # who is in a lineup: canonical names
+    assert roster_row[3] == f'=IF($A2="","",COUNTIF({key},$A2))'  # the # Lineups count
+    assert "Lineups!$A$1:$A" not in roster_row[0]
+    typed_slots = '=COUNTIF(Lineups!$A$1:$A,"?*")-COUNTIF(Lineups!$A$1:$A,"Name")'
+    assert header[9] == typed_slots  # "is this slot filled?" stays on the genuinely-blank typed column
+    assert f'FILTER({key},Lineups!$B$1:$B="QB",{key}<>"")' in header[11]
+    assert 'COUNTIFS(Lineups!$B$1:$B,"QB",Lineups!$A$1:$A,"<>")' in header[13]
+
+
 def test_build_exposure_adds_portfolio_headline_when_lineups_pos_and_gameid_linked():
     client = FakeSheetsClient(
         existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
@@ -253,10 +281,10 @@ def test_build_exposure_adds_portfolio_headline_when_lineups_pos_and_gameid_link
     header = client.write_tab_calls[0][1][0]
     assert header[10:16] == [
         "Distinct QBs",
-        '=COUNTA(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB")))',
+        '=IFERROR(ROWS(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB",Lineups!$A$1:$A<>""))),0)',
         "Shared QB?",
         '=IF(COUNTIFS(Lineups!$B$1:$B,"QB",Lineups!$A$1:$A,"<>")'
-        '>COUNTA(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB"))),"Yes","No")',
+        '>IFERROR(ROWS(UNIQUE(FILTER(Lineups!$A$1:$A,Lineups!$B$1:$B="QB",Lineups!$A$1:$A<>""))),0),"Yes","No")',
         "Distinct games",
         '=IFERROR(ROWS(UNIQUE(FILTER(Lineups!$C$1:$C,Lineups!$C$1:$C<>"",Lineups!$C$1:$C<>"GameID"))),0)',
     ]
@@ -707,12 +735,45 @@ def test_slate_grid_has_gps_and_a_hidden_check_but_no_model_columns():
         client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
     )
     header = client.rows[0]
-    assert header[12:] == ["GPS", SLATE_GPS_CHECK_HEADER]
+    assert header[12:] == ["GPS", SLATE_GPS_CHECK_HEADER, SLATE_ON_SLATE_HEADER]
     for gone in ("Model Tot", "Tot Δ", "Model Spd", "Spd Δ"):
         assert gone not in header
     row = client.rows[1]
     assert "GPSRaw!$A:$C" in row[12]  # GPS reads GPSRaw directly, keyed off the home team
     assert "VLOOKUP(GamesRaw!$C2," in row[12]
+
+
+def test_slate_grid_keeps_every_game_and_flags_the_ones_with_no_players():
+    """Round 5 follow-up item 1: Slate Grid lists the whole week; a hidden helper says
+    which games have a player on EdgeRaw (either team), for the dimming rule."""
+    client = _CapturingClient()
+    build_slate_grid(
+        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
+    )
+    assert len(client.rows) == 19  # header + 18 game rows, none filtered out
+    helper = client.rows[1][SLATE_ON_SLATE_COL_INDEX]
+    assert helper.count("COUNTIF(EdgeRaw!") == 2  # away + home
+    assert "GamesRaw!$B2" in helper and "GamesRaw!$C2" in helper and ")>0" in helper
+    assert helper.startswith('=IF(GamesRaw!$A2="","",')  # blank rows stay blank
+
+
+def test_board_slate_shape_drops_games_with_no_players_through_one_shared_filter():
+    """All four spills (Matchup, GameId, Away, Home) must use the identical condition
+    or the rows the per-row Wind/Pace lookups join on would misalign."""
+    client = _build_board()
+    slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
+    spills = [
+        slate_row[0],
+        slate_row[BOARD_SLATE_GAMEID_COL_INDEX],
+        slate_row[BOARD_SLATE_GAMEID_COL_INDEX + 1],
+        slate_row[BOARD_SLATE_GAMEID_COL_INDEX + 2],
+    ]
+    team = _rng("EdgeRaw", "Team")
+    conditions = set()
+    for formula in spills:
+        assert "MATCH(GamesRaw!" in formula and f",{team},0)" in formula
+        conditions.add(re.search(r'\(GamesRaw![^)]*<>""\)\*.*>0\)', formula).group(0))
+    assert len(conditions) == 1
 
 
 def test_slate_grid_gps_check_is_blank_without_gps_and_uses_the_1_5_point_threshold():
@@ -881,3 +942,18 @@ def test_write_queue_section_skips_cleanly_when_edgeraw_has_no_id_column():
     result = write_queue_section(client, _queue_changes_df(), "EdgeRaw")
     assert "no Id column" in result
     assert client.update_calls == []
+
+
+def test_banner_counts_the_same_main_slate_games_as_slate_shape():
+    """Round 5 follow-up: Games / Highest total / Max wind describe the games Slate shape
+    lists, not the whole week -- one shared condition, or the header contradicts the table."""
+    client = _build_board()
+    row = client.rows[BOARD_BANNER_ROW - 1]
+    slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
+    team = _rng("EdgeRaw", "Team")
+    games, top_total, max_wind = row[1], row[3], row[5]
+    for formula in (games, top_total, max_wind):
+        assert f",{team},0)" in formula  # gated on a team having players on EdgeRaw
+    shared = re.search(r'\(GamesRaw![^)]*<>""\)\*.*>0\)', slate_row[0]).group(0)
+    assert shared in games and shared in top_total
+    assert "MATCH(WeatherRaw!$A$2:$A$40" in max_wind  # wind is per GameId, restricted to slate games

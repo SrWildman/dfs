@@ -25,8 +25,9 @@ VLOOKUPs (`sheet_links.edge_lookup_formula`), the "Edge ↗" row link, the
 native PlayerPoolRaw lookups (`sheet_native_links.native_lookup_formula`),
 and the add-a-player control cell's position/pool/salary lookups
 (`sheet_pool_formulas`). The sync's drain step stores the canonical name.
-NOT normalized (they compare typed text against typed text, so a variant
-spelling reads as a different name): Lineups' duplicate/Exposure counts.
+Counts that ask "is this the same player?" (Lineups' DUPLICATE flag and Min
+Unique, Exposure, Player Pool's Used/In) compare Lineups' hidden `Player Key`
+-- DK's canonical name for whatever was typed, see `sheet_lineup_keys.py`.
 """
 
 from __future__ import annotations

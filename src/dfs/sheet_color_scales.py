@@ -21,6 +21,8 @@ a gradient rule itself needs live here.
 
 from __future__ import annotations
 
+import re
+
 from dfs.derived import CHALK_OWNERSHIP_THRESHOLD
 from dfs.sheets import column_letter
 
@@ -182,6 +184,33 @@ def _zero_exclude_formula(fn: str, ranges: str | list[str]) -> str:
     raise ValueError(f"Unsupported zero-exclude function {fn!r}")
 
 
+def _absolute(a1_range: str) -> str:
+    """`K2:K19` -> `$K$2:$K$19` (an optional `Tab!` prefix is kept as is)."""
+    prefix, _, ref = a1_range.rpartition("!")
+    absolute = re.sub(r"(\$?)([A-Z]{1,3})(\$?)(\d+)", r"$\2$\4", ref)
+    return f"{prefix}!{absolute}" if prefix else absolute
+
+
+def diverging_anchor_kwargs(ranges: str | list[str]) -> dict:
+    """Symmetric end anchors for a zero-centred (red -> white -> green) scale: the
+    endpoints sit at -m and +m, where m is the column's largest absolute value.
+
+    Without this the ends default to the column's own min/max, and a column with no
+    negatives (or no positives) has its min (or max) AT the zero midpoint -- Sheets then
+    paints every zero the end colour (Slate Grid's `Total move` read solid red where
+    nothing moved, `Spread move` solid green). With symmetric anchors a zero is white
+    whatever the data looks like, and a +1 and a -1 are equally saturated.
+    """
+    if isinstance(ranges, str):
+        ranges = [ranges]
+    # ABSOLUTE references, or Sheets shifts the formula per row: a cell below the column's one
+    # non-zero value then evaluates a window with none in it, the anchors collapse onto the
+    # midpoint, and its zero renders green (found live on Week 4's Slate Grid).
+    joined = ",".join(_absolute(r) for r in ranges)
+    bound = f"MAX(MAX({joined}),-MIN({joined}))"
+    return {"min_type": "NUMBER", "min_value": f"=-{bound}", "max_type": "NUMBER", "max_value": f"={bound}"}
+
+
 def _scale_rule_specs(
     a1: str,
     kind: str,
@@ -244,6 +273,7 @@ def _scale_rule_specs(
             "max_color": GRAD_MAX,
             "mid_type": "NUMBER",
             "mid_value": "0",
+            **diverging_anchor_kwargs(zero_exclude_range),
             **min_kwargs,
             **max_kwargs,
         }

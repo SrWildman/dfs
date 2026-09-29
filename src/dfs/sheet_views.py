@@ -25,6 +25,7 @@ import pandas as pd
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, SHOOTOUT_TOTAL_THRESHOLD
 from dfs.gps_check import GPS_IMPLIED_MISMATCH_PTS
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
+from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, _canonical_id
 from dfs.sources.nflverse_games import GAMES_COLUMNS
@@ -292,6 +293,10 @@ BOARD_LEADERS_PCT_COL = column_letter(BOARD_LEADERS_PCT_COL_INDEX)
 
 # Slate Grid's hidden GPS sanity-check column (see `build_slate_grid`).
 SLATE_GPS_CHECK_HEADER = "GPS off Vegas"
+# Round 5 follow-up item 1: TRUE when at least one of the game's teams has a player on
+# EdgeRaw (i.e. the game is on the DK salary file's slate). Hidden helper; the dimming
+# rule on every other Slate Grid cell reads it (a rule can't look at another tab).
+SLATE_ON_SLATE_HEADER = "On DK slate"
 SLATE_HEADER = [
     "Matchup",
     "Kickoff",
@@ -307,7 +312,11 @@ SLATE_HEADER = [
     "Spread move",
     "GPS",
     SLATE_GPS_CHECK_HEADER,
+    SLATE_ON_SLATE_HEADER,
 ]
+SLATE_GPS_CHECK_COL_INDEX = SLATE_HEADER.index(SLATE_GPS_CHECK_HEADER)
+SLATE_ON_SLATE_COL_INDEX = SLATE_HEADER.index(SLATE_ON_SLATE_HEADER)
+SLATE_ON_SLATE_COL = column_letter(SLATE_ON_SLATE_COL_INDEX)
 
 
 def _pp_col(name: str) -> str:
@@ -419,14 +428,29 @@ def build_board(
     games_total_range = f"{g}!${games_total_col}$2:${games_total_col}$40"
     games_spread_range = f"{g}!${games_spread_col}$2:${games_spread_col}$40"
     games_live = f'{games_id_range}<>""'
+    # Round 5 follow-up item 1: a game with no players on EdgeRaw isn't on the DK slate, so
+    # it doesn't belong in Slate shape -- and the banner above it describes the same set
+    # (Games, Highest total, Max wind), or the header would contradict the table under it.
+    # ONE condition, shared by the banner and all four Slate shape spills so they can never
+    # disagree about which games count. Slate Grid keeps every game, dimmed.
+    slate_live = (
+        f"({games_live})*"
+        f"((ISNUMBER(MATCH({games_away_range},{team},0))"
+        f"+ISNUMBER(MATCH({games_home_range},{team},0)))>0)"
+    )
 
-    games = f'=SUMPRODUCT(({games_id_range}<>"")*1)'
+    games = f"=SUMPRODUCT({slate_live}*1)"
     top_total = (
         f'=IFERROR(INDEX(SORT(FILTER({{{games_away_range}&" / "&{games_home_range},{games_total_range}}},'
-        f'{games_live}),2,FALSE),1,1)&"  "&'
-        f'TEXT(MAX(FILTER({games_total_range},{games_live})),"0.0"),"--")'
+        f'{slate_live}),2,FALSE),1,1)&"  "&'
+        f'TEXT(MAX(FILTER({games_total_range},{slate_live})),"0.0"),"--")'
     )
-    max_wind = f'=IFERROR(MAX(FILTER({w}!$F$2:$F$40,{w}!$A$2:$A$40<>""))&" mph","--")'
+    # WeatherRaw is keyed on GameId: only the slate's own games count toward the max.
+    slate_gameids = f"FILTER({games_id_range},{slate_live})"
+    max_wind = (
+        f'=IFERROR(MAX(FILTER({w}!$F$2:$F$40,{w}!$A$2:$A$40<>"",'
+        f'ISNUMBER(MATCH({w}!$A$2:$A$40,{slate_gameids},0))))&" mph","--")'
+    )
     injuries = (
         f'=COUNTIF({avail},"OUT")&" out  /  "&COUNTIF({avail},"IR")&" IR  /  "&COUNTIF({avail},"Q")&" Q"'
     )
@@ -669,26 +693,28 @@ def build_board(
     # lookup (EdgeRaw is keyed on Team). Verified live (2026-09-22,
     # template) that multiple SORTs on the same key preserve identical
     # relative order for tied values, so all four formulas stay row-aligned.
+    # `slate_live` (defined with the banner above) is the one shared filter for all four
+    # spills, so Matchup/GameId/Away/Home can never disagree about which rows survive.
     slate_sorted = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f'{{{games_away_range}&" @ "&{games_home_range},{games_total_range},'
         f"{fav_expr},{abs_spread_expr}}},"
-        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},4),"")'
+        f'{slate_live}),2,FALSE),{BOARD_SLATE_ROWS},4),"")'
     )
     slate_gameid = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f"{{{games_id_range},{games_total_range}}},"
-        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+        f'{slate_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
     slate_away = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f"{{{games_away_range},{games_total_range}}},"
-        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+        f'{slate_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
     slate_home = (
         f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
         f"{{{games_home_range},{games_total_range}}},"
-        f'{games_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
+        f'{slate_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
     _set(BOARD_SLATE_FIRST_ROW, [slate_sorted])
     _set(BOARD_SLATE_FIRST_ROW, [slate_gameid], start_col=BOARD_SLATE_GAMEID_COL_INDEX)
@@ -945,6 +971,9 @@ def build_slate_grid(
                     spread_ref=f"{g}!${games_spread_col}{r}",
                 )
                 + ")",
+                # Round 5 follow-up item 1: on the DK slate iff either team has a player.
+                f"={guard}(COUNTIF({e}!${team_col}:${team_col},{g}!$B{r})"
+                f"+COUNTIF({e}!${team_col}:${team_col},{g}!$C{r}))>0)",
             ]
         )
     client.write_tab(SLATE_TAB, rows)
@@ -996,10 +1025,20 @@ def build_exposure(
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     salary = _rng(edge_tab, "Salary")
-    lu = f"{_q(lineups_tab)}!$A$1:$A"
+    lu_typed = f"{_q(lineups_tab)}!$A$1:$A"
 
     lineups_header = client.read_range(lineups_tab, f"A{lineups_header_row}:{lineups_header_row}")
     lineups_header = lineups_header[0] if lineups_header else []
+    # Round 5 follow-up item 3: every "is this the same player?" count reads the hidden
+    # `Player Key` (DK's canonical name for whatever was typed), so two spellings of one
+    # player are one player. Falls back to the typed column when the key column doesn't
+    # exist yet. Emptiness tests below stay on the typed column, which is genuinely blank.
+    lu = (
+        f"{_q(lineups_tab)}!${column_letter(lineups_header.index(LINEUP_KEY_HEADER))}$1:"
+        f"${column_letter(lineups_header.index(LINEUP_KEY_HEADER))}"
+        if LINEUP_KEY_HEADER in lineups_header
+        else lu_typed
+    )
     portfolio_cols: dict[str, str] = {}
     if lineups_header:
         for col_name in ("Pos.", "GameID"):
@@ -1036,8 +1075,10 @@ def build_exposure(
     if "Pos." in portfolio_cols and "GameID" in portfolio_cols:
         lu_pos = f"{_q(lineups_tab)}!${portfolio_cols['Pos.']}$1:${portfolio_cols['Pos.']}"
         lu_gameid = f"{_q(lineups_tab)}!${portfolio_cols['GameID']}$1:${portfolio_cols['GameID']}"
-        qb_names = f'UNIQUE(FILTER({lu},{lu_pos}="QB"))'
-        distinct_qbs = f"=COUNTA({qb_names})"
+        # `key<>""` because the key column holds formula-blanks, which COUNTA would count;
+        # ROWS (not COUNTA) so a FILTER of nothing degrades to 0 instead of counting #N/A.
+        distinct_qb_count = f'IFERROR(ROWS(UNIQUE(FILTER({lu},{lu_pos}="QB",{lu}<>""))),0)'
+        distinct_qbs = f"={distinct_qb_count}"
         # Found live (2026-09-19), same static-label pitfall as Lineups'
         # stale "DEF" bug: `Pos.` is the FIXED slot label, always "QB" for
         # one row per block regardless of whether a name is typed there,
@@ -1047,8 +1088,8 @@ def build_exposure(
         # `lu,"<>"` requires the Name cell itself (typed by hand, so
         # genuinely blank when empty -- not a formula-blank like GameID)
         # to be non-blank too.
-        qb_slots_filled = f'COUNTIFS({lu_pos},"QB",{lu},"<>")'
-        shared_qb = f'=IF({qb_slots_filled}>COUNTA({qb_names}),"Yes","No")'
+        qb_slots_filled = f'COUNTIFS({lu_pos},"QB",{lu_typed},"<>")'
+        shared_qb = f'=IF({qb_slots_filled}>{distinct_qb_count},"Yes","No")'
         # Same header-repeat-text gotcha "Slots filled" (above) already
         # guards against: `lu_gameid` spans every block including each
         # one's own repeated header row, whose GameID cell reads the
@@ -1084,7 +1125,7 @@ def build_exposure(
             "vs Target",
             lineup_count_value,
             "Slots filled",
-            f'=COUNTIF({lu},"?*")-COUNTIF({lu},"Name")',
+            f'=COUNTIF({lu_typed},"?*")-COUNTIF({lu_typed},"Name")',
             "Distinct QBs",
             distinct_qbs,
             "Shared QB?",

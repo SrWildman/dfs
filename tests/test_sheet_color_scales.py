@@ -16,6 +16,7 @@ from dfs.sheet_color_scales import (
     ZERO_GREY_BG,
     band_rule_specs,
     column_rule_specs,
+    diverging_anchor_kwargs,
 )
 
 
@@ -152,3 +153,27 @@ def test_every_field_has_a_known_kind():
         "warm",
     }
     assert set(FIELD_COLOR_SCALES.values()) <= known
+
+
+def test_diverging_anchors_are_symmetric_so_a_zero_is_always_the_white_midpoint():
+    """A column with no negatives has its own MIN at the zero midpoint, and Sheets then
+    paints every zero the end colour (Slate Grid's Total move read solid red)."""
+    a = diverging_anchor_kwargs("K2:K19")
+    # ABSOLUTE: a relative anchor formula is shifted per row by Sheets, so every cell below the
+    # column's only non-zero value would see a window with none in it (zeros rendered green).
+    assert a["min_value"] == "=-MAX(MAX($K$2:$K$19),-MIN($K$2:$K$19))"
+    assert a["max_value"] == "=MAX(MAX($K$2:$K$19),-MIN($K$2:$K$19))"
+    assert a["min_type"] == a["max_type"] == "NUMBER"
+    multi = diverging_anchor_kwargs(["A2:A5", "A9:A12"])
+    assert (
+        "MAX($A$2:$A$5,$A$9:$A$12)" in multi["max_value"]
+        and "MIN($A$2:$A$5,$A$9:$A$12)" in multi["max_value"]
+    )
+
+
+def test_every_diverging_field_gets_the_symmetric_anchors_and_keeps_its_zero_midpoint():
+    for field in ("ImpliedMove", "TotMove", "SpdMove"):
+        (grad,), _ = column_rule_specs(field, "K", 2, 50)
+        assert grad["mid_type"] == "NUMBER" and grad["mid_value"] == "0"
+        assert grad["min_value"].startswith("=-MAX(MAX($K$2:$K$50)")
+        assert grad["max_value"].startswith("=MAX(MAX($K$2:$K$50)")

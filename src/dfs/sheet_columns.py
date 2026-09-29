@@ -103,6 +103,7 @@ from dfs.derived import (
     USAGE_LABEL,
     WEATHER_LABEL,
 )
+from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_metrics import LINEUP_METRIC_HEADERS
 
 IDENTITY = ["Name", "Pos.", "Team", "Opp."]
@@ -323,6 +324,9 @@ LINEUPS_COLUMN_ORDER = [
     USAGE_LABEL,
     *USAGE,
     *INTERNAL,
+    # Round 5 follow-up item 3: hidden canonical-name key the duplicate/exposure counts
+    # compare (`sheet_lineup_keys.py`). Appended last so nothing to its left moves.
+    LINEUP_KEY_HEADER,
 ]
 
 assert set(LINKED_COLUMNS) <= set(EDGE_COLUMNS)  # noqa: S101 - internal self-check, not a public contract

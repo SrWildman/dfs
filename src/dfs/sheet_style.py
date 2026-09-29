@@ -88,8 +88,10 @@ from dfs.sheet_color_scales import (
     GRAD_MIN,
     WHITE,
     column_rule_specs,
+    diverging_anchor_kwargs,
 )
 from dfs.sheet_columns import INTERNAL
+from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_tints import LEGEND as LINEUP_TINT_LEGEND
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_views import (
@@ -125,6 +127,8 @@ from dfs.sheet_views import (
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
     BOARD_STACK_LAST_ROW,
+    SLATE_GPS_CHECK_COL_INDEX,
+    SLATE_ON_SLATE_COL,
     _position_block_rows,
 )
 from dfs.sheets import SheetsClient, column_letter
@@ -1336,7 +1340,7 @@ def polish_builder_tab(
     # "Added" (A6, 2026-09-22) joins Id/Flag here -- Player Pool's own
     # hidden add-a-player accumulator, never meant to be looked at
     # directly (see `weekly_reset.PLAYER_POOL_ADDED_NAMES_HEADER`).
-    for hidden_name in (*INTERNAL, "Added"):
+    for hidden_name in (*INTERNAL, "Added", LINEUP_KEY_HEADER):
         if hidden_name in header:
             letter = column_letter(header.index(hidden_name))
             client.hide_columns(tab, letter, letter)
@@ -1449,15 +1453,20 @@ _GUARDRAILS_CHIPS = [
 ]
 
 
-def _slot_check_formula(start: int, end: int, row: int, avail_col: str) -> str:
+def _slot_check_formula(start: int, end: int, row: int, avail_col: str, key_col: str = "A") -> str:
     """Flags a name duplicated elsewhere in its own block, else surfaces
     that pick's linked Avail flag (OUT/IR/Q) if it has one. `end` is the
     block's own last REAL roster row now (Fix 2.4 -- it used to also be
     the totals row), so the duplicate check spans `start..end` directly,
-    no `-1` needed."""
+    no `-1` needed.
+
+    Round 5 follow-up item 3: the duplicate is judged on `key_col` -- the hidden
+    `Player Key` (DK's canonical name for whatever was typed) -- so two spellings of
+    one player inside a lineup are caught. Blank-ness is still read off the typed
+    column A. `key_col` defaults to A, the old behaviour, if that column is absent."""
     return (
         f'=IF($A{row}="","",'
-        f'IF(COUNTIF($A${start}:$A${end},$A{row})>1,"DUPLICATE",'
+        f'IF(COUNTIF(${key_col}${start}:${key_col}${end},${key_col}{row})>1,"DUPLICATE",'
         f'IF(${avail_col}{row}<>"",${avail_col}{row},"")))'
     )
 
@@ -1947,6 +1956,7 @@ def polish_guardrails(
     avail_col = column_letter(header.index("Avail"))
     salary_col = column_letter(header.index("DK Sal"))
     guardrails_col = column_letter(header.index(_GUARDRAILS_HEADER))
+    key_col = column_letter(header.index(LINEUP_KEY_HEADER)) if LINEUP_KEY_HEADER in header else "A"
 
     # Part 7.4: the two stack checks are additive, not required -- a
     # Lineups build that predates `GameID` being linked (or mid-migration)
@@ -1966,7 +1976,7 @@ def polish_guardrails(
 
     for start, end in name_blocks:
         totals_row = end + 1
-        rows = [[_slot_check_formula(start, end, row, avail_col)] for row in range(start, end + 1)]
+        rows = [[_slot_check_formula(start, end, row, avail_col, key_col)] for row in range(start, end + 1)]
         stack_check = (
             _stack_check_formula(
                 start,
@@ -2617,12 +2627,14 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
             "K": 92,
             "L": 92,
             # GPS (2026-09-26): appended past line movement. `N` is the hidden
-            # "GPS off Vegas" sanity-check helper (Round 5 item 5c).
+            # "GPS off Vegas" sanity-check helper (Round 5 item 5c); `O` the hidden
+            # "On DK slate" helper (Round 5 follow-up item 1).
             "M": 52,
             "N": 84,
+            "O": 84,
         },
     )
-    client.format_range(tab, "A1:N1", _HEADER_FMT)
+    client.format_range(tab, f"A1:{SLATE_ON_SLATE_COL}1", _HEADER_FMT)
     client.format_range(tab, "C2:C19", FIELD_FORMATS["Total"])
     client.format_range(tab, "D2:D19", FIELD_FORMATS["Spread"])
     client.format_range(tab, "F2:G19", FIELD_FORMATS["Wind"])
@@ -2650,6 +2662,7 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
             max_color=GRAD_MAX,
             mid_type="NUMBER",
             mid_value="0",
+            **diverging_anchor_kwargs(f"{col}2:{col}19"),
         )
     # GPS: a 1-5 score, gradient like Total; a muted chip when the worksheet's
     # implied totals are far off Vegas (hidden helper column N, see
@@ -2659,7 +2672,18 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
     client.add_boolean_rule(
         tab, "M2:M19", condition_type="CUSTOM_FORMULA", values=["=$N2=TRUE"], fmt=_chip(WARN_BG, WARN_FG)
     )
-    client.hide_columns(tab, "N", "N")
+    # Round 5 follow-up item 1: a game with no players on the DK slate stays listed
+    # here (the full week in one place) but in muted text. Added LAST so it wins over
+    # every other rule's text colour. Reads the hidden "On DK slate" helper.
+    on_slate = SLATE_ON_SLATE_COL
+    client.add_boolean_rule(
+        tab,
+        f"A2:{column_letter(SLATE_GPS_CHECK_COL_INDEX - 1)}19",
+        condition_type="CUSTOM_FORMULA",
+        values=[f"=${on_slate}2=FALSE"],
+        fmt={"textFormat": {"foregroundColor": INK_MUTED, "italic": True}},
+    )
+    client.hide_columns(tab, column_letter(SLATE_GPS_CHECK_COL_INDEX), on_slate)
     client.freeze(tab, rows=1, cols=1)
     return f"{tab}: styled (totals colour-scaled, high wind flagged, movement scaled, GPS scaled)"
 
@@ -2783,6 +2807,7 @@ def style_movement(client: SheetsClient, tab: str = "Movement") -> str:
             max_color=GRAD_MAX,
             mid_type="NUMBER",
             mid_value="0",
+            **diverging_anchor_kwargs(rng),
         )
         scaled += 1
 

@@ -202,7 +202,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Board",
         "Read-only landing tab (`dfs setup build-views`): seven collapsible sections "
         "-- Queue (what changed since the last sync, pooled players only; open by "
-        "default), Slate shape (games ranked by total, open by default), "
+        "default), Slate shape (games ranked by total, open by default -- only "
+        "games with players in DraftKings' salary file, i.e. the main slate), "
         "Per-position leaders, Punt finder, Stack candidates, Pool diagnostics "
         "(reads your pool, not the slate), and a deferred Chalk map placeholder, "
         "plus the same games/highest-total/max-wind/injuries summary as before. "
@@ -214,8 +215,10 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Read-only (`dfs setup build-views`): one row per game instead of one row "
         "per player -- kickoff, total, spread, roof, wind/gust, rest days, "
         "division game, stadium, plus per-game line movement (total move/spread "
-        'move). A sortable filter view ("All") is available without touching the '
-        "underlying rows. Nothing to type here.",
+        "move). Every game of the week is listed; one with no players in "
+        "DraftKings' salary file (not on the main slate) is dimmed. A sortable "
+        'filter view ("All") is available without touching the underlying rows. '
+        "Nothing to type here.",
     ),
     (
         "TFFBOptoRaw",

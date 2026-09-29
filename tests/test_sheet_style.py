@@ -46,6 +46,7 @@ from dfs.sheet_style import (
     style_flat_tab,
     style_movement,
     style_results,
+    style_slate_grid,
     style_sos_tab,
     style_tier23_tabs,
 )
@@ -1982,3 +1983,51 @@ def test_style_board_unhides_the_visible_range_before_hiding_the_helper_block():
     assert client.hide_events.index(("A", unhide_last, False)) < next(
         i for i, e in enumerate(client.hide_events) if e[2] is True
     )
+
+
+def test_style_slate_grid_dims_games_with_no_players_and_hides_both_helpers():
+    """Round 5 follow-up item 1: the game stays listed but in muted text, driven by the
+    hidden "On DK slate" helper; both hidden helpers (GPS check, On DK slate) are hidden."""
+    from dfs.sheet_views import SLATE_GPS_CHECK_COL_INDEX, SLATE_ON_SLATE_COL
+
+    rules = []
+    hidden_calls = []
+
+    class _Client(FakeBoardClient):
+        def add_boolean_rule(self, tab, a1_range, *, condition_type, values, fmt):
+            rules.append((a1_range, condition_type, values, fmt))
+
+        def hide_columns(self, tab, first, last, *, hidden=True):
+            hidden_calls.append((first, last))
+
+        def freeze(self, tab, *, rows, cols=None):
+            pass
+
+    style_slate_grid(_Client())
+    dim = [r for r in rules if r[2] == [f"=${SLATE_ON_SLATE_COL}2=FALSE"]]
+    assert len(dim) == 1
+    assert rules[-1] == dim[0]  # added last, so it wins over every other rule's text colour
+    assert dim[0][3]["textFormat"]["foregroundColor"] != WHITE
+    assert dim[0][0].endswith(f"{column_letter(SLATE_GPS_CHECK_COL_INDEX - 1)}19")  # visible columns only
+    assert hidden_calls == [(column_letter(SLATE_GPS_CHECK_COL_INDEX), SLATE_ON_SLATE_COL)]
+
+
+def test_slate_grid_movement_scales_are_zero_centred_with_symmetric_anchors():
+    """Both movement columns must paint a zero white even when no value in the column is
+    negative (or positive) -- found live on Week 4: zeros rendered solid red/green."""
+    scales = []
+
+    class _Client(FakeBoardClient):
+        def add_color_scale(self, tab, a1_range, **kwargs):
+            scales.append((a1_range, kwargs))
+
+        def freeze(self, tab, *, rows, cols=None):
+            pass
+
+    style_slate_grid(_Client())
+    movement = [(rng, kw) for rng, kw in scales if rng[0] in "KL" and kw.get("mid_value") == "0"]
+    assert [rng for rng, _ in movement] == ["K2:K19", "L2:L19"]
+    for rng, kw in movement:
+        col = rng[0]
+        assert kw["min_value"] == f"=-MAX(MAX(${col}$2:${col}$19),-MIN(${col}$2:${col}$19))"
+        assert kw["max_value"] == f"=MAX(MAX(${col}$2:${col}$19),-MIN(${col}$2:${col}$19))"

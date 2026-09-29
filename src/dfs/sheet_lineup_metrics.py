@@ -35,6 +35,7 @@ exposure stays a REPORT (`Exposure`, already built), never a constraint.
 
 from __future__ import annotations
 
+from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheets import SheetsClient, column_letter
 
 _GAMES_HEADER = "Games"
@@ -59,7 +60,12 @@ def distinct_games_formula(start: int, end: int, *, gameid_col: str) -> str:
 
 
 def min_unique_formula(
-    this_start: int, this_end: int, other_blocks: list[tuple[int, int]], *, name_col: str = "A"
+    this_start: int,
+    this_end: int,
+    other_blocks: list[tuple[int, int]],
+    *,
+    name_col: str = "A",
+    key_col: str | None = None,
 ) -> str:
     """The smallest count of THIS lineup's own picks absent from some
     OTHER lineup, minimized over every other lineup. `9 - overlap_count`
@@ -85,11 +91,16 @@ def min_unique_formula(
     at all."""
     if not other_blocks:
         return '=""'
-    this_rng = f"$A${this_start}:$A${this_end}"
-    block_empty = f"COUNTA({this_rng})=0"
+    # Round 5 follow-up item 3: overlap is judged on the hidden `Player Key` (DK's
+    # canonical name) when there is one, so "kenneth walker" in one lineup and
+    # "Kenneth Walker III" in another are the same player. Emptiness is still read off
+    # the typed column (a formula-blank key cell would count as non-empty in COUNTA).
+    compare_col = key_col or name_col
+    block_empty = f"COUNTA($A${this_start}:$A${this_end})=0"
+    this_rng = f"${compare_col}${this_start}:${compare_col}${this_end}"
     terms = []
     for other_start, other_end in other_blocks:
-        other_rng = f"${name_col}${other_start}:${name_col}${other_end}"
+        other_rng = f"${compare_col}${other_start}:${compare_col}${other_end}"
         picks = this_end - this_start + 1
         terms.append(f"({picks}-SUMPRODUCT(COUNTIF({other_rng},{this_rng})>0))")
     return f'=IF({block_empty},"",MIN({",".join(terms)}))'
@@ -117,6 +128,7 @@ def write_lineup_metrics(
     gameid_col = column_letter(header.index("GameID"))
     games_col = column_letter(header.index(_GAMES_HEADER))
     min_unique_col = column_letter(header.index(_MIN_UNIQUE_HEADER))
+    key_col = column_letter(header.index(LINEUP_KEY_HEADER)) if LINEUP_KEY_HEADER in header else None
 
     for start, end in name_blocks:
         totals_row = end + 1
@@ -125,7 +137,9 @@ def write_lineup_metrics(
             tab, f"{games_col}{totals_row}", [[distinct_games_formula(start, end, gameid_col=gameid_col)]]
         )
         client.update_range(
-            tab, f"{min_unique_col}{totals_row}", [[min_unique_formula(start, end, other_blocks)]]
+            tab,
+            f"{min_unique_col}{totals_row}",
+            [[min_unique_formula(start, end, other_blocks, key_col=key_col)]],
         )
 
     return (
