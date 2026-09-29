@@ -76,3 +76,13 @@ def test_week_for_date_sorts_a_multi_week_span_of_real_dates():
     assert nfl_calendar.week_for_date(kickoff + timedelta(days=6), season) == 2
     assert nfl_calendar.week_for_date(kickoff + timedelta(days=7), season) == 2
     assert nfl_calendar.week_for_date(kickoff + timedelta(days=21), season) == 4
+
+
+def test_season_week_for_date_is_none_before_week_one():
+    from datetime import date
+
+    from dfs import nfl_calendar
+
+    assert nfl_calendar.season_week_for_date(date(2025, 2, 9), 2026) is None
+    assert nfl_calendar.season_week_for_date(date(2026, 9, 13), 2026) == 1
+    assert nfl_calendar.season_week_for_date(date(2026, 9, 20), 2026) == 2

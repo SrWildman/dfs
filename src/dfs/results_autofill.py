@@ -48,7 +48,9 @@ def compute_week_results(entries: list[ContestEntry], season: int) -> dict[int, 
     (the slate hasn't finished scoring)."""
     by_week: dict[int, list[ContestEntry]] = {}
     for e in entries:
-        week = nfl_calendar.week_for_date(e.contest_date.date(), season)
+        week = nfl_calendar.season_week_for_date(e.contest_date.date(), season)
+        if week is None:
+            continue  # prior-season entry -- not part of this season's weeks
         by_week.setdefault(week, []).append(e)
 
     results: dict[int, WeekResults] = {}

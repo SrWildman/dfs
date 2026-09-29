@@ -63,7 +63,7 @@ def entries_for_week(entries: list[ContestEntry], week: int, season: int) -> lis
     whose season-long backfill across every past week's own Results ROW
     is the intended behaviour -- this filter only applies to the ledger
     append, which is scoped to "this week" by design."""
-    return [e for e in entries if nfl_calendar.week_for_date(e.contest_date.date(), season) == week]
+    return [e for e in entries if nfl_calendar.season_week_for_date(e.contest_date.date(), season) == week]
 
 
 def classify_entry(entry: ContestEntry) -> str:
@@ -150,6 +150,25 @@ class BucketSyncResult:
     skipped_full: int = 0
 
 
+def _key_text(value) -> str:
+    """A dedupe key as the string `ContestEntry.entry_key` holds. Keys are
+    read UNFORMATTED: a stray cell format (a `$` currency or comma-grouped
+    number format on a key cell -- seen live on Bankroll's L39/L89) changes
+    a formatted read to "$5,269,229,435.00", which never matches the key and
+    made `week close` append the entry a second time."""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value).strip()
+
+
+def _read_entry_keys(client: SheetsClient, tab: str, key_range: str) -> set[str]:
+    return {
+        _key_text(row[0])
+        for row in client.read_range_unformatted(tab, key_range)
+        if row and _key_text(row[0])
+    }
+
+
 def sync_bucket(
     client: SheetsClient,
     tab: str,
@@ -159,7 +178,7 @@ def sync_bucket(
 ) -> BucketSyncResult:
     key_col = table_cfg.entry_key_column
     key_range = f"{key_col}{table_cfg.first_row}:{key_col}{table_cfg.last_row}"
-    existing_keys = {row[0] for row in client.read_range(tab, key_range) if row and row[0].strip()}
+    existing_keys = _read_entry_keys(client, tab, key_range)
 
     already_synced = sum(1 for e in entries if e.entry_key in existing_keys)
 
@@ -252,7 +271,7 @@ def backfill_entry_keys(
     """
     key_col = table_cfg.entry_key_column
     rows = client.read_range(tab, f"A{table_cfg.first_row}:H{table_cfg.last_row}")
-    keys = client.read_range(tab, f"{key_col}{table_cfg.first_row}:{key_col}{table_cfg.last_row}")
+    keys = client.read_range_unformatted(tab, f"{key_col}{table_cfg.first_row}:{key_col}{table_cfg.last_row}")
 
     by_signature: dict[tuple, list[ContestEntry]] = {}
     for e in entries:
@@ -264,8 +283,8 @@ def backfill_entry_keys(
         if not row or not row[0].strip():
             continue
         row_num = table_cfg.first_row + i
-        existing_key = keys[i][0] if i < len(keys) and keys[i] else ""
-        if existing_key.strip():
+        existing_key = _key_text(keys[i][0]) if i < len(keys) and keys[i] else ""
+        if existing_key:
             continue
         candidates = by_signature.get(_row_signature(row), [])
         if len(candidates) == 1:

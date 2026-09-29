@@ -74,6 +74,18 @@ def week_for_date(d: date, season: int) -> int:
     return max(MIN_WEEK, min(MAX_WEEK, week))
 
 
+def season_week_for_date(d: date, season: int) -> int | None:
+    """Like `week_for_date`, but `None` for a date before `season`'s week-1
+    start instead of clamping it into week 1. A DK contest-history export
+    reaches back years (2021 onward); `week_for_date`'s clamp is right for
+    "what week is today" but sweeps every prior-season entry into week 1
+    when used to bucket an export (Round 5: Season's Week 1 row read
+    +$209.60 Cash / -$699.62 GPP, ~2,900 old entries deep, until this)."""
+    if d < _week_one_start(season):
+        return None
+    return week_for_date(d, season)
+
+
 def current_week(today: date | None = None) -> int:
     today = today or date.today()
     return week_for_date(today, current_season(today))

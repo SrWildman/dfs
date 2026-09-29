@@ -194,6 +194,9 @@ class FakeSheetsClient:
             result.pop()
         return result
 
+    def read_range_unformatted(self, tab, a1_range):
+        return self.read_range(tab, a1_range)
+
     def update_range(self, tab, a1_range, rows):
         import re
 
@@ -348,3 +351,26 @@ def test_backfill_entry_keys_skips_a_row_matching_multiple_entries(table_cfg):
     assert result.backfilled == []
     assert result.ambiguous_rows == [17]
     assert "L" not in client.cells["Bankroll"][17]
+
+
+def test_sync_bucket_dedupes_even_when_a_key_cell_has_a_currency_format(table_cfg):
+    """Live bug: L39 carried a `$` format, so a formatted read gave
+    "$5,269,229,435.00" and `week close` appended the entry twice."""
+
+    class CurrencyFormattedKeys(FakeSheetsClient):
+        def read_range(self, tab, a1_range):
+            rows = super().read_range(tab, a1_range)
+            if a1_range.startswith("L"):
+                return [[f"${int(r[0]):,}.00"] for r in rows]
+            return rows
+
+        def read_range_unformatted(self, tab, a1_range):
+            return super().read_range(tab, a1_range)
+
+    client = CurrencyFormattedKeys()
+    entry = _entry(entry_key="5269229435")
+    first = sync_bucket(client, "Bankroll", table_cfg, [entry], "cash")
+    assert len(first.written_entries) == 1
+    second = sync_bucket(client, "Bankroll", table_cfg, [entry], "cash")
+    assert second.written_entries == []
+    assert second.already_synced == 1
