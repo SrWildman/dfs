@@ -67,7 +67,8 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
   Results, Season, DkSalClean and PlayerPoolRaw have a formula on every row).
   Run this after any structural change, against both sheets. Never writes
   anything. `dfs setup repair-formula-ranges [--sheet-id <id>]` rewrites the
-  gaps it reports.
+  gaps it reports; it also expects Results/Bankroll/Season divisions to carry their
+  empty-state guard (`dfs setup guard-empty-states [--sheet-id <id>]` restores them).
 - `dfs setup sheet --sheet-id <id>` -- the full one-time sheet build (pool
   deck, Player Pool's add-a-player control row, view tabs, EdgeRaw linking,
   filters, protection, styling), in the one order that works; its own docstring

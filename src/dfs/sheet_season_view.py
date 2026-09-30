@@ -32,6 +32,7 @@ by week. E and N-Q are formulas, never written by Python.
 from __future__ import annotations
 
 from dfs.nfl_calendar import MAX_WEEK
+from dfs.sheet_empty_guards import guard_formula
 from dfs.sheets import SheetsClient
 
 HEADER_ROW = 1
@@ -123,14 +124,18 @@ def build_season_grid() -> list[list]:
         f"M{FIRST_ROW}:M{LAST_ROW}",
     )
 
-    rows.append(["Cash", f"=SUM({b})", f"=SUM({g})", f"=B{YTD_CASH_ROW}/C{YTD_CASH_ROW}", "", ""])  # 23
-    rows.append(["GPP", f"=SUM({c})", f"=SUM({h})", f"=B{YTD_GPP_ROW}/C{YTD_GPP_ROW}", "", ""])  # 24
+    rows.append(
+        ["Cash", f"=SUM({b})", f"=SUM({g})", guard_formula(f"=B{YTD_CASH_ROW}/C{YTD_CASH_ROW}"), "", ""]
+    )  # 23
+    rows.append(
+        ["GPP", f"=SUM({c})", f"=SUM({h})", guard_formula(f"=B{YTD_GPP_ROW}/C{YTD_GPP_ROW}"), "", ""]
+    )  # 24
     rows.append(
         [
             "Betting",
             f"=SUM({d})",
             f"=SUM({i})",
-            f"=B{YTD_BETTING_ROW}/C{YTD_BETTING_ROW}",
+            guard_formula(f"=B{YTD_BETTING_ROW}/C{YTD_BETTING_ROW}"),
             f'=SUM({wins})&"-"&SUM({losses})&"-"&SUM({pushes})',
             f'=ROUND(SUM({exp_wins}),1)&" vs "&SUM({wins})',
         ]
@@ -140,7 +145,7 @@ def build_season_grid() -> list[list]:
             "Total",
             f"=SUM({e})",
             f"=SUM({g})+SUM({h})+SUM({i})",
-            f"=B{YTD_TOTAL_ROW}/C{YTD_TOTAL_ROW}",
+            guard_formula(f"=B{YTD_TOTAL_ROW}/C{YTD_TOTAL_ROW}"),
             "",
             "",
         ]
@@ -180,8 +185,13 @@ def add_season_chart(client: SheetsClient, tab: str) -> str:
         domain_a1=f"S{HEADER_ROW}:S{CHART_LAST_ROW}",
         series_a1=[f"{col}{HEADER_ROW}:{col}{CHART_LAST_ROW}" for col in ("T", "U", "V", "W")],
         anchor_cell_a1=CHART_ANCHOR_CELL,
+        plot_hidden_data=True,
     )
-    return f"{tab}: chart data S:W written, chart rebuilt"
+    # The #N/A gaps that make the line stop at the last played week are chart plumbing, not
+    # something to read: hide the helper block. The chart keeps plotting it because of
+    # `plot_hidden_data` above.
+    client.hide_columns(tab, CHART_COLS[0], CHART_COLS[-1])
+    return f"{tab}: chart data S:W written (hidden), chart rebuilt"
 
 
 def build_season_tab(client: SheetsClient, tab: str) -> str:

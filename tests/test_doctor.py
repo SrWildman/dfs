@@ -49,6 +49,9 @@ class FakeDoctorClient:
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:
         return self._rows.get((tab_name, a1_range), [])
 
+    def row_count(self, tab_name: str) -> int:
+        return 30
+
     def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
         """Default: a healthy grid (row N's every cell is `=X{N}`), so existing tests see
         no formula-range findings; a test that wants a gap passes its own grid."""
@@ -421,6 +424,31 @@ def test_run_doctor_flags_a_results_formula_column_with_a_blank_row():
     issues = run_doctor(_formula_check_client({("Results", rng): grid}), _base_config(), title="Week 4")
     (issue,) = [i for i in issues if i.check == "formula-ranges"]
     assert "'Results'" in issue.detail and "row(s) 7 have no formula" in issue.detail
+
+
+def test_run_doctor_flags_an_unguarded_h2h_percent_but_not_the_guarded_one():
+    spec, rng = _range_for("Results")
+    h2h = [i for i, h in spec.columns.items() if h == RESULTS_FORMULA_HEADERS[1]][0]
+    grid = _good_grid(spec)
+    for r in range(spec.first_row, spec.last_row + 1):
+        grid[r - spec.first_row][h2h] = f'=IF(E{r}="","",IFERROR(F{r}/E{r},""))'
+    clean = run_doctor(_formula_check_client({("Results", rng): grid}), _base_config(), title="Week 4")
+    assert [i for i in clean if i.check == "formula-ranges"] == []
+    grid[3][h2h] = "=F5/E5"  # row 5 lost its guard
+    issues = run_doctor(_formula_check_client({("Results", rng): grid}), _base_config(), title="Week 4")
+    (issue,) = [i for i in issues if i.check == "formula-ranges"]
+    assert "row(s) 5 divide with no empty-state guard" in issue.detail
+
+
+def test_run_doctor_flags_unguarded_divisions_on_bankroll_and_season_but_not_results_h2h_twice():
+    cfg = _base_config()
+    tab = "Bankroll"
+    grid = [[f"=X{r}"] for r in range(1, 31)]
+    grid[11] = ["=D12/B7"]  # Weekly Cash %: the classic empty-week #DIV/0!
+    client = FakeDoctorClient(_ALL_GOOD_TABS, {**_lineups_rows()}, formulas={(tab, "A1:Z30"): grid})
+    issues = [i for i in run_doctor(client, cfg, title="Week 4") if i.check == "empty-guards"]
+    (issue,) = issues
+    assert "'Bankroll' column A: row(s) 12" in issue.detail and "guard-empty-states" in issue.detail
 
 
 def test_run_doctor_flags_dksalclean_rows_that_are_missing_or_read_another_row():

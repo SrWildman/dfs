@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dfs.sheet_empty_guards import guard_formula
 from dfs.sheet_style import CRIT_FG, INK_MUTED, OK_FG
 from dfs.sheets import SheetsClient
 
@@ -254,7 +255,7 @@ def build_betting_ledger(client: SheetsClient, tab: str) -> None:
         [
             [
                 "Weekly Betting %",
-                f"=D{SUMMARY_ROW}/B7",
+                guard_formula(f"=D{SUMMARY_ROW}/B7"),
                 "Weekly Betting Cost",
                 entered_formula(FIRST_ROW, LAST_ROW),
                 "Weekly Betting Winnings",

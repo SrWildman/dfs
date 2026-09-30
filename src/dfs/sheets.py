@@ -1565,6 +1565,7 @@ class SheetsClient:
         anchor_cell_a1: str,
         width: int = 600,
         height: int = 300,
+        plot_hidden_data: bool = False,
     ) -> None:
         """Add a `LINE` chart (Season tab's cumulative-net-by-week chart,
         Round 5 item 7d) -- `domain_a1` is the x-axis range (Week), each
@@ -1573,7 +1574,11 @@ class SheetsClient:
         this adds another chart rather than replacing one -- callers that
         rebuild a tab from scratch should not call this on a tab that
         might already have one (no `clear_charts` exists; this is a
-        brand-new tab's one-time build, not a per-sync operation)."""
+        brand-new tab's one-time build, not a per-sync operation).
+
+        `plot_hidden_data=True` sets the chart's "plot hidden rows and columns" option
+        (`hiddenDimensionStrategy: SHOW_ALL`) -- without it a chart whose source columns
+        are hidden draws nothing."""
         sheet, ws = self._ws(tab_name)
         domain_range = a1_range_to_grid_range(domain_a1, ws.id)
         anchor_range = a1_range_to_grid_range(anchor_cell_a1, ws.id)
@@ -1585,6 +1590,7 @@ class SheetsClient:
                 "chart": {
                     "spec": {
                         "title": title,
+                        **({"hiddenDimensionStrategy": "SHOW_ALL"} if plot_hidden_data else {}),
                         "basicChart": {
                             "chartType": "LINE",
                             "legendPosition": "BOTTOM_LEGEND",

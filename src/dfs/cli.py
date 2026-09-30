@@ -22,6 +22,7 @@ from pathlib import Path
 import pandas as pd
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from dfs import nfl_calendar, paths, perf, store
@@ -59,6 +60,7 @@ from dfs.sheet_bankroll_view import (
     compute_weekly_betting_stats,
 )
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
+from dfs.sheet_empty_guards import repair_unguarded
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
 from dfs.sheet_formula_ranges import repair_formula_ranges
 from dfs.sheet_instructions import build_instructions_tab
@@ -80,7 +82,7 @@ from dfs.sheet_pool_resize import fix_color_scale_ranges, resize_player_pool
 from dfs.sheet_pool_usage import write_pool_usage_columns
 from dfs.sheet_protection import protect_workbook
 from dfs.sheet_reorder import migrate_tab_to_designed_order, remove_header_columns, rename_header_column
-from dfs.sheet_season_view import build_season_tab
+from dfs.sheet_season_view import add_season_chart, build_season_tab
 from dfs.sheet_style import (
     EDGE_ROWS,
     POOL_RAW_ROWS,
@@ -170,6 +172,15 @@ app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
 
 console = Console()
+
+
+def _fail_line(tag: str, detail: str) -> str:
+    """A `FAIL [tag] detail` line. Rich reads `[...]` as markup, so an unescaped `[tag]` is
+    swallowed (the tag vanished from every doctor/audit-style failure until this existed);
+    `detail` is escaped too, since it can quote a formula or a range."""
+    return f"[red]FAIL[/red] {escape(f'[{tag}]')} {escape(str(detail))}"
+
+
 log = get_logger("cli")
 
 
@@ -640,6 +651,39 @@ def sheets_repair_formula_ranges(
         console.print("[green]OK[/green] nothing to repair")
     for line in report:
         console.print(f"[green]OK[/green] {line}")
+
+
+@setup_app.command(
+    "guard-empty-states",
+    short_help="Blank instead of #DIV/0!/#N/A on Results, Bankroll and Season when nothing is entered yet.",
+)
+def sheets_guard_empty_states(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Apply to a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Round 5 cleanup item 2 (2026-09-29). Wraps the divisions and averages on Results,
+    Bankroll and Season in a guard that returns a blank when its inputs are empty (`=F2/E2`
+    becomes `=IF(E2="","",IFERROR(F2/E2,""))`), and rebuilds the Season chart with its
+    `#N/A` helper block (S:W) hidden and "plot hidden data" on. Safe to re-run: guarded
+    formulas are left alone. Template first, then the live sheet; run `dfs doctor` after."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Guarding empty states in: [bold]{title}[/bold]\n{url}\n")
+        headers = {t.title: t.header for t in client.list_tabs()}
+        report = repair_formula_ranges(client, cfg, headers) + repair_unguarded(client, cfg)
+        if client.tab_exists(cfg.season.tab):
+            report.append(add_season_chart(client, cfg.season.tab))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in report:
+        console.print(f"[green]OK[/green] {escape(line)}")
 
 
 @setup_app.command(
@@ -1739,7 +1783,7 @@ def sheets_doctor(
         return
 
     for issue in issues:
-        console.print(f"[red]FAIL[/red] [{issue.check}] {issue.detail}")
+        console.print(_fail_line(issue.check, issue.detail))
     raise typer.Exit(code=1)
 
 
@@ -1786,7 +1830,7 @@ def sheets_audit_style(
             continue
         any_issue = True
         for issue in audit.issues:
-            console.print(f"[red]FAIL[/red] [{audit.tab}] {issue}")
+            console.print(_fail_line(audit.tab, issue))
 
     if any_issue:
         raise typer.Exit(code=1)
@@ -2551,7 +2595,7 @@ def week_new(
         raise typer.Exit(code=1) from e
     if issues:
         for issue in issues:
-            console.print(f"[red]FAIL[/red] [{issue.check}] {issue.detail}")
+            console.print(_fail_line(issue.check, issue.detail))
         console.print(
             "\n[red]The new sheet failed structural checks -- stopping before any write.[/red]\n"
             "Fix the sheet (or its config.toml mapping) and re-run, or run "

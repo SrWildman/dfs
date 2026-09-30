@@ -18,6 +18,8 @@ from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import EDGE_COLUMNS
+from dfs.sheet_empty_guards import describe as describe_unguarded
+from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
@@ -66,6 +68,9 @@ class DoctorClient:
         raise NotImplementedError
 
     def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:  # pragma: no cover
+        raise NotImplementedError
+
+    def row_count(self, tab_name: str) -> int:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -313,6 +318,16 @@ def _check_formula_ranges(
     return issues
 
 
+def _check_empty_guards(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
+    """Round 5 cleanup item 2: Results, Bankroll and Season divide and average in
+    places that are empty on a fresh week; an unguarded one shows `#DIV/0!` instead of
+    a blank. Results' per-row `H2H %` is checked with the other per-row formula ranges."""
+    return [
+        DoctorIssue("empty-guards", describe_unguarded(cells))
+        for cells in find_unguarded(client, cfg, tab_titles)
+    ]
+
+
 def run_doctor(
     client: DoctorClient, cfg: Config, *, title: str, check_title: bool = True
 ) -> list[DoctorIssue]:
@@ -366,4 +381,5 @@ def run_doctor(
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
+    issues += _check_empty_guards(client, cfg, tab_titles)
     return issues

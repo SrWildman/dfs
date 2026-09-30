@@ -154,3 +154,28 @@ def test_formula_ranges_derives_rows_and_columns_instead_of_typing_them():
     assert by_tab[PLAYER_POOL_RAW_TAB].columns == {0: "Name", 2: "Pos."}
     assert by_tab[PLAYER_POOL_RAW_TAB].same_row_only is False
     assert column_letter(6) == "G"
+
+
+def _results(rows: dict[int, dict[int, str]]) -> FormulaRange:
+    return FormulaRange("Results", {6: "H2H %"}, 2, 4, guarded=True)
+
+
+def test_a_guarded_range_accepts_the_guarded_formula_and_flags_the_bare_division():
+    tab = {r: {6: f'=IF(E{r}="","",IFERROR(F{r}/E{r},""))'} for r in range(2, 5)}
+    assert find_gaps(FakeClient({"Results": tab}), _results(tab)) == []
+    tab[3][6] = "=F3/E3"  # lost its guard
+    tab[4][6] = ""  # and one is missing altogether -- still caught
+    gaps = find_gaps(FakeClient({"Results": tab}), _results(tab))
+    assert [(g.kind, g.rows) for g in gaps] == [("missing", (4,)), ("unguarded", (3,))]
+    assert "row(s) 3 divide with no empty-state guard" in describe_gap(gaps[1])
+
+
+def test_repair_guards_an_unguarded_row_in_place_and_guards_rows_it_rewrites(monkeypatch):
+    tab = {2: {6: '=IF(E2="","",IFERROR(F2/E2,""))'}, 3: {6: "=F3/E3"}, 4: {}}
+    client = FakeClient({"Results": tab})
+    spec = _results(tab)
+    monkeypatch.setattr(mod, "formula_ranges", lambda cfg, headers: [spec])
+    repair_formula_ranges(client, _cfg(), {})
+    written = {a1: rows for _, a1, rows in client.updates}
+    assert written["G3:G3"] == [['=IF(E3="","",IFERROR(F3/E3,""))']]
+    assert written["G4:G4"] == [['=IF(E4="","",IFERROR(F4/E4,""))']]

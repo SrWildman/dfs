@@ -9,6 +9,8 @@ copy that lost them looked fine to every existing `dfs doctor` check.
 This module says where such ranges are and finds gaps in them:
 
 * a row with **no formula** (a typed value or nothing);
+* a row whose formula is an **unguarded** division/average (Results' `H2H %`) -- it
+  would show `#DIV/0!` on an empty week; see `sheet_empty_guards`;
 * a row whose formula **points at a different row** (`=DKSalRaw!A3083` on row 1000) --
   on Results, Season and DkSalClean row N reads row N, so a formula reading another
   row's cells is a leftover from an old row deletion. (Not checked on PlayerPoolRaw,
@@ -29,6 +31,7 @@ from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import ZONE_LABELS
+from dfs.sheet_empty_guards import guard_formula, is_unguarded
 from dfs.sheet_links import PLAYER_POOL_RAW_BLOCK, PLAYER_POOL_RAW_TAB
 from dfs.sheet_season_view import FIRST_ROW as SEASON_FIRST_ROW
 from dfs.sheet_season_view import LAST_ROW as SEASON_LAST_ROW
@@ -60,6 +63,9 @@ class FormulaRange:
     # order (row 16 reads DkSalClean row 17, and so on) -- deliberate, self-consistent per
     # row -- so only "a formula is there" is checkable.
     same_row_only: bool = True
+    # True where a division/average must carry its empty-state guard (`sheet_empty_guards`):
+    # Results' `H2H %` reads `=IF(E2="","",IFERROR(F2/E2,""))`, not `=F2/E2`.
+    guarded: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,7 +74,7 @@ class FormulaGap:
     column: str  # letter
     header: str
     rows: tuple[int, ...]
-    kind: str  # "missing" | "wrong-row"
+    kind: str  # "missing" | "wrong-row" | "unguarded"
 
 
 def referenced_rows(formula: str) -> set[int]:
@@ -99,7 +105,9 @@ def formula_ranges(cfg: Config, headers_by_tab: dict[str, list[str]]) -> list[Fo
 
     if cfg.results.tab in headers_by_tab:
         cols = _columns_from_header(headers_by_tab[cfg.results.tab], RESULTS_FORMULA_HEADERS)
-        ranges.append(FormulaRange(cfg.results.tab, cols, cfg.results.first_row, cfg.results.last_row))
+        ranges.append(
+            FormulaRange(cfg.results.tab, cols, cfg.results.first_row, cfg.results.last_row, guarded=True)
+        )
     if cfg.season.tab in headers_by_tab:
         cols = _columns_from_header(headers_by_tab[cfg.season.tab], SEASON_FORMULA_HEADERS)
         ranges.append(FormulaRange(cfg.season.tab, cols, SEASON_FIRST_ROW, SEASON_LAST_ROW))
@@ -138,17 +146,22 @@ def find_gaps(client, spec: FormulaRange) -> list[FormulaGap]:
     for col, header in sorted(spec.columns.items()):
         missing: list[int] = []
         wrong: list[int] = []
+        unguarded: list[int] = []
         for r in range(spec.first_row, spec.last_row + 1):
             cell = _grid_cell(grid, r - spec.first_row, col)
             if not cell.startswith("="):
                 missing.append(r)
             elif spec.same_row_only and referenced_rows(cell) - {r}:
                 wrong.append(r)
+            elif spec.guarded and is_unguarded(cell):
+                unguarded.append(r)
         letter = column_letter(col)
         if missing:
             gaps.append(FormulaGap(spec.tab, letter, header, tuple(missing), "missing"))
         if wrong:
             gaps.append(FormulaGap(spec.tab, letter, header, tuple(wrong), "wrong-row"))
+        if unguarded:
+            gaps.append(FormulaGap(spec.tab, letter, header, tuple(unguarded), "unguarded"))
     return gaps
 
 
@@ -164,7 +177,11 @@ def _runs(rows: tuple[int, ...] | list[int]) -> list[tuple[int, int]]:
 
 def describe_gap(gap: FormulaGap) -> str:
     spans = ", ".join(f"{a}" if a == b else f"{a}-{b}" for a, b in _runs(gap.rows))
-    what = "have no formula" if gap.kind == "missing" else "hold a formula pointing at another row"
+    what = {
+        "missing": "have no formula",
+        "wrong-row": "hold a formula pointing at another row",
+        "unguarded": "divide with no empty-state guard (`dfs setup repair-formula-ranges`)",
+    }[gap.kind]
     return f"{gap.tab!r} column {gap.column} ({gap.header}): row(s) {spans} {what}"
 
 
@@ -178,9 +195,22 @@ def repair_formula_ranges(client, cfg: Config, headers_by_tab: dict[str, list[st
         if gaps:
             grid = read_range_grid(client, spec)
             by_col: dict[str, set[int]] = {}
-            for gap in gaps:
-                by_col.setdefault(gap.column, set()).update(gap.rows)
             index_of = {column_letter(c): c for c in spec.columns}
+            for gap in gaps:
+                if gap.kind == "unguarded":
+                    # Keep the row's own formula, just add the guard.
+                    col = index_of[gap.column]
+                    for a, b in _runs(gap.rows):
+                        rows = [
+                            [guard_formula(_grid_cell(grid, r - spec.first_row, col))]
+                            for r in range(a, b + 1)
+                        ]
+                        client.update_range(spec.tab, f"{gap.column}{a}:{gap.column}{b}", rows)
+                        report.append(
+                            f"{spec.tab}!{gap.column}{a}:{gap.column}{b} guarded, e.g. {rows[0][0]}"
+                        )
+                    continue
+                by_col.setdefault(gap.column, set()).update(gap.rows)
             for letter, bad_rows in sorted(by_col.items()):
                 col = index_of[letter]
                 good = [
@@ -195,6 +225,8 @@ def repair_formula_ranges(client, cfg: Config, headers_by_tab: dict[str, list[st
                     pattern_row = max((r for r in good if r < a), default=min(good))
                     pattern = _grid_cell(grid, pattern_row - spec.first_row, col)
                     rows = [[shift_rows(pattern, pattern_row, r)] for r in range(a, b + 1)]
+                    if spec.guarded:
+                        rows = [[guard_formula(row[0])] for row in rows]
                     client.update_range(spec.tab, f"{letter}{a}:{letter}{b}", rows)
                     report.append(f"{spec.tab}!{letter}{a}:{letter}{b} rewritten from row {pattern_row}")
         if spec.clear_tail:

@@ -37,6 +37,15 @@ cells doctor flagged, from the nearest healthy row.
 
 ---
 
+**Results, Bankroll or Season shows `#DIV/0!` on an empty week, or `dfs doctor` reports `empty-guards`.**
+Cause: a division or average lost its empty-state guard (a hand edit, or a template copy from
+before the guards existed), so it errors until something is entered.
+Fix: `dfs setup guard-empty-states --sheet-id <template>`, then the same on the live sheet, then
+`dfs doctor` on both. Formulas already guarded are left alone. Season's hidden `T:W` `#N/A` cells
+are deliberate (they make the chart stop at the last played week).
+
+---
+
 **Player Pool is empty (or a position block is empty).**
 Cause: nothing's been added to the pool for that position yet.
 Fix: three ways in -- set a player's Pool dropdown on EdgeRaw, type a

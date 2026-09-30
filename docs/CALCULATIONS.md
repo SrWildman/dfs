@@ -1268,8 +1268,8 @@ a row's `E` and `B+C+D` were ever briefly out of sync mid-edit.
 
 **Year-to-date ROI** (`D23:D26`): `Net / Risked` for that bucket, over
 the full season range (`SUM(B2:B19)/SUM(G2:G19)` for Cash, etc.) --
-`#DIV/0!` before any risked amount exists, same convention the Bankroll
-tab's own Weekly `%` cells already use.
+blank before any risked amount exists (`=IF(C23="","",IFERROR(B23/C23,""))`) --
+see "Empty weeks read blank" below.
 
 **Betting's YTD record/expected-vs-actual** (`E25`/`F25`): `SUM` of the
 weekly `Wins`/`Losses`/`Pushes`/`Exp. Wins` columns (`J`-`M`) -- these are
@@ -1281,3 +1281,21 @@ close` time -- a pure-Python re-derivation of the same arithmetic
 `record_formula`/`expected_vs_actual_formula` compute on the sheet,
 verified against the same real 4-bet example (win/loss/push/pending) used
 to verify those formulas live.
+
+## Empty weeks read blank, not an error (Round 5 cleanup, 2026-09-29)
+
+Every division and average on Results, Bankroll and Season carries a guard that returns
+`""` when its inputs are empty, so a fresh week or an empty ledger shows blanks instead of
+`#DIV/0!`:
+
+- a division by a cell, `a/b`, is `=IF(b="","",IFERROR(a/b,""))` -- a blank denominator gives
+  a blank, and a denominator that is 0 falls through to the `IFERROR`
+  (Results `H2H %`, Bankroll `Weekly Net %`/`Weekly Cash %`/`Weekly GPP %`/`Weekly Betting %`,
+  the ledgers' `% Paid`/`Place %`, Season's YTD `ROI`);
+- a bare average is `=IF(COUNT(rng)=0,"",AVERAGE(rng))` (Results' totals row).
+
+The one deliberate exception is Season's chart helper block `S:W`: `#N/A` there is what makes
+the line chart stop at the last played week instead of drawing a flat line, so it stays, but
+the block is hidden and the chart plots hidden data. `dfs doctor` flags a division that has
+lost its guard (`empty-guards`, and `formula-ranges` for Results' `H2H %` rows);
+`dfs setup guard-empty-states` puts it back.

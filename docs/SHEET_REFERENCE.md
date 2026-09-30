@@ -784,7 +784,8 @@ A season-level results log (Week, Cash Pts/Line, H2H Entered/Win, Red/
 Blue/Black), one row per week -- unlike every other tab here, this one is
 **not** reset by a new weekly sheet copy. Each row's `Cash Results`
 (column D) and `H2H %` (column G) are formulas already built in
-(`=IF(B, B>C, "")` / `=F/E`); every other column is typed by hand. `dfs
+(`=IF(B, B>C, "")` / `=IF(E="","",IFERROR(F/E,""))` -- blank, not `#DIV/0!`, on a week with no
+H2H entries); every other column is typed by hand. `dfs
 week new` copies the typed-value columns from the outgoing sheet to the
 new one (config.toml's `[results]` table controls the row range) so this
 log keeps accumulating across weekly copies instead of resetting to empty
@@ -815,7 +816,9 @@ Columns: `Week` | `Cash Net` | `GPP Net` | `Betting Net` | `Total Net`
 (formula, `=B+C+D`) | `Ending Bankroll` | `Cash Risked` | `GPP Risked` |
 `Betting Risked` | `Betting Wins`/`Losses`/`Pushes` | `Betting Exp. Wins`
 | four cumulative columns (`Cum. Cash`/`GPP`/`Betting`/`Total`, running
-`SUM`s -- chart source only, not meant to be read directly).
+`SUM`s -- chart source only, not meant to be read directly). The chart's own helper block,
+`S:W` (Week 0 baseline, then each week's cumulative net, `#N/A` for weeks not played yet), is
+hidden; the chart is set to plot hidden data so it still draws.
 
 **Cash/GPP** (`B`/`C`, plus `G`/`H` risked): backfilled the same way
 Results is, from the same DK contest-history export -- `dfs bankroll sync

@@ -3230,9 +3230,9 @@ min/max, and a column with no negatives has its min AT the zero midpoint.
 anchor formulas MUST use absolute references: Sheets shifts a relative formula per row,
 and a first attempt left every zero below the column's one non-zero value green (its
 window contained no non-zero value, so the anchors collapsed onto the midpoint) --
-caught only by looking at the sheet. **Same hazard, not fixed:** the zero-exclusion
-`MINIFS`/`MEDIAN(FILTER(...))` anchors on the remaining gradient columns (`Own%`,
-`Exposure`, `Used`, ...) are also relative (`_zero_exclude_formula`).
+caught only by looking at the sheet. The zero-exclusion anchors behind the other
+gradients (`Own%`, `Exposure`, `Used`, ...) had the same hazard and were made absolute in
+the Round 5 cleanup (below).
 
 **Item 2 -- `dfs doctor` guards hand-built per-row formula ranges.** New
 `sheet_formula_ranges.py`: Results' `Cash Results`/`H2H %` (rows from
@@ -3278,6 +3278,47 @@ now describes the bands. **Item 0** -- a third-party site's name removed from
 | 2026-09-29 | `Board` | Slate shape spills filtered to games with players. | 16 game rows max, all games. | Same 16-row block, main-slate games only. | Template, Week 4 | `sheet_views.build_board` (`slate_live`). |
 | 2026-09-29 | `Lineups` | Hidden `Player Key` column appended after `CeilVal%ile`; repeated header rows resynced. | 49 columns (`GameID` at `AD`). | 50 columns; `Player Key` last, hidden. | Template, Week 4 | `sheet_columns.LINEUPS_COLUMN_ORDER`, `sheet_lineup_keys.LINEUP_KEY_HEADER`. |
 | 2026-09-29 | `DkSalClean`, `PlayerPoolRaw`, `Results` | Formula ranges regularised (see item 2). | Ragged extents; DkSalClean tail read +2083 rows. | Every column rows 2-987 (Results 2-20); nothing below. | Template, Week 4 | `sheet_formula_ranges.formula_ranges`, `PLAYER_POOL_RAW_BLOCK`. |
+
+## Round 5 cleanup (2026-09-29)
+
+**Item 1 -- zero-exclusion anchors are absolute too.** `sheet_color_scales.
+_zero_exclude_formula` (the `MINIFS` min and `MEDIAN(FILTER(...))` mid behind `Own%`,
+`Exposure`, `Used` and every other gradient) now runs each range through `_absolute`, the
+same fix as `diverging_anchor_kwargs`: Sheets shifts a relative reference inside a
+colour-scale anchor per row, so a cell far down a column evaluated a window that had slid
+off the data. `tests/test_sheet_color_scales.py` asserts `$` on every reference the dispatch
+emits, for every field. Verified on the template with three test lineups (removed
+afterwards): Exposure's lowest non-zero value (33.3%) took the green end of its reversed
+scale, 50.0% sat mid-scale (yellow) at the top row AND the bottom row of the column, and
+66.7% took the red end. Week 4's Lineups is empty, so it has no Exposure data to look at;
+`Own%` waits on ownership.
+
+**Item 2 -- blank instead of an error on an empty week (Sam approved).** New
+`sheet_empty_guards.py`: `guard_formula` wraps a division by a cell as
+`=IF(den="","",IFERROR(a/b,""))` and a bare `=AVERAGE(rng)` as
+`=IF(COUNT(rng)=0,"",AVERAGE(rng))`; a formula already starting `IF(`/`IFERROR(` is left
+alone, so it is idempotent. `dfs setup guard-empty-states [--sheet-id]` applies it to
+Results (`H2H %` rows and the totals row), Bankroll (`Weekly Net %`, `Weekly Cash/GPP/Betting
+%`, `Weekly Budget Usage`, `% Budget Remaining`, `Net %`, and the Cash/GPP ledgers' `% Paid`
+and `Place %`) and Season (YTD `ROI`). The two formulas this repo itself writes use the same
+function (`sheet_season_view.build_season_grid`, `sheet_bankroll_view.build_betting_ledger`).
+`sheet_formula_ranges` now expects the guarded text on Results' per-row range (gap kind
+`unguarded`; a missing formula is still reported as `missing`), and a new doctor check,
+`empty-guards`, scans Results (outside that range), Bankroll and Season. Season's `#N/A`
+chart gaps are kept (they are what stops the line at the last played week) but the helper
+block `S:W` is now hidden and the chart is created with `hiddenDimensionStrategy: SHOW_ALL`
+("plot hidden data"), so it still draws (`SheetsClient.add_line_chart(plot_hidden_data=True)`).
+Verified by reading the template back (empty week, empty ledger): zero error values on
+Results, Bankroll and Season apart from the hidden `T:W` gaps; Week 4 before/after: no
+non-error cell changed value, and the chart still starts at 0 and stops at week 3.
+
+**Item 3 -- doctor's `FAIL [check]` tag.** rich treated `[check-name]` as markup and dropped
+it; `cli._fail_line` escapes the tag and the detail for doctor and audit-style.
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-09-29 | `Season` | Chart helper block `S:W` hidden; chart set to plot hidden data. | `S:W` visible. | `S:W` hidden (`R` visible); one chart, `SHOW_ALL`. | Template, Week 4 | `sheet_season_view.add_season_chart`, `sheets.add_line_chart(plot_hidden_data=)`. |
+| 2026-09-29 | `Results`, `Bankroll`, `Season` | Divisions/averages wrapped in empty-state guards (formula text only; no cell moved). | `=F2/E2`, `=AVERAGE(B2:B20)`, ... | `=IF(E2="","",IFERROR(F2/E2,""))`, ... | Template, Week 4 | `sheet_empty_guards.guard_formula`, `sheet_formula_ranges.FormulaRange.guarded`. |
 
 ## Commit messages / PR descriptions
 

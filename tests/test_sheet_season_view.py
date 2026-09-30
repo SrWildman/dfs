@@ -7,6 +7,7 @@ from dfs.sheet_season_view import (
     YTD_CASH_ROW,
     YTD_GPP_ROW,
     YTD_TOTAL_ROW,
+    add_season_chart,
     build_season_grid,
 )
 
@@ -43,7 +44,8 @@ def test_ytd_rows_sum_the_full_week_range():
     cash_row = grid[YTD_CASH_ROW - 1]
     assert cash_row[0] == "Cash"
     assert cash_row[1] == f"=SUM(B{FIRST_ROW}:B{LAST_ROW})"
-    assert cash_row[3] == f"=B{YTD_CASH_ROW}/C{YTD_CASH_ROW}"
+    # guarded: a season with nothing risked yet reads blank, not #DIV/0!
+    assert cash_row[3] == f'=IF(C{YTD_CASH_ROW}="","",IFERROR(B{YTD_CASH_ROW}/C{YTD_CASH_ROW},""))'
 
     gpp_row = grid[YTD_GPP_ROW - 1]
     assert gpp_row[0] == "GPP"
@@ -55,3 +57,37 @@ def test_ytd_rows_sum_the_full_week_range():
 
     total_row = grid[YTD_TOTAL_ROW - 1]
     assert total_row[0] == "Total"
+
+
+def test_every_ytd_roi_cell_is_guarded_so_an_empty_season_reads_blank():
+    grid = build_season_grid()
+    for row in (YTD_CASH_ROW, YTD_GPP_ROW, YTD_BETTING_ROW, YTD_TOTAL_ROW):
+        assert grid[row - 1][3] == f'=IF(C{row}="","",IFERROR(B{row}/C{row},""))'
+
+
+class _ChartClient:
+    def __init__(self):
+        self.calls = []
+
+    def update_range(self, *a, **k):
+        self.calls.append(("update_range", a))
+
+    def format_range(self, *a, **k):
+        pass
+
+    def delete_charts(self, *a, **k):
+        self.calls.append(("delete_charts", a))
+
+    def add_line_chart(self, *a, **k):
+        self.calls.append(("add_line_chart", k))
+
+    def hide_columns(self, tab, first, last, **k):
+        self.calls.append(("hide_columns", (tab, first, last)))
+
+
+def test_the_chart_helper_block_is_hidden_and_the_chart_still_plots_it():
+    client = _ChartClient()
+    add_season_chart(client, "Season")
+    chart = next(k for name, k in client.calls if name == "add_line_chart")
+    assert chart["plot_hidden_data"] is True  # else hiding S:W would blank the chart
+    assert ("hide_columns", ("Season", "S", "W")) in client.calls
