@@ -232,7 +232,7 @@ def test_apply_field_color_scales_excludes_zero_for_ownership_columns():
     scale_call = calls[1]
     assert scale_call[1] == "B2:B100"
     assert scale_call[2]["min_type"] == "NUMBER"
-    assert scale_call[2]["min_value"] == '=MINIFS(B2:B100,B2:B100,"<>0")'
+    assert scale_call[2]["min_value"] == '=MINIFS($B$2:$B$100,$B$2:$B$100,"<>0")'
 
     bool_call = calls[2]
     assert bool_call[1] == "B2:B100"
@@ -1524,7 +1524,7 @@ def test_apply_grouped_color_scales_keeps_the_grey_zero_chip_and_the_warm_scale_
     apply_grouped_color_scales(client, "Player Pool", client._header, [(3, 12), (14, 33)])
 
     scales = dict(client.color_scale_calls)
-    assert scales["B3:B33"]["min_value"] == '=MINIFS(B3:B33,B3:B33,"<>0")'
+    assert scales["B3:B33"]["min_value"] == '=MINIFS($B$3:$B$33,$B$3:$B$33,"<>0")'
     assert {a1 for a1, _ in client.boolean_rule_calls} == {"B3:B33"}
 
 

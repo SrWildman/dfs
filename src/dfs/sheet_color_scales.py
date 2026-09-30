@@ -172,9 +172,14 @@ def _zero_exclude_formula(fn: str, ranges: str | list[str]) -> str:
     below. A list of ranges (`apply_edge_position_scales`'s own multi-
     range calls, one position's rows scattered across several contiguous
     runs) combines every run's own non-zero values into the SAME
-    computation rather than picking a min/median of any one run alone."""
+    computation rather than picking a min/median of any one run alone.
+
+    Every range goes through `_absolute`: Sheets shifts a RELATIVE reference inside a
+    colour-scale anchor formula per row (see `diverging_anchor_kwargs`), so a cell far
+    down the column would evaluate a window that has slid off the data."""
     if isinstance(ranges, str):
         ranges = [ranges]
+    ranges = [_absolute(r) for r in ranges]
     if fn == "MIN":
         parts = [f'MINIFS({r},{r},"<>0")' for r in ranges]
         return f"MIN({','.join(parts)})" if len(parts) > 1 else parts[0]

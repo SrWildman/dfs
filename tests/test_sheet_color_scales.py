@@ -14,6 +14,7 @@ from dfs.sheet_color_scales import (
     RANK_BANDS,
     ZERO_EXCLUDED_COLUMNS,
     ZERO_GREY_BG,
+    _zero_exclude_formula,
     band_rule_specs,
     column_rule_specs,
     diverging_anchor_kwargs,
@@ -177,3 +178,29 @@ def test_every_diverging_field_gets_the_symmetric_anchors_and_keeps_its_zero_mid
         assert grad["mid_type"] == "NUMBER" and grad["mid_value"] == "0"
         assert grad["min_value"].startswith("=-MAX(MAX($K$2:$K$50)")
         assert grad["max_value"].startswith("=MAX(MAX($K$2:$K$50)")
+
+
+def _every_reference_is_absolute(formula: str) -> bool:
+    """No bare `K2`/`K2:K19`/`$K2` left: every cell reference has `$` on column AND row."""
+    import re
+
+    refs = re.findall(r"(?<![A-Za-z0-9_$])\$?[A-Z]{1,3}\$?\d+", formula)
+    return bool(refs) and all(re.fullmatch(r"\$[A-Z]{1,3}\$\d+", r) for r in refs)
+
+
+def test_zero_exclude_anchors_use_absolute_references_or_sheets_shifts_them_per_row():
+    assert _zero_exclude_formula("MIN", "K2:K19") == 'MINIFS($K$2:$K$19,$K$2:$K$19,"<>0")'
+    assert _zero_exclude_formula("MEDIAN", "K2:K19") == "MEDIAN(FILTER($K$2:$K$19,$K$2:$K$19<>0))"
+    multi = ["B3:B12", "B14:B33"]  # one position's rows across several runs
+    assert _every_reference_is_absolute(_zero_exclude_formula("MIN", multi))
+    assert _every_reference_is_absolute(_zero_exclude_formula("MEDIAN", multi))
+
+
+@pytest.mark.parametrize("name", sorted(FIELD_COLOR_SCALES))
+def test_every_gradient_anchor_formula_the_dispatch_emits_is_absolute(name):
+    grads, _ = column_rule_specs(name, "K", 2, 19)
+    for grad in grads:
+        for key in ("min_value", "mid_value", "max_value"):
+            value = grad.get(key)
+            if isinstance(value, str) and value.startswith("="):
+                assert _every_reference_is_absolute(value), (name, key, value)
