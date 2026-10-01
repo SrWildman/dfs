@@ -827,16 +827,18 @@ class SheetsClient:
             "startIndex": first_row - 1,
             "endIndex": last_row,
         }
-        requests = [{"addDimensionGroup": {"range": dimension_range}}]
-        if collapsed:
-            requests.append(
-                {
-                    "updateDimensionGroup": {
-                        "dimensionGroup": {"range": dimension_range, "depth": 1, "collapsed": True},
-                        "fields": "collapsed",
-                    }
+        # Always state the collapsed flag, both ways: a new group can come back already
+        # collapsed (its state is not guaranteed to start open), so `collapsed=False` has to
+        # say so explicitly or "expanded by default" depends on what was there before.
+        requests = [
+            {"addDimensionGroup": {"range": dimension_range}},
+            {
+                "updateDimensionGroup": {
+                    "dimensionGroup": {"range": dimension_range, "depth": 1, "collapsed": collapsed},
+                    "fields": "collapsed",
                 }
-            )
+            },
+        ]
         sheet.batch_update({"requests": requests})
 
     # ------------------------------------------------------------------
@@ -944,6 +946,31 @@ class SheetsClient:
                                 "endIndex": grid_range["endColumnIndex"],
                             },
                             "properties": {"hiddenByUser": hidden},
+                            "fields": "hiddenByUser",
+                        }
+                    }
+                ]
+            }
+        )
+
+    def unhide_rows(self, tab_name: str, first_row: int, last_row: int) -> None:
+        """Show every row in `first_row`..`last_row` (1-indexed, inclusive). Deleting a
+        collapsed row group does NOT reopen its rows (they stay `hiddenByUser`), so a rebuild
+        that wants a section open has to unhide explicitly -- found on the template,
+        2026-09-30, when `collapsed=False` still left the Board's old collapsed sections shut."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "ROWS",
+                                "startIndex": first_row - 1,
+                                "endIndex": last_row,
+                            },
+                            "properties": {"hiddenByUser": False},
                             "fields": "hiddenByUser",
                         }
                     }

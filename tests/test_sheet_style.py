@@ -52,6 +52,7 @@ from dfs.sheet_style import (
 )
 from dfs.sheet_views import (
     BOARD_CHALK_HEADER_ROW,
+    BOARD_LAST_ROW,
     BOARD_LEADERS_FIRST_ROW,
     BOARD_LEADERS_LAST_ROW,
     BOARD_LEADERS_PCT_COL_INDEX,
@@ -763,6 +764,7 @@ class FakeBoardClient:
         self._present = present
         self.row_group_calls: list[tuple[int, int, bool]] = []
         self.cleared_row_groups = False
+        self.unhidden_rows: list[tuple[int, int]] = []
         self.format_calls: list[tuple[str, dict]] = []
         self.freeze_calls: list[int] = []
         self.width_calls: list[dict] = []
@@ -781,6 +783,9 @@ class FakeBoardClient:
 
     def clear_row_groups(self, tab_name: str) -> None:
         self.cleared_row_groups = True
+
+    def unhide_rows(self, tab_name: str, first_row: int, last_row: int) -> None:
+        self.unhidden_rows.append((first_row, last_row))
 
     def group_rows(self, tab_name: str, first_row: int, last_row: int, *, collapsed: bool = False) -> None:
         self.row_group_calls.append((first_row, last_row, collapsed))
@@ -817,28 +822,46 @@ def test_style_board_clears_existing_row_groups_before_regrouping():
     assert client.cleared_row_groups is True
 
 
-def test_style_board_leaves_queue_and_slate_shape_expanded():
+def test_style_board_leaves_every_section_expanded():
+    # Sam, 2026-09-30: all Board categories open by default.
     client = FakeBoardClient()
     style_board(client)
     grouped_ranges = {(first, last): collapsed for first, last, collapsed in client.row_group_calls}
     assert grouped_ranges[(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW)] is False
     assert grouped_ranges[(BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW)] is False
+    assert client.row_group_calls, "sections must still be grouped so they can be collapsed"
+    assert not any(collapsed for _, _, collapsed in client.row_group_calls)
 
 
-def test_style_board_collapses_everything_after_slate_shape():
+def test_style_board_groups_leaders_from_the_sublabel_row_and_the_chalk_placeholder():
     client = FakeBoardClient()
     style_board(client)
     grouped_ranges = {(first, last): collapsed for first, last, collapsed in client.row_group_calls}
-    # PROMPT_BOARD_FIXES.md item 2: the group now starts at the new
-    # sub-label row (added right after the section header, before the
-    # column header), not the column header row itself, so collapsing the
-    # section hides the sub-label too.
-    assert grouped_ranges[(BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW)] is True
-    # Chalk map's one placeholder row is grouped/collapsed too, even
-    # though it has no separate column-header row of its own.
-    assert any(
-        collapsed and first == BOARD_CHALK_HEADER_ROW + 1 for first, _, collapsed in client.row_group_calls
-    )
+    # PROMPT_BOARD_FIXES.md item 2: the group starts at the sub-label row (right after the
+    # section header), not the column header row, so collapsing hides the sub-label too.
+    assert (BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW) in grouped_ranges
+    # Chalk map's one placeholder row is grouped too, though it has no column-header row.
+    assert any(first == BOARD_CHALK_HEADER_ROW + 1 for first, _, _ in client.row_group_calls)
+
+
+def test_style_board_unhides_rows_a_collapsed_group_left_hidden():
+    # Deleting a collapsed row group leaves its rows hidden, so "expanded by default" needs an
+    # explicit unhide over the whole Board, not just collapsed=False on the new groups.
+    client = FakeBoardClient()
+    style_board(client)
+    assert client.unhidden_rows and client.unhidden_rows[0][0] == 1
+    assert client.unhidden_rows[0][1] >= BOARD_LAST_ROW
+
+
+def test_style_board_resets_stale_alignment_and_number_format_first():
+    # Week 4, 2026-09-30: a few Leaders rows kept an explicit LEFT alignment (and spacer columns
+    # a "$" format) from an earlier layout. The whole-tab reset must unset both (None), not just
+    # repaint fill and font.
+    client = FakeBoardClient()
+    style_board(client)
+    reset = client.format_calls[0][1]
+    assert reset["horizontalAlignment"] is None
+    assert reset["numberFormat"] is None
 
 
 def test_style_board_freezes_only_the_title_and_summary_banner():

@@ -830,7 +830,8 @@ def test_group_rows_not_collapsed_by_default(cfg, monkeypatch, tmp_path):
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
     client.group_rows("T", 5, 12)
     ws = fake_sheet._worksheets["T"]
-    assert ws.dimension_group_update_calls == []
+    # The flag is stated explicitly even when open: a new group can come back already collapsed.
+    assert [u["dimensionGroup"]["collapsed"] for u in ws.dimension_group_update_calls] == [False]
     assert ws.row_groups[0]["collapsed"] is False
 
 

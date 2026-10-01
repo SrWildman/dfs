@@ -348,8 +348,8 @@ def build_board(
     """Phase 6, Part 3 (2026-09-22): rebuilt from three ranked player
     panels (a question Sam already answered the moment he ticked his
     pool -- "it ranks 744 players") into one tab, seven sections, each a
-    collapsible row group (Queue and Slate shape open by default,
-    everything else collapsed). See `docs/planning/PROMPT_PHASE6.md` Part 3 and
+    collapsible row group (all open by default, since
+    2026-09-30). See `docs/planning/PROMPT_PHASE6.md` Part 3 and
     7.6 for the spec; row positions come from the `BOARD_*` constants
     above, shared with `sheet_style.style_board`.
 

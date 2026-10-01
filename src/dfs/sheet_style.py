@@ -2353,8 +2353,8 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     `sheet_views`' own `BOARD_*` constants -- the single source of truth
     `build_board` writes against, imported here rather than re-counted by
     hand so the two can't drift the way EdgeRaw's column order once did.
-    Queue and Slate shape are grouped but left expanded (open by default,
-    per spec); everything after is grouped AND collapsed.
+    Every section is grouped and left EXPANDED (Sam, 2026-09-30: all Board
+    categories open by default; the +/- controls still collapse them).
 
     PROMPT_BOARD_FIXES.md items 2/3/6 (2026-09-25): a sub-label row above
     each Leaders block naming its own sort, a thin top border between
@@ -2369,6 +2369,8 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         return f"{tab}: not present -- skipped"
     client.clear_conditional_formats(tab)
     client.clear_row_groups(tab)
+    # Deleting a collapsed group leaves its rows hidden; open everything, then regroup.
+    client.unhide_rows(tab, 1, BOARD_LAST_ROW + 10)
     # The pre-rebuild 3-panel Board painted plain (non-conditional)
     # background fills on spacer columns E/J -- `clear_conditional_
     # formats` only clears conditional-format RULES, not a plain fill
@@ -2388,12 +2390,18 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     # dark section-header rows left white bold text behind; when the rebuilt sections'
     # rows moved, real player rows landed on those stale rows and rendered white-on-white
     # -- invisible, which looked exactly like holes in the Board (found live, Week 4).
+    # Alignment and number format are cleared the same way (None = unset): a stale explicit
+    # LEFT on a few Leaders rows and stray "$" formats on spacer columns survived the old
+    # layout the same way (found Week 4, 2026-09-30: rows that sat left-aligned while their
+    # neighbours sat right-aligned). Every section below re-applies what it needs.
     client.format_range(
         tab,
         f"A1:{last_visible_col}{BOARD_LAST_ROW + 10}",
         {
             "backgroundColor": WHITE,
             "textFormat": {"foregroundColor": INK, "bold": False, "italic": False, "fontSize": 10},
+            "horizontalAlignment": None,
+            "numberFormat": None,
         },
     )
     client.set_column_widths(
@@ -2466,22 +2474,22 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         {"textFormat": {"italic": True, "foregroundColor": INK_MUTED, "fontSize": 9}},
     )
     client.format_range(tab, f"A{BOARD_LEADERS_COLHEADER_ROW}:I{BOARD_LEADERS_COLHEADER_ROW}", _SUBHEAD_FMT)
-    client.group_rows(tab, BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW, collapsed=True)
+    client.group_rows(tab, BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW, collapsed=False)
     _section(
-        BOARD_PUNT_HEADER_ROW, BOARD_PUNT_COLHEADER_ROW, BOARD_PUNT_LAST_ROW, last_col="D", collapsed=True
+        BOARD_PUNT_HEADER_ROW, BOARD_PUNT_COLHEADER_ROW, BOARD_PUNT_LAST_ROW, last_col="D", collapsed=False
     )
     _section(
         BOARD_STACK_HEADER_ROW,
         BOARD_STACK_COLHEADER_ROW,
         BOARD_STACK_LAST_ROW,
         last_col=last_visible_col,
-        collapsed=True,
+        collapsed=False,
     )
     _section(
-        BOARD_POOL_HEADER_ROW, BOARD_POOL_COLHEADER_ROW, BOARD_POOL_LAST_ROW, last_col="I", collapsed=True
+        BOARD_POOL_HEADER_ROW, BOARD_POOL_COLHEADER_ROW, BOARD_POOL_LAST_ROW, last_col="I", collapsed=False
     )
     client.format_range(tab, f"A{BOARD_CHALK_HEADER_ROW}:I{BOARD_CHALK_HEADER_ROW}", _PANEL_FMT)
-    client.group_rows(tab, BOARD_CHALK_HEADER_ROW + 1, BOARD_CHALK_HEADER_ROW + 1, collapsed=True)
+    client.group_rows(tab, BOARD_CHALK_HEADER_ROW + 1, BOARD_CHALK_HEADER_ROW + 1, collapsed=False)
 
     def _scaled(
         col: str, first_row: int, last_row: int, field_name: str, *, pct_letter: str | None = None
