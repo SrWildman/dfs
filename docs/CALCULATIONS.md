@@ -632,7 +632,7 @@ under the name `LineMove` -- a name that didn't say *which* line had
 moved once two more were added alongside it. `ImpliedMove` is the direct
 rename (team implied points, same number `LineMove` always was);
 `TotMove` (game total) and `SpdMove` (spread) are newly surfaced. The
-`Flags` column's `LINE↑`/`LINE↓` keys off `ImpliedMove` specifically --
+`Flags` column's `IMPL↑`/`IMPL↓` keys off `ImpliedMove` specifically --
 `TotMove`/`SpdMove` are shown for context but don't drive that flag.
 
 **Baseline**: the diff is `(current nfl_odds sync) − (the first nfl_odds
@@ -806,11 +806,11 @@ boolean check.
 |---|---|---|
 | 1 | `OUT` | `Avail` is `OUT` or `IR` |
 | 2 | `WIND` | `Wind ≥ 20` mph |
-| 3 | `LINE↑` | `ImpliedMove ≥ +6.0` |
-| 3 | `LINE↓` | `ImpliedMove ≤ −6.0` |
+| 3 | `IMPL↑` (was `LINE↑` until 2026-09-30) | `ImpliedMove ≥ +6.0` |
+| 3 | `IMPL↓` (was `LINE↓` until 2026-09-30) | `ImpliedMove ≤ −6.0` |
 | 4 | `LEVERAGE` | rosterable-pool member, in the top `LEVERAGE_FLAG_TOP_SHARE` (7%) of the pool by `Leverage` this week (blank `Leverage` while unpublished can never clear this) |
 | 5 | `CHALK` | `Own% ≥ 0.20` (20%) -- can only fire once ownership is real; `Own%` reads 0 for everyone until then |
-| 6 | `SPLIT↑` / `SPLIT↓` | rosterable-pool member with at least one of Sleeper/FantasyPros available, in the top `SPLIT_FLAG_TOP_SHARE` (7%) of the pool by `\|residual\|` (gap vs. this position's own trend line, not raw points) AND `\|residual\| ≥ SPLIT_MIN_RESIDUAL` -- see Part C's own section below |
+| 6 | `TFFB↑` / `TFFB↓` (SPLIT) | rosterable-pool member with at least one of Sleeper/FantasyPros available, in the top `SPLIT_FLAG_TOP_SHARE` (7%) of the pool by `\|residual\|` (gap vs. this position's own trend line, not raw points) AND `\|residual\| ≥ SPLIT_MIN_RESIDUAL` -- see Part C's own section below |
 | — | *(blank)* | none of the above |
 
 `WIND_FLAG_THRESHOLD_MPH = 20.0` is a starting point, not empirically
@@ -818,7 +818,7 @@ derived. `LINE_MOVE_FLAG_THRESHOLD = 6.0` **was** retuned (Phase 6, Part
 1.1, 2026-09-17) the same way `LEVERAGE_FLAG_THRESHOLD` below was: the old
 flat `1.0` fired on **95.7% of the real live Week 2 slate** (605 players
 with a real `ImpliedMove`) -- because `_flag_for_row` returns every
-matching flag but LINE sits above LEVERAGE/CHALK in read priority, this
+matching flag but the `IMPL` flag (was LINE) sits above LEVERAGE/CHALK in read priority, this
 was drowning out every other flag. Retuned against the real odds-snapshot
 history in `data/raw/nfl_odds/` (30 real per-team `|TeamPointsDelta|`
 values: mean 2.87, std 1.94, quartiles 1.0/3.0/4.0, a real gap between 5
@@ -919,7 +919,7 @@ below `ProjPts` more often than not -- and, as first built, `SPLIT`
 (below) fired on this backup-pile difference almost exclusively, which is
 exactly what the 2026-09-25 rework fixes.
 
-**`SPLIT↑`/`SPLIT↓`** (in `Flags`, lowest priority in the hidden `Flag`,
+**`TFFB↑`/`TFFB↓`** (the SPLIT flag; named `SPLIT↑`/`SPLIT↓` until 2026-09-30, see below; in `Flags`, lowest priority in the hidden `Flag`,
 below `CHALK`) flags disagreement **beyond the usual gap for a position
 and projection level**, not raw points -- reworked 2026-09-25 after the
 original raw-gap rule (`SPLIT_ABS_FLOOR`/`SPLIT_REL_THRESHOLD`, both now
@@ -946,8 +946,12 @@ warning) rather than fit against a handful of players. Still rosterable-
 pool only (same restriction `LEVERAGE` got: a $2,500 backup's
 disagreement is noise); still no flag when neither other source has a
 real number for that player. Direction comes from the sign of `resid`:
-`SPLIT↑` means the other sources are higher than usual for a player at
-this position/level relative to TFFB, `SPLIT↓` means lower.
+`TFFB↑` means TFFB is HIGHER than the other sources are, for a player at
+this position/level (`resid < 0`); `TFFB↓` means TFFB is lower (`resid > 0`).
+**Renamed 2026-09-30** (Sam: "say what they mean"): the old `SPLIT↑`/`SPLIT↓`
+arrows pointed at the OTHER sources, so the old `SPLIT↑` is now `TFFB↓` and
+the old `SPLIT↓` is now `TFFB↑`. The next `dfs sync` rewrites EdgeRaw's `Flags`
+with the new text; the tokens are `derived.SPLIT_TFFB_HIGH`/`SPLIT_TFFB_LOW`.
 
 **Why both a quantile AND a floor:** the quantile alone would flag ~7% of
 the pool even in a week where every source agrees closely (manufacturing
@@ -959,8 +963,8 @@ in a week with unusually wide disagreement (no longer "look closer,"
 Verified against the real 2026-09-23/24 inputs feeding EdgeRaw's
 2026-09-25 sync (`data/raw/projections/20260923T041654Z.csv`,
 `data/raw/draftkings/20260923T115552Z.csv`, and the one Sleeper/
-FantasyPros snapshot each has, `20260924T...`): **19 fires (10 `SPLIT↑`,
-9 `SPLIT↓`)** across a 250-player rosterable pool, zero outside it, every
+FantasyPros snapshot each has, `20260924T...`): **19 fires (10 old-`SPLIT↑`
+= `TFFB↓`, 9 old-`SPLIT↓` = `TFFB↑`)** across a 250-player rosterable pool, zero outside it, every
 position had >= `SPLIT_MIN_FIT_PLAYERS` and got a real fit (`split_
 skipped_positions` empty). Match rates: Sleeper 96.9-100% and FantasyPros
 96.9-100% per position over the pool (DST/QB/TE/WR all 100% or 96.9-100%,

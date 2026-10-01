@@ -3320,6 +3320,31 @@ it; `cli._fail_line` escapes the tag and the detail for doctor and audit-style.
 | 2026-09-29 | `Season` | Chart helper block `S:W` hidden; chart set to plot hidden data. | `S:W` visible. | `S:W` hidden (`R` visible); one chart, `SHOW_ALL`. | Template, Week 4 | `sheet_season_view.add_season_chart`, `sheets.add_line_chart(plot_hidden_data=)`. |
 | 2026-09-29 | `Results`, `Bankroll`, `Season` | Divisions/averages wrapped in empty-state guards (formula text only; no cell moved). | `=F2/E2`, `=AVERAGE(B2:B20)`, ... | `=IF(E2="","",IFERROR(F2/E2,""))`, ... | Template, Week 4 | `sheet_empty_guards.guard_formula`, `sheet_formula_ranges.FormulaRange.guarded`. |
 
+## Round 5 follow-ups (2026-09-30): Board, tab order, SPLIT wording
+
+Three changes from Sam's review of Week 4, no row/column moved inside any tab.
+
+- **Board sections open by default, stale formats cleared.** `sheet_style.style_board` groups
+  every section but collapses none (the `+`/`-` controls still work). Its whole-tab reset now
+  also unsets `horizontalAlignment` and `numberFormat` (`None`), not just fill and font: an
+  earlier layout left an explicit `LEFT` on a few Per-position-leaders rows and `$` formats on
+  spacer columns, so those rows sat left-aligned next to right-aligned neighbours (found
+  Week 4 from Sam's screenshot, then confirmed by reading `userEnteredFormat` back).
+- **`Slate Grid` moved ahead of `Board`** in the tab strip (`sheet_style.WEEK_ORDER`).
+- **SPLIT flags renamed to say what they mean.** `SPLIT↑`/`SPLIT↓` -> `TFFB↑`/`TFFB↓`
+  (`derived.SPLIT_TFFB_HIGH`/`SPLIT_TFFB_LOW`). The arrow is now TFFB's own position: `TFFB↑` =
+  TFFB projects the player higher than Sleeper/FantasyPros. That is the OPPOSITE arrow to the old
+  names (old `SPLIT↑` = others higher = new `TFFB↓`). `FLAG_CHIPS` keys use the constants.
+- **LINE flags renamed to match the column wording.** `LINE↑`/`LINE↓` -> `IMPL↑`/`IMPL↓`
+  (`line_movement.FLAG_IMPL_UP`/`FLAG_IMPL_DOWN`): the flag keys off the team's implied total
+  (`ImpliedMove`), so it now says so, in the same words as `ImpliedMove`/`ImpliedTotal`. Same
+  threshold, same green/red chips, same direction (↑ = implied total rose). Older changelog
+  entries below still say `LINE↑`/`LINE↓`; that is the same flag under its old name.
+
+| Date | Tab | What moved | Old position | New position | Sheets | Invalidated/updated symbols |
+|---|---|---|---|---|---|---|
+| 2026-09-30 | tab strip | `Slate Grid` moved before `Board`. No formula references a tab's position. | Instructions, Board, EdgeRaw, Slate Grid, ... | Instructions, Slate Grid, Board, EdgeRaw, ... | Template, Week 4 | `sheet_style.WEEK_ORDER` |
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

@@ -170,7 +170,7 @@ actually matches.
 | `Stadium` / `Roof` | From `GamesRaw`, joined by team code. Blank if `nflverse_games` hasn't synced this run. |
 | `Wind` | From `WeatherRaw`, joined by game. Blank for dome games or if `weather` hasn't synced. |
 | `Avail` | DraftKings' own `Status` (`Q`/`OUT`/`IR`). |
-| `Flags` | The one column meant to be read at a glance (renamed from `Flag` in Phase 6, Part 7.9 -- see the hidden `Flag`, above, for the single-highest-priority counterpart). Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `LINE↑`/`LINE↓` (`ImpliedMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (rosterable-pool member, top 7% of the pool by `Leverage` this week) → `CHALK` (`Own%` ≥ 0.20 (20%), can only fire once ownership is real) → `SPLIT↑`/`SPLIT↓` (reworked 2026-09-25: rosterable-pool member whose gap vs. Sleeper/FantasyPros is in the top 7% by residual off this position's own trend line, not raw points -- see `docs/CALCULATIONS.md`) → blank. |
+| `Flags` | The one column meant to be read at a glance (renamed from `Flag` in Phase 6, Part 7.9 -- see the hidden `Flag`, above, for the single-highest-priority counterpart). Every matching condition is included, space-separated, in priority order (e.g. `WIND LEVERAGE`) -- not just the first match: `OUT` (from `Avail`) → `WIND` (`Wind` ≥ ~20mph) → `IMPL↑`/`IMPL↓` (`ImpliedMove` past a threshold -- `TotMove`/`SpdMove` don't drive this) → `LEVERAGE` (rosterable-pool member, top 7% of the pool by `Leverage` this week) → `CHALK` (`Own%` ≥ 0.20 (20%), can only fire once ownership is real) → `TFFB↑`/`TFFB↓` (the SPLIT flag; `TFFB↑` = TFFB projects higher than Sleeper/FantasyPros, `TFFB↓` = lower; was `SPLIT↑`/`SPLIT↓` before 2026-09-30, with the arrows pointing the other way; reworked 2026-09-25: rosterable-pool member whose gap vs. Sleeper/FantasyPros is in the top 7% by residual off this position's own trend line, not raw points -- see `docs/CALCULATIONS.md`) → blank. |
 | `ImpliedMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpliedMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Sits in its own collapsed Movement group (Phase 6, Part 2) rather than grouped near `GameEnv` -- see `docs/planning/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 | `Snap%` | Part C, C6 (2026-09-24): this player's own most recently completed week's offensive snap share, from nflverse's free snap-count release (`sources/nflverse_snaps.py`), joined by name/team/position. Blank for a player nflverse hasn't recorded at all (a rookie, a bye, DST -- defenses have no individual snap share); a real recorded 0% (inactive/DNP) stays a real 0%, not blanked. |
@@ -567,8 +567,10 @@ Read-only landing tab, built/rebuilt by `dfs setup build-views`
 entirely in Phase 6 Part 3/7.6 (2026-09-22) -- the old design ranked all
 744 players on the slate, which Sam had already answered for himself the
 moment he ticked his pool. Now one tab, seven collapsible row sections
-(Data > collapse/expand a section's `+`/`-` control; Queue and Slate
-shape open by default, everything else collapsed):
+(Data > collapse/expand a section's `+`/`-` control; every section is
+expanded by default -- Sam's call, 2026-09-30 -- and `style_board` also
+clears any stale explicit alignment / number format left by an earlier
+layout before re-applying its own):
 
 - **Queue** -- what changed since the last sync, restricted to players
   in Sam's pool. Populated by `dfs sync --live`/`dfs go`
@@ -711,7 +713,7 @@ see Section F's own changelog entry for why). The top 40 players by
 absolute `ImpliedMove` since the start of the current NFL week, with
 `TotMove`/`SpdMove` riding along as extra columns once a row already
 qualifies (sorting/filtering is on `ImpliedMove` alone -- the same
-signal `Flags`' `LINE↑`/`LINE↓` keys off, so "biggest movers" keeps one
+signal `Flags`' `IMPL↑`/`IMPL↓` keys off, so "biggest movers" keeps one
 meaning). Prose headers (`Implied move`/`Total move`/`Spread move`) since
 this is a view, not a contract -- a reader here shouldn't need to know
 EdgeRaw's own header spells it `ImpliedMove`. Shows an explicit
