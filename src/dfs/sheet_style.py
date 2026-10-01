@@ -80,7 +80,15 @@ function happens to touch it first.
 from __future__ import annotations
 
 from dfs import perf
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, PLAYER_METRIC_PCT_COLUMNS, ZONE_LABELS
+from dfs.derived import (
+    EDGE_COLUMNS,
+    EDGE_DATA_OFFSET,
+    PLAYER_METRIC_PCT_COLUMNS,
+    SPLIT_TFFB_HIGH,
+    SPLIT_TFFB_LOW,
+    ZONE_LABELS,
+)
+from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP
 from dfs.sheet_color_scales import (
     FIELD_COLOR_SCALES,
     GRAD_MAX,
@@ -574,7 +582,7 @@ EDGE_WIDTHS = {
     "Wind": 68,
     "Avail": 60,
     # Widened from 96: can hold multiple space-separated tokens (Fix 2.1),
-    # e.g. "WIND LINE↑ LEVERAGE". Renamed from Flag (Part 7.9) -- "Flag"
+    # e.g. "WIND IMPL↑ LEVERAGE". Renamed from Flag (Part 7.9) -- "Flag"
     # itself is hidden now, single-highest-priority-token only, and
     # doesn't need a width entry.
     "Flags": 170,
@@ -680,7 +688,7 @@ POOL_TAG_TINTS = {
 POOL_TINT_BG = _rgb("#EAF1FB")
 
 # Ordered LEAST urgent first, matching derived._flag_for_row's priority
-# (OUT, WIND, LINE↑/↓, LEVERAGE, CHALK) IN REVERSE. Verified empirically
+# (OUT, WIND, IMPL↑/↓, LEVERAGE, CHALK) IN REVERSE. Verified empirically
 # against a live sheet's raw `conditionalFormats` metadata: both
 # `add_boolean_rule` and `add_color_scale` explicitly pass `"index": 0`,
 # so each new rule is inserted at the very FRONT of the sheet's rule list
@@ -696,17 +704,17 @@ POOL_TINT_BG = _rgb("#EAF1FB")
 FLAG_CHIPS = {
     "CHALK": _chip(FLAT_BG, FLAT_FG),
     "LEVERAGE": _chip(OK_BG, OK_FG),
-    "LINE↓": _chip(CRIT_BG, CRIT_FG),
-    "LINE↑": _chip(OK_BG, OK_FG),
+    FLAG_IMPL_DOWN: _chip(CRIT_BG, CRIT_FG),
+    FLAG_IMPL_UP: _chip(OK_BG, OK_FG),
     "WIND": _chip(WARN_BG, WARN_FG),
     "OUT": _chip(CRIT_BG, CRIT_FG),
     # Part C, C5b: "look closer," not "danger" -- same flat/neutral tone
-    # CHALK uses, not a valence colour (unlike LINE↑/↓, which really is
+    # CHALK uses, not a valence colour (unlike IMPL↑/↓, which really is
     # good/bad news, SPLIT is direction-neutral: sources disagreeing isn't
     # itself good or bad). Both arrows share this one tone; the text
     # itself carries the direction, same as LINE's own token text does.
-    "SPLIT↑": _chip(FLAT_BG, FLAT_FG),
-    "SPLIT↓": _chip(FLAT_BG, FLAT_FG),
+    SPLIT_TFFB_HIGH: _chip(FLAT_BG, FLAT_FG),
+    SPLIT_TFFB_LOW: _chip(FLAT_BG, FLAT_FG),
 }
 
 AVAIL_CHIPS = {
@@ -1095,7 +1103,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
         client.format_range(edge_tab, f"{flag_col}2:{flag_col}{EDGE_ROWS}", {"horizontalAlignment": "CENTER"})
         # TEXT_CONTAINS, not TEXT_EQ: Flags can hold more than one
         # space-separated token (Fix 2.1). None of the six tokens is a
-        # substring of another (checked -- LINE↑/LINE↓ in particular don't
+        # substring of another (checked -- IMPL↑/IMPL↓ in particular don't
         # collide, different trailing glyph), so substring matching can't
         # misfire onto the wrong flag.
         for text, fmt in FLAG_CHIPS.items():
@@ -2116,9 +2124,10 @@ def polish_bankroll(
 # family, which was the visible half of that mismatch.
 WEEK_ORDER = [
     ("Instructions", "decide"),
+    # Slate Grid before Board (Sam, 2026-09-30): the slate-level view comes first.
+    ("Slate Grid", "decide"),
     ("Board", "decide"),
     ("EdgeRaw", "decide"),
-    ("Slate Grid", "decide"),
     ("Player Pool", "build"),
     ("Lineups", "build"),
     ("DK Upload", "build"),

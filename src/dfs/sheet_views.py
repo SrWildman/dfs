@@ -1197,7 +1197,7 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
 
     Sorted/filtered on ImpliedMove alone (team implied points move --
     "LineMove" before Fix 2.2, and the one `derived._flag_for_row`'s
-    LINE↑/LINE↓ actually keys off) -- TotMove/SpdMove ride along as extra
+    IMPL↑/IMPL↓ actually keys off) -- TotMove/SpdMove ride along as extra
     DISPLAY columns once a row already qualifies, not a second way to
     qualify one, so "biggest movers" keeps one unambiguous meaning. This
     is a VIEW, so its headers are prose ("Implied move"/"Total move"/

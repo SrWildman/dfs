@@ -1,7 +1,7 @@
 """Pure diffing for `dfs sync --live`'s "what changed" report.
 
 `EdgeRaw`'s `Flags` column already aggregates every fast-moving signal that
-matters (`OUT` from DK's `Status`, `WIND` from weather, `LINE↑`/`LINE↓` from
+matters (`OUT` from DK's `Status`, `WIND` from weather, `IMPL↑`/`IMPL↓` from
 odds, plus `LEVERAGE`/`CHALK`) -- see derived.py's `_flags_for_row`. Diffing
 just that one column between two `EdgeRaw` snapshots surfaces the meaningful
 subset of what a live re-sync could have changed, without re-deriving a
@@ -52,7 +52,7 @@ _QUEUE_AVAIL_WATCH = frozenset({"OUT", "IR", "Q"})
 
 def diff_queue_changes(previous: pd.DataFrame, current: pd.DataFrame) -> pd.DataFrame:
     """Every player in `current` who: had their `Flags` change (same join
-    as `diff_edge_flags`, which already covers WIND/LINE↑/LINE↓/OUT/IR
+    as `diff_edge_flags`, which already covers WIND/IMPL↑/IMPL↓/OUT/IR
     appearing or clearing); OR newly moved into `Avail` being OUT/IR/Q
     (a transition, not merely being OUT/IR/Q already -- a player already
     OUT last sync doesn't need to be queued again); OR whose `Salary`

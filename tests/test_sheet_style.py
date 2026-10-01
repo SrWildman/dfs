@@ -2054,3 +2054,16 @@ def test_slate_grid_movement_scales_are_zero_centred_with_symmetric_anchors():
         col = rng[0]
         assert kw["min_value"] == f"=-MAX(MAX(${col}$2:${col}$19),-MIN(${col}$2:${col}$19))"
         assert kw["max_value"] == f"=MAX(MAX(${col}$2:${col}$19),-MIN(${col}$2:${col}$19))"
+
+
+def test_week_order_puts_slate_grid_before_board():
+    names = [tab for tab, _family in WEEK_ORDER]
+    assert names.index("Slate Grid") < names.index("Board")
+
+
+def test_split_flag_chips_use_the_tffb_tokens():
+    from dfs.derived import SPLIT_TFFB_HIGH, SPLIT_TFFB_LOW
+    from dfs.sheet_style import FLAG_CHIPS
+
+    assert {SPLIT_TFFB_HIGH, SPLIT_TFFB_LOW} <= set(FLAG_CHIPS)
+    assert not any(k.startswith("SPLIT") for k in FLAG_CHIPS)

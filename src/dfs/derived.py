@@ -73,7 +73,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from dfs.line_movement import LINE_MOVE_FLAG_THRESHOLD
+from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP, LINE_MOVE_FLAG_THRESHOLD
 from dfs.player_join import JoinResult, join_source_to_dk, normalize_name
 from dfs.team_metrics import GAME_ENV_WEIGHTS, combined_by_game, weighted_mean_skipna
 
@@ -165,6 +165,11 @@ CHALK_OWNERSHIP_THRESHOLD = 0.20
 SPLIT_FLAG_TOP_SHARE = 0.07
 SPLIT_MIN_RESIDUAL = 2.0
 SPLIT_MIN_FIT_PLAYERS = 8
+# Flag text (Sam, 2026-09-30: say what it means, keep it short). The arrow is TFFB's own
+# position against the other sources, NOT the old SPLIT↑/SPLIT↓ sense -- those arrows pointed
+# at the OTHER sources (↑ = others higher), so the old ↑ is now `TFFB↓` and vice versa.
+SPLIT_TFFB_HIGH = "TFFB↑"  # TFFB projects this player higher than Sleeper/FantasyPros do
+SPLIT_TFFB_LOW = "TFFB↓"  # TFFB projects this player lower than Sleeper/FantasyPros do
 # Phase 6, Part 1.4: `has_real_ownership` used to be `.any()` -- a single
 # non-zero ProjOwn (one early-published player, a data glitch, a bye-week
 # artifact) flipped the WHOLE slate to "real," computing OwnPct/Leverage as
@@ -879,7 +884,8 @@ def _split_flag_eligible(residual: pd.Series) -> pd.Series:
 def _split_flag_for_residual(resid: float, eligible: bool) -> str:
     if not eligible or pd.isna(resid):
         return ""
-    return "SPLIT↑" if resid > 0 else "SPLIT↓"
+    # resid > 0: the OTHER sources sit above their usual gap to TFFB, i.e. TFFB is the low one.
+    return SPLIT_TFFB_LOW if resid > 0 else SPLIT_TFFB_HIGH
 
 
 def _attach_agg_pts(
@@ -899,7 +905,7 @@ def _attach_agg_pts(
     equals `ProjPts` exactly. Feeds nothing else -- `ValAdj`/`Val`/
     `CeilVal`/the Board/every guardrail still key off `ProjPts` alone.
 
-    Also computes `SPLIT↑`/`SPLIT↓` eligibility (reworked 2026-09-25 -- see
+    Also computes the SPLIT flag (`TFFB↑`/`TFFB↓`) eligibility (reworked 2026-09-25 -- see
     `SPLIT_FLAG_TOP_SHARE`'s own comment for why): `gap = mean(Sleeper,
     FantasyPros) - ProjPts` -- deliberately NOT `AggPts`, which already
     includes `ProjPts` and would hide a third of the real disagreement --
@@ -916,7 +922,7 @@ def _attach_agg_pts(
     point in `build_edge_frame`) -- never against each other, so a name
     one source can't match doesn't cost the other's own independent
     match. Returns `(agg_pts, split_flags, joins, split_skipped_positions)`:
-    the `AggPts` series, the `SPLIT↑`/`SPLIT↓`/`""` series (both aligned to
+    the `AggPts` series, the `TFFB↑`/`TFFB↓`/`""` SPLIT series (both aligned to
     `merged`'s index), one `JoinResult` per source actually passed in (so
     the caller, `sources/edge.py`, can report C1's own required per-source,
     per-position match rate without re-running the join itself), and the
@@ -1028,12 +1034,12 @@ def _flags_for_row(row: pd.Series) -> list[str]:
         flags.append("OUT")
     if pd.notna(row["Wind"]) and row["Wind"] >= WIND_FLAG_THRESHOLD_MPH:
         flags.append("WIND")
-    # LINE↑/↓ keys off ImpliedMove specifically (Fix 2.2) -- TotMove/SpdMove
+    # IMPL↑/↓ keys off ImpliedMove specifically (Fix 2.2) -- TotMove/SpdMove
     # are shown for context but don't drive this flag.
     if pd.notna(row["ImpliedMove"]) and row["ImpliedMove"] >= LINE_MOVE_FLAG_THRESHOLD:
-        flags.append("LINE↑")
+        flags.append(FLAG_IMPL_UP)
     if pd.notna(row["ImpliedMove"]) and row["ImpliedMove"] <= -LINE_MOVE_FLAG_THRESHOLD:
-        flags.append("LINE↓")
+        flags.append(FLAG_IMPL_DOWN)
     if row["_LeverageFlagEligible"]:
         flags.append("LEVERAGE")
     # No ownership-published guard needed: ProjOwn reads 0 for everyone

@@ -924,14 +924,14 @@ def test_split_flag_uniform_backup_gap_does_not_fire_alone():
     finally:
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    assert not frame["Flags"].str.contains("SPLIT").any()
+    assert not frame["Flags"].str.contains("TFFB").any()
 
 
 def test_split_flag_fires_on_a_starter_off_the_positions_own_trend():
     # 20 backups all at gap -3; one "starter" at a similar ProjPts level
     # to several backups but with a real gap of +3 -- six points off what
     # this position's own trend line predicts for him. He should be
-    # flagged SPLIT↑ (others higher than usual relative to TFFB); nobody
+    # flagged TFFB↓ (others higher than usual relative to TFFB); nobody
     # else should be.
     starter = {
         "proj": {"Id": "starter", "Name": "Starter", "Position": "RB", "Team": "DET", "ProjPts": 15.0},
@@ -946,9 +946,9 @@ def test_split_flag_fires_on_a_starter_off_the_positions_own_trend():
     finally:
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    flagged = frame[frame["Flags"].str.contains("SPLIT")]
+    flagged = frame[frame["Flags"].str.contains("TFFB")]
     assert set(flagged["Name"]) == {"Starter"}
-    assert flagged.iloc[0]["Flags"] == "SPLIT↑"
+    assert flagged.iloc[0]["Flags"] == "TFFB↓"
 
 
 def test_split_flag_fires_down_in_the_opposite_direction():
@@ -965,9 +965,9 @@ def test_split_flag_fires_down_in_the_opposite_direction():
     finally:
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    flagged = frame[frame["Flags"].str.contains("SPLIT")]
+    flagged = frame[frame["Flags"].str.contains("TFFB")]
     assert set(flagged["Name"]) == {"Starter"}
-    assert flagged.iloc[0]["Flags"] == "SPLIT↓"
+    assert flagged.iloc[0]["Flags"] == "TFFB↑"
 
 
 def test_split_flag_never_fires_with_no_other_source_data():
@@ -975,7 +975,7 @@ def test_split_flag_never_fires_with_no_other_source_data():
     sal = _salaries([{"ID": "1"}])
 
     row = build_edge_frame(proj, sal).frame.iloc[0]
-    assert "SPLIT" not in row["Flags"]
+    assert "TFFB" not in row["Flags"]
 
 
 def test_split_flag_not_eligible_outside_the_rosterable_pool():
@@ -999,7 +999,7 @@ def test_split_flag_not_eligible_outside_the_rosterable_pool():
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
     outsider_row = frame[frame["Name"] == "Outsider"].iloc[0]
-    assert "SPLIT" not in outsider_row["Flags"]
+    assert "TFFB" not in outsider_row["Flags"]
 
 
 def test_split_flag_skips_a_position_with_too_few_fit_players_and_warns():
@@ -1019,7 +1019,7 @@ def test_split_flag_skips_a_position_with_too_few_fit_players_and_warns():
     finally:
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    assert not result.frame["Flags"].str.contains("SPLIT").any()
+    assert not result.frame["Flags"].str.contains("TFFB").any()
     assert "RB" in result.split_skipped_positions
 
 
@@ -1043,7 +1043,7 @@ def test_split_flag_residual_under_the_floor_does_not_fire():
     finally:
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
-    assert not frame["Flags"].str.contains("SPLIT").any()
+    assert not frame["Flags"].str.contains("TFFB").any()
 
 
 def test_split_flag_compares_against_other_sources_mean_not_aggpts():
@@ -1065,7 +1065,7 @@ def test_split_flag_compares_against_other_sources_mean_not_aggpts():
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
     starter_row = frame[frame["Name"] == "Starter"].iloc[0]
-    assert starter_row["Flags"] == "SPLIT↑"
+    assert starter_row["Flags"] == "TFFB↓"
 
 
 def test_split_flag_never_masks_a_higher_priority_flag_in_the_singular_flag_column():
@@ -1094,7 +1094,7 @@ def test_split_flag_never_masks_a_higher_priority_flag_in_the_singular_flag_colu
         derived.VAL_ADJ_ROSTERABLE_TOP_N = original
 
     row = frame[frame["Name"] == "Windy Split Guy"].iloc[0]
-    assert row["Flags"] == "WIND SPLIT↓"
+    assert row["Flags"] == "WIND TFFB↑"
     assert row["Flag"] == "WIND"
 
 
@@ -1252,7 +1252,7 @@ def test_line_move_joined_by_team_and_flagged():
     assert row["ImpliedMove"] == delta
     assert row["TotMove"] == 1.0
     assert row["SpdMove"] == -0.5
-    assert row["Flags"] == "LINE↑"
+    assert row["Flags"] == "IMPL↑"
 
 
 def test_line_move_down_flag():
@@ -1265,11 +1265,11 @@ def test_line_move_down_flag():
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["Flags"] == "LINE↓"
+    assert row["Flags"] == "IMPL↓"
 
 
 def test_line_move_flag_keys_off_impmove_not_totmove_or_spdmove():
-    # A big TotMove/SpdMove with a flat ImpliedMove must NOT trigger LINE↑/↓ --
+    # A big TotMove/SpdMove with a flat ImpliedMove must NOT trigger IMPL↑/↓ --
     # only ImpliedMove (team implied points) drives that flag (Fix 2.2).
     proj = _projections(
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
@@ -1295,7 +1295,7 @@ def test_out_and_line_move_flags_both_shown_out_first():
     )
 
     row = build_edge_frame(proj, sal, line_movement=line_movement).frame.iloc[0]
-    assert row["Flags"] == "OUT LINE↑"
+    assert row["Flags"] == "OUT IMPL↑"
 
 
 def test_multiple_flags_shown_in_priority_order():

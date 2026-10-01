@@ -60,13 +60,13 @@ def test_diff_edge_flags_treats_new_player_as_previously_unflagged():
 
 
 def test_diff_edge_flags_reports_a_cleared_flag():
-    previous = pd.DataFrame([_edge_row("1", "Player A", "RB", "KC", "LINE↑")])
+    previous = pd.DataFrame([_edge_row("1", "Player A", "RB", "KC", "IMPL↑")])
     current = pd.DataFrame([_edge_row("1", "Player A", "RB", "KC", "")])
 
     changes = diff_edge_flags(previous, current)
 
     assert len(changes) == 1
-    assert changes.iloc[0]["OldFlag"] == "LINE↑"
+    assert changes.iloc[0]["OldFlag"] == "IMPL↑"
     assert changes.iloc[0]["NewFlag"] == ""
 
 

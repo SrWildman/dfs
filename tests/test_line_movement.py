@@ -48,14 +48,14 @@ def test_flag_up_above_threshold():
     prev = _snapshot([{"abbr": "BUF", "team_points": "20.0"}])
     cur = _snapshot([{"abbr": "BUF", "team_points": str(20.0 + LINE_MOVE_FLAG_THRESHOLD)}])
     row = diff_odds(prev, cur).iloc[0]
-    assert row["Flag"] == "LINE↑"
+    assert row["Flag"] == "IMPL↑"
 
 
 def test_flag_down_below_negative_threshold():
     prev = _snapshot([{"abbr": "BUF", "team_points": "20.0"}])
     cur = _snapshot([{"abbr": "BUF", "team_points": str(20.0 - LINE_MOVE_FLAG_THRESHOLD)}])
     row = diff_odds(prev, cur).iloc[0]
-    assert row["Flag"] == "LINE↓"
+    assert row["Flag"] == "IMPL↓"
 
 
 def test_no_flag_for_small_moves():

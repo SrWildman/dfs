@@ -30,6 +30,10 @@ import pandas as pd
 # sits in that gap and flags 2/30 (6.7%) -- inside the 5-10% target band,
 # same shape of fix as LEVERAGE_FLAG_THRESHOLD's own comment above.
 LINE_MOVE_FLAG_THRESHOLD = 6.0
+# Flag text (Sam, 2026-09-30: was LINE↑/LINE↓ -- say WHAT moved, in the same words as the
+# ImpliedMove/ImpliedTotal columns). The flag is the team's implied total, not the game total.
+FLAG_IMPL_UP = "IMPL↑"
+FLAG_IMPL_DOWN = "IMPL↓"
 
 
 class LineMovementError(Exception):
@@ -78,9 +82,9 @@ def diff_odds(previous: pd.DataFrame, current: pd.DataFrame) -> pd.DataFrame:
         if pd.isna(delta):
             return ""
         if delta >= LINE_MOVE_FLAG_THRESHOLD:
-            return "LINE↑"
+            return FLAG_IMPL_UP
         if delta <= -LINE_MOVE_FLAG_THRESHOLD:
-            return "LINE↓"
+            return FLAG_IMPL_DOWN
         return ""
 
     merged["Flag"] = merged["TeamPointsDelta"].apply(_flag)
