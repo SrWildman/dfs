@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from dfs.config import Config
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, PLAYER_METRIC_PCT_COLUMNS
 from dfs.doctor import run_doctor
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
@@ -480,3 +480,46 @@ def test_run_doctor_flags_a_missing_dksalclean_tab():
     tabs = {k: v for k, v in _ALL_GOOD_TABS.items() if k != DKSALCLEAN_TAB}
     issues = run_doctor(FakeDoctorClient(tabs, {**_lineups_rows()}), _base_config(), title="Week 4")
     assert any(i.check == "tab-exists" and DKSALCLEAN_TAB in i.detail for i in issues)
+
+
+# ---- pct-helpers: the colour steps read hidden within-position percentile columns -------------
+
+
+def _edge_rows(*, with_helper_values: bool, n: int = 40) -> dict[tuple[str, str], list[list[str]]]:
+    """EdgeRaw rows with `n` scored players; the ProjPts%ile column is filled or left blank."""
+    header = _ALL_GOOD_TABS["EdgeRaw"]
+    proj, pct = header.index("ProjPts"), header.index("ProjPts%ile")
+    rows = []
+    for i in range(n):
+        row = [""] * len(header)
+        row[proj] = f"{10 + i / 10:.1f}"
+        row[pct] = f"{(i * 100) // n}" if with_helper_values else ""
+        rows.append(row)
+    # the check reads out to the furthest metric/helper column it needs
+    furthest = max(
+        header.index(c)
+        for m, h in PLAYER_METRIC_PCT_COLUMNS.items()
+        if m in header and h in header
+        for c in (m, h)
+    )
+    return {("EdgeRaw", f"A2:{column_letter(furthest)}30"): rows}
+
+
+def _pct_issues(rows):
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows={**_lineups_rows(), **rows})
+    return [i for i in run_doctor(client, _base_config(), title="Week 4") if i.check == "pct-helpers"]
+
+
+def test_run_doctor_passes_when_the_percentile_helpers_are_filled():
+    assert _pct_issues(_edge_rows(with_helper_values=True)) == []
+
+
+def test_run_doctor_flags_a_blank_percentile_helper_next_to_real_metric_values():
+    (issue,) = _pct_issues(_edge_rows(with_helper_values=False))
+    assert "ProjPts%ile" in issue.detail and "no colour" in issue.detail
+
+
+def test_run_doctor_ignores_the_percentile_helpers_on_a_tab_with_no_real_data_yet():
+    # a fresh template/week: nothing synced, so a blank helper is expected, not a failure
+    assert _pct_issues(_edge_rows(with_helper_values=False, n=3)) == []
+    assert _pct_issues({}) == []

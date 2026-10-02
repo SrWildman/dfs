@@ -1402,9 +1402,12 @@ class SheetsClient:
         for i, rule in enumerate(rules):
             if any(c is None and r is None for c, r in matchers):
                 indexes.append(i)  # a whole-tab target matches every rule
-            elif rule.get("ranges") and any(
-                all(_range_matches(rg, c, r) for rg in rule["ranges"]) for c, r in matchers
+            elif rule.get("ranges") and all(
+                any(_range_matches(rg, c, r) for c, r in matchers) for rg in rule["ranges"]
             ):
+                # Every range of the rule must be one this call owns. A multi-range rule (one
+                # gradient over a column's several row blocks) matches when each of its ranges
+                # matches some target; a single-range rule behaves exactly as before.
                 indexes.append(i)
         if not indexes:
             return

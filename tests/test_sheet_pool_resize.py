@@ -215,7 +215,7 @@ def test_fix_color_scale_ranges_clears_and_readds_each_linked_column_to_the_new_
 
     cleared_columns = {col for _, col in client.conditional_format_calls}
     assert cleared_columns == {"D", "E", "F"}  # CeilVal, Leverage, GameEnv per the fake header
-    ranges_added = {a1 for _, a1 in client.boolean_rule_calls}
+    ranges_added = {a1 for _, a1 in client.color_scale_calls + client.boolean_rule_calls}
     assert ranges_added == {"D2:D80", "E2:E80", "F2:F80"}
 
 
@@ -230,5 +230,5 @@ def test_fix_color_scale_ranges_reads_the_header_from_its_own_real_row():
     client = SpySheetsClient({}, header_row=2)
     fix_color_scale_ranges(client, "Player Pool", last_row=101, header_row=2)
 
-    ranges_added = {a1 for _, a1 in client.boolean_rule_calls}
+    ranges_added = {a1 for _, a1 in client.color_scale_calls + client.boolean_rule_calls}
     assert ranges_added == {"D3:D101", "E3:E101", "F3:F101"}

@@ -97,6 +97,7 @@ from dfs.sheet_color_scales import (
     WHITE,
     column_rule_specs,
     diverging_anchor_kwargs,
+    grouped_column_rule_specs,
 )
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
@@ -379,9 +380,9 @@ def apply_field_formats(
 # lineup block (`apply_grouped_color_scales`), where a raw Pts/Ceil
 # comparison is exactly the right one.
 #
-# Round 5 item 3 REMOVED this exclusion: the five metrics are now banded by their
-# hidden within-position percentile helper on every tab, EdgeRaw included, so nothing
-# needs skipping. Kept as an empty set so `skip=` call sites and tests stay valid.
+# Round 5 item 3 REMOVED this exclusion: every metric is a gradient over its whole column
+# on every tab, EdgeRaw included, so nothing needs skipping. Kept as an empty set so
+# `skip=` call sites and tests stay valid.
 EDGE_UNSCALED_PLAYER_METRICS: frozenset[str] = frozenset()
 
 # Phase 4 (4.1): the reverse exclusion -- CeilPct is EdgeRaw's substitute
@@ -456,9 +457,9 @@ def apply_field_color_scales(
     client.clear_conditional_formats_for(
         tab, [(column_letter(i), (data_start, last_row)) for i, _name in scaled_columns]
     )
-    # Round 5 item 3: one set of formula rules per column (bands + the grey zero chip),
-    # collected and sent in two batched calls. Gradients first, then booleans, so the
-    # chip lands above any gradient on the same column exactly as before.
+    # One gradient per column over the whole column (value-based, so it follows any sort or
+    # filter) plus the grey zero chip, collected and sent in two batched calls. Gradients
+    # first, then booleans, so the chip lands above any gradient on the same column.
     gradient_specs: list[dict] = []
     boolean_specs: list[dict] = []
     for i, name in scaled_columns:
@@ -480,17 +481,12 @@ def apply_grouped_color_scales(
 ) -> int:
     """Player Pool (per position) / Lineups (per lineup) colouring.
 
-    Round 5 item 3: this used to add one gradient rule PER `(column, group)` pair,
-    each scaled to its own block -- which is why the same number was a different
-    colour on Player Pool, Lineups and EdgeRaw, and why Lineups alone carried
-    hundreds of rules. Colour now comes from ONE set of formula rules per column
-    over the whole span of the blocks, keyed off the tab's own hidden percentile
-    helpers (`derived.PLAYER_METRIC_PCT_COLUMNS`, linked from EdgeRaw), so a player
-    looks identical on every tab. Header rows and totals rows that sit between or
-    below the blocks hold text or blanks, which no band ever matches. `groups` is
-    only used for its overall row span. Returns how many columns were coloured."""
-    span_start = min(start for start, _end in groups)
-    span_end = max(end for _start, end in groups)
+    One set of rules per column across ALL the blocks (`grouped_column_rule_specs`): the player
+    metrics are stepped by their hidden within-position percentile helper (linked from EdgeRaw),
+    so a player is the same colour on every tab, and the other columns are one gradient over the
+    union of the blocks. (Round 5 item 3 removed the old one-rule-per-block scaling that made the
+    same number a different colour on each tab.) Header and totals rows between/below the blocks
+    hold text or blanks, which no step matches. Returns how many columns were coloured."""
     columns = [
         (i, name) for i, name in enumerate(header) if FIELD_COLOR_SCALES.get(name) and name not in skip
     ]
@@ -501,10 +497,11 @@ def apply_grouped_color_scales(
     gradient_specs: list[dict] = []
     boolean_specs: list[dict] = []
     for i, name in columns:
-        gradients, booleans = column_rule_specs(name, column_letter(i), span_start, span_end, header=header)
-        gradient_specs += gradients
+        gradient, booleans = grouped_column_rule_specs(name, column_letter(i), groups, header=header)
+        if gradient is not None:
+            gradient_specs.append(gradient)
         boolean_specs += booleans
-    client.add_color_scales(tab, gradient_specs)
+    client.add_color_scales_multi_range(tab, gradient_specs)
     client.add_boolean_rules(tab, boolean_specs)
     return len(columns)
 
@@ -2503,9 +2500,9 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     def _scaled(
         col: str, first_row: int, last_row: int, field_name: str, *, pct_letter: str | None = None
     ) -> None:
-        """Round 5 item 3: the shared band dispatch (`column_rule_specs`), applied over one
-        section's column. Board's sections are small, so per-call application is fine.
-        `pct_letter` points a player metric at a hidden helper column on this tab."""
+        """The shared colour dispatch (`column_rule_specs`), applied over one section's column.
+        Board's sections are small, so per-call application is fine. `pct_letter` points a
+        player metric at a hidden within-position percentile column on this tab."""
         gradients, booleans = column_rule_specs(field_name, col, first_row, last_row, pct_letter=pct_letter)
         for spec in gradients:
             client.add_color_scale(tab, spec.pop("a1_range"), **spec)
@@ -2573,9 +2570,9 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     client.format_range(
         tab, f"I{BOARD_LEADERS_FIRST_ROW}:I{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["ProjPts"]
     )
-    # Round 5 item 3: ValAdj is banded on its own 0-100 value; ProjPts on the hidden
-    # within-position percentile looked up by name (`BOARD_LEADERS_PCT_COL`) -- so a
-    # leader looks exactly like the same player on EdgeRaw, Player Pool and Lineups.
+    # ValAdj is stepped on its own 0-100 value; ProjPts on the hidden within-position percentile
+    # looked up by name (`BOARD_LEADERS_PCT_COL`) -- so a leader looks exactly like the same
+    # player on EdgeRaw, Player Pool and Lineups.
     _scaled("D", BOARD_LEADERS_FIRST_ROW, BOARD_LEADERS_LAST_ROW, "ValAdj")
     _scaled("I", BOARD_LEADERS_FIRST_ROW, BOARD_LEADERS_LAST_ROW, "ProjPts", pct_letter=BOARD_LEADERS_PCT_COL)
     _position_top_borders(BOARD_LEADERS_FIRST_ROW, "A", "D")
@@ -2612,7 +2609,7 @@ def _apply_column_rules(
     client: SheetsClient, tab: str, name: str, letter: str, first_row: int, last_row: int
 ) -> None:
     """Round 5 item 3: one `FIELD_COLOR_SCALES` column through the shared dispatch
-    (`column_rule_specs`) -- bands or gradient, plus the grey zero chip -- applied
+    (`column_rule_specs`) -- steps or a gradient, plus the grey zero chip -- applied
     immediately, for the small view tabs."""
     gradients, booleans = column_rule_specs(name, letter, first_row, last_row)
     for spec in gradients:

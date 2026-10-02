@@ -168,19 +168,25 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         'One system, used everywhere: a dark header row always means "this is a '
         'table header", nothing else does. Pale yellow always means "you type '
         'here" (see above) -- the only cue for that. Green/red shading on a '
-        "number means better/worse: the top 10% of its column is strong green, "
-        "the next 20% light green, the bottom 10% strong red, the 20% above that "
-        "light red, and the middle 40% is left plain. Player stats (ProjPts, Val, "
-        "Ceiling, CeilVal, AggPts) are ranked against players at the SAME "
-        "position, so a QB is only ever compared with QBs. Zeros and blanks are "
-        "never coloured (a zero gets a flat grey cell). The shading follows the "
-        "player through any sort or filter. Rank-style columns are reversed "
-        "(SoS Rank, OppPosRank), where a LOW rank is the good "
-        "matchup; a signed number like ImpMove/TotMove/SpdMove shades "
+        "number means better/worse. Player stats (ProjPts, AggPts, Ceiling, Val, CeilVal) and the "
+        "0-100 scores (ValAdj, CeilPct, GameEnv) show where a player ranks among players at "
+        "the SAME position (a QB is only ever compared with QBs): plain = the middle of the "
+        "pack, green = ranked above most of his position, red = below, and the colour "
+        "deepens in small steps (finest near the top, every 2.5 percentile points) to full "
+        "strength for the top or bottom 2.5%, so two nearby numbers look almost the same "
+        "while a real gap shows. Columns that have no "
+        "position (game and team numbers, ownership, exposure) are one smooth gradient over "
+        "the whole column: white at the column's median, full colour near its extremes. "
+        "Either way nothing is a fixed cut-off, and the shading follows the player through any "
+        "sort or filter. Zeros and blanks are never part of the scale (a zero gets a flat "
+        "grey cell). Low-is-good columns are reversed "
+        "(SoS Rank, OppPosRank, Pace, Spread, Exposure), where a LOW number is the good "
+        "one; a signed number like ImpMove/TotMove/SpdMove/Leverage shades "
         "from red through white at zero to green, since zero -- not the middle of "
         'the range -- is what "no change" means. Ownership (ProjOwn on EdgeRaw, '
         'Rstr% on Player Pool/Lineups) is the one exception to "more is better": '
-        "it shades white-to-amber-to-red instead, since high ownership is chalk -- "
+        "it shades white-to-amber-to-red instead (amber at the 20% chalk line, red toward "
+        "the highest), since high ownership is chalk -- "
         "a caution, not a quality. A flat grey cell on ownership means no real "
         "number yet (TFFB hasn't published ownership this week), not \"the lowest "
         'value". Chips (solid colour, bold text) mark a state, never a number -- '

@@ -40,22 +40,33 @@ WHITE = _rgb("#FFFFFF")
 
 # The red -> yellow -> green gradient the now-removed `dfs sheets
 # format-edge` command originally introduced, kept identical here.
-GRAD_MIN = {"red": 0.96, "green": 0.80, "blue": 0.80}
+# Sam, 2026-10-02: keep the soft pastels, only slightly more prominent -- the end colours sit about
+# 15% of the way from the old pastels (#F5CCCC / #B8E0B8) toward Sheets' own default scale
+# (#E67C73 / #57BB8A), which he found "way too much to stare at a whole sheet of". (A first try at
+# 40% was too strong: "I think I liked the old colors better ... maybe 10-20% more".)
+GRAD_MIN = {"red": 0.95, "green": 0.75, "blue": 0.75}  # ~#F2C0BF
 GRAD_MID = {"red": 1.0, "green": 1.0, "blue": 0.80}
-GRAD_MAX = {"red": 0.72, "green": 0.88, "blue": 0.72}
+GRAD_MAX = {"red": 0.66, "green": 0.86, "blue": 0.69}  # ~#A8DBB0
 
-_GRADIENT = "gradient"  # red -> yellow -> green, more is better
-# Round 5 item 3: FIVE-BAND formula rules (see `band_rule_specs`) replace the gradient for
-# most columns. Bands are driven by a PERCENTILE, follow the row through any sort or
-# filter, and never colour a zero or a blank.
-_PCT = "pct"  # a player metric: banded by its hidden within-position percentile helper
-_SCORE = "score"  # already 0-100 (ValAdj, CeilPct, GameEnv): banded on its own value
-_LEVERAGE = "leverage"  # centred on 0 (CeilPct - OwnPct, -100..+100)
-_RANK = "rank"  # a 1-32 matchup rank, LOW is better
-_GAME = "game"  # a per-game/team metric: PERCENTRANK against the tab's own column, high is good
-_GAME_REVERSED = "game_reversed"  # same, LOW is good (Pace, Spread)
+# Sam, 2026-10-01: no fixed cut-offs, and a colour means one thing per column. Two shapes:
+#
+# - STEPS (`_PCT`, `_SCORE`): the player metrics. Compared WITHIN POSITION (a QB only against
+#   QBs), as a percentile rank, in many small shades (see `step_rule_specs`) -- Round 5 item 3's
+#   five wide bands made 3.00 white and 3.14 light green; ten shades per side make neighbouring
+#   values differ by a shade you can barely see, while the colour still follows the row through
+#   any sort or filter (a true gradient cannot: it only sees its own range).
+# - GRADIENT (`_GRADIENT`/`_REVERSED`/`_DIVERGING`/`_WARM`): everything that has no position (game
+#   and team metrics, ownership, exposure, movement): a smooth red -> white -> green gradient,
+#   white at the column's median, full colour at its 5th/95th percentile.
+#
+# Exact zeros are grey in both. Nothing is a fixed number.
+_PCT = "pct"  # a player metric: stepped by its hidden within-position percentile helper
+_SCORE = "score"  # already a 0-100 percentile (ValAdj, CeilPct, GameEnv): stepped on its own value
+_GRADIENT = "gradient"  # red -> white -> green, more is better
+_REVERSED = "reversed"  # green -> white -> red, LOW is better
 _DIVERGING = "diverging"  # red -> white -> green, zero is the midpoint
-_REVERSED = "reversed"  # green -> yellow -> red, LOW is better
+# Where the gradient reaches full colour, as a percentile of the column's non-zero values.
+EDGE_LOW_PERCENTILE, EDGE_HIGH_PERCENTILE = 0.05, 0.95
 # White -> amber -> red -- the one exception to "more is better" (Own%):
 # high ownership is chalk, a caution not a quality, so it never gets the
 # green=good treatment. Reuses WARN_BG/CRIT_BG's exact hues so it still
@@ -72,10 +83,7 @@ WARM_MAX = _rgb("#F8DEDA")  # == CRIT_BG
 # reuse EdgeRaw's own field names (ValAdj, ProjPts, Salary, ...) for their
 # column headers.
 FIELD_COLOR_SCALES = {
-    # Round 5 item 3: the five player-performance metrics are banded by their
-    # within-position percentile helper (`derived.PLAYER_METRIC_PCT_COLUMNS`), the
-    # same number on every tab, so a player looks identical everywhere and a sort
-    # or filter can never move a colour onto the wrong player.
+    # Player metrics: within-position percentile, stepped (`derived.PLAYER_METRIC_PCT_COLUMNS`).
     "ProjPts": _PCT,
     "AggPts": _PCT,
     "Pts": _PCT,
@@ -83,45 +91,38 @@ FIELD_COLOR_SCALES = {
     "Ceil": _PCT,
     "Val": _PCT,
     "CeilVal": _PCT,
-    # Already 0-100 scores/percentiles: banded on their own value (Rule 3).
+    # Already 0-100 percentile scores: stepped on their own value.
     "ValAdj": _SCORE,
     "CeilPct": _SCORE,
     "GameEnv": _SCORE,
-    # CeilPct - OwnPct, so -100..+100 and centred on 0 (Rule 3 -- see `LEVERAGE_BANDS`).
-    "Leverage": _LEVERAGE,
-    # Game/team metrics: PERCENTRANK against the tab's own column, live (Rule 4).
-    # Pace is faster-is-better (lower), Spread lower-is-better (a bigger favourite).
-    "Pace": _GAME_REVERSED,
-    "PROE": _GAME,
-    "Expl%": _GAME,
-    "Team Implied": _GAME,
-    "O/U": _GAME,
-    "OU": _GAME,
-    "OverUnder": _GAME,
-    "Total": _GAME,
-    "GPS": _GAME,
-    "Spread": _GAME_REVERSED,
-    # OppPosRank is a 1-32 rank where LOW is the tough matchup (this opponent allows
-    # the FEWEST fantasy points at the position): bands on the rank itself.
-    "OppPosRank": _RANK,
-    # Round 5 item 9: higher = softer matchup for every position (DST sign-flipped).
-    "OppEPA": _GAME,
-    # Rule 5: kept as they were -- movement diverges around zero, Own% is the warm scale.
+    # Game/team metrics have no position: a smooth gradient over the column. More is better.
+    "PROE": _GRADIENT,
+    "Expl%": _GRADIENT,
+    "Team Implied": _GRADIENT,
+    "O/U": _GRADIENT,
+    "OU": _GRADIENT,
+    "OverUnder": _GRADIENT,
+    "Total": _GRADIENT,
+    "GPS": _GRADIENT,
+    # Higher = softer matchup for every position (DST sign-flipped).
+    "OppEPA": _GRADIENT,
+    # Lower is better: Pace (seconds per snap, faster is better) and Spread (a bigger favourite).
+    "Pace": _REVERSED,
+    "Spread": _REVERSED,
+    # OppPosRank is a 1-32 matchup rank where the LOW end reads as the good colour (it always
+    # did under the bands: rank <= 4 was the strong green).
+    "OppPosRank": _REVERSED,
+    # CeilPct - OwnPct is -100..+100 and centred on 0: zero is a real, meaningful white.
+    "Leverage": _DIVERGING,
+    # Movement diverges around zero; Own% is the warm scale (high ownership is a caution).
     "ImpliedMove": _DIVERGING,
     "TotMove": _DIVERGING,
     "SpdMove": _DIVERGING,
     "Own%": _WARM,
-    # Item 1d (Exposure zeros): Exposure's share column joins the shared system so its
-    # zero-heavy column stops anchoring the gradient. Low is comfortable, high is
-    # concentration, so it stays a reversed gradient.
+    # Low is comfortable, high is concentration, so Exposure is a reversed gradient.
     "Exposure": _REVERSED,
-    # Phase 5B: a count (0..however many lineups H1 says are being built),
-    # same "more is better" reading as everything else in _GRADIENT -- a
-    # heavily-used player earning the deepest colour is exactly the point.
-    # Zero is also this column's overwhelmingly common value (most pool
-    # players are rostered nowhere), so it's zero-excluded too, for the
-    # same reason Own% is: an unrostered player is normal, not the bottom
-    # of a gradient.
+    # A count of lineups using the player: a heavily-used player earning the deepest colour is
+    # the point, and an unrostered player (the common zero) is grey, not the bottom of the scale.
     "Used": _GRADIENT,
 }
 
@@ -150,10 +151,8 @@ FIELD_COLOR_SCALES = {
 # ImpliedMove/TotMove/SpdMove and Slate Grid's movement columns already
 # render 0 as a meaningful white center; greying it would hide "no real
 # move" as if it were missing data) and `Spread` (0 is a real pick'em, not
-# missing data). `Own%`'s own fixed 20% (CHALK) midpoint is untouched --
-# only `_GRADIENT`/`_REVERSED` columns get the new MEDIAN(FILTER(...))
-# midpoint; `_WARM`'s own explicit midpoint always wins (see
-# `_scale_rule_specs`).
+# missing data). Every other kind, `_WARM` (Own%) included, anchors its low end and
+# midpoint to the column's own non-zero values.
 #
 # A handful of real scales elsewhere are deliberately NOT in this system
 # at all (so they never pass through here) -- each is a genuinely bespoke,
@@ -166,13 +165,12 @@ ZERO_EXCLUDED_COLUMNS = frozenset(name for name, kind in FIELD_COLOR_SCALES.item
 ZERO_GREY_BG = _rgb("#EDEEF1")
 
 
-def _zero_exclude_formula(fn: str, ranges: str | list[str]) -> str:
-    """`fn` applied over one range, or the combination of several -- used
-    by both the MINIFS-based min and the MEDIAN(FILTER(...))-based mid
-    below. A list of ranges (`apply_edge_position_scales`'s own multi-
-    range calls, one position's rows scattered across several contiguous
-    runs) combines every run's own non-zero values into the SAME
-    computation rather than picking a min/median of any one run alone.
+def _zero_exclude_formula(fn: str, ranges: str | list[str], q: float | None = None) -> str:
+    """`fn` applied over one range, or the combination of several -- the MINIFS-style min, the
+    MEDIAN(FILTER(...)) mid and the PERCENTILE(FILTER(...)) end anchors below all go through
+    here. A list of ranges (a column whose data sits in several row blocks) combines every
+    block's own non-zero values into the SAME computation rather than picking a value from
+    any one block alone.
 
     Every range goes through `_absolute`: Sheets shifts a RELATIVE reference inside a
     colour-scale anchor formula per row (see `diverging_anchor_kwargs`), so a cell far
@@ -186,6 +184,13 @@ def _zero_exclude_formula(fn: str, ranges: str | list[str]) -> str:
     if fn == "MEDIAN":
         parts = [f"FILTER({r},{r}<>0)" for r in ranges]
         return f"MEDIAN({','.join(parts)})"
+    if fn == "PERCENTILE":
+        parts = [f"FILTER({r},{r}<>0)" for r in ranges]
+        data = parts[0] if len(parts) == 1 else "{" + ";".join(parts) + "}"
+        return f"PERCENTILE({data},{q})"
+    if fn == "PERCENTILE_ALL":  # zero is a real value here (Spread): no filter
+        data = ranges[0] if len(ranges) == 1 else "{" + ";".join(ranges) + "}"
+        return f"PERCENTILE({data},{q})"
     raise ValueError(f"Unsupported zero-exclude function {fn!r}")
 
 
@@ -242,29 +247,35 @@ def _scale_rule_specs(
     position_scales`'s multi-range calls -- see `_zero_exclude_formula`.
     Only replaces an explicit `min_value` when the caller didn't already
     provide one; there is no equivalent override for `mid_value` because
-    no caller has ever needed one (a diverging/warm kind's own fixed
-    midpoint below already wins ahead of it). Returns `(gradient_spec,
+    no caller has ever needed one (a diverging kind's own zero midpoint
+    below already wins ahead of it). Returns `(gradient_spec,
     boolean_spec_or_None)`.
     """
+    # Sam, 2026-10-01: white at the column's median, full colour only near the extremes. The
+    # ends sit at the 5th/95th percentile of the column's non-zero values (not its min/max), so
+    # one outlier can't flatten everyone else's colour; values beyond them just stay at the end
+    # colour. A diverging kind (zero is its midpoint) keeps its own symmetric anchors.
+    zero_excluded = name in ZERO_EXCLUDED_COLUMNS
+    pct_fn = "PERCENTILE" if zero_excluded else "PERCENTILE_ALL"
     min_kwargs: dict = {}
     if min_value is not None:
         min_kwargs = {"min_type": "NUMBER", "min_value": min_value}
-    elif name in ZERO_EXCLUDED_COLUMNS:
+    elif kind != _DIVERGING:
         min_kwargs = {
             "min_type": "NUMBER",
-            "min_value": f"={_zero_exclude_formula('MIN', zero_exclude_range)}",
+            "min_value": f"={_zero_exclude_formula(pct_fn, zero_exclude_range, EDGE_LOW_PERCENTILE)}",
         }
     max_kwargs = {"max_type": "NUMBER", "max_value": max_value} if max_value is not None else {}
+    if max_value is None and kind != _DIVERGING:
+        max_kwargs = {
+            "max_type": "NUMBER",
+            "max_value": f"={_zero_exclude_formula(pct_fn, zero_exclude_range, EDGE_HIGH_PERCENTILE)}",
+        }
 
-    # PROMPT_BOARD_FIXES.md item 7: the midpoint must exclude zeros too,
-    # not just the minimum -- most scales default to the 50th-percentile
-    # midpoint, and half a column sitting at zero drags that median down
-    # with it. Only for `_GRADIENT`/`_REVERSED` -- `_DIVERGING`'s own zero-
-    # as-white center and `_WARM`'s own fixed CHALK threshold both already
-    # have a meaningful, deliberately-chosen midpoint that this must never
-    # override.
+    # The midpoint must exclude zeros too (PROMPT_BOARD_FIXES.md item 7): a scale's default
+    # midpoint is the 50th percentile, and half a column sitting at zero drags that down with it.
     mid_kwargs: dict = {}
-    if name in ZERO_EXCLUDED_COLUMNS:
+    if zero_excluded:
         mid_kwargs = {
             "mid_type": "NUMBER",
             "mid_value": f"={_zero_exclude_formula('MEDIAN', zero_exclude_range)}",
@@ -286,27 +297,21 @@ def _scale_rule_specs(
         gradient_spec = {
             "a1_range": a1,
             "min_color": GRAD_MAX,
-            "mid_color": GRAD_MID,
+            "mid_color": WHITE,
             "max_color": GRAD_MIN,
             **mid_kwargs,
             **min_kwargs,
             **max_kwargs,
         }
     elif kind == _WARM:
-        # Week 3 feedback (A2), 2026-09-22: Sam: "Ownership highlighting is
-        # hard to discern differences." Min/max were already adaptive to
-        # the slate (non-zero MINIFS / real MAX -- Fix 2.7), so the actual
-        # problem was the MIDPOINT: it defaulted (like every other scale
-        # here) to the statistical median, but ownership is right-skewed
-        # -- most players sit low, a few chalk plays sit high -- so the
-        # median lands low too, and the entire "meaningfully different"
-        # low-ownership majority gets crushed into the white-to-amber
-        # third of the scale while the amber-to-red two-thirds is spent on
-        # a handful of outliers. Anchoring the midpoint at
-        # `CHALK_OWNERSHIP_THRESHOLD` instead (the same 20% line `Flag`
-        # already calls out as CHALK) fixes that AND gives the transition
-        # real meaning: white-to-amber is "below the chalk line," amber-
-        # to-red is "how far past it."
+        # White -> amber -> red, high ownership is a caution. Week 3 feedback (A2) + Sam,
+        # 2026-10-02 ("the roster percent numbers are really flat in terms of colour spread"):
+        # ownership is right-skewed -- most players sit low, a few chalk plays sit high -- so a
+        # median midpoint (~5%) crushes almost every value into the same pale amber. Anchoring the
+        # midpoint at `CHALK_OWNERSHIP_THRESHOLD` (the same 20% line `Flags` calls CHALK) gives the
+        # white-to-amber half real meaning ("below the chalk line") and spends the amber-to-red
+        # half on "how far past it". The low end is the column's lowest NON-ZERO value and the high
+        # end its real maximum (no percentile trimming: the few chalk plays ARE the point).
         gradient_spec = {
             "a1_range": a1,
             "min_color": WARM_MIN,
@@ -314,14 +319,15 @@ def _scale_rule_specs(
             "max_color": WARM_MAX,
             "mid_type": "NUMBER",
             "mid_value": str(CHALK_OWNERSHIP_THRESHOLD),
-            **min_kwargs,
-            **max_kwargs,
+            "min_type": "NUMBER",
+            "min_value": f"={_zero_exclude_formula('MIN', zero_exclude_range)}",
+            **({"max_type": "NUMBER", "max_value": max_value} if max_value is not None else {}),
         }
     else:
         gradient_spec = {
             "a1_range": a1,
             "min_color": GRAD_MIN,
-            "mid_color": GRAD_MID,
+            "mid_color": WHITE,
             "max_color": GRAD_MAX,
             **mid_kwargs,
             **min_kwargs,
@@ -345,44 +351,51 @@ def _scale_rule_specs(
     return gradient_spec, boolean_spec
 
 
+def _zero_chip(a1_range: str) -> dict:
+    """The flat grey chip for an exact zero. Added AFTER the colour rules (later in the same
+    batch), so it lands at index 0 and wins for any exact-zero cell."""
+    return {
+        "a1_range": a1_range,
+        "condition_type": "NUMBER_EQ",
+        "values": ["0"],
+        "fmt": {"backgroundColor": ZERO_GREY_BG},
+    }
+
+
 # ---------------------------------------------------------------------------
-# Round 5 item 3: five-band formula rules
+# Steps: within-position percentile, many small shades
 # ---------------------------------------------------------------------------
 #
-# Percentile | Colour
-#   >= 90    | strong green
-#   70 - 90  | light green
-#   30 - 70  | none
-#   10 - 30  | light red
-#   < 10     | red
-#   0/blank  | none  (an exact zero keeps its grey chip, see `ZERO_GREY_BG`)
-#
-# Every rule is a custom formula with RELATIVE row references, applied to a whole
-# column, so it moves with the row through any sort, filter or sync -- no per-block
-# ranges, no re-polish needed after a sync. No new hues: the two strong colours are the
-# existing gradient ends (`GRAD_MAX`/`GRAD_MIN`), the light ones a 50% tint of each.
+# A percentile p in 0-100 (50 = the typical player at his position). The middle 20% (40-60) is
+# left plain. Beyond that the shade deepens with the distance d = |p - 50| from the middle: one
+# step per 5 points out to d = 25 (p 75 / 25), then HALF-SIZE steps (2.5 points) from there to
+# d = 47.5, then one open-ended top/bottom shade (p >= 97.5 / <= 2.5). The fine steps sit where
+# the players Sam actually weighs live -- the top of each position -- so a tight group of near
+# top players still lands on distinguishable shades (Sam, 2026-10-02: "the top 10 WRs are all
+# projected within 5 points of each other ... tough to tell who's the better play").
+# Each shade is a straight blend from white to the strong colour, `amount` rising linearly with
+# d from 12% (the first step) to 100% (the last, which IS `GRAD_MAX`/`GRAD_MIN`).
+STEP_PLAIN_HALF = 10  # |p - 50| below this is left plain (the middle 20%)
+STEP_EDGES = [10, 15, 20, 25, 27.5, 30, 32.5, 35, 37.5, 40, 42.5, 45, 47.5]  # lower bound of each d band
+STEP_LEVELS = len(STEP_EDGES)  # shades per side; the last one is open-ended
+STEP_FIRST_AMOUNT = 0.12
+
+# Every player metric's hidden within-position percentile column on EdgeRaw, keyed by the header
+# text that metric carries on ANY tab (Player Pool/Lineups call ProjPts "Pts", Ceiling "Ceil").
+PCT_HELPER_FOR_FIELD = {
+    "ProjPts": "ProjPts%ile",
+    "Pts": "ProjPts%ile",
+    "AggPts": "AggPts%ile",
+    "Ceiling": "Ceiling%ile",
+    "Ceil": "Ceiling%ile",
+    "Val": "Val%ile",
+    "CeilVal": "CeilVal%ile",
+}
 
 
-def _tint(color: dict, amount: float = 0.5) -> dict:
-    return {k: round(1 - amount * (1 - v), 4) for k, v in color.items()}
-
-
-BAND_STRONG_GREEN = GRAD_MAX
-BAND_LIGHT_GREEN = _tint(GRAD_MAX)
-BAND_LIGHT_RED = _tint(GRAD_MIN)
-BAND_STRONG_RED = GRAD_MIN
-
-# Cut-offs on a 0-100 percentile (`PERCENTRANK * 100` for game metrics).
-PCT_STRONG, PCT_LIGHT, PCT_LIGHT_LOW, PCT_STRONG_LOW = 90, 70, 30, 10
-
-# Rule 3, `Leverage` (CeilPct - OwnPct) is centred on 0 and spans -100..+100, not
-# 0-100, so its bands are on the value itself: +40/+15 above, -15/-40 below.
-LEVERAGE_BANDS = (40, 15, -15, -40)
-
-# `OppPosRank` is 1-32 (LOW = tough matchup): the 90/70/30/10 cut-offs, expressed as
-# ranks over 32 teams -- the top ~10% (<= 4), top ~30% (<= 10), bottom ~30% (>= 23),
-# bottom ~10% (>= 29).
-RANK_BANDS = (4, 10, 23, 29)
+def _blend(strong: dict, amount: float) -> dict:
+    """`amount` of `strong` over white (0 = white, 1 = `strong`)."""
+    return {k: round(1 - amount * (1 - v), 4) for k, v in strong.items()}
 
 
 def _bool_spec(a1_range: str, formula: str, color: dict) -> dict:
@@ -394,85 +407,48 @@ def _bool_spec(a1_range: str, formula: str, color: dict) -> dict:
     }
 
 
-def band_rule_specs(
-    kind: str,
-    letter: str,
-    first_row: int,
-    last_row: int,
-    *,
-    pct_letter: str | None = None,
-    allow_zero: bool = False,
+def step_rule_specs(
+    kind: str, letter: str, first_row: int, last_row: int, *, pct_letter: str | None = None
 ) -> list[dict]:
-    """The four coloured bands (the middle band is deliberately no colour) for one
-    column, as boolean-rule specs over `letter{first_row}:letter{last_row}`.
-
-    `kind` picks what is compared: `_PCT` reads the row's hidden percentile helper
-    (`pct_letter`), `_SCORE`/`_LEVERAGE`/`_RANK` compare the cell itself, and
-    `_GAME`/`_GAME_REVERSED` compare `PERCENTRANK` of the cell against the column
-    (`_GAME_REVERSED`: LOW is good). A zero or a non-number never matches any band
-    (unless `allow_zero`, for `Spread`, where 0 is a real pick'em)."""
+    """The 2 x `STEP_LEVELS` shaded steps (middle left plain) for one column, as boolean-rule specs
+    over `letter{first_row}:letter{last_row}`. `_PCT` reads the row's hidden percentile helper
+    (`pct_letter`; none given -> no rules, never a guess), `_SCORE` the cell itself. A blank, a
+    non-number or a zero never matches (a zero gets the grey chip instead). Rules use a RELATIVE row
+    reference, so a colour moves with its row through any sort or filter."""
     a1 = f"{letter}{first_row}:{letter}{last_row}"
-    cell = f"${letter}{first_row}"
-    numeric = f"ISNUMBER({cell})" if allow_zero else f"ISNUMBER({cell}),{cell}<>0"
-
     if kind == _PCT:
         if pct_letter is None:
             return []
         p = f"${pct_letter}{first_row}"
         guard = f"ISNUMBER({p})"
-        sg = f"=AND({guard},{p}>={PCT_STRONG})"
-        lg = f"=AND({guard},{p}>={PCT_LIGHT},{p}<{PCT_STRONG})"
-        lr = f"=AND({guard},{p}>={PCT_STRONG_LOW},{p}<{PCT_LIGHT_LOW})"
-        sr = f"=AND({guard},{p}<{PCT_STRONG_LOW})"
     elif kind == _SCORE:
-        sg = f"=AND({numeric},{cell}>={PCT_STRONG})"
-        lg = f"=AND({numeric},{cell}>={PCT_LIGHT},{cell}<{PCT_STRONG})"
-        lr = f"=AND({numeric},{cell}>={PCT_STRONG_LOW},{cell}<{PCT_LIGHT_LOW})"
-        sr = f"=AND({numeric},{cell}<{PCT_STRONG_LOW})"
-    elif kind == _LEVERAGE:
-        a, b, c, d = LEVERAGE_BANDS
-        sg = f"=AND({numeric},{cell}>={a})"
-        lg = f"=AND({numeric},{cell}>={b},{cell}<{a})"
-        lr = f"=AND({numeric},{cell}<={c},{cell}>{d})"
-        sr = f"=AND({numeric},{cell}<={d})"
-    elif kind == _RANK:
-        a, b, c, d = RANK_BANDS
-        sg = f"=AND({numeric},{cell}<={a})"
-        lg = f"=AND({numeric},{cell}>{a},{cell}<={b})"
-        lr = f"=AND({numeric},{cell}>={c},{cell}<{d})"
-        sr = f"=AND({numeric},{cell}>={d})"
-    elif kind in (_GAME, _GAME_REVERSED):
-        rank = f"PERCENTRANK(${letter}${first_row}:${letter}${last_row},{cell})"
-        # High-is-good reads `PERCENTRANK * 100`; low-is-good mirrors it.
-        hi = lo = f"{rank}*100" if kind == _GAME else f"(1-{rank})*100"
-        sg = f"=AND({numeric},{hi}>={PCT_STRONG})"
-        lg = f"=AND({numeric},{hi}>={PCT_LIGHT},{hi}<{PCT_STRONG})"
-        lr = f"=AND({numeric},{lo}>={PCT_STRONG_LOW},{lo}<{PCT_LIGHT_LOW})"
-        sr = f"=AND({numeric},{lo}<{PCT_STRONG_LOW})"
+        p = f"${letter}{first_row}"
+        guard = f"ISNUMBER({p}),{p}<>0"
     else:
         return []
-    return [
-        _bool_spec(a1, sg, BAND_STRONG_GREEN),
-        _bool_spec(a1, lg, BAND_LIGHT_GREEN),
-        _bool_spec(a1, lr, BAND_LIGHT_RED),
-        _bool_spec(a1, sr, BAND_STRONG_RED),
-    ]
+    specs = []
+    top = STEP_EDGES[-1]
+    for i, lo in enumerate(STEP_EDGES):
+        last = i == STEP_LEVELS - 1
+        hi = None if last else STEP_EDGES[i + 1]
+        amount = STEP_FIRST_AMOUNT + (1 - STEP_FIRST_AMOUNT) * (lo - STEP_PLAIN_HALF) / (
+            top - STEP_PLAIN_HALF
+        )
+        up = f"{p}>={50 + lo:g}" + ("" if last else f",{p}<{50 + hi:g}")
+        down = f"{p}<={50 - lo:g}" + ("" if last else f",{p}>{50 - hi:g}")
+        specs.append(_bool_spec(a1, f"=AND({guard},{up})", _blend(GRAD_MAX, amount)))
+        specs.append(_bool_spec(a1, f"=AND({guard},{down})", _blend(GRAD_MIN, amount)))
+    return specs
 
 
-BAND_KINDS = frozenset({_PCT, _SCORE, _LEVERAGE, _RANK, _GAME, _GAME_REVERSED})
+def _pct_letter_for(name: str, header: list | None, pct_letter: str | None) -> str | None:
+    if pct_letter is not None or header is None:
+        return pct_letter
+    helper = PCT_HELPER_FOR_FIELD.get(name)
+    return column_letter(header.index(helper)) if helper in header else None
 
-# Every player metric's hidden within-position percentile column on EdgeRaw, keyed by
-# the header text that metric carries on ANY tab (Player Pool/Lineups call ProjPts
-# "Pts" and Ceiling "Ceil").
-PCT_HELPER_FOR_FIELD = {
-    "ProjPts": "ProjPts%ile",
-    "Pts": "ProjPts%ile",
-    "AggPts": "AggPts%ile",
-    "Ceiling": "Ceiling%ile",
-    "Ceil": "Ceiling%ile",
-    "Val": "Val%ile",
-    "CeilVal": "CeilVal%ile",
-}
+
+STEP_KINDS = frozenset({_PCT, _SCORE})
 
 
 def column_rule_specs(
@@ -487,30 +463,48 @@ def column_rule_specs(
     """`(gradient_specs, boolean_specs)` for one `FIELD_COLOR_SCALES` column over
     `letter{first_row}:letter{last_row}` -- the single dispatch every call site uses.
 
-    A band kind gives no gradient and its four bands plus the grey zero chip
-    (added LAST, so it wins any exact-zero cell); every other kind (Own%, movement,
-    Exposure) gives its gradient and chip exactly as `_scale_rule_specs` always did.
-    `pct_letter` overrides the helper column found by name in `header` (Board's
-    hidden lookup column)."""
+    A step kind gives no gradient and its sixteen shaded steps plus the grey zero chip (added
+    LAST, so it wins any exact-zero cell); every other kind gives one smooth gradient and its
+    chip. `pct_letter` overrides the helper column found by name in `header` (Board's hidden
+    lookup column)."""
     kind = FIELD_COLOR_SCALES[name]
     a1 = f"{letter}{first_row}:{letter}{last_row}"
-    if kind not in BAND_KINDS:
-        gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, name, zero_exclude_range=a1)
-        return [gradient_spec], ([boolean_spec] if boolean_spec is not None else [])
-    if kind == _PCT and pct_letter is None and header is not None:
-        helper = PCT_HELPER_FOR_FIELD.get(name)
-        if helper in header:
-            pct_letter = column_letter(header.index(helper))
-    booleans = band_rule_specs(
-        kind, letter, first_row, last_row, pct_letter=pct_letter, allow_zero=(name == "Spread")
-    )
-    if name in ZERO_EXCLUDED_COLUMNS:
-        booleans.append(
-            {
-                "a1_range": a1,
-                "condition_type": "NUMBER_EQ",
-                "values": ["0"],
-                "fmt": {"backgroundColor": ZERO_GREY_BG},
-            }
+    if kind in STEP_KINDS:
+        booleans = step_rule_specs(
+            kind, letter, first_row, last_row, pct_letter=_pct_letter_for(name, header, pct_letter)
         )
-    return [], booleans
+        if name in ZERO_EXCLUDED_COLUMNS:
+            booleans.append(_zero_chip(a1))
+        return [], booleans
+    gradient_spec, boolean_spec = _scale_rule_specs(a1, kind, name, zero_exclude_range=a1)
+    return [gradient_spec], ([boolean_spec] if boolean_spec is not None else [])
+
+
+def grouped_column_rule_specs(
+    name: str,
+    letter: str,
+    groups: list[tuple[int, int]],
+    *,
+    header: list | None = None,
+) -> tuple[dict | None, list[dict]]:
+    """Same as `column_rule_specs`, for a column whose data sits in several row blocks (Player
+    Pool's positions, Lineups' lineups). A step kind is one set of rules over the blocks' overall
+    span (header/totals rows between them hold text or blanks, which no step matches). A gradient
+    kind is ONE gradient over the union of the blocks, so it scales across the whole column and
+    the totals rows stay out of it. Returns `(gradient_spec_with_a1_ranges_or_None,
+    boolean_specs)` -- the gradient spec carries `a1_ranges` (plural) for
+    `SheetsClient.add_color_scales_multi_range`."""
+    kind = FIELD_COLOR_SCALES[name]
+    span = f"{letter}{min(start for start, _ in groups)}:{letter}{max(end for _, end in groups)}"
+    if kind in STEP_KINDS:
+        first = min(start for start, _ in groups)
+        last = max(end for _, end in groups)
+        booleans = step_rule_specs(kind, letter, first, last, pct_letter=_pct_letter_for(name, header, None))
+        if name in ZERO_EXCLUDED_COLUMNS:
+            booleans.append(_zero_chip(span))
+        return None, booleans
+    ranges = [f"{letter}{start}:{letter}{end}" for start, end in groups]
+    gradient_spec, boolean_spec = _scale_rule_specs(ranges[0], kind, name, zero_exclude_range=ranges)
+    gradient_spec["a1_ranges"] = ranges
+    del gradient_spec["a1_range"]
+    return gradient_spec, ([_zero_chip(span)] if boolean_spec is not None else [])

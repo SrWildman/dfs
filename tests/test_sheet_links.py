@@ -357,11 +357,11 @@ def test_link_edge_columns_not_fooled_by_a_short_header():
 def test_link_edge_columns_applies_color_scale_to_three_columns_only():
     client = SpySheetsClient(header_row=["Name"])
     link_edge_columns(client, "Player Pool", [(2, 10)], "EdgeRaw")
-    # Round 5 item 3: formula bands (plus the grey zero chip) on exactly those columns.
-    assert len({a1.split(":")[0][0] for _tab, a1 in client.boolean_rule_calls}) == len(
-        COLOR_SCALE_LINKED_COLUMNS
-    )
-    assert client.color_scale_calls == []
+    # Steps (CeilVal, GameEnv) or a gradient (Leverage) on exactly those columns, plus the grey
+    # zero chip where zero means missing.
+    coloured = {a1.split(":")[0][0] for _tab, a1 in client.color_scale_calls}
+    coloured |= {a1.split(":")[0][0] for _tab, a1 in client.boolean_rule_calls}
+    assert len(coloured) == len(COLOR_SCALE_LINKED_COLUMNS)
 
 
 def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and_weather():

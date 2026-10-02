@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dfs.config import Config
-from dfs.derived import EDGE_COLUMNS
+from dfs.derived import EDGE_COLUMNS, PLAYER_METRIC_PCT_COLUMNS
 from dfs.sheet_empty_guards import describe as describe_unguarded
 from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
@@ -25,6 +25,7 @@ from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, rend
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
+from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
 from dfs.week import parse_week_from_title
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
@@ -328,6 +329,52 @@ def _check_empty_guards(client: DoctorClient, cfg: Config, tab_titles: set[str])
     ]
 
 
+# A synced EdgeRaw has hundreds of scored players; a handful of numbers is not a sync.
+_PCT_HELPER_MIN_SOURCE_VALUES = 20
+
+
+def _as_number(cell: str) -> float | None:
+    try:
+        return float(str(cell).strip().replace("$", "").replace(",", "").replace("%", ""))
+    except ValueError:
+        return None
+
+
+def _check_pct_helpers(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
+) -> list[DoctorIssue]:
+    """The player-metric colour steps read hidden within-position percentile columns
+    (`derived.PLAYER_METRIC_PCT_COLUMNS`). If a sync leaves one blank -- or the link onto
+    PlayerPoolRaw breaks -- those cells quietly get NO colour, and nothing else notices. Fails when
+    a tab has numbers in a metric but not one number in its percentile column. (Whether a column
+    exists at all is `_check_edge_header`'s and `_check_linked_edge_columns`' job.)"""
+    issues: list[DoctorIssue] = []
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    for tab in (edge_tab, PLAYER_POOL_RAW_TAB):
+        header = headers_by_tab.get(tab)
+        if not tab or tab not in tab_titles or not header:
+            continue
+        wanted = [(m, h) for m, h in PLAYER_METRIC_PCT_COLUMNS.items() if m in header and h in header]
+        if not wanted:
+            continue
+        last_col = column_letter(max(header.index(c) for pair in wanted for c in pair))
+        rows = client.read_range(tab, f"A2:{last_col}{client.row_count(tab)}")
+        for metric, helper in wanted:
+            m_i, h_i = header.index(metric), header.index(helper)
+            source = [n for r in rows if len(r) > m_i and (n := _as_number(r[m_i])) not in (None, 0.0)]
+            filled = [r for r in rows if len(r) > h_i and _as_number(r[h_i]) is not None]
+            if len(source) >= _PCT_HELPER_MIN_SOURCE_VALUES and not filled:
+                issues.append(
+                    DoctorIssue(
+                        "pct-helpers",
+                        f"{tab}: {len(source)} non-zero {metric} values but no number in {helper} -- "
+                        f"{metric}'s highlighting reads that column, so it shows no colour "
+                        "(run `dfs sync --only edge`, then check the link with `dfs doctor`).",
+                    )
+                )
+    return issues
+
+
 def run_doctor(
     client: DoctorClient, cfg: Config, *, title: str, check_title: bool = True
 ) -> list[DoctorIssue]:
@@ -382,4 +429,5 @@ def run_doctor(
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)
+    issues += _check_pct_helpers(client, cfg, tab_titles, headers_by_tab)
     return issues

@@ -252,7 +252,7 @@ def link_edge_columns(
     gradient_specs: list[dict] = []
     boolean_specs: list[dict] = []
     for column_name in COLOR_SCALE_LINKED_COLUMNS:
-        # Round 5 item 3: the shared band dispatch (formula rules, plus the grey zero chip).
+        # The shared colour dispatch (steps or a gradient, plus the grey zero chip).
         gradients, booleans = column_rule_specs(
             column_name, column_letter(columns[column_name]), 2, last_row, header=header
         )
