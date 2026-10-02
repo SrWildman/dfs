@@ -349,6 +349,14 @@ and elsewhere, which don't auto-update if a column gets inserted upstream.
 
 ### Player Pool / Lineups
 
+**Alignment (one rule, 2026-10-02):** text sits left, numbers sit right, and a column's header
+sits the same way as its data. Coloured pills and icon links stay centred, header included
+(`Avail`, `Flags`, `Venue`, `Pool`, `OwnStatus`, `Edge ↗` and the GAME / CEIL / MOVE / WX /
+USAGE label columns). Which columns are numbers comes from `sheet_style.FIELD_FORMATS` (plus
+`Used` and the hidden `*%ile` helpers), never from the values currently in the cells, so a
+column that is blank today aligns correctly when it fills (`sheet_style.column_alignment`).
+`Issues` is text with chips and is left like any other text. Applies to PlayerPoolRaw too.
+
 Where you actually build lineups. `Lineups` is still typed: type a
 player's name into the `Name` column of a roster slot, and every other
 column VLOOKUPs off that name against `PlayerPoolRaw`. `Lineups` repeats
@@ -721,6 +729,12 @@ empty-state message ("No line movement recorded yet") rather than a page
 of real `0.0`s until at least one `nfl_odds` sync has happened this week.
 
 ### Bankroll
+
+Alignment follows the same rule as Player Pool: in the summary block (rows 1-14) the dollar and
+percent figures are right-aligned and everything else -- labels and the W-L-P record text -- is
+left; in each of the three ledgers the first column (the entry name) is left and every column
+after it is right, header row included (`sheet_style.BANKROLL_VALUE_CELLS`,
+`BANKROLL_LEDGER_LAST_COLUMN`).
 
 Top to bottom: the starting/ending bankroll summary (rows 1-13, including
 the DK/PP/UD "parallel bankrolls" `week.BANKROLL_CARRYOVER_CELLS` carries

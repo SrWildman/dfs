@@ -11,6 +11,11 @@ from dfs.sheet_color_scales import (
 from dfs.sheet_style import (
     AVAIL_CHIPS,
     BAND_BG,
+    BANKROLL_CURRENCY_CELLS,
+    BANKROLL_KPI_LAST_ROW,
+    BANKROLL_PERCENT_CELLS,
+    BANKROLL_VALUE_CELLS,
+    CENTERED_COLUMNS,
     CRIT_BG,
     CRIT_FG,
     EDGE_COLUMN_GROUPS,
@@ -36,6 +41,7 @@ from dfs.sheet_style import (
     apply_field_formats,
     apply_grouped_color_scales,
     apply_tab_chrome,
+    column_alignment,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
@@ -1609,8 +1615,8 @@ def test_polish_builder_tab_skips_repeat_styling_when_none_given():
 
     polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
-    formatted_ranges = [a1 for a1, _fmt in client.format_calls]
-    assert formatted_ranges == ["A1:C1"]
+    # The header row and the data rows (alignment) -- and nothing else: no repeat-header rows.
+    assert {a1 for a1, _fmt in client.format_calls} == {"A1:C1", "A2:C100"}
 
 
 def test_polish_builder_tab_chips_flag_and_avail_columns_when_present():
@@ -1709,7 +1715,7 @@ def test_polish_builder_tab_shrinks_and_mutes_the_edge_link_when_present():
     client = FakeBuilderTabClient(["Name", "Edge ↗"])
     polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
 
-    edge_link_fmt = next(fmt for rng, fmt in client.format_calls if rng == "B2:B100")
+    edge_link_fmt = next(fmt for rng, fmt in client.format_calls if rng == "B2:B100" and "textFormat" in fmt)
     assert edge_link_fmt["textFormat"]["foregroundColor"] == INK_MUTED
     assert edge_link_fmt["textFormat"]["fontSize"] < 10
 
@@ -2090,3 +2096,132 @@ def test_split_flag_chips_use_the_tffb_tokens():
 
     assert {SPLIT_TFFB_HIGH, SPLIT_TFFB_LOW} <= set(FLAG_CHIPS)
     assert not any(k.startswith("SPLIT") for k in FLAG_CHIPS)
+
+
+# ---------------------------------------------------------------------------
+# One alignment rule: text left, numbers right, header matches its column
+# ---------------------------------------------------------------------------
+
+
+def test_column_alignment_follows_the_declared_format_not_the_data():
+    assert column_alignment("Name") == "LEFT"
+    assert column_alignment("Stadium") == "LEFT"
+    assert column_alignment("In") == "LEFT"  # text ("L1, L2"), not a number
+    assert column_alignment("Issues") == "LEFT"  # text with chips, not in the agreed centred list
+    assert column_alignment("DK Sal") == "RIGHT"
+    assert column_alignment("Own%") == "RIGHT"
+    assert column_alignment("Used") == "RIGHT"  # a count with no FIELD_FORMATS entry
+    assert column_alignment("ProjPts%ile") == "RIGHT"  # hidden helper, still a number
+
+
+def test_every_numeric_field_format_aligns_right_and_every_pill_or_label_column_centres():
+    for name, fmt in FIELD_FORMATS.items():
+        if name in CENTERED_COLUMNS:
+            continue
+        assert column_alignment(name) == "RIGHT", name  # every FIELD_FORMATS entry is a number
+        assert fmt["numberFormat"]["type"] in {"NUMBER", "CURRENCY", "PERCENT"}
+    for name in (
+        "Avail",
+        "Flags",
+        "Venue",
+        "Pool",
+        "OwnStatus",
+        "Edge ↗",
+        "GAME",
+        "CEIL",
+        "MOVE",
+        "WX",
+        "USAGE",
+    ):
+        assert column_alignment(name) == "CENTER", name
+
+
+def _alignment_by_cell(client: FakeBuilderTabClient) -> dict[str, str]:
+    """a1 range -> alignment, for the alignment-only calls."""
+    return {
+        a1: fmt["horizontalAlignment"]
+        for a1, fmt in client.format_calls
+        if set(fmt) == {"horizontalAlignment"}
+    }
+
+
+def test_polish_builder_tab_aligns_data_and_every_header_row_per_column():
+    # Name text, DK Sal/Pts numbers, Flags a centred pill: header repeats included.
+    client = FakeBuilderTabClient(["Name", "DK Sal", "Pts", "Flags"])
+
+    polish_builder_tab(client, "Lineups", last_row=100, header_row=1, header_repeats_at=[14, 27])
+
+    got = _alignment_by_cell(client)
+    assert got["A2:A100"] == "LEFT"
+    assert got["B2:C100"] == "RIGHT"  # neighbouring numeric columns share one request
+    assert got["D2:D100"] == "CENTER"
+    for row in (1, 14, 27):
+        assert got[f"A{row}:A{row}"] == "LEFT"
+        assert got[f"B{row}:C{row}"] == "RIGHT"  # header sits over its numbers
+        assert got[f"D{row}:D{row}"] == "CENTER"
+
+
+def test_alignment_touches_only_horizontal_alignment():
+    client = FakeBuilderTabClient(["Name", "Pts"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+    for a1, fmt in client.format_calls:
+        if "horizontalAlignment" in fmt and a1 in {"A2:A100", "B2:B100"}:
+            assert set(fmt) == {"horizontalAlignment"}  # never resets a fill/number format with it
+
+
+class RecordingBankrollClient(FakeBankrollClient):
+    def __init__(self):
+        super().__init__()
+        self.calls: list[tuple[str, dict]] = []
+
+    def format_range(self, tab_name, a1_range, fmt) -> None:
+        self.calls.append((a1_range, fmt))
+
+
+def _bankroll_alignment(client: RecordingBankrollClient) -> list[tuple[str, str]]:
+    return [(a1, f["horizontalAlignment"]) for a1, f in client.calls if set(f) == {"horizontalAlignment"}]
+
+
+def test_polish_bankroll_aligns_each_ledger_header_with_its_columns():
+    client = RecordingBankrollClient()
+
+    polish_bankroll(client, "Bankroll", cash=(38, 39, 83), gpp=(85, 86, 149), betting=(16, 17, 36))
+
+    got = _bankroll_alignment(client)
+    # Header row included in each range, so the header takes its column's alignment.
+    for a1, side in (
+        ("A38:A83", "LEFT"),
+        ("B38:J83", "RIGHT"),
+        ("A85:A149", "LEFT"),
+        ("B85:J149", "RIGHT"),
+        ("A16:A36", "LEFT"),
+        ("B16:F36", "RIGHT"),
+    ):
+        assert (a1, side) in got, a1
+
+
+def test_polish_bankroll_kpi_block_is_left_with_numeric_values_right():
+    client = RecordingBankrollClient()
+    polish_bankroll(client, "Bankroll", cash=(38, 39, 83), gpp=(85, 86, 149))
+
+    got = _bankroll_alignment(client)
+    baseline = got.index((f"A1:J{BANKROLL_KPI_LAST_ROW}", "LEFT"))
+    for rng in BANKROLL_VALUE_CELLS:
+        assert got.index((rng, "RIGHT")) > baseline  # right applied over the left baseline
+
+
+def test_bankroll_value_cells_cover_every_currency_and_percent_cell_and_the_kpi_row_is_pinned():
+    from dfs.sheet_bankroll_view import SUMMARY_ROW
+
+    def cells(rng):  # "B1:B2" / "F1" -> [(col, row)...]
+        import re
+
+        m = re.fullmatch(r"([A-Z])(\d+)(?::([A-Z])(\d+))?", rng)
+        c1, r1, c2, r2 = m.group(1), int(m.group(2)), m.group(3) or m.group(1), int(m.group(4) or m.group(2))
+        return {(c, r) for c in map(chr, range(ord(c1), ord(c2) + 1)) for r in range(r1, r2 + 1)}
+
+    values = set().union(*(cells(r) for r in BANKROLL_VALUE_CELLS))
+    formatted = set().union(*(cells(r) for r in BANKROLL_CURRENCY_CELLS + BANKROLL_PERCENT_CELLS))
+    assert formatted <= values
+    assert BANKROLL_KPI_LAST_ROW == SUMMARY_ROW  # the Betting summary row closes the KPI block
+    assert max(r for _c, r in values) <= BANKROLL_KPI_LAST_ROW

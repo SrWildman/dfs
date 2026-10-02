@@ -330,6 +330,61 @@ FIELD_FORMATS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# One alignment rule (Sam, 2026-10-02): text left, numbers right, and a header
+# sits the way its column does. Before this, Player Pool/Lineups had numbers
+# left, centred and unset in the same tab, with every header left. Derived from
+# the column's declared format, never from sample data: a column that is blank
+# today (empty pool, empty week) must still align correctly when it fills.
+#
+# The one exception is Sam's: coloured pills and icon links (`CENTERED_COLUMNS`)
+# stay centred, header included. `Issues` is text with chips but was not in that
+# list when the rule was agreed, so it stays an ordinary text column.
+# ---------------------------------------------------------------------------
+CENTERED_COLUMNS = frozenset({"Avail", "Flags", "Venue", "Pool", "OwnStatus", "Edge ↗", *ZONE_LABELS})
+_NUMERIC_FORMAT_TYPES = frozenset({"NUMBER", "CURRENCY", "PERCENT"})
+# Numbers with no FIELD_FORMATS entry: Player Pool's `Used` count and the hidden
+# within-position percentile helpers.
+NUMERIC_UNFORMATTED_COLUMNS = frozenset({"Used", *PLAYER_METRIC_PCT_COLUMNS.values()})
+
+
+def column_alignment(name: str) -> str:
+    """LEFT / RIGHT / CENTER for the column headed `name` (see the block above)."""
+    if name in CENTERED_COLUMNS:
+        return "CENTER"
+    fmt = FIELD_FORMATS.get(name)
+    is_number = name in NUMERIC_UNFORMATTED_COLUMNS or (
+        fmt is not None and fmt.get("numberFormat", {}).get("type") in _NUMERIC_FORMAT_TYPES
+    )
+    return "RIGHT" if is_number else "LEFT"
+
+
+def apply_column_alignment(
+    client: SheetsClient, tab: str, header: list, *, header_rows: list[int], data_start: int, last_row: int
+) -> int:
+    """Set `column_alignment` on every column of `header`: the data rows and each
+    row in `header_rows` (the real header plus Lineups' repeats). Neighbouring
+    columns with the same alignment share one request. Touches only
+    `horizontalAlignment`, so fills, fonts and number formats are left alone.
+    Run it after the header fill is applied, and before the chip/zone helpers
+    (which only ever set CENTER, the same thing this does for their columns).
+    Returns how many columns were set."""
+    runs: list[tuple[str, int, int]] = []  # (alignment, first col index, last col index)
+    for i, name in enumerate(header):
+        alignment = column_alignment(str(name))
+        if runs and runs[-1][0] == alignment and runs[-1][2] == i - 1:
+            runs[-1] = (alignment, runs[-1][1], i)
+        else:
+            runs.append((alignment, i, i))
+    for alignment, first, last in runs:
+        first_letter, last_letter = column_letter(first), column_letter(last)
+        fmt = {"horizontalAlignment": alignment}
+        client.format_range(tab, f"{first_letter}{data_start}:{last_letter}{last_row}", fmt)
+        for row in header_rows:
+            client.format_range(tab, f"{first_letter}{row}:{last_letter}{row}", fmt)
+    return len(header)
+
+
 def apply_field_formats(
     client: SheetsClient, tab: str, header: list, *, header_row: int, last_row: int
 ) -> int:
@@ -1327,6 +1382,14 @@ def polish_builder_tab(
     for repeat_row in header_repeats_at or []:
         client.format_range(tab, f"A{repeat_row}:{last_col}{repeat_row}", _HEADER_FMT)
     client.freeze(tab, rows=freeze_rows if freeze_rows is not None else header_row, cols=freeze_cols)
+    apply_column_alignment(
+        client,
+        tab,
+        header,
+        header_rows=[header_row, *(header_repeats_at or [])],
+        data_start=header_row + 1,
+        last_row=last_row,
+    )
 
     # Id/Flag hidden outright, same treatment as `polish_edge`'s own
     # EdgeRaw -- both sit in `sheet_columns.INTERNAL`, past the collapsed
@@ -2019,6 +2082,26 @@ _PERCENT = _num("0.0%", "PERCENT")
 BANKROLL_CURRENCY_CELLS = ["B1:B2", "D1:D3", "F1", "I1:I2", "B6:B7", "B9", "D12:D13", "F12:F13", "H12:H13"]
 BANKROLL_PERCENT_CELLS = ["D4", "F2", "B8", "B10", "B12:B13"]
 BANKROLL_LABEL_CELLS = ["A1:A13", "C1:C4", "E1:E2", "G12:G13", "H1:H2", "C12:E13"]
+# The KPI block is rows 1..BANKROLL_KPI_LAST_ROW (the Betting summary row is the last;
+# a test pins it to `sheet_bankroll_view.SUMMARY_ROW`). Its numeric value cells align
+# right and everything else in it (labels, the W-L-P record text) aligns left. Declared
+# cells, not sampled values: a blank week's guarded formulas return "" and must still
+# align right once they fill.
+BANKROLL_KPI_LAST_ROW = 14
+BANKROLL_KPI_LAST_COLUMN = "J"
+BANKROLL_VALUE_CELLS = [
+    "B1:B2",
+    "D1:D4",
+    "F1:F2",
+    "I1:I2",
+    "B6:B10",
+    "B12:B14",
+    "D12:D14",
+    "F12:F14",
+    "H12:H14",
+]
+# Every ledger is a text column A (entry name) and numbers across the rest.
+BANKROLL_LEDGER_LAST_COLUMN = {"betting": "F", "cash": "J", "gpp": "J"}
 
 
 def polish_bankroll(
@@ -2027,9 +2110,14 @@ def polish_bankroll(
     *,
     cash: tuple[int, int, int],
     gpp: tuple[int, int, int],
+    betting: tuple[int, int, int] | None = None,
     entry_key_columns: tuple[str, ...] = (),
 ) -> str:
     """Direction G: the same ledger, read as a scoreboard.
+
+    `betting` is the Betting ledger's (header_row, first_row, last_row), passed in
+    because those rows are `sheet_bankroll_view`'s constants (which imports this
+    module); it only affects alignment.
 
     Currency and percent formats across the KPI block, the two ledger
     header rows given the same dark treatment as everywhere else, money
@@ -2072,6 +2160,21 @@ def polish_bankroll(
             client.format_range(tab, f"{col}{first}:{col}{last}", _CURRENCY)
         for col in ("I", "J"):
             client.format_range(tab, f"{col}{first}:{col}{last}", _PERCENT)
+
+    # One alignment rule (see `column_alignment`): text left, numbers right, each ledger
+    # header over its own column. Left first, then the numeric cells right over it.
+    client.format_range(
+        tab,
+        f"A1:{BANKROLL_KPI_LAST_COLUMN}{BANKROLL_KPI_LAST_ROW}",
+        {"horizontalAlignment": "LEFT"},
+    )
+    for rng in BANKROLL_VALUE_CELLS:
+        client.format_range(tab, rng, {"horizontalAlignment": "RIGHT"})
+    ledgers = [("cash", cash), ("gpp", gpp)] + ([("betting", betting)] if betting else [])
+    for key, (header_row, _first, last) in ledgers:
+        last_col = BANKROLL_LEDGER_LAST_COLUMN[key]
+        client.format_range(tab, f"A{header_row}:A{last}", {"horizontalAlignment": "LEFT"})
+        client.format_range(tab, f"B{header_row}:{last_col}{last}", {"horizontalAlignment": "RIGHT"})
 
     # Net green when positive, red when negative -- on the season net, the
     # weekly net, and the Cash/GPP/Betting weekly nets.

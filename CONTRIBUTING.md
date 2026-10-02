@@ -3392,3 +3392,22 @@ from "X didn't work because Y, so this does Z instead" than from a list of
 changed files. Several files in this codebase have long module-docstring
 "here's what didn't work" sections for exactly this reason; that's a
 pattern worth continuing, not something specific to how they were written.
+
+## One alignment rule on Bankroll, Player Pool and Lineups (2026-10-02)
+
+No row/column/tab moved. Sam: "text left, numbers right, headers matching their column."
+Player Pool/Lineups had numeric columns left, centred or unset within one tab, every header
+left, and Bankroll's ledger headers left over right-aligned numbers.
+
+- `sheet_style.column_alignment(name)` decides a column from its declared format
+  (`FIELD_FORMATS` number/currency/percent, plus `NUMERIC_UNFORMATTED_COLUMNS`), never from the
+  data -- a blank column must align correctly once it fills. `CENTERED_COLUMNS` (Sam's call:
+  pills and icon links stay centred) holds the exceptions; `Issues` is deliberately not in it.
+- `apply_column_alignment` runs from `polish_builder_tab`, so Player Pool, Lineups (repeated
+  header rows included) and PlayerPoolRaw all follow it. EdgeRaw and the view tabs are
+  untouched. It writes only `horizontalAlignment`.
+- `polish_bankroll` aligns the KPI block (`BANKROLL_VALUE_CELLS` right, the rest left) and each
+  ledger (first column left, the rest right, header row inside the range). The Betting ledger's
+  rows come in as `betting=` from `cli` because they are `sheet_bankroll_view` constants.
+  `BANKROLL_KPI_LAST_ROW` is pinned to `sheet_bankroll_view.SUMMARY_ROW` by a test.
+- Not a structural change; no changelog row.

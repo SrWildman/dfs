@@ -59,6 +59,12 @@ from dfs.sheet_bankroll_view import (
     build_betting_ledger,
     compute_weekly_betting_stats,
 )
+from dfs.sheet_bankroll_view import (
+    FIRST_ROW as BETTING_FIRST_ROW,
+)
+from dfs.sheet_bankroll_view import (
+    LAST_ROW as BETTING_LAST_ROW,
+)
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_empty_guards import repair_unguarded
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
@@ -1108,6 +1114,7 @@ def sheets_polish(
                         cfg.bankroll.gpp.first_row,
                         cfg.bankroll.gpp.last_row,
                     ),
+                    betting=(HEADER_ROW, BETTING_FIRST_ROW, BETTING_LAST_ROW),
                     entry_key_columns=(
                         cfg.bankroll.cash.entry_key_column,
                         cfg.bankroll.gpp.entry_key_column,
