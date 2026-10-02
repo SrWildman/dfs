@@ -309,6 +309,25 @@ def test_offense_epa_per_play_is_all_scrimmage_plays():
     assert offense_epa_per_play(pbp)["KC"] == 0.2
 
 
+def test_offense_epa_is_split_by_pass_and_rush_with_the_same_filters():
+    from dfs.team_metrics import offense_epa_pass, offense_epa_rush
+
+    pbp = _plays(
+        [
+            ("KC", "DEN", "pass", 0.5, 1),
+            ("KC", "DEN", "pass", 0.1, 0),  # KC pass EPA mean (0.5 + 0.1) / 2 = 0.3
+            ("KC", "DEN", "pass", -9.0, 0, "no_play"),  # excluded, same allowlist as the defensive side
+            ("KC", "DEN", "rush", -0.2, 0),
+            ("DEN", "KC", "rush", 0.1, 1),
+            ("DEN", "KC", "rush", 0.3, 1),  # DEN rush EPA mean 0.2
+        ]
+    )
+    assert offense_epa_pass(pbp)["KC"] == 0.3
+    assert offense_epa_rush(pbp)["KC"] == -0.2
+    assert offense_epa_rush(pbp)["DEN"] == 0.2
+    assert "DEN" not in offense_epa_pass(pbp).index  # no DEN pass plays: absent, not 0
+
+
 def test_epa_blend_applies_the_prior_weight_and_keeps_three_decimals():
     from dfs.team_metrics import PBP_PRIOR_WEIGHT_GAMES, blend_with_prior
 

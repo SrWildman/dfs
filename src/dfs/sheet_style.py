@@ -136,8 +136,17 @@ from dfs.sheet_views import (
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
     BOARD_STACK_LAST_ROW,
+    SLATE_COL,
+    SLATE_GAME_FIRST_ROW,
+    SLATE_GAME_LAST_ROW,
+    SLATE_GPS_CHECK_COL,
     SLATE_GPS_CHECK_COL_INDEX,
     SLATE_ON_SLATE_COL,
+    SLATE_TEAMS_COLHEADER,
+    SLATE_TEAMS_COLHEADER_ROW,
+    SLATE_TEAMS_FIRST_ROW,
+    SLATE_TEAMS_HEADER_ROW,
+    SLATE_TEAMS_LAST_ROW,
     _position_block_rows,
 )
 from dfs.sheets import SheetsClient, column_letter
@@ -301,6 +310,14 @@ FIELD_FORMATS = {
     "SpdMove": _num('"+"0.0;"-"0.0;0.0'),
     # Slate Grid/Board Slate shape only: GPS is a 1-5 score (never negative).
     "GPS": _num("0.00"),
+    # Slate Grid's TEAMS section (2026-10-02). EPA per play is a small signed number, three
+    # decimals like `OppEPA`; "Implied" is a Vegas implied team total like `Team Implied`.
+    "Implied": _num("0.0"),
+    "Off EPA/play": _num("0.000"),
+    "Off EPA/pass": _num("0.000"),
+    "Off EPA/rush": _num("0.000"),
+    "Opp Def EPA/pass": _num("0.000"),
+    "Opp Def EPA/rush": _num("0.000"),
     "Val": _num("0.00"),
     # A3 (2026-09-22): ValAdj is a 0-100 within-position percentile blend
     # now, not a raw points residual -- same one-decimal format as
@@ -316,6 +333,14 @@ FIELD_FORMATS = {
     # can share this one PERCENT format.
     "Own%": _num("0.0%", "PERCENT"),
     "Snap%": _num("0.0%", "PERCENT"),
+    # Usage volume (2026-10-02). Shares are true fractions like Snap%/Own%; WOPR is a plain
+    # score (nflverse's own 1.5 x target share + 0.7 x air-yards share, ~0-1.5); the two
+    # per-game counts carry two decimals (a 3-game average of whole touches).
+    "Tgt%": _num("0.0%", "PERCENT"),
+    "Rush%": _num("0.0%", "PERCENT"),
+    "WOPR": _num("0.00"),
+    "RZ/G": _num("0.00"),
+    "HVT/G": _num("0.00"),
     "% of Cap": _num("0.0%", "PERCENT"),
     "Exposure": _num("0.0%", "PERCENT"),
     "Target": _num("0.0%", "PERCENT"),
@@ -657,6 +682,11 @@ EDGE_WIDTHS = {
     "WX": 44,
     "USAGE": 56,  # Part C, C6 -- a full word, not a 2-4 letter abbreviation like the others
     "Snap%": 78,
+    "Tgt%": 72,
+    "WOPR": 72,
+    "Rush%": 76,
+    "RZ/G": 72,
+    "HVT/G": 76,
 }
 
 # Phase 6, Part 2 (2026-09-17) overrides Fix 2.9: Stadium/Roof/Wind used
@@ -700,7 +730,7 @@ EDGE_COLUMN_GROUPS = [
     ("Stadium", "Wind"),
     # Round 5 1b: USAGE (Snap%) was never grouped -- the "arrow" Sam saw beside it
     # was the hidden Id/Flag columns, not a fold control. One real group, like the rest.
-    ("Snap%", "Snap%"),
+    ("Snap%", "HVT/G"),
 ]
 
 # Muted, per-position backgrounds -- just enough to see position boundaries
@@ -2264,6 +2294,8 @@ HIDE_TABS = [
     # Slate shape and EdgeRaw's own ModelImplied read it), same treatment
     # as GamesRaw/WeatherRaw just above.
     "GPSRaw",
+    # Per-team pbp metrics (usage work, 2026-10-02): Slate Grid's TEAMS section reads it.
+    "TeamMetricsRaw",
     # Round 5 item 6: static DST alias lookup (`sheet_names.NameAlias`).
     "NameAlias",
     "SoSQB",
@@ -2722,87 +2754,139 @@ def _apply_column_rules(
 
 
 def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
+    """Game rows (A:Q, hidden helpers R:S) then the TEAMS section below. Every column letter comes
+    from `sheet_views.SLATE_COL` / `SLATE_TEAMS_COLHEADER`, never typed: the usage work (2026-10-02)
+    inserted four game columns ahead of the hidden helpers and moved them from N/O to R/S."""
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
+    c = SLATE_COL
+    first, last = SLATE_GAME_FIRST_ROW, SLATE_GAME_LAST_ROW
     client.clear_conditional_formats(tab)
-    client.set_column_widths(
-        tab,
-        {
-            "A": 140,
-            "B": 116,
-            "C": 64,
-            "D": 72,
-            "E": 84,
-            "F": 72,
-            "G": 72,
-            "H": 84,
-            "I": 52,
-            "J": 160,
-            # A9 (2026-09-22): per-game line movement, appended past the
-            # original 10 columns -- same widths `style_movement` already
-            # uses for these two header names.
-            "K": 92,
-            "L": 92,
-            # GPS (2026-09-26): appended past line movement. `N` is the hidden
-            # "GPS off Vegas" sanity-check helper (Round 5 item 5c); `O` the hidden
-            # "On DK slate" helper (Round 5 follow-up item 1).
-            "M": 52,
-            "N": 84,
-            "O": 84,
-        },
-    )
+    widths = {
+        c["Matchup"]: 140,
+        c["Kickoff"]: 116,
+        c["Total"]: 64,
+        c["Spread"]: 72,
+        c["Roof"]: 84,
+        c["Wind"]: 72,
+        c["Gust"]: 72,
+        c["Rest (A/H)"]: 84,
+        # Wide enough for the TEAMS header "Off EPA/rush" that shares this column (wrapped, 2 lines).
+        c["Div"]: 84,
+        c["Stadium"]: 160,
+        # A9 (2026-09-22): per-game line movement -- same widths `style_movement` already
+        # uses for these two header names.
+        c["Total move"]: 92,
+        c["Spread move"]: 92,
+        c["GPS"]: 52,
+        # Usage work (2026-10-02): the Board Slate shape's combined-game values.
+        c["GameEnv"]: 72,
+        c["Pace"]: 72,
+        c["PROE"]: 64,
+        c["Expl%"]: 72,
+        # Hidden helpers: "GPS off Vegas" (Round 5 item 5c) and "On DK slate" (Round 5 follow-up 1).
+        SLATE_GPS_CHECK_COL: 84,
+        SLATE_ON_SLATE_COL: 84,
+    }
+    client.set_column_widths(tab, widths)
     client.format_range(tab, f"A1:{SLATE_ON_SLATE_COL}1", _HEADER_FMT)
-    client.format_range(tab, "C2:C19", FIELD_FORMATS["Total"])
-    client.format_range(tab, "D2:D19", FIELD_FORMATS["Spread"])
-    client.format_range(tab, "F2:G19", FIELD_FORMATS["Wind"])
-    client.format_range(tab, "I2:I19", {"horizontalAlignment": "CENTER"})
-    _apply_column_rules(client, tab, "Total", "C", 2, 19)
+    for name in ("Total", "Spread"):
+        client.format_range(tab, f"{c[name]}{first}:{c[name]}{last}", FIELD_FORMATS[name])
+    client.format_range(tab, f"{c['Wind']}{first}:{c['Gust']}{last}", FIELD_FORMATS["Wind"])
+    client.format_range(tab, f"{c['Div']}{first}:{c['Div']}{last}", {"horizontalAlignment": "CENTER"})
+    _apply_column_rules(client, tab, "Total", c["Total"], first, last)
     client.add_boolean_rule(
-        tab, "F2:G19", condition_type="NUMBER_GREATER", values=["15"], fmt=_chip(WARN_BG, WARN_FG)
+        tab,
+        f"{c['Wind']}{first}:{c['Gust']}{last}",
+        condition_type="NUMBER_GREATER",
+        values=["15"],
+        fmt=_chip(WARN_BG, WARN_FG),
     )
     client.add_boolean_rule(
-        tab, "I2:I19", condition_type="TEXT_EQ", values=["DIV"], fmt=_chip(FLAT_BG, FLAT_FG)
+        tab,
+        f"{c['Div']}{first}:{c['Div']}{last}",
+        condition_type="TEXT_EQ",
+        values=["DIV"],
+        fmt=_chip(FLAT_BG, FLAT_FG),
     )
-    # A9: same diverging-at-zero treatment `style_movement` gives these
-    # exact two column names -- zero is the meaningful midpoint, not the
-    # statistical median. Two separate rules, one per column (not one
-    # rule spanning K:L), same reasoning `style_movement` already
-    # documents: Total move and Spread move are different metrics and
-    # each needs its own min/max, not a shared one across both.
-    client.format_range(tab, "K2:L19", FIELD_FORMATS["ImpliedMove"])
-    for col in ("K", "L"):
+    # A9: same diverging-at-zero treatment `style_movement` gives these exact two column
+    # names -- zero is the meaningful midpoint, not the statistical median. Two separate rules,
+    # one per column, since Total move and Spread move are different metrics each needing its
+    # own min/max.
+    move_first, move_last = c["Total move"], c["Spread move"]
+    client.format_range(tab, f"{move_first}{first}:{move_last}{last}", FIELD_FORMATS["ImpliedMove"])
+    for col in (move_first, move_last):
         client.add_color_scale(
             tab,
-            f"{col}2:{col}19",
+            f"{col}{first}:{col}{last}",
             min_color=GRAD_MIN,
             mid_color=WHITE,
             max_color=GRAD_MAX,
             mid_type="NUMBER",
             mid_value="0",
-            **diverging_anchor_kwargs(f"{col}2:{col}19"),
+            **diverging_anchor_kwargs(f"{col}{first}:{col}{last}"),
         )
-    # GPS: a 1-5 score, gradient like Total; a muted chip when the worksheet's
-    # implied totals are far off Vegas (hidden helper column N, see
-    # `sheet_views.build_slate_grid`).
-    client.format_range(tab, "M2:M19", FIELD_FORMATS["GPS"])
-    _apply_column_rules(client, tab, "GPS", "M", 2, 19)
-    client.add_boolean_rule(
-        tab, "M2:M19", condition_type="CUSTOM_FORMULA", values=["=$N2=TRUE"], fmt=_chip(WARN_BG, WARN_FG)
-    )
-    # Round 5 follow-up item 1: a game with no players on the DK slate stays listed
-    # here (the full week in one place) but in muted text. Added LAST so it wins over
-    # every other rule's text colour. Reads the hidden "On DK slate" helper.
-    on_slate = SLATE_ON_SLATE_COL
+    # GPS: a 1-5 score, gradient like Total; a muted chip when the worksheet's implied totals
+    # are far off Vegas (hidden helper column, see `sheet_views.build_slate_grid`).
+    gps = c["GPS"]
+    client.format_range(tab, f"{gps}{first}:{gps}{last}", FIELD_FORMATS["GPS"])
+    _apply_column_rules(client, tab, "GPS", gps, first, last)
     client.add_boolean_rule(
         tab,
-        f"A2:{column_letter(SLATE_GPS_CHECK_COL_INDEX - 1)}19",
+        f"{gps}{first}:{gps}{last}",
         condition_type="CUSTOM_FORMULA",
-        values=[f"=${on_slate}2=FALSE"],
-        fmt={"textFormat": {"foregroundColor": INK_MUTED, "italic": True}},
+        values=[f"=${SLATE_GPS_CHECK_COL}{first}=TRUE"],
+        fmt=_chip(WARN_BG, WARN_FG),
     )
-    client.hide_columns(tab, column_letter(SLATE_GPS_CHECK_COL_INDEX), on_slate)
-    client.freeze(tab, rows=1, cols=1)
-    return f"{tab}: styled (totals colour-scaled, high wind flagged, movement scaled, GPS scaled)"
+    # The Board Slate shape's combined-game metrics, same formats and same colouring as there.
+    for name in ("GameEnv", "Pace", "PROE", "Expl%"):
+        client.format_range(tab, f"{c[name]}{first}:{c[name]}{last}", FIELD_FORMATS[name])
+        _apply_column_rules(client, tab, name, c[name], first, last)
+    # Round 5 follow-up item 1: a game with no players on the DK slate stays listed here (the
+    # full week in one place) but in muted text. Added LAST so it wins over every other rule's
+    # text colour. Reads the hidden "On DK slate" helper.
+    dim = {"textFormat": {"foregroundColor": INK_MUTED, "italic": True}}
+    client.add_boolean_rule(
+        tab,
+        f"A{first}:{column_letter(SLATE_GPS_CHECK_COL_INDEX - 1)}{last}",
+        condition_type="CUSTOM_FORMULA",
+        values=[f"=${SLATE_ON_SLATE_COL}{first}=FALSE"],
+        fmt=dim,
+    )
+
+    # ---- TEAMS: one row per team on the schedule ------------------------------------------
+    t_first, t_last = SLATE_TEAMS_FIRST_ROW, SLATE_TEAMS_LAST_ROW
+    last_teams_col = column_letter(len(SLATE_TEAMS_COLHEADER) - 1)
+    t = {name: column_letter(i) for i, name in enumerate(SLATE_TEAMS_COLHEADER)}
+    title_row, head_row = SLATE_TEAMS_HEADER_ROW, SLATE_TEAMS_COLHEADER_ROW
+    client.format_range(tab, f"A{title_row}:{last_teams_col}{title_row}", _PANEL_FMT)
+    client.format_range(
+        tab, f"A{head_row}:{last_teams_col}{head_row}", {**_SUBHEAD_FMT, "wrapStrategy": "WRAP"}
+    )
+    # The long headers ("Opp Def EPA/rush") wrap over two lines in the column widths above.
+    client.set_row_heights(tab, start_row=head_row, end_row=head_row, pixel_size=34)
+    # Reset the rows' number format first: they share columns with the game rows above, whose
+    # formats (Wind "mph", move signs, ...) must not bleed down.
+    client.format_range(tab, f"A{t_first}:{last_teams_col}{t_last}", {"numberFormat": None})
+    for name in SLATE_TEAMS_COLHEADER[2:]:
+        client.format_range(tab, f"{t[name]}{t_first}:{t[name]}{t_last}", FIELD_FORMATS[name])
+        _apply_column_rules(client, tab, name, t[name], t_first, t_last)
+    # Dimmed when the team has no player on the DK slate (same rule as the game rows, same helper).
+    client.add_boolean_rule(
+        tab,
+        f"A{t_first}:{last_teams_col}{t_last}",
+        condition_type="CUSTOM_FORMULA",
+        values=[f"=${SLATE_ON_SLATE_COL}{t_first}=FALSE"],
+        fmt=dim,
+    )
+    client.hide_columns(tab, SLATE_GPS_CHECK_COL, SLATE_ON_SLATE_COL)
+    # No frozen row (`sheet_audit.FREEZE_OVERRIDES`): a pinned game header would mislabel the TEAMS
+    # columns once you scroll down to them. Column A (Matchup / Team) stays pinned.
+    client.freeze(tab, rows=0, cols=1)
+    return (
+        f"{tab}: styled (totals colour-scaled, high wind flagged, movement scaled, GPS and game "
+        "metrics scaled, TEAMS section)"
+    )
 
 
 def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:

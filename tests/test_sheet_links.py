@@ -144,6 +144,10 @@ def test_already_linked_columns_positions_never_move():
     # shifting `GameID`/`TmRank` and everything after one right again.
     # Round 5 item 3 appended five hidden `*%ile` percentile helpers right
     # after `Flag` (linked, INTERNAL) -- nothing before them moves.
+    # Usage work (2026-10-02) appended `Tgt%`/`WOPR`/`Rush%`/`RZ/G`/`HVT/G` right after `Snap%` (all
+    # linked, 40-44) and five more hidden `*%ile` helpers after the existing five (52-56): `Id`,
+    # `Flag` and the first five helpers move five right (40/41/42-46 -> 45/46/47-51); nothing at
+    # or before `Snap%` (39) moves.
     assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
         6,
         8,
@@ -175,6 +179,16 @@ def test_already_linked_columns_positions_never_move():
         44,
         45,
         46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
     ]
 
 
@@ -400,9 +414,9 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
     client = SpySheetsClient(header_row=["Name", "Pos."])  # width 2 -> next col C
     link_edge_columns(client, "Player Pool", [(2, 3)], "EdgeRaw")
     assert client.group_calls == [
-        # GameEnv..Wind merged, plus USAGE's Snap% (Round 5 1b): this
-        # fixture has no USAGE label column between them, so they merge too.
-        ("Player Pool", "H", "Y", True),
+        # GameEnv..Wind merged, plus USAGE's Snap% and the five usage metrics (Round 5 1b; usage work
+        # 2026-10-02): this fixture has no USAGE label column between them, so they merge too.
+        ("Player Pool", "H", "AD", True),
     ]
 
 
@@ -427,7 +441,7 @@ def test_link_edge_columns_groups_independently_once_zone_labels_separate_them()
         (column_letter(header.index("CeilPct")), column_letter(header.index("OwnStatus"))),
         (column_letter(header.index("ImpliedMove")), column_letter(header.index("GameStart"))),
         (column_letter(header.index("Venue")), column_letter(header.index("Wind"))),
-        (column_letter(header.index("Snap%")), column_letter(header.index("Snap%"))),  # USAGE
+        (column_letter(header.index("Snap%")), column_letter(header.index("HVT/G"))),  # USAGE
     ]
     assert [(start, end) for _tab, start, end, _collapsed in client.group_calls] == expected
 

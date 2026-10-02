@@ -168,7 +168,8 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         'One system, used everywhere: a dark header row always means "this is a '
         'table header", nothing else does. Pale yellow always means "you type '
         'here" (see above) -- the only cue for that. Green/red shading on a '
-        "number means better/worse. Player stats (ProjPts, AggPts, Ceiling, Val, CeilVal) and the "
+        "number means better/worse. Player stats (ProjPts, AggPts, Ceiling, Val, CeilVal), the "
+        "usage columns (Tgt%, WOPR, Rush%, RZ/G, HVT/G) and the "
         "0-100 scores (ValAdj, CeilPct, GameEnv) show where a player ranks among players at "
         "the SAME position (a QB is only ever compared with QBs): plain = the middle of the "
         "pack, green = ranked above most of his position, red = below, and the colour "
@@ -221,10 +222,16 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Read-only (`dfs setup build-views`): one row per game instead of one row "
         "per player -- kickoff, total, spread, roof, wind/gust, rest days, "
         "division game, stadium, plus per-game line movement (total move/spread "
-        "move). Every game of the week is listed; one with no players in "
-        "DraftKings' salary file (not on the main slate) is dimmed. A sortable "
-        'filter view ("All") is available without touching the underlying rows. '
-        "Nothing to type here.",
+        "move), GPS and the combined game environment (GameEnv, Pace, PROE, Expl% "
+        "-- both teams' values averaged, the same numbers as the Board's Slate shape). "
+        "Below the games, a TEAMS section lists every team on the schedule by implied "
+        "total: pace, PROE, explosive rate, offensive EPA per play/pass/rush, and the "
+        "EPA the OPPONENT's defense allows per pass/rush (a high number is a soft "
+        "defense, so green) -- all from `TeamMetricsRaw`, the hidden per-team table "
+        "`dfs sync` writes. Every game and team of the week is listed; one with no "
+        "players in DraftKings' salary file (not on the main slate) is dimmed. A "
+        'sortable filter view ("All") is available on the games without touching the '
+        "underlying rows. Nothing to type here.",
     ),
     (
         "TFFBOptoRaw",

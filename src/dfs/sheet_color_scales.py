@@ -91,6 +91,13 @@ FIELD_COLOR_SCALES = {
     "Ceil": _PCT,
     "Val": _PCT,
     "CeilVal": _PCT,
+    # Usage volume (2026-10-02): compared within position, like ProjPts -- a 25% target share
+    # means something different for a WR and an RB. Blank where a metric doesn't apply.
+    "Tgt%": _PCT,
+    "WOPR": _PCT,
+    "Rush%": _PCT,
+    "RZ/G": _PCT,
+    "HVT/G": _PCT,
     # Already 0-100 percentile scores: stepped on their own value.
     "ValAdj": _SCORE,
     "CeilPct": _SCORE,
@@ -106,6 +113,14 @@ FIELD_COLOR_SCALES = {
     "GPS": _GRADIENT,
     # Higher = softer matchup for every position (DST sign-flipped).
     "OppEPA": _GRADIENT,
+    # Slate Grid's TEAMS section: more is better for an offence on all of these. For "Opp Def"
+    # a higher number means the opponent's defense allows more, i.e. a softer spot.
+    "Implied": _GRADIENT,
+    "Off EPA/play": _GRADIENT,
+    "Off EPA/pass": _GRADIENT,
+    "Off EPA/rush": _GRADIENT,
+    "Opp Def EPA/pass": _GRADIENT,
+    "Opp Def EPA/rush": _GRADIENT,
     # Lower is better: Pace (seconds per snap, faster is better) and Spread (a bigger favourite).
     "Pace": _REVERSED,
     "Spread": _REVERSED,
@@ -390,6 +405,11 @@ PCT_HELPER_FOR_FIELD = {
     "Ceil": "Ceiling%ile",
     "Val": "Val%ile",
     "CeilVal": "CeilVal%ile",
+    "Tgt%": "Tgt%ile",
+    "WOPR": "WOPR%ile",
+    "Rush%": "Rush%ile",
+    "RZ/G": "RZ/G%ile",
+    "HVT/G": "HVT/G%ile",
 }
 
 

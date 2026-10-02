@@ -1476,6 +1476,86 @@ def test_snap_pct_join_result_exposed_on_edge_build_result():
     assert result.source_joins["snaps"].pool_matched == 1
 
 
+def _usage(rows):
+    base = {
+        "GsisId": "00-0000001",
+        "Name": "Player One",
+        "Team": "DET",
+        "Position": "WR",
+        "Tgt%": 0.25,
+        "WOPR": 0.6,
+        "Rush%": float("nan"),
+        "RZ/G": 1.33,
+        "HVT/G": float("nan"),
+        "Games": 3,
+        "ThroughWeek": 3,
+    }
+    return pd.DataFrame([{**base, **r} for r in rows])
+
+
+def test_usage_columns_blank_when_not_synced_or_empty():
+    from dfs.usage_metrics import USAGE_METRIC_COLUMNS, empty_usage_frame
+
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "Position": "WR"}])
+    sal = _salaries([{"ID": "1"}])
+    for usage in (None, empty_usage_frame()):
+        result = build_edge_frame(proj, sal, usage=usage)
+        row = result.frame.iloc[0]
+        assert row[USAGE_METRIC_COLUMNS].isna().all()  # blank, never 0
+        assert "usage" not in result.source_joins
+
+
+def test_usage_joined_by_name_team_position_and_blank_where_a_metric_does_not_apply():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "Position": "WR"}])
+    sal = _salaries([{"ID": "1"}])
+
+    result = build_edge_frame(proj, sal, usage=_usage([{}]))
+    row = result.frame.iloc[0]
+    assert (row["Tgt%"], row["WOPR"], row["RZ/G"]) == (0.25, 0.6, 1.33)
+    assert pd.isna(row["Rush%"]) and pd.isna(row["HVT/G"])  # RB/QB-only: blank for a WR
+    assert result.source_joins["usage"].pool_matched == 1
+
+
+def test_usage_join_keeps_the_gsis_id_for_the_crosswalk():
+    proj = _projections([{"Id": "1", "Name": "Player One", "Team": "DET", "Position": "WR"}])
+    sal = _salaries([{"ID": "1"}])
+
+    matched = build_edge_frame(proj, sal, usage=_usage([{}])).source_joins["usage"].matched
+    assert matched.loc[0, "Id"] == "1"
+    assert matched.loc[0, "GsisId"] == "00-0000001"
+
+
+def test_usage_blank_for_a_player_nflverse_has_no_row_for():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Player One", "Team": "DET", "Position": "WR"},
+            {"Id": "2", "Name": "Rookie Debut", "Team": "DET", "Position": "WR"},
+        ]
+    )
+    sal = _salaries([{"ID": "1"}, {"ID": "2"}])
+
+    frame = build_edge_frame(proj, sal, usage=_usage([{}])).frame.set_index("Name")
+    assert frame.loc["Player One", "Tgt%"] == 0.25
+    assert pd.isna(frame.loc["Rookie Debut", "Tgt%"])
+
+
+def test_usage_percentile_helpers_exist_and_are_within_position():
+    from dfs.derived import PLAYER_METRIC_PCT_COLUMNS
+
+    assert PLAYER_METRIC_PCT_COLUMNS["Tgt%"] == "Tgt%ile"
+    rows = [
+        {"Id": str(i), "Name": f"WR {i}", "Team": "DET", "Position": "WR", "ProjPts": 10 + i}
+        for i in range(1, 6)
+    ]
+    proj = _projections(rows)
+    sal = _salaries([{"ID": str(i)} for i in range(1, 6)])
+    usage = _usage([{"GsisId": f"g{i}", "Name": f"WR {i}", "Tgt%": 0.05 * i} for i in range(1, 6)])
+
+    frame = build_edge_frame(proj, sal, usage=usage).frame.set_index("Name")
+    ranks = frame["Tgt%ile"]
+    assert ranks["WR 5"] > ranks["WR 3"] > ranks["WR 1"]  # a higher share is a higher percentile
+
+
 def test_zone_labels_present_and_blank_for_every_row():
     # Zone labels (GAME/CEIL/MOVE/WX) carry no per-row data -- the text
     # lives in the header only (`sheet_style._apply_zone_label_style`

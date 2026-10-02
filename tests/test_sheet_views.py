@@ -40,10 +40,21 @@ from dfs.sheet_views import (
     EXPOSURE_TAB,
     LINEUP_COUNT_CELL,
     MOVEMENT_TAB,
+    SLATE_GAME_FIRST_ROW,
+    SLATE_GPS_CHECK_COL_INDEX,
     SLATE_GPS_CHECK_HEADER,
+    SLATE_HEADER,
     SLATE_ON_SLATE_COL_INDEX,
     SLATE_ON_SLATE_HEADER,
+    SLATE_TEAM_ROWS,
+    SLATE_TEAMS_COLHEADER,
+    SLATE_TEAMS_COLHEADER_ROW,
+    SLATE_TEAMS_FIRST_ROW,
+    SLATE_TEAMS_HEADER_ROW,
+    SLATE_TEAMS_LAST_ROW,
+    SLATE_TEAMS_LOOKUPS,
     _col,
+    _edge_team_pair_mean,
     _rng,
     build_board,
     build_exposure,
@@ -674,11 +685,20 @@ def test_old_top_leverage_and_landmines_panels_are_gone():
     assert not any("TOP LEVERAGE" in cell for cell in flat)
 
 
+def _build_slate(client):
+    build_slate_grid(
+        client,
+        games_tab="GamesRaw",
+        weather_tab="WeatherRaw",
+        edge_tab="EdgeRaw",
+        gps_tab="GPSRaw",
+        team_metrics_tab="TeamMetricsRaw",
+    )
+
+
 def test_slate_grid_header_row_matches_style_slate_grids_column_assumptions():
     client = _CapturingClient()
-    build_slate_grid(
-        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
-    )
+    _build_slate(client)
     header = client.rows[0]
     assert header[2] == "Total"  # style_slate_grid colour-scales C
     assert header[3] == "Spread"  # style_slate_grid number-formats D
@@ -696,9 +716,7 @@ def test_slate_grid_movement_columns_read_the_home_teams_edgeraw_row():
     # home-team-perspective convention for the static Spread column),
     # keyed off GamesRaw's own Home column (C), not Away (B).
     client = _CapturingClient()
-    build_slate_grid(
-        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
-    )
+    _build_slate(client)
     row = client.rows[1]
     assert "VLOOKUP(GamesRaw!$C2," in row[10]
     assert "VLOOKUP(GamesRaw!$C2," in row[11]
@@ -717,9 +735,7 @@ def test_slate_grid_wind_gust_vlookups_derive_from_weather_columns_not_hardcoded
     from dfs.sources.weather import WEATHER_COLUMNS
 
     client = _CapturingClient()
-    build_slate_grid(
-        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
-    )
+    _build_slate(client)
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
     gust_idx = WEATHER_COLUMNS.index("Gust") + 1
     row = client.rows[1]
@@ -731,11 +747,17 @@ def test_slate_grid_has_gps_and_a_hidden_check_but_no_model_columns():
     """Round 5 item 5c: GPS's "Implied Total" is Vegas, not a model, so Model
     Tot/Tot Δ/Model Spd/Spd Δ are gone; only GPS and a hidden sanity check stay."""
     client = _CapturingClient()
-    build_slate_grid(
-        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
-    )
+    _build_slate(client)
     header = client.rows[0]
-    assert header[12:] == ["GPS", SLATE_GPS_CHECK_HEADER, SLATE_ON_SLATE_HEADER]
+    assert header[12:] == [
+        "GPS",
+        "GameEnv",
+        "Pace",
+        "PROE",
+        "Expl%",
+        SLATE_GPS_CHECK_HEADER,
+        SLATE_ON_SLATE_HEADER,
+    ]
     for gone in ("Model Tot", "Tot Δ", "Model Spd", "Spd Δ"):
         assert gone not in header
     row = client.rows[1]
@@ -747,14 +769,75 @@ def test_slate_grid_keeps_every_game_and_flags_the_ones_with_no_players():
     """Round 5 follow-up item 1: Slate Grid lists the whole week; a hidden helper says
     which games have a player on EdgeRaw (either team), for the dimming rule."""
     client = _CapturingClient()
-    build_slate_grid(
-        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
-    )
-    assert len(client.rows) == 19  # header + 18 game rows, none filtered out
+    _build_slate(client)
+    assert all(client.rows[r][0] for r in range(1, 19))  # header + 18 game rows, none filtered out
     helper = client.rows[1][SLATE_ON_SLATE_COL_INDEX]
     assert helper.count("COUNTIF(EdgeRaw!") == 2  # away + home
     assert "GamesRaw!$B2" in helper and "GamesRaw!$C2" in helper and ")>0" in helper
     assert helper.startswith('=IF(GamesRaw!$A2="","",')  # blank rows stay blank
+
+
+def test_slate_grid_game_columns_use_the_same_helper_as_the_board_slate_shape():
+    # Usage work (2026-10-02): GameEnv/Pace/PROE/Expl% on every game row are both teams' EdgeRaw
+    # values averaged -- the Board's own helper, not a second copy of the logic.
+    client = _CapturingClient()
+    _build_slate(client)
+    row = client.rows[SLATE_GAME_FIRST_ROW - 1]
+    for metric in ("GameEnv", "Pace", "PROE", "Expl%"):
+        expected = _edge_team_pair_mean("EdgeRaw", metric, "GamesRaw!$B2", "GamesRaw!$C2")
+        assert expected in row[SLATE_HEADER.index(metric)], metric
+    away, home = (
+        f"${BOARD_SLATE_AWAY_COL}{BOARD_SLATE_FIRST_ROW}",
+        f"${BOARD_SLATE_HOME_COL}{BOARD_SLATE_FIRST_ROW}",
+    )
+    board_row = _build_board().rows[BOARD_SLATE_FIRST_ROW - 1]
+    assert (
+        _edge_team_pair_mean("EdgeRaw", "Pace", away, home) in board_row[BOARD_SLATE_COLHEADER.index("Pace")]
+    )
+
+
+def test_slate_grid_teams_section_layout_and_spill():
+    client = _CapturingClient()
+    _build_slate(client)
+    rows = client.rows
+    assert rows[SLATE_TEAMS_HEADER_ROW - 1][0].startswith("TEAMS")
+    assert rows[SLATE_TEAMS_COLHEADER_ROW - 1][: len(SLATE_TEAMS_COLHEADER)] == SLATE_TEAMS_COLHEADER
+    assert len(rows) == SLATE_TEAMS_LAST_ROW  # one slot per possible team, no more
+    first = rows[SLATE_TEAMS_FIRST_ROW - 1]
+    spill = first[0]
+    # One SORT by implied total (3rd column) descending, spilling Team | Opp | Implied.
+    assert "SORT(FILTER(" in spill and ",3,FALSE)" in spill and f",{SLATE_TEAM_ROWS},3)" in spill
+    # Vegas implied from the home-perspective spread: away (total - spread)/2, home (total + spread)/2.
+    assert "-GamesRaw!$L$2:$L$40)/2" in spill and "+GamesRaw!$L$2:$L$40)/2" in spill
+    # The spill owns A:C of every team row below the first: nothing may sit in them.
+    for r in range(SLATE_TEAMS_FIRST_ROW, SLATE_TEAMS_LAST_ROW):
+        assert rows[r][:3] == ["", "", ""]
+
+
+def test_slate_grid_teams_metrics_read_team_metrics_raw_by_name_not_position():
+    from dfs.sources.nflverse_pbp import TEAM_METRIC_COLUMNS
+
+    client = _CapturingClient()
+    _build_slate(client)
+    row = client.rows[SLATE_TEAMS_FIRST_ROW - 1]
+    end = column_letter(len(TEAM_METRIC_COLUMNS) - 1)
+    for header, (field, whose) in SLATE_TEAMS_LOOKUPS.items():
+        formula = row[SLATE_TEAMS_COLHEADER.index(header)]
+        idx = TEAM_METRIC_COLUMNS.index(field) + 1
+        key = f"$B{SLATE_TEAMS_FIRST_ROW}" if whose == "opp" else f"$A{SLATE_TEAMS_FIRST_ROW}"
+        assert f"VLOOKUP({key},TeamMetricsRaw!$A:${end},{idx},FALSE)" in formula, header
+        assert formula.startswith(f'=IF($A{SLATE_TEAMS_FIRST_ROW}="","",')  # blank rows stay blank
+    # What the opponent's defense ALLOWS is the opponent's own row, never the team's.
+    assert SLATE_TEAMS_LOOKUPS["Opp Def EPA/pass"] == ("DefEPA/Pass", "opp")
+    assert SLATE_TEAMS_LOOKUPS["Off EPA/pass"] == ("OffEPA/Pass", "own")
+
+
+def test_slate_grid_teams_rows_carry_the_on_dk_slate_helper_for_dimming():
+    client = _CapturingClient()
+    _build_slate(client)
+    helper = client.rows[SLATE_TEAMS_FIRST_ROW - 1][SLATE_ON_SLATE_COL_INDEX]
+    assert helper.startswith(f'=IF($A{SLATE_TEAMS_FIRST_ROW}="","",COUNTIF(EdgeRaw!')
+    assert helper.endswith(f"$A{SLATE_TEAMS_FIRST_ROW})>0)")
 
 
 def test_board_slate_shape_drops_games_with_no_players_through_one_shared_filter():
@@ -778,10 +861,8 @@ def test_board_slate_shape_drops_games_with_no_players_through_one_shared_filter
 
 def test_slate_grid_gps_check_is_blank_without_gps_and_uses_the_1_5_point_threshold():
     client = _CapturingClient()
-    build_slate_grid(
-        client, games_tab="GamesRaw", weather_tab="WeatherRaw", edge_tab="EdgeRaw", gps_tab="GPSRaw"
-    )
-    check = client.rows[1][13]
+    _build_slate(client)
+    check = client.rows[1][SLATE_GPS_CHECK_COL_INDEX]
     assert "GPSRaw!$A:$C" in check
     assert f">{GPS_IMPLIED_MISMATCH_PTS}" in check
     assert check.count('=""') >= 2  # away/home implied blank-checks: never a fabricated 0

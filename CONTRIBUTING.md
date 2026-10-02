@@ -3411,3 +3411,49 @@ left, and Bankroll's ledger headers left over right-aligned numbers.
   rows come in as `betting=` from `cli` because they are `sheet_bankroll_view` constants.
   `BANKROLL_KPI_LAST_ROW` is pinned to `sheet_bankroll_view.SUMMARY_ROW` by a test.
 - Not a structural change; no changelog row.
+
+## Usage metrics, Slate Grid team metrics, `TeamMetricsRaw` (2026-10-02)
+
+`docs/planning/PROMPT_USAGE_METRICS.md`. Two structural changes (new EdgeRaw columns, a new hidden tab)
+and a Slate Grid rebuild; applied template first, then Week 4, never Week 3.
+
+- **Usage columns.** `Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G` join the USAGE group right after `Snap%`
+  (`derived.EDGE_COLUMNS`, `sheet_columns.USAGE`), each with a hidden within-position percentile helper
+  (`derived.PLAYER_METRIC_PCT_COLUMNS` gained five entries, so `sheet_columns.INTERNAL` and the
+  `pct-helpers` doctor check cover them with no further code). Source `usage`
+  (`sources/nflverse_usage.py`, no sheet tab) reduces nflverse's `stats_player` file plus the pbp
+  (`usage_metrics.py`); it fails soft to blank. `derived._attach_usage` joins by name/team/position and
+  keeps the gsis id, written every sync to `data/current/gsis_crosswalk.csv` for the results loop.
+  Volume only, no player efficiency stats (see `docs/CALCULATIONS.md`).
+- **`TeamMetricsRaw`.** `pbp` now uploads its per-team table (previously it had no tab); `OffEPA/Pass` and
+  `OffEPA/Rush` are new columns on it (`team_metrics.offense_epa_pass`/`offense_epa_rush`). Needs
+  `pbp = "TeamMetricsRaw"` in `[google_sheets.tab_mappings]` (added to `config.example.toml`; add it to a
+  local `config.toml`). Hidden through `sheet_style.HIDE_TABS`. No Instructions row (that tab never
+  inserts rows).
+- **Slate Grid.** Four game columns (`GameEnv`, `Pace`, `PROE`, `Expl%`, via
+  `sheet_views._edge_team_pair_mean`, shared with the Board) inserted before the two hidden helpers, which
+  moved `N:O` -> `R:S`; a TEAMS section below the games (`sheet_views.SLATE_TEAMS_*`). `style_slate_grid`
+  now derives every letter from `SLATE_COL`; it used to type them.
+- **Linked-column index pin** in `tests/test_sheet_links.py` updated: nothing at or before `Snap%` (39)
+  moved; `Id`/`Flag`/the first five helpers moved five right.
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-10-02 | `EdgeRaw` | Five usage columns after `Snap%`; five hidden `*%ile` helpers after `CeilVal%ile`. | 48 columns; `Snap%` 39, `Id` 40, `Flag` 41, helpers 42-46, `NameKey` 47. | 58 columns; `Snap%` 39, usage 40-44, `Id` 45, `Flag` 46, helpers 47-56, `NameKey` 57. | Template, Week 4 | `derived.EDGE_COLUMNS`, `derived.PLAYER_METRIC_PCT_COLUMNS`, `usage_metrics.USAGE_METRIC_COLUMNS`. |
+| 2026-10-02 | `PlayerPoolRaw`, `Player Pool`, `Lineups` | Same ten columns linked in (usage in the USAGE group, helpers in INTERNAL). | 49 / 55 / 55 columns (`Snap%` at 41 / 42 / 46). | 59 / 65 / 65 columns; usage at 42-46 / 43-47 / 47-51. | Template, Week 4 | `sheet_columns.USAGE`/`LINKED_COLUMNS`/`INTERNAL`, `sheet_style.EDGE_COLUMN_GROUPS` (USAGE is now `Snap%`..`HVT/G`), `sheet_style.FIELD_FORMATS`/`EDGE_WIDTHS`. |
+| 2026-10-02 | `TeamMetricsRaw` | New hidden per-team tab (`pbp` source). | Did not exist. | 32 team rows, 10 columns (`sources.nflverse_pbp.TEAM_METRIC_COLUMNS`). | Template, Week 4 | `sources/nflverse_pbp.py`, `sheet_style.HIDE_TABS`, `sheet_views.SLATE_TEAMS_LOOKUPS`. |
+| 2026-10-02 | `Slate Grid` | `GameEnv`/`Pace`/`PROE`/`Expl%` inserted after `GPS`; TEAMS section added at rows 21-58. | 15 columns (A-O; `N`, `O` hidden helpers); 19 rows. | 19 columns (A-S; `R`, `S` hidden helpers); 58 rows. | Template, Week 4 | `sheet_views.SLATE_HEADER`/`SLATE_COL`/`SLATE_TEAMS_*`, `sheet_style.style_slate_grid`. |
+
+**Slate Grid has no frozen row (2026-10-02, found in the browser).** With the TEAMS table stacked under the
+games, a frozen row 1 pinned the game headers (`Roof`, `Wind`, `Gust`) over the TEAMS columns once you scrolled
+down. `style_slate_grid` freezes column A only and `sheet_audit.FREEZE_OVERRIDES["Slate Grid"] = 0` records that
+as intended. The same pass widened the `Div` column (it shares column I with TEAMS' `Off EPA/rush`).
+
+**Verified by reading cells back (template, then Week 4):** the ten new EdgeRaw columns on EdgeRaw, Player Pool
+and Lineups for Chase, Chase Brown, Hurts and Puka Nacua (identical on all three tabs); Chase and Chase Brown
+hand-checked against the raw `stats_player` file and the pbp (targets, team targets, carries, air yards, red-zone
+looks); TEAMS 32 rows, sorted descending by implied total; `doctor` and `audit-style` clean on both; conditional
+formats identical on both sheets (EdgeRaw 390, Player Pool 400, Lineups 461, PlayerPoolRaw 392, Slate Grid 62).
+Colours checked in the browser on the template through a WR position filter and a `Tgt%` sort. Week 4's real Pool
+ticks survived the sync.
+

@@ -164,8 +164,8 @@ def _patch_store(monkeypatch, tmp_path):
 
 
 def test_run_sync_source_without_a_tab_skips_upload_and_succeeds(monkeypatch, tmp_path):
-    """`pbp` declares `uploads_to_sheet = False`: no tab mapping is needed and
-    nothing is written, but the sync still records success."""
+    """A source that declares `uploads_to_sheet = False` (`usage`): no tab mapping is needed
+    and nothing is written, but the sync still records success."""
     _patch_store(monkeypatch, tmp_path)
     cfg = Config.model_validate(
         {"google_sheets": {"sheet_id": "fake", "credentials_file": "creds.json", "tab_mappings": {}}}
@@ -191,8 +191,11 @@ def test_run_sync_normal_source_still_uploads_to_its_tab(monkeypatch, cfg, tmp_p
     assert client.written == ["Good"]
 
 
-def test_pbp_source_declares_no_sheet_tab():
+def test_only_the_usage_source_declares_no_sheet_tab():
+    # `pbp` now uploads its per-team table (hidden TeamMetricsRaw) for Slate Grid's TEAMS section;
+    # `usage` is per-player and reaches the sheet through EdgeRaw alone.
     from dfs.sources import SOURCES
 
-    assert SOURCES["pbp"].uploads_to_sheet is False
-    assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name != "pbp")
+    assert SOURCES["pbp"].uploads_to_sheet is True
+    assert SOURCES["usage"].uploads_to_sheet is False
+    assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name != "usage")

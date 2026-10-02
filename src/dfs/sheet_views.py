@@ -29,6 +29,7 @@ from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, _canonical_id
 from dfs.sources.nflverse_games import GAMES_COLUMNS
+from dfs.sources.nflverse_pbp import TEAM_METRIC_COLUMNS
 from dfs.sources.tffb_gps import GPS_COLUMNS
 from dfs.sources.weather import WEATHER_COLUMNS
 from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
@@ -99,6 +100,22 @@ def _gps_mismatch_formula(away_implied: str, home_implied: str, *, total_ref: st
         f'IF(OR({away_implied}="",{home_implied}="",{total_ref}="",{spread_ref}=""),"",'
         f"OR(ABS({away_implied}-({total_ref}-{spread_ref})/2)>{t},"
         f"ABS({home_implied}-({total_ref}+{spread_ref})/2)>{t}))"
+    )
+
+
+def _edge_team_pair_mean(edge_tab: str, metric: str, away_ref: str, home_ref: str) -> str:
+    """Mean of both teams' EdgeRaw value for `metric` (Pace/PROE/Expl%/GameEnv are per-team columns
+    there, so both sides are looked up and averaged -- "combined per game"). The column letter and
+    VLOOKUP index are derived from EDGE_COLUMNS, never typed. One helper for the Board's Slate
+    shape and Slate Grid's game rows, so the two can never disagree."""
+    e = _q(edge_tab)
+    team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
+    metric_col = column_letter(EDGE_COLUMNS.index(metric) + EDGE_DATA_OFFSET)
+    idx = EDGE_COLUMNS.index(metric) - EDGE_COLUMNS.index("Team") + 1
+    return (
+        f"IFERROR(AVERAGE("
+        f"VLOOKUP({away_ref},{e}!${team_col}:${metric_col},{idx},FALSE),"
+        f'VLOOKUP({home_ref},{e}!${team_col}:${metric_col},{idx},FALSE)),"")'
     )
 
 
@@ -311,12 +328,62 @@ SLATE_HEADER = [
     "Total move",
     "Spread move",
     "GPS",
+    # Usage work (2026-10-02): the same combined-game values the Board's Slate shape shows
+    # (`_edge_team_pair_mean`: both teams' EdgeRaw value, averaged), so the two tabs agree.
+    "GameEnv",
+    "Pace",
+    "PROE",
+    "Expl%",
     SLATE_GPS_CHECK_HEADER,
     SLATE_ON_SLATE_HEADER,
 ]
 SLATE_GPS_CHECK_COL_INDEX = SLATE_HEADER.index(SLATE_GPS_CHECK_HEADER)
 SLATE_ON_SLATE_COL_INDEX = SLATE_HEADER.index(SLATE_ON_SLATE_HEADER)
 SLATE_ON_SLATE_COL = column_letter(SLATE_ON_SLATE_COL_INDEX)
+SLATE_GPS_CHECK_COL = column_letter(SLATE_GPS_CHECK_COL_INDEX)
+# One letter per header name, for styling code that must not type a column letter.
+SLATE_COL = {name: column_letter(i) for i, name in enumerate(SLATE_HEADER)}
+
+# Slate Grid's game rows (one per GamesRaw row, unsorted), then the TEAMS section below.
+SLATE_GAME_FIRST_ROW = 2
+SLATE_GAME_ROWS = 18
+SLATE_GAME_LAST_ROW = SLATE_GAME_FIRST_ROW + SLATE_GAME_ROWS - 1
+# TEAMS: one row per team on the week's schedule, sorted by implied total, highest first. Two
+# teams per game, so the slot count is twice the game slots (32 teams in a normal week).
+SLATE_TEAMS_HEADER_ROW = SLATE_GAME_LAST_ROW + 2
+SLATE_TEAMS_COLHEADER_ROW = SLATE_TEAMS_HEADER_ROW + 1
+SLATE_TEAMS_FIRST_ROW = SLATE_TEAMS_COLHEADER_ROW + 1
+SLATE_TEAM_ROWS = 2 * SLATE_GAME_ROWS
+SLATE_TEAMS_LAST_ROW = SLATE_TEAMS_FIRST_ROW + SLATE_TEAM_ROWS - 1
+# Team, Opp and Implied come from ONE sorted spill (columns A:C, in this order); every other
+# column looks the team (or, for the "Opp Def" columns, the opponent) up in `TeamMetricsRaw`.
+# Header text -> the `TEAM_METRIC_COLUMNS` field it reads, and whose team (own or opponent's).
+SLATE_TEAMS_COLHEADER = [
+    "Team",
+    "Opp",
+    "Implied",
+    "Pace",
+    "PROE",
+    "Expl%",
+    "Off EPA/play",
+    "Off EPA/pass",
+    "Off EPA/rush",
+    "Opp Def EPA/pass",
+    "Opp Def EPA/rush",
+]
+SLATE_TEAMS_LOOKUPS = {
+    "Pace": ("Pace", "own"),
+    "PROE": ("PROE", "own"),
+    "Expl%": ("Expl%", "own"),
+    "Off EPA/play": ("OffEPA/Play", "own"),
+    "Off EPA/pass": ("OffEPA/Pass", "own"),
+    "Off EPA/rush": ("OffEPA/Rush", "own"),
+    "Opp Def EPA/pass": ("DefEPA/Pass", "opp"),
+    "Opp Def EPA/rush": ("DefEPA/Rush", "opp"),
+}
+SLATE_TEAMS_TITLE = (
+    "TEAMS  —  every team on the schedule, by implied total (Opp Def = what the opponent's defense allows)"
+)
 
 
 def _pp_col(name: str) -> str:
@@ -637,6 +704,7 @@ def build_board(
     _set(BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_COLHEADER)
     wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
+
     # Part C, C7 (2026-09-25): "the Board's Slate shape section ranks games
     # by total 'and pace'; it can now use real pace. Update it" -- read as
     # "surface the newly-available Pace signal," not "change the sort key"
@@ -648,21 +716,8 @@ def build_board(
     # per-TEAM column there, shared identically by both teams' rows isn't
     # true (each team has its OWN Pace), so both sides are looked up and
     # averaged, unlike Wind below (one game-level value, keyed by GameId).
-    team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
-
     def _team_pair_mean(metric: str, away_ref: str, home_ref: str) -> str:
-        """Mean of both teams' EdgeRaw value for `metric` (Pace/PROE/Expl%/
-        GameEnv are per-team columns there, so both sides are looked up and
-        averaged -- the same "combined per game" shape Pace always had). The
-        column letter and VLOOKUP index are derived from EDGE_COLUMNS, never
-        typed."""
-        metric_col = column_letter(EDGE_COLUMNS.index(metric) + EDGE_DATA_OFFSET)
-        idx = EDGE_COLUMNS.index(metric) - EDGE_COLUMNS.index("Team") + 1
-        return (
-            f"IFERROR(AVERAGE("
-            f"VLOOKUP({away_ref},{e}!${team_col}:${metric_col},{idx},FALSE),"
-            f'VLOOKUP({home_ref},{e}!${team_col}:${metric_col},{idx},FALSE)),"")'
-        )
+        return _edge_team_pair_mean(edge_tab, metric, away_ref, home_ref)
 
     # GPS's 1-5 score (and the sanity-check inputs) read GPSRaw directly (one
     # row per team, `sources/tffb_gps.py`) -- GPS is a per-GAME score and was
@@ -879,7 +934,13 @@ def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: s
 
 
 def build_slate_grid(
-    client: SheetsClient, *, games_tab: str, weather_tab: str, edge_tab: str, gps_tab: str
+    client: SheetsClient,
+    *,
+    games_tab: str,
+    weather_tab: str,
+    edge_tab: str,
+    gps_tab: str,
+    team_metrics_tab: str,
 ) -> str:
     """One row per game instead of one row per player.
 
@@ -940,7 +1001,7 @@ def build_slate_grid(
     games_total_col = _games_col("Total")
     games_spread_col = _games_col("Spread")
     rows = [list(SLATE_HEADER)]
-    for r in range(2, 20):
+    for r in range(SLATE_GAME_FIRST_ROW, SLATE_GAME_LAST_ROW + 1):
         guard = f'IF({g}!$A{r}="","",'
         away_implied = f'IFERROR(VLOOKUP({g}!$B{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
         home_implied = f'IFERROR(VLOOKUP({g}!$C{r},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
@@ -963,6 +1024,12 @@ def build_slate_grid(
                 f"={guard}IFERROR(VLOOKUP({g}!$C{r},{e}!${team_col}:${spd_move_end_col},"
                 f'{spd_move_idx},FALSE),""))',
                 f'={guard}IFERROR(VLOOKUP({g}!$C{r},{gp}!$A:${gps_end_col},{gps_score_idx},FALSE),""))',
+                # GameEnv / Pace / PROE / Expl%: both teams' values averaged, the same helper the
+                # Board's Slate shape uses (`_edge_team_pair_mean`), away team then home team.
+                *[
+                    f"={guard}{_edge_team_pair_mean(edge_tab, metric, f'{g}!$B{r}', f'{g}!$C{r}')})"
+                    for metric in ("GameEnv", "Pace", "PROE", "Expl%")
+                ],
                 f"={guard}"
                 + _gps_mismatch_formula(
                     away_implied,
@@ -976,8 +1043,53 @@ def build_slate_grid(
                 f"+COUNTIF({e}!${team_col}:${team_col},{g}!$C{r}))>0)",
             ]
         )
+
+    # ---- TEAMS (below the games): one row per team on the week's schedule -------------------
+    tm = _q(team_metrics_tab)
+    tm_end_col = column_letter(len(TEAM_METRIC_COLUMNS) - 1)
+    games_id_range = f"{g}!$A$2:$A$40"
+    away_rng = f"{g}!${_games_col('Away')}$2:${_games_col('Away')}$40"
+    home_rng = f"{g}!${_games_col('Home')}$2:${_games_col('Home')}$40"
+    total_rng = f"{g}!${games_total_col}$2:${games_total_col}$40"
+    spread_rng = f"{g}!${games_spread_col}$2:${games_spread_col}$40"
+    live = f'{games_id_range}<>""'
+    # Vegas implied totals, the same convention `_gps_mismatch_formula` documents: spread is
+    # signed from the HOME team's view (positive = home favoured), so home = (total + spread)/2
+    # and away = (total - spread)/2. Each game contributes two rows (away block stacked on home
+    # block), then one SORT by implied total, highest first, spills Team | Opp | Implied.
+    team_pairs = (
+        f"{{{away_rng},{home_rng},({total_rng}-{spread_rng})/2;"
+        f"{home_rng},{away_rng},({total_rng}+{spread_rng})/2}}"
+    )
+    teams_spill = (
+        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({team_pairs},{{{live};{live}}}),3,FALSE),"
+        f'{SLATE_TEAM_ROWS},3),"")'
+    )
+    while len(rows) < SLATE_TEAMS_HEADER_ROW - 1:  # blank spacer row(s) under the last game row
+        rows.append([""] * len(SLATE_HEADER))
+    rows.append([SLATE_TEAMS_TITLE])
+    rows.append(list(SLATE_TEAMS_COLHEADER))
+    on_slate_col = SLATE_ON_SLATE_COL_INDEX
+    for i in range(SLATE_TEAM_ROWS):
+        r = SLATE_TEAMS_FIRST_ROW + i
+        row = [""] * len(SLATE_HEADER)
+        if i == 0:
+            row[0] = teams_spill  # spills over A:C of every row below
+        for header, (field, whose) in SLATE_TEAMS_LOOKUPS.items():
+            key = f"$B{r}" if whose == "opp" else f"$A{r}"
+            idx = TEAM_METRIC_COLUMNS.index(field) + 1
+            row[SLATE_TEAMS_COLHEADER.index(header)] = (
+                f'=IF($A{r}="","",IFERROR(VLOOKUP({key},{tm}!$A:${tm_end_col},{idx},FALSE),""))'
+            )
+        # On the DK slate iff the team has a player on EdgeRaw (hidden helper the dimming rule reads).
+        row[on_slate_col] = f'=IF($A{r}="","",COUNTIF({e}!${team_col}:${team_col},$A{r})>0)'
+        rows.append(row)
+
     client.write_tab(SLATE_TAB, rows)
-    return f"{SLATE_TAB}: built (18 game rows off GamesRaw + WeatherRaw + EdgeRaw + GPSRaw)"
+    return (
+        f"{SLATE_TAB}: built ({SLATE_GAME_ROWS} game rows off GamesRaw + WeatherRaw + EdgeRaw + GPSRaw, "
+        f"and a TEAMS section off GamesRaw + {team_metrics_tab})"
+    )
 
 
 # ---------------------------------------------------------------------------

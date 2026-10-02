@@ -27,6 +27,7 @@ doc knowing.
 | `SleeperRaw` | Sleeper's free, undocumented projections API | `sleeper` |
 | `FantasyProsRaw` | FantasyPros' projection pages (needs `dfs auth fantasypros` -- anonymous pages cap at 10 rows/position) | `fantasypros` |
 | `SnapsRaw` | nflverse's free snap-count release | `snaps` |
+| `TeamMetricsRaw` | One row per team: Pace, PROE, Expl%, DefEPA/Pass, DefEPA/Rush, DefSucc%, OffEPA/Play, OffEPA/Pass, OffEPA/Rush -- nflverse play-by-play, blended with last season (hidden; Slate Grid's TEAMS section reads it) | `pbp` |
 | `EdgeRaw` | Computed locally from the above -- no network call | `edge` |
 
 Your `config.toml`'s `[google_sheets.tab_mappings]` controls the actual tab
@@ -174,6 +175,7 @@ actually matches.
 | `ImpliedMove`, `TotMove`, `SpdMove` | This player's team's Vegas-implied point total / the game's total / the spread, each changed since the **start of the current NFL week** (not the previous sync -- that was tried first and dropped, since it made the number depend on how often `dfs sync` happened to run rather than reflecting a real move; see `docs/CALCULATIONS.md`). `ImpliedMove` was called `LineMove` before Fix 2.2, when it was the only one of the three surfaced; `TotMove`/`SpdMove` are new. Blank until at least one `nfl_odds` sync has happened this week. Sits in its own collapsed Movement group (Phase 6, Part 2) rather than grouped near `GameEnv` -- see `docs/planning/ROADMAP.md`'s Phase 3 postmortem for why that positioning matters here specifically. `dfs odds movement` is a separate, terminal-only report that still diffs since the last sync. |
 | `GameStart` | This player's game's kickoff time (UTC), passed through from TFFBOptoRaw. Backs `dfs lineups late-swap`'s lock-time check -- not something you'd read directly here. |
 | `Snap%` | Part C, C6 (2026-09-24): this player's own most recently completed week's offensive snap share, from nflverse's free snap-count release (`sources/nflverse_snaps.py`), joined by name/team/position. Blank for a player nflverse hasn't recorded at all (a rookie, a bye, DST -- defenses have no individual snap share); a real recorded 0% (inactive/DNP) stays a real 0%, not blanked. |
+| `Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G` | Usage volume over the player's last 3 games played (2026-10-02), from nflverse's `stats_player` file plus the pbp -- see `docs/CALCULATIONS.md`'s "Usage volume" section for the definitions, which positions each applies to (blank elsewhere), why no efficiency stats, and the checks against nflverse's own `target_share`/`wopr`. Joined by gsis id -> name/team/position; blank for a player nflverse has no row for. Coloured within position through five hidden `*%ile` helpers. |
 | `GAME`, `CEIL`, `MOVE`, `WX`, `USAGE` | Zone labels, not data -- one sits immediately before each collapsed group (Game/Ceiling detail/Movement/Weather/Usage) it names, always visible, blank in every row below the header. See the canonical column order section (Player Pool/Lineups, above) for the full rationale; EdgeRaw has the same five for the same reason. |
 
 A basic filter (Data > Create a filter, `dfs setup add-filters`) puts a
@@ -232,8 +234,8 @@ disagree:
 | — label `WX` — | (always visible, not part of any group) |
 | WEATHER (collapsed) | `Venue` `Stadium` `Roof` `Wind` |
 | — label `USAGE` — | (always visible, not part of any group) |
-| USAGE (collapsed) | `Snap%` |
-| INTERNAL (hidden, not grouped) | `Id` `Flag` `ProjPts%ile` `AggPts%ile` `Ceiling%ile` `Val%ile` `CeilVal%ile` |
+| USAGE (collapsed) | `Snap%` `Tgt%` `WOPR` `Rush%` `RZ/G` `HVT/G` |
+| INTERNAL (hidden, not grouped) | `Id` `Flag` `ProjPts%ile` `AggPts%ile` `Ceiling%ile` `Val%ile` `CeilVal%ile` `Tgt%ile` `WOPR%ile` `Rush%ile` `RZ/G%ile` `HVT/G%ile` |
 
 **Zone labels** (added the same day as Part 7.9, a usability fix Sam
 raised mid-session rather than something in the original spec): each
@@ -668,11 +670,22 @@ shape drops those games instead.
 | `Div` | `DIV` if `GamesRaw.DivGame = 1`, else blank. |
 | `Stadium` | As `GamesRaw`. |
 | `Total move` / `Spread move` | A9 (2026-09-22): this game's `TotMove`/`SpdMove` off `EdgeRaw`, looked up by the HOME team (both are actually team-level joins keyed by `Team` -- any player on that team carries the same value; the home team's row is used consistently, matching `Spread`'s own home-team-perspective convention). `TotMove` is the same number either way; `SpdMove` is directional, so the choice of team matters. Blank until at least one `nfl_odds` sync has moved a line since the week started. |
+| `GameEnv` / `Pace` / `PROE` / `Expl%` | Usage work (2026-10-02): the mean of both teams' EdgeRaw value, via the same helper the Board's Slate shape uses (`sheet_views._edge_team_pair_mean`), so the two tabs agree. |
 | `GPS` | Kyle Borgognoni's TFFB Pace of Play 1-5 score, off `GPSRaw` (one row per team) via the home team's row. A muted amber chip marks a game whose worksheet implied totals are more than 1.5 pts off Vegas (a swapped row in the source), driven by a hidden `GPS off Vegas` helper column. `Model Tot`/`Tot Δ`/`Model Spd`/`Spd Δ` were removed in Round 5 item 5c: the worksheet's "Implied Total" is Vegas, not a model. See `docs/CALCULATIONS.md`'s GPS section. |
 
 No empty-state guard beyond a blank `IF($A{row}="",...)` per cell --
 unlike `Board`/`Movement`, there's no "not synced yet" message here,
 just blank rows once `GamesRaw` runs out of games.
+
+**TEAMS section** (2026-10-02), below the games: a title row, a column-header row, then one row per
+team on the week's schedule (36 slots, 32 in a normal week), sorted by implied total, highest first.
+`Team` / `Opp` / `Implied` come from one sorted spill off `GamesRaw` (the spill owns columns A:C of the
+rows below it, so nothing may be typed there); every other column is a lookup into the hidden
+`TeamMetricsRaw` by header name (`sheet_views.SLATE_TEAMS_LOOKUPS`), never a column number. `Opp Def
+EPA/pass` / `Opp Def EPA/rush` look up the OPPONENT's row: what that defense allows, so higher = softer
+= green. A team with no player on EdgeRaw is dimmed, off the same hidden `On DK slate` column the game
+rows use. The TEAMS rows share Slate Grid's columns with the game rows above them, so their number
+formats are reset first and set again per column. See `docs/CALCULATIONS.md`.
 
 ### DK Upload
 

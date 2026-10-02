@@ -76,6 +76,7 @@ import pandas as pd
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP, LINE_MOVE_FLAG_THRESHOLD
 from dfs.player_join import JoinResult, join_source_to_dk, normalize_name
 from dfs.team_metrics import GAME_ENV_WEIGHTS, combined_by_game, weighted_mean_skipna
+from dfs.usage_metrics import USAGE_METRIC_COLUMNS
 
 # Leverage = CeilPct - OwnPct, both percentile ranks on the same 0-100
 # scale within position -- see the module docstring's "second scale/index
@@ -292,13 +293,20 @@ USAGE_LABEL = "USAGE"
 
 # Round 5 item 3: `metric -> hidden percentile column` (within-position, over the
 # rosterable pool `_rosterable_pool_mask`, zeros/blanks excluded). The five
-# player-performance metrics whose raw value is NOT comparable across positions.
+# player-performance metrics whose raw value is NOT comparable across positions, plus (usage
+# work, 2026-10-02) the five usage volume columns, which are compared within position too: a
+# 25% target share means one thing for a WR and another for an RB.
 PLAYER_METRIC_PCT_COLUMNS = {
     "ProjPts": "ProjPts%ile",
     "AggPts": "AggPts%ile",
     "Ceiling": "Ceiling%ile",
     "Val": "Val%ile",
     "CeilVal": "CeilVal%ile",
+    "Tgt%": "Tgt%ile",
+    "WOPR": "WOPR%ile",
+    "Rush%": "Rush%ile",
+    "RZ/G": "RZ/G%ile",
+    "HVT/G": "HVT/G%ile",
 }
 
 EDGE_COLUMNS = [
@@ -403,6 +411,10 @@ EDGE_COLUMNS = [
     # per-row native formula.
     USAGE_LABEL,
     "Snap%",
+    # Usage volume (2026-10-02), over each player's last 3 games played (`usage_metrics.py`):
+    # `Tgt%`/`WOPR` for pass-catchers, `Rush%` for RB/QB, red-zone and high-value touches per
+    # game. Blank where a metric doesn't apply, never 0. Linked like `Snap%`.
+    *USAGE_METRIC_COLUMNS,
     # Id/Flag stay hidden outright, not part of any visible group -- Pool
     # (column A, ahead of this whole list) sits directly beside Name with
     # no column between them. "Flag" (Part 7.9) is the single
@@ -1012,6 +1024,35 @@ def _attach_snaps(
     return pd.to_numeric(snap_pct, errors="coerce"), result
 
 
+def _attach_usage(
+    merged: pd.DataFrame, usage: pd.DataFrame | None, pool_mask: pd.Series
+) -> tuple[pd.DataFrame, JoinResult | None]:
+    """Usage metrics (`Tgt%`/`WOPR`/`Rush%`/`RZ/G`/`HVT/G`) via the same (name, team, position)
+    join every other external source uses. `usage` is `sources/nflverse_usage.py`'s output, one
+    row per gsis id already reduced to each player's last 3 games played. The join's matched
+    rows keep `GsisId`, which is the gsis -> DK crosswalk the results loop reuses. Missing or
+    empty (not synced, fetch failed, Week 1) blanks every usage column -- never 0 -- and returns
+    `None` for the join result."""
+    blank = pd.DataFrame(float("nan"), index=merged.index, columns=USAGE_METRIC_COLUMNS)
+    if usage is None or usage.empty:
+        return blank, None
+    dk_frame = merged[["Id", "Name", "Team", "Position"]]
+    result = join_source_to_dk(
+        dk_frame,
+        usage,
+        source_name_col="Name",
+        source_team_col="Team",
+        source_position_col="Position",
+        source="usage",
+        pool_mask=pool_mask,
+        expect_dst=False,  # defenses have no usage
+    )
+    matched = result.matched[["Id", *USAGE_METRIC_COLUMNS]].drop_duplicates(subset="Id", keep="first")
+    values = dk_frame.merge(matched, on="Id", how="left")[USAGE_METRIC_COLUMNS]
+    values.index = merged.index
+    return values.apply(pd.to_numeric, errors="coerce"), result
+
+
 def _dst_nickname(full_team_name: str) -> str:
     """Mirrors sources/tffb_projections.py's `_dst_nickname` -- duplicated
     rather than imported for the same reason as WIND_FLAG_THRESHOLD_MPH
@@ -1066,6 +1107,7 @@ def build_edge_frame(
     fantasypros: pd.DataFrame | None = None,
     snaps: pd.DataFrame | None = None,
     team_metrics: pd.DataFrame | None = None,
+    usage: pd.DataFrame | None = None,
 ) -> EdgeBuildResult:
     """Join TFFB projections to DK salaries on player ID and compute every
     derived column for the EdgeRaw tab. Rows are returned pre-sorted by
@@ -1098,7 +1140,9 @@ def build_edge_frame(
     `GameEnv` indirectly (see `_game_env_scores`); missing it blanks the
     three team-metric columns and `GameEnv` silently reduces to its
     pre-C7, Vegas-only formula, same fail-soft contract as everything else
-    optional here.
+    optional here. `usage` is `sources/nflverse_usage.py`'s own shape (`GsisId`/`Name`/`Team`/
+    `Position` plus the five usage metrics -- see `usage_metrics.py`) -- optional, feeds the five
+    usage columns only (see `_attach_usage`); missing or empty blanks them.
     """
     proj = projections.copy()
     sal = salaries[["ID", "Salary", "Status"]].rename(
@@ -1192,6 +1236,11 @@ def build_edge_frame(
     merged["Snap%"], snaps_join = _attach_snaps(merged, snaps, val_adj_pool)
     if snaps_join is not None:
         source_joins["snaps"] = snaps_join
+    usage_values, usage_join = _attach_usage(merged, usage, val_adj_pool)
+    for column in USAGE_METRIC_COLUMNS:
+        merged[column] = usage_values[column]
+    if usage_join is not None:
+        source_joins["usage"] = usage_join
     merged["TmRank"] = _tm_rank_within_team_position(
         merged["Salary"], merged["Name"], merged["Team"], merged["Position"]
     )

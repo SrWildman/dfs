@@ -120,6 +120,12 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "OverUnder",
         "Spread",
         "CeilPct",
+        # Usage volume (2026-10-02), compared within position like ProjPts.
+        "Tgt%",
+        "WOPR",
+        "Rush%",
+        "RZ/G",
+        "HVT/G",
     }
     assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
     # Movement diverges around zero, Own% is the warm chalk scale, Leverage is zero-centred.
@@ -462,7 +468,7 @@ def test_polish_edge_groups_game_through_weather_collapsed_by_default():
         ("EdgeRaw", _edge_letter("CeilPct"), _edge_letter("OwnStatus"), True),
         ("EdgeRaw", _edge_letter("ImpliedMove"), _edge_letter("GameStart"), True),
         ("EdgeRaw", _edge_letter("Stadium"), _edge_letter("Wind"), True),
-        ("EdgeRaw", _edge_letter("Snap%"), _edge_letter("Snap%"), True),  # USAGE, Round 5 1b
+        ("EdgeRaw", _edge_letter("Snap%"), _edge_letter("HVT/G"), True),  # USAGE: Snap% + usage metrics
     ]
 
 
@@ -527,12 +533,13 @@ def test_polish_edge_clears_banding_before_re_adding_it():
 def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per_position_runs():
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
-    assert len(matched) == 20  # nothing is skipped on EdgeRaw
+    assert len(matched) == 25  # nothing is skipped on EdgeRaw (20 + the five usage metrics)
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    # The 8 within-position/0-100 columns are 16 steps each; the other 12 are one gradient each.
+    # The 13 within-position/0-100 columns (8 + the five usage metrics) are 26 steps each; the other 12
+    # are one gradient each.
     # Either way: whole-column rules (they follow any sort or filter), no per-position row runs.
     assert len(client.color_scale_calls) == 12
     assert client.multi_range_color_scale_calls == []
@@ -541,12 +548,12 @@ def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per
         for a1, k in client.boolean_rule_calls
         if k["condition_type"] == "CUSTOM_FORMULA" and not a1.startswith("B")  # B = Name tints
     ]
-    assert len(steps) == 8 * 26
+    assert len(steps) == 13 * 26
     # A grey zero chip on every column where zero means "missing" (not the four zero-centred
     # diverging columns, and not Spread, where 0 is a real pick'em).
     zero_chips = [a1 for a1, k in client.boolean_rule_calls if k["condition_type"] == "NUMBER_EQ"]
-    assert len(zero_chips) == 20 - 5
-    assert len(client.boolean_rule_calls) < 250  # a handful per column, not ~1,400 in total
+    assert len(zero_chips) == 25 - 5
+    assert len(client.boolean_rule_calls) < 450  # a handful per column, not ~1,400 in total
 
 
 def test_polish_edge_steps_player_metrics_off_their_hidden_percentile_column():
@@ -803,6 +810,10 @@ class FakeBoardClient:
 
     def set_column_widths(self, tab_name: str, widths: dict[str, int]) -> None:
         self.width_calls.append(widths)
+
+    def set_row_heights(self, tab_name: str, *, start_row: int, end_row: int, pixel_size: int) -> None:
+        self.row_height_calls = getattr(self, "row_height_calls", [])
+        self.row_height_calls.append((start_row, end_row, pixel_size))
 
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         self.format_calls.append((a1_range, fmt))
@@ -2037,10 +2048,17 @@ def test_style_board_unhides_the_visible_range_before_hiding_the_helper_block():
     )
 
 
-def test_style_slate_grid_dims_games_with_no_players_and_hides_both_helpers():
+def test_style_slate_grid_dims_games_and_teams_with_no_players_and_hides_both_helpers():
     """Round 5 follow-up item 1: the game stays listed but in muted text, driven by the
-    hidden "On DK slate" helper; both hidden helpers (GPS check, On DK slate) are hidden."""
-    from dfs.sheet_views import SLATE_GPS_CHECK_COL_INDEX, SLATE_ON_SLATE_COL
+    hidden "On DK slate" helper; the TEAMS rows dim off the same helper. Both hidden helpers
+    (GPS check, On DK slate) are hidden."""
+    from dfs.sheet_views import (
+        SLATE_GAME_LAST_ROW,
+        SLATE_GPS_CHECK_COL_INDEX,
+        SLATE_ON_SLATE_COL,
+        SLATE_TEAMS_FIRST_ROW,
+        SLATE_TEAMS_LAST_ROW,
+    )
 
     rules = []
     hidden_calls = []
@@ -2056,12 +2074,73 @@ def test_style_slate_grid_dims_games_with_no_players_and_hides_both_helpers():
             pass
 
     style_slate_grid(_Client())
-    dim = [r for r in rules if r[2] == [f"=${SLATE_ON_SLATE_COL}2=FALSE"]]
-    assert len(dim) == 1
-    assert rules[-1] == dim[0]  # added last, so it wins over every other rule's text colour
-    assert dim[0][3]["textFormat"]["foregroundColor"] != WHITE
-    assert dim[0][0].endswith(f"{column_letter(SLATE_GPS_CHECK_COL_INDEX - 1)}19")  # visible columns only
+    games_dim = [r for r in rules if r[2] == [f"=${SLATE_ON_SLATE_COL}2=FALSE"]]
+    teams_dim = [r for r in rules if r[2] == [f"=${SLATE_ON_SLATE_COL}{SLATE_TEAMS_FIRST_ROW}=FALSE"]]
+    assert len(games_dim) == 1 and len(teams_dim) == 1
+    assert rules[-1] == teams_dim[0]  # added last, so it wins over every other rule's text colour
+    for dim in (games_dim[0], teams_dim[0]):
+        assert dim[3]["textFormat"]["foregroundColor"] != WHITE
+    assert games_dim[0][0] == f"A2:{column_letter(SLATE_GPS_CHECK_COL_INDEX - 1)}{SLATE_GAME_LAST_ROW}"
+    assert teams_dim[0][0].endswith(f"{SLATE_TEAMS_LAST_ROW}")
     assert hidden_calls == [(column_letter(SLATE_GPS_CHECK_COL_INDEX), SLATE_ON_SLATE_COL)]
+
+
+def test_style_slate_grid_colours_game_metrics_and_every_teams_column():
+    from dfs.sheet_views import SLATE_COL, SLATE_TEAMS_COLHEADER, SLATE_TEAMS_FIRST_ROW, SLATE_TEAMS_LAST_ROW
+
+    gradients, booleans = [], []
+
+    class _Client(FakeBoardClient):
+        def add_color_scale(self, tab, a1_range, **kwargs):
+            gradients.append(a1_range)
+
+        def add_boolean_rule(self, tab, a1_range, *, condition_type, values, fmt):
+            booleans.append(a1_range)
+
+        def freeze(self, tab, *, rows, cols=None):
+            pass
+
+    style_slate_grid(_Client())
+    # The four game columns (GameEnv is a stepped score, the other three gradients)...
+    assert f"{SLATE_COL['Pace']}2:{SLATE_COL['Pace']}19" in gradients
+    assert f"{SLATE_COL['PROE']}2:{SLATE_COL['PROE']}19" in gradients
+    assert any(a1.startswith(f"{SLATE_COL['GameEnv']}2:") for a1 in booleans)
+    # ...and every metric column of TEAMS, over the team rows only (the games rows above are a
+    # different population and get their own rules).
+    for i, name in enumerate(SLATE_TEAMS_COLHEADER[2:], start=2):
+        letter = column_letter(i)
+        rng = f"{letter}{SLATE_TEAMS_FIRST_ROW}:{letter}{SLATE_TEAMS_LAST_ROW}"
+        assert rng in gradients, name
+
+
+def test_style_slate_grid_freezes_no_row_so_the_game_header_cannot_mislabel_the_teams_columns():
+    from dfs.sheet_audit import FREEZE_OVERRIDES
+
+    freezes = []
+
+    class _Client(FakeBoardClient):
+        def freeze(self, tab, *, rows=None, cols=None):
+            freezes.append((rows, cols))
+
+    style_slate_grid(_Client())
+    assert freezes == [(0, 1)]  # column A pinned, no row
+    assert FREEZE_OVERRIDES["Slate Grid"] == 0  # and audit-style agrees that is intended
+
+
+def test_style_slate_grid_teams_header_wraps_and_number_formats_do_not_bleed_from_the_game_rows():
+    from dfs.sheet_views import SLATE_TEAMS_COLHEADER_ROW, SLATE_TEAMS_FIRST_ROW, SLATE_TEAMS_LAST_ROW
+
+    class _Client(FakeBoardClient):
+        def freeze(self, tab, *, rows, cols=None):
+            pass
+
+    client = _Client()
+    style_slate_grid(client)
+    wraps = [a1 for a1, fmt in client.format_calls if fmt.get("wrapStrategy") == "WRAP"]
+    assert wraps and wraps[0].startswith(f"A{SLATE_TEAMS_COLHEADER_ROW}:")
+    reset = [a1 for a1, fmt in client.format_calls if fmt == {"numberFormat": None}]
+    assert reset == [f"A{SLATE_TEAMS_FIRST_ROW}:K{SLATE_TEAMS_LAST_ROW}"]
+    assert client.row_height_calls == [(SLATE_TEAMS_COLHEADER_ROW, SLATE_TEAMS_COLHEADER_ROW, 34)]
 
 
 def test_slate_grid_movement_scales_are_zero_centred_with_symmetric_anchors():

@@ -200,6 +200,18 @@ def offense_epa_per_play(pbp: pd.DataFrame) -> pd.Series:
     return _epa_by_side(pbp, "posteam", "play")
 
 
+def offense_epa_pass(pbp: pd.DataFrame) -> pd.Series:
+    """`OffEPA/Pass`: mean EPA per pass play an OFFENSE produced (a scramble counts as a pass,
+    matching nflverse). Same filters as `defense_epa_pass`, from the offence's side; Slate
+    Grid's TEAMS section shows it beside the opponent's `DefEPA/Pass`."""
+    return _epa_by_side(pbp, "posteam", "pass")
+
+
+def offense_epa_rush(pbp: pd.DataFrame) -> pd.Series:
+    """`OffEPA/Rush`: mean EPA per rush play an OFFENSE produced; the mirror of `defense_epa_rush`."""
+    return _epa_by_side(pbp, "posteam", "rush")
+
+
 def blend_with_prior(
     current: pd.Series,
     prior: pd.Series,

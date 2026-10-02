@@ -105,6 +105,7 @@ from dfs.derived import (
 )
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_metrics import LINEUP_METRIC_HEADERS
+from dfs.usage_metrics import USAGE_METRIC_COLUMNS
 
 IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 
@@ -180,7 +181,9 @@ WEATHER = ["Venue", "Stadium", "Roof", "Wind"]
 # Part C, C6 (2026-09-24): positioned after WEATHER, per Sam's own
 # instruction -- linked (VLOOKUP against EdgeRaw, a join against
 # nflverse's own snap-count release, not a per-row native formula).
-USAGE = ["Snap%"]
+# Usage volume (2026-10-02): `Tgt%`/`WOPR`/`Rush%`/`RZ/G`/`HVT/G` sit beside `Snap%`, same group,
+# same linking -- see `usage_metrics.py`.
+USAGE = ["Snap%", *USAGE_METRIC_COLUMNS]
 
 # Id/Flag stay hidden outright, not part of any visible collapsed group
 # (Part 2's own table lists Id separately from the four numbered groups

@@ -51,7 +51,9 @@ from dfs.team_metrics import (
     defense_epa_pass,
     defense_epa_rush,
     defense_success_pct,
+    offense_epa_pass,
     offense_epa_per_play,
+    offense_epa_rush,
     team_explosive_pct,
     team_games_played,
     team_pace,
@@ -64,7 +66,9 @@ PBP_URL_TEMPLATE = (
     "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_{season}.parquet"
 )
 
-# Round 5 item 9 appended the four defensive/matchup columns.
+# Round 5 item 9 appended the four defensive/matchup columns; the usage work (2026-10-02)
+# appended `OffEPA/Pass`/`OffEPA/Rush` so Slate Grid's TEAMS section can show an offence's
+# own pass/rush efficiency beside the opponent's.
 TEAM_METRIC_COLUMNS = [
     "Team",
     "Pace",
@@ -74,6 +78,8 @@ TEAM_METRIC_COLUMNS = [
     "DefEPA/Rush",
     "DefSucc%",
     "OffEPA/Play",
+    "OffEPA/Pass",
+    "OffEPA/Rush",
 ]
 
 
@@ -119,6 +125,8 @@ def build_team_metrics(current_pbp: pd.DataFrame, prior_pbp: pd.DataFrame | None
         ("DefEPA/Rush", defense_epa_rush, EPA_DECIMALS),
         ("DefSucc%", defense_success_pct, 2),
         ("OffEPA/Play", offense_epa_per_play, EPA_DECIMALS),
+        ("OffEPA/Pass", offense_epa_pass, EPA_DECIMALS),
+        ("OffEPA/Rush", offense_epa_rush, EPA_DECIMALS),
     ]
     columns: dict[str, pd.Series] = {}
     for column, fn, decimals in metrics:
@@ -139,7 +147,10 @@ def build_team_metrics(current_pbp: pd.DataFrame, prior_pbp: pd.DataFrame | None
 
 class NflversePbpSource(Source):
     name = "pbp"
-    uploads_to_sheet = False
+    # Hidden `TeamMetricsRaw` (one row per team): Slate Grid's TEAMS section reads team-level
+    # values straight from it. The same numbers still reach EdgeRaw per player (Pace/PROE/
+    # Expl%/OppEPA via `derived`), which is what the player tabs read.
+    uploads_to_sheet = True
 
     def fetch(self, ctx: SyncContext) -> pd.DataFrame:
         log.info("fetching nflverse play-by-play for season %s", ctx.season)

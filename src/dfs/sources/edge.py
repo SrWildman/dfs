@@ -151,6 +151,21 @@ def _report_source_joins(source_joins: dict) -> None:
         )
 
 
+GSIS_CROSSWALK_FILE = CURRENT_DIR / "gsis_crosswalk.csv"
+
+
+def _write_gsis_crosswalk(usage_join) -> None:  # noqa: ANN001 - a JoinResult or None
+    """nflverse gsis id -> DraftKings `Id`, for every DK player the usage join matched (name +
+    team + position through `player_join`, the same join every other source uses). Written every
+    sync as `data/current/gsis_crosswalk.csv`; the results loop reuses it to score actual points
+    by DK player. Offensive players with a stats_player row only -- defenses have no gsis id."""
+    if usage_join is None or usage_join.matched.empty or "GsisId" not in usage_join.matched.columns:
+        return
+    matched = usage_join.matched
+    columns = [c for c in ("Id", "GsisId", "Name", "Team", "Position") if c in matched.columns]
+    matched[columns].drop_duplicates(subset="Id").to_csv(GSIS_CROSSWALK_FILE, index=False)
+
+
 class EdgeSource(Source):
     name = "edge"
 
@@ -178,6 +193,11 @@ class EdgeSource(Source):
             log.warning(
                 "pbp snapshot predates OppEPA (no DefEPA/Pass column) -- run `dfs sync --only pbp`; "
                 "OppEPA will be blank until then"
+            )
+        usage = _try_load_current("usage")
+        if usage is None or usage.empty:
+            log.warning(
+                "usage not synced (or no games played yet) -- Tgt%%/WOPR/Rush%%/RZ/G/HVT/G will be blank"
             )
         gps = _try_load_current("tffb_gps")
         if gps is None:
@@ -208,7 +228,9 @@ class EdgeSource(Source):
             fantasypros=fantasypros,
             snaps=snaps,
             team_metrics=team_metrics,
+            usage=usage,
         )
+        _write_gsis_crosswalk(result.source_joins.get("usage"))
         if result.unmatched_names:
             log.warning(
                 "%d projected player(s) had no DraftKings salary match on the current "

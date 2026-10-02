@@ -93,7 +93,11 @@ AUDITED_TABS: list[tuple[str, int]] = [
 # the pool deck (Lineups' own former reason for one) was removed entirely
 # -- Phase 5, 2026-09-16, see sheet_pool_deck.py's module docstring.
 # Kept as a mechanism in case a future tab needs it again.
-FREEZE_OVERRIDES: dict[str, int] = {}
+#
+# Slate Grid (2026-10-02): the game table (rows 1-19) has a TEAMS table stacked below it. A frozen
+# row 1 would keep the GAME headers (Roof, Wind, Gust, ...) pinned over the TEAMS columns, which
+# have different meanings, so no row is frozen; each table carries its own header.
+FREEZE_OVERRIDES: dict[str, int] = {"Slate Grid": 0}
 
 # Column names deliberately narrower than their own header text needs
 # (Week 3 fixes, Fix 6.5, 2026-09-23). "Edge ↗" is a utility link column,

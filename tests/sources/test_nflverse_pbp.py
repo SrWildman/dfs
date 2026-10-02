@@ -64,3 +64,19 @@ def test_build_team_metrics_blends_with_prior_early_in_season():
     assert kc_with["Pace"] != kc_without["Pace"]
     assert kc_without["Pace"] == 30.0
     assert kc_with["Pace"] > kc_without["Pace"]
+
+
+def test_build_team_metrics_carries_the_offence_pass_and_rush_epa_columns():
+    from dfs.sources.nflverse_pbp import TEAM_METRIC_COLUMNS
+
+    assert TEAM_METRIC_COLUMNS[-2:] == ["OffEPA/Pass", "OffEPA/Rush"]  # appended after OffEPA/Play
+    metrics = build_team_metrics(_pbp("KC", "DEN"), None)
+    assert list(metrics.columns) == TEAM_METRIC_COLUMNS
+    kc = metrics[metrics["Team"] == "KC"].iloc[0]
+    assert kc[["OffEPA/Pass", "OffEPA/Rush"]].notna().all()
+
+
+def test_pbp_uploads_its_team_table_to_the_hidden_team_metrics_tab():
+    from dfs.sources.nflverse_pbp import NflversePbpSource
+
+    assert NflversePbpSource.uploads_to_sheet is True

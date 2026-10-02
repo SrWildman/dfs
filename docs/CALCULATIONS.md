@@ -1024,6 +1024,98 @@ Placed in its own collapsed **Usage** group, positioned after Weather,
 on EdgeRaw/Player Pool/Lineups. Feeds nothing else computed on this
 sheet -- a read-only usage signal, not an input to any flag or score.
 
+## Usage volume: `Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G` (2026-10-02)
+
+Five columns in the USAGE group beside `Snap%`, from nflverse's free `stats_player_week_{season}`
+parquet plus the current season's play-by-play (`sources/nflverse_usage.py`, source `usage`; all
+the maths is in `usage_metrics.py`). They are for you to read alongside the projection -- **not
+inputs to `ProjPts`, `ValAdj` or any flag**.
+
+**Why volume, not efficiency.** Published research is consistent that usage holds up from week
+to week and efficiency regresses. In one multi-season study the best predictors of future points
+were target share (WR +0.22, TE +0.34), WOPR, and snap share and carries for RBs; receiving TDs,
+receiving EPA and yards per target were *negative* predictors; for QBs only rushing usage
+predicted anything. So this sheet adds volume columns and deliberately does **not** add player
+efficiency stats (player EPA, RACR, yards per target, YAC over expected). Do not add them.
+
+| Column | Definition | Applies to |
+|---|---|---|
+| `Tgt%` | the player's targets / his team's targets, over the window | WR, TE, RB |
+| `WOPR` | 1.5 x target share + 0.7 x air-yards share, over the window | WR, TE |
+| `Rush%` | the player's carries / his team's carries (QB scrambles included), over the window | RB, QB |
+| `RZ/G` | targets + carries from inside the opponent's 20, per game | RB, WR, TE, QB |
+| `HVT/G` | "high-value touches": targets + carries from inside the opponent's 10, per game | RB |
+
+Blank (never 0) outside a metric's positions, for a player nflverse has no row for, and for
+everyone in Week 1 or when the file can't be fetched. A real 0 (a player who played and had no
+red-zone looks) stays 0 and gets the grey zero chip.
+
+- **Window: each player's last 3 games played** (fewer if he has fewer). Shares are ratios of
+  window *sums* (not a mean of weekly ratios), computed only over the games he played, so a
+  missed game never counts as a zero and an earlier game fills the window instead. A game counts
+  as played when the player has a row in `stats_player` that week; a player who suited up but
+  recorded no stat at all has no row and is skipped the same way. The header notes and the
+  Instructions tab state the window and the week the data runs through (the latest week with a
+  near-full slate, so a lone Thursday game does not move it; those players still carry that game
+  in their own window).
+- **A short window is a noisy number.** A player with fewer than 3 games is shown from the games he
+  has, as decided. Week 4 (data through Week 3): 270 players have 3 games, 99 have 2 and 92 have 1 --
+  e.g. Brock Bowers and Puka Nacua read from a single game. The window length is not on the sheet; it
+  is in the `Games` column of `data/current/usage.csv`. A minimum-games rule or a shown window length is
+  the obvious next step if this proves misleading.
+- **Team totals** are summed per team-week over every player in the file. Checked against
+  nflverse's own `target_share` for every WR/TE/RB row of the 2026 file (987 rows): our single-week
+  share matches with a **maximum difference of 0.0**.
+- **WOPR's air-yards share divides by the team's PASSING air yards** (the sum of its passers'
+  `passing_air_yards`), which is what nflverse's own `air_yards_share` divides by. Dividing by the
+  sum of receivers' `receiving_air_yards` instead was tried first and is wrong by up to 0.09
+  (throwaways and spikes carry air yards no receiver is credited with). With the passing
+  denominator our single-week WOPR matches nflverse's `wopr` on all 707 WR/TE rows, **maximum
+  difference 0.0**.
+- **Red zone** comes from the pbp, not the stats file: `yardline_100 <= 20` (`<= 10` for
+  `HVT/G`) on real scrimmage plays (`play_type` pass/run, the same allowlist `team_metrics` uses),
+  counting `receiver_player_id` on pass plays and `rusher_player_id` on rush plays (scrambles are
+  rushes), excluding two-point-conversion attempts and deleted plays. Both are gsis ids, matching
+  the stats file's `player_id`. A game with none counts as a 0 over the same game count.
+- **No prior-season blend** (roles change between seasons) and no fall back to last season:
+  if the stats file cannot be fetched the columns go blank, the sync carries on with a warning,
+  and the empty result also overwrites any stale `data/current/usage.csv`. A pbp failure alone
+  blanks only `RZ/G`/`HVT/G`.
+- **Join to DraftKings:** nflverse gsis id -> DK `Id` through `player_join` on display name +
+  team + position (FB/HB read as RB, like every other source). Every sync prints the rosterable-pool
+  coverage, writes the unmatched list to `data/current/unmatched_usage.csv` and the matched pairs
+  to `data/current/gsis_crosswalk.csv` (reused by the results loop). A player nflverse has no row for
+  (a QB who has not played) is legitimately unmatched; Travis Hunter is a CB in nflverse (a two-way
+  player), deliberately not joined, as for Sleeper.
+- **Colouring:** within position, through five more hidden `*%ile` helper columns (`Tgt%ile`,
+  `WOPR%ile`, `Rush%ile`, `RZ/G%ile`, `HVT/G%ile`), exactly like `ProjPts` -- the same 26 steps, the
+  same zero chip, and covered by the same `pct-helpers` doctor check.
+
+## Slate Grid: game environment columns and the TEAMS section (2026-10-02)
+
+**Game rows** gain `GameEnv`, `Pace`, `PROE` and `Expl%`: each is the mean of both teams' EdgeRaw
+value (`sheet_views._edge_team_pair_mean`, the same helper the Board's Slate shape uses, so the two
+tabs cannot disagree), coloured with the same game-metric rules.
+
+**TEAMS** (below the games) has one row per team on the week's schedule, sorted by implied total,
+highest first: `Team`, `Opp`, `Implied`, `Pace`, `PROE`, `Expl%`, `Off EPA/play`, `Off EPA/pass`,
+`Off EPA/rush`, `Opp Def EPA/pass`, `Opp Def EPA/rush`.
+
+- `Implied` is the Vegas implied team total from `GamesRaw`: home = (Total + Spread) / 2, away =
+  (Total - Spread) / 2 (Spread is signed from the home team's view, positive = home favoured),
+  the same convention `gps_check` uses.
+- The offence columns are the team's own values; **`Opp Def` is what the opponent's defense
+  allows** (the opponent's `DefEPA/Pass` / `DefEPA/Rush`), so a higher number is a softer defense
+  and reads green. `Pace` is seconds per snap, so lower is faster and reads green.
+- All of them are the `team_metrics` values (`TeamMetricsRaw`, one row per team, written by the
+  `pbp` source) with the usual prior-season blend (`PBP_PRIOR_WEIGHT_GAMES`).
+  `OffEPA/Pass` and `OffEPA/Rush` are new: mean EPA over pass plays (a scramble is a pass) and over
+  rush plays, all game states, real scrimmage plays only, the same filters as the defensive
+  `DefEPA/*` columns.
+- Each column is coloured as one smooth gradient against the other teams (white at the median,
+  zeros excluded); the rows are formula-sorted in place, so the colours stay attached.
+- A team with no player on the DK main slate is dimmed, the same way its game is.
+
 ## Player Pool ordering: tag group, then salary (Part 7.10)
 
 Sam, 2026-09-17: *"The pool should order players by position by salary
