@@ -724,7 +724,7 @@ of real `0.0`s until at least one `nfl_odds` sync has happened this week.
 
 Top to bottom: the starting/ending bankroll summary (rows 1-13, including
 the DK/PP/UD "parallel bankrolls" `week.BANKROLL_CARRYOVER_CELLS` carries
-forward and the Weekly Cash/GPP/Betting summary row), then the **Betting**
+forward (along with the typed Budget, Deposited, Withdrawn and Weekly Budget inputs) and the Weekly Cash/GPP/Betting summary row), then the **Betting**
 ledger, then **Cash**, then **GPP** -- Betting sits above Cash (not below
 GPP) so GPP, the bottom-most block, can grow downward without ever having
 to move anything else out of the way again (Round 5 item 7, 2026-09-28;

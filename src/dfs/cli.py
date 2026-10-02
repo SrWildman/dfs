@@ -2503,9 +2503,10 @@ def week_new(
     writing it as the NEW sheet's Starting balance -- see
     dfs.week.BANKROLL_CARRYOVER_CELLS and docs/planning/ROADMAP.md's Phase 4 section
     for how those cell addresses were found. Everything else on the
-    Bankroll tab (weekly budget formulas, Deposited/Withdrawn) is either
-    formula-driven and naturally resets, or a running total the user
-    updates by hand -- neither needs code here.
+    Bankroll tab is either formula-driven and naturally resets, or one of the
+    typed inputs that persist (Budget, Deposited, Withdrawn, Weekly Budget),
+    which `BANKROLL_CARRYOVER_CELLS` copies forward so a new week doesn't come
+    up with the template's placeholder values.
 
     Bankroll's own CONTEST rows (Cash/GPP entry ledgers) are cleared too --
     see `weekly_reset.clear_previous_week`'s `bankroll_*` params -- but only

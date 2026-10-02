@@ -166,3 +166,18 @@ def test_extract_results_value_columns_handles_short_rows():
     assert result["B:C"] == [["", ""]]
     assert result["E:F"] == [["", ""]]
     assert result["H:J"] == [["", "", ""]]
+
+
+def test_bankroll_carryover_includes_the_typed_inputs_that_persist():
+    # A new week is a copy of the template, whose placeholders ($10 deposited, $100 weekly
+    # budget) are not the real values -- Budget/Deposited/Withdrawn/Weekly Budget must come
+    # from the outgoing sheet along with the Starting balances (found Week 4, 2026-10-01).
+    from dfs.week import BANKROLL_CARRYOVER_CELLS
+
+    pairs = dict(BANKROLL_CARRYOVER_CELLS)
+    assert pairs["B2"] == "B1" and pairs["I2"] == "I1" and pairs["L2"] == "L1"
+    for typed in ("D1", "D2", "D3", "B6"):
+        assert pairs[typed] == typed
+    # each destination is written once -- two sources into one cell would silently clobber
+    destinations = [dst for _src, dst in BANKROLL_CARRYOVER_CELLS]
+    assert len(destinations) == len(set(destinations))

@@ -26,7 +26,21 @@ _WEEK_TITLE_RE = re.compile(r"^Week (\d+)$")
 # docs/planning/ROADMAP.md's Phase 4 section for how these cell addresses were found;
 # they're specific to the current template layout, not derived from anything
 # self-describing in the sheet.
-BANKROLL_CARRYOVER_CELLS = [("B2", "B1"), ("I2", "I1"), ("L2", "L1")]
+#
+# Also the four TYPED inputs that persist from week to week: Budget (D1), Deposited (D2),
+# Withdrawn (D3) and Weekly Budget (B6). They used to be left to "the user updates by hand",
+# which meant every new week came up with the TEMPLATE's placeholders ($10 deposited, $100
+# weekly budget) instead of the real $170 / $150 (found Week 4, 2026-10-01). They are plain
+# typed numbers, never formulas, so copying the resolved value is exact.
+BANKROLL_CARRYOVER_CELLS = [
+    ("B2", "B1"),
+    ("I2", "I1"),
+    ("L2", "L1"),
+    ("D1", "D1"),
+    ("D2", "D2"),
+    ("D3", "D3"),
+    ("B6", "B6"),
+]
 
 # The Results tab's column layout: A=Week, B=Cash Pts, C=Cash Line,
 # D=Cash Results (formula, =IF(B, B>C, "")), E=H2H Entered, F=H2H Win,
