@@ -19,6 +19,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from dfs.kickoff import parse_kickoff
 from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS
 
 
@@ -36,12 +37,9 @@ class SlotStatus:
 
 
 def _parse_game_start(value) -> datetime | None:
-    if value is None or (isinstance(value, float) and pd.isna(value)) or not str(value).strip():
-        return None
-    try:
-        return pd.Timestamp(value, tz="UTC").to_pydatetime()
-    except (ValueError, TypeError):
-        return None
+    """TFFB's `GameStart` as a real UTC instant -- it is Eastern wall-clock time labelled "Z", so it must
+    NOT be read as UTC (see `kickoff.py`): doing so marked a player locked up to four hours early."""
+    return parse_kickoff(value)
 
 
 def lineup_slot_status(names: list[str], edge: pd.DataFrame, *, now: datetime) -> list[SlotStatus]:
