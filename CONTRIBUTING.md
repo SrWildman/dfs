@@ -3345,6 +3345,45 @@ Three changes from Sam's review of Week 4, no row/column moved inside any tab.
 |---|---|---|---|---|---|---|
 | 2026-09-30 | tab strip | `Slate Grid` moved before `Board`. No formula references a tab's position. | Instructions, Board, EdgeRaw, Slate Grid, ... | Instructions, Slate Grid, Board, EdgeRaw, ... | Template, Week 4 | `sheet_style.WEEK_ORDER` |
 
+## Shading rebuilt without fixed cut-offs; Bankroll inputs carried (2026-10-01)
+
+No row/column/tab moved.
+
+- **Shading: no fixed cut-offs, position-aware where it matters.** Sam: "visually it's hard to
+  understand why 3 is white and 3.14 is light green ... I want to be able to tell per column what
+  values are good and bad relative to each other", "I don't want anything fixed", then "I like the
+  position stuff". Round 5 item 3's five percentile bands are replaced (see `docs/CALCULATIONS.md`,
+  "Highlighting: within-position steps and smooth gradients"):
+  the player metrics are compared within position through the existing hidden `*%ile` helpers, in
+  26 small steps (13 per side: every 5 percentile points out to p 75/25, then every 2.5 near the top
+  and bottom) instead of 4 wide bands, so neighbouring values differ by a soft tint
+  (`sheet_color_scales.step_rule_specs`); every column with no
+  position (game/team numbers, ownership, exposure) is one smooth red-white-green gradient, white at
+  the column's median, full colour at its 5th/95th percentile, zero excluded. Exact zeros stay grey.
+  Follow-up the same day (Sam: "the top 10 WRs are all projected within 5 points of each other, tough
+  to tell who's the better play", "the roster percent numbers are really flat", "the Sheets default
+  red/green is way too much to stare at"): the half-size steps above, a slightly more prominent
+  pastel palette (`GRAD_MIN`/`GRAD_MAX` moved ~15% toward Sheets' default; a first try at 40% was too
+  strong), and `Own%` back on its
+  CHALK-anchored midpoint -- I had moved it to the median, which crushes right-skewed ownership
+  into one pale amber (the Week 3 A2 finding, repeated).
+  I first built everything as a whole-column gradient, mixing positions (my reading of "per
+  column", never confirmed): it made DSTs read red next to QBs, and Sam asked for the position
+  comparison back. A true colour-scale gradient cannot be per position AND follow a sort (it only
+  sees its own range), which is why the steps go through the helpers.
+  New `dfs doctor` check `pct-helpers`: fails if a tab has real values in a metric but not one
+  number in that metric's percentile column (the steps would otherwise show no colour, silently).
+  Player Pool/Lineups use ONE multi-range gradient per gradient column over the blocks
+  (`grouped_column_rule_specs`) and one step set over the span.
+  `SheetsClient.clear_conditional_formats_for` now also matches a multi-range rule whose ranges each
+  belong to the call's targets; before that, re-polishing would have stacked a duplicate of every
+  multi-range rule instead of replacing it.
+- **Bankroll inputs carry over.** `dfs week new` now also copies Budget (`D1`), Deposited (`D2`),
+  Withdrawn (`D3`) and Weekly Budget (`B6`) from the closing sheet (`week.BANKROLL_CARRYOVER_CELLS`).
+  They were left to "the user updates by hand", so every new week (a copy of the template) came
+  up with the template's placeholders -- $10 deposited and $100 weekly budget instead of $170 and
+  $150 (found Week 4).
+
 ## Commit messages / PR descriptions
 
 Explain *why*, not just what -- especially for anything that was tried and

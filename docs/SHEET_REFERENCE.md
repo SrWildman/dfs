@@ -152,11 +152,11 @@ actually matches.
 | `Name` | Player name, DK-nickname convention for DST. |
 | `Position`, `Team`, `Opp` | As above. |
 | `Salary` | DraftKings' own salary (authoritative) -- falls back to TFFB's figure only for the rare player TFFB projects who isn't on DK's main-slate salary list (e.g. a Thursday/Monday-only game). |
-| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` are highlighted by their within-position percentile ("Highlighting", below); `Own%` keeps its own white-to-amber-to-red scale. |
+| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` are highlighted by their within-position steps ("Highlighting", below); `Own%` keeps its own white-to-amber-to-red scale. |
 | `AggPts` | Part C, C5 (2026-09-24): equal-weight mean of every DK-scored source with a real projection for this player -- `ProjPts`, Sleeper, FantasyPros (`sources/sleeper_projections.py`/`fantasypros_projections.py`, re-scored to exact DK rules -- see `docs/CALCULATIONS.md`). A missing source (not synced, or a genuine "no projection this week") is excluded from that player's own average, never treated as 0. With only TFFB available, equals `ProjPts` exactly. Feeds nothing else -- a second opinion to read, not an input to `ValAdj`/anything downstream. |
-| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Highlighted by its within-position percentile ("Highlighting", below). No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
+| `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Highlighted as a gradient over the whole column ("Highlighting", below). No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
 | `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Banded on its own value (already a 0-100, position-comparable score by construction), not through a percentile helper -- see "Highlighting", below. |
-| `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Highlighted by its within-position percentile ("Highlighting", below). |
+| `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Highlighted as a gradient over the whole column ("Highlighting", below). |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
 | `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is all zeros (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
 | `OwnStatus` | Renamed from `LevBasis` in Phase 6, Part 7.9 (Leverage's own demotion left this marker gating `Own%`, a spine column, not describing Leverage -- the old name no longer said what it does). `"real"` once any player has non-zero `Own%` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage` has a real number yet. |
@@ -187,20 +187,20 @@ only" (`Avail` blank), "In my pool" (`Pool = TRUE`). `EdgeRaw` itself is
 deliberately **not** protected (`dfs setup protect`) -- ticking `Pool` is
 the tab's entire reason to exist.
 
-**Highlighting** (five bands, Round 5 item 3, 2026-09-29; replaces the per-position
-gradients of 2026-09-18): the top 10% of a column is strong green, the next 20% light
-green, the middle 40% plain, then light red and strong red for the 20% and 10% at the
-bottom. Zeros and blanks are never coloured (a zero gets a flat grey chip). Rules are
-formulas that follow each row through any sort or filter.
-`ProjPts`/`AggPts`/`Ceiling`/`Val`/`CeilVal` are ranked **within position** -- a QB
-against QBs -- through five hidden percentile columns (`ProjPts%ile`, `AggPts%ile`,
-`Ceiling%ile`, `Val%ile`, `CeilVal%ile`), so a QB's real point totals and a DST's are
-never compared. `ValAdj`, `CeilPct` and `GameEnv` are already 0-100 and band on their own
-value; `Leverage` bands around zero; `OppPosRank` on the rank itself (low is the tough
-matchup); per-game columns (`Pace`, `PROE`, `Expl%`, `OppEPA`, `Total`, `GPS`, `Spread`)
-by `PERCENTRANK` against their own column. `Salary` is never highlighted anywhere on this
-sheet. The exact cut-offs and the reason for each choice are in `docs/CALCULATIONS.md`,
-"Highlighting: five bands".
+**Highlighting** (Sam, 2026-10-01; replaces the five percentile bands of 2026-09-29): the
+player metrics (`ProjPts`/`AggPts`/`Ceiling`/`Val`/`CeilVal`, and the 0-100 `ValAdj`/`CeilPct`/
+`GameEnv`) show where a player ranks **within his position** -- plain in the middle 20%, then a
+light-to-strong green or red in small steps (every 5 percentile points) to full colour for the top
+or bottom 5%, so two nearby numbers look nearly the same. They read five hidden percentile columns
+(`ProjPts%ile`, `AggPts%ile`, `Ceiling%ile`, `Val%ile`, `CeilVal%ile`) with formula rules that follow
+each row through any sort or filter. Every column with no position (game/team numbers, `Own%`,
+`Used`, `Exposure`, `Pace`, `Spread`, `OppPosRank`) is one smooth gradient over the whole column,
+white at its median and full colour at its 5th/95th percentile; the signed columns (`ImpliedMove`,
+`TotMove`, `SpdMove`, `Leverage`) are white at zero; low-is-good columns are reversed; `Own%` is the
+white -> amber -> red warm scale with amber at the 20% chalk line. Zeros and blanks are never part of any scale (a zero gets a flat
+grey chip). `Salary` is never highlighted anywhere on this sheet. The exact rules and the reason for
+each choice are in `docs/CALCULATIONS.md`, "Highlighting: within-position steps and smooth
+gradients".
 
 See `docs/CALCULATIONS.md` for the exact formula behind every EdgeRaw column above.
 
@@ -856,8 +856,9 @@ weekly wins/losses/pushes/expected-wins columns).
 - **`ProjPts%ile`, `AggPts%ile`, `Ceiling%ile`, `Val%ile`, `CeilVal%ile`** --
   EdgeRaw columns, linked (hidden, INTERNAL) onto Player Pool, Lineups and
   PlayerPoolRaw. Each is that player's percentile within his position over the
-  rosterable pool, zeros/blanks excluded; the highlighting rules read them
-  (see `docs/CALCULATIONS.md`, "Highlighting: five bands"). Never sort or
+  rosterable pool, zeros/blanks excluded; the colour steps read them (see
+  `docs/CALCULATIONS.md`, "Highlighting: within-position steps and smooth gradients"),
+  and `dfs doctor` fails if one is blank next to real metric values. Never sort or
   type in them.
 - **`NameKey`** -- EdgeRaw's last column, hidden: `player_join.normalize_name(Name)`.
   Typed names (Lineups, Player Pool's add-a-player box) are normalised the same

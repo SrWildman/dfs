@@ -147,9 +147,8 @@ a real, useful cash threshold. Bad sort key, good filter line.
 **Within-position, not cross-position.** Both percentiles feeding the
 blend are ranked within each player's own position (same convention as
 `CeilPct`) -- so `ValAdj` is already comparable across positions and is
-banded on its own value (see "Highlighting: five bands" below), where
-the raw `ProjPts`/`Val`/`Ceiling`/`CeilVal` are banded through their hidden
-within-position percentile helpers. This also means a thin
+stepped on its own value (see "Highlighting: within-position steps and smooth gradients"
+below). This also means a thin
 position's best player can post a very high `ValAdj` on a raw production
 level an average player at a deeper position would beat easily -- the
 fix targeted comparing players WITHIN the same position fairly, and does
@@ -161,58 +160,77 @@ that specific case is fixed. This paragraph's weaker claim, that a thin
 position's TOP player can still rank ahead of a deeper position's
 average one on raw production, remains true by design.)
 
-## Highlighting: five bands, driven by a percentile (Round 5 item 3, 2026-09-29)
+## Highlighting: within-position steps and smooth gradients (Sam, 2026-10-01)
 
-Every scaled column is coloured by the same five-band rule, and **zeros and
-blanks are never coloured by it** -- they are neither in the reference
-distribution nor given a band. (A real zero gets only the flat grey chip,
-`ZERO_GREY_BG`, added last so it wins; Sam zeroes promo/bonus rows by hand
-and they must not skew the real numbers.)
+Every scaled column is coloured, and **zeros and blanks are never part of it**. A
+real zero gets only the flat grey chip (`ZERO_GREY_BG`, added last so it wins); Sam
+zeroes promo/bonus rows by hand and they must not skew the real numbers.
 
-| Band | Percentile |
-|---|---|
-| strong green | >= 90 |
-| light green | 70 to < 90 |
-| (none) | 30 to < 70 |
-| light red | 10 to < 30 |
-| strong red | < 10 |
-
-Colours reuse the old gradient's palette (`GRAD_MAX`/`GRAD_MIN`; the light
-bands are a 50% tint toward white). Cut-offs are `sheet_color_scales`'s
-band constants. The rules are CUSTOM_FORMULA rules with *relative* row
-references (`=AND(ISNUMBER($AS2),$AS2>=90)`), so a colour follows its row
-through any sort or filter -- the old per-position `GridRange` rules did not.
-
-**Which number is banded** is set per column by
+It replaces Round 5 item 3's five wide percentile bands (2026-09-29). Sam: "visually
+it's hard to understand why 3 is white and 3.14 is light green", "I like the position
+stuff", "I don't want anything fixed". Two shapes, set per column by
 `sheet_color_scales.FIELD_COLOR_SCALES`:
 
-- `pct` -- `ProjPts`, `AggPts`, `Pts`, `Ceiling`/`Ceil`, `Val`, `CeilVal`.
-  Banded by a hidden **within-position percentile helper column**
-  (`derived.PLAYER_METRIC_PCT_COLUMNS`: `ProjPts%ile`, `AggPts%ile`,
-  `Ceiling%ile`, `Val%ile`, `CeilVal%ile`), computed once in `derived.py`
-  over the rosterable pool (`_rosterable_pool_mask`, the same pool ValAdj
-  uses), zeros/blanks excluded, then linked onto Player Pool, Lineups and
-  PlayerPoolRaw through the INTERNAL group, so a player is the same colour on
-  every tab. A QB is compared with QBs only.
-- `score` -- `ValAdj`, `CeilPct`, `GameEnv`: already 0-100, banded on their
-  own value.
-- `leverage` -- `Leverage` (CeilPct - OwnPct, -100..+100): strong at
-  +/-40, light at +/-15 (`LEVERAGE_BANDS`; **provisional**, chosen by
-  Claude when the prompt said to ask if the range was not 0-100).
-- `rank` -- `OppPosRank`, low is the tough matchup: bands at 4/10/23/29
-  (`RANK_BANDS`).
-- `game` / `game_reversed` -- per-game/team columns (`Pace`, `PROE`,
-  `Expl%`, `Team Implied`, `O/U`, `Total`, `GPS`, `OppEPA`; `Spread` and
-  `Pace` reversed, low is good): `PERCENTRANK` against the column's own
-  range, live, so it needs no helper. `Spread` allows a real 0 (a pick'em).
-- `diverging`/`warm`/`reversed` -- unchanged: the movement columns, `Own%`,
-  `Exposure`.
+**Steps -- the player metrics, compared within position.** `ProjPts`, `AggPts`, `Pts`,
+`Ceiling`/`Ceil`, `Val`, `CeilVal` read a hidden within-position percentile helper
+(`derived.PLAYER_METRIC_PCT_COLUMNS`: `ProjPts%ile`, ..., computed once in `derived.py`
+over the rosterable pool, zeros/blanks excluded, then linked onto Player Pool, Lineups and
+PlayerPoolRaw through the INTERNAL group), so a QB is compared with QBs only and a player is
+the same colour on every tab. `ValAdj`, `CeilPct` and `GameEnv` are already 0-100 percentile
+scores and step on their own value. A percentile `p` is shaded like this:
 
-The old machinery (`apply_edge_position_scales`, one gradient rule per
-metric x position with a multi-range `GridRange`) is gone;
-`EDGE_UNSCALED_PLAYER_METRICS` and `GROUPED_TAB_UNSCALED_COLUMNS` are now
-empty sets kept so callers do not break. Rule count on the template went
-2,605 -> 607 (EdgeRaw 1,491 -> 104).
+| p | shade |
+|---|---|
+| 40 to 60 | plain |
+| 60-65, 65-70, 70-75 | 3 light greens, one per 5 points |
+| 75 to 97.5 | 9 greens, one per 2.5 points (finest where the top players live) |
+| >= 97.5 | full green (`GRAD_MAX`) |
+| 25-40 and below | the same ladder in reds, down to full red (`GRAD_MIN`) at <= 2.5 |
+
+(`STEP_EDGES`: 13 shades per side, the distance from the middle `d = |p - 50|` growing by 5 out to
+25 and by 2.5 from there to 47.5, then one open-ended shade; `STEP_PLAIN_HALF` = 10.) Each shade is a
+straight blend from white to the strong colour, `amount` rising linearly with `d` from 12% to 100%,
+so neighbouring steps differ by a soft tint -- no 3.00-vs-3.14 cliff -- and the half-size steps
+spread a tight group of near-top players over distinguishable shades (Sam, 2026-10-02: the top 10
+WRs "all projected within 5 points of each other" were hard to tell apart). The palette is the old
+pastel gradient nudged about 15% of the way toward Sheets' default scale (`GRAD_MIN` ~#F2C0BF,
+`GRAD_MAX` ~#A8DBB0): Sam found the default "way too much to stare at a whole sheet of" and a first
+try at 40% too strong, but wanted a very slightly more prominent colour than the old pastels. The rules are CUSTOM_FORMULA rules with a *relative* row
+reference (`=AND(ISNUMBER($AS2),$AS2>=60,$AS2<65)`), so a colour follows its row through any sort
+or filter. (A true colour-scale gradient cannot do that per position: it only sees its own
+range, so a per-position gradient is tied to fixed row runs and breaks as soon as the sheet is
+sorted -- which is why the within-position colouring goes through the helpers.)
+`dfs doctor`'s `pct-helpers` check fails if a tab has metric values but a completely blank
+helper column, since the steps would then silently show no colour.
+
+**Gradient -- everything without a position.** Game and team metrics (`PROE`, `Expl%`,
+`Team Implied`, `O/U`/`OverUnder`/`Total`, `GPS`, `OppEPA`), `Own%`, `Used`, `Pace`, `Spread`,
+`OppPosRank`, `Exposure` and the zero-centred columns are ONE smooth gradient over the column:
+
+| Point | Value | Colour |
+|---|---|---|
+| low end | the 5th percentile of the column's NON-ZERO values | strong red |
+| midpoint | the MEDIAN of the column's non-zero values | white |
+| high end | the 95th percentile of the column's non-zero values | strong green |
+
+All three are live formulas over the column itself (`_zero_exclude_formula`:
+`PERCENTILE(FILTER(range,range<>0),q)` and `MEDIAN(FILTER(...))`, absolute references; a
+column in several row blocks combines every block into one computation). Values beyond the
+5th/95th percentile stay at the end colour. `Pace`, `Spread`, `OppPosRank` and `Exposure` are
+reversed (LOW is good: green at the low end); `Spread` keeps zero as a real value (a pick'em),
+so it has no grey chip. `ImpliedMove`, `TotMove`, `SpdMove` and `Leverage` (CeilPct - OwnPct,
+-100..+100) are *diverging*: white AT ZERO with symmetric ends (`diverging_anchor_kwargs`), no
+grey zero. `Own%` is the one column NOT anchored to its own median: white -> amber -> red (high
+ownership is a caution) with the midpoint at the 20% CHALK line, the low end the lowest non-zero
+value and the high end the real maximum. Ownership is right-skewed, so a median midpoint (~5%)
+crushes nearly every value into one pale amber -- Week 3 feedback A2, and again 2026-10-02 ("really
+flat in terms of colour spread") when I had moved it to the median under "nothing fixed".
+
+On Player Pool and Lineups a gradient column's blocks (one per position / lineup) are ONE rule
+over the union of the blocks, so totals and header rows between them stay out of it
+(`grouped_column_rule_specs`); Lineups carries about 21 gradient rules plus the steps instead of
+hundreds of per-block rules. The five-band machinery (`band_rule_specs`, `LEVERAGE_BANDS`,
+`RANK_BANDS`, `PERCENTRANK` rules for the game metrics) is deleted.
 
 **Known limitation.** A Slate Grid `Spread` column is signed
 home-perspective and is not banded.
@@ -388,7 +406,7 @@ team's real identity.
 ```
 Pace  = mean seconds between consecutive real offensive snaps (play_type in {pass, run})
         within the same drive, neutral script only. Lower is faster, so its bands are reversed
-        (the fastest teams are green -- see "Highlighting: five bands").
+        (the fastest teams are green -- see "Highlighting: within-position steps and smooth gradients").
 PROE  = mean pass_oe (nflverse's own pass-rate-over-expected model) over the same
         neutral-script scrimmage plays. Higher = pass-heavier than the situation implies.
 Expl% = share of ALL scrimmage plays (every game state) gaining ≥20 yards on a pass
@@ -470,7 +488,7 @@ alone.
 **Where it shows.** Slate Grid's `GPS` and the Board's Slate shape `GPS`
 read `GPSRaw` directly, off the HOME team's row (`GPS` is a per-GAME score,
 never an EdgeRaw column). Both are banded like `Total` (the `game` bands: a live
-`PERCENTRANK` against the column's own range -- see "Highlighting: five bands").
+`PERCENTRANK` against the column's own range -- see "Highlighting: within-position steps and smooth gradients").
 
 **`ImpliedTotal` stays in the snapshot as a sanity check only**
 (`gps_check.py`). A row swap in the source means a game's `GPS` describes
@@ -540,8 +558,8 @@ A bad offense (negative EPA/play) is a good matchup for a defense, so the
 DST's sign is flipped to keep "higher = better matchup" for every position.
 A team missing from the pbp data -- or pbp not synced at all -- leaves
 `OppEPA` blank, never 0. Coloured with the `game` bands, like `PROE`/`Expl%`
-(`FIELD_COLOR_SCALES["OppEPA"]`; higher = greener -- see "Highlighting: five
-bands"), formatted to three decimals.
+(`FIELD_COLOR_SCALES["OppEPA"]`; higher = greener -- see "Highlighting: within-position steps and
+smooth gradients"), formatted to three decimals.
 
 **One-time cross-check against a public team-stats site** (2026-09-29, current season
 through Week 3, unblended, all plays): our EPA/play tracks theirs closely
