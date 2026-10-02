@@ -780,6 +780,7 @@ class FakeGuardrailsClient:
 class FakeBoardClient:
     def __init__(self, *, present: bool = True):
         self._present = present
+        self.notes: list[tuple[str, str, str]] = []
         self.row_group_calls: list[tuple[int, int, bool]] = []
         self.cleared_row_groups = False
         self.unhidden_rows: list[tuple[int, int]] = []
@@ -792,6 +793,16 @@ class FakeBoardClient:
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
+
+    def read_range(self, tab_name: str, a1_range: str):
+        """Header rows only: Slate Grid's game header (row 1) or its TEAMS header (any later row)."""
+        from dfs.sheet_views import SLATE_HEADER, SLATE_TEAMS_COLHEADER
+
+        row = int(a1_range.split(":")[0].lstrip("A"))
+        return [list(SLATE_HEADER if row == 1 else SLATE_TEAMS_COLHEADER)]
+
+    def set_note(self, tab_name: str, cell_a1: str, note: str) -> None:
+        self.notes.append((tab_name, cell_a1, note))
 
     def hide_columns(self, tab_name: str, first_col: str, last_col: str, *, hidden: bool = True) -> None:
         self.hide_columns_calls.append((first_col, last_col))
@@ -2304,3 +2315,40 @@ def test_bankroll_value_cells_cover_every_currency_and_percent_cell_and_the_kpi_
     assert formatted <= values
     assert BANKROLL_KPI_LAST_ROW == SUMMARY_ROW  # the Betting summary row closes the KPI block
     assert max(r for _c, r in values) <= BANKROLL_KPI_LAST_ROW
+
+
+def test_slate_grid_header_notes_land_on_the_game_row_and_the_teams_row():
+    from dfs.sheet_views import SLATE_COL, SLATE_TEAMS_COLHEADER, SLATE_TEAMS_COLHEADER_ROW
+
+    class _Client(FakeBoardClient):
+        def freeze(self, tab, *, rows=None, cols=None):
+            pass
+
+    client = _Client()
+    style_slate_grid(client)
+    by_cell = {cell: text for _tab, cell, text in client.notes}
+    assert "both teams" in by_cell[f"{SLATE_COL['GameEnv']}1"].lower()
+    opp_def_pass = f"{chr(65 + SLATE_TEAMS_COLHEADER.index('Opp Def EPA/pass'))}{SLATE_TEAMS_COLHEADER_ROW}"
+    assert "ALLOWS" in by_cell[opp_def_pass]  # what the opponent's defense allows, higher = softer
+
+
+def test_builder_tab_usage_headers_get_the_note_on_the_header_row_only():
+    class _Client(FakeBuilderTabClient):
+        def __init__(self):
+            super().__init__(["Name", "Pos.", "Tgt%", "WOPR"])
+            self.notes = []
+
+        def set_note(self, tab, cell, note):
+            self.notes.append((cell, note))
+
+    client = _Client()
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=2)
+    cells = dict(client.notes)
+    assert set(cells) == {"C2", "D2"}  # exactly the two usage headers present, on the header row
+    assert "last 3 games played" in cells["C2"]
+
+
+def test_model_check_sits_after_season_and_results_in_the_money_band():
+    names = [tab for tab, _family in WEEK_ORDER]
+    assert names.index("Season") < names.index("Results") < names.index("Model Check")
+    assert dict(WEEK_ORDER)["Model Check"] == "money"

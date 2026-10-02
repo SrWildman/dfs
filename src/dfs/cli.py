@@ -35,6 +35,7 @@ from dfs.bankroll import (
 )
 from dfs.config import Config, ConfigError, load_config
 from dfs.doctor import run_doctor
+from dfs.kickoff import games_state
 from dfs.late_swap import lineup_slot_status, swap_candidates
 from dfs.launcher import LauncherState, header_lines, suggest_actions
 from dfs.line_movement import LineMovementError, diff_odds
@@ -167,6 +168,7 @@ odds_app = typer.Typer(help="Check how betting lines have moved since your last 
 week_app = typer.Typer(help="Start a new week's sheet, or close out the one you're on.")
 pool_app = typer.Typer(help="Add or remove players from your pool without opening the sheet.")
 ownership_app = typer.Typer(help="Log actual DK contest ownership (Phase 6, Part 7.8).")
+results_app = typer.Typer(help="Score every projection against what actually happened (Model Check).")
 app.add_typer(setup_app, name="setup")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
@@ -174,6 +176,7 @@ app.add_typer(bankroll_app, name="bankroll")
 app.add_typer(lineups_app, name="lineups")
 app.add_typer(odds_app, name="odds")
 app.add_typer(week_app, name="week")
+app.add_typer(results_app, name="results")
 app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
 
@@ -248,13 +251,10 @@ def gather_state() -> LauncherState:
     except FileNotFoundError:
         edge_df = None
     if edge_df is not None and "GameStart" in edge_df.columns:
-        starts = pd.to_datetime(edge_df["GameStart"], utc=True, errors="coerce").dropna()
-        if len(starts):
-            now = pd.Timestamp.now(tz="UTC")
-            state.game_started = bool((starts <= now).any())
-            if state.game_started:
-                hours_since_last_kickoff = (now - starts.max()).total_seconds() / 3600
-                state.games_finished = hours_since_last_kickoff >= GAMES_FINISHED_AFTER_HOURS
+        # GameStart is Eastern wall-clock time labelled "Z": `games_state` localises it (kickoff.py).
+        state.game_started, state.games_finished = games_state(
+            edge_df["GameStart"], datetime.now(UTC), GAMES_FINISHED_AFTER_HOURS
+        )
 
     try:
         client = SheetsClient(cfg.google_sheets)
@@ -2819,6 +2819,63 @@ def week_close(
     cfg = _load_config_or_exit()
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
     _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
+    _score_results_after_close(cfg)
+
+
+def _score_results_after_close(cfg: Config) -> None:
+    """Score the week that just finished and refresh Model Check. NEVER fails the close: nflverse
+    publishes a day or two late, and any problem here is reported and skipped."""
+    from dfs.nfl_calendar import current_season
+    from dfs.results_update import update_results
+
+    console.print("\n[bold]Scoring the week's projections[/bold] (Model Check)...")
+    try:
+        report = update_results(cfg, season=current_season())
+    except Exception as e:  # noqa: BLE001 - the close itself already succeeded; never fail it over this
+        console.print(f"[yellow]Model Check not updated ({e}); run `dfs results update` later.[/yellow]")
+        return
+    for line in report.lines:
+        console.print(line)
+
+
+@results_app.command("update")
+def results_update_command(
+    week: int = typer.Option(None, "--week", help="Score this completed week even if it is already scored."),
+    all_weeks: bool = typer.Option(
+        False, "--all", help="Rescore every completed week (flags are recomputed with today's code)."
+    ),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Write Model Check to this sheet instead of config.toml's (e.g. the template).",
+    ),
+    no_sheet: bool = typer.Option(
+        False, "--no-sheet", help="Score to data/results/ only; do not touch the sheet."
+    ),
+) -> None:
+    """Score every completed week that is not scored yet against nflverse's actual stats, then rebuild
+    the `Model Check` tab from everything scored so far.
+
+    Each player's projection is the last TFFB snapshot before HIS OWN kickoff; ValAdj, flags and the
+    rosterable pool are recomputed from the archived raw snapshots with today's code. Actual DK points
+    come from nflverse's `stats_player`/`stats_team` (real yardage bonuses; defenses from team stats plus
+    the opponent's final score). nflverse lags a day or two after a week's games: if the stats are not
+    out yet this says so and exits cleanly. Not part of `dfs sync`.
+    """
+    from dfs.nfl_calendar import current_season
+    from dfs.results_update import update_results
+
+    cfg = _load_config_or_exit()
+    report = update_results(
+        cfg,
+        season=current_season(),
+        week=week,
+        rescore_all=all_weeks,
+        sheet_id=sheet_id,
+        write_sheet=not no_sheet,
+    )
+    for line in report.lines:
+        console.print(line)
 
 
 @bankroll_app.command("sync")

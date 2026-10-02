@@ -3457,3 +3457,41 @@ formats identical on both sheets (EdgeRaw 390, Player Pool 400, Lineups 461, Pla
 Colours checked in the browser on the template through a WR position filter and a `Tgt%` sort. Week 4's real Pool
 ticks survived the sync.
 
+## The results loop and the `Model Check` tab (2026-10-02)
+
+`docs/planning/PROMPT_RESULTS_LOOP.md`. One structural change (a new visible tab) and a new command group; applied
+template first, then Week 4, never Week 3.
+
+- **`dfs results update [--week N] [--all] [--sheet-id ID] [--no-sheet]`** (`results_update.py`): fetches nflverse's
+  `stats_player`, `stats_team` and the schedule's final scores (`sources/nflverse_results.py`, raw files snapshotted
+  under `data/raw/`), scores every completed week that has no `data/results/scored_<season>_wNN.csv`, and rebuilds the
+  tab. `dfs week close` runs it last and never fails over it (`cli._score_results_after_close`); if nflverse has not
+  published the stats it says so and carries on. It is not part of `dfs sync`.
+- **Modules:** `results_actual.py` (actual DK points, identity check), `results_loop.py` (snapshot selection per
+  player, as-of reconstruction, recompute with `build_edge_frame`, join, coverage), `results_analysis.py` (the 3a-3e
+  tables, pure), `sheet_model_check.py` (tab layout and writer), and `dk_scoring.score_*_actual_row` (the `actual`
+  scoring path beside the projection one, reusing its constants).
+- **TFFB's `GameStart` is Eastern wall-clock time labelled "Z".** Verified against nflverse's kickoff times. The loop
+  localises it (`kickoff.kickoff_utc`). **`late_swap._parse_game_start` and the launcher's started/finished state
+  used to read it as UTC**, which marked a player locked up to four hours early (five after the clocks change) and
+  dropped him from the swap candidates for the same window -- found here, and **fixed the same day with Sam's OK**:
+  everything now goes through `kickoff.py` (`kickoff_utc`, `parse_kickoff`, `games_state`). On this week's real
+  slate at 1:30 pm ET, 51 RBs from the 4:05/4:25 games are swappable; the old reading said 0.
+- **The Week 3 contest file is really Week 2.** `data/ownership_log.csv` labels contest 195860733 "week 3"; its
+  points match Week 2 exactly (logged on a Tuesday after the calendar rolled).
+- **`Model Check`** is visible, after `Season` and `Results` (`sheet_style.WEEK_ORDER`: Season, Results, Model Check; family `money`; Sam: "season, results, model"), has a tab note
+  (`TAB_NOTES`), and is described in the `Season` Instructions row (that tab never inserts rows, so no new row).
+  Rebuilt from disk each run; the writer first resets the tab's whole format so a stale thin-row style cannot leak.
+  Band labels use an en dash because Sheets parses `5-10` as a date.
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-10-02 | `Model Check` | New visible season-level tab, rebuilt by `dfs results update`. | Did not exist. | Visible, last in the money band (Season, Results, Model Check); ~74 rows, columns A-J. | Template, Week 4 | `sheet_model_check.MODEL_CHECK_TAB`/`build_layout`/`write_model_check`, `sheet_style.WEEK_ORDER`/`TAB_NOTES`. |
+
+**One-hover definitions (2026-10-02, Sam: "make sure all these new things ... are documented ... in the sheet,
+wherever").** New `sheet_column_notes.py`: a plain-English cell note on the header of every new column -- the
+usage columns (window, positions, "data through Week N"), Slate Grid's game metrics and TEAMS columns, and every
+Model Check metric -- matched by header text and applied by `polish` (`apply_header_notes`) and by
+`results update`. `tests/test_sheet_column_notes.py` fails if a usage column, TEAMS header or Model Check header has
+no note. No row or column moved; nothing structural.
+

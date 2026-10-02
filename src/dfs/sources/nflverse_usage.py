@@ -45,6 +45,8 @@ STATS_RAW_DIRNAME = "stats_player"
 
 
 class NflverseUsageFetchError(Exception):
+    """The stats or play-by-play file could not be fetched or read (reported as a warning, never fatal)."""
+
     pass
 
 
@@ -73,10 +75,13 @@ def _snapshot_raw_stats(content: bytes) -> None:
 
 
 class NflverseUsageSource(Source):
+    """Per-player usage (`Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G`); no sheet tab, it feeds EdgeRaw."""
+
     name = "usage"
     uploads_to_sheet = False
 
     def fetch(self, ctx: SyncContext) -> pd.DataFrame:
+        """One row per player, or an EMPTY frame (columns only) when the stats file is unavailable."""
         log.info("fetching nflverse stats_player for season %s", ctx.season)
         try:
             stats_bytes = _download(

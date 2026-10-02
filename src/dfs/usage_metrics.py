@@ -90,6 +90,7 @@ _SCRIMMAGE_PLAY_TYPES = {"pass", "run"}
 
 
 def empty_usage_frame() -> pd.DataFrame:
+    """No players: the right columns and no rows (Week 1, or a failed fetch -- every usage column blank)."""
     return pd.DataFrame(columns=USAGE_SOURCE_COLUMNS)
 
 

@@ -833,6 +833,30 @@ and the three team-colour columns (H/I/J) stay yours to maintain by hand;
 `write_results_updates` never touches them, and never blanks `Cash Pts`
 for a week that hasn't finished scoring yet.
 
+### Header notes (one-hover definitions)
+
+The newer columns carry a plain-English definition as a **cell note on their header** (hover the little corner
+mark): the five usage columns on EdgeRaw / Player Pool / Lineups / PlayerPoolRaw (what it measures, which positions
+it applies to, the last-3-games-played window, and "data through Week N" as of the last sync), Slate Grid's game
+metrics and every TEAMS column (including that `Opp Def` is what the OPPONENT's defense allows), and every
+`Model Check` metric. The text lives in one place, `sheet_column_notes.py` (`USAGE_NOTES`, `SLATE_GAME_NOTES`,
+`SLATE_TEAMS_NOTES`, `MODEL_CHECK_NOTES`), is matched by header text, and is applied by `dfs setup polish` (and by
+`dfs results update` for Model Check). A test fails if a usage column, TEAMS header or Model Check header has no
+note, so a new column cannot ship unexplained.
+
+### Model Check
+
+Season-level, read-only, **rebuilt from `data/results/` every time `dfs results update` runs** (also at the end of
+`dfs week close`, which never fails over it). Nothing is typed. Seven blocks, top to bottom: a status line (weeks
+scored, rosterable-pool players scored / did not play / not found), **Ceiling** (how often a player beat his
+published `Ceiling`, with its 90% interval and implied quantile -- the headline), **Projection accuracy** (bias, MAE,
+calibration slope, R squared, Spearman, calibration buckets), **ValAdj** quintiles, **Sources compared** (labelled
+with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, and **Flags**. Every
+table shows n; a row with n < 30 is "thin" and drawn in muted italic. Sits after Season and Results in the tab strip
+(`sheet_style.WEEK_ORDER`: Season, Results, Model Check); built by `sheet_model_check.build_layout` / `write_model_check`. The definitions behind
+every number are in `docs/CALCULATIONS.md`'s "The results loop and `Model Check`". Every metric header carries a
+cell note (hover the corner mark) with its plain-English definition (`sheet_column_notes.MODEL_CHECK_NOTES`).
+
 ### Season
 
 Round 5, item 7d (2026-09-28). A year-at-a-glance rollup -- one pre-built

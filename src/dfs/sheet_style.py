@@ -99,6 +99,12 @@ from dfs.sheet_color_scales import (
     diverging_anchor_kwargs,
     grouped_column_rule_specs,
 )
+from dfs.sheet_column_notes import (
+    SLATE_GAME_NOTES,
+    SLATE_TEAMS_NOTES,
+    apply_header_notes,
+    usage_notes,
+)
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_tints import LEGEND as LINEUP_TINT_LEGEND
@@ -1228,6 +1234,8 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     )
 
     apply_edge_column_groups(client, edge_tab)
+    # One-hover definitions for the usage columns (window, positions, "data through Week N").
+    apply_header_notes(client, edge_tab, 1, usage_notes())
 
     return (
         f"{edge_tab}: widths, header, banding, formats, {n_scaled} highlighted column(s), "
@@ -1509,10 +1517,13 @@ def polish_builder_tab(
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_zone_label_style(client, tab, header, data_start=data_start, last_row=last_row)
 
+    # One-hover definitions for the usage columns (window, positions, "data through Week N").
+    noted = apply_header_notes(client, tab, header_row, usage_notes())
+
     pin_note = "Name pinned" if freeze_cols else "no column pin"
     return (
         f"{tab}: header styled, {pin_note}, banded, {applied} column(s) number-formatted, "
-        f"{scaled} colour scale(s), {chipped} chip column(s)"
+        f"{scaled} colour scale(s), {chipped} chip column(s), {noted} header note(s)"
     )
 
 
@@ -2266,6 +2277,10 @@ WEEK_ORDER = [
     ("Bankroll", "money"),
     ("Season", "money"),
     ("Results", "money"),
+    # Results loop (2026-10-02): projections scored against what actually happened, rebuilt from
+    # data/results/ by `dfs results update`. Nothing on it is typed. Last in the money band, after Season
+    # and Results (Sam: "season, results, model").
+    ("Model Check", "money"),
     ("SoSComb", "feed"),
     ("PlayerPoolRaw", "feed"),
 ]
@@ -2437,6 +2452,11 @@ TAB_NOTES: dict[str, str] = {
     "Instructions": (
         "INSTRUCTIONS -- read this first. The weekly workflow lives here, row by row; "
         "`docs/` in the repo has the full reference for anything beyond it."
+    ),
+    "Model Check": (
+        "MODEL CHECK -- every projection scored against what actually happened, rebuilt from disk each "
+        "time `dfs results update` runs (it also runs at the end of `dfs week close`). Nothing here is "
+        "typed. Muted italic rows are thin (n < 30): read them as 'not enough data yet'."
     ),
     "PlayerPoolRaw": (
         "PLAYERPOOLRAW -- the hub every other tab's VLOOKUPs read from. Left visible on "
@@ -2880,6 +2900,9 @@ def style_slate_grid(client: SheetsClient, tab: str = "Slate Grid") -> str:
         fmt=dim,
     )
     client.hide_columns(tab, SLATE_GPS_CHECK_COL, SLATE_ON_SLATE_COL)
+    # One-hover definitions: the game metrics in row 1, then the TEAMS header (same texts, different meaning).
+    apply_header_notes(client, tab, 1, SLATE_GAME_NOTES)
+    apply_header_notes(client, tab, SLATE_TEAMS_COLHEADER_ROW, SLATE_TEAMS_NOTES)
     # No frozen row (`sheet_audit.FREEZE_OVERRIDES`): a pinned game header would mislabel the TEAMS
     # columns once you scroll down to them. Column A (Matchup / Team) stays pinned.
     client.freeze(tab, rows=0, cols=1)

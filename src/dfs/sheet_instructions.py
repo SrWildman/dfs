@@ -388,7 +388,10 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "cumulative-net-by-week chart. Cash/GPP net backfill automatically from "
         "`dfs bankroll sync --csv`/`dfs week close --csv`; Betting net only fills "
         "in at `dfs week close`. NOT reset each week -- carried forward like "
-        "Results.",
+        "Results. The Model Check tab beside it scores every projection against what "
+        "actually happened; it is rebuilt by `dfs results update` (and at the end of "
+        "`dfs week close`), nothing on it is typed, and a muted italic row is too few "
+        "players to say anything yet.",
     ),
 ]
 

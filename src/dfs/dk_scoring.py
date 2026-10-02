@@ -219,3 +219,78 @@ def validate_against_tffb(
             }
         )
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# ACTUAL scoring (results loop, 2026-10-02): what a player REALLY scored, from a finished
+# game's stat line. The projection path above treats yardage bonuses as an expected value
+# (a projected yardage is a mean); here the yardage is a fact, so the +3 bonuses are hard
+# thresholds (did he cross 300 / 100 / 100?). Checked against DK's own points: 95 of 95
+# offensive players in a real Week 2 contest standings file match to the hundredth, and 22
+# of 23 defenses match exactly (the 23rd is one point off, unexplained).
+# ---------------------------------------------------------------------------
+
+# DK's two offense lines the projection scorer never needed: a kick/punt/FG return TD and an
+# offensive fumble-recovery TD are +6 each (the DraftKings Classic scoring table).
+DK_RETURN_TD_POINTS = 6.0
+DK_FUMBLE_RECOVERY_TD_POINTS = 6.0
+ACTUAL_OFFENSE_FIELDS = [*OFFENSE_STAT_FIELDS, "ret_td", "fumrec_td"]
+
+# Which points count as "allowed" is NOT stated on DK's published scoring table (nor, as far
+# as could be read, anywhere public). When True, points the OPPONENT's defense or special
+# teams scored (pick-sixes, fumble-return and kick/punt-return TDs) are not charged to this
+# defense -- the convention most platforms use. Over Weeks 1-3 the choice changes 4 of 96
+# team-games by exactly 1 point, and none of the 23 defenses in the real DK file Sam supplied
+# is affected, so it cannot be settled from the data we hold. Flipping it is one line.
+DST_POINTS_ALLOWED_EXCLUDES_OPP_DEF_ST_TDS = True
+
+ACTUAL_DST_FIELDS = [
+    "sack",
+    "def_int",
+    "fum_rec",
+    "def_td",
+    "safety",
+    "blocked_kick",
+    "two_pt_return",
+    "points_allowed",
+]
+
+
+def dst_points_allowed_score(points_allowed: float) -> float:
+    """DK points for a REAL (integer) points-allowed figure, from the same tier table the
+    projection scorer integrates over."""
+    for low, high, points in DST_POINTS_ALLOWED_TIERS:
+        if points_allowed >= low and (high is None or points_allowed <= high):
+            return points
+    raise ValueError(f"points allowed {points_allowed!r} is below the lowest tier")
+
+
+def score_offense_actual_row(stats: dict[str, float]) -> float:
+    """DK Classic points for one offensive player-game from REAL stats keyed by
+    `ACTUAL_OFFENSE_FIELDS` (`OFFENSE_STAT_FIELDS` plus `ret_td`, `fumrec_td`). Same
+    all-fields-or-nothing missing-data contract as `score_offense_row`; `fum_lost` is a
+    positive count (the weight makes it negative)."""
+    if any(_is_missing(stats.get(field)) for field in ACTUAL_OFFENSE_FIELDS):
+        return float("nan")
+    total = sum(stats[field] * weight for field, weight in DK_OFFENSE_SCORING.items())
+    for field, threshold in YARDAGE_BONUS_THRESHOLDS.items():
+        if stats[field] >= threshold:
+            total += YARDAGE_BONUS_POINTS
+    total += DK_RETURN_TD_POINTS * stats["ret_td"] + DK_FUMBLE_RECOVERY_TD_POINTS * stats["fumrec_td"]
+    return round(total, 2)
+
+
+def score_dst_actual_row(stats: dict[str, float]) -> float:
+    """DK Classic points for one defense-game from REAL stats keyed by `ACTUAL_DST_FIELDS`
+    (`def_td` already sums interception-return, fumble-return, kick/punt-return and blocked-kick
+    return TDs, all +6; `points_allowed` is the real integer, tiered exactly)."""
+    if any(_is_missing(stats.get(field)) for field in ACTUAL_DST_FIELDS):
+        return float("nan")
+    total = sum(stats[field] * weight for field, weight in DK_DST_SCORING.items())
+    total += DK_DST_TWO_PT_RETURN_POINTS * stats["two_pt_return"]
+    total += dst_points_allowed_score(stats["points_allowed"])
+    return round(total, 2)
+
+
+# DK: "2 Pt Conversion/Extra Point Return" is +2 for a defense.
+DK_DST_TWO_PT_RETURN_POINTS = 2.0

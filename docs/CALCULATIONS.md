@@ -55,6 +55,15 @@ populate `Ceiling` for every player (roughly 40-60% coverage depending on
 the week), and a blank is left blank rather than treated as zero, since a
 missing ceiling isn't the same claim as "this player has no ceiling."
 
+**What `Ceiling` actually is (measured, PROVISIONAL -- Weeks 1-3, rosterable pool, n = 677).** 14.3% of
+players scored more than their published `Ceiling` (90% interval 12.3%-16.7%), so it behaves like roughly the
+**86th percentile** -- close to FantasyLabs' own definition (top 15% of outcomes), which was the hypothesis,
+not an assumption. By position (n in brackets): QB 14.1% (78), RB 9.2% (174), WR 13.1% (259), TE 25.6% (90),
+DST 17.1% (76) -- so RB ceilings look too high and TE ceilings too low, but each is a few dozen to a few hundred
+players; read it as "not enough data yet" for any single position. Scored as a quantile with pinball loss
+(never RMSE) the overall fit is best at tau = 0.85. Re-measured by `dfs results update`; the live numbers are on
+the `Model Check` tab, and this paragraph should be refreshed from it as weeks accumulate.
+
 ## ValAdj (Part 7.2, 2026-09-18; reworked Week 3 feedback A3, 2026-09-22; reference population fixed Week 3 fixes Fix 2, 2026-09-23) -- EdgeRaw's default sort
 
 ```
@@ -1115,6 +1124,75 @@ highest first: `Team`, `Opp`, `Implied`, `Pace`, `PROE`, `Expl%`, `Off EPA/play`
 - Each column is coloured as one smooth gradient against the other teams (white at the median,
   zeros excluded); the rows are formula-sorted in place, so the colours stay attached.
 - A team with no player on the DK main slate is dimmed, the same way its game is.
+
+## The results loop and `Model Check` (2026-10-02)
+
+`dfs results update` scores every completed week against what actually happened and rebuilds the `Model Check`
+tab from `data/results/` (it also runs at the end of `dfs week close`, and never fails that command). Nothing on
+the tab is typed, and nothing is part of `dfs sync`.
+
+**Which projection.** Each player's projection is the **last TFFB snapshot taken before his own kickoff**
+(`GameStart`), not before the Sunday 1 pm games; `Snapshot` in `data/results/scored_<season>_wNN.csv` records which.
+TFFB only projects the Sunday main slate, so in practice one snapshot serves a whole week.
+**TFFB's `GameStart` is Eastern wall-clock time with a trailing "Z"** (`...T16:05:00Z` is the 4:05 pm ET game --
+checked against nflverse's own kickoff times, which match TFFB's strings exactly), so it is localised to
+`America/New_York` (DST-aware) before comparing it with a UTC snapshot time. Read as true UTC it discards every
+Sunday-morning snapshot. The same conversion (`kickoff.py`) now drives `dfs lineups late-swap`'s locked/open status
+and swap candidates and the launcher's "games started / finished" state, which used to read the column as UTC.
+
+**Derived fields are recomputed, never read.** `ValAdj`, `Flags` and the rosterable pool come from
+`derived.build_edge_frame` over the week's selected projections and every other source *as of* the week's reference
+time (the snapshot most players used), with today's code. A source with no snapshot that early is absent for that
+week (pbp before 9/25, Sleeper/FantasyPros before 9/24), exactly as on a live sync, so older weeks carry fewer flags.
+
+**Actual DK points** come from nflverse's free `stats_player` / `stats_team` files and the schedule's final scores
+(`results_actual.py`, scoring in `dk_scoring.score_offense_actual_row` / `score_dst_actual_row`):
+
+- *Offense:* the DK Classic table with the REAL yardage bonuses (a hard +3 at 300 passing / 100 rushing / 100
+  receiving yards, not the projection path's expected value), -1 per interception and lost fumble, +2 per
+  two-point conversion, +6 per kick/punt/FG return TD and per offensive fumble-recovery TD.
+- *Defense* (not in `stats_player`): sacks +1, interceptions +2, fumble recoveries +2, safeties +2, blocked kicks +2,
+  2-point/extra-point returns +2, and +6 for every defensive or special-teams TD (`def_tds` + `special_teams_tds` + the
+  defenders' `fumble_recovery_tds`, which nflverse reports separately from `def_tds`), plus the points-allowed tier
+  (0 -> +10, 1-6 -> +7, 7-13 -> +4, 14-20 -> +1, 21-27 -> 0, 28-34 -> -1, 35+ -> -4) on the opponent's final score.
+- **Which points count as "allowed" is not stated on DK's scoring table**, and DK's help pages could not be read
+  here. `dk_scoring.DST_POINTS_ALLOWED_EXCLUDES_OPP_DEF_ST_TDS = True` charges a defense the opponent's score LESS
+  the opponent's own defensive/special-teams TDs (the common convention). Over Weeks 1-3 flipping it changes **4 of
+  96** team-games by exactly 1 point; none of the 23 defenses in Sam's real DK file is affected, so the data cannot
+  settle it.
+- **Checked against nflverse and against DK itself.** nflverse's `fantasy_points_ppr` scores interceptions and lost
+  fumbles at -2 and has no bonuses, so `DK - fantasy_points_ppr = bonuses + interceptions + lost fumbles` for every
+  player-week: **0 of 1,114 offensive player-weeks break the identity** (`results_actual.identity_breaks`). Against
+  the real DK contest-standings file in `data/ownership_log.csv`: **102 of 102 offensive players** match DK's own
+  `FPTS` to the hundredth and **22 of 23 defenses** (the 23rd, the Panthers, is one point off, unexplained). That file
+  is logged as "Week 3" but its points match Week 2 -- it was exported on a Tuesday, after the calendar had rolled.
+
+**Join and coverage.** Offense joins to DraftKings by name + team + position through `player_join` (the same join as
+every other source); a defense joins by team. Each main-slate player is `scored` (found a stat line that week),
+`dnp` (no stat line that week but present elsewhere in the season file: inactive, injured or benched -- counted as
+joined, **never as an actual of 0**) or `unmatched` (found nowhere; written to `data/results/unmatched_<season>_wNN.csv`).
+Coverage is reported for both populations (the rosterable pool, and everyone with `ProjPts` > 0). Nearly all
+unmatched rosterable players are backup QBs and rookies with no stat line anywhere in the file, plus Travis Hunter
+(a CB in nflverse, deliberately not joined).
+
+**The tables** (`results_analysis.py`; every one shows n, any cell with n < 30 is "thin", every rate carries a 90%
+Wilson interval, and an empty answer says "not enough data yet"):
+
+- *Accuracy:* bias = actual minus projected (negative = the projection ran high), MAE, calibration slope (OLS of
+  actual on projected; 1.0 = calibrated, below 1 = too extreme), R squared, Spearman within position, calibration
+  buckets (0-5 .. 20+) and a position x salary-tier split. R squared is expected to be low (public studies find 3-23%).
+- *Sources compared:* TFFB, Sleeper, FantasyPros and `AggPts` on the rows where all three exist (Week 3 only so far,
+  labelled), plus the head-to-head: for each player, whether `AggPts` or TFFB landed closer (exact ties are not
+  decided). Week 3: `AggPts` wins 142 of 230 = 61.7% (public study: about 63%).
+- *Ceiling:* hit rate, implied quantile (1 - hit rate) and pinball loss at tau = 0.80 / 0.85 / 0.90. Raw pinball loss
+  shrinks as tau rises, so comparing raw losses across tau always favours the highest; the reported "best tau" is
+  the highest pinball SKILL (1 - loss / loss of the best constant quantile), which is scale-free.
+- *ValAdj:* quintiles within position, pooled; the mean of actual minus salary-expected points (salary-expected is
+  fit on ACTUAL points against salary, per position, over the weeks scored) and the rank correlation of `ValAdj` with
+  that residual.
+- *Salary multiple:* the share reaching 3x (cash line) and 4x (GPP line) salary per $1,000, by projected `Val` band.
+- *Flags:* per flag, n, mean actual minus projected and the unflagged same-position comparison. Reported, not judged.
+- *Consistency over time:* each source's week-by-week MAE and its coefficient of variation once there are 4+ weeks.
 
 ## Player Pool ordering: tag group, then salary (Part 7.10)
 
