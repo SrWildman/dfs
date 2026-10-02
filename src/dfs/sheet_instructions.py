@@ -158,10 +158,14 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "lines/injuries/weather move -- safe to re-run, never loses data (your "
         "EdgeRaw ticks survive it).  6) Gameday: `dfs sync --live` re-pulls odds/DK "
         "status/weather and shows what changed; `dfs lineups late-swap` checks your "
-        "built lineups against real kickoff times and shows who's still swappable.  "
-        "7) End of week: export your DK contest history and run `dfs week close "
-        "--csv <file>` to reconcile Cash/GPP results (pass `--week N` to reconcile "
-        "a specific week by hand instead of the connected sheet's own week).",
+        "built lineups against real kickoff times (Eastern) and shows who's still "
+        "swappable.  7) End of week: export your DK contest history and run `dfs week "
+        "close --csv <file>` to reconcile Cash/GPP results (pass `--week N` to "
+        "reconcile a specific week by hand instead of the connected sheet's own week); "
+        "it then scores the week's projections into the Model Check tab (nflverse posts "
+        "stats a day or two late -- if it says so, run `dfs results update` later).  "
+        "That is the whole standard week; everything else (`dfs --help`, "
+        "docs/COMMANDS.md) is reference.",
     ),
     (
         "Reading the colours",

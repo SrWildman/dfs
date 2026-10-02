@@ -72,14 +72,22 @@ subsequent week looks like -- `dfs week new` replaces the manual
 `config.toml` edit from Quickstart, carrying your bankroll and Results
 log forward from the sheet you're leaving:
 
+**This is your standard week, and it is all most weeks need:**
+
 ```bash
-dfs week new "<url-of-the-copy>" # new week: point config.toml at a fresh sheet copy, sync (quote the URL -- see below)
-dfs sync                         # re-run any time as lines/injuries/weather move
-# build the pool and lineups in the sheet (three ways in -- see WORKFLOW.md)
-dfs export -o lineups.csv        # validate + export DK's bulk-upload format
-dfs sync --live                  # gameday: fast-moving sources only, prints what changed
-dfs week close --csv history.csv # end of week: reconcile Cash/GPP into Bankroll
+dfs week new "<url-of-the-copy>"  # 1. new week: point config.toml at a fresh sheet copy, sync (quote the URL)
+dfs sync                          # 2. re-run any time as lines/injuries/weather move
+# 3. research, tick your pool and build lineups in the sheet (see WORKFLOW.md)
+dfs export -o lineups.csv         # 4. validate + export DK's bulk-upload format
+dfs sync --live                   # 5. gameday: fast-moving sources only, prints what changed
+dfs lineups late-swap             #    ...and who is still swappable before each kickoff
+dfs week close --csv history.csv  # 6. after the games: reconcile Cash/GPP into Bankroll AND score the
+                                  #    week's projections into the Model Check tab
 ```
+
+Everything else -- the other commands, one-time sheet setup, repairs -- is **reference**, for when you
+need it: [docs/COMMANDS.md](docs/COMMANDS.md) lists every command and option. You do not need to read it to
+run a normal week.
 
 Every command exits non-zero on real failure -- nothing here silently
 reports success when something failed.
@@ -90,26 +98,33 @@ other shells if left bare) or just the bare sheet ID segment.
 
 ## Commands
 
-Weekly-loop commands first, one-time setup last -- run `dfs --help` (or
-`dfs <command> --help`) for the full reference.
+**The standard week** (the six lines in "The weekly loop" above) is what you will use almost every time. The rest
+are listed here so they are findable, not because you need to read them. Run `dfs --help` (or `dfs <command>
+--help`) for any command, or see the complete generated reference in [docs/COMMANDS.md](docs/COMMANDS.md).
 
 | Command | Reach for it when... |
 |---|---|
-| `dfs status` | you want to know which sheet you're pointed at and how fresh each source is. |
-| `dfs sync` [`--live`] [`--sheet-id ID`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed; `--sheet-id` points it at another sheet (e.g. the template). |
-| `dfs --profile <command>` | a command feels slow: prints wall-clock, API request count and the slowest phases when it exits (same as `DFS_PROFILE=1`). |
-| `dfs doctor` | you want to confirm the sheet's structure hasn't drifted -- run it after any structural edit, or when something looks wrong. |
-| `dfs edge` | a quick look at top leverage plays in the terminal, no sheet needed. |
-| `dfs go` | `sync` + `doctor` + what-changed, back to back -- the three you'd otherwise run in sequence anyway. |
+| `dfs week new "<url>"` | starting a new week: it checks the new sheet, carries your bankroll and Results forward, and runs a full sync. |
+| `dfs sync` [`--live`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed. |
 | `dfs export -o <file>` | your lineups are built and paired to DK entries, ready to upload. |
-| `dfs pool add\|remove\|list\|clear` | adding/removing players from your pool without opening the sheet. |
-| `dfs lineups late-swap\|clear` | checking which rostered players are still swappable; clearing last week's picks on a new sheet copy. |
-| `dfs odds movement` | checking how betting lines have moved since your last sync. |
-| `dfs bankroll sync --csv <file>` | reconciling DK contest history into your bankroll tab. |
-| `dfs week new "<url>"` / `dfs week close --csv <file>` | starting a new week's sheet, or closing out the one you're on. |
-| `dfs ownership log --csv <file>` | logging a contest's real DK ownership locally, as a standalone record -- see `docs/WORKFLOW.md` step 8. |
-| `dfs auth tffb\|dk` | one-time interactive login for a source that needs a real browser session. |
-| `dfs setup ...` | one-time sheet construction (add-a-player control, EdgeRaw linking, styling, protection, ...) -- see `dfs setup --help`; `dfs setup sheet` runs the whole thing in order. |
+| `dfs lineups late-swap` | checking which rostered players are still swappable before each kickoff window. |
+| `dfs week close --csv <file>` | the week is over: reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into `Model Check`. |
+
+Also handy most weeks:
+
+| Command | Reach for it when... |
+|---|---|
+| `dfs` (no arguments) | you are not sure what to run: it shows where you are in the week and what makes sense next. |
+| `dfs status` / `dfs doctor` | which sheet am I on and how fresh is the data / has the sheet's structure drifted. |
+| `dfs go` | `sync` + `doctor` + what-changed, back to back. |
+| `dfs pool add\|remove\|list\|clear` | managing your pool without opening the sheet. |
+| `dfs results update` | scoring the week's projections into `Model Check` on its own (`dfs week close` already does this; nflverse posts stats a day or two late). |
+| `dfs edge` / `dfs odds movement` | a terminal look at the top leverage plays / how lines have moved. |
+
+**Reference, only when needed:** `dfs bankroll sync`, `dfs ownership log`, `dfs lineups clear`, `dfs auth ...`
+(one-time logins), `dfs setup ...` (building, styling and repairing a sheet; `dfs setup sheet` runs the whole
+build in order), and `dfs --profile <command>` (a slow command's wall-clock and API-call breakdown). All in
+[docs/COMMANDS.md](docs/COMMANDS.md).
 
 `dfs sheets ...` (the pre-reorganisation spelling of every `setup`
 command, plus `doctor`) still works this season as a deprecated alias.
@@ -118,6 +133,7 @@ command, plus `doctor`) still works this season as a deprecated alias.
 
 | Doc | Read it when |
 |---|---|
+| [docs/COMMANDS.md](docs/COMMANDS.md) | You need a command or option that is not in the standard week -- every `dfs` command, generated from the CLI itself. Reference, not required reading. |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | You want the weekly grind phase by phase, with exact commands and what "done" looks like. |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Something looks wrong and you want symptom -> cause -> fix. |
 | [docs/SHEET_REFERENCE.md](docs/SHEET_REFERENCE.md) | You need to know what a specific tab or column means. |

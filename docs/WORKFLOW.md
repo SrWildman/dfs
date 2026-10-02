@@ -11,6 +11,23 @@ where you are in the week (sheet, sync freshness, pool/lineup counts) and
 the two or three commands that make sense right now, each one printed
 next to its real name so you learn it as you use it.
 
+## The standard week at a glance
+
+This is what most weeks are -- **sections 1 to 7 below are the standard week**; everything else in this repo
+(one-time sheet setup, repairs, the other commands) is reference you open only when you need it.
+
+| # | When | Run |
+|---|---|---|
+| 1 | a new week starts | `dfs week new "<url-of-the-copy>"` |
+| 2 | any time as lines/injuries move | `dfs sync` |
+| 3 | research, pool, lineups | in the sheet (no command) |
+| 4 | lineups are built | `dfs export -o lineups.csv` |
+| 5 | gameday | `dfs sync --live`, then `dfs lineups late-swap` |
+| 6 | after the games | `dfs week close --csv history.csv` (reconciles Bankroll **and** scores the week into Model Check) |
+
+Sections 8 (log ownership) and 9 (read Model Check) are optional extras. The full command list is in
+[COMMANDS.md](COMMANDS.md).
+
 ## 1. Start the week
 
 **Tabs:** none yet -- this points the CLI at a new sheet.
@@ -72,7 +89,12 @@ position's own slate minimum), Stack candidates (QB + WR1/WR2/WR3/TE1/RB1
 for the highest-total games), Pool diagnostics (reads your ticked pool,
 not the slate), and a Chalk map placeholder (waiting on ownership data).
 Slate Grid is the same slate one row per game instead of one row per
-player. EdgeRaw is where the real work happens: sorted by ValAdj
+player, with each game's combined environment (GameEnv, Pace, PROE, Expl%) and, below the games, a TEAMS table: every team on
+the schedule by implied total, with its pace, pass rate over expected, explosive rate, offensive EPA per
+play/pass/rush, and the EPA the OPPONENT's defense allows (a high number is a soft defense, so green).
+EdgeRaw, Player Pool and Lineups also carry five usage columns in the collapsed USAGE group beside Snap% --
+Tgt%, WOPR, Rush%, RZ/G and HVT/G -- each over a player's last 3 games played and coloured against his own
+position; hover any header for its definition. These are for you to read next to the projection, not inputs to it. EdgeRaw is where the real work happens: sorted by ValAdj
 descending, colour scales on every decision number, a muted position
 tint, banding to make one player's row readable across 23 columns, and a
 visible sort/search arrow in every header cell (click one to sort by any
@@ -160,6 +182,10 @@ dfs sync --live              # re-pull odds/DK status/weather, gameday only
 dfs lineups late-swap         # who's still swappable, checked against real kickoffs
 ```
 
+Kickoff times are read as Eastern time (TFFB's `GameStart` is Eastern wall-clock time, not UTC); a player locks at
+his own game's kickoff, and one whose game starts later still shows as swappable, with swap candidates ranked by
+Leverage.
+
 Movement (once populated by a sync) ranks players by how far their
 team's implied total has moved since the week started -- a big shift is
 worth a second look at anything you built around that number.
@@ -183,6 +209,11 @@ from the same export, sorted into NFL weeks by each entry's own contest
 date -- a full-season export backfills every past week it has real data
 for in one pass, not just the current one. `Cash Line` and the team-
 colour columns stay yours to fill in by hand.
+
+**Then it scores the week's projections.** The close finishes by running `dfs results update`, which compares
+every projection with what actually happened and rebuilds the **Model Check** tab (section 9). nflverse posts
+a week's stats a day or two after the games, so if you close early it prints "stats not published yet" and carries on --
+run `dfs results update` later and the tab fills in. It never fails the close.
 
 **Done looks like:** Bankroll's running total moved by the amount you'd
 expect from the week's actual results, and Results' row for the week you
@@ -220,3 +251,26 @@ downstream is waiting on it.
 
 **Done looks like:** the command reports how many players it logged and
 how big the contest's field was; nothing on the sheet changes.
+
+## 9. Read the Model Check tab (optional -- it builds itself)
+
+**Tab:** Model Check (after Results). **Command:** none needed -- `dfs week close` rebuilds it; `dfs results update
+[--week N] [--all]` rebuilds it on its own.
+
+It scores every projection against what actually happened, for every completed week so far, and is rebuilt from
+`data/results/` each time (nothing on it is typed). Read it top to bottom: **Ceiling** (how often a player beat
+his published ceiling -- near 15% means it is roughly an 85th percentile), **Projection accuracy** (bias:
+negative means the projections ran high; MAE; calibration slope; Spearman, which matters most for DFS because
+it is about ordering players), **ValAdj** quintiles (do the players it points at beat their salary), **Sources
+compared** (TFFB vs Sleeper vs FantasyPros vs the average), **Salary multiple** (does a projected value of 3+
+actually reach 3x salary), and **Flags**. Every row shows n; **a muted italic row is "thin" (n under 30): read it
+as "not enough data yet".** Hover any header for its definition.
+
+Each projection is the last TFFB snapshot before that player's own kickoff, and `ValAdj` and flags are recomputed
+from the archived raw data with today's code, so old weeks are judged by today's rules. It reports; it never
+changes a threshold or a flag -- that is your decision after several weeks. The definitions behind every
+number are in [CALCULATIONS.md](CALCULATIONS.md).
+
+**Done looks like:** the status line shows the weeks scored and a high "joined" percentage; players it could not
+find are listed in `data/results/unmatched_<season>_wNN.csv` (mostly backups who never recorded a stat).
+

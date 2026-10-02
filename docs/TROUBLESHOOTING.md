@@ -202,3 +202,44 @@ Fix: use `ROWS` instead of `COUNTA` as the outermost function --
 `IFERROR(ROWS(UNIQUE(FILTER(...))),0)`. `ROWS` does not absorb the
 error the way `COUNTA` does; it propagates it, so `IFERROR` finally has
 something real to catch and correctly degrades to 0.
+
+---
+
+**The usage columns (`Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G`) are blank.**
+Cause: they come from nflverse's weekly stats file, and they are blank in Week 1 (no games played yet), when the
+file could not be fetched (a warning is logged; it never falls back to last season), or for a player nflverse has
+no stat line for. A metric is also blank for positions it does not apply to (`WOPR` is WR/TE only, `HVT/G` RB only).
+Fix: `dfs sync --only usage,edge` once nflverse has the week's games. Players with no stat line yet (a backup QB who
+has not played) are listed in `data/current/unmatched_usage.csv`.
+
+---
+
+**Slate Grid's TEAMS section is blank, or `dfs sync` / `build-views` complains about a `pbp` tab.**
+Cause: TEAMS reads a hidden `TeamMetricsRaw` tab that the `pbp` source writes, and `config.toml` needs
+`pbp = "TeamMetricsRaw"` under `[google_sheets.tab_mappings]` (it is in `config.example.toml`; an older local
+`config.toml` will not have it).
+Fix: add that line, then `dfs sync --only pbp` and `dfs setup build-views`.
+
+---
+
+**`dfs week close` (or `dfs results update`) says "stats not published yet".**
+Cause: nflverse posts a week's player and team stats a day or two after the games.
+Fix: nothing is wrong. Run `dfs results update` later; the Model Check tab fills in. The close itself already
+succeeded.
+
+---
+
+**Model Check says "Not enough data yet", or most rows are muted italic.**
+Cause: no completed week has been scored yet, or the sample is small (a row with n under 30 is "thin" on
+purpose). Early in the season almost everything is thin.
+Fix: nothing to fix; it fills in as weeks are scored. `dfs results update --all` rescores every completed week
+(useful after a scoring or flag change).
+
+---
+
+**`dfs lineups late-swap` calls a player locked before his game has started.**
+Cause: fixed 2026-10-02. TFFB's `GameStart` is Eastern wall-clock time labelled "Z"; it used to be read as UTC, which
+made every kickoff look four hours (five after the November clock change) early.
+Fix: update to the current code (`kickoff.py` converts it). If you still see it, check `dfs status`/EdgeRaw's
+`GameStart` column is populated and your computer's clock is right.
+

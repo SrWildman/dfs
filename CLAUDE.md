@@ -60,6 +60,16 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
 
 ## The commands you'll reach for most in an agent session
 
+The user's **standard week** is six commands (`dfs week new`, `dfs sync`, `dfs export`, `dfs sync --live` +
+`dfs lineups late-swap`, `dfs week close`); everything else is reference. `docs/COMMANDS.md` lists every command
+and option and is GENERATED from the CLI (`python -m dfs.commands_doc`): after adding or changing a command or
+option, regenerate it -- `tests/test_commands_doc.py` fails if it is stale or a command has no section.
+
+- `dfs results update [--week N] [--all] [--sheet-id <id>] [--no-sheet]` -- scores every completed week against
+  nflverse's actual stats and rebuilds the `Model Check` tab (also run at the end of `dfs week close`, which it
+  never fails). Projection = last TFFB snapshot before each player's own kickoff; flags/ValAdj recomputed from the
+  raw archives with current code.
+
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
@@ -87,6 +97,7 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
 |---|---|
 | `README.md` | You want the front door: what this is, install steps, the weekly command loop. No detail that belongs elsewhere. |
 | `CONTRIBUTING.md` | You're adding a data source, or touching the live sheet's *structure* -- design principles this codebase enforces, the hazard above in full incident-level detail, and the structural changelog (every row/column/tab move, ever, and what depends on it). Read before any structural edit. |
+| `docs/COMMANDS.md` | You need a command or option's exact spelling. **Generated from the CLI** -- never hand-edit; regenerate. Leads with the standard week; the rest is reference. |
 | `docs/WORKFLOW.md` | You want the weekly grind phase by phase, with the exact command for each step and what "done" looks like. |
 | `docs/TROUBLESHOOTING.md` | Something looks wrong on the sheet and you want symptom -> cause -> fix. |
 | `docs/SHEET_REFERENCE.md` | You need to know what a specific tab or column means, or the canonical column order for a shared tab. |
@@ -96,8 +107,8 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
 | `docs/planning/V2_PLAN.md` | **Gitignored, personal.** A separate, larger redesign track -- unrelated to day-to-day fixes unless a task explicitly says otherwise. |
 
 If you change a command's name, group, or behavior, update all of:
-README's Commands section, this file's command list above, `docs/
-WORKFLOW.md`, the Instructions tab on **both** the live sheet and the
+README's Commands section, this file's command list above, `docs/COMMANDS.md`
+(regenerate: `python -m dfs.commands_doc`), `docs/WORKFLOW.md`, the Instructions tab on **both** the live sheet and the
 template, and every docstring/comment mentioning the old name
 (`grep -rn 'dfs ' src/`) -- see `CONTRIBUTING.md`'s doc-sync checklist for
 the full table of "you changed X -> update Y."

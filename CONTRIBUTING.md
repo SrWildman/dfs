@@ -518,10 +518,12 @@ just the code:
 |---|---|
 | `EDGE_COLUMNS` (added/removed a column) | `docs/SHEET_REFERENCE.md`'s EdgeRaw table, the Instructions tab's EdgeRaw row on **both** the live sheet and the template |
 | A formula or threshold (how a column is actually calculated, not just its name) | `docs/CALCULATIONS.md` -- the one place the exact math is supposed to live; don't let it drift into being "close enough" to what the code does |
-| A CLI command's name, flags, or behavior | `docs/WORKFLOW.md`, the Instructions tab's "Weekly workflow" row on both sheets |
+| A CLI command's name, flags, or behavior | **Regenerate `docs/COMMANDS.md`** (`python -m dfs.commands_doc`; a test fails if it is stale or the command is not placed in a section), `docs/WORKFLOW.md`, the Instructions tab's "Weekly workflow" row on both sheets |
 | The weekly workflow itself (a step added, removed, or reordered) | Same two places as above, plus this file's own affected section if the change touched something documented here |
 | A new tab | Everywhere the "Adding a new data source" checklist above already says, **plus** a new Instructions tab row describing it, **plus** `docs/SHEET_REFERENCE.md` |
 | The template's tab set or a shared tab's column order (`PlayerPoolRaw`/`Player Pool`/`Lineups`) | Run `dfs doctor` against **both** the live sheet and the template, `docs/SHEET_REFERENCE.md`'s canonical-column-order note, the Instructions tab's column-order row on both sheets |
+| A new data source | `docs/COMMANDS.md` regenerates its row in the data-source table; `docs/SHEET_REFERENCE.md`'s synced-tabs table; the `[google_sheets.tab_mappings]` line in `config.example.toml` (and every existing local `config.toml`) if it has a tab |
+| A new column on EdgeRaw / Slate Grid / Model Check | A header note in `sheet_column_notes.py` (a test fails without one), `docs/SHEET_REFERENCE.md`, `docs/CALCULATIONS.md` if it is computed |
 | A new symptom worth debugging by hand | `docs/TROUBLESHOOTING.md` |
 | A command's name, group, or behavior | README's Commands section, `CLAUDE.md`'s doc map, `docs/WORKFLOW.md`, the Instructions tab on both sheets, and every docstring/comment mentioning it (`grep -rn 'dfs ' src/`) |
 
