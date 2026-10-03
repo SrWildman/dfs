@@ -66,8 +66,9 @@ whole standard week below -- always the same list, with the step that fits
 right now marked `>`. Pick a number and it asks for whatever the command
 needs (the new sheet's link, your contest CSV, a player name) instead of
 erroring; `m` lists every other command. Each line shows the real command,
-and typing the full command (`dfs sync --live`) still works exactly as
-before -- the menu is there so you never have to remember them.
+and typing the full command (`dfs sync --live`) still works. Leave a
+required argument off a typed command (`dfs week close`) and it asks for it
+there too -- you never have to remember them.
 
 ## The weekly loop
 

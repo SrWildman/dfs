@@ -7,7 +7,9 @@ cannot drift from the code. `dfs <command> --help` shows the same text. For *whe
 
 **You do not have to remember any of this:** run `dfs` with no arguments for a menu of the standard
 week (the step that fits right now is marked), and it asks for anything a command needs -- a sheet
-link, a CSV file, a player name -- instead of erroring. Typing the full command still works.
+link, a CSV file, a player name -- instead of erroring. Typing the full command still works, and
+leaving a required argument off a typed command asks for it too (in a terminal; scripts and pipes
+get the usual error).
 
 ## Your standard week
 

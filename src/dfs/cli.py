@@ -55,6 +55,7 @@ from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
 from dfs.ownership import append_ownership, parse_ownership_export
 from dfs.pool import clear_all, find_matches, read_players, set_pool
+from dfs.prompt_missing import PromptingGroup, ask
 from dfs.results_autofill import compute_week_results, write_results_updates
 from dfs.season import (
     extract_season_value_columns,
@@ -158,11 +159,14 @@ LIVE_SYNC_SOURCES = ["nfl_odds", "draftkings", "weather", "edge"]
 app = typer.Typer(
     name="dfs",
     help="Sync DFS data into Google Sheets, export DK lineups, track results and bankroll.",
+    cls=PromptingGroup,
 )
 # One-time sheet construction -- the stuff you run once per template/sheet
 # copy, not during a normal week. See `setup_sheet` below for the composite
 # that runs all of it in the right order.
-setup_app = typer.Typer(help="One-time sheet construction: build, style and link a sheet from scratch.")
+setup_app = typer.Typer(
+    help="One-time sheet construction: build, style and link a sheet from scratch.", cls=PromptingGroup
+)
 # `dfs sheets X` used to be where all nine `setup_app` commands (plus
 # `doctor`, now promoted to top-level) lived. Kept around, hidden from
 # `--help`, as a compatibility shim -- 79 places across docs/tests/muscle
@@ -170,15 +174,21 @@ setup_app = typer.Typer(help="One-time sheet construction: build, style and link
 # that silently (a renamed command that just says "no such command") is
 # worse than a deprecation notice. Remove this whole app once the season's
 # over and the old habit has had time to fade -- see CONTRIBUTING.md.
-sheets_app = typer.Typer(hidden=True)
-auth_app = typer.Typer(help="Log in to sites that require an authenticated session.")
-bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll tab.")
-lineups_app = typer.Typer(help="Manage lineups: check late swaps, clear last week's picks.")
-odds_app = typer.Typer(help="Check how betting lines have moved since your last sync.")
-week_app = typer.Typer(help="Start a new week's sheet, or close out the one you're on.")
-pool_app = typer.Typer(help="Add or remove players from your pool without opening the sheet.")
-ownership_app = typer.Typer(help="Log actual DK contest ownership (Phase 6, Part 7.8).")
-results_app = typer.Typer(help="Score every projection against what actually happened (Model Check).")
+sheets_app = typer.Typer(hidden=True, cls=PromptingGroup)
+auth_app = typer.Typer(help="Log in to sites that require an authenticated session.", cls=PromptingGroup)
+bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll tab.", cls=PromptingGroup)
+lineups_app = typer.Typer(
+    help="Manage lineups: check late swaps, clear last week's picks.", cls=PromptingGroup
+)
+odds_app = typer.Typer(help="Check how betting lines have moved since your last sync.", cls=PromptingGroup)
+week_app = typer.Typer(help="Start a new week's sheet, or close out the one you're on.", cls=PromptingGroup)
+pool_app = typer.Typer(
+    help="Add or remove players from your pool without opening the sheet.", cls=PromptingGroup
+)
+ownership_app = typer.Typer(help="Log actual DK contest ownership (Phase 6, Part 7.8).", cls=PromptingGroup)
+results_app = typer.Typer(
+    help="Score every projection against what actually happened (Model Check).", cls=PromptingGroup
+)
 app.add_typer(setup_app, name="setup")
 app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
@@ -331,13 +341,8 @@ def _prompt_for_missing(command: str) -> list[str] | None:
     click_command = all_commands().get(command_path(command))
     extra: list[str] = []
     for param in missing_required(command, click_command.params if click_command else []):
-        hint = " (Enter to cancel)" if param.default is None else ""
-        answer = typer.prompt(
-            f"{param.question}{hint}",
-            default=param.default or "",
-            show_default=param.default is not None,
-        ).strip()
-        if not answer:
+        answer = ask(param)
+        if answer is None:
             return None
         extra += answer_to_args(param, answer)
     return extra

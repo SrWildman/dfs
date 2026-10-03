@@ -216,29 +216,29 @@ class MissingParam:
     many: bool  # a positional that takes several values (player names)
 
 
+def prompt_spec(command: str, param: Any) -> MissingParam:
+    """How to ask for one click parameter. Duck-typed (Typer bundles its own click): reads `.name`, `.opts`,
+    `.nargs`, `.help` and `.type.choices`."""
+    opts = list(getattr(param, "opts", []))
+    is_option = bool(opts) and opts[0].startswith("-")
+    flag = next((o for o in opts if o.startswith("--")), opts[0]) if is_option else None
+    path = command_path(command)
+    question = (QUESTIONS.get((path, param.name)) or getattr(param, "help", None) or param.name).rstrip(".")
+    choices = getattr(getattr(param, "type", None), "choices", None)
+    if choices:
+        question += f" ({' / '.join(choices)})"
+    return MissingParam(
+        name=param.name,
+        question=question,
+        default=ANSWER_DEFAULTS.get((path, param.name)),
+        flag=flag,
+        many=(not is_option and getattr(param, "nargs", 1) == -1),
+    )
+
+
 def missing_required(command: str, params: list[Any]) -> list[MissingParam]:
-    """Every required parameter of the click command `params` belongs to, as something to prompt for.
-    Duck-typed (Typer bundles its own click): `.required`, `.name`, `.opts`, `.nargs`, `.help`."""
-    out = []
-    for param in params:
-        if not getattr(param, "required", False):
-            continue
-        opts = list(getattr(param, "opts", []))
-        is_option = bool(opts) and opts[0].startswith("-")
-        flag = next((o for o in opts if o.startswith("--")), opts[0]) if is_option else None
-        question = QUESTIONS.get((command_path(command), param.name)) or (
-            getattr(param, "help", None) or param.name
-        )
-        out.append(
-            MissingParam(
-                name=param.name,
-                question=question.rstrip("."),
-                default=ANSWER_DEFAULTS.get((command_path(command), param.name)),
-                flag=flag,
-                many=(not is_option and getattr(param, "nargs", 1) == -1),
-            )
-        )
-    return out
+    """Every required parameter among `params` (a click command's), as something to prompt for."""
+    return [prompt_spec(command, p) for p in params if getattr(p, "required", False)]
 
 
 def clean_path_or_text(answer: str) -> str:

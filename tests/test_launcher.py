@@ -270,3 +270,67 @@ def test_required_params_of_every_menu_command_get_a_question():
 def test_command_path_drops_flags():
     assert command_path("dfs sync --live") == "dfs sync"
     assert command_path("dfs week new") == "dfs week new"
+
+
+# --- typed commands prompt too (prompt_missing.py) ------------------------------------------------------
+
+from typer.testing import CliRunner  # noqa: E402
+
+from dfs import prompt_missing  # noqa: E402
+from dfs.cli import app  # noqa: E402
+
+
+def test_every_group_in_the_cli_prompts_for_missing_parameters():
+    from typer.main import get_command
+
+    def groups(command):
+        yield command
+        for sub in getattr(command, "commands", {}).values():
+            if hasattr(sub, "commands"):
+                yield from groups(sub)
+
+    for group in groups(get_command(app)):
+        assert isinstance(group, prompt_missing.PromptingGroup), group.name
+
+
+def test_without_a_terminal_a_missing_option_errors_exactly_as_before():
+    result = CliRunner().invoke(app, ["week", "close"])
+    assert result.exit_code != 0 and "Missing option" in result.output
+
+
+def test_at_a_terminal_a_missing_option_is_asked_for_then_the_command_runs(monkeypatch):
+    monkeypatch.setattr(prompt_missing, "interactive", lambda: True)
+    from dfs import cli
+
+    reached = {}
+
+    def stop_here():
+        reached["config"] = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "_load_config_or_exit", stop_here)
+    result = CliRunner().invoke(app, ["bankroll", "sync"], input="/tmp/my history.csv\n")
+    assert "DraftKings contest-history CSV" in result.output  # the question was asked
+    assert "Missing option" not in result.output
+    assert reached.get("config"), "the command body ran after the answer was supplied"
+
+
+def test_a_blank_answer_cancels_and_shows_the_usual_error(monkeypatch):
+    monkeypatch.setattr(prompt_missing, "interactive", lambda: True)
+    result = CliRunner().invoke(app, ["week", "close"], input="\n")
+    assert result.exit_code != 0 and "Missing option" in result.output
+
+
+def test_a_positional_argument_is_asked_for_and_split_on_commas(monkeypatch):
+    monkeypatch.setattr(prompt_missing, "interactive", lambda: True)
+    captured = {}
+
+    from dfs import cli
+
+    def fake_client():
+        captured["reached"] = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "_pool_client_and_edge_tab", fake_client)
+    result = CliRunner().invoke(app, ["pool", "add"], input="Josh Allen, Travis Kelce\n")
+    assert "Player name(s)" in result.output and captured.get("reached")

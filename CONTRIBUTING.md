@@ -3467,9 +3467,17 @@ command (`cli._more_commands`, labelled by `launcher.MORE_LABELS`). Picking a co
 parameter it lacks (`launcher.missing_required`, read from the command's own click params, so a new required option is
 asked about automatically; `QUESTIONS`/`ANSWER_DEFAULTS` give plain wording and defaults, e.g. `dfs export` offers
 `lineups.csv`; dragged-in file paths are unquoted) and then runs `dfs <command> <answers>` as a subprocess. A blank
-answer cancels. Typed commands are untouched, so a missing required option still errors there. Suggestions no longer
+answer cancels. Typed commands ask too (below). Suggestions no longer
 carry `<placeholders>`. `tests/test_launcher.py` fails if a command in `docs/COMMANDS.md` has no `MORE_LABELS` entry or
 a main-menu command was renamed away, so adding a command forces a label.
+
+**Typed commands ask as well.** `dfs week close` with no `--csv` (or `dfs pool add` with no name) used to stop with
+"Missing option"; at a real terminal it now asks the same question the menu does and carries on. Every `typer.Typer`
+in `cli.py` is created with `cls=PromptingGroup` (`prompt_missing.py`): when a group resolves a leaf command it wraps
+its `parse_args`, catches click's `MissingParameter`, asks for that one parameter, appends the answer and parses again.
+Only a MISSING parameter is intercepted -- a bad value still errors, `--help` never prompts, a blank answer cancels
+with the usual error, and with no terminal (stdin or stdout piped: scripts, cron, CI, `CliRunner`) behaviour is
+exactly as before. A new Typer sub-app must pass `cls=PromptingGroup` (a test fails otherwise).
 
 ## The results loop and the `Model Check` tab (2026-10-02)
 

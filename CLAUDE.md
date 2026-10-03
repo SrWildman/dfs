@@ -66,7 +66,9 @@ and option and is GENERATED from the CLI (`python -m dfs.commands_doc`): after a
 option, regenerate it -- `tests/test_commands_doc.py` fails if it is stale or a command has no section.
 
 Plain `dfs` is a guided menu of that standard week (`launcher.py`) that prompts for any required argument; a new
-command needs a `launcher.MORE_LABELS` entry (a test enforces it). Typed commands behave exactly as before.
+command needs a `launcher.MORE_LABELS` entry (a test enforces it).
+Typed commands also ask for a missing required argument at a terminal (`prompt_missing.py`; every Typer app needs
+`cls=PromptingGroup`) and fail as before when piped/scripted.
 
 - `dfs results update [--week N] [--all] [--sheet-id <id>] [--no-sheet]` -- scores every completed week against
   nflverse's actual stats and rebuilds the `Model Check` tab (also run at the end of `dfs week close`, which it

@@ -12,7 +12,8 @@ a numbered menu of the standard week, the step that fits right now marked
 `>`. Pick a number and it asks for anything the command needs (the new
 sheet's link, a contest CSV, a player name) rather than erroring; `m` lists
 every other command. Each line is printed next to its real command name so
-you learn it as you use it, and typing the full command still works.
+you learn it as you use it. Typing the full command still works, and a
+typed command with a required argument left off asks for it.
 
 ## The standard week at a glance
 
