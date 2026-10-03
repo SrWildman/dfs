@@ -65,6 +65,9 @@ The user's **standard week** is six commands (`dfs week new`, `dfs sync`, `dfs e
 and option and is GENERATED from the CLI (`python -m dfs.commands_doc`): after adding or changing a command or
 option, regenerate it -- `tests/test_commands_doc.py` fails if it is stale or a command has no section.
 
+Plain `dfs` is a guided menu of that standard week (`launcher.py`) that prompts for any required argument; a new
+command needs a `launcher.MORE_LABELS` entry (a test enforces it). Typed commands behave exactly as before.
+
 - `dfs results update [--week N] [--all] [--sheet-id <id>] [--no-sheet]` -- scores every completed week against
   nflverse's actual stats and rebuilds the `Model Check` tab (also run at the end of `dfs week close`, which it
   never fails). Projection = last TFFB snapshot before each player's own kickoff; flags/ValAdj recomputed from the

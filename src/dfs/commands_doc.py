@@ -314,9 +314,9 @@ def render() -> str:
         "[WORKFLOW.md](WORKFLOW.md); for what a sheet column means, see",
         "[SHEET_REFERENCE.md](SHEET_REFERENCE.md).",
         "",
-        "Run `dfs` with no arguments for a compact status and the two or three commands that make "
-        "sense right",
-        "now.",
+        "**You do not have to remember any of this:** run `dfs` with no arguments for a menu of the standard",
+        "week (the step that fits right now is marked), and it asks for anything a command needs -- a sheet",
+        "link, a CSV file, a player name -- instead of erroring. Typing the full command still works.",
         "",
     ]
     out += [

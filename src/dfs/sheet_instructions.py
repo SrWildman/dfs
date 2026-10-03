@@ -137,7 +137,8 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
     (
         "Weekly workflow",
         "0) Not sure what to run? Just run `dfs` with no arguments -- it shows where "
-        "you are in the week and the commands that make sense right now.  1) File > "
+        "you are in the week and a menu of the standard week (the step that fits now "
+        "is marked); pick a number and it asks for anything it needs.  1) File > "
         "Make a copy of this template (no need to rename it), then run `dfs week new "
         '"<url-of-the-copy>"` -- checks the copy\'s structure first (`dfs doctor`), '
         'titles it "Week <n>" for you, points config.toml at it, carries your '

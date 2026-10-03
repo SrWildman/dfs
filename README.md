@@ -61,9 +61,13 @@ you'll actually run week to week.
 ## Not sure what to run?
 
 Run `dfs` with no arguments. It shows a compact status (which sheet,
-how stale the data is, pool/lineup counts) and the two or three commands
-that make sense right now, each printed next to its real name -- the
-point is to make itself unnecessary once you know the commands below.
+how stale the data is, pool/lineup counts) and then a numbered menu of the
+whole standard week below -- always the same list, with the step that fits
+right now marked `>`. Pick a number and it asks for whatever the command
+needs (the new sheet's link, your contest CSV, a player name) instead of
+erroring; `m` lists every other command. Each line shows the real command,
+and typing the full command (`dfs sync --live`) still works exactly as
+before -- the menu is there so you never have to remember them.
 
 ## The weekly loop
 

@@ -10,8 +10,9 @@ Symptom, then cause, then fix. For the weekly grind, see
 Cause: the weekly workflow has ~15 commands across setup/sync/pool/
 lineups/bankroll, and it's easy to lose track of where you are mid-week.
 Fix: just run `dfs` with no arguments -- it shows a compact status (sheet,
-sync freshness, pool/lineup counts) and the two or three commands that
-actually make sense right now, each printed next to its real name.
+sync freshness, pool/lineup counts) and a menu of the standard week with the
+step that fits right now marked `>`. It asks for anything a command needs
+(a link, a CSV, a name), and `m` lists every other command.
 
 ---
 

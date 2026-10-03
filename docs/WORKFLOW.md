@@ -8,8 +8,11 @@ debugging, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 Not sure what to run next? Just run `dfs` with no arguments -- it shows
 where you are in the week (sheet, sync freshness, pool/lineup counts) and
-the two or three commands that make sense right now, each one printed
-next to its real name so you learn it as you use it.
+a numbered menu of the standard week, the step that fits right now marked
+`>`. Pick a number and it asks for anything the command needs (the new
+sheet's link, a contest CSV, a player name) rather than erroring; `m` lists
+every other command. Each line is printed next to its real command name so
+you learn it as you use it, and typing the full command still works.
 
 ## The standard week at a glance
 

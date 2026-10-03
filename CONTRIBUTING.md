@@ -3459,6 +3459,18 @@ formats identical on both sheets (EdgeRaw 390, Player Pool 400, Lineups 461, Pla
 Colours checked in the browser on the template through a WR position filter and a `Tgt%` sort. Week 4's real Pool
 ticks survived the sync.
 
+## Bare `dfs` is a guided menu (2026-10-03)
+
+`dfs` with no arguments lists the whole standard week every time (`launcher.STANDARD_WEEK_ITEMS`, then
+`HANDY_ITEMS`), marks the step(s) `suggest_actions` recommends for the current state, and `m` shows every other
+command (`cli._more_commands`, labelled by `launcher.MORE_LABELS`). Picking a command prompts for each REQUIRED
+parameter it lacks (`launcher.missing_required`, read from the command's own click params, so a new required option is
+asked about automatically; `QUESTIONS`/`ANSWER_DEFAULTS` give plain wording and defaults, e.g. `dfs export` offers
+`lineups.csv`; dragged-in file paths are unquoted) and then runs `dfs <command> <answers>` as a subprocess. A blank
+answer cancels. Typed commands are untouched, so a missing required option still errors there. Suggestions no longer
+carry `<placeholders>`. `tests/test_launcher.py` fails if a command in `docs/COMMANDS.md` has no `MORE_LABELS` entry or
+a main-menu command was renamed away, so adding a command forces a label.
+
 ## The results loop and the `Model Check` tab (2026-10-02)
 
 `docs/planning/PROMPT_RESULTS_LOOP.md`. One structural change (a new visible tab) and a new command group; applied

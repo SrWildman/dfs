@@ -37,7 +37,17 @@ from dfs.config import Config, ConfigError, load_config
 from dfs.doctor import run_doctor
 from dfs.kickoff import games_state
 from dfs.late_swap import lineup_slot_status, swap_candidates
-from dfs.launcher import LauncherState, header_lines, suggest_actions
+from dfs.launcher import (
+    MENU_SECTIONS,
+    MORE_LABELS,
+    LauncherState,
+    answer_to_args,
+    command_path,
+    header_lines,
+    menu_sections,
+    missing_required,
+    suggested_commands,
+)
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
 from dfs.live_diff import diff_edge_flags, diff_queue_changes
@@ -295,10 +305,9 @@ def gather_state() -> LauncherState:
     return state
 
 
-def _run_dfs_command(command: str) -> None:
-    """Reinvoke `dfs` as a fresh process for a suggestion picked from the
-    launcher's menu, rather than calling the target's typer-decorated
-    function directly in-process -- that function's own parameter defaults
+def _run_dfs_command(args: list[str]) -> None:
+    """Reinvoke `dfs <args>` as a fresh process for a choice made in the launcher's menu, rather than calling
+    the target's typer-decorated function directly in-process -- that function's own parameter defaults
     are `typer.Option(...)` sentinel objects, only ever resolved to real
     values by Click's own parsing, so calling it in-process without going
     through that would pass those sentinels straight through instead of
@@ -307,58 +316,118 @@ def _run_dfs_command(command: str) -> None:
     the terminal for confirmation prompts and rich tables; falls back to
     `python -m dfs.cli` if `dfs` isn't on PATH for some reason (e.g. run via
     `python -m` directly)."""
-    args = shlex.split(command)
     dfs_path = shutil.which("dfs")
-    argv = [dfs_path] + args[1:] if dfs_path else [sys.executable, "-m", "dfs.cli", *args[1:]]
+    argv = [dfs_path, *args] if dfs_path else [sys.executable, "-m", "dfs.cli", *args]
     subprocess.run(argv)
 
 
+def _prompt_for_missing(command: str) -> list[str] | None:
+    """Ask for every required argument/option of `command` that the menu did not supply, and return them as
+    argv (`--csv /path`, a URL, player names). None = Sam backed out (blank answer) so nothing runs. The
+    questions come from the command's own required parameters (`launcher.missing_required`), so a
+    command that gains a required option is asked about it with no change here."""
+    from dfs.commands_doc import all_commands
+
+    click_command = all_commands().get(command_path(command))
+    extra: list[str] = []
+    for param in missing_required(command, click_command.params if click_command else []):
+        hint = " (Enter to cancel)" if param.default is None else ""
+        answer = typer.prompt(
+            f"{param.question}{hint}",
+            default=param.default or "",
+            show_default=param.default is not None,
+        ).strip()
+        if not answer:
+            return None
+        extra += answer_to_args(param, answer)
+    return extra
+
+
+def _more_commands() -> list[tuple[str, str, str]]:
+    """(section title, label, command) for every visible command NOT already on the main menu, in the order
+    of docs/COMMANDS.md's sections (so a new command shows up here once it has a section and a label)."""
+    from dfs.commands_doc import SECTIONS, all_commands
+
+    on_menu = {command_path(i.command) for _t, items in MENU_SECTIONS for i in items if i.command}
+    commands = all_commands()
+    return [
+        (title, MORE_LABELS.get(name, name), name)
+        for title, _blurb, names in SECTIONS
+        for name in names
+        if name not in on_menu and name in commands
+    ]
+
+
+def _run_menu_choice(label: str, command: str | None) -> None:
+    """Prompt for whatever `command` needs, then run it."""
+    if command is None:
+        console.print(f"[dim]{label} -- there's nothing to run; open the sheet.[/dim]")
+        return
+    try:
+        extra = _prompt_for_missing(command)
+    except (typer.Abort, KeyboardInterrupt):
+        console.print("\n[dim]Cancelled.[/dim]")
+        return
+    if extra is None:
+        console.print("[dim]Cancelled -- nothing ran.[/dim]")
+        return
+    args = [*shlex.split(command)[1:], *extra]
+    console.print(f"[dim]$ dfs {shlex.join(args)}[/dim]")
+    _run_dfs_command(args)
+
+
 def run_launcher() -> None:
-    """`dfs` with no subcommand: a compact "where am I" header plus the
-    actions that make sense right now (Task 2). Always shows the real `dfs
-    ...` command next to each choice -- the point is to make itself
-    unnecessary over time, not to become a menu Sam has to remember."""
+    """`dfs` with no subcommand: a compact "where am I" header, then the whole standard week as a numbered
+    menu (always the same list, so nothing has to be remembered), with the step that fits right now marked.
+    Pick a number and it asks for anything the command needs -- a link, a file, a player -- instead of
+    erroring. Shows the real `dfs ...` command next to each choice, and the typed commands all still work:
+    the point is to make itself unnecessary over time, not to become a menu Sam has to remember."""
     state = gather_state()
 
     for line in header_lines(state):
         console.print(line)
     console.print()
 
-    menu: list[tuple[str, str | None]] = [(a.label, a.command) for a in suggest_actions(state)]
-    if state.config_exists:
-        menu.append(("Check the sheet's structure", "dfs doctor"))
-        menu.append(("Full status", "dfs status"))
-
-    for i, (label, command) in enumerate(menu, start=1):
-        hint = f"[dim]{command}[/dim]" if command else "[dim](do this in the sheet)[/dim]"
-        console.print(f"  {i}  {label:<32} {hint}")
-    console.print("  q  Quit")
+    suggested = suggested_commands(state)
+    menu: list[tuple[str, str | None]] = []
+    for title, items in menu_sections(state):
+        console.print(f"[bold]{title}[/bold]")
+        for item in items:
+            menu.append((item.label, item.command))
+            hint = f"[dim]{item.command}[/dim]" if item.command else "[dim](in the sheet)[/dim]"
+            mark = "[green]>[/green]" if item.command in suggested else " "
+            console.print(f" {mark}{len(menu):>2}  {item.label:<44} {hint}")
+        console.print()
+    console.print("    m  More commands (setup, logins, repairs, logs)")
+    console.print("    q  Quit")
     console.print()
     console.print(
-        "[dim]Tip: `dfs --install-completion` sets up tab-completion for every command above.[/dim]"
+        "[dim]> = suggested right now. Typing a full command (`dfs sync --live`) still works.[/dim]"
     )
     console.print()
 
     choice = typer.prompt("Choice", default="q", show_default=False).strip().lower()
     if choice in ("", "q"):
         return
-
+    if choice == "m":
+        more = _more_commands()
+        section = None
+        for i, (title, label, command) in enumerate(more, start=1):
+            if title != section:
+                section = title
+                console.print(f"\n[bold]{title.removesuffix(' (only when needed)')}[/bold]")
+            console.print(f"  {i:>2}  {label:<52} [dim]{command}[/dim]")
+        console.print()
+        choice = typer.prompt("Choice (Enter to go back)", default="", show_default=False).strip().lower()
+        if not choice:
+            return
+        menu = [(label, command) for _title, label, command in more]
     try:
-        index = int(choice) - 1
-        label, command = menu[index]
+        label, command = menu[int(choice) - 1]
     except (ValueError, IndexError):
         console.print(f"[yellow]Not a valid choice: {choice!r}[/yellow]")
         return
-
-    if command is None:
-        console.print(f"[dim]{label} -- there's nothing to run; open the sheet.[/dim]")
-        return
-    if "<" in command:
-        console.print(f"[yellow]That needs an argument -- run it yourself:[/yellow] {command}")
-        return
-
-    console.print(f"[dim]$ {command}[/dim]")
-    _run_dfs_command(command)
+    _run_menu_choice(label, command)
 
 
 @app.command()
