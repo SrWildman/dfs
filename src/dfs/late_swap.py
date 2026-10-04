@@ -77,7 +77,9 @@ def lineup_slot_status(names: list[str], edge: pd.DataFrame, *, now: datetime) -
                 leverage=row.get("Leverage"),
                 # Part 7.9: "Flags" is every matching condition -- "Flag"
                 # (singular) is hidden, top-priority-only, not useful here.
-                flag=(row.get("Flags") or None),
+                # A player with no flags is NaN in the saved CSV, and NaN is truthy: `or None` let the float
+                # through and the table printer crashed (found live 2026-10-04).
+                flag=(str(row.get("Flags")) if pd.notna(row.get("Flags")) and row.get("Flags") else None),
             )
         )
     return statuses

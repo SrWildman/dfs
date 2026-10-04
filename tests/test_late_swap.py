@@ -183,3 +183,17 @@ def test_a_blank_or_garbage_game_start_is_still_not_eligible_and_status_unknown(
     assert _qb_status("not a time", NOW) is None
     edge = _edge(_edge_row("No Time", "RB", "AAA", ""))
     assert swap_candidates(edge, "RB", set(), now=NOW).empty
+
+
+def test_a_player_with_no_flags_gets_no_flag_not_a_nan():
+    """Unflagged players are NaN in the saved CSV; NaN is truthy, so it used to reach the table printer as a
+    float and crash `dfs lineups late-swap` (found live 2026-10-04)."""
+    row = {**_edge_row("Josh Allen", "QB", "BUF", "2026-09-14T20:20:00Z"), "Flags": float("nan")}
+    qb = lineup_slot_status(_names({0: "Josh Allen"}), _edge(row), now=NOW)[0]
+    assert qb.flag is None
+
+
+def test_a_player_with_flags_keeps_them_as_text():
+    row = {**_edge_row("Josh Allen", "QB", "BUF", "2026-09-14T20:20:00Z"), "Flags": "WIND LINE↑"}
+    qb = lineup_slot_status(_names({0: "Josh Allen"}), _edge(row), now=NOW)[0]
+    assert qb.flag == "WIND LINE↑"
