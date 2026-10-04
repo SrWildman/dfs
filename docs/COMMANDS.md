@@ -21,7 +21,7 @@ This is what most weeks look like. Everything below it is reference.
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
 | 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. |
 | 4 | Lineups are built | `dfs export -o lineups.csv` | Validates your lineups and writes DraftKings' bulk-upload CSV. |
-| 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable. |
+| 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close --csv history.csv` | Reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
 
 Not sure what to run next? Run `dfs` on its own: it shows where you are in the week and the two or three commands that make sense right now.
@@ -85,7 +85,7 @@ Fetch data sources and upload them to the connected Google Sheet.
 | `--no-upload` | Fetch and store locally, skip Sheets. |
 | `--week INT` | Override auto-detected NFL week. |
 | `--season INT` | Override auto-detected NFL season. |
-| `--live` | Re-sync only fast-moving sources (odds, DK statuses, weather) plus edge, and print what changed in EdgeRaw's Flag column since the last sync. The Sunday-afternoon command -- not a substitute for a full `dfs sync`. |
+| `--live` | Re-sync only fast-moving sources (odds, DK statuses, TFFB projections, weather) plus edge, and print what changed in EdgeRaw's Flag column since the last sync. The Sunday-afternoon command -- not a substitute for a full `dfs sync`. |
 | `--sheet-id STR` | Write to this sheet instead of config.toml's (e.g. the template). |
 
 ### `dfs export`
@@ -429,7 +429,7 @@ What `dfs sync --only NAME[,NAME]` takes. A plain `dfs sync` runs all of them in
 |---|---|---|---|
 | `nfl_odds` | `Odds` | yes | NFL odds from Rotowire's DraftKings market feed. |
 | `draftkings` | `Salaries` | yes | DraftKings NFL salaries: draftgroups + player-pool CSV, both unauthenticated. |
-| `projections` | `Projections` | - | DraftKings projections from The Fantasy Footballers' DFS Pass optimizer. |
+| `projections` | `Projections` | yes | DraftKings projections from The Fantasy Footballers' DFS Pass optimizer. |
 | `sleeper` | `SleeperRaw` | - | Sleeper's free, unauthenticated, undocumented weekly projections API -- Part C, C3. |
 | `fantasypros` | `FantasyProsRaw` | - | FantasyPros weekly projection pages -- Part C, C4. |
 | `snaps` | `SnapsRaw` | - | nflverse's free, unauthenticated snap-count release -- Part C, C6. |

@@ -33,6 +33,8 @@ from dfs.sources.weather import WeatherSource
 # reach them the same way they always have, a live sheet formula (VLOOKUP
 # chain) reading real data now instead of a blank paste.
 #
+# (2026-10-04: "projections" -- TFFB's own -- IS in LIVE_SYNC_SOURCES now; see the note beside it in cli.py.)
+#
 # Part C, C3/C4: "sleeper"/"fantasypros" are deliberately NOT in cli.py's
 # LIVE_SYNC_SOURCES -- a full `dfs sync` includes them, `dfs sync --live`
 # doesn't, which is each one's own "make it skippable" instruction

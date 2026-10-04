@@ -3459,6 +3459,16 @@ formats identical on both sheets (EdgeRaw 390, Player Pool 400, Lineups 461, Pla
 Colours checked in the browser on the template through a WR position filter and a `Tgt%` sort. Week 4's real Pool
 ticks survived the sync.
 
+## `dfs sync --live` also re-pulls TFFB's projections (2026-10-04)
+
+`cli.LIVE_SYNC_SOURCES` is now `nfl_odds, draftkings, projections, weather, edge` (`projections` sits before `edge`, which
+reads it). TFFB revises projections through the week and its ownership only appears late, and the pull takes about 7
+seconds, so the Sunday pass should not run on Wednesday's numbers. It needs the `dfs auth tffb` login; if that has
+expired the one source reports "failed" without overwriting the saved projections, and the other sources and `edge`
+carry on (`sync.run_sync` isolates failures), though the command exits 1. Sleeper, FantasyPros, snaps, pbp, usage and
+the once-a-week sources are still left to the full `dfs sync`. Every live pass also archives a TFFB snapshot, which
+is what the results loop reads ("last snapshot before each player's own kickoff"), so it now has more late snapshots.
+
 ## Bare `dfs` is a guided menu (2026-10-03)
 
 `dfs` with no arguments lists the whole standard week every time (`launcher.STANDARD_WEEK_ITEMS`, then

@@ -149,12 +149,16 @@ from dfs.weekly_reset import (
 GAMES_FINISHED_AFTER_HOURS = 3.5
 
 # `dfs sync --live` re-syncs only what actually moves within a game day:
-# odds (line movement), DK's own Status (late inactives), and weather
-# (forecast firming up as kickoff nears) -- then recomputes `edge` off
-# them. `projections` (needs `dfs auth tffb`, and TFFB's numbers don't
-# change hour to hour) and `nflverse_games` (stadium/roof/schedule --
-# static for the week) are deliberately left out.
-LIVE_SYNC_SOURCES = ["nfl_odds", "draftkings", "weather", "edge"]
+# odds (line movement), DK's own Status (late inactives), TFFB's projections
+# (they are revised through the week, and ownership only appears late; ~7 s,
+# needs `dfs auth tffb`), and weather (forecast firming up as kickoff nears)
+# -- then recomputes `edge` off them. Order matters: `edge` reads the
+# projections just saved, so it stays last. If the TFFB login has expired
+# that one source reports "failed" (it never overwrites what is saved) and
+# the rest of the run carries on with the previous projections.
+# `nflverse_games` (stadium/roof/schedule -- static for the week) and the
+# slower once-a-week sources are deliberately left out.
+LIVE_SYNC_SOURCES = ["nfl_odds", "draftkings", "projections", "weather", "edge"]
 
 app = typer.Typer(
     name="dfs",
@@ -2076,7 +2080,7 @@ def sync(
     live: bool = typer.Option(
         False,
         "--live",
-        help="Re-sync only fast-moving sources (odds, DK statuses, weather) plus edge, "
+        help="Re-sync only fast-moving sources (odds, DK statuses, TFFB projections, weather) plus edge, "
         "and print what changed in EdgeRaw's Flag column since the last sync. The "
         "Sunday-afternoon command -- not a substitute for a full `dfs sync`.",
     ),

@@ -79,7 +79,7 @@ copied every week.
 
 ```
 dfs sync              # re-run any time through the week as lines/injuries/weather move
-dfs sync --live       # gameday: odds/DK status/weather only, prints what changed
+dfs sync --live       # gameday: odds/DK status/TFFB projections+ownership/weather only, prints what changed
 dfs edge              # top leverage plays, in the terminal, no browser needed
 dfs go                # sync + dfs doctor + what changed, back to back
 ```
@@ -182,7 +182,7 @@ validation error.
 **Tabs:** Lineups, Movement.
 
 ```
-dfs sync --live              # re-pull odds/DK status/weather, gameday only
+dfs sync --live              # re-pull odds/DK status/TFFB projections/weather, gameday only
 dfs lineups late-swap         # who's still swappable, checked against real kickoffs
 ```
 

@@ -86,7 +86,7 @@ def suggest_actions(state: LauncherState) -> list[Suggestion]:
 
     if state.game_started:
         return [
-            Suggestion("Re-sync live data (odds, statuses, weather)", "dfs sync --live"),
+            Suggestion("Re-sync live data (odds, statuses, projections, weather)", "dfs sync --live"),
             Suggestion("Check for late swaps", "dfs lineups late-swap"),
         ]
 

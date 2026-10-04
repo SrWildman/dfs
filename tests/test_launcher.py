@@ -334,3 +334,13 @@ def test_a_positional_argument_is_asked_for_and_split_on_commas(monkeypatch):
     monkeypatch.setattr(cli, "_pool_client_and_edge_tab", fake_client)
     result = CliRunner().invoke(app, ["pool", "add"], input="Josh Allen, Travis Kelce\n")
     assert "Player name(s)" in result.output and captured.get("reached")
+
+
+def test_live_sync_pulls_tffb_projections_before_recomputing_edge():
+    from dfs.cli import LIVE_SYNC_SOURCES
+    from dfs.sources import SOURCES
+
+    assert set(LIVE_SYNC_SOURCES) <= set(SOURCES)
+    assert "projections" in LIVE_SYNC_SOURCES
+    assert LIVE_SYNC_SOURCES.index("projections") < LIVE_SYNC_SOURCES.index("edge")
+    assert LIVE_SYNC_SOURCES[-1] == "edge", "edge reads what the others just saved"
