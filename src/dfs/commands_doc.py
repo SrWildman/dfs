@@ -62,7 +62,8 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
         "Sunday, before and between kickoffs",
         "dfs sync --live",
         "Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; "
-        "prints what changed. Then `dfs lineups late-swap` shows who is still swappable.",
+        "prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best "
+        "swaps for them.",
     ),
     (
         "6",

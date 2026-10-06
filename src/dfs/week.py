@@ -44,13 +44,56 @@ BANKROLL_CARRYOVER_CELLS = [
 
 # The Results tab's column layout: A=Week, B=Cash Pts, C=Cash Line,
 # D=Cash Results (formula, =IF(B, B>C, "")), E=H2H Entered, F=H2H Win,
-# G=H2H % (formula, =F/E), H=Red, I=Blue, J=Black. D and G are already
+# G=H2H % (formula, =F/E), H:J = the three team-colour columns (the template
+# calls them Red, Blue, Black; Sam renamed them to the colours he really
+# plays, e.g. "Red/Orange"). D and G are already
 # built into every row of the tab (same "pre-built per-row formula" shape
 # as Bankroll's entry tables) -- carrying them over as literal values
 # would freeze last week's formula result in place of this week's. Only
 # the typed-value columns get carried; the formula columns are left for
 # whatever's already sitting in that row on the destination sheet.
-RESULTS_VALUE_COLUMN_RANGES = ["A", "B:C", "E:F", "H:J"]
+#
+# The team-colour columns' HEADER cells are carried too (`carry_team_colour_headers`): they are typed
+# names, not formulas, and a fresh copy of the template would otherwise bring the template's own back
+# every week. Never read or write any other Results header cell: the rest are structural names (`Cash
+# Results`, `H2H %`) the code finds columns by.
+RESULTS_TEAM_COLOUR_RANGE = "H:J"
+RESULTS_VALUE_COLUMN_RANGES = ["A", "B:C", "E:F", RESULTS_TEAM_COLOUR_RANGE]
+
+
+def range_width(col_range: str) -> int:
+    """How many columns an A1 column range such as "H:J" covers (a single "A" covers one)."""
+
+    def index(letters: str) -> int:
+        n = 0
+        for ch in letters.strip().upper():
+            n = n * 26 + (ord(ch) - ord("A") + 1)
+        return n
+
+    start, _, end = col_range.partition(":")
+    return index(end or start) - index(start) + 1
+
+
+def carry_team_colour_headers(outgoing: list[str], incoming: list[str]) -> list[str]:
+    """The header cells to leave in the new sheet's team-colour columns (`RESULTS_TEAM_COLOUR_RANGE`).
+
+    For each column: the outgoing sheet's header if it has one, otherwise whatever the new sheet already
+    has. A blank on the outgoing sheet never wipes a name. Both lists may come back short from the Sheets
+    API (trailing blanks are dropped); the result is always `range_width(RESULTS_TEAM_COLOUR_RANGE)` long."""
+    width = range_width(RESULTS_TEAM_COLOUR_RANGE)
+
+    def cell(cells: list[str], i: int) -> str:
+        return str(cells[i]).strip() if i < len(cells) and cells[i] is not None else ""
+
+    return [cell(outgoing, i) or cell(incoming, i) for i in range(width)]
+
+
+def team_colour_headers_to_write(outgoing: list[str], incoming: list[str]) -> list[str] | None:
+    """`carry_team_colour_headers`' result when it differs from what the new sheet already holds, else None
+    (nothing to write: no request, no restyle)."""
+    merged = carry_team_colour_headers(outgoing, incoming)
+    current = carry_team_colour_headers(incoming, [])
+    return merged if merged != current else None
 
 
 def extract_results_value_columns(rows: list[list[str]]) -> dict[str, list[list[str]]]:

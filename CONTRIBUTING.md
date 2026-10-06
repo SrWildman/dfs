@@ -1637,7 +1637,7 @@ with an actual visual open of the live sheet, not just another round of
 
 ## Phase 6, Part 7.8 (2026-09-23): actual DK ownership logging, investigated then deliberately scoped down
 
-Step 1/2's investigation (per `docs/planning/HANDOFF_PHASE6.md`'s own "investigate
+Step 1/2's investigation (per `docs/planning/archive/HANDOFF_PHASE6.md`'s own "investigate
 first" instruction) happened live, with Sam present, checking his real
 DraftKings account -- not guessed:
 
@@ -1814,7 +1814,7 @@ Sam: *"I like the blank line between cash/gpp/both blocks in the pool, but
 it doesn't seem to consistently work."* Root cause: there was no
 separator logic in `sheet_pool_formulas.py` at all -- Sam was seeing an
 artifact of how `SORT` happened to lay out ties, not anything deliberate.
-`docs/planning/HANDOFF.md` had also listed "A7/A8" as done, describing
+`docs/planning/archive/HANDOFF.md` had also listed "A7/A8" as done, describing
 only A8's content -- A7 itself was never built.
 
 **The fix.** `_name_formula`'s flat `SORT(UNIQUE(union),3,TRUE,2,FALSE)`
@@ -1885,7 +1885,7 @@ all-empty and unknown-tag-rank cases, live on the template's scratch tab;
 `dfs setup add-pool-control` re-applied to template then live; a real
 3-tag tick across two real positions (QB and WR) on the LIVE sheet read
 back with exactly one blank row between each tag group, then un-ticked;
-`dfs doctor` clean on both sheets afterward. `docs/planning/HANDOFF.md`'s A7/A8
+`dfs doctor` clean on both sheets afterward. `docs/planning/archive/HANDOFF.md`'s A7/A8
 lettering also corrected (see Fix 3 in the session's own report to Sam).
 
 ## Week 3 fixes, Fix 4 (2026-09-23): the Instructions tab rewritten, badly stale
@@ -3458,6 +3458,43 @@ looks); TEAMS 32 rows, sorted descending by implied total; `doctor` and `audit-s
 formats identical on both sheets (EdgeRaw 390, Player Pool 400, Lineups 461, PlayerPoolRaw 392, Slate Grid 62).
 Colours checked in the browser on the template through a WR position filter and a `Tgt%` sort. Week 4's real Pool
 ticks survived the sync.
+
+## Week 5 round: Lineups colours, DST tints, late-swap re-fill, Results headers (2026-10-06)
+
+`docs/planning/PROMPT_WEEK5.md`, items 1, 3, 4 and 5. Template first, then Week 5; Weeks 3 and 4 were only read.
+No row, column or tab moved on any sheet, so nothing below is a structural change; the table row records what the
+sheets now look like and which symbols encode it.
+
+- **Lineups identity cells are plain white** (`sheet_style.polish_lineups_identity_cells`, replacing
+  `polish_lineups_input_column`; `polish_builder_tab(position_tint=False)` for Lineups). Name lost its pale-yellow
+  input fill and Pos. its per-position tint, so the correlation tints are the only colour on those cells. Player
+  Pool, EdgeRaw and the rest keep both. The "pale yellow = you type here" rule now has ONE stated exception
+  (Lineups' Name column): the `INPUT_BG` docstring and the Instructions tab say so. Name/Pos./Team are found by
+  header text, never by letter.
+- **Correlation tints include the DST** (`sheet_lineup_tints.py`). The DST on the QB's team joins the stack (blue). A
+  DST on any other team that has a same-team non-DST player in the lineup, and those players, are lavender (unless
+  already blue or amber). A DST facing one of your players is never tinted, so a DST on the QB's opponent matches no
+  rule. The three rules stay mutually exclusive by construction (`other` carries explicit not-QB-team and
+  not-QB-opponent guards); the module docstring states the proof. Interpretation made here, flagged to Sam: the
+  DST-on-the-QB's-opponent case is left plain even when the lineup also holds that team's non-DST players (those
+  players are amber).
+- **`dfs lineups late-swap` rebuilt** (`late_swap_search.py` search, `late_swap_report.py` text, `cli._run_late_swap`).
+  Ranked by `ProjPts` (`--metric AggPts`), never Leverage; salary-aware (cap counts locked players); FLEX, no-duplicate,
+  DST-vs-own-QB and one-RB-per-game rules; locked players never move. Output per lineup: best full re-fill, top 3
+  2-for-2, top 3 1-for-1 per open slot, each with a correlation note; "nothing beats" is said when true. The search is
+  a plain branch-and-bound with a Lagrangian salary bound -- **no solver dependency** (0.6 s at nine open slots over
+  the real Week 5 rosterable pool; `tests/test_late_swap_search.py` pins < 2 s and checks the search against brute
+  force). `swap_candidates` (Leverage-ranked, salary-blind) is deleted. Candidates default to the Player Pool tab's
+  names (`--all-players` adds the rosterable pool); OUT/IR players are never suggested.
+- **Results team-colour headers carry through `week new`** (`week.RESULTS_TEAM_COLOUR_RANGE`,
+  `carry_team_colour_headers`, `cli._carry_results_team_colour_headers`). Header cells of the team-colour columns only; a
+  blank outgoing header never wipes a name; the Results widths are re-applied when a name changed. Nothing in
+  doctor, polish, `setup instructions` or audit-style writes or expects the literal `Red`/`Blue`/`Black` (doctor finds
+  Results' formula columns by `Cash Results`/`H2H %`); only the Instructions text named them, and now doesn't.
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-10-06 | `Lineups` | Name/Pos./Team cells in every lineup block set to plain white; DST added to the correlation tints (60 conditional rules, same count). No row or column moved. | Name pale yellow (`INPUT_BG`), Pos. per-position tints, DSTs never tinted. | Name/Pos./Team white unless a tint rule applies; DST on the QB's team blue, DST + own-team players lavender. | Template, Week 5 | `sheet_style.polish_lineups_identity_cells`/`LINEUPS_IDENTITY_COLUMNS`, `polish_builder_tab(position_tint=)`, `sheet_lineup_tints.tint_formulas`/`LEGEND`. |
 
 ## `dfs sync --live` also re-pulls TFFB's projections (2026-10-04)
 

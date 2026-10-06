@@ -1,21 +1,34 @@
 """Round 5 item 4: subtle correlation tints on Lineups' identity cells
 (Name, Pos., Team), replacing the removed `Stack`/`Bring-back` text columns.
+Week 5 extended them to the DST.
 
-    Stack       soft blue      the lineup's QB, and every non-DST player on the QB's team
+    Stack       soft blue      the lineup's QB, every player on the QB's team, and that team's DST
     Bring-back  soft amber     every non-DST player on the QB's opponent
-    Other       soft lavender  any OTHER game with 2+ non-DST players in the lineup, all of them
+    Other       soft lavender  any OTHER game with 2+ non-DST players in the lineup, all of them; and a
+                               DST together with every non-DST player from its own team (a team that
+                               wins comfortably feeds its RB and its defense)
 
-No QB in the lineup means no stack/bring-back tint; the lavender rule still
-applies. DSTs never get a tint (DST vs your own QB is already an `Issues`
-guardrail). The numeric columns are left alone so their colour scales still
-read.
+No QB in the lineup means no stack/bring-back tint; the lavender rule still applies.
+
+A DST that faces one of your players is a NEGATIVE correlation, so it never gets a tint for that: a DST on
+the QB's opponent (DST vs your own QB, already an `Issues` guardrail) stays plain, and so does a DST
+facing a non-QB player of yours (nothing here looks at the opponent of a DST). The numeric columns are
+left alone so their colour scales still read.
 
 One custom-formula rule per tint per lineup block. Blocks are fixed row
 ranges (`weekly_reset.LINEUPS_NAME_BLOCKS`), and every reference inside a
 rule is to that block's own rows, so a rule can never read another lineup.
-The three conditions are mutually exclusive by construction (stack: team ==
-QB team; bring-back: team == QB opponent; other: game != QB game), so rule
-priority never decides a cell's colour.
+
+The three rules are mutually exclusive by construction, so rule priority never decides a cell's colour:
+
+    stack       team == QB team                      (any position, DST included)
+    bring-back  team == QB opponent AND not a DST
+    other       team != QB team AND team != QB opponent, AND (a game / own-team-DST / DST-with-teammate
+                condition)
+
+Stack and bring-back differ on the team (a team is never both the QB's and his opponent's); `other` carries
+both exclusions explicitly, so it can never overlap either. A DST on the QB's opponent matches none of
+the three.
 
 The rules are added BEFORE the guardrail/typo-guard rules in the polish run
 (added later = higher priority) so a red warning on a name cell still beats
@@ -32,9 +45,9 @@ BRING_BACK_TINT = {"red": 0.99, "green": 0.92, "blue": 0.78}  # soft amber
 OTHER_TINT = {"red": 0.91, "green": 0.88, "blue": 0.96}  # soft lavender
 
 LEGEND = (
-    "Cell tints on Name/Pos./Team: blue = your QB and his teammates (the stack); amber = "
-    "the QB's opponent (bring-back); lavender = 2+ players from any other game. "
-    "DSTs are never tinted."
+    "Cell tints on Name/Pos./Team: blue = your QB, his teammates and his team's DST (the stack); "
+    "amber = the QB's opponent (bring-back); lavender = 2+ players from any other game, or a DST "
+    "with its own team's players. A DST facing your QB is never tinted."
 )
 
 
@@ -48,21 +61,33 @@ def tint_formulas(
 ) -> dict[str, str]:
     """`{"stack", "bring_back", "other"}` -> CUSTOM_FORMULA text, written
     for the block's top-left cell (`start`) with row-relative references, so
-    it follows every row of `A{start}:C{end}`."""
-    filled = f'${name_col}{start}<>"",${pos_col}{start}<>"DST"'
+    it follows every row of `A{start}:C{end}`. See the module docstring for the rules and why they
+    cannot overlap."""
+    named = f'${name_col}{start}<>""'
+    not_dst = f'${pos_col}{start}<>"DST"'
+    is_dst = f'${pos_col}{start}="DST"'
+    team = f"${team_col}{start}"
     qb_team = _lookup(team_col, start, end, pos_col)
     qb_opp = _lookup(opp_col, start, end, pos_col)
-    qb_game = _lookup(gameid_col, start, end, pos_col)
     game = f"${gameid_col}{start}"
     pos_rng = f"${pos_col}${start}:${pos_col}${end}"
     name_rng = f"${name_col}${start}:${name_col}${end}"
     game_rng = f"${gameid_col}${start}:${gameid_col}${end}"
+    team_rng = f"${team_col}${start}:${team_col}${end}"
+
+    on_qb_team = f'AND({qb_team}<>"",{team}={qb_team})'
+    on_qb_opp = f'AND({qb_opp}<>"",{team}={qb_opp})'
+    # Lavender's three ways in. A player counts a DST's team-mate only if that DST is in THIS lineup
+    # (and the other way round); both sides are limited to this block's own rows.
+    two_in_a_game = f'AND({not_dst},COUNTIFS({game_rng},{game},{pos_rng},"<>DST",{name_rng},"<>")>=2)'
+    has_own_dst = f'AND({not_dst},COUNTIFS({team_rng},{team},{pos_rng},"DST",{name_rng},"<>")>=1)'
+    dst_with_teammate = f'AND({is_dst},COUNTIFS({team_rng},{team},{pos_rng},"<>DST",{name_rng},"<>")>=1)'
     return {
-        "stack": f'=AND({filled},{qb_team}<>"",${team_col}{start}={qb_team})',
-        "bring_back": f'=AND({filled},{qb_opp}<>"",${team_col}{start}={qb_opp})',
+        "stack": f'=AND({named},{team}<>"",{on_qb_team})',
+        "bring_back": f"=AND({named},{not_dst},{on_qb_opp})",
         "other": (
-            f'=AND({filled},{game}<>"",{game}<>{qb_game},'
-            f'COUNTIFS({game_rng},{game},{pos_rng},"<>DST",{name_rng},"<>")>=2)'
+            f'=AND({named},{team}<>"",NOT({on_qb_team}),NOT({on_qb_opp}),'
+            f"OR({two_in_a_game},{has_own_dst},{dst_with_teammate}))"
         ),
     }
 

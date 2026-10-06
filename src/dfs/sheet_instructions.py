@@ -58,6 +58,7 @@ from __future__ import annotations
 
 from dfs.models import ROSTER_SLOTS
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
+from dfs.sheet_lineup_tints import LEGEND as LINEUP_TINT_LEGEND
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_TYPE_SORT_ORDER
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
@@ -113,12 +114,14 @@ _TITLE = "How this sheet works"
 _GENERAL_ROWS: list[tuple[str, str]] = [
     (
         "THE ONE THING TO KNOW",
-        "Exactly four things are typed in this entire workbook, all pale yellow: "
+        "Exactly four things are typed in this entire workbook, all pale yellow "
+        "except the Lineups names: "
         "(1) the Pool dropdown in EdgeRaw column A (leftmost, blank/Cash/GPP/Both), "
         "(2) a player name in Player Pool's own row 1 search box (the add-a-player "
-        "control cell), (3) player names in Lineups column A, (4) a percentage in "
+        "control cell), (3) player names in Lineups column A (plain white, so the "
+        "stack colours show), (4) a percentage in "
         "Exposure column F (Target). Everything else is a formula -- if a cell isn't "
-        "pale yellow, don't type into it. Most other tabs will warn you before you "
+        "pale yellow (or a Lineups name), don't type into it. Most other tabs will warn you before you "
         "can (Data > Protection), but the warning is dismissible, not a hard lock, "
         "so it won't stop a genuine fix. Player Pool's Name column is COMPUTED from "
         "EdgeRaw ticks + that add-a-player control cell (every name you type there "
@@ -160,8 +163,9 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "EdgeRaw ticks survive it).  6) Gameday: `dfs sync --live` re-pulls odds/DK "
         "status/TFFB projections + projected ownership/weather and shows what "
         "changed; `dfs lineups late-swap` checks your "
-        "built lineups against real kickoff times (Eastern) and shows who's still "
-        "swappable.  7) End of week: export your DK contest history and run `dfs week "
+        "built lineups against real kickoff times (Eastern), shows who's still "
+        "swappable and suggests the best swaps (a full re-fill, 2-for-2 and 1-for-1, "
+        "within the salary cap).  7) End of week: export your DK contest history and run `dfs week "
         "close --csv <file>` to reconcile Cash/GPP results (pass `--week N` to "
         "reconcile a specific week by hand instead of the connected sheet's own week); "
         "it then scores the week's projections into the Model Check tab (nflverse posts "
@@ -200,8 +204,13 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         'Flag (can show more than one at once, e.g. "WIND LEVERAGE"), Avail, '
         "Venue (H/R), a lineup's Issues column. Grey text on OwnStatus means "
         "ownership hasn't published yet this week, in which case Leverage reads "
-        "blank rather than a number that looks real but isn't. If you see colour "
-        "that doesn't fit one of these, ask -- it's a bug, not a feature.",
+        "blank rather than a number that looks real but isn't. On Lineups the Name, Pos. and "
+        "Team cells are plain white unless your lineup has a correlation, and then they take "
+        f"a soft tint. {LINEUP_TINT_LEGEND} "
+        "A bold player name (EdgeRaw, Player Pool, Lineups) means he has at least one flag in "
+        "the Flags column (OUT, WIND, IMPL↑/↓, LEVERAGE, CHALK, TFFB↑/↓...): bold name = at "
+        "least one flag; see Flags. "
+        "If you see colour that doesn't fit one of these, ask -- it's a bug, not a feature.",
     ),
 ]
 
@@ -328,7 +337,7 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "incomplete). Same linked Edge columns at the right. Everywhere except "
         "column A is protected (warning-only) -- it's a formula. On gameday, "
         "`dfs lineups late-swap` checks every lineup here against real kickoff "
-        "times and shows who's still swappable.",
+        "times, shows who's still swappable and suggests the best swaps.",
     ),
     (
         "DK Upload",
@@ -382,8 +391,10 @@ _TAB_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Results",
-        "Season-level results log (Week, Cash Pts/Line, H2H Entered/Win, "
-        "Red/Blue/Black) -- Cash Results chipped green/red, H2H % colour-scaled. "
+        "Season-level results log (Week, Cash Pts/Line, H2H Entered/Win, then three "
+        "team-colour columns) -- Cash Results chipped green/red, H2H % colour-scaled. "
+        "The three team-colour headers are yours to rename; `dfs week new` carries your "
+        "names forward. "
         "NOT reset each week -- `dfs week new` carries it forward from the outgoing "
         'sheet automatically. A sortable filter view ("All") is available.',
     ),

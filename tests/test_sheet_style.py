@@ -46,6 +46,7 @@ from dfs.sheet_style import (
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
+    polish_lineups_identity_cells,
     polish_lineups_pct_of_cap,
     polish_lineups_totals_rows,
     style_board,
@@ -1684,6 +1685,36 @@ def test_polish_builder_tab_skips_chips_when_flag_and_avail_absent():
     assert "0 chip column(s)" in result
 
 
+def test_polish_builder_tab_can_leave_the_pos_column_untinted():
+    # Week 5: Lineups' Pos. is plain white so the correlation tints read; every other tab keeps its tint.
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+    polish_builder_tab(client, "Lineups", last_row=100, header_row=1, position_tint=False)
+    assert client.boolean_rule_calls == []
+
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team"])
+    polish_builder_tab(client, "Player Pool", last_row=100, header_row=1)
+    assert len(client.boolean_rule_calls) == len(POSITION_TINTS)
+
+
+def test_lineups_identity_cells_are_plain_white_in_every_block_and_nothing_else():
+    client = FakeBuilderTabClient(["Name", "Pos.", "Team", "Opp.", "DK Sal"])
+    result = polish_lineups_identity_cells(client, "Lineups", header_row=1, name_blocks=[(2, 10), (13, 21)])
+    assert {a1 for a1, _ in client.format_calls} == {
+        "A2:A10", "B2:B10", "C2:C10", "A13:A21", "B13:B21", "C13:C21",
+    }  # fmt: skip
+    assert all(fmt == {"backgroundColor": WHITE} for _, fmt in client.format_calls)  # no yellow, no tint
+    assert "2 lineup block(s)" in result
+
+
+def test_lineups_identity_cells_found_by_header_text_not_position():
+    client = FakeBuilderTabClient(["Pos.", "Name", "Team"])
+    polish_lineups_identity_cells(client, "Lineups", header_row=1, name_blocks=[(2, 10)])
+    assert {a1 for a1, _ in client.format_calls} == {"A2:A10", "B2:B10", "C2:C10"}
+    client = FakeBuilderTabClient(["Name", "Pts"])  # Pos./Team missing: only what exists
+    polish_lineups_identity_cells(client, "Lineups", header_row=1, name_blocks=[(2, 10)])
+    assert {a1 for a1, _ in client.format_calls} == {"A2:A10"}
+
+
 def test_polish_builder_tab_tints_every_pool_tag_defined_in_pool_tag_tints():
     # Part 7.10: bands Player Pool's own `Pool` column by tag
     # (Both/Cash/GPP) so the new sort groups read visually.
@@ -2352,3 +2383,16 @@ def test_model_check_sits_after_season_and_results_in_the_money_band():
     names = [tab for tab, _family in WEEK_ORDER]
     assert names.index("Season") < names.index("Results") < names.index("Model Check")
     assert dict(WEEK_ORDER)["Model Check"] == "money"
+
+
+def test_every_tab_with_bold_names_says_what_bold_means():
+    # Player Pool, EdgeRaw and Lineups bold a Name that has at least one flag (`_apply_name_flag_style`); each
+    # tab's A1 note says so, and so does the Instructions tab.
+    from dfs.sheet_instructions import render_instructions_grid
+    from dfs.sheet_style import BOLD_NAME_HINT, TAB_NOTES
+
+    for tab in ("EdgeRaw", "Player Pool", "Lineups"):
+        assert BOLD_NAME_HINT in TAB_NOTES[tab], tab
+    grid = render_instructions_grid()
+    text = " ".join(cell for pair in grid.values() for cell in pair).lower()
+    assert "bold name = at least one flag" in text

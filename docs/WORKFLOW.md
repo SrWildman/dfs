@@ -183,12 +183,20 @@ validation error.
 
 ```
 dfs sync --live              # re-pull odds/DK status/TFFB projections/weather, gameday only
-dfs lineups late-swap         # who's still swappable, checked against real kickoffs
+dfs lineups late-swap         # who's still swappable, and the best swaps for them
 ```
 
 Kickoff times are read as Eastern time (TFFB's `GameStart` is Eastern wall-clock time, not UTC); a player locks at
-his own game's kickoff, and one whose game starts later still shows as swappable, with swap candidates ranked by
-Leverage.
+his own game's kickoff, and one whose game starts later still shows as swappable.
+
+For each lineup with an open slot, `late-swap` then suggests, in this order: **(a)** the best full re-fill of all
+the open slots together, **(b)** the best 2-for-2 swaps (an expensive RB and a cheap TE out, a mid RB and a better
+TE in), **(c)** the best 1-for-1 swaps per open slot. Every suggestion stays under the $50,000 cap (the locked
+players' salaries count), respects the roster slots (FLEX takes an RB, WR or TE), never puts a DST against your
+own QB or a second RB in one game, and never moves a locked player; it shows who goes out and in, the points
+gained, the salary left and a note when it adds or breaks a stack, bring-back or DST/RB same-team pair. Ranked by
+`ProjPts` (`--metric AggPts` for the other), never Leverage. Candidates are the players in your Player Pool whose
+game has not started; `--all-players` also searches the rosterable pool. If nothing beats the lineup it says so.
 
 Movement (once populated by a sync) ranks players by how far their
 team's implied total has moved since the week started -- a big shift is

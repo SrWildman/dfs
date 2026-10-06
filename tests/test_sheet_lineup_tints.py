@@ -35,9 +35,15 @@ def test_three_formulas_are_custom_formulas_starting_with_equals():
     assert all(f.startswith("=AND(") for f in _f().values())
 
 
-def test_every_formula_skips_dsts_and_blank_slots():
+def test_every_formula_skips_blank_slots():
     for f in _f().values():
-        assert '$B2<>"DST"' in f and '$A2<>""' in f
+        assert '$A2<>""' in f
+
+
+def test_stack_includes_the_dst_but_bring_back_does_not():
+    f = _f()
+    assert '$B2<>"DST"' not in f["stack"]  # the DST on the QB's team joins the stack (blue)
+    assert '$B2<>"DST"' in f["bring_back"]  # a DST on the QB's opponent is DST-vs-QB: never tinted
 
 
 def test_stack_and_bring_back_key_off_the_qb_row_within_the_block():
@@ -47,10 +53,30 @@ def test_stack_and_bring_back_key_off_the_qb_row_within_the_block():
     assert "INDEX($D$15:$D$23" in f["bring_back"]  # the QB's OPPONENT
 
 
-def test_other_game_rule_excludes_the_qbs_game_and_needs_two_non_dst_players():
+def test_other_rule_excludes_the_qbs_team_and_opponent_team_explicitly():
+    # Mutual exclusion by construction: `other` can never overlap `stack` (team == QB team) or
+    # `bring_back` (team == QB opponent), whatever else it matches.
     f = _f()["other"]
-    assert "$F2<>IFERROR(INDEX($F$2:$F$10" in f  # not the QB's game
+    assert "NOT(AND(IFERROR(INDEX($C$2:$C$10" in f  # not on the QB's team
+    assert "NOT(AND(IFERROR(INDEX($D$2:$D$10" in f  # not on the QB's opponent
+
+
+def test_other_rule_has_its_three_ways_in():
+    f = _f()["other"]
+    # 2+ non-DST players from one game
     assert 'COUNTIFS($F$2:$F$10,$F2,$B$2:$B$10,"<>DST",$A$2:$A$10,"<>")>=2' in f
+    # a non-DST player whose own team's DST is in the lineup
+    assert 'COUNTIFS($C$2:$C$10,$C2,$B$2:$B$10,"DST",$A$2:$A$10,"<>")>=1' in f
+    # a DST with at least one non-DST player from its own team
+    assert 'AND($B2="DST",COUNTIFS($C$2:$C$10,$C2,$B$2:$B$10,"<>DST",$A$2:$A$10,"<>")>=1)' in f
+
+
+def test_a_dst_on_the_qbs_opponent_matches_no_rule():
+    # DST vs your own QB (an Issues guardrail already): not stack (team != QB team), not bring-back
+    # (DST excluded) and not other (the QB-opponent team is excluded outright).
+    f = _f()
+    assert "$B2" in f["bring_back"] and '<>"DST"' in f["bring_back"]
+    assert "NOT(AND(IFERROR(INDEX($D$2:$D$10" in f["other"]
 
 
 def test_no_formula_reaches_outside_its_own_block():

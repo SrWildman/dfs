@@ -181,3 +181,108 @@ def test_bankroll_carryover_includes_the_typed_inputs_that_persist():
     # each destination is written once -- two sources into one cell would silently clobber
     destinations = [dst for _src, dst in BANKROLL_CARRYOVER_CELLS]
     assert len(destinations) == len(set(destinations))
+
+
+# ---------------------------------------------------------------------------------------------
+# Sam's renamed Results team-colour headers survive `dfs week new`
+# ---------------------------------------------------------------------------------------------
+
+SAMS_HEADERS = ["Red/Orange", "Blue/Green", "Black/White/Purple"]
+
+
+def test_the_team_colour_range_is_one_of_the_carried_value_ranges():
+    from dfs.week import RESULTS_TEAM_COLOUR_RANGE, RESULTS_VALUE_COLUMN_RANGES, range_width
+
+    assert RESULTS_TEAM_COLOUR_RANGE in RESULTS_VALUE_COLUMN_RANGES
+    assert range_width(RESULTS_TEAM_COLOUR_RANGE) == 3
+    assert range_width("A") == 1 and range_width("B:C") == 2 and range_width("AA:AB") == 2
+
+
+def test_renamed_headers_replace_the_templates_names():
+    from dfs.week import carry_team_colour_headers
+
+    assert carry_team_colour_headers(SAMS_HEADERS, ["Red", "Blue", "Black"]) == SAMS_HEADERS
+
+
+def test_a_blank_outgoing_header_never_wipes_a_name():
+    from dfs.week import carry_team_colour_headers
+
+    assert carry_team_colour_headers(["Red/Orange", "", None], ["Red", "Blue", "Black"]) == [
+        "Red/Orange",
+        "Blue",
+        "Black",
+    ]
+    assert carry_team_colour_headers([], ["Red", "Blue", "Black"]) == ["Red", "Blue", "Black"]
+
+
+def test_short_rows_from_the_sheets_api_are_padded():
+    from dfs.week import carry_team_colour_headers
+
+    assert carry_team_colour_headers(["Red/Orange"], []) == ["Red/Orange", "", ""]
+
+
+def test_nothing_to_write_when_the_new_sheet_already_has_them():
+    from dfs.week import team_colour_headers_to_write
+
+    assert team_colour_headers_to_write(SAMS_HEADERS, list(SAMS_HEADERS)) is None
+    assert team_colour_headers_to_write(SAMS_HEADERS, ["Red", "Blue", "Black"]) == SAMS_HEADERS
+
+
+class _HeaderClient:
+    """Just enough of a sheet for `_carry_results_team_colour_headers`."""
+
+    def __init__(self, headers):
+        self.headers = list(headers)
+        self.writes: list[tuple[str, str, list]] = []
+
+    def read_range(self, tab, a1):
+        return [list(self.headers)]
+
+    def update_range(self, tab, a1, rows):
+        self.writes.append((tab, a1, rows))
+        self.headers = list(rows[0])
+
+
+def test_a_simulated_week_new_carries_the_renamed_headers_onto_a_fresh_template_copy(monkeypatch):
+    from dfs import cli
+    from dfs.config import ResultsConfig
+
+    restyled = []
+    monkeypatch.setattr(
+        cli, "style_results", lambda client, tab, *, last_row: restyled.append((tab, last_row))
+    )
+    outgoing = _HeaderClient(SAMS_HEADERS)  # last week's sheet, names typed by Sam
+    fresh_copy = _HeaderClient(["Red", "Blue", "Black"])  # a new copy of the template
+
+    carried = cli._carry_results_team_colour_headers(outgoing, fresh_copy, ResultsConfig())
+
+    assert carried == SAMS_HEADERS
+    assert fresh_copy.headers == SAMS_HEADERS
+    assert fresh_copy.writes == [("Results", "H1:J1", [SAMS_HEADERS])]  # the team-colour header cells only
+    assert outgoing.writes == []  # the outgoing sheet is only ever read
+    assert restyled == [("Results", ResultsConfig().last_row)]  # widths re-applied for the longer names
+
+
+def test_a_simulated_week_new_leaves_a_sheet_that_already_has_the_names_alone(monkeypatch):
+    from dfs import cli
+    from dfs.config import ResultsConfig
+
+    monkeypatch.setattr(cli, "style_results", lambda *a, **k: pytest.fail("no restyle when nothing changed"))
+    fresh_copy = _HeaderClient(SAMS_HEADERS)
+    assert (
+        cli._carry_results_team_colour_headers(_HeaderClient(SAMS_HEADERS), fresh_copy, ResultsConfig())
+        is None
+    )
+    assert fresh_copy.writes == []
+
+
+def test_a_sheets_error_while_carrying_the_headers_is_a_warning_not_a_stop():
+    from dfs import cli
+    from dfs.config import ResultsConfig
+    from dfs.sheets import SheetsError
+
+    class Broken(_HeaderClient):
+        def read_range(self, tab, a1):
+            raise SheetsError("no such tab")
+
+    assert cli._carry_results_team_colour_headers(Broken([]), _HeaderClient([]), ResultsConfig()) is None

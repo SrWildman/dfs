@@ -21,7 +21,7 @@ This is what most weeks look like. Everything below it is reference.
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
 | 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. |
 | 4 | Lineups are built | `dfs export -o lineups.csv` | Validates your lineups and writes DraftKings' bulk-upload CSV. |
-| 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable. |
+| 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close --csv history.csv` | Reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
 
 Not sure what to run next? Run `dfs` on its own: it shows where you are in the week and the two or three commands that make sense right now.
@@ -98,11 +98,13 @@ Validate paired lineups in the lineups tab and export DK's upload CSV.
 
 ### `dfs lineups late-swap`
 
-Check every built lineup in the Lineups tab against real kickoff times: which of your rostered players have already locked and which haven't, plus who's still available at each open slot right now.
+Check every built lineup in the Lineups tab against real kickoff times, then suggest what to swap: the best full re-fill of the open slots, the best 2-for-2 swaps and the best 1-for-1 swaps -- all within the $50,000 cap (locked players' salaries included), the roster slots (FLEX takes an RB, WR or TE), no DST against your own QB and at most one RB per game. Locked players never move.
 
 | Option | What it does |
 |---|---|
-| `--top / -n INT` | Number of swap candidates to show per open slot. Default: `3`. |
+| `--top / -n INT` | How many swaps to show per kind (and per open slot for 1-for-1 swaps). Default: `3`. |
+| `--metric CHOICE` | What to rank swaps by: ProjPts (default) or AggPts. Default: `ProjPts`. |
+| `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
 
 ### `dfs week close`
 
@@ -442,5 +444,5 @@ What `dfs sync --only NAME[,NAME]` takes. A plain `dfs sync` runs all of them in
 | `sos_te` | `SoSTE` | - | One instance per position -- `position` set at construction rather than five near-identical hardcoded subclasses, same reasoning as `EntryTableConfig` covering both Bankroll buckets from one shape. |
 | `sos_dst` | `SoSDef` | - | One instance per position -- `position` set at construction rather than five near-identical hardcoded subclasses, same reasoning as `EntryTableConfig` covering both Bankroll buckets from one shape. |
 | `nflverse_games` | `GamesRaw` | - | Per-game context (stadium, roof, surface, rest days, closing lines) from nflverse's free, unauthenticated `games.csv`. |
-| `weather` | `WeatherRaw` | yes | Wind/precipitation/temperature for this week's outdoor games, from Open-Meteo -- free, no API key at all (unlike WeatherAPI.com, which docs/planning/HANDOFF.md originally suggested). |
+| `weather` | `WeatherRaw` | yes | Wind/precipitation/temperature for this week's outdoor games, from Open-Meteo -- free, no API key at all (unlike WeatherAPI.com, which docs/planning/archive/HANDOFF.md originally suggested). |
 | `edge` | `EdgeRaw` | yes | Derived edge-layer signals (Leverage, CeilVal, GameEnv, ImpliedMove/TotMove/ SpdMove, Avail, Flag) computed locally from already-synced sources -- no network call of its own. |

@@ -515,6 +515,15 @@ for the exact formulas. `Exposure`'s own header row (K1:P1) carries the
 portfolio-level counterpart: `Distinct QBs`, `Shared QB?` (Yes/No), and
 `Distinct games`, across the whole lineup build rather than one lineup.
 
+**Colours on Lineups' Name / Pos. / Team cells.** Plain white (the pale-yellow "you type here" fill on Name and
+the per-position tint on Pos. were dropped on this tab only; every other tab keeps them) unless the lineup has a
+correlation, which `sheet_lineup_tints.py` shows with a soft tint: **blue** = your QB, every player on his team
+and that team's DST (the stack); **amber** = non-DST players on the QB's opponent (bring-back); **lavender** = 2+
+non-DST players from any other game, or a DST together with its own team's players (a team that wins comfortably
+feeds its RB and its defense). A DST that faces one of your players (including your own QB) is a negative
+correlation and is never tinted. The three rules cannot overlap (`sheet_lineup_tints`' module docstring says why),
+and a red guardrail or typo-guard warning still wins over a tint.
+
 `Lineups`' real header sits at row 1. It didn't always -- a "pool deck"
 (frozen rows above the header holding a sortable/filterable window into
 Player Pool) occupied that space from 2026-09-06 to 2026-09-16, resized
@@ -809,14 +818,16 @@ rows, and bump `[bankroll.gpp].last_row` in `config.toml` to match.
 
 ### Results
 
-A season-level results log (Week, Cash Pts/Line, H2H Entered/Win, Red/
-Blue/Black), one row per week -- unlike every other tab here, this one is
+A season-level results log (Week, Cash Pts/Line, H2H Entered/Win, then three
+team-colour columns H:J -- the template calls them Red/Blue/Black, Sam renames them to the colours he really plays),
+one row per week -- unlike every other tab here, this one is
 **not** reset by a new weekly sheet copy. Each row's `Cash Results`
 (column D) and `H2H %` (column G) are formulas already built in
 (`=IF(B, B>C, "")` / `=IF(E="","",IFERROR(F/E,""))` -- blank, not `#DIV/0!`, on a week with no
 H2H entries); every other column is typed by hand. `dfs
 week new` copies the typed-value columns from the outgoing sheet to the
-new one (config.toml's `[results]` table controls the row range) so this
+new one (config.toml's `[results]` table controls the row range) -- and the team-colour columns' header names
+too (`dfs.week.carry_team_colour_headers`; no other Results header is touched) -- so this
 log keeps accumulating across weekly copies instead of resetting to empty
 every week -- see `dfs.week.extract_results_value_columns` and `dfs week
 new`'s own docstring for exactly which columns are carried and which

@@ -85,7 +85,7 @@ dfs sync                          # 2. re-run any time as lines/injuries/weather
 # 3. research, tick your pool and build lineups in the sheet (see WORKFLOW.md)
 dfs export -o lineups.csv         # 4. validate + export DK's bulk-upload format
 dfs sync --live                   # 5. gameday: fast-moving sources only, prints what changed
-dfs lineups late-swap             #    ...and who is still swappable before each kickoff
+dfs lineups late-swap             #    ...and what to swap them for (best re-fill, 2-for-2, 1-for-1)
 dfs week close --csv history.csv  # 6. after the games: reconcile Cash/GPP into Bankroll AND score the
                                   #    week's projections into the Model Check tab
 ```
@@ -112,7 +112,7 @@ are listed here so they are findable, not because you need to read them. Run `df
 | `dfs week new "<url>"` | starting a new week: it checks the new sheet, carries your bankroll and Results forward, and runs a full sync. |
 | `dfs sync` [`--live`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed. |
 | `dfs export -o <file>` | your lineups are built and paired to DK entries, ready to upload. |
-| `dfs lineups late-swap` | checking which rostered players are still swappable before each kickoff window. |
+| `dfs lineups late-swap` | gameday: which rostered players are still swappable, and the best swaps for them within the salary cap (`--metric AggPts`, `--all-players`). |
 | `dfs week close --csv <file>` | the week is over: reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into `Model Check`. |
 
 Also handy most weeks:

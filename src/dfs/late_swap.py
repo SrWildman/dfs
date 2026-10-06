@@ -2,7 +2,8 @@
 lineup's typed player names against EdgeRaw's current numbers and each
 player's real kickoff time (`GameStart`, added to EdgeRaw in Phase 5
 specifically for this), so a player whose game hasn't started yet shows up
-as swappable and one who's already locked doesn't.
+as swappable and one who's already locked doesn't. What to swap them FOR is
+`late_swap_search.py` (the search) and `late_swap_report.py` (the text).
 
 Slot order within one Lineups block follows `models.ROSTER_SLOTS` exactly.
 See `weekly_reset.py`'s `LINEUPS_NAME_BLOCKS` docstring for how a block's
@@ -20,7 +21,7 @@ from datetime import datetime
 import pandas as pd
 
 from dfs.kickoff import parse_kickoff
-from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS
+from dfs.models import ROSTER_SLOTS
 
 
 @dataclass
@@ -31,8 +32,10 @@ class SlotStatus:
     locked: bool | None  # None when GameStart is missing/unparseable
     position: str | None = None
     team: str | None = None
+    salary: float | None = None
     proj_pts: float | None = None
-    leverage: float | None = None
+    agg_pts: float | None = None
+    avail: str | None = None
     flag: str | None = None
 
 
@@ -73,8 +76,10 @@ def lineup_slot_status(names: list[str], edge: pd.DataFrame, *, now: datetime) -
                 locked=locked,
                 position=row.get("Position"),
                 team=row.get("Team"),
+                salary=row.get("Salary"),
                 proj_pts=row.get("ProjPts"),
-                leverage=row.get("Leverage"),
+                agg_pts=row.get("AggPts"),
+                avail=(str(row.get("Avail")) if pd.notna(row.get("Avail")) and row.get("Avail") else None),
                 # Part 7.9: "Flags" is every matching condition -- "Flag"
                 # (singular) is hidden, top-priority-only, not useful here.
                 # A player with no flags is NaN in the saved CSV, and NaN is truthy: `or None` let the float
@@ -83,22 +88,3 @@ def lineup_slot_status(names: list[str], edge: pd.DataFrame, *, now: datetime) -
             )
         )
     return statuses
-
-
-def swap_candidates(
-    edge: pd.DataFrame, slot: str, exclude_names: set[str], *, now: datetime, top: int = 5
-) -> pd.DataFrame:
-    """Players eligible for `slot` (FLEX allows RB/WR/TE) whose game hasn't
-    started yet, excluding anyone already rostered in this lineup, ranked
-    by Leverage descending -- worth a look for a late swap into this slot.
-    A player with no parseable `GameStart` is treated as NOT eligible
-    (excluded, not included) -- better to under-suggest than to recommend
-    a swap into a player whose lock status can't actually be confirmed."""
-    eligible_positions = {p.value for p in FLEX_ELIGIBLE} if slot == "FLEX" else {slot}
-    pool = edge[edge["Position"].isin(eligible_positions) & ~edge["Name"].isin(exclude_names)].copy()
-
-    game_starts = pool["GameStart"].apply(_parse_game_start)
-    still_open = game_starts.notna() & (game_starts > now)
-    pool = pool[still_open]
-
-    return pool.sort_values("Leverage", ascending=False, na_position="last").head(top).reset_index(drop=True)

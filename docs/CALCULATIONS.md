@@ -1374,14 +1374,28 @@ lineup mid-week is a normal thing to do, not an error. A matched player
 with no parseable `GameStart` also comes back `locked=None` (unknown, not
 assumed either way).
 
-**Swap candidates** (`swap_candidates`): for a given slot (`FLEX` accepts
-RB/WR/TE; every other slot accepts only its own position), filters
-`EdgeRaw` to players at an eligible position who are **not** already
-rostered in this lineup and whose `GameStart` is both present and still
-in the future, then sorts by `Leverage` descending and returns the top N.
-A player with a missing/unparseable `GameStart` is **excluded**, not
-included -- better to under-suggest than recommend a swap into a player
-whose lock status can't actually be confirmed.
+**Swap suggestions** (`late_swap_search.py`, text by `late_swap_report.py`): the open slots of a lineup are
+those whose player is found and not yet kicked off, plus any empty slot or name EdgeRaw cannot find; every other
+slot is locked and never moves (a player whose kickoff cannot be read counts as locked). The pool of players who
+can come in is: kickoff parseable and in the future, `Avail` not `OUT`/`IR` (`Q` stays, shown beside the name), and
+in Sam's Player Pool -- or, with `--all-players`, also in the rosterable pool (`derived._rosterable_pool_mask`,
+the top 32 QB / 64 RB / 96 WR / 32 TE / 32 DST by ProjPts). The ranking metric is `ProjPts` (`--metric AggPts`);
+never Leverage.
+
+Constraints, applied to the whole lineup: total salary <= `lineups.salary_cap` counting the locked players;
+QB/RB/RB/WR/WR/WR/TE/FLEX/DST with FLEX taking an RB, WR or TE; no player twice; no DST whose opponent is your
+QB's team (same as the `DST/QB` guardrail); at most one RB per game, a FLEX RB included (same as `RB/GAME`). A
+pair of players who are both already in the lineup and untouched is not re-judged (that is the `Issues` column's
+job).
+
+Three searches, each showing only improvements: **(a) best full re-fill** -- the best combination for all open
+slots at once (exact branch-and-bound; every branch is cut with a Lagrangian bound on the salary cap, no solver
+library; under 2 s at nine open slots over the full rosterable pool, pinned by a test); **(b) best 2-for-2** -- the
+top 3 swaps that change exactly two open slots (two swaps that differ only in which of two interchangeable slots
+a player takes count once); **(c) best 1-for-1** -- the top 3 per open slot. Each carries a correlation note when it
+adds or breaks the QB stack (his non-DST teammates and his team's DST), the bring-back (non-DST players on his
+opponent) or a DST/same-team pair (a DST on neither the QB's team nor his opponent, with its own team's players) --
+the same groups the Lineups tints show.
 
 ## Betting ledger (`sheet_bankroll_view.py`, Round 5 item 7, 2026-09-28)
 

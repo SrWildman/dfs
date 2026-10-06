@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
-from dfs.late_swap import lineup_slot_status, swap_candidates
+from dfs.late_swap import lineup_slot_status
+from dfs.late_swap_search import swap_pool
 from dfs.models import ROSTER_SLOTS
 
 # 18:00 UTC = 2:00 pm ET: the Sunday 1 pm ET games are underway. NOTE: TFFB's `GameStart` is Eastern
@@ -86,48 +87,60 @@ def test_lineup_slot_status_wrong_length_raises():
         lineup_slot_status(["only one name"], pd.DataFrame(), now=NOW)
 
 
-def test_swap_candidates_excludes_locked_players():
-    edge = _edge(
-        _edge_row("Locked RB", "RB", "BUF", "2026-09-14T13:00:00Z", leverage=50.0),
-        _edge_row("Open RB", "RB", "KC", "2026-09-14T20:20:00Z", leverage=20.0),
-    )
-    candidates = swap_candidates(edge, "RB", exclude_names=set(), now=NOW)
-    assert list(candidates["Name"]) == ["Open RB"]
+def _row(name, position, team, game_start, **extra):
+    return {
+        **_edge_row(name, position, team, game_start),
+        "Salary": 5000,
+        "AggPts": 14.0,
+        "Opp": "ZZZ",
+        "GameID": f"g_{team}",
+        "Avail": "",
+        **extra,
+    }
 
 
-def test_swap_candidates_excludes_unknown_lock_status():
-    edge = _edge(_edge_row("Mystery RB", "RB", "KC", ""))
-    candidates = swap_candidates(edge, "RB", exclude_names=set(), now=NOW)
-    assert candidates.empty
+def _pool(rows, **kwargs):
+    kwargs.setdefault("now", NOW)
+    kwargs.setdefault("pool_names", {r["Name"] for r in rows})
+    return {p.name for p in swap_pool(_edge(*rows), **kwargs)}
 
 
-def test_swap_candidates_excludes_already_rostered_players():
-    edge = _edge(
-        _edge_row("Open RB One", "RB", "KC", "2026-09-14T20:20:00Z", leverage=20.0),
-        _edge_row("Open RB Two", "RB", "SF", "2026-09-14T20:20:00Z", leverage=15.0),
-    )
-    candidates = swap_candidates(edge, "RB", exclude_names={"Open RB One"}, now=NOW)
-    assert list(candidates["Name"]) == ["Open RB Two"]
+def test_swap_pool_excludes_locked_players():
+    rows = [
+        _row("Locked RB", "RB", "BUF", "2026-09-14T13:00:00Z"),
+        _row("Open RB", "RB", "KC", "2026-09-14T20:20:00Z"),
+    ]
+    assert _pool(rows) == {"Open RB"}
 
 
-def test_swap_candidates_flex_allows_rb_wr_te_only():
-    edge = _edge(
-        _edge_row("Flex RB", "RB", "KC", "2026-09-14T20:20:00Z", leverage=10.0),
-        _edge_row("Flex WR", "WR", "SF", "2026-09-14T20:20:00Z", leverage=20.0),
-        _edge_row("Flex TE", "TE", "DAL", "2026-09-14T20:20:00Z", leverage=5.0),
-        _edge_row("Flex QB", "QB", "BUF", "2026-09-14T20:20:00Z", leverage=99.0),
-        _edge_row("Flex DST", "DST", "NYJ", "2026-09-14T20:20:00Z", leverage=99.0),
-    )
-    candidates = swap_candidates(edge, "FLEX", exclude_names=set(), now=NOW)
-    assert set(candidates["Name"]) == {"Flex RB", "Flex WR", "Flex TE"}
+def test_swap_pool_excludes_unknown_lock_status():
+    assert _pool([_row("Mystery RB", "RB", "KC", "")]) == set()
 
 
-def test_swap_candidates_sorted_by_leverage_descending_and_capped_at_top():
-    edge = _edge(
-        *[_edge_row(f"RB {i}", "RB", "KC", "2026-09-14T20:20:00Z", leverage=float(i)) for i in range(10)]
-    )
-    candidates = swap_candidates(edge, "RB", exclude_names=set(), now=NOW, top=3)
-    assert list(candidates["Name"]) == ["RB 9", "RB 8", "RB 7"]
+def test_swap_pool_defaults_to_the_players_pool_only():
+    rows = [
+        _row("In Pool", "RB", "KC", "2026-09-14T20:20:00Z"),
+        _row("Not In Pool", "RB", "SF", "2026-09-14T20:20:00Z"),
+    ]
+    assert _pool(rows, pool_names={"In Pool"}) == {"In Pool"}
+    assert _pool(rows, pool_names=set()) == set()
+
+
+def test_swap_pool_all_players_adds_the_rosterable_pool():
+    # With 3 RBs the rosterable pool (top 64 RBs) is all of them, so --all-players brings in a player who is
+    # not in the Player Pool.
+    rows = [_row(f"RB {i}", "RB", "KC", "2026-09-14T20:20:00Z", ProjPts=10.0 + i) for i in range(3)]
+    assert _pool(rows, pool_names={"RB 0"}, all_players=True) == {"RB 0", "RB 1", "RB 2"}
+
+
+def test_swap_pool_leaves_out_players_who_are_not_playing():
+    rows = [
+        _row("Healthy", "WR", "KC", "2026-09-14T20:20:00Z"),
+        _row("Out WR", "WR", "SF", "2026-09-14T20:20:00Z", Avail="OUT"),
+        _row("IR WR", "WR", "DAL", "2026-09-14T20:20:00Z", Avail="IR"),
+        _row("Questionable WR", "WR", "NYJ", "2026-09-14T20:20:00Z", Avail="Q"),
+    ]
+    assert _pool(rows) == {"Healthy", "Questionable WR"}  # Q stays: it is a coin flip, and Avail is shown
 
 
 # ---------------------------------------------------------------------------------------------
@@ -167,22 +180,20 @@ def test_after_the_november_clock_change_the_offset_is_five_hours():
     assert _qb_status(one_pm, _at(12, 6, 18, 0)) is True
 
 
-def test_swap_candidates_include_a_player_whose_game_starts_within_the_next_four_hours():
+def test_swap_pool_includes_a_player_whose_game_starts_within_the_next_four_hours():
     now = _at(9, 14, 17, 30)  # 1:30 pm ET: the 1 pm games are on, the 4:25 pm game is not
-    edge = _edge(
-        _edge_row("On Field RB", "RB", "AAA", "2026-09-14T13:00:00Z", leverage=50),
-        _edge_row("Late RB", "RB", "BBB", "2026-09-14T16:25:00Z", leverage=20),
-        _edge_row("Night RB", "RB", "CCC", "2026-09-14T20:20:00Z", leverage=10),
-    )
-    got = swap_candidates(edge, "RB", set(), now=now)
-    assert list(got["Name"]) == ["Late RB", "Night RB"]  # the 4:25 pm player used to vanish from this list
+    rows = [
+        _row("On Field RB", "RB", "AAA", "2026-09-14T13:00:00Z"),
+        _row("Late RB", "RB", "BBB", "2026-09-14T16:25:00Z"),
+        _row("Night RB", "RB", "CCC", "2026-09-14T20:20:00Z"),
+    ]
+    assert _pool(rows, now=now) == {"Late RB", "Night RB"}  # the 4:25 pm player used to vanish from this list
 
 
 def test_a_blank_or_garbage_game_start_is_still_not_eligible_and_status_unknown():
     assert _qb_status("", NOW) is None
     assert _qb_status("not a time", NOW) is None
-    edge = _edge(_edge_row("No Time", "RB", "AAA", ""))
-    assert swap_candidates(edge, "RB", set(), now=NOW).empty
+    assert _pool([_row("No Time", "RB", "AAA", "")]) == set()
 
 
 def test_a_player_with_no_flags_gets_no_flag_not_a_nan():

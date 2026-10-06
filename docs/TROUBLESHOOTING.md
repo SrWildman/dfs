@@ -238,6 +238,15 @@ Fix: nothing to fix; it fills in as weeks are scored. `dfs results update --all`
 
 ---
 
+**`dfs lineups late-swap` says my Player Pool is empty / suggests nothing.**
+Cause: swap candidates come from your Player Pool (the names on that tab), and nothing has been ticked there yet --
+or everyone in it has already kicked off, or is OUT/IR.
+Fix: tick players into your pool on EdgeRaw, or run `dfs lineups late-swap --all-players` to search the whole
+rosterable pool. "Nothing beats this lineup" is a real answer: every swap that fits the cap and the rules scores
+less than what you have.
+
+---
+
 **`dfs lineups late-swap` calls a player locked before his game has started.**
 Cause: fixed 2026-10-02. TFFB's `GameStart` is Eastern wall-clock time labelled "Z"; it used to be read as UTC, which
 made every kickoff look four hours (five after the November clock change) early.

@@ -17,6 +17,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 import pandas as pd
@@ -33,10 +34,17 @@ from dfs.bankroll import (
     parse_contest_history,
     sync_bucket,
 )
-from dfs.config import Config, ConfigError, load_config
+from dfs.config import Config, ConfigError, ResultsConfig, load_config
 from dfs.doctor import run_doctor
 from dfs.kickoff import games_state
-from dfs.late_swap import lineup_slot_status, swap_candidates
+from dfs.late_swap import lineup_slot_status
+from dfs.late_swap_report import format_suggestions
+from dfs.late_swap_search import (
+    METRICS,
+    lineup_state,
+    suggest,
+    swap_pool,
+)
 from dfs.launcher import (
     MENU_SECTIONS,
     MORE_LABELS,
@@ -111,9 +119,10 @@ from dfs.sheet_style import (
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
-    polish_lineups_input_column,
+    polish_lineups_identity_cells,
     polish_lineups_pct_of_cap,
     polish_lineups_totals_rows,
+    style_results,
     style_tier23_tabs,
     style_view_tabs,
 )
@@ -126,11 +135,13 @@ from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
 from dfs.week import (
     BANKROLL_CARRYOVER_CELLS,
+    RESULTS_TEAM_COLOUR_RANGE,
     extract_results_value_columns,
     parse_sheet_id_from_url,
     parse_week_from_title,
     resolve_week_title,
     rewrite_sheet_id,
+    team_colour_headers_to_write,
 )
 from dfs.weekly_reset import (
     LINEUPS_NAME_BLOCKS,
@@ -1128,6 +1139,7 @@ def sheets_polish(
                 header_repeats_at=header_repeats_at,
                 band_blocks=LINEUPS_NAME_BLOCKS,
                 color_scale_groups=LINEUPS_NAME_BLOCKS,
+                position_tint=False,  # identity cells are plain white; see polish_lineups_identity_cells
             )
         )
         # Correlation tints go in BEFORE the guardrails: rules added later
@@ -1166,7 +1178,14 @@ def sheets_polish(
                 name_blocks=LINEUPS_NAME_BLOCKS,
             )
         )
-        results.append(polish_lineups_input_column(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
+        results.append(
+            polish_lineups_identity_cells(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
         results.append(add_lineups_typo_guard(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS))
         results.append(
             polish_lineups_totals_rows(
@@ -2479,41 +2498,78 @@ def _sheet_cell(rows: list[list[str]], index: int) -> str:
     return row[0] if row else ""
 
 
-@lineups_app.command("late-swap")
-def lineups_late_swap(
-    top: int = typer.Option(3, "--top", "-n", help="Number of swap candidates to show per open slot."),
+class SwapMetric(StrEnum):
+    """What `dfs lineups late-swap` ranks by (`late_swap_search.METRICS`); never Leverage."""
+
+    ProjPts = "ProjPts"
+    AggPts = "AggPts"
+
+
+assert tuple(m.value for m in SwapMetric) == METRICS  # one list of metrics, spelled once in the search module
+
+# Per lineup, how long the full re-fill may search before it reports the best it has (it takes well under a
+# second at nine open slots, so this only ever guards against a freak input).
+LATE_SWAP_TIME_LIMIT_SECONDS = 10.0
+
+
+def _read_player_pool_names(client: SheetsClient, player_pool_tab: str) -> set[str]:
+    """Every name currently in Player Pool's position blocks (the sheet's own computed pool: ticks, the add
+    control and the hidden `Added` list), found under the header called `Name`, never at a fixed letter."""
+    header = client.read_range(player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}")
+    header = header[0] if header else []
+    if "Name" not in header:
+        return set()
+    letter = column_letter(header.index("Name"))
+    first = PLAYER_POOL_NAME_BLOCKS[0][0]
+    last = PLAYER_POOL_NAME_BLOCKS[-1][1]
+    rows = client.read_range(player_pool_tab, f"{letter}{first}:{letter}{last}")
+    names = set()
+    for start, end in PLAYER_POOL_NAME_BLOCKS:
+        for row in rows[start - first : end - first + 1]:
+            if row and row[0].strip():
+                names.add(row[0].strip())
+    return names
+
+
+def _run_late_swap(
+    cfg: Config,
+    *,
+    top: int,
+    metric: str,
+    all_players: bool,
+    now: datetime,
+    client: SheetsClient | None = None,
 ) -> None:
-    """Check every built lineup in the Lineups tab against real kickoff
-    times: which of your rostered players have already locked and which
-    haven't, plus who's still available at each open slot right now.
-
-    Reads EdgeRaw locally (`store.load_current`) and the Lineups tab's
-    typed Name column -- no Sheets write, so nothing here needs
-    confirmation. Run `dfs sync --live` first for the freshest picture;
-    this command itself doesn't re-sync anything.
-    """
-    cfg = _load_config_or_exit()
-
+    """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
+    point in the slate; the command passes the real clock."""
     try:
         edge = store.load_current("edge")
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from e
 
-    client = SheetsClient(cfg.google_sheets)
+    client = client or SheetsClient(cfg.google_sheets)
     try:
         title, url = client.describe()
         last_row = LINEUPS_NAME_BLOCKS[-1][1]
         raw = client.read_range(cfg.lineups.builder_tab, f"A2:A{last_row}")
+        pool_names = _read_player_pool_names(client, cfg.lineups.player_pool_tab)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
 
     console.print(f"Checking lineups in: [bold]{title}[/bold]\n{url}\n")
+    pool = swap_pool(edge, now=now, metric=metric, pool_names=pool_names, all_players=all_players)
+    scope = "your Player Pool plus the rosterable pool" if all_players else "your Player Pool"
+    console.print(f"Swap candidates: {len(pool)} player(s) from {scope} whose game has not started.")
+    if not pool_names and not all_players:
+        console.print(
+            "[yellow]Your Player Pool is empty, so there is nobody to swap in. Add players to it, or run "
+            "with --all-players to search the whole rosterable pool.[/yellow]"
+        )
+    console.print()
 
-    now = datetime.now(UTC)
     any_shown = False
-
     for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
         # Each block IS the 9 roster rows now (ROSTER_SLOTS order) --
         # the salary-total row directly below it is no longer part of the
@@ -2530,7 +2586,7 @@ def lineups_late_swap(
 
         any_shown = True
         table = Table(title=f"Lineup {lineup_number}")
-        for col in ("Slot", "Name", "Status", "ProjPts", "Leverage", "Flags"):
+        for col in ("Slot", "Name", "Status", "Salary", "ProjPts", "AggPts", "Avail", "Flags"):
             table.add_column(col)
         for s in statuses:
             if not s.found:
@@ -2543,26 +2599,86 @@ def lineups_late_swap(
                 s.slot,
                 s.name or "[dim](empty)[/dim]",
                 status,
+                f"${s.salary:,.0f}" if pd.notna(s.salary) else "-",
                 f"{s.proj_pts:.1f}" if pd.notna(s.proj_pts) else "-",
-                f"{s.leverage:.1f}" if pd.notna(s.leverage) else "-",
+                f"{s.agg_pts:.1f}" if pd.notna(s.agg_pts) else "-",
+                s.avail or "",
                 s.flag or "",
             )
         console.print(table)
 
-        rostered = {s.name for s in statuses if s.name}
-        for s in statuses:
-            if s.found and s.locked is not False:
-                continue  # only suggest swaps for a confirmed-open or empty slot
-            candidates = swap_candidates(edge, s.slot, rostered, now=now, top=top)
-            if candidates.empty:
-                continue
-            console.print(f"  Swap candidates for {s.slot} ({s.name or 'empty'}):")
-            for _, c in candidates.iterrows():
-                console.print(f"    {c['Name']} ({c['Team']}) -- Leverage {c['Leverage']:.1f}")
+        state = lineup_state(statuses, edge, cap=cfg.lineups.salary_cap, metric=metric)
+        suggestions = suggest(state, pool, top=top, time_limit=LATE_SWAP_TIME_LIMIT_SECONDS)
+        for line in format_suggestions(suggestions, metric=metric):
+            console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
 
     if not any_shown:
         console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
+
+
+@lineups_app.command("late-swap")
+def lineups_late_swap(
+    top: int = typer.Option(
+        3, "--top", "-n", help="How many swaps to show per kind (and per open slot for 1-for-1 swaps)."
+    ),
+    metric: SwapMetric = typer.Option(
+        SwapMetric.ProjPts, "--metric", help="What to rank swaps by: ProjPts (default) or AggPts."
+    ),
+    all_players: bool = typer.Option(
+        False,
+        "--all-players",
+        help="Also consider the whole rosterable pool, not only your Player Pool.",
+    ),
+) -> None:
+    """Check every built lineup in the Lineups tab against real kickoff
+    times, then suggest what to swap: the best full re-fill of the open
+    slots, the best 2-for-2 swaps and the best 1-for-1 swaps -- all within
+    the $50,000 cap (locked players' salaries included), the roster slots
+    (FLEX takes an RB, WR or TE), no DST against your own QB and at most one
+    RB per game. Locked players never move.
+
+    Ranked by ProjPts (or `--metric AggPts`), never Leverage. Candidates are
+    players in your Player Pool whose game has not started; `--all-players`
+    widens that to the rosterable pool. Only swaps that beat your current
+    lineup are listed. Reads EdgeRaw locally (`store.load_current`) and the
+    Lineups tab's typed Name column plus the Player Pool's names -- no
+    Sheets write, so nothing here needs confirmation. Run `dfs sync --live`
+    first for the freshest picture; this command itself doesn't re-sync
+    anything.
+    """
+    cfg = _load_config_or_exit()
+    _run_late_swap(cfg, top=top, metric=metric.value, all_players=all_players, now=datetime.now(UTC))
+
+
+def _carry_results_team_colour_headers(
+    old_client: SheetsClient, new_client: SheetsClient, results_cfg: ResultsConfig
+) -> list[str] | None:
+    """`dfs week new`: carry Sam's renamed Results team-colour headers (`week.RESULTS_TEAM_COLOUR_RANGE`)
+    from the outgoing sheet to the new one, so a fresh copy of the template doesn't bring `Red`/`Blue`/`Black`
+    back every week. Header cells of those columns only; every other Results header is left alone. Returns
+    the headers it wrote, or None when there was nothing to write. A failure is a warning, never a stop: the
+    rest of `week new` does not depend on these names."""
+    first, _, last = RESULTS_TEAM_COLOUR_RANGE.partition(":")
+    header_range = f"{first}{results_cfg.header_row}:{last}{results_cfg.header_row}"
+    try:
+        old_cells = old_client.read_range(results_cfg.tab, header_range)
+        new_cells = new_client.read_range(results_cfg.tab, header_range)
+        carried = team_colour_headers_to_write(
+            old_cells[0] if old_cells else [], new_cells[0] if new_cells else []
+        )
+        if carried is None:
+            return None
+        new_client.update_range(results_cfg.tab, header_range, [carried])
+        console.print(
+            f"[green]OK[/green] carried {results_cfg.tab!r} team-colour headers: {', '.join(carried)}"
+        )
+        # Column widths are set from the header text; re-apply them so a longer name is not cut off.
+        style_results(new_client, results_cfg.tab, last_row=results_cfg.last_row)
+        return carried
+    except SheetsError as e:
+        console.print(f"[yellow]Could not carry the {results_cfg.tab!r} team-colour headers: {e}[/yellow]")
+        return None
 
 
 @week_app.command("new", short_help="Point config.toml at a new weeks sheet copy and sync.")
@@ -2618,13 +2734,16 @@ def week_new(
 
     Carrying Results forward means copying every already-typed week's row
     (config.toml's `[results]` table -- Week, Cash Pts/Line, H2H Entered/
-    Win, Red/Blue/Black) from the current sheet to the new one, since
+    Win, the three team-colour columns) from the current sheet to the new one, since
     Results is a season-level log, not a per-week one -- a fresh weekly
     copy's own Results tab starts with the template's empty pre-built
     rows, and would otherwise lose the whole season's history on every
     `dfs week new`. The two formula columns already built into each row
     (Cash Results, H2H %) are never touched -- see
-    dfs.week.extract_results_value_columns. If the current sheet has no
+    dfs.week.extract_results_value_columns. The three team-colour columns'
+    HEADER cells (Sam renames them: `Red/Orange`, ...) are carried as well, by
+    `_carry_results_team_colour_headers`, so a fresh copy of the template does
+    not bring `Red`/`Blue`/`Black` back. If the current sheet has no
     Results tab at all (e.g. moving off a sheet that predates this), this
     step is skipped with a note instead of failing.
     """
@@ -2775,6 +2894,8 @@ def week_new(
         console.print(f"[red]Could not write {bankroll_tab!r} on the new sheet:[/red] {e}")
         raise typer.Exit(code=1) from e
     console.print(f"[green]OK[/green] carried bankroll forward into {bankroll_tab!r}")
+
+    _carry_results_team_colour_headers(old_client, new_client, results_cfg)
 
     if results_rows:
         try:

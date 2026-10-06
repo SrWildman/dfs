@@ -34,12 +34,14 @@ function happens to touch it first.
 - Dark header (`_HEADER_FMT`, #20262F/white/bold) means "this row is a
   table header." Nothing else in the workbook uses this fill.
 - Pale yellow (`INPUT_BG`, #FFFDF5) means "you type here" -- and is the
-  ONLY thing that means that. Exactly five places carry it: EdgeRaw's Pool
+  ONLY thing that means that, with ONE exception: Lineups' Name column is
+  typed but plain white, so the correlation tints read against one backdrop
+  (`polish_lineups_identity_cells`). Pale yellow marks EdgeRaw's Pool
   column, Player Pool's own add-a-player control cell
-  (`sheet_pool_control.ensure_pool_control_row`), Lineups' block column A
-  (`polish_lineups_input_column`), Exposure's Target column, and the pool
-  deck's B1/D1/F1 controls (`polish_pool_deck`). Everywhere else is a
-  formula; if it isn't pale yellow, don't type into it.
+  (`sheet_pool_control.ensure_pool_control_row`), Exposure's Target column,
+  and the pool deck's B1/D1/F1 controls (`polish_pool_deck`). Everywhere
+  else is a formula; if it isn't pale yellow (or Lineups' Name column),
+  don't type into it.
 - Red -> yellow -> green (`GRAD_MIN`/`GRAD_MID`/`GRAD_MAX`, via
   `add_color_scale`) means "more is better," for the decision numbers
   named in `FIELD_COLOR_SCALES`/`FIELD_FORMATS`. Reversed (max color at the
@@ -1343,6 +1345,7 @@ def polish_builder_tab(
     header_repeats_at: list[int] | None = None,
     band_blocks: list[tuple[int, int]] | None = None,
     color_scale_groups: list[tuple[int, int]] | None = None,
+    position_tint: bool = True,
 ) -> str:
     """Number formats, widths, header treatment, colour scales, chips and
     row banding on a tab whose header row names its columns -- the same
@@ -1394,6 +1397,10 @@ def polish_builder_tab(
     Name bolded when Flag is set -- via the same shared helpers
     `polish_edge` itself calls (see the module-level comment just above
     `polish_edge`), so the two never drift into two different policies.
+
+    `position_tint=False` (Lineups only, Week 5) leaves the `Pos.` column without its per-position tint:
+    Lineups' identity cells are plain white so the correlation tints (`sheet_lineup_tints`) read against
+    one backdrop -- see `polish_lineups_identity_cells`. Every other tab keeps the tint.
 
     Part 7.9: also hides `Id`/`Flag` outright by name, same as
     `polish_edge` already did for EdgeRaw's own `Id` -- neither was ever
@@ -1510,7 +1517,10 @@ def polish_builder_tab(
     # unpooled rows to distinguish the way EdgeRaw does (see
     # `_apply_name_flag_style`'s own docstring).
     _apply_wind_chip(client, tab, header, data_start=data_start, last_row=last_row)
-    _apply_position_tint(client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row)
+    if position_tint:
+        _apply_position_tint(
+            client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row
+        )
     _apply_pool_tag_tint(client, tab, header, column_name="Pool", data_start=data_start, last_row=last_row)
     _apply_own_status_marker(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_edge_link_style(client, tab, header, data_start=data_start, last_row=last_row)
@@ -1728,19 +1738,32 @@ def _totals_check_formula(
     )
 
 
-def polish_lineups_input_column(client: SheetsClient, tab: str, name_blocks: list[tuple[int, int]]) -> str:
-    """Column A within each lineup block is one of the four places in the
-    whole workbook you type into by hand -- give it the shared "you type
-    here" cue (see the visual-grammar docstring below), same treatment as
-    EdgeRaw's Pool column and Exposure's Target column. Player Pool's own
-    column A must NEVER get this: it looks identical (a plain Name column)
-    but is fully computed, not typed -- see `polish_builder_tab`, which is
-    what actually styles Player Pool, and does not call this."""
+LINEUPS_IDENTITY_COLUMNS = ("Name", "Pos.", "Team")
+
+
+def polish_lineups_identity_cells(
+    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+) -> str:
+    """Week 5: Lineups' identity cells (Name, Pos., Team) are PLAIN WHITE in every lineup block, so a
+    correlation tint (`sheet_lineup_tints`: blue stack, amber bring-back, lavender other) is the only
+    colour there and reads at a glance. Column A of a block is still where you type a player, but it no
+    longer carries the pale-yellow "you type here" fill -- the yellow sat too close to the amber
+    bring-back tint to tell apart -- and `Pos.` no longer has its per-position tint
+    (`polish_builder_tab(position_tint=False)`). Every other tab keeps both.
+
+    A static white fill is a layer below the conditional tint rules and below the guardrail / typo-guard
+    warnings, so a tint or a red warning still wins over it. Columns are found by header text."""
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = header_rows[0] if header_rows else []
+    letters = [column_letter(header.index(n)) for n in LINEUPS_IDENTITY_COLUMNS if n in header]
+    if not letters:
+        return f"{tab}: Name/Pos./Team not found in the header -- identity cells left alone"
     for start, end in name_blocks:
-        client.format_range(tab, f"A{start}:A{end}", {"backgroundColor": INPUT_BG})
-    return f"{tab}: column A marked as input across {len(name_blocks)} lineup block(s)"
+        for letter in letters:
+            client.format_range(tab, f"{letter}{start}:{letter}{end}", {"backgroundColor": WHITE})
+    return f"{tab}: Name/Pos./Team plain white across {len(name_blocks)} lineup block(s)"
 
 
 def polish_lineups_totals_rows(
@@ -2362,6 +2385,9 @@ def apply_tab_chrome(client: SheetsClient, *, hide_staging: bool = True) -> list
 # update that doc's entry first and this text second, not the reverse.
 _SORT_SEARCH_HINT = "Click any header arrow to sort or search. Saved views: Data > Filter views."
 _SAVED_VIEW_HINT = "Sort/filter via Data > Filter views (this tab's own cells stay untouched)."
+# What a bold player name means (`_apply_name_flag_style`): the rule is "any flag at all", stated wherever
+# a bold name appears so nobody has to guess.
+BOLD_NAME_HINT = "Bold name = at least one flag; see Flags."
 
 TAB_NOTES: dict[str, str] = {
     # Fix 4 follow-up (Week 3 fixes, 2026-09-23): this note had the same
@@ -2381,7 +2407,8 @@ TAB_NOTES: dict[str, str] = {
     # blank/Cash/GPP/Both dropdown) were both stale.
     "EdgeRaw": (
         "EDGERAW -- every synced player this week, sorted by ValAdj. Set the Pool "
-        f"dropdown (blank/Cash/GPP/Both, far left) to add a player to your pool. {_SORT_SEARCH_HINT}"
+        f"dropdown (blank/Cash/GPP/Both, far left) to add a player to your pool. {BOLD_NAME_HINT} "
+        f"{_SORT_SEARCH_HINT}"
     ),
     "Slate Grid": (
         "SLATE GRID -- one row per game: total, spread, wind, divisional flag. Read-only, "
@@ -2392,14 +2419,14 @@ TAB_NOTES: dict[str, str] = {
         "(with a search box) to add a player directly, the same as ticking Pool on "
         "EdgeRaw. Everything below row 2 is computed. Edge ↗ jumps straight to that "
         "player on EdgeRaw (e.g. to remove them -- untick Pool there); Overflow (far "
-        "right) warns if a position has more picks than room."
+        f"right) warns if a position has more picks than room. {BOLD_NAME_HINT}"
     ),
     "Lineups": (
         "LINEUPS -- build your rosters here. One 9-player block per lineup (QB, RB, RB, "
         "WR, WR, WR, TE, FLEX, DST); type a player's name into column A of a block to "
         "fill a slot. Issues flags a duplicate, an unavailable player, or a salary/roster "
         "problem per lineup; Edge ↗ jumps straight to that player on EdgeRaw. "
-        f"{LINEUP_TINT_LEGEND}"
+        f"{LINEUP_TINT_LEGEND} {BOLD_NAME_HINT}"
     ),
     "DK Upload": (
         "DK UPLOAD -- `dfs export` writes DraftKings' bulk-upload file here. Read-only "
@@ -3220,7 +3247,7 @@ for _name in (
     "apply_edge_column_groups",
     "polish_edge",
     "polish_builder_tab",
-    "polish_lineups_input_column",
+    "polish_lineups_identity_cells",
     "polish_lineups_totals_rows",
     "polish_lineups_pct_of_cap",
     "fix_lineups_dst_slot_label",
