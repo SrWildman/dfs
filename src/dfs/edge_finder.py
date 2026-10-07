@@ -133,8 +133,7 @@ def _enrich(
 
     pool = _rosterable_pool_mask(pd.to_numeric(frame["ProjPts"], errors="coerce"), frame["Position"])
     df = dk_level_frame(frame, pool)
-    identity = signals.identity_frame(signals.season_weeks(data), data.injuries)
-    df, join = signals.attach_gsis(df, identity)
+    df, join = signals.attach_gsis(df, signals.identity_for(data, depth_cutoff(df, now)))
 
     um_ok = True
     try:

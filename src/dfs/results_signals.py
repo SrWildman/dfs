@@ -244,6 +244,19 @@ def signal_report(frame: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------------------------
 
 
+def _reference_iso(scored_week: pd.DataFrame) -> str | None:
+    """The week's reference moment as the depth chart's stamp (None when the rows carry none)."""
+    ref = (
+        scored_week["RefSnapshot"].dropna()
+        if "RefSnapshot" in scored_week.columns
+        else pd.Series(dtype=object)
+    )
+    if ref.empty:
+        return None
+    when = datetime.strptime(str(ref.iloc[0]), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    return signals_data.iso_of(when)
+
+
 def attach_um(
     scored_week: pd.DataFrame,
     data: signals.SeasonData,
@@ -256,7 +269,7 @@ def attach_um(
 ) -> pd.DataFrame:
     """`scored_week` with `UmPts` filled in: the UM model's mean for each player, from games before `week`
     only. The gsis id is attached with the project's one join when the row has none."""
-    identity = signals.identity_frame(signals.season_weeks(data), data.injuries)
+    identity = signals.identity_for(data, _reference_iso(scored_week))
     frame, _ = signals.attach_gsis(
         scored_week.assign(GsisId=scored_week["GsisId"].replace("", np.nan)), identity
     )

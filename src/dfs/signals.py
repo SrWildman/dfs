@@ -24,7 +24,7 @@ import pandas as pd
 from dfs import injury_beneficiaries as ib
 from dfs import matchups, probabilities, xfp
 from dfs.derived import OUT_STATUSES
-from dfs.player_join import JoinResult, join_source_to_dk, normalize_team
+from dfs.player_join import JoinResult, join_key, join_source_to_dk, normalize_team
 
 SIGNAL_COLUMNS = [
     "Id",
@@ -93,7 +93,7 @@ def _has(frame: pd.DataFrame | None) -> bool:
 
 
 def identity_frame(*sources: pd.DataFrame | None) -> pd.DataFrame:
-    """`GsisId`, `Name`, `Team`, `Position` of every player the given frames know (latest row first)."""
+    """`GsisId`, `Name`, `Team`, `Position` of every player the given frames know (first frame first)."""
     parts = [
         s[["GsisId", "Name", "Team", "Position"]]
         for s in sources
@@ -101,11 +101,21 @@ def identity_frame(*sources: pd.DataFrame | None) -> pd.DataFrame:
     ]
     if not parts:
         return pd.DataFrame(columns=["GsisId", "Name", "Team", "Position"])
-    return (
-        pd.concat(parts, ignore_index=True)
-        .dropna(subset=["GsisId"])
-        .drop_duplicates(subset="GsisId", keep="first")
-    )
+    # One row per join key (normalised name, team, position): the join assumes a key appears once, but a
+    # player the depth chart and ffopportunity spell differently ("Marvin Mims Jr." / "Marvin Mims") is
+    # still offered under both spellings, since they normalise to different keys only when they differ.
+    out = pd.concat(parts, ignore_index=True).dropna(subset=["GsisId"])
+    key = [join_key(n, t, p) for n, t, p in zip(out["Name"], out["Team"], out["Position"], strict=True)]
+    return out.assign(_k=key).drop_duplicates(subset="_k", keep="first").drop(columns="_k")
+
+
+def identity_for(data: SeasonData, depth_dt: str | None = None) -> pd.DataFrame:
+    """Every player the free files can name, for the gsis join: the depth chart at `depth_dt` first (it holds
+    each player's CURRENT team and covers players with no games yet), then this and last season's
+    ffopportunity players (newest game first), then the injury report."""
+    weeks = data.ffo_weeks if _has(data.ffo_weeks) else None
+    newest = weeks.sort_values(["season", "week"], ascending=False) if weeks is not None else None
+    return identity_frame(ib.latest_depth(data.depth, depth_dt), newest, data.injuries)
 
 
 def attach_gsis(frame: pd.DataFrame, identity: pd.DataFrame) -> tuple[pd.DataFrame, JoinResult | None]:
@@ -372,11 +382,11 @@ def build_signals(
     None takes the newest snapshot. Snapshots for "priced in" are `[(stamp, frame)]` as stored under
     `data/raw/`."""
     frame = frame.reset_index(drop=True)
-    identity = identity_frame(season_weeks(data), data.injuries)
+    identity = identity_for(data, depth_dt)
     frame, join = attach_gsis(frame, identity)
     coverage = {}
     if join is not None:
-        coverage["gsis (ffopportunity + injuries identity)"] = (join.pool_matched, join.pool_total)
+        coverage["gsis (depth chart + ffopportunity + injuries)"] = (join.pool_matched, join.pool_total)
 
     tokens = player_tokens(frame, data, week=week)
     outs = find_outs(frame, data, week=week)
