@@ -130,12 +130,22 @@ def latest_depth(depth: pd.DataFrame | None, cutoff: str | None) -> pd.DataFrame
     return depth[dts == eligible.max()]
 
 
-def depth_order(depth_rows: pd.DataFrame, team: str, position: str) -> list[str]:
-    """Gsis ids of `team`'s `position` players in depth-chart order (best `pos_rank` first, each once)."""
+def depth_order(
+    depth_rows: pd.DataFrame, team: str, position: str, tiebreak: pd.Series | None = None
+) -> list[str]:
+    """Gsis ids of `team`'s `position` players in depth-chart order: best `pos_rank` first, each once.
+
+    nflverse's chart lists a player once per formation group, and each group has its own rank 1, so two
+    players can share a `pos_rank` (found live: SEA's rank-1 RBs were both Wilson, the starter, and Russell,
+    a fullback). Ties are broken by `tiebreak` (current volume per game, indexed by gsis id; larger first),
+    then by id so the order is deterministic."""
     if depth_rows.empty:
         return []
     part = depth_rows[(depth_rows["Team"] == team) & (depth_rows["Position"] == position)]
-    ordered = part.sort_values("pos_rank").drop_duplicates(subset="GsisId", keep="first")
+    best = part.groupby("GsisId", as_index=False)["pos_rank"].min()
+    volume = pd.Series(0.0, index=best["GsisId"]) if tiebreak is None else tiebreak.reindex(best["GsisId"])
+    best["_volume"] = volume.fillna(0.0).to_numpy()
+    ordered = best.sort_values(["pos_rank", "_volume", "GsisId"], ascending=[True, False, True])
     return ordered["GsisId"].tolist()
 
 
@@ -350,7 +360,8 @@ def beneficiaries(
             method, n = METHOD_WITH_WITHOUT, n_missed
             gains = conserve(gains.reindex(mates.index).dropna(how="all").clip(lower=0.0), vacated)
         else:
-            order = {p: depth_order(depth_rows, team, p) for p in ("RB", "WR", "TE")}
+            volume = windows["tgt_g"].fillna(0.0) + windows["car_g"].fillna(0.0)
+            order = {p: depth_order(depth_rows, team, p, volume) for p in ("RB", "WR", "TE")}
             gains = depth_gains(position, vacated, mates, order)
             method, n = METHOD_DEPTH, 0
         for gsis_b, g in gains.iterrows():

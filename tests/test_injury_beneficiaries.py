@@ -288,3 +288,24 @@ def test_priced_in_logic():
     assert ib.priced_in(9.0, None, 4.0) == ib.PRICED_UNKNOWN  # no earlier snapshot
     assert ib.priced_in(np.nan, 8.0, 4.0) == ib.PRICED_UNKNOWN
     assert ib.priced_in(11.0, 8.0, 0.0) == ib.PRICED_UNKNOWN  # no positive gain to be priced against
+
+
+def test_two_players_sharing_a_pos_rank_are_ordered_by_current_volume():
+    # nflverse lists a player once per formation group, each with its own rank 1: the fullback and the starter
+    depth = pd.DataFrame(
+        [
+            {"dt": "2026-10-05T10:00:00Z", "Team": "SEA", "GsisId": g, "Position": "RB", "pos_rank": r}
+            for g, r in (("fb", 1), ("starter", 1), ("backup", 2), ("starter", 3))
+        ]
+    )
+    volume = pd.Series({"fb": 2.0, "starter": 20.0, "backup": 8.0})
+    assert ib.depth_order(depth, "SEA", "RB", volume) == [
+        "starter",
+        "fb",
+        "backup",
+    ]  # best rank per player, ties by volume
+    assert ib.depth_order(depth, "SEA", "RB") == [
+        "fb",
+        "starter",
+        "backup",
+    ]  # no volume: the id breaks the tie
