@@ -215,6 +215,7 @@ app.add_typer(results_app, name="results")
 app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
 app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model")
+app.add_typer(__import__("dfs.research.cli", fromlist=["research_app"]).research_app, name="research")
 
 console = Console()
 
