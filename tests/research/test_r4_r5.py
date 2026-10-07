@@ -83,22 +83,35 @@ def _sweep(fit_test_by_threshold):
     for t in r4.THRESHOLDS:
         d = fit_test_by_threshold.get(t, 0.0)
         cell = {"n_flagged": 100, "diff": d, "lo90": d - 0.4, "hi90": d + 0.4}
-        rows.append({"threshold_mph": t, "fit": cell, "test": cell, "all": cell})
+        # flagged rows shrink as the threshold rises: 1,500 at 10 mph down to 20 at 25 mph
+        pooled = {**cell, "n_flagged": {10: 1500, 12: 1000, 15: 500, 17: 250, 20: 100, 22: 60, 25: 20}[t]}
+        rows.append({"threshold_mph": t, "fit": cell, "test": cell, "all": pooled})
     return {"positions": {"QB": rows}}
 
 
-def test_threshold_recommendation_needs_both_periods():
+def test_threshold_recommendation_needs_both_periods_and_stays_selective():
     bins = _qb_bins({"15-19": -1.2})
-    out = r4.recommend_threshold(bins, _sweep({15: -1.3, 17: -1.4, 20: -1.5}))
+    out = r4.recommend_threshold(
+        bins, _sweep({10: -1.0, 12: -1.1, 15: -1.3, 17: -1.4, 20: -1.5}), qb_rows=4800
+    )
     assert out["first_bin_meeting_rule_all"] == "15-19"
-    assert out["qualifying_thresholds"] == [15, 17, 20] and out["recommended_mph"] == 15
-    # an effect that is not significant (interval includes 0) does not qualify
+    assert out["qualifying_thresholds"] == [10, 12, 15, 17, 20]
+    assert out["effect_begins_mph"] == 10
+    # 10 mph would flag 1,500 / 4,800 = 31% of QB games, 12 mph 21%; 15 mph is the first at <= 15%
+    assert out["recommended_mph"] == 15 and out["recommended_flag_share_of_qb_games"] == pytest.approx(
+        500 / 4800
+    )
+    # an effect whose interval includes zero in one period does not qualify
     sweep = _sweep({15: -1.3})
     sweep["positions"]["QB"][2]["fit"]["hi90"] = 0.2
-    assert r4.recommend_threshold(bins, sweep)["recommended_mph"] is None
+    assert r4.recommend_threshold(bins, sweep, qb_rows=4800)["recommended_mph"] is None
     # no effect anywhere
-    out = r4.recommend_threshold(_qb_bins({}), _sweep({}))
-    assert out["recommended_mph"] is None and out["first_bin_meeting_rule_all"] is None
+    out = r4.recommend_threshold(_qb_bins({}), _sweep({}), qb_rows=4800)
+    assert out["recommended_mph"] is None and out["effect_begins_mph"] is None
+    assert out["first_bin_meeting_rule_all"] is None
+    # nothing selective enough: fall back to the highest qualifying threshold
+    out = r4.recommend_threshold(bins, _sweep({10: -1.0, 12: -1.1}), qb_rows=4800)
+    assert out["recommended_mph"] == 12
 
 
 def test_ols_slope_and_clustered_stats():

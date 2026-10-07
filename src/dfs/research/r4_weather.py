@@ -290,14 +290,19 @@ def joint_model(f: pd.DataFrame) -> dict:
     return out
 
 
-def recommend_threshold(bins: list[dict], sweep: dict) -> dict:
+FLAG_SHARE_CAP = 0.15  # a "flag" should fire on at most this share of outdoor QB games to stay selective
+
+
+def recommend_threshold(bins: list[dict], sweep: dict, qb_rows: int) -> dict:
     """Two readings of "where does the wind effect become meaningfully negative for QBs":
 
     by bin        the first bin whose mean residual is `QB_RULE_POINTS` or worse with a 90% interval below
                   zero (all, fit and test seasons separately -- the top bins are thin).
-    cumulative    the lowest `wind >= t` flag whose QB effect is at least `QB_RULE_TOLERANCE` points negative
-                  with an interval below zero in BOTH the fit and the test seasons. `recommended_mph` is that
-                  t, or None if no flag qualifies; `qualifying_thresholds` lists every t that does."""
+    cumulative    every `wind >= t` flag whose QB effect is at least `QB_RULE_TOLERANCE` points negative with
+                  an interval below zero in BOTH the fit and the test seasons (`qualifying_thresholds`).
+                  `effect_begins_mph` is the lowest of them. `recommended_mph` is the lowest one that still
+                  fires on at most `FLAG_SHARE_CAP` of outdoor QB games (a flag on a third of games is not a
+                  flag), or the highest qualifying one if none is that selective; None if none qualifies."""
     qb = [r for r in bins if r["position"] == "QB"]
     out: dict = {}
     for name in ("all", "fit", "test"):
@@ -310,13 +315,22 @@ def recommend_threshold(bins: list[dict], sweep: dict) -> dict:
             None,
         )
         out[f"first_bin_meeting_rule_{name}"] = hit["bin"] if hit else None
+    rows = sweep["positions"]["QB"]
     qualifying = [
-        row["threshold_mph"]
-        for row in sweep["positions"]["QB"]
+        row
+        for row in rows
         if all(row[k]["diff"] <= -QB_RULE_TOLERANCE and row[k]["hi90"] < 0 for k in ("fit", "test"))
     ]
-    out["qualifying_thresholds"] = qualifying
-    out["recommended_mph"] = min(qualifying) if qualifying else None
+    out["qualifying_thresholds"] = [r["threshold_mph"] for r in qualifying]
+    out["effect_begins_mph"] = min(out["qualifying_thresholds"]) if qualifying else None
+    selective = [r for r in qualifying if r["all"]["n_flagged"] <= FLAG_SHARE_CAP * qb_rows]
+    pick = (
+        min(selective, key=lambda r: r["threshold_mph"])
+        if selective
+        else (qualifying[-1] if qualifying else None)
+    )
+    out["recommended_mph"] = pick["threshold_mph"] if pick else None
+    out["recommended_flag_share_of_qb_games"] = pick["all"]["n_flagged"] / qb_rows if pick else None
     return out
 
 
@@ -378,7 +392,7 @@ def run_study(base: pd.DataFrame, games: pd.DataFrame, pbp: pd.DataFrame) -> dic
                 f"QB mean residual <= {QB_RULE_POINTS} (cumulative: <= -{QB_RULE_TOLERANCE}, both periods) "
                 "with a 90% interval below 0"
             ),
-            **recommend_threshold(wind_bins, sweep),
+            **recommend_threshold(wind_bins, sweep, int((f["position"] == "QB").sum())),
         },
         "_frame_rows": int(len(f)),
     }

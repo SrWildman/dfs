@@ -184,3 +184,41 @@ def test_too_few_flagged_rows_is_never_chosen():
     tiny.iloc[:5] = True
     out = r3.sweep(f, [({"c": "tiny"}, tiny)], +1)
     assert out["chosen"] is None and out["recommendation"] == "drop"
+
+
+def _signal_frame(n=40000, seed=3) -> pd.DataFrame:
+    """A synthetic frame in `signal_frame`'s shape: only RBs carry a real carry-share signal (+2 points)."""
+    rng = np.random.default_rng(seed)
+    f = pd.DataFrame(
+        {
+            "season": rng.choice([2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025], n),
+            "position": rng.choice(["QB", "RB", "WR", "TE"], n),
+            "gsis_id": rng.integers(0, 1500, n),
+            "week": 1,
+            "gap_abs": rng.normal(0, 3, n),
+            "xfp_top_half": rng.random(n) < 0.5,
+            "td_excess_l3": rng.normal(0, 1, n),
+            "target_share_jump": rng.normal(0, 0.05, n),
+            "carry_share_jump": rng.normal(0, 0.08, n),
+            "rz_share_jump": rng.normal(0, 0.1, n),
+        }
+    )
+    f["gap_pct"] = f["gap_abs"] / 10
+    f["split"] = np.where(f["season"] < 2022, "fit", "test")
+    f["resid"] = rng.normal(0, 5, n)
+    rb_up = (f["position"] == "RB") & (f["carry_share_jump"] >= 0.10)
+    f.loc[rb_up, "resid"] += 2.0
+    f["resid_c"] = f["resid"] - f.groupby(["position", "season"])["resid"].transform("mean")
+    return f
+
+
+def test_a_usage_metric_is_judged_among_the_positions_it_applies_to():
+    signals = r3.run_study(_signal_frame())
+    res = signals["USAGE_up"]["per_metric"]["carry_share"]
+    assert set(res["by_position"]) == {"RB"}  # a carry-share jump is only ever flagged on RBs
+    # Against unflagged RBs the +2 shows in full; against every unflagged player it would be diluted.
+    assert res["test"]["diff"] == pytest.approx(2.0, abs=0.7)
+    assert res["recommendation"] == "keep"
+    # a metric with no real signal is dropped
+    assert signals["USAGE_up"]["per_metric"]["rz_share"]["recommendation"] == "drop"
+    assert signals["salary_lag"]["tested"] is False

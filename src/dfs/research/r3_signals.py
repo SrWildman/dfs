@@ -224,18 +224,21 @@ def run_study(f: pd.DataFrame) -> dict:
         "FADE_down": sweep(f, fade, -1),
         "FADE_down_gap_only": sweep(f, fade_gap, -1),
     }
-    chosen_usage: dict[str, dict] = {}
     for direction, name in ((+1, "up"), (-1, "down")):
         per_metric = {}
         for metric, grid in USAGE_GRID.items():
-            cands = [({"metric": metric, "threshold": t}, usage_flag(f, metric, t, name)) for t in grid]
-            per_metric[metric] = sweep(f, cands, direction)
-        chosen_usage[name] = per_metric
-        # The combined signal: any metric past ITS chosen threshold (and no metric past it the other way).
-        flags = []
-        for metric, res in per_metric.items():
-            if res["chosen"] is not None:
-                flags.append(usage_flag(f, metric, res["chosen"]["threshold"], name))
+            # Each metric is judged among the positions it applies to, against the unflagged players of
+            # those same positions (a carry-share jump is an RB signal: not RBs against everyone).
+            fm = f[f["position"].isin(USAGE_POSITIONS[metric])].reset_index(drop=True)
+            cands = [({"metric": metric, "threshold": t}, usage_flag(fm, metric, t, name)) for t in grid]
+            per_metric[metric] = sweep(fm, cands, direction)
+        # The combined signal: any metric past ITS chosen threshold, among every position a metric covers.
+        fc = f[f["position"].isin(("WR", "TE", "RB"))].reset_index(drop=True)
+        flags = [
+            usage_flag(fc, metric, res["chosen"]["threshold"], name)
+            for metric, res in per_metric.items()
+            if res["chosen"] is not None
+        ]
         combined = flags[0].copy()
         for fl in flags[1:]:
             combined = combined | fl
@@ -243,7 +246,7 @@ def run_study(f: pd.DataFrame) -> dict:
             "per_metric": per_metric,
             "combined": {
                 "thresholds": {m: r["chosen"]["threshold"] for m, r in per_metric.items() if r["chosen"]},
-                **sweep(f, [({"combined": True}, combined)], direction),
+                **sweep(fc, [({"combined": True}, combined)], direction),
             },
         }
     signals["salary_lag"] = {
