@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from dfs import results_actual, results_loop
+from dfs import results_actual, results_loop, results_signals, signals_data
 from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheet_model_check import MODEL_CHECK_TAB, build_layout, write_model_check
@@ -128,10 +128,14 @@ def update_results(
     sheet_id: str | None = None,
     write_sheet: bool = True,
     fetchers: Fetchers | None = None,
+    write_signals: bool | None = None,
+    signal_fetchers: signals_data.Fetchers | None = None,
 ) -> UpdateReport:
     """Run the whole update. Never raises for "stats not published yet": it returns a report with
     `published=False` instead."""
     fetchers = fetchers or Fetchers()
+    if write_signals is None:
+        write_signals = write_sheet  # an offline run (write_sheet=False) must not touch the network either
     report = UpdateReport()
     try:
         stats_player = fetchers.stats_player(season)
@@ -165,18 +169,122 @@ def update_results(
 
     scored = load_all_scored(season)
     all_weeks = sorted(int(w) for w in scored["week"].unique()) if not scored.empty else []
+    if write_signals and all_weeks:
+        _backfill_signals(
+            scored,
+            season,
+            all_weeks,
+            report,
+            rebuild=set(weeks),
+            offense=offense,
+            dst=dst,
+            schedule=game_scores,
+            signal_fetchers=signal_fetchers,
+        )
     if write_sheet:
         gs = cfg.google_sheets
         if sheet_id:
             gs = gs.model_copy(update={"sheet_id": sheet_id})
         client = SheetsClient(gs)
         title, _url = client.describe()
-        layout = build_layout(scored, weeks=all_weeks)
+        signal_table = reliability = None
+        if write_signals:
+            evaluation = results_signals.evaluation_frame(scored, season)
+            signal_table = results_signals.signal_report(evaluation)
+            reliability = results_signals.reliability_report(evaluation)
+        layout = build_layout(scored, weeks=all_weeks, signal_table=signal_table, reliability=reliability)
         with client.batched():  # the header notes are one request each; send them together
             summary = write_model_check(client, layout, MODEL_CHECK_TAB)
         report.say(f"{summary} on {title}")
         _slot_into_tab_strip(client)
     return report
+
+
+def _backfill_signals(
+    scored: pd.DataFrame,
+    season: int,
+    all_weeks: list[int],
+    report: UpdateReport,
+    *,
+    rebuild: set[int],
+    offense: pd.DataFrame,
+    dst: pd.DataFrame,
+    schedule: pd.DataFrame,
+    signal_fetchers: signals_data.Fetchers | None,
+) -> None:
+    """Fill in `UmPts` on every scored week that lacks it, then write the signals archive for every scored
+    week that lacks one, plus any week just (re)scored. If UM was newly attached anywhere, every week is
+    rebuilt: a later week's `CalPts` is fitted on the earlier weeks, so its archive changes with them.
+
+    Fail soft: whatever cannot be built is reported and the rest of the update carries on, because the
+    signals are context and `dfs week close` must never fail over them."""
+    try:
+        data, notes = signals_data.load_season_data(
+            season, fetchers=signal_fetchers, offense_actual=offense, dst_actual=dst, schedule=schedule
+        )
+        for note in notes:
+            report.say(f"Signals input unavailable: {note}")
+        scored, attached = _attach_um_to_scored_files(scored, season, all_weeks, rebuild, data, report)
+        have = {w for w in all_weeks if signals_data.archive_files(season, w)}
+        todo = all_weeks if attached else [w for w in all_weeks if w not in have or w in rebuild]
+        if not todo:
+            report.say("Signals: every scored week already has an archive.")
+            return
+        written = results_signals.backfill(scored, data, season=season, weeks=todo)
+    except Exception as e:  # noqa: BLE001 - never fail a results update over the signals
+        log.warning("signals backfill failed: %s", e)
+        report.say(f"Signals backfill failed ({e}); Model Check's signal tables will be missing.")
+        return
+    for week, name in written.items():
+        report.say(f"Signals: week {week} archived as {name}.")
+
+
+def _attach_um_to_scored_files(
+    scored: pd.DataFrame,
+    season: int,
+    all_weeks: list[int],
+    rebuild: set[int],
+    data: signals_data.SeasonData,
+    report: UpdateReport,
+) -> tuple[pd.DataFrame, list[int]]:
+    """Compute `UmPts` for each scored week that has none (or was just rescored) and rewrite its scored
+    file with it. Returns (the scored table, the weeks that gained UM). A missing model cache (`dfs model
+    fetch` not run) or any model error leaves UmPts blank and says so; CalPts then runs without UM."""
+    attached = []
+    todo = [
+        w
+        for w in all_weeks
+        if w in rebuild
+        or "UmPts" not in scored.columns
+        or scored.loc[scored["week"] == w, "UmPts"].isna().all()
+    ]
+    if not todo:
+        return scored, attached
+    try:
+        from dfs.model import data as model_data
+        from dfs.model.predict import slate_history
+
+        games = model_data.read_games()
+        history = slate_history(season, fetch=False)
+    except Exception as e:  # noqa: BLE001 - ModelDataError, a missing cache, a missing sklearn...
+        report.say(f"UM unavailable ({e}); CalPts is built without it. Run `dfs model fetch`.")
+        return scored, attached
+    for week in todo:
+        path = results_loop.scored_path(season, week)
+        if not path.exists():
+            continue
+        rows = pd.read_csv(path)
+        try:
+            filled = results_signals.attach_um(
+                rows, data, season=season, week=week, games=games, history=history
+            )
+        except Exception as e:  # noqa: BLE001
+            report.say(f"UM for week {week} failed ({e}); left blank.")
+            continue
+        filled.to_csv(path, index=False)
+        attached.append(week)
+        report.say(f"Week {week}: UM projection attached to {int(filled['UmPts'].notna().sum())} players.")
+    return (load_all_scored(season) if attached else scored), attached
 
 
 def _slot_into_tab_strip(client: SheetsClient) -> None:

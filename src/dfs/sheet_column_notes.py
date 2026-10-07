@@ -166,6 +166,47 @@ MODEL_CHECK_NOTES = {
     "Weeks": "Weeks included in the consistency measure.",
     "Mean MAE": "Average of the source's weekly MAE.",
     "CV": "Coefficient of variation of the weekly MAE (std / mean): lower = steadier week to week.",
+    "Projection": (
+        "TFFB = TFFB's own ProjPts; AggPts = the equal-weight average of every source; CalPts = each source "
+        "bias-corrected by position and salary tier, then weighted. All three are judged on weeks CalPts "
+        "did not train on."
+    ),
+    "ρ (rank)": (
+        "Rank correlation within position and week (averaged over groups of 5+, weighted by n): does the "
+        "projection ORDER players correctly? Hard to beat TFFB at this."
+    ),
+    "Week": "The week being predicted (CalPts was fitted on the weeks before it).",
+    "TFFB MAE": "TFFB's mean absolute miss that week.",
+    "AggPts MAE": "AggPts' mean absolute miss that week.",
+    "UM MAE": "The UM model's mean absolute miss that week, on the players it rates.",
+    "CalPts (no UM) MAE": "CalPts without the UM source: mean absolute miss that week.",
+    "CalPts (no UM) ρ": "CalPts without the UM source: rank correlation that week.",
+    "Measure": (
+        "Hit 3x = P(actual >= 3 x salary/$1,000), Boom 4x = P(actual >= 4x), Bust under 2x = P(actual < 2x): "
+        "the three probability columns, judged on whether they happened."
+    ),
+    "Decile": "Players ranked by predicted probability, cut into ten equal bins; 1 = lowest.",
+    "Predicted": "Mean predicted probability in the decile.",
+    "Realized": "Share of the decile's players for whom it actually happened.",
+    "Gap (pts)": "Realized minus predicted, in percentage points. Positive = it happens more than predicted.",
+    "Off?": "'off' when the gap exceeds 8 points with n of 30 or more. Reported, never adjusted.",
+    "CalPts MAE": "CalPts' mean absolute miss that week.",
+    "TFFB ρ": "TFFB's rank correlation that week (within position, n-weighted).",
+    "AggPts ρ": "AggPts' rank correlation that week.",
+    "CalPts ρ": "CalPts' rank correlation that week.",
+    "Signal": (
+        "A context signal: BUY↑/FADE↓ (xFP vs actual), USAGE↑/USAGE↓ (last 2 games vs earlier), INJ+ "
+        "(a teammate is out), and the top-8 / bottom-4 position matchups. Context, not proven to beat "
+        "projections."
+    ),
+    "Actual - ProjPts": (
+        "Mean of (actual minus TFFB ProjPts) for the group. Positive = they beat the projection."
+    ),
+    "Actual - CalPts": "Mean of (actual minus CalPts) for the group.",
+    "Hit (vs ProjPts)": (
+        "Share on the right side of ProjPts: above it for an 'up' signal, below it for a 'down' signal."
+    ),
+    "Hit (vs CalPts)": "The same hit rate measured against CalPts.",
 }
 
 

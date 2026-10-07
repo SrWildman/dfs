@@ -121,3 +121,42 @@ def test_a_week_with_no_archived_projections_is_skipped_with_a_message(monkeypat
     monkeypatch.setattr(results_update, "load_projection_snapshots", lambda: [])
     report = update_results(_Cfg(), season=2026, write_sheet=False, fetchers=_fetchers((1,)))
     assert report.weeks_scored == [] and "skipped" in report.lines[0]
+
+
+def test_the_signals_backfill_never_fails_a_results_update(monkeypatch, tmp_path):
+    """No model cache and every free file unavailable: the update still succeeds and says what is missing."""
+    from dfs import signals_data
+    from dfs.model import data as model_data
+    from dfs.sources import nflverse_files as nf
+
+    def gone(*args, **kwargs):
+        raise nf.ContextFetchError("not published")
+
+    monkeypatch.setattr(signals_data, "SIGNALS_DIR", tmp_path / "signals")
+    monkeypatch.setattr(model_data, "read_games", gone)
+    monkeypatch.setattr(results_loop, "score_week", lambda week, season, **kw: _fake_week(week))
+    monkeypatch.setattr(results_update, "load_projection_snapshots", lambda: [])
+    fetchers = signals_data.Fetchers(
+        ffo=gone, injuries=gone, depth=gone, stats_player=gone, stats_team=gone, schedule=gone, pbp_rz=gone
+    )
+    report = update_results(
+        _Cfg(),
+        season=2026,
+        write_sheet=False,
+        write_signals=True,
+        fetchers=_fetchers((1,)),
+        signal_fetchers=fetchers,
+    )
+    text = "\n".join(report.lines)
+    assert report.weeks_scored == [1]
+    assert "UM unavailable" in text and "Signals input unavailable" in text
+    assert report.published is True
+
+
+def test_an_offline_update_does_not_touch_the_signals(monkeypatch):
+    called = []
+    monkeypatch.setattr(results_update, "_backfill_signals", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(results_loop, "score_week", lambda week, season, **kw: _fake_week(week))
+    monkeypatch.setattr(results_update, "load_projection_snapshots", lambda: [])
+    update_results(_Cfg(), season=2026, write_sheet=False, fetchers=_fetchers((1,)))
+    assert called == []  # write_sheet=False means offline: no network, so no signals either

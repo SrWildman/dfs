@@ -167,9 +167,18 @@ GAMES_FINISHED_AFTER_HOURS = 3.5
 # projections just saved, so it stays last. If the TFFB login has expired
 # that one source reports "failed" (it never overwrites what is saved) and
 # the rest of the run carries on with the previous projections.
-# `nflverse_games` (stadium/roof/schedule -- static for the week) and the
-# slower once-a-week sources are deliberately left out.
-LIVE_SYNC_SOURCES = ["nfl_odds", "draftkings", "projections", "weather", "edge"]
+# Injuries and depth charts (nflverse, updated daily) are re-pulled too: they feed the injury
+# beneficiaries and Edge tokens. `nflverse_games` (stadium/roof/schedule -- static for the week) and
+# the slower once-a-week sources are deliberately left out.
+LIVE_SYNC_SOURCES = [
+    "nfl_odds",
+    "draftkings",
+    "projections",
+    "weather",
+    "nflverse_injuries",
+    "nflverse_depth",
+    "edge",
+]
 
 app = typer.Typer(
     name="dfs",
