@@ -91,6 +91,10 @@ FIELD_COLOR_SCALES = {
     "Ceil": _PCT,
     "Val": _PCT,
     "CeilVal": _PCT,
+    # Edge Finder (2026-10-07): the calibrated projection and last-3 xFP are compared within position
+    # like the other player metrics (hidden helpers `CalPts%ile`, `xFP/G%ile`).
+    "CalPts": _PCT,
+    "xFP/G": _PCT,
     # Usage volume (2026-10-02): compared within position, like ProjPts -- a 25% target share
     # means something different for a WR and an RB. Blank where a metric doesn't apply.
     "Tgt%": _PCT,
@@ -102,6 +106,12 @@ FIELD_COLOR_SCALES = {
     "ValAdj": _SCORE,
     "CeilPct": _SCORE,
     "GameEnv": _SCORE,
+    # Outcome probabilities (0-100). Stepped bands around 50 would paint every Boom% (typically 5-30)
+    # red, so these are gradients anchored on the column's own 5th/95th percentile; Bust% is the
+    # reverse (low is good).
+    "Hit3x%": _GRADIENT,
+    "Boom%": _GRADIENT,
+    "Bust%": _REVERSED,
     # Game/team metrics have no position: a smooth gradient over the column. More is better.
     "PROE": _GRADIENT,
     "Expl%": _GRADIENT,
@@ -410,6 +420,8 @@ PCT_HELPER_FOR_FIELD = {
     "Rush%": "Rush%ile",
     "RZ/G": "RZ/G%ile",
     "HVT/G": "HVT/G%ile",
+    "CalPts": "CalPts%ile",
+    "xFP/G": "xFP/G%ile",
 }
 
 

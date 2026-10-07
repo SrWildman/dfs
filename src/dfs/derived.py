@@ -309,6 +309,15 @@ PLAYER_METRIC_PCT_COLUMNS = {
     "HVT/G": "HVT/G%ile",
 }
 
+# Edge Finder columns (see `edge_finder.py`, `calibration.py`, `probabilities.py`, `xfp.py`).
+# `CalPts%ile` / `xFP/G%ile` are hidden within-position helpers, like `PLAYER_METRIC_PCT_COLUMNS`' but kept
+# separate so they APPEND after `NameKey` instead of shifting it.
+EDGE_FINDER_PCT_COLUMNS = {"CalPts": "CalPts%ile", "xFP/G": "xFP/G%ile"}
+EDGE_FINDER_VALUE_COLUMNS = ["CalPts", "Hit3x%", "Boom%", "Bust%", "Floor", "CeilM", "xFP/G", "Edge"]
+EDGE_FINDER_COLUMNS = [*EDGE_FINDER_VALUE_COLUMNS, *EDGE_FINDER_PCT_COLUMNS.values()]
+# Every hidden within-position percentile helper, old and new.
+ALL_PCT_COLUMNS = {**PLAYER_METRIC_PCT_COLUMNS, **EDGE_FINDER_PCT_COLUMNS}
+
 EDGE_COLUMNS = [
     # SPINE
     "Name",
@@ -429,6 +438,12 @@ EDGE_COLUMNS = [
     # Round 5 item 6: `player_join.normalize_name(Name)` -- the key typed names
     # are matched against (see `sheet_names.py`). Hidden, appended last.
     "NameKey",
+    # Edge Finder (2026-10-07), APPENDED after NameKey (EDGE_COLUMNS is append-only): the calibrated
+    # projection, outcome probabilities, xFP and the Edge token chips, plus two hidden within-position
+    # percentile helpers. Filled by `attach_edge_finder_columns` after the build (they need the results
+    # history, UM and the free nflverse files); blank until then. Display order on Player Pool, Lineups
+    # and PlayerPoolRaw comes from `sheet_columns.py`.
+    *EDGE_FINDER_COLUMNS,
 ]
 
 # The four zone labels, in the same left-to-right order they appear --
@@ -1285,6 +1300,8 @@ def build_edge_frame(
     # (see ZONE_LABELS' own comment for why they exist at all).
     for label in ZONE_LABELS:
         merged[label] = ""
+    for column in EDGE_FINDER_COLUMNS:
+        merged[column] = "" if column == "Edge" else float("nan")
 
     return EdgeBuildResult(
         frame=merged[EDGE_COLUMNS],
@@ -1292,3 +1309,21 @@ def build_edge_frame(
         source_joins=source_joins,
         split_skipped_positions=split_skipped_positions,
     )
+
+
+def attach_edge_finder_columns(frame: pd.DataFrame, extras: pd.DataFrame) -> pd.DataFrame:
+    """Fill the Edge Finder columns of an edge frame from `extras` (indexed by DraftKings `Id`, any of
+    `EDGE_FINDER_VALUE_COLUMNS`). A player with no row in `extras` stays blank, never 0. The two hidden
+    percentile helpers are recomputed within position over the rosterable pool, like the other helpers."""
+    out = frame.copy()
+    extras = extras[~extras.index.duplicated(keep="first")]
+    for column in EDGE_FINDER_VALUE_COLUMNS:
+        if column not in extras.columns:
+            continue
+        mapped = out["Id"].map(extras[column])
+        out[column] = mapped.fillna("") if column == "Edge" else pd.to_numeric(mapped, errors="coerce")
+    pool = _rosterable_pool_mask(pd.to_numeric(out["ProjPts"], errors="coerce"), out["Position"])
+    for metric, pct_column in EDGE_FINDER_PCT_COLUMNS.items():
+        values = pd.to_numeric(out[metric], errors="coerce")
+        out[pct_column] = _percentile_against_pool(values.where(values != 0), out["Position"], pool).round(1)
+    return out

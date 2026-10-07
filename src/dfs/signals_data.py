@@ -172,10 +172,12 @@ def load_season_data(
     offense_actual: pd.DataFrame | None = None,
     dst_actual: pd.DataFrame | None = None,
     schedule: pd.DataFrame | None = None,
+    heavy_only: bool = False,
 ) -> tuple[SeasonData, list[str]]:
     """Everything `signals.build_signals` reads. Pass a season's already-scored actuals / schedule to skip
     re-fetching them (the results update has them). Returns (data, notes); each failed file adds a note
-    and leaves its field None."""
+    and leaves its field None. `heavy_only` skips the ffopportunity, injury and depth-chart files (the sync
+    already holds those) and loads only the results/schedule/play-by-play inputs."""
     f = fetchers or Fetchers()
     notes: list[str] = []
     data = SeasonData(season=season, offense_actual=offense_actual, dst_actual=dst_actual, schedule=schedule)
@@ -189,7 +191,7 @@ def load_season_data(
             return None
 
     weeks = []
-    for year in (season - 1, season):
+    for year in () if heavy_only else (season - 1, season):
         raw = attempt(f"ffopportunity {year}", lambda y=year: f.ffo(y))
         if raw is not None and not raw.empty:
             weeks.append(xfp.player_weeks(raw, season=year))
@@ -233,8 +235,9 @@ def load_season_data(
         )
         data.ffo_weeks = pd.concat([data.ffo_weeks[~current], joined], ignore_index=True)
 
-    data.injuries = attempt(f"{season} injuries", lambda: f.injuries(season))
-    data.depth = attempt(f"{season} depth charts", lambda: f.depth(season))
+    if not heavy_only:
+        data.injuries = attempt(f"{season} injuries", lambda: f.injuries(season))
+        data.depth = attempt(f"{season} depth charts", lambda: f.depth(season))
     data.rz_by_week = attempt(f"{season} play-by-play", lambda: (f.pbp_rz or _fetch_pbp_rz)(season))
     return data, notes
 
@@ -242,3 +245,66 @@ def load_season_data(
 def week_cutoff(selected: pd.DataFrame) -> datetime | None:
     """The week's as-of moment for the depth chart and archive: the reference snapshot (`results_loop`)."""
     return results_loop.reference_time(selected)
+
+
+# ---------------------------------------------------------------------------------------------
+# The sync's view of the same inputs
+# ---------------------------------------------------------------------------------------------
+
+HEAVY_FIELDS = (
+    "offense_actual",
+    "offense_actual_prior",
+    "dst_actual",
+    "dst_actual_prior",
+    "schedule",
+    "schedule_prior",
+    "rz_by_week",
+)
+
+
+def _heavy_cache() -> Path:
+    from dfs.paths import CURRENT_DIR
+
+    return CURRENT_DIR / "signals_inputs.pkl"
+
+
+def _saved(name: str) -> pd.DataFrame | None:
+    from dfs import store
+
+    try:
+        frame = store.load_current(name)
+    except FileNotFoundError:
+        return None
+    return None if frame.empty else frame
+
+
+def load_current_data(
+    season: int, *, refresh: bool, fetchers: Fetchers | None = None
+) -> tuple[SeasonData, list[str]]:
+    """The inputs for the CURRENT slate, as the sync sees them. The three fast files (ffopportunity,
+    injuries, depth chart) are what the sync just saved under `data/current/`. The heavy ones (this and
+    last season's results, the schedules, red-zone play-by-play) are downloaded on a full sync
+    (`refresh=True`) and cached in `data/current/signals_inputs.pkl`; `--live` reuses that cache and never
+    re-downloads history (when there is no cache yet it downloads once). Returns (data, notes)."""
+    data = SeasonData(season=season, ffo_weeks=_saved("ffopportunity"), injuries=_saved("nflverse_injuries"))
+    data.depth = _saved("nflverse_depth")
+    notes: list[str] = []
+    cache = _heavy_cache()
+    heavy = None
+    if not refresh and cache.exists():
+        try:
+            heavy = pd.read_pickle(cache)
+        except Exception as e:  # noqa: BLE001 - a corrupt cache is just a miss
+            notes.append(f"signals cache unreadable: {e}")
+    if heavy is None:
+        loaded, notes_heavy = load_season_data(season, fetchers=fetchers, heavy_only=True)
+        notes += notes_heavy
+        heavy = {name: getattr(loaded, name) for name in HEAVY_FIELDS}
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            pd.to_pickle(heavy, cache)
+        except OSError as e:
+            notes.append(f"signals cache not written: {e}")
+    for name in HEAVY_FIELDS:
+        setattr(data, name, heavy.get(name))
+    return data, notes

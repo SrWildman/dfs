@@ -42,7 +42,7 @@ def _stamped(snapshots: list[tuple[datetime, pd.DataFrame]]) -> list[tuple[str, 
     return [(signals_data.stamp_of(ts), frame) for ts, frame in snapshots]
 
 
-def _week_snapshots(source: str, week: int, season: int, until: datetime) -> list[tuple[str, pd.DataFrame]]:
+def week_snapshots(source: str, week: int, season: int, until: datetime) -> list[tuple[str, pd.DataFrame]]:
     """The raw snapshots of `source` taken since the week's start and at or before `until`, oldest first."""
     start = nfl_calendar.week_start_date(week, season)
     out = []
@@ -81,8 +81,8 @@ def week_signals(
         depth_dt=signals_data.iso_of(reference),
         team_metrics=results_loop.as_of("pbp", reference),
         implied=signals.implied_by_team(projections) if projections is not None else None,
-        dk_snapshots=_week_snapshots("draftkings", week, season, reference),
-        projection_snapshots=_week_snapshots("projections", week, season, reference),
+        dk_snapshots=week_snapshots("draftkings", week, season, reference),
+        projection_snapshots=week_snapshots("projections", week, season, reference),
     )
     return output, reference
 

@@ -15,6 +15,9 @@ from dfs.sheets import SheetsClient
 class SyncContext:
     week: int
     season: int
+    # True for `dfs sync --live`: the Edge Finder step then reuses cached season inputs and never re-downloads
+    # history (it must stay fast).
+    live: bool = False
 
     @classmethod
     def current(cls, *, week: int | None = None, season: int | None = None) -> SyncContext:

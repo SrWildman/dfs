@@ -83,9 +83,9 @@ from __future__ import annotations
 
 from dfs import perf
 from dfs.derived import (
+    ALL_PCT_COLUMNS,
     EDGE_COLUMNS,
     EDGE_DATA_OFFSET,
-    PLAYER_METRIC_PCT_COLUMNS,
     SPLIT_TFFB_HIGH,
     SPLIT_TFFB_LOW,
     ZONE_LABELS,
@@ -102,6 +102,7 @@ from dfs.sheet_color_scales import (
     grouped_column_rule_specs,
 )
 from dfs.sheet_column_notes import (
+    EDGE_FINDER_NOTES,
     SLATE_GAME_NOTES,
     SLATE_TEAMS_NOTES,
     apply_header_notes,
@@ -113,6 +114,9 @@ from dfs.sheet_lineup_tints import LEGEND as LINEUP_TINT_LEGEND
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_views import (
     BOARD_CHALK_HEADER_ROW,
+    BOARD_EDGES_FIRST_ROW,
+    BOARD_EDGES_HEADER_ROW,
+    BOARD_EDGES_LAST_ROW,
     BOARD_LAST_ROW,
     BOARD_LEADERS_COLHEADER_ROW,
     BOARD_LEADERS_FIRST_ROW,
@@ -271,6 +275,16 @@ FIELD_FORMATS = {
     "Pts": _num("0.0"),
     "ProjPts": _num("0.0"),
     "AggPts": _num("0.0"),
+    # Edge Finder (2026-10-07). The three probabilities are 0-100 numbers with a literal "%" suffix (the
+    # Expl% pattern, so Sheets does not multiply them by 100); Floor/CeilM are points; xFP/G is points
+    # per game. `Edge` is text and has no format.
+    "CalPts": _num("0.0"),
+    "Hit3x%": _num('0"%"'),
+    "Boom%": _num('0"%"'),
+    "Bust%": _num('0"%"'),
+    "Floor": _num("0.0"),
+    "CeilM": _num("0.0"),
+    "xFP/G": _num("0.0"),
     "Ceil": _num("0.0"),
     "Ceiling": _num("0.0"),
     "O/U": _num("0.0"),
@@ -378,7 +392,7 @@ CENTERED_COLUMNS = frozenset({"Avail", "Flags", "Venue", "Pool", "OwnStatus", "E
 _NUMERIC_FORMAT_TYPES = frozenset({"NUMBER", "CURRENCY", "PERCENT"})
 # Numbers with no FIELD_FORMATS entry: Player Pool's `Used` count and the hidden
 # within-position percentile helpers.
-NUMERIC_UNFORMATTED_COLUMNS = frozenset({"Used", *PLAYER_METRIC_PCT_COLUMNS.values()})
+NUMERIC_UNFORMATTED_COLUMNS = frozenset({"Used", *ALL_PCT_COLUMNS.values()})
 
 
 def column_alignment(name: str) -> str:
@@ -604,7 +618,7 @@ EDGE_WIDTHS = {
     "Id": 90,
     # Round 5 item 3 / item 6: hidden helper columns, but every column still gets
     # an explicit width so the widths audit has nothing unmanaged to flag.
-    **{pct: 80 for pct in PLAYER_METRIC_PCT_COLUMNS.values()},
+    **{pct: 80 for pct in ALL_PCT_COLUMNS.values()},
     "NameKey": 150,
     # Part B widths-audit extension (2026-09-22): EdgeRaw's own checkbox
     # column had NO explicit width anywhere in code -- the exact
@@ -695,6 +709,15 @@ EDGE_WIDTHS = {
     "Rush%": 76,
     "RZ/G": 72,
     "HVT/G": 76,
+    # Edge Finder (2026-10-07): appended after NameKey on EdgeRaw.
+    "CalPts": 80,
+    "Hit3x%": 80,
+    "Boom%": 80,
+    "Bust%": 80,
+    "Floor": 66,
+    "CeilM": 72,
+    "xFP/G": 72,
+    "Edge": 150,
 }
 
 # Phase 6, Part 2 (2026-09-17) overrides Fix 2.9: Stadium/Roof/Wind used
@@ -807,6 +830,21 @@ FLAG_CHIPS = {
     SPLIT_TFFB_LOW: _chip(FLAT_BG, FLAT_FG),
 }
 
+# Edge Finder token chips (2026-10-07), on the `Edge` column of every tab that shows it. TEXT_CONTAINS (a
+# cell holds several space-separated tokens); the highest-priority rule is added LAST so it wins an
+# overlapping cell, same convention as FLAG_CHIPS: INJ+ (strong green) beats the soft ones.
+_SOFT_OK_BG, _SOFT_CRIT_BG = _rgb("#EDF5F0"), _rgb("#FBEFED")
+EDGE_CHIPS = {
+    "USAGE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
+    "FADE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
+    "USAGE↑": _chip(_SOFT_OK_BG, OK_FG),
+    "BUY↑": _chip(_SOFT_OK_BG, OK_FG),
+    "INJ+": _chip(OK_BG, OK_FG),
+}
+# Header text of the model's probability and range columns, muted for a low-projected DST (see
+# `probabilities.PROB_DST_LOW_CONFIDENCE_BELOW`): the values are shown but understate upside.
+LOW_CONFIDENCE_COLUMNS = ("Hit3x%", "Boom%", "Bust%", "Floor", "CeilM")
+
 AVAIL_CHIPS = {
     "OUT": _chip(CRIT_BG, CRIT_FG),
     "IR": _chip(CRIT_BG, CRIT_FG),
@@ -917,6 +955,34 @@ def _apply_wind_chip(client: SheetsClient, tab: str, header: list, *, data_start
         values=[WIND_CHIP_THRESHOLD],
         fmt=_chip(WARN_BG, WARN_FG),
     )
+
+
+def _apply_low_confidence_dst(
+    client: SheetsClient, tab: str, header: list, *, position_column: str, data_start: int, last_row: int
+) -> None:
+    """Mute (grey text) the model's probability/range columns on a DST whose `CalPts` is under
+    `probabilities.PROB_DST_LOW_CONFIDENCE_BELOW`: the values are shown but understate upside. One formula
+    rule per column, relative to the row, so it follows a sort or filter. Skipped when the tab lacks the
+    columns it needs (a tab without Edge Finder columns)."""
+    from dfs.probabilities import PROB_DST_LOW_CONFIDENCE_BELOW
+
+    if position_column not in header or "CalPts" not in header:
+        return
+    pos = f"${column_letter(header.index(position_column))}{data_start}"
+    cal = f"${column_letter(header.index('CalPts'))}{data_start}"
+    for name in LOW_CONFIDENCE_COLUMNS:
+        if name not in header:
+            continue
+        letter = column_letter(header.index(name))
+        client.add_boolean_rule(
+            tab,
+            f"{letter}{data_start}:{letter}{last_row}",
+            condition_type="CUSTOM_FORMULA",
+            values=[
+                f'=AND({pos}="DST",ISNUMBER({cal}),{cal}<{PROB_DST_LOW_CONFIDENCE_BELOW:g},ISNUMBER({letter}{data_start}))'
+            ],
+            fmt={"textFormat": {"italic": True, "foregroundColor": INK_MUTED}},
+        )
 
 
 def _apply_position_tint(
@@ -1152,7 +1218,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # docstring for the mechanism). Makes this call idempotent and
     # self-correcting instead of purely additive.
     _unhide_ungrouped_columns(client, edge_tab, len(EDGE_COLUMNS) + EDGE_DATA_OFFSET)
-    for hidden_name in ("Id", "Flag", *PLAYER_METRIC_PCT_COLUMNS.values(), "NameKey"):
+    for hidden_name in ("Id", "Flag", *ALL_PCT_COLUMNS.values(), "NameKey"):
         letter = _edge_letter(hidden_name)
         if letter:
             client.hide_columns(edge_tab, letter, letter)
@@ -1205,6 +1271,21 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
                 fmt=fmt,
             )
 
+    edge_col = _edge_letter("Edge")
+    if edge_col:
+        client.format_range(edge_tab, f"{edge_col}2:{edge_col}{EDGE_ROWS}", {"horizontalAlignment": "CENTER"})
+        for text, fmt in EDGE_CHIPS.items():
+            client.add_boolean_rule(
+                edge_tab,
+                f"{edge_col}2:{edge_col}{EDGE_ROWS}",
+                condition_type="TEXT_CONTAINS",
+                values=[text],
+                fmt=fmt,
+            )
+    _apply_low_confidence_dst(
+        client, edge_tab, edge_header, position_column="Position", data_start=2, last_row=EDGE_ROWS
+    )
+
     avail_col = _edge_letter("Avail")
     if avail_col:
         client.format_range(
@@ -1237,7 +1318,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 
     apply_edge_column_groups(client, edge_tab)
     # One-hover definitions for the usage columns (window, positions, "data through Week N").
-    apply_header_notes(client, edge_tab, 1, usage_notes())
+    apply_header_notes(client, edge_tab, 1, {**usage_notes(), **EDGE_FINDER_NOTES})
 
     return (
         f"{edge_tab}: widths, header, banding, formats, {n_scaled} highlighted column(s), "
@@ -1255,7 +1336,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 # `dfs setup audit-style`. "Name"/"Team" appear in both dicts with
 # identical values, so the merge doesn't change either.
 BUILDER_WIDTHS = {
-    **{pct: 80 for pct in PLAYER_METRIC_PCT_COLUMNS.values()},  # hidden helpers (item 3)
+    **{pct: 80 for pct in ALL_PCT_COLUMNS.values()},  # hidden helpers (item 3)
     **EDGE_WIDTHS,
     "Pos.": 52,
     # Widened from 54 (Week 3 fixes, Fix 6.2, 2026-09-23): A8 moved the
@@ -1320,6 +1401,14 @@ BUILDER_WIDTHS = {
     "O/U": 60,
     "Pts": 65,
     "AggPts": 65,  # Part C, C5: same width as Pts, right beside it
+    "CalPts": 68,  # Edge Finder: right after AggPts
+    "Hit3x%": 70,
+    "Boom%": 70,
+    "Bust%": 70,
+    "Floor": 56,
+    "CeilM": 64,
+    "xFP/G": 64,
+    "Edge": 130,
     # Part 7.5: Lineups-only, the lineup-metrics block
     # (`sheet_lineup_metrics.LINEUP_METRIC_HEADERS`).
     "Games": 56,
@@ -1484,6 +1573,7 @@ def polish_builder_tab(
         (column_name, chips)
         for column_name, chips in (
             ("Flags", FLAG_CHIPS),
+            ("Edge", EDGE_CHIPS),
             ("Avail", AVAIL_CHIPS),
             ("Venue", VENUE_CHIPS),
             ("Pool", POOL_TYPE_CHIPS),
@@ -1500,7 +1590,7 @@ def polish_builder_tab(
         )
         # Flags alone can hold more than one space-separated token (Fix
         # 2.1); Avail/Venue/Pool are still single exact values.
-        condition_type = "TEXT_CONTAINS" if column_name == "Flags" else "TEXT_EQ"
+        condition_type = "TEXT_CONTAINS" if column_name in ("Flags", "Edge") else "TEXT_EQ"
         for text, fmt in chips.items():
             client.add_boolean_rule(
                 tab,
@@ -1517,6 +1607,9 @@ def polish_builder_tab(
     # unpooled rows to distinguish the way EdgeRaw does (see
     # `_apply_name_flag_style`'s own docstring).
     _apply_wind_chip(client, tab, header, data_start=data_start, last_row=last_row)
+    _apply_low_confidence_dst(
+        client, tab, header, position_column="Pos.", data_start=data_start, last_row=last_row
+    )
     if position_tint:
         _apply_position_tint(
             client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row
@@ -1528,7 +1621,7 @@ def polish_builder_tab(
     _apply_zone_label_style(client, tab, header, data_start=data_start, last_row=last_row)
 
     # One-hover definitions for the usage columns (window, positions, "data through Week N").
-    noted = apply_header_notes(client, tab, header_row, usage_notes())
+    noted = apply_header_notes(client, tab, header_row, {**usage_notes(), **EDGE_FINDER_NOTES})
 
     pin_note = "Name pinned" if freeze_cols else "no column pin"
     return (
@@ -2291,6 +2384,8 @@ WEEK_ORDER = [
     # Slate Grid before Board (Sam, 2026-09-30): the slate-level view comes first.
     ("Slate Grid", "decide"),
     ("Board", "decide"),
+    # Edge Finder (2026-10-07): right after Board. Written by the sync, nothing on it is typed.
+    ("Edge Finder", "decide"),
     ("EdgeRaw", "decide"),
     ("Player Pool", "build"),
     ("Lineups", "build"),
@@ -2399,7 +2494,7 @@ TAB_NOTES: dict[str, str] = {
     "Board": (
         "BOARD -- a read-only landing tab across seven collapsible sections (Queue, "
         "Slate shape, Per-position leaders, Punt finder, Stack candidates, Pool "
-        "diagnostics, Chalk map placeholder), rebuilt by `dfs setup build-views`. "
+        "diagnostics, Chalk map placeholder, This week's edges), rebuilt by `dfs setup build-views`. "
         "Nothing here is typed."
     ),
     # Fix 4 follow-up: "sorted by Leverage" (pre-Part-7.2) and "the
@@ -2409,6 +2504,12 @@ TAB_NOTES: dict[str, str] = {
         "EDGERAW -- every synced player this week, sorted by ValAdj. Set the Pool "
         f"dropdown (blank/Cash/GPP/Both, far left) to add a player to your pool. {BOLD_NAME_HINT} "
         f"{_SORT_SEARCH_HINT}"
+    ),
+    "Edge Finder": (
+        "EDGE FINDER -- written by `dfs sync`, nothing here is typed. Cash core and GPP upside per position "
+        "(CalPts, Hit3x%, Boom%), where CalPts disagrees with TFFB, injury beneficiaries, matchups by "
+        "position, and the unproven context signals. Pool shows your EdgeRaw tick; ↗ jumps to the player on "
+        "EdgeRaw. Context signals are not proven to beat projections; Model Check tracks every one."
     ),
     "Slate Grid": (
         "SLATE GRID -- one row per game: total, spread, wind, divisional flag. Read-only, "
@@ -2678,6 +2779,14 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     )
     client.format_range(tab, f"A{BOARD_CHALK_HEADER_ROW}:I{BOARD_CHALK_HEADER_ROW}", _PANEL_FMT)
     client.group_rows(tab, BOARD_CHALK_HEADER_ROW + 1, BOARD_CHALK_HEADER_ROW + 1, collapsed=False)
+    # Edge Finder (2026-10-07): "This week's edges" -- five plain text lines, one per row, overflowing right.
+    client.format_range(tab, f"A{BOARD_EDGES_HEADER_ROW}:I{BOARD_EDGES_HEADER_ROW}", _PANEL_FMT)
+    client.format_range(
+        tab,
+        f"A{BOARD_EDGES_FIRST_ROW}:A{BOARD_EDGES_LAST_ROW}",
+        {"textFormat": {"fontSize": 10, "foregroundColor": INK}, "wrapStrategy": "OVERFLOW_CELL"},
+    )
+    client.group_rows(tab, BOARD_EDGES_FIRST_ROW, BOARD_EDGES_LAST_ROW, collapsed=False)
 
     def _scaled(
         col: str, first_row: int, last_row: int, field_name: str, *, pct_letter: str | None = None
