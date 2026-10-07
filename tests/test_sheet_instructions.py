@@ -51,8 +51,9 @@ def test_writes_the_tab_header_and_every_tab_row_at_the_expected_positions():
 
     assert cells["A7:B7"] == ["Tab-by-tab reference", "Columns / what to do"]
     assert cells["A8:B8"][0] == "Board"
-    # 19 tab rows, 8 through 26 (GPSRaw, 2026-09-26, added one more).
-    assert cells["A26:B26"][0] == "Results"
+    # Tab rows start at 8; Edge Finder (2026-10-07) sits right after Board and shifted the rest down one.
+    assert cells["A9:B9"][0] == "Edge Finder"
+    assert cells["A27:B27"][0] == "Results"
 
 
 def test_writes_the_doc_links_header_and_all_five_link_rows():
@@ -60,9 +61,9 @@ def test_writes_the_doc_links_header_and_all_five_link_rows():
     build_instructions_tab(client)
     cells = _cells(client)
 
-    assert cells["A28:B28"] == ["Full documentation", _DOC_LINK_ROWS[0]]
-    assert cells["A29:B29"] == ["", _DOC_LINK_ROWS[1]]
-    assert cells["A32:B32"] == ["", _DOC_LINK_ROWS[4]]
+    assert cells["A29:B29"] == ["Full documentation", _DOC_LINK_ROWS[0]]
+    assert cells["A30:B30"] == ["", _DOC_LINK_ROWS[1]]
+    assert cells["A33:B33"] == ["", _DOC_LINK_ROWS[4]]
 
 
 def test_player_pool_row_derives_caps_and_column_letters_not_hardcoded():

@@ -834,11 +834,12 @@ FLAG_CHIPS = {
 # cell holds several space-separated tokens); the highest-priority rule is added LAST so it wins an
 # overlapping cell, same convention as FLAG_CHIPS: INJ+ (strong green) beats the soft ones.
 _SOFT_OK_BG, _SOFT_CRIT_BG = _rgb("#EDF5F0"), _rgb("#FBEFED")
+# A row holding both a soft green and a soft red token shows the red (caution first).
 EDGE_CHIPS = {
-    "USAGE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
-    "FADE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
     "USAGE↑": _chip(_SOFT_OK_BG, OK_FG),
     "BUY↑": _chip(_SOFT_OK_BG, OK_FG),
+    "USAGE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
+    "FADE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
     "INJ+": _chip(OK_BG, OK_FG),
 }
 # Header text of the model's probability and range columns, muted for a low-projected DST (see

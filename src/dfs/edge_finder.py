@@ -28,7 +28,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from dfs import calibration, probabilities, results_loop, results_signals, signals, signals_data, store
+from dfs import calibration, perf, probabilities, results_loop, results_signals, signals, signals_data, store
 from dfs.derived import (
     EDGE_FINDER_VALUE_COLUMNS,
     _rosterable_pool_mask,
@@ -125,7 +125,8 @@ def _enrich(
 
     notes: list[str] = []
     if data is None:
-        data, data_notes = signals_data.load_current_data(ctx.season, refresh=not ctx.live)
+        with perf.phase("edge finder: season inputs"):
+            data, data_notes = signals_data.load_current_data(ctx.season, refresh=not ctx.live)
         notes += data_notes
     if scored is None:
         scored = results_update.load_all_scored(ctx.season)
@@ -137,7 +138,10 @@ def _enrich(
 
     um_ok = True
     try:
-        df["UmPts"] = probabilities.um_projections(df, season=ctx.season, week=ctx.week, fetch=not ctx.live)
+        with perf.phase("edge finder: UM inference"):
+            df["UmPts"] = probabilities.um_projections(
+                df, season=ctx.season, week=ctx.week, fetch=not ctx.live
+            )
     except Exception as e:  # noqa: BLE001 - no model cache, no sklearn, an unrateable slate...
         um_ok = False
         df["UmPts"] = np.nan
@@ -145,22 +149,24 @@ def _enrich(
         log.warning("UM unavailable: %s", e)
 
     sources = calibration.CAL_SOURCES if um_ok else calibration.CAL_SOURCES_NO_UM
-    fitted = calibration.fit(scored, before_week=ctx.week, season=ctx.season, sources=sources)
-    df["CalPts"] = calibration.predict(df, fitted)
+    with perf.phase("edge finder: CalPts"):
+        fitted = calibration.fit(scored, before_week=ctx.week, season=ctx.season, sources=sources)
+        df["CalPts"] = calibration.predict(df, fitted)
 
     projections = _try_current("projections")
     dk_snaps = results_signals.week_snapshots("draftkings", ctx.week, ctx.season, now)
     proj_snaps = results_signals.week_snapshots("projections", ctx.week, ctx.season, now)
-    output = signals.build_signals(
-        df,
-        data,
-        week=ctx.week,
-        depth_dt=depth_cutoff(df, now),
-        team_metrics=_try_current("pbp"),
-        implied=signals.implied_by_team(projections) if projections is not None else None,
-        dk_snapshots=dk_snaps,
-        projection_snapshots=proj_snaps,
-    )
+    with perf.phase("edge finder: signals and probabilities"):
+        output = signals.build_signals(
+            df,
+            data,
+            week=ctx.week,
+            depth_dt=depth_cutoff(df, now),
+            team_metrics=_try_current("pbp"),
+            implied=signals.implied_by_team(projections) if projections is not None else None,
+            dk_snapshots=dk_snaps,
+            projection_snapshots=proj_snaps,
+        )
     extras = output.players.set_index("Id")[
         [c for c in EDGE_FINDER_VALUE_COLUMNS if c in output.players.columns]
     ]

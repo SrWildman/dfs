@@ -84,7 +84,8 @@ dfs week new "<url-of-the-copy>"  # 1. new week: point config.toml at a fresh sh
 dfs sync                          # 2. re-run any time as lines/injuries/weather move
 # 3. research, tick your pool and build lineups in the sheet (see WORKFLOW.md)
 dfs export -o lineups.csv         # 4. validate + export DK's bulk-upload format
-dfs sync --live                   # 5. gameday: fast-moving sources only, prints what changed
+dfs sync --live                   # 5. gameday: fast-moving sources only, prints what changed (also refreshes
+                                  #    the Edge Finder tab: CalPts, Hit3x%/Boom%, injury beneficiaries)
 dfs lineups late-swap             #    ...and what to swap them for (best re-fill, 2-for-2, 1-for-1)
 dfs week close --csv history.csv  # 6. after the games: reconcile Cash/GPP into Bankroll AND score the
                                   #    week's projections into the Model Check tab

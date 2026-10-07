@@ -76,7 +76,8 @@ _TAB_FIRST_ROW = 8
 # never inserts/deletes a sheet row itself -- see the module docstring --
 # so a mismatch here means the ACTUAL Instructions tab needs a real row
 # inserted/deleted to match, not just this constant edited).
-_DOC_LINKS_HEADER_ROW = 28
+# Edge Finder (2026-10-07): a 20th row (the Edge Finder tab's own) -- 27 became 28 .. 28 became 29.
+_DOC_LINKS_HEADER_ROW = 29
 
 # Per-position pool caps (Player Pool's own block sizes), in the same
 # QB/RB/WR/TE/DST order PLAYER_POOL_NAME_BLOCKS itself is written in --
@@ -178,8 +179,8 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         'One system, used everywhere: a dark header row always means "this is a '
         'table header", nothing else does. Pale yellow always means "you type '
         'here" (see above) -- the only cue for that. Green/red shading on a '
-        "number means better/worse. Player stats (ProjPts, AggPts, Ceiling, Val, CeilVal), the "
-        "usage columns (Tgt%, WOPR, Rush%, RZ/G, HVT/G) and the "
+        "number means better/worse. Player stats (ProjPts, AggPts, CalPts, Ceiling, Val, CeilVal), the "
+        "usage columns (Tgt%, WOPR, Rush%, RZ/G, HVT/G, xFP/G) and the "
         "0-100 scores (ValAdj, CeilPct, GameEnv) show where a player ranks among players at "
         "the SAME position (a QB is only ever compared with QBs): plain = the middle of the "
         "pack, green = ranked above most of his position, red = below, and the colour "
@@ -191,8 +192,9 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "Either way nothing is a fixed cut-off, and the shading follows the player through any "
         "sort or filter. Zeros and blanks are never part of the scale (a zero gets a flat "
         "grey cell). Low-is-good columns are reversed "
-        "(SoS Rank, OppPosRank, Pace, Spread, Exposure), where a LOW number is the good "
-        "one; a signed number like ImpMove/TotMove/SpdMove/Leverage shades "
+        "(SoS Rank, OppPosRank, Pace, Spread, Exposure, Bust%), where a LOW number is the good "
+        "one; the outcome odds Hit3x% and Boom% are smooth gradients like the game numbers; "
+        "a signed number like ImpMove/TotMove/SpdMove/Leverage shades "
         "from red through white at zero to green, since zero -- not the middle of "
         'the range -- is what "no change" means. Ownership (ProjOwn on EdgeRaw, '
         'Rstr% on Player Pool/Lineups) is the one exception to "more is better": '
@@ -202,7 +204,8 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "number yet (TFFB hasn't published ownership this week), not \"the lowest "
         'value". Chips (solid colour, bold text) mark a state, never a number -- '
         'Flag (can show more than one at once, e.g. "WIND LEVERAGE"), Avail, '
-        "Venue (H/R), a lineup's Issues column. Grey text on OwnStatus means "
+        "Venue (H/R), the Edge tokens (INJ+ green; BUY↑ and USAGE↑ soft green; FADE↓ and USAGE↓ soft red: "
+        "context, not proven to beat projections), a lineup's Issues column. Grey text on OwnStatus means "
         "ownership hasn't published yet this week, in which case Leverage reads "
         "blank rather than a number that looks real but isn't. On Lineups the Name, Pos. and "
         "Team cells are plain white unless your lineup has a correlation, and then they take "
@@ -229,8 +232,24 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Per-position leaders, Punt finder, Stack candidates, Pool diagnostics "
         "(reads your pool, not the slate), and a deferred Chalk map placeholder, "
         "plus the same games/highest-total/max-wind/injuries summary as before. "
-        "Click a section's +/- to expand it. Nothing to type here -- check it "
-        "first each week.",
+        "Click a section's +/- to expand it. The last panel, This week's edges, is five "
+        "one-line summaries (best cash and GPP plays, biggest CalPts vs TFFB disagreements, "
+        "injury beneficiaries, best offense per position) written by `dfs sync` from the "
+        "Edge Finder tab. Nothing to type here -- check it first each week.",
+    ),
+    (
+        "Edge Finder",
+        "Written by `dfs sync`, nothing typed: calibrated projections and outcome odds, "
+        "per position. Cash core (best Hit3x% -- the chance of 3x salary, the line behind "
+        "Val >= 3 -- with Bust%), GPP upside (best Boom%, the chance of 4x salary, with "
+        "CeilM and Own%), projection disagreements (where CalPts, the bias-corrected blend "
+        "of every source, differs most from TFFB, with the measured reason), injury "
+        "beneficiaries (who inherits an out player's targets and carries, confirmed first, "
+        'questionable muted, with "Priced in?"), matchups by position and the unproven '
+        "context signals. Pool shows your EdgeRaw tick; ↗ jumps to the player on EdgeRaw. "
+        "Rows with fewer than 3 games are muted. Run the final `dfs sync --live` after "
+        "inactives (~90 min before kickoff). CalPts is not the default projection: Model "
+        "Check's Projection Race tracks it every week.",
     ),
     (
         "Slate Grid",
@@ -294,9 +313,12 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "across `dfs sync`, keyed on the DraftKings player Id. Id (B) is hidden -- "
         "meaningless to look at. Row already tinted when that player is pooled, and "
         "its Name bolded when Flag is set. Click any header arrow to sort or search "
-        "directly (Data > Create a filter). Four saved presets also live under "
+        "directly (Data > Create a filter). Six saved presets also live under "
         'Data > Filter views: "Pool picking", "Leverage plays", "Available only", '
-        '"In my pool". What each column means ->',
+        '"In my pool", "Cash" (best Hit3x% first) and "GPP" (best Boom% first). The '
+        "Edge Finder columns (CalPts, Hit3x%, Boom%, Bust%, Floor, CeilM, xFP/G, Edge) "
+        "sit at the far right; on Player Pool and Lineups they sit beside AggPts, ValAdj, "
+        "Flags, Ceil and the usage group. What each column means ->",
     ),
     (
         "PlayerPoolRaw",
@@ -408,7 +430,9 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Results. The Model Check tab beside it scores every projection against what "
         "actually happened; it is rebuilt by `dfs results update` (and at the end of "
         "`dfs week close`), nothing on it is typed, and a muted italic row is too few "
-        "players to say anything yet.",
+        "players to say anything yet. It also holds the Projection Race (TFFB, AggPts, UM "
+        "and CalPts judged on weeks they never trained on), the reliability of Hit3x%, "
+        "Boom% and Bust% by decile, and every context signal scored.",
     ),
 ]
 

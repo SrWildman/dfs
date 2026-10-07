@@ -3564,3 +3564,53 @@ Model Check metric -- matched by header text and applied by `polish` (`apply_hea
 `results update`. `tests/test_sheet_column_notes.py` fails if a usage column, TEAMS header or Model Check header has
 no note. No row or column moved; nothing structural.
 
+
+## Edge Finder: CalPts, outcome odds, context signals, the Edge Finder tab (2026-10-07)
+
+`docs/planning/PROMPT_EDGE_FINDER.md`. Applied to the template first, then Week 5; Weeks 3 and 4 were never touched. The
+design rationale and every constant are in `docs/CALCULATIONS.md` ("Edge Finder"); this section is what moved and
+what encodes it.
+
+- **EdgeRaw gained ten columns, APPENDED after `NameKey`** (`EDGE_COLUMNS` is append-only; nothing at or before
+  column 59 moved): `CalPts`, `Hit3x%`, `Boom%`, `Bust%`, `Floor`, `CeilM`, `xFP/G`, `Edge`, then the hidden helpers
+  `CalPts%ile`, `xFP/G%ile` (`derived.EDGE_FINDER_COLUMNS`, `EDGE_FINDER_PCT_COLUMNS`, `ALL_PCT_COLUMNS`). `build_edge_frame`
+  leaves them blank; `edge_finder.enrich` (called by `EdgeSource.fetch`, fail-soft) fills them through
+  `derived.attach_edge_finder_columns`. The hidden-helper machinery (INTERNAL group, widths, doctor `pct-helpers`,
+  colour steps) now iterates `ALL_PCT_COLUMNS`, not `PLAYER_METRIC_PCT_COLUMNS` (which still builds the original tail
+  so `NameKey` does not shift).
+- **Placement on the other three tabs** (`sheet_columns`): `CalPts` right after `AggPts`, `Hit3x%` and `Boom%` right
+  after `ValAdj`, `Edge` right after `Flags` (all in `DECISION`); `Floor`, `CeilM`, `Bust%` in `CEILING_DETAIL`;
+  `xFP/G` last in `USAGE`; the two helpers in `INTERNAL`. All eight are in `LINKED_COLUMNS` (VLOOKUP against EdgeRaw).
+  `link-edge --force` then `reorder-columns` placed them; `tests/test_sheet_links.py` pins the linked-column indices
+  (everything that existed before did not move).
+- **Colours and notes** (`sheet_color_scales.FIELD_COLOR_SCALES`, `sheet_style`): `CalPts` and `xFP/G` are within-position
+  steps off their helpers; `Hit3x%`/`Boom%` are gradients (stepped bands around 50 would paint every `Boom%` red, since it
+  runs 5-30) and `Bust%` is the reversed gradient; `Edge` chips are `EDGE_CHIPS` (INJ+ green, BUY↑/USAGE↑ soft green,
+  FADE↓/USAGE↓ soft red); a DST under 4 `CalPts` is muted on the five model columns (`_apply_low_confidence_dst`). A header
+  note on every new column (`sheet_column_notes.EDGE_FINDER_NOTES`).
+- **New visible tab `Edge Finder`, right after Board** (`sheet_style.WEEK_ORDER`, `TAB_NOTES`, `sheet_protection`,
+  `doctor._expected_tabs`). Python writes it on every sync (`edge_finder_tab.py` layout, `sheet_edge_finder.py` writer, 14
+  fixed columns A..N). `dfs setup build-views` creates the empty state once and never overwrites a synced one. Every
+  conditional format is relative to its own row, so it survives a sort or filter.
+- **Board**: a "This week's edges" panel APPENDED below the Chalk map (`sheet_views.BOARD_EDGES_*`, `BOARD_LAST_ROW` moved
+  with it; no existing row moved). Written by the sync (`write_board_edges`); `build_board` reads it back and keeps it.
+- **Instructions**: a 20th tab row (Edge Finder); `_DOC_LINKS_HEADER_ROW` 28 -> 29. The Instructions tab is rewritten whole
+  by `dfs setup instructions`.
+- **EdgeRaw filter views**: the original four plus `Cash` and `GPP` (`sheet_filters`; `SheetsClient.add_filter_view(sort=...)`).
+  The plan said "`dfs view cash` / `dfs view gpp`", which do not exist; Sam chose two filter views, no new command.
+- **Sources** (`sources/ffopportunity.py`, `nflverse_injuries.py`, `nflverse_depth.py`, shared `nflverse_files.py`): fail-soft,
+  no sheet tab, injuries and depth also in `LIVE_SYNC_SOURCES`. `SyncContext.live` tells the Edge Finder step to reuse
+  cached season inputs (`data/current/signals_inputs.pkl`).
+- **Results loop**: `results_loop.SCORED_COLUMNS` gained `UmPts`; `results update` attaches UM to the scored files and
+  archives each week's signals (`results_signals.backfill`, `data/signals/`); Model Check gained the Projection Race, Reliability
+  and Signals sections (`sheet_model_check`). `tests/test_results_signals.py` pins the no-lookahead rule.
+- **Never edited**: `src/dfs/model/`, `models/`, `tests/model/`, `docs/MODEL.md`.
+
+| Date | Tab | Change | Before | After | Applied to | Code that encodes it |
+|---|---|---|---|---|---|---|
+| 2026-10-07 | `EdgeRaw` | Ten Edge Finder columns appended after `NameKey`. | 59 columns (`Pool` + 58); `NameKey` last (59). | 69 columns; new 60-69; nothing at or before 59 moved. | Template, Week 5 | `derived.EDGE_COLUMNS`, `derived.EDGE_FINDER_COLUMNS`, `derived.ALL_PCT_COLUMNS`. |
+| 2026-10-07 | `PlayerPoolRaw`, `Player Pool`, `Lineups` | The same ten columns linked in and placed (`CalPts` after `AggPts`, `Hit3x%`/`Boom%` after `ValAdj`, `Edge` after `Flags`, `Floor`/`CeilM`/`Bust%` in Ceiling detail, `xFP/G` in USAGE). | 59 / 65 / 65 columns. | 69 / 75 / 75 columns. | Template, Week 5 | `sheet_columns.DECISION`/`CEILING_DETAIL`/`USAGE`/`INTERNAL`/`LINKED_COLUMNS`, `sheet_style.BUILDER_WIDTHS`. |
+| 2026-10-07 | `Edge Finder` | New visible tab after `Board`, written by the sync. | Did not exist. | ~230 rows, A..N. | Template, Week 5 | `edge_finder_tab`, `sheet_edge_finder`, `sheet_style.WEEK_ORDER`. |
+| 2026-10-07 | `Board` | "This week's edges" panel appended below the Chalk map. | Last row 150 (Chalk placeholder). | Header at 152, five lines at 153-157. | Template, Week 5 | `sheet_views.BOARD_EDGES_*`, `sheet_style.style_board`. |
+| 2026-10-07 | `Instructions` | A 20th tab row; doc-links header one row lower. | Doc-links header row 28. | Row 29. | Template, Week 5 | `sheet_instructions._TAB_ROWS`, `_DOC_LINKS_HEADER_ROW`. |
+| 2026-10-07 | `Model Check` | Projection Race, Reliability and Signals sections. | Seven blocks. | Ten blocks. | Week 5 (rebuilt by `dfs results update`) | `sheet_model_check`, `results_signals`. |

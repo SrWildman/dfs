@@ -9,6 +9,8 @@ survives a sort or filter of a section's rows. No basic filter is set: the secti
 
 from __future__ import annotations
 
+import contextlib
+
 from dfs import edge_finder_tab as eft
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
 from dfs.sheet_color_scales import GRAD_MAX, GRAD_MIN, WHITE
@@ -72,7 +74,14 @@ def tab_rows(layout: eft.Layout, edge_tab: str, gid: int) -> list[list]:
 
 
 def write_tab(client: SheetsClient, inputs: eft.Inputs | None, *, edge_tab: str = "EdgeRaw") -> str:
-    """Write and style the whole tab. `inputs` None writes the empty-state layout (a template)."""
+    """Write and style the whole tab. `inputs` None writes the empty-state layout (a template). The
+    formatting is hundreds of small requests, sent together through `client.batched()`."""
+    batched = getattr(client, "batched", None)
+    with batched() if batched is not None else contextlib.nullcontext():
+        return _write_tab(client, inputs, edge_tab=edge_tab)
+
+
+def _write_tab(client: SheetsClient, inputs: eft.Inputs | None, *, edge_tab: str) -> str:
     layout = eft.build_layout(inputs, edge_tab_name=edge_tab)
     gid = client.tab_gid(edge_tab) if client.tab_exists(edge_tab) else 0
     rows = tab_rows(layout, edge_tab, gid)

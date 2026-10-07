@@ -100,6 +100,7 @@ _ALL_GOOD_TABS = {
     "Season": list(SEASON_HEADER),
     DKSALCLEAN_TAB: ["Position", "Team", "ID", "Name", "Salary", "Team", "OPP"],
     "NameAlias": [],
+    "Edge Finder": [],
     EXPOSURE_TAB: [],
 }
 

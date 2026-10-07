@@ -253,3 +253,22 @@ made every kickoff look four hours (five after the November clock change) early.
 Fix: update to the current code (`kickoff.py` converts it). If you still see it, check `dfs status`/EdgeRaw's
 `GameStart` column is populated and your computer's clock is right.
 
+
+---
+
+**The Edge Finder columns (`CalPts`, `Hit3x%`, `Boom%`, `Edge`, ...) are blank, or `Edge Finder` says "Not synced yet".**
+Cause: the Edge Finder step is fail-soft, so a problem blanks only what depends on it and never fails the sync. Look
+for `Edge Finder columns skipped` or `UM unavailable` in the sync output, and `notes` in
+`data/current/edge_finder/status.json`. Usual causes: no `data/model_cache/` (the UM model reads it), a
+`ffopportunity` / `nflverse_injuries` / `nflverse_depth` download that failed (each leaves an empty frame, and only its
+own columns go blank), or no scored weeks yet (Week 1: `CalPts` is `AggPts`).
+Fix: `dfs model fetch` once, then `dfs sync` (a full sync refreshes the cached season inputs; `--live` reuses them).
+A QB projected under 10 points is blank on purpose ("not rated below 10 pts"), and a DST projected under 4 is shown
+muted because the engine understates its upside.
+
+---
+
+**Model Check has no Signals or Reliability numbers, or says `UM unavailable`.**
+Cause: `dfs results update` builds each scored week's signals (and attaches UM) from the free nflverse files; if a
+download or the model cache is missing it says so and leaves that part blank.
+Fix: `dfs model fetch`, then `dfs results update --all`. Weeks are rebuilt without lookahead, so rerunning is safe.

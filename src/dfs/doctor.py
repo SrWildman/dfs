@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS
+from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.sheet_empty_guards import describe as describe_unguarded
 from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
@@ -146,6 +147,7 @@ def _expected_tabs(cfg: Config) -> set[str]:
     tabs.add(ALIAS_TAB)
     tabs.add(PLAYER_POOL_RAW_TAB)
     tabs.add(DKSALCLEAN_TAB)
+    tabs.add(EDGE_FINDER_TAB)  # written by every sync; `dfs setup build-views` creates the empty state
     return tabs
 
 
