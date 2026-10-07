@@ -21,6 +21,9 @@ dependencies = [
     # The model's shipped joblib files are only valid under the scikit-learn that wrote them (loading checks
     # this and says "run `dfs model train`"); bump the pin and retrain together.
     "scikit-learn==1.9.1",
+    # Lineup simulator (dfs.sim): normal CDF and its inverse. scikit-learn already needs it; named so a
+    # change to scikit-learn cannot silently drop it.
+    "scipy>=1.11",
     "joblib>=1.3",
 ]
 
