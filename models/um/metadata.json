@@ -1,0 +1,299 @@
+{
+  "artifact_version": 1,
+  "blend": {
+    "dst": "trailing-8 DST points",
+    "offense_weights": {
+      "dk_l8": 0.5,
+      "xfp_l3": 0.5
+    }
+  },
+  "distribution": {
+    "bucket_edges": {
+      "DST": [
+        5.0,
+        7.0,
+        9.0
+      ],
+      "QB": [
+        14.0,
+        18.0,
+        22.0
+      ],
+      "RB": [
+        6.0,
+        10.0,
+        14.0,
+        18.0
+      ],
+      "TE": [
+        5.0,
+        8.0,
+        11.0
+      ],
+      "WR": [
+        6.0,
+        10.0,
+        14.0,
+        18.0
+      ]
+    },
+    "integer_scoring": [
+      "DST"
+    ],
+    "levels": [
+      0.01,
+      0.025,
+      0.05,
+      0.1,
+      0.15,
+      0.2,
+      0.25,
+      0.3,
+      0.35,
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6,
+      0.65,
+      0.7,
+      0.75,
+      0.8,
+      0.85,
+      0.9,
+      0.95,
+      0.975,
+      0.99
+    ]
+  },
+  "hgb_params": {
+    "l2_regularization": 1.0,
+    "learning_rate": 0.05,
+    "max_iter": 400,
+    "max_leaf_nodes": 31,
+    "min_samples_leaf": 40,
+    "random_state": 0
+  },
+  "holdout_seasons": [
+    2023,
+    2025
+  ],
+  "population": {
+    "min_prior_games": 1,
+    "min_xfp_l3": 4.0
+  },
+  "positions": {
+    "DST": {
+      "features": [
+        "opp_implied",
+        "home",
+        "weeks_into_season",
+        "games_l8",
+        "def_sacks",
+        "def_takeaways",
+        "def_dk",
+        "opp_sacks_allowed",
+        "opp_giveaways",
+        "opp_dst_conceded"
+      ],
+      "holdout_metrics": {
+        "mae_blend": 4.710401,
+        "mae_gbm": 4.682771,
+        "mae_l8": 4.710401,
+        "rho_blend": 0.103254,
+        "rho_gbm": 0.187457,
+        "rho_l8": 0.103254
+      },
+      "method": "gbm",
+      "n_holdout": 1632,
+      "n_oof": 6302,
+      "n_train_holdout_fit": 4670
+    },
+    "QB": {
+      "features": [
+        "dk_l1",
+        "dk_l3",
+        "dk_l8",
+        "xfp_l1",
+        "xfp_l3",
+        "xfp_l8",
+        "targets_l1",
+        "targets_l3",
+        "targets_l8",
+        "carries_l1",
+        "carries_l3",
+        "carries_l8",
+        "target_share_l1",
+        "target_share_l3",
+        "target_share_l8",
+        "air_yards_share_l1",
+        "air_yards_share_l3",
+        "air_yards_share_l8",
+        "receiving_air_yards_l1",
+        "receiving_air_yards_l3",
+        "receiving_air_yards_l8",
+        "attempts_l3",
+        "attempts_l8",
+        "passing_epa_l3",
+        "passing_epa_l8",
+        "games_l8",
+        "weeks_into_season",
+        "implied",
+        "spread",
+        "total",
+        "home",
+        "def_vs_pos_l8"
+      ],
+      "holdout_metrics": {
+        "mae_blend": 6.822408,
+        "mae_gbm": 6.839693,
+        "mae_l8": 6.983618,
+        "rho_blend": 0.402173,
+        "rho_gbm": 0.399637,
+        "rho_l8": 0.37472
+      },
+      "method": "blend",
+      "n_holdout": 1792,
+      "n_oof": 6689,
+      "n_train_holdout_fit": 4897
+    },
+    "RB": {
+      "features": [
+        "dk_l1",
+        "dk_l3",
+        "dk_l8",
+        "xfp_l1",
+        "xfp_l3",
+        "xfp_l8",
+        "targets_l1",
+        "targets_l3",
+        "targets_l8",
+        "carries_l1",
+        "carries_l3",
+        "carries_l8",
+        "target_share_l1",
+        "target_share_l3",
+        "target_share_l8",
+        "air_yards_share_l1",
+        "air_yards_share_l3",
+        "air_yards_share_l8",
+        "receiving_air_yards_l1",
+        "receiving_air_yards_l3",
+        "receiving_air_yards_l8",
+        "games_l8",
+        "weeks_into_season",
+        "implied",
+        "spread",
+        "total",
+        "home",
+        "def_vs_pos_l8"
+      ],
+      "holdout_metrics": {
+        "mae_blend": 5.687701,
+        "mae_gbm": 5.751751,
+        "mae_l8": 5.794037,
+        "rho_blend": 0.558707,
+        "rho_gbm": 0.537822,
+        "rho_l8": 0.540133
+      },
+      "method": "blend",
+      "n_holdout": 2989,
+      "n_oof": 12280,
+      "n_train_holdout_fit": 9291
+    },
+    "TE": {
+      "features": [
+        "dk_l1",
+        "dk_l3",
+        "dk_l8",
+        "xfp_l1",
+        "xfp_l3",
+        "xfp_l8",
+        "targets_l1",
+        "targets_l3",
+        "targets_l8",
+        "carries_l1",
+        "carries_l3",
+        "carries_l8",
+        "target_share_l1",
+        "target_share_l3",
+        "target_share_l8",
+        "air_yards_share_l1",
+        "air_yards_share_l3",
+        "air_yards_share_l8",
+        "receiving_air_yards_l1",
+        "receiving_air_yards_l3",
+        "receiving_air_yards_l8",
+        "games_l8",
+        "weeks_into_season",
+        "implied",
+        "spread",
+        "total",
+        "home",
+        "def_vs_pos_l8"
+      ],
+      "holdout_metrics": {
+        "mae_blend": 4.807529,
+        "mae_gbm": 4.864941,
+        "mae_l8": 4.870152,
+        "rho_blend": 0.421249,
+        "rho_gbm": 0.400623,
+        "rho_l8": 0.411394
+      },
+      "method": "blend",
+      "n_holdout": 1940,
+      "n_oof": 7604,
+      "n_train_holdout_fit": 5664
+    },
+    "WR": {
+      "features": [
+        "dk_l1",
+        "dk_l3",
+        "dk_l8",
+        "xfp_l1",
+        "xfp_l3",
+        "xfp_l8",
+        "targets_l1",
+        "targets_l3",
+        "targets_l8",
+        "carries_l1",
+        "carries_l3",
+        "carries_l8",
+        "target_share_l1",
+        "target_share_l3",
+        "target_share_l8",
+        "air_yards_share_l1",
+        "air_yards_share_l3",
+        "air_yards_share_l8",
+        "receiving_air_yards_l1",
+        "receiving_air_yards_l3",
+        "receiving_air_yards_l8",
+        "games_l8",
+        "weeks_into_season",
+        "implied",
+        "spread",
+        "total",
+        "home",
+        "def_vs_pos_l8"
+      ],
+      "holdout_metrics": {
+        "mae_blend": 5.830376,
+        "mae_gbm": 5.797391,
+        "mae_l8": 5.892393,
+        "rho_blend": 0.494629,
+        "rho_gbm": 0.503696,
+        "rho_l8": 0.48162
+      },
+      "method": "gbm",
+      "n_holdout": 4788,
+      "n_oof": 18985,
+      "n_train_holdout_fit": 14197
+    }
+  },
+  "sklearn_version": "1.9.1",
+  "train_seasons": [
+    2014,
+    2025
+  ],
+  "trained_on": "2026-10-07"
+}

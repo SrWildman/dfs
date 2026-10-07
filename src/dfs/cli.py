@@ -214,6 +214,7 @@ app.add_typer(week_app, name="week")
 app.add_typer(results_app, name="results")
 app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
+app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model")
 
 console = Console()
 
