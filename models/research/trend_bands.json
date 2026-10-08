@@ -1,0 +1,1071 @@
+{
+  "metadata": {
+    "study": "r6",
+    "seasons": [
+      2014,
+      2025
+    ],
+    "fit_seasons": [
+      2014,
+      2021
+    ],
+    "test_seasons": [
+      2022,
+      2025
+    ],
+    "n": 38892,
+    "generated": "2026-10-08",
+    "code_version": "22da938",
+    "trend_seasons": [
+      2018,
+      2025
+    ]
+  },
+  "window": {
+    "recent_games": 3,
+    "prior_games": 6,
+    "min_prior_games": 9
+  },
+  "seasons": [
+    2018,
+    2025
+  ],
+  "target_flag_rate": 0.15,
+  "populations": {
+    "all": "every skill-position player-game with full windows",
+    "pool": "the UM-projected subset (>= 1 prior game, last-3 xFP >= 4): who the sheet lists"
+  },
+  "arrow_rule": "show \u25b2 when L3 - prior >= +threshold and \u25bc when L3 - prior <= -threshold; no arrow when the player has fewer than min_prior_games earlier games. Use recommended.per_position",
+  "n_player_games": 38892,
+  "metrics": {
+    "tgt_share": {
+      "label": "Tgt%",
+      "feature": "tgt_share_chg",
+      "unit": "share",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 0.0401,
+            "abs_p80": 0.0495,
+            "abs_p90": 0.0666,
+            "arrow_threshold": 0.0562,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 0.044,
+            "abs_p80": 0.0545,
+            "abs_p90": 0.0713,
+            "arrow_threshold": 0.0623,
+            "flag_rate": 0.151
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15916,
+            "sd": 0.0562,
+            "abs_p80": 0.0707,
+            "abs_p90": 0.0924,
+            "arrow_threshold": 0.0801,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 0.0588,
+            "abs_p80": 0.075,
+            "abs_p90": 0.0962,
+            "arrow_threshold": 0.0836,
+            "flag_rate": 0.15
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 0.0452,
+            "abs_p80": 0.0545,
+            "abs_p90": 0.0747,
+            "arrow_threshold": 0.0628,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 0.0495,
+            "abs_p80": 0.0622,
+            "abs_p90": 0.0827,
+            "arrow_threshold": 0.0709,
+            "flag_rate": 0.15
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34589,
+          "sd": 0.0492,
+          "abs_p80": 0.0605,
+          "abs_p90": 0.0814,
+          "arrow_threshold": 0.0693,
+          "flag_rate": 0.15
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 0.0528,
+          "abs_p80": 0.0662,
+          "abs_p90": 0.0868,
+          "arrow_threshold": 0.0752,
+          "flag_rate": 0.15
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 0.0623,
+            "flag_rate": 0.151
+          },
+          "WR": {
+            "threshold": 0.0836,
+            "flag_rate": 0.15
+          },
+          "TE": {
+            "threshold": 0.0709,
+            "flag_rate": 0.15
+          }
+        },
+        "pooled": {
+          "threshold": 0.0752,
+          "flag_rate": 0.15
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.086,
+          "WR": 0.198,
+          "TE": 0.131
+        }
+      }
+    },
+    "wopr": {
+      "label": "WOPR",
+      "feature": "wopr_chg",
+      "unit": "index",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 0.0641,
+            "abs_p80": 0.0777,
+            "abs_p90": 0.106,
+            "arrow_threshold": 0.0893,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 0.0703,
+            "abs_p80": 0.0864,
+            "abs_p90": 0.114,
+            "arrow_threshold": 0.0991,
+            "flag_rate": 0.15
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15916,
+            "sd": 0.138,
+            "abs_p80": 0.172,
+            "abs_p90": 0.228,
+            "arrow_threshold": 0.196,
+            "flag_rate": 0.151
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 0.145,
+            "abs_p80": 0.184,
+            "abs_p90": 0.239,
+            "arrow_threshold": 0.207,
+            "flag_rate": 0.152
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 0.0991,
+            "abs_p80": 0.12,
+            "abs_p90": 0.164,
+            "arrow_threshold": 0.138,
+            "flag_rate": 0.152
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 0.109,
+            "abs_p80": 0.138,
+            "abs_p90": 0.183,
+            "arrow_threshold": 0.157,
+            "flag_rate": 0.151
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34589,
+          "sd": 0.111,
+          "abs_p80": 0.131,
+          "abs_p90": 0.185,
+          "arrow_threshold": 0.153,
+          "flag_rate": 0.152
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 0.119,
+          "abs_p80": 0.145,
+          "abs_p90": 0.199,
+          "arrow_threshold": 0.168,
+          "flag_rate": 0.15
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 0.0991,
+            "flag_rate": 0.15
+          },
+          "WR": {
+            "threshold": 0.207,
+            "flag_rate": 0.152
+          },
+          "TE": {
+            "threshold": 0.157,
+            "flag_rate": 0.151
+          }
+        },
+        "pooled": {
+          "threshold": 0.168,
+          "flag_rate": 0.15
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.0242,
+          "WR": 0.24,
+          "TE": 0.125
+        }
+      }
+    },
+    "ay_share": {
+      "label": "Air-yards share",
+      "feature": "ay_share_chg",
+      "unit": "share",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 0.0287,
+            "abs_p80": 0.0296,
+            "abs_p90": 0.043,
+            "arrow_threshold": 0.0351,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 0.0328,
+            "abs_p80": 0.0349,
+            "abs_p90": 0.0488,
+            "arrow_threshold": 0.0408,
+            "flag_rate": 0.151
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15916,
+            "sd": 0.0907,
+            "abs_p80": 0.113,
+            "abs_p90": 0.151,
+            "arrow_threshold": 0.129,
+            "flag_rate": 0.151
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 0.097,
+            "abs_p80": 0.122,
+            "abs_p90": 0.159,
+            "arrow_threshold": 0.137,
+            "flag_rate": 0.152
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 0.0562,
+            "abs_p80": 0.0671,
+            "abs_p90": 0.0922,
+            "arrow_threshold": 0.0768,
+            "flag_rate": 0.151
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 0.0635,
+            "abs_p80": 0.0775,
+            "abs_p90": 0.105,
+            "arrow_threshold": 0.0891,
+            "flag_rate": 0.15
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34589,
+          "sd": 0.069,
+          "abs_p80": 0.0783,
+          "abs_p90": 0.116,
+          "arrow_threshold": 0.0942,
+          "flag_rate": 0.15
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 0.076,
+          "abs_p80": 0.0898,
+          "abs_p90": 0.128,
+          "arrow_threshold": 0.106,
+          "flag_rate": 0.15
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 0.0408,
+            "flag_rate": 0.151
+          },
+          "WR": {
+            "threshold": 0.137,
+            "flag_rate": 0.152
+          },
+          "TE": {
+            "threshold": 0.0891,
+            "flag_rate": 0.15
+          }
+        },
+        "pooled": {
+          "threshold": 0.106,
+          "flag_rate": 0.15
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.0102,
+          "WR": 0.261,
+          "TE": 0.0964
+        }
+      }
+    },
+    "carry_share": {
+      "label": "Rush%",
+      "feature": "carry_share_chg",
+      "unit": "share",
+      "positions": {
+        "QB": {
+          "all": {
+            "n": 4303,
+            "sd": 0.0586,
+            "abs_p80": 0.0714,
+            "abs_p90": 0.0953,
+            "arrow_threshold": 0.0816,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 4068,
+            "sd": 0.0581,
+            "abs_p80": 0.071,
+            "abs_p90": 0.0951,
+            "arrow_threshold": 0.0811,
+            "flag_rate": 0.15
+          }
+        },
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 0.13,
+            "abs_p80": 0.154,
+            "abs_p90": 0.22,
+            "arrow_threshold": 0.18,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 0.142,
+            "abs_p80": 0.172,
+            "abs_p90": 0.237,
+            "arrow_threshold": 0.197,
+            "flag_rate": 0.151
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 15052,
+          "sd": 0.114,
+          "abs_p80": 0.127,
+          "abs_p90": 0.188,
+          "arrow_threshold": 0.152,
+          "flag_rate": 0.151
+        },
+        "pool": {
+          "n": 11453,
+          "sd": 0.119,
+          "abs_p80": 0.134,
+          "abs_p90": 0.195,
+          "arrow_threshold": 0.16,
+          "flag_rate": 0.15
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "QB": {
+            "threshold": 0.0811,
+            "flag_rate": 0.15
+          },
+          "RB": {
+            "threshold": 0.197,
+            "flag_rate": 0.151
+          }
+        },
+        "pooled": {
+          "threshold": 0.16,
+          "flag_rate": 0.15
+        },
+        "flag_rate_at_pooled": {
+          "QB": 0.0125,
+          "RB": 0.226
+        }
+      }
+    },
+    "rec_pg": {
+      "label": "Rec/G",
+      "feature": "rec_pg_chg",
+      "unit": "per game",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 1.18,
+            "abs_p80": 1.5,
+            "abs_p90": 2.0,
+            "arrow_threshold": 1.66,
+            "flag_rate": 0.162
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 1.32,
+            "abs_p80": 1.67,
+            "abs_p90": 2.17,
+            "arrow_threshold": 2.0,
+            "flag_rate": 0.133
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15916,
+            "sd": 1.46,
+            "abs_p80": 1.83,
+            "abs_p90": 2.5,
+            "arrow_threshold": 2.16,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 1.58,
+            "abs_p80": 2.0,
+            "abs_p90": 2.67,
+            "arrow_threshold": 2.33,
+            "flag_rate": 0.149
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 1.26,
+            "abs_p80": 1.5,
+            "abs_p90": 2.17,
+            "arrow_threshold": 1.83,
+            "flag_rate": 0.145
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 1.43,
+            "abs_p80": 1.83,
+            "abs_p90": 2.33,
+            "arrow_threshold": 2.16,
+            "flag_rate": 0.147
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34589,
+          "sd": 1.33,
+          "abs_p80": 1.67,
+          "abs_p90": 2.17,
+          "arrow_threshold": 2.0,
+          "flag_rate": 0.137
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 1.48,
+          "abs_p80": 1.83,
+          "abs_p90": 2.5,
+          "arrow_threshold": 2.16,
+          "flag_rate": 0.153
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 2.0,
+            "flag_rate": 0.133
+          },
+          "WR": {
+            "threshold": 2.33,
+            "flag_rate": 0.149
+          },
+          "TE": {
+            "threshold": 2.16,
+            "flag_rate": 0.147
+          }
+        },
+        "pooled": {
+          "threshold": 2.16,
+          "flag_rate": 0.153
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.113,
+          "WR": 0.182,
+          "TE": 0.147
+        }
+      }
+    },
+    "rb_tgt_share": {
+      "label": "RB Tgt%",
+      "feature": "tgt_share_chg",
+      "unit": "share",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 0.0401,
+            "abs_p80": 0.0495,
+            "abs_p90": 0.0666,
+            "arrow_threshold": 0.0562,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 0.044,
+            "abs_p80": 0.0545,
+            "abs_p90": 0.0713,
+            "arrow_threshold": 0.0623,
+            "flag_rate": 0.151
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 10749,
+          "sd": 0.0401,
+          "abs_p80": 0.0495,
+          "abs_p90": 0.0666,
+          "arrow_threshold": 0.0562,
+          "flag_rate": 0.15
+        },
+        "pool": {
+          "n": 7385,
+          "sd": 0.044,
+          "abs_p80": 0.0545,
+          "abs_p90": 0.0713,
+          "arrow_threshold": 0.0623,
+          "flag_rate": 0.151
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 0.0623,
+            "flag_rate": 0.151
+          }
+        },
+        "pooled": {
+          "threshold": 0.0623,
+          "flag_rate": 0.151
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.151
+        }
+      }
+    },
+    "rz_pg": {
+      "label": "RZ/G",
+      "feature": "rz_pg_chg",
+      "unit": "per game",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 1.29,
+            "abs_p80": 1.5,
+            "abs_p90": 2.17,
+            "arrow_threshold": 1.83,
+            "flag_rate": 0.159
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 1.47,
+            "abs_p80": 1.83,
+            "abs_p90": 2.5,
+            "arrow_threshold": 2.16,
+            "flag_rate": 0.15
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15916,
+            "sd": 0.607,
+            "abs_p80": 0.667,
+            "abs_p90": 1.0,
+            "arrow_threshold": 1.0,
+            "flag_rate": 0.127
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 0.676,
+            "abs_p80": 0.833,
+            "abs_p90": 1.17,
+            "arrow_threshold": 1.0,
+            "flag_rate": 0.165
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 0.573,
+            "abs_p80": 0.667,
+            "abs_p90": 1.0,
+            "arrow_threshold": 0.833,
+            "flag_rate": 0.166
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 0.672,
+            "abs_p80": 0.833,
+            "abs_p90": 1.17,
+            "arrow_threshold": 1.0,
+            "flag_rate": 0.16
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34589,
+          "sd": 0.872,
+          "abs_p80": 1.0,
+          "abs_p90": 1.33,
+          "arrow_threshold": 1.16,
+          "flag_rate": 0.153
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 0.994,
+          "abs_p80": 1.17,
+          "abs_p90": 1.5,
+          "arrow_threshold": 1.33,
+          "flag_rate": 0.158
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 2.16,
+            "flag_rate": 0.15
+          },
+          "WR": {
+            "threshold": 1.0,
+            "flag_rate": 0.165
+          },
+          "TE": {
+            "threshold": 1.0,
+            "flag_rate": 0.16
+          }
+        },
+        "pooled": {
+          "threshold": 1.33,
+          "flag_rate": 0.158
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.36,
+          "WR": 0.0708,
+          "TE": 0.0598
+        }
+      }
+    },
+    "hvt_pg": {
+      "label": "HVT/G",
+      "feature": "hvt_pg_chg",
+      "unit": "per game",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 1.69,
+            "abs_p80": 2.0,
+            "abs_p90": 2.83,
+            "arrow_threshold": 2.5,
+            "flag_rate": 0.143
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 1.88,
+            "abs_p80": 2.33,
+            "abs_p90": 3.0,
+            "arrow_threshold": 2.83,
+            "flag_rate": 0.14
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15916,
+            "sd": 1.98,
+            "abs_p80": 2.5,
+            "abs_p90": 3.33,
+            "arrow_threshold": 3.0,
+            "flag_rate": 0.139
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 2.11,
+            "abs_p80": 2.67,
+            "abs_p90": 3.5,
+            "arrow_threshold": 3.16,
+            "flag_rate": 0.145
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 1.59,
+            "abs_p80": 1.83,
+            "abs_p90": 2.67,
+            "arrow_threshold": 2.33,
+            "flag_rate": 0.144
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 1.78,
+            "abs_p80": 2.17,
+            "abs_p90": 3.0,
+            "arrow_threshold": 2.66,
+            "flag_rate": 0.146
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34589,
+          "sd": 1.81,
+          "abs_p80": 2.17,
+          "abs_p90": 3.0,
+          "arrow_threshold": 2.66,
+          "flag_rate": 0.148
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 1.98,
+          "abs_p80": 2.5,
+          "abs_p90": 3.33,
+          "arrow_threshold": 3.0,
+          "flag_rate": 0.135
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 2.83,
+            "flag_rate": 0.14
+          },
+          "WR": {
+            "threshold": 3.16,
+            "flag_rate": 0.145
+          },
+          "TE": {
+            "threshold": 2.66,
+            "flag_rate": 0.146
+          }
+        },
+        "pooled": {
+          "threshold": 3.0,
+          "flag_rate": 0.135
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.114,
+          "WR": 0.162,
+          "TE": 0.102
+        }
+      }
+    },
+    "snap_pct": {
+      "label": "Snap%",
+      "feature": "snap_pct_chg",
+      "unit": "share",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10746,
+            "sd": 0.138,
+            "abs_p80": 0.165,
+            "abs_p90": 0.227,
+            "arrow_threshold": 0.191,
+            "flag_rate": 0.151
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 0.144,
+            "abs_p80": 0.173,
+            "abs_p90": 0.235,
+            "arrow_threshold": 0.2,
+            "flag_rate": 0.149
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15908,
+            "sd": 0.168,
+            "abs_p80": 0.198,
+            "abs_p90": 0.283,
+            "arrow_threshold": 0.233,
+            "flag_rate": 0.151
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 0.156,
+            "abs_p80": 0.183,
+            "abs_p90": 0.262,
+            "arrow_threshold": 0.216,
+            "flag_rate": 0.151
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 0.148,
+            "abs_p80": 0.175,
+            "abs_p90": 0.242,
+            "arrow_threshold": 0.203,
+            "flag_rate": 0.149
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 0.144,
+            "abs_p80": 0.168,
+            "abs_p90": 0.235,
+            "arrow_threshold": 0.196,
+            "flag_rate": 0.15
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34578,
+          "sd": 0.154,
+          "abs_p80": 0.182,
+          "abs_p90": 0.255,
+          "arrow_threshold": 0.213,
+          "flag_rate": 0.149
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 0.15,
+          "abs_p80": 0.178,
+          "abs_p90": 0.248,
+          "arrow_threshold": 0.208,
+          "flag_rate": 0.149
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 0.2,
+            "flag_rate": 0.149
+          },
+          "WR": {
+            "threshold": 0.216,
+            "flag_rate": 0.151
+          },
+          "TE": {
+            "threshold": 0.196,
+            "flag_rate": 0.15
+          }
+        },
+        "pooled": {
+          "threshold": 0.208,
+          "flag_rate": 0.149
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.138,
+          "WR": 0.162,
+          "TE": 0.133
+        }
+      }
+    },
+    "ez_tgt_pg": {
+      "label": "End-zone targets/G",
+      "feature": "ez_tgt_pg_chg",
+      "unit": "per game",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10749,
+            "sd": 0.133,
+            "abs_p80": 0.167,
+            "abs_p90": 0.167,
+            "arrow_threshold": 0.333,
+            "flag_rate": 0.0937
+          },
+          "pool": {
+            "n": 7385,
+            "sd": 0.15,
+            "abs_p80": 0.167,
+            "abs_p90": 0.333,
+            "arrow_threshold": 0.333,
+            "flag_rate": 0.119
+          }
+        },
+        "WR": {
+          "all": {
+            "n": 15916,
+            "sd": 0.448,
+            "abs_p80": 0.5,
+            "abs_p90": 0.667,
+            "arrow_threshold": 0.666,
+            "flag_rate": 0.175
+          },
+          "pool": {
+            "n": 11674,
+            "sd": 0.503,
+            "abs_p80": 0.667,
+            "abs_p90": 0.833,
+            "arrow_threshold": 0.833,
+            "flag_rate": 0.129
+          }
+        },
+        "TE": {
+          "all": {
+            "n": 7924,
+            "sd": 0.375,
+            "abs_p80": 0.5,
+            "abs_p90": 0.667,
+            "arrow_threshold": 0.666,
+            "flag_rate": 0.117
+          },
+          "pool": {
+            "n": 4731,
+            "sd": 0.439,
+            "abs_p80": 0.5,
+            "abs_p90": 0.667,
+            "arrow_threshold": 0.666,
+            "flag_rate": 0.175
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 34589,
+          "sd": 0.361,
+          "abs_p80": 0.333,
+          "abs_p90": 0.667,
+          "arrow_threshold": 0.5,
+          "flag_rate": 0.178
+        },
+        "pool": {
+          "n": 23790,
+          "sd": 0.412,
+          "abs_p80": 0.5,
+          "abs_p90": 0.667,
+          "arrow_threshold": 0.666,
+          "flag_rate": 0.148
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 0.333,
+            "flag_rate": 0.119
+          },
+          "WR": {
+            "threshold": 0.833,
+            "flag_rate": 0.129
+          },
+          "TE": {
+            "threshold": 0.666,
+            "flag_rate": 0.175
+          }
+        },
+        "pooled": {
+          "threshold": 0.666,
+          "flag_rate": 0.148
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.00934,
+          "WR": 0.225,
+          "TE": 0.175
+        }
+      }
+    },
+    "gl_share": {
+      "label": "Goal-line carry share",
+      "feature": "gl_share_chg",
+      "unit": "share",
+      "positions": {
+        "RB": {
+          "all": {
+            "n": 10043,
+            "sd": 0.313,
+            "abs_p80": 0.385,
+            "abs_p90": 0.5,
+            "arrow_threshold": 0.454,
+            "flag_rate": 0.15
+          },
+          "pool": {
+            "n": 6923,
+            "sd": 0.355,
+            "abs_p80": 0.45,
+            "abs_p90": 0.6,
+            "arrow_threshold": 0.511,
+            "flag_rate": 0.134
+          }
+        }
+      },
+      "pooled": {
+        "all": {
+          "n": 10043,
+          "sd": 0.313,
+          "abs_p80": 0.385,
+          "abs_p90": 0.5,
+          "arrow_threshold": 0.454,
+          "flag_rate": 0.15
+        },
+        "pool": {
+          "n": 6923,
+          "sd": 0.355,
+          "abs_p80": 0.45,
+          "abs_p90": 0.6,
+          "arrow_threshold": 0.511,
+          "flag_rate": 0.134
+        }
+      },
+      "recommended": {
+        "per_position": {
+          "RB": {
+            "threshold": 0.511,
+            "flag_rate": 0.134
+          }
+        },
+        "pooled": {
+          "threshold": 0.511,
+          "flag_rate": 0.134
+        },
+        "flag_rate_at_pooled": {
+          "RB": 0.134
+        }
+      }
+    }
+  }
+}
