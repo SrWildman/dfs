@@ -27,6 +27,15 @@ def test_a_count_metric_moving_in_sixths_keeps_its_boundary_value():
     assert out["flag_rate"] == pytest.approx(0.20)
 
 
+def test_values_equal_up_to_float_noise_are_one_step_not_two():
+    sixth = 1 / 6
+    noisy = np.nextafter(sixth, 1.0)  # what (2 * sum3 - sum6) / 6 sometimes gives for the same sixth
+    change = np.concatenate([np.zeros(70), np.full(20, sixth), np.full(6, noisy), np.full(4, 1 / 3)])
+    out = T.arrow_threshold(change)
+    # 30% flagged at a sixth, 4% at a third: 4% is nearer to 15% than 30%. A noise sliver must not win.
+    assert out["threshold"] == 0.333 and out["flag_rate"] == pytest.approx(0.04)
+
+
 def test_floor_sig_rounds_toward_zero():
     assert T._floor_sig(0.66666) == 0.666
     assert T._floor_sig(2.16667) == 2.16

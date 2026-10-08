@@ -62,7 +62,9 @@ def arrow_threshold(change: np.ndarray, target: float = TARGET_FLAG_RATE) -> dic
     a = np.abs(change[~np.isnan(change)])
     if len(a) == 0:
         return {"threshold": None, "flag_rate": None}
-    values, counts = np.unique(a, return_counts=True)
+    # Sixths computed two ways differ in the 16th digit (1/6 vs 1/6 + 1 ulp): merge them, or a sliver of
+    # float noise looks like its own step and wins the search.
+    values, counts = np.unique(np.round(a, 9), return_counts=True)
     rate_at_least = counts[::-1].cumsum()[::-1] / len(a)
     nonzero = values > 0
     values, rate_at_least = values[nonzero], rate_at_least[nonzero]
