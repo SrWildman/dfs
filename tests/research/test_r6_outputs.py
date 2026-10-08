@@ -128,6 +128,7 @@ def check_usage_signals(payload: dict, full: bool = True):
         assert by_id[i]["survives_um_matching"] and by_id[i]["passes_keep_rule"]
         assert by_id[i]["um_matched"]["verdict"] == "keep"
     assert {i for i, s in by_id.items() if s["survives_um_matching"]} == set(payload["keeps_um_matched"])
+    assert payload["recommended_chips"] == payload["keeps_um_matched"] and payload["recommended_chips_note"]
     shuffle = payload["shuffle"]
     assert {"seed", "n_shuffles", "n_specs", "n_thresholds_swept", "brief_rule", "um_matched_rule"} <= set(
         shuffle

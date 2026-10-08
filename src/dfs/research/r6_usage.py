@@ -709,6 +709,11 @@ def run_study(f: pd.DataFrame, n_shuffles: int = N_SHUFFLES, seed: int = SEED, l
         "signals": records,
         "keeps": [r["id"] for r in kept],
         "keeps_um_matched": [r["id"] for r in kept_m],
+        # Sam's decision: build only the UM-matched signals. `keeps` (the brief's rule alone) is kept for the
+        # record; it includes rows that are mostly UM's top-end over-projection and must not become chips.
+        "recommended_chips": [r["id"] for r in kept_m],
+        "recommended_chips_note": "Build only these (they keep against UM and among players UM rates alike). "
+        "Rows in `keeps` but not here are not to be built.",
         "overlap_pairs": pairs,
         "shuffle": shuffle,
         "routes": ROUTES,
