@@ -16,7 +16,7 @@ The tokens are context, not proven edges (`xfp.CONTEXT_NOTE`); Model Check score
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -24,7 +24,10 @@ import pandas as pd
 from dfs import injury_beneficiaries as ib
 from dfs import matchups, probabilities, xfp
 from dfs.derived import OUT_STATUSES
+from dfs.log import get_logger
 from dfs.player_join import JoinResult, join_key, join_source_to_dk, normalize_team
+
+log = get_logger("signals")
 
 SIGNAL_COLUMNS = [
     "Id",
@@ -117,17 +120,63 @@ def identity_for(data: SeasonData, depth_dt: str | None = None) -> pd.DataFrame:
     return identity_frame(ib.latest_depth(data.depth, depth_dt), newest, data.injuries)
 
 
-def attach_gsis(frame: pd.DataFrame, identity: pd.DataFrame) -> tuple[pd.DataFrame, JoinResult | None]:
-    """Add `GsisId` to the DraftKings-level frame by the project's one join (name, team, position). A
-    `GsisId` already on the frame is kept; DSTs never get one."""
+def attach_gsis(
+    frame: pd.DataFrame, identity: pd.DataFrame, crosswalk: pd.DataFrame | None = None
+) -> tuple[pd.DataFrame, JoinResult | None]:
+    """Add `GsisId` to the DraftKings-level frame by the project's one join (name, team, position) against
+    the identity sources (depth chart first). A `GsisId` already on the frame is kept; DSTs never get one.
+
+    `crosswalk` (`Id`, `GsisId`: the usage join's DK-id -> gsis map, `data/current/gsis_crosswalk.csv`) is the
+    second source: it fills only the players the identity join missed, by DraftKings `Id`, never by name. It
+    catches a player whose identity-file team is stale (a player traded or signed after his last game)."""
     out = frame.copy()
     if "GsisId" not in out.columns:
         out["GsisId"] = np.nan
-    if identity.empty:
-        return out, None
     players = out[out["Position"] != "DST"]
-    if players.empty:
-        return out, None
+    result = None
+    if not identity.empty and not players.empty:
+        out, result = _attach_by_identity(out, players, identity)
+    if crosswalk is not None and not crosswalk.empty and not players.empty:
+        out, result = _fill_from_crosswalk(out, crosswalk, result)
+    return out, result
+
+
+def _fill_from_crosswalk(
+    out: pd.DataFrame, crosswalk: pd.DataFrame, result: JoinResult | None
+) -> tuple[pd.DataFrame, JoinResult | None]:
+    """Fill still-missing gsis ids of non-DST players from the DK-id crosswalk and credit them to the join
+    result's pool counts."""
+    by_id = crosswalk.drop_duplicates(subset="Id").assign(Id=lambda d: d["Id"].astype(str)).set_index("Id")
+    missing = (out["GsisId"].isna() | (out["GsisId"] == "")) & (out["Position"] != "DST")
+    found = out.loc[missing, "Id"].astype(str).map(by_id["GsisId"])
+    filled = found.dropna()
+    if filled.empty:
+        return out, result
+    out = out.copy()
+    out.loc[filled.index, "GsisId"] = filled
+    for idx in filled.index:
+        log.info("gsis: %r matched by DraftKings id through the usage crosswalk", out.at[idx, "Name"])
+    if result is not None:
+        in_pool = out.loc[filled.index, "RosterablePool"].astype(bool) if "RosterablePool" in out else None
+        pool_filled = filled.index if in_pool is None else filled.index[in_pool.to_numpy()]
+        names = set(out.loc[pool_filled, "Name"])
+        by_position = dict(result.by_position)
+        for pos, count in out.loc[pool_filled, "Position"].value_counts().items():
+            if pos in by_position:
+                matched, total = by_position[pos]
+                by_position[pos] = (matched + int(count), total)
+        result = replace(
+            result,
+            pool_matched=result.pool_matched + len(pool_filled),
+            unmatched_pool_names=[n for n in result.unmatched_pool_names if n not in names],
+            by_position=by_position,
+        )
+    return out, result
+
+
+def _attach_by_identity(
+    out: pd.DataFrame, players: pd.DataFrame, identity: pd.DataFrame
+) -> tuple[pd.DataFrame, JoinResult]:
     pool = out["RosterablePool"].astype(bool) if "RosterablePool" in out.columns else None
     result = join_source_to_dk(
         players[["Id", "Name", "Team", "Position"]],

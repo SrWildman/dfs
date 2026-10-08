@@ -133,7 +133,9 @@ def _enrich(
 
     pool = _rosterable_pool_mask(pd.to_numeric(frame["ProjPts"], errors="coerce"), frame["Position"])
     df = dk_level_frame(frame, pool)
-    df, join = signals.attach_gsis(df, signals.identity_for(data, depth_cutoff(df, now)))
+    df, join = signals.attach_gsis(
+        df, signals.identity_for(data, depth_cutoff(df, now)), crosswalk=read_gsis_crosswalk()
+    )
 
     with perf.phase("edge finder: CalPts"):
         fitted = calibration.fit(
@@ -209,6 +211,7 @@ def _write_outputs(
         "calpts_weeks": list(fitted.weeks),
         "calpts_sources": list(fitted.sources),
         "gsis_coverage": list(join_coverage(join)),
+        "gsis_unmatched": list(join.unmatched_pool_names) if join is not None else [],
         "live": bool(ctx.live),
         "notes": notes,
     }
@@ -243,6 +246,21 @@ def injury_report_info(data: signals.SeasonData, ctx: SyncContext) -> dict:
         "with_status": with_status,
         "fetched": fetched,
     }
+
+
+def read_gsis_crosswalk() -> pd.DataFrame | None:
+    """The usage join's DraftKings-id -> gsis map from this sync (`data/current/gsis_crosswalk.csv`), the
+    second identity source after the depth chart. None when it does not exist."""
+    from dfs.paths import CURRENT_DIR
+
+    path = CURRENT_DIR / "gsis_crosswalk.csv"
+    if not path.exists():
+        return None
+    try:
+        return pd.read_csv(path, dtype={"Id": str})
+    except (OSError, ValueError, pd.errors.ParserError) as e:
+        log.warning("gsis crosswalk unreadable (%s) -- identity from the depth chart and stats only", e)
+        return None
 
 
 def join_coverage(join) -> tuple[int, int]:  # noqa: ANN001

@@ -1381,6 +1381,19 @@ MAE 3.39 against 2.41) and only roughly right for carries.
   copy was fetched. Before Friday the Week's rows are practice reports only (statuses blank); outs then come from
   DraftKings' `Avail`. That is a timing fact, not a fault.
 
+### Identity: DraftKings player to nflverse gsis id (`signals.attach_gsis`)
+
+Order: the depth chart (each player's current team), then this and last season's ffopportunity players, then the injury
+report, all through the project's one join (normalised name + team + position; the nickname fallback also needs a
+compatible first name, never a last name alone); then the usage join's DraftKings-id crosswalk
+(`data/current/gsis_crosswalk.csv`) fills only the players still missing, **by DraftKings `Id`, never by name**. DSTs have
+no gsis id and are not in the denominator. On Week 5 (2026-10-08) the rosterable pool is 224 players ex-DST (246 with the
+22 DSTs): identity sources alone matched 223 (99.6%; with at least one 2026 offensive snap: 208 of 209, 99.5%); the
+crosswalk rescued the one miss (Nick Westbrook-Ikhine, whose identity-file team was still MIA, DraftKings has him at IND),
+so 224 of 224 and 209 of 209. The 83.9% quoted when the depth chart became the first source was measured on a different
+state and on a denominator that included the DSTs (today the same denominator reads 224/246 = 91.1%). The sync's
+`status.json` lists any unmatched pool player under `gsis_unmatched`.
+
 ### Matchups (context) (`matchups.py`)
 
 **Context only.** The research (R2) found matchups add at most 0.04 points of MAE beyond the projection, so the Edge

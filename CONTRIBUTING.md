@@ -3630,6 +3630,8 @@ was edited by the signal and injury slices.**
   - Edge Finder tab: the injury section is carries-only plus an "Absent regulars" context block; "Matchups (context)";
     a status line for the injury report's source, rows, final statuses and fetch time.
   - Matchups: context only; the research's L4/L8 lookbacks are a window change, not a constant, so they were NOT adopted.
+- **Slice 2, Part 4 (identity).** `signals.attach_gsis(..., crosswalk=)` fills the players the identity join missed from the usage
+  crosswalk by DraftKings `Id` (`edge_finder.read_gsis_crosswalk`); `status.json` carries `gsis_unmatched`. Coverage ex-DST: 224/224.
 
 
 | Date | Tab | Change | Before | After | Applied to | Code that encodes it |
@@ -3641,3 +3643,4 @@ was edited by the signal and injury slices.**
 | 2026-10-07 | `Instructions` | A 20th tab row; doc-links header one row lower. | Doc-links header row 28. | Row 29. | Template, Week 5 | `sheet_instructions._TAB_ROWS`, `_DOC_LINKS_HEADER_ROW`. |
 | 2026-10-07 | `Model Check` | Projection Race, Reliability and Signals sections. | Seven blocks. | Ten blocks. | Week 5 (rebuilt by `dfs results update`) | `sheet_model_check`, `results_signals`. |
 | 2026-10-08 | `Edge Finder`, `Model Check` | Slice 1 (Parts 1-3): the injury section becomes carries-only with an "Absent regulars" context block (no `Gain Tgt/G` column), the signals table loses `BUY↑` and gains four `Unflagged <pos>` rows, "Matchups (context)", an injury-report status line. No EdgeRaw column, no other tab moved. | Injury section: `Gain Tgt/G`, `Gain Car/G`, `Gain xFP/G`; Signals: 8 rows. | Injury section: `Gain Car/G`, `Gain xFP/G` + Absent regulars (`Role`, `Tgt/G`, `Car/G`, `Games missed`); Signals: 11 rows. | Template, Week 5 (rewritten by the sync / `dfs results update`) | `edge_finder_tab.BENEFICIARY_COLUMNS`, `ABSENCE_COLUMNS`, `SIGNAL_COLUMNS`; `results_signals.SIGNAL_GROUPS`, `BASELINE_POSITIONS`. |
+| 2026-10-08 | none | Slice 2 (Part 4): gsis identity coverage fix (code and `status.json` only). No sheet structure moved. | n/a | n/a | n/a (a data join) | `signals.attach_gsis`, `edge_finder.read_gsis_crosswalk`. |

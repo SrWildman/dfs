@@ -246,6 +246,61 @@ def test_nothing_from_the_slate_week_or_later_changes_the_signal_no_lookahead():
     pd.testing.assert_frame_equal(base.absences, again.absences)
 
 
+def _dk_frame():
+    return pd.DataFrame(
+        [
+            {
+                "Id": "1",
+                "Name": "Nick Westbrook-Ikhine",
+                "Team": "IND",
+                "Position": "WR",
+                "RosterablePool": True,
+            },
+            {"Id": "2", "Name": "Star", "Team": "DEN", "Position": "WR", "RosterablePool": True},
+            {"Id": "3", "Name": "Colts", "Team": "IND", "Position": "DST", "RosterablePool": True},
+            {"Id": "4", "Name": "Other Player", "Team": "DEN", "Position": "WR", "RosterablePool": True},
+        ]
+    )
+
+
+def _identity():
+    return pd.DataFrame(
+        [
+            {"GsisId": "w", "Name": "Nick Westbrook-Ikhine", "Team": "MIA", "Position": "WR"},  # stale team
+            {"GsisId": "s", "Name": "Star", "Team": "DEN", "Position": "WR"},
+        ]
+    )
+
+
+def test_a_stale_identity_team_is_rescued_by_the_usage_crosswalk_by_draftkings_id_only():
+    frame = _dk_frame()
+    plain, join = signals.attach_gsis(frame, _identity())
+    assert plain.set_index("Id").loc["2", "GsisId"] == "s" and pd.isna(
+        plain.set_index("Id").loc["1", "GsisId"]
+    )
+    assert join.pool_matched == 1 and join.pool_total == 3
+    crosswalk = pd.DataFrame(
+        {"Id": ["1", "9"], "GsisId": ["00-W", "00-X"], "Name": ["Nick Westbrook-Ikhine", "Other Player"]}
+    )
+    fixed, join = signals.attach_gsis(frame, _identity(), crosswalk=crosswalk)
+    by_id = fixed.set_index("Id")["GsisId"]
+    assert by_id["1"] == "00-W" and by_id["2"] == "s"  # the crosswalk fills only what the join missed
+    assert pd.isna(by_id["3"])  # a DST never gets one
+    assert pd.isna(by_id["4"])  # a name match with a DIFFERENT DraftKings id is not a match: never by name
+    assert join.pool_matched == 2 and join.pool_total == 3
+    assert (
+        "Nick Westbrook-Ikhine" not in join.unmatched_pool_names
+        and "Other Player" in join.unmatched_pool_names
+    )
+    assert join.by_position["WR"] == (2, 3)
+
+
+def test_the_crosswalk_never_overwrites_an_id_the_identity_join_found():
+    crosswalk = pd.DataFrame({"Id": ["2"], "GsisId": ["WRONG"], "Name": ["Star"]})
+    fixed, _ = signals.attach_gsis(_dk_frame(), _identity(), crosswalk=crosswalk)
+    assert fixed.set_index("Id").loc["2", "GsisId"] == "s"
+
+
 def test_nothing_from_matchups_flows_into_calpts():
     import inspect
 
