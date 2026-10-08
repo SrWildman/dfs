@@ -471,10 +471,12 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
         "out designation exists."
     )
     b.header(BENEFICIARY_COLUMNS)
-    ben = inputs.beneficiaries
     by_gsis = (
         edge.drop_duplicates("GsisId").set_index("GsisId") if "GsisId" in edge.columns else pd.DataFrame()
     )
+    ben = on_slate(
+        inputs.beneficiaries, by_gsis
+    )  # only backs DraftKings lists: a back with no salary is no option
     if ben.empty:
         b.note("No regular back is out or questionable with a beneficiary this week.")
     else:

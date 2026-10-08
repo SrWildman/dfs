@@ -258,11 +258,11 @@ Fix: update to the current code (`kickoff.py` converts it). If you still see it,
 
 **The Edge Finder columns (`CalPts`, `Hit3x%`, `Boom%`, `Edge`, ...) are blank, or `Edge Finder` says "Not synced yet".**
 Cause: the Edge Finder step is fail-soft, so a problem blanks only what depends on it and never fails the sync. Look
-for `Edge Finder columns skipped` or `UM unavailable` in the sync output, and `notes` in
-`data/current/edge_finder/status.json`. Usual causes: no `data/model_cache/` (the UM model reads it), a
-`ffopportunity` / `nflverse_injuries` / `nflverse_depth` download that failed (each leaves an empty frame, and only its
-own columns go blank), or no scored weeks yet (Week 1: `CalPts` is `AggPts`).
-Fix: `dfs model fetch` once, then `dfs sync` (a full sync refreshes the cached season inputs; `--live` reuses them).
+for `Edge Finder columns skipped` in the sync output, and `notes` in `data/current/edge_finder/status.json`. Usual
+causes: a `ffopportunity` / `nflverse_injuries` / `nflverse_depth` download that failed (each leaves an empty frame, and
+only its own columns go blank), or no scored weeks yet (Week 1: `CalPts` is `AggPts`). UM is no longer an input to
+`CalPts` (2026-10-08), so a missing model cache cannot blank these columns.
+Fix: `dfs sync` (a full sync refreshes the cached season inputs; `--live` reuses them).
 A QB projected under 10 points is blank on purpose ("not rated below 10 pts"), and a DST projected under 4 is shown
 muted because the engine understates its upside.
 
@@ -272,3 +272,20 @@ muted because the engine understates its upside.
 Cause: `dfs results update` builds each scored week's signals (and attaches UM) from the free nflverse files; if a
 download or the model cache is missing it says so and leaves that part blank.
 Fix: `dfs model fetch`, then `dfs results update --all`. Weeks are rebuilt without lookahead, so rerunning is safe.
+
+---
+
+**"Priced in?" is blank on the Edge Finder tab, or the injury report line says "Practice reports only so far".**
+Not a fault. "Priced in?" compares TFFB's projection before and after the DraftKings status change, so it needs a
+projection snapshot from before the out designation; a back already OUT in the first snapshot we hold cannot be priced
+(blank, never a guess). The injury report line on the Edge Finder tab shows the nflverse report's row count, how many
+carry a final status and when it was fetched: before Friday's final report the Week's rows are practice reports with
+no status, so outs come from DraftKings' `Avail`.
+
+---
+
+**The Lineups simulator columns (`Median`, `p90`, `P(cash)`, `P(190+)`) are blank.**
+A lineup with an empty slot, or a name EdgeRaw does not have (typo, bye week), is left blank on purpose; fill it in and
+`dfs sync` again. If every lineup is blank, check the sync output for `Lineup simulator not written` (a Sheets error) or
+`column(s) [...] not found` (run `dfs setup reorder-columns`). The cash line is the median of your last three typed
+`Cash Line` values in Results; with none typed the sync says it used the 145 placeholder.

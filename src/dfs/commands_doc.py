@@ -116,6 +116,17 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         ],
     ),
     (
+        "Reference: the lineup simulator (only when needed)",
+        "The Median, p90, P(cash) and P(GPP) columns on Lineups are written by every `dfs sync`; these "
+        "commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` "
+        "fills and never touch a sheet.",
+        [
+            "dfs sim fit",
+            "dfs sim backtest",
+            "dfs sim demo",
+        ],
+    ),
+    (
         "Reference: building and styling a sheet (only when needed)",
         "You do not run these in a normal week. Run against the TEMPLATE first, then the live sheet "
         "(`--sheet-id`), then `dfs doctor` and `dfs setup audit-style` on both. `dfs setup sheet` runs the "

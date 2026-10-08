@@ -11,10 +11,11 @@ and his WR1 boom together -- and that is what this adds. It uses **public nflver
 through the UM model's existing loaders (`dfs.model`); no sheet, no credentials, no TFFB. Nothing in
 `src/dfs/sim/` writes to a sheet. See [MODEL.md](MODEL.md) for the distribution engine it builds on.
 
-`dfs sim` is **registered hidden** for now, like `dfs model`: a visible command must also be added to the
-launcher's `MORE_LABELS`, `commands_doc.SECTIONS` and the generated `docs/COMMANDS.md`, which belong to the
-local integration. Whoever wires the simulator into the sheet drops `hidden=True` in `src/dfs/sim/cli.py` and
-adds those three entries.
+`dfs sim` is a **visible command group** (`fit`, `backtest`, `demo`; the launcher's `MORE_LABELS`,
+`commands_doc.SECTIONS` and `docs/COMMANDS.md` list them). **In the sheet** (PROMPT_EDGE_V3 Part 5, 2026-10-08), the
+simulator runs on every `dfs sync` and fills the Lineups tab, and `dfs lineups late-swap` scores swaps with it:
+see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself writes to a sheet; the integration is in
+`src/dfs/sim_inputs.py`, `sheet_lineup_sim.py` and `late_swap_sim.py`.
 
 | Part | Module | What it does |
 |---|---|---|
@@ -640,3 +641,30 @@ top of the range. Whatever improves the top end of the engine will make the corr
 
 Every random draw is seeded (`--seed`, default 0). `dfs sim fit` takes about 80 s, `dfs sim backtest --jobs 4`
 about 5 minutes on four cores (about 35 on one); the results do not depend on `--jobs`.
+
+## In the sheet (the local integration)
+
+**Players.** `sim_inputs.build_specs` makes one `PlayerSpec` per EdgeRaw player, keyed by the name typed on Lineups.
+The projection is `CalPts` where present, else TFFB's `ProjPts`; the game id, team and opponent are EdgeRaw's
+`GameID`, `Team` and `Opp`. The role is QB1 for a quarterback and DST for a defense; backs, receivers and tight ends
+are ranked within their team and position by the depth chart's `pos_rank`, ties and players the chart lacks by current
+usage (`Tgt% + Rush%`, the same tiebreak the injury code uses), skipping anyone listed OUT or IR, with ranks past the last
+named role folded into it.
+
+**Lines.** The cash line is the median of the last three typed `Cash Line` values in Results (before the slate's week;
+read only; Results' Cash columns are cash contests by construction, so no GPP value can be in it). With none typed the
+placeholder 145 is used and the sync says so. The GPP target is `[sim] gpp_target` in `config.toml`, default 190, shown in
+the column header as `P(190+)`.
+
+**Lineups tab.** `dfs sync` (the full sync and `--live`) simulates every complete lineup together (20,000 draws, seed 0)
+and writes `Median`, `p90`, `P(cash)` and `P(<target>+)` onto each lineup's Total row, plus the portfolio line on the first
+lineup's `Remaining` row (`Portfolio`, expected cashes under `p90`, P(at least one cashes) under `P(cash)`, P(at least one
+reaches the target) under the GPP column). A half-built lineup or an unknown name is left blank. The numbers are not
+conditioned on games already played. Changing `gpp_target` renames the header on the next sync; `dfs setup reorder-columns`
+puts the canonical `P(190+)` back first so its exact-name comparison still works.
+
+**Late swap.** `dfs lineups late-swap` scores every swap it finds (the full re-fill, the 2-for-2 swaps and the 1-for-1
+swaps) with the change in P(cash) and P(GPP): the lineup and all its candidate versions are simulated in ONE run, so the
+players they share have identical draws (this is `swap_impact`, generalised from one player to several). `--goal cash|gpp`
+(default cash) ranks by the matching change, projection gain breaking ties; the search keeps four times as many candidates
+as it shows so a swap that wins on probability but not on projection can surface.

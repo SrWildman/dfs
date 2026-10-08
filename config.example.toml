@@ -104,3 +104,9 @@ tab = "Results"
 header_row = 1
 first_row = 2
 last_row = 20
+
+# The lineup simulator (`dfs sim`, and the Median / p90 / P(cash) / P(GPP) columns on Lineups). The cash line is
+# NOT set here: it is the median of the last three weeks of your typed `Cash Line` in Results. `gpp_target` is
+# the score a tournament lineup needs; it is shown in the column header as "P(190+)".
+[sim]
+gpp_target = 190

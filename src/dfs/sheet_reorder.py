@@ -39,6 +39,7 @@ from __future__ import annotations
 from dfs import perf
 from dfs.column_reorder import compute_column_moves
 from dfs.sheet_columns import LINKED_COLUMNS
+from dfs.sheet_lineup_sim import GPP_HEADER_DEFAULT, restore_canonical_gpp_header
 from dfs.sheet_links import link_edge_columns
 from dfs.sheet_native_links import rewrite_native_lookup_columns
 from dfs.sheets import SheetsClient, column_letter
@@ -208,6 +209,11 @@ def migrate_tab_to_designed_order(
     Returns the human-readable report line from each step, in order, for
     the changelog.
     """
+    # The simulator's GPP column carries the configured target in its header text ("P(200+)"); this module
+    # compares header names exactly, so put the canonical name back first. The next sync writes the target
+    # again.
+    if GPP_HEADER_DEFAULT in target_order:
+        restore_canonical_gpp_header(client, tab, header_row=header_row, header_repeats_at=header_repeats_at)
     native_target = [name for name in target_order if name not in LINKED_COLUMNS]
     created = provision_missing_columns(
         client, tab, native_target, header_row=header_row, header_repeats_at=header_repeats_at

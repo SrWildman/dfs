@@ -100,6 +100,10 @@ class FakeWorksheet:
             for j, value in enumerate(row_values):
                 row[col_start + j] = str(value)
 
+    def batch_update(self, data: list[dict], value_input_option=None) -> None:
+        for item in data:
+            self.update(item["range"], item["values"], value_input_option=value_input_option)
+
     def format(self, a1_range: str, fmt: dict) -> None:
         pass
 
@@ -423,6 +427,17 @@ def test_update_range_does_not_touch_cells_outside_the_range(cfg, monkeypatch, t
     fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["keep", "keep", "keep"]])
     client.update_range("T", "C1:C1", [["new"]])
     assert fake_sheet._worksheets["T"].row_values(1) == ["keep", "keep", "new"]
+
+
+def test_update_ranges_writes_several_ranges_and_nothing_else(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet(
+        "T", rows=[["keep", "keep", "keep"], ["keep", "keep", "keep"]]
+    )
+    client.update_ranges("T", {"A1:A1": [["a"]], "C2:C2": [["c"]]})
+    assert fake_sheet._worksheets["T"].get_all_values() == [["a", "keep", "keep"], ["keep", "keep", "c"]]
+    client.update_ranges("T", {})  # nothing to write: no call
+    assert fake_sheet._worksheets["T"].get_all_values()[0][0] == "a"
 
 
 def test_clear_ranges_only_clears_given_cells(cfg, monkeypatch, tmp_path):

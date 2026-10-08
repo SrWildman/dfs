@@ -45,6 +45,7 @@ from dfs.late_swap_search import (
     suggest,
     swap_pool,
 )
+from dfs.late_swap_sim import OVERSAMPLE, attach_probabilities
 from dfs.launcher import (
     MENU_SECTIONS,
     MORE_LABELS,
@@ -85,6 +86,7 @@ from dfs.sheet_bankroll_view import (
 from dfs.sheet_bankroll_view import (
     LAST_ROW as BETTING_LAST_ROW,
 )
+from dfs.sheet_column_notes import apply_header_notes
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_empty_guards import repair_unguarded
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
@@ -92,6 +94,7 @@ from dfs.sheet_formula_ranges import repair_formula_ranges
 from dfs.sheet_instructions import build_instructions_tab
 from dfs.sheet_lineup_keys import write_lineup_keys
 from dfs.sheet_lineup_metrics import write_lineup_metrics
+from dfs.sheet_lineup_sim import LineupSimReport, format_sim_columns, lineup_sim_notes, write_lineup_sim
 from dfs.sheet_lineup_tints import apply_lineup_tints
 from dfs.sheet_links import (
     PLAYER_POOL_RAW_BLOCK,
@@ -1191,6 +1194,18 @@ def sheets_polish(
             )
         )
         results.append(
+            format_sim_columns(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
+        sim_notes = apply_header_notes(
+            client, cfg.lineups.builder_tab, lineups_header_row, lineup_sim_notes(cfg.sim.gpp_target)
+        )
+        results.append(f"{cfg.lineups.builder_tab}: {sim_notes} simulator header note(s)")
+        results.append(
             polish_lineups_identity_cells(
                 client,
                 cfg.lineups.builder_tab,
@@ -2202,6 +2217,7 @@ def sync(
 
     if "edge" in source_names and not no_upload:
         _write_edge_finder_tabs(cfg, ctx)
+        _write_lineup_sim(cfg, ctx, live_client)
 
     if live:
         _print_live_flag_diff(
@@ -2231,6 +2247,52 @@ def _write_edge_finder_tabs(cfg: Config, ctx: SyncContext) -> None:
         console.print(f"[green]OK[/green] {sheet_edge_finder.write_board_panel(client, inputs)}")
     except (SheetsError, OSError, ValueError, KeyError) as e:
         console.print(f"[yellow]Edge Finder tab not written:[/yellow] {e}")
+
+
+def _write_lineup_sim(cfg: Config, ctx: SyncContext, client: SheetsClient | None = None) -> None:
+    """After an edge sync: simulate every built lineup on Lineups and write Median / p90 / P(cash) / P(GPP)
+    and the portfolio line (`sheet_lineup_sim`). It reads the Lineups names and Results' typed `Cash Line`
+    (read only), writes only its own columns on Lineups, and a failure only says so: the rest of the sync
+    stands."""
+    import time
+
+    started = time.perf_counter()
+    try:
+        from dfs import injury_beneficiaries as ib
+        from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
+        from dfs.edge_finder import PLAYERS_FILE
+
+        edge = store.load_current("edge")
+        try:
+            players = pd.read_csv(EDGE_FINDER_DIR / PLAYERS_FILE, usecols=["Id", "GsisId"])
+            gsis_by_id = dict(zip(players["Id"], players["GsisId"], strict=True))
+        except (OSError, ValueError):
+            gsis_by_id = {}
+        try:
+            depth_rows = ib.latest_depth(store.load_current("nflverse_depth"), None)
+        except FileNotFoundError:
+            depth_rows = None
+        outcome = write_lineup_sim(
+            client or SheetsClient(cfg.google_sheets),
+            cfg.lineups.builder_tab,
+            header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            header_repeats_at=[start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]],
+            edge=edge,
+            depth_rows=depth_rows,
+            gsis_by_id={k: v for k, v in gsis_by_id.items() if isinstance(v, str)},
+            results_tab=cfg.results.tab,
+            week=ctx.week,
+            gpp_target=cfg.sim.gpp_target,
+        )
+    except (SheetsError, OSError, ValueError, KeyError, FileNotFoundError) as e:
+        console.print(f"[yellow]Lineup simulator not written:[/yellow] {e}")
+        return
+    seconds = time.perf_counter() - started
+    if isinstance(outcome, LineupSimReport):
+        console.print(f"[green]OK[/green] {outcome.line()} ({seconds:.1f}s)")
+    else:
+        console.print(f"[yellow]{outcome}[/yellow]")
 
 
 def _print_live_flag_diff(
@@ -2536,6 +2598,13 @@ def _sheet_cell(rows: list[list[str]], index: int) -> str:
     return row[0] if row else ""
 
 
+class SwapGoal(StrEnum):
+    """Which probability `dfs lineups late-swap` ranks swaps by (the simulator's change in it)."""
+
+    cash = "cash"
+    gpp = "gpp"
+
+
 class SwapMetric(StrEnum):
     """What `dfs lineups late-swap` ranks by (`late_swap_search.METRICS`); never Leverage."""
 
@@ -2569,6 +2638,42 @@ def _read_player_pool_names(client: SheetsClient, player_pool_tab: str) -> set[s
     return names
 
 
+def _late_swap_sim_setup(cfg: Config, client: SheetsClient, edge: pd.DataFrame, goal: str, now: datetime):
+    """What the simulator needs to score late-swap candidates: every player's `PlayerSpec`, the cash line (the
+    median of your last three typed Cash Lines in Results, read only) and the GPP target. None, with a note,
+    when anything is missing: the swaps are then shown and ranked by projection alone."""
+    from dfs import injury_beneficiaries as ib
+    from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
+    from dfs.edge_finder import PLAYERS_FILE
+    from dfs.late_swap_sim import SimSettings
+    from dfs.sim_inputs import build_specs, cash_line_from_results
+
+    try:
+        try:
+            players = pd.read_csv(EDGE_FINDER_DIR / PLAYERS_FILE, usecols=["Id", "GsisId"])
+            gsis_by_id = {
+                i: g for i, g in zip(players["Id"], players["GsisId"], strict=True) if isinstance(g, str)
+            }
+        except (OSError, ValueError):
+            gsis_by_id = {}
+        try:
+            depth = ib.latest_depth(store.load_current("nflverse_depth"), None)
+        except FileNotFoundError:
+            depth = None
+        rows = client.read_range(cfg.results.tab, "A1:J40")
+        week = SyncContext.current(week=None, season=None).week
+        cash = cash_line_from_results(rows[0] if rows else [], rows[1:], before_week=week)
+        specs = build_specs(edge, depth, gsis_by_id)
+    except (SheetsError, OSError, ValueError, KeyError) as e:
+        console.print(f"[yellow]Simulator unavailable ({e}): swaps are ranked by projection only.[/yellow]")
+        return None
+    console.print(
+        f"Simulator: cash line {cash.value:g} ({cash.note}), GPP target {cfg.sim.gpp_target:g}; "
+        f"swaps ranked by change in P({goal}).\n"
+    )
+    return specs, SimSettings(cash_line=cash.value, gpp_target=cfg.sim.gpp_target, goal=goal)
+
+
 def _run_late_swap(
     cfg: Config,
     *,
@@ -2577,6 +2682,7 @@ def _run_late_swap(
     all_players: bool,
     now: datetime,
     client: SheetsClient | None = None,
+    goal: str = "cash",
 ) -> None:
     """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
     point in the slate; the command passes the real clock."""
@@ -2606,6 +2712,8 @@ def _run_late_swap(
             "with --all-players to search the whole rosterable pool.[/yellow]"
         )
     console.print()
+
+    sim_setup = _late_swap_sim_setup(cfg, client, edge, goal, now)
 
     any_shown = False
     for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
@@ -2646,8 +2754,26 @@ def _run_late_swap(
         console.print(table)
 
         state = lineup_state(statuses, edge, cap=cfg.lineups.salary_cap, metric=metric)
-        suggestions = suggest(state, pool, top=top, time_limit=LATE_SWAP_TIME_LIMIT_SECONDS)
-        for line in format_suggestions(suggestions, metric=metric):
+        scored = False
+        lineup_specs = None
+        if sim_setup is not None:
+            from dfs.sim_inputs import lineup_from_names
+
+            lineup_specs = lineup_from_names(names, sim_setup[0])
+        suggestions = suggest(
+            state,
+            pool,
+            top=top * OVERSAMPLE if lineup_specs is not None else top,
+            time_limit=LATE_SWAP_TIME_LIMIT_SECONDS,
+        )
+        if lineup_specs is not None:
+            suggestions = attach_probabilities(suggestions, lineup_specs, sim_setup[0], sim_setup[1], top=top)
+            scored = True
+        elif sim_setup is not None:
+            console.print(
+                "[dim]Probabilities skipped: this lineup is incomplete or has an unknown name.[/dim]"
+            )
+        for line in format_suggestions(suggestions, metric=metric, goal=goal if scored else None):
             console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
 
@@ -2668,6 +2794,11 @@ def lineups_late_swap(
         "--all-players",
         help="Also consider the whole rosterable pool, not only your Player Pool.",
     ),
+    goal: SwapGoal = typer.Option(
+        SwapGoal.cash,
+        "--goal",
+        help="Rank swaps by the simulator's change in P(cash) (default) or P(GPP); both are shown.",
+    ),
 ) -> None:
     """Check every built lineup in the Lineups tab against real kickoff
     times, then suggest what to swap: the best full re-fill of the open
@@ -2686,7 +2817,9 @@ def lineups_late_swap(
     anything.
     """
     cfg = _load_config_or_exit()
-    _run_late_swap(cfg, top=top, metric=metric.value, all_players=all_players, now=datetime.now(UTC))
+    _run_late_swap(
+        cfg, top=top, metric=metric.value, all_players=all_players, now=datetime.now(UTC), goal=goal.value
+    )
 
 
 def _carry_results_team_colour_headers(

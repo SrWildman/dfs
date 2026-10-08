@@ -429,3 +429,40 @@ def test_a_fully_locked_lineup_has_nothing_to_swap():
     state = state_of(locked_core(), {})
     lines = format_suggestions(suggest(state, []), metric="ProjPts")
     assert lines[-1] == "Nothing left to swap: every slot is locked."
+
+
+def test_a_refill_that_moves_the_flex_back_into_an_rb_slot_and_brings_in_a_fourth_receiver_is_assigned():
+    """Found live (2026-10-08): the best lineup kept the FLEX back, dropped an RB and added a fourth WR.
+    Pinning the FLEX back in FLEX left the new WR with no slot (StopIteration). The surplus receiver takes
+    FLEX; the back moves into the RB slot."""
+    flex_rb = P("Flex RB", "RB", "FR", "F2", "g_fr", 6000, 15)
+    state = state_of(
+        {},
+        {
+            "QB": P("Old QB", "QB", "OQ", "Q2", "g_oq", 5000, 10),
+            "RB1": P("Old RB1", "RB", "O1", "A2", "g_o1", 5000, 10),
+            "RB2": P("Old RB2", "RB", "O2", "B2", "g_o2", 5000, 10),
+            "WR1": P("Old WR1", "WR", "W1", "C2", "g_w1", 5000, 10),
+            "WR2": P("Old WR2", "WR", "W2", "D2", "g_w2", 5000, 10),
+            "WR3": P("Old WR3", "WR", "W3", "E2", "g_w3", 5000, 10),
+            "TE": P("Old TE", "TE", "OT", "T2", "g_ot", 4000, 8),
+            "FLEX": flex_rb,
+            "DST": P("Old DST", "DST", "OD", "D3", "g_od", 3000, 7),
+        },
+        cap=100000,
+    )
+    pool = [
+        P("New QB", "QB", "NQ", "N2", "g_nq", 5000, 20),
+        P("Star RB", "RB", "SR", "S2", "g_sr", 6000, 25),
+        *[P(f"Star WR{i}", "WR", f"SW{i}", f"X{i}", f"g_sw{i}", 6000, 22 + i) for i in range(4)],
+        P("New TE", "TE", "NT", "N3", "g_nt", 4000, 12),
+        P("New DST", "DST", "ND", "N4", "g_nd", 3000, 11),
+    ]
+    refill = best_refill(state, [*pool, *(s.current for s in state.open)])
+    assert refill is not None
+    after = {i: new.name for i, (_old, new) in refill.changes.items()}
+    assert after[IDX["FLEX"]].startswith("Star WR")  # the fourth receiver sits in FLEX
+    # the FLEX back moved into an RB slot rather than being left in FLEX
+    assert any(new.name == "Flex RB" and ROSTER_SLOTS[i] == "RB" for i, (_old, new) in refill.changes.items())
+    for index, (_old, new) in refill.changes.items():  # and every changed slot holds a legal player
+        assert _fits(ROSTER_SLOTS[index], new)

@@ -3632,6 +3632,19 @@ was edited by the signal and injury slices.**
   - Matchups: context only; the research's L4/L8 lookbacks are a window change, not a constant, so they were NOT adopted.
 - **Slice 2, Part 4 (identity).** `signals.attach_gsis(..., crosswalk=)` fills the players the identity join missed from the usage
   crosswalk by DraftKings `Id` (`edge_finder.read_gsis_crosswalk`); `status.json` carries `gsis_unmatched`. Coverage ex-DST: 224/224.
+- **Slice 3, Part 5 (the simulator in the sheet).**
+  - **Lineups gained four columns after `Min Unique`**: `Median`, `p90`, `P(cash)`, `P(190+)`
+    (`sheet_columns.LINEUPS_COLUMN_ORDER`, created by `dfs setup reorder-columns`). **Python writes them on every
+    `dfs sync`** (`sheet_lineup_sim.write_lineup_sim`, one batched read and one batched write): per lineup on its Total row, and a
+    portfolio line on the first lineup's `Remaining` row. The GPP header text carries `[sim] gpp_target`
+    (`config.SimConfig`, default 190); `sheet_reorder.migrate_tab_to_designed_order` puts the canonical `P(190+)` back
+    before it compares names, and the next sync writes the target again. Nothing hardcodes a letter: every column is
+    found by header name (`find_gpp_column` matches `P(<n>+)`).
+  - `sim_inputs.py` (PlayerSpecs from EdgeRaw + the depth chart, the cash-line reader, `swap_deltas`), `late_swap_sim.py`
+    (ΔP for every late-swap candidate, `--goal cash|gpp`), `SheetsClient.update_ranges`. `dfs sim` is visible (launcher
+    `MORE_LABELS`, `commands_doc.SECTIONS`, `docs/COMMANDS.md`).
+  - Fixed while testing it on 20 lineups: `late_swap_search._assign_to_slots` crashed (`StopIteration`) when the best
+    re-fill moved the FLEX back into an RB slot and brought in a fourth receiver; the FLEX surplus is now settled first.
 
 
 | Date | Tab | Change | Before | After | Applied to | Code that encodes it |
@@ -3644,3 +3657,4 @@ was edited by the signal and injury slices.**
 | 2026-10-07 | `Model Check` | Projection Race, Reliability and Signals sections. | Seven blocks. | Ten blocks. | Week 5 (rebuilt by `dfs results update`) | `sheet_model_check`, `results_signals`. |
 | 2026-10-08 | `Edge Finder`, `Model Check` | Slice 1 (Parts 1-3): the injury section becomes carries-only with an "Absent regulars" context block (no `Gain Tgt/G` column), the signals table loses `BUY↑` and gains four `Unflagged <pos>` rows, "Matchups (context)", an injury-report status line. No EdgeRaw column, no other tab moved. | Injury section: `Gain Tgt/G`, `Gain Car/G`, `Gain xFP/G`; Signals: 8 rows. | Injury section: `Gain Car/G`, `Gain xFP/G` + Absent regulars (`Role`, `Tgt/G`, `Car/G`, `Games missed`); Signals: 11 rows. | Template, Week 5 (rewritten by the sync / `dfs results update`) | `edge_finder_tab.BENEFICIARY_COLUMNS`, `ABSENCE_COLUMNS`, `SIGNAL_COLUMNS`; `results_signals.SIGNAL_GROUPS`, `BASELINE_POSITIONS`. |
 | 2026-10-08 | none | Slice 2 (Part 4): gsis identity coverage fix (code and `status.json` only). No sheet structure moved. | n/a | n/a | n/a (a data join) | `signals.attach_gsis`, `edge_finder.read_gsis_crosswalk`. |
+| 2026-10-08 | `Lineups` | Slice 3 (Part 5): four simulator columns inserted after `Min Unique`, filled by `dfs sync` (Total row per lineup, portfolio line on the first lineup's `Remaining` row). `moveDimension` shifted every range reference; read back: `Games` reads GameID at `$AL`, `Min Unique` reads `Player Key` at `$CA`. | `Min Unique` V, `Edge ↗` W, `GameID` AH, `Player Key` BW; 75 columns. | `Median` W, `p90` X, `P(cash)` Y, `P(190+)` Z, `Edge ↗` AA, `GameID` AL, `Player Key` CA; 79 columns. | Template, Week 5 | `sheet_columns.LINEUPS_COLUMN_ORDER`, `sheet_lineup_sim.LINEUP_SIM_HEADERS` / `GPP_HEADER_DEFAULT` / `find_gpp_column`, `sheet_reorder.migrate_tab_to_designed_order`. |

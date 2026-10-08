@@ -292,8 +292,9 @@ in that same spot, was removed entirely in Week 3 feedback (A4,
 2026-09-22) -- Sam had no use for it. `Lineups` inserts `% of Cap` (renamed from `% of
 Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
 the full spine, then `Issues`, then the two lineup-metrics columns
-(`Games`, `Min Unique`, see above), then `Edge ↗` (A3), before the
-collapsed groups begin (49 total after Round 5 item 1c removed four).
+(`Games`, `Min Unique`, see above), then the four simulator columns
+(`Median`, `p90`, `P(cash)`, `P(190+)`, 2026-10-08), then `Edge ↗` (A3), before the
+collapsed groups begin (53 total).
 Lineups also groups
 `O/U`/`Spread`/`Team
 Implied` (Phase 5D) behind their own +/- control, same idea as the
@@ -515,6 +516,18 @@ different is your MOST similar other lineup). `Stack`, `Bring-back`,
 for the exact formulas. `Exposure`'s own header row (K1:P1) carries the
 portfolio-level counterpart: `Distinct QBs`, `Shared QB?` (Yes/No), and
 `Distinct games`, across the whole lineup build rather than one lineup.
+
+**The lineup simulator (2026-10-08).** Right after `Min Unique` come four more lineup-level columns, **written by
+`dfs sync`** (Python, `sheet_lineup_sim.py`; not formulas) onto each lineup's Total row: `Median` and `p90` (the
+simulated median and 90th-percentile score), `P(cash)` (the chance the lineup reaches the cash line) and
+`P(190+)` (the chance it reaches the GPP target; **the number in the header is `[sim] gpp_target` in
+`config.toml`**, default 190, and the header text is rewritten when you change it). The **portfolio line** sits on the
+first lineup's `Remaining` row in the same columns: the label `Portfolio` under `Median`, the expected number of
+lineups that cash under `p90`, the chance at least one lineup cashes under `P(cash)` and the chance at least one
+reaches the target under the GPP column. The cash line is the median of your last three typed `Cash Line` values in
+Results (read only). 20,000 draws with a fixed seed, so the numbers do not move between syncs unless a lineup does; all
+built lineups are simulated together (a player in two lineups is one random variable). A lineup with a blank slot or a
+name EdgeRaw does not know stays blank. Not conditioned on games already played. Method: `docs/SIM.md`.
 
 **Colours on Lineups' Name / Pos. / Team cells.** Plain white (the pale-yellow "you type here" fill on Name and
 the per-position tint on Pos. were dropped on this tab only; every other tab keeps them) unless the lineup has a

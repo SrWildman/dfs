@@ -33,17 +33,27 @@ def _swap_lines(swap: Swap, indent: str) -> list[str]:
     return lines
 
 
+def _pct(delta: float | None) -> str:
+    return "n/a" if delta is None else f"{100 * delta:+.1f}%"
+
+
 def _headline(swap: Swap) -> str:
-    return f"{swap.delta:+.1f} pts, {_money(swap.salary_left)} left"
+    text = f"{swap.delta:+.1f} pts, {_money(swap.salary_left)} left"
+    if swap.delta_p_cash is not None or swap.delta_p_gpp is not None:
+        text += f", P(cash) {_pct(swap.delta_p_cash)}, P(GPP) {_pct(swap.delta_p_gpp)}"
+    return text
 
 
-def format_suggestions(suggestions: LineupSuggestions, *, metric: str) -> list[str]:
-    """The report for one lineup as lines of text (no colour, no markup)."""
+def format_suggestions(suggestions: LineupSuggestions, *, metric: str, goal: str | None = None) -> list[str]:
+    """The report for one lineup as lines of text (no colour, no markup). With `goal` ("cash" or "gpp") the
+    swaps were ranked by the simulator's change in that probability (projection breaking ties) and each shows
+    both changes, in percentage points, beside the projection delta."""
     state = suggestions.state
     open_names = ", ".join(s.slot for s in state.open) or "none"
+    ranked = f"Ranked by {metric}." if goal is None else f"Ranked by change in P({goal}), then {metric}."
     lines = [
         f"Open slots: {open_names}.  Locked salary {_money(state.fixed_salary)}, "
-        f"{_money(state.cap - state.fixed_salary)} for the open slots.  Ranked by {metric}."
+        f"{_money(state.cap - state.fixed_salary)} for the open slots.  {ranked}"
     ]
     if not state.open:
         return lines + ["Nothing left to swap: every slot is locked."]

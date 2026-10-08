@@ -203,6 +203,16 @@ gained, the salary left and a note when it adds or breaks a stack, bring-back or
 `ProjPts` (`--metric AggPts` for the other), never Leverage. Candidates are the players in your Player Pool whose
 game has not started; `--all-players` also searches the rosterable pool. If nothing beats the lineup it says so.
 
+Each swap also shows what it does to the lineup's chances, from the lineup simulator (`docs/SIM.md`): `P(cash)` and `P(GPP)`
+are the change in percentage points, beside the projection gain. `--goal cash` (the default) ranks the swaps by the change
+in P(cash), `--goal gpp` by P(GPP), projection gain breaking ties; the search keeps four times as many candidates as it
+shows, so a swap that wins on probability but not on projection can surface. The cash line is the median of your last three
+typed `Cash Line` values in Results and the GPP target is `[sim] gpp_target` (default 190); the top of the output says which.
+
+After `dfs sync`, the **Lineups** tab also shows `Median`, `p90`, `P(cash)` and `P(190+)` for every built lineup and a
+portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and
+the chance at least one reaches the target.
+
 Movement (once populated by a sync) ranks players by how far their
 team's implied total has moved since the week started -- a big shift is
 worth a second look at anything you built around that number.

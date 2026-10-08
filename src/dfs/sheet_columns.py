@@ -105,6 +105,7 @@ from dfs.derived import (
 )
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_metrics import LINEUP_METRIC_HEADERS
+from dfs.sheet_lineup_sim import LINEUP_SIM_HEADERS
 from dfs.usage_metrics import USAGE_METRIC_COLUMNS
 
 IDENTITY = ["Name", "Pos.", "Team", "Opp."]
@@ -327,7 +328,8 @@ PLAYER_POOL_COLUMN_ORDER = [
 # "Issues" (A1: renamed from "Check") is the last thing you look at
 # before trusting a lineup, so it sits right after "% of Cap". Part 7.5's
 # lineup-metrics columns (Games, Min Unique; `sheet_lineup_metrics.
-# LINEUP_METRIC_HEADERS`) sit right after Issues -- same "read this
+# LINEUP_METRIC_HEADERS`) sit right after Issues, then the simulator's Median, p90,
+# P(cash) and P(<gpp target>+) (`sheet_lineup_sim.LINEUP_SIM_HEADERS`, 2026-10-08) -- same "read this
 # before trusting a lineup" neighborhood, a natural continuation of it
 # rather than a second unrelated block -- with "Edge ↗" (A3, same
 # HYPERLINK-to-EdgeRaw as Player Pool's own column of the same name)
@@ -339,6 +341,7 @@ LINEUPS_COLUMN_ORDER = [
     "% of Cap",
     "Issues",
     *LINEUP_METRIC_HEADERS,
+    *LINEUP_SIM_HEADERS,
     "Edge ↗",
     GAME_LABEL,
     *GAME,

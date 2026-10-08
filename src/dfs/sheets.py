@@ -377,6 +377,17 @@ class SheetsClient:
         _, ws = self._ws(tab_name)
         ws.update(range_name=a1_range, values=rows, value_input_option=ValueInputOption.user_entered)
 
+    def update_ranges(self, tab_name: str, updates: dict[str, list[list]]) -> None:
+        """Write several separate ranges of one tab in ONE Sheets API call (`values_batch_update`): `updates`
+        maps an A1 range to its rows. Like `update_range`, only those cells are touched."""
+        if not updates:
+            return
+        _, ws = self._ws(tab_name)
+        ws.batch_update(
+            [{"range": a1, "values": rows} for a1, rows in updates.items()],
+            value_input_option=ValueInputOption.user_entered,
+        )
+
     def freeze_header(self, tab_name: str, rows: int = 1) -> None:
         """Freeze the top `rows` row(s) so the header stays visible on scroll."""
         _, ws = self._ws(tab_name)

@@ -1,9 +1,10 @@
 """`dfs sim ...`: fit the correlations, back-test the simulator, run a worked example.
 
-Registered hidden in `dfs.cli` (one line) until the local session wires the simulator into the sheet and adds
-the commands to the launcher's `MORE_LABELS`, `commands_doc.SECTIONS` and the generated `docs/COMMANDS.md`.
-Heavy imports stay inside the commands so `dfs --help` does not pay for them. No command here touches a sheet,
-and none needs credentials -- only the cache `dfs model fetch` fills.
+Visible since the local round wired the simulator into the sheet (the launcher's `MORE_LABELS`,
+`commands_doc.SECTIONS` and the generated `docs/COMMANDS.md` list them). Heavy imports stay inside the
+commands so `dfs --help` does not pay for them. No command here touches a sheet, and none needs credentials --
+only the cache `dfs model fetch` fills. (The sheet columns are written by `dfs sync`, see
+`sheet_lineup_sim.py`.)
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from dfs.prompt_missing import PromptingGroup
 sim_app = typer.Typer(
     help="Lineup simulator: fit player correlations, back-test, worked example.",
     cls=PromptingGroup,
-    hidden=True,
 )
 console = Console()
 

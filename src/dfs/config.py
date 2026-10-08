@@ -126,6 +126,20 @@ class SeasonConfig(BaseModel):
     last_row: int = 19
 
 
+# The GPP target the simulator's P(GPP) column uses until config.toml says otherwise. A tournament-winning
+# neighbourhood for a small field, not advice: Sam sets his own with `[sim] gpp_target`.
+SIM_GPP_TARGET_DEFAULT = 190.0
+
+
+class SimConfig(BaseModel):
+    """`[sim]`: the lineup simulator's one setting. The cash line is NOT here: it is Sam's typed `Cash Line`
+    in Results (the median of the last three weeks), read from the sheet each time."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gpp_target: float = SIM_GPP_TARGET_DEFAULT
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -135,6 +149,7 @@ class Config(BaseModel):
     bankroll: BankrollConfig = BankrollConfig()
     results: ResultsConfig = ResultsConfig()
     season: SeasonConfig = SeasonConfig()
+    sim: SimConfig = SimConfig()
 
 
 def _missing_config_message() -> str:

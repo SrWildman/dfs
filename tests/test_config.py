@@ -64,3 +64,17 @@ def test_config_accepts_previous_sheet_id():
         }
     )
     assert cfg.google_sheets.previous_sheet_id == "old-id"
+
+
+def _minimal(**extra):
+    return {
+        "google_sheets": {"sheet_id": "abc", "credentials_file": "creds.json", "tab_mappings": {}},
+        **extra,
+    }
+
+
+def test_sim_gpp_target_defaults_to_190_and_is_configurable():
+    assert Config.model_validate(_minimal()).sim.gpp_target == 190.0
+    assert Config.model_validate(_minimal(sim={"gpp_target": 205})).sim.gpp_target == 205.0
+    with pytest.raises(ValidationError):
+        Config.model_validate(_minimal(sim={"cash_line": 140}))  # the cash line is Sam's typed Results value

@@ -105,6 +105,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | `--top / -n INT` | How many swaps to show per kind (and per open slot for 1-for-1 swaps). Default: `3`. |
 | `--metric CHOICE` | What to rank swaps by: ProjPts (default) or AggPts. Default: `ProjPts`. |
 | `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
+| `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) (default) or P(GPP); both are shown. Default: `cash`. |
 
 ### `dfs week close`
 
@@ -223,6 +224,43 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build on a different sheet instead of config.toml's -- template first, then live, per the two-sheet rule. This is a one-time structural build, not a per-week command. |
+
+## Reference: the lineup simulator (only when needed)
+
+The Median, p90, P(cash) and P(GPP) columns on Lineups are written by every `dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.
+
+### `dfs sim fit`
+
+Rebuild models/sim/correlations.csv from the cached history (about half a minute).
+
+| Option | What it does |
+|---|---|
+| `--n-boot INT` | Bootstrap resamples for each interval. Default: `1000`. |
+| `--seed INT` | Seed for every random draw. |
+| `--out-dir PATH` | Where to write (default: models/sim/). |
+
+### `dfs sim backtest`
+
+Back-test on 2023-2025: random legal lineups, correlations fitted on 2014-2022 only (about 30 minutes at the defaults; lower --lineups-per-week for a quick look).
+
+| Option | What it does |
+|---|---|
+| `--lineups-per-week INT` | Random legal lineups per week. Default: `200`. |
+| `--n-sims INT` | Simulations per lineup. Default: `10000`. |
+| `--seed INT` | Seed for every random draw. |
+| `--jobs INT` | Worker processes (the result does not depend on it). Default: `1`. |
+| `--save` | Also write the report to models/sim/backtest.md. |
+| `--results PATH` | Also write the per-lineup results (parquet). |
+| `--from-results PATH` | Print the report for saved per-lineup results instead of re-simulating. |
+
+### `dfs sim demo`
+
+Two lineups from 2025 week 12 -- one stacked around Patrick Mahomes, one not -- and the portfolio.
+
+| Option | What it does |
+|---|---|
+| `--cash-line FLOAT` | Cash line in points (default 145). |
+| `--gpp-target FLOAT` | GPP target in points (default 190). |
 
 ## Reference: building and styling a sheet (only when needed)
 

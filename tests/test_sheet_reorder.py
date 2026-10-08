@@ -369,3 +369,25 @@ def test_remove_header_columns_is_a_full_noop_when_none_present():
 
     assert client.delete_calls == []
     assert "none of" in result and "skipped" in result
+
+
+def test_a_renamed_gpp_header_is_put_back_before_the_column_order_is_compared():
+    from dfs.sheet_columns import LINEUPS_COLUMN_ORDER
+
+    # The sheet's GPP column carries a configured target ("P(200+)"); reorder compares names exactly.
+    header = ["P(200+)" if name == "P(190+)" else name for name in LINEUPS_COLUMN_ORDER]
+    header[2], header[5] = header[5], header[2]  # and the order is off, so something has to move
+    client = SpySheetsClient(header_row=header)
+
+    migrate_tab_to_designed_order(
+        client,
+        "Lineups",
+        LINEUPS_COLUMN_ORDER,
+        name_blocks=[(2, 10)],
+        edge_tab="EdgeRaw",
+        rewrite_native=False,
+    )
+
+    assert (
+        client.header_row == LINEUPS_COLUMN_ORDER
+    )  # "P(190+)" restored, no ValueError from the move planner

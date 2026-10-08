@@ -108,6 +108,11 @@ class Swap:
     salary_left: int
     notes: list[str] = field(default_factory=list)
     exact: bool = True  # False: a time limit cut the search short, so a better lineup may exist
+    # The simulator's verdict (`late_swap_sim`): the change in the lineup's chance of reaching the cash
+    # line / the GPP target, as fractions (0.031 = +3.1 percentage points). None when it was not (or could
+    # not be) scored.
+    delta_p_cash: float | None = None
+    delta_p_gpp: float | None = None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -378,18 +383,50 @@ def best_refill(
 
 
 def _assign_to_slots(state: LineupState, chosen: list[SwapPlayer]) -> dict[int, SwapPlayer]:
-    """Put the chosen players into the open slots: a kept player stays in his own slot where he still fits,
-    everyone else takes the remaining slots in order, FLEX last."""
+    """Put the chosen players into the open slots, keeping a player in his own slot wherever that still lets
+    everyone fit.
+
+    The FLEX slot is settled FIRST, by counting: of the chosen RB / WR / TE, the one position with more
+    players than dedicated open slots has its surplus man in FLEX (preferring FLEX's current occupant when
+    he is of that position, then a man not already holding a dedicated slot). Pinning every kept player in
+    his own slot before that count is wrong: a current FLEX back who should move into an RB slot (because
+    the best lineup
+    brings in a fourth receiver) would be left in FLEX, and the receiver would have nowhere to go."""
+    open_slots = list(state.open)
+    flex = next((s for s in open_slots if s.slot == "FLEX"), None)
+    dedicated = [s for s in open_slots if s is not flex]
+    by_position: dict[str, list[SwapPlayer]] = {}
+    for player in chosen:
+        by_position.setdefault(player.position, []).append(player)
+    slots_by_position: dict[str, list[OpenSlot]] = {}
+    for slot in dedicated:
+        slots_by_position.setdefault(slot.slot, []).append(slot)
     assignment: dict[int, SwapPlayer] = {}
-    pending = list(chosen)
-    for slot in state.open:
-        if slot.current is not None and slot.current in pending and _fits(slot.slot, slot.current):
-            assignment[slot.index] = slot.current
-            pending.remove(slot.current)
-    for slot in sorted((s for s in state.open if s.index not in assignment), key=lambda s: s.slot == "FLEX"):
-        fit = next(p for p in pending if _fits(slot.slot, p))
-        assignment[slot.index] = fit
-        pending.remove(fit)
+    pools = {position: list(players) for position, players in by_position.items()}
+    if flex is not None:
+        surplus = [
+            position
+            for position, players in pools.items()
+            if position in FLEX_POSITIONS and len(players) > len(slots_by_position.get(position, []))
+        ]
+        if surplus:
+            position = surplus[0]
+            holding = {s.current for s in slots_by_position.get(position, []) if s.current is not None}
+            pick = next(
+                (p for p in pools[position] if flex.current is not None and p == flex.current),
+                next((p for p in pools[position] if p not in holding), pools[position][0]),
+            )
+            assignment[flex.index] = pick
+            pools[position].remove(pick)
+    for position, slots in slots_by_position.items():
+        players = pools.get(position, [])
+        for slot in slots:  # a kept player stays in his own slot
+            if slot.current is not None and slot.current in players:
+                assignment[slot.index] = slot.current
+                players.remove(slot.current)
+        for slot in slots:
+            if slot.index not in assignment:
+                assignment[slot.index] = players.pop(0)
     return assignment
 
 

@@ -166,7 +166,8 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "changed; `dfs lineups late-swap` checks your "
         "built lineups against real kickoff times (Eastern), shows who's still "
         "swappable and suggests the best swaps (a full re-fill, 2-for-2 and 1-for-1, "
-        "within the salary cap).  7) End of week: export your DK contest history and run `dfs week "
+        "within the salary cap), each with its change in P(cash) and P(GPP).  "
+        "7) End of week: export your DK contest history and run `dfs week "
         "close --csv <file>` to reconcile Cash/GPP results (pass `--week N` to "
         "reconcile a specific week by hand instead of the connected sheet's own week); "
         "it then scores the week's projections into the Model Check tab (nflverse posts "
@@ -361,7 +362,13 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "incomplete). Same linked Edge columns at the right. Everywhere except "
         "column A is protected (warning-only) -- it's a formula. On gameday, "
         "`dfs lineups late-swap` checks every lineup here against real kickoff "
-        "times, shows who's still swappable and suggests the best swaps.",
+        "times, shows who's still swappable and suggests the best swaps. After a "
+        "sync, Median, p90, P(cash) and P(190+) on each lineup's total row are the "
+        "simulated median, 90th percentile and chances of reaching your cash line "
+        "(median of your last three typed Results Cash Lines) and the GPP target "
+        "(config.toml [sim] gpp_target), and the first lineup's Remaining row holds "
+        "the portfolio: P(at least one lineup cashes), expected cashes, P(at least "
+        "one reaches the target).",
     ),
     (
         "DK Upload",

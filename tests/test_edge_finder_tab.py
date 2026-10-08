@@ -395,3 +395,31 @@ def test_the_status_line_names_the_injury_report_source_and_says_when_it_has_no_
     )
     assert "Practice reports only so far" in text
     assert "not recorded" in eft._injury_report_line(None)
+
+
+def test_only_beneficiaries_draftkings_lists_are_shown_in_the_tab_and_the_board_line():
+    edge = _edge([_player(1), _player(2)])
+    ben = pd.DataFrame(
+        [
+            {
+                "GsisId": g,
+                "Name": n,
+                "Team": "DEN",
+                "Position": "RB",
+                "OutStatus": "out",
+                "OutPlayers": "X",
+                "car_gain": 4.0,
+                "xfp_gain": 3.0,
+                "Method": "measured table",
+                "n": 0,
+                "Token": "INJ+",
+                "PricedIn": "",
+            }
+            for g, n in (("1", "On Slate"), ("99", "Not On DraftKings"))
+        ]
+    )
+    inputs = _inputs(edge, beneficiaries=ben)
+    layout = eft.build_layout(inputs)
+    names = {str(r[0]) for r in layout.rows}
+    assert "On Slate" in names and "Not On DraftKings" not in names
+    assert "Not On DraftKings" not in " ".join(eft.board_panel_lines(inputs))

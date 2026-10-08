@@ -1,4 +1,4 @@
-"""`dfs sim ...`: registered but hidden, help works with no network, cache or sheet."""
+"""`dfs sim ...`: registered and visible, help works with no network, cache or sheet."""
 
 import re
 
@@ -10,13 +10,13 @@ from dfs.cli import app
 runner = CliRunner()
 
 
-def test_sim_is_registered_and_hidden_from_the_main_help():
+def test_sim_is_registered_and_listed_in_the_main_help():
     command = typer.main.get_command(app)
-    assert command.commands["sim"].hidden is True
+    assert not command.commands["sim"].hidden
     assert set(command.commands["sim"].commands) == {"fit", "backtest", "demo"}
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert not re.search(r"^[│\s]*sim\s{2,}", result.output, re.MULTILINE)
+    assert re.search(r"^[│\s]*sim\s{2,}", result.output, re.MULTILINE)
 
 
 def test_sim_help_lists_the_commands():
