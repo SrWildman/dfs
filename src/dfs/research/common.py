@@ -19,7 +19,7 @@ FIT_SEASONS = list(range(2014, 2022))
 TEST_SEASONS = list(range(2022, 2026))
 SEASONS = FIT_SEASONS + TEST_SEASONS
 
-STUDIES = ("r1", "r2", "r3", "r4", "r5")
+STUDIES = ("r1", "r2", "r3", "r4", "r5", "r6")
 OFFENSE_POSITIONS = ("QB", "RB", "WR", "TE")
 
 

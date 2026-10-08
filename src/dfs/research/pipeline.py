@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from dfs.research import r1_redistribution, r2_matchup, r3_signals, r4_weather, r5_checks
+from dfs.research import r1_redistribution, r2_matchup, r3_signals, r4_weather, r5_checks, r6_usage
 from dfs.research.common import OUTPUT_DIR, STUDIES
 
 # study -> (module, the files it writes)
@@ -15,11 +15,12 @@ STUDY_MODULES = {
     "r3": (r3_signals, ["signal_thresholds.json"]),
     "r4": (r4_weather, ["weather.json"]),
     "r5": (r5_checks, ["quick_checks.json"]),
+    "r6": (r6_usage, ["usage_signals.json", "trend_bands.json"]),
 }
 
 
 def resolve(study: str) -> list[str]:
-    """`all` or one of r1..r5 as the list of studies to run, in order."""
+    """`all` or one of r1..r6 as the list of studies to run, in order."""
     study = study.lower()
     if study == "all":
         return list(STUDIES)
