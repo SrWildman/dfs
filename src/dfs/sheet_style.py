@@ -2595,6 +2595,8 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     client.clear_row_groups(tab)
     # Deleting a collapsed group leaves its rows hidden; open everything, then regroup.
     client.unhide_rows(tab, 1, BOARD_RESET_ROWS)
+    # Fill and font resets leave borders alone: an old layout's rules (rows 99, 109, 114) stayed visible.
+    client.clear_borders(tab, 1, BOARD_RESET_ROWS)
     last_visible_col = column_letter(BOARD_MAX_VISIBLE_COL_INDEX)
     # Reset the TEXT format, alignment and number format too, not just the fill: an earlier layout's dark
     # header rows left white bold text behind, and when the rebuilt sections' rows moved, real player rows

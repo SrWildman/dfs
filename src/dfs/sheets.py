@@ -1077,6 +1077,40 @@ class SheetsClient:
             }
         )
 
+    def clear_borders(self, tab_name: str, first_row: int, last_row: int, last_col_index: int = 26) -> None:
+        """Remove every cell border in rows `first_row`..`last_row` (1-indexed, inclusive) of columns A..
+        `last_col_index`. Borders survive a fill/font reset, so a moved layout leaves its old rules behind."""
+        sheet, ws = self._ws(tab_name)
+        none = {"style": "NONE"}
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateBorders": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "startRowIndex": first_row - 1,
+                                "endRowIndex": last_row,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": last_col_index,
+                            },
+                            **{
+                                side: none
+                                for side in (
+                                    "top",
+                                    "bottom",
+                                    "left",
+                                    "right",
+                                    "innerHorizontal",
+                                    "innerVertical",
+                                )
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+
     def unhide_rows(self, tab_name: str, first_row: int, last_row: int) -> None:
         """Show every row in `first_row`..`last_row` (1-indexed, inclusive). Deleting a
         collapsed row group does NOT reopen its rows (they stay `hiddenByUser`), so a rebuild

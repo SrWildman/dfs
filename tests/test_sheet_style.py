@@ -797,6 +797,7 @@ class FakeBoardClient:
         self.row_group_calls: list[tuple[int, int, bool]] = []
         self.cleared_row_groups = False
         self.unhidden_rows: list[tuple[int, int]] = []
+        self.cleared_borders: list[tuple[int, int]] = []
         self.format_calls: list[tuple[str, dict]] = []
         self.freeze_calls: list[int] = []
         self.width_calls: list[dict] = []
@@ -805,6 +806,9 @@ class FakeBoardClient:
         self.hide_columns_calls: list[tuple[str, str]] = []
         self.hidden_rows: list[tuple[int, int]] = []
         self.dropdown_calls: list[tuple[str, list[str]]] = []
+
+    def clear_borders(self, tab_name, first_row, last_row, last_col_index=26):
+        self.cleared_borders.append((first_row, last_row))
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
@@ -927,6 +931,15 @@ def test_style_board_wipes_the_old_boards_formatting_far_below_the_new_last_row(
     style_board(client)
     first_range = client.format_calls[0][0]
     assert first_range.endswith(str(BOARD_RESET_ROWS)) and BOARD_RESET_ROWS >= BOARD_LAST_ROW + 200
+
+
+def test_style_board_clears_the_old_layouts_borders_over_the_whole_reset_area():
+    # Week 5, 2026-10-08: thin rules from the old Board stayed at rows 99, 109 and 114 after the fill reset.
+    from dfs.sheet_style import BOARD_RESET_ROWS
+
+    client = FakeBoardClient()
+    style_board(client)
+    assert client.cleared_borders == [(1, BOARD_RESET_ROWS)]
 
 
 def test_style_board_resets_stale_alignment_and_number_format_first():
