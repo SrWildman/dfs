@@ -26,18 +26,18 @@ def _rows(week, n, *, position="RB", salary=4000, proj=10.0, actual=15.0, sleepe
 
 
 def test_shrunk_bias_at_n_0_10_and_160():
-    # residual 5 on every row: the raw mean is 5, shrinkage keeps n / (n + 40) of it.
+    # residual 5 on every row: the raw mean is 5, shrinkage keeps n / (n + 30) of it.
     assert cal.shrunk_bias(0.0, 0) == 0.0
-    assert cal.shrunk_bias(5 * 10, 10) == pytest.approx(1.0)  # keeps 20%
-    assert cal.shrunk_bias(5 * 160, 160) == pytest.approx(4.0)  # keeps 80%
+    assert cal.shrunk_bias(5 * 10, 10) == pytest.approx(1.25)  # keeps 25%
+    assert cal.shrunk_bias(5 * 160, 160) == pytest.approx(5 * 160 / 190)  # keeps 84%
 
 
 def test_fit_applies_the_shrinkage_per_cell():
     # n=10 cheap RBs missed by +5 and n=160 mid RBs missed by +5: the cells shrink differently.
     scored = pd.concat([_rows(1, 10, salary=4000), _rows(1, 160, salary=5000)], ignore_index=True)
     fitted = cal.fit(scored, before_week=2)
-    assert fitted.bias[("ProjPts", "RB", 0)] == pytest.approx(1.0)
-    assert fitted.bias[("ProjPts", "RB", 1)] == pytest.approx(4.0)
+    assert fitted.bias[("ProjPts", "RB", 0)] == pytest.approx(1.25)
+    assert fitted.bias[("ProjPts", "RB", 1)] == pytest.approx(5 * 160 / 190)
     assert fitted.counts[("ProjPts", "RB", 0)] == 10
     # a cell with no training rows has no entry, so predicting it adds 0
     assert ("ProjPts", "RB", 3) not in fitted.bias
@@ -123,7 +123,7 @@ def test_fit_only_sees_weeks_strictly_before_and_never_a_dnp_or_non_pool_row():
     fitted = cal.fit(scored, before_week=3)
     assert fitted.weeks == (1, 2)
     assert fitted.train_rows == 40
-    assert fitted.bias[("ProjPts", "RB", 0)] == pytest.approx(5 * 40 / 80)
+    assert fitted.bias[("ProjPts", "RB", 0)] == pytest.approx(5 * 40 / 70)
 
 
 def test_no_lookahead_week_k_calpts_ignores_week_k_actuals():

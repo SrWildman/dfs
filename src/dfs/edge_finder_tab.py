@@ -309,27 +309,32 @@ def disagreements(edge: pd.DataFrame, position: str, direction: str) -> pd.DataF
     return part.sort_values("Diff", ascending=(direction == "down"))
 
 
+def _and(names: tuple[str, ...]) -> str:
+    return " and ".join(names)
+
+
 def disagreement_reason(row: pd.Series, fitted: calibration.Calibration | None) -> str:
-    """Why CalPts differs from ProjPts: the cell's measured TFFB bias, in words ("TFFB runs -3.1 on RBs under
-    $4.5k (n=67)"), plus how far the other sources sit from TFFB when they matter."""
+    """Why CalPts differs from ProjPts, split into two parts that add up to the gap: what the measured bias
+    for his position and salary contributes (the amount actually applied, after shrinking for a small sample)
+    and what the other sources contribute by disagreeing with TFFB. A source he lacks is named."""
+    why = calibration.explain_gap(row, fitted)
+    if why is None:
+        return "sources disagree with TFFB"
     parts = []
-    position, salary = row["Position"], row["Salary"]
-    if fitted is not None and not fitted.is_empty:
-        tier = int(calibration.tier_index(pd.Series([position]), pd.Series([salary])).iloc[0])
-        key = ("ProjPts", position, tier)
-        n = fitted.counts.get(key, 0)
-        if n:
-            raw = (
-                fitted.bias[key] * (n + calibration.CAL_SHRINK_K) / n
-            )  # undo the shrinkage: the raw mean miss
-            labels = calibration.tier_labels(position)
-            # raw = mean(actual - TFFB): negative = TFFB runs high
-            parts.append(f"TFFB runs {raw:+.1f} on {position}s {labels[tier]} (n={n})")
-    others = [pd.to_numeric(row.get(c), errors="coerce") for c in ("SleeperPts", "FantasyProsPts")]
-    others = [v for v in others if pd.notna(v)]
-    if others:
-        parts.append(f"other sources avg {np.mean(others) - row['ProjPts']:+.1f} vs TFFB")
-    return "; ".join(parts) if parts else "sources disagree with TFFB"
+    if abs(why.bias) >= 0.05:
+        thin = "; shrunk, small sample" if 0 < why.n < calibration.CAL_SHRINK_K else ""
+        parts.append(f"{why.bias:+.1f} from TFFB's measured bias on {why.cell} (n={why.n}{thin})")
+    if abs(why.sources) >= 0.05:
+        side = "higher" if why.higher and not why.lower else "lower"
+        names = why.higher if side == "higher" else why.lower
+        if names and not (why.higher and why.lower):
+            verb = f"{_and(names)} both project {side}" if len(names) > 1 else f"{names[0]} projects {side}"
+        else:
+            verb = "the other sources differ from TFFB"
+        parts.append(f"{why.sources:+.1f} because {verb}")
+    if why.missing:
+        parts.append(f"no {_and(why.missing)} projection for him")
+    return "; ".join(parts) if parts else "sources agree with TFFB"
 
 
 def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> Layout:

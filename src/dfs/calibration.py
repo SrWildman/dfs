@@ -13,7 +13,8 @@ bias we have already measured, then averaged".
 
 1. Salary tiers per position (`CAL_SALARY_TIERS`); a cell is (position, tier).
 2. Per source and cell, `bias = sum(actual - source) / (n + CAL_SHRINK_K)`: empirical-Bayes
-   shrinkage toward 0. n = 0 gives 0, n = 10 keeps 20% of the raw mean, n = 160 keeps 80%.
+   shrinkage toward 0, the same for every source. n = 0 gives 0, n = 10 keeps 25% of the raw mean,
+   n = 30 keeps 50%, n = 160 keeps 84%.
    `calibrated_source = source + bias`.
 3. Per position, source weights from the inverse MSE of the calibrated sources, shrunk toward equal
    weights: `w = (n * w_invmse + CAL_WEIGHT_K * w_equal) / (n + CAL_WEIGHT_K)`. The MSE is measured
@@ -53,7 +54,9 @@ CAL_SALARY_TIERS = {
     "TE": (3500, 5000),
     "DST": (2800,),
 }
-CAL_SHRINK_K = 40  # pseudo-observations pulling a cell's bias toward 0
+# Pseudo-observations pulling a cell's bias toward 0. 30 (was 40): Weeks 2-4 walk-forward MAE 4.99 -> 4.97,
+# rho .517 unchanged; a thin cell (n = 11) now keeps 27% of its raw miss instead of 22%.
+CAL_SHRINK_K = 30
 CAL_WEIGHT_K = 100  # pseudo-rows pulling the source weights toward equal
 CAL_DECIMALS = 1
 # The projection sources the ensemble blends, as columns of the scored table. `ProjPts` is TFFB's own.
@@ -235,6 +238,63 @@ def predict(frame: pd.DataFrame, calibration: Calibration) -> pd.Series:
     total = masked.sum(axis=1)
     value = (cal.fillna(0.0) * masked).sum(axis=1) / total.where(total > 0)
     return value.round(CAL_DECIMALS)
+
+
+@dataclass(frozen=True)
+class GapExplanation:
+    """Why one player's `CalPts` differs from TFFB's `ProjPts`, in two parts that add up to the gap.
+
+    `bias` is the part that comes from the measured (shrunk) cell biases, weighted by the player's own source
+    weights; `sources` is the rest, the other sources disagreeing with TFFB. `n` and `raw_bias` describe
+    TFFB's own cell (the rows behind it and its unshrunk mean miss, actual minus TFFB)."""
+
+    bias: float
+    sources: float
+    n: int
+    raw_bias: float | None
+    cell: str
+    present: tuple[str, ...]  # the non-TFFB sources he has, as SOURCE_LABELS names
+    higher: tuple[str, ...]  # of those, the ones above TFFB
+    lower: tuple[str, ...]
+    missing: tuple[str, ...]  # sources he lacks (TFFB included, in which case there is no gap to explain)
+
+
+def explain_gap(row: pd.Series, fitted: Calibration | None) -> GapExplanation | None:
+    """Split `CalPts - ProjPts` for one player into the bias part and the sources part. None when there is
+    nothing to explain (no projection to compare, or no calibration was fitted)."""
+    tffb = pd.to_numeric(row.get(TFFB_SOURCE), errors="coerce")
+    cal = pd.to_numeric(row.get("CalPts"), errors="coerce")
+    if fitted is None or pd.isna(tffb) or pd.isna(cal):
+        return None
+    position, salary = row["Position"], row["Salary"]
+    tier = int(tier_index(pd.Series([position]), pd.Series([salary])).iloc[0])
+    values = {s: pd.to_numeric(row.get(s), errors="coerce") for s in fitted.sources}
+    present = [s for s, v in values.items() if pd.notna(v)]
+    raw_weight = {s: fitted.weights.get(position, {}).get(s, 0.0) for s in present}
+    total = sum(raw_weight.values())
+    bias = 0.0
+    if total > 0 and tier >= 0:
+        bias = sum(raw_weight[s] / total * fitted.bias.get((s, position, tier), 0.0) for s in present)
+    key = (TFFB_SOURCE, position, tier)
+    n = fitted.counts.get(key, 0)
+    raw = fitted.bias[key] * (n + CAL_SHRINK_K) / n if n else None
+    cell = f"{position}s {tier_labels(position)[tier]}" if tier >= 0 and tier_labels(position) else position
+    others = [s for s in present if s != TFFB_SOURCE]
+    higher = tuple(SOURCE_LABELS[s] for s in others if values[s] > tffb)
+    lower = tuple(SOURCE_LABELS[s] for s in others if values[s] < tffb)
+    missing = tuple(SOURCE_LABELS[s] for s in fitted.sources if s not in present)
+    gap = float(cal - tffb)
+    return GapExplanation(
+        bias=round(bias, 1) if fitted.train_rows else 0.0,
+        sources=round(gap - (round(bias, 1) if fitted.train_rows else 0.0), 1),
+        n=n,
+        raw_bias=raw,
+        cell=cell,
+        present=tuple(SOURCE_LABELS[s] for s in others),
+        higher=higher,
+        lower=lower,
+        missing=missing,
+    )
 
 
 def calpts_for_week(

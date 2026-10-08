@@ -102,8 +102,8 @@ def test_disagreements_report_the_direction_and_skip_zero_projections():
     assert "WR3" not in set(up["Name"]) | set(down["Name"])
 
 
-def test_the_disagreement_reason_quotes_the_raw_measured_bias_and_n():
-    scored = pd.DataFrame(
+def _scored_rb_rows(n):
+    return pd.DataFrame(
         [
             {
                 "season": 2026,
@@ -118,14 +118,47 @@ def test_the_disagreement_reason_quotes_the_raw_measured_bias_and_n():
                 "FantasyProsPts": np.nan,
                 "AggPts": 10.0,
             }
-            for _ in range(60)
+            for _ in range(n)
         ]
     )
-    fitted = calibration.fit(scored, before_week=2, sources=("ProjPts",))
-    row = pd.Series({"Position": "RB", "Salary": 4000, "ProjPts": 10.0})
+
+
+def test_the_disagreement_reason_quotes_the_applied_shrunk_bias_and_n():
+    fitted = calibration.fit(_scored_rb_rows(60), before_week=2, sources=("ProjPts",))
+    applied = fitted.bias[("ProjPts", "RB", 0)]  # -3.0 * 60 / 90, shrunk
+    row = pd.Series({"Position": "RB", "Salary": 4000, "ProjPts": 10.0, "CalPts": round(10.0 + applied, 1)})
     reason = eft.disagreement_reason(row, fitted)
-    assert "TFFB runs -3.0 on RBs <$4.5k (n=60)" in reason  # the raw mean miss, shrinkage undone
+    assert f"{round(applied, 1):+.1f} from TFFB's measured bias on RBs <$4.5k (n=60)" in reason
+    assert "-3.0" not in reason  # the raw miss is not what was applied
     assert eft.disagreement_reason(row, None) == "sources disagree with TFFB"
+
+
+def test_a_thin_bucket_says_it_was_shrunk():
+    fitted = calibration.fit(_scored_rb_rows(11), before_week=2, sources=("ProjPts",))
+    applied = fitted.bias[("ProjPts", "RB", 0)]
+    assert abs(applied) < 1.0  # -3.0 * 11/41, not the raw -3.0
+    row = pd.Series({"Position": "RB", "Salary": 4000, "ProjPts": 10.0, "CalPts": round(10.0 + applied, 1)})
+    assert "(n=11; shrunk, small sample)" in eft.disagreement_reason(row, fitted)
+
+
+def test_the_reason_splits_the_gap_into_bias_and_sources_and_names_a_missing_source():
+    scored = _scored_rb_rows(60).assign(SleeperPts=10.0, FantasyProsPts=10.0)
+    fitted = calibration.fit(scored, before_week=2)
+    row = pd.Series(
+        {
+            "Position": "RB",
+            "Salary": 4000,
+            "ProjPts": 10.0,
+            "SleeperPts": 14.0,
+            "FantasyProsPts": np.nan,
+            "CalPts": 12.0,
+        }
+    )
+    why = calibration.explain_gap(row, fitted)
+    assert why is not None and abs(why.bias + why.sources - 2.0) < 0.06  # the two parts add up to the gap
+    reason = eft.disagreement_reason(row, fitted)
+    assert "because Sleeper projects higher" in reason
+    assert "no FantasyPros projection for him" in reason
 
 
 def test_the_empty_state_layout_has_every_section_and_says_nothing_yet():

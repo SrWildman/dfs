@@ -1222,7 +1222,9 @@ blend on 2026-10-08):
    5.5-6.5k / 6.5k+; RB and WR under $4.5k / 4.5-6k / 6-7.5k / 7.5k+; TE under $3.5k / 3.5-5k / 5k+; DST under
    $2.8k / 2.8k+. A cell is (position, tier).
 2. **Per-source bias by cell**, shrunk toward 0: `bias = sum(actual - source) / (n + CAL_SHRINK_K)`,
-   `CAL_SHRINK_K = 40` (empirical-Bayes: n=0 keeps nothing, n=10 keeps 20% of the raw mean, n=160 keeps 80%).
+   `CAL_SHRINK_K = 30` (empirical-Bayes, the same for every source: n=0 keeps nothing, n=10 keeps 25% of the raw
+   mean, n=30 keeps 50%, n=160 keeps 84%). It was 40 until the usability round; Weeks 2-4 walk-forward MAE moved
+   4.99 -> 4.97 with rho unchanged.
    `calibrated_source = source + bias`.
 3. **Source weights per position**: inverse mean squared error of each calibrated source, shrunk toward equal weights:
    `w = (n * w_invmse + CAL_WEIGHT_K * w_equal) / (n + CAL_WEIGHT_K)`, `CAL_WEIGHT_K = 100`. The MSE is measured on
