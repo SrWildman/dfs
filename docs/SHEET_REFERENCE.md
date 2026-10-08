@@ -672,23 +672,52 @@ the same idea against `sheet_columns.PLAYER_POOL_COLUMN_ORDER` instead.
 ### Edge Finder
 
 Visible tab right after `Board` (`sheet_style.WEEK_ORDER`), **written by Python on every `dfs sync`** (`edge_finder_tab.build_layout`
-from the tables `edge_finder.enrich` saves under `data/current/edge_finder/`; written by `sheet_edge_finder.write_tab`). Nothing is
-typed. A template carries only the empty state (`dfs setup build-views` creates it once and never overwrites a synced one). Fixed
-columns A..N: Name, Pos, Team, Salary, six section-specific columns, `Pool` (EdgeRaw's own tick for that name, a formula), `↗` (a link
-to his EdgeRaw row), `Games` (games in his window; **rows under 3 are muted**), `Notes`. Sections, top to bottom: a status line (stats
-through week, injury report week, the injury report's source / rows / how many carry a final status / fetch time, depth chart time, projection snapshot, "CalPts trained on Weeks 1-N", "final `dfs sync --live` after
-inactives ~90 min before kickoff"); **Cash core** per position (top 5 by `Hit3x%` among players with `CalPts` at least the position
-median, with `Bust%`); **GPP upside** (top 5 by `Boom%`, with `CeilM` and `Own%`, a star when `Boom%` is in the top quartile and `Own%`
-in the bottom half, once ownership publishes); **Projection disagreements** (largest CalPts - ProjPts per position, both directions,
-with the measured reason: "TFFB runs -3.1 on RBs under $4.5k (n=67)"; the field mostly uses raw projections); **Injury beneficiaries**
-(CARRIES only: confirmed out first, questionable muted, method, "Priced in?", which is blank when it cannot be told; then **Absent regulars**,
-every confirmed absence of a back/receiver/tight end as muted context with his role, what he vacated, games missed, the with-or-without split and the
-historical "no single teammate gains much" line; no points are moved for targets); **Matchups (context)** (top 8 and bottom 4 with reasons and each
-team's top 2 players; feeds nothing); **Context signals** (`FADE↓` TE only, `USAGE↑ USAGE↓` RB carry share only, muted, unproven). A section is capped, with "+N more" in its
-heading. Every conditional format is relative to its own row, so colours and muting survive a sort or filter; no basic filter is set.
-Definitions: `docs/CALCULATIONS.md` ("Edge Finder"). Saved filter views on EdgeRaw: the original four plus **Cash** (Avail blank,
-`Hit3x%` not blank, sorted `Hit3x%` high to low) and **GPP** (Avail blank, `Boom%` not blank, sorted `Boom%` high to low); a filter view
-cannot hide columns, so `Boom%` and `Bust%` stay visible in both.
+from the tables `edge_finder.enrich` saves under `data/current/edge_finder/` plus the weekly usage tables; written by
+`sheet_edge_finder.write_tab`). Nothing is typed except the `Set` dropdown. A template carries only the empty state
+(`dfs setup build-views` creates it once and never overwrites a synced one).
+
+**Columns (fixed across sections).** `A`-`D` Name, Pos, Team, Salary; `E`-`J` section-specific (named by each section's header row);
+`K` **Why** (the plain-English reason, wide), `L` **Do** (a verb), `M` **Pool** (the player's current pool state: EdgeRaw's own tick
+found by his Id, or "Added" when his name is on Player Pool's hidden `Added` list), `N` **Set** (a dropdown: Cash / GPP / Both /
+Remove; the bound Apps Script `apps_script/Code.gs` acts on it, see `docs/APPS_SCRIPT.md`), `O` `↗` (a link to his EdgeRaw row),
+`P` **Id** (his DraftKings id, hidden: the script and every formula find the player by it, never by name) and `Q` (hidden: the key
+of the row group that starts on the next row). There is no `Games` column: a row built on fewer than 3 games is muted and its Why says
+"only 2 games of data". **Do** shows "In pool (Cash)" instead of its verb whenever the player is already pooled (a live formula, no sync).
+
+**Status lines (rows 2-5), in Eastern time:** "Stats through Week 4 · Injuries: practice reports only until Friday · Projections updated
+Wed 10:46 pm ET"; the injury report's source, rows, final statuses and fetch time; "CalPts trained on Weeks 1-N"; the reminder to run the
+final `dfs sync --live` about 90 minutes before kickoff, with the first kickoff.
+
+**Sections, top to bottom.** Each opens with a title bar (with an **All ↗** link to the matching EdgeRaw filter view on Cash core and GPP
+upside) and a second line, "what it is · what to do".
+- **Cash core**: per position, the rosterable, available players with `CalPts` at least the position median, best `Hit3x%` first.
+  Columns `CalPts`, `Hit3x%`, `Bust%`, `ProjPts`, `Rank` ("#3 of 28"), `Edge`. Do: `Cash add` (top 3 `Hit3x%` at the position AND `Bust%`
+  below the position median) or `Cash option`. A **thin week** line sits under a position's header when the block's best `Hit3x%` is below
+  the median best of earlier weeks (no history, no line).
+- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Own%`, `Rank`, `Edge`. Do: `GPP add` (`Boom%` in the position's top
+  quartile), `GPP leverage ★` (also low-owned, once ownership is out), else `GPP option`.
+- **Punt plays**: best `ValAdj` within $1,000 of each position's cheapest salary on the slate (top 5 per position). Do: `Punt option`.
+- **Projection disagreements**: largest |CalPts - ProjPts| per position, both directions; columns TFFB, Sleeper, FantasyPros, CalPts, Diff,
+  `Edge`. Why splits the gap into the measured bias (the applied, shrunk amount, with its n) and the other sources. Do: `Look closer ▲` /
+  `Caution ▼`.
+- **Injury beneficiaries**: carries only; confirmed out (`Bump ▲`) first, questionable muted (`Watch`); then **Absent regulars** as muted
+  context (Do `Out`). No points are moved for targets.
+- **Usage trends** (context, no chips): per position, the players whose last-3-games usage moved beyond normal week-to-week noise (more
+  than one standard deviation of that position's changes), one row per player (his biggest move; the others are named in Why). Do: `Watch`.
+- **Matchups (context)**: a row per team (`Soft` top 8 / `Tough` bottom 4), its top 3 players by `CalPts` in E, the reasons and score in
+  Why; the team's players sit in a collapsed row group under it, with `Set`. Feeds nothing.
+- **Context signals**: `FADE↓` (TE only), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven.
+
+**Row groups.** Each section's body is a level-1 group; in Cash core, GPP upside and punt plays every rosterable player is written (up to
+40 per position) and the rows past the visible count (QB 6, RB 10, WR 12, TE 6, DST 6) sit in a collapsed level-2 group under "▸ 34 more
+RBs (click + to show)"; each matchup team has its own. The +/- toggles sit on the row above the group. **Your open/closed choices survive
+every sync**: the sheet's own `rowGroups` are read before the rewrite and re-applied by group key (hidden column `Q`); a key not seen before
+gets the default (sections open, overflow and team groups shut).
+
+Every conditional format is relative to its own cells; the probability colour is a gradient per position block (best green, never red).
+No basic filter is set. Definitions: `docs/CALCULATIONS.md` ("Edge Finder", "Edge Finder tab"). Saved filter views on EdgeRaw: the original
+four plus **Cash** (Avail blank, `Hit3x%` not blank, sorted `Hit3x%` high to low) and **GPP** (Avail blank, `Boom%` not blank, sorted
+`Boom%` high to low); a filter view cannot hide columns, so `Boom%` and `Bust%` stay visible in both.
 
 ### Slate Grid
 

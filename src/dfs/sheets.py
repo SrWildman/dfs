@@ -852,6 +852,94 @@ class SheetsClient:
         ]
         sheet.batch_update({"requests": requests})
 
+    def read_row_groups(self, tab_name: str) -> list[dict]:
+        """Every row group on a tab, outermost first, as `{"start", "end", "depth", "collapsed"}` (1-based,
+        inclusive rows), read from the sheet's own `rowGroups` metadata. This is how a rebuild remembers which
+        groups Sam had open or shut (`apply_row_groups` puts them back)."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),rowGroups)"})
+        found = []
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                for group in s.get("rowGroups", []) or []:
+                    rng = group["range"]
+                    found.append(
+                        {
+                            "start": int(rng["startIndex"]) + 1,
+                            "end": int(rng["endIndex"]),
+                            "depth": int(group.get("depth", 1)),
+                            "collapsed": bool(group.get("collapsed", False)),
+                        }
+                    )
+                break
+        return sorted(found, key=lambda g: (g["depth"], g["start"]))
+
+    def apply_row_groups(self, tab_name: str, groups: list[tuple[int, int, int, bool]]) -> None:
+        """Create nested row groups `(first_row, last_row, depth, collapsed)` (1-based, inclusive) on a tab
+        with no row groups (`clear_row_groups` first). Groups are added outermost first, so an inner group
+        lands one level deeper than the one it sits in, and the collapsed flags are set innermost first once
+        every group exists (a collapsed outer group would otherwise hide the rows an inner one is about to
+        claim)."""
+        if not groups:
+            return
+        sheet, ws = self._ws(tab_name)
+
+        def span(first: int, last: int) -> dict:
+            return {"sheetId": ws.id, "dimension": "ROWS", "startIndex": first - 1, "endIndex": last}
+
+        ordered = sorted(groups, key=lambda g: (g[2], g[0]))
+        requests = [{"addDimensionGroup": {"range": span(first, last)}} for first, last, _, _ in ordered]
+        for first, last, depth, collapsed in sorted(groups, key=lambda g: (-g[2], g[0])):
+            requests.append(
+                {
+                    "updateDimensionGroup": {
+                        "dimensionGroup": {
+                            "range": span(first, last),
+                            "depth": depth,
+                            "collapsed": collapsed,
+                        },
+                        "fields": "collapsed",
+                    }
+                }
+            )
+        sheet.batch_update({"requests": requests})
+
+    def set_row_group_control_before(self, tab_name: str) -> None:
+        """Put a tab's row-group +/- toggle on the row ABOVE its group (Sheets' default is the row below).
+        The Edge Finder's section and overflow headers sit above the rows they fold away, so the toggle
+        belongs on them. Rendering only: no cell, value or group changes."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": ws.id,
+                                "gridProperties": {"rowGroupControlAfter": False},
+                            },
+                            "fields": "gridProperties.rowGroupControlAfter",
+                        }
+                    }
+                ]
+            }
+        )
+
+    def filter_view_id(self, tab_name: str, title: str) -> int | None:
+        """The id (`fvid` in a URL) of the filter view called `title` on a tab, or None."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),filterViews)"})
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                for fv in s.get("filterViews", []) or []:
+                    if fv.get("title") == title:
+                        return int(fv["filterViewId"])
+        return None
+
+    @property
+    def spreadsheet_id(self) -> str:
+        return self._cfg.sheet_id
+
     # ------------------------------------------------------------------
     # Presentation primitives.
     #
@@ -878,6 +966,13 @@ class SheetsClient:
             if ws.title == tab_name:
                 found = True
         return found
+
+    def ensure_row_capacity(self, tab_name: str, min_rows: int) -> None:
+        """Grow `tab_name`'s grid to at least `min_rows` rows (no-op if it already is). A tab rewritten with
+        more rows than its grid has fails with "exceeds grid limits" rather than growing to fit."""
+        _, ws = self._ws(tab_name)
+        if ws.row_count < min_rows:
+            ws.add_rows(min_rows - ws.row_count)
 
     def ensure_column_capacity(self, tab_name: str, min_cols: int) -> None:
         """Grows `tab_name`'s actual grid (via gspread's `add_cols`, an

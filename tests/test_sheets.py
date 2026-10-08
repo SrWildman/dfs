@@ -293,7 +293,10 @@ class FakeSpreadsheet:
                     "properties": {"sheetId": ws.id},
                     "conditionalFormats": ws.conditional_formats,
                     "columnGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.column_groups],
-                    "rowGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.row_groups],
+                    "rowGroups": [
+                        {"range": g["range"], "depth": g["depth"], "collapsed": g.get("collapsed", False)}
+                        for g in ws.row_groups
+                    ],
                     "filterViews": ws.filter_views,
                     "protectedRanges": ws.protected_ranges,
                 }
@@ -1331,3 +1334,48 @@ def test_clear_conditional_formats_for_with_no_targets_touches_nothing(cfg, monk
     before = len(fake.batch_update_calls)
     client.clear_conditional_formats_for("T", [])
     assert len(fake.batch_update_calls) == before
+
+
+def test_read_row_groups_reports_one_based_rows_depth_and_the_collapsed_flag(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    client.group_rows("T", 9, 40)
+    client.group_rows("T", 20, 25, collapsed=True)
+    groups = client.read_row_groups("T")
+    assert {(g["start"], g["end"], g["collapsed"]) for g in groups} == {(9, 40, False), (20, 25, True)}
+    assert client.read_row_groups("T") == sorted(groups, key=lambda g: (g["depth"], g["start"]))
+
+
+def test_apply_row_groups_adds_outer_groups_first_then_sets_collapsed_innermost_first(
+    cfg, monkeypatch, tmp_path
+):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    # given inner-first on purpose: the order is the client's job
+    client.apply_row_groups("T", [(20, 25, 2, True), (9, 40, 1, False), (30, 33, 2, False)])
+    ws = fake_sheet._worksheets["T"]
+    adds = [(c["range"]["startIndex"] + 1, c["range"]["endIndex"]) for c in ws.dimension_group_calls]
+    assert adds[0] == (9, 40) and set(adds[1:]) == {(20, 25), (30, 33)}  # the outer group is created first
+    updates = [
+        (u["dimensionGroup"]["depth"], u["dimensionGroup"]["collapsed"])
+        for u in ws.dimension_group_update_calls
+    ]
+    assert [d for d, _ in updates] == [2, 2, 1]  # collapsed flags: depth 2 before depth 1
+    assert {(g["range"]["startIndex"] + 1, g["collapsed"]) for g in ws.row_groups} == {
+        (9, False),
+        (20, True),
+        (30, False),
+    }
+    client.apply_row_groups("T", [])  # nothing to do must not raise
+
+
+def test_set_row_group_control_before_and_filter_view_id(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    ws = FakeWorksheet("T", rows=[["h"]])
+    fake_sheet._worksheets["T"] = ws
+    client.set_row_group_control_before("T")
+    update = fake_sheet.batch_update_calls[-1]["requests"][0]["updateSheetProperties"]
+    assert update["properties"]["gridProperties"] == {"rowGroupControlAfter": False}
+    assert update["fields"] == "gridProperties.rowGroupControlAfter"
+    ws.filter_views.append({"title": "Cash", "filterViewId": 77, "range": {"sheetId": ws.id}})
+    assert client.filter_view_id("T", "Cash") == 77 and client.filter_view_id("T", "Nope") is None

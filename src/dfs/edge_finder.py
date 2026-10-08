@@ -47,6 +47,7 @@ ABSENCES_FILE = "absences.csv"
 MATCHUPS_FILE = "matchups.csv"
 OUTS_FILE = "outs.csv"
 STATUS_FILE = "status.json"
+SOURCE_PROJECTION_COLUMNS = ("SleeperPts", "FantasyProsPts")  # saved beside the signals for the Edge Finder
 
 
 def _try_current(name: str) -> pd.DataFrame | None:
@@ -182,7 +183,11 @@ def _write_outputs(
     """The signals archive (`data/signals/`) and the tab's source tables (`data/current/edge_finder/`)."""
     signals_data.write_archive(output.players, ctx.season, ctx.week, now)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output.players.to_csv(OUTPUT_DIR / PLAYERS_FILE, index=False)
+    source_cols = [c for c in SOURCE_PROJECTION_COLUMNS if c in df.columns]
+    players = output.players.drop(columns=source_cols, errors="ignore")
+    if source_cols:  # the tab splits CalPts - ProjPts by source, so it needs each source's own projection
+        players = players.merge(df[["Id", *source_cols]].drop_duplicates("Id"), on="Id", how="left")
+    players.to_csv(OUTPUT_DIR / PLAYERS_FILE, index=False)
     output.beneficiaries.to_csv(OUTPUT_DIR / BENEFICIARIES_FILE, index=False)
     output.absences.to_csv(OUTPUT_DIR / ABSENCES_FILE, index=False)
     output.matchups.to_csv(OUTPUT_DIR / MATCHUPS_FILE, index=False)

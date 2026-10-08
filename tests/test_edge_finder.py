@@ -159,3 +159,27 @@ def test_depth_cutoff_never_reads_a_chart_published_after_the_first_kickoff():
     after = edge_finder.depth_cutoff(frame, datetime(2026, 10, 11, 22, tzinfo=UTC))
     assert before == "2026-10-10T12:00:00Z"
     assert after == "2026-10-11T17:00:00Z"  # capped at kickoff, not "now"
+
+
+def test_the_saved_players_table_carries_each_sources_own_projection_for_the_tab(monkeypatch, tmp_path):
+    """The tab splits CalPts - ProjPts by source, so players.csv must hold Sleeper's and FantasyPros' own
+    projections (they are not signals columns)."""
+    monkeypatch.setattr(edge_finder, "OUTPUT_DIR", tmp_path / "ef")
+    monkeypatch.setattr("dfs.signals_data.SIGNALS_DIR", tmp_path / "signals")
+    monkeypatch.setattr(
+        edge_finder.results_loop,
+        "source_projection_columns",
+        lambda df, inputs: pd.DataFrame({"Id": df["Id"], "SleeperPts": 9.5, "FantasyProsPts": 8.5}),
+    )
+    edge_finder.enrich(
+        _edge_frame(),
+        SyncContext(week=4, season=2026),
+        now=datetime(2026, 10, 5, 12, tzinfo=UTC),
+        scored=_scored(),
+        data=_data(),
+        write=True,
+    )
+    saved = pd.read_csv(tmp_path / "ef" / edge_finder.PLAYERS_FILE)
+    assert {"SleeperPts", "FantasyProsPts"} <= set(saved.columns)
+    assert saved["SleeperPts"].eq(9.5).all() and saved["FantasyProsPts"].eq(8.5).all()
+    assert saved["Id"].is_unique  # one row per player, however the merge ran

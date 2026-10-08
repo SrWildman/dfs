@@ -84,8 +84,9 @@ dfs edge              # top leverage plays, in the terminal, no browser needed
 dfs go                # sync + dfs doctor + what changed, back to back
 ```
 
-Every sync also rewrites the **Edge Finder** tab (cash core and GPP upside per position, where `CalPts` disagrees with
-TFFB, who inherits an out back's carries, every absent regular as context, matchups (context only), and the unproven context signals) and the Board's
+Every sync also rewrites the **Edge Finder** tab (cash core and GPP upside per position with a reason and a verb on every row, punt plays, where
+`CalPts` disagrees with TFFB, who inherits an out back's carries, every absent regular as context, usage trends, matchups (context only), and
+the unproven context signals; your open/closed sections survive the rewrite) and the Board's
 "This week's edges" panel. The final `dfs sync --live` after inactives (about 90 minutes before kickoff) is the one that
 matters for the injury list. `CalPts` is **not** the default projection: it is tracked in Model Check.
 

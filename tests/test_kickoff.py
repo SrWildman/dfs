@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from dfs.kickoff import games_state, kickoff_utc, parse_kickoff
+from dfs.kickoff import format_et, games_state, kickoff_label, kickoff_utc, parse_kickoff
 
 
 def test_edt_and_est_kickoffs_convert_to_the_right_utc_instant():
@@ -48,3 +48,17 @@ def test_games_state_with_nothing_parseable_is_not_started_and_not_finished():
         False,
         False,
     )
+
+
+def test_format_et_writes_an_instant_in_eastern_wall_clock_time():
+    assert format_et(datetime(2026, 10, 8, 2, 46, tzinfo=UTC)) == "Wed 10:46 pm ET"  # EDT, UTC-4
+    assert format_et(datetime(2026, 12, 6, 18, 0, tzinfo=UTC), suffix=False) == "Sun 1:00 pm"  # EST, UTC-5
+    assert (
+        format_et(datetime(2026, 10, 11, 4, 5, tzinfo=UTC)) == "Sun 12:05 am ET"
+    )  # midnight hour is 12, not 0
+
+
+def test_kickoff_label_formats_tffbs_eastern_string_as_written_never_converting_it():
+    assert kickoff_label("2026-10-11T13:00:00Z") == "Sun 1:00 pm"  # the "Z" is a lie: this is 1 pm Eastern
+    assert kickoff_label("2026-10-11T20:20:00Z") == "Sun 8:20 pm"
+    assert kickoff_label("") == "" and kickoff_label(None) == "" and kickoff_label("garbage") == ""

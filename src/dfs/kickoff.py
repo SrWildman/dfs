@@ -17,6 +17,7 @@ from datetime import datetime
 import pandas as pd
 
 KICKOFF_TIMEZONE = "America/New_York"
+_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 def kickoff_utc(values: pd.Series) -> pd.Series:
@@ -49,3 +50,27 @@ def games_state(game_starts: pd.Series, now: datetime, finished_after_hours: flo
     started = bool((starts <= stamp).any())
     finished = started and (stamp - starts.max()).total_seconds() / 3600 >= finished_after_hours
     return (started, finished)
+
+
+def _clock(moment: datetime) -> str:
+    hour = moment.hour % 12 or 12
+    return f"{hour}:{moment.minute:02d} {'am' if moment.hour < 12 else 'pm'}"
+
+
+def format_et(instant: datetime, *, suffix: bool = True) -> str:
+    """A real instant as Eastern wall-clock text, e.g. `Wed 10:46 pm ET` (`Wed 10:46 pm` without the suffix).
+    Naive datetimes are taken as UTC."""
+    stamp = pd.Timestamp(instant)
+    stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp
+    local = stamp.tz_convert(KICKOFF_TIMEZONE).to_pydatetime()
+    return f"{_DAYS[local.weekday()]} {_clock(local)}" + (" ET" if suffix else "")
+
+
+def kickoff_label(value: object) -> str:
+    """TFFB's `GameStart` string as the kickoff Sam reads, e.g. `Sun 1:00 pm`. The string is already Eastern
+    wall-clock time (see the module docstring), so it is formatted as written, never converted. Blank for a
+    blank or unparseable value."""
+    parsed = parse_kickoff(value)
+    if parsed is None:
+        return ""
+    return format_et(parsed, suffix=False)

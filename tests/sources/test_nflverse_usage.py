@@ -45,6 +45,7 @@ def _stats_parquet() -> bytes:
 
 def _redirect_raw(monkeypatch, tmp_path):
     monkeypatch.setattr(nflverse_usage, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(nflverse_usage, "CURRENT_DIR", tmp_path / "current")
     monkeypatch.setattr(nflverse_usage, "ensure_data_dirs", lambda: None)
 
 
@@ -91,3 +92,28 @@ def test_usage_source_has_no_sheet_tab_and_sits_before_edge():
     names = list(SOURCES)
     assert names.index("usage") < names.index("edge")
     assert names.index("pbp") < names.index("edge")
+
+
+def test_the_weekly_red_zone_table_is_saved_and_removed_when_pbp_is_missing(monkeypatch, tmp_path):
+    _redirect_raw(monkeypatch, tmp_path)
+    saved = tmp_path / "current" / nflverse_usage.REDZONE_WEEKLY_FILE
+    pbp = pd.DataFrame(
+        {
+            "game_id": ["g1"],
+            "week": [1],
+            "season_type": ["REG"],
+            "play_type": ["pass"],
+            "pass": [1],
+            "rush": [0],
+            "yardline_100": [8],
+            "receiver_player_id": ["w1"],
+            "rusher_player_id": [None],
+            "two_point_attempt": [0],
+            "play_deleted": [0],
+        }
+    )
+    nflverse_usage._save_redzone_weekly(pbp)
+    weekly = pd.read_csv(saved)
+    assert weekly.loc[0, "GsisId"] == "w1" and weekly.loc[0, "rz"] == 1 and weekly.loc[0, "hvt"] == 1
+    nflverse_usage._save_redzone_weekly(None)  # a failed pbp fetch must not leave last sync's counts behind
+    assert not saved.exists()

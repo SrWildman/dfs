@@ -1430,15 +1430,43 @@ a later week's games and a later depth chart to every input and assert nothing i
 
 ### Every new named constant (starting values)
 
-`CAL_SHRINK_K` 40, `CAL_WEIGHT_K` 100, `CAL_DECIMALS` 1, `CAL_SALARY_TIERS` (above), `HIT_MULTIPLE` 3, `BOOM_MULTIPLE` 4,
+`CAL_SHRINK_K` 30, `CAL_WEIGHT_K` 100, `CAL_DECIMALS` 1, `CAL_SALARY_TIERS` (above), `HIT_MULTIPLE` 3, `BOOM_MULTIPLE` 4,
 `BUST_MULTIPLE` 2, `PROB_QB_MIN_CALPTS` 10, `PROB_DST_LOW_CONFIDENCE_BELOW` 4, `PROB_DECIMALS` 1, `XFP_WINDOW_GAMES` 3,
 `XFP_TOP_HALF_PCT` 0.5 (the FADE/USAGE thresholds, the regular definition and the carry fractions are NOT constants:
 they are read from `models/research/`), `PRICED_IN_SHARE` 0.7,
 `INJ_MIN_GAINED_XFP` 1.0, `WITH_WITHOUT_MIN_GAMES` 2, `MATCHUP_WEIGHTS` equal, `MATCHUP_TOP_N` 8, `MATCHUP_BOTTOM_N` 4,
 `MATCHUP_PLAYERS_PER_TEAM` 2, `MIN_SLATE_TEAMS` 3, `RELIABILITY_BINS` 10, `RELIABILITY_FLAG_POINTS` 8,
-`RELIABILITY_MIN_N` 30, `KEEP_DAYS` 10 (the depth-chart source), and the Edge Finder tab's `SECTION_TOP_N` 5,
+`RELIABILITY_MIN_N` 30, `KEEP_DAYS` 10 (the depth-chart source), and the Edge Finder tab's `SECTION_TOP_N` 5 (the Board panel),
 `DISAGREEMENT_PER_DIRECTION` 2, `BENEFICIARY_CONFIRMED_N` 12, `BENEFICIARY_QUESTIONABLE_N` 6, `SIGNALS_PER_TOKEN` 6,
 `MUTED_BELOW_GAMES` 3, `CASH_CORE_MIN_CALPTS_PCT` 50, `BOOM_STAR_TOP_QUARTILE` 0.75, `OWN_STAR_BOTTOM_HALF` 0.5.
+
+## Edge Finder tab: ranks, verbs, trends, punt plays (usability round, 2026-10-08)
+
+Everything below is presentation of numbers computed elsewhere; nothing here moves a projection. Constants live in `edge_finder_tab.py` and
+`usage_trends.py` and are named, never typed in the layout.
+
+- **Pools and counts.** "Top N of M" counts only the rosterable pool (`derived._rosterable_pool_mask`: the top 32 QB / 64 RB / 96 WR / 32 TE / 32
+  DST by `ProjPts`), never every DraftKings listing. Cash core further needs `CalPts%ile >= 50` (`CASH_CORE_MIN_CALPTS_PCT`) and a `Hit3x%`.
+  Visible rows per position `VISIBLE_PER_POSITION` QB 6, RB 10, WR 12, TE 6, DST 6; at most `MAX_PER_POSITION` 40 are written. `Rank` is
+  "#i of M" within that same block, by the section's sort column (`Hit3x%`, `Boom%`, `ValAdj`).
+- **Do verbs.** `Cash add`: rank <= `CASH_ADD_TOP_N` (3) AND `Bust%` strictly below the block's median `Bust%`; else `Cash option`.
+  `GPP add`: `Boom%` at or above the block's `GPP_ADD_TOP_QUARTILE` (0.75) quantile; `GPP leverage ★` also needs the star (ownership published,
+  `Own%` at or below the block's median, `OWN_STAR_BOTTOM_HALF`); else `GPP option`. Disagreements: `Look closer ▲` where CalPts > TFFB, `Caution ▼`
+  where lower. Injury: `Bump ▲` confirmed out, `Watch` questionable. Pooled players read `In pool (Cash|GPP|Both|Added)` instead (a formula on `Pool`).
+- **Thin-week verdict.** For each position, the median across earlier weeks of that week's best cash-core `Hit3x%` (each week read the way Sam saw
+  it: the last signals archive before each player's own kickoff, `signals_data.select_archive_rows`; `typical_best_hit3x`). If this week's best
+  is below it: "Thin week at RB: best cash odds 34% (typical best ~41%, 4 earlier weeks)". No earlier week, no line.
+- **Disagreement Why.** `calibration.explain_gap` splits `CalPts - ProjPts` into the weight-averaged, shrunk cell biases (what was actually
+  applied) and the remainder (the other sources disagreeing with TFFB); the two add to the gap. A source the player lacks is named.
+- **Punt plays.** Floor = the position's minimum `Salary` over every DraftKings listing on the slate; candidates are rosterable, available players
+  within `PUNT_SALARY_WINDOW` ($1,000) of it, best `ValAdj` first, top `PUNT_ROWS_PER_POSITION` 5. (The Board's old Punt finder, ported.)
+- **Usage trends** (`usage_trends.py`, context only). For each player, his last `TREND_RECENT_GAMES` 3 games played this season against every earlier game
+  (needs `TREND_MIN_PRIOR_GAMES` 1). Metrics: `Tgt%` (WR/TE/RB), `WOPR` and `Air share` (WR/TE), `Rush%` and `Rec/G` (RB), `RZ/G` (RB/WR/TE), `HVT/G`
+  (RB), `Snap%` (RB/WR/TE); shares are ratios of window sums, per-game values window means. The noise band per metric and position is one standard
+  deviation of (recent - earlier) across the rosterable players this season; an arrow `▲`/`▼` appears only when a player's own change is beyond
+  `TREND_NOISE_SD` (1) of it, and needs `MIN_BAND_PLAYERS` (5) to exist. **Routes run are not available from any free source; snaps are not a stand-in for them
+  and are not used as one.** The planned R6 signals research may replace this empirical band. Inputs: the latest `data/raw/stats_player/` snapshot,
+  `data/current/redzone_weekly.csv` (from the usage source's play-by-play) and `data/current/snaps_weekly.csv` (from the snaps source).
 
 ## Player Pool ordering: tag group, then salary (Part 7.10)
 
