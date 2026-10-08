@@ -57,34 +57,34 @@ def test_fit_covers_every_role_pair_it_has_data_for(synth_frame):
     # roles the synthetic frame has: 8 of them; every same-team pair and every opposing pair among them
     assert len(pooled[pooled["relation"] == "same_team"]) == 8 * 7 // 2
     assert len(pooled[pooled["relation"] == "opp"]) == 8 * 9 // 2
-    assert shipped["total_bucket"].isin(["all", "low", "mid", "high"]).all()
+    assert (shipped["total_bucket"] == "all").all()  # only pooled values ship
 
 
-def test_a_total_bucket_row_ships_only_where_the_terciles_differ(synth_frame):
+def test_tercile_analysis_is_report_only_and_nothing_but_pooled_ships(synth_frame):
     # No dependence on the game total anywhere. Two 90% intervals failing to overlap is a ~2% event per
     # comparison and each pair has three comparisons, so about 6% of pairs are flagged by chance alone.
     fit = C.fit_correlations(synth_frame(), n_boot=100, seed=2)
     pairs = fit.detail.drop_duplicates(["relation", "role_a", "role_b"])
     flagged = fit.detail[fit.detail["conditional"]].drop_duplicates(["relation", "role_a", "role_b"])
     assert len(flagged) <= 0.2 * len(pairs)
-    shipped_buckets = fit.shipped[fit.shipped["total_bucket"] != "all"]
-    assert len(shipped_buckets) == 3 * len(flagged)
+    assert set(fit.detail["total_bucket"]) == {"all", "low", "mid", "high"}  # the analysis is kept ...
+    assert set(fit.shipped["total_bucket"]) == {"all"}  # ... but not shipped
 
 
-def test_a_correlation_that_really_depends_on_the_total_is_shipped_by_tercile(synth_frame):
+def test_even_a_real_total_dependence_ships_only_the_pooled_value(synth_frame):
     frame = synth_frame(n_games=2400, rho_qb_wr={38.5: 0.1, 44.5: 0.4, 50.5: 0.7}, seed=3)
     fit = C.fit_correlations(frame, n_boot=100, seed=3)
-    rows = fit.shipped[
-        (fit.shipped["role_a"] == "QB1")
-        & (fit.shipped["role_b"] == "WR1")
-        & (fit.shipped["relation"] == "same_team")
-    ]
-    by = rows.set_index("total_bucket")["rho"]
-    assert set(by.index) == {"all", "low", "mid", "high"}
-    assert by["low"] < by["mid"] < by["high"] and by["low"] < 0.2 and by["high"] > 0.55
-    look = fit.lookup()
-    assert look.rho("same_team", "QB1", "WR1", "high") == by["high"]
-    assert look.rho("same_team", "QB1", "WR1") == by["all"]
+    key = (
+        (fit.detail["role_a"] == "QB1")
+        & (fit.detail["role_b"] == "WR1")
+        & (fit.detail["relation"] == "same_team")
+    )
+    by = fit.detail[key].set_index("total_bucket")["rho"]
+    assert by["low"] < by["mid"] < by["high"] and by["low"] < 0.2 and by["high"] > 0.55  # seen in the report
+    assert fit.detail[key & (fit.detail["total_bucket"] != "all")]["conditional"].all()
+    shipped = fit.shipped[(fit.shipped["role_a"] == "QB1") & (fit.shipped["role_b"] == "WR1")]
+    assert shipped["total_bucket"].tolist().count("all") == len(shipped) == 2  # same_team and opp
+    assert fit.lookup().rho("same_team", "QB1", "WR1") == by["all"]
 
 
 def test_conditional_flag_needs_non_overlapping_intervals():
@@ -131,31 +131,38 @@ def test_cross_game_pairs_are_uncorrelated(synth_frame):
     assert np.corrcoef(same["za"], same["zb"])[0, 1] > 0.4
 
 
-def test_lookup_is_symmetric_falls_back_to_pooled_and_defaults_to_zero():
-    table = pd.DataFrame(
+def _table(buckets=("all", "all")):
+    return pd.DataFrame(
         {
-            "relation": ["same_team", "same_team", "opp"],
-            "role_a": ["QB1", "QB1", "QB1"],
-            "role_b": ["WR1", "WR1", "DST"],
-            "total_bucket": ["all", "high", "all"],
-            "rho": [0.3, 0.45, -0.3],
-            "n": [100, 30, 100],
-            "ci_lo": [0.2, 0.3, -0.4],
-            "ci_hi": [0.4, 0.6, -0.2],
+            "relation": ["same_team", "opp"],
+            "role_a": ["QB1", "QB1"],
+            "role_b": ["WR1", "DST"],
+            "total_bucket": list(buckets),
+            "rho": [0.3, -0.3],
+            "n": [100, 100],
+            "ci_lo": [0.2, -0.4],
+            "ci_hi": [0.4, -0.2],
         }
     )
-    look = C.CorrelationLookup(table, (43.5, 47.0))
+
+
+def test_lookup_is_symmetric_and_defaults_to_zero():
+    look = C.CorrelationLookup(_table())
     assert look.rho("same_team", "WR1", "QB1") == look.rho("same_team", "QB1", "WR1") == 0.3
-    assert look.rho("same_team", "QB1", "WR1", "high") == 0.45
-    assert look.rho("same_team", "QB1", "WR1", "low") == 0.3  # no low row shipped: pooled
-    assert look.rho("opp", "DST", "QB1", "high") == -0.3
+    assert look.rho("opp", "DST", "QB1") == -0.3
     assert look.rho("same_team", "RB1", "RB2") == 0.0  # never observed
-    assert look.bucket(50.0) == "high"
+    assert look.has("opp", "DST", "QB1") and not look.has("opp", "RB1", "RB2")
+
+
+def test_a_table_with_total_bucket_rows_is_refused():
+    # a stale file from before only pooled values shipped must not be half-used
+    with pytest.raises(C.CorrelationError, match="dfs sim fit"):
+        C.CorrelationLookup(_table(("all", "high")))
 
 
 def test_a_malformed_table_is_refused():
     with pytest.raises(C.CorrelationError):
-        C.CorrelationLookup(pd.DataFrame({"relation": []}), (1.0, 2.0))
+        C.CorrelationLookup(pd.DataFrame({"relation": []}))
 
 
 # --- the table that ships ---------------------------------------------------------------------------------
@@ -187,7 +194,8 @@ def test_the_shipped_cross_game_check_passed():
 
     meta = json.loads((C.SIM_DIR / C.META_FILE).read_text())
     assert meta["cross_game"]["mean_abs_r"] < C.CROSS_GAME_LIMIT
-    assert len(meta["total_cutoffs"]) == 2
+    assert len(meta["total_cutoffs"]) == 2  # kept for the report-only tercile analysis
+    assert (pd.read_csv(C.SIM_DIR / C.CORRELATIONS_FILE)["total_bucket"] == "all").all()
 
 
 def test_save_and_load_round_trip(synth_frame, tmp_path):
@@ -198,7 +206,6 @@ def test_save_and_load_round_trip(synth_frame, tmp_path):
     assert loaded.rho("same_team", "QB1", "WR1") == pytest.approx(
         fit.lookup().rho("same_team", "QB1", "WR1"), abs=1e-5
     )
-    assert loaded.cutoffs == pytest.approx(fit.cutoffs)
     with pytest.raises(C.CorrelationError):
         C.load_correlations(tmp_path / "nowhere")
 

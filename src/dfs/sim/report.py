@@ -123,7 +123,7 @@ def fit_summary(fit: Fit, checks: dict) -> str:
         f"mean |r| = {cg['cross_game']['mean_abs_r']:.4f} "
         f"(independence noise floor {cg['cross_game']['noise_floor']:.4f}; limit {CROSS_GAME_LIMIT}).",
         f"Total-conditional: {cg['conditional_pairs']} of {cg['pairs']} role pairs differ significantly "
-        f"across game-total terciles; those ship tercile rows, the rest ship the pooled value.",
+        f"across game-total terciles; report only -- every pair ships its pooled value.",
     ]
     return "\n".join(lines)
 

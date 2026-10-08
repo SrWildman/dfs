@@ -20,7 +20,7 @@ adds those three entries.
 |---|---|---|
 | Marginals | `marginal.py` | One player's outcome distribution as a CDF and a quantile function (the engine's ratio quantiles, with the zero atom explicit). |
 | Roles | `roles.py` | A player's slot on his team (QB1, RB1-3, WR1-4, TE1-2, DST) from his **prior three games only**; builds the frame the correlations are fitted on. |
-| Correlations | `correlation.py` | Normal scores, role-pair correlations with bootstrap intervals and shrinkage, the game-total check, the cross-game check. |
+| Correlations | `correlation.py` | Normal scores, role-pair correlations with bootstrap intervals and shrinkage, the report-only game-total analysis, the cross-game check. |
 | Simulator | `simulate.py` | `simulate_lineups` (Gaussian copula) and `swap_impact`. |
 | Back-test | `backtest.py` | Random legal lineups for 2023-2025, predicted with correlations fitted on 2014-2022 only. |
 | Text | `report.py`, `cli.py` | The tables printed by `dfs sim fit / backtest / demo` and used in this file. |
@@ -48,14 +48,7 @@ qb = PlayerSpec(
     salary=6600,
 )
 ...
-result = simulate_lineups(
-    [lineup_a, lineup_b],
-    n_sims=20000,
-    seed=0,
-    cash_line=148.0,
-    gpp_target=200.0,
-    total_bucket_by_game={"2025_12_IND_KC": 50.5},
-)  # a Vegas total, or "low"/"mid"/"high"
+result = simulate_lineups([lineup_a, lineup_b], n_sims=20000, seed=0, cash_line=148.0, gpp_target=200.0)
 result.table()  # mean, p10 ... p99, P(cash), P(GPP target) per lineup
 result.p_any_gpp, result.p_any_cash, result.expected_cashing
 result.score_correlation  # lineup x lineup
@@ -104,15 +97,16 @@ is **shrunk toward 0 in Fisher-z space with a prior worth 200 observations**:
 `z' = z * (n - 3) / (n - 3 + 200)`. The interval's endpoints go through the same map, so `rho` always sits
 inside it. **Players in different games are assumed independent**; the check is below.
 
-**5. Game total.** The same fit within terciles of the Vegas game total (cut at 43.5 and 47.0 points). A tercile
-row is shipped for a pair only when two terciles' *unshrunk* intervals do not overlap; every other pair ships
-only the pooled value. `correlations.csv` has columns `relation, role_a, role_b, total_bucket, rho, n, ci_lo,
-ci_hi`; `total_bucket` is `all`, or `low` / `mid` / `high` for a conditional row. `correlations_detail.csv`
-has every row, with the unshrunk values and the flag; `correlations_meta.json` records the cutoffs and checks.
+**5. Game total (report only).** The same fit within terciles of the Vegas game total (cut at 43.5 and 47.0
+points), flagging a pair when two terciles' *unshrunk* intervals do not overlap. The flagged pairs turned out to be
+what chance produces (see below), so **nothing from the tercile fit is shipped**: `correlations.csv` has the
+pooled value of every pair, columns `relation, role_a, role_b, total_bucket, rho, n, ci_lo, ci_hi`, with
+`total_bucket` always `all` (the loader refuses a file with any other value), and the simulator takes no game
+total. `correlations_detail.csv` keeps every row of the analysis, with the unshrunk values and the flag;
+`correlations_meta.json` records the cutoffs and checks.
 
 **6. The copula.** For the union of every player in every lineup: build the correlation matrix `R` (0 across
-games; the table's `same_team` or `opp` value for the two roles within a game, the game's total-tercile row
-where one is shipped), repair it if needed, draw `z ~ N(0, R)`, take `u = Phi(z)`, and read each player's
+games; the table's `same_team` or `opp` value for the two roles within a game), repair it if needed, draw `z ~ N(0, R)`, take `u = Phi(z)`, and read each player's
 points off his own quantile function at `u`. Every player therefore keeps exactly his own marginal and every
 pair inherits `R`. **The same player in two lineups is one variable**, so lineups that share players are
 correlated with each other the way real ones are. `R` is assembled from separately estimated pairs, so it can in
@@ -124,7 +118,7 @@ it moved). Two different players in the same role on one team (two RB3s) borrow 
 
 ## The correlation table
 
-`models/sim/correlations.csv` (145 rows) is fitted on all of 2014-2025: 51,267 out-of-fold player-games
+`models/sim/correlations.csv` (121 rows, one per role pair) is fitted on all of 2014-2025: 51,267 out-of-fold player-games
 in 3,151 games.
 
 ### Against the literature
@@ -308,9 +302,9 @@ Mean |r| is 0.012 against a limit of 0.03, which is what sampling noise alone wo
 
 ### Does it depend on the game total?
 
-The same fit within terciles of the Vegas game total (low below 43.5, mid up to 47.0, high above). A pair gets
-tercile rows only if two terciles' unshrunk 90% intervals fail to overlap, so those rows are shipped for
-**8 of 121 pairs** and the other 113 ship only their pooled value:
+The same fit within terciles of the Vegas game total (low below 43.5, mid up to 47.0, high above), as a
+**report-only analysis**. A pair is flagged if two terciles' unshrunk 90% intervals fail to overlap, which
+happens for **8 of 121 pairs**:
 
 | Relation | Pair | low | mid | high |
 |---|---|---|---|---|
@@ -329,9 +323,9 @@ dependence at all. To measure that on this data, the games' totals were shuffled
 link between total and correlation) and the whole fit repeated five times: **7, 10, 7, 10 and 6 pairs were
 flagged, mean 8.0 -- against 8 on the real totals.** None of the eight is a pair that matters for stacking
 (QB1 with his receivers), the patterns jump up and down (mid unlike low and high) rather than rising or falling
-with the total, and most rest on a few hundred pairs. The rule in the task was followed as written, so the rows
-are in `correlations.csv`; the simulator uses them only if `total_bucket_by_game` is passed. To use the pooled
-values alone, delete the rows whose `total_bucket` is not `all` -- or, better, keep them out of the next fit.
+with the total, and most rest on a few hundred pairs. **Ruling: pooled values only.** `correlations.csv` ships
+the pooled value of every pair, the simulator takes no game total, and this table is the whole of what the
+tercile analysis contributes (`correlations_detail.csv` keeps every row of it).
 
 ## Back-test
 
@@ -630,14 +624,15 @@ top of the range. Whatever improves the top end of the engine will make the corr
 - **Bins in a week are not independent draws:** lineups in one week share players and games, so a reliability bin
   of 1,080 lineups carries less information than 1,080 independent ones; the standard errors shown for the
   paired differences use weeks as the unit.
-- **The total-conditional rows** are what chance produces (see above).
+- **No game-total dependence is modelled.** The tercile analysis found only what chance produces (see above), so
+  every pair has one pooled value whatever the game's total.
 
 ## Files
 
 | File | What |
 |---|---|
-| `models/sim/correlations.csv` | The shipped table (`relation, role_a, role_b, total_bucket, rho, n, ci_lo, ci_hi`). |
-| `models/sim/correlations_detail.csv` | Every fitted row with the unshrunk `r_raw`, its interval and the `conditional` flag. |
+| `models/sim/correlations.csv` | The shipped table, pooled values only (`relation, role_a, role_b, total_bucket, rho, n, ci_lo, ci_hi`; `total_bucket` is always `all`). |
+| `models/sim/correlations_detail.csv` | Every fitted row, including the report-only tercile rows, with the unshrunk `r_raw`, its interval and the `conditional` flag. |
 | `models/sim/correlations_meta.json` | Seed, bootstrap size, shrinkage prior, total cutoffs, the cross-game check. |
 | `models/sim/backtest.md` | The complete back-test report (`dfs sim backtest --save`). |
 | `src/dfs/sim/` | `marginal.py`, `roles.py`, `correlation.py`, `simulate.py`, `backtest.py`, `pipeline.py`, `report.py`, `cli.py`. |

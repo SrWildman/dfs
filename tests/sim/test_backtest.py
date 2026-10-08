@@ -99,7 +99,7 @@ def _look():
             "ci_hi": 0.5,
         }
     )
-    return CorrelationLookup(table, (43.5, 47.0))
+    return CorrelationLookup(table)
 
 
 def test_run_backtest_end_to_end_on_a_small_frame(synth_week):

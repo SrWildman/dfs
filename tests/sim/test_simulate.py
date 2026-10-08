@@ -21,7 +21,7 @@ def lookup(*rows):
             "ci_hi": [r[3] + 0.05 for r in rows],
         }
     )
-    return CorrelationLookup(table, (43.5, 47.0))
+    return CorrelationLookup(table)
 
 
 def P(pid, position, team, role, projection, game="G1", opp="BBB"):
@@ -99,27 +99,20 @@ def test_players_in_different_games_are_independent_whatever_their_roles():
     assert abs(res.score_correlation[0, 1]) < 0.02
 
 
-def test_matrix_uses_same_team_opp_and_the_game_total_bucket():
-    table = pd.DataFrame(
-        {
-            "relation": ["same_team", "same_team", "opp"],
-            "role_a": ["QB1", "QB1", "QB1"],
-            "role_b": ["WR1", "WR1", "WR1"],
-            "total_bucket": ["all", "high", "all"],
-            "rho": [0.3, 0.5, 0.1],
-            "n": 100,
-            "ci_lo": 0.0,
-            "ci_hi": 0.6,
-        }
-    )
-    look = CorrelationLookup(table, (43.5, 47.0))
+def test_matrix_uses_the_same_team_and_opposing_values():
+    look = lookup(("same_team", "QB1", "WR1", 0.3), ("opp", "QB1", "WR1", 0.1))
     foe = P("wrx", "WR", "BBB", "WR1", 14.0, opp="AAA")
     r, _ = S.correlation_matrix([QB, WR, foe], look)
     assert (r[0, 1], r[0, 2]) == (0.3, 0.1)
-    r, _ = S.correlation_matrix([QB, WR, foe], look, {"G1": "high"})
-    assert r[0, 1] == 0.5 and r[0, 2] == 0.1  # the opposing pair has no 'high' row: pooled
-    r, _ = S.correlation_matrix([QB, WR], look, {"G1": 52.5})  # a raw total reads through the cutoffs
-    assert r[0, 1] == 0.5
+    assert r[1, 2] == 0.0  # WR1 against WR1 was never given: independent
+
+
+def test_the_simulator_takes_no_game_total():
+    import inspect
+
+    assert "total_bucket_by_game" not in inspect.signature(S.simulate_lineups).parameters
+    with pytest.raises(TypeError):
+        S.simulate_lineups([[QB]], total_bucket_by_game={"G1": "high"}, correlations=lookup())
 
 
 def test_two_players_in_the_same_role_on_one_team_borrow_the_neighbour():

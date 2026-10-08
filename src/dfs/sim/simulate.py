@@ -13,7 +13,7 @@ ONE variable (one column of z), so lineups that share players are correlated wit
 lineups are.
 
 R is assembled from the shipped table: a pair in different games is 0; in the same game it is the table's
-'same_team' or 'opp' value for the two roles (the game's total tercile row where one was shipped). Pairs
+'same_team' or 'opp' value for the two roles. Pairs
 assembled from separately estimated values need not form a valid correlation matrix, so R is repaired to the
 nearest positive semi-definite matrix by eigenvalue clipping and rescaling to a unit diagonal; the result
 records whether that was needed and the largest entry it moved.
@@ -152,18 +152,11 @@ def _distinct_players(lineups: list[list[PlayerSpec]]) -> list[PlayerSpec]:
     return list(seen.values())
 
 
-def correlation_matrix(
-    players: list[PlayerSpec],
-    lookup: CorrelationLookup,
-    total_bucket_by_game: dict | None = None,
-) -> tuple[np.ndarray, list[str]]:
+def correlation_matrix(players: list[PlayerSpec], lookup: CorrelationLookup) -> tuple[np.ndarray, list[str]]:
     """The raw (unrepaired) correlation matrix for `players`, and notes on any pair that had to borrow."""
     n = len(players)
     r = np.eye(n)
     notes: list[str] = []
-    buckets = {}
-    for game, value in (total_bucket_by_game or {}).items():
-        buckets[game] = value if isinstance(value, str) else lookup.bucket(float(value))
     for i in range(n):
         for j in range(i):
             a, b = players[i], players[j]
@@ -180,7 +173,7 @@ def correlation_matrix(
                 notes.append(
                     f"{a.id} and {b.id} are both {role_a} on {a.team}; used the {role_a}-{role_b} value"
                 )
-            r[i, j] = r[j, i] = lookup.rho(relation, role_a, role_b, buckets.get(a.game_id))
+            r[i, j] = r[j, i] = lookup.rho(relation, role_a, role_b)
     return r, notes
 
 
@@ -212,7 +205,6 @@ def simulate_lineups(
     *,
     n_sims: int = 20000,
     seed: int = 0,
-    total_bucket_by_game: dict | None = None,
     cash_line: float = DEFAULT_CASH_LINE,
     gpp_target: float = DEFAULT_GPP_TARGET,
     correlations: CorrelationLookup | None = None,
@@ -222,8 +214,6 @@ def simulate_lineups(
 ) -> SimResult:
     """Simulate every lineup on the same draws.
 
-    `total_bucket_by_game` maps a game id to its total tercile ('low' / 'mid' / 'high') or to the game's Vegas
-    total in points; where the shipped table has a conditional row for that bucket it replaces the pooled one.
     `correlations` defaults to `models/sim/correlations.csv`, `tables` to the shipped distribution tables;
     `independent=True` zeroes every correlation (the comparison the back-test runs). Deterministic in `seed`.
     """
@@ -236,7 +226,7 @@ def simulate_lineups(
     if independent:
         r, repair = np.eye(m), RepairInfo(m, False, 1.0, 0.0)
     else:
-        raw, notes = correlation_matrix(players, correlations or load_correlations(), total_bucket_by_game)
+        raw, notes = correlation_matrix(players, correlations or load_correlations())
         r, repair = repair_correlation(raw)
 
     rng = np.random.default_rng(seed)
@@ -288,7 +278,7 @@ def swap_impact(
 ) -> SwapImpact:
     """What swapping `out_id` for `in_spec` does to the lineup's P(cash), P(GPP target) and mean. Both
     versions are simulated in one call, so the players they share have identical draws. `kwargs` are
-    `simulate_lineups`'s (n_sims, seed, cash_line, gpp_target, total_bucket_by_game, ...)."""
+    `simulate_lineups`'s (n_sims, seed, cash_line, gpp_target, ...)."""
     if all(p.id != out_id for p in lineup):
         raise ValueError(f"{out_id!r} is not in the lineup")
     if any(p.id == in_spec.id for p in lineup):

@@ -12,9 +12,10 @@ The method, in four steps:
    Pearson correlation of z, with a game-level bootstrap 90% interval (games are resampled whole, so the two
    teams of a game and every pair inside a game stay together), shrunk toward 0 in Fisher-z space with a prior
    worth `SHRINK_PRIOR_N` observations. Pairs in different games are 0 by assumption (and checked).
-4. **Game total.** The same, within terciles of the game's Vegas total. A tercile's value is only shipped for
-   a pair when two terciles' (unshrunk) bootstrap intervals do not overlap; otherwise the pooled value is
-   used.
+4. **Game total (report only).** The same, within terciles of the game's Vegas total, flagging pairs whose
+   terciles' (unshrunk) bootstrap intervals do not overlap. Nothing from this is shipped: the flagged pairs
+   are what chance produces (docs/SIM.md), so only the pooled value ships and the simulator takes no game
+   total.
 
 Everything random is seeded.
 """
@@ -128,8 +129,8 @@ def _pearson(t: np.ndarray) -> np.ndarray:
 
 @dataclass
 class Fit:
-    """A fitted table. `detail` has one row per (relation, role pair, total bucket), raw and shrunk;
-    `shipped` is the `correlations.csv` subset (pooled everywhere, a total bucket only where it differs)."""
+    """A fitted table. `detail` has one row per (relation, role pair, total bucket), raw and shrunk, with the
+    tercile comparison (report only); `shipped` is `correlations.csv`: the pooled (`all`) rows only."""
 
     detail: pd.DataFrame
     shipped: pd.DataFrame
@@ -138,7 +139,7 @@ class Fit:
     scored: pd.DataFrame | None = None  # the fitted frame, with its z column
 
     def lookup(self) -> CorrelationLookup:
-        return CorrelationLookup(self.shipped, self.cutoffs)
+        return CorrelationLookup(self.shipped)
 
 
 def tercile_cutoffs(frame: pd.DataFrame) -> tuple[float, float]:
@@ -197,7 +198,7 @@ def fit_correlations(
     detail["ci_hi"] = shrink(detail["raw_hi"], detail["n"], prior_n)
     detail["conditional"] = _flag_conditional(detail)
     detail = detail.dropna(subset=["rho"]).reset_index(drop=True)
-    shipped = detail.loc[(detail["total_bucket"] == POOLED) | detail["conditional"], CSV_COLUMNS]
+    shipped = detail.loc[detail["total_bucket"] == POOLED, CSV_COLUMNS]
     shipped = shipped.reset_index(drop=True)
     meta = {
         "rows": int(len(frame)),
@@ -234,47 +235,35 @@ def _flag_conditional(detail: pd.DataFrame) -> pd.Series:
 
 
 class CorrelationLookup:
-    """Role-pair correlations, with the total-conditional rows where shipped. Symmetric in the two roles."""
+    """Pooled role-pair correlations. Symmetric in the two roles; a pair never observed is 0."""
 
-    def __init__(self, table: pd.DataFrame, cutoffs: tuple[float, float]):
+    def __init__(self, table: pd.DataFrame):
         missing = [c for c in CSV_COLUMNS if c not in table.columns]
         if missing:
             raise CorrelationError(f"correlation table is missing columns {missing}")
-        self.cutoffs = (float(cutoffs[0]), float(cutoffs[1]))
-        self._rho: dict[tuple[str, str, str, str], float] = {}
-        order = {role: i for i, role in enumerate(ROLES)}
-        for rel, a, b, bucket, rho in zip(
-            table["relation"],
-            table["role_a"],
-            table["role_b"],
-            table["total_bucket"],
-            table["rho"],
-            strict=True,
-        ):
-            if order[a] > order[b]:
-                a, b = b, a
-            self._rho[(rel, a, b, bucket)] = float(rho)
-        self._order = order
+        if (table["total_bucket"] != POOLED).any():
+            raise CorrelationError(
+                f"correlation table has rows other than total_bucket={POOLED!r} -- run `dfs sim fit`"
+            )
+        self._order = {role: i for i, role in enumerate(ROLES)}
+        self._rho = {
+            self._key(rel, a, b): float(rho)
+            for rel, a, b, rho in zip(
+                table["relation"], table["role_a"], table["role_b"], table["rho"], strict=True
+            )
+        }
 
-    def has(self, relation: str, a: str, b: str) -> bool:
-        return self._key(relation, a, b, POOLED) in self._rho
-
-    def _key(self, relation: str, a: str, b: str, bucket: str):
+    def _key(self, relation: str, a: str, b: str) -> tuple[str, str, str]:
         if self._order[a] > self._order[b]:
             a, b = b, a
-        return (relation, a, b, bucket)
+        return (relation, a, b)
 
-    def rho(self, relation: str, a: str, b: str, bucket: str | None = None) -> float:
-        """The correlation for the pair (the `bucket` row if shipped, else the pooled one; 0 when the pair was
-        never observed)."""
-        if bucket in TOTAL_BUCKETS:
-            hit = self._rho.get(self._key(relation, a, b, bucket))
-            if hit is not None:
-                return hit
-        return self._rho.get(self._key(relation, a, b, POOLED), 0.0)
+    def has(self, relation: str, a: str, b: str) -> bool:
+        return self._key(relation, a, b) in self._rho
 
-    def bucket(self, total: float) -> str:
-        return total_bucket(total, self.cutoffs)
+    def rho(self, relation: str, a: str, b: str) -> float:
+        """The correlation for the pair of roles ('same_team' or 'opp'); 0 when never observed."""
+        return self._rho.get(self._key(relation, a, b), 0.0)
 
 
 def save_fit(fit: Fit, directory: Path = SIM_DIR, extra_meta: dict | None = None) -> Path:
@@ -293,11 +282,7 @@ def load_correlations(directory: Path = SIM_DIR) -> CorrelationLookup:
     path = directory / CORRELATIONS_FILE
     if not path.exists():
         raise CorrelationError(f"{path} not found -- run `dfs sim fit`")
-    meta_path = directory / META_FILE
-    if not meta_path.exists():
-        raise CorrelationError(f"{meta_path} not found -- run `dfs sim fit`")
-    cutoffs = json.loads(meta_path.read_text())["total_cutoffs"]
-    return CorrelationLookup(pd.read_csv(path), tuple(cutoffs))
+    return CorrelationLookup(pd.read_csv(path))
 
 
 # --- checks -----------------------------------------------------------------------------------------------
