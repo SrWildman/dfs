@@ -108,6 +108,7 @@ def metadata_for(run: TrainingRun, trained_on: date | None = None) -> dict:
             "levels": list(dist.LEVELS),
             "bucket_edges": {k: list(v) for k, v in dist.BUCKET_EDGES.items()},
             "integer_scoring": sorted(dist.INTEGER_SCORING),
+            **dist.table_metadata(),
         },
         "positions": positions,
     }

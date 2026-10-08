@@ -351,16 +351,20 @@ Cash line 145, GPP target 190.
 
 | Lineups | n | Sum of projections | Simulated mean | Realized mean | P(>= 145) predicted | realized |
 |---|---|---|---|---|---|---|
-| selectivity 1 | 3,562 | 109.3 | 106.5 | 106.3 | 8.9% | 8.8% |
-| selectivity 3 | 3,642 | 130.4 | 125.2 | 123.8 | 24.1% | 21.7% |
-| selectivity 6 | 3,596 | 149.9 | 141.9 | 138.7 | 44.2% | 39.5% |
-| all players in range | 2,913 | 110.4 | 107.9 | 108.8 | 10.0% | 10.1% |
-| a player past the top bucket | 7,887 | 137.2 | 130.8 | 128.2 | 31.6% | 28.3% |
+| selectivity 1 | 3,562 | 109.3 | 106.1 | 106.3 | 8.3% | 8.8% |
+| selectivity 3 | 3,642 | 130.4 | 124.3 | 123.8 | 22.8% | 21.7% |
+| selectivity 6 | 3,596 | 149.9 | 140.0 | 138.7 | 41.8% | 39.5% |
+| all players in range | 8,710 | 125.7 | 120.2 | 120.0 | 20.8% | 20.4% |
+| a player past the top bucket | 2,090 | 147.5 | 137.5 | 135.3 | 39.3% | 35.8% |
 
-"Past the top bucket" means at least one player is projected above the mean projection of his position's highest
-distribution bucket (QB 24.3, RB 21.2, WR 19.8, TE 14.0, DST 10.5), where the engine has no bucket of its own.
-The sum of projections is far above the realized score for the selective lineups, which is expected (the
-distribution is skewed and the highest projections regress).
+"Past the top bucket" means at least one player is projected above where the engine's table ends: the 99.5th
+percentile of his position's projections (QB 28.9, RB 26.3, WR 21.7, TE 20.2, DST 13.4), beyond which the
+ratio is held flat. The first release's tables ended at the mean projection of their top bucket (QB 24.3, RB
+21.2, WR 19.8, TE 14.0, DST 10.5), which put 7,887 of the 10,800 lineups past the end and left 2,913 in
+range. With the smooth tables 2,090 are past it, so "all players in range" is no longer the small control
+group it was (it fails like everything else); the comparison that isolates the first release's failure is kept
+under the verdict, split at the *old* centres. The sum of projections is far above the realized score for the
+selective lineups, which is expected (the distribution is skewed and the highest projections regress).
 
 ### Coverage (shipped marginals)
 
@@ -370,45 +374,45 @@ All lineups:
 
 | Predicted quantile | Target | Correlated | Independent | SE |
 |---|---|---|---|---|
-| p10 | 10% | 10.4% (+0.4) | 11.2% (+1.2) | 0.3 |
-| p25 | 25% | 26.4% (+1.4) | 27.1% (+2.1) | 0.4 |
-| p50 | 50% | 52.5% (+2.5) | 52.7% (+2.7) | 0.5 |
-| p75 | 75% | 77.0% (+2.0) | 76.4% (+1.4) | 0.4 |
-| p90 | 90% | 91.3% (+1.3) | 90.6% (+0.6) | 0.3 |
-| p99 | 99% | 99.1% (+0.1) | 99.0% (-0.0) | 0.1 |
+| p10 | 10% | 10.2% (+0.2) | 11.1% (+1.1) | 0.3 |
+| p25 | 25% | 25.8% (+0.8) | 26.6% (+1.6) | 0.4 |
+| p50 | 50% | 51.4% (+1.4) | 51.5% (+1.5) | 0.5 |
+| p75 | 75% | 75.4% (+0.4) | 74.9% (-0.1) | 0.4 |
+| p90 | 90% | 90.2% (+0.2) | 89.4% (-0.6) | 0.3 |
+| p99 | 99% | 98.9% (-0.1) | 98.6% (-0.4) | 0.1 |
 
 Stacked lineups:
 
 | Predicted quantile | Target | Correlated | Independent | SE |
 |---|---|---|---|---|
-| p10 | 10% | 10.4% (+0.4) | 12.1% (+2.1) | 0.4 |
-| p25 | 25% | 26.4% (+1.4) | 27.9% (+2.9) | 0.6 |
-| p50 | 50% | 52.6% (+2.6) | 52.9% (+2.9) | 0.7 |
-| p75 | 75% | 76.0% (+1.0) | 74.9% (-0.1) | 0.6 |
-| p90 | 90% | 90.8% (+0.8) | 89.2% (-0.8) | 0.4 |
-| p99 | 99% | 98.9% (-0.1) | 98.6% (-0.4) | 0.1 |
+| p10 | 10% | 10.3% (+0.3) | 12.0% (+2.0) | 0.4 |
+| p25 | 25% | 25.8% (+0.8) | 27.3% (+2.3) | 0.6 |
+| p50 | 50% | 51.5% (+1.5) | 51.7% (+1.7) | 0.7 |
+| p75 | 75% | 74.7% (-0.3) | 73.7% (-1.3) | 0.6 |
+| p90 | 90% | 89.6% (-0.4) | 88.0% (-2.0) | 0.4 |
+| p99 | 99% | 98.8% (-0.2) | 98.3% (-0.7) | 0.1 |
 
 Random lineups:
 
 | Predicted quantile | Target | Correlated | Independent | SE |
 |---|---|---|---|---|
-| p10 | 10% | 10.4% (+0.4) | 10.3% (+0.3) | 0.4 |
-| p25 | 25% | 26.3% (+1.3) | 26.4% (+1.4) | 0.6 |
-| p50 | 50% | 52.4% (+2.4) | 52.6% (+2.6) | 0.7 |
-| p75 | 75% | 77.9% (+2.9) | 77.8% (+2.8) | 0.6 |
-| p90 | 90% | 91.9% (+1.9) | 91.9% (+1.9) | 0.4 |
-| p99 | 99% | 99.3% (+0.3) | 99.3% (+0.3) | 0.1 |
+| p10 | 10% | 10.1% (+0.1) | 10.2% (+0.2) | 0.4 |
+| p25 | 25% | 25.8% (+0.8) | 25.8% (+0.8) | 0.6 |
+| p50 | 50% | 51.4% (+1.4) | 51.3% (+1.3) | 0.7 |
+| p75 | 75% | 76.1% (+1.1) | 76.1% (+1.1) | 0.6 |
+| p90 | 90% | 90.9% (+0.9) | 90.9% (+0.9) | 0.4 |
+| p99 | 99% | 98.9% (-0.1) | 99.0% (-0.0) | 0.1 |
 
 Out-of-time marginals (train-only), all lineups:
 
 | Predicted quantile | Target | Correlated | Independent | SE |
 |---|---|---|---|---|
-| p10 | 10% | 10.8% (+0.8) | 11.7% (+1.7) | 0.3 |
-| p25 | 25% | 27.2% (+2.2) | 27.9% (+2.9) | 0.4 |
-| p50 | 50% | 53.4% (+3.4) | 53.7% (+3.7) | 0.5 |
-| p75 | 75% | 77.5% (+2.5) | 76.9% (+1.9) | 0.4 |
-| p90 | 90% | 91.6% (+1.6) | 91.0% (+1.0) | 0.3 |
-| p99 | 99% | 99.2% (+0.2) | 99.0% (-0.0) | 0.1 |
+| p10 | 10% | 10.8% (+0.7) | 11.5% (+1.5) | 0.3 |
+| p25 | 25% | 26.5% (+1.5) | 27.2% (+2.2) | 0.4 |
+| p50 | 50% | 52.3% (+2.3) | 52.5% (+2.5) | 0.5 |
+| p75 | 75% | 76.2% (+1.2) | 75.8% (+0.8) | 0.4 |
+| p90 | 90% | 90.7% (+0.7) | 89.8% (-0.2) | 0.3 |
+| p99 | 99% | 98.9% (-0.1) | 98.8% (-0.2) | 0.1 |
 
 ### Reliability of P(score >= cash line) (shipped marginals)
 
@@ -418,31 +422,16 @@ All lineups:
 
 | Bin | n | Corr. predicted | Corr. realized | Gap | Indep. predicted | Indep. realized | Gap  | Hits (corr.) |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 1,080 | 2.2% | 2.5% | +0.3 | 1.9% | 2.8% | +0.9 | 27 |
-| 2 | 1,080 | 5.7% | 6.5% | +0.8 | 5.1% | 6.3% | +1.2 | 70 |
-| 3 | 1,080 | 9.7% | 9.4% | -0.4 | 9.0% | 10.0% | +1.0 | 101 |
-| 4 | 1,080 | 14.3% | 14.5% | +0.2 | 13.5% | 13.5% | +0.0 | 157 |
-| 5 | 1,080 | 19.8% | 19.0% | -0.8 | 18.9% | 19.5% | +0.6 | 205 |
-| 6 | 1,080 | 25.8% | 24.5% | -1.3 | 25.1% | 24.9% | -0.2 | 265 |
-| 7 | 1,080 | 32.1% | 28.4% | -3.7 | 31.6% | 26.9% | -4.7* | 307 |
-| 8 | 1,080 | 39.2% | 35.5% | -3.8 | 39.0% | 36.3% | -2.7 | 383 |
-| 9 | 1,080 | 47.7% | 41.9% | -5.8* | 47.7% | 42.0% | -5.7* | 452 |
-| 10 | 1,080 | 61.2% | 51.9% | -9.3* | 61.5% | 51.9% | -9.7* | 561 |
-
-Lineups with no player past the top bucket:
-
-| Bin | n | Corr. predicted | Corr. realized | Gap | Indep. predicted | Indep. realized | Gap  | Hits (corr.) |
-|---|---|---|---|---|---|---|---|---|
-| 1 | 292 | 0.9% | 0.3% | -0.6 | 0.8% | 0.7% | -0.1 | 1 |
-| 2 | 292 | 2.2% | 3.4% | +1.2 | 1.9% | 2.7% | +0.9 | 10 |
-| 3 | 292 | 3.5% | 2.7% | -0.8 | 3.1% | 4.1% | +1.0 | 8 |
-| 4 | 291 | 5.0% | 5.8% | +0.9 | 4.4% | 4.8% | +0.4 | 17 |
-| 5 | 291 | 6.7% | 7.2% | +0.5 | 6.0% | 8.2% | +2.2 | 21 |
-| 6 | 291 | 8.7% | 10.3% | +1.6 | 7.9% | 7.6% | -0.4 | 30 |
-| 7 | 291 | 11.2% | 10.7% | -0.6 | 10.4% | 11.7% | +1.3 | 31 |
-| 8 | 291 | 14.3% | 15.8% | +1.5 | 13.4% | 17.2% | +3.8 | 46 |
-| 9 | 291 | 18.8% | 16.8% | -2.0 | 17.9% | 16.8% | -1.1 | 49 |
-| 10 | 291 | 29.0% | 27.8% | -1.2 | 28.4% | 27.1% | -1.3 | 81 |
+| 1 | 1,080 | 1.9% | 2.5% | +0.6 | 1.6% | 2.7% | +1.0 | 27 |
+| 2 | 1,080 | 5.3% | 6.5% | +1.2 | 4.7% | 6.1% | +1.4 | 70 |
+| 3 | 1,080 | 9.1% | 9.2% | +0.1 | 8.3% | 10.1% | +1.8 | 99 |
+| 4 | 1,080 | 13.5% | 14.3% | +0.8 | 12.6% | 13.1% | +0.5 | 154 |
+| 5 | 1,080 | 18.6% | 19.4% | +0.8 | 17.7% | 20.5% | +2.8 | 209 |
+| 6 | 1,080 | 24.4% | 24.4% | +0.1 | 23.7% | 24.0% | +0.3 | 264 |
+| 7 | 1,080 | 30.3% | 27.4% | -2.9 | 29.7% | 27.5% | -2.2 | 296 |
+| 8 | 1,080 | 37.1% | 36.7% | -0.4 | 36.7% | 36.6% | -0.1 | 396 |
+| 9 | 1,080 | 45.1% | 40.9% | -4.2* | 45.0% | 41.1% | -3.9 | 442 |
+| 10 | 1,080 | 58.3% | 52.9% | -5.4* | 58.5% | 52.4% | -6.1* | 571 |
 
 ### Reliability of P(score >= GPP target) (shipped marginals)
 
@@ -451,57 +440,57 @@ All lineups:
 | Bin | n | Corr. predicted | Corr. realized | Gap | Indep. predicted | Indep. realized | Gap  | Hits (corr.) |
 |---|---|---|---|---|---|---|---|---|
 | 1 | 1,080 | 0.0% | 0.0% | -0.0 | 0.0% | 0.0% | -0.0 | 0 |
-| 2 | 1,080 | 0.1% | 0.3% | +0.2 | 0.1% | 0.3% | +0.2 | 3 |
-| 3 | 1,080 | 0.3% | 0.4% | +0.1 | 0.2% | 0.4% | +0.2 | 4 |
-| 4 | 1,080 | 0.5% | 0.4% | -0.2 | 0.4% | 0.4% | -0.0 | 4 |
-| 5 | 1,080 | 1.0% | 0.8% | -0.1 | 0.8% | 0.6% | -0.1 | 9 |
-| 6 | 1,080 | 1.7% | 1.3% | -0.4 | 1.4% | 1.7% | +0.3 | 14 |
-| 7 | 1,080 | 2.7% | 1.6% | -1.1 | 2.3% | 1.6% | -0.7 | 17 |
-| 8 | 1,080 | 4.2% | 2.8% | -1.5 | 3.7% | 2.7% | -1.1 | 30 |
-| 9 | 1,080 | 6.7% | 5.1% | -1.6 | 6.1% | 5.0% | -1.1 | 55 |
-| 10 | 1,080 | 13.3% | 7.8% | -5.5* | 12.8% | 7.8% | -5.0* | 84 |
+| 2 | 1,080 | 0.1% | 0.2% | +0.1 | 0.0% | 0.3% | +0.2 | 2 |
+| 3 | 1,080 | 0.2% | 0.5% | +0.3 | 0.1% | 0.5% | +0.3 | 5 |
+| 4 | 1,080 | 0.4% | 0.3% | -0.1 | 0.3% | 0.3% | -0.0 | 3 |
+| 5 | 1,080 | 0.8% | 0.7% | -0.0 | 0.6% | 0.7% | +0.1 | 8 |
+| 6 | 1,080 | 1.4% | 1.0% | -0.3 | 1.1% | 1.5% | +0.4 | 11 |
+| 7 | 1,080 | 2.2% | 2.2% | +0.1 | 1.8% | 1.9% | +0.0 | 24 |
+| 8 | 1,080 | 3.4% | 2.8% | -0.6 | 2.9% | 2.8% | -0.1 | 30 |
+| 9 | 1,080 | 5.3% | 4.6% | -0.6 | 4.7% | 4.5% | -0.2 | 50 |
+| 10 | 1,080 | 10.2% | 8.1% | -2.2 | 9.7% | 8.0% | -1.7 | 87 |
 
 Stacked lineups:
 
 | Bin | n | Corr. predicted | Corr. realized | Gap | Indep. predicted | Indep. realized | Gap  | Hits (corr.) |
 |---|---|---|---|---|---|---|---|---|
 | 1 | 540 | 0.0% | 0.0% | -0.0 | 0.0% | 0.0% | -0.0 | 0 |
-| 2 | 540 | 0.1% | 0.6% | +0.4 | 0.1% | 0.4% | +0.3 | 3 |
-| 3 | 540 | 0.3% | 0.4% | +0.1 | 0.2% | 0.6% | +0.4 | 2 |
-| 4 | 540 | 0.5% | 0.6% | +0.0 | 0.3% | 0.7% | +0.4 | 3 |
-| 5 | 540 | 0.9% | 0.9% | -0.0 | 0.6% | 0.6% | -0.1 | 5 |
-| 6 | 540 | 1.5% | 0.7% | -0.8 | 1.1% | 1.1% | +0.0 | 4 |
-| 7 | 540 | 2.4% | 3.0% | +0.6 | 1.8% | 2.8% | +1.0 | 16 |
-| 8 | 540 | 3.6% | 2.0% | -1.5 | 2.8% | 2.2% | -0.6 | 11 |
-| 9 | 540 | 5.5% | 3.3% | -2.2 | 4.5% | 3.5% | -1.0 | 18 |
-| 10 | 540 | 10.9% | 6.7% | -4.2* | 9.6% | 6.3% | -3.3 | 36 |
+| 2 | 540 | 0.1% | 0.4% | +0.3 | 0.0% | 0.4% | +0.3 | 2 |
+| 3 | 540 | 0.2% | 0.6% | +0.3 | 0.1% | 0.6% | +0.4 | 3 |
+| 4 | 540 | 0.4% | 0.6% | +0.1 | 0.3% | 0.4% | +0.1 | 3 |
+| 5 | 540 | 0.8% | 0.6% | -0.2 | 0.5% | 0.9% | +0.4 | 3 |
+| 6 | 540 | 1.2% | 1.3% | +0.1 | 0.8% | 0.7% | -0.1 | 7 |
+| 7 | 540 | 1.9% | 2.6% | +0.7 | 1.4% | 3.1% | +1.8 | 14 |
+| 8 | 540 | 2.9% | 2.2% | -0.6 | 2.1% | 2.0% | -0.1 | 12 |
+| 9 | 540 | 4.3% | 2.8% | -1.6 | 3.4% | 3.0% | -0.4 | 15 |
+| 10 | 540 | 8.5% | 7.2% | -1.2 | 7.2% | 7.0% | -0.1 | 39 |
 
 ### Spread: does the correlation matter?
 
 | Lineups | n | Independent mean sd | Independent E[z^2] | Correlated mean sd | Correlated E[z^2] |
 |---|---|---|---|---|---|
-| all | 10,800 | 26.03 | 1.030 | 26.95 | 0.957 |
-| stacked | 5,400 | 25.76 | 1.132 | 27.48 | 0.994 |
-| random | 5,400 | 26.31 | 0.927 | 26.42 | 0.920 |
-| in-range | 2,913 | 24.04 | 1.039 | 24.95 | 0.962 |
+| all | 10,800 | 25.27 | 1.082 | 26.18 | 1.003 |
+| stacked | 5,400 | 25.03 | 1.188 | 26.75 | 1.039 |
+| random | 5,400 | 25.51 | 0.977 | 25.62 | 0.968 |
+| in-range | 8,710 | 24.94 | 1.085 | 25.87 | 1.005 |
 
 The mean of ((realized - mean) / sd)^2 is 1 for a calibrated spread. And as paired differences (correlated
 against independent; weeks are the unit, because lineups in a week share players and games):
 
 | Lineups | Measure | Independent | Correlated | Improvement | Better by |
 |---|---|---|---|---|---|
-| all | Pinball loss (p10-p99) | 6.211 | 6.205 | +0.006 (SE 0.003) | +0.10% |
-| all | Brier, P(>= 145) | 0.15756 | 0.15734 | +0.00022 (SE 0.00013) | +0.14% |
-| all | Brier, P(>= 190) | 0.01992 | 0.02001 | -0.00009 (SE 0.00004) | -0.46% |
-| stacked | Pinball loss (p10-p99) | 6.459 | 6.447 | +0.012 (SE 0.006) | +0.19% |
-| stacked | Brier, P(>= 145) | 0.15665 | 0.15638 | +0.00026 (SE 0.00024) | +0.17% |
-| stacked | Brier, P(>= 190) | 0.01771 | 0.01786 | -0.00015 (SE 0.00006) | -0.85% |
-| random | Pinball loss (p10-p99) | 5.963 | 5.963 | +0.000 (SE 0.002) | +0.01% |
-| random | Brier, P(>= 145) | 0.15847 | 0.15830 | +0.00017 (SE 0.00006) | +0.11% |
-| random | Brier, P(>= 190) | 0.02213 | 0.02216 | -0.00003 (SE 0.00002) | -0.15% |
-| in-range | Pinball loss (p10-p99) | 5.742 | 5.738 | +0.008 (SE 0.005) | +0.14% |
-| in-range | Brier, P(>= 145) | 0.08492 | 0.08471 | +0.00028 (SE 0.00016) | +0.33% |
-| in-range | Brier, P(>= 190) | 0.00412 | 0.00412 | +0.00000 (SE 0.00001) | +0.09% |
+| all | Pinball loss (p10-p99) | 6.187 | 6.176 | +0.011 (SE 0.003) | +0.18% |
+| all | Brier, P(>= 145) | 0.15658 | 0.15627 | +0.00031 (SE 0.00014) | +0.20% |
+| all | Brier, P(>= 190) | 0.01959 | 0.01961 | -0.00003 (SE 0.00004) | -0.14% |
+| stacked | Pinball loss (p10-p99) | 6.438 | 6.418 | +0.020 (SE 0.006) | +0.31% |
+| stacked | Brier, P(>= 145) | 0.15549 | 0.15511 | +0.00038 (SE 0.00026) | +0.24% |
+| stacked | Brier, P(>= 190) | 0.01753 | 0.01757 | -0.00004 (SE 0.00006) | -0.22% |
+| random | Pinball loss (p10-p99) | 5.936 | 5.934 | +0.003 (SE 0.002) | +0.04% |
+| random | Brier, P(>= 145) | 0.15767 | 0.15742 | +0.00024 (SE 0.00006) | +0.15% |
+| random | Brier, P(>= 190) | 0.02164 | 0.02166 | -0.00002 (SE 0.00002) | -0.08% |
+| in-range | Pinball loss (p10-p99) | 6.110 | 6.100 | +0.012 (SE 0.004) | +0.19% |
+| in-range | Brier, P(>= 145) | 0.14425 | 0.14393 | +0.00033 (SE 0.00016) | +0.23% |
+| in-range | Brier, P(>= 190) | 0.01374 | 0.01376 | -0.00001 (SE 0.00003) | -0.07% |
 
 ### Verdict
 
@@ -509,86 +498,93 @@ Shipped marginals:
 
 | Lineups | Simulation | Max coverage gap | Coverage within 3 | Max cash-bin gap | Max GPP-bin gap | Reliability within 4 |
 |---|---|---|---|---|---|---|
-| all | Correlated | 2.5 | yes | 9.3 | 5.5 | NO |
-| all | Independent | 2.7 | yes | 9.7 | 5.0 | NO |
-| stacked | Correlated | 2.6 | yes | 12.1 | 4.2 | NO |
-| stacked | Independent | 2.9 | yes | 13.0 | 3.3 | NO |
-| random | Correlated | 2.9 | yes | 6.2 | 6.4 | NO |
-| random | Independent | 2.8 | yes | 7.0 | 6.0 | NO |
-| in-range | Correlated | 1.6 | yes | 2.0 | 1.2 | yes |
-| in-range | Independent | 1.1 | yes | 3.8 | 0.9 | yes |
+| all | Correlated | 1.4 | yes | 5.4 | 2.2 | NO |
+| all | Independent | 1.6 | yes | 6.1 | 1.7 | NO |
+| stacked | Correlated | 1.5 | yes | 9.0 | 1.6 | NO |
+| stacked | Independent | 2.3 | yes | 9.6 | 1.8 | NO |
+| random | Correlated | 1.4 | yes | 4.6 | 3.8 | NO |
+| random | Independent | 1.3 | yes | 4.8 | 3.0 | NO |
+| in-range | Correlated | 0.9 | yes | 4.5 | 2.3 | NO |
+| in-range | Independent | 1.1 | yes | 5.1 | 1.5 | NO |
 
 Out-of-time marginals (train-only):
 
 | Lineups | Simulation | Max coverage gap | Coverage within 3 | Max cash-bin gap | Max GPP-bin gap | Reliability within 4 |
 |---|---|---|---|---|---|---|
-| all | Correlated | 3.4 | NO | 9.8 | 5.7 | NO |
-| all | Independent | 3.7 | NO | 10.3 | 5.0 | NO |
-| stacked | Correlated | 3.3 | NO | 12.8 | 4.3 | NO |
-| stacked | Independent | 3.7 | NO | 13.3 | 3.4 | NO |
-| random | Correlated | 3.5 | NO | 7.5 | 6.5 | NO |
-| random | Independent | 3.8 | NO | 7.6 | 6.3 | NO |
-| in-range | Correlated | 1.2 | yes | 2.5 | 1.2 | yes |
-| in-range | Independent | 1.2 | yes | 2.9 | 0.9 | yes |
+| all | Correlated | 2.3 | yes | 7.1 | 3.0 | NO |
+| all | Independent | 2.5 | yes | 7.6 | 2.5 | NO |
+| stacked | Correlated | 2.2 | yes | 10.1 | 2.1 | NO |
+| stacked | Independent | 3.0 | NO | 11.4 | 1.5 | NO |
+| random | Correlated | 2.3 | yes | 6.0 | 4.2 | NO |
+| random | Independent | 2.5 | yes | 6.1 | 3.8 | NO |
+| in-range | Correlated | 1.7 | yes | 5.4 | 2.7 | NO |
+| in-range | Independent | 1.9 | yes | 5.9 | 1.9 | NO |
 
 (The full set of tables, including every group for both marginal sets, is `models/sim/backtest.md`.)
 
-**Coverage: accepted for the shipped marginals** -- all within 3 points (largest 2.9, random lineups). The
-out-of-time marginals fall just outside (3.3 to 3.8 for all, stacked and random lineups: realized scores fall
-below the predicted median 53.4% of the time), the era drift [MODEL.md](MODEL.md)'s stricter check already
-found. Almost every gap is positive: the predicted quantiles run a little high.
+Against the first release (correlated simulation; max coverage gap / max cash-bin gap / max GPP-bin gap, in points):
 
-**Reliability: not accepted as specified, and the cause is the distribution engine, not the copula.** The
-bins beyond 4 points are the top two or three deciles of the cash line (over-predicted by 5.8 to 12.1 points) and
-the top decile of the GPP target (by 5.5), in the correlated *and* the independent runs. They are the lineups
-with the highest predicted probability: the near-chalk ones, which hold players projected above the centre of
-their position's top bucket, where the engine reuses that bucket's outcome ratios however high the projection. Three pieces of evidence point there:
-(1) the misses are confined to the most selective lineups and the highest bins; (2) the table below shows the
-engine's mean overstating players projected well past the top bucket (actual / engine 0.81 to 0.98 for QB at
-25 and up, RB at 26 and up, TE at 14 and up and DST at 11 and up; WR is unaffected); (3) **lineups with no such player pass**: 2,913 lineups, 291 per bin, largest gap 2.0
-points for the cash line and 1.2 for the GPP target.
+| Lineups | Shipped marginals, before | Shipped marginals, after | Out-of-time marginals, before | Out-of-time marginals, after |
+|---|---|---|---|---|
+| all | 2.5 / 9.3 / 5.5 | 1.4 / 5.4 / 2.2 | 3.4 / 9.8 / 5.7 | 2.3 / 7.1 / 3.0 |
+| stacked | 2.6 / 12.1 / 4.2 | 1.5 / 9.0 / 1.6 | 3.3 / 12.8 / 4.3 | 2.2 / 10.1 / 2.1 |
+| random | 2.9 / 6.2 / 6.4 | 1.4 / 4.6 / 3.8 | 3.5 / 7.5 / 6.5 | 2.3 / 6.0 / 4.2 |
 
-| Position | Projection | n | Mean projection | Engine mean | Actual mean | Actual / engine |
-|---|---|---|---|---|---|---|
-| QB | <14 | 1,209 | 11.0 | 11.8 | 14.0 | 1.19 |
-| QB | 25-28 | 207 | 26.2 | 23.5 | 22.6 | 0.96 |
-| QB | 28+ | 60 | 29.5 | 26.4 | 23.3 | 0.88 |
-| RB | 22-26 | 268 | 23.7 | 21.7 | 21.9 | 1.01 |
-| RB | 26+ | 78 | 27.8 | 25.5 | 23.4 | 0.92 |
-| WR | 22+ | 71 | 22.9 | 22.4 | 22.7 | 1.01 |
-| TE | 14-17 | 437 | 15.3 | 13.7 | 13.5 | 0.98 |
-| TE | 17+ | 202 | 19.1 | 17.0 | 15.9 | 0.93 |
-| DST | 11-13 | 254 | 11.8 | 9.8 | 9.0 | 0.92 |
-| DST | 13+ | 61 | 13.8 | 11.4 | 9.2 | 0.81 |
+**Coverage: accepted**, for the shipped marginals (largest gap 2.9 before, 1.5 now) and now for the out-of-time
+marginals too: the first release's failed at 3.3 to 3.5 for the correlated simulation, they are at 2.2 to 2.3
+now (the independent stacked run, 3.0, is at the line). Realized scores fall below the predicted median 51.4%
+of the time, not 52.5%.
 
-(Out-of-fold 2014-2025, the data the tables were built on. "Engine mean" is the mean of the simulated
-distribution at each projection. The lowest QB bucket is the other end of the same weakness, already documented
-in [MODEL.md](MODEL.md): actuals do not scale down with a tiny projection.) **The remedy is in the engine** --
-tables for projections above the current top bucket centre, e.g. an extra top bucket per position -- which
-changes `dfs.model.distribution`'s bucket edges, outside this task's files; it is left for review.
+**Reliability: much improved, still not accepted as specified, and what is left is not the engine's top end.**
 
-**Does the correlated simulation do better? Yes on spread, barely on everything else, and not in the upper tail.**
-The honest numbers:
+- *The GPP target is accepted* with the shipped marginals for all, stacked and random lineups: no bin is beyond
+  4 points (the largest gaps are 2.2, 1.6 and 3.8; they were 5.5, 4.2 and 6.4). With the out-of-time marginals
+  the largest are 3.0, 2.1 and 4.2, random lineups 0.2 over.
+- *The cash line is not*: with the shipped marginals the bins beyond 4 points are the top two for all lineups
+  (-4.2, -5.4), the top two for stacked lineups (-4.6, -9.0) and bin 6 for random lineups (-4.6). Before they
+  were the top two or three deciles, over-predicted by 5.8 to 12.1 points.
+- *The lineups that failed before no longer do, to the extent the engine can fix it.* Split at the first
+  release's top-bucket centres (correlated, max coverage gap / max cash-bin gap / max GPP-bin gap):
+
+| Lineups | n | First release | Smooth tables |
+|---|---|---|---|
+| no player past the old top-bucket centre, shipped | 2,913 | 1.6 / 2.0 / 1.2 | 1.5 / 2.7 / 0.7 |
+| a player past the old top-bucket centre, shipped | 7,887 | 3.7 / 9.4 / 6.6 | 2.2 / 6.7 / 3.3 |
+| a player past the old top-bucket centre, out-of-time | 7,887 | 4.3 / 9.9 / 6.8 | 2.9 / 8.4 / 4.2 |
+
+- *What is left is a level, not a shape.* In the top decile of P(cash), the predicted standard deviation is
+  28.6 points and the realized root-mean-square residual 29.2: the spread is right. The mean is not: realized
+  scores sit 3.9 points under the simulated means (0.4 a player), where the first release's sat 7.3 under. By
+  season, the top-decile cash gap is -3.1 (2023), +2.1 (2024) and -9.3 (2025), the first two inside +/-4.
+  2025 is the whole story: its lineups ran 3.7 points under the simulated means across the board (2023: +0.5,
+  2024: +1.5), the same season-level shift [MODEL.md](MODEL.md) finds in the engine itself (2025 scored 3.6%
+  under the twelve-season tables, WR and DST 7.6%). A table fitted to twelve seasons cannot see a season's
+  scoring level; the recency weighting MODEL.md names as the next step is the fix, and it is not done here.
+- *The ±4 line is at the noise level for the top decile.* The chalk lineups of a week share the same few
+  players, so 1,080 lineups carry far less information than 1,080 independent ones. Resampling whole weeks
+  (2,000 draws), the top-decile gap's standard error is 4.5 points for the cash line and 2.2 for the GPP
+  target: the remaining cash gaps are 1.2 standard errors (all lineups) and 2.0 (stacked), the GPP gaps 1.0
+  and 0.7.
+
+**Does the correlated simulation do better? Yes on spread and the lower and middle quantiles; clearly on the
+pinball loss now; not on the upper-tail GPP probability.** The honest numbers:
 
 - *Spread:* for stacked lineups the independent simulation is too narrow (mean squared standardized residual
-  1.13) and the correlated one is right (0.99). For random lineups the two are the same (0.93 independent, 0.92 correlated), as they
-  should be. The mean predicted sd of a stack grows from 25.8 to 27.5 points.
-- *Lower and middle quantiles of stacked lineups:* p10 gap +0.4 correlated against +2.1 independent, p25 +1.4
-  against +2.9.
-- *Upper tail of stacked lineups:* p90 gap +0.8 correlated against -0.8 independent -- the same size, opposite
-  side; p99 -0.1 against -0.4. Random lineups sit at +1.9 at p90 under both, so the predicted quantiles run
-  about 1 to 2 points high everywhere (the top-end effect above) and the correlated stack is the closer of the two
-  once that is allowed for -- but this is **not** the clear upper-tail improvement that was hoped for.
-- *Scores:* pinball loss over the quantiles improves by 0.19% for stacked lineups (2 standard errors) and
-  0.10% overall; the Brier score of P(>= 145) by 0.17% (stacked, 1 SE). **The Brier score of P(>= 190) is
-  slightly worse with the correlation (-0.85% for stacked lineups, about 2.5 SE)**, because the extra spread
-  raises the predicted GPP probability of lineups whose probability the engine already overstates: the top
-  decile's prediction rises from 9.6% to 10.9% against 6.3% to 6.7% realized. On lineups without a player past the top bucket
-  the two are indistinguishable (n is small: 12 realized hits at the GPP target).
+  1.19) and the correlated one is right (1.04). For random lineups the two are the same (0.98 independent, 0.97
+  correlated), as they should be. The mean predicted sd of a stack grows from 25.0 to 26.8 points.
+- *Quantiles of stacked lineups:* the correlated simulation is closer to the target at every level: p10 gap +0.3
+  against +2.0 independent, p25 +0.8 against +2.3, p90 -0.4 against -2.0, p99 -0.2 against -0.7.
+- *Scores:* pinball loss over the quantiles improves by 0.31% for stacked lineups (3.3 standard errors) and
+  0.18% overall (3.7); the Brier score of P(>= 145) by 0.24% (stacked, 1.5 SE) and 0.20% (overall, 2.2 SE). **The
+  Brier score of P(>= 190) is slightly worse with the correlation** (-0.22% stacked, -0.14% overall, under one
+  standard error either way; it was -0.85%, about 2.5 SE, before the engine was fixed): the extra spread raises
+  the top decile's predicted GPP probability for stacks from 7.2% (independent) to 8.5% (correlated), against
+  7.0% and 7.2% realized in the two runs' top bins, so the independent simulation is closer there.
 
-Taken together: the simulator's lineup distributions are well calibrated where the engine is, correlation makes
-a stack's spread right, and its benefit for tail *probabilities* is smaller than the engine's own error at the
-top of the range. Whatever improves the top end of the engine will make the correlation matter more, not less.
+Taken together: with the engine's top end fixed, the correlation earns a clear, if small, improvement in the
+lineup distribution (spread, quantiles, pinball loss and the cash probability) and is neutral for the GPP
+probability. What stands between the simulator and the cash-line acceptance rule is the season-level scoring
+shift, which neither the copula nor a static table can model.
 
 ## Speed and repair
 
@@ -610,10 +606,13 @@ top of the range. Whatever improves the top end of the engine will make the corr
   unknowable from this data, a player back from injury or newly traded looks like his old usage, and a role is
   not a salary tier or an alignment. The role-average QB1-WR1 correlation (+0.31) averages elite and ordinary
   pairs.
-- **The distribution engine's known weak spots carry straight through:** the lowest QB and DST deciles are
-  understated ([MODEL.md](MODEL.md)); the highest projections are overstated (table above); and ratios drift
-  between eras (the out-of-time marginals above are 1 to 1.5 points worse on coverage than the shipped ones).
-  Past the engine's first and last quantile levels (0.01 and 0.99) the CDF is extrapolated linearly.
+- **The distribution engine's known weak spot carries straight through: ratios drift between eras and
+  seasons.** The tables pool twelve seasons, so a season that scores low as a whole shifts every probability:
+  2025 ran 3.7 points per lineup under the simulated means (2023: +0.5, 2024: +1.5), and the out-of-time marginals
+  are about 1 point worse on coverage than the shipped ones (2.3 against 1.4). The first release's other two weak
+  spots (the lowest QB and DST deciles understated, the highest projections overstated) were fixed in the
+  engine ([MODEL.md](MODEL.md)). Past the engine's first and last quantile levels (0.01 and 0.99) the CDF is
+  extrapolated linearly.
 - **A Gaussian copula** has no tail dependence beyond what the normal scores imply, and the correlation is one
   number per role pair, fitted over 12 seasons. It captures the dependence of surprises; it knows nothing of
   weather, injuries during the game or garbage time except through the history they are in.
