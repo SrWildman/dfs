@@ -19,7 +19,8 @@ from dfs.research.common import (
     write_csv,
     write_json,
 )
-from tests.research.conftest import make_games, make_injuries, make_matchup_tables, make_stats
+
+from .helpers import make_games, make_injuries, make_matchup_tables, make_stats
 
 META_KEYS = {"study", "seasons", "fit_seasons", "test_seasons", "n", "generated", "code_version"}
 JSON_FILES = {
@@ -108,7 +109,9 @@ def check_redistribution_constants(payload: dict):
         payload
     )
     assert {"period_stability", "by_reason", "refit_rule_constants_fit_seasons"} <= set(payload)
-    assert payload["definitions"]["hand_set_rule"] == {"next_up_share": 0.6, "spill_share": 0.25}
+    assert payload["definitions"]["hand_set_rule"] == pytest.approx(
+        {"next_up_share": 0.6, "rest_of_position_share": 0.3, "other_group_share": 0.1, "unassigned": 0.0}
+    )
     assert payload["counts"]["clean_events"] > 0
     for row in payload["prediction_mae"]:
         assert {"channel", "seasons", "subset", "method", "n", "mae", "gain_vs_a", "gain_vs_b"} <= set(row)

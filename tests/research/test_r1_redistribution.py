@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 
 from dfs.research import r1_redistribution as r1
-from tests.research.conftest import SEASON, TEAM_CARRIES, TEAM_TARGETS, make_games, make_injuries, make_stats
+
+from .helpers import SEASON, TEAM_CARRIES, TEAM_TARGETS, make_games, make_injuries, make_stats
 
 # AAA's week 5 is a bye, so its games are weeks 1,2,3,4,6,7,8,9 -> game index 5 is week 6.
 BYE = 5
@@ -179,27 +180,87 @@ def test_reason_tags_come_from_the_injury_report():
     assert res["events"].set_index("abs_id")["reason"].to_dict()["AAA-WR2"] == "other"
 
 
+def _played(rows):
+    """(gsis_id, position, rank, share) -> the event's rotation players who played."""
+    return pd.DataFrame(rows, columns=["gsis_id", "position", "rank", "share_t"]).assign(
+        share_c=lambda d: d["share_t"]
+    )
+
+
 def test_hand_set_rule_allocation():
-    played = pd.DataFrame(
-        {
-            "gsis_id": ["wr2", "wr3", "te1", "te2"],
-            "position": ["WR", "WR", "TE", "TE"],
-            "rank": [2, 3, 1, 2],
-            "share_t": [0.2, 0.1, 0.3, 0.1],
-        }
+    # WR1 out: WR2 is the next man up (0.60); the other 0.40 splits 0.75 to the rest of the WRs (0.30) and
+    # 0.25 to the TEs (0.10), each pro rata to prior share. Nothing is left over.
+    played = _played(
+        [
+            ("wr2", "WR", 2, 0.2),
+            ("wr3", "WR", 3, 0.1),
+            ("wr4", "WR", 4, 0.1),
+            ("te1", "TE", 1, 0.3),
+            ("te2", "TE", 2, 0.1),
+        ]
     )
     alloc = r1.rule_allocation("WR", 1, "targets", played)
-    assert alloc["wr2"] == pytest.approx(0.60)  # the next WR up the chart
-    assert alloc["te1"] == pytest.approx(0.25 * 0.75) and alloc["te2"] == pytest.approx(0.25 * 0.25)
-    assert sum(alloc.values()) == pytest.approx(0.85)
-    # carries have no spill, and a WR out vacates no carries to speak of
-    assert r1.rule_allocation("RB", 1, "carries", played.assign(position="RB")).get("te1") is None
-    # WR2 out: the NEXT man up is WR3 under the default reading, WR2's slot's best remaining under the other
-    played2 = played.assign(rank=[1, 3, 1, 2])
-    assert r1.rule_allocation("WR", 2, "targets", played2)["wr3"] == pytest.approx(0.60)
-    assert r1.rule_allocation("WR", 2, "targets", played2, variant="top_remaining")["wr2"] == pytest.approx(
-        0.60
+    assert alloc["wr2"] == pytest.approx(0.60)
+    assert alloc["wr3"] == pytest.approx(0.15) and alloc["wr4"] == pytest.approx(0.15)
+    assert alloc["te1"] == pytest.approx(0.075) and alloc["te2"] == pytest.approx(0.025)
+    assert sum(alloc.values()) == pytest.approx(1.0)
+    assert (r1.NEXT_UP_SHARE, r1.REST_OF_POSITION_SHARE, r1.OTHER_GROUP_SHARE) == pytest.approx(
+        (0.6, 0.3, 0.1)
     )
+
+    # WR2 out: the next man up is the player ranked behind him (WR3); WR1 is part of "the rest".
+    played2 = _played([("wr1", "WR", 1, 0.3), ("wr3", "WR", 3, 0.1), ("te1", "TE", 1, 0.2)])
+    alloc = r1.rule_allocation("WR", 2, "targets", played2)
+    assert alloc["wr3"] == pytest.approx(0.60) and alloc["wr1"] == pytest.approx(0.30)
+    assert alloc["te1"] == pytest.approx(0.10)
+    # the other reading of "next player": the best-ranked remaining WR
+    top = r1.rule_allocation("WR", 2, "targets", played2, variant="top_remaining")
+    assert top["wr1"] == pytest.approx(0.60) and top["wr3"] == pytest.approx(0.30)
+
+    # TE out spills to the WRs; carries have no other group
+    te_out = _played(
+        [("te2", "TE", 2, 0.1), ("te3", "TE", 3, 0.1), ("wr1", "WR", 1, 0.3), ("wr2", "WR", 2, 0.1)]
+    )
+    alloc = r1.rule_allocation("TE", 1, "targets", te_out)
+    assert alloc["te2"] == pytest.approx(0.60) and alloc["te3"] == pytest.approx(0.30)
+    assert alloc["wr1"] == pytest.approx(0.075) and alloc["wr2"] == pytest.approx(0.025)
+    rb = _played([("rb2", "RB", 2, 0.2), ("rb3", "RB", 3, 0.1), ("wr1", "WR", 1, 0.3)])
+    alloc = r1.rule_allocation("RB", 1, "carries", rb)
+    assert alloc == pytest.approx({"rb2": 0.60, "rb3": 0.40})  # no other group: the rest takes its weight
+    assert "wr1" not in r1.rule_allocation("RB", 1, "targets", rb)  # and the RB rule has no spill group
+
+
+def test_hand_set_rule_leaves_nothing_unassigned_when_a_bucket_is_empty():
+    cases = {
+        "no rest of position": _played([("wr2", "WR", 2, 0.2), ("te1", "TE", 1, 0.3)]),
+        "no other group": _played([("wr2", "WR", 2, 0.2), ("wr3", "WR", 3, 0.1)]),
+        "only the next man up": _played([("wr2", "WR", 2, 0.2)]),
+        "nobody else at the position": _played([("te1", "TE", 1, 0.3), ("te2", "TE", 2, 0.1)]),
+    }
+    expect = {
+        "no rest of position": {"wr2": 0.60, "te1": 0.40},
+        "no other group": {"wr2": 0.60, "wr3": 0.40},
+        "only the next man up": {"wr2": 1.0},
+        "nobody else at the position": {"te1": 0.75, "te2": 0.25},
+    }
+    for name, played in cases.items():
+        alloc = r1.rule_allocation("WR", 1, "targets", played)
+        assert alloc == pytest.approx(expect[name]), name
+        assert sum(alloc.values()) == pytest.approx(1.0), name
+    assert r1.rule_allocation("WR", 1, "targets", _played([("rb1", "RB", 1, 0.1)])) == {}
+    assert r1.rule_allocation("QB", 1, "carries", _played([("rb1", "RB", 1, 0.1)])) == {}
+
+
+def test_zero_prior_shares_split_equally():
+    played = _played([("wr2", "WR", 2, 0.2), ("te1", "TE", 1, 0.0), ("te2", "TE", 2, 0.0)])
+    alloc = r1.rule_allocation("WR", 1, "targets", played)
+    assert alloc["te1"] == pytest.approx(alloc["te2"]) and alloc["te1"] + alloc["te2"] == pytest.approx(0.40)
+
+
+def test_refit_structure_keeps_two_free_constants_and_may_leave_a_leak():
+    played = _played([("wr2", "WR", 2, 0.2), ("wr3", "WR", 3, 0.1), ("te1", "TE", 1, 0.3)])
+    alloc = r1.refit_allocation("WR", 1, "targets", played, next_up=0.14, spill=0.10)
+    assert alloc == pytest.approx({"wr2": 0.14, "te1": 0.10})  # no rest-of-position bucket; sums below 1
 
 
 def test_control_games_have_no_regular_out():

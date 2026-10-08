@@ -49,12 +49,17 @@ OFFENSE = ("QB", "RB", "WR", "TE")
 CHANNELS = ("targets", "carries")
 THRESHOLD = {"targets": TARGET_REGULAR, "carries": CARRY_REGULAR}
 
-# The hand-set rule, as the research task states it (the local round's code is not in this repo, so this is
-# the task's wording made precise -- see docs/RESEARCH.md): the next player at the same position gets
-# NEXT_UP_SHARE of the vacated volume; for a WR or TE, SPILL_SHARE of the vacated TARGETS goes to the other
-# pass-catching group (a WR out -> the TEs, a TE out -> the WRs), pro rata to their prior shares.
+# The hand-set rule, as coded in the local Edge Finder round: the next man up at the same position gets
+# NEXT_UP_SHARE of the vacated volume; the other 0.40 splits REMAINDER_SAME_POSITION to the rest of the same
+# position and REMAINDER_OTHER_GROUP to the other pass-catching group (a WR out -> the TEs, a TE out -> the
+# WRs; targets only; there is no such group for a RB), each pro rata to prior share. That is 0.60 / 0.30 /
+# 0.10 of the vacated total, and nothing is left unassigned: an empty bucket hands its weight to the others
+# (see `rule_allocation`). The spill is therefore 0.10 of the vacated volume, not 0.25.
 NEXT_UP_SHARE = 0.60
-SPILL_SHARE = 0.25
+REMAINDER_SAME_POSITION = 0.75
+REMAINDER_OTHER_GROUP = 0.25
+REST_OF_POSITION_SHARE = (1 - NEXT_UP_SHARE) * REMAINDER_SAME_POSITION  # 0.30
+OTHER_GROUP_SHARE = (1 - NEXT_UP_SHARE) * REMAINDER_OTHER_GROUP  # 0.10
 OTHER_GROUP = {"WR": "TE", "TE": "WR"}
 
 
@@ -514,39 +519,98 @@ def _rank_of(label: str) -> int:
     return int(digits) if digits else 1
 
 
+def _pro_rata(group: pd.DataFrame, share_col: str, total: float) -> dict[str, float]:
+    """`total` split across the group's players pro rata to their prior share (equally if none has any)."""
+    weights = group[share_col].to_numpy(dtype=float)
+    weights = weights / weights.sum() if weights.sum() > 0 else np.full(len(group), 1 / len(group))
+    return {pid: total * float(w) for pid, w in zip(group["gsis_id"], weights, strict=True)}
+
+
+def _next_man_up(same: pd.DataFrame, abs_rank: int, variant: str) -> pd.Series:
+    """`next_lower`: the player ranked just behind the absent one (the best remaining player at the position
+    if the absent was the last). `top_remaining`: the best-ranked remaining player at the position."""
+    if variant == "top_remaining":
+        return same.iloc[0]
+    below = same[same["rank"] > abs_rank]
+    return below.iloc[0] if len(below) else same.iloc[0]
+
+
 def rule_allocation(
     abs_pos: str,
     abs_rank: int,
     channel: str,
     played: pd.DataFrame,
-    next_up: float = NEXT_UP_SHARE,
-    spill: float = SPILL_SHARE,
     variant: str = "next_lower",
 ) -> dict[str, float]:
     """The hand-set rule: fractions of the vacated volume by teammate id. `played` holds the event's
-    rotation players who played (columns gsis_id, position, rank, share_t).
+    rotation players who played (columns gsis_id, position, rank, share_t, share_c).
 
-    next_up: `next_lower` gives the player ranked just behind the absent one (the next man up the depth
-    chart; the best remaining player at the position if the absent was the last); `top_remaining` gives the
-    best-ranked remaining player at the position. spill: WR out -> TEs, TE out -> WRs, targets only,
-    pro rata to prior target share (equal if none has any)."""
+    The next man up gets `NEXT_UP_SHARE` (0.60). The other 0.40 splits 0.75 to the rest of the same position
+    (0.30 of the total) and 0.25 to the other pass-catching group (0.10), each pro rata to prior share in
+    the channel; the other group exists only for targets with a WR or TE out. Nothing is left unassigned:
+    inside the 0.40 an empty bucket hands its weight to the other one (both empty: to the next man up); if
+    there is no next man up (nobody else at the position played) his 0.60 goes to the remaining buckets in
+    proportion to their weights; if every bucket is empty, nothing is assigned."""
+    if abs_pos not in ("WR", "TE", "RB"):
+        return {}
+    share_col = "share_t" if channel == "targets" else "share_c"
+    same = played[played["position"] == abs_pos].sort_values("rank")
+    alloc: dict[str, float] = {}
+    nxt_id = None
+    rest = same.iloc[0:0]
+    if len(same):
+        nxt = _next_man_up(same, abs_rank, variant)
+        nxt_id = nxt["gsis_id"]
+        rest = same[same["gsis_id"] != nxt_id]
+    other_pos = OTHER_GROUP.get(abs_pos) if channel == "targets" else None
+    other = played[played["position"] == other_pos] if other_pos else played.iloc[0:0]
+
+    remainder = 1 - NEXT_UP_SHARE
+    if len(rest) and len(other):
+        w_rest, w_other = remainder * REMAINDER_SAME_POSITION, remainder * REMAINDER_OTHER_GROUP
+    elif len(rest):
+        w_rest, w_other = remainder, 0.0
+    elif len(other):
+        w_rest, w_other = 0.0, remainder
+    else:
+        w_rest = w_other = 0.0
+    w_next = NEXT_UP_SHARE
+    if nxt_id is None:
+        total = w_rest + w_other
+        if total == 0:
+            return {}
+        w_rest, w_other = w_rest / total, w_other / total
+        w_next = 0.0
+    elif not (len(rest) or len(other)):
+        w_next = 1.0
+    if nxt_id is not None:
+        alloc[nxt_id] = w_next
+    for group, weight in ((rest, w_rest), (other, w_other)):
+        if weight > 0:
+            for pid, share in _pro_rata(group, share_col, weight).items():
+                alloc[pid] = alloc.get(pid, 0.0) + share
+    return alloc
+
+
+def refit_allocation(
+    abs_pos: str, abs_rank: int, channel: str, played: pd.DataFrame, next_up: float, spill: float
+) -> dict[str, float]:
+    """(d): the hand-set rule's STRUCTURE with two free constants -- one next man up gets `next_up` and, for
+    targets with a WR or TE out, the other group gets `spill` pro rata -- and no rest-of-position bucket.
+    The constants are refit on the fit seasons (`fit_structure`) and need not sum to one: what is not
+    assigned is the measured leak."""
+    if abs_pos not in ("WR", "TE", "RB"):
+        return {}
     alloc: dict[str, float] = {}
     same = played[played["position"] == abs_pos].sort_values("rank")
-    if abs_pos in ("WR", "TE", "RB") and len(same):
-        if variant == "top_remaining":
-            pick = same.iloc[0]
-        else:
-            below = same[same["rank"] > abs_rank]
-            pick = below.iloc[0] if len(below) else same.iloc[0]
-        alloc[pick["gsis_id"]] = next_up
-    other = OTHER_GROUP.get(abs_pos)
-    if channel == "targets" and other:
-        grp = played[played["position"] == other]
+    if len(same):
+        alloc[_next_man_up(same, abs_rank, "next_lower")["gsis_id"]] = next_up
+    other_pos = OTHER_GROUP.get(abs_pos) if channel == "targets" else None
+    if other_pos:
+        grp = played[played["position"] == other_pos]
         if len(grp):
-            weights = grp["share_t"].to_numpy(dtype=float)
-            weights = weights / weights.sum() if weights.sum() > 0 else np.full(len(grp), 1 / len(grp))
-            for pid, w in zip(grp["gsis_id"], weights, strict=True):
-                alloc[pid] = alloc.get(pid, 0.0) + spill * float(w)
+            for pid, share in _pro_rata(grp, "share_t", spill).items():
+                alloc[pid] = alloc.get(pid, 0.0) + share
     return alloc
 
 
@@ -603,7 +667,7 @@ def prediction_frame(
             rule = rule_allocation(e["abs_pos"], rank, channel, chunk)
             rule_top = rule_allocation(e["abs_pos"], rank, channel, chunk, variant="top_remaining")
             fit = structure.get((channel, e["abs_pos"]), {"next_up": 0.0, "spill": 0.0})
-            refit = rule_allocation(e["abs_pos"], rank, channel, chunk, fit["next_up"], fit["spill"])
+            refit = refit_allocation(e["abs_pos"], rank, channel, chunk, fit["next_up"], fit["spill"])
             next_up_id = _next_up_id(e["abs_pos"], rank, chunk)
             other_pos = OTHER_GROUP.get(e["abs_pos"]) if channel == "targets" else None
             for r in chunk.itertuples():
@@ -897,7 +961,12 @@ def write_outputs(result: dict, directory=None) -> None:
             "regular": (
                 f"prior-{WINDOW}-game target share >= {TARGET_REGULAR} or carry share >= {CARRY_REGULAR}"
             ),
-            "hand_set_rule": {"next_up_share": NEXT_UP_SHARE, "spill_share": SPILL_SHARE},
+            "hand_set_rule": {
+                "next_up_share": NEXT_UP_SHARE,
+                "rest_of_position_share": REST_OF_POSITION_SHARE,
+                "other_group_share": OTHER_GROUP_SHARE,
+                "unassigned": 0.0,
+            },
         },
         "counts": result["counts"],
         "control_game_mean_gain": {f"{c}:{i}": float(v) for (c, i), v in sorted(ctrl.items())},
