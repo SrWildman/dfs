@@ -2966,7 +2966,7 @@ _MOVEMENT_WIDTHS = {
     "Implied now": 96,
     "Implied move": 110,
     "Total move": 96,
-    "Spread move": 100,
+    "Spread move": 102,  # not 100: the audit reads exactly 100 as "never set"
     "Kickoff (ET)": 130,
     "Top players": 360,
     "What it means": 520,
