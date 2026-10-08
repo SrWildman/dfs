@@ -477,6 +477,8 @@ def _add_signals(b: _Builder, signal_table: pd.DataFrame | None) -> None:
         percent={"Hit (vs ProjPts)", "Hit (vs CalPts)"},
         signed={"Actual - ProjPts", "Actual - CalPts"},
     )
+    for line in results_signals.r6_verdict_lines(signal_table):
+        b.note(line)
     b.note(
         "Each row is a group of players the signal picked, as it stood before kickoff (weeks backfilled "
         "without lookahead). Hit = on the right side of the projection: above it for USAGE up, "

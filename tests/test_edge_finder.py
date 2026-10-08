@@ -81,6 +81,7 @@ def _scored():
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch):
     monkeypatch.setattr(edge_finder, "_try_current", lambda name: None)
+    monkeypatch.setattr(edge_finder, "_r6_features", lambda ctx, notes: None)  # no network in tests
     monkeypatch.setattr("dfs.results_signals.week_snapshots", lambda *a, **k: [])
     monkeypatch.setattr(
         probabilities, "um_projections", lambda frame, **kw: pd.Series(np.nan, index=frame.index)

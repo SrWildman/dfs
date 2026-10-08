@@ -3,8 +3,9 @@
 import numpy as np
 import pandas as pd
 
-from dfs import calibration
+from dfs import calibration, usage_r6
 from dfs import edge_finder_tab as eft
+from dfs import sheet_edge_finder as writer
 from dfs.derived import EDGE_COLUMNS
 
 
@@ -436,34 +437,127 @@ def test_punt_plays_are_the_best_value_within_a_thousand_of_the_cheapest_salary(
 def _trends(**kw):
     base = {
         "GsisId": "7",
-        "Name": "WR7",
-        "Team": "DEN",
         "Position": "WR",
         "Metric": "Tgt%",
-        "Recent": 0.26,
+        "Recent": 0.27,
         "Prior": 0.18,
-        "Change": 0.08,
-        "Band": 0.03,
-        "Z": 2.7,
+        "Change": 0.09,
+        "Threshold": 0.0836,
+        "Z": 1.08,
         "Direction": "▲",
-        "RecentGames": 3,
-        "PriorGames": 1,
+        "FlagRate": 0.15,
+        "EarlierGames": 12,
     }
     return pd.DataFrame([{**base, **kw}])
 
 
-def test_usage_trends_list_only_moves_beyond_the_band_with_a_plain_why_and_a_watch_verb():
-    edge = _edge([_player(7)])
-    layout = eft.build_layout(_inputs(edge, trends=_trends()))
-    row = layout.rows[_rows_named(layout, "WR7")[-1] - 1]
-    assert row[4:9] == ["Tgt%", "26%", "18%", "'+8 pts", "▲"]  # last 3, earlier, change ('= literal text)
-    assert row[_col(eft.DO_COL)] == "Watch"
-    assert row[_col(eft.WHY_COL)].startswith(
-        "Tgt% 18% → 26% over the last 3 (▲, beyond normal week-to-week noise)"
+def _r6(signals=None, trends=None, short_games=0):
+    chips = {c.id: c for c in usage_r6.load_chips()}
+    return eft.R6View(
+        chips=chips,
+        signals=signals or {},
+        trends=trends if trends is not None else pd.DataFrame(columns=usage_r6.TREND_COLUMNS),
+        min_games=9,
+        short_games=short_games,
     )
-    quiet = eft.build_layout(_inputs(edge, trends=_trends(Direction="")))
-    assert any("moved beyond its normal week-to-week noise" in str(r[0]) for r in quiet.rows)
-    assert eft.build_layout(_inputs(edge)).player_rows  # no trends table at all is fine
+
+
+def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
+    edge = _edge([_player(7)])
+    layout = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends())))
+    row = layout.rows[_rows_named(layout, "WR7")[-1] - 1]
+    assert row[4:9] == ["Tgt%", "27%", "18%", "'+9 pts", "▲"]  # last 3, earlier, change ('= literal text)
+    assert row[_col(eft.DO_COL)] == "Watch"
+    why = row[_col(eft.WHY_COL)]
+    assert why.startswith("Tgt% 18% → 27% over the last 3 (▲, a bigger jump than 85% of weeks).")
+    assert "Historically projections over-react to jumps like this." in why
+    quiet = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends(Direction=""))))
+    assert any("moved by more than R6's measured band" in str(r[0]) for r in quiet.rows)
+
+
+def test_a_player_too_new_for_an_arrow_is_counted_not_guessed():
+    edge = _edge([_player(7)])
+    layout = eft.build_layout(_inputs(edge, r6=_r6(short_games=4)))
+    text = " ".join(str(r[0]) for r in layout.rows)
+    assert "Not enough games: 4 pool players have fewer than 9 earlier games, so they get no arrow" in text
+    missing = eft.build_layout(_inputs(edge))  # no R6 data at all: the tab says how to get it
+    assert any("need the R6 data" in str(r[0]) for r in missing.rows)
+    assert any("R6 usage signals are not available this sync" in str(r[0]) for r in missing.rows)
+
+
+def _signal(fade=(), bump=()):
+    return usage_r6.PlayerSignal(fade=tuple(fade), bump=tuple(bump))
+
+
+def test_a_proj_chip_adds_its_reason_and_a_lean_verb_and_the_pool_override_still_applies():
+    edge = _edge([_player(1), _player(2), _player(3)])
+    inputs = _inputs(
+        edge,
+        r6=_r6(
+            signals={
+                "g1": _signal(fade=["tgt_pg|TE|change_up"]),
+                "g2": _signal(bump=["tgt_pg|TE|change_down"]),
+                "g3": _signal(fade=["hvt|RB|level_hi"], bump=["tgt_pg|TE|change_down"]),
+            }
+        ),
+    )
+    inputs.players["GsisId"] = ["g1", "g2", "g3"]
+    layout = eft.build_layout(inputs)
+    do, why = _col(eft.DO_COL), _col(eft.WHY_COL)
+    cash = {layout.rows[r - 1][0]: layout.rows[r - 1] for r in layout.player_rows[:3]}
+    assert cash["WR1"][do].endswith(" · Lean under in cash") and cash["WR1"][do].startswith("Cash")
+    assert cash["WR2"][do].endswith(" · Lean over")
+    assert "Lean" not in cash["WR3"][do]  # signals point both ways: no chip, no lean
+    assert "TE targets up 2.2+/game over the last 3 (usually fades back: −0.8 pts" in cash["WR1"][why]
+    assert "Signals point both ways, so no Proj chip" in cash["WR3"][why]
+    # the sheet turns the verb into "In pool (...)" through the same formula as before
+    rows = writer.tab_rows(layout, "EdgeRaw", 5)
+    formula = rows[_rows_named(layout, "WR1")[0] - 1][_col(eft.DO_COL)]
+    assert formula.startswith("=IF($M") and "Lean under in cash" in formula and "In pool (" in formula
+
+
+def test_an_older_chip_and_an_r6_signal_on_one_player_share_a_single_why():
+    edge = _edge([_player(1, Edge="FADE↓ Proj ▼")])
+    inputs = _inputs(edge, r6=_r6(signals={"g1": _signal(fade=["tgt_pg|TE|change_up"])}))
+    inputs.players["GsisId"] = ["g1"]
+    layout = eft.build_layout(inputs)
+    why = layout.rows[layout.player_rows[0] - 1][_col(eft.WHY_COL)]
+    assert (
+        "TE targets up 2.2+/game" in why and "FADE↓: last-3 DK points a game at least 2 above expected" in why
+    )
+
+
+def test_a_chip_resting_only_on_weaker_evidence_is_muted_and_says_so():
+    edge = _edge([_player(1), _player(2)])
+    inputs = _inputs(
+        edge,
+        r6=_r6(
+            signals={
+                "g1": _signal(fade=["adot|WR|level_hi"]),
+                "g2": _signal(fade=["snap_pct|WR|change_down"]),
+            }
+        ),
+    )
+    inputs.players["GsisId"] = ["g1", "g2"]
+    layout = eft.build_layout(inputs)
+    first, second = _rows_named(layout, "WR1")[0], _rows_named(layout, "WR2")[0]
+    assert first in layout.muted_rows and "weaker evidence" in layout.rows[first - 1][_col(eft.WHY_COL)]
+    assert second not in layout.muted_rows
+
+
+def test_context_signals_list_each_of_the_twelve_r6_signals_as_its_own_sub_block():
+    edge = _edge([_player(1)])
+    inputs = _inputs(edge, r6=_r6(signals={"g1": _signal(fade=["tgt_pg|TE|change_up"])}))
+    inputs.players["GsisId"] = ["g1"]
+    layout = eft.build_layout(inputs)
+    subs = [layout.rows[r - 1][0] for r in layout.subheader_rows if "flagged" in str(layout.rows[r - 1][0])]
+    assert len(subs) == 12
+    te_up = [s for s in subs if s.startswith("TE targets up 2.2+/game")][0]
+    assert "1 flagged" in te_up and "FADE (Proj ▼)" in te_up and "−0.8 pts" in te_up.replace("-", "−")
+    assert any("weaker evidence" in s for s in subs) and any(
+        "tested on 2014-21 and 2022-25" in s for s in subs
+    )
+    assert sum("0 flagged" in s for s in subs) == 11
 
 
 def test_every_confirmed_absence_is_listed_muted_as_context_with_the_historical_line():

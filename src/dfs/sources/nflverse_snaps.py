@@ -38,7 +38,6 @@ import httpx
 import pandas as pd
 
 from dfs.log import get_logger
-from dfs.paths import CURRENT_DIR
 from dfs.sources.base import Source, SyncContext
 
 log = get_logger("sources.nflverse_snaps")
@@ -48,8 +47,6 @@ SNAP_COUNTS_URL_TEMPLATE = (
 )
 
 _REQUIRED_COLUMNS = {"pfr_player_id", "player", "team", "position", "week", "offense_pct"}
-SNAPS_WEEKLY_FILE = "snaps_weekly.csv"  # every player-week, for the Edge Finder's usage trends
-WEEKLY_COLUMNS = ["player", "team", "position", "week", "offense_pct"]
 
 
 class NflverseSnapsFetchError(Exception):
@@ -73,14 +70,6 @@ def parse_snap_counts(csv_text: str) -> pd.DataFrame:
     )
 
 
-def save_weekly(csv_text: str) -> None:
-    """Keep every player-week beside the latest-only frame this source returns. Usage trends compare a
-    player's last three games with his earlier ones, which the latest-only frame cannot show."""
-    df = pd.read_csv(io.StringIO(csv_text))
-    CURRENT_DIR.mkdir(parents=True, exist_ok=True)
-    df[WEEKLY_COLUMNS].to_csv(CURRENT_DIR / SNAPS_WEEKLY_FILE, index=False)
-
-
 class NflverseSnapsSource(Source):
     name = "snaps"
 
@@ -92,6 +81,4 @@ class NflverseSnapsSource(Source):
             resp.raise_for_status()
         except httpx.HTTPError as e:
             raise NflverseSnapsFetchError(f"Request to nflverse failed: {e}") from e
-        parsed = parse_snap_counts(resp.text)
-        save_weekly(resp.text)
-        return parsed
+        return parse_snap_counts(resp.text)

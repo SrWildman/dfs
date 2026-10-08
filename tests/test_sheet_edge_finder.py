@@ -208,7 +208,7 @@ def test_gradients_are_per_position_block_and_the_pooled_override_is_a_condition
         for _rng, kind, v in client.rules
         if kind == "TEXT_CONTAINS" and v[0] not in ("add", "leverage", "In pool")
     }
-    assert chips == {"INJ+", "FADE↓", "USAGE↑", "USAGE↓"}
+    assert chips == {"INJ+", "FADE↓", "USAGE↑", "USAGE↓", "Proj ▲", "Proj ▼", "Proj ▲?", "Proj ▼?"}
 
 
 def _wr_edge(n):

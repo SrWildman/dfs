@@ -23,6 +23,7 @@ import pandas as pd
 
 from dfs import injury_beneficiaries as ib
 from dfs import matchups, probabilities, xfp
+from dfs import usage_r6 as r6
 from dfs.derived import OUT_STATUSES
 from dfs.log import get_logger
 from dfs.player_join import JoinResult, join_key, join_source_to_dk, normalize_team
@@ -53,7 +54,16 @@ SIGNAL_COLUMNS = [
     "MatchupRank",
     "Edge",
 ]
-TOKEN_ORDER = [ib.TOKEN_INJ, xfp.TOKEN_FADE, xfp.TOKEN_USAGE_UP, xfp.TOKEN_USAGE_DOWN]
+TOKEN_ORDER = [
+    ib.TOKEN_INJ,
+    xfp.TOKEN_FADE,
+    xfp.TOKEN_USAGE_UP,
+    xfp.TOKEN_USAGE_DOWN,
+    r6.PROJ_DOWN,
+    r6.PROJ_DOWN + r6.WEAK_MARK,
+    r6.PROJ_UP,
+    r6.PROJ_UP + r6.WEAK_MARK,
+]
 SOURCE_NAMES = ("ffopportunity", "injuries", "depth")
 
 
@@ -425,6 +435,7 @@ def build_signals(
     implied: pd.Series | None = None,
     dk_snapshots: list[tuple[str, pd.DataFrame]] | None = None,
     projection_snapshots: list[tuple[str, pd.DataFrame]] | None = None,
+    r6_tokens: pd.Series | None = None,
 ) -> SignalOutput:
     """All of a slate's signals.
 
@@ -432,7 +443,8 @@ def build_signals(
     `ProjPts`, `Avail`, `RosterablePool`, optionally `CalPts`, `GameStart` and a known `GsisId`.
     `depth_dt` is the ISO stamp the depth chart is cut at (the slate's first kickoff / the as-of moment);
     None takes the newest snapshot. Snapshots for "priced in" are `[(stamp, frame)]` as stored under
-    `data/raw/`."""
+    `data/raw/`. `r6_tokens` maps a DraftKings `Id` to its `Proj ▲ / Proj ▼` token (`usage_r6`); blank for
+    anyone it does not name."""
     frame = frame.reset_index(drop=True)
     identity = identity_for(data, depth_dt)
     frame, join = attach_gsis(frame, identity)
@@ -493,7 +505,12 @@ def build_signals(
                 players.at[idx, "MatchupGroup"] = key.loc[k, "Group"]
                 players.at[idx, "MatchupRank"] = key.loc[k, "Rank"]
 
-    players["Edge"] = _join_tokens(inj_token, tokens["TokenFade"], tokens["TokenUsage"])
+    proj_token = (
+        players["Id"].map(r6_tokens).fillna("")
+        if r6_tokens is not None and not r6_tokens.empty
+        else pd.Series("", index=players.index)
+    )
+    players["Edge"] = _join_tokens(inj_token, tokens["TokenFade"], tokens["TokenUsage"], proj_token)
     return SignalOutput(
         players=players[[c for c in SIGNAL_COLUMNS if c in players.columns]],
         outs=outs,

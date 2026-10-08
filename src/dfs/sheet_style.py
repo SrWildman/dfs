@@ -845,6 +845,13 @@ EDGE_CHIPS = {
     "USAGE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
     "FADE↓": _chip(_SOFT_CRIT_BG, CRIT_FG),
     "INJ+": _chip(OK_BG, OK_FG),
+    # R6's one chip per player (`usage_r6`): which way the projection is likely wrong. A trailing "?" means
+    # only the weaker (test-led) evidence supports it, so it is drawn flat grey. Later = higher priority, so
+    # the "?" forms (which also contain the plain text) win.
+    "Proj ▲": _chip(_SOFT_OK_BG, OK_FG),
+    "Proj ▼": _chip(_SOFT_CRIT_BG, CRIT_FG),
+    "Proj ▲?": _chip(FLAT_BG, FLAT_FG),
+    "Proj ▼?": _chip(FLAT_BG, FLAT_FG),
 }
 # Header text of the model's probability and range columns, muted for a low-projected DST (see
 # `probabilities.PROB_DST_LOW_CONFIDENCE_BELOW`): the values are shown but understate upside.

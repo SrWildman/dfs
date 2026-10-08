@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 
-from dfs import calibration, nfl_calendar, probabilities, results_loop, signals, signals_data
+from dfs import calibration, nfl_calendar, probabilities, results_loop, signals, signals_data, usage_r6
 from dfs.log import get_logger
 from dfs.results_analysis import is_thin, usable
 
@@ -115,7 +115,59 @@ def backfill(
 # ---------------------------------------------------------------------------------------------
 
 
-def evaluation_frame(scored: pd.DataFrame, season: int) -> pd.DataFrame:
+PROJ_DOWN_GROUP = "Proj ▼ (any R6 signal)"
+PROJ_UP_GROUP = "Proj ▲ (any R6 signal)"
+R6_COLUMN_PREFIX = "R6:"
+R6_MIN_VERDICT_N = 30  # the verdict line waits for this many flagged player-games
+
+
+def r6_group_defs() -> list[tuple[str, str, str]]:
+    """The R6 rows of the signals table: (row name, mask column, direction), one per recommended signal and
+    then
+    the combined `Proj ▼` / `Proj ▲`. Empty when the research files cannot be read."""
+    try:
+        chips = usage_r6.load_chips()
+    except usage_r6.ResearchConstantsError:
+        return []
+    defs = [
+        (
+            f"R6 {usage_r6.chip_label(c)}",
+            f"{R6_COLUMN_PREFIX}{c.id}",
+            "down" if c.direction == usage_r6.FADE else "up",
+        )
+        for c in chips
+    ]
+    return [
+        *defs,
+        (PROJ_DOWN_GROUP, f"{R6_COLUMN_PREFIX}{usage_r6.PROJ_DOWN}", "down"),
+        (PROJ_UP_GROUP, f"{R6_COLUMN_PREFIX}{usage_r6.PROJ_UP}", "up"),
+    ]
+
+
+def attach_r6(frame: pd.DataFrame, flags: pd.DataFrame | None) -> pd.DataFrame:
+    """Add a bool column per R6 signal (and the combined Proj ▼ / Proj ▲) to the evaluation frame: which
+    signals
+    would have fired for each row's player before that game. `flags` is `usage_r6.history_flags`."""
+    if flags is None or flags.empty or frame.empty or "GsisId" not in frame.columns:
+        return frame
+    chips = {c.id: c for c in usage_r6.load_chips()}
+    keyed = flags.rename(columns={"gsis_id": "GsisId"}).drop_duplicates(["GsisId", "season", "week"])
+    out = frame.merge(keyed, on=["GsisId", "season", "week"], how="left")
+    ids = [c for c in chips if c in out.columns]
+    for chip_id in ids:
+        out[chip_id] = out[chip_id].fillna(False).astype(bool)
+    fade = [c for c in ids if chips[c].direction == usage_r6.FADE]
+    bump = [c for c in ids if chips[c].direction == usage_r6.BUMP]
+    fade_any = out[fade].any(axis=1) if fade else pd.Series(False, index=out.index)
+    bump_any = out[bump].any(axis=1) if bump else pd.Series(False, index=out.index)
+    out[f"{R6_COLUMN_PREFIX}{usage_r6.PROJ_DOWN}"] = fade_any & ~bump_any
+    out[f"{R6_COLUMN_PREFIX}{usage_r6.PROJ_UP}"] = bump_any & ~fade_any
+    for chip_id in ids:
+        out[f"{R6_COLUMN_PREFIX}{chip_id}"] = out.pop(chip_id)
+    return out
+
+
+def evaluation_frame(scored: pd.DataFrame, season: int, r6_flags: pd.DataFrame | None = None) -> pd.DataFrame:
     """Scored rows (rosterable pool, real stat line, ProjPts > 0) joined to the signals that would have
     been seen: per player the LAST archive taken before his own kickoff. Columns added: `CalPts`, `Edge`,
     `InjFrom`, `MatchupGroup`, `MatchupRank`, `MatchupTop`, `ArchiveStamp`. Weeks with no archive are
@@ -167,11 +219,38 @@ def evaluation_frame(scored: pd.DataFrame, season: int) -> pd.DataFrame:
         else score
     )
     out["MatchupTop"] = rank <= 2
-    return out
+    return attach_r6(out, r6_flags)
 
 
 def _tokens(edge: pd.Series) -> pd.Series:
-    return edge.fillna("").astype(str).str.split()
+    return edge.fillna("").astype(str).map(usage_r6.edge_tokens)
+
+
+def r6_verdict_lines(table: pd.DataFrame | None) -> list[str]:
+    """One verdict per combined R6 chip once it has `R6_MIN_VERDICT_N` flagged player-games: how its players
+    did against CalPts, and whether that points the way the research said (`Proj ▼` below, `Proj ▲` above).
+    The research measured against UM, so "matches history" is a sign check on CalPts, nothing stronger."""
+    if table is None or table.empty:
+        return []
+    rows = table.set_index("Signal")
+    lines = []
+    for name, label, expected in (
+        (PROJ_DOWN_GROUP, usage_r6.PROJ_DOWN, -1),
+        (PROJ_UP_GROUP, usage_r6.PROJ_UP, 1),
+    ):
+        if name not in rows.index:
+            continue
+        row = rows.loc[name]
+        n = int(row["n"])
+        value = row["VsCal"] if pd.notna(row["VsCal"]) else row["VsProj"]
+        if n < R6_MIN_VERDICT_N or pd.isna(value):
+            continue
+        against = "CalPts" if pd.notna(row["VsCal"]) else "ProjPts"
+        verdict = (
+            "matches history" if (value > 0) == (expected > 0) and value != 0 else "not matching history yet"
+        )
+        lines.append(f"{label} players: {value:+.1f} vs {against} (n={n}), {verdict}".replace("-", "−"))
+    return lines
 
 
 def signal_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
@@ -191,6 +270,12 @@ def signal_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
         "Matchup top 8": (frame["MatchupGroup"] == "top") & frame["MatchupTop"],
         "Matchup bottom 4": (frame["MatchupGroup"] == "bottom") & frame["MatchupTop"],
     }
+    r6_masks = {
+        name: frame[column].fillna(False).astype(bool)
+        for name, column, _direction in r6_group_defs()
+        if column in frame.columns
+    }
+    groups.update(r6_masks)
     flagged = pd.concat(groups.values(), axis=1).any(axis=1) | (has.map(len) > 0)
     baselines = {
         f"{BASELINE_PREFIX}{pos}": (frame["Position"] == pos) & ~flagged for pos in BASELINE_POSITIONS
@@ -214,7 +299,8 @@ def signal_report(frame: pd.DataFrame) -> pd.DataFrame:
     actual = pd.to_numeric(frame["DkActual"], errors="coerce")
     rows = []
     baseline_names = [f"{BASELINE_PREFIX}{pos}" for pos in BASELINE_POSITIONS]
-    for name, direction in [*SIGNAL_GROUPS, *((b, None) for b in baseline_names)]:
+    r6_groups = [(name, direction) for name, column, direction in r6_group_defs() if column in frame.columns]
+    for name, direction in [*SIGNAL_GROUPS, *r6_groups, *((b, None) for b in baseline_names)]:
         mask = masks[name]
         n = int(mask.sum())
         if n == 0:

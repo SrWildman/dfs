@@ -28,15 +28,9 @@ import pandas as pd
 
 from dfs import store
 from dfs.log import get_logger
-from dfs.paths import CURRENT_DIR, RAW_DIR, ensure_data_dirs
+from dfs.paths import RAW_DIR, ensure_data_dirs
 from dfs.sources.base import Source, SyncContext
-from dfs.usage_metrics import (
-    PBP_USAGE_COLUMNS,
-    STATS_COLUMNS,
-    empty_usage_frame,
-    player_usage,
-    red_zone_counts,
-)
+from dfs.usage_metrics import PBP_USAGE_COLUMNS, STATS_COLUMNS, empty_usage_frame, player_usage
 
 log = get_logger("sources.nflverse_usage")
 
@@ -48,7 +42,6 @@ PBP_URL_TEMPLATE = (
     "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_{season}.parquet"
 )
 STATS_RAW_DIRNAME = "stats_player"
-REDZONE_WEEKLY_FILE = "redzone_weekly.csv"  # per player-week red-zone / high-value touches, for usage trends
 
 
 class NflverseUsageFetchError(Exception):
@@ -71,17 +64,6 @@ def _read_parquet(content: bytes, columns: list[str], *, what: str) -> pd.DataFr
         return pd.read_parquet(io.BytesIO(content), columns=columns)
     except Exception as e:  # pyarrow raises its own exception types, not one common base
         raise NflverseUsageFetchError(f"Could not parse {what}: {e}") from e
-
-
-def _save_redzone_weekly(pbp: pd.DataFrame | None) -> None:
-    """Per player-week red-zone counts beside `usage.csv` (the Edge Finder's usage trends read them). Without
-    a play-by-play file the old one is removed rather than left to describe an earlier sync."""
-    path = CURRENT_DIR / REDZONE_WEEKLY_FILE
-    if pbp is None or pbp.empty:
-        path.unlink(missing_ok=True)
-        return
-    CURRENT_DIR.mkdir(parents=True, exist_ok=True)
-    red_zone_counts(pbp).to_csv(path, index=False)
 
 
 def _snapshot_raw_stats(content: bytes) -> None:
@@ -122,5 +104,4 @@ class NflverseUsageSource(Source):
             )
         except NflverseUsageFetchError as e:
             log.warning("usage: %s -- RZ/G and HVT/G will be blank this run", e)
-        _save_redzone_weekly(pbp)
         return player_usage(stats, pbp)

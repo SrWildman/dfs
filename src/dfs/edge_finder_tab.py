@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from dfs import calibration, signals_data, usage_trends
+from dfs import calibration, signals_data, usage_r6
 from dfs.derived import _rosterable_pool_mask
 from dfs.edge_finder import (
     ABSENCES_FILE,
@@ -49,7 +49,8 @@ from dfs.edge_finder import (
     STATUS_FILE,
 )
 from dfs.kickoff import format_et, parse_kickoff
-from dfs.paths import CURRENT_DIR, RAW_DIR
+from dfs.paths import CURRENT_DIR
+from dfs.research_constants import ResearchConstantsError, signal_thresholds
 from dfs.sheet_pool_cells import SET_OPTIONS  # noqa: F401 - re-exported for the Edge Finder writer
 
 EDGE_FINDER_TAB = "Edge Finder"
@@ -61,6 +62,8 @@ BENEFICIARY_CONFIRMED_N = 12
 BENEFICIARY_QUESTIONABLE_N = 6
 SIGNALS_PER_TOKEN = 6
 TREND_ROWS_PER_POSITION = 8
+R6_SIGNAL_ROWS = 8  # players listed per R6 signal in Context signals
+LEAN_UNDER, LEAN_OVER = "Lean under in cash", "Lean over"
 PUNT_SALARY_WINDOW = 1000  # dollars above each position's cheapest salary on the slate (the Board's old rule)
 PUNT_ROWS_PER_POSITION = 5
 MATCHUP_PLAYERS = 3
@@ -107,6 +110,7 @@ TREND_HEADERS = ["Metric", "Last 3", "Earlier", "Change", "Trend"]
 MATCHUP_LEAD = ["Matchup", "Pos", "", "Grade"]
 MATCHUP_COLUMNS = ["Top 3 / CalPts", "Hit3x%", "Boom%"]
 SIGNAL_COLUMNS = ["Token", "xFP/G", "DK/G L3"]
+R6_SIGNAL_COLUMNS = ["Read", "CalPts", "ProjPts"]
 
 MEANINGS = {
     "CASH CORE": (
@@ -146,10 +150,23 @@ MEANINGS = {
 
 
 @dataclass
+class R6View:
+    """The sheet's view of R6 (`usage_r6`): the 12 chip definitions, who they fire for (rosterable pool only),
+    the trend arrows, and how many pool players are too new for an arrow."""
+
+    chips: dict[str, usage_r6.Chip]
+    signals: dict[str, usage_r6.PlayerSignal]  # gsis id -> what fired for him
+    trends: pd.DataFrame  # `usage_r6.compute_trends`
+    min_games: int
+    short_games: int = 0  # pool players with fewer than `min_games` earlier games: no arrow for them
+
+
+@dataclass
 class Inputs:
     """What the tab is built from. `edge` is the enriched edge frame (`data/current/edge.csv`); `players` the
-    signals table (`Games`, `DkG`, `GsisId`, ...); the rest are the sync's saved tables. `trends` is
-    `usage_trends.compute_trends`; `history` maps a position to the typical best Hit3x% of earlier weeks."""
+    signals table (`Games`, `DkG`, `GsisId`, ...); the rest are the sync's saved tables. `r6` is the
+    `R6View` (the R6 usage arrows and the 12 `Proj` signals; None when its data is not available);
+    `history` maps a position to the typical best Hit3x% of earlier weeks."""
 
     edge: pd.DataFrame
     players: pd.DataFrame
@@ -158,7 +175,7 @@ class Inputs:
     status: dict
     absences: pd.DataFrame = field(default_factory=pd.DataFrame)
     calibration: calibration.Calibration | None = None
-    trends: pd.DataFrame = field(default_factory=pd.DataFrame)
+    r6: R6View | None = None
     history: dict[str, tuple[float, int]] = field(default_factory=dict)
 
 
@@ -210,35 +227,29 @@ def _read(path: Path) -> pd.DataFrame:
     return pd.read_csv(path) if path.exists() else pd.DataFrame()
 
 
-def latest_weekly_stats() -> pd.DataFrame:
-    """The newest saved nflverse weekly stats file (`data/raw/stats_player/`), or empty."""
-    directory = RAW_DIR / "stats_player"
-    files = sorted(directory.glob("*.parquet")) if directory.exists() else []
-    if not files:
-        return pd.DataFrame()
+def load_r6(edge: pd.DataFrame, players: pd.DataFrame) -> R6View | None:
+    """The R6 view for the slate, from the features the sync saved (`usage_r6.SAVED_FILE`) and the research
+    files (`usage_signals.json`, `trend_bands.json`). None when either is missing: the tab then says so."""
+    path = OUTPUT_DIR / usage_r6.SAVED_FILE
+    if not path.exists() or "GsisId" not in players.columns:
+        return None
     try:
-        return pd.read_parquet(files[-1])
-    except Exception:  # noqa: BLE001 - trends are context; a bad file must not stop the tab
-        return pd.DataFrame()
-
-
-def load_trends(edge: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
-    """Usage trends for the slate: the weekly stats, red-zone and snap tables saved by the usage and snaps
-    sources, with the band measured on the rosterable players only (fringe players whose usage never moves
-    would shrink it). Empty when the weekly stats are not saved."""
-    stats = latest_weekly_stats()
-    if stats.empty:
-        return pd.DataFrame(columns=usage_trends.TREND_COLUMNS)
-    weekly = usage_trends.weekly_frame(
-        stats,
-        redzone=_read(CURRENT_DIR / "redzone_weekly.csv"),
-        snaps=_read(CURRENT_DIR / "snaps_weekly.csv"),
+        features = pd.read_csv(path)
+        chips = usage_r6.load_chips()
+        bands = usage_r6.load_trend_bands()
+        min_games = usage_r6.min_earlier_games()
+    except (OSError, ValueError, ResearchConstantsError):
+        return None
+    pool_ids = edge.loc[rosterable(edge), "Id"]
+    pool = set(players.loc[players["Id"].isin(pool_ids), "GsisId"].dropna())
+    in_pool = features[features["gsis_id"].isin(pool)]
+    return R6View(
+        chips={c.id: c for c in chips},
+        signals=usage_r6.slate_signals(features, chips, pool),
+        trends=usage_r6.compute_trends(features, bands, min_games=min_games, population=pool),
+        min_games=min_games,
+        short_games=int((in_pool["earlier_games"] < min_games).sum()),
     )
-    pool = edge[rosterable(edge)]
-    gsis = (
-        players.loc[players["Id"].isin(pool["Id"]), "GsisId"].dropna() if "GsisId" in players.columns else []
-    )
-    return usage_trends.compute_trends(weekly, population=set(gsis) or None)
 
 
 def typical_best_hit3x(season: int, before_week: int) -> dict[str, tuple[float, int]]:
@@ -288,7 +299,7 @@ def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None
         absences=_read(OUTPUT_DIR / ABSENCES_FILE),
         status=status,
         calibration=fitted,
-        trends=load_trends(edge, players),
+        r6=load_r6(edge, players),
         history=history,
     )
 
@@ -347,8 +358,28 @@ def _k(value) -> str:
     return f"${value / 1000:.1f}k"
 
 
+def existing_chip_reasons(edge_text: object) -> str:
+    """Why the older unproven chips (FADE↓ for TEs, USAGE↑ / USAGE↓ for RBs) are on a player, in words, read
+    from the research thresholds. Shown beside an R6 reason when both apply, so there is one Why, never two
+    contradictory stories."""
+    tokens = usage_r6.edge_tokens(edge_text)
+    try:
+        s = signal_thresholds()
+    except ResearchConstantsError:
+        return ""
+    parts = []
+    if "FADE↓" in tokens:
+        parts.append(f"FADE↓: last-3 DK points a game at least {s.fade_gap_points:g} above expected")
+    if "USAGE↑" in tokens:
+        parts.append(f"USAGE↑: carry share up {s.usage_up:.0%}+ over the last 2 games")
+    if "USAGE↓" in tokens:
+        parts.append(f"USAGE↓: carry share down {s.usage_down:.0%}+ over the last 2 games")
+    return "; ".join(parts)
+
+
 class _Builder:
-    def __init__(self) -> None:
+    def __init__(self, r6: R6View | None = None) -> None:
+        self.r6 = r6
         self.layout = Layout(rows=[])
         self._section: tuple[str, int] | None = None
         self._open: tuple[str, int] | None = None  # (key, header row) of an open depth-2 group
@@ -430,7 +461,27 @@ class _Builder:
         self._open = None
 
     # ---- rows ----------------------------------------------------------------------------------
-    def player_row(self, lead: list, slots: list, *, why: str, verb: str, pid, muted: bool = False) -> int:
+    def r6_text(self, gsis, edge_text: object, why: str, verb: str) -> tuple[str, str, bool]:
+        """Add the R6 signals behind a player to a row's `Why` and `Do`: every signal that fired in plain
+        words (with the reason of an older chip beside it when one overlaps), and `Lean under in cash` /
+        `Lean over`
+        for a `Proj ▼` / `Proj ▲`. Returns (why, verb, muted): a chip on weaker evidence only mutes."""
+        sig = self.r6.signals.get(gsis) if self.r6 is not None and isinstance(gsis, str) else None
+        if sig is None:
+            return why, verb, False
+        why = _join(why, usage_r6.signal_why(sig, self.r6.chips), existing_chip_reasons(edge_text))
+        if verb != "Out":
+            if sig.chip == usage_r6.PROJ_DOWN:
+                verb = f"{verb} · {LEAN_UNDER}"
+            elif sig.chip == usage_r6.PROJ_UP:
+                verb = f"{verb} · {LEAN_OVER}"
+        return why, verb, usage_r6.weaker_only(sig, self.r6.chips)
+
+    def player_row(
+        self, lead: list, slots: list, *, why: str, verb: str, pid, muted: bool = False, gsis=None, edge=""
+    ) -> int:
+        why, verb, weak = self.r6_text(gsis, edge, why, verb)
+        muted = muted or weak
         slots = [*slots, *[""] * (SLOTS - len(slots))]
         row = self.add([*lead, *slots, why, verb, "", "", "", pid])
         self.layout.player_rows.append(row)
@@ -671,7 +722,7 @@ def _ranked_blocks(
 
 def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> Layout:
     """The whole tab. `inputs` None gives the empty-state layout (a template, or no sync yet)."""
-    b = _Builder()
+    b = _Builder(inputs.r6 if inputs is not None else None)
     b.add(["EDGE FINDER  —  calibrated projections, outcome odds and the signals that matter"])
     if inputs is None:
         b.note("Not synced yet -- run `dfs sync`; this tab is written by the sync and holds nothing typed.")
@@ -738,6 +789,8 @@ def _cash_section(b: _Builder, edge: pd.DataFrame, inputs: Inputs) -> None:
             why=why,
             verb=cash_verb(rank, r["Bust%"], medians.get(pos, np.inf)),
             pid=r["Id"],
+            gsis=r.get("GsisId"),
+            edge=r.get("Edge", ""),
             muted=_muted(r),
         )
 
@@ -777,6 +830,8 @@ def _gpp_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
             why=why,
             verb=gpp_verb(r["Boom%"], boom_cut, starred),
             pid=r["Id"],
+            gsis=r.get("GsisId"),
+            edge=r.get("Edge", ""),
             muted=_muted(r),
         )
 
@@ -806,6 +861,8 @@ def _punt_section(b: _Builder, edge: pd.DataFrame) -> None:
                 ),
                 verb="Punt option",
                 pid=r["Id"],
+                gsis=r.get("GsisId"),
+                edge=r.get("Edge", ""),
                 muted=_muted(r),
             )
     b.end_section()
@@ -839,6 +896,8 @@ def _disagreement_section(b: _Builder, edge: pd.DataFrame, fitted) -> None:
                     why=_join(disagreement_reason(r, fitted), _thin_note(r.get("Games"))),
                     verb=verb,
                     pid=r["Id"],
+                    gsis=r.get("GsisId"),
+                    edge=r.get("Edge", ""),
                     muted=_muted(r),
                 )
     b.end_section()
@@ -892,6 +951,8 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
                     ),
                     verb=verb,
                     pid=info["Id"] if info is not None else "",
+                    gsis=r["GsisId"],
+                    edge=info["Edge"] if info is not None else "",
                     muted=muted or _is_thin(games),
                 )
     # Every confirmed absence of a regular, as context. No points are attached, for any position.
@@ -915,23 +976,26 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
     b.end_section()
 
 
-def _signed(metric: str, change: float) -> str:
-    unit = usage_trends.METRIC_BY_NAME[metric].unit
-    if unit == "pct":
-        return f"{change * 100:+.0f} pts"
-    return f"{change:+.2f}" if unit == "wopr" else f"{change:+.1f}"
-
-
 def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
-    b.begin_section("USAGE TRENDS  —  whose last-3-games usage moved beyond normal noise")
+    b.begin_section("USAGE TRENDS  —  whose last-3-games usage moved a lot against the 6 before")
     b.header(TREND_HEADERS)
-    trends = inputs.trends
-    marked = trends[trends["Direction"] != ""] if trends is not None and not trends.empty else pd.DataFrame()
-    if marked.empty:
+    view = inputs.r6
+    if view is None:
         b.note(
-            "No player's usage has moved beyond its normal week-to-week noise yet "
-            "(needs 3 recent games and at least 1 earlier game this season)."
+            "Usage trends need the R6 data: run a full `dfs sync` (it fetches last season's and this "
+            "season's stats, play-by-play and snap counts)."
         )
+        b.end_section()
+        return
+    trends = view.trends
+    marked = trends[trends["Direction"] != ""] if not trends.empty else trends
+    if view.short_games:
+        b.note(
+            f"Not enough games: {view.short_games} pool players have fewer than {view.min_games} earlier "
+            "games, so they get no arrow (3 for the last-3 window and 6 for the 6 before it)."
+        )
+    if marked.empty:
+        b.note("No player's usage has moved by more than R6's measured band over the last 3 games yet.")
         b.end_section()
         return
     ids = (
@@ -943,7 +1007,7 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
     marked = marked.assign(_id=marked["GsisId"].map(ids), _z=marked["Z"].abs()).dropna(subset=["_id"])
     marked["_id"] = marked["_id"].astype(int)
     marked = marked[marked["_id"].isin(by_id.index)]
-    for pos in usage_trends.TREND_POSITIONS:
+    for pos in usage_r6.TREND_POSITIONS:
         at = marked[marked["Position"] == pos].sort_values("_z", ascending=False)
         if at.empty:
             continue
@@ -952,7 +1016,7 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
         shown = players[:TREND_ROWS_PER_POSITION]
         more = len(players) - len(shown)
         b.sub(
-            f"{pos}  —  {len(shown)} of {len(players)} players moved beyond noise"
+            f"{pos}  —  {len(shown)} of {len(players)} players moved more than the measured band"
             + (f" (+{more} more)" if more else "")
         )
         for pid in shown:
@@ -965,14 +1029,16 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
                 [e["Name"], pos, e["Team"], e["Salary"]],
                 [
                     metric,
-                    usage_trends.format_value(metric, r["Recent"]),
-                    usage_trends.format_value(metric, r["Prior"]),
-                    _signed(metric, r["Change"]),
+                    usage_r6.format_value(metric, r["Recent"]),
+                    usage_r6.format_value(metric, r["Prior"]),
+                    usage_r6.format_change(metric, r["Change"]),
                     r["Direction"],
                 ],
-                why=_join(usage_trends.why(r), f"also moved: {', '.join(others)}" if others else ""),
+                why=_join(usage_r6.trend_why(r), f"also moved: {', '.join(others)}" if others else ""),
                 verb="Watch",
                 pid=pid,
+                gsis=r["GsisId"],
+                edge=e.get("Edge", ""),
             )
     b.end_section()
 
@@ -1012,9 +1078,54 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
                     why=f"CalPts {p['CalPts']:.1f} vs TFFB {p['ProjPts']:.1f}",
                     verb="Context only",
                     pid=p["Id"],
+                    gsis=p.get("GsisId"),
+                    edge=p.get("Edge", ""),
                 )
             b.close_group()
     b.end_section()
+
+
+def _r6_signal_blocks(b: _Builder, edge: pd.DataFrame) -> None:
+    """Each of R6's 12 signals as its own sub-block: who is flagged, the effect, the evidence tier."""
+    view = b.r6
+    if view is None:
+        b.note(
+            "R6 usage signals are not available this sync (they need a full `dfs sync` and models/research/)."
+        )
+        return
+    by_gsis = (
+        edge.drop_duplicates("GsisId").set_index("GsisId") if "GsisId" in edge.columns else pd.DataFrame()
+    )
+    b.sub("R6 USAGE SIGNALS  —  spikes and slumps fade back (measured against the research projection)")
+    for chip in view.chips.values():
+        flagged = [
+            g
+            for g, s in view.signals.items()
+            if chip.id in s.fired and not by_gsis.empty and g in by_gsis.index
+        ]
+        part = by_gsis.loc[flagged].copy() if flagged else by_gsis.iloc[0:0]
+        part = part.assign(_c=pd.to_numeric(part.get("CalPts"), errors="coerce")).sort_values(
+            "_c", ascending=False
+        )
+        read = "FADE (Proj ▼)" if chip.direction == usage_r6.FADE else "BUMP (Proj ▲)"
+        tier = "weaker evidence" if chip.weaker else "tested on 2014-21 and 2022-25"
+        b.sub(
+            f"{chip.position} {usage_r6.threshold_text(chip)}  —  {len(part)} flagged  ·  {read}  ·  "
+            f"{chip.effect_um_test:+.1f} pts vs the research projection  ·  {tier}"
+        )
+        for _, r in part.head(R6_SIGNAL_ROWS).iterrows():
+            b.player_row(
+                _lead(r),
+                [read.split(" ")[0], r["CalPts"], r["ProjPts"]],
+                why=usage_r6.chip_why(chip),
+                verb="Context only",
+                pid=r["Id"],
+                gsis=r.get("GsisId"),
+                edge=r.get("Edge", ""),
+                muted=chip.weaker,
+            )
+        if len(part) > R6_SIGNAL_ROWS:
+            b.note(f"+{len(part) - R6_SIGNAL_ROWS} more flagged")
 
 
 def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
@@ -1022,7 +1133,7 @@ def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
     b.header(SIGNAL_COLUMNS)
     pool = rosterable(edge)
     for token in ["FADE↓", "USAGE↑", "USAGE↓"]:
-        has = edge["Edge"].fillna("").astype(str).str.split().map(lambda t, k=token: k in t)
+        has = edge["Edge"].fillna("").astype(str).map(lambda text, k=token: k in usage_r6.edge_tokens(text))
         part = edge[has & pool & available(edge)].sort_values("CalPts", ascending=False)
         if part.empty:
             continue
@@ -1038,8 +1149,11 @@ def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
                 why=_join("context only, not proven to beat the projection", _thin_note(r.get("Games"))),
                 verb="Context only",
                 pid=r["Id"],
+                gsis=r.get("GsisId"),
+                edge=r.get("Edge", ""),
                 muted=True,
             )
+    _r6_signal_blocks(b, edge)
     b.end_section()
 
 

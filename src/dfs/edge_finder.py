@@ -27,7 +27,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from dfs import calibration, perf, results_loop, results_signals, signals, signals_data, store
+from dfs import calibration, perf, results_loop, results_signals, signals, signals_data, store, usage_r6
 from dfs.derived import (
     EDGE_FINDER_VALUE_COLUMNS,
     _rosterable_pool_mask,
@@ -36,6 +36,7 @@ from dfs.derived import (
 from dfs.kickoff import kickoff_utc
 from dfs.log import get_logger
 from dfs.paths import CURRENT_DIR
+from dfs.research_constants import ResearchConstantsError
 from dfs.sources.base import SyncContext
 
 log = get_logger("edge_finder")
@@ -144,6 +145,8 @@ def _enrich(
         )
         df["CalPts"] = calibration.predict(df, fitted)
 
+    r6_features = _r6_features(ctx, notes)
+    r6_tokens = _r6_tokens(df, r6_features)
     projections = _try_current("projections")
     dk_snaps = results_signals.week_snapshots("draftkings", ctx.week, ctx.season, now)
     proj_snaps = results_signals.week_snapshots("projections", ctx.week, ctx.season, now)
@@ -157,6 +160,7 @@ def _enrich(
             implied=signals.implied_by_team(projections) if projections is not None else None,
             dk_snapshots=dk_snaps,
             projection_snapshots=proj_snaps,
+            r6_tokens=r6_tokens,
         )
     extras = output.players.set_index("Id")[
         [c for c in EDGE_FINDER_VALUE_COLUMNS if c in output.players.columns]
@@ -165,7 +169,57 @@ def _enrich(
 
     if write:
         _write_outputs(output, ctx, now, fitted, data, df, notes, join, enriched, proj_snaps)
+        _save_r6_features(r6_features, ctx)
     return enriched
+
+
+R6_FEATURES_FILE = usage_r6.SAVED_FILE
+
+
+def _r6_features(ctx: SyncContext, notes: list[str]) -> pd.DataFrame | None:
+    """The slate's R6 window features (`usage_r6`): built fresh on a full sync (it refreshes the current
+    season's stats, play-by-play and snap counts), and on `--live` reused from the same week's saved file
+    (the features of a
+    game do not change with that week's results). None when they cannot be had; the rest of the sync
+    stands."""
+    path = OUTPUT_DIR / R6_FEATURES_FILE
+    try:
+        if ctx.live:
+            if not path.exists():
+                return None
+            saved = pd.read_csv(path)
+            same = saved["slate_season"].eq(ctx.season).all() and saved["slate_week"].eq(ctx.week).all()
+            return saved if same else None
+        with perf.phase("edge finder: R6 usage features"):
+            feats = usage_r6.build_saved_table(ctx.season, ctx.week, log=log.info)
+        return feats.assign(slate_season=ctx.season, slate_week=ctx.week)
+    except (usage_r6.R6Error, ResearchConstantsError, OSError, ValueError, KeyError) as e:
+        notes.append(f"R6 usage signals skipped: {e}")
+        log.warning("R6 usage signals skipped: %s", e)
+        return None
+
+
+def _r6_tokens(df: pd.DataFrame, features: pd.DataFrame | None) -> pd.Series | None:
+    """`Id -> Proj ▼ / Proj ▲` (a `?` when only weaker evidence supports it) for the rosterable pool, from the
+    research's 12 signals; None without features."""
+    if features is None or features.empty or "GsisId" not in df.columns:
+        return None
+    chips = usage_r6.load_chips()
+    by_id = {c.id: c for c in chips}
+    pool = df[df["RosterablePool"].astype(bool) & df["GsisId"].notna()]
+    found = usage_r6.slate_signals(features, chips, set(pool["GsisId"]))
+    tokens = {gsis: usage_r6.proj_token(sig, by_id) for gsis, sig in found.items()}
+    tokens = {g: t for g, t in tokens.items() if t}
+    mapped = pool.set_index("Id")["GsisId"].map(tokens).dropna()
+    return mapped
+
+
+def _save_r6_features(features: pd.DataFrame | None, ctx: SyncContext) -> None:
+    """Keep this slate's features for the Edge Finder tab (its Usage trends and Context signals read them)."""
+    if features is None or features.empty:
+        return
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    features.to_csv(OUTPUT_DIR / R6_FEATURES_FILE, index=False)
 
 
 def _write_outputs(

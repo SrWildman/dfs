@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dfs import results_loop, results_signals, signals, signals_data
+from dfs import results_loop, results_signals, signals, signals_data, usage_r6
 
 
 @pytest.fixture()
@@ -252,3 +252,89 @@ def test_bust_counts_a_score_under_two_times_salary():
     table = results_signals.reliability_report(frame)
     assert table["Measure"].unique().tolist() == ["Bust under 2x"]
     assert table["Realized"].tolist()[:5] == [100.0] * 5 and table["Realized"].tolist()[5:] == [0.0] * 5
+
+
+# ---- R6 rows in Model Check ---------------------------------------------------------------------
+
+
+def _r6_frame(n_flagged=40, miss=-1.0):
+    """A scored-and-signalled frame: `n_flagged` receivers carry the FADE signal 'WR snap share down 11+'
+    (they miss their projection by `miss`), 60 unflagged receivers do not."""
+    from dfs import results_signals as rs
+
+    rows = []
+    for i in range(n_flagged + 60):
+        flagged = i < n_flagged
+        rows.append(
+            {
+                "season": 2026,
+                "week": 4,
+                "GsisId": f"g{i}",
+                "Position": "WR",
+                "ProjPts": 10.0,
+                "CalPts": 10.0,
+                "DkActual": 10.0 + (miss if flagged else 0.2),
+                "Edge": "",
+                "InjFrom": "",
+                "MatchupGroup": "",
+                "MatchupTop": False,
+            }
+        )
+    frame = pd.DataFrame(rows)
+    flags = pd.DataFrame(
+        {
+            "gsis_id": [f"g{i}" for i in range(n_flagged + 60)],
+            "season": 2026,
+            "week": 4,
+            **{
+                c.id: [i < n_flagged and c.id == "snap_pct|WR|change_down" for i in range(n_flagged + 60)]
+                for c in usage_r6.load_chips()
+            },
+        }
+    )
+    return rs.attach_r6(frame, flags)
+
+
+def test_attach_r6_adds_a_column_per_signal_and_the_combined_proj_chips():
+    frame = _r6_frame()
+    assert frame["R6:snap_pct|WR|change_down"].sum() == 40
+    assert frame["R6:Proj ▼"].sum() == 40 and frame["R6:Proj ▲"].sum() == 0
+    both = _r6_frame()
+    both.loc[0, "R6:Proj ▼"] = (
+        False  # (the combined chip is derived: a player with both directions has neither)
+    )
+    assert len([c for c in frame.columns if c.startswith("R6:")]) == 14  # 12 signals + Proj ▼ + Proj ▲
+
+
+def test_the_signals_table_scores_each_r6_row_and_the_baseline_excludes_flagged_players():
+    from dfs import results_signals as rs
+
+    table = rs.signal_report(_r6_frame()).set_index("Signal")
+    row = table.loc["R6 WR snap share down 11+ points"]
+    assert row["n"] == 40 and row["VsProj"] == pytest.approx(-1.0) and row["HitProj"] == pytest.approx(1.0)
+    assert table.loc[rs.PROJ_DOWN_GROUP, "n"] == 40 and table.loc[rs.PROJ_UP_GROUP, "n"] == 0
+    assert (
+        table.loc["Unflagged WR", "n"] == 60
+    )  # the 40 flagged are in a signal group, so not in the baseline
+    assert table.loc["Unflagged WR", "VsProj"] == pytest.approx(0.2)
+    assert len([s for s in table.index if s.startswith("R6 ")]) == 12
+
+
+def test_the_verdict_line_waits_for_thirty_flagged_player_games_and_checks_the_sign_against_history():
+    from dfs import results_signals as rs
+
+    lines = rs.r6_verdict_lines(rs.signal_report(_r6_frame(n_flagged=41, miss=-0.9)))
+    assert lines == ["Proj ▼ players: −0.9 vs CalPts (n=41), matches history"]
+    wrong = rs.r6_verdict_lines(rs.signal_report(_r6_frame(n_flagged=41, miss=+0.9)))
+    assert wrong == ["Proj ▼ players: +0.9 vs CalPts (n=41), not matching history yet"]
+    assert rs.r6_verdict_lines(rs.signal_report(_r6_frame(n_flagged=29))) == []  # n < 30: no line yet
+    assert rs.r6_verdict_lines(None) == []
+
+
+def test_without_r6_flags_the_signals_table_has_only_the_older_rows():
+    from dfs import results_signals as rs
+
+    frame = _r6_frame()
+    frame = frame[[c for c in frame.columns if not c.startswith("R6:")]]
+    names = list(rs.signal_report(frame)["Signal"])
+    assert not any(n.startswith(("R6 ", "Proj")) for n in names)

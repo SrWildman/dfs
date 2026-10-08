@@ -102,8 +102,10 @@ EDGE_FINDER_NOTES = {
         "TOKENS (context, not proven edges): INJ+ a back ahead of him is out and he inherits carries (the "
         "measured split from 12 seasons); FADE↓ a tight end scoring 2+ points a game above his expected "
         "points over 3 games; USAGE↑ / USAGE↓ a back whose carry share rose 10+ points / fell 5+ points "
-        f"over his last 2 games against the 6 before. {_CONTEXT_LABEL} Not part of Flags: bold names are "
-        "unchanged."
+        "over his last 2 games against the 6 before; Proj ▼ / Proj ▲ the projection is likely too high / too "
+        "low, because his recent usage spiked or slumped (the research shows projections over-react to both; "
+        "a ? means only the weaker evidence supports it). "
+        f"{_CONTEXT_LABEL} Not part of Flags: bold names are unchanged."
     ),
 }
 

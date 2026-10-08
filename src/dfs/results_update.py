@@ -189,7 +189,7 @@ def update_results(
         title, _url = client.describe()
         signal_table = reliability = None
         if write_signals:
-            evaluation = results_signals.evaluation_frame(scored, season)
+            evaluation = results_signals.evaluation_frame(scored, season, _r6_history(season))
             signal_table = results_signals.signal_report(evaluation)
             reliability = results_signals.reliability_report(evaluation)
         layout = build_layout(scored, weeks=all_weeks, signal_table=signal_table, reliability=reliability)
@@ -198,6 +198,18 @@ def update_results(
         report.say(f"{summary} on {title}")
         _slot_into_tab_strip(client)
     return report
+
+
+def _r6_history(season: int):
+    """The R6 signals each scored player-game would have shown (cached inputs only; None when they are not
+    there, so Model Check simply has no R6 rows yet)."""
+    from dfs import usage_r6
+
+    try:
+        return usage_r6.history_flags([season - 1, season])
+    except (usage_r6.R6Error, usage_r6.ResearchConstantsError, OSError, ValueError, KeyError) as e:
+        log.warning("R6 rows skipped in Model Check: %s", e)
+        return None
 
 
 def _backfill_signals(

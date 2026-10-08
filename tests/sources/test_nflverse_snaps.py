@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 
 from dfs.sources.nflverse_snaps import NflverseSnapsFetchError, parse_snap_counts
@@ -52,18 +51,3 @@ def test_parse_snap_counts_raises_on_missing_required_column():
 def test_parse_snap_counts_raises_on_empty_file():
     with pytest.raises(NflverseSnapsFetchError, match="no rows"):
         parse_snap_counts(CSV_HEADER)
-
-
-def test_every_player_week_is_saved_for_the_usage_trends(monkeypatch, tmp_path):
-    from dfs.sources import nflverse_snaps
-
-    monkeypatch.setattr(nflverse_snaps, "CURRENT_DIR", tmp_path)
-    csv_text = (
-        "pfr_player_id,player,team,position,week,offense_pct,defense_pct\n"
-        "P1,Wide Out,AAA,WR,1,0.8,0\n"
-        "P1,Wide Out,AAA,WR,2,0.9,0\n"
-    )
-    nflverse_snaps.save_weekly(csv_text)
-    saved = pd.read_csv(tmp_path / nflverse_snaps.SNAPS_WEEKLY_FILE)
-    assert list(saved.columns) == nflverse_snaps.WEEKLY_COLUMNS
-    assert saved["offense_pct"].tolist() == [0.8, 0.9]
