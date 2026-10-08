@@ -312,3 +312,33 @@ def test_committed_alias_file_resolves_joshua_palmer_for_snaps():
     from dfs.player_join import load_player_aliases
 
     assert any(a.source == "snaps" and a.alias_name == "Josh Palmer" for a in load_player_aliases())
+
+
+def test_a_duplicated_source_row_does_not_fan_the_join_out():
+    # Sleeper listed one player twice (2026-10-08): the left join then had more rows than DK and every
+    # positional mask failed with a shape error. The first row is kept.
+    dk = _dk_frame(
+        [
+            {"Id": "1", "Name": "Josh Allen", "Team": "BUF", "Position": "QB"},
+            {"Id": "2", "Name": "Saquon Barkley", "Team": "PHI", "Position": "RB"},
+        ]
+    )
+    source = pd.DataFrame(
+        [
+            {"src_name": "Josh Allen", "src_team": "BUF", "src_pos": "QB", "proj": 24.5},
+            {"src_name": "Josh Allen", "src_team": "BUF", "src_pos": "QB", "proj": 99.0},
+            {"src_name": "Saquon Barkley", "src_team": "PHI", "src_pos": "RB", "proj": 18.2},
+        ]
+    )
+
+    result = join_source_to_dk(
+        dk,
+        source,
+        source_name_col="src_name",
+        source_team_col="src_team",
+        source_position_col="src_pos",
+        source="test",
+    )
+
+    assert result.pool_matched == 2 and len(result.matched) == 2
+    assert result.matched.set_index("Id").loc["1", "proj"] == 24.5

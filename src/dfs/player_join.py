@@ -219,6 +219,19 @@ def join_source_to_dk(
         )
     ]
 
+    # A source listing the same player twice (a duplicate Sleeper row, 2026-10-08) would fan the left join out
+    # to more rows than DK has and break every positional mask below; keep the first row and say so.
+    repeated = src["_join_key"].duplicated()
+    if repeated.any():
+        log.warning(
+            "%s: %d duplicate source row(s) for the same player (kept the first): %s",
+            source,
+            int(repeated.sum()),
+            ", ".join(sorted(set(src.loc[repeated, source_name_col].astype(str)))[:8]),
+        )
+        src = src[~repeated].reset_index(drop=True)
+        src_is_dst = src_is_dst[~repeated.to_numpy()].reset_index(drop=True)
+
     merged = dk.merge(src, on="_join_key", how="left", suffixes=("", "_src"), indicator=True)
     unmatched_mask = merged["_merge"] == "left_only"
 
