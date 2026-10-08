@@ -2006,29 +2006,21 @@ def test_style_exposure_sets_widths_for_the_portfolio_headline_columns():
 
 
 def test_style_movement_finds_columns_by_name_not_position():
-    # Section F: build_movement's header is now 4-7 columns wide depending
-    # on which optional columns EdgeRaw/GameStart provide, so this must be
-    # header-name-driven, not a hardcoded A:E range.
-    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Total move", "Spread move", "Flags"])
+    # header-name-driven: the per-team header, columns found wherever they land
+    header = ["Team", "Opp", "Implied now", "Implied move", "Total move", "Spread move", "Kickoff (ET)"]
+    client = FakeBuilderTabClient(header)
 
     result = style_movement(client, "Movement")
 
     scale_ranges = {a1 for a1, _ in client.color_scale_calls}
-    assert scale_ranges == {"C4:C60", "D4:D60", "E4:E60"}
-    flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == "F4:F60"]
-    assert len(flag_rules) == len(FLAG_CHIPS)
+    assert scale_ranges == {"D4:D60", "E4:E60", "F4:F60"}
     assert "3 movement column(s) colour-scaled" in result
 
 
-def test_style_movement_handles_the_narrower_no_kickoff_no_extras_shape():
-    client = FakeBuilderTabClient(["Player", "Pos", "Implied move", "Flags"])
-
+def test_style_movement_handles_a_narrower_shape():
+    client = FakeBuilderTabClient(["Team", "Implied move"])
     result = style_movement(client, "Movement")
-
-    scale_ranges = {a1 for a1, _ in client.color_scale_calls}
-    assert scale_ranges == {"C4:C60"}
-    flag_rules = [r for a1, r in client.boolean_rule_calls if a1 == "D4:D60"]
-    assert len(flag_rules) == len(FLAG_CHIPS)
+    assert {a1 for a1, _ in client.color_scale_calls} == {"B4:B60"}
     assert "1 movement column(s) colour-scaled" in result
 
 
@@ -2386,14 +2378,16 @@ def test_model_check_sits_after_season_and_results_in_the_money_band():
     assert dict(WEEK_ORDER)["Model Check"] == "money"
 
 
-def test_every_tab_with_bold_names_says_what_bold_means():
-    # Player Pool, EdgeRaw and Lineups bold a Name that has at least one flag (`_apply_name_flag_style`); each
-    # tab's A1 note says so, and so does the Instructions tab.
+def test_bold_names_are_explained_on_the_instructions_tab_and_every_tab_note_is_short_and_points_there():
+    # The A1 notes pop up whenever the cell is selected, so each is one or two lines ending with a pointer to
+    # the Instructions tab; the "bold name = at least one flag" explanation lives on the Instructions tab.
     from dfs.sheet_instructions import render_instructions_grid
-    from dfs.sheet_style import BOLD_NAME_HINT, TAB_NOTES
+    from dfs.sheet_style import TAB_NOTES
 
-    for tab in ("EdgeRaw", "Player Pool", "Lineups"):
-        assert BOLD_NAME_HINT in TAB_NOTES[tab], tab
+    for tab, note in TAB_NOTES.items():
+        assert len(note) <= 130, (tab, len(note))
+        if tab != "Instructions":
+            assert note.endswith("More: Instructions tab."), tab
     grid = render_instructions_grid()
     text = " ".join(cell for pair in grid.values() for cell in pair).lower()
     assert "bold name = at least one flag" in text

@@ -1369,74 +1369,91 @@ def build_exposure(
 # ---------------------------------------------------------------------------
 
 
+MOVEMENT_ROWS = 32  # one row per team on the schedule
+MOVEMENT_HEADER_ROW = 3
+MOVEMENT_FIRST_ROW = MOVEMENT_HEADER_ROW + 1
+MOVEMENT_TOP_PLAYERS = 3
+MOVEMENT_HEADER = [
+    "Team",
+    "Opp",
+    "Implied now",
+    "Implied move",
+    "Total move",
+    "Spread move",
+    "Kickoff (ET)",
+    "Top players",
+    "What it means",
+]
+MOVEMENT_EMPTY = "No line movement recorded yet — run dfs sync at least once this week."
+
+
 def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
-    """The hour before lock: players ranked by how far their team's implied
-    total has moved since the start of the NFL week, with kickoff alongside.
+    """The hour before lock: one row per TEAM, ranked by how far its implied total has moved since the start
+    of the NFL week (usability round, slice 6: it used to repeat one team's move on every player, TEN -2.0
+    about 25 times).
 
-    Sorted/filtered on ImpliedMove alone (team implied points move --
-    "LineMove" before Fix 2.2, and the one `derived._flag_for_row`'s
-    IMPL↑/IMPL↓ actually keys off) -- TotMove/SpdMove ride along as extra
-    DISPLAY columns once a row already qualifies, not a second way to
-    qualify one, so "biggest movers" keeps one unambiguous meaning. This
-    is a VIEW, so its headers are prose ("Implied move"/"Total move"/
-    "Spread move") rather than the EDGE_COLUMNS contract names Section F
-    renamed -- a reader here shouldn't need to know that EdgeRaw's own
-    header spells it `ImpliedMove`.
+    Columns: Team, Opp, Implied now, Implied move, Total move, Spread move, Kickoff (ET), the team's top 3
+    players by projection, and `What it means` ("TEN implied -2.0: their players project lower than when the
+    week opened"). Sorted by |Implied move|; a team whose implied total has not moved is not listed (an
+    unmoved line is 0.0, not blank, so filtering on non-blank alone lets a page of zeros through). `Implied
+    now` is `(OverUnder - Spread) / 2` from EdgeRaw's own team-perspective Spread (negative = favourite).
 
-    ImpliedMove is blank until at least one `nfl_odds` sync has happened
-    this week, so an unsynced sheet says so rather than showing a page of
-    convincing-looking zeros.
+    Kickoff is shown in Eastern time: TFFB's `GameStart` is Eastern wall-clock time labelled "Z" (see
+    `kickoff.py`), so the text is formatted AS WRITTEN and never converted; there is no "UTC" anywhere on this
+    tab. ImpliedMove is blank until at least one `nfl_odds` sync has happened this week, so an unsynced sheet
+    says so rather than showing a page of convincing-looking zeros.
     """
-    name = _rng(edge_tab, "Name")
-    pos = _rng(edge_tab, "Position")
-    team = _rng(edge_tab, "Team")
-
     if "ImpliedMove" not in EDGE_COLUMNS:
         return f"{MOVEMENT_TAB}: skipped -- this version of EDGE_COLUMNS has no ImpliedMove column"
 
+    name = _rng(edge_tab, "Name")
+    team = _rng(edge_tab, "Team")
+    opp = _rng(edge_tab, "Opp")
+    total = _rng(edge_tab, "OverUnder")
+    spread = _rng(edge_tab, "Spread")
     move = _rng(edge_tab, "ImpliedMove")
-    tot_move = _rng(edge_tab, "TotMove") if "TotMove" in EDGE_COLUMNS else None
-    spd_move = _rng(edge_tab, "SpdMove") if "SpdMove" in EDGE_COLUMNS else None
-    start = _rng(edge_tab, "GameStart") if "GameStart" in EDGE_COLUMNS else None
-    # Part 7.9: "Flags" (everything that fired), not the hidden,
-    # top-priority-only "Flag".
-    flag = _rng(edge_tab, "Flags")
+    tot_move = _rng(edge_tab, "TotMove")
+    spd_move = _rng(edge_tab, "SpdMove")
+    start = _rng(edge_tab, "GameStart")
+    projpts = _rng(edge_tab, "ProjPts")
 
-    # An unmoved line is 0.0, not blank, so filtering on <>"" alone lets
-    # a whole page of zeros through and the empty-state message never
-    # fires. Require actual movement -- ImpliedMove specifically, per the
-    # docstring above.
-    cond = f'{name}<>"",{move}<>"",ABS({move})>0'
-
-    header = ["Player", "Pos", "Implied move"]
-    col_terms = [name, f'{pos}&" "&{team}', move]
-    if tot_move:
-        header.append("Total move")
-        col_terms.append(tot_move)
-    if spd_move:
-        header.append("Spread move")
-        col_terms.append(spd_move)
-    if start:
-        header.append("Kickoff (UTC)")
-        col_terms.append(
-            f"IFERROR(TEXT(DATEVALUE(LEFT({start},10))+TIMEVALUE(MID({start},12,8)),"
-            f'"ddd h:mm")&" UTC",{start})'
-        )
-    header.append("Flags")
-    col_terms.append(flag)
-    cols = "{" + ",".join(col_terms) + "}"
-
-    body = (
-        f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({cols},{cond}),"
-        f"ABS(FILTER({move},{cond})),FALSE),40,{len(header)}),"
-        f'"No line movement recorded yet — run dfs sync at least once this week.")'
+    cond = f'{team}<>"",{move}<>"",ABS({move})>0'
+    implied_now = f'IFERROR(({total}-{spread})/2,"")'
+    kickoff = (
+        f'IFERROR(TEXT(DATEVALUE(LEFT({start},10))+TIMEVALUE(MID({start},12,8)),"ddd h:mm AM/PM")&" ET","")'
     )
-
+    cols = "{" + ",".join([team, opp, implied_now, move, tot_move, spd_move, kickoff]) + "}"
+    teams = f"UNIQUE(FILTER({cols},{cond}))"
+    body = (
+        f"=IFERROR(ARRAY_CONSTRAIN(SORT({teams},ARRAYFORMULA(ABS(INDEX({teams},0,4))),FALSE),"
+        f'{MOVEMENT_ROWS},7),"{MOVEMENT_EMPTY}")'
+    )
     rows = [
-        ["MOVEMENT DESK — biggest line moves since the start of the NFL week"],
+        ["MOVEMENT DESK — how each team's line has moved since the start of the NFL week"],
         [],
-        header,
+        MOVEMENT_HEADER,
         [body],
     ]
+    for i in range(MOVEMENT_ROWS):
+        r = MOVEMENT_FIRST_ROW + i
+        top = (
+            f"ARRAY_CONSTRAIN(SORT(FILTER({{{name},{projpts}}},{team}=$A{r},{projpts}>0),2,FALSE),"
+            f"{MOVEMENT_TOP_PLAYERS},1)"
+        )
+        means = (
+            f'$A{r}&" implied "&TEXT($D{r},"+0.0;-0.0")&": "&IF($D{r}>0,'
+            f'"their players project higher than when the week opened",'
+            f'"their players project lower than when the week opened")'
+        )
+        cells = [
+            f'=IF($A{r}="","",IFERROR(TEXTJOIN(", ",TRUE,{top}),""))',
+            f'=IF($A{r}="","",{means})',
+        ]
+        if r == MOVEMENT_FIRST_ROW:
+            rows[r - 1] = [body, "", "", "", "", "", "", *cells]
+        else:
+            rows.append(["", "", "", "", "", "", "", *cells])
     client.write_tab(MOVEMENT_TAB, rows)
-    return f"{MOVEMENT_TAB}: built (top 40 by absolute implied-move, {len(header)} column(s))"
+    return (
+        f"{MOVEMENT_TAB}: built (one row per team by absolute implied-move, {len(MOVEMENT_HEADER)} columns)"
+    )

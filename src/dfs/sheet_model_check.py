@@ -29,6 +29,14 @@ from dfs.sheet_column_notes import MODEL_CHECK_NOTES, apply_notes_to_values
 from dfs.sheets import SheetsClient
 
 MODEL_CHECK_TAB = "Model Check"
+# Plain-English column labels (usability round, slice 6; they used to read "Implied quantile" and "Skill
+# τ=0.80").
+CEILING_REAL = "Ceiling is really the Nth percentile"
+SKILL_80, SKILL_85, SKILL_90 = (f"Ceiling skill ({n}th pct)" for n in (80, 85, 90))
+RACE_CLEAR_GAP = 0.15  # MAE points between the best projection and the runner-up for "clearly best"
+RACE_CLEAR_MIN_N = 50
+VERDICT_MIN_N = 30  # a signal needs this many players before its verdict is worded
+RELIABILITY_ADJUST_WEEK = 8  # "no adjustment until ~Week 8" (docs: reliability recalibration)
 LAST_COLUMN = "J"
 COLUMN_COUNT = 10  # A..J
 # Notes overflow to the right, so they are wrapped into rows short enough to fit A..J (~1,200 px at 9 pt).
@@ -50,6 +58,7 @@ class Layout:
     header_rows: list[int] = field(default_factory=list)
     thin_rows: list[int] = field(default_factory=list)
     note_rows: list[int] = field(default_factory=list)
+    verdict_rows: list[int] = field(default_factory=list)  # one computed sentence opening each block
     signed_ranges: list[tuple[int, int, str]] = field(default_factory=list)  # (first, last, column letter)
     percent_cells: list[str] = field(default_factory=list)  # A1 ranges
     number_cells: list[str] = field(default_factory=list)
@@ -100,6 +109,11 @@ class _Builder:
         self.blank()
         self.layout.section_rows.append(self.add([title]))
 
+    def verdict(self, text: str) -> None:
+        """The block's one computed line, in words (bold), wrapped like a note."""
+        for line in textwrap.wrap(text, NOTE_WRAP_CHARS) or [""]:
+            self.layout.verdict_rows.append(self.add([line]))
+
     def note(self, text: str) -> None:
         """A muted explanatory line, wrapped into as many rows as it needs."""
         for line in textwrap.wrap(text, NOTE_WRAP_CHARS) or [""]:
@@ -137,6 +151,80 @@ class _Builder:
                 self.layout.number_cells.append(f"{letter}{first}:{letter}{last}")
             if header in signed:
                 self.layout.signed_ranges.append((first, last, letter))
+
+
+def race_verdict(race: pd.DataFrame) -> str:
+    """Per position, which projection has the lowest MAE and by how much against the runner-up: "clearly best"
+    when the gap is at least `RACE_CLEAR_GAP` with n >= `RACE_CLEAR_MIN_N`, else "too close to call"."""
+    parts = []
+    for position in calibration.POSITIONS:
+        part = race[race["Position"] == position].sort_values("MAE")
+        if len(part) < 2:
+            continue
+        best, second = part.iloc[0], part.iloc[1]
+        if second["MAE"] - best["MAE"] >= RACE_CLEAR_GAP and best["n"] >= RACE_CLEAR_MIN_N:
+            parts.append(
+                f"{position}: {best['Source']} clearly best (MAE {best['MAE']:.2f} vs "
+                f"{second['Source']} {second['MAE']:.2f})."
+            )
+        else:
+            parts.append(f"{position}: too close to call.")
+    return " ".join(parts) or "Not enough rows to compare the projections yet."
+
+
+def reliability_verdict(reliability: pd.DataFrame) -> str:
+    """How far each probability column runs from what happened, in points (n-weighted over the deciles)."""
+    parts = []
+    for measure, part in reliability.groupby("Measure", sort=False):
+        weight = part["n"].sum()
+        if weight <= 0:
+            continue
+        gap = float((part["Gap"] * part["n"]).sum() / weight)  # realized minus predicted, in points
+        if abs(gap) < 0.5:
+            parts.append(f"{measure} is about right")
+        else:
+            points = round(abs(gap))
+            parts.append(
+                f"{measure} runs ~{points} point{'' if points == 1 else 's'} {'high' if gap < 0 else 'low'}"
+            )
+    if not parts:
+        return "Not enough scored players to judge the probabilities yet."
+    return "; ".join(parts) + f"; no adjustment until ~Week {RELIABILITY_ADJUST_WEEK}."
+
+
+def _signal_position(name: str) -> str | None:
+    """The position whose unflagged baseline a signal is judged against (None: it spans positions)."""
+    if name.startswith("R6 "):
+        return name.split()[1]
+    return {
+        "FADE↓": "TE",
+        "USAGE↑": "RB",
+        "USAGE↓": "RB",
+        "INJ+ confirmed": "RB",
+        "INJ+ questionable": "RB",
+    }.get(name)
+
+
+def signals_verdict(table: pd.DataFrame) -> str:
+    """Each signal with enough players, against its position's unflagged baseline, in words."""
+    rows = table.set_index("Signal")
+    parts = []
+    for name in rows.index:
+        position = _signal_position(name)
+        base_name = f"{results_signals.BASELINE_PREFIX}{position}"
+        row = rows.loc[name]
+        if position is None or base_name not in rows.index or int(row["n"]) < VERDICT_MIN_N:
+            continue
+        value, base = row["VsCal"], rows.loc[base_name, "VsCal"]
+        if pd.isna(value) or pd.isna(base):
+            continue
+        gap = float(value - base)
+        way = "below" if gap < 0 else "above"
+        parts.append(
+            f"{name} (n={int(row['n'])}): {value:+.1f} vs CalPts, {abs(gap):.1f} {way} the unflagged "
+            f"{position} average ({base:+.1f})."
+        )
+    return " ".join(parts) or "No signal has 30 players yet; read the n column as 'not enough data'."
 
 
 def _weeks_text(weeks: list[int]) -> str:
@@ -184,6 +272,11 @@ def build_layout(
     if ceiling.empty:
         b.note(ra.NOT_ENOUGH)
     else:
+        overall_row = ceiling[ceiling["Position"] == "All"].iloc[0]
+        b.verdict(
+            f"Ceiling is really the {overall_row['ImpliedQuantile'] * 100:.0f}th percentile: "
+            f"{overall_row['HitRate']:.0%} of players beat it (n={int(overall_row['n'])})."
+        )
         b.table(
             ceiling,
             [
@@ -192,12 +285,12 @@ def build_layout(
                 ("Beat Ceiling", "HitRate"),
                 ("90% low", "Low90"),
                 ("90% high", "High90"),
-                ("Implied quantile", "ImpliedQuantile"),
-                ("Skill τ=0.80", "Skill80"),
-                ("Skill τ=0.85", "Skill85"),
-                ("Skill τ=0.90", "Skill90"),
+                (CEILING_REAL, "ImpliedQuantile"),
+                (SKILL_80, "Skill80"),
+                (SKILL_85, "Skill85"),
+                (SKILL_90, "Skill90"),
             ],
-            percent={"Beat Ceiling", "90% low", "90% high", "Implied quantile"},
+            percent={"Beat Ceiling", "90% low", "90% high", CEILING_REAL},
         )
         overall = ceiling[ceiling["Position"] == "All"].iloc[0]
         b.note(
@@ -211,6 +304,13 @@ def build_layout(
     # ---- Projection accuracy ------------------------------------------------------------------
     accuracy = ra.accuracy_by_position(scored)
     b.section("PROJECTION ACCURACY  —  actual minus projected (rosterable pool)")
+    overall_acc = accuracy[accuracy["Position"] == "All"]
+    if not overall_acc.empty:
+        a = overall_acc.iloc[0]
+        b.verdict(
+            f"TFFB's projections {'run high' if a['Bias'] < 0 else 'run low'} by {abs(a['Bias']):.1f} "
+            f"points on average and miss by {a['MAE']:.1f} (n={int(a['n'])})."
+        )
     b.table(
         accuracy,
         [
@@ -252,6 +352,10 @@ def build_layout(
     if quintiles.empty:
         b.note(ra.NOT_ENOUGH)
     else:
+        b.verdict(
+            f"ValAdj {'does' if rho['All'] > 0.05 else 'does not yet'} point at players who beat salary: "
+            f"rank correlation {rho['All']:+.2f} (n={rho['n']})."
+        )
         b.table(
             quintiles,
             [("Quintile", "Quintile"), ("n", "n"), ("Mean residual", "MeanResidual")],
@@ -273,6 +377,10 @@ def build_layout(
     if sources.empty:
         b.note(ra.NOT_ENOUGH)
     else:
+        b.verdict(
+            f"AggPts landed closer than TFFB {head['win_rate']:.0%} of the time ({head['agg_wins']} of "
+            f"{head['n']})" + (", still thin." if head["thin"] else ".")
+        )
         b.table(
             sources,
             [("Source", "Source"), ("n", "n"), ("MAE", "MAE"), ("Bias", "Bias"), ("Spearman", "Spearman")],
@@ -301,6 +409,12 @@ def build_layout(
     if multiples.empty:
         b.note(ra.NOT_ENOUGH)
     else:
+        low_row, high_row = multiples.iloc[0], multiples.iloc[-1]
+        b.verdict(
+            f"Players projected at Val {high_row['ProjectedVal']} reached 3x salary "
+            f"{high_row['Hit3x']:.0%} of the time, against {low_row['Hit3x']:.0%} at "
+            f"{low_row['ProjectedVal']}."
+        )
         b.table(
             multiples,
             [
@@ -316,6 +430,17 @@ def build_layout(
 
     # ---- Flags ---------------------------------------------------------------------------------
     b.section("FLAGS  —  recomputed with today's code; reported, not judged")
+    flags = ra.flag_report(scored)
+    settled = flags[flags["n"] >= VERDICT_MIN_N] if not flags.empty else flags
+    b.verdict(
+        f"{len(settled)} of {len(flags)} flags have {VERDICT_MIN_N}+ players; "
+        + (
+            ", ".join(f"{r.Flag} {r.MeanError:+.1f}" for r in settled.itertuples())
+            + " points against projection."
+            if len(settled)
+            else "the rest are too thin to read yet."
+        )
+    )
     b.table(
         ra.flag_report(scored),
         [
@@ -387,6 +512,9 @@ def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
     trained on (CalPts is fitted on earlier weeks only; the 2nd scored week is the first it can be judged),
     first without UM, then with UM on the rows UM rates."""
     b.section("PROJECTION RACE  —  TFFB vs AggPts vs CalPts, each judged on weeks it never trained on")
+    plain = calibration.backtest(scored, with_um=False)
+    if not plain.empty:
+        b.verdict(race_verdict(plain))
     if not _race_block(b, scored, with_um=False):
         b.note(
             "Not enough data yet -- CalPts needs one earlier scored week to learn from, so the race starts "
@@ -414,6 +542,7 @@ def _add_reliability(b: _Builder, reliability: pd.DataFrame | None) -> None:
     if reliability is None or reliability.empty:
         b.note("Not enough data yet -- no scored week has probabilities. Run `dfs results update`.")
         return
+    b.verdict(reliability_verdict(reliability))
     table = reliability.assign(
         Predicted=reliability["Predicted"] / 100, Realized=reliability["Realized"] / 100
     )
@@ -456,6 +585,7 @@ def _add_signals(b: _Builder, signal_table: pd.DataFrame | None) -> None:
             "Not enough data yet -- no signals archive exists. Run `dfs results update` after a week's games."
         )
         return
+    b.verdict(signals_verdict(signal_table))
     table = signal_table.rename(
         columns={
             "VsProj": "Actual - ProjPts",
@@ -534,6 +664,8 @@ def write_model_check(client: SheetsClient, layout: Layout, tab: str = MODEL_CHE
     for row in layout.header_rows:
         client.format_range(tab, f"A{row}:{LAST_COLUMN}{row}", _HEADER_FMT)
         client.format_range(tab, f"B{row}:{LAST_COLUMN}{row}", {"horizontalAlignment": "RIGHT"})
+    for row in layout.verdict_rows:
+        client.format_range(tab, f"A{row}", {"textFormat": {"bold": True, "fontSize": 10}})
     for row in layout.note_rows:
         client.format_range(
             tab, f"A{row}", {"textFormat": {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}}

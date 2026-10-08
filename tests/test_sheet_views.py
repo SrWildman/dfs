@@ -46,7 +46,13 @@ from dfs.sheet_views import (
     DEFAULT_LINEUP_COUNT,
     EXPOSURE_TAB,
     LINEUP_COUNT_CELL,
+    MOVEMENT_EMPTY,
+    MOVEMENT_FIRST_ROW,
+    MOVEMENT_HEADER,
+    MOVEMENT_HEADER_ROW,
+    MOVEMENT_ROWS,
     MOVEMENT_TAB,
+    MOVEMENT_TOP_PLAYERS,
     ROSTER_MIN,
     SLATE_GAME_FIRST_ROW,
     SLATE_GPS_CHECK_COL_INDEX,
@@ -397,7 +403,7 @@ def test_build_exposure_reads_lineups_own_header_row_not_row_1():
     assert "QB" in header[11]  # formula still built -- read succeeded against row 8, not row 1
 
 
-def test_build_movement_uses_edge_columns_positions_for_impmove_and_gamestart():
+def test_build_movement_is_one_row_per_team_and_derives_columns_from_edge_columns():
     assert "ImpliedMove" in EDGE_COLUMNS and "GameStart" in EDGE_COLUMNS
 
     class NoopClient:
@@ -410,9 +416,43 @@ def test_build_movement_uses_edge_columns_positions_for_impmove_and_gamestart():
     assert result.startswith(f"{MOVEMENT_TAB}: built")
     tab_name, rows = client.written
     assert tab_name == MOVEMENT_TAB
-    body = rows[-1][0]
-    assert f"${_col('ImpliedMove')}$2:${_col('ImpliedMove')}" in body
-    assert f"${_col('GameStart')}$2:${_col('GameStart')}" in body
+    body = rows[MOVEMENT_FIRST_ROW - 1][0]
+    for name in ("Team", "Opp", "ImpliedMove", "TotMove", "SpdMove", "GameStart", "OverUnder", "Spread"):
+        assert f"${_col(name)}$2:${_col(name)}" in body
+    assert "UNIQUE(" in body  # a team once, not once per player
+    assert "ABS(INDEX(UNIQUE(" in body and ",0,4)))" in body  # sorted by |Implied move|, the fourth column
+    assert MOVEMENT_EMPTY in body  # the empty state is kept
+    assert len(rows) == MOVEMENT_FIRST_ROW - 1 + MOVEMENT_ROWS
+
+
+def test_movement_times_are_eastern_and_never_say_utc():
+    class NoopClient:
+        def write_tab(self, tab_name, rows, **_kwargs):
+            self.written = rows
+            return len(rows)
+
+    client = NoopClient()
+    build_movement(client, edge_tab="EdgeRaw")
+    flat = " ".join(str(c) for row in client.written for c in row)
+    assert "UTC" not in flat and "Kickoff (ET)" in flat and '&" ET"' in flat
+    # TFFB's "Z" is Eastern wall-clock time: the text is formatted as written, never converted
+    assert "TIMEVALUE(MID(" in flat and "TIMEZONE" not in flat.upper()
+
+
+def test_movement_what_it_means_names_the_team_and_which_way_its_players_moved():
+    class NoopClient:
+        def write_tab(self, tab_name, rows, **_kwargs):
+            self.written = rows
+            return len(rows)
+
+    client = NoopClient()
+    build_movement(client, edge_tab="EdgeRaw")
+    first = client.written[MOVEMENT_FIRST_ROW - 1]
+    means = first[MOVEMENT_HEADER.index("What it means")]
+    assert '" implied "' in means and "project lower than when the week opened" in means
+    assert "project higher than when the week opened" in means
+    top = first[MOVEMENT_HEADER.index("Top players")]
+    assert "TEXTJOIN" in top and f",{MOVEMENT_TOP_PLAYERS},1)" in top
 
 
 # ---------------------------------------------------------------------------
@@ -940,17 +980,11 @@ def test_exposure_header_row_matches_style_exposures_column_assumptions():
 
 
 def test_movement_header_row_has_the_names_style_movement_looks_up():
-    # style_movement (sheet_style.py) is header-NAME-driven now (Section
-    # F), not a hardcoded A:E range -- this just confirms build_movement
-    # still produces the names it looks for, wherever they land.
     client = _CapturingClient()
     build_movement(client, edge_tab="EdgeRaw")
-    header = client.rows[2]  # row 3
-    assert "Implied move" in header
-    assert "Total move" in header
-    assert "Spread move" in header
-    assert "Flags" in header
-    assert "Line Move" not in header  # Section F: renamed away from the ambiguous old label
+    header = client.rows[MOVEMENT_HEADER_ROW - 1]
+    assert header == MOVEMENT_HEADER
+    assert "Kickoff (UTC)" not in header and "Player" not in header  # per team, not per player
 
 
 class _QueueSectionClient:

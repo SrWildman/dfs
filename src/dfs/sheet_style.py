@@ -110,7 +110,6 @@ from dfs.sheet_column_notes import (
 )
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
-from dfs.sheet_lineup_tints import LEGEND as LINEUP_TINT_LEGEND
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_cells import SET_OPTIONS
 from dfs.sheet_views import (
@@ -2496,112 +2495,38 @@ _SAVED_VIEW_HINT = "Sort/filter via Data > Filter views (this tab's own cells st
 # a bold name appears so nobody has to guess.
 BOLD_NAME_HINT = "Bold name = at least one flag; see Flags."
 
+MORE = "More: Instructions tab."
 TAB_NOTES: dict[str, str] = {
-    # Fix 4 follow-up (Week 3 fixes, 2026-09-23): this note had the same
-    # staleness the Instructions tab did, unnoticed because being
-    # code-generated (`apply_tab_notes`) regenerates the CELL every run,
-    # not the STRING inside it -- the mechanism can't catch a fact that
-    # changed in the string itself. Corrected to Part 7.6's 7-section
-    # rebuild (was still describing the old 3-panel ranked-player Board).
-    "Board": (
-        "BOARD -- a read-only landing tab across seven collapsible sections (Queue, "
-        "Slate shape, Per-position leaders, Punt finder, Stack candidates, Pool "
-        "diagnostics, Chalk map placeholder, This week's edges), rebuilt by `dfs setup build-views`. "
-        "Nothing here is typed."
-    ),
-    # Fix 4 follow-up: "sorted by Leverage" (pre-Part-7.2) and "the
-    # checkbox" (Pool was a TRUE/FALSE checkbox before Fix 2.11 made it a
-    # blank/Cash/GPP/Both dropdown) were both stale.
-    "EdgeRaw": (
-        "EDGERAW -- every synced player this week, sorted by ValAdj. Set the Pool "
-        f"dropdown (blank/Cash/GPP/Both, far left) to add a player to your pool. {BOLD_NAME_HINT} "
-        f"{_SORT_SEARCH_HINT}"
-    ),
+    # Usability round, slice 6: a tab note pops up whenever A1 is selected, so each is one or two lines and
+    # ends with a pointer to the Instructions tab (the full explanation lives there and in docs/).
+    "Board": f"BOARD -- the slate, your pool's health and the stacks. Only Set is typed. {MORE}",
+    "EdgeRaw": f"EDGERAW -- every synced player by ValAdj. Set Pool to add a player. {MORE}",
     "Edge Finder": (
-        "EDGE FINDER -- written by `dfs sync`, nothing here is typed. Cash core and GPP upside per position "
-        "(CalPts, Hit3x%, Boom%), where CalPts disagrees with TFFB, injury beneficiaries, matchups by "
-        "position, and the unproven context signals. Pool shows your EdgeRaw tick; ↗ jumps to the player on "
-        "EdgeRaw. Context signals are not proven to beat projections; Model Check tracks every one."
+        f"EDGE FINDER -- written by `dfs sync`; pick a Set value to add or remove a player. {MORE}"
     ),
-    "Slate Grid": (
-        "SLATE GRID -- one row per game: total, spread, wind, divisional flag. Read-only, "
-        f"rebuilt by `dfs setup build-views`. {_SAVED_VIEW_HINT}"
-    ),
+    "Slate Grid": f"SLATE GRID -- one row per game, then every team by implied total. Read-only. {MORE}",
     "Player Pool": (
-        "PLAYER POOL -- everyone you've added, grouped by position. Row 1: type a name "
-        "(with a search box) to add a player directly, the same as ticking Pool on "
-        "EdgeRaw. Everything below row 2 is computed. Edge ↗ jumps straight to that "
-        "player on EdgeRaw (e.g. to remove them -- untick Pool there); Overflow (far "
-        f"right) warns if a position has more picks than room. {BOLD_NAME_HINT}"
+        f"PLAYER POOL -- everyone you added, by position. Type a name in row 1 to add a player. {MORE}"
     ),
     "Lineups": (
-        "LINEUPS -- build your rosters here. One 9-player block per lineup (QB, RB, RB, "
-        "WR, WR, WR, TE, FLEX, DST); type a player's name into column A of a block to "
-        "fill a slot. Issues flags a duplicate, an unavailable player, or a salary/roster "
-        "problem per lineup; Edge ↗ jumps straight to that player on EdgeRaw. "
-        f"{LINEUP_TINT_LEGEND} {BOLD_NAME_HINT}"
+        f"LINEUPS -- one block per lineup; type names in column A, set Cash or GPP on the Total row. {MORE}"
     ),
-    "DK Upload": (
-        "DK UPLOAD -- `dfs export` writes DraftKings' bulk-upload file here. Read-only "
-        "output; don't type into it."
-    ),
-    "Movement": (
-        "MOVEMENT -- how betting lines have shifted since your last sync "
-        f"(`dfs odds movement`). Read-only. {_SAVED_VIEW_HINT}"
-    ),
-    "Exposure": (
-        "EXPOSURE -- how much of your lineups each player is in. Type a target percentage "
-        f"into the Target column; everything else is computed. {_SAVED_VIEW_HINT}"
-    ),
-    "Bankroll": (
-        "BANKROLL -- Cash/GPP ledgers plus starting/ending bankroll. `dfs bankroll sync "
-        "--csv <file>` (or `dfs week close`) appends rows here; the summary figures are "
-        "formulas, not typed."
-    ),
-    "Results": (
-        "RESULTS -- a season-level results log, one row per week, NOT reset by a new "
-        f"weekly copy. Type into every column except Cash Results/H2H %. {_SORT_SEARCH_HINT}"
-    ),
-    # Fix 4 follow-up: "pasted in by hand each week" was true before
-    # Phase 5 automated the sos_qb/sos_rb/sos_wr/sos_te/sos_dst sync
-    # sources -- all five entries had this exact stale claim.
-    "SoSQB": (
-        "SOSQB -- Strength-of-schedule for QBs, synced automatically each week "
-        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
-    ),
-    "SoSRB": (
-        "SOSRB -- Strength-of-schedule for RBs, synced automatically each week "
-        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
-    ),
-    "SoSWr": (
-        "SOSWR -- Strength-of-schedule for WRs, synced automatically each week "
-        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
-    ),
-    "SoSTE": (
-        "SOSTE -- Strength-of-schedule for TEs, synced automatically each week "
-        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
-    ),
-    "SoSDef": (
-        "SOSDEF -- Strength-of-schedule for DSTs, synced automatically each week "
-        f"(`dfs sync`). Rank is colour-scaled REVERSED (low is the tough matchup). {_SORT_SEARCH_HINT}"
-    ),
-    "SoSComb": (
-        "SOSCOMB -- combines all five SoS tabs into one lookup table by team and "
-        f"position, feeding Player Pool's OppPosRank. {_SORT_SEARCH_HINT}"
-    ),
-    "Instructions": (
-        "INSTRUCTIONS -- read this first. The weekly workflow lives here, row by row; "
-        "`docs/` in the repo has the full reference for anything beyond it."
-    ),
+    "DK Upload": f"DK UPLOAD -- `dfs export` writes the DraftKings upload file here. Read-only. {MORE}",
+    "Movement": f"MOVEMENT -- how each team's line has moved this week. Read-only. {MORE}",
+    "Exposure": f"EXPOSURE -- how much of your lineups each player is in. Type a Target. {MORE}",
+    "Bankroll": f"BANKROLL -- Cash and GPP ledgers; `dfs week close` appends rows. {MORE}",
+    "Results": f"RESULTS -- one row per week, never reset; type all columns except the two formulas. {MORE}",
+    "SoSQB": f"SOSQB -- strength of schedule for QBs, synced by `dfs sync`. {MORE}",
+    "SoSRB": f"SOSRB -- strength of schedule for RBs, synced by `dfs sync`. {MORE}",
+    "SoSWr": f"SOSWR -- strength of schedule for WRs, synced by `dfs sync`. {MORE}",
+    "SoSTE": f"SOSTE -- strength of schedule for TEs, synced by `dfs sync`. {MORE}",
+    "SoSDef": f"SOSDEF -- strength of schedule for DSTs, synced by `dfs sync`. {MORE}",
+    "SoSComb": f"SOSCOMB -- the five SoS tabs in one lookup, feeding OppPosRank. {MORE}",
+    "Instructions": "INSTRUCTIONS -- read this first: the week step by step, the numbers, the tabs.",
     "Model Check": (
-        "MODEL CHECK -- every projection scored against what actually happened, rebuilt from disk each "
-        "time `dfs results update` runs (it also runs at the end of `dfs week close`). Nothing here is "
-        "typed. Muted italic rows are thin (n < 30): read them as 'not enough data yet'."
+        f"MODEL CHECK -- every projection scored against what happened; `dfs results update`. {MORE}"
     ),
-    "PlayerPoolRaw": (
-        "PLAYERPOOLRAW -- the hub every other tab's VLOOKUPs read from. Left visible on "
-        "purpose so a broken lookup is easier to debug; nothing here is typed."
-    ),
+    "PlayerPoolRaw": f"PLAYERPOOLRAW -- the hub other tabs read from. Nothing here is typed. {MORE}",
 }
 
 
@@ -3036,16 +2961,15 @@ def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:
 
 
 _MOVEMENT_WIDTHS = {
-    "Player": 165,
-    "Pos": 92,
-    # Widened from 92 -- Phase 6, Part 1.5's own audit-style check caught
-    # this one truncating live ("Implied move" is longer than "Total
-    # move"/"Spread move", the only one of the three that didn't fit).
+    "Team": 70,
+    "Opp": 70,
+    "Implied now": 96,
     "Implied move": 110,
-    "Total move": 92,
-    "Spread move": 92,
-    "Kickoff (UTC)": 152,
-    "Flags": 96,
+    "Total move": 96,
+    "Spread move": 100,
+    "Kickoff (ET)": 130,
+    "Top players": 360,
+    "What it means": 520,
 }
 
 # Diverging, not the standard red->yellow->green: each is a signed delta
@@ -3099,14 +3023,11 @@ def style_movement(client: SheetsClient, tab: str = "Movement") -> str:
         )
         scaled += 1
 
-    if "Flags" in header:
-        letter = column_letter(header.index("Flags"))
-        rng = f"{letter}4:{letter}60"
-        for text, fmt in FLAG_CHIPS.items():
-            client.add_boolean_rule(tab, rng, condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
-
+    if "Implied now" in header:
+        letter = column_letter(header.index("Implied now"))
+        client.format_range(tab, f"{letter}4:{letter}60", {**_num("0.0"), "horizontalAlignment": "RIGHT"})
     client.freeze(tab, rows=3, cols=1)
-    return f"{tab}: styled ({scaled} movement column(s) colour-scaled, flags chipped)"
+    return f"{tab}: styled ({scaled} movement column(s) colour-scaled)"
 
 
 def style_view_tabs(client: SheetsClient) -> list[str]:

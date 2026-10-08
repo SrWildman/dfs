@@ -1,7 +1,7 @@
 """Per-column explanations, attached as a cell note on each header (hover the little corner mark).
 
-A column name alone does not say what a number means -- "WOPR", "Opp Def EPA/pass", "Skill τ=0.85" are
-all jargon to anyone who did not build the sheet. Each definition lives here, once, and is applied
+A column name alone does not say what a number means -- "WOPR", "Opp Def EPA/pass", "Ceiling skill (85th
+pct)" are all jargon to anyone who did not build the sheet. Each definition lives here, once, and is applied
 wherever that header appears, so the explanation is always one hover away and cannot drift between tabs.
 
 Three groups, one dict each (headers are matched by their TEXT, never by position):
@@ -170,18 +170,20 @@ MODEL_CHECK_NOTES = {
     "Beat Ceiling": "Share of players whose actual DK points were MORE than their published Ceiling.",
     "90% low": "Lower end of the 90% Wilson confidence interval for the rate beside it.",
     "90% high": "Upper end of the 90% Wilson confidence interval for the rate beside it.",
-    "Implied quantile": (
+    "Ceiling is really the Nth percentile": (
         "1 minus the share who beat their Ceiling. 85% means Ceiling behaves like an 85th-percentile outcome "
         "(FantasyLabs' own ceiling, the top 15%, is the hypothesis being tested)."
     ),
-    "Skill τ=0.80": (
-        "Pinball skill of Ceiling read as the 0.80 quantile: 1 minus its pinball loss over the loss "
+    "Ceiling skill (80th pct)": (
+        "How well Ceiling works as an 80th-percentile forecast (pinball skill): 1 minus its pinball loss "
+        "over "
+        "the loss "
         "of the best "
         "constant quantile. 0 = no better than ignoring the player. Highest across the three columns = the "
         "quantile Ceiling really is. Never RMSE: a quantile is not a mean."
     ),
-    "Skill τ=0.85": "Pinball skill of Ceiling read as the 0.85 quantile (see Skill τ=0.80).",
-    "Skill τ=0.90": "Pinball skill of Ceiling read as the 0.90 quantile (see Skill τ=0.80).",
+    "Ceiling skill (85th pct)": "The same skill read as an 85th-percentile forecast (see the 80th pct).",
+    "Ceiling skill (90th pct)": "The same skill read as a 90th-percentile forecast (see the 80th pct).",
     "Bias": (
         "Mean of (actual minus projected) DK points. Negative = the projections ran HIGH. "
         "Coloured red below zero, green above."

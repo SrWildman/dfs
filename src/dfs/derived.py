@@ -1297,6 +1297,11 @@ def build_edge_frame(
     # (Own%), which is why the rename has to land after every internal use
     # of "ProjOwn" and right before this final column selection.
     merged = merged.rename(columns={"ProjOwn": "Own%"})
+    # Until TFFB publishes ownership every ProjOwn reads 0, and a column of "0.0%" looks like a real (and
+    # impossible) forecast. Blank until then: every consumer (the colour scale, Lineups' total, the Edge
+    # Finder's star) already treats a blank as "no ownership yet".
+    if not has_real_ownership:
+        merged["Own%"] = float("nan")
 
     # Zone labels carry no per-row data -- text lives in the header only
     # (see ZONE_LABELS' own comment for why they exist at all).

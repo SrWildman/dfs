@@ -1630,3 +1630,17 @@ def test_a_zero_or_blank_metric_gets_no_percentile_and_does_not_skew_the_others(
     # the same RB percentiles with and without the zero row present
     without = _pct_frame().drop(index="RB0")
     assert frame.loc["RB1", "ProjPts%ile"] == without.loc["RB1", "ProjPts%ile"]
+
+
+def test_own_pct_is_blank_not_zero_until_ownership_publishes_and_real_after():
+    rows = [
+        {"Id": str(i), "Name": f"P{i}", "Position": "RB", "Ceiling": 10.0 + i, "ProjOwn": 0}
+        for i in range(1, 5)
+    ]
+    sal = _salaries([{"ID": str(i)} for i in range(1, 5)])
+    unpublished = build_edge_frame(_projections(rows), sal).frame
+    assert (unpublished["OwnStatus"] == OWN_STATUS_UNPUBLISHED).all()
+    assert unpublished["Own%"].isna().all()  # blank, not 0.0%
+    published_rows = [{**r, "ProjOwn": 5.0 + r["Ceiling"] / 10} for r in rows]
+    published = build_edge_frame(_projections(published_rows), sal).frame
+    assert published["Own%"].notna().all() and (published["Own%"] > 0).all()
