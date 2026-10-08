@@ -338,13 +338,11 @@ def build_layout(
 
 def _race_block(b: _Builder, scored: pd.DataFrame, *, with_um: bool) -> bool:
     """One projection-race table (by position) and its per-week trend. Returns False when the race cannot
-    start yet. `with_um` judges UM and the production CalPts on the rows UM rates."""
+    start yet. `with_um` adds UM as a row, judged with the others on the players UM rates."""
     race = calibration.backtest(scored, with_um=with_um)
     if race.empty:
         return False
-    labels = [
-        label for label, _ in (calibration.PROJECTIONS_WITH_UM if with_um else calibration.PROJECTIONS_NO_UM)
-    ]
+    labels = [label for label, _ in (calibration.PROJECTIONS_WITH_UM if with_um else calibration.PROJECTIONS)]
     order = {name: i for i, name in enumerate(labels)}
     positions = ["All", *calibration.POSITIONS]
     race = race.assign(_p=race["Position"].map(positions.index), _s=race["Source"].map(order))
@@ -403,7 +401,7 @@ def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
     b.note(
         "CalPts is NOT the default projection: it is tracked here every week and Sam decides. It is each "
         "source's level bias corrected per position and salary tier (shrunk toward 0), then weighted; "
-        "'CalPts (no UM)' leaves UM out, 'CalPts' is the production blend that includes it. "
+        "UM is not part of CalPts (it added nothing in 12 seasons of back-tests); it is its own row. "
         f"Scored weeks so far: {_weeks_text(weeks_trained)}. rho = rank correlation within position and week "
         "(TFFB is hard to beat at ranking; the gain from CalPts is expected in the level, MAE and bias). "
         "Rosterable pool, scored players only."
@@ -481,11 +479,13 @@ def _add_signals(b: _Builder, signal_table: pd.DataFrame | None) -> None:
     )
     b.note(
         "Each row is a group of players the signal picked, as it stood before kickoff (weeks backfilled "
-        "without lookahead). Hit = on the right side of the projection: above it for BUY, USAGE up, "
+        "without lookahead). Hit = on the right side of the projection: above it for USAGE up, "
         "INJ+ and the top-8 matchups; below it for FADE, USAGE down and the bottom-4 matchups. "
-        "Matchup rows are each team's top two players at the position by CalPts. The planning "
-        "session found these signals do NOT beat TFFB on Weeks 1-4; they are shown as context. "
-        "A signal with n of 0 has not fired yet."
+        "Matchup rows are each team's top two players at the position by CalPts. The "
+        "'Unflagged' rows are every pool player at that position with no signal: a signal means something "
+        "only if its row differs from them (they have no direction, so no hit rate). BUY↑ was removed "
+        "(wrong-signed in 12 seasons of back-tests). Shown as context. A signal with n of 0 has not "
+        "fired yet."
     )
 
 

@@ -1,5 +1,6 @@
 """xFP: expected fantasy points from ffopportunity's weekly file, converted to DraftKings scoring, and
-the per-player windows and `Edge` context tokens built on it (`BUY↑`, `FADE↓`, `USAGE↑`, `USAGE↓`).
+the per-player windows and `Edge` context tokens built on it (`FADE↓` for TEs, `USAGE↑` / `USAGE↓` for RB
+carry share).
 
 Pure and offline-testable; the thin fetch wrapper is `sources/nflverse_xfp.py`, the cross-source
 glue (joining to DraftKings players, injuries, the as-of rules) is `signals.py`.
@@ -9,25 +10,28 @@ receptions, yards, touchdowns and so on, next to what actually happened (`ep_wee
 updated weekly). Summed through DraftKings' scoring this is `xFP`: what the player's OPPORTUNITY was
 worth that week, whether or not he cashed it.
 
-**DK conversion** (one place; the cloud model branch uses the same formula, and this block is to be
-replaced by an import from `dfs.model` once that branch is merged)::
+**DK conversion** (`dfs.model.history.XFP_WEIGHTS`, imported, not copied)::
 
     receptions_exp + 0.1*rec_yards_gained_exp + 6*rec_touchdown_exp
     + 0.1*rush_yards_gained_exp + 6*rush_touchdown_exp
     + 0.04*pass_yards_gained_exp + 4*pass_touchdown_exp - pass_interception_exp
     + 2*(pass + rec + rush two-point conversions expected)
 
-It is split three ways (`rec_xfp`, `rush_xfp`, `pass_xfp`) so injury redistribution can move receiving
-value with targets and rushing value with carries.
+It is split three ways (`rec_xfp`, `rush_xfp`, `pass_xfp`) so injury redistribution can move rushing value
+with
+carries.
 
-**The tokens are context, not proven edges.** The planning session found that public "regression" and
-"usage jump" signals do NOT beat TFFB's projection (corr(xFP - actual over L3, actual - TFFB) = -.015;
-usage jump -.095): TFFB already prices them in. They are shown, labelled "context, not proven to beat
-projections; tracked in Model Check", and `results_analysis`/Model Check keep score on them.
+**The tokens are context, not proven edges, and their definitions are the research pack's** (R3, 12 seasons,
+thresholds fit on 2014-2021 and tested on 2022-2025; read from `models/research/signal_thresholds.json` at run
+time, see `research_constants.py`): `BUY↑` was dropped (wrong-signed out of sample); `FADE↓` survives for TEs
+only; `USAGE↑` / `USAGE↓` survive for RB carry share only. They are shown labelled "context, not proven to
+beat
+projections; tracked in Model Check", and Model Check keeps score on them.
 
-Windows are the player's last `XFP_WINDOW_GAMES` games PLAYED strictly BEFORE the week in question
-(`before_week`): a missed game is never a zero, and nothing from the week being predicted can reach
-its own signal.
+Windows are the player's last `XFP_WINDOW_GAMES` games PLAYED strictly BEFORE the slate (`before`, a
+(season, week) pair), continuing across the season boundary as the research's windows do: a missed game is
+never
+a zero, and nothing from the week being predicted can reach its own signal.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ import pandas as pd
 
 from dfs.model.history import XFP_TWO_POINT_POINTS, XFP_WEIGHTS
 from dfs.player_join import normalize_position, normalize_team
+from dfs.research_constants import signal_thresholds
 
 SKILL_POSITIONS = {"QB", "RB", "WR", "TE"}
 XFP_WINDOW_GAMES = 3
@@ -47,26 +52,14 @@ XFP_WINDOW_GAMES = 3
 # can move receiving value with targets and rushing value with carries.
 XFP_TWO_POINT = XFP_TWO_POINT_POINTS
 
-# BUY / FADE: his last-3 DK points per game against his last-3 xFP per game. A gap of at least
-# `XFP_GAP_POINTS` points OR `XFP_GAP_PCT` of xFP/G counts (Sam, 2026-10-07: "either one"). The player's
-# xFP/G must also be in the top half of his position (`XFP_TOP_HALF_PCT`, over the rosterable pool).
-XFP_GAP_POINTS = 3.0
-XFP_GAP_PCT = 0.25
+# FADE / USAGE thresholds are NOT constants in this file: `research_constants.signal_thresholds()` reads them
+# from `models/research/signal_thresholds.json` (FADE: last-3 DK/G at least `fade_gap_points` above last-3
+# xFP/G, TE only; USAGE: RB carry-share jump of the last 2 games against the 6 before, at least +`usage_up`
+# or at most -`usage_down`, needing all 8 prior games). The player's xFP/G must also be in the top half of
+# his position (the measured FADE version; Sam, 2026-10-08), over the rosterable pool.
 XFP_TOP_HALF_PCT = 0.5
-# FADE needs the mirror gap AND at least this many TDs above ffopportunity's expected TDs over the same
-# games (Sam, 2026-10-07: "extra requirement").
-FADE_TD_EXCESS = 1.5
+_EPS = 1e-9  # a gap of exactly the threshold fires despite float error (0.3 - 0.2 is 0.0999...)
 
-# USAGE: the last `USAGE_RECENT_GAMES` games against every earlier game this season. At least
-# `USAGE_MIN_EARLIER_GAMES` earlier games are required (Sam, 2026-10-07: "2 recent + 2 earlier"), and `n`
-# (the earlier-game count) is shown. A jump is the recent average minus the earlier average.
-USAGE_RECENT_GAMES = 2
-USAGE_MIN_EARLIER_GAMES = 2
-USAGE_JUMP_TGT_SHARE = 0.06
-USAGE_JUMP_RUSH_SHARE = 0.12
-USAGE_JUMP_RZ_PER_GAME = 1.0
-
-TOKEN_BUY = "BUY↑"
 TOKEN_FADE = "FADE↓"
 TOKEN_USAGE_UP = "USAGE↑"
 TOKEN_USAGE_DOWN = "USAGE↓"
@@ -187,46 +180,79 @@ def player_weeks(ffo: pd.DataFrame, *, season: int | None = None) -> pd.DataFram
     return out[PLAYER_WEEK_COLUMNS].reset_index(drop=True)
 
 
-def attach_actual_points(weeks: pd.DataFrame, offense_actual: pd.DataFrame) -> pd.DataFrame:
-    """Add `dk_actual` (the real DK points that game) from `results_actual.score_offense_actual`'s output,
-    joined on gsis id and week. Rows with no stat line stay NaN."""
+def attach_actual_points(weeks: pd.DataFrame, offense_actual: pd.DataFrame, season: int) -> pd.DataFrame:
+    """Add `dk_actual` (the real DK points that game) for the rows of `weeks` in `season` from
+    `results_actual.score_offense_actual`'s output (that season's), joined on gsis id and week. Rows of other
+    seasons keep whatever `dk_actual` they had (NaN if none); rows with no stat line stay NaN."""
     actual = offense_actual[["player_id", "week", "dk_actual"]].rename(columns={"player_id": "GsisId"})
     actual = actual.drop_duplicates(subset=["GsisId", "week"], keep="last")
-    return weeks.merge(actual, on=["GsisId", "week"], how="left")
+    mine = weeks[pd.to_numeric(weeks["season"], errors="coerce") == season].drop(
+        columns="dk_actual", errors="ignore"
+    )
+    rest = weeks[pd.to_numeric(weeks["season"], errors="coerce") != season]
+    joined = mine.merge(actual, on=["GsisId", "week"], how="left")
+    return pd.concat([rest, joined], ignore_index=True) if not rest.empty else joined
 
 
-def recent_games(weeks: pd.DataFrame, *, before_week: int, window: int = XFP_WINDOW_GAMES) -> pd.DataFrame:
-    """Each player's last `window` games played strictly before `before_week` (one row per game)."""
-    past = weeks[pd.to_numeric(weeks["week"], errors="coerce") < before_week]
-    past = past.sort_values(["GsisId", "week"], ascending=[True, False])
-    return past.groupby("GsisId", sort=False).head(window)
+def game_key(season, week):  # noqa: ANN001, ANN201 - Series or scalar
+    """`season * 100 + week`: games sort chronologically across the season boundary (weeks never pass 22)."""
+    return pd.to_numeric(season) * 100 + pd.to_numeric(week)
 
 
-def xfp_windows(weeks: pd.DataFrame, *, before_week: int, window: int = XFP_WINDOW_GAMES) -> pd.DataFrame:
-    """Per player (indexed by `GsisId`): `Games`, `xFP/G`, `DkG` (actual DK points per game), `TdExcess`
-    (actual minus expected TDs over those games), plus the volume per game that redistribution needs
-    (`tgt_g`, `car_g`, `rec_xfp_g`, `rush_xfp_g`). Only games before `before_week`."""
-    recent = recent_games(weeks, before_week=before_week, window=window)
+def recent_games(
+    weeks: pd.DataFrame, *, before: tuple[int, int], window: int = XFP_WINDOW_GAMES
+) -> pd.DataFrame:
+    """Each player's last `window` games played strictly before `before` = (season, week), across seasons
+    (one row per game, newest first)."""
+    weeks = weeks.reset_index(drop=True)  # callers may concatenate seasons without renumbering
+    key = game_key(weeks["season"], weeks["week"])
+    past = weeks[key < game_key(*before)].assign(_key=key)
+    past = past.sort_values(["GsisId", "_key"], ascending=[True, False])
+    return past.groupby("GsisId", sort=False).head(window).drop(columns="_key")
+
+
+def xfp_windows(
+    weeks: pd.DataFrame, *, before: tuple[int, int], window: int = XFP_WINDOW_GAMES
+) -> pd.DataFrame:
+    """Per player (indexed by `GsisId`): `Games`, `xFP/G`, `DkG` (actual DK points per game), plus the volume
+    per game that redistribution needs (`tgt_g`, `car_g`, `rec_xfp_g`, `rush_xfp_g`), his `tgt_share` /
+    `car_share` of the team's volume over the window, and `LastKey` (the `game_key` of his latest game). Only
+    games before `before`, across seasons."""
+    recent = recent_games(weeks, before=before, window=window)
+    columns = [
+        "Games",
+        "xFP/G",
+        "DkG",
+        "tgt_g",
+        "car_g",
+        "rec_xfp_g",
+        "rush_xfp_g",
+        "tgt_share",
+        "car_share",
+        "LastKey",
+    ]
     if recent.empty:
-        return pd.DataFrame(
-            columns=["Games", "xFP/G", "DkG", "TdExcess", "tgt_g", "car_g", "rec_xfp_g", "rush_xfp_g"]
-        )
+        return pd.DataFrame(columns=columns)
     if "dk_actual" not in recent.columns:
         recent = recent.assign(dk_actual=np.nan)
+    recent = recent.reset_index(drop=True)
+    recent = recent.assign(_key=game_key(recent["season"], recent["week"]))
     grouped = recent.groupby("GsisId")
-    out = pd.DataFrame(
+    return pd.DataFrame(
         {
             "Games": grouped["week"].count(),
             "xFP/G": grouped["xfp"].mean(),
             "DkG": grouped["dk_actual"].mean(),
-            "TdExcess": grouped["td"].sum() - grouped["td_exp"].sum(),
             "tgt_g": grouped["targets"].mean(),
             "car_g": grouped["carries"].mean(),
             "rec_xfp_g": grouped["rec_xfp"].mean(),
             "rush_xfp_g": grouped["rush_xfp"].mean(),
+            # share of his team's targets / carries over the window (sum over sum), the research's "regular"
+            "tgt_share": grouped["targets"].sum() / grouped["team_targets"].sum().replace(0, np.nan),
+            "car_share": grouped["carries"].sum() / grouped["team_carries"].sum().replace(0, np.nan),
+            "LastKey": grouped["_key"].max(),
         }
     )
-    return out
 
 
 def position_percentile(
@@ -246,83 +272,58 @@ def position_percentile(
     return out
 
 
-def buy_fade_tokens(windows: pd.DataFrame, top_half: pd.Series) -> pd.Series:
-    """`BUY↑` / `FADE↓` / "" per player, indexed like `windows`. `top_half` is True where xFP/G is in the
-    top half of the position.
-
-    BUY: actual DK/G at least `XFP_GAP_POINTS` points OR `XFP_GAP_PCT` BELOW xFP/G.
-    FADE: the mirror (ABOVE), AND TDs at least `FADE_TD_EXCESS` above expected over the same games.
-    Both need a real window (`Games >= 1`) and xFP/G in the top half of the position."""
-    xfp = windows["xFP/G"]
-    actual = windows["DkG"]
-    gap = xfp - actual
-    positive = xfp.where(xfp > 0)
-    below = ((gap >= XFP_GAP_POINTS) | (gap >= XFP_GAP_PCT * positive)) & actual.notna()
-    above = ((-gap >= XFP_GAP_POINTS) | (-gap >= XFP_GAP_PCT * positive)) & actual.notna()
-    eligible = top_half.reindex(windows.index).fillna(False).astype(bool) & (windows["Games"] >= 1)
-    fade = above & (windows["TdExcess"] >= FADE_TD_EXCESS)
+def fade_tokens(windows: pd.DataFrame, top_half: pd.Series, position: pd.Series) -> pd.Series:
+    """`FADE↓` / "" per player, indexed like `windows`. TE only (the positions whose verdict in
+    `signal_thresholds.json` is "keep"): last-3 DK/G at least `fade_gap_points` above last-3 xFP/G, with
+    xFP/G in the top half of the position, over a full `XFP_WINDOW_GAMES` window. No touchdown-excess
+    condition (it added nothing). `top_half` and `position` are indexed like `windows`."""
+    thresholds = signal_thresholds()
+    above = (windows["DkG"] - windows["xFP/G"]) >= thresholds.fade_gap_points - _EPS
+    allowed = position.reindex(windows.index).isin(thresholds.fade_positions)
+    eligible = top_half.reindex(windows.index).fillna(False).astype(bool) & (
+        windows["Games"] >= XFP_WINDOW_GAMES
+    )
     out = pd.Series("", index=windows.index, dtype=object)
-    out[below & eligible] = TOKEN_BUY
-    out[fade & eligible] = TOKEN_FADE
+    out[above & allowed & eligible] = TOKEN_FADE
     return out
 
 
-def usage_jumps(
-    weeks: pd.DataFrame,
-    rz_by_week: pd.DataFrame | None,
-    *,
-    before_week: int,
-    recent: int = USAGE_RECENT_GAMES,
-    min_earlier: int = USAGE_MIN_EARLIER_GAMES,
-) -> pd.DataFrame:
-    """Per player (indexed by `GsisId`): the last-`recent`-games average of target share, carry share and
-    red-zone opportunities per game, against his earlier games THIS season (`before_week`), with `n` the
-    earlier-game count. A metric a player has no volume for in either window is NaN.
-
-    `weeks` is `player_weeks` for one season (shares come from the team totals riding on each row);
-    `rz_by_week` is `[GsisId, week, rz]` (red-zone targets plus carries) or None. Returns the rows with at
-    least `min_earlier` earlier games and `recent` recent games; `token` is `USAGE↑`, `USAGE↓` or ""."""
-    past = weeks[pd.to_numeric(weeks["week"], errors="coerce") < before_week].copy()
+def usage_jumps(weeks: pd.DataFrame, *, before: tuple[int, int]) -> pd.DataFrame:
+    """RB carry-share jumps, per player (indexed by `GsisId`): the mean carry share of his last
+    `recent_games` games minus the mean of the `earlier_games` games before them (the research's 2 and 6),
+    across seasons, over games strictly before `before`. A carry share is his carries over his team's carries
+    that game. A jump needs BOTH windows full (8 prior games). `token` is `USAGE↑` (jump at least
+    +`usage_up`), `USAGE↓` (at most -`usage_down`) or ""; only positions whose verdict is "keep" (RB) are
+    returned.
+    `n` is the number of prior games used (always `prior_games_needed`)."""
+    th = signal_thresholds()
+    empty = pd.DataFrame(columns=["n", "token", "jump", "recent", "earlier"]).rename_axis("GsisId")
+    weeks = weeks.reset_index(drop=True)
+    key = game_key(weeks["season"], weeks["week"])
+    past = weeks[(key < game_key(*before)) & weeks["Position"].isin(th.usage_positions)].assign(_key=key)
     if past.empty:
-        return pd.DataFrame(columns=["n", "token", "d_tgt", "d_rush", "d_rz"]).rename_axis("GsisId")
-    past["tgt_share"] = past["targets"] / past["team_targets"].where(past["team_targets"] > 0)
-    past["rush_share"] = past["carries"] / past["team_carries"].where(past["team_carries"] > 0)
-    if rz_by_week is not None and not rz_by_week.empty:
-        past = past.merge(rz_by_week[["GsisId", "week", "rz"]], on=["GsisId", "week"], how="left")
-        past["rz"] = past["rz"].fillna(0.0)
-    else:
-        past["rz"] = np.nan
+        return empty
+    past = past.assign(share=past["carries"] / past["team_carries"].where(past["team_carries"] > 0))
     rows = []
-    for gsis, games in past.sort_values("week").groupby("GsisId"):
-        if len(games) < recent + min_earlier:
+    for gsis, games in past.sort_values("_key").groupby("GsisId"):
+        if len(games) < th.prior_games_needed:
             continue
-        last, earlier = games.iloc[-recent:], games.iloc[:-recent]
+        last8 = games.iloc[-th.prior_games_needed :]
+        earlier, recent = last8.iloc[: th.earlier_games], last8.iloc[th.earlier_games :]
         rows.append(
             {
                 "GsisId": gsis,
-                "n": len(earlier),
-                "d_tgt": last["tgt_share"].mean() - earlier["tgt_share"].mean(),
-                "d_rush": last["rush_share"].mean() - earlier["rush_share"].mean(),
-                "d_rz": last["rz"].mean() - earlier["rz"].mean(),
+                "n": len(last8),
+                "recent": recent["share"].mean(),
+                "earlier": earlier["share"].mean(),
             }
         )
     if not rows:
-        return pd.DataFrame(columns=["n", "token", "d_tgt", "d_rush", "d_rz"]).rename_axis("GsisId")
+        return empty
     out = pd.DataFrame(rows).set_index("GsisId")
-    up = (
-        (out["d_tgt"] >= USAGE_JUMP_TGT_SHARE)
-        | (out["d_rush"] >= USAGE_JUMP_RUSH_SHARE)
-        | (out["d_rz"] >= USAGE_JUMP_RZ_PER_GAME)
-    )
-    down = (
-        (out["d_tgt"] <= -USAGE_JUMP_TGT_SHARE)
-        | (out["d_rush"] <= -USAGE_JUMP_RUSH_SHARE)
-        | (out["d_rz"] <= -USAGE_JUMP_RZ_PER_GAME)
-    )
+    out["jump"] = out["recent"] - out["earlier"]
     token = pd.Series("", index=out.index, dtype=object)
-    token[up & ~down] = TOKEN_USAGE_UP
-    token[down & ~up] = TOKEN_USAGE_DOWN
-    # A player whose metrics jumped in opposite directions (targets up, carries down) gets no token: a
-    # mixed signal is not a signal.
+    token[out["jump"] >= th.usage_up - _EPS] = TOKEN_USAGE_UP
+    token[out["jump"] <= -th.usage_down + _EPS] = TOKEN_USAGE_DOWN
     out["token"] = token
     return out

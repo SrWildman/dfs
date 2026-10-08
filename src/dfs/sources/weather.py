@@ -37,7 +37,7 @@ from dfs.sources.base import Source, SyncContext
 log = get_logger("sources.weather")
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-WIND_FLAG_THRESHOLD_MPH = 20.0
+WIND_FLAG_THRESHOLD_MPH = 15.0  # was 20; docs/RESEARCH.md R4 (mirrored in derived.py)
 
 WEATHER_COLUMNS = ["GameId", "Away", "Home", "Stadium", "Temp", "Wind", "Gust", "Precip", "Flag"]
 

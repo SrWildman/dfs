@@ -663,13 +663,15 @@ from the tables `edge_finder.enrich` saves under `data/current/edge_finder/`; wr
 typed. A template carries only the empty state (`dfs setup build-views` creates it once and never overwrites a synced one). Fixed
 columns A..N: Name, Pos, Team, Salary, six section-specific columns, `Pool` (EdgeRaw's own tick for that name, a formula), `↗` (a link
 to his EdgeRaw row), `Games` (games in his window; **rows under 3 are muted**), `Notes`. Sections, top to bottom: a status line (stats
-through week, injury report week, depth chart time, projection snapshot, "CalPts trained on Weeks 1-N", "final `dfs sync --live` after
+through week, injury report week, the injury report's source / rows / how many carry a final status / fetch time, depth chart time, projection snapshot, "CalPts trained on Weeks 1-N", "final `dfs sync --live` after
 inactives ~90 min before kickoff"); **Cash core** per position (top 5 by `Hit3x%` among players with `CalPts` at least the position
 median, with `Bust%`); **GPP upside** (top 5 by `Boom%`, with `CeilM` and `Own%`, a star when `Boom%` is in the top quartile and `Own%`
 in the bottom half, once ownership publishes); **Projection disagreements** (largest CalPts - ProjPts per position, both directions,
 with the measured reason: "TFFB runs -3.1 on RBs under $4.5k (n=67)"; the field mostly uses raw projections); **Injury beneficiaries**
-(confirmed out first, questionable muted, method, "Priced in?"); **Matchups by position** (top 8 and bottom 4 with reasons and each
-team's top 2 players); **Context signals** (`BUY↑ FADE↓ USAGE↑ USAGE↓`, muted, unproven). A section is capped, with "+N more" in its
+(CARRIES only: confirmed out first, questionable muted, method, "Priced in?", which is blank when it cannot be told; then **Absent regulars**,
+every confirmed absence of a back/receiver/tight end as muted context with his role, what he vacated, games missed, the with-or-without split and the
+historical "no single teammate gains much" line; no points are moved for targets); **Matchups (context)** (top 8 and bottom 4 with reasons and each
+team's top 2 players; feeds nothing); **Context signals** (`FADE↓` TE only, `USAGE↑ USAGE↓` RB carry share only, muted, unproven). A section is capped, with "+N more" in its
 heading. Every conditional format is relative to its own row, so colours and muting survive a sort or filter; no basic filter is set.
 Definitions: `docs/CALCULATIONS.md` ("Edge Finder"). Saved filter views on EdgeRaw: the original four plus **Cash** (Avail blank,
 `Hit3x%` not blank, sorted `Hit3x%` high to low) and **GPP** (Avail blank, `Boom%` not blank, sorted `Boom%` high to low); a filter view
@@ -879,10 +881,10 @@ note, so a new column cannot ship unexplained.
 
 Season-level, read-only, **rebuilt from `data/results/` every time `dfs results update` runs** (also at the end of
 `dfs week close`, which never fails over it). Nothing is typed. Ten blocks, top to bottom: a status line (weeks
-scored, rosterable-pool players scored / did not play / not found), the **Projection Race** (2026-10-07: TFFB, AggPts, UM and CalPts, with and without UM, judged on weeks they never trained on; by position plus a per-week trend -- the table Sam uses to choose a default projection), **Reliability** (predicted decile against realized for `Hit3x%`, `Boom%` and `Bust%`, n shown, a decile more than 8 points off with n >= 30 flagged), **Ceiling** (how often a player beat his
+scored, rosterable-pool players scored / did not play / not found), the **Projection Race** (2026-10-07: TFFB, AggPts and CalPts on everyone, then with UM as its own row on the players UM rates, judged on weeks they never trained on; by position plus a per-week trend -- the table Sam uses to choose a default projection), **Reliability** (predicted decile against realized for `Hit3x%`, `Boom%` and `Bust%`, n shown, a decile more than 8 points off with n >= 30 flagged), **Ceiling** (how often a player beat his
 published `Ceiling`, with its 90% interval and implied quantile -- the headline), **Projection accuracy** (bias, MAE,
 calibration slope, R squared, Spearman, calibration buckets), **ValAdj** quintiles, **Sources compared** (labelled
-with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, **Flags**, and **Signals** (`BUY↑`, `FADE↓`, `USAGE↑`, `USAGE↓`, `INJ+` confirmed and questionable, matchup top 8 against bottom 4: n, mean actual minus ProjPts and minus CalPts, hit rate). Every
+with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, **Flags**, and **Signals** (`FADE↓`, `USAGE↑`, `USAGE↓`, `INJ+` confirmed and questionable, matchup top 8 against bottom 4, then an `Unflagged QB/RB/WR/TE` baseline row per position: n, mean actual minus ProjPts and minus CalPts, hit rate; a baseline has no direction, so no hit rate). Every
 table shows n; a row with n < 30 is "thin" and drawn in muted italic. Sits after Season and Results in the tab strip
 (`sheet_style.WEEK_ORDER`: Season, Results, Model Check); built by `sheet_model_check.build_layout` / `write_model_check`. The definitions behind
 every number are in `docs/CALCULATIONS.md`'s "The results loop and `Model Check`". Every metric header carries a

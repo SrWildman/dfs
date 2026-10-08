@@ -26,7 +26,6 @@ from dfs.results_analysis import is_thin, usable
 log = get_logger("results_signals")
 
 SIGNAL_GROUPS = [
-    ("BUY↑", "up"),
     ("FADE↓", "down"),
     ("USAGE↑", "up"),
     ("USAGE↓", "down"),
@@ -35,6 +34,8 @@ SIGNAL_GROUPS = [
     ("Matchup top 8", "up"),
     ("Matchup bottom 4", "down"),
 ]
+BASELINE_POSITIONS = ("QB", "RB", "WR", "TE")
+BASELINE_PREFIX = "Unflagged "  # "Unflagged RB": the rosterable pool at that position in no signal group
 SIGNAL_COLUMNS = ["Signal", "n", "VsProj", "VsCal", "HitProj", "HitCal", "Thin"]
 
 
@@ -137,7 +138,6 @@ def evaluation_frame(scored: pd.DataFrame, season: int) -> pd.DataFrame:
         keep = [
             "Id",
             "CalPts",
-            "UmPts",
             "Hit3x%",
             "Boom%",
             "Bust%",
@@ -175,14 +175,14 @@ def _tokens(edge: pd.Series) -> pd.Series:
 
 
 def signal_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
-    """Which rows belong to each signal group (`SIGNAL_GROUPS`)."""
+    """Which rows belong to each signal group (`SIGNAL_GROUPS`), then one UNFLAGGED BASELINE group per
+    position: the rows at that position that are in no signal group at all."""
     has = _tokens(frame["Edge"])
 
     def token(t: str) -> pd.Series:
         return has.map(lambda parts, t=t: t in parts)
 
-    return {
-        "BUY↑": token("BUY↑"),
+    groups = {
         "FADE↓": token("FADE↓"),
         "USAGE↑": token("USAGE↑"),
         "USAGE↓": token("USAGE↓"),
@@ -191,12 +191,21 @@ def signal_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
         "Matchup top 8": (frame["MatchupGroup"] == "top") & frame["MatchupTop"],
         "Matchup bottom 4": (frame["MatchupGroup"] == "bottom") & frame["MatchupTop"],
     }
+    flagged = pd.concat(groups.values(), axis=1).any(axis=1) | (has.map(len) > 0)
+    baselines = {
+        f"{BASELINE_PREFIX}{pos}": (frame["Position"] == pos) & ~flagged for pos in BASELINE_POSITIONS
+    }
+    return {**groups, **baselines}
 
 
 def signal_report(frame: pd.DataFrame) -> pd.DataFrame:
     """Per signal group: n, mean (actual - ProjPts), mean (actual - CalPts), and the hit rate against each
     (share on the right side of the projection: above it for an "up" signal, below it for a "down" one).
-    A group with no rows is listed with n = 0, never dropped, so the reader sees it has not fired."""
+    A group with no rows is listed with n = 0, never dropped, so the reader sees it has not fired.
+
+    After the signals come one UNFLAGGED BASELINE row per position (the pool at that position in no signal
+    group at all): its mean residual is what "no signal" looks like, so each signal reads as flagged against
+    unflagged. A baseline has no direction, so its hit rates are blank."""
     if frame is None or frame.empty:
         return pd.DataFrame(columns=SIGNAL_COLUMNS)
     masks = signal_masks(frame)
@@ -204,7 +213,8 @@ def signal_report(frame: pd.DataFrame) -> pd.DataFrame:
     cal = pd.to_numeric(frame["CalPts"], errors="coerce")
     actual = pd.to_numeric(frame["DkActual"], errors="coerce")
     rows = []
-    for name, direction in SIGNAL_GROUPS:
+    baseline_names = [f"{BASELINE_PREFIX}{pos}" for pos in BASELINE_POSITIONS]
+    for name, direction in [*SIGNAL_GROUPS, *((b, None) for b in baseline_names)]:
         mask = masks[name]
         n = int(mask.sum())
         if n == 0:
@@ -223,15 +233,16 @@ def signal_report(frame: pd.DataFrame) -> pd.DataFrame:
         vs_proj = (actual - proj)[mask]
         vs_cal = (actual - cal)[mask]
         sign = 1.0 if direction == "up" else -1.0
+        directed = direction is not None
         rows.append(
             {
                 "Signal": name,
                 "n": n,
                 "VsProj": round(float(vs_proj.mean()), 2),
                 "VsCal": round(float(vs_cal.dropna().mean()), 2) if vs_cal.notna().any() else np.nan,
-                "HitProj": round(float((sign * vs_proj > 0).mean()), 3),
+                "HitProj": round(float((sign * vs_proj > 0).mean()), 3) if directed else np.nan,
                 "HitCal": round(float((sign * vs_cal.dropna() > 0).mean()), 3)
-                if vs_cal.notna().any()
+                if directed and vs_cal.notna().any()
                 else np.nan,
                 "Thin": is_thin(n),
             }

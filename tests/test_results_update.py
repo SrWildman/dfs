@@ -137,7 +137,7 @@ def test_the_signals_backfill_never_fails_a_results_update(monkeypatch, tmp_path
     monkeypatch.setattr(results_loop, "score_week", lambda week, season, **kw: _fake_week(week))
     monkeypatch.setattr(results_update, "load_projection_snapshots", lambda: [])
     fetchers = signals_data.Fetchers(
-        ffo=gone, injuries=gone, depth=gone, stats_player=gone, stats_team=gone, schedule=gone, pbp_rz=gone
+        ffo=gone, injuries=gone, depth=gone, stats_player=gone, stats_team=gone, schedule=gone
     )
     report = update_results(
         _Cfg(),

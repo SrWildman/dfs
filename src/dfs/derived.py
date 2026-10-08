@@ -198,7 +198,9 @@ OUT_STATUSES = frozenset({"OUT", "IR"})
 # than imported so derived.py (pure, source-agnostic logic) never depends
 # on a specific source module -- sources depend on derived.py, not the
 # other way around.
-WIND_FLAG_THRESHOLD_MPH = 20.0
+# 15 mph, down from 20 (2026-10-08): the research (docs/RESEARCH.md R4) found QBs lose about a point from
+# 10 mph, flat to 20, and the 20 mph flag fired on 2.5% of outdoor QB games against 11% at 15.
+WIND_FLAG_THRESHOLD_MPH = 15.0
 
 # Phase 6, Part 3 (2026-09-22): the Board's "Slate shape" section flags a
 # game as a probable shootout by its Vegas total. 48 is a standard DFS

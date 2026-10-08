@@ -1185,6 +1185,21 @@ def test_wind_joined_from_weather_by_game_and_flagged_over_threshold():
     assert row["Flags"] == "WIND"
 
 
+def test_the_wind_flag_fires_at_fifteen_mph_not_twenty():
+    def flags(wind):
+        proj = _projections(
+            [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]
+        )
+        games = _games([{"GameId": "g1", "Away": "DET", "Home": "NO"}])
+        weather = pd.DataFrame([{"GameId": "g1", "Wind": wind}])
+        return build_edge_frame(proj, _salaries([{"ID": "1"}]), games=games, weather=weather).frame.iloc[0][
+            "Flags"
+        ]
+
+    assert flags(15.0) == "WIND" and flags(17.0) == "WIND"  # the old 20 mph line would have missed these
+    assert flags(14.9) == ""
+
+
 def test_out_and_wind_flags_both_shown_out_first():
     proj = _projections(
         [{"Id": "1", "Name": "P", "Team": "DET", "Position": "RB", "Ceiling": 1.0, "ProjOwn": 0}]

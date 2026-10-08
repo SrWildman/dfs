@@ -90,10 +90,10 @@ def _offline(monkeypatch):
 def test_attach_fills_by_id_and_leaves_unknown_players_blank_never_zero():
     frame = _edge_frame()
     extras = pd.DataFrame(
-        {"CalPts": [10.0, 12.0], "Edge": ["INJ+", "BUY↑"], "Hit3x%": [30.0, 40.0]}, index=[2, 4]
+        {"CalPts": [10.0, 12.0], "Edge": ["INJ+", "FADE↓"], "Hit3x%": [30.0, 40.0]}, index=[2, 4]
     )
     out = derived.attach_edge_finder_columns(frame, extras)
-    assert out.set_index("Id").loc[2, "CalPts"] == 10.0 and out.set_index("Id").loc[4, "Edge"] == "BUY↑"
+    assert out.set_index("Id").loc[2, "CalPts"] == 10.0 and out.set_index("Id").loc[4, "Edge"] == "FADE↓"
     assert np.isnan(out.set_index("Id").loc[1, "CalPts"])  # no row in extras: blank
     assert out.set_index("Id").loc[1, "Edge"] == ""  # a text column's blank is "", not NaN
     assert list(out.columns) == derived.EDGE_COLUMNS
@@ -120,7 +120,8 @@ def test_enrich_fills_calpts_probabilities_and_tokens_and_keeps_the_column_order
     by = out.set_index("Name")
     assert by["CalPts"].notna().all()  # CalPts exists for everyone with a projection
     assert by.loc["Wr Two", "Hit3x%"] > 0 and by.loc["Wr Two", "Floor"] < by.loc["Wr Two", "CeilM"]
-    assert by.loc["Wr Two", "Edge"] == "INJ+"  # Star is out per DraftKings; Wr Two is next up
+    # Star (a WR) is out per DraftKings, but target absences move no points: no INJ+ for the next man up
+    assert by.loc["Wr Two", "Edge"] == ""
     assert by.loc["Wr Two", "xFP/G"] == pytest.approx(6.0)
 
 
@@ -136,30 +137,20 @@ def test_any_failure_returns_the_frame_unchanged(monkeypatch):
     pd.testing.assert_frame_equal(out, frame)
 
 
-def test_a_live_sync_never_asks_the_model_package_to_download(monkeypatch):
-    seen = {}
+def test_the_edge_finder_no_longer_infers_um_so_neither_sync_runs_the_model_package(monkeypatch):
+    def forbidden(frame, **kw):
+        raise AssertionError("UM inference must not run in the Edge Finder: UM is not in CalPts")
 
-    def spy(frame, **kw):
-        seen.update(kw)
-        return pd.Series(np.nan, index=frame.index)
-
-    monkeypatch.setattr(probabilities, "um_projections", spy)
-    edge_finder.enrich(
-        _edge_frame(),
-        SyncContext(week=4, season=2026, live=True),
-        scored=_scored(),
-        data=_data(),
-        write=False,
-    )
-    assert seen["fetch"] is False
-    edge_finder.enrich(
-        _edge_frame(),
-        SyncContext(week=4, season=2026, live=False),
-        scored=_scored(),
-        data=_data(),
-        write=False,
-    )
-    assert seen["fetch"] is True
+    monkeypatch.setattr(probabilities, "um_projections", forbidden)
+    for live in (True, False):
+        out = edge_finder.enrich(
+            _edge_frame(),
+            SyncContext(week=4, season=2026, live=live),
+            scored=_scored(),
+            data=_data(),
+            write=False,
+        )
+        assert out["CalPts"].notna().all()
 
 
 def test_depth_cutoff_never_reads_a_chart_published_after_the_first_kickoff():

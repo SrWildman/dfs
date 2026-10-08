@@ -4,7 +4,7 @@ Source: `https://github.com/ffverse/ffopportunity/releases/download/latest-data/
 (about 330 KB, updated weekly). The current season AND last season are read (last season feeds the
 with-or-without injury history); `season` is a column. The actual DK points per game ride along as
 `dk_actual` (scored from nflverse's `stats_player` by the same code the results loop uses), so the
-BUY/FADE tokens can compare what happened with what the opportunity was worth.
+FADE token can compare what happened with what the opportunity was worth.
 
 Fail soft: any fetch or parse problem logs a warning and returns an EMPTY frame (columns only), so
 `xFP/G` and every token built on it go blank and the sync carries on. `uploads_to_sheet = False`: it
@@ -62,11 +62,10 @@ class FfopportunitySource(Source):
                     return empty_frame()
                 log.warning("ffopportunity: %s -- no last-season history for with-or-without", e)
                 continue
-            if season == ctx.season:
-                try:
-                    weeks = xfp.attach_actual_points(weeks, fetch_offense_actual(season))
-                except nf.ContextFetchError as e:
-                    log.warning("ffopportunity: %s -- actual DK points blank, BUY/FADE need them", e)
+            try:
+                weeks = xfp.attach_actual_points(weeks, fetch_offense_actual(season), season)
+            except nf.ContextFetchError as e:
+                log.warning("ffopportunity: %s -- actual DK points blank for %s, FADE needs them", e, season)
             frames.append(weeks)
         if not frames:
             return empty_frame()

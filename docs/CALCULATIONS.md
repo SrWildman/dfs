@@ -832,7 +832,7 @@ boolean check.
 | Priority | Flag | Condition |
 |---|---|---|
 | 1 | `OUT` | `Avail` is `OUT` or `IR` |
-| 2 | `WIND` | `Wind ≥ 20` mph |
+| 2 | `WIND` | `Wind ≥ 15` mph (was 20 until 2026-10-08: the research found QBs lose about a point from 10 mph and the 20 mph line fired on 2.5% of outdoor QB games, 15 on 11%) |
 | 3 | `IMPL↑` (was `LINE↑` until 2026-09-30) | `ImpliedMove ≥ +6.0` |
 | 3 | `IMPL↓` (was `LINE↓` until 2026-09-30) | `ImpliedMove ≤ −6.0` |
 | 4 | `LEVERAGE` | rosterable-pool member, in the top `LEVERAGE_FLAG_TOP_SHARE` (7%) of the pool by `Leverage` this week (blank `Leverage` while unpublished can never clear this) |
@@ -840,8 +840,8 @@ boolean check.
 | 6 | `TFFB↑` / `TFFB↓` (SPLIT) | rosterable-pool member with at least one of Sleeper/FantasyPros available, in the top `SPLIT_FLAG_TOP_SHARE` (7%) of the pool by `\|residual\|` (gap vs. this position's own trend line, not raw points) AND `\|residual\| ≥ SPLIT_MIN_RESIDUAL` -- see Part C's own section below |
 | — | *(blank)* | none of the above |
 
-`WIND_FLAG_THRESHOLD_MPH = 20.0` is a starting point, not empirically
-derived. `LINE_MOVE_FLAG_THRESHOLD = 6.0` **was** retuned (Phase 6, Part
+`WIND_FLAG_THRESHOLD_MPH = 15.0` is the research's measured line (docs/RESEARCH.md R4; it was a
+hand-set 20.0 before). `LINE_MOVE_FLAG_THRESHOLD = 6.0` **was** retuned (Phase 6, Part
 1.1, 2026-09-17) the same way `LEVERAGE_FLAG_THRESHOLD` below was: the old
 flat `1.0` fired on **95.7% of the real live Week 2 slate** (605 players
 with a real `ImpliedMove`) -- because `_flag_for_row` returns every
@@ -1198,8 +1198,8 @@ Wilson interval, and an empty answer says "not enough data yet"):
 ## Edge Finder: `CalPts`, outcome odds, context signals, matchups (2026-10-07)
 
 `docs/planning/PROMPT_EDGE_FINDER.md`. Everything here is computed locally from data the tool already holds plus
-three free files (ffopportunity, nflverse injuries, nflverse depth charts) and the UM model package
-(`docs/MODEL.md`). **None of it changes `ProjPts`, `ValAdj`, `Val`, the flags or any default sort**: `CalPts` is
+three free files (ffopportunity, nflverse injuries, nflverse depth charts) and, for the outcome odds, the model
+package's distribution tables (`docs/MODEL.md`). **None of it changes `ProjPts`, `ValAdj`, `Val`, the flags or any default sort**: `CalPts` is
 tracked in Model Check and Sam decides.
 
 ### Why: what the planning session found (Weeks 1-4, the rosterable pool)
@@ -1215,7 +1215,8 @@ tracked in Model Check and Sam decides.
 
 ### `CalPts` (`calibration.py`, pure)
 
-Per player, from whichever of TFFB `ProjPts`, Sleeper, FantasyPros and UM (`UmPts`) he has:
+Per player, from whichever of TFFB `ProjPts`, Sleeper and FantasyPros he has (`CAL_SOURCES`; UM was dropped from the
+blend on 2026-10-08):
 
 1. **Salary tiers** (`CAL_SALARY_TIERS`; a salary equal to an edge belongs to the higher tier): QB under $5.5k /
    5.5-6.5k / 6.5k+; RB and WR under $4.5k / 4.5-6k / 6-7.5k / 7.5k+; TE under $3.5k / 3.5-5k / 5k+; DST under
@@ -1238,74 +1239,74 @@ weeks **strictly before** the week being predicted (`calibration.training_rows` 
 position-week, weighted by n; bias is actual minus projected). Through Week 4, n = rosterable players with a real stat
 line:
 
-**Without UM (all rosterable players, weeks 2-4, each predicted by a fit on earlier weeks)**
+**All rosterable players, weeks 2-4, each predicted by a fit on earlier weeks** (CalPts is TFFB + Sleeper +
+FantasyPros; UM is no longer a source)
 
 | Position | Projection | n | rho | MAE | Bias |
 |---|---|---|---|---|---|
 | All | TFFB | 689 | 0.516 | 5.33 | -1.26 |
 | All | AggPts | 689 | 0.516 | 5.08 | -0.81 |
-| All | CalPts (no UM) | 689 | 0.517 | 4.99 | -0.54 |
+| All | CalPts | 689 | 0.517 | 4.99 | -0.54 |
 | QB | TFFB | 78 | 0.332 | 5.74 | -0.98 |
 | QB | AggPts | 78 | 0.318 | 5.81 | -0.96 |
-| QB | CalPts (no UM) | 78 | 0.316 | 5.84 | -1.05 |
+| QB | CalPts | 78 | 0.316 | 5.84 | -1.05 |
 | RB | TFFB | 182 | 0.646 | 5.23 | -2.35 |
 | RB | AggPts | 182 | 0.644 | 4.84 | -1.59 |
-| RB | CalPts (no UM) | 182 | 0.640 | 4.70 | -1.07 |
+| RB | CalPts | 182 | 0.640 | 4.70 | -1.07 |
 | WR | TFFB | 266 | 0.622 | 5.57 | -1.50 |
 | WR | AggPts | 266 | 0.623 | 5.22 | -0.83 |
-| WR | CalPts (no UM) | 266 | 0.626 | 5.07 | -0.44 |
+| WR | CalPts | 266 | 0.626 | 5.07 | -0.44 |
 | TE | TFFB | 87 | 0.307 | 5.83 | +0.79 |
 | TE | AggPts | 87 | 0.297 | 5.72 | +0.66 |
-| TE | CalPts (no UM) | 87 | 0.291 | 5.74 | +0.48 |
+| TE | CalPts | 87 | 0.291 | 5.74 | +0.48 |
 | DST | TFFB | 76 | 0.257 | 3.77 | -0.48 |
 | DST | AggPts | 76 | 0.288 | 3.68 | -0.36 |
-| DST | CalPts (no UM) | 76 | 0.307 | 3.62 | -0.28 |
+| DST | CalPts | 76 | 0.307 | 3.62 | -0.28 |
 
-**With UM (the players UM rates)**
+**The players UM rates** (UM is a race row beside them, not an ingredient):
 
 | Position | Projection | n | rho | MAE | Bias |
 |---|---|---|---|---|---|
 | All | TFFB | 580 | 0.442 | 5.51 | -1.07 |
 | All | AggPts | 580 | 0.443 | 5.36 | -0.74 |
 | All | UM | 580 | 0.374 | 5.38 | -0.20 |
-| All | CalPts (no UM) | 580 | 0.446 | 5.29 | -0.51 |
-| All | CalPts | 580 | 0.442 | 5.26 | -0.37 |
+| All | CalPts | 580 | 0.446 | 5.29 | -0.51 |
 | QB | TFFB | 74 | 0.288 | 5.82 | -0.99 |
 | QB | AggPts | 74 | 0.282 | 5.88 | -0.96 |
 | QB | UM | 74 | 0.187 | 6.10 | -0.07 |
-| QB | CalPts (no UM) | 74 | 0.277 | 5.88 | -1.02 |
-| QB | CalPts | 74 | 0.280 | 5.87 | -0.82 |
+| QB | CalPts | 74 | 0.277 | 5.88 | -1.02 |
 | RB | TFFB | 139 | 0.583 | 5.38 | -2.17 |
 | RB | AggPts | 139 | 0.593 | 5.16 | -1.63 |
 | RB | UM | 139 | 0.535 | 5.21 | -1.06 |
-| RB | CalPts (no UM) | 139 | 0.589 | 5.06 | -1.12 |
-| RB | CalPts | 139 | 0.573 | 5.09 | -1.00 |
+| RB | CalPts | 139 | 0.589 | 5.06 | -1.12 |
 | WR | TFFB | 216 | 0.535 | 5.91 | -1.31 |
 | WR | AggPts | 216 | 0.529 | 5.67 | -0.75 |
 | WR | UM | 216 | 0.484 | 5.50 | +0.17 |
-| WR | CalPts (no UM) | 216 | 0.535 | 5.56 | -0.41 |
-| WR | CalPts | 216 | 0.542 | 5.43 | -0.13 |
+| WR | CalPts | 216 | 0.535 | 5.56 | -0.41 |
 | TE | TFFB | 75 | 0.253 | 6.08 | +0.98 |
 | TE | AggPts | 75 | 0.230 | 6.03 | +0.74 |
 | TE | UM | 75 | 0.117 | 6.20 | +0.57 |
-| TE | CalPts (no UM) | 75 | 0.230 | 6.02 | +0.57 |
-| TE | CalPts | 75 | 0.220 | 6.07 | +0.52 |
+| TE | CalPts | 75 | 0.230 | 6.02 | +0.57 |
 | DST | TFFB | 76 | 0.257 | 3.77 | -0.48 |
 | DST | AggPts | 76 | 0.288 | 3.68 | -0.36 |
 | DST | UM | 76 | 0.201 | 3.85 | -0.58 |
-| DST | CalPts (no UM) | 76 | 0.307 | 3.62 | -0.28 |
-| DST | CalPts | 76 | 0.295 | 3.66 | -0.31 |
+| DST | CalPts | 76 | 0.307 | 3.62 | -0.28 |
 
+**Before / after removing UM from the blend** (PROMPT_EDGE_V3 Part 1, 2026-10-08; same walk-forward, all 689
+rosterable player-weeks): CalPts with UM had rho .515, MAE 4.96, bias -0.42; CalPts without UM has rho .517, MAE 4.99,
+bias -0.54. Per position (MAE before to after): QB 5.82 to 5.84, RB 4.72 to 4.70, WR 4.97 to 5.07, TE 5.78 to 5.74, DST
+3.66 to 3.62. The research's 12-season test found the same (MAE 5.29 to 5.26, rho .446 to .442 on UM-rated rows, i.e.
+UM adds nothing), so it is out of the blend and still tracked as its own Model Check row. No reliability
+recalibration yet (revisit around Week 8).
 
-*Read:* the correction closes most of TFFB's level bias (overall bias -1.26 to -0.54, MAE 5.33 to 4.99 without UM)
-and leaves ranking where it was (rho .516 to .517): exactly what the planning session predicted. It helps RB, WR and
-DST; it does not help QB or TE (small n, and TFFB's QB/TE bias is small). With UM on the players UM rates, the
-production `CalPts` is the best on MAE and bias, not on rho. These are three small weeks; Model Check's Projection
+*Read:* the correction closes most of TFFB's level bias (overall bias -1.26 to -0.54, MAE 5.33 to 4.99) and leaves
+ranking where it was (rho .516 to .517): exactly what the planning session predicted. It helps RB, WR and DST; it does
+not help QB or TE (small n, and TFFB's QB/TE bias is small). UM trails the others on rho and is not part of the blend. These are three small weeks; Model Check's Projection
 Race rebuilds this table every week.
 
 ### Outcome probabilities (`probabilities.py`; the engine is `docs/MODEL.md`)
 
-The model package's outcome-ratio tables are applied to **`CalPts`** (not UM): `Hit3x%` = P(actual >= 3 x
+The model package's outcome-ratio tables are applied to **`CalPts`**: `Hit3x%` = P(actual >= 3 x
 Salary/1000) (the 3x line behind the `Val >= 3` cash rule, as a probability), `Boom%` = P(>= 4x) (GPP upside),
 `Bust%` = P(< 2x) (cash risk), `Floor` = 20th percentile, `CeilM` = 85th percentile (the model's ceiling, beside
 TFFB's `Ceil`). Probabilities are stored 0-100. A player with no `CalPts` or no salary is blank, never 0.
@@ -1321,49 +1322,74 @@ lowest projection decile for QB and DST (realized beats predicted by about 6 poi
   Model Check's RELIABILITY section (predicted decile against realized, n shown) is the check, and it flags any decile
   more than `RELIABILITY_FLAG_POINTS` = 8 points off with n >= `RELIABILITY_MIN_N` = 30.
 
-### xFP and the `Edge` tokens (`xfp.py`, `signals.py`)
+### xFP and the `Edge` tokens (`xfp.py`, `signals.py`, `research_constants.py`)
 
 `xFP` is ffopportunity's expected components in DK scoring (`dfs.model.history.XFP_WEIGHTS`, imported, not copied;
-`tests/test_xfp.py` asserts equality). `xFP/G` is the player's last `XFP_WINDOW_GAMES` = 3 games PLAYED this
-season, before the slate's week. The tokens are **context, not proven to beat projections; tracked in Model Check**:
+`tests/test_xfp.py` asserts equality). `xFP/G` is the player's last `XFP_WINDOW_GAMES` = 3 games PLAYED before the
+slate's week, **continuing across the season boundary** (as the research's windows do). The tokens are **context, not
+proven to beat projections; tracked in Model Check**. Since PROMPT_EDGE_V3 (2026-10-08) their definitions and
+thresholds are the research pack's (`docs/RESEARCH.md` R3, 12 seasons, fit 2014-2021 and tested 2022-2025), **read at run
+time from `models/research/signal_thresholds.json`** by `research_constants.signal_thresholds()` (never typed into the
+code; re-running the research and committing the file changes them):
 
-| Token | Fires when | Constants (starting value) |
+| Token | Fires when | Notes |
 |---|---|---|
-| `BUY↑` | actual DK/G over the last 3 games is at least 3.0 points **or** 25% below xFP/G, and xFP/G is in the top half of his position (rosterable pool) | `XFP_GAP_POINTS` 3.0, `XFP_GAP_PCT` 0.25, `XFP_TOP_HALF_PCT` 0.5 |
-| `FADE↓` | the mirror (above), **and** TDs at least 1.5 above ffopportunity's expected TDs over the same games | `FADE_TD_EXCESS` 1.5 |
-| `USAGE↑` / `USAGE↓` | last 2 games against every earlier game this season: target share +/-0.06, carry share +/-0.12 or red-zone looks per game +/-1.0; at least 2 earlier games (n shown); a mixed signal (one up, one down) gets none | `USAGE_RECENT_GAMES` 2, `USAGE_MIN_EARLIER_GAMES` 2, `USAGE_JUMP_TGT_SHARE` 0.06, `USAGE_JUMP_RUSH_SHARE` 0.12, `USAGE_JUMP_RZ_PER_GAME` 1.0 |
-| `INJ+` | a confirmed-out teammate's volume goes to him: gained xFP/G at least `INJ_MIN_GAINED_XFP` (below) | `INJ_MIN_GAINED_XFP` 1.0 |
+| `BUY↑` | **removed** | Wrong-signed out of sample (code, chip, notes, docs, section and Model Check row all gone). |
+| `FADE↓` | **TE only**: last-3 DK/G is at least 2.0 points above last-3 xFP/G, with xFP/G in the top half of his position (rosterable pool) and a full 3-game window | No touchdown-excess condition. The top-half condition is the measured version (Sam, 2026-10-08). |
+| `USAGE↑` / `USAGE↓` | **RB carry share only**: the mean carry share of his last 2 games minus the mean of the 6 games before them is at least +10 points (`↑`) or at most -5 points (`↓`) | Needs all 8 prior games (across seasons); the target-share and red-zone jumps are dropped. A carry share is his carries over his team's carries that game. |
+| `INJ+` | a confirmed-out **back's carries** go to him: gained rushing xFP/G at least `INJ_MIN_GAINED_XFP` | Never fires from a target gain (below). |
 
-("Either one" for BUY, "extra requirement" for FADE's TD test, and "2 recent + 2 earlier" for USAGE were Sam's
-rulings, 2026-10-07.) `Edge` holds the tokens space-separated, **not** merged into `Flags`, so bold names and flag
-priority are unchanged. Sources: `ffopportunity` (this and last season), joined to DraftKings players by the same
-name/team/position join every source uses (`player_join`); join coverage is printed by the sync and in the sync's
-`data/current/edge_finder/status.json`.
+`Edge` holds the tokens space-separated, **not** merged into `Flags`, so bold names and flag priority are unchanged.
+Sources: `ffopportunity` (this and last season, each with real DK points from `stats_player`), joined to DraftKings
+players by the same name/team/position join every source uses (`player_join`); join coverage is printed by the sync
+and in `data/current/edge_finder/status.json`. Float-equal thresholds fire (`_EPS`): exactly +10 points is a jump.
 
-### Injury beneficiaries (`injury_beneficiaries.py`)
+### Injury beneficiaries (`injury_beneficiaries.py`), rebuilt on the measured table
+
+The hand-set "next man up gets 60%" rule is gone (`NEXT_UP_SHARE`, `SPILL_SHARE`, `RB_TARGET_TO_RB_SHARE` deleted). The
+research (`docs/RESEARCH.md` R1) found it wrong for targets (out of sample it predicted targets worse than doing nothing,
+MAE 3.39 against 2.41) and only roughly right for carries.
 
 - **Out** = DraftKings' `Avail` (`OUT`/`IR`, or `D` doubtful) when set, otherwise this week's nflverse report (`Out`,
   `Doubtful`). DraftKings wins on conflict. **Questionable** (`Q`, or the report's `Questionable`) goes in a separate,
-  muted list and is assumed to play. (The plan said "TFFB Avail"; the sheet's `Avail` is DraftKings' own status.)
-- **Vacated** = the out player's last 3 games played: targets, carries, receiving and rushing xFP per game.
-- **Redistribution, in order of preference.**
-  1. *With-or-without* when he missed at least `WITH_WITHOUT_MIN_GAMES` = 2 games with the same team (this or last
-     season) that a teammate played: each teammate's per-game change without him minus with him, clipped at 0 and
-     **scaled so the total never exceeds what he vacated** (opportunity is moved, not created). On Week 5's real data
-     the literal "at least 1 game, uncapped" version gave gains 3-10x the vacated volume (one missed game is noise), so
-     Sam moved it to 2 games plus the cap (2026-10-07).
-  2. *Depth chart* otherwise: the latest snapshot at or before the slate's first kickoff. The next `pos_rank` at his
-     position gets `NEXT_UP_SHARE` = 0.6 of what he vacated; the other 40% splits among same-position teammates by
-     current share, of which `SPILL_SHARE` = 25% spills to the other pass-catching group (WR to TE, TE to WR). RB
-     carries go to RBs only; RB targets split `RB_TARGET_TO_RB_SHARE` = 50% to RBs and the rest to WR+TE by target
-     share. Receiving xFP follows targets, rushing xFP follows carries. An empty bucket hands its weight to the others.
-     (A WR1 out sends 60% of his targets to the WR2: the plan's test.) A QB out is listed but not redistributed.
+  muted list and is assumed to play.
+- **Regulars only.** The research counted an absence only when the player had a prior-3-game target share of at least
+  0.15 or carry share of at least 0.30 (`research_constants.regular_thresholds`, parsed from the JSON).
+- **Carries (a back is out): the measured table.** The fractions of the vacated carries are loaded at run time from
+  `models/research/redistribution_constants.json` (cross-checked against `redistribution.csv`): RB1 out -> RB2 gets
+  47%, each further back 22%, **19% goes to nobody and stays unassigned**; RB2 out -> RB1 52%, each RB3+ 20%, 14%
+  unassigned. The shares are scaled down together **only** if they would sum above `1 - unassigned` (a deep
+  rotation). An RB3+ out has no cell (n=2) and is not redistributed. The gained carries are valued at the out back's
+  own rushing xFP per carry, which is what `INJ+` reads (at least 1.0 expected points a game).
+- **With-or-without** (Sam's ruling stands) **overrides the table for carries** when he missed at least
+  `WITH_WITHOUT_MIN_GAMES` = 2 games with the same team (this or last season) that a teammate played: each
+  teammate's per-game carry change without him minus with him, clipped at 0 and scaled so the total never exceeds
+  what he vacated.
+- **Targets (any position out): no redistribution.** A target absence never produces points and never fires `INJ+`.
+  The Edge Finder tab lists every confirmed absence of a regular as muted, labelled context (`Absent regulars`): his
+  role (WR1, TE1, RB1...), what he vacated, games missed, the teammates' with-or-without split when it exists
+  (display only for targets) and the historical line "no single teammate gains much: WR2 +13% of the vacated targets,
+  ~27% goes nowhere" (numbers from the JSON's `recommended` block; omitted when the study has no usable cell).
+- **A QB out** is listed but not redistributed.
 - **Priced in?** `yes` when TFFB's `ProjPts` for the beneficiary rose at least `PRICED_IN_SHARE` = 70% of the gained
   xFP between the last projection snapshot BEFORE the out designation appeared (DraftKings' own status change, seen
-  in `data/raw/draftkings/`) and now; `unknown` whenever that cannot be established (no earlier snapshot, or the
-  designation is only on the injury report).
+  in `data/raw/draftkings/`) and now. It is **blank** (it read "unknown" before) whenever that cannot be established.
+  On Week 5 that was every row: the DK snapshots start 2026-10-06 and every `OUT`/`IR`/`D` designation predates the
+  first one, so there is no snapshot from before it. It will fill in for designations made after a snapshot exists.
+- **The nflverse injury report and timing.** The Edge Finder tab's status line states the source (nflverse-data
+  `injuries` release), the rows it held for the slate's week, how many carried a final `report_status`, and when this
+  copy was fetched. Before Friday the Week's rows are practice reports only (statuses blank); outs then come from
+  DraftKings' `Avail`. That is a timing fact, not a fault.
 
-### Matchups by position (`matchups.py`)
+### Matchups (context) (`matchups.py`)
+
+**Context only.** The research (R2) found matchups add at most 0.04 points of MAE beyond the projection, so the Edge
+Finder tab titles the section "Matchups (context)" and **nothing from it flows into `CalPts`** (or any flag):
+`CalPts` is fitted from the TFFB / Sleeper / FantasyPros columns before any matchup is computed, `build_signals` only
+*attaches* `MatchupGroup`/`MatchupRank` to the output, and `tests/test_signals.py` pins both facts. The research's
+preferred lookbacks (L4 for QB/RB/TE, a season-plus-prior blend for WR, L8 for DST) are a window change in
+`matchups.py`, not a constant, and the variants differ by at most 0.025 MAE, so they are **not** adopted; the
+current "all games before the slate, blended with last season" rule stands.
 
 - **Adjusted points allowed**: for each defense and position (QB, RB, WR, TE) the DK points its opponents scored at
   the position minus what each of those offenses scored at the position in its OTHER games, averaged over the
@@ -1391,9 +1417,8 @@ a later week's games and a later depth chart to every input and assert nothing i
 
 `CAL_SHRINK_K` 40, `CAL_WEIGHT_K` 100, `CAL_DECIMALS` 1, `CAL_SALARY_TIERS` (above), `HIT_MULTIPLE` 3, `BOOM_MULTIPLE` 4,
 `BUST_MULTIPLE` 2, `PROB_QB_MIN_CALPTS` 10, `PROB_DST_LOW_CONFIDENCE_BELOW` 4, `PROB_DECIMALS` 1, `XFP_WINDOW_GAMES` 3,
-`XFP_GAP_POINTS` 3.0, `XFP_GAP_PCT` 0.25, `XFP_TOP_HALF_PCT` 0.5, `FADE_TD_EXCESS` 1.5, `USAGE_RECENT_GAMES` 2,
-`USAGE_MIN_EARLIER_GAMES` 2, `USAGE_JUMP_TGT_SHARE` 0.06, `USAGE_JUMP_RUSH_SHARE` 0.12, `USAGE_JUMP_RZ_PER_GAME` 1.0,
-`VACATED_WINDOW` 3, `NEXT_UP_SHARE` 0.6, `SPILL_SHARE` 0.25, `RB_TARGET_TO_RB_SHARE` 0.5, `PRICED_IN_SHARE` 0.7,
+`XFP_TOP_HALF_PCT` 0.5 (the FADE/USAGE thresholds, the regular definition and the carry fractions are NOT constants:
+they are read from `models/research/`), `PRICED_IN_SHARE` 0.7,
 `INJ_MIN_GAINED_XFP` 1.0, `WITH_WITHOUT_MIN_GAMES` 2, `MATCHUP_WEIGHTS` equal, `MATCHUP_TOP_N` 8, `MATCHUP_BOTTOM_N` 4,
 `MATCHUP_PLAYERS_PER_TEAM` 2, `MIN_SLATE_TEAMS` 3, `RELIABILITY_BINS` 10, `RELIABILITY_FLAG_POINTS` 8,
 `RELIABILITY_MIN_N` 30, `KEEP_DAYS` 10 (the depth-chart source), and the Edge Finder tab's `SECTION_TOP_N` 5,

@@ -3606,6 +3606,32 @@ what encodes it.
   and Signals sections (`sheet_model_check`). `tests/test_results_signals.py` pins the no-lookahead rule.
 - **Never edited**: `src/dfs/model/`, `models/`, `tests/model/`, `docs/MODEL.md`.
 
+## Edge Finder v3: the research applied (2026-10-08)
+
+`docs/planning/PROMPT_EDGE_V3.md`, committed in slices (one changelog row each, below). Measured constants are read at run
+time from `models/research/` by `src/dfs/research_constants.py`; **nothing in `src/dfs/research/`, `src/dfs/model/` or `src/dfs/sim/`
+was edited by the signal and injury slices.**
+
+- **Slice 1, Parts 1-3 (CalPts, injuries, signals).**
+  - `calibration.CAL_SOURCES` is TFFB / Sleeper / FantasyPros; `UmPts` stays a Model Check race row (`PROJECTIONS`,
+    `PROJECTIONS_WITH_UM`). `edge_finder.enrich` no longer runs UM inference (about 11.5 s less on a full sync) and the
+    signals table lost `UmPts` and `TdExcess`; the signals archives lost `UmPts` (scored files keep it for the race).
+  - `injury_beneficiaries.py` was rebuilt: carries from the measured table, targets as context only (`absences()`),
+    `PricedIn` blank when unknown, regulars by the research's share definition; `NEXT_UP_SHARE`, `SPILL_SHARE`,
+    `RB_TARGET_TO_RB_SHARE`, `depth_gains` and the `tgt_gain` beneficiary column are gone.
+  - `xfp.py`: `BUY↑` removed everywhere (token, chip, notes, section, Model Check row); `FADE↓` TE only
+    (`fade_tokens`); `USAGE` is RB carry share, 2 games against the 6 before, 8 prior games (`usage_jumps`); the
+    windows continue across the season boundary (`xfp_windows(before=(season, week))`). The play-by-play red-zone
+    download and `Fetchers.pbp_rz` were removed from `signals_data`.
+  - `WIND_FLAG_THRESHOLD_MPH` 20 -> 15 (`derived.py`, `sources/weather.py`); `Wind` header note (WIND at 15 mph; rain and
+    cold as context) in `sheet_column_notes`.
+  - `player_join`: the nickname fallback now also needs compatible first names (`first_names_compatible`) and logs a
+    refusal. Model Check's signals table gained an `Unflagged QB/RB/WR/TE` baseline row per position.
+  - Edge Finder tab: the injury section is carries-only plus an "Absent regulars" context block; "Matchups (context)";
+    a status line for the injury report's source, rows, final statuses and fetch time.
+  - Matchups: context only; the research's L4/L8 lookbacks are a window change, not a constant, so they were NOT adopted.
+
+
 | Date | Tab | Change | Before | After | Applied to | Code that encodes it |
 |---|---|---|---|---|---|---|
 | 2026-10-07 | `EdgeRaw` | Ten Edge Finder columns appended after `NameKey`. | 59 columns (`Pool` + 58); `NameKey` last (59). | 69 columns; new 60-69; nothing at or before 59 moved. | Template, Week 5 | `derived.EDGE_COLUMNS`, `derived.EDGE_FINDER_COLUMNS`, `derived.ALL_PCT_COLUMNS`. |
@@ -3614,3 +3640,4 @@ what encodes it.
 | 2026-10-07 | `Board` | "This week's edges" panel appended below the Chalk map. | Last row 150 (Chalk placeholder). | Header at 152, five lines at 153-157. | Template, Week 5 | `sheet_views.BOARD_EDGES_*`, `sheet_style.style_board`. |
 | 2026-10-07 | `Instructions` | A 20th tab row; doc-links header one row lower. | Doc-links header row 28. | Row 29. | Template, Week 5 | `sheet_instructions._TAB_ROWS`, `_DOC_LINKS_HEADER_ROW`. |
 | 2026-10-07 | `Model Check` | Projection Race, Reliability and Signals sections. | Seven blocks. | Ten blocks. | Week 5 (rebuilt by `dfs results update`) | `sheet_model_check`, `results_signals`. |
+| 2026-10-08 | `Edge Finder`, `Model Check` | Slice 1 (Parts 1-3): the injury section becomes carries-only with an "Absent regulars" context block (no `Gain Tgt/G` column), the signals table loses `BUY↑` and gains four `Unflagged <pos>` rows, "Matchups (context)", an injury-report status line. No EdgeRaw column, no other tab moved. | Injury section: `Gain Tgt/G`, `Gain Car/G`, `Gain xFP/G`; Signals: 8 rows. | Injury section: `Gain Car/G`, `Gain xFP/G` + Absent regulars (`Role`, `Tgt/G`, `Car/G`, `Games missed`); Signals: 11 rows. | Template, Week 5 (rewritten by the sync / `dfs results update`) | `edge_finder_tab.BENEFICIARY_COLUMNS`, `ABSENCE_COLUMNS`, `SIGNAL_COLUMNS`; `results_signals.SIGNAL_GROUPS`, `BASELINE_POSITIONS`. |

@@ -1,44 +1,43 @@
-"""Injury beneficiaries: when a skill player is out, who inherits his targets, carries and expected points,
-and has TFFB's projection already moved?
+"""Injury beneficiaries: when a regular is out, what do we actually know about who inherits his volume?
 
-Pure and offline-testable (dataframes in, dataframes out); `signals.py` gathers the inputs.
+Pure and offline-testable (dataframes in, dataframes out); `signals.py` gathers the inputs. Rebuilt on the
+research pack's measured table (`docs/RESEARCH.md` R1, `models/research/`), replacing the hand-set "next man
+up gets 60%" rule, which the research showed is wrong for targets and only roughly right for carries.
 
-**Who is out.** `classify_status`: DraftKings' `Avail` (`OUT`/`IR`, or `Q` for questionable) decides when
-it is set; the nflverse report fills in when it is blank (`Out` and `Doubtful` count as out,
-`Questionable` as questionable). The `Avail` column on the sheet is DraftKings' status. Questionable
-players are listed SEPARATELY (muted), never mixed into the confirmed list.
+**Who is out.** `classify_status`: DraftKings' `Avail` (`OUT`/`IR`/`D`, or `Q` for questionable) decides
+when it is set; the nflverse report fills in when it is blank (`Out` and `Doubtful` count as out,
+`Questionable` as questionable). The sheet's `Avail` is DraftKings' status. Questionable players are listed
+SEPARATELY (muted).
 
-**What he vacates.** His last `VACATED_WINDOW` games played: targets, carries and expected points per
-game (and red-zone opportunities when the play-by-play is available).
+**Regulars only.** The research counted an absence only when the player was a regular: his share of the
+team's targets at least 0.15, or of its carries at least 0.3 (`research_constants.regular_thresholds`), over
+his prior 3 games. Here that is his last 3 games PLAYED (`rotation_window`; Sam, 2026-10-08), and he must
+have missed no more than `MAX_GAMES_MISSED` = 2 team games since: a back out for a month is old news (his
+team's usage has moved on and his replacements already carry the load), so he is neither listed nor
+redistributed. A bit-part's absence is no event either. Roles (RB1, RB2, WR1...) are the research's too:
+ranks by usage in the window (`position_order`), not the depth chart.
 
-**Who gets it, in order of preference.**
+**Carries (a back is out): the measured table.** `research_constants.carry_shares` gives the fractions of the
+VACATED carries that went to each teammate historically: with RB1 out, RB2 gets 0.47, each further back 0.22
+and 0.19 goes to nobody in the rotation. **The unassigned share stays unassigned**; the beneficiaries'
+shares are normalised only if they would sum above `1 - unassigned`. An RB2 out uses its own cells (RB1
+0.52, each RB3+ 0.20, unassigned 0.14); an RB3+ out has no cell (n=2) and is not redistributed. The gained
+rushing xFP follows the carries (his rushing xFP per carry); that is what `INJ+` reads.
 
-1. *With-or-without*: at least `WITH_WITHOUT_MIN_GAMES` (2) games this or last season, with the SAME team,
-   in which he missed and a teammate played. Each teammate's gain is his per-game average without the
-   out player minus with him, clipped at 0 and scaled so the teammates' total never exceeds what the out
-   player vacated (`conserve`). A game counts as missed only between his first game with the team and
-   now. (The plan said "at least 1 game"; on real data a single game gave gains 3-10x the vacated
-   volume, so Sam moved it to 2 and added the cap, 2026-10-07.)
-2. *Depth chart*: the latest snapshot at or before the slate's first kickoff. The next `pos_rank` at his
-   position gets `NEXT_UP_SHARE` (60%) of what he vacated; the rest is split among the same-position
-   teammates by current share. Rules by position:
+**With-or-without** (Sam's ruling stands): when he missed at least `WITH_WITHOUT_MIN_GAMES` (2) games with
+the same team that a teammate played, the teammates' per-game CARRY change replaces the table (clipped at 0
+and scaled so the total never exceeds what he vacated, `conserve`).
 
-   - WR out (TE out is the mirror): of the 40% that is not the next-up's, `SPILL_SHARE` (25%) spills to
-     the other pass-catching group (TEs for a WR) by current target share and the rest goes to the other
-     WRs. (The plan's "~60% of a WR1's targets go to the WR2" is the next-up's share of the total; the
-     spill is read as a share of the remainder. An empty bucket hands its weight to the others.)
-   - RB out: carries go to RBs only (next-up 60%, the rest by carry share); targets split
-     `RB_TARGET_TO_RB_SHARE` (50%) to RBs (same next-up rule) and the rest to the pass catchers (WR + TE)
-     by current target share.
-   - receiving expected points follow the target split, rushing expected points follow the carry split.
-   - A QB out is not redistributed (nothing in the plan covers it); he is still listed as out.
+**Targets (any pass catcher is out): no redistribution.** Out of sample the 60% rule predicted targets worse
+than doing nothing; the learned table only ties it. So a target absence never produces points, never fires
+`INJ+`, and is listed as CONTEXT (`absences`): who is out, what he vacated, the teammates' with-or-without
+split when it exists (display only) and the historical line "no single teammate gains much: WR2 +13% of the
+vacated targets, ~27% goes nowhere".
 
-   Players who are themselves out are never beneficiaries.
-
-**Priced in?** `priced_in`: yes when TFFB's `ProjPts` for the beneficiary rose by at least
-`PRICED_IN_SHARE` (70%) of the gained xFP between the last snapshot BEFORE the out designation appeared
-and now. When that cannot be established (the designation is only on the nflverse report, or there is no
-earlier snapshot) the answer is "unknown", never a guess.
+**Priced in?** `priced_in`: yes when TFFB's `ProjPts` for the beneficiary rose by at least `PRICED_IN_SHARE`
+(70%) of the gained xFP between the last snapshot BEFORE the out designation appeared and now. It is BLANK
+whenever that cannot be established (the designation predates this slate's first snapshot, or is only on the
+nflverse report): nothing is guessed.
 """
 
 from __future__ import annotations
@@ -49,17 +48,20 @@ import numpy as np
 import pandas as pd
 
 from dfs.derived import OUT_STATUSES
+from dfs.research_constants import (
+    CarryShares,
+    carry_shares,
+    regular_thresholds,
+    target_context,
+    target_context_line,
+)
 
-VACATED_WINDOW = 3
-NEXT_UP_SHARE = 0.6
-SPILL_SHARE = 0.25
-RB_TARGET_TO_RB_SHARE = 0.5
 PRICED_IN_SHARE = 0.7
 # With-or-without needs this many missed games (Sam, 2026-10-07: on real data a single missed game
-# produced gains 3-10x what the out player vacated); with fewer the depth chart decides.
+# produced gains 3-10x what the out player vacated).
 WITH_WITHOUT_MIN_GAMES = 2
-# A beneficiary is tagged `INJ+` once the gain is worth at least this many expected points per game. A
-# starting value, not fitted to anything; Model Check keeps score on the token.
+# A carry beneficiary is tagged `INJ+` once the gain is worth at least this many rushing expected points per
+# game. A starting value, not fitted to anything; Model Check keeps score on the token.
 INJ_MIN_GAINED_XFP = 1.0
 TOKEN_INJ = "INJ+"
 
@@ -71,12 +73,11 @@ AVAIL_QUESTIONABLE = {"Q"}
 AVAIL_DOUBTFUL = {"D"}  # DraftKings' own spelling of Doubtful; counts as out, like the report's
 
 METHOD_WITH_WITHOUT = "with-or-without"
-METHOD_DEPTH = "depth chart"
-PRICED_YES, PRICED_NO, PRICED_UNKNOWN = "yes", "no", "unknown"
+METHOD_TABLE = "measured table"
+PRICED_YES, PRICED_NO, PRICED_UNKNOWN = "yes", "no", ""  # blank, not "unknown": see `priced_in`
 
-PASS_CATCHERS = {"WR", "TE"}
-RECEIVING_GROUPS = {"WR": "TE", "TE": "WR"}  # who a WR's/TE's spill goes to
 GAIN_COLUMNS = ["tgt_gain", "car_gain", "xfp_gain"]
+NO_DEPTH_RANK = 99
 
 
 def classify_status(avail: object, report_status: object) -> str | None:
@@ -102,19 +103,23 @@ def classify_status(avail: object, report_status: object) -> str | None:
 
 @dataclass(frozen=True)
 class Vacated:
-    """What one out player leaves behind, per game (his last `VACATED_WINDOW` games played)."""
+    """What one out player leaves behind, per game (his last 3 games played)."""
 
     tgt_g: float
     car_g: float
     rec_xfp_g: float
     rush_xfp_g: float
     games: int
-    rz_g: float = float("nan")
 
     @property
     def xfp_g(self) -> float:
         """Receiving plus rushing expected points per game (passing xFP is not redistributed)."""
         return self.rec_xfp_g + self.rush_xfp_g
+
+    @property
+    def rush_xfp_per_carry(self) -> float:
+        """His rushing expected points per carry (0 with no carries)."""
+        return self.rush_xfp_g / self.car_g if self.car_g > 0 else 0.0
 
 
 def latest_depth(depth: pd.DataFrame | None, cutoff: str | None) -> pd.DataFrame:
@@ -149,85 +154,128 @@ def depth_order(
     return ordered["GsisId"].tolist()
 
 
-def _by_share(members: pd.DataFrame, column: str) -> pd.Series:
-    """Fractions summing to 1 across `members` in proportion to `column` (equal when nobody has any)."""
-    weight = members[column].fillna(0.0).astype(float)
-    total = weight.sum()
-    if total <= 0:
-        return pd.Series(1.0 / len(members), index=members.index)
-    return weight / total
+# ---------------------------------------------------------------------------------------------
+# The prior window, roles and regulars (the research's definitions, R1, with Sam's ruling on "out")
+# ---------------------------------------------------------------------------------------------
+
+WINDOW_GAMES = 3  # a player's window: his last 3 games played for the team (the research's prior 3)
+MAX_GAMES_MISSED = 2  # a regular who has missed 3+ team games is old news: his team's usage has moved on
+WINDOW_COLUMNS = [
+    "Name",
+    "Position",
+    "Games",
+    "tgt_g",
+    "car_g",
+    "rec_xfp_g",
+    "rush_xfp_g",
+    "tgt_share",
+    "car_share",
+    "LastKey",
+    "Missed",
+    "InRotation",
+]
 
 
-def _next_up_split(members: pd.DataFrame, column: str, order: list[str]) -> pd.Series:
-    """Fractions summing to 1: the first member in depth-chart `order` (else the biggest current share) gets
-    `NEXT_UP_SHARE`, the rest share the remainder by `column`; a lone member gets everything."""
-    if len(members) == 1:
-        return pd.Series(1.0, index=members.index)
-    ranked = [g for g in order if g in members.index]
-    next_up = ranked[0] if ranked else members[column].fillna(0.0).idxmax()
-    rest = members.drop(index=next_up)
-    out = pd.Series(0.0, index=members.index)
-    out[next_up] = NEXT_UP_SHARE
-    out[rest.index] = (1 - NEXT_UP_SHARE) * _by_share(rest, column)
-    return out
-
-
-def depth_gains(
-    out_position: str,
-    vacated: Vacated,
-    teammates: pd.DataFrame,
-    order_by_position: dict[str, list[str]],
+def rotation_window(
+    history: pd.DataFrame, team: str, *, before: tuple[int, int], n: int = WINDOW_GAMES
 ) -> pd.DataFrame:
-    """Per-teammate gained `tgt_gain`, `car_gain`, `xfp_gain` per game by the depth-chart rules.
+    """Every player who has played for `team` before `before` = (season, week), indexed by gsis id, over his
+    last `n` games played for it (across seasons): per-game means of targets, carries and expected points, his
+    share of the team's targets and carries in THOSE games, `Missed` (team games since his last appearance)
+    and
+    `InRotation` (he played in the team's last `n` games: the research's rotation, "anyone with a touch in the
+    window"). A game he missed is not a zero here (Sam, 2026-10-08): a back who sat out two games is still
+    judged on the games he played; `MAX_GAMES_MISSED` is what retires a long absence."""
+    hist = history[history["Team"] == team].copy()
+    hist["_key"] = list(zip(hist["season"].astype(int), hist["week"].astype(int), strict=True))
+    hist = hist[hist["_key"] < before]
+    if hist.empty:
+        return pd.DataFrame(columns=WINDOW_COLUMNS)
+    team_keys = sorted(set(hist["_key"]))
+    team_totals = hist.drop_duplicates("_key").set_index("_key")[["team_targets", "team_carries"]]
+    recent_keys = set(team_keys[-n:])
+    rows = []
+    for gsis, games in hist.sort_values("_key").groupby("GsisId"):
+        last = games.tail(n)
+        totals = team_totals.loc[list(last["_key"])].sum()
+        count = len(last)
+        rows.append(
+            {
+                "GsisId": gsis,
+                "Name": last["Name"].iloc[-1],
+                "Position": last["Position"].iloc[-1],
+                "Games": count,
+                "tgt_g": last["targets"].mean(),
+                "car_g": last["carries"].mean(),
+                "rec_xfp_g": last["rec_xfp"].mean(),
+                "rush_xfp_g": last["rush_xfp"].mean(),
+                "tgt_share": last["targets"].sum() / totals["team_targets"]
+                if totals["team_targets"] > 0
+                else np.nan,
+                "car_share": last["carries"].sum() / totals["team_carries"]
+                if totals["team_carries"] > 0
+                else np.nan,
+                "LastKey": last["_key"].iloc[-1],
+                "Missed": sum(1 for k in team_keys if k > last["_key"].iloc[-1]),
+                "InRotation": last["_key"].iloc[-1] in recent_keys,
+            }
+        )
+    return pd.DataFrame(rows).set_index("GsisId")[WINDOW_COLUMNS]
 
-    `teammates` is indexed by gsis id with `Position`, `tgt_g`, `car_g` (current per-game volume).
-    `order_by_position` maps a position to its gsis ids in depth order. Players who are out must already
-    be excluded by the caller."""
-    gains = pd.DataFrame(0.0, index=teammates.index, columns=GAIN_COLUMNS)
-    by_pos = {p: teammates[teammates["Position"] == p] for p in ("RB", "WR", "TE")}
 
-    def give_targets(fraction: pd.Series) -> None:
-        gains.loc[fraction.index, "tgt_gain"] += fraction * vacated.tgt_g
-        gains.loc[fraction.index, "xfp_gain"] += fraction * vacated.rec_xfp_g
+def vacated_from_row(row: pd.Series) -> Vacated:
+    """What one player leaves per game, from his `rotation_window` row."""
+    return Vacated(
+        tgt_g=float(row["tgt_g"]),
+        car_g=float(row["car_g"]),
+        rec_xfp_g=float(row["rec_xfp_g"]),
+        rush_xfp_g=float(row["rush_xfp_g"]),
+        games=int(row["Games"]),
+    )
 
-    def give_carries(fraction: pd.Series) -> None:
-        gains.loc[fraction.index, "car_gain"] += fraction * vacated.car_g
-        gains.loc[fraction.index, "xfp_gain"] += fraction * vacated.rush_xfp_g
 
-    if out_position in RECEIVING_GROUPS:
-        own, other = by_pos[out_position], by_pos[RECEIVING_GROUPS[out_position]]
-        remainder = 1 - NEXT_UP_SHARE
-        weights = {
-            "next_up": NEXT_UP_SHARE if not own.empty else 0.0,
-            "rest": remainder * (1 - SPILL_SHARE) if len(own) > 1 else 0.0,
-            "other": remainder * SPILL_SHARE if not other.empty else 0.0,
-        }
-        total = sum(weights.values())
-        if total > 0:
-            order = order_by_position.get(out_position, [])
-            ranked = [g for g in order if g in own.index]
-            next_up = (ranked[0] if ranked else own["tgt_g"].fillna(0.0).idxmax()) if not own.empty else None
-            fraction = pd.Series(0.0, index=teammates.index)
-            if next_up is not None:
-                fraction[next_up] += weights["next_up"] / total
-                rest = own.drop(index=next_up)
-                if not rest.empty:
-                    fraction[rest.index] += weights["rest"] / total * _by_share(rest, "tgt_g")
-            if not other.empty:
-                fraction[other.index] += weights["other"] / total * _by_share(other, "tgt_g")
-            give_targets(fraction[fraction > 0])
-    elif out_position == "RB":
-        backs = by_pos["RB"]
-        catchers = pd.concat([by_pos["WR"], by_pos["TE"]])
-        order = order_by_position.get("RB", [])
-        if not backs.empty:
-            give_carries(_next_up_split(backs, "car_g", order))
-        rb_part = RB_TARGET_TO_RB_SHARE if not catchers.empty and not backs.empty else float(not backs.empty)
-        if not backs.empty:
-            give_targets(rb_part * _next_up_split(backs, "tgt_g", order))
-        if not catchers.empty:
-            give_targets((1 - rb_part) * _by_share(catchers, "tgt_g"))
-    return gains
+def regular_kinds(window_row: pd.Series) -> list[str]:
+    """Which of `targets` / `carries` make him a regular: his share of the team's targets over his last
+    `WINDOW_GAMES` games played at least the research's 0.15, or of its carries at least 0.3 (empty = a
+    bit-part, or someone who has missed `MAX_GAMES_MISSED`+1 or more team games: not an event)."""
+    if window_row.get("Missed", 0) > MAX_GAMES_MISSED:
+        return []
+    th = regular_thresholds()
+    kinds = []
+    if pd.notna(window_row.get("tgt_share")) and window_row["tgt_share"] >= th.target_share:
+        kinds.append("targets")
+    if pd.notna(window_row.get("car_share")) and window_row["car_share"] >= th.carry_share:
+        kinds.append("carries")
+    return kinds
+
+
+def position_order(
+    window: pd.DataFrame, position: str, depth_rows: pd.DataFrame, team: str, include: set[str] = frozenset()
+) -> list[str]:
+    """The team's rotation at `position`, best first, ranked as the research ranked it (R1 `rank_rotation`):
+    by usage per game in the window, which is carries + targets for a back and targets for a receiver or tight
+    end (carries break a tie), then the depth chart, then id. The rotation is whoever played in the team's
+    last 3 games, plus anyone in `include` (the out player himself, who may have missed them). Out players are
+    INCLUDED: this is the pecking order the measured fractions were learned on. (The depth chart is not the
+    primary key: it drops an injured starter to the bottom, which would make a 44%-of-the-carries back an
+    "RB3+".)"""
+    part = window[(window["Position"] == position) & (window["InRotation"] | window.index.isin(include))]
+    usage = part["tgt_g"] + part["car_g"] if position == "RB" else part["tgt_g"] + 1e-6 * part["car_g"]
+    chart = {
+        g: i for i, g in enumerate(depth_order(depth_rows, team, position, part["tgt_g"] + part["car_g"]))
+    }
+    return sorted(part.index, key=lambda g: (-float(usage[g]), chart.get(g, NO_DEPTH_RANK), g))
+
+
+def role_label(position: str, rank: int) -> str:
+    """`RB1`, `RB2`, `RB3+`, `WR1`..`WR3`, `WR4+`, `TE1`, `TE2+` from a 1-based rank within his team."""
+    cap = {"RB": 3, "WR": 4, "TE": 2}.get(position, 1)
+    return f"{position}{rank}" if rank < cap else f"{position}{cap}+"
+
+
+# ---------------------------------------------------------------------------------------------
+# With-or-without
+# ---------------------------------------------------------------------------------------------
 
 
 def with_without_gains(
@@ -265,6 +313,17 @@ def with_without_gains(
     return gains, n_missed
 
 
+def games_missed(history: pd.DataFrame, gsis: str, team: str, *, before: tuple[int, int]) -> int:
+    """Team games since his last appearance for `team` before `before` (0 = he played the last one)."""
+    hist = history[history["Team"] == team]
+    keys = list(zip(hist["season"].astype(int), hist["week"].astype(int), strict=True))
+    team_games = sorted({k for k in keys if k < before})
+    mine = sorted({k for k, g in zip(keys, hist["GsisId"], strict=True) if g == gsis and k < before})
+    if not mine:
+        return len(team_games)
+    return sum(1 for k in team_games if k > mine[-1])
+
+
 def conserve(gains: pd.DataFrame, vacated: Vacated) -> pd.DataFrame:
     """Scale each gain column down so the teammates' total never exceeds what the out player vacated
     (targets, carries, xFP per game): opportunity is moved, not created. Gains already within the limit
@@ -278,26 +337,41 @@ def conserve(gains: pd.DataFrame, vacated: Vacated) -> pd.DataFrame:
     return out
 
 
+# ---------------------------------------------------------------------------------------------
+# Carries
+# ---------------------------------------------------------------------------------------------
+
+
+def table_shares(remaining: list[str], shares: CarryShares) -> pd.Series:
+    """Each remaining back's fraction of the vacated carries: the first (best) gets `next_up`, every other
+    `each_other`. The unassigned share is never handed out: the fractions are scaled down together only when
+    they would sum above `1 - unassigned`."""
+    values = [shares.next_up if i == 0 else shares.each_other for i in range(len(remaining))]
+    fractions = pd.Series(values, index=remaining, dtype=float)
+    cap = 1.0 - shares.unassigned
+    total = fractions.sum()
+    if total > cap > 0:
+        fractions = fractions * (cap / total)
+    return fractions
+
+
+def carry_gains(vacated: Vacated, fractions: pd.Series) -> pd.DataFrame:
+    """Per-back gained carries and rushing xFP per game from the measured fractions (no target gain)."""
+    car = fractions * vacated.car_g
+    return pd.DataFrame(
+        {"tgt_gain": 0.0, "car_gain": car, "xfp_gain": car * vacated.rush_xfp_per_carry},
+        index=fractions.index,
+    )
+
+
 def priced_in(projection_now: float, projection_before: float | None, gained_xfp: float) -> str:
     """`yes` when TFFB's projection rose by at least `PRICED_IN_SHARE` of the gained xFP since the last
-    snapshot before the out designation; `no` when it rose less; `unknown` when either projection or the
-    gain is missing (or the gain is not positive)."""
+    snapshot before the out designation; `no` when it rose less; BLANK when either projection or the gain is
+    missing (or the gain is not positive): the question has no answer yet."""
     values = (projection_now, projection_before, gained_xfp)
     if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in values) or gained_xfp <= 0:
         return PRICED_UNKNOWN
     return PRICED_YES if (projection_now - projection_before) >= PRICED_IN_SHARE * gained_xfp else PRICED_NO
-
-
-def vacated_from_window(window_row: pd.Series, rz_g: float = float("nan")) -> Vacated:
-    """A `Vacated` from an `xfp.xfp_windows` row."""
-    return Vacated(
-        tgt_g=float(window_row["tgt_g"]),
-        car_g=float(window_row["car_g"]),
-        rec_xfp_g=float(window_row["rec_xfp_g"]),
-        rush_xfp_g=float(window_row["rush_xfp_g"]),
-        games=int(window_row["Games"]),
-        rz_g=rz_g,
-    )
 
 
 BENEFICIARY_COLUMNS = [
@@ -307,75 +381,93 @@ BENEFICIARY_COLUMNS = [
     "Position",
     "OutStatus",
     "OutPlayers",
-    "tgt_gain",
     "car_gain",
     "xfp_gain",
     "Method",
     "n",
     "Token",
 ]
+ABSENCE_COLUMNS = [
+    "GsisId",
+    "Name",
+    "Team",
+    "Position",
+    "Role",
+    "Regular",
+    "tgt_g",
+    "car_g",
+    "GamesMissed",
+    "WithWithoutGames",
+    "WithWithout",
+    "History",
+]
+
+
+def _confirmed(outs: pd.DataFrame) -> set[str]:
+    return set(outs.loc[outs["Status"] == STATUS_OUT, "GsisId"]) if not outs.empty else set()
 
 
 def beneficiaries(
     outs: pd.DataFrame,
-    windows: pd.DataFrame,
-    identity: pd.DataFrame,
     history: pd.DataFrame,
     depth_rows: pd.DataFrame,
     *,
     before: tuple[int, int],
 ) -> pd.DataFrame:
-    """Every beneficiary of every out or questionable player, one row per beneficiary and status.
+    """Who inherits the CARRIES of every out or questionable regular back, one row per beneficiary and status.
 
     - `outs`: `GsisId`, `Name`, `Team`, `Position`, `Status` (`out`/`questionable`).
-    - `windows`: `xfp.xfp_windows` (indexed by gsis id), the current per-game volume of everyone.
-    - `identity`: `GsisId`, `Name`, `Team`, `Position` of every skill player the windows cover.
-    - `history`: `xfp.player_weeks` for this and last season (with-or-without).
-    - `depth_rows`: `latest_depth` output.
+    - `history`: `xfp.player_weeks` for this and last season (the prior window and with-or-without).
+    - `depth_rows`: `latest_depth` output (a tiebreak in the rotation order only).
     - `before`: (season, week) of the slate; only earlier games count.
 
-    A beneficiary hit by several outs sums the gains; `OutPlayers` names them; `Method` is that of the
-    biggest contribution. Rows are sorted by `xfp_gain`, largest first. A confirmed-out list never
-    contains a player who is out himself; questionable beneficiaries are computed against the CONFIRMED
-    outs only (a questionable player is assumed to play)."""
-    if outs is None or outs.empty:
+    Backs only: a quarterback's scrambles or a receiver's end-around are not "inheriting the backfield".
+    Targets are never redistributed (see the module docstring). A back hit by several outs sums the gains;
+    `OutPlayers` names them. Rows are sorted by `xfp_gain`, largest first. A player who is out himself is
+    never a beneficiary; questionable beneficiaries are computed against the CONFIRMED outs only."""
+    if outs is None or outs.empty or history is None or history.empty:
         return pd.DataFrame(columns=BENEFICIARY_COLUMNS)
-    people = identity.drop_duplicates(subset="GsisId").set_index("GsisId")
-    confirmed = set(outs.loc[outs["Status"] == STATUS_OUT, "GsisId"])
+    confirmed = _confirmed(outs)
     rows = []
     for _, out in outs.iterrows():
-        gsis, team, position = out["GsisId"], out["Team"], out["Position"]
-        if position not in {"WR", "TE", "RB"} or gsis not in windows.index:
+        gsis, team = out["GsisId"], out["Team"]
+        if out["Position"] != "RB":
             continue
-        vacated = vacated_from_window(windows.loc[gsis])
-        mates_ids = people.index[(people["Team"] == team) & (people["Position"].isin(PASS_CATCHERS | {"RB"}))]
-        mates_ids = [g for g in mates_ids if g != gsis and g not in confirmed]
-        mates = people.loc[mates_ids, ["Name", "Team", "Position"]].join(
-            windows[["tgt_g", "car_g"]], how="left"
-        )
-        if mates.empty:
+        window = rotation_window(history, team, before=before)
+        if gsis not in window.index or "carries" not in regular_kinds(window.loc[gsis]):
             continue
+        vacated = vacated_from_row(window.loc[gsis])
+        order = position_order(window, "RB", depth_rows, team, {gsis})
+        label = role_label("RB", order.index(gsis) + 1)
+        shares = carry_shares(label)
+        remaining = [g for g in order if g != gsis and g not in confirmed]
         gains, n_missed = with_without_gains(history, gsis, team, before=before, exclude=confirmed)
         if n_missed >= WITH_WITHOUT_MIN_GAMES:
             method, n = METHOD_WITH_WITHOUT, n_missed
-            gains = conserve(gains.reindex(mates.index).dropna(how="all").clip(lower=0.0), vacated)
+            backs = history[(history["Team"] == team) & (history["Position"] == "RB")]["GsisId"].unique()
+            mates = [g for g in backs if g != gsis and g not in confirmed]  # carries go to backs only
+            car = conserve(gains.reindex(mates).dropna(how="all").clip(lower=0.0), vacated)["car_gain"]
+            table = pd.DataFrame(
+                {"tgt_gain": 0.0, "car_gain": car, "xfp_gain": car * vacated.rush_xfp_per_carry},
+                index=car.index,
+            )
+        elif shares is not None and remaining:
+            method, n = METHOD_TABLE, 0
+            table = carry_gains(vacated, table_shares(remaining, shares))
         else:
-            volume = windows["tgt_g"].fillna(0.0) + windows["car_g"].fillna(0.0)
-            order = {p: depth_order(depth_rows, team, p, volume) for p in ("RB", "WR", "TE")}
-            gains = depth_gains(position, vacated, mates, order)
-            method, n = METHOD_DEPTH, 0
-        for gsis_b, g in gains.iterrows():
-            if g["xfp_gain"] <= 0 and g["tgt_gain"] <= 0 and g["car_gain"] <= 0:
+            continue
+        names = history.sort_values(["season", "week"]).groupby("GsisId")["Name"].last()
+        for gsis_b, g in table.iterrows():
+            if g["car_gain"] <= 0:
                 continue
             rows.append(
                 {
                     "GsisId": gsis_b,
-                    "Name": mates.loc[gsis_b, "Name"],
+                    "Name": names.get(gsis_b, gsis_b),
                     "Team": team,
-                    "Position": mates.loc[gsis_b, "Position"],
+                    "Position": "RB",
                     "OutStatus": out["Status"],
                     "OutPlayers": out["Name"],
-                    "tgt_gain": g["tgt_gain"],
                     "car_gain": g["car_gain"],
                     "xfp_gain": g["xfp_gain"],
                     "Method": method,
@@ -384,17 +476,109 @@ def beneficiaries(
             )
     if not rows:
         return pd.DataFrame(columns=BENEFICIARY_COLUMNS)
-    frame = pd.DataFrame(rows)
-    agg = frame.groupby(["GsisId", "OutStatus"], as_index=False).agg(
-        Name=("Name", "first"),
-        Team=("Team", "first"),
-        Position=("Position", "first"),
-        OutPlayers=("OutPlayers", lambda s: ", ".join(dict.fromkeys(s))),
-        tgt_gain=("tgt_gain", "sum"),
-        car_gain=("car_gain", "sum"),
-        xfp_gain=("xfp_gain", "sum"),
-        Method=("Method", "first"),
-        n=("n", "max"),
+    agg = (
+        pd.DataFrame(rows)
+        .groupby(["GsisId", "OutStatus"], as_index=False)
+        .agg(
+            Name=("Name", "first"),
+            Team=("Team", "first"),
+            Position=("Position", "first"),
+            OutPlayers=("OutPlayers", lambda s: ", ".join(dict.fromkeys(s))),
+            car_gain=("car_gain", "sum"),
+            xfp_gain=("xfp_gain", "sum"),
+            Method=("Method", "first"),
+            n=("n", "max"),
+        )
     )
     agg["Token"] = np.where(agg["xfp_gain"] >= INJ_MIN_GAINED_XFP, TOKEN_INJ, "")
     return agg.sort_values("xfp_gain", ascending=False)[BENEFICIARY_COLUMNS].reset_index(drop=True)
+
+
+def _carry_history_line(shares: CarryShares | None) -> str:
+    if shares is None:
+        return "historically: too few past absences at this role to quote a split"
+    return (
+        f"historically: {shares.next_up_label} +{round(100 * shares.next_up):d}% of the vacated carries, "
+        f"each further back +{round(100 * shares.each_other):d}%, "
+        f"~{round(100 * shares.unassigned):d}% goes nowhere (n={shares.n})"
+    )
+
+
+def _split_text(gains: pd.DataFrame, column: str, unit: str, names: pd.Series, n_missed: int) -> str:
+    top = gains[column][gains[column] > 0].sort_values(ascending=False).head(3)
+    if top.empty:
+        return ""
+    parts = ", ".join(f"{names.get(g, g)} +{v:.1f}" for g, v in top.items())
+    return f"with-or-without ({n_missed} g): {parts} {unit}"
+
+
+def absences(
+    outs: pd.DataFrame,
+    history: pd.DataFrame,
+    depth_rows: pd.DataFrame,
+    *,
+    before: tuple[int, int],
+) -> pd.DataFrame:
+    """Every CONFIRMED absence of a regular (a back, receiver or tight end whose prior-window share of his
+    team's targets or carries clears the research's threshold, `regular_kinds`), as context: role, what he
+    vacated, how many team games he has missed, the teammates' with-or-without split when it exists (display
+    only for targets), and the historical line for his role. No points are attached: this is information, not
+    an edge. Most recent absences first."""
+    if outs is None or outs.empty or history is None or history.empty:
+        return pd.DataFrame(columns=ABSENCE_COLUMNS)
+    confirmed = _confirmed(outs)
+    names = history.sort_values(["season", "week"]).groupby("GsisId")["Name"].last()
+    positions = history.sort_values(["season", "week"]).groupby("GsisId")["Position"].last()
+    rows = []
+    for _, out in outs[outs["Status"] == STATUS_OUT].iterrows():
+        gsis, team, position = out["GsisId"], out["Team"], out["Position"]
+        if position not in ("RB", "WR", "TE"):
+            continue
+        window = rotation_window(history, team, before=before)
+        if gsis not in window.index:
+            continue
+        kinds = regular_kinds(window.loc[gsis])
+        if not kinds:
+            continue
+        order = position_order(window, position, depth_rows, team, {gsis})
+        label = role_label(position, order.index(gsis) + 1) if gsis in order else position
+        gains, n_missed = with_without_gains(history, gsis, team, before=before, exclude=confirmed)
+        vacated = vacated_from_row(window.loc[gsis])
+        split = ""
+        if n_missed >= WITH_WITHOUT_MIN_GAMES:
+            clipped = conserve(gains.clip(lower=0.0), vacated)
+            if position == "RB":
+                backs = clipped.index[clipped.index.map(lambda g: positions.get(g) == "RB")]
+                split = _split_text(clipped.loc[backs], "car_gain", "carries/G", names, n_missed)
+            else:
+                catchers = clipped.index[clipped.index.map(lambda g: positions.get(g) in ("WR", "TE", "RB"))]
+                split = _split_text(clipped.loc[catchers], "tgt_gain", "targets/G", names, n_missed)
+        if position == "RB":
+            history_line = _carry_history_line(carry_shares(label))
+        else:
+            history_line = target_context_line(position, target_context(label))
+        share_column = {"targets": "tgt_share", "carries": "car_share"}
+        regular = " and ".join(
+            f"{round(100 * window.loc[gsis, share_column[k]]):d}% of team {k}" for k in kinds
+        )
+        rows.append(
+            {
+                "GsisId": gsis,
+                "Name": out["Name"],
+                "Team": team,
+                "Position": position,
+                "Role": label,
+                "Regular": regular,
+                "tgt_g": vacated.tgt_g,
+                "car_g": vacated.car_g,
+                "GamesMissed": games_missed(history, gsis, team, before=before),
+                "WithWithoutGames": n_missed,
+                "WithWithout": split,
+                "History": history_line,
+            }
+        )
+    if not rows:
+        return pd.DataFrame(columns=ABSENCE_COLUMNS)
+    frame = pd.DataFrame(rows)
+    ordered = frame.sort_values(["GamesMissed", "tgt_g"], ascending=[True, False])
+    return ordered[ABSENCE_COLUMNS].reset_index(drop=True)

@@ -56,14 +56,13 @@ CAL_SALARY_TIERS = {
 CAL_SHRINK_K = 40  # pseudo-observations pulling a cell's bias toward 0
 CAL_WEIGHT_K = 100  # pseudo-rows pulling the source weights toward equal
 CAL_DECIMALS = 1
-# The projection sources, as columns of the scored table. `ProjPts` is TFFB's own; `UmPts` is the UM model's
-# mean (`dfs.model`, blank outside its training population: a player it cannot rate simply drops out of his
-# own weighted mean). `CAL_SOURCES` is production; `CAL_SOURCES_NO_UM` is the version without UM that Model
-# Check shows beside it.
+# The projection sources the ensemble blends, as columns of the scored table. `ProjPts` is TFFB's own.
+# UM (`UmPts`, the `dfs.model` mean, blank outside its training population) is NOT in the blend: the research
+# found it adds nothing (MAE 5.29 -> 5.26, rho .446 -> .442; docs/RESEARCH.md), so it is tracked in the Model
+# Check race as its own row and `UM_SOURCE` names its column there.
 TFFB_SOURCE = "ProjPts"
 UM_SOURCE = "UmPts"
-CAL_SOURCES_NO_UM = ("ProjPts", "SleeperPts", "FantasyProsPts")
-CAL_SOURCES = (*CAL_SOURCES_NO_UM, UM_SOURCE)
+CAL_SOURCES = ("ProjPts", "SleeperPts", "FantasyProsPts")
 SOURCE_LABELS = {
     "ProjPts": "TFFB",
     "SleeperPts": "Sleeper",
@@ -258,15 +257,9 @@ def calpts_for_week(
 # ---------------------------------------------------------------------------------------------
 
 BACKTEST_COLUMNS = ["Source", "Position", "n", "Rho", "MAE", "Bias"]
-# (label, column) pairs: the race without UM (every usable row) and with it (rows UM rates only).
-PROJECTIONS_NO_UM = (("TFFB", "ProjPts"), ("AggPts", "AggPts"), ("CalPts (no UM)", "CalPtsNoUm"))
-PROJECTIONS_WITH_UM = (
-    ("TFFB", "ProjPts"),
-    ("AggPts", "AggPts"),
-    ("UM", "UmPts"),
-    ("CalPts (no UM)", "CalPtsNoUm"),
-    ("CalPts", "CalPts"),
-)
+# (label, column) pairs: the race on every usable row, and with UM beside it (rows UM rates only).
+PROJECTIONS = (("TFFB", "ProjPts"), ("AggPts", "AggPts"), ("CalPts", "CalPts"))
+PROJECTIONS_WITH_UM = (("TFFB", "ProjPts"), ("AggPts", "AggPts"), ("UM", UM_SOURCE), ("CalPts", "CalPts"))
 
 
 def score_predictions(frame: pd.DataFrame, columns: tuple[tuple[str, str], ...]) -> pd.DataFrame:
@@ -307,17 +300,13 @@ def score_predictions(frame: pd.DataFrame, columns: tuple[tuple[str, str], ...])
 
 def backtest_frame(scored: pd.DataFrame, *, season: int | None = None, with_um: bool = False) -> pd.DataFrame:
     """Every predictable week (the 2nd onward) with its out-of-sample projections: for k = 2..N, fit on
-    weeks < k and predict week k. `CalPtsNoUm` is the ensemble without UM; with `with_um`, `CalPts` is the
-    production ensemble (UM included) and only rows UM rated are kept, so every column is judged on the same
-    players. Rosterable pool rows with a real stat line and ProjPts > 0 only (Model Check's population)."""
+    weeks < k and predict week k. With `with_um` only the rows UM rated are kept, so UM and the others are
+    judged on the same players. Rosterable pool rows with a real stat line and ProjPts > 0 only (Model
+    Check's population)."""
     weeks = sorted(int(w) for w in pd.to_numeric(scored["week"], errors="coerce").dropna().unique())
     pieces = []
     for week in weeks[1:]:
-        rows, _ = calpts_for_week(scored, week, season=season, sources=CAL_SOURCES_NO_UM)
-        rows["CalPtsNoUm"] = rows["CalPts"]
-        if with_um:
-            full, _ = calpts_for_week(scored, week, season=season, sources=CAL_SOURCES)
-            rows["CalPts"] = full["CalPts"]
+        rows, _ = calpts_for_week(scored, week, season=season, sources=CAL_SOURCES)
         pieces.append(usable(rows, "pool"))
     if not pieces:
         return pd.DataFrame()
@@ -329,12 +318,12 @@ def backtest_frame(scored: pd.DataFrame, *, season: int | None = None, with_um: 
 
 def backtest(scored: pd.DataFrame, *, season: int | None = None, with_um: bool = False) -> pd.DataFrame:
     """The expanding-window backtest table (`BACKTEST_COLUMNS`) by position and overall, each projection
-    judged on weeks it did not train on. Without UM: TFFB, AggPts, CalPts (no UM). With UM: also UM itself
-    and the production CalPts, on the rows UM rates."""
+    judged on weeks it did not train on: TFFB, AggPts and CalPts; with `with_um`, UM itself too, on the rows
+    UM rates."""
     frame = backtest_frame(scored, season=season, with_um=with_um)
     if frame.empty:
         return pd.DataFrame(columns=BACKTEST_COLUMNS)
-    return score_predictions(frame, PROJECTIONS_WITH_UM if with_um else PROJECTIONS_NO_UM)
+    return score_predictions(frame, PROJECTIONS_WITH_UM if with_um else PROJECTIONS)
 
 
 def backtest_by_week(
@@ -343,7 +332,7 @@ def backtest_by_week(
     """The same race, one row per week and projection (n, Rho, MAE, Bias over the position groups), for the
     per-week trend in Model Check."""
     frame = backtest_frame(scored, season=season, with_um=with_um)
-    columns = PROJECTIONS_WITH_UM if with_um else PROJECTIONS_NO_UM
+    columns = PROJECTIONS_WITH_UM if with_um else PROJECTIONS
     if frame.empty:
         return pd.DataFrame(columns=["Week", "Source", "n", "Rho", "MAE", "Bias"])
     rows = []

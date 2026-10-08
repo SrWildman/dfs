@@ -103,6 +103,22 @@ def _last_name_key(name: object, team: object, position: object) -> str:
     return f"{last}|{normalize_team(team)}|{normalize_position(position)}"
 
 
+FIRST_NAME_MIN_COMMON = 3
+
+
+def first_names_compatible(a: object, b: object) -> bool:
+    """Could these be one person's first names? Equal, one a prefix of the other (`josh`/`joshua`), or sharing
+    their first `FIRST_NAME_MIN_COMMON` letters (`gabe`/`gabriel`, `kenny`/`kenneth`). `mike`/`mark` are not.
+    The nickname fallback below requires this on top of last name + team + position."""
+    first_a, first_b = (normalize_name(x).split()[:1] for x in (a, b))
+    if not first_a or not first_b:
+        return False
+    fa, fb = first_a[0], first_b[0]
+    if fa == fb or fa.startswith(fb) or fb.startswith(fa):
+        return True
+    return len(fa) >= FIRST_NAME_MIN_COMMON and fa[:FIRST_NAME_MIN_COMMON] == fb[:FIRST_NAME_MIN_COMMON]
+
+
 def dst_join_key(team: object) -> str:
     """DSTs match by team only -- DK's own DST `Name` is a nickname
     ("Texans"), not the source's team code/full name, so there is no
@@ -174,8 +190,11 @@ def join_source_to_dk(
     Third and last chance (Round 5 item 6): a nickname fallback -- `Josh`
     vs `Joshua`, `Kenny` vs `Kenneth`. An unmatched DK player matches a source
     row by LAST NAME + TEAM + POSITION only when exactly one unmatched DK
-    player and exactly one unclaimed source row share that key on the slate,
-    and every such match is logged at INFO so a wrong one is visible.
+    player and exactly one unclaimed source row share that key on the slate
+    AND their first names are compatible (`first_names_compatible`: a last
+    name alone never matches). Every match is logged at INFO, and a candidate
+    refused for its first name is logged too, so neither a wrong match nor a
+    miss is silent.
 
     `expect_dst=False` for a source that never carries defenses (snap counts):
     DSTs are left out of the pool counts and the unmatched report rather than
@@ -246,6 +265,15 @@ def join_source_to_dk(
             if len(dk_idxs) != 1 or len(candidates) != 1 or candidates[0]["_join_key"] in claimed:
                 continue
             idx, src_row = dk_idxs[0], candidates[0]
+            if not first_names_compatible(merged.at[idx, dk_name_col], src_row[source_name_col]):
+                log.info(
+                    "%s: nickname fallback REFUSED DK %r -> source %r (same last name + team + position, "
+                    "but the first names differ)",
+                    source,
+                    merged.at[idx, dk_name_col],
+                    src_row[source_name_col],
+                )
+                continue
             for col in src.columns:
                 if col == "_join_key":
                     continue
@@ -254,7 +282,7 @@ def join_source_to_dk(
             merged.at[idx, "_merge"] = "both"
             claimed.add(src_row["_join_key"])
             log.info(
-                "%s: nickname fallback matched DK %r -> source %r (last name + team + position)",
+                "%s: nickname fallback matched DK %r -> source %r (last name + team + position + first name)",
                 source,
                 merged.at[idx, dk_name_col],
                 src_row[source_name_col],

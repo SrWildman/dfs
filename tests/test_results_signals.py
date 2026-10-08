@@ -150,6 +150,7 @@ def _eval(rows):
         "InjFrom": "",
         "MatchupGroup": "",
         "MatchupTop": False,
+        "Position": "WR",
     }
     return pd.DataFrame([{**base, **r} for r in rows])
 
@@ -157,14 +158,15 @@ def _eval(rows):
 def test_signal_report_computes_means_and_hit_rates_by_hand():
     frame = _eval(
         [
-            {"Edge": "BUY↑", "DkActual": 14.0, "CalPts": 11.0},  # beat both
-            {"Edge": "BUY↑", "DkActual": 8.0, "CalPts": 11.0},  # missed both
+            {"Edge": "USAGE↑", "Position": "RB", "DkActual": 14.0, "CalPts": 11.0},  # beat both
+            {"Edge": "USAGE↑", "Position": "RB", "DkActual": 8.0, "CalPts": 11.0},  # missed both
             {
-                "Edge": "BUY↑ USAGE↑",
+                "Edge": "USAGE↑ INJ+",
+                "Position": "RB",
                 "DkActual": 10.0,
                 "CalPts": 9.0,
             },  # tie vs ProjPts (not a hit), beat CalPts
-            {"Edge": "FADE↓", "DkActual": 6.0, "CalPts": 12.0},
+            {"Edge": "FADE↓", "Position": "TE", "DkActual": 6.0, "CalPts": 12.0},
             {"InjFrom": "questionable", "DkActual": 12.0},
             {"MatchupGroup": "top", "MatchupTop": True, "DkActual": 13.0},
             {"MatchupGroup": "top", "MatchupTop": False, "DkActual": 99.0},  # not a team's top two: excluded
@@ -172,13 +174,14 @@ def test_signal_report_computes_means_and_hit_rates_by_hand():
         ]
     )
     report = results_signals.signal_report(frame).set_index("Signal")
-    buy = report.loc["BUY↑"]
-    assert buy["n"] == 3
-    assert buy["VsProj"] == pytest.approx((4.0 - 2.0 + 0.0) / 3, abs=0.01)
-    assert buy["HitProj"] == pytest.approx(1 / 3, abs=0.001)
-    assert buy["VsCal"] == pytest.approx((3.0 - 3.0 + 1.0) / 3, abs=0.01)
-    assert buy["HitCal"] == pytest.approx(2 / 3, abs=0.001)
-    assert report.loc["USAGE↑", "n"] == 1
+    assert "BUY↑" not in report.index  # removed for good
+    usage = report.loc["USAGE↑"]
+    assert usage["n"] == 3
+    assert usage["VsProj"] == pytest.approx((4.0 - 2.0 + 0.0) / 3, abs=0.01)
+    assert usage["HitProj"] == pytest.approx(1 / 3, abs=0.001)
+    assert usage["VsCal"] == pytest.approx((3.0 - 3.0 + 1.0) / 3, abs=0.01)
+    assert usage["HitCal"] == pytest.approx(2 / 3, abs=0.001)
+    assert report.loc["INJ+ confirmed", "n"] == 1
     fade = report.loc["FADE↓"]
     assert fade["VsProj"] == -4.0 and fade["HitProj"] == 1.0  # a down signal hits when he scores BELOW
     assert report.loc["INJ+ questionable", "n"] == 1
@@ -187,6 +190,31 @@ def test_signal_report_computes_means_and_hit_rates_by_hand():
         report.loc["USAGE↓", "VsProj"]
     )  # listed even when empty
     assert report["Thin"].all()
+
+
+def test_every_position_gets_an_unflagged_baseline_row_with_mean_residual_and_n():
+    frame = _eval(
+        [
+            {"Edge": "USAGE↑", "Position": "RB", "DkActual": 20.0},  # flagged: not in a baseline
+            {"Position": "RB", "DkActual": 12.0},  # unflagged RB: +2 against ProjPts 10
+            {"Position": "RB", "DkActual": 6.0},  # unflagged RB: -4
+            {"Position": "WR", "DkActual": 10.0},
+            {
+                "InjFrom": "questionable",
+                "Position": "WR",
+                "DkActual": 50.0,
+            },  # in a signal group: not baseline
+            {"MatchupGroup": "top", "MatchupTop": True, "Position": "QB", "DkActual": 50.0},  # likewise
+        ]
+    )
+    report = results_signals.signal_report(frame).set_index("Signal")
+    rows = [f"Unflagged {pos}" for pos in ("QB", "RB", "WR", "TE")]
+    assert [r for r in report.index if r.startswith("Unflagged")] == rows
+    rb = report.loc["Unflagged RB"]
+    assert rb["n"] == 2 and rb["VsProj"] == pytest.approx(-1.0)
+    assert report.loc["Unflagged WR", "n"] == 1 and report.loc["Unflagged WR", "VsProj"] == 0.0
+    assert report.loc["Unflagged QB", "n"] == 0 and np.isnan(report.loc["Unflagged QB", "VsProj"])
+    assert np.isnan(rb["HitProj"]) and np.isnan(rb["HitCal"])  # a baseline has no direction
 
 
 def test_reliability_bins_predictions_into_deciles_and_flags_big_gaps_with_enough_n():

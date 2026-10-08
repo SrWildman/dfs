@@ -152,7 +152,8 @@ def test_ffopportunity_returns_both_seasons_with_actual_points_and_fails_soft(mo
     assert sorted(out["season"].unique()) == [2025, 2026]
     this_season = out[out["season"] == 2026].iloc[0]
     assert this_season["dk_actual"] == 17.0 and this_season["xfp"] == pytest.approx(4 + 5 + 1.8)
-    assert out[out["season"] == 2025]["dk_actual"].isna().all()  # last season's actuals are not needed
+    # last season's actuals ride along too: the FADE window runs across the season boundary
+    assert out[out["season"] == 2025]["dk_actual"].notna().all()
 
     monkeypatch.setattr(ffopportunity, "fetch_ffo", _boom)
     empty = ffopportunity.FfopportunitySource().fetch(SyncContext(week=5, season=2026))

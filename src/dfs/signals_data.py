@@ -30,7 +30,6 @@ from dfs.signals import SeasonData
 from dfs.sources import ffopportunity, nflverse_depth, nflverse_injuries
 from dfs.sources import nflverse_files as nf
 from dfs.sources.nflverse_games import GAMES_CSV_URL
-from dfs.usage_metrics import PBP_USAGE_COLUMNS, red_zone_counts
 
 log = get_logger("signals_data")
 
@@ -39,7 +38,6 @@ _STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 _NFLVERSE = nf.NFLVERSE_RELEASES
 STATS_PLAYER_URL = _NFLVERSE + "/stats_player/stats_player_week_{season}.parquet"
 STATS_TEAM_URL = _NFLVERSE + "/stats_team/stats_team_week_{season}.parquet"
-PBP_URL = _NFLVERSE + "/pbp/play_by_play_{season}.parquet"
 
 
 def archive_path(season: int, week: int, stamp: str) -> Path:
@@ -137,7 +135,6 @@ class Fetchers:
     stats_player: Callable[[int], pd.DataFrame] | None = None
     stats_team: Callable[[int], pd.DataFrame] | None = None
     schedule: Callable[[int], pd.DataFrame] | None = None
-    pbp_rz: Callable[[int], pd.DataFrame] | None = None
 
 
 def _fetch_stats_player(season: int) -> pd.DataFrame:
@@ -156,13 +153,6 @@ def _fetch_schedule(season: int) -> pd.DataFrame:
     games = pd.read_csv(io.BytesIO(content))
     games = games[(games["season"] == season) & (games["game_type"] == "REG")]
     return games[["week", "away_team", "home_team", "away_score", "home_score"]].reset_index(drop=True)
-
-
-def _fetch_pbp_rz(season: int) -> pd.DataFrame:
-    """Red-zone opportunities per player-week (`GsisId`, `week`, `rz`) from the season's play-by-play."""
-    content = nf.download(PBP_URL.format(season=season), what=f"{season} play-by-play")
-    pbp = nf.read_parquet(content, PBP_USAGE_COLUMNS, what=f"{season} play-by-play")
-    return red_zone_counts(pbp)[["GsisId", "week", "rz"]]
 
 
 def load_season_data(
@@ -219,7 +209,8 @@ def load_season_data(
         sp, st = cached("stats_player", season, fetch_player), cached("stats_team", season, fetch_team)
         if sp is not None and st is not None:
             data.dst_actual = results_actual.score_dst_actual(st, sp, data.schedule)
-    # Last season: only the matchup blend and with-or-without use it, so a failure costs only those.
+    # Last season: the matchup blend, with-or-without and the signal windows (which run across the season
+    # boundary, as the research's do) use it, so a failure costs only those.
     prior = season - 1
     sp_prior = cached("stats_player", prior, fetch_player)
     st_prior = cached("stats_team", prior, fetch_team)
@@ -228,17 +219,16 @@ def load_season_data(
         data.offense_actual_prior = results_actual.score_offense_actual(sp_prior)
         if st_prior is not None and data.schedule_prior is not None:
             data.dst_actual_prior = results_actual.score_dst_actual(st_prior, sp_prior, data.schedule_prior)
-    if data.ffo_weeks is not None and data.offense_actual is not None:
-        current = data.ffo_weeks["season"] == season
-        joined = xfp.attach_actual_points(
-            data.ffo_weeks[current].drop(columns="dk_actual", errors="ignore"), data.offense_actual
-        )
-        data.ffo_weeks = pd.concat([data.ffo_weeks[~current], joined], ignore_index=True)
+    if data.ffo_weeks is not None:
+        joined = data.ffo_weeks
+        for year, actual in ((season, data.offense_actual), (prior, data.offense_actual_prior)):
+            if actual is not None:
+                joined = xfp.attach_actual_points(joined, actual, year)
+        data.ffo_weeks = joined
 
     if not heavy_only:
         data.injuries = attempt(f"{season} injuries", lambda: f.injuries(season))
         data.depth = attempt(f"{season} depth charts", lambda: f.depth(season))
-    data.rz_by_week = attempt(f"{season} play-by-play", lambda: (f.pbp_rz or _fetch_pbp_rz)(season))
     return data, notes
 
 
@@ -258,7 +248,6 @@ HEAVY_FIELDS = (
     "dst_actual_prior",
     "schedule",
     "schedule_prior",
-    "rz_by_week",
 )
 
 
@@ -283,7 +272,7 @@ def load_current_data(
 ) -> tuple[SeasonData, list[str]]:
     """The inputs for the CURRENT slate, as the sync sees them. The three fast files (ffopportunity,
     injuries, depth chart) are what the sync just saved under `data/current/`. The heavy ones (this and
-    last season's results, the schedules, red-zone play-by-play) are downloaded on a full sync
+    last season's results, the schedules) are downloaded on a full sync
     (`refresh=True`) and cached in `data/current/signals_inputs.pkl`; `--live` reuses that cache and never
     re-downloads history (when there is no cache yet it downloads once). Returns (data, notes)."""
     data = SeasonData(season=season, ffo_weeks=_saved("ffopportunity"), injuries=_saved("nflverse_injuries"))
@@ -307,4 +296,10 @@ def load_current_data(
             notes.append(f"signals cache not written: {e}")
     for name in HEAVY_FIELDS:
         setattr(data, name, heavy.get(name))
+    # The saved ffopportunity file may predate last season's actual points (the FADE window runs across the
+    # season boundary): join both seasons' real DK points from the cached results, which is idempotent.
+    if data.ffo_weeks is not None and not data.ffo_weeks.empty:
+        for year, actual in ((season, data.offense_actual), (season - 1, data.offense_actual_prior)):
+            if actual is not None:
+                data.ffo_weeks = xfp.attach_actual_points(data.ffo_weeks, actual, year)
     return data, notes

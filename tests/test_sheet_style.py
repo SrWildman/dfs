@@ -1502,6 +1502,10 @@ class FakeBuilderTabClient:
         self.multi_range_calls: list[dict] = []
         self.hide_calls: list[tuple[str, str, bool]] = []
         self._grouped_column_indices = grouped_column_indices or set()
+        self.notes: list[tuple[str, str]] = []
+
+    def set_note(self, tab_name: str, cell: str, text: str) -> None:
+        self.notes.append((cell, text))
 
     def tab_exists(self, tab_name: str) -> bool:
         return True

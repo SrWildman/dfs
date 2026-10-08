@@ -61,9 +61,17 @@ _DST_LOW = (
 )
 _MODEL = "From the outcome-distribution tables in docs/MODEL.md, applied to CalPts."
 
+_WEATHER_NOTE = (
+    "WIND flag: fires at 15 mph or more (research: QBs lose about a point from 10 mph, flat out to 20; the "
+    "old 20 mph line caught only a fifth as many games). Rain and cold are CONTEXT only, not in CalPts and "
+    "not a flag: rain cost QBs about 1.7 points and each 10°F under 50°F about 0.5 (WR/TE less); Temp and "
+    "Precip are on WeatherRaw. Domes and closed roofs have no wind."
+)
+
 EDGE_FINDER_NOTES = {
+    "Wind": "Forecast sustained wind (mph) at kickoff. " + _WEATHER_NOTE,
     "CalPts": (
-        "CALIBRATED PROJECTION: every source (TFFB, Sleeper, FantasyPros, UM) with its level bias corrected "
+        "CALIBRATED PROJECTION: every source (TFFB, Sleeper, FantasyPros) with its level bias corrected "
         "per position and salary tier (shrunk toward zero), then weighted by how accurate each has been. "
         "Fitted only on weeks BEFORE this one. Not the default projection: Model Check's Projection Race "
         "shows whether it earns that. Coloured within his position."
@@ -91,14 +99,16 @@ EDGE_FINDER_NOTES = {
         f"scored). Coloured within position. {_CONTEXT_LABEL}"
     ),
     "Edge": (
-        "TOKENS (context, not proven edges): INJ+ a teammate is out and he inherits his volume; BUY↑ he has "
-        "scored well under his expected points over 3 games; FADE↓ well over, on touchdown luck; USAGE↑ / "
-        f"USAGE↓ his last 2 games against earlier ones. {_CONTEXT_LABEL} Not part of Flags: bold names are "
+        "TOKENS (context, not proven edges): INJ+ a back ahead of him is out and he inherits carries (the "
+        "measured split from 12 seasons); FADE↓ a tight end scoring 2+ points a game above his expected "
+        "points over 3 games; USAGE↑ / USAGE↓ a back whose carry share rose 10+ points / fell 5+ points "
+        f"over his last 2 games against the 6 before. {_CONTEXT_LABEL} Not part of Flags: bold names are "
         "unchanged."
     ),
 }
 
 SLATE_GAME_NOTES = {
+    "Wind": "Forecast sustained wind (mph) at kickoff. " + _WEATHER_NOTE,
     "GameEnv": (
         "GAME ENVIRONMENT (0-100): how shootout-friendly the game is -- an equal-weight percentile blend of "
         "total, spread tightness, combined pace and PROE. This is the average of both teams' values."
@@ -212,8 +222,8 @@ MODEL_CHECK_NOTES = {
     "CV": "Coefficient of variation of the weekly MAE (std / mean): lower = steadier week to week.",
     "Projection": (
         "TFFB = TFFB's own ProjPts; AggPts = the equal-weight average of every source; CalPts = each source "
-        "bias-corrected by position and salary tier, then weighted. All three are judged on weeks CalPts "
-        "did not train on."
+        "bias-corrected by position and salary tier, then weighted (TFFB, Sleeper, FantasyPros; not UM). "
+        "UM = the UM model, tracked as its own row. All are judged on weeks CalPts did not train on."
     ),
     "ρ (rank)": (
         "Rank correlation within position and week (averaged over groups of 5+, weighted by n): does the "
@@ -223,8 +233,6 @@ MODEL_CHECK_NOTES = {
     "TFFB MAE": "TFFB's mean absolute miss that week.",
     "AggPts MAE": "AggPts' mean absolute miss that week.",
     "UM MAE": "The UM model's mean absolute miss that week, on the players it rates.",
-    "CalPts (no UM) MAE": "CalPts without the UM source: mean absolute miss that week.",
-    "CalPts (no UM) ρ": "CalPts without the UM source: rank correlation that week.",
     "Measure": (
         "Hit 3x = P(actual >= 3 x salary/$1,000), Boom 4x = P(actual >= 4x), Bust under 2x = P(actual < 2x): "
         "the three probability columns, judged on whether they happened."
@@ -239,9 +247,10 @@ MODEL_CHECK_NOTES = {
     "AggPts ρ": "AggPts' rank correlation that week.",
     "CalPts ρ": "CalPts' rank correlation that week.",
     "Signal": (
-        "A context signal: BUY↑/FADE↓ (xFP vs actual), USAGE↑/USAGE↓ (last 2 games vs earlier), INJ+ "
-        "(a teammate is out), and the top-8 / bottom-4 position matchups. Context, not proven to beat "
-        "projections."
+        "A context signal: FADE↓ (TEs only, DK points vs expected), USAGE↑/USAGE↓ (RB carry share, last 2 "
+        "games vs the 6 before), INJ+ (a back ahead of him is out), and the top-8 / bottom-4 position "
+        "matchups. 'Unflagged QB/RB/WR/TE' rows are the same position with no signal at all: read each "
+        "signal against them. Context, not proven to beat projections."
     ),
     "Actual - ProjPts": (
         "Mean of (actual minus TFFB ProjPts) for the group. Positive = they beat the projection."

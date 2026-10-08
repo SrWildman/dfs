@@ -35,14 +35,12 @@ SIGNAL_COLUMNS = [
     "Salary",
     "GameStart",
     "ProjPts",
-    "UmPts",
     "CalPts",
     *probabilities.PROB_COLUMNS,
     "LowConf",
     "Games",
     "xFP/G",
     "DkG",
-    "TdExcess",
     "UsageN",
     "InjFrom",
     "InjGain",
@@ -52,7 +50,7 @@ SIGNAL_COLUMNS = [
     "MatchupRank",
     "Edge",
 ]
-TOKEN_ORDER = [ib.TOKEN_INJ, xfp.TOKEN_BUY, xfp.TOKEN_FADE, xfp.TOKEN_USAGE_UP, xfp.TOKEN_USAGE_DOWN]
+TOKEN_ORDER = [ib.TOKEN_INJ, xfp.TOKEN_FADE, xfp.TOKEN_USAGE_UP, xfp.TOKEN_USAGE_DOWN]
 SOURCE_NAMES = ("ffopportunity", "injuries", "depth")
 
 
@@ -65,7 +63,6 @@ class SeasonData:
     ffo_weeks: pd.DataFrame | None = (
         None  # xfp.player_weeks, this AND last season, `dk_actual` on this season
     )
-    rz_by_week: pd.DataFrame | None = None  # GsisId, week, rz (red-zone targets + carries), this season
     injuries: pd.DataFrame | None = None  # nflverse_injuries.OUTPUT_COLUMNS
     depth: pd.DataFrame | None = None  # nflverse_depth.OUTPUT_COLUMNS (one or many snapshots)
     offense_actual: pd.DataFrame | None = None  # results_actual.score_offense_actual, this season
@@ -78,13 +75,15 @@ class SeasonData:
 
 @dataclass
 class SignalOutput:
-    """One slate's signals: the player table (`SIGNAL_COLUMNS`), the outs, the beneficiaries and the matchup
-    rows (top and bottom per position), plus the join coverage for the report."""
+    """One slate's signals: the player table (`SIGNAL_COLUMNS`), the outs, the carry beneficiaries, the
+    matchup rows (top and bottom per position) and the confirmed absences of regulars (context), plus the
+    join coverage for the report."""
 
     players: pd.DataFrame
     outs: pd.DataFrame
     beneficiaries: pd.DataFrame
     matchups: pd.DataFrame
+    absences: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=ib.ABSENCE_COLUMNS))
     coverage: dict[str, tuple[int, int]] = field(default_factory=dict)  # source -> (matched, rosterable pool)
 
 
@@ -149,27 +148,28 @@ def attach_gsis(frame: pd.DataFrame, identity: pd.DataFrame) -> tuple[pd.DataFra
 
 
 def season_weeks(data: SeasonData) -> pd.DataFrame:
-    """This season's player-weeks from `data.ffo_weeks` (empty frame when there are none)."""
+    """Every player-week the signals may look at: this AND last season (the research's windows run across the
+    season boundary), `dk_actual` on both. Empty frame when there are none."""
     if not _has(data.ffo_weeks):
         return pd.DataFrame(columns=[*xfp.PLAYER_WEEK_COLUMNS, "dk_actual"])
-    weeks = data.ffo_weeks
-    return weeks[pd.to_numeric(weeks["season"], errors="coerce") == data.season]
+    return data.ffo_weeks
 
 
 def player_tokens(frame: pd.DataFrame, data: SeasonData, *, week: int) -> pd.DataFrame:
-    """Per frame row (index-aligned): `Games`, `xFP/G`, `DkG`, `TdExcess`, `UsageN`, and the BUY/FADE and
-    USAGE tokens. Blank (NaN / "") where the player has no ffopportunity history."""
-    cols = ["Games", "xFP/G", "DkG", "TdExcess", "UsageN", "TokenBuyFade", "TokenUsage", "XfpTopHalf"]
+    """Per frame row (index-aligned): `Games`, `xFP/G`, `DkG`, `UsageN`, and the FADE and USAGE tokens. Blank
+    (NaN / "") where the player has no ffopportunity history."""
+    cols = ["Games", "xFP/G", "DkG", "UsageN", "TokenFade", "TokenUsage", "XfpTopHalf"]
     out = pd.DataFrame(index=frame.index, columns=cols, dtype=object)
-    out[["TokenBuyFade", "TokenUsage"]] = ""
+    out[["TokenFade", "TokenUsage"]] = ""
     weeks = season_weeks(data)
     if weeks.empty or "GsisId" not in frame.columns:
         return out
-    windows = xfp.xfp_windows(weeks, before_week=week)
+    before = (data.season, week)
+    windows = xfp.xfp_windows(weeks, before=before)
     mapped = frame["GsisId"].map(lambda g: g if g in windows.index else np.nan)
     have = mapped.notna()
     values = windows.reindex(mapped[have])
-    for column in ("Games", "xFP/G", "DkG", "TdExcess"):
+    for column in ("Games", "xFP/G", "DkG"):
         out.loc[have, column] = values[column].to_numpy()
     pool = frame["RosterablePool"].astype(bool) if "RosterablePool" in frame.columns else None
     xfp_g = pd.to_numeric(out["xFP/G"], errors="coerce")
@@ -181,14 +181,17 @@ def player_tokens(frame: pd.DataFrame, data: SeasonData, *, week: int) -> pd.Dat
             {
                 "xFP/G": xfp_g[have].to_numpy(),
                 "DkG": pd.to_numeric(out.loc[have, "DkG"], errors="coerce").to_numpy(),
-                "TdExcess": pd.to_numeric(out.loc[have, "TdExcess"], errors="coerce").to_numpy(),
                 "Games": pd.to_numeric(out.loc[have, "Games"], errors="coerce").to_numpy(),
             },
             index=mapped[have].to_numpy(),
         )
-        tokens = xfp.buy_fade_tokens(by_player, pd.Series(top_half[have].to_numpy(), index=by_player.index))
-        out.loc[have, "TokenBuyFade"] = tokens.to_numpy()
-    jumps = xfp.usage_jumps(weeks, data.rz_by_week, before_week=week)
+        tokens = xfp.fade_tokens(
+            by_player,
+            pd.Series(top_half[have].to_numpy(), index=by_player.index),
+            pd.Series(frame.loc[have, "Position"].to_numpy(), index=by_player.index),
+        )
+        out.loc[have, "TokenFade"] = tokens.to_numpy()
+    jumps = xfp.usage_jumps(weeks, before=before)
     if not jumps.empty:
         ids = frame["GsisId"].map(lambda g: g if g in jumps.index else np.nan)
         j = ids.notna()
@@ -298,8 +301,8 @@ def attach_priced_in(
     dk_snapshots: list[tuple[str, pd.DataFrame]] | None,
     projection_snapshots: list[tuple[str, pd.DataFrame]] | None,
 ) -> pd.DataFrame:
-    """Add `PricedIn` (`yes` / `no` / `unknown`) to the beneficiary table. A beneficiary of several outs is
-    judged against the earliest designation among the outs that fed him."""
+    """Add `PricedIn` (`yes` / `no` / blank when it cannot be told) to the beneficiary table. A beneficiary
+    of several outs is judged against the earliest designation among the outs that fed him."""
     out = benef.copy()
     out["PricedIn"] = ib.PRICED_UNKNOWN
     if out.empty or not dk_snapshots or not projection_snapshots:
@@ -390,33 +393,20 @@ def build_signals(
 
     tokens = player_tokens(frame, data, week=week)
     outs = find_outs(frame, data, week=week)
-    weeks = season_weeks(data)
-    windows = xfp.xfp_windows(weeks, before_week=week)
-    people = identity_frame(weeks.sort_values("week", ascending=False), data.injuries)
-    benef = ib.beneficiaries(
-        outs,
-        windows,
-        people,
-        data.ffo_weeks if _has(data.ffo_weeks) else pd.DataFrame(columns=xfp.PLAYER_WEEK_COLUMNS),
-        ib.latest_depth(data.depth, depth_dt),
-        before=(data.season, week),
-    )
+    history = data.ffo_weeks if _has(data.ffo_weeks) else pd.DataFrame(columns=xfp.PLAYER_WEEK_COLUMNS)
+    depth_rows = ib.latest_depth(data.depth, depth_dt)
+    benef = ib.beneficiaries(outs, history, depth_rows, before=(data.season, week))
+    absent = ib.absences(outs, history, depth_rows, before=(data.season, week))
     benef = attach_priced_in(benef, outs, frame, dk_snapshots, projection_snapshots)
 
     players = frame.copy()
     for column in ("GameStart", "CalPts"):
         if column not in players.columns:
             players[column] = np.nan
-    if "UmPts" not in players.columns:
-        players["UmPts"] = np.nan
     for column, value in probabilities.outcome_columns(players).items():
         players[column] = value
     players["Games"], players["xFP/G"] = tokens["Games"], tokens["xFP/G"]
-    players["DkG"], players["TdExcess"], players["UsageN"] = (
-        tokens["DkG"],
-        tokens["TdExcess"],
-        tokens["UsageN"],
-    )
+    players["DkG"], players["UsageN"] = tokens["DkG"], tokens["UsageN"]
 
     players["InjFrom"], players["InjGain"], players["InjMethod"], players["PricedIn"] = "", np.nan, "", ""
     if not benef.empty:
@@ -454,12 +444,13 @@ def build_signals(
                 players.at[idx, "MatchupGroup"] = key.loc[k, "Group"]
                 players.at[idx, "MatchupRank"] = key.loc[k, "Rank"]
 
-    players["Edge"] = _join_tokens(inj_token, tokens["TokenBuyFade"], tokens["TokenUsage"])
+    players["Edge"] = _join_tokens(inj_token, tokens["TokenFade"], tokens["TokenUsage"])
     return SignalOutput(
         players=players[[c for c in SIGNAL_COLUMNS if c in players.columns]],
         outs=outs,
         beneficiaries=benef,
         matchups=matchup_rows,
+        absences=absent,
         coverage=coverage,
     )
 

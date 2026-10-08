@@ -15,9 +15,9 @@ right). Matchup rows use `A` Position, `B` Team, `C` Opp, `D` Score, `N` reasons
 players whose `CalPts` is at least the position's median); GPP upside per position (top `SECTION_TOP_N` by
 `Boom%`, a star when `Boom%` is in the top quartile AND `Own%` in the bottom half, once ownership has
 published); projection disagreements (largest |CalPts - ProjPts| per position, both directions, with the
-reason); injury beneficiaries (confirmed out first, then questionable, muted, with "Priced in?"); matchups by
-position (top 8, bottom 4, with reasons); context signals (unproven, muted). A section is capped, with "+N
-more" in its heading.
+reason); injury beneficiaries (carries only: confirmed out first, then questionable, muted, then every absent
+regular as context); matchups (context only: top 8, bottom 4, with reasons); context signals (unproven,
+muted). A section is capped, with "+N more" in its heading.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ import pandas as pd
 from dfs import calibration
 from dfs.derived import _rosterable_pool_mask
 from dfs.edge_finder import (
+    ABSENCES_FILE,
     BENEFICIARIES_FILE,
     MATCHUPS_FILE,
     OUTPUT_DIR,
@@ -63,7 +64,6 @@ GPP_COLUMNS = [*PLAYER_COLUMNS, "CalPts", "Boom%", "CeilM", "Own%", "Edge", "★
 DISAGREE_COLUMNS = [*PLAYER_COLUMNS, "ProjPts", "CalPts", "Diff"]
 BENEFICIARY_COLUMNS = [
     *PLAYER_COLUMNS,
-    "Gain Tgt/G",
     "Gain Car/G",
     "Gain xFP/G",
     "Method",
@@ -71,7 +71,8 @@ BENEFICIARY_COLUMNS = [
     "Edge",
 ]
 MATCHUP_COLUMNS = ["Position", "Team", "Opp", "Score", "Group"]
-SIGNAL_COLUMNS = [*PLAYER_COLUMNS, "Token", "xFP/G", "DK/G L3", "TD vs exp", "Usage n"]
+ABSENCE_COLUMNS = [*PLAYER_COLUMNS, "Role", "Tgt/G", "Car/G", "Games missed"]
+SIGNAL_COLUMNS = [*PLAYER_COLUMNS, "Token", "xFP/G", "DK/G L3"]
 TRAILING = {"K": "Pool", "L": "↗", "M": "Games", "N": "Notes"}
 
 
@@ -85,6 +86,7 @@ class Inputs:
     beneficiaries: pd.DataFrame
     matchups: pd.DataFrame
     status: dict
+    absences: pd.DataFrame = field(default_factory=pd.DataFrame)
     calibration: calibration.Calibration | None = None
 
 
@@ -141,6 +143,7 @@ def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None
         players=players,
         beneficiaries=_read(OUTPUT_DIR / BENEFICIARIES_FILE),
         matchups=_read(OUTPUT_DIR / MATCHUPS_FILE),
+        absences=_read(OUTPUT_DIR / ABSENCES_FILE),
         status=status,
         calibration=fitted,
     )
@@ -226,6 +229,13 @@ class _Builder:
         return row
 
 
+def on_slate(beneficiaries: pd.DataFrame, by_gsis: pd.DataFrame) -> pd.DataFrame:
+    """Only beneficiaries DraftKings lists this week (a back with no salary is no option)."""
+    if beneficiaries is None or beneficiaries.empty or by_gsis.empty:
+        return beneficiaries.iloc[0:0] if beneficiaries is not None else pd.DataFrame()
+    return beneficiaries[beneficiaries["GsisId"].isin(by_gsis.index)]
+
+
 def _games(value) -> object:
     return "" if pd.isna(value) else int(value)
 
@@ -248,11 +258,28 @@ def _status_lines(inputs: Inputs) -> list[str]:
         f"Week {s.get('week', '?')} · stats through Week {s.get('stats_through_week', '?')} · "
         f"injury report for Week {s.get('injury_report_week', '?')} · "
         f"depth chart {s.get('depth_chart_dt') or 'unknown'}",
-        f"Projection snapshot {snap_text} · CalPts trained on {trained} ({sources}) · UM rates "
-        f"{s.get('um_players', 0)} players",
+        _injury_report_line(s.get("injury_report")),
+        f"Projection snapshot {snap_text} · CalPts trained on {trained} ({sources})",
         "Final `dfs sync --live` after inactives (~90 min before kickoff). Context columns are not proven to "
         "beat projections; Model Check tracks every one.",
     ]
+
+
+def _injury_report_line(info: dict | None) -> str:
+    """Where the injury statuses came from and how complete that source was when fetched. A report with no
+    final statuses yet is a timing fact (teams publish them Friday), not a fault."""
+    if not info:
+        return "Injury report: not recorded for this sync (statuses come from DraftKings' Avail)."
+    fetched = str(info.get("fetched") or "")
+    when = f"{fetched[:10]} {fetched[11:16]} UTC" if len(fetched) >= 16 else "unknown time"
+    rows, with_status = int(info.get("rows") or 0), int(info.get("with_status") or 0)
+    text = (
+        f"Injury report: nflverse injuries release, Week {info.get('week', '?')}: {rows} rows, "
+        f"{with_status} with a final status, fetched {when}."
+    )
+    if with_status == 0:
+        text += " Practice reports only so far (final statuses come Friday): outs are DraftKings' Avail."
+    return text
 
 
 def cash_core(edge: pd.DataFrame, position: str) -> pd.DataFrame:
@@ -298,7 +325,7 @@ def disagreement_reason(row: pd.Series, fitted: calibration.Calibration | None) 
             labels = calibration.tier_labels(position)
             # raw = mean(actual - TFFB): negative = TFFB runs high
             parts.append(f"TFFB runs {raw:+.1f} on {position}s {labels[tier]} (n={n})")
-    others = [pd.to_numeric(row.get(c), errors="coerce") for c in ("SleeperPts", "FantasyProsPts", "UmPts")]
+    others = [pd.to_numeric(row.get(c), errors="coerce") for c in ("SleeperPts", "FantasyProsPts")]
     others = [v for v in others if pd.notna(v)]
     if others:
         parts.append(f"other sources avg {np.mean(others) - row['ProjPts']:+.1f} vs TFFB")
@@ -315,8 +342,8 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
             "CASH CORE  —  best Hit3x% per position",
             "GPP UPSIDE  —  best Boom% per position",
             "PROJECTION DISAGREEMENTS  —  where CalPts differs most from TFFB",
-            "INJURY BENEFICIARIES  —  who inherits an out player's volume",
-            "MATCHUPS BY POSITION  —  softest and toughest offenses",
+            "INJURY BENEFICIARIES  —  who inherits a back's carries; absences are context",
+            "MATCHUPS (CONTEXT)  —  softest and toughest offenses",
             "CONTEXT SIGNALS  —  unproven",
         ):
             b.section(title)
@@ -324,7 +351,7 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
         return b.layout
 
     edge = with_games(inputs.edge, inputs.players)
-    for col in ("SleeperPts", "FantasyProsPts", "UmPts"):
+    for col in ("SleeperPts", "FantasyProsPts"):
         if col in inputs.players.columns and col not in edge.columns:
             edge = edge.merge(inputs.players[["Id", col]].drop_duplicates("Id"), on="Id", how="left")
     for line in _status_lines(inputs):
@@ -435,21 +462,22 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
                 )
 
     # ---- Injury beneficiaries ----------------------------------------------------------------
-    b.section(
-        "INJURY BENEFICIARIES  —  who inherits an out player's volume (confirmed first, questionable muted)"
-    )
+    b.section("INJURY BENEFICIARIES  —  who inherits a back's carries (confirmed first, questionable muted)")
     b.note(
-        "INJ+ marks a confirmed beneficiary worth at least 1 xFP/G. Priced in? compares TFFB's projection "
-        "before and after the designation."
+        "CARRIES ONLY. When a regular back is out, the measured split of his carries (12 seasons) goes to "
+        "the backs behind him and the share that historically goes to nobody stays unassigned; a "
+        "with-or-without split (2+ missed games) replaces it. INJ+ marks a confirmed beneficiary worth at "
+        "least 1 expected point a game. Priced in? is blank until a projection snapshot from before the "
+        "out designation exists."
     )
     b.header(BENEFICIARY_COLUMNS)
     ben = inputs.beneficiaries
+    by_gsis = (
+        edge.drop_duplicates("GsisId").set_index("GsisId") if "GsisId" in edge.columns else pd.DataFrame()
+    )
     if ben.empty:
-        b.note("No out or questionable skill players with a beneficiary this week.")
+        b.note("No regular back is out or questionable with a beneficiary this week.")
     else:
-        by_gsis = (
-            edge.drop_duplicates("GsisId").set_index("GsisId") if "GsisId" in edge.columns else pd.DataFrame()
-        )
         for status, label, cap, muted in (
             ("out", "Confirmed out (DraftKings or the injury report)", BENEFICIARY_CONFIRMED_N, False),
             ("questionable", "Questionable (assumed to play: muted)", BENEFICIARY_QUESTIONABLE_N, True),
@@ -471,23 +499,54 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
                         r["Position"],
                         r["Team"],
                         salary,
-                        round(r["tgt_gain"], 1),
                         round(r["car_gain"], 1),
                         round(r["xfp_gain"], 1),
                         r["Method"] + (f" ({int(r['n'])} g)" if r["Method"] == "with-or-without" else ""),
-                        r.get("PricedIn", "unknown"),
+                        r.get("PricedIn", ""),
                         edge_text,
                     ],
                     games=games,
                     note=f"out: {r['OutPlayers']}",
                     muted=muted,
                 )
+    # Every confirmed absence of a regular, as context. No points are attached, for any position.
+    absent = inputs.absences
+    b.sub("Absent regulars  —  context, not an edge (no points are moved for targets)")
+    b.note(
+        "Out of sample, handing a missing receiver's targets to the next man up predicted WORSE than doing "
+        "nothing, so no target gain is computed and INJ+ never fires from one. Historical split and the "
+        "with-or-without split (2+ missed games, display only for targets) on the right."
+    )
+    b.header(ABSENCE_COLUMNS)
+    if absent is None or absent.empty:
+        b.note("No regular is confirmed out this week.")
+    else:
+        for _, r in absent.iterrows():
+            info = by_gsis.loc[r["GsisId"]] if r["GsisId"] in by_gsis.index else None
+            salary = info["Salary"] if info is not None else ""
+            texts = [str(t) for t in (r.get("WithWithout"), r.get("History")) if isinstance(t, str) and t]
+            b.player_row(
+                [
+                    r["Name"],
+                    r["Position"],
+                    r["Team"],
+                    salary,
+                    r["Role"],
+                    round(r["tgt_g"], 1),
+                    round(r["car_g"], 1),
+                    int(r["GamesMissed"]),
+                ],
+                games="",
+                note=f"{r.get('Regular', '')}  |  " + "  |  ".join(texts),
+                muted=True,
+            )
 
     # ---- Matchups -----------------------------------------------------------------------------
-    b.section("MATCHUPS BY POSITION  —  the 8 best and 4 toughest offenses (DST: the defense's spot)")
+    b.section("MATCHUPS (CONTEXT)  —  the 8 best and 4 toughest offenses (DST: the defense's spot)")
     b.note(
-        "Score = mean z of the opponent's adjusted points allowed, EPA, implied total, pace and PROE. "
-        "Reasons and top-2 players by CalPts on the right."
+        "CONTEXT ONLY: nothing here feeds CalPts or any flag (research: matchups add under 0.04 points of "
+        "error beyond the projection). Score = mean z of the opponent's adjusted points allowed, EPA, "
+        "implied total, pace and PROE. Reasons and top-2 players by CalPts on the right."
     )
     b.header(MATCHUP_COLUMNS)
     mu = inputs.matchups
@@ -524,11 +583,12 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
     # ---- Context signals ------------------------------------------------------------------------
     b.section("CONTEXT SIGNALS  —  unproven; tracked in Model Check")
     b.note(
-        "BUY↑ / FADE↓: last-3 DK points per game against expected. USAGE↑ / USAGE↓: last 2 games against "
-        "earlier ones. Muted on purpose."
+        "FADE↓ (TEs only): last-3 DK points per game at least 2.0 above expected. USAGE↑ / USAGE↓ (RBs "
+        "only): carry share of the last 2 games up 10+ points / down 5+ points against the 6 before. "
+        "Muted on purpose."
     )
     b.header(SIGNAL_COLUMNS)
-    tokens = ["BUY↑", "FADE↓", "USAGE↑", "USAGE↓"]
+    tokens = ["FADE↓", "USAGE↑", "USAGE↓"]
     pool = rosterable(edge)
     for token in tokens:
         has = edge["Edge"].fillna("").astype(str).str.split().map(lambda t, k=token: k in t)
@@ -550,8 +610,6 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
                     token,
                     r["xFP/G"],
                     r.get("DkG", ""),
-                    r.get("TdExcess", ""),
-                    r.get("UsageN", ""),
                 ],
                 games=_games(r.get("Games")),
                 note="context",
@@ -585,11 +643,11 @@ def _mark_formats(layout: Layout) -> None:
                 "CeilM",
                 "Diff",
                 "xFP/G",
-                "Gain Tgt/G",
+                "Tgt/G",
+                "Car/G",
                 "Gain Car/G",
                 "Gain xFP/G",
                 "DK/G L3",
-                "TD vs exp",
                 "Score",
             ):
                 layout.point_cells.append(rng)
@@ -640,13 +698,22 @@ def board_panel_lines(inputs: Inputs | None) -> list[str]:
         "Biggest disagreements with TFFB: "
         + (" · ".join(_name_with(r, f"CalPts {r['Diff']:+.1f}") for _, r in diffs.iterrows()) or "none"),
     ]
-    ben = inputs.beneficiaries
+    by_gsis = (
+        edge.drop_duplicates("GsisId").set_index("GsisId") if "GsisId" in edge.columns else pd.DataFrame()
+    )
+    ben = on_slate(inputs.beneficiaries, by_gsis)
     confirmed = ben[ben["OutStatus"] == "out"].head(BOARD_TOP_INJURY) if not ben.empty else ben
     lines.append(
-        "Injury beneficiaries: "
+        "Injury beneficiaries (carries): "
         + (
             " · ".join(
-                f"{r['Name']} ({r['Position']}, +{r['xfp_gain']:.1f} xFP/G, {r.get('PricedIn', 'unknown')})"
+                f"{r['Name']} ({r['Position']}, +{r['xfp_gain']:.1f} xFP/G"
+                + (
+                    f", priced in: {r['PricedIn']}"
+                    if isinstance(r.get("PricedIn"), str) and r["PricedIn"]
+                    else ""
+                )
+                + ")"
                 for _, r in confirmed.iterrows()
             )
             or "none"

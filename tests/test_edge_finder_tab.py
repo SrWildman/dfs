@@ -46,8 +46,7 @@ def _players_table(edge):
             "Id": edge["Id"],
             "Games": 3,
             "DkG": 10.0,
-            "TdExcess": 0.0,
-            "UsageN": 2,
+            "UsageN": 8,
             "GsisId": edge["Id"].astype(str),
         }
     )
@@ -59,7 +58,7 @@ def _inputs(edge, **kw):
         "players": _players_table(edge),
         "beneficiaries": pd.DataFrame(),
         "matchups": pd.DataFrame(),
-        "status": {"week": 5, "calpts_weeks": [1, 2, 3, 4], "calpts_sources": ["ProjPts"], "um_players": 9},
+        "status": {"week": 5, "calpts_weeks": [1, 2, 3, 4], "calpts_sources": ["ProjPts"]},
     }
     return eft.Inputs(**{**base, **kw})
 
@@ -137,7 +136,7 @@ def test_the_empty_state_layout_has_every_section_and_says_nothing_yet():
         "GPP UPSIDE",
         "PROJECTION DISAGREEMENTS",
         "INJURY BENEFICIARIES",
-        "MATCHUPS BY POSITION",
+        "MATCHUPS (CONTEXT)",
         "CONTEXT SIGNALS",
     ]
     assert layout.pool_rows == []
@@ -188,7 +187,7 @@ def test_rows_under_three_games_are_marked_muted_by_the_games_column():
     assert layout.rows[[r for r in layout.pool_rows if layout.rows[r - 1][0] == "WR2"][0] - 1][games_col] == 2
 
 
-def test_beneficiaries_confirmed_first_then_questionable_muted_with_priced_in():
+def test_beneficiaries_confirmed_first_then_questionable_muted_with_a_blank_priced_in_when_unknown():
     edge = _edge([_player(1), _player(2)])
     ben = pd.DataFrame(
         [
@@ -199,13 +198,12 @@ def test_beneficiaries_confirmed_first_then_questionable_muted_with_priced_in():
                 "Position": "WR",
                 "OutStatus": "questionable",
                 "OutPlayers": "X",
-                "tgt_gain": 2.0,
                 "car_gain": 0.0,
                 "xfp_gain": 3.0,
-                "Method": "depth chart",
+                "Method": "measured table",
                 "n": 0,
                 "Token": "INJ+",
-                "PricedIn": "unknown",
+                "PricedIn": "",
             },
             {
                 "GsisId": "2",
@@ -214,7 +212,6 @@ def test_beneficiaries_confirmed_first_then_questionable_muted_with_priced_in():
                 "Position": "WR",
                 "OutStatus": "out",
                 "OutPlayers": "Y",
-                "tgt_gain": 4.0,
                 "car_gain": 0.0,
                 "xfp_gain": 6.0,
                 "Method": "with-or-without",
@@ -242,7 +239,15 @@ def test_beneficiaries_confirmed_first_then_questionable_muted_with_priced_in():
         for r in layout.pool_rows
         if layout.rows[r - 1][0] == "WR2" and "out:" in str(layout.rows[r - 1][13])
     ][0]
-    assert confirmed[7] == "with-or-without (3 g)" and confirmed[8] == "yes"
+    assert confirmed[6] == "with-or-without (3 g)" and confirmed[7] == "yes"  # Method, Priced in?
+    assert eft.BENEFICIARY_COLUMNS[:6] == ["Name", "Pos", "Team", "Salary", "Gain Car/G", "Gain xFP/G"]
+    assert "Gain Tgt/G" not in eft.BENEFICIARY_COLUMNS  # no target gains, ever
+    blank = [
+        layout.rows[r - 1]
+        for r in layout.pool_rows
+        if layout.rows[r - 1][0] == "WR1" and "out:" in str(layout.rows[r - 1][13])
+    ][0]
+    assert blank[7] == ""  # unknown reads blank, not the word "unknown"
 
 
 def test_the_pool_and_link_formulas_point_at_edgerawand_reference_their_own_row():
@@ -301,7 +306,7 @@ def test_the_writer_adds_relative_row_rules_so_colour_survives_a_sort_or_filter(
     muting = [r for r in client.rules if r[1] == "CUSTOM_FORMULA"]
     assert len(muting) == 1 and muting[0][2][0].startswith("=AND(ISNUMBER($M") and "$M" in muting[0][2][0]
     chip_texts = {v[0] for _rng, kind, v in client.rules if kind == "TEXT_CONTAINS"}
-    assert chip_texts == {"INJ+", "BUY↑", "FADE↓", "USAGE↑", "USAGE↓"}
+    assert chip_texts == {"INJ+", "FADE↓", "USAGE↑", "USAGE↓"}
     assert client.scales, "Hit3x% / Boom% / Bust% get a gradient"
     assert client.freeze_args == {"rows": 0, "cols": 1}  # no frozen header row: sections are separate blocks
 
@@ -319,4 +324,74 @@ def test_board_panel_is_five_lines_one_each_and_says_none_when_empty():
     lines = eft.board_panel_lines(_inputs(edge))
     assert len(lines) == eft.BOARD_PANEL_LINES == 5
     assert lines[0].startswith("Cash core: ") and "WR5" in lines[0]
-    assert lines[3] == "Injury beneficiaries: none" and lines[4] == "Best offense per position: none"
+    assert (
+        lines[3] == "Injury beneficiaries (carries): none" and lines[4] == "Best offense per position: none"
+    )
+
+
+def _absences():
+    return pd.DataFrame(
+        [
+            {
+                "GsisId": "1",
+                "Name": "WR1",
+                "Team": "DEN",
+                "Position": "WR",
+                "Role": "WR1",
+                "Regular": "28% of team targets",
+                "tgt_g": 8.0,
+                "car_g": 0.0,
+                "GamesMissed": 2,
+                "WithWithoutGames": 2,
+                "WithWithout": "with-or-without (2 g): Z +1.5 targets/G",
+                "History": "historically, no single teammate gains much: WR2 +13% of the vacated targets, "
+                "~27% goes nowhere (n=239)",
+            }
+        ]
+    )
+
+
+def test_every_confirmed_absence_is_listed_muted_as_context_with_the_historical_line():
+    edge = _edge([_player(1), _player(2)])
+    layout = eft.build_layout(_inputs(edge, absences=_absences()))
+    text = [str(c) for r in layout.rows for c in r if c != ""]
+    assert any("Absent regulars" in t and "no points are moved for targets" in t for t in text)
+    row = [r for r in layout.pool_rows if layout.rows[r - 1][4] == "WR1" and "WR1" == layout.rows[r - 1][0]][
+        0
+    ]
+    assert row in layout.muted_rows  # context is muted, never an edge
+    note = layout.rows[row - 1][13]
+    assert "with-or-without (2 g)" in note and "no single teammate gains much" in note and "~27%" in note
+    assert layout.rows[row - 1][4:8] == ["WR1", 8.0, 0.0, 2]  # Role, Tgt/G, Car/G, Games missed
+
+
+def test_the_matchups_section_says_it_is_context_only_and_feeds_nothing():
+    mu = pd.DataFrame(
+        [
+            {
+                "Position": "WR",
+                "Team": "DEN",
+                "Opp": "KC",
+                "Score": 1.0,
+                "Group": "top",
+                "Reasons": "r",
+                "Players": "p",
+            }
+        ]
+    )
+    layout = eft.build_layout(_inputs(_edge([_player(1)]), matchups=mu))
+    titles = [layout.rows[r - 1][0] for r in layout.section_rows]
+    assert any(t.startswith("MATCHUPS (CONTEXT)") for t in titles)
+    assert any("CONTEXT ONLY" in str(c) and "CalPts" in str(c) for r in layout.rows for c in r)
+
+
+def test_the_status_line_names_the_injury_report_source_and_says_when_it_has_no_final_statuses():
+    info = {"source": "nflverse", "week": 5, "rows": 4, "with_status": 0, "fetched": "2026-10-07T12:21:00Z"}
+    layout = eft.build_layout(_inputs(_edge([_player(1)]), status={"week": 5, "injury_report": info}))
+    text = " ".join(str(c) for r in layout.rows for c in r if c != "")
+    assert (
+        "nflverse injuries release, Week 5: 4 rows, 0 with a final status, fetched 2026-10-07 12:21 UTC"
+        in text
+    )
+    assert "Practice reports only so far" in text
+    assert "not recorded" in eft._injury_report_line(None)

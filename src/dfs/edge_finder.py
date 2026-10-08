@@ -7,14 +7,14 @@ two hidden percentile helpers. It also writes the signals archive (`data/signals
 tables (`data/current/edge_finder/`).
 
 **Fail soft, column by column.** Each input is optional: no results history means `CalPts` is AggPts (Week
-1) or blank; no UM cache blanks UM and the ensemble runs without it; no ffopportunity blanks `xFP/G` and
+1) or blank; no ffopportunity blanks `xFP/G` and
 the context tokens; no depth chart falls back to with-or-without; no injuries file blanks the injury
 list. An exception anywhere returns the frame unchanged (blank Edge Finder columns) and logs a warning:
 the base EdgeRaw sync never fails over this.
 
-**Full sync vs `--live`.** A full sync (`ctx.live` False) refreshes the cached season inputs and lets the
-model package refresh its current-season files before UM inference. `--live` reuses the cached inputs and
-the model cache, never re-downloading history.
+**Full sync vs `--live`.** A full sync (`ctx.live` False) refreshes the cached season inputs. `--live`
+reuses the cached inputs, never re-downloading history. (UM is no longer inferred here: CalPts is the TFFB /
+Sleeper / FantasyPros blend, and UM is scored only in Model Check.)
 
 **No lookahead.** Everything is cut at the slate's week (`signals.build_signals`).
 """
@@ -25,10 +25,9 @@ import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
 
-from dfs import calibration, perf, probabilities, results_loop, results_signals, signals, signals_data, store
+from dfs import calibration, perf, results_loop, results_signals, signals, signals_data, store
 from dfs.derived import (
     EDGE_FINDER_VALUE_COLUMNS,
     _rosterable_pool_mask,
@@ -44,6 +43,7 @@ log = get_logger("edge_finder")
 OUTPUT_DIR = CURRENT_DIR / "edge_finder"
 PLAYERS_FILE = "players.csv"
 BENEFICIARIES_FILE = "beneficiaries.csv"
+ABSENCES_FILE = "absences.csv"
 MATCHUPS_FILE = "matchups.csv"
 OUTS_FILE = "outs.csv"
 STATUS_FILE = "status.json"
@@ -135,21 +135,10 @@ def _enrich(
     df = dk_level_frame(frame, pool)
     df, join = signals.attach_gsis(df, signals.identity_for(data, depth_cutoff(df, now)))
 
-    um_ok = True
-    try:
-        with perf.phase("edge finder: UM inference"):
-            df["UmPts"] = probabilities.um_projections(
-                df, season=ctx.season, week=ctx.week, fetch=not ctx.live
-            )
-    except Exception as e:  # noqa: BLE001 - no model cache, no sklearn, an unrateable slate...
-        um_ok = False
-        df["UmPts"] = np.nan
-        notes.append(f"UM unavailable ({e})")
-        log.warning("UM unavailable: %s", e)
-
-    sources = calibration.CAL_SOURCES if um_ok else calibration.CAL_SOURCES_NO_UM
     with perf.phase("edge finder: CalPts"):
-        fitted = calibration.fit(scored, before_week=ctx.week, season=ctx.season, sources=sources)
+        fitted = calibration.fit(
+            scored, before_week=ctx.week, season=ctx.season, sources=calibration.CAL_SOURCES
+        )
         df["CalPts"] = calibration.predict(df, fitted)
 
     projections = _try_current("projections")
@@ -193,6 +182,7 @@ def _write_outputs(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output.players.to_csv(OUTPUT_DIR / PLAYERS_FILE, index=False)
     output.beneficiaries.to_csv(OUTPUT_DIR / BENEFICIARIES_FILE, index=False)
+    output.absences.to_csv(OUTPUT_DIR / ABSENCES_FILE, index=False)
     output.matchups.to_csv(OUTPUT_DIR / MATCHUPS_FILE, index=False)
     output.outs.to_csv(OUTPUT_DIR / OUTS_FILE, index=False)
     weeks = data.ffo_weeks
@@ -213,16 +203,46 @@ def _write_outputs(
         "generated": signals_data.iso_of(now),
         "stats_through_week": through,
         "injury_report_week": injuries_week,
+        "injury_report": injury_report_info(data, ctx),
         "depth_chart_dt": depth_dt,
         "projection_snapshot": proj_snaps[-1][0] if proj_snaps else None,
         "calpts_weeks": list(fitted.weeks),
         "calpts_sources": list(fitted.sources),
-        "um_players": int(df["UmPts"].notna().sum()) if "UmPts" in df.columns else 0,
         "gsis_coverage": list(join_coverage(join)),
         "live": bool(ctx.live),
         "notes": notes,
     }
     (OUTPUT_DIR / STATUS_FILE).write_text(json.dumps(status, indent=2))
+
+
+def injury_report_info(data: signals.SeasonData, ctx: SyncContext) -> dict:
+    """What the nflverse injury report held for this slate's week: the source, how many rows, how many carry a
+    final status (blank until teams publish Friday's report; before that the rows are practice reports only),
+    and when this copy was fetched (the saved file's time). Shown on the Edge Finder tab so a thin report
+    reads as a timing fact, not a bug."""
+    from dfs.paths import CURRENT_DIR
+
+    rows = with_status = 0
+    if data.injuries is not None and not data.injuries.empty:
+        inj = data.injuries
+        mine = inj[
+            (pd.to_numeric(inj["season"], errors="coerce") == ctx.season)
+            & (pd.to_numeric(inj["week"], errors="coerce") == ctx.week)
+        ]
+        rows, with_status = len(mine), int(mine["report_status"].notna().sum())
+    path = CURRENT_DIR / "nflverse_injuries.csv"
+    fetched = (
+        datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if path.exists()
+        else None
+    )
+    return {
+        "source": "nflverse-data release `injuries` (injuries_<season>.parquet)",
+        "week": ctx.week,
+        "rows": rows,
+        "with_status": with_status,
+        "fetched": fetched,
+    }
 
 
 def join_coverage(join) -> tuple[int, int]:  # noqa: ANN001

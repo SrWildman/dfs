@@ -1,4 +1,4 @@
-"""xFP: the DK conversion by hand, the windows, and the BUY/FADE/USAGE tokens at their thresholds."""
+"""xFP: the DK conversion by hand, the windows, and the FADE (TE) / USAGE (RB carry share) tokens."""
 
 import numpy as np
 import pandas as pd
@@ -107,72 +107,95 @@ def test_window_is_the_last_three_games_played_before_the_week():
             ("a", 6, 99, 99, 0, 0),
         ]
     )
-    window = xfp.xfp_windows(weeks, before_week=6)  # weeks 2, 4, 5 (week 3 was missed, not a zero)
+    window = xfp.xfp_windows(weeks, before=(2026, 6))  # weeks 2, 4, 5 (week 3 was missed, not a zero)
     assert window.loc["a", "Games"] == 3
     assert window.loc["a", "xFP/G"] == pytest.approx(30.0)
     # nothing at or after the slate's own week can reach it
-    assert xfp.xfp_windows(weeks, before_week=5).loc["a", "xFP/G"] == pytest.approx(20.0)
+    assert xfp.xfp_windows(weeks, before=(2026, 5)).loc["a", "xFP/G"] == pytest.approx(20.0)
 
 
-def _tokens(xfp_g, actual, td_excess, games=3, top=True):
-    windows = pd.DataFrame(
-        {"xFP/G": [xfp_g], "DkG": [actual], "TdExcess": [td_excess], "Games": [games]}, index=["a"]
-    )
-    return xfp.buy_fade_tokens(windows, pd.Series([top], index=["a"])).iloc[0]
+def test_the_window_runs_across_the_season_boundary():
+    last_year = _weeks([("a", 16, 50, 50, 0, 0), ("a", 17, 60, 60, 0, 0)]).assign(season=2025)
+    this_year = _weeks([("a", 1, 10, 10, 0, 0)])
+    window = xfp.xfp_windows(pd.concat([last_year, this_year]), before=(2026, 2))
+    assert window.loc["a", "Games"] == 3
+    assert window.loc["a", "xFP/G"] == pytest.approx(40.0)  # 50, 60, 10: last season fills the window
 
 
-def test_buy_fires_on_either_the_points_gap_or_the_percentage_gap():
-    assert _tokens(20.0, 16.9, 0) == xfp.TOKEN_BUY  # 3.1 points under (and 15%)
-    assert _tokens(10.0, 7.4, 0) == xfp.TOKEN_BUY  # only 2.6 points, but 26% under
-    assert _tokens(20.0, 17.5, 0) == ""  # 2.5 points and 12.5%: neither
-    assert _tokens(10.0, 7.6, 0) == ""  # 2.4 points, 24%: neither
+def test_attach_actual_points_joins_one_season_and_leaves_the_other():
+    weeks = pd.concat([_weeks([("a", 1, 10, 0, 0, 0)]).assign(season=2025), _weeks([("a", 1, 10, 0, 0, 0)])])
+    weeks = weeks.drop(columns="dk_actual")
+    actual = pd.DataFrame({"player_id": ["a"], "week": [1], "dk_actual": [17.0]})
+    out = xfp.attach_actual_points(weeks, actual, 2026).set_index("season")
+    assert out.loc[2026, "dk_actual"] == 17.0 and pd.isna(out.loc[2025, "dk_actual"])
 
 
-def test_buy_and_fade_need_the_top_half_and_a_real_window():
-    assert _tokens(20.0, 10.0, 0, top=False) == ""
-    assert _tokens(20.0, 10.0, 0, games=0) == ""
+def _tokens(xfp_g, actual, games=3, top=True, position="TE"):
+    windows = pd.DataFrame({"xFP/G": [xfp_g], "DkG": [actual], "Games": [games]}, index=["a"])
+    return xfp.fade_tokens(windows, pd.Series([top], index=["a"]), pd.Series([position], index=["a"])).iloc[0]
 
 
-def test_fade_needs_the_mirror_gap_and_the_td_excess():
-    assert _tokens(10.0, 14.0, 1.5) == xfp.TOKEN_FADE
-    assert _tokens(10.0, 14.0, 1.4) == ""  # a hot stretch without TD luck is not faded
-    assert _tokens(10.0, 11.0, 3.0) == ""  # TD luck without the gap is not faded
-    assert _tokens(10.0, 12.6, 2.0) == xfp.TOKEN_FADE  # 26% over
+def test_fade_is_te_only_two_points_over_expected_and_inclusive():
+    assert _tokens(10.0, 12.0) == xfp.TOKEN_FADE  # exactly +2.0
+    assert _tokens(10.0, 11.9) == ""
+    assert _tokens(20.0, 22.0) == xfp.TOKEN_FADE  # a points gap, not a percentage: 10% is enough
+    for position in ("QB", "RB", "WR"):
+        assert _tokens(10.0, 20.0, position=position) == ""
 
 
-def _usage_weeks(shares):
-    """One player, one week each, with the given target shares (team targets fixed at 100)."""
-    rows = [("a", w + 1, 10, 10, 0, 0) for w in range(len(shares))]
-    frame = _weeks(rows)
-    frame["team_targets"] = 100.0
-    frame["targets"] = [s * 100 for s in shares]
-    return frame
+def test_fade_needs_the_top_half_and_a_full_window_and_no_td_condition():
+    assert _tokens(10.0, 14.0, top=False) == ""
+    assert _tokens(10.0, 14.0, games=2) == ""
+    assert not hasattr(xfp, "FADE_TD_EXCESS")  # the touchdown condition is gone
 
 
-def test_usage_needs_two_recent_and_two_earlier_games_and_shows_n():
-    # three games only: 2 recent + 1 earlier is not enough
-    assert xfp.usage_jumps(_usage_weeks([0.10, 0.20, 0.20]), None, before_week=4).empty
-    jumps = xfp.usage_jumps(_usage_weeks([0.10, 0.10, 0.20, 0.20]), None, before_week=5)
-    assert jumps.loc["a", "n"] == 2
-    assert jumps.loc["a", "token"] == xfp.TOKEN_USAGE_UP  # +0.10 target share >= 0.06
-    assert (
-        xfp.usage_jumps(_usage_weeks([0.25, 0.25, 0.15, 0.15]), None, before_week=5).loc["a", "token"]
-        == xfp.TOKEN_USAGE_DOWN
-    )
+def test_buy_is_gone():
+    assert not hasattr(xfp, "TOKEN_BUY") and not hasattr(xfp, "buy_fade_tokens")
 
 
-def test_usage_jump_thresholds_are_inclusive_and_an_rz_jump_counts():
-    flat = _usage_weeks([0.10, 0.10, 0.16, 0.16])
-    assert xfp.usage_jumps(flat, None, before_week=5).loc["a", "token"] == xfp.TOKEN_USAGE_UP  # exactly +0.06
-    small = _usage_weeks([0.10, 0.10, 0.15, 0.15])
-    assert xfp.usage_jumps(small, None, before_week=5).loc["a", "token"] == ""
-    rz = pd.DataFrame({"GsisId": ["a"] * 4, "week": [1, 2, 3, 4], "rz": [0, 0, 1, 1]})
-    assert xfp.usage_jumps(small, rz, before_week=5).loc["a", "token"] == xfp.TOKEN_USAGE_UP  # +1.0 RZ/G
+def _usage_weeks(shares, *, position="RB"):
+    """One player, one game a week from Week 1, with the given carry shares (team carries fixed at 100)."""
+    frame = _weeks([("a", w + 1, 10, 10, 0, 0) for w in range(len(shares))])
+    frame["team_carries"] = 100.0
+    frame["carries"] = [s * 100 for s in shares]
+    return frame.assign(Position=position)
+
+
+EARLIER6 = [0.20] * 6
+
+
+def test_usage_needs_eight_prior_games_two_recent_and_six_before():
+    assert xfp.usage_jumps(_usage_weeks([0.2] * 5 + [0.3, 0.3]), before=(2026, 8)).empty  # seven games
+    jumps = xfp.usage_jumps(_usage_weeks([*EARLIER6, 0.30, 0.30]), before=(2026, 9))
+    assert jumps.loc["a", "n"] == 8
+    assert jumps.loc["a", "token"] == xfp.TOKEN_USAGE_UP  # +0.10 carry share, exactly the threshold
+    down = xfp.usage_jumps(_usage_weeks([0.30] * 6 + [0.25, 0.25]), before=(2026, 9))
+    assert down.loc["a", "token"] == xfp.TOKEN_USAGE_DOWN  # -0.05, exactly the threshold
+
+
+def test_usage_thresholds_are_ten_up_and_five_down():
+    assert xfp.usage_jumps(_usage_weeks([*EARLIER6, 0.29, 0.29]), before=(2026, 9)).loc["a", "token"] == ""
+    assert xfp.usage_jumps(_usage_weeks([0.30] * 6 + [0.26, 0.26]), before=(2026, 9)).loc["a", "token"] == ""
+
+
+def test_usage_is_rb_carry_share_only():
+    receiver = _usage_weeks([*EARLIER6, 0.30, 0.30], position="WR")
+    assert xfp.usage_jumps(receiver, before=(2026, 9)).empty
+    tgt = _usage_weeks([0.0] * 8)
+    tgt["team_targets"], tgt["targets"] = 100.0, [10.0] * 6 + [40.0, 40.0]  # a target-share jump: ignored
+    assert xfp.usage_jumps(tgt, before=(2026, 9)).loc["a", "token"] == ""
+
+
+def test_usage_window_crosses_the_season_boundary():
+    last_year = _usage_weeks([0.20] * 4).assign(season=2025)
+    this_year = _usage_weeks([0.20, 0.20, 0.30, 0.30])
+    jumps = xfp.usage_jumps(pd.concat([last_year, this_year]), before=(2026, 5))
+    assert jumps.loc["a", "n"] == 8 and jumps.loc["a", "token"] == xfp.TOKEN_USAGE_UP
 
 
 def test_usage_ignores_games_at_or_after_the_slate_week():
-    shares = _usage_weeks([0.10, 0.10, 0.10, 0.10, 0.90])  # a huge week 5 must not leak into week 5's signal
-    assert xfp.usage_jumps(shares, None, before_week=5).loc["a", "token"] == ""
+    shares = _usage_weeks([*EARLIER6, 0.20, 0.20, 0.90])  # a huge week 9 must not leak into week 9's signal
+    assert xfp.usage_jumps(shares, before=(2026, 9)).loc["a", "token"] == ""
 
 
 def test_position_percentile_ranks_within_position_over_the_pool():

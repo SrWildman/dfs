@@ -153,10 +153,10 @@ def test_backtest_is_expanding_window_and_skips_week_one():
     frame = cal.backtest_frame(scored)
     assert sorted(frame["week"].unique()) == [2, 3]
     table = cal.backtest(scored)
-    assert set(table["Source"]) == {"TFFB", "AggPts", "CalPts (no UM)"}
+    assert set(table["Source"]) == {"TFFB", "AggPts", "CalPts"}
     assert set(table["Position"]) == {"RB", "All"}
     tffb = table[(table["Source"] == "TFFB") & (table["Position"] == "All")].iloc[0]
-    calp = table[(table["Source"] == "CalPts (no UM)") & (table["Position"] == "All")].iloc[0]
+    calp = table[(table["Source"] == "CalPts") & (table["Position"] == "All")].iloc[0]
     assert tffb["Bias"] == pytest.approx(4.0)
     assert abs(calp["Bias"]) < abs(tffb["Bias"])  # the correction closes part of the gap
     assert calp["n"] == tffb["n"] == 80
@@ -166,7 +166,7 @@ def test_backtest_by_week_has_one_row_per_week_and_projection():
     scored = pd.concat([_rows(w, 40, actual=14.0, proj=10.0) for w in (1, 2, 3)], ignore_index=True)
     trend = cal.backtest_by_week(scored)
     assert sorted(trend["Week"].unique()) == [2, 3]
-    assert len(trend) == 6  # two weeks x TFFB, AggPts, CalPts (no UM)
+    assert len(trend) == 6  # two weeks x TFFB, AggPts, CalPts
 
 
 def _um_scored(weeks=(1, 2, 3), n=40):
@@ -180,11 +180,11 @@ def _um_scored(weeks=(1, 2, 3), n=40):
     return pd.concat(pieces, ignore_index=True)
 
 
-def test_um_is_a_source_and_a_player_it_cannot_rate_simply_drops_it():
+def test_um_is_not_a_calpts_source_so_a_um_value_changes_nothing():
     scored = _um_scored()
+    assert "UmPts" not in cal.CAL_SOURCES
     fitted = cal.fit(scored, before_week=3)
-    assert "UmPts" in fitted.sources
-    assert fitted.bias[("UmPts", "RB", 0)] > 0  # actual 14 vs UM 13: a small positive bias after shrinkage
+    assert "UmPts" not in fitted.sources
     frame = pd.DataFrame(
         {
             "Position": ["RB", "RB"],
@@ -196,16 +196,14 @@ def test_um_is_a_source_and_a_player_it_cannot_rate_simply_drops_it():
             "AggPts": [11.0, 11.0],
         }
     )
-    with_um, without = cal.predict(frame, fitted).tolist()
-    assert with_um != without  # the rated player's number includes UM
-    no_um_fit = cal.fit(scored, before_week=3, sources=cal.CAL_SOURCES_NO_UM)
-    assert cal.predict(frame, no_um_fit)[1] == pytest.approx(without)  # blank UM = the no-UM answer
+    rated, unrated = cal.predict(frame, fitted).tolist()
+    assert rated == unrated  # the rated player's number is the same: UM does not enter the blend
 
 
-def test_with_um_backtest_keeps_only_players_um_rates_and_adds_its_columns():
+def test_with_um_backtest_keeps_only_players_um_rates_and_adds_its_row():
     scored = _um_scored()
     table = cal.backtest(scored, with_um=True)
-    assert set(table["Source"]) == {"TFFB", "AggPts", "UM", "CalPts (no UM)", "CalPts"}
+    assert set(table["Source"]) == {"TFFB", "AggPts", "UM", "CalPts"}  # UM is a race row, not a blend source
     assert (table[table["Position"] == "All"]["n"] == 40).all()  # 20 UM-rated players in each of 2 weeks
     plain = cal.backtest(scored, with_um=False)
     assert (plain[plain["Position"] == "All"]["n"] == 80).all()  # everyone, no UM column

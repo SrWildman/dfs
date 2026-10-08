@@ -85,7 +85,7 @@ dfs go                # sync + dfs doctor + what changed, back to back
 ```
 
 Every sync also rewrites the **Edge Finder** tab (cash core and GPP upside per position, where `CalPts` disagrees with
-TFFB, injury beneficiaries with "Priced in?", matchups by position, and the unproven context signals) and the Board's
+TFFB, who inherits an out back's carries, every absent regular as context, matchups (context only), and the unproven context signals) and the Board's
 "This week's edges" panel. The final `dfs sync --live` after inactives (about 90 minutes before kickoff) is the one that
 matters for the injury list. `CalPts` is **not** the default projection: it is tracked in Model Check.
 
@@ -278,9 +278,9 @@ It scores every projection against what actually happened, for every completed w
 `data/results/` each time (nothing on it is typed). Read it top to bottom: **Ceiling** (how often a player beat
 his published ceiling -- near 15% means it is roughly an 85th percentile), **Projection accuracy** (bias:
 negative means the projections ran high; MAE; calibration slope; Spearman, which matters most for DFS because
-it is about ordering players), the **Projection Race** at the top (TFFB, AggPts, UM and the calibrated `CalPts`, judged on weeks they never trained on -- this is the table to read before deciding whether `CalPts` should be your default projection), **Reliability** (do `Hit3x%`, `Boom%` and `Bust%` come true, by decile), **ValAdj** quintiles (do the players it points at beat their salary), **Sources
+it is about ordering players), the **Projection Race** at the top (TFFB, AggPts, the calibrated `CalPts` and UM as its own row, judged on weeks they never trained on -- this is the table to read before deciding whether `CalPts` should be your default projection), **Reliability** (do `Hit3x%`, `Boom%` and `Bust%` come true, by decile), **ValAdj** quintiles (do the players it points at beat their salary), **Sources
 compared** (TFFB vs Sleeper vs FantasyPros vs the average), **Salary multiple** (does a projected value of 3+
-actually reach 3x salary), **Flags**, and **Signals** (`BUY↑`, `FADE↓`, `USAGE↑/↓`, `INJ+` and the matchup groups, each with n, the mean miss and a hit rate). Every row shows n; **a muted italic row is "thin" (n under 30): read it
+actually reach 3x salary), **Flags**, and **Signals** (`FADE↓`, `USAGE↑/↓`, `INJ+`, the matchup groups and an unflagged baseline per position, each with n, the mean miss and a hit rate). Every row shows n; **a muted italic row is "thin" (n under 30): read it
 as "not enough data yet".** Hover any header for its definition.
 
 Each projection is the last TFFB snapshot before that player's own kickoff, and `ValAdj` and flags are recomputed

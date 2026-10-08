@@ -250,6 +250,26 @@ def test_nickname_fallback_matches_a_unique_last_name_team_position(caplog):
     assert any("nickname fallback" in r.message for r in caplog.records)  # every fallback is logged
 
 
+def test_a_last_name_alone_never_matches_the_first_names_must_be_compatible(caplog):
+    import logging
+
+    from dfs.player_join import first_names_compatible
+
+    assert first_names_compatible("Josh Allen", "Joshua Allen")
+    assert first_names_compatible("Kenny Gainwell", "Kenneth Gainwell")
+    assert first_names_compatible("Gabe Davis", "Gabriel Davis")
+    assert not first_names_compatible("Mike Williams", "Mark Williams")
+    assert not first_names_compatible("Marcus Jones", "Zay Jones")
+    assert not first_names_compatible("", "Zay Jones")
+    with caplog.at_level(logging.INFO, logger="dfs.player_join"):
+        result = _join(
+            [{"Id": "1", "Name": "Mike Williams", "Team": "NYJ", "Position": "WR"}],
+            [{"n": "Mark Williams", "t": "NYJ", "p": "WR", "v": 7}],  # same last name, team, position
+        )
+    assert result.pool_matched == 0  # no match ...
+    assert any("REFUSED" in r.message for r in caplog.records)  # ... and the refusal is logged
+
+
 def test_nickname_fallback_refuses_an_ambiguous_last_name():
     """Two unmatched DK players share last name + team + position, so a lone
     source row can't be assigned to either -- guessing would be a bad join."""

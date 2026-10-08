@@ -204,7 +204,7 @@ _GENERAL_ROWS: list[tuple[str, str]] = [
         "number yet (TFFB hasn't published ownership this week), not \"the lowest "
         'value". Chips (solid colour, bold text) mark a state, never a number -- '
         'Flag (can show more than one at once, e.g. "WIND LEVERAGE"), Avail, '
-        "Venue (H/R), the Edge tokens (INJ+ green; BUY↑ and USAGE↑ soft green; FADE↓ and USAGE↓ soft red: "
+        "Venue (H/R), the Edge tokens (INJ+ green; USAGE↑ soft green; FADE↓ and USAGE↓ soft red: "
         "context, not proven to beat projections), a lineup's Issues column. Grey text on OwnStatus means "
         "ownership hasn't published yet this week, in which case Leverage reads "
         "blank rather than a number that looks real but isn't. On Lineups the Name, Pos. and "
@@ -244,9 +244,11 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Val >= 3 -- with Bust%), GPP upside (best Boom%, the chance of 4x salary, with "
         "CeilM and Own%), projection disagreements (where CalPts, the bias-corrected blend "
         "of every source, differs most from TFFB, with the measured reason), injury "
-        "beneficiaries (who inherits an out player's targets and carries, confirmed first, "
-        'questionable muted, with "Priced in?"), matchups by position and the unproven '
-        "context signals. Pool shows your EdgeRaw tick; ↗ jumps to the player on EdgeRaw. "
+        "beneficiaries (who inherits an out back's carries, from the measured 12-season split; "
+        "every absent regular is listed as context only, since target redistribution did "
+        "not beat doing nothing), matchups (context only) and the unproven "
+        "context signals (FADE for tight ends, USAGE for a back's carry share). "
+        "Pool shows your EdgeRaw tick; ↗ jumps to the player on EdgeRaw. "
         "Rows with fewer than 3 games are muted. Run the final `dfs sync --live` after "
         "inactives (~90 min before kickoff). CalPts is not the default projection: Model "
         "Check's Projection Race tracks it every week.",
@@ -294,7 +296,7 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "WeatherRaw",
         "Synced by `dfs sync` (`weather` source), free forecast for outdoor games "
         "only (dome games are skipped). Columns: GameId, Away, Home, Stadium, Temp, "
-        "Wind, Gust, Precip, Flag (WIND if windy).",
+        "Wind, Gust, Precip, Flag (WIND at 15 mph or more).",
     ),
     (
         "GPSRaw",
@@ -430,8 +432,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Results. The Model Check tab beside it scores every projection against what "
         "actually happened; it is rebuilt by `dfs results update` (and at the end of "
         "`dfs week close`), nothing on it is typed, and a muted italic row is too few "
-        "players to say anything yet. It also holds the Projection Race (TFFB, AggPts, UM "
-        "and CalPts judged on weeks they never trained on), the reliability of Hit3x%, "
+        "players to say anything yet. It also holds the Projection Race (TFFB, AggPts, CalPts and UM "
+        "judged on weeks they never trained on), the reliability of Hit3x%, "
         "Boom% and Bust% by decile, and every context signal scored.",
     ),
 ]
