@@ -191,11 +191,14 @@ def test_run_sync_normal_source_still_uploads_to_its_tab(monkeypatch, cfg, tmp_p
     assert client.written == ["Good"]
 
 
-def test_only_the_usage_source_declares_no_sheet_tab():
+def test_only_the_per_player_context_sources_declare_no_sheet_tab():
     # `pbp` now uploads its per-team table (hidden TeamMetricsRaw) for Slate Grid's TEAMS section;
     # `usage` is per-player and reaches the sheet through EdgeRaw alone.
     from dfs.sources import SOURCES
 
     assert SOURCES["pbp"].uploads_to_sheet is True
     assert SOURCES["usage"].uploads_to_sheet is False
-    assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name != "usage")
+    # Edge Finder's three context sources are per-player too: they feed `signals.py`, never a tab.
+    no_tab = {"usage", "ffopportunity", "nflverse_injuries", "nflverse_depth"}
+    assert all(not SOURCES[name].uploads_to_sheet for name in no_tab)
+    assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name not in no_tab)

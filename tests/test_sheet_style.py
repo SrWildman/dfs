@@ -101,6 +101,12 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
     assert matched == {
+        # Edge Finder (2026-10-07)
+        "CalPts",
+        "xFP/G",
+        "Hit3x%",
+        "Boom%",
+        "Bust%",
         "ProjPts",
         "AggPts",
         "Own%",
@@ -534,27 +540,29 @@ def test_polish_edge_clears_banding_before_re_adding_it():
 def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per_position_runs():
     edge_header = [POOL_HEADER, *EDGE_COLUMNS]
     matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
-    assert len(matched) == 25  # nothing is skipped on EdgeRaw (20 + the five usage metrics)
+    assert len(matched) == 30  # nothing is skipped on EdgeRaw (20 + five usage metrics + five Edge Finder)
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    # The 13 within-position/0-100 columns (8 + the five usage metrics) are 26 steps each; the other 12
-    # are one gradient each.
+    # The 15 within-position/0-100 columns (8 + five usage metrics + CalPts and xFP/G) are 26 steps each;
+    # the other 15 (12 + Hit3x%, Boom%, Bust%) are one gradient each.
     # Either way: whole-column rules (they follow any sort or filter), no per-position row runs.
-    assert len(client.color_scale_calls) == 12
+    assert len(client.color_scale_calls) == 15
     assert client.multi_range_color_scale_calls == []
     steps = [
         a1
         for a1, k in client.boolean_rule_calls
-        if k["condition_type"] == "CUSTOM_FORMULA" and not a1.startswith("B")  # B = Name tints
+        if k["condition_type"] == "CUSTOM_FORMULA"
+        and not a1.startswith("B2:")  # B = Name tints (columns BH.. are real data columns now)
+        and "DST" not in k["values"][0]  # the low-confidence DST rules are not colour steps
     ]
-    assert len(steps) == 13 * 26
+    assert len(steps) == 15 * 26
     # A grey zero chip on every column where zero means "missing" (not the four zero-centred
     # diverging columns, and not Spread, where 0 is a real pick'em).
     zero_chips = [a1 for a1, k in client.boolean_rule_calls if k["condition_type"] == "NUMBER_EQ"]
-    assert len(zero_chips) == 25 - 5
-    assert len(client.boolean_rule_calls) < 450  # a handful per column, not ~1,400 in total
+    assert len(zero_chips) == 30 - 5
+    assert len(client.boolean_rule_calls) < 520  # a handful per column, not ~1,400 in total
 
 
 def test_polish_edge_steps_player_metrics_off_their_hidden_percentile_column():

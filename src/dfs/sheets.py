@@ -1166,6 +1166,7 @@ class SheetsClient:
         title: str,
         a1_range: str,
         criteria: dict[int, dict] | None = None,
+        sort: list[tuple[int, str]] | None = None,
     ) -> None:
         """Add a named, per-user filter view (Data > Filter views) over
         `a1_range`. Unlike the plain "Create a filter" button (one filter
@@ -1178,13 +1179,16 @@ class SheetsClient:
         `FilterCriteria` dict (e.g. `{5: {"condition": {"type": "TEXT_EQ",
         "values": [{"userEnteredValue": "LEVERAGE"}]}}}`) -- omit for a
         view that's just a sortable/filterable window with no preset.
-        Callers that re-run this must call `clear_filter_view` with the
+        `sort` is `[(0-indexed column, "ASCENDING" | "DESCENDING")]`, applied in order, inside the view
+        only. Callers that re-run this must call `clear_filter_view` with the
         same title first; this method only ever adds."""
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
         filter_view: dict = {"title": title, "range": grid_range}
         if criteria:
             filter_view["criteria"] = {str(col): crit for col, crit in criteria.items()}
+        if sort:
+            filter_view["sortSpecs"] = [{"dimensionIndex": col, "sortOrder": order} for col, order in sort]
         sheet.batch_update({"requests": [{"addFilterView": {"filter": filter_view}}]})
 
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:

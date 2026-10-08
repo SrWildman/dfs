@@ -272,7 +272,16 @@ BOARD_POOL_COLHEADER = [
 
 BOARD_CHALK_HEADER_ROW = BOARD_POOL_LAST_ROW + 2
 BOARD_CHALK_PLACEHOLDER_ROW = BOARD_CHALK_HEADER_ROW + 1
-BOARD_LAST_ROW = BOARD_CHALK_PLACEHOLDER_ROW
+
+# Edge Finder (2026-10-07): "This week's edges", a compact panel of five one-line summaries written by Python
+# on every sync (`dfs.edge_finder_tab.board_panel_lines`, like Queue: a Sheets formula cannot compute it). It
+# is APPENDED below the Chalk map so no existing Board row moves.
+BOARD_EDGES_TITLE = "THIS WEEK'S EDGES  —  from the Edge Finder tab"
+BOARD_EDGES_HEADER_ROW = BOARD_CHALK_PLACEHOLDER_ROW + 2
+BOARD_EDGES_FIRST_ROW = BOARD_EDGES_HEADER_ROW + 1
+BOARD_EDGES_ROWS = 5
+BOARD_EDGES_LAST_ROW = BOARD_EDGES_FIRST_ROW + BOARD_EDGES_ROWS - 1
+BOARD_LAST_ROW = BOARD_EDGES_LAST_ROW
 
 # PROMPT_BOARD_FIXES.md item 5: the hidden Slate-shape join-key columns
 # (GameId, then Part C's Away/Home) must sit past the rightmost column
@@ -439,7 +448,12 @@ def build_board(
     whatever Queue was showing until the next live sync repopulates it.
     """
     existing_queue = []
+    existing_edges: list[str] = []
     if client.tab_exists(BOARD_TAB):
+        header = client.read_range(BOARD_TAB, f"A{BOARD_EDGES_HEADER_ROW}:A{BOARD_EDGES_HEADER_ROW}")
+        if header and header[0] and header[0][0] == BOARD_EDGES_TITLE:
+            lines = client.read_range(BOARD_TAB, f"A{BOARD_EDGES_FIRST_ROW}:A{BOARD_EDGES_LAST_ROW}")
+            existing_edges = [(row[0] if row else "") for row in lines]
         colheader_rows = client.read_range(
             BOARD_TAB, f"A{BOARD_QUEUE_COLHEADER_ROW}:D{BOARD_QUEUE_COLHEADER_ROW}"
         )
@@ -864,11 +878,30 @@ def build_board(
         ],
     )
 
+    # The edges panel is filled by the sync; a rebuild keeps whatever it showed (read back above) so a
+    # `dfs setup build-views` re-run does not blank it until the next sync.
+    _set(BOARD_EDGES_HEADER_ROW, [BOARD_EDGES_TITLE])
+    for i in range(BOARD_EDGES_ROWS):
+        line = existing_edges[i] if i < len(existing_edges) else ""
+        _set(BOARD_EDGES_FIRST_ROW + i, [line or ("Not synced yet -- run `dfs sync`." if i == 0 else "")])
+
     client.write_tab(BOARD_TAB, rows)
     return (
         f"{BOARD_TAB}: built (Queue, Slate shape, Per-position leaders, Punt finder, "
-        "Stack candidates, Pool diagnostics, Chalk map placeholder)"
+        "Stack candidates, Pool diagnostics, Chalk map placeholder, This week's edges)"
     )
+
+
+def write_board_edges(client: SheetsClient, lines: list[str]) -> str:
+    """Write the five "This week's edges" lines under their header (one per row, column A, text only: a
+    leading "=" or "+" is neutralised). The tab and its header must already exist (`build_board`)."""
+    values = [[_text_cell(line)] for line in (list(lines) + [""] * BOARD_EDGES_ROWS)[:BOARD_EDGES_ROWS]]
+    client.update_range(BOARD_TAB, f"A{BOARD_EDGES_FIRST_ROW}:A{BOARD_EDGES_LAST_ROW}", values)
+    return f"{BOARD_TAB}: this week's edges written ({sum(1 for v in values if v[0])} line(s))"
+
+
+def _text_cell(text: str) -> str:
+    return "'" + text if text.startswith(("=", "+", "-", "@")) else text
 
 
 def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: str) -> str:

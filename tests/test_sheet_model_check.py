@@ -45,12 +45,15 @@ def test_sections_appear_in_the_decided_order():
     layout = build_layout(_scored(), weeks=[3])
     titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
     assert titles == [
+        "PROJECTION RACE",
+        "RELIABILITY",
         "CEILING",
         "PROJECTION ACCURACY",
         "VALADJ",
         "SOURCES COMPARED",
         "SALARY MULTIPLE",
         "FLAGS",
+        "SIGNALS",
     ]
     assert layout.rows[0][0].startswith("MODEL CHECK") and "Weeks scored: 3" in layout.rows[1][0]
 

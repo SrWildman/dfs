@@ -1,0 +1,20 @@
+{
+  "study": "r1",
+  "seasons": [
+    2014,
+    2025
+  ],
+  "fit_seasons": [
+    2014,
+    2021
+  ],
+  "test_seasons": [
+    2022,
+    2025
+  ],
+  "n": 1063,
+  "generated": "2026-10-08",
+  "code_version": "c231272",
+  "unit": "clean single-regular absences",
+  "min_cell": 8
+}

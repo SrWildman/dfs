@@ -26,7 +26,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from dfs import nfl_calendar, paths, perf, store
+from dfs import edge_finder_tab, nfl_calendar, paths, perf, sheet_edge_finder, store
 from dfs.bankroll import (
     backfill_entry_keys,
     classify_entry,
@@ -167,9 +167,18 @@ GAMES_FINISHED_AFTER_HOURS = 3.5
 # projections just saved, so it stays last. If the TFFB login has expired
 # that one source reports "failed" (it never overwrites what is saved) and
 # the rest of the run carries on with the previous projections.
-# `nflverse_games` (stadium/roof/schedule -- static for the week) and the
-# slower once-a-week sources are deliberately left out.
-LIVE_SYNC_SOURCES = ["nfl_odds", "draftkings", "projections", "weather", "edge"]
+# Injuries and depth charts (nflverse, updated daily) are re-pulled too: they feed the injury
+# beneficiaries and Edge tokens. `nflverse_games` (stadium/roof/schedule -- static for the week) and
+# the slower once-a-week sources are deliberately left out.
+LIVE_SYNC_SOURCES = [
+    "nfl_odds",
+    "draftkings",
+    "projections",
+    "weather",
+    "nflverse_injuries",
+    "nflverse_depth",
+    "edge",
+]
 
 app = typer.Typer(
     name="dfs",
@@ -216,6 +225,7 @@ app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
 app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model")
 app.add_typer(__import__("dfs.sim.cli", fromlist=["sim_app"]).sim_app, name="sim")
+app.add_typer(__import__("dfs.research.cli", fromlist=["research_app"]).research_app, name="research")
 
 console = Console()
 
@@ -1329,6 +1339,7 @@ def sheets_build_views(
             ),
             build_movement(client, edge_tab=edge_tab),
             build_name_alias_tab(client),
+            sheet_edge_finder.ensure_tab(client, edge_tab=edge_tab),
         ]
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -2155,6 +2166,7 @@ def sync(
             old_edge = None
 
     ctx = SyncContext.current(week=week, season=season)
+    ctx.live = live
     console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
 
     results = run_sync(cfg, source_names, ctx, upload=not no_upload)
@@ -2188,6 +2200,9 @@ def sync(
         except SheetsError as e:
             console.print(f"[yellow]Could not check the add-a-player control cell:[/yellow] {e}")
 
+    if "edge" in source_names and not no_upload:
+        _write_edge_finder_tabs(cfg, ctx)
+
     if live:
         _print_live_flag_diff(
             old_edge, client=live_client, edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
@@ -2195,6 +2210,27 @@ def sync(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _write_edge_finder_tabs(cfg: Config, ctx: SyncContext) -> None:
+    """After an edge sync: write the `Edge Finder` tab and the Board's "This week's edges" panel from the
+    tables the sync just saved (`edge_finder.enrich`). A failure only says so: the rest of the sync stands."""
+    try:
+        from dfs import results_update
+
+        scored = results_update.load_all_scored(ctx.season)
+        inputs = edge_finder_tab.load_inputs(scored=scored, season=ctx.season)
+        if inputs is None:
+            console.print(
+                "[yellow]Edge Finder: no saved signals from this sync -- tab left as it was.[/yellow]"
+            )
+            return
+        client = SheetsClient(cfg.google_sheets)
+        edge_tab = cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
+        console.print(f"[green]OK[/green] {sheet_edge_finder.write_tab(client, inputs, edge_tab=edge_tab)}")
+        console.print(f"[green]OK[/green] {sheet_edge_finder.write_board_panel(client, inputs)}")
+    except (SheetsError, OSError, ValueError, KeyError) as e:
+        console.print(f"[yellow]Edge Finder tab not written:[/yellow] {e}")
 
 
 def _print_live_flag_diff(

@@ -13,7 +13,10 @@ from dfs.sources.base import Source
 from dfs.sources.dk_salaries import DkSalariesSource
 from dfs.sources.edge import EdgeSource
 from dfs.sources.fantasypros_projections import FantasyProsProjectionsSource
+from dfs.sources.ffopportunity import FfopportunitySource
+from dfs.sources.nflverse_depth import NflverseDepthSource
 from dfs.sources.nflverse_games import NflverseGamesSource
+from dfs.sources.nflverse_injuries import NflverseInjuriesSource
 from dfs.sources.nflverse_pbp import NflversePbpSource
 from dfs.sources.nflverse_snaps import NflverseSnapsSource
 from dfs.sources.nflverse_usage import NflverseUsageSource
@@ -51,6 +54,11 @@ from dfs.sources.weather import WeatherSource
 # so a fast live-sync pass has nothing to gain from it either. Kyle Borg's Pace of Play
 # article only changes once a week (published Wednesday), so a fast
 # live-sync pass has nothing new to gain from re-fetching it.
+#
+# Edge Finder (2026-10-07): "ffopportunity" (xFP, weekly) follows the same rule as "usage" and is left
+# out of `--live`. "nflverse_injuries" and "nflverse_depth" change DAILY and matter most close to kickoff
+# (a beneficiary appears when an out is designated), so both are in LIVE_SYNC_SOURCES (cli.py). All
+# three feed `signals.py` only (no sheet tab) and fail soft: an unavailable file gives an empty frame.
 SOURCES: dict[str, Source] = {
     "nfl_odds": RotowireOddsSource(),
     "draftkings": DkSalariesSource(),
@@ -60,6 +68,9 @@ SOURCES: dict[str, Source] = {
     "snaps": NflverseSnapsSource(),
     "pbp": NflversePbpSource(),
     "usage": NflverseUsageSource(),
+    "ffopportunity": FfopportunitySource(),
+    "nflverse_injuries": NflverseInjuriesSource(),
+    "nflverse_depth": NflverseDepthSource(),
     "tffb_gps": TffbGpsSource(),
     "sos_qb": TffbSosSource("QB"),
     "sos_rb": TffbSosSource("RB"),

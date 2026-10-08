@@ -56,7 +56,7 @@ def _edge_col_index(name: str) -> int | None:
 
 
 def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
-    """The four EdgeRaw filter views from Task 3.3:
+    """The six EdgeRaw filter views (the first four from Task 3.3, "Cash" and "GPP" from Edge Finder):
     - "Pool picking" -- the full range, no preset. This is the workhorse:
       the Name column's own filter-view header gets a type-ahead search
       box for free, the primary way to find a player without scrolling
@@ -68,6 +68,8 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
     - "Available only" -- Avail blank (no Q/OUT/IR).
     - "In my pool" -- Pool NOT BLANK (Fix 2.11: a blank/Cash/GPP/Both
       dropdown, not a TRUE/FALSE checkbox).
+    - "Cash" -- Avail blank and Hit3x% not blank, sorted by Hit3x% high to low.
+    - "GPP" -- Avail blank and Boom% not blank, sorted by Boom% high to low.
     Re-runnable: each view is cleared by title before being re-added.
     """
     if not client.tab_exists(edge_tab):
@@ -77,6 +79,7 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
     full_range = f"A1:{last_col}{EDGE_ROWS}"
 
     views: list[tuple[str, dict[int, dict] | None]] = [("Pool picking", None)]
+    sorts: dict[str, list[tuple[int, str]]] = {}
 
     flag_idx = _edge_col_index("Flags")
     if flag_idx is not None:
@@ -100,10 +103,24 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
     pool_idx = ord(POOL_COLUMN) - ord("A")
     views.append(("In my pool", {pool_idx: {"condition": {"type": "NOT_BLANK"}}}))
 
+    # Edge Finder (2026-10-07): "Cash" and "GPP" -- available players with the relevant probability, best
+    # first. A filter view cannot hide columns, so Boom% and Bust% stay visible in both; the sort is what
+    # puts the right one in front. The Edge Finder tab's cash-core / GPP-upside sections cover the rest.
+    for title, column in (("Cash", "Hit3x%"), ("GPP", "Boom%")):
+        idx, avail = _edge_col_index(column), _edge_col_index("Avail")
+        if idx is None or avail is None:
+            continue
+        views.append(
+            (title, {avail: {"condition": {"type": "BLANK"}}, idx: {"condition": {"type": "NOT_BLANK"}}})
+        )
+        sorts[title] = [(idx, "DESCENDING")]
+
     results = []
     for title, criteria in views:
         client.clear_filter_view(edge_tab, title)
-        client.add_filter_view(edge_tab, title=title, a1_range=full_range, criteria=criteria)
+        client.add_filter_view(
+            edge_tab, title=title, a1_range=full_range, criteria=criteria, sort=sorts.get(title)
+        )
         results.append(f"{edge_tab}: filter view {title!r} added")
     return results
 

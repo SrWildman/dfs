@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from dfs.derived import PLAYER_METRIC_PCT_COLUMNS
+from dfs.derived import ALL_PCT_COLUMNS
 from dfs.sheet_color_scales import (
     EDGE_HIGH_PERCENTILE,
     EDGE_LOW_PERCENTILE,
@@ -32,7 +32,7 @@ def _formulas(specs):
 
 
 def test_every_percentile_helper_the_rules_read_exists_in_edge_columns_config():
-    assert set(PCT_HELPER_FOR_FIELD.values()) == set(PLAYER_METRIC_PCT_COLUMNS.values())
+    assert set(PCT_HELPER_FOR_FIELD.values()) == set(ALL_PCT_COLUMNS.values())
 
 
 def test_a_pct_column_gets_two_ladders_of_small_shades_and_a_plain_middle():

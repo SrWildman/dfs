@@ -66,6 +66,7 @@ SCORED_COLUMNS = [
     "Status",
     "DkActual",
     "GsisId",
+    "UmPts",  # the UM model's mean, added by `results_signals.attach_um` (blank until then)
 ]
 
 # Status of a DK main-slate player's actual points: "scored" (found a stat line that week), "dnp"

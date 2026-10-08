@@ -38,6 +38,7 @@ from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
 FULLY_PROTECTED_TABS = [
     PLAYER_POOL_RAW_TAB,
     "Board",
+    "Edge Finder",
     "Slate Grid",
     "Movement",
 ]

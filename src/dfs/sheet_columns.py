@@ -95,11 +95,11 @@ separate alias to track.
 from __future__ import annotations
 
 from dfs.derived import (
+    ALL_PCT_COLUMNS,
     CEILING_DETAIL_LABEL,
     EDGE_COLUMNS,
     GAME_LABEL,
     MOVEMENT_LABEL,
-    PLAYER_METRIC_PCT_COLUMNS,
     USAGE_LABEL,
     WEATHER_LABEL,
 )
@@ -128,7 +128,26 @@ IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 # `LINKED_COLUMNS` below), since it's a whole-slate join/average over
 # multiple sources, not a per-row native formula. Same insertion pattern
 # `ValAdj` used right after `Val` (Part 7.2).
-DECISION = ["DK Sal", "Pts", "AggPts", "Val", "ValAdj", "Ceil", "CeilVal", "Own%", "Avail", "Flags"]
+# Edge Finder (2026-10-07), per `PROMPT_EDGE_FINDER.md` F1: `CalPts` right after `AggPts`, `Hit3x%` and
+# `Boom%` right after `ValAdj`, `Edge` (the token chips) right after `Flags` -- not merged into `Flags`, so
+# bold names and flag priority are unchanged. All four are linked (VLOOKUP against EdgeRaw, where they
+# are APPENDED after `NameKey`; display order here is independent of EdgeRaw's).
+DECISION = [
+    "DK Sal",
+    "Pts",
+    "AggPts",
+    "CalPts",
+    "Val",
+    "ValAdj",
+    "Hit3x%",
+    "Boom%",
+    "Ceil",
+    "CeilVal",
+    "Own%",
+    "Avail",
+    "Flags",
+    "Edge",
+]
 
 # O/U/Spread/Team Implied/OppPosRank are native (VLOOKUP against oddsFinal/
 # SoSComb); GameEnv is linked. The four `SoS 1..4` placeholders that used
@@ -170,7 +189,8 @@ GAME = [
 # `LevBasis` renamed to `OwnStatus` in that same pass (Leverage's own
 # demotion left it gating `Own%`, a spine column, not describing
 # Leverage -- the old name no longer said what it does).
-CEILING_DETAIL = ["CeilPct", "Leverage", "OwnStatus"]
+# Edge Finder: the model's own `Floor`, `CeilM` and `Bust%` join the group (beside TFFB's `Ceil`/`Leverage`).
+CEILING_DETAIL = ["CeilPct", "Leverage", "OwnStatus", "Floor", "CeilM", "Bust%"]
 
 # All linked (VLOOKUP against EdgeRaw).
 MOVEMENT = ["ImpliedMove", "TotMove", "SpdMove", "GameStart"]
@@ -183,7 +203,7 @@ WEATHER = ["Venue", "Stadium", "Roof", "Wind"]
 # nflverse's own snap-count release, not a per-row native formula).
 # Usage volume (2026-10-02): `Tgt%`/`WOPR`/`Rush%`/`RZ/G`/`HVT/G` sit beside `Snap%`, same group,
 # same linking -- see `usage_metrics.py`.
-USAGE = ["Snap%", *USAGE_METRIC_COLUMNS]
+USAGE = ["Snap%", *USAGE_METRIC_COLUMNS, "xFP/G"]  # xFP/G: Edge Finder (2026-10-07)
 
 # Id/Flag stay hidden outright, not part of any visible collapsed group
 # (Part 2's own table lists Id separately from the four numbered groups
@@ -195,7 +215,7 @@ USAGE = ["Snap%", *USAGE_METRIC_COLUMNS]
 # Round 5 item 3: the five hidden percentile helpers join them -- each player
 # metric's within-position standing, linked so the highlighting rules on every
 # tab read the SAME number for the same player.
-INTERNAL = ["Id", "Flag", *PLAYER_METRIC_PCT_COLUMNS.values()]
+INTERNAL = ["Id", "Flag", *ALL_PCT_COLUMNS.values()]
 
 # Shared by all three tabs -- see PLAYER_POOL_RAW_COLUMN_ORDER/
 # PLAYER_POOL_COLUMN_ORDER/LINEUPS_COLUMN_ORDER below for each tab's full
@@ -231,10 +251,14 @@ BASE_COLUMN_ORDER = [
 # excluded (native, see module docstring) despite sitting inside WEATHER.
 LINKED_COLUMNS = [
     "AggPts",
+    "CalPts",
     "ValAdj",
+    "Hit3x%",
+    "Boom%",
     "CeilVal",
     "Avail",
     "Flags",
+    "Edge",
     "GameEnv",
     "Pace",
     "PROE",

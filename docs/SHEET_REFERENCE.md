@@ -158,6 +158,7 @@ actually matches.
 | `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Highlighted as a gradient over the whole column ("Highlighting", below). No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
 | `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Banded on its own value (already a 0-100, position-comparable score by construction), not through a percentile helper -- see "Highlighting", below. |
 | `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Highlighted as a gradient over the whole column ("Highlighting", below). |
+| `CalPts`, `Hit3x%`, `Boom%`, `Bust%`, `Floor`, `CeilM`, `xFP/G`, `Edge`, `CalPts%ile`, `xFP/G%ile` | **Edge Finder (2026-10-07)**, APPENDED after `NameKey` (`EDGE_COLUMNS` is append-only; `derived.EDGE_FINDER_COLUMNS`), filled by `edge_finder.enrich` after the base build. `CalPts` = the bias-corrected ensemble projection; `Hit3x%`/`Boom%`/`Bust%` = P(actual >= 3x / >= 4x / < 2x salary per $1,000), 0-100; `Floor`/`CeilM` = the 20th/85th percentile; `xFP/G` = expected DK points per game over his last 3 games; `Edge` = the context tokens `INJ+ BUY↑ FADE↓ USAGE↑ USAGE↓` (not part of `Flags`); the two `*%ile` columns are hidden within-position helpers for `CalPts` and `xFP/G`. QBs under 10 projected points are blank on the five model columns; low-projected DSTs are muted. Definitions and every constant: `docs/CALCULATIONS.md` ("Edge Finder"). On `PlayerPoolRaw`, `Player Pool` and `Lineups` they are linked in and placed by `sheet_columns`: `CalPts` right after `AggPts`, `Hit3x%` and `Boom%` right after `ValAdj`, `Edge` right after `Flags`, `Floor`/`CeilM`/`Bust%` in the Ceiling detail group, `xFP/G` in the USAGE group. |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
 | `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is all zeros (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
 | `OwnStatus` | Renamed from `LevBasis` in Phase 6, Part 7.9 (Leverage's own demotion left this marker gating `Own%`, a spine column, not describing Leverage -- the old name no longer said what it does). `"real"` once any player has non-zero `Own%` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage` has a real number yet. |
@@ -585,7 +586,7 @@ Read-only landing tab, built/rebuilt by `dfs setup build-views`
 (`sheet_views.build_board`, styled by `sheet_style.style_board`). Rebuilt
 entirely in Phase 6 Part 3/7.6 (2026-09-22) -- the old design ranked all
 744 players on the slate, which Sam had already answered for himself the
-moment he ticked his pool. Now one tab, seven collapsible row sections
+moment he ticked his pool. Now one tab, seven collapsible row sections (plus, since 2026-10-07, an eighth panel at the bottom: **This week's edges**, five one-line summaries written by `dfs sync` from the Edge Finder tab -- top 3 cash core, top 3 GPP upside, top 3 CalPts-vs-TFFB disagreements, top 2 injury beneficiaries, best offense per position; appended below the Chalk map so no existing row moved)
 (Data > collapse/expand a section's `+`/`-` control; every section is
 expanded by default -- Sam's call, 2026-09-30 -- and `style_board` also
 clears any stale explicit alignment / number format left by an earlier
@@ -654,6 +655,25 @@ Every EdgeRaw-derived section is regenerated fresh against the CURRENT
 `sheet_views._rng`/`_col`) -- re-run it after any EdgeRaw column reorder,
 same requirement the pre-rebuild Board already had. Pool diagnostics is
 the same idea against `sheet_columns.PLAYER_POOL_COLUMN_ORDER` instead.
+
+### Edge Finder
+
+Visible tab right after `Board` (`sheet_style.WEEK_ORDER`), **written by Python on every `dfs sync`** (`edge_finder_tab.build_layout`
+from the tables `edge_finder.enrich` saves under `data/current/edge_finder/`; written by `sheet_edge_finder.write_tab`). Nothing is
+typed. A template carries only the empty state (`dfs setup build-views` creates it once and never overwrites a synced one). Fixed
+columns A..N: Name, Pos, Team, Salary, six section-specific columns, `Pool` (EdgeRaw's own tick for that name, a formula), `↗` (a link
+to his EdgeRaw row), `Games` (games in his window; **rows under 3 are muted**), `Notes`. Sections, top to bottom: a status line (stats
+through week, injury report week, depth chart time, projection snapshot, "CalPts trained on Weeks 1-N", "final `dfs sync --live` after
+inactives ~90 min before kickoff"); **Cash core** per position (top 5 by `Hit3x%` among players with `CalPts` at least the position
+median, with `Bust%`); **GPP upside** (top 5 by `Boom%`, with `CeilM` and `Own%`, a star when `Boom%` is in the top quartile and `Own%`
+in the bottom half, once ownership publishes); **Projection disagreements** (largest CalPts - ProjPts per position, both directions,
+with the measured reason: "TFFB runs -3.1 on RBs under $4.5k (n=67)"; the field mostly uses raw projections); **Injury beneficiaries**
+(confirmed out first, questionable muted, method, "Priced in?"); **Matchups by position** (top 8 and bottom 4 with reasons and each
+team's top 2 players); **Context signals** (`BUY↑ FADE↓ USAGE↑ USAGE↓`, muted, unproven). A section is capped, with "+N more" in its
+heading. Every conditional format is relative to its own row, so colours and muting survive a sort or filter; no basic filter is set.
+Definitions: `docs/CALCULATIONS.md` ("Edge Finder"). Saved filter views on EdgeRaw: the original four plus **Cash** (Avail blank,
+`Hit3x%` not blank, sorted `Hit3x%` high to low) and **GPP** (Avail blank, `Boom%` not blank, sorted `Boom%` high to low); a filter view
+cannot hide columns, so `Boom%` and `Bust%` stay visible in both.
 
 ### Slate Grid
 
@@ -858,11 +878,11 @@ note, so a new column cannot ship unexplained.
 ### Model Check
 
 Season-level, read-only, **rebuilt from `data/results/` every time `dfs results update` runs** (also at the end of
-`dfs week close`, which never fails over it). Nothing is typed. Seven blocks, top to bottom: a status line (weeks
-scored, rosterable-pool players scored / did not play / not found), **Ceiling** (how often a player beat his
+`dfs week close`, which never fails over it). Nothing is typed. Ten blocks, top to bottom: a status line (weeks
+scored, rosterable-pool players scored / did not play / not found), the **Projection Race** (2026-10-07: TFFB, AggPts, UM and CalPts, with and without UM, judged on weeks they never trained on; by position plus a per-week trend -- the table Sam uses to choose a default projection), **Reliability** (predicted decile against realized for `Hit3x%`, `Boom%` and `Bust%`, n shown, a decile more than 8 points off with n >= 30 flagged), **Ceiling** (how often a player beat his
 published `Ceiling`, with its 90% interval and implied quantile -- the headline), **Projection accuracy** (bias, MAE,
 calibration slope, R squared, Spearman, calibration buckets), **ValAdj** quintiles, **Sources compared** (labelled
-with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, and **Flags**. Every
+with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, **Flags**, and **Signals** (`BUY↑`, `FADE↓`, `USAGE↑`, `USAGE↓`, `INJ+` confirmed and questionable, matchup top 8 against bottom 4: n, mean actual minus ProjPts and minus CalPts, hit rate). Every
 table shows n; a row with n < 30 is "thin" and drawn in muted italic. Sits after Season and Results in the tab strip
 (`sheet_style.WEEK_ORDER`: Season, Results, Model Check); built by `sheet_model_check.build_layout` / `write_model_check`. The definitions behind
 every number are in `docs/CALCULATIONS.md`'s "The results loop and `Model Check`". Every metric header carries a

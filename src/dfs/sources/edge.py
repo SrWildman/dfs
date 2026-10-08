@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from dfs import nfl_calendar, store
+from dfs import edge_finder, nfl_calendar, store
 from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, build_edge_frame
 from dfs.gps_check import find_gps_mismatches
 from dfs.line_movement import LineMovementError, diff_odds
@@ -231,6 +231,7 @@ class EdgeSource(Source):
             usage=usage,
         )
         _write_gsis_crosswalk(result.source_joins.get("usage"))
+        frame = edge_finder.enrich(result.frame, ctx)
         if result.unmatched_names:
             log.warning(
                 "%d projected player(s) had no DraftKings salary match on the current "
@@ -245,7 +246,7 @@ class EdgeSource(Source):
                 "source to fit a line (no flags possible there this run)",
                 ", ".join(result.split_skipped_positions),
             )
-        return result.frame
+        return frame
 
     def to_sheet_rows(self, df: pd.DataFrame) -> list[list]:
         """Pool prepended ahead of EDGE_COLUMNS on every row -- header gets

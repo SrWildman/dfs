@@ -14,6 +14,7 @@ class FakeFilterClient:
         self._present = present
         self.clear_calls: list[tuple[str, str]] = []
         self.add_calls: list[tuple[str, str, str, dict | None]] = []
+        self.sorts: dict[str, list | None] = {}
         self.basic_filter_calls: list[tuple[str, str]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
@@ -23,9 +24,16 @@ class FakeFilterClient:
         self.clear_calls.append((tab_name, title))
 
     def add_filter_view(
-        self, tab_name: str, *, title: str, a1_range: str, criteria: dict | None = None
+        self,
+        tab_name: str,
+        *,
+        title: str,
+        a1_range: str,
+        criteria: dict | None = None,
+        sort: list | None = None,
     ) -> None:
         self.add_calls.append((tab_name, title, a1_range, criteria))
+        self.sorts[title] = sort
 
     def set_basic_filter(self, tab_name: str, a1_range: str) -> None:
         self.basic_filter_calls.append((tab_name, a1_range))
@@ -43,7 +51,7 @@ def test_add_edge_filter_views_clears_before_adding_each_title():
     add_edge_filter_views(client, "EdgeRaw")
 
     titles = [t for _tab, t, _rng, _crit in client.add_calls]
-    assert titles == ["Pool picking", "Leverage plays", "Available only", "In my pool"]
+    assert titles == ["Pool picking", "Leverage plays", "Available only", "In my pool", "Cash", "GPP"]
     assert client.clear_calls == [("EdgeRaw", t) for t in titles]
     for i, (_tab, title) in enumerate(client.clear_calls):
         add_title = client.add_calls[i][1]
@@ -163,3 +171,18 @@ def test_basic_filter_plain_tabs_excludes_the_view_only_tabs():
     excluded_tabs = ("Player Pool", "Lineups", "PlayerPoolRaw", "Board", "Slate Grid", "Movement", "Exposure")
     for excluded in excluded_tabs:
         assert excluded not in tabs
+
+
+def test_cash_and_gpp_views_filter_to_available_players_with_the_probability_and_sort_it_descending():
+    client = FakeFilterClient()
+    add_edge_filter_views(client, "EdgeRaw")
+    by_title = {title: criteria for _tab, title, _rng, criteria in client.add_calls}
+    avail = EDGE_COLUMNS.index("Avail") + EDGE_DATA_OFFSET
+    for title, column in (("Cash", "Hit3x%"), ("GPP", "Boom%")):
+        idx = EDGE_COLUMNS.index(column) + EDGE_DATA_OFFSET
+        criteria = by_title[title]
+        assert criteria[avail]["condition"]["type"] == "BLANK"
+        assert criteria[idx]["condition"]["type"] == "NOT_BLANK"
+        assert client.sorts[title] == [(idx, "DESCENDING")]
+    # a filter view cannot hide columns, so nothing here hides Boom% or Bust%
+    assert client.sorts["Pool picking"] is None

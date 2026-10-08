@@ -148,7 +148,13 @@ def test_already_linked_columns_positions_never_move():
     # linked, 40-44) and five more hidden `*%ile` helpers after the existing five (52-56): `Id`,
     # `Flag` and the first five helpers move five right (40/41/42-46 -> 45/46/47-51); nothing at
     # or before `Snap%` (39) moves.
-    assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS] == [
+    # Edge Finder (2026-10-07) APPENDED ten columns after `NameKey` (the last column): nothing at or before
+    # it moves, so the pinned list below is the linked columns that existed before, unchanged.
+    from dfs.derived import EDGE_FINDER_COLUMNS
+
+    appended = [c for c in LINKED_EDGE_COLUMNS if c in EDGE_FINDER_COLUMNS]
+    assert appended and all(EDGE_COLUMNS.index(c) > EDGE_COLUMNS.index("NameKey") for c in appended)
+    assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS if c not in EDGE_FINDER_COLUMNS] == [
         6,
         8,
         10,
@@ -416,7 +422,7 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
     assert client.group_calls == [
         # GameEnv..Wind merged, plus USAGE's Snap% and the five usage metrics (Round 5 1b; usage work
         # 2026-10-02): this fixture has no USAGE label column between them, so they merge too.
-        ("Player Pool", "H", "AD", True),
+        ("Player Pool", "L", "AL", True),
     ]
 
 
@@ -438,10 +444,12 @@ def test_link_edge_columns_groups_independently_once_zone_labels_separate_them()
     assert all(collapsed is True for _tab, _start, _end, collapsed in client.group_calls)
     expected = [
         (column_letter(header.index("O/U")), column_letter(header.index("TmRank"))),
-        (column_letter(header.index("CeilPct")), column_letter(header.index("OwnStatus"))),
+        # Edge Finder: Floor, CeilM and Bust% joined the Ceiling detail group
+        (column_letter(header.index("CeilPct")), column_letter(header.index("Bust%"))),
         (column_letter(header.index("ImpliedMove")), column_letter(header.index("GameStart"))),
         (column_letter(header.index("Venue")), column_letter(header.index("Wind"))),
-        (column_letter(header.index("Snap%")), column_letter(header.index("HVT/G"))),  # USAGE
+        # USAGE: xFP/G (Edge Finder) is its last member
+        (column_letter(header.index("Snap%")), column_letter(header.index("xFP/G"))),
     ]
     assert [(start, end) for _tab, start, end, _collapsed in client.group_calls] == expected
 

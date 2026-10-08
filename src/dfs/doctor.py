@@ -17,7 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dfs.config import Config
-from dfs.derived import EDGE_COLUMNS, PLAYER_METRIC_PCT_COLUMNS
+from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS
+from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.sheet_empty_guards import describe as describe_unguarded
 from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
@@ -146,6 +147,7 @@ def _expected_tabs(cfg: Config) -> set[str]:
     tabs.add(ALIAS_TAB)
     tabs.add(PLAYER_POOL_RAW_TAB)
     tabs.add(DKSALCLEAN_TAB)
+    tabs.add(EDGE_FINDER_TAB)  # written by every sync; `dfs setup build-views` creates the empty state
     return tabs
 
 
@@ -344,7 +346,7 @@ def _check_pct_helpers(
     client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
 ) -> list[DoctorIssue]:
     """The player-metric colour steps read hidden within-position percentile columns
-    (`derived.PLAYER_METRIC_PCT_COLUMNS`). If a sync leaves one blank -- or the link onto
+    (`derived.ALL_PCT_COLUMNS`). If a sync leaves one blank -- or the link onto
     PlayerPoolRaw breaks -- those cells quietly get NO colour, and nothing else notices. Fails when
     a tab has numbers in a metric but not one number in its percentile column. (Whether a column
     exists at all is `_check_edge_header`'s and `_check_linked_edge_columns`' job.)"""
@@ -354,7 +356,7 @@ def _check_pct_helpers(
         header = headers_by_tab.get(tab)
         if not tab or tab not in tab_titles or not header:
             continue
-        wanted = [(m, h) for m, h in PLAYER_METRIC_PCT_COLUMNS.items() if m in header and h in header]
+        wanted = [(m, h) for m, h in ALL_PCT_COLUMNS.items() if m in header and h in header]
         if not wanted:
             continue
         last_col = column_letter(max(header.index(c) for pair in wanted for c in pair))

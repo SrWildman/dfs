@@ -437,6 +437,9 @@ What `dfs sync --only NAME[,NAME]` takes. A plain `dfs sync` runs all of them in
 | `snaps` | `SnapsRaw` | - | nflverse's free, unauthenticated snap-count release -- Part C, C6. |
 | `pbp` | `TeamMetricsRaw` | - | nflverse's free, unauthenticated play-by-play release -- Part C, C7. |
 | `usage` | `(none)` | - | Per-player usage (`Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G`); no sheet tab, it feeds EdgeRaw. |
+| `ffopportunity` | `(none)` | - | Per-player-week expected points (`xFP`), current and prior season; no sheet tab. |
+| `nflverse_injuries` | `(none)` | yes | This season's injury reports; no sheet tab. |
+| `nflverse_depth` | `(none)` | yes | Recent depth-chart snapshots; no sheet tab. |
 | `tffb_gps` | `GPSRaw` | - | Kyle Borgognoni's (@kyle_borg) weekly "Pace of Play: Matchups & Stacks for Week N" article on TFFB -- Sam's existing subscription, so this is not a new paid source (`docs/planning/PROMPT_GPS.md`). |
 | `sos_qb` | `SoSQB` | - | One instance per position -- `position` set at construction rather than five near-identical hardcoded subclasses, same reasoning as `EntryTableConfig` covering both Bankroll buckets from one shape. |
 | `sos_rb` | `SoSRB` | - | One instance per position -- `position` set at construction rather than five near-identical hardcoded subclasses, same reasoning as `EntryTableConfig` covering both Bankroll buckets from one shape. |

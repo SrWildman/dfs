@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from dfs.config import Config
-from dfs.derived import EDGE_COLUMNS, PLAYER_METRIC_PCT_COLUMNS
+from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS
 from dfs.doctor import run_doctor
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
@@ -100,6 +100,7 @@ _ALL_GOOD_TABS = {
     "Season": list(SEASON_HEADER),
     DKSALCLEAN_TAB: ["Position", "Team", "ID", "Name", "Salary", "Team", "OPP"],
     "NameAlias": [],
+    "Edge Finder": [],
     EXPOSURE_TAB: [],
 }
 
@@ -497,10 +498,7 @@ def _edge_rows(*, with_helper_values: bool, n: int = 40) -> dict[tuple[str, str]
         rows.append(row)
     # the check reads out to the furthest metric/helper column it needs
     furthest = max(
-        header.index(c)
-        for m, h in PLAYER_METRIC_PCT_COLUMNS.items()
-        if m in header and h in header
-        for c in (m, h)
+        header.index(c) for m, h in ALL_PCT_COLUMNS.items() if m in header and h in header for c in (m, h)
     )
     return {("EdgeRaw", f"A2:{column_letter(furthest)}30"): rows}
 

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from dfs import calibration, results_signals
 from dfs import results_analysis as ra
 from dfs.sheet_column_notes import MODEL_CHECK_NOTES, apply_notes_to_values
 from dfs.sheets import SheetsClient
@@ -34,7 +35,8 @@ COLUMN_COUNT = 10  # A..J
 NOTE_WRAP_CHARS = 150
 FIRST_COLUMN_PX = 190
 OTHER_COLUMN_PX = 118
-_COUNT_HEADERS = {"n", "Unflagged n", "Weeks"}
+_COUNT_HEADERS = {"n", "Unflagged n", "Weeks", "Week", "Decile"}
+_TEXT_HEADERS = {"Source", "Flag", "Quintile", "Projection", "Signal", "Measure", "Off?"}
 
 
 @dataclass
@@ -131,7 +133,7 @@ class _Builder:
                 self.layout.fine_cells.append(f"{letter}{first}:{letter}{last}")
             elif header in _COUNT_HEADERS:
                 self.layout.count_cells.append(f"{letter}{first}:{letter}{last}")
-            elif index > 0 and header not in {"Source", "Flag", "Quintile"}:
+            elif index > 0 and header not in _TEXT_HEADERS:
                 self.layout.number_cells.append(f"{letter}{first}:{letter}{last}")
             if header in signed:
                 self.layout.signed_ranges.append((first, last, letter))
@@ -141,8 +143,15 @@ def _weeks_text(weeks: list[int]) -> str:
     return ", ".join(str(w) for w in weeks) if weeks else "none"
 
 
-def build_layout(scored: pd.DataFrame, *, weeks: list[int]) -> Layout:
-    """The whole tab as rows plus formatting instructions. Pure."""
+def build_layout(
+    scored: pd.DataFrame,
+    *,
+    weeks: list[int],
+    signal_table: pd.DataFrame | None = None,
+    reliability: pd.DataFrame | None = None,
+) -> Layout:
+    """The whole tab as rows plus formatting instructions. Pure. `signal_table` is
+    `results_signals.signal_report` (None when no signals archive exists yet)."""
     b = _Builder()
     pool = scored[scored["RosterablePool"].astype(bool)] if not scored.empty else scored
     counts = ra.dnp_counts(pool) if not pool.empty else {"scored": 0, "dnp": 0, "unmatched": 0}
@@ -165,6 +174,9 @@ def build_layout(scored: pd.DataFrame, *, weeks: list[int]) -> Layout:
             "Run `dfs results update` after a week's games."
         )
         return b.layout
+
+    _add_projection_race(b, scored)
+    _add_reliability(b, reliability)
 
     # ---- Ceiling (the headline) ---------------------------------------------------------------
     ceiling = ra.ceiling_report(scored)
@@ -320,7 +332,161 @@ def build_layout(scored: pd.DataFrame, *, weeks: list[int]) -> Layout:
         "Muted italic rows are thin (n < 30): too few to say anything yet. "
         "Almost everything here is thin this early."
     )
+    _add_signals(b, signal_table)
     return b.layout
+
+
+def _race_block(b: _Builder, scored: pd.DataFrame, *, with_um: bool) -> bool:
+    """One projection-race table (by position) and its per-week trend. Returns False when the race cannot
+    start yet. `with_um` judges UM and the production CalPts on the rows UM rates."""
+    race = calibration.backtest(scored, with_um=with_um)
+    if race.empty:
+        return False
+    labels = [
+        label for label, _ in (calibration.PROJECTIONS_WITH_UM if with_um else calibration.PROJECTIONS_NO_UM)
+    ]
+    order = {name: i for i, name in enumerate(labels)}
+    positions = ["All", *calibration.POSITIONS]
+    race = race.assign(_p=race["Position"].map(positions.index), _s=race["Source"].map(order))
+    race = race.sort_values(["_p", "_s"]).drop(columns=["_p", "_s"])
+    race = race.assign(Thin=race["n"].map(ra.is_thin)).rename(columns={"Source": "Projection"})
+    b.table(
+        race,
+        [
+            ("Position", "Position"),
+            ("Projection", "Projection"),
+            ("n", "n"),
+            ("ρ (rank)", "Rho"),
+            ("MAE", "MAE"),
+            ("Bias", "Bias"),
+        ],
+        signed={"Bias"},
+        three_decimals={"ρ (rank)"},
+    )
+    trend = calibration.backtest_by_week(scored, with_um=with_um)
+    if not trend.empty:
+        wide = trend.pivot(index="Week", columns="Source", values=["MAE", "Rho"])
+        counts = trend[trend["Source"] == "TFFB"].set_index("Week")["n"]
+        table = pd.DataFrame({"Week": wide.index, "n": counts.reindex(wide.index).to_numpy()})
+        columns = [("Week", "Week"), ("n", "n")]
+        three = set()
+        for name in labels:
+            table[f"{name} MAE"] = wide[("MAE", name)].to_numpy()
+            columns.append((f"{name} MAE", f"{name} MAE"))
+        if not with_um:  # twelve columns would not fit A..J; the with-UM trend shows MAE only
+            for name in labels:
+                table[f"{name} ρ"] = wide[("Rho", name)].to_numpy()
+                columns.append((f"{name} ρ", f"{name} ρ"))
+                three.add(f"{name} ρ")
+        table["Thin"] = table["n"].map(ra.is_thin)
+        b.blank()
+        b.table(table, columns, three_decimals=three)
+    return True
+
+
+def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
+    """The table Sam uses to choose his default projection: TFFB, AggPts and CalPts on weeks none of them
+    trained on (CalPts is fitted on earlier weeks only; the 2nd scored week is the first it can be judged),
+    first without UM, then with UM on the rows UM rates."""
+    b.section("PROJECTION RACE  —  TFFB vs AggPts vs CalPts, each judged on weeks it never trained on")
+    if not _race_block(b, scored, with_um=False):
+        b.note(
+            "Not enough data yet -- CalPts needs one earlier scored week to learn from, so the race starts "
+            "with the 2nd scored week."
+        )
+        return
+    b.blank()
+    b.note("WITH UM, on the players the UM model rates (blank outside its training population):")
+    if not _race_block(b, scored, with_um=True):
+        b.note("UM is not on the scored weeks yet -- run `dfs model fetch`, then `dfs results update`.")
+    weeks_trained = sorted(int(w) for w in scored["week"].unique())
+    b.note(
+        "CalPts is NOT the default projection: it is tracked here every week and Sam decides. It is each "
+        "source's level bias corrected per position and salary tier (shrunk toward 0), then weighted; "
+        "'CalPts (no UM)' leaves UM out, 'CalPts' is the production blend that includes it. "
+        f"Scored weeks so far: {_weeks_text(weeks_trained)}. rho = rank correlation within position and week "
+        "(TFFB is hard to beat at ranking; the gain from CalPts is expected in the level, MAE and bias). "
+        "Rosterable pool, scored players only."
+    )
+
+
+def _add_reliability(b: _Builder, reliability: pd.DataFrame | None) -> None:
+    """Predicted decile against realized for Hit3x%, Boom% and Bust%."""
+    b.section("RELIABILITY  —  do Hit3x%, Boom% and Bust% come true? (predicted decile vs realized)")
+    if reliability is None or reliability.empty:
+        b.note("Not enough data yet -- no scored week has probabilities. Run `dfs results update`.")
+        return
+    table = reliability.assign(
+        Predicted=reliability["Predicted"] / 100, Realized=reliability["Realized"] / 100
+    )
+    b.table(
+        table,
+        [
+            ("Measure", "Measure"),
+            ("Decile", "Decile"),
+            ("n", "n"),
+            ("Predicted", "Predicted"),
+            ("Realized", "Realized"),
+            ("Gap (pts)", "Gap"),
+            ("Off?", "Flag"),
+        ],
+        percent={"Predicted", "Realized"},
+        signed={"Gap (pts)"},
+    )
+    flagged = reliability[reliability["Flag"] == "off"]
+    b.note(
+        "Decile 1 = the lowest predicted probability. Gap = realized minus predicted, in percentage points "
+        f"(flagged 'off' when beyond {results_signals.RELIABILITY_FLAG_POINTS:g} with n >= "
+        f"{results_signals.RELIABILITY_MIN_N}; nothing is adjusted). "
+        + (
+            f"{len(flagged)} decile(s) are off: "
+            + ", ".join(f"{r.Measure} decile {r.Decile} ({r.Gap:+.1f})" for r in flagged.itertuples())
+            + ". "
+            if len(flagged)
+            else "No decile is off yet. "
+        )
+        + "The probability tables were learned from UM's errors and are applied to CalPts, so Boom% and "
+        "Bust% may run slightly too wide. Few weeks scored: deciles are thin, read n."
+    )
+
+
+def _add_signals(b: _Builder, signal_table: pd.DataFrame | None) -> None:
+    """Every context signal scored: n, mean miss against ProjPts and CalPts, and the hit rate."""
+    b.section("SIGNALS  —  context, not proven to beat projections; scored here every week")
+    if signal_table is None or signal_table.empty:
+        b.note(
+            "Not enough data yet -- no signals archive exists. Run `dfs results update` after a week's games."
+        )
+        return
+    table = signal_table.rename(
+        columns={
+            "VsProj": "Actual - ProjPts",
+            "VsCal": "Actual - CalPts",
+            "HitProj": "Hit (vs ProjPts)",
+            "HitCal": "Hit (vs CalPts)",
+        }
+    )
+    b.table(
+        table,
+        [
+            ("Signal", "Signal"),
+            ("n", "n"),
+            ("Actual - ProjPts", "Actual - ProjPts"),
+            ("Actual - CalPts", "Actual - CalPts"),
+            ("Hit (vs ProjPts)", "Hit (vs ProjPts)"),
+            ("Hit (vs CalPts)", "Hit (vs CalPts)"),
+        ],
+        percent={"Hit (vs ProjPts)", "Hit (vs CalPts)"},
+        signed={"Actual - ProjPts", "Actual - CalPts"},
+    )
+    b.note(
+        "Each row is a group of players the signal picked, as it stood before kickoff (weeks backfilled "
+        "without lookahead). Hit = on the right side of the projection: above it for BUY, USAGE up, "
+        "INJ+ and the top-8 matchups; below it for FADE, USAGE down and the bottom-4 matchups. "
+        "Matchup rows are each team's top two players at the position by CalPts. The planning "
+        "session found these signals do NOT beat TFFB on Weeks 1-4; they are shown as context. "
+        "A signal with n of 0 has not fired yet."
+    )
 
 
 def write_model_check(client: SheetsClient, layout: Layout, tab: str = MODEL_CHECK_TAB) -> str:
