@@ -105,7 +105,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | `--top / -n INT` | How many swaps to show per kind (and per open slot for 1-for-1 swaps). Default: `3`. |
 | `--metric CHOICE` | What to rank swaps by: ProjPts (default) or AggPts. Default: `ProjPts`. |
 | `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
-| `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) (default) or P(GPP); both are shown. Default: `cash`. |
+| `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each lineup's Cash/GPP marker (column A of its Total row; cash if blank). |
 
 ### `dfs week close`
 
@@ -227,7 +227,7 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 
 ## Reference: the lineup simulator (only when needed)
 
-The Median, p90, P(cash) and P(GPP) columns on Lineups are written by every `dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.
+The Median, p90, P(cash) and P(GPP) numbers on each Lineups Total row are written by every `dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.
 
 ### `dfs sim fit`
 

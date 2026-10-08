@@ -1,4 +1,5 @@
-"""Median / p90 / P(cash) / P(GPP) on the Lineups tab: what is written where, determinism, the GPP header."""
+"""Median / p90 / P(cash) / P(GPP) on the Lineups Total rows: what is written where, the labels, determinism,
+the Cash/GPP marker, and the retired far-right columns."""
 
 from contextlib import contextmanager
 
@@ -11,7 +12,7 @@ from dfs.sheets import column_letter
 
 BLOCKS = [(2, 10), (15, 23)]
 REPEATS = [14]
-HEADER = ["Name", "Pos.", "Games", "Min Unique", *sls.LINEUP_SIM_HEADERS, "Edge ↗"]
+HEADER = ["Name", "Pos.", "Team", "Opp.", "DK Sal", "Pts", *sls.SIM_SLOT_HEADERS, "Hit3x%", "Edge ↗"]
 RESULTS = [
     ["Week", "Cash Pts", "Cash Line"],
     ["1", "131", "147.56"],
@@ -128,14 +129,39 @@ def _run(client, **kw):
     return sls.write_lineup_sim(client, "Lineups", **{**args, **kw})
 
 
+def _slot_letters():
+    return [column_letter(HEADER.index(h)) for h in sls.SIM_SLOT_HEADERS]
+
+
 def test_each_built_lineup_gets_its_four_numbers_on_its_total_row_and_a_blank_for_an_unbuilt_one():
     client = FakeClient([FULL_A, None])
     report = _run(client)
     assert report.simulated == 1 and report.skipped == 1
-    median, p90, p_cash, p_gpp = (column_letter(HEADER.index(h)) for h in sls.LINEUP_SIM_HEADERS)
-    row_a = client.updates[f"{median}11:{p_gpp}11"][0]  # block 1's Total row is end + 1
+    first, _, _, last = _slot_letters()
+    assert (first, last) == ("G", "J")  # the four columns right after Pts: AggPts, CalPts, Val, ValAdj
+    row_a = client.updates[f"{first}11:{last}11"][0]  # block 1's Total row is end + 1
     assert row_a[0] > 0 and row_a[1] > row_a[0] and 0 <= row_a[3] <= row_a[2] <= 1
-    assert client.updates[f"{median}24:{p_gpp}24"] == [["", "", "", ""]]  # the unbuilt block is cleared
+    assert client.updates[f"{first}24:{last}24"] == [["", "", "", ""]]  # the unbuilt block is cleared
+
+
+def test_the_labels_go_on_every_remaining_row_with_the_configured_target():
+    client = FakeClient([FULL_A, None])
+    _run(client, gpp_target=200.0)
+    first, _, _, last = _slot_letters()
+    assert client.updates[f"{first}12:{last}12"] == [["Median", "p90", "P(cash)", "P(200+)"]]
+    assert client.updates[f"{first}25:{last}25"] == [["Median", "p90", "P(cash)", "P(200+)"]]
+
+
+def test_the_portfolio_is_in_the_report_for_the_board_not_written_to_lineups():
+    client = FakeClient([FULL_A, FULL_B])
+    report = _run(client)
+    first, _, _, last = _slot_letters()
+    single = [client.updates[f"{first}{r}:{last}{r}"][0] for r in (11, 24)]
+    p = report.portfolio
+    assert p["p_any_cash"] >= max(single[0][2], single[1][2]) - 1e-9
+    assert p["expected_cashes"] == pytest.approx(single[0][2] + single[1][2], abs=0.01)
+    assert p["p_any_gpp"] >= max(single[0][3], single[1][3]) - 1e-9
+    assert not any("Portfolio" in str(v) for v in client.updates.values())  # the old far-right line is gone
 
 
 def test_the_cash_line_is_the_typed_median_and_is_reported():
@@ -145,19 +171,6 @@ def test_the_cash_line_is_the_typed_median_and_is_reported():
     assert "Weeks 2, 3, 4" in report.line() and "140.16" in report.line()
     default = _run(FakeClient([FULL_A, None], results=[["Week", "Cash Line"], ["1", ""]]))
     assert default.cash_line.is_default
-
-
-def test_the_portfolio_line_sits_on_the_first_blocks_remaining_row():
-    client = FakeClient([FULL_A, FULL_B])
-    report = _run(client)
-    median, p90, p_cash, p_gpp = (column_letter(HEADER.index(h)) for h in sls.LINEUP_SIM_HEADERS)
-    label, expected, any_cash, any_gpp = client.updates[f"{median}12:{p_gpp}12"][0]  # block 1 end + 2
-    assert label == sls.PORTFOLIO_LABEL
-    single = [client.updates[f"{median}{r}:{p_gpp}{r}"][0] for r in (11, 24)]
-    assert any_cash >= max(single[0][2], single[1][2]) - 1e-9  # at least one cashing is at least as likely
-    assert expected == pytest.approx(single[0][2] + single[1][2], abs=0.01)  # the expectation adds up
-    assert any_gpp >= max(single[0][3], single[1][3]) - 1e-9
-    assert report.portfolio["p_any_cash"] == pytest.approx(any_cash, abs=1e-4)
 
 
 def test_the_numbers_are_deterministic_under_the_fixed_seed():
@@ -176,55 +189,89 @@ def test_an_incomplete_lineup_or_an_unknown_name_is_left_blank():
         assert report.simulated == 0 and "nothing to simulate" in report.line()
 
 
-def test_the_header_is_rewritten_when_the_configured_target_changes_and_reflects_it():
-    client = FakeClient([FULL_A, None])
-    assert client.header[HEADER.index("P(190+)")] == "P(190+)"
-    report = _run(client, gpp_target=200.0)
-    assert report.renamed_header
-    assert "P(200+)" in client.header and "P(190+)" not in client.header
-    letter = column_letter(client.header.index("P(200+)"))
-    renamed = [rng for rng, _ in client.single]
-    assert f"{letter}1" in renamed and f"{letter}14" in renamed  # the primary header and the repeat
-    assert any("200" in text for _cell, text in client.notes)  # the note names the new target
-    assert client.widths  # and the width is set again
-    assert sls.find_gpp_column(client.header) == client.header.index("P(200+)")
-    again = _run(client, gpp_target=200.0)
-    assert not again.renamed_header  # nothing to rewrite the second time
-
-
-def test_a_sheet_without_the_columns_is_skipped_with_a_message():
-    client = FakeClient([FULL_A, None], header=["Name", "Pos.", "Games"])
-    message = _run(client)
-    assert isinstance(message, str) and "reorder-columns" in message and "P(190+)" in message
-    assert not client.updates
+def test_a_sheet_without_the_four_slot_columns_is_skipped_with_a_message():
+    for header in (
+        ["Name", "Pos.", "Games"],
+        ["Name", "Pos.", "AggPts", "Edge ↗", "CalPts", "Val", "ValAdj"],
+    ):
+        client = FakeClient([FULL_A, None], header=header)
+        message = _run(client)
+        assert isinstance(message, str) and "not found as one run" in message
+        assert not client.updates
 
 
 def test_only_one_batched_read_and_one_batched_write_are_needed():
     client = FakeClient([FULL_A, FULL_B])
     _run(client)
-    assert client.reads == 1 and len(client.single) == 0  # no per-cell writes unless the header is renamed
+    assert client.reads == 1 and len(client.single) == 0  # no per-cell writes
 
 
-def test_the_canonical_header_comes_back_for_the_column_reorder():
-    client = FakeClient([FULL_A, None])
-    _run(client, gpp_target=200.0)
-    assert sls.restore_canonical_gpp_header(client, "Lineups", header_repeats_at=REPEATS)
-    assert client.header[HEADER.index("P(190+)")] == "P(190+)"
-    assert not sls.restore_canonical_gpp_header(client, "Lineups", header_repeats_at=REPEATS)
-
-
-def test_gpp_header_text_carries_the_target_and_the_lookup_accepts_any_target():
+def test_gpp_label_text_carries_the_target_and_the_retired_headers_are_recognised():
     assert sls.gpp_header(190.0) == "P(190+)" and sls.gpp_header(187.5) == "P(187.5+)"
-    assert sls.find_gpp_column(["a", "P(187.5+)", "P(cash)"]) == 1
-    assert sls.find_gpp_column(["a", "P(cash)", "P(GPP)"]) is None
+    assert sls.labels(200.0) == ["Median", "p90", "P(cash)", "P(200+)"]
     notes = sls.lineup_sim_notes(200.0)
-    assert set(notes) == {"Median", "p90", "P(cash)", "P(200+)"} and "200" in notes["P(200+)"]
+    assert set(notes) == set(sls.labels(200.0)) and "200" in notes["P(200+)"]
+    assert all(sls.is_retired_sim_header(h) for h in ("Median", "p90", "P(cash)", "P(190+)", "P(187.5+)"))
+    assert not sls.is_retired_sim_header("Edge ↗") and not sls.is_retired_sim_header("P(GPP)")
 
 
-def test_the_lineups_column_order_places_the_four_columns_after_min_unique():
-    from dfs.config import SIM_GPP_TARGET_DEFAULT
+def test_the_lineups_column_order_no_longer_has_the_four_columns():
     from dfs.sheet_columns import LINEUPS_COLUMN_ORDER
 
-    i = LINEUPS_COLUMN_ORDER.index("Min Unique")
-    assert LINEUPS_COLUMN_ORDER[i + 1 : i + 5] == ["Median", "p90", "P(cash)", "P(190+)"]
-    assert sls.GPP_HEADER_DEFAULT == sls.gpp_header(SIM_GPP_TARGET_DEFAULT) == "P(190+)"
+    assert not [h for h in LINEUPS_COLUMN_ORDER if sls.is_retired_sim_header(h)]
+    assert all(h in LINEUPS_COLUMN_ORDER for h in sls.SIM_SLOT_HEADERS)
+    i = LINEUPS_COLUMN_ORDER.index("Pts")
+    assert LINEUPS_COLUMN_ORDER[i + 1 : i + 5] == list(sls.SIM_SLOT_HEADERS)
+
+
+class _ScoreboardClient(FakeClient):
+    def __init__(self):
+        super().__init__([FULL_A, None])
+        self.rules, self.validations = [], []
+
+    def read_range(self, tab, rng):
+        return [self.header]
+
+    def add_boolean_rule(self, tab, rng, *, condition_type, values, fmt):
+        self.rules.append((rng, condition_type, values))
+
+    def set_dropdown_validation(self, tab, rng, options):
+        self.validations.append((rng, options))
+
+
+def test_the_scoreboard_formats_the_marker_the_greens_and_the_matching_highlight():
+    client = _ScoreboardClient()
+    sls.format_sim_columns(client, "Lineups", header_row=1, name_blocks=BLOCKS)
+    assert client.validations == [
+        ("A11", ["Cash", "GPP"]),
+        ("A24", ["Cash", "GPP"]),
+    ]  # column A of each Total row
+    green = {(rng, v[0]) for rng, kind, v in client.rules if kind == "NUMBER_GREATER_THAN_EQ"}
+    assert ("I11", "0.5") in green and ("J11", "0.05") in green  # P(cash) 50%, P(GPP) 5%
+    highlight = {(rng, v[0]) for rng, kind, v in client.rules if kind == "CUSTOM_FORMULA"}
+    assert ("I11", '=$A$11="Cash"') in highlight and ("J11", '=$A$11="GPP"') in highlight
+    formats = dict(client.formats)
+    assert formats["G11:H11"]["numberFormat"]["pattern"] == "0.0"
+    assert formats["I11:J11"]["numberFormat"]["type"] == "PERCENT"
+    assert "backgroundColor" in formats["A11"]  # the pale-yellow input look
+
+
+def test_label_notes_land_on_the_first_lineups_remaining_row():
+    client = _ScoreboardClient()
+    assert sls.apply_label_notes(client, "Lineups", header_row=1, name_blocks=BLOCKS, target=190.0) == 4
+    assert [cell for cell, _ in client.notes] == ["G12", "H12", "I12", "J12"]
+
+
+def test_lineup_types_reads_column_a_of_each_total_row_and_blank_means_both():
+    class C:
+        def batch_read_ranges(self, specs):
+            assert [s[1] for s in specs] == ["A11", "A24"]
+            return [[["Cash"]], [[]]]
+
+    assert sls.lineup_types(C(), "Lineups", BLOCKS) == ["Cash", ""]
+
+
+def test_the_late_swap_goal_is_the_flag_else_the_lineups_marker_else_cash():
+    assert sls.resolve_goal(None, "GPP") == "gpp" and sls.resolve_goal(None, "Cash") == "cash"
+    assert sls.resolve_goal(None, "") == "cash"  # a blank marker means both: the long-standing default
+    assert sls.resolve_goal("cash", "GPP") == "cash" and sls.resolve_goal("gpp", "") == "gpp"  # the flag wins

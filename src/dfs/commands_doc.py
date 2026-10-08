@@ -117,7 +117,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
     ),
     (
         "Reference: the lineup simulator (only when needed)",
-        "The Median, p90, P(cash) and P(GPP) columns on Lineups are written by every `dfs sync`; these "
+        "The Median, p90, P(cash) and P(GPP) numbers on each Lineups Total row are written by every `dfs sync`; these "
         "commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` "
         "fills and never touch a sheet.",
         [

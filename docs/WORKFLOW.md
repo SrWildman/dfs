@@ -208,7 +208,7 @@ in P(cash), `--goal gpp` by P(GPP), projection gain breaking ties; the search ke
 shows, so a swap that wins on probability but not on projection can surface. The cash line is the median of your last three
 typed `Cash Line` values in Results and the GPP target is `[sim] gpp_target` (default 190); the top of the output says which.
 
-After `dfs sync`, the **Lineups** tab also shows `Median`, `p90`, `P(cash)` and `P(190+)` for every built lineup and a
+After `dfs sync`, the **Lineups** tab also shows `Median`, `p90`, `P(cash)` and `P(190+)` on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and
 the chance at least one reaches the target.
 

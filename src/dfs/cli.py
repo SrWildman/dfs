@@ -9,6 +9,7 @@ typer.Exit.
 
 from __future__ import annotations
 
+import dataclasses
 import json as _json
 import re
 import shlex
@@ -87,7 +88,6 @@ from dfs.sheet_bankroll_view import (
 from dfs.sheet_bankroll_view import (
     LAST_ROW as BETTING_LAST_ROW,
 )
-from dfs.sheet_column_notes import apply_header_notes
 from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, PLAYER_POOL_RAW_COLUMN_ORDER
 from dfs.sheet_empty_guards import repair_unguarded
 from dfs.sheet_filters import add_all_filter_views, add_basic_filters
@@ -95,7 +95,14 @@ from dfs.sheet_formula_ranges import repair_formula_ranges
 from dfs.sheet_instructions import build_instructions_tab
 from dfs.sheet_lineup_keys import write_lineup_keys
 from dfs.sheet_lineup_metrics import write_lineup_metrics
-from dfs.sheet_lineup_sim import LineupSimReport, format_sim_columns, lineup_sim_notes, write_lineup_sim
+from dfs.sheet_lineup_sim import (
+    LineupSimReport,
+    apply_label_notes,
+    format_sim_columns,
+    lineup_types,
+    resolve_goal,
+    write_lineup_sim,
+)
 from dfs.sheet_lineup_tints import apply_lineup_tints
 from dfs.sheet_links import (
     PLAYER_POOL_RAW_BLOCK,
@@ -1209,10 +1216,14 @@ def sheets_polish(
                 name_blocks=LINEUPS_NAME_BLOCKS,
             )
         )
-        sim_notes = apply_header_notes(
-            client, cfg.lineups.builder_tab, lineups_header_row, lineup_sim_notes(cfg.sim.gpp_target)
+        sim_notes = apply_label_notes(
+            client,
+            cfg.lineups.builder_tab,
+            header_row=lineups_header_row,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            target=cfg.sim.gpp_target,
         )
-        results.append(f"{cfg.lineups.builder_tab}: {sim_notes} simulator header note(s)")
+        results.append(f"{cfg.lineups.builder_tab}: {sim_notes} simulator label note(s)")
         results.append(
             polish_lineups_identity_cells(
                 client,
@@ -2663,7 +2674,9 @@ def _read_player_pool_names(client: SheetsClient, player_pool_tab: str) -> set[s
     return names
 
 
-def _late_swap_sim_setup(cfg: Config, client: SheetsClient, edge: pd.DataFrame, goal: str, now: datetime):
+def _late_swap_sim_setup(
+    cfg: Config, client: SheetsClient, edge: pd.DataFrame, goal: str | None, now: datetime
+):
     """What the simulator needs to score late-swap candidates: every player's `PlayerSpec`, the cash line (the
     median of your last three typed Cash Lines in Results, read only) and the GPP target. None, with a note,
     when anything is missing: the swaps are then shown and ranked by projection alone."""
@@ -2694,7 +2707,12 @@ def _late_swap_sim_setup(cfg: Config, client: SheetsClient, edge: pd.DataFrame, 
         return None
     console.print(
         f"Simulator: cash line {cash.value:g} ({cash.note}), GPP target {cfg.sim.gpp_target:g}; "
-        f"swaps ranked by change in P({goal}).\n"
+        + (
+            f"swaps ranked by change in P({goal})."
+            if goal
+            else "swaps ranked by P(cash) or P(GPP) as each lineup's Cash/GPP marker says (cash if blank)."
+        )
+        + "\n"
     )
     return specs, SimSettings(cash_line=cash.value, gpp_target=cfg.sim.gpp_target, goal=goal)
 
@@ -2707,10 +2725,11 @@ def _run_late_swap(
     all_players: bool,
     now: datetime,
     client: SheetsClient | None = None,
-    goal: str = "cash",
+    goal: str | None = None,
 ) -> None:
     """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
-    point in the slate; the command passes the real clock."""
+    point in the slate; the command passes the real clock. `goal` None reads each lineup's Cash/GPP marker
+    (column A of its Total row; blank means cash); an explicit goal overrides every marker."""
     try:
         edge = store.load_current("edge")
     except FileNotFoundError as e:
@@ -2723,6 +2742,7 @@ def _run_late_swap(
         last_row = LINEUPS_NAME_BLOCKS[-1][1]
         raw = client.read_range(cfg.lineups.builder_tab, f"A2:A{last_row}")
         pool_names = _read_player_pool_names(client, cfg.lineups.player_pool_tab)
+        markers = lineup_types(client, cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS)
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -2779,6 +2799,7 @@ def _run_late_swap(
         console.print(table)
 
         state = lineup_state(statuses, edge, cap=cfg.lineups.salary_cap, metric=metric)
+        lineup_goal = resolve_goal(goal, markers[lineup_number - 1])
         scored = False
         lineup_specs = None
         if sim_setup is not None:
@@ -2792,13 +2813,14 @@ def _run_late_swap(
             time_limit=LATE_SWAP_TIME_LIMIT_SECONDS,
         )
         if lineup_specs is not None:
-            suggestions = attach_probabilities(suggestions, lineup_specs, sim_setup[0], sim_setup[1], top=top)
+            settings = dataclasses.replace(sim_setup[1], goal=lineup_goal)
+            suggestions = attach_probabilities(suggestions, lineup_specs, sim_setup[0], settings, top=top)
             scored = True
         elif sim_setup is not None:
             console.print(
                 "[dim]Probabilities skipped: this lineup is incomplete or has an unknown name.[/dim]"
             )
-        for line in format_suggestions(suggestions, metric=metric, goal=goal if scored else None):
+        for line in format_suggestions(suggestions, metric=metric, goal=lineup_goal if scored else None):
             console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
 
@@ -2820,9 +2842,10 @@ def lineups_late_swap(
         help="Also consider the whole rosterable pool, not only your Player Pool.",
     ),
     goal: SwapGoal = typer.Option(
-        SwapGoal.cash,
+        None,
         "--goal",
-        help="Rank swaps by the simulator's change in P(cash) (default) or P(GPP); both are shown.",
+        help="Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each "
+        "lineup's Cash/GPP marker (column A of its Total row; cash if blank).",
     ),
 ) -> None:
     """Check every built lineup in the Lineups tab against real kickoff
@@ -2843,7 +2866,12 @@ def lineups_late_swap(
     """
     cfg = _load_config_or_exit()
     _run_late_swap(
-        cfg, top=top, metric=metric.value, all_players=all_players, now=datetime.now(UTC), goal=goal.value
+        cfg,
+        top=top,
+        metric=metric.value,
+        all_players=all_players,
+        now=datetime.now(UTC),
+        goal=goal.value if goal else None,
     )
 
 

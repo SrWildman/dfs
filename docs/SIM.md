@@ -658,7 +658,7 @@ placeholder 145 is used and the sync says so. The GPP target is `[sim] gpp_targe
 the column header as `P(190+)`.
 
 **Lineups tab.** `dfs sync` (the full sync and `--live`) simulates every complete lineup together (20,000 draws, seed 0)
-and writes `Median`, `p90`, `P(cash)` and `P(<target>+)` onto each lineup's Total row, plus the portfolio line on the first
+and writes `Median`, `p90`, `P(cash)` and `P(<target>+)` onto each lineup's Total row (under `AggPts`..`ValAdj`, labels on the Remaining row), plus the portfolio line (now on the Board) from the first
 lineup's `Remaining` row (`Portfolio`, expected cashes under `p90`, P(at least one cashes) under `P(cash)`, P(at least one
 reaches the target) under the GPP column). A half-built lineup or an unknown name is left blank. The numbers are not
 conditioned on games already played. Changing `gpp_target` renames the header on the next sync; `dfs setup reorder-columns`

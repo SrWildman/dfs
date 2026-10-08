@@ -59,6 +59,9 @@ class StubClient:
     def describe(self):
         return ("Week X", "https://example.test/sheet")
 
+    def batch_read_ranges(self, specs):  # the Cash/GPP markers on the Total rows: all blank (both)
+        return [[] for _ in specs]
+
     def read_range(self, tab, a1):
         if tab == "Lineups":
             rows = [[""] for _ in range(LINEUPS_NAME_BLOCKS[-1][1] - 1)]

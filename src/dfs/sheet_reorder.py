@@ -39,7 +39,7 @@ from __future__ import annotations
 from dfs import perf
 from dfs.column_reorder import compute_column_moves
 from dfs.sheet_columns import LINKED_COLUMNS
-from dfs.sheet_lineup_sim import GPP_HEADER_DEFAULT, restore_canonical_gpp_header
+from dfs.sheet_lineup_sim import is_retired_sim_header
 from dfs.sheet_links import link_edge_columns
 from dfs.sheet_native_links import rewrite_native_lookup_columns
 from dfs.sheets import SheetsClient, column_letter
@@ -209,11 +209,9 @@ def migrate_tab_to_designed_order(
     Returns the human-readable report line from each step, in order, for
     the changelog.
     """
-    # The simulator's GPP column carries the configured target in its header text ("P(200+)"); this module
-    # compares header names exactly, so put the canonical name back first. The next sync writes the target
-    # again.
-    if GPP_HEADER_DEFAULT in target_order:
-        restore_canonical_gpp_header(client, tab, header_row=header_row, header_repeats_at=header_repeats_at)
+    # The simulator's four numbers used to have columns of their own (Median, p90, P(cash), P(<target>+));
+    # they now sit on each Total row, so a sheet that still has the columns has them removed first.
+    retire_lineup_sim_columns(client, tab, header_row=header_row)
     native_target = [name for name in target_order if name not in LINKED_COLUMNS]
     created = provision_missing_columns(
         client, tab, native_target, header_row=header_row, header_repeats_at=header_repeats_at
@@ -265,6 +263,19 @@ def migrate_tab_to_designed_order(
         report.append(f"{tab}: resynced {resynced} repeated header row(s) to match the primary header")
 
     return report
+
+
+def retire_lineup_sim_columns(client: SheetsClient, tab: str, *, header_row: int = 1) -> str | None:
+    """Delete the retired simulator columns (`Median`, `p90`, `P(cash)`, `P(<target>+)`) from a tab that
+    still has them; None when it has none. A real `deleteDimension`, so every formula range after them
+    shifts."""
+    rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = list(rows[0]) if rows else []
+    names = [str(h).strip() for h in header if is_retired_sim_header(h)]
+    # Only the run the retired columns formed: "Median" is also a legitimate header on other tabs.
+    if "Median" not in names or "p90" not in names:
+        return None
+    return remove_header_columns(client, tab, names, header_row=header_row)
 
 
 def remove_header_columns(client: SheetsClient, tab: str, names: list[str], *, header_row: int = 1) -> str:

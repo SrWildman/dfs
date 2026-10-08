@@ -1425,12 +1425,6 @@ BUILDER_WIDTHS = {
     # (`sheet_lineup_metrics.LINEUP_METRIC_HEADERS`).
     "Games": 56,
     "Min Unique": 92,
-    # The simulator's columns (`sheet_lineup_sim.LINEUP_SIM_HEADERS`); the GPP one is renamed to the
-    # configured target, so `format_sim_columns` / the writer set its width again when it changes.
-    "Median": 62,
-    "p90": 56,
-    "P(cash)": 66,
-    "P(190+)": 66,
     # Results-only. Found live during Part 4b's own verification pass
     # (2026-09-22): no Results column had ever had an explicit width --
     # `style_results` falls back to `_GENERIC_COLUMN_PX` for anything not
