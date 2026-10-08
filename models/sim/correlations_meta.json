@@ -1,0 +1,30 @@
+{
+  "ci_level": 0.9,
+  "conditional_pairs": 8,
+  "cross_game": {
+    "limit": 0.03,
+    "max_abs_r": 0.038459193411985414,
+    "mean_abs_r": 0.011703032232559779,
+    "mean_r": 0.0014778852099515943,
+    "noise_floor": 0.01252150588975836,
+    "role_pairs": 66
+  },
+  "games": 3151,
+  "n_boot": 1000,
+  "pairs": 121,
+  "rows": 51267,
+  "seasons": [
+    2014,
+    2025
+  ],
+  "seed": 0,
+  "shrink_prior_n": 200,
+  "total_cutoffs": [
+    43.5,
+    47.0
+  ],
+  "u_clip": [
+    0.005,
+    0.995
+  ]
+}
