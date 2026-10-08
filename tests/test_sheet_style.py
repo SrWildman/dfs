@@ -918,6 +918,17 @@ def test_style_board_unhides_rows_a_collapsed_group_left_hidden():
     assert client.unhidden_rows[0][1] >= BOARD_LAST_ROW
 
 
+def test_style_board_wipes_the_old_boards_formatting_far_below_the_new_last_row():
+    # Week 5, 2026-10-08: the previous Board ran past row 150 and its dark bands and header fills stayed
+    # visible under the new Board's last row. The reset must reach well past BOARD_LAST_ROW.
+    from dfs.sheet_style import BOARD_RESET_ROWS
+
+    client = FakeBoardClient()
+    style_board(client)
+    first_range = client.format_calls[0][0]
+    assert first_range.endswith(str(BOARD_RESET_ROWS)) and BOARD_RESET_ROWS >= BOARD_LAST_ROW + 200
+
+
 def test_style_board_resets_stale_alignment_and_number_format_first():
     # Week 4, 2026-09-30: a few Leaders rows kept an explicit LEFT alignment (and spacer columns
     # a "$" format) from an earlier layout. The whole-tab reset must unset both (None), not just

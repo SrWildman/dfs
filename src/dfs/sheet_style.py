@@ -119,7 +119,6 @@ from dfs.sheet_views import (
     BOARD_CHECK_HEADER_ROW,
     BOARD_CHECK_LAST_ROW,
     BOARD_ID_COL,
-    BOARD_LAST_ROW,
     BOARD_LIST_COLHEADER,
     BOARD_LIST_POOL_COL,
     BOARD_LIST_SET_COL,
@@ -2572,7 +2571,12 @@ _BANNER_FMT = {
 }
 
 
-# Board panels: (first column, last column) for each of the three.
+# The old Board ran past row 150 (leaders, punt finder, chalk map, edges panel); its dark bands and header
+# fills stayed visible below the new Board's last row until the reset covered them (found live, Week 5,
+# 2026-10-08).
+BOARD_RESET_ROWS = 400
+
+
 def style_board(client: SheetsClient, tab: str = "Board") -> str:
     """The Board's formatting: five collapsible ROW sections (Slate shape, Queue, Pool check, Pool summary,
     Stack candidates). Row positions come from `sheet_views`' own `BOARD_*` constants, the single source of
@@ -2590,14 +2594,14 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     client.clear_conditional_formats(tab)
     client.clear_row_groups(tab)
     # Deleting a collapsed group leaves its rows hidden; open everything, then regroup.
-    client.unhide_rows(tab, 1, BOARD_LAST_ROW + 10)
+    client.unhide_rows(tab, 1, BOARD_RESET_ROWS)
     last_visible_col = column_letter(BOARD_MAX_VISIBLE_COL_INDEX)
     # Reset the TEXT format, alignment and number format too, not just the fill: an earlier layout's dark
     # header rows left white bold text behind, and when the rebuilt sections' rows moved, real player rows
     # landed on those stale rows and rendered white-on-white (found live, Week 4, 2026-09-30).
     client.format_range(
         tab,
-        f"A1:{last_visible_col}{BOARD_LAST_ROW + 10}",
+        f"A1:{last_visible_col}{BOARD_RESET_ROWS}",
         {
             "backgroundColor": WHITE,
             "textFormat": {"foregroundColor": INK, "bold": False, "italic": False, "fontSize": 10},
