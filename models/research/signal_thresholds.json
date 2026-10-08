@@ -14,8 +14,8 @@
       2025
     ],
     "n": 45558,
-    "generated": "2026-10-07",
-    "code_version": "df5cf48",
+    "generated": "2026-10-08",
+    "code_version": "c231272",
     "min_flagged": 150,
     "min_effect_points": 0.5,
     "keep_rule": "expected sign in fit and test, test effect >= min_effect, test 90% interval excludes 0; borderline = all but the size"

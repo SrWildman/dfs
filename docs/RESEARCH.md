@@ -31,10 +31,10 @@ n, date generated, code version):
 
 1. **The hand-set "next man up gets 60%" rule is wrong for targets, and fits carries only roughly.** When a WR1 is
    out, WR2 gains 0.13 of the vacated targets (not 0.60). Out of sample the rule makes target predictions
-   *worse* than doing nothing (next-man-up MAE 3.39 vs 2.41 targets). For carries it helps, but 0.47 is closer
-   than 0.60 (RB2 when RB1 is out).
+   *worse* than doing nothing (next-man-up MAE 3.41 vs 2.41 targets). For carries it does as well as the learned
+   table overall, but loses on the next man up, and 0.47 is closer than 0.60 (RB2 when RB1 is out).
 2. **About 0.3 of a missing WR's volume goes nowhere** (0.27 mean, 0.41 median; 0.50 in 2022-2025): to players
-   outside the prior rotation or into the team throwing less. The hand-set rule leaves 0.15 unassigned.
+   outside the prior rotation or into the team throwing less. The hand-set rule assigns all of it (nothing is left unassigned), so it has no place for a leak.
 3. **Matchups are context, not edge.** Beyond UM, no position gains more than 0.04 points of MAE (QB 0.039,
    RB 0.015, WR 0.015, TE 0.003, DST 0.001; the bar for "edge" was 0.2).
 4. **Drop BUY↑. Keep FADE↓ for TEs only. Keep only the RB carry-share jumps of USAGE.** Salary lag cannot be tested.
@@ -236,9 +236,10 @@ What it says:
 - **About 0.27 of it (median 0.41) goes nowhere**: 0.12 to players outside the prior rotation (call-ups, returners)
   and a net team-volume drop of 0.18 targets per vacated target. A WR2 out looks the same (nowhere 0.28).
 - **TE out is the opposite of the hand-set rule.** The WRs gain 0.47 [0.32, 0.62] (WR1 0.22, WR2 0.16), the
-  other TEs only 0.29 in all (TE2+ 0.15 each). The rule gives the next TE 0.60 and the WRs 0.25.
+  other TEs only 0.29 in all (TE2+ 0.15 each). The rule gives the next TE 0.60, the other TEs 0.30 and the WRs 0.10.
 - **RB1 out**: RB2 takes 0.47 of the carries [0.42, 0.52], RB3+ 0.22 each (all RBs 0.79), 0.19 nowhere [0.13, 0.26].
-  Carries behave much more like the hand-set picture than targets do, only with 0.47 where the rule says 0.60.
+  Carries behave much more like the hand-set picture than targets do, only with 0.47 where the rule says 0.60
+  (and 0.79 to all RBs where it says 1.00).
 - The picture differs little by reason (injury-listed vs everything else: WR "nowhere" 0.27 vs 0.36, RB carries
   0.18 vs 0.19). The exception is TE (0.09 vs 0.30, on 78 vs 36 events). See `by_reason` in
   `redistribution_constants.json`.
@@ -284,15 +285,15 @@ hand-set rule; **(c)** the learned table, fit on 2014-2021 only (net fractions, 
 separate term, falling back to position-level and then pooled cells when a cell has fewer than 8 events).
 Because (c) also corrects the churn that (a) ignores, two comparators isolate what the absence itself adds:
 **(a2)** prior share + churn, and **(b3)** the hand rule + churn. **(d)** keeps the hand-set rule's *structure*
-(one next man up + one spill group) and refits its two constants on 2014-2021. MAE in targets / carries:
+(one next man up + one spill group, no rest-of-position bucket) and refits its two constants on 2014-2021. MAE in targets / carries:
 
 | Method | MAE, all rotation (n=2,267) | vs (a) | MAE, next man up (n=238) | vs (a) |
 |---|---|---|---|---|
 | (a) unchanged prior share | 1.600 | +0.000 | 2.413 | +0.000 |
 | (a2) prior share + typical-game churn | 1.549 | +0.051 | 2.291 | +0.123 |
-| **(b) hand-set rule** | 1.733 | -0.133 | 3.387 | -0.974 |
-| (b2) hand rule, best-remaining reading | 1.772 | -0.172 | 3.155 | -0.742 |
-| (b3) hand rule + churn | 1.731 | -0.131 | 3.662 | -1.249 |
+| **(b) hand-set rule** | 1.720 | -0.119 | 3.406 | -0.993 |
+| (b2) hand rule, best-remaining reading | 1.741 | -0.140 | 3.155 | -0.742 |
+| (b3) hand rule + churn | 1.739 | -0.139 | 3.680 | -1.267 |
 | **(c) learned table** | 1.598 | +0.002 | 2.286 | +0.128 |
 | (c2) learned, raw fractions | 1.599 | +0.002 | 2.291 | +0.123 |
 | (d) hand-rule structure, 2 constants refit | 1.565 | +0.035 | 2.297 | +0.116 |
@@ -301,9 +302,9 @@ Because (c) also corrects the churn that (a) ignores, two comparators isolate wh
 |---|---|---|---|---|
 | (a) unchanged prior share | 1.503 | +0.000 | 6.413 | +0.000 |
 | (a2) prior share + typical-game churn | 1.430 | +0.073 | 6.029 | +0.384 |
-| **(b) hand-set rule** | 1.311 | +0.193 | 4.574 | +1.839 |
-| (b2) hand rule, best-remaining reading | 1.306 | +0.197 | 4.610 | +1.803 |
-| (b3) hand rule + churn | 1.302 | +0.202 | 4.802 | +1.610 |
+| **(b) hand-set rule** | 1.262 | +0.242 | 4.732 | +1.680 |
+| (b2) hand rule, best-remaining reading | 1.258 | +0.246 | 4.684 | +1.729 |
+| (b3) hand rule + churn | 1.326 | +0.177 | 5.037 | +1.376 |
 | **(c) learned table** | 1.261 | +0.242 | 4.350 | +2.062 |
 | (c2) learned, raw fractions | 1.257 | +0.246 | 4.346 | +2.066 |
 | (d) hand-rule structure, 2 constants refit | 1.265 | +0.238 | 4.453 | +1.959 |
@@ -312,9 +313,9 @@ Because (c) also corrects the churn that (a) ignores, two comparators isolate wh
 |---|---|---|
 | (a) unchanged prior share | 1.749 | +0.000 |
 | (a2) prior share + typical-game churn | 1.720 | +0.028 |
-| **(b) hand-set rule** | 1.870 | -0.121 |
-| (b2) hand rule, best-remaining reading | 1.870 | -0.121 |
-| (b3) hand rule + churn | 1.870 | -0.121 |
+| **(b) hand-set rule** | 1.810 | -0.062 |
+| (b2) hand rule, best-remaining reading | 1.810 | -0.062 |
+| (b3) hand rule + churn | 1.791 | -0.043 |
 | **(c) learned table** | 1.780 | -0.031 |
 | (c2) learned, raw fractions | 1.782 | -0.034 |
 | (d) hand-rule structure, 2 constants refit | 1.780 | -0.032 |
@@ -326,16 +327,20 @@ Because (c) also corrects the churn that (a) ignores, two comparators isolate wh
   still not better than (a2). Whatever the fit-period table learned does not carry into 2022-25 (the stability
   drift above) and is small next to the noise in a single game's target count.
 - **The hand-set rule is worse than not redistributing at all**: it overshoots the named next man up by about one
-  target per player (MAE 3.39 vs 2.41) and spills too much onto the other group (1.87 vs 1.75).
-- **Carries: absence information is worth having**, the rule helps (1.50 to 1.31), the learned table helps more
-  (1.26), and for the next man up the learned table beats the rule by 0.22 carries (4.35 vs 4.57; 6.41 unchanged).
+  target per player (MAE 3.41 vs 2.41), and is slightly worse for the other pass-catching group too (1.81 vs 1.75).
+- **Carries: absence information is worth having.** The rule helps (1.50 to 1.26) and ties the learned table
+  (1.26) over all rotation players; for the next man up the learned table is better by 0.38 carries
+  (4.35 vs 4.73; 6.41 unchanged).
 
-The hand-set rule's code is not in this repository (the local round has not merged), so it is implemented from
-the task's wording: the next-ranked player *behind* the absent one at the same position gets 0.60 of `V`; for a
-WR or TE out, 0.25 of the vacated *targets* goes to the other pass-catching group (WRs for a TE, TEs for a WR),
-pro rata to prior target share. Reading "next player" as the best-ranked remaining player instead (b2) is
-slightly worse still. If the local rule differs, `r1.rule_allocation` takes its constants and the comparison can
-be rerun.
+**The hand-set rule** is implemented as the local Edge Finder round codes it (as relayed by the planner; the code is
+not in this repository). The next man up gets 0.60 of the vacated volume `V` -- the next-ranked player *behind* the
+absent one at the same position. The other 0.40 splits 0.75 to the rest of the same position (0.30 of `V`) and 0.25
+to the other pass-catching group (0.10 of `V`: TEs for a WR out, WRs for a TE out; targets only; there is no such
+group for a RB), each pro rata to prior share. **Nothing is left unassigned**: inside the 0.40 an empty bucket hands
+its weight to the other one (both empty: to the next man up); with no next man up the 0.60 goes to whatever buckets
+remain. That last part is my reading of "an empty bucket hands its weight to the others" and only matters at the
+edges. Reading "next player" as the best-ranked remaining player (b2) changes little (targets 1.74, carries 1.26).
+`r1.rule_allocation` takes the constants, so the comparison can be rerun if the local rule changes.
 
 ### Recommendation
 
@@ -734,7 +739,7 @@ By position:
 
 ## Anything that contradicts the local round's design
 
-- The **60% next-man-up / 25% spill rule** is contradicted for targets and approximate for carries (R1).
+- The **60% next-man-up rule (0.30 to the rest of the position, 0.10 spill, nothing unassigned)** is contradicted for targets and approximate for carries (R1).
 - **Equal-weight matchup factors** have nothing to weight: all of them together are worth less than 0.04 points (R2).
 - **BUY↑** does nothing; **FADE↓** is a TE signal; only **RB carry-share jumps** survive USAGE (R3).
 - **A 20 mph wind flag** is too high and too rare; wind (and rain, and cold) is an under-priced total (R4).
@@ -744,7 +749,8 @@ By position:
 
 - **UM is the baseline.** No historical TFFB exists, so "beyond UM" is not "beyond TFFB": if TFFB already includes some
   of these effects, UM-based findings overstate the edge available on top of it.
-- **R1's hand-set rule is a reading of the task's wording**; the local code is not in this repository.
+- **R1's hand-set rule follows the local round's description as relayed**, not its code (not in this repository); the
+  empty-bucket handling is my reading of it.
 - **R1 cells are thin** outside WR1/WR2/RB1/RB2/TE1; the WR-target behaviour drifted between periods; the churn
   correction assumes a no-absence game is a fair control for an absence game.
 - **R3 TD excess is counted in touchdowns** (the task did not say points).
@@ -756,14 +762,14 @@ By position:
 
 | # | Constant (local round) | Current | Recommended | Evidence |
 |---|---|---|---|---|
-| 1 | Next-up share, WR out, **targets** (WR2 when WR1 is out) | 0.60 | **0.13** (WR3 0.15; each WR4+ 0.17; all WRs 0.65). Or do not redistribute targets | n=239; test MAE of next man up 3.39 (rule) vs 2.41 (no change): the rule hurts |
-| 2 | Spill, WR out to TEs | 0.25 | **0.07** (TEs together; RBs 0.00) | n=239, [0.03, 0.12] |
-| 3 | Next-up share, TE out (TE2) | 0.60 | **0.15** (all TEs 0.29) | n=111 |
-| 4 | Spill, TE out to WRs | 0.25 | **0.47** (WR1 0.22, WR2 0.16, WR3 0.08) | n=111, [0.32, 0.62] |
-| 5 | Next-up share, RB out, **carries** (RB2 when RB1 is out) | 0.60 | **0.47** (RB3+ 0.22 each; one-pick refit 0.40) | n=320, [0.42, 0.52]; test MAE of next man up 4.35 learned vs 4.57 rule vs 6.41 none |
-| 6 | Next-up share, RB out, **targets** (RB2) | 0.60 | **0.24** (WRs 0.46 and TE1 0.21 also gain) | n=33 (thin) |
-| 7 | Unassigned share ("nowhere"), WR out | 0.15 (what 0.60 + 0.25 leaves) | **0.27** mean / 0.41 median (0.50 in 2022-25) | n=239, [0.16, 0.39]; drift z=3.0 |
-| 8 | Unassigned share, RB out (carries) / TE out | 0.15 | **0.19** [0.13, 0.26] / **0.14** | n=352 / 111 |
+| 1 | Next-up share, WR out, **targets** (WR2 when WR1 is out) | 0.60 (+0.30 to the rest of the WRs) | **0.13** (WR3 0.15; each WR4+ 0.17; all WRs 0.65). Or do not redistribute targets | n=239; test MAE of next man up 3.41 (rule) vs 2.41 (no change): the rule hurts |
+| 2 | Spill, WR out to TEs | 0.10 of the vacated total (0.25 of the 0.40 remainder) | **0.07** (TEs together; RBs 0.00) | n=239, [0.03, 0.12] |
+| 3 | Next-up share, TE out (TE2) | 0.60 (+0.30 to the rest of the TEs) | **0.15** (all TEs 0.29) | n=111 |
+| 4 | Spill, TE out to WRs | 0.10 of the vacated total | **0.47** (WR1 0.22, WR2 0.16, WR3 0.08) | n=111, [0.32, 0.62] |
+| 5 | Next-up share, RB out, **carries** (RB2 when RB1 is out) | 0.60 (+0.40 to the rest of the RBs) | **0.47** (RB3+ 0.22 each; one-pick refit 0.40) | n=320, [0.42, 0.52]; test MAE of next man up 4.35 learned vs 4.73 rule vs 6.41 none |
+| 6 | Next-up share, RB out, **targets** (RB2) | 0.60 (+0.40 to the rest of the RBs) | **0.24** (WRs 0.46 and TE1 0.21 also gain) | n=33 (thin) |
+| 7 | Unassigned share ("nowhere"), WR out | 0.00 (the rule assigns everything) | **0.27** mean / 0.41 median (0.50 in 2022-25) | n=239, [0.16, 0.39]; drift z=3.0 |
+| 8 | Unassigned share, RB out (carries) / TE out | 0.00 | **0.19** [0.13, 0.26] / **0.14** | n=352 / 111 |
 | 9 | Matchup factor weights | equal | **~0**: show as context only. If used: ridge weights in `matchup_weights.json` | holdout MAE gain QB 0.039, RB 0.015, WR 0.015, TE 0.003, DST 0.001 (bar: 0.2) |
 | 10 | Matchup lookback / schedule adjustment | (unspecified) | l4 (QB, RB, TE), blend (WR), l8 (DST); adjustment optional | variants differ by <= 0.025 MAE |
 | 11 | BUY↑ threshold (X pts / p%) | sweep 2-5 / 15-35% | **drop the signal** | fit effect -0.01 at the best threshold; test -0.57, wrong sign at 9 of 9 |
