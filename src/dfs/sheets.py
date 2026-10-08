@@ -967,6 +967,24 @@ class SheetsClient:
                 found = True
         return found
 
+    def read_named_range_value(self, name: str) -> object | None:
+        """The value of the first cell of the named range `name` (a hidden named range holds the Apps Script's
+        version stamp), or None when there is no such range or the cell is empty."""
+        sheet = self._open()
+        meta = sheet.fetch_sheet_metadata(params={"fields": "namedRanges,sheets(properties(sheetId,title))"})
+        titles = {s["properties"]["sheetId"]: s["properties"]["title"] for s in meta.get("sheets", [])}
+        for named in meta.get("namedRanges", []) or []:
+            if named.get("name") != name:
+                continue
+            rng = named["range"]
+            title = titles.get(rng.get("sheetId", 0))
+            if title is None:
+                return None
+            cell = f"{column_letter(rng.get('startColumnIndex', 0))}{rng.get('startRowIndex', 0) + 1}"
+            values = self.read_range_unformatted(title, cell)
+            return values[0][0] if values and values[0] else None
+        return None
+
     def ensure_row_capacity(self, tab_name: str, min_rows: int) -> None:
         """Grow `tab_name`'s grid to at least `min_rows` rows (no-op if it already is). A tab rewritten with
         more rows than its grid has fails with "exceeds grid limits" rather than growing to fit."""

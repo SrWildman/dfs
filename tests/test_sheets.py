@@ -1379,3 +1379,23 @@ def test_set_row_group_control_before_and_filter_view_id(cfg, monkeypatch, tmp_p
     assert update["fields"] == "gridProperties.rowGroupControlAfter"
     ws.filter_views.append({"title": "Cash", "filterViewId": 77, "range": {"sheetId": ws.id}})
     assert client.filter_view_id("T", "Cash") == 77 and client.filter_view_id("T", "Nope") is None
+
+
+def test_read_named_range_value_reads_the_first_cell_of_the_named_range(cfg, monkeypatch, tmp_path):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    ws = FakeWorksheet("NameAlias", rows=[["a"] * 8])
+    fake_sheet._worksheets["NameAlias"] = ws
+    metadata = {
+        "namedRanges": [
+            {
+                "name": "DFS_SCRIPT_VERSION",
+                "range": {"sheetId": ws.id, "startRowIndex": 0, "startColumnIndex": 7},
+            }
+        ],
+        "sheets": [{"properties": {"sheetId": ws.id, "title": "NameAlias"}}],
+    }
+    monkeypatch.setattr(fake_sheet, "fetch_sheet_metadata", lambda params=None: metadata)
+    seen = []
+    monkeypatch.setattr(client, "read_range_unformatted", lambda tab, rng: seen.append((tab, rng)) or [[3]])
+    assert client.read_named_range_value("DFS_SCRIPT_VERSION") == 3 and seen == [("NameAlias", "H1")]
+    assert client.read_named_range_value("OTHER") is None

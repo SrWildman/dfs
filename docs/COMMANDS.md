@@ -46,7 +46,7 @@ Show whether config is set up and how fresh each data source is.
 
 ### `dfs doctor`
 
-Read-only structural check: every tab named in config.toml exists, EdgeRaw's header matches derived.EDGE_COLUMNS, LINKED_EDGE_COLUMNS is linked exactly once (not zero, not twice) on Player Pool/Lineups/ PlayerPoolRaw, Lineups' header repeats fall exactly where LINEUPS_NAME_BLOCKS expects, and Bankroll's configured header rows aren't blank. Never writes anything. Exits non-zero on any failure -- this is the check that would have caught a stale template's missing tabs and drifted column positions before they broke `dfs export`/`dfs lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead of surfacing three commands later as a crash or a silently wrong formula.
+Read-only structural check: every tab named in config.toml exists, EdgeRaw's header matches derived.EDGE_COLUMNS, LINKED_EDGE_COLUMNS is linked exactly once (not zero, not twice) on Player Pool/Lineups/ PlayerPoolRaw, Lineups' header repeats fall exactly where LINEUPS_NAME_BLOCKS expects, and Bankroll's configured header rows aren't blank. Never writes anything. Exits non-zero on any failure -- this is the check that would have caught a stale template's missing tabs and drifted column positions before they broke `dfs export`/`dfs lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead of surfacing three commands later as a crash or a silently wrong formula. It also WARNS (without failing) when the bound Apps Script behind the `Set` dropdowns is not pasted or is older than apps_script/Code.gs.
 
 | Option | What it does |
 |---|---|

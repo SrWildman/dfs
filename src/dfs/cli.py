@@ -27,6 +27,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from dfs import edge_finder_tab, nfl_calendar, paths, perf, sheet_edge_finder, store
+from dfs.apps_script import script_warnings
 from dfs.bankroll import (
     backfill_entry_keys,
     classify_entry,
@@ -1904,7 +1905,8 @@ def sheets_doctor(
     tabs and drifted column positions before they broke `dfs export`/`dfs
     lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead
     of surfacing three commands later as a crash or a silently wrong
-    formula.
+    formula. It also WARNS (without failing) when the bound Apps Script behind the `Set`
+    dropdowns is not pasted or is older than apps_script/Code.gs.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -1917,12 +1919,20 @@ def sheets_doctor(
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
 
+    try:
+        warnings = script_warnings(client)
+    except SheetsError:
+        warnings = []
     if not issues:
         console.print("[green]OK[/green] all structural checks passed")
+        for warning in warnings:
+            console.print(f"[yellow]WARN[/yellow] {warning}")
         return
 
     for issue in issues:
         console.print(_fail_line(issue.check, issue.detail))
+    for warning in warnings:
+        console.print(f"[yellow]WARN[/yellow] {warning}")
     raise typer.Exit(code=1)
 
 
