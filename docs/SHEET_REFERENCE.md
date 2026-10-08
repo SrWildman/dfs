@@ -616,7 +616,7 @@ collapsible row sections, all open by default, in this order (Sam's call):
    Lineups simulator), a per-position table (Pooled, Cash, GPP, with Both counting for each; Min / Max / Avg Sal; the cheapest play), and **Your
    stacks** (each pooled QB: how many of his team's WR and TE are pooled, and whether anyone from the opponent is, a bring-back). There are no
    per-position targets (Sam: a week may want 2 QBs or 5); the gap line says only what is missing to fill ONE DraftKings lineup (`sheet_views.ROSTER_MIN`).
-5. **Chalk map** (`BOARD_CHALK_*`): the highest-owned players per position (`BOARD_CHALK_POSITION_ROWS`: QB 3, RB 5, WR 6, TE 3, DST 2), sorted by `Own%`, nobody listed OUT/IR, with `Sal`, `Own%`, `CalPts`, `Hit3x%`, a live `Pool` cell, a `Set` dropdown and a hidden `Id`. One spill per position block; until ownership has published (EdgeRaw `OwnStatus` is not `real`) the first row says so and the rest stay blank.
+5. **Chalk map** (`BOARD_CHALK_*`): the highest-owned players per position (`BOARD_CHALK_POSITION_ROWS`: QB 4, RB 8, WR 8, TE 4, DST 4 (Sam's choice)), sorted by `Own%`, nobody listed OUT/IR, with `Sal`, `Own%`, `CalPts`, `Hit3x%`, a live `Pool` cell, a `Set` dropdown and a hidden `Id`. One spill per position block; until ownership has published (EdgeRaw `OwnStatus` is not `real`) the first row says so and the rest stay blank.
 6. **Stack candidates**: QB + WR1/WR2/WR3/TE1/RB1 for the 8 highest-total games (formulas).
 
 Columns A-N visible; the hidden helper block past them holds the Slate shape join keys (GameId, Away, Home, a GPS check), each list row's DraftKings
