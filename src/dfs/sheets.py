@@ -1102,6 +1102,29 @@ class SheetsClient:
             }
         )
 
+    def hide_rows(self, tab_name: str, first_row: int, last_row: int) -> None:
+        """Hide rows `first_row`..`last_row` (1-indexed, inclusive): a real Sheets hide, still readable and
+        writable through the API. `unhide_rows` is the opposite."""
+        sheet, ws = self._ws(tab_name)
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "ROWS",
+                                "startIndex": first_row - 1,
+                                "endIndex": last_row,
+                            },
+                            "properties": {"hiddenByUser": True},
+                            "fields": "hiddenByUser",
+                        }
+                    }
+                ]
+            }
+        )
+
     def set_row_heights(self, tab_name: str, *, start_row: int, end_row: int, pixel_size: int) -> None:
         """Set a pixel height for rows `start_row`..`end_row` (inclusive,
         1-indexed) -- e.g. compacting a frozen control zone so it doesn't

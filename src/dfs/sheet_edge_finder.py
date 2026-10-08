@@ -17,7 +17,7 @@ from __future__ import annotations
 import contextlib
 
 from dfs import edge_finder_tab as eft
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs import sheet_pool_cells as pc
 from dfs.sheet_color_scales import GRAD_MAX, WHITE
 from dfs.sheet_style import (
     _HEADER_FMT,
@@ -28,17 +28,10 @@ from dfs.sheet_style import (
     INPUT_BG,
     _num,
 )
-from dfs.sheet_views import write_board_edges
 from dfs.sheets import SheetsClient, column_letter
-from dfs.sources.edge import POOL_COLUMN
-from dfs.weekly_reset import (
-    PLAYER_POOL_ADDED_NAMES_HEADER,
-    PLAYER_POOL_ADDED_NAMES_ROWS,
-    PLAYER_POOL_HEADER_ROW,
-)
 
 TAB = eft.EDGE_FINDER_TAB
-POOL_TAB = "Player Pool"
+POOL_TAB = pc.POOL_TAB
 WIDTHS = {
     "A": 190,
     "B": 44,
@@ -66,47 +59,28 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={gid}&fv
 
 
 def _edge_letter(name: str) -> str:
-    return column_letter(EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET)
+    return pc.edge_letter(name)
 
 
 def _name_letter() -> str:
-    return _edge_letter("Name")
+    return pc.edge_letter("Name")
 
 
 def _id_letter() -> str:
-    return _edge_letter("Id")
-
-
-def _quote(tab: str) -> str:
-    return f"'{tab}'" if " " in tab else tab
-
-
-def _match(row: int, edge_tab: str) -> str:
-    i = _id_letter()
-    return f"MATCH(${eft.ID_COL}{row},{edge_tab}!${i}:${i},0)"
+    return pc.edge_letter("Id")
 
 
 def pool_formula(row: int, edge_tab: str, added_range: str | None = None) -> str:
-    """The player's pool state: EdgeRaw's own Pool tick (Cash / GPP / Both) found by his Id, or "Added" when
-    his name is on Player Pool's hidden `Added` list (a name typed into the add-a-player control), else
-    blank. Blank
-    Id, blank result."""
-    found = f"INDEX({edge_tab}!${POOL_COLUMN}:${POOL_COLUMN},{_match(row, edge_tab)})"
-    added = f'IF(COUNTIF({added_range},$A{row})>0,"Added","")' if added_range else '""'
-    return f'=IF(${eft.ID_COL}{row}="","",IFERROR(IF({found}<>"",{found},{added}),""))'
+    """The player's pool state (`sheet_pool_cells.pool_formula`) keyed on this tab's hidden `Id` cell."""
+    return pc.pool_formula(row, edge_tab, added_range, id_col=eft.ID_COL)
 
 
 def do_formula(row: int, verb: str) -> str:
-    """The row's verb, unless the player is already pooled: then "In pool (Cash)" (live, no sync needed)."""
-    safe = verb.replace('"', '""')
-    return f'=IF(${eft.POOL_COL}{row}<>"","In pool ("&${eft.POOL_COL}{row}&")","{safe}")'
+    return pc.do_formula(row, verb, pool_col=eft.POOL_COL)
 
 
 def link_formula(row: int, edge_tab: str, gid: int) -> str:
-    """A same-spreadsheet link to this player's row on EdgeRaw, found by his Id."""
-    n = _name_letter()
-    target = f'"#gid={gid}&range={n}"&{_match(row, edge_tab)}'
-    return f'=IFERROR(HYPERLINK({target},"↗"),"-")'
+    return pc.link_formula(row, edge_tab, gid, id_col=eft.ID_COL)
 
 
 def tab_rows(layout: eft.Layout, edge_tab: str, gid: int, *, added_range: str | None = None) -> list[list]:
@@ -123,18 +97,7 @@ def tab_rows(layout: eft.Layout, edge_tab: str, gid: int, *, added_range: str | 
 
 
 def added_names_range(client: SheetsClient, pool_tab: str = POOL_TAB) -> str | None:
-    """Player Pool's hidden `Added` list as an absolute range, found by header text; None when the tab or the
-    column does not exist (then the Pool cell reads EdgeRaw alone)."""
-    if not client.tab_exists(pool_tab):
-        return None
-    header_rows = client.read_range(pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}")
-    header = header_rows[0] if header_rows else []
-    if PLAYER_POOL_ADDED_NAMES_HEADER not in header:
-        return None
-    col = column_letter(header.index(PLAYER_POOL_ADDED_NAMES_HEADER))
-    first = PLAYER_POOL_HEADER_ROW + 1
-    last = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
-    return f"{_quote(pool_tab)}!${col}${first}:${col}${last}"
+    return pc.added_names_range(client, pool_tab)
 
 
 def read_group_state(client: SheetsClient) -> dict[str, bool]:
@@ -339,11 +302,6 @@ def _column_of(layout: eft.Layout, header: str, row: int) -> str | None:
         return None
     names = layout.rows[max(above) - 1]
     return column_letter(names.index(header)) if header in names else None
-
-
-def write_board_panel(client: SheetsClient, inputs: eft.Inputs | None) -> str:
-    """The Board's five "This week's edges" lines."""
-    return write_board_edges(client, eft.board_panel_lines(inputs))
 
 
 def ensure_tab(client: SheetsClient, *, edge_tab: str = "EdgeRaw") -> str:

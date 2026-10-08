@@ -50,6 +50,7 @@ from dfs.edge_finder import (
 )
 from dfs.kickoff import format_et, parse_kickoff
 from dfs.paths import CURRENT_DIR, RAW_DIR
+from dfs.sheet_pool_cells import SET_OPTIONS  # noqa: F401 - re-exported for the Edge Finder writer
 
 EDGE_FINDER_TAB = "Edge Finder"
 SECTION_TOP_N = 5  # the Board's one-line summary panel
@@ -71,7 +72,6 @@ OWN_STAR_BOTTOM_HALF = 0.5
 POSITIONS = ["QB", "RB", "WR", "TE", "DST"]
 OUT_STATUSES = {"OUT", "IR", "D"}
 STAR = "★"
-SET_OPTIONS = ["Cash", "GPP", "Both", "Remove"]
 
 LEAD = ["Name", "Pos", "Team", "Salary"]  # A-D
 SLOTS = 6  # E-J

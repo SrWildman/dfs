@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, SHOOTOUT_TOTAL_THRESHOLD
+from dfs import sheet_pool_cells as pc
+from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, SHOOTOUT_TOTAL_THRESHOLD, VAL_ADJ_ROSTERABLE_TOP_N
 from dfs.gps_check import GPS_IMPLIED_MISMATCH_PTS
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
@@ -134,33 +135,18 @@ BOARD_TITLE_ROW = 1
 BOARD_BANNER_ROW = 2
 BOARD_FRESHNESS_ROW = 3
 
-BOARD_QUEUE_HEADER_ROW = 5
-BOARD_QUEUE_COLHEADER_ROW = BOARD_QUEUE_HEADER_ROW + 1
-BOARD_QUEUE_FIRST_ROW = BOARD_QUEUE_COLHEADER_ROW + 1
-BOARD_QUEUE_ROWS = 20
-BOARD_QUEUE_LAST_ROW = BOARD_QUEUE_FIRST_ROW + BOARD_QUEUE_ROWS - 1
-# Checked against the live column-header row before trusting whatever
-# sits below it as real Queue data to preserve (see build_board's own
-# docstring) -- a sheet still on the pre-rebuild 3-panel Board has
-# TOP LEVERAGE's own data occupying these exact rows by coincidence,
-# and reading that forward into the new Queue section on the very first
-# post-rebuild `build-views` run produced garbage (found live,
-# 2026-09-22, against the template).
-BOARD_QUEUE_COLHEADER = ["Player", "Pos", "Team", "What changed"]
-
-BOARD_SLATE_HEADER_ROW = BOARD_QUEUE_LAST_ROW + 2
+# Sections, top to bottom (Sam's ruling, 2026-10-08: Slate shape first, then the pool's state, then the
+# stacks): Slate shape, Queue, Pool check, Pool summary, Stack candidates. Each is one always-visible
+# header row, one column-header row, then the body. Every row number is computed from the one before it,
+# never counted by hand.
+BOARD_SLATE_HEADER_ROW = 5
 BOARD_SLATE_COLHEADER_ROW = BOARD_SLATE_HEADER_ROW + 1
 BOARD_SLATE_FIRST_ROW = BOARD_SLATE_COLHEADER_ROW + 1
 BOARD_SLATE_ROWS = 16
 BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
-# PROMPT_BOARD_FIXES.md item 1: `Fav`/`Spread` inserted right after
-# `Total` -- two columns, not one "KC -3.5" text cell, since text can't be
-# colour-scaled (item 6 scales `Spread`). `Pace` (Part C, C7) stays where
-# it was relative to Wind/Shootout, just shifted two further right.
-# Round 5 item 5b: `PROE`/`Expl%`/`GameEnv` join `Pace` (each the mean of both
-# teams' values, the same "combined per game" shape Pace already had) and item
-# 5c dropped `Tot Δ` (GPS's "Implied Total" is Vegas, not a model -- see
-# `gps_check.py`). Total stays the sort key.
+# PROMPT_BOARD_FIXES.md item 1: `Fav`/`Spread` inserted right after `Total` -- two columns, not one "KC -3.5"
+# text cell, since text can't be colour-scaled. Round 5 item 5b: `PROE`/`Expl%`/`GameEnv` join `Pace`
+# (each the mean of both teams' values) and item 5c dropped `Tot Δ`. Total stays the sort key.
 BOARD_SLATE_COLHEADER = [
     "Matchup",
     "Total",
@@ -175,62 +161,77 @@ BOARD_SLATE_COLHEADER = [
     "GPS",
 ]
 
-BOARD_LEADERS_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
-# PROMPT_BOARD_FIXES.md item 2: a sub-label row naming each block's own
-# sort -- nothing on the sheet said so before.
-BOARD_LEADERS_SUBLABEL_ROW = BOARD_LEADERS_HEADER_ROW + 1
-BOARD_LEADERS_COLHEADER_ROW = BOARD_LEADERS_SUBLABEL_ROW + 1
-BOARD_LEADERS_FIRST_ROW = BOARD_LEADERS_COLHEADER_ROW + 1
+# The two player lists (Queue, Pool check) share one column layout: the reason is text in D that overflows
+# right across the empty E-G, `Pool` is the live pool state, `Set` the action dropdown. The DraftKings id
+# the Apps Script and the formulas find the player by sits in a hidden helper column (`BOARD_ID_COL`).
+BOARD_LIST_COLHEADER = ["Player", "Pos", "Team", "", "", "", "", "Pool", "Set"]
+BOARD_QUEUE_COLHEADER = ["Player", "Pos", "Team", "What changed", "", "", "", "Pool", "Set"]
+BOARD_CHECK_COLHEADER = ["Player", "Pos", "Team", "Why", "", "", "", "Pool", "Set"]
+BOARD_LIST_POOL_COL = column_letter(BOARD_LIST_COLHEADER.index("Pool"))
+BOARD_LIST_SET_COL = column_letter(BOARD_LIST_COLHEADER.index("Set"))
+BOARD_ID_HEADER = "Id"
+
+BOARD_QUEUE_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
+BOARD_QUEUE_COLHEADER_ROW = BOARD_QUEUE_HEADER_ROW + 1
+BOARD_QUEUE_FIRST_ROW = BOARD_QUEUE_COLHEADER_ROW + 1
+BOARD_QUEUE_ROWS = 20
+BOARD_QUEUE_LAST_ROW = BOARD_QUEUE_FIRST_ROW + BOARD_QUEUE_ROWS - 1
+BOARD_QUEUE_EMPTY = "No changes since the last sync for pooled players."
+
+BOARD_CHECK_HEADER_ROW = BOARD_QUEUE_LAST_ROW + 2
+BOARD_CHECK_COLHEADER_ROW = BOARD_CHECK_HEADER_ROW + 1
+BOARD_CHECK_FIRST_ROW = BOARD_CHECK_COLHEADER_ROW + 1
+BOARD_CHECK_ROWS = 10
+BOARD_CHECK_LAST_ROW = BOARD_CHECK_FIRST_ROW + BOARD_CHECK_ROWS - 1
+BOARD_CHECK_NOTHING = "Nothing in your pool looks worse than when you added it."
+BOARD_CHECK_EMPTY_POOL = "Tick players into your pool to see this."
+# What turns a pooled player into a Pool check row (PROMPT_USABILITY.md slice 4).
+CHECK_AVAIL_STATUSES = ("OUT", "D", "Q", "IR")
+CHECK_BUST_QUANTILE = 0.75  # Bust% at or above the top quartile of his position's rosterable pool
+CHECK_CALPTS_BELOW_PROJPTS = 2.0  # CalPts at least this far below ProjPts
+CHECK_FADE_CHIP = "FADE↓"
+
 _POSITIONS = ("QB", "RB", "WR", "TE", "DST")
-# PROMPT_BOARD_FIXES.md item 3: replaces the old flat `_LEADERS_ROWS_PER_
-# POSITION`/`_PUNT_ROWS_PER_POSITION` ints (both were 2/1) -- every
-# section is collapsible now, so length is cheap, and each position gets
-# sized to its own real depth (QB is shallow, WR is deep). Both the
-# leaders blocks AND punt finder share this same distribution -- Sam's
-# own table gives them identical counts.
-BOARD_ROWS_PER_POSITION = {"QB": 5, "RB": 8, "WR": 10, "TE": 5, "DST": 5}
-BOARD_LEADERS_COLHEADER = ["Player", "Pos", "Salary", "ValAdj", "", "Player", "Pos", "Salary", "ProjPts"]
-BOARD_LEADERS_ROWS = sum(BOARD_ROWS_PER_POSITION.values())
-BOARD_LEADERS_LAST_ROW = BOARD_LEADERS_FIRST_ROW + BOARD_LEADERS_ROWS - 1
+# DraftKings' classic roster: QB, 2 RB, 3 WR, TE, FLEX (a RB, WR or TE), DST. The fewest players of each
+# position a pool needs to fill one lineup; Sam sets no per-position target (a week may want 2 QBs or 5),
+# so the gap line says only what is missing to build a lineup at all.
+ROSTER_MIN = {"QB": 1, "RB": 2, "WR": 3, "TE": 1, "DST": 1}
+ROSTER_FLEX_POSITIONS = ("RB", "WR", "TE")
+ROSTER_MIN_FLEX_POOL = sum(ROSTER_MIN[p] for p in ROSTER_FLEX_POSITIONS) + 1
 
+BOARD_POOL_HEADER_ROW = BOARD_CHECK_LAST_ROW + 2
+BOARD_POOL_GAP_ROW = BOARD_POOL_HEADER_ROW + 1
+BOARD_PORTFOLIO_ROW = BOARD_POOL_GAP_ROW + 1
+BOARD_POOL_COLHEADER_ROW = BOARD_PORTFOLIO_ROW + 1
+BOARD_POOL_FIRST_ROW = BOARD_POOL_COLHEADER_ROW + 1
+BOARD_POOL_POSITION_ROWS = len(_POSITIONS)
+BOARD_POOL_LAST_ROW = BOARD_POOL_FIRST_ROW + BOARD_POOL_POSITION_ROWS - 1
+BOARD_POOL_COLHEADER = [
+    "Pos",
+    "Pooled",
+    "Cash",
+    "GPP",
+    "Min Sal",
+    "Max Sal",
+    "Avg Sal",
+    "Cheapest",
+    "Cheapest Sal",
+]
+BOARD_POOL_COL = {name: column_letter(i) for i, name in enumerate(BOARD_POOL_COLHEADER)}
+BOARD_STACKS_HEADER_ROW = BOARD_POOL_LAST_ROW + 2
+BOARD_STACKS_COLHEADER_ROW = BOARD_STACKS_HEADER_ROW + 1
+BOARD_STACKS_FIRST_ROW = BOARD_STACKS_COLHEADER_ROW + 1
+BOARD_STACKS_ROWS = 8
+BOARD_STACKS_LAST_ROW = BOARD_STACKS_FIRST_ROW + BOARD_STACKS_ROWS - 1
+BOARD_STACKS_COLHEADER = ["QB", "Team", "Opp", "Pass catchers", "Bring-back"]
+BOARD_PORTFOLIO_PREFIX = "Portfolio:"
+BOARD_PORTFOLIO_PLACEHOLDER = "Portfolio: fill the lineups on Lineups to see the odds (written by dfs sync)."
 
-def _position_block_rows(first_row: int) -> dict[str, tuple[int, int]]:
-    """Each position's own `(start_row, end_row)` within a stacked
-    per-position block beginning at `first_row` (Leaders or Punt finder,
-    both use `BOARD_ROWS_PER_POSITION`'s counts in `_POSITIONS` order) --
-    shared by `build_board` (writing the stacked array) and `style_board`
-    (the top-border/colour-scale ranges item 3/6 need), so the two can't
-    silently drift apart the way EdgeRaw's own column order once did."""
-    rows: dict[str, tuple[int, int]] = {}
-    r = first_row
-    for p in _POSITIONS:
-        n = BOARD_ROWS_PER_POSITION[p]
-        rows[p] = (r, r + n - 1)
-        r += n
-    return rows
-
-
-BOARD_PUNT_HEADER_ROW = BOARD_LEADERS_LAST_ROW + 2
-BOARD_PUNT_COLHEADER_ROW = BOARD_PUNT_HEADER_ROW + 1
-BOARD_PUNT_FIRST_ROW = BOARD_PUNT_COLHEADER_ROW + 1
-BOARD_PUNT_COLHEADER = ["Player", "Pos", "Salary", "ValAdj"]
-BOARD_PUNT_ROWS = sum(BOARD_ROWS_PER_POSITION.values())
-BOARD_PUNT_LAST_ROW = BOARD_PUNT_FIRST_ROW + BOARD_PUNT_ROWS - 1
-# PROMPT_BOARD_FIXES.md item 4: the old `PUNT_SALARY_CEILING` (a flat
-# $4,000) is DraftKings' own FLOOR for QB/RB, so "under $4,000" could
-# never match either position. Replaced with a window measured off each
-# position's own cheapest salary ON THIS SLATE (a live MINIFS in the
-# formula, never a hardcoded floor per position).
-PUNT_SALARY_WINDOW = 1000
-
-BOARD_STACK_HEADER_ROW = BOARD_PUNT_LAST_ROW + 2
+BOARD_STACK_HEADER_ROW = BOARD_STACKS_LAST_ROW + 2
 BOARD_STACK_COLHEADER_ROW = BOARD_STACK_HEADER_ROW + 1
 BOARD_STACK_FIRST_ROW = BOARD_STACK_COLHEADER_ROW + 1
-# PROMPT_BOARD_FIXES.md item 3: "at least 8 games (16 teams); all games if
-# the slate is smaller." A smaller slate leaves the tail blank (same
-# fallback every other section here already uses); a bigger one shows the
-# 8 highest-total games, matching this section's own "highest-total games
-# first" framing.
+# PROMPT_BOARD_FIXES.md item 3: "at least 8 games (16 teams); all games if the slate is smaller." A
+# smaller slate leaves the tail blank; a bigger one shows the 8 highest-total games.
 _STACK_GAMES = 8
 BOARD_STACK_COLHEADER = [
     "Team",
@@ -250,72 +251,38 @@ BOARD_STACK_COLHEADER = [
 ]
 BOARD_STACK_ROWS = _STACK_GAMES * 2  # two teams per game
 BOARD_STACK_LAST_ROW = BOARD_STACK_FIRST_ROW + BOARD_STACK_ROWS - 1
+BOARD_LAST_ROW = BOARD_STACK_LAST_ROW
 
-BOARD_POOL_HEADER_ROW = BOARD_STACK_LAST_ROW + 2
-BOARD_POOL_NOTICE_ROW = BOARD_POOL_HEADER_ROW + 1
-BOARD_POOL_COLHEADER_ROW = BOARD_POOL_NOTICE_ROW + 1
-BOARD_POOL_FIRST_ROW = BOARD_POOL_COLHEADER_ROW + 1
-BOARD_POOL_POSITION_ROWS = len(_POSITIONS)
-BOARD_POOL_SUMMARY_ROW = BOARD_POOL_FIRST_ROW + BOARD_POOL_POSITION_ROWS
-BOARD_POOL_LAST_ROW = BOARD_POOL_SUMMARY_ROW
-BOARD_POOL_COLHEADER = [
-    "Pos",
-    "Min Sal",
-    "Max Sal",
-    "Avg Sal",
-    "Cheapest",
-    "Cheapest Sal",
-    "Chalk#",
-    "Leverage#",
-    "Gap",
-]
-
-BOARD_CHALK_HEADER_ROW = BOARD_POOL_LAST_ROW + 2
-BOARD_CHALK_PLACEHOLDER_ROW = BOARD_CHALK_HEADER_ROW + 1
-
-# Edge Finder (2026-10-07): "This week's edges", a compact panel of five one-line summaries written by Python
-# on every sync (`dfs.edge_finder_tab.board_panel_lines`, like Queue: a Sheets formula cannot compute it). It
-# is APPENDED below the Chalk map so no existing Board row moves.
-BOARD_EDGES_TITLE = "THIS WEEK'S EDGES  —  from the Edge Finder tab"
-BOARD_EDGES_HEADER_ROW = BOARD_CHALK_PLACEHOLDER_ROW + 2
-BOARD_EDGES_FIRST_ROW = BOARD_EDGES_HEADER_ROW + 1
-BOARD_EDGES_ROWS = 5
-BOARD_EDGES_LAST_ROW = BOARD_EDGES_FIRST_ROW + BOARD_EDGES_ROWS - 1
-BOARD_LAST_ROW = BOARD_EDGES_LAST_ROW
-
-# PROMPT_BOARD_FIXES.md item 5: the hidden Slate-shape join-key columns
-# (GameId, then Part C's Away/Home) must sit past the rightmost column
-# ANY section uses -- Stack candidates' own 14 columns (A-N) are now the
-# widest, wider than they were when column J was originally past
-# everything. Derived from every section's own header width, not a
-# second hardcoded literal, so a future width change anywhere just moves
-# this automatically.
+# PROMPT_BOARD_FIXES.md item 5: the hidden helper columns must sit past the rightmost column ANY section uses.
+# Derived from every section's own header width, so a width change anywhere just moves this automatically.
 BOARD_MAX_VISIBLE_COL_INDEX = (
     max(
         len(BOARD_SLATE_COLHEADER),
-        len(BOARD_LEADERS_COLHEADER),
+        len(BOARD_LIST_COLHEADER),
         len(BOARD_STACK_COLHEADER),
         len(BOARD_POOL_COLHEADER),
+        len(BOARD_STACKS_COLHEADER),
     )
     - 1
 )
 BOARD_SLATE_GAMEID_COL_INDEX = BOARD_MAX_VISIBLE_COL_INDEX + 1
 BOARD_SLATE_AWAY_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 1
 BOARD_SLATE_HOME_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 2
-# Hidden per-row helper: TRUE when this game's GPS worksheet implied totals are
-# more than `GPS_IMPLIED_MISMATCH_PTS` off Vegas (a conditional-format rule on
-# the visible GPS cell reads it -- CF can't reference GPSRaw directly).
+# Hidden per-row helper: TRUE when this game's GPS worksheet implied totals are more than
+# `GPS_IMPLIED_MISMATCH_PTS` off Vegas (a conditional-format rule on the visible GPS cell reads it).
 BOARD_SLATE_GPSCHK_COL_INDEX = BOARD_SLATE_GAMEID_COL_INDEX + 3
+# Hidden: the DraftKings id of each Queue / Pool check row, and (on the Pool summary's position rows) the
+# position's Bust% quartile cut the Pool check compares against.
+BOARD_ID_COL_INDEX = BOARD_SLATE_GPSCHK_COL_INDEX + 1
+BOARD_BUSTCUT_COL_INDEX = BOARD_SLATE_GPSCHK_COL_INDEX + 2
 BOARD_SLATE_GAMEID_COL = column_letter(BOARD_SLATE_GAMEID_COL_INDEX)
 BOARD_SLATE_AWAY_COL = column_letter(BOARD_SLATE_AWAY_COL_INDEX)
 BOARD_SLATE_HOME_COL = column_letter(BOARD_SLATE_HOME_COL_INDEX)
 BOARD_SLATE_GPSCHK_COL = column_letter(BOARD_SLATE_GPSCHK_COL_INDEX)
-# Hidden helper (Round 5 item 3): the `ProjPts%ile` of each "Highest projection"
-# leader, looked up by name, so the Board's ProjPts column is banded by the SAME
-# within-position percentile every other tab uses. Spills down from the first
-# Leaders row, aligned with the ProjPts block.
-BOARD_LEADERS_PCT_COL_INDEX = BOARD_SLATE_GPSCHK_COL_INDEX + 1
-BOARD_LEADERS_PCT_COL = column_letter(BOARD_LEADERS_PCT_COL_INDEX)
+BOARD_ID_COL = column_letter(BOARD_ID_COL_INDEX)
+BOARD_BUSTCUT_COL = column_letter(BOARD_BUSTCUT_COL_INDEX)
+BOARD_LAST_HELPER_COL_INDEX = BOARD_BUSTCUT_COL_INDEX
+
 
 # Slate Grid's hidden GPS sanity-check column (see `build_slate_grid`).
 SLATE_GPS_CHECK_HEADER = "GPS off Vegas"
@@ -412,6 +379,36 @@ def _pp_rng(pool_tab: str, name: str, start_row: int, end_row: int) -> str:
     return f"{_q(pool_tab)}!${letter}${start_row}:${letter}${end_row}"
 
 
+def board_list_row(
+    row: int, name: str, pos: str, team: str, reason: str, pid, *, edge_tab: str, added_range: str | None
+) -> list:
+    """One Queue / Pool check player row, `A` through the hidden Id column: the player, the reason (text in
+    D that
+    overflows right), the live `Pool` formula, an empty `Set` cell (a dropdown), and his DraftKings id."""
+    cells: list = [""] * (BOARD_ID_COL_INDEX + 1)
+    cells[0:4] = [_text_cell(str(name)), pos, team, _text_cell(str(reason))]
+    cells[BOARD_LIST_COLHEADER.index("Pool")] = pc.pool_formula(
+        row, edge_tab, added_range, id_col=BOARD_ID_COL, name_col="A"
+    )
+    cells[BOARD_ID_COL_INDEX] = pid
+    return cells
+
+
+def _roster_gap_formula(count_col: str) -> str:
+    """The gap line for one pool type: what is missing, by position, to fill one DraftKings lineup."""
+    row_of = {p: BOARD_POOL_FIRST_ROW + i for i, p in enumerate(_POSITIONS)}
+    ref = {p: f"${count_col}${row_of[p]}" for p in _POSITIONS}
+    parts = [f'IF({ref[p]}<{ROSTER_MIN[p]},({ROSTER_MIN[p]}-{ref[p]})&" more {p}","")' for p in _POSITIONS]
+    flex_total = "+".join(ref[p] for p in ROSTER_FLEX_POSITIONS)
+    flex_ok = ",".join(f"{ref[p]}>={ROSTER_MIN[p]}" for p in ROSTER_FLEX_POSITIONS)
+    parts.append(
+        f"IF(AND({flex_ok},{flex_total}<{ROSTER_MIN_FLEX_POOL}),"
+        f'({ROSTER_MIN_FLEX_POOL}-({flex_total}))&" more RB/WR/TE (for the FLEX)","")'
+    )
+    missing = f'TEXTJOIN(", ",TRUE,{",".join(parts)})'
+    return f'IF({missing}="","enough to fill a lineup","need "&{missing})'
+
+
 def build_board(
     client: SheetsClient,
     *,
@@ -421,65 +418,60 @@ def build_board(
     gps_tab: str,
     player_pool_tab: str,
 ) -> str:
-    """Phase 6, Part 3 (2026-09-22): rebuilt from three ranked player
-    panels (a question Sam already answered the moment he ticked his
-    pool -- "it ranks 744 players") into one tab, seven sections, each a
-    collapsible row group (all open by default, since
-    2026-09-30). See `docs/planning/PROMPT_PHASE6.md` Part 3 and
-    7.6 for the spec; row positions come from the `BOARD_*` constants
-    above, shared with `sheet_style.style_board`.
+    """The Board (usability round, slice 4): games, stacks and where the pool stands. The Edge Finder is the
+    players' tab, so the old per-position leaders, punt finder, chalk map and "this week's edges" panel are
+    gone (the Edge Finder's cash and GPP sections and its Punt plays cover them).
 
-    Every EdgeRaw-derived panel is regenerated fresh every call against
-    the CURRENT `EDGE_COLUMNS` layout via `_rng`/`_col` (same contract
-    the pre-rebuild Board already had, and the same reason it must be
-    re-run after any EdgeRaw column reorder -- see CONTRIBUTING.md's
-    Phase 3 changelog entry for what happens when it isn't). Player
-    Pool-derived panels (Pool diagnostics) are the same idea against
-    `sheet_columns.PLAYER_POOL_COLUMN_ORDER` instead, via `_pp_rng`.
+    Sections, top to bottom (row positions come from the `BOARD_*` constants above, shared with
+    `sheet_style.style_board`):
 
-    Queue's body (`BOARD_QUEUE_FIRST_ROW..LAST_ROW`) is populated by
-    `write_queue_section`, called from `dfs sync --live`/`dfs go`, NOT by
-    this function -- a Sheets formula cannot see yesterday's values, only
-    a Python diff against the last snapshot can. Read back and restored
-    here before the rewrite (same "typed/live input survives a rebuild"
-    pattern `sheet_views.py`'s own module docstring already documents for
-    Exposure's Target and `LINEUP_COUNT_CELL`), so a routine `dfs setup
-    build-views` re-run (e.g. after an EdgeRaw reorder) doesn't wipe
-    whatever Queue was showing until the next live sync repopulates it.
-    """
-    existing_queue = []
-    existing_edges: list[str] = []
+    - **Slate shape**: games by total (formulas).
+    - **Queue**: pooled players whose numbers changed since the last sync. Written by `write_queue_section`
+      (a formula cannot see yesterday's values), unused rows hidden so "nothing changed" is one line; every
+      row is a player row with a live `Pool` cell, a `Set` dropdown and a hidden `Id`. Read back and
+      re-emitted here so a `dfs setup build-views` re-run does not blank it.
+    - **Pool check** (live formulas): pooled players whose numbers went bad (listed OUT / D / Q, `Bust%` in
+      the top quartile of his position, `CalPts` at least 2.0 below `ProjPts`, a `FADE↓` chip), each with
+      its reason and a `Set` cell so `Remove` is one click.
+    - **Pool summary** (live formulas, no sync needed): per position how many are pooled for Cash and for GPP
+      (Both counts for each), what is missing to fill a lineup, the portfolio line (written by the sync from
+      the Lineups simulator), each pooled QB's stack, and the salary spread and cheapest play.
+    - **Stack candidates**: the highest-total games' QB + top pass catchers (formulas).
+
+    Every EdgeRaw-derived panel is regenerated against the CURRENT `EDGE_COLUMNS` layout via `_rng`/`_col`
+    (re-run `dfs setup build-views` after any EdgeRaw column reorder); Player Pool-derived panels are the same
+    idea against `sheet_columns.PLAYER_POOL_COLUMN_ORDER` via `_pp_rng`."""
+    existing_queue: list[list] = []
+    existing_portfolio = ""
     if client.tab_exists(BOARD_TAB):
-        header = client.read_range(BOARD_TAB, f"A{BOARD_EDGES_HEADER_ROW}:A{BOARD_EDGES_HEADER_ROW}")
-        if header and header[0] and header[0][0] == BOARD_EDGES_TITLE:
-            lines = client.read_range(BOARD_TAB, f"A{BOARD_EDGES_FIRST_ROW}:A{BOARD_EDGES_LAST_ROW}")
-            existing_edges = [(row[0] if row else "") for row in lines]
         colheader_rows = client.read_range(
-            BOARD_TAB, f"A{BOARD_QUEUE_COLHEADER_ROW}:D{BOARD_QUEUE_COLHEADER_ROW}"
+            BOARD_TAB, f"A{BOARD_QUEUE_COLHEADER_ROW}:{BOARD_LIST_SET_COL}{BOARD_QUEUE_COLHEADER_ROW}"
         )
-        colheader = colheader_rows[0] if colheader_rows else []
-        if colheader == BOARD_QUEUE_COLHEADER:
-            existing_queue = client.read_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:D{BOARD_QUEUE_LAST_ROW}")
+        if colheader_rows and colheader_rows[0] == [c for c in BOARD_QUEUE_COLHEADER]:
+            existing_queue = client.read_range(
+                BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}"
+            )
+        portfolio = client.read_range(BOARD_TAB, f"A{BOARD_PORTFOLIO_ROW}")
+        kept_text = portfolio[0][0] if portfolio and portfolio[0] else ""
+        # only a line the sync wrote: an older Board layout has something else on this row
+        existing_portfolio = kept_text if str(kept_text).startswith(BOARD_PORTFOLIO_PREFIX) else ""
+    added_range = pc.added_names_range(client, player_pool_tab)
 
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
     team = _rng(edge_tab, "Team")
     salary = _rng(edge_tab, "Salary")
     projpts = _rng(edge_tab, "ProjPts")
-    valadj = _rng(edge_tab, "ValAdj")
     avail = _rng(edge_tab, "Avail")
-    flag = _rng(edge_tab, "Flags")
     basis = _rng(edge_tab, "OwnStatus")
     overunder = _rng(edge_tab, "OverUnder")
     tmrank = _rng(edge_tab, "TmRank")
 
     g = _q(games_tab)
     w = _q(weather_tab)
-    e = _q(edge_tab)
     gp = _q(gps_tab)
 
     live = f'{name}<>""'
-    not_out = f'NOT(ISNUMBER(SEARCH("OUT",{flag})))'
 
     # ---- Summary banner (rows 2-3, unchanged from the pre-rebuild Board) --
     # NOT `COUNTA(FILTER(...))` -- verified live (2026-09-22, template
@@ -552,48 +544,6 @@ def build_board(
         f'in small-field contests, so treat it as directional.")'
     )
 
-    # ---- Section 3: per-position leaders (ValAdj / ProjPts, 7.6) --------
-    def _ranked_position_block(position: str, *, sort_metric: str, extra: str = "") -> str:
-        # Ranked WITHIN position, not across the whole slate -- this is
-        # the actual fix for the 11-of-12-QBs bug (a flat sort by a
-        # salary ratio isn't comparable across positions). Stacking a
-        # FIXED number of rows per position (PROMPT_BOARD_FIXES.md item 3:
-        # `BOARD_ROWS_PER_POSITION`, no longer a single flat count), rather
-        # than cutting one combined ranking to a total row count,
-        # guarantees every position is represented every time instead of
-        # whichever one happens to sort first crowding out the rest.
-        is_position = f'{pos}="{position}"'
-        filters = f"{live},{not_out},{is_position}" + (f",{extra}" if extra else "")
-        rows_per_position = BOARD_ROWS_PER_POSITION[position]
-        return (
-            f"IFERROR(ARRAY_CONSTRAIN(SORT(FILTER("
-            f'{{{name},{pos}&" "&{team},{salary},{sort_metric}}},{filters}),4,FALSE),'
-            f'{rows_per_position},4),{{"","","",""}})'
-        )
-
-    best_valadj = "={" + ";".join(_ranked_position_block(p, sort_metric=valadj) for p in _POSITIONS) + "}"
-    highest_proj = "={" + ";".join(_ranked_position_block(p, sort_metric=projpts) for p in _POSITIONS) + "}"
-
-    # ---- Section 4: punt finder ------------------------------------------
-    # PROMPT_BOARD_FIXES.md item 4: `PUNT_SALARY_CEILING` (a flat $4,000)
-    # was DraftKings' own FLOOR for QB/RB, so "under $4,000" could never
-    # match either position -- a punt is now "within `PUNT_SALARY_WINDOW`
-    # of this position's own cheapest salary on this slate," computed live
-    # via MINIFS (scoped to the position, across the whole slate, not just
-    # live/available players -- DK's own price floor doesn't care about
-    # injury status).
-    def _punt_salary_extra(position: str) -> str:
-        floor = f'MINIFS({salary},{pos},"{position}")'
-        return f"{salary}<={floor}+{PUNT_SALARY_WINDOW}"
-
-    punt_finder = (
-        "={"
-        + ";".join(
-            _ranked_position_block(p, sort_metric=valadj, extra=_punt_salary_extra(p)) for p in _POSITIONS
-        )
-        + "}"
-    )
-
     # ---- Section 5: stack candidates (replaces the old leverage panel, 7.6) --
     # Two teams sharing a game share the identical OverUnder value, so
     # sorting individual teams by it is enough to keep them adjacent --
@@ -630,71 +580,105 @@ def build_board(
             formulas.append(f'=IFERROR(INDEX(FILTER({salary},{slot_filter}),1),"")')
         return formulas
 
-    # ---- Section 6: pool diagnostics (reads Player Pool, not EdgeRaw) ----
-    pp_all_names = (
-        "{" + ";".join(_pp_rng(player_pool_tab, "Name", s, e) for s, e in PLAYER_POOL_NAME_BLOCKS) + "}"
+    # ---- Pool check and Pool summary (read Player Pool, not EdgeRaw) ----
+    def pp_all(column: str) -> str:
+        """One Player Pool column across the five position blocks, stacked as one array."""
+        return (
+            "{" + ";".join(_pp_rng(player_pool_tab, column, s, e) for s, e in PLAYER_POOL_NAME_BLOCKS) + "}"
+        )
+
+    p_name, p_pos, p_team = pp_all("Name"), pp_all("Pos."), pp_all("Team")
+    p_proj, p_cal, p_avail = pp_all("Pts"), pp_all("CalPts"), pp_all("Avail")
+    p_bust, p_edge, p_id = pp_all("Bust%"), pp_all("Edge"), pp_all("Id")
+    bust_cut_ref = {p: f"${BOARD_BUSTCUT_COL}${BOARD_POOL_FIRST_ROW + i}" for i, p in enumerate(_POSITIONS)}
+    cut_expr = bust_cut_ref[_POSITIONS[-1]]
+    for position in reversed(_POSITIONS[:-1]):
+        cut_expr = f'IF({p_pos}="{position}",{bust_cut_ref[position]},{cut_expr})'
+    avail_set = "|".join(CHECK_AVAIL_STATUSES)
+    c_avail = f'REGEXMATCH({p_avail}&"","^({avail_set})$")'
+    c_bust = f"IFERROR(ISNUMBER({p_bust})*ISNUMBER({cut_expr})*({p_bust}>={cut_expr}),0)"
+    c_cal = (
+        f"IFERROR(ISNUMBER({p_cal})*ISNUMBER({p_proj})*({p_cal}<={p_proj}-{CHECK_CALPTS_BELOW_PROJPTS:g}),0)"
     )
-    # NOT `COUNTA(pp_all_names)=0` -- verified live (2026-09-22, template
-    # sheet, nobody pooled): each of the 5 stacked blocks' own first cell
-    # is an `IFERROR(ARRAY_CONSTRAIN(...),"")`-driven formula, and a
-    # formula that resolves to the empty STRING "" still counts as
-    # present under COUNTA (only a truly untouched cell doesn't) -- so
-    # COUNTA saw 5 "non-blank" cells even with an empty pool and the
-    # notice never fired. SUMPRODUCT correctly treats a `""` result the
-    # same as a genuinely blank cell, since it compares VALUE (`<>""`),
-    # not presence.
-    pool_empty_notice = (
-        f'=IF(SUMPRODUCT(({pp_all_names}<>"")*1)=0,"Tick players into your pool to see diagnostics.","")'
+    c_fade = f'REGEXMATCH({p_edge}&"","{CHECK_FADE_CHIP}")'
+    # IFERROR keeps one broken Player Pool row (an #N/A from the hub tabs) from taking the whole list down.
+    check_cond = f'IFERROR(({p_name}<>"")*(({c_avail}+{c_bust}+{c_cal}+{c_fade})>0),0)'
+    check_reason = (
+        f'IFERROR(TRIM(IF({c_avail},"Listed "&{p_avail}&". ","")'
+        f'&IF({c_bust}>0,"Bust odds "&TEXT({p_bust},"0")&"% (top quartile for "&{p_pos}&"). ","")'
+        f'&IF({c_cal}>0,"CalPts "&IFERROR(TEXT({p_proj}-{p_cal},"0.0"),"")&" below TFFB. ","")'
+        f'&IF({c_fade},"{CHECK_FADE_CHIP} chip. ","")),"")'
+    )
+    # NOT COUNTA: a block's name cells are formulas that can resolve to "" and still count as present.
+    pool_is_empty = f'SUMPRODUCT(({p_name}<>"")*1)=0'
+    check_nothing = f'IF({pool_is_empty},"{BOARD_CHECK_EMPTY_POOL}","{BOARD_CHECK_NOTHING}")'
+    # The fallback is one cell wide on purpose: a spilled "" in B-D would block the message's text overflow.
+    # NOT an IFERROR around the whole spill: it would replace each errored cell with the message.
+    check_main = (
+        f"=IF(SUMPRODUCT({check_cond})=0,{check_nothing},ARRAY_CONSTRAIN(ARRAYFORMULA(FILTER("
+        f"{{{p_name},{p_pos},{p_team},{check_reason}}},{check_cond})),{BOARD_CHECK_ROWS},4))"
+    )
+    check_ids = (
+        f'=IF(SUMPRODUCT({check_cond})=0,"",ARRAY_CONSTRAIN(ARRAYFORMULA(FILTER({{{p_id}}},{check_cond})),'
+        f"{BOARD_CHECK_ROWS},1))"
     )
 
-    def _pool_diagnostics_row(position: str, start: int, end: int) -> list[str]:
+    def _pool_summary_row(position: str, start: int, end: int) -> list[str]:
         pp_name = _pp_rng(player_pool_tab, "Name", start, end)
         pp_salary = _pp_rng(player_pool_tab, "DK Sal", start, end)
-        pp_flags = _pp_rng(player_pool_tab, "Flags", start, end)
+        pp_tag = _pp_rng(player_pool_tab, "Pool", start, end)
         pooled = f'{pp_name}<>""'
         cheapest = f"SORT(FILTER({{{pp_name},{pp_salary}}},{pooled}),2,TRUE)"
-        # PROMPT_BOARD_FIXES.md item 4: same per-position window as Punt
-        # finder (`PUNT_SALARY_WINDOW` off this position's own slate-wide
-        # cheapest salary via EdgeRaw's `salary`/`pos`, not a hardcoded
-        # $4,000 floor that could never fire for QB/RB).
-        punt_floor = f'MINIFS({salary},{pos},"{position}")'
-        gap_threshold = f"{punt_floor}+{PUNT_SALARY_WINDOW}"
         return [
             position,
-            f'=IFERROR(MIN(FILTER({pp_salary},{pooled})),"")',
-            f'=IFERROR(MAX(FILTER({pp_salary},{pooled})),"")',
-            f'=IFERROR(AVERAGE(FILTER({pp_salary},{pooled})),"")',
+            f"=SUMPRODUCT(({pooled})*1)",
+            f'=COUNTIF({pp_tag},"Cash")+COUNTIF({pp_tag},"Both")',
+            f'=COUNTIF({pp_tag},"GPP")+COUNTIF({pp_tag},"Both")',
+            f'=IFERROR(MIN(IFERROR(FILTER({pp_salary},{pooled}),"")),"")',
+            f'=IFERROR(MAX(IFERROR(FILTER({pp_salary},{pooled}),"")),"")',
+            f'=IFERROR(AVERAGE(IFERROR(FILTER({pp_salary},{pooled}),"")),"")',
             f'=IFERROR(INDEX({cheapest},1,1),"")',
             f'=IFERROR(INDEX({cheapest},1,2),"")',
-            f'=COUNTIF({pp_flags},"*CHALK*")',
-            f'=COUNTIF({pp_flags},"*LEVERAGE*")',
-            f'=IF(COUNTIF(FILTER({pp_salary},{pooled}),"<="&({gap_threshold}))=0,'
-            f'"No {position} within ${PUNT_SALARY_WINDOW:,} of the slate min","")',
         ]
 
-    pp_all_gameids = (
-        "{" + ";".join(_pp_rng(player_pool_tab, "GameID", s, e) for s, e in PLAYER_POOL_NAME_BLOCKS) + "}"
+    def _bust_cut(position: str) -> str:
+        """The position's Bust% top-quartile cut among its rosterable players (the top
+        `VAL_ADJ_ROSTERABLE_TOP_N` by ProjPts, the pool every other "rosterable" count uses)."""
+        at_position = f'{pos}="{position}"'
+        n = VAL_ADJ_ROSTERABLE_TOP_N[position]
+        floor = f"IFERROR(LARGE(FILTER({projpts},{at_position}),{n}),-1000000)"
+        return (
+            f"=IFERROR(PERCENTILE(FILTER({_rng(edge_tab, 'Bust%')},{at_position},{projpts}>={floor}),"
+            f'{CHECK_BUST_QUANTILE:g}),"")'
+        )
+
+    # Your stacks: each pooled QB, how many of his team's pass catchers are pooled, and whether anyone
+    # from the other side of the game is (a bring-back).
+    qb_block, wr_block, te_block = (PLAYER_POOL_NAME_BLOCKS[_POSITIONS.index(p)] for p in ("QB", "WR", "TE"))
+
+    def _pp(column: str, block: tuple[int, int]) -> str:
+        return _pp_rng(player_pool_tab, column, block[0], block[1])
+
+    qb_names, qb_teams, qb_opps = _pp("Name", qb_block), _pp("Team", qb_block), _pp("Opp.", qb_block)
+    stacks_spill = (
+        f'=IF(SUMPRODUCT(({qb_names}<>"")*1)=0,"No QB in your pool yet.",'
+        f'ARRAY_CONSTRAIN(FILTER({{{qb_names},{qb_teams},{qb_opps}}},{qb_names}<>""),{BOARD_STACKS_ROWS},3))'
     )
-    _pp_pooled_gameids = f'FILTER({pp_all_gameids},{pp_all_names}<>"")'
-    # NOT a bare `IFERROR(...,"")` around `MAX(COUNTIF(FILTER(...),
-    # FILTER(...)))` -- verified live (2026-09-22, template sheet,
-    # nobody pooled): FILTER-of-nothing returns #N/A, and COUNTIF (like
-    # COUNTA above) does not propagate that error, it counts the single
-    # #N/A as "1 matching item" -- so the outer IFERROR never catches
-    # anything and this read "Most pooled players sharing one game: 1"
-    # with an empty pool. Gated on the same SUMPRODUCT emptiness check as
-    # `pool_empty_notice` instead, so the FILTER-of-nothing case is never
-    # reached at all.
-    pool_concentration = (
-        f'=IF(SUMPRODUCT(({pp_all_names}<>"")*1)=0,"",'
-        f'"Most pooled players sharing one game: "&'
-        f"MAX(COUNTIF({_pp_pooled_gameids},{_pp_pooled_gameids})))"
-    )
+
+    def _catchers_on(team_cell: str) -> str:
+        return f"(COUNTIF({_pp('Team', wr_block)},{team_cell})+COUNTIF({_pp('Team', te_block)},{team_cell}))"
+
+    def _stack_pool_row(row: int) -> list[str]:
+        guard = f'OR($A{row}="",$B{row}="")'
+        return [
+            f'=IF({guard},"",{_catchers_on(f"$B{row}")})',
+            f'=IF({guard},"",IF({_catchers_on(f"$C{row}")}>0,"Yes ("&{_catchers_on(f"$C{row}")}&")","No"))',
+        ]
 
     # ---- Assemble ---------------------------------------------------------
     rows: list[list[str]] = [[] for _ in range(BOARD_LAST_ROW)]
 
-    def _set(row: int, values: list[str], start_col: int = 0) -> None:
+    def _set(row: int, values: list, start_col: int = 0) -> None:
         r = rows[row - 1]
         needed = start_col + len(values)
         if len(r) < needed:
@@ -703,19 +687,17 @@ def build_board(
             r[start_col + i] = v
 
     _set(BOARD_TITLE_ROW, ["THIS WEEK'S BOARD"])
-    _set(
-        BOARD_BANNER_ROW,
-        ["Games", games, "Highest total", top_total, "Max wind", max_wind, "Injuries", injuries],
-    )
+    # The values sit in B, D, H, J; D and J are text that overflow right across the empty cells after them
+    # (the old layout put "Max wind" in column E and cut "DET / ARI  54.5" off).
+    _set(BOARD_BANNER_ROW, ["Games", games, "Highest total", top_total], start_col=0)
+    _set(BOARD_BANNER_ROW, ["Max wind", max_wind, "Injuries", injuries], start_col=6)
     _set(BOARD_FRESHNESS_ROW, [freshness_banner])
-
-    _set(BOARD_QUEUE_HEADER_ROW, ["QUEUE  —  changes since the last sync, pooled players only"])
-    _set(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_COLHEADER)
-    for i, existing_row in enumerate(existing_queue):
-        _set(BOARD_QUEUE_FIRST_ROW + i, list(existing_row))
 
     _set(BOARD_SLATE_HEADER_ROW, ["SLATE SHAPE  —  where do I want exposure this week"])
     _set(BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_COLHEADER)
+    wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
+    wind_idx = WEATHER_COLUMNS.index("Wind") + 1
+
     wind_end_col = column_letter(WEATHER_COLUMNS.index("Wind"))
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
 
@@ -826,33 +808,60 @@ def build_board(
             start_col=BOARD_SLATE_GPSCHK_COL_INDEX,
         )
 
-    _set(BOARD_LEADERS_HEADER_ROW, ["PER-POSITION LEADERS  —  ranked within position, never across it"])
-    # PROMPT_BOARD_FIXES.md item 2: a sub-label row naming each block's own
-    # sort -- nothing on the sheet said so before.
-    _set(BOARD_LEADERS_SUBLABEL_ROW, ["Best value — sorted by ValAdj, high to low"], start_col=0)
-    _set(BOARD_LEADERS_SUBLABEL_ROW, ["Highest projection — sorted by ProjPts, high to low"], start_col=5)
-    _set(BOARD_LEADERS_COLHEADER_ROW, BOARD_LEADERS_COLHEADER)
-    _set(BOARD_LEADERS_FIRST_ROW, [best_valadj], start_col=0)
-    _set(BOARD_LEADERS_FIRST_ROW, [highest_proj], start_col=5)
-    # Round 5 item 3: hidden per-row percentile for the ProjPts leaders (names are column F).
-    edge_name_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
-    edge_pct_col = column_letter(EDGE_COLUMNS.index("ProjPts%ile") + EDGE_DATA_OFFSET)
-    pct_idx = EDGE_COLUMNS.index("ProjPts%ile") - EDGE_COLUMNS.index("Name") + 1
-    proj_names = f"F{BOARD_LEADERS_FIRST_ROW}:F{BOARD_LEADERS_LAST_ROW}"
-    _set(
-        BOARD_LEADERS_FIRST_ROW,
-        [
-            f'=ARRAYFORMULA(IFERROR(VLOOKUP({proj_names},{e}!${edge_name_col}:${edge_pct_col},{pct_idx},FALSE),""))'
-        ],
-        start_col=BOARD_LEADERS_PCT_COL_INDEX,
-    )
+    _set(BOARD_QUEUE_HEADER_ROW, ["QUEUE  —  pooled players whose numbers changed since the last sync"])
+    _set(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_COLHEADER)
+    _set(BOARD_QUEUE_COLHEADER_ROW, [BOARD_ID_HEADER], start_col=BOARD_ID_COL_INDEX)
+    kept = [r for r in existing_queue if len(r) > BOARD_ID_COL_INDEX and str(r[BOARD_ID_COL_INDEX]).strip()]
+    for i, old in enumerate(kept[:BOARD_QUEUE_ROWS]):
+        row = BOARD_QUEUE_FIRST_ROW + i
+        _set(
+            row,
+            board_list_row(
+                row,
+                old[0],
+                old[1],
+                old[2],
+                old[3],
+                old[BOARD_ID_COL_INDEX],
+                edge_tab=edge_tab,
+                added_range=added_range,
+            ),
+        )
+    if not kept:
+        _set(BOARD_QUEUE_FIRST_ROW, [BOARD_QUEUE_EMPTY])
 
+    _set(BOARD_CHECK_HEADER_ROW, ["POOL CHECK  —  pooled players whose numbers went bad (Set: Remove)"])
+    _set(BOARD_CHECK_COLHEADER_ROW, BOARD_CHECK_COLHEADER)
+    _set(BOARD_CHECK_COLHEADER_ROW, [BOARD_ID_HEADER], start_col=BOARD_ID_COL_INDEX)
+    _set(BOARD_CHECK_FIRST_ROW, [check_main])
+    _set(BOARD_CHECK_FIRST_ROW, [check_ids], start_col=BOARD_ID_COL_INDEX)
+    pool_col_index = BOARD_LIST_COLHEADER.index("Pool")
+    for i in range(BOARD_CHECK_ROWS):
+        row = BOARD_CHECK_FIRST_ROW + i
+        _set(
+            row,
+            [pc.pool_formula(row, edge_tab, added_range, id_col=BOARD_ID_COL, name_col="A")],
+            start_col=pool_col_index,
+        )
+
+    _set(BOARD_POOL_HEADER_ROW, ["POOL SUMMARY  —  your pool right now (live, no sync needed)"])
+    cash_col, gpp_col = BOARD_POOL_COL["Cash"], BOARD_POOL_COL["GPP"]
     _set(
-        BOARD_PUNT_HEADER_ROW,
-        [f"PUNT FINDER  —  within ${PUNT_SALARY_WINDOW:,} of each position's minimum, by ValAdj"],
+        BOARD_POOL_GAP_ROW,
+        [f'="Cash: "&{_roster_gap_formula(cash_col)}&"   ·   GPP: "&{_roster_gap_formula(gpp_col)}'],
     )
-    _set(BOARD_PUNT_COLHEADER_ROW, BOARD_PUNT_COLHEADER)
-    _set(BOARD_PUNT_FIRST_ROW, [punt_finder])
+    _set(BOARD_PORTFOLIO_ROW, [existing_portfolio or BOARD_PORTFOLIO_PLACEHOLDER])
+    _set(BOARD_POOL_COLHEADER_ROW, BOARD_POOL_COLHEADER)
+    for i, (position, (start, end)) in enumerate(zip(_POSITIONS, PLAYER_POOL_NAME_BLOCKS, strict=True)):
+        row = BOARD_POOL_FIRST_ROW + i
+        _set(row, _pool_summary_row(position, start, end))
+        _set(row, [_bust_cut(position)], start_col=BOARD_BUSTCUT_COL_INDEX)
+    _set(BOARD_STACKS_HEADER_ROW, ["YOUR STACKS  —  each pooled QB's pass catchers and bring-back"])
+    _set(BOARD_STACKS_COLHEADER_ROW, BOARD_STACKS_COLHEADER)
+    _set(BOARD_STACKS_FIRST_ROW, [stacks_spill])
+    for i in range(BOARD_STACKS_ROWS):
+        row = BOARD_STACKS_FIRST_ROW + i
+        _set(row, _stack_pool_row(row), start_col=3)
 
     _set(BOARD_STACK_HEADER_ROW, ["STACK CANDIDATES  —  QB + top pass-catchers, highest-total games first"])
     _set(BOARD_STACK_COLHEADER_ROW, BOARD_STACK_COLHEADER)
@@ -861,67 +870,73 @@ def build_board(
         r = BOARD_STACK_FIRST_ROW + i
         _set(r, _stack_row_formulas(r), start_col=2)
 
-    _set(BOARD_POOL_HEADER_ROW, ["POOL DIAGNOSTICS  —  reads your pool, not the slate"])
-    _set(BOARD_POOL_NOTICE_ROW, [pool_empty_notice])
-    _set(BOARD_POOL_COLHEADER_ROW, BOARD_POOL_COLHEADER)
-    for i, (position, (start, end)) in enumerate(zip(_POSITIONS, PLAYER_POOL_NAME_BLOCKS, strict=True)):
-        _set(BOARD_POOL_FIRST_ROW + i, _pool_diagnostics_row(position, start, end))
-    _set(BOARD_POOL_SUMMARY_ROW, [pool_concentration])
-
-    _set(BOARD_CHALK_HEADER_ROW, ["CHALK MAP  —  deferred"])
-    _set(
-        BOARD_CHALK_PLACEHOLDER_ROW,
-        [
-            "Where the field concentrates -- only meaningful once ownership publishes "
-            "(TFFB's ProjOwn reads 0 pre-midweek). See docs/planning/PROMPT_DATA.md's Move 2 / "
-            "7.8's actual-ownership logging."
-        ],
-    )
-
-    # The edges panel is filled by the sync; a rebuild keeps whatever it showed (read back above) so a
-    # `dfs setup build-views` re-run does not blank it until the next sync.
-    _set(BOARD_EDGES_HEADER_ROW, [BOARD_EDGES_TITLE])
-    for i in range(BOARD_EDGES_ROWS):
-        line = existing_edges[i] if i < len(existing_edges) else ""
-        _set(BOARD_EDGES_FIRST_ROW + i, [line or ("Not synced yet -- run `dfs sync`." if i == 0 else "")])
-
     client.write_tab(BOARD_TAB, rows)
-    return (
-        f"{BOARD_TAB}: built (Queue, Slate shape, Per-position leaders, Punt finder, "
-        "Stack candidates, Pool diagnostics, Chalk map placeholder, This week's edges)"
-    )
-
-
-def write_board_edges(client: SheetsClient, lines: list[str]) -> str:
-    """Write the five "This week's edges" lines under their header (one per row, column A, text only: a
-    leading "=" or "+" is neutralised). The tab and its header must already exist (`build_board`)."""
-    values = [[_text_cell(line)] for line in (list(lines) + [""] * BOARD_EDGES_ROWS)[:BOARD_EDGES_ROWS]]
-    client.update_range(BOARD_TAB, f"A{BOARD_EDGES_FIRST_ROW}:A{BOARD_EDGES_LAST_ROW}", values)
-    return f"{BOARD_TAB}: this week's edges written ({sum(1 for v in values if v[0])} line(s))"
+    return f"{BOARD_TAB}: built (Slate shape, Queue, Pool check, Pool summary, Stack candidates)"
 
 
 def _text_cell(text: str) -> str:
     return "'" + text if text.startswith(("=", "+", "-", "@")) else text
 
 
-def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: str) -> str:
-    """Populates Board's Queue body (`BOARD_QUEUE_FIRST_ROW..LAST_ROW`)
-    from `live_diff.diff_queue_changes`' output, filtered to players
-    currently ticked into the pool. Called from `dfs sync --live`/`dfs
-    go` right after the diff is computed -- NOT from `build_board`, since
-    a Sheets formula can't see yesterday's values, only this Python diff
-    can. `changes` is expected to carry `Id`/`Name`/`Position`/`Team`/
-    `Reason` columns, `diff_queue_changes`'s own output shape.
+def queue_body(
+    changes: pd.DataFrame, pooled_ids: set[str], *, edge_tab: str, added_range: str | None
+) -> list[list]:
+    """The Queue's rows, `A` through the hidden Id column, for the pooled players in `changes` (at most
+    `BOARD_QUEUE_ROWS`; the last row says how many more there were). One line saying nothing changed when
+    none.
+    `changes` carries `Id`/`Name`/`Position`/`Team`/`Reason`, `live_diff.diff_queue_changes`' own output."""
+    width = BOARD_ID_COL_INDEX + 1
+    if changes.empty:
+        pooled = changes
+    else:
+        pooled = changes[changes["Id"].map(_canonical_id).isin(pooled_ids)]
+    shown = pooled.head(BOARD_QUEUE_ROWS)
+    overflow = len(pooled) - len(shown)
+    body = []
+    for i, (_, r) in enumerate(shown.iterrows()):
+        reason = str(r["Reason"])
+        if overflow > 0 and i == len(shown) - 1:
+            reason = f"{reason} (+{overflow} more not shown)"
+        body.append(
+            board_list_row(
+                BOARD_QUEUE_FIRST_ROW + i,
+                r["Name"],
+                r["Position"],
+                r["Team"],
+                reason,
+                r["Id"],
+                edge_tab=edge_tab,
+                added_range=added_range,
+            )
+        )
+    if not body:
+        body = [[BOARD_QUEUE_EMPTY, *[""] * (width - 1)]]
+    while len(body) < BOARD_QUEUE_ROWS:
+        body.append([""] * width)
+    return body
 
-    The pool tick itself lives only on the live sheet, never in the local
-    diff dataframe (`sources/edge.py`'s `fetch()` never includes it --
-    see that module's `pre_upload`/`post_upload` docstrings for why), so
-    it's read here the same way `pre_upload` reads it: by Id, off
-    EdgeRaw's own current header and Pool column, never assumed from
-    `EDGE_DATA_OFFSET`'s TARGET layout (this can run between an EdgeRaw
-    reorder's `write_tab` and the next `dfs setup polish`, same hazard
-    `pre_upload`'s own docstring documents at length).
-    """
+
+def used_queue_rows(body: list[list]) -> int:
+    """How many Queue rows hold something (a player, or the one "nothing changed" line)."""
+    used = 0
+    for i, row in enumerate(body):
+        if any(str(c).strip() for c in row):
+            used = i + 1
+    return max(used, 1)
+
+
+def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: str) -> str:
+    """Populates Board's Queue body from `live_diff.diff_queue_changes`' output, filtered to the players
+    currently ticked into the pool. Called from `dfs sync --live`/`dfs go` right after the diff is computed
+    -- NOT from `build_board`, since a Sheets formula can't see yesterday's values, only this Python diff
+    can. Every row is a player row (name, reason, a live `Pool` cell, a `Set` dropdown, a hidden `Id`); the
+    rows it did not use are hidden, so "nothing changed" is one line instead of twenty empty rows.
+
+    The pool tick lives only on the live sheet, never in the local diff (`sources/edge.py`'s `fetch()` never
+    includes it), so it is read here the way `pre_upload` reads it: by Id, off EdgeRaw's own current header
+    and Pool column, never assumed from `EDGE_DATA_OFFSET`'s TARGET layout (this can run between an EdgeRaw
+    reorder's
+    `write_tab` and the next `dfs setup polish`)."""
     if not client.tab_exists(BOARD_TAB):
         return f"{BOARD_TAB}: not present -- skipped"
     if not client.tab_exists(edge_tab):
@@ -939,26 +954,44 @@ def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: s
         for i in range(len(ids))
         if ids[i] and ids[i][0] != "" and i < len(ticks) and ticks[i] and ticks[i][0]
     }
+    body = queue_body(changes, pooled_ids, edge_tab=edge_tab, added_range=pc.added_names_range(client))
+    client.update_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}", body)
+    used = used_queue_rows(body)
+    apply_queue_visibility(client, used)
+    shown = used if any(str(c).strip() for c in body[0][1:]) else 0
+    return f"{BOARD_TAB}: Queue updated ({shown} pooled change(s))"
 
-    if changes.empty:
-        pooled_changes = changes
-    else:
-        pooled_changes = changes[changes["Id"].map(_canonical_id).isin(pooled_ids)]
 
-    body = [
-        [row["Name"], row["Position"], row["Team"], row["Reason"]]
-        for _, row in pooled_changes.head(BOARD_QUEUE_ROWS).iterrows()
-    ]
-    overflow = len(pooled_changes) - len(body)
-    if body and overflow > 0:
-        body[-1][3] = f"{body[-1][3]} (+{overflow} more not shown)"
-    if not body:
-        body = [["No changes since the last sync for pooled players.", "", "", ""]]
-    while len(body) < BOARD_QUEUE_ROWS:
-        body.append(["", "", "", ""])
+def apply_queue_visibility(client: SheetsClient, used: int) -> None:
+    """Show the Queue's first `used` body rows and hide the rest."""
+    first_hidden = BOARD_QUEUE_FIRST_ROW + used
+    client.unhide_rows(BOARD_TAB, BOARD_QUEUE_FIRST_ROW, first_hidden - 1)
+    if first_hidden <= BOARD_QUEUE_LAST_ROW:
+        client.hide_rows(BOARD_TAB, first_hidden, BOARD_QUEUE_LAST_ROW)
 
-    client.update_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:D{BOARD_QUEUE_LAST_ROW}", body)
-    return f"{BOARD_TAB}: Queue updated ({len(pooled_changes)} pooled change(s))"
+
+def board_portfolio_text(portfolio: dict[str, float] | None, lineups: int, gpp_target: float) -> str:
+    """The Pool summary's portfolio line from the Lineups simulator's summary: lineups built, expected cashes,
+    P(at least one cash) and P(at least one lineup at the GPP target); the placeholder when none are built."""
+    if not portfolio or lineups <= 0:
+        return BOARD_PORTFOLIO_PLACEHOLDER
+    return (
+        f"{BOARD_PORTFOLIO_PREFIX} {lineups} lineup{'s' if lineups != 1 else ''}  ·  "
+        f"{portfolio['expected_cashes']:.1f} expected cashes  ·  "
+        f"P(at least one cash) {portfolio['p_any_cash']:.0%}  ·  "
+        f"P(at least one {gpp_target:g}+) {portfolio['p_any_gpp']:.0%}"
+    )
+
+
+def write_board_portfolio(
+    client: SheetsClient, portfolio: dict[str, float] | None, lineups: int, gpp_target: float
+) -> str:
+    """Write the portfolio line on the Board (the same numbers as the Lineups simulator's portfolio line)."""
+    if not client.tab_exists(BOARD_TAB):
+        return f"{BOARD_TAB}: not present -- portfolio skipped"
+    text = board_portfolio_text(portfolio, lineups, gpp_target)
+    client.update_range(BOARD_TAB, f"A{BOARD_PORTFOLIO_ROW}", [[text]])
+    return f"{BOARD_TAB}: portfolio line written"
 
 
 # ---------------------------------------------------------------------------

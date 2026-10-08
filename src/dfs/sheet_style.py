@@ -112,29 +112,29 @@ from dfs.sheet_columns import INTERNAL
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_tints import LEGEND as LINEUP_TINT_LEGEND
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
+from dfs.sheet_pool_cells import SET_OPTIONS
 from dfs.sheet_views import (
-    BOARD_CHALK_HEADER_ROW,
-    BOARD_EDGES_FIRST_ROW,
-    BOARD_EDGES_HEADER_ROW,
-    BOARD_EDGES_LAST_ROW,
+    BOARD_BUSTCUT_COL_INDEX,
+    BOARD_CHECK_COLHEADER_ROW,
+    BOARD_CHECK_FIRST_ROW,
+    BOARD_CHECK_HEADER_ROW,
+    BOARD_CHECK_LAST_ROW,
+    BOARD_ID_COL,
     BOARD_LAST_ROW,
-    BOARD_LEADERS_COLHEADER_ROW,
-    BOARD_LEADERS_FIRST_ROW,
-    BOARD_LEADERS_HEADER_ROW,
-    BOARD_LEADERS_LAST_ROW,
-    BOARD_LEADERS_PCT_COL,
-    BOARD_LEADERS_PCT_COL_INDEX,
-    BOARD_LEADERS_SUBLABEL_ROW,
+    BOARD_LIST_COLHEADER,
+    BOARD_LIST_POOL_COL,
+    BOARD_LIST_SET_COL,
     BOARD_MAX_VISIBLE_COL_INDEX,
+    BOARD_POOL_COL,
+    BOARD_POOL_COLHEADER,
     BOARD_POOL_COLHEADER_ROW,
     BOARD_POOL_FIRST_ROW,
+    BOARD_POOL_GAP_ROW,
     BOARD_POOL_HEADER_ROW,
     BOARD_POOL_LAST_ROW,
-    BOARD_PUNT_COLHEADER_ROW,
-    BOARD_PUNT_FIRST_ROW,
-    BOARD_PUNT_HEADER_ROW,
-    BOARD_PUNT_LAST_ROW,
+    BOARD_PORTFOLIO_ROW,
     BOARD_QUEUE_COLHEADER_ROW,
+    BOARD_QUEUE_FIRST_ROW,
     BOARD_QUEUE_HEADER_ROW,
     BOARD_QUEUE_LAST_ROW,
     BOARD_SLATE_COLHEADER,
@@ -148,6 +148,10 @@ from dfs.sheet_views import (
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
     BOARD_STACK_LAST_ROW,
+    BOARD_STACKS_COLHEADER,
+    BOARD_STACKS_COLHEADER_ROW,
+    BOARD_STACKS_HEADER_ROW,
+    BOARD_STACKS_LAST_ROW,
     SLATE_COL,
     SLATE_GAME_FIRST_ROW,
     SLATE_GAME_LAST_ROW,
@@ -159,7 +163,8 @@ from dfs.sheet_views import (
     SLATE_TEAMS_FIRST_ROW,
     SLATE_TEAMS_HEADER_ROW,
     SLATE_TEAMS_LAST_ROW,
-    _position_block_rows,
+    apply_queue_visibility,
+    used_queue_rows,
 )
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_HEADER
@@ -2643,52 +2648,27 @@ _BANNER_FMT = {
 
 # Board panels: (first column, last column) for each of the three.
 def style_board(client: SheetsClient, tab: str = "Board") -> str:
-    """Phase 6, Part 3 (2026-09-22) rebuild: seven collapsible ROW sections
-    instead of three fixed side-by-side panels. Row positions come from
-    `sheet_views`' own `BOARD_*` constants -- the single source of truth
-    `build_board` writes against, imported here rather than re-counted by
-    hand so the two can't drift the way EdgeRaw's column order once did.
-    Every section is grouped and left EXPANDED (Sam, 2026-09-30: all Board
-    categories open by default; the +/- controls still collapse them).
+    """The Board's formatting: five collapsible ROW sections (Slate shape, Queue, Pool check, Pool summary,
+    Stack candidates). Row positions come from `sheet_views`' own `BOARD_*` constants, the single source of
+    truth `build_board` writes against, imported here rather than re-counted by hand so the two can't drift
+    apart. Every section is grouped and left EXPANDED (the +/- controls still collapse them).
 
-    PROMPT_BOARD_FIXES.md items 2/3/6 (2026-09-25): a sub-label row above
-    each Leaders block naming its own sort, a thin top border between
-    positions in the Leaders/Punt blocks, and full colour-scale coverage
-    (position-ranked sections scaled per position, never across it;
-    Slate shape/Stack candidates scaled across their whole section) --
-    every scale routed through the shared `_scale_rule_specs` dispatch
-    (`sheet_color_scales.py`) so the same zero-exclusion every other
-    scaled column in the workbook gets applies here too.
-    """
+    Queue and Pool check rows are player rows: a pale-yellow `Set` dropdown (`SET_OPTIONS`) beside the live
+    `Pool` cell; the hidden `Id` column behind them is what the Apps Script finds the player by. The Queue's
+    unused rows are hidden again here (the sync hides them when it writes; a polish run must not undo that).
+    Position-ranked colour scales are gone with the leaders; Slate shape and Stack candidates are scaled
+    across
+    their whole section through the shared `_scale_rule_specs` dispatch (`sheet_color_scales.py`)."""
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
     client.clear_conditional_formats(tab)
     client.clear_row_groups(tab)
     # Deleting a collapsed group leaves its rows hidden; open everything, then regroup.
     client.unhide_rows(tab, 1, BOARD_LAST_ROW + 10)
-    # The pre-rebuild 3-panel Board painted plain (non-conditional)
-    # background fills on spacer columns E/J -- `clear_conditional_
-    # formats` only clears conditional-format RULES, not a plain fill
-    # `format_range` already set, so those old grey bands were still
-    # visible live after this rebuild shipped (found visually, 2026-09-
-    # 23, opening the actual sheet -- an API cell-value read alone never
-    # would have caught a leftover fill with no corresponding value).
-    # Reset to white first, past the tab's current widest/tallest
-    # section, so every section's own formatting below starts from a
-    # clean sheet regardless of what an earlier design left behind.
-    # PROMPT_BOARD_FIXES.md item 5: last visible column is now derived
-    # (`BOARD_MAX_VISIBLE_COL_INDEX`, Stack candidates' own 14-column
-    # width), not a hardcoded "N" -- which happens to be the same letter
-    # today, but stops being a coincidence.
     last_visible_col = column_letter(BOARD_MAX_VISIBLE_COL_INDEX)
-    # Round 5 item 5a: reset the TEXT format too, not just the fill. An earlier layout's
-    # dark section-header rows left white bold text behind; when the rebuilt sections'
-    # rows moved, real player rows landed on those stale rows and rendered white-on-white
-    # -- invisible, which looked exactly like holes in the Board (found live, Week 4).
-    # Alignment and number format are cleared the same way (None = unset): a stale explicit
-    # LEFT on a few Leaders rows and stray "$" formats on spacer columns survived the old
-    # layout the same way (found Week 4, 2026-09-30: rows that sat left-aligned while their
-    # neighbours sat right-aligned). Every section below re-applies what it needs.
+    # Reset the TEXT format, alignment and number format too, not just the fill: an earlier layout's dark
+    # header rows left white bold text behind, and when the rebuilt sections' rows moved, real player rows
+    # landed on those stale rows and rendered white-on-white (found live, Week 4, 2026-09-30).
     client.format_range(
         tab,
         f"A1:{last_visible_col}{BOARD_LAST_ROW + 10}",
@@ -2700,132 +2680,105 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         },
     )
     client.set_column_widths(
-        tab,
-        {
-            "A": 170,
-            "B": 90,
-            "C": 90,
-            "D": 90,
-            "E": 90,
-            "F": 90,
-            "G": 90,
-            "H": 90,
-            "I": 90,
-            "J": 90,
-            "K": 90,
-            "L": 90,
-            "M": 90,
-            "N": 90,
-        },
+        tab, {"A": 170, **{column_letter(i): 90 for i in range(1, BOARD_MAX_VISIBLE_COL_INDEX + 1)}}
     )
     client.format_range(tab, "A1", _TITLE_FMT)
-    client.format_range(tab, "A2:H2", {"textFormat": {"fontSize": 10}})
-    for label in ("A2", "C2", "E2", "G2"):
+    # Banner (row 2): label / value pairs at A-B, C-D, G-H, I-J. D and J are text that overflow right.
+    client.format_range(tab, "A2:J2", {"textFormat": {"fontSize": 10}})
+    for label in ("A2", "C2", "G2", "I2"):
         client.format_range(tab, label, {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
-    for value in ("B2", "D2", "F2", "H2"):
+    for value in ("B2", "D2", "H2", "J2"):
         client.format_range(tab, value, {"textFormat": {"bold": True, "foregroundColor": INK}})
     client.format_range(tab, f"A3:{last_visible_col}3", _BANNER_FMT)
 
-    # Slate shape's GameId/Away/Home join keys (sheet_views.
-    # BOARD_SLATE_GAMEID_COL/AWAY_COL/HOME_COL) -- meaningless to look at,
-    # same treatment as EdgeRaw's own hidden Id. Derived from
-    # BOARD_MAX_VISIBLE_COL_INDEX (item 5), past every section's own
-    # rightmost visible column, so this can't hide real content belonging
-    # to a different section that happens to share the same letter.
-    # Unhide everything left of the helper block first: an earlier layout hid columns that are
-    # visible now (found live: the old join keys sat at J:L, so Shootout?/GPS stayed hidden
-    # after the slate shape grew past column I).
+    # The hidden helper block (GameId/Away/Home/GPS check, then the list Ids and the Bust% cuts). Unhide
+    # everything left of it first: an earlier layout hid columns that are visible now.
     client.hide_columns(tab, "A", column_letter(BOARD_SLATE_GAMEID_COL_INDEX - 1), hidden=False)
-    hide_first = column_letter(BOARD_SLATE_GAMEID_COL_INDEX)
-    hide_last = column_letter(BOARD_LEADERS_PCT_COL_INDEX)
-    client.hide_columns(tab, hide_first, hide_last)
+    client.hide_columns(
+        tab, column_letter(BOARD_SLATE_GAMEID_COL_INDEX), column_letter(BOARD_BUSTCUT_COL_INDEX)
+    )
 
     def _section(
-        header_row: int, colheader_row: int, last_row: int, *, last_col: str, collapsed: bool
+        header_row: int, colheader_row: int, last_row: int, *, last_col: str, group_from: int | None = None
     ) -> None:
         client.format_range(tab, f"A{header_row}:{last_col}{header_row}", _PANEL_FMT)
         client.format_range(tab, f"A{colheader_row}:{last_col}{colheader_row}", _SUBHEAD_FMT)
-        client.group_rows(tab, colheader_row, last_row, collapsed=collapsed)
+        client.group_rows(tab, group_from or colheader_row, last_row, collapsed=False)
 
-    _section(
-        BOARD_QUEUE_HEADER_ROW, BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW, last_col="D", collapsed=False
-    )
+    list_last = column_letter(len(BOARD_LIST_COLHEADER) - 1)
+    pool_last = column_letter(len(BOARD_POOL_COLHEADER) - 1)
     _section(
         BOARD_SLATE_HEADER_ROW,
         BOARD_SLATE_COLHEADER_ROW,
         BOARD_SLATE_LAST_ROW,
         last_col=column_letter(len(BOARD_SLATE_COLHEADER) - 1),
-        collapsed=False,
     )
-    # PROMPT_BOARD_FIXES.md item 2: a sub-label row (naming each block's
-    # own sort) sits between the section header and the column header now
-    # -- grouped along with the rest of the section's body, same as the
-    # column header row already was, so collapsing the section hides it
-    # too rather than leaving an orphaned label visible.
-    client.format_range(tab, f"A{BOARD_LEADERS_HEADER_ROW}:I{BOARD_LEADERS_HEADER_ROW}", _PANEL_FMT)
-    client.format_range(
-        tab,
-        f"A{BOARD_LEADERS_SUBLABEL_ROW}:I{BOARD_LEADERS_SUBLABEL_ROW}",
-        {"textFormat": {"italic": True, "foregroundColor": INK_MUTED, "fontSize": 9}},
-    )
-    client.format_range(tab, f"A{BOARD_LEADERS_COLHEADER_ROW}:I{BOARD_LEADERS_COLHEADER_ROW}", _SUBHEAD_FMT)
-    client.group_rows(tab, BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW, collapsed=False)
+    _section(BOARD_QUEUE_HEADER_ROW, BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW, last_col=list_last)
+    _section(BOARD_CHECK_HEADER_ROW, BOARD_CHECK_COLHEADER_ROW, BOARD_CHECK_LAST_ROW, last_col=list_last)
+    # Pool summary: its gap line and portfolio line sit under the title, above the table, inside the group.
     _section(
-        BOARD_PUNT_HEADER_ROW, BOARD_PUNT_COLHEADER_ROW, BOARD_PUNT_LAST_ROW, last_col="D", collapsed=False
+        BOARD_POOL_HEADER_ROW,
+        BOARD_POOL_COLHEADER_ROW,
+        BOARD_STACKS_LAST_ROW,
+        last_col=pool_last,
+        group_from=BOARD_POOL_GAP_ROW,
     )
+    stacks_last = column_letter(len(BOARD_STACKS_COLHEADER) - 1)
+    for row in (BOARD_STACKS_HEADER_ROW, BOARD_STACKS_COLHEADER_ROW):
+        client.format_range(tab, f"A{row}:{stacks_last}{row}", _SUBHEAD_FMT)
     _section(
         BOARD_STACK_HEADER_ROW,
         BOARD_STACK_COLHEADER_ROW,
         BOARD_STACK_LAST_ROW,
         last_col=last_visible_col,
-        collapsed=False,
     )
-    _section(
-        BOARD_POOL_HEADER_ROW, BOARD_POOL_COLHEADER_ROW, BOARD_POOL_LAST_ROW, last_col="I", collapsed=False
-    )
-    client.format_range(tab, f"A{BOARD_CHALK_HEADER_ROW}:I{BOARD_CHALK_HEADER_ROW}", _PANEL_FMT)
-    client.group_rows(tab, BOARD_CHALK_HEADER_ROW + 1, BOARD_CHALK_HEADER_ROW + 1, collapsed=False)
-    # Edge Finder (2026-10-07): "This week's edges" -- five plain text lines, one per row, overflowing right.
-    client.format_range(tab, f"A{BOARD_EDGES_HEADER_ROW}:I{BOARD_EDGES_HEADER_ROW}", _PANEL_FMT)
-    client.format_range(
-        tab,
-        f"A{BOARD_EDGES_FIRST_ROW}:A{BOARD_EDGES_LAST_ROW}",
-        {"textFormat": {"fontSize": 10, "foregroundColor": INK}, "wrapStrategy": "OVERFLOW_CELL"},
-    )
-    client.group_rows(tab, BOARD_EDGES_FIRST_ROW, BOARD_EDGES_LAST_ROW, collapsed=False)
 
-    def _scaled(
-        col: str, first_row: int, last_row: int, field_name: str, *, pct_letter: str | None = None
-    ) -> None:
-        """The shared colour dispatch (`column_rule_specs`), applied over one section's column.
-        Board's sections are small, so per-call application is fine. `pct_letter` points a
-        player metric at a hidden within-position percentile column on this tab."""
-        gradients, booleans = column_rule_specs(field_name, col, first_row, last_row, pct_letter=pct_letter)
+    # Queue and Pool check: player rows with a Set dropdown beside the live Pool cell.
+    for first, last in (
+        (BOARD_QUEUE_FIRST_ROW, BOARD_QUEUE_LAST_ROW),
+        (BOARD_CHECK_FIRST_ROW, BOARD_CHECK_LAST_ROW),
+    ):
+        client.format_range(
+            tab,
+            f"{BOARD_LIST_POOL_COL}{first}:{BOARD_LIST_POOL_COL}{last}",
+            {"horizontalAlignment": "CENTER"},
+        )
+        client.format_range(
+            tab,
+            f"{BOARD_LIST_SET_COL}{first}:{BOARD_LIST_SET_COL}{last}",
+            {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER"},
+        )
+        client.set_dropdown_validation(
+            tab, f"{BOARD_LIST_SET_COL}{first}:{BOARD_LIST_SET_COL}{last}", SET_OPTIONS
+        )
+
+    # Pool summary: counts and salaries; the gap and portfolio lines read as plain bold sentences.
+    client.format_range(
+        tab, f"A{BOARD_POOL_GAP_ROW}:A{BOARD_PORTFOLIO_ROW}", {"textFormat": {"bold": True, "fontSize": 10}}
+    )
+    for name in ("Min Sal", "Max Sal", "Avg Sal", "Cheapest Sal"):
+        col = BOARD_POOL_COL[name]
+        client.format_range(
+            tab, f"{col}{BOARD_POOL_FIRST_ROW}:{col}{BOARD_POOL_LAST_ROW}", FIELD_FORMATS["Salary"]
+        )
+    for name in ("Pooled", "Cash", "GPP"):
+        col = BOARD_POOL_COL[name]
+        client.format_range(
+            tab,
+            f"{col}{BOARD_POOL_FIRST_ROW}:{col}{BOARD_POOL_LAST_ROW}",
+            {"horizontalAlignment": "CENTER"},
+        )
+
+    def _scaled(col: str, first_row: int, last_row: int, field_name: str) -> None:
+        """The shared colour dispatch (`column_rule_specs`), applied over one section's column."""
+        gradients, booleans = column_rule_specs(field_name, col, first_row, last_row)
         for spec in gradients:
             client.add_color_scale(tab, spec.pop("a1_range"), **spec)
         for spec in booleans:
             client.add_boolean_rule(tab, spec.pop("a1_range"), **spec)
 
-    def _position_top_borders(first_row: int, first_col: str, last_col: str) -> None:
-        """PROMPT_BOARD_FIXES.md item 3: "a thin visual break between
-        positions... a top border on each position's first row" -- skips
-        the very first position (QB), which already sits directly under
-        the column header row and needs no further separator."""
-        blocks = list(_position_block_rows(first_row).values())
-        for start, _ in blocks[1:]:
-            client.format_range(
-                tab,
-                f"{first_col}{start}:{last_col}{start}",
-                {"borders": {"top": {"style": "SOLID", "width": 1, "color": INK_MUTED}}},
-            )
-
-    # Slate shape: Total/Fav/Spread/Pace/Wind. Fav is text (no scale, no
-    # format); the rest are FIELD_FORMATS' own formats. Scaled across the
-    # whole section (item 6: not position-ranked, so no per-position
-    # split makes sense here) -- Wind keeps its existing chip treatment
-    # (style_slate_grid's own high-wind boolean rule doesn't apply on
-    # Board, which has never chipped Wind; item 6 only says "keep" it
-    # where it already existed).
+    # Slate shape: Total/Fav/Spread/Pace/Wind. Fav is text (no scale, no format); the rest are FIELD_FORMATS'
+    # own formats, scaled across the whole section (not position-ranked). Wind keeps its plain format.
     slate_col = {name: column_letter(i) for i, name in enumerate(BOARD_SLATE_COLHEADER)}
     for name, field_name in (
         ("Total", "Total"),
@@ -2841,13 +2794,10 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         client.format_range(
             tab, f"{col}{BOARD_SLATE_FIRST_ROW}:{col}{BOARD_SLATE_LAST_ROW}", FIELD_FORMATS[field_name]
         )
-    # Scaled across the whole section, like Total/Spread/Pace always were
-    # (Wind keeps its plain format; Shootout?/Fav are text).
     for name in ("Total", "Spread", "Pace", "PROE", "Expl%", "GameEnv", "GPS"):
-        col = slate_col[name]
-        _scaled(col, BOARD_SLATE_FIRST_ROW, BOARD_SLATE_LAST_ROW, name)
-    # Muted marker on a game's GPS cell when the worksheet's implied totals
-    # are far off Vegas (`gps_check.py`): a swapped row in the source.
+        _scaled(slate_col[name], BOARD_SLATE_FIRST_ROW, BOARD_SLATE_LAST_ROW, name)
+    # Muted marker on a game's GPS cell when the worksheet's implied totals are far off Vegas
+    # (`gps_check.py`): a swapped row in the source.
     gps_col = slate_col["GPS"]
     client.add_boolean_rule(
         tab,
@@ -2857,34 +2807,8 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         fmt=_chip(WARN_BG, WARN_FG),
     )
 
-    # Per-position leaders: Salary/ValAdj (block 1), Salary/ProjPts (block
-    # 2) -- Salary stays unscaled (existing policy: a constraint, not a
-    # quality). Both ValAdj and ProjPts are scaled PER POSITION now (item
-    # 6), not once across all 33 stacked rows.
-    client.format_range(tab, f"C{BOARD_LEADERS_FIRST_ROW}:C{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["Salary"])
-    client.format_range(tab, f"D{BOARD_LEADERS_FIRST_ROW}:D{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["ValAdj"])
-    client.format_range(tab, f"H{BOARD_LEADERS_FIRST_ROW}:H{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["Salary"])
-    client.format_range(
-        tab, f"I{BOARD_LEADERS_FIRST_ROW}:I{BOARD_LEADERS_LAST_ROW}", FIELD_FORMATS["ProjPts"]
-    )
-    # ValAdj is stepped on its own 0-100 value; ProjPts on the hidden within-position percentile
-    # looked up by name (`BOARD_LEADERS_PCT_COL`) -- so a leader looks exactly like the same
-    # player on EdgeRaw, Player Pool and Lineups.
-    _scaled("D", BOARD_LEADERS_FIRST_ROW, BOARD_LEADERS_LAST_ROW, "ValAdj")
-    _scaled("I", BOARD_LEADERS_FIRST_ROW, BOARD_LEADERS_LAST_ROW, "ProjPts", pct_letter=BOARD_LEADERS_PCT_COL)
-    _position_top_borders(BOARD_LEADERS_FIRST_ROW, "A", "D")
-    _position_top_borders(BOARD_LEADERS_FIRST_ROW, "F", "I")
-
-    # Punt finder: Salary/ValAdj -- same per-position scaling as Leaders.
-    client.format_range(tab, f"C{BOARD_PUNT_FIRST_ROW}:C{BOARD_PUNT_LAST_ROW}", FIELD_FORMATS["Salary"])
-    client.format_range(tab, f"D{BOARD_PUNT_FIRST_ROW}:D{BOARD_PUNT_LAST_ROW}", FIELD_FORMATS["ValAdj"])
-    _scaled("D", BOARD_PUNT_FIRST_ROW, BOARD_PUNT_LAST_ROW, "ValAdj")
-    _position_top_borders(BOARD_PUNT_FIRST_ROW, "A", "D")
-
-    # Stack candidates: Total (item 5/6 -- scaled across the whole
-    # section, it's per-game, not position-ranked) plus every Salary
-    # column staying unscaled (QB/WR1/WR2/WR3/TE1/RB1's own Sal columns
-    # are D/F/H/J/L/N -- see build_board's own column layout).
+    # Stack candidates: Total scaled across the whole section (per game, not position-ranked); every Salary
+    # column (QB/WR1/WR2/WR3/TE1/RB1's own Sal columns D/F/H/J/L/N) stays unscaled.
     client.format_range(tab, f"B{BOARD_STACK_FIRST_ROW}:B{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Total"])
     _scaled("B", BOARD_STACK_FIRST_ROW, BOARD_STACK_LAST_ROW, "Total")
     for col in ("D", "F", "H", "J", "L", "N"):
@@ -2892,14 +2816,11 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
             tab, f"{col}{BOARD_STACK_FIRST_ROW}:{col}{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Salary"]
         )
 
-    # Pool diagnostics: Min/Max/Avg/Cheapest Salary -- all unscaled
-    # (Salary, same policy as everywhere else).
-    for col in ("B", "C", "D", "F"):
-        client.format_range(
-            tab, f"{col}{BOARD_POOL_FIRST_ROW}:{col}{BOARD_POOL_FIRST_ROW + 4}", FIELD_FORMATS["Salary"]
-        )
+    # The Queue shows only the rows it uses (the sync hid the rest; undo nothing here).
+    body = client.read_range(tab, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}")
+    apply_queue_visibility(client, used_queue_rows(body))
     client.freeze(tab, rows=3)
-    return f"{tab}: styled (7 collapsible sections, banner, colour scales)"
+    return f"{tab}: styled (5 collapsible sections, banner, colour scales, Set dropdowns)"
 
 
 def _apply_column_rules(

@@ -86,18 +86,16 @@ dfs go                # sync + dfs doctor + what changed, back to back
 
 Every sync also rewrites the **Edge Finder** tab (cash core and GPP upside per position with a reason and a verb on every row, punt plays, where
 `CalPts` disagrees with TFFB, who inherits an out back's carries, every absent regular as context, usage trends, matchups (context only), and
-the unproven context signals; your open/closed sections survive the rewrite) and the Board's
-"This week's edges" panel. The final `dfs sync --live` after inactives (about 90 minutes before kickoff) is the one that
+the unproven context signals; your open/closed sections survive the rewrite). The final `dfs sync --live` after inactives (about 90 minutes before kickoff) is the one that
 matters for the injury list. `CalPts` is **not** the default projection: it is tracked in Model Check.
 
-Check Board first each week -- it's a landing view, seven collapsible
-sections: Queue (what changed since the last sync, pooled players only),
-Slate shape (games ranked by total, with Fav/Spread/Pace/wind/shootout
-flag), Per-position leaders (best ValAdj and highest ProjPts, ranked
-within position), Punt finder (best value within $1,000 of each
-position's own slate minimum), Stack candidates (QB + WR1/WR2/WR3/TE1/RB1
-for the highest-total games), Pool diagnostics (reads your ticked pool,
-not the slate), and a Chalk map placeholder (waiting on ownership data).
+Check Board first each week -- it's a landing view, five collapsible
+sections: Slate shape (games ranked by total, with Fav/Spread/Pace/wind/shootout
+flag), Queue (what changed since the last sync, pooled players only; one line when
+nothing did), Pool check (pooled players whose numbers went bad, with a Set cell to
+remove them), Pool summary (your pool right now: counts, what is missing to fill a
+lineup, the portfolio odds, each pooled QB's stack, salary spread) and Stack
+candidates (QB + WR1/WR2/WR3/TE1/RB1 for the highest-total games).
 Slate Grid is the same slate one row per game instead of one row per
 player, with each game's combined environment (GameEnv, Pace, PROE, Expl%) and, below the games, a TEAMS table: every team on
 the schedule by implied total, with its pace, pass rate over expected, explosive rate, offensive EPA per

@@ -58,18 +58,22 @@ from dfs.sheet_style import (
     style_tier23_tabs,
 )
 from dfs.sheet_views import (
-    BOARD_CHALK_HEADER_ROW,
+    BOARD_BUSTCUT_COL_INDEX,
+    BOARD_CHECK_COLHEADER_ROW,
+    BOARD_CHECK_FIRST_ROW,
+    BOARD_CHECK_LAST_ROW,
     BOARD_LAST_ROW,
-    BOARD_LEADERS_FIRST_ROW,
-    BOARD_LEADERS_LAST_ROW,
-    BOARD_LEADERS_PCT_COL_INDEX,
-    BOARD_LEADERS_SUBLABEL_ROW,
+    BOARD_LIST_SET_COL,
+    BOARD_POOL_GAP_ROW,
     BOARD_QUEUE_COLHEADER_ROW,
+    BOARD_QUEUE_FIRST_ROW,
     BOARD_QUEUE_LAST_ROW,
-    BOARD_ROWS_PER_POSITION,
     BOARD_SLATE_COLHEADER_ROW,
     BOARD_SLATE_GAMEID_COL_INDEX,
     BOARD_SLATE_LAST_ROW,
+    BOARD_STACK_COLHEADER_ROW,
+    BOARD_STACK_LAST_ROW,
+    BOARD_STACKS_LAST_ROW,
 )
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
@@ -799,9 +803,17 @@ class FakeBoardClient:
         self.color_scale_calls: list[str] = []
         self.boolean_rule_calls: list[str] = []
         self.hide_columns_calls: list[tuple[str, str]] = []
+        self.hidden_rows: list[tuple[int, int]] = []
+        self.dropdown_calls: list[tuple[str, list[str]]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
+
+    def hide_rows(self, tab_name: str, first_row: int, last_row: int) -> None:
+        self.hidden_rows.append((first_row, last_row))
+
+    def set_dropdown_validation(self, tab_name: str, a1_range: str, options: list[str]) -> None:
+        self.dropdown_calls.append((a1_range, options))
 
     def read_range(self, tab_name: str, a1_range: str):
         """Header rows only: Slate Grid's game header (row 1) or its TEAMS header (any later row)."""
@@ -864,26 +876,37 @@ def test_style_board_clears_existing_row_groups_before_regrouping():
     assert client.cleared_row_groups is True
 
 
-def test_style_board_leaves_every_section_expanded():
+def test_style_board_leaves_every_section_expanded_and_groups_all_five():
     # Sam, 2026-09-30: all Board categories open by default.
     client = FakeBoardClient()
     style_board(client)
     grouped_ranges = {(first, last): collapsed for first, last, collapsed in client.row_group_calls}
-    assert grouped_ranges[(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW)] is False
     assert grouped_ranges[(BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW)] is False
-    assert client.row_group_calls, "sections must still be grouped so they can be collapsed"
+    assert grouped_ranges[(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW)] is False
+    assert grouped_ranges[(BOARD_CHECK_COLHEADER_ROW, BOARD_CHECK_LAST_ROW)] is False
+    # Pool summary's group starts at its gap line (right under the title) and takes the stacks table with it.
+    assert grouped_ranges[(BOARD_POOL_GAP_ROW, BOARD_STACKS_LAST_ROW)] is False
+    assert grouped_ranges[(BOARD_STACK_COLHEADER_ROW, BOARD_STACK_LAST_ROW)] is False
+    assert len(client.row_group_calls) == 5
     assert not any(collapsed for _, _, collapsed in client.row_group_calls)
 
 
-def test_style_board_groups_leaders_from_the_sublabel_row_and_the_chalk_placeholder():
+def test_style_board_gives_queue_and_pool_check_rows_a_set_dropdown_on_the_set_column():
     client = FakeBoardClient()
     style_board(client)
-    grouped_ranges = {(first, last): collapsed for first, last, collapsed in client.row_group_calls}
-    # PROMPT_BOARD_FIXES.md item 2: the group starts at the sub-label row (right after the
-    # section header), not the column header row, so collapsing hides the sub-label too.
-    assert (BOARD_LEADERS_SUBLABEL_ROW, BOARD_LEADERS_LAST_ROW) in grouped_ranges
-    # Chalk map's one placeholder row is grouped too, though it has no column-header row.
-    assert any(first == BOARD_CHALK_HEADER_ROW + 1 for first, _, _ in client.row_group_calls)
+    ranges = {rng for rng, _ in client.dropdown_calls}
+    assert ranges == {
+        f"{BOARD_LIST_SET_COL}{BOARD_QUEUE_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_QUEUE_LAST_ROW}",
+        f"{BOARD_LIST_SET_COL}{BOARD_CHECK_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_CHECK_LAST_ROW}",
+    }
+    assert all(options == ["Cash", "GPP", "Both", "Remove"] for _, options in client.dropdown_calls)
+
+
+def test_style_board_hides_the_queues_unused_rows_again_so_a_polish_does_not_undo_the_sync():
+    client = FakeBoardClient()
+    style_board(client)
+    # the fake returns no Queue content: one visible line, the other nineteen hidden
+    assert client.hidden_rows == [(BOARD_QUEUE_FIRST_ROW + 1, BOARD_QUEUE_LAST_ROW)]
 
 
 def test_style_board_unhides_rows_a_collapsed_group_left_hidden():
@@ -915,15 +938,12 @@ def test_style_board_freezes_only_the_title_and_summary_banner():
     assert client.freeze_calls == [3]
 
 
-def test_style_board_hides_the_slate_shape_gameid_join_key():
-    # PROMPT_BOARD_FIXES.md item 5: GameId/Away/Home sit past Stack candidates' own
-    # 14-column width (the widest section), derived from BOARD_MAX_VISIBLE_COL_INDEX so
-    # this can't collide with a real column belonging to a different section.
+def test_style_board_hides_the_helper_block_the_join_keys_the_ids_and_the_bust_cuts():
+    # GameId/Away/Home/GPS check, then the list Ids and the Pool check's per-position Bust% cuts: one
+    # contiguous hidden run past every section's widest visible column.
     client = FakeBoardClient()
     style_board(client)
-    # Three join keys (GameId/Away/Home), item 5c's GPS-check helper, and item 3's
-    # ProjPts-percentile helper -- one contiguous hidden run.
-    assert (column_letter(BOARD_SLATE_GAMEID_COL_INDEX), column_letter(BOARD_LEADERS_PCT_COL_INDEX)) in (
+    assert (column_letter(BOARD_SLATE_GAMEID_COL_INDEX), column_letter(BOARD_BUSTCUT_COL_INDEX)) in (
         client.hide_columns_calls
     )
 
@@ -951,37 +971,6 @@ def test_style_board_reset_also_clears_stale_white_text_so_player_rows_never_van
     _, first_fmt = client.format_calls[0]
     text = first_fmt["textFormat"]
     assert text["foregroundColor"] != WHITE and text["bold"] is False
-
-
-def test_style_board_steps_leaders_and_punt_with_one_rule_set_per_column():
-    # ValAdj steps on its own 0-100 value and ProjPts on a hidden percentile lookup: one set of
-    # formula rules over the whole block, so a leader looks like the same player on EdgeRaw.
-    client = FakeBoardClient()
-    style_board(client)
-
-    leaders_last = BOARD_LEADERS_FIRST_ROW + sum(BOARD_ROWS_PER_POSITION.values()) - 1
-    d_ranges = [a1 for a1 in client.boolean_rule_calls if a1.startswith("D") and ":" in a1]
-    assert f"D{BOARD_LEADERS_FIRST_ROW}:D{leaders_last}" in d_ranges
-    i_ranges = [a1 for a1 in client.boolean_rule_calls if a1.startswith("I")]
-    assert set(i_ranges) == {f"I{BOARD_LEADERS_FIRST_ROW}:I{leaders_last}"}
-    # the leaders/punt player metrics are steps, never a gradient (the slate-shape and stack
-    # sections' game metrics are the gradients)
-    assert not [a1 for a1 in client.color_scale_calls if a1.startswith(("D4", "D5", "I4", "I5"))]
-
-
-def test_style_board_puts_a_top_border_between_positions_not_before_the_first():
-    # PROMPT_BOARD_FIXES.md item 3: "a thin visual break between
-    # positions... a top border on each position's first row" -- QB (the
-    # first position, right under the column header) doesn't need one.
-    client = FakeBoardClient()
-    style_board(client)
-
-    border_ranges = [a1 for a1, fmt in client.format_calls if "borders" in fmt]
-    # 4 borders per block (RB/WR/TE/DST, not QB) x 2 Leaders blocks + 1
-    # Punt block = 12.
-    assert len(border_ranges) == 12
-    # The very first Leaders row (QB's own first row) must never get one.
-    assert not any(a1.startswith(f"A{BOARD_LEADERS_FIRST_ROW}:") for a1 in border_ranges)
 
 
 _HEADER_WITH_AVAIL_AT_Y = (

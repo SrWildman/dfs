@@ -595,79 +595,31 @@ module docstring for the live-verified specifics.
 
 ### Board
 
-Read-only landing tab, built/rebuilt by `dfs setup build-views`
-(`sheet_views.build_board`, styled by `sheet_style.style_board`). Rebuilt
-entirely in Phase 6 Part 3/7.6 (2026-09-22) -- the old design ranked all
-744 players on the slate, which Sam had already answered for himself the
-moment he ticked his pool. Now one tab, seven collapsible row sections (plus, since 2026-10-07, an eighth panel at the bottom: **This week's edges**, five one-line summaries written by `dfs sync` from the Edge Finder tab -- top 3 cash core, top 3 GPP upside, top 3 CalPts-vs-TFFB disagreements, top 2 injury beneficiaries, best offense per position; appended below the Chalk map so no existing row moved)
-(Data > collapse/expand a section's `+`/`-` control; every section is
-expanded by default -- Sam's call, 2026-09-30 -- and `style_board` also
-clears any stale explicit alignment / number format left by an earlier
-layout before re-applying its own):
+Landing tab, built/rebuilt by `dfs setup build-views` (`sheet_views.build_board`, styled by `sheet_style.style_board`). **Board = the
+games, the stacks and where your pool stands; the Edge Finder = the players** (usability round, slice 4, 2026-10-08: the per-position
+leaders, punt finder, chalk map and "This week's edges" text panel were removed; the Edge Finder's cash/GPP sections and Punt plays cover
+them). Banner (rows 2-3): Games, Highest total (it overflows across the empty E-F), Max wind, Injuries, then the ownership note. Five
+collapsible row sections, all open by default, in this order (Sam's call):
 
-- **Queue** -- what changed since the last sync, restricted to players
-  in Sam's pool. Populated by `dfs sync --live`/`dfs go`
-  (`sheet_views.write_queue_section`), NOT by `build-views` -- a Sheets
-  formula can't see yesterday's values, only the Python diff
-  (`live_diff.diff_queue_changes`) that runs at sync time can. A rebuild
-  reads back and restores whatever Queue last showed, so it survives a
-  routine `dfs setup build-views` re-run untouched until the next live
-  sync. Empty ("No changes since the last sync for pooled players.")
-  until something actually changes.
-- **Slate shape** -- games ranked by total, **only games with players on EdgeRaw**
-  (Round 5 follow-up item 1: a game with none isn't on DK's main slate; all four
-  spills -- Matchup, GameId, Away, Home -- share one filter so rows stay aligned;
-  `Slate Grid` keeps every game, dimmed), with each game's `Fav`/
-  `Spread` (Board Fixes item 1, 2026-09-25 -- sourced from the same
-  `GamesRaw` place as `Total`, every column letter derived from
-  `nflverse_games.GAMES_COLUMNS`, never hardcoded), then `Pace`, `PROE`,
-  `Expl%` and `GameEnv` (Round 5 item 5b -- each the mean of both teams'
-  own value off EdgeRaw, looked up by team code, the same "combined per
-  game" shape `Pace` always had), wind, a shootout flag (`derived.
-  SHOOTOUT_TOTAL_THRESHOLD`, currently 48 -- a first-pass DFS heuristic,
-  not yet tuned against a real slate), and `GPS` (Kyle Borgognoni's 1-5
-  score, off `GPSRaw`; a muted amber chip marks a game whose worksheet
-  implied totals are far off Vegas -- see `docs/CALCULATIONS.md`'s GPS
-  section). `Tot Δ` was removed in item 5c. Sort stays by Total.
-- **Per-position leaders** -- best `ValAdj` and highest `ProjPts`, each
-  ranked *within* position (never across it -- the actual fix for the
-  old "11 QBs out of 12 rows" bug, a salary-ratio metric mechanically
-  favouring cheap positions if sorted across the whole slate). A
-  sub-label row above each block names its own sort. Row counts per
-  position (Board Fixes item 3, 2026-09-25) come from `sheet_views.
-  BOARD_ROWS_PER_POSITION = {"QB": 5, "RB": 8, "WR": 10, "TE": 5, "DST":
-  5}`, not a flat count -- with a thin top border between each position's
-  block.
-- **Punt finder** -- best `ValAdj` play within `sheet_views.
-  PUNT_SALARY_WINDOW = $1,000` of *that position's own* live per-slate
-  minimum salary (Board Fixes item 4, 2026-09-25 -- replaces a flat
-  `$4,000` ceiling that sat below DK's own QB/RB salary floor and so
-  could never fire for those two positions). Same `BOARD_ROWS_PER_
-  POSITION` row counts as Leaders.
-- **Stack candidates** (replaces the old leverage panel, 7.6; widened to
-  14 columns in Board Fixes item 5, 2026-09-25) -- for the top
-  `sheet_views._STACK_GAMES = 8` `OverUnder` games, each team's QB, its
-  `TmRank`-ordered WR1/WR2/WR3, TE1, RB1, and a `Total` column repeating
-  the game's OverUnder. The hidden Slate-shape join-key columns sit past
-  this block's width, derived from `BOARD_MAX_VISIBLE_COL_INDEX` rather
-  than a hardcoded letter.
-- **Pool diagnostics** -- reads **Player Pool**, not EdgeRaw: salary
-  spread and cheapest play per position, a chalk-vs-leverage count (via
-  `Flags`), a per-position "no <POS> within `PUNT_SALARY_WINDOW` of the
-  slate min" gap check (same threshold as Punt finder, Board Fixes item
-  4), and how many pooled players share their most-crowded single game.
-  Empty ("Tick players into your pool to see diagnostics.") before
-  anything is pooled.
-- **Chalk map** -- a labelled, empty placeholder. Meaningless until
-  ownership actually publishes (TFFB's `ProjOwn` reads 0 pre-midweek);
-  see `docs/planning/PROMPT_DATA.md`'s Move 2 / 7.8 for the actual-ownership
-  logging work this is waiting on.
+1. **Slate shape**: games ranked by total (formulas), with Fav, Spread, Pace, PROE, Expl%, GameEnv, Wind, a Shootout flag and GPS.
+2. **Queue**: pooled players whose numbers changed since the last sync (`dfs sync --live` / `dfs go` write it from `live_diff.diff_queue_changes`; a
+   formula cannot see yesterday's values). Every row is a player row: name, reason, a live `Pool` cell, a `Set` dropdown, and a hidden `Id`. The
+   rows it does not use are **hidden**, so "no changes" is one line, not twenty empty rows (`sheet_views.apply_queue_visibility`).
+3. **Pool check** (live formulas): pooled players whose numbers went bad, each with its reason and a `Set` cell, so `Remove` is one click. Triggers:
+   listed OUT / D / Q / IR, `Bust%` in the top quartile of his position's rosterable pool, `CalPts` at least 2.0 below `ProjPts`, a `FADE↓` chip.
+   Empty states: "Tick players into your pool to see this." / "Nothing in your pool looks worse than when you added it." Up to 10 rows.
+4. **Pool summary** (live formulas, updating the moment you change the pool, no sync): a gap line ("Cash: need 1 more TE · GPP: enough to fill a
+   lineup"), the **portfolio line** (lineups built, expected cashes, P(at least one cash), P(at least one 190+); written by the sync from the
+   Lineups simulator), a per-position table (Pooled, Cash, GPP, with Both counting for each; Min / Max / Avg Sal; the cheapest play), and **Your
+   stacks** (each pooled QB: how many of his team's WR and TE are pooled, and whether anyone from the opponent is, a bring-back). There are no
+   per-position targets (Sam: a week may want 2 QBs or 5); the gap line says only what is missing to fill ONE DraftKings lineup (`sheet_views.ROSTER_MIN`).
+5. **Stack candidates**: QB + WR1/WR2/WR3/TE1/RB1 for the 8 highest-total games (formulas).
 
-Every EdgeRaw-derived section is regenerated fresh against the CURRENT
-`derived.EDGE_COLUMNS` layout every time `build-views` runs (via
-`sheet_views._rng`/`_col`) -- re-run it after any EdgeRaw column reorder,
-same requirement the pre-rebuild Board already had. Pool diagnostics is
-the same idea against `sheet_columns.PLAYER_POOL_COLUMN_ORDER` instead.
+Columns A-N visible; the hidden helper block past them holds the Slate shape join keys (GameId, Away, Home, a GPS check), each list row's DraftKings
+`Id`, and the Pool check's per-position `Bust%` quartile cut (`sheet_views.BOARD_ID_COL`, `BOARD_BUSTCUT_COL`). The bound Apps Script acts on a `Set`
+cell by finding the nearest `Set` header above it and the `Id` in that header row. Every EdgeRaw-derived section is regenerated against the CURRENT
+`derived.EDGE_COLUMNS` layout every time `build-views` runs (`sheet_views._rng`/`_col`): re-run it after any EdgeRaw column reorder. Pool-derived
+sections do the same against `sheet_columns.PLAYER_POOL_COLUMN_ORDER`. `style_board` also clears any stale format left by an earlier layout.
 
 ### Edge Finder
 

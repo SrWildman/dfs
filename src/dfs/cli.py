@@ -132,7 +132,14 @@ from dfs.sheet_style import (
 )
 from dfs.sheet_tab_removal import remove_retired_tabs
 from dfs.sheet_typo_guard import add_lineups_typo_guard
-from dfs.sheet_views import build_board, build_exposure, build_movement, build_slate_grid, write_queue_section
+from dfs.sheet_views import (
+    build_board,
+    build_exposure,
+    build_movement,
+    build_slate_grid,
+    write_board_portfolio,
+    write_queue_section,
+)
 from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
@@ -2254,7 +2261,6 @@ def _write_edge_finder_tabs(cfg: Config, ctx: SyncContext) -> None:
         client = SheetsClient(cfg.google_sheets)
         edge_tab = cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
         console.print(f"[green]OK[/green] {sheet_edge_finder.write_tab(client, inputs, edge_tab=edge_tab)}")
-        console.print(f"[green]OK[/green] {sheet_edge_finder.write_board_panel(client, inputs)}")
     except (SheetsError, OSError, ValueError, KeyError) as e:
         console.print(f"[yellow]Edge Finder tab not written:[/yellow] {e}")
 
@@ -2301,6 +2307,15 @@ def _write_lineup_sim(cfg: Config, ctx: SyncContext, client: SheetsClient | None
     seconds = time.perf_counter() - started
     if isinstance(outcome, LineupSimReport):
         console.print(f"[green]OK[/green] {outcome.line()} ({seconds:.1f}s)")
+        try:  # the Board's Pool summary shows the same portfolio line
+            write_board_portfolio(
+                client or SheetsClient(cfg.google_sheets),
+                outcome.portfolio,
+                outcome.simulated,
+                outcome.gpp_target,
+            )
+        except SheetsError as e:
+            console.print(f"[yellow]Board portfolio line not written:[/yellow] {e}")
     else:
         console.print(f"[yellow]{outcome}[/yellow]")
 
