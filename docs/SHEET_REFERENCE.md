@@ -654,11 +654,14 @@ upside) and a second line, "what it is · what to do".
   `Caution ▼`.
 - **Injury beneficiaries**: carries only; confirmed out (`Bump ▲`) first, questionable muted (`Watch`); then **Absent regulars** as muted
   context (Do `Out`). No points are moved for targets.
-- **Usage trends** (context, no chips): per position, the players whose last-3-games usage moved beyond normal week-to-week noise (more
-  than one standard deviation of that position's changes), one row per player (his biggest move; the others are named in Why). Do: `Watch`.
+- **Usage trends** (context, no chips): per position, the players whose last-3-games usage moved beyond R6's measured band against the 6
+  games before (arrow thresholds in `models/research/trend_bands.json`; none for a player with fewer than 9 earlier games), one row per
+  player (his biggest move; the others are named in Why). Do: `Watch`.
 - **Matchups (context)**: a row per team (`Soft` top 8 / `Tough` bottom 4), its top 3 players by `CalPts` in E, the reasons and score in
   Why; the team's players sit in a collapsed row group under it, with `Set`. Feeds nothing.
-- **Context signals**: `FADE↓` (TE only), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven.
+- **Context signals**: `FADE↓` (TE only), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven; then **R6 usage signals**, each of the 12
+  as its own sub-block (who is flagged, the measured effect, the evidence tier). Every player row's Why also names the R6 signals behind his
+  single `Proj ▼` / `Proj ▲` chip (`Proj ▼?` / `Proj ▲?`, grey, when only weaker evidence supports it), and Do adds "Lean under in cash" / "Lean over".
 
 **Row groups.** Each section's body is a level-1 group; in Cash core, GPP upside and punt plays every rosterable player is written (up to
 40 per position) and the rows past the visible count (QB 6, RB 10, WR 12, TE 6, DST 6) sit in a collapsed level-2 group under "▸ 34 more

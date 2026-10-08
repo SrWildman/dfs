@@ -466,7 +466,7 @@ def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
     edge = _edge([_player(7)])
     layout = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends())))
     row = layout.rows[_rows_named(layout, "WR7")[-1] - 1]
-    assert row[4:9] == ["Tgt%", "27%", "18%", "'+9 pts", "▲"]  # last 3, earlier, change ('= literal text)
+    assert row[4:9] == ["Tgt%", "'27%", "'18%", "'+9 pts", "▲"]  # last 3, earlier, change ('= literal text)
     assert row[_col(eft.DO_COL)] == "Watch"
     why = row[_col(eft.WHY_COL)]
     assert why.startswith("Tgt% 18% → 27% over the last 3 (▲, a bigger jump than 85% of weeks).")
@@ -707,3 +707,8 @@ def test_only_beneficiaries_draftkings_lists_are_shown_in_the_tab_and_the_board_
     names = {str(r[0]) for r in layout.rows}
     assert "On Slate" in names and "Not On DraftKings" not in names
     assert "Not On DraftKings" not in " ".join(eft.board_panel_lines(inputs))
+
+
+def test_percent_text_is_kept_as_text_so_sheets_does_not_turn_79_percent_into_0_79():
+    assert eft._clean("79%") == "'79%" and eft._clean("12.5%") == "'12.5%"
+    assert eft._clean("2.3") == "2.3" and eft._clean("Tgt% up") == "Tgt% up"

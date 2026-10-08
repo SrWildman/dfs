@@ -31,6 +31,7 @@ live.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -309,13 +310,16 @@ def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None
 # ---------------------------------------------------------------------------------------------
 
 
+_PERCENT_TEXT = re.compile(r"^[\d.]+%$")
+
+
 def _clean(value):
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return ""
     if hasattr(value, "item"):
         value = value.item()
-    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
-        return "'" + value
+    if isinstance(value, str) and (value.startswith(("=", "+", "-", "@")) or _PERCENT_TEXT.match(value)):
+        return "'" + value  # kept as text: "79%" would otherwise become the number 0.79
     return value
 
 

@@ -1460,13 +1460,27 @@ Everything below is presentation of numbers computed elsewhere; nothing here mov
   applied) and the remainder (the other sources disagreeing with TFFB); the two add to the gap. A source the player lacks is named.
 - **Punt plays.** Floor = the position's minimum `Salary` over every DraftKings listing on the slate; candidates are rosterable, available players
   within `PUNT_SALARY_WINDOW` ($1,000) of it, best `ValAdj` first, top `PUNT_ROWS_PER_POSITION` 5. (The Board's old Punt finder, ported.)
-- **Usage trends** (`usage_trends.py`, context only). For each player, his last `TREND_RECENT_GAMES` 3 games played this season against every earlier game
-  (needs `TREND_MIN_PRIOR_GAMES` 1). Metrics: `Tgt%` (WR/TE/RB), `WOPR` and `Air share` (WR/TE), `Rush%` and `Rec/G` (RB), `RZ/G` (RB/WR/TE), `HVT/G`
-  (RB), `Snap%` (RB/WR/TE); shares are ratios of window sums, per-game values window means. The noise band per metric and position is one standard
-  deviation of (recent - earlier) across the rosterable players this season; an arrow `▲`/`▼` appears only when a player's own change is beyond
-  `TREND_NOISE_SD` (1) of it, and needs `MIN_BAND_PLAYERS` (5) to exist. **Routes run are not available from any free source; snaps are not a stand-in for them
-  and are not used as one.** The planned R6 signals research may replace this empirical band. Inputs: the latest `data/raw/stats_player/` snapshot,
-  `data/current/redzone_weekly.csv` (from the usage source's play-by-play) and `data/current/snaps_weekly.csv` (from the snaps source).
+- **Usage trends** (`usage_r6.py`, context only; replaces the season-SD band of the first usability cut). R6's own windows
+  (`dfs.research.r6_features.window_features`, imported): L3 = the last 3 games played, prior6 = the 6 before, across seasons
+  (a week-1 L3 uses last season's games), byes skipped. `▲` when `L3 - prior6 >= +threshold`, `▼` when `<= -threshold`, the
+  threshold per metric and position from `models/research/trend_bands.json` (`recommended.per_position`, the value whose flag
+  rate is closest to 15% over the UM-projected player-games); **no arrow with fewer than 9 earlier games** (the tab counts
+  them: "Not enough games: N pool players..."). Metrics: Tgt% (WR/TE/RB), WOPR and air-yards share (WR/TE), Rush% and Rec/G
+  (RB), RZ/G and HVT/G (RB/WR/TE), Snap% (RB/WR/TE). The Why says how rare the move is ("a bigger jump than 85% of weeks") and
+  that projections historically over-react to jumps / cut too deep after drops. **Routes run are not available from any free
+  source; snaps are not a stand-in for them.**
+- **The 12 R6 signals and the `Proj ▲ / Proj ▼` chip** (`usage_r6.py`). Exactly the `recommended_chips` of
+  `models/research/usage_signals.json` (formula, window and threshold from the file, `1e-9` tolerance on the boundary), applied to the
+  rosterable pool. A FADE-direction signal firing gives `Proj ▼` (soft red), a BUMP-direction one `Proj ▲` (soft green); both
+  directions on one player: no chip, and the Why says so. A chip resting only on the five test-led rows (WR aDOT level, RB snap share
+  down, TE deep-target drop, both WR end-zone rows; the fit interval does not exclude 0) is `Proj ▼?` / `Proj ▲?`, drawn flat grey,
+  with "weaker evidence" in the Why. The Why names every signal that fired with its UM-matched measured effect ("TE targets up
+  2.2+/game over the last 3 (usually fades back: −0.8 pts vs the research model's projection, 2022–25)"). `Do` adds "Lean under in cash"
+  (`Proj ▼`) or "Lean over" (`Proj ▲`). **These were measured against UM, not TFFB or CalPts, and a ▲ is not a reason to bump anyone: they
+  are context, scored in Model Check** (a row per signal, the combined chips, and one verdict line once n >= 30 saying whether the
+  players' result against CalPts points the way the research said). Inputs: `stats_player` (the `dfs.model` cache), reduced
+  play-by-play, snap counts and the PFR crosswalk (`data/research_cache/`); `dfs sync` refreshes the current season, `--live` reuses the
+  week's saved `data/current/edge_finder/r6_features.csv`.
 
 ## Player Pool ordering: tag group, then salary (Part 7.10)
 
