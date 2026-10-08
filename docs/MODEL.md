@@ -682,6 +682,15 @@ under the scikit-learn that wrote it, so loading checks the version (and the fea
   percentile, so P(>= T) is 0 beyond about 1.5x the projection for a QB at the top of the range: right for
   the data (no QB projected 27+ has scored 46 points; the first release said 5% for a QB projected 30), but a
   4x-salary line above that reads 0.0%. Treat Floor and Ceiling as wider than they look.
+- **The tables describe every in-population row, backups included -- an open question.** Of the 1,704 QB games
+  projected under 14, 495 come from players with only one or two prior games (mean projection 8.7, mean actual
+  3.6, 67% under 3 points); the other 1,209 (the simulator's role frame, which needs three prior games)
+  average 14.0 on a projection of 11.0. The table is the blend, so for a QB under 14 *with* history the engine
+  is low: actual / engine **1.22** (the first release's 1.19; it is 1.00 on the rows the tables are built
+  from, before and after). No shape of table fixes it, because the projection alone cannot tell the two
+  apart. Fixing it means building the tables on the population they will be applied to, or conditioning on
+  games played; that changes what the tables mean, so it is left for Sam. Every other position and band is
+  inside 0.95-1.05 on the role frame too.
 - **No injury or depth-chart features.** A player returning from injury, or about to lose snaps, looks like
   his trailing games say. A rookie or newcomer with no prior games gets no UM projection at all.
 - **Not tuned, with one exception.** The hyper-parameters are the fixed ones, and the P(0) bucket edges are the

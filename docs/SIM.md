@@ -611,8 +611,10 @@ shift, which neither the copula nor a static table can model.
   2025 ran 3.7 points per lineup under the simulated means (2023: +0.5, 2024: +1.5), and the out-of-time marginals
   are about 1 point worse on coverage than the shipped ones (2.3 against 1.4). The first release's other two weak
   spots (the lowest QB and DST deciles understated, the highest projections overstated) were fixed in the
-  engine ([MODEL.md](MODEL.md)). Past the engine's first and last quantile levels (0.01 and 0.99) the CDF is
-  extrapolated linearly.
+  engine ([MODEL.md](MODEL.md)), except one that is not a table-shape problem: the tables include one- and
+  two-game backup QBs, who score far less than the starters-with-history the back-test draws from, so a QB
+  projected under 14 with three prior games has actual / engine 1.22 (MODEL.md, Limitations). Past the
+  engine's first and last quantile levels (0.01 and 0.99) the CDF is extrapolated linearly.
 - **A Gaussian copula** has no tail dependence beyond what the normal scores imply, and the correlation is one
   number per role pair, fitted over 12 seasons. It captures the dependence of surprises; it knows nothing of
   weather, injuries during the game or garbage time except through the history they are in.
