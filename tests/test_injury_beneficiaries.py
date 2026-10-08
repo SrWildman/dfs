@@ -249,7 +249,7 @@ def test_the_window_is_his_last_three_games_played_with_shares_of_those_games_an
     outs, history, _ = _league(missed_games={4})  # rb1 sat out Week 4
     window = ib.rotation_window(history, "DEN", before=(2026, 5))
     rb1 = window.loc["rb1"]
-    assert rb1["Games"] == 3 and rb1["Missed"] == 1 and rb1["LastKey"] == (2026, 3)  # weeks 1-3: not a zero
+    assert rb1["Games"] == 3 and rb1["Missed"] == 1 and rb1["LastKey"] == 202603  # weeks 1-3: not a zero
     assert rb1["car_g"] == 14.0 and rb1["car_share"] == pytest.approx(14 / 21)
     assert window.loc["rb1", "InRotation"]  # he played in the team's last three games (Weeks 2 and 3)
     vacated = ib.vacated_from_row(rb1)

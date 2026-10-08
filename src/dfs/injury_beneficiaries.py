@@ -181,46 +181,41 @@ def rotation_window(
 ) -> pd.DataFrame:
     """Every player who has played for `team` before `before` = (season, week), indexed by gsis id, over his
     last `n` games played for it (across seasons): per-game means of targets, carries and expected points, his
-    share of the team's targets and carries in THOSE games, `Missed` (team games since his last appearance)
-    and
-    `InRotation` (he played in the team's last `n` games: the research's rotation, "anyone with a touch in the
-    window"). A game he missed is not a zero here (Sam, 2026-10-08): a back who sat out two games is still
-    judged on the games he played; `MAX_GAMES_MISSED` is what retires a long absence."""
-    hist = history[history["Team"] == team].copy()
-    hist["_key"] = list(zip(hist["season"].astype(int), hist["week"].astype(int), strict=True))
-    hist = hist[hist["_key"] < before]
+    share of the team's targets and carries in THOSE games, `LastKey` (his last game as `season * 100 +
+    week`), `Missed` (team games since) and `InRotation` (he played in the team's last `n` games: the
+    research's rotation, "anyone with a touch in the window"). A game he missed is not a zero here (Sam,
+    2026-10-08): a back who sat out two games is still judged on the games he played; `MAX_GAMES_MISSED` is
+    what retires a long absence."""
+    hist = history[history["Team"] == team]
+    key = hist["season"].astype(int) * 100 + hist["week"].astype(int)
+    hist = hist.assign(_key=key)[key < before[0] * 100 + before[1]]
     if hist.empty:
         return pd.DataFrame(columns=WINDOW_COLUMNS)
-    team_keys = sorted(set(hist["_key"]))
-    team_totals = hist.drop_duplicates("_key").set_index("_key")[["team_targets", "team_carries"]]
-    recent_keys = set(team_keys[-n:])
-    rows = []
-    for gsis, games in hist.sort_values("_key").groupby("GsisId"):
-        last = games.tail(n)
-        totals = team_totals.loc[list(last["_key"])].sum()
-        count = len(last)
-        rows.append(
-            {
-                "GsisId": gsis,
-                "Name": last["Name"].iloc[-1],
-                "Position": last["Position"].iloc[-1],
-                "Games": count,
-                "tgt_g": last["targets"].mean(),
-                "car_g": last["carries"].mean(),
-                "rec_xfp_g": last["rec_xfp"].mean(),
-                "rush_xfp_g": last["rush_xfp"].mean(),
-                "tgt_share": last["targets"].sum() / totals["team_targets"]
-                if totals["team_targets"] > 0
-                else np.nan,
-                "car_share": last["carries"].sum() / totals["team_carries"]
-                if totals["team_carries"] > 0
-                else np.nan,
-                "LastKey": last["_key"].iloc[-1],
-                "Missed": sum(1 for k in team_keys if k > last["_key"].iloc[-1]),
-                "InRotation": last["_key"].iloc[-1] in recent_keys,
-            }
-        )
-    return pd.DataFrame(rows).set_index("GsisId")[WINDOW_COLUMNS]
+    team_keys = np.array(sorted(hist["_key"].unique()))
+    totals = hist.drop_duplicates("_key").set_index("_key")[["team_targets", "team_carries"]]
+    hist = hist.sort_values(["GsisId", "_key"])
+    last = hist[hist.groupby("GsisId").cumcount(ascending=False) < n].copy()
+    last["_tt"] = last["_key"].map(totals["team_targets"])
+    last["_tc"] = last["_key"].map(totals["team_carries"])
+    out = last.groupby("GsisId").agg(
+        Name=("Name", "last"),
+        Position=("Position", "last"),
+        Games=("_key", "size"),
+        tgt_g=("targets", "mean"),
+        car_g=("carries", "mean"),
+        rec_xfp_g=("rec_xfp", "mean"),
+        rush_xfp_g=("rush_xfp", "mean"),
+        _tgt=("targets", "sum"),
+        _car=("carries", "sum"),
+        _tt=("_tt", "sum"),
+        _tc=("_tc", "sum"),
+        LastKey=("_key", "max"),
+    )
+    out["tgt_share"] = (out["_tgt"] / out["_tt"]).where(out["_tt"] > 0)
+    out["car_share"] = (out["_car"] / out["_tc"]).where(out["_tc"] > 0)
+    out["Missed"] = len(team_keys) - np.searchsorted(team_keys, out["LastKey"].to_numpy(), side="right")
+    out["InRotation"] = out["LastKey"].isin(set(team_keys[-n:]))
+    return out[WINDOW_COLUMNS]
 
 
 def vacated_from_row(row: pd.Series) -> Vacated:
@@ -428,12 +423,15 @@ def beneficiaries(
     if outs is None or outs.empty or history is None or history.empty:
         return pd.DataFrame(columns=BENEFICIARY_COLUMNS)
     confirmed = _confirmed(outs)
+    windows: dict[str, pd.DataFrame] = {}
     rows = []
     for _, out in outs.iterrows():
         gsis, team = out["GsisId"], out["Team"]
         if out["Position"] != "RB":
             continue
-        window = rotation_window(history, team, before=before)
+        if team not in windows:
+            windows[team] = rotation_window(history, team, before=before)
+        window = windows[team]
         if gsis not in window.index or "carries" not in regular_kinds(window.loc[gsis]):
             continue
         vacated = vacated_from_row(window.loc[gsis])
@@ -529,12 +527,15 @@ def absences(
     confirmed = _confirmed(outs)
     names = history.sort_values(["season", "week"]).groupby("GsisId")["Name"].last()
     positions = history.sort_values(["season", "week"]).groupby("GsisId")["Position"].last()
+    windows: dict[str, pd.DataFrame] = {}
     rows = []
     for _, out in outs[outs["Status"] == STATUS_OUT].iterrows():
         gsis, team, position = out["GsisId"], out["Team"], out["Position"]
         if position not in ("RB", "WR", "TE"):
             continue
-        window = rotation_window(history, team, before=before)
+        if team not in windows:
+            windows[team] = rotation_window(history, team, before=before)
+        window = windows[team]
         if gsis not in window.index:
             continue
         kinds = regular_kinds(window.loc[gsis])
