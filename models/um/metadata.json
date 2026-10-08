@@ -37,6 +37,10 @@
         18.0
       ]
     },
+    "edge_percentiles": [
+      0.5,
+      99.5
+    ],
     "integer_scoring": [
       "DST"
     ],
@@ -64,7 +68,16 @@
       0.95,
       0.975,
       0.99
-    ]
+    ],
+    "n_knots": 21,
+    "spline_knot_quantiles": [
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      0.95
+    ],
+    "table_format": "knots-v2"
   },
   "hgb_params": {
     "l2_regularization": 1.0,
