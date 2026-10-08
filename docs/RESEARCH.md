@@ -922,6 +922,8 @@ mostly test-led: treat it as the weakest of the list.
 
 ### The keep list: what survives UM matching (12 chip candidates)
 
+**Decision (Sam): build only these 12.** The other 12 rows that pass the brief's rule are not to be built; `usage_signals.json` lists the 12 under `recommended_chips`.
+
 These are the rows the local session can implement. The windows are the ones above; every threshold is the exact one
 chosen on 2014-21 (two significant digits). "Reads as" is the direction against UM: **FADE** = flagged players
 miss their projection, **BUMP** = they beat it. Effects are DK points. Per-game counts move in sixths, so compare with a

@@ -15,7 +15,7 @@
     ],
     "n": 45558,
     "generated": "2026-10-08",
-    "code_version": "22da938",
+    "code_version": "d58815a",
     "window": {
       "recent_games": 3,
       "prior_games": 6,
@@ -13358,6 +13358,21 @@
     "deep_tgt|TE|change_down",
     "deep_tgt|WR|change_down"
   ],
+  "recommended_chips": [
+    "snap_pct|WR|change_down",
+    "ez_tgt|WR|change_down",
+    "ez_tgt|WR|change_up",
+    "snap_pct|RB|change_down",
+    "ez_tgt|TE|change_down",
+    "tgt_pg|RB|change_up",
+    "tgt_pg|TE|change_down",
+    "tgt_pg|TE|change_up",
+    "adot|WR|level_hi",
+    "hvt|RB|level_hi",
+    "deep_tgt|TE|change_down",
+    "deep_tgt|WR|change_down"
+  ],
+  "recommended_chips_note": "Build only these (they keep against UM and among players UM rates alike). Rows in `keeps` but not here are not to be built.",
   "overlap_pairs": [
     {
       "a": "tgt_pg|TE|change_up",
