@@ -212,8 +212,9 @@ After `dfs sync`, the **Lineups** tab also shows `Median`, `p90`, `P(cash)` and 
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and
 the chance at least one reaches the target.
 
-Movement (once populated by a sync) ranks players by how far their
-team's implied total has moved since the week started -- a big shift is
+Movement (once populated by a sync) lists each team by how far its
+implied total has moved since the week started, with kickoff in Eastern time,
+its top players and a sentence on what the move means -- a big shift is
 worth a second look at anything you built around that number.
 
 **Done looks like:** `dfs lineups late-swap` shows no unexpected locked

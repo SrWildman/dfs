@@ -1408,8 +1408,9 @@ def sheets_instructions(
     still describe behavior incorrectly if a feature changes and nobody
     updates this file).
 
-    Never inserts or deletes a row, so this is safe to re-run any time;
-    idempotent, like every other `dfs setup` step.
+    Clears and rewrites only the Instructions tab (its length is no longer
+    fixed), so this is safe to re-run any time; idempotent, like every
+    other `dfs setup` step.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets

@@ -146,8 +146,8 @@ command, plus `doctor`) still works this season as a deprecated alias.
 | [docs/CALCULATIONS.md](docs/CALCULATIONS.md) | You want the exact formula behind a computed number. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | You're adding a data source or touching the live sheet's structure -- read this first. |
 
-The sheet's own `Instructions` tab has a one-line-per-tab summary and
-links back to all of the above.
+The sheet's own `Instructions` tab is the playbook: the week step by step, a plain line for every number and chip,
+one line per tab, and where to find the docs above.
 
 ## Development
 

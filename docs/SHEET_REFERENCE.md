@@ -153,14 +153,14 @@ actually matches.
 | `Name` | Player name, DK-nickname convention for DST. |
 | `Position`, `Team`, `Opp` | As above. |
 | `Salary` | DraftKings' own salary (authoritative) -- falls back to TFFB's figure only for the rare player TFFB projects who isn't on DK's main-slate salary list (e.g. a Thursday/Monday-only game). |
-| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Still reads 0 for every player until TFFB computes real ownership, usually midweek. `ProjPts`/`Ceiling` are highlighted by their within-position steps ("Highlighting", below); `Own%` keeps its own white-to-amber-to-red scale. |
+| `ProjPts`, `Own%`, `Ceiling` | `ProjPts`/`Ceiling` passed through from TFFBOptoRaw as-is. `Own%` is TFFBOptoRaw's own `ProjOwn`, renamed and rescaled from a 0-100 number to a 0-1 fraction (Phase 6, Part 2) so the name and scale match `Own%` everywhere else on the sheet -- one shared name across `EdgeRaw`/`PlayerPoolRaw`/`Player Pool`/`Lineups`, one scale. Blank (not 0.0%) for every player until TFFB computes real ownership, usually midweek (usability slice 6); every consumer treats blank as "no ownership yet". `ProjPts`/`Ceiling` are highlighted by their within-position steps ("Highlighting", below); `Own%` keeps its own white-to-amber-to-red scale. |
 | `AggPts` | Part C, C5 (2026-09-24): equal-weight mean of every DK-scored source with a real projection for this player -- `ProjPts`, Sleeper, FantasyPros (`sources/sleeper_projections.py`/`fantasypros_projections.py`, re-scored to exact DK rules -- see `docs/CALCULATIONS.md`). A missing source (not synced, or a genuine "no projection this week") is excluded from that player's own average, never treated as 0. With only TFFB available, equals `ProjPts` exactly. Feeds nothing else -- a second opinion to read, not an input to `ValAdj`/anything downstream. |
 | `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Highlighted as a gradient over the whole column ("Highlighting", below). No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
 | `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Banded on its own value (already a 0-100, position-comparable score by construction), not through a percentile helper -- see "Highlighting", below. |
 | `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Highlighted as a gradient over the whole column ("Highlighting", below). |
 | `CalPts`, `Hit3x%`, `Boom%`, `Bust%`, `Floor`, `CeilM`, `xFP/G`, `Edge`, `CalPts%ile`, `xFP/G%ile` | **Edge Finder (2026-10-07)**, APPENDED after `NameKey` (`EDGE_COLUMNS` is append-only; `derived.EDGE_FINDER_COLUMNS`), filled by `edge_finder.enrich` after the base build. `CalPts` = the bias-corrected ensemble projection; `Hit3x%`/`Boom%`/`Bust%` = P(actual >= 3x / >= 4x / < 2x salary per $1,000), 0-100; `Floor`/`CeilM` = the 20th/85th percentile; `xFP/G` = expected DK points per game over his last 3 games; `Edge` = the context tokens `INJ+ BUY↑ FADE↓ USAGE↑ USAGE↓` (not part of `Flags`); the two `*%ile` columns are hidden within-position helpers for `CalPts` and `xFP/G`. QBs under 10 projected points are blank on the five model columns; low-projected DSTs are muted. Definitions and every constant: `docs/CALCULATIONS.md` ("Edge Finder"). On `PlayerPoolRaw`, `Player Pool` and `Lineups` they are linked in and placed by `sheet_columns`: `CalPts` right after `AggPts`, `Hit3x%` and `Boom%` right after `ValAdj`, `Edge` right after `Flags`, `Floor`/`CeilM`/`Bust%` in the Ceiling detail group, `xFP/G` in the USAGE group. |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
-| `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is all zeros (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
+| `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is unpublished (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
 | `OwnStatus` | Renamed from `LevBasis` in Phase 6, Part 7.9 (Leverage's own demotion left this marker gating `Own%`, a spine column, not describing Leverage -- the old name no longer said what it does). `"real"` once any player has non-zero `Own%` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage` has a real number yet. |
 | `GameEnv` | Rebuilt Part C, C7 (2026-09-25): 0-100 per-game score, an equal-weight percentile blend of total, spread tightness, combined pace and combined pass-rate-over-expected (`Pace`/`PROE`, below) -- higher total, tighter spread, faster pace and a pass-heavier tendency all score higher. Falls back to the pre-C7 total/spread-only formula automatically if `pbp` hasn't synced (see `docs/CALCULATIONS.md`). |
 | `OverUnder`, `Spread` | Straight passthrough of the same TFFB Vegas fields `GameEnv` is computed from. `OverUnder` (not `OU`) so it doesn't collide with Player Pool/Lineups' own `O/U`, sourced from a different tab. |
@@ -757,20 +757,36 @@ there for lack of anywhere better, and this is the one tab that actually
 reads it. `H1` survives `dfs week new` too (nothing here clears it) --
 it's still the right number until you change it.
 
+### Instructions
+
+Sam's playbook (usability slice 7), generated by `sheet_instructions.py` and rewritten by `dfs setup instructions` (and `dfs setup
+polish`); `dfs doctor` warns when the tab differs from what the code renders (`instructions-drift`). Two columns: a label and a wrapped
+line of text, in four parts under dark section bands: **Read this first** (what you type, the one thing to run first, the Set dropdown),
+**The week, step by step** (start of week, Tue/Wed, Thu-Sat, Sunday final sync and lineups, Sunday late swap, Mon/Tue close; each names the
+tab, what to look at, what to do and the command), **Reading the numbers** (CalPts, Hit3x%, Boom%, Bust%, CeilM, ValAdj, P(cash),
+P(190+), the chips, the trend arrows, the colours) and **The tabs** (one line each), then a pointer to these docs. Plain English: no
+backticks, no source names, no function names (a test enforces it). Facts with a constant behind them (pool caps, roster slots, block
+count, the Set options, the GPP target default) are derived, not retyped. The tab's length is no longer fixed: the writer clears A1:B120
+first, sets the column widths and sets each row's height from its text length (a wrapped row does not reliably auto-fit through the API).
+
 ### Movement
 
-Built by `dfs setup build-views` (`sheet_views.build_movement`), styled by
-`dfs setup polish` (`sheet_style.style_movement`, header-name-driven --
-see Section F's own changelog entry for why). The top 40 players by
-absolute `ImpliedMove` since the start of the current NFL week, with
-`TotMove`/`SpdMove` riding along as extra columns once a row already
-qualifies (sorting/filtering is on `ImpliedMove` alone -- the same
-signal `Flags`' `IMPL↑`/`IMPL↓` keys off, so "biggest movers" keeps one
-meaning). Prose headers (`Implied move`/`Total move`/`Spread move`) since
-this is a view, not a contract -- a reader here shouldn't need to know
-EdgeRaw's own header spells it `ImpliedMove`. Shows an explicit
-empty-state message ("No line movement recorded yet") rather than a page
-of real `0.0`s until at least one `nfl_odds` sync has happened this week.
+Built by `dfs setup build-views` (`sheet_views.build_movement`), styled by `dfs setup polish`
+(`sheet_style.style_movement`, header-name-driven). **One row per team**, not per player (usability slice 6),
+sorted by the absolute change in the team's implied total since the start of the current NFL week. Header on row
+3, first team on row 4 (`MOVEMENT_HEADER_ROW`, `MOVEMENT_FIRST_ROW`), up to `MOVEMENT_ROWS` = 32 rows.
+
+| Column | Meaning |
+|---|---|
+| `Team`, `Opp` | The team and its opponent. |
+| `Implied now` | The team's implied total now, `(OverUnder - Spread) / 2` from EdgeRaw. |
+| `Implied move`, `Total move`, `Spread move` | Changes since the week opened (EdgeRaw `ImpliedMove`, `TotMove`, `SpdMove`); signed, colour-scaled around zero. |
+| `Kickoff (ET)` | TFFB's `GameStart`, which is Eastern wall-clock time labelled "Z"; the text is formatted as written and never converted (it never says UTC). |
+| `Top players` | The team's top three players by `ProjPts` (`MOVEMENT_TOP_PLAYERS`). |
+| `What it means` | One sentence, e.g. "TEN implied -2.0: their players project lower than when the week opened". |
+
+Shows "No line movement recorded yet" rather than a page of `0.0`s until at least one odds sync has happened this
+week. Every column is found by header name, so a reorder cannot break the styling.
 
 ### Bankroll
 
@@ -882,9 +898,13 @@ note, so a new column cannot ship unexplained.
 Season-level, read-only, **rebuilt from `data/results/` every time `dfs results update` runs** (also at the end of
 `dfs week close`, which never fails over it). Nothing is typed. Ten blocks, top to bottom: a status line (weeks
 scored, rosterable-pool players scored / did not play / not found), the **Projection Race** (2026-10-07: TFFB, AggPts and CalPts on everyone, then with UM as its own row on the players UM rates, judged on weeks they never trained on; by position plus a per-week trend -- the table Sam uses to choose a default projection), **Reliability** (predicted decile against realized for `Hit3x%`, `Boom%` and `Bust%`, n shown, a decile more than 8 points off with n >= 30 flagged), **Ceiling** (how often a player beat his
-published `Ceiling`, with its 90% interval and implied quantile -- the headline), **Projection accuracy** (bias, MAE,
+published `Ceiling`, with its 90% interval, `Ceiling is really the Nth percentile` and `Ceiling skill (80th/85th/90th pct)` -- the headline), **Projection accuracy** (bias, MAE,
 calibration slope, R squared, Spearman, calibration buckets), **ValAdj** quintiles, **Sources compared** (labelled
-with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, **Flags**, and **Signals** (`FADE↓`, `USAGE↑`, `USAGE↓`, `INJ+` confirmed and questionable, matchup top 8 against bottom 4, then an `Unflagged QB/RB/WR/TE` baseline row per position: n, mean actual minus ProjPts and minus CalPts, hit rate; a baseline has no direction, so no hit rate). Every
+with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, **Flags**, and **Signals** (`FADE↓`, `USAGE↑`, `USAGE↓`, `INJ+` confirmed and questionable, matchup top 8 against bottom 4, then an `Unflagged QB/RB/WR/TE` baseline row per position: n, mean actual minus ProjPts and minus CalPts, hit rate; a baseline has no direction, so no hit rate). **Every block opens with one bold computed sentence** (usability slice 6; `sheet_model_check.race_verdict` /
+`reliability_verdict` / `signals_verdict` and the one-liners beside them): the race says a projection is "clearly best" for a
+position only at an MAE gap of `RACE_CLEAR_GAP` = 0.15 with n >= `RACE_CLEAR_MIN_N` = 50, else "too close to call"; the reliability line
+says which way each probability runs (n-weighted gap, in points) and "no adjustment until ~Week 8"; the signals line compares each
+signal with n >= `VERDICT_MIN_N` = 30 against its position's unflagged baseline. Every
 table shows n; a row with n < 30 is "thin" and drawn in muted italic. Sits after Season and Results in the tab strip
 (`sheet_style.WEEK_ORDER`: Season, Results, Model Check); built by `sheet_model_check.build_layout` / `write_model_check`. The definitions behind
 every number are in `docs/CALCULATIONS.md`'s "The results loop and `Model Check`". Every metric header carries a
