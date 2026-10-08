@@ -93,7 +93,7 @@ def test_no_backticks_no_source_names_no_function_names():
 
 def test_the_text_describes_the_current_sheet_not_a_retired_one():
     text = _text()
-    for stale in ("Pool Picks", "PoolSort", "LevBasis", "Per-position leaders", "Punt finder", "Chalk map"):
+    for stale in ("Pool Picks", "PoolSort", "LevBasis", "Per-position leaders", "Punt finder"):
         assert stale not in text, stale
     assert "bold name = at least one flag" in text.lower()
     assert "Pool summary" in text and "Pool check" in text and "Queue" in text

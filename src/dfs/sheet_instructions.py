@@ -235,7 +235,9 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Your landing tab, nothing typed except Set. Slate shape ranks the games; the Queue is what changed "
         "for your pool since the last sync; Pool check flags pool players with a problem; Pool summary "
         "counts "
-        "your pool by position; Stack candidates lists the best QB with his pass catchers in the best games.",
+        "your pool by position; Chalk map lists the highest-owned players at each position once ownership is "
+        "out, with Set beside each; Stack candidates lists the best QB with his pass catchers in the best "
+        "games.",
     ),
     (
         "Edge Finder",

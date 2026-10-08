@@ -59,6 +59,9 @@ from dfs.sheet_style import (
 )
 from dfs.sheet_views import (
     BOARD_BUSTCUT_COL_INDEX,
+    BOARD_CHALK_COLHEADER_ROW,
+    BOARD_CHALK_FIRST_ROW,
+    BOARD_CHALK_LAST_ROW,
     BOARD_CHECK_COLHEADER_ROW,
     BOARD_CHECK_FIRST_ROW,
     BOARD_CHECK_LAST_ROW,
@@ -880,7 +883,7 @@ def test_style_board_clears_existing_row_groups_before_regrouping():
     assert client.cleared_row_groups is True
 
 
-def test_style_board_leaves_every_section_expanded_and_groups_all_five():
+def test_style_board_leaves_every_section_expanded_and_groups_all_six():
     # Sam, 2026-09-30: all Board categories open by default.
     client = FakeBoardClient()
     style_board(client)
@@ -891,7 +894,8 @@ def test_style_board_leaves_every_section_expanded_and_groups_all_five():
     # Pool summary's group starts at its gap line (right under the title) and takes the stacks table with it.
     assert grouped_ranges[(BOARD_POOL_GAP_ROW, BOARD_STACKS_LAST_ROW)] is False
     assert grouped_ranges[(BOARD_STACK_COLHEADER_ROW, BOARD_STACK_LAST_ROW)] is False
-    assert len(client.row_group_calls) == 5
+    assert grouped_ranges[(BOARD_CHALK_COLHEADER_ROW, BOARD_CHALK_LAST_ROW)] is False
+    assert len(client.row_group_calls) == 6
     assert not any(collapsed for _, _, collapsed in client.row_group_calls)
 
 
@@ -902,6 +906,7 @@ def test_style_board_gives_queue_and_pool_check_rows_a_set_dropdown_on_the_set_c
     assert ranges == {
         f"{BOARD_LIST_SET_COL}{BOARD_QUEUE_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_QUEUE_LAST_ROW}",
         f"{BOARD_LIST_SET_COL}{BOARD_CHECK_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_CHECK_LAST_ROW}",
+        f"{BOARD_LIST_SET_COL}{BOARD_CHALK_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_CHALK_LAST_ROW}",
     }
     assert all(options == ["Cash", "GPP", "Both", "Remove"] for _, options in client.dropdown_calls)
 

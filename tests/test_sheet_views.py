@@ -8,6 +8,12 @@ from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_views import (
     BOARD_BANNER_ROW,
     BOARD_BUSTCUT_COL_INDEX,
+    BOARD_CHALK_COLHEADER,
+    BOARD_CHALK_EMPTY,
+    BOARD_CHALK_FIRST_ROW,
+    BOARD_CHALK_HEADER_ROW,
+    BOARD_CHALK_LAST_ROW,
+    BOARD_CHALK_POSITION_ROWS,
     BOARD_CHECK_FIRST_ROW,
     BOARD_CHECK_HEADER_ROW,
     BOARD_FRESHNESS_ROW,
@@ -491,6 +497,7 @@ def test_board_writes_every_section_header_at_its_own_row():
         (BOARD_CHECK_HEADER_ROW, "POOL CHECK"),
         (BOARD_POOL_HEADER_ROW, "POOL SUMMARY"),
         (BOARD_STACKS_HEADER_ROW, "YOUR STACKS"),
+        (BOARD_CHALK_HEADER_ROW, "CHALK MAP"),
         (BOARD_STACK_HEADER_ROW, "STACK CANDIDATES"),
     ]
     for row, title in headers:
@@ -503,9 +510,36 @@ def test_board_writes_every_section_header_at_its_own_row():
 def test_the_sections_the_edge_finder_took_over_are_gone_from_the_board():
     client = _build_board()
     flat = " ".join(str(c) for row in client.rows for c in row)
-    for gone in ("PER-POSITION LEADERS", "PUNT FINDER", "CHALK MAP", "THIS WEEK'S EDGES", "POOL DIAGNOSTICS"):
+    for gone in ("PER-POSITION LEADERS", "PUNT FINDER", "THIS WEEK'S EDGES", "POOL DIAGNOSTICS"):
         assert gone not in flat
     assert "docs/planning" not in flat  # no link to a developer file
+
+
+def test_chalk_map_is_one_spill_per_position_sorted_by_ownership_with_ids_beside_it():
+    client = _build_board()
+    assert client.rows[BOARD_CHALK_HEADER_ROW][: len(BOARD_CHALK_COLHEADER)] == BOARD_CHALK_COLHEADER
+    first = BOARD_CHALK_FIRST_ROW
+    row = first
+    for position, count in BOARD_CHALK_POSITION_ROWS.items():
+        main = client.rows[row - 1][0]
+        assert f'="{position}"' in main
+        assert "SORT(FILTER(" in main and ",5,FALSE)" in main  # Own% is the fifth column
+        assert f",{count},7)" in main  # the block's own size, seven columns wide
+        assert "REGEXMATCH(" in main and "OUT|IR" in main  # nobody listed out
+        ids = client.rows[row - 1][BOARD_ID_COL_INDEX]
+        assert "INDEX(SORT(FILTER(" in ids and f",{count},1)" in ids
+        row += count
+    assert row - 1 == BOARD_CHALK_LAST_ROW
+    # a Pool cell per row keyed on the hidden Id, so Set and the Pool tick read the same player
+    assert all(client.rows[r - 1][7].startswith("=") for r in range(first, BOARD_CHALK_LAST_ROW + 1))
+
+
+def test_chalk_map_says_so_until_ownership_publishes_and_only_once():
+    client = _build_board()
+    qb_main = client.rows[BOARD_CHALK_FIRST_ROW - 1][0]
+    assert BOARD_CHALK_EMPTY in qb_main and "COUNTIF(EdgeRaw!" in qb_main and ',"real")=0' in qb_main
+    other = client.rows[BOARD_CHALK_FIRST_ROW - 1 + BOARD_CHALK_POSITION_ROWS["QB"]][0]
+    assert BOARD_CHALK_EMPTY not in other  # one message, not five
 
 
 def test_slate_shape_sorts_by_total_not_gamesraws_own_row_order():

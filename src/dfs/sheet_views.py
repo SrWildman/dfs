@@ -136,7 +136,8 @@ BOARD_BANNER_ROW = 2
 BOARD_FRESHNESS_ROW = 3
 
 # Sections, top to bottom (Sam's ruling, 2026-10-08: Slate shape first, then the pool's state, then the
-# stacks): Slate shape, Queue, Pool check, Pool summary, Stack candidates. Each is one always-visible
+# stacks): Slate shape, Queue, Pool check, Pool summary (with Your stacks), Chalk map, Stack
+# candidates. Each is one always-visible
 # header row, one column-header row, then the body. Every row number is computed from the one before it,
 # never counted by hand.
 BOARD_SLATE_HEADER_ROW = 5
@@ -227,7 +228,20 @@ BOARD_STACKS_COLHEADER = ["QB", "Team", "Opp", "Pass catchers", "Bring-back"]
 BOARD_PORTFOLIO_PREFIX = "Portfolio:"
 BOARD_PORTFOLIO_PLACEHOLDER = "Portfolio: fill the lineups on Lineups to see the odds (written by dfs sync)."
 
-BOARD_STACK_HEADER_ROW = BOARD_STACKS_LAST_ROW + 2
+# Chalk map (Sam: "chalk map is important to still have", 2026-10-08): the highest-owned players per position,
+# with what they cost and what they project, once ownership has published. Player rows (Pool and Set beside
+# each, a hidden Id), so a chalk player is one click from the pool or from Remove.
+BOARD_CHALK_HEADER_ROW = BOARD_STACKS_LAST_ROW + 2
+BOARD_CHALK_COLHEADER_ROW = BOARD_CHALK_HEADER_ROW + 1
+BOARD_CHALK_FIRST_ROW = BOARD_CHALK_COLHEADER_ROW + 1
+BOARD_CHALK_POSITION_ROWS = {"QB": 3, "RB": 5, "WR": 6, "TE": 3, "DST": 2}
+BOARD_CHALK_ROWS = sum(BOARD_CHALK_POSITION_ROWS.values())
+BOARD_CHALK_LAST_ROW = BOARD_CHALK_FIRST_ROW + BOARD_CHALK_ROWS - 1
+BOARD_CHALK_COLHEADER = ["Player", "Pos", "Team", "Sal", "Own%", "CalPts", "Hit3x%", "Pool", "Set"]
+BOARD_CHALK_EMPTY = "Ownership isn't published yet; the chalk fills in when it is."
+BOARD_CHALK_STATS = ("Salary", "Own%", "CalPts", "Hit3x%")  # EdgeRaw columns behind D:G, in order
+
+BOARD_STACK_HEADER_ROW = BOARD_CHALK_LAST_ROW + 2
 BOARD_STACK_COLHEADER_ROW = BOARD_STACK_HEADER_ROW + 1
 BOARD_STACK_FIRST_ROW = BOARD_STACK_COLHEADER_ROW + 1
 # PROMPT_BOARD_FIXES.md item 3: "at least 8 games (16 teams); all games if the slate is smaller." A
@@ -259,6 +273,7 @@ BOARD_MAX_VISIBLE_COL_INDEX = (
     max(
         len(BOARD_SLATE_COLHEADER),
         len(BOARD_LIST_COLHEADER),
+        len(BOARD_CHALK_COLHEADER),
         len(BOARD_STACK_COLHEADER),
         len(BOARD_POOL_COLHEADER),
         len(BOARD_STACKS_COLHEADER),
@@ -436,6 +451,9 @@ def build_board(
     - **Pool summary** (live formulas, no sync needed): per position how many are pooled for Cash and for GPP
       (Both counts for each), what is missing to fill a lineup, the portfolio line (written by the sync from
       the Lineups simulator), each pooled QB's stack, and the salary spread and cheapest play.
+    - **Chalk map** (formulas, once ownership has published): the highest-owned players per position
+      (`BOARD_CHALK_POSITION_ROWS`) with salary, `Own%`, `CalPts` and `Hit3x%`, a live `Pool` cell and a `Set`
+      dropdown each; one line says so until ownership is out.
     - **Stack candidates**: the highest-total games' QB + top pass catchers (formulas).
 
     Every EdgeRaw-derived panel is regenerated against the CURRENT `EDGE_COLUMNS` layout via `_rng`/`_col`
@@ -863,6 +881,44 @@ def build_board(
         row = BOARD_STACKS_FIRST_ROW + i
         _set(row, _stack_pool_row(row), start_col=3)
 
+    # Chalk map: per position, the highest-owned players who are not listed OUT / IR. One spill per position
+    # block (sized by BOARD_CHALK_POSITION_ROWS), the DK ids spilled beside it into the hidden Id column.
+    own, stat_ranges = _rng(edge_tab, "Own%"), [_rng(edge_tab, c) for c in BOARD_CHALK_STATS]
+    unpublished = f'COUNTIF({basis},"real")=0'
+    edge_id = _rng(edge_tab, "Id")
+    _set(
+        BOARD_CHALK_HEADER_ROW,
+        ["CHALK MAP  —  the highest-owned players at each position (Set: Cash / GPP / Remove)"],
+    )
+    _set(BOARD_CHALK_COLHEADER_ROW, BOARD_CHALK_COLHEADER)
+    _set(BOARD_CHALK_COLHEADER_ROW, [BOARD_ID_HEADER], start_col=BOARD_ID_COL_INDEX)
+    chalk_row = BOARD_CHALK_FIRST_ROW
+    for position, count in BOARD_CHALK_POSITION_ROWS.items():
+        cond = (
+            f'({pos}="{position}")*ISNUMBER({own})*IFERROR({own}>0,0)*({name}<>"")'
+            f'*(1-REGEXMATCH({avail}&"","^(OUT|IR)$"))'
+        )
+        message = f'"{BOARD_CHALK_EMPTY}"' if position == next(iter(BOARD_CHALK_POSITION_ROWS)) else '""'
+        main = (
+            f'=IF({unpublished},{message},IF(SUMPRODUCT({cond})=0,"",'
+            f"ARRAY_CONSTRAIN(SORT(FILTER({{{name},{pos},{team},{','.join(stat_ranges)}}},{cond}),5,FALSE),"
+            f"{count},{len(BOARD_CHALK_STATS) + 3})))"
+        )
+        ids = (
+            f'=IF({unpublished},"",IF(SUMPRODUCT({cond})=0,"",'
+            f"ARRAY_CONSTRAIN(INDEX(SORT(FILTER({{{own},{edge_id}}},{cond}),1,FALSE),0,2),{count},1)))"
+        )
+        _set(chalk_row, [main])
+        _set(chalk_row, [ids], start_col=BOARD_ID_COL_INDEX)
+        for i in range(count):
+            row = chalk_row + i
+            _set(
+                row,
+                [pc.pool_formula(row, edge_tab, added_range, id_col=BOARD_ID_COL, name_col="A")],
+                start_col=BOARD_CHALK_COLHEADER.index("Pool"),
+            )
+        chalk_row += count
+
     _set(BOARD_STACK_HEADER_ROW, ["STACK CANDIDATES  —  QB + top pass-catchers, highest-total games first"])
     _set(BOARD_STACK_COLHEADER_ROW, BOARD_STACK_COLHEADER)
     _set(BOARD_STACK_FIRST_ROW, [team_list])
@@ -871,7 +927,7 @@ def build_board(
         _set(r, _stack_row_formulas(r), start_col=2)
 
     client.write_tab(BOARD_TAB, rows)
-    return f"{BOARD_TAB}: built (Slate shape, Queue, Pool check, Pool summary, Stack candidates)"
+    return f"{BOARD_TAB}: built (Slate shape, Queue, Pool check, Pool summary, Chalk map, Stack candidates)"
 
 
 def _text_cell(text: str) -> str:

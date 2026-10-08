@@ -114,6 +114,11 @@ from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_cells import SET_OPTIONS
 from dfs.sheet_views import (
     BOARD_BUSTCUT_COL_INDEX,
+    BOARD_CHALK_COLHEADER_ROW,
+    BOARD_CHALK_FIRST_ROW,
+    BOARD_CHALK_HEADER_ROW,
+    BOARD_CHALK_LAST_ROW,
+    BOARD_CHALK_POSITION_ROWS,
     BOARD_CHECK_COLHEADER_ROW,
     BOARD_CHECK_FIRST_ROW,
     BOARD_CHECK_HEADER_ROW,
@@ -2658,6 +2663,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     stacks_last = column_letter(len(BOARD_STACKS_COLHEADER) - 1)
     for row in (BOARD_STACKS_HEADER_ROW, BOARD_STACKS_COLHEADER_ROW):
         client.format_range(tab, f"A{row}:{stacks_last}{row}", _SUBHEAD_FMT)
+    _section(BOARD_CHALK_HEADER_ROW, BOARD_CHALK_COLHEADER_ROW, BOARD_CHALK_LAST_ROW, last_col=list_last)
     _section(
         BOARD_STACK_HEADER_ROW,
         BOARD_STACK_COLHEADER_ROW,
@@ -2669,6 +2675,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     for first, last in (
         (BOARD_QUEUE_FIRST_ROW, BOARD_QUEUE_LAST_ROW),
         (BOARD_CHECK_FIRST_ROW, BOARD_CHECK_LAST_ROW),
+        (BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW),
     ):
         client.format_range(
             tab,
@@ -2743,6 +2750,24 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     # column (QB/WR1/WR2/WR3/TE1/RB1's own Sal columns D/F/H/J/L/N) stays unscaled.
     client.format_range(tab, f"B{BOARD_STACK_FIRST_ROW}:B{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Total"])
     _scaled("B", BOARD_STACK_FIRST_ROW, BOARD_STACK_LAST_ROW, "Total")
+
+    # Chalk map: D Sal, E Own%, F CalPts, G Hit3x% (FIELD_FORMATS' own formats; Own% keeps its warm scale).
+    for letter, field_name in zip("DEFG", ("Salary", "Own%", "CalPts", "Hit3x%"), strict=True):
+        client.format_range(
+            tab,
+            f"{letter}{BOARD_CHALK_FIRST_ROW}:{letter}{BOARD_CHALK_LAST_ROW}",
+            {**FIELD_FORMATS[field_name], "horizontalAlignment": "RIGHT"},
+        )
+    _scaled("E", BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW, "Own%")
+    # Position groups read as groups: every other block gets a pale band (A:H; the Set cell keeps its yellow)
+    # and the position label is bold. The groups are the BOARD_CHALK_POSITION_ROWS blocks, in order.
+    block_first = BOARD_CHALK_FIRST_ROW
+    for index, count in enumerate(BOARD_CHALK_POSITION_ROWS.values()):
+        block_last = block_first + count - 1
+        if index % 2 == 1:
+            client.format_range(tab, f"A{block_first}:H{block_last}", {"backgroundColor": FLAT_BG})
+        client.format_range(tab, f"B{block_first}:B{block_last}", {"textFormat": {"bold": True}})
+        block_first = block_last + 1
     for col in ("D", "F", "H", "J", "L", "N"):
         client.format_range(
             tab, f"{col}{BOARD_STACK_FIRST_ROW}:{col}{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Salary"]
