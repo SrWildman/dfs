@@ -21,7 +21,7 @@ def test_research_is_registered_but_hidden_from_the_top_level_help():
 
 
 def test_study_names():
-    assert pipeline.resolve("all") == ["r1", "r2", "r3", "r4", "r5"]
+    assert pipeline.resolve("all") == ["r1", "r2", "r3", "r4", "r5", "r6"]
     assert pipeline.resolve("R3") == ["r3"]
     with pytest.raises(ValueError, match="unknown study"):
         pipeline.resolve("r9")
@@ -43,7 +43,7 @@ def empty_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(httpx, "get", no_network)
 
 
-@pytest.mark.parametrize("study", ["r1", "r2", "r3", "r4", "r5"])
+@pytest.mark.parametrize("study", ["r1", "r2", "r3", "r4", "r5", "r6"])
 def test_run_with_an_empty_cache_names_the_fetch_command(empty_cache, study):
     result = runner.invoke(app, ["research", "run", "--study", study])
     assert result.exit_code == 1

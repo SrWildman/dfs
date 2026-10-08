@@ -11,10 +11,10 @@ the local round's starting constants should be dropped, not tuned.
 
 ```
 dfs research fetch                 # one-time: download the extra public data (cached under data/)
-dfs research run --study all       # rebuild every output below from the cache; or r1 .. r5
+dfs research run --study all       # rebuild every output below from the cache; or r1 .. r6
 ```
 
-`dfs research` is registered hidden, like `dfs model`. A full run takes about 90 seconds from a warm cache; the
+`dfs research` is registered hidden, like `dfs model`. A full run takes about 90 seconds from a warm cache (R6 adds about a minute for its 500 shuffles); the
 first run adds about a minute to build the UM baseline. The outputs, each with a metadata block (study, seasons,
 n, date generated, code version):
 
@@ -26,6 +26,8 @@ n, date generated, code version):
 | `models/research/signal_thresholds.json` | R3: BUY / FADE / USAGE threshold sweeps and verdicts |
 | `models/research/weather.json` | R4: wind / temperature / rain effects, the wind-flag threshold, Vegas pricing |
 | `models/research/quick_checks.json` | R5: short week, divisional, home / away, back-to-back road |
+| `models/research/usage_signals.json` | R6: 13 usage candidates as levels and changes, thresholds, effects, verdicts, the shuffle baseline |
+| `models/research/trend_bands.json` | R6: how far L3 usage normally moves from the 6 games before, per metric and position, and the arrow thresholds |
 
 ## Headlines
 
@@ -737,6 +739,377 @@ By position:
 
 ---
 
+## R6. Usage signals, as levels and as changes
+
+### Question and method
+
+R3 tested a few shapes (a target-share jump, a red-zone-share jump, carry-share jumps) and found only the TE fade and the RB carry-share
+jumps held out of sample. R6 tests a wider, DraftKings-specific set: **13 candidates** (the 11 in the brief and 2 of mine)
+at **63 candidate x position x shape rows**, as LEVELS (last 3 games) and as CHANGES (last 3 games minus the 6 games
+before those). Everything is computed from games **before** the one being predicted (leakage tests in
+`tests/research/test_r6_features.py`: putting absurd values in a game and every later game moves no feature of it, and
+a deliberately broken window fails ten tests). Public data only: `stats_player`, the reduced play-by-play (one new
+column, `air_yards`), PFR snap counts joined through nflverse's `players.parquet`, and R2's team pass-rate-over-expected.
+
+- **Windows.** L3 = the player's last 3 games played (a row in the box score, across seasons, byes skipped), prior = the 6
+  games before those. A level needs 3 earlier games, a change needs 9. Mean metrics are the mean of the per-game value;
+  ratio metrics (aDOT, goal-line share) are a ratio of window sums (a 1-target game does not count as much as a 10-target
+  one). My L3 windows reproduce `dfs.model`'s `target_share_l3`, `air_yards_share_l3` and `targets_l3` on all 44,078 rows
+  where both exist.
+- **Target.** The residual `actual DK - UM` (UM out of fold, as in R1-R5), demeaned within position and season; the raw
+  `actual - L8` version is reported beside it. The population is UM's (>= 1 prior game and last-3 xFP >= 4), 45,558 offense
+  player-games.
+- **Shapes.** `level` = L3 at or above a threshold; `change up` = L3 - prior at or above +threshold; `change down` = at or
+  below -threshold; `deep + volume` (aDOT only) = a deep L3 aDOT **and** a high L3 target share. Low levels were not tested.
+- **Thresholds** are the 70/80/90/95th percentiles of the fit-season feature (75/85/90/95 for a change up, 25/15/10/5 for
+  a change down; 60/80 on each axis for deep + volume), rounded to two significant digits, among that position's rows. Per row
+  the threshold with the largest |t| in **2014-2021** is chosen (at least 150 flagged and 150 unflagged fit rows), whichever
+  sign the effect has, and then reported untouched on **2022-2025**. 227 thresholds were swept in all.
+- **Verdict.** **keep** = same sign in fit and test, |test effect| >= 0.5 DK points, the test 90% interval (clustered by
+  player) excludes 0, and at least 150 flagged test rows; then, of two kept signals flagging mostly the same player-games
+  (Jaccard > 0.5), the stronger (larger |test t|) survives. **context** = same sign in fit and test and exactly one of the
+  other three conditions missed. **drop** = anything else.
+- **Hit rate** = the share of rows with actual DK above the UM projection, flagged versus unflagged (the sign of the
+  effect says which way the signal points).
+
+### Read this first: most "usage" effects are UM's top end, not usage
+
+UM's QB / RB / TE projection (the `0.5 x L8 + 0.5 x L3 xFP` blend) has no shrinkage: it over-projects its own highest-rated
+players. The WR model (a GBM) does not. Mean residual `actual - UM` by UM decile within position-season (fit / test), and
+the slope of actual DK on UM:
+
+| Pos | Decile 1 (lowest UM) | Decile 5 | Decile 8 | Decile 9 | Decile 10 (highest UM) | Slope of DK on UM |
+|---|---|---|---|---|---|---|
+| QB | +0.88 / +1.30 | +0.45 / +0.19 | -0.38 / -1.05 | -1.82 / -2.05 | -3.16 / -2.42 | 0.78 / 0.80 |
+| RB | +1.15 / -0.02 | -0.25 / +0.27 | -0.95 / -0.39 | -1.00 / -0.59 | -1.90 / -1.96 | 0.83 / 0.90 |
+| WR | -0.24 / -0.63 | -0.08 / -0.26 | +0.14 / +0.17 | +0.58 / +0.13 | -0.30 / -0.78 | 1.01 / 1.01 |
+| TE | +0.12 / +0.16 | +0.10 / +0.36 | -0.89 / -0.77 | -0.53 / -1.42 | -2.48 / -1.86 | 0.81 / 0.80 |
+
+A flag for "high or rising usage" picks out high-UM players, so at RB, TE and QB it inherits that ~-2 point miss whether or
+not usage tells UM anything. So every row below also carries the **UM-matched** effect: the same flag, but each player is
+compared only with players of the same position, season and UM decile. Its keep rule is the same, and a signal that
+survives it is information about usage rather than about UM's calibration. (The slope is a finding for `dfs.model`, out of
+this task's scope: a shrinkage term for QB / RB / TE would likely remove much of the level effects by itself.)
+
+### The candidates
+
+| # | Candidate | Positions | Shapes | Source | Definition (per game, then windowed) |
+|---|---|---|---|---|---|
+| 1 | RB target share | RB | level, change | stats_player | RB targets / team targets (nflverse `target_share`) |
+| 2 | RB receptions/G | RB | level, change | stats_player | receptions |
+| 3 | Air-yards share | WR, TE | level, change | stats_player | nflverse `air_yards_share` |
+| 4 | aDOT | WR, TE | level, deep + volume | stats_player | sum of receiving air yards / sum of targets over the window |
+| 5 | WOPR change | WR, TE | change | stats_player | nflverse `wopr` (1.5 x target share + 0.7 x air-yards share) |
+| 6 | Snap share change | RB, WR, TE | change | PFR snap counts | offensive snaps / team offensive snaps |
+| 7 | End-zone targets/G | WR, TE, RB | level, change | pbp | targets with `air_yards >= yardline_100` |
+| 8 | Goal-line carry share | RB | level, change | pbp | sum of the RB's carries with `yardline_100 <= 5` / sum of team carries with `yardline_100 <= 5` over the window |
+| 9 | QB designed rushes/G | QB | level, change | pbp | QB carries with `qb_scramble == 0` |
+| 10 | High-value touches/G | RB | level, change | pbp | targets (anywhere) + carries with `yardline_100 <= 10` |
+| 11 | Team pass rate over expected, change | WR, TE | change | pbp | the player's TEAM mean `pass_oe` (percentage points) in the same windows |
+| 12 | Targets/G (mine) | WR, TE, RB | level, change | stats_player | targets |
+| 13 | Deep targets/G (mine) | WR, TE | level, change | pbp | targets with `air_yards >= 20` |
+
+**Why 12 and 13.** R3 and candidates 1-3 test target *share*, which can fall while volume rises (and candidate 11 is about
+the team's throwing rate), so the raw target *count* is its own question. aDOT (4) is a rate that says nothing about how
+often the deep looks come; the *count* of deep targets does, and it comes from the same pbp pass as end-zone targets.
+Nothing was added after seeing results.
+
+### Result: every row
+
+Rule = the threshold chosen on 2014-21. Effect = flagged minus unflagged mean residual `actual - UM` in DK points
+(demeaned within position-season); the test column carries the 90% interval. Hit = share of rows beating UM, flagged vs
+unflagged. **vs L8** = the test effect on `actual - trailing-8 DK` instead. **UM-matched** = the test effect compared only
+within the same UM decile. **Survives** = a verdict of keep that also keeps among UM-matched (and survives its own overlap
+check).
+
+| Candidate | Pos | Shape | Rule (L3 = last 3 games; prior6 = the 6 before) | n fit | Effect fit | n test | Effect test [90% CI] | Hit fit | Hit test | vs L8 (test) | UM-matched (test) | Verdict | Survives |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RB target share | RB | level | target share (L3) ≥ 11 pts | 2,386 | -1.19 | 1,156 | -0.69 [-1.18, -0.20] | 38.1% vs 41.0% | 39.5% vs 39.1% | -0.50 | -0.14 [-0.69, +0.41] | drop (redundant) | no |
+| RB target share | RB | change ↑ | target share (L3 - prior6) ≥ 3.2 pts | 1,692 | -0.59 | 924 | -0.74 [-1.24, -0.24] | 38.5% vs 40.3% | 36.6% vs 40.5% | +0.47 | -0.63 [-1.12, -0.13] | **keep** | (redundant) |
+| RB target share | RB | change ↓ | target share (L3 - prior6) ≤ -2.4 pts | 1,687 | +0.35 | 964 | +0.58 [+0.01, +1.16] | 42.0% vs 39.1% | 42.5% vs 38.4% | -0.77 | +0.55 [-0.03, +1.13] | **keep** | no |
+| RB receptions per game | RB | level | receptions/G (L3) ≥ 3 | 2,411 | -1.20 | 1,032 | -0.72 [-1.17, -0.26] | 38.2% vs 41.0% | 38.9% vs 39.3% | -0.44 | -0.16 [-0.69, +0.36] | drop (redundant) | no |
+| RB receptions per game | RB | change ↑ | receptions/G (L3 - prior6) ≥ 1 | 1,665 | -0.42 | 870 | -0.59 [-1.07, -0.11] | 39.0% vs 40.1% | 36.1% vs 40.5% | +0.58 | -0.44 [-0.93, +0.04] | drop (redundant) | no |
+| RB receptions per game | RB | change ↓ | receptions/G (L3 - prior6) ≤ -0.67 | 1,651 | +0.45 | 892 | +0.41 [-0.16, +0.97] | 42.6% vs 38.9% | 41.8% vs 38.8% | -0.88 | +0.47 [-0.10, +1.05] | drop | no |
+| Air-yards share | WR | level | air-yards share (L3) ≥ 29 pts | 3,535 | +0.37 | 2,135 | +0.32 [-0.05, +0.69] | 44.9% vs 39.8% | 42.1% vs 38.1% | -0.60 | +0.18 [-0.22, +0.57] | drop | no |
+| Air-yards share | WR | change ↑ | air-yards share (L3 - prior6) ≥ 6.7 pts | 2,634 | -0.20 | 1,516 | -0.44 [-0.76, -0.11] | 40.5% vs 41.9% | 37.5% vs 40.5% | -0.13 | -0.42 [-0.75, -0.10] | context | no |
+| Air-yards share | WR | change ↓ | air-yards share (L3 - prior6) ≤ -14 pts | 533 | +0.48 | 358 | +0.71 [+0.01, +1.41] | 45.8% vs 41.4% | 43.9% vs 39.5% | -0.10 | +0.66 [-0.04, +1.35] | **keep** | no |
+| Air-yards share | TE | level | air-yards share (L3) ≥ 28 pts | 251 | -1.22 | 105 | -1.41 [-2.51, -0.30] | 37.1% vs 39.1% | 31.4% vs 40.4% | -1.07 | -0.17 [-1.33, +0.99] | context | no |
+| Air-yards share | TE | change ↑ | air-yards share (L3 - prior6) ≥ 8.7 pts | 431 | -0.52 | 252 | -0.48 [-1.05, +0.09] | 36.2% vs 39.6% | 37.7% vs 40.0% | +0.46 | -0.24 [-0.80, +0.32] | drop | no |
+| Air-yards share | TE | change ↓ | air-yards share (L3 - prior6) ≤ -5.3 pts | 642 | +0.92 | 405 | +0.69 [+0.01, +1.38] | 45.6% vs 38.1% | 43.7% vs 39.0% | -0.38 | +0.59 [-0.09, +1.28] | drop (redundant) | no |
+| aDOT (air yards per target) | WR | level | aDOT (L3) ≥ 18 | 573 | -0.12 | 259 | -0.89 [-1.60, -0.18] | 38.7% vs 41.4% | 34.0% vs 39.7% | -0.47 | -0.78 [-1.49, -0.08] | **keep** | yes |
+| aDOT (air yards per target) | WR | deep + volume | aDOT (L3) ≥ 14 and target share (L3) ≥ 24 pts | 356 | +0.35 | 158 | +0.35 [-0.98, +1.68] | 44.4% vs 41.2% | 41.8% vs 39.4% | -0.45 | -0.02 [-1.34, +1.30] | drop | no |
+| aDOT (air yards per target) | TE | level | aDOT (L3) ≥ 12 | 315 | +0.89 | 97 | -0.41 [-1.54, +0.71] | 42.2% vs 38.8% | 34.0% vs 40.2% | -0.32 | -0.55 [-1.60, +0.50] | drop | no |
+| aDOT (air yards per target) | TE | deep + volume | aDOT (L3) ≥ 8.1 and target share (L3) ≥ 15 pts | 823 | -0.97 | 335 | -0.63 [-1.29, +0.02] | 38.2% vs 39.2% | 39.7% vs 40.0% | -0.74 | +0.05 [-0.58, +0.69] | context | no |
+| WOPR change | WR | change ↑ | WOPR (L3 - prior6) ≥ 0.19 | 1,091 | -0.60 | 658 | +0.57 [+0.09, +1.05] | 38.7% vs 41.9% | 41.9% vs 39.5% | +1.04 | +0.51 [+0.02, +0.99] | drop | no |
+| WOPR change | WR | change ↓ | WOPR (L3 - prior6) ≤ -0.16 | 1,057 | +0.29 | 668 | +0.49 [+0.00, +0.98] | 43.8% vs 41.3% | 44.0% vs 39.2% | -0.41 | +0.45 [-0.03, +0.92] | context | no |
+| WOPR change | TE | change ↑ | WOPR (L3 - prior6) ≥ 0.16 | 421 | -1.23 | 226 | -1.00 [-1.77, -0.22] | 34.4% vs 39.7% | 36.3% vs 40.1% | +0.39 | -0.63 [-1.37, +0.10] | **keep** | no |
+| WOPR change | TE | change ↓ | WOPR (L3 - prior6) ≤ -0.083 | 637 | +1.03 | 399 | +0.63 [+0.04, +1.21] | 47.1% vs 37.9% | 42.4% vs 39.3% | -0.83 | +0.48 [-0.08, +1.04] | **keep** | no |
+| Snap share change | RB | change ↑ | snap share (L3 - prior6) ≥ 28 pts | 350 | +1.08 | 142 | +0.62 [-0.68, +1.91] | 46.3% vs 39.5% | 41.5% vs 39.4% | +2.95 | +0.57 [-0.69, +1.83] | drop | no |
+| Snap share change | RB | change ↓ | snap share (L3 - prior6) ≤ -7.3 pts | 1,698 | -0.27 | 870 | -0.64 [-1.14, -0.15] | 39.2% vs 40.0% | 36.8% vs 40.3% | -1.84 | -0.76 [-1.25, -0.27] | **keep** | yes |
+| Snap share change | WR | change ↑ | snap share (L3 - prior6) ≥ 16 pts | 1,571 | +0.18 | 771 | +0.03 [-0.39, +0.44] | 41.2% vs 41.6% | 39.0% vs 39.9% | +1.04 | +0.13 [-0.28, +0.54] | drop | no |
+| Snap share change | WR | change ↓ | snap share (L3 - prior6) ≤ -11 pts | 1,599 | -0.95 | 970 | -0.84 [-1.22, -0.45] | 36.0% vs 42.6% | 36.0% vs 40.5% | -0.93 | -0.78 [-1.16, -0.40] | **keep** | yes |
+| Snap share change | TE | change ↑ | snap share (L3 - prior6) ≥ 21 pts | 423 | +0.42 | 149 | +0.47 [-0.47, +1.42] | 42.1% vs 38.9% | 40.9% vs 39.7% | +1.35 | +0.20 [-0.72, +1.12] | drop | no |
+| Snap share change | TE | change ↓ | snap share (L3 - prior6) ≤ -5.7 pts | 1,074 | -0.46 | 628 | -0.41 [-0.98, +0.16] | 36.9% vs 40.0% | 37.1% vs 40.7% | -0.91 | -0.60 [-1.15, -0.05] | drop | no |
+| End-zone targets per game | WR | level | end-zone targets/G (L3) ≥ 1.3 | 1,092 | +0.16 | 549 | -0.74 [-1.27, -0.20] | 43.9% vs 41.0% | 37.9% vs 39.6% | -1.39 | -0.71 [-1.25, -0.18] | drop | no |
+| End-zone targets per game | WR | change ↑ | end-zone targets/G (L3 - prior6) ≥ 0.33 | 3,143 | -0.29 | 1,735 | -0.56 [-0.92, -0.20] | 41.0% vs 41.8% | 36.6% vs 41.1% | -0.45 | -0.56 [-0.92, -0.20] | **keep** | yes |
+| End-zone targets per game | WR | change ↓ | end-zone targets/G (L3 - prior6) ≤ -0.5 | 1,825 | +0.36 | 960 | +0.90 [+0.43, +1.37] | 43.1% vs 41.3% | 46.2% vs 38.5% | +0.18 | +0.81 [+0.34, +1.29] | **keep** | yes |
+| End-zone targets per game | TE | level | end-zone targets/G (L3) ≥ 0.67 | 666 | -1.73 | 255 | -1.76 [-2.57, -0.95] | 32.3% vs 40.1% | 32.9% vs 40.8% | -1.31 | -0.76 [-1.63, +0.10] | **keep** | no |
+| End-zone targets per game | TE | change ↑ | end-zone targets/G (L3 - prior6) ≥ 0.5 | 786 | -1.42 | 379 | -1.06 [-1.62, -0.49] | 32.3% vs 40.8% | 35.1% vs 40.7% | -0.31 | -0.56 [-1.16, +0.03] | **keep** | no |
+| End-zone targets per game | TE | change ↓ | end-zone targets/G (L3 - prior6) ≤ -0.5 | 594 | +0.67 | 260 | +0.90 [+0.14, +1.65] | 44.1% vs 38.4% | 43.5% vs 39.3% | -0.12 | +1.06 [+0.34, +1.78] | **keep** | yes |
+| End-zone targets per game | RB | level | end-zone targets/G (L3) ≥ 0.33 | 918 | -0.74 | 429 | -0.64 [-1.40, +0.11] | 38.3% vs 40.4% | 37.8% vs 39.4% | -0.40 | -0.40 [-1.17, +0.36] | context | no |
+| End-zone targets per game | RB | change ↑ | end-zone targets/G (L3 - prior6) ≥ 0.17 | 589 | -0.82 | 283 | -0.81 [-1.63, -0.00] | 37.4% vs 40.1% | 35.7% vs 39.8% | -0.40 | -0.72 [-1.55, +0.11] | **keep** | no |
+| End-zone targets per game | RB | change ↓ | end-zone targets/G (L3 - prior6) ≤ -0.17 | 213 | -0.36 | 136 | +0.27 [-1.07, +1.62] | 41.3% vs 39.8% | 39.7% vs 39.5% | -0.46 | +0.45 [-1.05, +1.95] | drop | no |
+| Goal-line carry share | RB | level | goal-line carry share (L3) ≥ 60 pts | 2,274 | -0.75 | 1,219 | -0.80 [-1.32, -0.27] | 39.1% vs 40.1% | 39.3% vs 39.3% | -0.59 | -0.40 [-0.95, +0.14] | **keep** | no |
+| Goal-line carry share | RB | change ↑ | goal-line carry share (L3 - prior6) ≥ 25 pts | 1,607 | -0.36 | 868 | -0.10 [-0.64, +0.43] | 38.0% vs 39.9% | 40.0% vs 39.5% | +0.70 | -0.06 [-0.59, +0.46] | drop | no |
+| Goal-line carry share | RB | change ↓ | goal-line carry share (L3 - prior6) ≤ -33 pts | 1,003 | +0.35 | 537 | +0.41 [-0.23, +1.05] | 41.6% vs 39.0% | 40.0% vs 39.6% | -0.63 | +0.33 [-0.31, +0.98] | drop | no |
+| QB designed rushes per game | QB | level | QB designed rushes/G (L3) ≥ 1.7 | 666 | -0.40 | 585 | -0.48 [-1.05, +0.10] | 43.8% vs 47.5% | 44.6% vs 45.2% | -0.41 | +0.16 [-0.62, +0.95] | drop | no |
+| QB designed rushes per game | QB | change ↑ | QB designed rushes/G (L3 - prior6) ≥ 1 | 349 | +0.49 | 284 | -0.26 [-1.20, +0.68] | 45.8% vs 46.7% | 43.3% vs 45.3% | +0.48 | +0.01 [-0.91, +0.93] | drop | no |
+| QB designed rushes per game | QB | change ↓ | QB designed rushes/G (L3 - prior6) ≤ -1.2 | 171 | -0.19 | 167 | +0.71 [-0.68, +2.11] | 43.9% vs 46.7% | 50.9% vs 44.5% | -0.21 | +1.01 [-0.37, +2.40] | drop | no |
+| High-value touches per game | RB | level | HVT/G (L3) ≥ 4.7 | 2,237 | -1.34 | 1,007 | -1.30 [-1.78, -0.82] | 37.7% vs 41.1% | 38.3% vs 39.5% | -0.77 | -0.58 [-1.12, -0.04] | **keep** | yes |
+| High-value touches per game | RB | change ↑ | HVT/G (L3 - prior6) ≥ 2 | 1,106 | -0.83 | 533 | -1.09 [-1.66, -0.51] | 37.7% vs 40.3% | 36.6% vs 40.0% | +0.79 | -0.81 [-1.39, -0.23] | **keep** | (redundant) |
+| High-value touches per game | RB | change ↓ | HVT/G (L3 - prior6) ≤ -1 | 1,783 | +0.68 | 995 | +0.44 [-0.12, +0.99] | 42.6% vs 38.8% | 41.0% vs 38.9% | -1.27 | +0.38 [-0.17, +0.93] | drop | no |
+| Team pass rate over expected, change | WR | change ↑ | team PROE (L3 - prior6) ≥ 6.5 | 1,184 | -0.28 | 731 | +0.31 [-0.20, +0.82] | 40.3% vs 41.1% | 39.4% vs 39.5% | +0.43 | +0.30 [-0.21, +0.81] | drop | no |
+| Team pass rate over expected, change | WR | change ↓ | team PROE (L3 - prior6) ≤ -8.8 | 587 | -0.48 | 345 | -0.17 [-0.83, +0.49] | 40.0% vs 41.1% | 35.7% vs 39.7% | -0.11 | -0.18 [-0.84, +0.48] | drop | no |
+| Team pass rate over expected, change | TE | change ↑ | team PROE (L3 - prior6) ≥ 3.4 | 1,168 | +0.08 | 672 | -0.17 [-0.65, +0.31] | 39.0% vs 38.9% | 39.4% vs 39.9% | -0.01 | -0.16 [-0.62, +0.30] | drop | no |
+| Team pass rate over expected, change | TE | change ↓ | team PROE (L3 - prior6) ≤ -8.8 | 236 | +0.61 | 130 | +0.29 [-0.69, +1.28] | 43.2% vs 38.7% | 39.2% vs 39.8% | +0.12 | +0.11 [-0.90, +1.13] | drop | no |
+| Targets per game | WR | level | targets/G (L3) ≥ 11 | 554 | +0.65 | 253 | +0.47 [-0.24, +1.19] | 46.2% vs 41.1% | 48.2% vs 39.1% | -2.32 | +0.65 [-0.10, +1.41] | drop | no |
+| Targets per game | WR | change ↑ | targets/G (L3 - prior6) ≥ 2.3 | 1,751 | -0.49 | 870 | -0.00 [-0.46, +0.45] | 39.0% vs 42.1% | 40.6% vs 39.6% | +0.24 | -0.04 [-0.50, +0.42] | drop | no |
+| Targets per game | WR | change ↓ | targets/G (L3 - prior6) ≤ -1.2 | 2,470 | +0.16 | 1,434 | +0.50 [+0.12, +0.88] | 42.8% vs 41.2% | 43.6% vs 38.5% | -0.33 | +0.44 [+0.06, +0.81] | **keep** | no |
+| Targets per game | TE | level | targets/G (L3) ≥ 7.7 | 474 | -1.92 | 212 | -1.85 [-2.78, -0.93] | 34.2% vs 39.6% | 33.5% vs 40.6% | -1.12 | -0.26 [-1.22, +0.71] | **keep** | no |
+| Targets per game | TE | change ↑ | targets/G (L3 - prior6) ≥ 2.2 | 619 | -1.60 | 273 | -1.26 [-1.83, -0.70] | 32.3% vs 40.4% | 37.0% vs 40.1% | +0.41 | -0.77 [-1.33, -0.21] | **keep** | yes |
+| Targets per game | TE | change ↓ | targets/G (L3 - prior6) ≤ -2 | 446 | +1.14 | 229 | +1.20 [+0.43, +1.98] | 45.3% vs 38.5% | 45.9% vs 39.1% | -0.58 | +1.09 [+0.31, +1.88] | **keep** | yes |
+| Targets per game | RB | level | targets/G (L3) ≥ 3.7 | 2,286 | -1.16 | 892 | -0.79 [-1.28, -0.31] | 37.9% vs 41.1% | 39.2% vs 39.2% | -0.33 | -0.20 [-0.73, +0.33] | drop (redundant) | no |
+| Targets per game | RB | change ↑ | targets/G (L3 - prior6) ≥ 1.2 | 1,522 | -0.42 | 766 | -0.91 [-1.43, -0.38] | 39.2% vs 40.0% | 35.0% vs 40.7% | +0.41 | -0.77 [-1.30, -0.23] | drop (redundant) | yes |
+| Targets per game | RB | change ↓ | targets/G (L3 - prior6) ≤ -0.83 | 1,858 | +0.47 | 1,000 | +0.47 [-0.07, +1.01] | 42.4% vs 38.9% | 41.9% vs 38.6% | -0.83 | +0.44 [-0.11, +0.99] | drop | no |
+| Deep targets per game | WR | level | deep targets/G (L3) ≥ 2.3 | 996 | -0.20 | 385 | -0.38 [-1.12, +0.36] | 42.7% vs 41.2% | 38.4% vs 39.5% | -1.80 | -0.55 [-1.28, +0.19] | drop | no |
+| Deep targets per game | WR | change ↑ | deep targets/G (L3 - prior6) ≥ 1.3 | 583 | -0.71 | 275 | -0.76 [-1.57, +0.06] | 39.6% vs 41.7% | 34.5% vs 40.0% | -1.06 | -0.84 [-1.65, -0.03] | context | no |
+| Deep targets per game | WR | change ↓ | deep targets/G (L3 - prior6) ≤ -0.83 | 1,433 | +0.39 | 691 | +0.67 [+0.10, +1.23] | 44.0% vs 41.2% | 42.5% vs 39.4% | +0.08 | +0.58 [+0.02, +1.13] | **keep** | yes |
+| Deep targets per game | TE | level | deep targets/G (L3) ≥ 1.3 | 289 | -1.01 | 95 | -2.13 [-3.07, -1.19] | 37.4% vs 39.1% | 31.6% vs 40.3% | -1.86 | -1.29 [-2.28, -0.29] | context | no |
+| Deep targets per game | TE | change ↑ | deep targets/G (L3 - prior6) ≥ 0.33 | 1,220 | -0.66 | 601 | -0.20 [-0.72, +0.32] | 35.8% vs 40.6% | 39.1% vs 40.0% | +0.20 | -0.01 [-0.51, +0.49] | drop | no |
+| Deep targets per game | TE | change ↓ | deep targets/G (L3 - prior6) ≤ -0.33 | 1,072 | +0.31 | 576 | +0.61 [+0.04, +1.19] | 41.7% vs 38.4% | 42.2% vs 39.0% | +0.09 | +0.61 [+0.03, +1.20] | **keep** | yes |
+
+23 keep, 7 context, 33 drop (of 63). Flagged rows per season for every row are in
+`usage_signals.json` (`n_per_season`, with `effect_by_season`). Redundant pairs (Jaccard > 0.5):
+
+- `rb_tgt_share|RB|level_hi` loses to `hvt|RB|level_hi` in the brief's list
+- `rb_tgt_share|RB|change_up` loses to `tgt_pg|RB|change_up` in the UM-matched list
+- `rb_rec_pg|RB|level_hi` loses to `hvt|RB|level_hi` in the brief's list
+- `rb_rec_pg|RB|change_up` loses to `rb_tgt_share|RB|change_up` in the brief's list
+- `ay_share|TE|change_down` loses to `wopr|TE|change_down` in the brief's list
+- `hvt|RB|change_up` loses to `tgt_pg|RB|change_up` in the UM-matched list
+- `tgt_pg|RB|level_hi` loses to `hvt|RB|level_hi` in the brief's list
+- `tgt_pg|RB|change_up` loses to `hvt|RB|change_up` in the brief's list
+
+### Multiple testing: how many keeps would chance give?
+
+63 rows x 227 thresholds were swept, and the threshold was chosen on the fit seasons, so some rows pass by luck. The
+shuffle baseline re-runs the whole procedure (choose a threshold on the fit seasons, then apply the keep rule to the
+test seasons) 500 times (seed 20260607), each time permuting the residuals among players of the same
+position, season and week. That leaves every flag exactly as it is (its persistence, its overlap with the others) and
+severs only its link to the outcome.
+
+| Rule | Keeps expected by chance | 5th-95th percentile | Max in 500 shuffles | Observed (before the overlap rule) | Shuffles with at least that many |
+|---|---|---|---|---|---|
+| The brief's (actual - UM) | **2.38** | 0-6 | 9 | 29 | 0.0% |
+| UM-matched as well | **2.13** | 0-6 | 8 | 14 | 0.0% |
+
+Chance alone delivers about 2 keeps from this search (never more than 9). The real run found 29
+(23 after the overlap rule), and 14 that also survive the UM
+match (12 after overlap). So the pattern is real; the question is how much of it is UM's calibration (the table above)
+and how much is information about usage. Per-row chance keep rates (the probability that a row with no real effect would have
+been kept) are in `usage_signals.json` (`null_keep_rate`): 0-8% each, 3.8% on average. A kept row with a fit interval that includes 0 is
+mostly test-led: treat it as the weakest of the list.
+
+### The keep list: what survives UM matching (12 chip candidates)
+
+**Decision (Sam): build only these 12.** The other 12 rows that pass the brief's rule are not to be built; `usage_signals.json` lists the 12 under `recommended_chips`.
+
+These are the rows the local session can implement. The windows are the ones above; every threshold is the exact one
+chosen on 2014-21 (two significant digits). "Reads as" is the direction against UM: **FADE** = flagged players
+miss their projection, **BUMP** = they beat it. Effects are DK points. Per-game counts move in sixths, so compare with a
+1e-9 tolerance (`<= -0.5` must include a value computed as -0.5000000001). Apply only to players UM projects.
+
+| Candidate | Pos | Shape | Formula, window, threshold | Reads as | Effect fit [90% CI] | Effect test [90% CI] | Flagged fit / test | Hit test | vs L8 (test) | UM-matched (test) | Seasons with the same sign | Fit interval excludes 0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| High-value touches per game | RB | level | HVT/G (L3) ≥ 4.7 | FADE ↓ (misses UM) | -1.34 [-1.66, -1.02] | -1.30 [-1.78, -0.82] | 2,237 / 1,007 (229-316/season) | 38.3% vs 39.5% | -0.77 | -0.58 [-1.12, -0.04] | 4/4 test, 8/8 fit | yes |
+| Snap share change | RB | change ↓ | snap share (L3 - prior6) ≤ -7.3 pts | FADE ↓ (misses UM) | -0.27 [-0.61, +0.07] | -0.64 [-1.14, -0.15] | 1,698 / 870 (72-266/season) | 36.8% vs 40.3% | -1.84 | -0.76 [-1.25, -0.27] | 3/4 test, 5/8 fit | **no** |
+| Targets per game | RB | change ↑ | targets/G (L3 - prior6) ≥ 1.2 | FADE ↓ (misses UM) | -0.42 [-0.82, -0.03] | -0.91 [-1.43, -0.38] | 1,522 / 766 (63-251/season) | 35.0% vs 40.7% | +0.41 | -0.77 [-1.30, -0.23] | 4/4 test, 5/8 fit | yes |
+| Deep targets per game | TE | change ↓ | deep targets/G (L3 - prior6) ≤ -0.33 | BUMP ↑ (beats UM) | +0.31 [-0.11, +0.72] | +0.61 [+0.04, +1.19] | 1,072 / 576 (57-166/season) | 42.2% vs 39.0% | +0.09 | +0.61 [+0.03, +1.20] | 4/4 test, 6/8 fit | **no** |
+| End-zone targets per game | TE | change ↓ | end-zone targets/G (L3 - prior6) ≤ -0.5 | BUMP ↑ (beats UM) | +0.67 [+0.09, +1.25] | +0.90 [+0.14, +1.65] | 594 / 260 (42-95/season) | 43.5% vs 39.3% | -0.12 | +1.06 [+0.34, +1.78] | 4/4 test, 6/8 fit | yes |
+| Targets per game | TE | change ↓ | targets/G (L3 - prior6) ≤ -2 | BUMP ↑ (beats UM) | +1.14 [+0.63, +1.66] | +1.20 [+0.43, +1.98] | 446 / 229 (18-79/season) | 45.9% vs 39.1% | -0.58 | +1.09 [+0.31, +1.88] | 4/4 test, 7/8 fit | yes |
+| Targets per game | TE | change ↑ | targets/G (L3 - prior6) ≥ 2.2 | FADE ↓ (misses UM) | -1.60 [-2.14, -1.06] | -1.26 [-1.83, -0.70] | 619 / 273 (31-96/season) | 37.0% vs 40.1% | +0.41 | -0.77 [-1.33, -0.21] | 3/4 test, 8/8 fit | yes |
+| aDOT (air yards per target) | WR | level | aDOT (L3) ≥ 18 | FADE ↓ (misses UM) | -0.12 [-0.64, +0.40] | -0.89 [-1.60, -0.18] | 573 / 259 (43-89/season) | 34.0% vs 39.7% | -0.47 | -0.78 [-1.49, -0.08] | 4/4 test, 5/8 fit | **no** |
+| Deep targets per game | WR | change ↓ | deep targets/G (L3 - prior6) ≤ -0.83 | BUMP ↑ (beats UM) | +0.39 [+0.01, +0.77] | +0.67 [+0.10, +1.23] | 1,433 / 691 (79-218/season) | 42.5% vs 39.4% | +0.08 | +0.58 [+0.02, +1.13] | 3/4 test, 5/8 fit | yes |
+| End-zone targets per game | WR | change ↓ | end-zone targets/G (L3 - prior6) ≤ -0.5 | BUMP ↑ (beats UM) | +0.36 [-0.00, +0.73] | +0.90 [+0.43, +1.37] | 1,825 / 960 (91-276/season) | 46.2% vs 38.5% | +0.18 | +0.81 [+0.34, +1.29] | 4/4 test, 5/8 fit | **no** |
+| End-zone targets per game | WR | change ↑ | end-zone targets/G (L3 - prior6) ≥ 0.33 | FADE ↓ (misses UM) | -0.29 [-0.58, +0.00] | -0.56 [-0.92, -0.20] | 3,143 / 1,735 (156-466/season) | 36.6% vs 41.1% | -0.45 | -0.56 [-0.92, -0.20] | 3/4 test, 6/8 fit | **no** |
+| Snap share change | WR | change ↓ | snap share (L3 - prior6) ≤ -11 pts | FADE ↓ (misses UM) | -0.95 [-1.27, -0.63] | -0.84 [-1.22, -0.45] | 1,599 / 970 (58-277/season) | 36.0% vs 40.5% | -0.93 | -0.78 [-1.16, -0.40] | 4/4 test, 7/8 fit | yes |
+
+- **Strongest** (the fit interval and the matched test interval both exclude 0, same sign in at least 3 of 4 test seasons and
+  in most fit seasons): **WR snap share down**, **TE targets/G up and down**, **TE end-zone targets/G down**, **RB
+  high-value touches/G level**.
+- **Next tier** (both intervals clear zero, but only just): **RB targets/G up**, **WR deep targets/G down**.
+- **Test-led** (the fit interval includes 0 or touches it, so only 2022-25 clearly supports them): WR aDOT level, RB snap
+  share down, TE deep targets/G down, and both WR end-zone rows.
+- `hvt|RB|change_up` and `tgt_pg|RB|change_up` flag mostly the same RB-weeks (Jaccard 0.52); build one.
+- **12 rows pass the brief's rule but are not in this list** (next table): ten fail the UM match (RB goal-line
+  share, TE end-zone level and rise, TE targets/G level, WOPR change at TE, ...) and are largely UM's top decile again, so
+  they should not be shown as usage chips; two (RB target share up, RB high-value touches up) pass the match but are
+  redundant with RB targets/G up.
+
+**Reading the `vs L8` column.** For the change-up signals the flagged players really do beat their own trailing-8 average
+(RB targets/G up +0.41, TE targets/G up +0.41 vs L8) but UM projects them even higher, so the ▲ is a truthful description
+("usage is up") and the model already over-credits it. For role losses (snap share down) the trailing-8 average is far too
+high (-1.84 for RBs) and UM only partly adjusts (-0.64).
+
+### Passed the brief's rule only (not UM-matched)
+
+| Candidate | Pos | Shape | Rule | Effect test [90% CI] (actual - UM) | UM-matched (test) | Matched verdict |
+|---|---|---|---|---|---|---|
+| End-zone targets per game | RB | change ↑ | end-zone targets/G (L3 - prior6) ≥ 0.17 | -0.81 [-1.63, -0.00] | -0.72 [-1.55, +0.11] | context |
+| Goal-line carry share | RB | level | goal-line carry share (L3) ≥ 60 pts | -0.80 [-1.32, -0.27] | -0.40 [-0.95, +0.14] | drop |
+| High-value touches per game | RB | change ↑ | HVT/G (L3 - prior6) ≥ 2 | -1.09 [-1.66, -0.51] | -0.81 [-1.39, -0.23] | keep |
+| RB target share | RB | change ↓ | target share (L3 - prior6) ≤ -2.4 pts | +0.58 [+0.01, +1.16] | +0.55 [-0.03, +1.13] | context |
+| RB target share | RB | change ↑ | target share (L3 - prior6) ≥ 3.2 pts | -0.74 [-1.24, -0.24] | -0.63 [-1.12, -0.13] | keep |
+| End-zone targets per game | TE | change ↑ | end-zone targets/G (L3 - prior6) ≥ 0.5 | -1.06 [-1.62, -0.49] | -0.56 [-1.16, +0.03] | context |
+| End-zone targets per game | TE | level | end-zone targets/G (L3) ≥ 0.67 | -1.76 [-2.57, -0.95] | -0.76 [-1.63, +0.10] | context |
+| Targets per game | TE | level | targets/G (L3) ≥ 7.7 | -1.85 [-2.78, -0.93] | -0.26 [-1.22, +0.71] | drop |
+| WOPR change | TE | change ↓ | WOPR (L3 - prior6) ≤ -0.083 | +0.63 [+0.04, +1.21] | +0.48 [-0.08, +1.04] | drop |
+| WOPR change | TE | change ↑ | WOPR (L3 - prior6) ≥ 0.16 | -1.00 [-1.77, -0.22] | -0.63 [-1.37, +0.10] | context |
+| Air-yards share | WR | change ↓ | air-yards share (L3 - prior6) ≤ -14 pts | +0.71 [+0.01, +1.41] | +0.66 [-0.04, +1.35] | context |
+| Targets per game | WR | change ↓ | targets/G (L3 - prior6) ≤ -1.2 | +0.50 [+0.12, +0.88] | +0.44 [+0.06, +0.81] | context |
+
+### Context only (near-misses)
+
+Same sign in fit and test, exactly one of the three further conditions missed:
+
+| Candidate | Pos | Shape | Rule | Effect test [90% CI] | n test | What missed |
+|---|---|---|---|---|---|---|
+| End-zone targets per game | RB | level | end-zone targets/G (L3) ≥ 0.33 | -0.64 [-1.40, +0.11] | 429 | test 90% interval includes 0 |
+| aDOT (air yards per target) | TE | deep + volume | aDOT (L3) ≥ 8.1 and target share (L3) ≥ 15 pts | -0.63 [-1.29, +0.02] | 335 | test 90% interval includes 0 |
+| Air-yards share | TE | level | air-yards share (L3) ≥ 28 pts | -1.41 [-2.51, -0.30] | 105 | only 105 flagged test rows (< 150) |
+| Deep targets per game | TE | level | deep targets/G (L3) ≥ 1.3 | -2.13 [-3.07, -1.19] | 95 | only 95 flagged test rows (< 150) |
+| Air-yards share | WR | change ↑ | air-yards share (L3 - prior6) ≥ 6.7 pts | -0.44 [-0.76, -0.11] | 1,516 | test effect -0.44 pts is smaller than 0.5 |
+| Deep targets per game | WR | change ↑ | deep targets/G (L3 - prior6) ≥ 1.3 | -0.76 [-1.57, +0.06] | 275 | test 90% interval includes 0 |
+| WOPR change | WR | change ↓ | WOPR (L3 - prior6) ≤ -0.16 | +0.49 [+0.00, +0.98] | 668 | test effect +0.49 pts is smaller than 0.5 |
+
+### Trend bands (for the ▲/▼ arrows)
+
+For each metric the sheet shows, the distribution of `L3 - prior6` over player-games of **2018-2025**, in
+`models/research/trend_bands.json`. The arrow rule: **▲ when L3 - prior6 >= +threshold, ▼ when <= -threshold; no arrow
+when the player has fewer than 9 earlier games** (the minimum prior games needed: 3 for L3 and 6 for prior). The
+threshold is the observed |change| whose flag rate is closest to 15% (ties go to fewer arrows), floored to three
+significant digits so the written rule flags exactly what was measured. Columns are over the **UM-projected
+player-games** (who the sheet lists); the last column is the same rule over every skill-position player-game, for
+comparison (a fifth receiver's share never moves, so it is a little lower). SD and percentiles are of the change; shares
+are in percentage points.
+
+| Metric | Pos | n | SD | 80th pct of abs(change) | 90th pct | **Threshold** | Flag rate at it | All player-games: threshold (rate) |
+|---|---|---|---|---|---|---|---|---|
+| Tgt% | RB | 7,385 | 4.4 pts | 5.5 pts | 7.1 pts | **6.2 pts** | 15.1% | 5.6 pts (15.0%) |
+| Tgt% | WR | 11,674 | 5.9 pts | 7.5 pts | 9.6 pts | **8.4 pts** | 15.0% | 8.0 pts (15.0%) |
+| Tgt% | TE | 4,731 | 5.0 pts | 6.2 pts | 8.3 pts | **7.1 pts** | 15.0% | 6.3 pts (15.0%) |
+| WOPR | RB | 7,385 | 0.0703 | 0.0864 | 0.114 | **0.0991** | 15.0% | 0.0893 (15.0%) |
+| WOPR | WR | 11,674 | 0.145 | 0.184 | 0.239 | **0.207** | 15.2% | 0.196 (15.1%) |
+| WOPR | TE | 4,731 | 0.109 | 0.138 | 0.183 | **0.157** | 15.1% | 0.138 (15.2%) |
+| Air-yards share | RB | 7,385 | 3.3 pts | 3.5 pts | 4.9 pts | **4.1 pts** | 15.1% | 3.5 pts (15.0%) |
+| Air-yards share | WR | 11,674 | 9.7 pts | 12.2 pts | 15.9 pts | **13.7 pts** | 15.2% | 12.9 pts (15.1%) |
+| Air-yards share | TE | 4,731 | 6.3 pts | 7.8 pts | 10.5 pts | **8.9 pts** | 15.0% | 7.7 pts (15.1%) |
+| Rush% | QB | 4,068 | 5.8 pts | 7.1 pts | 9.5 pts | **8.1 pts** | 15.0% | 8.2 pts (15.0%) |
+| Rush% | RB | 7,385 | 14.2 pts | 17.2 pts | 23.7 pts | **19.7 pts** | 15.1% | 18.0 pts (15.0%) |
+| Rec/G | RB | 7,385 | 1.32 | 1.67 | 2.17 | **2** | 13.3% | 1.66 (16.2%) |
+| Rec/G | WR | 11,674 | 1.58 | 2 | 2.67 | **2.33** | 14.9% | 2.16 (15.0%) |
+| Rec/G | TE | 4,731 | 1.43 | 1.83 | 2.33 | **2.16** | 14.7% | 1.83 (14.5%) |
+| RB Tgt% | RB | 7,385 | 4.4 pts | 5.5 pts | 7.1 pts | **6.2 pts** | 15.1% | 5.6 pts (15.0%) |
+| RZ/G | RB | 7,385 | 1.47 | 1.83 | 2.5 | **2.16** | 15.0% | 1.83 (15.9%) |
+| RZ/G | WR | 11,674 | 0.676 | 0.833 | 1.17 | **1** | 16.5% | 1 (12.7%) |
+| RZ/G | TE | 4,731 | 0.672 | 0.833 | 1.17 | **1** | 16.0% | 0.833 (16.6%) |
+| HVT/G | RB | 7,385 | 1.88 | 2.33 | 3 | **2.83** | 14.0% | 2.5 (14.3%) |
+| HVT/G | WR | 11,674 | 2.11 | 2.67 | 3.5 | **3.16** | 14.5% | 3 (13.9%) |
+| HVT/G | TE | 4,731 | 1.78 | 2.17 | 3 | **2.66** | 14.6% | 2.33 (14.4%) |
+| Snap% | RB | 7,385 | 14.4 pts | 17.3 pts | 23.5 pts | **20.0 pts** | 14.9% | 19.1 pts (15.1%) |
+| Snap% | WR | 11,674 | 15.6 pts | 18.3 pts | 26.2 pts | **21.6 pts** | 15.1% | 23.3 pts (15.1%) |
+| Snap% | TE | 4,731 | 14.4 pts | 16.8 pts | 23.5 pts | **19.6 pts** | 15.0% | 20.3 pts (14.9%) |
+| End-zone targets/G | RB | 7,385 | 0.15 | 0.167 | 0.333 | **0.333** | 11.9% | 0.333 (9.4%) |
+| End-zone targets/G | WR | 11,674 | 0.503 | 0.667 | 0.833 | **0.833** | 12.9% | 0.666 (17.5%) |
+| End-zone targets/G | TE | 4,731 | 0.439 | 0.5 | 0.667 | **0.666** | 17.5% | 0.666 (11.7%) |
+| Goal-line carry share | RB | 6,923 | 35.5 pts | 45.0 pts | 60.0 pts | **51.1 pts** | 13.4% | 45.4 pts (15.0%) |
+
+**Per position, not per metric.** A single threshold per metric flags very different shares of each position, because a WR's
+air-yards share moves more than an RB's:
+
+| Metric | Pooled threshold (85th pct, all positions) | Share of each position it would flag |
+|---|---|---|
+| Tgt% | 7.5 pts | RB 9%, WR 20%, TE 13% |
+| WOPR | 0.168 | RB 2%, WR 24%, TE 12% |
+| Air-yards share | 10.6 pts | RB 1%, WR 26%, TE 10% |
+| Rush% | 16.0 pts | QB 1%, RB 23% |
+| Rec/G | 2.16 | RB 11%, WR 18%, TE 15% |
+| RZ/G | 1.33 | RB 36%, WR 7%, TE 6% |
+| HVT/G | 3 | RB 11%, WR 16%, TE 10% |
+| Snap% | 20.8 pts | RB 14%, WR 16%, TE 13% |
+| End-zone targets/G | 0.666 | RB 1%, WR 22%, TE 18% |
+
+so the per-position thresholds above are the recommendation (the pooled ones are in the JSON if one number per metric is
+wanted). Counts move in sixths, so the discrete metrics cannot hit 15% exactly: Rec/G flags 13.3-14.9%, RZ/G flags 15.0-16.5%, HVT/G flags 14.0-14.6%, end-zone targets/G flags 11.9-17.5%.
+RB Tgt% is the same series as Tgt% for RBs and is listed twice because the sheet lists it twice.
+
+### Routes run
+
+**No free nflverse release has per-player routes run, and nothing here proxies it with snaps.** Checked: `pbp_participation`
+has a `route` column, but it is a single label per play (the targeted receiver's route on a pass play, blank otherwise) with
+no player attached, and it is only ~38% populated in 2016-2022; its `offense_players` lists who was on the field, which is
+snaps. `ftn_charting` has play-level flags (play action, motion, screen, drop, contested ball), `pfr_advstats` (rec / pass /
+rush) has broken tackles, drops and rating when targeted, `nextgen_stats` receiving has separation, cushion and air-yards
+share, and `snap_counts`, `stats_player`, ffopportunity `ep_weekly` and `stats_team` have no routes column.
+Targets per route run, and a routes-based target share, cannot be built from public data. Snap share (candidate 6) is the
+nearest thing available and is tested as itself.
+
+### What to show Sam
+
+Short version: **don't add a pile of new usage chips.** Most of what looked like a usage signal is UM being too confident
+about its highest-rated RBs, TEs and QBs: the top tenth of UM's projections miss by about 2 points, and any "high usage"
+flag lands there. Once I compare players UM rates the same, the level signals mostly disappear (a TE with 7.7+ targets a game
+misses UM by 1.85 points, but only 0.26 against other TEs UM rates alike). Fixing that is a job for the model (shrink its top
+end), not for a chip.
+
+What is left, after that, is **"spikes and slumps fade back"**, worth roughly half a point to a point of DK per player-week
+(the share of rows beating UM moves by 3-7 points, 1 for RB high-value touches): when a player's recent usage jumped, UM
+follows it too far, and when it dropped, UM cuts too deep. Twelve rows survive (the numbers in brackets are the UM-matched test effects, in DK points). The ones I would build first are **snap
+share down** for WRs (down 11+ points from the prior six games: -0.78), **TE targets per game up 2.2+ (-0.77) or down 2+
+(+1.09)**, **TE end-zone targets per game down 0.5+ (+1.06)**, and **RB high-value touches per game at 4.7+ (-0.58)**; then
+**RB targets per game up 1.2+ (-0.77)** and **WR deep targets per game down 0.83+ (+0.58)**. The ones that rest mostly on the
+2022-25 seasons (WR aDOT 18+, RB snap share down, TE deep-target drop, the two WR end-zone swings) I would hold back or label
+lower.
+
+Nothing at all came out of **QB designed rushes**, **team pass rate over expected**, **WOPR or air-yards share as levels**,
+**snap share going up**, or **goal-line carry share** beyond what UM's top end already explains. The ▲/▼ arrows are fine as
+context (they describe what happened to the player's usage), but the ▲ is not a reason to bump anyone: a rising player is
+usually already over-projected. The arrow thresholds are in the table above (about 8 points of target share for a WR, 6 for an
+RB, 7 for a TE; about 20 points of snap share for everyone). **Routes run** does not exist in any free release.
+
+### Notes, deviations and caveats for R6
+
+- **`dfs.model` does not join snap counts** (it only declares the URL), so "pfr join, as dfs.model does" had nothing to copy.
+  Snap counts (PFR ids) are joined to gsis ids through nflverse's `players.parquet` `pfr_id` crosswalk, dropping any id that
+  does not map one-to-one: 99.9% of skill-position player-games have a snap row. Cache additions: `snaps_<season>.parquet`,
+  `players.parquet`, and an `air_yards` pbp column (the pbp cache re-downloads, about 20 MB a season).
+- **QB designed rushes.** In this nflverse release a scramble is a `run` play with `pass == 1`, `rush == 0` and
+  `qb_scramble == 1`, so "a rush that is not a scramble" is `play_type == "run"` and `qb_scramble == 0`; kneels are their
+  own play type and are not carries here (official carry totals include them; with kneels added back, pbp carries equal
+  `stats_player` carries on 99.9986% of player-games, and targets and air yards match on the same share).
+- **Goal-line share** counts scrambles and sneaks as team carries and excludes kneels and two-point tries.
+- **Windows cross seasons**, as `dfs.model` does (a week-1 L3 uses last season's games); if the sheet only has the current
+  season's games, week 9 is the first week with a full change window.
+- **UM is still the baseline** (R1-R5 caveat): the same out-of-fold UM, so for 2022-25 the WR and DST GBMs saw other
+  seasons' games, which makes UM harder to beat there.
+- **The UM-matched control is mine, not the brief's.** The brief's rule is the one called "keep" in every table; the match is
+  reported beside it because it changes the conclusion.
+- **Selection is two-sided.** The best threshold was chosen by |t| regardless of sign; the shuffle baseline includes that
+  freedom.
+- **Salary-based chips** remain untestable (no historical salary).
+
+---
+
 ## Anything that contradicts the local round's design
 
 - The **60% next-man-up rule (0.30 to the rest of the position, 0.10 spill, nothing unassigned)** is contradicted for targets and approximate for carries (R1).
@@ -744,6 +1117,8 @@ By position:
 - **BUY↑** does nothing; **FADE↓** is a TE signal; only **RB carry-share jumps** survive USAGE (R3).
 - **A 20 mph wind flag** is too high and too rare; wind (and rain, and cold) is an under-priced total (R4).
 - Home field is unmodelled for QBs (R5), and UM's QB / RB / TE projection is the blend, which has no home term.
+- **UM's QB / RB / TE blend over-projects its top decile by about 2 points** (R6), and most "high usage" flags are just that.
+  The usage signals that survive a UM-matched comparison are about recent *changes* (spikes and slumps fade back), not levels.
 
 ## Caveats
 
@@ -756,7 +1131,8 @@ By position:
 - **R3 TD excess is counted in touchdowns** (the task did not say points).
 - Absences are first misses (see R1), so a returning-from-injury or multi-week story is not what is measured.
 - Each table cell is a separate test; position-level highlights (TE fade, QB home, QB divisional) were not corrected
-  for the number of cells examined.
+  for the number of cells examined. (R6 is the exception: it reports how many keeps chance alone would give, from a
+  shuffle baseline.)
 
 ## Constants to change
 

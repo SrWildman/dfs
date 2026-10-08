@@ -47,12 +47,13 @@ def research_fetch(
 
 @research_app.command("run")
 def research_run(
-    study: str = typer.Option("all", "--study", help="r1, r2, r3, r4, r5 or all."),
+    study: str = typer.Option("all", "--study", help="r1, r2, r3, r4, r5, r6 or all."),
 ) -> None:
     """Rebuild the study outputs under models/research/ from the cache (no network).
 
     r1 redistribution of a missing starter's volume, r2 matchup weights, r3 signal thresholds, r4 weather,
-    r5 quick checks (short week, divisional, home / away, back-to-back road).
+    r5 quick checks (short week, divisional, home / away, back-to-back road), r6 usage signals and the
+    trend-arrow noise bands.
     """
     from dfs.research import data, pipeline
 

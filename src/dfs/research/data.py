@@ -27,10 +27,12 @@ SEASONS = list(range(2014, 2026))
 
 _NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 INJURIES_URL = _NFLVERSE + "/injuries/injuries_{season}.parquet"
+SNAPS_URL = _NFLVERSE + "/snap_counts/snap_counts_{season}.parquet"
+PLAYERS_URL = _NFLVERSE + "/players/players.parquet"
 PBP_URL = _NFLVERSE + "/pbp/play_by_play_{season}.parquet"
 
 # Only what the studies read. R2: EPA / pace / PROE by team; R3: red-zone opportunity by player;
-# R4: weather text, wind, temp, roof and pass rate.
+# R4: weather text, wind, temp, roof and pass rate; R6: air yards (end-zone targets).
 PBP_COLUMNS = [
     "game_id",
     "season",
@@ -55,6 +57,7 @@ PBP_COLUMNS = [
     "xpass",
     "pass_oe",
     "yardline_100",
+    "air_yards",
     "receiver_player_id",
     "rusher_player_id",
     "passer_player_id",
@@ -76,6 +79,19 @@ INJURY_COLUMNS = [
     "practice_status",
 ]
 
+# R6: offensive snap share (keyed on the PFR id) and the PFR -> gsis crosswalk.
+SNAP_COLUMNS = [
+    "season",
+    "game_type",
+    "week",
+    "team",
+    "pfr_player_id",
+    "position",
+    "offense_snaps",
+    "offense_pct",
+]
+PLAYER_COLUMNS = ["gsis_id", "pfr_id", "display_name", "position"]
+
 _ATTEMPTS = 4
 
 
@@ -85,6 +101,14 @@ class ResearchDataError(Exception):
 
 def injuries_path(season: int) -> Path:
     return CACHE_DIR / f"injuries_{season}.parquet"
+
+
+def snaps_path(season: int) -> Path:
+    return CACHE_DIR / f"snaps_{season}.parquet"
+
+
+def players_path() -> Path:
+    return CACHE_DIR / "players.parquet"
 
 
 def pbp_path(season: int) -> Path:
@@ -126,6 +150,24 @@ def fetch_injuries(season: int) -> Path:
     return path
 
 
+def fetch_snaps(season: int) -> Path:
+    path = snaps_path(season)
+    frame = reduce_parquet(
+        _download(SNAPS_URL.format(season=season), f"{season} snap counts"), SNAP_COLUMNS, path.name
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(path, index=False)
+    return path
+
+
+def fetch_players() -> Path:
+    path = players_path()
+    frame = reduce_parquet(_download(PLAYERS_URL, "players.parquet"), PLAYER_COLUMNS, path.name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(path, index=False)
+    return path
+
+
 def fetch_pbp(season: int) -> Path:
     path = pbp_path(season)
     frame = reduce_parquet(_download(PBP_URL.format(season=season), f"{season} pbp"), PBP_COLUMNS, path.name)
@@ -155,6 +197,12 @@ def fetch_all(seasons: list[int] | None = None, *, refresh: bool = False, log=la
         if refresh or not pbp_path(season).exists():
             log(f"fetching pbp {season}")
             fetch_pbp(season)
+        if refresh or not snaps_path(season).exists():
+            log(f"fetching snap counts {season}")
+            fetch_snaps(season)
+    if refresh or not players_path().exists():
+        log("fetching the players crosswalk")
+        fetch_players()
 
 
 def _read_cached(path: Path, hint: str) -> pd.DataFrame:
@@ -179,6 +227,21 @@ def read_pbp(seasons: list[int] | None = None) -> pd.DataFrame:
     for col in ("posteam", "defteam"):
         pbp[col] = pbp[col].map(model_data.normalize_team)
     return pbp
+
+
+def read_snaps(seasons: list[int] | None = None) -> pd.DataFrame:
+    """Regular-season offensive snap counts, one row per (PFR player, team, week)."""
+    frames = [_read_cached(snaps_path(s), "snaps") for s in seasons or SEASONS]
+    snaps = pd.concat(frames, ignore_index=True)
+    snaps = snaps[snaps["game_type"] == "REG"].copy()
+    snaps["team"] = snaps["team"].map(model_data.normalize_team)
+    return snaps.reset_index(drop=True)
+
+
+def read_players() -> pd.DataFrame:
+    """The PFR id -> gsis id crosswalk (`players.parquet`), rows with both ids."""
+    players = _read_cached(players_path(), "players")
+    return players[players["gsis_id"].notna() & players["pfr_id"].notna()].reset_index(drop=True)
 
 
 def _model_read(call: Callable[[], pd.DataFrame]) -> pd.DataFrame:
