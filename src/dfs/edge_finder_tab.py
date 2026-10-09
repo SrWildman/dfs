@@ -5,11 +5,13 @@ Nothing here reads a sheet or the network. `load_inputs` reads what `edge_finder
 them into rows, groups and formatting instructions; `sheet_edge_finder.write_tab` writes them. Python writes
 the tab on every sync (it is a view of the sync, not a formula tab).
 
-**Columns (fixed across sections).** `A`-`D` Name, Pos, Team, Salary; `E`-`J` section-specific (six slots,
-named by each section's header row); then, named in `TRAILING_HEADERS`: `K` **Why** (the plain-English
-reason, wide), `L` **Do** (a verb), `M` **Pool** (the player's current pool state, a formula), `N` **Set**
-(the action dropdown the Apps Script reads), `O` the `↗` link to his EdgeRaw row, `P` **Id** (his DraftKings
-id, hidden: the Apps Script finds the player by it, never by name), and `Q` a hidden group key (see below).
+**Columns (fixed across sections).** `A` **Pool** (the player's pool state and its dropdown: a formula the
+bound Apps Script restores after an edit, see `sheet_pool_cells`), `B`-`E` Name, Pos, Team, Salary, `F`
+**Own%** (blank until ownership publishes); `G`-`L` section-specific (six slots, named by each section's
+header row); then, named in `TRAILING_HEADERS`: `M` **Do** (a verb), `N` **Why** (the one most useful fact,
+about 60 characters, last so it can overflow right; the full text is the cell's note), `O` **Id** (his
+DraftKings id, hidden: the Apps Script and every formula find the player by it, never by name), and `P` a
+hidden group key (see below).
 
 **Sections, top to bottom:** cash core; GPP upside; punt plays; projection disagreements; injury beneficiaries
 (carries only) with the absent regulars as context; usage trends (context); matchups (context, with each
@@ -26,6 +28,10 @@ after a rewrite, even when the count in a header changes.
 **Do verbs.** The static verb for each row is chosen here (`cash_verb`, `gpp_verb`, ...); the sheet turns it
 into a formula that reads "In pool (Cash)" instead whenever the player is already pooled, so the override is
 live.
+
+**Short Why, full note.** Every player row carries two texts: `why` (what the cell shows, `SHORT_WHY_CHARS` at
+most, number first, nothing another column on the row already shows) and `why_full` (the whole reason, kept as
+the cell's note). `Layout.notes` maps a row to its note.
 """
 
 from __future__ import annotations
@@ -52,7 +58,7 @@ from dfs.edge_finder import (
 from dfs.kickoff import format_et, parse_kickoff
 from dfs.paths import CURRENT_DIR
 from dfs.research_constants import ResearchConstantsError, signal_thresholds
-from dfs.sheet_pool_cells import SET_OPTIONS  # noqa: F401 - re-exported for the Edge Finder writer
+from dfs.sheet_pool_cells import POOL_OPTIONS  # noqa: F401 - re-exported for the Edge Finder writer
 
 EDGE_FINDER_TAB = "Edge Finder"
 SECTION_TOP_N = 5  # the Board's one-line summary panel
@@ -76,40 +82,54 @@ OWN_STAR_BOTTOM_HALF = 0.5
 POSITIONS = ["QB", "RB", "WR", "TE", "DST"]
 OUT_STATUSES = {"OUT", "IR", "D"}
 STAR = "★"
+LEVERAGE_MIN_LEV = 25  # `Lev` at or above this, with Boom% in the top half, is "GPP leverage"
+LEVERAGE_ROWS_PER_POSITION = 5
+CHALK_ROWS_PER_POSITION = 3
+CHALK_THIRD = 1 / 3  # Bust% in the bottom third of the position -> eat; top third -> fade candidate
+OWN_NOT_OUT = "Ownership not out yet; GPP leverage appears when it does."
 
-LEAD = ["Name", "Pos", "Team", "Salary"]  # A-D
-SLOTS = 6  # E-J
-TRAILING_HEADERS = ["Why", "Do", "Pool", "Set", "↗", "Id"]  # K-P
-COLUMN_COUNT = len(LEAD) + SLOTS + len(TRAILING_HEADERS) + 1  # + Q, the hidden group key
+POOL_HEADER = "Pool"
+LEAD = [POOL_HEADER, "Name", "Pos", "Team", "Salary", "Own%"]  # A-F
+SLOTS = 6  # G-L
+TRAILING_HEADERS = ["Do", "Why", "Id"]  # M-O
+COLUMN_COUNT = len(LEAD) + SLOTS + len(TRAILING_HEADERS) + 1  # + P, the hidden group key
 FIRST_TRAILING = len(LEAD) + SLOTS
+SHORT_WHY_CHARS = 60  # what the Why cell shows; the rest is the cell's note
 
 
 def column_letter(index: int) -> str:
     return chr(ord("A") + index)
 
 
+def _lead_letter(header: str) -> str:
+    return column_letter(LEAD.index(header))
+
+
 def _trailing_letter(header: str) -> str:
     return column_letter(FIRST_TRAILING + TRAILING_HEADERS.index(header))
 
 
-WHY_COL = _trailing_letter("Why")
+POOL_COL = _lead_letter(POOL_HEADER)
+NAME_COL = _lead_letter("Name")
+OWN_COL = _lead_letter("Own%")
 DO_COL = _trailing_letter("Do")
-POOL_COL = _trailing_letter("Pool")
-SET_COL = _trailing_letter("Set")
-LINK_COL = _trailing_letter("↗")
+WHY_COL = _trailing_letter("Why")
 ID_COL = _trailing_letter("Id")
 KEY_COL = column_letter(COLUMN_COUNT - 1)
 LAST_COLUMN = KEY_COL
+LAST_VISIBLE_COL = WHY_COL  # Id and the group key are hidden
 
 CASH_COLUMNS = ["CalPts", "Hit3x%", "Bust%", "ProjPts", "Rank", "Edge"]
-GPP_COLUMNS = ["CalPts", "Boom%", "CeilM", "Own%", "Rank", "Edge"]
+GPP_COLUMNS = ["CalPts", "Boom%", "CeilM", "Lev", "Rank", "Edge"]
+LEVERAGE_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "Rank", "Edge"]
+CHALK_COLUMNS = ["CalPts", "Boom%", "Bust%", "ProjPts", "Rank", "Edge"]
 PUNT_COLUMNS = ["CalPts", "ValAdj", "Hit3x%", "Rank", "Edge"]
 DISAGREE_COLUMNS = ["TFFB", "Sleeper", "FantasyPros", "CalPts", "Diff", "Edge"]
 BENEFICIARY_COLUMNS = ["Gain Car/G", "Gain xFP/G", "Method", "Priced in?", "Edge"]
 ABSENCE_COLUMNS = ["Role", "Tgt/G", "Car/G", "Games missed"]
 TREND_HEADERS = ["Metric", "Last 3", "Earlier", "Change", "Trend"]
-MATCHUP_LEAD = ["Matchup", "Pos", "", "Grade"]
-MATCHUP_COLUMNS = ["Top 3 / CalPts", "Hit3x%", "Boom%"]
+MATCHUP_LEAD = ["", "Matchup", "Pos", "", "Grade", ""]
+MATCHUP_COLUMNS = ["CalPts", "Hit3x%", "Boom%"]  # a team row names its top players in the first slot
 SIGNAL_COLUMNS = ["Token", "xFP/G", "DK/G L3"]
 R6_SIGNAL_COLUMNS = ["Read", "CalPts", "ProjPts"]
 
@@ -120,7 +140,18 @@ MEANINGS = {
     ),
     "GPP UPSIDE": (
         "Players with the best chance to score 4× their salary, the pace that wins tournaments.  ·  Do: pool "
-        f"the 'GPP add' rows for tournaments; {STAR} marks the low-owned ones once ownership is out."
+        f"the 'GPP add' and 'GPP leverage' rows for tournaments. {STAR} marks a top-quartile Boom% that is "
+        "also owned below his position's median (once ownership is out)."
+    ),
+    "LEVERAGE PLAYS": (
+        "The best Boom% against ownership: Lev is his Boom% rank minus his Own% rank among his position's "
+        "players (+35 = far more upside than ownership).  ·  Do: pool 'GPP leverage' rows for tournaments; "
+        "ownership is a large-field projection, so it is directional for small fields."
+    ),
+    "CHALK TO FADE OR EAT": (
+        "The 3 highest-owned players at each position.  ·  Do: 'Chalk: eat' when his bust odds are in the "
+        "bottom third of his position (safe to roster), 'Chalk: fade candidate' when they are in the top "
+        "third."
     ),
     "PUNT PLAYS": (
         "The best value within $1,000 of each position's cheapest salary on the slate.  ·  Do: pick one to "
@@ -207,11 +238,14 @@ class Layout:
     overflow_rows: list[int] = field(default_factory=list)
     team_rows: list[int] = field(default_factory=list)
     muted_rows: list[int] = field(default_factory=list)  # static muting (thin sample, questionable, unproven)
-    player_rows: list[int] = field(default_factory=list)  # rows with Pool / Set / link cells
+    player_rows: list[int] = field(default_factory=list)  # rows with a Pool control and an Id
+    notes: dict[int, str] = field(default_factory=dict)  # player row -> the full Why, kept as the cell's note
     status_rows: list[int] = field(default_factory=list)
     groups: list[Group] = field(default_factory=list)
     all_links: dict[int, str] = field(default_factory=dict)  # section row -> EdgeRaw filter view title
     percent_cells: list[str] = field(default_factory=list)
+    own_cells: list[str] = field(default_factory=list)  # Own% ranges (a fraction shown as a percent)
+    lev_cells: list[str] = field(default_factory=list)  # Lev ranges (a signed whole number)
     money_cells: list[str] = field(default_factory=list)
     point_cells: list[str] = field(default_factory=list)
     chip_ranges: list[str] = field(default_factory=list)  # `Edge` / token cells
@@ -387,6 +421,7 @@ class _Builder:
         self.layout = Layout(rows=[])
         self._section: tuple[str, int] | None = None
         self._open: tuple[str, int] | None = None  # (key, header row) of an open depth-2 group
+        self._edge_last = False  # the current header's last slot is `Edge`: it sits in the final slot column
 
     @property
     def next_row(self) -> int:
@@ -444,15 +479,20 @@ class _Builder:
         self.layout.note_rows.append(self.add([text]))
 
     def header(self, slots: list[str], *, lead: list[str] | None = None) -> int:
-        names = [*(lead or LEAD), *slots, *[""] * (SLOTS - len(slots)), *TRAILING_HEADERS]
+        """A column-header row. A section whose last slot is `Edge` (the chips) always shows it in the same,
+        final slot column, with any unused slots blank before it, so the chips line up down the whole tab."""
+        self._edge_last = bool(slots) and slots[-1] == "Edge"
+        slots = self._edge_to_the_end(slots)
+        names = [*(lead or LEAD), *slots, *TRAILING_HEADERS]
         row = self.add(names)
         self.layout.header_rows.append(row)
         return row
 
     # ---- groups ------------------------------------------------------------------------------
     def open_group(self, header_text: str, key: str, *, team: bool = False) -> int:
-        """A header row (the toggle sits on it) whose following rows form a collapsed level-2 group."""
-        row = self.add([header_text])
+        """A header row (the toggle sits on it) whose following rows form a collapsed level-2 group. Its text
+        starts in the Name column, under the section's names, not in the narrow Pool column."""
+        row = self.add(["", header_text])
         (self.layout.team_rows if team else self.layout.overflow_rows).append(row)
         self._open = (key, row)
         self.set_key(row, key)
@@ -481,17 +521,49 @@ class _Builder:
                 verb = f"{verb} · {LEAN_OVER}"
         return why, verb, usage_r6.weaker_only(sig, self.r6.chips)
 
+    def _edge_to_the_end(self, slots: list) -> list:
+        """`slots` padded to `SLOTS`, with the Edge value last when the section's header ends in `Edge`."""
+        slots = list(slots)
+        if self._edge_last and slots:
+            return [*slots[:-1], *[""] * (SLOTS - len(slots)), slots[-1]]
+        return [*slots, *[""] * (SLOTS - len(slots))]
+
     def player_row(
-        self, lead: list, slots: list, *, why: str, verb: str, pid, muted: bool = False, gsis=None, edge=""
+        self,
+        lead: list,
+        slots: list,
+        *,
+        why: str,
+        verb: str,
+        pid,
+        short: str | None = None,
+        muted: bool = False,
+        gsis=None,
+        edge="",
     ) -> int:
+        """One player row: Pool (filled by the writer), `lead` (Name, Pos, Team, Salary, Own%), the section's
+        `slots`, Do, Why, Id. `why` is the whole reason (the cell's note); `short` is what the cell shows (the
+        whole reason cut to `SHORT_WHY_CHARS` when not given)."""
         why, verb, weak = self.r6_text(gsis, edge, why, verb)
         muted = muted or weak
-        slots = [*slots, *[""] * (SLOTS - len(slots))]
-        row = self.add([*lead, *slots, why, verb, "", "", "", pid])
+        slots = self._edge_to_the_end(slots)
+        row = self.add(["", *lead, *slots, verb, short_why(short if short is not None else why), pid])
         self.layout.player_rows.append(row)
+        self.layout.notes[row] = why
         if muted:
             self.layout.muted_rows.append(row)
         return row
+
+
+def short_why(text: str, limit: int = SHORT_WHY_CHARS) -> str:
+    """The cell's version of a reason: its first clause (up to the first `;` or `. `), cut at a word boundary
+    to `limit` characters with an ellipsis. Specific rows pass their own short text instead."""
+    text = (text or "").strip()
+    cut = min((i for i in (text.find("; "), text.find(". ")) if i > 0), default=len(text))
+    text = text[:cut]
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rsplit(" ", 1)[0].rstrip(",:·-") + "…"
 
 
 def on_slate(beneficiaries: pd.DataFrame, by_gsis: pd.DataFrame) -> pd.DataFrame:
@@ -541,7 +613,7 @@ def _injury_report_line(info: dict | None) -> str:
     return text
 
 
-def _status_lines(inputs: Inputs) -> list[str]:
+def _status_lines(inputs: Inputs, published: bool = True) -> list[str]:
     s = inputs.status
     weeks = s.get("calpts_weeks") or []
     trained = f"Weeks {min(weeks)}–{max(weeks)}" if weeks else "no earlier weeks (CalPts = AggPts)"
@@ -560,6 +632,7 @@ def _status_lines(inputs: Inputs) -> list[str]:
         f"CalPts trained on {trained} ({sources}). The context columns are not proven to beat projections; "
         "Model Check tracks every one.",
         f"Run the final `dfs sync --live` about 90 minutes before kickoff.{first_kick}",
+        *([] if published else [OWN_NOT_OUT]),
     ]
 
 
@@ -638,17 +711,47 @@ def disagreement_reason(row: pd.Series, fitted: calibration.Calibration | None) 
     return "; ".join(parts) if parts else "sources agree with TFFB"
 
 
+def disagreement_short(row: pd.Series, fitted: calibration.Calibration | None) -> str:
+    """The two parts of the gap in one line: `-1.2 other sources, +0.4 bias`. The whole reason is the note."""
+    why = calibration.explain_gap(row, fitted)
+    if why is None:
+        return "sources disagree with TFFB"
+    parts = []
+    if abs(why.sources) >= 0.05:
+        parts.append(f"{why.sources:+.1f} other sources")
+    if abs(why.bias) >= 0.05:
+        parts.append(f"{why.bias:+.1f} bias")
+    return ", ".join(parts) or "sources agree with TFFB"
+
+
 def cash_verb(rank: int, bust: float, bust_median: float) -> str:
     """`Cash add`: top `CASH_ADD_TOP_N` Hit3x% at the position AND Bust% below the position median."""
     return "Cash add" if rank <= CASH_ADD_TOP_N and bust < bust_median else "Cash option"
 
 
-def gpp_verb(boom: float, boom_cut: float, starred: bool) -> str:
-    """`GPP leverage`: a top-quartile Boom% that is also a star (low owned, once ownership is out);
-    `GPP add`: top-quartile Boom%; `GPP option` otherwise."""
-    if boom >= boom_cut:
-        return f"GPP leverage {STAR}" if starred else "GPP add"
-    return "GPP option"
+def gpp_verb(
+    boom: float, boom_cut: float, starred: bool, lev: float | None = None, boom_half: bool = False
+) -> str:
+    """`GPP leverage`: `Lev` at least `LEVERAGE_MIN_LEV` with Boom% in the top half of his position;
+    `GPP add`: top-quartile Boom%; `GPP option` otherwise. A star (top-quartile Boom% owned below his
+    position's median, `gpp_upside` / `_gpp_section`) is appended to any of them."""
+    if lev is not None and pd.notna(lev) and lev >= LEVERAGE_MIN_LEV and boom_half:
+        verb = "GPP leverage"
+    elif boom >= boom_cut:
+        verb = "GPP add"
+    else:
+        verb = "GPP option"
+    return f"{verb} {STAR}" if starred else verb
+
+
+def chalk_verb(bust_pct: float) -> str:
+    """`Chalk: eat` when his Bust% rank within the position is in the bottom third (safe), `Chalk: fade
+    candidate` in the top third, plain `Chalk` between. `bust_pct` is that rank, 0-1 (1 = most bust-prone)."""
+    if bust_pct <= CHALK_THIRD:
+        return "Chalk: eat"
+    if bust_pct >= 1 - CHALK_THIRD:
+        return "Chalk: fade candidate"
+    return "Chalk"
 
 
 def cash_verdict(position: str, best: float, history: dict[str, tuple[float, int]]) -> str | None:
@@ -674,17 +777,82 @@ def team_players(edge: pd.DataFrame, team: str, position: str) -> pd.DataFrame:
     return part.sort_values("_c", ascending=False).head(MATCHUP_PLAYERS)
 
 
+def with_leverage(edge: pd.DataFrame) -> pd.DataFrame:
+    """The edge frame with `BoomRank`, `OwnRank`, `Lev` and `BoomHalf`, all within position among the
+    rosterable, available players who have both a `Boom%` and an `Own%`: the percentile rank (0-100) of each,
+    `Lev` their difference (Boom% rank minus Own% rank, rounded), `BoomHalf` whether his Boom% is at or above
+    the position's median. All NaN / False for a player outside that pool, and for everyone while ownership is
+    unpublished. Reads `Own%`, changes none of the projection columns."""
+    out = edge.copy()
+    out["BoomRank"] = np.nan
+    out["OwnRank"] = np.nan
+    out["Lev"] = np.nan
+    out["BoomHalf"] = False
+    pool = rosterable(out) & available(out)
+    for position in POSITIONS:
+        at = out[pool & (out["Position"] == position)]
+        boom = pd.to_numeric(at["Boom%"], errors="coerce")
+        own = pd.to_numeric(at["Own%"], errors="coerce")
+        ok = boom.notna() & own.notna()
+        if "OwnStatus" in at.columns:
+            ok &= at["OwnStatus"] == "real"  # a placeholder 0 before ownership publishes is not ownership
+        if ok.sum() < 2:
+            continue
+        boom, own = boom[ok], own[ok]
+        boom_pct, own_pct = boom.rank(pct=True) * 100, own.rank(pct=True) * 100
+        out.loc[boom.index, "BoomRank"] = boom_pct.round()
+        out.loc[own.index, "OwnRank"] = own_pct.round()
+        out.loc[boom.index, "Lev"] = (boom_pct - own_pct).round()
+        out.loc[boom.index, "BoomHalf"] = boom >= boom.median()
+    return out
+
+
+def leverage_plays(edge: pd.DataFrame, position: str) -> pd.DataFrame:
+    """Players at a position with Boom% in the top half and a `Lev`, best `Lev` first."""
+    part = edge[(edge["Position"] == position) & edge["BoomHalf"] & edge["Lev"].notna()]
+    return part.sort_values(["Lev", "Boom%"], ascending=False)
+
+
+def chalk_players(edge: pd.DataFrame, position: str) -> pd.DataFrame:
+    """The highest-owned rosterable, available players at a position, with `BustPct`: his Bust% rank within
+    that position's pool, 0-1 (1 = the most bust-prone)."""
+    pool = rosterable(edge) & available(edge) & (edge["Position"] == position)
+    part = edge[pool & pd.to_numeric(edge["Own%"], errors="coerce").gt(0)].copy()
+    if part.empty:
+        return part
+    bust = pd.to_numeric(edge.loc[pool, "Bust%"], errors="coerce")
+    part["BustPct"] = bust.rank(pct=True).reindex(part.index)
+    return part.sort_values("Own%", ascending=False)
+
+
 # ---------------------------------------------------------------------------------------------
 # The layout
 # ---------------------------------------------------------------------------------------------
 
 
 def _lead(r, pos: str | None = None) -> list:
-    return [r["Name"], pos or r["Position"], r["Team"], r["Salary"]]
+    """Name, Pos, Team, Salary and Own% (blank until ownership publishes)."""
+    return [r["Name"], pos or r["Position"], r["Team"], r["Salary"], r.get("Own%", "")]
 
 
 def _muted(r) -> bool:
     return _is_thin(r.get("Games"))
+
+
+def _vs_tffb(r) -> str:
+    """`CalPts 1.8 under TFFB`: the one fact about the projection the other columns do not state."""
+    diff = float(r["CalPts"]) - float(r["ProjPts"])
+    if abs(diff) < 0.05:
+        return "CalPts matches TFFB"
+    return f"CalPts {abs(diff):.1f} {'over' if diff > 0 else 'under'} TFFB"
+
+
+def _short(*parts: str) -> str:
+    return " · ".join(p for p in parts if p)
+
+
+def _thin_short(games) -> str:
+    return f"{int(games)} game{'s' if int(games) != 1 else ''}" if _is_thin(games) else ""
 
 
 def _ranked_blocks(
@@ -733,6 +901,8 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
         for title in (
             "CASH CORE  —  best Hit3x% per position",
             "GPP UPSIDE  —  best Boom% per position",
+            "LEVERAGE PLAYS  —  the most upside for the ownership",
+            "CHALK TO FADE OR EAT  —  the highest-owned at each position",
             "PUNT PLAYS  —  the best value near each position's cheapest salary",
             "PROJECTION DISAGREEMENTS  —  where CalPts differs most from TFFB",
             "INJURY BENEFICIARIES  —  who inherits a back's carries; absences are context",
@@ -745,16 +915,20 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
             b.note("Nothing yet.")
         return b.layout
 
-    edge = with_games(inputs.edge, inputs.players)
+    edge = with_leverage(with_games(inputs.edge, inputs.players))
     for col in ("SleeperPts", "FantasyProsPts"):
         if col in inputs.players.columns and col not in edge.columns:
             edge = edge.merge(inputs.players[["Id", col]].drop_duplicates("Id"), on="Id", how="left")
-    for line in _status_lines(inputs):
-        b.layout.status_rows.append(b.add([line]))
     published = (edge.get("OwnStatus", pd.Series(dtype=object)) == "real").any()
+    if not published:
+        edge["Own%"] = np.nan  # defensive: the status line and every Own% cell agree it is not out
+    for line in _status_lines(inputs, published):
+        b.layout.status_rows.append(b.add([line]))
 
     _cash_section(b, edge, inputs)
     _gpp_section(b, edge, published)
+    _leverage_section(b, edge, published)
+    _chalk_section(b, edge, published)
     _punt_section(b, edge)
     _disagreement_section(b, edge, inputs.calibration)
     by_gsis = (
@@ -782,6 +956,7 @@ def _cash_section(b: _Builder, edge: pd.DataFrame, inputs: Inputs) -> None:
             b.verdict(text)
 
     def row_for(pos: str, rank: int, total: int, r: pd.Series) -> None:
+        # Cash rows never mention ownership: it is a large-field projection and Sam ignores it in cash.
         why = _join(
             f"{r['Hit3x%']:.0f}% to reach 3x salary, {r['Bust%']:.0f}% to bust (under 2x)",
             f"CalPts {r['CalPts']:.1f} vs TFFB {r['ProjPts']:.1f}",
@@ -791,6 +966,7 @@ def _cash_section(b: _Builder, edge: pd.DataFrame, inputs: Inputs) -> None:
             _lead(r, pos),
             [r["CalPts"], r["Hit3x%"], r["Bust%"], r["ProjPts"], f"#{rank} of {total}", r["Edge"]],
             why=why,
+            short=_short(_vs_tffb(r), _thin_short(r.get("Games"))),
             verb=cash_verb(rank, r["Bust%"], medians.get(pos, np.inf)),
             pid=r["Id"],
             gsis=r.get("GsisId"),
@@ -805,6 +981,8 @@ def _cash_section(b: _Builder, edge: pd.DataFrame, inputs: Inputs) -> None:
 def _gpp_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
     b.begin_section("GPP UPSIDE  —  best Boom% per position", link="GPP")
     b.header(GPP_COLUMNS)
+    if not published:
+        b.note(OWN_NOT_OUT)
     parts = {pos: gpp_upside(edge, pos) for pos in POSITIONS}
     cuts = {}
     for pos, part in parts.items():
@@ -822,24 +1000,109 @@ def _gpp_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
         starred = bool(
             published and own != "" and pd.notna(own_cut) and r["Boom%"] >= boom_cut and own <= own_cut
         )
+        lev = r["Lev"] if pd.notna(r["Lev"]) else ""
         why = _join(
             f"{r['Boom%']:.0f}% to reach 4x salary; the model's 85th percentile is {r['CeilM']:.1f} pts",
-            f"owned {own:.0f}%" if own != "" else ("" if published else "ownership not out yet"),
+            f"owned {own:.1%}" if own != "" else ("" if published else "ownership not out yet"),
+            f"Lev {lev:+.0f} (Boom% rank minus Own% rank among {_plural(pos)})" if lev != "" else "",
             "low-owned for his upside" if starred else "",
             _thin_note(r.get("Games")),
         )
+        short = (
+            "Low-owned for his upside"
+            if starred
+            else (
+                f"Boom {r['BoomRank']:.0f}th pct, owned {r['OwnRank']:.0f}th pct"
+                if lev != ""
+                else ("Top-quartile Boom%" if r["Boom%"] >= boom_cut else "")
+            )
+        )
         b.player_row(
             _lead(r, pos),
-            [r["CalPts"], r["Boom%"], r["CeilM"], own, f"#{rank} of {total}", r["Edge"]],
+            [r["CalPts"], r["Boom%"], r["CeilM"], lev, f"#{rank} of {total}", r["Edge"]],
             why=why,
-            verb=gpp_verb(r["Boom%"], boom_cut, starred),
+            short=_short(short, _thin_short(r.get("Games"))),
+            verb=gpp_verb(r["Boom%"], boom_cut, starred, r["Lev"], bool(r["BoomHalf"])),
             pid=r["Id"],
             gsis=r.get("GsisId"),
             edge=r.get("Edge", ""),
             muted=_muted(r),
         )
 
-    _ranked_blocks(b, parts, row_for, colour={"Boom%": False})
+    _ranked_blocks(b, parts, row_for, colour={"Boom%": False, "Lev": False})
+    b.end_section()
+
+
+def _leverage_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
+    """The top `LEVERAGE_ROWS_PER_POSITION` at each position by `Lev`, among players with a top-half Boom%."""
+    b.begin_section("LEVERAGE PLAYS  —  the most upside for the ownership (Lev = Boom% rank minus Own% rank)")
+    b.header(LEVERAGE_COLUMNS)
+    if not published:
+        b.note(OWN_NOT_OUT)
+        b.end_section()
+        return
+    for pos in POSITIONS:
+        part = leverage_plays(edge, pos)
+        if part.empty:
+            continue
+        shown = part.head(LEVERAGE_ROWS_PER_POSITION)
+        b.sub(f"{pos}  —  top {len(shown)} of {len(part)} by Lev")
+        first = b.next_row
+        for rank, (_, r) in enumerate(shown.iterrows(), start=1):
+            lev = r["Lev"]
+            b.player_row(
+                _lead(r, pos),
+                [r["CalPts"], r["Boom%"], r["Bust%"], lev, f"#{rank} of {len(part)}", r["Edge"]],
+                why=_join(
+                    f"Lev {lev:+.0f}: Boom% is at the {r['BoomRank']:.0f}th percentile of {_plural(pos)}, "
+                    f"ownership at the {r['OwnRank']:.0f}th ({r['Own%']:.1%} owned)",
+                    f"{r['Boom%']:.0f}% to reach 4x salary",
+                    _thin_note(r.get("Games")),
+                ),
+                short=_short(
+                    f"Boom {r['BoomRank']:.0f}th pct, owned {r['OwnRank']:.0f}th", _thin_short(r.get("Games"))
+                ),
+                verb="GPP leverage" if lev >= LEVERAGE_MIN_LEV else "GPP option",
+                pid=r["Id"],
+                gsis=r.get("GsisId"),
+                edge=r.get("Edge", ""),
+                muted=_muted(r),
+            )
+        b.layout.prob_blocks.append(("Lev", first, b.last_row, False))
+    b.end_section()
+
+
+def _chalk_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
+    """The `CHALK_ROWS_PER_POSITION` highest-owned players at each position, with an eat or fade read."""
+    b.begin_section("CHALK TO FADE OR EAT  —  the highest-owned at each position")
+    b.header(CHALK_COLUMNS)
+    if not published:
+        b.note(OWN_NOT_OUT)
+        b.end_section()
+        return
+    for pos in POSITIONS:
+        part = chalk_players(edge, pos).head(CHALK_ROWS_PER_POSITION)
+        if part.empty:
+            continue
+        b.sub(f"{pos}  —  the {len(part)} highest-owned")
+        for rank, (_, r) in enumerate(part.iterrows(), start=1):
+            verb = chalk_verb(float(r["BustPct"]))
+            third = {"Chalk: eat": "bottom", "Chalk: fade candidate": "top"}.get(verb, "middle")
+            b.player_row(
+                _lead(r, pos),
+                [r["CalPts"], r["Boom%"], r["Bust%"], r["ProjPts"], f"#{rank} owned", r["Edge"]],
+                why=_join(
+                    f"owned {r['Own%']:.1%}; {r['Boom%']:.0f}% to reach 4x salary, {r['Bust%']:.0f}% to bust",
+                    f"his bust odds are in the {third} third of {_plural(pos)}",
+                    _thin_note(r.get("Games")),
+                ),
+                short=_short(f"Bust odds in the {third} third", _thin_short(r.get("Games"))),
+                verb=verb,
+                pid=r["Id"],
+                gsis=r.get("GsisId"),
+                edge=r.get("Edge", ""),
+                muted=_muted(r),
+            )
     b.end_section()
 
 
@@ -855,14 +1118,16 @@ def _punt_section(b: _Builder, edge: pd.DataFrame) -> None:
         b.sub(f"{pos}  —  best {len(shown)} of {len(part)} within {money(PUNT_SALARY_WINDOW)} of {_k(floor)}")
         for rank, (_, r) in enumerate(shown.iterrows(), start=1):
             gap = float(r["Salary"]) - floor
+            above = f"{money(gap)} above the cheapest {pos}" if gap else f"the cheapest {pos} on the slate"
             b.player_row(
                 _lead(r, pos),
                 [r["CalPts"], r["ValAdj"], r["Hit3x%"], f"#{rank} of {len(part)}", r["Edge"]],
                 why=_join(
-                    f"{money(gap)} above the cheapest {pos}" if gap else f"the cheapest {pos} on the slate",
+                    above,
                     f"ValAdj {r['ValAdj']:.1f} (value against what his price usually buys)",
                     _thin_note(r.get("Games")),
                 ),
+                short=_short(above, _thin_short(r.get("Games"))),
                 verb="Punt option",
                 pid=r["Id"],
                 gsis=r.get("GsisId"),
@@ -898,6 +1163,7 @@ def _disagreement_section(b: _Builder, edge: pd.DataFrame, fitted) -> None:
                         r["Edge"],
                     ],
                     why=_join(disagreement_reason(r, fitted), _thin_note(r.get("Games"))),
+                    short=_short(disagreement_short(r, fitted), _thin_short(r.get("Games"))),
                     verb=verb,
                     pid=r["Id"],
                     gsis=r.get("GsisId"),
@@ -938,8 +1204,15 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
                 priced = r.get("PricedIn", "")
                 method = r["Method"] + (f" ({int(r['n'])} g)" if r["Method"] == "with-or-without" else "")
                 state = "out" if status == "out" else "questionable"
+                priced_text = f"priced in: {priced}" if isinstance(priced, str) and priced else ""
                 b.player_row(
-                    [r["Name"], r["Position"], r["Team"], info["Salary"] if info is not None else ""],
+                    [
+                        r["Name"],
+                        r["Position"],
+                        r["Team"],
+                        info["Salary"] if info is not None else "",
+                        info["Own%"] if info is not None else "",
+                    ],
                     [
                         round(r["car_gain"], 1),
                         round(r["xfp_gain"], 1),
@@ -950,9 +1223,10 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
                     why=_join(
                         f"{r['OutPlayers']} {state}: +{r['car_gain']:.1f} carries and "
                         f"+{r['xfp_gain']:.1f} expected points a game ({method})",
-                        f"priced in: {priced}" if isinstance(priced, str) and priced else "",
+                        priced_text,
                         _thin_note(games),
                     ),
+                    short=_short(f"{r['OutPlayers']} {state}", priced_text, _thin_short(games)),
                     verb=verb,
                     pid=info["Id"] if info is not None else "",
                     gsis=r["GsisId"],
@@ -970,9 +1244,16 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
             info = by_gsis.loc[r["GsisId"]] if r["GsisId"] in by_gsis.index else None
             texts = [str(t) for t in (r.get("WithWithout"), r.get("History")) if isinstance(t, str) and t]
             b.player_row(
-                [r["Name"], r["Position"], r["Team"], info["Salary"] if info is not None else ""],
+                [
+                    r["Name"],
+                    r["Position"],
+                    r["Team"],
+                    info["Salary"] if info is not None else "",
+                    info["Own%"] if info is not None else "",
+                ],
                 [r["Role"], round(r["tgt_g"], 1), round(r["car_g"], 1), int(r["GamesMissed"])],
                 why=_join(f"{r.get('Regular', '')}", *texts),
+                short=str(r.get("Regular", "") or ""),
                 verb="Out",
                 pid=info["Id"] if info is not None else "",
                 muted=True,
@@ -1029,8 +1310,9 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             e = by_id.loc[pid]
             metric = r["Metric"]
             others = [f"{m['Metric']} {m['Direction']}" for _, m in moves.iloc[1:].iterrows()]
+            move = "jump" if r["Direction"] == usage_r6.UP else "drop"
             b.player_row(
-                [e["Name"], pos, e["Team"], e["Salary"]],
+                [e["Name"], pos, e["Team"], e["Salary"], e.get("Own%", "")],
                 [
                     metric,
                     usage_r6.format_value(metric, r["Recent"]),
@@ -1039,6 +1321,7 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
                     r["Direction"],
                 ],
                 why=_join(usage_r6.trend_why(r), f"also moved: {', '.join(others)}" if others else ""),
+                short=f"A bigger {move} than {1 - float(r['FlagRate']):.0%} of weeks",
                 verb="Watch",
                 pid=pid,
                 gsis=r["GsisId"],
@@ -1055,6 +1338,7 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
         b.note("No matchup tables yet (the schedule or last season's results were unavailable).")
         b.end_section()
         return
+    pos_i, grade_i = LEAD.index("Pos"), LEAD.index("Salary")
     for pos in POSITIONS:
         part = mu[mu["Position"] == pos]
         if part.empty:
@@ -1065,14 +1349,16 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             soft = r["Group"] == "top"
             row = b.open_group(f"{r['Team']} vs {r['Opp']}", f"MATCHUPS|{pos}|{r['Team']}", team=True)
             cells = b.layout.rows[row - 1]
-            cells[1], cells[3] = pos, "Soft" if soft else "Tough"
-            for i, (_, p) in enumerate(players.iterrows()):
-                cells[len(LEAD) + i] = f"{p['Name']} {_k(p['Salary'])}"
-            cells[FIRST_TRAILING] = _join(
+            cells[pos_i], cells[grade_i] = pos, "Soft" if soft else "Tough"
+            if not players.empty:  # one cell that overflows right; salaries are on the player rows below
+                cells[len(LEAD)] = "Top: " + ", ".join(players["Name"])
+            cells[FIRST_TRAILING + TRAILING_HEADERS.index("Do")] = "Context only"
+            reason = _join(
                 str(r["Reasons"]),
                 f"score {r['Score']:+.2f} (standard deviations above the league average; higher is softer)",
             )
-            cells[FIRST_TRAILING + 1] = "Context only"
+            cells[FIRST_TRAILING + TRAILING_HEADERS.index("Why")] = short_why(reason)
+            b.layout.notes[row] = reason
             if not soft:
                 b.layout.muted_rows.append(row)
             for _, p in players.iterrows():
@@ -1080,6 +1366,7 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
                     _lead(p, pos),
                     [p["CalPts"], p["Hit3x%"], p["Boom%"]],
                     why=f"CalPts {p['CalPts']:.1f} vs TFFB {p['ProjPts']:.1f}",
+                    short=_vs_tffb(p),
                     verb="Context only",
                     pid=p["Id"],
                     gsis=p.get("GsisId"),
@@ -1122,6 +1409,7 @@ def _r6_signal_blocks(b: _Builder, edge: pd.DataFrame) -> None:
                 _lead(r),
                 [read.split(" ")[0], r["CalPts"], r["ProjPts"]],
                 why=usage_r6.chip_why(chip),
+                short=short_why(usage_r6.chip_why(chip)),
                 verb="Context only",
                 pid=r["Id"],
                 gsis=r.get("GsisId"),
@@ -1151,6 +1439,7 @@ def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
                 _lead(r),
                 [token, r["xFP/G"], r.get("DkG", "")],
                 why=_join("context only, not proven to beat the projection", _thin_note(r.get("Games"))),
+                short=_short("Context only, unproven", _thin_short(r.get("Games"))),
                 verb="Context only",
                 pid=r["Id"],
                 gsis=r.get("GsisId"),
@@ -1164,7 +1453,6 @@ def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
 POINT_HEADERS = frozenset(
     {
         "CalPts",
-        "Top 3 / CalPts",
         "ProjPts",
         "TFFB",
         "Sleeper",
@@ -1180,7 +1468,9 @@ POINT_HEADERS = frozenset(
         "ValAdj",
     }
 )
-PERCENT_HEADERS = frozenset({"Hit3x%", "Boom%", "Bust%", "Own%"})
+PERCENT_HEADERS = frozenset({"Hit3x%", "Boom%", "Bust%"})
+OWN_HEADERS = frozenset({"Own%"})  # a 0-1 fraction on EdgeRaw, shown as a percent
+LEV_HEADERS = frozenset({"Lev"})
 CHIP_HEADERS = frozenset({"Edge", "Token", "Trend"})
 
 
@@ -1209,6 +1499,10 @@ def _mark_formats(layout: Layout) -> None:
                 layout.point_cells.append(rng)
             elif name in PERCENT_HEADERS:
                 layout.percent_cells.append(rng)
+            elif name in OWN_HEADERS:
+                layout.own_cells.append(rng)
+            elif name in LEV_HEADERS:
+                layout.lev_cells.append(rng)
             elif name in CHIP_HEADERS:
                 layout.chip_ranges.append(rng)
 

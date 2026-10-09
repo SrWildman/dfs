@@ -28,20 +28,23 @@ protection for the same reason.
 
 from __future__ import annotations
 
+from dfs import edge_finder_tab as eft
 from dfs.sheet_links import PLAYER_POOL_RAW_TAB
-from dfs.sheet_views import LINEUP_COUNT_CELL
-from dfs.sheets import SheetsClient
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
+from dfs.sheet_pool_control import control_cells
+from dfs.sheet_views import BOARD_LIST_POOL_COL, BOARD_TAB, LINEUP_COUNT_CELL
+from dfs.sheets import SheetsClient, column_letter
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
 # Whole tab, no exceptions -- entirely computed or spilled-array output,
 # nothing here is ever typed by hand.
 FULLY_PROTECTED_TABS = [
     PLAYER_POOL_RAW_TAB,
-    "Board",
-    "Edge Finder",
     "Slate Grid",
     "Movement",
 ]
+# Protected except the Pool column: every player row's Pool cell is a dropdown you pick from (the formula
+# under it is put back by the bound Apps Script), so it has to be editable without a warning.
+POOL_GUTTER_TABS = {eft.EDGE_FINDER_TAB: eft.POOL_COL, BOARD_TAB: BOARD_LIST_POOL_COL}
 
 _FORMULA_DESCRIPTION = "Formula-driven -- check before typing here (dfs setup protect)"
 
@@ -67,17 +70,37 @@ def protect_workbook(
         client.protect_sheet(tab, description=_FORMULA_DESCRIPTION)
         results.append(f"{tab}: whole tab protected (warning-only)")
 
+    for tab, pool_col in POOL_GUTTER_TABS.items():
+        if not client.tab_exists(tab):
+            results.append(f"{tab}: not present -- skipped")
+            continue
+        client.clear_protected_ranges(tab)
+        client.protect_sheet(
+            tab,
+            unprotected_ranges=[f"{pool_col}:{pool_col}"],
+            description=f"{_FORMULA_DESCRIPTION} (except the Pool column, {pool_col})",
+        )
+        results.append(f"{tab}: whole tab protected except the Pool column ({pool_col})")
+
     if not client.tab_exists(player_pool_tab):
         results.append(f"{player_pool_tab}: not present -- skipped")
     else:
-        control_cell = f"B{PLAYER_POOL_CONTROL_ROW}"
+        # The Pool column and the add-a-player box (found from the header, never a fixed letter).
+        header_rows = client.read_range(
+            player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
+        )
+        header = header_rows[0] if header_rows else []
+        pool_col = column_letter(header.index("Pool")) if "Pool" in header else "A"
+        box = control_cells(header)["input"]
         client.clear_protected_ranges(player_pool_tab)
         client.protect_sheet(
             player_pool_tab,
-            unprotected_ranges=[control_cell],
-            description=f"{_FORMULA_DESCRIPTION} (except the add-a-player control, {control_cell})",
+            unprotected_ranges=[f"{pool_col}:{pool_col}", box],
+            description=f"{_FORMULA_DESCRIPTION} (except the Pool column and the add-a-player box, {box})",
         )
-        results.append(f"{player_pool_tab}: whole tab protected except the add-a-player control")
+        results.append(
+            f"{player_pool_tab}: whole tab protected except the Pool column and the add-a-player box"
+        )
 
     if not client.tab_exists(exposure_tab):
         results.append(f"{exposure_tab}: not present -- skipped")

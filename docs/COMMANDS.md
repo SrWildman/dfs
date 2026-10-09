@@ -163,6 +163,19 @@ Diff the two most recent nfl_odds syncs and show which teams' lines moved the mo
 |---|---|
 | `--top / -n INT` | Number of biggest moves to show. Default: `10`. |
 
+### `dfs odds snapshot`
+
+Save the current betting lines (and nothing else): no sheet, no other source. Line movement for the week is measured against the week's opening lines, and the odds source only shows the current slate, so the opening is on record only if the lines were saved before the sheet was copied. A scheduled job runs this every Monday and Tuesday morning (`dfs odds schedule`).
+
+### `dfs odds schedule`
+
+Show, install or remove the job that runs `dfs odds snapshot` on Mondays and Tuesdays at 10:00 ET (your Mac's clock is converted). With no option it says whether the job is installed. To turn it off later: `dfs odds schedule --remove`.
+
+| Option | What it does |
+|---|---|
+| `--install` | Save the lines every Monday and Tuesday at 10:00 ET (a macOS launchd job). |
+| `--remove` | Turn that job off and delete it. |
+
 ## Reference: bankroll, logs and accounts (only when needed)
 
 Reconciling results and keeping records, and one-time logins. `dfs week close` already calls `bankroll sync` for you.
@@ -318,7 +331,7 @@ Phase 3/6, one-time: moves PlayerPoolRaw, Player Pool and Lineups into `sheet_co
 
 ### `dfs setup add-pool-control`
 
-A3: create (or refresh) Player Pool's own "add a player" row -- a live search box (ONE_OF_RANGE validation) against EdgeRaw's Name column, pinned at the top of Player Pool itself, for when typing a name is faster than scrolling EdgeRaw to tick a checkbox (the "Pool picking" filter view, `dfs setup add-filters`, is the third way). Replaces the old separate `Pool Picks` tab (see `sheet_pool_control.py` and CONTRIBUTING.md's A3 changelog entry) -- Sam never wanted a second tab for this. The structural row-insert runs at most once per sheet (idempotent, see `ensure_pool_control_row`); safe to re-run any time, including as part of a future `dfs setup polish`.
+A3: create (or refresh) Player Pool's own "add a player" row -- a type dropdown (Cash / GPP / Both, default Both) and a live search box (ONE_OF_RANGE validation) against EdgeRaw's Name column, pinned at the top of Player Pool itself, for when typing a name is faster than scrolling EdgeRaw to tick a checkbox (the "Pool picking" filter view, `dfs setup add-filters`, is the third way). Replaces the old separate `Pool Picks` tab (see `sheet_pool_control.py` and CONTRIBUTING.md's A3 changelog entry) -- Sam never wanted a second tab for this. The structural row-insert runs at most once per sheet (idempotent, see `ensure_pool_control_row`); safe to re-run any time, including as part of a future `dfs setup polish`.
 
 | Option | What it does |
 |---|---|

@@ -1,13 +1,16 @@
 """Write the `Edge Finder` tab (`edge_finder_tab.build_layout`) and the Board's "This week's edges" panel.
 
 The tab is rebuilt from scratch by every write (nothing on it is typed): its values come from the sync; its
-`Pool`, `Do` and `↗` cells are live formulas keyed on the hidden `Id` cell (the player's DraftKings id,
-never his name), and its `Set` cells are dropdowns the bound Apps Script (`apps_script/Code.gs`) reads.
-Formatting is static for section/header/note rows; the probability colour is a gradient per position block,
-and the muting of thin samples is written with the rows.
+`Pool` and `Do` cells are live formulas keyed on the hidden `Id` cell (the player's DraftKings id, never his
+name).
+The `Pool` cell, first on every player row, is also the control: it carries a Cash / GPP / Both dropdown, and
+the bound Apps Script (`apps_script/Code.gs`) writes EdgeRaw's `Pool` for the pick and puts the formula back.
+`Why` is the last visible column, short, with the full reason as the cell's note. Formatting is static for
+section/header/note rows; the probability colour is a gradient per position block, and the muting of thin
+samples is written with the rows.
 
 **Open and shut groups survive a rewrite.** Before anything is cleared, `read_group_state` reads the tab's row
-groups and remembers each one's collapsed flag by its key (hidden column `Q`, on the row above the group);
+groups and remembers each one's collapsed flag by its key (hidden column `P`, on the row above the group);
 after the rewrite the same keys get the same state back, and a key never seen before gets its default
 (sections open, overflow and team groups shut).
 """
@@ -18,6 +21,7 @@ import contextlib
 
 from dfs import edge_finder_tab as eft
 from dfs import sheet_pool_cells as pc
+from dfs.sheet_clipping import fitted_widths
 from dfs.sheet_color_scales import GRAD_MAX, WHITE
 from dfs.sheet_style import (
     _HEADER_FMT,
@@ -26,6 +30,7 @@ from dfs.sheet_style import (
     EDGE_CHIPS,
     INK_MUTED,
     INPUT_BG,
+    POOL_TYPE_CHIPS,
     _num,
 )
 from dfs.sheets import SheetsClient, column_letter
@@ -33,23 +38,22 @@ from dfs.sheets import SheetsClient, column_letter
 TAB = eft.EDGE_FINDER_TAB
 POOL_TAB = pc.POOL_TAB
 WIDTHS = {
-    "A": 190,
-    "B": 44,
-    "C": 48,
-    "D": 64,
-    "E": 84,
-    "F": 84,
+    eft.POOL_COL: pc.POOL_COLUMN_WIDTH,
+    "B": 190,
+    "C": 44,
+    "D": 48,
+    "E": 64,
+    eft.OWN_COL: 62,
     "G": 84,
     "H": 84,
     "I": 84,
-    "J": 100,
-    "K": 640,
-    "L": 150,
-    "M": 96,
-    "N": 80,
-    "O": 40,
-    "P": 90,
-    "Q": 90,
+    "J": 84,
+    "K": 84,
+    "L": 100,
+    eft.DO_COL: 170,
+    eft.WHY_COL: 320,
+    eft.ID_COL: 90,
+    eft.KEY_COL: 90,
 }
 HIDDEN_FIRST, HIDDEN_LAST = eft.ID_COL, eft.KEY_COL
 NO_FILL = {"red": 1.0, "green": 1.0, "blue": 1.0}
@@ -70,34 +74,27 @@ def _id_letter() -> str:
     return pc.edge_letter("Id")
 
 
-def pool_formula(row: int, edge_tab: str, added_range: str | None = None) -> str:
+def pool_formula(row: int, edge_tab: str) -> str:
     """The player's pool state (`sheet_pool_cells.pool_formula`) keyed on this tab's hidden `Id` cell."""
-    return pc.pool_formula(row, edge_tab, added_range, id_col=eft.ID_COL)
+    return pc.pool_formula(row, edge_tab, id_col=eft.ID_COL)
 
 
 def do_formula(row: int, verb: str) -> str:
     return pc.do_formula(row, verb, pool_col=eft.POOL_COL)
 
 
-def link_formula(row: int, edge_tab: str, gid: int) -> str:
-    return pc.link_formula(row, edge_tab, gid, id_col=eft.ID_COL)
+def _index(letter: str) -> int:
+    return ord(letter) - ord("A")
 
 
-def tab_rows(layout: eft.Layout, edge_tab: str, gid: int, *, added_range: str | None = None) -> list[list]:
-    """The layout's rows with the Pool, Do and link formulas filled into every player row."""
+def tab_rows(layout: eft.Layout, edge_tab: str) -> list[list]:
+    """The layout's rows with the Pool and Do formulas filled into every player row."""
     rows = [list(r) for r in layout.rows]
-    col = {name: ord(letter) - ord("A") for name, letter in (("do", eft.DO_COL), ("pool", eft.POOL_COL))}
-    link = ord(eft.LINK_COL) - ord("A")
     for row in layout.player_rows:
-        verb = rows[row - 1][col["do"]]
-        rows[row - 1][col["pool"]] = pool_formula(row, edge_tab, added_range)
-        rows[row - 1][col["do"]] = do_formula(row, str(verb))
-        rows[row - 1][link] = link_formula(row, edge_tab, gid)
+        verb = rows[row - 1][_index(eft.DO_COL)]
+        rows[row - 1][_index(eft.POOL_COL)] = pool_formula(row, edge_tab)
+        rows[row - 1][_index(eft.DO_COL)] = do_formula(row, str(verb))
     return rows
-
-
-def added_names_range(client: SheetsClient, pool_tab: str = POOL_TAB) -> str | None:
-    return pc.added_names_range(client, pool_tab)
 
 
 def read_group_state(client: SheetsClient) -> dict[str, bool]:
@@ -156,12 +153,11 @@ def _all_link(client: SheetsClient, edge_tab: str, view: str) -> str | None:
 def _write_tab(client: SheetsClient, inputs: eft.Inputs | None, *, edge_tab: str) -> str:
     layout = eft.build_layout(inputs, edge_tab_name=edge_tab)
     state = read_group_state(client)
-    gid = client.tab_gid(edge_tab) if client.tab_exists(edge_tab) else 0
-    rows = tab_rows(layout, edge_tab, gid, added_range=added_names_range(client))
+    rows = tab_rows(layout, edge_tab)
     for row, view in layout.all_links.items():
         link = _all_link(client, edge_tab, view)
         if link:
-            rows[row - 1][ord(eft.LINK_COL) - ord("A")] = link
+            rows[row - 1][_index(eft.DO_COL)] = link
     last_row = max(len(rows), 40)
 
     if client.tab_exists(TAB):
@@ -169,6 +165,9 @@ def _write_tab(client: SheetsClient, inputs: eft.Inputs | None, *, edge_tab: str
         client.clear_row_groups(TAB)
         client.unhide_rows(TAB, 1, last_row + 20)  # deleting a collapsed group leaves its rows hidden
     client.write_tab(TAB, rows)
+    client.clear_notes(TAB, f"{eft.WHY_COL}1:{eft.WHY_COL}{last_row + 20}")
+    # the previous layout's dropdowns (the old Set column) stay behind unless cleared
+    client.clear_data_validation(TAB, f"A1:{eft.LAST_COLUMN}{last_row + 20}")
     client.clear_conditional_formats(TAB)
     client.format_range(
         TAB,
@@ -181,11 +180,12 @@ def _write_tab(client: SheetsClient, inputs: eft.Inputs | None, *, edge_tab: str
             "wrapStrategy": "OVERFLOW_CELL",
         },
     )
-    client.set_column_widths(TAB, WIDTHS)
+    client.set_column_widths(TAB, fit_widths(layout))
     _static_formats(client, layout)
     _conditional_formats(client, layout)
     client.hide_columns(TAB, HIDDEN_FIRST, HIDDEN_LAST)
-    client.freeze(TAB, rows=0, cols=1)
+    client.freeze(TAB, rows=0, cols=2)  # Pool and Name stay in view
+    _write_notes(client, layout)
     client.set_row_group_control_before(TAB)
     client.apply_row_groups(TAB, group_specs(layout, state))
     return (
@@ -194,8 +194,54 @@ def _write_tab(client: SheetsClient, inputs: eft.Inputs | None, *, edge_tab: str
     )
 
 
+def _display_rows(layout: eft.Layout) -> list[list]:
+    """The layout's rows as text roughly as the sheet shows them (a number is the stored float, which is far
+    longer than its formatted cell): `Own%` as a one-decimal percent, `Salary` as dollars, other floats to one
+    decimal."""
+    own, salary = _index(eft.OWN_COL), eft.LEAD.index("Salary")
+    out = []
+    for row in layout.rows:
+        shown = []
+        for i, cell in enumerate(row):
+            if isinstance(cell, bool) or not isinstance(cell, (int, float)):
+                shown.append(cell)
+            elif i == own:
+                shown.append(f"{cell:.1%}")
+            elif i == salary:
+                shown.append(f"${cell:,.0f}")
+            else:
+                shown.append(f"{cell:.1f}" if isinstance(cell, float) else str(cell))
+        out.append(shown)
+    return out
+
+
+def fit_widths(layout: eft.Layout) -> dict[str, int]:
+    """`WIDTHS`, with every column that would cut off a cell of this write widened to fit it
+    (`sheet_clipping`, never narrower, never past 300 px): a name or a chip combination the fixed widths did
+    not foresee does not get clipped. The hidden columns and the open-ended Why (last visible, it overflows
+    right) are left alone."""
+    letters = [column_letter(i) for i in range(eft.COLUMN_COUNT)]
+    widths = [WIDTHS.get(letter, 100) for letter in letters]
+    hidden = {i for i, letter in enumerate(letters) if HIDDEN_FIRST <= letter <= HIDDEN_LAST}
+    fitted = fitted_widths(
+        _display_rows(layout),
+        widths,
+        hidden,
+        bold_rows=frozenset(layout.header_rows),
+        skip_columns=frozenset({_index(eft.WHY_COL)}),
+    )
+    return {**WIDTHS, **{letters[i]: px for i, px in fitted.items()}}
+
+
+def _write_notes(client: SheetsClient, layout: eft.Layout) -> None:
+    """The full reason behind each shortened `Why`, as the cell's note (hover to read it)."""
+    for row, text in layout.notes.items():
+        if text:
+            client.set_note(TAB, f"{eft.WHY_COL}{row}", text)
+
+
 def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
-    last = eft.LINK_COL  # visible columns end at the link; P and Q are hidden
+    last = eft.LAST_VISIBLE_COL  # Why is the last visible column; the Id and group key are hidden
     client.format_range(TAB, f"A{layout.title_row}", _TITLE_FMT)
     for row in layout.status_rows:
         client.format_range(TAB, f"A{row}", {"textFormat": {"fontSize": 9, "foregroundColor": INK_MUTED}})
@@ -235,18 +281,22 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         client.format_range(TAB, rng, {**_num('0"%"'), "horizontalAlignment": "RIGHT"})
     for rng in layout.chip_ranges:
         client.format_range(TAB, rng, {"horizontalAlignment": "CENTER"})
-    # Why wraps (a reason can run to two lines); Do / Pool read centred; Set is an input cell.
+    # Own% is a 0-1 fraction on EdgeRaw, shown as a percent; Lev is a signed whole number.
+    for rng in layout.own_cells:
+        client.format_range(TAB, rng, {**_num("0.0%"), "horizontalAlignment": "RIGHT"})
+    for rng in layout.lev_cells:
+        client.format_range(TAB, rng, {**_num("+0;-0;0"), "horizontalAlignment": "RIGHT"})
+    # Pool is the control (input colour + dropdown + a chip colour per state); Do reads centred; Why never
+    # wraps (it is the last visible column and overflows right; the full reason is its note).
     for first, last_row in _runs(layout.player_rows):
-        client.format_range(TAB, f"{eft.WHY_COL}{first}:{eft.WHY_COL}{last_row}", {"wrapStrategy": "WRAP"})
+        pool = f"{eft.POOL_COL}{first}:{eft.POOL_COL}{last_row}"
         client.format_range(
-            TAB, f"{eft.DO_COL}{first}:{eft.POOL_COL}{last_row}", {"horizontalAlignment": "CENTER"}
+            TAB, pool, {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER", "wrapStrategy": "CLIP"}
         )
+        client.set_dropdown_validation(TAB, pool, pc.POOL_OPTIONS)
         client.format_range(
-            TAB,
-            f"{eft.SET_COL}{first}:{eft.SET_COL}{last_row}",
-            {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER"},
+            TAB, f"{eft.DO_COL}{first}:{eft.DO_COL}{last_row}", {"horizontalAlignment": "CENTER"}
         )
-        client.set_dropdown_validation(TAB, f"{eft.SET_COL}{first}:{eft.SET_COL}{last_row}", eft.SET_OPTIONS)
     # Static muting: thin samples, questionable beneficiaries, context signals, the toughest matchups.
     for row in layout.muted_rows:
         client.format_range(
@@ -277,6 +327,9 @@ def _conditional_formats(client: SheetsClient, layout: eft.Layout) -> None:
             client.add_boolean_rule(TAB, rng, condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
     if layout.player_rows:
         first, last_row = min(layout.player_rows), max(layout.player_rows)
+        pool = f"{eft.POOL_COL}{first}:{eft.POOL_COL}{last_row}"
+        for state, fmt in POOL_TYPE_CHIPS.items():
+            client.add_boolean_rule(TAB, pool, condition_type="TEXT_EQ", values=[state], fmt=fmt)
         do = f"{eft.DO_COL}{first}:{eft.DO_COL}{last_row}"
         for text in ("add", "leverage"):
             client.add_boolean_rule(

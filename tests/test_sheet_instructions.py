@@ -9,7 +9,7 @@ from dfs.sheet_instructions import (
     build_instructions_tab,
     render_instructions_grid,
 )
-from dfs.sheet_pool_cells import SET_OPTIONS
+from dfs.sheet_pool_cells import POOL_OPTIONS
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
 
 
@@ -97,8 +97,10 @@ def test_the_text_describes_the_current_sheet_not_a_retired_one():
         assert stale not in text, stale
     assert "bold name = at least one flag" in text.lower()
     assert "Pool summary" in text and "Pool check" in text and "Queue" in text
-    for option in SET_OPTIONS:
+    for option in POOL_OPTIONS:
         assert option in text
+    assert "Set dropdown" not in text and "Remove takes" not in text  # the Set dropdown is retired
+    assert "Pool dropdown at the left" in text
 
 
 def test_player_pool_row_derives_caps_not_hardcoded():

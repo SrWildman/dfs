@@ -111,9 +111,12 @@ from dfs.sheet_column_notes import (
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
-from dfs.sheet_pool_cells import SET_OPTIONS
+from dfs.sheet_pool_cells import POOL_COLUMN_WIDTH, POOL_OPTIONS
 from dfs.sheet_views import (
+    BANNER_START_COL,
     BOARD_BUSTCUT_COL_INDEX,
+    BOARD_CHALK_COL,
+    BOARD_CHALK_COLHEADER,
     BOARD_CHALK_COLHEADER_ROW,
     BOARD_CHALK_FIRST_ROW,
     BOARD_CHALK_HEADER_ROW,
@@ -125,8 +128,8 @@ from dfs.sheet_views import (
     BOARD_CHECK_LAST_ROW,
     BOARD_ID_COL,
     BOARD_LIST_COLHEADER,
+    BOARD_LIST_NAME_COL,
     BOARD_LIST_POOL_COL,
-    BOARD_LIST_SET_COL,
     BOARD_MAX_VISIBLE_COL_INDEX,
     BOARD_POOL_COL,
     BOARD_POOL_COLHEADER,
@@ -140,6 +143,7 @@ from dfs.sheet_views import (
     BOARD_QUEUE_FIRST_ROW,
     BOARD_QUEUE_HEADER_ROW,
     BOARD_QUEUE_LAST_ROW,
+    BOARD_SLATE_COL,
     BOARD_SLATE_COLHEADER,
     BOARD_SLATE_COLHEADER_ROW,
     BOARD_SLATE_FIRST_ROW,
@@ -147,10 +151,12 @@ from dfs.sheet_views import (
     BOARD_SLATE_GPSCHK_COL,
     BOARD_SLATE_HEADER_ROW,
     BOARD_SLATE_LAST_ROW,
+    BOARD_STACK_COL,
     BOARD_STACK_COLHEADER_ROW,
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
     BOARD_STACK_LAST_ROW,
+    BOARD_STACK_SALARY_COLS,
     BOARD_STACKS_COLHEADER,
     BOARD_STACKS_COLHEADER_ROW,
     BOARD_STACKS_HEADER_ROW,
@@ -1038,6 +1044,21 @@ def _apply_pool_tag_tint(
         )
 
 
+def _apply_pool_control(
+    client: SheetsClient, tab: str, header: list, *, blocks: list[tuple[int, int]]
+) -> None:
+    """Player Pool's `Pool` column is the control (the same Cash / GPP / Both dropdown as every tab's): input
+    colour and a dropdown over each position block. No-ops on a tab without a `Pool` column. The tags'
+    own tint and chip colours sit on top (conditional formats outrank the base fill)."""
+    if "Pool" not in header:
+        return
+    letter = column_letter(header.index("Pool"))
+    for start, end in blocks:
+        rng = f"{letter}{start}:{letter}{end}"
+        client.format_range(tab, rng, {"backgroundColor": INPUT_BG})
+        client.set_dropdown_validation(tab, rng, POOL_OPTIONS)
+
+
 def _apply_zone_label_style(
     client: SheetsClient, tab: str, header: list, *, data_start: int, last_row: int
 ) -> None:
@@ -1380,18 +1401,11 @@ BUILDER_WIDTHS = {
     # through. Centralized here to match; `polish_guardrails`'s own call
     # is redundant now but harmless (same value, set twice).
     "Issues": 110,
-    "Pool": 64,
-    # Week 3 fixes, Fix 6.5 (2026-09-23): shrunk further, from A5's 60 to
-    # the actual glyph-width A5 originally asked for -- Sam: "still full
-    # width." The per-row cell text is just the arrow (`edge_row_
-    # hyperlink_formula`), which alone fits in ~28px; the HEADER cell
-    # still reads "Edge ↗" in full (the column's own lookup-by-name key,
-    # used everywhere -- renaming it is a much bigger, out-of-scope
-    # change) and WILL clip at this width -- a deliberate trade-off for
-    # this one utility column now, not a regression: see `sheet_audit.
-    # TRUNCATION_EXEMPT_COLUMNS`, which stops `dfs setup audit-style` from
-    # re-flagging it every run.
-    "Edge ↗": 28,
+    "Pool": POOL_COLUMN_WIDTH,
+    # Actions round, slice 3 (2026-10-09): the header "Edge ↗" needs ~52px and was being cut at 28 (Week 3's
+    # Fix 6.5 narrowed it to the glyph the cells show and accepted the clipped header). The header is read as
+    # a column name everywhere, so the width goes up, not the text down, and the audit no longer exempts it.
+    "Edge ↗": 58,
     "Used": 52,
     "In": 96,
     # "Team Implied"/"Ceil"/"Overflow" had NO entry here at all before this
@@ -1554,10 +1568,7 @@ def polish_builder_tab(
     # killed/retried run can otherwise leave a stale hide on the wrong
     # column behind forever.
     _unhide_ungrouped_columns(client, tab, len(header))
-    # "Added" (A6, 2026-09-22) joins Id/Flag here -- Player Pool's own
-    # hidden add-a-player accumulator, never meant to be looked at
-    # directly (see `weekly_reset.PLAYER_POOL_ADDED_NAMES_HEADER`).
-    for hidden_name in (*INTERNAL, "Added", LINEUP_KEY_HEADER):
+    for hidden_name in (*INTERNAL, LINEUP_KEY_HEADER):
         if hidden_name in header:
             letter = column_letter(header.index(hidden_name))
             client.hide_columns(tab, letter, letter)
@@ -1630,6 +1641,7 @@ def polish_builder_tab(
             client, tab, header, column_name="Pos.", data_start=data_start, last_row=last_row
         )
     _apply_pool_tag_tint(client, tab, header, column_name="Pool", data_start=data_start, last_row=last_row)
+    _apply_pool_control(client, tab, header, blocks=band_blocks or [(data_start, last_row)])
     _apply_own_status_marker(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_edge_link_style(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
@@ -2503,14 +2515,15 @@ MORE = "More: Instructions tab."
 TAB_NOTES: dict[str, str] = {
     # Usability round, slice 6: a tab note pops up whenever A1 is selected, so each is one or two lines and
     # ends with a pointer to the Instructions tab (the full explanation lives there and in docs/).
-    "Board": f"BOARD -- the slate, your pool's health and the stacks. Only Set is typed. {MORE}",
-    "EdgeRaw": f"EDGERAW -- every synced player by ValAdj. Set Pool to add a player. {MORE}",
+    "Board": f"BOARD -- the slate, your pool's health and the stacks. Only Pool is typed. {MORE}",
+    "EdgeRaw": f"EDGERAW -- every synced player by ValAdj. Pick Pool to add a player. {MORE}",
     "Edge Finder": (
-        f"EDGE FINDER -- written by `dfs sync`; pick a Set value to add or remove a player. {MORE}"
+        f"EDGE FINDER -- written by `dfs sync`; pick Pool to add a player, clear it to remove. {MORE}"
     ),
     "Slate Grid": f"SLATE GRID -- one row per game, then every team by implied total. Read-only. {MORE}",
     "Player Pool": (
-        f"PLAYER POOL -- everyone you added, by position. Type a name in row 1 to add a player. {MORE}"
+        f"PLAYER POOL -- everyone you added, by position. Pick a name in row 1 to add; clear Pool to remove. "
+        f"{MORE}"
     ),
     "Lineups": (
         f"LINEUPS -- one block per lineup; type names in column A, set Cash or GPP on the Total row. {MORE}"
@@ -2588,12 +2601,13 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     truth `build_board` writes against, imported here rather than re-counted by hand so the two can't drift
     apart. Every section is grouped and left EXPANDED (the +/- controls still collapse them).
 
-    Queue and Pool check rows are player rows: a pale-yellow `Set` dropdown (`SET_OPTIONS`) beside the live
-    `Pool` cell; the hidden `Id` column behind them is what the Apps Script finds the player by. The Queue's
-    unused rows are hidden again here (the sync hides them when it writes; a polish run must not undo that).
-    Position-ranked colour scales are gone with the leaders; Slate shape and Stack candidates are scaled
-    across
-    their whole section through the shared `_scale_rule_specs` dispatch (`sheet_color_scales.py`)."""
+    Column A is the Pool gutter: on the player rows of the Queue, Pool check and Chalk map it is the live
+    `Pool` cell, a pale-yellow Cash / GPP / Both dropdown (`POOL_OPTIONS`) the Apps Script reads; on every
+    other row it stays blank. The hidden `Id` column behind the player rows is what the Apps Script finds the
+    player by. The Queue's unused rows are hidden again here (the sync hides them when it writes; a polish
+    run must not undo that). Position-ranked colour scales are gone with the leaders; Slate shape and Stack
+    candidates are scaled across their whole section through the shared `_scale_rule_specs` dispatch
+    (`sheet_color_scales.py`)."""
     if not client.tab_exists(tab):
         return f"{tab}: not present -- skipped"
     client.clear_conditional_formats(tab)
@@ -2602,6 +2616,8 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     client.unhide_rows(tab, 1, BOARD_RESET_ROWS)
     # Fill and font resets leave borders alone: an old layout's rules (rows 99, 109, 114) stayed visible.
     client.clear_borders(tab, 1, BOARD_RESET_ROWS)
+    # An earlier layout's dropdowns (the old `Set` column) stayed behind after a rebuild.
+    client.clear_data_validation(tab, f"A1:{column_letter(BOARD_MAX_VISIBLE_COL_INDEX)}{BOARD_RESET_ROWS}")
     last_visible_col = column_letter(BOARD_MAX_VISIBLE_COL_INDEX)
     # Reset the TEXT format, alignment and number format too, not just the fill: an earlier layout's dark
     # header rows left white bold text behind, and when the rebuilt sections' rows moved, real player rows
@@ -2617,14 +2633,20 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         },
     )
     client.set_column_widths(
-        tab, {"A": 170, **{column_letter(i): 90 for i in range(1, BOARD_MAX_VISIBLE_COL_INDEX + 1)}}
+        tab,
+        {
+            "A": POOL_COLUMN_WIDTH,
+            BOARD_LIST_NAME_COL: 170,
+            **{column_letter(i): 90 for i in range(2, BOARD_MAX_VISIBLE_COL_INDEX + 1)},
+        },
     )
     client.format_range(tab, "A1", _TITLE_FMT)
-    # Banner (row 2): label / value pairs at A-B, C-D, G-H, I-J. D and J are text that overflow right.
-    client.format_range(tab, "A2:J2", {"textFormat": {"fontSize": 10}})
-    for label in ("A2", "C2", "G2", "I2"):
+    # Banner (row 2): label / value pairs at B-C, D-E, H-I, J-K. E and K are text that overflow right.
+    pairs = [(BANNER_START_COL + offset) for offset in (0, 2, 6, 8)]
+    client.format_range(tab, f"A2:{column_letter(pairs[-1] + 1)}2", {"textFormat": {"fontSize": 10}})
+    for label in (f"{column_letter(i)}2" for i in pairs):
         client.format_range(tab, label, {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
-    for value in ("B2", "D2", "H2", "J2"):
+    for value in (f"{column_letter(i + 1)}2" for i in pairs):
         client.format_range(tab, value, {"textFormat": {"bold": True, "foregroundColor": INK}})
     client.format_range(tab, f"A3:{last_visible_col}3", _BANNER_FMT)
 
@@ -2671,25 +2693,18 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         last_col=last_visible_col,
     )
 
-    # Queue and Pool check: player rows with a Set dropdown beside the live Pool cell.
+    # Queue, Pool check and Chalk map: the Pool gutter is the control (input colour, a Cash / GPP / Both
+    # dropdown, and a chip colour per state).
     for first, last in (
         (BOARD_QUEUE_FIRST_ROW, BOARD_QUEUE_LAST_ROW),
         (BOARD_CHECK_FIRST_ROW, BOARD_CHECK_LAST_ROW),
         (BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW),
     ):
-        client.format_range(
-            tab,
-            f"{BOARD_LIST_POOL_COL}{first}:{BOARD_LIST_POOL_COL}{last}",
-            {"horizontalAlignment": "CENTER"},
-        )
-        client.format_range(
-            tab,
-            f"{BOARD_LIST_SET_COL}{first}:{BOARD_LIST_SET_COL}{last}",
-            {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER"},
-        )
-        client.set_dropdown_validation(
-            tab, f"{BOARD_LIST_SET_COL}{first}:{BOARD_LIST_SET_COL}{last}", SET_OPTIONS
-        )
+        pool = f"{BOARD_LIST_POOL_COL}{first}:{BOARD_LIST_POOL_COL}{last}"
+        client.format_range(tab, pool, {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER"})
+        client.set_dropdown_validation(tab, pool, POOL_OPTIONS)
+        for state, fmt in POOL_TYPE_CHIPS.items():
+            client.add_boolean_rule(tab, pool, condition_type="TEXT_EQ", values=[state], fmt=fmt)
 
     # Pool summary: counts and salaries; the gap and portfolio lines read as plain bold sentences.
     client.format_range(
@@ -2718,7 +2733,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
 
     # Slate shape: Total/Fav/Spread/Pace/Wind. Fav is text (no scale, no format); the rest are FIELD_FORMATS'
     # own formats, scaled across the whole section (not position-ranked). Wind keeps its plain format.
-    slate_col = {name: column_letter(i) for i, name in enumerate(BOARD_SLATE_COLHEADER)}
+    slate_col = BOARD_SLATE_COL
     for name, field_name in (
         ("Total", "Total"),
         ("Spread", "Spread"),
@@ -2748,27 +2763,40 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
 
     # Stack candidates: Total scaled across the whole section (per game, not position-ranked); every Salary
     # column (QB/WR1/WR2/WR3/TE1/RB1's own Sal columns D/F/H/J/L/N) stays unscaled.
-    client.format_range(tab, f"B{BOARD_STACK_FIRST_ROW}:B{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Total"])
-    _scaled("B", BOARD_STACK_FIRST_ROW, BOARD_STACK_LAST_ROW, "Total")
+    total_col = BOARD_STACK_COL["Total"]
+    client.format_range(
+        tab, f"{total_col}{BOARD_STACK_FIRST_ROW}:{total_col}{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Total"]
+    )
+    _scaled(total_col, BOARD_STACK_FIRST_ROW, BOARD_STACK_LAST_ROW, "Total")
 
-    # Chalk map: D Sal, E Own%, F CalPts, G Hit3x% (FIELD_FORMATS' own formats; Own% keeps its warm scale).
-    for letter, field_name in zip("DEFG", ("Salary", "Own%", "CalPts", "Hit3x%"), strict=True):
+    # Chalk map: Sal, Own%, CalPts, Hit3x% (FIELD_FORMATS' own formats; Own% keeps its warm scale).
+    for column, field_name in zip(
+        ("Sal", "Own%", "CalPts", "Hit3x%"), ("Salary", "Own%", "CalPts", "Hit3x%"), strict=True
+    ):
+        letter = BOARD_CHALK_COL[column]
         client.format_range(
             tab,
             f"{letter}{BOARD_CHALK_FIRST_ROW}:{letter}{BOARD_CHALK_LAST_ROW}",
             {**FIELD_FORMATS[field_name], "horizontalAlignment": "RIGHT"},
         )
-    _scaled("E", BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW, "Own%")
-    # Position groups read as groups: every other block gets a pale band (A:H; the Set cell keeps its yellow)
-    # and the position label is bold. The groups are the BOARD_CHALK_POSITION_ROWS blocks, in order.
+    _scaled(BOARD_CHALK_COL["Own%"], BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW, "Own%")
+    # Position groups read as groups: every other block gets a pale band (the Player..Hit3x% columns; the Pool
+    # gutter keeps its input colour) and the position label is bold. The groups are the
+    # BOARD_CHALK_POSITION_ROWS blocks, in order.
+    band_first, band_last = BOARD_CHALK_COL["Player"], column_letter(len(BOARD_CHALK_COLHEADER) - 1)
     block_first = BOARD_CHALK_FIRST_ROW
     for index, count in enumerate(BOARD_CHALK_POSITION_ROWS.values()):
         block_last = block_first + count - 1
         if index % 2 == 1:
-            client.format_range(tab, f"A{block_first}:H{block_last}", {"backgroundColor": FLAT_BG})
-        client.format_range(tab, f"B{block_first}:B{block_last}", {"textFormat": {"bold": True}})
+            client.format_range(
+                tab, f"{band_first}{block_first}:{band_last}{block_last}", {"backgroundColor": FLAT_BG}
+            )
+        pos_col = BOARD_CHALK_COL["Pos"]
+        client.format_range(
+            tab, f"{pos_col}{block_first}:{pos_col}{block_last}", {"textFormat": {"bold": True}}
+        )
         block_first = block_last + 1
-    for col in ("D", "F", "H", "J", "L", "N"):
+    for col in BOARD_STACK_SALARY_COLS:
         client.format_range(
             tab, f"{col}{BOARD_STACK_FIRST_ROW}:{col}{BOARD_STACK_LAST_ROW}", FIELD_FORMATS["Salary"]
         )
@@ -2777,7 +2805,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     body = client.read_range(tab, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}")
     apply_queue_visibility(client, used_queue_rows(body))
     client.freeze(tab, rows=3)
-    return f"{tab}: styled (5 collapsible sections, banner, colour scales, Set dropdowns)"
+    return f"{tab}: styled (collapsible sections, banner, colour scales, Pool dropdowns)"
 
 
 def _apply_column_rules(

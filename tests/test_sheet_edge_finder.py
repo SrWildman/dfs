@@ -1,13 +1,13 @@
-"""The Edge Finder writer: id-keyed formulas, the Set dropdowns, hidden columns, and open/shut groups that
-survive a rewrite."""
+"""The Edge Finder writer: id-keyed formulas, the Pool dropdowns, notes, hidden columns, and open/shut groups
+that survive a rewrite."""
 
 import numpy as np
 import pandas as pd
 
 from dfs import edge_finder_tab as eft
 from dfs import sheet_edge_finder as writer
+from dfs import sheet_pool_cells as pc
 from dfs.derived import EDGE_COLUMNS
-from dfs.weekly_reset import PLAYER_POOL_ADDED_NAMES_ROWS, PLAYER_POOL_HEADER_ROW
 
 
 def _edge(rows):
@@ -59,14 +59,14 @@ class FakeClient:
 
     spreadsheet_id = "SHEETID"
 
-    def __init__(self, *, groups=None, keys=None, filter_views=None, header=None):
+    def __init__(self, *, groups=None, keys=None, filter_views=None):
         self.tab_written = None
         self.rules, self.scales, self.formats = [], [], []
         self.validations, self.hidden, self.calls = [], [], []
+        self.notes, self.cleared_notes = {}, []
         self.groups = list(groups or [])  # {"start","end","depth","collapsed"}
-        self.keys = dict(keys or {})  # row -> text in hidden column Q
+        self.keys = dict(keys or {})  # row -> text in the hidden group-key column
         self.filter_views = {"Cash": 11, "GPP": 22} if filter_views is None else filter_views
-        self.header = header if header is not None else [["Name", "Pos"] + [""] * 23 + ["Added"]]
 
     def tab_exists(self, tab):
         return True
@@ -75,8 +75,6 @@ class FakeClient:
         return 5
 
     def read_range(self, tab, rng):
-        if tab == "Player Pool":
-            return self.header
         column = rng.split(":")[0][0]
         assert column == eft.KEY_COL
         last = int(rng.split(":")[1][1:])
@@ -121,6 +119,15 @@ class FakeClient:
     def set_dropdown_validation(self, tab, rng, options):
         self.validations.append((rng, options))
 
+    def set_note(self, tab, cell, note):
+        self.notes[cell] = note
+
+    def clear_notes(self, tab, rng):
+        self.cleared_notes.append(rng)
+
+    def clear_data_validation(self, tab, rng):
+        self.cleared_validation = rng
+
     def hide_columns(self, tab, first, last, hidden=True):
         self.hidden.append((first, last))
 
@@ -140,60 +147,54 @@ class FakeClient:
 
 def test_formulas_find_the_player_by_his_hidden_id_never_his_name():
     layout = eft.build_layout(_inputs(_edge([_player(1)])))
-    added = "'Player Pool'!$Z$4:$Z$53"
-    rows = writer.tab_rows(layout, "EdgeRaw", 777, added_range=added)
+    rows = writer.tab_rows(layout, "EdgeRaw")
     row = layout.player_rows[0]
     cells = rows[row - 1]
     idl = writer._id_letter()
-    pool, do, link = cells[ord(eft.POOL_COL) - 65], cells[ord(eft.DO_COL) - 65], cells[ord(eft.LINK_COL) - 65]
+    pool, do = cells[ord(eft.POOL_COL) - 65], cells[ord(eft.DO_COL) - 65]
     lookup = f"MATCH(${eft.ID_COL}{row},EdgeRaw!${idl}:${idl},0)"
     assert lookup in pool and pool.startswith(f'=IF(${eft.ID_COL}{row}="","",')  # blank Id, blank result
-    assert (
-        f"COUNTIF({added},$A{row})" in pool and '"Added"' in pool
-    )  # the Added list is the one by-name lookup
-    assert "MATCH($A" not in pool and "MATCH($A" not in link  # EdgeRaw is never matched by name
+    assert pool == pc.pool_formula(row, "EdgeRaw", id_col=eft.ID_COL)  # the one formula the script restores
+    assert "MATCH($B" not in pool and "COUNTIF" not in pool  # never by name, no Added list
     assert do.startswith(f'=IF(${eft.POOL_COL}{row}<>"","In pool ("&${eft.POOL_COL}{row}&")","')
     assert do.endswith(('Cash add")', 'Cash option")'))
-    assert "#gid=777" in link and lookup in link
-    assert cells[0] == "WR1" and cells[ord(eft.ID_COL) - 65] == 1001  # untouched
+    assert cells[ord(eft.NAME_COL) - 65] == "WR1" and cells[ord(eft.ID_COL) - 65] == 1001  # untouched
 
 
-def test_the_pool_cell_reads_edgeraw_alone_when_there_is_no_added_list():
-    layout = eft.build_layout(_inputs(_edge([_player(1)])))
-    rows = writer.tab_rows(layout, "EdgeRaw", 1, added_range=None)
-    assert "COUNTIF" not in rows[layout.player_rows[0] - 1][ord(eft.POOL_COL) - 65]
+def test_the_columns_run_pool_name_pos_team_salary_own_then_numbers_do_and_why_last():
+    assert eft.LEAD == ["Pool", "Name", "Pos", "Team", "Salary", "Own%"]
+    assert (eft.POOL_COL, eft.NAME_COL, eft.OWN_COL) == ("A", "B", "F")
+    assert eft.TRAILING_HEADERS == ["Do", "Why", "Id"]
+    assert ord(eft.DO_COL) < ord(eft.WHY_COL) < ord(eft.ID_COL)  # Why is the last visible column
+    assert eft.LAST_VISIBLE_COL == eft.WHY_COL
 
 
-def test_the_added_range_is_found_by_header_text_and_missing_is_none():
-    client = FakeClient()
-    first = PLAYER_POOL_HEADER_ROW + 1
-    last = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
-    assert writer.added_names_range(client) == f"'Player Pool'!$Z${first}:$Z${last}"
-    assert writer.added_names_range(FakeClient(header=[["Name", "Pos"]])) is None
-
-
-def test_the_writer_adds_set_dropdowns_hides_id_and_key_and_shows_the_all_links():
+def test_the_writer_adds_pool_dropdowns_notes_hides_id_and_key_and_shows_the_all_links():
     client = FakeClient()
     edge = _edge([_player(i) for i in range(1, 4)])
     message = writer.write_tab(client, _inputs(edge), edge_tab="EdgeRaw")
     assert "player rows" in message and client.tab_written[0] == "Edge Finder"
     assert client.hidden == [(eft.ID_COL, eft.KEY_COL)]
-    assert client.validations and all(o == ["Cash", "GPP", "Both", "Remove"] for _, o in client.validations)
-    assert all(rng.startswith(eft.SET_COL) for rng, _ in client.validations)
-    assert "control_before" in client.calls and client.freeze_args == {"rows": 0, "cols": 1}
+    assert client.cleared_validation.startswith("A1:")  # the old layout's Set dropdowns are cleared first
+    assert client.validations and all(o == ["Cash", "GPP", "Both"] for _, o in client.validations)
+    assert all(rng.startswith(eft.POOL_COL) for rng, _ in client.validations)
+    assert "control_before" in client.calls and client.freeze_args == {"rows": 0, "cols": 2}
+    assert client.cleared_notes == [f"{eft.WHY_COL}1:{eft.WHY_COL}{max(len(client.tab_written[1]), 40) + 20}"]
     rows = client.tab_written[1]
+    player = [i + 1 for i, r in enumerate(rows) if r[ord(eft.ID_COL) - 65] == 1001][0]
+    assert f"{eft.WHY_COL}{player}" in client.notes  # the full reason sits in the note
     cash_row = [i for i, r in enumerate(rows) if str(r[0]).startswith("CASH CORE")][0]
-    link = rows[cash_row][ord(eft.LINK_COL) - 65]
+    link = rows[cash_row][ord(eft.DO_COL) - 65]
     assert link == '=HYPERLINK("https://docs.google.com/spreadsheets/d/SHEETID/edit#gid=5&fvid=11","All ↗")'
     gpp_row = [i for i, r in enumerate(rows) if str(r[0]).startswith("GPP UPSIDE")][0]
-    assert "fvid=22" in rows[gpp_row][ord(eft.LINK_COL) - 65]
+    assert "fvid=22" in rows[gpp_row][ord(eft.DO_COL) - 65]
 
 
 def test_no_all_link_when_the_filter_view_does_not_exist():
     client = FakeClient(filter_views={})
     writer.write_tab(client, _inputs(_edge([_player(1)])), edge_tab="EdgeRaw")
     cash_row = [i for i, r in enumerate(client.tab_written[1]) if str(r[0]).startswith("CASH CORE")][0]
-    assert client.tab_written[1][cash_row][ord(eft.LINK_COL) - 65] == ""
+    assert client.tab_written[1][cash_row][ord(eft.DO_COL) - 65] == ""
 
 
 def test_gradients_are_per_position_block_and_the_pooled_override_is_a_conditional_format():
@@ -271,3 +272,46 @@ def test_the_empty_state_writes_without_error_and_ensure_tab_leaves_an_existing_
     assert "written" in writer.write_tab(client, None)
     assert "already present" in writer.ensure_tab(client)
     assert client.tab_written[0] == "Edge Finder"
+
+
+def test_the_widths_grow_to_fit_a_cell_the_fixed_widths_would_cut_off():
+    long_name = "Jacory Croskey-Merritt the Third of Many"
+    edge = _edge([_player(1, Name=long_name, Edge="INJ+ USAGE↑ Proj ▼ FADE↓")])
+    layout = eft.build_layout(_inputs(edge))
+    fitted = writer.fit_widths(layout)
+    assert fitted[eft.NAME_COL] > writer.WIDTHS[eft.NAME_COL]  # the name was cut at the fixed width
+    last_slot = chr(ord("A") + eft.FIRST_TRAILING - 1)
+    assert fitted[last_slot] > writer.WIDTHS[last_slot]  # so were the stacked chips
+    assert all(fitted[c] >= writer.WIDTHS[c] for c in writer.WIDTHS)  # never narrower
+    assert fitted[eft.WHY_COL] == writer.WIDTHS[eft.WHY_COL]  # the open-ended Why is left alone
+    short = writer.fit_widths(eft.build_layout(_inputs(_edge([_player(1)]))))
+    assert short == writer.WIDTHS  # nothing cut, nothing changed
+
+
+def test_edge_chips_share_one_column_in_every_section():
+    edge = _edge([_player(i, Edge="INJ+", Salary=2500 + 10 * i, ValAdj=2.0) for i in range(1, 4)])
+    layout = eft.build_layout(_inputs(edge))
+    last_slot = eft.FIRST_TRAILING - 1
+    with_edge = [r for r in layout.player_rows if layout.rows[r - 1][last_slot] == "INJ+"]
+    assert len(with_edge) >= 6  # cash, GPP, punt, leverage-free sections: all show the chips in the last slot
+    punt = [
+        layout.rows[r - 1]
+        for r in layout.player_rows
+        if layout.rows[r - 1][_idx(eft.DO_COL)] == "Punt option"
+    ]
+    assert punt and all(row[last_slot] == "INJ+" and row[last_slot - 1] == "" for row in punt)
+
+
+def _idx(letter):
+    return ord(letter) - ord("A")
+
+
+def test_widths_are_fitted_to_the_text_the_sheet_shows_not_the_stored_float():
+    edge = _edge(
+        [_player(1, **{"Own%": 0.0727499999999999, "OwnStatus": "real", "Boom%": 11.127333333333334})]
+    )
+    layout = eft.build_layout(_inputs(edge))
+    shown = writer._display_rows(layout)
+    row = shown[layout.player_rows[0] - 1]
+    assert row[ord(eft.OWN_COL) - 65] == "7.3%" and row[eft.LEAD.index("Salary")] == "$5,100"
+    assert writer.fit_widths(layout)[eft.OWN_COL] == writer.WIDTHS[eft.OWN_COL]  # not blown up by 18 digits

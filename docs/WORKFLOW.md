@@ -51,7 +51,13 @@ the title itself parses -- see below), rewrites `config.toml`'s
 clears last week's lineups, blanks every synced tab AND every local
 synced-data cache (so a source that fails on the first sync reads as
 no-data-yet rather than a previous week's now-mismatched numbers), and
-runs a full `dfs sync`.
+runs a full `dfs sync`. It then prints which saved odds snapshot the week's line movement is measured against, e.g. "Opening lines: Tue 9:30 am ET snapshot (after the previous week's last game)"
+(or says it is using the current lines when none is older).
+
+**The opening lines.** Movement (`ImpliedMove`, `TotMove`, `SpdMove`, the Movement tab) is measured against the week's *opening* lines: the earliest saved `nfl_odds` snapshot that shows the new
+week's slate, not whenever `dfs week new` happened to run (`store.opening_snapshot`). The odds source only ever shows the current slate, so the opening is on record only if the lines were saved
+before the sheet was copied. `dfs odds snapshot` saves them (no sheet, no other source); `dfs odds schedule --install` runs it every **Monday and Tuesday at 10:00 ET** as a macOS launchd job
+(your Mac's clock is converted), and `dfs odds schedule --remove` turns it off (`dfs odds schedule` alone says whether it is installed). Its log is `data/odds_snapshot.log`.
 
 If the copy is somehow already titled `Week <n>` and `<n>` disagrees with
 what `dfs week new` derives, it stops and asks rather than overwriting a
@@ -205,8 +211,8 @@ game has not started; `--all-players` also searches the rosterable pool. If noth
 Each swap also shows what it does to the lineup's chances, from the lineup simulator (`docs/SIM.md`): `P(cash)` and `P(GPP)`
 are the change in percentage points, beside the projection gain. `--goal cash` (the default) ranks the swaps by the change
 in P(cash), `--goal gpp` by P(GPP), projection gain breaking ties; the search keeps four times as many candidates as it
-shows, so a swap that wins on probability but not on projection can surface. The cash line is the median of your last three
-typed `Cash Line` values in Results and the GPP target is `[sim] gpp_target` (default 190); the top of the output says which.
+shows, so a swap that wins on probability but not on projection can surface. The cash line is the median of every typed
+`Cash Line` in Results this season and the GPP target is `[sim] gpp_target` (default 190); the top of the output says which.
 
 After `dfs sync`, the **Lineups** tab also shows `Median`, `p90`, `P(cash)` and `P(190+)` on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and

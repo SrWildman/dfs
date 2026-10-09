@@ -1,14 +1,15 @@
 """The bound Apps Script (`apps_script/Code.gs`): its version, and whether a sheet has it pasted.
 
-The script handles the `Set` dropdown on the Edge Finder and Board tabs (it writes EdgeRaw's `Pool` cell for
-the player whose hidden `Id` sits on the clicked row) and the "Lineup Tools" menu. It lives in the repo so
-nothing Sam has is lost, and is pasted into each sheet by hand (Extensions > Apps Script; the steps are in
-`docs/APPS_SCRIPT.md`). Weekly copies of the template inherit it.
+The script handles the `Pool` dropdown on the Edge Finder, Board and Player Pool tabs (it writes EdgeRaw's
+`Pool` cell for the player whose hidden `Id` sits on the edited row, then puts the cell's formula back),
+Player Pool's add-a-player box, and the "Lineup Tools" menu. It lives in the repo so nothing Sam has is lost,
+and is pasted into each sheet by hand (Extensions > Apps Script; the steps are in `docs/APPS_SCRIPT.md`).
+Weekly copies of the template inherit it.
 
 Every time `onOpen` runs, the script writes its `DFS_SCRIPT_VERSION` into a hidden named range of the same
 name (a cell on the hidden `NameAlias` tab). `dfs doctor` reads that stamp and WARNS (it never fails) when it
 is missing or older than the repo's `Code.gs`, with the one-line fix. The names the script and this package
-must agree on (tab names, the `Set` / `Id` / `Pool` headers, the dropdown options) are checked against
+must agree on (tab names, the `Id` / `Pool` headers, the dropdown options) are checked against
 `Code.gs` by `tests/test_apps_script.py`.
 """
 
@@ -39,7 +40,8 @@ def stamp_warning(stamp: object, repo_version: int) -> str | None:
     text = "" if stamp is None else str(stamp).strip()
     if text == "":
         return (
-            f"Apps Script not pasted (or never opened since): the `Set` dropdowns do nothing yet. Fix: {FIX}"
+            "Apps Script not pasted (or never opened since): the Pool dropdowns will not change the pool "
+            f"yet (a picked value would sit there stale). Fix: {FIX}"
         )
     try:
         have = int(float(text))

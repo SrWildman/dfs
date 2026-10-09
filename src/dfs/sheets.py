@@ -316,6 +316,11 @@ class SheetsClient:
         _, ws = self._ws(tab_name)
         return ws.row_count
 
+    def column_count(self, tab_name: str) -> int:
+        """The tab's grid width (how many columns exist, filled or not)."""
+        _, ws = self._ws(tab_name)
+        return ws.col_count
+
     def read_formula(self, tab_name: str, a1_range: str) -> list[list[str]]:
         """Like `read_range`, but returns the literal formula text (e.g.
         "=SUM(A1:A2)") instead of the resolved value for any formula cell --
@@ -1751,6 +1756,25 @@ class SheetsClient:
                             "fields": "note",
                         }
                     }
+                ]
+            }
+        )
+
+    def clear_notes(self, tab_name: str, a1_range: str) -> None:
+        """Remove every cell note in `a1_range` (an `updateCells` that sets only the `note` field, to
+        nothing).
+        Values, formulas and formats are untouched. A rewritten tab keeps its old notes unless they are
+        cleared: `clear` and `write_tab` leave notes in place, so a row that now holds a different player
+        would still show the previous player's note."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = a1_range_to_grid_range(a1_range, ws.id)
+        n_rows = grid_range["endRowIndex"] - grid_range["startRowIndex"]
+        n_cols = grid_range["endColumnIndex"] - grid_range["startColumnIndex"]
+        empty_row = {"values": [{} for _ in range(n_cols)]}
+        sheet.batch_update(
+            {
+                "requests": [
+                    {"updateCells": {"range": grid_range, "rows": [empty_row] * n_rows, "fields": "note"}}
                 ]
             }
         )

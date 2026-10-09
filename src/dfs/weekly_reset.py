@@ -127,27 +127,11 @@ PLAYER_POOL_HEADER_ROW = PLAYER_POOL_NAME_BLOCKS[0][0] - 1
 PLAYER_POOL_BLOCK_CAPACITIES = {"QB": 15, "RB": 20, "WR": 25, "TE": 15, "DST": 10}
 PLAYER_POOL_BLOCK_ROWS = {"QB": 17, "RB": 22, "WR": 27, "TE": 17, "DST": 12}
 
-# Week 3 feedback (A6), 2026-09-22: "Adding a player in row one of the
-# pool works, but only once. If you try and add a second in the same
-# spot, the first is deleted." Correct -- the control cell holds one
-# typed name and `sheet_pool_formulas._union_array` only ever read that
-# one cell, so a second entry replaced the first. Fix: a hidden,
-# position-agnostic column (`Added`, appended past `In` -- see
-# `sheet_columns.PLAYER_POOL_COLUMN_ORDER`) accumulates every name ever
-# typed into the control cell this week. `dfs sync` drains the control
-# cell into the next free row here and blanks it
-# (`sheet_pool_control.drain_control_cell_into_added_names`);
-# `_union_array` unions EdgeRaw's ticks, the (now almost-always-blank)
-# control cell, AND this whole range, so a name shows up immediately
-# after typing (still via the live control-cell branch) and keeps
-# showing up after the next sync drains it here. 50 rows is generously
-# past realistic weekly use -- position caps sum to 75, and most adds go
-# through ticking EdgeRaw directly; this only needs to hold the ones
-# that don't. Cleared every week by `clear_previous_week`,
-# same "typed state must not survive into a new week" reasoning as the
-# control cell itself.
-PLAYER_POOL_ADDED_NAMES_HEADER = "Added"
-PLAYER_POOL_ADDED_NAMES_ROWS = 50
+# The add-a-player control row (`sheet_pool_control.py`): the label's text, and the type the dropdown beside
+# the box resets to each week. (Until the actions round the box fed a hidden, accumulated `Added` list that
+# the Name formulas also read; it is retired, and the box now sets EdgeRaw's `Pool` directly.)
+PLAYER_POOL_CONTROL_LABEL = "Add a player"
+PLAYER_POOL_CONTROL_DEFAULT_TYPE = "Both"
 
 # Full-grid tab: clear everything below the header, generously past any
 # row/column count actually seen so far.
@@ -225,32 +209,30 @@ def clear_previous_week(
     client.clear_ranges(lineups_tab, lineups_ranges)
     summary.append(f"{lineups_tab}: cleared Name column across {len(LINEUPS_NAME_BLOCKS)} lineup slot(s)")
 
-    # A3: the add-a-player control cell (row PLAYER_POOL_CONTROL_ROW) is a
-    # plain typed value, not a formula -- unlike the rest of Player Pool,
-    # `is_formula_driven` below doesn't cover it, and a name typed there
-    # last week (for a player who may not even be on this week's slate)
-    # must not survive into a new week any more than a stale Lineups pick
-    # would (Fix 2.14's "blank is better than bad").
-    client.clear_ranges(player_pool_tab, [f"B{PLAYER_POOL_CONTROL_ROW}"])
-    summary.append(f"{player_pool_tab}: cleared the add-a-player control (B{PLAYER_POOL_CONTROL_ROW})")
+    # The add-a-player box (row PLAYER_POOL_CONTROL_ROW) is a plain typed value, not a formula, so a name
+    # typed last week must not survive into a new week any more than a stale Lineups pick would (Fix
+    # 2.14's "blank is better than bad"); the type beside it goes back to its default. Both cells are
+    # found from the label's own position in row 1, since a column move shifts them.
+    control = client.read_range(player_pool_tab, f"A{PLAYER_POOL_CONTROL_ROW}:{PLAYER_POOL_CONTROL_ROW}")
+    control_row = control[0] if control else []
+    if PLAYER_POOL_CONTROL_LABEL in control_row:
+        label = control_row.index(PLAYER_POOL_CONTROL_LABEL)
+        box = f"{column_letter(label + 1)}{PLAYER_POOL_CONTROL_ROW}"
+        client.clear_ranges(player_pool_tab, [box])
+        if label > 0:
+            type_cell = f"{column_letter(label - 1)}{PLAYER_POOL_CONTROL_ROW}"
+            client.update_range(player_pool_tab, type_cell, [[PLAYER_POOL_CONTROL_DEFAULT_TYPE]])
+        summary.append(f"{player_pool_tab}: cleared the add-a-player box ({box})")
 
-    # A6: the accumulated add-a-player list is typed weekly state too --
-    # found by header name (never hardcoded, may not exist on an
-    # older/not-yet-migrated sheet, hence the guard).
+    # Player Pool's Name column is found by header text (it sits right of the Pool column).
     header_row_values = client.read_range(
         player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
     )
     header = header_row_values[0] if header_row_values else []
-    if PLAYER_POOL_ADDED_NAMES_HEADER in header:
-        added_col = column_letter(header.index(PLAYER_POOL_ADDED_NAMES_HEADER))
-        first_row = PLAYER_POOL_HEADER_ROW + 1
-        last_row = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
-        added_range = f"{added_col}{first_row}:{added_col}{last_row}"
-        client.clear_ranges(player_pool_tab, [added_range])
-        summary.append(f"{player_pool_tab}: cleared the accumulated add-a-player list ({added_range})")
+    name_col = column_letter(header.index("Name")) if "Name" in header else "A"
 
     first_start, _ = PLAYER_POOL_NAME_BLOCKS[0]
-    first_cell = client.read_formula(player_pool_tab, f"A{first_start}")
+    first_cell = client.read_formula(player_pool_tab, f"{name_col}{first_start}")
     is_formula_driven = bool(first_cell and first_cell[0] and str(first_cell[0][0]).startswith("="))
     if is_formula_driven:
         # Task K 4.3: Player Pool's Name column is a SORT/FILTER formula off
@@ -261,7 +243,7 @@ def clear_previous_week(
         # sources/edge.py) every week regardless.
         summary.append(f"{player_pool_tab}: formula-driven (Task K), Name column left alone")
     else:
-        pool_ranges = [f"A{s}:A{e}" for s, e in PLAYER_POOL_NAME_BLOCKS]
+        pool_ranges = [f"{name_col}{s}:{name_col}{e}" for s, e in PLAYER_POOL_NAME_BLOCKS]
         client.clear_ranges(player_pool_tab, pool_ranges)
         n = len(PLAYER_POOL_NAME_BLOCKS)
         summary.append(f"{player_pool_tab}: cleared Name column across {n} block(s)")

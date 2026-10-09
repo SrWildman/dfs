@@ -71,13 +71,20 @@ _EDGE_RANGE_START = column_letter(EDGE_COLUMNS.index(_EDGE_NAME_COLUMN) + EDGE_D
 _EDGE_RANGE_END = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
 
 
+def _name_column(header: list[str]) -> str:
+    """The letter of the tab's own `Name` column (the VLOOKUP key). Player Pool's is column B now that its
+    `Pool` control sits left of it; Lineups' and PlayerPoolRaw's stay A. Read from the header, never
+    assumed."""
+    return column_letter(header.index("Name")) if "Name" in header else "A"
+
+
 def _vlookup_index(column_name: str) -> int:
     """1-based position of `column_name` within EdgeRaw!$<start>:$<end>,
     for VLOOKUP's 3rd argument."""
     return EDGE_COLUMNS.index(column_name) - EDGE_COLUMNS.index(_EDGE_NAME_COLUMN) + 1
 
 
-def edge_lookup_formula(row: int, edge_tab: str, column_name: str) -> str:
+def edge_lookup_formula(row: int, edge_tab: str, column_name: str, *, name_col: str = "A") -> str:
     """The VLOOKUP-by-Name formula for one cell: `row`'s player Name
     (column A of the tab this formula is written into) looked up against
     `edge_tab`'s `column_name`. Wrapped in an `IF($A<row>="","",...)`
@@ -90,13 +97,13 @@ def edge_lookup_formula(row: int, edge_tab: str, column_name: str) -> str:
     index = _vlookup_index(column_name)
     # Round 5 item 6: the typed name is resolved to DK's canonical spelling first
     # (`sheet_names.resolve_name_expr`), so "kenneth walker" finds Kenneth Walker III.
-    key = resolve_name_expr(f"$A{row}", edge_tab)
+    key = resolve_name_expr(f"${name_col}{row}", edge_tab)
     base = f"VLOOKUP({key},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_END},{index},false)"
     lookup = f"IFNA({base})" if column_name in _OPTIONAL_LINKED_COLUMNS else base
-    return f'=IF($A{row}="","",{lookup})'
+    return f'=IF(${name_col}{row}="","",{lookup})'
 
 
-def edge_row_hyperlink_formula(row: int, edge_tab: str, edge_gid: int) -> str:
+def edge_row_hyperlink_formula(row: int, edge_tab: str, edge_gid: int, *, name_col: str = "A") -> str:
     """A3: `=HYPERLINK("#gid=...&range=...","↗")` jumping straight to this
     row's own player on `edge_tab`, so removing someone from the pool
     (unchecking EdgeRaw's Pool column) is one click away instead of a
@@ -114,10 +121,10 @@ def edge_row_hyperlink_formula(row: int, edge_tab: str, edge_gid: int) -> str:
     header text itself (the column's NAME, "Edge ↗", used everywhere this
     codebase finds the column by header) is unchanged -- only the cell
     VALUE each row's HYPERLINK displays."""
-    typed = resolve_name_expr(f"$A{row}", edge_tab)
+    typed = resolve_name_expr(f"${name_col}{row}", edge_tab)
     match = f"MATCH({typed},{edge_tab}!${_EDGE_RANGE_START}:${_EDGE_RANGE_START},0)"
     target = f'"#gid={edge_gid}&range={_EDGE_RANGE_START}"&{match}'
-    return f'=IF($A{row}="","",IFNA(HYPERLINK({target},"↗"),"-"))'
+    return f'=IF(${name_col}{row}="","",IFNA(HYPERLINK({target},"↗"),"-"))'
 
 
 def write_edge_row_links(
@@ -144,9 +151,13 @@ def write_edge_row_links(
         return f"{tab}: no 'Edge ↗' column -- skipped"
 
     col = column_letter(header.index("Edge ↗"))
+    name_col = _name_column(header)
     edge_gid = client.tab_gid(edge_tab)
     for start, end in name_blocks:
-        rows = [[edge_row_hyperlink_formula(row, edge_tab, edge_gid)] for row in range(start, end + 1)]
+        rows = [
+            [edge_row_hyperlink_formula(row, edge_tab, edge_gid, name_col=name_col)]
+            for row in range(start, end + 1)
+        ]
         client.update_range(tab, f"{col}{start}:{col}{end}", rows)
 
     total_rows = sum(end - start + 1 for start, end in name_blocks)
@@ -223,6 +234,7 @@ def link_edge_columns(
             client.update_range(tab, a1, [missing])
 
     columns = {name: header.index(name) for name in LINKED_EDGE_COLUMNS}
+    name_col = _name_column(header)
 
     # Write one `update_range` call per contiguous run of column indices
     # per name_block, not one per individual column -- the designed order
@@ -238,7 +250,8 @@ def link_edge_columns(
             start_col = column_letter(columns[run[0]])
             end_col = column_letter(columns[run[-1]])
             rows = [
-                [edge_lookup_formula(row, edge_tab, name) for name in run] for row in range(start, end + 1)
+                [edge_lookup_formula(row, edge_tab, name, name_col=name_col) for name in run]
+                for row in range(start, end + 1)
             ]
             client.update_range(tab, f"{start_col}{start}:{end_col}{end}", rows)
 

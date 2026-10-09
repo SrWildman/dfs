@@ -1450,9 +1450,21 @@ Everything below is presentation of numbers computed elsewhere; nothing here mov
   Visible rows per position `VISIBLE_PER_POSITION` QB 6, RB 10, WR 12, TE 6, DST 6; at most `MAX_PER_POSITION` 40 are written. `Rank` is
   "#i of M" within that same block, by the section's sort column (`Hit3x%`, `Boom%`, `ValAdj`).
 - **Do verbs.** `Cash add`: rank <= `CASH_ADD_TOP_N` (3) AND `Bust%` strictly below the block's median `Bust%`; else `Cash option`.
-  `GPP add`: `Boom%` at or above the block's `GPP_ADD_TOP_QUARTILE` (0.75) quantile; `GPP leverage ★` also needs the star (ownership published,
-  `Own%` at or below the block's median, `OWN_STAR_BOTTOM_HALF`); else `GPP option`. Disagreements: `Look closer ▲` where CalPts > TFFB, `Caution ▼`
-  where lower. Injury: `Bump ▲` confirmed out, `Watch` questionable. Pooled players read `In pool (Cash|GPP|Both|Added)` instead (a formula on `Pool`).
+  `GPP leverage`: `Lev` at least `LEVERAGE_MIN_LEV` (25) AND `Boom%` at or above the position's median; else `GPP add`: `Boom%` at or above the
+  block's `GPP_ADD_TOP_QUARTILE` (0.75) quantile; else `GPP option`. A **★** is appended to any of them when the player is *starred*: ownership
+  published, `Boom%` top-quartile and `Own%` at or below the block's median (`OWN_STAR_BOTTOM_HALF`, the original definition, unchanged).
+  Disagreements: `Look closer ▲` where CalPts > TFFB, `Caution ▼` where lower. Injury: `Bump ▲` confirmed out, `Watch` questionable.
+  Pooled players read `In pool (Cash|GPP|Both)` instead (a formula on `Pool`).
+- **`Lev`, Leverage plays, Chalk (actions round, 2026-10-09).** Ownership (`Own%`, TFFB's `ProjOwn`) is a *large-field* projection: directional for small-field
+  GPPs, ignored in cash. `edge_finder_tab.with_leverage` takes, within each position, the rosterable, available players with both a `Boom%` and a real `Own%`
+  (`OwnStatus == "real"`), ranks each as a percentile (0-100, `rank(pct=True)`), and sets `Lev = round(Boom% rank - Own% rank)`; `BoomHalf` is `Boom%` at or
+  above the position median. **Leverage plays** = the top `LEVERAGE_ROWS_PER_POSITION` (5) per position by `Lev` among `BoomHalf` players. **Chalk to fade
+  or eat** = the `CHALK_ROWS_PER_POSITION` (3) highest-owned per position; `chalk_verb` reads his `Bust%` rank within the position (0-1, 1 = most bust-prone):
+  at or below `CHALK_THIRD` (1/3) -> `Chalk: eat`, at or above 2/3 -> `Chalk: fade candidate`, else `Chalk`. All three are blank until ownership publishes. Nothing
+  here is an input to `CalPts`, `Hit3x%`, `Boom%`, `Bust%`, `Floor` or `CeilM` (`tests/test_edge_finder_tab.py` pins that, and that no projection module mentions ownership).
+- **The shown `Why`.** At most `SHORT_WHY_CHARS` (60) characters: the one fact the row's other columns do not state, number first ("CalPts 1.8 under TFFB", "Boom 85th pct,
+  owned 45th pct", "$300 above the cheapest RB", "-1.2 other sources, +0.4 bias"); the full reason is the cell's note (`edge_finder_tab.short_why` cuts a long text at its first clause and a
+  word boundary).
 - **Thin-week verdict.** For each position, the median across earlier weeks of that week's best cash-core `Hit3x%` (each week read the way Sam saw
   it: the last signals archive before each player's own kickoff, `signals_data.select_archive_rows`; `typical_best_hit3x`). If this week's best
   is below it: "Thin week at RB: best cash odds 34% (typical best ~41%, 4 earlier weeks)". No earlier week, no line.

@@ -284,18 +284,20 @@ PLAYER_POOL_RAW_COLUMN_ORDER = list(BASE_COLUMN_ORDER)
 # HYPERLINK straight to this player's row on EdgeRaw, so removing someone
 # -- unchecking Pool there -- is one click away instead of a scroll/search
 # through 743 rows) sits right after IDENTITY now, since it's about
-# managing this row rather than describing the player; "Pool" (Fix 2.11's
-# surfaced Cash/GPP/Both value) and "Overflow" (the over-the-cap warning)
-# are both about *this tab's own roster mechanics*, not a player
-# attribute, so they stay appended at the very end regardless of what
-# else moves around them. "Used"/"In" (Phase 5B: how many of THIS WEEK'S
-# lineups roster this player, and which ones) are the newest addition and
-# append-only past everything else, per `sheet_links.link_edge_columns`'s
-# own append convention -- `sheet_pool_usage.py` writes their formulas.
-# "Added" (Week 3 feedback, A6, 2026-09-22) is hidden outright, same
-# treatment as `Id`/`Flag` in INTERNAL -- see `weekly_reset.
-# PLAYER_POOL_ADDED_NAMES_HEADER`'s own comment for what it holds.
+# managing this row rather than describing the player. "Pool" (the live
+# Cash/GPP/Both control, actions slice 1, 2026-10-09) is the FIRST column,
+# left of Name like EdgeRaw's own Pool: it shows the player's EdgeRaw state
+# and is the dropdown the bound Apps Script reads (blank it to remove him
+# from the pool). It used to be appended after "Overflow" (the over-the-cap
+# warning, which stays near the end: a roster-mechanics note, not a player
+# attribute). "Used"/"In" (Phase 5B: how many of THIS WEEK'S lineups roster
+# this player, and which ones) are append-only past everything else, per
+# `sheet_links.link_edge_columns`'s own append convention --
+# `sheet_pool_usage.py` writes their formulas. The hidden "Added" list
+# (Week 3 feedback, A6) is retired: the add-a-player box sets EdgeRaw's
+# Pool directly now (`sheet_pool_control.py`).
 PLAYER_POOL_COLUMN_ORDER = [
+    "Pool",
     *IDENTITY,
     "Edge ↗",
     *DECISION,
@@ -311,10 +313,8 @@ PLAYER_POOL_COLUMN_ORDER = [
     *USAGE,
     *INTERNAL,
     "Overflow",
-    "Pool",
     "Used",
     "In",
-    "Added",
 ]
 
 # Lineups: Part 2 moved "% of Rstr" OUT of its old interspersed position

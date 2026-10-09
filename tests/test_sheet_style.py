@@ -66,7 +66,8 @@ from dfs.sheet_views import (
     BOARD_CHECK_FIRST_ROW,
     BOARD_CHECK_LAST_ROW,
     BOARD_LAST_ROW,
-    BOARD_LIST_SET_COL,
+    BOARD_LIST_POOL_COL,
+    BOARD_MAX_VISIBLE_COL_INDEX,
     BOARD_POOL_GAP_ROW,
     BOARD_QUEUE_COLHEADER_ROW,
     BOARD_QUEUE_FIRST_ROW,
@@ -796,6 +797,7 @@ class FakeGuardrailsClient:
 class FakeBoardClient:
     def __init__(self, *, present: bool = True):
         self._present = present
+        self.cleared_validation: list[str] = []
         self.notes: list[tuple[str, str, str]] = []
         self.row_group_calls: list[tuple[int, int, bool]] = []
         self.cleared_row_groups = False
@@ -866,6 +868,9 @@ class FakeBoardClient:
     def freeze(self, tab_name: str, *, rows: int) -> None:
         self.freeze_calls.append(rows)
 
+    def clear_data_validation(self, tab_name: str, a1_range: str) -> None:
+        self.cleared_validation.append(a1_range)
+
 
 def test_style_board_skips_cleanly_when_tab_absent():
     client = FakeBoardClient(present=False)
@@ -899,16 +904,19 @@ def test_style_board_leaves_every_section_expanded_and_groups_all_six():
     assert not any(collapsed for _, _, collapsed in client.row_group_calls)
 
 
-def test_style_board_gives_queue_and_pool_check_rows_a_set_dropdown_on_the_set_column():
+def test_style_board_gives_every_player_row_a_pool_dropdown_in_the_gutter_and_none_elsewhere():
     client = FakeBoardClient()
     style_board(client)
+    pool = BOARD_LIST_POOL_COL
+    assert pool == "A"  # the gutter
     ranges = {rng for rng, _ in client.dropdown_calls}
     assert ranges == {
-        f"{BOARD_LIST_SET_COL}{BOARD_QUEUE_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_QUEUE_LAST_ROW}",
-        f"{BOARD_LIST_SET_COL}{BOARD_CHECK_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_CHECK_LAST_ROW}",
-        f"{BOARD_LIST_SET_COL}{BOARD_CHALK_FIRST_ROW}:{BOARD_LIST_SET_COL}{BOARD_CHALK_LAST_ROW}",
-    }
-    assert all(options == ["Cash", "GPP", "Both", "Remove"] for _, options in client.dropdown_calls)
+        f"{pool}{BOARD_QUEUE_FIRST_ROW}:{pool}{BOARD_QUEUE_LAST_ROW}",
+        f"{pool}{BOARD_CHECK_FIRST_ROW}:{pool}{BOARD_CHECK_LAST_ROW}",
+        f"{pool}{BOARD_CHALK_FIRST_ROW}:{pool}{BOARD_CHALK_LAST_ROW}",
+    }  # not Slate shape, Pool summary, Your stacks or Stack candidates
+    assert all(options == ["Cash", "GPP", "Both"] for _, options in client.dropdown_calls)
+    assert all("Remove" not in options for _, options in client.dropdown_calls)  # blank is the remove
 
 
 def test_style_board_hides_the_queues_unused_rows_again_so_a_polish_does_not_undo_the_sync():
@@ -989,7 +997,7 @@ def test_style_board_resets_background_before_applying_new_formatting():
     style_board(client)
     first_range, first_fmt = client.format_calls[0]
     assert first_fmt["backgroundColor"] == WHITE
-    assert first_range.startswith("A1:N")
+    assert first_range.startswith(f"A1:{column_letter(BOARD_MAX_VISIBLE_COL_INDEX)}")
 
 
 def test_style_board_reset_also_clears_stale_white_text_so_player_rows_never_vanish():
@@ -1519,8 +1527,12 @@ class FakeBuilderTabClient:
         self.color_scale_calls: list[tuple[str, dict]] = []
         self.multi_range_calls: list[dict] = []
         self.hide_calls: list[tuple[str, str, bool]] = []
-        self._grouped_column_indices = grouped_column_indices or set()
+        self.dropdown_calls: list[tuple[str, list[str]]] = []
         self.notes: list[tuple[str, str]] = []
+        self._grouped_column_indices = grouped_column_indices or set()
+
+    def set_dropdown_validation(self, tab_name: str, a1_range: str, options: list[str]) -> None:
+        self.dropdown_calls.append((a1_range, options))
 
     def set_note(self, tab_name: str, cell: str, text: str) -> None:
         self.notes.append((cell, text))
@@ -1757,6 +1769,21 @@ def test_polish_builder_tab_tints_every_pool_tag_defined_in_pool_tag_tints():
         if a1 == "B2:B100" and kwargs["condition_type"] == "TEXT_EQ" and kwargs["values"][0] in POOL_TAG_TINTS
     }
     assert tinted_tags == set(POOL_TAG_TINTS)
+
+
+def test_polish_builder_tab_makes_player_pools_pool_column_the_dropdown_control_over_each_block():
+    client = FakeBuilderTabClient(["Pool", "Name"])
+    polish_builder_tab(client, "Player Pool", last_row=40, header_row=2, band_blocks=[(3, 10), (12, 40)])
+
+    assert client.dropdown_calls == [
+        ("A3:A10", ["Cash", "GPP", "Both"]),
+        ("A12:A40", ["Cash", "GPP", "Both"]),
+    ]
+    assert any(a1 == "A3:A10" and "backgroundColor" in fmt for a1, fmt in client.format_calls)
+    # a tab with no Pool column (PlayerPoolRaw, Lineups) gets no dropdown
+    other = FakeBuilderTabClient(["Name", "Pos."])
+    polish_builder_tab(other, "Lineups", last_row=40, header_row=1)
+    assert other.dropdown_calls == []
 
 
 def test_polish_builder_tab_skips_pool_tag_tint_when_pool_column_absent():
@@ -2420,3 +2447,11 @@ def test_bold_names_are_explained_on_the_instructions_tab_and_every_tab_note_is_
     grid = render_instructions_grid()
     text = " ".join(cell for pair in grid.values() for cell in pair).lower()
     assert "bold name = at least one flag" in text
+
+
+def test_style_board_clears_the_old_layouts_dropdowns_before_adding_the_pool_ones():
+    from dfs.sheet_style import BOARD_RESET_ROWS
+
+    client = FakeBoardClient()
+    style_board(client)
+    assert client.cleared_validation == [f"A1:{column_letter(BOARD_MAX_VISIBLE_COL_INDEX)}{BOARD_RESET_ROWS}"]

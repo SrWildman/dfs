@@ -287,5 +287,5 @@ no status, so outs come from DraftKings' `Avail`.
 **The Lineups simulator columns (`Median`, `p90`, `P(cash)`, `P(190+)`) are blank.**
 A lineup with an empty slot, or a name EdgeRaw does not have (typo, bye week), is left blank on purpose; fill it in and
 `dfs sync` again. If every lineup is blank, check the sync output for `Lineup simulator not written` (a Sheets error) or
-`column(s) [...] not found` (run `dfs setup reorder-columns`). The cash line is the median of your last three typed
-`Cash Line` values in Results; with none typed the sync says it used the 145 placeholder.
+`column(s) [...] not found` (run `dfs setup reorder-columns`). The cash line is the median of every typed
+`Cash Line` in Results this season; with none typed the sync says it used the 145 placeholder.

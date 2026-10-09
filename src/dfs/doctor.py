@@ -19,13 +19,15 @@ from dataclasses import dataclass
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
+from dfs.edge_finder_tab import ID_COL as EDGE_FINDER_ID_COL
+from dfs.edge_finder_tab import POOL_COL as EDGE_FINDER_POOL_COL
 from dfs.sheet_empty_guards import describe as describe_unguarded
 from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
-from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
+from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
 from dfs.week import parse_week_from_title
@@ -377,6 +379,47 @@ def _check_pct_helpers(
     return issues
 
 
+def _check_pool_cells_hold_the_formula(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
+) -> list[DoctorIssue]:
+    """Every player row's `Pool` cell (Edge Finder, Board, Player Pool) must hold the formula that shows his
+    EdgeRaw state. The cell is also a dropdown: if the bound Apps Script is not pasted, or an edit failed, a
+    picked value overwrites the formula and then goes stale. A player row is one whose hidden `Id` cell is
+    filled; a non-empty Pool cell on it that is not a formula is the failure."""
+    pool_tab = cfg.lineups.player_pool_tab
+    targets: list[tuple[str, str, str]] = [
+        (EDGE_FINDER_TAB, EDGE_FINDER_POOL_COL, EDGE_FINDER_ID_COL),
+        (BOARD_TAB, BOARD_LIST_POOL_COL, BOARD_ID_COL),
+    ]
+    header = headers_by_tab.get(pool_tab, [])
+    if "Pool" in header and "Id" in header:
+        targets.append((pool_tab, column_letter(header.index("Pool")), column_letter(header.index("Id"))))
+    issues = []
+    for tab, pool_col, id_col in targets:
+        if tab not in tab_titles:
+            continue
+        last = client.row_count(tab)
+        formulas = client.read_formula(tab, f"{pool_col}1:{pool_col}{last}")
+        ids = client.read_range(tab, f"{id_col}1:{id_col}{last}")
+        plain = []
+        for index, row in enumerate(formulas):
+            cell = str(row[0]).strip() if row else ""
+            has_id = index < len(ids) and bool(ids[index]) and str(ids[index][0]).strip() != ""
+            if has_id and cell and cell != "Pool" and not cell.startswith("="):  # "Pool" is the header
+                plain.append(index + 1)
+        if plain:
+            first = f"{pool_col}{plain[0]}"
+            issues.append(
+                DoctorIssue(
+                    "pool-cell-plain-value",
+                    f"{tab!r}: {len(plain)} Pool cell(s) hold a typed value instead of the formula "
+                    f"(first at {first}) -- the Apps Script did not put it back (is it pasted and current? "
+                    "see docs/APPS_SCRIPT.md); `dfs sync` or `dfs setup build-views` rewrites them.",
+                )
+            )
+    return issues
+
+
 def run_doctor(
     client: DoctorClient, cfg: Config, *, title: str, check_title: bool = True
 ) -> list[DoctorIssue]:
@@ -432,4 +475,5 @@ def run_doctor(
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)
     issues += _check_pct_helpers(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_pool_cells_hold_the_formula(client, cfg, tab_titles, headers_by_tab)
     return issues

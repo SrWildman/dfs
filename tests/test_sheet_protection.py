@@ -1,4 +1,5 @@
-from dfs.sheet_protection import FULLY_PROTECTED_TABS, protect_workbook
+from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
+from dfs.sheet_protection import FULLY_PROTECTED_TABS, POOL_GUTTER_TABS, protect_workbook
 from dfs.sheet_views import LINEUP_COUNT_CELL
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
 
@@ -11,6 +12,9 @@ class FakeProtectionClient:
 
     def tab_exists(self, tab_name: str) -> bool:
         return tab_name not in self._missing
+
+    def read_range(self, tab_name: str, a1_range: str):
+        return [list(PLAYER_POOL_COLUMN_ORDER)]  # Player Pool's header
 
     def clear_protected_ranges(self, tab_name: str) -> None:
         self.clear_calls.append(tab_name)
@@ -82,10 +86,22 @@ def test_edgeraw_is_never_protected():
     assert "EdgeRaw" not in protected_tabs
 
 
-def test_player_pool_leaves_only_the_add_a_player_control_unprotected():
+def test_player_pool_leaves_the_pool_column_and_the_add_a_player_box_unprotected():
     client = FakeProtectionClient()
     protect_workbook(client, lineups_tab="Lineups")
 
     _tab, kwargs = next(c for c in client.protect_calls if c[0] == "Player Pool")
-    assert kwargs["unprotected_ranges"] == [f"B{PLAYER_POOL_CONTROL_ROW}"]
+    # Pool is column A and the box sits right of the label in Name's column (B): C
+    assert kwargs["unprotected_ranges"] == ["A:A", f"C{PLAYER_POOL_CONTROL_ROW}"]
     assert kwargs["warning_only"] is True
+
+
+def test_edge_finder_and_board_leave_only_the_pool_gutter_unprotected():
+    client = FakeProtectionClient()
+    protect_workbook(client, lineups_tab="Lineups")
+
+    assert set(POOL_GUTTER_TABS) == {"Edge Finder", "Board"}
+    for tab, column in POOL_GUTTER_TABS.items():
+        _tab, kwargs = next(c for c in client.protect_calls if c[0] == tab)
+        assert column == "A" and kwargs["unprotected_ranges"] == ["A:A"]
+        assert kwargs["warning_only"] is True

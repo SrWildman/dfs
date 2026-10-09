@@ -161,12 +161,21 @@ def test_the_reason_splits_the_gap_into_bias_and_sources_and_names_a_missing_sou
     assert "no FantasyPros projection for him" in reason
 
 
-def _rows_named(layout, name):
-    return [r for r in layout.player_rows if layout.rows[r - 1][0] == name]
-
-
 def _col(letter):
     return ord(letter) - ord("A")
+
+
+NAME = _col(eft.NAME_COL)  # the player's name column
+S0 = len(eft.LEAD)  # the first section-specific slot
+
+
+def _rows_named(layout, name):
+    return [r for r in layout.player_rows if layout.rows[r - 1][NAME] == name]
+
+
+def _why(layout, row):
+    """The full reason behind a row's shortened Why cell (it is the cell's note)."""
+    return layout.notes[row]
 
 
 def _group(layout, key):
@@ -179,6 +188,8 @@ def test_the_empty_state_layout_has_every_section_and_says_nothing_yet():
     assert titles == [
         "CASH CORE",
         "GPP UPSIDE",
+        "LEVERAGE PLAYS",
+        "CHALK TO FADE OR EAT",
         "PUNT PLAYS",
         "PROJECTION DISAGREEMENTS",
         "INJURY BENEFICIARIES",
@@ -190,24 +201,27 @@ def test_the_empty_state_layout_has_every_section_and_says_nothing_yet():
     assert all(len(r) == eft.COLUMN_COUNT for r in layout.rows)
 
 
-def test_the_trailing_columns_are_why_do_pool_set_link_id_and_a_hidden_key():
-    assert eft.TRAILING_HEADERS == ["Why", "Do", "Pool", "Set", "↗", "Id"]
+def test_the_columns_are_pool_name_pos_team_salary_own_numbers_do_why_id_and_a_hidden_key():
+    assert eft.LEAD == ["Pool", "Name", "Pos", "Team", "Salary", "Own%"]
+    assert eft.TRAILING_HEADERS == ["Do", "Why", "Id"]
     assert [
-        eft.WHY_COL,
-        eft.DO_COL,
         eft.POOL_COL,
-        eft.SET_COL,
-        eft.LINK_COL,
+        eft.NAME_COL,
+        eft.OWN_COL,
+        eft.DO_COL,
+        eft.WHY_COL,
         eft.ID_COL,
         eft.KEY_COL,
-    ] == list("KLMNOPQ")
+    ] == list("ABFMNOP")
     layout = eft.build_layout(_inputs(_edge([_player(1)])))
     header = layout.rows[layout.header_rows[0] - 1]
-    assert header[:10] == [
+    assert header[:12] == [
+        "Pool",
         "Name",
         "Pos",
         "Team",
         "Salary",
+        "Own%",
         "CalPts",
         "Hit3x%",
         "Bust%",
@@ -215,8 +229,8 @@ def test_the_trailing_columns_are_why_do_pool_set_link_id_and_a_hidden_key():
         "Rank",
         "Edge",
     ]
-    assert header[10:16] == ["Why", "Do", "Pool", "Set", "↗", "Id"]
-    assert "Games" not in header
+    assert header[12:15] == ["Do", "Why", "Id"]  # Why is last of the visible columns
+    assert "Games" not in header and "Set" not in header and "↗" not in header
 
 
 def test_the_counts_are_the_rosterable_pool_not_every_listing():
@@ -230,7 +244,7 @@ def test_the_counts_are_the_rosterable_pool_not_every_listing():
         eft.rosterable = saved
     subs = [layout.rows[r - 1][0] for r in layout.subheader_rows]
     assert "WR  —  top 6 of 6" in subs  # 10 listed, 6 rosterable
-    names = {layout.rows[r - 1][0] for r in layout.player_rows}
+    names = {layout.rows[r - 1][NAME] for r in layout.player_rows}
     assert not names & {"WR1", "WR2", "WR3", "WR4"}
 
 
@@ -240,8 +254,8 @@ def test_visible_rows_follow_roster_need_and_the_rest_sit_in_a_collapsed_nested_
     assert eft.VISIBLE_PER_POSITION == {"QB": 6, "RB": 10, "WR": 12, "TE": 6, "DST": 6}
     sub = [layout.rows[r - 1][0] for r in layout.subheader_rows if layout.rows[r - 1][0].startswith("WR")][0]
     assert sub == "WR  —  top 12 of 30"
-    header = [r for r in layout.overflow_rows if "WRs" in layout.rows[r - 1][0]][0]
-    assert layout.rows[header - 1][0] == "▸ 18 more WRs (click + to show)"
+    header = [r for r in layout.overflow_rows if "WRs" in layout.rows[r - 1][NAME]][0]
+    assert layout.rows[header - 1][NAME] == "▸ 18 more WRs (click + to show)"
     (overflow,) = _group(layout, "CASH CORE|WR|more")
     assert (overflow.first, overflow.last, overflow.depth, overflow.collapsed) == (
         header + 1,
@@ -258,7 +272,9 @@ def test_visible_rows_follow_roster_need_and_the_rest_sit_in_a_collapsed_nested_
 def test_every_rosterable_player_is_written_up_to_forty_a_position():
     edge = _edge([_player(i, **{"Hit3x%": 20.0 + i}) for i in range(1, 61)])
     layout = eft.build_layout(_inputs(edge))
-    cash_wr = [r for r in layout.player_rows if layout.rows[r - 1][4] != "" and layout.rows[r - 1][5] != ""]
+    cash_wr = [
+        r for r in layout.player_rows if layout.rows[r - 1][S0] != "" and layout.rows[r - 1][S0 + 1] != ""
+    ]
     (overflow,) = _group(layout, "CASH CORE|WR|more")
     assert overflow.last - overflow.first + 1 == eft.MAX_PER_POSITION - 12
     assert any("top 12 of 60" in str(r[0]) for r in layout.rows)  # the header counts the whole pool
@@ -275,8 +291,8 @@ def test_rank_is_against_the_position_pool_and_the_verbs_follow_the_rules():
         ]
     )
     layout = eft.build_layout(_inputs(edge))
-    do, rank = _col(eft.DO_COL), _col("I")
-    by_name = {layout.rows[r - 1][0]: layout.rows[r - 1] for r in layout.player_rows[:4]}
+    do, rank = _col(eft.DO_COL), S0 + 4
+    by_name = {layout.rows[r - 1][NAME]: layout.rows[r - 1] for r in layout.player_rows[:4]}
     assert by_name["WR1"][rank] == "#1 of 4" and by_name["WR4"][rank] == "#4 of 4"
     assert [by_name[n][do] for n in ("WR1", "WR2", "WR3", "WR4")] == [
         "Cash add",
@@ -286,32 +302,53 @@ def test_rank_is_against_the_position_pool_and_the_verbs_follow_the_rules():
     ]
 
 
+def _gpp_upside_rows(layout):
+    """The player rows of GPP UPSIDE alone (the Leverage section repeats some of the same players)."""
+    start = [r for r in layout.section_rows if layout.rows[r - 1][0].startswith("GPP UPSIDE")][0]
+    end = [r for r in layout.section_rows if layout.rows[r - 1][0].startswith("LEVERAGE PLAYS")][0]
+    return [r for r in layout.player_rows if start < r < end]
+
+
 def test_gpp_verbs_add_for_a_top_quartile_boom_and_leverage_adds_the_star():
     rows = [
         _player(i, **{"Boom%": 10.0 + i, "Own%": 0.20 - i / 100, "OwnStatus": "real"}) for i in range(1, 9)
     ]
     layout = eft.build_layout(_inputs(_edge(rows)))
-    verbs = {
-        layout.rows[r - 1][0]: layout.rows[r - 1][_col(eft.DO_COL)]
-        for r in layout.player_rows
-        if str(layout.rows[r - 1][_col(eft.DO_COL)]).startswith("GPP")
-    }
-    assert verbs["WR8"] == f"GPP leverage {eft.STAR}"  # highest Boom%, lowest ownership
+    verbs = {layout.rows[r - 1][NAME]: layout.rows[r - 1][_col(eft.DO_COL)] for r in _gpp_upside_rows(layout)}
+    assert verbs["WR8"] == f"GPP leverage {eft.STAR}"  # highest Boom%, lowest ownership, Lev far above 25
     assert verbs["WR1"] == "GPP option"
     unpublished = eft.build_layout(_inputs(_edge([_player(i, **{"Boom%": 10.0 + i}) for i in range(1, 9)])))
-    assert not any(eft.STAR in str(c) for r in unpublished.rows for c in r[10:13])
-    assert any("ownership not out yet" in str(r[10]) for r in unpublished.rows)
+    assert not any(eft.STAR in str(c) for r in unpublished.rows for c in r[S0:])
+    assert any("ownership not out yet" in note for note in unpublished.notes.values())
+    assert any(eft.OWN_NOT_OUT in str(r[0]) for r in unpublished.rows)  # the status line says so too
 
 
-def test_a_player_row_carries_the_hidden_id_the_why_and_a_do_verb():
+def test_a_player_row_carries_the_hidden_id_a_short_why_the_full_note_and_a_do_verb():
     layout = eft.build_layout(_inputs(_edge([_player(7)])))
-    row = layout.rows[_rows_named(layout, "WR7")[0] - 1]
-    assert row[_col(eft.ID_COL)] == 7
-    assert "to reach 3x salary" in row[_col(eft.WHY_COL)] and row[_col(eft.DO_COL)] in (
-        "Cash add",
-        "Cash option",
+    row_number = _rows_named(layout, "WR7")[0]
+    row = layout.rows[row_number - 1]
+    assert row[_col(eft.ID_COL)] == 7 and row[_col(eft.POOL_COL)] == ""  # the writer fills the Pool formula
+    assert row[_col(eft.WHY_COL)] == "CalPts 1.0 over TFFB"  # what no other column shows, number first
+    assert "to reach 3x salary" in _why(layout, row_number)  # the whole reason is the note
+    assert row[_col(eft.DO_COL)] in ("Cash add", "Cash option")
+
+
+def test_the_shown_why_is_at_most_sixty_characters_and_cash_never_mentions_ownership():
+    edge = _edge(
+        [_player(i, **{"Own%": 0.1 + i / 100, "OwnStatus": "real", "Hit3x%": 20.0 + i}) for i in range(1, 25)]
     )
-    assert row[_col(eft.SET_COL)] == ""
+    layout = eft.build_layout(_inputs(edge))
+    why = _col(eft.WHY_COL)
+    assert layout.player_rows
+    assert all(len(layout.rows[r - 1][why]) <= eft.SHORT_WHY_CHARS for r in layout.player_rows)
+    cash_start = [r for r in layout.section_rows if layout.rows[r - 1][0].startswith("CASH CORE")][0]
+    gpp_start = [r for r in layout.section_rows if layout.rows[r - 1][0].startswith("GPP UPSIDE")][0]
+    cash_rows = [r for r in layout.player_rows if cash_start < r < gpp_start]
+    assert cash_rows and all("own" not in layout.rows[r - 1][why].lower() for r in cash_rows)
+    assert all("own" not in _why(layout, r).lower() for r in cash_rows)
+    assert eft.short_why("") == "" and eft.short_why("a; b") == "a"
+    long = eft.short_why("word " * 30)
+    assert len(long) <= eft.SHORT_WHY_CHARS and long.endswith("…")
 
 
 def test_rows_under_three_games_are_muted_and_the_why_says_how_little_data():
@@ -319,10 +356,11 @@ def test_rows_under_three_games_are_muted_and_the_why_says_how_little_data():
     inputs = _inputs(edge)
     inputs.players.loc[inputs.players["Id"] == 2, "Games"] = 2
     layout = eft.build_layout(inputs)
-    muted = {layout.rows[r - 1][0] for r in layout.muted_rows}
+    muted = {layout.rows[r - 1][NAME] for r in layout.muted_rows}
     assert "WR2" in muted and "WR1" not in muted
-    why = layout.rows[_rows_named(layout, "WR2")[0] - 1][_col(eft.WHY_COL)]
-    assert why.endswith("only 2 games of data")
+    row = _rows_named(layout, "WR2")[0]
+    assert _why(layout, row).endswith("only 2 games of data")
+    assert layout.rows[row - 1][_col(eft.WHY_COL)].endswith("2 games")
 
 
 def test_a_thin_week_verdict_needs_history_and_a_best_below_the_typical_best():
@@ -385,13 +423,14 @@ def test_beneficiaries_confirmed_first_then_questionable_muted_with_a_blank_pric
     layout = eft.build_layout(_inputs(edge, beneficiaries=ben))
     do = _col(eft.DO_COL)
     injury = [r for r in layout.player_rows if layout.rows[r - 1][do] in ("Bump ▲", "Watch")]
-    assert [layout.rows[r - 1][0] for r in injury] == ["WR2", "WR1"]  # confirmed before questionable
+    assert [layout.rows[r - 1][NAME] for r in injury] == ["WR2", "WR1"]  # confirmed before questionable
     assert [layout.rows[r - 1][do] for r in injury] == ["Bump ▲", "Watch"]
     assert injury[1] in layout.muted_rows
     confirmed, questionable = (layout.rows[r - 1] for r in injury)
-    assert confirmed[6] == "with-or-without (3 g)" and confirmed[7] == "yes"  # Method, Priced in?
-    assert questionable[7] == ""  # unknown reads blank, not the word "unknown"
-    assert "Y out: +0.0 carries and +6.0 expected points a game" in confirmed[_col(eft.WHY_COL)]
+    assert confirmed[S0 + 2] == "with-or-without (3 g)" and confirmed[S0 + 3] == "yes"  # Method, Priced in?
+    assert questionable[S0 + 3] == ""  # unknown reads blank, not the word "unknown"
+    assert "Y out: +0.0 carries and +6.0 expected points a game" in _why(layout, injury[0])
+    assert layout.rows[injury[0] - 1][_col(eft.WHY_COL)].startswith("Y out")
     assert "Gain Tgt/G" not in eft.BENEFICIARY_COLUMNS  # no target gains, ever
 
 
@@ -405,15 +444,17 @@ def test_disagreements_show_the_three_sources_the_diff_and_a_look_closer_or_caut
     layout = eft.build_layout(_inputs(edge))
     do = _col(eft.DO_COL)
     rows = {
-        (layout.rows[r - 1][0], layout.rows[r - 1][do]): layout.rows[r - 1]
+        (layout.rows[r - 1][NAME], layout.rows[r - 1][do]): layout.rows[r - 1]
         for r in layout.player_rows
         if layout.rows[r - 1][do] in ("Look closer ▲", "Caution ▼")
     }
     up, down = rows[("WR1", "Look closer ▲")], rows[("WR2", "Caution ▼")]
-    assert up[4:8] == [10.0, 13.0, "", 14.0] and up[8] == 4.0  # TFFB, Sleeper, FantasyPros, CalPts, Diff
-    assert down[4] == 10.0 and down[7] == 6.0 and down[8] == -4.0
     assert (
-        layout.rows[[r for r in layout.header_rows if "Sleeper" in layout.rows[r - 1]][0] - 1][4:9]
+        up[S0 : S0 + 4] == [10.0, 13.0, "", 14.0] and up[S0 + 4] == 4.0
+    )  # TFFB, Sleeper, FantasyPros, CalPts, Diff
+    assert down[S0] == 10.0 and down[S0 + 3] == 6.0 and down[S0 + 4] == -4.0
+    assert (
+        layout.rows[[r for r in layout.header_rows if "Sleeper" in layout.rows[r - 1]][0] - 1][S0 : S0 + 5]
         == eft.DISAGREE_COLUMNS[:5]
     )
 
@@ -431,7 +472,7 @@ def test_punt_plays_are_the_best_value_within_a_thousand_of_the_cheapest_salary(
     assert floor == 2500 and part["Name"].tolist() == ["WR2", "WR1"]
     layout = eft.build_layout(_inputs(edge))
     punt = [r for r in layout.player_rows if layout.rows[r - 1][_col(eft.DO_COL)] == "Punt option"]
-    assert [layout.rows[r - 1][0] for r in punt] == ["WR2", "WR1"]
+    assert [layout.rows[r - 1][NAME] for r in punt] == ["WR2", "WR1"]
 
 
 def _trends(**kw):
@@ -466,9 +507,10 @@ def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
     edge = _edge([_player(7)])
     layout = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends())))
     row = layout.rows[_rows_named(layout, "WR7")[-1] - 1]
-    assert row[4:9] == ["Tgt%", "'27%", "'18%", "'+9 pts", "▲"]  # last 3, earlier, change ('= literal text)
+    assert row[S0 : S0 + 5] == ["Tgt%", "'27%", "'18%", "'+9 pts", "▲"]  # last 3, earlier, change
     assert row[_col(eft.DO_COL)] == "Watch"
-    why = row[_col(eft.WHY_COL)]
+    assert row[_col(eft.WHY_COL)] == "A bigger jump than 85% of weeks"
+    why = _why(layout, _rows_named(layout, "WR7")[-1])
     assert why.startswith("Tgt% 18% → 27% over the last 3 (▲, a bigger jump than 85% of weeks).")
     assert "Historically projections over-react to jumps like this." in why
     quiet = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends(Direction=""))))
@@ -504,16 +546,24 @@ def test_a_proj_chip_adds_its_reason_and_a_lean_verb_and_the_pool_override_still
     inputs.players["GsisId"] = ["g1", "g2", "g3"]
     layout = eft.build_layout(inputs)
     do, why = _col(eft.DO_COL), _col(eft.WHY_COL)
-    cash = {layout.rows[r - 1][0]: layout.rows[r - 1] for r in layout.player_rows[:3]}
+    cash_rows = {layout.rows[r - 1][NAME]: r for r in layout.player_rows[:3]}
+    cash = {name: layout.rows[r - 1] for name, r in cash_rows.items()}
     assert cash["WR1"][do].endswith(" · Lean under in cash") and cash["WR1"][do].startswith("Cash")
     assert cash["WR2"][do].endswith(" · Lean over")
     assert "Lean" not in cash["WR3"][do]  # signals point both ways: no chip, no lean
-    assert "TE targets up 2.2+/game over the last 3 (usually fades back: −0.8 pts" in cash["WR1"][why]
-    assert "Signals point both ways, so no Proj chip" in cash["WR3"][why]
+    assert "TE targets up 2.2+/game over the last 3 (usually fades back: −0.8 pts" in _why(
+        layout, cash_rows["WR1"]
+    )
+    assert "Signals point both ways, so no Proj chip" in _why(layout, cash_rows["WR3"])
+    assert why  # (the shown Why is the short one)
     # the sheet turns the verb into "In pool (...)" through the same formula as before
-    rows = writer.tab_rows(layout, "EdgeRaw", 5)
+    rows = writer.tab_rows(layout, "EdgeRaw")
     formula = rows[_rows_named(layout, "WR1")[0] - 1][_col(eft.DO_COL)]
-    assert formula.startswith("=IF($M") and "Lean under in cash" in formula and "In pool (" in formula
+    assert (
+        formula.startswith(f"=IF(${eft.POOL_COL}")
+        and "Lean under in cash" in formula
+        and "In pool (" in formula
+    )
 
 
 def test_an_older_chip_and_an_r6_signal_on_one_player_share_a_single_why():
@@ -521,7 +571,7 @@ def test_an_older_chip_and_an_r6_signal_on_one_player_share_a_single_why():
     inputs = _inputs(edge, r6=_r6(signals={"g1": _signal(fade=["tgt_pg|TE|change_up"])}))
     inputs.players["GsisId"] = ["g1"]
     layout = eft.build_layout(inputs)
-    why = layout.rows[layout.player_rows[0] - 1][_col(eft.WHY_COL)]
+    why = _why(layout, layout.player_rows[0])
     assert (
         "TE targets up 2.2+/game" in why and "FADE↓: last-3 DK points a game at least 2 above expected" in why
     )
@@ -541,7 +591,7 @@ def test_a_chip_resting_only_on_weaker_evidence_is_muted_and_says_so():
     inputs.players["GsisId"] = ["g1", "g2"]
     layout = eft.build_layout(inputs)
     first, second = _rows_named(layout, "WR1")[0], _rows_named(layout, "WR2")[0]
-    assert first in layout.muted_rows and "weaker evidence" in layout.rows[first - 1][_col(eft.WHY_COL)]
+    assert first in layout.muted_rows and "weaker evidence" in _why(layout, first)
     assert second not in layout.muted_rows
 
 
@@ -567,9 +617,9 @@ def test_every_confirmed_absence_is_listed_muted_as_context_with_the_historical_
     assert any("Absent regulars" in t and "no points are moved for targets" in t for t in text)
     row = [r for r in layout.player_rows if layout.rows[r - 1][_col(eft.DO_COL)] == "Out"][0]
     assert row in layout.muted_rows  # context is muted, never an edge
-    why = layout.rows[row - 1][_col(eft.WHY_COL)]
+    why = _why(layout, row)
     assert "with-or-without (2 g)" in why and "no single teammate gains much" in why and "~27%" in why
-    assert layout.rows[row - 1][4:8] == ["WR1", 8.0, 0.0, 2]  # Role, Tgt/G, Car/G, Games missed
+    assert layout.rows[row - 1][S0 : S0 + 4] == ["WR1", 8.0, 0.0, 2]  # Role, Tgt/G, Car/G, Games missed
 
 
 def _matchups():
@@ -609,17 +659,19 @@ def test_matchups_are_graded_list_the_top_three_players_and_nest_their_player_ro
     layout = eft.build_layout(_inputs(edge, matchups=_matchups()))
     titles = [layout.rows[r - 1][0] for r in layout.section_rows]
     assert any(t.startswith("MATCHUPS (CONTEXT)") for t in titles)
-    team = [r for r in layout.team_rows if layout.rows[r - 1][0] == "DEN vs KC"][0]
+    team = [r for r in layout.team_rows if layout.rows[r - 1][NAME] == "DEN vs KC"][0]
     cells = layout.rows[team - 1]
-    assert cells[3] == "Soft" and cells[4:7] == ["WR1 $6.2k", "WR2 $5.1k", "WR3 $4.1k"]
+    assert cells[eft.LEAD.index("Salary")] == "Soft" and cells[S0] == "Top: WR1, WR2, WR3"
+    assert not any(str(c) for c in cells[S0 + 1 : S0 + eft.SLOTS])  # the rest of the slots stay empty
     assert "WR4" not in " ".join(str(c) for c in cells)
-    assert "score +1.00" in cells[_col(eft.WHY_COL)] and "KC allows many points" in cells[_col(eft.WHY_COL)]
+    assert "score +1.00" in _why(layout, team) and "KC allows many points" in _why(layout, team)
+    assert cells[_col(eft.WHY_COL)].startswith("KC allows many points")
     (group,) = _group(layout, "MATCHUPS|WR|DEN")
     assert group.depth == 2 and group.collapsed is True and group.first == team + 1
-    players = [layout.rows[r - 1][0] for r in range(group.first, group.last + 1)]
+    players = [layout.rows[r - 1][NAME] for r in range(group.first, group.last + 1)]
     assert players == ["WR1", "WR2", "WR3"]
-    tough = [r for r in layout.team_rows if layout.rows[r - 1][0] == "LV vs BUF"][0]
-    assert layout.rows[tough - 1][3] == "Tough" and tough in layout.muted_rows
+    tough = [r for r in layout.team_rows if layout.rows[r - 1][NAME] == "LV vs BUF"][0]
+    assert layout.rows[tough - 1][eft.LEAD.index("Salary")] == "Tough" and tough in layout.muted_rows
     assert any("CONTEXT ONLY" in str(c) or "Context only" in str(c) for r in layout.rows for c in r)
 
 
@@ -704,7 +756,7 @@ def test_only_beneficiaries_draftkings_lists_are_shown_in_the_tab_and_the_board_
     )
     inputs = _inputs(edge, beneficiaries=ben)
     layout = eft.build_layout(inputs)
-    names = {str(r[0]) for r in layout.rows}
+    names = {str(r[NAME]) for r in layout.rows}
     assert "On Slate" in names and "Not On DraftKings" not in names
     assert "Not On DraftKings" not in " ".join(eft.board_panel_lines(inputs))
 
@@ -712,3 +764,110 @@ def test_only_beneficiaries_draftkings_lists_are_shown_in_the_tab_and_the_board_
 def test_percent_text_is_kept_as_text_so_sheets_does_not_turn_79_percent_into_0_79():
     assert eft._clean("79%") == "'79%" and eft._clean("12.5%") == "'12.5%"
     assert eft._clean("2.3") == "2.3" and eft._clean("Tgt% up") == "Tgt% up"
+
+
+# ---- ownership: Lev, Leverage plays, Chalk to fade or eat (actions round, slice 4) -------------------------
+
+
+def _owned(i, boom, own, pos="WR", **kw):
+    return _player(i, pos=pos, **{"Boom%": boom, "Own%": own, "OwnStatus": "real", **kw})
+
+
+def _section_rows(layout, title):
+    """The player rows of one section, found by its title."""
+    start = [r for r in layout.section_rows if layout.rows[r - 1][0].startswith(title)][0]
+    later = [r for r in layout.section_rows if r > start]
+    return [r for r in layout.player_rows if start < r < (later[0] if later else 10**6)]
+
+
+def test_lev_is_boom_rank_minus_own_rank_within_position_and_blank_until_ownership_is_out():
+    rows = [_owned(i, boom=10.0 + i, own=0.30 - i / 100) for i in range(1, 5)]  # boom up, ownership down
+    rows += [_owned(i, boom=10.0 + i, own=0.05 + i / 100, pos="RB") for i in range(11, 15)]  # both up
+    out = eft.with_leverage(_edge(rows))
+    wr = out[out["Position"] == "WR"].set_index("Name")
+    assert wr.loc["WR4", "Lev"] == 75 and wr.loc["WR1", "Lev"] == -75  # 100th boom - 25th own; 25th - 100th
+    assert (out[out["Position"] == "RB"]["Lev"] == 0).all()  # rank for rank: no leverage
+    unpublished = eft.with_leverage(_edge([_player(i) for i in range(1, 5)]))
+    assert unpublished["Lev"].isna().all() and not unpublished["BoomHalf"].any()
+
+
+def test_gpp_leverage_needs_lev_at_least_25_and_a_top_half_boom():
+    assert eft.LEVERAGE_MIN_LEV == 25
+    assert eft.gpp_verb(20.0, 30.0, False, lev=25, boom_half=True) == "GPP leverage"
+    assert eft.gpp_verb(20.0, 30.0, False, lev=24, boom_half=True) == "GPP option"
+    assert eft.gpp_verb(20.0, 30.0, False, lev=60, boom_half=False) == "GPP option"  # boom in the bottom half
+    assert eft.gpp_verb(35.0, 30.0, False, lev=0, boom_half=True) == "GPP add"
+    assert eft.gpp_verb(35.0, 30.0, True, lev=40, boom_half=True) == f"GPP leverage {eft.STAR}"
+
+
+def test_the_leverage_section_lists_the_top_five_per_position_by_lev_among_top_half_booms():
+    rows = [_owned(i, boom=10.0 + i, own=0.40 - i / 50) for i in range(1, 13)]
+    layout = eft.build_layout(_inputs(_edge(rows)))
+    shown = _section_rows(layout, "LEVERAGE PLAYS")
+    assert len(shown) == eft.LEVERAGE_ROWS_PER_POSITION == 5
+    names = [layout.rows[r - 1][NAME] for r in shown]
+    levs = [layout.rows[r - 1][S0 + 3] for r in shown]
+    assert levs == sorted(levs, reverse=True) and names[0] == "WR12"  # best boom, lowest owned
+    top_half = {f"WR{i}" for i in range(7, 13)}  # booms at or above the median
+    assert set(names) <= top_half
+    assert {layout.rows[r - 1][_col(eft.DO_COL)] for r in shown} <= {"GPP leverage", "GPP option"}
+    # Lev is coloured within the position block
+    assert any(name == "Lev" for name, *_ in layout.prob_blocks)
+
+
+def test_chalk_lists_the_three_highest_owned_per_position_with_an_eat_or_fade_verb_by_bust_third():
+    busts = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+    rows = [_owned(i, boom=15.0, own=0.10 + i / 100, **{"Bust%": busts[i - 1]}) for i in range(1, 7)]
+    layout = eft.build_layout(_inputs(_edge(rows)))
+    shown = _section_rows(layout, "CHALK TO FADE OR EAT")
+    assert [layout.rows[r - 1][NAME] for r in shown] == ["WR6", "WR5", "WR4"]  # the three highest-owned
+    verbs = {layout.rows[r - 1][NAME]: layout.rows[r - 1][_col(eft.DO_COL)] for r in shown}
+    assert verbs == {"WR6": "Chalk: fade candidate", "WR5": "Chalk: fade candidate", "WR4": "Chalk"}
+    assert eft.chalk_verb(0.2) == "Chalk: eat" and eft.chalk_verb(1 / 3) == "Chalk: eat"
+    assert eft.chalk_verb(0.5) == "Chalk" and eft.chalk_verb(0.7) == "Chalk: fade candidate"
+
+
+def test_leverage_and_chalk_say_ownership_is_not_out_and_list_nobody_until_it_is():
+    layout = eft.build_layout(_inputs(_edge([_player(i) for i in range(1, 6)])))
+    assert (
+        _section_rows(layout, "LEVERAGE PLAYS") == [] and _section_rows(layout, "CHALK TO FADE OR EAT") == []
+    )
+    notes = [str(r[0]) for r in layout.rows]
+    assert notes.count(eft.OWN_NOT_OUT) == 4  # the status line plus GPP, Leverage and Chalk
+    assert all(layout.rows[r - 1][eft.LEAD.index("Own%")] == "" for r in layout.player_rows)  # blank, not 0%
+
+
+def test_own_pct_shows_in_every_player_row_once_published_as_a_fraction():
+    layout = eft.build_layout(_inputs(_edge([_owned(1, 12.0, 0.255), _owned(2, 14.0, 0.05)])))
+    own = {layout.rows[r - 1][NAME]: layout.rows[r - 1][_col(eft.OWN_COL)] for r in layout.player_rows}
+    assert own["WR1"] == 0.255 and own["WR2"] == 0.05
+    assert layout.own_cells and not any("Own%" in name for name in ("Hit3x%", "Boom%", "Bust%"))
+
+
+def test_ownership_never_changes_calpts_or_any_probability():
+    """Own% is read only to show and to rank; the projection and the model's odds do not depend on it."""
+    low = _edge([_owned(i, boom=10.0 + i, own=0.05) for i in range(1, 9)])
+    high = _edge([_owned(i, boom=10.0 + i, own=0.45 - i / 100) for i in range(1, 9)])
+    numbers = ["CalPts", "Hit3x%", "Boom%", "Bust%", "Floor", "CeilM", "ProjPts"]
+    out_low, out_high = eft.with_leverage(low), eft.with_leverage(high)
+    pd.testing.assert_frame_equal(out_low[numbers], out_high[numbers])
+    layout_low = eft.build_layout(_inputs(low))
+    layout_high = eft.build_layout(_inputs(high))
+
+    def first(layout):  # the Cash core's numbers, in order
+        return [tuple(layout.rows[r - 1][S0 : S0 + 4]) for r in _section_rows(layout, "CASH CORE")]
+
+    assert first(layout_low) == first(layout_high) and first(layout_low)
+
+
+def test_no_projection_module_reads_ownership():
+    """A source-level guard behind the test above: the modules that compute CalPts and the outcome odds never
+    mention ownership."""
+    from pathlib import Path
+
+    import dfs
+
+    root = Path(dfs.__file__).parent
+    for name in ("probabilities.py", "calibration.py", "edge_finder.py"):
+        text = (root / name).read_text()
+        assert "Own%" not in text and "ProjOwn" not in text, name

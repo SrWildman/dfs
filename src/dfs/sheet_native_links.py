@@ -45,10 +45,12 @@ NATIVE_LOOKUP_COLUMNS = [
 _OPTIONAL_NATIVE_COLUMNS = {"O/U", "Spread", "Team Implied"}
 
 
-def native_lookup_formula(row: int, column_name: str, edge_tab: str = "EdgeRaw") -> str:
+def native_lookup_formula(
+    row: int, column_name: str, edge_tab: str = "EdgeRaw", *, name_col: str = "A"
+) -> str:
     """The VLOOKUP-by-Name formula for one cell on Player Pool/Lineups,
     pulling `column_name` off PlayerPoolRaw -- `row`'s player Name (this
-    tab's own column A) looked up against PlayerPoolRaw, range always
+    tab's own `name_col`, found from its header) looked up against PlayerPoolRaw, range always
     starting at PlayerPoolRaw's own column A. Wrapped in an
     `IF($A<row>="","",...)` blank-name guard -- see `sheet_links.
     edge_lookup_formula`'s docstring for why (same live-sheet finding,
@@ -57,9 +59,10 @@ def native_lookup_formula(row: int, column_name: str, edge_tab: str = "EdgeRaw")
     index = PLAYER_POOL_RAW_COLUMN_ORDER.index(column_name) + 1  # 1-based, range starts at A
     col = column_letter(index - 1)
     # Round 5 item 6: resolve the typed name to DK's canonical spelling first.
-    base = f"VLOOKUP({resolve_name_expr(f'$A{row}', edge_tab)},PlayerPoolRaw!$A:${col},{index},false)"
+    name_cell = f"${name_col}{row}"
+    base = f"VLOOKUP({resolve_name_expr(name_cell, edge_tab)},PlayerPoolRaw!$A:${col},{index},false)"
     lookup = f"IFNA({base})" if column_name in _OPTIONAL_NATIVE_COLUMNS else base
-    return f'=IF($A{row}="","",{lookup})'
+    return f'=IF({name_cell}="","",{lookup})'
 
 
 def rewrite_native_lookup_columns(
@@ -87,13 +90,17 @@ def rewrite_native_lookup_columns(
         raise ValueError(f"{tab!r} header is missing native column(s) {missing} -- nothing to rewrite")
 
     columns = {name: header.index(name) for name in NATIVE_LOOKUP_COLUMNS}
+    name_col = column_letter(header.index("Name")) if "Name" in header else "A"
     runs = group_into_contiguous_runs(NATIVE_LOOKUP_COLUMNS, columns)
 
     for start, end in name_blocks:
         for run in runs:
             start_col = column_letter(columns[run[0]])
             end_col = column_letter(columns[run[-1]])
-            rows = [[native_lookup_formula(row, name) for name in run] for row in range(start, end + 1)]
+            rows = [
+                [native_lookup_formula(row, name, name_col=name_col) for name in run]
+                for row in range(start, end + 1)
+            ]
             client.update_range(tab, f"{start_col}{start}:{end_col}{end}", rows)
 
     return f"{tab}: rewrote {len(NATIVE_LOOKUP_COLUMNS)} native PlayerPoolRaw-lookup column(s)"

@@ -521,3 +521,32 @@ def test_run_doctor_ignores_the_percentile_helpers_on_a_tab_with_no_real_data_ye
     # a fresh template/week: nothing synced, so a blank helper is expected, not a failure
     assert _pct_issues(_edge_rows(with_helper_values=False, n=3)) == []
     assert _pct_issues({}) == []
+
+
+def test_run_doctor_flags_a_pool_cell_that_holds_a_value_instead_of_the_formula():
+    """The Pool cell is a dropdown over a formula; a pick the script did not restore leaves a plain value."""
+    from dfs.edge_finder_tab import ID_COL, POOL_COL
+
+    cfg = _base_config()
+    tabs = _ALL_GOOD_TABS
+    last = 30
+    rows = {(("Edge Finder"), f"{ID_COL}1:{ID_COL}{last}"): [["Id"], [""], ["1001"], ["1002"]]}
+    formulas = {
+        ("Edge Finder", f"{POOL_COL}1:{POOL_COL}{last}"): [
+            ["Pool"],
+            [""],
+            ['=IF($O3="","")'],
+            ["Cash"],
+        ]
+    }
+    issues = run_doctor(
+        FakeDoctorClient(tabs, rows={**_lineups_rows(), **rows}, formulas=formulas), cfg, title="Week 5"
+    )
+    plain = [i for i in issues if i.check == "pool-cell-plain-value"]
+    assert len(plain) == 1 and "Edge Finder" in plain[0].detail and f"{POOL_COL}4" in plain[0].detail
+    # a title in the Pool column has no Id beside it: not a player row, not flagged
+    assert not [
+        i
+        for i in run_doctor(FakeDoctorClient(tabs, rows=_lineups_rows()), cfg, title="Week 5")
+        if i.check == "pool-cell-plain-value"
+    ]

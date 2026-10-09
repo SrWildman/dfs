@@ -8,8 +8,8 @@ names, no function names; the developer reference stays in `docs/`.
 **What this fixes, and what it does not.** Every fact below that already has a named constant elsewhere is
 derived from it, not retyped: Player Pool's per-position caps (`weekly_reset.PLAYER_POOL_NAME_BLOCKS`),
 Lineups' roster slots and block count (`models.ROSTER_SLOTS`, `weekly_reset.LINEUPS_NAME_BLOCKS`), the pool
-tag-group order (`sources.edge.POOL_TYPE_SORT_ORDER`), the Set dropdown's options
-(`sheet_pool_cells.SET_OPTIONS`) and the GPP target default. The surrounding English is still hand-written
+tag-group order (`sources.edge.POOL_TYPE_SORT_ORDER`), the Pool dropdown's options
+(`sheet_pool_cells.POOL_OPTIONS`) and the GPP target default. The surrounding English is still hand-written
 and can go stale the way any comment can; a generated row does not generate the facts inside it.
 
 The tab's layout is `_LAYOUT`, a flat list of title / section-band / text rows. `render_instructions_grid`
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dfs.config import SIM_GPP_TARGET_DEFAULT
 from dfs.models import ROSTER_SLOTS
-from dfs.sheet_pool_cells import SET_OPTIONS
+from dfs.sheet_pool_cells import POOL_OPTIONS
 from dfs.sheets import SheetsClient
 from dfs.sources.edge import POOL_TYPE_SORT_ORDER
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
@@ -60,8 +60,8 @@ def _tag_order_text() -> str:
     return ", then ".join(POOL_TYPE_SORT_ORDER[:-1]) + f", then {POOL_TYPE_SORT_ORDER[-1]}"
 
 
-def _set_options_text() -> str:
-    return ", ".join(SET_OPTIONS[:-1]) + f" or {SET_OPTIONS[-1]}"
+def _pool_options_text() -> str:
+    return ", ".join(POOL_OPTIONS[:-1]) + f" or {POOL_OPTIONS[-1]}"
 
 
 _TITLE = "How to use this sheet"
@@ -69,13 +69,13 @@ _TITLE = "How to use this sheet"
 _ONE_THING_ROWS: list[tuple[str, str]] = [
     (
         "What you type",
-        "Only a few cells are ever typed, and the pale yellow ones are the cue: the Set dropdown on the Edge "
-        f"Finder and the Board ({_set_options_text()}), the Pool dropdown on EdgeRaw, a name in Player "
-        f"Pool's "
-        "top row, the names in Lineups column A (plain white, so the stack colours show), the Cash or GPP "
-        "marker on each lineup's Total row, and a percentage in Exposure's Target column. Everything else is "
-        "a formula or written by the sync: if a cell is not one of those, do not type in it. Most tabs warn "
-        "you before you can; the warning is a reminder, not a lock.",
+        "Only a few cells are ever typed, and the pale yellow ones are the cue: the Pool dropdown at the "
+        f"left of every player on the Edge Finder, the Board and Player Pool ({_pool_options_text()}; clear "
+        "it to take him out), the Pool dropdown on EdgeRaw, the add-a-player box in Player Pool's top row, "
+        "the names in Lineups column A (plain white, so the stack colours show), the Cash or GPP marker on "
+        "each lineup's Total row, and a percentage in Exposure's Target column. Everything else is a formula "
+        "or written by the sync: if a cell is not one of those, do not type in it. Most tabs warn you "
+        "before you can; the warning is a reminder, not a lock.",
     ),
     (
         "The one thing to run first",
@@ -85,13 +85,12 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
         "anything it needs.",
     ),
     (
-        "The Set dropdown",
-        "Set on the Edge Finder and the Board adds a player to your pool as Cash, GPP or Both, and "
-        "Remove takes "
-        "him out. It needs the one-time Lineup Tools script pasted into the sheet (Extensions, then Apps "
-        "Script; the dfs doctor check says when it is missing). Until then, use the Pool dropdown on "
-        "EdgeRaw, "
-        "which does the same thing.",
+        "The Pool dropdown",
+        "The Pool cell at the left of every player on the Edge Finder, the Board and Player Pool shows "
+        "whether he is in your pool and is the control: pick Cash, GPP or Both to add him, or press Delete "
+        "to take him out. It needs the one-time Lineup Tools script pasted into the sheet (Extensions, then "
+        "Apps Script; the dfs doctor check says when it is missing). Until then, use the Pool dropdown on "
+        "EdgeRaw, which does the same thing.",
     ),
 ]
 
@@ -107,9 +106,8 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "1) Model Check: read the bold sentence that opens each block. The projection race says which "
         "projection to trust (it only says clearly best at a real gap); the signals line says whether the "
         "chips are earning their place. 2) Edge Finder: the first pass. Cash core and GPP upside list "
-        "the best "
-        "plays by position, with Why and Do saying what to make of each; add players with Set. Command to "
-        "refresh any time: dfs sync.",
+        "the best plays by position, with Why and Do saying what to make of each; add players with the Pool "
+        "dropdown. Command to refresh any time: dfs sync.",
     ),
     (
         "Thu - Sat: injuries and pool changes",
@@ -118,8 +116,8 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "lists pool players with a problem (out or doubtful, a high Bust%, a CalPts well under the "
         "projection, "
         "a FADE chip), and Pool summary shows how many you have per position and where you are short of "
-        "what a "
-        "lineup needs. Fix them with Set, or Remove. Movement shows how each team's line has moved.",
+        "what a lineup needs. Fix them with the Pool dropdown (clear it to remove). Movement shows how each "
+        "team's line has moved.",
     ),
     (
         "Sunday: final sync, then lineups",
@@ -182,7 +180,7 @@ _NUMBER_ROWS: list[tuple[str, str]] = [
     (
         "P(cash)",
         "On a lineup's Total row: the chance the lineup reaches the cash line. The line is the median of "
-        "your last three typed Cash Lines in Results. Green at 50% or more. Median is the typical score and "
+        "every typed Cash Line in Results this season. Green at 50% or more. Median is the typical score and "
         "p90 is the great-night score.",
     ),
     (
@@ -232,19 +230,18 @@ _TAB_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Board",
-        "Your landing tab, nothing typed except Set. Slate shape ranks the games; the Queue is what changed "
-        "for your pool since the last sync; Pool check flags pool players with a problem; Pool summary "
-        "counts "
-        "your pool by position; Chalk map lists the highest-owned players at each position once ownership is "
-        "out, with Set beside each; Stack candidates lists the best QB with his pass catchers in the best "
-        "games.",
+        "Your landing tab, nothing typed except the Pool dropdowns. Slate shape ranks the games; the "
+        "Queue is what changed for your pool since the last sync; Pool check flags pool players with a "
+        "problem; Pool summary counts your pool by position; Chalk map lists the highest-owned players at "
+        "each position once ownership is out, with a Pool dropdown beside each; Stack candidates lists "
+        "the best QB with his pass catchers in the best games.",
     ),
     (
         "Edge Finder",
         "Written by the sync. Per position, the best cash plays and best GPP plays, where CalPts disagrees "
         "with TFFB, who benefits from an injury, matchups and the usage trends and signals, each with a Why "
-        "and a Do. Pool shows your pick, Set changes it and the arrow jumps to the player on EdgeRaw. "
-        "Overflow lists are folded under a plus sign.",
+        "and a Do. Pool, at the left, shows your pick and changes it. The Why is the one most useful fact; "
+        "hover it for the full reason. Overflow lists are folded under a plus sign.",
     ),
     (
         "EdgeRaw",
@@ -255,7 +252,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Player Pool",
         "Everyone you added, grouped by position, tagged by Cash, GPP or Both and sorted by salary within a "
         f"tag ({_tag_order_text()}). Caps: {_pool_caps_text()}; a warning appears if you add more than "
-        "a position has room for. Type a name in the top row to add one directly. The rest is computed.",
+        "a position has room for. Pick a name in the top row (with Cash, GPP or Both beside it) to add one "
+        "directly; clear a player's Pool cell to take him out. The rest is computed.",
     ),
     (
         "Lineups",

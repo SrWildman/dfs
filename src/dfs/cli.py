@@ -74,7 +74,7 @@ from dfs.season import (
     write_season_betting_and_ending,
     write_season_cash_gpp,
 )
-from dfs.sheet_audit import SKIPPED_TABS, run_audit
+from dfs.sheet_audit import SKIPPED_TABS, fit_workbook_widths, run_audit
 from dfs.sheet_bankroll_view import (
     BETTING_LEDGER_HEADER,
     BLOCK_ROWS,
@@ -111,7 +111,7 @@ from dfs.sheet_links import (
     write_edge_row_links,
 )
 from dfs.sheet_names import build_name_alias_tab
-from dfs.sheet_pool_control import drain_control_cell_into_added_names, ensure_pool_control_row
+from dfs.sheet_pool_control import add_typed_player_to_pool, ensure_pool_control_row, retire_added_list
 from dfs.sheet_pool_deck import remove_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
 from dfs.sheet_pool_raw_sos import rewrite_opp_pos_rank
@@ -1057,8 +1057,9 @@ def sheets_add_pool_control(
     ),
 ) -> None:
     """A3: create (or refresh) Player Pool's own "add a player" row --
-    a live search box (ONE_OF_RANGE validation) against EdgeRaw's Name
-    column, pinned at the top of Player Pool itself, for when typing a
+    a type dropdown (Cash / GPP / Both, default Both) and a live search box
+    (ONE_OF_RANGE validation) against EdgeRaw's Name column, pinned at the
+    top of Player Pool itself, for when typing a
     name is faster than scrolling EdgeRaw to tick a checkbox (the "Pool
     picking" filter view, `dfs setup add-filters`, is the third way).
     Replaces the old separate `Pool Picks` tab (see `sheet_pool_control.py`
@@ -1068,10 +1069,9 @@ def sheets_add_pool_control(
     time, including as part of a future `dfs setup polish`.
 
     Also re-runs `write_pool_formulas` against Player Pool -- its Name/
-    Overflow formulas need to change to read the UNION of EdgeRaw ticks
-    and the control cell, and nothing else re-applies that automatically
-    (see `sheet_pool_formulas.py`; it has no standing caller of its own
-    in this CLI).
+    Overflow/Pool formulas are keyed on EdgeRaw's Pool ticks alone, and
+    nothing else re-applies them automatically (see `sheet_pool_formulas.py`;
+    it has no standing caller of its own in this CLI).
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -1151,6 +1151,7 @@ def sheets_polish(
                 cfg.lineups.player_pool_tab,
                 last_row=pool_last,
                 header_row=PLAYER_POOL_HEADER_ROW,
+                freeze_cols=2,  # Pool and Name stay in view
                 band_blocks=PLAYER_POOL_NAME_BLOCKS,
                 color_scale_groups=PLAYER_POOL_NAME_BLOCKS,
             )
@@ -1300,6 +1301,10 @@ def sheets_polish(
         # rather than relying on someone remembering the standalone
         # `dfs setup instructions` command.
         results.append(build_instructions_tab(client))
+
+        # Last: widen whatever is still cut off to fit its real content (never narrows), so the clipping
+        # audit and the sheet agree. See `sheet_clipping`.
+        results.append(fit_workbook_widths(client))
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -1665,6 +1670,10 @@ def sheets_reorder_columns(
         console.print(
             f"[green]OK[/green] renamed {renamed} header cell(s) (Rstr% -> Own%, % of Rstr -> % of Own)"
         )
+
+        # The hidden `Added` list is retired: its column goes before Player Pool is reordered, since the
+        # designed order no longer has it (and the Name formulas stop reading it first).
+        console.print(f"[green]OK[/green] {retire_added_list(client, cfg.lineups.player_pool_tab, edge_tab)}")
 
         results = migrate_tab_to_designed_order(
             client,
@@ -2228,21 +2237,20 @@ def sync(
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
 
-    # A6 (2026-09-22): drain any pending add-a-player name into the
-    # accumulated list before it can be overwritten by a second typed
-    # name -- see `sheet_pool_control.drain_control_cell_into_added_names`.
-    # A live-sheet step, so skipped under --no-upload; failure here
-    # shouldn't fail an otherwise-successful sync.
+    # A name left in Player Pool's add-a-player box (the bound Apps Script normally handles it the moment
+    # it is typed; an API write never fires the script) is set on EdgeRaw's Pool now -- see
+    # `sheet_pool_control.add_typed_player_to_pool`. A live-sheet step, so skipped under --no-upload; a
+    # failure here shouldn't fail an otherwise-successful sync.
     if not no_upload:
         try:
-            drain_result = drain_control_cell_into_added_names(
+            added = add_typed_player_to_pool(
                 SheetsClient(cfg.google_sheets),
                 cfg.lineups.player_pool_tab,
-                edge_tab=cfg.google_sheets.tab_mappings.get("edge"),
+                edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw"),
             )
-            console.print(f"[green]OK[/green] {drain_result}")
+            console.print(f"[green]OK[/green] {added}")
         except SheetsError as e:
-            console.print(f"[yellow]Could not check the add-a-player control cell:[/yellow] {e}")
+            console.print(f"[yellow]Could not check the add-a-player box:[/yellow] {e}")
 
     if "edge" in source_names and not no_upload:
         _write_edge_finder_tabs(cfg, ctx)
@@ -2325,6 +2333,7 @@ def _write_lineup_sim(cfg: Config, ctx: SyncContext, client: SheetsClient | None
                 outcome.portfolio,
                 outcome.simulated,
                 outcome.gpp_target,
+                outcome.cash_line.basis,
             )
         except SheetsError as e:
             console.print(f"[yellow]Board portfolio line not written:[/yellow] {e}")
@@ -2467,6 +2476,48 @@ def edge(
             r["Flags"] or "",
         )
     console.print(table)
+
+
+@odds_app.command("snapshot")
+def odds_snapshot() -> None:
+    """Save the current betting lines (and nothing else): no sheet, no other source. Line movement for the
+    week is measured against the week's opening lines, and the odds source only shows the current slate, so
+    the opening is on record only if the lines were saved before the sheet was copied. A scheduled job runs
+    this every Monday and Tuesday morning (`dfs odds schedule`)."""
+    cfg = _load_config_or_exit()
+    ctx = SyncContext.current()
+    result = run_sync(cfg, ["nfl_odds"], ctx, upload=False)[0]
+    if not result.ok:
+        console.print(f"[red]Could not save the lines:[/red] {result.error}")
+        raise typer.Exit(code=1)
+    console.print(f"[green]OK[/green] saved {result.rows} line(s) for week {ctx.week}.")
+
+
+@odds_app.command("schedule")
+def odds_schedule(
+    install: bool = typer.Option(
+        False, "--install", help="Save the lines every Monday and Tuesday at 10:00 ET (a macOS launchd job)."
+    ),
+    remove: bool = typer.Option(False, "--remove", help="Turn that job off and delete it."),
+) -> None:
+    """Show, install or remove the job that runs `dfs odds snapshot` on Mondays and Tuesdays at 10:00 ET
+    (your Mac's clock is converted). With no option it says whether the job is installed. To turn it off
+    later: `dfs odds schedule --remove`."""
+    from dfs import odds_schedule as schedule
+
+    if install and remove:
+        console.print("[red]Choose one of --install or --remove.[/red]")
+        raise typer.Exit(code=1)
+    try:
+        if install:
+            console.print(f"[green]OK[/green] {schedule.install()}")
+        elif remove:
+            console.print(f"[green]OK[/green] {schedule.remove()}")
+        else:
+            console.print(f"Odds snapshot job: {schedule.status()}")
+    except (RuntimeError, OSError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
 
 
 @odds_app.command("movement")
@@ -2657,8 +2708,8 @@ LATE_SWAP_TIME_LIMIT_SECONDS = 10.0
 
 
 def _read_player_pool_names(client: SheetsClient, player_pool_tab: str) -> set[str]:
-    """Every name currently in Player Pool's position blocks (the sheet's own computed pool: ticks, the add
-    control and the hidden `Added` list), found under the header called `Name`, never at a fixed letter."""
+    """Every name currently in Player Pool's position blocks (the sheet's own computed pool: EdgeRaw's Pool
+    ticks), found under the header called `Name`, never at a fixed letter."""
     header = client.read_range(player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}")
     header = header[0] if header else []
     if "Name" not in header:
@@ -2679,7 +2730,7 @@ def _late_swap_sim_setup(
     cfg: Config, client: SheetsClient, edge: pd.DataFrame, goal: str | None, now: datetime
 ):
     """What the simulator needs to score late-swap candidates: every player's `PlayerSpec`, the cash line (the
-    median of your last three typed Cash Lines in Results, read only) and the GPP target. None, with a note,
+    median of every typed Cash Line in Results this season, read only) and the GPP target. None, with a note,
     when anything is missing: the swaps are then shown and ranked by projection alone."""
     from dfs import injury_beneficiaries as ib
     from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
@@ -3195,6 +3246,7 @@ def week_new(
     ctx = SyncContext.current()
     console.print(f"\nSyncing week {ctx.week}, season {ctx.season} ({len(SOURCES)} source(s))...")
     results = run_sync(new_cfg, list(SOURCES), ctx, upload=True)
+    console.print(_opening_lines_line(ctx))
 
     table = Table(title="Sync results")
     table.add_column("source")
@@ -3211,6 +3263,24 @@ def week_new(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _opening_lines_line(ctx: SyncContext) -> str:
+    """The line `dfs week new` prints about the week's opening lines: which saved snapshot movement is
+    measured against, or that none is older than the lines just fetched."""
+    from dfs.kickoff import format_et
+
+    try:
+        opening = store.opening_snapshot("nfl_odds", nfl_calendar.week_start_date(ctx.week, ctx.season))
+        newest = store.snapshot_paths("nfl_odds")[-1][0]
+    except (FileNotFoundError, IndexError):
+        return "Opening lines: none saved yet -- using the current lines as the baseline."
+    if opening.stamp is None or opening.stamp >= newest:
+        return (
+            "Opening lines: no snapshot older than the lines just fetched -- using the current lines as the "
+            "baseline (run `dfs odds schedule --install` to save them every Monday and Tuesday)."
+        )
+    return f"Opening lines: {format_et(opening.stamp)} snapshot ({opening.how})."
 
 
 @week_app.command("close", short_help="Reconcile bankroll from DK contest history.")

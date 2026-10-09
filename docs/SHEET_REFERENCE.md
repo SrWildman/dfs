@@ -283,11 +283,9 @@ two more, to 40; Part C, C7 added `Pace`/`PROE`/`Expl%`, three more, to
 43; GPS added `ModelImplied`, one more, to 44; Round 5 item 5c removed it again, to 43, and item 9 added `OppEPA`, back to 44). `Player
 Pool` inserts `Edge ↗` (A3) right after `Opp.` (i.e. right after
 IDENTITY, since `Venue` no longer sits there) and appends
-`Overflow`/`Pool`/`Used`/`In`/`Added` at the very end (50 total, up from
-46 the same way `PlayerPoolRaw` did; `Used`/
-`In` are Phase 5B, `Added` is Week 3 feedback's A6 -- a HIDDEN column
-accumulating every name typed into the add-a-player control cell this
-week, see below). `Source`, which used to sit right before `Edge ↗`
+`Overflow`/`Used`/`In` near the end, and (actions round, 2026-10-09) **`Pool` is the FIRST column**, left of `Name`, moved from the far right by `dfs setup reorder-columns`
+(49 columns; the hidden `Added` column is retired: `sheet_pool_control.retire_added_list`, which refuses to delete it while it still holds a name). `Used`/
+`In` are Phase 5B. `Source`, which used to sit right before `Edge ↗`
 in that same spot, was removed entirely in Week 3 feedback (A4,
 2026-09-22) -- Sam had no use for it. `Lineups` inserts `% of Cap` (renamed from `% of
 Own` in Part 7.9, `% of Rstr` before that in Part 2) immediately after
@@ -392,47 +390,25 @@ more `INDIRECT`, no more hazard class to guard against here).
 `weekly_reset.LINEUPS_TOTALS_ROWS` names the totals row for each block;
 the Remaining/average-remaining row is always the one directly below it.
 
-`Player Pool` (A3) has a one-row control strip pinned at the top: `A1` is
-a plain label ("Add a player"), `B1` is a live type-ahead search box
-(`ONE_OF_RANGE` validation, non-strict) against `EdgeRaw`'s own `Name`
-column -- typing a name there adds that player to the pool, the same as
-ticking them in `EdgeRaw`. This replaced a separate `Pool Picks` tab
-(removed -- see `CONTRIBUTING.md`'s A3 changelog entry); the real header
-now sits at row 2, with every position block one row lower than before
-Phase 3's own layout.
+`Player Pool` (A3) has a one-row control strip pinned at the top (rewritten in the actions round): `A1` is a **type dropdown** (`Cash` / `GPP` / `Both`, default `Both`; it resets
+every week), `B1` the label "Add a player", `C1` a live type-ahead search box (`ONE_OF_RANGE` validation, non-strict) against `EdgeRaw`'s own `Name` column, and a hidden helper in the
+`Id` column of that row holds what the typed text resolves to ("kenneth walker" becomes "Kenneth Walker III"; the sheet's own name resolver). Picking a name sets that player's EdgeRaw
+`Pool` to the type and clears the box: the bound Apps Script does it the moment the cell is edited (`docs/APPS_SCRIPT.md`), and `dfs sync` does the same for a name left in the box
+(`sheet_pool_control.add_typed_player_to_pool`), since an API write never fires the script. This replaced a separate `Pool Picks` tab (removed -- see `CONTRIBUTING.md`'s A3 changelog
+entry); the real header sits at row 2.
 
-`Player Pool`'s `Name` column is **not typed** (except that one control
-cell above it) -- it's a `SORT(UNIQUE({...}))` formula per position
-block, pulling in the UNION of THREE sources: whichever players have a
-non-blank `Pool` value on `EdgeRaw` (see EdgeRaw's column docs above);
-whatever name is currently typed into the control cell, for that
-position; and every name accumulated in the hidden `Added` column (Week
-3 feedback, A6, 2026-09-22 -- see immediately below) that matches. Each
-source's Salary/Position/Pool-tag is looked up against `EdgeRaw` by
-name, never carried on the source itself. `UNIQUE` dedupes a player who
-ends up in more than one source into one row, not several. `Edge ↗`
-(right after `Opp.` -- `Venue` no longer sits in IDENTITY, see the
-canonical column order above) is a `HYPERLINK` jumping straight to that
-player's row on `EdgeRaw`, the fastest way to find and remove one
-(there's no in-place delete -- see A3's changelog entry for why not). A
-`Source` column used to sit here too, stating which of the (then two)
-sources a row came from -- removed entirely in Week 3 feedback (A4,
-2026-09-22); Sam had no use for it.
+`Player Pool`'s `Name` column is **not typed** -- it's a `SORT(UNIQUE({...}))` formula per position block that reads **EdgeRaw's `Pool` ticks alone** (the box and the old `Added` list no
+longer feed it): whichever players have a non-blank `Pool` value on `EdgeRaw` (see EdgeRaw's column docs above). `Edge ↗` (right after `Opp.`) is a `HYPERLINK` jumping straight to that
+player's row on `EdgeRaw`. A `Source` column used to sit here too -- removed entirely in Week 3 feedback (A4, 2026-09-22); Sam had no use for it.
 
-**`Added` (hidden, A6, 2026-09-22)** fixes "adding a second player in
-the control cell deletes the first": the control cell holds only one
-typed name at a time, so `dfs sync` drains it into the next free row of
-this 50-row hidden column and blanks the cell, immediately after
-writing it -- `sheet_pool_control.drain_control_cell_into_added_names`.
-A typed name still shows up in the pool the INSTANT it's typed (the
-control cell is still one of the three union sources above), and keeps
-showing up after the next sync moves it here. Cleared every week by
-`dfs week new`, same "typed state must not survive into a new week"
-reasoning as the control cell itself.
+**Removing a player.** Clear his `Pool` cell (Delete): he leaves the pool and the block refills without him. (Before the actions round the only ways were the `Edge ↗` link plus EdgeRaw's Pool, or
+`dfs pool remove`; both still work.)
 
-`Pool` surfaces that player's actual `EdgeRaw` `Pool` value (`Cash`/`GPP`/
-`Both`) via `INDEX`/`MATCH` by name (`Pool` sits left of `Name` on
-`EdgeRaw`, so a plain `VLOOKUP` can't reach it). `Used`/`In` (Phase 5B,
+**`Added` (retired, actions round 2026-10-09).** The hidden 50-row list that used to accumulate every name typed into the box (Week 3 feedback, A6) is gone: the box sets EdgeRaw's `Pool` directly, so
+nothing needs accumulating. It was empty on the template and on Week 5 when it was removed.
+
+`Pool` (column A) is the control: a Cash / GPP / Both dropdown over a formula that reads that player's `EdgeRaw` `Pool` value by the `Id` in its own row (so it stays right when the Name spill reflows;
+the bound Apps Script puts the formula back after an edit). `Used`/`In` (Phase 5B,
 appended past `Pool`) answer the one thing a second browser window can't
 on its own: `Used` is a plain `COUNTIF` of how many of THIS WEEK's
 `Lineups` roster this player (against the whole of `Lineups!A:A`, so a
@@ -457,7 +433,7 @@ DST 10; up from QB/TE 10 -- a block's row count is capacity plus rows for
 however many of Both/Cash/GPP's separators actually appear, so
 `PLAYER_POOL_BLOCK_ROWS` -- QB 17, RB 22, WR 27, TE 17, DST 12 -- runs
 slightly ahead of capacity), with an
-`Overflow` column (second to last, right before `Pool`)
+`Overflow` column (near the end, before `Used`)
 warning per position if players plus the separators they need exceed the
 block's rows (counting the same deduped union, so a player counted in
 both sources can't trigger a false warning) -- nobody is ever silently
@@ -468,8 +444,8 @@ block could silently hide up to 2 players with no warning shown.
 (`sheet_style.POOL_TAG_TINTS`) so the three sort groups read as bands at
 a glance, not just by scrolling and reading the text. Every other column
 still VLOOKUPs off `Name` the same as before. `Player Pool` is protected
-everywhere except that one control
-cell (warning-only, `dfs setup protect`) -- nothing else is meant to be
+everywhere except the Pool column and the add-a-player box
+(warning-only, `dfs setup protect`) -- nothing else is meant to be
 typed into directly. See `sheet_pool_control.py`/`sheet_pool_formulas.py`/
 `sources/edge.py` for the mechanism and `CONTRIBUTING.md`'s changelog for
 the block-resize and A3 history.
@@ -526,8 +502,8 @@ the number in the label is `[sim] gpp_target` in `config.toml`, default 190; **g
 (`sheet_reorder.retire_lineup_sim_columns`, a real column delete) and the **portfolio line** moved to the Board's Pool summary.
 **Column A of every Total row is the lineup type marker**: a pale-yellow dropdown, `Cash` or `GPP` (blank = both). The number that
 matches the type is drawn bold in deep blue, and `dfs lineups late-swap` reads the marker as that lineup's default `--goal` (the
-flag still overrides it; both deltas are still shown). The cash line is the median of your last three typed `Cash Line` values in
-Results (read only). 20,000 draws with a fixed seed, so the numbers do not move between syncs unless a lineup does; all built lineups
+flag still overrides it; both deltas are still shown). The cash line is the median of every typed `Cash Line` in Results this
+season (read only; the P(cash) label's note and the Board's portfolio line say which, e.g. "cash line 141.3 (season median, 4 weeks)"). 20,000 draws with a fixed seed, so the numbers do not move between syncs unless a lineup does; all built lineups
 are simulated together (a player in two lineups is one random variable). A lineup with a blank slot or a name EdgeRaw does not know
 stays blank. Not conditioned on games already played. Method: `docs/SIM.md`. The Apps Script's "Clear Lineup Names" never touches the
 Total or Remaining rows, so the markers survive it.
@@ -601,14 +577,16 @@ module docstring for the live-verified specifics.
 Landing tab, built/rebuilt by `dfs setup build-views` (`sheet_views.build_board`, styled by `sheet_style.style_board`). **Board = the
 games, the stacks and where your pool stands; the Edge Finder = the players** (usability round, slice 4, 2026-10-08: the per-position
 leaders, punt finder and "This week's edges" text panel were removed; the Edge Finder's cash/GPP sections and Punt plays cover
-them; the Chalk map was kept and rebuilt on real ownership). Banner (rows 2-3): Games, Highest total (it overflows across the empty E-F), Max wind, Injuries, then the ownership note. Six
+them; the Chalk map was kept and rebuilt on real ownership). **Column A is the Pool gutter** (actions round, 2026-10-09): on a player row of the Queue, Pool check or Chalk map it is the live `Pool` cell and its
+Cash / GPP / Both dropdown (about 70 px, pale yellow); on every other row (Slate shape, Pool summary, Your stacks, Stack candidates, headers) it is blank, no fill and no
+dropdown. Every table starts in column B. Banner (rows 2-3): Games, Highest total (it overflows across the empty cells after it), Max wind, Injuries, then the ownership note. Six
 collapsible row sections, all open by default, in this order (Sam's call):
 
 1. **Slate shape**: games ranked by total (formulas), with Fav, Spread, Pace, PROE, Expl%, GameEnv, Wind, a Shootout flag and GPS.
 2. **Queue**: pooled players whose numbers changed since the last sync (`dfs sync --live` / `dfs go` write it from `live_diff.diff_queue_changes`; a
-   formula cannot see yesterday's values). Every row is a player row: name, reason, a live `Pool` cell, a `Set` dropdown, and a hidden `Id`. The
+   formula cannot see yesterday's values). Every row is a player row: a live `Pool` dropdown, the player, the reason, and a hidden `Id`. The
    rows it does not use are **hidden**, so "no changes" is one line, not twenty empty rows (`sheet_views.apply_queue_visibility`).
-3. **Pool check** (live formulas): pooled players whose numbers went bad, each with its reason and a `Set` cell, so `Remove` is one click. Triggers:
+3. **Pool check** (live formulas): pooled players whose numbers went bad, each with its reason and a `Pool` cell, so clearing it (Delete) removes him. Triggers:
    listed OUT / D / Q / IR, `Bust%` in the top quartile of his position's rosterable pool, `CalPts` at least 2.0 below `ProjPts`, a `FADE↓` chip.
    Empty states: "Tick players into your pool to see this." / "Nothing in your pool looks worse than when you added it." Up to 10 rows.
 4. **Pool summary** (live formulas, updating the moment you change the pool, no sync): a gap line ("Cash: need 1 more TE · GPP: enough to fill a
@@ -616,12 +594,12 @@ collapsible row sections, all open by default, in this order (Sam's call):
    Lineups simulator), a per-position table (Pooled, Cash, GPP, with Both counting for each; Min / Max / Avg Sal; the cheapest play), and **Your
    stacks** (each pooled QB: how many of his team's WR and TE are pooled, and whether anyone from the opponent is, a bring-back). There are no
    per-position targets (Sam: a week may want 2 QBs or 5); the gap line says only what is missing to fill ONE DraftKings lineup (`sheet_views.ROSTER_MIN`).
-5. **Chalk map** (`BOARD_CHALK_*`): the highest-owned players per position (`BOARD_CHALK_POSITION_ROWS`: QB 4, RB 8, WR 8, TE 4, DST 4 (Sam's choice)), sorted by `Own%`, nobody listed OUT/IR, with `Sal`, `Own%`, `CalPts`, `Hit3x%`, a live `Pool` cell, a `Set` dropdown and a hidden `Id`. One spill per position block; until ownership has published (EdgeRaw `OwnStatus` is not `real`) the first row says so and the rest stay blank.
+5. **Chalk map** (`BOARD_CHALK_*`): the highest-owned players per position (`BOARD_CHALK_POSITION_ROWS`: QB 4, RB 8, WR 8, TE 4, DST 4 (Sam's choice)), sorted by `Own%`, nobody listed OUT/IR, with `Sal`, `Own%`, `CalPts`, `Hit3x%`, a live `Pool` dropdown and a hidden `Id`. One spill per position block; until ownership has published (EdgeRaw `OwnStatus` is not `real`) the first row says so and the rest stay blank.
 6. **Stack candidates**: QB + WR1/WR2/WR3/TE1/RB1 for the 8 highest-total games (formulas).
 
-Columns A-N visible; the hidden helper block past them holds the Slate shape join keys (GameId, Away, Home, a GPS check), each list row's DraftKings
-`Id`, and the Pool check's per-position `Bust%` quartile cut (`sheet_views.BOARD_ID_COL`, `BOARD_BUSTCUT_COL`). The bound Apps Script acts on a `Set`
-cell by finding the nearest `Set` header above it and the `Id` in that header row. Every EdgeRaw-derived section is regenerated against the CURRENT
+Columns A-O visible; the hidden helper block past them holds the Slate shape join keys (GameId, Away, Home, a GPS check), each list row's DraftKings
+`Id`, and the Pool check's per-position `Bust%` quartile cut (`sheet_views.BOARD_ID_COL`, `BOARD_BUSTCUT_COL`). The bound Apps Script acts on a `Pool`
+cell by finding the nearest `Pool` header above it and the `Id` in that header row. Every EdgeRaw-derived section is regenerated against the CURRENT
 `derived.EDGE_COLUMNS` layout every time `build-views` runs (`sheet_views._rng`/`_col`): re-run it after any EdgeRaw column reorder. Pool-derived
 sections do the same against `sheet_columns.PLAYER_POOL_COLUMN_ORDER`. `style_board` also clears any stale format left by an earlier layout.
 
@@ -629,16 +607,17 @@ sections do the same against `sheet_columns.PLAYER_POOL_COLUMN_ORDER`. `style_bo
 
 Visible tab right after `Board` (`sheet_style.WEEK_ORDER`), **written by Python on every `dfs sync`** (`edge_finder_tab.build_layout`
 from the tables `edge_finder.enrich` saves under `data/current/edge_finder/` plus the weekly usage tables; written by
-`sheet_edge_finder.write_tab`). Nothing is typed except the `Set` dropdown. A template carries only the empty state
+`sheet_edge_finder.write_tab`). Nothing is typed except the `Pool` dropdown. A template carries only the empty state
 (`dfs setup build-views` creates it once and never overwrites a synced one).
 
-**Columns (fixed across sections).** `A`-`D` Name, Pos, Team, Salary; `E`-`J` section-specific (named by each section's header row);
-`K` **Why** (the plain-English reason, wide), `L` **Do** (a verb), `M` **Pool** (the player's current pool state: EdgeRaw's own tick
-found by his Id, or "Added" when his name is on Player Pool's hidden `Added` list), `N` **Set** (a dropdown: Cash / GPP / Both /
-Remove; the bound Apps Script `apps_script/Code.gs` acts on it, see `docs/APPS_SCRIPT.md`), `O` `↗` (a link to his EdgeRaw row),
-`P` **Id** (his DraftKings id, hidden: the script and every formula find the player by it, never by name) and `Q` (hidden: the key
-of the row group that starts on the next row). There is no `Games` column: a row built on fewer than 3 games is muted and its Why says
-"only 2 games of data". **Do** shows "In pool (Cash)" instead of its verb whenever the player is already pooled (a live formula, no sync).
+**Columns (fixed across sections), actions round 2026-10-09.** `A` **Pool** (the player's pool state and its Cash / GPP / Both dropdown: a formula, EdgeRaw's own tick found by his Id, that the bound
+Apps Script `apps_script/Code.gs` puts back after an edit; clear it to remove him, see `docs/APPS_SCRIPT.md`), `B`-`E` Name, Pos, Team, Salary, `F` **Own%** (blank until
+ownership publishes; a 0-1 fraction shown as a percent), `G`-`L` section-specific (named by each section's header row; a section's `Edge` chips always sit in `L`, with any
+unused slots blank before it), `M` **Do** (a verb), `N` **Why** (last visible, about 60 characters, number first, nothing another column on the row already shows; the **full
+reason is the cell's note**, hover to read it; it overflows right), `O` **Id** (his DraftKings id, hidden: the script and every formula find the player by it, never by name) and `P`
+(hidden: the key of the row group that starts on the next row). Pool and Name stay frozen. The per-row `↗` link and the `Set` column are gone. There is no `Games` column: a row
+built on fewer than 3 games is muted and its Why says "2 games". **Do** shows "In pool (Cash)" instead of its verb whenever the player is already pooled (a live formula, no sync).
+Column widths are fitted to the written content (`sheet_edge_finder.fit_widths`).
 
 **Status lines (rows 2-5), in Eastern time:** "Stats through Week 4 · Injuries: practice reports only until Friday · Projections updated
 Wed 10:46 pm ET"; the injury report's source, rows, final statuses and fetch time; "CalPts trained on Weeks 1-N"; the reminder to run the
@@ -650,8 +629,12 @@ upside) and a second line, "what it is · what to do".
   Columns `CalPts`, `Hit3x%`, `Bust%`, `ProjPts`, `Rank` ("#3 of 28"), `Edge`. Do: `Cash add` (top 3 `Hit3x%` at the position AND `Bust%`
   below the position median) or `Cash option`. A **thin week** line sits under a position's header when the block's best `Hit3x%` is below
   the median best of earlier weeks (no history, no line).
-- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Own%`, `Rank`, `Edge`. Do: `GPP add` (`Boom%` in the position's top
-  quartile), `GPP leverage ★` (also low-owned, once ownership is out), else `GPP option`.
+- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Lev`, `Rank`, `Edge` (`Own%` is column F). `Lev` = his `Boom%` percentile rank minus his `Own%` percentile rank within his
+  position (the rosterable, available players), a signed whole number coloured within the position block; blank until ownership is out. Do: `GPP leverage` (`Lev` at least +25 AND `Boom%` in the top half of
+  the position), `GPP add` (`Boom%` in the top quartile), else `GPP option`. A **★** is appended when his `Boom%` is top-quartile AND his ownership is below the position's median (the original definition, unchanged).
+- **Leverage plays**: the top 5 per position by `Lev` among players with `Boom%` in the top half; `CalPts`, `Boom%`, `Bust%`, `Lev`, `Rank`, `Edge`. Do: `GPP leverage` or `GPP option`. A note says "Ownership not out yet; GPP leverage appears when it does." until `OwnStatus` is real.
+- **Chalk to fade or eat**: the 3 highest-owned per position with `Boom%` and `Bust%`. Do: `Chalk: eat` (his `Bust%` rank in the position's bottom third), `Chalk: fade candidate` (top third), else `Chalk`. TFFB's ownership is a large-field projection, so it is
+  directional for small-field GPPs and is ignored in cash: the Cash sections show `Own%` uncoloured and their Why never mentions it. Ownership never changes `CalPts` or any probability.
 - **Punt plays**: best `ValAdj` within $1,000 of each position's cheapest salary on the slate (top 5 per position). Do: `Punt option`.
 - **Projection disagreements**: largest |CalPts - ProjPts| per position, both directions; columns TFFB, Sleeper, FantasyPros, CalPts, Diff,
   `Edge`. Why splits the gap into the measured bias (the applied, shrunk amount, with its n) and the other sources. Do: `Look closer ▲` /
@@ -661,8 +644,8 @@ upside) and a second line, "what it is · what to do".
 - **Usage trends** (context, no chips): per position, the players whose last-3-games usage moved beyond R6's measured band against the 6
   games before (arrow thresholds in `models/research/trend_bands.json`; none for a player with fewer than 9 earlier games), one row per
   player (his biggest move; the others are named in Why). Do: `Watch`.
-- **Matchups (context)**: a row per team (`Soft` top 8 / `Tough` bottom 4), its top 3 players by `CalPts` in E, the reasons and score in
-  Why; the team's players sit in a collapsed row group under it, with `Set`. Feeds nothing.
+- **Matchups (context)**: a row per team (`Soft` top 8 / `Tough` bottom 4), its top 3 players by `CalPts` named in one cell that overflows right, the reasons and score in
+  Why (the full text is the note); the team's players sit in a collapsed row group under it, each with a `Pool` cell. Feeds nothing.
 - **Context signals**: `FADE↓` (TE only), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven; then **R6 usage signals**, each of the 12
   as its own sub-block (who is flagged, the measured effect, the evidence tier). Every player row's Why also names the R6 signals behind his
   single `Proj ▼` / `Proj ▲` chip (`Proj ▼?` / `Proj ▲?`, grey, when only weaker evidence supports it), and Do adds "Lean under in cash" / "Lean over".
@@ -670,7 +653,7 @@ upside) and a second line, "what it is · what to do".
 **Row groups.** Each section's body is a level-1 group; in Cash core, GPP upside and punt plays every rosterable player is written (up to
 40 per position) and the rows past the visible count (QB 6, RB 10, WR 12, TE 6, DST 6) sit in a collapsed level-2 group under "▸ 34 more
 RBs (click + to show)"; each matchup team has its own. The +/- toggles sit on the row above the group. **Your open/closed choices survive
-every sync**: the sheet's own `rowGroups` are read before the rewrite and re-applied by group key (hidden column `Q`); a key not seen before
+every sync**: the sheet's own `rowGroups` are read before the rewrite and re-applied by group key (hidden column `P`); a key not seen before
 gets the default (sections open, overflow and team groups shut).
 
 Every conditional format is relative to its own cells; the probability colour is a gradient per position block (best green, never red).
@@ -762,12 +745,12 @@ it's still the right number until you change it.
 
 Sam's playbook (usability slice 7), generated by `sheet_instructions.py` and rewritten by `dfs setup instructions` (and `dfs setup
 polish`); `dfs doctor` warns when the tab differs from what the code renders (`instructions-drift`). Two columns: a label and a wrapped
-line of text, in four parts under dark section bands: **Read this first** (what you type, the one thing to run first, the Set dropdown),
+line of text, in four parts under dark section bands: **Read this first** (what you type, the one thing to run first, the Pool dropdown),
 **The week, step by step** (start of week, Tue/Wed, Thu-Sat, Sunday final sync and lineups, Sunday late swap, Mon/Tue close; each names the
 tab, what to look at, what to do and the command), **Reading the numbers** (CalPts, Hit3x%, Boom%, Bust%, CeilM, ValAdj, P(cash),
 P(190+), the chips, the trend arrows, the colours) and **The tabs** (one line each), then a pointer to these docs. Plain English: no
 backticks, no source names, no function names (a test enforces it). Facts with a constant behind them (pool caps, roster slots, block
-count, the Set options, the GPP target default) are derived, not retyped. The tab's length is no longer fixed: the writer clears A1:B120
+count, the Pool options, the GPP target default) are derived, not retyped. The tab's length is no longer fixed: the writer clears A1:B120
 first, sets the column widths and sets each row's height from its text length (a wrapped row does not reliably auto-fit through the API).
 
 ### Movement

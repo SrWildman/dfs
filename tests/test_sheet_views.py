@@ -6,6 +6,7 @@ from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, VAL_ADJ_ROSTERABLE_TOP_N
 from dfs.gps_check import GPS_IMPLIED_MISMATCH_PTS
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_views import (
+    BANNER_START_COL,
     BOARD_BANNER_ROW,
     BOARD_BUSTCUT_COL_INDEX,
     BOARD_CHALK_COLHEADER,
@@ -20,14 +21,17 @@ from dfs.sheet_views import (
     BOARD_ID_COL,
     BOARD_ID_COL_INDEX,
     BOARD_LIST_COLHEADER,
-    BOARD_LIST_SET_COL,
+    BOARD_LIST_NAME_COL,
+    BOARD_LIST_REASON_INDEX,
     BOARD_POOL_COL,
+    BOARD_POOL_COLHEADER,
     BOARD_POOL_FIRST_ROW,
     BOARD_POOL_GAP_ROW,
     BOARD_POOL_HEADER_ROW,
     BOARD_PORTFOLIO_PLACEHOLDER,
     BOARD_PORTFOLIO_ROW,
     BOARD_QUEUE_COLHEADER,
+    BOARD_QUEUE_COLHEADER_LEGACY,
     BOARD_QUEUE_COLHEADER_ROW,
     BOARD_QUEUE_EMPTY,
     BOARD_QUEUE_FIRST_ROW,
@@ -36,6 +40,7 @@ from dfs.sheet_views import (
     BOARD_QUEUE_ROWS,
     BOARD_SLATE_AWAY_COL,
     BOARD_SLATE_AWAY_COL_INDEX,
+    BOARD_SLATE_COL,
     BOARD_SLATE_COLHEADER,
     BOARD_SLATE_COLHEADER_ROW,
     BOARD_SLATE_FIRST_ROW,
@@ -45,8 +50,11 @@ from dfs.sheet_views import (
     BOARD_SLATE_HEADER_ROW,
     BOARD_SLATE_HOME_COL,
     BOARD_SLATE_HOME_COL_INDEX,
+    BOARD_STACK_COLHEADER,
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
+    BOARD_STACKS_COL,
+    BOARD_STACKS_COLHEADER,
     BOARD_STACKS_FIRST_ROW,
     BOARD_STACKS_HEADER_ROW,
     DEFAULT_LINEUP_COUNT,
@@ -473,6 +481,17 @@ def test_movement_what_it_means_names_the_team_and_which_way_its_players_moved()
 # ---------------------------------------------------------------------------
 
 
+def _ix(header, name):
+    """The column index of a header name in one of the Board's tables (column A is the Pool gutter)."""
+    return header.index(name)
+
+
+SL = _ix(BOARD_SLATE_COLHEADER, "Matchup")  # Slate shape spill start
+PL = _ix(BOARD_CHALK_COLHEADER, "Player")  # list / chalk spill start
+ST = _ix(BOARD_STACK_COLHEADER, "Team")  # Stack candidates spill start
+YS = _ix(BOARD_STACKS_COLHEADER, "QB")  # Your stacks spill start
+
+
 def _build_board(client=None, **overrides):
     client = client or _CapturingClient()
     kwargs = {
@@ -521,7 +540,7 @@ def test_chalk_map_is_one_spill_per_position_sorted_by_ownership_with_ids_beside
     first = BOARD_CHALK_FIRST_ROW
     row = first
     for position, count in BOARD_CHALK_POSITION_ROWS.items():
-        main = client.rows[row - 1][0]
+        main = client.rows[row - 1][PL]
         assert f'="{position}"' in main
         assert "SORT(FILTER(" in main and ",5,FALSE)" in main  # Own% is the fifth column
         assert f",{count},7)" in main  # the block's own size, seven columns wide
@@ -531,14 +550,16 @@ def test_chalk_map_is_one_spill_per_position_sorted_by_ownership_with_ids_beside
         row += count
     assert row - 1 == BOARD_CHALK_LAST_ROW
     # a Pool cell per row keyed on the hidden Id, so Set and the Pool tick read the same player
-    assert all(client.rows[r - 1][7].startswith("=") for r in range(first, BOARD_CHALK_LAST_ROW + 1))
+    pool = _ix(BOARD_CHALK_COLHEADER, "Pool")
+    assert pool == 0
+    assert all(client.rows[r - 1][pool].startswith("=") for r in range(first, BOARD_CHALK_LAST_ROW + 1))
 
 
 def test_chalk_map_says_so_until_ownership_publishes_and_only_once():
     client = _build_board()
-    qb_main = client.rows[BOARD_CHALK_FIRST_ROW - 1][0]
+    qb_main = client.rows[BOARD_CHALK_FIRST_ROW - 1][PL]
     assert BOARD_CHALK_EMPTY in qb_main and "COUNTIF(EdgeRaw!" in qb_main and ',"real")=0' in qb_main
-    other = client.rows[BOARD_CHALK_FIRST_ROW - 1 + BOARD_CHALK_POSITION_ROWS["QB"]][0]
+    other = client.rows[BOARD_CHALK_FIRST_ROW - 1 + BOARD_CHALK_POSITION_ROWS["QB"]][PL]
     assert BOARD_CHALK_EMPTY not in other  # one message, not five
 
 
@@ -550,9 +571,9 @@ def test_slate_shape_sorts_by_total_not_gamesraws_own_row_order():
     client = _build_board()
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
 
-    assert slate_row[0].startswith("=")
-    assert "SORT(" in slate_row[0]
-    assert "GamesRaw!$M$2:$M$40" in slate_row[0]  # Total is the sort key
+    assert slate_row[SL].startswith("=")
+    assert "SORT(" in slate_row[SL]
+    assert "GamesRaw!$M$2:$M$40" in slate_row[SL]  # Total is the sort key
 
 
 def test_slate_shape_fav_and_spread_columns_derive_from_games_columns():
@@ -562,7 +583,7 @@ def test_slate_shape_fav_and_spread_columns_derive_from_games_columns():
     # hardcoded -- Spread shows the ABSOLUTE line; Fav's sign check picks
     # the favoured team code (or "PK").
     client = _build_board()
-    slate_formula = client.rows[BOARD_SLATE_FIRST_ROW - 1][0]
+    slate_formula = client.rows[BOARD_SLATE_FIRST_ROW - 1][SL]
 
     assert "GamesRaw!$L$2:$L$40" in slate_formula  # Spread is GAMES_COLUMNS' own column L
     assert 'IF(GamesRaw!$L$2:$L$40=0,"PK"' in slate_formula
@@ -588,9 +609,9 @@ def test_slate_shape_pace_averages_away_and_home_team_lookups():
     # by GameId alone.
     client = _build_board()
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
-    pace_formula = slate_row[4]
+    pace_formula = slate_row[BOARD_SLATE_COLHEADER.index("Pace")]
 
-    assert pace_formula.startswith("=IF($A")
+    assert pace_formula.startswith(f"=IF(${BOARD_SLATE_COL['Matchup']}")
     assert "AVERAGE(" in pace_formula
     assert f"${BOARD_SLATE_AWAY_COL}" in pace_formula
     assert f"${BOARD_SLATE_HOME_COL}" in pace_formula
@@ -606,24 +627,24 @@ def test_stack_candidates_reference_current_edge_columns():
     # generates against EDGE_COLUMNS at call time.
     client = _build_board()
     stack_row = client.rows[BOARD_STACK_FIRST_ROW - 1]
-    team_list = stack_row[0]
-    # PROMPT_BOARD_FIXES.md item 5: Total now spills into column B, so the
-    # QB name formula starts at column C (index 2).
-    qb_formula = stack_row[2]
+    team_list = stack_row[ST]
+    # Total spills beside the team, so the QB name formula starts two columns after it.
+    qb_formula = stack_row[_ix(BOARD_STACK_COLHEADER, "QB")]
 
     assert _rng("EdgeRaw", "OverUnder") in team_list
     assert _rng("EdgeRaw", "Team") in qb_formula
-    assert _rng("EdgeRaw", "TmRank") in stack_row[4]  # WR1 column
+    assert _rng("EdgeRaw", "TmRank") in stack_row[_ix(BOARD_STACK_COLHEADER, "WR1")]
 
 
 def test_pool_summary_counts_cash_and_gpp_from_player_pool_with_both_counting_for_each():
     client = _build_board()
     qb = client.rows[BOARD_POOL_FIRST_ROW - 1]
-    assert qb[0] == "QB"
-    assert "Player Pool" in qb[1] and "EdgeRaw" not in qb[1]
-    assert "COUNTIF" in qb[2] and '"Cash"' in qb[2] and '"Both"' in qb[2]
-    assert '"GPP"' in qb[3] and '"Both"' in qb[3]
-    assert BOARD_POOL_COL["Cash"] == "C" and BOARD_POOL_COL["GPP"] == "D"
+    pos, pooled, cash, gpp = (qb[_ix(BOARD_POOL_COLHEADER, n)] for n in ("Pos", "Pooled", "Cash", "GPP"))
+    assert pos == "QB" and qb[0] == ""  # the gutter stays blank on a row that is not a player
+    assert "Player Pool" in pooled and "EdgeRaw" not in pooled
+    assert "COUNTIF" in cash and '"Cash"' in cash and '"Both"' in cash
+    assert '"GPP"' in gpp and '"Both"' in gpp
+    assert BOARD_POOL_COL["Cash"] == "D" and BOARD_POOL_COL["GPP"] == "E"
 
 
 def test_pool_summary_has_no_per_position_targets_only_what_is_missing_to_fill_a_lineup():
@@ -638,7 +659,7 @@ def test_pool_summary_has_no_per_position_targets_only_what_is_missing_to_fill_a
 
 def test_pool_check_triggers_are_the_four_the_prompt_names_and_it_ends_in_the_set_cell():
     client = _build_board()
-    spill = client.rows[BOARD_CHECK_FIRST_ROW - 1][0]
+    spill = client.rows[BOARD_CHECK_FIRST_ROW - 1][PL]
     ids = client.rows[BOARD_CHECK_FIRST_ROW - 1][BOARD_ID_COL_INDEX]
     assert "OUT|D|Q|IR" in spill  # listed out / doubtful / questionable
     assert "Bust odds" in spill and "below TFFB" in spill and "FADE↓" in spill
@@ -650,7 +671,7 @@ def test_pool_check_triggers_are_the_four_the_prompt_names_and_it_ends_in_the_se
     for row in range(BOARD_CHECK_FIRST_ROW, BOARD_CHECK_FIRST_ROW + 3):
         pool = client.rows[row - 1][BOARD_LIST_COLHEADER.index("Pool")]
         assert f"${BOARD_ID_COL}{row}" in pool  # found by the hidden Id, never by name
-        assert "MATCH($A" not in pool
+        assert pool.startswith("=IF(") and f"MATCH(${BOARD_LIST_NAME_COL}" not in pool
 
 
 def test_pool_check_compares_bust_to_the_positions_own_rosterable_quartile_cut():
@@ -663,22 +684,26 @@ def test_pool_check_compares_bust_to_the_positions_own_rosterable_quartile_cut()
 
 def test_your_stacks_counts_each_pooled_qbs_pass_catchers_and_a_bring_back():
     client = _build_board()
-    spill = client.rows[BOARD_STACKS_FIRST_ROW - 1][0]
+    spill = client.rows[BOARD_STACKS_FIRST_ROW - 1][YS]
     assert "No QB in your pool yet." in spill and "ARRAY_CONSTRAIN" in spill
     catchers, bring_back = (
-        client.rows[BOARD_STACKS_FIRST_ROW - 1][3],
-        client.rows[BOARD_STACKS_FIRST_ROW - 1][4],
+        client.rows[BOARD_STACKS_FIRST_ROW - 1][_ix(BOARD_STACKS_COLHEADER, "Pass catchers")],
+        client.rows[BOARD_STACKS_FIRST_ROW - 1][_ix(BOARD_STACKS_COLHEADER, "Bring-back")],
     )
-    assert "COUNTIF(" in catchers and "$B" in catchers  # his team's WR + TE in the pool
-    assert "$C" in bring_back and '"Yes ("' in bring_back and '"No"' in bring_back  # the opponent's
+    team, opp = BOARD_STACKS_COL["Team"], BOARD_STACKS_COL["Opp"]
+    assert "COUNTIF(" in catchers and f"${team}" in catchers  # his team's WR + TE in the pool
+    assert f"${opp}" in bring_back and '"Yes ("' in bring_back and '"No"' in bring_back  # the opponent's
 
 
 def test_the_banner_values_do_not_run_into_each_other():
     client = _build_board()
     row = client.rows[BOARD_BANNER_ROW - 1]
-    assert row[0] == "Games" and row[2] == "Highest total" and row[6] == "Max wind" and row[8] == "Injuries"
-    # Highest total (D) overflows across the empty E-F; Max wind starts at G.
-    assert row[4] == "" and row[5] == ""
+    b = BANNER_START_COL
+    assert row[b] == "Games" and row[b + 2] == "Highest total"
+    assert row[b + 6] == "Max wind" and row[b + 8] == "Injuries"
+    assert row[0] == ""  # the gutter stays blank
+    # Highest total's value (E) overflows across the empty F-G; Max wind's label starts at H.
+    assert row[b + 4] == "" and row[b + 5] == ""
 
 
 def test_the_portfolio_line_is_one_sentence_and_the_placeholder_until_lineups_exist():
@@ -689,6 +714,9 @@ def test_the_portfolio_line_is_one_sentence_and_the_placeholder_until_lineups_ex
         "P(at least one cash) 91%  ·  P(at least one 190+) 12%"
     )
     assert board_portfolio_text(summary, 1, 190.0).startswith("Portfolio: 1 lineup  ·")
+    assert board_portfolio_text(summary, 6, 190.0, "cash line 141.3 (season median, 4 weeks)").endswith(
+        "P(at least one 190+) 12%  ·  cash line 141.3 (season median, 4 weeks)"
+    )
     assert board_portfolio_text(None, 0, 190.0) == BOARD_PORTFOLIO_PLACEHOLDER
     client = _build_board()
     assert client.rows[BOARD_PORTFOLIO_ROW - 1][0] == BOARD_PORTFOLIO_PLACEHOLDER
@@ -712,7 +740,7 @@ def test_games_banner_uses_sumproduct_not_counta_of_filter():
     # above -- found live via this exact formula (an empty GamesRaw read
     # "1" instead of the intended IFERROR(...,0) fallback).
     client = _build_board()
-    games_formula = client.rows[BOARD_BANNER_ROW - 1][1]
+    games_formula = client.rows[BOARD_BANNER_ROW - 1][BANNER_START_COL + 1]
 
     assert "SUMPRODUCT" in games_formula
     assert "COUNTA(" not in games_formula
@@ -731,11 +759,8 @@ def test_freshness_banner_no_longer_describes_the_removed_ranked_leverage_panel(
     assert banner.count("directional") == 2
 
 
-def test_build_board_preserves_existing_queue_rows_on_rebuild():
-    # A routine dfs setup build-views re-run (e.g. after an EdgeRaw reorder) must not wipe whatever the last
-    # `dfs sync --live` wrote into Queue; the rows come back with fresh live Pool formulas and their Ids.
-    old_row = ["Player A", "RB", "KC", "Avail -> Q"] + [""] * (BOARD_ID_COL_INDEX - 4) + ["44391845"]
-    colheader_range = f"A{BOARD_QUEUE_COLHEADER_ROW}:{BOARD_LIST_SET_COL}{BOARD_QUEUE_COLHEADER_ROW}"
+def _queue_client(header, body_row):
+    colheader_range = f"A{BOARD_QUEUE_COLHEADER_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_COLHEADER_ROW}"
 
     class _ClientWithQueue(_CapturingClient):
         def tab_exists(self, tab_name):
@@ -743,17 +768,38 @@ def test_build_board_preserves_existing_queue_rows_on_rebuild():
 
         def read_range(self, tab_name, a1_range):
             if a1_range == colheader_range:
-                return [BOARD_QUEUE_COLHEADER]
+                return [header]
             if a1_range.startswith(f"A{BOARD_QUEUE_FIRST_ROW}:"):
-                return [old_row]
+                return [body_row]
             return []
 
-    client = _build_board(client=_ClientWithQueue())
+    return _ClientWithQueue()
+
+
+def test_build_board_preserves_existing_queue_rows_on_rebuild():
+    # A routine dfs setup build-views re-run (e.g. after an EdgeRaw reorder) must not wipe whatever the last
+    # `dfs sync --live` wrote into Queue; the rows come back with fresh live Pool formulas and their Ids.
+    old_row = ["", "Player A", "RB", "KC", "Avail -> Q"] + [""] * (BOARD_ID_COL_INDEX - 5) + ["44391845"]
+    client = _build_board(client=_queue_client(BOARD_QUEUE_COLHEADER, old_row))
     row = client.rows[BOARD_QUEUE_FIRST_ROW - 1]
-    assert row[:4] == ["Player A", "RB", "KC", "Avail -> Q"] and row[BOARD_ID_COL_INDEX] == "44391845"
+    first = BOARD_LIST_COLHEADER.index("Player")
+    assert row[first : first + 3] == ["Player A", "RB", "KC"] and row[4] == "Avail -> Q"
+    assert row[BOARD_ID_COL_INDEX] == "44391845"
     assert row[BOARD_LIST_COLHEADER.index("Pool")].startswith(
         f'=IF(${BOARD_ID_COL}{BOARD_QUEUE_FIRST_ROW}="","",'
     )
+
+
+def test_build_board_carries_a_queue_from_the_layout_before_the_pool_gutter_forward():
+    # The Board before the gutter read Player..reason in A:D (Pool and Set at H:I) with the Id one column
+    # further left. A rebuild re-emits those rows in the new order rather than blanking the Queue.
+    legacy_id = BOARD_ID_COL_INDEX - 1
+    old_row = ["Player A", "RB", "KC", "Avail -> Q"] + [""] * (legacy_id - 4) + ["44391845"]
+    client = _build_board(client=_queue_client(BOARD_QUEUE_COLHEADER_LEGACY, old_row))
+    row = client.rows[BOARD_QUEUE_FIRST_ROW - 1]
+    first = BOARD_LIST_COLHEADER.index("Player")
+    assert row[first : first + 3] == ["Player A", "RB", "KC"] and row[4] == "Avail -> Q"
+    assert row[BOARD_ID_COL_INDEX] == "44391845" and row[0].startswith("=IF(")
 
 
 def test_build_board_discards_stale_pre_rebuild_data_sitting_in_queues_rows():
@@ -772,7 +818,9 @@ def test_build_board_discards_stale_pre_rebuild_data_sitting_in_queues_rows():
 
     client = _build_board(client=_ClientWithStaleBoard())
     # No stale data copied forward: the Queue reads as empty.
-    assert client.rows[BOARD_QUEUE_FIRST_ROW - 1][0] == BOARD_QUEUE_EMPTY  # only the "nothing changed" line
+    row = client.rows[BOARD_QUEUE_FIRST_ROW - 1]
+    assert row[BOARD_LIST_COLHEADER.index("Player")] == BOARD_QUEUE_EMPTY
+    assert row[0] == ""  # the line is not a player, so the gutter stays blank
 
 
 def test_old_top_leverage_and_landmines_panels_are_gone():
@@ -945,7 +993,7 @@ def test_board_slate_shape_drops_games_with_no_players_through_one_shared_filter
     client = _build_board()
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
     spills = [
-        slate_row[0],
+        slate_row[SL],
         slate_row[BOARD_SLATE_GAMEID_COL_INDEX],
         slate_row[BOARD_SLATE_GAMEID_COL_INDEX + 1],
         slate_row[BOARD_SLATE_GAMEID_COL_INDEX + 2],
@@ -1081,7 +1129,9 @@ def test_write_queue_section_filters_to_pooled_players_and_writes_player_rows_wi
     assert "1 pooled change" in result
     a1_range, body = client.update_calls[0]
     assert a1_range == f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}"
-    assert body[0][:4] == ["Player A", "RB", "KC", "Avail -> Q"] and body[0][BOARD_ID_COL_INDEX] == "1"
+    assert (
+        body[0][PL : PL + 4] == ["Player A", "RB", "KC", "Avail -> Q"] and body[0][BOARD_ID_COL_INDEX] == "1"
+    )
     assert body[0][BOARD_LIST_COLHEADER.index("Pool")].startswith("=IF($")  # live Pool cell, keyed on the Id
     assert all(not any(c for c in row) for row in body[1:])
     # the rows it did not use are hidden: one visible line, not twenty
@@ -1100,7 +1150,7 @@ def test_write_queue_section_shows_one_line_when_nothing_pooled_changed():
     write_queue_section(client, changes, "EdgeRaw")
 
     _, body = client.update_calls[0]
-    assert body[0][0] == BOARD_QUEUE_EMPTY
+    assert body[0][PL] == BOARD_QUEUE_EMPTY and body[0][0] == ""
     assert client.hidden == [(BOARD_QUEUE_FIRST_ROW + 1, BOARD_QUEUE_LAST_ROW)]  # one visible line
 
 
@@ -1117,13 +1167,13 @@ def test_write_queue_section_notes_overflow_past_the_row_cap_and_hides_nothing()
 
     _, body = client.update_calls[0]
     assert len(body) == BOARD_QUEUE_ROWS
-    assert "more not shown" in body[-1][3]
+    assert "more not shown" in body[-1][BOARD_LIST_REASON_INDEX]
     assert client.hidden == []
 
 
 def test_queue_body_and_used_rows_are_pure_helpers():
-    body = queue_body(_queue_changes_df(), set(), edge_tab="EdgeRaw", added_range=None)
-    assert len(body) == BOARD_QUEUE_ROWS and body[0][0] == BOARD_QUEUE_EMPTY
+    body = queue_body(_queue_changes_df(), set(), edge_tab="EdgeRaw")
+    assert len(body) == BOARD_QUEUE_ROWS and body[0][PL] == BOARD_QUEUE_EMPTY
     assert used_queue_rows(body) == 1
     assert used_queue_rows([[""] * 3] * 4) == 1  # never fewer than one visible row
     assert used_queue_rows([["x"], ["y"], [""]]) == 2
@@ -1150,9 +1200,10 @@ def test_banner_counts_the_same_main_slate_games_as_slate_shape():
     row = client.rows[BOARD_BANNER_ROW - 1]
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
     team = _rng("EdgeRaw", "Team")
-    games, top_total, max_wind = row[1], row[3], row[7]
+    b = BANNER_START_COL
+    games, top_total, max_wind = row[b + 1], row[b + 3], row[b + 7]
     for formula in (games, top_total, max_wind):
         assert f",{team},0)" in formula  # gated on a team having players on EdgeRaw
-    shared = re.search(r'\(GamesRaw![^)]*<>""\)\*.*>0\)', slate_row[0]).group(0)
+    shared = re.search(r'\(GamesRaw![^)]*<>""\)\*.*>0\)', slate_row[SL]).group(0)
     assert shared in games and shared in top_total
     assert "MATCH(WeatherRaw!$A$2:$A$40" in max_wind  # wind is per GameId, restricted to slate games

@@ -133,6 +133,7 @@ def _edge_team_pair_mean(edge_tab: str, metric: str, away_ref: str, home_ref: st
 # from the one before it, never re-counted by hand.
 BOARD_TITLE_ROW = 1
 BOARD_BANNER_ROW = 2
+BANNER_START_COL = 1  # the banner's label/value pairs start in B; A is the Pool gutter
 BOARD_FRESHNESS_ROW = 3
 
 # Sections, top to bottom (Sam's ruling, 2026-10-08: Slate shape first, then the pool's state, then the
@@ -148,7 +149,13 @@ BOARD_SLATE_LAST_ROW = BOARD_SLATE_FIRST_ROW + BOARD_SLATE_ROWS - 1
 # PROMPT_BOARD_FIXES.md item 1: `Fav`/`Spread` inserted right after `Total` -- two columns, not one "KC -3.5"
 # text cell, since text can't be colour-scaled. Round 5 item 5b: `PROE`/`Expl%`/`GameEnv` join `Pace`
 # (each the mean of both teams' values) and item 5c dropped `Tot Δ`. Total stays the sort key.
+# Column A is the Pool gutter (actions round, 2026-10-09): on a player row it is the live `Pool` dropdown; on
+# a row that is not a single player (Slate shape, Pool summary, Your stacks, Stack candidates) it stays
+# blank, no fill and no dropdown. Every table's header therefore starts with the gutter cell.
+BOARD_GUTTER = ""
+BOARD_POOL_HEADER = "Pool"
 BOARD_SLATE_COLHEADER = [
+    BOARD_GUTTER,
     "Matchup",
     "Total",
     "Fav",
@@ -162,14 +169,19 @@ BOARD_SLATE_COLHEADER = [
     "GPS",
 ]
 
-# The two player lists (Queue, Pool check) share one column layout: the reason is text in D that overflows
-# right across the empty E-G, `Pool` is the live pool state, `Set` the action dropdown. The DraftKings id
-# the Apps Script and the formulas find the player by sits in a hidden helper column (`BOARD_ID_COL`).
-BOARD_LIST_COLHEADER = ["Player", "Pos", "Team", "", "", "", "", "Pool", "Set"]
-BOARD_QUEUE_COLHEADER = ["Player", "Pos", "Team", "What changed", "", "", "", "Pool", "Set"]
-BOARD_CHECK_COLHEADER = ["Player", "Pos", "Team", "Why", "", "", "", "Pool", "Set"]
-BOARD_LIST_POOL_COL = column_letter(BOARD_LIST_COLHEADER.index("Pool"))
-BOARD_LIST_SET_COL = column_letter(BOARD_LIST_COLHEADER.index("Set"))
+# The two player lists (Queue, Pool check) share one column layout: `Pool` (the live pool state and its
+# dropdown) in the gutter, then the player, and the reason as text in E that overflows right across the empty
+# F-H. The DraftKings id the Apps Script and the formulas find the player by sits in a hidden helper column
+# (`BOARD_ID_COL`).
+BOARD_LIST_COLHEADER = [BOARD_POOL_HEADER, "Player", "Pos", "Team", "", "", "", ""]
+BOARD_QUEUE_COLHEADER = [BOARD_POOL_HEADER, "Player", "Pos", "Team", "What changed", "", "", ""]
+BOARD_CHECK_COLHEADER = [BOARD_POOL_HEADER, "Player", "Pos", "Team", "Why", "", "", ""]
+# Before the gutter the Queue read Player, Pos, Team, What changed in A:D with Pool and Set at H:I; a
+# rebuild re-emits those rows in the new order (see `build_board`).
+BOARD_QUEUE_COLHEADER_LEGACY = ["Player", "Pos", "Team", "What changed", "", "", "", "Pool", "Set"]
+BOARD_LIST_POOL_COL = column_letter(BOARD_LIST_COLHEADER.index(BOARD_POOL_HEADER))
+BOARD_LIST_NAME_COL = column_letter(BOARD_LIST_COLHEADER.index("Player"))
+BOARD_LIST_REASON_INDEX = 4
 BOARD_ID_HEADER = "Id"
 
 BOARD_QUEUE_HEADER_ROW = BOARD_SLATE_LAST_ROW + 2
@@ -208,6 +220,7 @@ BOARD_POOL_FIRST_ROW = BOARD_POOL_COLHEADER_ROW + 1
 BOARD_POOL_POSITION_ROWS = len(_POSITIONS)
 BOARD_POOL_LAST_ROW = BOARD_POOL_FIRST_ROW + BOARD_POOL_POSITION_ROWS - 1
 BOARD_POOL_COLHEADER = [
+    BOARD_GUTTER,
     "Pos",
     "Pooled",
     "Cash",
@@ -218,13 +231,13 @@ BOARD_POOL_COLHEADER = [
     "Cheapest",
     "Cheapest Sal",
 ]
-BOARD_POOL_COL = {name: column_letter(i) for i, name in enumerate(BOARD_POOL_COLHEADER)}
+BOARD_POOL_COL = {name: column_letter(i) for i, name in enumerate(BOARD_POOL_COLHEADER) if name}
 BOARD_STACKS_HEADER_ROW = BOARD_POOL_LAST_ROW + 2
 BOARD_STACKS_COLHEADER_ROW = BOARD_STACKS_HEADER_ROW + 1
 BOARD_STACKS_FIRST_ROW = BOARD_STACKS_COLHEADER_ROW + 1
 BOARD_STACKS_ROWS = 8
 BOARD_STACKS_LAST_ROW = BOARD_STACKS_FIRST_ROW + BOARD_STACKS_ROWS - 1
-BOARD_STACKS_COLHEADER = ["QB", "Team", "Opp", "Pass catchers", "Bring-back"]
+BOARD_STACKS_COLHEADER = [BOARD_GUTTER, "QB", "Team", "Opp", "Pass catchers", "Bring-back"]
 BOARD_PORTFOLIO_PREFIX = "Portfolio:"
 BOARD_PORTFOLIO_PLACEHOLDER = "Portfolio: fill the lineups on Lineups to see the odds (written by dfs sync)."
 
@@ -237,9 +250,9 @@ BOARD_CHALK_FIRST_ROW = BOARD_CHALK_COLHEADER_ROW + 1
 BOARD_CHALK_POSITION_ROWS = {"QB": 4, "RB": 8, "WR": 8, "TE": 4, "DST": 4}  # Sam, 2026-10-08
 BOARD_CHALK_ROWS = sum(BOARD_CHALK_POSITION_ROWS.values())
 BOARD_CHALK_LAST_ROW = BOARD_CHALK_FIRST_ROW + BOARD_CHALK_ROWS - 1
-BOARD_CHALK_COLHEADER = ["Player", "Pos", "Team", "Sal", "Own%", "CalPts", "Hit3x%", "Pool", "Set"]
+BOARD_CHALK_COLHEADER = [BOARD_POOL_HEADER, "Player", "Pos", "Team", "Sal", "Own%", "CalPts", "Hit3x%"]
 BOARD_CHALK_EMPTY = "Ownership isn't published yet; the chalk fills in when it is."
-BOARD_CHALK_STATS = ("Salary", "Own%", "CalPts", "Hit3x%")  # EdgeRaw columns behind D:G, in order
+BOARD_CHALK_STATS = ("Salary", "Own%", "CalPts", "Hit3x%")  # EdgeRaw columns behind Sal..Hit3x%, in order
 
 BOARD_STACK_HEADER_ROW = BOARD_CHALK_LAST_ROW + 2
 BOARD_STACK_COLHEADER_ROW = BOARD_STACK_HEADER_ROW + 1
@@ -248,6 +261,7 @@ BOARD_STACK_FIRST_ROW = BOARD_STACK_COLHEADER_ROW + 1
 # smaller slate leaves the tail blank; a bigger one shows the 8 highest-total games.
 _STACK_GAMES = 8
 BOARD_STACK_COLHEADER = [
+    BOARD_GUTTER,
     "Team",
     "Total",
     "QB",
@@ -264,6 +278,13 @@ BOARD_STACK_COLHEADER = [
     "Sal",
 ]
 BOARD_STACK_ROWS = _STACK_GAMES * 2  # two teams per game
+# One letter per header name, for the code and the styling that must not type a column letter.
+BOARD_SLATE_COL = {name: column_letter(i) for i, name in enumerate(BOARD_SLATE_COLHEADER) if name}
+BOARD_STACKS_COL = {name: column_letter(i) for i, name in enumerate(BOARD_STACKS_COLHEADER) if name}
+BOARD_CHALK_COL = {name: column_letter(i) for i, name in enumerate(BOARD_CHALK_COLHEADER) if name}
+BOARD_STACK_COL = {name: column_letter(i) for i, name in enumerate(BOARD_STACK_COLHEADER) if name}
+# Stack candidates repeats `Sal` after each player: the letters of the salary columns, left to right.
+BOARD_STACK_SALARY_COLS = [column_letter(i) for i, name in enumerate(BOARD_STACK_COLHEADER) if name == "Sal"]
 BOARD_STACK_LAST_ROW = BOARD_STACK_FIRST_ROW + BOARD_STACK_ROWS - 1
 BOARD_LAST_ROW = BOARD_STACK_LAST_ROW
 
@@ -394,17 +415,15 @@ def _pp_rng(pool_tab: str, name: str, start_row: int, end_row: int) -> str:
     return f"{_q(pool_tab)}!${letter}${start_row}:${letter}${end_row}"
 
 
-def board_list_row(
-    row: int, name: str, pos: str, team: str, reason: str, pid, *, edge_tab: str, added_range: str | None
-) -> list:
-    """One Queue / Pool check player row, `A` through the hidden Id column: the player, the reason (text in
-    D that
-    overflows right), the live `Pool` formula, an empty `Set` cell (a dropdown), and his DraftKings id."""
+def board_list_row(row: int, name: str, pos: str, team: str, reason: str, pid, *, edge_tab: str) -> list:
+    """One Queue / Pool check player row, `A` through the hidden Id column: the live `Pool` cell in the
+    gutter, the player, his position and team, the reason (text in E that overflows right), and his
+    DraftKings id."""
     cells: list = [""] * (BOARD_ID_COL_INDEX + 1)
-    cells[0:4] = [_text_cell(str(name)), pos, team, _text_cell(str(reason))]
-    cells[BOARD_LIST_COLHEADER.index("Pool")] = pc.pool_formula(
-        row, edge_tab, added_range, id_col=BOARD_ID_COL, name_col="A"
-    )
+    cells[BOARD_LIST_COLHEADER.index(BOARD_POOL_HEADER)] = pc.pool_formula(row, edge_tab, id_col=BOARD_ID_COL)
+    first = BOARD_LIST_COLHEADER.index("Player")
+    cells[first : first + 3] = [_text_cell(str(name)), pos, team]
+    cells[BOARD_LIST_REASON_INDEX] = _text_cell(str(reason))
     cells[BOARD_ID_COL_INDEX] = pid
     return cells
 
@@ -443,37 +462,50 @@ def build_board(
     - **Slate shape**: games by total (formulas).
     - **Queue**: pooled players whose numbers changed since the last sync. Written by `write_queue_section`
       (a formula cannot see yesterday's values), unused rows hidden so "nothing changed" is one line; every
-      row is a player row with a live `Pool` cell, a `Set` dropdown and a hidden `Id`. Read back and
+      row is a player row with a live `Pool` dropdown and a hidden `Id`. Read back and
       re-emitted here so a `dfs setup build-views` re-run does not blank it.
     - **Pool check** (live formulas): pooled players whose numbers went bad (listed OUT / D / Q, `Bust%` in
       the top quartile of his position, `CalPts` at least 2.0 below `ProjPts`, a `FADE↓` chip), each with
-      its reason and a `Set` cell so `Remove` is one click.
+      its reason and a `Pool` cell (clear it to remove).
     - **Pool summary** (live formulas, no sync needed): per position how many are pooled for Cash and for GPP
       (Both counts for each), what is missing to fill a lineup, the portfolio line (written by the sync from
       the Lineups simulator), each pooled QB's stack, and the salary spread and cheapest play.
     - **Chalk map** (formulas, once ownership has published): the highest-owned players per position
-      (`BOARD_CHALK_POSITION_ROWS`) with salary, `Own%`, `CalPts` and `Hit3x%`, a live `Pool` cell and a `Set`
+      (`BOARD_CHALK_POSITION_ROWS`) with salary, `Own%`, `CalPts` and `Hit3x%`, a live `Pool`
       dropdown each; one line says so until ownership is out.
     - **Stack candidates**: the highest-total games' QB + top pass catchers (formulas).
 
     Every EdgeRaw-derived panel is regenerated against the CURRENT `EDGE_COLUMNS` layout via `_rng`/`_col`
     (re-run `dfs setup build-views` after any EdgeRaw column reorder); Player Pool-derived panels are the same
     idea against `sheet_columns.PLAYER_POOL_COLUMN_ORDER` via `_pp_rng`."""
-    existing_queue: list[list] = []
+    existing_queue: list[tuple] = []  # (name, pos, team, reason, id), whichever layout the Board had
     existing_portfolio = ""
     if client.tab_exists(BOARD_TAB):
-        colheader_rows = client.read_range(
-            BOARD_TAB, f"A{BOARD_QUEUE_COLHEADER_ROW}:{BOARD_LIST_SET_COL}{BOARD_QUEUE_COLHEADER_ROW}"
-        )
-        if colheader_rows and colheader_rows[0] == [c for c in BOARD_QUEUE_COLHEADER]:
-            existing_queue = client.read_range(
-                BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}"
-            )
+        wide = f"{BOARD_ID_COL}{BOARD_QUEUE_COLHEADER_ROW}"
+        colheader_rows = client.read_range(BOARD_TAB, f"A{BOARD_QUEUE_COLHEADER_ROW}:{wide}")
+        found = list(colheader_rows[0]) if colheader_rows else []
+        body = f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}"
+        if found[: len(BOARD_QUEUE_COLHEADER)] == BOARD_QUEUE_COLHEADER:
+            first = BOARD_QUEUE_COLHEADER.index("Player")
+            existing_queue = [
+                (r[first], r[first + 1], r[first + 2], r[BOARD_LIST_REASON_INDEX], r[BOARD_ID_COL_INDEX])
+                for r in client.read_range(BOARD_TAB, body)
+                if len(r) > BOARD_ID_COL_INDEX and str(r[BOARD_ID_COL_INDEX]).strip()
+            ]
+        elif found[: len(BOARD_QUEUE_COLHEADER_LEGACY)] == BOARD_QUEUE_COLHEADER_LEGACY:
+            # the layout before the Pool gutter: Player..reason in A:D, the Id one column further left
+            legacy_id = BOARD_ID_COL_INDEX - 1
+            existing_queue = [
+                (r[0], r[1], r[2], r[3], r[legacy_id])
+                for r in client.read_range(
+                    BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:{column_letter(legacy_id)}{BOARD_QUEUE_LAST_ROW}"
+                )
+                if len(r) > legacy_id and str(r[legacy_id]).strip()
+            ]
         portfolio = client.read_range(BOARD_TAB, f"A{BOARD_PORTFOLIO_ROW}")
         kept_text = portfolio[0][0] if portfolio and portfolio[0] else ""
         # only a line the sync wrote: an older Board layout has something else on this row
         existing_portfolio = kept_text if str(kept_text).startswith(BOARD_PORTFOLIO_PREFIX) else ""
-    added_range = pc.added_names_range(client, player_pool_tab)
 
     name = _rng(edge_tab, "Name")
     pos = _rng(edge_tab, "Position")
@@ -579,7 +611,7 @@ def build_board(
         # PROMPT_BOARD_FIXES.md item 5: WR2/WR3 (TmRank 2/3) and RB1 (RB,
         # TmRank 1) join WR1/TE1 -- RB1 is display only, no guardrail (Part
         # 7.4's "no QB+RB stack rule" still stands).
-        team_cell = f"$A{row}"
+        team_cell = f"${BOARD_STACK_COL['Team']}{row}"
 
         def _slot_filter(position: str, tm_rank: int) -> str:
             return f'({team}={team_cell})*({pos}="{position}")*({tmrank}={tm_rank})'
@@ -687,10 +719,11 @@ def build_board(
         return f"(COUNTIF({_pp('Team', wr_block)},{team_cell})+COUNTIF({_pp('Team', te_block)},{team_cell}))"
 
     def _stack_pool_row(row: int) -> list[str]:
-        guard = f'OR($A{row}="",$B{row}="")'
+        qb, team, opp = (f"${BOARD_STACKS_COL[name]}{row}" for name in ("QB", "Team", "Opp"))
+        guard = f'OR({qb}="",{team}="")'
         return [
-            f'=IF({guard},"",{_catchers_on(f"$B{row}")})',
-            f'=IF({guard},"",IF({_catchers_on(f"$C{row}")}>0,"Yes ("&{_catchers_on(f"$C{row}")}&")","No"))',
+            f'=IF({guard},"",{_catchers_on(team)})',
+            f'=IF({guard},"",IF({_catchers_on(opp)}>0,"Yes ("&{_catchers_on(opp)}&")","No"))',
         ]
 
     # ---- Assemble ---------------------------------------------------------
@@ -705,10 +738,10 @@ def build_board(
             r[start_col + i] = v
 
     _set(BOARD_TITLE_ROW, ["THIS WEEK'S BOARD"])
-    # The values sit in B, D, H, J; D and J are text that overflow right across the empty cells after them
-    # (the old layout put "Max wind" in column E and cut "DET / ARI  54.5" off).
-    _set(BOARD_BANNER_ROW, ["Games", games, "Highest total", top_total], start_col=0)
-    _set(BOARD_BANNER_ROW, ["Max wind", max_wind, "Injuries", injuries], start_col=6)
+    # The values sit in C, E, I, K (labels in B, D, H, J); E and K are text that overflow right across the
+    # empty cells after them (the old layout put "Max wind" in column E and cut "DET / ARI  54.5" off).
+    _set(BOARD_BANNER_ROW, ["Games", games, "Highest total", top_total], start_col=BANNER_START_COL)
+    _set(BOARD_BANNER_ROW, ["Max wind", max_wind, "Injuries", injuries], start_col=BANNER_START_COL + 6)
     _set(BOARD_FRESHNESS_ROW, [freshness_banner])
 
     _set(BOARD_SLATE_HEADER_ROW, ["SLATE SHAPE  —  where do I want exposure this week"])
@@ -785,13 +818,14 @@ def build_board(
         f"{{{games_home_range},{games_total_range}}},"
         f'{slate_live}),2,FALSE),{BOARD_SLATE_ROWS},1),"")'
     )
-    _set(BOARD_SLATE_FIRST_ROW, [slate_sorted])
+    _set(BOARD_SLATE_FIRST_ROW, [slate_sorted], start_col=BOARD_SLATE_COLHEADER.index("Matchup"))
     _set(BOARD_SLATE_FIRST_ROW, [slate_gameid], start_col=BOARD_SLATE_GAMEID_COL_INDEX)
     _set(BOARD_SLATE_FIRST_ROW, [slate_away], start_col=BOARD_SLATE_AWAY_COL_INDEX)
     _set(BOARD_SLATE_FIRST_ROW, [slate_home], start_col=BOARD_SLATE_HOME_COL_INDEX)
     for i in range(BOARD_SLATE_ROWS):
         r = BOARD_SLATE_FIRST_ROW + i
-        guard = f'IF($A{r}="","",'
+        sc = BOARD_SLATE_COL
+        guard = f'IF(${sc["Matchup"]}{r}="","",'
         away_ref, home_ref = f"${BOARD_SLATE_AWAY_COL}{r}", f"${BOARD_SLATE_HOME_COL}{r}"
         away_implied = f'IFERROR(VLOOKUP({away_ref},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
         home_implied = f'IFERROR(VLOOKUP({home_ref},{gp}!$A:${gps_end_col},{gps_implied_idx},FALSE),"")'
@@ -799,7 +833,8 @@ def build_board(
         # signed home-perspective spread `gps_check.py` needs is rebuilt from
         # them: +|spread| when the home team is the favourite, -|spread| when
         # the away team is, 0 for a pick'em.
-        home_spread = f"IF($C{r}={home_ref},$D{r},IF($C{r}={away_ref},-$D{r},0))"
+        fav, spread_abs, total = f"${sc['Fav']}{r}", f"${sc['Spread']}{r}", f"${sc['Total']}{r}"
+        home_spread = f"IF({fav}={home_ref},{spread_abs},IF({fav}={away_ref},-{spread_abs},0))"
         _set(
             r,
             [
@@ -809,18 +844,16 @@ def build_board(
                 f"={guard}{_team_pair_mean('GameEnv', away_ref, home_ref)})",
                 f"={guard}IFERROR(VLOOKUP(${BOARD_SLATE_GAMEID_COL}{r},{w}!$A:${wind_end_col},"
                 f'{wind_idx},FALSE),""))',
-                f'={guard}IF($B{r}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
+                f'={guard}IF({total}>={SHOOTOUT_TOTAL_THRESHOLD},"Shootout",""))',
                 f'={guard}IFERROR(VLOOKUP({home_ref},{gp}!$A:${gps_end_col},{gps_score_idx},FALSE),""))',
             ],
-            start_col=4,
+            start_col=BOARD_SLATE_COLHEADER.index("Pace"),
         )
         _set(
             r,
             [
                 f"={guard}"
-                + _gps_mismatch_formula(
-                    away_implied, home_implied, total_ref=f"$B{r}", spread_ref=home_spread
-                )
+                + _gps_mismatch_formula(away_implied, home_implied, total_ref=total, spread_ref=home_spread)
                 + ")"
             ],
             start_col=BOARD_SLATE_GPSCHK_COL_INDEX,
@@ -829,38 +862,25 @@ def build_board(
     _set(BOARD_QUEUE_HEADER_ROW, ["QUEUE  —  pooled players whose numbers changed since the last sync"])
     _set(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_COLHEADER)
     _set(BOARD_QUEUE_COLHEADER_ROW, [BOARD_ID_HEADER], start_col=BOARD_ID_COL_INDEX)
-    kept = [r for r in existing_queue if len(r) > BOARD_ID_COL_INDEX and str(r[BOARD_ID_COL_INDEX]).strip()]
-    for i, old in enumerate(kept[:BOARD_QUEUE_ROWS]):
+    kept = existing_queue
+    for i, (old_name, old_pos, old_team, old_reason, old_id) in enumerate(kept[:BOARD_QUEUE_ROWS]):
         row = BOARD_QUEUE_FIRST_ROW + i
-        _set(
-            row,
-            board_list_row(
-                row,
-                old[0],
-                old[1],
-                old[2],
-                old[3],
-                old[BOARD_ID_COL_INDEX],
-                edge_tab=edge_tab,
-                added_range=added_range,
-            ),
-        )
+        _set(row, board_list_row(row, old_name, old_pos, old_team, old_reason, old_id, edge_tab=edge_tab))
     if not kept:
-        _set(BOARD_QUEUE_FIRST_ROW, [BOARD_QUEUE_EMPTY])
+        _set(BOARD_QUEUE_FIRST_ROW, [BOARD_QUEUE_EMPTY], start_col=BOARD_LIST_COLHEADER.index("Player"))
 
-    _set(BOARD_CHECK_HEADER_ROW, ["POOL CHECK  —  pooled players whose numbers went bad (Set: Remove)"])
+    _set(
+        BOARD_CHECK_HEADER_ROW,
+        ["POOL CHECK  —  pooled players whose numbers went bad (clear Pool to remove)"],
+    )
     _set(BOARD_CHECK_COLHEADER_ROW, BOARD_CHECK_COLHEADER)
     _set(BOARD_CHECK_COLHEADER_ROW, [BOARD_ID_HEADER], start_col=BOARD_ID_COL_INDEX)
-    _set(BOARD_CHECK_FIRST_ROW, [check_main])
+    _set(BOARD_CHECK_FIRST_ROW, [check_main], start_col=BOARD_LIST_COLHEADER.index("Player"))
     _set(BOARD_CHECK_FIRST_ROW, [check_ids], start_col=BOARD_ID_COL_INDEX)
-    pool_col_index = BOARD_LIST_COLHEADER.index("Pool")
+    pool_col_index = BOARD_LIST_COLHEADER.index(BOARD_POOL_HEADER)
     for i in range(BOARD_CHECK_ROWS):
         row = BOARD_CHECK_FIRST_ROW + i
-        _set(
-            row,
-            [pc.pool_formula(row, edge_tab, added_range, id_col=BOARD_ID_COL, name_col="A")],
-            start_col=pool_col_index,
-        )
+        _set(row, [pc.pool_formula(row, edge_tab, id_col=BOARD_ID_COL)], start_col=pool_col_index)
 
     _set(BOARD_POOL_HEADER_ROW, ["POOL SUMMARY  —  your pool right now (live, no sync needed)"])
     cash_col, gpp_col = BOARD_POOL_COL["Cash"], BOARD_POOL_COL["GPP"]
@@ -872,14 +892,14 @@ def build_board(
     _set(BOARD_POOL_COLHEADER_ROW, BOARD_POOL_COLHEADER)
     for i, (position, (start, end)) in enumerate(zip(_POSITIONS, PLAYER_POOL_NAME_BLOCKS, strict=True)):
         row = BOARD_POOL_FIRST_ROW + i
-        _set(row, _pool_summary_row(position, start, end))
+        _set(row, _pool_summary_row(position, start, end), start_col=BOARD_POOL_COLHEADER.index("Pos"))
         _set(row, [_bust_cut(position)], start_col=BOARD_BUSTCUT_COL_INDEX)
     _set(BOARD_STACKS_HEADER_ROW, ["YOUR STACKS  —  each pooled QB's pass catchers and bring-back"])
     _set(BOARD_STACKS_COLHEADER_ROW, BOARD_STACKS_COLHEADER)
-    _set(BOARD_STACKS_FIRST_ROW, [stacks_spill])
+    _set(BOARD_STACKS_FIRST_ROW, [stacks_spill], start_col=BOARD_STACKS_COLHEADER.index("QB"))
     for i in range(BOARD_STACKS_ROWS):
         row = BOARD_STACKS_FIRST_ROW + i
-        _set(row, _stack_pool_row(row), start_col=3)
+        _set(row, _stack_pool_row(row), start_col=BOARD_STACKS_COLHEADER.index("Pass catchers"))
 
     # Chalk map: per position, the highest-owned players who are not listed OUT / IR. One spill per position
     # block (sized by BOARD_CHALK_POSITION_ROWS), the DK ids spilled beside it into the hidden Id column.
@@ -888,7 +908,7 @@ def build_board(
     edge_id = _rng(edge_tab, "Id")
     _set(
         BOARD_CHALK_HEADER_ROW,
-        ["CHALK MAP  —  the highest-owned players at each position (Set: Cash / GPP / Remove)"],
+        ["CHALK MAP  —  the highest-owned players at each position (pick Pool)"],
     )
     _set(BOARD_CHALK_COLHEADER_ROW, BOARD_CHALK_COLHEADER)
     _set(BOARD_CHALK_COLHEADER_ROW, [BOARD_ID_HEADER], start_col=BOARD_ID_COL_INDEX)
@@ -908,23 +928,23 @@ def build_board(
             f'=IF({unpublished},"",IF(SUMPRODUCT({cond})=0,"",'
             f"ARRAY_CONSTRAIN(INDEX(SORT(FILTER({{{own},{edge_id}}},{cond}),1,FALSE),0,2),{count},1)))"
         )
-        _set(chalk_row, [main])
+        _set(chalk_row, [main], start_col=BOARD_CHALK_COLHEADER.index("Player"))
         _set(chalk_row, [ids], start_col=BOARD_ID_COL_INDEX)
         for i in range(count):
             row = chalk_row + i
             _set(
                 row,
-                [pc.pool_formula(row, edge_tab, added_range, id_col=BOARD_ID_COL, name_col="A")],
-                start_col=BOARD_CHALK_COLHEADER.index("Pool"),
+                [pc.pool_formula(row, edge_tab, id_col=BOARD_ID_COL)],
+                start_col=BOARD_CHALK_COLHEADER.index(BOARD_POOL_HEADER),
             )
         chalk_row += count
 
     _set(BOARD_STACK_HEADER_ROW, ["STACK CANDIDATES  —  QB + top pass-catchers, highest-total games first"])
     _set(BOARD_STACK_COLHEADER_ROW, BOARD_STACK_COLHEADER)
-    _set(BOARD_STACK_FIRST_ROW, [team_list])
+    _set(BOARD_STACK_FIRST_ROW, [team_list], start_col=BOARD_STACK_COLHEADER.index("Team"))
     for i in range(BOARD_STACK_ROWS):
         r = BOARD_STACK_FIRST_ROW + i
-        _set(r, _stack_row_formulas(r), start_col=2)
+        _set(r, _stack_row_formulas(r), start_col=BOARD_STACK_COLHEADER.index("QB"))
 
     client.write_tab(BOARD_TAB, rows)
     return f"{BOARD_TAB}: built (Slate shape, Queue, Pool check, Pool summary, Chalk map, Stack candidates)"
@@ -934,9 +954,7 @@ def _text_cell(text: str) -> str:
     return "'" + text if text.startswith(("=", "+", "-", "@")) else text
 
 
-def queue_body(
-    changes: pd.DataFrame, pooled_ids: set[str], *, edge_tab: str, added_range: str | None
-) -> list[list]:
+def queue_body(changes: pd.DataFrame, pooled_ids: set[str], *, edge_tab: str) -> list[list]:
     """The Queue's rows, `A` through the hidden Id column, for the pooled players in `changes` (at most
     `BOARD_QUEUE_ROWS`; the last row says how many more there were). One line saying nothing changed when
     none.
@@ -962,11 +980,12 @@ def queue_body(
                 reason,
                 r["Id"],
                 edge_tab=edge_tab,
-                added_range=added_range,
             )
         )
     if not body:
-        body = [[BOARD_QUEUE_EMPTY, *[""] * (width - 1)]]
+        empty = [""] * width
+        empty[BOARD_LIST_COLHEADER.index("Player")] = BOARD_QUEUE_EMPTY
+        body = [empty]
     while len(body) < BOARD_QUEUE_ROWS:
         body.append([""] * width)
     return body
@@ -985,7 +1004,7 @@ def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: s
     """Populates Board's Queue body from `live_diff.diff_queue_changes`' output, filtered to the players
     currently ticked into the pool. Called from `dfs sync --live`/`dfs go` right after the diff is computed
     -- NOT from `build_board`, since a Sheets formula can't see yesterday's values, only this Python diff
-    can. Every row is a player row (name, reason, a live `Pool` cell, a `Set` dropdown, a hidden `Id`); the
+    can. Every row is a player row (name, reason, a live `Pool` dropdown, a hidden `Id`); the
     rows it did not use are hidden, so "nothing changed" is one line instead of twenty empty rows.
 
     The pool tick lives only on the live sheet, never in the local diff (`sources/edge.py`'s `fetch()` never
@@ -1010,7 +1029,7 @@ def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: s
         for i in range(len(ids))
         if ids[i] and ids[i][0] != "" and i < len(ticks) and ticks[i] and ticks[i][0]
     }
-    body = queue_body(changes, pooled_ids, edge_tab=edge_tab, added_range=pc.added_names_range(client))
+    body = queue_body(changes, pooled_ids, edge_tab=edge_tab)
     client.update_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}", body)
     used = used_queue_rows(body)
     apply_queue_visibility(client, used)
@@ -1026,9 +1045,12 @@ def apply_queue_visibility(client: SheetsClient, used: int) -> None:
         client.hide_rows(BOARD_TAB, first_hidden, BOARD_QUEUE_LAST_ROW)
 
 
-def board_portfolio_text(portfolio: dict[str, float] | None, lineups: int, gpp_target: float) -> str:
+def board_portfolio_text(
+    portfolio: dict[str, float] | None, lineups: int, gpp_target: float, cash_basis: str | None = None
+) -> str:
     """The Pool summary's portfolio line from the Lineups simulator's summary: lineups built, expected cashes,
-    P(at least one cash) and P(at least one lineup at the GPP target); the placeholder when none are built."""
+    P(at least one cash) and P(at least one lineup at the GPP target), then the cash line's basis ("cash line
+    141.3 (season median, 4 weeks)"); the placeholder when none are built."""
     if not portfolio or lineups <= 0:
         return BOARD_PORTFOLIO_PLACEHOLDER
     return (
@@ -1036,16 +1058,21 @@ def board_portfolio_text(portfolio: dict[str, float] | None, lineups: int, gpp_t
         f"{portfolio['expected_cashes']:.1f} expected cashes  ·  "
         f"P(at least one cash) {portfolio['p_any_cash']:.0%}  ·  "
         f"P(at least one {gpp_target:g}+) {portfolio['p_any_gpp']:.0%}"
+        + (f"  ·  {cash_basis}" if cash_basis else "")
     )
 
 
 def write_board_portfolio(
-    client: SheetsClient, portfolio: dict[str, float] | None, lineups: int, gpp_target: float
+    client: SheetsClient,
+    portfolio: dict[str, float] | None,
+    lineups: int,
+    gpp_target: float,
+    cash_basis: str | None = None,
 ) -> str:
     """Write the portfolio line on the Board (the same numbers as the Lineups simulator's portfolio line)."""
     if not client.tab_exists(BOARD_TAB):
         return f"{BOARD_TAB}: not present -- portfolio skipped"
-    text = board_portfolio_text(portfolio, lineups, gpp_target)
+    text = board_portfolio_text(portfolio, lineups, gpp_target, cash_basis)
     client.update_range(BOARD_TAB, f"A{BOARD_PORTFOLIO_ROW}", [[text]])
     return f"{BOARD_TAB}: portfolio line written"
 

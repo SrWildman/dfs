@@ -302,5 +302,7 @@ MORE_LABELS = {
     "dfs setup remove-retired-tabs": "Remove retired tabs",
     "dfs setup remove-sos-placeholders": "Remove the SoS placeholder tabs",
     "dfs setup remove-lineup-metrics": "Remove the retired Lineups metric columns",
+    "dfs odds snapshot": "Save the current betting lines (no sheet)",
+    "dfs odds schedule": "Save the lines every Monday and Tuesday morning (macOS job)",
     "dfs setup remove-model-implied": "Remove the retired model-implied column",
 }

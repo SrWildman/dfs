@@ -7,16 +7,22 @@
 // What it does:
 //   1. Lineup Tools > Clear Lineup Names: clears the player names of the Lineups tab (always that tab,
 //      never the active one), only the 9 player rows of each block, after a confirm dialog.
-//   2. onEdit: the `Set` dropdown on the Edge Finder and Board tabs. Pick Cash, GPP, Both or Remove and
-//      the player's pool cell on EdgeRaw is written; the Set cell then clears itself.
-//   3. onOpen: the menu, plus a version stamp in the hidden named range DFS_SCRIPT_VERSION so `dfs
+//   2. onEdit, the `Pool` dropdown: every player row on the Edge Finder, Board and Player Pool tabs has a
+//      `Pool` cell left of his name. The cell holds a formula that shows his state on EdgeRaw (blank, Cash,
+//      GPP or Both); picking a value overwrites that formula, so this script writes the value to EdgeRaw's
+//      `Pool` cell (found by the row's hidden `Id`, never by name) and puts the formula back. Clearing the
+//      cell (Delete) removes him from the pool. Every other `Pool` cell follows by itself, because each is
+//      the same formula.
+//   3. onEdit, Player Pool's "Add a player" box: pick a name, and he is added to the pool as the type
+//      beside the box (default Both); the box then clears.
+//   4. onOpen: the menu, plus a version stamp in the hidden named range DFS_SCRIPT_VERSION so `dfs
 //      doctor` can tell whether this script is pasted and current.
 //
 // Everything is found by header text or label, never by a fixed row or column. The pure helper
 // functions at the bottom are unit-tested with node (tests/test_apps_script.py).
 
 // Bump this whenever this file changes: `dfs doctor` warns when the sheet's stamp is older.
-var DFS_SCRIPT_VERSION = 1;
+var DFS_SCRIPT_VERSION = 2;
 
 var VERSION_RANGE_NAME = 'DFS_SCRIPT_VERSION';
 var VERSION_TAB = 'NameAlias'; // a hidden tab nothing rewrites
@@ -25,19 +31,20 @@ var VERSION_CELL = 'H1';
 var LINEUPS_TAB = 'Lineups';
 var EDGE_RAW_TAB = 'EdgeRaw';
 var PLAYER_POOL_TAB = 'Player Pool';
-var SET_TABS = ['Edge Finder', 'Board'];
+var POOL_TABS = ['Edge Finder', 'Board', 'Player Pool'];
 
 var NAME_HEADER = 'Name';
 var TOTAL_LABEL = 'Total';
 var PLAYERS_PER_BLOCK = 9;
 var LABEL_SEARCH_COLUMNS = 8; // the Total label sits in one of the first columns of its row
 
-var SET_HEADER = 'Set';
 var ID_HEADER = 'Id';
 var POOL_HEADER = 'Pool';
-var ADDED_HEADER = 'Added';
-var SET_VALUES = ['Cash', 'GPP', 'Both', 'Remove'];
-var HEADER_SEARCH_ROWS = 10; // Player Pool's header is within the first rows
+var POOL_VALUES = ['Cash', 'GPP', 'Both'];
+var ADD_LABEL = 'Add a player'; // the label cell of Player Pool's control row
+var ADD_DEFAULT_TYPE = 'Both';
+var HEADER_SEARCH_ROWS = 10; // Player Pool's header is within the first rows under the control row
+var MAX_POOL_EDIT_ROWS = 100; // a bigger paste or delete is ignored rather than half-applied
 
 
 // ---------------------------------------------------------------------------------------------
@@ -106,94 +113,156 @@ function clearLineupNames() {
 
 
 // ---------------------------------------------------------------------------------------------
-// The Set dropdown
+// The Pool dropdown and the add-a-player box
 // ---------------------------------------------------------------------------------------------
 
 function onEdit(e) {
   try {
-    handleSetEdit_(e);
+    if (!e || !e.range) return;
+    var sheet = e.range.getSheet();
+    if (POOL_TABS.indexOf(sheet.getName()) === -1) return;
+    if (sheet.getName() === PLAYER_POOL_TAB && handleAddPlayer_(e.range)) return;
+    handlePoolEdit_(e.range);
   } catch (err) {
-    SpreadsheetApp.getActiveSpreadsheet().toast('Set failed: ' + err.message, 'DFS', 8);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Pool change failed: ' + err.message, 'DFS', 8);
   }
 }
 
-function handleSetEdit_(e) {
-  if (!e || !e.range) return;
-  var range = e.range;
-  if (range.getNumRows() !== 1 || range.getNumColumns() !== 1) return;
+/** True when the cell carries the Pool dropdown (a list of exactly POOL_VALUES). */
+function isPoolControl_(validation) {
+  if (!validation || validation.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+    return false;
+  }
+  return sameList(validation.getCriteriaValues()[0], POOL_VALUES);
+}
+
+function handlePoolEdit_(range) {
+  if (range.getNumColumns() !== 1 || range.getNumRows() > MAX_POOL_EDIT_ROWS) return;
+  var validations = range.getDataValidations();
+  if (!validations.some(function (v) { return isPoolControl_(v[0]); })) return; // not a Pool control
+
   var sheet = range.getSheet();
-  if (SET_TABS.indexOf(sheet.getName()) === -1) return;
-
-  var action = normalizeSetValue(range.getValue());
-  if (action === null) return; // not one of our values (or a clear): leave the cell alone
-  var row = range.getRow();
   var col = range.getColumn();
+  var first = range.getRow();
+  var values = range.getValues();
+  var colValues = sheet.getRange(1, col, range.getLastRow(), 1).getValues().map(function (r) { return r[0]; });
+  var edge = openEdge_(sheet.getParent());
+  if (edge === null) return;
+  var headerCache = {};
 
-  var colValues = sheet.getRange(1, col, row, 1).getValues().map(function (r) { return r[0]; });
-  var headerRow = headerRowAbove(colValues, row, SET_HEADER);
-  if (headerRow === -1) return; // an edit in a column that is not a Set column
-  var headerValues = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var idCol = findColumn(headerValues, ID_HEADER);
-  if (idCol === -1) {
-    toast_('No Id column under this Set column, nothing changed.');
-    return;
-  }
-  var id = sheet.getRange(row, idCol).getValue();
-  if (String(id).trim() === '') {
-    toast_('That row has no player, nothing changed.');
-    range.clearContent();
-    return;
-  }
+  for (var i = 0; i < values.length; i++) {
+    if (!isPoolControl_(validations[i][0])) continue;
+    var row = first + i;
+    var headerRow = headerRowAbove(colValues, row, POOL_HEADER);
+    var cell = sheet.getRange(row, col);
+    if (headerRow === -1) continue; // e.g. the add-a-player type cell above Player Pool's header
+    if (!headerCache[headerRow]) {
+      headerCache[headerRow] = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+    }
+    var idCol = findColumn(headerCache[headerRow], ID_HEADER);
+    if (idCol === -1) { toast_('No Id column under this Pool column, nothing changed.'); continue; }
 
-  var ss = sheet.getParent();
-  var edge = ss.getSheetByName(EDGE_RAW_TAB);
-  if (!edge) {
-    toast_('There is no ' + EDGE_RAW_TAB + ' tab.');
-    return;
+    var action = normalizePoolValue(values[i][0]);
+    var id = String(sheet.getRange(row, idCol).getValue()).trim();
+    // Whatever happens next, the cell gets its formula back: it never keeps a typed value.
+    var formula = poolFormula(row, columnLetter(idCol), EDGE_RAW_TAB, columnLetter(edge.poolCol),
+      columnLetter(edge.idCol));
+    if (id === '') {
+      cell.setFormula(formula);
+      toast_('That row has no player, nothing changed.');
+      continue;
+    }
+    if (action.kind === 'invalid') {
+      cell.setFormula(formula);
+      toast_('"' + values[i][0] + '" is not Cash, GPP or Both, nothing changed.');
+      continue;
+    }
+    var edgeRow = findEdgeRow_(edge, id);
+    if (edgeRow === -1) {
+      cell.setFormula(formula);
+      toast_('Could not find that player on ' + EDGE_RAW_TAB + ', nothing changed.');
+      continue;
+    }
+    var poolCell = edge.sheet.getRange(edgeRow, edge.poolCol);
+    if (action.kind === 'remove') poolCell.clearContent(); else poolCell.setValue(action.value);
+    cell.setFormula(formula);
+    var name = edge.nameCol === -1 ? id : edge.sheet.getRange(edgeRow, edge.nameCol).getValue();
+    toast_(action.kind === 'remove' ? 'Removed ' + name : name + ': ' + action.value);
   }
-  var edgeHeader = edge.getRange(1, 1, 1, edge.getLastColumn()).getValues()[0];
-  var edgeIdCol = findColumn(edgeHeader, ID_HEADER);
-  var poolCol = findColumn(edgeHeader, POOL_HEADER);
-  var nameCol = findColumn(edgeHeader, NAME_HEADER);
-  if (edgeIdCol === -1 || poolCol === -1) {
-    toast_(EDGE_RAW_TAB + ' has no ' + ID_HEADER + ' / ' + POOL_HEADER + ' header.');
-    return;
-  }
-  var edgeLast = edge.getLastRow();
-  var hit = edge.getRange(2, edgeIdCol, Math.max(edgeLast - 1, 1), 1)
-    .createTextFinder(String(id)).matchEntireCell(true).findNext();
-  if (!hit) {
-    toast_('Player ' + id + ' is not on ' + EDGE_RAW_TAB + ' this week.');
-    return;
-  }
-  var edgeRow = hit.getRow();
-  var poolCell = edge.getRange(edgeRow, poolCol);
-  var pool = poolValueFor(action);
-  if (pool === '') poolCell.clearContent(); else poolCell.setValue(pool);
-
-  if (action === 'Remove' && nameCol !== -1) {
-    removeFromAddedList_(ss, String(edge.getRange(edgeRow, nameCol).getValue()));
-  }
-  range.clearContent();
-  toast_((action === 'Remove' ? 'Removed ' : 'Set ' + action + ': ') +
-    edge.getRange(edgeRow, nameCol === -1 ? 1 : nameCol).getValue());
 }
 
-/** Blank the player's entry in Player Pool's hidden `Added` list, if he has one. */
-function removeFromAddedList_(ss, name) {
-  var pool = ss.getSheetByName(PLAYER_POOL_TAB);
-  if (!pool || name === '') return;
-  var rows = Math.min(HEADER_SEARCH_ROWS, pool.getLastRow());
-  var top = pool.getRange(1, 1, rows, pool.getLastColumn()).getValues();
-  for (var r = 0; r < top.length; r++) {
-    var c = findColumn(top[r], ADDED_HEADER);
-    if (c === -1) continue;
-    var below = pool.getRange(r + 2, c, Math.max(pool.getLastRow() - (r + 1), 1), 1);
-    var values = below.getValues().map(function (v) { return v[0]; });
-    var indices = indicesOfName(values, name);
-    indices.forEach(function (i) { pool.getRange(r + 2 + i, c).clearContent(); });
-    return;
+/** EdgeRaw's sheet and the columns the script needs, found by header text; null (with a toast) if absent. */
+function openEdge_(ss) {
+  var sheet = ss.getSheetByName(EDGE_RAW_TAB);
+  if (!sheet) { toast_('There is no ' + EDGE_RAW_TAB + ' tab.'); return null; }
+  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var edge = {
+    sheet: sheet,
+    idCol: findColumn(header, ID_HEADER),
+    poolCol: findColumn(header, POOL_HEADER),
+    nameCol: findColumn(header, NAME_HEADER)
+  };
+  if (edge.idCol === -1 || edge.poolCol === -1) {
+    toast_(EDGE_RAW_TAB + ' has no ' + ID_HEADER + ' / ' + POOL_HEADER + ' header.');
+    return null;
   }
+  return edge;
+}
+
+/** The 1-based EdgeRaw row of a DraftKings id, or -1. */
+function findEdgeRow_(edge, id) {
+  var last = edge.sheet.getLastRow();
+  if (last < 2) return -1;
+  var hit = edge.sheet.getRange(2, edge.idCol, last - 1, 1)
+    .createTextFinder(String(id)).matchEntireCell(true).findNext();
+  return hit ? hit.getRow() : -1;
+}
+
+/**
+ * Player Pool's "Add a player" box. The control row reads, left to right: a type dropdown in the Pool column,
+ * the label, the input box. A helper in the hidden Id column of the same row holds what the box's text
+ * resolves to (the sheet's own name resolver). When the edited cell is the input, add the player to
+ * EdgeRaw's Pool as the type and clear the box. Returns true when the edit was in the box, handled or not.
+ */
+function handleAddPlayer_(range) {
+  var sheet = range.getSheet();
+  if (range.getRow() !== 1) return false;
+  var top = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var label = findColumn(top, ADD_LABEL);
+  if (label === -1 || range.getColumn() !== label + 1) return false;
+  var typed = String(range.getValue()).trim();
+  if (typed === '') return true;
+  SpreadsheetApp.flush(); // let the resolved-name formula settle
+  var resolved = '';
+  var idCol = findIdColumnBelow_(sheet);
+  if (idCol !== -1) resolved = sheet.getRange(1, idCol).getValue();
+  var name = chooseAddName(typed, resolved);
+  var type = normalizeAddType(label > 1 ? sheet.getRange(1, label - 1).getValue() : '');
+  var edge = openEdge_(sheet.getParent());
+  if (edge === null || edge.nameCol === -1) return true;
+  var last = edge.sheet.getLastRow();
+  var hit = last < 2 ? null : edge.sheet.getRange(2, edge.nameCol, last - 1, 1)
+    .createTextFinder(name).matchEntireCell(true).findNext();
+  if (!hit) {
+    toast_('Could not find "' + typed + '" on ' + EDGE_RAW_TAB + ', nothing added.');
+    return true;
+  }
+  edge.sheet.getRange(hit.getRow(), edge.poolCol).setValue(type);
+  range.clearContent();
+  toast_('Added ' + name + ' (' + type + ').');
+  return true;
+}
+
+/** The column whose header (in the rows just under the control row) reads Id, or -1. */
+function findIdColumnBelow_(sheet) {
+  var rows = Math.min(HEADER_SEARCH_ROWS, sheet.getLastRow() - 1);
+  if (rows < 1) return -1;
+  var below = sheet.getRange(2, 1, rows, sheet.getLastColumn()).getValues();
+  for (var r = 0; r < below.length; r++) {
+    var c = findColumn(below[r], ID_HEADER);
+    if (c !== -1) return c;
+  }
+  return -1;
 }
 
 function toast_(message) {
@@ -242,18 +311,60 @@ function rowHasLabel(row, label) {
   return false;
 }
 
-/** The value as one of SET_VALUES (any case, trimmed), or null. */
-function normalizeSetValue(value) {
-  var text = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
-  for (var i = 0; i < SET_VALUES.length; i++) {
-    if (SET_VALUES[i].toLowerCase() === text) return SET_VALUES[i];
+/**
+ * What an edit of a Pool cell means: {kind:'set', value:'Cash'|'GPP'|'Both'} for a pool value (any case,
+ * trimmed), {kind:'remove'} for a cleared cell, {kind:'invalid'} for anything else.
+ */
+function normalizePoolValue(value) {
+  var text = String(value === null || value === undefined ? '' : value).trim();
+  if (text === '') return { kind: 'remove' };
+  for (var i = 0; i < POOL_VALUES.length; i++) {
+    if (POOL_VALUES[i].toLowerCase() === text.toLowerCase()) return { kind: 'set', value: POOL_VALUES[i] };
   }
-  return null;
+  return { kind: 'invalid' };
 }
 
-/** What goes in EdgeRaw's Pool cell for an action: the value itself, or '' (blank) for Remove. */
-function poolValueFor(action) {
-  return action === 'Remove' ? '' : action;
+/** The type beside the add-a-player box: a pool value, else the default. */
+function normalizeAddType(value) {
+  var action = normalizePoolValue(value);
+  return action.kind === 'set' ? action.value : ADD_DEFAULT_TYPE;
+}
+
+/** The name to look up for an added player: the resolved name when the sheet has one, else what was typed. */
+function chooseAddName(typed, resolved) {
+  var r = String(resolved === null || resolved === undefined ? '' : resolved).trim();
+  return r !== '' ? r : String(typed).trim();
+}
+
+/**
+ * The formula for a Pool cell: the player's EdgeRaw Pool value found by the Id in this row, blank when the
+ * row has no Id or EdgeRaw does not have him. `tests/test_apps_script.py` pins this text against the one
+ * `sheet_pool_cells.pool_formula` writes from Python.
+ */
+function poolFormula(row, idLetter, edgeTab, edgePoolLetter, edgeIdLetter) {
+  var id = '$' + idLetter + row;
+  return '=IF(' + id + '="","",IFERROR(INDEX(' + edgeTab + '!$' + edgePoolLetter + ':$' + edgePoolLetter +
+    ',MATCH(' + id + ',' + edgeTab + '!$' + edgeIdLetter + ':$' + edgeIdLetter + ',0)),""))';
+}
+
+/** 1-based column number to its A1 letters (1 -> A, 27 -> AA). */
+function columnLetter(n) {
+  var out = '';
+  while (n > 0) {
+    var rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+/** True when two lists hold the same strings in the same order. */
+function sameList(a, b) {
+  if (!a || a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (String(a[i]) !== String(b[i])) return false;
+  }
+  return true;
 }
 
 /**
@@ -275,26 +386,19 @@ function findColumn(headerValues, text) {
   return -1;
 }
 
-/** 0-based indices of the cells equal to `name` (trimmed). */
-function indicesOfName(values, name) {
-  var out = [];
-  var want = String(name).trim();
-  for (var i = 0; i < values.length; i++) {
-    if (String(values[i]).trim() === want && want !== '') out.push(i);
-  }
-  return out;
-}
-
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     planLineupClear: planLineupClear,
-    normalizeSetValue: normalizeSetValue,
-    poolValueFor: poolValueFor,
+    normalizePoolValue: normalizePoolValue,
+    normalizeAddType: normalizeAddType,
+    chooseAddName: chooseAddName,
+    poolFormula: poolFormula,
+    columnLetter: columnLetter,
+    sameList: sameList,
     headerRowAbove: headerRowAbove,
     findColumn: findColumn,
-    indicesOfName: indicesOfName,
     rowHasLabel: rowHasLabel,
     DFS_SCRIPT_VERSION: DFS_SCRIPT_VERSION,
-    SET_VALUES: SET_VALUES
+    POOL_VALUES: POOL_VALUES
   };
 }

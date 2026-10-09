@@ -1,7 +1,7 @@
 import pytest
 
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
-from dfs.sheet_names import resolve_name_expr
+from dfs.sheet_pool_cells import pool_formula
 from dfs.sheet_pool_formulas import (
     _TAG_RANK_ARRAY,
     _UNKNOWN_TAG_RANK,
@@ -11,20 +11,14 @@ from dfs.sheet_pool_formulas import (
 )
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_COLUMN
-from dfs.weekly_reset import (
-    PLAYER_POOL_ADDED_NAMES_ROWS,
-    PLAYER_POOL_CONTROL_ROW,
-    PLAYER_POOL_HEADER_ROW,
-)
+from dfs.weekly_reset import PLAYER_POOL_HEADER_ROW
 
 OVERFLOW_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Overflow"))
 POOL_TYPE_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Pool"))
-ADDED_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Added"))
+NAME_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Name"))
+POS_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Pos."))
+ID_COL = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Id"))
 _HEADER_A1 = f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
-_CONTROL_CELL = f"$B${PLAYER_POOL_CONTROL_ROW}"
-_ADDED_FIRST_ROW = PLAYER_POOL_HEADER_ROW + 1
-_ADDED_LAST_ROW = PLAYER_POOL_HEADER_ROW + PLAYER_POOL_ADDED_NAMES_ROWS
-_ADDED_RANGE = f"${ADDED_COL}${_ADDED_FIRST_ROW}:${ADDED_COL}${_ADDED_LAST_ROW}"
 
 
 class SpySheetsClient:
@@ -52,7 +46,17 @@ class SpySheetsClient:
 
 
 _BLOCKS = [(2, 11), (13, 29), (31, 55), (57, 65), (67, 74)]
-_POSITIONS = {"B2": "QB", "B13": "RB", "B31": "WR", "B57": "TE", "B67": "DST"}
+_POSITIONS = {
+    f"{POS_COL}2": "QB",
+    f"{POS_COL}13": "RB",
+    f"{POS_COL}31": "WR",
+    f"{POS_COL}57": "TE",
+    f"{POS_COL}67": "DST",
+}
+
+
+def test_pool_sits_left_of_name_so_name_is_no_longer_column_a():
+    assert (POOL_TYPE_COL, NAME_COL, POS_COL) == ("A", "B", "C")
 
 
 def test_writes_a_name_formula_and_overflow_formula_per_block_only():
@@ -60,26 +64,14 @@ def test_writes_a_name_formula_and_overflow_formula_per_block_only():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     ranges_written = {a1 for _, a1, _ in client.update_calls}
-    assert ranges_written == {
-        f"{OVERFLOW_COL}{PLAYER_POOL_HEADER_ROW}",
-        f"{POOL_TYPE_COL}{PLAYER_POOL_HEADER_ROW}",
-        f"{ADDED_COL}{PLAYER_POOL_HEADER_ROW}",
-        "A2",
-        f"{OVERFLOW_COL}2",
-        f"{POOL_TYPE_COL}2:{POOL_TYPE_COL}11",
-        "A13",
-        f"{OVERFLOW_COL}13",
-        f"{POOL_TYPE_COL}13:{POOL_TYPE_COL}29",
-        "A31",
-        f"{OVERFLOW_COL}31",
-        f"{POOL_TYPE_COL}31:{POOL_TYPE_COL}55",
-        "A57",
-        f"{OVERFLOW_COL}57",
-        f"{POOL_TYPE_COL}57:{POOL_TYPE_COL}65",
-        "A67",
-        f"{OVERFLOW_COL}67",
-        f"{POOL_TYPE_COL}67:{POOL_TYPE_COL}74",
-    }
+    expected = {f"{OVERFLOW_COL}{PLAYER_POOL_HEADER_ROW}", f"{POOL_TYPE_COL}{PLAYER_POOL_HEADER_ROW}"}
+    for start, end in _BLOCKS:
+        expected |= {
+            f"{NAME_COL}{start}",
+            f"{OVERFLOW_COL}{start}",
+            f"{POOL_TYPE_COL}{start}:{POOL_TYPE_COL}{end}",
+        }
+    assert ranges_written == expected  # no Added header any more
 
 
 def test_raises_when_overflow_or_pool_column_is_missing():
@@ -98,12 +90,12 @@ def test_name_formula_uses_the_position_actually_read_from_the_sheet():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert 'EdgeRaw!$C$2:$C="QB"' in formulas["A2"]
-    assert 'EdgeRaw!$C$2:$C="RB"' in formulas["A13"]
-    assert 'EdgeRaw!$C$2:$C="WR"' in formulas["A31"]
-    assert 'EdgeRaw!$C$2:$C="TE"' in formulas["A57"]
-    assert 'EdgeRaw!$C$2:$C="DST"' in formulas["A67"]
-    assert f'EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}<>""' in formulas["A2"]
+    assert 'EdgeRaw!$C$2:$C="QB"' in formulas[f"{NAME_COL}2"]
+    assert 'EdgeRaw!$C$2:$C="RB"' in formulas[f"{NAME_COL}13"]
+    assert 'EdgeRaw!$C$2:$C="WR"' in formulas[f"{NAME_COL}31"]
+    assert 'EdgeRaw!$C$2:$C="TE"' in formulas[f"{NAME_COL}57"]
+    assert 'EdgeRaw!$C$2:$C="DST"' in formulas[f"{NAME_COL}67"]
+    assert f'EdgeRaw!${POOL_COLUMN}$2:${POOL_COLUMN}<>""' in formulas[f"{NAME_COL}2"]
 
 
 def test_name_formula_caps_at_the_blocks_own_row_count():
@@ -111,25 +103,11 @@ def test_name_formula_caps_at_the_blocks_own_row_count():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert ",10,1)" in formulas["A2"]  # QB: 11-2+1 = 10
-    assert ",17,1)" in formulas["A13"]  # RB: 29-13+1 = 17
-    assert ",25,1)" in formulas["A31"]  # WR: 55-31+1 = 25
-    assert ",9,1)" in formulas["A57"]  # TE: 65-57+1 = 9
-    assert ",8,1)" in formulas["A67"]  # DST: 74-67+1 = 8
-
-
-_CONTROL_NAMES = (
-    f'FILTER({_CONTROL_CELL}:{_CONTROL_CELL},{_CONTROL_CELL}<>"",'
-    f'IFERROR(VLOOKUP({_CONTROL_CELL},EdgeRaw!$B:$C,2,FALSE),"")="QB")'
-)
-
-
-def _added_filter_for_qb() -> str:
-    position_lookup = f'IFERROR(VLOOKUP({_ADDED_RANGE},EdgeRaw!$B:$C,2,FALSE),"")'
-    salary_lookup = f"IFERROR(VLOOKUP({_ADDED_RANGE},EdgeRaw!$B:$F,5,FALSE),0)"
-    pool_tag_lookup = f'IFERROR(VLOOKUP({_ADDED_RANGE},{{EdgeRaw!$B:$B,EdgeRaw!$A:$A}},2,FALSE),"")'
-    tag_rank = f"IFERROR(MATCH({pool_tag_lookup},{_TAG_RANK_ARRAY},0),{_UNKNOWN_TAG_RANK})"
-    return f'FILTER({{{_ADDED_RANGE},{salary_lookup},{tag_rank}}},{_ADDED_RANGE}<>"",{position_lookup}="QB")'
+    assert ",10,1)" in formulas[f"{NAME_COL}2"]  # QB: 11-2+1 = 10
+    assert ",17,1)" in formulas[f"{NAME_COL}13"]  # RB: 29-13+1 = 17
+    assert ",25,1)" in formulas[f"{NAME_COL}31"]  # WR: 55-31+1 = 25
+    assert ",9,1)" in formulas[f"{NAME_COL}57"]  # TE: 65-57+1 = 9
+    assert ",8,1)" in formulas[f"{NAME_COL}67"]  # DST: 74-67+1 = 8
 
 
 def test_overflow_formula_thresholds_on_the_same_cap():
@@ -144,7 +122,7 @@ def test_overflow_formula_thresholds_on_the_same_cap():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    union = _union_array("EdgeRaw", "QB", _ADDED_RANGE)
+    union = _union_array("EdgeRaw", "QB")
     count = f'IFERROR(SUMPRODUCT((INDEX(UNIQUE({union}),0,1)<>"")*1),0)'
     # PROMPT_BOARD_FIXES.md item 8 (2026-09-25): the threshold is now
     # ROWS() of the SAME grouped-with-separators array `_name_formula`
@@ -182,47 +160,23 @@ def test_overflow_formula_fires_when_separators_alone_push_past_the_cap():
     assert "IF(ROWS(LET(" in overflow_formula
 
 
-def test_name_formula_includes_the_accumulated_add_a_player_list():
-    # A6: the third union source -- see _added_filter_for_qb above.
+def test_name_formula_reads_edgeraw_pool_ticks_alone_no_box_and_no_added_list():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
-    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    assert _added_filter_for_qb() in formulas["A2"]
-
-
-def test_name_formula_unions_edgeraw_ticks_with_the_control_cell():
-    client = SpySheetsClient(_POSITIONS)
-    write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
-
-    formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    name_formula = formulas["A2"]
-    assert "UNIQUE({" in name_formula
+    name_formula = {a1: rows[0][0] for _, a1, rows in client.update_calls}[f"{NAME_COL}2"]
+    assert "UNIQUE(IFERROR(FILTER({" in name_formula
     assert "FILTER({EdgeRaw!$B$2:$B,EdgeRaw!$F$2:$F,MATCH(" in name_formula
-    # Round 5 item 6: the control cell's typed name is resolved to DK's spelling first.
-    assert f'FILTER({{{resolve_name_expr(_CONTROL_CELL, "EdgeRaw")}}},{_CONTROL_CELL}<>"",' in name_formula
-    assert (
-        f'VLOOKUP({resolve_name_expr(_CONTROL_CELL, "EdgeRaw")},EdgeRaw!$B:$C,2,FALSE),"")="QB"'
-        in name_formula
-    )
-    assert "VLOOKUP(" in name_formula  # the control cell's half looks Salary up against EdgeRaw
+    assert "$B$1" not in name_formula and "$C$1" not in name_formula  # the add-a-player box feeds nothing
+    assert name_formula.count("VLOOKUP(") == 0  # nothing looked up by typed name
+    assert "Added" not in name_formula
 
 
-def test_union_array_guards_each_source_so_the_whole_stack_never_errors():
-    # Found while verifying Fix 3, not itself part of that fix's spec:
-    # `{a;b;c}` vertical concatenation propagates a single erroring piece
-    # (FILTER-of-nothing raises #N/A) to the WHOLE combined array --
-    # verified empirically. On the live Week 3 sheet, right now, neither
-    # the control cell nor the added-names list has anything in it yet,
-    # so the moment Sam ticks his first EdgeRaw checkbox this week,
-    # control_filter/added_filter would each independently error and
-    # blank out the whole block despite the real tick existing. Each of
-    # the three sources must be individually IFERROR-guarded to the same
-    # blank placeholder shape.
-    union = _union_array("EdgeRaw", "QB", "$AQ$3:$AQ$52")
-    assert union.count("IFERROR(") >= 3
-    assert union.count('{"",0,0}') == 3
-    assert union.startswith("{IFERROR(FILTER(")
+def test_union_array_is_one_guarded_source_so_it_never_errors():
+    # `FILTER` of nothing raises #N/A; the single source is IFERROR-guarded to a same-shaped blank row.
+    union = _union_array("EdgeRaw", "QB")
+    assert union.startswith("IFERROR(FILTER(") and union.endswith('{"",0,0})')
+    assert union.count('{"",0,0}') == 1
 
 
 def test_name_formula_sorts_by_tag_rank_then_salary_descending():
@@ -238,7 +192,7 @@ def test_name_formula_sorts_by_tag_rank_then_salary_descending():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    name_formula = formulas["A2"]
+    name_formula = formulas[f"{NAME_COL}2"]
     assert "LET(rawArr,UNIQUE(" in name_formula
     assert "SORT(FILTER(uArr,INDEX(uArr,0,3)=1),2,FALSE)" in name_formula
     assert "SORT(FILTER(uArr,INDEX(uArr,0,3)=2),2,FALSE)" in name_formula
@@ -255,7 +209,7 @@ def test_name_formula_emits_one_blank_row_between_tag_groups():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    name_formula = formulas["A2"]
+    name_formula = formulas[f"{NAME_COL}2"]
     assert 'sepRow,{"",0,0}' in name_formula
     assert "IF(hasOne,IF(hasTwo,IF(hasThree,{grpOne;sepRow;grpTwo;sepRow;grpThree}" in name_formula
 
@@ -272,7 +226,7 @@ def test_name_formula_does_not_silently_drop_an_unknown_tag_rank_row():
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
-    name_formula = formulas["A2"]
+    name_formula = formulas[f"{NAME_COL}2"]
     assert "grpOther,IFERROR(SORT(FILTER(uArr,INDEX(uArr,0,3)<>1,INDEX(uArr,0,3)<>2,INDEX(uArr,0,3)<>3)" in (
         name_formula
     )
@@ -309,7 +263,6 @@ def test_overflow_formula_counts_the_deduped_union_not_edgeraw_alone():
 
     formulas = {a1: rows[0][0] for _, a1, rows in client.update_calls}
     assert "SUMPRODUCT((INDEX(UNIQUE(" in formulas[f"{OVERFLOW_COL}2"]
-    assert _CONTROL_CELL in formulas[f"{OVERFLOW_COL}2"]
 
 
 def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formula():
@@ -319,41 +272,36 @@ def test_skips_a_block_with_no_position_label_instead_of_writing_a_broken_formul
     )
 
     ranges_written = {a1 for _, a1, _ in client.update_calls}
-    assert "A13" not in ranges_written
+    assert f"{NAME_COL}13" not in ranges_written
     assert f"{OVERFLOW_COL}13" not in ranges_written
     assert f"{POOL_TYPE_COL}13:{POOL_TYPE_COL}29" not in ranges_written
     assert any("skipped" in line for line in result)
 
 
 def test_never_writes_outside_name_overflow_and_pool_columns():
-    # Name, the overflow warning, and (Fix 2.11) the surfaced Pool value
-    # are the only columns this function is allowed to touch -- every
-    # other column already holds a VLOOKUP written by link_edge_columns
-    # and must never be rewritten with a blank/placeholder value.
+    # Name, the overflow warning, and the Pool control are the only columns this function may touch -- every
+    # other column already holds a VLOOKUP written by link_edge_columns.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     import re
 
-    added_col = column_letter(PLAYER_POOL_COLUMN_ORDER.index("Added"))  # the add-a-player accumulator
-    allowed_columns = {"A", OVERFLOW_COL, POOL_TYPE_COL, added_col}
+    allowed_columns = {NAME_COL, OVERFLOW_COL, POOL_TYPE_COL}
     for _, a1_range, _ in client.update_calls:
-        # Whole column letters (not first characters): past column Z the first letter
-        # of "AZ"/"BA" stops identifying a column.
         assert re.match(r"[A-Z]+", a1_range).group(0) in allowed_columns
 
 
-def test_pool_type_formula_looks_up_edgeraw_by_name_with_index_match():
-    # Fix 2.11: Pool (column A on EdgeRaw) sits LEFT of Name (column B),
-    # so this can't be a plain VLOOKUP -- it must be INDEX/MATCH.
+def test_the_pool_cell_finds_the_player_by_the_id_in_its_own_row_not_by_name():
+    # Same formula as every other tab's Pool control, keyed on this row's hidden Id: it stays right when the
+    # Name spill reflows, and it is the text the Apps Script restores after an edit.
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
 
     pool_call = next(c for c in client.update_calls if c[1] == f"{POOL_TYPE_COL}2:{POOL_TYPE_COL}11")
-    first_row_formula = pool_call[2][0][0]
-    assert 'IF($A2="","",' in first_row_formula
-    assert "INDEX(EdgeRaw!$A:$A," in first_row_formula
-    assert "MATCH($A2,EdgeRaw!$B:$B,0)" in first_row_formula
+    formulas = [row[0] for row in pool_call[2]]
+    assert formulas[0] == pool_formula(2, "EdgeRaw", id_col=ID_COL)
+    assert formulas[3] == pool_formula(5, "EdgeRaw", id_col=ID_COL)  # each row reads its own Id
+    assert f"${ID_COL}2" in formulas[0] and f"${NAME_COL}2" not in formulas[0]
 
 
 def test_pool_type_column_header_is_written_once():
@@ -370,4 +318,4 @@ def test_each_blocks_spill_area_is_cleared_of_stray_formulas():
     client = SpySheetsClient(_POSITIONS)
     write_pool_formulas(client, player_pool_tab="Player Pool", edge_tab="EdgeRaw", name_blocks=_BLOCKS)
     cleared = [rng for _tab, ranges in client.clear_calls for rng in ranges]
-    assert cleared == [f"A{start + 1}:A{end}" for start, end in _BLOCKS]
+    assert cleared == [f"{NAME_COL}{start + 1}:{NAME_COL}{end}" for start, end in _BLOCKS]
