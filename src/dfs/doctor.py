@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dfs.config import Config
-from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS
+from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.edge_finder_tab import ID_COL as EDGE_FINDER_ID_COL
 from dfs.edge_finder_tab import POOL_COL as EDGE_FINDER_POOL_COL
@@ -173,12 +173,12 @@ def _check_edge_header(
     # kept out of the EDGE_COLUMNS list itself. Checked together with
     # EDGE_COLUMNS as one contiguous expected header, not separately, now
     # that its position is load-bearing (not just appended past the end).
-    expected = [POOL_HEADER, *EDGE_COLUMNS]
+    expected = [POOL_HEADER, *EDGE_SHEET_ORDER]
     if header[: len(expected)] != expected:
         return [
             DoctorIssue(
                 "edgeraw-header",
-                f"{edge_tab!r} header does not match [Pool, *EDGE_COLUMNS].\n"
+                f"{edge_tab!r} header does not match [Pool, *EDGE_SHEET_ORDER].\n"
                 f"    expected: {expected}\n"
                 f"    actual:   {header[: len(expected)]}",
             )

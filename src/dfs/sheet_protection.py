@@ -31,7 +31,7 @@ from __future__ import annotations
 from dfs import edge_finder_tab as eft
 from dfs.sheet_links import PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_control import control_cells
-from dfs.sheet_views import BOARD_LIST_POOL_COL, BOARD_TAB, LINEUP_COUNT_CELL
+from dfs.sheet_views import BOARD_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
@@ -42,9 +42,12 @@ FULLY_PROTECTED_TABS = [
     "Slate Grid",
     "Movement",
 ]
-# Protected except the Pool column: every player row's Pool cell is a dropdown you pick from (the formula
-# under it is put back by the bound Apps Script), so it has to be editable without a warning.
-POOL_GUTTER_TABS = {eft.EDGE_FINDER_TAB: eft.POOL_COL, BOARD_TAB: BOARD_LIST_POOL_COL}
+# Deliberately NOT protected (Sam, 2026-10-09): opening or closing a row group counts as an edit of
+# the rows it hides, so whole-tab protection showed a "Heads up" dialog on every fold. Their safety is
+# elsewhere: the sync rewrites the Edge Finder every run, `dfs setup build-views` rebuilds the Board,
+# the Apps Script puts a Pool cell's formula back after an edit, and `dfs doctor` flags a Pool cell
+# that holds a typed value. Any protection a previous run left on them is removed.
+UNPROTECTED_VIEW_TABS = [eft.EDGE_FINDER_TAB, BOARD_TAB]
 
 _FORMULA_DESCRIPTION = "Formula-driven -- check before typing here (dfs setup protect)"
 
@@ -70,17 +73,14 @@ def protect_workbook(
         client.protect_sheet(tab, description=_FORMULA_DESCRIPTION)
         results.append(f"{tab}: whole tab protected (warning-only)")
 
-    for tab, pool_col in POOL_GUTTER_TABS.items():
+    for tab in UNPROTECTED_VIEW_TABS:
         if not client.tab_exists(tab):
             results.append(f"{tab}: not present -- skipped")
             continue
         client.clear_protected_ranges(tab)
-        client.protect_sheet(
-            tab,
-            unprotected_ranges=[f"{pool_col}:{pool_col}"],
-            description=f"{_FORMULA_DESCRIPTION} (except the Pool column, {pool_col})",
+        results.append(
+            f"{tab}: left unprotected (folding its groups must not warn); any old protection removed"
         )
-        results.append(f"{tab}: whole tab protected except the Pool column ({pool_col})")
 
     if not client.tab_exists(player_pool_tab):
         results.append(f"{player_pool_tab}: not present -- skipped")

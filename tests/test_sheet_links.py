@@ -1,4 +1,4 @@
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import EDGE_COLUMNS, edge_last_letter, edge_sheet_letter, edge_vlookup_index
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_links import (
     COLOR_SCALE_LINKED_COLUMNS,
@@ -223,12 +223,13 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # occupies column A ahead of EDGE_COLUMNS, and the range's own END
     # letter also grows by one per column added. Matches what
     # `sheet_style.polish_edge` reports for the same columns.
-    assert EDGE_COLUMNS.index("Leverage") == 27
-    start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
-    end_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    # Slice 5 (2026-10-09): the tab is written in `EDGE_SHEET_ORDER` (Leverage is 32nd counting from Name).
+    assert edge_vlookup_index("Leverage") == 32
+    start_col = edge_sheet_letter("Name")
+    end_col = edge_last_letter()
     key = resolve_name_expr("$A5", "EdgeRaw")
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP({key},EdgeRaw!${start_col}:${end_col},28,false))'
+        f'=IF($A5="","",VLOOKUP({key},EdgeRaw!${start_col}:${end_col},32,false))'
     )
 
 
@@ -513,7 +514,7 @@ def test_link_edge_columns_run_twice_only_appends_once():
 
 def test_edge_row_hyperlink_formula_targets_the_right_gid_and_column():
     formula = edge_row_hyperlink_formula(5, "EdgeRaw", 999)
-    start_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+    start_col = edge_sheet_letter("Name")
     # Week 3 feedback (A5): displayed text shortened to just "↗" -- the
     # column's own HEADER text stays "Edge ↗" (see sheet_columns.py),
     # only this per-row HYPERLINK's visible label changed.

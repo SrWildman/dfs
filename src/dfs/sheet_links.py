@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from dfs import perf
 from dfs.column_reorder import group_into_contiguous_runs
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import edge_last_letter, edge_sheet_letter, edge_vlookup_index
 from dfs.sheet_color_scales import column_rule_specs
 from dfs.sheet_columns import CEILING_DETAIL, GAME, LINKED_COLUMNS, MOVEMENT, USAGE, WEATHER
 from dfs.sheet_names import resolve_name_expr
@@ -67,8 +67,8 @@ PLAYER_POOL_RAW_BLOCK = [(2, 987)]
 _OPTIONAL_LINKED_COLUMNS = {"Wind"}
 
 _EDGE_NAME_COLUMN = "Name"
-_EDGE_RANGE_START = column_letter(EDGE_COLUMNS.index(_EDGE_NAME_COLUMN) + EDGE_DATA_OFFSET)
-_EDGE_RANGE_END = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+_EDGE_RANGE_START = edge_sheet_letter(_EDGE_NAME_COLUMN)
+_EDGE_RANGE_END = edge_last_letter()
 
 
 def _name_column(header: list[str]) -> str:
@@ -81,7 +81,7 @@ def _name_column(header: list[str]) -> str:
 def _vlookup_index(column_name: str) -> int:
     """1-based position of `column_name` within EdgeRaw!$<start>:$<end>,
     for VLOOKUP's 3rd argument."""
-    return EDGE_COLUMNS.index(column_name) - EDGE_COLUMNS.index(_EDGE_NAME_COLUMN) + 1
+    return edge_vlookup_index(column_name, _EDGE_NAME_COLUMN)
 
 
 def edge_lookup_formula(row: int, edge_tab: str, column_name: str, *, name_col: str = "A") -> str:

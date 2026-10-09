@@ -131,6 +131,12 @@ only a sanity check against Vegas, not a model (Round 5 item 5c).
 
 ### EdgeRaw
 
+**Column order (actions round, slice 5, 2026-10-09).** The tab is written in `derived.EDGE_SHEET_ORDER`, a designed order that mirrors Player Pool's spine: `Pool`, `Name`, `Position`, `Team`, `Opp`, `Salary`,
+`ProjPts`, `AggPts`, `CalPts`, `Val`, `ValAdj`, `Hit3x%`, `Boom%`, `Ceiling`, `CeilVal`, `Own%`, `Avail`, `Flags`, `Edge`; then the collapsed zones GAME (+ `GameID`, `TmRank`), CEIL (`CeilPct`, `Leverage`,
+`OwnStatus`, + `Floor`, `CeilM`, `Bust%`), MOVE, WX and USAGE (+ `xFP/G`); then the hidden helpers (`Id`, `Flag`, the `*%ile` columns, `NameKey`). `derived.EDGE_COLUMNS` is unchanged and still
+append-only: it is the data frame's, `edge.csv`'s and the saved snapshots' order. Every EdgeRaw column letter and VLOOKUP index comes from `derived.edge_sheet_letter` / `edge_sheet_index` /
+`edge_vlookup_index`; `tests/test_edge_sheet_order.py` fails if any other code computes one from `EDGE_COLUMNS`. The column tables below describe what each column means; their order is this one.
+
 The derived "which players are actually worth a look" tab -- computed
 locally by joining the tabs above, no network call of its own. Rows are
 pre-sorted by `Leverage` descending. Full design rationale in

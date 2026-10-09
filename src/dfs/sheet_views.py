@@ -23,7 +23,13 @@ from __future__ import annotations
 import pandas as pd
 
 from dfs import sheet_pool_cells as pc
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, SHOOTOUT_TOTAL_THRESHOLD, VAL_ADJ_ROSTERABLE_TOP_N
+from dfs.derived import (
+    EDGE_SHEET_ORDER,
+    SHOOTOUT_TOTAL_THRESHOLD,
+    VAL_ADJ_ROSTERABLE_TOP_N,
+    edge_sheet_letter,
+    edge_vlookup_index,
+)
 from dfs.gps_check import GPS_IMPLIED_MISMATCH_PTS
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
@@ -76,16 +82,16 @@ def _q(tab: str) -> str:
 
 
 def _col(name: str) -> str | None:
-    if name not in EDGE_COLUMNS:
+    if name not in EDGE_SHEET_ORDER:
         return None
-    return column_letter(EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET)
+    return edge_sheet_letter(name)
 
 
 def _rng(edge_tab: str, name: str) -> str:
     """`EdgeRaw!$M$2:$M` for a named EdgeRaw column."""
     letter = _col(name)
     if letter is None:
-        raise KeyError(f"{name!r} is not in EDGE_COLUMNS -- cannot build a view referencing it.")
+        raise KeyError(f"{name!r} is not an EdgeRaw column -- cannot build a view referencing it.")
     return f"{_q(edge_tab)}!${letter}$2:${letter}"
 
 
@@ -110,9 +116,9 @@ def _edge_team_pair_mean(edge_tab: str, metric: str, away_ref: str, home_ref: st
     VLOOKUP index are derived from EDGE_COLUMNS, never typed. One helper for the Board's Slate
     shape and Slate Grid's game rows, so the two can never disagree."""
     e = _q(edge_tab)
-    team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
-    metric_col = column_letter(EDGE_COLUMNS.index(metric) + EDGE_DATA_OFFSET)
-    idx = EDGE_COLUMNS.index(metric) - EDGE_COLUMNS.index("Team") + 1
+    team_col = edge_sheet_letter("Team")
+    metric_col = edge_sheet_letter(metric)
+    idx = edge_vlookup_index(metric, "Team")
     return (
         f"IFERROR(AVERAGE("
         f"VLOOKUP({away_ref},{e}!${team_col}:${metric_col},{idx},FALSE),"
@@ -1139,11 +1145,11 @@ def build_slate_grid(
     wind_idx = WEATHER_COLUMNS.index("Wind") + 1
     gust_end_col = column_letter(WEATHER_COLUMNS.index("Gust"))
     gust_idx = WEATHER_COLUMNS.index("Gust") + 1
-    team_col = column_letter(EDGE_COLUMNS.index("Team") + EDGE_DATA_OFFSET)
-    tot_move_end_col = column_letter(EDGE_COLUMNS.index("TotMove") + EDGE_DATA_OFFSET)
-    tot_move_idx = EDGE_COLUMNS.index("TotMove") - EDGE_COLUMNS.index("Team") + 1
-    spd_move_end_col = column_letter(EDGE_COLUMNS.index("SpdMove") + EDGE_DATA_OFFSET)
-    spd_move_idx = EDGE_COLUMNS.index("SpdMove") - EDGE_COLUMNS.index("Team") + 1
+    team_col = edge_sheet_letter("Team")
+    tot_move_end_col = edge_sheet_letter("TotMove")
+    tot_move_idx = edge_vlookup_index("TotMove", "Team")
+    spd_move_end_col = edge_sheet_letter("SpdMove")
+    spd_move_idx = edge_vlookup_index("SpdMove", "Team")
     gps_end_col = column_letter(len(GPS_COLUMNS) - 1)
     gps_implied_idx = GPS_COLUMNS.index("ImpliedTotal") + 1
     gps_score_idx = GPS_COLUMNS.index("GPS") + 1
@@ -1486,8 +1492,8 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
     tab. ImpliedMove is blank until at least one `nfl_odds` sync has happened this week, so an unsynced sheet
     says so rather than showing a page of convincing-looking zeros.
     """
-    if "ImpliedMove" not in EDGE_COLUMNS:
-        return f"{MOVEMENT_TAB}: skipped -- this version of EDGE_COLUMNS has no ImpliedMove column"
+    if "ImpliedMove" not in EDGE_SHEET_ORDER:
+        return f"{MOVEMENT_TAB}: skipped -- this version has no EdgeRaw ImpliedMove column"
 
     name = _rng(edge_tab, "Name")
     team = _rng(edge_tab, "Team")

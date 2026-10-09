@@ -1,4 +1,4 @@
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import edge_last_letter, edge_sheet_index
 from dfs.sheet_filters import (
     BASIC_FILTER_PLAIN_TABS,
     FULL_RANGE_FILTER_TABS,
@@ -6,7 +6,6 @@ from dfs.sheet_filters import (
     add_edge_filter_views,
     add_plain_filter_views,
 )
-from dfs.sheets import column_letter
 
 
 class FakeFilterClient:
@@ -70,7 +69,7 @@ def test_add_edge_filter_views_leverage_plays_targets_flag_column():
     add_edge_filter_views(client, "EdgeRaw")
     _tab, title, _rng, criteria = client.add_calls[1]
     assert title == "Leverage plays"
-    flag_idx = EDGE_COLUMNS.index("Flags") + EDGE_DATA_OFFSET
+    flag_idx = edge_sheet_index("Flags")
     assert list(criteria) == [flag_idx]
     # TEXT_CONTAINS, not TEXT_EQ: Flags can hold more than one
     # space-separated token now (Fix 2.1), e.g. "WIND LEVERAGE".
@@ -83,7 +82,7 @@ def test_add_edge_filter_views_available_only_is_blank_avail():
     add_edge_filter_views(client, "EdgeRaw")
     _tab, title, _rng, criteria = client.add_calls[2]
     assert title == "Available only"
-    avail_idx = EDGE_COLUMNS.index("Avail") + EDGE_DATA_OFFSET
+    avail_idx = edge_sheet_index("Avail")
     assert criteria[avail_idx]["condition"]["type"] == "BLANK"
 
 
@@ -103,7 +102,7 @@ def test_add_edge_filter_views_range_spans_every_edge_column():
     client = FakeFilterClient()
     add_edge_filter_views(client, "EdgeRaw")
     _tab, _title, a1_range, _crit = client.add_calls[0]
-    last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    last_col = edge_last_letter()
     assert a1_range.startswith(f"A1:{last_col}")
 
 
@@ -147,7 +146,7 @@ def test_add_basic_filters_edgeraw_spans_the_whole_real_range():
     client = FakeFilterClient()
     add_basic_filters(client, edge_tab="EdgeRaw")
     _tab, a1_range = client.basic_filter_calls[0]
-    last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    last_col = edge_last_letter()
     assert a1_range.startswith(f"A1:{last_col}")
 
 
@@ -177,9 +176,9 @@ def test_cash_and_gpp_views_filter_to_available_players_with_the_probability_and
     client = FakeFilterClient()
     add_edge_filter_views(client, "EdgeRaw")
     by_title = {title: criteria for _tab, title, _rng, criteria in client.add_calls}
-    avail = EDGE_COLUMNS.index("Avail") + EDGE_DATA_OFFSET
+    avail = edge_sheet_index("Avail")
     for title, column in (("Cash", "Hit3x%"), ("GPP", "Boom%")):
-        idx = EDGE_COLUMNS.index(column) + EDGE_DATA_OFFSET
+        idx = edge_sheet_index(column)
         criteria = by_title[title]
         assert criteria[avail]["condition"]["type"] == "BLANK"
         assert criteria[idx]["condition"]["type"] == "NOT_BLANK"

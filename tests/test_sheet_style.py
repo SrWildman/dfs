@@ -1,4 +1,4 @@
-from dfs.derived import EDGE_COLUMNS, ZONE_LABELS
+from dfs.derived import EDGE_COLUMNS, EDGE_SHEET_ORDER, ZONE_LABELS
 from dfs.sheet_color_scales import (
     FIELD_COLOR_SCALES,
     GRAD_MAX,
@@ -106,7 +106,7 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
     # FIELD_COLOR_SCALES is shared across every tab (Fix 2.1), so it also
     # carries builder-only header text ("Team Implied"...) that isn't a
     # literal EDGE_COLUMNS name -- pin the EdgeRaw-side subset that matters.
-    edge_header = [POOL_HEADER, *EDGE_COLUMNS]
+    edge_header = [POOL_HEADER, *EDGE_SHEET_ORDER]
     matched = {name for name in edge_header if name in FIELD_COLOR_SCALES}
     assert matched == {
         # Edge Finder (2026-10-07)
@@ -480,10 +480,10 @@ def test_polish_edge_groups_game_through_weather_collapsed_by_default():
 
     assert client.group_calls == [
         ("EdgeRaw", _edge_letter("OverUnder"), _edge_letter("TmRank"), True),
-        ("EdgeRaw", _edge_letter("CeilPct"), _edge_letter("OwnStatus"), True),
+        ("EdgeRaw", _edge_letter("CeilPct"), _edge_letter("Bust%"), True),  # CEIL: + Floor, CeilM, Bust%
         ("EdgeRaw", _edge_letter("ImpliedMove"), _edge_letter("GameStart"), True),
         ("EdgeRaw", _edge_letter("Stadium"), _edge_letter("Wind"), True),
-        ("EdgeRaw", _edge_letter("Snap%"), _edge_letter("HVT/G"), True),  # USAGE: Snap% + usage metrics
+        ("EdgeRaw", _edge_letter("Snap%"), _edge_letter("xFP/G"), True),  # USAGE: Snap%, usage metrics, xFP/G
     ]
 
 
@@ -546,7 +546,7 @@ def test_polish_edge_clears_banding_before_re_adding_it():
 
 
 def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per_position_runs():
-    edge_header = [POOL_HEADER, *EDGE_COLUMNS]
+    edge_header = [POOL_HEADER, *EDGE_SHEET_ORDER]
     matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
     assert len(matched) == 30  # nothing is skipped on EdgeRaw (20 + five usage metrics + five Edge Finder)
 
@@ -580,7 +580,7 @@ def test_polish_edge_steps_player_metrics_off_their_hidden_percentile_column():
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    header = [POOL_HEADER, *EDGE_COLUMNS]
+    header = [POOL_HEADER, *EDGE_SHEET_ORDER]
     proj_col = column_letter(header.index("ProjPts"))
     pct_col = column_letter(header.index("ProjPts%ile"))
     mine = [(a1, k) for a1, k in client.boolean_rule_calls if a1.startswith(f"{proj_col}2:")]
@@ -2455,3 +2455,15 @@ def test_style_board_clears_the_old_layouts_dropdowns_before_adding_the_pool_one
     client = FakeBoardClient()
     style_board(client)
     assert client.cleared_validation == [f"A1:{column_letter(BOARD_MAX_VISIBLE_COL_INDEX)}{BOARD_RESET_ROWS}"]
+
+
+def test_polish_edge_clears_stale_formats_over_the_data_area_before_styling_by_name():
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+    calls = client.format_range_calls
+    index = next(
+        i for i, (a1, fmt) in enumerate(calls) if a1.startswith("A2:") and fmt.get("numberFormat", 1) is None
+    )
+    fmt = calls[index][1]
+    assert set(fmt) == {"numberFormat", "horizontalAlignment", "backgroundColor", "textFormat"}
+    assert all(v is None for v in fmt.values()) and index < len(calls) - 1  # before the per-column styling

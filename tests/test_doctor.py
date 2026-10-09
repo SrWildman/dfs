@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from dfs.config import Config
-from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS
+from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
 from dfs.doctor import run_doctor
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
@@ -82,7 +82,7 @@ def _base_config(**overrides) -> Config:
 
 
 _ALL_GOOD_TABS = {
-    "EdgeRaw": [POOL_HEADER, *EDGE_COLUMNS],
+    "EdgeRaw": [POOL_HEADER, *EDGE_SHEET_ORDER],
     "DK Upload": ["Entry ID"],
     "Lineups": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Player Pool": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
@@ -242,7 +242,7 @@ def test_run_doctor_flags_edgeraw_header_mismatch():
 
 def test_run_doctor_passes_when_edgeraw_pool_column_is_correct():
     tabs = dict(_ALL_GOOD_TABS)
-    tabs["EdgeRaw"] = [POOL_HEADER, *EDGE_COLUMNS]
+    tabs["EdgeRaw"] = [POOL_HEADER, *EDGE_SHEET_ORDER]
     cfg = _base_config()
     client = FakeDoctorClient(tabs=tabs, rows=_lineups_rows())
 

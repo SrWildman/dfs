@@ -1,5 +1,5 @@
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
-from dfs.sheet_protection import FULLY_PROTECTED_TABS, POOL_GUTTER_TABS, protect_workbook
+from dfs.sheet_protection import FULLY_PROTECTED_TABS, UNPROTECTED_VIEW_TABS, protect_workbook
 from dfs.sheet_views import LINEUP_COUNT_CELL
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
 
@@ -96,12 +96,11 @@ def test_player_pool_leaves_the_pool_column_and_the_add_a_player_box_unprotected
     assert kwargs["warning_only"] is True
 
 
-def test_edge_finder_and_board_leave_only_the_pool_gutter_unprotected():
+def test_edge_finder_and_board_are_not_protected_and_any_old_protection_is_cleared():
     client = FakeProtectionClient()
     protect_workbook(client, lineups_tab="Lineups")
 
-    assert set(POOL_GUTTER_TABS) == {"Edge Finder", "Board"}
-    for tab, column in POOL_GUTTER_TABS.items():
-        _tab, kwargs = next(c for c in client.protect_calls if c[0] == tab)
-        assert column == "A" and kwargs["unprotected_ranges"] == ["A:A"]
-        assert kwargs["warning_only"] is True
+    assert set(UNPROTECTED_VIEW_TABS) == {"Edge Finder", "Board"}
+    protected = {tab for tab, _ in client.protect_calls}
+    for tab in UNPROTECTED_VIEW_TABS:
+        assert tab not in protected and tab in client.clear_calls  # folding a group must not warn

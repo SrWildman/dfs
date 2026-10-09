@@ -448,6 +448,104 @@ EDGE_COLUMNS = [
     *EDGE_FINDER_COLUMNS,
 ]
 
+# What the EdgeRaw TAB is written in (actions round, slice 5, 2026-10-09): a designed order that mirrors
+# Player Pool's spine, Name .. Edge, then the five collapsed zones, then the hidden helpers last. It is a
+# PERMUTATION of `EDGE_COLUMNS`, which stays the data frame's order, the saved `edge.csv` / `data/raw/edge`
+# order and APPEND-ONLY (old snapshots and the closed weeks were written that way). Only the sheet's column
+# order differs, and every EdgeRaw column letter and VLOOKUP index goes through `edge_sheet_letter` /
+# `edge_sheet_index` / `edge_vlookup_index` below, never `EDGE_COLUMNS.index`
+# (`tests/test_edge_sheet_order.py` fails if anything else computes one). Add a new column to `EDGE_COLUMNS`
+# (append) and to the right place here.
+EDGE_SHEET_ORDER = [
+    "Name",
+    "Position",
+    "Team",
+    "Opp",
+    "Salary",
+    "ProjPts",
+    "AggPts",
+    "CalPts",
+    "Val",
+    "ValAdj",
+    "Hit3x%",
+    "Boom%",
+    "Ceiling",
+    "CeilVal",
+    "Own%",
+    "Avail",
+    "Flags",
+    "Edge",
+    GAME_LABEL,
+    "OverUnder",
+    "Spread",
+    "GameEnv",
+    "Pace",
+    "PROE",
+    "Expl%",
+    "OppPosRank",
+    "OppEPA",
+    "GameID",
+    "TmRank",
+    CEILING_DETAIL_LABEL,
+    "CeilPct",
+    "Leverage",
+    "OwnStatus",
+    "Floor",
+    "CeilM",
+    "Bust%",
+    MOVEMENT_LABEL,
+    "ImpliedMove",
+    "TotMove",
+    "SpdMove",
+    "GameStart",
+    WEATHER_LABEL,
+    "Stadium",
+    "Roof",
+    "Wind",
+    USAGE_LABEL,
+    "Snap%",
+    *USAGE_METRIC_COLUMNS,
+    "xFP/G",
+    "Id",
+    "Flag",
+    *ALL_PCT_COLUMNS.values(),
+    "NameKey",
+]
+assert sorted(EDGE_SHEET_ORDER) == sorted(EDGE_COLUMNS)  # noqa: S101 - EDGE_SHEET_ORDER is a permutation
+
+
+def edge_sheet_index(name: str) -> int:
+    """The 0-based position of an EdgeRaw column on the tab (Pool is column A: `EDGE_DATA_OFFSET`)."""
+    if name not in EDGE_SHEET_ORDER:
+        raise KeyError(f"{name!r} is not an EdgeRaw column")
+    return EDGE_SHEET_ORDER.index(name) + EDGE_DATA_OFFSET
+
+
+def edge_sheet_letter(name: str) -> str:
+    """EdgeRaw's absolute column letter for a named column (A is Pool)."""
+    return _column_letter(edge_sheet_index(name))
+
+
+def edge_last_letter() -> str:
+    """The letter of EdgeRaw's last data column."""
+    return _column_letter(len(EDGE_SHEET_ORDER) - 1 + EDGE_DATA_OFFSET)
+
+
+def edge_vlookup_index(name: str, anchor: str = "Name") -> int:
+    """1-based position of `name` in a range starting at the `anchor` column (default `Name`): the third
+    argument of a VLOOKUP into `EdgeRaw!$<anchor>:$<last>`."""
+    return EDGE_SHEET_ORDER.index(name) - EDGE_SHEET_ORDER.index(anchor) + 1
+
+
+def _column_letter(index: int) -> str:
+    letters = ""
+    n = index + 1
+    while n:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
 # The four zone labels, in the same left-to-right order they appear --
 # used wherever code needs "all the label columns" as a group (e.g. to
 # exclude them from formatting that only makes sense for real metrics).

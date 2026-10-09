@@ -20,7 +20,7 @@ every run.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import edge_sheet_letter
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_names import resolve_name_expr, resolve_typed_name
 from dfs.sheet_pool_cells import POOL_OPTIONS
@@ -39,7 +39,7 @@ _NORMAL_ROW1_FORMAT = {
     "textFormat": {"foregroundColor": {"red": 0, "green": 0, "blue": 0}, "bold": False},
 }
 
-_edge_name_col = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+_edge_name_col = edge_sheet_letter("Name")
 
 
 def control_cells(header: list[str] | None = None) -> dict[str, str]:

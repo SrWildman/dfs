@@ -1,6 +1,6 @@
 import pytest
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import edge_sheet_letter
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_pool_control import (
     add_typed_player_to_pool,
@@ -11,7 +11,7 @@ from dfs.sheet_pool_control import (
 from dfs.sheets import column_letter
 from dfs.weekly_reset import PLAYER_POOL_CONTROL_ROW, PLAYER_POOL_HEADER_ROW
 
-_EDGE_NAME_COL = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
+_EDGE_NAME_COL = edge_sheet_letter("Name")
 _ROW = PLAYER_POOL_CONTROL_ROW
 _HEADER = list(PLAYER_POOL_COLUMN_ORDER)  # the designed header: Pool, Name, Pos., ...
 

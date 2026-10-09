@@ -32,9 +32,9 @@ Unique, Exposure, Player Pool's Used/In) compare Lineups' hidden `Player Key`
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import edge_sheet_letter
 from dfs.player_join import normalize_name
-from dfs.sheets import SheetsClient, column_letter
+from dfs.sheets import SheetsClient
 
 NAME_KEY_HEADER = "NameKey"
 ALIAS_TAB = "NameAlias"
@@ -91,7 +91,7 @@ def norm_expr(ref: str) -> str:
 
 
 def _edge_col(name: str) -> str:
-    return column_letter(EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET)
+    return edge_sheet_letter(name)
 
 
 def resolve_name_expr(ref: str, edge_tab: str) -> str:

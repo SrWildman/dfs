@@ -23,10 +23,12 @@ have independently corrupted a live sheet already (see
 changelog for the exact incidents) -- it is easy to reintroduce blind,
 and the fix is always the same: **derive positions, never hardcode them.**
 
-Concretely: column/row positions come from named constants --
-`derived.EDGE_COLUMNS` (EdgeRaw's own columns), `EDGE_DATA_OFFSET` (the
-Pool column sits ahead of `EDGE_COLUMNS`, so every absolute EdgeRaw column
-letter needs `EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET`),
+Concretely: column/row positions come from named constants and functions --
+`derived.EDGE_COLUMNS` (the data frame's append-only column list) and
+`derived.EDGE_SHEET_ORDER` (the order the EdgeRaw TAB is written in; Pool sits
+ahead of it in column A): every EdgeRaw column letter and VLOOKUP index comes
+from `derived.edge_sheet_letter` / `edge_sheet_index` / `edge_vlookup_index`,
+never `EDGE_COLUMNS.index` (a test fails if anything else computes one),
 `weekly_reset.PLAYER_POOL_NAME_BLOCKS` / `LINEUPS_NAME_BLOCKS` (where each
 position's rows live on Player Pool / Lineups), and `sheet_links.
 LINKED_EDGE_COLUMNS` (the EdgeRaw-derived block appended onto Player

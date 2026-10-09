@@ -16,7 +16,7 @@ from __future__ import annotations
 import pandas as pd
 
 from dfs import edge_finder, nfl_calendar, store
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, build_edge_frame
+from dfs.derived import EDGE_SHEET_ORDER, build_edge_frame, edge_last_letter, edge_sheet_letter
 from dfs.gps_check import find_gps_mismatches
 from dfs.line_movement import LineMovementError, diff_odds
 from dfs.log import get_logger
@@ -61,7 +61,7 @@ POOL_TYPE_OPTIONS = ["", "Cash", "GPP", "Both"]
 # this list's own order -- never hand-write the array into a formula
 # string, so this one list is still the only place the order is decided.
 POOL_TYPE_SORT_ORDER = ["Both", "Cash", "GPP"]
-_ID_COLUMN = column_letter(EDGE_COLUMNS.index("Id") + EDGE_DATA_OFFSET)
+_ID_COLUMN = edge_sheet_letter("Id")
 # Matches write_tab's default worksheet sizing (see cli.py's
 # _EDGE_FORMAT_LAST_ROW) -- the range every EdgeRaw column operation uses.
 _LAST_ROW = 1000
@@ -69,7 +69,7 @@ _LAST_ROW = 1000
 # -- duplicated here rather than imported (sheet_filters/sheet_style both
 # import FROM this module, so the reverse import would be circular) but
 # derived the same way, never a separate literal.
-_FILTER_RANGE = f"A1:{column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)}{_LAST_ROW}"
+_FILTER_RANGE = f"A1:{edge_last_letter()}{_LAST_ROW}"
 
 # Matches sources/tffb_sos.py's own SOURCES registry keys -- one optional
 # input per position, same graceful-degradation treatment as games/weather
@@ -249,7 +249,7 @@ class EdgeSource(Source):
         return frame
 
     def to_sheet_rows(self, df: pd.DataFrame) -> list[list]:
-        """Pool prepended ahead of EDGE_COLUMNS on every row -- header gets
+        """Pool prepended ahead of EDGE_SHEET_ORDER on every row -- header gets
         the real label, every data row gets an explicit blank Pool cell
         (not simply a shorter row relying on Sheets' implicit trailing
         blank, the way an *appended* column could -- a column at the
@@ -259,7 +259,8 @@ class EdgeSource(Source):
         restore ticks by Id after write_tab clears the tab), only the
         blank placeholder, so the column exists and is labeled even on a
         brand-new EdgeRaw tab."""
-        rows = super().to_sheet_rows(df)
+        # The tab is written in `EDGE_SHEET_ORDER` (a permutation of the frame's own `EDGE_COLUMNS` order).
+        rows = super().to_sheet_rows(df[EDGE_SHEET_ORDER])
         header, *data = rows
         return [[POOL_HEADER, *header]] + [["", *row] for row in data]
 

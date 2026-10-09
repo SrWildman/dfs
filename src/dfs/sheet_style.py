@@ -84,11 +84,14 @@ from __future__ import annotations
 from dfs import perf
 from dfs.derived import (
     ALL_PCT_COLUMNS,
-    EDGE_COLUMNS,
     EDGE_DATA_OFFSET,
+    EDGE_SHEET_ORDER,
     SPLIT_TFFB_HIGH,
     SPLIT_TFFB_LOW,
     ZONE_LABELS,
+    edge_last_letter,
+    edge_sheet_index,
+    edge_sheet_letter,
 )
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP
 from dfs.sheet_color_scales import (
@@ -770,12 +773,12 @@ EDGE_COLUMN_GROUPS = [
     # collapsed group instead of folded into it, unlike Player Pool/
     # Lineups, where `sheet_columns.GAME` already included them).
     ("OverUnder", "TmRank"),
-    ("CeilPct", "OwnStatus"),
+    ("CeilPct", "Bust%"),
     ("ImpliedMove", "GameStart"),
     ("Stadium", "Wind"),
     # Round 5 1b: USAGE (Snap%) was never grouped -- the "arrow" Sam saw beside it
     # was the hidden Id/Flag columns, not a fold control. One real group, like the rest.
-    ("Snap%", "HVT/G"),
+    ("Snap%", "xFP/G"),
 ]
 
 # Muted, per-position backgrounds -- just enough to see position boundaries
@@ -906,9 +909,9 @@ def _edge_letter(column_name: str) -> str | None:
     column had no code-managed width at all before this)."""
     if column_name == POOL_HEADER:
         return POOL_COLUMN
-    if column_name not in EDGE_COLUMNS:
+    if column_name not in EDGE_SHEET_ORDER:
         return None
-    return column_letter(EDGE_COLUMNS.index(column_name) + EDGE_DATA_OFFSET)
+    return edge_sheet_letter(column_name)
 
 
 # ---------------------------------------------------------------------------
@@ -1217,12 +1220,21 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     if not client.tab_exists(edge_tab):
         return f"{edge_tab}: not present -- skipped"
 
-    edge_header = [POOL_HEADER, *EDGE_COLUMNS]
-    last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    edge_header = [POOL_HEADER, *EDGE_SHEET_ORDER]
+    last_col = edge_last_letter()
     client.clear_conditional_formats(edge_tab)
     client.clear_banding(edge_tab)
     client.add_row_banding(
         edge_tab, f"A2:{last_col}{EDGE_ROWS}", first_band_color=WHITE, second_band_color=BAND_BG
+    )
+
+    # A reordered tab keeps each old column's number format, alignment, fill and font at its OLD letter (a
+    # sync rewrites values, never formats): clear them over the data area first, so every column then gets
+    # exactly the look its name says it should (EDGE_SHEET_ORDER, slice 5, 2026-10-09).
+    client.format_range(
+        edge_tab,
+        f"A2:{last_col}{EDGE_ROWS}",
+        {"numberFormat": None, "horizontalAlignment": None, "backgroundColor": None, "textFormat": None},
     )
 
     widths = {}
@@ -1253,12 +1265,12 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # leave a STALE hide behind (see `_unhide_ungrouped_columns`'s own
     # docstring for the mechanism). Makes this call idempotent and
     # self-correcting instead of purely additive.
-    _unhide_ungrouped_columns(client, edge_tab, len(EDGE_COLUMNS) + EDGE_DATA_OFFSET)
+    _unhide_ungrouped_columns(client, edge_tab, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET)
     for hidden_name in ("Id", "Flag", *ALL_PCT_COLUMNS.values(), "NameKey"):
         letter = _edge_letter(hidden_name)
         if letter:
             client.hide_columns(edge_tab, letter, letter)
-    name_idx = EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET if "Name" in EDGE_COLUMNS else 1
+    name_idx = edge_sheet_index("Name") if "Name" in EDGE_SHEET_ORDER else 1
     client.freeze(edge_tab, rows=1, cols=name_idx + 1)
 
     # EdgeRaw's real header is `[POOL_HEADER, *EDGE_COLUMNS]` by construction

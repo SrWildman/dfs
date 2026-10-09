@@ -10,8 +10,7 @@ follows at once.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
-from dfs.sheets import column_letter
+from dfs.derived import edge_sheet_letter
 from dfs.sources.edge import (  # noqa: F401 - POOL_HEADER re-exported
     POOL_COLUMN,
     POOL_HEADER,
@@ -24,8 +23,8 @@ POOL_COLUMN_WIDTH = 70  # px: "Cash" / "Both" and the dropdown arrow never clip
 
 
 def edge_letter(name: str) -> str:
-    """EdgeRaw's absolute column letter for a named column (its `EDGE_COLUMNS` index plus the Pool offset)."""
-    return column_letter(EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET)
+    """EdgeRaw's absolute column letter for a named column (`derived.edge_sheet_letter`)."""
+    return edge_sheet_letter(name)
 
 
 def quote(tab: str) -> str:

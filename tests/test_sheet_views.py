@@ -2,7 +2,12 @@ import re
 
 import pandas as pd
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET, VAL_ADJ_ROSTERABLE_TOP_N
+from dfs.derived import (
+    EDGE_COLUMNS,
+    VAL_ADJ_ROSTERABLE_TOP_N,
+    edge_sheet_letter,
+    edge_vlookup_index,
+)
 from dfs.gps_check import GPS_IMPLIED_MISMATCH_PTS
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_views import (
@@ -867,8 +872,8 @@ def test_slate_grid_movement_columns_read_the_home_teams_edgeraw_row():
     row = client.rows[1]
     assert "VLOOKUP(GamesRaw!$C2," in row[10]
     assert "VLOOKUP(GamesRaw!$C2," in row[11]
-    total_move_end = column_letter(EDGE_COLUMNS.index("TotMove") + EDGE_DATA_OFFSET)
-    spread_move_end = column_letter(EDGE_COLUMNS.index("SpdMove") + EDGE_DATA_OFFSET)
+    total_move_end = edge_sheet_letter("TotMove")
+    spread_move_end = edge_sheet_letter("SpdMove")
     assert f"EdgeRaw!$D:${total_move_end}" in row[10]  # Team through TotMove
     assert f"EdgeRaw!$D:${spread_move_end}" in row[11]  # Team through SpdMove
 
@@ -1035,8 +1040,8 @@ def test_board_slate_team_metrics_average_both_teams_and_derive_letters_from_edg
     row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
     for metric in ("Pace", "PROE", "Expl%", "GameEnv"):
         formula = row[BOARD_SLATE_COLHEADER.index(metric)]
-        letter = column_letter(EDGE_COLUMNS.index(metric) + EDGE_DATA_OFFSET)
-        idx = EDGE_COLUMNS.index(metric) - EDGE_COLUMNS.index("Team") + 1
+        letter = edge_sheet_letter(metric)
+        idx = edge_vlookup_index(metric, "Team")
         assert "AVERAGE(" in formula
         assert f"${letter}," in formula and f",{idx},FALSE" in formula
         assert f"${BOARD_SLATE_AWAY_COL}" in formula and f"${BOARD_SLATE_HOME_COL}" in formula

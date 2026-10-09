@@ -22,9 +22,9 @@ confusing view even though nothing underneath actually moved.
 
 from __future__ import annotations
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import EDGE_SHEET_ORDER, edge_last_letter, edge_sheet_index
 from dfs.sheet_style import EDGE_ROWS
-from dfs.sheets import SheetsClient, column_letter
+from dfs.sheets import SheetsClient
 from dfs.sources.edge import POOL_COLUMN
 
 # Tabs whose entire real range gets one plain filter view (no preset
@@ -50,9 +50,9 @@ _FILTER_VIEW_TITLE = "All"
 
 
 def _edge_col_index(name: str) -> int | None:
-    if name not in EDGE_COLUMNS:
+    if name not in EDGE_SHEET_ORDER:
         return None
-    return EDGE_COLUMNS.index(name) + EDGE_DATA_OFFSET
+    return edge_sheet_index(name)
 
 
 def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
@@ -75,7 +75,7 @@ def add_edge_filter_views(client: SheetsClient, edge_tab: str) -> list[str]:
     if not client.tab_exists(edge_tab):
         return [f"{edge_tab}: not present -- skipped"]
 
-    last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+    last_col = edge_last_letter()
     full_range = f"A1:{last_col}{EDGE_ROWS}"
 
     views: list[tuple[str, dict[int, dict] | None]] = [("Pool picking", None)]
@@ -178,7 +178,7 @@ def add_basic_filters(client: SheetsClient, *, edge_tab: str) -> list[str]:
     results = []
 
     if client.tab_exists(edge_tab):
-        last_col = column_letter(len(EDGE_COLUMNS) - 1 + EDGE_DATA_OFFSET)
+        last_col = edge_last_letter()
         edge_range = f"A1:{last_col}{EDGE_ROWS}"
         client.set_basic_filter(edge_tab, edge_range)
         results.append(f"{edge_tab}: basic filter added over {edge_range}")

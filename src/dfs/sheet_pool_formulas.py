@@ -54,7 +54,7 @@ everywhere, no `FILTER` needed.
 from __future__ import annotations
 
 from dfs import sheet_pool_cells as pc
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import edge_sheet_letter
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN, POOL_TYPE_SORT_ORDER
 from dfs.weekly_reset import PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
@@ -67,9 +67,9 @@ _OVERFLOW_HEADER = "Overflow"
 # Player Pool too.
 _POOL_TYPE_HEADER = "Pool"
 
-_EDGE_NAME_COL = column_letter(EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET)
-_EDGE_POSITION_COL = column_letter(EDGE_COLUMNS.index("Position") + EDGE_DATA_OFFSET)
-_EDGE_SALARY_COL = column_letter(EDGE_COLUMNS.index("Salary") + EDGE_DATA_OFFSET)
+_EDGE_NAME_COL = edge_sheet_letter("Name")
+_EDGE_POSITION_COL = edge_sheet_letter("Position")
+_EDGE_SALARY_COL = edge_sheet_letter("Salary")
 # Part 7.10: `{"Both","Cash","GPP"}`, generated from the one Python list
 # that decides the order -- never hand-written into a formula string, so
 # renaming/reordering a tag only ever means editing POOL_TYPE_SORT_ORDER.

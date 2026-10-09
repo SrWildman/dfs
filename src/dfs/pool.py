@@ -18,14 +18,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dfs.derived import EDGE_COLUMNS, EDGE_DATA_OFFSET
+from dfs.derived import edge_sheet_index
 from dfs.player_join import normalize_name
 from dfs.sheets import SheetsClient, column_letter
 from dfs.sources.edge import POOL_COLUMN
 
-_NAME_IDX = EDGE_COLUMNS.index("Name") + EDGE_DATA_OFFSET
-_POSITION_IDX = EDGE_COLUMNS.index("Position") + EDGE_DATA_OFFSET
-_SALARY_IDX = EDGE_COLUMNS.index("Salary") + EDGE_DATA_OFFSET
+_NAME_IDX = edge_sheet_index("Name")
+_POSITION_IDX = edge_sheet_index("Position")
+_SALARY_IDX = edge_sheet_index("Salary")
 _LAST_NEEDED_COL = column_letter(max(_NAME_IDX, _POSITION_IDX, _SALARY_IDX))
 
 # Generous provisioned depth, same reasoning as EDGE_ROWS elsewhere.
