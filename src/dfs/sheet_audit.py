@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from dfs.sheet_clipping import audit_clipping, fit_tab_widths
 from dfs.sheet_style import AVAIL_CHIPS, BUILDER_WIDTHS, EDGE_WIDTHS, FIELD_FORMATS, FLAG_CHIPS, HEADER_FMT
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
@@ -99,17 +100,9 @@ AUDITED_TABS: list[tuple[str, int]] = [
 # have different meanings, so no row is frozen; each table carries its own header.
 FREEZE_OVERRIDES: dict[str, int] = {"Slate Grid": 0}
 
-# Column names deliberately narrower than their own header text needs
-# (Week 3 fixes, Fix 6.5, 2026-09-23). "Edge ↗" is a utility link column,
-# read once per player at most -- its header text is the column's own
-# lookup-by-name key everywhere in this codebase (renaming it is a much
-# bigger, out-of-scope change; see `sheet_links.edge_row_hyperlink_
-# formula`'s own docstring), so it can't shrink like the per-row cells
-# already have (glyph-only, "↗"). A5 got this to "meaningfully narrower"
-# (60px) but that's still nowhere near "roughly a glyph's width," which
-# needs the header text itself to clip -- an intentional trade-off for
-# this one utility column, not a regression to keep re-flagging.
-TRUNCATION_EXEMPT_COLUMNS: set[str] = {"Edge ↗"}
+# Column names deliberately narrower than their own header text needs. Empty since the actions round
+# (2026-10-09): `Edge ↗` used to be exempt at 28px and is now wide enough for its header; kept as a mechanism.
+TRUNCATION_EXEMPT_COLUMNS: set[str] = set()
 
 # A tab whose real table header is narrower than its full header ROW.
 # Exposure's row 1 has 7 real column headers (A-G) plus a spacer and a
@@ -144,6 +137,10 @@ WIDTHS_DICT_BY_TAB: dict[str, dict[str, int]] = {
     "Player Pool": BUILDER_WIDTHS,
     "Lineups": BUILDER_WIDTHS,
 }
+
+# Tabs that have no single header row (so the checks above do not fit them) but are still read for clipping:
+# a visible cell wider than its column that cannot overflow, headers included (`sheet_clipping`).
+CLIPPING_ONLY_TABS = ["Edge Finder", "Board", "Model Check", "Bankroll", "Season", "Instructions"]
 
 SKIPPED_TABS = [
     # Phase 6 Part 3 (2026-09-22): rebuilt from three side-by-side panels
@@ -251,8 +248,44 @@ def audit_tab(client: SheetsClient, tab: str, *, header_row: int) -> TabAudit:
         if not client.has_chip_rule(tab, letter, list(AVAIL_CHIPS)):
             audit.issues.append(f"Avail column ({letter}) has no matching chip rule")
 
+    for finding in audit_clipping(client, tab, header_row=header_row):
+        audit.issues.append(f"cells cut off (wider than the column, cannot overflow): {finding}")
+
+    return audit
+
+
+def audit_clipping_only(client: SheetsClient, tab: str) -> TabAudit:
+    audit = TabAudit(tab=tab)
+    if not client.tab_exists(tab):
+        audit.present = False
+        return audit
+    for finding in audit_clipping(client, tab):
+        audit.issues.append(f"cells cut off (wider than the column, cannot overflow): {finding}")
     return audit
 
 
 def run_audit(client: SheetsClient) -> list[TabAudit]:
-    return [audit_tab(client, tab, header_row=header_row) for tab, header_row in AUDITED_TABS]
+    audits = [audit_tab(client, tab, header_row=header_row) for tab, header_row in AUDITED_TABS]
+    audits += [audit_clipping_only(client, tab) for tab in CLIPPING_ONLY_TABS]
+    return audits
+
+
+# Tabs whose widths the content-fit pass (`fit_workbook_widths`) must leave alone: Instructions wraps its
+# text, and the Edge Finder is rewritten by every sync, which fits its own widths from the rows it writes
+# (`sheet_edge_finder`).
+FIT_EXCLUDED_TABS = {"Instructions", "Edge Finder"}
+
+
+def fit_workbook_widths(client: SheetsClient) -> str:
+    """The width pass `dfs setup polish` ends with: every tab the clipping audit reads has its cut-off
+    columns widened to fit their real content (`sheet_clipping.fit_tab_widths`), so the audit and the sheet
+    cannot disagree. Never narrows a column and leaves wrapped ones alone."""
+    changed = []
+    tabs = [*AUDITED_TABS, *((tab, None) for tab in CLIPPING_ONLY_TABS)]
+    for tab, header_row in tabs:
+        if tab in FIT_EXCLUDED_TABS:
+            continue
+        widths = fit_tab_widths(client, tab, header_row=header_row)
+        if widths:
+            changed.append(f"{tab} {', '.join(f'{col}={px}' for col, px in sorted(widths.items()))}")
+    return "column widths fitted to content: " + ("; ".join(changed) if changed else "none cut off")

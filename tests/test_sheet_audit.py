@@ -1,4 +1,4 @@
-from dfs.sheet_audit import AUDITED_TABS, TabAudit, audit_tab, run_audit
+from dfs.sheet_audit import AUDITED_TABS, CLIPPING_ONLY_TABS, TabAudit, audit_tab, run_audit
 from dfs.sheet_style import AVAIL_CHIPS, FLAG_CHIPS, HEADER_FMT
 
 _HEADER_BG = HEADER_FMT["backgroundColor"]
@@ -38,6 +38,12 @@ class FakeAuditClient:
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
+
+    def row_count(self, tab_name: str) -> int:
+        return 10
+
+    def column_count(self, tab_name: str) -> int:
+        return len(self._header)
 
     def read_range(self, tab_name: str, a1_range: str):
         return [self._header] if self._header else []
@@ -225,14 +231,15 @@ def test_audit_tab_flags_a_header_narrower_than_its_own_text_needs():
     assert "Name" not in issue and "Pts" not in issue
 
 
-def test_audit_tab_does_not_flag_the_deliberately_truncated_edge_link_column():
-    # Fix 6.5 (Week 3 fixes, 2026-09-23): "Edge ↗" is intentionally
-    # narrowed below what its own header text needs (28px, genuine
-    # glyph-width) -- TRUNCATION_EXEMPT_COLUMNS stops this from being
-    # re-flagged as a regression every audit run.
-    client = FakeAuditClient(header=["Name", "Edge ↗", "Pts"], widths={"A": 165, "B": 28, "C": 62})
-    audit = audit_tab(client, "T", header_row=1)
-    assert not any("truncated" in i for i in audit.issues)
+def test_the_edge_link_column_is_no_longer_exempt_so_a_28px_header_is_flagged_and_56px_is_not():
+    # Actions round, slice 3: "Edge ↗" needs ~52px for its header; 28px used to be accepted and clipped it.
+    narrow = FakeAuditClient(header=["Name", "Edge ↗", "Pts"], widths={"A": 165, "B": 28, "C": 62})
+    assert any("truncated" in i for i in audit_tab(narrow, "T", header_row=1).issues)
+    from dfs.sheet_style import BUILDER_WIDTHS
+
+    assert BUILDER_WIDTHS["Edge ↗"] >= 52
+    wide = FakeAuditClient(header=["Name", "Edge ↗", "Pts"], widths={"A": 165, "B": 58, "C": 62})
+    assert not any("truncated" in i for i in audit_tab(wide, "T", header_row=1).issues)
 
 
 def test_audit_tab_does_not_flag_known_good_narrow_headers():
@@ -296,7 +303,7 @@ def test_flag_and_avail_chip_sets_are_not_empty():
 def test_run_audit_covers_every_registered_tab():
     client = FakeAuditClient(widths={"A": 165, "B": 78, "C": 62, "D": 96, "E": 60})
     results = run_audit(client)
-    assert [r.tab for r in results] == [tab for tab, _ in AUDITED_TABS]
+    assert [r.tab for r in results] == [tab for tab, _ in AUDITED_TABS] + CLIPPING_ONLY_TABS
     assert all(isinstance(r, TabAudit) for r in results)
 
 
