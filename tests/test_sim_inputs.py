@@ -119,7 +119,7 @@ def test_a_lineup_needs_every_slot_filled_with_a_known_distinct_player():
 HEADER = ["Week", "Cash Pts", "Cash Line", "Cash Results", "H2H Entered"]
 
 
-def test_the_cash_line_is_the_median_of_the_last_three_typed_weeks():
+def test_the_cash_line_is_the_median_of_every_typed_week_before_the_slate():
     rows = [
         ["1", "131", "147.56"],
         ["2", "170", "140.16"],
@@ -128,17 +128,29 @@ def test_the_cash_line_is_the_median_of_the_last_three_typed_weeks():
         ["5"],
     ]
     line = si.cash_line_from_results(HEADER, rows, before_week=5)
-    assert (
-        line.weeks == (2, 3, 4) and line.value == 140.16 and not line.is_default
-    )  # median of 140.16/158.7/105.98
-    # the first week is not used once three later ones exist; and only weeks before the slate count
-    assert si.cash_line_from_results(HEADER, rows, before_week=4).weeks == (1, 2, 3)
+    # the whole season so far: the median of 147.56 / 140.16 / 158.7 / 105.98 is the mean of the middle two
+    assert line.weeks == (1, 2, 3, 4) and line.value == 143.86 and not line.is_default
+    # only weeks before the slate count
+    three = si.cash_line_from_results(HEADER, rows, before_week=4)
+    assert three.weeks == (1, 2, 3) and three.value == 147.56
+
+
+def test_the_cash_line_says_its_basis_for_the_notes_and_the_board():
+    rows = [["1", "", "147.56"], ["2", "", "140.16"], ["3", "", "158.7"], ["4", "", "105.98"]]
+    line = si.cash_line_from_results(HEADER, rows, before_week=5)
+    assert line.basis == "cash line 143.9 (season median, 4 weeks)"
+    one = si.cash_line_from_results(HEADER, rows[:1], before_week=2)
+    assert one.basis == "cash line 147.6 (season median, 1 week)"
+    nothing = si.cash_line_from_results(HEADER, [], before_week=2)
+    assert nothing.value == 145 and "placeholder" in nothing.basis  # the fallback is still 145
 
 
 def test_blank_and_non_numeric_cash_lines_are_skipped_not_zeroed():
     rows = [["1", "", ""], ["2", "", "140"], ["3", "", ""], ["4", "", "n/a"], ["5", "", "$150.50"]]
     line = si.cash_line_from_results(HEADER, rows, before_week=6)
-    assert line.weeks == (2, 5) and line.value == pytest.approx(145.25)  # fewer than three: the median of two
+    assert line.weeks == (2, 5) and line.value == pytest.approx(
+        145.25
+    )  # the median of the two that were typed
     assert si.cash_line_from_results(HEADER, [["1", "", "100"], ["2", "", "120"]], before_week=3).value == 110
 
 

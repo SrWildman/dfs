@@ -12,7 +12,8 @@ columns to the right (`Median` .. `P(190+)` after `Min Unique`); those columns a
 both). The number that matches the lineup's type is highlighted, and `dfs lineups late-swap` reads it as
 that lineup's default `--goal` (the flag still overrides it, and both deltas are still shown).
 
-- **Cash line**: the median of your last three typed `Cash Line` values in Results (`sim_inputs`), read only.
+- **Cash line**: the median of every typed `Cash Line` in Results this season (`sim_inputs`), read only; the
+  P(cash) label's note says which ("cash line 141.3 (season median, 4 weeks)").
 - **GPP target**: `[sim] gpp_target` in config.toml (default 190), in the label under the number (`P(190+)`).
 - **Draws**: `sim_inputs.N_SIMS` (20,000) with a fixed seed, so the numbers do not jitter between syncs. All
   the built lineups are simulated in one run: a player in two lineups is one random variable, which is what
@@ -79,8 +80,9 @@ def sim_slots(header: list) -> list[int] | None:
     return indices if indices == list(range(indices[0], indices[0] + len(indices))) else None
 
 
-def lineup_sim_notes(target: float, cash_line_weeks: int = 3) -> dict[str, str]:
-    """The notes on the four labels, keyed by label text (so the GPP note carries the current target)."""
+def lineup_sim_notes(target: float, cash_basis: str | None = None) -> dict[str, str]:
+    """The notes on the four labels, keyed by label text (so the GPP note carries the current target and the
+    P(cash) note the basis of the cash line, e.g. "cash line 141.3 (season median, 4 weeks)")."""
     return {
         MEDIAN_HEADER: (
             "SIMULATED median score of this lineup (half the simulated slates land above it). Outcomes come "
@@ -91,9 +93,10 @@ def lineup_sim_notes(target: float, cash_line_weeks: int = 3) -> dict[str, str]:
             "SIMULATED 90th-percentile score: a good night for this lineup (1 slate in 10 is better)."
         ),
         P_CASH_HEADER: (
-            f"Chance this lineup reaches the cash line: the median of your last {cash_line_weeks} typed "
-            "Cash Line values in Results (read only). Green at 50% or more. Column A of the Total row says "
-            "whether this lineup is a Cash or a GPP lineup; the matching number is highlighted."
+            "Chance this lineup reaches the cash line: the median of every typed Cash Line in Results this "
+            f"season (read only){f', now {cash_basis}' if cash_basis else ''}. Green at 50% or more. Column "
+            "A of the Total row says whether this lineup is a Cash or a GPP lineup; the matching number is "
+            "highlighted."
         ),
         gpp_header(target): (
             f"Chance this lineup scores {target:g} or more, the GPP target (config.toml [sim] gpp_target). "
@@ -213,6 +216,15 @@ def write_lineup_sim(
     portfolio = portfolio_summary(result) if result else None
     with perf.phase("lineup sim: write sheet"):
         client.update_ranges(tab, updates)
+        # the P(cash) label's note carries the cash line's basis (season median, how many weeks)
+        apply_label_notes(
+            client,
+            tab,
+            header_row=header_row,
+            name_blocks=name_blocks,
+            target=gpp_target,
+            cash_basis=cash_line.basis,
+        )
     return LineupSimReport(
         simulated=len(lineups),
         skipped=len(name_blocks) - len(lineups),
@@ -313,7 +325,13 @@ def lineup_types(client: SheetsClient, tab: str, name_blocks: list[tuple[int, in
 
 
 def apply_label_notes(
-    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]], target: float
+    client: SheetsClient,
+    tab: str,
+    *,
+    header_row: int,
+    name_blocks: list[tuple[int, int]],
+    target: float,
+    cash_basis: str | None = None,
 ) -> int:
     """Hover notes on the four labels of the first lineup's Remaining row (the one place that explains them
     all). Returns how many were set."""
@@ -322,7 +340,7 @@ def apply_label_notes(
     if slots is None:
         return 0
     row = name_blocks[0][1] + 2
-    notes = lineup_sim_notes(target)
+    notes = lineup_sim_notes(target, cash_basis)
     for index, label in zip(slots, labels(target), strict=True):
         client.set_note(tab, f"{column_letter(index)}{row}", notes[label])
     return len(slots)

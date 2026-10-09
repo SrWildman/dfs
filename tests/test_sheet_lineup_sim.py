@@ -167,8 +167,13 @@ def test_the_portfolio_is_in_the_report_for_the_board_not_written_to_lineups():
 def test_the_cash_line_is_the_typed_median_and_is_reported():
     client = FakeClient([FULL_A, None])
     report = _run(client)
-    assert report.cash_line.value == 140.16 and report.cash_line.weeks == (2, 3, 4)
-    assert "Weeks 2, 3, 4" in report.line() and "140.16" in report.line()
+    assert report.cash_line.value == 143.86 and report.cash_line.weeks == (
+        1,
+        2,
+        3,
+        4,
+    )  # the whole season so far
+    assert "Weeks 1, 2, 3, 4" in report.line() and "143.86" in report.line()
     default = _run(FakeClient([FULL_A, None], results=[["Week", "Cash Line"], ["1", ""]]))
     assert default.cash_line.is_default
 
@@ -209,8 +214,12 @@ def test_only_one_batched_read_and_one_batched_write_are_needed():
 def test_gpp_label_text_carries_the_target_and_the_retired_headers_are_recognised():
     assert sls.gpp_header(190.0) == "P(190+)" and sls.gpp_header(187.5) == "P(187.5+)"
     assert sls.labels(200.0) == ["Median", "p90", "P(cash)", "P(200+)"]
-    notes = sls.lineup_sim_notes(200.0)
+    notes = sls.lineup_sim_notes(200.0, "cash line 141.3 (season median, 4 weeks)")
     assert set(notes) == set(sls.labels(200.0)) and "200" in notes["P(200+)"]
+    assert (
+        "every typed Cash Line" in notes["P(cash)"]
+        and "cash line 141.3 (season median, 4 weeks)" in notes["P(cash)"]
+    )
     assert all(sls.is_retired_sim_header(h) for h in ("Median", "p90", "P(cash)", "P(190+)", "P(187.5+)"))
     assert not sls.is_retired_sim_header("Edge ↗") and not sls.is_retired_sim_header("P(GPP)")
 

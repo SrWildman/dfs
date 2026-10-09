@@ -652,7 +652,7 @@ are ranked within their team and position by the depth chart's `pos_rank`, ties 
 usage (`Tgt% + Rush%`, the same tiebreak the injury code uses), skipping anyone listed OUT or IR, with ranks past the last
 named role folded into it.
 
-**Lines.** The cash line is the median of the last three typed `Cash Line` values in Results (before the slate's week;
+**Lines.** The cash line is the median of every typed `Cash Line` in Results this season (all weeks before the slate's week;
 read only; Results' Cash columns are cash contests by construction, so no GPP value can be in it). With none typed the
 placeholder 145 is used and the sync says so. The GPP target is `[sim] gpp_target` in `config.toml`, default 190, shown in
 the column header as `P(190+)`.

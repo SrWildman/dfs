@@ -14,10 +14,11 @@ player, keyed by the name Sam types on Lineups:
   the chart lacks, by current usage `Tgt% + Rush%`, the tiebreak `injury_beneficiaries.depth_order` uses),
   skipping anyone listed OUT or IR; ranks past the last named role fold into it.
 
-**Cash line.** The median of the last `CASH_LINE_WEEKS` (3) weeks of Sam's typed `Cash Line` in Results
-(column found by header name; read only). Results' Cash columns are cash contests by construction (`Cash Pts`,
-`Cash Line`, `Cash Results`), so no GPP value can be in it. With no typed line yet the simulator's placeholder
-(145) is used and says so.
+**Cash line.** The median of every typed `Cash Line` in Results this season, all the weeks before the slate's
+week (column found by header name; read only). Results' Cash columns are cash contests by construction (`Cash
+Pts`, `Cash Line`, `Cash Results`), so no GPP value can be in it. It reads "cash line 141.3 (season median, 4
+weeks)" wherever it is shown (`CashLine.basis`). With no typed line yet the simulator's placeholder (145) is
+used and says so.
 
 **Swaps.** `swap_deltas` simulates a lineup and every candidate swap of it in ONE run, so players the versions
 share have identical draws and the difference in P(cash) / P(GPP) is the swap's own effect (this is
@@ -39,7 +40,6 @@ from dfs.sim.simulate import DEFAULT_CASH_LINE, PlayerSpec, simulate_lineups
 
 N_SIMS = 20000  # the sheet's numbers must not jitter between syncs: a fixed number of draws ...
 SEED = 0  # ... and a fixed seed, so the same lineups always read the same
-CASH_LINE_WEEKS = 3
 NOT_PLAYING = frozenset({"OUT", "IR"})
 USAGE_COLUMNS = ("Tgt%", "Rush%")
 NO_CHART_RANK = 999
@@ -58,6 +58,14 @@ class CashLine:
     def is_default(self) -> bool:
         return not self.weeks
 
+    @property
+    def basis(self) -> str:
+        """How the number was reached, for a header note or the Board's portfolio line."""
+        if self.is_default:
+            return f"cash line {self.value:g} (placeholder: no typed Cash Line yet)"
+        count = len(self.weeks)
+        return f"cash line {self.value:.1f} (season median, {count} week{'s' if count != 1 else ''})"
+
 
 def _number(cell: object) -> float | None:
     text = str(cell).replace("$", "").replace(",", "").strip()
@@ -67,15 +75,12 @@ def _number(cell: object) -> float | None:
         return None
 
 
-def cash_line_from_results(
-    header: list, rows: list[list], *, before_week: int, n: int = CASH_LINE_WEEKS
-) -> CashLine:
-    """The median of the last `n` weeks of typed `Cash Line` values strictly BEFORE `before_week`.
+def cash_line_from_results(header: list, rows: list[list], *, before_week: int) -> CashLine:
+    """The median of every typed `Cash Line` value this season strictly BEFORE `before_week`.
 
     `header` is Results' header row and `rows` its data rows; the `Week` and `Cash Line` columns are found by
-    header name. A week with no typed line (or a non-number) is skipped, not counted as zero; with fewer than
-    `n` typed weeks the median is over what exists; with none the placeholder `DEFAULT_CASH_LINE` is returned
-    and flagged."""
+    header name. A week with no typed line (or a non-number) is skipped, not counted as zero; with none at
+    all the placeholder `DEFAULT_CASH_LINE` is returned and flagged."""
     names = [str(h).strip() for h in header]
     if "Week" not in names or "Cash Line" not in names:
         return CashLine(
@@ -92,9 +97,11 @@ def cash_line_from_results(
         return CashLine(
             DEFAULT_CASH_LINE, (), f"no typed Cash Line before Week {before_week}: using the placeholder"
         )
-    weeks = tuple(sorted(typed)[-n:])
+    weeks = tuple(sorted(typed))
     value = round(statistics.median(typed[w] for w in weeks), 2)
-    return CashLine(value, weeks, f"median of your typed Cash Line, Weeks {', '.join(str(w) for w in weeks)}")
+    return CashLine(
+        value, weeks, f"season median of your typed Cash Line, Weeks {', '.join(str(w) for w in weeks)}"
+    )
 
 
 # ---------------------------------------------------------------------------------------------

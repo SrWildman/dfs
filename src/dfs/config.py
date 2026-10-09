@@ -133,7 +133,7 @@ SIM_GPP_TARGET_DEFAULT = 190.0
 
 class SimConfig(BaseModel):
     """`[sim]`: the lineup simulator's one setting. The cash line is NOT here: it is Sam's typed `Cash Line`
-    in Results (the median of the last three weeks), read from the sheet each time."""
+    in Results (the median of every typed week this season), read from the sheet each time."""
 
     model_config = ConfigDict(extra="forbid")
 
