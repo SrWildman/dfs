@@ -152,5 +152,21 @@ def build_name_alias_tab(client: SheetsClient) -> str:
     """Writes the hidden `NameAlias` lookup tab (static NFL facts -- not a
     synced source). Safe to re-run: `write_tab` replaces the whole tab."""
     rows = [ALIAS_HEADER, *dst_alias_rows()]
+    # The bound Apps Script keeps its version stamp in a cell of this tab (`apps_script`), which a full
+    # rewrite would wipe until the sheet is next opened: carry it across.
+    stamp = _read_stamp(client)
     client.write_tab(ALIAS_TAB, rows)
+    if stamp:
+        client.update_range(ALIAS_TAB, STAMP_CELL, [[stamp]])
     return f"{ALIAS_TAB}: {len(rows) - 1} DST alias(es) written"
+
+
+STAMP_CELL = "H1"  # apps_script/Code.gs VERSION_CELL on the NameAlias tab
+
+
+def _read_stamp(client: SheetsClient) -> str:
+    try:
+        cells = client.read_range(ALIAS_TAB, STAMP_CELL)
+    except Exception:  # noqa: BLE001 - a missing tab or a read error just means nothing to carry
+        return ""
+    return str(cells[0][0]).strip() if cells and cells[0] else ""

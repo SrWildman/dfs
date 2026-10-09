@@ -103,3 +103,28 @@ def test_alias_rows_cover_all_32_teams_and_never_map_two_teams_to_one_alias():
     by_key = dict((r[0], r[2]) for r in rows)
     assert "los angeles" not in by_key and "new york" not in by_key  # ambiguous bare cities skipped
     assert by_key["kc"] == "KC" and by_key["kansas city chiefs"] == "KC" and by_key["chiefs dst"] == "KC"
+
+
+def test_rebuilding_the_alias_tab_carries_the_apps_script_version_stamp_across():
+    from dfs.sheet_names import ALIAS_TAB, STAMP_CELL, build_name_alias_tab
+
+    class Client:
+        def __init__(self, stamp):
+            self.stamp, self.calls = stamp, []
+
+        def read_range(self, tab, rng):
+            assert (tab, rng) == (ALIAS_TAB, STAMP_CELL)
+            return [[self.stamp]] if self.stamp else []
+
+        def write_tab(self, tab, rows):
+            self.calls.append("write")
+
+        def update_range(self, tab, rng, rows):
+            self.calls.append(("restore", rng, rows))
+
+    kept = Client("2")
+    build_name_alias_tab(kept)
+    assert kept.calls == ["write", ("restore", STAMP_CELL, [["2"]])]
+    fresh = Client("")
+    build_name_alias_tab(fresh)
+    assert fresh.calls == ["write"]  # nothing to carry, nothing invented
