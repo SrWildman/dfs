@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from dfs import nfl_calendar
+from dfs import nfl_calendar, store
 from dfs.derived import _rosterable_pool_mask, build_edge_frame
 from dfs.kickoff import KICKOFF_TIMEZONE, kickoff_utc
 from dfs.line_movement import LineMovementError, diff_odds
@@ -118,15 +118,19 @@ def as_of(source: str, when: datetime) -> pd.DataFrame | None:
 
 
 def odds_movement(week: int, season: int, when: datetime) -> pd.DataFrame | None:
-    """The week's line movement as of `when`: earliest `nfl_odds` snapshot on/after the week's start
-    date, against the latest one at or before `when` -- the same baseline a live sync uses."""
+    """The week's line movement as of `when`: the week's opening `nfl_odds` snapshot
+    (`store.opening_snapshot`) against the latest one at or before `when` -- the same baseline a live sync
+    uses."""
     start = nfl_calendar.week_start_date(week, season)
     snaps = [(ts, p) for ts, p in snapshot_files("nfl_odds") if ts <= when]
     if not snaps:
         return None
-    baseline = next((p for ts, p in snaps if ts.date() >= start), snaps[0][1])
-    previous, current = read_snapshot(baseline), read_snapshot(snaps[-1][1])
-    if previous is None or current is None:
+    try:
+        previous = store.opening_snapshot("nfl_odds", start, as_of=when).frame
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    current = read_snapshot(snaps[-1][1])
+    if current is None:
         return None
     try:
         return diff_odds(previous, current)
