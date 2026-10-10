@@ -311,3 +311,15 @@ def test_old_numbers_left_on_cleared_lineups_are_blanked_not_skipped():
     assert report.simulated == 0 and client.updates  # the blanks are written
     letters = _slot_letters()
     assert client.updates[f"{letters[0]}11:{letters[-1]}11"] == [["", "", "", ""]]
+
+
+def test_polish_draws_the_scoreboard_after_the_totals_rows_wipe_column_a():
+    """Week 5: the Cash / GPP marker was missing on every Total row. `polish_lineups_totals_rows` clears the
+    typo-guard dropdown and the fill from column A of each Total row, and the scoreboard (which puts the
+    marker there) ran BEFORE it, so the marker never survived a polish."""
+    import inspect
+
+    import dfs.cli
+
+    source = inspect.getsource(dfs.cli.sheets_polish)
+    assert source.index("polish_lineups_totals_rows(") < source.index("format_sim_columns(")

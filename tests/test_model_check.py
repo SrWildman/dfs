@@ -9,23 +9,28 @@ def _race(rows):
     return pd.DataFrame(rows, columns=["Source", "Position", "n", "Rho", "MAE", "Bias"])
 
 
-def test_the_race_verdict_names_the_best_projection_and_says_clear_only_with_a_gap_and_enough_players():
+def test_the_race_verdict_leads_with_calpts_against_tffb_then_names_a_better_third_source():
     from dfs.sheet_model_check import race_verdict
 
     race = _race(
         [
             ("TFFB", "RB", 182, 0.64, 5.23, -2.3),
-            ("CalPts", "RB", 182, 0.64, 4.70, -1.0),
-            ("AggPts", "RB", 182, 0.63, 5.00, -1.5),
+            ("CalPts", "RB", 182, 0.64, 4.69, -1.0),
+            ("AggPts", "RB", 182, 0.63, 4.50, -1.5),  # lower than CalPts: the second sentence
             ("TFFB", "QB", 78, 0.33, 5.74, -1.0),
-            ("CalPts", "QB", 78, 0.31, 5.84, -1.0),  # the best is 0.10 ahead: too close
+            ("CalPts", "QB", 78, 0.31, 5.84, -1.0),  # TFFB is 0.10 ahead: too close
             ("TFFB", "WR", 40, 0.6, 6.0, 0.0),
             ("CalPts", "WR", 40, 0.6, 5.0, 0.0),  # a clear gap but only 40 players
+            ("TFFB", "TE", 90, 0.5, 4.0, 0.0),
+            ("CalPts", "TE", 90, 0.5, 4.4, 0.0),  # TFFB clearly better
         ]
     )
     text = race_verdict(race)
-    assert "RB: CalPts clearly best (MAE 4.70 vs AggPts 5.00)." in text
-    assert "QB: too close to call." in text and "WR: too close to call." in text
+    assert "RB: CalPts beats TFFB clearly, MAE 4.69 vs 5.23." in text
+    assert "Lowest of all: AggPts (MAE 4.50, 0.19 better than CalPts)." in text
+    assert "QB: CalPts and TFFB are too close to call, MAE 5.84 vs 5.74." in text
+    assert "WR: too early to call (40 players), MAE 5.00 vs 6.00." in text  # a clear gap, too few players
+    assert "TE: TFFB beats CalPts clearly, MAE 4.00 vs 4.40." in text
 
 
 def test_the_reliability_verdict_says_which_way_each_measure_runs_and_when_nothing_is_adjusted():

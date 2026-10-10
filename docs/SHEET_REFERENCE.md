@@ -893,8 +893,9 @@ scored, rosterable-pool players scored / did not play / not found), the **Projec
 published `Ceiling`, with its 90% interval, `Ceiling is really the Nth percentile` and `Ceiling skill (80th/85th/90th pct)` -- the headline), **Projection accuracy** (bias, MAE,
 calibration slope, R squared, Spearman, calibration buckets), **ValAdj** quintiles, **Sources compared** (labelled
 with the weeks it covers) and the AggPts-vs-TFFB head-to-head, **Salary multiple** hit rates, **Flags**, and **Signals** (`FADE↓`, `USAGE↑`, `USAGE↓`, `INJ+` confirmed and questionable, matchup top 8 against bottom 4, then an `Unflagged QB/RB/WR/TE` baseline row per position: n, mean actual minus ProjPts and minus CalPts, hit rate; a baseline has no direction, so no hit rate). **Every block opens with one bold computed sentence** (usability slice 6; `sheet_model_check.race_verdict` /
-`reliability_verdict` / `signals_verdict` and the one-liners beside them): the race says a projection is "clearly best" for a
-position only at an MAE gap of `RACE_CLEAR_GAP` = 0.15 with n >= `RACE_CLEAR_MIN_N` = 50, else "too close to call"; the reliability line
+`reliability_verdict` / `signals_verdict` and the one-liners beside them): the race leads with Sam's question, CalPts against TFFB, per position ("RB: CalPts beats TFFB clearly, MAE 4.69 vs 5.23."), and says
+"clearly" only at an MAE gap of `RACE_CLEAR_GAP` = 0.15 with n >= `RACE_CLEAR_MIN_N` = 50 (else "too close to call", or "too early to call" under 50 players); a second
+sentence names the lowest-MAE source overall only when it is a third one (AggPts, say); the reliability line
 says which way each probability runs (n-weighted gap, in points) and "no adjustment until ~Week 8"; the signals line compares each
 signal with n >= `VERDICT_MIN_N` = 30 against its position's unflagged baseline. Every
 table shows n; a row with n < 30 is "thin" and drawn in muted italic. Sits after Season and Results in the tab strip

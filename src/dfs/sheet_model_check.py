@@ -154,21 +154,35 @@ class _Builder:
 
 
 def race_verdict(race: pd.DataFrame) -> str:
-    """Per position, which projection has the lowest MAE and by how much against the runner-up: "clearly best"
-    when the gap is at least `RACE_CLEAR_GAP` with n >= `RACE_CLEAR_MIN_N`, else "too close to call"."""
+    """Sam's question is whether CalPts beats TFFB, so each position leads with exactly that: "RB: CalPts
+    beats TFFB clearly, MAE 4.69 vs 5.23." ("clearly" needs a gap of at least `RACE_CLEAR_GAP` with n >=
+    `RACE_CLEAR_MIN_N`; a smaller gap is "too close to call", fewer players "too early to call"). A second
+    sentence names the lowest-MAE source overall only when it is neither of the two (AggPts, say)."""
     parts = []
     for position in calibration.POSITIONS:
-        part = race[race["Position"] == position].sort_values("MAE")
-        if len(part) < 2:
+        part = race[race["Position"] == position]
+        by_source = part.set_index("Source")
+        if "CalPts" not in by_source.index or "TFFB" not in by_source.index:
             continue
-        best, second = part.iloc[0], part.iloc[1]
-        if second["MAE"] - best["MAE"] >= RACE_CLEAR_GAP and best["n"] >= RACE_CLEAR_MIN_N:
-            parts.append(
-                f"{position}: {best['Source']} clearly best (MAE {best['MAE']:.2f} vs "
-                f"{second['Source']} {second['MAE']:.2f})."
-            )
+        cal, tffb = by_source.loc["CalPts"], by_source.loc["TFFB"]
+        n = min(cal["n"], tffb["n"])
+        gap = tffb["MAE"] - cal["MAE"]  # positive: CalPts is closer to what happened
+        mae = f"MAE {cal['MAE']:.2f} vs {tffb['MAE']:.2f}"
+        if n < RACE_CLEAR_MIN_N:
+            line = f"{position}: too early to call ({int(n)} players), {mae}."
+        elif gap >= RACE_CLEAR_GAP:
+            line = f"{position}: CalPts beats TFFB clearly, {mae}."
+        elif -gap >= RACE_CLEAR_GAP:
+            line = f"{position}: TFFB beats CalPts clearly, MAE {tffb['MAE']:.2f} vs {cal['MAE']:.2f}."
         else:
-            parts.append(f"{position}: too close to call.")
+            line = f"{position}: CalPts and TFFB are too close to call, {mae}."
+        best = part.sort_values("MAE").iloc[0]
+        if best["Source"] not in ("CalPts", "TFFB") and best["n"] >= RACE_CLEAR_MIN_N:
+            line += (
+                f" Lowest of all: {best['Source']} (MAE {best['MAE']:.2f}, "
+                f"{cal['MAE'] - best['MAE']:.2f} better than CalPts)."
+            )
+        parts.append(line)
     return " ".join(parts) or "Not enough rows to compare the projections yet."
 
 

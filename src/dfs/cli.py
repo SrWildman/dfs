@@ -1210,22 +1210,6 @@ def sheets_polish(
             )
         )
         results.append(
-            format_sim_columns(
-                client,
-                cfg.lineups.builder_tab,
-                header_row=lineups_header_row,
-                name_blocks=LINEUPS_NAME_BLOCKS,
-            )
-        )
-        sim_notes = apply_label_notes(
-            client,
-            cfg.lineups.builder_tab,
-            header_row=lineups_header_row,
-            name_blocks=LINEUPS_NAME_BLOCKS,
-            target=cfg.sim.gpp_target,
-        )
-        results.append(f"{cfg.lineups.builder_tab}: {sim_notes} simulator label note(s)")
-        results.append(
             polish_lineups_identity_cells(
                 client,
                 cfg.lineups.builder_tab,
@@ -1243,6 +1227,24 @@ def sheets_polish(
                 salary_cap=cfg.lineups.salary_cap,
             )
         )
+        # After the totals rows (not before): that step clears column A of each Total row (the typo-guard
+        # dropdown it inherited), which is where the Cash / GPP marker lives.
+        results.append(
+            format_sim_columns(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
+        sim_notes = apply_label_notes(
+            client,
+            cfg.lineups.builder_tab,
+            header_row=lineups_header_row,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            target=cfg.sim.gpp_target,
+        )
+        results.append(f"{cfg.lineups.builder_tab}: {sim_notes} simulator label note(s)")
         if cfg.bankroll and cfg.bankroll.cash and cfg.bankroll.gpp:
             results.append(
                 polish_bankroll(
