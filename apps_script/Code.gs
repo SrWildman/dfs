@@ -22,7 +22,7 @@
 // functions at the bottom are unit-tested with node (tests/test_apps_script.py).
 
 // Bump this whenever this file changes: `dfs doctor` warns when the sheet's stamp is older.
-var DFS_SCRIPT_VERSION = 2;
+var DFS_SCRIPT_VERSION = 3;
 
 var VERSION_RANGE_NAME = 'DFS_SCRIPT_VERSION';
 var VERSION_TAB = 'NameAlias'; // a hidden tab nothing rewrites
@@ -168,26 +168,51 @@ function handlePoolEdit_(range) {
     var formula = poolFormula(row, columnLetter(idCol), EDGE_RAW_TAB, columnLetter(edge.poolCol),
       columnLetter(edge.idCol));
     if (id === '') {
-      cell.setFormula(formula);
+      restoreFormula_(cell, formula);
       toast_('That row has no player, nothing changed.');
       continue;
     }
     if (action.kind === 'invalid') {
-      cell.setFormula(formula);
+      restoreFormula_(cell, formula);
       toast_('"' + values[i][0] + '" is not Cash, GPP or Both, nothing changed.');
       continue;
     }
     var edgeRow = findEdgeRow_(edge, id);
     if (edgeRow === -1) {
-      cell.setFormula(formula);
+      restoreFormula_(cell, formula);
       toast_('Could not find that player on ' + EDGE_RAW_TAB + ', nothing changed.');
       continue;
     }
     var poolCell = edge.sheet.getRange(edgeRow, edge.poolCol);
     if (action.kind === 'remove') poolCell.clearContent(); else poolCell.setValue(action.value);
-    cell.setFormula(formula);
+    restoreFormula_(cell, formula);
     var name = edge.nameCol === -1 ? id : edge.sheet.getRange(edgeRow, edge.nameCol).getValue();
     toast_(action.kind === 'remove' ? 'Removed ' + name : name + ': ' + action.value);
+  }
+}
+
+/**
+ * Puts the Pool formula back in a mirrored cell. The cell is a strict Cash / GPP / Both dropdown, and Apps
+ * Script refuses to write a result the list does not hold (a player taken out of the pool shows a blank), with
+ * "The data you entered in cell A741 violates the data validation rules": the edit then left the cell empty.
+ * So: let EdgeRaw settle first, try the plain write, and if the validation refuses it, lift the rule for the one
+ * write and put it back. (`dfs setup polish` now writes these dropdowns as warnings, so this is the backstop for
+ * a sheet that has not been re-polished.)
+ */
+function restoreFormula_(cell, formula) {
+  SpreadsheetApp.flush();
+  try {
+    cell.setFormula(formula);
+    return;
+  } catch (err) {
+    // the validation refused the formula's current result: fall through
+  }
+  var rule = cell.getDataValidation();
+  cell.clearDataValidations();
+  try {
+    cell.setFormula(formula);
+  } finally {
+    if (rule) cell.setDataValidation(rule);
   }
 }
 
