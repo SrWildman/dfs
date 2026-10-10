@@ -484,7 +484,8 @@ def _check_pool_cells_hold_the_formula(
         for index, row in enumerate(formulas):
             cell = str(row[0]).strip() if row else ""
             has_id = index < len(ids) and bool(ids[index]) and str(ids[index][0]).strip() != ""
-            if has_id and cell != "Pool" and not cell.startswith("="):  # "Pool" is the header
+            is_header = cell == "Pool" or (index < len(ids) and str(ids[index][0]).strip() == "Id")
+            if has_id and not is_header and not cell.startswith("="):  # a header row has "Id" / "Pool"
                 plain.append(index + 1)  # a typed value, or empty (a failed restore left it blank)
         if plain:
             first = f"{pool_col}{plain[0]}"

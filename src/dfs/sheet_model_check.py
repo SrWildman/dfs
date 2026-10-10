@@ -25,6 +25,7 @@ import pandas as pd
 
 from dfs import calibration, results_signals
 from dfs import results_analysis as ra
+from dfs.sheet_clipping import fit_tab_widths
 from dfs.sheet_column_notes import MODEL_CHECK_NOTES, apply_notes_to_values
 from dfs.sheets import SheetsClient
 
@@ -717,4 +718,7 @@ def write_model_check(client: SheetsClient, layout: Layout, tab: str = MODEL_CHE
         apply_notes_to_values(client, tab, row, layout.rows[row - 1], MODEL_CHECK_NOTES)
         for row in layout.header_rows
     )
+    # The widths above are reset on every write, so fit any column this run's text cuts off (a long R6 signal
+    # name in A, a long metric header): the polish-time fit does not survive a rewrite of the tab.
+    fit_tab_widths(client, tab)
     return f"{tab}: built ({len(layout.rows)} rows, {len(layout.thin_rows)} thin, {notes} header note(s))"

@@ -45,7 +45,7 @@ POOL_TAB = pc.POOL_TAB
 # `fit_widths` does it.
 NAME_MIN, NAME_MAX = 155, 170
 WHY_MIN, WHY_MAX = 220, 300
-CHIP_MAX = 140
+CHIP_MAX = 160  # Sam said 140, but the audit (final say) cut "GPP leverage ★ (Proj ▼)", which needs ~153
 BUDGET = 1270
 SLOT_PX = 64
 WIDTHS = {

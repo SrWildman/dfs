@@ -1078,3 +1078,16 @@ def test_r6_signal_rows_do_not_repeat_the_subheader_in_their_why():
     assert block_rows and all(layout.rows[r - 1][why] in ("", "1 game") for r in block_rows)
     first = layout.player_rows[0]  # the signal shows in a few words on his ordinary rows
     assert "targets up 2.2+/game (usually fades back)" in layout.rows[first - 1][why]
+
+
+def test_every_meaning_row_carries_its_text_in_column_c():
+    """A label with no detail left the 'What it is' / 'Do' rows blank on Week 5 (2026-10-09)."""
+    edge = _edge([_player(i) for i in range(1, 5)])
+    layout = eft.build_layout(_inputs(edge, matchups=_matchups()))
+    assert layout.meaning_rows
+    for row in layout.meaning_rows:
+        cells = layout.rows[row - 1]
+        assert cells[eft.DETAIL_INDEX], (row, cells[0])
+    labels = [layout.rows[r - 1][0] for r in layout.meaning_rows]
+    assert "What it is" in labels and "Do" in labels
+    assert not any("with Set" in str(c) for r in layout.rows for c in r)  # the Set column is gone

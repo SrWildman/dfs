@@ -641,3 +641,18 @@ def test_doctor_leaves_an_expanded_group_alone():
         _visibility_issues(groups={"EdgeRaw": expanded}, hidden_names={"EdgeRaw": set(EDGE_HIDDEN_HELPERS)})
         == []
     )
+
+
+def test_run_doctor_does_not_flag_a_section_header_row_whose_id_cell_says_id():
+    """Week 5 (2026-10-09): the matchup section's header row has an empty Pool cell and "Id" in the Id
+    column."""
+    from dfs.edge_finder_tab import ID_COL, POOL_COL
+
+    rows = {("Edge Finder", f"{ID_COL}1:{ID_COL}30"): [["Id"], [""], ["1001"]]}
+    formulas = {("Edge Finder", f"{POOL_COL}1:{POOL_COL}30"): [[""], [""], ['=IF($O3="","")']]}
+    issues = run_doctor(
+        FakeDoctorClient(_ALL_GOOD_TABS, rows={**_lineups_rows(), **rows}, formulas=formulas),
+        _base_config(),
+        title="Week 5",
+    )
+    assert not [i for i in issues if i.check == "pool-cell-plain-value"]

@@ -233,7 +233,7 @@ MEANINGS = {
     ),
     "MATCHUPS (CONTEXT)": (
         "How soft or tough each offense's matchup is: Soft is the 8 best, Tough the 4 worst. Context only, "
-        "it moves no projection.  ·  Do: open a team (click +) to add its top players with Set."
+        "it moves no projection.  ·  Do: open a team (click +) to see its top players and set their Pool."
     ),
     "CONTEXT SIGNALS": (
         "FADE↓ (TEs), USAGE↑ and USAGE↓ (RBs): unproven chips.  ·  Do: use them as a tiebreaker at most; "
@@ -548,9 +548,10 @@ class _Builder:
         if link:
             self.layout.all_links[row] = link
         what, _, do = MEANINGS[short].partition("  ·  ")
-        self.text_row(what, self.layout.meaning_rows, label="What it is")
+        self.text_row(what, self.layout.meaning_rows, label="What it is", detail=what)
         if do:
-            self.text_row(do.removeprefix("Do: "), self.layout.meaning_rows, label="Do")
+            do = do.removeprefix("Do: ")
+            self.text_row(do, self.layout.meaning_rows, label="Do", detail=do)
         self._section = (short, self.last_row)
 
     @property

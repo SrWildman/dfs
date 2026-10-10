@@ -306,15 +306,15 @@ def test_edge_and_do_take_the_width_of_their_longest_real_value_capped():
 
 
 def test_a_wider_slot_is_paid_for_by_why_then_name_never_by_the_budget():
-    edge = _edge([_player(1, Name="Jacory Croskey-Merritt", Edge="INJ+ USAGE↑ Proj ▼ FADE↓ more chips")])
-    layout = eft.build_layout(_inputs(edge))
+    layout = eft.build_layout(_inputs(_edge([_player(1, Name="Jacory Croskey-Merritt", Edge="INJ+")])))
     base = writer.fit_widths(layout)
     row = layout.rows[layout.player_rows[0] - 1]
+    row[eft.FIRST_TRAILING - 1] = "INJ+ USAGE↑ Proj ▼ FADE↓ more chips"  # a long chip stack in Edge
     for slot in (eft.FIRST_TRAILING - 4, eft.FIRST_TRAILING - 3, eft.FIRST_TRAILING - 2):
         row[slot] = "1234567890123"  # a number never overflows: the slot must widen to show it
     wide = writer.fit_widths(layout)
-    assert wide["K"] > base["K"] and wide["J"] > base["J"]  # the slots grew to show it ...
-    assert wide[eft.WHY_COL] < base[eft.WHY_COL]  # ... and Why paid for it
+    assert wide["K"] > base["K"] and wide["J"] > base["J"] and wide[eft.EDGE_COL] > base[eft.EDGE_COL]
+    assert wide[eft.WHY_COL] < base[eft.WHY_COL]  # Why paid for it ...
     assert wide[eft.WHY_COL] >= writer.WHY_MIN
     assert _through_why(wide) <= writer.BUDGET or wide[eft.WHY_COL] == writer.WHY_MIN
 

@@ -3106,7 +3106,7 @@ def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:
 _MOVEMENT_WIDTHS = {  # the whole table fits ~1,200 px: nothing is off-screen at a laptop width
     "Team": 56,
     "Opp": 56,
-    "Implied now": 88,
+    "Implied now": 94,
     "Implied move": 96,
     "Total move": 84,
     "Spread move": 102,  # not 100: the audit reads exactly 100 as "never set"
