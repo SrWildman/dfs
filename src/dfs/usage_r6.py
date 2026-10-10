@@ -360,6 +360,19 @@ def chip_why(chip: Chip) -> str:
     return text + (f"; {WEAKER}" if chip.weaker else "")
 
 
+def signal_short(signal: PlayerSignal, chips: dict[str, Chip]) -> str:
+    """The first signal that fired, in a few words for a `Why` cell: `targets up 2.2+/game (usually fades
+    back)`; `R6 signals point both ways` when they disagree; "" when nothing fired."""
+    if signal.conflicted:
+        return "R6 signals point both ways"
+    if not signal.fired:
+        return ""
+    chip = chips[signal.fired[0]]
+    text = f"{threshold_text(chip).removesuffix(' over the last 3')} ({READS[(chip.shape, chip.direction)]})"
+    more = len(signal.fired) - 1
+    return text + (f" +{more} more" if more else "")
+
+
 def signal_why(signal: PlayerSignal, chips: dict[str, Chip]) -> str:
     """Every signal that fired, in plain words, one `Why`. Both directions: no chip, and it says so."""
     parts = [chip_why(chips[c]) for c in signal.fired]

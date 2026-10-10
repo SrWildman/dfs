@@ -178,13 +178,18 @@ def _why(layout, row):
     return layout.notes[row]
 
 
+def _row_text(row):
+    """A text row as it reads on the sheet: the label in A, then the description from column C."""
+    return " ".join(str(c) for c in (row[0], row[eft.DETAIL_INDEX]) if str(c))
+
+
 def _group(layout, key):
     return [g for g in layout.groups if g.key == key]
 
 
 def test_the_empty_state_layout_has_every_section_and_says_nothing_yet():
     layout = eft.build_layout(None)
-    titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
+    titles = [layout.rows[r - 1][0] for r in layout.section_rows]  # the label; the description is in C
     assert titles == [
         "CASH CORE",
         "GPP UPSIDE",
@@ -226,7 +231,7 @@ def test_the_columns_are_pool_name_pos_team_salary_own_numbers_do_why_id_and_a_h
         "Hit3x%",
         "Bust%",
         "ProjPts",
-        "Rank",
+        "",  # the unused slot sits before Edge, which is always the last slot
         "Edge",
     ]
     assert header[12:15] == ["Do", "Why", "Id"]  # Why is last of the visible columns
@@ -243,7 +248,7 @@ def test_the_counts_are_the_rosterable_pool_not_every_listing():
     finally:
         eft.rosterable = saved
     subs = [layout.rows[r - 1][0] for r in layout.subheader_rows]
-    assert "WR  —  top 6 of 6" in subs  # 10 listed, 6 rosterable
+    assert "WR · top 6 of 6" in subs  # 10 listed, 6 rosterable
     names = {layout.rows[r - 1][NAME] for r in layout.player_rows}
     assert not names & {"WR1", "WR2", "WR3", "WR4"}
 
@@ -253,7 +258,7 @@ def test_visible_rows_follow_roster_need_and_the_rest_sit_in_a_collapsed_nested_
     layout = eft.build_layout(_inputs(edge))
     assert eft.VISIBLE_PER_POSITION == {"QB": 6, "RB": 10, "WR": 12, "TE": 6, "DST": 6}
     sub = [layout.rows[r - 1][0] for r in layout.subheader_rows if layout.rows[r - 1][0].startswith("WR")][0]
-    assert sub == "WR  —  top 12 of 30"
+    assert sub == "WR · top 12 of 30"
     header = [r for r in layout.overflow_rows if "WRs" in layout.rows[r - 1][NAME]][0]
     assert layout.rows[header - 1][NAME] == "▸ 18 more WRs (click + to show)"
     (overflow,) = _group(layout, "CASH CORE|WR|more")
@@ -281,7 +286,7 @@ def test_every_rosterable_player_is_written_up_to_forty_a_position():
     assert cash_wr
 
 
-def test_rank_is_against_the_position_pool_and_the_verbs_follow_the_rules():
+def test_the_verbs_follow_the_rules_and_there_is_no_rank_column_the_rows_are_in_order():
     edge = _edge(
         [
             _player(1, **{"Hit3x%": 60.0, "Bust%": 10.0}),
@@ -291,9 +296,10 @@ def test_rank_is_against_the_position_pool_and_the_verbs_follow_the_rules():
         ]
     )
     layout = eft.build_layout(_inputs(edge))
-    do, rank = _col(eft.DO_COL), S0 + 4
+    do = _col(eft.DO_COL)
     by_name = {layout.rows[r - 1][NAME]: layout.rows[r - 1] for r in layout.player_rows[:4]}
-    assert by_name["WR1"][rank] == "#1 of 4" and by_name["WR4"][rank] == "#4 of 4"
+    assert not any("Rank" in str(c) or str(c).startswith("#") for row in layout.rows for c in row)
+    assert list(by_name) == ["WR1", "WR2", "WR3", "WR4"]  # the order is the rank
     assert [by_name[n][do] for n in ("WR1", "WR2", "WR3", "WR4")] == [
         "Cash add",
         "Cash option",
@@ -320,7 +326,7 @@ def test_gpp_verbs_add_for_a_top_quartile_boom_and_leverage_adds_the_star():
     unpublished = eft.build_layout(_inputs(_edge([_player(i, **{"Boom%": 10.0 + i}) for i in range(1, 9)])))
     assert not any(eft.STAR in str(c) for r in unpublished.rows for c in r[S0:])
     assert any("ownership not out yet" in note for note in unpublished.notes.values())
-    assert any(eft.OWN_NOT_OUT in str(r[0]) for r in unpublished.rows)  # the status line says so too
+    assert any(eft.OWN_NOT_OUT in _row_text(r) for r in unpublished.rows)  # the status line says so too
 
 
 def test_a_player_row_carries_the_hidden_id_a_short_why_the_full_note_and_a_do_verb():
@@ -328,7 +334,9 @@ def test_a_player_row_carries_the_hidden_id_a_short_why_the_full_note_and_a_do_v
     row_number = _rows_named(layout, "WR7")[0]
     row = layout.rows[row_number - 1]
     assert row[_col(eft.ID_COL)] == 7 and row[_col(eft.POOL_COL)] == ""  # the writer fills the Pool formula
-    assert row[_col(eft.WHY_COL)] == "CalPts 1.0 over TFFB"  # what no other column shows, number first
+    assert (
+        row[_col(eft.WHY_COL)] == ""
+    )  # nothing to add (no calibration): blank rather than repeat CalPts/ProjPts
     assert "to reach 3x salary" in _why(layout, row_number)  # the whole reason is the note
     assert row[_col(eft.DO_COL)] in ("Cash add", "Cash option")
 
@@ -369,9 +377,9 @@ def test_a_thin_week_verdict_needs_history_and_a_best_below_the_typical_best():
     assert not none.verdict_rows  # no history: no verdict, never invented
     layout = eft.build_layout(_inputs(edge, history={"WR": (41.0, 4)}))
     (row,) = layout.verdict_rows
-    assert (
-        layout.rows[row - 1][0] == "Thin week at WR: best cash odds 34% (typical best ~41%, 4 earlier weeks)"
-    )
+    # the label fits the frozen pane; the detail starts in column C
+    assert layout.rows[row - 1][0] == "Thin week at WR"
+    assert layout.rows[row - 1][eft.DETAIL_INDEX] == "best cash odds 34% (typical best ~41%, 4 earlier weeks)"
     strong = eft.build_layout(_inputs(edge, history={"WR": (30.0, 4)}))
     assert not strong.verdict_rows
     assert eft.cash_verdict("RB", 10.0, {"WR": (41.0, 4)}) is None
@@ -427,7 +435,7 @@ def test_beneficiaries_confirmed_first_then_questionable_muted_with_a_blank_pric
     assert [layout.rows[r - 1][do] for r in injury] == ["Bump ▲", "Watch"]
     assert injury[1] in layout.muted_rows
     confirmed, questionable = (layout.rows[r - 1] for r in injury)
-    assert confirmed[S0 + 2] == "with-or-without (3 g)" and confirmed[S0 + 3] == "yes"  # Method, Priced in?
+    assert confirmed[S0 + 2] == "w/wo (3 g)" and confirmed[S0 + 3] == "yes"  # Method, Priced?
     assert questionable[S0 + 3] == ""  # unknown reads blank, not the word "unknown"
     assert "Y out: +0.0 carries and +6.0 expected points a game" in _why(layout, injury[0])
     assert layout.rows[injury[0] - 1][_col(eft.WHY_COL)].startswith("Y out")
@@ -517,22 +525,22 @@ def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
         f"{eft.column_letter(S0 + 3)}{row_no}": ('+0" pts";-0" pts";0" pts"', "NUMBER"),
     }
     assert row[_col(eft.DO_COL)] == "Watch"
-    assert row[_col(eft.WHY_COL)] == "A bigger jump than 85% of weeks"
+    assert row[_col(eft.WHY_COL)] == "A bigger jump than 85% of weeks · often fades"
     why = _why(layout, _rows_named(layout, "WR7")[-1])
     assert why.startswith("Tgt% 18% → 27% over the last 3 (▲, a bigger jump than 85% of weeks).")
     assert "Historically projections over-react to jumps like this." in why
     quiet = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends(Direction=""))))
-    assert any("moved by more than R6's measured band" in str(r[0]) for r in quiet.rows)
+    assert any("moved by more than R6's measured band" in _row_text(r) for r in quiet.rows)
 
 
 def test_a_player_too_new_for_an_arrow_is_counted_not_guessed():
     edge = _edge([_player(7)])
     layout = eft.build_layout(_inputs(edge, r6=_r6(short_games=4)))
-    text = " ".join(str(r[0]) for r in layout.rows)
-    assert "Not enough games: 4 pool players have fewer than 9 earlier games, so they get no arrow" in text
+    text = " ".join(_row_text(r) for r in layout.rows)
+    assert "Not enough games 4 pool players have fewer than 9 earlier games, so they get no arrow" in text
     missing = eft.build_layout(_inputs(edge))  # no R6 data at all: the tab says how to get it
-    assert any("need the R6 data" in str(r[0]) for r in missing.rows)
-    assert any("R6 usage signals are not available this sync" in str(r[0]) for r in missing.rows)
+    assert any("need the R6 data" in _row_text(r) for r in missing.rows)
+    assert any("R6 usage signals are not available this sync" in _row_text(r) for r in missing.rows)
 
 
 def _signal(fade=(), bump=()):
@@ -605,10 +613,15 @@ def test_context_signals_list_each_of_the_twelve_r6_signals_as_its_own_sub_block
     inputs = _inputs(edge, r6=_r6(signals={"g1": _signal(fade=["tgt_pg|TE|change_up"])}))
     inputs.players["GsisId"] = ["g1"]
     layout = eft.build_layout(inputs)
-    subs = [layout.rows[r - 1][0] for r in layout.subheader_rows if "flagged" in str(layout.rows[r - 1][0])]
+    subs = [
+        _row_text(layout.rows[r - 1])
+        for r in layout.subheader_rows
+        if "flagged" in str(layout.rows[r - 1][0])
+    ]
     assert len(subs) == 12
-    te_up = [s for s in subs if s.startswith("TE targets up 2.2+/game")][0]
+    te_up = [s for s in subs if s.startswith("TE · 1 flagged") and "targets up 2.2+/game" in s][0]
     assert "1 flagged" in te_up and "FADE (Proj ▼)" in te_up and "−0.8 pts" in te_up.replace("-", "−")
+    assert len(layout.subheader_rows) == len({r for r in layout.subheader_rows})  # no continuation rows here
     assert any("weaker evidence" in s for s in subs) and any(
         "tested on 2014-21 and 2022-25" in s for s in subs
     )
@@ -618,7 +631,7 @@ def test_context_signals_list_each_of_the_twelve_r6_signals_as_its_own_sub_block
 def test_every_confirmed_absence_is_listed_muted_as_context_with_the_historical_line():
     edge = _edge([_player(1), _player(2)])
     layout = eft.build_layout(_inputs(edge, absences=_absences()))
-    text = [str(c) for r in layout.rows for c in r if c != ""]
+    text = [_row_text(r) for r in layout.rows]
     assert any("Absent regulars" in t and "no points are moved for targets" in t for t in text)
     row = [r for r in layout.player_rows if layout.rows[r - 1][_col(eft.DO_COL)] == "Out"][0]
     assert row in layout.muted_rows  # context is muted, never an edge
@@ -727,7 +740,13 @@ def test_the_status_lines_are_for_sam_in_eastern_time_with_the_final_sync_remind
     }
     edge = _edge([_player(1, GameStart="2026-10-11T13:00:00Z")])
     layout = eft.build_layout(_inputs(edge, status=status))
-    lines = [layout.rows[r - 1][0] for r in layout.status_rows]
+    assert [layout.rows[r - 1][0] for r in layout.status_rows][:4] == [
+        "Data",
+        "Injury report",
+        "CalPts",
+        "Final sync",
+    ]
+    lines = [layout.rows[r - 1][eft.DETAIL_INDEX] for r in layout.status_rows]
     assert lines[0] == (
         "Stats through Week 4 · Injuries: practice reports only until Friday · "
         "Projections updated Wed 10:46 pm ET"
@@ -737,7 +756,7 @@ def test_the_status_lines_are_for_sam_in_eastern_time_with_the_final_sync_remind
         lines[3]
         == "Run the final `dfs sync --live` about 90 minutes before kickoff. First kickoff Sun 1:00 pm ET."
     )
-    assert "not recorded" in eft._injury_report_line(None)
+    assert "Not recorded" in eft._injury_report_line(None)
 
 
 def _absences():
@@ -872,7 +891,7 @@ def test_leverage_and_chalk_say_ownership_is_not_out_and_list_nobody_until_it_is
     assert (
         _section_rows(layout, "LEVERAGE PLAYS") == [] and _section_rows(layout, "CHALK TO FADE OR EAT") == []
     )
-    notes = [str(r[0]) for r in layout.rows]
+    notes = [str(r[eft.DETAIL_INDEX]) for r in layout.rows]
     assert notes.count(eft.OWN_NOT_OUT) == 4  # the status line plus GPP, Leverage and Chalk
     assert all(layout.rows[r - 1][eft.LEAD.index("Own%")] == "" for r in layout.player_rows)  # blank, not 0%
 
@@ -923,3 +942,107 @@ def test_a_proj_signal_never_leaves_two_opposite_instructions_on_one_row():
     assert eft.verb_with_proj("GPP add", down) == "GPP add (Proj ▼)"
     assert eft.verb_with_proj("Out", down) == "Out" and eft.verb_with_proj("Cash add", None) == "Cash add"
     assert eft.verb_with_proj("Cash add", "Proj ▼?") == "Cash add"  # weaker evidence only mutes the row
+
+
+def test_every_text_row_keeps_a_label_that_fits_the_frozen_panes_and_puts_the_description_in_column_c():
+    """Pool and Name stay frozen (A:B is ~225 px at the narrowest): a title across that boundary was chopped.
+    Sam: a short label in A:B, the longer description from column C where it overflows right freely."""
+    from dfs.sheet_clipping import FIT_PADDING_PX, FIT_PX_PER_CHAR, estimate_px
+
+    edge = _edge([_player(i) for i in range(1, 8)])
+    layout = eft.build_layout(
+        _inputs(edge, history={"WR": (41.0, 4)}, matchups=_matchups(), absences=_absences())
+    )
+    text_rows = [
+        *layout.section_rows,
+        *layout.meaning_rows,
+        *layout.subheader_rows,
+        *layout.note_rows,
+        *layout.verdict_rows,
+        *layout.status_rows,
+    ]
+    assert text_rows
+    for row in text_rows:
+        cells = layout.rows[row - 1]
+        label = str(cells[0])
+        bold = row in layout.section_rows or row in layout.subheader_rows
+        needed = estimate_px(label, per_char=FIT_PX_PER_CHAR, padding=FIT_PADDING_PX, bold=bold)
+        assert needed <= eft.FROZEN_PX, (row, label)  # never chopped at the A:B boundary
+        assert cells[1] == ""  # B stays empty so the label can overflow into it
+        assert len(str(cells[eft.DETAIL_INDEX])) <= eft.DETAIL_CHARS, (row,)
+        # nothing between the description and Do, or it could not overflow right (the hidden key is past Id)
+        assert not any(str(c) for c in cells[eft.DETAIL_INDEX + 1 : eft.FIRST_TRAILING]), (row, cells)
+
+
+def test_split_label_keeps_a_short_text_whole_cuts_at_the_dash_and_never_chops_a_word():
+    assert eft.split_label("RB  —  top 10 of 32", bold=True) == ("RB · top 10 of 32", "")
+    assert eft.split_label("CASH CORE  —  best Hit3x% per position", bold=True, join=False) == (
+        "CASH CORE",
+        "best Hit3x% per position",
+    )
+    assert eft.split_label("Thin week at RB: best cash odds 34% (typical best ~41%)", fallback="Verdict") == (
+        "Thin week at RB",
+        "best cash odds 34% (typical best ~41%)",
+    )
+    label, detail = eft.split_label(
+        "a long sentence with no separator at all that cannot possibly fit A and B"
+    )
+    assert label.endswith("…") and detail.startswith("a long sentence")
+    assert (
+        eft.split_label("a long sentence with no separator at all that cannot fit", fallback="Note")[0]
+        == "Note"
+    )
+
+
+def test_a_description_longer_than_a_line_continues_on_the_next_row_without_a_stray_separator():
+    long = "First sentence about the thing. " + "word " * 40 + "· tail  ·  last bit"
+    lines = eft.detail_lines(long, limit=60)
+    assert all(len(line) <= 60 for line in lines) and len(lines) > 1
+    assert not any(line.startswith("·") for line in lines)
+
+
+def test_the_shown_why_gives_the_reason_for_the_gap_not_the_numbers_beside_it():
+    """Sam: "CalPts 1.8 under TFFB" repeats two visible columns. Use the reason; blank rather than repeat."""
+    scored = _scored_rb_rows(60).assign(SleeperPts=10.0, FantasyProsPts=10.0)
+    fitted = calibration.fit(scored, before_week=2)
+    row = pd.Series(
+        {
+            "Position": "RB",
+            "Salary": 4000,
+            "ProjPts": 10.0,
+            "SleeperPts": 14.0,
+            "FantasyProsPts": 14.0,
+            "CalPts": 12.0,
+        }
+    )
+    reason = eft.gap_short(row, fitted)
+    assert "CalPts" not in reason and "TFFB" in reason or "higher" in reason
+    assert eft.gap_short(row, None) == ""  # no calibration: nothing to say
+    close = row.copy()
+    close["CalPts"] = 10.2
+    assert eft.gap_short(close, fitted) == ""  # a gap under half a point is not worth a reason
+    both = pd.Series(
+        {
+            "Position": "RB",
+            "Salary": 4000,
+            "ProjPts": 10.0,
+            "SleeperPts": 14.0,
+            "FantasyProsPts": 14.0,
+            "CalPts": 14.0,
+        }
+    )
+    assert "Sleeper and FantasyPros both higher" in eft.gap_short(both, fitted)
+
+
+def test_r6_signal_rows_do_not_repeat_the_subheader_in_their_why():
+    edge = _edge([_player(1)])
+    inputs = _inputs(edge, r6=_r6(signals={"g1": _signal(fade=["tgt_pg|TE|change_up"])}))
+    inputs.players["GsisId"] = ["g1"]
+    layout = eft.build_layout(inputs)
+    why = _col(eft.WHY_COL)
+    block_rows = [
+        r for r in layout.player_rows if layout.rows[r - 1][_col(eft.DO_COL)].startswith("Context only")
+    ]
+    assert block_rows and all(layout.rows[r - 1][why] in ("", "1 game") for r in block_rows)
+    first = layout.player_rows[0]  # the signal shows in a few words on his ordinary rows
+    assert "targets up 2.2+/game (usually fades back)" in layout.rows[first - 1][why]

@@ -458,7 +458,7 @@ def test_movement_times_are_eastern_and_never_say_utc():
     assert "TIMEVALUE(MID(" in flat and "TIMEZONE" not in flat.upper()
 
 
-def test_movement_what_it_means_names_the_team_and_which_way_its_players_moved():
+def test_movement_what_it_means_says_which_way_its_players_moved_in_a_short_line():
     class NoopClient:
         def write_tab(self, tab_name, rows, **_kwargs):
             self.written = rows
@@ -468,8 +468,7 @@ def test_movement_what_it_means_names_the_team_and_which_way_its_players_moved()
     build_movement(client, edge_tab="EdgeRaw")
     first = client.written[MOVEMENT_FIRST_ROW - 1]
     means = first[MOVEMENT_HEADER.index("What it means")]
-    assert '" implied "' in means and "project lower than when the week opened" in means
-    assert "project higher than when the week opened" in means
+    assert "project lower than at the open" in means and "project higher than at the open" in means
     top = first[MOVEMENT_HEADER.index("Top players")]
     assert "TEXTJOIN" in top and f",{MOVEMENT_TOP_PLAYERS},1)" in top
 
@@ -700,15 +699,16 @@ def test_your_stacks_counts_each_pooled_qbs_pass_catchers_and_a_bring_back():
     assert f"${opp}" in bring_back and '"Yes ("' in bring_back and '"No"' in bring_back  # the opponent's
 
 
-def test_the_banner_values_do_not_run_into_each_other():
+def test_the_banner_is_one_live_line_in_b_so_nothing_runs_off_the_screen():
     client = _build_board()
     row = client.rows[BOARD_BANNER_ROW - 1]
     b = BANNER_START_COL
-    assert row[b] == "Games" and row[b + 2] == "Highest total"
-    assert row[b + 6] == "Max wind" and row[b + 8] == "Injuries"
+    line = row[b]
+    assert line.startswith('="Games "&(') and line.count("   ·   ") == 3  # four pieces, one cell
+    for label in ("Highest total ", "Max wind ", "Injuries "):
+        assert f'"{label}"&(' in line
     assert row[0] == ""  # the gutter stays blank
-    # Highest total's value (E) overflows across the empty F-G; Max wind's label starts at H.
-    assert row[b + 4] == "" and row[b + 5] == ""
+    assert not any(row[b + 1 :])  # nothing else on the row: the text overflows right
 
 
 def test_the_portfolio_line_is_one_sentence_and_the_placeholder_until_lineups_exist():
@@ -745,7 +745,7 @@ def test_games_banner_uses_sumproduct_not_counta_of_filter():
     # above -- found live via this exact formula (an empty GamesRaw read
     # "1" instead of the intended IFERROR(...,0) fallback).
     client = _build_board()
-    games_formula = client.rows[BOARD_BANNER_ROW - 1][BANNER_START_COL + 1]
+    games_formula = client.rows[BOARD_BANNER_ROW - 1][BANNER_START_COL]
 
     assert "SUMPRODUCT" in games_formula
     assert "COUNTA(" not in games_formula
@@ -1206,8 +1206,8 @@ def test_banner_counts_the_same_main_slate_games_as_slate_shape():
     slate_row = client.rows[BOARD_SLATE_FIRST_ROW - 1]
     team = _rng("EdgeRaw", "Team")
     b = BANNER_START_COL
-    games, top_total, max_wind = row[b + 1], row[b + 3], row[b + 7]
-    for formula in (games, top_total, max_wind):
+    games = top_total = max_wind = row[b]  # the one banner line holds all three
+    for formula in (games,):
         assert f",{team},0)" in formula  # gated on a team having players on EdgeRaw
     shared = re.search(r'\(GamesRaw![^)]*<>""\)\*.*>0\)', slate_row[SL]).group(0)
     assert shared in games and shared in top_total

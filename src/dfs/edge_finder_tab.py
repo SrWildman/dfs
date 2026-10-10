@@ -58,6 +58,7 @@ from dfs.edge_finder import (
 from dfs.kickoff import format_et, parse_kickoff
 from dfs.paths import CURRENT_DIR
 from dfs.research_constants import ResearchConstantsError, signal_thresholds
+from dfs.sheet_clipping import FIT_PADDING_PX, FIT_PX_PER_CHAR, estimate_px
 from dfs.sheet_pool_cells import POOL_OPTIONS  # noqa: F401 - re-exported for the Edge Finder writer
 
 EDGE_FINDER_TAB = "Edge Finder"
@@ -95,6 +96,59 @@ COLUMN_COUNT = len(LEAD) + SLOTS + len(TRAILING_HEADERS) + 1  # + P, the hidden 
 FIRST_TRAILING = len(LEAD) + SLOTS
 SHORT_WHY_CHARS = 60  # what the Why cell shows; the rest is the cell's note
 
+# Pool and Name stay frozen, so a title that runs across the A:B boundary is chopped there. Every title,
+# sub-header and note row therefore keeps a SHORT label in A (it overflows into the empty B, inside the frozen
+# pane) and puts the longer description in column C, which overflows right freely (Sam, 2026-10-09).
+FROZEN_PX = 70 + 155  # Pool's width + the narrowest Name may be
+DETAIL_INDEX = 2  # column C, the first column right of the frozen pane
+DETAIL_CHARS = 135  # a description longer than this continues on the next row
+
+
+def _fits_frozen(text: str, bold: bool) -> bool:
+    return estimate_px(text, per_char=FIT_PX_PER_CHAR, padding=FIT_PADDING_PX, bold=bold) <= FROZEN_PX
+
+
+def split_label(
+    text: str, *, bold: bool = False, fallback: str | None = None, join: bool = True
+) -> tuple[str, str]:
+    """`(label, detail)` for a text row: the label fits the frozen A:B pane, the detail starts in column C.
+    A text that fits whole stays the label (`RB  —  top 10 of 32` reads `RB · top 10 of 32`); otherwise it is
+    cut at its first `  —  ` or `: ` when the head fits (always, for a title: `join=False`); otherwise
+    `fallback` (e.g. "Note") labels the whole text, or a word-boundary cut of it does."""
+    joined = text.replace("  —  ", " · ")
+    if join and _fits_frozen(joined, bold):
+        return joined, ""
+    for separator in ("  —  ", ": "):
+        head, found, tail = text.partition(separator)
+        if found and _fits_frozen(head, bold):
+            return head, tail
+    if fallback is not None:
+        return fallback, text
+    cut = text
+    while cut and not _fits_frozen(cut + "…", bold):
+        cut = cut.rsplit(" ", 1)[0] if " " in cut else cut[:-1]
+    return cut + "…", text
+
+
+def detail_lines(text: str, limit: int = DETAIL_CHARS) -> list[str]:
+    """`text` as lines of at most `limit` characters, broken at the last sentence end, `; ` or `  ·  ` that
+    leaves a reasonable first line, else at a space. A `·` separator is dropped, a full stop or `;` stays."""
+    text = text.strip()
+    lines: list[str] = []
+    while len(text) > limit:
+        window = text[: limit + 2]
+        best = None  # (first line ends at, rest starts at)
+        for separator, keep in ((". ", 1), ("; ", 1), ("  ·  ", 0), (" · ", 0)):
+            at = window.rfind(separator)
+            if at > limit // 3 and (best is None or at > best[0]):
+                best = (at + keep, at + len(separator))
+        if best is None:
+            at = window[:limit].rfind(" ")
+            best = (at, at + 1) if at > 0 else (limit, limit)
+        lines.append(text[: best[0]].strip())
+        text = text[best[1] :].strip()
+    return [*lines, text] if text else lines
+
 
 def column_letter(index: int) -> str:
     return chr(ord("A") + index)
@@ -111,6 +165,7 @@ def _trailing_letter(header: str) -> str:
 POOL_COL = _lead_letter(POOL_HEADER)
 NAME_COL = _lead_letter("Name")
 OWN_COL = _lead_letter("Own%")
+EDGE_COL = column_letter(FIRST_TRAILING - 1)  # the chips: always the last of the six slots
 DO_COL = _trailing_letter("Do")
 WHY_COL = _trailing_letter("Why")
 ID_COL = _trailing_letter("Id")
@@ -118,20 +173,23 @@ KEY_COL = column_letter(COLUMN_COUNT - 1)
 LAST_COLUMN = KEY_COL
 LAST_VISIBLE_COL = WHY_COL  # Id and the group key are hidden
 
-CASH_COLUMNS = ["CalPts", "Hit3x%", "Bust%", "ProjPts", "Rank", "Edge"]
-GPP_COLUMNS = ["CalPts", "Boom%", "CeilM", "Lev", "Rank", "Edge"]
-LEVERAGE_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "Rank", "Edge"]
-CHALK_COLUMNS = ["CalPts", "Boom%", "Bust%", "ProjPts", "Rank", "Edge"]
-PUNT_COLUMNS = ["CalPts", "ValAdj", "Hit3x%", "Rank", "Edge"]
-DISAGREE_COLUMNS = ["TFFB", "Sleeper", "FantasyPros", "CalPts", "Diff", "Edge"]
-BENEFICIARY_COLUMNS = ["Gain Car/G", "Gain xFP/G", "Method", "Priced in?", "Edge"]
-ABSENCE_COLUMNS = ["Role", "Tgt/G", "Car/G", "Games missed"]
+CASH_COLUMNS = ["CalPts", "Hit3x%", "Bust%", "ProjPts", "Edge"]
+GPP_COLUMNS = ["CalPts", "Boom%", "CeilM", "Lev", "Edge"]
+LEVERAGE_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "Edge"]
+CHALK_COLUMNS = ["CalPts", "Boom%", "Bust%", "ProjPts", "Edge"]
+PUNT_COLUMNS = ["CalPts", "ValAdj", "Hit3x%", "Edge"]
+DISAGREE_COLUMNS = ["TFFB", "Sleeper", "FantPros", "CalPts", "Diff", "Edge"]
+BENEFICIARY_COLUMNS = ["+Car/G", "+xFP/G", "Method", "Priced?", "Edge"]
+ABSENCE_COLUMNS = ["Role", "Tgt/G", "Car/G", "Missed"]
 TREND_HEADERS = ["Metric", "Last 3", "Earlier", "Change", "Trend"]
 # A team row reads Matchup | Pos | Grade | Players (B-E; the players' names are one left-aligned cell that
 # overflows right). The player rows nested under it have their own small header row, the standard player
 # columns, so their Salary / Own% / CalPts ... carry the sheet-wide formats and colours.
 MATCHUP_LEAD = ["", "Matchup", "Pos", "Grade", "Players", ""]
 MATCHUP_COLUMNS = ["CalPts", "Hit3x%", "Boom%"]  # the nested player rows' number columns
+# The slot columns are 64-72 px wide, so a value shown in one is short; the Why's note has the full words.
+METHOD_SHORT = {"with-or-without": "w/wo", "measured table": "table"}
+TREND_METRIC_SHORT = {"Air-yards share": "AY share"}
 SIGNAL_COLUMNS = ["Token", "xFP/G", "DK/G L3"]
 R6_SIGNAL_COLUMNS = ["Read", "CalPts", "ProjPts"]
 
@@ -421,8 +479,9 @@ def existing_chip_reasons(edge_text: object) -> str:
 
 
 class _Builder:
-    def __init__(self, r6: R6View | None = None) -> None:
+    def __init__(self, r6: R6View | None = None, fitted=None) -> None:  # noqa: ANN001
         self.r6 = r6
+        self.fitted = fitted  # for `gap_short`
         self.layout = Layout(rows=[])
         self._section: tuple[str, int] | None = None
         self._open: tuple[str, int] | None = None  # (key, header row) of an open depth-2 group
@@ -448,18 +507,49 @@ class _Builder:
         self.layout.rows[row - 1][COLUMN_COUNT - 1] = key
 
     # ---- sections ------------------------------------------------------------------------
+    def text_row(
+        self,
+        text: str,
+        kind: list[int] | None,
+        *,
+        bold: bool = False,
+        label: str | None = None,
+        detail: str | None = None,
+        fallback: str | None = None,
+        join: bool = True,
+    ) -> int:
+        """A row of text: a short label in A and the description from column C (see `split_label`). A long
+        description continues on following rows (same kind, no label). Returns the first row."""
+        lab, det = (
+            (label, detail or "")
+            if label is not None
+            else split_label(text, bold=bold, fallback=fallback, join=join)
+        )
+        lines = detail_lines(det) or [""]
+        first = 0
+        for i, line in enumerate(lines):
+            cells = [lab if i == 0 else "", "", line]
+            row = self.add(cells)
+            if i == 0:
+                first = row
+            if kind is not None:
+                kind.append(row)
+        return first
+
+    # ---- sections ------------------------------------------------------------------------
     def begin_section(self, title: str, *, link: str | None = None) -> None:
-        """Blank row, the title bar, and the "what it is · what to do" line. The section's body (everything
-        until `end_section`) becomes a level-1 group whose toggle sits on the meaning line."""
+        """Blank row, the title bar, and the "what it is" and "what to do" lines. The section's body
+        (everything until `end_section`) becomes a level-1 group whose toggle sits on the last of those."""
         short = title.split("  ")[0]
         self.blank()
-        row = self.add([title])
-        self.layout.section_rows.append(row)
+        row = self.text_row(title, self.layout.section_rows, bold=True, join=False)
         if link:
             self.layout.all_links[row] = link
-        meaning = self.add([MEANINGS[short]])
-        self.layout.meaning_rows.append(meaning)
-        self._section = (short, meaning)
+        what, _, do = MEANINGS[short].partition("  ·  ")
+        self.text_row(what, self.layout.meaning_rows, label="What it is")
+        if do:
+            self.text_row(do.removeprefix("Do: "), self.layout.meaning_rows, label="Do")
+        self._section = (short, self.last_row)
 
     @property
     def section_key(self) -> str:
@@ -472,16 +562,14 @@ class _Builder:
             self.set_key(meaning, key)
         self._section = None
 
-    def sub(self, title: str) -> int:
-        row = self.add([title])
-        self.layout.subheader_rows.append(row)
-        return row
+    def sub(self, title: str, *, label: str | None = None, detail: str | None = None) -> int:
+        return self.text_row(title, self.layout.subheader_rows, bold=True, label=label, detail=detail)
 
     def verdict(self, text: str) -> None:
-        self.layout.verdict_rows.append(self.add([text]))
+        self.text_row(text, self.layout.verdict_rows, fallback="Verdict")
 
-    def note(self, text: str) -> None:
-        self.layout.note_rows.append(self.add([text]))
+    def note(self, text: str, *, label: str | None = None) -> None:
+        self.text_row(text, self.layout.note_rows, label=label, fallback="Note")
 
     def header(self, slots: list[str], *, lead: list[str] | None = None) -> int:
         """A column-header row. A section whose last slot is `Edge` (the chips) always shows it in the same,
@@ -518,17 +606,17 @@ class _Builder:
         self._open = None
 
     # ---- rows ----------------------------------------------------------------------------------
-    def r6_text(self, gsis, edge_text: object, why: str, verb: str) -> tuple[str, str, bool]:
+    def r6_text(self, gsis, edge_text: object, why: str, verb: str) -> tuple[str, str, bool, str]:
         """Add the R6 signals behind a player to a row's `Why` and `Do`: every signal that fired in plain
         words (with the reason of an older chip beside it when one overlaps), and the chip beside the verb
-        (`verb_with_proj`: one verb per row). Returns (why, verb, muted): a chip on weaker evidence only
-        mutes."""
+        (`verb_with_proj`: one verb per row). Returns (why, verb, muted, short): a chip on weaker evidence
+        only mutes; `short` is the signal in a few words for the shown Why."""
         sig = self.r6.signals.get(gsis) if self.r6 is not None and isinstance(gsis, str) else None
         if sig is None:
-            return why, verb, False
+            return why, verb, False, ""
         why = _join(why, usage_r6.signal_why(sig, self.r6.chips), existing_chip_reasons(edge_text))
         verb = verb_with_proj(verb, sig.chip)
-        return why, verb, usage_r6.weaker_only(sig, self.r6.chips)
+        return why, verb, usage_r6.weaker_only(sig, self.r6.chips), usage_r6.signal_short(sig, self.r6.chips)
 
     def _edge_to_the_end(self, slots: list) -> list:
         """`slots` padded to `SLOTS`, with the Edge value last when the section's header ends in `Edge`."""
@@ -553,10 +641,12 @@ class _Builder:
         """One player row: Pool (filled by the writer), `lead` (Name, Pos, Team, Salary, Own%), the section's
         `slots`, Do, Why, Id. `why` is the whole reason (the cell's note); `short` is what the cell shows (the
         whole reason cut to `SHORT_WHY_CHARS` when not given)."""
-        why, verb, weak = self.r6_text(gsis, edge, why, verb)
+        why, verb, weak, signal = self.r6_text(gsis, edge, why, verb)
         muted = muted or weak
         slots = self._edge_to_the_end(slots)
-        row = self.add(["", *lead, *slots, verb, short_why(short if short is not None else why), pid])
+        base = short if short is not None else short_why(why)
+        shown = short_why(_short(base, signal)) if signal else short_why(base)
+        row = self.add(["", *lead, *slots, verb, shown, pid])
         self.layout.player_rows.append(row)
         self.layout.notes[row] = why
         if muted:
@@ -606,7 +696,7 @@ def _injury_report_line(info: dict | None) -> str:
     """Where the injury statuses came from and how complete that source was when fetched. A report with no
     final statuses yet is a timing fact (teams publish them Friday), not a fault."""
     if not info:
-        return "Injury report: not recorded for this sync (statuses come from DraftKings' Avail)."
+        return "Not recorded for this sync (statuses come from DraftKings' Avail)."
     fetched = str(info.get("fetched") or "")
     try:
         when = format_et(datetime.fromisoformat(fetched.replace("Z", "+00:00")))
@@ -614,15 +704,16 @@ def _injury_report_line(info: dict | None) -> str:
         when = "unknown time"
     rows, with_status = int(info.get("rows") or 0), int(info.get("with_status") or 0)
     text = (
-        f"Injury report: nflverse release for Week {info.get('week', '?')}: {rows} rows, "
-        f"{with_status} with a final status, fetched {when}."
+        f"nflverse Week {info.get('week', '?')} release: {rows} rows, {with_status} with a final status, "
+        f"fetched {when}."
     )
     if with_status == 0:
-        text += " Outs shown are DraftKings' Avail until the final statuses come Friday."
+        text += " Outs are DraftKings' Avail until Friday."
     return text
 
 
-def _status_lines(inputs: Inputs, published: bool = True) -> list[str]:
+def _status_lines(inputs: Inputs, published: bool = True) -> list[tuple[str, str]]:
+    """`(label, text)` for each status row: the label sits in the frozen pane, the text starts in column C."""
     s = inputs.status
     weeks = s.get("calpts_weeks") or []
     trained = f"Weeks {min(weeks)}–{max(weeks)}" if weeks else "no earlier weeks (CalPts = AggPts)"
@@ -634,14 +725,19 @@ def _status_lines(inputs: Inputs, published: bool = True) -> list[str]:
         if starts:
             first_kick = f" First kickoff {format_et(min(starts))}."
     return [
-        f"Stats through Week {s.get('stats_through_week', '?')} · "
-        f"Injuries: {_injury_phrase(s.get('injury_report'))} · "
-        f"Projections updated {_snapshot_et(str(s.get('projection_snapshot') or ''))}",
-        _injury_report_line(s.get("injury_report")),
-        f"CalPts trained on {trained} ({sources}). The context columns are not proven to beat projections; "
-        "Model Check tracks every one.",
-        f"Run the final `dfs sync --live` about 90 minutes before kickoff.{first_kick}",
-        *([] if published else [OWN_NOT_OUT]),
+        (
+            "Data",
+            f"Stats through Week {s.get('stats_through_week', '?')} · "
+            f"Injuries: {_injury_phrase(s.get('injury_report'))} · "
+            f"Projections updated {_snapshot_et(str(s.get('projection_snapshot') or ''))}",
+        ),
+        ("Injury report", _injury_report_line(s.get("injury_report"))),
+        (
+            "CalPts",
+            f"trained on {trained} ({sources}). The context columns are unproven; Model Check tracks each.",
+        ),
+        ("Final sync", f"Run the final `dfs sync --live` about 90 minutes before kickoff.{first_kick}"),
+        *([] if published else [("Ownership", OWN_NOT_OUT)]),
     ]
 
 
@@ -859,12 +955,29 @@ def _muted(r) -> bool:
     return _is_thin(r.get("Games"))
 
 
-def _vs_tffb(r) -> str:
-    """`CalPts 1.8 under TFFB`: the one fact about the projection the other columns do not state."""
-    diff = float(r["CalPts"]) - float(r["ProjPts"])
-    if abs(diff) < 0.05:
-        return "CalPts matches TFFB"
-    return f"CalPts {abs(diff):.1f} {'over' if diff > 0 else 'under'} TFFB"
+GAP_WORTH_EXPLAINING = 0.5  # points of CalPts away from TFFB below which the gap is not worth a reason
+
+
+def gap_short(r, fitted) -> str:  # noqa: ANN001
+    """Why CalPts sits away from TFFB's number, in a few words, for the shown Why: `TFFB bias on QBs
+    $4.5-6k`, `Sleeper and FantasyPros both higher`. Blank when the gap is under half a point, there is no
+    calibration, or nothing explains it: the Why never repeats the CalPts and ProjPts columns beside it."""
+    try:
+        diff = float(r["CalPts"]) - float(r["ProjPts"])
+    except (TypeError, ValueError, KeyError):
+        return ""
+    if pd.isna(diff) or abs(diff) < GAP_WORTH_EXPLAINING:
+        return ""
+    why = calibration.explain_gap(r, fitted)
+    if why is None:
+        return ""
+    parts = []
+    if abs(why.bias) >= 0.3:
+        parts.append(f"TFFB bias on {why.cell}")
+    if abs(why.sources) >= 0.3 and bool(why.higher) != bool(why.lower):
+        names, side = (why.higher, "higher") if why.higher else (why.lower, "lower")
+        parts.append(f"{_and(names)} {'both ' if len(names) > 1 else ''}{side}")
+    return " · ".join(parts)
 
 
 def _short(*parts: str) -> str:
@@ -914,8 +1027,15 @@ def _ranked_blocks(
 
 def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> Layout:
     """The whole tab. `inputs` None gives the empty-state layout (a template, or no sync yet)."""
-    b = _Builder(inputs.r6 if inputs is not None else None)
-    b.add(["EDGE FINDER  —  calibrated projections, outcome odds and the signals that matter"])
+    b = _Builder(
+        inputs.r6 if inputs is not None else None, inputs.calibration if inputs is not None else None
+    )
+    b.text_row(
+        "EDGE FINDER  —  calibrated projections, outcome odds and the signals that matter",
+        None,
+        bold=True,
+        join=False,
+    )
     if inputs is None:
         b.note("Not synced yet -- run `dfs sync`; this tab is written by the sync and holds nothing typed.")
         for title in (
@@ -931,7 +1051,7 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
             "CONTEXT SIGNALS  —  unproven",
         ):
             b.blank()
-            b.layout.section_rows.append(b.add([title]))
+            b.text_row(title, b.layout.section_rows, bold=True, join=False)
             b.note("Nothing yet.")
         return b.layout
 
@@ -942,8 +1062,8 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
     published = (edge.get("OwnStatus", pd.Series(dtype=object)) == "real").any()
     if not published:
         edge["Own%"] = np.nan  # defensive: the status line and every Own% cell agree it is not out
-    for line in _status_lines(inputs, published):
-        b.layout.status_rows.append(b.add([line]))
+    for label, line in _status_lines(inputs, published):
+        b.text_row(line, b.layout.status_rows, label=label, detail=line)
 
     _cash_section(b, edge, inputs)
     _gpp_section(b, edge, published)
@@ -984,9 +1104,9 @@ def _cash_section(b: _Builder, edge: pd.DataFrame, inputs: Inputs) -> None:
         )
         b.player_row(
             _lead(r, pos),
-            [r["CalPts"], r["Hit3x%"], r["Bust%"], r["ProjPts"], f"#{rank} of {total}", r["Edge"]],
+            [r["CalPts"], r["Hit3x%"], r["Bust%"], r["ProjPts"], r["Edge"]],
             why=why,
-            short=_short(_vs_tffb(r), _thin_short(r.get("Games"))),
+            short=_short(gap_short(r, b.fitted), _thin_short(r.get("Games"))),
             verb=cash_verb(rank, r["Bust%"], medians.get(pos, np.inf)),
             pid=r["Id"],
             gsis=r.get("GsisId"),
@@ -1039,7 +1159,7 @@ def _gpp_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
         )
         b.player_row(
             _lead(r, pos),
-            [r["CalPts"], r["Boom%"], r["CeilM"], lev, f"#{rank} of {total}", r["Edge"]],
+            [r["CalPts"], r["Boom%"], r["CeilM"], lev, r["Edge"]],
             why=why,
             short=_short(short, _thin_short(r.get("Games"))),
             verb=gpp_verb(r["Boom%"], boom_cut, starred, r["Lev"], bool(r["BoomHalf"])),
@@ -1068,11 +1188,11 @@ def _leverage_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
         shown = part.head(LEVERAGE_ROWS_PER_POSITION)
         b.sub(f"{pos}  —  top {len(shown)} of {len(part)} by Lev")
         first = b.next_row
-        for rank, (_, r) in enumerate(shown.iterrows(), start=1):
+        for _, r in shown.iterrows():
             lev = r["Lev"]
             b.player_row(
                 _lead(r, pos),
-                [r["CalPts"], r["Boom%"], r["Bust%"], lev, f"#{rank} of {len(part)}", r["Edge"]],
+                [r["CalPts"], r["Boom%"], r["Bust%"], lev, r["Edge"]],
                 why=_join(
                     f"Lev {lev:+.0f}: Boom% is at the {r['BoomRank']:.0f}th percentile of {_plural(pos)}, "
                     f"ownership at the {r['OwnRank']:.0f}th ({r['Own%']:.1%} owned)",
@@ -1105,12 +1225,12 @@ def _chalk_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
         if part.empty:
             continue
         b.sub(f"{pos}  —  the {len(part)} highest-owned")
-        for rank, (_, r) in enumerate(part.iterrows(), start=1):
+        for _, r in part.iterrows():
             verb = chalk_verb(float(r["BustPct"]))
             third = {"Chalk: eat": "bottom", "Chalk: fade candidate": "top"}.get(verb, "middle")
             b.player_row(
                 _lead(r, pos),
-                [r["CalPts"], r["Boom%"], r["Bust%"], r["ProjPts"], f"#{rank} owned", r["Edge"]],
+                [r["CalPts"], r["Boom%"], r["Bust%"], r["ProjPts"], r["Edge"]],
                 why=_join(
                     f"owned {r['Own%']:.1%}; {r['Boom%']:.0f}% to reach 4x salary, {r['Bust%']:.0f}% to bust",
                     f"his bust odds are in the {third} third of {_plural(pos)}",
@@ -1136,12 +1256,12 @@ def _punt_section(b: _Builder, edge: pd.DataFrame) -> None:
             continue
         shown = part.head(PUNT_ROWS_PER_POSITION)
         b.sub(f"{pos}  —  best {len(shown)} of {len(part)} within {money(PUNT_SALARY_WINDOW)} of {_k(floor)}")
-        for rank, (_, r) in enumerate(shown.iterrows(), start=1):
+        for _, r in shown.iterrows():
             gap = float(r["Salary"]) - floor
             above = f"{money(gap)} above the cheapest {pos}" if gap else f"the cheapest {pos} on the slate"
             b.player_row(
                 _lead(r, pos),
-                [r["CalPts"], r["ValAdj"], r["Hit3x%"], f"#{rank} of {len(part)}", r["Edge"]],
+                [r["CalPts"], r["ValAdj"], r["Hit3x%"], r["Edge"]],
                 why=_join(
                     above,
                     f"ValAdj {r['ValAdj']:.1f} (value against what his price usually buys)",
@@ -1203,26 +1323,32 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
         b.note("No regular back is out or questionable with a beneficiary this week.")
     else:
         for status, label, cap, muted, verb in (
-            (
-                "out",
-                "Confirmed out (DraftKings or the injury report)",
-                BENEFICIARY_CONFIRMED_N,
-                False,
-                "Bump ▲",
-            ),
-            ("questionable", "Questionable (assumed to play)", BENEFICIARY_QUESTIONABLE_N, True, "Watch"),
+            ("out", "Confirmed out", BENEFICIARY_CONFIRMED_N, False, "Bump ▲"),
+            ("questionable", "Questionable", BENEFICIARY_QUESTIONABLE_N, True, "Watch"),
         ):
             part = ben[ben["OutStatus"] == status].head(cap)
             total = int((ben["OutStatus"] == status).sum())
             if part.empty:
                 continue
             more = max(total - cap, 0)
-            b.sub(f"{label}  —  {len(part)} of {total}" + (f" (+{more} more)" if more else ""))
+            explain = (
+                "DraftKings or the injury report says he is out"
+                if status == "out"
+                else "assumed to play; decide after the final sync"
+            )
+            b.sub(
+                "",
+                label=f"{label} · {len(part)} of {total}",
+                detail=f"{explain}" + (f" (+{more} more not shown)" if more else ""),
+            )
             for _, r in part.iterrows():
                 info = by_gsis.loc[r["GsisId"]] if r["GsisId"] in by_gsis.index else None
                 games = info["Games"] if info is not None and "Games" in info else np.nan
                 priced = r.get("PricedIn", "")
                 method = r["Method"] + (f" ({int(r['n'])} g)" if r["Method"] == "with-or-without" else "")
+                method_cell = METHOD_SHORT.get(r["Method"], r["Method"]) + (
+                    f" ({int(r['n'])} g)" if r["Method"] == "with-or-without" else ""
+                )
                 state = "out" if status == "out" else "questionable"
                 priced_text = f"priced in: {priced}" if isinstance(priced, str) and priced else ""
                 b.player_row(
@@ -1236,7 +1362,7 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
                     [
                         round(r["car_gain"], 1),
                         round(r["xfp_gain"], 1),
-                        method,
+                        method_cell,
                         priced,
                         info["Edge"] if info is not None else "",
                     ],
@@ -1246,7 +1372,7 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
                         priced_text,
                         _thin_note(games),
                     ),
-                    short=_short(f"{r['OutPlayers']} {state}", priced_text, _thin_short(games)),
+                    short=_short(f"{r['OutPlayers']} {state}", _thin_short(games)),
                     verb=verb,
                     pid=info["Id"] if info is not None else "",
                     gsis=r["GsisId"],
@@ -1321,8 +1447,10 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
         shown = players[:TREND_ROWS_PER_POSITION]
         more = len(players) - len(shown)
         b.sub(
-            f"{pos}  —  {len(shown)} of {len(players)} players moved more than the measured band"
-            + (f" (+{more} more)" if more else "")
+            "",
+            label=f"{pos} · {len(shown)} of {len(players)} moved",
+            detail="players whose usage moved more than the measured band"
+            + (f" (+{more} more not shown)" if more else ""),
         )
         for pid in shown:
             moves = at[at["_id"] == pid]
@@ -1334,9 +1462,12 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             numbers, patterns = usage_r6.trend_cells(metric, r["Recent"], r["Prior"], r["Change"])
             row = b.player_row(
                 [e["Name"], pos, e["Team"], e["Salary"], e.get("Own%", "")],
-                [metric, *numbers, r["Direction"]],
+                [TREND_METRIC_SHORT.get(metric, metric), *numbers, r["Direction"]],
                 why=_join(usage_r6.trend_why(r), f"also moved: {', '.join(others)}" if others else ""),
-                short=f"A bigger {move} than {1 - float(r['FlagRate']):.0%} of weeks",
+                short=(
+                    f"A bigger {move} than {1 - float(r['FlagRate']):.0%} of weeks"
+                    f" · {'often fades' if r['Direction'] == usage_r6.UP else 'often rebounds'}"
+                ),
                 verb="Watch",
                 pid=pid,
                 gsis=r["GsisId"],
@@ -1385,7 +1516,7 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
                     _lead(p, pos),
                     [p["CalPts"], p["Hit3x%"], p["Boom%"]],
                     why=f"CalPts {p['CalPts']:.1f} vs TFFB {p['ProjPts']:.1f}",
-                    short=_vs_tffb(p),
+                    short=gap_short(p, b.fitted),
                     verb="Context only",
                     pid=p["Id"],
                     gsis=p.get("GsisId"),
@@ -1420,8 +1551,11 @@ def _r6_signal_blocks(b: _Builder, edge: pd.DataFrame) -> None:
         read = "FADE (Proj ▼)" if chip.direction == usage_r6.FADE else "BUMP (Proj ▲)"
         tier = "weaker evidence" if chip.weaker else "tested on 2014-21 and 2022-25"
         b.sub(
-            f"{chip.position} {usage_r6.threshold_text(chip)}  —  {len(part)} flagged  ·  {read}  ·  "
-            f"{chip.effect_um_test:+.1f} pts vs the research projection  ·  {tier}"
+            "",
+            label=f"{chip.position} · {len(part)} flagged",
+            detail=(
+                f"{usage_r6.threshold_text(chip)}  ·  {read}  ·  {chip.effect_um_test:+.1f} pts  ·  {tier}"
+            ),
         )
         if not part.empty:  # these columns are not the section's (Token | xFP/G | DK/G L3): name them
             b.inner_header(R6_SIGNAL_COLUMNS)
@@ -1430,7 +1564,7 @@ def _r6_signal_blocks(b: _Builder, edge: pd.DataFrame) -> None:
                 _lead(r),
                 [read.split(" ")[0], r["CalPts"], r["ProjPts"]],
                 why=usage_r6.chip_why(chip),
-                short=short_why(usage_r6.chip_why(chip)),
+                short="",  # the sub-header above already says it; the note has the whole reason
                 verb="Context only",
                 pid=r["Id"],
                 gsis=r.get("GsisId"),
@@ -1460,7 +1594,7 @@ def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
                 _lead(r),
                 [token, r["xFP/G"], r.get("DkG", "")],
                 why=_join("context only, not proven to beat the projection", _thin_note(r.get("Games"))),
-                short=_short("Context only, unproven", _thin_short(r.get("Games"))),
+                short=_thin_short(r.get("Games")),  # "Context only" is the Do column's
                 verb="Context only",
                 pid=r["Id"],
                 gsis=r.get("GsisId"),
@@ -1477,14 +1611,14 @@ POINT_HEADERS = frozenset(
         "ProjPts",
         "TFFB",
         "Sleeper",
-        "FantasyPros",
+        "FantPros",
         "CeilM",
         "Diff",
         "xFP/G",
         "Tgt/G",
         "Car/G",
-        "Gain Car/G",
-        "Gain xFP/G",
+        "+Car/G",
+        "+xFP/G",
         "DK/G L3",
         "ValAdj",
     }

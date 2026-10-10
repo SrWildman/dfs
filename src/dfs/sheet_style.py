@@ -2681,13 +2681,15 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
         },
     )
     client.format_range(tab, "A1", _TITLE_FMT)
-    # Banner (row 2): label / value pairs at B-C, D-E, H-I, J-K. E and K are text that overflow right.
-    pairs = [(BANNER_START_COL + offset) for offset in (0, 2, 6, 8)]
-    client.format_range(tab, f"A2:{column_letter(pairs[-1] + 1)}2", {"textFormat": {"fontSize": 10}})
-    for label in (f"{column_letter(i)}2" for i in pairs):
-        client.format_range(tab, label, {"textFormat": {"foregroundColor": INK_MUTED, "fontSize": 9}})
-    for value in (f"{column_letter(i + 1)}2" for i in pairs):
-        client.format_range(tab, value, {"textFormat": {"bold": True, "foregroundColor": INK}})
+    # Banner (row 2): one live line in B, bold, overflowing right (a formula cell cannot hold rich text).
+    client.format_range(
+        tab, f"A2:{last_visible_col}2", {"textFormat": {"fontSize": 10}, "horizontalAlignment": None}
+    )
+    client.format_range(
+        tab,
+        f"{column_letter(BANNER_START_COL)}2",
+        {"textFormat": {"bold": True, "foregroundColor": INK, "fontSize": 10}},
+    )
     client.format_range(tab, f"A3:{last_visible_col}3", _BANNER_FMT)
 
     # The hidden helper block (GameId/Away/Home/GPS check, then the list Ids and the Bust% cuts). Unhide
@@ -3059,16 +3061,16 @@ def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:
     return f"{tab}: styled (Target marked as input, over/under target flagged)"
 
 
-_MOVEMENT_WIDTHS = {
-    "Team": 70,
-    "Opp": 70,
-    "Implied now": 96,
-    "Implied move": 110,
-    "Total move": 96,
+_MOVEMENT_WIDTHS = {  # the whole table fits ~1,200 px: nothing is off-screen at a laptop width
+    "Team": 56,
+    "Opp": 56,
+    "Implied now": 88,
+    "Implied move": 96,
+    "Total move": 84,
     "Spread move": 102,  # not 100: the audit reads exactly 100 as "never set"
-    "Kickoff (ET)": 130,
-    "Top players": 360,
-    "What it means": 520,
+    "Kickoff (ET)": 112,
+    "Top players": 330,
+    "What it means": 290,
 }
 
 # Diverging, not the standard red->yellow->green: each is a signed delta

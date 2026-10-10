@@ -277,18 +277,46 @@ def test_the_empty_state_writes_without_error_and_ensure_tab_leaves_an_existing_
     assert client.tab_written[0] == "Edge Finder"
 
 
-def test_the_widths_grow_to_fit_a_cell_the_fixed_widths_would_cut_off():
-    long_name = "Jacory Croskey-Merritt the Third of Many"
-    edge = _edge([_player(1, Name=long_name, Edge="INJ+ USAGE↑ Proj ▼ FADE↓")])
+def _through_why(widths):
+    return sum(
+        widths[letter] for letter in (chr(ord("A") + i) for i in range(ord(eft.WHY_COL) - ord("A") + 1))
+    )
+
+
+def test_pool_through_why_fits_the_budget_with_nothing_cut_off_on_a_realistic_slate():
+    edge = _edge([_player(1, Name="Jacory Croskey-Merritt", Edge="INJ+ Proj ▼"), _player(2)])
     layout = eft.build_layout(_inputs(edge))
     fitted = writer.fit_widths(layout)
-    assert fitted[eft.NAME_COL] > writer.WIDTHS[eft.NAME_COL]  # the name was cut at the fixed width
-    last_slot = chr(ord("A") + eft.FIRST_TRAILING - 1)
-    assert fitted[last_slot] > writer.WIDTHS[last_slot]  # so were the stacked chips
-    assert all(fitted[c] >= writer.WIDTHS[c] for c in writer.WIDTHS)  # never narrower
-    assert fitted[eft.WHY_COL] == writer.WIDTHS[eft.WHY_COL]  # the open-ended Why is left alone
-    short = writer.fit_widths(eft.build_layout(_inputs(_edge([_player(1)]))))
-    assert short == writer.WIDTHS  # nothing cut, nothing changed
+    assert _through_why(fitted) <= writer.BUDGET  # about 1,270 px: no horizontal scroll on a laptop
+    assert writer.NAME_MIN <= fitted[eft.NAME_COL] <= writer.NAME_MAX
+    assert fitted[eft.WHY_COL] >= writer.WHY_MIN
+    assert (
+        fitted[eft.POOL_COL] == 70 and fitted["C"] == 44 and fitted["D"] == 48
+    )  # the fixed columns stay tight
+
+
+def test_edge_and_do_take_the_width_of_their_longest_real_value_capped():
+    short = writer.fit_widths(eft.build_layout(_inputs(_edge([_player(1, Edge="INJ+")]))))
+    stacked = writer.fit_widths(
+        eft.build_layout(_inputs(_edge([_player(1, Edge="INJ+ USAGE↑ Proj ▼ FADE↓ more chips")])))
+    )
+    assert short[eft.EDGE_COL] < stacked[eft.EDGE_COL] <= writer.CHIP_MAX  # follows the value, never past 140
+    assert stacked[eft.EDGE_COL] == writer.CHIP_MAX
+    assert writer.CHIP_MAX >= short[eft.DO_COL] >= 90
+
+
+def test_a_wider_slot_is_paid_for_by_why_then_name_never_by_the_budget():
+    edge = _edge([_player(1, Name="Jacory Croskey-Merritt", Edge="INJ+ USAGE↑ Proj ▼ FADE↓ more chips")])
+    layout = eft.build_layout(_inputs(edge))
+    base = writer.fit_widths(layout)
+    row = layout.rows[layout.player_rows[0] - 1]
+    for slot in (eft.FIRST_TRAILING - 4, eft.FIRST_TRAILING - 3, eft.FIRST_TRAILING - 2):
+        row[slot] = "1234567890123"  # a number never overflows: the slot must widen to show it
+    wide = writer.fit_widths(layout)
+    assert wide["K"] > base["K"] and wide["J"] > base["J"]  # the slots grew to show it ...
+    assert wide[eft.WHY_COL] < base[eft.WHY_COL]  # ... and Why paid for it
+    assert wide[eft.WHY_COL] >= writer.WHY_MIN
+    assert _through_why(wide) <= writer.BUDGET or wide[eft.WHY_COL] == writer.WHY_MIN
 
 
 def test_edge_chips_share_one_column_in_every_section():

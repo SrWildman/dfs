@@ -585,7 +585,7 @@ games, the stacks and where your pool stands; the Edge Finder = the players** (u
 leaders, punt finder and "This week's edges" text panel were removed; the Edge Finder's cash/GPP sections and Punt plays cover
 them; the Chalk map was kept and rebuilt on real ownership). **Column A is the Pool gutter** (actions round, 2026-10-09): on a player row of the Queue, Pool check or Chalk map it is the live `Pool` cell and its
 Cash / GPP / Both dropdown (about 70 px, pale yellow); on every other row (Slate shape, Pool summary, Your stacks, Stack candidates, headers) it is blank, no fill and no
-dropdown. Every table starts in column B. Banner (rows 2-3): Games, Highest total (it overflows across the empty cells after it), Max wind, Injuries, then the ownership note. Six
+dropdown. Every table starts in column B. Banner (rows 2-3): row 2 is ONE live line in B (`Games 11 · Highest total DET / ARI 54.5 · Max wind 17.1 mph · Injuries 13 out / 68 IR / 52 Q`, plain bold: a formula cell cannot hold rich text, and four label / value pairs ran off a laptop screen), then the ownership note. Six
 collapsible row sections, all open by default, in this order (Sam's call):
 
 1. **Slate shape**: games ranked by total (formulas), with Fav, Spread, Pace, PROE, Expl%, GameEnv, Wind, a Shootout flag and GPS.
@@ -619,9 +619,9 @@ from the tables `edge_finder.enrich` saves under `data/current/edge_finder/` plu
 **Columns (fixed across sections), actions round 2026-10-09.** `A` **Pool** (the player's pool state and its Cash / GPP / Both dropdown: a formula, EdgeRaw's own tick found by his Id, that the bound
 Apps Script `apps_script/Code.gs` puts back after an edit; clear it to remove him, see `docs/APPS_SCRIPT.md`), `B`-`E` Name, Pos, Team, Salary, `F` **Own%** (blank until
 ownership publishes; a 0-1 fraction shown as a percent), `G`-`L` section-specific (named by each section's header row; a section's `Edge` chips always sit in `L`, with any
-unused slots blank before it), `M` **Do** (a verb), `N` **Why** (last visible, about 60 characters, number first, nothing another column on the row already shows; the **full
+unused slots blank before it), `M` **Do** (a verb), `N` **Why** (last visible, about 60 characters, a reason the row does not already show: `TFFB bias on QBs $4.5-6k`, `Sleeper and FantasyPros both higher`, `targets up 2.2+/game (usually fades back)`, blank rather than repeat CalPts / ProjPts; the **full
 reason is the cell's note**, hover to read it; it overflows right), `O` **Id** (his DraftKings id, hidden: the script and every formula find the player by it, never by name) and `P`
-(hidden: the key of the row group that starts on the next row). Pool and Name stay frozen. The per-row `↗` link and the `Set` column are gone. There is no `Games` column: a row
+(hidden: the key of the row group that starts on the next row). Pool and Name stay frozen (Sam works split-screen): every title, sub-header, note and status row therefore has a SHORT label in A (it overflows into the empty B, inside the frozen pane: `CASH CORE`, `RB · top 10 of 32`, `Thin week at RB`, `Note`) and its longer description starting in column C, which overflows right freely; a description over about 135 characters continues on the next row. Widths (`sheet_edge_finder.fit_widths`): Pool 70, Name 155-170, Pos 44, Team 48, Salary 64, Own% 60, five slots 64 (each may grow to 84 when a real value is cut), Edge and Do the width of their longest real value (cap 140), Why 220-300, Pool through Why within about 1,270 px. The per-row `↗` link and the `Set` column are gone. There is no `Games` column: a row
 built on fewer than 3 games is muted and its Why says "2 games". **Do** shows "In pool (Cash)" instead of its verb whenever the player is already pooled (a live formula, no sync).
 Column widths are fitted to the written content (`sheet_edge_finder.fit_widths`).
 
@@ -632,17 +632,17 @@ final `dfs sync --live` about 90 minutes before kickoff, with the first kickoff.
 **Sections, top to bottom.** Each opens with a title bar (with an **All ↗** link to the matching EdgeRaw filter view on Cash core and GPP
 upside) and a second line, "what it is · what to do".
 - **Cash core**: per position, the rosterable, available players with `CalPts` at least the position median, best `Hit3x%` first.
-  Columns `CalPts`, `Hit3x%`, `Bust%`, `ProjPts`, `Rank` ("#3 of 28"), `Edge`. Do: `Cash add` (top 3 `Hit3x%` at the position AND `Bust%`
+  Columns `CalPts`, `Hit3x%`, `Bust%`, `ProjPts`, `Edge` (there is no Rank column: the rows are in order and the sub-header says "top 10 of 32"). Do: `Cash add` (top 3 `Hit3x%` at the position AND `Bust%`
   below the position median) or `Cash option`. A **thin week** line sits under a position's header when the block's best `Hit3x%` is below
   the median best of earlier weeks (no history, no line).
-- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Lev`, `Rank`, `Edge` (`Own%` is column F). `Lev` = his `Boom%` percentile rank minus his `Own%` percentile rank within his
+- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Lev`, `Edge` (`Own%` is column F). `Lev` = his `Boom%` percentile rank minus his `Own%` percentile rank within his
   position (the rosterable, available players), a signed whole number coloured within the position block; blank until ownership is out. Do: `GPP leverage` (`Lev` at least +25 AND `Boom%` in the top half of
   the position), `GPP add` (`Boom%` in the top quartile), else `GPP option`. A **★** is appended when his `Boom%` is top-quartile AND his ownership is below the position's median (the original definition, unchanged).
-- **Leverage plays**: the top 5 per position by `Lev` among players with `Boom%` in the top half; `CalPts`, `Boom%`, `Bust%`, `Lev`, `Rank`, `Edge`. Do: `GPP leverage` or `GPP option`. A note says "Ownership not out yet; GPP leverage appears when it does." until `OwnStatus` is real.
+- **Leverage plays**: the top 5 per position by `Lev` among players with `Boom%` in the top half; `CalPts`, `Boom%`, `Bust%`, `Lev`, `Edge`. Do: `GPP leverage` or `GPP option`. A note says "Ownership not out yet; GPP leverage appears when it does." until `OwnStatus` is real.
 - **Chalk to fade or eat**: the 3 highest-owned per position with `Boom%` and `Bust%`. Do: `Chalk: eat` (his `Bust%` rank in the position's bottom third), `Chalk: fade candidate` (top third), else `Chalk`. TFFB's ownership is a large-field projection, so it is
   directional for small-field GPPs and is ignored in cash: the Cash sections show `Own%` uncoloured and their Why never mentions it. Ownership never changes `CalPts` or any probability.
 - **Punt plays**: best `ValAdj` within $1,000 of each position's cheapest salary on the slate (top 5 per position). Do: `Punt option`.
-- **Projection disagreements**: largest |CalPts - ProjPts| per position, both directions; columns TFFB, Sleeper, FantasyPros, CalPts, Diff,
+- **Projection disagreements**: largest |CalPts - ProjPts| per position, both directions; columns TFFB, Sleeper, FantPros, CalPts, Diff,
   `Edge`. Why splits the gap into the measured bias (the applied, shrunk amount, with its n) and the other sources. Do: `Look closer ▲` /
   `Caution ▼`.
 - **Injury beneficiaries**: carries only; confirmed out (`Bump ▲`) first, questionable muted (`Watch`); then **Absent regulars** as muted
@@ -773,7 +773,7 @@ sorted by the absolute change in the team's implied total since the start of the
 | `Implied move`, `Total move`, `Spread move` | Changes since the week opened (EdgeRaw `ImpliedMove`, `TotMove`, `SpdMove`); signed, colour-scaled around zero. |
 | `Kickoff (ET)` | TFFB's `GameStart`, which is Eastern wall-clock time labelled "Z"; the text is formatted as written and never converted (it never says UTC). |
 | `Top players` | The team's top three players by `ProjPts` (`MOVEMENT_TOP_PLAYERS`). |
-| `What it means` | One sentence, e.g. "TEN implied -2.0: their players project lower than when the week opened". |
+| `What it means` | One short line, e.g. "Their players project lower than at the open" (Team and Implied move beside it say who and how much). The table is about 1,200 px wide. |
 
 Shows "No line movement recorded yet" rather than a page of `0.0`s until at least one odds sync has happened this
 week. Every column is found by header name, so a reorder cannot break the styling.

@@ -21,7 +21,7 @@ import contextlib
 
 from dfs import edge_finder_tab as eft
 from dfs import sheet_pool_cells as pc
-from dfs.sheet_clipping import fitted_widths
+from dfs.sheet_clipping import FIT_PADDING_PX, FIT_PX_PER_CHAR, estimate_px, fitted_widths
 from dfs.sheet_color_scales import GRAD_MAX, WHITE
 from dfs.sheet_style import (
     _HEADER_FMT,
@@ -38,24 +38,35 @@ from dfs.sheets import SheetsClient, column_letter
 
 TAB = eft.EDGE_FINDER_TAB
 POOL_TAB = pc.POOL_TAB
+# Sam (2026-10-09): Pool through Why fits about 1,270 px with no horizontal scroll. The fixed columns are
+# tight; Edge and Do take the width of their longest real value (never past CHIP_MAX); Name and Why give up
+# the difference (Name down to NAME_MIN, Why down to WHY_MIN) when something else had to grow.
+# `fit_widths` does it.
+NAME_MIN, NAME_MAX = 155, 170
+WHY_MIN, WHY_MAX = 220, 300
+CHIP_MAX = 140
+BUDGET = 1270
+SLOT_PX = 64
 WIDTHS = {
     eft.POOL_COL: pc.POOL_COLUMN_WIDTH,
-    "B": 190,
+    "B": NAME_MAX,
     "C": 44,
     "D": 48,
     "E": 64,
-    eft.OWN_COL: 62,
-    "G": 84,
-    "H": 84,
-    "I": 84,
-    "J": 84,
-    "K": 84,
-    "L": 100,
-    eft.DO_COL: 170,
-    eft.WHY_COL: 320,
+    eft.OWN_COL: 60,
+    "G": SLOT_PX,
+    "H": SLOT_PX,
+    "I": SLOT_PX,
+    "J": SLOT_PX,
+    "K": SLOT_PX,
+    eft.EDGE_COL: 100,
+    eft.DO_COL: 120,
+    eft.WHY_COL: 250,
     eft.ID_COL: 90,
     eft.KEY_COL: 90,
 }
+# How far a column may grow past its fixed width when a real value would be cut off (the audit decides).
+GROW_MAX = {"C": 56, "D": 56, "E": 72, eft.OWN_COL: 70, "G": 84, "H": 84, "I": 84, "J": 84, "K": 84}
 HIDDEN_FIRST, HIDDEN_LAST = eft.ID_COL, eft.KEY_COL
 NO_FILL = {"red": 1.0, "green": 1.0, "blue": 1.0}
 VERDICT_FG = {"red": 0.60, "green": 0.38, "blue": 0.0}
@@ -216,22 +227,46 @@ def _display_rows(layout: eft.Layout) -> list[list]:
     return out
 
 
+def _longest_px(texts: list[str]) -> int:
+    return max(
+        (estimate_px(x, per_char=FIT_PX_PER_CHAR, padding=FIT_PADDING_PX) for x in texts if x), default=0
+    )
+
+
 def fit_widths(layout: eft.Layout) -> dict[str, int]:
-    """`WIDTHS`, with every column that would cut off a cell of this write widened to fit it
-    (`sheet_clipping`, never narrower, never past 300 px): a name or a chip combination the fixed widths did
-    not foresee does not get clipped. The hidden columns and the open-ended Why (last visible, it overflows
-    right) are left alone."""
+    """`WIDTHS` adjusted to the real values (Sam's rule, 2026-10-09):
+    - Edge and Do: the width of their longest real value, between a floor and `CHIP_MAX`;
+    - every other column: widened only when a real value would be cut off (`sheet_clipping`), up to
+      `GROW_MAX`;
+    - Name: its longest real name, between `NAME_MIN` and `NAME_MAX`;
+    - Pool through Why stays within `BUDGET`: the surplus comes out of Why (down to `WHY_MIN`), then Name.
+    The hidden columns are left alone."""
     letters = [column_letter(i) for i in range(eft.COLUMN_COUNT)]
     widths = [WIDTHS.get(letter, 100) for letter in letters]
     hidden = {i for i, letter in enumerate(letters) if HIDDEN_FIRST <= letter <= HIDDEN_LAST}
+    rows = _display_rows(layout)
+    players = [rows[r - 1] for r in layout.player_rows]
+    edge_i, do_i, name_i, why_i = (_index(c) for c in (eft.EDGE_COL, eft.DO_COL, eft.NAME_COL, eft.WHY_COL))
+    # the chip columns: the longest real value (and the longest value the Do formula can show instead)
+    widths[edge_i] = min(CHIP_MAX, max(60, _longest_px([str(r[edge_i]) for r in players] + ["Edge"])))
+    widths[do_i] = min(CHIP_MAX, max(90, _longest_px([str(r[do_i]) for r in players] + ["In pool (Both)"])))
+    widths[name_i] = min(NAME_MAX, max(NAME_MIN, _longest_px([str(r[name_i]) for r in players])))
     fitted = fitted_widths(
-        _display_rows(layout),
+        rows,
         widths,
         hidden,
         bold_rows=frozenset([*layout.header_rows, *layout.inner_header_rows]),
-        skip_columns=frozenset({_index(eft.WHY_COL)}),
+        skip_columns=frozenset({edge_i, do_i, why_i}),
+        maxima={_index(letter): px for letter, px in GROW_MAX.items()} | {name_i: NAME_MAX},
     )
-    return {**WIDTHS, **{letters[i]: px for i, px in fitted.items()}}
+    for i, px in fitted.items():
+        widths[i] = px
+    over = sum(widths[: why_i + 1]) - BUDGET
+    for i, floor in ((why_i, WHY_MIN), (name_i, NAME_MIN)):
+        take = min(max(over, 0), widths[i] - floor)
+        widths[i] -= take
+        over -= take
+    return {letter: widths[i] for i, letter in enumerate(letters)}
 
 
 def _write_notes(client: SheetsClient, layout: eft.Layout) -> None:
@@ -243,14 +278,18 @@ def _write_notes(client: SheetsClient, layout: eft.Layout) -> None:
 
 def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
     last = eft.LAST_VISIBLE_COL  # Why is the last visible column; the Id and group key are hidden
-    client.format_range(TAB, f"A{layout.title_row}", _TITLE_FMT)
+    client.format_range(TAB, f"A{layout.title_row}:{last}{layout.title_row}", _TITLE_FMT)
     for row in layout.status_rows:
-        client.format_range(TAB, f"A{row}", {"textFormat": {"fontSize": 9, "foregroundColor": INK_MUTED}})
+        client.format_range(
+            TAB, f"A{row}:{last}{row}", {"textFormat": {"fontSize": 9, "foregroundColor": INK_MUTED}}
+        )
     for row in layout.section_rows:
         client.format_range(TAB, f"A{row}:{last}{row}", _PANEL_FMT)
     for row in layout.meaning_rows:
         client.format_range(
-            TAB, f"A{row}", {"textFormat": {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}}
+            TAB,
+            f"A{row}:{last}{row}",
+            {"textFormat": {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}},
         )
     for row in layout.header_rows:
         client.format_range(TAB, f"A{row}:{last}{row}", _HEADER_FMT)
@@ -267,12 +306,14 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         client.format_range(TAB, f"A{row}:{last}{row}", {"textFormat": {"bold": True, "fontSize": 10}})
     for row in layout.note_rows:
         client.format_range(
-            TAB, f"A{row}", {"textFormat": {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}}
+            TAB,
+            f"A{row}:{last}{row}",
+            {"textFormat": {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}},
         )
     for row in layout.verdict_rows:
         client.format_range(
             TAB,
-            f"A{row}",
+            f"A{row}:{last}{row}",
             {"textFormat": {"italic": True, "bold": True, "fontSize": 9, "foregroundColor": VERDICT_FG}},
         )
     for row in layout.overflow_rows:
@@ -283,6 +324,17 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         )
     for row in layout.team_rows:
         client.format_range(TAB, f"A{row}:{last}{row}", {"textFormat": {"bold": True, "fontSize": 10}})
+    # The label cell keeps its row's look and adds bold (a format call replaces the whole textFormat).
+    label_looks = [
+        (layout.status_rows, {"fontSize": 9, "foregroundColor": INK_MUTED}),
+        (layout.meaning_rows, {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}),
+        (layout.note_rows, {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}),
+        (layout.verdict_rows, {"italic": True, "fontSize": 9, "foregroundColor": VERDICT_FG}),
+    ]
+    for rows, look in label_looks:
+        for row in rows:
+            if layout.rows[row - 1][0]:  # a continuation line has no label
+                client.format_range(TAB, f"A{row}", {"textFormat": {**look, "bold": True}})
     for rng in layout.money_cells:
         client.format_range(TAB, rng, {**_num("$#,##0", "CURRENCY"), "horizontalAlignment": "RIGHT"})
     for rng in layout.point_cells:

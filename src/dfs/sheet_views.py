@@ -744,10 +744,13 @@ def build_board(
             r[start_col + i] = v
 
     _set(BOARD_TITLE_ROW, ["THIS WEEK'S BOARD"])
-    # The values sit in C, E, I, K (labels in B, D, H, J); E and K are text that overflow right across the
-    # empty cells after them (the old layout put "Max wind" in column E and cut "DET / ARI  54.5" off).
-    _set(BOARD_BANNER_ROW, ["Games", games, "Highest total", top_total], start_col=BANNER_START_COL)
-    _set(BOARD_BANNER_ROW, ["Max wind", max_wind, "Injuries", injuries], start_col=BANNER_START_COL + 6)
+    # One live line in B (Sam, 2026-10-09): the four label / value pairs used to span B to K and the last was
+    # cut off at laptop width. A formula cell cannot hold rich text, so the whole line is plain bold. The
+    # text overflows right across the empty cells after it.
+    pieces = [("Games", games), ("Highest total", top_total), ("Max wind", max_wind), ("Injuries", injuries)]
+    separator = '&"   ·   "&'
+    banner = "=" + separator.join(f'"{label} "&({formula.removeprefix("=")})' for label, formula in pieces)
+    _set(BOARD_BANNER_ROW, [banner], start_col=BANNER_START_COL)
     _set(BOARD_FRESHNESS_ROW, [freshness_banner])
 
     _set(BOARD_SLATE_HEADER_ROW, ["SLATE SHAPE  —  where do I want exposure this week"])
@@ -1482,10 +1485,10 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
     about 25 times).
 
     Columns: Team, Opp, Implied now, Implied move, Total move, Spread move, Kickoff (ET), the team's top 3
-    players by projection, and `What it means` ("TEN implied -2.0: their players project lower than when the
-    week opened"). Sorted by |Implied move|; a team whose implied total has not moved is not listed (an
-    unmoved line is 0.0, not blank, so filtering on non-blank alone lets a page of zeros through). `Implied
-    now` is `(OverUnder - Spread) / 2` from EdgeRaw's own team-perspective Spread (negative = favourite).
+    players by projection, and `What it means` ("Their players project lower than at the open"). Sorted by
+    |Implied move|; a team whose implied total has not moved is not listed (an unmoved line is 0.0, not
+    blank, so filtering on non-blank alone lets a page of zeros through). `Implied now` is
+    `(OverUnder - Spread) / 2` from EdgeRaw's own team-perspective Spread (negative = favourite).
 
     Kickoff is shown in Eastern time: TFFB's `GameStart` is Eastern wall-clock time labelled "Z" (see
     `kickoff.py`), so the text is formatted AS WRITTEN and never converted; there is no "UTC" anywhere on this
@@ -1529,10 +1532,10 @@ def build_movement(client: SheetsClient, *, edge_tab: str) -> str:
             f"ARRAY_CONSTRAIN(SORT(FILTER({{{name},{projpts}}},{team}=$A{r},{projpts}>0),2,FALSE),"
             f"{MOVEMENT_TOP_PLAYERS},1)"
         )
+        # short: the Team and Implied move columns beside it already say who and by how much
         means = (
-            f'$A{r}&" implied "&TEXT($D{r},"+0.0;-0.0")&": "&IF($D{r}>0,'
-            f'"their players project higher than when the week opened",'
-            f'"their players project lower than when the week opened")'
+            f'IF($D{r}>0,"Their players project higher than at the open",'
+            f'"Their players project lower than at the open")'
         )
         cells = [
             f'=IF($A{r}="","",IFERROR(TEXTJOIN(", ",TRUE,{top}),""))',
