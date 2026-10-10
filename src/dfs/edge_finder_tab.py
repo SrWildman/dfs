@@ -174,13 +174,13 @@ KEY_COL = column_letter(COLUMN_COUNT - 1)
 LAST_COLUMN = KEY_COL
 LAST_VISIBLE_COL = WHY_COL  # Id and the group key are hidden
 
-CASH_COLUMNS = ["CalPts", "Hit3x%", "Bust%", "ProjPts", "Edge"]
-GPP_COLUMNS = ["CalPts", "Boom%", "CeilM", "Lev", "Edge"]
-LEVERAGE_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "Edge"]
-CHALK_COLUMNS = ["CalPts", "Boom%", "Bust%", "ProjPts", "Edge"]
-PUNT_COLUMNS = ["CalPts", "ValAdj", "Hit3x%", "Edge"]
+CASH_COLUMNS = ["CalPts", "Hit3x%", "Bust%", "ProjPts", "Floor", "Edge"]
+GPP_COLUMNS = ["CalPts", "Boom%", "CeilM", "Lev", "ValAdj", "Edge"]
+LEVERAGE_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "ValAdj", "Edge"]
+CHALK_COLUMNS = ["CalPts", "Boom%", "Bust%", "ProjPts", "ValAdj", "Edge"]
+PUNT_COLUMNS = ["CalPts", "ValAdj", "Hit3x%", "Boom%", "Floor", "Edge"]
 DISAGREE_COLUMNS = ["TFFB", "Sleeper", "FantPros", "CalPts", "Diff", "Edge"]
-BENEFICIARY_COLUMNS = ["+Car/G", "+xFP/G", "Method", "Priced?", "Edge"]
+BENEFICIARY_COLUMNS = ["CalPts", "+Car/G", "+xFP/G", "Method", "Priced?", "Edge"]
 ABSENCE_COLUMNS = ["Role", "Tgt/G", "Car/G", "Missed"]
 TREND_HEADERS = ["Metric", "Last 3", "Earlier", "Change", "Trend"]
 # A team row reads Matchup | Pos | Grade | Players (B-E; the players' names are one left-aligned cell that
@@ -835,8 +835,8 @@ def disagreement_short(row: pd.Series, fitted: calibration.Calibration | None) -
 def verb_with_proj(verb: str, chip: str | None) -> str:
     """One verb per row, with the R6 chip beside it, never a second instruction. A `Proj ▼` DOWNGRADES a
     `Cash add` to `Cash option (Proj ▼)` (a fade signal cannot sit beside "add"); a `Proj ▲` never upgrades
-    anything, it only shows beside the verb (`Cash option (Proj ▲)`). `Out` carries no chip."""
-    if verb == "Out" or chip not in (usage_r6.PROJ_DOWN, usage_r6.PROJ_UP):
+    anything, it only shows beside the verb (`Cash option (Proj ▲)`). A blank verb has no chip."""
+    if not verb or chip not in (usage_r6.PROJ_DOWN, usage_r6.PROJ_UP):
         return verb
     if chip == usage_r6.PROJ_DOWN and verb == "Cash add":
         verb = "Cash option"
@@ -1103,7 +1103,7 @@ def _cash_section(b: _Builder, edge: pd.DataFrame, inputs: Inputs) -> None:
         )
         b.player_row(
             _lead(r, pos),
-            [r["CalPts"], r["Hit3x%"], r["Bust%"], r["ProjPts"], r["Edge"]],
+            [r["CalPts"], r["Hit3x%"], r["Bust%"], r["ProjPts"], r["Floor"], r["Edge"]],
             why=why,
             short=_short(gap_short(r, b.fitted), _thin_short(r.get("Games"))),
             verb=cash_verb(rank, r["Bust%"], medians.get(pos, np.inf)),
@@ -1158,7 +1158,7 @@ def _gpp_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
         )
         b.player_row(
             _lead(r, pos),
-            [r["CalPts"], r["Boom%"], r["CeilM"], lev, r["Edge"]],
+            [r["CalPts"], r["Boom%"], r["CeilM"], lev, r["ValAdj"], r["Edge"]],
             why=why,
             short=_short(short, _thin_short(r.get("Games"))),
             verb=gpp_verb(r["Boom%"], boom_cut, starred, r["Lev"], bool(r["BoomHalf"])),
@@ -1190,7 +1190,7 @@ def _leverage_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
             lev = r["Lev"]
             b.player_row(
                 _lead(r, pos),
-                [r["CalPts"], r["Boom%"], r["Bust%"], lev, r["Edge"]],
+                [r["CalPts"], r["Boom%"], r["Bust%"], lev, r["ValAdj"], r["Edge"]],
                 why=_join(
                     f"Lev {lev:+.0f}: Boom% is at the {r['BoomRank']:.0f}th percentile of {_plural(pos)}, "
                     f"ownership at the {r['OwnRank']:.0f}th ({r['Own%']:.1%} owned)",
@@ -1227,7 +1227,7 @@ def _chalk_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
             third = {"Chalk: eat": "bottom", "Chalk: fade candidate": "top"}.get(verb, "middle")
             b.player_row(
                 _lead(r, pos),
-                [r["CalPts"], r["Boom%"], r["Bust%"], r["ProjPts"], r["Edge"]],
+                [r["CalPts"], r["Boom%"], r["Bust%"], r["ProjPts"], r["ValAdj"], r["Edge"]],
                 why=_join(
                     f"owned {r['Own%']:.1%}; {r['Boom%']:.0f}% to reach 4x salary, {r['Bust%']:.0f}% to bust",
                     f"his bust odds are in the {third} third of {_plural(pos)}",
@@ -1258,7 +1258,7 @@ def _punt_section(b: _Builder, edge: pd.DataFrame) -> None:
             above = f"{money(gap)} above the cheapest {pos}" if gap else f"the cheapest {pos} on the slate"
             b.player_row(
                 _lead(r, pos),
-                [r["CalPts"], r["ValAdj"], r["Hit3x%"], r["Edge"]],
+                [r["CalPts"], r["ValAdj"], r["Hit3x%"], r["Boom%"], r["Floor"], r["Edge"]],
                 why=_join(
                     above,
                     f"ValAdj {r['ValAdj']:.1f} (value against what his price usually buys)",
@@ -1357,6 +1357,7 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
                         info["Own%"] if info is not None else "",
                     ],
                     [
+                        info["CalPts"] if info is not None else "",
                         round(r["car_gain"], 1),
                         round(r["xfp_gain"], 1),
                         method_cell,
@@ -1397,7 +1398,7 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
                 [r["Role"], round(r["tgt_g"], 1), round(r["car_g"], 1), int(r["GamesMissed"])],
                 why=_join(f"{r.get('Regular', '')}", *texts),
                 short=str(r.get("Regular", "") or ""),
-                verb="Out",
+                verb="",  # context, not an action: the sub-header says so, and "Out" told him nothing
                 pid=info["Id"] if info is not None else "",
                 muted=True,
             )
@@ -1610,6 +1611,7 @@ POINT_HEADERS = frozenset(
         "Sleeper",
         "FantPros",
         "CeilM",
+        "Floor",
         "Diff",
         "xFP/G",
         "Tgt/G",
@@ -1644,6 +1646,7 @@ COLOUR_KINDS: dict[str, str] = {
             "Hit3x%",
             "Boom%",
             "CeilM",
+            "Floor",
             "Lev",
             "+Car/G",
             "+xFP/G",
@@ -1669,6 +1672,17 @@ COLOUR_KINDS: dict[str, str] = {
 COLOUR_MIN_PLAYERS = 2  # a block with a single player has no top or bottom to compare
 
 
+# In a FADE↓ block a high DK/G against xFP/G is the warning (he is over-performing his usage), so a
+# good-high scale on those two columns would mislead: they stay uncoloured there (Sam, 2026-10-10).
+NEUTRAL_BLOCK_PREFIX = "FADE↓"
+NEUTRAL_IN_FADE = frozenset({"xFP/G", "DK/G L3"})
+
+
+def _header_name(cell) -> str:
+    """A header's name: `'+Car/G` carries a leading apostrophe so Sheets reads text, not a formula."""
+    return str(cell).removeprefix("'")
+
+
 def _mark_colours(layout: Layout) -> None:
     """`colour_blocks`: a block is the run of rows under one sub-header (a position, an R6 signal, a token),
     team groups and overflow rows included, so a column is compared with the same position's other players.
@@ -1683,8 +1697,12 @@ def _mark_colours(layout: Layout) -> None:
             first, last = block[0], block[-1]
             above = [h for h in headers if h < first]
             names = layout.rows[max(above) - 1] if above else []
+            sub = max((r for r in layout.subheader_rows if r < first), default=0)
+            fade = bool(sub) and str(layout.rows[sub - 1][0]).startswith(NEUTRAL_BLOCK_PREFIX)
             for index, name in enumerate(names[:FIRST_TRAILING]):
-                kind = COLOUR_KINDS.get(name)
+                kind = COLOUR_KINDS.get(_header_name(name))
+                if fade and _header_name(name) in NEUTRAL_IN_FADE:
+                    continue
                 if kind:
                     layout.colour_blocks.append((kind, column_letter(index), first, last))
         block.clear()
@@ -1705,7 +1723,7 @@ def _mark_formats(layout: Layout) -> None:
     team_rows = set(layout.team_rows)  # a team row's cells are text under other names: never in a block
     headers = set(layout.header_rows) | set(layout.inner_header_rows)
     for header_row in sorted(headers):
-        names = layout.rows[header_row - 1]
+        names = [_header_name(n) for n in layout.rows[header_row - 1]]
         last = header_row
         while (
             last < len(layout.rows)

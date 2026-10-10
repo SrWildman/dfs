@@ -330,7 +330,7 @@ def test_edge_chips_share_one_column_in_every_section():
         for r in layout.player_rows
         if layout.rows[r - 1][_idx(eft.DO_COL)] == "Punt option"
     ]
-    assert punt and all(row[last_slot] == "INJ+" and row[last_slot - 1] == "" for row in punt)
+    assert punt and all(row[last_slot] == "INJ+" for row in punt)
 
 
 def _idx(letter):

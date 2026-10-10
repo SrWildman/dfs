@@ -94,6 +94,7 @@ from dfs.derived import (
     edge_sheet_letter,
 )
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP
+from dfs.lineups import DK_UPLOAD_HEADER
 from dfs.sheet_color_scales import (
     BLOCK_BAD,
     BLOCK_DIFF,
@@ -181,7 +182,10 @@ from dfs.sheet_views import (
     SLATE_TEAMS_FIRST_ROW,
     SLATE_TEAMS_HEADER_ROW,
     SLATE_TEAMS_LAST_ROW,
+    apply_queue_pool_dropdown,
     apply_queue_visibility,
+    queue_player_count,
+    size_slate_shape,
     used_queue_rows,
 )
 from dfs.sheets import SheetsClient, column_letter
@@ -2772,6 +2776,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
 
     # Queue, Pool check and Chalk map: the Pool gutter is the control (input colour, a Cash / GPP / Both
     # dropdown, and a chip colour per state).
+    # (The Queue's dropdown goes on its player rows only, below, once its body is read back.)
     for first, last in (
         (BOARD_QUEUE_FIRST_ROW, BOARD_QUEUE_LAST_ROW),
         (BOARD_CHECK_FIRST_ROW, BOARD_CHECK_LAST_ROW),
@@ -2779,7 +2784,8 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     ):
         pool = f"{BOARD_LIST_POOL_COL}{first}:{BOARD_LIST_POOL_COL}{last}"
         client.format_range(tab, pool, {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER"})
-        client.set_dropdown_validation(tab, pool, POOL_OPTIONS, strict=False)
+        if first != BOARD_QUEUE_FIRST_ROW:
+            client.set_dropdown_validation(tab, pool, POOL_OPTIONS, strict=False)
         for state, fmt in POOL_TYPE_CHIPS.items():
             client.add_boolean_rule(tab, pool, condition_type="TEXT_EQ", values=[state], fmt=fmt)
 
@@ -2888,6 +2894,8 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     # The Queue shows only the rows it uses (the sync hid the rest; undo nothing here).
     body = client.read_range(tab, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}")
     apply_queue_visibility(client, used_queue_rows(body))
+    apply_queue_pool_dropdown(client, queue_player_count(body))
+    size_slate_shape(client)
     client.freeze(tab, rows=3)
     return f"{tab}: styled (collapsible sections, banner, colour scales, Pool dropdowns)"
 
@@ -3103,7 +3111,7 @@ def style_exposure(client: SheetsClient, tab: str = "Exposure") -> str:
     return f"{tab}: styled (Target marked as input, over/under target flagged)"
 
 
-_MOVEMENT_WIDTHS = {  # the whole table fits ~1,200 px: nothing is off-screen at a laptop width
+_MOVEMENT_WIDTHS = {  # the whole table fits ~1,230 px: nothing is off-screen at a laptop width
     "Team": 56,
     "Opp": 56,
     "Implied now": 94,
@@ -3111,7 +3119,7 @@ _MOVEMENT_WIDTHS = {  # the whole table fits ~1,200 px: nothing is off-screen at
     "Total move": 84,
     "Spread move": 102,  # not 100: the audit reads exactly 100 as "never set"
     "Kickoff (ET)": 112,
-    "Top players": 330,
+    "Top players": 360,  # 330 cut "Jayden Daniels, Jacory Cros..." (needs ~358) on Week 5
     "What it means": 290,
 }
 
@@ -3319,6 +3327,21 @@ def style_sos_tab(client: SheetsClient, tab: str) -> str:
     return f"{tab}: header styled, frozen, widths set{', Rank scaled (reversed)' if scaled else ''}"
 
 
+def restore_dk_upload_header(client: SheetsClient, tab: str = "DK Upload") -> str:
+    """Row 1 of DK Upload is DK Classic's bulk-edit header (`lineups.DK_UPLOAD_HEADER`). It was
+    once a Showdown one (CPT, FLEX x5) on every sheet, which misled and was never what `dfs
+    export` reads (that is positional). Writes row 1 only when it differs; never touches entries."""
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    rows = client.read_range(tab, "A1:1")
+    current = [c.strip() for c in (rows[0] if rows else [])]
+    expected = list(DK_UPLOAD_HEADER)
+    if current[: len(expected)] == expected and not any(current[len(expected) :]):
+        return f"{tab}: header already DK Classic"
+    client.update_range(tab, f"A1:{column_letter(len(expected) - 1)}1", [expected])
+    return f"{tab}: header restored to DK Classic"
+
+
 def style_tier23_tabs(
     client: SheetsClient,
     *,
@@ -3329,6 +3352,7 @@ def style_tier23_tabs(
     """Every Tier 2/3 tab in one call, each skipped cleanly if the tab
     doesn't exist or (for the hand-pasted SoS tabs) is currently empty."""
     results = [
+        restore_dk_upload_header(client),
         style_flat_tab(client, "DK Upload", last_row=dk_upload_last_row),
         style_results(client, last_row=results_last_row),
     ]
@@ -3360,6 +3384,7 @@ for _name in (
     "style_slate_grid",
     "style_exposure",
     "style_movement",
+    "restore_dk_upload_header",
     "style_flat_tab",
     "style_results",
     "style_sos_tab",

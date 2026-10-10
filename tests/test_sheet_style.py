@@ -6,6 +6,7 @@ from dfs.derived import (
     edge_last_letter,
     edge_sheet_index,
 )
+from dfs.lineups import DK_UPLOAD_HEADER
 from dfs.sheet_color_scales import (
     FIELD_COLOR_SCALES,
     GRAD_MAX,
@@ -58,6 +59,7 @@ from dfs.sheet_style import (
     polish_lineups_identity_cells,
     polish_lineups_pct_of_cap,
     polish_lineups_totals_rows,
+    restore_dk_upload_header,
     style_board,
     style_flat_tab,
     style_movement,
@@ -979,10 +981,9 @@ def test_style_board_gives_every_player_row_a_pool_dropdown_in_the_gutter_and_no
     assert pool == "A"  # the gutter
     ranges = {rng for rng, _ in client.dropdown_calls}
     assert ranges == {
-        f"{pool}{BOARD_QUEUE_FIRST_ROW}:{pool}{BOARD_QUEUE_LAST_ROW}",
         f"{pool}{BOARD_CHECK_FIRST_ROW}:{pool}{BOARD_CHECK_LAST_ROW}",
         f"{pool}{BOARD_CHALK_FIRST_ROW}:{pool}{BOARD_CHALK_LAST_ROW}",
-    }  # not Slate shape, Pool summary, Your stacks or Stack candidates
+    }  # not Slate shape, Pool summary, Your stacks or Stack candidates; the Queue's go on its player rows
     assert all(options == ["Cash", "GPP", "Both"] for _, options in client.dropdown_calls)
     assert all("Remove" not in options for _, options in client.dropdown_calls)  # blank is the remove
     assert client.dropdown_strict and not any(
@@ -994,7 +995,7 @@ def test_style_board_hides_the_queues_unused_rows_again_so_a_polish_does_not_und
     client = FakeBoardClient()
     style_board(client)
     # the fake returns no Queue content: one visible line, the other nineteen hidden
-    assert client.hidden_rows == [(BOARD_QUEUE_FIRST_ROW + 1, BOARD_QUEUE_LAST_ROW)]
+    assert (BOARD_QUEUE_FIRST_ROW + 1, BOARD_QUEUE_LAST_ROW) in client.hidden_rows
 
 
 def test_style_board_unhides_rows_a_collapsed_group_left_hidden():
@@ -2011,12 +2012,16 @@ class FakeTier23Client:
         self.clear_cf_calls: int = 0
         self.boolean_rule_calls: list[tuple[str, dict]] = []
         self.color_scale_calls: list[tuple[str, dict]] = []
+        self.update_calls: list[tuple[str, list]] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
 
     def read_range(self, tab_name: str, a1_range: str):
         return [self._header] if self._header else []
+
+    def update_range(self, tab_name: str, a1_range: str, rows: list[list]) -> None:
+        self.update_calls.append((a1_range, rows))
 
     def format_range(self, tab_name: str, a1_range: str, fmt: dict) -> None:
         self.format_calls.append((a1_range, fmt))
@@ -2165,6 +2170,28 @@ def test_style_movement_skips_when_tab_absent():
     assert "not present" in result
 
 
+def test_restore_dk_upload_header_replaces_a_showdown_row_and_leaves_a_classic_one():
+    showdown = [
+        "Entry ID",
+        "Contest Name",
+        "Contest ID",
+        "Entry Fee",
+        "CPT",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+    ]
+    client = FakeTier23Client(showdown)
+    assert "restored" in restore_dk_upload_header(client)
+    assert client.update_calls == [("A1:M1", [list(DK_UPLOAD_HEADER)])]
+
+    classic = FakeTier23Client(list(DK_UPLOAD_HEADER))
+    assert "already" in restore_dk_upload_header(classic)
+    assert classic.update_calls == []
+
+
 def test_style_tier23_tabs_covers_every_expected_tab():
     client = FakeTier23Client(["A", "B"])
     results = style_tier23_tabs(
@@ -2173,7 +2200,7 @@ def test_style_tier23_tabs_covers_every_expected_tab():
         results_last_row=30,
         sos_comb_last_row=40,
     )
-    assert len(results) == 8  # DK Upload, Results, 5xSoS, SoSComb
+    assert len(results) == 9  # DK Upload header + styling, Results, 5xSoS, SoSComb
 
 
 def test_highlight_rules_follow_header_order_so_two_runs_are_identical():
@@ -2529,7 +2556,11 @@ def test_style_board_clears_the_old_layouts_dropdowns_before_adding_the_pool_one
 
     client = FakeBoardClient()
     style_board(client)
-    assert client.cleared_validation == [f"A1:{column_letter(BOARD_MAX_VISIBLE_COL_INDEX)}{BOARD_RESET_ROWS}"]
+    queue_pool = f"A{BOARD_QUEUE_FIRST_ROW}:A{BOARD_QUEUE_LAST_ROW}"  # then re-set on player rows only
+    assert client.cleared_validation == [
+        f"A1:{column_letter(BOARD_MAX_VISIBLE_COL_INDEX)}{BOARD_RESET_ROWS}",
+        queue_pool,
+    ]
 
 
 def test_polish_edge_clears_stale_formats_over_the_data_area_before_styling_by_name():

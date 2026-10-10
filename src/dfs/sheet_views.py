@@ -1042,8 +1042,50 @@ def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: s
     client.update_range(BOARD_TAB, f"A{BOARD_QUEUE_FIRST_ROW}:{BOARD_ID_COL}{BOARD_QUEUE_LAST_ROW}", body)
     used = used_queue_rows(body)
     apply_queue_visibility(client, used)
+    apply_queue_pool_dropdown(client, queue_player_count(body))
     shown = used if any(str(c).strip() for c in body[0][1:]) else 0
     return f"{BOARD_TAB}: Queue updated ({shown} pooled change(s))"
+
+
+def queue_player_count(body: list[list]) -> int:
+    """How many leading Queue rows are players (they carry the hidden `Id`); the empty-state line does not."""
+    count = 0
+    for row in body:
+        if len(row) > BOARD_ID_COL_INDEX and str(row[BOARD_ID_COL_INDEX]).strip():
+            count += 1
+        else:
+            break
+    return count
+
+
+def apply_queue_pool_dropdown(client: SheetsClient, players: int) -> None:
+    """The Pool dropdown on the Queue's player rows only: the "nothing changed" line and the unused rows
+    have no player to pool, so they carry no validation (Sam, 2026-10-10)."""
+    pool = f"{BOARD_LIST_POOL_COL}{BOARD_QUEUE_FIRST_ROW}:{BOARD_LIST_POOL_COL}{BOARD_QUEUE_LAST_ROW}"
+    client.clear_data_validation(BOARD_TAB, pool)
+    if players > 0:
+        last = BOARD_QUEUE_FIRST_ROW + players - 1
+        shown = f"{BOARD_LIST_POOL_COL}{BOARD_QUEUE_FIRST_ROW}:{BOARD_LIST_POOL_COL}{last}"
+        client.set_dropdown_validation(BOARD_TAB, shown, pc.POOL_OPTIONS, strict=False)
+
+
+def size_slate_shape(client: SheetsClient) -> str:
+    """Show only as many Slate shape rows as there are games; hide the reserved rest. The section reserves
+    `BOARD_SLATE_ROWS` rows (a full slate), and a short slate left blank ones under the last game. Called by
+    polish and by every edge sync (the games arrive with the sync), so a longer slate next week opens up."""
+    if not client.tab_exists(BOARD_TAB):
+        return f"{BOARD_TAB}: not present -- skipped"
+    last_col = column_letter(len(BOARD_SLATE_COLHEADER) - 1)
+    rows = client.read_range(BOARD_TAB, f"A{BOARD_SLATE_FIRST_ROW}:{last_col}{BOARD_SLATE_LAST_ROW}")
+    used = 1
+    for i, row in enumerate(rows):
+        if any(str(c).strip() for c in row):
+            used = i + 1
+    first_hidden = BOARD_SLATE_FIRST_ROW + used
+    client.unhide_rows(BOARD_TAB, BOARD_SLATE_FIRST_ROW, BOARD_SLATE_LAST_ROW)
+    if first_hidden <= BOARD_SLATE_LAST_ROW:
+        client.hide_rows(BOARD_TAB, first_hidden, BOARD_SLATE_LAST_ROW)
+    return f"{BOARD_TAB}: Slate shape shows {used} game row(s)"
 
 
 def apply_queue_visibility(client: SheetsClient, used: int) -> None:

@@ -27,6 +27,7 @@ from dfs.sheet_views import (
     BOARD_ID_COL_INDEX,
     BOARD_LIST_COLHEADER,
     BOARD_LIST_NAME_COL,
+    BOARD_LIST_POOL_COL,
     BOARD_LIST_REASON_INDEX,
     BOARD_POOL_COL,
     BOARD_POOL_COLHEADER,
@@ -55,6 +56,8 @@ from dfs.sheet_views import (
     BOARD_SLATE_HEADER_ROW,
     BOARD_SLATE_HOME_COL,
     BOARD_SLATE_HOME_COL_INDEX,
+    BOARD_SLATE_LAST_ROW,
+    BOARD_SLATE_ROWS,
     BOARD_STACK_COLHEADER,
     BOARD_STACK_FIRST_ROW,
     BOARD_STACK_HEADER_ROW,
@@ -95,6 +98,8 @@ from dfs.sheet_views import (
     build_movement,
     build_slate_grid,
     queue_body,
+    queue_player_count,
+    size_slate_shape,
     used_queue_rows,
     write_board_portfolio,
     write_queue_section,
@@ -1088,6 +1093,14 @@ class _QueueSectionClient:
         self.update_calls: list[tuple[str, list[list]]] = []
         self.hidden: list[tuple[int, int]] = []
         self.unhidden: list[tuple[int, int]] = []
+        self.cleared_validation: list[str] = []
+        self.dropdowns: list[tuple[str, list[str]]] = []
+
+    def clear_data_validation(self, tab_name, a1_range):
+        self.cleared_validation.append(a1_range)
+
+    def set_dropdown_validation(self, tab_name, a1_range, options, *, strict=True):
+        self.dropdowns.append((a1_range, options))
 
     def tab_exists(self, tab_name):
         if tab_name == "Player Pool":
@@ -1212,3 +1225,65 @@ def test_banner_counts_the_same_main_slate_games_as_slate_shape():
     shared = re.search(r'\(GamesRaw![^)]*<>""\)\*.*>0\)', slate_row[SL]).group(0)
     assert shared in games and shared in top_total
     assert "MATCH(WeatherRaw!$A$2:$A$40" in max_wind  # wind is per GameId, restricted to slate games
+
+
+def test_queue_pool_dropdown_goes_on_player_rows_only_not_the_empty_state_line():
+    pool = BOARD_LIST_POOL_COL
+    whole = f"{pool}{BOARD_QUEUE_FIRST_ROW}:{pool}{BOARD_QUEUE_LAST_ROW}"
+
+    one = _QueueSectionClient(
+        header=["Pool", "Name", "Position", "Team", "Id"], ids=["1"], pool_ticks=["Both"]
+    )
+    write_queue_section(one, _queue_changes_df(("1", "Player A", "RB", "KC", "Avail -> Q")), "EdgeRaw")
+    assert one.cleared_validation == [whole]
+    assert [r for r, _ in one.dropdowns] == [f"{pool}{BOARD_QUEUE_FIRST_ROW}:{pool}{BOARD_QUEUE_FIRST_ROW}"]
+
+    none = _QueueSectionClient(
+        header=["Pool", "Name", "Position", "Team", "Id"], ids=["1"], pool_ticks=["Both"]
+    )
+    write_queue_section(none, _queue_changes_df(), "EdgeRaw")
+    assert none.cleared_validation == [whole] and none.dropdowns == []  # the "nothing changed" line has none
+
+
+def test_queue_player_count_stops_at_the_first_row_without_an_id():
+    body = queue_body(_queue_changes_df(), set(), edge_tab="EdgeRaw")
+    assert queue_player_count(body) == 0
+    width = BOARD_ID_COL_INDEX + 1
+    rows = [["x"] * (width - 1) + ["1"], ["y"] * (width - 1) + ["2"], [""] * width]
+    assert queue_player_count(rows) == 2
+
+
+class _SlateClient:
+    def __init__(self, games: int, *, present: bool = True):
+        self._games, self._present = games, present
+        self.hidden: list[tuple[int, int]] = []
+        self.unhidden: list[tuple[int, int]] = []
+
+    def tab_exists(self, tab_name):
+        return self._present
+
+    def read_range(self, tab_name, a1_range):
+        return [["Team A @ Team B", "48.5"] for _ in range(self._games)]  # trailing blanks are dropped
+
+    def hide_rows(self, tab_name, first, last):
+        self.hidden.append((first, last))
+
+    def unhide_rows(self, tab_name, first, last):
+        self.unhidden.append((first, last))
+
+
+def test_size_slate_shape_hides_the_rows_below_the_last_game_and_shows_a_longer_slate_again():
+    short = _SlateClient(10)
+    assert "10 game" in size_slate_shape(short)
+    assert short.hidden == [(BOARD_SLATE_FIRST_ROW + 10, BOARD_SLATE_LAST_ROW)]
+    assert short.unhidden == [(BOARD_SLATE_FIRST_ROW, BOARD_SLATE_LAST_ROW)]  # open first, so it can grow
+
+    full = _SlateClient(BOARD_SLATE_ROWS)
+    size_slate_shape(full)
+    assert full.hidden == []
+
+    empty = _SlateClient(0)
+    size_slate_shape(empty)  # never fewer than one visible row
+    assert empty.hidden == [(BOARD_SLATE_FIRST_ROW + 1, BOARD_SLATE_LAST_ROW)]
+
+    assert "not present" in size_slate_shape(_SlateClient(3, present=False))

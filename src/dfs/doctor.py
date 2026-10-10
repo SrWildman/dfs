@@ -21,6 +21,7 @@ from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.edge_finder_tab import ID_COL as EDGE_FINDER_ID_COL
 from dfs.edge_finder_tab import POOL_COL as EDGE_FINDER_POOL_COL
+from dfs.lineups import DK_UPLOAD_HEADER
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_empty_guards import describe as describe_unguarded
 from dfs.sheet_empty_guards import find_unguarded
@@ -271,6 +272,27 @@ def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[s
                 )
             )
     return issues
+
+
+def _check_dk_upload_header(
+    cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
+) -> list[DoctorIssue]:
+    """Row 1 must be DK Classic's header. `dfs export` reads the slots by position, so a wrong
+    header (it was Showdown's CPT/FLEX x5 on every sheet) does not break it, but it misleads."""
+    tab = cfg.lineups.upload_tab
+    if tab not in tab_titles:
+        return []
+    found = [str(c).strip() for c in headers_by_tab.get(tab, [])]
+    expected = list(DK_UPLOAD_HEADER)
+    if found[: len(expected)] == expected:
+        return []
+    return [
+        DoctorIssue(
+            "dk-upload-header",
+            f"{tab!r}: row 1 reads {', '.join(found) or '(blank)'} -- expected the DK Classic header "
+            f"({', '.join(expected)}); `dfs setup polish` restores it",
+        )
+    ]
 
 
 def _check_lineup_count_cell(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
@@ -551,6 +573,7 @@ def run_doctor(
     issues += _check_edge_header(cfg, tab_titles, headers_by_tab)
     issues += _check_linked_edge_columns(cfg, tab_titles, headers_by_tab)
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
+    issues += _check_dk_upload_header(cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)

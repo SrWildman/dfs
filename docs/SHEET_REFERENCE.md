@@ -588,10 +588,10 @@ Cash / GPP / Both dropdown (about 70 px, pale yellow); on every other row (Slate
 dropdown. Every table starts in column B. Banner (rows 2-3): row 2 is ONE live line in B (`Games 11 · Highest total DET / ARI 54.5 · Max wind 17.1 mph · Injuries 13 out / 68 IR / 52 Q`, plain bold: a formula cell cannot hold rich text, and four label / value pairs ran off a laptop screen), then the ownership note. Six
 collapsible row sections, all open by default, in this order (Sam's call):
 
-1. **Slate shape**: games ranked by total (formulas), with Fav, Spread, Pace, PROE, Expl%, GameEnv, Wind, a Shootout flag and GPS.
+1. **Slate shape**: games ranked by total (formulas), with Fav, Spread, Pace, PROE, Expl%, GameEnv, Wind, a Shootout flag and GPS. The 16 reserved rows below the last game are **hidden** (`sheet_views.size_slate_shape`, run by polish and every edge sync), so the section is as tall as the slate.
 2. **Queue**: pooled players whose numbers changed since the last sync (`dfs sync --live` / `dfs go` write it from `live_diff.diff_queue_changes`; a
    formula cannot see yesterday's values). Every row is a player row: a live `Pool` dropdown, the player, the reason, and a hidden `Id`. The
-   rows it does not use are **hidden**, so "no changes" is one line, not twenty empty rows (`sheet_views.apply_queue_visibility`).
+   rows it does not use are **hidden**, so "no changes" is one line, not twenty empty rows (`sheet_views.apply_queue_visibility`). The Pool dropdown is on the player rows only; the "no changes" line has none (`apply_queue_pool_dropdown`).
 3. **Pool check** (live formulas): pooled players whose numbers went bad, each with its reason and a `Pool` cell, so clearing it (Delete) removes him. Triggers:
    listed OUT / D / Q / IR, `Bust%` in the top quartile of his position's rosterable pool, `CalPts` at least 2.0 below `ProjPts`, a `FADE↓` chip.
    Empty states: "Tick players into your pool to see this." / "Nothing in your pool looks worse than when you added it." Up to 10 rows.
@@ -632,27 +632,27 @@ final `dfs sync --live` about 90 minutes before kickoff, with the first kickoff.
 **Sections, top to bottom.** Each opens with a title bar (with an **All ↗** link to the matching EdgeRaw filter view on Cash core and GPP
 upside) and a second line, "what it is · what to do".
 - **Cash core**: per position, the rosterable, available players with `CalPts` at least the position median, best `Hit3x%` first.
-  Columns `CalPts`, `Hit3x%`, `Bust%`, `ProjPts`, `Edge` (there is no Rank column: the rows are in order and the sub-header says "top 10 of 32"). Do: `Cash add` (top 3 `Hit3x%` at the position AND `Bust%`
+  Columns `CalPts`, `Hit3x%`, `Bust%`, `ProjPts`, `Floor` (his 20th-percentile points, the cash-relevant number), `Edge` (there is no Rank column: the rows are in order and the sub-header says "top 10 of 32"). Do: `Cash add` (top 3 `Hit3x%` at the position AND `Bust%`
   below the position median) or `Cash option`. A **thin week** line sits under a position's header when the block's best `Hit3x%` is below
   the median best of earlier weeks (no history, no line).
-- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Lev`, `Edge` (`Own%` is column F). `Lev` = his `Boom%` percentile rank minus his `Own%` percentile rank within his
+- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Lev`, `ValAdj`, `Edge` (`Own%` is column F). `Lev` = his `Boom%` percentile rank minus his `Own%` percentile rank within his
   position (the rosterable, available players), a signed whole number coloured within the position block; blank until ownership is out. Do: `GPP leverage` (`Lev` at least +25 AND `Boom%` in the top half of
   the position), `GPP add` (`Boom%` in the top quartile), else `GPP option`. A **★** is appended when his `Boom%` is top-quartile AND his ownership is below the position's median (the original definition, unchanged).
-- **Leverage plays**: the top 5 per position by `Lev` among players with `Boom%` in the top half; `CalPts`, `Boom%`, `Bust%`, `Lev`, `Edge`. Do: `GPP leverage` or `GPP option`. A note says "Ownership not out yet; GPP leverage appears when it does." until `OwnStatus` is real.
-- **Chalk to fade or eat**: the 3 highest-owned per position with `Boom%` and `Bust%`. Do: `Chalk: eat` (his `Bust%` rank in the position's bottom third), `Chalk: fade candidate` (top third), else `Chalk`. TFFB's ownership is a large-field projection, so it is
+- **Leverage plays**: the top 5 per position by `Lev` among players with `Boom%` in the top half; `CalPts`, `Boom%`, `Bust%`, `Lev`, `ValAdj`, `Edge`. Do: `GPP leverage` or `GPP option`. A note says "Ownership not out yet; GPP leverage appears when it does." until `OwnStatus` is real.
+- **Chalk to fade or eat**: the 3 highest-owned per position with `Boom%`, `Bust%`, `ProjPts` and `ValAdj`. Do: `Chalk: eat` (his `Bust%` rank in the position's bottom third), `Chalk: fade candidate` (top third), else `Chalk`. TFFB's ownership is a large-field projection, so it is
   directional for small-field GPPs and is ignored in cash: the Cash sections show `Own%` uncoloured and their Why never mentions it. Ownership never changes `CalPts` or any probability.
-- **Punt plays**: best `ValAdj` within $1,000 of each position's cheapest salary on the slate (top 5 per position). Do: `Punt option`.
+- **Punt plays**: best `ValAdj` within $1,000 of each position's cheapest salary on the slate (top 5 per position). Columns `CalPts`, `ValAdj`, `Hit3x%`, `Boom%` (a GPP dart), `Floor` (a cash floor), `Edge`. Do: `Punt option`.
 - **Projection disagreements**: largest |CalPts - ProjPts| per position, both directions; columns TFFB, Sleeper, FantPros, CalPts, Diff,
   `Edge`. Why splits the gap into the measured bias (the applied, shrunk amount, with its n) and the other sources. Do: `Look closer ▲` /
   `Caution ▼`.
-- **Injury beneficiaries**: carries only; confirmed out (`Bump ▲`) first, questionable muted (`Watch`); then **Absent regulars** as muted
-  context (Do `Out`). No points are moved for targets.
+- **Injury beneficiaries**: carries only (columns `CalPts` first, so you can see whether the bump is already in his projection, then `+Car/G`, `+xFP/G`, `Method`, `Priced?`, `Edge`); confirmed out (`Bump ▲`) first, questionable muted (`Watch`); then **Absent regulars** as muted
+  context (Do is blank: nothing to do, the section says so). No points are moved for targets.
 - **Usage trends** (context, no chips): per position, the players whose last-3-games usage moved beyond R6's measured band against the 6
   games before (arrow thresholds in `models/research/trend_bands.json`; none for a player with fewer than 9 earlier games), one row per
   player (his biggest move; the others are named in Why). Do: `Watch`. Last 3 / Earlier / Change are numbers, right-aligned and formatted by the row's metric (shares as `43%` with the change in points, `+9 pts`; WOPR to two places; per-game rows to one).
 - **Matchups (context)**: a row per team reading `Matchup | Pos | Grade | Players` (`Soft` top 8 / `Tough` bottom 4; the top 3 players by `CalPts` are named in one left-aligned cell that overflows right), the reasons and score in
   Why (the full text is the note). The team's players sit in a collapsed row group under it, which opens on its own small header over the standard player columns (`Pool | Name | Pos | Team | Salary | Own% | CalPts | Hit3x% | Boom%`), so their Salary, Own% and numbers carry the sheet-wide formats. Feeds nothing.
-- **Context signals**: `FADE↓` (TE only), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven; then **R6 usage signals**, each of the 12
+- **Context signals**: `FADE↓` (TE only; its `xFP/G` and `DK/G L3` are left uncoloured because a high DK/G against xFP/G is the warning there), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven; then **R6 usage signals**, each of the 12
   as its own sub-block (who is flagged, the measured effect, the evidence tier). Every player row's Why also names the R6 signals behind his
   single `Proj ▼` / `Proj ▲` chip (`Proj ▼?` / `Proj ▲?`, grey, when only weaker evidence supports it), and Do shows it beside the one verb: `Proj ▼` downgrades "Cash add" to "Cash option (Proj ▼)", `Proj ▲` never upgrades ("Cash option (Proj ▲)"). Each R6 block opens with a small header naming its columns (`Read | CalPts | ProjPts`).
 
@@ -714,7 +714,7 @@ formats are reset first and set again per column. See `docs/CALCULATIONS.md`.
 
 Where you pair a finished lineup to a real DK contest entry: DraftKings'
 own "bulk edit entries" layout (Entry ID, Contest Name, Contest ID, Entry
-Fee, then the 9 roster-slot columns). `dfs export` reads this tab as-is,
+Fee, then the 9 roster-slot columns). Row 1 is DK Classic's header (`lineups.DK_UPLOAD_HEADER`: `Entry ID, Contest Name, Contest ID, Entry Fee, QB, RB, RB, WR, WR, WR, TE, FLEX, DST`); `dfs setup polish` restores it and `dfs doctor` checks it (every sheet once carried a Showdown `CPT / FLEX x5` header by hand; `dfs export` reads the slots by position, so it never broke, but it misled). `dfs export` reads this tab as-is,
 validates it against the current salary data, and writes DK's own
 upload-ready CSV. Pairing lineups to entries stays a manual step.
 
@@ -775,7 +775,7 @@ sorted by the absolute change in the team's implied total since the start of the
 | `Implied move`, `Total move`, `Spread move` | Changes since the week opened (EdgeRaw `ImpliedMove`, `TotMove`, `SpdMove`); signed, colour-scaled around zero. |
 | `Kickoff (ET)` | TFFB's `GameStart`, which is Eastern wall-clock time labelled "Z"; the text is formatted as written and never converted (it never says UTC). |
 | `Top players` | The team's top three players by `ProjPts` (`MOVEMENT_TOP_PLAYERS`). |
-| `What it means` | One short line, e.g. "Their players project lower than at the open" (Team and Implied move beside it say who and how much). The table is about 1,200 px wide. |
+| `What it means` | One short line, e.g. "Their players project lower than at the open" (Team and Implied move beside it say who and how much). The table is about 1,230 px wide. |
 
 Shows "No line movement recorded yet" rather than a page of `0.0`s until at least one odds sync has happened this
 week. Every column is found by header name, so a reorder cannot break the styling.

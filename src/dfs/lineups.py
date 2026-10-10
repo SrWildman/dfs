@@ -22,6 +22,8 @@ import pandas as pd
 from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS, Player, Position
 
 _ENTRY_COLUMNS = 4  # Entry ID, Contest Name, Contest ID, Entry Fee
+# Row 1 of the DK Upload tab, and of the CSV `dfs export` writes (DK Classic).
+DK_UPLOAD_HEADER: tuple[str, ...] = ("Entry ID", "Contest Name", "Contest ID", "Entry Fee", *ROSTER_SLOTS)
 _CELL_RE = re.compile(r"^(.*?)\s*\((\d+)\)$")
 
 
@@ -153,7 +155,7 @@ def validate_entry(
 def export_csv(valid_entries: list[ParsedEntry], path: Path) -> int:
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["Entry ID", "Contest Name", "Contest ID", "Entry Fee", *ROSTER_SLOTS])
+        writer.writerow(DK_UPLOAD_HEADER)
         for e in valid_entries:
             writer.writerow([e.entry_id, e.contest_name, e.contest_id, e.entry_fee, *e.slot_cells])
     return len(valid_entries)

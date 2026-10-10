@@ -7,6 +7,7 @@ from dfs import calibration, usage_r6
 from dfs import edge_finder_tab as eft
 from dfs import sheet_edge_finder as writer
 from dfs.derived import EDGE_COLUMNS
+from dfs.sheets import column_letter
 
 
 def _edge(rows):
@@ -231,7 +232,7 @@ def test_the_columns_are_pool_name_pos_team_salary_own_numbers_do_why_id_and_a_h
         "Hit3x%",
         "Bust%",
         "ProjPts",
-        "",  # the unused slot sits before Edge, which is always the last slot
+        "Floor",  # Cash core fills the sixth slot with the cash-relevant number
         "Edge",
     ]
     assert header[12:15] == ["Do", "Why", "Id"]  # Why is last of the visible columns
@@ -466,8 +467,8 @@ def test_beneficiaries_confirmed_first_then_questionable_muted_with_a_blank_pric
     assert [layout.rows[r - 1][do] for r in injury] == ["Bump ▲", "Watch"]
     assert injury[1] in layout.muted_rows
     confirmed, questionable = (layout.rows[r - 1] for r in injury)
-    assert confirmed[S0 + 2] == "w/wo (3 g)" and confirmed[S0 + 3] == "yes"  # Method, Priced?
-    assert questionable[S0 + 3] == ""  # unknown reads blank, not the word "unknown"
+    assert confirmed[S0 + 3] == "w/wo (3 g)" and confirmed[S0 + 4] == "yes"  # Method, Priced?
+    assert questionable[S0 + 4] == ""  # unknown reads blank, not the word "unknown"
     assert "Y out: +0.0 carries and +6.0 expected points a game" in _why(layout, injury[0])
     assert layout.rows[injury[0] - 1][_col(eft.WHY_COL)].startswith("Y out")
     assert "Gain Tgt/G" not in eft.BENEFICIARY_COLUMNS  # no target gains, ever
@@ -664,7 +665,8 @@ def test_every_confirmed_absence_is_listed_muted_as_context_with_the_historical_
     layout = eft.build_layout(_inputs(edge, absences=_absences()))
     text = [_row_text(r) for r in layout.rows]
     assert any("Absent regulars" in t and "no points are moved for targets" in t for t in text)
-    row = [r for r in layout.player_rows if layout.rows[r - 1][_col(eft.DO_COL)] == "Out"][0]
+    row = [r for r in layout.player_rows if layout.rows[r - 1][S0] == "WR1"][0]
+    assert layout.rows[row - 1][_col(eft.DO_COL)] == ""  # context, not an action
     assert row in layout.muted_rows  # context is muted, never an edge
     why = _why(layout, row)
     assert "with-or-without (2 g)" in why and "no single teammate gains much" in why and "~27%" in why
@@ -972,7 +974,7 @@ def test_a_proj_signal_never_leaves_two_opposite_instructions_on_one_row():
     assert eft.verb_with_proj("Cash add", up) == "Cash add (Proj ▲)"  # an up signal never upgrades
     assert eft.verb_with_proj("Cash option", up) == "Cash option (Proj ▲)"
     assert eft.verb_with_proj("GPP add", down) == "GPP add (Proj ▼)"
-    assert eft.verb_with_proj("Out", down) == "Out" and eft.verb_with_proj("Cash add", None) == "Cash add"
+    assert eft.verb_with_proj("", down) == "" and eft.verb_with_proj("Cash add", None) == "Cash add"
     assert eft.verb_with_proj("Cash add", "Proj ▼?") == "Cash add"  # weaker evidence only mutes the row
 
 
@@ -1091,3 +1093,74 @@ def test_every_meaning_row_carries_its_text_in_column_c():
     labels = [layout.rows[r - 1][0] for r in layout.meaning_rows]
     assert "What it is" in labels and "Do" in labels
     assert not any("with Set" in str(c) for r in layout.rows for c in r)  # the Set column is gone
+
+
+def test_the_fifth_number_slot_is_filled_in_cash_gpp_leverage_and_chalk():
+    """Column K was an empty slot here (Sam, 2026-10-10): Cash core shows Floor, the rest ValAdj."""
+    assert eft.PUNT_COLUMNS == [
+        "CalPts",
+        "ValAdj",
+        "Hit3x%",
+        "Boom%",
+        "Floor",
+        "Edge",
+    ]  # cash floor or GPP dart
+    assert eft.BENEFICIARY_COLUMNS[:2] == ["CalPts", "+Car/G"]  # is the bump already in his projection?
+    assert eft.CASH_COLUMNS[-2:] == ["Floor", "Edge"]
+    for columns in (eft.GPP_COLUMNS, eft.LEVERAGE_COLUMNS, eft.CHALK_COLUMNS):
+        assert columns[-2:] == ["ValAdj", "Edge"]
+    for columns in (
+        eft.CASH_COLUMNS,
+        eft.GPP_COLUMNS,
+        eft.LEVERAGE_COLUMNS,
+        eft.CHALK_COLUMNS,
+        eft.PUNT_COLUMNS,
+        eft.BENEFICIARY_COLUMNS,
+    ):
+        assert len(columns) == eft.SLOTS  # no blank slot before Edge
+    assert eft.COLOUR_KINDS["Floor"] == eft.COLOUR_GOOD and eft.COLOUR_KINDS["ValAdj"] == eft.COLOUR_GOOD
+    assert "Floor" in eft.POINT_HEADERS and "ValAdj" in eft.POINT_HEADERS
+
+
+def test_beneficiary_gains_are_one_decimal_point_cells():
+    """`+Car/G` / `+xFP/G` showed "4" beside "4.2" on the sheet: they must be in the point-format ranges."""
+    ben = pd.DataFrame(
+        [
+            {
+                "GsisId": "1", "Name": "WR1", "Team": "DEN", "Position": "WR", "OutStatus": "out",
+                "OutPlayers": "X", "car_gain": 4.0, "xfp_gain": 1.0, "Method": "measured table", "n": 0,
+                "Token": "INJ+", "PricedIn": "",
+            }
+        ]
+    )  # fmt: skip
+    layout = eft.build_layout(_inputs(_edge([_player(1)]), beneficiaries=ben))
+    row = next(r for r in layout.player_rows if layout.rows[r - 1][_col(eft.DO_COL)] == "Bump ▲")
+
+    def covered(letter: str) -> bool:
+        for rng in layout.point_cells:
+            head, tail = rng.split(":")
+            if head[0] == letter and int(head[1:]) <= row <= int(tail[1:]):
+                return True
+        return False
+
+    assert covered(column_letter(S0)) and covered(column_letter(S0 + 1))
+
+
+def test_a_fade_block_leaves_xfp_and_dk_per_game_uncoloured_but_a_usage_block_colours_them():
+    edge = _edge(
+        [
+            _player(1, Edge="FADE↓", **{"xFP/G": 9.0, "DkG": 15.0}),
+            _player(2, Edge="FADE↓", **{"xFP/G": 8.0, "DkG": 6.0}),
+            _player(3, Edge="USAGE↑", **{"xFP/G": 9.0, "DkG": 15.0}),
+            _player(4, Edge="USAGE↑", **{"xFP/G": 8.0, "DkG": 6.0}),
+        ]
+    )
+    layout = eft.build_layout(_inputs(edge))
+    sig = next(i for i, r in enumerate(layout.rows, 1) if str(r[0]).startswith("CONTEXT SIGNALS"))
+    subs = [r for r in layout.subheader_rows if r > sig]
+    fade_sub = next(r for r in subs if str(layout.rows[r - 1][0]).startswith("FADE↓"))
+    usage_sub = next(r for r in subs if str(layout.rows[r - 1][0]).startswith("USAGE↑"))
+    coloured = {(letter, first) for _, letter, first, _ in layout.colour_blocks}
+    xfp, dk = column_letter(S0 + 1), column_letter(S0 + 2)
+    assert (xfp, fade_sub + 1) not in coloured and (dk, fade_sub + 1) not in coloured
+    assert (xfp, usage_sub + 1) in coloured and (dk, usage_sub + 1) in coloured

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
 from dfs.doctor import run_doctor
+from dfs.lineups import DK_UPLOAD_HEADER
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
@@ -108,7 +109,7 @@ def _base_config(**overrides) -> Config:
 
 _ALL_GOOD_TABS = {
     "EdgeRaw": [POOL_HEADER, *EDGE_SHEET_ORDER],
-    "DK Upload": ["Entry ID"],
+    "DK Upload": list(DK_UPLOAD_HEADER),
     "Lineups": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Player Pool": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
@@ -363,6 +364,32 @@ def test_run_doctor_flags_blank_bankroll_header_row():
 
     issues = run_doctor(client, cfg, title="Week 1")
     assert any(i.check == "bankroll-header-row" and "cash" in i.detail for i in issues)
+
+
+def test_run_doctor_flags_a_showdown_header_on_dk_upload():
+    showdown = [
+        "Entry ID",
+        "Contest Name",
+        "Contest ID",
+        "Entry Fee",
+        "CPT",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+    ]
+    tabs = {**_ALL_GOOD_TABS, "DK Upload": showdown}
+    issues = run_doctor(FakeDoctorClient(tabs=tabs, rows=_lineups_rows()), _base_config(), title="Week 1")
+    assert any(i.check == "dk-upload-header" and "CPT" in i.detail for i in issues)
+
+
+def test_run_doctor_passes_the_classic_dk_upload_header():
+    issues = run_doctor(
+        FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=_lineups_rows()), _base_config(), title="Week 1"
+    )
+    assert not [i for i in issues if i.check == "dk-upload-header"]
+    assert DK_UPLOAD_HEADER[4:] == ("QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST")
 
 
 def test_run_doctor_passes_bankroll_header_row_when_present():

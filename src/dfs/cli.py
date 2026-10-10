@@ -144,6 +144,7 @@ from dfs.sheet_views import (
     build_exposure,
     build_movement,
     build_slate_grid,
+    size_slate_shape,
     write_board_portfolio,
     write_queue_section,
 )
@@ -2283,6 +2284,10 @@ def _write_edge_finder_tabs(cfg: Config, ctx: SyncContext) -> None:
         client = SheetsClient(cfg.google_sheets)
         edge_tab = cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
         console.print(f"[green]OK[/green] {sheet_edge_finder.write_tab(client, inputs, edge_tab=edge_tab)}")
+        try:  # the Board shows one Slate shape row per game; this sync may have changed the slate
+            console.print(f"[green]OK[/green] {size_slate_shape(client)}")
+        except SheetsError as e:
+            console.print(f"[yellow]Board slate rows not resized:[/yellow] {e}")
     except (SheetsError, OSError, ValueError, KeyError) as e:
         console.print(f"[yellow]Edge Finder tab not written:[/yellow] {e}")
 
