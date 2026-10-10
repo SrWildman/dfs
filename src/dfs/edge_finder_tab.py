@@ -59,6 +59,7 @@ from dfs.kickoff import format_et, parse_kickoff
 from dfs.paths import CURRENT_DIR
 from dfs.research_constants import ResearchConstantsError, signal_thresholds
 from dfs.sheet_clipping import FIT_PADDING_PX, FIT_PX_PER_CHAR, estimate_px
+from dfs.sheet_color_scales import BLOCK_BAD, BLOCK_DIFF, BLOCK_GOOD, BLOCK_OWN, BLOCK_SIGN
 from dfs.sheet_pool_cells import POOL_OPTIONS  # noqa: F401 - re-exported for the Edge Finder writer
 
 EDGE_FINDER_TAB = "Edge Finder"
@@ -312,8 +313,9 @@ class Layout:
     money_cells: list[str] = field(default_factory=list)
     point_cells: list[str] = field(default_factory=list)
     chip_ranges: list[str] = field(default_factory=list)  # `Edge` / token cells
-    # (column header, first row, last row, lower is better): the probability colour inside each position block
-    prob_blocks: list[tuple[str, int, int, bool]] = field(default_factory=list)
+    # (kind, column letter, first row, last row): one colour scale per number column per position block
+    # (`_mark_colours`; kinds are the `COLOUR_*` constants).
+    colour_blocks: list[tuple[str, str, int, int]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -993,13 +995,11 @@ def _ranked_blocks(
     parts: dict[str, pd.DataFrame],
     row_for,
     *,
-    colour: dict[str, bool],
     before_rows=None,
 ) -> None:
     """One block per position: subheader ("RB — top 10 of 28"), the optional verdict, the visible rows, then
     the rest (up to `MAX_PER_POSITION` in all) in a collapsed group under "▸ 18 more RBs (click + to show)".
-    `row_for(position, rank, total, row)` writes one player row. `colour` maps a header name to whether a
-    LOWER value is better, for the probability colour inside each block."""
+    `row_for(position, rank, total, row)` writes one player row."""
     for pos in POSITIONS:
         part = parts.get(pos)
         if part is None or part.empty:
@@ -1010,7 +1010,6 @@ def _ranked_blocks(
         b.sub(f"{pos}  —  top {min(visible, total)} of {total}")
         if before_rows is not None:
             before_rows(pos, part)
-        block_first = b.next_row
         for rank, (_, r) in enumerate(shown.head(visible).iterrows(), start=1):
             row_for(pos, rank, total, r)
         rest = shown.iloc[visible:]
@@ -1021,8 +1020,6 @@ def _ranked_blocks(
             for rank, (_, r) in enumerate(rest.iterrows(), start=visible + 1):
                 row_for(pos, rank, total, r)
             b.close_group()
-        for name, lower_is_better in colour.items():
-            b.layout.prob_blocks.append((name, block_first, b.last_row, lower_is_better))
 
 
 def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> Layout:
@@ -1079,6 +1076,7 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
     _matchup_section(b, inputs, edge)
     _signal_section(b, edge)
     _mark_formats(b.layout)
+    _mark_colours(b.layout)
     return b.layout
 
 
@@ -1114,7 +1112,7 @@ def _cash_section(b: _Builder, edge: pd.DataFrame, inputs: Inputs) -> None:
             muted=_muted(r),
         )
 
-    _ranked_blocks(b, parts, row_for, colour={"Hit3x%": False, "Bust%": True}, before_rows=verdict)
+    _ranked_blocks(b, parts, row_for, before_rows=verdict)
     b.end_section()
 
 
@@ -1169,7 +1167,7 @@ def _gpp_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
             muted=_muted(r),
         )
 
-    _ranked_blocks(b, parts, row_for, colour={"Boom%": False, "Lev": False})
+    _ranked_blocks(b, parts, row_for)
     b.end_section()
 
 
@@ -1187,7 +1185,6 @@ def _leverage_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
             continue
         shown = part.head(LEVERAGE_ROWS_PER_POSITION)
         b.sub(f"{pos}  —  top {len(shown)} of {len(part)} by Lev")
-        first = b.next_row
         for _, r in shown.iterrows():
             lev = r["Lev"]
             b.player_row(
@@ -1208,7 +1205,6 @@ def _leverage_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
                 edge=r.get("Edge", ""),
                 muted=_muted(r),
             )
-        b.layout.prob_blocks.append(("Lev", first, b.last_row, False))
     b.end_section()
 
 
@@ -1627,6 +1623,78 @@ PERCENT_HEADERS = frozenset({"Hit3x%", "Boom%", "Bust%"})
 OWN_HEADERS = frozenset({"Own%"})  # a 0-1 fraction on EdgeRaw, shown as a percent
 LEV_HEADERS = frozenset({"Lev"})
 CHIP_HEADERS = frozenset({"Edge", "Token", "Trend"})
+
+
+# The one colour scheme for every number column in every player section, within its position block (Sam,
+# 2026-10-09: "helps find outliers", especially in columns you are not sorting by).
+COLOUR_GOOD, COLOUR_BAD, COLOUR_OWN, COLOUR_DIFF, COLOUR_SIGN = (
+    BLOCK_GOOD,
+    BLOCK_BAD,
+    BLOCK_OWN,
+    BLOCK_DIFF,
+    BLOCK_SIGN,
+)
+COLOUR_KINDS: dict[str, str] = {
+    # good-high: green, neutral at the median
+    **dict.fromkeys(
+        (
+            "CalPts",
+            "ProjPts",
+            "Hit3x%",
+            "Boom%",
+            "CeilM",
+            "Lev",
+            "+Car/G",
+            "+xFP/G",
+            "ValAdj",
+            "Val",
+            "TFFB",
+            "Sleeper",
+            "FantPros",
+            "xFP/G",
+            "DK/G L3",
+            "Tgt/G",
+            "Car/G",
+        ),
+        COLOUR_GOOD,
+    ),
+    "Bust%": COLOUR_BAD,  # bad-high: red
+    "Own%": COLOUR_OWN,  # ownership is context, not good or bad: neutral to orange
+    "Diff": COLOUR_DIFF,  # diverging around 0: red / white / green
+    "Change": COLOUR_SIGN,  # a usage trend's change: green up, red down (the units differ by row)
+}
+# Not coloured: Salary, Team, Pos, text, a trend's Last 3 / Earlier (a percent in one row, a per-game number
+# in the next) and a count (Missed).
+COLOUR_MIN_PLAYERS = 2  # a block with a single player has no top or bottom to compare
+
+
+def _mark_colours(layout: Layout) -> None:
+    """`colour_blocks`: a block is the run of rows under one sub-header (a position, an R6 signal, a token),
+    team groups and overflow rows included, so a column is compared with the same position's other players.
+    A column's kind comes from its header name in the nearest header row above the block's first player."""
+    boundaries = set(layout.section_rows) | set(layout.subheader_rows) | set(layout.header_rows)
+    headers = sorted(set(layout.header_rows) | set(layout.inner_header_rows))
+    players = set(layout.player_rows)
+    block: list[int] = []
+
+    def close() -> None:
+        if len(block) >= COLOUR_MIN_PLAYERS:
+            first, last = block[0], block[-1]
+            above = [h for h in headers if h < first]
+            names = layout.rows[max(above) - 1] if above else []
+            for index, name in enumerate(names[:FIRST_TRAILING]):
+                kind = COLOUR_KINDS.get(name)
+                if kind:
+                    layout.colour_blocks.append((kind, column_letter(index), first, last))
+        block.clear()
+
+    for row in range(1, len(layout.rows) + 1):
+        blank = not any(str(c) for c in layout.rows[row - 1])
+        if row in boundaries or blank:
+            close()
+        elif row in players:
+            block.append(row)
+    close()
 
 
 def _mark_formats(layout: Layout) -> None:

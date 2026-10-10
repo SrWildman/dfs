@@ -22,7 +22,7 @@ import contextlib
 from dfs import edge_finder_tab as eft
 from dfs import sheet_pool_cells as pc
 from dfs.sheet_clipping import FIT_PADDING_PX, FIT_PX_PER_CHAR, estimate_px, fitted_widths
-from dfs.sheet_color_scales import GRAD_MAX, WHITE
+from dfs.sheet_color_scales import WHITE
 from dfs.sheet_style import (
     _HEADER_FMT,
     _PANEL_FMT,
@@ -33,6 +33,7 @@ from dfs.sheet_style import (
     INPUT_BG,
     POOL_TYPE_CHIPS,
     _num,
+    apply_block_scale,
 )
 from dfs.sheets import SheetsClient, column_letter
 
@@ -370,22 +371,14 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         )
 
 
-def _blend(a: dict, b: dict, t: float) -> dict:
-    return {k: a[k] + (b[k] - a[k]) * t for k in ("red", "green", "blue")}
+def _colour_scale(client: SheetsClient, kind: str, rng: str) -> None:
+    apply_block_scale(client, TAB, kind, rng)
 
 
 def _conditional_formats(client: SheetsClient, layout: eft.Layout) -> None:
     """Conditional formats, all relative to their own cells. Added first = lowest priority."""
-    # The best in a position block is green, the worst neutral (never red for the best players available).
-    mid = _blend(NO_FILL, GRAD_MAX, 0.5)
-    for header, first, last_row, lower_is_better in layout.prob_blocks:
-        letter = _column_of(layout, header, first)
-        if letter is None:
-            continue
-        low, high = (GRAD_MAX, NO_FILL) if lower_is_better else (NO_FILL, GRAD_MAX)
-        client.add_color_scale(
-            TAB, f"{letter}{first}:{letter}{last_row}", min_color=low, mid_color=mid, max_color=high
-        )
+    for kind, letter, first, last_row in layout.colour_blocks:
+        _colour_scale(client, kind, f"{letter}{first}:{letter}{last_row}")
     for rng in layout.chip_ranges:
         for text, fmt in EDGE_CHIPS.items():
             client.add_boolean_rule(TAB, rng, condition_type="TEXT_CONTAINS", values=[text], fmt=fmt)
@@ -410,15 +403,6 @@ def _conditional_formats(client: SheetsClient, layout: eft.Layout) -> None:
             values=["In pool"],
             fmt={"textFormat": {"bold": False, "italic": True, "foregroundColor": INK_MUTED}},
         )
-
-
-def _column_of(layout: eft.Layout, header: str, row: int) -> str | None:
-    """The letter of `header` in the nearest header row above `row` (a block's own section header)."""
-    above = [h for h in layout.header_rows if h < row]
-    if not above:
-        return None
-    names = layout.rows[max(above) - 1]
-    return column_letter(names.index(header)) if header in names else None
 
 
 def ensure_tab(client: SheetsClient, *, edge_tab: str = "EdgeRaw") -> str:

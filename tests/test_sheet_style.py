@@ -2542,3 +2542,21 @@ def test_polish_edge_clears_stale_formats_over_the_data_area_before_styling_by_n
     fmt = calls[index][1]
     assert set(fmt) == {"numberFormat", "horizontalAlignment", "backgroundColor", "textFormat"}
     assert all(v is None for v in fmt.values()) and index < len(calls) - 1  # before the per-column styling
+
+
+def test_style_board_colours_each_chalk_position_block_by_the_per_block_scheme():
+    """Own% orange, CalPts and Hit3x% green, each within its own position block (never one scale over the
+    whole Chalk map, where a QB would paint every DST)."""
+    from dfs.sheet_views import BOARD_CHALK_COL, BOARD_CHALK_FIRST_ROW, BOARD_CHALK_POSITION_ROWS
+
+    client = FakeBoardClient()
+    style_board(client)
+    first = BOARD_CHALK_FIRST_ROW
+    for count in BOARD_CHALK_POSITION_ROWS.values():
+        last = first + count - 1
+        for column in ("Own%", "CalPts", "Hit3x%"):
+            letter = BOARD_CHALK_COL[column]
+            assert f"{letter}{first}:{letter}{last}" in client.color_scale_calls
+        first = last + 1
+    whole = f"{BOARD_CHALK_COL['Own%']}{BOARD_CHALK_FIRST_ROW}:{BOARD_CHALK_COL['Own%']}{first - 1}"
+    assert whole not in client.color_scale_calls  # no single scale across all the blocks

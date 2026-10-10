@@ -385,13 +385,44 @@ def test_a_thin_week_verdict_needs_history_and_a_best_below_the_typical_best():
     assert eft.cash_verdict("RB", 10.0, {"WR": (41.0, 4)}) is None
 
 
-def test_the_probability_colour_is_per_position_block_with_best_green():
-    edge = _edge([_player(i, pos="WR") for i in range(1, 4)] + [_player(i, pos="RB") for i in range(11, 14)])
+def test_every_number_column_is_coloured_within_its_position_block_by_the_one_scheme():
+    edge = _edge([_player(i, pos="WR") for i in range(1, 5)] + [_player(i, pos="RB") for i in range(11, 15)])
     layout = eft.build_layout(_inputs(edge))
-    cash = [b for b in layout.prob_blocks if b[0] == "Hit3x%"]
-    assert len(cash) == 2  # one block per position, not one range for the whole section
-    assert all(not lower for _, _, _, lower in cash)
-    assert [lower for name, _, _, lower in layout.prob_blocks if name == "Bust%"] == [True, True]
+    cash_start = [r for r in layout.section_rows if layout.rows[r - 1][0] == "CASH CORE"][0]
+    gpp_start = [r for r in layout.section_rows if layout.rows[r - 1][0] == "GPP UPSIDE"][0]
+    cash = [(k, letter, f, last) for k, letter, f, last in layout.colour_blocks if cash_start < f < gpp_start]
+
+    def kinds(letter):
+        return [k for k, ltr, _, _ in cash if ltr == letter]
+
+    names = layout.rows[[r for r in layout.header_rows if r > cash_start][0] - 1]
+    by_name = {n: eft.column_letter(i) for i, n in enumerate(names) if n}
+    assert len(cash) and kinds(by_name["Hit3x%"]) == [eft.COLOUR_GOOD] * 2  # one block per position (WR, RB)
+    assert kinds(by_name["Bust%"]) == [eft.COLOUR_BAD] * 2  # bad-high is red
+    assert kinds(by_name["Own%"]) == [eft.COLOUR_OWN] * 2  # ownership: neutral to orange, not good or bad
+    assert (
+        kinds(by_name["CalPts"]) == [eft.COLOUR_GOOD] * 2
+        and kinds(by_name["ProjPts"]) == [eft.COLOUR_GOOD] * 2
+    )
+    for plain in ("Salary", "Team", "Pos", "Name", "Pool"):  # never coloured
+        assert not kinds(by_name[plain])
+    for _, _, first, last in cash:  # a block's range stays inside its own position
+        assert last >= first
+
+
+def test_a_block_with_a_single_player_gets_no_scale():
+    layout = eft.build_layout(_inputs(_edge([_player(1)])))
+    for _, _, first, last in layout.colour_blocks:
+        rows = [r for r in layout.player_rows if first <= r <= last]
+        assert len(rows) >= 2  # nothing is coloured against nobody
+
+
+def test_matchup_player_rows_and_r6_blocks_are_coloured_too():
+    edge = _edge([_player(i, **{"CalPts": 10.0 + i}) for i in range(1, 6)])
+    layout = eft.build_layout(_inputs(edge, matchups=_matchups()))
+    mu = [r for r in layout.section_rows if layout.rows[r - 1][0].startswith("MATCHUPS")][0]
+    in_matchups = [b for b in layout.colour_blocks if b[2] > mu]
+    assert any(k == eft.COLOUR_GOOD and letter == eft.column_letter(S0) for k, letter, *_ in in_matchups)
 
 
 def test_beneficiaries_confirmed_first_then_questionable_muted_with_a_blank_priced_in_when_unknown():
@@ -871,7 +902,8 @@ def test_the_leverage_section_lists_the_top_five_per_position_by_lev_among_top_h
     assert set(names) <= top_half
     assert {layout.rows[r - 1][_col(eft.DO_COL)] for r in shown} <= {"GPP leverage", "GPP option"}
     # Lev is coloured within the position block
-    assert any(name == "Lev" for name, *_ in layout.prob_blocks)
+    lev_letter = eft.column_letter(S0 + 3)
+    assert any(k == eft.COLOUR_GOOD and ltr == lev_letter for k, ltr, *_ in layout.colour_blocks)
 
 
 def test_chalk_lists_the_three_highest_owned_per_position_with_an_eat_or_fade_verb_by_bust_third():

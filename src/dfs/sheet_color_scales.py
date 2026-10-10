@@ -38,6 +38,16 @@ def _rgb(hex_str: str) -> dict:
 
 WHITE = _rgb("#FFFFFF")
 
+# The per-block scheme (Edge Finder, Board's Chalk map; Sam, 2026-10-09): every number column is coloured
+# within its position block by what it means. `apply_block_scale` (sheet_style) draws each kind.
+BLOCK_GOOD = "good"  # more is better: white up to the median, then green
+BLOCK_BAD = "bad"  # more is worse: white up to the median, then red
+BLOCK_OWN = "own"  # ownership is context, not good or bad: white to orange
+BLOCK_DIFF = "diff"  # red below 0, white at 0, green above
+BLOCK_SIGN = "sign"  # green when positive, red when negative (one colour per sign, units differ by row)
+BLOCK_RED = {"red": 0.95, "green": 0.75, "blue": 0.75}  # the workbook's soft red (== GRAD_MIN)
+BLOCK_ORANGE = {"red": 0.99, "green": 0.85, "blue": 0.66}
+
 # The red -> yellow -> green gradient the now-removed `dfs sheets
 # format-edge` command originally introduced, kept identical here.
 # Sam, 2026-10-02: keep the soft pastels, only slightly more prominent -- the end colours sit about

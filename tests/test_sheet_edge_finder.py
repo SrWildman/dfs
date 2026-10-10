@@ -346,3 +346,33 @@ def test_widths_are_fitted_to_the_text_the_sheet_shows_not_the_stored_float():
     row = shown[layout.player_rows[0] - 1]
     assert row[ord(eft.OWN_COL) - 65] == "7.3%" and row[eft.LEAD.index("Salary")] == "$5,100"
     assert writer.fit_widths(layout)[eft.OWN_COL] == writer.WIDTHS[eft.OWN_COL]  # not blown up by 18 digits
+
+
+def test_the_colour_scheme_good_green_bad_red_ownership_orange_diff_diverging_sign_by_direction():
+    from dfs.sheet_color_scales import BLOCK_ORANGE, BLOCK_RED, GRAD_MAX
+
+    client = FakeClient()
+    edge = _edge([_player(i) for i in range(1, 6)])
+    layout = eft.build_layout(_inputs(edge))
+    layout.colour_blocks[:] = [
+        (eft.COLOUR_GOOD, "G", 5, 9),
+        (eft.COLOUR_BAD, "I", 5, 9),
+        (eft.COLOUR_OWN, "F", 5, 9),
+        (eft.COLOUR_DIFF, "K", 5, 9),
+        (eft.COLOUR_SIGN, "J", 5, 9),
+    ]
+    writer._conditional_formats(client, layout)
+    by_range = {rng: kw for rng, kw in client.scales}
+    good = by_range["G5:G9"]
+    assert (
+        good["min_color"] == good["mid_color"] == writer.NO_FILL and good["max_color"] == GRAD_MAX
+    )  # median neutral
+    bad = by_range["I5:I9"]
+    assert bad["min_color"] == bad["mid_color"] == writer.NO_FILL and bad["max_color"] == BLOCK_RED
+    own = by_range["F5:F9"]
+    assert own["max_color"] == BLOCK_ORANGE and own["min_color"] == writer.NO_FILL
+    diff = by_range["K5:K9"]
+    assert diff["mid_type"] == "NUMBER" and diff["mid_value"] == "0"
+    assert diff["min_color"] == BLOCK_RED and diff["max_color"] == GRAD_MAX
+    sign = [(c, v) for rng, c, v in client.rules if rng == "J5:J9"]
+    assert ("NUMBER_GREATER", ["0"]) in sign and ("NUMBER_LESS", ["0"]) in sign

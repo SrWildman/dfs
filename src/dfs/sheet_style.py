@@ -95,6 +95,12 @@ from dfs.derived import (
 )
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP
 from dfs.sheet_color_scales import (
+    BLOCK_BAD,
+    BLOCK_DIFF,
+    BLOCK_GOOD,
+    BLOCK_ORANGE,
+    BLOCK_OWN,
+    BLOCK_RED,
     FIELD_COLOR_SCALES,
     GRAD_MAX,
     GRAD_MID,
@@ -953,6 +959,35 @@ def _merge_contiguous(values: list[int]) -> list[tuple[int, int]]:
         else:
             runs.append((v, v))
     return runs
+
+
+def apply_block_scale(client: SheetsClient, tab: str, kind: str, rng: str) -> None:
+    """One position block's colour scale for a number column (`sheet_color_scales.BLOCK_*`): good-high is
+    white up to the median then green, bad-high white then red, ownership white to orange, a difference
+    red / white / green around 0, a sign green or red."""
+    white = WHITE
+    if kind == BLOCK_GOOD:
+        client.add_color_scale(tab, rng, min_color=white, mid_color=white, max_color=GRAD_MAX)
+    elif kind == BLOCK_BAD:
+        client.add_color_scale(tab, rng, min_color=white, mid_color=white, max_color=BLOCK_RED)
+    elif kind == BLOCK_OWN:
+        half = {k: white[k] + (BLOCK_ORANGE[k] - white[k]) * 0.5 for k in ("red", "green", "blue")}
+        client.add_color_scale(tab, rng, min_color=white, mid_color=half, max_color=BLOCK_ORANGE)
+    elif kind == BLOCK_DIFF:
+        client.add_color_scale(
+            tab,
+            rng,
+            min_color=BLOCK_RED,
+            mid_color=white,
+            max_color=GRAD_MAX,
+            mid_type="NUMBER",
+            mid_value="0",
+        )
+    else:
+        for condition, colour in (("NUMBER_GREATER", GRAD_MAX), ("NUMBER_LESS", BLOCK_RED)):
+            client.add_boolean_rule(
+                tab, rng, condition_type=condition, values=["0"], fmt={"backgroundColor": colour}
+            )
 
 
 def _unhide_columns(client: SheetsClient, tab: str, total_width: int) -> None:
@@ -2821,7 +2856,14 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
             f"{letter}{BOARD_CHALK_FIRST_ROW}:{letter}{BOARD_CHALK_LAST_ROW}",
             {**FIELD_FORMATS[field_name], "horizontalAlignment": "RIGHT"},
         )
-    _scaled(BOARD_CHALK_COL["Own%"], BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW, "Own%")
+    # Each position block is coloured by the one per-block scheme: CalPts and Hit3x% good-high, Own% orange.
+    block_first = BOARD_CHALK_FIRST_ROW
+    for count in BOARD_CHALK_POSITION_ROWS.values():
+        block_last = block_first + count - 1
+        for column, kind in (("Own%", BLOCK_OWN), ("CalPts", BLOCK_GOOD), ("Hit3x%", BLOCK_GOOD)):
+            letter = BOARD_CHALK_COL[column]
+            apply_block_scale(client, tab, kind, f"{letter}{block_first}:{letter}{block_last}")
+        block_first = block_last + 1
     # Position groups read as groups: every other block gets a pale band (the Player..Hit3x% columns; the Pool
     # gutter keeps its input colour) and the position label is bold. The groups are the
     # BOARD_CHALK_POSITION_ROWS blocks, in order.
