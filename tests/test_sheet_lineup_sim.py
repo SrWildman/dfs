@@ -284,3 +284,30 @@ def test_the_late_swap_goal_is_the_flag_else_the_lineups_marker_else_cash():
     assert sls.resolve_goal(None, "GPP") == "gpp" and sls.resolve_goal(None, "Cash") == "cash"
     assert sls.resolve_goal(None, "") == "cash"  # a blank marker means both: the long-standing default
     assert sls.resolve_goal("cash", "GPP") == "cash" and sls.resolve_goal("gpp", "") == "gpp"  # the flag wins
+
+
+class _EmptyLineupsClient(FakeClient):
+    """No lineup has a player; `stale` is what the four sim columns still hold from an earlier sync."""
+
+    def __init__(self, stale=None):
+        super().__init__([None, None])
+        self.stale = stale
+
+    def read_range(self, tab, rng):
+        return [self.stale] if self.stale else [[""] * 4]
+
+
+def test_a_sync_with_no_players_on_any_lineup_writes_nothing_at_all():
+    """Week 5's Lineups was empty and the sync still wrote ~40 ranges (and once hung there)."""
+    client = _EmptyLineupsClient()
+    message = _run(client)
+    assert isinstance(message, str) and "no lineup has players yet" in message
+    assert client.updates == {} and client.single == [] and client.notes == []
+
+
+def test_old_numbers_left_on_cleared_lineups_are_blanked_not_skipped():
+    client = _EmptyLineupsClient(stale=["150.2", "180.1", "0.5", "0.04"])
+    report = _run(client)
+    assert report.simulated == 0 and client.updates  # the blanks are written
+    letters = _slot_letters()
+    assert client.updates[f"{letters[0]}11:{letters[-1]}11"] == [["", "", "", ""]]

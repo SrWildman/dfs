@@ -185,6 +185,15 @@ def write_lineup_sim(
         return name_rows[index][0].strip() if index < len(name_rows) and name_rows[index] else ""
 
     typed = {name_at(r) for start, end in name_blocks for r in range(start, end + 1)} - {""}
+    first_letter, last_letter = column_letter(slots[0]), column_letter(slots[-1])
+    if not typed:
+        # No lineup has a player yet (every week until the lineups are built): there is nothing to simulate,
+        # and a sync should not make ~40 writes (and a chance to hang) to write blanks. Unless an earlier
+        # sync left numbers that are now stale, then they are blanked below.
+        with perf.phase("lineup sim: check for stale numbers"):
+            cells = client.read_range(tab, f"{first_letter}2:{last_letter}{last_row}")
+        if not any(str(cell).strip() for row in cells for cell in row):
+            return f"{tab}: no lineup has players yet -- lineup simulator skipped (nothing to write)"
     specs = build_specs(edge, depth_rows, gsis_by_id, only_names=typed) if typed else {}
 
     lineups, owners = [], []
@@ -194,7 +203,6 @@ def write_lineup_sim(
             lineups.append(built)
             owners.append(block)
 
-    first_letter, last_letter = column_letter(slots[0]), column_letter(slots[-1])
     with perf.phase("lineup sim: simulate"):
         result = (
             simulate_lineups(

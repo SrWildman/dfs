@@ -35,6 +35,11 @@ from gspread.exceptions import APIError
 # Retried: rate limit, request timeout, transient server errors.
 RETRY_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 MAX_RETRIES = 8
+# gspread's default is NO timeout: a connection Google never answers waits forever (a Week 5 sync sat on the
+# simulator write for ~20 minutes, 2026-10-09). Every request gets (connect, read) seconds; a request that
+# times out is tried `TIMEOUT_RETRIES` more times, then fails with a message that names the request.
+REQUEST_TIMEOUT = (10.0, 120.0)
+TIMEOUT_RETRIES = 2
 MAX_BACKOFF_SECONDS = 60.0
 BASE_BACKOFF_SECONDS = 1.0
 
@@ -252,6 +257,7 @@ class InstrumentedHTTPClient(gspread.http_client.HTTPClient):
         if not self._flushing and self._pending_list():
             self.flush()
         attempt = 0
+        timeouts = 0
         while True:
             started = time.perf_counter()
             try:
@@ -265,7 +271,19 @@ class InstrumentedHTTPClient(gspread.http_client.HTTPClient):
                 if headers:
                     retry_after = headers.get("Retry-After")
                 wait = _backoff_seconds(attempt, retry_after)
-            except (requests.ConnectionError, requests.Timeout):
+            except requests.Timeout as err:  # (before ConnectionError: a ConnectTimeout is both)
+                _record_request(method, endpoint, time.perf_counter() - started)
+                timeouts += 1
+                if timeouts > TIMEOUT_RETRIES:
+                    from dfs.sheets import SheetsTimeoutError
+
+                    what = f"{method.upper()} {endpoint.rsplit('/v4/', 1)[-1][:80]}"
+                    raise SheetsTimeoutError(
+                        f"Google did not answer within {REQUEST_TIMEOUT[1]:.0f}s, {timeouts} tries in a row "
+                        f"({what}). Not retried further; this step may be half-written, so run it again."
+                    ) from err
+                wait = _backoff_seconds(attempt, None)
+            except requests.ConnectionError:
                 _record_request(method, endpoint, time.perf_counter() - started)
                 if attempt >= MAX_RETRIES:
                     raise

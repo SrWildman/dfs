@@ -99,7 +99,6 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs pool clear",
             "dfs odds movement",
             "dfs odds snapshot",
-            "dfs odds schedule",
         ],
     ),
     (

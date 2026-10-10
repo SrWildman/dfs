@@ -292,3 +292,32 @@ def test_unusual_value_updates_are_sent_immediately(monkeypatch):
         body={"values": [[1]]},
     )
     assert len(net.sent) == 1  # asked for the response values, so it can't be faked
+
+
+def test_a_request_gets_a_real_timeout_because_gspreads_default_is_none():
+    """No timeout meant a connection Google never answered waited forever (a ~20 minute sync stall)."""
+    import inspect
+
+    import dfs.sheets
+
+    assert perf.REQUEST_TIMEOUT[0] > 0 and perf.REQUEST_TIMEOUT[1] > 0
+    assert "set_timeout(REQUEST_TIMEOUT)" in inspect.getsource(dfs.sheets.SheetsClient._open)
+
+
+def test_a_timeout_is_retried_a_couple_of_times_then_fails_with_a_clear_message(monkeypatch):
+    from dfs.sheets import SheetsError, SheetsTimeoutError
+
+    calls = _script(monkeypatch, [requests.ReadTimeout("slow") for _ in range(perf.TIMEOUT_RETRIES + 1)])
+    with pytest.raises(SheetsTimeoutError) as raised:
+        _client().request("post", "https://sheets.googleapis.com/v4/spreadsheets/abc/values:batchUpdate")
+    assert len(calls) == perf.TIMEOUT_RETRIES + 1  # bounded: not the eight tries of an ordinary error
+    message = str(raised.value)
+    assert f"{perf.REQUEST_TIMEOUT[1]:.0f}s" in message and "values:batchUpdate" in message
+    assert "run it again" in message
+    assert isinstance(raised.value, SheetsError)  # so every `except SheetsError` in the CLI catches it
+
+
+def test_a_timeout_that_clears_on_the_retry_succeeds(monkeypatch):
+    _script(monkeypatch, [requests.ReadTimeout("slow"), "ok"])
+    assert _client().request("get", "https://sheets/x") == "ok"
+    assert perf.STATS.retries == 1

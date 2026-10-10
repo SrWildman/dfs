@@ -58,9 +58,9 @@ def test_the_old_set_dropdown_and_added_list_are_gone_from_the_script():
 def test_every_edit_path_puts_the_formula_back_or_leaves_the_cell_alone():
     """No branch of the Pool edit may leave a typed value behind: each early exit that reaches the cell
     writes the formula back first (the one exception, a cell with no header above, is not a Pool control)."""
-    body = SOURCE.split("function handlePoolEdit_")[1].split("/** EdgeRaw's sheet")[0]
+    body = SOURCE.split("function handlePoolEdit_")[1].split("function restoreFormula_")[0]
     # row without an Id, an invalid value, a player EdgeRaw lacks, and the set / remove that succeeded
-    assert body.count("cell.setFormula(formula)") == 4
+    assert body.count("restoreFormula_(cell, formula)") == 4 and "cell.setFormula" not in body
     assert "if (headerRow === -1) continue;" in body
     assert "clearContent()" in body  # only EdgeRaw's own Pool cell on a remove
 
@@ -247,7 +247,7 @@ HARNESS = Path(__file__).parent / "js" / "apps_script_harness.cjs"
 POOL_LIST = ["Cash", "GPP", "Both"]
 
 
-def _scenario(edits, *, edge_ids=(1001, 1002), player_pool_box=None):
+def _scenario(edits, *, edge_ids=(1001, 1002), player_pool_box=None, strict_rejects=False):
     """EdgeRaw (Pool in A, Id in D), an Edge Finder with player rows and a title, a Player Pool."""
     edge_rows = [["Pool", "Name", "Position", "Id"]] + [["", f"Player {i}", "WR", i] for i in edge_ids]
     edge_rows[1][1] = "Kenneth Walker III"
@@ -285,6 +285,7 @@ def _scenario(edits, *, edge_ids=(1001, 1002), player_pool_box=None):
             },
         },
         "edits": edits,
+        "strictRejects": strict_rejects,
     }
 
 
@@ -377,3 +378,31 @@ def test_editing_the_type_dropdown_above_the_header_never_clears_it(tmp_path):
     state = _run_flow(tmp_path, _scenario([{"sheet": "Player Pool", "row": 1, "col": 1, "values": ["Cash"]}]))
     assert _cell(state, "Player Pool", 1, 1)["value"] == "Cash"  # no Pool header above it: left as typed
     assert _cell(state, "EdgeRaw", 2, 1)["value"] is None
+
+
+@needs_node
+def test_a_strict_dropdown_that_refuses_the_formula_still_gets_it_back_and_keeps_its_rule(tmp_path):
+    """Sam's "Pool change failed: The data you entered in cell A741 violates the data validation rules": a
+    strict dropdown refused the restoring setFormula and the edit left the cell empty."""
+    edits = [
+        {"sheet": "Edge Finder", "row": 4, "col": 1, "values": ["Both"]},
+        {"sheet": "Edge Finder", "row": 4, "col": 1, "values": [None]},  # remove: the result is blank
+    ]
+    state = _run_flow(tmp_path, _scenario(edits, strict_rejects=True))
+    cell = _cell(state, "Edge Finder", 4, 1)
+    assert cell["formula"] and cell["formula"].startswith("=IF($D4")  # not left empty
+    assert cell["validated"] is True  # the dropdown is back
+    assert not any("failed" in t for t in state["toasts"])
+    assert _cell(state, "EdgeRaw", 2, 1)["value"] is None  # and the removal landed
+
+
+@needs_node
+def test_a_non_strict_dropdown_never_needs_the_workaround(tmp_path):
+    scenario = _scenario(
+        [{"sheet": "Edge Finder", "row": 5, "col": 1, "values": ["GPP"]}], strict_rejects=True
+    )
+    for v in scenario["sheets"]["Edge Finder"]["validations"]:
+        v["strict"] = False
+    state = _run_flow(tmp_path, scenario)
+    assert _cell(state, "Edge Finder", 5, 1)["formula"].startswith("=IF($D5")
+    assert _cell(state, "EdgeRaw", 3, 1)["value"] == "GPP"

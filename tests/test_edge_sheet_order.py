@@ -94,3 +94,21 @@ def test_the_edgeraw_rows_are_written_in_sheet_order_with_pool_first():
     assert rows[0] == ["Pool", *EDGE_SHEET_ORDER]
     assert rows[1][0] == "" and rows[1][1] == frame["Name"].iloc[0]
     assert rows[1][1 + EDGE_SHEET_ORDER.index("Id")] == frame["Id"].iloc[0]  # values follow their headers
+
+
+def test_no_hide_unhide_or_group_call_types_a_column_letter():
+    """Every `hide_columns` / `group_columns` call gets its letters from a name, a header or a constant.
+    A typed letter ("AL", "Q") is the bug slice 5 hit: the columns it
+    named moved and the old hide stayed behind.
+    ("A" alone is allowed: it means the first column of a tab that has no data columns before it.)"""
+    import re
+    from pathlib import Path
+
+    call = re.compile(r"(?:hide_columns|group_columns)\((?P<args>[^)]*(?:\([^)]*\)[^)]*)*)\)")
+    typed = re.compile(r'"(?!A")[A-Z]{1,2}"')
+    offenders = []
+    for path in sorted(Path(__file__).resolve().parents[1].glob("src/dfs/*.py")):
+        for match in call.finditer(path.read_text()):
+            if typed.search(match.group("args")):
+                offenders.append(f"{path.name}: {match.group(0)[:80]}")
+    assert not offenders, offenders

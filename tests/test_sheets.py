@@ -322,7 +322,9 @@ def _client_with_fake_sheet(cfg, monkeypatch, tmp_path) -> tuple[SheetsClient, F
     fake_sheet = FakeSpreadsheet()
     monkeypatch.setattr(
         "gspread.service_account",
-        lambda filename, **_kwargs: type("C", (), {"open_by_key": lambda self, key: fake_sheet})(),
+        lambda filename, **_kwargs: type(
+            "C", (), {"open_by_key": lambda self, key: fake_sheet, "set_timeout": lambda self, t: None}
+        )(),
     )
 
     return SheetsClient(cfg), fake_sheet

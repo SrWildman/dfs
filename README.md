@@ -126,7 +126,7 @@ Also handy most weeks:
 | `dfs pool add\|remove\|list\|clear` | managing your pool without opening the sheet. |
 | `dfs results update` | scoring the week's projections into `Model Check` on its own (`dfs week close` already does this; nflverse posts stats a day or two late). |
 | `dfs edge` / `dfs odds movement` | a terminal look at the top leverage plays / how lines have moved. |
-| `dfs odds snapshot` / `dfs odds schedule` | saving the week's opening lines (every Monday and Tuesday at 10:00 ET, if you install the job). |
+| `dfs odds snapshot` | saving the week's opening lines (run it Monday or Tuesday morning, before `dfs week new`). |
 
 **Reference, only when needed:** `dfs bankroll sync`, `dfs ownership log`, `dfs lineups clear`, `dfs auth ...`
 (one-time logins), `dfs setup ...` (building, styling and repairing a sheet; `dfs setup sheet` runs the whole

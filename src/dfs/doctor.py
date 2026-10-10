@@ -21,12 +21,15 @@ from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.edge_finder_tab import ID_COL as EDGE_FINDER_ID_COL
 from dfs.edge_finder_tab import POOL_COL as EDGE_FINDER_POOL_COL
+from dfs.sheet_columns import INTERNAL
 from dfs.sheet_empty_guards import describe as describe_unguarded
 from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
+from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
+from dfs.sheet_style import EDGE_HIDDEN_HELPERS, edge_group_spans
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
@@ -75,6 +78,12 @@ class DoctorClient:
         raise NotImplementedError
 
     def row_count(self, tab_name: str) -> int:  # pragma: no cover
+        raise NotImplementedError
+
+    def get_column_widths(self, tab_name: str, last_col_a1: str) -> list[dict]:  # pragma: no cover
+        raise NotImplementedError
+
+    def get_column_groups(self, tab_name: str) -> list[tuple[int, int, bool]]:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -379,13 +388,83 @@ def _check_pct_helpers(
     return issues
 
 
+def _letters(spans: list[tuple[int, int]]) -> list[str]:
+    return [f"{column_letter(a)}:{column_letter(b)}" for a, b in spans]
+
+
+def _check_column_visibility(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
+) -> list[DoctorIssue]:
+    """Which columns are hidden, by header NAME. A hidden column is right only if it is a helper
+    (`Id`, the `*%ile` columns, ...) or sits inside a column group; a helper must be hidden; and EdgeRaw's
+    groups must sit exactly where `EDGE_COLUMN_GROUPS` says. A group the person has expanded is fine.
+    Caught after the EdgeRaw reorder (slice 5): Avail, Flags, Edge and the GAME / MOVE / WX labels were
+    hidden outside any group because the hide logic had run against the old letters."""
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    targets: list[tuple[str, tuple[str, ...], list[tuple[int, int]] | None]] = [
+        (cfg.lineups.player_pool_tab, tuple(INTERNAL), None),
+        (cfg.lineups.builder_tab, (*INTERNAL, LINEUP_KEY_HEADER), None),
+        (PLAYER_POOL_RAW_TAB, tuple(INTERNAL), None),
+    ]
+    if edge_tab:
+        targets.insert(0, (edge_tab, EDGE_HIDDEN_HELPERS, edge_group_spans()))
+    issues: list[DoctorIssue] = []
+    for tab, helpers, expected_spans in targets:
+        header = headers_by_tab.get(tab)
+        if tab not in tab_titles or not header:
+            continue
+        hidden = [
+            bool(m.get("hiddenByUser")) for m in client.get_column_widths(tab, column_letter(len(header) - 1))
+        ]
+        groups = client.get_column_groups(tab)
+        grouped = {i for first, last, _ in groups for i in range(first, last + 1)}
+        stray = [
+            f"{column_letter(i)} {name}"
+            for i, name in enumerate(header)
+            if i < len(hidden) and hidden[i] and i not in grouped and name not in helpers
+        ]
+        shown = [
+            f"{column_letter(i)} {name}"
+            for i, name in enumerate(header)
+            if name in helpers and not (i < len(hidden) and hidden[i])
+        ]
+        if stray:
+            issues.append(
+                DoctorIssue(
+                    "column-visibility",
+                    f"{tab!r}: hidden but not a helper and not inside a column group: {', '.join(stray)} "
+                    "(`dfs setup polish` unhides them).",
+                )
+            )
+        if shown:
+            issues.append(
+                DoctorIssue(
+                    "column-visibility",
+                    f"{tab!r}: helper column(s) showing that should be hidden: {', '.join(shown)} "
+                    "(`dfs setup polish` hides them).",
+                )
+            )
+        if expected_spans is not None:
+            actual = sorted((first, last) for first, last, _ in groups)
+            if actual != sorted(expected_spans):
+                issues.append(
+                    DoctorIssue(
+                        "column-visibility",
+                        f"{tab!r}: column groups are at {_letters(actual)} but belong at "
+                        f"{_letters(sorted(expected_spans))} (`dfs setup polish` rebuilds them).",
+                    )
+                )
+    return issues
+
+
 def _check_pool_cells_hold_the_formula(
     client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
 ) -> list[DoctorIssue]:
     """Every player row's `Pool` cell (Edge Finder, Board, Player Pool) must hold the formula that shows his
     EdgeRaw state. The cell is also a dropdown: if the bound Apps Script is not pasted, or an edit failed, a
     picked value overwrites the formula and then goes stale. A player row is one whose hidden `Id` cell is
-    filled; a non-empty Pool cell on it that is not a formula is the failure."""
+    filled; a Pool cell on it that is not a formula (a typed value, or empty because a restore failed) is the
+    failure."""
     pool_tab = cfg.lineups.player_pool_tab
     targets: list[tuple[str, str, str]] = [
         (EDGE_FINDER_TAB, EDGE_FINDER_POOL_COL, EDGE_FINDER_ID_COL),
@@ -405,16 +484,16 @@ def _check_pool_cells_hold_the_formula(
         for index, row in enumerate(formulas):
             cell = str(row[0]).strip() if row else ""
             has_id = index < len(ids) and bool(ids[index]) and str(ids[index][0]).strip() != ""
-            if has_id and cell and cell != "Pool" and not cell.startswith("="):  # "Pool" is the header
-                plain.append(index + 1)
+            if has_id and cell != "Pool" and not cell.startswith("="):  # "Pool" is the header
+                plain.append(index + 1)  # a typed value, or empty (a failed restore left it blank)
         if plain:
             first = f"{pool_col}{plain[0]}"
             issues.append(
                 DoctorIssue(
                     "pool-cell-plain-value",
-                    f"{tab!r}: {len(plain)} Pool cell(s) hold a typed value instead of the formula "
-                    f"(first at {first}) -- the Apps Script did not put it back (is it pasted and current? "
-                    "see docs/APPS_SCRIPT.md); `dfs sync` or `dfs setup build-views` rewrites them.",
+                    f"{tab!r}: {len(plain)} Pool cell(s) are empty or hold a typed value instead of the "
+                    f"formula (first at {first}) -- the Apps Script did not put it back (is it pasted and "
+                    "current? see docs/APPS_SCRIPT.md); `dfs sync` or `dfs setup build-views` rewrites them.",
                 )
             )
     return issues
@@ -476,4 +555,5 @@ def run_doctor(
     issues += _check_empty_guards(client, cfg, tab_titles)
     issues += _check_pct_helpers(client, cfg, tab_titles, headers_by_tab)
     issues += _check_pool_cells_hold_the_formula(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_column_visibility(client, cfg, tab_titles, headers_by_tab)
     return issues

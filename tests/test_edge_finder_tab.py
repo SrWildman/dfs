@@ -507,7 +507,15 @@ def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
     edge = _edge([_player(7)])
     layout = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends())))
     row = layout.rows[_rows_named(layout, "WR7")[-1] - 1]
-    assert row[S0 : S0 + 5] == ["Tgt%", "'27%", "'18%", "'+9 pts", "▲"]  # last 3, earlier, change
+    # last 3, earlier, change: numbers (so they right-align), each row formatted by its metric's unit
+    assert row[S0 : S0 + 5] == ["Tgt%", 0.27, 0.18, 9.0, "▲"]
+    row_no = _rows_named(layout, "WR7")[-1]
+    shown = {c: (p, k) for c, p, k in layout.cell_formats if int(c.lstrip("ABCDEFGHIJKLMNOP")) == row_no}
+    assert shown == {
+        f"{eft.column_letter(S0 + 1)}{row_no}": ("0%", "PERCENT"),
+        f"{eft.column_letter(S0 + 2)}{row_no}": ("0%", "PERCENT"),
+        f"{eft.column_letter(S0 + 3)}{row_no}": ('+0" pts";-0" pts";0" pts"', "NUMBER"),
+    }
     assert row[_col(eft.DO_COL)] == "Watch"
     assert row[_col(eft.WHY_COL)] == "A bigger jump than 85% of weeks"
     why = _why(layout, _rows_named(layout, "WR7")[-1])
@@ -548,9 +556,10 @@ def test_a_proj_chip_adds_its_reason_and_a_lean_verb_and_the_pool_override_still
     do, why = _col(eft.DO_COL), _col(eft.WHY_COL)
     cash_rows = {layout.rows[r - 1][NAME]: r for r in layout.player_rows[:3]}
     cash = {name: layout.rows[r - 1] for name, r in cash_rows.items()}
-    assert cash["WR1"][do].endswith(" · Lean under in cash") and cash["WR1"][do].startswith("Cash")
-    assert cash["WR2"][do].endswith(" · Lean over")
-    assert "Lean" not in cash["WR3"][do]  # signals point both ways: no chip, no lean
+    assert cash["WR1"][do] == "Cash option (Proj ▼)"  # a fade signal downgrades "Cash add"
+    assert cash["WR2"][do].endswith("(Proj ▲)") and "Cash add" not in cash["WR1"][do]
+    assert "Proj" not in cash["WR3"][do] and "Lean" not in cash["WR3"][do]  # points both ways: no chip
+    assert all(" · " not in cash[n][do] for n in cash)  # one verb per row
     assert "TE targets up 2.2+/game over the last 3 (usually fades back: −0.8 pts" in _why(
         layout, cash_rows["WR1"]
     )
@@ -559,11 +568,7 @@ def test_a_proj_chip_adds_its_reason_and_a_lean_verb_and_the_pool_override_still
     # the sheet turns the verb into "In pool (...)" through the same formula as before
     rows = writer.tab_rows(layout, "EdgeRaw")
     formula = rows[_rows_named(layout, "WR1")[0] - 1][_col(eft.DO_COL)]
-    assert (
-        formula.startswith(f"=IF(${eft.POOL_COL}")
-        and "Lean under in cash" in formula
-        and "In pool (" in formula
-    )
+    assert formula.startswith(f"=IF(${eft.POOL_COL}") and "(Proj ▼)" in formula and "In pool (" in formula
 
 
 def test_an_older_chip_and_an_r6_signal_on_one_player_share_a_single_why():
@@ -661,18 +666,53 @@ def test_matchups_are_graded_list_the_top_three_players_and_nest_their_player_ro
     assert any(t.startswith("MATCHUPS (CONTEXT)") for t in titles)
     team = [r for r in layout.team_rows if layout.rows[r - 1][NAME] == "DEN vs KC"][0]
     cells = layout.rows[team - 1]
-    assert cells[eft.LEAD.index("Salary")] == "Soft" and cells[S0] == "Top: WR1, WR2, WR3"
-    assert not any(str(c) for c in cells[S0 + 1 : S0 + eft.SLOTS])  # the rest of the slots stay empty
+    pos_i, grade_i, players_i = (eft.LEAD.index(h) for h in ("Pos", "Team", "Salary"))
+    # Matchup | Pos | Grade | Players: the names are one cell, with the rest of the row's slots empty
+    assert (cells[pos_i], cells[grade_i], cells[players_i]) == ("WR", "Soft", "WR1, WR2, WR3")
+    assert not any(str(c) for c in cells[S0 : S0 + eft.SLOTS])
     assert "WR4" not in " ".join(str(c) for c in cells)
     assert "score +1.00" in _why(layout, team) and "KC allows many points" in _why(layout, team)
     assert cells[_col(eft.WHY_COL)].startswith("KC allows many points")
     (group,) = _group(layout, "MATCHUPS|WR|DEN")
     assert group.depth == 2 and group.collapsed is True and group.first == team + 1
-    players = [layout.rows[r - 1][NAME] for r in range(group.first, group.last + 1)]
+    # the group opens on its own small header over the standard player columns, then the three players
+    inner = layout.rows[group.first - 1]
+    assert group.first in layout.inner_header_rows
+    assert inner[: len(eft.LEAD)] == eft.LEAD and inner[S0 : S0 + 3] == ["CalPts", "Hit3x%", "Boom%"]
+    players = [layout.rows[r - 1][NAME] for r in range(group.first + 1, group.last + 1)]
     assert players == ["WR1", "WR2", "WR3"]
     tough = [r for r in layout.team_rows if layout.rows[r - 1][NAME] == "LV vs BUF"][0]
-    assert layout.rows[tough - 1][eft.LEAD.index("Salary")] == "Tough" and tough in layout.muted_rows
+    assert layout.rows[tough - 1][eft.LEAD.index("Team")] == "Tough" and tough in layout.muted_rows
     assert any("CONTEXT ONLY" in str(c) or "Context only" in str(c) for r in layout.rows for c in r)
+
+
+def test_matchup_player_rows_get_the_standard_formats_and_the_team_row_gets_none():
+    """Sam: "what are these numbers?" -- Salary 6700 and Own% 0.28 showed raw because the matchup header
+    had no Salary / Own% columns to take a format from, and a team row sat inside a right-aligned block."""
+    edge = _edge([_player(1, **{"CalPts": 18.0, "Salary": 6200}), _player(2, **{"CalPts": 15.0})])
+    layout = eft.build_layout(_inputs(edge, matchups=_matchups()))
+    (group,) = _group(layout, "MATCHUPS|WR|DEN")
+    first, last = group.first + 1, group.last
+
+    def covers(ranges, letter):
+        return any(r == f"{letter}{first}:{letter}{last}" for r in ranges)
+
+    assert covers(layout.money_cells, eft.column_letter(eft.LEAD.index("Salary")))
+    assert covers(layout.own_cells, eft.OWN_COL)
+    assert covers(layout.point_cells, eft.column_letter(S0)) and covers(
+        layout.percent_cells, eft.column_letter(S0 + 1)
+    )
+    # no format range reaches a team row (its Players text must stay left-aligned, never a number format)
+    every = [*layout.money_cells, *layout.own_cells, *layout.point_cells, *layout.percent_cells]
+    spans = [_range_rows(r) for r in every]
+    assert not any(lo <= row <= hi for row in layout.team_rows for lo, hi in spans)
+
+
+def _range_rows(rng):
+    import re
+
+    a, b = re.fullmatch(r"[A-Z]+(\d+):[A-Z]+(\d+)", rng).groups()
+    return int(a), int(b)
 
 
 def test_the_status_lines_are_for_sam_in_eastern_time_with_the_final_sync_reminder():
@@ -871,3 +911,15 @@ def test_no_projection_module_reads_ownership():
     for name in ("probabilities.py", "calibration.py", "edge_finder.py"):
         text = (root / name).read_text()
         assert "Own%" not in text and "ProjOwn" not in text, name
+
+
+def test_a_proj_signal_never_leaves_two_opposite_instructions_on_one_row():
+    """Jonathan Taylor read "Cash add · Lean under in cash" (2026-10-09): the verb and the lean disagreed."""
+    down, up = usage_r6.PROJ_DOWN, usage_r6.PROJ_UP
+    assert eft.verb_with_proj("Cash add", down) == "Cash option (Proj ▼)"
+    assert eft.verb_with_proj("Cash option", down) == "Cash option (Proj ▼)"
+    assert eft.verb_with_proj("Cash add", up) == "Cash add (Proj ▲)"  # an up signal never upgrades
+    assert eft.verb_with_proj("Cash option", up) == "Cash option (Proj ▲)"
+    assert eft.verb_with_proj("GPP add", down) == "GPP add (Proj ▼)"
+    assert eft.verb_with_proj("Out", down) == "Out" and eft.verb_with_proj("Cash add", None) == "Cash add"
+    assert eft.verb_with_proj("Cash add", "Proj ▼?") == "Cash add"  # weaker evidence only mutes the row

@@ -21,13 +21,17 @@ from gspread.utils import ValueInputOption, ValueRenderOption, a1_range_to_grid_
 from dfs.config import GoogleSheetsConfig
 from dfs.log import get_logger
 from dfs.paths import credentials_path
-from dfs.perf import InstrumentedHTTPClient, batching_disabled
+from dfs.perf import REQUEST_TIMEOUT, InstrumentedHTTPClient, batching_disabled
 
 log = get_logger("sheets")
 
 
 class SheetsError(Exception):
     """Raised for any Google Sheets auth/access problem."""
+
+
+class SheetsTimeoutError(SheetsError):
+    """Google did not answer a request within `perf.REQUEST_TIMEOUT`, several times in a row."""
 
 
 def column_letter(index: int) -> str:
@@ -161,6 +165,7 @@ class SheetsClient:
             # individual requests past the default per-minute write quota.
             client = gspread.service_account(filename=str(creds), http_client=InstrumentedHTTPClient)
             self._http = getattr(client, "http_client", None)
+            client.set_timeout(REQUEST_TIMEOUT)  # gspread's default is none: a dead connection waits forever
             self._sheet = client.open_by_key(self._cfg.sheet_id)
         except gspread.exceptions.APIError as e:
             raise SheetsError(
@@ -713,6 +718,20 @@ class SheetsClient:
                 break
         return indices
 
+    def get_column_groups(self, tab_name: str) -> list[tuple[int, int, bool]]:
+        """Every column group on `tab_name` as 0-indexed `(first, last, collapsed)` (both ends inclusive),
+        one entry per distinct range. `dfs doctor` compares these with where the code says they belong."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),columnGroups)"})
+        found: dict[tuple[int, int], bool] = {}
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                for group in s.get("columnGroups", []) or []:
+                    rng = group["range"]
+                    found[(rng["startIndex"], rng["endIndex"] - 1)] = bool(group.get("collapsed"))
+                break
+        return [(first, last, collapsed) for (first, last), collapsed in sorted(found.items())]
+
     def clear_column_groups(self, tab_name: str) -> None:
         """Delete every existing column group on a tab before re-adding one
         with `group_columns` -- without this, `addDimensionGroup` doesn't
@@ -1188,10 +1207,14 @@ class SheetsClient:
             }
         )
 
-    def set_dropdown_validation(self, tab_name: str, a1_range: str, options: list[str]) -> None:
+    def set_dropdown_validation(
+        self, tab_name: str, a1_range: str, options: list[str], *, strict: bool = True
+    ) -> None:
         """Restrict `a1_range` to a dropdown of `options` (Sheets'
         ONE_OF_LIST data validation) -- a typed value outside the list is
-        rejected rather than silently accepted."""
+        rejected rather than silently accepted. `strict=False` makes it a warning instead: the Pool
+        cells are formulas the Apps Script writes back, and a strict rule makes Apps Script refuse a
+        result the list does not hold (a blank, for a player out of the pool)."""
         sheet, ws = self._ws(tab_name)
         grid_range = a1_range_to_grid_range(a1_range, ws.id)
         sheet.batch_update(
@@ -1206,7 +1229,7 @@ class SheetsClient:
                                     "values": [{"userEnteredValue": v} for v in options],
                                 },
                                 "showCustomUi": True,
-                                "strict": True,
+                                "strict": strict,
                             },
                         }
                     }

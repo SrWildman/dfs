@@ -4,10 +4,13 @@ from dataclasses import dataclass
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
 from dfs.doctor import run_doctor
+from dfs.sheet_columns import INTERNAL
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
+from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_season_view import HEADER as SEASON_HEADER
+from dfs.sheet_style import EDGE_HIDDEN_HELPERS, edge_group_spans
 from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
@@ -38,10 +41,32 @@ class FakeDoctorClient:
         tabs: dict[str, list[str]],
         rows: dict[tuple[str, str], list[list[str]]] | None = None,
         formulas: dict[tuple[str, str], list[list[str]]] | None = None,
+        hidden_names: dict[str, set[str]] | None = None,
+        groups: dict[str, list[tuple[int, int, bool]]] | None = None,
     ):
         self._tabs = tabs
         self._rows = rows or {}
         self._formulas = formulas or {}
+        self._hidden_names = hidden_names or {}
+        self._groups = groups or {}
+
+    def get_column_widths(self, tab_name: str, last_col_a1: str) -> list[dict]:
+        """Default: a healthy layout -- exactly the tab's helper columns hidden (by header name), plus the
+        columns inside its groups. A test that wants a fault passes its own `hidden_names` / `groups`."""
+        header = self._tabs[tab_name]
+        if tab_name in self._hidden_names:
+            hidden = self._hidden_names[tab_name]
+        else:
+            hidden = set(EDGE_HIDDEN_HELPERS if tab_name == "EdgeRaw" else INTERNAL)
+            if tab_name == "Lineups":
+                hidden.add(LINEUP_KEY_HEADER)
+        in_group = {i for a, b, _ in self.get_column_groups(tab_name) for i in range(a, b + 1)}
+        return [{"hiddenByUser": name in hidden or i in in_group} for i, name in enumerate(header)]
+
+    def get_column_groups(self, tab_name: str) -> list[tuple[int, int, bool]]:
+        if tab_name in self._groups:
+            return self._groups[tab_name]
+        return [(a, b, True) for a, b in edge_group_spans()] if tab_name == "EdgeRaw" else []
 
     def list_tabs(self):
         return [_FakeTab(title=title, header=header) for title, header in self._tabs.items()]
@@ -550,3 +575,69 @@ def test_run_doctor_flags_a_pool_cell_that_holds_a_value_instead_of_the_formula(
         for i in run_doctor(FakeDoctorClient(tabs, rows=_lineups_rows()), cfg, title="Week 5")
         if i.check == "pool-cell-plain-value"
     ]
+
+
+def test_run_doctor_flags_a_player_rows_empty_pool_cell_as_a_failed_restore():
+    """Edge Finder A741 (2026-10-09): the strict dropdown made the script's restore throw, which left the
+    cell empty. An empty Pool cell beside a player's Id is as wrong as a typed value, and was not caught."""
+    from dfs.edge_finder_tab import ID_COL, POOL_COL
+
+    rows = {("Edge Finder", f"{ID_COL}1:{ID_COL}30"): [["Id"], [""], ["1001"], ["1002"]]}
+    formulas = {("Edge Finder", f"{POOL_COL}1:{POOL_COL}30"): [["Pool"], [""], ['=IF($O3="","")'], [""]]}
+    issues = run_doctor(
+        FakeDoctorClient(_ALL_GOOD_TABS, rows={**_lineups_rows(), **rows}, formulas=formulas),
+        _base_config(),
+        title="Week 5",
+    )
+    (found,) = [i for i in issues if i.check == "pool-cell-plain-value"]
+    assert f"{POOL_COL}4" in found.detail and "empty" in found.detail
+
+
+# ---------------------------------------------------------------------------
+# column visibility (slice 5 follow-up, 2026-10-09)
+# ---------------------------------------------------------------------------
+
+
+def _visibility_issues(**kw):
+    cfg = _base_config()
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=_lineups_rows(), **kw)
+    return [i for i in run_doctor(client, cfg, title="Week 1") if i.check == "column-visibility"]
+
+
+def test_doctor_accepts_edgeraw_with_exactly_its_helpers_hidden_and_its_groups_in_place():
+    assert _visibility_issues() == []
+
+
+def test_doctor_flags_edgeraw_spine_columns_hidden_outside_any_group_by_name():
+    helpers = set(EDGE_HIDDEN_HELPERS)
+    issues = _visibility_issues(hidden_names={"EdgeRaw": helpers | {"Avail", "Flags", "Edge"}})
+    assert len(issues) == 1
+    for name in ("Avail", "Flags", "Edge"):
+        assert name in issues[0].detail
+    assert "Name" not in issues[0].detail
+
+
+def test_doctor_flags_a_zone_label_that_is_hidden():
+    header = _ALL_GOOD_TABS["EdgeRaw"]
+    label = header[edge_group_spans()[1][0] - 1]  # the column just before the second group
+    issues = _visibility_issues(hidden_names={"EdgeRaw": set(EDGE_HIDDEN_HELPERS) | {label}})
+    assert len(issues) == 1 and label in issues[0].detail
+
+
+def test_doctor_flags_a_helper_column_that_is_showing():
+    issues = _visibility_issues(hidden_names={"EdgeRaw": set(EDGE_HIDDEN_HELPERS) - {"NameKey", "Id"}})
+    assert len(issues) == 1 and "NameKey" in issues[0].detail and "Id" in issues[0].detail
+
+
+def test_doctor_flags_edgeraw_groups_at_the_old_letters():
+    stale = [(a - 3, b - 3, True) for a, b in edge_group_spans()]
+    issues = _visibility_issues(groups={"EdgeRaw": stale})
+    assert any("belong at" in i.detail for i in issues)
+
+
+def test_doctor_leaves_an_expanded_group_alone():
+    expanded = [(a, b, False) for a, b in edge_group_spans()]
+    assert (
+        _visibility_issues(groups={"EdgeRaw": expanded}, hidden_names={"EdgeRaw": set(EDGE_HIDDEN_HELPERS)})
+        == []
+    )

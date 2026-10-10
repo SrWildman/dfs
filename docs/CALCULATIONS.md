@@ -1487,8 +1487,8 @@ Everything below is presentation of numbers computed elsewhere; nothing here mov
   directions on one player: no chip, and the Why says so. A chip resting only on the five test-led rows (WR aDOT level, RB snap share
   down, TE deep-target drop, both WR end-zone rows; the fit interval does not exclude 0) is `Proj ▼?` / `Proj ▲?`, drawn flat grey,
   with "weaker evidence" in the Why. The Why names every signal that fired with its UM-matched measured effect ("TE targets up
-  2.2+/game over the last 3 (usually fades back: −0.8 pts vs the research model's projection, 2022–25)"). `Do` adds "Lean under in cash"
-  (`Proj ▼`) or "Lean over" (`Proj ▲`). **These were measured against UM, not TFFB or CalPts, and a ▲ is not a reason to bump anyone: they
+  2.2+/game over the last 3 (usually fades back: −0.8 pts vs the research model's projection, 2022–25)"). `Do` keeps ONE verb per row and shows the chip beside it:
+  a `Proj ▼` downgrades "Cash add" to "Cash option (Proj ▼)", a `Proj ▲` never upgrades anything ("Cash option (Proj ▲)"). **These were measured against UM, not TFFB or CalPts, and a ▲ is not a reason to bump anyone: they
   are context, scored in Model Check** (a row per signal, the combined chips, and one verdict line once n >= 30 saying whether the
   players' result against CalPts points the way the research said). Inputs: `stats_player` (the `dfs.model` cache), reduced
   play-by-play, snap counts and the PFR crosswalk (`data/research_cache/`); `dfs sync` refreshes the current season, `--live` reuses the

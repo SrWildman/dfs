@@ -7,7 +7,7 @@ const scenario = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const toasts = [];
 
 class Validation {
-  constructor(values) { this.values = values; }
+  constructor(values, strict) { this.values = values; this.strict = strict !== false; }
   getCriteriaType() { return 'VALUE_IN_LIST'; }
   getCriteriaValues() { return [this.values]; }
 }
@@ -20,7 +20,7 @@ class Sheet {
       if (v !== null && v !== undefined && v !== '') this.set(r + 1, c + 1, { value: v });
     }));
     (data.formulas || []).forEach(f => this.set(f.row, f.col, { value: f.value, formula: f.formula }));
-    (data.validations || []).forEach(v => { this.cell(v.row, v.col).validation = new Validation(v.values); });
+    (data.validations || []).forEach(v => { this.cell(v.row, v.col).validation = new Validation(v.values, v.strict); });
     this.lastRow = data.lastRow; this.lastCol = data.lastCol;
   }
   key(r, c) { return r + ',' + c; }
@@ -46,7 +46,21 @@ class Range {
   getValues() { const out = []; for (let i = 0; i < this.nr; i++) { const row = []; for (let j = 0; j < this.nc; j++) { const x = this.sheet.cells[this.sheet.key(this.r + i, this.c + j)]; row.push(x && x.value !== undefined ? x.value : ''); } out.push(row); } return out; }
   getDataValidations() { const out = []; for (let i = 0; i < this.nr; i++) { const row = []; for (let j = 0; j < this.nc; j++) { const x = this.sheet.cells[this.sheet.key(this.r + i, this.c + j)]; row.push(x && x.validation ? x.validation : null); } out.push(row); } return out; }
   setValue(v) { this.eachCell((r, c) => { const x = this.sheet.cell(r, c); x.value = v; delete x.formula; }); return this; }
-  setFormula(f) { this.eachCell((r, c) => { const x = this.sheet.cell(r, c); x.formula = f; x.value = '(formula)'; }); return this; }
+  // Apps Script checks a formula's result against a STRICT dropdown; the scenario's `strictRejects` makes the mock
+  // behave as that did for a blank result (Sam's A741), so a non-strict cell or a lifted rule lets it through.
+  setFormula(f) {
+    this.eachCell((r, c) => {
+      const x = this.sheet.cell(r, c);
+      if (scenario.strictRejects && x.validation && x.validation.strict) {
+        throw new Error('The data you entered in cell ' + String.fromCharCode(64 + c) + r + ' violates the data validation rules set on this cell.');
+      }
+    });
+    this.eachCell((r, c) => { const x = this.sheet.cell(r, c); x.formula = f; x.value = '(formula)'; });
+    return this;
+  }
+  getDataValidation() { const x = this.sheet.cells[this.sheet.key(this.r, this.c)]; return x && x.validation ? x.validation : null; }
+  clearDataValidations() { this.eachCell((r, c) => { delete this.sheet.cell(r, c).validation; }); return this; }
+  setDataValidation(rule) { this.eachCell((r, c) => { this.sheet.cell(r, c).validation = rule; }); return this; }
   clearContent() { this.eachCell((r, c) => { const x = this.sheet.cell(r, c); delete x.value; delete x.formula; }); return this; }
   createTextFinder(text) {
     const self = this; let exact = false;
@@ -92,6 +106,6 @@ scenario.edits.forEach(e => {
 const out = { toasts, sheets: {} };
 Object.keys(sheets).forEach(n => {
   out.sheets[n] = {};
-  Object.keys(sheets[n].cells).forEach(k => { const x = sheets[n].cells[k]; out.sheets[n][k] = { value: x.value === undefined ? null : x.value, formula: x.formula || null }; });
+  Object.keys(sheets[n].cells).forEach(k => { const x = sheets[n].cells[k]; out.sheets[n][k] = { value: x.value === undefined ? null : x.value, formula: x.formula || null, validated: !!x.validation }; });
 });
 console.log(JSON.stringify(out));

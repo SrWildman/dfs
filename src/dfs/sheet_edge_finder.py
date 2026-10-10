@@ -27,6 +27,7 @@ from dfs.sheet_style import (
     _HEADER_FMT,
     _PANEL_FMT,
     _TITLE_FMT,
+    BAND_BG,
     EDGE_CHIPS,
     INK_MUTED,
     INPUT_BG,
@@ -227,7 +228,7 @@ def fit_widths(layout: eft.Layout) -> dict[str, int]:
         _display_rows(layout),
         widths,
         hidden,
-        bold_rows=frozenset(layout.header_rows),
+        bold_rows=frozenset([*layout.header_rows, *layout.inner_header_rows]),
         skip_columns=frozenset({_index(eft.WHY_COL)}),
     )
     return {**WIDTHS, **{letters[i]: px for i, px in fitted.items()}}
@@ -253,6 +254,15 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         )
     for row in layout.header_rows:
         client.format_range(TAB, f"A{row}:{last}{row}", _HEADER_FMT)
+    for row in layout.inner_header_rows:  # the small header inside a group: quiet, not a dark bar
+        client.format_range(
+            TAB,
+            f"A{row}:{last}{row}",
+            {
+                "backgroundColor": BAND_BG,
+                "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": INK_MUTED},
+            },
+        )
     for row in layout.subheader_rows:
         client.format_range(TAB, f"A{row}:{last}{row}", {"textFormat": {"bold": True, "fontSize": 10}})
     for row in layout.note_rows:
@@ -281,6 +291,8 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         client.format_range(TAB, rng, {**_num('0"%"'), "horizontalAlignment": "RIGHT"})
     for rng in layout.chip_ranges:
         client.format_range(TAB, rng, {"horizontalAlignment": "CENTER"})
+    for cell, pattern, kind in layout.cell_formats:
+        client.format_range(TAB, cell, {**_num(pattern, kind), "horizontalAlignment": "RIGHT"})
     # Own% is a 0-1 fraction on EdgeRaw, shown as a percent; Lev is a signed whole number.
     for rng in layout.own_cells:
         client.format_range(TAB, rng, {**_num("0.0%"), "horizontalAlignment": "RIGHT"})
@@ -293,7 +305,7 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         client.format_range(
             TAB, pool, {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER", "wrapStrategy": "CLIP"}
         )
-        client.set_dropdown_validation(TAB, pool, pc.POOL_OPTIONS)
+        client.set_dropdown_validation(TAB, pool, pc.POOL_OPTIONS, strict=False)
         client.format_range(
             TAB, f"{eft.DO_COL}{first}:{eft.DO_COL}{last_row}", {"horizontalAlignment": "CENTER"}
         )

@@ -500,6 +500,33 @@ def format_change(metric: str, change: float) -> str:
     return f"{change:+.2f}" if unit == "index" else f"{change:+.1f}"
 
 
+def trend_cells(
+    metric: str, recent: float, prior: float, change: float
+) -> tuple[list[float], list[tuple[str, str]]]:
+    """The three trend cells (Last 3, Earlier, Change) as NUMBERS, each with its `(pattern, type)` number
+    format, so the sheet right-aligns them and shows each metric in its own unit: a share as `43%` with its
+    change in points (`+9 pts`), an index to two places, a per-game number to one. (`format_value` /
+    `format_change` stay the text twins used inside the reasons.)"""
+    unit = trend_unit(metric)
+    if unit == "share":
+        return [round(recent, 4), round(prior, 4), round(change * 100, 1)], [
+            ("0%", "PERCENT"),
+            ("0%", "PERCENT"),
+            ('+0" pts";-0" pts";0" pts"', "NUMBER"),
+        ]
+    if unit == "index":
+        return [round(recent, 3), round(prior, 3), round(change, 3)], [
+            ("0.00", "NUMBER"),
+            ("0.00", "NUMBER"),
+            ("+0.00;-0.00;0.00", "NUMBER"),
+        ]
+    return [round(recent, 2), round(prior, 2), round(change, 2)], [
+        ("0.0", "NUMBER"),
+        ("0.0", "NUMBER"),
+        ("+0.0;-0.0;0.0", "NUMBER"),
+    ]
+
+
 def trend_why(row: pd.Series) -> str:
     """`Tgt% 18% → 27% over the last 3 (▲, a bigger jump than 85% of weeks). Historically projections
     over-react to jumps like this.`"""

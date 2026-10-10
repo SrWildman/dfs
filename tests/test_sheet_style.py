@@ -1,4 +1,11 @@
-from dfs.derived import EDGE_COLUMNS, EDGE_SHEET_ORDER, ZONE_LABELS
+from dfs.derived import (
+    EDGE_COLUMNS,
+    EDGE_DATA_OFFSET,
+    EDGE_SHEET_ORDER,
+    ZONE_LABELS,
+    edge_last_letter,
+    edge_sheet_index,
+)
 from dfs.sheet_color_scales import (
     FIELD_COLOR_SCALES,
     GRAD_MAX,
@@ -19,6 +26,7 @@ from dfs.sheet_style import (
     CRIT_BG,
     CRIT_FG,
     EDGE_COLUMN_GROUPS,
+    EDGE_HIDDEN_HELPERS,
     EDGE_ROWS,
     EDGE_WIDTHS,
     FAMILY_COLORS,
@@ -42,6 +50,7 @@ from dfs.sheet_style import (
     apply_grouped_color_scales,
     apply_tab_chrome,
     column_alignment,
+    edge_group_spans,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
@@ -438,12 +447,77 @@ def test_polish_edge_clears_column_groups_before_re_adding_them():
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
-    assert client.clear_group_calls == ["EdgeRaw"]
+    assert client.clear_group_calls == [
+        "EdgeRaw"
+    ]  # once: polish_edge clears first, before it unhides anything
     assert len(client.group_calls) == len(EDGE_COLUMN_GROUPS)
     # clear must run before any group is (re-)added.
     clear_index = client.calls.index("clear_column_groups")
     first_group_index = client.calls.index("group_columns")
     assert clear_index < first_group_index
+    # ... and before the unhide, or the unhide skips columns that a stale collapsed group is hiding.
+    assert clear_index < client.calls.index("hide_columns")
+
+
+class SheetsLikeColumnClient(FakeEdgeClient):
+    """FakeEdgeClient that also behaves like Sheets for column visibility: hide/unhide change a hidden set,
+    a collapsed group hides its columns, and DELETING a collapsed group leaves them hidden (the real
+    behaviour that left Avail, Flags, Edge and the GAME / MOVE / WX labels hidden after the reorder)."""
+
+    def __init__(self, stale_groups: list[tuple[int, int]] | None = None, hidden: set[int] | None = None):
+        super().__init__()
+        self.groups: list[tuple[int, int, bool]] = [(a, b, True) for a, b in (stale_groups or [])]
+        self.hidden: set[int] = set(hidden or set())
+        for a, b, _ in self.groups:
+            self.hidden.update(range(a, b + 1))
+
+    def get_grouped_column_indices(self, tab_name):
+        return {i for a, b, _ in self.groups for i in range(a, b + 1)}
+
+    def clear_column_groups(self, tab_name):
+        super().clear_column_groups(tab_name)
+        self.groups = []  # the columns it hid stay hidden
+
+    def hide_columns(self, tab_name, first_col_a1, last_col_a1, *, hidden=True):
+        super().hide_columns(tab_name, first_col_a1, last_col_a1, hidden=hidden)
+        span = range(_letter_to_index(first_col_a1), _letter_to_index(last_col_a1) + 1)
+        self.hidden = self.hidden | set(span) if hidden else self.hidden - set(span)
+
+    def group_columns(self, tab_name, first_col_a1, last_col_a1, *, collapsed=False):
+        super().group_columns(tab_name, first_col_a1, last_col_a1, collapsed=collapsed)
+        a, b = _letter_to_index(first_col_a1), _letter_to_index(last_col_a1)
+        self.groups.append((a, b, collapsed))
+        if collapsed:
+            self.hidden.update(range(a, b + 1))
+
+
+def _hidden_names_after_polish(client) -> set[str]:
+    polish_edge(client, "EdgeRaw")
+    header = [POOL_HEADER, *EDGE_SHEET_ORDER]
+    return {header[i] for i in client.hidden}
+
+
+def test_polish_edge_hides_exactly_the_helpers_and_the_group_bodies_by_name():
+    names = _hidden_names_after_polish(SheetsLikeColumnClient())
+    bodies = {EDGE_SHEET_ORDER[i - EDGE_DATA_OFFSET] for a, b in edge_group_spans() for i in range(a, b + 1)}
+    assert names == set(EDGE_HIDDEN_HELPERS) | bodies
+    # the visible set is the spine plus the group labels, nothing else
+    for on_the_spine in ("Pool", "Name", "Avail", "Flags", "Edge"):
+        assert on_the_spine not in names
+
+
+def test_polish_edge_unhides_columns_a_stale_collapsed_group_at_old_letters_was_hiding():
+    # The groups as they sat before the reorder: ranges at the OLD letters, covering today's Avail..GAME
+    # label (Q:T), MOVE (AL) and WX (AQ). Before the fix these stayed hidden and ungrouped.
+    stale = [(16, 19), (37, 37), (42, 42)]
+    client = SheetsLikeColumnClient(stale_groups=stale)
+    names = _hidden_names_after_polish(client)
+    for visible in ("Avail", "Flags", "Edge"):
+        assert visible not in names
+    # the zone labels sit just before each group's first column
+    for first_body in ("OverUnder", "ImpliedMove", "Stadium", "CeilPct", "Snap%"):
+        label_index = edge_sheet_index(first_body) - 1
+        assert label_index not in client.hidden, f"label before {first_body} is hidden"
 
 
 def test_polish_edge_sets_column_group_control_before_the_group():
@@ -511,25 +585,16 @@ def _letter_to_index(letter: str) -> int:
     return n - 1
 
 
-def test_polish_edge_reset_before_hide_skips_columns_already_inside_a_group():
-    # Real live incident, three times in one session (Name; Avail/Flags;
-    # GAME/CEIL/MOVE, all on EdgeRaw): a killed/retried polish run left a
-    # stray column hidden that should never have been, because the old
-    # hide-Id/Flag loop only ever ADDED a hide, never reset a stale one.
-    # The fix resets every non-grouped column visible first -- but must
-    # skip columns already inside an EXISTING collapsed group, or it
-    # desyncs the group (verified live: explicitly unhiding a grouped
-    # range's columns makes them visible while the group's own metadata
-    # still says collapsed=true). Columns 14-16 here (0-indexed) simulate
-    # OverUnder/Spread/GameEnv already sitting inside a real group.
+def test_polish_edge_unhides_the_whole_width_after_clearing_the_groups_never_skipping_a_column():
+    # Real live incident, four times now (Name; Avail/Flags; GAME/CEIL/MOVE; slice 5's reorder): a stale hide
+    # survived because the reset skipped "columns already inside a group" while those groups sat at old
+    # letters. EdgeRaw therefore clears its groups first and then unhides every column in one call (nothing
+    # is grouped, so nothing can desync); the builder tabs keep the skip, tested further down.
     client = FakeEdgeClient(grouped_column_indices={14, 15, 16})
     polish_edge(client, "EdgeRaw")
 
     unhide_calls = [(a, b) for a, b, hidden in client.hide_calls if hidden is False]
-    touched = set()
-    for start, end in unhide_calls:
-        touched.update(range(_letter_to_index(start), _letter_to_index(end) + 1))
-    assert not touched & {14, 15, 16}
+    assert unhide_calls == [("A", edge_last_letter())]
 
 
 def test_polish_edge_clears_banding_before_re_adding_it():
@@ -821,8 +886,11 @@ class FakeBoardClient:
     def hide_rows(self, tab_name: str, first_row: int, last_row: int) -> None:
         self.hidden_rows.append((first_row, last_row))
 
-    def set_dropdown_validation(self, tab_name: str, a1_range: str, options: list[str]) -> None:
+    def set_dropdown_validation(
+        self, tab_name: str, a1_range: str, options: list[str], *, strict: bool = True
+    ) -> None:
         self.dropdown_calls.append((a1_range, options))
+        self.dropdown_strict = getattr(self, "dropdown_strict", []) + [strict]
 
     def read_range(self, tab_name: str, a1_range: str):
         """Header rows only: Slate Grid's game header (row 1) or its TEAMS header (any later row)."""
@@ -917,6 +985,9 @@ def test_style_board_gives_every_player_row_a_pool_dropdown_in_the_gutter_and_no
     }  # not Slate shape, Pool summary, Your stacks or Stack candidates
     assert all(options == ["Cash", "GPP", "Both"] for _, options in client.dropdown_calls)
     assert all("Remove" not in options for _, options in client.dropdown_calls)  # blank is the remove
+    assert client.dropdown_strict and not any(
+        client.dropdown_strict
+    )  # warnings: Apps Script writes the formula back
 
 
 def test_style_board_hides_the_queues_unused_rows_again_so_a_polish_does_not_undo_the_sync():
@@ -1531,8 +1602,11 @@ class FakeBuilderTabClient:
         self.notes: list[tuple[str, str]] = []
         self._grouped_column_indices = grouped_column_indices or set()
 
-    def set_dropdown_validation(self, tab_name: str, a1_range: str, options: list[str]) -> None:
+    def set_dropdown_validation(
+        self, tab_name: str, a1_range: str, options: list[str], *, strict: bool = True
+    ) -> None:
         self.dropdown_calls.append((a1_range, options))
+        self.dropdown_strict = getattr(self, "dropdown_strict", []) + [strict]
 
     def set_note(self, tab_name: str, cell: str, text: str) -> None:
         self.notes.append((cell, text))
@@ -1780,6 +1854,7 @@ def test_polish_builder_tab_makes_player_pools_pool_column_the_dropdown_control_
         ("A12:A40", ["Cash", "GPP", "Both"]),
     ]
     assert any(a1 == "A3:A10" and "backgroundColor" in fmt for a1, fmt in client.format_calls)
+    assert client.dropdown_strict == [False, False]  # warnings: Apps Script writes the formula back
     # a tab with no Pool column (PlayerPoolRaw, Lineups) gets no dropdown
     other = FakeBuilderTabClient(["Name", "Pos."])
     polish_builder_tab(other, "Lineups", last_row=40, header_row=1)

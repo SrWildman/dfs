@@ -2482,8 +2482,8 @@ def edge(
 def odds_snapshot() -> None:
     """Save the current betting lines (and nothing else): no sheet, no other source. Line movement for the
     week is measured against the week's opening lines, and the odds source only shows the current slate, so
-    the opening is on record only if the lines were saved before the sheet was copied. A scheduled job runs
-    this every Monday and Tuesday morning (`dfs odds schedule`)."""
+    the opening is on record only if the lines were saved before the sheet was copied: run this early in the
+    week (Monday or Tuesday morning), before `dfs week new`."""
     cfg = _load_config_or_exit()
     ctx = SyncContext.current()
     result = run_sync(cfg, ["nfl_odds"], ctx, upload=False)[0]
@@ -2491,33 +2491,6 @@ def odds_snapshot() -> None:
         console.print(f"[red]Could not save the lines:[/red] {result.error}")
         raise typer.Exit(code=1)
     console.print(f"[green]OK[/green] saved {result.rows} line(s) for week {ctx.week}.")
-
-
-@odds_app.command("schedule")
-def odds_schedule(
-    install: bool = typer.Option(
-        False, "--install", help="Save the lines every Monday and Tuesday at 10:00 ET (a macOS launchd job)."
-    ),
-    remove: bool = typer.Option(False, "--remove", help="Turn that job off and delete it."),
-) -> None:
-    """Show, install or remove the job that runs `dfs odds snapshot` on Mondays and Tuesdays at 10:00 ET
-    (your Mac's clock is converted). With no option it says whether the job is installed. To turn it off
-    later: `dfs odds schedule --remove`."""
-    from dfs import odds_schedule as schedule
-
-    if install and remove:
-        console.print("[red]Choose one of --install or --remove.[/red]")
-        raise typer.Exit(code=1)
-    try:
-        if install:
-            console.print(f"[green]OK[/green] {schedule.install()}")
-        elif remove:
-            console.print(f"[green]OK[/green] {schedule.remove()}")
-        else:
-            console.print(f"Odds snapshot job: {schedule.status()}")
-    except (RuntimeError, OSError) as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(code=1) from e
 
 
 @odds_app.command("movement")
@@ -3278,7 +3251,7 @@ def _opening_lines_line(ctx: SyncContext) -> str:
     if opening.stamp is None or opening.stamp >= newest:
         return (
             "Opening lines: no snapshot older than the lines just fetched -- using the current lines as the "
-            "baseline (run `dfs odds schedule --install` to save them every Monday and Tuesday)."
+            "baseline (run `dfs odds snapshot` on Monday or Tuesday morning to save them)."
         )
     return f"Opening lines: {format_et(opening.stamp)} snapshot ({opening.how})."
 

@@ -781,6 +781,18 @@ EDGE_COLUMN_GROUPS = [
     ("Snap%", "xFP/G"),
 ]
 
+# The only EdgeRaw columns that are hidden outright (everything else is either visible or inside a
+# collapsed group above): the id, the single-token flag, the percentile helpers (the colour steps read
+# them) and the name key. `polish_edge` hides exactly these and `dfs doctor` checks exactly these.
+EDGE_HIDDEN_HELPERS = ("Id", "Flag", *ALL_PCT_COLUMNS.values(), "NameKey")
+
+
+def edge_group_spans() -> list[tuple[int, int]]:
+    """Each EdgeRaw group as a 0-indexed (first, last) sheet-column pair, found by NAME through
+    `edge_sheet_index` -- the only way a group may be positioned (slice 5's rule)."""
+    return [(edge_sheet_index(first), edge_sheet_index(last)) for first, last in EDGE_COLUMN_GROUPS]
+
+
 # Muted, per-position backgrounds -- just enough to see position boundaries
 # while scanning a list sorted by Leverage, not loud enough to compete with
 # the colour scales on the decision columns.
@@ -943,6 +955,12 @@ def _merge_contiguous(values: list[int]) -> list[tuple[int, int]]:
     return runs
 
 
+def _unhide_columns(client: SheetsClient, tab: str, total_width: int) -> None:
+    """Unhides columns A through `total_width`. Only safe when the tab has no column groups (clear them
+    first): unhiding a grouped column desyncs the group's collapsed flag."""
+    client.hide_columns(tab, column_letter(0), column_letter(total_width - 1), hidden=False)
+
+
 def _unhide_ungrouped_columns(client: SheetsClient, tab: str, total_width: int) -> None:
     """Unhides every column NOT currently covered by a collapsed group,
     across the tab's full known width -- the fix for a real, three-times-
@@ -1059,7 +1077,7 @@ def _apply_pool_control(
     for start, end in blocks:
         rng = f"{letter}{start}:{letter}{end}"
         client.format_range(tab, rng, {"backgroundColor": INPUT_BG})
-        client.set_dropdown_validation(tab, rng, POOL_OPTIONS)
+        client.set_dropdown_validation(tab, rng, POOL_OPTIONS, strict=False)
 
 
 def _apply_zone_label_style(
@@ -1184,11 +1202,13 @@ def _apply_name_flag_style(
         )
 
 
-def apply_edge_column_groups(client: SheetsClient, edge_tab: str) -> None:
+def apply_edge_column_groups(client: SheetsClient, edge_tab: str, *, clear: bool = True) -> None:
     """EdgeRaw's collapsible column groups (`EDGE_COLUMN_GROUPS`), rebuilt
     from scratch. Split out of `polish_edge` so a group change can be
-    applied without re-running the whole polish pass."""
-    client.clear_column_groups(edge_tab)
+    applied without re-running the whole polish pass. `polish_edge` has already cleared them (it must,
+    before it unhides anything) and passes `clear=False`."""
+    if clear:
+        client.clear_column_groups(edge_tab)
     client.set_column_group_control_before(edge_tab)
     for first, last in EDGE_COLUMN_GROUPS:
         a, b = _edge_letter(first), _edge_letter(last)
@@ -1265,8 +1285,16 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     # leave a STALE hide behind (see `_unhide_ungrouped_columns`'s own
     # docstring for the mechanism). Makes this call idempotent and
     # self-correcting instead of purely additive.
-    _unhide_ungrouped_columns(client, edge_tab, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET)
-    for hidden_name in ("Id", "Flag", *ALL_PCT_COLUMNS.values(), "NameKey"):
+    #
+    # Slice 5 (2026-10-09) found the hole in that reset: after the EdgeRaw reorder the groups still on the
+    # tab sat at the OLD letters, so "skip every column in a group" skipped columns (Avail, Flags, Edge, the
+    # GAME / MOVE / WX labels) that the stale collapsed groups had hidden; the groups were then cleared and
+    # rebuilt at the new letters, and Sheets leaves a deleted collapsed group's columns hidden. So on this
+    # tab the groups go FIRST, then every column is unhidden (nothing is grouped to desync), then only the
+    # helpers are hidden, and `apply_edge_column_groups` regroups last.
+    client.clear_column_groups(edge_tab)
+    _unhide_columns(client, edge_tab, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET)
+    for hidden_name in EDGE_HIDDEN_HELPERS:
         letter = _edge_letter(hidden_name)
         if letter:
             client.hide_columns(edge_tab, letter, letter)
@@ -1364,7 +1392,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
         client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS, pool_column=POOL_HEADER
     )
 
-    apply_edge_column_groups(client, edge_tab)
+    apply_edge_column_groups(client, edge_tab, clear=False)
     # One-hover definitions for the usage columns (window, positions, "data through Week N").
     apply_header_notes(client, edge_tab, 1, {**usage_notes(), **EDGE_FINDER_NOTES})
 
@@ -2714,7 +2742,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     ):
         pool = f"{BOARD_LIST_POOL_COL}{first}:{BOARD_LIST_POOL_COL}{last}"
         client.format_range(tab, pool, {"backgroundColor": INPUT_BG, "horizontalAlignment": "CENTER"})
-        client.set_dropdown_validation(tab, pool, POOL_OPTIONS)
+        client.set_dropdown_validation(tab, pool, POOL_OPTIONS, strict=False)
         for state, fmt in POOL_TYPE_CHIPS.items():
             client.add_boolean_rule(tab, pool, condition_type="TEXT_EQ", values=[state], fmt=fmt)
 

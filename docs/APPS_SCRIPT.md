@@ -36,7 +36,9 @@ A new weekly sheet is a copy of the template, so it carries the script and the s
 ## When `Code.gs` changes
 
 Bump `DFS_SCRIPT_VERSION` at the top of `apps_script/Code.gs`, paste the file again into the template and the live sheet (steps 1-5), and `dfs doctor` goes quiet again. **Version 2** (the actions round) replaced the `Set`
-dropdown with the `Pool` dropdown and added the add-a-player box: a sheet still on version 1 has no working Pool dropdown.
+dropdown with the `Pool` dropdown and added the add-a-player box: a sheet still on version 1 has no working Pool dropdown. **Version 3** (the polish round) fixes "Pool change failed: The data you entered in cell A741 violates the data validation rules": the
+script's `restoreFormula_` lets EdgeRaw settle, tries the plain write, and if a strict dropdown refuses the formula's result (a player taken out of the pool shows a blank) it lifts the rule for that one
+write and puts it back. `dfs setup polish` and every Edge Finder write now also make the Pool dropdowns warnings rather than rejections, so a sheet that has been polished never needs the workaround.
 
 ## Manual test checklist (needs a browser; the pure functions are unit-tested with node in `tests/test_apps_script.py`)
 

@@ -56,8 +56,7 @@ runs a full `dfs sync`. It then prints which saved odds snapshot the week's line
 
 **The opening lines.** Movement (`ImpliedMove`, `TotMove`, `SpdMove`, the Movement tab) is measured against the week's *opening* lines: the earliest saved `nfl_odds` snapshot that shows the new
 week's slate, not whenever `dfs week new` happened to run (`store.opening_snapshot`). The odds source only ever shows the current slate, so the opening is on record only if the lines were saved
-before the sheet was copied. `dfs odds snapshot` saves them (no sheet, no other source); `dfs odds schedule --install` runs it every **Monday and Tuesday at 10:00 ET** as a macOS launchd job
-(your Mac's clock is converted), and `dfs odds schedule --remove` turns it off (`dfs odds schedule` alone says whether it is installed). Its log is `data/odds_snapshot.log`.
+before the sheet was copied. `dfs odds snapshot` saves them (no sheet, no other source): run it on Monday or Tuesday morning, before `dfs week new`. There is no scheduled job; the Mac is not always on.
 
 If the copy is somehow already titled `Week <n>` and `<n>` disagrees with
 what `dfs week new` derives, it stops and asks rather than overwriting a

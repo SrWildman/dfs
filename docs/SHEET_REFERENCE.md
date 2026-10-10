@@ -649,12 +649,12 @@ upside) and a second line, "what it is · what to do".
   context (Do `Out`). No points are moved for targets.
 - **Usage trends** (context, no chips): per position, the players whose last-3-games usage moved beyond R6's measured band against the 6
   games before (arrow thresholds in `models/research/trend_bands.json`; none for a player with fewer than 9 earlier games), one row per
-  player (his biggest move; the others are named in Why). Do: `Watch`.
-- **Matchups (context)**: a row per team (`Soft` top 8 / `Tough` bottom 4), its top 3 players by `CalPts` named in one cell that overflows right, the reasons and score in
-  Why (the full text is the note); the team's players sit in a collapsed row group under it, each with a `Pool` cell. Feeds nothing.
+  player (his biggest move; the others are named in Why). Do: `Watch`. Last 3 / Earlier / Change are numbers, right-aligned and formatted by the row's metric (shares as `43%` with the change in points, `+9 pts`; WOPR to two places; per-game rows to one).
+- **Matchups (context)**: a row per team reading `Matchup | Pos | Grade | Players` (`Soft` top 8 / `Tough` bottom 4; the top 3 players by `CalPts` are named in one left-aligned cell that overflows right), the reasons and score in
+  Why (the full text is the note). The team's players sit in a collapsed row group under it, which opens on its own small header over the standard player columns (`Pool | Name | Pos | Team | Salary | Own% | CalPts | Hit3x% | Boom%`), so their Salary, Own% and numbers carry the sheet-wide formats. Feeds nothing.
 - **Context signals**: `FADE↓` (TE only), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven; then **R6 usage signals**, each of the 12
   as its own sub-block (who is flagged, the measured effect, the evidence tier). Every player row's Why also names the R6 signals behind his
-  single `Proj ▼` / `Proj ▲` chip (`Proj ▼?` / `Proj ▲?`, grey, when only weaker evidence supports it), and Do adds "Lean under in cash" / "Lean over".
+  single `Proj ▼` / `Proj ▲` chip (`Proj ▼?` / `Proj ▲?`, grey, when only weaker evidence supports it), and Do shows it beside the one verb: `Proj ▼` downgrades "Cash add" to "Cash option (Proj ▼)", `Proj ▲` never upgrades ("Cash option (Proj ▲)"). Each R6 block opens with a small header naming its columns (`Read | CalPts | ProjPts`).
 
 **Row groups.** Each section's body is a level-1 group; in Cash core, GPP upside and punt plays every rosterable player is written (up to
 40 per position) and the rows past the visible count (QB 6, RB 10, WR 12, TE 6, DST 6) sit in a collapsed level-2 group under "▸ 34 more

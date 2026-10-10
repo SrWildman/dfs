@@ -165,16 +165,7 @@ Diff the two most recent nfl_odds syncs and show which teams' lines moved the mo
 
 ### `dfs odds snapshot`
 
-Save the current betting lines (and nothing else): no sheet, no other source. Line movement for the week is measured against the week's opening lines, and the odds source only shows the current slate, so the opening is on record only if the lines were saved before the sheet was copied. A scheduled job runs this every Monday and Tuesday morning (`dfs odds schedule`).
-
-### `dfs odds schedule`
-
-Show, install or remove the job that runs `dfs odds snapshot` on Mondays and Tuesdays at 10:00 ET (your Mac's clock is converted). With no option it says whether the job is installed. To turn it off later: `dfs odds schedule --remove`.
-
-| Option | What it does |
-|---|---|
-| `--install` | Save the lines every Monday and Tuesday at 10:00 ET (a macOS launchd job). |
-| `--remove` | Turn that job off and delete it. |
+Save the current betting lines (and nothing else): no sheet, no other source. Line movement for the week is measured against the week's opening lines, and the odds source only shows the current slate, so the opening is on record only if the lines were saved before the sheet was copied: run this early in the week (Monday or Tuesday morning), before `dfs week new`.
 
 ## Reference: bankroll, logs and accounts (only when needed)
 

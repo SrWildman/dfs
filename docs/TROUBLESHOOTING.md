@@ -76,6 +76,14 @@ first, or accept the cap.
 
 ---
 
+**"Pool change failed: The data you entered in cell A741 violates the data validation rules", and the Pool cell is now empty.**
+Cause: the Pool cell is a strict Cash / GPP / Both dropdown holding a formula, and the Apps Script (version 2) could not write the formula back when its
+result was blank (a player removed from the pool): the pool change itself had already landed on EdgeRaw, the cell was left empty. Fix: paste the current
+`apps_script/Code.gs` (version 3, `docs/APPS_SCRIPT.md`), run `dfs setup polish` (the Pool dropdowns become warnings), then `dfs sync --only edge` to write the
+formula back into the empty cell. `dfs doctor` flags a player row whose Pool cell is empty.
+
+---
+
 **A tick in EdgeRaw's Pool column vanished after `dfs sync`.**
 Cause: usually nothing's actually wrong -- ticks are preserved across a
 sync by matching on the DraftKings player Id, not row position, so a

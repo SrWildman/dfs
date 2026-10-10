@@ -70,7 +70,6 @@ BENEFICIARY_QUESTIONABLE_N = 6
 SIGNALS_PER_TOKEN = 6
 TREND_ROWS_PER_POSITION = 8
 R6_SIGNAL_ROWS = 8  # players listed per R6 signal in Context signals
-LEAN_UNDER, LEAN_OVER = "Lean under in cash", "Lean over"
 PUNT_SALARY_WINDOW = 1000  # dollars above each position's cheapest salary on the slate (the Board's old rule)
 PUNT_ROWS_PER_POSITION = 5
 MATCHUP_PLAYERS = 3
@@ -128,8 +127,11 @@ DISAGREE_COLUMNS = ["TFFB", "Sleeper", "FantasyPros", "CalPts", "Diff", "Edge"]
 BENEFICIARY_COLUMNS = ["Gain Car/G", "Gain xFP/G", "Method", "Priced in?", "Edge"]
 ABSENCE_COLUMNS = ["Role", "Tgt/G", "Car/G", "Games missed"]
 TREND_HEADERS = ["Metric", "Last 3", "Earlier", "Change", "Trend"]
-MATCHUP_LEAD = ["", "Matchup", "Pos", "", "Grade", ""]
-MATCHUP_COLUMNS = ["CalPts", "Hit3x%", "Boom%"]  # a team row names its top players in the first slot
+# A team row reads Matchup | Pos | Grade | Players (B-E; the players' names are one left-aligned cell that
+# overflows right). The player rows nested under it have their own small header row, the standard player
+# columns, so their Salary / Own% / CalPts ... carry the sheet-wide formats and colours.
+MATCHUP_LEAD = ["", "Matchup", "Pos", "Grade", "Players", ""]
+MATCHUP_COLUMNS = ["CalPts", "Hit3x%", "Boom%"]  # the nested player rows' number columns
 SIGNAL_COLUMNS = ["Token", "xFP/G", "DK/G L3"]
 R6_SIGNAL_COLUMNS = ["Read", "CalPts", "ProjPts"]
 
@@ -234,6 +236,7 @@ class Layout:
     subheader_rows: list[int] = field(default_factory=list)
     verdict_rows: list[int] = field(default_factory=list)
     header_rows: list[int] = field(default_factory=list)
+    inner_header_rows: list[int] = field(default_factory=list)  # a small header inside a group (matchups)
     note_rows: list[int] = field(default_factory=list)
     overflow_rows: list[int] = field(default_factory=list)
     team_rows: list[int] = field(default_factory=list)
@@ -246,6 +249,8 @@ class Layout:
     percent_cells: list[str] = field(default_factory=list)
     own_cells: list[str] = field(default_factory=list)  # Own% ranges (a fraction shown as a percent)
     lev_cells: list[str] = field(default_factory=list)  # Lev ranges (a signed whole number)
+    # (cell, pattern, type): a number format chosen per ROW (usage trends mix percents and per-game numbers)
+    cell_formats: list[tuple[str, str, str]] = field(default_factory=list)
     money_cells: list[str] = field(default_factory=list)
     point_cells: list[str] = field(default_factory=list)
     chip_ranges: list[str] = field(default_factory=list)  # `Edge` / token cells
@@ -488,6 +493,14 @@ class _Builder:
         self.layout.header_rows.append(row)
         return row
 
+    def inner_header(self, slots: list[str]) -> int:
+        """A small header row for the player rows of the group being built: the standard player columns
+        (`LEAD`), then `slots`, Do, Why, Id. It is first in the group, so it folds away with it, and it names
+        the columns the number formats and colours key off."""
+        row = self.add([*LEAD, *self._edge_to_the_end(slots), *TRAILING_HEADERS])
+        self.layout.inner_header_rows.append(row)
+        return row
+
     # ---- groups ------------------------------------------------------------------------------
     def open_group(self, header_text: str, key: str, *, team: bool = False) -> int:
         """A header row (the toggle sits on it) whose following rows form a collapsed level-2 group. Its text
@@ -507,18 +520,14 @@ class _Builder:
     # ---- rows ----------------------------------------------------------------------------------
     def r6_text(self, gsis, edge_text: object, why: str, verb: str) -> tuple[str, str, bool]:
         """Add the R6 signals behind a player to a row's `Why` and `Do`: every signal that fired in plain
-        words (with the reason of an older chip beside it when one overlaps), and `Lean under in cash` /
-        `Lean over`
-        for a `Proj ▼` / `Proj ▲`. Returns (why, verb, muted): a chip on weaker evidence only mutes."""
+        words (with the reason of an older chip beside it when one overlaps), and the chip beside the verb
+        (`verb_with_proj`: one verb per row). Returns (why, verb, muted): a chip on weaker evidence only
+        mutes."""
         sig = self.r6.signals.get(gsis) if self.r6 is not None and isinstance(gsis, str) else None
         if sig is None:
             return why, verb, False
         why = _join(why, usage_r6.signal_why(sig, self.r6.chips), existing_chip_reasons(edge_text))
-        if verb != "Out":
-            if sig.chip == usage_r6.PROJ_DOWN:
-                verb = f"{verb} · {LEAN_UNDER}"
-            elif sig.chip == usage_r6.PROJ_UP:
-                verb = f"{verb} · {LEAN_OVER}"
+        verb = verb_with_proj(verb, sig.chip)
         return why, verb, usage_r6.weaker_only(sig, self.r6.chips)
 
     def _edge_to_the_end(self, slots: list) -> list:
@@ -722,6 +731,17 @@ def disagreement_short(row: pd.Series, fitted: calibration.Calibration | None) -
     if abs(why.bias) >= 0.05:
         parts.append(f"{why.bias:+.1f} bias")
     return ", ".join(parts) or "sources agree with TFFB"
+
+
+def verb_with_proj(verb: str, chip: str | None) -> str:
+    """One verb per row, with the R6 chip beside it, never a second instruction. A `Proj ▼` DOWNGRADES a
+    `Cash add` to `Cash option (Proj ▼)` (a fade signal cannot sit beside "add"); a `Proj ▲` never upgrades
+    anything, it only shows beside the verb (`Cash option (Proj ▲)`). `Out` carries no chip."""
+    if verb == "Out" or chip not in (usage_r6.PROJ_DOWN, usage_r6.PROJ_UP):
+        return verb
+    if chip == usage_r6.PROJ_DOWN and verb == "Cash add":
+        verb = "Cash option"
+    return f"{verb} ({chip})"
 
 
 def cash_verb(rank: int, bust: float, bust_median: float) -> str:
@@ -1311,15 +1331,10 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             metric = r["Metric"]
             others = [f"{m['Metric']} {m['Direction']}" for _, m in moves.iloc[1:].iterrows()]
             move = "jump" if r["Direction"] == usage_r6.UP else "drop"
-            b.player_row(
+            numbers, patterns = usage_r6.trend_cells(metric, r["Recent"], r["Prior"], r["Change"])
+            row = b.player_row(
                 [e["Name"], pos, e["Team"], e["Salary"], e.get("Own%", "")],
-                [
-                    metric,
-                    usage_r6.format_value(metric, r["Recent"]),
-                    usage_r6.format_value(metric, r["Prior"]),
-                    usage_r6.format_change(metric, r["Change"]),
-                    r["Direction"],
-                ],
+                [metric, *numbers, r["Direction"]],
                 why=_join(usage_r6.trend_why(r), f"also moved: {', '.join(others)}" if others else ""),
                 short=f"A bigger {move} than {1 - float(r['FlagRate']):.0%} of weeks",
                 verb="Watch",
@@ -1327,6 +1342,8 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
                 gsis=r["GsisId"],
                 edge=e.get("Edge", ""),
             )
+            for offset, (pattern, kind) in enumerate(patterns, start=1):  # slots 2-4: Last 3, Earlier, Change
+                b.layout.cell_formats.append((f"{column_letter(len(LEAD) + offset)}{row}", pattern, kind))
     b.end_section()
 
 
@@ -1338,7 +1355,7 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
         b.note("No matchup tables yet (the schedule or last season's results were unavailable).")
         b.end_section()
         return
-    pos_i, grade_i = LEAD.index("Pos"), LEAD.index("Salary")
+    pos_i, grade_i, players_i = LEAD.index("Pos"), LEAD.index("Team"), LEAD.index("Salary")
     for pos in POSITIONS:
         part = mu[mu["Position"] == pos]
         if part.empty:
@@ -1350,8 +1367,8 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             row = b.open_group(f"{r['Team']} vs {r['Opp']}", f"MATCHUPS|{pos}|{r['Team']}", team=True)
             cells = b.layout.rows[row - 1]
             cells[pos_i], cells[grade_i] = pos, "Soft" if soft else "Tough"
-            if not players.empty:  # one cell that overflows right; salaries are on the player rows below
-                cells[len(LEAD)] = "Top: " + ", ".join(players["Name"])
+            if not players.empty:  # one cell that overflows right; the salaries are on the player rows below
+                cells[players_i] = ", ".join(players["Name"])
             cells[FIRST_TRAILING + TRAILING_HEADERS.index("Do")] = "Context only"
             reason = _join(
                 str(r["Reasons"]),
@@ -1361,6 +1378,8 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             b.layout.notes[row] = reason
             if not soft:
                 b.layout.muted_rows.append(row)
+            if not players.empty:
+                b.inner_header(MATCHUP_COLUMNS)
             for _, p in players.iterrows():
                 b.player_row(
                     _lead(p, pos),
@@ -1404,6 +1423,8 @@ def _r6_signal_blocks(b: _Builder, edge: pd.DataFrame) -> None:
             f"{chip.position} {usage_r6.threshold_text(chip)}  —  {len(part)} flagged  ·  {read}  ·  "
             f"{chip.effect_um_test:+.1f} pts vs the research projection  ·  {tier}"
         )
+        if not part.empty:  # these columns are not the section's (Token | xFP/G | DK/G L3): name them
+            b.inner_header(R6_SIGNAL_COLUMNS)
         for _, r in part.head(R6_SIGNAL_ROWS).iterrows():
             b.player_row(
                 _lead(r),
@@ -1478,8 +1499,9 @@ def _mark_formats(layout: Layout) -> None:
     """Number-format and chip ranges, derived from the header rows (every section's columns by NAME). A
     header's block runs until the next header, section or blank row."""
     section_rows = set(layout.section_rows)
-    headers = set(layout.header_rows)
-    for header_row in layout.header_rows:
+    team_rows = set(layout.team_rows)  # a team row's cells are text under other names: never in a block
+    headers = set(layout.header_rows) | set(layout.inner_header_rows)
+    for header_row in sorted(headers):
         names = layout.rows[header_row - 1]
         last = header_row
         while (
@@ -1487,6 +1509,7 @@ def _mark_formats(layout: Layout) -> None:
             and any(c != "" for c in layout.rows[last])
             and (last + 1) not in section_rows
             and (last + 1) not in headers
+            and (last + 1) not in team_rows
         ):
             last += 1
         first = header_row + 1

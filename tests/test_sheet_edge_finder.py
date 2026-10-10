@@ -116,8 +116,9 @@ class FakeClient:
     def add_color_scale(self, tab, rng, **kw):
         self.scales.append((rng, kw))
 
-    def set_dropdown_validation(self, tab, rng, options):
+    def set_dropdown_validation(self, tab, rng, options, **kwargs):
         self.validations.append((rng, options))
+        self.validation_kwargs = getattr(self, "validation_kwargs", []) + [kwargs]
 
     def set_note(self, tab, cell, note):
         self.notes[cell] = note
@@ -178,6 +179,8 @@ def test_the_writer_adds_pool_dropdowns_notes_hides_id_and_key_and_shows_the_all
     assert client.cleared_validation.startswith("A1:")  # the old layout's Set dropdowns are cleared first
     assert client.validations and all(o == ["Cash", "GPP", "Both"] for _, o in client.validations)
     assert all(rng.startswith(eft.POOL_COL) for rng, _ in client.validations)
+    # warnings, not rejections: a strict rule made Apps Script refuse the formula it writes back
+    assert all(k.get("strict") is False for k in client.validation_kwargs)
     assert "control_before" in client.calls and client.freeze_args == {"rows": 0, "cols": 2}
     assert client.cleared_notes == [f"{eft.WHY_COL}1:{eft.WHY_COL}{max(len(client.tab_written[1]), 40) + 20}"]
     rows = client.tab_written[1]
