@@ -1477,7 +1477,7 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
 
 def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
     b.begin_section("MATCHUPS (CONTEXT)  —  the 8 best and 4 toughest offenses (DST: the defense's spot)")
-    b.header(MATCHUP_COLUMNS, lead=MATCHUP_LEAD)
+    b.header([], lead=MATCHUP_LEAD)  # the team rows have no numbers: those headers sit in each group
     mu = inputs.matchups
     if mu.empty:
         b.note("No matchup tables yet (the schedule or last season's results were unavailable).")

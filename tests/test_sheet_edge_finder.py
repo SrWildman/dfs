@@ -300,9 +300,9 @@ def test_edge_and_do_take_the_width_of_their_longest_real_value_capped():
     stacked = writer.fit_widths(
         eft.build_layout(_inputs(_edge([_player(1, Edge="INJ+ USAGE↑ Proj ▼ FADE↓ more chips")])))
     )
-    assert short[eft.EDGE_COL] < stacked[eft.EDGE_COL] <= writer.CHIP_MAX  # follows the value, never past 140
-    assert stacked[eft.EDGE_COL] == writer.CHIP_MAX
-    assert writer.CHIP_MAX >= short[eft.DO_COL] >= 90
+    assert short[eft.EDGE_COL] < stacked[eft.EDGE_COL] <= writer.EDGE_MAX  # follows the value, never past 140
+    assert stacked[eft.EDGE_COL] == writer.EDGE_MAX
+    assert writer.DO_MAX >= short[eft.DO_COL] >= 90
 
 
 def test_a_wider_slot_is_paid_for_by_why_then_name_never_by_the_budget():

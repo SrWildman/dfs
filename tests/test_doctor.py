@@ -656,3 +656,16 @@ def test_run_doctor_does_not_flag_a_section_header_row_whose_id_cell_says_id():
         title="Week 5",
     )
     assert not [i for i in issues if i.check == "pool-cell-plain-value"]
+
+
+def test_run_doctor_survives_a_blank_row_in_the_id_column():
+    from dfs.edge_finder_tab import ID_COL, POOL_COL
+
+    rows = {("Edge Finder", f"{ID_COL}1:{ID_COL}30"): [[], ["Id"], [], ["1001"]]}  # a blank row reads as []
+    formulas = {("Edge Finder", f"{POOL_COL}1:{POOL_COL}30"): [[""], [""], [""], ['=IF($O4="","")']]}
+    issues = run_doctor(
+        FakeDoctorClient(_ALL_GOOD_TABS, rows={**_lineups_rows(), **rows}, formulas=formulas),
+        _base_config(),
+        title="Week 5",
+    )
+    assert not [i for i in issues if i.check == "pool-cell-plain-value"]

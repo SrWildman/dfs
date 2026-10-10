@@ -40,12 +40,13 @@ from dfs.sheets import SheetsClient, column_letter
 TAB = eft.EDGE_FINDER_TAB
 POOL_TAB = pc.POOL_TAB
 # Sam (2026-10-09): Pool through Why fits about 1,270 px with no horizontal scroll. The fixed columns are
-# tight; Edge and Do take the width of their longest real value (never past CHIP_MAX); Name and Why give up
-# the difference (Name down to NAME_MIN, Why down to WHY_MIN) when something else had to grow.
-# `fit_widths` does it.
+# tight; Edge and Do take the width of their longest real value (never past EDGE_MAX / DO_MAX); Name and
+# Why give up the difference (Name down to NAME_MIN, Why down to WHY_MIN) when something else had to
+# grow. `fit_widths` does it.
 NAME_MIN, NAME_MAX = 155, 170
 WHY_MIN, WHY_MAX = 220, 300
-CHIP_MAX = 160  # Sam said 140, but the audit (final say) cut "GPP leverage ★ (Proj ▼)", which needs ~153
+EDGE_MAX = 140
+DO_MAX = 160  # Sam said 140, but the audit (final say) cut "GPP leverage ★ (Proj ▼)", which needs ~153
 BUDGET = 1270
 SLOT_PX = 64
 WIDTHS = {
@@ -236,7 +237,7 @@ def _longest_px(texts: list[str]) -> int:
 
 def fit_widths(layout: eft.Layout) -> dict[str, int]:
     """`WIDTHS` adjusted to the real values (Sam's rule, 2026-10-09):
-    - Edge and Do: the width of their longest real value, between a floor and `CHIP_MAX`;
+    - Edge and Do: the width of their longest real value, between a floor and `EDGE_MAX` / `DO_MAX`;
     - every other column: widened only when a real value would be cut off (`sheet_clipping`), up to
       `GROW_MAX`;
     - Name: its longest real name, between `NAME_MIN` and `NAME_MAX`;
@@ -249,8 +250,8 @@ def fit_widths(layout: eft.Layout) -> dict[str, int]:
     players = [rows[r - 1] for r in layout.player_rows]
     edge_i, do_i, name_i, why_i = (_index(c) for c in (eft.EDGE_COL, eft.DO_COL, eft.NAME_COL, eft.WHY_COL))
     # the chip columns: the longest real value (and the longest value the Do formula can show instead)
-    widths[edge_i] = min(CHIP_MAX, max(60, _longest_px([str(r[edge_i]) for r in players] + ["Edge"])))
-    widths[do_i] = min(CHIP_MAX, max(90, _longest_px([str(r[do_i]) for r in players] + ["In pool (Both)"])))
+    widths[edge_i] = min(EDGE_MAX, max(60, _longest_px([str(r[edge_i]) for r in players] + ["Edge"])))
+    widths[do_i] = min(DO_MAX, max(90, _longest_px([str(r[do_i]) for r in players] + ["In pool (Both)"])))
     widths[name_i] = min(NAME_MAX, max(NAME_MIN, _longest_px([str(r[name_i]) for r in players])))
     fitted = fitted_widths(
         rows,
