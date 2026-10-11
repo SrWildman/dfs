@@ -344,3 +344,35 @@ def test_live_sync_pulls_tffb_projections_before_recomputing_edge():
     assert "projections" in LIVE_SYNC_SOURCES
     assert LIVE_SYNC_SOURCES.index("projections") < LIVE_SYNC_SOURCES.index("edge")
     assert LIVE_SYNC_SOURCES[-1] == "edge", "edge reads what the others just saved"
+
+
+def test_every_command_section_belongs_to_a_more_topic_and_every_topic_is_not_empty():
+    from dfs.cli import _topic_commands
+    from dfs.commands_doc import SECTIONS
+    from dfs.launcher import MORE_TOPICS
+
+    keys = [key for key, *_rest in MORE_TOPICS]
+    assert len(keys) == len(set(keys)) and "q" not in keys
+    topic_sections = [s for *_head, sections in MORE_TOPICS for s in sections]
+    assert sorted(topic_sections) == sorted(title for title, _b, _n in SECTIONS)
+    for _key, title, _blurb, sections in MORE_TOPICS:
+        assert _topic_commands(sections), f"topic {title!r} lists no commands"
+
+
+def test_model_and_sim_commands_are_reachable_under_the_simulator_topic():
+    from dfs.cli import _topic_commands
+    from dfs.launcher import MORE_TOPICS
+
+    sections = next(sections for key, _t, _b, sections in MORE_TOPICS if key == "s")
+    commands = {command for _label, command in _topic_commands(sections)}
+    assert {"dfs sim fit", "dfs sim demo", "dfs model fetch", "dfs model train"} <= commands
+
+
+def test_the_more_topics_are_drawn_on_the_menu_and_a_letter_opens_one(monkeypatch):
+    monkeypatch.setattr("dfs.cli.gather_state", lambda: LauncherState(sheet_title="Week 1", synced_sources=3))
+    monkeypatch.setattr("dfs.cli._run_menu_choice", lambda label, command: print(f"RAN {command}"))
+    answers = iter(["s", "1"])
+    monkeypatch.setattr("dfs.cli.typer.prompt", lambda *a, **k: next(answers))
+    from dfs import cli
+
+    cli.run_launcher()

@@ -266,6 +266,55 @@ Two lineups from 2025 week 12 -- one stacked around Patrick Mahomes, one not -- 
 | `--cash-line FLOAT` | Cash line in points (default 145). |
 | `--gpp-target FLOAT` | GPP target in points (default 190). |
 
+## Reference: the UM model and the research pack (only when needed)
+
+The player-outcome model behind CalPts, Floor and the simulator's distributions, and the study pack that measured the Edge Finder's constants. Nothing here touches a sheet or needs a login; `dfs model fetch` fills the cache `dfs sim fit` reads.
+
+### `dfs model fetch`
+
+Download or refresh the public nflverse / ffopportunity history into data/model_cache/.
+
+| Option | What it does |
+|---|---|
+| `--refresh-all` | Re-download completed seasons too (they never change). |
+
+### `dfs model train`
+
+Rebuild the artifacts: holdout comparison, shipping decision, shipped models, distribution tables and backtest.md. Run it once a season, or on demand; it needs `dfs model fetch` first.
+
+| Option | What it does |
+|---|---|
+| `--through INT` | Last season to train on (default: the last complete season in the cache). |
+| `--out-dir PATH` | Where to write artifacts (default: models/um/). |
+
+### `dfs model backtest`
+
+Print the holdout and calibration tables. By default this recomputes them from the cache (about half a minute) without writing anything; `--saved` prints the report that shipped with the artifacts.
+
+| Option | What it does |
+|---|---|
+| `--saved` | Print the shipped backtest.md instead of recomputing. |
+
+### `dfs model info`
+
+Show the shipped artifacts: version, training seasons, chosen method per position, holdout metrics and the scikit-learn version they were built with (flagging a mismatch).
+
+### `dfs research fetch`
+
+Download the 2014-2025 public history the studies read (player and team stats, ffopportunity, the schedule, injury reports and a reduced play-by-play) into data/model_cache/ and data/research_cache/.
+
+| Option | What it does |
+|---|---|
+| `--refresh` | Re-download seasons already cached. |
+
+### `dfs research run`
+
+Rebuild the study outputs under models/research/ from the cache (no network).
+
+| Option | What it does |
+|---|---|
+| `--study STR` | r1, r2, r3, r4, r5, r6 or all. Default: `all`. |
+
 ## Reference: building and styling a sheet (only when needed)
 
 You do not run these in a normal week. Run against the TEMPLATE first, then the live sheet (`--sheet-id`), then `dfs doctor` and `dfs setup audit-style` on both. `dfs setup sheet` runs the whole build in the one order that works.

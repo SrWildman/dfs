@@ -10,8 +10,9 @@ Not sure what to run next? Just run `dfs` with no arguments -- it shows
 where you are in the week (sheet, sync freshness, pool/lineup counts) and
 a numbered menu of the standard week, the step that fits right now marked
 `>`. Pick a number and it asks for anything the command needs (the new
-sheet's link, a contest CSV, a player name) rather than erroring; `m` lists
-every other command. Each line is printed next to its real command name so
+sheet's link, a contest CSV, a player name) rather than erroring. Below it, "More, by topic" groups every
+other command (extras, bankroll and logins, simulator and model, sheet building,
+repairs): type a topic's letter, then a number. Each line is printed next to its real command name so
 you learn it as you use it. Typing the full command still works, and a
 typed command with a required argument left off asks for it.
 

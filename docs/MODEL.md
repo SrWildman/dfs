@@ -642,10 +642,8 @@ dfs model info       # artifact version, training seasons, chosen method, metric
 python tests/model/bench_distribution.py   # score the table-building remedies (--help for modes and --sim)
 ```
 
-`dfs model` is **registered hidden** for now: a visible command must also be added to the launcher's
-`MORE_LABELS`, `commands_doc.SECTIONS` and the generated `docs/COMMANDS.md`, which are outside this model's
-files. Whoever wires the model into the sheet drops `hidden=True` in `src/dfs/model/cli.py` and adds those
-three entries.
+`dfs model` is a visible command group: it is in the launcher's "Simulator and model" topic (`MORE_LABELS`,
+`MORE_TOPICS`) and in `docs/COMMANDS.md`. `dfs.cli` registers it with `hidden=False`, overriding the group's own flag.
 
 `predict_slate(players)` takes `gsis_id, position, team, opp, season, week, implied, spread, total, home` and
 returns `gsis_id, um_mean, floor, ceil`, in input order. `implied` is **this team's** implied total, `spread`

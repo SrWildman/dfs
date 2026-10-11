@@ -1,4 +1,4 @@
-"""`dfs research ...`: registered hidden, validates its argument, and names `dfs research fetch` when the
+"""`dfs research ...`: registered and visible, validates its argument, and names `dfs research fetch` when the
 cache is empty. `run` never touches the network."""
 
 import httpx
@@ -12,9 +12,9 @@ from dfs.research import data, pipeline
 runner = CliRunner()
 
 
-def test_research_is_registered_but_hidden_from_the_top_level_help():
+def test_research_is_registered_and_listed_in_the_top_level_help():
     top = runner.invoke(app, ["--help"])
-    assert top.exit_code == 0 and "research" not in top.output.lower().replace("researching", "")
+    assert top.exit_code == 0 and "research" in top.output.lower().replace("researching", "")
     sub = runner.invoke(app, ["research", "--help"])
     assert sub.exit_code == 0
     assert "fetch" in sub.output and "run" in sub.output

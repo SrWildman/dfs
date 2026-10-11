@@ -1,4 +1,4 @@
-"""`dfs model ...`: registered but hidden, real exit codes, no network or sheet."""
+"""`dfs model ...`: registered and visible, real exit codes, no network or sheet."""
 
 import re
 
@@ -11,14 +11,13 @@ from dfs.model import data
 runner = CliRunner()
 
 
-def test_model_is_registered_and_hidden_from_the_main_help():
+def test_model_is_registered_and_listed_in_the_main_help():
     command = typer.main.get_command(app)
-    assert command.commands["model"].hidden is True
+    assert command.commands["model"].hidden is False
     assert set(command.commands["model"].commands) == {"fetch", "train", "backtest", "info"}
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    # no command row named `model` (the word appears only inside `results`' wrapped "(Model Check)")
-    assert not re.search(r"^[│\s]*model\s{2,}", result.output, re.MULTILINE | re.IGNORECASE)
+    assert re.search(r"^[│\s]*model\s{2,}", result.output, re.MULTILINE | re.IGNORECASE)
 
 
 def test_model_help_still_works_when_typed():

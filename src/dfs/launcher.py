@@ -159,6 +159,8 @@ HANDY_ITEMS = [
     MenuItem("Add a player to your pool", "dfs pool add"),
     MenuItem("Remove a player from your pool", "dfs pool remove"),
     MenuItem("Show your pool", "dfs pool list"),
+    MenuItem("Sync + check + report what changed", "dfs go"),
+    MenuItem("Which betting lines have moved", "dfs odds movement"),
     MenuItem("Score projections (Model Check)", "dfs results update"),
     MenuItem("Status: config, sheet, data freshness", "dfs status"),
     MenuItem("Check the sheet's structure", "dfs doctor"),
@@ -271,7 +273,7 @@ MORE_LABELS = {
     "dfs bankroll sync": "Reconcile a DK contest-history CSV into Bankroll",
     "dfs ownership log": "Log a contest's actual ownership",
     "dfs lineups clear": "Clear last week's typed-in lineups",
-    "dfs sim fit": "Rebuild the simulator's player-correlation table",
+    "dfs sim fit": "Rebuild the simulator's player-correlation table (needs model fetch)",
     "dfs sim backtest": "Back-test the simulator on past seasons (slow)",
     "dfs sim demo": "Worked example: two lineups, one stacked, and a swap",
     "dfs auth tffb": "Log in to The Fantasy Footballers (one time)",
@@ -303,5 +305,52 @@ MORE_LABELS = {
     "dfs setup remove-sos-placeholders": "Remove the SoS placeholder tabs",
     "dfs setup remove-lineup-metrics": "Remove the retired Lineups metric columns",
     "dfs odds snapshot": "Save the current betting lines (no sheet)",
+    "dfs model fetch": "Download the public NFL history the model and simulator read",
+    "dfs model train": "Retrain the player-outcome model (about 2 minutes)",
+    "dfs model backtest": "Show the model's holdout and calibration tables",
+    "dfs model info": "Show which model version is installed and how it scored",
+    "dfs research fetch": "Download the extra history the research studies read",
+    "dfs research run": "Rebuild the research studies from the cache",
     "dfs setup remove-model-implied": "Remove the retired model-implied column",
 }
+
+
+# The "More" screen is organised by topic, not one 40-line list: a letter opens a topic,
+# a number inside it picks the command. Each topic is one or more `commands_doc.SECTIONS` titles (that is
+# where the commands live), so a new command shows up under its section's topic once it has a label.
+# tests/test_launcher.py fails if a section has no topic.
+MORE_TOPICS: list[tuple[str, str, str, tuple[str, ...]]] = [
+    (
+        "e",
+        "Everyday extras",
+        "Top plays, clear your pool, odds snapshot",
+        ("Also used most weeks",),
+    ),
+    (
+        "b",
+        "Bankroll, records and logins",
+        "Bankroll, ownership log, site logins",
+        ("Reference: bankroll, logs and accounts (only when needed)",),
+    ),
+    (
+        "s",
+        "Simulator and model",
+        "Lineup simulator, UM model, research",
+        (
+            "Reference: the lineup simulator (only when needed)",
+            "Reference: the UM model and the research pack (only when needed)",
+        ),
+    ),
+    (
+        "w",
+        "Build and style a sheet",
+        "Set up, restyle and audit a sheet",
+        ("Reference: building and styling a sheet (only when needed)",),
+    ),
+    (
+        "r",
+        "One-time repairs",
+        "Past fixes; you should not need these",
+        ("Reference: one-time repairs and migrations (only when needed)",),
+    ),
+]

@@ -51,6 +51,7 @@ from dfs.late_swap_sim import OVERSAMPLE, attach_probabilities
 from dfs.launcher import (
     MENU_SECTIONS,
     MORE_LABELS,
+    MORE_TOPICS,
     LauncherState,
     answer_to_args,
     command_path,
@@ -242,9 +243,13 @@ app.add_typer(week_app, name="week")
 app.add_typer(results_app, name="results")
 app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
-app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model")
+# `hidden=False` overrides the groups' own `hidden=True` (set in model/ and research/, which this layer
+# does not edit): both are visible now, listed in the launcher and docs/COMMANDS.md.
+app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model", hidden=False)
 app.add_typer(__import__("dfs.sim.cli", fromlist=["sim_app"]).sim_app, name="sim")
-app.add_typer(__import__("dfs.research.cli", fromlist=["research_app"]).research_app, name="research")
+app.add_typer(
+    __import__("dfs.research.cli", fromlist=["research_app"]).research_app, name="research", hidden=False
+)
 
 console = Console()
 
@@ -409,6 +414,20 @@ def _more_commands() -> list[tuple[str, str, str]]:
     ]
 
 
+def _topic_commands(sections: tuple[str, ...]) -> list[tuple[str, str]]:
+    """(label, command) for the More-screen commands in the given `SECTIONS` titles."""
+    return [(label, command) for title, label, command in _more_commands() if title in sections]
+
+
+def _print_command_line(number: int, label: str, command: str) -> None:
+    """One numbered line; the command drops to its own line when the pair would not fit the terminal."""
+    if 6 + max(52, len(label)) + 1 + len(command) <= console.width:
+        console.print(f"  {number:>2}  {label:<52} [dim]{command}[/dim]")
+    else:
+        console.print(f"  {number:>2}  {label}")
+        console.print(f"        [dim]{command}[/dim]")
+
+
 def _run_menu_choice(label: str, command: str | None) -> None:
     """Prompt for whatever `command` needs, then run it."""
     if command is None:
@@ -449,7 +468,9 @@ def run_launcher() -> None:
             mark = "[green]>[/green]" if item.command in suggested else " "
             console.print(f" {mark}{len(menu):>2}  {item.label:<44} {hint}")
         console.print()
-    console.print("    m  More commands (setup, logins, repairs, logs)")
+    console.print("[bold]More, by topic[/bold]  [dim](type the letter)[/dim]")
+    for key, title, blurb, _sections in MORE_TOPICS:
+        console.print(f"    {key}  {title:<30} [dim]{blurb}[/dim]")
     console.print("    q  Quit")
     console.print()
     console.print(
@@ -460,19 +481,18 @@ def run_launcher() -> None:
     choice = typer.prompt("Choice", default="q", show_default=False).strip().lower()
     if choice in ("", "q"):
         return
-    if choice == "m":
-        more = _more_commands()
-        section = None
-        for i, (title, label, command) in enumerate(more, start=1):
-            if title != section:
-                section = title
-                console.print(f"\n[bold]{title.removesuffix(' (only when needed)')}[/bold]")
-            console.print(f"  {i:>2}  {label:<52} [dim]{command}[/dim]")
+    topics = {key: (title, sections) for key, title, _blurb, sections in MORE_TOPICS}
+    if choice in topics:
+        title, sections = topics[choice]
+        entries = _topic_commands(sections)
+        console.print(f"\n[bold]{title}[/bold]")
+        for i, (label, command) in enumerate(entries, start=1):
+            _print_command_line(i, label, command)
         console.print()
         choice = typer.prompt("Choice (Enter to go back)", default="", show_default=False).strip().lower()
         if not choice:
             return
-        menu = [(label, command) for _title, label, command in more]
+        menu = entries
     try:
         label, command = menu[int(choice) - 1]
     except (ValueError, IndexError):

@@ -68,7 +68,8 @@ and option and is GENERATED from the CLI (`python -m dfs.commands_doc`): after a
 option, regenerate it -- `tests/test_commands_doc.py` fails if it is stale or a command has no section.
 
 Plain `dfs` is a guided menu of that standard week (`launcher.py`) that prompts for any required argument; a new
-command needs a `launcher.MORE_LABELS` entry (a test enforces it).
+command needs a `launcher.MORE_LABELS` entry and its `commands_doc.SECTIONS` section a `launcher.MORE_TOPICS`
+topic, which is how the "More, by topic" screen reaches it (tests enforce both).
 Typed commands also ask for a missing required argument at a terminal (`prompt_missing.py`; every Typer app needs
 `cls=PromptingGroup`) and fail as before when piped/scripted.
 

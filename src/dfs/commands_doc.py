@@ -129,6 +129,20 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         ],
     ),
     (
+        "Reference: the UM model and the research pack (only when needed)",
+        "The player-outcome model behind CalPts, Floor and the simulator's distributions, and the study pack "
+        "that measured the Edge Finder's constants. Nothing here touches a sheet or needs a login; "
+        "`dfs model fetch` fills the cache `dfs sim fit` reads.",
+        [
+            "dfs model fetch",
+            "dfs model train",
+            "dfs model backtest",
+            "dfs model info",
+            "dfs research fetch",
+            "dfs research run",
+        ],
+    ),
+    (
         "Reference: building and styling a sheet (only when needed)",
         "You do not run these in a normal week. Run against the TEMPLATE first, then the live sheet "
         "(`--sheet-id`), then `dfs doctor` and `dfs setup audit-style` on both. `dfs setup sheet` runs the "
