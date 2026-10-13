@@ -218,3 +218,34 @@ def test_eight_lineups_of_twenty_thousand_draws_in_under_two_seconds(synth_week)
     elapsed = time.perf_counter() - start
     assert len(res.lineups) == 8
     assert elapsed < 2.0, f"took {elapsed:.2f}s"
+
+
+def test_the_draws_do_not_depend_on_the_signs_or_basis_eigh_happens_to_return(monkeypatch):
+    """`np.linalg.eigh` may return `-v` for `v` (or any basis inside a repeated eigenvalue) on another LAPACK
+    build. With the root `v sqrt(w)` that changes the draws for the same seed; the principal root does not."""
+    r = np.array([[1.0, 0.5, 0.3, 0.0], [0.5, 1.0, 0.2, 0.0], [0.3, 0.2, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    plain = S._draw(r, 500, np.random.default_rng(7))
+    real_eigh = np.linalg.eigh
+
+    def flipped(signs):
+        def eigh(a):
+            w, v = real_eigh(a)
+            return w, v * np.asarray(signs, dtype=float)
+
+        return eigh
+
+    for signs in ([-1, 1, 1, 1], [1, -1, -1, 1], [-1, -1, -1, -1]):
+        monkeypatch.setattr(np.linalg, "eigh", flipped(signs))
+        np.testing.assert_allclose(S._draw(r, 500, np.random.default_rng(7)), plain, atol=1e-12)
+    # the old root really was sensitive to it (this is the case the test is guarding against)
+    monkeypatch.setattr(np.linalg, "eigh", flipped([-1, 1, 1, 1]))
+    w, v = np.linalg.eigh(r)
+    old = np.random.default_rng(7).standard_normal((500, 4)) @ (v * np.sqrt(np.maximum(w, 0.0))).T
+    assert not np.allclose(old, plain, atol=1e-6)
+
+
+def test_the_draws_have_the_requested_correlation():
+    r = np.array([[1.0, 0.6, 0.0], [0.6, 1.0, -0.3], [0.0, -0.3, 1.0]])
+    draws = S._draw(r, 200_000, np.random.default_rng(1))
+    np.testing.assert_allclose(np.corrcoef(draws.T), r, atol=0.01)
+    np.testing.assert_allclose(draws.std(axis=0), 1.0, atol=0.01)

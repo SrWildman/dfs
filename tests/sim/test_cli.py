@@ -3,6 +3,7 @@
 import re
 
 import typer.main
+from cli_text import strip_ansi
 from typer.testing import CliRunner
 
 from dfs.cli import app
@@ -16,7 +17,7 @@ def test_sim_is_registered_and_listed_in_the_main_help():
     assert set(command.commands["sim"].commands) == {"fit", "backtest", "demo"}
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert re.search(r"^[│\s]*sim\s{2,}", result.output, re.MULTILINE)
+    assert re.search(r"^[│\s]*sim\s{2,}", strip_ansi(result.output), re.MULTILINE)
 
 
 def test_sim_help_lists_the_commands():

@@ -26,7 +26,11 @@ builds. A build's title names its stack ("DET stack + ARI bring-back").
 own slots (`flex_order`; Sam's rule), so a build is ready to enter as it stands.
 
 **Deterministic**: the search has no randomness and the simulator runs a fixed number of draws with a fixed
-seed (`sim_inputs.N_SIMS`, `SEED`), so the same pool and the same data give the same builds."""
+seed (`sim_inputs.N_SIMS`, `SEED`), so the same pool and the same data give the same builds. Probabilities
+are counts of draws, so many lineups TIE exactly (on a quiet slate most GPP lineups reach the target in 0-5 of
+1,500 draws); every ordering therefore ends in a canonical tie-break (`lineup_key`, the sorted names) and
+compares probabilities at a fixed precision (`PROB_DECIMALS`), never on the last bits of a float. The choice
+among tied lineups can then not depend on iteration order or on how the machine rounded a sum."""
 
 from __future__ import annotations
 
@@ -224,8 +228,24 @@ def stacked_lineups(
     return _best_first(found, k), complete
 
 
+PROB_DECIMALS = 9  # probabilities and projections compare at this precision (draw counts are far coarser)
+VALUE_DECIMALS = 6
+
+
+def lineup_names(players: Sequence[SwapPlayer]) -> tuple[str, ...]:
+    """A lineup's canonical identity: its players' names, sorted. The last tie-break of every ordering."""
+    return tuple(sorted(p.name for p in players))
+
+
 def _best_first(found: dict[frozenset[str], list[SwapPlayer]], k: int | None) -> list[list[SwapPlayer]]:
-    ranked = sorted(found.values(), key=lambda lu: (-sum(p.value for p in lu), sum(p.salary for p in lu)))
+    ranked = sorted(
+        found.values(),
+        key=lambda lu: (
+            -round(sum(p.value for p in lu), VALUE_DECIMALS),
+            sum(p.salary for p in lu),
+            lineup_names(lu),
+        ),
+    )
     return ranked if k is None else ranked[:k]
 
 
@@ -294,8 +314,31 @@ def exposure_cap(builds: int, share: float = MAX_EXPOSURE) -> int:
     return max(1, round(share * builds))
 
 
-BACKTRACK_POOL = 80  # candidates a failed greedy choice may backtrack over
-BACKTRACK_NODES = 20000  # and how many steps it may take
+BACKTRACK_NODES = 20000  # placements the exposure-cap search may make before it gives up (never time)
+
+
+def lineup_key(scored: Scored) -> tuple[str, ...]:
+    return lineup_names(scored.players)
+
+
+def cash_key(s: Scored):
+    """Best first: the chance of beating the cash line, then projection, the cheaper lineup, then names."""
+    return (
+        -round(s.p_cash, PROB_DECIMALS),
+        -round(s.projection, VALUE_DECIMALS),
+        s.salary,
+        lineup_key(s),
+    )
+
+
+def gpp_key(s: Scored):
+    """Best first: the chance of reaching the GPP target, then projection, the cheaper lineup, then names."""
+    return (
+        -round(s.p_gpp, PROB_DECIMALS),
+        -round(s.projection, VALUE_DECIMALS),
+        s.salary,
+        lineup_key(s),
+    )
 
 
 def _fits(
@@ -317,10 +360,18 @@ def choose(
     """The best `count` by `key`, each differing from the ones already chosen by `min_difference` players and
     (when `max_per_player` is set) with no player in more than that many of them.
 
-    Greedy in `key` order. When the exposure cap leaves it short, the top `BACKTRACK_POOL` candidates are
-    searched for a set of `count` that satisfies every rule (the first such set in `key` order). Fewer than
-    `count` come back only when no such set exists."""
-    ordered = sorted(scored, key=key)
+    Ordered by `key`, then by `lineup_key` (so a tie is never broken by input order). Greedy in that order.
+    When the exposure cap leaves it short, EVERY candidate is searched for a set of `count` that satisfies
+    every rule, and the first such set in order is returned. The search is exact: after each pick it keeps
+    only the candidates that still fit with everything picked, and stops a branch the moment too few remain,
+    so the count of placements (`BACKTRACK_NODES`), not the clock, is the only limit and the answer is the
+    same on every machine. Fewer than `count` come back only when no such set exists (or the limit is hit)."""
+
+    def ranked(s: Scored) -> tuple:
+        k = key(s)
+        return (*(k if isinstance(k, tuple) else (k,)), lineup_key(s))
+
+    ordered = sorted(scored, key=ranked)
     chosen: list[Scored] = []
     uses: dict[str, int] = {}
     for candidate in ordered:
@@ -333,31 +384,39 @@ def choose(
     if len(chosen) == count or max_per_player is None:
         return chosen
 
-    pool = ordered[:BACKTRACK_POOL]
-    steps = 0
+    names = [frozenset(p.name for p in c.players) for c in ordered]
+    placements = 0
 
-    def search(start: int, picked: list[Scored], used: dict[str, int]) -> list[Scored] | None:
-        nonlocal steps
-        if len(picked) == count:
+    def search(remaining: list[int], picked: list[int], used: dict[str, int]) -> list[int] | None:
+        nonlocal placements
+        need = count - len(picked)
+        if need == 0:
             return list(picked)
-        for i in range(start, len(pool)):
-            steps += 1
-            if steps > BACKTRACK_NODES:
+        for position, i in enumerate(remaining):
+            if len(remaining) - position < need:
+                return None  # too few left to finish, whichever is picked
+            placements += 1
+            if placements > BACKTRACK_NODES:
                 return None
-            if not _fits(pool[i], picked, used, min_difference, max_per_player):
-                continue
-            for p in pool[i].players:
-                used[p.name] = used.get(p.name, 0) + 1
-            picked.append(pool[i])
-            found = search(i + 1, picked, used)
+            for name in names[i]:
+                used[name] = used.get(name, 0) + 1
+            still = [
+                j
+                for j in remaining[position + 1 :]
+                if len(names[j] - names[i]) >= min_difference
+                and not any(used.get(name, 0) >= max_per_player for name in names[j])
+            ]
+            picked.append(i)
+            found = search(still, picked, used) if len(still) >= need - 1 else None
             picked.pop()
-            for p in pool[i].players:
-                used[p.name] -= 1
+            for name in names[i]:
+                used[name] -= 1
             if found is not None:
                 return found
         return None
 
-    return search(0, [], {}) or chosen
+    found = search(list(range(len(ordered))), [], {})
+    return [ordered[i] for i in found] if found is not None else chosen
 
 
 def suggest_builds(
@@ -399,7 +458,7 @@ def suggest_builds(
         scored = score(
             lineups, specs, kickoff, cash_line=cash_line, gpp_target=gpp_target, n_sims=n_sims, seed=seed
         )
-        picks = choose(scored, cash_builds, key=lambda s: (-s.p_cash, -s.projection, s.salary))
+        picks = choose(scored, cash_builds, key=cash_key)
         for pick in picks:
             report.builds.append(_build(number, "cash", f"Cash build {number}", pick))
             number += 1
@@ -415,12 +474,7 @@ def suggest_builds(
         scored = score(
             lineups, specs, kickoff, cash_line=cash_line, gpp_target=gpp_target, n_sims=n_sims, seed=seed
         )
-        picks = choose(
-            scored,
-            gpp_builds,
-            key=lambda s: (-s.p_gpp, -s.projection, s.salary),
-            max_per_player=exposure_cap(gpp_builds),
-        )
+        picks = choose(scored, gpp_builds, key=gpp_key, max_per_player=exposure_cap(gpp_builds))
         for pick in picks:
             name = stack_name(pick.players)
             report.builds.append(_build(number, "gpp", f"GPP build {number}  ·  {name}", pick, stack=name))

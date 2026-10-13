@@ -196,8 +196,12 @@ def repair_correlation(r: np.ndarray) -> tuple[np.ndarray, RepairInfo]:
 def _draw(r: np.ndarray, n_sims: int, rng: np.random.Generator) -> np.ndarray:
     """`n_sims` x n standard normals with correlation `r` (any positive semi-definite matrix)."""
     w, v = np.linalg.eigh(r)
-    root = v * np.sqrt(np.maximum(w, 0.0))
-    return rng.standard_normal((n_sims, len(r))) @ root.T
+    # The PRINCIPAL square root, v sqrt(w) v^T, not v sqrt(w): an eigenvector's sign (and the basis inside a
+    # repeated eigenvalue) is whatever the LAPACK build returns, and v sqrt(w) turns a flipped sign into a
+    # different set of draws for the same seed (27-29 of 40 lineups changed their P(GPP)). The principal root
+    # is the same matrix whichever sign or basis eigh chose, so a seed means the same draws on every machine.
+    root = (v * np.sqrt(np.maximum(w, 0.0))) @ v.T
+    return rng.standard_normal((n_sims, len(r))) @ root
 
 
 def simulate_lineups(
