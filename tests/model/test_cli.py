@@ -3,6 +3,7 @@
 import re
 
 import typer.main
+from cli_text import strip_ansi
 from typer.testing import CliRunner
 
 from dfs.cli import app
@@ -17,7 +18,7 @@ def test_model_is_registered_and_listed_in_the_main_help():
     assert set(command.commands["model"].commands) == {"fetch", "train", "backtest", "info"}
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert re.search(r"^[│\s]*model\s{2,}", result.output, re.MULTILINE | re.IGNORECASE)
+    assert re.search(r"^[│\s]*model\s{2,}", strip_ansi(result.output), re.MULTILINE | re.IGNORECASE)
 
 
 def test_model_help_still_works_when_typed():

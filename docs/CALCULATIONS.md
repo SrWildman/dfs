@@ -834,8 +834,8 @@ slots with FLEX taking an RB, WR or TE, nobody twice, no DST against his own QB,
 `Cash %` (the chance of beating the cash line, the median of Sam's typed Results `Cash Line`s). **GPP builds** (default 5): every candidate holds a stack (the QB, at least two of his WR/TE, at least one
 non-DST player from his opponent); each QB is searched on his own for his best `PER_QB = 80` stacked lineups, cutting branches that can no longer reach a stack (`_stack_feasible`: it never rejects a
 lineup that can pass), then ranked by the chance of reaching `[sim] gpp_target`. **Diversity:** each build differs from the earlier ones of its kind by at least `MIN_DIFFERENCE = 3` players. **Exposure:**
-no player in more than `exposure_cap(n) = max(1, round(0.6 n))` of the GPP builds (3 of 5). Greedy by rank; when the cap leaves it short it backtracks over the top 80 candidates for a set that
-fits, and reports fewer builds only when none exists. **FLEX:** the latest kickoff of the surplus position (`flex_order`), ties to the lowest projection. **Time:** a 20 s budget (cash 40%, GPP the
+no player in more than `exposure_cap(n) = max(1, round(0.6 n))` of the GPP builds (3 of 5). Greedy by rank; when the cap leaves it short it searches EVERY candidate for the first set (in rank order) that
+fits - exactly, keeping after each pick only the candidates that still fit with it, so the limit is a count of placements (`BACKTRACK_NODES = 20,000`), never the clock - and reports fewer builds only when none exists. **Ties are canonical:** chances are counts of draws (on a quiet slate most GPP lineups reach the target in 0-5 of 1,500), so every ordering compares probabilities at `PROB_DECIMALS = 9` and ends in the lineup's sorted names, never in input order or the last bits of a float sum. **FLEX:** the latest kickoff of the surplus position (`flex_order`), ties to the lowest projection. **Time:** a 20 s budget (cash 40%, GPP the
 rest, shared evenly between QBs); a 60-player pool takes about 4 s; a cut-short search says so on the tab. Titles: `GPP build 4  ·  NO stack + NYG bring-back`.
 
 ## Top plays and Consider (Edge Finder, Week 6)

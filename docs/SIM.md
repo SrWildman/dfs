@@ -107,7 +107,7 @@ total. `correlations_detail.csv` keeps every row of the analysis, with the unshr
 `correlations_meta.json` records the cutoffs and checks.
 
 **6. The copula.** For the union of every player in every lineup: build the correlation matrix `R` (0 across
-games; the table's `same_team` or `opp` value for the two roles within a game), repair it if needed, draw `z ~ N(0, R)`, take `u = Phi(z)`, and read each player's
+games; the table's `same_team` or `opp` value for the two roles within a game), repair it if needed, draw `z ~ N(0, R)` (as `g @ R^(1/2)` with the PRINCIPAL square root `V sqrt(W) V^T`, not `V sqrt(W)`: the eigenvector signs `eigh` returns differ between LAPACK builds, and with them the draws for one seed, whereas the principal root is the same matrix whichever signs or basis it was built from, so a seed means the same draws on every machine), take `u = Phi(z)`, and read each player's
 points off his own quantile function at `u`. Every player therefore keeps exactly his own marginal and every
 pair inherits `R`. **The same player in two lineups is one variable**, so lineups that share players are
 correlated with each other the way real ones are. `R` is assembled from separately estimated pairs, so it can in
