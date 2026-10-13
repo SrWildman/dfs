@@ -9,8 +9,8 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from dfs.contests import analysis, history, slate_index
 from dfs.contests import series as series_mod
+from dfs.contests import slate_index
 from dfs.paths import CONTESTS_DIR
 from dfs.prompt_missing import PromptingGroup
 
@@ -57,6 +57,10 @@ def analyze(
     scores how tough each series is (and your head-to-head record), and, given a folder of standings files,
     measures how the fields build their lineups. Writes CSVs under --out and prints a short summary; it never
     touches a sheet and never contacts DraftKings."""
+    # Imported here, not at module level: the group is registered on every `dfs` start, and this is an
+    # unfinished command that must not add import cost or a failure point to the standard week.
+    from dfs.contests import analysis, history
+
     if index_candidate != analysis.NO_INDEX and index_candidate not in slate_index.CANDIDATES:
         console.print(f"[red]Unknown --slate-index {escape(index_candidate)}[/red]")
         raise typer.Exit(code=2)
@@ -78,7 +82,7 @@ def analyze(
             index_candidate=index_candidate,
             index_file=index_file,
         )
-    except history.HistoryError as e:
+    except (history.HistoryError, ValueError) as e:
         console.print(f"[red]FAIL[/red] {escape(str(e))}")
         raise typer.Exit(code=1) from e
     written = analysis.write(result)

@@ -34,6 +34,7 @@ from dfs.sources.nflverse_results import ResultsFetchError
 
 LOG_NAME = "contest_log.csv"
 NO_INDEX = "none"
+ENTRANT_TOLERANCE = 0.01  # a standings file this far off the history's entry count is a partial export
 
 
 @dataclass
@@ -58,6 +59,12 @@ class Analysis:
     warnings: list[str] = field(default_factory=list)
 
 
+def _median(values: pd.Series) -> float:
+    """The median of a nullable column; NaN (not a crash) when every value is missing."""
+    valid = values.dropna()
+    return float(valid.astype("Float64").median()) if len(valid) else float("nan")
+
+
 def series_summary(typed: pd.DataFrame) -> pd.DataFrame:
     """One row per (format, series) of the typed log."""
     rows = []
@@ -70,9 +77,9 @@ def series_summary(typed: pd.DataFrame) -> pd.DataFrame:
                 "weeks": int(sub[["season", "week"]].drop_duplicates().shape[0]),
                 "first": sub["date"].min(),
                 "last": sub["date"].max(),
-                "median_fee": float(sub["fee"].median()),
-                "median_field": float(sub["entries"].astype("Float64").median()),
-                "median_payout_ratio": float(sub["payout_ratio"].astype("Float64").median()),
+                "median_fee": _median(sub["fee"]),
+                "median_field": _median(sub["entries"]),
+                "median_payout_ratio": _median(sub["payout_ratio"]),
                 "net": float((sub["winnings"] - sub["fee"]).sum()),
             }
         )
@@ -209,13 +216,29 @@ def run(
                     "source": source.origin,
                 }
             )
-            if (
+            usable = (
                 season is not None
                 and week is not None
                 and fmt
                 and info is not None
                 and (parsed.kind == "Showdown" or info["slate"] == "main")
-            ):
+            )
+            if usable and not prof.complete:
+                result.warnings.append(
+                    f"contest {source.contest_id}: still in play (time remaining on some entries), "
+                    "its score profile is not used in the fit"
+                )
+                usable = False
+            if usable and not pd.isna(info["entries"]):
+                gap = abs(prof.entrants - int(info["entries"])) / max(int(info["entries"]), 1)
+                if gap > ENTRANT_TOLERANCE:
+                    result.warnings.append(
+                        f"contest {source.contest_id}: the file has {prof.entrants} entries but the "
+                        f"history says {int(info['entries'])}; a partial export, so its profile is not "
+                        "used in the fit"
+                    )
+                    usable = False
+            if usable:
                 profile_inputs.append((prof, fmt, name, season, week))
             if len(parsed.lineup_errors):
                 error_rows.append(parsed.lineup_errors.assign(contest_id=parsed.contest_id))
@@ -238,7 +261,7 @@ def run(
     result.field_stacks = stack(stack_rows, ["contest_id", "group", "team", "n", "share"])
     result.field_unmatched = stack(miss_rows, ["contest_id", "player", "slot", "reason"])
 
-    supplied = pd.read_csv(index_file) if index_file is not None else None
+    supplied = slate_index.read_index_file(index_file) if index_file is not None else None
     previous_path = out_dir / "slate_index.csv"
     previous = pd.read_csv(previous_path) if previous_path.exists() else None
     result.index_candidate = index_candidate

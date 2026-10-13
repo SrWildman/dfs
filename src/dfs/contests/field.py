@@ -254,11 +254,12 @@ def field_stats(
     no_unmatched = pd.DataFrame(columns=["contest_id", "player", "slot", "reason"])
     no_stacks = pd.DataFrame(columns=["contest_id", "group", "team", "n", "share"])
     if standings.kind != "Classic":
-        reason = (
-            f"{standings.kind} contest: field measures are defined for Classic rosters only"
-            if standings.kind != "Unknown"
-            else "no lineup parsed"
-        )
+        reasons = {
+            "Showdown": "Showdown contest: the field measures are defined for Classic rosters only",
+            "Mixed": "the file mixes Classic and Showdown lineups",
+            "Unknown": "no lineup parsed",
+        }
+        reason = reasons.get(standings.kind, f"{standings.kind} contest")
         return FieldResult(empty, no_unmatched, no_stacks, pd.DataFrame(), skipped=reason)
 
     cid = standings.contest_id

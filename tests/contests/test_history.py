@@ -264,3 +264,51 @@ def test_a_column_draftkings_adds_later_is_kept_verbatim(tmp_path):
     merged = history.read_log(log_path)
     assert len(merged) == 32 and (merged["Brand_New_Column"] == "").sum() == 31
     assert history.merge_into(log_path, src).unchanged == 1
+
+
+# ---- merge rules (found in review) ---------------------------------------------------------------
+
+
+def test_a_changed_rule_relabels_the_log_on_the_next_merge(tmp_path, monkeypatch):
+    log_path = tmp_path / "log.csv"
+    history.merge_into(log_path, EXPORT)
+    before = history.read_log(log_path).set_index("Entry_Key").loc["5000000001", "Format"]
+    assert before == "SE GPP"
+    real = history.series_mod.classify
+
+    def reclassified(*args, **kwargs):
+        return real(*args, **kwargs).__class__(**{**real(*args, **kwargs).__dict__, "format": "Other"})
+
+    monkeypatch.setattr(history.series_mod, "classify", reclassified)
+    result = history.merge_into(log_path, EXPORT)  # the same export: nothing added or updated ...
+    assert (result.added, result.updated) == (0, 0)
+    assert (
+        history.read_log(log_path).set_index("Entry_Key").loc["5000000001", "Format"] == "Other"
+    )  # ... but relabelled
+
+
+def test_a_contest_still_in_play_never_overwrites_a_result(tmp_path):
+    log_path = tmp_path / "log.csv"
+    history.merge_into(log_path, EXPORT)
+    stale = tmp_path / "stale.csv"
+    df = history.read_export(EXPORT)
+    df.loc[df["Entry_Key"] == "5000000001", ["Place", "Points"]] = ["", "12.50"]  # mid-flight: no place yet
+    df.to_csv(stale, index=False)
+    result = history.merge_into(log_path, stale)
+    assert result.updated == 0 and result.unchanged == 31
+    row = history.read_log(log_path).set_index("Entry_Key").loc["5000000001"]
+    assert (row["Place"], row["Points"]) == ("87", "181.20")
+
+
+def test_a_column_only_the_log_has_survives_a_newer_export_without_it(tmp_path):
+    older = tmp_path / "older.csv"
+    df = history.read_export(EXPORT)
+    df["Retired_Column"] = "keep me"
+    df.to_csv(older, index=False)
+    log_path = tmp_path / "log.csv"
+    history.merge_into(log_path, older)
+    result = history.merge_into(log_path, LATER)  # DraftKings no longer sends Retired_Column
+    log = history.read_log(log_path)
+    assert result.updated == 1 and result.added == 1  # only the genuinely changed and the new row
+    assert (log.set_index("Entry_Key").loc["5000000001", "Retired_Column"]) == "keep me"
+    assert log.set_index("Entry_Key").loc["5000000099", "Retired_Column"] == ""

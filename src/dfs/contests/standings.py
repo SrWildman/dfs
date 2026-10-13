@@ -144,7 +144,7 @@ def score_profile(entries: pd.DataFrame, *, contest_id: str, places_paid: int | 
 @dataclass
 class Standings:
     contest_id: str
-    kind: str  # Classic / Showdown / Unknown (no lineup parsed)
+    kind: str  # Classic / Showdown / Mixed (both kinds in one file) / Unknown (no lineup parsed)
     entries: pd.DataFrame  # rank, entry_id, entry_name, entry_no, entry_max, time_remaining, points, lineup
     profile: ScoreProfile
     lineups: pd.DataFrame  # entry_id, rank, points, entry_name, entry_no, kind, slots
@@ -239,7 +239,7 @@ def parse_standings(raw: bytes, *, contest_id: str, places_paid: int | None = No
     kinds = set(lineups["kind"]) if len(lineups) else set()
     if len(kinds) > 1:
         warnings.append(f"lineups of more than one kind in one contest: {sorted(kinds)}")
-    kind = next(iter(kinds)) if len(kinds) == 1 else "Unknown"
+    kind = next(iter(kinds)) if len(kinds) == 1 else ("Mixed" if len(kinds) > 1 else "Unknown")
     if len(errors):
         warnings.append(f"{len(errors)} lineup(s) did not parse and were left out of the field analysis")
 

@@ -222,8 +222,14 @@ def _write_atomic(df: pd.DataFrame, path: Path) -> None:
 def merge_into(
     log_path: str | os.PathLike, export_path: str | os.PathLike, *, me: str = series_mod.MY_USERNAME
 ) -> MergeResult:
-    """Merges one export into the log at `log_path` (created if missing). Idempotent: running it again on
-    the same export changes nothing. Rows are matched on `Entry_Key`; the export's row replaces the log's."""
+    """Merges one export into the log at `log_path` (created if missing).
+
+    Rows are matched on `Entry_Key`. The export is taken as the newer record, so its row replaces the
+    log's -- except that a row without a `Place` (a contest still in play when that export was taken) never
+    replaces one that has a result, and a column only the log carries (one DraftKings has since dropped) is
+    kept. Safe to re-run: the same export changes nothing, and the file is rewritten only when its content
+    would change -- the derived columns included, so a changed rule in `series.py` re-labels every row on
+    the next merge."""
     path = Path(log_path)
     export = read_export(export_path)
     export_nfl = export[export["Sport"].str.strip().str.upper() == "NFL"]
@@ -233,28 +239,34 @@ def merge_into(
 
     existing = read_log(path)
     originals = original_columns(pd.concat([existing.iloc[:0], export.iloc[:0]]))
-    existing_raw = existing.reindex(columns=originals, fill_value="")
-    export = export.reindex(columns=originals, fill_value="")
-    compared = [c for c in originals if c != "Entry_Key"]
-    old = existing_raw.set_index("Entry_Key")[compared]
-    combined_raw = pd.concat([existing_raw, export], ignore_index=True)
-    combined_raw = combined_raw.drop_duplicates("Entry_Key", keep="last")
-    merged = enrich(combined_raw, me=me)
+    compared = [c for c in original_columns(export) if c != "Entry_Key"]
+    log_rows = existing.reindex(columns=originals, fill_value="").set_index("Entry_Key")
+    incoming = export.reindex(columns=originals, fill_value="").drop_duplicates("Entry_Key", keep="last")
+
+    added = updated = unchanged = 0
+    for key, row in incoming.set_index("Entry_Key").iterrows():
+        if key not in log_rows.index:
+            log_rows.loc[key] = row
+            added += 1
+            continue
+        previous = log_rows.loc[key]
+        scored_before = bool(str(previous["Place"]).strip())
+        if (scored_before and not str(row["Place"]).strip()) or (previous[compared] == row[compared]).all():
+            unchanged += 1
+            continue
+        log_rows.loc[key, compared] = row[compared]
+        updated += 1
+
+    merged = enrich(log_rows.reset_index(), me=me)
     merged["_sort"] = pd.to_datetime(merged["Contest_Date_EST"], errors="coerce")
     merged = merged.sort_values(["_sort", "Entry_Key"], kind="stable").drop(columns="_sort")
     merged = merged.reset_index(drop=True)
 
-    new = export.drop_duplicates("Entry_Key", keep="last").set_index("Entry_Key")[compared]
-    added = updated = unchanged = 0
-    for key, row in new.iterrows():
-        if key not in old.index:
-            added += 1
-        elif (old.loc[key] == row).all():
-            unchanged += 1
-        else:
-            updated += 1
+    def cells(frame: pd.DataFrame) -> list:
+        return frame.fillna("").astype(str).to_numpy().tolist()
 
-    if added or updated or not path.exists():
+    on_disk = existing.reindex(columns=merged.columns, fill_value="").reset_index(drop=True)
+    if not path.exists() or list(existing.columns) != list(merged.columns) or cells(merged) != cells(on_disk):
         _write_atomic(merged, path)
     return MergeResult(added, updated, unchanged, len(merged), dropped_other, dropped_no_key)
 

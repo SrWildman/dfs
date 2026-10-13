@@ -295,3 +295,16 @@ def test_a_zip_member_parses_exactly_like_the_bare_file(tmp_path):
     from_zip = S.parse_standings(source.raw, contest_id=source.contest_id, places_paid=4)
     bare = parse(SMALL, places_paid=4)
     assert from_zip.entries.equals(bare.entries) and from_zip.profile == bare.profile
+
+
+def test_a_file_mixing_classic_and_showdown_lineups_is_mixed_not_unknown():
+    text = SMALL.read_text(encoding="utf-8-sig").splitlines()
+    swapped = text[:]
+    swapped[2] = swapped[2].replace(
+        swapped[2].split(",")[5], "CPT A  FLEX B FLEX C FLEX D FLEX E FLEX F", 1
+    )  # entry 2 becomes a Showdown lineup
+    st = S.parse_standings("\n".join(swapped).encode(), contest_id="1")
+    assert st.kind == "Mixed" and any("more than one kind" in w for w in st.warnings)
+    from dfs.contests import field as F
+
+    assert "mixes" in F.field_stats(st, None).skipped

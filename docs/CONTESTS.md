@@ -57,7 +57,9 @@ What I did, and what needs your call:
 (`$8.00`, `2,972`), deduplicates by `Entry_Key` (the export merged last wins), drops non-NFL rows (counted in
 `MergeResult.dropped_other_sports`), and adds `Season`, `Week`, `Slate`, `Series`, `Format`, `Matchup`,
 `Opponent`, `Entry_No`, `Entry_Max`, `Bankroll_Class`, `Format_Class`. `merge_into(log, export)` is safe to
-re-run; exports must be merged **oldest first**, since the last one merged wins.
+re-run; exports must be merged **oldest first**, since the last one merged wins (a row with no `Place`, i.e.
+a contest still in play, never replaces one that has a result; a column only the log has is kept; the file is
+rewritten whenever its content would change, so a changed rule in `series.py` re-labels the whole log).
 
 **2. Per-contest "export full standings"** (`contest-standings-<id>.csv`, bare or in a zip of any name, found
 recursively in the `--standings` folder). `standings.py` returns the entries (rank, points, name with `(1/3)`
@@ -166,7 +168,9 @@ and each **series** has its level shifted by `delta_s`, with the slope kept at t
   formula above. In the paired test (a week shock with sd 1.0 on the logit) the paired series gap lands within 0.1 of the
   truth.
 - **Score profiles** (a whole field from a standings file): five points per contest (winner, top 1%, top 10%,
-  cash line, median), each worth 0.5 of an entry (they share one contest and one week).
+  cash line, median), each worth 0.5 of an entry (they share one contest and one week). A profile from a
+  contest still in play, or whose file has more than 1% fewer entries than the history says (a partial
+  export), is written to `profiles.csv` but kept out of the fit, with a warning.
 - **Showdown** is fitted separately from Classic and never pooled with it, on raw points (a single game has no
   main-slate index). Classic contests on other slates (Thursday, Sunday night, Monday) are left out, as the
   main-slate index does not describe them. H2H and `Other` have no curve.

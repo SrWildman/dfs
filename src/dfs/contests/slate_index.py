@@ -237,8 +237,24 @@ def select(fits: pd.DataFrame) -> str:
 # ---- the thin disk / network layer ---------------------------------------------------------------
 
 
+def read_index_file(path: Path) -> pd.DataFrame:
+    """A caller-supplied `season, week, index` CSV, validated: a missing column or a non-numeric value is a
+    `ValueError` that names the file, not a traceback later."""
+    table = pd.read_csv(path)
+    missing = [c for c in ("season", "week", "index") if c not in table.columns]
+    if missing:
+        raise ValueError(
+            f"{path}: the slate index file needs column(s) {missing} (has {list(table.columns)})"
+        )
+    for column in ("season", "week", "index"):
+        table[column] = pd.to_numeric(table[column], errors="coerce")
+    if table[["season", "week", "index"]].isna().any().any():
+        raise ValueError(f"{path}: season, week and index must all be numbers")
+    return table[["season", "week", "index"]].astype({"season": int, "week": int})
+
+
 def load_backfill() -> pd.DataFrame:
-    """The committed 2022-2025 table (empty frame if it has not been built)."""
+    """The committed 2021-2025 table (empty frame if it has not been built)."""
     if not BACKFILL_FILE.exists():
         return pd.DataFrame(columns=INDEX_COLUMNS)
     return pd.read_csv(BACKFILL_FILE)

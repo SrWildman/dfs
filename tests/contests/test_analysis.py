@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from dfs.cli import app
-from dfs.contests import analysis, slate_index
+from dfs.contests import analysis, history, slate_index
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXPORT, LATER = FIXTURES / "history_export.csv", FIXTURES / "history_export_later.csv"
@@ -248,3 +248,78 @@ def test_the_package_has_no_sheet_code_and_no_draftkings_address():
         text = source.read_text()
         for needle in forbidden:
             assert needle not in text, f"{source.name} mentions {needle}"
+
+
+# ---- found in review -----------------------------------------------------------------------------
+
+
+def test_a_series_with_no_entry_counts_does_not_crash_the_summary(tmp_path):
+    src = tmp_path / "live.csv"
+    df = history.read_export(EXPORT)
+    df.loc[df["Entry_Key"] == "5000000002", ["Contest_Entries", "Places_Paid", "Place"]] = ""  # still in play
+    df.to_csv(src, index=False)
+    res = analysis.run([src], tmp_path / "out", fetch_season=None, index_candidate="none")
+    row = res.series_table.set_index("series").loc["NFL $75K Fair Catch [Single Entry]"]
+    assert pd.isna(row["median_field"]) and pd.isna(row["median_payout_ratio"])
+    analysis.write(res)
+
+
+def _standings_copy(tmp_path, transform):
+    folder = tmp_path / "standings"
+    folder.mkdir()
+    text = (STANDINGS / "contest-standings-900000001.csv").read_text(encoding="utf-8-sig")
+    (folder / "contest-standings-900000001.csv").write_text(transform(text), encoding="utf-8-sig")
+    return folder
+
+
+def test_a_live_contest_is_profiled_but_kept_out_of_the_fit(tmp_path):
+    folder = _standings_copy(tmp_path, lambda t: t.replace(",0,208.66,", ",25,208.66,", 1))
+    res = analysis.run(
+        [EXPORT], tmp_path / "out", standings_dir=folder, fetch_season=None, index_candidate="none"
+    )
+    assert res.profiles["complete"].tolist() == [False]
+    assert any("still in play" in w for w in res.warnings)
+    assert (res.toughness.observations["kind"] == "profile").sum() == 0
+
+
+def test_a_partial_standings_export_is_kept_out_of_the_fit(tmp_path):
+    folder = _standings_copy(tmp_path, lambda t: "\n".join(t.splitlines()[:6]) + "\n")  # header + 5 entries
+    res = analysis.run(
+        [EXPORT], tmp_path / "out", standings_dir=folder, fetch_season=None, index_candidate="none"
+    )
+    assert any("5 entries but the history says 10" in w for w in res.warnings)
+    assert (res.toughness.observations["kind"] == "profile").sum() == 0
+
+
+def test_a_complete_standings_export_does_enter_the_fit(tmp_path):
+    folder = _standings_copy(tmp_path, lambda t: t)
+    res = analysis.run(
+        [EXPORT], tmp_path / "out", standings_dir=folder, fetch_season=None, index_candidate="none"
+    )
+    assert (res.toughness.observations["kind"] == "profile").sum() == 5
+
+
+def test_a_bad_slate_index_file_is_a_clear_failure_not_a_traceback(tmp_path):
+    bad = tmp_path / "idx.csv"
+    bad.write_text("season,week\n2025,6\n")
+    result = invoke("--history", str(EXPORT), "--out", str(tmp_path / "out"), "--slate-index-file", str(bad))
+    assert result.exit_code == 1 and "needs column" in result.output and "Traceback" not in result.output
+    bad.write_text("season,week,index\n2025,six,1.0\n")
+    with pytest.raises(ValueError, match="must all be numbers"):
+        slate_index.read_index_file(bad)
+    good = tmp_path / "good.csv"
+    good.write_text("season,week,index\n2025,6,1.1\n")
+    assert slate_index.read_index_file(good).to_dict("list") == {
+        "season": [2025],
+        "week": [6],
+        "index": [1.1],
+    }
+
+
+def test_importing_the_command_does_not_import_the_analysis_stack():
+    """The group is registered on every `dfs` start; the unfinished command must stay lazy."""
+    import subprocess
+    import sys
+
+    code = "import sys, dfs.contests.cli; sys.exit(1 if 'dfs.contests.analysis' in sys.modules else 0)"
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
