@@ -186,6 +186,23 @@ def test_the_weights_and_biggest_corrections_sit_beside_last_weeks():
     assert first_fit["Bias last week"].isna().all()  # nothing before week 3: no "was"
 
 
+def test_a_shadow_source_shows_in_the_weights_table_only_once_it_has_joined_the_blend():
+    from dfs import calibration
+    from dfs import sheet_model_check as smc
+
+    scored = pd.concat([_two_weeks().assign(week=w) for w in (1, 2, 3)], ignore_index=True)
+    scored["PropPts"] = scored["DkActual"] + 1.0
+    in_shadow = calibration.fit(scored.assign(PropPts=float("nan")), before_week=4)
+    assert smc.shown_sources(in_shadow, in_shadow) == smc._SOURCE_ORDER
+    now = calibration.fit(scored, before_week=4)
+    was = calibration.fit(scored, before_week=3)
+    assert "PropPts" in now.sources and "PropPts" not in was.sources
+    assert smc.shown_sources(now, was) == (*smc._SOURCE_ORDER, "PropPts")
+    row = smc.weight_table(now, was).iloc[0]
+    assert abs(row["TFFB"] + row["Sleeper"] + row["FantasyPros"] + row["Props"] - 1.0) < 1e-9
+    assert pd.isna(row["Props (last week)"]) or row["Props (last week)"] == 0
+
+
 def test_weeks_read_as_a_range_or_a_list():
     from dfs.sheet_model_check import weeks_text
 

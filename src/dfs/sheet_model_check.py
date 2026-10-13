@@ -480,7 +480,7 @@ def build_layout(
 def _race_block(b: _Builder, scored: pd.DataFrame, *, with_um: bool) -> bool:
     """One projection-race table (by position) and its per-week trend. Returns False when the race cannot
     start yet. `with_um` adds UM as a row, judged with the others on the players UM rates."""
-    race = calibration.backtest(scored, with_um=with_um)
+    race = calibration.backtest(scored, with_um=with_um, shadow=calibration.configured_shadow())
     if race.empty:
         return False
     labels = [label for label, _ in (calibration.PROJECTIONS_WITH_UM if with_um else calibration.PROJECTIONS)]
@@ -502,7 +502,7 @@ def _race_block(b: _Builder, scored: pd.DataFrame, *, with_um: bool) -> bool:
         signed={"Bias"},
         three_decimals={"ρ (rank)"},
     )
-    trend = calibration.backtest_by_week(scored, with_um=with_um)
+    trend = calibration.backtest_by_week(scored, with_um=with_um, shadow=calibration.configured_shadow())
     if not trend.empty:
         wide = trend.pivot(index="Week", columns="Source", values=["MAE", "Rho"])
         counts = trend[trend["Source"] == "TFFB"].set_index("Week")["n"]
@@ -549,6 +549,13 @@ def weeks_text(weeks: tuple[int, ...]) -> str:
     return ", ".join(str(w) for w in ordered)
 
 
+def shown_sources(now: calibration.Calibration, was: calibration.Calibration) -> tuple[str, ...]:
+    """The three standing sources, then any shadow source that has joined the blend (now or last week), so the
+    weights shown always add to 100%."""
+    extra = [s for s in (*now.sources, *was.sources) if s not in _SOURCE_ORDER]
+    return (*_SOURCE_ORDER, *dict.fromkeys(extra))
+
+
 def weight_table(now: calibration.Calibration, was: calibration.Calibration) -> pd.DataFrame:
     """CalPts's source weights by position, now and last week (percent; blank when last week had no fit)."""
     rows = []
@@ -556,7 +563,7 @@ def weight_table(now: calibration.Calibration, was: calibration.Calibration) -> 
         if position not in now.weights:
             continue
         row = {"Position": position}
-        for source in _SOURCE_ORDER:
+        for source in shown_sources(now, was):
             label = calibration.SOURCE_LABELS[source]
             row[label] = now.weights[position].get(source)
             row[f"{label} (last week)"] = None if was.is_empty else was.weights.get(position, {}).get(source)
@@ -639,8 +646,9 @@ def _add_learned(
     recommendation: it makes the learning visible."""
     latest = int(pd.to_numeric(scored["week"], errors="coerce").max())
     b.section(f"WHAT THE MODEL LEARNED THIS WEEK  —  Week {latest}, against last week")
-    now = calibration.fit(scored, before_week=latest + 1)
-    was = calibration.fit(scored, before_week=latest)
+    shadow = calibration.configured_shadow()
+    now = calibration.fit(scored, before_week=latest + 1, shadow=shadow)
+    was = calibration.fit(scored, before_week=latest, shadow=shadow)
     if now.is_empty:
         b.note("Nothing to learn from yet: CalPts needs one scored week.")
     else:
@@ -661,10 +669,10 @@ def _add_learned(
         weights = weight_table(now, was)
         b.note("Source weights by position (inverse error, pulled toward equal until there is enough data):")
         columns = [("Position", "Position")]
-        for source in _SOURCE_ORDER:
+        for source in shown_sources(now, was):
             label = calibration.SOURCE_LABELS[source]
             columns += [(label, label)]
-        for source in _SOURCE_ORDER:
+        for source in shown_sources(now, was):
             label = calibration.SOURCE_LABELS[source]
             columns += [(f"{label} (last week)", f"{label} (last week)")]
         b.table(weights, columns, percent={c for c, _ in columns if c != "Position"})
@@ -683,7 +691,7 @@ def _add_learned(
                 ],
                 signed={"Bias now", "Bias last week"},
             )
-    race = calibration.backtest(scored, with_um=False)
+    race = calibration.backtest(scored, with_um=False, shadow=calibration.configured_shadow())
     if not race.empty:
         b.blank()
         b.verdict(race_leaders(race))
@@ -716,7 +724,7 @@ def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
     trained on (CalPts is fitted on earlier weeks only; the 2nd scored week is the first it can be judged),
     first without UM, then with UM on the rows UM rates."""
     b.section("PROJECTION RACE  —  TFFB vs AggPts vs CalPts, each judged on weeks it never trained on")
-    plain = calibration.backtest(scored, with_um=False)
+    plain = calibration.backtest(scored, with_um=False, shadow=calibration.configured_shadow())
     if not plain.empty:
         b.verdict(race_verdict(plain))
     if not _race_block(b, scored, with_um=False):

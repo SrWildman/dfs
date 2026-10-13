@@ -141,7 +141,11 @@ def _enrich(
 
     with perf.phase("edge finder: CalPts"):
         fitted = calibration.fit(
-            scored, before_week=ctx.week, season=ctx.season, sources=calibration.CAL_SOURCES
+            scored,
+            before_week=ctx.week,
+            season=ctx.season,
+            sources=calibration.CAL_SOURCES,
+            shadow=calibration.configured_shadow(),
         )
         df["CalPts"] = calibration.predict(df, fitted)
 

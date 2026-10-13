@@ -409,7 +409,10 @@ def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None
     fitted = None
     if scored is not None and not scored.empty and status.get("week"):
         fitted = calibration.fit(
-            scored, before_week=int(status["week"]), season=season or status.get("season")
+            scored,
+            before_week=int(status["week"]),
+            season=season or status.get("season"),
+            shadow=calibration.configured_shadow(),
         )
     history = {}
     if status.get("week") and (season or status.get("season")):
