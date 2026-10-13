@@ -13,9 +13,9 @@ from dfs import apps_script
 from dfs import edge_finder_tab as eft
 from dfs import sheet_pool_cells as pc
 from dfs.sheet_names import ALIAS_TAB
-from dfs.sheet_pool_control import DEFAULT_TYPE, LABEL_TEXT
+from dfs.sheet_pool_control import DEFAULT_TYPE, HINT_TEXT, LEGACY_LABEL
 from dfs.sheet_views import BOARD_ID_HEADER, BOARD_TAB
-from dfs.weekly_reset import PLAYER_POOL_CONTROL_DEFAULT_TYPE, PLAYER_POOL_CONTROL_LABEL
+from dfs.weekly_reset import PLAYER_POOL_CONTROL_DEFAULT_TYPE, PLAYER_POOL_CONTROL_HINT
 
 CODE = Path(apps_script.SCRIPT_PATH)
 SOURCE = CODE.read_text()
@@ -46,7 +46,8 @@ def test_the_pool_headers_options_and_tabs_match_what_python_writes():
     assert _const("LINEUPS_TAB") == "Lineups" and _const("PLAYER_POOL_TAB") == "Player Pool"
     assert _const("EDGE_RAW_TAB") == "EdgeRaw" and _const("VERSION_TAB") == ALIAS_TAB
     assert _const("VERSION_RANGE_NAME") == apps_script.VERSION_RANGE_NAME
-    assert _const("ADD_LABEL") == LABEL_TEXT == PLAYER_POOL_CONTROL_LABEL
+    assert _const("ADD_HINT") == HINT_TEXT == PLAYER_POOL_CONTROL_HINT
+    assert _const("ADD_LEGACY_LABEL") == LEGACY_LABEL
     assert _const("ADD_DEFAULT_TYPE") == DEFAULT_TYPE == PLAYER_POOL_CONTROL_DEFAULT_TYPE
 
 
@@ -264,7 +265,7 @@ def _scenario(edits, *, edge_ids=(1001, 1002), player_pool_box=None, strict_reje
     formulas = [{"row": r, "col": 1, "value": "", "formula": "=orig"} for r in (4, 5, 6, 7)]
     validations = [{"row": r, "col": 1, "values": POOL_LIST} for r in (4, 5, 6, 7)]
     pool_rows = [
-        ["Both", "Add a player", player_pool_box or "", "", "Kenneth Walker III"],
+        ["Both", player_pool_box if player_pool_box is not None else HINT_TEXT, "", "", "Kenneth Walker III"],
         ["Pool", "Name", "Pos.", "Team", "Id"],
     ]
     return {
@@ -353,24 +354,50 @@ def test_cells_without_the_pool_dropdown_are_left_alone(tmp_path):
     assert _cell(state, "EdgeRaw", 2, 1)["value"] is None
 
 
+BOX = {"sheet": "Player Pool", "row": 1, "col": 2}  # the box is the Name column's cell in row 1
+
+
 @needs_node
-def test_the_add_a_player_box_sets_edgeraw_pool_to_the_chosen_type_and_clears_the_box(tmp_path):
-    scenario = _scenario([{"sheet": "Player Pool", "row": 1, "col": 3, "values": ["kenneth walker"]}])
+def test_the_add_a_player_box_sets_edgeraw_pool_to_the_chosen_type_and_puts_the_hint_back(tmp_path):
+    scenario = _scenario([{**BOX, "values": ["kenneth walker"]}])
     state = _run_flow(tmp_path, scenario)
     assert _cell(state, "EdgeRaw", 2, 1)["value"] == "Both"  # the resolved name, the default type
-    assert _cell(state, "Player Pool", 1, 3)["value"] is None  # the box clears
+    assert _cell(state, "Player Pool", 1, 2)["value"] == HINT_TEXT  # the hint is back, not blank
     assert any("Added Kenneth Walker III (Both)" in t for t in state["toasts"])
 
-    gpp = _scenario([{"sheet": "Player Pool", "row": 1, "col": 3, "values": ["kenneth walker"]}])
+    gpp = _scenario([{**BOX, "values": ["kenneth walker"]}])
     gpp["sheets"]["Player Pool"]["rows"][0][0] = "GPP"
     assert _cell(_run_flow(tmp_path, gpp), "EdgeRaw", 2, 1)["value"] == "GPP"
 
-    unknown = _scenario([{"sheet": "Player Pool", "row": 1, "col": 3, "values": ["nobody"]}])
+    unknown = _scenario([{**BOX, "values": ["nobody"]}])
     unknown["sheets"]["Player Pool"]["rows"][0][4] = ""  # the resolver found nothing
     state = _run_flow(tmp_path, unknown)
     assert _cell(state, "EdgeRaw", 2, 1)["value"] is None and any(
         "nothing added" in t for t in state["toasts"]
     )
+
+
+@needs_node
+def test_the_box_is_found_from_the_header_so_a_blank_row_one_cannot_kill_it(tmp_path):
+    # Found live on Weeks 5 and 6: the old script found the box from a label cell, and a name typed over
+    # the label left it nowhere to look. Here nothing else in row 1 says "add a player" at all.
+    scenario = _scenario([{**BOX, "values": ["kenneth walker"]}], player_pool_box="")
+    state = _run_flow(tmp_path, scenario)
+    assert _cell(state, "EdgeRaw", 2, 1)["value"] == "Both"
+
+
+@needs_node
+def test_clearing_the_box_puts_the_hint_back_and_adds_nobody(tmp_path):
+    state = _run_flow(tmp_path, _scenario([{**BOX, "values": [None]}]))
+    assert _cell(state, "Player Pool", 1, 2)["value"] == HINT_TEXT
+    assert _cell(state, "EdgeRaw", 2, 1)["value"] is None
+
+
+@needs_node
+def test_putting_the_hint_or_the_old_label_in_the_box_adds_nobody(tmp_path):
+    for text in (HINT_TEXT, LEGACY_LABEL):
+        state = _run_flow(tmp_path, _scenario([{**BOX, "values": [text]}]))
+        assert _cell(state, "EdgeRaw", 2, 1)["value"] is None and state["toasts"] == []
 
 
 @needs_node

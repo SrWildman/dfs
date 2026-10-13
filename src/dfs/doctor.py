@@ -41,7 +41,7 @@ from dfs.sources.edge import POOL_HEADER
 from dfs.week import parse_week_from_title
 from dfs.weekly_reset import (
     LINEUPS_NAME_BLOCKS,
-    PLAYER_POOL_CONTROL_LABEL,
+    PLAYER_POOL_CONTROL_HINT,
     PLAYER_POOL_CONTROL_ROW,
     PLAYER_POOL_HEADER_ROW,
 )
@@ -139,23 +139,23 @@ def _check_time_zone(client: DoctorClient) -> list[DoctorIssue]:
 def _check_pool_control_row(
     client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
 ) -> list[DoctorIssue]:
-    """Player Pool's row 1 is the add-a-player control: a type dropdown (Cash / GPP / Both) in the Pool col,
-    the label `Add a player` in the Name column, and the name box beside it (a dropdown over EdgeRaw's names).
-    The Apps Script finds the box FROM the label, so a blank label silently kills the box: found live on Weeks
-    5 and 6, where row 1 held only the type. Reads the three cells at the positions the header gives them."""
+    """Player Pool's row 1 is the add-a-player control: a type dropdown (Cash / GPP / Both) in the Pool column
+    and the name box (a dropdown over EdgeRaw's names) in the Name column, holding its hint while empty. The
+    Apps Script finds the box from the header, so what matters is that both cells are still there: the type
+    valid, the box not blank (a blank box has lost its hint) and both still dropdowns. Found live on Weeks 5
+    and 6, where a name typed over the old label cell blanked it and the box did nothing."""
     pool_tab = cfg.lineups.player_pool_tab
     if pool_tab not in tab_titles:
         return []
     cells = control_cells(headers_by_tab.get(pool_tab) or None)
     row = client.read_range(pool_tab, f"A{PLAYER_POOL_CONTROL_ROW}:{PLAYER_POOL_CONTROL_ROW}")
     values = row[0] if row else []
-    label_index = column_index(cells["label"])
+    box_index, type_index = column_index(cells["input"]), column_index(cells["type"])
     problems = []
-    if label_index >= len(values) or values[label_index].strip() != PLAYER_POOL_CONTROL_LABEL:
-        problems.append(f"the label {PLAYER_POOL_CONTROL_LABEL!r} is missing from {cells['label']}")
-    type_index = column_index(cells["type"])
+    if box_index >= len(values) or not values[box_index].strip():
+        problems.append(f"the box {cells['input']} is blank (it should hold {PLAYER_POOL_CONTROL_HINT!r})")
     type_value = values[type_index].strip() if type_index < len(values) else ""
-    if type_index != label_index and type_value not in POOL_OPTIONS:
+    if type_index != box_index and type_value not in POOL_OPTIONS:
         problems.append(f"the type in {cells['type']} is not Cash, GPP or Both")
     for what, key in (("type dropdown", "type"), ("name box dropdown", "input")):
         if client.has_data_validation(pool_tab, cells[key]) is False:
@@ -165,10 +165,8 @@ def _check_pool_control_row(
     return [
         DoctorIssue(
             "pool-control-row",
-            f"{pool_tab!r} row 1 (the add-a-player control): "
-            + "; ".join(problems)
-            + ". The box does nothing "
-            "without its label; `dfs setup add-pool-control` puts the row back.",
+            f"{pool_tab!r} row 1 (the add-a-player control): " + "; ".join(problems) + ". "
+            "`dfs setup add-pool-control` puts the row back.",
         )
     ]
 

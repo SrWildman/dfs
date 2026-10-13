@@ -79,7 +79,9 @@ class FakeDoctorClient:
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:
         if (tab_name, a1_range) not in self._rows and (tab_name, a1_range) == ("Player Pool", "A1:1"):
-            return [["Both", "Add a player"]]  # a healthy control row unless a test says otherwise
+            return [
+                ["Both", "Add a player: type a name"]
+            ]  # a healthy control row unless a test says otherwise
         return self._rows.get((tab_name, a1_range), [])
 
     def has_data_validation(self, tab_name: str, a1_cell: str) -> bool:
@@ -727,24 +729,30 @@ def test_a_healthy_add_a_player_row_is_not_flagged():
     assert _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=_lineups_rows())) == []
 
 
-def test_a_blank_add_a_player_label_is_reported_because_the_script_finds_the_box_from_it():
-    # Found live on Weeks 5 and 6: row 1 held only the type, so the box beside the label did nothing.
+def test_a_blank_add_a_player_box_is_reported():
+    # Found live on Weeks 5 and 6: a name typed over the old label cell blanked it and the box did nothing.
     rows = _lineups_rows()
     rows[("Player Pool", "A1:1")] = [["GPP"]]
     issues = _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=rows))
     assert len(issues) == 1
-    assert "'Add a player' is missing from B1" in issues[0].detail
+    assert "the box B1 is blank" in issues[0].detail
     assert "add-pool-control" in issues[0].detail
+
+
+def test_a_name_waiting_in_the_box_is_not_a_fault():
+    rows = _lineups_rows()
+    rows[("Player Pool", "A1:1")] = [["Both", "Jeremiah Love"]]
+    assert _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=rows)) == []
 
 
 def test_a_type_cell_that_lost_its_dropdown_or_holds_junk_is_reported():
     client = FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=_lineups_rows())
-    client.no_dropdown = {("Player Pool", "A1"), ("Player Pool", "C1")}
+    client.no_dropdown = {("Player Pool", "A1"), ("Player Pool", "B1")}
     detail = _control_issues(client)[0].detail
-    assert "A1 has lost its type dropdown" in detail and "C1 has lost its name box dropdown" in detail
+    assert "A1 has lost its type dropdown" in detail and "B1 has lost its name box dropdown" in detail
 
     rows = _lineups_rows()
-    rows[("Player Pool", "A1:1")] = [["Maybe", "Add a player"]]
+    rows[("Player Pool", "A1:1")] = [["Maybe", "Add a player: type a name"]]
     assert (
         "type in A1 is not Cash, GPP or Both"
         in _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=rows))[0].detail

@@ -5,7 +5,7 @@ One small Google Apps Script is bound to the sheet. It does six things, and noth
 1. **The `Pool` dropdown.** Every player row on the **Edge Finder**, **Board** and **Player Pool** tabs has a `Pool` cell at the left, before his name. It shows whether he is in your pool (blank, `Cash`, `GPP` or `Both`) and it
    is also the control: pick `Cash`, `GPP` or `Both` to add him, or clear the cell (press Delete) to take him out. The script writes the pick to EdgeRaw's `Pool` cell, which stays the one source of truth, and then
    puts the cell's formula back, so every other `Pool` cell for that player follows by itself. The script finds the player by the hidden **`Id`** cell on the edited row, never by name.
-2. **Player Pool's "Add a player" box.** Pick a name in the box in the top row, with `Cash`, `GPP` or `Both` in the cell to its left (default `Both`): the player is added to EdgeRaw's `Pool` as that type and the box clears.
+2. **Player Pool's "Add a player" box.** Pick or type a name in the box in the top row (the Name column, reading "Add a player: type a name" while empty), with `Cash`, `GPP` or `Both` in the cell to its left (default `Both`): the player is added to EdgeRaw's `Pool` as that type and the hint goes back. The script finds the box from the header, not from any text in row 1.
 3. **Lineup Tools > Clear Lineup Names.** Always acts on the **Lineups** tab (never the one you are looking at), clears only the 9 player rows of each lineup
    (never the Total or Remaining rows, so a lineup's Cash/GPP marker stays), and asks you to confirm first.
 4. **Lineup Tools > Fix FLEX order** (version 4). For every lineup block on the **Lineups** tab, puts the player with the latest kickoff in the FLEX slot by swapping two typed names
@@ -47,7 +47,7 @@ dropdown with the `Pool` dropdown and added the add-a-player box: a sheet still 
 script's `restoreFormula_` lets EdgeRaw settle, tries the plain write, and if a strict dropdown refuses the formula's result (a player taken out of the pool shows a blank) it lifts the rule for that one
 write and puts it back. `dfs setup polish` and every Edge Finder write now also make the Pool dropdowns warnings rather than rejections, so a sheet that has been polished never needs the workaround.
 
-**Version 4** (the Week 6 round) adds **Lineup Tools > Fix FLEX order** and **Copy build to Lineups**; a sheet still on version 3 simply has no such menu item.
+**Version 4** (the Week 6 round) adds **Lineup Tools > Fix FLEX order** and **Copy build to Lineups**; a sheet still on version 3 simply has no such menu item. **Version 5** moves the add-a-player box into the Name column of row 1 (it held a separate label with the box one cell to its right: a name typed over the label left the version-4 script nowhere to look, and the box did nothing). Until version 5 is pasted, the new layout works only through `dfs sync`, which adds a name left in the box.
 
 ## Manual test checklist (needs a browser; the pure functions are unit-tested with node in `tests/test_apps_script.py`)
 
@@ -55,7 +55,7 @@ write and puts it back. `dfs setup polish` and every Edge Finder write now also 
 - Pick `Both`, then `GPP`: EdgeRaw follows. Press Delete on the cell: EdgeRaw's Pool is blank, the cell is blank and `Do` goes back to its verb.
 - Board: the same on a Queue row, a Pool check row and a Chalk map row. The Slate shape, Pool summary and Stack candidates rows have no Pool cell.
 - Player Pool: clear a pooled player's `Pool` cell: he leaves the pool and the Name column refills without him (rows below move up). Pick `GPP` on another: his tag group changes.
-- Player Pool's add-a-player box: set the type beside it to `GPP`, pick a name: he appears in the pool as GPP and the box clears. A name EdgeRaw does not have: a toast, nothing added.
+- Player Pool's add-a-player box: set the type beside it to `GPP`, pick a name: he appears in the pool as GPP and the box shows its hint again. Delete the box's text: the hint comes back. A name EdgeRaw does not have: a toast, nothing added.
 - After each step read EdgeRaw's `Pool` and the player's `Pool` cell on every tab: they agree (the planning session does this read-back after you paste).
 - Type something that is not an option into a `Pool` cell (the dropdown rejects it); edit any other cell: nothing happens.
 - Lineups: set a lineup's marker, then **Lineup Tools > Clear Lineup Names** from the *Player Pool* tab: the confirm dialog names Lineups, the names clear, the markers and Totals stay,

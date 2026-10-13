@@ -91,8 +91,8 @@ def test_player_pool_leaves_the_pool_column_and_the_add_a_player_box_unprotected
     protect_workbook(client, lineups_tab="Lineups")
 
     _tab, kwargs = next(c for c in client.protect_calls if c[0] == "Player Pool")
-    # Pool is column A and the box sits right of the label in Name's column (B): C
-    assert kwargs["unprotected_ranges"] == ["A:A", f"C{PLAYER_POOL_CONTROL_ROW}"]
+    # Pool is column A and the box is the Name column's (B) cell of the control row
+    assert kwargs["unprotected_ranges"] == ["A:A", f"B{PLAYER_POOL_CONTROL_ROW}"]
     assert kwargs["warning_only"] is True
 
 

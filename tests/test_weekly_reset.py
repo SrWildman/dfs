@@ -2,13 +2,13 @@ from dfs.config import EntryTableConfig
 from dfs.weekly_reset import (
     DK_UPLOAD_RANGE,
     LINEUPS_NAME_BLOCKS,
+    PLAYER_POOL_CONTROL_HINT,
     PLAYER_POOL_NAME_BLOCKS,
     clear_previous_week,
     clear_synced_tabs,
 )
 
 _HEADER = ["Pool", "Name", "Pos."]
-_CONTROL_ROW = ["Both", "Add a player", ""]  # the type dropdown, the label, the (blank) box
 
 
 class SpySheetsClient:
@@ -18,14 +18,12 @@ class SpySheetsClient:
         self,
         player_pool_name_formula: str = "",
         player_pool_header: list[str] | None = None,
-        control_row: list[str] | None = None,
     ):
         self.calls: list[tuple[str, list[str]]] = []
         self.updates: list[tuple[str, str, list[list]]] = []
         self.formula_reads: list[str] = []
         self._name_formula = player_pool_name_formula
         self._header = player_pool_header or _HEADER
-        self._control_row = control_row if control_row is not None else _CONTROL_ROW
 
     def clear_ranges(self, tab_name, a1_ranges):
         self.calls.append((tab_name, list(a1_ranges)))
@@ -38,8 +36,6 @@ class SpySheetsClient:
         return [[self._name_formula]]
 
     def read_range(self, tab_name, a1_range):
-        if a1_range == "A1:1":
-            return [self._control_row]
         return [self._header]
 
     def tab_exists(self, tab_name):
@@ -55,31 +51,30 @@ def test_clear_previous_week_targets_each_configured_tab():
         dk_upload_tab="DK Upload",
     )
     tabs_touched = [tab for tab, _ in client.calls]
-    # Player Pool appears twice: the add-a-player box (always cleared, a plain typed value) and the Name
-    # column (only when it isn't formula-driven, see the "skips" test).
-    assert tabs_touched == ["Lineups", "Player Pool", "Player Pool", "DK Upload"]
+    # Player Pool appears once in the clears: the Name column (only when it isn't formula-driven, see the
+    # "skips" test). The add-a-player box is rewritten, not cleared.
+    assert tabs_touched == ["Lineups", "Player Pool", "DK Upload"]
 
 
-def test_clear_previous_week_clears_the_add_a_player_box_and_resets_its_type_to_both():
-    # The box sits right of the label and the type dropdown left of it, found from the label's own place in
-    # row 1 (a column move shifts them), never hardcoded.
-    client = SpySheetsClient(control_row=["GPP", "Add a player", "Kupp"])
+def test_clear_previous_week_puts_the_hint_back_in_the_add_a_player_box_and_resets_its_type():
+    # The box is the Name column's cell in row 1 and the type dropdown sits left of it, both found from the
+    # header (a column move shifts them), never hardcoded.
+    client = SpySheetsClient()
     clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
-    assert ("Player Pool", ["C1"]) in client.calls
+    assert ("Player Pool", "B1", [[PLAYER_POOL_CONTROL_HINT]]) in client.updates
     assert ("Player Pool", "A1", [["Both"]]) in client.updates
 
 
-def test_clear_previous_week_leaves_the_control_row_alone_when_it_is_not_there():
-    client = SpySheetsClient(control_row=[])
+def test_clear_previous_week_leaves_the_control_row_alone_when_the_header_has_no_name_column():
+    client = SpySheetsClient(player_pool_header=["Pool", "Pos."])
     clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     assert client.updates == []
-    assert not any(ranges == ["C1"] or ranges == ["B1"] for _, ranges in client.calls)
 
 
 def test_clear_previous_week_only_clears_the_name_columns():
     client = SpySheetsClient()
     clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
-    calls = {tab: ranges for tab, ranges in client.calls if ranges != ["C1"]}
+    calls = dict(client.calls)
 
     assert calls["Lineups"] == [f"A{s}:A{e}" for s, e in LINEUPS_NAME_BLOCKS]
     # Player Pool's Name column is B now (Pool sits left of it), found from the header
@@ -102,10 +97,10 @@ def test_clear_previous_week_skips_player_pool_when_name_column_is_a_formula():
     clear_previous_week(client, "Lineups", "Player Pool", "DK Upload")
     tabs_touched = [tab for tab, _ in client.calls]
 
-    # The Name column is skipped (still formula-driven), but the add-a-player box (a plain typed value) is
-    # cleared regardless.
-    assert tabs_touched == ["Lineups", "Player Pool", "DK Upload"]
-    assert client.calls[1] == ("Player Pool", ["C1"])
+    # The Name column is skipped (still formula-driven); the add-a-player box (a plain typed value) is
+    # reset regardless.
+    assert tabs_touched == ["Lineups", "DK Upload"]
+    assert ("Player Pool", "B1", [[PLAYER_POOL_CONTROL_HINT]]) in client.updates
 
 
 def test_clear_previous_week_still_clears_player_pool_when_it_holds_typed_values():

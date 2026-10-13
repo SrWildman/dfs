@@ -127,10 +127,11 @@ PLAYER_POOL_HEADER_ROW = PLAYER_POOL_NAME_BLOCKS[0][0] - 1
 PLAYER_POOL_BLOCK_CAPACITIES = {"QB": 15, "RB": 20, "WR": 25, "TE": 15, "DST": 10}
 PLAYER_POOL_BLOCK_ROWS = {"QB": 17, "RB": 22, "WR": 27, "TE": 17, "DST": 12}
 
-# The add-a-player control row (`sheet_pool_control.py`): the label's text, and the type the dropdown beside
-# the box resets to each week. (Until the actions round the box fed a hidden, accumulated `Added` list that
-# the Name formulas also read; it is retired, and the box now sets EdgeRaw's `Pool` directly.)
-PLAYER_POOL_CONTROL_LABEL = "Add a player"
+# The add-a-player control row (`sheet_pool_control.py`): the hint that sits in the box while it is empty (the
+# box is the cell in the Name column, so this is the text a person overwrites), and the type the dropdown
+# beside it resets to each week. (Until the actions round the box fed a hidden, accumulated `Added` list
+# that the Name formulas also read; it is retired, and the box now sets EdgeRaw's `Pool` directly.)
+PLAYER_POOL_CONTROL_HINT = "Add a player: type a name"
 PLAYER_POOL_CONTROL_DEFAULT_TYPE = "Both"
 
 # Full-grid tab: clear everything below the header, generously past any
@@ -209,27 +210,24 @@ def clear_previous_week(
     client.clear_ranges(lineups_tab, lineups_ranges)
     summary.append(f"{lineups_tab}: cleared Name column across {len(LINEUPS_NAME_BLOCKS)} lineup slot(s)")
 
-    # The add-a-player box (row PLAYER_POOL_CONTROL_ROW) is a plain typed value, not a formula, so a name
-    # typed last week must not survive into a new week any more than a stale Lineups pick would (Fix
-    # 2.14's "blank is better than bad"); the type beside it goes back to its default. Both cells are
-    # found from the label's own position in row 1, since a column move shifts them.
-    control = client.read_range(player_pool_tab, f"A{PLAYER_POOL_CONTROL_ROW}:{PLAYER_POOL_CONTROL_ROW}")
-    control_row = control[0] if control else []
-    if PLAYER_POOL_CONTROL_LABEL in control_row:
-        label = control_row.index(PLAYER_POOL_CONTROL_LABEL)
-        box = f"{column_letter(label + 1)}{PLAYER_POOL_CONTROL_ROW}"
-        client.clear_ranges(player_pool_tab, [box])
-        if label > 0:
-            type_cell = f"{column_letter(label - 1)}{PLAYER_POOL_CONTROL_ROW}"
-            client.update_range(player_pool_tab, type_cell, [[PLAYER_POOL_CONTROL_DEFAULT_TYPE]])
-        summary.append(f"{player_pool_tab}: cleared the add-a-player box ({box})")
-
     # Player Pool's Name column is found by header text (it sits right of the Pool column).
     header_row_values = client.read_range(
         player_pool_tab, f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
     )
     header = header_row_values[0] if header_row_values else []
     name_col = column_letter(header.index("Name")) if "Name" in header else "A"
+
+    # The add-a-player box (row PLAYER_POOL_CONTROL_ROW, the Name column) is a plain typed value, not a
+    # formula, so a name typed last week must not survive into a new week any more than a stale Lineups pick
+    # would (Fix 2.14's "blank is better than bad"): it goes back to its hint, the type to its default.
+    if "Name" in header:
+        name_index = header.index("Name")
+        box = f"{name_col}{PLAYER_POOL_CONTROL_ROW}"
+        client.update_range(player_pool_tab, box, [[PLAYER_POOL_CONTROL_HINT]])
+        if name_index > 0:
+            type_cell = f"{column_letter(name_index - 1)}{PLAYER_POOL_CONTROL_ROW}"
+            client.update_range(player_pool_tab, type_cell, [[PLAYER_POOL_CONTROL_DEFAULT_TYPE]])
+        summary.append(f"{player_pool_tab}: reset the add-a-player box ({box}) to its hint")
 
     first_start, _ = PLAYER_POOL_NAME_BLOCKS[0]
     first_cell = client.read_formula(player_pool_tab, f"{name_col}{first_start}")

@@ -76,9 +76,9 @@ first, or accept the cap.
 
 ---
 
-**The "Add a player" box does nothing, and Player Pool's row 1 shows only a type (Cash / GPP / Both).**
-Cause: the label `Add a player` (the cell left of the box, in the Name column) was blanked. The Apps Script finds the box FROM the label, so without it picking a name changes nothing. Found live on Weeks 5 and 6 (what blanked it was not found in the code: the weekly reset, sync and polish never write that cell).
-Fix: `dfs doctor` reports it as `pool-control-row`; `dfs setup add-pool-control` writes the label back (and resets the type to Both) without inserting a row.
+**The "Add a player" box does nothing.**
+Cause (found live on Weeks 5 and 6): the old layout had a white label cell reading "Add a player" in the Name column with the real box one cell to its right, so people typed over the label, and the script (which found the box FROM the label) then had nowhere to look. Since the Week 6 fixes the box IS the Name-column cell of row 1 (it reads "Add a player: type a name" while empty) and the script finds it from the header. A sheet still on script version 4 has no working box in the new layout: paste `Code.gs` (version 5).
+Fix: `dfs doctor` reports a blank box as `pool-control-row` and an old script as a version warning; `dfs setup add-pool-control` converts the old layout (a name left in the box is added to the pool first) and `dfs sync` adds a name left in the box even without the script.
 
 ---
 

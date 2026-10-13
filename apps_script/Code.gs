@@ -13,8 +13,10 @@
 //      `Pool` cell (found by the row's hidden `Id`, never by name) and puts the formula back. Clearing the
 //      cell (Delete) removes him from the pool. Every other `Pool` cell follows by itself, because each is
 //      the same formula.
-//   3. onEdit, Player Pool's "Add a player" box: pick a name, and he is added to the pool as the type
-//      beside the box (default Both); the box then clears.
+//   3. onEdit, Player Pool's add-a-player box: the Name-column cell of row 1, which holds the hint "Add a
+//      player: type a name" while empty. Pick or type a name, and he is added to the pool as the type beside
+//      the box (default Both); the hint then goes back. The box is found from the header, never from text
+//      in row 1 (version 5; before that a blank label cell silently killed it).
 //   4. Lineup Tools > Fix FLEX order: for every lineup block on the Lineups tab, puts the player with the
 //      latest kickoff (among the position that has one more player than its own slots hold) in the FLEX slot,
 //      by swapping two typed names. Never moves a player whose game has started. Kickoffs come from EdgeRaw's
@@ -29,7 +31,7 @@
 // functions at the bottom are unit-tested with node (tests/test_apps_script.py).
 
 // Bump this whenever this file changes: `dfs doctor` warns when the sheet's stamp is older.
-var DFS_SCRIPT_VERSION = 4;
+var DFS_SCRIPT_VERSION = 5;
 
 var VERSION_RANGE_NAME = 'DFS_SCRIPT_VERSION';
 var VERSION_TAB = 'NameAlias'; // a hidden tab nothing rewrites
@@ -59,7 +61,8 @@ var MARKER_VALUES = ['Cash', 'GPP'];
 var ID_HEADER = 'Id';
 var POOL_HEADER = 'Pool';
 var POOL_VALUES = ['Cash', 'GPP', 'Both'];
-var ADD_LABEL = 'Add a player'; // the label cell of Player Pool's control row
+var ADD_HINT = 'Add a player: type a name'; // what the add-a-player box holds while it is empty
+var ADD_LEGACY_LABEL = 'Add a player'; // the old label cell's text: counts as an empty box
 var ADD_DEFAULT_TYPE = 'Both';
 var HEADER_SEARCH_ROWS = 10; // Player Pool's header is within the first rows under the control row
 var MAX_POOL_EDIT_ROWS = 100; // a bigger paste or delete is ignored rather than half-applied
@@ -403,25 +406,27 @@ function findEdgeRow_(edge, id) {
 }
 
 /**
- * Player Pool's "Add a player" box. The control row reads, left to right: a type dropdown in the Pool column,
- * the label, the input box. A helper in the hidden Id column of the same row holds what the box's text
- * resolves to (the sheet's own name resolver). When the edited cell is the input, add the player to
- * EdgeRaw's Pool as the type and clear the box. Returns true when the edit was in the box, handled or not.
+ * Player Pool's add-a-player box: the Name-column cell of row 1. The control row reads, left to right: a type
+ * dropdown in the Pool column, then the box, which holds ADD_HINT while it is empty. A helper in the hidden Id
+ * column of the same row holds what the box's text resolves to (the sheet's own name resolver). When the
+ * edited cell is the box, add the player to EdgeRaw's Pool as the type and put the hint back; an emptied box
+ * gets the hint back too. The box is found from the header under the control row, so nothing in row 1 can
+ * hide it. Returns true when the edit was in the box, handled or not.
  */
 function handleAddPlayer_(range) {
   var sheet = range.getSheet();
   if (range.getRow() !== 1) return false;
-  var top = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var label = findColumn(top, ADD_LABEL);
-  if (label === -1 || range.getColumn() !== label + 1) return false;
+  var box = findNameColumnBelow_(sheet);
+  if (box === -1 || range.getColumn() !== box) return false;
   var typed = String(range.getValue()).trim();
-  if (typed === '') return true;
+  if (typed === '') { range.setValue(ADD_HINT); return true; }
+  if (isEmptyAddBox(typed)) return true;
   SpreadsheetApp.flush(); // let the resolved-name formula settle
   var resolved = '';
   var idCol = findIdColumnBelow_(sheet);
   if (idCol !== -1) resolved = sheet.getRange(1, idCol).getValue();
   var name = chooseAddName(typed, resolved);
-  var type = normalizeAddType(label > 1 ? sheet.getRange(1, label - 1).getValue() : '');
+  var type = normalizeAddType(box > 1 ? sheet.getRange(1, box - 1).getValue() : '');
   var edge = openEdge_(sheet.getParent());
   if (edge === null || edge.nameCol === -1) return true;
   var last = edge.sheet.getLastRow();
@@ -432,18 +437,27 @@ function handleAddPlayer_(range) {
     return true;
   }
   edge.sheet.getRange(hit.getRow(), edge.poolCol).setValue(type);
-  range.clearContent();
+  range.setValue(ADD_HINT);
   toast_('Added ' + name + ' (' + type + ').');
   return true;
 }
 
+/** The column whose header (in the rows just under the control row) reads Name, or -1. */
+function findNameColumnBelow_(sheet) {
+  return findHeaderColumnBelow_(sheet, NAME_HEADER);
+}
+
 /** The column whose header (in the rows just under the control row) reads Id, or -1. */
 function findIdColumnBelow_(sheet) {
+  return findHeaderColumnBelow_(sheet, ID_HEADER);
+}
+
+function findHeaderColumnBelow_(sheet, text) {
   var rows = Math.min(HEADER_SEARCH_ROWS, sheet.getLastRow() - 1);
   if (rows < 1) return -1;
   var below = sheet.getRange(2, 1, rows, sheet.getLastColumn()).getValues();
   for (var r = 0; r < below.length; r++) {
-    var c = findColumn(below[r], ID_HEADER);
+    var c = findColumn(below[r], text);
     if (c !== -1) return c;
   }
   return -1;
@@ -648,6 +662,12 @@ function normalizePoolValue(value) {
   return { kind: 'invalid' };
 }
 
+/** True when the add-a-player box holds nothing to add: the hint, or the old label's text. */
+function isEmptyAddBox(text) {
+  var t = String(text === null || text === undefined ? '' : text).trim();
+  return t === '' || t === ADD_HINT || t === ADD_LEGACY_LABEL;
+}
+
 /** The type beside the add-a-player box: a pool value, else the default. */
 function normalizeAddType(value) {
   var action = normalizePoolValue(value);
@@ -724,6 +744,7 @@ if (typeof module !== 'undefined' && module.exports) {
     normalizePoolValue: normalizePoolValue,
     normalizeAddType: normalizeAddType,
     chooseAddName: chooseAddName,
+    isEmptyAddBox: isEmptyAddBox,
     poolFormula: poolFormula,
     columnLetter: columnLetter,
     sameList: sameList,

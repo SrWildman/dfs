@@ -397,9 +397,9 @@ more `INDIRECT`, no more hazard class to guard against here).
 the Remaining/average-remaining row is always the one directly below it.
 
 `Player Pool` (A3) has a one-row control strip pinned at the top (rewritten in the actions round): `A1` is a **type dropdown** (`Cash` / `GPP` / `Both`, default `Both`; it resets
-every week), `B1` the label "Add a player", `C1` a live type-ahead search box (`ONE_OF_RANGE` validation, non-strict) against `EdgeRaw`'s own `Name` column, and a hidden helper in the
+every week), `B1` (the Name column) the box itself, a live type-ahead search (`ONE_OF_RANGE` validation, non-strict) against `EdgeRaw`'s own `Name` column that reads "Add a player: type a name" while empty (Week 6 fixes: it used to be a label in `B1` with the box in `C1`), and a hidden helper in the
 `Id` column of that row holds what the typed text resolves to ("kenneth walker" becomes "Kenneth Walker III"; the sheet's own name resolver). Picking a name sets that player's EdgeRaw
-`Pool` to the type and clears the box: the bound Apps Script does it the moment the cell is edited (`docs/APPS_SCRIPT.md`), and `dfs sync` does the same for a name left in the box
+`Pool` to the type and puts the hint back: the bound Apps Script does it the moment the cell is edited (`docs/APPS_SCRIPT.md`), and `dfs sync` does the same for a name left in the box
 (`sheet_pool_control.add_typed_player_to_pool`), since an API write never fires the script. This replaced a separate `Pool Picks` tab (removed -- see `CONTRIBUTING.md`'s A3 changelog
 entry); the real header sits at row 2.
 
