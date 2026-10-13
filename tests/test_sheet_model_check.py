@@ -45,6 +45,7 @@ def test_sections_appear_in_the_decided_order():
     layout = build_layout(_scored(), weeks=[3])
     titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
     assert titles == [
+        "WHAT THE MODEL LEARNED THIS WEEK",
         "PROJECTION RACE",
         "RELIABILITY",
         "CEILING",
@@ -75,8 +76,8 @@ def test_counts_are_whole_numbers_percentages_are_percent_and_signed_columns_get
     layout = build_layout(_scored(), weeks=[3])
     assert layout.count_cells and layout.percent_cells and layout.signed_ranges
     # The Ceiling hit-rate columns are percentages, never plain numbers.
-    first_percent_row = int(re.search(r"\d+", layout.percent_cells[0]).group())
-    assert layout.rows[first_percent_row - 2][2] == "Beat Ceiling"
+    first_rows = [int(re.search(r"\d+", rng).group()) for rng in layout.percent_cells]
+    assert any(layout.rows[row - 2][2] == "Beat Ceiling" for row in first_rows)
 
 
 def test_the_status_line_reports_the_rosterable_pool_not_every_draftkings_row():
@@ -134,3 +135,89 @@ def test_notes_are_wrapped_short_enough_to_fit_across_the_tab():
 
     layout = build_layout(_scored(), weeks=[3])
     assert all(len(layout.rows[r - 1][0]) <= NOTE_WRAP_CHARS + 1 for r in layout.note_rows)
+
+
+# --- Week 6, slice 6: "What the model learned this week" ---------------------------------------------------
+
+
+def test_the_learned_block_opens_the_tab_and_says_what_refits_and_what_is_fixed():
+    layout = build_layout(_scored(80), weeks=[3])
+    titles = [layout.rows[r - 1][0] for r in layout.section_rows]
+    assert titles[0].startswith("WHAT THE MODEL LEARNED THIS WEEK")
+    text = " ".join(str(c) for r in layout.rows for c in r)
+    assert "CalPts refits every week" in text and "FIXED" in text
+    assert "Week 8: recalibrate Hit3x%/Boom%/Bust% on 2026 results" in text and "No action now." in text
+
+
+def test_with_one_scored_week_the_block_says_it_is_the_first_fit_and_has_nothing_to_compare():
+    layout = build_layout(_scored(80), weeks=[3])
+    text = " ".join(str(c) for r in layout.rows for c in r)
+    assert "its first fit: nothing to compare" in text
+
+
+def _two_weeks():
+    frame = _scored(120)
+    other = frame.copy()
+    other["week"] = 4
+    other["DkActual"] = other["DkActual"] + 3.0  # week 4: everyone beat their projection by more
+    return pd.concat([frame, other], ignore_index=True)
+
+
+def test_the_weights_and_biggest_corrections_sit_beside_last_weeks():
+    from dfs import calibration
+    from dfs import sheet_model_check as smc
+
+    scored = _two_weeks()
+    now = calibration.fit(scored, before_week=5)
+    was = calibration.fit(scored, before_week=4)
+    weights = smc.weight_table(now, was)
+    assert {"Position", "TFFB", "Sleeper", "FantasyPros", "TFFB (last week)"} <= set(weights.columns)
+    row = weights.iloc[0]
+    assert abs(row["TFFB"] + row["Sleeper"] + row["FantasyPros"] - 1.0) < 1e-9
+    assert (
+        abs(row["TFFB (last week)"] + row["Sleeper (last week)"] + row["FantasyPros (last week)"] - 1.0)
+        < 1e-9
+    )
+    changes = smc.bias_changes(now, was)
+    assert 0 < len(changes) <= smc.LEARNED_BIAS_ROWS
+    assert list(changes["Bias now"].abs()) == sorted(changes["Bias now"].abs(), reverse=True)
+    assert not changes["Bias last week"].isna().any()
+    first_fit = smc.bias_changes(now, calibration.fit(scored, before_week=3 - 1))
+    assert first_fit["Bias last week"].isna().all()  # nothing before week 3: no "was"
+
+
+def test_weeks_read_as_a_range_or_a_list():
+    from dfs.sheet_model_check import weeks_text
+
+    assert weeks_text((1, 2, 3, 4)) == "1–4" and weeks_text((1, 3)) == "1, 3" and weeks_text(()) == "none"
+    assert weeks_text((2,)) == "2"
+
+
+def test_race_leaders_name_the_lowest_mae_per_position_and_mark_early_ones():
+    from dfs.sheet_model_check import race_leaders
+
+    race = pd.DataFrame(
+        [
+            {"Position": "RB", "Source": "CalPts", "n": 80, "MAE": 4.6},
+            {"Position": "RB", "Source": "TFFB", "n": 80, "MAE": 5.1},
+            {"Position": "QB", "Source": "TFFB", "n": 20, "MAE": 5.2},
+            {"Position": "QB", "Source": "CalPts", "n": 20, "MAE": 5.9},
+        ]
+    )
+    assert race_leaders(race) == "Lowest MAE by position: QB TFFB (early), RB CalPts."
+    assert race_leaders(race.iloc[0:0]) == ""
+
+
+def test_signal_progress_lists_only_signals_that_fired_with_their_unflagged_baseline():
+    from dfs.sheet_model_check import signal_progress
+
+    table = pd.DataFrame(
+        [
+            {"Signal": "USAGE↑", "n": 40, "VsCal": 1.2, "HitCal": 0.6, "Thin": False},
+            {"Signal": "FADE↓", "n": 0, "VsCal": None, "HitCal": None, "Thin": True},
+            {"Signal": "Unflagged RB", "n": 300, "VsCal": 0.1, "HitCal": None, "Thin": False},
+        ]
+    )
+    got = signal_progress(table)
+    assert list(got["Signal"]) == ["USAGE↑"] and got.iloc[0]["Unflagged avg"] == 0.1
+    assert signal_progress(None).empty

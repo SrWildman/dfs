@@ -179,9 +179,18 @@ gameday) to refresh Avail flags before finalizing.
 dfs export -o lineups.csv
 ```
 
+Before that, if you want a starting point: `dfs lineups suggest` writes complete builds from your pool to the **Suggested** tab (3 cash, 5 GPP with a stack, each at least 3 players
+apart, FLEX on the latest kickoff), and **Lineup Tools > Copy build to Lineups** drops one into the first empty lineup. It never touches a lineup that has names.
+
 Pair each finished lineup to a real DK contest entry in DK Upload (Entry
 ID, Contest Name, Contest ID, Entry Fee, then the roster-slot columns),
 then run `dfs export` and upload the resulting file on DraftKings.
+
+`dfs export` also applies the **FLEX rule** before it writes the file: the FLEX slot holds whichever of its position's players kicks
+off last (RB beyond 2, WR beyond 3 or TE beyond 1), so it stays open to a swap the longest. It swaps two names in the exported rows
+only (the sheet is not touched) and prints what it moved ("Moved Puka Nacua to FLEX (plays SNF), Cooper Kupp to WR"). A player whose
+game has started is never moved, and a tie or a missing kickoff leaves the lineup as it is. In the sheet, the Lineups `Issues`
+column shows the same advice on the FLEX row, and **Lineup Tools > Fix FLEX order** applies it to every lineup (it asks first).
 
 **Done looks like:** the exported CSV's row count matches the number of
 lineups you actually paired, and DraftKings accepts the upload without a
@@ -214,7 +223,7 @@ in P(cash), `--goal gpp` by P(GPP), projection gain breaking ties; the search ke
 shows, so a swap that wins on probability but not on projection can surface. The cash line is the median of every typed
 `Cash Line` in Results this season and the GPP target is `[sim] gpp_target` (default 190); the top of the output says which.
 
-After `dfs sync`, the **Lineups** tab also shows `Median`, `p90`, `P(cash)` and `P(190+)` on every built lineup's Total row (set its Cash/GPP marker in column A) and a
+After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `190+ %` on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and
 the chance at least one reaches the target.
 

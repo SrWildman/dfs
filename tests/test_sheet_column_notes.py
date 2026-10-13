@@ -62,3 +62,99 @@ def test_through_week_is_read_from_the_latest_usage_sync(monkeypatch):
 
     monkeypatch.setattr(notes.store, "load_current", missing)
     assert notes.usage_through_week() is None
+
+
+# --- the one registry: every header explained, nothing stale, notes replaced not accumulated ---------
+
+
+def test_every_header_on_edgeraw_player_pool_and_lineups_has_a_note():
+    from dfs import derived
+    from dfs.sheet_columns import LINEUPS_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER
+
+    registry = notes.player_tab_notes()
+    for tab, headers in (
+        ("EdgeRaw", derived.EDGE_SHEET_ORDER),
+        ("Player Pool", PLAYER_POOL_COLUMN_ORDER),
+        ("Lineups", LINEUPS_COLUMN_ORDER),
+    ):
+        missing = [h for h in headers if h not in registry]
+        assert not missing, f"{tab} headers with no note: {missing}"
+
+
+def test_every_edge_finder_and_board_header_has_a_note():
+    from dfs import edge_finder_tab as eft
+    from dfs import sheet_views as sv
+
+    registry = notes.edge_finder_tab_notes()
+    headers = set(eft.LEAD) | set(eft.TRAILING_HEADERS) | set(eft.MATCHUP_LEAD)
+    for group in (
+        eft.CASH_COLUMNS,
+        eft.GPP_COLUMNS,
+        eft.LEVERAGE_COLUMNS,
+        eft.CHALK_COLUMNS,
+        eft.PUNT_COLUMNS,
+        eft.DISAGREE_COLUMNS,
+        eft.BENEFICIARY_COLUMNS,
+        eft.ABSENCE_COLUMNS,
+        eft.TREND_HEADERS,
+        eft.MATCHUP_COLUMNS,
+        eft.SIGNAL_COLUMNS,
+        eft.R6_SIGNAL_COLUMNS,
+    ):
+        headers |= set(group)
+    missing = sorted(h for h in headers if h and h not in registry)
+    assert not missing, f"Edge Finder headers with no note: {missing}"
+
+    board = {**notes.player_tab_notes(), **notes.BOARD_NOTES}
+    board_headers = set()
+    for group in (
+        sv.BOARD_SLATE_COLHEADER,
+        sv.BOARD_LIST_COLHEADER,
+        sv.BOARD_QUEUE_COLHEADER,
+        sv.BOARD_CHECK_COLHEADER,
+        sv.BOARD_POOL_COLHEADER,
+        sv.BOARD_STACKS_COLHEADER,
+        sv.BOARD_STACK_COLHEADER,
+        sv.BOARD_CHALK_COLHEADER,
+    ):
+        board_headers |= set(group)
+    missing = sorted(h for h in board_headers if h and h not in board)
+    assert not missing, f"Board headers with no note: {missing}"
+
+
+def test_no_note_mentions_a_removed_feature():
+    everything = {
+        **notes.player_tab_notes(),
+        **notes.edge_finder_tab_notes(),
+        **notes.BOARD_NOTES,
+        **notes.MODEL_CHECK_NOTES,
+        **notes.SLATE_TEAMS_NOTES,
+    }
+    for header, text in everything.items():
+        for removed in notes.REMOVED_FEATURES:
+            assert removed.lower() not in text.lower(), f"{header!r}'s note mentions the removed {removed!r}"
+
+
+class _RowNotesClient:
+    def __init__(self, header):
+        self.header = header
+        self.calls = []
+
+    def read_range(self, tab, a1):
+        return [self.header]
+
+    def set_row_notes(self, tab, row, texts, *, first_col=0):
+        self.calls.append((tab, row, list(texts), first_col))
+
+
+def test_applying_notes_replaces_the_row_so_a_header_without_a_note_loses_its_old_one():
+    client = _RowNotesClient(["Name", "Mystery column", "Tgt%"])
+    written = notes.apply_header_notes(client, "Player Pool", 2, {"Name": "n", "Tgt%": "t"})
+    assert written == 2
+    assert client.calls == [("Player Pool", 2, ["n", "", "t"], 0)]  # "" = clear whatever note was there
+
+
+def test_row_one_keeps_its_tab_note_in_column_a():
+    client = _RowNotesClient(["Pool", "Name", "Team"])
+    notes.apply_header_notes(client, "EdgeRaw", 1, {"Pool": "p", "Name": "n", "Team": "t"})
+    assert client.calls == [("EdgeRaw", 1, ["n", "t"], 1)]  # column A (the tab's own note) is not touched

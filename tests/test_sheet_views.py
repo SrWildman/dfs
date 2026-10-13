@@ -22,9 +22,17 @@ from dfs.sheet_views import (
     BOARD_CHALK_POSITION_ROWS,
     BOARD_CHECK_FIRST_ROW,
     BOARD_CHECK_HEADER_ROW,
+    BOARD_CHECK_LAST_ROW,
     BOARD_FRESHNESS_ROW,
     BOARD_ID_COL,
     BOARD_ID_COL_INDEX,
+    BOARD_LIKES_CASH_ROWS,
+    BOARD_LIKES_COLHEADER,
+    BOARD_LIKES_EMPTY,
+    BOARD_LIKES_FIRST_ROW,
+    BOARD_LIKES_GPP_ROWS,
+    BOARD_LIKES_HEADER_ROW,
+    BOARD_LIKES_LAST_ROW,
     BOARD_LIST_COLHEADER,
     BOARD_LIST_NAME_COL,
     BOARD_LIST_POOL_COL,
@@ -180,6 +188,13 @@ class FakeSheetsClient:
 
     def set_note(self, tab_name: str, cell_a1: str, note: str) -> None:
         self.note_calls.append((cell_a1, note))
+
+    def set_row_notes(self, tab, row, notes, *, first_col=0):
+        from dfs.sheets import column_letter
+
+        for i, text in enumerate(notes):
+            if text:
+                self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
 
     def set_number_range_validation(
         self, tab_name: str, a1_range: str, *, minimum: int, maximum: int, strict: bool = False
@@ -523,6 +538,7 @@ def test_board_writes_every_section_header_at_its_own_row():
         (BOARD_SLATE_HEADER_ROW, "SLATE SHAPE"),
         (BOARD_QUEUE_HEADER_ROW, "QUEUE"),
         (BOARD_CHECK_HEADER_ROW, "POOL CHECK"),
+        (BOARD_LIKES_HEADER_ROW, "MODEL LIKES, NOT IN YOUR POOL"),
         (BOARD_POOL_HEADER_ROW, "POOL SUMMARY"),
         (BOARD_STACKS_HEADER_ROW, "YOUR STACKS"),
         (BOARD_CHALK_HEADER_ROW, "CHALK MAP"),
@@ -1287,3 +1303,52 @@ def test_size_slate_shape_hides_the_rows_below_the_last_game_and_shows_a_longer_
     assert empty.hidden == [(BOARD_SLATE_FIRST_ROW + 1, BOARD_SLATE_LAST_ROW)]
 
     assert "not present" in size_slate_shape(_SlateClient(3, present=False))
+
+
+# --- Week 6, slice 3: "Model likes, not in your pool" (6 Cash, then 12 GPP) --------------------------
+
+
+def test_model_likes_has_six_cash_rows_then_twelve_gpp_rows_and_sits_right_after_the_pool_check():
+    assert (BOARD_LIKES_CASH_ROWS, BOARD_LIKES_GPP_ROWS) == (6, 12)  # Sam's counts
+    assert BOARD_LIKES_HEADER_ROW == BOARD_CHECK_LAST_ROW + 2
+    assert BOARD_LIKES_LAST_ROW - BOARD_LIKES_FIRST_ROW + 1 == 18
+    assert BOARD_POOL_HEADER_ROW == BOARD_LIKES_LAST_ROW + 2  # everything below moved down with it
+    assert BOARD_LIKES_COLHEADER[:2] == ["Pool", "Player"]
+
+
+def test_model_likes_reads_the_edge_finders_favourites_and_drops_anyone_already_pooled():
+    client = _build_board()
+    first = BOARD_LIKES_FIRST_ROW
+    gpp_first = first + BOARD_LIKES_CASH_ROWS
+    cash_spill = client.rows[first - 1][BOARD_ID_COL_INDEX]
+    gpp_spill = client.rows[gpp_first - 1][BOARD_ID_COL_INDEX]
+    assert "'Edge Finder'!$Q$2:$Q$200" in cash_spill and ",6,1)" in cash_spill
+    assert "'Edge Finder'!$R$2:$R$200" in gpp_spill and ",12,1)" in gpp_spill
+    # unpooled: no typed Pool value on EdgeRaw for that id (COUNTIFS against the typed Pool column)
+    for spill in (cash_spill, gpp_spill):
+        assert "COUNTIFS(" in spill and '"<>"' in spill and spill.startswith("=IFERROR(")
+    # one player on both lists shows once: the GPP block skips whoever the Cash block already shows
+    shown = f"${BOARD_ID_COL}${first}:${BOARD_ID_COL}${gpp_first - 1}"
+    assert f"COUNTIF({shown}," in gpp_spill
+
+
+def test_every_model_likes_row_has_the_live_pool_dropdown_formula_and_a_why_that_names_its_list():
+    client = _build_board()
+    for i in range(BOARD_LIKES_CASH_ROWS + BOARD_LIKES_GPP_ROWS):
+        row = BOARD_LIKES_FIRST_ROW + i
+        cells = client.rows[row - 1]
+        assert cells[BOARD_LIKES_COLHEADER.index("Pool")].startswith(f'=IF(${BOARD_ID_COL}{row}="","",')
+        why = cells[BOARD_LIST_REASON_INDEX]
+        assert ("Cash add" in why) if i < BOARD_LIKES_CASH_ROWS else ("GPP" in why and "Cash add" not in why)
+        assert BOARD_ID_COL_INDEX >= len(cells) or cells[BOARD_ID_COL_INDEX] in ("", None) or i in (0, 6)
+
+
+def test_model_likes_says_the_pool_has_every_favourite_once_in_the_first_row_when_nobody_is_left():
+    client = _build_board()
+    player = client.rows[BOARD_LIKES_FIRST_ROW - 1][BOARD_LIKES_COLHEADER.index("Player")]
+    assert BOARD_LIKES_EMPTY in player and BOARD_LIKES_EMPTY == "Your pool already has every model favourite."
+    others = [
+        client.rows[r - 1][BOARD_LIKES_COLHEADER.index("Player")]
+        for r in range(BOARD_LIKES_FIRST_ROW + 1, BOARD_LIKES_LAST_ROW + 1)
+    ]
+    assert not any(BOARD_LIKES_EMPTY in str(c) for c in others)

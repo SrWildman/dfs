@@ -798,6 +798,52 @@ and the two sources that measured it most carefully both call it
 functionally zero -- not worth a rule that would flag real, harmless
 lineups.
 
+## The FLEX rule, and the weak-cash warning (Week 6)
+
+**The FLEX rule** (`flex_order.py`; Sam: "the player with the latest start time should be in the flex"). DraftKings locks a slot when
+its player's game starts, so the FLEX should hold the player who kicks off last. A legal lineup has one RB/WR/TE more than the base
+slots (RB beyond 2, WR beyond 3, TE beyond 1): that is the **flex position**. Among its players the one with the **latest kickoff**
+goes in FLEX and the others fill the position's slots. Only two names ever swap (the new FLEX player and the old one); no other slot moves.
+It leaves a lineup alone, and says why, when:
+
+| Case | What happens |
+|---|---|
+| the latest kickoff is shared by two or more players (a tie) | left as it is |
+| either of the two games has started (`kickoff <= now`) | left as it is: a started player is never moved |
+| a kickoff is missing for a player at the flex position | not checked |
+| fewer than nine players, or no single surplus position | not checked |
+
+Three places use it, and the same cases are pinned in each: **`dfs export`** reorders the exported rows before it writes the file
+(`lineups.reorder_flex`, kickoffs from the synced edge frame by DraftKings id) and prints what it moved; the Lineups **`Issues`** FLEX
+row says "Move X to FLEX (plays SNF)" (`sheet_style._flex_order_formula`, `NOW()` against `GameStart`, so the workbook's time zone is
+`America/New_York`); **Lineup Tools > Fix FLEX order** in `Code.gs` (`planFlexSwap`) applies it to every block, kickoffs from EdgeRaw
+`GameStart` by name, "now" read in Eastern time. TFFB's `GameStart` is Eastern wall-clock time labelled `Z` (`kickoff.py`), never UTC.
+`plays_label`: Thursday `TNF`, Monday `MNF`, a Sunday kickoff at 7 pm Eastern or later `SNF`, otherwise `Sun 4:25 pm`.
+
+**The weak-cash warning.** A lineup whose Total-row marker is `Cash` and whose simulated `Cash %` is under
+`sheet_lineup_sim.CASH_WEAK_BELOW = 0.40` gets `Weak for cash: Cash % 31%` in its Total-row `Issues` cell
+(`sheet_style._weak_cash_formula`). Quiet while `Cash %` is blank (nothing simulated yet) and for a `GPP` or unmarked lineup. The
+40% is Sam's line (50% or more is a solid cash build; the label turns green there).
+
+## Suggested lineups (`lineup_suggest.py`, Week 6)
+
+`dfs lineups suggest` builds complete lineups from Sam's pool; nothing is random. **Candidates:** pool players tagged `Cash`/`Both` (cash builds) or `GPP`/`Both` (GPP builds), not OUT or IR,
+game not started (`late_swap_search.swap_pool`), valued at the configured projection (`[projection] default`, `CalPts`, `ProjPts` where CalPts is blank). **Rules** (late swap's): salary cap, nine
+slots with FLEX taking an RB, WR or TE, nobody twice, no DST against his own QB, at most one RB per game. **Cash builds** (default 3): the best `CASH_TOP_K = 300` lineups by projection
+(`late_swap_search.top_lineups`, branch-and-bound with the Lagrangian salary bound, exact) are all simulated in one run (`sim_inputs.N_SIMS = 20,000` draws, seed 0) and the builds are the highest
+`Cash %` (the chance of beating the cash line, the median of Sam's typed Results `Cash Line`s). **GPP builds** (default 5): every candidate holds a stack (the QB, at least two of his WR/TE, at least one
+non-DST player from his opponent); each QB is searched on his own for his best `PER_QB = 80` stacked lineups, cutting branches that can no longer reach a stack (`_stack_feasible`: it never rejects a
+lineup that can pass), then ranked by the chance of reaching `[sim] gpp_target`. **Diversity:** each build differs from the earlier ones of its kind by at least `MIN_DIFFERENCE = 3` players. **Exposure:**
+no player in more than `exposure_cap(n) = max(1, round(0.6 n))` of the GPP builds (3 of 5). Greedy by rank; when the cap leaves it short it backtracks over the top 80 candidates for a set that
+fits, and reports fewer builds only when none exists. **FLEX:** the latest kickoff of the surplus position (`flex_order`), ties to the lowest projection. **Time:** a 20 s budget (cash 40%, GPP the
+rest, shared evenly between QBs); a 60-player pool takes about 4 s; a cut-short search says so on the tab. Titles: `GPP build 4  ·  NO stack + NYG bring-back`.
+
+## Top plays and Consider (Edge Finder, Week 6)
+
+Top plays lists the rows whose displayed Do (after the R6 `Proj` chip) is `Cash add` (`edge_finder_tab.TOP_CASH_PER_POSITION`) or `GPP add` / `GPP leverage` (`TOP_GPP_PER_POSITION`), best
+`Hit3x%` / `Boom%` first within each position; the verbs are the Cash core's and GPP upside's own (`_cash_row`, `_gpp_row` are shared, so the two cannot drift). `favourites()` is the same selection
+across positions without the per-position caps, in `Hit3x%` / `Boom%` order. **Consider** = Pool blank AND the id on a favourites list (Do starts with one of `CONSIDER_VERBS` on the Edge Finder itself).
+
 ## Flags (and Flag)
 
 The one column meant to be read at a glance. Evaluated in order

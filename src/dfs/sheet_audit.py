@@ -140,7 +140,15 @@ WIDTHS_DICT_BY_TAB: dict[str, dict[str, int]] = {
 
 # Tabs that have no single header row (so the checks above do not fit them) but are still read for clipping:
 # a visible cell wider than its column that cannot overflow, headers included (`sheet_clipping`).
-CLIPPING_ONLY_TABS = ["Edge Finder", "Board", "Model Check", "Bankroll", "Season", "Instructions"]
+CLIPPING_ONLY_TABS = [
+    "Edge Finder",
+    "Board",
+    "Suggested",
+    "Model Check",
+    "Bankroll",
+    "Season",
+    "Instructions",
+]
 
 SKIPPED_TABS = [
     # Phase 6 Part 3 (2026-09-22): rebuilt from three side-by-side panels

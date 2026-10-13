@@ -501,18 +501,32 @@ portfolio-level counterpart: `Distinct QBs`, `Shared QB?` (Yes/No), and
 
 **The lineup simulator and the Cash/GPP marker (usability round, 2026-10-08).** Each lineup's **Total row** now carries the four
 outcome numbers up front, in the four columns right after `Pts` that are blank there (`AggPts`, `CalPts`, `Val`, `ValAdj`, found by
-header name), with small labels on the **Remaining row** under them: `Median`, `p90` (the simulated median and 90th-percentile score),
-`P(cash)` (the chance the lineup reaches the cash line; **green at 50% or more**) and `P(190+)` (the chance it reaches the GPP target;
-the number in the label is `[sim] gpp_target` in `config.toml`, default 190; **green at 5% or more**). They are numbers, written by
+header name), with small labels on the **Remaining row** under them: `Typical`, `Big night` (the simulated median and 90th-percentile score),
+`Cash %` (the chance the lineup beats a typical cash line; **green at 50% or more**) and `190+ %` (the chance it reaches the GPP target;
+the number in the label is `[sim] gpp_target` in `config.toml`, default 190; **green at 5% or more**). They were `Median`, `p90`,
+`P(cash)` and `P(190+)` until the Week 6 round (renamed: Sam did not know what they meant). They are numbers, written by
 `dfs sync` (Python, `sheet_lineup_sim.py`; not formulas). The old far-right `Median`..`P(190+)` columns were retired
 (`sheet_reorder.retire_lineup_sim_columns`, a real column delete) and the **portfolio line** moved to the Board's Pool summary.
 **Column A of every Total row is the lineup type marker**: a pale-yellow dropdown, `Cash` or `GPP` (blank = both). The number that
 matches the type is drawn bold in deep blue, and `dfs lineups late-swap` reads the marker as that lineup's default `--goal` (the
 flag still overrides it; both deltas are still shown). The cash line is the median of every typed `Cash Line` in Results this
-season (read only; the P(cash) label's note and the Board's portfolio line say which, e.g. "cash line 141.3 (season median, 4 weeks)"). 20,000 draws with a fixed seed, so the numbers do not move between syncs unless a lineup does; all built lineups
+season (read only; the Cash % label's note and the Board's portfolio line say which, e.g. "cash line 141.3 (season median, 4 weeks)"). 20,000 draws with a fixed seed, so the numbers do not move between syncs unless a lineup does; all built lineups
 are simulated together (a player in two lineups is one random variable). A lineup with a blank slot or a name EdgeRaw does not know
 stays blank. Not conditioned on games already played. Method: `docs/SIM.md`. The Apps Script's "Clear Lineup Names" never touches the
 Total or Remaining rows, so the markers survive it.
+
+**Lineups `Issues` (Week 6).** Per player row: `DUPLICATE`, or his `Avail` flag. On the Total row: `OVER $n`, `INCOMPLETE n/9`, `DST/QB`,
+`RB/GAME`, and **`Weak for cash: Cash % 31%`** (a lineup marked `Cash` whose `Cash %` is under 40%, `sheet_lineup_sim.CASH_WEAK_BELOW`;
+it clips at the 110 px Issues width, which Sam kept). On the **FLEX row**: **`Move Puka Nacua to FLEX (plays SNF)`** when a player of
+the flex position (the one position with a player more than its own slots hold) kicks off later than whoever is in FLEX. It stays quiet
+on a tie, when a kickoff is missing, and once either player's game has started (it reads `NOW()`, so the workbook's time zone must be
+`America/New_York`, the zone TFFB's kickoffs are written in). Rule and edge cases: `docs/CALCULATIONS.md` "The FLEX rule".
+
+**Header notes (Week 6).** Every header on EdgeRaw, Player Pool, Lineups, the Edge Finder (every header row), the Board's tables and Model
+Check carries a hover note. They all come from one registry keyed by header text (`sheet_column_notes.py`: `player_tab_notes()`,
+`edge_finder_tab_notes()`, `BOARD_NOTES`, `MODEL_CHECK_NOTES`). Every apply **replaces** the row's notes (`SheetsClient.set_row_notes`, one
+request per row), so a note a column move left behind is cleared, and column A of row 1 keeps the tab's own note (`TAB_NOTES`).
+`tests/test_sheet_column_notes.py` fails when a header has no note or a note mentions a removed feature (`REMOVED_FEATURES`).
 
 **Colours on Lineups' Name / Pos. / Team cells.** Plain white (the pale-yellow "you type here" fill on Name and
 the per-position tint on Pos. were dropped on this tab only; every other tab keeps them) unless the lineup has a
@@ -595,13 +609,16 @@ collapsible row sections, all open by default, in this order (Sam's call):
 3. **Pool check** (live formulas): pooled players whose numbers went bad, each with its reason and a `Pool` cell, so clearing it (Delete) removes him. Triggers:
    listed OUT / D / Q / IR, `Bust%` in the top quartile of his position's rosterable pool, `CalPts` at least 2.0 below `ProjPts`, a `FADE↓` chip.
    Empty states: "Tick players into your pool to see this." / "Nothing in your pool looks worse than when you added it." Up to 10 rows.
-4. **Pool summary** (live formulas, updating the moment you change the pool, no sync): a gap line ("Cash: need 1 more TE · GPP: enough to fill a
+4. **Model likes, not in your pool** (Week 6; `BOARD_LIKES_*`): the Edge Finder's favourites you have not pooled, **6 Cash then 12 GPP** (Sam's counts), each with a live `Pool`
+   dropdown and a soft-yellow name; a formula over the Edge Finder's hidden favourites lists, so a pick removes the row at once. A player on both lists shows once, in the Cash block.
+   Empty state (one line, first row): "Your pool already has every model favourite."
+5. **Pool summary** (live formulas, updating the moment you change the pool, no sync): a gap line ("Cash: need 1 more TE · GPP: enough to fill a
    lineup"), the **portfolio line** (lineups built, expected cashes, P(at least one cash), P(at least one 190+); written by the sync from the
    Lineups simulator), a per-position table (Pooled, Cash, GPP, with Both counting for each; Min / Max / Avg Sal; the cheapest play), and **Your
    stacks** (each pooled QB: how many of his team's WR and TE are pooled, and whether anyone from the opponent is, a bring-back). There are no
    per-position targets (Sam: a week may want 2 QBs or 5); the gap line says only what is missing to fill ONE DraftKings lineup (`sheet_views.ROSTER_MIN`).
-5. **Chalk map** (`BOARD_CHALK_*`): the highest-owned players per position (`BOARD_CHALK_POSITION_ROWS`: QB 4, RB 8, WR 8, TE 4, DST 4 (Sam's choice)), sorted by `Own%`, nobody listed OUT/IR, with `Sal`, `Own%`, `CalPts`, `Hit3x%`, a live `Pool` dropdown and a hidden `Id`. One spill per position block; until ownership has published (EdgeRaw `OwnStatus` is not `real`) the first row says so and the rest stay blank.
-6. **Stack candidates**: QB + WR1/WR2/WR3/TE1/RB1 for the 8 highest-total games (formulas).
+6. **Chalk map** (`BOARD_CHALK_*`): the highest-owned players per position (`BOARD_CHALK_POSITION_ROWS`: QB 4, RB 8, WR 8, TE 4, DST 4 (Sam's choice)), sorted by `Own%`, nobody listed OUT/IR, with `Sal`, `Own%`, `CalPts`, `Hit3x%`, a live `Pool` dropdown and a hidden `Id`. One spill per position block; until ownership has published (EdgeRaw `OwnStatus` is not `real`) the first row says so and the rest stay blank.
+7. **Stack candidates**: QB + WR1/WR2/WR3/TE1/RB1 for the 8 highest-total games (formulas).
 
 Columns A-O visible; the hidden helper block past them holds the Slate shape join keys (GameId, Away, Home, a GPS check), each list row's DraftKings
 `Id`, and the Pool check's per-position `Bust%` quartile cut (`sheet_views.BOARD_ID_COL`, `BOARD_BUSTCUT_COL`). The bound Apps Script acts on a `Pool`
@@ -628,6 +645,19 @@ Column widths are fitted to the written content (`sheet_edge_finder.fit_widths`)
 **Status lines (rows 2-5), in Eastern time:** "Stats through Week 4 · Injuries: practice reports only until Friday · Projections updated
 Wed 10:46 pm ET"; the injury report's source, rows, final statuses and fetch time; "CalPts trained on Weeks 1-N"; the reminder to run the
 final `dfs sync --live` about 90 minutes before kickoff, with the first kickoff.
+
+**Top plays and the repeated headers (Week 6).** The first section is **Top plays**, the model's best plays at a glance, stacked (Cash block, then
+GPP block; two blocks side by side would need about 1,700 px because every column below is shared with them): the Cash block lists the rows whose Do is
+`Cash add` (at most QB 2, RB 4, WR 5, TE 2, DST 2 per position by `Hit3x%`; `Cash add` itself is the top 3 of a position, so RB and WR show 3 at most), the GPP
+block the `GPP add` and `GPP leverage` rows (QB 3, RB 4, WR 6, TE 3, DST 3 by `Boom%`, with `Lev`). It uses the Do exactly as the detail rows show it (a `Proj ▼` chip
+downgrades a `Cash add`, so that player is left out). The same two lists (ids in rank order, Cash then GPP) sit in hidden columns `Q` and `R`
+(`edge_finder_tab.FAVOURITE_*`) for the Board's list and the Consider highlight. Sheets freezes rows only at the top of a tab, so **every position block after a section's first
+repeats the section's column header** in the same dark bar, smaller (`Layout.repeat_header_rows`): the labels are never more than about 12 rows up. (The overflow groups and the
+team groups do not repeat it.)
+
+**Consider (soft yellow).** A player whose Do is `Cash add`, `GPP add` or `GPP leverage` and who is not in your pool has a soft-yellow Name, on the Edge Finder (from the row's own `Pool` and
+`Do`), the Board's Chalk map and Model likes lists, and EdgeRaw (from the hidden lists above, read through `INDIRECT`: `sheet_consider.py`). It goes away the moment he is pooled; the lists
+themselves refresh with each sync. Player Pool lists only pooled players, so nothing is ever yellow there. The `Name` header notes say so.
 
 **Sections, top to bottom.** Each opens with a title bar (with an **All ↗** link to the matching EdgeRaw filter view on Cash core and GPP
 upside) and a second line, "what it is · what to do".
@@ -668,6 +698,16 @@ Every conditional format is relative to its own cells; the probability colour is
 No basic filter is set. Definitions: `docs/CALCULATIONS.md` ("Edge Finder", "Edge Finder tab"). Saved filter views on EdgeRaw: the original
 four plus **Cash** (Avail blank, `Hit3x%` not blank, sorted `Hit3x%` high to low) and **GPP** (Avail blank, `Boom%` not blank, sorted
 `Boom%` high to low); a filter view cannot hide columns, so `Boom%` and `Bust%` stay visible in both.
+
+### Suggested
+
+Written by `dfs lineups suggest` (`lineup_suggest.py`, `sheet_suggested.py`); created empty by `dfs setup build-views`, between Player Pool and Lineups in the tab strip, whole-tab warning
+protection (nothing is typed). Three lines on top (what it is, the projection / pool sizes / cash line / GPP target / seconds taken, how to use a build), then one block per build,
+all stacked, Cash builds first then GPP, numbered 1..N: a dark bar (`Build 4 | GPP | NO stack + NYG bring-back`), a column header (`Slot | Name | Team | Opp | Salary | CalPts | Kickoff | Own% |
+Typical | Big night | Cash % | 190+ %`; `CalPts` is the projection used, the last label carries `[sim] gpp_target`), nine player rows in roster-slot order with the FLEX on the latest kickoff, and a Total row
+(salary, projection and the simulator's four numbers; Cash % green at 50%, the GPP chance at 5%, the lines Lineups uses). It is rewritten from scratch each run and **never touches Lineups**:
+**Lineup Tools > Copy build to Lineups** (`Code.gs`) asks for a build number and copies its nine names into the first lineup block with no name in it, setting that block's Cash / GPP marker. How the
+builds are chosen: `docs/CALCULATIONS.md` ("Suggested lineups"). `dfs sync --live` does not refresh it (Sam: only when he asks).
 
 ### Slate Grid
 

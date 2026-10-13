@@ -15,14 +15,21 @@
 //      the same formula.
 //   3. onEdit, Player Pool's "Add a player" box: pick a name, and he is added to the pool as the type
 //      beside the box (default Both); the box then clears.
-//   4. onOpen: the menu, plus a version stamp in the hidden named range DFS_SCRIPT_VERSION so `dfs
+//   4. Lineup Tools > Fix FLEX order: for every lineup block on the Lineups tab, puts the player with the
+//      latest kickoff (among the position that has one more player than its own slots hold) in the FLEX slot,
+//      by swapping two typed names. Never moves a player whose game has started. Kickoffs come from EdgeRaw's
+//      `GameStart` by name; "now" is read in Eastern time, the zone those kickoffs are written in.
+//   5. Lineup Tools > Copy build to Lineups: asks for a build number from the Suggested tab and copies that
+//      build's nine names into the FIRST EMPTY lineup block on Lineups, setting its Cash / GPP marker. It
+//      never overwrites a block that has a name in it and does nothing when every block is taken.
+//   6. onOpen: the menu, plus a version stamp in the hidden named range DFS_SCRIPT_VERSION so `dfs
 //      doctor` can tell whether this script is pasted and current.
 //
 // Everything is found by header text or label, never by a fixed row or column. The pure helper
 // functions at the bottom are unit-tested with node (tests/test_apps_script.py).
 
 // Bump this whenever this file changes: `dfs doctor` warns when the sheet's stamp is older.
-var DFS_SCRIPT_VERSION = 3;
+var DFS_SCRIPT_VERSION = 4;
 
 var VERSION_RANGE_NAME = 'DFS_SCRIPT_VERSION';
 var VERSION_TAB = 'NameAlias'; // a hidden tab nothing rewrites
@@ -37,6 +44,17 @@ var NAME_HEADER = 'Name';
 var TOTAL_LABEL = 'Total';
 var PLAYERS_PER_BLOCK = 9;
 var LABEL_SEARCH_COLUMNS = 8; // the Total label sits in one of the first columns of its row
+
+var SLOT_ORDER = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'DST']; // one lineup block, top to bottom
+var FLEX_SLOT = 'FLEX';
+var FLEX_BASE = { RB: 2, WR: 3, TE: 1 }; // the players each position's own slots hold before the FLEX
+var POSITION_HEADER = 'Position'; // EdgeRaw
+var GAMESTART_HEADER = 'GameStart'; // EdgeRaw: Eastern wall-clock text with a trailing Z
+var KEY_HEADER = 'Player Key'; // Lineups: DraftKings' canonical name for what was typed (hidden)
+var KICKOFF_TIMEZONE = 'America/New_York';
+var SUGGESTED_TAB = 'Suggested';
+var BUILD_LABEL = 'Build'; // column A of a Suggested block's bar row reads "Build 4"
+var MARKER_VALUES = ['Cash', 'GPP'];
 
 var ID_HEADER = 'Id';
 var POOL_HEADER = 'Pool';
@@ -55,6 +73,8 @@ function onOpen(e) {
   SpreadsheetApp.getUi()
     .createMenu('Lineup Tools')
     .addItem('Clear Lineup Names', 'clearLineupNames')
+    .addItem('Fix FLEX order', 'fixFlexOrder')
+    .addItem('Copy build to Lineups', 'copyBuildToLineups')
     .addToUi();
   try {
     stampVersion_();
@@ -109,6 +129,145 @@ function clearLineupNames() {
   if (ui.alert('Clear Lineup Names', message, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
 
   sheet.getRangeList(plan.rows.map(function (r) { return 'A' + r; })).clearContent();
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Fix FLEX order
+// ---------------------------------------------------------------------------------------------
+
+function fixFlexOrder() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(LINEUPS_TAB);
+  var edge = openEdge_(ss);
+  if (!sheet || edge === null) {
+    ui.alert('Fix FLEX order', 'This needs the "' + LINEUPS_TAB + '" and "' + EDGE_RAW_TAB + '" tabs.', ui.ButtonSet.OK);
+    return;
+  }
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  var all = lastRow > 0 && lastCol > 0 ? sheet.getRange(1, 1, lastRow, lastCol).getValues() : [];
+  var grid = all.map(function (r) { return r.slice(0, LABEL_SEARCH_COLUMNS); });
+  var blocks = findLineupBlocks(grid).blocks;
+  if (blocks.length === 0) {
+    ui.alert('Fix FLEX order', 'No lineup blocks were found on ' + LINEUPS_TAB + '.', ui.ButtonSet.OK);
+    return;
+  }
+  var info = edgeKickoffs_(edge);
+  if (info === null) {
+    ui.alert('Fix FLEX order', EDGE_RAW_TAB + ' has no ' + POSITION_HEADER + ' / ' + GAMESTART_HEADER +
+      ' column to read kickoffs from. Run `dfs sync` first.', ui.ButtonSet.OK);
+    return;
+  }
+  var keyCol = -1;
+  for (var h = 0; h < blocks.length && keyCol === -1; h++) keyCol = findColumn(all[blocks[h].header - 1], KEY_HEADER);
+  var nowEt = Utilities.formatDate(new Date(), KICKOFF_TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss");
+
+  var moves = [];
+  var left = [];
+  blocks.forEach(function (block) {
+    var seats = [];
+    for (var i = 0; i < SLOT_ORDER.length; i++) {
+      var row = all[block.first - 1 + i];
+      var typed = String(row[0]).trim();
+      var key = keyCol === -1 ? '' : String(row[keyCol - 1]).trim();
+      var known = info[normalizeName(key)] || info[normalizeName(typed)] || null;
+      seats.push({ slot: SLOT_ORDER[i], name: typed, position: known ? known.position : '', start: known ? known.start : '' });
+    }
+    var plan = planFlexSwap(seats, nowEt);
+    if (plan.status === 'move') {
+      moves.push({ block: block, plan: plan, seats: seats });
+    } else if (plan.status === 'locked' || plan.status === 'unknown') {
+      left.push('the lineup at row ' + block.header + ' (' + (plan.status === 'locked' ? 'a game has started' : 'a kickoff time is missing') + ')');
+    }
+  });
+
+  if (moves.length === 0) {
+    ui.alert('Fix FLEX order', 'Every lineup already has the latest kickoff in FLEX, or cannot be changed.' +
+      (left.length ? '\n\nLeft alone: ' + left.join('; ') + '.' : ''), ui.ButtonSet.OK);
+    return;
+  }
+  var lines = moves.map(function (m) {
+    var to = m.seats[m.plan.toFlex];
+    var from = m.seats[m.plan.fromFlex];
+    return 'Lineup at row ' + m.block.header + ': ' + to.name + ' to FLEX (plays ' + playsLabel(to.start) + '), ' + from.name + ' to ' + to.slot;
+  });
+  var message = 'Reorder ' + moves.length + ' lineup' + (moves.length === 1 ? '' : 's') + ' on ' + LINEUPS_TAB + '?\n\n' + lines.join('\n') +
+    '\n\nOnly two typed names swap in each lineup.' + (left.length ? '\n\nLeft alone: ' + left.join('; ') + '.' : '');
+  if (ui.alert('Fix FLEX order', message, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+  moves.forEach(function (m) {
+    var toRow = m.block.first + m.plan.toFlex;
+    var flexRow = m.block.first + m.plan.fromFlex;
+    var a = sheet.getRange(toRow, 1);
+    var b = sheet.getRange(flexRow, 1);
+    var keep = a.getValue();
+    a.setValue(b.getValue());
+    b.setValue(keep);
+  });
+  toast_('FLEX order fixed on ' + moves.length + ' lineup' + (moves.length === 1 ? '' : 's') + '.');
+}
+
+/** EdgeRaw as {normalized name: {position, start}} (start = the kickoff text without its trailing Z), or null. */
+function edgeKickoffs_(edge) {
+  var header = edge.sheet.getRange(1, 1, 1, edge.sheet.getLastColumn()).getValues()[0];
+  var posCol = findColumn(header, POSITION_HEADER);
+  var startCol = findColumn(header, GAMESTART_HEADER);
+  if (edge.nameCol === -1 || posCol === -1 || startCol === -1) return null;
+  var last = edge.sheet.getLastRow();
+  if (last < 2) return {};
+  var values = edge.sheet.getRange(2, 1, last - 1, edge.sheet.getLastColumn()).getValues();
+  var out = {};
+  values.forEach(function (r) {
+    var key = normalizeName(r[edge.nameCol - 1]);
+    if (key !== '' && !out[key]) out[key] = { position: String(r[posCol - 1]).trim(), start: parseKickoff(r[startCol - 1]) };
+  });
+  return out;
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Copy build to Lineups
+// ---------------------------------------------------------------------------------------------
+
+function copyBuildToLineups() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var suggested = ss.getSheetByName(SUGGESTED_TAB);
+  var lineups = ss.getSheetByName(LINEUPS_TAB);
+  if (!suggested || !lineups) {
+    ui.alert('Copy build to Lineups', 'This needs the "' + SUGGESTED_TAB + '" and "' + LINEUPS_TAB + '" tabs.', ui.ButtonSet.OK);
+    return;
+  }
+  var sGrid = suggested.getLastRow() > 0 ? suggested.getRange(1, 1, suggested.getLastRow(), Math.min(3, suggested.getLastColumn() || 3)).getValues() : [];
+  var available = parseBuilds(sGrid).map(function (b) { return b.number; });
+  if (available.length === 0) {
+    ui.alert('Copy build to Lineups', 'The Suggested tab has no builds yet. Run `dfs lineups suggest` first.', ui.ButtonSet.OK);
+    return;
+  }
+  var answer = ui.prompt('Copy build to Lineups', 'Which build? (' + available.join(', ') + ')', ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+  var number = parseInt(String(answer.getResponseText()).replace(/[^0-9]/g, ''), 10);
+
+  var lastRow = lineups.getLastRow();
+  var lGrid = lastRow > 0 ? lineups.getRange(1, 1, lastRow, Math.min(lineups.getLastColumn(), LABEL_SEARCH_COLUMNS)).getValues() : [];
+  var plan = planCopyBuild(sGrid, number, lGrid);
+  if (plan.status === 'noBuild') {
+    ui.alert('Copy build to Lineups', 'There is no build ' + answer.getResponseText() + ' on ' + SUGGESTED_TAB + '. Builds: ' + available.join(', ') + '.', ui.ButtonSet.OK);
+    return;
+  }
+  if (plan.status === 'noBlock') {
+    ui.alert('Copy build to Lineups', 'Every lineup block on ' + LINEUPS_TAB + ' already has a name in it, so nothing was copied. Clear a lineup first.', ui.ButtonSet.OK);
+    return;
+  }
+  var message = 'Copy build ' + plan.build.number + ' (' + plan.build.kind + ': ' + plan.build.title + ') into the lineup at row ' + plan.block.header +
+    ' of ' + LINEUPS_TAB + '?\n\n' + plan.build.names.join(', ') + '\n\nIt is an empty lineup; nothing is overwritten.';
+  if (ui.alert('Copy build to Lineups', message, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+  lineups.getRange(plan.block.first, 1, plan.build.names.length, 1).setValues(plan.build.names.map(function (n) { return [n]; }));
+  if (plan.marker) lineups.getRange(plan.block.total, 1).setValue(plan.marker);
+  toast_('Build ' + plan.build.number + ' copied to the lineup at row ' + plan.block.header + '.');
 }
 
 
@@ -309,8 +468,21 @@ function toast_(message) {
  */
 function planLineupClear(grid) {
   var rows = [];
+  var found = findLineupBlocks(grid);
+  found.blocks.forEach(function (block) {
+    for (var r = block.first; r < block.first + PLAYERS_PER_BLOCK; r++) rows.push(r);
+  });
+  return { rows: rows, blocks: found.blocks.length, skipped: found.skipped };
+}
+
+/**
+ * The lineup blocks of a Lineups grid: {blocks: [{header, first, total}], skipped: [header rows]} with
+ * 1-based rows (`first` is the block's first player row). A block is a NAME_HEADER row followed by exactly
+ * PLAYERS_PER_BLOCK player rows and a TOTAL_LABEL row; anything else is skipped.
+ */
+function findLineupBlocks(grid) {
+  var blocks = [];
   var skipped = [];
-  var blocks = 0;
   for (var i = 0; i < grid.length; i++) {
     if (String(grid[i][0]).trim() !== NAME_HEADER) continue;
     var total = -1;
@@ -322,10 +494,9 @@ function planLineupClear(grid) {
       skipped.push(i + 1);
       continue;
     }
-    blocks++;
-    for (var r = i + 1; r < total; r++) rows.push(r + 1);
+    blocks.push({ header: i + 1, first: i + 2, total: total + 1 });
   }
-  return { rows: rows, blocks: blocks, skipped: skipped };
+  return { blocks: blocks, skipped: skipped };
 }
 
 function rowHasLabel(row, label) {
@@ -334,6 +505,134 @@ function rowHasLabel(row, label) {
     if (String(row[k]).trim() === label) return true;
   }
   return false;
+}
+
+/**
+ * The builds on a Suggested grid (`src/dfs/sheet_suggested.py` `parse_builds` does the same in Python): a bar row
+ * whose column A reads "Build N" (column B the kind, Cash or GPP, column C the title), then the column header,
+ * then nine player rows with the name in column B. A block without nine names is left out. Returns
+ * [{number, kind, title, names: [9 names]}].
+ */
+function parseBuilds(grid) {
+  var builds = [];
+  for (var i = 0; i < grid.length; i++) {
+    var label = String(grid[i][0] === undefined ? '' : grid[i][0]).trim();
+    var match = /^Build (\d+)$/.exec(label);
+    if (!match || label.indexOf(BUILD_LABEL) !== 0) continue;
+    var names = [];
+    for (var j = i + 2; j < i + 2 + SLOT_ORDER.length && j < grid.length; j++) {
+      names.push(String(grid[j][1] === undefined ? '' : grid[j][1]).trim());
+    }
+    if (names.length !== SLOT_ORDER.length || names.some(function (n) { return n === ''; })) continue;
+    builds.push({
+      number: parseInt(match[1], 10),
+      kind: String(grid[i][1] === undefined ? '' : grid[i][1]).trim(),
+      title: String(grid[i][2] === undefined ? '' : grid[i][2]).trim(),
+      names: names
+    });
+  }
+  return builds;
+}
+
+/**
+ * Where build `number` goes: the FIRST lineup block whose nine name cells (column A) are all empty. Returns
+ * {status: 'ok', build, block: {header, first, total}, marker} with the Cash / GPP marker to set on the block's
+ * Total row, {status: 'noBuild'} when `number` is not on the Suggested grid, or {status: 'noBlock'} when every
+ * block already has a name in it. A block that has any name in it is never chosen.
+ */
+function planCopyBuild(suggestedGrid, number, lineupsGrid) {
+  var build = null;
+  parseBuilds(suggestedGrid).forEach(function (b) { if (b.number === number) build = b; });
+  if (build === null) return { status: 'noBuild' };
+  var blocks = findLineupBlocks(lineupsGrid).blocks;
+  for (var i = 0; i < blocks.length; i++) {
+    var empty = true;
+    for (var r = blocks[i].first; r < blocks[i].first + PLAYERS_PER_BLOCK; r++) {
+      if (String(lineupsGrid[r - 1][0]).trim() !== '') { empty = false; break; }
+    }
+    if (empty) {
+      return {
+        status: 'ok',
+        build: build,
+        block: blocks[i],
+        marker: MARKER_VALUES.indexOf(build.kind) === -1 ? '' : build.kind
+      };
+    }
+  }
+  return { status: 'noBlock' };
+}
+
+/** A name as the sheets compare it: trimmed and lower-case. */
+function normalizeName(value) {
+  return String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+}
+
+/**
+ * A `GameStart` value as sortable Eastern wall-clock text, `YYYY-MM-DDTHH:mm:ss` (TFFB writes Eastern time
+ * with a trailing "Z", which is not UTC). '' when blank or not that shape.
+ */
+function parseKickoff(value) {
+  var text = String(value === null || value === undefined ? '' : value).trim().replace(/Z$/, '');
+  var match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(:\d{2})?$/.exec(text);
+  return match ? match[1] + (match[2] || ':00') : '';
+}
+
+/** Where a kickoff falls, the way Sam says it: TNF, SNF, MNF, otherwise `Sun 1:00 pm` (Eastern). */
+function playsLabel(start) {
+  var match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(start);
+  if (!match) return 'later';
+  var day = new Date(Date.UTC(+match[1], +match[2] - 1, +match[3])).getUTCDay(); // 0 = Sunday
+  var hour = +match[4];
+  if (day === 4) return 'TNF';
+  if (day === 1) return 'MNF';
+  if (day === 0 && hour >= 19) return 'SNF';
+  var names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return names[day] + ' ' + (hour % 12 || 12) + ':' + match[5] + ' ' + (hour < 12 ? 'am' : 'pm');
+}
+
+/**
+ * The FLEX rule (`src/dfs/flex_order.py` has the same, tested against the same cases). `seats` is the nine
+ * players of one lineup in SLOT_ORDER, each {slot, name, position, start} (start from `parseKickoff`, '' when
+ * unknown); `nowEt` is the current Eastern time in the same text form. The position with one player more than
+ * its own slots hold (RB beyond 2, WR beyond 3, TE beyond 1) owns the FLEX: its player with the latest
+ * kickoff belongs there. Returns {status, toFlex, fromFlex} (seat indexes, set for 'move' and 'locked'):
+ *   ok          the FLEX already holds the latest kickoff
+ *   move        swap the players at toFlex and fromFlex
+ *   tie         the latest kickoff is shared: left as it is
+ *   locked      one of the two games has started: a started player is never moved
+ *   unknown     a kickoff is missing for someone at the flex position
+ *   incomplete  fewer than nine named players, or not a legal lineup shape
+ */
+function planFlexSwap(seats, nowEt) {
+  if (seats.length !== SLOT_ORDER.length) return { status: 'incomplete' };
+  var counts = { RB: 0, WR: 0, TE: 0 };
+  var flexIndex = -1;
+  for (var i = 0; i < seats.length; i++) {
+    if (String(seats[i].name).trim() === '' || seats[i].position === '') return { status: 'incomplete' };
+    if (counts.hasOwnProperty(seats[i].position)) counts[seats[i].position]++;
+    if (seats[i].slot === FLEX_SLOT) flexIndex = i;
+  }
+  var surplus = [];
+  var exact = true;
+  Object.keys(FLEX_BASE).forEach(function (p) {
+    if (counts[p] === FLEX_BASE[p] + 1) surplus.push(p);
+    else if (counts[p] !== FLEX_BASE[p]) exact = false;
+  });
+  if (surplus.length !== 1 || !exact || flexIndex === -1 || seats[flexIndex].position !== surplus[0]) {
+    return { status: 'incomplete' };
+  }
+  var pool = [];
+  for (var j = 0; j < seats.length; j++) if (seats[j].position === surplus[0]) pool.push(j);
+  for (var k = 0; k < pool.length; k++) if (seats[pool[k]].start === '') return { status: 'unknown' };
+  var latest = pool.reduce(function (best, idx) { return seats[idx].start > best ? seats[idx].start : best; }, '');
+  var last = pool.filter(function (idx) { return seats[idx].start === latest; });
+  if (last.length > 1) return { status: 'tie' };
+  var target = last[0];
+  if (target === flexIndex) return { status: 'ok' };
+  if (seats[target].start <= nowEt || seats[flexIndex].start <= nowEt) {
+    return { status: 'locked', toFlex: target, fromFlex: flexIndex };
+  }
+  return { status: 'move', toFlex: target, fromFlex: flexIndex };
 }
 
 /**
@@ -414,6 +713,14 @@ function findColumn(headerValues, text) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     planLineupClear: planLineupClear,
+    findLineupBlocks: findLineupBlocks,
+    planFlexSwap: planFlexSwap,
+    parseKickoff: parseKickoff,
+    parseBuilds: parseBuilds,
+    planCopyBuild: planCopyBuild,
+    playsLabel: playsLabel,
+    normalizeName: normalizeName,
+    SLOT_ORDER: SLOT_ORDER,
     normalizePoolValue: normalizePoolValue,
     normalizeAddType: normalizeAddType,
     chooseAddName: chooseAddName,

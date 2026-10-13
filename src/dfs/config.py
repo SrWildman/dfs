@@ -15,6 +15,7 @@ from __future__ import annotations
 import sys
 import tomllib
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -140,6 +141,20 @@ class SimConfig(BaseModel):
     gpp_target: float = SIM_GPP_TARGET_DEFAULT
 
 
+PROJECTION_CHOICES = ("CalPts", "ProjPts", "AggPts")
+
+
+class ProjectionConfig(BaseModel):
+    """`[projection]`: which projection the model-driven tools act on (late swap, the Lineups simulator, the
+    Suggested builds, the Board's portfolio line). `CalPts` is our corrected projection (Sam, Week 6: after
+    five weeks it beats TFFB clearly at RB and WR and ties at QB and TE); wherever CalPts is blank the tools
+    fall back to TFFB's `ProjPts`. TFFB stays visible on every tab for comparison."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: Literal["CalPts", "ProjPts", "AggPts"] = "CalPts"
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -150,6 +165,7 @@ class Config(BaseModel):
     results: ResultsConfig = ResultsConfig()
     season: SeasonConfig = SeasonConfig()
     sim: SimConfig = SimConfig()
+    projection: ProjectionConfig = ProjectionConfig()
 
 
 def _missing_config_message() -> str:

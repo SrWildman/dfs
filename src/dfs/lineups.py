@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import csv
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
+from dfs import flex_order
+from dfs.kickoff import parse_kickoff
 from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS, Player, Position
 
 _ENTRY_COLUMNS = 4  # Entry ID, Contest Name, Contest ID, Entry Fee
@@ -150,6 +153,39 @@ def validate_entry(
         result.errors.append(f"salary {result.salary_total} exceeds cap {salary_cap}")
 
     return result
+
+
+def kickoffs_by_id(edge: pd.DataFrame) -> dict[str, datetime | None]:
+    """DraftKings id -> real kickoff instant, from the edge frame's `Id` and `GameStart` (`kickoff.py`)."""
+    return {str(row["Id"]): parse_kickoff(row.get("GameStart")) for _, row in edge.iterrows()}
+
+
+def reorder_flex(
+    results: list[ValidationResult], kickoffs: dict[str, datetime | None], now: datetime
+) -> tuple[list[ParsedEntry], list[str]]:
+    """The valid entries with the FLEX rule applied (`flex_order`: the latest kickoff among the flex
+    position's players goes in FLEX), and one sentence per entry that was changed or could not be (`locked`:
+    a started player is never moved). An entry that needs nothing comes back as it was."""
+    entries: list[ParsedEntry] = []
+    messages: list[str] = []
+    for result in (r for r in results if r.ok):
+        seats = [
+            flex_order.Seat(slot, p.name, p.position.value, kickoffs.get(p.dk_id))
+            for slot, p in zip(ROSTER_SLOTS, result.players, strict=True)
+        ]
+        plan = flex_order.plan_flex(seats, now)
+        where = f"row {result.entry.row_number} ({result.entry.entry_id})"
+        if plan.moves:
+            cells = flex_order.apply_swap(result.entry.slot_cells, plan, seats)
+            entries.append(replace(result.entry, slot_cells=cells))
+            messages.append(f"{where}: {flex_order.describe(plan)}")
+        else:
+            entries.append(result.entry)
+            if plan.status == "locked":
+                messages.append(f"{where}: FLEX left as it is (a player's game has started)")
+            elif plan.status == "unknown":
+                messages.append(f"{where}: FLEX not checked (a kickoff time is missing)")
+    return entries, messages
 
 
 def export_csv(valid_entries: list[ParsedEntry], path: Path) -> int:

@@ -94,6 +94,7 @@ def suggest_actions(state: LauncherState) -> list[Suggestion]:
     if state.lineups_total and state.lineups_filled >= state.lineups_total:
         suggestions.append(Suggestion("Export DK's upload CSV", "dfs export"))
     elif state.pool_count:
+        suggestions.append(Suggestion("Suggest lineups from your pool", "dfs lineups suggest"))
         suggestions.append(Suggestion("Build lineups in the sheet", None))
         suggestions.append(Suggestion("Add more players to your pool", "dfs pool add"))
     else:
@@ -143,30 +144,20 @@ class MenuItem:
     command: str | None
 
 
-# The standard week, in order -- the same six steps as docs/COMMANDS.md's "Your standard week".
+# Sam's week, in order (Week 6: the main menu is these steps and nothing else; every other command is under
+# "More, by topic"). The same steps as docs/COMMANDS.md's "Your standard week" and CLAUDE.md's shortcuts.
 STANDARD_WEEK_ITEMS = [
     MenuItem("Start a new week", "dfs week new"),
     MenuItem("Sync all data", "dfs sync"),
-    MenuItem("Build lineups (research + pool, in the sheet)", None),
+    MenuItem("Pick your pool and build lineups", None),
+    MenuItem("Suggest lineups from your pool", "dfs lineups suggest"),
     MenuItem("Export the DraftKings upload file", "dfs export"),
-    MenuItem("Gameday: refresh odds/statuses/weather", "dfs sync --live"),
+    MenuItem("Gameday: final sync (after inactives)", "dfs sync --live"),
     MenuItem("Gameday: who can still be swapped?", "dfs lineups late-swap"),
     MenuItem("Close out the week (after the games)", "dfs week close"),
 ]
 
-# Used most weeks but not part of the six steps.
-HANDY_ITEMS = [
-    MenuItem("Add a player to your pool", "dfs pool add"),
-    MenuItem("Remove a player from your pool", "dfs pool remove"),
-    MenuItem("Show your pool", "dfs pool list"),
-    MenuItem("Sync + check + report what changed", "dfs go"),
-    MenuItem("Which betting lines have moved", "dfs odds movement"),
-    MenuItem("Score projections (Model Check)", "dfs results update"),
-    MenuItem("Status: config, sheet, data freshness", "dfs status"),
-    MenuItem("Check the sheet's structure", "dfs doctor"),
-]
-
-MENU_SECTIONS = [("Your standard week", STANDARD_WEEK_ITEMS), ("Also handy", HANDY_ITEMS)]
+MENU_SECTIONS = [("Your week, in order", STANDARD_WEEK_ITEMS)]
 
 # What to offer when the prompt can reasonably propose an answer: (command, parameter name) -> default.
 ANSWER_DEFAULTS = {("dfs export", "output"): "lineups.csv"}
@@ -197,14 +188,17 @@ def suggested_commands(state: LauncherState) -> set[str | None]:
     return {a.command for a in suggest_actions(state)}
 
 
+ALSO_SUGGESTED = "Also suggested right now"
+
+
 def menu_sections(state: LauncherState) -> list[tuple[str, list[MenuItem]]]:
-    """`MENU_SECTIONS`, plus any suggested command that is not on it (e.g. reconciling results) appended
-    to the "Also handy" section so a suggestion is never invisible."""
+    """`MENU_SECTIONS`, plus an "Also suggested right now" section for any suggested command that is not a
+    step of the week (e.g. reconciling results, adding a player), so a suggestion is never invisible."""
     shown = {item.command for _t, items in MENU_SECTIONS for item in items}
     extras = [
         MenuItem(a.label, a.command) for a in suggest_actions(state) if a.command and a.command not in shown
     ]
-    return [(title, items + (extras if title == "Also handy" else [])) for title, items in MENU_SECTIONS]
+    return [*MENU_SECTIONS, *([(ALSO_SUGGESTED, extras)] if extras else [])]
 
 
 @dataclass
@@ -266,6 +260,12 @@ def answer_to_args(param: MissingParam, answer: str) -> list[str]:
 # One plain-English line per command for the "More commands" screen (the docstrings carry project history).
 # tests/test_launcher.py fails if a command in docs/COMMANDS.md has no label here (a new command needs one).
 MORE_LABELS = {
+    "dfs status": "Config, sheet and how fresh each data source is",
+    "dfs doctor": "Check the sheet's structure",
+    "dfs pool add": "Add a player to your pool",
+    "dfs pool remove": "Remove a player from your pool",
+    "dfs pool list": "Show your pool",
+    "dfs results update": "Score the projections into Model Check",
     "dfs go": "Sync, check the sheet and report what changed, in one go",
     "dfs edge": "Show the top leverage plays from the last sync",
     "dfs pool clear": "Clear your whole pool",

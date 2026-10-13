@@ -4,7 +4,14 @@ A column name alone does not say what a number means -- "WOPR", "Opp Def EPA/pas
 pct)" are all jargon to anyone who did not build the sheet. Each definition lives here, once, and is applied
 wherever that header appears, so the explanation is always one hover away and cannot drift between tabs.
 
-Three groups, one dict each (headers are matched by their TEXT, never by position):
+**One registry, keyed by header text.** `player_tab_notes()` is every header on EdgeRaw, Player Pool and
+Lineups (both spellings where the tabs differ: `Position`/`Pos.`, `Salary`/`DK Sal`, `ProjPts`/`Pts`,
+`Ceiling`/`Ceil`), `edge_finder_tab_notes()` adds the Edge Finder's own, `BOARD_NOTES` the Board's tables.
+Every apply REPLACES the notes on the header row (a note that no longer matches its header is cleared: that
+is what left a `Tgt%` note on `GameStart` after a column move), and a test fails when a visible header has
+no note or a note mentions a removed feature (`REMOVED_FEATURES`).
+
+The groups (headers are matched by their TEXT, never by position):
 
 - `USAGE_NOTES`: the five usage-volume columns on EdgeRaw, Player Pool, Lineups and PlayerPoolRaw. They carry
   the window ("last 3 games played") and the week the data runs through -- the number comes from the latest
@@ -21,7 +28,9 @@ header row whose text the caller already has (Model Check, whose rows are built 
 from __future__ import annotations
 
 from dfs import store
-from dfs.sheets import SheetsClient, column_letter
+from dfs.sheet_columns import ALL_PCT_COLUMNS
+from dfs.sheet_consider import CONSIDER_NOTE
+from dfs.sheets import SheetsClient
 from dfs.usage_metrics import USAGE_WINDOW_GAMES
 
 _WINDOW = (
@@ -73,8 +82,9 @@ EDGE_FINDER_NOTES = {
     "CalPts": (
         "CALIBRATED PROJECTION: every source (TFFB, Sleeper, FantasyPros) with its level bias corrected "
         "per position and salary tier (shrunk toward zero), then weighted by how accurate each has been. "
-        "Fitted only on weeks BEFORE this one. Not the default projection: Model Check's Projection Race "
-        "shows whether it earns that. Coloured within his position."
+        "Fitted only on weeks BEFORE this one. The projection late swap, the lineup odds and the Suggested "
+        "builds use (ProjPts where CalPts is blank); TFFB stays visible for comparison. Model Check's "
+        "Projection Race keeps scoring it. Coloured within his position."
     ),
     "Hit3x%": (
         "CASH: the chance he scores at least 3 x his salary per $1,000 (the line behind Val >= 3), 0-100. "
@@ -165,7 +175,164 @@ SLATE_TEAMS_NOTES = {
     ),
 }
 
+_PTS = (
+    "TFFB's projection: his median outcome in DraftKings points. CalPts (our corrected projection) "
+    "sits beside "
+    "it, and TFFB stays visible everywhere for comparison."
+)
+_SAL = "DraftKings salary. Nine players share the $50,000 cap."
+_CEIL = (
+    "TFFB's own ceiling: about his 85th-percentile outcome (14% of players beat it). Blank where TFFB gives "
+    "none, never a zero. CeilM is the model's version."
+)
+_GROUP = (
+    "Section marker: the columns after it, up to the next marker, are one group. Collapse it "
+    "with the +/- above."
+)
+
+# Everything on EdgeRaw, Player Pool and Lineups that is not a usage, weather, slate-game or probability
+# column (those have their own dicts above). Where the tabs spell a header differently, both spellings
+# are here.
+CORE_NOTES = {
+    "Pool": (
+        "Whether he is in your pool: Cash, GPP or Both. Pick one to add him, blank it to remove him. The "
+        "same "
+        "cell on EdgeRaw, Player Pool and the Edge Finder."
+    ),
+    "Name": "The player, spelled as DraftKings spells him.",
+    "Position": "DraftKings position: QB, RB, WR, TE or DST.",
+    "Pos.": "DraftKings position: QB, RB, WR, TE or DST. (On Lineups it is the roster slot, FLEX included.)",
+    "Pos": "DraftKings position: QB, RB, WR, TE or DST.",
+    "Team": "His team.",
+    "Opp": "This week's opponent.",
+    "Opp.": "This week's opponent.",
+    "Salary": _SAL,
+    "DK Sal": _SAL,
+    "ProjPts": _PTS,
+    "Pts": _PTS,
+    "AggPts": (
+        "The plain average of every projection source (TFFB, Sleeper, FantasyPros). Context: CalPts is the "
+        "corrected version."
+    ),
+    "Val": (
+        "VALUE: projected points per $1,000 of salary (ProjPts divided by Salary / 1,000). 3.0 is the usual "
+        "cash pace, 4.0 the GPP pace."
+    ),
+    "ValAdj": (
+        "VALUE, ADJUSTED (0-100, within his position): half how high his projection ranks among that "
+        "position's regular starters, half how far he beats what his salary normally buys. EdgeRaw is sorted "
+        "by it. Compare players within a position, not across positions."
+    ),
+    "Ceiling": _CEIL,
+    "Ceil": _CEIL,
+    "CeilVal": "CEILING VALUE: his Ceiling points per $1,000 of salary. Blank where Ceiling is blank.",
+    "Own%": (
+        "PROJECTED OWNERSHIP: the share of lineups that will hold him. Reads 0 for everyone until ownership "
+        "publishes, usually late in the week."
+    ),
+    "Avail": "DraftKings' status: Q (questionable), OUT or IR. Blank means no designation.",
+    "Flags": (
+        "Every warning that applies, most urgent first: OUT; WIND (15+ mph); IMPL↑ / IMPL↓ (his team's "
+        "implied "
+        "total moved 6+ points); LEVERAGE; CHALK (owned 20%+); TFFB↑ / TFFB↓ (TFFB far from the other "
+        "sources). Bold names have a flag."
+    ),
+    "Flag": "The single most urgent flag (hidden helper behind the bold Name).",
+    "GAME": _GROUP + " This one is the game: total, spread, pace and the matchup.",
+    "Spread": "The point spread, signed from the home team's view (negative = the home team is favoured).",
+    "O/U": "The game's Vegas total: the points both teams are expected to score.",
+    "OverUnder": "The game's Vegas total: the points both teams are expected to score.",
+    "Team Implied": (
+        "His team's Vegas implied total: (Total plus or minus the spread) / 2. The higher, the more points "
+        "his offense is expected to score."
+    ),
+    "OppPosRank": (
+        "TFFB's strength-of-schedule rank (1-32) of his opponent at his position. Noisy early in the season; "
+        "OppEPA is steadier. Coloured green at the low end."
+    ),
+    "OppEPA": (
+        "How soft his matchup is, in expected points added per play: the opponent's pass defense for a "
+        "QB, WR "
+        "or TE, its rush defense for an RB, and for a DST the opposing offense with the sign flipped. Higher "
+        "= a softer matchup."
+    ),
+    "GameID": "The game's identifier. Two players with the same GameID are in the same game.",
+    "TmRank": (
+        "Where his salary ranks among his team's players at his position (1 = the highest-priced). A proxy "
+        "for the depth chart, not a measured share: TmRank 1 at WR is that team's WR1 by price."
+    ),
+    "CEIL": _GROUP + " This one is ceiling detail: CeilPct, Leverage, OwnStatus, Floor, CeilM and Bust%.",
+    "CeilPct": "His Ceiling's percentile within his position, 0-100. A proxy for upside before ownership.",
+    "Leverage": (
+        "CeilPct minus his ownership percentile within his position (-100 to +100). Positive = more upside "
+        "than the field's ownership gives him. Blank until ownership publishes."
+    ),
+    "OwnStatus": "Whether Own% is real ('real') or not published yet ('unpublished').",
+    "MOVE": _GROUP + " This one is line movement since the week's first odds snapshot.",
+    "ImpliedMove": (
+        "How far his team's implied total has moved since the first odds snapshot of the week, in points. "
+        "6 or more sets IMPL↑ / IMPL↓."
+    ),
+    "TotMove": "How far the game's total has moved since the first odds snapshot of the week.",
+    "SpdMove": "How far the spread has moved since the first odds snapshot of the week.",
+    "GameStart": "Kickoff, Eastern time. Late swap and the FLEX rule use it to know who has started.",
+    "WX": _GROUP + " This one is the weather.",
+    "Venue": "H (home) or A (away).",
+    "Stadium": "The stadium.",
+    "Roof": (
+        "outdoors or dome. Blank means nflverse does not know yet (common for retractable roofs). "
+        "Domes have no wind."
+    ),
+    "USAGE": _GROUP + " This one is usage volume: snap share, targets, carries and red-zone looks.",
+    "Snap%": (
+        "OFFENSIVE SNAP SHARE in his most recent game (nflverse). Blank for a player with no recorded game "
+        "and for defenses; a real 0% stays 0%."
+    ),
+    "Id": "His DraftKings player id (hidden). Pool and the add-a-player box find him by it, never by name.",
+    "NameKey": "His name in a plain lower-case form (hidden), used only to join sources.",
+    "Edge ↗": (
+        "Opens his row on EdgeRaw (the filtered view), where the Pool dropdown changes or removes him."
+    ),
+    "Overflow": (
+        "Warns when a position has more players in the pool than its block has rows (nobody is "
+        "dropped silently)."
+    ),
+    "Used": "How many of this week's lineups hold him.",
+    "In": "Which of this week's lineups hold him.",
+    "% of Cap": "His salary as a share of the cap (config.toml [lineups] salary_cap).",
+    "Issues": (
+        "Per player: DUPLICATE, or his Avail flag (OUT, IR, Q). On the Total row: OVER the cap, INCOMPLETE "
+        "(fewer than 9 players), DST/QB (your DST faces your own QB), RB/GAME (two RBs from one game), "
+        "'Weak for cash' (a Cash lineup under 40% Cash %), or OK."
+    ),
+    "Games": "How many different games your nine players come from.",
+    "Min Unique": (
+        "The fewest players this lineup has that some other lineup of yours does not (9 = nothing shared)."
+    ),
+    "Player Key": (
+        "DraftKings' canonical name for whatever was typed in column A (hidden), so two spellings "
+        "of one player are caught."
+    ),
+}
+
 MODEL_CHECK_NOTES = {
+    "Salary tier": "The salary band a bias is measured in (CalPts corrects per position and band).",
+    "Bias now": (
+        "How far this source misses at this position and price, shrunk toward zero when few players back "
+        "it. Negative = the source runs HIGH; CalPts takes that many points off. Fitted on every scored "
+        "week so far."
+    ),
+    "Bias last week": "The same number as it stood before this week was scored (blank on the first fit).",
+    "TFFB": "The weight TFFB's projection gets in CalPts at this position (fitted on every scored week).",
+    "Sleeper": "The weight Sleeper's projection gets in CalPts at this position.",
+    "FantasyPros": "The weight FantasyPros' projection gets in CalPts at this position.",
+    "TFFB (last week)": "TFFB's weight before this week was scored.",
+    "Sleeper (last week)": "Sleeper's weight before this week was scored.",
+    "FantasyPros (last week)": "FantasyPros' weight before this week was scored.",
+    "Unflagged avg": (
+        "Mean of (actual minus CalPts) for the same position's players with no signal: what a signal has "
+        "to beat."
+    ),
     "n": "Sample size. A row with n under 30 is 'thin' (muted italic): too few players to say anything yet.",
     "Beat Ceiling": "Share of players whose actual DK points were MORE than their published Ceiling.",
     "90% low": "Lower end of the 90% Wilson confidence interval for the rate beside it.",
@@ -267,6 +434,132 @@ MODEL_CHECK_NOTES = {
 }
 
 
+# The Edge Finder's own headers (the player tabs' dicts cover Pool, Name, Pos, Team, Salary, Own%, CalPts,
+# Hit3x%, Boom%, Bust%, Floor, CeilM, ValAdj, ProjPts and Edge there too).
+NAME_WITH_CONSIDER = f"{CORE_NOTES['Name']} {CONSIDER_NOTE}"
+
+EDGE_FINDER_TAB_NOTES = {
+    "Name": NAME_WITH_CONSIDER,
+    "Do": (
+        "The verb: what to do with him. 'Cash add', 'GPP add' and 'GPP leverage' are the pool candidates; "
+        "'In pool (Both)' once you have ticked him. Reads your Pool live."
+    ),
+    "Why": "A one-line reason. Hover the cell for the full explanation.",
+    "Lev": (
+        "LEVERAGE: his Boom% rank minus his Own% rank among his position's players (-100 to +100). +25 or "
+        "more is much more upside than ownership. Blank until ownership publishes."
+    ),
+    "TFFB": "TFFB's projection, in DraftKings points.",
+    "Sleeper": "Sleeper's projection, in DraftKings points.",
+    "FantPros": "FantasyPros' projection, in DraftKings points.",
+    "Diff": "CalPts minus TFFB's ProjPts. Positive = we are higher than TFFB.",
+    "+Car/G": (
+        "Extra carries per game he inherits while the regular back is out (the measured carries table)."
+    ),
+    "+xFP/G": "What those extra carries are worth in DraftKings points per game.",
+    "Method": (
+        "How the bump was worked out: 'table' = the measured carries table, 'w/wo' = his own "
+        "with-or-without history."
+    ),
+    "Priced?": (
+        "Whether his salary already moved after the injury designation. Blank when no earlier "
+        "snapshot exists."
+    ),
+    "Role": "His role on his team before the absence.",
+    "Tgt/G": "Targets per game over his last 3 games played.",
+    "Car/G": "Carries per game over his last 3 games played.",
+    "Missed": "Team games he has missed so far this season.",
+    "Metric": "The usage measure that moved.",
+    "Last 3": "His average over the last 3 games played.",
+    "Earlier": "His average over the games before those 3.",
+    "Change": "Last 3 minus Earlier.",
+    "Trend": "▲ rising or ▼ falling, only when the move is bigger than normal week-to-week noise.",
+    "Matchup": "The offense and the opponent it faces. Click + to open the team's top players.",
+    "Grade": "Soft is one of the 8 easiest matchups on the slate, Tough one of the 4 hardest. Context only.",
+    "Players": "How many of the team's players are listed under it.",
+    "Token": "The context chip that fired for him (see Edge). Unproven: a tiebreaker at most.",
+    "DK/G L3": "His actual DraftKings points per game over his last 3 games.",
+    "Read": "The signal and its plain-language reading. Model Check scores each one against its baseline.",
+}
+
+BOARD_NOTES = {
+    "Matchup": "The game, away at home.",
+    "Total": "The game's Vegas total.",
+    "Fav": "The favourite.",
+    "Spread": "The spread, from the favourite's side.",
+    "Shootout?": (
+        "Shootout when the game total is 48 or more (a first-pass line, not yet tuned on real slates)."
+    ),
+    "GPS": (
+        "TFFB's pace-of-play score for the game, 1-5 (Kyle Borgognoni's weekly article). Blank "
+        "until it publishes."
+    ),
+    "Player": f"The player; Pool is his live Cash / GPP / Both control. {CONSIDER_NOTE}",
+    "What changed": "What moved since the last sync, for the players in your pool.",
+    "Why": "Why he is on this list.",
+    "Pooled": "Players in your pool at this position.",
+    "Cash": "Of those, tagged Cash or Both.",
+    "GPP": "Of those, tagged GPP or Both.",
+    "Min Sal": "Cheapest salary in your pool at this position.",
+    "Max Sal": "Most expensive salary in your pool at this position.",
+    "Avg Sal": "Average salary of your pool at this position.",
+    "Cheapest": "Your cheapest pooled player at this position.",
+    "Cheapest Sal": "His salary.",
+    "QB": "The quarterback.",
+    "Opp": "The opponent.",
+    "Pass catchers": "His team's top pass catchers by salary.",
+    "Bring-back": "The opposing team's best pass catcher, the usual bring-back.",
+    "Sal": "DraftKings salary.",
+    "Team": "His team.",
+    "WR1": "The team's highest-priced WR (TmRank 1).",
+    "WR2": "The team's second-highest-priced WR.",
+    "WR3": "The team's third-highest-priced WR.",
+    "TE1": "The team's highest-priced TE.",
+    "RB1": "The team's highest-priced RB.",
+}
+
+# Features that no longer exist. A note that mentions one is stale (the test pins this list).
+REMOVED_FEATURES = (
+    "Pool Picks",
+    "Pool deck",
+    "Source column",
+    "checkbox",
+    "TRUE/FALSE",
+    "Set column",
+    "LineMove",
+)
+
+
+# The hidden `*%ile` helpers behind the colour steps, one per coloured column (`ALL_PCT_COLUMNS`).
+PERCENTILE_HELPER_NOTES = {
+    helper: f"Hidden helper: {base}'s percentile within his position (0-100). The colour steps read it."
+    for base, helper in ALL_PCT_COLUMNS.items()
+}
+
+
+def player_tab_notes() -> dict[str, str]:
+    """Every header on EdgeRaw, Player Pool and Lineups (and the Edge Finder's number columns), by text.
+    The usage notes carry the week the usage data runs through, so this reads the latest sync."""
+    return {
+        **CORE_NOTES,
+        **PERCENTILE_HELPER_NOTES,
+        **SLATE_GAME_NOTES,
+        **EDGE_FINDER_NOTES,
+        **usage_notes(),
+    }
+
+
+def edgeraw_notes() -> dict[str, str]:
+    """EdgeRaw's: the player tabs' plus the soft-yellow "Consider" explanation on `Name` (it lists everyone,
+    pooled or not; Player Pool and Lineups never show the yellow)."""
+    return {**player_tab_notes(), "Name": NAME_WITH_CONSIDER}
+
+
+def edge_finder_tab_notes() -> dict[str, str]:
+    """The Edge Finder's header notes: the player tabs' plus its own."""
+    return {**player_tab_notes(), **EDGE_FINDER_TAB_NOTES}
+
+
 def usage_through_week() -> int | None:
     """The week the usage columns currently run through (the latest near-full week in the most recent
     `usage` sync), or None when there is no usage data yet. Read from `data/current/usage.csv`."""
@@ -288,21 +581,24 @@ def usage_notes() -> dict[str, str]:
 
 
 def apply_notes_to_values(
-    client: SheetsClient, tab: str, row: int, header: list, notes: dict[str, str]
+    client: SheetsClient, tab: str, row: int, header: list, notes: dict[str, str], *, first_col: int = 0
 ) -> int:
-    """Set a note on every header cell in `header` (the values of row `row`) whose text is a key of `notes`.
+    """REPLACE the notes on `row` (whose header text is `header`): every cell whose text is a key of `notes`
+    gets that note, and every other cell from `first_col` on loses whatever note it had. Clearing is the
+    point: a column that moved used to leave its old note on whichever header now sits there. One request
+    per row.
     Returns how many notes were written."""
-    written = 0
-    for index, name in enumerate(header):
-        text = notes.get(str(name))
-        if text:
-            client.set_note(tab, f"{column_letter(index)}{row}", text)
-            written += 1
-    return written
+    texts = [notes.get(str(name).strip(), "") for name in header][first_col:]
+    if texts:
+        client.set_row_notes(tab, row, texts, first_col=first_col)
+    return sum(1 for text in texts if text)
 
 
 def apply_header_notes(client: SheetsClient, tab: str, header_row: int, notes: dict[str, str]) -> int:
-    """Read `tab`'s header row and note every column named in `notes`. Matches by header text, so it is
-    safe wherever the columns sit; returns how many notes were written."""
+    """Read `tab`'s header row and replace its notes with those in `notes` (matched by header text, so safe
+    wherever the columns sit). Column A of row 1 is left alone: it carries the tab's own note
+    (`sheet_style.TAB_NOTES`). Returns how many notes were written."""
     rows = client.read_range(tab, f"A{header_row}:{header_row}")
-    return apply_notes_to_values(client, tab, header_row, rows[0] if rows else [], notes)
+    return apply_notes_to_values(
+        client, tab, header_row, rows[0] if rows else [], notes, first_col=1 if header_row == 1 else 0
+    )

@@ -406,3 +406,194 @@ def test_a_non_strict_dropdown_never_needs_the_workaround(tmp_path):
     state = _run_flow(tmp_path, scenario)
     assert _cell(state, "Edge Finder", 5, 1)["formula"].startswith("=IF($D5")
     assert _cell(state, "EdgeRaw", 3, 1)["value"] == "GPP"
+
+
+# --- Fix FLEX order (Week 6): the same rule as flex_order.py, pinned to the same cases ----------------------
+
+
+def test_the_flex_constants_match_the_python_rule():
+    from dfs import flex_order
+    from dfs.kickoff import KICKOFF_TIMEZONE
+    from dfs.models import ROSTER_SLOTS
+    from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
+
+    assert _list_const("SLOT_ORDER") == list(ROSTER_SLOTS)
+    assert _const("FLEX_SLOT") == flex_order.FLEX_SLOT
+    base = re.search(r"^var FLEX_BASE = \{(.*?)\};", SOURCE, re.MULTILINE).group(1)
+    assert {k.strip(): int(v) for k, v in (p.split(":") for p in base.split(","))} == flex_order.BASE_SLOTS
+    assert _const("KICKOFF_TIMEZONE") == KICKOFF_TIMEZONE
+    assert _const("KEY_HEADER") == LINEUP_KEY_HEADER and _const("POSITION_HEADER") == "Position"
+    assert _const("GAMESTART_HEADER") == "GameStart"
+
+
+def test_the_menu_offers_fix_flex_order_and_the_version_moved_on():
+    assert ".addItem('Fix FLEX order', 'fixFlexOrder')" in SOURCE
+    assert apps_script.repo_script_version() >= 4
+    body = SOURCE.split("function fixFlexOrder")[1].split("function edgeKickoffs_")[0]
+    assert "getSheetByName(LINEUPS_TAB)" in body and "getActiveSheet" not in SOURCE
+    assert "ButtonSet.YES_NO" in body  # asks before it changes anything
+
+
+_SLOTS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST"]
+_WR_FLEX = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "WR", "DST"]
+_EARLY, _SNF, _MON = "2030-10-20T13:00:00", "2030-10-20T20:20:00", "2030-10-21T20:15:00"
+_BEFORE, _DURING = "2030-10-20T11:00:00", "2030-10-20T14:00:00"
+
+
+def _seats(positions, starts):
+    return [
+        {"slot": s, "name": f"P{i}", "position": pos, "start": st}
+        for i, (s, pos, st) in enumerate(zip(_SLOTS, positions, starts, strict=True))
+    ]
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("positions", "starts", "now", "expected"),
+    [
+        (
+            _WR_FLEX,
+            [_EARLY] * 5 + [_SNF] + [_EARLY] * 3,
+            _BEFORE,
+            {"status": "move", "toFlex": 5, "fromFlex": 7},
+        ),
+        (_WR_FLEX, [_EARLY] * 7 + [_SNF, _EARLY], _BEFORE, {"status": "ok"}),
+        (_WR_FLEX, [_EARLY] * 5 + [_SNF, _EARLY, _SNF, _EARLY], _BEFORE, {"status": "tie"}),
+        (
+            _WR_FLEX,
+            [_EARLY] * 5 + [_SNF] + [_EARLY] * 3,
+            _DURING,
+            {"status": "locked", "toFlex": 5, "fromFlex": 7},
+        ),
+        (_WR_FLEX, [_EARLY] * 5 + [""] + [_EARLY] * 3, _BEFORE, {"status": "unknown"}),
+        (
+            ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "RB", "DST"],
+            [_EARLY, _EARLY, _MON] + [_EARLY] * 6,
+            _BEFORE,
+            {"status": "move", "toFlex": 2, "fromFlex": 7},
+        ),
+        (
+            ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "QB", "DST"],
+            [_EARLY] * 9,
+            _BEFORE,
+            {"status": "incomplete"},
+        ),
+    ],
+)
+def test_plan_flex_swap_agrees_with_the_python_rule(node_module, positions, starts, now, expected):
+    got = _run_node(
+        node_module, f"m.planFlexSwap({json.dumps(_seats(positions, starts))}, {json.dumps(now)})"
+    )
+    assert got == expected
+
+
+@needs_node
+def test_a_lineup_with_a_blank_name_is_incomplete_and_a_kickoff_parses_as_eastern_text(node_module):
+    seats = _seats(_WR_FLEX, [_EARLY] * 9)
+    seats[3]["name"] = ""
+    assert _run_node(node_module, f"m.planFlexSwap({json.dumps(seats)}, {json.dumps(_BEFORE)})") == {
+        "status": "incomplete"
+    }
+    assert _run_node(node_module, "m.parseKickoff('2030-10-20T20:20:00Z')") == "2030-10-20T20:20:00"
+    assert _run_node(node_module, "['', null, 'soon'].map(m.parseKickoff)") == ["", "", ""]
+
+
+@needs_node
+def test_plays_label_matches_the_python_wording(node_module):
+    from dfs.flex_order import plays_label
+
+    cases = [_SNF, "2030-10-21T20:15:00", "2030-10-17T20:15:00", "2030-10-20T16:25:00"]
+    got = _run_node(node_module, f"{json.dumps(cases)}.map(m.playsLabel)")
+    # Python reads the same Eastern wall-clock text through kickoff.py
+    from dfs.kickoff import parse_kickoff
+
+    assert got == [plays_label(parse_kickoff(c + "Z")) for c in cases]
+
+
+@needs_node
+def test_find_lineup_blocks_numbers_header_first_player_and_total_rows(node_module):
+    grid = _lineups_grid(blocks=2)
+    got = _run_node(node_module, f"m.findLineupBlocks({json.dumps(grid)})")
+    assert got["blocks"] == [{"header": 1, "first": 2, "total": 11}, {"header": 14, "first": 15, "total": 24}]
+    assert got["skipped"] == []
+
+
+# --- Copy build to Lineups (Week 6): the Suggested layout is read by Python and by the script alike -------
+
+
+def _suggested_grid(builds=((1, "Cash"), (2, "GPP"), (3, "GPP")), names_per_build=9):
+    """A Suggested grid in `sheet_suggested`'s layout: three lines, a blank, then the blocks."""
+    grid = [["SUGGESTED LINEUPS"], ["status"], ["how to"], []]
+    for number, kind in builds:
+        grid.append([f"Build {number}", kind, f"{kind} build {number}"])
+        grid.append(["Slot", "Name", "Team", "Opp"])
+        for i in range(names_per_build):
+            grid.append([_SLOTS[i] if i < len(_SLOTS) else "", f"B{number} Player {i}", "DET", "ARI"])
+        grid.append(["Total", "", "", "", 49900])
+        grid.append([])
+    return grid
+
+
+def test_the_script_names_match_the_suggested_tab_python_writes():
+    from dfs import sheet_suggested as ss
+    from dfs.sheet_lineup_sim import MARKER_OPTIONS
+
+    assert _const("SUGGESTED_TAB") == ss.TAB == "Suggested" and _const("BUILD_LABEL") == ss.BUILD_LABEL
+    assert _list_const("MARKER_VALUES") == MARKER_OPTIONS == ["Cash", "GPP"]
+    assert ".addItem('Copy build to Lineups', 'copyBuildToLineups')" in SOURCE
+
+
+@needs_node
+def test_parse_builds_agrees_with_the_python_parser_on_the_same_grid(node_module):
+    from dfs import sheet_suggested as ss
+
+    grid = _suggested_grid()
+    short = _suggested_grid(builds=((7, "Cash"),), names_per_build=8)  # only eight names: not a build
+    for g in (grid, grid + short[4:]):
+        from_js = _run_node(node_module, f"m.parseBuilds({json.dumps(g)})")
+        assert from_js == ss.parse_builds(g)
+    assert [b["number"] for b in ss.parse_builds(grid + short[4:])] == [1, 2, 3]
+
+
+def _empty_lineups(blocks=3, filled=()):
+    """`_lineups_grid` with every name cleared (a name back in the third row of each block in `filled`)."""
+    grid = _lineups_grid(blocks=blocks)
+    stride = 13  # a header, nine player rows, the Total and Remaining rows, and a blank row
+    for block in range(blocks):
+        top = block * stride
+        for p in range(9):
+            grid[top + 1 + p][0] = f"Old {block} {p}" if block in filled and p == 2 else ""
+        grid[top + 10][0] = ""  # the Total row's marker
+    return grid
+
+
+@needs_node
+def test_copy_build_goes_into_the_first_empty_block_and_sets_the_marker(node_module):
+    suggested, lineups = _suggested_grid(), _empty_lineups(blocks=3, filled=(0,))
+    plan = _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 2, {json.dumps(lineups)})")
+    assert plan["status"] == "ok" and plan["marker"] == "GPP"
+    assert plan["build"]["number"] == 2 and plan["build"]["names"][0] == "B2 Player 0"
+    assert plan["block"] == {"header": 14, "first": 15, "total": 24}  # block 0 has a name in it: skipped
+    cash = _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 1, {json.dumps(lineups)})")
+    assert cash["marker"] == "Cash"
+
+
+@needs_node
+def test_copy_build_never_overwrites_a_block_with_a_name_and_says_when_nothing_is_free(node_module):
+    suggested = _suggested_grid()
+    full = _empty_lineups(blocks=2, filled=(0, 1))  # a name in every block
+    assert _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 1, {json.dumps(full)})") == {
+        "status": "noBlock"
+    }
+    free = _empty_lineups(blocks=2)
+    assert _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 9, {json.dumps(free)})") == {
+        "status": "noBuild"
+    }
+    assert _run_node(node_module, f"m.planCopyBuild([], 1, {json.dumps(free)})") == {"status": "noBuild"}
+
+
+def test_the_copy_action_asks_before_it_writes_and_only_writes_names_and_the_marker():
+    body = SOURCE.split("function copyBuildToLineups")[1].split("// ----")[0]
+    assert "ButtonSet.YES_NO" in body and "getActiveSheet" not in SOURCE
+    assert body.count(".setValues(") == 1 and body.count(".setValue(") == 1  # the nine names, the marker
+    assert "clearContent" not in body

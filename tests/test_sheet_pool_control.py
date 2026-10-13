@@ -57,6 +57,13 @@ class SpyClient:
     def set_note(self, tab_name: str, a1: str, note: str) -> None:
         self.notes[a1] = note
 
+    def set_row_notes(self, tab, row, notes, *, first_col=0):
+        from dfs.sheets import column_letter
+
+        for i, text in enumerate(notes):
+            if text:
+                self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
+
 
 def test_the_control_cells_follow_the_name_column_which_sits_right_of_pool():
     cells = control_cells(_HEADER)

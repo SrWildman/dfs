@@ -57,9 +57,23 @@ def test_the_grid_is_one_row_per_layout_entry_and_ends_at_the_last_row():
     assert grid[1][0] == "How to use this sheet"
 
 
-def test_the_four_parts_the_playbook_promises_are_all_there_in_order():
+def test_the_parts_the_playbook_promises_are_all_there_in_order():
     sections = [a for kind, a, _b in _LAYOUT if kind == "section"]
-    assert sections[:4] == ["READ THIS FIRST", "THE WEEK, STEP BY STEP", "READING THE NUMBERS", "THE TABS"]
+    assert sections[:5] == [
+        "HOW TO USE THE MODEL",
+        "READ THIS FIRST",
+        "THE WEEK, STEP BY STEP",
+        "READING THE NUMBERS",
+        "THE TABS",
+    ]
+
+
+def test_how_to_use_the_model_is_six_short_lines_at_the_top():
+    rows = [(a, b) for kind, a, b in _LAYOUT if kind == "row"][:6]
+    assert [a for a, _ in rows] == ["CalPts", "Cash", "GPP", "Proj ▼ / Proj ▲", "Suggested", "Gameday"]
+    text = " ".join(b for _, b in rows)
+    assert "50% or more" in text and "+25 or more" in text and "Fix FLEX order" in text and "4 pm" in text
+    assert all(len(b) < 200 for _, b in rows)  # short, plain lines
 
 
 def test_every_step_of_the_week_names_a_day_and_the_commands_sam_runs():
@@ -79,7 +93,7 @@ def test_every_step_of_the_week_names_a_day_and_the_commands_sam_runs():
 
 def test_every_number_and_chip_sam_asked_about_has_a_plain_line():
     labels = {a for kind, a, _b in _LAYOUT if kind == "row"}
-    for name in ("CalPts", "Hit3x%", "Boom%", "Bust%", "CeilM", "ValAdj", "P(cash)", "P(190+)", "The chips"):
+    for name in ("CalPts", "Hit3x%", "Boom%", "Bust%", "CeilM", "ValAdj", "Cash %", "190+ %", "The chips"):
         assert name in labels, name
     assert "The arrows (trends)" in labels
 

@@ -1,0 +1,459 @@
+"""Suggested lineups: complete DraftKings builds from Sam's own pool, scored by the lineup simulator.
+
+`dfs lineups suggest` writes them to the `Suggested` tab (`sheet_suggested.py`); nothing here touches a
+sheet. Sam's own lineups are never overwritten: he copies a build into an empty Lineups block himself
+(Lineup Tools > Copy build to Lineups).
+
+**Candidates.** Only the players in his pool (`Cash` and `Both` for cash builds, `GPP` and `Both` for GPP
+builds), nobody listed OUT or IR, nobody whose game has started (`late_swap_search.swap_pool`), ranked by
+the projection (`CalPts`, `ProjPts` where CalPts is blank). The rules are late swap's: the salary cap, the
+roster slots (FLEX takes an RB, WR or TE), no DST against his own QB and at most one RB per game.
+
+**Cash builds** (default 3). The best `CASH_TOP_K` lineups by projection (the branch-and-bound of
+`late_swap_search`, `top_lineups`) are all simulated, and the builds are the ones with the highest `Cash %`
+(the simulator's chance of beating the typical cash line), each differing from the builds before it by at
+least `MIN_DIFFERENCE` players.
+
+**GPP builds** (default 5). Every candidate holds a stack: the QB, at least two of his pass catchers (WR /
+TE) and at least one player from the opponent (the bring-back). A branch-and-bound that cannot see a stack
+would spend its whole budget on lineups without one, so each QB is searched on his own (`stacked_lineups`),
+cutting every branch that can no longer reach a stack.
+Candidates are ranked by `190+ %` (the simulator's chance of reaching the GPP target), each differing from
+the earlier builds by at least `MIN_DIFFERENCE` players, and no player is in more than `MAX_EXPOSURE` of the
+builds. A build's title names its stack ("DET stack + ARI bring-back").
+
+**FLEX** is always the player with the latest kickoff among the position that has one more player than its
+own slots (`flex_order`; Sam's rule), so a build is ready to enter as it stands.
+
+**Deterministic**: the search has no randomness and the simulator runs a fixed number of draws with a fixed
+seed (`sim_inputs.N_SIMS`, `SEED`), so the same pool and the same data give the same builds."""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import datetime
+
+import pandas as pd
+
+from dfs.flex_order import BASE_SLOTS
+from dfs.kickoff import parse_kickoff
+from dfs.late_swap_search import (
+    LineupState,
+    OpenSlot,
+    SwapPlayer,
+    swap_pool,
+    top_lineups,
+)
+from dfs.models import ROSTER_SLOTS
+from dfs.sim.simulate import PlayerSpec
+from dfs.sim_inputs import N_SIMS, SEED, lineup_from_names
+
+DEFAULT_CASH_BUILDS = 3
+DEFAULT_GPP_BUILDS = 5
+MIN_DIFFERENCE = 3  # each build differs from every earlier one by at least this many players
+MAX_EXPOSURE = 0.6  # no player in more than this share of the GPP builds
+CASH_TOP_K = 300  # how many of the best cash lineups by projection are simulated
+PER_QB = 80  # stacked lineups kept per quarterback while building the GPP candidates
+TIME_LIMIT_SECONDS = 20.0  # the whole search, cash and GPP together
+CASH_SHARE_OF_TIME = 0.4  # the cash search may use this share of it; GPP gets the rest
+PASS_CATCHERS = ("WR", "TE")
+
+CASH_TAGS = frozenset({"Cash", "Both"})
+GPP_TAGS = frozenset({"GPP", "Both"})
+
+
+@dataclass(frozen=True)
+class Build:
+    """One suggested lineup: nine players in `ROSTER_SLOTS` order, what they cost and project, the simulator's
+    odds, and (for a GPP build) the stack that names it."""
+
+    number: int
+    kind: str  # "cash" or "gpp"
+    title: str
+    players: tuple[SwapPlayer, ...]
+    salary: int
+    projection: float
+    p_cash: float
+    p_gpp: float
+    typical: float  # the simulated median score
+    big_night: float  # the simulated 90th percentile
+    stack: str = ""
+
+
+@dataclass
+class SuggestReport:
+    """What a run produced and what it could not: shown in the terminal and as the tab's status line."""
+
+    builds: list[Build] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    seconds: float = 0.0
+    candidates: dict[str, int] = field(default_factory=dict)  # "cash" / "gpp" -> players considered
+    complete: bool = True  # False when the time limit cut a search short
+
+
+# ---------------------------------------------------------------------------------------------
+# Candidates and rules
+# ---------------------------------------------------------------------------------------------
+
+
+def _all_open_state(cap: int) -> LineupState:
+    return LineupState(
+        cap=cap, fixed={}, open=[OpenSlot(i, slot, None) for i, slot in enumerate(ROSTER_SLOTS)]
+    )
+
+
+def pool_for(
+    edge: pd.DataFrame, tags: dict[str, str], wanted: frozenset[str], *, now: datetime, metric: str
+) -> list[SwapPlayer]:
+    """The pool players tagged with one of `wanted` who can still be used: not OUT or IR, game not started."""
+    names = {name for name, tag in tags.items() if tag in wanted}
+    return swap_pool(edge, now=now, metric=metric, pool_names=names)
+
+
+def is_stacked(players: Sequence[SwapPlayer]) -> bool:
+    """The GPP rule: the QB, at least two of his pass catchers and at least one player from his opponent."""
+    qb = next((p for p in players if p.position == "QB"), None)
+    if qb is None:
+        return False
+    mates = sum(1 for p in players if p.team == qb.team and p.position in PASS_CATCHERS)
+    return mates >= 2 and any(p.team == qb.opp and p.position != "DST" for p in players)
+
+
+def stack_name(players: Sequence[SwapPlayer]) -> str:
+    """ "DET stack + ARI bring-back" for a stacked lineup, "" for one without a stack."""
+    qb = next((p for p in players if p.position == "QB"), None)
+    if qb is None or not is_stacked(players):
+        return ""
+    return f"{qb.team} stack + {qb.opp} bring-back"
+
+
+def seat(players: Sequence[SwapPlayer], kickoff: dict[str, datetime | None]) -> tuple[SwapPlayer, ...]:
+    """Nine players in `ROSTER_SLOTS` order with the FLEX rule applied: of the position that has one more
+    player than its own slots, the one with the latest kickoff is the FLEX (a tie, or no kickoffs, puts the
+    lowest projected there). Within a position the earlier kickoffs come first, then the higher projection."""
+
+    def start(p: SwapPlayer):
+        k = kickoff.get(p.name)
+        return (k is None, k, -p.value, p.name)
+
+    by_position: dict[str, list[SwapPlayer]] = {}
+    for p in players:
+        by_position.setdefault(p.position, []).append(p)
+    flex_position = next(
+        (pos for pos, base in BASE_SLOTS.items() if len(by_position.get(pos, [])) > base), None
+    )
+    flex = None
+    if flex_position is not None:
+        group = by_position[flex_position]
+        known = [kickoff[p.name] for p in group if kickoff.get(p.name) is not None]
+        latest = max(known) if known else None
+        last = [p for p in group if latest is not None and kickoff.get(p.name) == latest] or group
+        flex = min(last, key=lambda p: (p.value, p.name))
+        by_position[flex_position] = [p for p in group if p is not flex]
+    queues = {pos: iter(sorted(group, key=start)) for pos, group in by_position.items()}
+    return tuple(flex if slot == "FLEX" else next(queues[slot]) for slot in ROSTER_SLOTS)
+
+
+# ---------------------------------------------------------------------------------------------
+# Candidate lineups
+# ---------------------------------------------------------------------------------------------
+
+
+def cash_lineups(
+    pool: list[SwapPlayer], *, cap: int, k: int = CASH_TOP_K, deadline: float | None = None
+) -> tuple[list[list[SwapPlayer]], bool]:
+    """The best `k` legal lineups from `pool` by projection (any shape), best first."""
+    state = _all_open_state(cap)
+    remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+    found, complete = top_lineups(state, pool, k=k, time_limit=remaining)
+    return [[a[i] for i in range(len(ROSTER_SLOTS))] for a in found], complete
+
+
+def _stack_feasible(qb: SwapPlayer):
+    """A `top_lineups(feasible=...)` for one QB's stack: from a partial lineup, can the slots still to fill
+    hold the pass catchers and the bring-back it still needs? (Never says no to a lineup that can pass.)"""
+
+    def feasible(placed: list[SwapPlayer], rest: list[str]) -> bool:
+        mates = sum(1 for p in placed if p.team == qb.team and p.position in PASS_CATCHERS)
+        back = any(p.team == qb.opp and p.position != "DST" for p in placed)
+        need_mates, need_back = max(0, 2 - mates), 0 if back else 1
+        receiver_slots = sum(1 for slot in rest if slot in ("TE", "WR", "FLEX"))
+        skill_slots = sum(1 for slot in rest if slot in ("RB", "TE", "WR", "FLEX"))
+        return need_mates <= receiver_slots and need_mates + need_back <= skill_slots
+
+    return feasible
+
+
+def stacked_lineups(
+    pool: list[SwapPlayer],
+    *,
+    cap: int,
+    k: int | None = None,
+    per_qb: int = PER_QB,
+    deadline: float | None = None,
+) -> tuple[list[list[SwapPlayer]], bool]:
+    """The best stacked lineups from `pool` by projection, best first: `per_qb` for each quarterback (all of
+    them, or the best `k` of those when `k` is given).
+
+    One search per QB: he is fixed in the QB slot and the other eight slots are searched exactly for the best
+    `per_qb` lineups that hold two of his pass catchers and one of his opponent's players (`is_stacked`),
+    cutting every branch that can no longer reach a stack (`_stack_feasible`). The time left is shared out
+    evenly, so a short budget thins every QB's list instead of dropping the last QBs."""
+    quarterbacks = [p for p in pool if p.position == "QB"]
+    qb_slot = ROSTER_SLOTS.index("QB")
+    found: dict[frozenset[str], list[SwapPlayer]] = {}
+    complete = True
+    for n, qb in enumerate(quarterbacks):
+        left = None if deadline is None else max(0.0, deadline - time.monotonic())
+        share = None if left is None else left / (len(quarterbacks) - n)
+        state = LineupState(
+            cap=cap,
+            fixed={qb_slot: qb},
+            open=[OpenSlot(i, slot, None) for i, slot in enumerate(ROSTER_SLOTS) if i != qb_slot],
+        )
+        rest = [p for p in pool if p.name != qb.name and p.position != "QB"]
+        assignments, done = top_lineups(
+            state, rest, k=per_qb, leaf_filter=is_stacked, feasible=_stack_feasible(qb), time_limit=share
+        )
+        complete = complete and done
+        for assignment in assignments:
+            lineup = [qb, *assignment.values()]
+            found.setdefault(frozenset(p.name for p in lineup), lineup)
+    return _best_first(found, k), complete
+
+
+def _best_first(found: dict[frozenset[str], list[SwapPlayer]], k: int | None) -> list[list[SwapPlayer]]:
+    ranked = sorted(found.values(), key=lambda lu: (-sum(p.value for p in lu), sum(p.salary for p in lu)))
+    return ranked if k is None else ranked[:k]
+
+
+# ---------------------------------------------------------------------------------------------
+# Scoring and choosing
+# ---------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Scored:
+    players: tuple[SwapPlayer, ...]  # in ROSTER_SLOTS order, FLEX rule applied
+    projection: float
+    salary: int
+    p_cash: float
+    p_gpp: float
+    typical: float
+    big_night: float
+
+
+def score(
+    lineups: list[list[SwapPlayer]],
+    specs: dict[str, PlayerSpec],
+    kickoff: dict[str, datetime | None],
+    *,
+    cash_line: float,
+    gpp_target: float,
+    n_sims: int = N_SIMS,
+    seed: int = SEED,
+) -> list[Scored]:
+    """Simulate every lineup in ONE run (a player in two lineups has the same draws in both) and return them
+    with their odds. A lineup with a player the simulator has no spec for is left out."""
+    from dfs.sim.simulate import simulate_lineups
+
+    seated = [seat(lineup, kickoff) for lineup in lineups]
+    rated = [
+        (players, specs_list)
+        for players in seated
+        if (specs_list := lineup_from_names([p.name for p in players], specs)) is not None
+    ]
+    if not rated:
+        return []
+    result = simulate_lineups(
+        [s for _, s in rated], n_sims=n_sims, seed=seed, cash_line=cash_line, gpp_target=gpp_target
+    )
+    return [
+        Scored(
+            players=players,
+            projection=sum(p.value for p in players),
+            salary=sum(p.salary for p in players),
+            p_cash=float(stats.p_cash),
+            p_gpp=float(stats.p_gpp),
+            typical=float(stats.quantiles[0.5]),
+            big_night=float(stats.quantiles[0.9]),
+        )
+        for (players, _), stats in zip(rated, result.lineups, strict=True)
+    ]
+
+
+def different_enough(a: Sequence[SwapPlayer], b: Sequence[SwapPlayer], minimum: int = MIN_DIFFERENCE) -> bool:
+    """True when the two lineups differ by at least `minimum` players."""
+    return len({p.name for p in a} - {p.name for p in b}) >= minimum
+
+
+def exposure_cap(builds: int, share: float = MAX_EXPOSURE) -> int:
+    """The most builds one player may be in: about `share` of them, never less than one."""
+    return max(1, round(share * builds))
+
+
+BACKTRACK_POOL = 80  # candidates a failed greedy choice may backtrack over
+BACKTRACK_NODES = 20000  # and how many steps it may take
+
+
+def _fits(
+    candidate: Scored, chosen: list[Scored], uses: dict[str, int], min_difference: int, cap: int | None
+):
+    if not all(different_enough(candidate.players, c.players, min_difference) for c in chosen):
+        return False
+    return cap is None or not any(uses.get(p.name, 0) >= cap for p in candidate.players)
+
+
+def choose(
+    scored: list[Scored],
+    count: int,
+    *,
+    key,  # noqa: ANN001 - Scored -> sort key, best first
+    min_difference: int = MIN_DIFFERENCE,
+    max_per_player: int | None = None,
+) -> list[Scored]:
+    """The best `count` by `key`, each differing from the ones already chosen by `min_difference` players and
+    (when `max_per_player` is set) with no player in more than that many of them.
+
+    Greedy in `key` order. When the exposure cap leaves it short, the top `BACKTRACK_POOL` candidates are
+    searched for a set of `count` that satisfies every rule (the first such set in `key` order). Fewer than
+    `count` come back only when no such set exists."""
+    ordered = sorted(scored, key=key)
+    chosen: list[Scored] = []
+    uses: dict[str, int] = {}
+    for candidate in ordered:
+        if len(chosen) == count:
+            break
+        if _fits(candidate, chosen, uses, min_difference, max_per_player):
+            chosen.append(candidate)
+            for p in candidate.players:
+                uses[p.name] = uses.get(p.name, 0) + 1
+    if len(chosen) == count or max_per_player is None:
+        return chosen
+
+    pool = ordered[:BACKTRACK_POOL]
+    steps = 0
+
+    def search(start: int, picked: list[Scored], used: dict[str, int]) -> list[Scored] | None:
+        nonlocal steps
+        if len(picked) == count:
+            return list(picked)
+        for i in range(start, len(pool)):
+            steps += 1
+            if steps > BACKTRACK_NODES:
+                return None
+            if not _fits(pool[i], picked, used, min_difference, max_per_player):
+                continue
+            for p in pool[i].players:
+                used[p.name] = used.get(p.name, 0) + 1
+            picked.append(pool[i])
+            found = search(i + 1, picked, used)
+            picked.pop()
+            for p in pool[i].players:
+                used[p.name] -= 1
+            if found is not None:
+                return found
+        return None
+
+    return search(0, [], {}) or chosen
+
+
+def suggest_builds(
+    edge: pd.DataFrame,
+    tags: dict[str, str],
+    specs: dict[str, PlayerSpec],
+    *,
+    now: datetime,
+    cap: int,
+    cash_line: float,
+    gpp_target: float,
+    metric: str,
+    cash_builds: int = DEFAULT_CASH_BUILDS,
+    gpp_builds: int = DEFAULT_GPP_BUILDS,
+    n_sims: int = N_SIMS,
+    seed: int = SEED,
+    time_limit: float = TIME_LIMIT_SECONDS,
+) -> SuggestReport:
+    """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both)."""
+    started = time.monotonic()
+    deadline = started + time_limit
+    cash_deadline = started + time_limit * CASH_SHARE_OF_TIME  # the GPP search gets the rest
+    report = SuggestReport()
+    kickoff = {
+        str(name): parse_kickoff(start)
+        for name, start in zip(
+            edge["Name"], edge.get("GameStart", pd.Series("", index=edge.index)), strict=True
+        )
+    }
+    number = 1
+
+    cash_pool = pool_for(edge, tags, CASH_TAGS, now=now, metric=metric) if cash_builds else []
+    gpp_pool = pool_for(edge, tags, GPP_TAGS, now=now, metric=metric) if gpp_builds else []
+    report.candidates = {"cash": len(cash_pool), "gpp": len(gpp_pool)}
+
+    if cash_builds:
+        lineups, done = cash_lineups(cash_pool, cap=cap, deadline=cash_deadline)
+        report.complete = report.complete and done
+        scored = score(
+            lineups, specs, kickoff, cash_line=cash_line, gpp_target=gpp_target, n_sims=n_sims, seed=seed
+        )
+        picks = choose(scored, cash_builds, key=lambda s: (-s.p_cash, -s.projection, s.salary))
+        for pick in picks:
+            report.builds.append(_build(number, "cash", f"Cash build {number}", pick))
+            number += 1
+        if len(picks) < cash_builds:
+            report.notes.append(
+                f"Only {len(picks)} cash build(s): the cash pool ({len(cash_pool)} players) does not hold "
+                f"{cash_builds} legal lineups that differ by {MIN_DIFFERENCE}+ players."
+            )
+
+    if gpp_builds:
+        lineups, done = stacked_lineups(gpp_pool, cap=cap, deadline=deadline)
+        report.complete = report.complete and done
+        scored = score(
+            lineups, specs, kickoff, cash_line=cash_line, gpp_target=gpp_target, n_sims=n_sims, seed=seed
+        )
+        picks = choose(
+            scored,
+            gpp_builds,
+            key=lambda s: (-s.p_gpp, -s.projection, s.salary),
+            max_per_player=exposure_cap(gpp_builds),
+        )
+        for pick in picks:
+            name = stack_name(pick.players)
+            report.builds.append(_build(number, "gpp", f"GPP build {number}  ·  {name}", pick, stack=name))
+            number += 1
+        if not lineups:
+            report.notes.append(
+                "No stacked GPP lineup fits: a stack needs a QB, two of his pass catchers and one of his "
+                f"opponent's players from your GPP pool ({len(gpp_pool)} players)."
+            )
+        elif len(picks) < gpp_builds:
+            report.notes.append(
+                f"Only {len(picks)} GPP build(s): {len(lineups)} stacked lineups, but not {gpp_builds} that "
+                f"differ by {MIN_DIFFERENCE}+ players with no player in more than "
+                f"{exposure_cap(gpp_builds)} builds."
+            )
+
+    report.seconds = time.monotonic() - started
+    if not report.complete:
+        report.notes.append("The time limit cut the search short: a better build may exist.")
+    return report
+
+
+def _build(number: int, kind: str, title: str, pick: Scored, stack: str = "") -> Build:
+    return Build(
+        number=number,
+        kind=kind,
+        title=title,
+        players=pick.players,
+        salary=pick.salary,
+        projection=pick.projection,
+        p_cash=pick.p_cash,
+        p_gpp=pick.p_gpp,
+        typical=pick.typical,
+        big_night=pick.big_night,
+        stack=stack,
+    )

@@ -991,6 +991,30 @@ class SheetsClient:
                 found = True
         return found
 
+    def time_zone(self) -> str:
+        """The workbook's time zone (File > Settings), e.g. `America/New_York`."""
+        sheet = self._open()
+        return str(
+            sheet.fetch_sheet_metadata(params={"fields": "properties(timeZone)"})["properties"]["timeZone"]
+        )
+
+    def set_time_zone(self, time_zone: str) -> None:
+        """Set the workbook's time zone. Formulas that read `NOW()` (the Lineups FLEX warning) compare it with
+        TFFB's Eastern wall-clock kickoffs, so the sheet's zone has to be Eastern too."""
+        sheet = self._open()
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateSpreadsheetProperties": {
+                            "properties": {"timeZone": time_zone},
+                            "fields": "timeZone",
+                        }
+                    }
+                ]
+            }
+        )
+
     def read_named_range_value(self, name: str) -> object | None:
         """The value of the first cell of the named range `name` (a hidden named range holds the Apps Script's
         version stamp), or None when there is no such range or the cell is empty."""
@@ -1779,6 +1803,27 @@ class SheetsClient:
                             "fields": "note",
                         }
                     }
+                ]
+            }
+        )
+
+    def set_row_notes(self, tab_name: str, row: int, notes: list[str], *, first_col: int = 0) -> None:
+        """Set the note on each cell of `row` from 0-based column `first_col`, in ONE request: `notes[i]`
+        is the note for the i-th cell and "" removes whatever note it had. Values, formulas and formats are
+        untouched (the field mask is `note` only)."""
+        sheet, ws = self._ws(tab_name)
+        grid_range = {
+            "sheetId": ws.id,
+            "startRowIndex": row - 1,
+            "endRowIndex": row,
+            "startColumnIndex": first_col,
+            "endColumnIndex": first_col + len(notes),
+        }
+        values = [{"note": text} if text else {} for text in notes]
+        sheet.batch_update(
+            {
+                "requests": [
+                    {"updateCells": {"range": grid_range, "rows": [{"values": values}], "fields": "note"}}
                 ]
             }
         )

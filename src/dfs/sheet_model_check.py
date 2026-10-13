@@ -278,6 +278,7 @@ def build_layout(
         )
         return b.layout
 
+    _add_learned(b, scored, signal_table, reliability)
     _add_projection_race(b, scored)
     _add_reliability(b, reliability)
 
@@ -522,6 +523,194 @@ def _race_block(b: _Builder, scored: pd.DataFrame, *, with_um: bool) -> bool:
     return True
 
 
+# ---- "What the model learned this week" (Week 6, slice 6) -------------------------------------------------
+LEARNED_BIAS_ROWS = 6  # the biggest bias corrections listed
+LEARNED_MIN_CELL_N = 10  # a bias cell needs this many players behind it to be listed
+WEEK_8_CHECKPOINT = (
+    f"Week {RELIABILITY_ADJUST_WEEK}: recalibrate Hit3x%/Boom%/Bust% on 2026 results, drop any signal still "
+    "not beating its baseline. No action now."
+)
+LEARNED_EXPLAINER = (
+    "What learns and what does not. CalPts refits every week on all earlier weeks (the source weights and "
+    "the bias corrections below). Model Check scores every week after `dfs week close`. The probability "
+    "tables (Hit3x%, Boom%, Bust%) and the signal thresholds are FIXED: they come from 12 seasons and "
+    "change only at a planned recalibration."
+)
+_SOURCE_ORDER = ("ProjPts", "SleeperPts", "FantasyProsPts")
+
+
+def weeks_text(weeks: tuple[int, ...]) -> str:
+    """`1-4` for a run of weeks, `1, 2, 4` otherwise, `none` for no weeks."""
+    if not weeks:
+        return "none"
+    ordered = sorted(weeks)
+    if ordered == list(range(ordered[0], ordered[-1] + 1)) and len(ordered) > 1:
+        return f"{ordered[0]}\u2013{ordered[-1]}"
+    return ", ".join(str(w) for w in ordered)
+
+
+def weight_table(now: calibration.Calibration, was: calibration.Calibration) -> pd.DataFrame:
+    """CalPts's source weights by position, now and last week (percent; blank when last week had no fit)."""
+    rows = []
+    for position in calibration.POSITIONS:
+        if position not in now.weights:
+            continue
+        row = {"Position": position}
+        for source in _SOURCE_ORDER:
+            label = calibration.SOURCE_LABELS[source]
+            row[label] = now.weights[position].get(source)
+            row[f"{label} (last week)"] = None if was.is_empty else was.weights.get(position, {}).get(source)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def bias_changes(
+    now: calibration.Calibration, was: calibration.Calibration, *, top: int = LEARNED_BIAS_ROWS
+) -> pd.DataFrame:
+    """The `top` biggest bias corrections now (by size, cells with at least `LEARNED_MIN_CELL_N` players),
+    each beside what it was last week. A negative bias means the source runs high: CalPts takes that off."""
+    rows = []
+    for (source, position, tier), bias in now.bias.items():
+        n = now.counts.get((source, position, tier), 0)
+        labels = calibration.tier_labels(position)
+        if n < LEARNED_MIN_CELL_N or not labels or tier >= len(labels):
+            continue
+        rows.append(
+            {
+                "Source": calibration.SOURCE_LABELS.get(source, source),
+                "Position": position,
+                "Salary tier": labels[tier],
+                "Bias now": bias,
+                "Bias last week": None if was.is_empty else was.bias.get((source, position, tier), 0.0),
+                "n": n,
+                "Thin": ra.is_thin(n),
+            }
+        )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    return frame.reindex(frame["Bias now"].abs().sort_values(ascending=False).index).head(top)
+
+
+def race_leaders(race: pd.DataFrame) -> str:
+    """ "Lowest MAE by position: QB TFFB, RB CalPts, ..." among TFFB, AggPts and CalPts; a position with fewer
+    than `RACE_CLEAR_MIN_N` players is marked early."""
+    parts = []
+    for position in calibration.POSITIONS:
+        part = race[race["Position"] == position]
+        if part.empty:
+            continue
+        best = part.sort_values("MAE").iloc[0]
+        early = " (early)" if best["n"] < RACE_CLEAR_MIN_N else ""
+        parts.append(f"{position} {best['Source']}{early}")
+    return "Lowest MAE by position: " + ", ".join(parts) + "." if parts else ""
+
+
+def signal_progress(signal_table: pd.DataFrame) -> pd.DataFrame:
+    """Each signal that has fired: n, its running hit rate against CalPts, how far it ran from CalPts, and the
+    unflagged average at its position (the baseline it has to beat)."""
+    if signal_table is None or signal_table.empty:
+        return pd.DataFrame()
+    rows = signal_table.set_index("Signal")
+    out = []
+    for name in rows.index:
+        if name.startswith(results_signals.BASELINE_PREFIX) or int(rows.loc[name, "n"]) == 0:
+            continue
+        position = _signal_position(name)
+        base = f"{results_signals.BASELINE_PREFIX}{position}"
+        out.append(
+            {
+                "Signal": name,
+                "n": int(rows.loc[name, "n"]),
+                "Hit (vs CalPts)": rows.loc[name, "HitCal"],
+                "Actual - CalPts": rows.loc[name, "VsCal"],
+                "Unflagged avg": rows.loc[base, "VsCal"] if base in rows.index else None,
+                "Thin": bool(rows.loc[name, "Thin"]),
+            }
+        )
+    return pd.DataFrame(out)
+
+
+def _add_learned(
+    b: _Builder, scored: pd.DataFrame, signal_table: pd.DataFrame | None, reliability: pd.DataFrame | None
+) -> None:
+    """The block at the top: what CalPts learned from this week against last week, who leads the race, how
+    each signal is running and whether the probabilities hold, then the Week 8 checkpoint. Nothing here is a
+    recommendation: it makes the learning visible."""
+    latest = int(pd.to_numeric(scored["week"], errors="coerce").max())
+    b.section(f"WHAT THE MODEL LEARNED THIS WEEK  —  Week {latest}, against last week")
+    now = calibration.fit(scored, before_week=latest + 1)
+    was = calibration.fit(scored, before_week=latest)
+    if now.is_empty:
+        b.note("Nothing to learn from yet: CalPts needs one scored week.")
+    else:
+        changes = bias_changes(now, was)
+        first = f"CalPts is fitted on Weeks {weeks_text(now.weeks)}" + (
+            f" (last week: {weeks_text(was.weeks)})."
+            if not was.is_empty
+            else " (its first fit: nothing to compare)."
+        )
+        if not changes.empty:
+            top = changes.iloc[0]
+            was_text = "" if pd.isna(top["Bias last week"]) else f" (was {top['Bias last week']:+.1f})"
+            first += (
+                f" Biggest correction: {top['Source']} {top['Position']} {top['Salary tier']} bias now "
+                f"{top['Bias now']:+.1f}{was_text}."
+            )
+        b.verdict(first)
+        weights = weight_table(now, was)
+        b.note("Source weights by position (inverse error, pulled toward equal until there is enough data):")
+        columns = [("Position", "Position")]
+        for source in _SOURCE_ORDER:
+            label = calibration.SOURCE_LABELS[source]
+            columns += [(label, label)]
+        for source in _SOURCE_ORDER:
+            label = calibration.SOURCE_LABELS[source]
+            columns += [(f"{label} (last week)", f"{label} (last week)")]
+        b.table(weights, columns, percent={c for c, _ in columns if c != "Position"})
+        if not changes.empty:
+            b.blank()
+            b.note("Biggest bias corrections (negative = the source runs high; CalPts takes that off):")
+            b.table(
+                changes,
+                [
+                    ("Source", "Source"),
+                    ("Position", "Position"),
+                    ("Salary tier", "Salary tier"),
+                    ("Bias now", "Bias now"),
+                    ("Bias last week", "Bias last week"),
+                    ("n", "n"),
+                ],
+                signed={"Bias now", "Bias last week"},
+            )
+    race = calibration.backtest(scored, with_um=False)
+    if not race.empty:
+        b.blank()
+        b.verdict(race_leaders(race))
+    progress = signal_progress(signal_table)
+    if not progress.empty:
+        b.blank()
+        b.note("Signals that have fired, against the unflagged average at their position:")
+        b.table(
+            progress,
+            [
+                ("Signal", "Signal"),
+                ("n", "n"),
+                ("Hit (vs CalPts)", "Hit (vs CalPts)"),
+                ("Actual - CalPts", "Actual - CalPts"),
+                ("Unflagged avg", "Unflagged avg"),
+            ],
+            percent={"Hit (vs CalPts)"},
+            signed={"Actual - CalPts", "Unflagged avg"},
+        )
+    if reliability is not None and not reliability.empty:
+        b.blank()
+        b.verdict("Probabilities: " + reliability_verdict(reliability))
+    b.blank()
+    b.note(LEARNED_EXPLAINER)
+    b.note(WEEK_8_CHECKPOINT)
+
+
 def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
     """The table Sam uses to choose his default projection: TFFB, AggPts and CalPts on weeks none of them
     trained on (CalPts is fitted on earlier weeks only; the 2nd scored week is the first it can be judged),
@@ -542,7 +731,8 @@ def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
         b.note("UM is not on the scored weeks yet -- run `dfs model fetch`, then `dfs results update`.")
     weeks_trained = sorted(int(w) for w in scored["week"].unique())
     b.note(
-        "CalPts is NOT the default projection: it is tracked here every week and Sam decides. It is each "
+        "CalPts is the projection the model-driven tools use (late swap, lineup odds, Suggested); TFFB stays "
+        "visible for comparison and this race keeps scoring both every week. It is each "
         "source's level bias corrected per position and salary tier (shrunk toward 0), then weighted; "
         "UM is not part of CalPts (it added nothing in 12 seasons of back-tests); it is its own row. "
         f"Scored weeks so far: {_weeks_text(weeks_trained)}. rho = rank correlation within position and week "
@@ -656,6 +846,9 @@ def write_model_check(client: SheetsClient, layout: Layout, tab: str = MODEL_CHE
 
     last_row = max(len(layout.rows), 60)
     client.write_tab(tab, layout.rows)
+    # A rewritten tab keeps its old notes: the layout moves from week to week, so a header's note would land
+    # on whatever value now sits at that cell. Clear them all; the header rows get theirs back below.
+    client.clear_notes(tab, f"A1:{LAST_COLUMN}{last_row + 20}")
     client.clear_conditional_formats(tab)
     client.format_range(
         tab,

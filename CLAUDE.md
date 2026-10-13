@@ -62,8 +62,8 @@ confirm you're pointed at the sheet you think you are -- `config.toml`'s
 
 ## The commands you'll reach for most in an agent session
 
-The user's **standard week** is six commands (`dfs week new`, `dfs sync`, `dfs export`, `dfs sync --live` +
-`dfs lineups late-swap`, `dfs week close`); everything else is reference. `docs/COMMANDS.md` lists every command
+The user's **standard week** is `dfs week new`, `dfs sync`, `dfs lineups suggest`, `dfs export`, `dfs sync --live` +
+`dfs lineups late-swap`, `dfs week close`; everything else is reference. `docs/COMMANDS.md` lists every command
 and option and is GENERATED from the CLI (`python -m dfs.commands_doc`): after adding or changing a command or
 option, regenerate it -- `tests/test_commands_doc.py` fails if it is stale or a command has no section.
 
@@ -98,6 +98,32 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `pytest -q`, `ruff check .`, `ruff format --check .` -- all three run in
   CI on every push/PR; run them before considering a change done. None of
   the tests need real credentials, a real sheet, or a browser.
+
+## Sam's weekly shortcuts
+
+Sam runs the week by talking to a local Claude session. When he says one of these, run exactly this (in order),
+then report what the last column says. Always say **which sheet** the commands used (`dfs status` prints its title and
+URL; check it before any write).
+
+| Sam says | Run, in order | Report back |
+|---|---|---|
+| "start week N" | 1) `dfs odds snapshot` if no opening snapshot exists for the week yet (`dfs odds movement` shows what is saved); 2) **ask Sam to confirm, and for the new sheet's URL** if he has not given it, then `dfs week new "<url>"`; 3) `dfs doctor` | the new sheet's title and URL, what `week new` carried over, any doctor findings |
+| "sync" | `dfs sync`, then `dfs doctor` | each source's status (name any failure, e.g. an expired TFFB login), doctor findings |
+| "final sync" | `dfs sync --live`, then `dfs doctor` | what changed since the last sync (the terminal diff / the Board's Queue), anyone in his pool now OUT or Q |
+| "build me lineups" | `dfs lineups suggest` (his pool must not be empty: if it is, say so and stop) | each build in one line (cash or GPP, stack, salary, Cash % / 190+ %), and that **Lineup Tools > Copy build to Lineups** puts one in |
+| "fix flex" | nothing to run: tell him to use **Lineup Tools > Fix FLEX order** on Lineups (a sheet script); `dfs export` also puts the FLEX right in the file it writes | which of the two did it |
+| "late swap" | `dfs lineups late-swap` (it covers every built lineup) | a summary per lineup: who is still swappable, the best change and its Cash % / GPP % effect, or "nothing beats it" |
+| "close the week" | `dfs week close --csv <file Sam names>` (ask for the file if he did not name one) | the Model Check verdict and the learned block, and the bankroll lines it reconciled |
+| "how did we do" | read (do not write) Model Check: the opening verdict sentences and "What the model learned this week" | five lines: who leads the projection race by position, what CalPts learned, how the signals are running, whether the probabilities hold, the Week 8 checkpoint |
+
+Guardrails:
+
+- **Ask before `dfs week new`**, and before writing to any sheet other than the live week (the one `config.toml` points at).
+- **Never touch a closed week** (a previous week's sheet is read only).
+- **Never push** (or open a PR) without Sam's OK in chat.
+- A command that fails: show the error and stop; do not retry in a loop or work around it. Google calls hang now and
+  then: run a long job detached with a log file and read the log.
+- Anything not in this table is a normal request: `docs/COMMANDS.md` has every command and option.
 
 ## Where things are documented -- one canonical home per fact
 

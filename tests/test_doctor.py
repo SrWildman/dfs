@@ -50,6 +50,10 @@ class FakeDoctorClient:
         self._formulas = formulas or {}
         self._hidden_names = hidden_names or {}
         self._groups = groups or {}
+        self.zone = "America/New_York"
+
+    def time_zone(self) -> str:
+        return self.zone
 
     def get_column_widths(self, tab_name: str, last_col_a1: str) -> list[dict]:
         """Default: a healthy layout -- exactly the tab's helper columns hidden (by header name), plus the
@@ -127,6 +131,7 @@ _ALL_GOOD_TABS = {
     DKSALCLEAN_TAB: ["Position", "Team", "ID", "Name", "Salary", "Team", "OPP"],
     "NameAlias": [],
     "Edge Finder": [],
+    "Suggested": [],
     EXPOSURE_TAB: [],
 }
 
@@ -696,3 +701,13 @@ def test_run_doctor_survives_a_blank_row_in_the_id_column():
         title="Week 5",
     )
     assert not [i for i in issues if i.check == "pool-cell-plain-value"]
+
+
+def test_a_workbook_not_on_eastern_time_is_reported_because_the_flex_warning_reads_now():
+    client = FakeDoctorClient(dict(_ALL_GOOD_TABS))
+    client.zone = "America/Mexico_City"
+    issues = run_doctor(client, _base_config(), title="Week 6")
+    zone = [i for i in issues if i.check == "time-zone"]
+    assert len(zone) == 1 and "America/Mexico_City" in zone[0].detail and "America/New_York" in zone[0].detail
+    client.zone = "America/New_York"
+    assert not [i for i in run_doctor(client, _base_config(), title="Week 6") if i.check == "time-zone"]

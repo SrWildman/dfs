@@ -8,8 +8,8 @@ Three views of the same open slots, best first:
    + cheap TE out, mid RB in + better TE in" when no single swap does.
 3. **Best 1-for-1 swaps** (`one_for_one`): one open slot changes, salary-checked.
 
-Ranked by a metric (`ProjPts` by default, `AggPts` on request) -- never Leverage. Only improvements are
-listed.
+Ranked by a projection (`CalPts` by default, `ProjPts` where CalPts is blank; `ProjPts` or `AggPts` on
+request) -- never Leverage. Only improvements are listed.
 
 **Constraints, all enforced on the whole lineup** (locked players included):
 
@@ -31,7 +31,9 @@ under 2 s) and checks the search against brute force.
 
 from __future__ import annotations
 
+import heapq
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -41,8 +43,16 @@ from dfs.derived import _rosterable_pool_mask
 from dfs.kickoff import parse_kickoff
 from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS
 
-METRICS = ("ProjPts", "AggPts")
-DEFAULT_METRIC = "ProjPts"
+METRICS = ("CalPts", "ProjPts", "AggPts")
+DEFAULT_METRIC = "CalPts"  # `config.toml` `[projection] default`; ProjPts stands in wherever CalPts is blank
+FALLBACK_METRIC = "ProjPts"
+
+
+def projection_note(metric: str) -> str:
+    """Which projection a run used, for the top of its output: `CalPts (ProjPts where CalPts is blank)`."""
+    return f"{metric} (TFFB's {FALLBACK_METRIC} where CalPts is blank)" if metric == "CalPts" else metric
+
+
 # A player who is not going to play can't be a swap target. `Q` stays: it is a coin flip, and the Avail
 # column is shown next to the name so the call is Sam's.
 NOT_PLAYING = frozenset({"OUT", "IR"})
@@ -124,6 +134,8 @@ def _player(row: pd.Series, metric: str) -> SwapPlayer | None:
     """One EdgeRaw row as a `SwapPlayer`, or None when its salary or metric is missing."""
     salary = pd.to_numeric(row.get("Salary"), errors="coerce")
     value = pd.to_numeric(row.get(metric), errors="coerce")
+    if pd.isna(value) and metric == "CalPts":
+        value = pd.to_numeric(row.get(FALLBACK_METRIC), errors="coerce")  # no CalPts for him: TFFB's number
     if pd.isna(salary) or pd.isna(value):
         return None
     game = row.get("GameID")
@@ -277,8 +289,25 @@ class _Bound:
 class _Search:
     """Depth-first branch-and-bound over the open slots, in a fixed order, canonical within a position."""
 
-    def __init__(self, state: LineupState, candidates: list[SwapPlayer], time_limit: float | None):
+    def __init__(
+        self,
+        state: LineupState,
+        candidates: list[SwapPlayer],
+        time_limit: float | None,
+        *,
+        k: int = 1,
+        leaf_filter: Callable[[list[SwapPlayer]], bool] | None = None,
+        feasible: Callable[[list[SwapPlayer], list[str]], bool] | None = None,
+    ):
         self.state = state
+        self.k = k  # keep the best `k` lineups (1: just the best, the late-swap re-fill)
+        self.leaf_filter = leaf_filter  # a whole-lineup rule the bound cannot see (a stack, say)
+        # `feasible(placed, stages left)`: False when no completion of this partial lineup can pass
+        # `leaf_filter`. It must never say False for a branch that has a passing completion (that would hide a
+        # valid lineup); it only saves the search from walking branches that cannot.
+        self.feasible = feasible
+        self.heap: list[tuple[float, int, tuple[SwapPlayer, ...]]] = []
+        self._seq = 0
         self.by_position: dict[str, list[SwapPlayer]] = {}
         for p in sorted(candidates, key=lambda p: (-p.value, p.salary, p.name)):
             self.by_position.setdefault(p.position, []).append(p)
@@ -317,6 +346,29 @@ class _Search:
         used = {p.name for p in self.state.fixed.values()}
         return lam * self.budget + bound.best_sum(self.need, self.flex, used, {}, self.by_position)
 
+    def _offer(self, obj: float, chosen: list[SwapPlayer]) -> None:
+        """A complete lineup. Keeps the best `k`; `best_obj` is the score a lineup must beat to matter (the
+        k-th best once `k` are held), which is what prunes the search."""
+        if self.k == 1:
+            if obj > self.best_obj:
+                self.best_obj, self.best = obj, list(chosen)
+            return
+        entry = (obj, -self._seq, tuple(chosen))
+        self._seq += 1
+        if len(self.heap) < self.k:
+            heapq.heappush(self.heap, entry)
+        elif obj > self.heap[0][0]:
+            heapq.heapreplace(self.heap, entry)
+        if len(self.heap) == self.k:
+            self.best_obj = self.heap[0][0]
+
+    def top(self) -> list[tuple[float, list[SwapPlayer]]]:
+        """The lineups kept, best first: `(score, players in stage order)`. The score includes the tiny
+        cheaper-is-better nudge, so use it for ordering only."""
+        if self.k == 1:
+            return [] if self.best is None else [(self.best_obj, list(self.best))]
+        return [(obj, list(players)) for obj, _seq, players in sorted(self.heap, reverse=True)]
+
     def run(self) -> None:
         used = {p.name for p in self.state.fixed.values()}
         self._descend(0, [*self.state.fixed.values()], used, self.budget, 0.0, [], {})
@@ -328,8 +380,8 @@ class _Search:
         if self.timed_out:
             return
         if depth == len(self.stages):
-            if obj > self.best_obj:
-                self.best_obj, self.best = obj, list(chosen)
+            if self.leaf_filter is None or self.leaf_filter(placed):
+                self._offer(obj, chosen)
             return
         slot = self.stages[depth]
         positions = sorted(FLEX_POSITIONS) if slot == "FLEX" else [slot]
@@ -344,6 +396,8 @@ class _Search:
                 # FLEX goes last, so a regular slot's floor never needs the FLEX pick.
                 new_floor = floor if slot == "FLEX" else {**floor, pos: i}
                 rest = self.stages[depth + 1 :]
+                if self.feasible is not None and not self.feasible([*placed, player], rest):
+                    continue
                 rest_need = {p: rest.count(p) for p in self.need if rest.count(p)}
                 bound = (
                     new_obj
@@ -380,6 +434,30 @@ def best_refill(
     if search.best is None:
         return None
     return _swap_from_lineup(state, _assign_to_slots(state, search.best), exact=not search.timed_out)
+
+
+def top_lineups(
+    state: LineupState,
+    candidates: list[SwapPlayer],
+    *,
+    k: int,
+    leaf_filter: Callable[[list[SwapPlayer]], bool] | None = None,
+    feasible: Callable[[list[SwapPlayer], list[str]], bool] | None = None,
+    time_limit: float | None = None,
+) -> tuple[list[dict[int, SwapPlayer]], bool]:
+    """The best `k` lineups over ALL open slots by the metric, best first, each as `slot index -> player`,
+    plus whether the search finished (False when `time_limit` cut it short: a better lineup may be missing).
+
+    `leaf_filter` receives a complete lineup (locked and chosen players together) and says whether it counts;
+    the bound ignores it, so it is always correct, only slower the rarer a passing lineup is. `feasible` lets
+    a caller cut branches that cannot reach a passing lineup (see `_Search`). Every SET of
+    players appears once (the FLEX is settled by `_assign_to_slots`, so a lineup is not repeated for each way
+    of seating it)."""
+    if not state.open:
+        return [], True
+    search = _Search(state, candidates, time_limit, k=k, leaf_filter=leaf_filter, feasible=feasible)
+    search.run()
+    return [_assign_to_slots(state, players) for _score, players in search.top()], not search.timed_out
 
 
 def _assign_to_slots(state: LineupState, chosen: list[SwapPlayer]) -> dict[int, SwapPlayer]:

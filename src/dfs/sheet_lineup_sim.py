@@ -1,20 +1,20 @@
-"""The lineup simulator on the Lineups tab: Median, p90, P(cash) and P(GPP) for every built lineup, up front.
+"""The lineup simulator on the Lineups tab: Typical, Big night, Cash % and 190+ % for every built lineup.
 
 **Where they sit** (usability round, slice 5). On each lineup's **Total row**, in the four columns right
 after `Pts` that are blank there (`AggPts`, `CalPts`, `Val`, `ValAdj`, found by header name), with small
-labels on the
-**Remaining row** under them (`Median`, `p90`, `P(cash)`, `P(190+)`), scoreboard style. They are numbers, so
-they colour: P(cash) goes green at 50% or more and P(GPP) at 5% or more. They used to sit about twenty
-columns to the right (`Median` .. `P(190+)` after `Min Unique`); those columns are retired
-(`sheet_reorder.retire_lineup_sim_columns`) and the portfolio line moved to the Board's Pool summary.
+labels on the **Remaining row** under them (`Typical`, `Big night`, `Cash %`, `190+ %`; they were `Median`,
+`p90`, `P(cash)`, `P(190+)` until the Week 6 round), scoreboard style. They are numbers, so they colour:
+Cash % goes green at 50% or more and 190+ % at 5% or more. They used to sit about twenty columns to the
+right (after `Min Unique`); those columns are retired (`sheet_reorder.retire_lineup_sim_columns`) and the
+portfolio line moved to the Board's Pool summary.
 
 **The type marker.** Column A of every Total row is a pale-yellow input dropdown, `Cash` / `GPP` (blank =
 both). The number that matches the lineup's type is highlighted, and `dfs lineups late-swap` reads it as
 that lineup's default `--goal` (the flag still overrides it, and both deltas are still shown).
 
 - **Cash line**: the median of every typed `Cash Line` in Results this season (`sim_inputs`), read only; the
-  P(cash) label's note says which ("cash line 141.3 (season median, 4 weeks)").
-- **GPP target**: `[sim] gpp_target` in config.toml (default 190), in the label under the number (`P(190+)`).
+  Cash % label's note says which ("cash line 141.3 (season median, 4 weeks)").
+- **GPP target**: `[sim] gpp_target` in config.toml (default 190), in the label under the number (`190+ %`).
 - **Draws**: `sim_inputs.N_SIMS` (20,000) with a fixed seed, so the numbers do not jitter between syncs. All
   the built lineups are simulated in one run: a player in two lineups is one random variable, which is what
   makes the portfolio numbers (on the Board) mean something.
@@ -39,9 +39,15 @@ if TYPE_CHECKING:  # the simulator stack (numpy, scipy) is imported only when a 
 N_SIMS = 20000  # mirrored by sim_inputs.N_SIMS (a test pins them equal)
 SEED = 0
 
-MEDIAN_HEADER = "Median"
-P90_HEADER = "p90"
-P_CASH_HEADER = "P(cash)"
+# What the four numbers are called on the sheet (plain words, Slice 1 of the Week 6 round).
+MEDIAN_HEADER = "Typical"
+P90_HEADER = "Big night"
+P_CASH_HEADER = "Cash %"
+# What the retired far-right columns were called, and what the labels were before the rename: both still
+# count as "a retired sim header" so an old sheet is cleaned up whichever vintage it is.
+OLD_MEDIAN_HEADER = "Median"
+OLD_P90_HEADER = "p90"
+OLD_P_CASH_HEADER = "P(cash)"
 GPP_HEADER_RE = re.compile(r"^P\((\d+(?:\.\d+)?)\+\)$")
 # The columns the four numbers sit in: blank on a Total row, right after `Pts`.
 SIM_SLOT_HEADERS = ("AggPts", "CalPts", "Val", "ValAdj")
@@ -49,16 +55,17 @@ MARKER_HEADER = "Name"  # the marker is column A of the Total row: under the Nam
 MARKER_OPTIONS = ["Cash", "GPP"]
 P_CASH_GREEN = 0.5  # P(cash) at or above this reads green
 P_GPP_GREEN = 0.05  # P(GPP target) at or above this reads green
+CASH_WEAK_BELOW = 0.40  # a lineup marked Cash with Cash % under this gets an `Issues` warning
 
 
 def gpp_header(target: float) -> str:
-    """`P(190+)` for a 190 target, `P(187.5+)` for 187.5."""
-    return f"P({target:g}+)"
+    """`190+ %` for a 190 target, `187.5+ %` for 187.5."""
+    return f"{target:g}+ %"
 
 
 GPP_HEADER_DEFAULT = gpp_header(SIM_GPP_TARGET_DEFAULT)
 # What the retired far-right columns were called (`sheet_reorder.retire_lineup_sim_columns` deletes them).
-RETIRED_SIM_HEADERS = [MEDIAN_HEADER, P90_HEADER, P_CASH_HEADER]
+RETIRED_SIM_HEADERS = [OLD_MEDIAN_HEADER, OLD_P90_HEADER, OLD_P_CASH_HEADER]
 
 
 def is_retired_sim_header(name: object) -> bool:
@@ -82,26 +89,22 @@ def sim_slots(header: list) -> list[int] | None:
 
 def lineup_sim_notes(target: float, cash_basis: str | None = None) -> dict[str, str]:
     """The notes on the four labels, keyed by label text (so the GPP note carries the current target and the
-    P(cash) note the basis of the cash line, e.g. "cash line 141.3 (season median, 4 weeks)")."""
+    Cash % note the basis of the cash line, e.g. "cash line 141.3 (season median, 4 weeks)")."""
     return {
         MEDIAN_HEADER: (
-            "SIMULATED median score of this lineup (half the simulated slates land above it). Outcomes come "
-            "from the model's distributions and move together by role (QB with his receivers, the two sides "
-            "of a game)."
+            "TYPICAL: this lineup's usual score. Half of the simulated slates land above it, half below."
         ),
-        P90_HEADER: (
-            "SIMULATED 90th-percentile score: a good night for this lineup (1 slate in 10 is better)."
-        ),
+        P90_HEADER: ("BIG NIGHT: what this lineup scores on a great slate; only 1 slate in 10 does better."),
         P_CASH_HEADER: (
-            "Chance this lineup reaches the cash line: the median of every typed Cash Line in Results this "
-            f"season (read only){f', now {cash_basis}' if cash_basis else ''}. Green at 50% or more. Column "
-            "A of the Total row says whether this lineup is a Cash or a GPP lineup; the matching number is "
-            "highlighted."
+            "CASH %: the chance this lineup beats a typical cash line, the median of the Cash Lines you "
+            f"typed on Results.{f' Today: {cash_basis}.' if cash_basis else ''} 50% or more is a solid cash "
+            "build and turns green. The Cash or GPP marker in column A of the Total row says which number "
+            "this lineup is judged on."
         ),
         gpp_header(target): (
-            f"Chance this lineup scores {target:g} or more, the GPP target (config.toml [sim] gpp_target). "
-            "Green at 5% or more. Simulated from the model, not conditioned on games already played; "
-            "20,000 draws with a fixed seed."
+            f"{target:g}+ %: the chance this lineup scores {target:g} or more, a typical tournament-winning "
+            "pace (config.toml [sim] gpp_target sets the number). 5% or more is good for a GPP and turns "
+            "green. Simulated 20,000 times from the model, not adjusted for games already played."
         ),
     }
 
@@ -193,7 +196,21 @@ def write_lineup_sim(
         with perf.phase("lineup sim: check for stale numbers"):
             cells = client.read_range(tab, f"{first_letter}2:{last_letter}{last_row}")
         if not any(str(cell).strip() for row in cells for cell in row):
-            return f"{tab}: no lineup has players yet -- lineup simulator skipped (nothing to write)"
+            # Nothing to simulate and no stale numbers, but the labels under the numbers may be an older
+            # wording (`Median`, `p90`, ...): put the current ones on every Remaining row.
+            remaining = name_blocks[0][1] + 2
+            shown = client.read_range(tab, f"{first_letter}{remaining}:{last_letter}{remaining}")
+            if [str(c).strip() for c in (shown[0] if shown else [])] == labels(gpp_target):
+                return f"{tab}: no lineup has players yet -- lineup simulator skipped (nothing to write)"
+            client.update_ranges(
+                tab,
+                {
+                    f"{first_letter}{end + 2}:{last_letter}{end + 2}": [labels(gpp_target)]
+                    for _start, end in name_blocks
+                },
+            )
+            apply_label_notes(client, tab, header_row=header_row, name_blocks=name_blocks, target=gpp_target)
+            return f"{tab}: no lineup has players yet -- labels updated, nothing to simulate"
     specs = build_specs(edge, depth_rows, gsis_by_id, only_names=typed) if typed else {}
 
     lineups, owners = [], []
@@ -344,11 +361,15 @@ def apply_label_notes(
     """Hover notes on the four labels of the first lineup's Remaining row (the one place that explains them
     all). Returns how many were set."""
     rows = client.read_range(tab, f"A{header_row}:{header_row}")
-    slots = sim_slots(list(rows[0]) if rows else [])
+    header = list(rows[0]) if rows else []
+    slots = sim_slots(header)
     if slots is None:
         return 0
     row = name_blocks[0][1] + 2
     notes = lineup_sim_notes(target, cash_basis)
+    texts = [""] * len(header)
     for index, label in zip(slots, labels(target), strict=True):
-        client.set_note(tab, f"{column_letter(index)}{row}", notes[label])
+        texts[index] = notes[label]
+    # The whole row is replaced, so a note left on the cell where a column used to be is cleared too.
+    client.set_row_notes(tab, row, texts)
     return len(slots)

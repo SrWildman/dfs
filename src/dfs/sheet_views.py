@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from dfs import edge_finder_tab as eft
 from dfs import sheet_pool_cells as pc
 from dfs.derived import (
     EDGE_SHEET_ORDER,
@@ -218,7 +219,22 @@ ROSTER_MIN = {"QB": 1, "RB": 2, "WR": 3, "TE": 1, "DST": 1}
 ROSTER_FLEX_POSITIONS = ("RB", "WR", "TE")
 ROSTER_MIN_FLEX_POOL = sum(ROSTER_MIN[p] for p in ROSTER_FLEX_POSITIONS) + 1
 
-BOARD_POOL_HEADER_ROW = BOARD_CHECK_LAST_ROW + 2
+# Model likes, not in your pool (Week 6): the model's favourites (the Edge Finder's Cash add and GPP add /
+# leverage players, `edge_finder_tab.favourites`) that are not in the pool yet, 6 Cash then 12 GPP (Sam's
+# counts), each with the live Pool dropdown. A formula over the Edge Finder's hidden favourites lists, so a
+# pick makes the row go away at once. A player on both lists shows once, in the Cash block.
+BOARD_LIKES_COLHEADER = [BOARD_POOL_HEADER, "Player", "Pos", "Team", "Why", "", "", ""]
+BOARD_LIKES_HEADER_ROW = BOARD_CHECK_LAST_ROW + 2
+BOARD_LIKES_COLHEADER_ROW = BOARD_LIKES_HEADER_ROW + 1
+BOARD_LIKES_FIRST_ROW = BOARD_LIKES_COLHEADER_ROW + 1
+BOARD_LIKES_CASH_ROWS = 6
+BOARD_LIKES_GPP_ROWS = 12
+BOARD_LIKES_ROWS = BOARD_LIKES_CASH_ROWS + BOARD_LIKES_GPP_ROWS
+BOARD_LIKES_LAST_ROW = BOARD_LIKES_FIRST_ROW + BOARD_LIKES_ROWS - 1
+BOARD_LIKES_EMPTY = "Your pool already has every model favourite."
+LIKES_FAVOURITE_ROWS = 200  # how far down the Edge Finder's favourites columns the formulas read
+
+BOARD_POOL_HEADER_ROW = BOARD_LIKES_LAST_ROW + 2
 BOARD_POOL_GAP_ROW = BOARD_POOL_HEADER_ROW + 1
 BOARD_PORTFOLIO_ROW = BOARD_POOL_GAP_ROW + 1
 BOARD_POOL_COLHEADER_ROW = BOARD_PORTFOLIO_ROW + 1
@@ -891,6 +907,61 @@ def build_board(
         row = BOARD_CHECK_FIRST_ROW + i
         _set(row, [pc.pool_formula(row, edge_tab, id_col=BOARD_ID_COL)], start_col=pool_col_index)
 
+    _set(
+        BOARD_LIKES_HEADER_ROW,
+        ["MODEL LIKES, NOT IN YOUR POOL  —  Cash and GPP favourites you have not pooled (pick Pool)"],
+    )
+    _set(BOARD_LIKES_COLHEADER_ROW, BOARD_LIKES_COLHEADER)
+    _set(BOARD_LIKES_COLHEADER_ROW, [BOARD_ID_HEADER], start_col=BOARD_ID_COL_INDEX)
+    edge_id = _rng(edge_tab, "Id")
+    edge_pool = (
+        f"{_q(edge_tab)}!${POOL_COLUMN}$2:${POOL_COLUMN}"  # EdgeRaw's typed Pool column (not a frame column)
+    )
+    edge_hit, edge_boom = _rng(edge_tab, "Hit3x%"), _rng(edge_tab, "Boom%")
+    fav_cash = _favourites_range(eft.FAVOURITE_CASH_COL)
+    fav_gpp = _favourites_range(eft.FAVOURITE_GPP_COL)
+    cash_first = BOARD_LIKES_FIRST_ROW
+    gpp_first = BOARD_LIKES_FIRST_ROW + BOARD_LIKES_CASH_ROWS
+    cash_shown = f"${BOARD_ID_COL}${cash_first}:${BOARD_ID_COL}${gpp_first - 1}"
+    unpooled = f'ARRAYFORMULA(COUNTIFS({edge_id},{{fav}},{edge_pool},"<>"))=0'
+    cash_ids = (
+        f'=IFERROR(ARRAY_CONSTRAIN(FILTER({fav_cash},{fav_cash}<>"",{unpooled.format(fav=fav_cash)}),'
+        f'{BOARD_LIKES_CASH_ROWS},1),"")'
+    )
+    gpp_ids = (
+        f'=IFERROR(ARRAY_CONSTRAIN(FILTER({fav_gpp},{fav_gpp}<>"",{unpooled.format(fav=fav_gpp)},'
+        f'ARRAYFORMULA(COUNTIF({cash_shown},{fav_gpp}))=0),{BOARD_LIKES_GPP_ROWS},1),"")'
+    )
+    _set(cash_first, [cash_ids], start_col=BOARD_ID_COL_INDEX)
+    _set(gpp_first, [gpp_ids], start_col=BOARD_ID_COL_INDEX)
+    for i in range(BOARD_LIKES_ROWS):
+        row = BOARD_LIKES_FIRST_ROW + i
+        is_cash = i < BOARD_LIKES_CASH_ROWS
+        id_ref = f"${BOARD_ID_COL}{row}"
+        at = f"MATCH({id_ref},{edge_id},0)"
+
+        def _pick(column: str, at: str = at) -> str:
+            return f"INDEX({column},{at})"
+
+        player = f'IFERROR({_pick(name)},"")'
+        if row == cash_first:  # the one empty-state line, in the first row, when neither block has anyone
+            player = f'IF({id_ref}="",IF(${BOARD_ID_COL}${gpp_first}="","{BOARD_LIKES_EMPTY}",""),{player})'
+        why = (
+            f'IFERROR("Cash add  ·  "&TEXT({_pick(edge_hit)},"0")&"% to reach 3x salary","")'
+            if is_cash
+            else f'IFERROR("GPP  ·  "&TEXT({_pick(edge_boom)},"0")&"% to reach 4x salary","")'
+        )
+        _set(
+            row,
+            [
+                pc.pool_formula(row, edge_tab, id_col=BOARD_ID_COL),
+                f"={player}" if row == cash_first else f'=IF({id_ref}="","",{player})',
+                f'=IF({id_ref}="","",IFERROR({_pick(pos)},""))',
+                f'=IF({id_ref}="","",IFERROR({_pick(team)},""))',
+                f'=IF({id_ref}="","",{why})',
+            ],
+        )
+
     _set(BOARD_POOL_HEADER_ROW, ["POOL SUMMARY  —  your pool right now (live, no sync needed)"])
     cash_col, gpp_col = BOARD_POOL_COL["Cash"], BOARD_POOL_COL["GPP"]
     _set(
@@ -956,7 +1027,15 @@ def build_board(
         _set(r, _stack_row_formulas(r), start_col=BOARD_STACK_COLHEADER.index("QB"))
 
     client.write_tab(BOARD_TAB, rows)
-    return f"{BOARD_TAB}: built (Slate shape, Queue, Pool check, Pool summary, Chalk map, Stack candidates)"
+    return (
+        f"{BOARD_TAB}: built (Slate shape, Queue, Pool check, Model likes, Pool summary, Chalk map, "
+        "Stack candidates)"
+    )
+
+
+def _favourites_range(column: str) -> str:
+    """One of the Edge Finder's hidden favourites columns (ids in rank order, from row 2) as a range."""
+    return f"'{eft.EDGE_FINDER_TAB}'!${column}$2:${column}${LIKES_FAVOURITE_ROWS}"
 
 
 def _text_cell(text: str) -> str:

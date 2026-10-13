@@ -1,6 +1,6 @@
 # The bound Apps Script (`apps_script/Code.gs`)
 
-One small Google Apps Script is bound to the sheet. It does four things, and nothing else:
+One small Google Apps Script is bound to the sheet. It does six things, and nothing else:
 
 1. **The `Pool` dropdown.** Every player row on the **Edge Finder**, **Board** and **Player Pool** tabs has a `Pool` cell at the left, before his name. It shows whether he is in your pool (blank, `Cash`, `GPP` or `Both`) and it
    is also the control: pick `Cash`, `GPP` or `Both` to add him, or clear the cell (press Delete) to take him out. The script writes the pick to EdgeRaw's `Pool` cell, which stays the one source of truth, and then
@@ -8,7 +8,14 @@ One small Google Apps Script is bound to the sheet. It does four things, and not
 2. **Player Pool's "Add a player" box.** Pick a name in the box in the top row, with `Cash`, `GPP` or `Both` in the cell to its left (default `Both`): the player is added to EdgeRaw's `Pool` as that type and the box clears.
 3. **Lineup Tools > Clear Lineup Names.** Always acts on the **Lineups** tab (never the one you are looking at), clears only the 9 player rows of each lineup
    (never the Total or Remaining rows, so a lineup's Cash/GPP marker stays), and asks you to confirm first.
-4. **Version stamp.** Each time the sheet is opened it writes its version into a hidden named range, `DFS_SCRIPT_VERSION` (a cell on the hidden `NameAlias` tab).
+4. **Lineup Tools > Fix FLEX order** (version 4). For every lineup block on the **Lineups** tab, puts the player with the latest kickoff in the FLEX slot by swapping two typed names
+   (column A only; the Total row's marker and every formula stay). It reads each player's `Position` and `GameStart` from EdgeRaw by name, treats "now" as Eastern time (`America/New_York`, the
+   zone TFFB writes kickoffs in) and **never moves a player whose game has started**. The dialog lists every lineup it would change and asks before it writes; a tie, a missing kickoff or a started game is left
+   alone and reported. The rule is `src/dfs/flex_order.py`'s, and `tests/test_apps_script.py` runs the same cases through both.
+5. **Lineup Tools > Copy build to Lineups** (version 4). Asks for a build number from the **Suggested** tab (the dialog lists them), then copies that build's nine names into the **first lineup block on Lineups with no name in it** and
+   sets its Cash / GPP marker; it shows what it will copy and asks first, never writes into a block that has a name, and says so when every block is taken. `tests/test_apps_script.py` reads the same Suggested grid with
+   both this script and `sheet_suggested.parse_builds`.
+6. **Version stamp.** Each time the sheet is opened it writes its version into a hidden named range, `DFS_SCRIPT_VERSION` (a cell on the hidden `NameAlias` tab).
    `dfs doctor` reads it and warns if the script is missing or older than the repo's.
 
 How the `Pool` cell works: it holds the formula `=IF($Id="","",IFERROR(INDEX(EdgeRaw!Pool, MATCH($Id, EdgeRaw!Id, 0)),""))` for its own row (`sheet_pool_cells.pool_formula`; the script writes the same text, and
@@ -40,6 +47,8 @@ dropdown with the `Pool` dropdown and added the add-a-player box: a sheet still 
 script's `restoreFormula_` lets EdgeRaw settle, tries the plain write, and if a strict dropdown refuses the formula's result (a player taken out of the pool shows a blank) it lifts the rule for that one
 write and puts it back. `dfs setup polish` and every Edge Finder write now also make the Pool dropdowns warnings rather than rejections, so a sheet that has been polished never needs the workaround.
 
+**Version 4** (the Week 6 round) adds **Lineup Tools > Fix FLEX order** and **Copy build to Lineups**; a sheet still on version 3 simply has no such menu item.
+
 ## Manual test checklist (needs a browser; the pure functions are unit-tested with node in `tests/test_apps_script.py`)
 
 - Edge Finder: pick `Cash` in a player row's `Pool` cell. EdgeRaw's Pool cell for him says `Cash`; his `Pool` cell still holds the formula (click it to see) and shows `Cash`; his `Do` reads `In pool (Cash)`.
@@ -51,3 +60,7 @@ write and puts it back. `dfs setup polish` and every Edge Finder write now also 
 - Type something that is not an option into a `Pool` cell (the dropdown rejects it); edit any other cell: nothing happens.
 - Lineups: set a lineup's marker, then **Lineup Tools > Clear Lineup Names** from the *Player Pool* tab: the confirm dialog names Lineups, the names clear, the markers and Totals stay,
   and Player Pool's Name formulas are untouched.
+- Lineups: build one lineup with a WR in FLEX whose game is earlier than a WR in a WR slot, then **Lineup Tools > Fix FLEX order**: the dialog names both players ("X to FLEX (plays SNF), Y to WR");
+  YES swaps the two typed names and nothing else. Run it again: "already has the latest kickoff". Late on Sunday with the early games started, it leaves the lineup alone and says why.
+- Suggested: after `dfs lineups suggest`, **Lineup Tools > Copy build to Lineups**, enter a build number: the dialog names the build and the empty lineup it will use; YES fills column A of that block and the
+  Total row's marker. Run it again with another build: it goes to the next empty block. With every block holding a name it refuses.

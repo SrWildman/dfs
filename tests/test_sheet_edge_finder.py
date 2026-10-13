@@ -98,7 +98,8 @@ class FakeClient:
 
     def write_tab(self, tab, rows):
         self.tab_written = (tab, rows)
-        self.keys = {i + 1: r[eft.COLUMN_COUNT - 1] for i, r in enumerate(rows) if r[eft.COLUMN_COUNT - 1]}
+        key = ord(eft.KEY_COL) - 65
+        self.keys = {i + 1: r[key] for i, r in enumerate(rows) if r[key]}
         return len(rows)
 
     def clear_conditional_formats(self, tab):
@@ -122,6 +123,13 @@ class FakeClient:
 
     def set_note(self, tab, cell, note):
         self.notes[cell] = note
+
+    def set_row_notes(self, tab, row, notes, *, first_col=0):
+        from dfs.sheets import column_letter
+
+        for i, text in enumerate(notes):
+            if text:
+                self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
 
     def clear_notes(self, tab, rng):
         self.cleared_notes.append(rng)
@@ -149,7 +157,8 @@ class FakeClient:
 def test_formulas_find_the_player_by_his_hidden_id_never_his_name():
     layout = eft.build_layout(_inputs(_edge([_player(1)])))
     rows = writer.tab_rows(layout, "EdgeRaw")
-    row = layout.player_rows[0]
+    cash_core = next(r for r in layout.section_rows if layout.rows[r - 1][0] == "CASH CORE")
+    row = next(r for r in layout.player_rows if r > cash_core)  # the first Cash core row
     cells = rows[row - 1]
     idl = writer._id_letter()
     pool, do = cells[ord(eft.POOL_COL) - 65], cells[ord(eft.DO_COL) - 65]
@@ -175,14 +184,15 @@ def test_the_writer_adds_pool_dropdowns_notes_hides_id_and_key_and_shows_the_all
     edge = _edge([_player(i) for i in range(1, 4)])
     message = writer.write_tab(client, _inputs(edge), edge_tab="EdgeRaw")
     assert "player rows" in message and client.tab_written[0] == "Edge Finder"
-    assert client.hidden == [(eft.ID_COL, eft.KEY_COL)]
+    assert client.hidden == [(eft.ID_COL, eft.LAST_COLUMN)]  # Id, the group key and the favourites lists
     assert client.cleared_validation.startswith("A1:")  # the old layout's Set dropdowns are cleared first
     assert client.validations and all(o == ["Cash", "GPP", "Both"] for _, o in client.validations)
     assert all(rng.startswith(eft.POOL_COL) for rng, _ in client.validations)
     # warnings, not rejections: a strict rule made Apps Script refuse the formula it writes back
     assert all(k.get("strict") is False for k in client.validation_kwargs)
     assert "control_before" in client.calls and client.freeze_args == {"rows": 0, "cols": 2}
-    assert client.cleared_notes == [f"{eft.WHY_COL}1:{eft.WHY_COL}{max(len(client.tab_written[1]), 40) + 20}"]
+    # every old note goes (Why and header notes alike); the current ones are written back after
+    assert client.cleared_notes == [f"A1:{eft.LAST_COLUMN}{max(len(client.tab_written[1]), 40) + 20}"]
     rows = client.tab_written[1]
     player = [i + 1 for i, r in enumerate(rows) if r[ord(eft.ID_COL) - 65] == 1001][0]
     assert f"{eft.WHY_COL}{player}" in client.notes  # the full reason sits in the note
@@ -232,16 +242,16 @@ def test_open_and_shut_state_survives_a_second_write_even_when_the_count_changes
     writer.write_tab(client, _inputs(_wr_edge(20)), edge_tab="EdgeRaw")  # sync 1: WR overflow shut
     wr = [g for g in client.groups if g["depth"] == 2][0]
     wr["collapsed"] = False  # Sam opens the WR overflow ...
-    section = [g for g in client.groups if g["depth"] == 1][0]
-    section["collapsed"] = True  # ... and shuts the first section
-    first_section_start = section["start"]
+    section = [g for g in client.groups if g["depth"] == 1][1]  # (the first is Top plays) ...
+    section["collapsed"] = True  # ... and shuts the Cash core section
     writer.write_tab(client, _inputs(_wr_edge(24)), edge_tab="EdgeRaw")  # sync 2: 12 more WRs overflow now
-    after = {(g["start"], g["depth"]): g["collapsed"] for g in client.groups}
-    assert after[(first_section_start, 1)] is True
+    # The rows move between syncs (Top plays gains rows with 24 receivers), so groups are compared by order.
+    sections = sorted((g for g in client.groups if g["depth"] == 1), key=lambda g: g["start"])
+    assert sections[1]["collapsed"] is True  # Cash core stayed shut, found again by its key
     new_wr = [g for g in client.groups if g["depth"] == 2 and g["end"] - g["start"] + 1 == 12][0]
     assert new_wr["collapsed"] is False  # the header said 8 more, now 12: same key, same state
-    other_sections = [g for g in client.groups if g["depth"] == 1 and g["start"] != first_section_start]
-    assert other_sections and all(g["collapsed"] is False for g in other_sections)
+    others = [g for i, g in enumerate(sections) if i != 1]
+    assert others and all(g["collapsed"] is False for g in others)
 
 
 def test_the_group_state_is_read_from_the_key_on_the_row_above_each_group():

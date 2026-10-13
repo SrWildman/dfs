@@ -1,10 +1,15 @@
+from datetime import UTC, datetime
+
 import pandas as pd
 
+from dfs.kickoff import parse_kickoff
 from dfs.lineups import (
     build_salary_lookup,
     export_csv,
+    kickoffs_by_id,
     parse_entries,
     parse_player_cell,
+    reorder_flex,
     validate_entry,
 )
 from dfs.models import ROSTER_SLOTS
@@ -141,3 +146,57 @@ def test_export_csv_writes_only_given_entries(tmp_path):
     content = out.read_text()
     assert content.splitlines()[0] == "Entry ID,Contest Name,Contest ID,Entry Fee," + ",".join(ROSTER_SLOTS)
     assert "E1" in content and "E2" in content
+
+
+# --- the FLEX rule on export (Week 6): the latest kickoff among the flex position's players goes in FLEX ---
+
+EARLY, LATE_SNF = "2026-10-18T13:00:00Z", "2026-10-18T20:20:00Z"
+BEFORE = datetime(2026, 10, 18, 15, 0, tzinfo=UTC)  # 11 am ET
+DURING = datetime(2026, 10, 18, 18, 0, tzinfo=UTC)  # 2 pm ET: the 1 pm games are under way
+
+
+def _validated(*, flex_cell=None):
+    lookup = build_salary_lookup(_salary_df())
+    row = _lineup_row()
+    if flex_cell:
+        row[4 + ROSTER_SLOTS.index("FLEX")] = flex_cell
+    return [validate_entry(e, lookup, salary_cap=50000) for e in parse_entries([HEADER, row])]
+
+
+def _kicks(**late):
+    """Every player at 1 pm except the ids in `late` (dk id -> kickoff string)."""
+    ids = [str(i) for i in range(1, 10)]
+    return {i: parse_kickoff(late.get(f"id{i}", EARLY)) for i in ids}
+
+
+def test_export_moves_the_wr_with_the_latest_kickoff_into_flex_and_says_so():
+    # WR3 (Justin Jefferson, id 6) plays Sunday night; the FLEX WR (Lamb, id 8) plays at 1 pm
+    results = _validated()
+    entries, messages = reorder_flex(results, _kicks(id6=LATE_SNF), BEFORE)
+    cells = entries[0].slot_cells
+    assert cells[ROSTER_SLOTS.index("FLEX")] == "Justin Jefferson (6)"
+    assert cells[5] == "CeeDee Lamb (8)"  # the third WR slot took the old FLEX player
+    assert [c for i, c in enumerate(cells) if i not in (5, 7)] == [
+        c for i, c in enumerate(results[0].entry.slot_cells) if i not in (5, 7)
+    ]
+    assert messages == ["row 2 (E1): Moved Justin Jefferson to FLEX (plays SNF), CeeDee Lamb to WR"]
+
+
+def test_export_leaves_a_lineup_whose_flex_already_plays_last_or_ties_or_has_started():
+    results = _validated()
+    assert reorder_flex(results, _kicks(id8=LATE_SNF), BEFORE) == ([results[0].entry], [])  # already right
+    assert reorder_flex(results, _kicks(id6=LATE_SNF, id8=LATE_SNF), BEFORE)[1] == []  # a tie
+    entries, messages = reorder_flex(results, _kicks(id6=LATE_SNF), DURING)  # Lamb's 1 pm game has started
+    assert entries == [results[0].entry]
+    assert messages == ["row 2 (E1): FLEX left as it is (a player's game has started)"]
+    missing = _kicks(id6=LATE_SNF)
+    missing["8"] = None
+    assert reorder_flex(results, missing, BEFORE)[1] == [
+        "row 2 (E1): FLEX not checked (a kickoff time is missing)"
+    ]
+
+
+def test_kickoffs_by_id_reads_the_edge_frame_through_kickoff_py():
+    edge = pd.DataFrame({"Id": [6, 8], "GameStart": [LATE_SNF, ""]})
+    got = kickoffs_by_id(edge)
+    assert got["6"] == parse_kickoff(LATE_SNF) and got["8"] is None

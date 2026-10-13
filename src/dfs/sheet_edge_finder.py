@@ -23,6 +23,8 @@ from dfs import edge_finder_tab as eft
 from dfs import sheet_pool_cells as pc
 from dfs.sheet_clipping import FIT_PADDING_PX, FIT_PX_PER_CHAR, estimate_px, fitted_widths
 from dfs.sheet_color_scales import WHITE
+from dfs.sheet_column_notes import apply_notes_to_values, edge_finder_tab_notes
+from dfs.sheet_consider import add_consider_rule, edge_finder_formula
 from dfs.sheet_style import (
     _HEADER_FMT,
     _PANEL_FMT,
@@ -69,7 +71,7 @@ WIDTHS = {
 }
 # How far a column may grow past its fixed width when a real value would be cut off (the audit decides).
 GROW_MAX = {"C": 56, "D": 56, "E": 72, eft.OWN_COL: 70, "G": 84, "H": 84, "I": 84, "J": 84, "K": 84}
-HIDDEN_FIRST, HIDDEN_LAST = eft.ID_COL, eft.KEY_COL
+HIDDEN_FIRST, HIDDEN_LAST = eft.ID_COL, eft.LAST_COLUMN  # Id, the group key, the two favourites lists
 NO_FILL = {"red": 1.0, "green": 1.0, "blue": 1.0}
 VERDICT_FG = {"red": 0.60, "green": 0.38, "blue": 0.0}
 ADD_FG = {"red": 0.10, "green": 0.45, "blue": 0.25}
@@ -102,8 +104,18 @@ def _index(letter: str) -> int:
 
 
 def tab_rows(layout: eft.Layout, edge_tab: str) -> list[list]:
-    """The layout's rows with the Pool and Do formulas filled into every player row."""
+    """The layout's rows with the Pool and Do formulas filled into every player row, and the favourites'
+    ids (the hidden `FAVOURITE_CASH_COL` / `FAVOURITE_GPP_COL`, a label in row 1 and the ids from row 2)."""
     rows = [list(r) for r in layout.rows]
+    for index, label, ids in (
+        (eft.FAVOURITE_CASH_INDEX, eft.FAVOURITE_CASH_LABEL, layout.favourites_cash),
+        (eft.FAVOURITE_GPP_INDEX, eft.FAVOURITE_GPP_LABEL, layout.favourites_gpp),
+    ):
+        while len(rows) < len(ids) + 1:
+            rows.append([""] * eft.COLUMN_COUNT)
+        rows[0][index] = label
+        for i, player_id in enumerate(ids, start=1):
+            rows[i][index] = player_id
     for row in layout.player_rows:
         verb = rows[row - 1][_index(eft.DO_COL)]
         rows[row - 1][_index(eft.POOL_COL)] = pool_formula(row, edge_tab)
@@ -179,7 +191,9 @@ def _write_tab(client: SheetsClient, inputs: eft.Inputs | None, *, edge_tab: str
         client.clear_row_groups(TAB)
         client.unhide_rows(TAB, 1, last_row + 20)  # deleting a collapsed group leaves its rows hidden
     client.write_tab(TAB, rows)
-    client.clear_notes(TAB, f"{eft.WHY_COL}1:{eft.WHY_COL}{last_row + 20}")
+    # The tab is rewritten from scratch, so no old note may survive: not a Why note, not a header note that
+    # now sits on a different row (`_write_notes` puts the current ones back).
+    client.clear_notes(TAB, f"A1:{eft.LAST_COLUMN}{last_row + 20}")
     # the previous layout's dropdowns (the old Set column) stay behind unless cleared
     client.clear_data_validation(TAB, f"A1:{eft.LAST_COLUMN}{last_row + 20}")
     client.clear_conditional_formats(TAB)
@@ -272,7 +286,11 @@ def fit_widths(layout: eft.Layout) -> dict[str, int]:
 
 
 def _write_notes(client: SheetsClient, layout: eft.Layout) -> None:
-    """The full reason behind each shortened `Why`, as the cell's note (hover to read it)."""
+    """One-hover definitions on every header row (`sheet_column_notes.edge_finder_tab_notes`), and the full
+    reason behind each shortened `Why`, as the cell's note."""
+    notes = edge_finder_tab_notes()
+    for row in (*layout.header_rows, *layout.repeat_header_rows, *layout.inner_header_rows):
+        apply_notes_to_values(client, TAB, row, layout.rows[row - 1], notes)
     for row, text in layout.notes.items():
         if text:
             client.set_note(TAB, f"{eft.WHY_COL}{row}", text)
@@ -295,6 +313,12 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         )
     for row in layout.header_rows:
         client.format_range(TAB, f"A{row}:{last}{row}", _HEADER_FMT)
+    for row in layout.repeat_header_rows:  # the section's header again, per position block: same bar, smaller
+        client.format_range(
+            TAB,
+            f"A{row}:{last}{row}",
+            {**_HEADER_FMT, "textFormat": {**_HEADER_FMT["textFormat"], "fontSize": 8}},
+        )
     for row in layout.inner_header_rows:  # the small header inside a group: quiet, not a dark bar
         client.format_range(
             TAB,
@@ -388,6 +412,11 @@ def _conditional_formats(client: SheetsClient, layout: eft.Layout) -> None:
         pool = f"{eft.POOL_COL}{first}:{eft.POOL_COL}{last_row}"
         for state, fmt in POOL_TYPE_CHIPS.items():
             client.add_boolean_rule(TAB, pool, condition_type="TEXT_EQ", values=[state], fmt=fmt)
+        # "Consider": a model favourite not in your pool gets a soft yellow Name (Pool blank, Do = favourite)
+        name = f"{eft.NAME_COL}{first}:{eft.NAME_COL}{last_row}"
+        add_consider_rule(
+            client, TAB, name, edge_finder_formula(f"${eft.POOL_COL}{first}", f"${eft.DO_COL}{first}")
+        )
         do = f"{eft.DO_COL}{first}:{eft.DO_COL}{last_row}"
         for text in ("add", "leverage"):
             client.add_boolean_rule(

@@ -110,3 +110,11 @@ last_row = 20
 # the score a tournament lineup needs; it is shown in the column header as "P(190+)".
 [sim]
 gpp_target = 190
+
+# Which projection the model-driven tools act on: late swap, the Lineups simulator, the Suggested builds and the
+# Board's portfolio line. "CalPts" is our corrected projection (TFFB corrected for its known biases and blended with
+# Sleeper and FantasyPros); wherever CalPts is blank they fall back to TFFB's ProjPts. TFFB stays visible on every
+# tab for comparison. The other choices are "ProjPts" and "AggPts".
+[projection]
+default = "CalPts"
+

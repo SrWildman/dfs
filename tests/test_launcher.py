@@ -149,7 +149,6 @@ def test_header_lines_render_a_fully_built_week():
 import pytest  # noqa: E402
 
 from dfs.launcher import (  # noqa: E402
-    HANDY_ITEMS,
     STANDARD_WEEK_ITEMS,
     MissingParam,
     answer_to_args,
@@ -173,7 +172,7 @@ def test_standard_week_is_always_on_the_menu_whatever_the_state():
         LauncherState(sheet_title="Week 1", synced_sources=5, game_started=True),
     ):
         title, items = menu_sections(state)[0]
-        assert title == "Your standard week"
+        assert title == "Your week, in order"
         assert [i.command for i in items] == [i.command for i in STANDARD_WEEK_ITEMS]
 
 
@@ -183,11 +182,35 @@ def test_menu_commands_carry_no_placeholders_because_they_are_prompted_for():
             assert item.command is None or "<" not in item.command
 
 
-def test_a_suggestion_missing_from_the_fixed_menu_is_appended_not_dropped():
+def test_a_suggestion_missing_from_the_fixed_menu_gets_its_own_section_not_dropped():
     state = LauncherState(sheet_title="W", synced_sources=3, games_finished=True)
-    handy = dict(menu_sections(state))["Also handy"]
-    assert "dfs bankroll sync" in [i.command for i in handy]
-    assert len(handy) == len(HANDY_ITEMS) + 1
+    extra = dict(menu_sections(state))["Also suggested right now"]
+    assert [i.command for i in extra] == ["dfs bankroll sync"]
+    quiet = LauncherState(sheet_title="W", synced_sources=3, game_started=True)
+    assert [title for title, _ in menu_sections(quiet)] == ["Your week, in order"]  # nothing extra to offer
+
+
+def test_the_main_menu_is_the_weekly_steps_in_order_and_nothing_else():
+    from dfs.launcher import MENU_SECTIONS
+
+    assert len(MENU_SECTIONS) == 1
+    assert [i.command for i in STANDARD_WEEK_ITEMS] == [
+        "dfs week new",
+        "dfs sync",
+        None,  # build the pool and lineups in the sheet
+        "dfs lineups suggest",
+        "dfs export",
+        "dfs sync --live",
+        "dfs lineups late-swap",
+        "dfs week close",
+    ]
+
+
+def test_with_a_pool_and_unfilled_lineups_the_suggested_next_step_is_the_suggest_command():
+    state = LauncherState(
+        sheet_title="W", synced_sources=3, pool_count=40, lineups_filled=0, lineups_total=20
+    )
+    assert "dfs lineups suggest" in suggested_commands(state)
 
 
 def test_suggested_commands_follow_the_state():

@@ -19,7 +19,7 @@ This is what most weeks look like. Everything below it is reference.
 |---|---|---|---|
 | 1 | Tuesday/Wednesday: a new week starts | `dfs week new "<url-of-the-sheet-copy>"` | Points the CLI at a fresh copy of the template, carries your bankroll and Results forward, runs a full sync. Then check `dfs status`. |
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
-| 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. |
+| 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy build to Lineups drops one in). |
 | 4 | Lineups are built | `dfs export -o lineups.csv` | Validates your lineups and writes DraftKings' bulk-upload CSV. |
 | 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close --csv history.csv` | Reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
@@ -88,6 +88,16 @@ Fetch data sources and upload them to the connected Google Sheet.
 | `--live` | Re-sync only fast-moving sources (odds, DK statuses, TFFB projections, weather) plus edge, and print what changed in EdgeRaw's Flag column since the last sync. The Sunday-afternoon command -- not a substitute for a full `dfs sync`. |
 | `--sheet-id STR` | Write to this sheet instead of config.toml's (e.g. the template). |
 
+### `dfs lineups suggest`
+
+Build complete lineups from your Player Pool and write them to the Suggested tab.
+
+| Option | What it does |
+|---|---|
+| `--cash INT RANGE` | How many cash builds (0 for none). Default: `3`. |
+| `--gpp INT RANGE` | How many GPP builds (0 for none). Default: `5`. |
+| `--no-write` | Print the builds here and leave the Suggested tab alone. |
+
 ### `dfs export`
 
 Validate paired lineups in the lineups tab and export DK's upload CSV.
@@ -103,7 +113,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | Option | What it does |
 |---|---|
 | `--top / -n INT` | How many swaps to show per kind (and per open slot for 1-for-1 swaps). Default: `3`. |
-| `--metric CHOICE` | What to rank swaps by: ProjPts (default) or AggPts. Default: `ProjPts`. |
+| `--metric CHOICE` | What to rank swaps by: CalPts, ProjPts or AggPts. Default: config.toml's [projection] default (CalPts, with ProjPts where CalPts is blank). |
 | `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
 | `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each lineup's Cash/GPP marker (column A of its Total row; cash if blank). |
 
@@ -231,7 +241,7 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 
 ## Reference: the lineup simulator (only when needed)
 
-The Median, p90, P(cash) and P(GPP) numbers on each Lineups Total row are written by every `dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.
+The Typical, Big night, Cash % and 190+ % numbers on each Lineups Total row are written by every `dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.
 
 ### `dfs sim fit`
 

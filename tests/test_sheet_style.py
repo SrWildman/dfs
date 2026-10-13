@@ -37,6 +37,7 @@ from dfs.sheet_style import (
     GROUPED_TAB_UNSCALED_COLUMNS,
     HEADER_FMT,
     HIDE_TABS,
+    ISSUES_WIDTH,
     OK_BG,
     OK_FG,
     POOL_TAG_TINTS,
@@ -77,6 +78,9 @@ from dfs.sheet_views import (
     BOARD_CHECK_FIRST_ROW,
     BOARD_CHECK_LAST_ROW,
     BOARD_LAST_ROW,
+    BOARD_LIKES_COLHEADER_ROW,
+    BOARD_LIKES_FIRST_ROW,
+    BOARD_LIKES_LAST_ROW,
     BOARD_LIST_POOL_COL,
     BOARD_MAX_VISIBLE_COL_INDEX,
     BOARD_POOL_GAP_ROW,
@@ -790,6 +794,13 @@ class FakeNotesClient:
     def set_note(self, tab_name: str, cell_a1: str, note: str) -> None:
         self.note_calls.append((tab_name, cell_a1, note))
 
+    def set_row_notes(self, tab, row, notes, *, first_col=0):
+        from dfs.sheets import column_letter
+
+        for i, text in enumerate(notes):
+            if text:
+                self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
+
 
 def test_apply_tab_notes_sets_a1_on_every_present_tab():
     from dfs.sheet_style import TAB_NOTES, apply_tab_notes
@@ -904,6 +915,13 @@ class FakeBoardClient:
     def set_note(self, tab_name: str, cell_a1: str, note: str) -> None:
         self.notes.append((tab_name, cell_a1, note))
 
+    def set_row_notes(self, tab, row, notes, *, first_col=0):
+        from dfs.sheets import column_letter
+
+        for i, text in enumerate(notes):
+            if text:
+                self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
+
     def hide_columns(self, tab_name: str, first_col: str, last_col: str, *, hidden: bool = True) -> None:
         self.hide_columns_calls.append((first_col, last_col))
 
@@ -958,7 +976,7 @@ def test_style_board_clears_existing_row_groups_before_regrouping():
     assert client.cleared_row_groups is True
 
 
-def test_style_board_leaves_every_section_expanded_and_groups_all_six():
+def test_style_board_leaves_every_section_expanded_and_groups_all_seven():
     # Sam, 2026-09-30: all Board categories open by default.
     client = FakeBoardClient()
     style_board(client)
@@ -966,11 +984,12 @@ def test_style_board_leaves_every_section_expanded_and_groups_all_six():
     assert grouped_ranges[(BOARD_SLATE_COLHEADER_ROW, BOARD_SLATE_LAST_ROW)] is False
     assert grouped_ranges[(BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW)] is False
     assert grouped_ranges[(BOARD_CHECK_COLHEADER_ROW, BOARD_CHECK_LAST_ROW)] is False
+    assert grouped_ranges[(BOARD_LIKES_COLHEADER_ROW, BOARD_LIKES_LAST_ROW)] is False
     # Pool summary's group starts at its gap line (right under the title) and takes the stacks table with it.
     assert grouped_ranges[(BOARD_POOL_GAP_ROW, BOARD_STACKS_LAST_ROW)] is False
     assert grouped_ranges[(BOARD_STACK_COLHEADER_ROW, BOARD_STACK_LAST_ROW)] is False
     assert grouped_ranges[(BOARD_CHALK_COLHEADER_ROW, BOARD_CHALK_LAST_ROW)] is False
-    assert len(client.row_group_calls) == 6
+    assert len(client.row_group_calls) == 7
     assert not any(collapsed for _, _, collapsed in client.row_group_calls)
 
 
@@ -982,6 +1001,7 @@ def test_style_board_gives_every_player_row_a_pool_dropdown_in_the_gutter_and_no
     ranges = {rng for rng, _ in client.dropdown_calls}
     assert ranges == {
         f"{pool}{BOARD_CHECK_FIRST_ROW}:{pool}{BOARD_CHECK_LAST_ROW}",
+        f"{pool}{BOARD_LIKES_FIRST_ROW}:{pool}{BOARD_LIKES_LAST_ROW}",
         f"{pool}{BOARD_CHALK_FIRST_ROW}:{pool}{BOARD_CHALK_LAST_ROW}",
     }  # not Slate shape, Pool summary, Your stacks or Stack candidates; the Queue's go on its player rows
     assert all(options == ["Cash", "GPP", "Both"] for _, options in client.dropdown_calls)
@@ -1398,7 +1418,7 @@ def test_polish_guardrails_widens_its_own_column_and_clears_only_its_own_rules()
 
     polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 18)])
 
-    assert client.width_calls == [{guardrails_col: 110}]
+    assert client.width_calls == [{guardrails_col: ISSUES_WIDTH}]
     assert client.clear_calls == [guardrails_col]  # never a blanket clear of Lineups' other rules
 
 
@@ -1611,6 +1631,13 @@ class FakeBuilderTabClient:
 
     def set_note(self, tab_name: str, cell: str, text: str) -> None:
         self.notes.append((cell, text))
+
+    def set_row_notes(self, tab, row, notes, *, first_col=0):
+        from dfs.sheets import column_letter
+
+        for i, text in enumerate(notes):
+            if text:
+                self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
@@ -2514,7 +2541,7 @@ def test_slate_grid_header_notes_land_on_the_game_row_and_the_teams_row():
     assert "ALLOWS" in by_cell[opp_def_pass]  # what the opponent's defense allows, higher = softer
 
 
-def test_builder_tab_usage_headers_get_the_note_on_the_header_row_only():
+def test_builder_tab_headers_get_their_note_on_the_header_row_only():
     class _Client(FakeBuilderTabClient):
         def __init__(self):
             super().__init__(["Name", "Pos.", "Tgt%", "WOPR"])
@@ -2523,11 +2550,19 @@ def test_builder_tab_usage_headers_get_the_note_on_the_header_row_only():
         def set_note(self, tab, cell, note):
             self.notes.append((cell, note))
 
+        def set_row_notes(self, tab, row, notes, *, first_col=0):
+            from dfs.sheets import column_letter
+
+            for i, text in enumerate(notes):
+                if text:
+                    self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
+
     client = _Client()
     polish_builder_tab(client, "Player Pool", last_row=100, header_row=2)
     cells = dict(client.notes)
-    assert set(cells) == {"C2", "D2"}  # exactly the two usage headers present, on the header row
+    assert set(cells) == {"A2", "B2", "C2", "D2"}  # exactly the four headers present, on the header row
     assert "last 3 games played" in cells["C2"]
+    assert cells["A2"].startswith("The player")
 
 
 def test_model_check_sits_after_season_and_results_in_the_money_band():
@@ -2591,3 +2626,64 @@ def test_style_board_colours_each_chalk_position_block_by_the_per_block_scheme()
         first = last + 1
     whole = f"{BOARD_CHALK_COL['Own%']}{BOARD_CHALK_FIRST_ROW}:{BOARD_CHALK_COL['Own%']}{first - 1}"
     assert whole not in client.color_scale_calls  # no single scale across all the blocks
+
+
+# Week 6, Slice 1: a lineup marked Cash whose Cash % is under 40% says so in Issues.
+_SIM_SLOTS_HEADER = [h for h in _HEADER_FOR_GUARDRAILS if h != "Val"] + ["AggPts", "CalPts", "Val", "ValAdj"]
+
+
+def test_weak_cash_formula_reads_the_marker_and_the_cash_percent_on_the_total_row():
+    from dfs.sheet_style import _weak_cash_formula
+
+    formula = _weak_cash_formula(18, "K")
+    assert '$A18="Cash"' in formula and "ISNUMBER(K18)" in formula and "K18<0.4" in formula
+    assert 'TEXT(K18,"0%")' in formula and "Weak for cash: Cash % " in formula
+
+
+def test_totals_check_appends_weak_cash_after_a_stack_violation_and_never_masks_one():
+    from dfs.sheet_style import _totals_check_formula
+
+    weak = '"Weak for cash: Cash % 31%"'
+    only_weak = _totals_check_formula(9, 17, 18, "K", weak_cash=weak)
+    assert weak in only_weak and "IF((" in only_weak
+    both = _totals_check_formula(9, 17, 18, "K", stack_check='"DST/QB"', weak_cash=weak)
+    assert 'TEXTJOIN(" ",TRUE,"DST/QB",' in both  # both appear, the stack violation first
+    assert _totals_check_formula(9, 17, 18, "K", weak_cash=None) == _totals_check_formula(9, 17, 18, "K")
+
+
+def test_polish_guardrails_adds_the_weak_cash_check_only_when_the_sim_columns_exist():
+    with_sim = FakeGuardrailsClient(_SIM_SLOTS_HEADER)
+    polish_guardrails(with_sim, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    totals = next(c for c in with_sim.update_calls if c[0].endswith("18") and len(c[1]) == 10)
+    assert "Weak for cash" in totals[1][-1][0]
+    without = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    polish_guardrails(without, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    totals = next(c for c in without.update_calls if c[0].endswith("18") and len(c[1]) == 10)
+    assert "Weak for cash" not in totals[1][-1][0]
+
+
+# Week 6, Slice 1: "Move X to FLEX (plays SNF)" on the FLEX row (the formula was checked on the template).
+_FLEX_HEADER = [h for h in _HEADER_FOR_GUARDRAILS_WITH_GAMEID if h != "Val"] + ["GameStart"]
+
+
+def test_flex_order_formula_reads_names_slot_labels_and_kickoffs_by_the_given_columns():
+    from dfs.sheet_style import _flex_order_formula
+
+    formula = _flex_order_formula(9, 17, position_col="C", gamestart_col="X", raw_tab="PlayerPoolRaw")
+    assert "nm,$A$9:$A$17" in formula and "ps,$C$9:$C$17" in formula and "gs,$X$9:$X$17" in formula
+    assert "VLOOKUP(nm,PlayerPoolRaw!$A:$B,2,FALSE)" in formula  # the FLEX player's real position
+    assert "DATEVALUE(LEFT(gs,10))+TIMEVALUE(MID(gs,12,8))" in formula  # TFFB's Eastern wall-clock text
+    assert "last=1" in formula and "mx>NOW()" in formula and "kf>NOW()" in formula  # a tie / a started player
+    assert '"Move "&who&" to FLEX (plays "' in formula and '"TNF"' in formula and '"SNF"' in formula
+
+
+def test_polish_guardrails_puts_the_flex_check_on_the_flex_row_only():
+    client = FakeGuardrailsClient(_FLEX_HEADER)
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+    block = next(
+        c for c in client.update_calls if c[0].startswith(f"{column_letter(_FLEX_HEADER.index('Issues'))}9:")
+    )
+    rows = [r[0] for r in block[1]]
+    flex_row = rows[7]  # QB RB RB WR WR WR TE FLEX DST
+    assert flex_row.startswith('=TEXTJOIN(" ",TRUE,IF($A16=""') and "Move " in flex_row
+    assert not any("Move " in r for i, r in enumerate(rows) if i != 7)  # no other row carries it

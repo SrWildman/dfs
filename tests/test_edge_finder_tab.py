@@ -192,6 +192,7 @@ def test_the_empty_state_layout_has_every_section_and_says_nothing_yet():
     layout = eft.build_layout(None)
     titles = [layout.rows[r - 1][0] for r in layout.section_rows]  # the label; the description is in C
     assert titles == [
+        "TOP PLAYS",
         "CASH CORE",
         "GPP UPSIDE",
         "LEVERAGE PLAYS",
@@ -220,7 +221,8 @@ def test_the_columns_are_pool_name_pos_team_salary_own_numbers_do_why_id_and_a_h
         eft.KEY_COL,
     ] == list("ABFMNOP")
     layout = eft.build_layout(_inputs(_edge([_player(1)])))
-    header = layout.rows[layout.header_rows[0] - 1]
+    cash_core = next(r for r in layout.section_rows if layout.rows[r - 1][0] == "CASH CORE")
+    header = layout.rows[next(h for h in layout.header_rows if h > cash_core) - 1]
     assert header[:12] == [
         "Pool",
         "Name",
@@ -298,7 +300,7 @@ def test_the_verbs_follow_the_rules_and_there_is_no_rank_column_the_rows_are_in_
     )
     layout = eft.build_layout(_inputs(edge))
     do = _col(eft.DO_COL)
-    by_name = {layout.rows[r - 1][NAME]: layout.rows[r - 1] for r in layout.player_rows[:4]}
+    by_name = {layout.rows[r - 1][NAME]: layout.rows[r - 1] for r in _section_rows(layout, "CASH CORE")[:4]}
     assert not any("Rank" in str(c) or str(c).startswith("#") for row in layout.rows for c in row)
     assert list(by_name) == ["WR1", "WR2", "WR3", "WR4"]  # the order is the rank
     assert [by_name[n][do] for n in ("WR1", "WR2", "WR3", "WR4")] == [
@@ -332,7 +334,7 @@ def test_gpp_verbs_add_for_a_top_quartile_boom_and_leverage_adds_the_star():
 
 def test_a_player_row_carries_the_hidden_id_a_short_why_the_full_note_and_a_do_verb():
     layout = eft.build_layout(_inputs(_edge([_player(7)])))
-    row_number = _rows_named(layout, "WR7")[0]
+    row_number = _section_rows(layout, "CASH CORE")[0]
     row = layout.rows[row_number - 1]
     assert row[_col(eft.ID_COL)] == 7 and row[_col(eft.POOL_COL)] == ""  # the writer fills the Pool formula
     assert (
@@ -594,7 +596,7 @@ def test_a_proj_chip_adds_its_reason_and_a_lean_verb_and_the_pool_override_still
     inputs.players["GsisId"] = ["g1", "g2", "g3"]
     layout = eft.build_layout(inputs)
     do, why = _col(eft.DO_COL), _col(eft.WHY_COL)
-    cash_rows = {layout.rows[r - 1][NAME]: r for r in layout.player_rows[:3]}
+    cash_rows = {layout.rows[r - 1][NAME]: r for r in _section_rows(layout, "CASH CORE")[:3]}
     cash = {name: layout.rows[r - 1] for name, r in cash_rows.items()}
     assert cash["WR1"][do] == "Cash option (Proj ▼)"  # a fade signal downgrades "Cash add"
     assert cash["WR2"][do].endswith("(Proj ▲)") and "Cash add" not in cash["WR1"][do]
@@ -607,7 +609,7 @@ def test_a_proj_chip_adds_its_reason_and_a_lean_verb_and_the_pool_override_still
     assert why  # (the shown Why is the short one)
     # the sheet turns the verb into "In pool (...)" through the same formula as before
     rows = writer.tab_rows(layout, "EdgeRaw")
-    formula = rows[_rows_named(layout, "WR1")[0] - 1][_col(eft.DO_COL)]
+    formula = rows[cash_rows["WR1"] - 1][_col(eft.DO_COL)]
     assert formula.startswith(f"=IF(${eft.POOL_COL}") and "(Proj ▼)" in formula and "In pool (" in formula
 
 
@@ -926,7 +928,9 @@ def test_leverage_and_chalk_say_ownership_is_not_out_and_list_nobody_until_it_is
         _section_rows(layout, "LEVERAGE PLAYS") == [] and _section_rows(layout, "CHALK TO FADE OR EAT") == []
     )
     notes = [str(r[eft.DETAIL_INDEX]) for r in layout.rows]
-    assert notes.count(eft.OWN_NOT_OUT) == 4  # the status line plus GPP, Leverage and Chalk
+    assert (
+        notes.count(eft.OWN_NOT_OUT) == 5
+    )  # the status line plus Top plays' GPP block, GPP, Leverage, Chalk
     assert all(layout.rows[r - 1][eft.LEAD.index("Own%")] == "" for r in layout.player_rows)  # blank, not 0%
 
 
@@ -1078,7 +1082,7 @@ def test_r6_signal_rows_do_not_repeat_the_subheader_in_their_why():
         r for r in layout.player_rows if layout.rows[r - 1][_col(eft.DO_COL)].startswith("Context only")
     ]
     assert block_rows and all(layout.rows[r - 1][why] in ("", "1 game") for r in block_rows)
-    first = layout.player_rows[0]  # the signal shows in a few words on his ordinary rows
+    first = _section_rows(layout, "CASH CORE")[0]  # the signal shows in a few words on his ordinary rows
     assert "targets up 2.2+/game (usually fades back)" in layout.rows[first - 1][why]
 
 
@@ -1164,3 +1168,173 @@ def test_a_fade_block_leaves_xfp_and_dk_per_game_uncoloured_but_a_usage_block_co
     xfp, dk = column_letter(S0 + 1), column_letter(S0 + 2)
     assert (xfp, fade_sub + 1) not in coloured and (dk, fade_sub + 1) not in coloured
     assert (xfp, usage_sub + 1) in coloured and (dk, usage_sub + 1) in coloured
+
+
+def test_the_beneficiaries_section_says_it_covers_backs_only_and_where_pass_catchers_went():
+    layout = eft.build_layout(_inputs(_edge([_player(1)])))
+    start = next(r for r in layout.section_rows if layout.rows[r - 1][0] == "INJURY BENEFICIARIES")
+    nearby = " ".join(_row_text(layout.rows[r - 1]) for r in range(start, start + 6))
+    assert "Backs only." in nearby and "Absent regulars" in nearby
+
+
+# --- Slice 2 (Week 6): the section header repeats at the top of every position block after the first --------
+
+
+def test_every_position_block_after_the_first_repeats_the_sections_header_in_a_smaller_bar():
+    edge = _edge([_player(i, pos=pos) for i, pos in enumerate(["QB", "RB", "RB", "WR", "WR", "TE"], start=1)])
+    layout = eft.build_layout(_inputs(edge))
+    assert layout.repeat_header_rows, "no repeated headers were laid out"
+    for row in layout.repeat_header_rows:
+        header = max(h for h in layout.header_rows if h < row)  # the section header it repeats
+        assert layout.rows[row - 1] == layout.rows[header - 1]
+        # right under a position block's title, never inside the first block (the header is right above it)
+        assert row - 1 in layout.subheader_rows
+    cash = next(r for r in layout.section_rows if layout.rows[r - 1][0] == "CASH CORE")
+    in_cash = [r for r in layout.repeat_header_rows if r > cash]
+    first_sub = min(r for r in layout.subheader_rows if r > cash)
+    assert min(in_cash) > first_sub  # the first position block has no repeat: the section header is above it
+
+
+def test_a_repeated_header_never_becomes_a_player_row_or_splits_a_colour_block():
+    edge = _edge([_player(i, pos="RB") for i in range(1, 6)] + [_player(i, pos="WR") for i in range(6, 12)])
+    layout = eft.build_layout(_inputs(edge))
+    assert not set(layout.repeat_header_rows) & set(layout.player_rows)
+    for _kind, _letter, first, last in layout.colour_blocks:
+        assert not any(first <= r <= last for r in layout.repeat_header_rows)  # no scale spans a header row
+
+
+# --- Slice 3 (Week 6): TOP PLAYS, the favourites lists ------------------------------------------------------
+
+
+def _cash_and_gpp_edge():
+    """Eight WRs, four RBs and a QB whose Hit3x% / Bust% / Boom% / ownership give some Cash adds, some GPP
+    adds and some leverage plays (ownership published)."""
+    rows = [
+        _owned(i, boom=10.0 + 3 * i, own=0.30 - i / 40, **{"Hit3x%": 30.0 + 4 * i, "Bust%": 40.0 - 4 * i})
+        for i in range(1, 9)
+    ]
+    rows += [
+        _owned(i, boom=15.0 + i, own=0.10, pos="RB", **{"Hit3x%": 50.0 + i, "Bust%": 30.0 - i})
+        for i in range(21, 25)
+    ]
+    rows += [_owned(31, boom=22.0, own=0.05, pos="QB", **{"Hit3x%": 60.0, "Bust%": 20.0})]
+    return _edge(rows)
+
+
+def _top_rows(layout):
+    return _section_rows(layout, "TOP PLAYS")
+
+
+def test_top_plays_is_the_first_section_with_one_line_under_the_title_and_a_cash_then_a_gpp_block():
+    layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
+    first = layout.section_rows[0]
+    assert layout.rows[first - 1][0] == "TOP PLAYS"
+    what = layout.rows[first][eft.DETAIL_INDEX]
+    assert what == "The model's best plays this week. Pool them here; the detail is below."
+    subs = [str(layout.rows[r - 1][0]) for r in layout.subheader_rows if r < layout.section_rows[1]]
+    assert subs[0].startswith("CASH") and subs[1].startswith("GPP")
+    cash_header, gpp_header = [h for h in layout.header_rows if h < layout.section_rows[1]]
+    assert layout.rows[cash_header - 1][:12] == [
+        "Pool",
+        "Name",
+        "Pos",
+        "Team",
+        "Salary",
+        "Own%",
+        "CalPts",
+        "Hit3x%",
+        "",
+        "",
+        "",
+        "Edge",
+    ]
+    assert layout.rows[gpp_header - 1][:12] == [
+        "Pool",
+        "Name",
+        "Pos",
+        "Team",
+        "Salary",
+        "Own%",
+        "CalPts",
+        "Boom%",
+        "Lev",
+        "",
+        "",
+        "Edge",
+    ]
+
+
+def test_top_plays_lists_only_cash_add_and_gpp_verbs_with_the_per_position_caps():
+    layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
+    do = _col(eft.DO_COL)
+    cash_header, gpp_header = [h for h in layout.header_rows if h < layout.section_rows[1]]
+    rows = _top_rows(layout)
+    cash = [r for r in rows if r < gpp_header]
+    gpp = [r for r in rows if r > gpp_header]
+    assert cash and gpp
+    assert all(layout.rows[r - 1][do] == "Cash add" for r in cash)
+    assert all(str(layout.rows[r - 1][do]).startswith(("GPP add", "GPP leverage")) for r in gpp)
+    by_pos = lambda rs, p: [r for r in rs if layout.rows[r - 1][_col("C")] == p]  # noqa: E731
+    assert len(by_pos(cash, "WR")) <= eft.TOP_CASH_PER_POSITION["WR"]
+    assert len(by_pos(cash, "RB")) <= 3  # "Cash add" itself is the top 3 Hit3x% of a position
+    assert len(by_pos(gpp, "WR")) <= eft.TOP_GPP_PER_POSITION["WR"]
+    # within a position, best Hit3x% first (cash) / best Boom% first (GPP)
+    hit = [layout.rows[r - 1][_col("H")] for r in by_pos(cash, "WR")]
+    boom = [layout.rows[r - 1][_col("H")] for r in by_pos(gpp, "WR")]
+    assert hit == sorted(hit, reverse=True) and boom == sorted(boom, reverse=True)
+
+
+def test_top_plays_rows_carry_the_same_pool_control_id_and_note_as_the_detail_rows():
+    layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
+    for row in _top_rows(layout):
+        assert row in layout.player_rows and layout.rows[row - 1][_col(eft.ID_COL)] != ""
+        assert "to reach" in layout.notes[row]  # the full reason is the note
+    # a player in Top plays is in the detail below too, under the same verb
+    top = {layout.rows[r - 1][NAME]: layout.rows[r - 1][_col(eft.DO_COL)] for r in _top_rows(layout)}
+    detail = {
+        layout.rows[r - 1][NAME]: layout.rows[r - 1][_col(eft.DO_COL)]
+        for r in _section_rows(layout, "CASH CORE")
+    }
+    for name, verb in top.items():
+        if verb == "Cash add":
+            assert detail.get(name) == "Cash add"
+
+
+def test_each_position_run_in_top_plays_is_its_own_colour_block():
+    layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
+    top = set(_top_rows(layout))
+    assert layout.break_rows and set(layout.break_rows) <= top
+    for _kind, _letter, first, last in layout.colour_blocks:
+        if first in top:
+            positions = {layout.rows[r - 1][_col("C")] for r in range(first, last + 1) if r in top}
+            assert len(positions) == 1  # a scale never spans two positions
+
+
+def test_top_plays_says_so_when_nobody_qualifies_and_the_empty_state_still_lists_it():
+    layout = eft.build_layout(_inputs(_edge([_player(1, **{"Hit3x%": np.nan, "Boom%": np.nan})])))
+    assert not _top_rows(layout)
+    cells = {str(c) for r in layout.rows for c in r[:3]}  # a short note sits in the label cell
+    assert "No Cash add yet." in cells and "No GPP add yet." in cells
+
+
+def test_the_favourites_are_the_cash_adds_by_hit3x_and_the_gpp_adds_and_leverage_by_boom_best_first():
+    layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
+    assert layout.favourites_cash and layout.favourites_gpp
+    edge = _cash_and_gpp_edge().set_index("Id")
+    hit = [edge.loc[i, "Hit3x%"] for i in layout.favourites_cash]
+    boom = [edge.loc[i, "Boom%"] for i in layout.favourites_gpp]
+    assert hit == sorted(hit, reverse=True) and boom == sorted(boom, reverse=True)
+    # every Cash add in the Top plays is a favourite
+    top_cash_ids = {layout.rows[r - 1][_col(eft.ID_COL)] for r in _top_rows(layout)}
+    assert top_cash_ids <= set(layout.favourites_cash) | set(layout.favourites_gpp)
+
+
+def test_the_writer_puts_the_favourites_in_two_hidden_columns_with_a_label_in_row_one():
+    layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
+    rows = writer.tab_rows(layout, "EdgeRaw")
+    cash_col, gpp_col = eft.FAVOURITE_CASH_INDEX, eft.FAVOURITE_GPP_INDEX
+    assert rows[0][cash_col] == eft.FAVOURITE_CASH_LABEL and rows[0][gpp_col] == eft.FAVOURITE_GPP_LABEL
+    assert [r[cash_col] for r in rows[1 : 1 + len(layout.favourites_cash)]] == layout.favourites_cash
+    assert [r[gpp_col] for r in rows[1 : 1 + len(layout.favourites_gpp)]] == layout.favourites_gpp
+    assert eft.KEY_COL == "P" and (eft.FAVOURITE_CASH_COL, eft.FAVOURITE_GPP_COL) == ("Q", "R")
+    assert writer.HIDDEN_FIRST == eft.ID_COL and writer.HIDDEN_LAST == eft.LAST_COLUMN == "R"

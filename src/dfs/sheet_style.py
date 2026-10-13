@@ -95,6 +95,7 @@ from dfs.derived import (
 )
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP
 from dfs.lineups import DK_UPLOAD_HEADER
+from dfs.models import ROSTER_SLOTS
 from dfs.sheet_color_scales import (
     BLOCK_BAD,
     BLOCK_DIFF,
@@ -112,14 +113,17 @@ from dfs.sheet_color_scales import (
     grouped_column_rule_specs,
 )
 from dfs.sheet_column_notes import (
-    EDGE_FINDER_NOTES,
+    BOARD_NOTES,
     SLATE_GAME_NOTES,
     SLATE_TEAMS_NOTES,
     apply_header_notes,
-    usage_notes,
+    edgeraw_notes,
+    player_tab_notes,
 )
 from dfs.sheet_columns import INTERNAL
+from dfs.sheet_consider import CONSIDER_BG, add_consider_rule, consider_formula, listed_formula
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
+from dfs.sheet_lineup_sim import CASH_WEAK_BELOW, sim_slots
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_cells import POOL_COLUMN_WIDTH, POOL_OPTIONS
 from dfs.sheet_views import (
@@ -137,6 +141,10 @@ from dfs.sheet_views import (
     BOARD_CHECK_HEADER_ROW,
     BOARD_CHECK_LAST_ROW,
     BOARD_ID_COL,
+    BOARD_LIKES_COLHEADER_ROW,
+    BOARD_LIKES_FIRST_ROW,
+    BOARD_LIKES_HEADER_ROW,
+    BOARD_LIKES_LAST_ROW,
     BOARD_LIST_COLHEADER,
     BOARD_LIST_NAME_COL,
     BOARD_LIST_POOL_COL,
@@ -1227,8 +1235,22 @@ def _apply_name_flag_style(
         rules = [
             (f'=AND({pool_ref}<>"",{flag_ref}<>"")', pooled_and_flagged),
             (f'=AND({pool_ref}<>"",{flag_ref}="")', pooled_only),
-            (f'=AND({pool_ref}="",{flag_ref}<>"")', flagged_only),
         ]
+        if "Id" in header:
+            # "Consider" (`sheet_consider`): not pooled and on the model's favourites list -> soft yellow
+            # (bold too when flagged); exclusive with the plain flagged rule (one rule applies per cell).
+            id_ref = f"${column_letter(header.index('Id'))}{data_start}"
+            consider = consider_formula(pool_ref, id_ref)
+            rules += [
+                (
+                    f'=AND({consider},{flag_ref}<>"")',
+                    {"backgroundColor": CONSIDER_BG, "textFormat": {"bold": True}},
+                ),
+                (f'=AND({consider},{flag_ref}="")', {"backgroundColor": CONSIDER_BG}),
+                (f'=AND({pool_ref}="",{flag_ref}<>"",NOT({listed_formula(id_ref)}))', flagged_only),
+            ]
+        else:
+            rules.append((f'=AND({pool_ref}="",{flag_ref}<>"")', flagged_only))
         for formula, fmt in rules:
             client.add_boolean_rule(tab, rng, condition_type="CUSTOM_FORMULA", values=[formula], fmt=fmt)
     else:
@@ -1432,8 +1454,8 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
     )
 
     apply_edge_column_groups(client, edge_tab, clear=False)
-    # One-hover definitions for the usage columns (window, positions, "data through Week N").
-    apply_header_notes(client, edge_tab, 1, {**usage_notes(), **EDGE_FINDER_NOTES})
+    # One-hover definition on every header (`sheet_column_notes.player_tab_notes`); replaces what was there.
+    apply_header_notes(client, edge_tab, 1, edgeraw_notes())
 
     return (
         f"{edge_tab}: widths, header, banding, formats, {n_scaled} highlighted column(s), "
@@ -1450,6 +1472,7 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
 # on EdgeRaw itself, not left at Sheets' own default -- found missing by
 # `dfs setup audit-style`. "Name"/"Team" appear in both dicts with
 # identical values, so the merge doesn't change either.
+ISSUES_WIDTH = 110  # Sam kept it at 110: a long warning ("Weak for cash: Cash % 31%") clips on the Total row
 BUILDER_WIDTHS = {
     **{pct: 80 for pct in ALL_PCT_COLUMNS.values()},  # hidden helpers (item 3)
     **EDGE_WIDTHS,
@@ -1479,7 +1502,7 @@ BUILDER_WIDTHS = {
     # sheet_audit.py check that everything else's width is tracked
     # through. Centralized here to match; `polish_guardrails`'s own call
     # is redundant now but harmless (same value, set twice).
-    "Issues": 110,
+    "Issues": ISSUES_WIDTH,
     "Pool": POOL_COLUMN_WIDTH,
     # Actions round, slice 3 (2026-10-09): the header "Edge ↗" needs ~52px and was being cut at 28 (Week 3's
     # Fix 6.5 narrowed it to the glyph the cells show and accepted the clipped header). The header is read as
@@ -1726,8 +1749,12 @@ def polish_builder_tab(
     _apply_name_flag_style(client, tab, header, data_start=data_start, last_row=last_row)
     _apply_zone_label_style(client, tab, header, data_start=data_start, last_row=last_row)
 
-    # One-hover definitions for the usage columns (window, positions, "data through Week N").
-    noted = apply_header_notes(client, tab, header_row, {**usage_notes(), **EDGE_FINDER_NOTES})
+    # One-hover definition on every header, the repeated headers too (`sheet_column_notes.player_tab_notes`);
+    # replaces what was there, so a note left behind by a column move is cleared.
+    notes = player_tab_notes()
+    noted = apply_header_notes(client, tab, header_row, notes)
+    for repeat_row in header_repeats_at or []:
+        apply_header_notes(client, tab, repeat_row, notes)
 
     pin_note = "Name pinned" if freeze_cols else "no column pin"
     return (
@@ -1767,6 +1794,8 @@ _GUARDRAILS_CHIPS = [
     ("TEXT_EQ", "IR", _chip(CRIT_BG, CRIT_FG)),
     ("TEXT_EQ", "Q", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "INCOMPLETE", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "Weak for cash", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "to FLEX", _chip(WARN_BG, WARN_FG)),
     ("TEXT_EQ", "OK", _chip(OK_BG, OK_FG)),
 ]
 
@@ -1901,8 +1930,65 @@ def _stack_check_formula(
     return f'TEXTJOIN(" ",TRUE,{dst_vs_own_qb},{rb_per_game})'
 
 
+def _flex_order_formula(
+    start: int, end: int, *, position_col: str, gamestart_col: str, raw_tab: str = PLAYER_POOL_RAW_TAB
+) -> str:
+    """The FLEX rule (`flex_order.py`) as the text of an `Issues` cell, WITHOUT the leading `=`: "Move Puka
+    Nacua to FLEX (plays SNF)" when a player of the flex position kicks off later than whoever sits in FLEX,
+    else "". Goes on the block's FLEX row, so it spills right into the empty cells beside it.
+
+    Read per block, by range: names in column A, the fixed slot labels in `position_col`, kickoffs in
+    `gamestart_col` (Lineups' linked `GameStart`: TFFB's Eastern wall-clock text, so the ISO string is
+    parsed with DATEVALUE + TIMEVALUE and compared with NOW(), which is Eastern when the sheet's time zone
+    is -- `dfs setup`/`doctor` keep it America/New_York). A FLEX player's real position comes from
+    `raw_tab` (the slot label says only "FLEX"). Quiet unless exactly one player has the latest kickoff
+    (a tie is left as it is), every flex-position player has a kickoff, and neither the player who should
+    move in nor the one in FLEX has kicked off yet (a started player is never moved)."""
+    names = f"$A${start}:$A${end}"
+    labels = f"${position_col}${start}:${position_col}${end}"
+    starts = f"${gamestart_col}${start}:${gamestart_col}${end}"
+    when = (
+        'IF(WEEKDAY(mx)=5,"TNF",IF(WEEKDAY(mx)=2,"MNF",IF(AND(WEEKDAY(mx)=1,HOUR(mx)>=19),"SNF",'
+        'TEXT(mx,"ddd")&" "&LOWER(TEXT(mx,"h:mm am/pm")))))'
+    )
+    return (
+        "IFERROR(LET("
+        f"nm,{names},"
+        f"ps,{labels},"
+        f"gs,{starts},"
+        f'rp,ARRAYFORMULA(IF(ps="FLEX",IFERROR(VLOOKUP(nm,{raw_tab}!$A:$B,2,FALSE),""),ps)),'
+        'k,ARRAYFORMULA(IF(gs="","",DATEVALUE(LEFT(gs,10))+TIMEVALUE(MID(gs,12,8)))),'
+        'fp,IF(COUNTIF(rp,"RB")>2,"RB",IF(COUNTIF(rp,"WR")>3,"WR",IF(COUNTIF(rp,"TE")>1,"TE",""))),'
+        'known,AND(fp<>"",SUMPRODUCT((rp=fp)*1)=SUMPRODUCT((rp=fp)*ISNUMBER(k))),'
+        "mx,IF(known,MAX(FILTER(k,rp=fp)),0),"
+        "last,SUMPRODUCT((rp=fp)*(k=mx)),"
+        'kf,INDEX(k,MATCH("FLEX",ps,0)),'
+        "who,INDEX(nm,MATCH(1,ARRAYFORMULA((rp=fp)*(k=mx)),0)),"
+        "IF(AND(known,last=1,kf<>mx,mx>NOW(),kf>NOW()),"
+        f'"Move "&who&" to FLEX (plays "&{when}&")","")'
+        '),"")'
+    )
+
+
+def _weak_cash_formula(totals_row: int, cash_pct_col: str) -> str:
+    """ "Weak for cash: Cash % 31%" when the Total row's marker says Cash and the simulated Cash % (written
+    there by `sheet_lineup_sim`) is under `CASH_WEAK_BELOW`; empty otherwise, and while the number is blank
+    (an unbuilt lineup, or a sync that has not simulated it yet)."""
+    cell = f"{cash_pct_col}{totals_row}"
+    return (
+        f'IF(AND($A{totals_row}="Cash",ISNUMBER({cell}),{cell}<{CASH_WEAK_BELOW:g}),'
+        f'"Weak for cash: Cash % "&TEXT({cell},"0%"),"")'
+    )
+
+
 def _totals_check_formula(
-    start: int, end: int, totals_row: int, salary_col: str, *, stack_check: str | None = None
+    start: int,
+    end: int,
+    totals_row: int,
+    salary_col: str,
+    *,
+    stack_check: str | None = None,
+    weak_cash: str | None = None,
 ) -> str:
     """Salary cap, roster completeness, or OK -- on the block's totals
     row (Fix 2.4: `totals_row` is `end + 1`, a real separate row now, not
@@ -1920,21 +2006,22 @@ def _totals_check_formula(
     "don't let one condition hide another" principle `Flags` already
     established after Part 1.1's LINE-suppresses-everything bug). `None`
     (the caller's default when Position/Team/Opp/GameID aren't all
-    linked yet) reproduces the exact prior behaviour."""
+    linked yet) reproduces the exact prior behaviour.
+
+    `weak_cash` (`_weak_cash_formula`) rides the same way: appended after the stack violations, never masking
+    one, and never alone replacing an OVER or INCOMPLETE."""
     cap_or_completeness = (
         f'IF(COUNTA($A${start}:$A${end})=0,"",'
         f'IF({salary_col}{totals_row}>50000,"OVER "&TEXT({salary_col}{totals_row}-50000,"$#,##0"),'
         f"IF(COUNTA($A${start}:$A${end})<9,"
         f'"INCOMPLETE "&COUNTA($A${start}:$A${end})&"/9","OK")))'
     )
-    if not stack_check:
+    extras = [x for x in (stack_check, weak_cash) if x]
+    if not extras:
         return f"={cap_or_completeness}"
+    extra = extras[0] if len(extras) == 1 else f'TEXTJOIN(" ",TRUE,{",".join(extras)})'
     base = f"({cap_or_completeness})"
-    return (
-        f'=IF({base}="","",'
-        f'IF({stack_check}="",{base},'
-        f'IF({base}="OK",{stack_check},{base}&" "&{stack_check})))'
-    )
+    return f'=IF({base}="","",IF({extra}="",{base},IF({base}="OK",{extra},{base}&" "&{extra})))'
 
 
 LINEUPS_IDENTITY_COLUMNS = ("Name", "Pos.", "Team")
@@ -2250,7 +2337,8 @@ def polish_guardrails(
     lineup, else that pick's Avail flag (OUT/IR/Q) if it has one. On the
     block's totals row: OVER the cap, INCOMPLETE (fewer than 9 picks),
     Part 7.4's two stack-rule violations (DST/QB, RB/GAME -- see
-    `_stack_check_formula`), any combination of those additively, or OK.
+    `_stack_check_formula`), "Weak for cash: Cash % 31%" (a lineup marked Cash whose simulated Cash % is
+    under `sheet_lineup_sim.CASH_WEAK_BELOW`), any combination of those additively, or OK.
     The Avail/DK Sal/Pos./Team/Opp./GameID columns are all found by
     header name, never a hardcoded letter -- exactly the class of
     assumption that caused this feature's own prerequisite bug (see
@@ -2300,7 +2388,18 @@ def polish_guardrails(
         else (None, None, None, None)
     )
 
-    client.set_column_widths(tab, {guardrails_col: 110})
+    # The FLEX row also says when the FLEX should hold someone else (the latest kickoff of the flex position):
+    # it needs the slot labels (`Pos.`) and the linked `GameStart`; an older sheet without them skips it.
+    flex_ready = "Pos." in header and "GameStart" in header
+    flex_position_col = column_letter(header.index("Pos.")) if flex_ready else None
+    gamestart_col = column_letter(header.index("GameStart")) if flex_ready else None
+
+    # The Cash % number sits on each Total row, in the third of the four sim slot columns (by header name);
+    # without the slots (an old sheet) the weak-cash check is simply left out.
+    slots = sim_slots(header)
+    cash_pct_col = column_letter(slots[2]) if slots else None
+
+    client.set_column_widths(tab, {guardrails_col: ISSUES_WIDTH})
     client.update_range(tab, f"{guardrails_col}{header_row}", [[_GUARDRAILS_HEADER]])
     for repeat_row in header_repeats_at or []:
         client.update_range(tab, f"{guardrails_col}{repeat_row}", [[_GUARDRAILS_HEADER]])
@@ -2308,6 +2407,13 @@ def polish_guardrails(
     for start, end in name_blocks:
         totals_row = end + 1
         rows = [[_slot_check_formula(start, end, row, avail_col, key_col)] for row in range(start, end + 1)]
+        if flex_ready:
+            flex_row = start + ROSTER_SLOTS.index("FLEX")
+            flex_issue = _flex_order_formula(
+                start, end, position_col=flex_position_col, gamestart_col=gamestart_col
+            )
+            slot_check = rows[flex_row - start][0][1:]  # without the leading "="
+            rows[flex_row - start] = [f'=TEXTJOIN(" ",TRUE,{slot_check},{flex_issue})']
         stack_check = (
             _stack_check_formula(
                 start,
@@ -2320,7 +2426,14 @@ def polish_guardrails(
             if stack_ready
             else None
         )
-        rows.append([_totals_check_formula(start, end, totals_row, salary_col, stack_check=stack_check)])
+        weak_cash = _weak_cash_formula(totals_row, cash_pct_col) if cash_pct_col else None
+        rows.append(
+            [
+                _totals_check_formula(
+                    start, end, totals_row, salary_col, stack_check=stack_check, weak_cash=weak_cash
+                )
+            ]
+        )
         client.update_range(tab, f"{guardrails_col}{start}:{guardrails_col}{totals_row}", rows)
 
     client.clear_conditional_formats(tab, column=guardrails_col)
@@ -2494,6 +2607,8 @@ WEEK_ORDER = [
     ("Edge Finder", "decide"),
     ("EdgeRaw", "decide"),
     ("Player Pool", "build"),
+    # Suggested builds (Week 6): written by `dfs lineups suggest`; between the pool and the lineups you type.
+    ("Suggested", "build"),
     ("Lineups", "build"),
     ("DK Upload", "build"),
     ("Exposure", "contest"),
@@ -2602,6 +2717,10 @@ TAB_NOTES: dict[str, str] = {
     "Slate Grid": f"SLATE GRID -- one row per game, then every team by implied total. Read-only. {MORE}",
     "Player Pool": (
         f"PLAYER POOL -- everyone you added, by position. Pick a name in row 1 to add; clear Pool to remove. "
+        f"{MORE}"
+    ),
+    "Suggested": (
+        f"SUGGESTED -- builds from your pool (`dfs lineups suggest`). Copy one into Lineups: Lineup Tools. "
         f"{MORE}"
     ),
     "Lineups": (
@@ -2755,6 +2874,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     )
     _section(BOARD_QUEUE_HEADER_ROW, BOARD_QUEUE_COLHEADER_ROW, BOARD_QUEUE_LAST_ROW, last_col=list_last)
     _section(BOARD_CHECK_HEADER_ROW, BOARD_CHECK_COLHEADER_ROW, BOARD_CHECK_LAST_ROW, last_col=list_last)
+    _section(BOARD_LIKES_HEADER_ROW, BOARD_LIKES_COLHEADER_ROW, BOARD_LIKES_LAST_ROW, last_col=list_last)
     # Pool summary: its gap line and portfolio line sit under the title, above the table, inside the group.
     _section(
         BOARD_POOL_HEADER_ROW,
@@ -2780,6 +2900,7 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     for first, last in (
         (BOARD_QUEUE_FIRST_ROW, BOARD_QUEUE_LAST_ROW),
         (BOARD_CHECK_FIRST_ROW, BOARD_CHECK_LAST_ROW),
+        (BOARD_LIKES_FIRST_ROW, BOARD_LIKES_LAST_ROW),
         (BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW),
     ):
         pool = f"{BOARD_LIST_POOL_COL}{first}:{BOARD_LIST_POOL_COL}{last}"
@@ -2897,7 +3018,31 @@ def style_board(client: SheetsClient, tab: str = "Board") -> str:
     apply_queue_pool_dropdown(client, queue_player_count(body))
     size_slate_shape(client)
     client.freeze(tab, rows=3)
-    return f"{tab}: styled (collapsible sections, banner, colour scales, Pool dropdowns)"
+    # "Consider": a favourite not in the pool gets a soft-yellow Player cell (Chalk map and Model likes).
+    for first, last in (
+        (BOARD_LIKES_FIRST_ROW, BOARD_LIKES_LAST_ROW),
+        (BOARD_CHALK_FIRST_ROW, BOARD_CHALK_LAST_ROW),
+    ):
+        add_consider_rule(
+            client,
+            tab,
+            f"{BOARD_LIST_NAME_COL}{first}:{BOARD_LIST_NAME_COL}{last}",
+            consider_formula(f"${BOARD_LIST_POOL_COL}{first}", f"${BOARD_ID_COL}{first}"),
+        )
+    # One-hover definition on every table's header row (replacing whatever note sat there before).
+    board_notes = {**player_tab_notes(), **BOARD_NOTES}
+    for header_row in (
+        BOARD_SLATE_COLHEADER_ROW,
+        BOARD_QUEUE_COLHEADER_ROW,
+        BOARD_CHECK_COLHEADER_ROW,
+        BOARD_LIKES_COLHEADER_ROW,
+        BOARD_POOL_COLHEADER_ROW,
+        BOARD_STACKS_COLHEADER_ROW,
+        BOARD_CHALK_COLHEADER_ROW,
+        BOARD_STACK_COLHEADER_ROW,
+    ):
+        apply_header_notes(client, tab, header_row, board_notes)
+    return f"{tab}: styled (collapsible sections, banner, colour scales, Pool dropdowns, header notes)"
 
 
 def _apply_column_rules(

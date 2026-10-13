@@ -94,6 +94,30 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
     ),
 ]
 
+_MODEL_ROWS: list[tuple[str, str]] = [
+    (
+        "CalPts",
+        "Our projection: TFFB corrected for its known biases and blended with Sleeper and FantasyPros. "
+        "Better than TFFB at RB and WR so far.",
+    ),
+    ("Cash", "Pool from Top plays, then Cash. Build lineups with a Cash % of 50% or more."),
+    (
+        "GPP",
+        "Pool from Top plays, then GPP. Look for a Lev of +25 or more. Build with a stack and check the "
+        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ %.",
+    ),
+    (
+        "Proj ▼ / Proj ▲",
+        "The projection is probably a bit high (▼) or a bit low (▲). Use it as a tiebreaker only.",
+    ),
+    ("Suggested", "Complete builds from your pool. Copy one in with Lineup Tools and tweak it."),
+    (
+        "Gameday",
+        "Final sync after the inactives, then Lineup Tools, Fix FLEX order, then late swap before the 4 pm "
+        "games.",
+    ),
+]
+
 _WEEK_ROWS: list[tuple[str, str]] = [
     (
         "Start of week",
@@ -123,8 +147,8 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "Sunday: final sync, then lineups",
         "About 90 minutes before the first kickoff, after inactives, run: dfs sync --live. Then build "
         "lineups "
-        "on the Lineups tab: type names in column A, set Cash or GPP on the Total row, and read P(cash) and "
-        f"P({SIM_GPP_TARGET_DEFAULT:.0f}+) there (see Reading the numbers). Exposure shows how concentrated "
+        "on the Lineups tab: type names in column A, set Cash or GPP on the Total row, and read Cash % and "
+        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ % there (see Reading the numbers). Exposure shows how concentrated "
         "your lineups are. When they are final, pair them to your contest entries in DK Upload, run: dfs "
         "export, and upload the file to DraftKings.",
     ),
@@ -149,7 +173,7 @@ _NUMBER_ROWS: list[tuple[str, str]] = [
         "Our corrected projection: the sources blended after removing the bias each is known to have "
         "for that "
         "position and salary tier. It fixes the level (TFFB runs high) and ranks players about the same as "
-        "TFFB. It is not the default projection: Model Check's race says whether it is earning that.",
+        "TFFB. It is the projection late swap, the lineup odds and Suggested use; TFFB stays visible.",
     ),
     (
         "Hit3x%",
@@ -178,13 +202,13 @@ _NUMBER_ROWS: list[tuple[str, str]] = [
         "so a quarterback is only ever measured against quarterbacks.",
     ),
     (
-        "P(cash)",
-        "On a lineup's Total row: the chance the lineup reaches the cash line. The line is the median of "
-        "every typed Cash Line in Results this season. Green at 50% or more. Median is the typical score and "
-        "p90 is the great-night score.",
+        "Cash %",
+        "On a lineup's Total row: the chance the lineup beats a typical cash line, the median of every Cash "
+        "Line you typed in Results this season. Green at 50% or more. Typical is its usual score and Big "
+        "night is what it scores on a great slate (1 slate in 10 does better).",
     ),
     (
-        f"P({SIM_GPP_TARGET_DEFAULT:.0f}+)",
+        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ %",
         f"On a lineup's Total row: the chance the lineup reaches the GPP target "
         f"({SIM_GPP_TARGET_DEFAULT:.0f} "
         "points unless you change it in the config). Green at 5% or more. The Cash or GPP marker highlights "
@@ -256,12 +280,22 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "directly; clear a player's Pool cell to take him out. The rest is computed.",
     ),
     (
+        "Suggested",
+        "Complete lineups built from your pool by dfs lineups suggest: 3 cash builds, ranked by Cash %, "
+        "and 5 GPP builds, each with a stack and ranked by the chance of reaching the GPP target. Every "
+        "build shows salary, CalPts, kickoff and ownership, with the FLEX on the latest kickoff. Copy one "
+        "into the first empty lineup with Lineup Tools, Copy build to Lineups; nothing here changes "
+        "Lineups on its own.",
+    ),
+    (
         "Lineups",
         f"Type names in column A, starting at row {LINEUPS_NAME_BLOCKS[0][0]}. Each lineup is one "
         f"{len(ROSTER_SLOTS)}-player roster block ({_roster_slots_text()}); there are "
         f"{len(LINEUPS_NAME_BLOCKS)} blocks total. The Issues column flags a duplicate, an unavailable "
-        "player, a salary problem or an incomplete lineup. The Total row holds Median, p90, P(cash) and "
-        "P(GPP) and the Cash or GPP marker you set; the portfolio line is on the Board.",
+        "player, a salary problem, an incomplete lineup, a Cash lineup with a weak Cash %, or a FLEX that "
+        "should hold a later kickoff. The Total row holds Typical, Big night, Cash % and "
+        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ % and the Cash or GPP marker you set; the portfolio line is on the "
+        "Board.",
     ),
     (
         "DK Upload",
@@ -291,7 +325,7 @@ _TAB_ROWS: list[tuple[str, str]] = [
     (
         "Results",
         "One row per week: cash points and cash line, head-to-head entered and won. You type it; it is "
-        "never reset. The cash line you type here feeds P(cash).",
+        "never reset. The cash line you type here feeds Cash %.",
     ),
     (
         "Model Check",
@@ -328,6 +362,8 @@ _MORE_ROWS: list[tuple[str, str]] = [
 # (kind, column A, column B): "title", "section" (a dark band) or "row".
 _LAYOUT: list[tuple[str, str, str]] = [
     ("title", _TITLE, ""),
+    ("section", "HOW TO USE THE MODEL", "Six lines"),
+    *(("row", a, b) for a, b in _MODEL_ROWS),
     ("section", "READ THIS FIRST", ""),
     *(("row", a, b) for a, b in _ONE_THING_ROWS),
     ("section", "THE WEEK, STEP BY STEP", "Tab, what to look at, what to do, and the command"),

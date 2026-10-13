@@ -38,12 +38,13 @@ from dfs.bankroll import (
 )
 from dfs.config import Config, ConfigError, ResultsConfig, load_config
 from dfs.doctor import run_doctor
-from dfs.kickoff import games_state
+from dfs.kickoff import KICKOFF_TIMEZONE, games_state
 from dfs.late_swap import lineup_slot_status
 from dfs.late_swap_report import format_suggestions
 from dfs.late_swap_search import (
     METRICS,
     lineup_state,
+    projection_note,
     suggest,
     swap_pool,
 )
@@ -58,10 +59,19 @@ from dfs.launcher import (
     header_lines,
     menu_sections,
     missing_required,
+    suggest_actions,
     suggested_commands,
 )
 from dfs.line_movement import LineMovementError, diff_odds
-from dfs.lineups import build_salary_lookup, export_csv, parse_entries, validate_entry
+from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, DEFAULT_GPP_BUILDS, suggest_builds
+from dfs.lineups import (
+    build_salary_lookup,
+    export_csv,
+    kickoffs_by_id,
+    parse_entries,
+    reorder_flex,
+    validate_entry,
+)
 from dfs.live_diff import diff_edge_flags, diff_queue_changes
 from dfs.log import get_logger, setup_logging
 from dfs.models import ROSTER_SLOTS
@@ -138,6 +148,7 @@ from dfs.sheet_style import (
     style_tier23_tabs,
     style_view_tabs,
 )
+from dfs.sheet_suggested import build_lines, build_summary, ensure_suggested_tab, write_suggested
 from dfs.sheet_tab_removal import remove_retired_tabs
 from dfs.sheet_typo_guard import add_lineups_typo_guard
 from dfs.sheet_views import (
@@ -456,6 +467,10 @@ def run_launcher() -> None:
 
     for line in header_lines(state):
         console.print(line)
+    next_step = next(iter(suggest_actions(state)), None)
+    if next_step is not None:
+        command = f"  [dim]{next_step.command}[/dim]" if next_step.command else "  [dim](in the sheet)[/dim]"
+        console.print(f"[bold]Next:[/bold] {next_step.label}{command}")
     console.print()
 
     suggested = suggested_commands(state)
@@ -1163,6 +1178,9 @@ def sheets_polish(
         title, url = client.describe()
         console.print(f"Styling: [bold]{title}[/bold]\n{url}\n")
 
+        # The Lineups FLEX warning compares NOW() with TFFB's Eastern kickoffs: the zone must match.
+        client.set_time_zone(KICKOFF_TIMEZONE)
+        results.append(f"workbook time zone set to {KICKOFF_TIMEZONE}")
         results.append(polish_edge(client, edge_tab))
         results.append(polish_builder_tab(client, PLAYER_POOL_RAW_TAB, last_row=POOL_RAW_ROWS))
         pool_last = max(end for _, end in PLAYER_POOL_NAME_BLOCKS)
@@ -1402,6 +1420,7 @@ def sheets_build_views(
             build_movement(client, edge_tab=edge_tab),
             build_name_alias_tab(client),
             sheet_edge_finder.ensure_tab(client, edge_tab=edge_tab),
+            ensure_suggested_tab(client),
         ]
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -2562,7 +2581,10 @@ def odds_movement(
 def export(
     output: Path = typer.Option(..., "--output", "-o", help="Path to write the DK bulk-upload CSV."),
 ) -> None:
-    """Validate paired lineups in the lineups tab and export DK's upload CSV."""
+    """Validate paired lineups in the lineups tab and export DK's upload CSV.
+
+    Puts the FLEX slot on the player who kicks off last (never moving a player whose game has started) and
+    says what it moved."""
     cfg = _load_config_or_exit()
 
     try:
@@ -2613,6 +2635,18 @@ def export(
 
     valid = [r.entry for r in results if r.ok]
     if valid:
+        # The FLEX holds whichever of its position's players kicks off last: reorder before writing.
+        try:
+            valid, moved = reorder_flex(
+                results, kickoffs_by_id(store.load_current("edge")), datetime.now(tz=UTC)
+            )
+        except FileNotFoundError:
+            moved = []
+            console.print(
+                "[yellow]No edge data saved: the FLEX order was not checked (run `dfs sync`).[/yellow]"
+            )
+        for line in moved:
+            console.print(f"[cyan]{line}[/cyan]")
         n = export_csv(valid, output)
         console.print(f"[green]Wrote {n} lineup(s) to {output}[/green]")
 
@@ -2696,6 +2730,7 @@ class SwapGoal(StrEnum):
 class SwapMetric(StrEnum):
     """What `dfs lineups late-swap` ranks by (`late_swap_search.METRICS`); never Leverage."""
 
+    CalPts = "CalPts"
     ProjPts = "ProjPts"
     AggPts = "AggPts"
 
@@ -2800,6 +2835,7 @@ def _run_late_swap(
         raise typer.Exit(code=1) from e
 
     console.print(f"Checking lineups in: [bold]{title}[/bold]\n{url}\n")
+    console.print(f"Projection: {projection_note(metric)}.\n")
     pool = swap_pool(edge, now=now, metric=metric, pool_names=pool_names, all_players=all_players)
     scope = "your Player Pool plus the rosterable pool" if all_players else "your Player Pool"
     console.print(f"Swap candidates: {len(pool)} player(s) from {scope} whose game has not started.")
@@ -2886,7 +2922,10 @@ def lineups_late_swap(
         3, "--top", "-n", help="How many swaps to show per kind (and per open slot for 1-for-1 swaps)."
     ),
     metric: SwapMetric = typer.Option(
-        SwapMetric.ProjPts, "--metric", help="What to rank swaps by: ProjPts (default) or AggPts."
+        None,
+        "--metric",
+        help="What to rank swaps by: CalPts, ProjPts or AggPts. Default: config.toml's [projection] default "
+        "(CalPts, with ProjPts where CalPts is blank).",
     ),
     all_players: bool = typer.Option(
         False,
@@ -2907,7 +2946,8 @@ def lineups_late_swap(
     (FLEX takes an RB, WR or TE), no DST against your own QB and at most one
     RB per game. Locked players never move.
 
-    Ranked by ProjPts (or `--metric AggPts`), never Leverage. Candidates are
+    Ranked by CalPts (ProjPts where CalPts is blank; `--metric` or config.toml's
+    [projection] default changes it), never Leverage. Candidates are
     players in your Player Pool whose game has not started; `--all-players`
     widens that to the rosterable pool. Only swaps that beat your current
     lineup are listed. Reads EdgeRaw locally (`store.load_current`) and the
@@ -2920,11 +2960,121 @@ def lineups_late_swap(
     _run_late_swap(
         cfg,
         top=top,
-        metric=metric.value,
+        metric=metric.value if metric else cfg.projection.default,
         all_players=all_players,
         now=datetime.now(UTC),
         goal=goal.value if goal else None,
     )
+
+
+@lineups_app.command("suggest")
+def lineups_suggest(
+    cash: int = typer.Option(
+        DEFAULT_CASH_BUILDS, "--cash", min=0, max=20, help="How many cash builds (0 for none)."
+    ),
+    gpp: int = typer.Option(
+        DEFAULT_GPP_BUILDS, "--gpp", min=0, max=20, help="How many GPP builds (0 for none)."
+    ),
+    no_write: bool = typer.Option(
+        False, "--no-write", help="Print the builds here and leave the Suggested tab alone."
+    ),
+) -> None:
+    """Build complete lineups from your Player Pool and write them to the
+    Suggested tab.
+
+    Cash builds (default 3) have the best chance of beating the typical cash
+    line. GPP builds (default 5) each hold a stack (a QB, two of his pass
+    catchers and a bring-back) and have the best chance of reaching the GPP
+    target. Players come only from your pool (Cash and Both for cash builds,
+    GPP and Both for GPP builds), never OUT or IR or already kicked off, and
+    every build follows the salary cap, the roster slots, no DST against your
+    own QB and one RB per game. Each build differs from the earlier ones by at
+    least 3 players, and the FLEX holds the latest kickoff.
+
+    Your own lineups are never touched: copy a build in with Lineup Tools >
+    Copy build to Lineups. Reads the last sync's data; run `dfs sync` (or
+    `dfs sync --live`) first for the freshest picture."""
+    cfg = _load_config_or_exit()
+    _run_suggest(cfg, cash=cash, gpp=gpp, write=not no_write, now=datetime.now(UTC))
+
+
+def _run_suggest(
+    cfg: Config, *, cash: int, gpp: int, write: bool, now: datetime, client: SheetsClient | None = None
+) -> None:
+    """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
+    in the slate; the command passes the real clock."""
+    try:
+        edge = store.load_current("edge")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
+    if not edge_tab:
+        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
+        raise typer.Exit(code=1)
+    client = client or SheetsClient(cfg.google_sheets)
+    try:
+        title, url = client.describe()
+        tags = {p.name: p.pool_value for p in read_players(client, edge_tab) if p.pooled}
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"Suggesting lineups for: [bold]{title}[/bold]\n{url}\n")
+    metric = cfg.projection.default
+    console.print(f"Projection: {projection_note(metric)}.")
+    if not tags:
+        console.print(
+            "[yellow]Your pool is empty, so there is nothing to build from. Tick players into it "
+            "(Cash, GPP or Both) and run this again.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+    sim_setup = _late_swap_sim_setup(cfg, client, edge, None, now)
+    if sim_setup is None:
+        console.print("[red]The simulator is needed to score builds and could not be set up.[/red]")
+        raise typer.Exit(code=1)
+    specs, settings = sim_setup
+    report = suggest_builds(
+        edge,
+        tags,
+        specs,
+        now=now,
+        cap=cfg.lineups.salary_cap,
+        cash_line=settings.cash_line,
+        gpp_target=settings.gpp_target,
+        metric=metric,
+        cash_builds=cash,
+        gpp_builds=gpp,
+    )
+    console.print(
+        f"Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
+        f"{report.candidates.get('gpp', 0)} for GPP builds. {len(report.builds)} build(s) in "
+        f"{report.seconds:.1f} s.\n"
+    )
+    for build in report.builds:
+        console.print(build_summary(build), markup=False, highlight=False, soft_wrap=True)
+        for line in build_lines(build, edge):
+            console.print("  " + line, markup=False, highlight=False, soft_wrap=True)
+        console.print()
+    for note in report.notes:
+        console.print(f"[yellow]{note}[/yellow]")
+    if not write:
+        console.print("[dim]--no-write: the Suggested tab was not changed.[/dim]")
+        return
+    try:
+        console.print(
+            "[green]OK[/green] "
+            + write_suggested(
+                client,
+                report,
+                edge,
+                metric=metric,
+                cash_line=settings.cash_line,
+                gpp_target=settings.gpp_target,
+            )
+        )
+    except SheetsError as e:
+        console.print(f"[red]Sheets error writing the Suggested tab:[/red] {e}")
+        raise typer.Exit(code=1) from e
 
 
 def _carry_results_team_colour_headers(

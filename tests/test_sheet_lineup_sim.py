@@ -1,5 +1,5 @@
-"""Median / p90 / P(cash) / P(GPP) on the Lineups Total rows: what is written where, the labels, determinism,
-the Cash/GPP marker, and the retired far-right columns."""
+"""Typical / Big night / Cash % / 190+ % on the Lineups Total rows: what is written where, the labels,
+determinism, the Cash/GPP marker, and the retired far-right columns."""
 
 from contextlib import contextmanager
 
@@ -95,6 +95,13 @@ class FakeClient:
     def set_note(self, tab, cell, text):
         self.notes.append((cell, text))
 
+    def set_row_notes(self, tab, row, notes, *, first_col=0):
+        from dfs.sheets import column_letter
+
+        for i, text in enumerate(notes):
+            if text:
+                self.set_note(tab, f"{column_letter(first_col + i)}{row}", text)
+
     def format_range(self, tab, rng, fmt):
         self.formats.append((rng, fmt))
 
@@ -148,8 +155,8 @@ def test_the_labels_go_on_every_remaining_row_with_the_configured_target():
     client = FakeClient([FULL_A, None])
     _run(client, gpp_target=200.0)
     first, _, _, last = _slot_letters()
-    assert client.updates[f"{first}12:{last}12"] == [["Median", "p90", "P(cash)", "P(200+)"]]
-    assert client.updates[f"{first}25:{last}25"] == [["Median", "p90", "P(cash)", "P(200+)"]]
+    assert client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "200+ %"]]
+    assert client.updates[f"{first}25:{last}25"] == [["Typical", "Big night", "Cash %", "200+ %"]]
 
 
 def test_the_portfolio_is_in_the_report_for_the_board_not_written_to_lineups():
@@ -212,13 +219,13 @@ def test_only_one_batched_read_and_one_batched_write_are_needed():
 
 
 def test_gpp_label_text_carries_the_target_and_the_retired_headers_are_recognised():
-    assert sls.gpp_header(190.0) == "P(190+)" and sls.gpp_header(187.5) == "P(187.5+)"
-    assert sls.labels(200.0) == ["Median", "p90", "P(cash)", "P(200+)"]
+    assert sls.gpp_header(190.0) == "190+ %" and sls.gpp_header(187.5) == "187.5+ %"
+    assert sls.labels(200.0) == ["Typical", "Big night", "Cash %", "200+ %"]
     notes = sls.lineup_sim_notes(200.0, "cash line 141.3 (season median, 4 weeks)")
-    assert set(notes) == set(sls.labels(200.0)) and "200" in notes["P(200+)"]
+    assert set(notes) == set(sls.labels(200.0)) and "200" in notes["200+ %"]
     assert (
-        "every typed Cash Line" in notes["P(cash)"]
-        and "cash line 141.3 (season median, 4 weeks)" in notes["P(cash)"]
+        "typed on Results" in notes["Cash %"]
+        and "cash line 141.3 (season median, 4 weeks)" in notes["Cash %"]
     )
     assert all(sls.is_retired_sim_header(h) for h in ("Median", "p90", "P(cash)", "P(190+)", "P(187.5+)"))
     assert not sls.is_retired_sim_header("Edge ↗") and not sls.is_retired_sim_header("P(GPP)")
@@ -289,20 +296,36 @@ def test_the_late_swap_goal_is_the_flag_else_the_lineups_marker_else_cash():
 class _EmptyLineupsClient(FakeClient):
     """No lineup has a player; `stale` is what the four sim columns still hold from an earlier sync."""
 
-    def __init__(self, stale=None):
+    def __init__(self, stale=None, labels=None):
         super().__init__([None, None])
         self.stale = stale
+        self.shown_labels = labels  # what the first Remaining row (row 12) currently says
 
     def read_range(self, tab, rng):
+        if rng.startswith("A"):  # the header row
+            return [self.header]
+        if rng.endswith("12") and rng.count("12") == 2:  # the first block's Remaining row
+            return [list(self.shown_labels)] if self.shown_labels else [[""] * 4]
         return [self.stale] if self.stale else [[""] * 4]
 
 
 def test_a_sync_with_no_players_on_any_lineup_writes_nothing_at_all():
     """Week 5's Lineups was empty and the sync still wrote ~40 ranges (and once hung there)."""
-    client = _EmptyLineupsClient()
+    client = _EmptyLineupsClient(labels=sls.labels(190.0))  # the labels are already the current wording
     message = _run(client)
     assert isinstance(message, str) and "no lineup has players yet" in message
     assert client.updates == {} and client.single == [] and client.notes == []
+
+
+def test_an_older_wording_on_the_labels_is_replaced_even_when_no_lineup_has_players():
+    """The Week 6 rename (Median -> Typical ...) must reach a sheet whose lineups are still empty."""
+    client = _EmptyLineupsClient(labels=["Median", "p90", "P(cash)", "P(190+)"])
+    message = _run(client)
+    assert isinstance(message, str) and "labels updated" in message
+    first, _, _, last = _slot_letters()
+    assert client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "190+ %"]]
+    assert client.updates[f"{first}25:{last}25"] == [["Typical", "Big night", "Cash %", "190+ %"]]
+    assert client.notes  # and their notes
 
 
 def test_old_numbers_left_on_cleared_lineups_are_blanked_not_skipped():

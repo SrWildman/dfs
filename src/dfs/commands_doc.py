@@ -49,7 +49,8 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
         "In the sheet (no command)",
         "Board, Slate Grid, EdgeRaw, Player Pool, Lineups",
         "Research, tick your pool, build lineups. `dfs pool add|remove|list` does the pool without opening "
-        "the sheet.",
+        "the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup "
+        "Tools > Copy build to Lineups drops one in).",
     ),
     (
         "4",
@@ -89,6 +90,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs edge",
             "dfs week new",
             "dfs sync",
+            "dfs lineups suggest",
             "dfs export",
             "dfs lineups late-swap",
             "dfs week close",
@@ -118,7 +120,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
     ),
     (
         "Reference: the lineup simulator (only when needed)",
-        "The Median, p90, P(cash) and P(GPP) numbers on each Lineups Total row are written by every "
+        "The Typical, Big night, Cash % and 190+ % numbers on each Lineups Total row are written by every "
         "`dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache "
         "`dfs model fetch` "
         "fills and never touch a sheet.",

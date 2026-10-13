@@ -21,6 +21,7 @@ from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.edge_finder_tab import ID_COL as EDGE_FINDER_ID_COL
 from dfs.edge_finder_tab import POOL_COL as EDGE_FINDER_POOL_COL
+from dfs.kickoff import KICKOFF_TIMEZONE
 from dfs.lineups import DK_UPLOAD_HEADER
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_empty_guards import describe as describe_unguarded
@@ -31,6 +32,7 @@ from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, edge_group_spans
+from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
@@ -87,6 +89,10 @@ class DoctorClient:
     def get_column_groups(self, tab_name: str) -> list[tuple[int, int, bool]]:  # pragma: no cover
         raise NotImplementedError
 
+    def time_zone(self) -> str | None:  # pragma: no cover
+        """The workbook's time zone; None (not checked) for a client that cannot say."""
+        return None
+
 
 def _check_sheet_title(title: str) -> list[DoctorIssue]:
     """Week 3 follow-ups, Item 1: catches a bad weekly-copy title (`Week4`,
@@ -102,6 +108,21 @@ def _check_sheet_title(title: str) -> list[DoctorIssue]:
     except ValueError as e:
         return [DoctorIssue("sheet-title", str(e))]
     return []
+
+
+def _check_time_zone(client: DoctorClient) -> list[DoctorIssue]:
+    """The workbook's time zone must be Eastern, the zone TFFB's `GameStart` kickoffs are written in: the
+    Lineups FLEX warning compares `NOW()` with them, so any other zone makes it fire (or stay quiet) early."""
+    zone = client.time_zone()
+    if zone is None or zone == KICKOFF_TIMEZONE:
+        return []
+    return [
+        DoctorIssue(
+            "time-zone",
+            f"the workbook's time zone is {zone}, not {KICKOFF_TIMEZONE} (the zone kickoffs are written in): "
+            "the Lineups FLEX warning compares NOW() with them. `dfs setup polish` sets it.",
+        )
+    ]
 
 
 def _check_instructions_drift(client: DoctorClient, tab_titles: set[str]) -> list[DoctorIssue]:
@@ -160,6 +181,7 @@ def _expected_tabs(cfg: Config) -> set[str]:
     tabs.add(PLAYER_POOL_RAW_TAB)
     tabs.add(DKSALCLEAN_TAB)
     tabs.add(EDGE_FINDER_TAB)  # written by every sync; `dfs setup build-views` creates the empty state
+    tabs.add(SUGGESTED_TAB)  # written by `dfs lineups suggest`; `dfs setup build-views` creates it empty
     return tabs
 
 
@@ -569,6 +591,7 @@ def run_doctor(
     if check_title:
         issues += _check_sheet_title(title)
     issues += _check_tabs_exist(cfg, tab_titles)
+    issues += _check_time_zone(client)
     issues += _check_instructions_drift(client, tab_titles)
     issues += _check_edge_header(cfg, tab_titles, headers_by_tab)
     issues += _check_linked_edge_columns(cfg, tab_titles, headers_by_tab)
