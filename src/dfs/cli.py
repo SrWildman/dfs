@@ -258,6 +258,8 @@ app.add_typer(ownership_app, name="ownership")
 # does not edit): both are visible now, listed in the launcher and docs/COMMANDS.md.
 app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model", hidden=False)
 app.add_typer(__import__("dfs.sim.cli", fromlist=["sim_app"]).sim_app, name="sim")
+# Hidden while unfinished (docs/CONTESTS.md): not in COMMANDS.md or the launcher until `week close` runs it.
+app.add_typer(__import__("dfs.contests.cli", fromlist=["contests_app"]).contests_app, name="contests")
 app.add_typer(
     __import__("dfs.research.cli", fromlist=["research_app"]).research_app, name="research", hidden=False
 )

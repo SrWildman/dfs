@@ -136,6 +136,7 @@ Guardrails:
 | `docs/TROUBLESHOOTING.md` | Something looks wrong on the sheet and you want symptom -> cause -> fix. |
 | `docs/SHEET_REFERENCE.md` | You need to know what a specific tab or column means, or the canonical column order for a shared tab. |
 | `docs/CALCULATIONS.md` | You want the exact formula/threshold behind a computed column -- the one place the math is supposed to live; don't let a docstring's summary of it drift into "close enough." |
+| `docs/CONTESTS.md` | You're working on `src/dfs/contests/` (the contests engine: history log, series/format tagging, standings parsing, field stats, slate index, toughness curves). Method, the slate-index finding, every assumption, and what the local session must wire up. The command is hidden until it is. |
 | `docs/planning/README.md` | **Gitignored, personal.** Start here for anything under `docs/planning/`: it names `HANDOFF.md` as the file to read first and says which one `PROMPT_*.md` is the active round. |
 | `docs/planning/HANDOFF.md` | **Gitignored, personal.** The starting point for a new session: what the tool is, the sheet ids, the standing rules, the gotchas, and where each kind of decision lives. Current facts only -- no history. Keep it that way; don't try to `git add` it. |
 | `docs/planning/ROADMAP.md` | **Gitignored, personal.** What has been built, what is deferred, and what was deliberately not done. Same rule: don't try to commit it. |
