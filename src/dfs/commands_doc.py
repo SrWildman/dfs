@@ -240,6 +240,8 @@ def _option_rows(command: Command) -> list[tuple[str, str]]:
         if getattr(param, "required", False):
             parts.append("**Required.**")
         default = getattr(param, "default", None)
+        if isinstance(getattr(param, "show_default", None), str):
+            default = param.show_default  # a machine-independent spelling (e.g. a path under the repo)
         if default not in (None, False, (), "") and not getattr(param, "required", False):
             parts.append(f"Default: `{default}`.")
         rows.append((names, " ".join(p for p in parts if p)))

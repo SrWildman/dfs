@@ -208,7 +208,7 @@ Merges your DraftKings history into a durable log, tags every contest with its s
 |---|---|
 | `--history PATH` | A DraftKings My Contests -> History export (CSV). Repeat for several; they are merged into the durable log, deduplicated by Entry_Key. **Required.** |
 | `--standings PATH` | A folder of contest-standings-<id>.csv files and/or zips of them (searched recursively). |
-| `--out PATH` | Where the log and the CSVs are written. Default: `/Users/Sam/Documents/Development/dfs/data/contests`. |
+| `--out PATH` | Where the log and the CSVs are written. Default: `data/contests`. |
 | `--me STR` | Your DraftKings username. Default: `srwildman`. |
 | `--players PATH` | CSV of players: Name, Team, Position, Opponent and optionally Salary (EdgeRaw has them), with Season and Week columns to cover several weeks. Without it each week's players come from the last DraftKings salary snapshot before that week's lock (data/raw/draftkings). |
 | `--slate-index STR` | Which slate-scoring index is shown beside each week's fitted effect, and is the 'index' comparator: top_n_lineup, p95_optimal, points_per_game, or 'none' to leave it out. Default: `top_n_lineup`. |
