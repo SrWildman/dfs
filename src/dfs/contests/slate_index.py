@@ -1,9 +1,13 @@
 """How high a slate scored, from public nflverse data and the repo's real DK scoring.
 
-Contests are scored on whatever the week's games produced, so a 160-point lineup is a different result in a
-week the main slate was a shootout than in a week it was a slog. `toughness.py` needs every score on one
-scale; this module builds that scale: **a per-week index, relative to the season's mean, of how high the
-main slate scored.** Dividing a week's points by its index puts every week on an "average slate" footing.
+A per-week index, relative to the season's mean, of how high the main slate scored.
+
+**Context only.** It does not predict Sam's cash lines (see `docs/CONTESTS.md`: five weeks, r about 0.1, and
+the actual Oct 4 standings confirm that week 4's ~106 line was real: GIANT $25 Double Up 106.0, GIANT $10
+Double Up 106.1, SE $5 Double Up 108.2 -- cash lines track whether the chalk hit, which no public slate
+measure sees). `toughness.py` therefore estimates week effects from the contests themselves and does not
+divide by this; the index is kept as a reported column beside each week's fitted effect, and as the `index`
+comparator in the leave-one-week-out comparison of ways to handle the week.
 
 **Main slate** is the repo's existing definition (`sources/dk_salaries._is_sunday_afternoon`): Sunday games
 kicking off 12:00-17:59 ET (the 1 pm and 4 pm windows; no Thursday, Sunday night, Monday or early
@@ -65,7 +69,8 @@ KNOWN_CASH_LINES = {
     (2026, 5): 153.06,
 }
 
-# The candidate the index uses. Set from `fit_candidates` on KNOWN_CASH_LINES -- see docs/CONTESTS.md.
+# The candidate shown as context (and compared as `index`). Lowest leave-one-out error on KNOWN_CASH_LINES,
+# which is to say none of them predicts: see docs/CONTESTS.md.
 SELECTED = "top_n_lineup"
 
 INDEX_COLUMNS = ["season", "week", "n_games", *CANDIDATES, *(f"rel_{c}" for c in CANDIDATES)]

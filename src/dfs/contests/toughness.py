@@ -1,47 +1,57 @@
-"""Score-to-finish curves per contest format and series, and the head-to-head record.
+"""Score-to-finish curves per contest format and series, week effects, and the head-to-head record.
 
-**The model.** For one entry, `x` is its score on the "average slate" footing (points divided by that week's
-slate index, `slate_index.py`) and `q = (place - 0.5) / entries` is where it finished (0 = first; the
-half-place keeps last place finite). Within a format the curve is a logistic,
+**The model.** For one entry, `x` is its score and `q = (place - 0.5) / entries` is where it finished (0 =
+first; the half-place keeps last place finite). With `y = logit(q)` (clipped to +-6: q in [0.25%, 99.75%]),
 
-    logit(q) = alpha + beta * x          (beta < 0: more points, better finish)
+    y = alpha_F + w_week + delta_s + beta_F * x
 
-fitted by weighted least squares on the logit (clipped to +-6, i.e. q in [0.25%, 99.75%]). Each **series**
-(one recurring contest) then gets its own level, shifted from its format's by `delta_s`:
+- `alpha_F`, `beta_F`: the **format** curve (beta < 0: more points, better finish), pooled over the format's
+  series; not shrunk.
+- `delta_s`: the **series** level within its format. `delta_s > 0` = the same score finishes worse = a
+  tougher field. Shrunk toward 0 by `n / (n + k)`.
+- `w_week`: the **week effect**, shared by every contest in the same week: how much tougher or softer the
+  whole week played than the model expects for a score. It absorbs everything about a week that scores do
+  not carry (whether the chalk hit, the slate's scoring, the field's mood) and it is what makes cash lines
+  swing 106 to 159 between weeks. Shrunk toward 0 by `n / (n + k_w)`. Estimated *within a format group*:
+  every Classic main-slate format shares one `w_week` (Sam enters ~10-15 of them a week, so it is well
+  identified); Showdown has its own, on its own contests.
 
-    logit(q) = alpha + delta_s + beta * x
+All of it is one ridge least-squares fit on the logit (an entry weighs 1, a profile point
+`PROFILE_WEIGHT`); the penalties are `k` on the series levels and `k_w` on the week effects, so with only
+series effects the shrinkage is exactly `delta_s = sum(r) / (n + k)` for the entry residuals `r`, and likewise
+for weeks. A series' slope is the format's: a series has far too few entries for its own.
 
-with the slope kept at the format's: a series has far too few entries to say anything about its own slope.
-`delta_s > 0` means a worse finish for the same score, i.e. a tougher field.
+**Same-week pairs** (one lineup entered in several contests in a week: identical score, identical week) are
+the special case of this model in which the score term cancels; they need no separate weighting, so there is
+none. `pair_entries` in the series table still counts how many of a series' entries were such pairs.
 
-**Shrinkage.** `delta_s` is shrunk toward zero (the format) by `n / (n + k)`: with only each entry's own
-residual `r = logit(q) - alpha - beta * x` as evidence, `delta_s = sum(r) / (n + k)`. `k` is chosen by
-**leave-one-week-out** error: for each (season, week) in turn, fit on every other week and score that week's
-entries by the mean absolute error of the predicted finish percentile; the `k` with the lowest total wins
-(`GRID_K`; ties go to the larger `k`). With too little data (`MIN_FOLDS` weeks, `MIN_ENTRIES` entries) `k` is
-`DEFAULT_K` and the result says so.
+**Choosing `k` and `k_w`: leave-one-week-out.** For each (season, week) in turn the model is refitted
+without it and the held-out week's entries are scored by the mean absolute error of the predicted finish
+percentile. A week that has not been played has no week effect, so the held-out prediction uses `w = 0`;
+that is also how `expected_cash_line` is defined: **the score that finishes at the series' own typical cash
+percentile in an average week (`w = 0`)**.
 
-**Same-week pairs.** One lineup entered in several series in the same week has one score and one slate; the
-difference between its finishes is a pure series effect, with the week's slate-index error and the lineup's
-own quality cancelled. Entries sharing (format, season, week, points) across 2+ different contests form a
-*pair group*. Each member contributes a second equation, `r_i - mean(r of the group) = delta_s(i) -
-mean(delta of the group's series)`, with weight `lambda` times the entry's weight, where `lambda = var(r) /
-var(within-group deviation)`, clipped to [1, `LAMBDA_MAX`] (1 when there are fewer than `MIN_PAIR_GROUPS`
-groups): an inverse-variance weighting, estimated from the data. The ordinary equations stay as they were,
-and the `k` prior is added on top, so with no pairs this is exactly `n / (n + k)` shrinkage.
+**Three ways to handle the week, compared by that same error** (`compare_models`; the best is used, ties go
+to the simplest):
 
-**Score profiles** (a whole contest's field, from a standings file) add points to the format fit and the
-series equations: five points per contest (winner, top 1%, top 10%, cash line, median), each weighing
-`PROFILE_WEIGHT` of an entry, since they are one contest's curve and share its week.
+- `weeks`: raw points plus week effects (grid over `k` and `k_w`; `k_w = inf` is exactly `raw`);
+- `index`: points divided by the main-slate scoring index (`slate_index.py`), no week effects;
+- `raw`: raw points, no week effects.
+
+The slate index is otherwise **context only**: `toughness_weeks.csv` carries it beside each week's fitted
+effect, and nothing divides by it unless `index` wins the comparison. The three are compared on the same
+rows (those the index covers), each with its own best `k` (and `k_w`); the `weeks` grid is the largest, so
+its error is the most optimistic of the three by a little.
 
 **What is fitted.** Classic main-slate contests of every format except H2H (two entries have no curve; see
-`h2h_report`) and `Other`; Showdown on its own, on raw points (a single game has no main-slate index), never
-pooled with Classic. Classic contests on other slates (Thursday, Sunday night, Monday) are left out: the
-main-slate index does not describe them.
+`h2h_report`) and `Other`; Showdown on its own format and its own week effects, never pooled with Classic.
+Classic contests on other slates (Thursday, Sunday night, Monday) are left out: their week is not the
+main slate's. **Score profiles** (a whole field from a standings file) add five points per contest (winner,
+top 1%, top 10%, cash line, median) at `PROFILE_WEIGHT` of an entry each.
 
-**Outputs.** Per series: the expected cash line on an average slate, the toughness against its format (the
-points more, or fewer, it takes to reach the series' own cash percentile than the format's curve says, so
-`-delta / beta`; positive = tougher), and `n`.
+**Outputs.** Per series: the expected cash line (`w = 0`), the toughness against its format (the points more,
+or fewer, it takes to reach the series' own cash percentile than the format's curve says, `-delta / beta`;
+positive = tougher) and `n`. Per week: the fitted effect in logit and in points.
 """
 
 from __future__ import annotations
@@ -55,18 +65,27 @@ import pandas as pd
 from dfs.contests import series as series_mod
 from dfs.contests.standings import ScoreProfile
 
+INF_K = 1e8  # a penalty at or above this means "no such effect": its columns are dropped from the fit
 GRID_K = (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 1e9)
+GRID_KW = (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 200.0, 1e9)
 DEFAULT_K = 10.0
+DEFAULT_KW = 10.0
 LOGIT_CLIP = 6.0
 PROFILE_WEIGHT = 0.5
 MIN_FORMAT_N = 8
 MIN_FOLDS = 3
 MIN_ENTRIES = 30
-MIN_PAIR_GROUPS = 5
-LAMBDA_MAX = 10.0
+# Scores are centred and scaled before the fit purely for conditioning; alpha and beta are unpenalised, so
+# this changes nothing about the answer and the parameters are converted back to raw points.
+XCENTER = 150.0
+XSCALE = 25.0
+RIDGE_FLOOR = 1e-8
+COMPARISON_COLUMNS = ["mode", "k", "k_w", "mae", "n_scored", "n_entries"]
 
+MODES = ("raw", "index", "weeks")  # simplest first: ties in the comparison go to the earlier one
 NOT_FITTED = frozenset({series_mod.H2H, series_mod.OTHER})
 H2H_BAND_EDGES = (0, 100, 120, 140, 160, 180, math.inf)
+CLASSIC_GROUP, SHOWDOWN_GROUP = "classic", "showdown"
 
 OBS_COLUMNS = [
     "kind",
@@ -74,12 +93,15 @@ OBS_COLUMNS = [
     "series",
     "season",
     "week",
+    "wgroup",
     "contest_key",
-    "x",
+    "x_raw",
+    "x_idx",
     "y",
     "weight",
     "group",
     "q_cash",
+    "points",
 ]
 
 
@@ -102,17 +124,35 @@ def _index_lookup(index: pd.DataFrame | None) -> dict[tuple[int, int], float]:
     }
 
 
+def _index_lookup(index: pd.DataFrame | None) -> dict[tuple[int, int], float]:
+    if index is None or index.empty:
+        return {}
+    return {
+        (int(s), int(w)): float(v)
+        for s, w, v in zip(index["season"], index["week"], index["index"], strict=True)
+        if pd.notna(v) and v > 0
+    }
+
+
 def build_observations(
     log: pd.DataFrame,
     index: pd.DataFrame | None,
     profiles: list[tuple[ScoreProfile, str, str, int, int]] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
-    """`(observations, skipped)` from `history.typed(log)`, the slate index (`season, week, index`) and
-    optional score profiles as `(profile, format, series, season, week)` tuples. `skipped` counts the rows
-    left out and why."""
+    """`(observations, skipped)` from `history.typed(log)`, the slate index (`season, week, index`; optional)
+    and optional score profiles as `(profile, format, series, season, week)` tuples.
+
+    `x_raw` is the score as scored; `x_idx` is the score divided by that week's slate index (NaN where the
+    index has no value for the week; a Showdown score has no main-slate index and keeps its raw value).
+    `skipped` counts the rows left out and why; `no_index` is informational (rows only the `index` model
+    cannot use)."""
     lookup = _index_lookup(index)
     skipped = {"unscored": 0, "not_fitted_format": 0, "other_slate": 0, "no_index": 0, "no_week": 0}
     rows = []
+
+    def scale_for(fmt: str, season: int, week: int) -> float | None:
+        return 1.0 if fmt == series_mod.SHOWDOWN else lookup.get((season, week))
+
     for rec in log.itertuples(index=False):
         fmt = rec.format
         if fmt in NOT_FITTED:
@@ -124,16 +164,13 @@ def build_observations(
         if pd.isna(rec.season) or pd.isna(rec.week):
             skipped["no_week"] += 1
             continue
-        if fmt == series_mod.SHOWDOWN:
-            scale = 1.0
-        elif rec.slate != "main":
+        if fmt != series_mod.SHOWDOWN and rec.slate != "main":
             skipped["other_slate"] += 1
             continue
-        else:
-            scale = lookup.get((int(rec.season), int(rec.week)))
-            if scale is None:
-                skipped["no_index"] += 1
-                continue
+        season, week = int(rec.season), int(rec.week)
+        scale = scale_for(fmt, season, week)
+        if scale is None:
+            skipped["no_index"] += 1
         q = (float(rec.place) - 0.5) / float(rec.entries)
         q_cash = (
             (float(rec.places_paid) - 0.5) / float(rec.entries)
@@ -145,10 +182,12 @@ def build_observations(
                 "kind": "entry",
                 "format": fmt,
                 "series": rec.series,
-                "season": int(rec.season),
-                "week": int(rec.week),
+                "season": season,
+                "week": week,
+                "wgroup": SHOWDOWN_GROUP if fmt == series_mod.SHOWDOWN else CLASSIC_GROUP,
                 "contest_key": str(rec.contest_key),
-                "x": float(rec.points) / scale,
+                "x_raw": float(rec.points),
+                "x_idx": float(rec.points) / scale if scale else math.nan,
                 "y": float(logit(q)),
                 "weight": 1.0,
                 "group": "",
@@ -156,23 +195,22 @@ def build_observations(
                 "points": round(float(rec.points), 2),
             }
         )
-    for profile, fmt, series, season, week in profiles or []:
+    for profile, fmt, name, season, week in profiles or []:
         if fmt in NOT_FITTED:
             continue
-        scale = 1.0 if fmt == series_mod.SHOWDOWN else lookup.get((int(season), int(week)))
-        if scale is None:
-            skipped["no_index"] += 1
-            continue
+        scale = scale_for(fmt, int(season), int(week))
         for q, score in profile.curve():
             rows.append(
                 {
                     "kind": "profile",
                     "format": fmt,
-                    "series": series,
+                    "series": name,
                     "season": int(season),
                     "week": int(week),
+                    "wgroup": SHOWDOWN_GROUP if fmt == series_mod.SHOWDOWN else CLASSIC_GROUP,
                     "contest_key": str(profile.contest_id),
-                    "x": float(score) / scale,
+                    "x_raw": float(score),
+                    "x_idx": float(score) / scale if scale else math.nan,
                     "y": float(logit(q)),
                     "weight": PROFILE_WEIGHT,
                     "group": "",
@@ -180,26 +218,25 @@ def build_observations(
                     "points": math.nan,
                 }
             )
-    obs = pd.DataFrame(rows, columns=[*OBS_COLUMNS, "points"])
-    return assign_pair_groups(obs), skipped
+    return assign_pair_groups(pd.DataFrame(rows, columns=OBS_COLUMNS)), skipped
 
 
 def assign_pair_groups(obs: pd.DataFrame) -> pd.DataFrame:
     """Fills `group` for entries that share (format, season, week, points) across 2+ different contests:
-    one lineup entered more than once in a week."""
+    one lineup entered more than once in a week (reported as `pair_entries`; the week effects already
+    cancel what pairs would)."""
     out = obs.copy()
     out["group"] = ""
     entries = out[out["kind"] == "entry"]
     if entries.empty:
         return out
-    keyed = entries.groupby(["format", "season", "week", "points"])
-    for (fmt, season, week, points), sub in keyed:
+    for (fmt, season, week, points), sub in entries.groupby(["format", "season", "week", "points"]):
         if len(sub) >= 2 and sub["contest_key"].nunique() >= 2:
             out.loc[sub.index, "group"] = f"{fmt}|{season}|{week}|{points}"
     return out
 
 
-# ---- fitting -------------------------------------------------------------------------------------
+# ---- the joint fit -------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -213,193 +250,223 @@ class FormatFit:
     note: str = ""
 
 
-def fit_format(obs: pd.DataFrame, fmt: str) -> FormatFit | None:
-    """Weighted least squares of `y` on `x` for one format; None when there is too little data."""
-    sub = obs[obs["format"] == fmt]
-    n_entries = int((sub["kind"] == "entry").sum())
-    n_profile = int((sub["kind"] == "profile").sum())
-    if n_entries + n_profile < MIN_FORMAT_N or sub["x"].nunique() < 2:
-        return None
-    w, x, y = sub["weight"].to_numpy(float), sub["x"].to_numpy(float), sub["y"].to_numpy(float)
-    xbar, ybar = np.average(x, weights=w), np.average(y, weights=w)
-    sxx = float((w * (x - xbar) ** 2).sum())
-    if sxx <= 0:
-        return None
-    beta = float((w * (x - xbar) * (y - ybar)).sum() / sxx)
-    alpha = float(ybar - beta * xbar)
-    reliable = beta < 0
-    note = "" if reliable else "slope is not negative: more points did not mean a better finish"
-    return FormatFit(fmt, alpha, beta, n_entries, n_profile, reliable, note)
-
-
-def estimate_lambda(obs: pd.DataFrame, fit: FormatFit) -> float:
-    """Weight of the paired equations: var(r) / var(within-group deviation), clipped to [1, LAMBDA_MAX]."""
-    entries = obs[(obs["format"] == fit.format) & (obs["kind"] == "entry")]
-    if entries.empty:
-        return 1.0
-    r = entries["y"] - fit.alpha - fit.beta * entries["x"]
-    grouped = entries.assign(r=r)[entries["group"] != ""]
-    if grouped["group"].nunique() < MIN_PAIR_GROUPS:
-        return 1.0
-    dev = grouped["r"] - grouped.groupby("group")["r"].transform("mean")
-    size = grouped.groupby("group")["r"].transform("size")
-    dof = float((1 - 1 / size).sum())
-    var_pair = float((dev**2).sum() / dof) if dof > 0 else 0.0
-    var_abs = float(r.var(ddof=1)) if len(r) > 1 else 0.0
-    if var_pair <= 0 or var_abs <= 0:
-        return LAMBDA_MAX if var_pair <= 0 < var_abs else 1.0
-    return float(min(max(var_abs / var_pair, 1.0), LAMBDA_MAX))
-
-
-@dataclass(frozen=True)
-class SeriesSystem:
-    """The normal equations for one format's series levels, without the `k` prior (which is added at solve
-    time, so one build serves every `k` in the grid)."""
-
-    names: list[str]
-    lhs: np.ndarray
-    rhs: np.ndarray
-
-
-def build_system(
-    obs: pd.DataFrame, fit: FormatFit, *, use_pairs: bool = True, lam: float | None = None
-) -> SeriesSystem:
-    sub = obs[obs["format"] == fit.format]
-    names = sorted(sub["series"].unique())
-    size = len(names)
-    lhs, rhs = np.zeros((size, size)), np.zeros(size)
-    if not size:
-        return SeriesSystem(names, lhs, rhs)
-    pos = {name: i for i, name in enumerate(names)}
-    resid = (sub["y"] - fit.alpha - fit.beta * sub["x"]).to_numpy(float)
-    series_idx = np.array([pos[s] for s in sub["series"]])
-    weights = sub["weight"].to_numpy(float)
-    np.add.at(lhs, (series_idx, series_idx), weights)
-    np.add.at(rhs, series_idx, weights * resid)
-    if use_pairs:
-        lam = estimate_lambda(obs, fit) if lam is None else lam
-        groups = pd.Series(np.arange(len(sub))).groupby(sub["group"].to_numpy())
-        for group, members in groups:
-            members = members.to_numpy()
-            if not group or len(members) < 2:
-                continue
-            share = np.bincount(series_idx[members], minlength=size) / len(members)
-            mean_r = resid[members].mean()
-            for i in members:
-                d = -share.copy()
-                d[series_idx[i]] += 1.0
-                lhs += lam * weights[i] * np.outer(d, d)
-                rhs += lam * weights[i] * d * (resid[i] - mean_r)
-    return SeriesSystem(names, lhs, rhs)
-
-
-def solve_system(system: SeriesSystem, k: float) -> dict[str, float]:
-    if not system.names:
-        return {}
-    solution, *_ = np.linalg.lstsq(system.lhs + np.eye(len(system.names)) * float(k), system.rhs, rcond=None)
-    return dict(zip(system.names, (float(v) for v in solution), strict=True))
-
-
-def solve_series(
-    obs: pd.DataFrame, fit: FormatFit, k: float, *, use_pairs: bool = True, lam: float | None = None
-) -> dict[str, float]:
-    """`delta_s` for every series of the format, given the format's curve. See the module docstring."""
-    return solve_system(build_system(obs, fit, use_pairs=use_pairs, lam=lam), k)
-
-
 @dataclass
 class Model:
+    mode: str
     k: float
+    k_w: float
     formats: dict[str, FormatFit] = field(default_factory=dict)
     deltas: dict[tuple[str, str], float] = field(default_factory=dict)
+    weeks: dict[tuple[str, int, int], float] = field(default_factory=dict)
 
     def predict_q(self, fmt: str, series: str, x: float) -> float:
+        """The predicted finish percentile for a score in an average week (`w = 0`). `x` is in the model's
+        own units (raw points, or index-divided points in `index` mode)."""
         fit = self.formats.get(fmt)
         if fit is None or not fit.reliable:
             return math.nan
         return float(expit(fit.alpha + self.deltas.get((fmt, series), 0.0) + fit.beta * x))
 
 
-def fit_model(obs: pd.DataFrame, k: float, *, use_pairs: bool = True) -> Model:
-    model = Model(k=k)
-    for fmt in sorted(obs["format"].unique()):
-        fit = fit_format(obs, fmt)
-        if fit is None:
-            continue
-        model.formats[fmt] = fit
-        if fit.reliable:
-            for name, delta in solve_series(obs, fit, k, use_pairs=use_pairs).items():
-                model.deltas[(fmt, name)] = delta
-    return model
+class Design:
+    """The data side of the ridge fit for one mode, built once: the normal equations of the whole data set
+    and of each (season, week), so a leave-one-week-out fold is a subtraction and each `(k, k_w)` a solve.
 
+    Columns: an intercept and a slope per format (unpenalised), a week effect per (group, season, week)
+    (`weeks` mode only, penalty `k_w`), a level per (format, series) (penalty `k`)."""
 
-def fold_predictions(
-    obs: pd.DataFrame, season: int, week: int, grid=GRID_K, *, use_pairs: bool = True
-) -> dict[float, list[tuple[float, float]]]:
-    """For one held-out (season, week): per `k`, `(predicted q, actual q)` for each of that week's entries,
-    from a fit that has never seen the week (its observations, pairs and profiles are all removed)."""
-    held = (obs["season"] == season) & (obs["week"] == week)
-    train = obs[~held]
-    test = obs[held & (obs["kind"] == "entry")]
-    fits = {fmt: fit_format(train, fmt) for fmt in train["format"].unique()}
-    systems = {
-        fmt: build_system(train, fit, use_pairs=use_pairs)
-        for fmt, fit in fits.items()
-        if fit is not None and fit.reliable
-    }
-    out: dict[float, list[tuple[float, float]]] = {}
-    for k in grid:
-        deltas = {}
-        for fmt, system in systems.items():
-            for name, delta in solve_system(system, k).items():
-                deltas[(fmt, name)] = delta
-        pairs = []
-        for rec in test.itertuples(index=False):
-            fit = fits.get(rec.format)
-            if fit is None or not fit.reliable:
-                continue
-            y_hat = fit.alpha + deltas.get((rec.format, rec.series), 0.0) + fit.beta * rec.x
-            pairs.append((float(expit(y_hat)), float(expit(rec.y))))
-        out[k] = pairs
-    return out
-
-
-def leave_one_week_out(obs: pd.DataFrame, grid=GRID_K, *, use_pairs: bool = True) -> pd.DataFrame:
-    """Mean absolute error of the predicted finish percentile over every held-out week's entries, per `k`."""
-    entries = obs[obs["kind"] == "entry"]
-    weeks = sorted({(int(s), int(w)) for s, w in zip(entries["season"], entries["week"], strict=True)})
-    abs_err: dict[float, list[float]] = {k: [] for k in grid}
-    for season, week in weeks:
-        for k, pairs in fold_predictions(obs, season, week, grid, use_pairs=use_pairs).items():
-            abs_err[k].extend(abs(pred - actual) for pred, actual in pairs)
-    return pd.DataFrame(
-        [
-            {"k": k, "mae": float(np.mean(v)) if v else math.nan, "n_scored": len(v)}
-            for k, v in abs_err.items()
+    def __init__(self, obs: pd.DataFrame, mode: str):
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}, not {mode!r}")
+        self.mode = mode
+        self.xcol = "x_idx" if mode == "index" else "x_raw"
+        self.use_weeks = mode == "weeks"
+        sub = obs[obs[self.xcol].notna()]
+        keep = [
+            fmt for fmt, g in sub.groupby("format") if len(g) >= MIN_FORMAT_N and g[self.xcol].nunique() >= 2
         ]
-    )
+        self.formats = sorted(keep)
+        self.sub = sub[sub["format"].isin(keep)].reset_index(drop=True)
+        sub = self.sub
+        n, nf = len(sub), len(self.formats)
+        self.series = sorted(set(zip(sub["format"], sub["series"], strict=True)))
+        self.week_keys = (
+            sorted(
+                {
+                    (g, int(s), int(w))
+                    for g, s, w in zip(sub["wgroup"], sub["season"], sub["week"], strict=True)
+                }
+            )
+            if self.use_weeks
+            else []
+        )
+        nw, ns = len(self.week_keys), len(self.series)
+        self.nf, self.nw, self.ns = nf, nw, ns
+        self.p = 2 * nf + nw + ns
+        fi = np.array([self.formats.index(f) for f in sub["format"]], dtype=int)
+        si = np.array(
+            [self.series.index(fs) for fs in zip(sub["format"], sub["series"], strict=True)], dtype=int
+        )
+        xs = (sub[self.xcol].to_numpy(float) - XCENTER) / XSCALE
+        rows = np.arange(n)
+        design = np.zeros((n, self.p))
+        design[rows, fi] = 1.0
+        design[rows, nf + fi] = xs
+        if self.use_weeks:
+            index_of = {key: i for i, key in enumerate(self.week_keys)}
+            wi = np.array(
+                [
+                    index_of[(g, int(s), int(w))]
+                    for g, s, w in zip(sub["wgroup"], sub["season"], sub["week"], strict=True)
+                ],
+                dtype=int,
+            )
+            design[rows, 2 * nf + wi] = 1.0
+        design[rows, 2 * nf + nw + si] = 1.0
+        root = np.sqrt(sub["weight"].to_numpy(float))
+        xw, yw = design * root[:, None], sub["y"].to_numpy(float) * root
+        self.fi, self.si, self.xs = fi, si, xs
+        self.G, self.b = xw.T @ xw, xw.T @ yw
+        self.by_week: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
+        for key, idx in sub.groupby(["season", "week"]).indices.items():
+            self.by_week[(int(key[0]), int(key[1]))] = (xw[idx].T @ xw[idx], xw[idx].T @ yw[idx])
+        kind = np.zeros(self.p, dtype=int)  # 0 unpenalised, 1 week effect, 2 series level
+        kind[2 * nf : 2 * nf + nw] = 1
+        kind[2 * nf + nw :] = 2
+        self.kind = kind
+
+    def solve(self, k: float, k_w: float, exclude: tuple[int, int] | None = None) -> np.ndarray:
+        """The coefficient vector for penalties `(k, k_w)`, with the (season, week) `exclude` left out."""
+        gram, rhs = self.G, self.b
+        if exclude is not None and exclude in self.by_week:
+            gram, rhs = gram - self.by_week[exclude][0], rhs - self.by_week[exclude][1]
+        penalty = np.where(self.kind == 1, k_w, np.where(self.kind == 2, k, 0.0)) + RIDGE_FLOOR
+        active = ~(((self.kind == 1) & (k_w >= INF_K)) | ((self.kind == 2) & (k >= INF_K)))
+        theta = np.zeros(self.p)
+        if active.any():
+            a = np.ix_(active, active)
+            theta[active] = np.linalg.solve(gram[a] + np.diag(penalty[active]), rhs[active])
+        return theta
+
+    def parts(self, theta: np.ndarray):
+        nf, nw = self.nf, self.nw
+        return theta[:nf], theta[nf : 2 * nf], theta[2 * nf : 2 * nf + nw], theta[2 * nf + nw :]
+
+    def model(self, k: float, k_w: float) -> Model:
+        """The fitted model on all the data."""
+        a_s, b_s, weeks, deltas = self.parts(self.solve(k, k_w))
+        out = Model(self.mode, k, k_w)
+        for i, fmt in enumerate(self.formats):
+            beta = float(b_s[i] / XSCALE)
+            alpha = float(a_s[i] - b_s[i] * XCENTER / XSCALE)
+            rows = self.sub[self.sub["format"] == fmt]
+            reliable = beta < 0
+            out.formats[fmt] = FormatFit(
+                fmt,
+                alpha,
+                beta,
+                int((rows["kind"] == "entry").sum()),
+                int((rows["kind"] == "profile").sum()),
+                reliable,
+                "" if reliable else "slope is not negative: more points did not mean a better finish",
+            )
+        out.deltas = {fs: float(d) for fs, d in zip(self.series, deltas, strict=True)}
+        out.weeks = {key: float(w) for key, w in zip(self.week_keys, weeks, strict=True)}
+        return out
+
+    def fold_errors(self, grid_k, grid_kw) -> dict[tuple[float, float], list[float]]:
+        """For every `(k, k_w)`: the absolute error of the predicted finish percentile of each entry of each
+        held-out week, from a fit that has never seen that week (its entries, profiles and week effect)."""
+        entries = self.sub["kind"].to_numpy() == "entry"
+        week_of = list(zip(self.sub["season"].astype(int), self.sub["week"].astype(int), strict=True))
+        y = self.sub["y"].to_numpy(float)
+        errors: dict[tuple[float, float], list[float]] = {(k, kw): [] for k in grid_k for kw in grid_kw}
+        folds: dict[tuple[int, int], list[int]] = {}
+        for i, key in enumerate(week_of):
+            if entries[i]:
+                folds.setdefault(key, []).append(i)
+        for key, idx in folds.items():
+            rows = np.array(idx)
+            for k, kw in errors:
+                a_s, b_s, _, deltas = self.parts(self.solve(k, kw, exclude=key))
+                ok = b_s[self.fi[rows]] < 0  # a format whose slope is not negative predicts nothing
+                y_hat = a_s[self.fi[rows]] + b_s[self.fi[rows]] * self.xs[rows] + deltas[self.si[rows]]
+                err = np.abs(expit(y_hat) - expit(y[rows]))
+                errors[(k, kw)].extend(float(e) for e in err[ok])
+        return errors
 
 
-def choose_k(obs: pd.DataFrame, grid=GRID_K, *, use_pairs: bool = True) -> tuple[float, pd.DataFrame, str]:
-    """`(k, error table, how it was chosen)`."""
+# ---- choosing k and the mode ---------------------------------------------------------------------
+
+
+def _enough(obs: pd.DataFrame) -> tuple[bool, int]:
     entries = obs[obs["kind"] == "entry"]
     n_weeks = len({(int(s), int(w)) for s, w in zip(entries["season"], entries["week"], strict=True)})
-    if n_weeks < MIN_FOLDS or len(entries) < MIN_ENTRIES:
-        return (
-            DEFAULT_K,
-            pd.DataFrame(columns=["k", "mae", "n_scored"]),
-            (
-                f"default k={DEFAULT_K:g}: {len(entries)} entries over {n_weeks} weeks is too little for "
-                f"leave-one-week-out (needs {MIN_ENTRIES} entries over {MIN_FOLDS} weeks)"
-            ),
+    return n_weeks >= MIN_FOLDS and len(entries) >= MIN_ENTRIES, n_weeks
+
+
+def leave_one_week_out(obs: pd.DataFrame, mode: str, grid_k=GRID_K, grid_kw=GRID_KW) -> pd.DataFrame:
+    """`k, k_w, mae, n_scored` for every penalty pair of one mode (`k_w` is `inf` where the mode has no week
+    effects)."""
+    design = Design(obs, mode)
+    used_kw = grid_kw if design.use_weeks else (1e9,)  # no week effects: nothing to penalise
+    rows = []
+    for (k, kw), errs in design.fold_errors(grid_k, used_kw).items():
+        rows.append(
+            {
+                "k": k,
+                "k_w": kw if design.use_weeks else float("inf"),
+                "mae": float(np.mean(errs)) if errs else math.nan,
+                "n_scored": len(errs),
+            }
         )
-    errors = leave_one_week_out(obs, grid, use_pairs=use_pairs)
+    return pd.DataFrame(rows, columns=["k", "k_w", "mae", "n_scored"])
+
+
+def best_penalties(errors: pd.DataFrame) -> tuple[float, float, float] | None:
+    """`(k, k_w, mae)` of the lowest error; ties go to the larger penalties (more shrinkage)."""
     scored = errors.dropna(subset=["mae"])
     if scored.empty:
-        return DEFAULT_K, errors, f"default k={DEFAULT_K:g}: no held-out week could be scored"
+        return None
     best = scored["mae"].min()
-    k = float(scored[scored["mae"] <= best + 1e-12]["k"].max())
-    return k, errors, f"leave-one-week-out over {n_weeks} weeks"
+    tied = scored[scored["mae"] <= best + 1e-12].sort_values(["k", "k_w"], ascending=False)
+    row = tied.iloc[0]
+    return float(row["k"]), float(row["k_w"]), float(row["mae"])
+
+
+def compare_models(obs: pd.DataFrame, modes=MODES) -> pd.DataFrame:
+    """Leave-one-week-out error of each way of handling the week, each at its own best penalties, on the
+    rows they can all use (those with a slate index, when the `index` model is among them).
+
+    Columns: `mode, k, k_w, mae, n_scored, n_entries`; empty when there is too little data."""
+    modes = list(modes)
+    support = obs
+    if "index" in modes:
+        covered = obs[obs["x_idx"].notna()]
+        if (covered["kind"] == "entry").sum() >= MIN_ENTRIES:
+            support = covered
+        else:
+            modes.remove("index")
+    ok, _ = _enough(support)
+    if not ok:
+        return pd.DataFrame(columns=COMPARISON_COLUMNS)
+    rows = []
+    n_entries = int((support["kind"] == "entry").sum())
+    for mode in modes:
+        best = best_penalties(leave_one_week_out(support, mode))
+        if best is None:
+            continue
+        k, kw, mae = best
+        scored = int(leave_one_week_out(support, mode, grid_k=(k,), grid_kw=(kw,))["n_scored"].iloc[0])
+        rows.append({"mode": mode, "k": k, "k_w": kw, "mae": mae, "n_scored": scored, "n_entries": n_entries})
+    return pd.DataFrame(rows, columns=COMPARISON_COLUMNS)
+
+
+def choose_mode(comparison: pd.DataFrame) -> str:
+    """The mode with the lowest error; ties (to 1e-9) go to the simplest, `MODES` order."""
+    best = comparison["mae"].min()
+    tied = comparison[comparison["mae"] <= best + 1e-9]
+    return sorted(tied["mode"], key=MODES.index)[0]
 
 
 # ---- results -------------------------------------------------------------------------------------
@@ -408,14 +475,22 @@ def choose_k(obs: pd.DataFrame, grid=GRID_K, *, use_pairs: bool = True) -> tuple
 @dataclass
 class ToughnessResult:
     model: Model
+    mode: str
     k: float
-    k_source: str
+    k_w: float
+    penalty_source: str
+    comparison: pd.DataFrame
     k_errors: pd.DataFrame
     series_table: pd.DataFrame
     format_table: pd.DataFrame
+    weeks_table: pd.DataFrame
     observations: pd.DataFrame
     skipped: dict[str, int]
     notes: list[str] = field(default_factory=list)
+
+    @property
+    def k_source(self) -> str:  # the name the summary and the first release used
+        return self.penalty_source
 
 
 def _x_at(alpha: float, beta: float, delta: float, q: float) -> float:
@@ -446,6 +521,42 @@ FORMAT_COLUMNS = [
     "expected_cash_line",
     "note",
 ]
+WEEK_COLUMNS = ["group", "season", "week", "n_entries", "w", "w_points", "slate_index"]
+
+
+def _weeks_table(model: Model, obs: pd.DataFrame, index: pd.DataFrame | None) -> pd.DataFrame:
+    """One row per (group, season, week): the fitted effect in logit and in points at the group's pooled slope
+    (positive = a tougher week: it took that many more points for the same finish), beside the slate index
+    as context."""
+    lookup = _index_lookup(index)
+    entries = obs[obs["kind"] == "entry"]
+    pooled = {}
+    for group in (CLASSIC_GROUP, SHOWDOWN_GROUP):
+        fits = [
+            f
+            for fmt, f in model.formats.items()
+            if f.reliable and (fmt == series_mod.SHOWDOWN) == (group == SHOWDOWN_GROUP)
+        ]
+        total = sum(f.n_entries for f in fits)
+        pooled[group] = sum(f.beta * f.n_entries for f in fits) / total if total else math.nan
+    rows = []
+    for (group, season, week), w in sorted(model.weeks.items()):
+        n = int(
+            ((entries["wgroup"] == group) & (entries["season"] == season) & (entries["week"] == week)).sum()
+        )
+        beta = pooled[group]
+        rows.append(
+            {
+                "group": group,
+                "season": season,
+                "week": week,
+                "n_entries": n,
+                "w": w,
+                "w_points": -w / beta if beta and not math.isnan(beta) else math.nan,
+                "slate_index": lookup.get((season, week), math.nan) if group == CLASSIC_GROUP else math.nan,
+            }
+        )
+    return pd.DataFrame(rows, columns=WEEK_COLUMNS)
 
 
 def fit_toughness(
@@ -453,35 +564,69 @@ def fit_toughness(
     index: pd.DataFrame | None,
     profiles: list[tuple[ScoreProfile, str, str, int, int]] | None = None,
     *,
+    mode: str = "auto",
     k: float | None = None,
-    use_pairs: bool = True,
+    k_w: float | None = None,
 ) -> ToughnessResult:
-    """The whole pipeline: observations, `k` by leave-one-week-out (unless given), format and series fits."""
+    """The whole pipeline: observations; the three ways of handling the week compared by leave-one-week-out
+    error (unless `mode` is given); `k` and `k_w` chosen (unless given); the fit; the tables."""
     obs, skipped = build_observations(log, index, profiles)
+    empty = ToughnessResult(
+        Model("weeks", DEFAULT_K, DEFAULT_KW),
+        "weeks",
+        DEFAULT_K,
+        DEFAULT_KW,
+        "no data",
+        pd.DataFrame(columns=COMPARISON_COLUMNS),
+        pd.DataFrame(columns=["k", "k_w", "mae", "n_scored"]),
+        pd.DataFrame(columns=SERIES_COLUMNS),
+        pd.DataFrame(columns=FORMAT_COLUMNS),
+        pd.DataFrame(columns=WEEK_COLUMNS),
+        obs,
+        skipped,
+        ["no scored entries to fit"],
+    )
     if obs.empty:
-        empty = Model(k=DEFAULT_K)
-        return ToughnessResult(
-            empty,
-            DEFAULT_K,
-            "no data",
-            pd.DataFrame(),
-            pd.DataFrame(columns=SERIES_COLUMNS),
-            pd.DataFrame(columns=FORMAT_COLUMNS),
-            obs,
-            skipped,
-            ["no scored entries to fit"],
-        )
-    if k is None:
-        k, errors, source = choose_k(obs, use_pairs=use_pairs)
+        return empty
+
+    notes: list[str] = []
+    enough, n_weeks = _enough(obs)
+    comparison = (
+        compare_models(obs, MODES if mode == "auto" else [mode])
+        if enough
+        else pd.DataFrame(columns=COMPARISON_COLUMNS)
+    )
+    if mode == "auto":
+        chosen = choose_mode(comparison) if len(comparison) else "weeks"
     else:
-        errors, source = pd.DataFrame(columns=["k", "mae", "n_scored"]), f"given k={k:g}"
-    model = fit_model(obs, k, use_pairs=use_pairs)
+        chosen = mode
+    k_errors = pd.DataFrame(columns=["k", "k_w", "mae", "n_scored"])
+    source = f"given k={k}, k_w={k_w}" if k is not None and k_w is not None else ""
+    if k is None or k_w is None:
+        if enough:
+            support = obs if chosen != "index" else obs[obs["x_idx"].notna()]
+            k_errors = leave_one_week_out(support, chosen)
+            best = best_penalties(k_errors)
+            if best is not None:
+                k = best[0] if k is None else k
+                k_w = best[1] if k_w is None else k_w
+                source = f"leave-one-week-out over {n_weeks} weeks"
+        if k is None or k_w is None:
+            k = DEFAULT_K if k is None else k
+            k_w = DEFAULT_KW if k_w is None else k_w
+            source = (
+                f"default k={DEFAULT_K:g}, k_w={DEFAULT_KW:g}: too little data for leave-one-week-out "
+                f"(needs {MIN_ENTRIES} entries over {MIN_FOLDS} weeks)"
+            )
+    design = Design(obs, chosen)
+    model = design.model(float(k), float(k_w))
 
     entries = obs[obs["kind"] == "entry"]
-    fmt_rows, series_rows, notes = [], [], []
+    fmt_rows, series_rows = [], []
     for fmt, fit in sorted(model.formats.items()):
         sub = entries[entries["format"] == fmt]
         payout = float(sub["q_cash"].median()) if sub["q_cash"].notna().any() else math.nan
+        usable = fit.reliable and not math.isnan(payout)
         fmt_rows.append(
             {
                 "format": fmt,
@@ -491,9 +636,7 @@ def fit_toughness(
                 "beta": fit.beta,
                 "reliable": fit.reliable,
                 "payout_q": payout,
-                "expected_cash_line": _x_at(fit.alpha, fit.beta, 0.0, payout)
-                if fit.reliable and not math.isnan(payout)
-                else math.nan,
+                "expected_cash_line": _x_at(fit.alpha, fit.beta, 0.0, payout) if usable else math.nan,
                 "note": fit.note,
             }
         )
@@ -504,19 +647,19 @@ def fit_toughness(
             notes.append(f"{fmt}: fewer than {MIN_FORMAT_N} scored entries, no curve fitted")
     for (fmt, name), sub in entries.groupby(["format", "series"]):
         fit = model.formats.get(fmt)
-        n = len(sub)
+        count = len(sub)
         payout = float(sub["q_cash"].median()) if sub["q_cash"].notna().any() else math.nan
         delta = model.deltas.get((fmt, name), math.nan)
-        usable = fit is not None and fit.reliable
-        cash = _x_at(fit.alpha, fit.beta, delta, payout) if usable and not math.isnan(payout) else math.nan
-        base = _x_at(fit.alpha, fit.beta, 0.0, payout) if usable and not math.isnan(payout) else math.nan
+        usable = fit is not None and fit.reliable and not math.isnan(payout)
+        cash = _x_at(fit.alpha, fit.beta, delta, payout) if usable else math.nan
+        base = _x_at(fit.alpha, fit.beta, 0.0, payout) if usable else math.nan
         series_rows.append(
             {
                 "format": fmt,
                 "series": name,
-                "n": n,
+                "n": count,
                 "n_weeks": int(sub[["season", "week"]].drop_duplicates().shape[0]),
-                "shrink_weight": n / (n + k) if (n + k) > 0 else math.nan,
+                "shrink_weight": count / (count + k) if (count + k) > 0 else math.nan,
                 "delta": delta,
                 "payout_q": payout,
                 "expected_cash_line": cash,
@@ -530,11 +673,15 @@ def fit_toughness(
     )
     return ToughnessResult(
         model=model,
-        k=k,
-        k_source=source,
-        k_errors=errors,
+        mode=chosen,
+        k=float(k),
+        k_w=float(k_w),
+        penalty_source=source,
+        comparison=comparison,
+        k_errors=k_errors,
         series_table=series_table.reset_index(drop=True),
         format_table=pd.DataFrame(fmt_rows, columns=FORMAT_COLUMNS),
+        weeks_table=_weeks_table(model, obs, index),
         observations=obs,
         skipped=skipped,
         notes=notes,
@@ -551,12 +698,12 @@ def _band(x: float) -> str:
     return ""
 
 
-def h2h_report(log: pd.DataFrame, index: pd.DataFrame | None) -> tuple[pd.DataFrame, pd.DataFrame]:
+def h2h_report(log: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """`(win rate by score band, record per opponent with 2+ meetings)` from the H2H rows of `history.typed`.
 
     A result is W if the entry won more than its fee back, L if less, T if exactly its fee (a refund). Win
-    rate counts a tie as half. Bands are of the score on the average-slate footing (main-slate Classic only;
-    others cannot be placed on that scale), the opponent record uses every H2H row."""
+    rate counts a tie as half. Bands are of the raw score (main-slate Classic only: other slates score on a
+    different scale; nothing is divided by the slate index), the opponent record uses every H2H row."""
     h2h = log[(log["format"] == series_mod.H2H) & log["place"].notna()].copy()
     cols_band = ["band", "n", "wins", "losses", "ties", "win_rate"]
     cols_opp = ["opponent", "meetings", "wins", "losses", "ties", "record", "net"]
@@ -566,13 +713,9 @@ def h2h_report(log: pd.DataFrame, index: pd.DataFrame | None) -> tuple[pd.DataFr
         h2h["winnings"] > h2h["fee"] + 1e-9, "W", np.where(h2h["winnings"] < h2h["fee"] - 1e-9, "L", "T")
     )
     h2h["net"] = h2h["winnings"] - h2h["fee"]
-    lookup = _index_lookup(index)
-    scale = [
-        lookup.get((int(s), int(w))) if pd.notna(s) and pd.notna(w) and sl == "main" else None
-        for s, w, sl in zip(h2h["season"], h2h["week"], h2h["slate"], strict=True)
-    ]
     h2h["x"] = [
-        p / sc if sc and pd.notna(p) else math.nan for p, sc in zip(h2h["points"], scale, strict=True)
+        float(p) if pd.notna(p) and sl == "main" else math.nan
+        for p, sl in zip(h2h["points"], h2h["slate"], strict=True)
     ]
 
     def summarise(frame: pd.DataFrame, key: str) -> pd.DataFrame:

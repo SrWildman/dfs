@@ -2,7 +2,8 @@
 
 Writes only files under the output directory. No sheet, no credentials, no DraftKings network call; the only
 network access is nflverse (public) for the slate index of a season not already in the committed backfill,
-and that fails soft: the affected weeks are left out of the toughness fit and the summary says so.
+and that fails soft: the index is context (and one of the three week treatments compared), so a season
+without it is left out of that comparison only, and the summary says so.
 
 Output files (all in `out_dir`):
 
@@ -12,9 +13,11 @@ Output files (all in `out_dir`):
 - `profiles.csv`         the score profile of every standings contest (entrants, cash line, top 10%, ...)
 - `field_stats.csv`, `field_stacks.csv`, `field_unmatched.csv`   how the fields build (see `field.py`)
 - `lineup_errors.csv`    lineups that did not parse, with the reason
-- `toughness_series.csv`, `toughness_formats.csv`, `toughness_k.csv`   the curves (see `toughness.py`)
+- `toughness_series.csv`, `toughness_formats.csv`, `toughness_weeks.csv`   the curves and the week effects
+- `toughness_models.csv`, `toughness_k.csv`   the leave-one-week-out comparison of the three week
+  treatments, and the penalty grid of the one used (see `toughness.py`)
 - `h2h_bands.csv`, `h2h_opponents.csv`
-- `slate_index.csv`      the per-week index the scores were divided by
+- `slate_index.csv`      the per-week slate index: context beside the week effects, and the `index` comparator
 """
 
 from __future__ import annotations
@@ -103,7 +106,7 @@ def resolve_index(
     back to `previous` (the last run's `slate_index.csv`) and is reported as missing."""
     weeks = typed[["season", "week"]].dropna().drop_duplicates()
     if candidate == NO_INDEX:
-        return weeks.assign(index=1.0).astype({"season": int, "week": int})
+        return pd.DataFrame(columns=["season", "week", "index"])
     if supplied is not None:
         return supplied[["season", "week", "index"]]
     seasons = sorted({int(s) for s in weeks["season"]})
@@ -122,7 +125,8 @@ def resolve_index(
         except (OSError, httpx.HTTPError, ResultsFetchError, ValueError, KeyError) as e:
             detail = str(e).splitlines()[0] if str(e) else type(e).__name__
             warnings.append(
-                f"slate index for {season} unavailable ({detail}); its weeks are left out of the fit"
+                f"slate index for {season} unavailable ({detail}); those weeks are left out of the index "
+                "comparison only"
             )
             if previous is not None and len(previous) and set(previous.get("candidate", [])) == {candidate}:
                 kept = previous[previous["season"] == season][["season", "week", "index"]]
@@ -274,7 +278,7 @@ def run(
         warnings=result.warnings,
     )
     result.toughness = toughness.fit_toughness(result.typed, result.index, profile_inputs)
-    result.h2h_bands, result.h2h_opponents = toughness.h2h_report(result.typed, result.index)
+    result.h2h_bands, result.h2h_opponents = toughness.h2h_report(result.typed)
     return result
 
 
@@ -293,6 +297,8 @@ def write(result: Analysis) -> list[Path]:
         "lineup_errors.csv": result.lineup_errors,
         "toughness_series.csv": tough.series_table if tough else pd.DataFrame(),
         "toughness_formats.csv": tough.format_table if tough else pd.DataFrame(),
+        "toughness_weeks.csv": tough.weeks_table if tough else pd.DataFrame(),
+        "toughness_models.csv": tough.comparison if tough else pd.DataFrame(),
         "toughness_k.csv": tough.k_errors if tough else pd.DataFrame(),
         "h2h_bands.csv": result.h2h_bands,
         "h2h_opponents.csv": result.h2h_opponents,
@@ -353,13 +359,33 @@ def summary_lines(result: Analysis) -> list[str]:
         lines.append(f"{len(result.lineup_errors)} lineup(s) did not parse (lineup_errors.csv)")
     tough = result.toughness
     if tough is not None:
-        lines.append(f"toughness: k = {tough.k:g} ({tough.k_source}); left out: {tough.skipped}")
-        if len(tough.format_table):
-            for rec in tough.format_table.itertuples(index=False):
-                lines.append(
-                    f"  {rec.format}: {rec.n_entries} entries, expected cash line on an average slate "
-                    f"{rec.expected_cash_line:.1f}" + (f" ({rec.note})" if rec.note else "")
+        lines.append(
+            f"toughness: week treatment '{tough.mode}', k = {tough.k:g}, k_w = {tough.k_w:g} "
+            f"({tough.penalty_source}); left out: {tough.skipped}"
+        )
+        for rec in tough.comparison.itertuples(index=False):
+            lines.append(
+                f"  leave-one-week-out error, {rec.mode}: {rec.mae:.4f} "
+                f"(k={rec.k:g}, k_w={rec.k_w:g}; {rec.n_scored} entries)"
+            )
+        if len(tough.weeks_table):
+            weeks = tough.weeks_table[tough.weeks_table["group"] == "classic"]
+            if len(weeks) > 1:
+                line = (
+                    f"  week effects (Classic): sd {weeks['w'].std():.2f} logit "
+                    f"= {weeks['w_points'].std():.0f} points"
                 )
+                paired = weeks[["w", "slate_index"]].dropna()
+                if len(paired) > 2:
+                    line += (
+                        f"; correlation with the slate index {paired['w'].corr(paired['slate_index']):+.2f}"
+                    )
+                lines.append(line)
+        for rec in tough.format_table.itertuples(index=False):
+            lines.append(
+                f"  {rec.format}: {rec.n_entries} entries, expected cash line in an average week "
+                f"{rec.expected_cash_line:.1f}" + (f" ({rec.note})" if rec.note else "")
+            )
         ranked = tough.series_table.dropna(subset=["toughness"])
         ranked = ranked[ranked["n"] >= 5].sort_values("toughness", ascending=False)
         for label, sub in (("toughest", ranked.head(3)), ("softest", ranked.tail(3)[::-1])):

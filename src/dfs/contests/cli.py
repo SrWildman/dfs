@@ -46,8 +46,8 @@ def analyze(
     index_candidate: str = typer.Option(
         slate_index.SELECTED,
         "--slate-index",
-        help="Which slate-scoring index divides each week's scores: "
-        f"{', '.join(slate_index.CANDIDATES)}, or 'none' for raw points.",
+        help="Which slate-scoring index is shown beside each week's fitted effect, and is the 'index' "
+        f"comparator: {', '.join(slate_index.CANDIDATES)}, or 'none' to leave it out.",
     ),
     index_file: Path = typer.Option(
         None, "--slate-index-file", help="A season,week,index CSV to use instead of computing the index."

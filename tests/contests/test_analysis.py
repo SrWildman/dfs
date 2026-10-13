@@ -100,6 +100,8 @@ def test_write_produces_every_csv_and_nothing_else(tmp_path):
             "lineup_errors.csv",
             "toughness_series.csv",
             "toughness_formats.csv",
+            "toughness_weeks.csv",
+            "toughness_models.csv",
             "toughness_k.csv",
             "h2h_bands.csv",
             "h2h_opponents.csv",
@@ -145,9 +147,10 @@ def test_a_season_outside_the_backfill_is_fetched_through_the_given_loader(tmp_p
     assert not any("unavailable" in w for w in res.warnings)
 
 
-def test_slate_index_none_uses_raw_points_and_never_fetches(tmp_path):
+def test_slate_index_none_leaves_the_index_out_and_never_fetches(tmp_path):
     res = run(tmp_path, index_candidate="none")
-    assert set(res.index["index"]) == {1.0}
+    assert res.index.empty
+    assert "index" not in set(res.toughness.comparison["mode"])  # the comparator needs it
     assert not any("unavailable" in w for w in res.warnings)
 
 
@@ -206,8 +209,8 @@ def test_the_command_runs_writes_csvs_and_prints_a_summary(tmp_path):
     assert result.exit_code == 0, result.output
     assert (
         "formats:" in result.output
-        and "toughness: k =" in result.output
-        and "OK wrote 14 file(s)" in result.output
+        and "toughness: week treatment" in result.output
+        and "OK wrote 16 file(s)" in result.output
     )
     assert (out / "toughness_series.csv").exists() and (out / "field_stats.csv").exists()
 
