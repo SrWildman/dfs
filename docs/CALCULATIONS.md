@@ -1983,3 +1983,13 @@ the line chart stop at the last played week instead of drawing a flat line, so i
 the block is hidden and the chart plots hidden data. `dfs doctor` flags a division that has
 lost its guard (`empty-guards`, and `formula-ranges` for Results' `H2H %` rows);
 `dfs setup guard-empty-states` puts it back.
+
+## The Contests tab (`sheet_contests.py`, 2026-10-13)
+
+Per series, this season (`Season` from the contest date): **ROI** = (winnings including tickets − fees) / fees. **Cash rate** = the share
+of entries with `place <= places_paid` (any winnings when either is unknown). **Avg finish** = the mean of `place / entries` (head-to-head
+left blank). **Paid %** is the median `places_paid / entries` over the series' whole history. **Cash line (avg slate)** is the format
+curve's score at the series' paid share in an average week (`docs/CONTESTS.md`). **Latest cash line** is the score at the last paid place
+in the newest standings file. **Cash line vs same-format peers** = for each week with standings files for at least two series of the
+format, the series' mean cash line minus the mean cash line of the *other* series in that week; averaged over those weeks
+(`sheet_contests.peer_gaps`). Positive = it took a higher score to cash. No shrinkage: `Weeks behind it` is the evidence.

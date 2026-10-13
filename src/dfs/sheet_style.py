@@ -2629,6 +2629,9 @@ WEEK_ORDER = [
     # data/results/ by `dfs results update`. Nothing on it is typed. Last in the money band, after Season
     # and Results (Sam: "season, results, model").
     ("Model Check", "money"),
+    # Contest selection (Week 6): what each contest series has done, the real cash lines and how the fields
+    # build. Rebuilt by `dfs week close` / `dfs contests update`; nothing on it is typed.
+    ("Contests", "money"),
     ("SoSComb", "feed"),
     ("PlayerPoolRaw", "feed"),
 ]
@@ -2750,6 +2753,7 @@ TAB_NOTES: dict[str, str] = {
     "Model Check": (
         f"MODEL CHECK -- every projection scored against what happened; `dfs results update`. {MORE}"
     ),
+    "Contests": f"CONTESTS -- your contests, real cash lines, how fields build; `dfs week close`. {MORE}",
     "PlayerPoolRaw": f"PLAYERPOOLRAW -- the hub other tabs read from. Nothing here is typed. {MORE}",
 }
 

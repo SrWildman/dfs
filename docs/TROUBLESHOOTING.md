@@ -303,3 +303,20 @@ A lineup with an empty slot, or a name EdgeRaw does not have (typo, bye week), i
 `dfs sync` again. If every lineup is blank, check the sync output for `Lineup simulator not written` (a Sheets error) or
 `column(s) [...] not found` (run `dfs setup reorder-columns`). The cash line is the median of every typed
 `Cash Line` in Results this season; with none typed the sync says it used the 145 placeholder.
+
+---
+
+**`dfs week close` says a standings download is EMPTY, or the Contests tab has no cash lines for last week.**
+DraftKings only serves a contest's standings for about two weeks and then sends a 0-byte file, and a download that failed looks the
+same. An empty file is reported and left in Downloads; nothing can be rebuilt from it. Grab each contest's "export full standings" on
+Monday or Tuesday, then run `dfs contests update` (or the next `dfs week close`). A contest with no standings file still counts in
+the table's ROI, cash rate and finish; it just has no real cash line.
+
+**The Contests tab's `Cash line vs same-format peers` is blank for a series.**
+Not a fault. It needs a week where standings files exist for two or more series of that format (Double Ups, SE GPPs ...). `Weeks behind
+it` says how many weeks the number rests on.
+
+**`dfs week close` did not fill Results' `Cash Line`.**
+It only fills a **blank** cell, and only from the standings of `[contests] cash_line_series` (default `NFL GIANT $25 Double Up [Single
+Entry]`). A value you typed is kept; if the standings disagree by more than half a point both numbers are printed. A week with no
+standings file for that series stays blank.

@@ -28,7 +28,7 @@ This is what most weeks are -- **sections 1 to 7 below are the standard week**; 
 | 3 | research, pool, lineups | in the sheet (no command) |
 | 4 | lineups are built | `dfs export -o lineups.csv` |
 | 5 | gameday | `dfs sync --live`, then `dfs lineups late-swap` |
-| 6 | after the games | `dfs week close --csv history.csv` (reconciles Bankroll **and** scores the week into Model Check) |
+| 6 | after the games | `dfs week close` (reconciles Bankroll, keeps your DraftKings downloads and rebuilds Contests, **and** scores the week into Model Check) |
 
 Sections 8 (log ownership) and 9 (read Model Check) are optional extras. The full command list is in
 [COMMANDS.md](COMMANDS.md).
@@ -239,9 +239,16 @@ starters you meant to swap.
 
 **Tabs:** Bankroll, Results.
 
+Before you run it, in DraftKings: **My Contests > History > export** (the contest-entry history), and on each contest's results page
+**export full standings** for the contests you want to learn from. **DraftKings only serves a contest's standings for about two
+weeks, then sends an empty file**, so grab them on Monday or Tuesday; they cannot be backfilled.
+
 ```
-dfs week close --csv <exported-dk-contest-history.csv>
+dfs week close
 ```
+
+With no `--csv` it uses the newest history export in your Downloads folder (found by its header row, `[contests] downloads_dir` changes
+the folder) and says which file. `--csv <file>` still works.
 
 Exports your DK contest history, classifies Cash vs GPP results, and
 appends them to Bankroll -- never touching the summary figures or
@@ -251,6 +258,12 @@ from the same export, sorted into NFL weeks by each entry's own contest
 date -- a full-season export backfills every past week it has real data
 for in one pass, not just the current one. `Cash Line` and the team-
 colour columns stay yours to fill in by hand.
+
+**Then it learns from your contests** (`docs/CONTESTS.md`). It keeps a copy of the history export in `data/raw/dk_history/`, merges it
+into the durable log `data/contests/contest_log.csv`, moves new standings files out of Downloads into `data/raw/dk_standings/` (an
+empty file is reported and left), reads them (score profiles, how the fields build, the actual ownership into `data/ownership_log.csv`),
+fills a **blank** Results `Cash Line` from the GIANT $25 Double Up's standings (a value you typed is never changed) and rebuilds the
+**Contests** tab. It never fails the close. `dfs contests update` does just this part.
 
 **Then it scores the week's projections.** The close finishes by running `dfs results update`, which compares
 every projection with what actually happened and rebuilds the **Model Check** tab (section 9). nflverse posts

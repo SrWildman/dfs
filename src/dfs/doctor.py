@@ -228,6 +228,7 @@ def _expected_tabs(cfg: Config) -> set[str]:
     tabs.add(DKSALCLEAN_TAB)
     tabs.add(EDGE_FINDER_TAB)  # written by every sync; `dfs setup build-views` creates the empty state
     tabs.add(SUGGESTED_TAB)  # written by `dfs lineups suggest`; `dfs setup build-views` creates it empty
+    tabs.add(cfg.contests.tab)  # rebuilt by `dfs week close` / `dfs contests update`
     return tabs
 
 

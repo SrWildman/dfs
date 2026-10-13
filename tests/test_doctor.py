@@ -140,6 +140,7 @@ _ALL_GOOD_TABS = {
     "NameAlias": [],
     "Edge Finder": [],
     "Suggested": [],
+    "Contests": [],
     EXPOSURE_TAB: [],
 }
 

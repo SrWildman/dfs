@@ -944,6 +944,39 @@ table shows n; a row with n < 30 is "thin" and drawn in muted italic. Sits after
 every number are in `docs/CALCULATIONS.md`'s "The results loop and `Model Check`". Every metric header carries a
 cell note (hover the corner mark) with its plain-English definition (`sheet_column_notes.MODEL_CHECK_NOTES`).
 
+### Contests
+
+Season-level, read-only, **rebuilt from `data/contests/` by `dfs week close` and `dfs contests update`**; nothing is typed, and a
+whole-tab warning protection (`sheet_protection.FULLY_PROTECTED_TABS`) says so. It sits after Model Check
+(`sheet_style.WEEK_ORDER`); built by `sheet_contests.build_layout` / `write_contests` from the CSVs the contests engine writes
+(`docs/CONTESTS.md`). Five blocks, top to bottom:
+
+1. **Series you play, this season** -- one row per series in H2H, 50/50, Double Up, Multiplier, SE GPP and N-max GPP, by format.
+   `Fee`, `Field` (typical entrants), `Paid %`, `Played` (this season), `ROI` (winnings less fees over fees; freerolls are not here),
+   `Cash rate` (share that finished in a paid place), `Avg finish` (place / entries, lower is better; blank for head-to-head),
+   `Cash line (avg slate)` (the score at the series' paid share on the format's curve, an average week), `Latest cash line` (the real
+   one, from your newest standings file, with its week) and `Cash line vs same-format peers` (this series' real cash line minus the
+   other series of its format **in the same weeks**, averaged; above 0 = it took a higher score to cash = tougher) with `Weeks behind it`.
+   The engine's own series toughness is not shown as a number: with the data so far its leave-one-week-out check finds a series no
+   different from its format (`docs/CONTESTS.md`), so the within-week gap, a measured number, is shown instead.
+2. **Cash lines from your standings files** -- per contest and week: entrants, share paid, the cash line (score at the last paid
+   place), top 10 %, top 1 %, winner and median. Newest week first.
+3. **How the field builds** -- per format, averaged over the contests logged: for the field, the top 10 % and you: QB + 1 / + 2
+   catchers, bring-back, salary left, share leaving $1,000+, FLEX position, chalk (how many of the contest's five most-owned players a
+   lineup holds), DST with / against the QB, and the share of duplicate lineups.
+4. **Head to head** -- your win rate by score band, and your record against the 15 opponents you have met most (2 or more times), with
+   the one-line use: favour opponents you beat; skip the ones who beat you.
+5. **Left out of the ROI above** -- freerolls, Showdown, private and unrecognised contests: entries and net this season and overall,
+   and cash rate.
+
+Colours: ROI and nets diverge red / white / green about 0; cash rate and win rate go white to green; average finish is green when low;
+the cash-line gap is red above 0 (tougher) and green below. Every header carries a hover note (`sheet_column_notes.CONTESTS_NOTES`; a test
+fails if a header has none).
+
+`dfs week close` also fills Results' blank `Cash Line` from the standings of `[contests] cash_line_series` (default
+`NFL GIANT $25 Double Up [Single Entry]`, the series whose cash line you type; your typed values 105.98 and 153.06 match it). A typed
+value is never overwritten; when the standings disagree by more than half a point, both numbers are printed.
+
 ### Season
 
 Round 5, item 7d (2026-09-28). A year-at-a-glance rollup -- one pre-built

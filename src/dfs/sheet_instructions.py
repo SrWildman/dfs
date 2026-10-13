@@ -160,10 +160,12 @@ _WEEK_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Mon / Tue: close the week",
-        "Export your contest history from DraftKings and run: dfs week close --csv <file>. It "
-        "reconciles Cash "
-        "and GPP results into Bankroll and Season and scores the week's projections into Model Check. If "
-        "the stats are not posted yet it says so; run dfs results update a day later.",
+        "Export your contest history from DraftKings, and download each contest's standings (DraftKings only "
+        "keeps them about two weeks). Then run: dfs week close. It finds the newest history export in "
+        "Downloads (or pass --csv <file>), reconciles Cash and GPP results into Bankroll and Season, keeps "
+        "your downloads, fills a blank Cash Line in Results, rebuilds Contests and scores the week's "
+        "projections into Model Check. If the stats are not posted yet it says so; run dfs results update a "
+        "day later.",
     ),
 ]
 
@@ -332,6 +334,12 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Every projection scored against what happened, rebuilt by dfs results update. Each block opens with "
         "one bold sentence saying what the numbers show. Muted italic rows have too few players to say "
         "anything yet.",
+    ),
+    (
+        "Contests",
+        "Your contests by format with ROI and cash rate, the real cash line of each one from your standings "
+        "files, how the fields build their lineups and your head-to-head record. Rebuilt by dfs week "
+        "close; nothing is typed.",
     ),
     (
         "SoSComb",

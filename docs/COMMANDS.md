@@ -22,7 +22,7 @@ This is what most weeks look like. Everything below it is reference.
 | 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy build to Lineups drops one in). |
 | 4 | Lineups are built | `dfs export -o lineups.csv` | Validates your lineups and writes DraftKings' bulk-upload CSV. |
 | 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
-| 6 | After the games (nflverse posts stats a day or two late) | `dfs week close --csv history.csv` | Reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
+| 6 | After the games (nflverse posts stats a day or two late) | `dfs week close` | Reconciles Cash/GPP into Bankroll and Results from the newest contest-history export in Downloads (or `--csv <file>`), keeps your DraftKings downloads (history copy, standings files) and rebuilds the Contests tab, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
 
 Not sure what to run next? Run `dfs` on its own: it shows where you are in the week and the two or three commands that make sense right now.
 

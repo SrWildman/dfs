@@ -113,7 +113,7 @@ URL; check it before any write).
 | "build me lineups" | `dfs lineups suggest` (his pool must not be empty: if it is, say so and stop) | each build in one line (cash or GPP, stack, salary, Cash % / 190+ %), and that **Lineup Tools > Copy build to Lineups** puts one in |
 | "fix flex" | nothing to run: tell him to use **Lineup Tools > Fix FLEX order** on Lineups (a sheet script); `dfs export` also puts the FLEX right in the file it writes | which of the two did it |
 | "late swap" | `dfs lineups late-swap` (it covers every built lineup) | a summary per lineup: who is still swappable, the best change and its Cash % / GPP % effect, or "nothing beats it" |
-| "close the week" | `dfs week close --csv <file Sam names>` (ask for the file if he did not name one) | the Model Check verdict and the learned block, and the bankroll lines it reconciled |
+| "close the week" | `dfs week close` (it finds the newest history export in Downloads by its header and says which; pass `--csv <file>` if he names one) | the Model Check verdict and the learned block, the bankroll lines it reconciled, and what it kept and filled on the contest side (standings moved, empty downloads, Cash Line, the Contests tab) |
 | "how did we do" | read (do not write) Model Check: the opening verdict sentences and "What the model learned this week" | five lines: who leads the projection race by position, what CalPts learned, how the signals are running, whether the probabilities hold, the Week 8 checkpoint |
 
 Guardrails:

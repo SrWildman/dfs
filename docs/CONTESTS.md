@@ -241,22 +241,34 @@ Each is a one-line change if you disagree.
     treatment also uses `w = 0`, so it scores how well the curves predict a week not yet played.
 13. H2H bands use raw points.
 
-## What the local session must supply
+## How it is wired locally (Phase 1)
 
-- **Paths.** `--history` (repeatable, oldest first), `--standings <folder>`, `--out` (default
-  `data/contests/`, which is gitignored with the rest of `data/`).
-- **The players frame** for field stats: `Name`, `Team`, `Position`, `Opp` (or `Opponent`) and `Salary` - EdgeRaw
-  has exactly these (`derived.EDGE_COLUMNS`); pass that week's. `field.field_stats(standings, players, me=...)`
-  takes a DataFrame, `dfs contests analyze --players` a CSV of it. Without it, only chalk and duplicates are
-  computed.
-- **`week close`.** Not wired. The hook is one call after the bankroll sync, failing soft like `results
-  update`: `analysis.run([history_csv], CONTESTS_DIR, standings_dir=..., players=<EdgeRaw frame>)` then
-  `analysis.write(result)`. It needs a standings folder (a new `--standings-dir` option, or a fixed
-  `data/standings/`), which is yours to choose. Standings expire after ~2 weeks, so the hook should run in the
-  week the contests finish.
-- **The `Contests` tab** can read the CSVs; nothing here writes a sheet.
-- Run the engine on the real files once, read the `Other` list and the `class_disagreements.csv`, and add the
-  rules those show.
+`dfs week close` runs the contest step after the bankroll reconciliation (soft: a failure is printed and the close still
+succeeds); `dfs contests update [--csv] [--sheet-id] [--no-sheet]` is the same step alone. `contests_close.run_contests` does, in order:
+
+1. **History.** The export is the `--csv`, else the **newest file in `[contests] downloads_dir`** (default `~/Downloads`) whose **header
+   row** has the DraftKings history columns (`capture.find_history_export`; the name is ignored) and the run says which. A copy goes to
+   `data/raw/dk_history/` (`capture.keep_history_copy`: dated, never overwriting a different file of the same name, skipped when an
+   identical one is already there). `bankroll sync` also keeps the copy and merges the log.
+2. **Standings.** `capture.capture_standings` **moves** every new `contest-standings-<id>.csv` (or zip holding one, any name) from Downloads to
+   `data/raw/dk_standings/`. A contest already kept stays in Downloads ("already kept"); a 0-byte file is reported as a failed or
+   expired download and left. The reminder is printed each time: standings expire after about two weeks.
+3. **The engine** over the log and every kept file (`analysis.run` + `analysis.write`, outputs in `data/contests/`; the default location, not
+   `data/contest_log.csv`). Field stats need each contest's week of players: `week_frames` builds them from the **last DraftKings salary
+   snapshot in `data/raw/draftkings/` before that week's Sunday 1:00 pm ET lock** whose games are on that Sunday, main slate only (Sunday
+   kickoffs 12:00-17:59 ET), with the opponent from `Game Info`. On the first real run all 20 standings files resolved every lineup
+   player (0 unmatched), including Week 2's Hundo.
+4. **Ownership.** Each kept standings file's `%Drafted` is appended to `data/ownership_log.csv` (replacing that contest's rows) when the
+   contest is not logged yet or sits under a different week. Report-only: nothing reads it to change `Own%` or `Lev`.
+5. **Cash Line** (`contests_cash_line`, live sheet only): a **blank** Results `Cash Line` for a week is filled from the standings cash line of
+   `[contests] cash_line_series` (default the GIANT $25 Double Up, which matches the values Sam typed for Weeks 4 and 5); a typed value is
+   never overwritten, and a typed value more than 0.5 off the standings is printed beside it.
+6. **The `Contests` tab** (`sheet_contests`, `docs/SHEET_REFERENCE.md`).
+
+Toughness on the tab: the first real run showed the engine's leave-one-week-out choice of `k` and `k_w` shrinks **every** series and week effect
+to nothing (`k = 1e9`, `k_w = inf`: a held-out week has `w = 0`, so week effects cannot help that error, and series offsets are small against
+the noise), so the engine's per-series toughness is +0.0 for all. The tab therefore shows the real within-week gap in cash lines between series of
+one format (`sheet_contests.peer_gaps`) and says the engine's number is not separable yet.
 
 Out of scope and untouched: Sheets, real DraftKings files, any DraftKings call, `src/dfs/model/`, `research/`,
 `sim/` (read, not edited), and the Phase 2 "best contest per lineup" EV (after Week 8, locally).

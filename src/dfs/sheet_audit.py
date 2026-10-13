@@ -145,6 +145,7 @@ CLIPPING_ONLY_TABS = [
     "Board",
     "Suggested",
     "Model Check",
+    "Contests",
     "Bankroll",
     "Season",
     "Instructions",

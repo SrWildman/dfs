@@ -59,6 +59,7 @@ LEFT_OUT_FORMATS = (
     series_mod.OTHER,
 )
 FIELD_GROUPS = (("all", "field"), ("top10", "top 10%"), ("me", "you"))
+TEXT_HEADERS = {"Series", "Format", "Latest cash line", "Your score", "Opponent (2+ meetings)"}
 OPPONENTS_SHOWN = 15  # the most-met opponents
 TOUGHNESS_NOTE = (
     "Series toughness is not separable yet: the engine's own leave-one-week-out check finds a series no "
@@ -111,6 +112,7 @@ class Layout:
     percent_cells: list[str] = field(default_factory=list)
     number_cells: list[str] = field(default_factory=list)  # one decimal
     count_cells: list[str] = field(default_factory=list)
+    money_cells: list[str] = field(default_factory=list)  # dollars
     good_high: list[str] = field(default_factory=list)  # white -> green with the value
     good_low: list[str] = field(default_factory=list)  # green for low, e.g. a finish percentile
     tough_gap: list[str] = field(default_factory=list)  # red above 0 (tougher), green below (easier)
@@ -162,13 +164,6 @@ class _Builder:
 
 
 # ---- numbers --------------------------------------------------------------------------------------
-
-
-def _money(value: float) -> str:
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return ""
-    text = f"{value:,.2f}".rstrip("0").rstrip(".")
-    return f"${text}"
 
 
 def _nan() -> float:
@@ -379,7 +374,7 @@ def build_layout(tables: Tables, season: int) -> Layout:
                 [
                     rec.series,
                     rec.format,
-                    _money(rec.fee),
+                    rec.fee,
                     rec.field,
                     rec.paid,
                     rec.played,
@@ -394,6 +389,7 @@ def build_layout(tables: Tables, season: int) -> Layout:
             )
         last = b.next_row - 1
         lay.count_cells += [_range("D", first, last), _range("F", first, last), _range("M", first, last)]
+        lay.money_cells.append(_range("C", first, last))
         lay.percent_cells += [_range(c, first, last) for c in "EGHI"]
         lay.number_cells += [_range("J", first, last), _range("L", first, last)]
         lay.diff_good.append(_range("G", first, last))
@@ -529,7 +525,7 @@ def build_layout(tables: Tables, season: int) -> Layout:
                 b.add([rec.opponent, rec.meetings, rec.wins, rec.losses, rec.ties, rec.net])
             last = b.next_row - 1
             lay.count_cells += [_range(c, first, last) for c in "BCDE"]
-            lay.number_cells.append(_range("F", first, last))
+            lay.money_cells.append(_range("F", first, last))
             lay.diff_good.append(_range("F", first, last))
         b.note(H2H_USE)
 
@@ -556,7 +552,7 @@ def build_layout(tables: Tables, season: int) -> Layout:
             )
         last = b.next_row - 1
         lay.count_cells += [_range("B", first, last), _range("D", first, last)]
-        lay.number_cells += [_range("C", first, last), _range("E", first, last)]
+        lay.money_cells += [_range("C", first, last), _range("E", first, last)]
         lay.diff_good += [_range("C", first, last), _range("E", first, last)]
         lay.percent_cells.append(_range("F", first, last))
     return lay
@@ -608,7 +604,10 @@ def write_contests(client: SheetsClient, layout: Layout, tab: str = CONTESTS_TAB
             f"A{row}:{LAST_COLUMN}{row}",
             {**_HEADER_FMT, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"},
         )
-        client.format_range(tab, f"B{row}:{LAST_COLUMN}{row}", {"horizontalAlignment": "RIGHT"})
+        client.format_range(tab, f"A{row}:{LAST_COLUMN}{row}", {"horizontalAlignment": "RIGHT"})
+        for index, name in enumerate(layout.rows[row - 1]):
+            if str(name).strip() in TEXT_HEADERS:
+                client.format_range(tab, f"{chr(ord('A') + index)}{row}", {"horizontalAlignment": "LEFT"})
     for row in layout.verdict_rows:
         client.format_range(tab, f"A{row}", {"textFormat": {"bold": True, "fontSize": 10}})
     for row in layout.note_rows:
@@ -621,6 +620,10 @@ def write_contests(client: SheetsClient, layout: Layout, tab: str = CONTESTS_TAB
         client.format_range(tab, rng, {**_num("#,##0"), "horizontalAlignment": "RIGHT"})
     for rng in layout.number_cells:
         client.format_range(tab, rng, {**_num("0.0"), "horizontalAlignment": "RIGHT"})
+    for rng in layout.money_cells:
+        client.format_range(
+            tab, rng, {**_num('"$"#,##0.00;[Red]-"$"#,##0.00'), "horizontalAlignment": "RIGHT"}
+        )
     for rng in layout.good_high:
         client.add_color_scale(tab, rng, min_color=WHITE, mid_color=WHITE, max_color=GRAD_MAX)
     for rng in layout.good_low:

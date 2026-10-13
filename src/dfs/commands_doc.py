@@ -69,9 +69,11 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
     (
         "6",
         "After the games (nflverse posts stats a day or two late)",
-        "dfs week close --csv history.csv",
-        "Reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into the Model "
-        "Check tab. `dfs results update` does just the scoring, any time.",
+        "dfs week close",
+        "Reconciles Cash/GPP into Bankroll and Results from the newest contest-history export in "
+        "Downloads (or `--csv <file>`), keeps your DraftKings downloads (history copy, standings files) and "
+        "rebuilds the Contests tab, then scores the week's projections into the Model Check tab. "
+        "`dfs results update` does just the scoring, any time.",
     ),
 ]
 

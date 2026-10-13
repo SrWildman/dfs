@@ -89,8 +89,8 @@ dfs export -o lineups.csv         # 4. validate + export DK's bulk-upload format
 dfs sync --live                   # 5. gameday: fast-moving sources only, prints what changed (also refreshes
                                   #    the Edge Finder tab: CalPts, Hit3x%/Boom%, injury beneficiaries)
 dfs lineups late-swap             #    ...and what to swap them for (best re-fill, 2-for-2, 1-for-1)
-dfs week close --csv history.csv  # 6. after the games: reconcile Cash/GPP into Bankroll AND score the
-                                  #    week's projections into the Model Check tab
+dfs week close                    # 6. after the games: reconcile Cash/GPP into Bankroll, keep your DraftKings
+                                  #    downloads (Contests tab, Cash Line) AND score the week into Model Check
 ```
 
 Everything else -- the other commands, one-time sheet setup, repairs -- is **reference**, for when you
@@ -117,7 +117,8 @@ are listed here so they are findable, not because you need to read them. Run `df
 | `dfs export -o <file>` | your lineups are built and paired to DK entries, ready to upload. |
 | `dfs lineups suggest` | building lineups: complete builds from your pool on the Suggested tab (3 cash, 5 GPP with a stack; `--cash N`, `--gpp N`, `--no-write`). Copy one in with Lineup Tools > Copy build to Lineups. |
 | `dfs lineups late-swap` | gameday: which rostered players are still swappable, and the best swaps for them within the salary cap, with each swap's change in P(cash) / P(GPP) (`--goal cash|gpp`, `--metric CalPts|ProjPts|AggPts`, default `[projection] default` = CalPts, `--all-players`). |
-| `dfs week close --csv <file>` | the week is over: reconciles Cash/GPP into Bankroll and Results, then scores the week's projections into `Model Check`. |
+| `dfs week close` | the week is over: reconciles Cash/GPP into Bankroll and Results (newest history export in Downloads, or `--csv <file>`), keeps your DraftKings history and standings downloads, fills a blank Cash Line, rebuilds `Contests`, then scores the week's projections into `Model Check`. |
+| `dfs contests update` | just the contest part of the close: keep the downloads, learn from the standings, rebuild `Contests` (`--sheet-id`, `--no-sheet`). |
 
 Also handy most weeks:
 

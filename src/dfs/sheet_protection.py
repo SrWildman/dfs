@@ -29,6 +29,7 @@ protection for the same reason.
 from __future__ import annotations
 
 from dfs import edge_finder_tab as eft
+from dfs.sheet_contests import CONTESTS_TAB
 from dfs.sheet_links import PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_control import control_cells
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
@@ -43,6 +44,7 @@ FULLY_PROTECTED_TABS = [
     "Slate Grid",
     "Movement",
     SUGGESTED_TAB,  # written by `dfs lineups suggest`; Lineup Tools > Copy build to Lineups only reads it
+    CONTESTS_TAB,  # rebuilt by `dfs week close` / `dfs contests update`; nothing on it is typed
 ]
 # Deliberately NOT protected (Sam, 2026-10-09): opening or closing a row group counts as an edit of
 # the rows it hides, so whole-tab protection showed a "Heads up" dialog on every fold. Their safety is
