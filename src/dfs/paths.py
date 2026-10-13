@@ -27,6 +27,9 @@ MANIFEST_FILE = DATA_DIR / "manifest.json"
 # a synced source's "current" snapshot is), so it lives outside
 # RAW_DIR/CURRENT_DIR's own "one source, one current copy" model.
 OWNERSHIP_LOG_FILE = DATA_DIR / "ownership_log.csv"
+# The contests engine's default output directory (`dfs contests analyze`): the durable contest-entry log
+# and the CSVs derived from it.
+CONTESTS_DIR = DATA_DIR / "contests"
 
 
 def credentials_path(filename: str) -> Path:

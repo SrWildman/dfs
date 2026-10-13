@@ -1,0 +1,27 @@
+﻿Rank,EntryId,EntryName,TimeRemaining,Points,Lineup,,Player,Roster Position,%Drafted,FPTS
+1,9000000101,alpha_fox,0,208.66,DST Jets  FLEX Jaylen Warren QB Jordan Love RB Josh Jacobs RB D'Andre Swift TE Tucker Kraft WR Christian Watson WR Matthew Golden WR DJ Moore,,Christian Watson,WR,70.00%,27.2
+1,9000000102,bravo_owl,0,208.66,DST Jets  FLEX Jaylen Warren QB Jordan Love RB Josh Jacobs RB D'Andre Swift TE Tucker Kraft WR Christian Watson WR Matthew Golden WR DJ Moore,,D'Andre Swift,RB,70.00%,22.1
+3,9000000103,charlie_elk,0,195.00,DST Bears  FLEX Amon-Ra St. Brown QB Jordan Love RB D'Andre Swift RB Jaylen Warren TE Sam LaPorta WR Christian Watson WR Rome Odunze WR Michael Wilson,,DJ Moore,WR,60.00%,13.6
+4,9000000104,delta_hawk,0,190.50,DST Packers  FLEX Jaylen Warren QB Caleb Williams RB D'Andre Swift RB Braelon Allen TE Cole Kmet WR DJ Moore WR Rome Odunze WR Michael Wilson,,Josh Jacobs,RB,60.00%,18.7
+5,9000000105,echo_wolf,0,185.00,DST Jets  FLEX D'Andre Swift QB Jared Goff RB Braelon Allen RB Josh Jacobs TE Sam LaPorta WR Amon-Ra St. Brown WR Matthew Golden WR Christian Watson,,Jets,DST,50.00%,6.8
+6,9000000106,test_me (1/2),0,170.00,DST Packers  FLEX D'Andre Swift QB Jordan Love RB Josh Jacobs RB Jaylen Warren TE Tucker Kraft WR Christian Watson WR Matthew Golden WR Michael Wilson,,Jordan Love,QB,50.00%,18.7
+7,9000000107,foxtrot_bat,0,165.00,DST Jets  FLEX Rome Odunze QB Caleb Williams RB D'Andre Swift RB Braelon Allen TE Sam LaPorta WR DJ Moore WR Michael Wilson WR Wan'Dale Robinson,,Michael Wilson,WR,50.00%,23.8
+8,9000000108,golf_yak,0,150.00,DST Bears  FLEX Tucker Kraft QB Jared Goff RB Jaylen Warren RB Braelon Allen TE Cole Kmet WR Michael Wilson WR Wan'Dale Robinson WR Christian Watson,,Braelon Allen,RB,40.00%,22.1
+9,9000000109,test_me (2/2),0,140.00,DST Jets  FLEX Matthew Golden QB Jordan Love RB Josh Jacobs RB D'Andre Swift TE Tucker Kraft WR Christian Watson WR DJ Moore WR Rome Odunze,,Jaylen Warren,FLEX,40.00%,22.1
+10,9000000110,hotel_ram,0,120.00,DST Packers  FLEX Jaylen Warren QB Caleb Williams RB D'Andre Swift RB Josh Jacobs TE Cole Kmet WR DJ Moore WR Rome Odunze WR Amon-Ra St. Brown,,Matthew Golden,WR,40.00%,23.8
+,,,,,,,Rome Odunze,WR,40.00%,18.7
+,,,,,,,Tucker Kraft,TE,40.00%,20.4
+,,,,,,,Caleb Williams,QB,30.00%,23.8
+,,,,,,,Cole Kmet,TE,30.00%,15.3
+,,,,,,,Jaylen Warren,RB,30.00%,22.1
+,,,,,,,Packers,DST,30.00%,11.9
+,,,,,,,Sam LaPorta,TE,30.00%,18.7
+,,,,,,,Amon-Ra St. Brown,WR,20.00%,28.9
+,,,,,,,Bears,DST,20.00%,8.5
+,,,,,,,D'Andre Swift,FLEX,20.00%,22.1
+,,,,,,,Jared Goff,QB,20.00%,17.0
+,,,,,,,Wan'Dale Robinson,WR,20.00%,28.9
+,,,,,,,Amon-Ra St. Brown,FLEX,10.00%,28.9
+,,,,,,,Matthew Golden,FLEX,10.00%,23.8
+,,,,,,,Rome Odunze,FLEX,10.00%,18.7
+,,,,,,,Tucker Kraft,FLEX,10.00%,20.4
