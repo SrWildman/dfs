@@ -123,3 +123,15 @@ default = "CalPts"
 # shrinkage as TFFB, Sleeper and FantasyPros. A name with no column in the scored table yet is never active.
 shadow_sources = ["EspnPts", "PropPts"]
 shadow_min_weeks = 3
+
+# Contest selection (dfs week close): where to find the two files you download from DraftKings by hand -- the
+# contest-entry history export and the per-contest "export full standings" files -- and which double-up's
+# standings fill Results' blank Cash Line (a value you typed is never overwritten).
+[contests]
+downloads_dir = "~/Downloads"
+cash_line_series = "NFL GIANT $25 Double Up [Single Entry]"
+
+# The Odds API (the-odds-api.com), for player props. Put your own key here; config.toml is gitignored and the key is
+# never printed or committed.
+[odds_api]
+key = "PASTE-YOUR-KEY-HERE"

@@ -166,6 +166,31 @@ class ProjectionConfig(BaseModel):
     shadow_min_weeks: int = Field(SHADOW_MIN_WEEKS_DEFAULT, ge=1)
 
 
+class OddsApiConfig(BaseModel):
+    """`[odds_api]`: Sam's key for the-odds-api.com (player props). The key lives only in config.toml
+    (gitignored) or the environment and is never printed or committed. The pull itself is built in the sources
+    round; this section is here so a config that already holds the key still loads."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str | None = None
+
+
+# "The" double-up whose cash line Sam types into Results each week (his typed values match its standings).
+CASH_LINE_SERIES_DEFAULT = "NFL GIANT $25 Double Up [Single Entry]"
+
+
+class ContestsConfig(BaseModel):
+    """`[contests]`: where `dfs week close` looks for the two DraftKings downloads, and which double-up's
+    standings fill Results' blank `Cash Line`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    downloads_dir: str = "~/Downloads"
+    cash_line_series: str = CASH_LINE_SERIES_DEFAULT
+    tab: str = "Contests"
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -177,6 +202,8 @@ class Config(BaseModel):
     season: SeasonConfig = SeasonConfig()
     sim: SimConfig = SimConfig()
     projection: ProjectionConfig = ProjectionConfig()
+    contests: ContestsConfig = ContestsConfig()
+    odds_api: OddsApiConfig = OddsApiConfig()
 
 
 def _missing_config_message() -> str:

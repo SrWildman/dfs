@@ -317,7 +317,7 @@ def test_every_group_in_the_cli_prompts_for_missing_parameters():
 
 
 def test_without_a_terminal_a_missing_option_errors_exactly_as_before():
-    result = CliRunner().invoke(app, ["week", "close"])
+    result = CliRunner().invoke(app, ["bankroll", "backfill-keys"])
     assert result.exit_code != 0 and "Missing option" in result.output
 
 
@@ -332,7 +332,7 @@ def test_at_a_terminal_a_missing_option_is_asked_for_then_the_command_runs(monke
         raise SystemExit(0)
 
     monkeypatch.setattr(cli, "_load_config_or_exit", stop_here)
-    result = CliRunner().invoke(app, ["bankroll", "sync"], input="/tmp/my history.csv\n")
+    result = CliRunner().invoke(app, ["bankroll", "backfill-keys"], input="/tmp/my history.csv\n")
     assert "DraftKings contest-history CSV" in result.output  # the question was asked
     assert "Missing option" not in result.output
     assert reached.get("config"), "the command body ran after the answer was supplied"
@@ -340,7 +340,7 @@ def test_at_a_terminal_a_missing_option_is_asked_for_then_the_command_runs(monke
 
 def test_a_blank_answer_cancels_and_shows_the_usual_error(monkeypatch):
     monkeypatch.setattr(prompt_missing, "interactive", lambda: True)
-    result = CliRunner().invoke(app, ["week", "close"], input="\n")
+    result = CliRunner().invoke(app, ["bankroll", "backfill-keys"], input="\n")
     assert result.exit_code != 0 and "Missing option" in result.output
 
 

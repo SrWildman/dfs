@@ -1,5 +1,5 @@
-"""`dfs contests ...` -- hidden while the engine is unfinished (the repo's convention for that: `hidden=True`,
-like `dfs model`; it is not in `docs/COMMANDS.md` or the launcher until it is wired into `week close`)."""
+"""`dfs contests ...`: `update` is what `dfs week close` runs for the contest side of the week; `analyze` is
+the engine on its own (files only, no sheet)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from dfs.prompt_missing import PromptingGroup
 contests_app = typer.Typer(
     help="Learn which contests suit which lineups, and how your fields build theirs.",
     cls=PromptingGroup,
-    hidden=True,
 )
 console = Console()
 
@@ -92,3 +91,52 @@ def analyze(
     for line in analysis.summary_lines(result):
         console.print(escape(line))
     console.print(f"[green]OK[/green] wrote {len(written)} file(s) under {escape(str(out))}")
+
+
+@contests_app.command("update")
+def update(
+    csv: Path = typer.Option(
+        None,
+        "--csv",
+        help="A DraftKings contest-history export. Left out, the newest one in your Downloads folder "
+        "([contests] downloads_dir) is used, found by its header row.",
+    ),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Write the Contests tab to this sheet instead of config.toml's (the template first). Results' "
+        "Cash Line is only ever filled on config.toml's own sheet.",
+    ),
+    no_sheet: bool = typer.Option(
+        False, "--no-sheet", help="Keep the files and run the engine; touch no sheet."
+    ),
+) -> None:
+    """The contest side of `dfs week close`, on its own: keeps the history export and moves new standings
+    files out of Downloads (DraftKings only serves standings for about two weeks), reads them, logs their
+    ownership, fills Results' blank Cash Line from the configured double-up, and rebuilds the Contests tab.
+    Never contacts DraftKings."""
+    from dfs import contests_close as weekly
+    from dfs.config import ConfigError, load_config
+
+    try:
+        cfg = load_config()
+    except ConfigError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    client = None
+    if not no_sheet:
+        try:
+            client, title, url = weekly.open_sheet(cfg, sheet_id)
+        except weekly.SheetsError as e:
+            console.print(f"[red]Sheets error:[/red] {escape(str(e))}")
+            raise typer.Exit(code=1) from e
+        console.print(f"Sheet: [bold]{escape(title)}[/bold]\n{url}\n")
+    report = weekly.run_contests(
+        cfg,
+        csv,
+        client=client,
+        fill_cash_line=sheet_id is None,
+        progress=lambda line: console.print(escape(line)),
+    )
+    if report.history_used is None:
+        raise typer.Exit(code=1)

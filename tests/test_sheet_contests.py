@@ -1,0 +1,184 @@
+"""Contests tab: the tables the engine writes, the pure layout, then the writer against a recording fake."""
+
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from dfs import sheet_contests as sc
+from dfs.contests import analysis
+
+FIXTURES = Path(__file__).parent / "contests" / "fixtures"
+SEASON = 2025
+
+
+@pytest.fixture(scope="module")
+def tables(tmp_path_factory):
+    out = tmp_path_factory.mktemp("contests")
+    result = analysis.run(
+        [FIXTURES / "history_export.csv"],
+        out,
+        standings_dir=FIXTURES / "standings",
+        players=FIXTURES / "players_week.csv",
+        me="test_me",
+        fetch_season=None,
+        index_candidate="none",
+    )
+    analysis.write(result)
+    return sc.load_tables(out)
+
+
+def _text(layout):
+    return [str(c) for row in layout.rows for c in row if c != ""]
+
+
+def test_every_row_is_padded_to_the_tab_width_and_the_last_column_matches():
+    layout = sc.build_layout(sc.Tables(*[pd.DataFrame()] * 6), SEASON)
+    assert all(len(row) == sc.COLUMN_COUNT for row in layout.rows)
+    assert sc.LAST_COLUMN == chr(ord("A") + sc.COLUMN_COUNT - 1)
+
+
+def test_an_empty_log_still_builds_every_section_with_a_plain_sentence():
+    layout = sc.build_layout(sc.Tables(*[pd.DataFrame()] * 6), SEASON)
+    titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
+    assert [t.split()[0] for t in titles] == ["SERIES", "CASH", "HOW", "HEAD", "LEFT"]
+    assert "No Classic entries logged this season yet." in _text(layout)
+
+
+def test_sections_come_in_the_decided_order(tables):
+    layout = sc.build_layout(tables, SEASON)
+    titles = [layout.rows[r - 1][0] for r in layout.section_rows]
+    assert [t.split("  ")[0] for t in titles] == [
+        "SERIES YOU PLAY, 2025",
+        "CASH LINES FROM YOUR STANDINGS FILES",
+        "HOW THE FIELD BUILDS",
+        "HEAD TO HEAD",
+        "LEFT OUT OF THE ROI ABOVE",
+    ]
+    assert layout.rows[0][0] == "Contests"
+
+
+def test_the_series_table_has_one_row_per_series_with_roi_and_cash_rate(tables):
+    series = sc.series_rows(tables, SEASON).set_index("series")
+    fair = series.loc["NFL $8K Fair Catch [Single Entry]"]
+    mine = tables.typed[
+        (tables.typed["series"] == "NFL $8K Fair Catch [Single Entry]") & (tables.typed["season"] == SEASON)
+    ]
+    assert fair["format"] == "SE GPP" and fair["played"] == len(mine) >= 1
+    assert fair["roi"] == pytest.approx((mine["winnings"].sum() - mine["fee"].sum()) / mine["fee"].sum())
+    assert 0.0 <= fair["cash_rate"] <= 1.0
+    assert not series["format"].isin(["Freeroll", "Showdown", "Private", "Other"]).any()
+
+
+def test_a_series_toughness_note_explains_why_gaps_replace_the_engines_number(tables):
+    text = " ".join(_text(sc.build_layout(tables, SEASON)))
+    assert "not separable yet" in text and "same weeks" in text
+
+
+def test_the_cash_line_gap_is_against_the_other_series_of_the_same_format_in_the_same_week():
+    profiles = pd.DataFrame(
+        [
+            {
+                "contest_id": "1",
+                "season": 2026,
+                "week": 5,
+                "format": "Double Up",
+                "series": "A",
+                "kind": "Classic",
+                "cash_line": 153.0,
+            },
+            {
+                "contest_id": "2",
+                "season": 2026,
+                "week": 5,
+                "format": "Double Up",
+                "series": "B",
+                "kind": "Classic",
+                "cash_line": 147.0,
+            },
+            {
+                "contest_id": "3",
+                "season": 2026,
+                "week": 5,
+                "format": "Double Up",
+                "series": "C",
+                "kind": "Classic",
+                "cash_line": 141.0,
+            },
+            {
+                "contest_id": "4",
+                "season": 2026,
+                "week": 4,
+                "format": "Double Up",
+                "series": "A",
+                "kind": "Classic",
+                "cash_line": 106.0,
+            },
+            {
+                "contest_id": "5",
+                "season": 2026,
+                "week": 4,
+                "format": "SE GPP",
+                "series": "S",
+                "kind": "Classic",
+                "cash_line": 130.0,
+            },
+        ]
+    )
+    gaps = sc.peer_gaps(profiles)
+    assert gaps[("Double Up", "A")] == (
+        pytest.approx(9.0),
+        1,
+    )  # 153 against the mean of 147 and 141; week 4 has no peer
+    assert gaps[("Double Up", "C")][0] == pytest.approx(-9.0)
+    assert ("SE GPP", "S") not in gaps  # alone in its format that week
+    assert sc.latest_cash_lines(profiles)[("Double Up", "A")] == "153.0 (Wk 5)"
+
+
+def test_how_the_field_builds_has_field_top_ten_and_you_rows_per_format(tables):
+    fields = sc.field_by_format(tables)
+    assert fields, "the fixtures hold a Classic contest with a players frame"
+    for frame in fields.values():
+        assert list(frame["label"]) == ["field", "top 10%", "you"][: len(frame)]
+
+
+def test_head_to_head_bands_and_the_how_to_line_are_on_the_tab(tables):
+    text = " ".join(_text(sc.build_layout(tables, SEASON)))
+    assert "Win rate" in text and sc.H2H_USE in text
+
+
+def test_no_cell_can_be_read_by_sheets_as_a_formula(tables):
+    cells = [c for row in sc.build_layout(tables, SEASON).rows for c in row if isinstance(c, str)]
+    assert not [c for c in cells if c.startswith(("=", "+", "@"))]
+    assert sc._clean("=SUM(A1)") == "'=SUM(A1)"
+
+
+def test_every_header_on_the_tab_has_a_note(tables):
+    from dfs.sheet_column_notes import CONTESTS_NOTES
+
+    layout = sc.build_layout(tables, SEASON)
+    headers = {str(c).strip() for r in layout.header_rows for c in layout.rows[r - 1] if c != ""}
+    assert not [h for h in headers if h not in CONTESTS_NOTES], "a header with no hover note"
+
+
+class _Recorder:
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        def record(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+
+        return record
+
+
+def test_the_writer_resets_the_tab_then_styles_it_and_sets_header_notes(tables):
+    layout = sc.build_layout(tables, SEASON)
+    client = _Recorder()
+    summary = sc.write_contests(client, layout)
+    names = [c[0] for c in client.calls]
+    assert names[0] == "write_tab" and client.calls[0][1][0] == sc.CONTESTS_TAB
+    reset = next(c for c in client.calls if c[0] == "format_range")
+    assert reset[1][2]["numberFormat"] is None and reset[1][2]["horizontalAlignment"] is None
+    assert "clear_notes" in names and "clear_conditional_formats" in names and "set_row_notes" in names
+    assert "built" in summary

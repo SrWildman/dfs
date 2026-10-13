@@ -316,6 +316,66 @@ CORE_NOTES = {
     ),
 }
 
+CONTESTS_NOTES = {
+    "Series": "The contest's name, without the entry counter, the Showdown matchup or the H2H opponent.",
+    "Format": "The kind of contest: H2H, 50/50, Double Up, Multiplier (Triple Up ...), SE GPP, N-max GPP.",
+    "Fee": "The entry fee (the middle one, if it changed).",
+    "Field": "The typical number of entries in this contest.",
+    "Paid %": "The share of the field that gets paid (places paid / entries).",
+    "Played": "How many times you entered it this season.",
+    "ROI": "Winnings minus fees, divided by fees, this season. Freerolls are not in this table.",
+    "Cash rate": "The share of this season's entries that finished in a paid place.",
+    "Avg finish": (
+        "Your average finish as a share of the field (place / entries), this season. Lower is better: "
+        "10% means the top tenth. Blank for head-to-head."
+    ),
+    "Cash line (avg slate)": (
+        "The score that finishes at this contest's paid share on an average slate, from the format's "
+        "curve. Cash lines move a lot with how the slate scored, so read it as a typical week, not this one."
+    ),
+    "Latest cash line": "The last paid place's score in your most recent standings file for this contest.",
+    "Cash line vs same-format peers": (
+        "This contest's real cash line minus the average cash line of the other contests of its format in "
+        "the same weeks, averaged over those weeks. Above 0 means it took a higher score to cash (tougher); "
+        "below "
+        "0, easier. Blank until a week has standings files for two contests of the format."
+    ),
+    "Weeks behind it": "How many weeks of standings files the gap rests on. Few weeks, loose number.",
+    "Week": "The NFL week the contest was played.",
+    "Entrants": "How many entries the contest had.",
+    "Cash line": "The score of the last paid place.",
+    "Top 10%": "The score that just makes the top tenth of the field.",
+    "Top 1%": "The score that just makes the top one percent.",
+    "Winner": "The winning score.",
+    "Median": "The middle score of the field.",
+    "Contests": "How many contests' standings files the row averages.",
+    "QB + 1 catcher": "Share of lineups with the QB and at least one WR or TE from his team.",
+    "QB + 2 catchers": "Share of lineups with the QB and at least two WR or TE from his team.",
+    "Bring-back": "Share of lineups with a player (not a DST) from the QB's opponent.",
+    "Salary left": "Average salary left unspent out of $50,000.",
+    "Left $1,000+": "Share of lineups that leave $1,000 or more unspent.",
+    "FLEX RB": "Share of lineups whose FLEX is a running back.",
+    "FLEX WR": "Share of lineups whose FLEX is a wide receiver.",
+    "FLEX TE": "Share of lineups whose FLEX is a tight end.",
+    "Chalk (of 5)": "How many of the contest's five most-owned players the average lineup holds.",
+    "DST with QB": "Share of lineups whose defense is the QB's own team.",
+    "DST vs QB": "Share of lineups whose defense faces the QB's team.",
+    "Duplicates": "Share of lineups whose exact nine players appear in two or more entries of the contest.",
+    "Your score": "The band your lineup's score fell in.",
+    "Entries": "How many head-to-head entries fell in the band.",
+    "Wins": "Head-to-head wins.",
+    "Losses": "Head-to-head losses.",
+    "Ties": "Ties (the fee is refunded; counted as half a win in the rate).",
+    "Win rate": "Wins plus half the ties, divided by entries.",
+    "Opponent (2+ meetings)": "An opponent you have met at least twice.",
+    "Meetings": "How many times you have played them.",
+    "Net": "Winnings minus fees against them, in dollars.",
+    "Entries this season": "How many entries this season.",
+    "Net this season": "Winnings minus fees this season, in dollars.",
+    "Entries, all seasons": "How many entries in the whole log.",
+    "Net, all seasons": "Winnings minus fees over the whole log, in dollars.",
+}
+
 MODEL_CHECK_NOTES = {
     "Salary tier": "The salary band a bias is measured in (CalPts corrects per position and band).",
     "Bias now": (

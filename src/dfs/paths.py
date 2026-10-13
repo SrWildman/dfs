@@ -30,6 +30,10 @@ OWNERSHIP_LOG_FILE = DATA_DIR / "ownership_log.csv"
 # The contests engine's default output directory (`dfs contests analyze`): the durable contest-entry log
 # and the CSVs derived from it.
 CONTESTS_DIR = DATA_DIR / "contests"
+# Hand-downloaded DraftKings files, kept for good (`dfs week close` copies/moves them here): the contest-entry
+# history exports and the per-contest standings (which DraftKings only serves for about two weeks).
+DK_HISTORY_DIR = RAW_DIR / "dk_history"
+DK_STANDINGS_DIR = RAW_DIR / "dk_standings"
 
 
 def credentials_path(filename: str) -> Path:

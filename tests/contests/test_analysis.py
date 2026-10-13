@@ -215,11 +215,12 @@ def test_the_command_runs_writes_csvs_and_prints_a_summary(tmp_path):
     assert (out / "toughness_series.csv").exists() and (out / "field_stats.csv").exists()
 
 
-def test_the_command_is_hidden_from_help_and_from_the_command_reference():
-    assert "contests" not in CliRunner().invoke(app, ["--help"]).output
+def test_the_commands_are_in_help_and_the_command_reference_now_that_week_close_runs_them():
+    assert "contests" in CliRunner().invoke(app, ["--help"]).output
     from dfs import commands_doc
 
-    assert not any(path.startswith("dfs contests") for path in commands_doc.all_commands())
+    commands = commands_doc.all_commands()
+    assert "dfs contests update" in commands and "dfs contests analyze" in commands
 
 
 def test_a_missing_file_is_a_clear_failure(tmp_path):

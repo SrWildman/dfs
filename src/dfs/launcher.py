@@ -166,8 +166,9 @@ ANSWER_DEFAULTS = {("dfs export", "output"): "lineups.csv"}
 QUESTIONS = {
     ("dfs week new", "sheet_url"): "Link (or ID) of this week's sheet -- the copy of the template",
     ("dfs export", "output"): "File to write",
-    ("dfs week close", "csv"): "DraftKings contest-history CSV (My Contests > export) -- drag the file in",
-    ("dfs bankroll sync", "csv"): "DraftKings contest-history CSV (My Contests > export) -- drag the file in",
+    ("dfs bankroll backfill-keys", "csv"): (
+        "DraftKings contest-history CSV (My Contests > export) -- drag the file in"
+    ),
     ("dfs pool add", "names"): "Player name(s), separated by commas",
     ("dfs pool remove", "names"): "Player name(s), separated by commas",
 }
@@ -271,6 +272,8 @@ MORE_LABELS = {
     "dfs pool clear": "Clear your whole pool",
     "dfs odds movement": "Which betting lines moved since the last sync",
     "dfs bankroll sync": "Reconcile a DK contest-history CSV into Bankroll",
+    "dfs contests update": "Keep the DK downloads, learn from the standings, rebuild the Contests tab",
+    "dfs contests analyze": "Run the contests engine on files only (no sheet)",
     "dfs ownership log": "Log a contest's actual ownership",
     "dfs lineups clear": "Clear last week's typed-in lineups",
     "dfs sim fit": "Rebuild the simulator's player-correlation table (needs model fetch)",

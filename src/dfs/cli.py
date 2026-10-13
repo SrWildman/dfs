@@ -3438,7 +3438,11 @@ def _opening_lines_line(ctx: SyncContext) -> str:
 @week_app.command("close", short_help="Reconcile bankroll from DK contest history.")
 def week_close(
     csv: Path = typer.Option(
-        ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
+        None,
+        "--csv",
+        help="Path to a DK contest-history CSV export (My Contests > export). Left out, the newest "
+        "history export in your Downloads folder is used (found by its header row; [contests] "
+        "downloads_dir in config.toml changes the folder).",
     ),
     week: int = typer.Option(
         None,
@@ -3464,8 +3468,56 @@ def week_close(
     """
     cfg = _load_config_or_exit()
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
+    csv = _resolve_history_csv(cfg, csv)
     _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
+    _contests_after_close(cfg, csv)
     _score_results_after_close(cfg)
+
+
+def _keep_history_export(csv: Path) -> None:
+    """`bankroll sync` keeps what it read: a copy of the export in data/raw/dk_history/ and its entries merged
+    into the durable contest log. Soft: the sync itself has already succeeded."""
+    from dfs.contests import capture, history
+    from dfs.paths import CONTESTS_DIR, DK_HISTORY_DIR
+
+    try:
+        kept, new = capture.keep_history_copy(csv, DK_HISTORY_DIR)
+        merged = history.merge_into(CONTESTS_DIR / "contest_log.csv", csv)
+        console.print(
+            f"Kept the export ({'copied to' if new else 'already in'} {kept}); contest log: "
+            f"{merged.added} new entries, {merged.total} in all."
+        )
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[yellow]Could not keep the export ({e}).[/yellow]")
+
+
+def _resolve_history_csv(cfg: Config, csv: Path | None) -> Path:
+    """The history export to read: the one given, else the newest in Downloads (by header). Says which."""
+    from dfs import contests_close as weekly
+
+    found, how = weekly.resolve_history(csv, Path(cfg.contests.downloads_dir).expanduser())
+    if found is None:
+        console.print(f"[red]{how}.[/red] Export it from DraftKings (My Contests > History) or pass --csv.")
+        raise typer.Exit(code=1)
+    console.print(f"Contest history: [bold]{found}[/bold] ({how}).\n")
+    return found
+
+
+def _contests_after_close(cfg: Config, csv: Path) -> None:
+    """The contest side of the close: keep the files, learn from the standings, fill Cash Line, rebuild the
+    Contests tab. NEVER fails the close (see `contests.weekly`)."""
+    from dfs import contests_close as weekly
+
+    console.print("\n[bold]Contests[/bold] (history kept, standings read, Cash Line, Contests tab)...")
+    try:
+        weekly.run_contests(
+            cfg,
+            csv,
+            client=SheetsClient(cfg.google_sheets),
+            progress=lambda line: console.print(escape(line)),
+        )
+    except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; never fail the close over this
+        console.print(f"[yellow]Contests not updated ({e}); run `dfs contests update` later.[/yellow]")
 
 
 def _score_results_after_close(cfg: Config) -> None:
@@ -3527,7 +3579,10 @@ def results_update_command(
 @bankroll_app.command("sync")
 def bankroll_sync(
     csv: Path = typer.Option(
-        ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
+        None,
+        "--csv",
+        help="Path to a DK contest-history CSV export (My Contests > export). Left out, the newest "
+        "history export in your Downloads folder is used (found by its header row).",
     ),
     week: int = typer.Option(
         None,
@@ -3548,7 +3603,9 @@ def bankroll_sync(
     built.
     """
     cfg = _load_config_or_exit()
+    csv = _resolve_history_csv(cfg, csv)
     _sync_bankroll_from_csv(cfg, csv, week=week)
+    _keep_history_export(csv)
 
 
 @bankroll_app.command("backfill-keys")

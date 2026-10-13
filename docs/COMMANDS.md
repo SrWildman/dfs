@@ -123,7 +123,7 @@ End-of-week bankroll reconciliation -- currently a thin wrapper over `dfs bankro
 
 | Option | What it does |
 |---|---|
-| `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). **Required.** |
+| `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). Left out, the newest history export in your Downloads folder is used (found by its header row; [contests] downloads_dir in config.toml changes the folder). |
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
 
 ### `dfs results update`
@@ -187,8 +187,32 @@ Classify contest entries into Cash/GPP and append new ones to the bankroll tab, 
 
 | Option | What it does |
 |---|---|
-| `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). **Required.** |
+| `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). Left out, the newest history export in your Downloads folder is used (found by its header row). |
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
+
+### `dfs contests update`
+
+The contest side of `dfs week close`, on its own: keeps the history export and moves new standings files out of Downloads (DraftKings only serves standings for about two weeks), reads them, logs their ownership, fills Results' blank Cash Line from the configured double-up, and rebuilds the Contests tab. Never contacts DraftKings.
+
+| Option | What it does |
+|---|---|
+| `--csv PATH` | A DraftKings contest-history export. Left out, the newest one in your Downloads folder ([contests] downloads_dir) is used, found by its header row. |
+| `--sheet-id STR` | Write the Contests tab to this sheet instead of config.toml's (the template first). Results' Cash Line is only ever filled on config.toml's own sheet. |
+| `--no-sheet` | Keep the files and run the engine; touch no sheet. |
+
+### `dfs contests analyze`
+
+Merges your DraftKings history into a durable log, tags every contest with its series and format, scores how tough each series is (and your head-to-head record), and, given a folder of standings files, measures how the fields build their lineups. Writes CSVs under --out and prints a short summary; it never touches a sheet and never contacts DraftKings.
+
+| Option | What it does |
+|---|---|
+| `--history PATH` | A DraftKings My Contests -> History export (CSV). Repeat for several; they are merged into the durable log, deduplicated by Entry_Key. **Required.** |
+| `--standings PATH` | A folder of contest-standings-<id>.csv files and/or zips of them (searched recursively). |
+| `--out PATH` | Where the log and the CSVs are written. Default: `/Users/Sam/Documents/Development/dfs/data/contests`. |
+| `--me STR` | Your DraftKings username. Default: `srwildman`. |
+| `--players PATH` | CSV of players: Name, Team, Position, Opponent and optionally Salary (EdgeRaw has them), with Season and Week columns to cover several weeks. Without it each week's players come from the last DraftKings salary snapshot before that week's lock (data/raw/draftkings). |
+| `--slate-index STR` | Which slate-scoring index is shown beside each week's fitted effect, and is the 'index' comparator: top_n_lineup, p95_optimal, points_per_game, or 'none' to leave it out. Default: `top_n_lineup`. |
+| `--slate-index-file PATH` | A season,week,index CSV to use instead of computing the index. |
 
 ### `dfs ownership log`
 
