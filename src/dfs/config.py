@@ -17,7 +17,7 @@ import tomllib
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from dfs.paths import CONFIG_EXAMPLE_FILE, CONFIG_FILE
 
@@ -143,6 +143,12 @@ class SimConfig(BaseModel):
 
 PROJECTION_CHOICES = ("CalPts", "ProjPts", "AggPts")
 
+# Shadow projection sources (`calibration.py`): scored by Model Check from their first week, but kept out
+# of the CalPts blend until they have `shadow_min_weeks` scored weeks. A source named here that has no
+# column yet (ESPN's is still being wired up) is simply never active, so listing it early is harmless.
+SHADOW_SOURCES_DEFAULT = ("EspnPts", "PropPts")
+SHADOW_MIN_WEEKS_DEFAULT = 3
+
 
 class ProjectionConfig(BaseModel):
     """`[projection]`: which projection the model-driven tools act on (late swap, the Lineups simulator, the
@@ -153,6 +159,11 @@ class ProjectionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     default: Literal["CalPts", "ProjPts", "AggPts"] = "CalPts"
+    # Columns of the scored table that are tracked but not yet blended into CalPts. A shadow source joins
+    # the blend (through the same inverse-error weighting and shrinkage as the others) once it has
+    # `shadow_min_weeks` scored weeks; see `calibration.ShadowPolicy`.
+    shadow_sources: list[str] = list(SHADOW_SOURCES_DEFAULT)
+    shadow_min_weeks: int = Field(SHADOW_MIN_WEEKS_DEFAULT, ge=1)
 
 
 class Config(BaseModel):

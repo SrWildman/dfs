@@ -217,3 +217,189 @@ def test_no_lookahead_holds_with_um_too():
     altered.loc[altered["week"] == 4, "DkActual"] = 99.0
     after, _ = cal.calpts_for_week(altered, 4)
     pd.testing.assert_series_equal(before["CalPts"], after["CalPts"])
+
+
+# ---------------------------------------------------------------------------------------------
+# Shadow sources: scored from their first week, kept out of the blend until they have enough weeks
+# ---------------------------------------------------------------------------------------------
+
+
+def _varied(week, n=60, *, seed=0, props=False, props_rows=None, espn=False):
+    """A week of varied pool rows with the three standing sources, optionally PropPts and EspnPts columns."""
+    rng = np.random.default_rng(seed * 100 + week)
+    part = _rows(week, n, proj=10.0, sleeper=11.0, fp=12.0)
+    part["Position"] = rng.choice(["QB", "RB", "WR", "TE"], n)
+    part["Salary"] = rng.choice([3500, 5000, 6500, 8000], n)
+    truth = rng.uniform(4, 22, n)
+    part["ProjPts"] = truth + rng.normal(1.0, 3.0, n)
+    part["SleeperPts"] = truth + rng.normal(-0.5, 4.0, n)
+    part["FantasyProsPts"] = truth + rng.normal(0.0, 3.5, n)
+    part["AggPts"] = part[["ProjPts", "SleeperPts", "FantasyProsPts"]].mean(axis=1)
+    part["DkActual"] = truth + rng.normal(0.0, 6.0, n)
+    if props:
+        # a much better source than the others, so a promotion would visibly move CalPts
+        values = part["DkActual"] + rng.normal(0.0, 1.0, n)
+        if props_rows is not None:
+            values = values.where(np.arange(n) < props_rows)
+        part["PropPts"] = values
+    if espn:
+        part["EspnPts"] = truth + rng.normal(0.0, 3.0, n)
+    return part
+
+
+def _shadow_table(prop_weeks, *, weeks=(1, 2, 3, 4), props_rows=None, espn_weeks=()):
+    """Weeks `weeks`, with PropPts rated in `prop_weeks` and EspnPts in `espn_weeks` (NaN elsewhere)."""
+    pieces = []
+    for week in weeks:
+        part = _varied(week, props=True, props_rows=props_rows, espn=week in espn_weeks)
+        if week not in prop_weeks:
+            part["PropPts"] = np.nan
+        if "EspnPts" in part.columns and week not in espn_weeks:
+            part["EspnPts"] = np.nan
+        pieces.append(part)
+    return pd.concat(pieces, ignore_index=True)
+
+
+def _without(frame, *columns):
+    return frame.drop(columns=[c for c in columns if c in frame.columns])
+
+
+def _bytes(series):
+    return series.to_numpy(dtype=float).tobytes()
+
+
+def test_calpts_is_byte_identical_with_and_without_a_shadow_source_while_it_is_in_shadow():
+    # PropPts is rated in weeks 1 and 2 only: two scored weeks, one short of the three it needs for week 4.
+    with_props = _shadow_table(prop_weeks=(1, 2))
+    plain = _without(with_props, "PropPts")
+    assert with_props["PropPts"].notna().sum() > 0
+    # week 4's own rows carry values too, so predict() has a populated column it must ignore
+    with_props.loc[with_props["week"] == 4, "PropPts"] = 25.0
+
+    rows_with, fit_with = cal.calpts_for_week(with_props, 4)
+    rows_plain, fit_plain = cal.calpts_for_week(plain, 4)
+
+    assert _bytes(rows_with["CalPts"]) == _bytes(rows_plain["CalPts"])
+    pd.testing.assert_series_equal(rows_with["CalPts"], rows_plain["CalPts"])
+    assert rows_with["CalPts"].to_csv() == rows_plain["CalPts"].to_csv()
+    # and the fitted object itself is the same: no source, bias, count or weight for the shadow column
+    assert fit_with == fit_plain
+    assert "PropPts" not in fit_with.sources
+    assert not any(key[0] == "PropPts" for key in fit_with.bias)
+
+
+def test_a_shadow_source_with_too_few_rated_players_per_week_never_counts():
+    # three weeks of PropPts, but only 10 rated players each: under SHADOW_MIN_ROWS_PER_WEEK
+    thin = _shadow_table(prop_weeks=(1, 2, 3), props_rows=10)
+    plain = _without(thin, "PropPts")
+    assert cal.shadow_scored_weeks(cal.training_rows(thin, 4), "PropPts") == 0
+    rows_thin, fit_thin = cal.calpts_for_week(thin, 4)
+    rows_plain, _ = cal.calpts_for_week(plain, 4)
+    assert "PropPts" not in fit_thin.sources
+    assert _bytes(rows_thin["CalPts"]) == _bytes(rows_plain["CalPts"])
+
+
+def test_two_shadow_sources_in_shadow_leave_calpts_untouched():
+    both = _shadow_table(prop_weeks=(1, 2), espn_weeks=(2, 3))
+    plain = _without(both, "PropPts", "EspnPts")
+    rows_both, fit_both = cal.calpts_for_week(both, 4)
+    rows_plain, _ = cal.calpts_for_week(plain, 4)
+    assert _bytes(rows_both["CalPts"]) == _bytes(rows_plain["CalPts"])
+    assert fit_both.sources == cal.CAL_SOURCES
+
+
+def test_a_shadow_source_joins_after_the_required_scored_weeks_and_goes_through_the_normal_weighting():
+    table = _shadow_table(prop_weeks=(1, 2, 3))
+    plain = _without(table, "PropPts")
+    # before week 4 it has weeks 1-2 only (before_week=3): still in shadow
+    assert "PropPts" not in cal.fit(table, before_week=3).sources
+    # for week 4 it has three scored weeks: it is in
+    fitted = cal.fit(table, before_week=4)
+    assert fitted.sources == (*cal.CAL_SOURCES, "PropPts")
+    assert any(key[0] == "PropPts" for key in fitted.bias)
+    for weights in fitted.weights.values():
+        assert set(weights) == set(fitted.sources)
+        assert sum(weights.values()) == pytest.approx(1.0)
+    # the far better source gets the largest weight at a position with enough rows, and it moves CalPts
+    wr = fitted.weights["WR"]
+    assert wr["PropPts"] == max(wr.values())
+    rows, _ = cal.calpts_for_week(table, 4)
+    base, _ = cal.calpts_for_week(plain, 4)
+    assert not np.allclose(rows["CalPts"], base["CalPts"], equal_nan=True)
+
+
+def test_a_player_without_a_shadow_value_is_renormalised_over_the_sources_he_has():
+    table = _shadow_table(prop_weeks=(1, 2, 3))
+    week4 = table[table["week"] == 4].copy()
+    fitted = cal.fit(table, before_week=4)
+    week4.loc[week4.index[:5], "PropPts"] = np.nan
+    value = cal.predict(week4, fitted)
+    blank = week4.index[:5]
+    cal_sources = cal.calibrated_sources(week4, fitted)
+    for idx in blank:
+        position = week4.loc[idx, "Position"]
+        present = [s for s in cal.CAL_SOURCES if pd.notna(cal_sources.loc[idx, s])]
+        weights = {s: fitted.weights[position][s] for s in present}
+        expected = sum(weights[s] * cal_sources.loc[idx, s] for s in present) / sum(weights.values())
+        assert value[idx] == pytest.approx(round(expected, 1))
+
+
+def test_shadow_min_weeks_is_configurable_and_the_gate_can_be_switched_off():
+    table = _shadow_table(prop_weeks=(1,))
+    assert "PropPts" not in cal.fit(table, before_week=4).sources
+    one_week = cal.ShadowPolicy(min_weeks=1)
+    assert "PropPts" in cal.fit(table, before_week=4, shadow=one_week).sources
+    # a policy that names no shadow source: an explicitly listed source is the caller's business
+    off = cal.ShadowPolicy(sources=())
+    assert (
+        "PropPts" in cal.fit(table, before_week=4, sources=(*cal.CAL_SOURCES, "PropPts"), shadow=off).sources
+    )
+
+
+def test_a_shadow_source_passed_explicitly_is_still_held_back_until_it_has_earned_its_place():
+    table = _shadow_table(prop_weeks=(1, 2))
+    explicit = cal.fit(table, before_week=4, sources=(*cal.CAL_SOURCES, "PropPts"))
+    assert explicit.sources == cal.CAL_SOURCES
+
+
+def test_a_shadow_source_with_no_column_is_simply_never_active():
+    plain = _without(_shadow_table(prop_weeks=()), "PropPts")
+    fitted = cal.fit(plain, before_week=4)
+    assert fitted.sources == cal.CAL_SOURCES
+    assert cal.shadow_scored_weeks(cal.training_rows(plain, 4), "EspnPts") == 0
+
+
+def test_shadow_gating_keeps_the_no_lookahead_rule():
+    # a promoted shadow source is fitted on earlier weeks only: week 4's own actuals move nothing in week 4
+    table = _shadow_table(prop_weeks=(1, 2, 3), weeks=(1, 2, 3, 4))
+    before, fitted = cal.calpts_for_week(table, 4)
+    assert "PropPts" in fitted.sources
+    altered = table.copy()
+    altered.loc[altered["week"] == 4, "DkActual"] = 99.0
+    after, _ = cal.calpts_for_week(altered, 4)
+    assert _bytes(before["CalPts"]) == _bytes(after["CalPts"])
+
+
+def test_configured_shadow_falls_back_to_the_defaults_without_a_config(monkeypatch):
+    from dfs import config
+
+    def no_config():
+        raise config.ConfigError("none")
+
+    monkeypatch.setattr(config, "load_config", no_config)
+    assert cal.configured_shadow() == cal.DEFAULT_SHADOW
+    assert cal.DEFAULT_SHADOW.sources == ("EspnPts", "PropPts")
+    assert cal.DEFAULT_SHADOW.min_weeks == 3
+
+
+def test_configured_shadow_reads_the_projection_section(monkeypatch):
+    from dfs import config
+
+    cfg = config.Config.model_validate(
+        {
+            "google_sheets": {"sheet_id": "x", "credentials_file": "c.json", "tab_mappings": {}},
+            "projection": {"shadow_sources": ["PropPts"], "shadow_min_weeks": 5},
+        }
+    )
+    monkeypatch.setattr(config, "load_config", lambda: cfg)
+    assert cal.configured_shadow() == cal.ShadowPolicy(sources=("PropPts",), min_weeks=5)

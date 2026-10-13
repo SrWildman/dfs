@@ -78,3 +78,17 @@ def test_sim_gpp_target_defaults_to_190_and_is_configurable():
     assert Config.model_validate(_minimal(sim={"gpp_target": 205})).sim.gpp_target == 205.0
     with pytest.raises(ValidationError):
         Config.model_validate(_minimal(sim={"cash_line": 140}))  # the cash line is Sam's typed Results value
+
+
+def test_projection_shadow_defaults_and_overrides():
+    base = {"google_sheets": {"sheet_id": "x", "credentials_file": "c.json", "tab_mappings": {}}}
+    cfg = Config.model_validate(base)
+    assert cfg.projection.shadow_sources == ["EspnPts", "PropPts"]
+    assert cfg.projection.shadow_min_weeks == 3
+    cfg = Config.model_validate(
+        {**base, "projection": {"shadow_sources": ["PropPts"], "shadow_min_weeks": 4}}
+    )
+    assert cfg.projection.shadow_sources == ["PropPts"]
+    assert cfg.projection.shadow_min_weeks == 4
+    with pytest.raises(ValidationError):
+        Config.model_validate({**base, "projection": {"shadow_min_weeks": 0}})

@@ -1,0 +1,627 @@
+{
+  "id": "synthetic-event-american-0001",
+  "sport_key": "americanfootball_nfl",
+  "sport_title": "NFL",
+  "commence_time": "2026-10-18T17:00:00Z",
+  "home_team": "Kansas City Chiefs",
+  "away_team": "Buffalo Bills",
+  "bookmakers": [
+    {
+      "key": "draftkings",
+      "title": "DraftKings",
+      "last_update": "2026-10-14T16:05:00Z",
+      "markets": [
+        {
+          "key": "h2h",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Kansas City Chiefs",
+              "price": -185
+            },
+            {
+              "name": "Buffalo Bills",
+              "price": 155
+            }
+          ]
+        },
+        {
+          "key": "player_pass_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -115,
+              "point": 275.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -105,
+              "point": 275.5
+            },
+            {
+              "name": "Over",
+              "description": "Josh Allen",
+              "price": -110,
+              "point": 262.5
+            },
+            {
+              "name": "Under",
+              "description": "Josh Allen",
+              "price": -110,
+              "point": 262.5
+            }
+          ]
+        },
+        {
+          "key": "player_pass_tds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -125,
+              "point": 1.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": 100,
+              "point": 1.5
+            },
+            {
+              "name": "Over",
+              "description": "Josh Allen",
+              "price": -105,
+              "point": 1.5
+            },
+            {
+              "name": "Under",
+              "description": "Josh Allen",
+              "price": -115,
+              "point": 1.5
+            }
+          ]
+        },
+        {
+          "key": "player_pass_interceptions",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": 120,
+              "point": 0.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -150,
+              "point": 0.5
+            }
+          ]
+        },
+        {
+          "key": "player_rush_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -110,
+              "point": 16.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -110,
+              "point": 16.5
+            },
+            {
+              "name": "Over",
+              "description": "Isiah Pacheco",
+              "price": -115,
+              "point": 58.5
+            },
+            {
+              "name": "Under",
+              "description": "Isiah Pacheco",
+              "price": -105,
+              "point": 58.5
+            }
+          ]
+        },
+        {
+          "key": "player_receptions",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Rashee Rice",
+              "price": -120,
+              "point": 5.5
+            },
+            {
+              "name": "Under",
+              "description": "Rashee Rice",
+              "price": 100,
+              "point": 5.5
+            },
+            {
+              "name": "Over",
+              "description": "Travis Kelce",
+              "price": 105,
+              "point": 5.5
+            },
+            {
+              "name": "Under",
+              "description": "Travis Kelce",
+              "price": -125,
+              "point": 5.5
+            }
+          ]
+        },
+        {
+          "key": "player_reception_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Rashee Rice",
+              "price": -110,
+              "point": 62.5
+            },
+            {
+              "name": "Under",
+              "description": "Rashee Rice",
+              "price": -110,
+              "point": 62.5
+            },
+            {
+              "name": "Over",
+              "description": "Travis Kelce",
+              "price": -110,
+              "point": 55.5
+            },
+            {
+              "name": "Under",
+              "description": "Travis Kelce",
+              "price": -110,
+              "point": 55.5
+            }
+          ]
+        },
+        {
+          "key": "player_anytime_td",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Yes",
+              "description": "Isiah Pacheco",
+              "price": 160
+            },
+            {
+              "name": "Yes",
+              "description": "Rashee Rice",
+              "price": 210
+            },
+            {
+              "name": "Yes",
+              "description": "Travis Kelce",
+              "price": 240
+            },
+            {
+              "name": "Yes",
+              "description": "Patrick Mahomes",
+              "price": 350
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "fanduel",
+      "title": "FanDuel",
+      "last_update": "2026-10-14T16:05:00Z",
+      "markets": [
+        {
+          "key": "player_pass_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -118,
+              "point": 274.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -102,
+              "point": 274.5
+            },
+            {
+              "name": "Over",
+              "description": "Josh Allen",
+              "price": 105,
+              "point": 262.5
+            },
+            {
+              "name": "Under",
+              "description": "Josh Allen",
+              "price": -125,
+              "point": 262.5
+            }
+          ]
+        },
+        {
+          "key": "player_pass_tds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -130,
+              "point": 1.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": 105,
+              "point": 1.5
+            },
+            {
+              "name": "Over",
+              "description": "Josh Allen",
+              "price": -110,
+              "point": 1.5
+            },
+            {
+              "name": "Under",
+              "description": "Josh Allen",
+              "price": -110,
+              "point": 1.5
+            }
+          ]
+        },
+        {
+          "key": "player_pass_interceptions",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": 125,
+              "point": 0.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -155,
+              "point": 0.5
+            }
+          ]
+        },
+        {
+          "key": "player_rush_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -110,
+              "point": 15.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -110,
+              "point": 15.5
+            },
+            {
+              "name": "Over",
+              "description": "Isiah Pacheco",
+              "price": -110,
+              "point": 57.5
+            },
+            {
+              "name": "Under",
+              "description": "Isiah Pacheco",
+              "price": -110,
+              "point": 57.5
+            }
+          ]
+        },
+        {
+          "key": "player_receptions",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Rashee Rice",
+              "price": -115,
+              "point": 5.5
+            },
+            {
+              "name": "Under",
+              "description": "Rashee Rice",
+              "price": -105,
+              "point": 5.5
+            },
+            {
+              "name": "Over",
+              "description": "Travis Kelce",
+              "price": -110,
+              "point": 5.5
+            },
+            {
+              "name": "Under",
+              "description": "Travis Kelce",
+              "price": -110,
+              "point": 5.5
+            }
+          ]
+        },
+        {
+          "key": "player_reception_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Rashee Rice",
+              "price": -110,
+              "point": 61.5
+            },
+            {
+              "name": "Under",
+              "description": "Rashee Rice",
+              "price": -110,
+              "point": 61.5
+            },
+            {
+              "name": "Over",
+              "description": "Travis Kelce",
+              "price": -118,
+              "point": 54.5
+            },
+            {
+              "name": "Under",
+              "description": "Travis Kelce",
+              "price": -102,
+              "point": 54.5
+            }
+          ]
+        },
+        {
+          "key": "player_anytime_td",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Yes",
+              "description": "Isiah Pacheco",
+              "price": 150
+            },
+            {
+              "name": "Yes",
+              "description": "Rashee Rice",
+              "price": 200
+            },
+            {
+              "name": "Yes",
+              "description": "Travis Kelce",
+              "price": 250
+            },
+            {
+              "name": "Yes",
+              "description": "Patrick Mahomes",
+              "price": 320
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "betmgm",
+      "title": "BetMGM",
+      "last_update": "2026-10-14T16:05:00Z",
+      "markets": [
+        {
+          "key": "player_pass_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -110,
+              "point": 275.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -110,
+              "point": 275.5
+            },
+            {
+              "name": "Over",
+              "description": "Josh Allen",
+              "price": -110,
+              "point": 263.5
+            },
+            {
+              "name": "Under",
+              "description": "Josh Allen",
+              "price": -110,
+              "point": 263.5
+            }
+          ]
+        },
+        {
+          "key": "player_pass_tds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -120,
+              "point": 1.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -105,
+              "point": 1.5
+            },
+            {
+              "name": "Over",
+              "description": "Josh Allen",
+              "price": -105,
+              "point": 1.5
+            },
+            {
+              "name": "Under",
+              "description": "Josh Allen",
+              "price": -120,
+              "point": 1.5
+            }
+          ]
+        },
+        {
+          "key": "player_pass_interceptions",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": 115,
+              "point": 0.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -145,
+              "point": 0.5
+            }
+          ]
+        },
+        {
+          "key": "player_rush_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Patrick Mahomes",
+              "price": -105,
+              "point": 16.5
+            },
+            {
+              "name": "Under",
+              "description": "Patrick Mahomes",
+              "price": -115,
+              "point": 16.5
+            },
+            {
+              "name": "Over",
+              "description": "Isiah Pacheco",
+              "price": -110,
+              "point": 59.5
+            },
+            {
+              "name": "Under",
+              "description": "Isiah Pacheco",
+              "price": -110,
+              "point": 59.5
+            }
+          ]
+        },
+        {
+          "key": "player_receptions",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Rashee Rice",
+              "price": 130,
+              "point": 6.5
+            },
+            {
+              "name": "Under",
+              "description": "Rashee Rice",
+              "price": -160,
+              "point": 6.5
+            },
+            {
+              "name": "Over",
+              "description": "Travis Kelce",
+              "price": -105,
+              "point": 5.5
+            },
+            {
+              "name": "Under",
+              "description": "Travis Kelce",
+              "price": -115,
+              "point": 5.5
+            }
+          ]
+        },
+        {
+          "key": "player_reception_yds",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "Rashee Rice",
+              "price": -105,
+              "point": 63.5
+            },
+            {
+              "name": "Under",
+              "description": "Rashee Rice",
+              "price": -115,
+              "point": 63.5
+            },
+            {
+              "name": "Over",
+              "description": "Travis Kelce",
+              "price": -110,
+              "point": 55.5
+            },
+            {
+              "name": "Under",
+              "description": "Travis Kelce",
+              "price": -110,
+              "point": 55.5
+            }
+          ]
+        },
+        {
+          "key": "player_anytime_td",
+          "last_update": "2026-10-14T16:05:00Z",
+          "outcomes": [
+            {
+              "name": "Yes",
+              "description": "Isiah Pacheco",
+              "price": 170
+            },
+            {
+              "name": "Yes",
+              "description": "Rashee Rice",
+              "price": 220
+            },
+            {
+              "name": "Yes",
+              "description": "Travis Kelce",
+              "price": 260
+            },
+            {
+              "name": "Yes",
+              "description": "Patrick Mahomes",
+              "price": 400
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

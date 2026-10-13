@@ -1352,6 +1352,138 @@ ranking where it was (rho .516 to .517): exactly what the planning session predi
 not help QB or TE (small n, and TFFB's QB/TE bias is small). UM trails the others on rho and is not part of the blend. These are three small weeks; Model Check's Projection
 Race rebuilds this table every week.
 
+### Shadow sources (`calibration.ShadowPolicy`, `[projection] shadow_sources`, `shadow_min_weeks`)
+
+A projection source can be **tracked before it is trusted**. A column named in `[projection] shadow_sources`
+(default `["EspnPts", "PropPts"]`) is scored by Model Check from its first week, but is **left out of the CalPts
+blend** until the training rows hold `shadow_min_weeks` (default 3) scored weeks in which it rated at least
+`SHADOW_MIN_ROWS_PER_WEEK` (20) players. Once it has them it joins exactly like TFFB, Sleeper and FantasyPros: the same
+cell biases (`CAL_SHRINK_K`) and the same inverse-error weights shrunk toward equal (`CAL_WEIGHT_K`), and a player it
+did not rate is renormalised over the sources he has. `calibration.resolve_sources` drops an inactive shadow source
+before any maths runs, so **while it is in shadow `CalPts` is byte-identical to a table without the column**
+(`tests/test_calibration.py::test_calpts_is_byte_identical_...`). A name with no column is never active; the week that
+counts is a week strictly before the one being predicted (no lookahead). Model Check's weights table shows a shadow
+source from the week it joins (`sheet_model_check.shown_sources`) so the displayed weights still add to 100%.
+
+### `PropPts` (`props.py`, pure; a shadow source)
+
+Vegas player props turned into an expected DraftKings score, as an independent signal beside TFFB, Sleeper and
+FantasyPros (FantasyPros is already a consensus of many sites; props are a market). **The Odds API pull, its key and the
+join to the DraftKings pool are the local session's; this module is the maths and the response parser.** Nothing is
+written to a sheet and `PropPts` is not yet a column anywhere: it enters Model Check when the local session adds it to
+the scored table.
+
+**Status of the parser: UNVERIFIED.** It was written in a session that could not reach the-odds-api.com. The response
+shape and the seven market keys (`props.MARKETS`) are from memory of their v4 docs, `tests/fixtures/odds_api/
+synthetic_event_odds.json` is invented, and `props.PARSER_ASSUMPTIONS` lists every assumption. The parser is tolerant
+(it skips and counts what it cannot read, `quotes.attrs["skipped"]`). **Prices may be decimal or American** (whichever `oddsFormat` the request asked for; the first real response
+was American: -115, +110, +320). `parse_event_odds(odds_format="auto")`, the default, reads them as American if any price in
+the payload is negative or at least 100 in size, else decimal, logs which, and keeps it in `quotes.attrs["odds_format"]`;
+`"decimal"`/`"american"` force it. Read as decimal, every negative American price is skipped and whole markets vanish
+(`tests/fixtures/odds_api/synthetic_event_odds_american.json` pins this). Every anytime-TD quote in that response is Yes-only,
+so the `ANYTD_YES_ONLY_VIG` haircut (below) is the path real data takes. The local session's recorded
+`tests/fixtures/odds_api/event_odds_sample.json` is the authority; `test_recorded_sample_parses` runs on it when it exists.
+
+1. **De-vig** each book's pair multiplicatively: `p_over = (1/o_over) / (1/o_over + 1/o_under)` on decimal prices
+   (1.91/1.91 -> 0.5; 1.80/2.00 -> 0.5263; -150/+130 -> 0.5798). Anytime TD: the Yes/No pair the same way; a **Yes-only**
+   quote is `(1/price) / (1 + ANYTD_YES_ONLY_VIG)`, `ANYTD_YES_ONLY_VIG = 0.08`, **a guess** (flagged `td:yes_only` on
+   the row; Model Check's PropPts bias is what corrects it). A book with several lines keeps the one nearest a coin flip.
+2. **Across books**: the **median line**, then the **median de-vigged Over probability at that line**. A book quoting a
+   different line is first moved onto it, `p' = Phi((line_b - line*)/sd + Phi^-1(p_b))`, `sd = sqrt(phi * line*)` (the
+   stated interpolation; a book already on the line is untouched, an even number of lines gives a median that
+   nobody quotes, so every book is moved).
+3. **Expected stat from (line, p)**: the line is roughly the median, not the mean. `mean_from_line` finds the mean
+   whose distribution puts `p` above `line`:
+
+   | Stat | Distribution (variance = phi * mean) |
+   |---|---|
+   | Passing yards | normal (nearly symmetric) |
+   | Rushing, receiving yards | gamma, shape = mean/phi, scale = phi (right-skewed: mean above median) |
+   | Receptions, pass TDs, INTs | Poisson if phi <= 1, else negative binomial |
+   | Anytime TD | Poisson: `E[TDs] = -ln(1 - p)`; p = 0.5 -> 0.693 TDs -> 4.16 points. One TD bucket (DK pays rush and receiving TDs the same 6) |
+
+   `p` is clipped to [0.02, 0.98]. An integer count line excludes the push: `P(X > L) / (1 - P(X = L))`.
+4. **Bonuses**: `YARDAGE_BONUS_POINTS * P(yards >= threshold)` for 300 pass / 100 rush / 100 receiving yards
+   (`dk_scoring.YARDAGE_BONUS_THRESHOLDS`), under the same distribution, threshold less 0.5 (yards are whole numbers).
+5. **Score** with `dk_scoring.DK_OFFENSE_SCORING` (never retyped): `0.04 pass yd + 4 pass TD - 1 INT + 0.1 rush yd + 1 rec
+   + 0.1 rec yd + 6 TD + bonuses`, rounded to 0.01. **Fumbles lost and 2-point conversions have no prop market and are
+   not in it.** INTs: the market if there is one, else the QB's shrunk season rate (`season_int_rates`,
+   `(INTs + 4 * league) / (games + 4)`, flagged `int:rate`), else the league rate 0.7362 (flagged `int:league`).
+6. **No partial PropPts.** A player missing a market his position needs is **blank**, never a score from the markets that
+   exist: QB `pass_yd` + `pass_td`; RB `rush_yd` + `td`; WR/TE `rec` + `rec_yd` + `td`. DST (and K) get none. Markets
+   beyond the required set (a QB's rushing yards and anytime TD, an RB's receptions and receiving yards) are used when
+   quoted. **An RB with no receiving markets is scored without receiving**, flagged `no:rec no:rec_yd`; that is the brief's
+   rule but understates a pass-catching back (open question, below).
+
+**Dispersion** (`props.DISPERSION`; refit with `python -m dfs.props_history --last 2025 --test-from 2023`, which downloads
+nflverse `stats_player` once). No free historical props lines exist, so `phi = sum((actual - fitted)^2) / sum(fitted)`
+is fitted per (position, stat) to the **proxy a bettor had**: `fitted` is the game's stat regressed on the mean of the
+player's previous eight games (at least six), regular seasons 2018-2025. Because the market also knows injuries and
+matchup, this is an **upper bound** on the market's own dispersion.
+
+| Position | Stat | phi | n |
+|---|---|---|---|
+| QB | pass yards / pass TDs / INTs / rush yards | 22.4 / 0.83 / 1.05 / 16.8 | 3,526 / 3,503 / 3,144 / 1,525 |
+| RB | rush yards / receptions / rec yards | 23.8 / 1.51 / 19.8 | 6,312 / 7,048 / 5,468 |
+| WR | receptions / rec yards | 1.39 / 25.9 | 11,699 / 10,990 |
+| TE | receptions / rec yards | 1.31 / 20.4 | 5,181 / 5,044 |
+
+Variance grows with the mean (var/mean is roughly flat across levels: WR receiving yards about 24 in the bottom quartile
+of projected yards and 23 in the top), which is why the model is `variance = phi * mean` and not a fixed CV. TD counts are under-dispersed
+(0.83), so a Poisson (phi = 1) is used.
+
+**Evidence on history** (`python -m dfs.props_history`, fit on 2018-22, tested on 2023-25 unless stated):
+
+* *Does the distribution give the right tail probabilities?* (it is what `mean_from_line` inverts.) For thresholds at
+  0.6-1.4 times each player's fitted mean, the model's `P(X > t)` against how often the stat really exceeded it differs by
+  at most 0.012-0.018 for receptions, TDs and INTs, and 0.02-0.05 for yardage, where the gamma is a little *under* the
+  realised exceedance for rushing and receiving (the real distribution is slightly less skewed than a gamma) and the
+  normal over-states it for passing yards (2023-25 passing yards ran below the earlier seasons).
+* *Does a mean from a line beat "expected = line"?* A median line is built without the model (median regression of the
+  stat on the proxy, odd weeks), converted at `p = 0.5`, and judged on even weeks (interleaved, so era drift cannot
+  masquerade as skew):
+
+  | Position, stat | n | Bias if expected = line | Bias, mean from line | RMSE, line -> mean |
+  |---|---|---|---|---|
+  | QB rush yards | 744 | +4.90 | -0.39 | 22.12 -> 21.59 |
+  | RB rush yards | 3,076 | +7.70 | +0.31 | 35.42 -> 34.57 |
+  | RB rec yards | 2,672 | +4.88 | -1.04 | 19.83 -> 19.24 |
+  | WR rec yards | 5,349 | +7.34 | -1.10 | 35.04 -> 34.28 |
+  | TE rec yards | 2,473 | +3.27 | -3.27 | 25.11 -> 25.12 (a tie: that line sat 3.5% high) |
+  | QB pass yards | 1,726 | -1.59 | -1.59 | normal: a coin-flip line *is* the mean, so no change at p = 0.5 |
+
+  A gamma for passing yards was tried and over-corrected (bias -9.1 against -1.6), which is why passing yards are normal.
+  At 60-70 receiving yards the skew is worth about 7-8 yards = 0.7-0.8 points. **What this does not test:** the effect of `p`
+  away from 0.5 (no historical prices are available), which is checked only through the tail-probability test above.
+* *A backtest against real props*: none. The Odds API's history is paid (May 2023 onward) and no free, login-free
+  dataset was found; nothing was bought or scraped. The real test is Model Check, with `PropPts` in shadow.
+
+**Worked by hand on the synthetic fixture** (`tests/test_props.py::test_the_fixture_worked_through_independently_...`
+repeats it with scipy):
+
+*Patrick Mahomes (QB).* Passing yards: DraftKings 275.5 at 1.91/1.91 -> 0.5000, BetMGM the same, FanDuel 274.5 at
+1.87/1.95 -> 0.5105 (moved to 275.5: 0.5000); median line 275.5, p = 0.5000, so the mean is 275.5 (normal, symmetric) and
+`0.04 x 275.5 = 11.02`. Pass TDs: median line 1.5, p = 0.5263 (DK 1.80/2.00 = 10/19); a Poisson with P(X >= 2) = 0.5263 has
+mean 1.764, `4 x 1.764 = 7.06`. INTs: 0.5 at p = 0.4273, mean 0.570, `-0.57`. Rushing yards: books at 15.5 and 16.5, median
+16.0, p = 0.5, gamma (phi 16.8) mean 21.3, `0.1 x 21.3 = 2.13`. Anytime TD: one Yes-only book at 4.50 ->
+(1/4.5)/1.08 = 0.2058, `-ln(1 - 0.2058) = 0.2304` TDs, `x 6 = 1.38`. Bonuses: `3 x P(pass yards >= 300) + 3 x P(rush
+yards >= 100)` = 1.15. **PropPts = 11.02 + 7.06 - 0.57 + 2.13 + 1.38 + 1.15 = 22.17.**
+
+*Rashee Rice (WR).* Receptions: median line 5.5, p = 0.5197 over 5.5, negative binomial (phi 1.39) with P(X >= 6) = 0.5197
+has mean 5.94, `5.94`. Receiving yards: 63.5 / 62.5 / 61.5, median 62.5, p = 0.4998, gamma (phi 25.9) mean 70.9, `0.1 x 70.9 =
+7.09`. Anytime TD: DraftKings Yes-only 3.10 -> 0.2987, FanDuel Yes/No 3.00/1.38 -> 0.3151, BetMGM Yes-only 3.20 -> 0.2894;
+median p 0.2987, `-ln(1 - 0.2987) = 0.3548`, `x 6 = 2.13`. Bonus `3 x P(rec yards >= 100)` = 0.64.
+**PropPts = 5.94 + 7.09 + 2.13 + 0.64 = 15.80.**
+
+**Open questions for Sam / the local session**
+
+1. The parser and market keys need the first real response (above).
+2. `ANYTD_YES_ONLY_VIG = 0.08` is a guess; if real books quote "No" for anytime TD the guess is not used.
+3. An RB without receiving props is scored without receiving (the brief's rule). Alternatives: require them for RBs, or fill
+   from nflverse. Model Check's PropPts bias by position will show how much it matters.
+4. The Odds API names no team or position for a player; `props.attach_players` matches on name plus a team in the event and
+   refuses an ambiguous match, returning those rows to the caller.
+
 ### Outcome probabilities (`probabilities.py`; the engine is `docs/MODEL.md`)
 
 The model package's outcome-ratio tables are applied to **`CalPts`**: `Hit3x%` = P(actual >= 3 x

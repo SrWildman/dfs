@@ -118,3 +118,8 @@ gpp_target = 190
 [projection]
 default = "CalPts"
 
+# Shadow projection sources: tracked in Model Check from their first scored week, but kept OUT of the CalPts blend
+# until they have `shadow_min_weeks` scored weeks. They then join through the same inverse-error weighting and
+# shrinkage as TFFB, Sleeper and FantasyPros. A name with no column in the scored table yet is never active.
+shadow_sources = ["EspnPts", "PropPts"]
+shadow_min_weeks = 3

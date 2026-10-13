@@ -23,6 +23,13 @@ bias we have already measured, then averaged".
    over the sources he actually has.
 4. `CalPts = sum(w * calibrated_source)`, rounded to 0.1.
 
+**Shadow sources.** A source named in `[projection] shadow_sources` (`ShadowPolicy`) is scored by Model
+Check from its first week but is NOT in the blend until it has `shadow_min_weeks` scored weeks in the
+training rows (a week counts when the source rated at least `SHADOW_MIN_ROWS_PER_WEEK` players in it).
+`fit` drops a source that is not yet active BEFORE any maths runs, so while it is in shadow `CalPts` is
+byte-identical to a table that does not have the column at all (`tests/test_calibration.py` asserts it).
+Once active it goes through steps 2-4 like every other source.
+
 **No lookahead, ever.** `fit` takes the scored table and `before_week`, and uses only weeks
 strictly before it, rosterable pool, `Status == "scored"`. Week 1 has no history, so its `CalPts`
 is `AggPts` exactly. `tests/test_calibration.py` changes a week's actuals and asserts nothing in
@@ -40,6 +47,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from dfs.config import SHADOW_MIN_WEEKS_DEFAULT, SHADOW_SOURCES_DEFAULT
 from dfs.results_analysis import _spearman, usable
 
 POSITIONS = ["QB", "RB", "WR", "TE", "DST"]
@@ -71,7 +79,12 @@ SOURCE_LABELS = {
     "SleeperPts": "Sleeper",
     "FantasyProsPts": "FantasyPros",
     "UmPts": "UM",
+    "EspnPts": "ESPN",
+    "PropPts": "Props",
 }
+# A shadow source's week only counts as "scored" when it rated at least this many players that week: a stray
+# handful of rows (a partial props pull, one position) is not a week of evidence.
+SHADOW_MIN_ROWS_PER_WEEK = 20
 _EPS = 1e-9
 
 
@@ -99,6 +112,64 @@ def tier_index(position: pd.Series, salary: pd.Series) -> pd.Series:
         mask = (position == pos) & salary.notna()
         out[mask] = np.searchsorted(np.array(edges, dtype=float), salary[mask].to_numpy(), side="right")
     return out
+
+
+@dataclass(frozen=True)
+class ShadowPolicy:
+    """Which projection columns are tracked but kept out of the CalPts blend, and how many scored weeks
+    each needs first. The defaults are `[projection]`'s defaults (`config.py`); callers with a config pass
+    `configured_shadow()`. Pass `ShadowPolicy(sources=())` to switch the gating off."""
+
+    sources: tuple[str, ...] = tuple(SHADOW_SOURCES_DEFAULT)
+    min_weeks: int = SHADOW_MIN_WEEKS_DEFAULT
+    min_rows_per_week: int = SHADOW_MIN_ROWS_PER_WEEK
+
+
+DEFAULT_SHADOW = ShadowPolicy()
+
+
+def configured_shadow() -> ShadowPolicy:
+    """The policy from `config.toml`'s `[projection]`, or the defaults when there is no usable config
+    (tests, a fresh checkout). The one place this module touches the config file."""
+    from dfs.config import ConfigError, load_config
+
+    try:
+        cfg = load_config().projection
+    except ConfigError:
+        return DEFAULT_SHADOW
+    return ShadowPolicy(sources=tuple(cfg.shadow_sources), min_weeks=cfg.shadow_min_weeks)
+
+
+def shadow_scored_weeks(train: pd.DataFrame, source: str, policy: ShadowPolicy = DEFAULT_SHADOW) -> int:
+    """How many weeks of `train` (already the strictly-earlier, scored, rosterable-pool rows) `source`
+    rated at least `policy.min_rows_per_week` players in."""
+    if train.empty or source not in train.columns:
+        return 0
+    rated = pd.to_numeric(train[source], errors="coerce").notna()
+    per_week = rated.groupby(pd.to_numeric(train["week"], errors="coerce")).sum()
+    return int((per_week >= policy.min_rows_per_week).sum())
+
+
+def resolve_sources(
+    train: pd.DataFrame, sources: tuple[str, ...], policy: ShadowPolicy = DEFAULT_SHADOW
+) -> tuple[str, ...]:
+    """The blend for this fit: `sources` minus any shadow source that has not earned its place yet, plus
+    any shadow source that has (and is not already listed). Order: the caller's sources, then newly
+    active shadows in policy order."""
+    kept = [s for s in sources if s not in policy.sources]
+    kept += [
+        s
+        for s in sources
+        if s in policy.sources and shadow_scored_weeks(train, s, policy) >= policy.min_weeks
+    ]
+    earned = [
+        s
+        for s in policy.sources
+        if s not in sources
+        and s not in CAL_SOURCES
+        and shadow_scored_weeks(train, s, policy) >= policy.min_weeks
+    ]
+    return tuple(dict.fromkeys([*kept, *earned]))
 
 
 @dataclass(frozen=True)
@@ -148,9 +219,13 @@ def fit(
     before_week: int,
     season: int | None = None,
     sources: tuple[str, ...] = CAL_SOURCES,
+    shadow: ShadowPolicy | None = None,
 ) -> Calibration:
-    """Learn the cell biases and the position weights from weeks `< before_week` only."""
+    """Learn the cell biases and the position weights from weeks `< before_week` only. A shadow source
+    (see `ShadowPolicy`) is left out until it has enough scored weeks; a source that is out takes no part
+    in any of the maths below, so its column cannot move a single weight or bias."""
     train = training_rows(scored, before_week, season)
+    sources = resolve_sources(train, sources, shadow or DEFAULT_SHADOW)
     sources = tuple(s for s in sources if train.empty or s in train.columns)
     if train.empty:
         return Calibration(sources=tuple(sources))
@@ -298,13 +373,18 @@ def explain_gap(row: pd.Series, fitted: Calibration | None) -> GapExplanation | 
 
 
 def calpts_for_week(
-    scored: pd.DataFrame, week: int, *, season: int | None = None, sources: tuple[str, ...] = CAL_SOURCES
+    scored: pd.DataFrame,
+    week: int,
+    *,
+    season: int | None = None,
+    sources: tuple[str, ...] = CAL_SOURCES,
+    shadow: ShadowPolicy | None = None,
 ) -> tuple[pd.DataFrame, Calibration]:
     """The week's own rows with a `CalPts` column, fit only on weeks before it."""
     rows = scored[pd.to_numeric(scored["week"], errors="coerce") == week].copy()
     if season is not None and "season" in rows.columns:
         rows = rows[rows["season"] == season].copy()
-    calibration = fit(scored, before_week=week, season=season, sources=sources)
+    calibration = fit(scored, before_week=week, season=season, sources=sources, shadow=shadow)
     if rows.empty:
         rows["CalPts"] = pd.Series(dtype=float)
         return rows, calibration
@@ -358,7 +438,13 @@ def score_predictions(frame: pd.DataFrame, columns: tuple[tuple[str, str], ...])
     return pd.DataFrame(rows, columns=BACKTEST_COLUMNS)
 
 
-def backtest_frame(scored: pd.DataFrame, *, season: int | None = None, with_um: bool = False) -> pd.DataFrame:
+def backtest_frame(
+    scored: pd.DataFrame,
+    *,
+    season: int | None = None,
+    with_um: bool = False,
+    shadow: ShadowPolicy | None = None,
+) -> pd.DataFrame:
     """Every predictable week (the 2nd onward) with its out-of-sample projections: for k = 2..N, fit on
     weeks < k and predict week k. With `with_um` only the rows UM rated are kept, so UM and the others are
     judged on the same players. Rosterable pool rows with a real stat line and ProjPts > 0 only (Model
@@ -366,7 +452,7 @@ def backtest_frame(scored: pd.DataFrame, *, season: int | None = None, with_um: 
     weeks = sorted(int(w) for w in pd.to_numeric(scored["week"], errors="coerce").dropna().unique())
     pieces = []
     for week in weeks[1:]:
-        rows, _ = calpts_for_week(scored, week, season=season, sources=CAL_SOURCES)
+        rows, _ = calpts_for_week(scored, week, season=season, sources=CAL_SOURCES, shadow=shadow)
         pieces.append(usable(rows, "pool"))
     if not pieces:
         return pd.DataFrame()
@@ -376,22 +462,32 @@ def backtest_frame(scored: pd.DataFrame, *, season: int | None = None, with_um: 
     return out
 
 
-def backtest(scored: pd.DataFrame, *, season: int | None = None, with_um: bool = False) -> pd.DataFrame:
+def backtest(
+    scored: pd.DataFrame,
+    *,
+    season: int | None = None,
+    with_um: bool = False,
+    shadow: ShadowPolicy | None = None,
+) -> pd.DataFrame:
     """The expanding-window backtest table (`BACKTEST_COLUMNS`) by position and overall, each projection
     judged on weeks it did not train on: TFFB, AggPts and CalPts; with `with_um`, UM itself too, on the rows
     UM rates."""
-    frame = backtest_frame(scored, season=season, with_um=with_um)
+    frame = backtest_frame(scored, season=season, with_um=with_um, shadow=shadow)
     if frame.empty:
         return pd.DataFrame(columns=BACKTEST_COLUMNS)
     return score_predictions(frame, PROJECTIONS_WITH_UM if with_um else PROJECTIONS)
 
 
 def backtest_by_week(
-    scored: pd.DataFrame, *, season: int | None = None, with_um: bool = False
+    scored: pd.DataFrame,
+    *,
+    season: int | None = None,
+    with_um: bool = False,
+    shadow: ShadowPolicy | None = None,
 ) -> pd.DataFrame:
     """The same race, one row per week and projection (n, Rho, MAE, Bias over the position groups), for the
     per-week trend in Model Check."""
-    frame = backtest_frame(scored, season=season, with_um=with_um)
+    frame = backtest_frame(scored, season=season, with_um=with_um, shadow=shadow)
     columns = PROJECTIONS_WITH_UM if with_um else PROJECTIONS
     if frame.empty:
         return pd.DataFrame(columns=["Week", "Source", "n", "Rho", "MAE", "Bias"])

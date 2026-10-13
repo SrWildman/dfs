@@ -65,7 +65,9 @@ def week_signals(
 ) -> tuple[signals.SignalOutput, datetime] | None:
     """The signals for one scored week as of its reference moment, or None when the week has no rows or no
     reference. `scored` is every scored table (the calibration needs the earlier weeks)."""
-    rows, _fit = calibration.calpts_for_week(scored, week, season=season, sources=sources)
+    rows, _fit = calibration.calpts_for_week(
+        scored, week, season=season, sources=sources, shadow=calibration.configured_shadow()
+    )
     if rows.empty:
         return None
     reference = datetime.strptime(str(rows["RefSnapshot"].iloc[0]), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
