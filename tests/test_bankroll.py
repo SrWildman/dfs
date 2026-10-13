@@ -122,6 +122,13 @@ def test_classify_zero_entries_defaults_gpp():
     assert classify_entry(e) == "gpp"
 
 
+@pytest.mark.parametrize("game_type", ["Single Stat", "Showdown Captain Mode", "Best Ball", ""])
+def test_classify_only_a_classic_contest_can_be_cash(game_type):
+    # Found live on Week 4: "NFL Single Stat $1 7-Player (Top 3 Win)" paid 3 of 7 (0.43), in the cash band.
+    assert classify_entry(_entry(entries=7, places_paid=3, game_type=game_type)) == "gpp"
+    assert classify_entry(_entry(entries=7, places_paid=3, game_type="Classic")) == "cash"
+
+
 def test_classify_boundary_values():
     e_low = _entry(entries=100, places_paid=int(CASH_PAYOUT_RATIO_LOW * 100))
     assert classify_entry(e_low) == "cash"

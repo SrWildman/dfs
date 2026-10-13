@@ -31,13 +31,20 @@ from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, rend
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
+from dfs.sheet_pool_cells import POOL_OPTIONS
+from dfs.sheet_pool_control import control_cells
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, edge_group_spans
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
-from dfs.sheets import column_letter
+from dfs.sheets import column_index, column_letter
 from dfs.sources.edge import POOL_HEADER
 from dfs.week import parse_week_from_title
-from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
+from dfs.weekly_reset import (
+    LINEUPS_NAME_BLOCKS,
+    PLAYER_POOL_CONTROL_LABEL,
+    PLAYER_POOL_CONTROL_ROW,
+    PLAYER_POOL_HEADER_ROW,
+)
 
 # Column A of every repeated Lineups sub-header row is the literal text
 # "Name" (see weekly_reset.py's module docstring) -- the tab's own header
@@ -93,6 +100,10 @@ class DoctorClient:
         """The workbook's time zone; None (not checked) for a client that cannot say."""
         return None
 
+    def has_data_validation(self, tab_name: str, a1_cell: str) -> bool | None:  # pragma: no cover
+        """True when the cell has a dropdown rule; None (not checked) for a client that cannot say."""
+        return None
+
 
 def _check_sheet_title(title: str) -> list[DoctorIssue]:
     """Week 3 follow-ups, Item 1: catches a bad weekly-copy title (`Week4`,
@@ -121,6 +132,43 @@ def _check_time_zone(client: DoctorClient) -> list[DoctorIssue]:
             "time-zone",
             f"the workbook's time zone is {zone}, not {KICKOFF_TIMEZONE} (the zone kickoffs are written in): "
             "the Lineups FLEX warning compares NOW() with them. `dfs setup polish` sets it.",
+        )
+    ]
+
+
+def _check_pool_control_row(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
+) -> list[DoctorIssue]:
+    """Player Pool's row 1 is the add-a-player control: a type dropdown (Cash / GPP / Both) in the Pool col,
+    the label `Add a player` in the Name column, and the name box beside it (a dropdown over EdgeRaw's names).
+    The Apps Script finds the box FROM the label, so a blank label silently kills the box: found live on Weeks
+    5 and 6, where row 1 held only the type. Reads the three cells at the positions the header gives them."""
+    pool_tab = cfg.lineups.player_pool_tab
+    if pool_tab not in tab_titles:
+        return []
+    cells = control_cells(headers_by_tab.get(pool_tab) or None)
+    row = client.read_range(pool_tab, f"A{PLAYER_POOL_CONTROL_ROW}:{PLAYER_POOL_CONTROL_ROW}")
+    values = row[0] if row else []
+    label_index = column_index(cells["label"])
+    problems = []
+    if label_index >= len(values) or values[label_index].strip() != PLAYER_POOL_CONTROL_LABEL:
+        problems.append(f"the label {PLAYER_POOL_CONTROL_LABEL!r} is missing from {cells['label']}")
+    type_index = column_index(cells["type"])
+    type_value = values[type_index].strip() if type_index < len(values) else ""
+    if type_index != label_index and type_value not in POOL_OPTIONS:
+        problems.append(f"the type in {cells['type']} is not Cash, GPP or Both")
+    for what, key in (("type dropdown", "type"), ("name box dropdown", "input")):
+        if client.has_data_validation(pool_tab, cells[key]) is False:
+            problems.append(f"{cells[key]} has lost its {what}")
+    if not problems:
+        return []
+    return [
+        DoctorIssue(
+            "pool-control-row",
+            f"{pool_tab!r} row 1 (the add-a-player control): "
+            + "; ".join(problems)
+            + ". The box does nothing "
+            "without its label; `dfs setup add-pool-control` puts the row back.",
         )
     ]
 
@@ -593,6 +641,7 @@ def run_doctor(
     issues += _check_tabs_exist(cfg, tab_titles)
     issues += _check_time_zone(client)
     issues += _check_instructions_drift(client, tab_titles)
+    issues += _check_pool_control_row(client, cfg, tab_titles, headers_by_tab)
     issues += _check_edge_header(cfg, tab_titles, headers_by_tab)
     issues += _check_linked_edge_columns(cfg, tab_titles, headers_by_tab)
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)

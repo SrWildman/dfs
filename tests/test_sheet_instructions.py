@@ -142,7 +142,7 @@ def test_build_clears_first_writes_the_whole_grid_and_styles_the_bands():
     client = FakeClient()
     result = build_instructions_tab(client)
     assert INSTRUCTIONS_TAB in result and "row(s) written" in result
-    assert client.cleared and client.cleared[0][1][0].startswith("A1:B")
+    assert client.cleared and client.cleared[0][1][0].startswith("A1:C")  # column C too: old per-row links go
     (_tab, a1, rows) = client.update_calls[0]
     assert a1 == f"A1:B{INSTRUCTIONS_LAST_ROW}" and len(rows) == INSTRUCTIONS_LAST_ROW
     assert client.widths["B"] > client.widths["A"]

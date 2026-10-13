@@ -114,6 +114,9 @@ from dfs.sheet_color_scales import (
 )
 from dfs.sheet_column_notes import (
     BOARD_NOTES,
+    ISSUES_FLEX_NOTE,
+    ISSUES_SLOT_NOTE,
+    ISSUES_TOTAL_NOTE,
     SLATE_GAME_NOTES,
     SLATE_TEAMS_NOTES,
     apply_header_notes,
@@ -2435,6 +2438,12 @@ def polish_guardrails(
             ]
         )
         client.update_range(tab, f"{guardrails_col}{start}:{guardrails_col}{totals_row}", rows)
+        # The cell clips at ISSUES_WIDTH, so the full warnings live in a note on each cell.
+        notes = {f"{guardrails_col}{row}": ISSUES_SLOT_NOTE for row in range(start, end + 1)}
+        if flex_ready:
+            notes[f"{guardrails_col}{start + ROSTER_SLOTS.index('FLEX')}"] = ISSUES_FLEX_NOTE
+        notes[f"{guardrails_col}{totals_row}"] = ISSUES_TOTAL_NOTE
+        client.set_cell_notes(tab, notes)
 
     client.clear_conditional_formats(tab, column=guardrails_col)
     last_row = max(end for _, end in name_blocks) + 1

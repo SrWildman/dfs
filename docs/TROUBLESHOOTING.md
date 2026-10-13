@@ -76,6 +76,12 @@ first, or accept the cap.
 
 ---
 
+**The "Add a player" box does nothing, and Player Pool's row 1 shows only a type (Cash / GPP / Both).**
+Cause: the label `Add a player` (the cell left of the box, in the Name column) was blanked. The Apps Script finds the box FROM the label, so without it picking a name changes nothing. Found live on Weeks 5 and 6 (what blanked it was not found in the code: the weekly reset, sync and polish never write that cell).
+Fix: `dfs doctor` reports it as `pool-control-row`; `dfs setup add-pool-control` writes the label back (and resets the type to Both) without inserting a row.
+
+---
+
 **"Pool change failed: The data you entered in cell A741 violates the data validation rules", and the Pool cell is now empty.**
 Cause: the Pool cell is a strict Cash / GPP / Both dropdown holding a formula, and the Apps Script (version 2) could not write the formula back when its
 result was blank (a player removed from the pool): the pool change itself had already landed on EdgeRaw, the cell was left empty. Fix: paste the current

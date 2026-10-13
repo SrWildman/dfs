@@ -837,6 +837,10 @@ class FakeGuardrailsClient:
         self.boolean_rule_calls: list[tuple[str, str, list[str], dict]] = []
         self.format_calls: list[tuple[str, dict]] = []
         self.clear_validation_calls: list[str] = []
+        self.cell_notes: dict[str, str] = {}
+
+    def set_cell_notes(self, tab_name: str, notes: dict[str, str]) -> None:
+        self.cell_notes.update(notes)
 
     def tab_exists(self, tab_name: str) -> bool:
         return self._present
@@ -1396,6 +1400,27 @@ def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avai
         f'IF({salary_col}18>50000,"OVER "&TEXT({salary_col}18-50000,"$#,##0"),'
         'IF(COUNTA($A$9:$A$17)<9,"INCOMPLETE "&COUNTA($A$9:$A$17)&"/9","OK")))'
     ]
+
+
+def test_polish_guardrails_puts_the_full_warnings_in_a_note_on_every_issues_cell():
+    # The cell clips at 110 px; the note carries every warning of its kind (static text).
+    from dfs.sheet_column_notes import ISSUES_FLEX_NOTE, ISSUES_SLOT_NOTE, ISSUES_TOTAL_NOTE
+    from dfs.sheet_lineup_sim import CASH_WEAK_BELOW
+
+    client = FakeGuardrailsClient(_HEADER_FOR_GUARDRAILS)
+    col = column_letter(_HEADER_FOR_GUARDRAILS.index("Issues"))
+
+    polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
+
+    assert set(client.cell_notes) == {f"{col}{row}" for row in range(9, 19)}  # nine slots + the Total row
+    assert client.cell_notes[f"{col}18"] == ISSUES_TOTAL_NOTE
+    assert client.cell_notes[f"{col}9"] == ISSUES_SLOT_NOTE
+    for word in ("DUPLICATE", "OUT", "IR", "Q"):
+        assert word in ISSUES_SLOT_NOTE
+    for word in ("OVER", "INCOMPLETE", "DST/QB", "RB/GAME", "Weak for cash", "OK"):
+        assert word in ISSUES_TOTAL_NOTE
+    assert f"{CASH_WEAK_BELOW:.0%}" in ISSUES_TOTAL_NOTE  # the threshold the formula uses
+    assert "Move NAME to FLEX" in ISSUES_FLEX_NOTE and ISSUES_FLEX_NOTE.startswith(ISSUES_SLOT_NOTE)
 
 
 def test_polish_guardrails_repeats_header_at_every_block():

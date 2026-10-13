@@ -51,6 +51,7 @@ class FakeDoctorClient:
         self._hidden_names = hidden_names or {}
         self._groups = groups or {}
         self.zone = "America/New_York"
+        self.no_dropdown: set[tuple[str, str]] = set()
 
     def time_zone(self) -> str:
         return self.zone
@@ -77,7 +78,12 @@ class FakeDoctorClient:
         return [_FakeTab(title=title, header=header) for title, header in self._tabs.items()]
 
     def read_range(self, tab_name: str, a1_range: str) -> list[list[str]]:
+        if (tab_name, a1_range) not in self._rows and (tab_name, a1_range) == ("Player Pool", "A1:1"):
+            return [["Both", "Add a player"]]  # a healthy control row unless a test says otherwise
         return self._rows.get((tab_name, a1_range), [])
+
+    def has_data_validation(self, tab_name: str, a1_cell: str) -> bool:
+        return (tab_name, a1_cell) not in self.no_dropdown
 
     def row_count(self, tab_name: str) -> int:
         return 30
@@ -115,7 +121,7 @@ _ALL_GOOD_TABS = {
     "EdgeRaw": [POOL_HEADER, *EDGE_SHEET_ORDER],
     "DK Upload": list(DK_UPLOAD_HEADER),
     "Lineups": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
-    "Player Pool": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
+    "Player Pool": ["Pool", "Name", "Pos.", *LINKED_EDGE_COLUMNS],
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Bankroll": [],
     "Results": [
@@ -711,3 +717,35 @@ def test_a_workbook_not_on_eastern_time_is_reported_because_the_flex_warning_rea
     assert len(zone) == 1 and "America/Mexico_City" in zone[0].detail and "America/New_York" in zone[0].detail
     client.zone = "America/New_York"
     assert not [i for i in run_doctor(client, _base_config(), title="Week 6") if i.check == "time-zone"]
+
+
+def _control_issues(client: FakeDoctorClient) -> list:
+    return [i for i in run_doctor(client, _base_config(), title="Week 6") if i.check == "pool-control-row"]
+
+
+def test_a_healthy_add_a_player_row_is_not_flagged():
+    assert _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=_lineups_rows())) == []
+
+
+def test_a_blank_add_a_player_label_is_reported_because_the_script_finds_the_box_from_it():
+    # Found live on Weeks 5 and 6: row 1 held only the type, so the box beside the label did nothing.
+    rows = _lineups_rows()
+    rows[("Player Pool", "A1:1")] = [["GPP"]]
+    issues = _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=rows))
+    assert len(issues) == 1
+    assert "'Add a player' is missing from B1" in issues[0].detail
+    assert "add-pool-control" in issues[0].detail
+
+
+def test_a_type_cell_that_lost_its_dropdown_or_holds_junk_is_reported():
+    client = FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=_lineups_rows())
+    client.no_dropdown = {("Player Pool", "A1"), ("Player Pool", "C1")}
+    detail = _control_issues(client)[0].detail
+    assert "A1 has lost its type dropdown" in detail and "C1 has lost its name box dropdown" in detail
+
+    rows = _lineups_rows()
+    rows[("Player Pool", "A1:1")] = [["Maybe", "Add a player"]]
+    assert (
+        "type in A1 is not Cash, GPP or Both"
+        in _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=rows))[0].detail
+    )

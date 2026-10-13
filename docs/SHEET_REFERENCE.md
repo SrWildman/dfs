@@ -172,7 +172,7 @@ actually matches.
 | `OverUnder`, `Spread` | Straight passthrough of the same TFFB Vegas fields `GameEnv` is computed from. `OverUnder` (not `OU`) so it doesn't collide with Player Pool/Lineups' own `O/U`, sourced from a different tab. |
 | `Pace`, `PROE`, `Expl%` | Part C, C7 (2026-09-25): this player's own team's season-to-date offense tempo (mean seconds/snap, neutral script -- lower is faster, so its bands are reversed), pass rate over expected (neutral script), and explosive-play rate (all scrimmage plays, ≥20 pass or ≥10 rush yards) -- all three from nflverse's free play-by-play, blended with last season's full-season value early on. `Pace`/`PROE` feed `GameEnv`; `Expl%` is a readable column on its own, deliberately not one of GameEnv's inputs. See `docs/CALCULATIONS.md` for the full formulas and the early-season blend. |
 | `OppEPA` | Round 5 item 9: the opponent's EPA-per-play efficiency, from our own play-by-play -- QB/WR/TE see the opponent defense's EPA allowed per pass play, RB per rush play, DST the opposing offense's EPA/play with the sign flipped. Higher = a softer matchup for every position. Sits beside `OppPosRank` in the Game group. Blank when the opponent is missing from the pbp data, never 0. See `docs/CALCULATIONS.md`'s OppEPA section. (`ModelImplied` used to sit here; removed in item 5c -- GPS's "Implied Total" is Vegas, not a model.) |
-| `OppPosRank` | This player's OPPONENT's strength-of-schedule rank at this player's own position (1 = toughest matchup). Computed natively in Python from the already-synced `sos_qb`/`sos_rb`/`sos_wr`/`sos_te`/`sos_dst` frames (Phase 5, 2026-09-16, Sam: "all data should be in edge raw") -- the same value `PlayerPoolRaw`'s own `OppPosRank` computes via a `SoSComb` formula, just computed here without a live Sheets lookup. Blank for a position whose TFFB sync hasn't run yet, same graceful-degradation treatment as `Stadium`/`Roof`/`Wind`. |
+| `OppPosRank` | This player's OPPONENT's strength-of-schedule rank at this player's own position (**1 = the EASIEST matchup**: the defense that allows the most fantasy points above average to his position; 32 = the toughest. Checked against the data, Week 6 round. The column is coloured green at the low end). Computed natively in Python from the already-synced `sos_qb`/`sos_rb`/`sos_wr`/`sos_te`/`sos_dst` frames (Phase 5, 2026-09-16, Sam: "all data should be in edge raw") -- the same value `PlayerPoolRaw`'s own `OppPosRank` computes via a `SoSComb` formula, just computed here without a live Sheets lookup. Blank for a position whose TFFB sync hasn't run yet, same graceful-degradation treatment as `Stadium`/`Roof`/`Wind`. |
 | `GameID` | Part 7.4: this player's game, `nflverse_games`' own ID format (`"2026_02_DET_BUF"` -- season, week, away, home). Was already computed internally to join `Stadium`/`Roof`/`Wind`, just never surfaced before now. What makes a stack visible: two players sharing this value are in the same game. |
 | `TmRank` | Part 7.4: this player's salary rank within his own team AND position -- 1 is the highest-salaried player at that position on that team (read alongside `Position`: "WR1", "RB1"). **A crude proxy for target hierarchy, not a measurement of it** -- salary reflects the market's own belief, not actual target share. No colour scale, deliberately -- see `docs/CALCULATIONS.md`. |
 | `Stadium` / `Roof` | From `GamesRaw`, joined by team code. Blank if `nflverse_games` hasn't synced this run. |
@@ -517,7 +517,7 @@ Total or Remaining rows, so the markers survive it.
 
 **Lineups `Issues` (Week 6).** Per player row: `DUPLICATE`, or his `Avail` flag. On the Total row: `OVER $n`, `INCOMPLETE n/9`, `DST/QB`,
 `RB/GAME`, and **`Weak for cash: Cash % 31%`** (a lineup marked `Cash` whose `Cash %` is under 40%, `sheet_lineup_sim.CASH_WEAK_BELOW`;
-it clips at the 110 px Issues width, which Sam kept). On the **FLEX row**: **`Move Puka Nacua to FLEX (plays SNF)`** when a player of
+it clips at the 110 px Issues width, which Sam kept: every Issues cell has a note listing the full warnings of its kind, a roster row, the FLEX row or a Total row, as static text). On the **FLEX row**: **`Move Puka Nacua to FLEX (plays SNF)`** when a player of
 the flex position (the one position with a player more than its own slots hold) kicks off later than whoever is in FLEX. It stays quiet
 on a tie, when a kickoff is missing, and once either player's game has started (it reads `NOW()`, so the workbook's time zone must be
 `America/New_York`, the zone TFFB's kickoffs are written in). Rule and edge cases: `docs/CALCULATIONS.md` "The FLEX rule".
@@ -871,9 +871,10 @@ bucket's typed entry columns (A-H) and its dedupe-key column when moving
 to a new week (Fix 5H) -- the two formula columns per row and the
 Starting/Ending balance cells are never touched. `dfs bankroll sync --csv
 <file>` (or `dfs week close --csv <file>`, a thin wrapper over it)
-classifies each contest entry as Cash or GPP by payout shape (roughly half
-the field paid, or a straight head-to-head, counts as Cash; everything
-else is GPP) and appends new rows here -- it only ever writes into its
+classifies each contest entry as Cash or GPP by payout shape (a Classic contest that
+pays roughly half the field, or a straight head-to-head, counts as Cash; everything
+else is GPP, and so is every Single Stat, Showdown or Best Ball contest whatever its payout
+shape: they never feed Results' Cash Pts) and appends new rows here -- it only ever writes into its
 configured row range and dedupe-key column (`[bankroll.cash]`/
 `[bankroll.gpp]`'s `entry_key_column` in `config.toml`), never touching
 the summary figures or any other formula, and re-running is safe since

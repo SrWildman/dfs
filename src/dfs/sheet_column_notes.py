@@ -247,8 +247,9 @@ CORE_NOTES = {
         "his offense is expected to score."
     ),
     "OppPosRank": (
-        "TFFB's strength-of-schedule rank (1-32) of his opponent at his position. Noisy early in the season; "
-        "OppEPA is steadier. Coloured green at the low end."
+        "TFFB's strength-of-schedule rank (1-32) of his opponent at his position. 1 is the EASIEST matchup "
+        "(that defense allows the most points to his position), 32 the toughest, so low is green. Noisy "
+        "early in the season; OppEPA is steadier."
     ),
     "OppEPA": (
         "How soft his matchup is, in expected points added per play: the opponent's pass defense for a "
@@ -535,6 +536,32 @@ PERCENTILE_HELPER_NOTES = {
     helper: f"Hidden helper: {base}'s percentile within his position (0-100). The colour steps read it."
     for base, helper in ALL_PCT_COLUMNS.items()
 }
+
+
+# Issues cells are clipped at 110 px, so each one carries a note with the full warnings it can show. A note
+# is static text and cannot follow the formula, so each note lists every warning of its kind (a roster row,
+# the FLEX row, a Total row) rather than the one currently showing.
+ISSUES_SLOT_NOTE = (
+    "ISSUES for this pick. Blank means nothing is wrong.\n"
+    "DUPLICATE: the same player is in this lineup twice.\n"
+    "OUT or IR: he is ruled out; swap him.\n"
+    "Q: he is questionable; check the news before his game."
+)
+ISSUES_FLEX_NOTE = (
+    ISSUES_SLOT_NOTE + "\n"
+    "Move NAME to FLEX (plays TIME): someone else in this lineup kicks off later than the player in FLEX. "
+    "Put the latest kickoff in FLEX so you can still swap him late. Lineup Tools > Fix FLEX order does it. "
+    "Quiet when two players tie for the latest kickoff or a game has started."
+)
+ISSUES_TOTAL_NOTE = (
+    "ISSUES for the whole lineup. OK means none.\n"
+    "OVER $N: salary is above the cap by that much.\n"
+    "INCOMPLETE n/9: fewer than nine players.\n"
+    "DST/QB: your DST plays against your own QB, which works against you.\n"
+    "RB/GAME: two of your RBs are from the same game.\n"
+    "Weak for cash: Cash % N%: a lineup marked Cash whose simulated Cash % is under 40%.\n"
+    "More than one can show at once."
+)
 
 
 def player_tab_notes() -> dict[str, str]:

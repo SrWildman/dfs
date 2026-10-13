@@ -399,7 +399,9 @@ def build_instructions_tab(client: SheetsClient, tab: str = INSTRUCTIONS_TAB) ->
     from dfs.sheet_style import _HEADER_FMT, _TITLE_FMT, WHITE
 
     grid = render_instructions_grid()
-    client.clear_ranges(tab, [f"A1:B{_CLEAR_TO_ROW}"])
+    # Column C too: an older layout kept a link per row there, and a link left beside a row it no longer
+    # belongs to (CalPts, Suggested) reads as part of that row. The tab is two columns now.
+    client.clear_ranges(tab, [f"A1:C{_CLEAR_TO_ROW}"])
     client.update_range(tab, f"A1:B{len(grid)}", [list(grid[number]) for number in range(1, len(grid) + 1)])
     client.set_column_widths(tab, COLUMN_WIDTHS)
     client.format_range(

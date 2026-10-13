@@ -9,7 +9,7 @@ range-scoped read/update, so existing formulas are never touched and nothing
 outside the configured row range is written.
 
 Classification rule (confirmed with you directly, not guessed): a "cash"
-entry pays out roughly half the field -- 50/50s and Double-Ups included --
+entry is a Classic contest that pays out roughly half the field -- 50/50s and Double-Ups included --
 or is a straight 2-person head-to-head; everything else (tiered/top-heavy
 payouts) is GPP. Validated against your own contest history: real
 Double-Ups sit at a Places_Paid/Contest_Entries ratio of ~0.44-0.52, H2H at
@@ -66,8 +66,16 @@ def entries_for_week(entries: list[ContestEntry], week: int, season: int) -> lis
     return [e for e in entries if nfl_calendar.season_week_for_date(e.contest_date.date(), season) == week]
 
 
+CLASSIC_GAME_TYPE = "Classic"
+
+
 def classify_entry(entry: ContestEntry) -> str:
-    """Returns "cash" or "gpp"."""
+    """Returns "cash" or "gpp". Only a Classic contest can be "cash": Single Stat, Showdown and Best Ball
+    pay by their own rules (found live on Week 4: a $1 Single Stat contest, 3 of 7 paid, fell inside the cash
+    band and fed Cash Pts and Cash Results a score that was not the cash lineup's). Their money still lands
+    in the GPP ledger, so the bankroll stays whole."""
+    if entry.game_type.strip().lower() != CLASSIC_GAME_TYPE.lower():
+        return "gpp"
     if not entry.contest_entries:
         return "gpp"
     ratio = (entry.places_paid or 0) / entry.contest_entries

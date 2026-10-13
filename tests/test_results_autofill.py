@@ -50,6 +50,18 @@ def test_cash_pts_is_the_points_of_a_cash_classified_entry():
     assert results[1].cash_pts == 131.5
 
 
+def test_a_single_stat_contest_never_feeds_cash_pts():
+    # Week 4, found live: the Single Stat contest (3 of 7 paid) came first in the export and its 344 points
+    # became Cash Pts; the real cash lineup scored 104.38.
+    entries = [
+        _entry(entry_key="ss", game_type="Single Stat", points=344.0, contest_entries=7, places_paid=3),
+        _entry(entry_key="cash", points=104.38, contest_entries=100, places_paid=50),
+    ]
+    assert compute_week_results(entries, _SEASON)[1].cash_pts == 104.38
+    only_single_stat = [e for e in entries if e.entry_key == "ss"]
+    assert compute_week_results(only_single_stat, _SEASON)[1].cash_pts is None
+
+
 def test_cash_pts_is_none_when_no_cash_entry_has_scored_yet():
     entries = [_entry(entry_key="gpp1", points=None, contest_entries=1000, places_paid=100)]
     results = compute_week_results(entries, _SEASON)

@@ -65,9 +65,14 @@ def _read_header(client: SheetsClient, player_pool_tab: str) -> list[str]:
 
 
 def _already_migrated(client: SheetsClient, player_pool_tab: str) -> bool:
-    """True when some cell of row 1 reads the control label (a column move may have shifted it from A)."""
+    """True when the control row is already inserted: some cell of row 1 reads the label (a column move may
+    have shifted it from A), or the real header already sits one row down. The second test matters: a row 1
+    whose label was wiped (found live on Weeks 5 and 6) would otherwise look un-migrated, and inserting
+    another row would push the header and every block down a row."""
     values = client.read_range(player_pool_tab, f"A{PLAYER_POOL_CONTROL_ROW}:{PLAYER_POOL_CONTROL_ROW}")
-    return bool(values and LABEL_TEXT in values[0])
+    if values and LABEL_TEXT in values[0]:
+        return True
+    return "Name" in _read_header(client, player_pool_tab)
 
 
 def ensure_pool_control_row(client: SheetsClient, player_pool_tab: str, edge_tab: str) -> str:

@@ -45,6 +45,14 @@ def column_letter(index: int) -> str:
     return letters
 
 
+def column_index(a1_cell: str) -> int:
+    """The 0-indexed column of an A1 cell or column ("C1" -> 2, "AA7" -> 26): `column_letter`'s inverse."""
+    n = 0
+    for ch in a1_cell.rstrip("0123456789"):
+        n = n * 26 + (ord(ch.upper()) - 64)
+    return n - 1
+
+
 def _gradient_rule(
     grid_ranges: list[dict],
     *,
@@ -991,6 +999,25 @@ class SheetsClient:
                 found = True
         return found
 
+    def has_data_validation(self, tab_name: str, a1_cell: str) -> bool:
+        """True when the cell carries any data-validation rule (a dropdown), whatever it lists: `dfs doctor`
+        checks that Player Pool's add-a-player controls are still dropdowns."""
+        sheet, _ = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(
+            params={
+                "includeGridData": True,
+                "ranges": [f"'{tab_name}'!{a1_cell}"],
+                "fields": "sheets(data(rowData(values(dataValidation(condition(type))))))",
+            }
+        )
+        for s in meta.get("sheets", []):
+            for block in s.get("data", []):
+                for row in block.get("rowData", []):
+                    for cell in row.get("values", []):
+                        if cell.get("dataValidation"):
+                            return True
+        return False
+
     def time_zone(self) -> str:
         """The workbook's time zone (File > Settings), e.g. `America/New_York`."""
         sheet = self._open()
@@ -1806,6 +1833,24 @@ class SheetsClient:
                 ]
             }
         )
+
+    def set_cell_notes(self, tab_name: str, notes: dict[str, str]) -> None:
+        """Set the note on each cell of `notes` (A1 cell -> text) in ONE `batchUpdate`, one `updateCells`
+        request per cell. Values, formulas and formats are untouched (the field mask is `note` only)."""
+        if not notes:
+            return
+        sheet, ws = self._ws(tab_name)
+        requests = [
+            {
+                "updateCells": {
+                    "range": a1_range_to_grid_range(a1, ws.id),
+                    "rows": [{"values": [{"note": text}]}],
+                    "fields": "note",
+                }
+            }
+            for a1, text in notes.items()
+        ]
+        sheet.batch_update({"requests": requests})
 
     def set_row_notes(self, tab_name: str, row: int, notes: list[str], *, first_col: int = 0) -> None:
         """Set the note on each cell of `row` from 0-based column `first_col`, in ONE request: `notes[i]`

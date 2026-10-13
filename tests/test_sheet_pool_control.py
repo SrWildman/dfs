@@ -17,8 +17,17 @@ _HEADER = list(PLAYER_POOL_COLUMN_ORDER)  # the designed header: Pool, Name, Pos
 
 
 class SpyClient:
-    def __init__(self, label_in_row_one: bool = False, header: list[str] | None = None):
+    def __init__(
+        self,
+        label_in_row_one: bool = False,
+        header: list[str] | None = None,
+        *,
+        header_below: bool | None = None,
+    ):
         self._label_in_row_one = label_in_row_one
+        # Whether the real header already sits in row 2 (the control row was inserted before); a fresh sheet
+        # has none there until `insert_rows` runs.
+        self._header_below = label_in_row_one if header_below is None else header_below
         # Wider than Z (26 columns) by default -- proves the reset range is derived from the tab's own width.
         self._header = header if header is not None else _HEADER
         self.insert_calls: list[tuple[str, int, int]] = []
@@ -33,7 +42,7 @@ class SpyClient:
         if a1_range == f"A{_ROW}:{_ROW}":
             return [["", "Add a player"]] if self._label_in_row_one else []
         if a1_range == f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}":
-            return [self._header]
+            return [self._header] if self._header_below or self.insert_calls else [["Roger Goodell"]]
         raise AssertionError(f"unexpected read_range: {a1_range!r}")
 
     def insert_rows(self, tab_name: str, *, at_row: int, count: int) -> None:
@@ -89,6 +98,17 @@ def test_already_migrated_sheet_does_not_insert_again_wherever_the_label_now_sit
     result = ensure_pool_control_row(client, "Player Pool", "EdgeRaw")
 
     assert client.insert_calls == []
+    assert "refresh" in result
+
+
+def test_a_wiped_label_is_restored_without_inserting_another_row():
+    # Found live on Weeks 5 and 6: row 1 held only the type, the label blank. Not "fresh": the header is
+    # already in row 2, so a second insert would push every block down a row.
+    client = SpyClient(label_in_row_one=False, header_below=True)
+    result = ensure_pool_control_row(client, "Player Pool", "EdgeRaw")
+
+    assert client.insert_calls == []
+    assert ("B1", [["Add a player"]]) in client.update_calls
     assert "refresh" in result
 
 
