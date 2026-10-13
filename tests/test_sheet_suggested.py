@@ -209,3 +209,10 @@ def test_build_views_creates_the_tab_empty_and_never_touches_one_that_exists():
     assert created.written[1][0][0] == ss.TITLE
     present = _Client(exists=True)
     assert "already present" in ss.ensure_suggested_tab(present) and present.written is None
+
+
+def test_a_tab_nothing_has_written_to_says_it_has_not_been_run_instead_of_showing_zeros():
+    layout = ss.build_layout(
+        SuggestReport(), pd.DataFrame({"Name": []}), metric="CalPts", cash_line=0.0, gpp_target=0.0
+    )
+    assert layout.rows[1][0] == "Not run yet: `dfs lineups suggest` fills this tab from your pool."

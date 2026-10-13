@@ -75,6 +75,8 @@ def projection_label(metric: str) -> str:
 def status_line(report: SuggestReport, *, metric: str, cash_line: float, gpp_target: float) -> str:
     """ "CalPts · pool 47 Cash / 51 GPP · cash line 143.9 · GPP target 190 · 8 builds in 3 s"."""
     pool = report.candidates
+    if not pool and not report.builds:  # nothing has been run yet (a fresh template or week)
+        return "Not run yet: `dfs lineups suggest` fills this tab from your pool."
     return (
         f"{metric}  ·  pool {pool.get('cash', 0)} for Cash / {pool.get('gpp', 0)} for GPP  ·  cash line "
         f"{cash_line:g}  ·  GPP target {gpp_target:g}  ·  {len(report.builds)} build"
