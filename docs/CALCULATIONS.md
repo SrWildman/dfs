@@ -1376,7 +1376,12 @@ the scored table.
 **Status of the parser: UNVERIFIED.** It was written in a session that could not reach the-odds-api.com. The response
 shape and the seven market keys (`props.MARKETS`) are from memory of their v4 docs, `tests/fixtures/odds_api/
 synthetic_event_odds.json` is invented, and `props.PARSER_ASSUMPTIONS` lists every assumption. The parser is tolerant
-(it skips and counts what it cannot read, `quotes.attrs["skipped"]`). The local session's recorded
+(it skips and counts what it cannot read, `quotes.attrs["skipped"]`). **Prices may be decimal or American** (whichever `oddsFormat` the request asked for; the first real response
+was American: -115, +110, +320). `parse_event_odds(odds_format="auto")`, the default, reads them as American if any price in
+the payload is negative or at least 100 in size, else decimal, logs which, and keeps it in `quotes.attrs["odds_format"]`;
+`"decimal"`/`"american"` force it. Read as decimal, every negative American price is skipped and whole markets vanish
+(`tests/fixtures/odds_api/synthetic_event_odds_american.json` pins this). Every anytime-TD quote in that response is Yes-only,
+so the `ANYTD_YES_ONLY_VIG` haircut (below) is the path real data takes. The local session's recorded
 `tests/fixtures/odds_api/event_odds_sample.json` is the authority; `test_recorded_sample_parses` runs on it when it exists.
 
 1. **De-vig** each book's pair multiplicatively: `p_over = (1/o_over) / (1/o_over + 1/o_under)` on decimal prices

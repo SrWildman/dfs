@@ -21,12 +21,18 @@ from dfs.dk_scoring import DK_OFFENSE_SCORING, YARDAGE_BONUS_POINTS
 
 FIXTURES = Path(__file__).parent / "fixtures" / "odds_api"
 SYNTHETIC = FIXTURES / "synthetic_event_odds.json"
+SYNTHETIC_AMERICAN = FIXTURES / "synthetic_event_odds_american.json"
 RECORDED = FIXTURES / "event_odds_sample.json"
 
 
 @pytest.fixture(scope="module")
 def event():
     return json.loads(SYNTHETIC.read_text())
+
+
+@pytest.fixture(scope="module")
+def american_event():
+    return json.loads(SYNTHETIC_AMERICAN.read_text())
 
 
 @pytest.fixture(scope="module")
@@ -96,6 +102,131 @@ def test_parser_reads_every_modelled_market_and_skips_the_rest(event):
         "fanduel",
     ]
     assert one["event_id"].unique().tolist() == ["synthetic-event-0001"]
+
+
+def _outcome_count(payload, *, modelled_only=True):
+    return sum(
+        len(m["outcomes"])
+        for e in props._events(payload)
+        for b in e["bookmakers"]
+        for m in b["markets"]
+        if not modelled_only or m["key"] in props.MARKETS
+    )
+
+
+def test_detect_odds_format():
+    def payload(*prices):
+        outcomes = [{"name": "Over", "description": "X", "price": p, "point": 5.5} for p in prices]
+        return {"bookmakers": [{"key": "b", "markets": [{"key": "player_receptions", "outcomes": outcomes}]}]}
+
+    assert props.detect_odds_format(payload(1.91, 1.91, 2.5)) == "decimal"
+    assert props.detect_odds_format(payload(-115, -105)) == "american"  # a negative price
+    assert props.detect_odds_format(payload(1.91, -115)) == "american"  # one is enough
+    assert props.detect_odds_format(payload(110, 320)) == "american"  # positive-only, size >= 100
+    assert props.detect_odds_format(payload(99.0)) == "decimal"  # under 100 and positive: a decimal price
+    assert props.detect_odds_format(payload(100)) == "american"
+    assert props.detect_odds_format({}) == "decimal"  # nothing to read
+    assert props.detect_odds_format(None) == "decimal"
+
+
+def test_detection_reads_every_market_not_just_the_modelled_ones():
+    payload = {
+        "bookmakers": [
+            {"key": "b", "markets": [{"key": "h2h", "outcomes": [{"name": "KC", "price": -185}]}]},
+        ]
+    }
+    assert props.detect_odds_format(payload) == "american"
+
+
+def test_auto_reads_the_decimal_fixture_as_decimal(event):
+    quotes = props.parse_event_odds(event)
+    assert quotes.attrs["odds_format"] == "decimal"
+    assert quotes.equals(props.parse_event_odds(event, odds_format="decimal"))
+
+
+def test_auto_picks_american_for_the_american_fixture_and_skips_nothing(american_event):
+    quotes = props.parse_event_odds(american_event)
+    assert quotes.attrs["odds_format"] == "american"
+    assert quotes.attrs["skipped"] == 0
+    assert len(quotes) == _outcome_count(american_event)  # every outcome of every modelled market
+    assert set(quotes["market"]) == set(props.MARKETS)
+    assert (quotes["price"] > 1.0).all()
+    # prices came out DECIMAL: -115 -> 1 + 100/115, +110 -> 2.10, +320 -> 4.20
+    dk = quotes[(quotes["book"] == "draftkings") & (quotes["player"] == "Patrick Mahomes")]
+    over = dk[(dk["market"] == "player_pass_yds") & (dk["side"] == "over")]["price"].iloc[0]
+    assert over == pytest.approx(1 + 100 / 115)
+    td = quotes[(quotes["market"] == "player_anytime_td") & (quotes["player"] == "Patrick Mahomes")]
+    assert sorted(td["price"].round(2)) == [4.2, 4.5, 5.0]  # +320, +350, +400
+
+
+def test_reading_american_prices_as_decimal_is_what_lost_the_negative_ones(american_event):
+    """The regression this default fixes: with `odds_format="decimal"` every negative price is skipped, so a
+    market whose quotes are all negative (here, player_pass_yds at one book is -110/-110) loses its quotes."""
+    decimal = props.parse_event_odds(american_event, odds_format="decimal")
+    assert decimal.attrs["skipped"] > 0
+    assert len(decimal) < _outcome_count(american_event)
+    assert props.parse_event_odds(american_event, odds_format="american").attrs["skipped"] == 0
+
+
+def test_an_explicit_format_overrides_detection(event, american_event):
+    forced = props.parse_event_odds(american_event, odds_format="american")
+    assert forced.attrs["odds_format"] == "american"
+    assert props.parse_event_odds(event, odds_format="decimal").attrs["odds_format"] == "decimal"
+    with pytest.raises(ValueError, match="auto"):
+        props.parse_event_odds(event, odds_format="fractional")
+
+
+def test_the_format_used_is_logged(american_event, event, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="dfs.props"):
+        props.parse_event_odds(american_event)
+        props.parse_event_odds(event)
+    messages = [r.getMessage() for r in caplog.records]
+    assert "props: reading prices as american odds" in messages
+    assert "props: reading prices as decimal odds" in messages
+
+
+def test_american_pair_devig_by_hand():
+    # -115 / -105 = decimal 1.869565 / 1.952381: implied 115/215 = 0.534884 and 105/205 = 0.512195 -> 0.510834
+    over = props.devig_multiplicative(props.american_to_decimal(-115), props.american_to_decimal(-105))
+    assert over == pytest.approx(0.534884 / (0.534884 + 0.512195), abs=1e-6)
+    assert over == pytest.approx(0.510834, abs=1e-6)
+
+
+def test_the_whole_chain_on_american_odds_with_yes_only_anytime_tds(american_event, pool):
+    quotes = props.parse_event_odds(american_event)
+    books = props.book_probabilities(quotes)
+    td = books[books["stat"] == "td"]
+    assert set(td["p_method"]) == {"yes_only"}  # no "No" side anywhere, as in the real response
+    # FanDuel Pacheco +150 = 2.50: (1/2.5) / 1.08
+    row = td[(td["player"] == "Isiah Pacheco") & (td["book"] == "fanduel")].iloc[0]
+    assert row["p"] == pytest.approx(0.4 / (1 + props.ANYTD_YES_ONLY_VIG))
+    consensus = props.consensus_lines(books)
+    mahomes = consensus[(consensus["player"] == "Patrick Mahomes") & (consensus["stat"] == "pass_yd")].iloc[0]
+    assert mahomes["line"] == 275.5 and mahomes["n_books"] == 3
+    scored, unmatched = props.props_from_responses(american_event, pool)  # default odds_format="auto"
+    assert unmatched.empty
+    assert scored["PropPts"].notna().all()
+    assert sorted(scored["Name"]) == [
+        "Isiah Pacheco",
+        "Josh Allen",
+        "Patrick Mahomes",
+        "Rashee Rice",
+        "Travis Kelce",
+    ]
+    # Allen quoted no anytime TD and no INT market: a QB needs neither, and the INT fallback is flagged
+    allen = scored.set_index("Name").loc["Josh Allen"]
+    assert "int:league" in allen["Flags"]
+    # every anytime TD in this response is Yes-only, so every player who has one is flagged
+    assert all(
+        "td:yes_only" in flags
+        for name, flags in zip(scored["Name"], scored["Flags"], strict=True)
+        if name != "Josh Allen"
+    )
+    by_name = scored.set_index("Name")
+    assert 14 < by_name.loc["Patrick Mahomes", "PropPts"] < 26
+    assert by_name.loc["Travis Kelce", "PropPts"] > 0
 
 
 def test_parser_accepts_a_list_of_events_and_the_historical_wrapper(event):

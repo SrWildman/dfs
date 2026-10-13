@@ -165,7 +165,7 @@ PARSER_ASSUMPTIONS = (
     "bookmaker: key (or title), last_update, markets[]",
     "market: key (one of MARKETS), last_update, outcomes[]",
     "outcome: name in Over/Under/Yes/No, description = the player, price, point = the line (none for Yes/No)",
-    "price is DECIMAL (the API's default oddsFormat); pass odds_format='american' if requested that way",
+    "price is DECIMAL or AMERICAN (the request's oddsFormat); odds_format='auto' (default) detects which",
     "player_anytime_td: name 'Yes' + description = player; a missing description means name is the player",
 )
 
@@ -211,15 +211,44 @@ def _number(value: object) -> float | None:
     return None if math.isnan(number) else number
 
 
-def parse_event_odds(payload: object, *, odds_format: str = "decimal") -> pd.DataFrame:
+ODDS_FORMATS = ("auto", "decimal", "american")
+# A decimal price is a payout multiple (1.01 upward) and never negative; an American price is at least 100 in
+# size, positive or negative. So one negative price, or one whose size is 100 or more, can only be American.
+# (A decimal price of 100+ would be misread, but no prop is quoted at +9900.)
+AMERICAN_MIN_ABS_PRICE = 100.0
+
+
+def detect_odds_format(payload: object) -> str:
+    """`"american"` if any price in the payload is negative or at least `AMERICAN_MIN_ABS_PRICE` in size,
+    else `"decimal"` (also for a payload with no readable price). Every market in a response shares one
+    format (it is a request parameter), so the whole payload is scanned, h2h and spreads included."""
+    for event in _events(payload):
+        for book in event.get("bookmakers") or []:
+            for market in book.get("markets") or []:
+                for outcome in market.get("outcomes") or []:
+                    price = _number(outcome.get("price"))
+                    if price is not None and (price < 0 or abs(price) >= AMERICAN_MIN_ABS_PRICE):
+                        return "american"
+    return "decimal"
+
+
+def parse_event_odds(payload: object, *, odds_format: str = "auto") -> pd.DataFrame:
     """Flatten The Odds API event-odds response(s) into one row per quoted outcome, `QUOTE_COLUMNS`.
+
+    `odds_format` is how the response's prices are written: `"decimal"`, `"american"`, or `"auto"` (the
+    default: `detect_odds_format`). The API returns whatever `oddsFormat` the request asked for, and a real
+    response came back American (-115, +110, +320): read as decimal every negative price was skipped, which
+    silently removed whole markets. The format used is logged and kept in `result.attrs["odds_format"]`.
 
     Tolerant by design: a market we do not model, an outcome without a player, a price we cannot read, a
     bookmaker with no markets are skipped, never raised; the count is logged and kept in `result.attrs
     ["skipped"]` so a real file shows what the parser did not understand. `price` comes out DECIMAL.
     `line` is NaN for Yes/No quotes."""
-    if odds_format not in ("decimal", "american"):
-        raise ValueError("odds_format must be 'decimal' or 'american'")
+    if odds_format not in ODDS_FORMATS:
+        raise ValueError(f"odds_format must be one of {', '.join(ODDS_FORMATS)}")
+    if odds_format == "auto":
+        odds_format = detect_odds_format(payload)
+    log.info("props: reading prices as %s odds", odds_format)
     rows: list[dict] = []
     skipped = 0
     for event in _events(payload):
@@ -272,6 +301,7 @@ def parse_event_odds(payload: object, *, odds_format: str = "decimal") -> pd.Dat
                     )
     out = pd.DataFrame(rows, columns=QUOTE_COLUMNS)
     out.attrs["skipped"] = skipped
+    out.attrs["odds_format"] = odds_format
     if skipped:
         log.warning("props: skipped %d outcome(s) the parser could not read", skipped)
     return out
@@ -651,7 +681,7 @@ def props_from_responses(
     players: pd.DataFrame,
     *,
     qb_int_rates: Mapping[str, float] | None = None,
-    odds_format: str = "decimal",
+    odds_format: str = "auto",
     min_books: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """The whole chain for one or more event responses: parse, de-vig, consensus, score. Returns
