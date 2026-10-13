@@ -34,7 +34,12 @@ def analyze(
         "--standings",
         help="A folder of contest-standings-<id>.csv files and/or zips of them (searched recursively).",
     ),
-    out: Path = typer.Option(CONTESTS_DIR, "--out", help="Where the log and the CSVs are written."),
+    out: Path = typer.Option(
+        CONTESTS_DIR,
+        "--out",
+        help="Where the log and the CSVs are written.",
+        show_default="data/contests",
+    ),
     me: str = typer.Option(series_mod.MY_USERNAME, "--me", help="Your DraftKings username."),
     players: Path = typer.Option(
         None,
