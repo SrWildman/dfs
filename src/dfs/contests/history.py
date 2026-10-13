@@ -18,8 +18,8 @@ Derived columns (`DERIVED_COLUMNS`):
 - `Slate`: `main` if the contest starts Sunday 12:00-17:59 ET (the repo's definition of the Sunday-afternoon
   main slate, `sources/dk_salaries._is_sunday_afternoon`), else `other` (Thursday, Monday, SNF-only, ...).
   Only `main` Classic contests are comparable with the main-slate scoring index.
-- `Series`, `Format`, `Matchup`, `Opponent`, `Entry_No`, `Entry_Max`, `Bankroll_Class`, `Format_Class`:
-  `series.classify`.
+- `Series`, `Format`, `Matchup`, `Opponent`, `Entry_No`, `Entry_Max`, `Bankroll_Class`, `Format_Class`,
+  `Multiple` (a Multiplier contest's 3, 5, 10 ... times the fee, else blank): `series.classify`.
 """
 
 from __future__ import annotations
@@ -65,6 +65,7 @@ DERIVED_COLUMNS = [
     "Entry_Max",
     "Bankroll_Class",
     "Format_Class",
+    "Multiple",
 ]
 LOG_COLUMNS = HISTORY_COLUMNS + DERIVED_COLUMNS
 
@@ -183,6 +184,7 @@ def enrich(df: pd.DataFrame, *, me: str = series_mod.MY_USERNAME) -> pd.DataFram
                 "" if info.entry_max is None else info.entry_max,
                 info.bankroll_class,
                 info.format_class,
+                "" if info.multiple is None else f"{info.multiple:g}",
             ]
         )
     derived = pd.DataFrame(rows, columns=DERIVED_COLUMNS, dtype=str)
@@ -292,6 +294,7 @@ def typed(log: pd.DataFrame) -> pd.DataFrame:
             "format": log["Format"],
             "opponent": log["Opponent"],
             "matchup": log["Matchup"],
+            "multiple": pd.to_numeric(log["Multiple"], errors="coerce"),
             "place": log["Place"].map(count).astype("Int64"),
             "points": log["Points"].map(number).astype("Float64"),
             "entries": log["Contest_Entries"].map(count).astype("Int64"),

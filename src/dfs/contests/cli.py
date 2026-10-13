@@ -40,8 +40,9 @@ def analyze(
     players: Path = typer.Option(
         None,
         "--players",
-        help="CSV of that week's players: Name, Team, Position, Opponent and optionally Salary "
-        "(EdgeRaw has them). Without it the field's stack, bring-back and salary measures are blank.",
+        help="CSV of players: Name, Team, Position, Opponent and optionally Salary (EdgeRaw has them), "
+        "with Season and Week columns to cover several weeks. Without it each week's players come from "
+        "the last DraftKings salary snapshot before that week's lock (data/raw/draftkings).",
     ),
     index_candidate: str = typer.Option(
         slate_index.SELECTED,
@@ -59,7 +60,8 @@ def analyze(
     touches a sheet and never contacts DraftKings."""
     # Imported here, not at module level: the group is registered on every `dfs` start, and this is an
     # unfinished command that must not add import cost or a failure point to the standard week.
-    from dfs.contests import analysis, history
+    from dfs.contests import analysis, history, week_frames
+    from dfs.paths import RAW_DIR
 
     if index_candidate != analysis.NO_INDEX and index_candidate not in slate_index.CANDIDATES:
         console.print(f"[red]Unknown --slate-index {escape(index_candidate)}[/red]")
@@ -81,6 +83,7 @@ def analyze(
             me=me,
             index_candidate=index_candidate,
             index_file=index_file,
+            frames=lambda season, week: week_frames.week_frame(RAW_DIR / "draftkings", season, week),
         )
     except (history.HistoryError, ValueError) as e:
         console.print(f"[red]FAIL[/red] {escape(str(e))}")

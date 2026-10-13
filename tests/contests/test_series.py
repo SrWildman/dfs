@@ -94,20 +94,67 @@ def test_a_public_nfl_contest_with_by_in_its_name_is_not_private():
     assert classify("Classic", "NFL $5K Pass by Pass [Single Entry]").format == S.SE_GPP
 
 
-@pytest.mark.parametrize("name", ["NFL 10x Booster [Top 5 Win $100]", "NFL $10 Quintuple Up [Top 5 Win $50]"])
-def test_small_top_heavy_contests(name):
-    info = classify("Classic", name, entries=20, paid=5)
-    assert (info.format, info.series) == (S.SMALL_TOP_HEAVY, name)
+@pytest.mark.parametrize(
+    ("name", "fee", "multiple"),
+    [
+        ("Casual NFL $1 Triple Up [Top 9 Win $3]", 1, 3),
+        ("Beginner NFL $5 Triple Up [Top 9 Win $15]", 5, 3),
+        ("NFL $10 Quintuple Up [Top 5 Win $50]", 10, 5),
+        ("NFL 10x Booster [Top 5 Win $100]", 10, 10),
+        ("NFL BIG 40x Micro Booster [Top 50 Win $10]", 0.25, 40),
+        ("NFL $2 Big Prize [Top 10 Win $14]", 2, 7),  # no keyword: prize / fee
+    ],
+)
+def test_multiplier_contests_carry_their_multiple(name, fee, multiple):
+    info = classify("Classic", name, fee=fee, entries=31, paid=9)
+    assert (info.format, info.series, info.multiple) == (S.MULTIPLIER, name, multiple)
+    assert info.format_class == "gpp"
 
 
-def test_small_top_heavy_boundaries():
-    assert classify("Classic", "NFL x", entries=99, paid=5).format == S.SMALL_TOP_HEAVY
-    assert classify("Classic", "NFL x", entries=100, paid=5).format == S.OTHER  # field not under 100
-    assert classify("Classic", "NFL x", entries=99, paid=6).format == S.OTHER  # more than 5 places
-    assert classify("Classic", "NFL x", entries=99, paid=0).format == S.OTHER  # nothing paid recorded
+def test_triple_option_is_not_a_multiplier():
+    info = classify("Classic", "NFL $10K Triple Option [3 Entry Max] (1/3)", fee=3, entries=3963, paid=1018)
+    assert info.format == S.N_MAX_GPP and info.multiple is None
 
 
-def test_a_small_double_up_is_a_double_up_not_top_heavy():
+def test_a_showdown_multiplier_stays_showdown():
+    info = classify(
+        "Showdown Captain Mode", "Beginner NFL Showdown $1 Triple Up [Top 9 Win $3] (PIT vs MIA)", fee=1
+    )
+    assert info.format == S.SHOWDOWN and info.multiple is None
+
+
+@pytest.mark.parametrize(
+    "name", ["Beginner NFL $1 50-50 (Primetime)", "Beginner NFL $3 50-50", "NFL $5 50/50"]
+)
+def test_a_hyphenated_50_50_is_the_50_50_format_even_in_a_tiny_field(name):
+    info = classify("Classic", name, fee=3, entries=10, paid=5)
+    assert info.format == S.FIFTY_FIFTY and info.format_class == "cash"
+
+
+def test_the_footballers_weekly_contest_is_its_own_series_in_the_se_gpp_format():
+    info = classify("Classic", "Footballers NFL Weekly Contest", fee=5, entries=493, paid=163)
+    assert (info.format, info.series, info.format_class) == (
+        S.SE_GPP,
+        "Footballers NFL Weekly Contest",
+        "gpp",
+    )
+
+
+def test_the_footballers_pod_contest_stays_private():
+    info = classify("Classic", "Footballers DFS Pod Weekly by kborgognoni #57", fee=5, entries=75, paid=5)
+    assert (info.format, info.series) == (S.PRIVATE, "Footballers DFS Pod Weekly by kborgognoni")
+
+
+def test_a_private_contest_with_a_dollar_amount_in_its_name_is_private():
+    info = classify("Classic", "$1 THURSDAY - MONDAY SLATE 100 by bradikal36 #3", fee=1, entries=11, paid=1)
+    assert (info.format, info.series) == (S.PRIVATE, "$1 THURSDAY - MONDAY SLATE 100 by bradikal36")
+
+
+def test_a_small_field_with_few_places_paid_is_no_longer_a_format_of_its_own():
+    assert classify("Classic", "NFL x", entries=99, paid=5).format == S.OTHER
+
+
+def test_a_small_double_up_is_a_double_up():
     assert classify("Classic", "NFL $2 Double Up", entries=10, paid=4).format == S.DOUBLE_UP
 
 

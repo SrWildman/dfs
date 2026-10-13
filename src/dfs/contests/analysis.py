@@ -60,6 +60,7 @@ class Analysis:
     h2h_bands: pd.DataFrame = field(default_factory=pd.DataFrame)
     h2h_opponents: pd.DataFrame = field(default_factory=pd.DataFrame)
     warnings: list[str] = field(default_factory=list)
+    frame_sources: dict[tuple[int, int], str] = field(default_factory=dict)  # (season, week) -> snapshot used
 
 
 def _median(values: pd.Series) -> float:
@@ -155,6 +156,7 @@ def run(
     index_candidate: str = slate_index.SELECTED,
     index_file: Path | None = None,
     fetch_season: Callable[[int], pd.DataFrame] | None = slate_index.compute_season,
+    frames: Callable[[int, int], tuple[pd.DataFrame | None, str]] | None = None,
 ) -> Analysis:
     out_dir = Path(out_dir)
     result = Analysis(out_dir=out_dir)
@@ -168,6 +170,29 @@ def run(
     result.disagreements = series_mod.crosscheck(result.log)
 
     frame = _read_players(players) if isinstance(players, Path) else players
+    week_cache: dict[tuple[int, int], pd.DataFrame | None] = {}
+
+    def players_for(season: int | None, week: int | None) -> pd.DataFrame | None:
+        """The players frame of one contest's week: a supplied frame with `Season`/`Week` columns is cut to
+        the contest's week; one without them is used as is; with none, `frames` builds the week's."""
+        if frame is not None:
+            if season is None or week is None or "Week" not in frame.columns:
+                return frame
+            keep = frame["Week"] == week
+            if "Season" in frame.columns:
+                keep &= frame["Season"] == season
+            return frame[keep]
+        if frames is None or season is None or week is None:
+            return None
+        if (season, week) not in week_cache:
+            built, note = frames(season, week)
+            week_cache[(season, week)] = built
+            if built is None:
+                result.warnings.append(f"no players frame for Week {week} {season}: {note}")
+            else:
+                result.frame_sources[(season, week)] = note
+        return week_cache[(season, week)]
+
     log_by_contest = (
         result.typed.drop_duplicates("contest_key").set_index("contest_key") if len(result.typed) else None
     )
@@ -246,7 +271,7 @@ def run(
                 profile_inputs.append((prof, fmt, name, season, week))
             if len(parsed.lineup_errors):
                 error_rows.append(parsed.lineup_errors.assign(contest_id=parsed.contest_id))
-            stats = field_mod.field_stats(parsed, frame, me=me)
+            stats = field_mod.field_stats(parsed, players_for(season, week), me=me)
             if stats.skipped:
                 result.warnings.append(
                     f"contest {source.contest_id}: field measures skipped ({stats.skipped})"
@@ -353,6 +378,8 @@ def summary_lines(result: Analysis) -> list[str]:
                 if sub["avg_unspent"].notna().any()
                 else f"field [{group}] {len(sub)} contest(s): QB+1 {_pct(sub['qb_stack1'].mean())}"
             )
+    for (season, week), snapshot in sorted(result.frame_sources.items()):
+        lines.append(f"players for Week {week} {season}: {snapshot}")
     if len(result.field_unmatched):
         lines.append(f"{len(result.field_unmatched)} lineup player name(s) unmatched (field_unmatched.csv)")
     if len(result.lineup_errors):

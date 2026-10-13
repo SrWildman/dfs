@@ -76,10 +76,11 @@ by bradikal36`). The **format** is decided by `Game_Type` first, then:
 | anything but Classic / a Showdown type | | `Other` (Best Ball, Snake, Madden Classic, Single Stat, **In-Game Showdown**) |
 | a Showdown type (`Showdown`, `Showdown Captain Mode`, `KFC Sunday Night Showdown Series`, ...) | | `Showdown` |
 | Classic | fee $0 | `Freeroll` |
-| | name has `by <user>`, no `NFL`, no `$` | `Private` |
+| | name has `by <user>`, does not start with `NFL`, is not "presented by" | `Private` |
 | | name `$N a vs. b`, or exactly 2 entries | `H2H` |
-| | name says `Double Up` / `50/50` | `Double Up` / `50/50` |
-| | fewer than 100 entries and 1-5 places paid | `Small top-heavy` |
+| | name says `Double Up` / `50/50` (or `50-50`) | `Double Up` / `50/50` |
+| | name says Triple/Quintuple Up, `Nx Booster`, or has a `[Top N Win $X]` bracket | `Multiplier` (`Multiple` column: 3, 5, 10 ... from the name, else prize / fee) |
+| | name is exactly `Footballers NFL Weekly Contest` | `SE GPP` (its own series) |
 | | `[Single Entry]` / `[1 Entry Max]` | `SE GPP` |
 | | `[N Entry Max]` N > 1, or a counter `(x/N)` N > 1 | `N-max GPP` |
 | | nothing above | `Other` (listed in the summary so a rule can be added) |
@@ -227,7 +228,7 @@ Each is a one-line change if you disagree.
 4. In-Game Showdown is `Other`, not `Showdown` (a quarter-long contest on a different scale).
 5. A Showdown freeroll is `Showdown`; a Classic freeroll is `Freeroll`. A paid 2-entry Classic with no `vs.` in
    the name is H2H.
-6. `Private` = `by <user>` in the name with no `NFL` and no `$`; the trailing `#5` is dropped so weekly
+6. `Private` = `by <user>` in a name that does not start with `NFL` (a `$` amount in it is fine; "presented by" is not a creator); the trailing `#5` is dropped so weekly
    instances share a series. This rests on the one example you gave.
 7. Pass catchers are WR and TE only; the bring-back excludes the DST (that is `dst_vs_qb`); the DST counts as a
    player in the five-most-owned set.
