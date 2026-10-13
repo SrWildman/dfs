@@ -242,6 +242,79 @@ def test_choose_skips_lookalikes_and_enforces_the_exposure_cap():
     assert ls.exposure_cap(5) == 3 and ls.exposure_cap(3) == 2 and ls.exposure_cap(1) == 1
 
 
+def _scored(names, p_gpp=0.0, projection=100.0, salary=50000):
+    return ls.Scored(tuple(P(n, "WR") for n in names), projection, salary, p_gpp, p_gpp, 100.0, 120.0)
+
+
+def test_choose_is_the_same_whatever_order_the_candidates_arrive_in():
+    """Probabilities are counts of draws, so ties are everywhere: the order may not come from the input."""
+    import random
+
+    candidates = [
+        _scored([f"p{i}{j}" for j in range(9)], p_gpp=(i % 3) / 100, projection=100.0 + (i % 2))
+        for i in range(30)
+    ]
+    expected = [s.players for s in ls.choose(candidates, 4, key=ls.gpp_key, max_per_player=2)]
+    for seed in range(8):
+        shuffled = candidates[:]
+        random.Random(seed).shuffle(shuffled)
+        assert [s.players for s in ls.choose(shuffled, 4, key=ls.gpp_key, max_per_player=2)] == expected
+
+
+def test_probabilities_that_differ_by_float_noise_are_a_tie_that_falls_to_the_next_rule():
+    noisy = _scored("abcdefghi", p_gpp=0.123456789 + 3e-16, projection=100.0)
+    clean_better = _scored("ABCDEFGHI", p_gpp=0.123456789, projection=101.0)
+    assert ls.gpp_key(noisy)[0] == ls.gpp_key(clean_better)[0]
+    assert ls.choose([noisy, clean_better], 1, key=ls.gpp_key) == [clean_better]  # decided by projection
+    # a real difference (one draw in 1,500) still decides
+    real = _scored("abcdefghi", p_gpp=0.123456789 + 1 / 1500)
+    assert ls.choose([clean_better, real], 1, key=ls.gpp_key) == [real]
+    # and a full tie is settled by the names, not by who came first
+    one, two = _scored("abcdefghi"), _scored("ABCDEFGHI")
+    assert ls.choose([one, two], 1, key=ls.gpp_key) == ls.choose([two, one], 1, key=ls.gpp_key)
+
+
+def test_choose_searches_every_candidate_not_just_the_best_few_when_the_cap_leaves_it_short():
+    """Every one of the 100 best candidates holds `X`, so with a cap of one only one can be picked; the second
+    build exists but is far down the ranking. (The search used to look at the top 80 only.)"""
+    top = [_scored(["X", *[f"t{i}{j}" for j in range(8)]], p_gpp=0.5 - i / 1000) for i in range(100)]
+    far = _scored([f"far{j}" for j in range(9)], p_gpp=0.01)
+    chosen = ls.choose([*top, far], 2, key=ls.gpp_key, max_per_player=1)
+    assert chosen == [top[0], far]
+
+
+def test_choose_returns_the_first_valid_set_in_rank_order_and_agrees_with_brute_force():
+    import random
+    from itertools import combinations
+
+    rng = random.Random(5)
+    for trial in range(12):
+        names = [f"n{i}" for i in range(16)]
+        candidates = [
+            _scored(
+                rng.sample(names, 9), p_gpp=rng.choice([0.0, 0.002, 0.004]), projection=rng.choice([100, 101])
+            )
+            for _ in range(25)
+        ]
+        ordered = sorted(candidates, key=lambda s: (*ls.gpp_key(s), ls.lineup_key(s)))
+
+        def valid(group):
+            uses: dict[str, int] = {}
+            for s in group:
+                for p in s.players:
+                    uses[p.name] = uses.get(p.name, 0) + 1
+            return max(uses.values()) <= 2 and all(
+                ls.different_enough(a.players, b.players) for a, b in combinations(group, 2)
+            )
+
+        expected = next((list(g) for g in combinations(ordered, 3) if valid(g)), None)
+        got = ls.choose(candidates, 3, key=ls.gpp_key, max_per_player=2)
+        if expected is None:
+            assert len(got) < 3, trial
+        else:
+            assert got == expected, trial
+
+
 def test_seat_puts_the_latest_kickoff_of_the_surplus_position_in_flex_and_ties_use_the_lowest_projection():
     early, late = parse_kickoff(EARLY), parse_kickoff(NIGHT)
     players = [
@@ -305,7 +378,8 @@ def test_stacked_lineups_are_all_stacked_legal_and_best_first(edge):
     for lu in lineups:
         assert sum(p.salary for p in lu) <= CAP and len({p.name for p in lu}) == 9
         assert not any(conflicts(p, [o for o in lu if o is not p]) for p in lu)
-    totals = [sum(p.value for p in lu) for lu in lineups]
+    # best first at the precision the ordering uses: totals that differ by float noise are ties
+    totals = [round(sum(p.value for p in lu), ls.VALUE_DECIMALS) for lu in lineups]
     assert totals == sorted(totals, reverse=True)
 
 
@@ -327,6 +401,19 @@ def test_a_pool_with_no_possible_stack_says_so_and_still_builds_the_cash_lineups
 def test_an_empty_pool_builds_nothing_and_says_nothing_dishonest(edge):
     report = run(edge, {})
     assert report.builds == [] and report.candidates == {"cash": 0, "gpp": 0}
+
+
+@pytest.mark.parametrize("seed", [0, 1000, 1019, 1021, 1033])
+def test_the_gpp_builds_are_found_whatever_the_simulation_draws_turn_out_to_be(edge, seed):
+    """The ranking of this slate's stacked lineups is almost all ties (0-5 of 1,500 draws reach the target),
+    so a different realisation of the draws reorders it, and that used to decide whether the last build was
+    found. Five builds (no player in more than 3) and two (none shared) exist whichever seed is drawn."""
+    five = run(edge, cash_builds=0, gpp_builds=5, seed=seed)
+    two = run(edge, cash_builds=0, gpp_builds=2, seed=seed)
+    assert len(five.builds) == 5 and five.notes == [], five.notes
+    assert len(two.builds) == 2 and two.notes == [], two.notes
+    for build in (*five.builds, *two.builds):
+        assert_legal(build)
 
 
 def test_asking_for_no_cash_or_no_gpp_builds_skips_that_search(edge):
