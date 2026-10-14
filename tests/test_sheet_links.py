@@ -223,13 +223,15 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # occupies column A ahead of EDGE_COLUMNS, and the range's own END
     # letter also grows by one per column added. Matches what
     # `sheet_style.polish_edge` reports for the same columns.
-    # Slice 5 (2026-10-09): the tab is written in `EDGE_SHEET_ORDER` (Leverage is 32nd counting from Name).
-    assert edge_vlookup_index("Leverage") == 32
+    # Slice 5 (2026-10-09): the tab is written in `EDGE_SHEET_ORDER` (Leverage was 32nd counting from Name).
+    # Shadow sources (2026-10-13): `EspnPts` and `PropPts` sit right after `CalPts`, ahead of Leverage: 34th.
+    # Every linked formula was rewritten (`dfs setup link-edge --force`) on both sheets.
+    assert edge_vlookup_index("Leverage") == 34
     start_col = edge_sheet_letter("Name")
     end_col = edge_last_letter()
     key = resolve_name_expr("$A5", "EdgeRaw")
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP({key},EdgeRaw!${start_col}:${end_col},32,false))'
+        f'=IF($A5="","",VLOOKUP({key},EdgeRaw!${start_col}:${end_col},34,false))'
     )
 
 

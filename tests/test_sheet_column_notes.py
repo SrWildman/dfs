@@ -77,6 +77,8 @@ def test_every_header_on_edgeraw_player_pool_and_lineups_has_a_note():
         ("Player Pool", PLAYER_POOL_COLUMN_ORDER),
         ("Lineups", LINEUPS_COLUMN_ORDER),
     ):
+        # EdgeRaw alone carries the shadow sources' columns (`EspnPts`, `PropPts`).
+        registry = notes.edgeraw_notes() if tab == "EdgeRaw" else notes.player_tab_notes()
         missing = [h for h in headers if h not in registry]
         assert not missing, f"{tab} headers with no note: {missing}"
 

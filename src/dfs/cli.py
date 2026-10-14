@@ -27,7 +27,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from dfs import edge_finder_tab, nfl_calendar, paths, perf, sheet_edge_finder, store
+from dfs import edge_finder_tab, nfl_calendar, odds_credits, paths, perf, sheet_edge_finder, store
 from dfs.apps_script import script_warnings
 from dfs.bankroll import (
     backfill_entry_keys,
@@ -1978,7 +1978,8 @@ def sheets_doctor(
     lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead
     of surfacing three commands later as a crash or a silently wrong
     formula. It also WARNS (without failing) when the bound Apps Script behind the `Set`
-    dropdowns is not pasted or is older than apps_script/Code.gs.
+    dropdowns is not pasted or is older than apps_script/Code.gs, and when fewer than 100 Odds API credits
+    are left.
     """
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
@@ -1995,6 +1996,9 @@ def sheets_doctor(
         warnings = script_warnings(client)
     except SheetsError:
         warnings = []
+    credit_warning = odds_credits.low_warning()  # local file, no call: under 100 Odds API credits left
+    if credit_warning:
+        warnings.append(credit_warning)
     if not issues:
         console.print("[green]OK[/green] all structural checks passed")
         for warning in warnings:
@@ -2216,6 +2220,14 @@ def sync(
     sheet_id: str = typer.Option(
         None, "--sheet-id", help="Write to this sheet instead of config.toml's (e.g. the template)."
     ),
+    props: bool = typer.Option(
+        False,
+        "--props",
+        help="Also pull player props from The Odds API now (spends credits: about 6 per game, see "
+        "docs/WORKFLOW.md). A plain full sync pulls them on its own only on Saturday or Sunday and only "
+        "if no snapshot is under 24 hours old; with --live, only games not yet started are refreshed. "
+        "A plain --live never spends credits.",
+    ),
 ) -> None:
     """Fetch data sources and upload them to the connected Google Sheet."""
     cfg = _load_config_or_exit()
@@ -2231,7 +2243,7 @@ def sync(
         raise typer.Exit(code=1)
 
     if live:
-        source_names = LIVE_SYNC_SOURCES
+        source_names = list(LIVE_SYNC_SOURCES)
     elif only:
         requested = [s.strip() for s in only.split(",") if s.strip()]
         unknown = [s for s in requested if s not in SOURCES]
@@ -2242,6 +2254,9 @@ def sync(
         source_names = requested
     else:
         source_names = list(SOURCES)
+    source_names, props_note = _props_plan(source_names, live=live, forced=props, only=bool(only))
+    if props_note:
+        console.print(props_note)
 
     live_client: SheetsClient | None = None
     if no_upload:
@@ -2307,6 +2322,32 @@ def sync(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _props_plan(
+    source_names: list[str], *, live: bool, forced: bool, only: bool, now: datetime | None = None
+) -> tuple[list[str], str]:
+    """Which of `source_names` to run once The Odds API's credit rules are applied, and the line to print.
+
+    `odds_props` is the only source that spends money: a plain `--live` never includes it; a full sync
+    includes it only when `odds_props.full_sync_decision` says so (Saturday or Sunday, no snapshot in 24 h);
+    `--props` (or `--only odds_props`) forces it, but a pull still skips games that have started. When it is
+    pulled it sits right before `edge`, which reads it."""
+    from dfs.sources import odds_props
+
+    names = [n for n in source_names if n != "odds_props"]
+    if only:
+        return source_names, ""  # `--only odds_props` is an explicit request
+    if live and not forced:
+        return names, ""
+    if forced:
+        note = "props: pulling now (--props); only games not yet started are fetched"
+    else:
+        pull, note = odds_props.full_sync_decision(now or datetime.now(UTC))
+        if not pull:
+            return names, note
+    at = names.index("edge") if "edge" in names else len(names)
+    return [*names[:at], "odds_props", *names[at:]], note
 
 
 def _write_edge_finder_tabs(cfg: Config, ctx: SyncContext) -> None:
@@ -2455,7 +2496,7 @@ def go() -> None:
         old_edge = None
 
     console.print("[bold]-- sync --[/bold]")
-    sync(only=None, no_upload=False, week=None, season=None, live=False)
+    sync(only=None, no_upload=False, week=None, season=None, live=False, sheet_id=None, props=False)
 
     console.print("\n[bold]-- doctor --[/bold]")
     sheets_doctor(sheet_id=None)
@@ -3397,7 +3438,7 @@ def week_new(
     new_cfg = _load_config_or_exit()
     ctx = SyncContext.current()
     console.print(f"\nSyncing week {ctx.week}, season {ctx.season} ({len(SOURCES)} source(s))...")
-    results = run_sync(new_cfg, list(SOURCES), ctx, upload=True)
+    results = run_sync(new_cfg, [n for n in SOURCES if n != "odds_props"], ctx, upload=True)
     console.print(_opening_lines_line(ctx))
 
     table = Table(title="Sync results")

@@ -317,6 +317,11 @@ PLAYER_METRIC_PCT_COLUMNS = {
 EDGE_FINDER_PCT_COLUMNS = {"CalPts": "CalPts%ile", "xFP/G": "xFP/G%ile"}
 EDGE_FINDER_VALUE_COLUMNS = ["CalPts", "Hit3x%", "Boom%", "Bust%", "Floor", "CeilM", "xFP/G", "Edge"]
 EDGE_FINDER_COLUMNS = [*EDGE_FINDER_VALUE_COLUMNS, *EDGE_FINDER_PCT_COLUMNS.values()]
+# Shadow projection sources (2026-10-13): ESPN's and the props' own DK-scored projections, visible on EdgeRaw
+# beside CalPts (`EDGE_SHEET_ORDER`) and scored in Model Check; not part of CalPts until a source has enough
+# scored weeks (`calibration.ShadowPolicy`). Appended after the Edge Finder columns (`EDGE_COLUMNS` is
+# append-only), filled by `edge_finder.enrich`, blank until then and for a player the source did not rate.
+EDGE_SOURCE_COLUMNS = ["EspnPts", "PropPts"]
 # Every hidden within-position percentile helper, old and new.
 ALL_PCT_COLUMNS = {**PLAYER_METRIC_PCT_COLUMNS, **EDGE_FINDER_PCT_COLUMNS}
 
@@ -446,6 +451,8 @@ EDGE_COLUMNS = [
     # history, UM and the free nflverse files); blank until then. Display order on Player Pool, Lineups
     # and PlayerPoolRaw comes from `sheet_columns.py`.
     *EDGE_FINDER_COLUMNS,
+    # Shadow sources (2026-10-13), appended after the Edge Finder columns; shown beside CalPts on the tab.
+    *EDGE_SOURCE_COLUMNS,
 ]
 
 # What the EdgeRaw TAB is written in (actions round, slice 5, 2026-10-09): a designed order that mirrors
@@ -465,6 +472,7 @@ EDGE_SHEET_ORDER = [
     "ProjPts",
     "AggPts",
     "CalPts",
+    *EDGE_SOURCE_COLUMNS,
     "Val",
     "ValAdj",
     "Hit3x%",
@@ -1407,6 +1415,8 @@ def build_edge_frame(
         merged[label] = ""
     for column in EDGE_FINDER_COLUMNS:
         merged[column] = "" if column == "Edge" else float("nan")
+    for column in EDGE_SOURCE_COLUMNS:
+        merged[column] = float("nan")
 
     return EdgeBuildResult(
         frame=merged[EDGE_COLUMNS],

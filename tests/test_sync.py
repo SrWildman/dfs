@@ -200,5 +200,7 @@ def test_only_the_per_player_context_sources_declare_no_sheet_tab():
     assert SOURCES["usage"].uploads_to_sheet is False
     # Edge Finder's three context sources are per-player too: they feed `signals.py`, never a tab.
     no_tab = {"usage", "ffopportunity", "nflverse_injuries", "nflverse_depth"}
+    # The shadow sources (ESPN, props) reach the sheet through EdgeRaw's `EspnPts` / `PropPts` columns alone.
+    no_tab |= {"espn", "odds_props"}
     assert all(not SOURCES[name].uploads_to_sheet for name in no_tab)
     assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name not in no_tab)

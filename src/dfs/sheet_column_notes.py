@@ -452,10 +452,15 @@ MODEL_CHECK_NOTES = {
     "Weeks": "Weeks included in the consistency measure.",
     "Mean MAE": "Average of the source's weekly MAE.",
     "CV": "Coefficient of variation of the weekly MAE (std / mean): lower = steadier week to week.",
+    "Players rated by": (
+        "The shadow source whose players the row is measured on. A shadow source is scored every week but is "
+        "not in CalPts until it has enough scored weeks (config.toml [projection] shadow_min_weeks)."
+    ),
     "Projection": (
         "TFFB = TFFB's own ProjPts; AggPts = the equal-weight average of every source; CalPts = each source "
         "bias-corrected by position and salary tier, then weighted (TFFB, Sleeper, FantasyPros; not UM). "
-        "UM = the UM model, tracked as its own row. All are judged on weeks CalPts did not train on."
+        "UM = the UM model, tracked as its own row; (shadow) = ESPN or props, tracked, not in CalPts yet. "
+        "All are judged on weeks CalPts did not train on."
     ),
     "ρ (rank)": (
         "Rank correlation within position and week (averaged over groups of 5+, weighted by n): does the "
@@ -624,6 +629,21 @@ ISSUES_TOTAL_NOTE = (
 )
 
 
+SHADOW_SOURCE_NOTES = {
+    "EspnPts": (
+        "SHADOW: ESPN's own weekly projection, scored to DraftKings rules from its component stats (never "
+        "ESPN's fantasy points). Scored in Model Check every week; kept out of CalPts until it has 3 scored "
+        "weeks. Blank where ESPN has no projection for him."
+    ),
+    "PropPts": (
+        "SHADOW: Vegas player props turned into a DraftKings score (de-vigged lines and anytime-TD odds from "
+        "The Odds API, every book in the US region). Needs all the markets his position uses, so it is blank "
+        "rather than partial. Scored in Model Check every week; kept out of CalPts until it has 3 scored "
+        "weeks. Pulled Saturday (and refreshed Sunday for games not yet started)."
+    ),
+}
+
+
 def player_tab_notes() -> dict[str, str]:
     """Every header on EdgeRaw, Player Pool and Lineups (and the Edge Finder's number columns), by text.
     The usage notes carry the week the usage data runs through, so this reads the latest sync."""
@@ -639,7 +659,7 @@ def player_tab_notes() -> dict[str, str]:
 def edgeraw_notes() -> dict[str, str]:
     """EdgeRaw's: the player tabs' plus the soft-yellow "Consider" explanation on `Name` (it lists everyone,
     pooled or not; Player Pool and Lineups never show the yellow)."""
-    return {**player_tab_notes(), "Name": NAME_WITH_CONSIDER}
+    return {**player_tab_notes(), **SHADOW_SOURCE_NOTES, "Name": NAME_WITH_CONSIDER}
 
 
 def edge_finder_tab_notes() -> dict[str, str]:

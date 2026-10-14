@@ -12,6 +12,7 @@ from __future__ import annotations
 from dfs.sources.base import Source
 from dfs.sources.dk_salaries import DkSalariesSource
 from dfs.sources.edge import EdgeSource
+from dfs.sources.espn_projections import EspnProjectionsSource
 from dfs.sources.fantasypros_projections import FantasyProsProjectionsSource
 from dfs.sources.ffopportunity import FfopportunitySource
 from dfs.sources.nflverse_depth import NflverseDepthSource
@@ -20,6 +21,7 @@ from dfs.sources.nflverse_injuries import NflverseInjuriesSource
 from dfs.sources.nflverse_pbp import NflversePbpSource
 from dfs.sources.nflverse_snaps import NflverseSnapsSource
 from dfs.sources.nflverse_usage import NflverseUsageSource
+from dfs.sources.odds_props import OddsPropsSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
 from dfs.sources.sleeper_projections import SleeperProjectionsSource
 from dfs.sources.tffb_gps import TffbGpsSource
@@ -65,6 +67,8 @@ SOURCES: dict[str, Source] = {
     "projections": TffbProjectionsSource(),
     "sleeper": SleeperProjectionsSource(),
     "fantasypros": FantasyProsProjectionsSource(),
+    "espn": EspnProjectionsSource(),
+    "odds_props": OddsPropsSource(),
     "snaps": NflverseSnapsSource(),
     "pbp": NflversePbpSource(),
     "usage": NflverseUsageSource(),

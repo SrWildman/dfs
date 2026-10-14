@@ -66,7 +66,11 @@ SCORED_COLUMNS = [
     "Status",
     "DkActual",
     "GsisId",
-    "UmPts",  # the UM model's mean, added by `results_signals.attach_um` (blank until then)
+    "UmPts",  # the UM model's mean, added by `results_signals.attach_um`
+    # Shadow sources (`calibration.ShadowPolicy`): scored from their first week, in the CalPts blend only
+    # after `shadow_min_weeks`. Blank for every week before the source existed.
+    "EspnPts",
+    "PropPts",
 ]
 
 # Status of a DK main-slate player's actual points: "scored" (found a stat line that week), "dnp"
@@ -206,6 +210,20 @@ class WeekInputs:
     snaps: pd.DataFrame | None
     team_metrics: pd.DataFrame | None
     present: list[str]
+    espn: pd.DataFrame | None = None
+    props: pd.DataFrame | None = None  # one PropPts row per player: the last snapshot before HIS kickoff
+
+
+def props_for_week(week: int, season: int) -> pd.DataFrame | None:
+    """The week's `PropPts` rows, one per player, each from the last props snapshot taken BEFORE HIS OWN
+    kickoff (`select_projection_rows`, the same rule TFFB's projections get). None when no props were ever
+    pulled for the week."""
+    snapshots = [(ts, read_snapshot(path)) for ts, path in snapshot_files("odds_props")]
+    snapshots = [(ts, frame) for ts, frame in snapshots if frame is not None and not frame.empty]
+    if not snapshots:
+        return None
+    chosen = select_projection_rows(snapshots, week, season)
+    return chosen if not chosen.empty else None
 
 
 def load_week_inputs(week: int, season: int, when: datetime) -> WeekInputs | None:
@@ -226,6 +244,8 @@ def load_week_inputs(week: int, season: int, when: datetime) -> WeekInputs | Non
         snaps=as_of("snaps", when),
         team_metrics=as_of("pbp", when),
         present=[],
+        espn=as_of("espn", when),
+        props=props_for_week(week, season),
     )
     inputs.present = [
         name
@@ -237,6 +257,8 @@ def load_week_inputs(week: int, season: int, when: datetime) -> WeekInputs | Non
             ("fantasypros", inputs.fantasypros),
             ("snaps", inputs.snaps),
             ("pbp", inputs.team_metrics),
+            ("espn", inputs.espn),
+            ("props", inputs.props),
         )
         if value is not None
     ] + [f"sos_{pos.lower()}" for pos in sos]
@@ -262,14 +284,22 @@ def rebuild_week_frame(selected: pd.DataFrame, inputs: WeekInputs) -> pd.DataFra
     return result.frame
 
 
-def source_projection_columns(frame: pd.DataFrame, inputs: WeekInputs) -> pd.DataFrame:
-    """Sleeper's and FantasyPros' own DK-scored projection per DK player (NaN when a source did not
-    project him), joined with the same `player_join` every other source uses."""
+def _id_key(values: pd.Series) -> pd.Series:
+    """DK ids as comparable strings (a CSV round trip turns `44475736` into an int or a float)."""
+    return values.map(lambda v: "" if pd.isna(v) else str(int(float(v))))
+
+
+def source_projection_columns(frame: pd.DataFrame, inputs) -> pd.DataFrame:  # noqa: ANN001 - WeekInputs or a namespace
+    """Each outside source's own DK-scored projection per DK player (NaN when a source did not project him):
+    Sleeper, FantasyPros and ESPN joined through `player_join` like every other source, and the props'
+    `PropPts` (already DK-keyed) by `Id`. `inputs` needs `sleeper` and `fantasypros`; `espn` and `props` are
+    optional (a namespace without them just leaves those columns blank)."""
     dk = frame[["Id", "Name", "Team", "Position"]]
     out = pd.DataFrame({"Id": frame["Id"]})
     for column, source, df in (
         ("SleeperPts", "sleeper", inputs.sleeper),
         ("FantasyProsPts", "fantasypros", inputs.fantasypros),
+        ("EspnPts", "espn", getattr(inputs, "espn", None)),
     ):
         if df is None or df.empty:
             out[column] = float("nan")
@@ -286,6 +316,12 @@ def source_projection_columns(frame: pd.DataFrame, inputs: WeekInputs) -> pd.Dat
             result.matched[["Id", "DkPts"]].drop_duplicates(subset="Id").rename(columns={"DkPts": column})
         )
         out = out.merge(matched, on="Id", how="left")
+    props = getattr(inputs, "props", None)
+    if props is None or props.empty or "PropPts" not in props.columns:
+        out["PropPts"] = float("nan")
+    else:
+        by_id = props.assign(_k=_id_key(props["Id"])).drop_duplicates("_k").set_index("_k")["PropPts"]
+        out["PropPts"] = _id_key(out["Id"]).map(by_id).to_numpy()
     return out
 
 

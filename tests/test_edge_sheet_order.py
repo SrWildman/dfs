@@ -27,9 +27,8 @@ def test_the_sheet_order_is_a_permutation_of_the_append_only_frame_order():
         EDGE_SHEET_ORDER
     )
     assert EDGE_SHEET_ORDER != EDGE_COLUMNS  # the tab has its own designed order
-    assert (
-        EDGE_COLUMNS[-len(derived.EDGE_FINDER_COLUMNS) :] == derived.EDGE_FINDER_COLUMNS
-    )  # still append-only
+    appended = [*derived.EDGE_FINDER_COLUMNS, *derived.EDGE_SOURCE_COLUMNS]
+    assert EDGE_COLUMNS[-len(appended) :] == appended  # still append-only
 
 
 def test_no_code_outside_derived_computes_an_edgeraw_letter_from_edge_columns():

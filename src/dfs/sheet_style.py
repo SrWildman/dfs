@@ -317,6 +317,8 @@ FIELD_FORMATS = {
     # Expl% pattern, so Sheets does not multiply them by 100); Floor/CeilM are points; xFP/G is points
     # per game. `Edge` is text and has no format.
     "CalPts": _num("0.0"),
+    "EspnPts": _num("0.0"),  # shadow sources (EdgeRaw only)
+    "PropPts": _num("0.0"),
     "Hit3x%": _num('0"%"'),
     "Boom%": _num('0"%"'),
     "Bust%": _num('0"%"'),
@@ -749,6 +751,8 @@ EDGE_WIDTHS = {
     "HVT/G": 76,
     # Edge Finder (2026-10-07): appended after NameKey on EdgeRaw.
     "CalPts": 80,
+    "EspnPts": 80,
+    "PropPts": 80,
     "Hit3x%": 80,
     "Boom%": 80,
     "Bust%": 80,

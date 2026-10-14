@@ -478,6 +478,50 @@ def backtest(
     return score_predictions(frame, PROJECTIONS_WITH_UM if with_um else PROJECTIONS)
 
 
+SHADOW_RACE_COLUMNS = ["Rated by", "Source", "Position", "n", "Rho", "MAE", "Bias"]
+
+
+def shadow_label(source: str) -> str:
+    return f"{SOURCE_LABELS.get(source, source)} (shadow)"
+
+
+def shadow_race(
+    scored: pd.DataFrame, *, season: int | None = None, shadow: ShadowPolicy | None = None
+) -> pd.DataFrame:
+    """Each shadow source as its own row beside TFFB and CalPts, judged on the players THAT source rated (the
+    same rule as UM's row): out-of-sample CalPts (weeks it did not train on), n, rho, MAE and bias by position
+    and overall. A source with no rated player yet has no rows. This is the evidence for letting a source into
+    the blend; it never changes `CalPts` itself."""
+    policy = shadow or DEFAULT_SHADOW
+    frame = backtest_frame(scored, season=season, with_um=False, shadow=policy)
+    pieces = []
+    for source in policy.sources:
+        if frame.empty or source not in frame.columns:
+            continue
+        rated = frame[pd.to_numeric(frame[source], errors="coerce").notna()]
+        if rated.empty:
+            continue
+        label = shadow_label(source)
+        table = score_predictions(rated, (("TFFB", TFFB_SOURCE), ("CalPts", "CalPts"), (label, source)))
+        table.insert(0, "Rated by", SOURCE_LABELS.get(source, source))
+        pieces.append(table)
+    return pd.concat(pieces, ignore_index=True) if pieces else pd.DataFrame(columns=SHADOW_RACE_COLUMNS)
+
+
+def shadow_progress(
+    scored: pd.DataFrame, shadow: ShadowPolicy | None = None
+) -> list[tuple[str, int, int, bool]]:
+    """`(source label, scored weeks, weeks needed, in the blend)` for each shadow source that has a column in
+    `scored` (a week counts once the source rated `min_rows_per_week` players that week)."""
+    policy = shadow or DEFAULT_SHADOW
+    usable_rows = usable(scored, "pool")
+    out = []
+    for source in policy.sources:
+        weeks = shadow_scored_weeks(usable_rows, source, policy)
+        out.append((SOURCE_LABELS.get(source, source), weeks, policy.min_weeks, weeks >= policy.min_weeks))
+    return out
+
+
 def backtest_by_week(
     scored: pd.DataFrame,
     *,

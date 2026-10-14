@@ -30,6 +30,7 @@ import pandas as pd
 from dfs import calibration, perf, results_loop, results_signals, signals, signals_data, store, usage_r6
 from dfs.derived import (
     EDGE_FINDER_VALUE_COLUMNS,
+    EDGE_SOURCE_COLUMNS,
     _rosterable_pool_mask,
     attach_edge_finder_columns,
 )
@@ -60,8 +61,9 @@ def _try_current(name: str) -> pd.DataFrame | None:
 
 def dk_level_frame(frame: pd.DataFrame, pool: pd.Series) -> pd.DataFrame:
     """The edge frame reshaped for `signals.build_signals` / the calibration: `Id`, `Name`, `Team`, `Opp`,
-    `Position`, `Salary`, `ProjPts`, `AggPts`, `Avail`, `GameStart`, `RosterablePool`, plus Sleeper's and
-    FantasyPros' own projections (the ensemble needs them separately; the edge frame keeps only AggPts)."""
+    `Position`, `Salary`, `ProjPts`, `AggPts`, `Avail`, `GameStart`, `RosterablePool`, plus Sleeper's,
+    FantasyPros' and ESPN's own projections and the props' `PropPts` (the ensemble needs them separately; the
+    edge frame keeps only AggPts)."""
     df = pd.DataFrame(
         {
             "Id": frame["Id"],
@@ -77,7 +79,12 @@ def dk_level_frame(frame: pd.DataFrame, pool: pd.Series) -> pd.DataFrame:
             "RosterablePool": pool.to_numpy(),
         }
     )
-    inputs = SimpleNamespace(sleeper=_try_current("sleeper"), fantasypros=_try_current("fantasypros"))
+    inputs = SimpleNamespace(
+        sleeper=_try_current("sleeper"),
+        fantasypros=_try_current("fantasypros"),
+        espn=_try_current("espn"),
+        props=_try_current("odds_props"),
+    )
     extra = results_loop.source_projection_columns(df, inputs)
     return df.merge(extra, on="Id", how="left")
 
@@ -170,6 +177,11 @@ def _enrich(
         [c for c in EDGE_FINDER_VALUE_COLUMNS if c in output.players.columns]
     ]
     enriched = attach_edge_finder_columns(frame, extras)
+    for column in EDGE_SOURCE_COLUMNS:  # the shadow sources' own projections, from the frame built above
+        if column in df.columns:
+            enriched[column] = pd.to_numeric(
+                enriched["Id"].map(df.drop_duplicates("Id").set_index("Id")[column]), errors="coerce"
+            )
 
     if write:
         _write_outputs(output, ctx, now, fitted, data, df, notes, join, enriched, proj_snaps)

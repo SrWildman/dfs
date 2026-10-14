@@ -47,6 +47,7 @@ def test_sections_appear_in_the_decided_order():
     assert titles == [
         "WHAT THE MODEL LEARNED THIS WEEK",
         "PROJECTION RACE",
+        "SHADOW SOURCES",
         "RELIABILITY",
         "CEILING",
         "PROJECTION ACCURACY",
@@ -238,3 +239,37 @@ def test_signal_progress_lists_only_signals_that_fired_with_their_unflagged_base
     got = signal_progress(table)
     assert list(got["Signal"]) == ["USAGE↑"] and got.iloc[0]["Unflagged avg"] == 0.1
     assert signal_progress(None).empty
+
+
+# --- shadow sources (ESPN, props) ------------------------------------------------------------------------
+
+
+def test_the_shadow_block_always_says_where_each_source_stands_and_marks_a_rated_source_as_shadow():
+    from dfs import sheet_model_check as smc
+
+    plain = smc.build_layout(_two_weeks().assign(UmPts=float("nan")), weeks=[3, 4])
+    text = " ".join(str(c) for r in plain.rows for c in r)
+    assert (
+        "SHADOW SOURCES" in text
+        and "ESPN 0 of 3 scored weeks" in text
+        and "Props 0 of 3 scored weeks" in text
+    )
+    assert "No shadow source has rated a scored player yet" in text
+
+    scored = _two_weeks().assign(UmPts=float("nan"))
+    scored["EspnPts"] = scored["ProjPts"] + 1.0
+    layout = smc.build_layout(scored, weeks=[3, 4])
+    text = " ".join(str(c) for r in layout.rows for c in r)
+    assert "ESPN (shadow)" in text and "Players rated by" in text
+    assert "ESPN 2 of 3 scored weeks" in text  # it rated 20+ players in each of weeks 3 and 4
+    assert "Props (shadow)" not in text  # no props rated anyone: no rows, only its status
+
+
+def test_a_shadow_source_never_changes_calpts_while_it_is_in_shadow():
+    from dfs import calibration
+
+    scored = _two_weeks()
+    without = calibration.calpts_for_week(scored, 4, season=None, sources=calibration.CAL_SOURCES)[0]
+    with_shadow = scored.assign(EspnPts=scored["DkActual"], PropPts=scored["DkActual"] + 5.0)  # absurdly good
+    after = calibration.calpts_for_week(with_shadow, 4, season=None, sources=calibration.CAL_SOURCES)[0]
+    pd.testing.assert_series_equal(without["CalPts"], after["CalPts"])

@@ -45,7 +45,7 @@ NOTE_WRAP_CHARS = 150
 FIRST_COLUMN_PX = 190
 OTHER_COLUMN_PX = 118
 _COUNT_HEADERS = {"n", "Unflagged n", "Weeks", "Week", "Decile"}
-_TEXT_HEADERS = {"Source", "Flag", "Quintile", "Projection", "Signal", "Measure", "Off?"}
+_TEXT_HEADERS = {"Source", "Flag", "Quintile", "Projection", "Signal", "Measure", "Off?", "Players rated by"}
 
 
 @dataclass
@@ -280,6 +280,7 @@ def build_layout(
 
     _add_learned(b, scored, signal_table, reliability)
     _add_projection_race(b, scored)
+    _add_shadow_sources(b, scored)
     _add_reliability(b, reliability)
 
     # ---- Ceiling (the headline) ---------------------------------------------------------------
@@ -746,6 +747,56 @@ def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
         f"Scored weeks so far: {_weeks_text(weeks_trained)}. rho = rank correlation within position and week "
         "(TFFB is hard to beat at ranking; the gain from CalPts is expected in the level, MAE and bias). "
         "Rosterable pool, scored players only."
+    )
+
+
+def _add_shadow_sources(b: _Builder, scored: pd.DataFrame) -> None:
+    """Shadow sources (ESPN, props): tracked from their first scored week, in the CalPts blend only after
+    `shadow_min_weeks`. A status line always; the table (the source beside TFFB and CalPts on the players it
+    rated, marked "shadow") once a source has rated anyone."""
+    policy = calibration.configured_shadow()
+    progress = calibration.shadow_progress(scored, policy)
+    if not progress:
+        return
+    status = "; ".join(
+        f"{label} {'in the blend' if joined else f'{weeks} of {needed} scored weeks'}"
+        for label, weeks, needed, joined in progress
+    )
+    race = calibration.shadow_race(scored, shadow=policy)
+    b.section("SHADOW SOURCES  —  scored every week, kept out of CalPts until they have enough weeks")
+    b.verdict(f"Shadow status: {status}.")
+    if race.empty:
+        b.note(
+            "No shadow source has rated a scored player yet (ESPN and props are collected from Week 6; "
+            "`dfs sync` pulls ESPN, and props come with the Saturday pull)."
+        )
+        return
+    race = race.assign(
+        _p=race["Position"].map(["All", *calibration.POSITIONS].index),
+        _s=race["Source"].map(lambda name: 2 if "(shadow)" in name else (1 if name == "CalPts" else 0)),
+    )
+    race = race.sort_values(["Rated by", "_p", "_s"]).drop(columns=["_p", "_s"])
+    race = race.assign(Thin=race["n"].map(ra.is_thin)).rename(
+        columns={"Rated by": "Players rated by", "Source": "Projection"}
+    )
+    b.table(
+        race,
+        [
+            ("Players rated by", "Players rated by"),
+            ("Position", "Position"),
+            ("Projection", "Projection"),
+            ("n", "n"),
+            ("ρ (rank)", "Rho"),
+            ("MAE", "MAE"),
+            ("Bias", "Bias"),
+        ],
+        signed={"Bias"},
+        three_decimals={"ρ (rank)"},
+    )
+    b.note(
+        "Each shadow source is judged on the players it rated, beside TFFB and CalPts (weeks CalPts did "
+        "not train on). A source joins the CalPts blend, through the same weighting and shrinkage, once it "
+        "has the weeks shown above; until then CalPts is unchanged by it."
     )
 
 

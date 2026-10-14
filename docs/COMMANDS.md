@@ -46,7 +46,7 @@ Show whether config is set up and how fresh each data source is.
 
 ### `dfs doctor`
 
-Read-only structural check: every tab named in config.toml exists, EdgeRaw's header matches derived.EDGE_COLUMNS, LINKED_EDGE_COLUMNS is linked exactly once (not zero, not twice) on Player Pool/Lineups/ PlayerPoolRaw, Lineups' header repeats fall exactly where LINEUPS_NAME_BLOCKS expects, and Bankroll's configured header rows aren't blank. Never writes anything. Exits non-zero on any failure -- this is the check that would have caught a stale template's missing tabs and drifted column positions before they broke `dfs export`/`dfs lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead of surfacing three commands later as a crash or a silently wrong formula. It also WARNS (without failing) when the bound Apps Script behind the `Set` dropdowns is not pasted or is older than apps_script/Code.gs.
+Read-only structural check: every tab named in config.toml exists, EdgeRaw's header matches derived.EDGE_COLUMNS, LINKED_EDGE_COLUMNS is linked exactly once (not zero, not twice) on Player Pool/Lineups/ PlayerPoolRaw, Lineups' header repeats fall exactly where LINEUPS_NAME_BLOCKS expects, and Bankroll's configured header rows aren't blank. Never writes anything. Exits non-zero on any failure -- this is the check that would have caught a stale template's missing tabs and drifted column positions before they broke `dfs export`/`dfs lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead of surfacing three commands later as a crash or a silently wrong formula. It also WARNS (without failing) when the bound Apps Script behind the `Set` dropdowns is not pasted or is older than apps_script/Code.gs, and when fewer than 100 Odds API credits are left.
 
 | Option | What it does |
 |---|---|
@@ -87,6 +87,7 @@ Fetch data sources and upload them to the connected Google Sheet.
 | `--season INT` | Override auto-detected NFL season. |
 | `--live` | Re-sync only fast-moving sources (odds, DK statuses, TFFB projections, weather) plus edge, and print what changed in EdgeRaw's Flag column since the last sync. The Sunday-afternoon command -- not a substitute for a full `dfs sync`. |
 | `--sheet-id STR` | Write to this sheet instead of config.toml's (e.g. the template). |
+| `--props` | Also pull player props from The Odds API now (spends credits: about 6 per game, see docs/WORKFLOW.md). A plain full sync pulls them on its own only on Saturday or Sunday and only if no snapshot is under 24 hours old; with --live, only games not yet started are refreshed. A plain --live never spends credits. |
 
 ### `dfs lineups suggest`
 
@@ -559,6 +560,8 @@ What `dfs sync --only NAME[,NAME]` takes. A plain `dfs sync` runs all of them in
 | `projections` | `Projections` | yes | DraftKings projections from The Fantasy Footballers' DFS Pass optimizer. |
 | `sleeper` | `SleeperRaw` | - | Sleeper's free, unauthenticated, undocumented weekly projections API -- Part C, C3. |
 | `fantasypros` | `FantasyProsRaw` | - | FantasyPros weekly projection pages -- Part C, C4. |
+| `espn` | `(none)` | - | ESPN's public fantasy API: weekly player projections, scored to DraftKings rules -- `EspnPts`. |
+| `odds_props` | `(none)` | - | `odds_props`: The Odds API player props, turned into `PropPts` (`props.py` does the maths). |
 | `snaps` | `SnapsRaw` | - | nflverse's free, unauthenticated snap-count release -- Part C, C6. |
 | `pbp` | `TeamMetricsRaw` | - | nflverse's free, unauthenticated play-by-play release -- Part C, C7. |
 | `usage` | `(none)` | - | Per-player usage (`Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G`); no sheet tab, it feeds EdgeRaw. |
