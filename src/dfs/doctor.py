@@ -14,10 +14,11 @@ the eye. This module only reads; nothing here ever writes to the sheet.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from dfs.config import Config
-from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER
+from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER, edge_sheet_letter
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.edge_finder_tab import ID_COL as EDGE_FINDER_ID_COL
 from dfs.edge_finder_tab import POOL_COL as EDGE_FINDER_POOL_COL
@@ -571,7 +572,7 @@ def _check_pool_cells_hold_the_formula(
         last = client.row_count(tab)
         formulas = client.read_formula(tab, f"{pool_col}1:{pool_col}{last}")
         ids = client.read_range(tab, f"{id_col}1:{id_col}{last}")
-        plain = []
+        plain, stale = [], []
         for index, row in enumerate(formulas):
             cell = str(row[0]).strip() if row else ""
             has_id = index < len(ids) and bool(ids[index]) and str(ids[index][0]).strip() != ""
@@ -579,6 +580,18 @@ def _check_pool_cells_hold_the_formula(
             is_header = cell == "Pool" or id_text == "Id"
             if has_id and not is_header and not cell.startswith("="):  # a header row has "Id" / "Pool"
                 plain.append(index + 1)  # a typed value, or empty (a failed restore left it blank)
+            elif has_id and not is_header and _stale_id_letter(cell):
+                stale.append(index + 1)
+        if stale:
+            issues.append(
+                DoctorIssue(
+                    "pool-cell-stale-id-column",
+                    f"{tab!r}: {len(stale)} Pool cell(s) look up EdgeRaw's Id in a column where it no "
+                    f"longer is (first at {pool_col}{stale[0]}); an EdgeRaw column moved. "
+                    "`dfs setup add-pool-control` (Player Pool), `dfs setup build-views` (Board) or "
+                    "`dfs sync` (Edge Finder) rewrites them.",
+                )
+            )
         if plain:
             first = f"{pool_col}{plain[0]}"
             issues.append(
@@ -590,6 +603,18 @@ def _check_pool_cells_hold_the_formula(
                 )
             )
     return issues
+
+
+_POOL_MATCH = re.compile(r"MATCH\(\$[A-Z]+\d+,[^,]*!\$([A-Z]+):\$([A-Z]+),0\)")
+
+
+def _stale_id_letter(formula: str) -> bool:
+    """True when a Pool cell's formula finds the player on EdgeRaw by an `Id` column that is no longer where
+    EdgeRaw's `Id` is (`derived.edge_sheet_letter("Id")`): the letter is baked into the formula when it is
+    written, so an EdgeRaw column inserted ahead of `Id` leaves it reading the wrong column, and every pooled
+    player's state silently goes blank (found live 2026-10-13 after `EspnPts`/`PropPts` were added)."""
+    found = _POOL_MATCH.search(formula)
+    return bool(found) and not (found.group(1) == found.group(2) == edge_sheet_letter("Id"))
 
 
 def run_doctor(

@@ -320,3 +320,21 @@ it` says how many weeks the number rests on.
 It only fills a **blank** cell, and only from the standings of `[contests] cash_line_series` (default `NFL GIANT $25 Double Up [Single
 Entry]`). A value you typed is kept; if the standings disagree by more than half a point both numbers are printed. A week with no
 standings file for that series stays blank.
+
+---
+
+**`PropPts` is blank for a player, or most of the slate.**
+Not a fault. `PropPts` needs every market his position uses (QB: pass yards and pass TDs; RB: rush yards and anytime TD; WR/TE:
+receptions, receiving yards and anytime TD), otherwise it is blank rather than a partial score. Books post props through the week, so
+before Saturday only some players are priced; the Saturday pull is the main one. The Texans/Jaguars-style games that are not on the
+DraftKings slate are never pulled. `data/current/unmatched_odds_props.csv` lists prop players that did not match a DraftKings name.
+
+**`dfs sync` says "props: the main pull is Saturday" (or "reusing the snapshot").**
+That is the credit guard: a plain full sync pulls props only on Saturday or Sunday and only when no snapshot is under 24 hours old.
+`dfs sync --props` forces a pull; `dfs doctor` warns when fewer than 100 credits are left, and a pull refuses to run when the credits left would not
+cover it. Plain `--live` never spends credits.
+
+**`EspnPts` is blank for a starter.**
+ESPN has no weekly projection for him (its API returns an empty entry for a player it expects out or on a bye), so there is nothing to score.
+It is a shadow column: Model Check scores it where it exists.
+

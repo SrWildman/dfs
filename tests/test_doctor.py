@@ -758,3 +758,31 @@ def test_a_type_cell_that_lost_its_dropdown_or_holds_junk_is_reported():
         "type in A1 is not Cash, GPP or Both"
         in _control_issues(FakeDoctorClient(dict(_ALL_GOOD_TABS), rows=rows))[0].detail
     )
+
+
+def test_run_doctor_flags_a_pool_formula_that_looks_up_edgerais_id_where_it_no_longer_is():
+    """2026-10-13: `EspnPts`/`PropPts` landed ahead of `Id` on EdgeRaw (BC -> BE) and Player Pool's Pool
+    cells still said `EdgeRaw!$BC:$BC`: every pooled player read blank until `dfs setup add-pool-control`
+    rewrote them."""
+    from dfs.derived import edge_sheet_letter
+    from dfs.edge_finder_tab import ID_COL, POOL_COL
+    from dfs.sheet_pool_cells import pool_formula
+
+    cfg = _base_config()
+    rows = {("Edge Finder", f"{ID_COL}1:{ID_COL}30"): [["Id"], [""], ["1001"]]}
+    good = pool_formula(3, "EdgeRaw", id_col=ID_COL)
+    old = edge_sheet_letter("Id")
+    stale = good.replace(f"${old}:${old}", "$BC:$BC")
+    assert stale != good
+
+    def run(formula):
+        formulas = {("Edge Finder", f"{POOL_COL}1:{POOL_COL}30"): [["Pool"], [""], [formula]]}
+        return run_doctor(
+            FakeDoctorClient(_ALL_GOOD_TABS, rows={**_lineups_rows(), **rows}, formulas=formulas),
+            cfg,
+            title="Week 5",
+        )
+
+    assert not [i for i in run(good) if i.check == "pool-cell-stale-id-column"]
+    (found,) = [i for i in run(stale) if i.check == "pool-cell-stale-id-column"]
+    assert "Edge Finder" in found.detail and f"{POOL_COL}3" in found.detail

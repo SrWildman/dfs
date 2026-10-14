@@ -114,6 +114,28 @@ tint, banding to make one player's row readable across 23 columns, and a
 visible sort/search arrow in every header cell (click one to sort by any
 column, or search it -- Data > Filter views holds the saved presets).
 
+### Props and ESPN: two shadow projections, and the credit plan
+
+`dfs sync` also pulls two independent projections that are **tracked, not trusted yet**: ESPN's own (`EspnPts`, free, every sync) and
+Vegas player props from The Odds API (`PropPts`, **500 credits a month**). Both appear on EdgeRaw beside `CalPts` and are scored in Model
+Check's SHADOW SOURCES block from their first week; neither enters `CalPts` until it has 3 scored weeks.
+
+A call costs one credit per market that returns data per game, in one US region (every book in it; naming fewer books does not
+save credits). We pull six markets for the unstarted games on the DraftKings slate, so a full pull is about **6 credits a game, ~78 a
+week**. The plan:
+
+| When | Command | Credits |
+|---|---|---|
+| Saturday | `dfs sync` (pulls props on its own: Saturday or Sunday, and only if no snapshot is under 24 hours old) | ~78 |
+| Sunday morning | `dfs sync --live --props` (only games not yet started; skip it if the Saturday pull covered everything) | up to ~30 |
+| Any other day | `dfs sync` leaves props alone and says so; `dfs sync --props` forces a pull | 0 / ~78 |
+| Gameday final sync | plain `dfs sync --live` **never** spends credits | 0 |
+
+About 108 a week, **~470 a month**. Props are not all posted on a Tuesday (a Tuesday pull costs credits and prices only a few players), which is
+why the main pull is Saturday. Every pull logs `x-requests-remaining` (`data/raw/odds_props/credits.csv`), refuses to run when the credits left
+would not cover it, and `dfs doctor` warns under 100. The raw responses are kept in `data/raw/odds_props/` and the key lives only in
+`config.toml` (`[odds_api] key`, never committed). `dfs week new` never pulls props.
+
 **Done looks like:** EdgeRaw has real data (not blank/zero rows), and
 Board's slate summary matches what you'd expect for the week (right
 number of games, no games missing from Slate Grid).

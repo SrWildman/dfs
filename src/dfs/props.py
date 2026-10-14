@@ -2,13 +2,14 @@
 data (a parsed response, dataframes), none reads a file or the network. The Odds API pull itself, its key and
 the join to the DraftKings pool belong to the caller (the local session).
 
-**UNVERIFIED against The Odds API's documentation.** This module was written in a session that could not
-reach the-odds-api.com, so the response shape and the market keys below come from memory of their v4 docs,
-not from reading them (`PARSER_ASSUMPTIONS` lists every one). `tests/fixtures/odds_api/
-synthetic_event_odds.json` is a SYNTHETIC response shaped like that memory, not a recorded one. A real
-response committed as `tests/fixtures/odds_api/event_odds_sample.json` replaces it as the authority; the
-parser is deliberately tolerant (it skips what it cannot read and counts it) so the first real file shows
-what is missing instead of crashing.
+**Verified on a real response (2026-10-13).** The parser was first written in a session that could not reach
+the-odds-api.com, from memory of their v4 docs. `tests/fixtures/odds_api/event_odds_sample.json` is a REAL
+recorded event-odds response (Texans at Jaguars, six US books, seven markets) and is now the authority:
+`test_recorded_sample_parses` reads it and every market key in `MARKETS` matched (prices are American,
+anytime-TD quotes are Yes-only). `PARSER_ASSUMPTIONS` still lists what the parser relies on, and it stays
+tolerant (it skips what it cannot read and counts it) so a changed response shows what is missing instead of
+crashing. The synthetic fixtures remain for the cases a real file does not contain. The pull, the key and the
+credit rules are `sources/odds_props.py`.
 
 **Pipeline** (each step is one function; the maths in `docs/CALCULATIONS.md`, "PropPts"):
 

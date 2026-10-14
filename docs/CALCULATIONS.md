@@ -1368,21 +1368,23 @@ source from the week it joins (`sheet_model_check.shown_sources`) so the display
 ### `PropPts` (`props.py`, pure; a shadow source)
 
 Vegas player props turned into an expected DraftKings score, as an independent signal beside TFFB, Sleeper and
-FantasyPros (FantasyPros is already a consensus of many sites; props are a market). **The Odds API pull, its key and the
-join to the DraftKings pool are the local session's; this module is the maths and the response parser.** Nothing is
-written to a sheet and `PropPts` is not yet a column anywhere: it enters Model Check when the local session adds it to
-the scored table.
+FantasyPros (FantasyPros is already a consensus of many sites; props are a market). `props.py` is the maths and the response
+parser (pure, no network); `sources/odds_props.py` is the pull with Sam's key and the credit rules, and `PropPts` is a column
+on EdgeRaw (beside `CalPts`) and a row in Model Check's shadow block.
 
-**Status of the parser: UNVERIFIED.** It was written in a session that could not reach the-odds-api.com. The response
-shape and the seven market keys (`props.MARKETS`) are from memory of their v4 docs, `tests/fixtures/odds_api/
-synthetic_event_odds.json` is invented, and `props.PARSER_ASSUMPTIONS` lists every assumption. The parser is tolerant
-(it skips and counts what it cannot read, `quotes.attrs["skipped"]`). **Prices may be decimal or American** (whichever `oddsFormat` the request asked for; the first real response
-was American: -115, +110, +320). `parse_event_odds(odds_format="auto")`, the default, reads them as American if any price in
-the payload is negative or at least 100 in size, else decimal, logs which, and keeps it in `quotes.attrs["odds_format"]`;
+**Status of the parser: verified on a real response (2026-10-13).** It was first written without access to
+the-odds-api.com; `tests/fixtures/odds_api/event_odds_sample.json` is now a real recorded response (Texans at Jaguars, six
+US books, seven markets) and `test_recorded_sample_parses` reads every market key in `props.MARKETS` from it. Prices come
+back **American** (-115, +110, +320): `parse_event_odds(odds_format="auto")`, the default, reads them as American if any
+price is negative or at least 100 in size, else decimal, logs which, and keeps it in `quotes.attrs["odds_format"]`;
 `"decimal"`/`"american"` force it. Read as decimal, every negative American price is skipped and whole markets vanish
-(`tests/fixtures/odds_api/synthetic_event_odds_american.json` pins this). Every anytime-TD quote in that response is Yes-only,
-so the `ANYTD_YES_ONLY_VIG` haircut (below) is the path real data takes. The local session's recorded
-`tests/fixtures/odds_api/event_odds_sample.json` is the authority; `test_recorded_sample_parses` runs on it when it exists.
+(`tests/fixtures/odds_api/synthetic_event_odds_american.json` pins this). Every anytime-TD quote is Yes-only, so the
+`ANYTD_YES_ONLY_VIG` haircut (below) is the path real data takes. The parser stays tolerant (it skips and counts what it
+cannot read, `quotes.attrs["skipped"]`). **The pull** (`sources/odds_props.py`): the free `/events` list, then one
+`/events/{id}/odds` call per unstarted game on the DraftKings slate for six markets (`PULL_MARKETS`: `player_pass_yds`,
+`player_pass_tds`, `player_rush_yds`, `player_receptions`, `player_reception_yds`, `player_anytime_td`; interceptions are
+left out, the QB's season rate stands in), `regions=us`, every book. A call costs (markets that return data) x (regions);
+the bookmaker list does not change it (measured: 1 market x 3 books = 1 credit; 7 x 6 = 7).
 
 1. **De-vig** each book's pair multiplicatively: `p_over = (1/o_over) / (1/o_over + 1/o_under)` on decimal prices
    (1.91/1.91 -> 0.5; 1.80/2.00 -> 0.5263; -150/+130 -> 0.5798). Anytime TD: the Yes/No pair the same way; a **Yes-only**
@@ -1993,3 +1995,24 @@ curve's score at the series' paid share in an average week (`docs/CONTESTS.md`).
 in the newest standings file. **Cash line vs same-format peers** = for each week with standings files for at least two series of the
 format, the series' mean cash line minus the mean cash line of the *other* series in that week; averaged over those weeks
 (`sheet_contests.peer_gaps`). Positive = it took a higher score to cash. No shrinkage: `Weeks behind it` is the evidence.
+
+### `EspnPts` and the shadow gating (2026-10-13)
+
+**`EspnPts`** (`sources/espn_projections.py`) is ESPN's own weekly projection from its public fantasy API
+(`kona_player_info`, no cookies; personal use, see the module docstring for the access check and the terms), scored to
+DraftKings rules from its COMPONENT stats with `dk_scoring` (ESPN's `appliedTotal` is its own fantasy scoring and is never
+used). A player ESPN has no weekly projection for (an empty `stats` dict: bye, out) has no `EspnPts`, never zeros. The stat
+ids were checked against nflverse (Week 5 actuals for 130+ players; the defenses over Weeks 1-5): pass yards 3, pass TDs 4,
+INTs 20, rush yards 24, rush TDs 25, receptions 53 (41 in a game log), receiving yards 42, receiving TDs 43, fumbles lost
+72, 2-point 19/26/44; DST sacks 99, INTs 95, fumble recoveries 96, blocked kicks 97, safeties 98 (one occurrence), defensive
+TDs 105, points allowed 120. Rush 2-pt (26), safeties (98) and the 2-point return were weakly or never observed; they move
+a projection by hundredths. Coverage of the Week 6 DraftKings slate (name + position, team always agreed): 97% of players at
+$6,000+, 92% at $5,000+, 52% at $4,000+, every defense.
+
+**Shadow gating.** `EspnPts` and `PropPts` are scored by Model Check from their first week (the `SHADOW SOURCES` block: each
+source beside TFFB and CalPts on the players it rated, marked "(shadow)", with how many of the 3 weeks it has) and are kept
+out of the CalPts blend until they have `[projection] shadow_min_weeks` (3) scored weeks (`calibration.ShadowPolicy`, tested
+byte-identical). A week counts when the source rated at least 20 players. `PropPts` is scored through the same rule as
+TFFB's projections: each player's row is from the **last props snapshot taken before his own kickoff**
+(`results_loop.props_for_week`); `EspnPts` through the snapshot at the week's reference time, like Sleeper's.
+

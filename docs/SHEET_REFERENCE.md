@@ -132,10 +132,12 @@ only a sanity check against Vegas, not a model (Round 5 item 5c).
 ### EdgeRaw
 
 **Column order (actions round, slice 5, 2026-10-09).** The tab is written in `derived.EDGE_SHEET_ORDER`, a designed order that mirrors Player Pool's spine: `Pool`, `Name`, `Position`, `Team`, `Opp`, `Salary`,
-`ProjPts`, `AggPts`, `CalPts`, `Val`, `ValAdj`, `Hit3x%`, `Boom%`, `Ceiling`, `CeilVal`, `Own%`, `Avail`, `Flags`, `Edge`; then the collapsed zones GAME (+ `GameID`, `TmRank`), CEIL (`CeilPct`, `Leverage`,
+`ProjPts`, `AggPts`, `CalPts`, `EspnPts`, `PropPts`, `Val`, `ValAdj`, `Hit3x%`, `Boom%`, `Ceiling`, `CeilVal`, `Own%`, `Avail`, `Flags`, `Edge`; then the collapsed zones GAME (+ `GameID`, `TmRank`), CEIL (`CeilPct`, `Leverage`,
 `OwnStatus`, + `Floor`, `CeilM`, `Bust%`), MOVE, WX and USAGE (+ `xFP/G`); then the hidden helpers (`Id`, `Flag`, the `*%ile` columns, `NameKey`). `derived.EDGE_COLUMNS` is unchanged and still
-append-only: it is the data frame's, `edge.csv`'s and the saved snapshots' order. Every EdgeRaw column letter and VLOOKUP index comes from `derived.edge_sheet_letter` / `edge_sheet_index` /
+append-only: it is the data frame's, `edge.csv`'s and the saved snapshots' order (the shadow columns `EspnPts` and `PropPts`, 2026-10-13, were appended last and placed right after `CalPts` on the tab). Every EdgeRaw column letter and VLOOKUP index comes from `derived.edge_sheet_letter` / `edge_sheet_index` /
 `edge_vlookup_index`; `tests/test_edge_sheet_order.py` fails if any other code computes one from `EDGE_COLUMNS`. The column tables below describe what each column means; their order is this one.
+
+**`EspnPts` and `PropPts`** (2026-10-13) are SHADOW projections shown beside `CalPts` on EdgeRaw only (not linked into Player Pool or Lineups): ESPN's weekly projection and Vegas player props, each scored to DraftKings points (`docs/CALCULATIONS.md`, "`EspnPts` and the shadow gating"). Blank where the source did not rate him (and `PropPts` is blank, never partial, unless every market his position needs is quoted). Model Check scores both from their first week in its SHADOW SOURCES block; neither is in `CalPts` until it has 3 scored weeks. Hover notes on both headers say so.
 
 The derived "which players are actually worth a look" tab -- computed
 locally by joining the tabs above, no network call of its own. Rows are

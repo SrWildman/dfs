@@ -14,7 +14,7 @@ the format the first real response turned out to use: Over/Under pairs with nega
 Yes-only anytime-TD quote at every book (no "No" side), three books, no malformed outcomes. Its job is to show
 `odds_format="auto"` picks American and skips nothing.
 
-`event_odds_sample.json` (a REAL recorded response) is to be committed by the local session. Run
-`tests/test_props.py` against it: `test_recorded_sample_parses` skips until it exists and then asserts the
-parser reads at least one quote for every market in `props.MARKETS` the response contains, and the
-assumptions it relies on are listed in `props.PARSER_ASSUMPTIONS`.
+`event_odds_sample.json` is a REAL recorded response (Texans at Jaguars, 2026-10-13: six US books, seven markets, American
+prices, Yes-only anytime-TD quotes, no key inside). It is the authority: `tests/test_props.py::test_recorded_sample_parses` asserts the
+parser reads at least one quote for every market in `props.MARKETS` the response contains, and
+`tests/sources/test_odds_props.py` pulls from it through a mocked HTTP layer.
