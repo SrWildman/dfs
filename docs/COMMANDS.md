@@ -87,7 +87,7 @@ Fetch data sources and upload them to the connected Google Sheet.
 | `--season INT` | Override auto-detected NFL season. |
 | `--live` | Re-sync only fast-moving sources (odds, DK statuses, TFFB projections, weather) plus edge, and print what changed in EdgeRaw's Flag column since the last sync. The Sunday-afternoon command -- not a substitute for a full `dfs sync`. |
 | `--sheet-id STR` | Write to this sheet instead of config.toml's (e.g. the template). |
-| `--props` | Also pull player props from The Odds API now (spends credits: about 6 per game, see docs/WORKFLOW.md). A plain full sync pulls them on its own only on Saturday or Sunday and only if no snapshot is under 24 hours old; with --live, only games not yet started are refreshed. A plain --live never spends credits. |
+| `--props` | Player props from The Odds API (about 6 credits a game, see docs/WORKFLOW.md). A plain full sync pulls them ONCE per NFL week, on the first full sync of a Saturday or Sunday. With --live this refreshes only the games whose players' DraftKings status changed since the last pull (nothing spent if none did); on a full sync it forces a pull. A plain --live never spends credits, and every pull must fit the budget (credits left / NFL weekends before the monthly reset). |
 
 ### `dfs lineups suggest`
 

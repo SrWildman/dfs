@@ -121,19 +121,23 @@ Vegas player props from The Odds API (`PropPts`, **500 credits a month**). Both 
 Check's SHADOW SOURCES block from their first week; neither enters `CalPts` until it has 3 scored weeks.
 
 A call costs one credit per market that returns data per game, in one US region (every book in it; naming fewer books does not
-save credits). We pull six markets for the unstarted games on the DraftKings slate, so a full pull is about **6 credits a game, ~78 a
-week**. The plan:
+save credits). We pull six markets for the unstarted games on the DraftKings slate, so a full pull is about **6 credits a game, ~78**. The plan:
 
 | When | Command | Credits |
 |---|---|---|
-| Saturday | `dfs sync` (pulls props on its own: Saturday or Sunday, and only if no snapshot is under 24 hours old) | ~78 |
-| Sunday morning | `dfs sync --live --props` (only games not yet started; skip it if the Saturday pull covered everything) | up to ~30 |
-| Any other day | `dfs sync` leaves props alone and says so; `dfs sync --props` forces a pull | 0 / ~78 |
+| Saturday or Sunday | the **first** full `dfs sync` of the NFL week pulls props on its own: **one automatic pull per week**, later full syncs that week reuse it | ~78 |
+| Sunday, game day | `dfs sync --live --props` refreshes **only games where a player's DraftKings status changed** since the last pull (a quoted player or a $5,000+ starter went Q/OUT/IR or came back); if none changed it says so and spends nothing | ~6 per changed game |
+| Any other day | a full `dfs sync` leaves props alone and says so; `dfs sync --props` forces a pull | 0 / ~78 |
 | Gameday final sync | plain `dfs sync --live` **never** spends credits | 0 |
 
-About 108 a week, **~470 a month**. Props are not all posted on a Tuesday (a Tuesday pull costs credits and prices only a few players), which is
-why the main pull is Saturday. Every pull logs `x-requests-remaining` (`data/raw/odds_props/credits.csv`), refuses to run when the credits left
-would not cover it, and `dfs doctor` warns under 100. The raw responses are kept in `data/raw/odds_props/` and the key lives only in
+**Budget guard.** Before any pull, the credits left divided by the NFL weekends before the monthly reset must cover that pull's worst case
+(6 credits x games), otherwise the pull is skipped with a sentence saying so (it is a skip, not a failure, and nothing is spent). The reset day is
+`[odds_api] reset_day` in `config.toml` (your account page on the-odds-api.com; yours is the 1st). Expected use: one ~78-credit pull a week
+(~335 a month) plus a few refreshes, **about 400-450 a month**, and the guard keeps it under 500.
+
+Props are not all posted on a Tuesday (a Tuesday pull costs credits and prices only a few players), which is
+why the main pull is the weekend. Every pull logs `x-requests-remaining` (`data/raw/odds_props/credits.csv`), and
+`dfs doctor` warns under 100. The raw responses are kept in `data/raw/odds_props/` and the key lives only in
 `config.toml` (`[odds_api] key`, never committed). `dfs week new` never pulls props.
 
 **Done looks like:** EdgeRaw has real data (not blank/zero rows), and

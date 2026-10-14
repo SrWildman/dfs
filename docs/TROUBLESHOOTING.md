@@ -329,10 +329,11 @@ receptions, receiving yards and anytime TD), otherwise it is blank rather than a
 before Saturday only some players are priced; the Saturday pull is the main one. The Texans/Jaguars-style games that are not on the
 DraftKings slate are never pulled. `data/current/unmatched_odds_props.csv` lists prop players that did not match a DraftKings name.
 
-**`dfs sync` says "props: the main pull is Saturday" (or "reusing the snapshot").**
-That is the credit guard: a plain full sync pulls props only on Saturday or Sunday and only when no snapshot is under 24 hours old.
-`dfs sync --props` forces a pull; `dfs doctor` warns when fewer than 100 credits are left, and a pull refuses to run when the credits left would not
-cover it. Plain `--live` never spends credits.
+**`dfs sync` says "props: the main pull is Saturday", or "Week N's one automatic pull was made ...".**
+That is the credit guard: a plain full sync pulls props once per NFL week, on the first full sync of a Saturday or Sunday, and later full syncs
+that week reuse it. `dfs sync --props` forces a full pull; `dfs sync --live --props` refreshes only the games where a DraftKings status changed
+since the last pull and says "nothing spent" when none did. A pull is also skipped (with the numbers) when credits left / NFL weekends before the
+reset (`[odds_api] reset_day`) would not cover it. `dfs doctor` warns under 100 credits. Plain `--live` never spends credits.
 
 **`EspnPts` is blank for a starter.**
 ESPN has no weekly projection for him (its API returns an empty entry for a player it expects out or on a bye), so there is nothing to score.

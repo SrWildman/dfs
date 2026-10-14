@@ -18,6 +18,11 @@ class SyncContext:
     # True for `dfs sync --live`: the Edge Finder step then reuses cached season inputs and never re-downloads
     # history (it must stay fast).
     live: bool = False
+    # The Odds API pull (`sources/odds_props.py`) is the one source that spends a budget: `props_kind` says
+    # why it runs ("auto": the week's one automatic pull, "forced": `--props`/`--only`, "refresh": `--live
+    # --props`) and `props_teams`, for a refresh, the teams whose games changed (None = every game).
+    props_kind: str = "forced"
+    props_teams: frozenset[str] | None = None
 
     @classmethod
     def current(cls, *, week: int | None = None, season: int | None = None) -> SyncContext:
@@ -25,6 +30,11 @@ class SyncContext:
             week=week if week is not None else nfl_calendar.current_week(),
             season=season if season is not None else nfl_calendar.current_season(),
         )
+
+
+class SourceSkipped(Exception):
+    """A source that chose not to run this time (a budget guard, nothing changed): not a failure. `run_sync`
+    reports it as a skip, saves nothing and leaves the source's last data as it was."""
 
 
 class Source(ABC):

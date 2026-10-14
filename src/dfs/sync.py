@@ -16,7 +16,7 @@ from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheets import SheetsClient, SheetsError
 from dfs.sources import get_source
-from dfs.sources.base import SyncContext
+from dfs.sources.base import SourceSkipped, SyncContext
 from dfs.store import record_failure, record_success, save
 
 log = get_logger("sync")
@@ -67,6 +67,9 @@ def run_sync(
 
             record_success(name, len(df))
             results.append(SourceResult(name, True, len(df), None))
+        except SourceSkipped as e:
+            log.info("skipped %s: %s", name, e)
+            results.append(SourceResult(name, True, 0, f"skipped: {e}"))
         except Exception as e:  # noqa: BLE001 - report every failure, never swallow
             log.error("sync failed for %s: %s", name, e)
             record_failure(name, str(e))

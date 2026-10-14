@@ -135,3 +135,6 @@ cash_line_series = "NFL GIANT $25 Double Up [Single Entry]"
 # never printed or committed.
 [odds_api]
 key = "PASTE-YOUR-KEY-HERE"
+# The day of the month your quota renews (your account page on the-odds-api.com). Every pull must fit
+# credits left / NFL weekends before this day.
+reset_day = 1

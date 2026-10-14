@@ -174,6 +174,9 @@ class OddsApiConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     key: str | None = None
+    # The day of the month the monthly quota renews (your account page on the-odds-api.com). The budget guard
+    # spreads the credits left over the NFL weekends before it (`odds_props.weekends_left`).
+    reset_day: int = Field(1, ge=1, le=28)
 
 
 # "The" double-up whose cash line Sam types into Results each week (his typed values match its standings).

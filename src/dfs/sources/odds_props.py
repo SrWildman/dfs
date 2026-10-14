@@ -4,8 +4,8 @@
 the six markets we use, from ONE US region (`regions=us`, every book in it). A call costs (markets that return
 data) x (regions); the free list and an empty response cost nothing, and restricting the bookmakers does not
 reduce it (measured: 1 market x 3 books = 1 credit, 7 markets x 6 books = 7). The plan is 500 credits a month:
-a Saturday main pull of about 78 (6 markets x ~13 games) plus a Sunday-morning refresh of the games not yet
-started, capped near 30. `docs/WORKFLOW.md` has the plan and the guards below.
+a Saturday main pull of about 78 (6 markets x ~13 games) plus status-change refreshes on game days.
+`docs/WORKFLOW.md` has the plan and the guards below.
 
 **What is kept.** Every pull writes the raw responses to `data/raw/odds_props/<UTC stamp>.json` (never the
 key), and the resulting `PropPts` frame to `data/raw/odds_props/<UTC stamp>.csv` and `data/current/
@@ -14,11 +14,16 @@ odds_props.csv`. The snapshots are kept every week: Model Check scores PropPts i
 `GameStart` (Eastern wall-clock with a trailing Z, as TFFB writes it; `kickoff.py`).
 
 **Guards** (`dfs sync` / `cli._props_plan`):
-- a full `dfs sync` pulls only on Saturday or Sunday (Eastern) AND only if no snapshot exists from the last 24
-  hours, so a Tuesday sync never spends credits on half-posted props;
-- `dfs sync --props` (full) and `dfs sync --live --props` pull whatever the day, but never for a game that has
-  started (props come down at kickoff) and never when the credits left would not cover the pull;
-- plain `dfs sync --live` never pulls (this source is not in `LIVE_SYNC_SOURCES`);
+- **at most ONE automatic pull per NFL week**: the first full `dfs sync` on a Saturday or Sunday (Eastern);
+  later full syncs that week reuse it (the credit log marks it `<season> week <n> auto`, so a forced or
+  test pull does not use it up). Any other day needs `--props`;
+- `dfs sync --live --props` refreshes only the games whose players' DraftKings `Status` changed since the last
+  pull (`refresh_plan`: someone quoted, or a $5,000+ starter, went Q/OUT/IR or came back) and spends nothing
+  when none did; a refresh merges into the saved frame so the other games keep their prices;
+- **budget**: before any pull, credits left / NFL weekends before the monthly reset (`[odds_api] reset_day`)
+  must cover the pull's worst case (`budget_check`), else it is skipped with that sentence (not a failure);
+- a pull never fetches a started game or a game off the DraftKings slate;
+- plain `dfs sync --live` and `dfs week new` never pull (this source is not in `LIVE_SYNC_SOURCES`);
 - every pull records `x-requests-remaining/used/last` (`odds_credits`), and `dfs doctor` warns under 100.
 
 The key is `[odds_api] key` in config.toml or `$ODDS_API_KEY`; it is passed as a query parameter (the API's
@@ -31,7 +36,7 @@ import glob
 import json
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -42,7 +47,7 @@ from dfs import store as store_mod
 from dfs.kickoff import KICKOFF_TIMEZONE
 from dfs.log import get_logger
 from dfs.paths import RAW_DIR
-from dfs.sources.base import Source, SyncContext
+from dfs.sources.base import Source, SourceSkipped, SyncContext
 
 log = get_logger("sources.odds_props")
 
@@ -76,7 +81,11 @@ FRAME_COLUMNS = [
 
 
 class OddsApiError(Exception):
-    """A failed or refused pull (no key, an HTTP error, too few credits left)."""
+    """A failed pull (no key, an HTTP error)."""
+
+
+class PropsSkipped(SourceSkipped):
+    """A pull a guard declined (budget, nothing changed, no games): reported as a skip, never a failure."""
 
 
 def api_key() -> str:
@@ -212,23 +221,153 @@ def snapshot_age(now: datetime | None = None) -> timedelta | None:
     return (now or datetime.now(UTC)) - snaps[-1][0]
 
 
-def full_sync_decision(now: datetime) -> tuple[bool, str]:
-    """`(pull, reason)` for a plain full `dfs sync`: Saturday or Sunday (Eastern) and no snapshot in the last
-    `REUSE_HOURS`. The reason is printed either way."""
-    local = pd.Timestamp(now).tz_convert(KICKOFF_TIMEZONE)
-    age = snapshot_age(now)
-    if age is not None and age < timedelta(hours=REUSE_HOURS):
-        hours = age.total_seconds() / 3600
+def _note(season: int, week: int, kind: str) -> str:
+    return f"{season} week {week} {kind}"
+
+
+def auto_pulled(season: int, week: int, log_file: Path | None = None) -> str | None:
+    """When this NFL week's one automatic pull happened (its UTC stamp), or None. Read from the credit log:
+    only a pull the full sync made on its own counts (`kind` "auto"), so a forced `--props` pull or an early
+    test pull does not use up the week's main pull."""
+    path = log_file or odds_credits.LOG_FILE
+    if not Path(path).exists():
+        return None
+    wanted = _note(season, week, "auto")
+    try:
+        log_frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    except (OSError, ValueError, pd.errors.ParserError):
+        return None
+    hit = log_frame[log_frame.get("note", pd.Series(dtype=str)) == wanted]
+    return str(hit["pulled_at"].iloc[-1]) if len(hit) else None
+
+
+def full_sync_decision(now: datetime, season: int, week: int) -> tuple[bool, str]:
+    """`(pull, reason)` for a plain full `dfs sync`: AT MOST ONE automatic pull per NFL week, made by the
+    first full sync on Saturday or Sunday (Eastern). Later full syncs that week reuse it. A pull on any other
+    day needs `--props`. The reason is printed either way."""
+    done = auto_pulled(season, week)
+    if done:
         return (
             False,
-            f"props: reusing the snapshot from {hours:.1f} h ago (a pull is due after {REUSE_HOURS} h)",
+            f"props: Week {week}'s one automatic pull was made {done}; reusing it "
+            "(`--live --props` refreshes)",
         )
+    local = pd.Timestamp(now).tz_convert(KICKOFF_TIMEZONE)
     if local.weekday() not in MAIN_PULL_WEEKDAYS:
         return (
             False,
             "props: the main pull is Saturday (props are not all posted yet); `dfs sync --props` forces one",
         )
-    return True, "props: pulling (Saturday/Sunday, no snapshot in the last 24 h)"
+    return True, f"props: pulling Week {week} (the first full sync on a Saturday or Sunday)"
+
+
+def weekends_left(now: datetime, reset_day: int) -> int:
+    """How many NFL Sundays (Eastern) remain from today up to, not including, the next quota reset day. At
+    least the one being played this weekend counts; a Sunday that is itself the reset day belongs to the
+    next quota."""
+    today = pd.Timestamp(now).tz_convert(KICKOFF_TIMEZONE).date()
+    year, month = today.year, today.month
+    reset = date(year, month, reset_day)
+    if reset <= today:
+        reset = date(year + (month == 12), 1 if month == 12 else month + 1, reset_day)
+    count, day = 0, today
+    while day < reset:
+        count += day.weekday() == 6
+        day += timedelta(days=1)
+    return count
+
+
+def budget_check(remaining: int | None, cost: int, now: datetime, reset_day: int) -> tuple[bool, str]:
+    """May a pull that can cost up to `cost` credits run? Credits left, divided by the NFL weekends left
+    before the quota resets, must cover it (so one big pull cannot starve the weekends after it); unknown
+    credits pass. The reason is the sentence the sync prints when it does not."""
+    if remaining is None:
+        return True, ""
+    weekends = max(weekends_left(now, reset_day), 1)
+    share = remaining / weekends
+    if cost <= share:
+        return True, ""
+    return False, (
+        f"{remaining} credit(s) left for {weekends} NFL weekend(s) before the reset on day {reset_day} "
+        f"is {share:.0f} a weekend, and this pull can cost up to {cost}: skipped"
+    )
+
+
+def _team_codes(event: dict) -> set[str]:
+    from dfs.sources.fantasypros_projections import FULL_TEAM_NAME_TO_CODE
+
+    return {
+        c
+        for c in (
+            FULL_TEAM_NAME_TO_CODE.get(event.get("home_team")),
+            FULL_TEAM_NAME_TO_CODE.get(event.get("away_team")),
+        )
+        if c
+    }
+
+
+def _status_by_id(frame: pd.DataFrame) -> dict[str, str]:
+    status = frame["Status"].fillna("") if "Status" in frame.columns else pd.Series("", index=frame.index)
+    return dict(zip(frame["ID"].astype(str), status.astype(str).str.strip(), strict=False))
+
+
+def changed_teams(
+    previous: pd.DataFrame, current: pd.DataFrame, quoted_ids: set[str], *, starter_salary: int = 5000
+) -> set[str]:
+    """Teams with a player whose DraftKings `Status` (Q / OUT / IR / blank) changed between two salary files,
+    and who matters to props: he was quoted in the last pull, or he is a starter by salary
+    (`starter_salary`+). A refresh pulls only these teams' games; no change means nothing is spent."""
+    before, after = _status_by_id(previous), _status_by_id(current)
+    salary = pd.to_numeric(current.get("Salary"), errors="coerce")
+    team = dict(zip(current["ID"].astype(str), current["TeamAbbrev"].astype(str).str.upper(), strict=False))
+    big = set(current["ID"].astype(str)[salary.fillna(0) >= starter_salary])
+    out = set()
+    for pid, status in after.items():
+        if pid in before and before[pid] != status and (pid in quoted_ids or pid in big):
+            out.add(team[pid])
+    return out
+
+
+def refresh_plan(
+    ctx: SyncContext,
+    now: datetime,
+    *,
+    last_snapshot: tuple[datetime, pd.DataFrame] | None = None,
+    previous_salaries: pd.DataFrame | None = None,
+    salaries: pd.DataFrame | None = None,
+) -> tuple[frozenset[str] | None, str]:
+    """For `--live --props`: `(teams to refresh, message)`. No earlier props snapshot this week ->
+    `(None, ...)`, every unstarted game (a first pull). An earlier one -> only the teams with a changed DK
+    status since it; none changed -> an empty set and a message saying nothing is spent."""
+    if last_snapshot is None:
+        snaps = [(ts, p) for ts, p in store_mod.snapshot_paths(RAW_DIR_NAME)]
+        week_start = nfl_calendar.week_start_date(ctx.week, ctx.season)
+        snaps = [(ts, p) for ts, p in snaps if ts.date() >= week_start]
+        if snaps:
+            last_snapshot = (snaps[-1][0], pd.read_csv(snaps[-1][1]))
+    if last_snapshot is None:
+        return None, "props: no earlier snapshot this week; pulling every unstarted game"
+    stamp, frame = last_snapshot
+    if salaries is None:
+        salaries = store_mod.load_current("draftkings")
+    if previous_salaries is None:
+        earlier = [p for ts, p in store_mod.snapshot_paths("draftkings") if ts <= stamp]
+        if not earlier:
+            return (
+                None,
+                "props: no DraftKings snapshot from before the last pull; pulling every unstarted game",
+            )
+        previous_salaries = pd.read_csv(earlier[-1])
+    quoted = {str(int(float(i))) for i in frame["Id"].dropna()} if "Id" in frame.columns else set()
+    teams = changed_teams(previous_salaries, salaries, quoted)
+    if not teams:
+        return frozenset(), (
+            "props: no DraftKings status has changed since the last pull "
+            f"({stamp:%a %H:%M} UTC); nothing spent"
+        )
+    return frozenset(
+        teams
+    ), f"props: status changed on {', '.join(sorted(teams))}; refreshing those games only"
 
 
 def pull(
@@ -240,6 +379,7 @@ def pull(
     raw_dir: Path | None = None,
     key: str | None = None,
     sleep: Callable[[float], None] | None = None,
+    reset_day: int | None = None,
 ) -> pd.DataFrame:
     """The whole pull for `ctx.week`: events, event odds for the unstarted games, raw JSON kept, credits
     recorded, `PropPts` frame returned. Raises `OddsApiError` when it cannot or should not run."""
@@ -253,16 +393,24 @@ def pull(
             salaries = store_mod.load_current("draftkings")
         listing = _get(client, f"/sports/{SPORT}/events", key)  # free
         events = slate_events(unstarted_week_events(listing.json(), ctx.week, ctx.season, now), salaries)
+        if ctx.props_teams is not None:  # a refresh: only the games whose players' status changed
+            events = [e for e in events if _team_codes(e) & ctx.props_teams]
         if not events:
-            raise OddsApiError(
+            raise PropsSkipped(
                 f"no unstarted Week {ctx.week} games on the DraftKings slate to pull props for"
             )
         cost = estimate_cost(len(events))
         known = odds_credits.read()
-        if known is not None and known.remaining is not None and known.remaining < cost:
-            raise OddsApiError(
-                f"{known.remaining} credit(s) left and this pull can cost up to {cost}: not pulling"
+        remaining_now = known.remaining if known is not None else None
+        if remaining_now is not None and remaining_now < cost:
+            raise PropsSkipped(
+                f"{remaining_now} credit(s) left and this pull can cost up to {cost}: not pulling"
             )
+        allowed, why = budget_check(
+            remaining_now, cost, now, reset_day if reset_day is not None else _reset_day()
+        )
+        if not allowed:
+            raise PropsSkipped(why)
         payloads, spent, remaining, used = [], 0, None, None
         for event in events:
             resp = _get(
@@ -292,13 +440,20 @@ def pull(
         json.dumps({"pulled_at": stamp, "week": ctx.week, "events": payloads})
     )
     reading = odds_credits.record(
-        remaining, used, spent=spent, events=len(payloads), now=now, note=f"week {ctx.week}"
+        remaining,
+        used,
+        spent=spent,
+        events=len(payloads),
+        now=now,
+        note=_note(ctx.season, ctx.week, ctx.props_kind),
     )
     log.info("props: %d game(s), %d credit(s) spent, %s remaining", len(payloads), spent, reading.remaining)
 
     frame, unmatched = frame_from_payloads(
         payloads, salaries, season=ctx.season, week=ctx.week, qb_int_rates=_qb_int_rates(ctx.season, ctx.week)
     )
+    if ctx.props_teams is not None:
+        frame = _merge_with_previous(frame, {e.get("id") for e in payloads})
     frame.attrs.update({"spent": spent, "remaining": reading.remaining, "unmatched": len(unmatched)})
     if len(unmatched):
         from dfs.paths import CURRENT_DIR
@@ -306,6 +461,28 @@ def pull(
         CURRENT_DIR.mkdir(parents=True, exist_ok=True)
         unmatched.to_csv(CURRENT_DIR / "unmatched_odds_props.csv", index=False)
     return frame
+
+
+def _reset_day() -> int:
+    from dfs.config import ConfigError, load_config
+
+    try:
+        return load_config().odds_api.reset_day
+    except ConfigError:
+        return 1
+
+
+def _merge_with_previous(frame: pd.DataFrame, refreshed_events: set) -> pd.DataFrame:
+    """A refresh prices only some games; the saved frame must still hold the others' last prices, or their
+    PropPts would blank out of EdgeRaw. Rows of the previous frame for games NOT refreshed are kept."""
+    try:
+        previous = store_mod.load_current("odds_props")
+    except FileNotFoundError:
+        return frame
+    kept = previous[~previous["event_id"].isin(refreshed_events)]
+    merged = pd.concat([kept, frame], ignore_index=True)
+    merged.attrs.update(frame.attrs)
+    return merged[FRAME_COLUMNS]
 
 
 class OddsPropsSource(Source):

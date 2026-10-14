@@ -2223,10 +2223,11 @@ def sync(
     props: bool = typer.Option(
         False,
         "--props",
-        help="Also pull player props from The Odds API now (spends credits: about 6 per game, see "
-        "docs/WORKFLOW.md). A plain full sync pulls them on its own only on Saturday or Sunday and only "
-        "if no snapshot is under 24 hours old; with --live, only games not yet started are refreshed. "
-        "A plain --live never spends credits.",
+        help="Player props from The Odds API (about 6 credits a game, see docs/WORKFLOW.md). A plain full "
+        "sync pulls them ONCE per NFL week, on the first full sync of a Saturday or Sunday. With --live this "
+        "refreshes only the games whose players' DraftKings status changed since the last pull (nothing "
+        "spent if none did); on a full sync it forces a pull. A plain --live never spends credits, and every "
+        "pull must fit the budget (credits left / NFL weekends before the monthly reset).",
     ),
 ) -> None:
     """Fetch data sources and upload them to the connected Google Sheet."""
@@ -2254,7 +2255,9 @@ def sync(
         source_names = requested
     else:
         source_names = list(SOURCES)
-    source_names, props_note = _props_plan(source_names, live=live, forced=props, only=bool(only))
+    ctx = SyncContext.current(week=week, season=season)
+    ctx.live = live
+    source_names, props_note = _props_plan(source_names, ctx, live=live, forced=props, only=bool(only))
     if props_note:
         console.print(props_note)
 
@@ -2277,8 +2280,6 @@ def sync(
         except FileNotFoundError:
             old_edge = None
 
-    ctx = SyncContext.current(week=week, season=season)
-    ctx.live = live
     console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
 
     results = run_sync(cfg, source_names, ctx, upload=not no_upload)
@@ -2289,7 +2290,9 @@ def sync(
     table.add_column("status")
     any_failed = False
     for r in results:
-        if r.ok:
+        if r.ok and r.error:  # a source that chose not to run (a budget guard): not a failure
+            table.add_row(r.source, "-", f"[yellow]{escape(r.error)}[/yellow]")
+        elif r.ok:
             table.add_row(r.source, str(r.rows), "[green]ok[/green]")
         else:
             any_failed = True
@@ -2325,25 +2328,46 @@ def sync(
 
 
 def _props_plan(
-    source_names: list[str], *, live: bool, forced: bool, only: bool, now: datetime | None = None
+    source_names: list[str],
+    ctx: SyncContext,
+    *,
+    live: bool,
+    forced: bool,
+    only: bool,
+    now: datetime | None = None,
 ) -> tuple[list[str], str]:
     """Which of `source_names` to run once The Odds API's credit rules are applied, and the line to print.
+    Sets `ctx.props_kind` / `ctx.props_teams` for the pull.
 
-    `odds_props` is the only source that spends money: a plain `--live` never includes it; a full sync
-    includes it only when `odds_props.full_sync_decision` says so (Saturday or Sunday, no snapshot in 24 h);
-    `--props` (or `--only odds_props`) forces it, but a pull still skips games that have started. When it is
-    pulled it sits right before `edge`, which reads it."""
+    `odds_props` is the only source that spends money. A plain `--live` never includes it. A full sync runs
+    it ONCE per NFL week (`odds_props.full_sync_decision`: the first full sync on a Saturday or Sunday; later
+    ones reuse it). `--live --props` refreshes only the games whose players' DraftKings status changed
+    since the last pull, and spends nothing when none did. `--props` on a full sync (or `--only odds_props`)
+    forces a pull. Every pull still passes the budget guard inside `odds_props.pull`. When it runs it sits
+    right before `edge`, which reads it."""
     from dfs.sources import odds_props
 
     names = [n for n in source_names if n != "odds_props"]
+    now = now or datetime.now(UTC)
     if only:
-        return source_names, ""  # `--only odds_props` is an explicit request
+        ctx.props_kind = "forced"
+        return source_names, ""
     if live and not forced:
         return names, ""
-    if forced:
+    if live:
+        ctx.props_kind = "refresh"
+        try:
+            ctx.props_teams, note = odds_props.refresh_plan(ctx, now)
+        except FileNotFoundError:
+            ctx.props_teams, note = None, "props: no DraftKings file yet; pulling every unstarted game"
+        if ctx.props_teams is not None and not ctx.props_teams:
+            return names, note
+    elif forced:
+        ctx.props_kind = "forced"
         note = "props: pulling now (--props); only games not yet started are fetched"
     else:
-        pull, note = odds_props.full_sync_decision(now or datetime.now(UTC))
+        ctx.props_kind = "auto"
+        pull, note = odds_props.full_sync_decision(now, ctx.season, ctx.week)
         if not pull:
             return names, note
     at = names.index("edge") if "edge" in names else len(names)
