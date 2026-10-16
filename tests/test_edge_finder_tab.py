@@ -568,6 +568,20 @@ def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
     assert any("moved by more than R6's measured band" in _row_text(r) for r in quiet.rows)
 
 
+def test_usage_trends_fold_the_players_past_the_visible_rows_into_a_more_group():
+    count = eft.TREND_ROWS_PER_POSITION + 3
+    edge = _edge([_player(i) for i in range(1, count + 1)])
+    trends = pd.concat(
+        [_trends(GsisId=str(i), Z=1.0 + i / 100) for i in range(1, count + 1)], ignore_index=True
+    )
+    layout = eft.build_layout(_inputs(edge, r6=_r6(trends=trends)))
+    key = "USAGE TRENDS|WR|more"
+    group = next(g for g in layout.groups if g.key == key)
+    assert group.depth == 2 and group.collapsed and group.last - group.first + 1 == 3
+    assert "▸ 3 more WRs" in layout.rows[group.first - 2][1]
+    assert any(f"WR · {eft.TREND_ROWS_PER_POSITION} of {count} moved" in _row_text(r) for r in layout.rows)
+
+
 def test_a_player_too_new_for_an_arrow_is_counted_not_guessed():
     edge = _edge([_player(7)])
     layout = eft.build_layout(_inputs(edge, r6=_r6(short_games=4)))

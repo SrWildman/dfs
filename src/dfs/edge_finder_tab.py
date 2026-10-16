@@ -1642,16 +1642,15 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
         if at.empty:
             continue
         # one row per player: his biggest move, with his other moves named in the Why
-        players = list(dict.fromkeys(at["_id"]))
-        shown = players[:TREND_ROWS_PER_POSITION]
-        more = len(players) - len(shown)
+        players = list(dict.fromkeys(at["_id"]))[:MAX_PER_POSITION]
+        visible = players[:TREND_ROWS_PER_POSITION]
         b.sub(
             "",
-            label=f"{pos} · {len(shown)} of {len(players)} moved",
-            detail="players whose usage moved more than the measured band"
-            + (f" (+{more} more not shown)" if more else ""),
+            label=f"{pos} · {len(visible)} of {len(players)} moved",
+            detail="players whose usage moved more than the measured band",
         )
-        for pid in shown:
+
+        def trend_row(pid, pos=pos, at=at) -> None:
             moves = at[at["_id"] == pid]
             r = moves.iloc[0]
             e = by_id.loc[pid]
@@ -1674,6 +1673,17 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             )
             for offset, (pattern, kind) in enumerate(patterns, start=1):  # slots 2-4: Last 3, Earlier, Change
                 b.layout.cell_formats.append((f"{column_letter(len(LEAD) + offset)}{row}", pattern, kind))
+
+        for pid in visible:
+            trend_row(pid)
+        rest = players[len(visible) :]
+        if rest:  # the same "▸ N more" fold as the other sections
+            b.open_group(
+                f"▸ {len(rest)} more {_plural(pos)} (click + to show)", f"{b.section_key}|{pos}|more"
+            )
+            for pid in rest:
+                trend_row(pid)
+            b.close_group()
     b.end_section()
 
 
