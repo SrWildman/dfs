@@ -57,6 +57,7 @@ from dfs.sim.simulate import PlayerSpec
 from dfs.sim_inputs import N_SIMS, SEED, lineup_from_names
 
 DEFAULT_CASH_BUILDS = 3
+SECOND_BUILD_MIN_DIFFERENCE = 2  # a QB's second build need only differ from the others by this many players
 BUILDS_PER_QB = 2  # GPP builds: every QB with a stack gets one build, and ideally this many
 MIN_DIFFERENCE = 3  # each build differs from every earlier one by at least this many players
 MAX_EXPOSURE = 0.6  # no player in more than this share of the GPP builds
@@ -446,7 +447,8 @@ def choose_per_qb(
     share: float = MAX_EXPOSURE,
 ) -> list[Scored]:
     """GPP builds that cover every QB stack: one round gives each quarterback his best lineup, a second round
-    a second one (`BUILDS_PER_QB`), quarterbacks in order of their best lineup, each build differing from the
+    a second one (`BUILDS_PER_QB`; it needs only `SECOND_BUILD_MIN_DIFFERENCE` different players),
+    quarterbacks in order of their best lineup, each build differing from the
     earlier ones by `min_difference` players and (from the second round on) no player past the exposure cap:
     every QB gets his first build whatever the cap says. The cap is a share of the
     number of builds, which is only known at the end, so it is re-run until the cap fits the builds it made.
@@ -468,19 +470,27 @@ def choose_per_qb(
         uses: dict[str, int] = {}
         for round_ in range(BUILDS_PER_QB):
             limit = None if round_ == 0 else cap  # a QB's first build is never given up to the exposure cap
+            # The best lineups of one stack are variants of each other (a cheap player swapped), so a second
+            # build of it would almost never clear the usual difference: it needs one fewer player.
+            need = min_difference if round_ == 0 else min(min_difference, SECOND_BUILD_MIN_DIFFERENCE)
             for qb in order:
                 for candidate in by_qb[qb]:
-                    if candidate not in chosen and _fits(candidate, chosen, uses, min_difference, limit):
+                    if candidate not in chosen and _fits(candidate, chosen, uses, need, limit):
                         chosen.append(candidate)
                         for p in candidate.players:
                             uses[p.name] = uses.get(p.name, 0) + 1
                         break
         return chosen
 
-    cap = exposure_cap(BUILDS_PER_QB * len(order), share)
+    def cap_for(builds: int) -> int:
+        # The core players of every stack are in each QB's first build, so a cap below the number of QBs plus
+        # one would forbid any second build at all: the cap is never less than that.
+        return max(exposure_cap(builds, share), len(order) + 1)
+
+    cap = cap_for(BUILDS_PER_QB * len(order))
     chosen = run(cap)
-    while chosen and exposure_cap(len(chosen), share) < cap:
-        cap = exposure_cap(len(chosen), share)
+    while chosen and cap_for(len(chosen)) < cap:
+        cap = cap_for(len(chosen))
         chosen = run(cap)
     return sorted(chosen, key=ranked)
 

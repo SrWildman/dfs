@@ -138,8 +138,11 @@ def test_every_build_is_a_legal_lineup(report):
 def test_every_build_differs_from_the_earlier_ones_of_its_kind_by_at_least_three_players(report):
     for kind in ("cash", "gpp"):
         group = [b for b in report.builds if b.kind == kind]
+        floor = (
+            ls.MIN_DIFFERENCE if kind == "cash" else ls.SECOND_BUILD_MIN_DIFFERENCE
+        )  # a QB's 2nd GPP build
         for a, b in combinations(group, 2):
-            assert len({p.name for p in a.players} - {p.name for p in b.players}) >= ls.MIN_DIFFERENCE
+            assert len({p.name for p in a.players} - {p.name for p in b.players}) >= floor
 
 
 def test_every_gpp_build_holds_a_stack_and_its_title_names_it(report):
