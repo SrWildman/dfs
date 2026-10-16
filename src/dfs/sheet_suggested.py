@@ -4,7 +4,7 @@ Nothing on it is typed and nothing on any other tab reads it except the Apps Scr
 build to Lineups. Each build is a block in the Lineups layout (Sam approved it, Week 6):
 
     Build 4 | GPP | NO stack + NYG bring-back                             (a dark bar)
-    Slot | Name | Team | Opp | Salary | CalPts | Kickoff | Own% | Typical | Big night | Cash % | 190+ %
+    Slot | Name | Team | Opp | Salary | CalPts | Kickoff | Own% | Typical | Big night | Cash % | Top 1%
     QB   | ...                                                    (nine player rows, FLEX = the latest
     ...                                                           kickoff)
     Total |     |     |    | $49,900 | 132.9 |        |      | 126.1 | 163.4 | 25% | 1.4%
@@ -26,6 +26,7 @@ import pandas as pd
 from dfs.kickoff import kickoff_label
 from dfs.lineup_suggest import Build, SuggestReport
 from dfs.models import ROSTER_SLOTS
+from dfs.sheet_lineup_sim import P_CASH_GREEN, P_GPP_GREEN, TOP1_HEADER
 from dfs.sheet_lineup_tints import apply_lineup_tints
 from dfs.sheets import SheetsClient, column_letter
 
@@ -43,7 +44,7 @@ COLUMNS = [
     "Typical",
     "Big night",
     "Cash %",
-    "190+ %",
+    TOP1_HEADER,
 ]
 LAST_COLUMN = column_letter(len(COLUMNS) - 1)  # the last visible column
 GAME_COLUMN = "GameID"  # a hidden helper after the visible columns: the correlation tints group by game
@@ -145,7 +146,6 @@ def build_layout(
     layout = Layout(rows=[])
     header = [*COLUMNS, GAME_COLUMN]
     header[COLUMNS.index("CalPts")] = projection_label(metric)
-    header[COLUMNS.index("190+ %")] = f"{gpp_target:g}+ %"
 
     def add(values: list) -> int:
         layout.rows.append([*values, *[""] * (COLUMN_COUNT - len(values))])
@@ -234,7 +234,6 @@ def write_suggested(
     lines_text: str | None = None,
 ) -> str:
     """Write and style the whole tab (it is rebuilt from scratch every run)."""
-    from dfs.sheet_lineup_sim import P_CASH_GREEN, P_GPP_GREEN
     from dfs.sheet_style import _HEADER_FMT, _SUBHEAD_FMT, _TITLE_FMT, INK_MUTED, WHITE, _chip, _num
 
     layout = build_layout(
@@ -300,9 +299,11 @@ def write_suggested(
             {**_num("0.0"), "horizontalAlignment": "RIGHT"},
         )
         client.format_range(TAB, f"{number['Cash %']}{row}", {**_num("0%"), "horizontalAlignment": "RIGHT"})
-        client.format_range(TAB, f"{number['190+ %']}{row}", {**_num("0.0%"), "horizontalAlignment": "RIGHT"})
-    for row in layout.total_rows:  # green at the same lines Lineups uses (Cash % 50%, GPP target 5%)
-        for column, line in (("Cash %", P_CASH_GREEN), ("190+ %", P_GPP_GREEN)):
+        client.format_range(
+            TAB, f"{number[TOP1_HEADER]}{row}", {**_num("0.0%"), "horizontalAlignment": "RIGHT"}
+        )
+    for row in layout.total_rows:  # green at the same lines Lineups uses (Cash % 50%, Top 1% 2%)
+        for column, line in (("Cash %", P_CASH_GREEN), (TOP1_HEADER, P_GPP_GREEN)):
             cell = f"{number[column]}{row}"
             client.add_boolean_rule(
                 TAB,

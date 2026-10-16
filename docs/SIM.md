@@ -687,11 +687,10 @@ cash builds. Against a line that moves with the field the lineup that wins is th
    (`SimResult` keeps each draw's lines with `keep_scores`, so any other offset is one subtraction away).
    The per-draw thresholds also drive `p_any_cash`, `p_any_gpp` and `expected_cashing` (the portfolio line).
 
-The column formerly `190+ %` is **`Top 1%`** in code, notes and these docs; its numbers are P(top 1% line), not
-P(>= 190). **The sheet's label is still `190+ %`** (Lineups, Suggested, the Instructions tab, `GPP_HEADER_RE`,
-`LINEUPS_COLUMN_ORDER`'s `P(190+)`, template and live sheet): relabelling a sheet header is a structural change
-and was left to the local session. Until then the hover note on that label says what the number is, and the
-Suggested tab's status line says so.
+The column formerly `190+ %` is **`Top 1%`** in code, notes, docs and on the sheet (Lineups, Suggested and the
+Instructions tab, template and Week 6, relabelled in the local round after this one landed); its numbers are
+P(top 1% line), not P(>= 190), except with the fixed lines, where the hover note says it is the chance of reaching
+`[sim] gpp_target`. `GPP_HEADER_RE` stays only to recognise the retired far-right `P(190+)` column.
 
 **Column notes.**
 
@@ -700,15 +699,48 @@ Suggested tab's status line says so.
   Green at 50% or more. (Before: "beats a typical cash line, the median of your typed Cash Lines".)
 - **`Top 1%`**: the chance the lineup finishes in the top 1% of a large-field GPP, the field's average score plus
   63.2 points (the line moves with the slate). An average entry has about 1%; the more above that, the better a GPP
-  build. (Before: P(score >= 190), "a typical tournament-winning pace".) The sheet's green rule still fires at 5%,
-  which a top-1% chance rarely reaches: revisit it with the relabel.
+  build. (Before: P(score >= 190), "a typical tournament-winning pace".) Green at 2% or more (twice that).
 
 **Ownership is a large-field projection.** TFFB's `Own%` describes a large-field contest. Double-ups are much chalkier:
 in Sam's files, players projected over 15% were actually owned about 39% on average, about 15 points above projection.
 `[sim.lines] double_up_own_curve` and `gpp_own_curve` take a piecewise-linear `[projected, expected]` curve (fractions,
 anchored at (0, 0) and (1, 1), strictly increasing in `projected`, non-decreasing in `expected`) that maps projected
 Own% to the Own% each contest type is expected to have; **both default to empty, the identity.** The cash line uses the
-double-up field, the top-end line the GPP field. The local session fits the curves on Sam's files.
+double-up field, the top-end line the GPP field. The local session fitted them on Sam's files (next paragraph): both stay empty.
+
+**Fitted on Sam's files (Weeks 4 and 5): both curves stay empty, the identity.** Projected `Own%` is TFFB's last
+snapshot before the slate's kickoff (`data/raw/projections`); actual is the contest's `%Drafted` summed over a player's
+slot rows (`data/ownership_log.csv`; it sums to 9.0 per contest, and actual ownership x actual points reproduces the
+contest's real field mean to within 0.05 points in 17 of 20 files, 1.5 in the three 100-entry ones). The
+double-up files exist only for Weeks 4 and 5 (Week 2 has one 100-entry GPP), so that curve rests on two slates.
+
+- *GPP fields of 700+ (9 contests): the fit is the identity.* Binned means sit within about 10% of projection at every
+  level above 1%; a four-knot fit beats the identity by 6% of squared error in sample and is no better held out by week.
+  Field mean from projected ownership x actual points minus the real field mean: mean +2.3, mean absolute 2.5.
+- *Double-ups (7 contests): the fit is a steep convex curve.* A player projected 4% / 10% / 20% / 35% was owned
+  about 1.9% / 4.0% / 31% / 67% (scaled so the mapped ownership sums to 9; Week 4 and Week 5 fitted alone agree to
+  within 0.08), and the curve beats the identity out of sample on the players' own ownership (held-out squared error 2.7 vs
+  4.9 and 1.2 vs 3.1). **It still makes the field mean worse**, so it is not saved:
+
+| Week | Contest (entries) | Real field mean | Identity | Gap | With the double-up curve |
+|---|---|---|---|---|---|
+| 4 | Double Up (4,597) | 110.4 | 122.0 | +11.7 | +18.0 |
+| 4 | Double Up (2,758) | 110.0 | 122.0 | +12.1 | +18.4 |
+| 4 | Double Up (2,873) | 110.0 | 122.0 | +12.1 | +18.4 |
+| 4 | Double Up (3,448) | 110.5 | 122.0 | +11.6 | +17.9 |
+| 5 | Double Up (4,433) | 142.2 | 135.9 | -6.2 | +9.8 |
+| 5 | Double Up (2,758) | 144.8 | 135.9 | -8.9 | +7.2 |
+| 5 | Double Up (3,995) | 143.1 | 135.9 | -7.2 | +8.9 |
+
+  The curve gets the chalk's total share right (Week 4: players projected at 20% or more held 3.54 of the 9 slots,
+  the curve says 3.54, identity 1.9) but spreads it by projection, and the double-up field does not: it piles into
+  **specific value plays** (Week 4: Trevor Lawrence owned 62% against 16% projected; Week 5: Jacoby Brissett 74% against
+  25%), so a level curve over-weights the projected chalk that the field passed over (Tee Higgins 19% projected, 6.5%
+  owned, 30 points). **The remaining field-mean error under the identity (Week 4 +12, Week 5 -7) comes from that
+  player-specific double-up chalk, not from a level.** Revisit at the Week 8 recalibration as a per-player double-up
+  ownership model (value, salary, closeness to the field's mega-chalk build), using the standings files; until then
+  `double_up_own_curve` and `gpp_own_curve` stay empty and Cash % is measured against a field mean that is right on
+  average and wrong by about 10 points in either direction in a given week.
 
 **Before ownership publishes** (`Own%` is blank until TFFB computes it midweek) there is no field to measure
 against, so there are no relative lines. The simulator falls back to the FIXED lines, **and says so** (the sync summary,
@@ -754,15 +786,14 @@ lines"): the field's average score plus 0.6 (double-up cash line) and plus 63.2 
 `--fixed-lines`, or until ownership publishes, they are the old fixed lines: the cash line is the median of every typed
 `Cash Line` in Results this season (all weeks before the slate's week; read only; Results' Cash columns are cash
 contests by construction, so no GPP value can be in it; with none typed the placeholder 145 is used and the sync says
-so) and the GPP target is `[sim] gpp_target` in `config.toml`, default 190, shown in the column header as `190+ %`.
+so) and the GPP target is `[sim] gpp_target` in `config.toml`, default 190 (the label stays `Top 1%`).
 
 **Lineups tab.** `dfs sync` (the full sync and `--live`) simulates every complete lineup together (20,000 draws, seed 0; with relative lines, the top-owned players of the whole
 slate join the run, so EdgeRaw's specs are built for every team, not only the lineups')
-and writes `Median`, `p90`, `P(cash)` and `P(<target>+)` onto each lineup's Total row (under `AggPts`..`ValAdj`, labels on the Remaining row), plus the portfolio line (now on the Board) from the first
+and writes `Typical`, `Big night`, `Cash %` and `Top 1%` onto each lineup's Total row (under `AggPts`..`ValAdj`, labels on the Remaining row), plus the portfolio line (now on the Board) from the first
 lineup's `Remaining` row (`Portfolio`, expected cashes under `p90`, P(at least one cashes) under `P(cash)`, P(at least one
 reaches the target) under the GPP column). A half-built lineup or an unknown name is left blank. The numbers are not
-conditioned on games already played. Changing `gpp_target` renames the header on the next sync; `dfs setup reorder-columns`
-puts the canonical `P(190+)` back first so its exact-name comparison still works.
+conditioned on games already played. Changing `gpp_target` no longer renames anything: the label is always `Top 1%`.
 
 **Late swap.** `dfs lineups late-swap` scores every swap it finds (the full re-fill, the 2-for-2 swaps and the 1-for-1
 swaps) with the change in P(cash) and P(GPP): the lineup and all its candidate versions are simulated in ONE run, so the

@@ -90,7 +90,7 @@ def test_each_build_is_a_bar_a_header_nine_player_rows_and_a_total_row_then_a_bl
         "Typical",
         "Big night",
         "Cash %",
-        "190+ %",
+        "Top 1%",
         "GameID",  # the hidden helper the stack tints group by
     ]
     players = layout.player_rows[:9]
@@ -102,7 +102,7 @@ def test_each_build_is_a_bar_a_header_nine_player_rows_and_a_total_row_then_a_bl
     assert layout.rows[total - 1][4] == cash.salary and layout.rows[total - 1][5] == cash.projection
     own = [layout.rows[r - 1][7] for r in players]
     assert layout.rows[total - 1][7] == round(sum(o for o in own if o != ""), 4) > 0  # total ownership
-    assert layout.rows[total - 1][8:12] == [131.3, 166.0, 0.512, 0.0432]  # Typical, Big night, Cash %, 190+ %
+    assert layout.rows[total - 1][8:12] == [131.3, 166.0, 0.512, 0.0432]  # Typical, Big night, Cash %, Top 1%
     assert layout.rows[total] == [""] * ss.COLUMN_COUNT  # a blank row between blocks
     assert layout.bar_rows[1] == total + 2
     assert layout.rows[layout.bar_rows[1] - 1][:3] == [
@@ -130,11 +130,11 @@ def test_the_player_rows_carry_team_opponent_salary_projection_kickoff_and_owner
     assert second[7] == 0.123  # published ownership shows as a fraction (the column formats it as a percent)
 
 
-def test_the_projection_and_target_headers_follow_the_config():
+def test_the_projection_header_follows_the_config_and_the_top_header_is_fixed():
     gpp = _build(1, "gpp", "GPP build 1  ·  DET stack + ARI bring-back")
     layout = ss.build_layout(_report(gpp), _edge([gpp]), metric="ProjPts", cash_line=140.0, gpp_target=187.5)
     header = layout.rows[layout.header_rows[0] - 1]
-    assert header[5] == "ProjPts" and header[11] == "187.5+ %"
+    assert header[5] == "ProjPts" and header[11] == "Top 1%"
 
 
 def test_the_empty_state_and_the_notes_are_said_on_the_tab():
@@ -201,7 +201,7 @@ class _Client:
         self.tints = specs
 
 
-def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_the_gpp_chance_at_five():
+def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_top_one_percent_at_two():
     cash = _build(1, "cash", "Cash build 1")
     client = _Client(exists=True)
     message = ss.write_suggested(
@@ -212,7 +212,7 @@ def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_the_gp
         _report(cash), _edge([cash]), metric="CalPts", cash_line=143.9, gpp_target=190.0
     ).total_rows[0]
     assert (f"K{total}", "NUMBER_GREATER_THAN_EQ", ["0.5"]) in client.rules
-    assert (f"L{total}", "NUMBER_GREATER_THAN_EQ", ["0.05"]) in client.rules
+    assert (f"L{total}", "NUMBER_GREATER_THAN_EQ", ["0.02"]) in client.rules
     assert client.widths["B"] == 170  # the Name column
     assert client.hidden == ("M", "M")  # the GameID helper
     # Lineups' three correlation tints over the build's Name and Team cells (B:C); Slot is the position

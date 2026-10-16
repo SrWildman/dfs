@@ -140,7 +140,7 @@ class SimLines:
             return f"cash line {self.cash_line:g}  ·  GPP target {self.gpp_target:g}  ·  {self.mode} lines"
         return (
             f"lines move with the slate: Cash % = field average +{self.field.cash_offset:g}, "
-            f"Top 1% (the {self.gpp_target:g}+ % column) = field average +{self.field.top_offset:g}"
+            f"Top 1% = field average +{self.field.top_offset:g}"
         )
 
 

@@ -9,7 +9,8 @@ names, no function names; the developer reference stays in `docs/`.
 derived from it, not retyped: Player Pool's per-position caps (`weekly_reset.PLAYER_POOL_NAME_BLOCKS`),
 Lineups' roster slots and block count (`models.ROSTER_SLOTS`, `weekly_reset.LINEUPS_NAME_BLOCKS`), the pool
 tag-group order (`sources.edge.POOL_TYPE_SORT_ORDER`), the Pool dropdown's options
-(`sheet_pool_cells.POOL_OPTIONS`) and the GPP target default. The surrounding English is still hand-written
+(`sheet_pool_cells.POOL_OPTIONS`) and the simulator's Top 1% label and green lines
+(`sheet_lineup_sim`). The surrounding English is still hand-written
 and can go stale the way any comment can; a generated row does not generate the facts inside it.
 
 The tab's layout is `_LAYOUT`, a flat list of title / section-band / text rows. `render_instructions_grid`
@@ -21,8 +22,8 @@ Idempotent.
 
 from __future__ import annotations
 
-from dfs.config import SIM_GPP_TARGET_DEFAULT
 from dfs.models import ROSTER_SLOTS
+from dfs.sheet_lineup_sim import P_CASH_GREEN, P_GPP_GREEN, TOP1_HEADER
 from dfs.sheet_pool_cells import POOL_OPTIONS
 from dfs.sheets import SheetsClient
 from dfs.sources.edge import POOL_TYPE_SORT_ORDER
@@ -100,11 +101,14 @@ _MODEL_ROWS: list[tuple[str, str]] = [
         "Our projection: TFFB corrected for its known biases and blended with Sleeper and FantasyPros. "
         "Better than TFFB at RB and WR so far.",
     ),
-    ("Cash", "Pool from Top plays, then Cash. Build lineups with a Cash % of 50% or more."),
+    (
+        "Cash",
+        f"Pool from Top plays, then Cash. Build lineups with a Cash % of {P_CASH_GREEN:.0%} or more.",
+    ),
     (
         "GPP",
         "Pool from Top plays, then GPP. Look for a Lev of +25 or more. Build with a stack and check the "
-        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ %.",
+        f"{TOP1_HEADER}.",
     ),
     (
         "Proj ▼ / Proj ▲",
@@ -148,7 +152,7 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "About 90 minutes before the first kickoff, after inactives, run: dfs sync --live. Then build "
         "lineups "
         "on the Lineups tab: type names in column A, set Cash or GPP on the Total row, and read Cash % and "
-        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ % there (see Reading the numbers). Exposure shows how concentrated "
+        f"{TOP1_HEADER} there (see Reading the numbers). Exposure shows how concentrated "
         "your lineups are. When they are final, pair them to your contest entries in DK Upload, run: dfs "
         "export, and upload the file to DraftKings.",
     ),
@@ -205,16 +209,17 @@ _NUMBER_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Cash %",
-        "On a lineup's Total row: the chance the lineup beats a typical cash line, the median of every Cash "
-        "Line you typed in Results this season. Green at 50% or more. Typical is its usual score and Big "
-        "night is what it scores on a great slate (1 slate in 10 does better).",
+        "On a lineup's Total row: the chance the lineup beats the double-up cash line, which moves with the "
+        f"slate (the field's average score plus a little). Green at {P_CASH_GREEN:.0%} or more. Typical is "
+        "its usual score and Big night is what it scores on a great slate (1 slate in 10 does better).",
     ),
     (
-        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ %",
-        f"On a lineup's Total row: the chance the lineup reaches the GPP target "
-        f"({SIM_GPP_TARGET_DEFAULT:.0f} "
-        "points unless you change it in the config). Green at 5% or more. The Cash or GPP marker highlights "
-        "the number that matters for that lineup.",
+        TOP1_HEADER,
+        "On a lineup's Total row: the chance the lineup finishes in the top 1% of a large-field GPP, a line "
+        "that moves with the slate. An average entry has about 1%, so "
+        f"{P_GPP_GREEN:.0%} or more (twice that) is green. The Cash or GPP marker highlights the number "
+        "that matters for that lineup. Until ownership publishes it is the chance of reaching a fixed score "
+        "instead.",
     ),
     (
         "The chips",
@@ -284,8 +289,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
     (
         "Suggested",
         "Complete lineups built from your pool by dfs lineups suggest: 3 cash builds, ranked by Cash %, "
-        "and GPP builds, a stack for every QB and two each when they fit, ranked by the chance of reaching "
-        "the GPP target (GPP builds may use anyone in your pool, never all Cash-marked). Every "
+        "and GPP builds, a stack for every QB and two each when they fit, ranked by Top 1% "
+        "(GPP builds may use anyone in your pool, never all Cash-marked). Every "
         "build shows salary, CalPts, kickoff and total ownership, with the FLEX on the latest kickoff. "
         "Copy one "
         "into the first empty lineup with Lineup Tools, Copy build to Lineups; nothing here changes "
@@ -298,7 +303,7 @@ _TAB_ROWS: list[tuple[str, str]] = [
         f"{len(LINEUPS_NAME_BLOCKS)} blocks total. The Issues column flags a duplicate, an unavailable "
         "player, a salary problem, an incomplete lineup, a Cash lineup with a weak Cash %, or a FLEX that "
         "should hold a later kickoff. The Total row holds Typical, Big night, Cash % and "
-        f"{SIM_GPP_TARGET_DEFAULT:.0f}+ % and the Cash or GPP marker you set; the portfolio line is on the "
+        f"{TOP1_HEADER} and the Cash or GPP marker you set; the portfolio line is on the "
         "Board.",
     ),
     (

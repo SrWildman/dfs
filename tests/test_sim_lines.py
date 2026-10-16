@@ -369,12 +369,11 @@ def test_the_lineups_tab_writes_relative_numbers_and_says_what_they_are():
     )
     first, _, _, last = tsls._slot_letters()
     assert relative_client.updates[f"{first}11:{last}11"] != fixed_client.updates[f"{first}11:{last}11"]
-    # the labels are the sheet's own and unchanged: the relabel to `Top 1%` is the local session's job
-    assert relative_client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "190+ %"]]
+    assert relative_client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "Top 1%"]]
     notes = dict(relative_client.notes)
     cash_note, top_note = notes[f"{tsls._slot_letters()[2]}12"], notes[f"{last}12"]
     assert "moves with the slate" in cash_note and "0.6" in cash_note
-    assert top_note.startswith("TOP 1%") and "63.2" in top_note and "190+ %" in top_note
+    assert top_note.startswith("TOP 1%") and "63.2" in top_note and "190+" not in top_note
     assert "median of the Cash Lines" in dict(fixed_client.notes)[f"{tsls._slot_letters()[2]}12"]
 
 

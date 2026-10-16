@@ -1,4 +1,4 @@
-"""Typical / Big night / Cash % / 190+ % on the Lineups Total rows: what is written where, the labels,
+"""Typical / Big night / Cash % / Top 1% on the Lineups Total rows: what is written where, the labels,
 determinism, the Cash/GPP marker, and the retired far-right columns."""
 
 from contextlib import contextmanager
@@ -151,12 +151,12 @@ def test_each_built_lineup_gets_its_four_numbers_on_its_total_row_and_a_blank_fo
     assert client.updates[f"{first}24:{last}24"] == [["", "", "", ""]]  # the unbuilt block is cleared
 
 
-def test_the_labels_go_on_every_remaining_row_with_the_configured_target():
+def test_the_labels_go_on_every_remaining_row_whatever_the_configured_target():
     client = FakeClient([FULL_A, None])
     _run(client, gpp_target=200.0)
     first, _, _, last = _slot_letters()
-    assert client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "200+ %"]]
-    assert client.updates[f"{first}25:{last}25"] == [["Typical", "Big night", "Cash %", "200+ %"]]
+    assert client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "Top 1%"]]
+    assert client.updates[f"{first}25:{last}25"] == [["Typical", "Big night", "Cash %", "Top 1%"]]
 
 
 def test_the_portfolio_is_in_the_report_for_the_board_not_written_to_lineups():
@@ -218,11 +218,11 @@ def test_only_one_batched_read_and_one_batched_write_are_needed():
     assert client.reads == 1 and len(client.single) == 0  # no per-cell writes
 
 
-def test_gpp_label_text_carries_the_target_and_the_retired_headers_are_recognised():
-    assert sls.gpp_header(190.0) == "190+ %" and sls.gpp_header(187.5) == "187.5+ %"
-    assert sls.labels(200.0) == ["Typical", "Big night", "Cash %", "200+ %"]
+def test_the_top_label_is_fixed_its_fixed_line_note_carries_the_target_and_retired_headers_are_recognised():
+    assert sls.TOP1_HEADER == "Top 1%"
+    assert sls.labels() == ["Typical", "Big night", "Cash %", "Top 1%"]
     notes = sls.lineup_sim_notes(200.0, "cash line 141.3 (season median, 4 weeks)")
-    assert set(notes) == set(sls.labels(200.0)) and "200" in notes["200+ %"]
+    assert set(notes) == set(sls.labels()) and "200" in notes["Top 1%"] and "fixed" in notes["Top 1%"]
     assert (
         "typed on Results" in notes["Cash %"]
         and "cash line 141.3 (season median, 4 weeks)" in notes["Cash %"]
@@ -263,7 +263,7 @@ def test_the_scoreboard_formats_the_marker_the_greens_and_the_matching_highlight
         ("A24", ["Cash", "GPP"]),
     ]  # column A of each Total row
     green = {(rng, v[0]) for rng, kind, v in client.rules if kind == "NUMBER_GREATER_THAN_EQ"}
-    assert ("I11", "0.5") in green and ("J11", "0.05") in green  # P(cash) 50%, P(GPP) 5%
+    assert ("I11", "0.5") in green and ("J11", "0.02") in green  # Cash % 50%, Top 1% 2%
     highlight = {(rng, v[0]) for rng, kind, v in client.rules if kind == "CUSTOM_FORMULA"}
     assert ("I11", '=$A$11="Cash"') in highlight and ("J11", '=$A$11="GPP"') in highlight
     formats = dict(client.formats)
@@ -311,21 +311,37 @@ class _EmptyLineupsClient(FakeClient):
 
 def test_a_sync_with_no_players_on_any_lineup_writes_nothing_at_all():
     """Week 5's Lineups was empty and the sync still wrote ~40 ranges (and once hung there)."""
-    client = _EmptyLineupsClient(labels=sls.labels(190.0))  # the labels are already the current wording
+    client = _EmptyLineupsClient(labels=sls.labels())  # the labels are already the current wording
     message = _run(client)
     assert isinstance(message, str) and "no lineup has players yet" in message
     assert client.updates == {} and client.single == [] and client.notes == []
 
 
-def test_an_older_wording_on_the_labels_is_replaced_even_when_no_lineup_has_players():
-    """The Week 6 rename (Median -> Typical ...) must reach a sheet whose lineups are still empty."""
-    client = _EmptyLineupsClient(labels=["Median", "p90", "P(cash)", "P(190+)"])
+@pytest.mark.parametrize(
+    "older", [["Median", "p90", "P(cash)", "P(190+)"], ["Typical", "Big night", "Cash %", "190+ %"]]
+)
+def test_an_older_wording_on_the_labels_is_replaced_even_when_no_lineup_has_players(older):
+    """The Week 6 renames (Median -> Typical ..., then 190+ % -> Top 1%) must reach a sheet whose lineups are
+    still empty."""
+    client = _EmptyLineupsClient(labels=older)
     message = _run(client)
     assert isinstance(message, str) and "labels updated" in message
     first, _, _, last = _slot_letters()
-    assert client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "190+ %"]]
-    assert client.updates[f"{first}25:{last}25"] == [["Typical", "Big night", "Cash %", "190+ %"]]
+    assert client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "Top 1%"]]
+    assert client.updates[f"{first}25:{last}25"] == [["Typical", "Big night", "Cash %", "Top 1%"]]
     assert client.notes  # and their notes
+
+
+def test_write_labels_puts_the_current_wording_on_every_remaining_row_and_nothing_else():
+    """`polish` runs it: the template never syncs, so its `190+ %` labels only change here."""
+    client = _EmptyLineupsClient(labels=["Typical", "Big night", "Cash %", "190+ %"])
+    message = sls.write_labels(client, "Lineups", header_row=1, name_blocks=BLOCKS)
+    first, _, _, last = _slot_letters()
+    assert client.updates == {
+        f"{first}{end + 2}:{last}{end + 2}": [["Typical", "Big night", "Cash %", "Top 1%"]]
+        for _start, end in BLOCKS
+    }
+    assert "labels written" in message and client.single == [] and client.notes == []
 
 
 def test_old_numbers_left_on_cleared_lineups_are_blanked_not_skipped():

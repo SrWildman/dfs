@@ -252,8 +252,8 @@ P(GPP) against the top-1% line (the field's average plus about 63 points; `docs/
 ownership publishes, or with `--fixed-lines`, they are the old fixed lines (the median of every typed `Cash Line` in
 Results this season and `[sim] gpp_target`, default 190); the top of the output says which.
 
-After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `190+ %` (the chance of the top-1% line;
-the label is still `190+ %` until the sheet is relabelled `Top 1%`) on every built lineup's Total row (set its Cash/GPP marker in column A) and a
+After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `Top 1%` (the chance of the top-1% line;
+green at 2% or more) on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and
 the chance at least one reaches the target.
 

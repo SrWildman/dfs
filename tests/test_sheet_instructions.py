@@ -93,7 +93,7 @@ def test_every_step_of_the_week_names_a_day_and_the_commands_sam_runs():
 
 def test_every_number_and_chip_sam_asked_about_has_a_plain_line():
     labels = {a for kind, a, _b in _LAYOUT if kind == "row"}
-    for name in ("CalPts", "Hit3x%", "Boom%", "Bust%", "CeilM", "ValAdj", "Cash %", "190+ %", "The chips"):
+    for name in ("CalPts", "Hit3x%", "Boom%", "Bust%", "CeilM", "ValAdj", "Cash %", "Top 1%", "The chips"):
         assert name in labels, name
     assert "The arrows (trends)" in labels
 

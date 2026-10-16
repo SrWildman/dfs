@@ -112,6 +112,7 @@ from dfs.sheet_lineup_sim import (
     format_sim_columns,
     lineup_types,
     resolve_goal,
+    write_labels,
     write_lineup_sim,
 )
 from dfs.sheet_lineup_tints import apply_lineup_tints
@@ -1277,6 +1278,14 @@ def sheets_polish(
         )
         # After the totals rows (not before): that step clears column A of each Total row (the typo-guard
         # dropdown it inherited), which is where the Cash / GPP marker lives.
+        results.append(
+            write_labels(
+                client,
+                cfg.lineups.builder_tab,
+                header_row=lineups_header_row,
+                name_blocks=LINEUPS_NAME_BLOCKS,
+            )
+        )
         results.append(
             format_sim_columns(
                 client,

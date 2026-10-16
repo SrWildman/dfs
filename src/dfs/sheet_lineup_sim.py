@@ -1,21 +1,20 @@
-"""The lineup simulator on the Lineups tab: Typical, Big night, Cash % and 190+ % for every built lineup.
+"""The lineup simulator on the Lineups tab: Typical, Big night, Cash % and Top 1% for every built lineup.
 
-**Lines (round F).** Cash % and the fourth number are no longer scored against fixed lines: they move with
+**Lines (round F).** Cash % and Top 1% are no longer scored against fixed lines: they move with
 the slate (`sim_inputs.resolve_lines`, `dfs.sim.field`). Cash % is the chance the lineup beats the double-up
-cash line (the field's average score plus 0.6) and the fourth number the chance it reaches the large-field
+cash line (the field's average score plus 0.6) and Top 1% the chance it reaches the large-field
 top-1% line (the field's average plus 63.2); before ownership publishes, or with `dfs sync --fixed-lines`,
-they are the old fixed lines (the typed Cash Line median, `[sim] gpp_target`). **The fourth label still
-reads `190+ %`**: the sheet relabel to `Top 1%` (this header, `GPP_HEADER_RE`, `LINEUPS_COLUMN_ORDER`'s
-`P(190+)`, Suggested's header, the Instructions tab, template and live sheet together) is deliberately left
-to the local session, so the notes below say what the number is.
+they are the old fixed lines (the typed Cash Line median, `[sim] gpp_target`). **The fourth label is always
+`Top 1%`** (it was `190+ %`, a header that followed `gpp_target`, until the Week 6 relabel); with the
+fixed lines the number under it is the chance of reaching `gpp_target`, and its hover note says so.
 
 **Where they sit** (usability round, slice 5). On each lineup's **Total row**, in the four columns right
 after `Pts` that are blank there (`AggPts`, `CalPts`, `Val`, `ValAdj`, found by header name), with small
-labels on the **Remaining row** under them (`Typical`, `Big night`, `Cash %`, `190+ %`; they were `Median`,
+labels on the **Remaining row** under them (`Typical`, `Big night`, `Cash %`, `Top 1%`; they were `Median`,
 `p90`, `P(cash)`, `P(190+)` until the Week 6 round), scoreboard style. They are numbers, so they colour:
-Cash % goes green at 50% or more and 190+ % at 5% or more. They used to sit about twenty columns to the
-right (after `Min Unique`); those columns are retired (`sheet_reorder.retire_lineup_sim_columns`) and the
-portfolio line moved to the Board's Pool summary.
+Cash % goes green at 50% or more and Top 1% at 2% or more (twice what an average entry has). They used to
+sit about twenty columns to the right (after `Min Unique`); those columns are retired
+(`sheet_reorder.retire_lineup_sim_columns`) and the portfolio line moved to the Board's Pool summary.
 
 **The type marker.** Column A of every Total row is a pale-yellow input dropdown, `Cash` / `GPP` (blank =
 both). The number that matches the lineup's type is highlighted, and `dfs lineups late-swap` reads it as
@@ -23,7 +22,8 @@ that lineup's default `--goal` (the flag still overrides it, and both deltas are
 
 - **Cash line**: the median of every typed `Cash Line` in Results this season (`sim_inputs`), read only; the
   Cash % label's note says which ("cash line 141.3 (season median, 4 weeks)").
-- **GPP target**: `[sim] gpp_target` in config.toml (default 190), in the label under the number (`190+ %`).
+- **GPP target**: `[sim] gpp_target` in config.toml (default 190), the FIXED top-end line (used with
+  `--fixed-lines` and before ownership publishes); it no longer names the label, which is `Top 1%`.
 - **Draws**: `sim_inputs.N_SIMS` (20,000) with a fixed seed, so the numbers do not jitter between syncs. All
   the built lineups are simulated in one run: a player in two lineups is one random variable, which is what
   makes the portfolio numbers (on the Board) mean something.
@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from dfs import perf
-from dfs.config import SIM_GPP_TARGET_DEFAULT
 from dfs.sheets import SheetsClient, column_letter
 
 if TYPE_CHECKING:  # the simulator stack (numpy, scipy) is imported only when a simulation actually runs
@@ -58,22 +57,18 @@ P_CASH_HEADER = "Cash %"
 OLD_MEDIAN_HEADER = "Median"
 OLD_P90_HEADER = "p90"
 OLD_P_CASH_HEADER = "P(cash)"
+TOP1_HEADER = "Top 1%"  # the fourth label; it was `190+ %` (following `[sim] gpp_target`) until Week 6
+# The retired far-right column (`P(190+)`, `P(187.5+)`): matched so an old sheet is cleaned up.
 GPP_HEADER_RE = re.compile(r"^P\((\d+(?:\.\d+)?)\+\)$")
 # The columns the four numbers sit in: blank on a Total row, right after `Pts`.
 SIM_SLOT_HEADERS = ("AggPts", "CalPts", "Val", "ValAdj")
 MARKER_HEADER = "Name"  # the marker is column A of the Total row: under the Name column
 MARKER_OPTIONS = ["Cash", "GPP"]
 P_CASH_GREEN = 0.5  # P(cash) at or above this reads green
-P_GPP_GREEN = 0.05  # P(GPP target) at or above this reads green
+P_GPP_GREEN = 0.02  # Top 1% at or above this reads green: twice the 1% an average entry has
 CASH_WEAK_BELOW = 0.40  # a lineup marked Cash with Cash % under this gets an `Issues` warning
 
 
-def gpp_header(target: float) -> str:
-    """`190+ %` for a 190 target, `187.5+ %` for 187.5."""
-    return f"{target:g}+ %"
-
-
-GPP_HEADER_DEFAULT = gpp_header(SIM_GPP_TARGET_DEFAULT)
 # What the retired far-right columns were called (`sheet_reorder.retire_lineup_sim_columns` deletes them).
 RETIRED_SIM_HEADERS = [OLD_MEDIAN_HEADER, OLD_P90_HEADER, OLD_P_CASH_HEADER]
 
@@ -83,9 +78,9 @@ def is_retired_sim_header(name: object) -> bool:
     return text in RETIRED_SIM_HEADERS or bool(GPP_HEADER_RE.match(text))
 
 
-def labels(target: float) -> list[str]:
+def labels() -> list[str]:
     """The four labels under the numbers, in slot order."""
-    return [MEDIAN_HEADER, P90_HEADER, P_CASH_HEADER, gpp_header(target)]
+    return [MEDIAN_HEADER, P90_HEADER, P_CASH_HEADER, TOP1_HEADER]
 
 
 def sim_slots(header: list) -> list[int] | None:
@@ -115,12 +110,11 @@ def lineup_sim_notes(
             "and turns green. The Cash or GPP marker in column A of the Total row says which number this "
             "lineup is judged on."
         )
-        notes[gpp_header(target)] = (
+        notes[TOP1_HEADER] = (
             "TOP 1%: the chance this lineup finishes in the top 1% of a large-field GPP: the field's average "
             f"score plus {offsets.top_offset:g} points, a line that moves with the slate and is worked out "
-            "in every draw from projected ownership. An average entry has about 1%; the more above that, "
-            f"the better a GPP build. (This column is still headed {gpp_header(target)} until the sheet is "
-            "relabelled.) Not adjusted for games already played."
+            "in every draw from projected ownership. An average entry has about 1%, so 2% or more turns "
+            "green and the more above that, the better a GPP build. Not adjusted for games already played."
         )
     return notes
 
@@ -137,10 +131,12 @@ def _fixed_notes(target: float, cash_basis: str | None) -> dict[str, str]:
             "build and turns green. The Cash or GPP marker in column A of the Total row says which number "
             "this lineup is judged on."
         ),
-        gpp_header(target): (
-            f"{target:g}+ %: the chance this lineup scores {target:g} or more, a typical tournament-winning "
-            "pace (config.toml [sim] gpp_target sets the number). 5% or more is good for a GPP and turns "
-            "green. Simulated 20,000 times from the model, not adjusted for games already played."
+        TOP1_HEADER: (
+            "TOP 1%: with a fixed line (ownership is not published yet, or --fixed-lines) this is the "
+            f"chance the lineup scores {target:g} or more, a typical top-end pace (config.toml [sim] "
+            "gpp_target sets the number). Once ownership publishes it is the chance of a top-1% finish "
+            "against a line that moves with the slate. 2% or more turns green. Simulated 20,000 times from "
+            "the model, not adjusted for games already played."
         ),
     }
 
@@ -154,7 +150,6 @@ class LineupSimReport:
     cash_line: CashLine
     gpp_target: float
     portfolio: dict[str, float] | None
-    renamed_header: bool = False
     lines: SimLines | None = None
 
     def line(self) -> str:
@@ -256,12 +251,12 @@ def write_lineup_sim(
             # wording (`Median`, `p90`, ...): put the current ones on every Remaining row.
             remaining = name_blocks[0][1] + 2
             shown = client.read_range(tab, f"{first_letter}{remaining}:{last_letter}{remaining}")
-            if [str(c).strip() for c in (shown[0] if shown else [])] == labels(gpp_target):
+            if [str(c).strip() for c in (shown[0] if shown else [])] == labels():
                 return f"{tab}: no lineup has players yet -- lineup simulator skipped (nothing to write)"
             client.update_ranges(
                 tab,
                 {
-                    f"{first_letter}{end + 2}:{last_letter}{end + 2}": [labels(gpp_target)]
+                    f"{first_letter}{end + 2}:{last_letter}{end + 2}": [labels()]
                     for _start, end in name_blocks
                 },
             )
@@ -304,7 +299,7 @@ def write_lineup_sim(
         total_row, remaining_row = end + 1, end + 2
         values = _values_for(by_block[block]) if block in by_block else blank
         updates[f"{first_letter}{total_row}:{last_letter}{total_row}"] = [values]
-        updates[f"{first_letter}{remaining_row}:{last_letter}{remaining_row}"] = [labels(gpp_target)]
+        updates[f"{first_letter}{remaining_row}:{last_letter}{remaining_row}"] = [labels()]
 
     portfolio = portfolio_summary(result) if result else None
     with perf.phase("lineup sim: write sheet"):
@@ -419,6 +414,25 @@ def lineup_types(client: SheetsClient, tab: str, name_blocks: list[tuple[int, in
     return out
 
 
+def write_labels(
+    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+) -> str:
+    """The four labels on every lineup's Remaining row. `dfs sync` writes them along with the numbers; this
+    puts them on a sheet that has not synced (the template) or still shows an older wording (`190+ %`).
+    Found by header name, values only, safe to repeat. Run by `polish`."""
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    slots = sim_slots(list(rows[0]) if rows else [])
+    if slots is None:
+        return f"{tab}: simulator columns not found (run `dfs setup reorder-columns` first) -- skipped"
+    first, last = column_letter(slots[0]), column_letter(slots[-1])
+    client.update_ranges(
+        tab, {f"{first}{end + 2}:{last}{end + 2}": [labels()] for _start, end in name_blocks}
+    )
+    return f"{tab}: simulator labels written on {len(name_blocks)} Remaining rows"
+
+
 def apply_label_notes(
     client: SheetsClient,
     tab: str,
@@ -439,7 +453,7 @@ def apply_label_notes(
     row = name_blocks[0][1] + 2
     notes = lineup_sim_notes(target, cash_basis, lines)
     texts = [""] * len(header)
-    for index, label in zip(slots, labels(target), strict=True):
+    for index, label in zip(slots, labels(), strict=True):
         texts[index] = notes[label]
     # The whole row is replaced, so a note left on the cell where a column used to be is cleared too.
     client.set_row_notes(tab, row, texts)

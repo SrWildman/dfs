@@ -504,9 +504,8 @@ portfolio-level counterpart: `Distinct QBs`, `Shared QB?` (Yes/No), and
 **The lineup simulator and the Cash/GPP marker (usability round, 2026-10-08).** Each lineup's **Total row** now carries the four
 outcome numbers up front, in the four columns right after `Pts` that are blank there (`AggPts`, `CalPts`, `Val`, `ValAdj`, found by
 header name), with small labels on the **Remaining row** under them: `Typical`, `Big night` (the simulated median and 90th-percentile score),
-`Cash %` (the chance the lineup beats the double-up cash line, which moves with the slate: the field's average score + 0.6; **green at 50% or more**) and `190+ %` (since Round F
-the chance it reaches the large-field **top-1% line**, the field's average + 63.2, which moves with the slate; **green at 5% or more**, a bar a top-1% chance rarely reaches; the label is still
-`190+ %` until the local session relabels it `Top 1%`, and `[sim] gpp_target`, default 190, is the FIXED line used by `--fixed-lines` and before ownership publishes; `docs/SIM.md`, "Relative lines"). They were `Median`, `p90`,
+`Cash %` (the chance the lineup beats the double-up cash line, which moves with the slate: the field's average score + 0.6; **green at 50% or more**) and `Top 1%` (since Round F
+the chance it reaches the large-field **top-1% line**, the field's average + 63.2, which moves with the slate; an average entry has about 1%, so it is **green at 2% or more**, twice that; `[sim] gpp_target`, default 190, is the FIXED line used by `--fixed-lines` and before ownership publishes, when the number is the chance of reaching it; `docs/SIM.md`, "Relative lines"). The label was `190+ %` until Week 6 (it followed `gpp_target`); the four were `Median`, `p90`,
 `P(cash)` and `P(190+)` until the Week 6 round (renamed: Sam did not know what they meant). They are numbers, written by
 `dfs sync` (Python, `sheet_lineup_sim.py`; not formulas). The old far-right `Median`..`P(190+)` columns were retired
 (`sheet_reorder.retire_lineup_sim_columns`, a real column delete) and the **portfolio line** moved to the Board's Pool summary.
@@ -616,7 +615,7 @@ collapsible row sections, all open by default, in this order (Sam's call):
    dropdown and a soft-yellow name; a formula over the Edge Finder's hidden favourites lists, so a pick removes the row at once. A player on both lists shows once, in the Cash block.
    Empty state (one line, first row): "Your pool already has every model favourite."
 5. **Pool summary** (live formulas, updating the moment you change the pool, no sync): a gap line ("Cash: need 1 more TE · GPP: enough to fill a
-   lineup"), the **portfolio line** (lineups built, expected cashes, P(at least one cash), P(at least one 190+); written by the sync from the
+   lineup"), the **portfolio line** (lineups built, expected cashes, P(at least one cash), P(at least one Top 1%); written by the sync from the
    Lineups simulator), a per-position table (Pooled, Cash, GPP, with Both counting for each; Min / Max / Avg Sal; the cheapest play), and **Your
    stacks** (each pooled QB: how many of his team's WR and TE are pooled, and whether anyone from the opponent is, a bring-back). There are no
    per-position targets (Sam: a week may want 2 QBs or 5); the gap line says only what is missing to fill ONE DraftKings lineup (`sheet_views.ROSTER_MIN`).
@@ -710,8 +709,8 @@ four plus **Cash** (Avail blank, `Hit3x%` not blank, sorted `Hit3x%` high to low
 Written by `dfs lineups suggest` (`lineup_suggest.py`, `sheet_suggested.py`); created empty by `dfs setup build-views`, between Player Pool and Lineups in the tab strip, whole-tab warning
 protection (nothing is typed). Three lines on top (what it is, the projection / pool sizes / cash line / GPP target / seconds taken, how to use a build), then one block per build,
 all stacked, Cash builds first then GPP, numbered 1..N: a dark bar (`Build 4 | GPP | NO stack + NYG bring-back`), a column header (`Slot | Name | Team | Opp | Salary | CalPts | Kickoff | Own% |
-Typical | Big night | Cash % | 190+ %`; `CalPts` is the projection used, the last label carries `[sim] gpp_target`), nine player rows in roster-slot order with the FLEX on the latest kickoff, and a Total row
-(salary, projection and the simulator's four numbers; Cash % green at 50%, the GPP chance at 5%, the lines Lineups uses). It is rewritten from scratch each run and **never touches Lineups**:
+Typical | Big night | Cash % | Top 1%`; `CalPts` is the projection used), nine player rows in roster-slot order with the FLEX on the latest kickoff, and a Total row
+(salary, projection and the simulator's four numbers; Cash % green at 50%, Top 1% at 2%, the lines Lineups uses). It is rewritten from scratch each run and **never touches Lineups**:
 **Lineup Tools > Copy build to Lineups** (`Code.gs`) asks for a build number and copies its nine names into the first lineup block with no name in it, setting that block's Cash / GPP marker. How the
 builds are chosen: `docs/CALCULATIONS.md` ("Suggested lineups"). `dfs sync --live` does not refresh it (Sam: only when he asks).
 
@@ -801,10 +800,10 @@ Sam's playbook (usability slice 7), generated by `sheet_instructions.py` and rew
 polish`); `dfs doctor` warns when the tab differs from what the code renders (`instructions-drift`). Two columns: a label and a wrapped
 line of text, in four parts under dark section bands: **Read this first** (what you type, the one thing to run first, the Pool dropdown),
 **The week, step by step** (start of week, Tue/Wed, Thu-Sat, Sunday final sync and lineups, Sunday late swap, Mon/Tue close; each names the
-tab, what to look at, what to do and the command), **Reading the numbers** (CalPts, Hit3x%, Boom%, Bust%, CeilM, ValAdj, P(cash),
-P(190+), the chips, the trend arrows, the colours) and **The tabs** (one line each), then a pointer to these docs. Plain English: no
+tab, what to look at, what to do and the command), **Reading the numbers** (CalPts, Hit3x%, Boom%, Bust%, CeilM, ValAdj, Cash %,
+Top 1%, the chips, the trend arrows, the colours) and **The tabs** (one line each), then a pointer to these docs. Plain English: no
 backticks, no source names, no function names (a test enforces it). Facts with a constant behind them (pool caps, roster slots, block
-count, the Pool options, the GPP target default) are derived, not retyped. The tab's length is no longer fixed: the writer clears A1:B120
+count, the Pool options, the Top 1% label and green lines) are derived, not retyped. The tab's length is no longer fixed: the writer clears A1:B120
 first, sets the column widths and sets each row's height from its text length (a wrapped row does not reliably auto-fit through the API).
 
 ### Movement

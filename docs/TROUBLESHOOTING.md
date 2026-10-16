@@ -298,7 +298,7 @@ no status, so outs come from DraftKings' `Avail`.
 
 ---
 
-**The Lineups simulator numbers (`Typical`, `Big night`, `Cash %`, `190+ %`) are blank.**
+**The Lineups simulator numbers (`Typical`, `Big night`, `Cash %`, `Top 1%`) are blank.**
 A lineup with an empty slot, or a name EdgeRaw does not have (typo, bye week), is left blank on purpose; fill it in and
 `dfs sync` again. If every lineup is blank, check the sync output for `Lineup simulator not written` (a Sheets error) or
 `column(s) [...] not found` (run `dfs setup reorder-columns`). `Cash %` and the last number move with the slate
