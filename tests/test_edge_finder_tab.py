@@ -367,7 +367,8 @@ def test_rows_under_three_games_are_muted_and_the_why_says_how_little_data():
     inputs = _inputs(edge)
     inputs.players.loc[inputs.players["Id"] == 2, "Games"] = 2
     layout = eft.build_layout(inputs)
-    muted = {layout.rows[r - 1][NAME] for r in layout.muted_rows}
+    top = set(_top_rows(layout))  # Top plays greys its own "Next up" filler; this is about the detail rows
+    muted = {layout.rows[r - 1][NAME] for r in layout.muted_rows if r not in top}
     assert "WR2" in muted and "WR1" not in muted
     row = _rows_named(layout, "WR2")[0]
     assert _why(layout, row).endswith("only 2 games of data")
@@ -637,7 +638,9 @@ def test_a_chip_resting_only_on_weaker_evidence_is_muted_and_says_so():
     )
     inputs.players["GsisId"] = ["g1", "g2"]
     layout = eft.build_layout(inputs)
-    first, second = _rows_named(layout, "WR1")[0], _rows_named(layout, "WR2")[0]
+    top = set(_top_rows(layout))
+    detail = lambda name: [r for r in _rows_named(layout, name) if r not in top][0]  # noqa: E731
+    first, second = detail("WR1"), detail("WR2")
     assert first in layout.muted_rows and "weaker evidence" in _why(layout, first)
     assert second not in layout.muted_rows
 
@@ -1264,7 +1267,7 @@ def test_top_plays_is_the_first_section_with_one_line_under_the_title_and_a_cash
     ]
 
 
-def test_top_plays_lists_only_cash_add_and_gpp_verbs_with_the_per_position_caps():
+def test_top_plays_cash_lists_model_picks_first_then_greyed_next_up_to_fill_the_cap():
     layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
     do = _col(eft.DO_COL)
     cash_header, gpp_header = [h for h in layout.header_rows if h < layout.section_rows[1]]
@@ -1272,14 +1275,20 @@ def test_top_plays_lists_only_cash_add_and_gpp_verbs_with_the_per_position_caps(
     cash = [r for r in rows if r < gpp_header]
     gpp = [r for r in rows if r > gpp_header]
     assert cash and gpp
-    assert all(layout.rows[r - 1][do] == "Cash add" for r in cash)
+    assert all(layout.rows[r - 1][do] in ("Cash add", eft.NEXT_UP_VERB) for r in cash)
+    for pos in eft.POSITIONS:
+        verbs = [layout.rows[r - 1][do] for r in cash if layout.rows[r - 1][_col("C")] == pos]
+        assert verbs == sorted(verbs, key=lambda v: v != "Cash add")  # model picks first, filler after
+        assert len(verbs) <= eft.TOP_CASH_PER_POSITION[pos]
+    next_up = [r for r in cash if layout.rows[r - 1][do] == eft.NEXT_UP_VERB]
+    assert next_up and all(r in layout.muted_rows for r in next_up)  # filler is greyed, never "Cash add"
     assert all(str(layout.rows[r - 1][do]).startswith(("GPP add", "GPP leverage")) for r in gpp)
     by_pos = lambda rs, p: [r for r in rs if layout.rows[r - 1][_col("C")] == p]  # noqa: E731
     assert len(by_pos(cash, "WR")) <= eft.TOP_CASH_PER_POSITION["WR"]
-    assert len(by_pos(cash, "RB")) <= 3  # "Cash add" itself is the top 3 Hit3x% of a position
+    assert len(by_pos(cash, "RB")) <= eft.TOP_CASH_PER_POSITION["RB"]
     assert len(by_pos(gpp, "WR")) <= eft.TOP_GPP_PER_POSITION["WR"]
     # within a position, best Hit3x% first (cash) / best Boom% first (GPP)
-    hit = [layout.rows[r - 1][_col("H")] for r in by_pos(cash, "WR")]
+    hit = [layout.rows[r - 1][_col("H")] for r in by_pos(cash, "WR") if r not in next_up]
     boom = [layout.rows[r - 1][_col("H")] for r in by_pos(gpp, "WR")]
     assert hit == sorted(hit, reverse=True) and boom == sorted(boom, reverse=True)
 
@@ -1325,7 +1334,11 @@ def test_the_favourites_are_the_cash_adds_by_hit3x_and_the_gpp_adds_and_leverage
     boom = [edge.loc[i, "Boom%"] for i in layout.favourites_gpp]
     assert hit == sorted(hit, reverse=True) and boom == sorted(boom, reverse=True)
     # every Cash add in the Top plays is a favourite
-    top_cash_ids = {layout.rows[r - 1][_col(eft.ID_COL)] for r in _top_rows(layout)}
+    top_cash_ids = {
+        layout.rows[r - 1][_col(eft.ID_COL)]
+        for r in _top_rows(layout)
+        if layout.rows[r - 1][_col(eft.DO_COL)] != eft.NEXT_UP_VERB
+    }
     assert top_cash_ids <= set(layout.favourites_cash) | set(layout.favourites_gpp)
 
 

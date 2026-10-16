@@ -508,6 +508,7 @@ EDGE_FINDER_TAB_NOTES = {
     "Name": NAME_WITH_CONSIDER,
     "Do": (
         "The verb: what to do with him. 'Cash add', 'GPP add' and 'GPP leverage' are the pool candidates; "
+        "'Next up' (greyed, in Top plays' Cash block) only fills the list, it is not a model pick; "
         "'In pool (Both)' once you have ticked him. Reads your Pool live."
     ),
     "Why": "A one-line reason. Hover the cell for the full explanation.",

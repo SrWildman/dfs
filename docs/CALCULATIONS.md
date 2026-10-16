@@ -840,7 +840,7 @@ rest, shared evenly between QBs); a 60-player pool takes about 4 s; a cut-short 
 
 ## Top plays and Consider (Edge Finder, Week 6)
 
-Top plays lists the rows whose displayed Do (after the R6 `Proj` chip) is `Cash add` (`edge_finder_tab.TOP_CASH_PER_POSITION`) or `GPP add` / `GPP leverage` (`TOP_GPP_PER_POSITION`), best
+Top plays lists, in its Cash block, the rows whose displayed Do (after the R6 `Proj` chip) is `Cash add`, then fills each position up to `edge_finder_tab.TOP_CASH_PER_POSITION` with the next-best Cash core rows by `Hit3x%`, shown as a greyed `Next up` (not a model pick, no Consider highlight); its GPP block lists `GPP add` / `GPP leverage` (`TOP_GPP_PER_POSITION`), best
 `Hit3x%` / `Boom%` first within each position; the verbs are the Cash core's and GPP upside's own (`_cash_row`, `_gpp_row` are shared, so the two cannot drift). `favourites()` is the same selection
 across positions without the per-position caps, in `Hit3x%` / `Boom%` order. **Consider** = Pool blank AND the id on a favourites list (Do starts with one of `CONSIDER_VERBS` on the Edge Finder itself).
 

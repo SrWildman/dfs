@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -185,7 +185,8 @@ CONSIDER_VERBS = ("Cash add", "GPP add", "GPP leverage")  # a Do that starts wit
 
 # The Top plays section (Week 6): the model's best plays at a glance, stacked Cash then GPP (the two would not
 # fit side by side: every column is shared with the sections below). Up to this many rows per position.
-TOP_CASH_PER_POSITION = {"QB": 2, "RB": 4, "WR": 5, "TE": 2, "DST": 2}
+NEXT_UP_VERB = "Next up"  # a Top plays Cash row the model does not pick: filler, best Hit3x% remaining
+TOP_CASH_PER_POSITION = {"QB": 3, "RB": 5, "WR": 6, "TE": 3, "DST": 3}
 TOP_GPP_PER_POSITION = {"QB": 3, "RB": 4, "WR": 6, "TE": 3, "DST": 3}
 TOP_CASH_COLUMNS = ["CalPts", "Hit3x%", "Edge"]
 TOP_GPP_COLUMNS = ["CalPts", "Boom%", "Lev", "Edge"]
@@ -1265,17 +1266,23 @@ def final_verb(b: _Builder, spec: _RowSpec) -> str:
 
 
 def top_cash_picks(b: _Builder, edge: pd.DataFrame) -> list[tuple[str, int, pd.Series, _RowSpec]]:
-    """The Cash add rows, per position by `Hit3x%`, at most `TOP_CASH_PER_POSITION` each:
-    `(position, rank in the Cash core, player, row)`, positions in `POSITIONS` order."""
+    """Per position, up to `TOP_CASH_PER_POSITION` rows by `Hit3x%`: the model's own `Cash add` rows first,
+    then the best remaining Cash core players (`Next up`, muted) to fill the list.
+    `(position, rank in the Cash core, player, row)`, positions in `POSITIONS` order. Only a `Cash add` is a
+    model pick: a `Next up` row keeps the Cash core's own verdict in its Why but not the verb, so Consider
+    never highlights it."""
     parts, medians = _cash_context(edge)
     picks = []
     for pos in POSITIONS:
-        taken = 0
+        model, rest = [], []
         for rank, (_, r) in enumerate(parts[pos].head(MAX_PER_POSITION).iterrows(), start=1):
             spec = _cash_row(b, pos, rank, r, medians)
-            if final_verb(b, spec).startswith("Cash add") and taken < TOP_CASH_PER_POSITION[pos]:
-                picks.append((pos, rank, r, spec))
-                taken += 1
+            if final_verb(b, spec).startswith("Cash add"):
+                model.append((pos, rank, r, spec))
+            else:
+                next_up = replace(spec, kwargs={**spec.kwargs, "verb": NEXT_UP_VERB, "muted": True})
+                rest.append((pos, rank, r, next_up))
+        picks.extend((model + rest)[: TOP_CASH_PER_POSITION[pos]])
     return picks
 
 
@@ -1301,7 +1308,7 @@ def _top_plays_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None
     block (GPP add and GPP leverage rows, with Lev). Each position's run is its own colour block, so a column
     is still compared with the same position's players (`Layout.break_rows`)."""
     b.begin_section("TOP PLAYS  —  the model's best plays this week")
-    b.sub("CASH  —  Cash add rows, best Hit3x% first within each position")
+    b.sub("CASH  —  Cash add = the model's pick; greyed Next up = best Hit3x% left, to fill the list")
     b.header(TOP_CASH_COLUMNS)
     cash = top_cash_picks(b, edge)
     if not cash:
