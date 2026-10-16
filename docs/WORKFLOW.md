@@ -246,10 +246,14 @@ game has not started; `--all-players` also searches the rosterable pool. If noth
 Each swap also shows what it does to the lineup's chances, from the lineup simulator (`docs/SIM.md`): `P(cash)` and `P(GPP)`
 are the change in percentage points, beside the projection gain. `--goal cash` (the default) ranks the swaps by the change
 in P(cash), `--goal gpp` by P(GPP), projection gain breaking ties; the search keeps four times as many candidates as it
-shows, so a swap that wins on probability but not on projection can surface. The cash line is the median of every typed
-`Cash Line` in Results this season and the GPP target is `[sim] gpp_target` (default 190); the top of the output says which.
+shows, so a swap that wins on probability but not on projection can surface. The lines move with the slate: P(cash) is
+measured against the double-up cash line (the field's average score plus a small margin, from projected ownership) and
+P(GPP) against the top-1% line (the field's average plus about 63 points; `docs/SIM.md`, "Relative lines"). Before
+ownership publishes, or with `--fixed-lines`, they are the old fixed lines (the median of every typed `Cash Line` in
+Results this season and `[sim] gpp_target`, default 190); the top of the output says which.
 
-After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `190+ %` on every built lineup's Total row (set its Cash/GPP marker in column A) and a
+After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `190+ %` (the chance of the top-1% line;
+the label is still `190+ %` until the sheet is relabelled `Top 1%`) on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and
 the chance at least one reaches the target.
 

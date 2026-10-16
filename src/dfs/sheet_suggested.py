@@ -76,14 +76,23 @@ def projection_label(metric: str) -> str:
     return metric
 
 
-def status_line(report: SuggestReport, *, metric: str, cash_line: float, gpp_target: float) -> str:
-    """ "CalPts · pool 47 Cash / 51 GPP · cash line 143.9 · GPP target 190 · 8 builds in 3 s"."""
+def status_line(
+    report: SuggestReport,
+    *,
+    metric: str,
+    cash_line: float,
+    gpp_target: float,
+    lines_text: str | None = None,
+) -> str:
+    """ "CalPts · pool 47 Cash / 51 GPP · cash line 143.9 · GPP target 190 · 8 builds in 3 s". `lines_text`
+    (what the Cash % and Top 1% were measured against, `SimLines.status`) replaces the two fixed numbers."""
     pool = report.candidates
     if not pool and not report.builds:  # nothing has been run yet (a fresh template or week)
         return "Not run yet: `dfs lineups suggest` fills this tab from your pool."
     return (
-        f"{metric}  ·  pool {pool.get('cash', 0)} for Cash / {pool.get('gpp', 0)} for GPP  ·  cash line "
-        f"{cash_line:g}  ·  GPP target {gpp_target:g}  ·  {len(report.builds)} build"
+        f"{metric}  ·  pool {pool.get('cash', 0)} for Cash / {pool.get('gpp', 0)} for GPP  ·  "
+        + (lines_text or f"cash line {cash_line:g}  ·  GPP target {gpp_target:g}")
+        + f"  ·  {len(report.builds)} build"
         f"{'' if len(report.builds) == 1 else 's'} in {report.seconds:.0f} s"
     )
 
@@ -124,7 +133,13 @@ def _total_own(build: Build, details: dict[str, tuple[str, float | str]]) -> flo
 
 
 def build_layout(
-    report: SuggestReport, edge: pd.DataFrame, *, metric: str, cash_line: float, gpp_target: float
+    report: SuggestReport,
+    edge: pd.DataFrame,
+    *,
+    metric: str,
+    cash_line: float,
+    gpp_target: float,
+    lines_text: str | None = None,
 ) -> Layout:
     """The tab's rows (1-based numbers resolved) and which rows are bars, headers, players and totals."""
     layout = Layout(rows=[])
@@ -138,7 +153,13 @@ def build_layout(
 
     add([TITLE])
     layout.status_rows.append(
-        add([status_line(report, metric=metric, cash_line=cash_line, gpp_target=gpp_target)])
+        add(
+            [
+                status_line(
+                    report, metric=metric, cash_line=cash_line, gpp_target=gpp_target, lines_text=lines_text
+                )
+            ]
+        )
     )
     layout.status_rows.append(add([HOW_TO]))
     add([])
@@ -210,12 +231,15 @@ def write_suggested(
     metric: str,
     cash_line: float,
     gpp_target: float,
+    lines_text: str | None = None,
 ) -> str:
     """Write and style the whole tab (it is rebuilt from scratch every run)."""
     from dfs.sheet_lineup_sim import P_CASH_GREEN, P_GPP_GREEN
     from dfs.sheet_style import _HEADER_FMT, _SUBHEAD_FMT, _TITLE_FMT, INK_MUTED, WHITE, _chip, _num
 
-    layout = build_layout(report, edge, metric=metric, cash_line=cash_line, gpp_target=gpp_target)
+    layout = build_layout(
+        report, edge, metric=metric, cash_line=cash_line, gpp_target=gpp_target, lines_text=lines_text
+    )
     last_row = max(len(layout.rows), 40)
     client.write_tab(TAB, layout.rows)
     client.clear_conditional_formats(TAB)
@@ -321,7 +345,7 @@ def build_summary(build: Build) -> str:
     """One terminal line for a build: number, kind, title, salary, projection and the odds."""
     return (
         f"Build {build.number}  {build.kind.upper():<4} ${build.salary:,}  {build.projection:.1f} pts  "
-        f"Cash {build.p_cash:.0%}  {build.p_gpp:.1%} to reach the target  {build.title}"
+        f"Cash {build.p_cash:.0%}  Top 1% {build.p_gpp:.1%}  {build.title}"
     )
 
 

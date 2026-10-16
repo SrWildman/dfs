@@ -23,6 +23,7 @@ see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself wri
 | Roles | `roles.py` | A player's slot on his team (QB1, RB1-3, WR1-4, TE1-2, DST) from his **prior three games only**; builds the frame the correlations are fitted on. |
 | Correlations | `correlation.py` | Normal scores, role-pair correlations with bootstrap intervals and shrinkage, the report-only game-total analysis, the cross-game check. |
 | Simulator | `simulate.py` | `simulate_lineups` (Gaussian copula) and `swap_impact`. |
+| Relative lines | `field.py` | The field mean per draw: ownership weights, the ownership curve, the 95% cover, the tail's expected points. See "Relative lines". |
 | Back-test | `backtest.py` | Random legal lineups for 2023-2025, predicted with correlations fitted on 2014-2022 only. |
 | Text | `report.py`, `cli.py` | The tables printed by `dfs sim fit / backtest / demo` and used in this file. |
 
@@ -637,11 +638,107 @@ shift, which neither the copula nor a static table can model.
 | `models/sim/correlations_detail.csv` | Every fitted row, including the report-only tercile rows, with the unshrunk `r_raw`, its interval and the `conditional` flag. |
 | `models/sim/correlations_meta.json` | Seed, bootstrap size, shrinkage prior, total cutoffs, the cross-game check. |
 | `models/sim/backtest.md` | The complete back-test report (`dfs sim backtest --save`). |
-| `src/dfs/sim/` | `marginal.py`, `roles.py`, `correlation.py`, `simulate.py`, `backtest.py`, `pipeline.py`, `report.py`, `cli.py`. |
-| `tests/sim/` | Normal scores ~ N(0,1), PSD repair, the copula reproducing a known correlation, a shared player being one variable, cross-game independence, determinism, back-test legality, speed. |
+| `src/dfs/sim/` | `marginal.py`, `roles.py`, `correlation.py`, `simulate.py`, `field.py`, `backtest.py`, `pipeline.py`, `report.py`, `cli.py`. |
+| `tests/sim/` | Normal scores ~ N(0,1), PSD repair, the copula reproducing a known correlation, a shared player being one variable, cross-game independence, determinism, back-test legality, speed; `test_field.py`: the field-mean identity, relative lines, the ownership curve. |
 
 Every random draw is seeded (`--seed`, default 0). `dfs sim fit` takes about 80 s, `dfs sim backtest --jobs 4`
 about 5 minutes on four cores (about 35 on one); the results do not depend on `--jobs`.
+
+## Relative lines
+
+**The problem.** The simulator used to score every lineup against two fixed numbers: `Cash %` = P(lineup >= the
+season-median typed cash line, 147.56 at the time) and `190+ %` = P(lineup >= 190). A contest's lines are not fixed:
+they move with the slate, because **the field holds the same players you do**. The field mean (the mean entry
+score) is exactly `sum over players of %Drafted x FPTS`, and the lines that pay sit a stable distance above it.
+Measured on Sam's 20 real standings files (Weeks 2, 4 and 5, 2026), the line minus *that contest's* field mean:
+
+| Line, minus that contest's field mean | n contests | mean | sd |
+|---|---|---|---|
+| Double-up cash line | 7 | **+0.6** | 4.9 |
+| GPP min-cash (21-26% paid) | 13 | **+17.9** | 1.9 |
+| GPP top 10% | 9 | **+31.9** | 1.2 |
+| GPP top 1% (fields of 700+) | 9 | **+63.2** | 5.7 |
+
+The field mean itself swung 33 points between weeks: about 110 in Week 4 (the chalk busted; the double-up line was
+106) against about 143 in Week 5. So a fixed line is wrong by up to 40 points in a given week.
+
+It is also wrong in a way that changes the *ranking*. When the fixed line sits above a lineup's median (it did: the
+Suggested cash builds showed Typical about 129 against a line of 147.6, Cash % 22-25%), maximising P(score > line)
+**rewards variance**, the opposite of a cash build, and it is why the GPP builds showed higher Cash % than the
+cash builds. Against a line that moves with the field the lineup that wins is the one that beats the field.
+
+**The method** (`field.py`, `simulate_lineups(..., field=...)`; pure functions, deterministic under the seed):
+
+1. **Weights.** Each player's projected ownership (EdgeRaw's `Own%`, a fraction) goes through the optional
+   per-contest-type curve (below) and is normalised to sum to **9**, one lineup's worth. Only players the simulator
+   can rate (a projection) and that have an ownership number are in the field; ownership on a player it cannot rate
+   is dropped before normalising, never guessed.
+2. **The simulated set** is the union of the lineups' players and the **top-owned players, enough to cover at least
+   95% of the total ownership** (`[sim.lines] own_coverage`), taking the higher of the two contest types' needs. They
+   join the same Gaussian-copula draw, so a player in both a lineup and the field is **one random variable**: a lineup
+   of chalk is correlated with the line it is measured against, and a lineup of strangers is not.
+3. **The field mean, per draw** = `sum of own_i x X_i` over the simulated field players, plus the **tail** (the
+   remaining ownership, under 5%) at each tail player's *expected* points (the mean of his own quantile function; a
+   constant per run). Leaving the tail out would bias the line down by about 5% of the slate's points; rescaling the
+   covered weights up to 9 would bias it up (the uncovered are the low scorers).
+4. **The lines, per draw:** `Cash %` = P(lineup >= field mean + `double_up_offset`) and the top-end column =
+   P(lineup >= field mean + `gpp_top1_offset`), from `[sim.lines]` (defaults: the table above). The min-cash and
+   top-10% offsets are stored in the same block for reference; the simulator does not report them yet
+   (`SimResult` keeps each draw's lines with `keep_scores`, so any other offset is one subtraction away).
+   The per-draw thresholds also drive `p_any_cash`, `p_any_gpp` and `expected_cashing` (the portfolio line).
+
+The column formerly `190+ %` is **`Top 1%`** in code, notes and these docs; its numbers are P(top 1% line), not
+P(>= 190). **The sheet's label is still `190+ %`** (Lineups, Suggested, the Instructions tab, `GPP_HEADER_RE`,
+`LINEUPS_COLUMN_ORDER`'s `P(190+)`, template and live sheet): relabelling a sheet header is a structural change
+and was left to the local session. Until then the hover note on that label says what the number is, and the
+Suggested tab's status line says so.
+
+**Column notes.**
+
+- **`Cash %`**: the chance the lineup beats the double-up cash line. That line moves with the slate: it sits about 0.6
+  points above the field's average score, which the simulator works out in every draw from projected ownership.
+  Green at 50% or more. (Before: "beats a typical cash line, the median of your typed Cash Lines".)
+- **`Top 1%`**: the chance the lineup finishes in the top 1% of a large-field GPP, the field's average score plus
+  63.2 points (the line moves with the slate). An average entry has about 1%; the more above that, the better a GPP
+  build. (Before: P(score >= 190), "a typical tournament-winning pace".) The sheet's green rule still fires at 5%,
+  which a top-1% chance rarely reaches: revisit it with the relabel.
+
+**Ownership is a large-field projection.** TFFB's `Own%` describes a large-field contest. Double-ups are much chalkier:
+in Sam's files, players projected over 15% were actually owned about 39% on average, about 15 points above projection.
+`[sim.lines] double_up_own_curve` and `gpp_own_curve` take a piecewise-linear `[projected, expected]` curve (fractions,
+anchored at (0, 0) and (1, 1), strictly increasing in `projected`, non-decreasing in `expected`) that maps projected
+Own% to the Own% each contest type is expected to have; **both default to empty, the identity.** The cash line uses the
+double-up field, the top-end line the GPP field. The local session fits the curves on Sam's files.
+
+**Before ownership publishes** (`Own%` is blank until TFFB computes it midweek) there is no field to measure
+against, so there are no relative lines. The simulator falls back to the FIXED lines, **and says so** (the sync summary,
+`dfs lineups suggest` and `late-swap` print "Ownership has not published ... using FIXED lines", and the Lineups hover
+note stops describing relative lines): `[sim.lines] fallback_cash_line` and `fallback_top1_line`. Left unset (the
+default) these are the old fixed numbers: the median of the typed Cash Lines in Results (147.56 now, else the 145
+placeholder) and `[sim] gpp_target` (190). Set a number to pin either.
+
+**`--fixed-lines`** (on `dfs sync`, `dfs lineups suggest` and `dfs lineups late-swap`) forces the old fixed lines even
+when ownership is published, for one season so the old and new numbers can be compared. `simulate_lineups` without a
+`field` is the old simulator unchanged (a test pins today's numbers: the same draws, the same P(cash) and P(GPP)).
+
+**What a run costs.** The simulated set grows from the lineups' players to the union with the field's cover. On a
+synthetic 14-team slate (154 rated players, ownership spread so that 95% takes 129 of them) that was 111 extra
+players beyond the 18 in four lineups: 0.06 s became 0.45 s for the four lineups. The Suggested builds simulate
+hundreds of lineups at once (300 cash candidates over 61 distinct players, 1,120 stacked GPP candidates over 113), where
+the per-lineup work dominates and the time is unchanged (1.2 s and 4.9 s either way). A real slate's ownership is more
+concentrated than that synthetic one, so its cover is smaller. Ownership on EdgeRaw is read from the last sync; nothing
+here makes a network call.
+
+**The two assumptions that matter, stated plainly:** the offsets are measured on 20 contests from three weeks (sd 4.9
+for the double-up, 5.7 for the top 1%), so they will move when the local session adds weeks; and a player's ownership
+is taken as given by the projection (or the curve), not conditioned on how the week actually went, which is the same
+information a lineup builder has before kickoff.
+
+**Why equal means no longer reward variance (test).** Two lineups with the same nine marginals, one independent and
+one built from three correlated QB-WR pairs, have means 131.0 and 131.3 and standard deviations 25.3 and 30.2. Against
+a fixed line 25 points above the mean, P(cash) is 16.1% and 20.3%: the risk-taker wins, by construction. Against a
+field of the same size and shape with `double_up_offset = 0`, it is 50.1% and 49.6%: it does not
+(`tests/sim/test_field.py::test_variance_is_rewarded_by_a_fixed_line_above_the_median_but_not_by_the_relative_line`).
 
 ## In the sheet (the local integration)
 
@@ -652,12 +749,15 @@ are ranked within their team and position by the depth chart's `pos_rank`, ties 
 usage (`Tgt% + Rush%`, the same tiebreak the injury code uses), skipping anyone listed OUT or IR, with ranks past the last
 named role folded into it.
 
-**Lines.** The cash line is the median of every typed `Cash Line` in Results this season (all weeks before the slate's week;
-read only; Results' Cash columns are cash contests by construction, so no GPP value can be in it). With none typed the
-placeholder 145 is used and the sync says so. The GPP target is `[sim] gpp_target` in `config.toml`, default 190, shown in
-the column header as `P(190+)`.
+**Lines.** Cash % and the top-end number are measured against lines that move with the slate (see "Relative
+lines"): the field's average score plus 0.6 (double-up cash line) and plus 63.2 (top 1%), from `[sim.lines]`. With
+`--fixed-lines`, or until ownership publishes, they are the old fixed lines: the cash line is the median of every typed
+`Cash Line` in Results this season (all weeks before the slate's week; read only; Results' Cash columns are cash
+contests by construction, so no GPP value can be in it; with none typed the placeholder 145 is used and the sync says
+so) and the GPP target is `[sim] gpp_target` in `config.toml`, default 190, shown in the column header as `190+ %`.
 
-**Lineups tab.** `dfs sync` (the full sync and `--live`) simulates every complete lineup together (20,000 draws, seed 0)
+**Lineups tab.** `dfs sync` (the full sync and `--live`) simulates every complete lineup together (20,000 draws, seed 0; with relative lines, the top-owned players of the whole
+slate join the run, so EdgeRaw's specs are built for every team, not only the lineups')
 and writes `Median`, `p90`, `P(cash)` and `P(<target>+)` onto each lineup's Total row (under `AggPts`..`ValAdj`, labels on the Remaining row), plus the portfolio line (now on the Board) from the first
 lineup's `Remaining` row (`Portfolio`, expected cashes under `p90`, P(at least one cashes) under `P(cash)`, P(at least one
 reaches the target) under the GPP column). A half-built lineup or an unknown name is left blank. The numbers are not

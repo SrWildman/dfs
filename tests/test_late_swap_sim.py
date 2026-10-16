@@ -129,3 +129,20 @@ def test_the_changes_are_probability_fractions():
     for s in next(iter(sug.singles.values())):
         assert -1.0 <= s.delta_p_cash <= 1.0 and -1.0 <= s.delta_p_gpp <= 1.0
     assert pytest.approx(0.0, abs=1.0) == sug.refill.delta_p_cash
+
+
+def test_a_field_in_the_settings_reaches_the_simulation_and_changes_the_lines():
+    from dfs.sim.field import build_field
+
+    own = {name: 1.0 for name in SPECS}  # every rated player owned alike: a field of the whole slate
+    fld = build_field(SPECS.values(), own, cash_offset=0.6, top_offset=63.2)
+    fixed = attach_probabilities(_suggestions(), LINEUP, SPECS, SimSettings(60.0, 80.0, "cash"), top=3)
+    moving = attach_probabilities(
+        _suggestions(), LINEUP, SPECS, SimSettings(60.0, 80.0, "cash", field=fld), top=3
+    )
+    fixed_deltas = [s.delta_p_cash for s in next(iter(fixed.singles.values()))]
+    moving_deltas = [s.delta_p_cash for s in next(iter(moving.singles.values()))]
+    assert fixed_deltas != moving_deltas
+    assert all(-1.0 <= d <= 1.0 for d in moving_deltas)
+    star = next(s for lst in moving.singles.values() for s in lst if swap_names(s)[1] == ["Star WR"])
+    assert star.delta_p_cash > 0  # a 20-point WR for a 12-point one still helps against the field's line

@@ -1,5 +1,14 @@
 """The lineup simulator on the Lineups tab: Typical, Big night, Cash % and 190+ % for every built lineup.
 
+**Lines (round F).** Cash % and the fourth number are no longer scored against fixed lines: they move with
+the slate (`sim_inputs.resolve_lines`, `dfs.sim.field`). Cash % is the chance the lineup beats the double-up
+cash line (the field's average score plus 0.6) and the fourth number the chance it reaches the large-field
+top-1% line (the field's average plus 63.2); before ownership publishes, or with `dfs sync --fixed-lines`,
+they are the old fixed lines (the typed Cash Line median, `[sim] gpp_target`). **The fourth label still
+reads `190+ %`**: the sheet relabel to `Top 1%` (this header, `GPP_HEADER_RE`, `LINEUPS_COLUMN_ORDER`'s
+`P(190+)`, Suggested's header, the Instructions tab, template and live sheet together) is deliberately left
+to the local session, so the notes below say what the number is.
+
 **Where they sit** (usability round, slice 5). On each lineup's **Total row**, in the four columns right
 after `Pts` that are blank there (`AggPts`, `CalPts`, `Val`, `ValAdj`, found by header name), with small
 labels on the **Remaining row** under them (`Typical`, `Big night`, `Cash %`, `190+ %`; they were `Median`,
@@ -34,7 +43,8 @@ from dfs.config import SIM_GPP_TARGET_DEFAULT
 from dfs.sheets import SheetsClient, column_letter
 
 if TYPE_CHECKING:  # the simulator stack (numpy, scipy) is imported only when a simulation actually runs
-    from dfs.sim_inputs import CashLine
+    from dfs.config import SimLinesConfig
+    from dfs.sim_inputs import CashLine, SimLines
 
 N_SIMS = 20000  # mirrored by sim_inputs.N_SIMS (a test pins them equal)
 SEED = 0
@@ -87,9 +97,35 @@ def sim_slots(header: list) -> list[int] | None:
     return indices if indices == list(range(indices[0], indices[0] + len(indices))) else None
 
 
-def lineup_sim_notes(target: float, cash_basis: str | None = None) -> dict[str, str]:
+def lineup_sim_notes(
+    target: float, cash_basis: str | None = None, lines: SimLines | None = None
+) -> dict[str, str]:
     """The notes on the four labels, keyed by label text (so the GPP note carries the current target and the
-    Cash % note the basis of the cash line, e.g. "cash line 141.3 (season median, 4 weeks)")."""
+    Cash % note the basis of the cash line, e.g. "cash line 141.3 (season median, 4 weeks)"). With `lines`
+    that move with the slate (`SimLines.relative`) the Cash % and fourth-number notes describe those lines
+    instead of the fixed ones."""
+    notes = _fixed_notes(target, cash_basis)
+    if lines is not None and lines.relative:
+        offsets = lines.field
+        notes[P_CASH_HEADER] = (
+            "CASH %: the chance this lineup beats the double-up cash line. That line moves with the slate: "
+            f"it sits about {offsets.cash_offset:g} points above the field's average score, which the "
+            "simulator works out in every one of its 20,000 draws from projected ownership (the players "
+            "your lineup shares with the field move the line with it). 50% or more is a solid cash build "
+            "and turns green. The Cash or GPP marker in column A of the Total row says which number this "
+            "lineup is judged on."
+        )
+        notes[gpp_header(target)] = (
+            "TOP 1%: the chance this lineup finishes in the top 1% of a large-field GPP: the field's average "
+            f"score plus {offsets.top_offset:g} points, a line that moves with the slate and is worked out "
+            "in every draw from projected ownership. An average entry has about 1%; the more above that, "
+            f"the better a GPP build. (This column is still headed {gpp_header(target)} until the sheet is "
+            "relabelled.) Not adjusted for games already played."
+        )
+    return notes
+
+
+def _fixed_notes(target: float, cash_basis: str | None) -> dict[str, str]:
     return {
         MEDIAN_HEADER: (
             "TYPICAL: this lineup's usual score. Half of the simulated slates land above it, half below."
@@ -119,13 +155,21 @@ class LineupSimReport:
     gpp_target: float
     portfolio: dict[str, float] | None
     renamed_header: bool = False
+    lines: SimLines | None = None
 
     def line(self) -> str:
         if self.simulated == 0:
             return "Lineup simulator: no complete lineup on Lineups yet -- nothing to simulate."
         p = self.portfolio or {}
+        if self.lines is not None and self.lines.mode != "fixed":
+            return (
+                f"Lineup simulator: {self.simulated} lineup(s) ({self.skipped} unbuilt). {self.lines.note} "
+                f"P(>=1 cash) {p.get('p_any_cash', 0):.0%}, {p.get('expected_cashes', 0):.1f} expected "
+                f"cashes, P(>=1 {self.lines.top_label}) {p.get('p_any_gpp', 0):.0%}."
+            )
+        prefix = "--fixed-lines: " if self.lines is not None else ""
         return (
-            f"Lineup simulator: {self.simulated} lineup(s) ({self.skipped} unbuilt), cash line "
+            f"Lineup simulator: {prefix}{self.simulated} lineup(s) ({self.skipped} unbuilt), cash line "
             f"{self.cash_line.value:g} ({self.cash_line.note}), GPP target {self.gpp_target:g}; "
             f"P(>=1 cash) {p.get('p_any_cash', 0):.0%}, {p.get('expected_cashes', 0):.1f} expected cashes, "
             f"P(>=1 {self.gpp_target:g}+) {p.get('p_any_gpp', 0):.0%}."
@@ -157,12 +201,24 @@ def write_lineup_sim(
     gpp_target: float,
     n_sims: int = N_SIMS,
     seed: int = SEED,
+    lines_config: SimLinesConfig | None = None,
+    fixed_lines: bool = False,
 ) -> LineupSimReport | str:
     """Simulate every complete lineup on `tab` and write the four numbers on each Total row and their labels
-    on the
-    Remaining row below. Returns the report, or a message when the tab or its columns are missing."""
+    on the Remaining row below. Returns the report, or a message when the tab or its columns are missing.
+
+    With `lines_config` (`[sim.lines]`) the numbers are scored against lines that move with the slate, unless
+    `fixed_lines` or ownership is blank (`sim_inputs.resolve_lines`); without it, against the fixed lines."""
+    from dfs.sim.field import has_ownership
     from dfs.sim.simulate import simulate_lineups
-    from dfs.sim_inputs import build_specs, cash_line_from_results, lineup_from_names, portfolio_summary
+    from dfs.sim_inputs import (
+        build_specs,
+        cash_line_from_results,
+        lineup_from_names,
+        ownership_by_name,
+        portfolio_summary,
+        resolve_lines,
+    )
 
     last_row = name_blocks[-1][1] + 2
     with perf.phase("lineup sim: read sheet"):
@@ -211,7 +267,14 @@ def write_lineup_sim(
             )
             apply_label_notes(client, tab, header_row=header_row, name_blocks=name_blocks, target=gpp_target)
             return f"{tab}: no lineup has players yet -- labels updated, nothing to simulate"
-    specs = build_specs(edge, depth_rows, gsis_by_id, only_names=typed) if typed else {}
+    # Relative lines need every player the field holds, not only the lineups' teams.
+    whole_slate = lines_config is not None and not fixed_lines and has_ownership(ownership_by_name(edge))
+    specs = build_specs(edge, depth_rows, gsis_by_id, only_names=None if whole_slate else typed)
+    lines = (
+        resolve_lines(edge, specs, cash_line, gpp_target, lines_config, fixed_lines=fixed_lines)
+        if lines_config is not None
+        else None
+    )
 
     lineups, owners = [], []
     for block, (start, end) in enumerate(name_blocks):
@@ -223,7 +286,12 @@ def write_lineup_sim(
     with perf.phase("lineup sim: simulate"):
         result = (
             simulate_lineups(
-                lineups, n_sims=n_sims, seed=seed, cash_line=cash_line.value, gpp_target=gpp_target
+                lineups,
+                n_sims=n_sims,
+                seed=seed,
+                cash_line=lines.cash_line if lines else cash_line.value,
+                gpp_target=lines.gpp_target if lines else gpp_target,
+                field=lines.field if lines else None,
             )
             if lineups
             else None
@@ -248,7 +316,8 @@ def write_lineup_sim(
             header_row=header_row,
             name_blocks=name_blocks,
             target=gpp_target,
-            cash_basis=cash_line.basis,
+            cash_basis=lines.cash_basis if lines else cash_line.basis,
+            lines=lines,
         )
     return LineupSimReport(
         simulated=len(lineups),
@@ -256,6 +325,7 @@ def write_lineup_sim(
         cash_line=cash_line,
         gpp_target=gpp_target,
         portfolio=portfolio,
+        lines=lines,
     )
 
 
@@ -357,6 +427,7 @@ def apply_label_notes(
     name_blocks: list[tuple[int, int]],
     target: float,
     cash_basis: str | None = None,
+    lines: SimLines | None = None,
 ) -> int:
     """Hover notes on the four labels of the first lineup's Remaining row (the one place that explains them
     all). Returns how many were set."""
@@ -366,7 +437,7 @@ def apply_label_notes(
     if slots is None:
         return 0
     row = name_blocks[0][1] + 2
-    notes = lineup_sim_notes(target, cash_basis)
+    notes = lineup_sim_notes(target, cash_basis, lines)
     texts = [""] * len(header)
     for index, label in zip(slots, labels(target), strict=True):
         texts[index] = notes[label]

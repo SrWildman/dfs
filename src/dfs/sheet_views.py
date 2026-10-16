@@ -1176,18 +1176,23 @@ def apply_queue_visibility(client: SheetsClient, used: int) -> None:
 
 
 def board_portfolio_text(
-    portfolio: dict[str, float] | None, lineups: int, gpp_target: float, cash_basis: str | None = None
+    portfolio: dict[str, float] | None,
+    lineups: int,
+    gpp_target: float,
+    cash_basis: str | None = None,
+    top_label: str | None = None,
 ) -> str:
     """The Pool summary's portfolio line from the Lineups simulator's summary: lineups built, expected cashes,
-    P(at least one cash) and P(at least one lineup at the GPP target), then the cash line's basis ("cash line
-    141.3 (season median, 4 weeks)"); the placeholder when none are built."""
+    P(at least one cash) and P(at least one lineup at the GPP target, or `top_label` when the top-end line
+    moves with the slate: "Top 1%"), then the cash line's basis ("cash line 141.3 (season median, 4 weeks)");
+    the placeholder when none are built."""
     if not portfolio or lineups <= 0:
         return BOARD_PORTFOLIO_PLACEHOLDER
     return (
         f"{BOARD_PORTFOLIO_PREFIX} {lineups} lineup{'s' if lineups != 1 else ''}  ·  "
         f"{portfolio['expected_cashes']:.1f} expected cashes  ·  "
         f"P(at least one cash) {portfolio['p_any_cash']:.0%}  ·  "
-        f"P(at least one {gpp_target:g}+) {portfolio['p_any_gpp']:.0%}"
+        f"P(at least one {top_label or f'{gpp_target:g}+'}) {portfolio['p_any_gpp']:.0%}"
         + (f"  ·  {cash_basis}" if cash_basis else "")
     )
 
@@ -1198,11 +1203,12 @@ def write_board_portfolio(
     lineups: int,
     gpp_target: float,
     cash_basis: str | None = None,
+    top_label: str | None = None,
 ) -> str:
     """Write the portfolio line on the Board (the same numbers as the Lineups simulator's portfolio line)."""
     if not client.tab_exists(BOARD_TAB):
         return f"{BOARD_TAB}: not present -- portfolio skipped"
-    text = board_portfolio_text(portfolio, lineups, gpp_target, cash_basis)
+    text = board_portfolio_text(portfolio, lineups, gpp_target, cash_basis, top_label)
     client.update_range(BOARD_TAB, f"A{BOARD_PORTFOLIO_ROW}", [[text]])
     return f"{BOARD_TAB}: portfolio line written"
 

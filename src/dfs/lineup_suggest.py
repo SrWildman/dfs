@@ -11,8 +11,10 @@ roster slots (FLEX takes an RB, WR or TE), no DST against his own QB and at most
 
 **Cash builds** (default 3). The best `CASH_TOP_K` lineups by projection (the branch-and-bound of
 `late_swap_search`, `top_lineups`) are all simulated, and the builds are the ones with the highest `Cash %`
-(the simulator's chance of beating the typical cash line), each differing from the builds before it by at
-least `MIN_DIFFERENCE` players.
+(the simulator's chance of beating the double-up cash line, which moves with the slate: the field's average
+score plus a fixed margin; `dfs.sim.field`), each differing from the builds before it by at least
+`MIN_DIFFERENCE` players. Against a FIXED line above a lineup's median, maximising P(score > line) would
+reward variance, the opposite of a cash build; measuring against the field is what stops that.
 
 **GPP builds** (every QB stack, ideally `BUILDS_PER_QB` = 2 each; `--gpp N` asks for the N best
 instead; any pool player may be used, but never a lineup of only Cash-marked ones). Every candidate holds
@@ -20,8 +22,9 @@ a stack: the QB, at least two of his pass catchers (WR /
 TE) and at least one player from the opponent (the bring-back). A branch-and-bound that cannot see a stack
 would spend its whole budget on lineups without one, so each QB is searched on his own (`stacked_lineups`),
 cutting every branch that can no longer reach a stack.
-Candidates are ranked by `190+ %` (the simulator's chance of reaching the GPP target), each differing from
-the earlier builds by at least `MIN_DIFFERENCE` players, and no player is in more than `MAX_EXPOSURE` of the
+Candidates are ranked by `Top 1%` (the simulator's chance of reaching the large-field top-1% line: the
+field's average score plus 63 points; with `--fixed-lines` the old fixed GPP target), each differing from the
+earlier builds by at least `MIN_DIFFERENCE` players, and no player is in more than `MAX_EXPOSURE` of the
 builds. A build's title names its stack ("DET stack + ARI bring-back").
 
 **FLEX** is always the player with the latest kickoff among the position that has one more player than its
@@ -53,6 +56,7 @@ from dfs.late_swap_search import (
     top_lineups,
 )
 from dfs.models import ROSTER_SLOTS
+from dfs.sim.field import FieldModel
 from dfs.sim.simulate import PlayerSpec
 from dfs.sim_inputs import N_SIMS, SEED, lineup_from_names
 
@@ -294,9 +298,11 @@ def score(
     gpp_target: float,
     n_sims: int = N_SIMS,
     seed: int = SEED,
+    field: FieldModel | None = None,
 ) -> list[Scored]:
     """Simulate every lineup in ONE run (a player in two lineups has the same draws in both) and return them
-    with their odds. A lineup with a player the simulator has no spec for is left out."""
+    with their odds. A lineup with a player the simulator has no spec for is left out. With a `field` the
+    odds are against the field's lines (Cash % and Top 1%), else against `cash_line` / `gpp_target`."""
     from dfs.sim.simulate import simulate_lineups
 
     seated = [seat(lineup, kickoff) for lineup in lineups]
@@ -308,7 +314,12 @@ def score(
     if not rated:
         return []
     result = simulate_lineups(
-        [s for _, s in rated], n_sims=n_sims, seed=seed, cash_line=cash_line, gpp_target=gpp_target
+        [s for _, s in rated],
+        n_sims=n_sims,
+        seed=seed,
+        cash_line=cash_line,
+        gpp_target=gpp_target,
+        field=field,
     )
     return [
         Scored(
@@ -352,7 +363,7 @@ def cash_key(s: Scored):
 
 
 def gpp_key(s: Scored):
-    """Best first: the chance of reaching the GPP target, then projection, the cheaper lineup, then names."""
+    """Best first: the Top 1% chance (`p_gpp`), then projection, the cheaper lineup, then names."""
     return (
         -round(s.p_gpp, PROB_DECIMALS),
         -round(s.projection, VALUE_DECIMALS),
@@ -510,8 +521,11 @@ def suggest_builds(
     n_sims: int = N_SIMS,
     seed: int = SEED,
     time_limit: float = TIME_LIMIT_SECONDS,
+    field: FieldModel | None = None,
 ) -> SuggestReport:
-    """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both)."""
+    """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
+    `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
+    builds are scored against the fixed `cash_line` / `gpp_target`."""
     started = time.monotonic()
     deadline = started + time_limit
     cash_deadline = started + time_limit * CASH_SHARE_OF_TIME  # the GPP search gets the rest
@@ -532,7 +546,14 @@ def suggest_builds(
         lineups, done = cash_lineups(cash_pool, cap=cap, deadline=cash_deadline)
         report.complete = report.complete and done
         scored = score(
-            lineups, specs, kickoff, cash_line=cash_line, gpp_target=gpp_target, n_sims=n_sims, seed=seed
+            lineups,
+            specs,
+            kickoff,
+            cash_line=cash_line,
+            gpp_target=gpp_target,
+            n_sims=n_sims,
+            seed=seed,
+            field=field,
         )
         picks = choose(scored, cash_builds, key=cash_key)
         for pick in picks:
@@ -548,7 +569,14 @@ def suggest_builds(
         lineups, done = stacked_lineups(gpp_pool, cap=cap, deadline=deadline, leaf_ok=not_all_cash(tags))
         report.complete = report.complete and done
         scored = score(
-            lineups, specs, kickoff, cash_line=cash_line, gpp_target=gpp_target, n_sims=n_sims, seed=seed
+            lineups,
+            specs,
+            kickoff,
+            cash_line=cash_line,
+            gpp_target=gpp_target,
+            n_sims=n_sims,
+            seed=seed,
+            field=field,
         )
         if gpp_builds is None:
             picks = choose_per_qb(scored, key=gpp_key)

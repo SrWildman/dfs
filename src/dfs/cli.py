@@ -211,6 +211,13 @@ LIVE_SYNC_SOURCES = [
     "edge",
 ]
 
+FIXED_LINES_HELP = (
+    "Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of "
+    "lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one "
+    "season so the old and new numbers can be compared."
+)
+
+
 app = typer.Typer(
     name="dfs",
     help="Sync DFS data into Google Sheets, export DK lineups, track results and bankroll.",
@@ -2229,6 +2236,7 @@ def sync(
         "spent if none did); on a full sync it forces a pull. A plain --live never spends credits, and every "
         "pull must fit the budget (credits left / NFL weekends before the monthly reset).",
     ),
+    fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
 ) -> None:
     """Fetch data sources and upload them to the connected Google Sheet."""
     cfg = _load_config_or_exit()
@@ -2316,7 +2324,7 @@ def sync(
 
     if "edge" in source_names and not no_upload:
         _write_edge_finder_tabs(cfg, ctx)
-        _write_lineup_sim(cfg, ctx, live_client)
+        _write_lineup_sim(cfg, ctx, live_client, fixed_lines=fixed_lines)
 
     if live:
         _print_live_flag_diff(
@@ -2398,7 +2406,9 @@ def _write_edge_finder_tabs(cfg: Config, ctx: SyncContext) -> None:
         console.print(f"[yellow]Edge Finder tab not written:[/yellow] {e}")
 
 
-def _write_lineup_sim(cfg: Config, ctx: SyncContext, client: SheetsClient | None = None) -> None:
+def _write_lineup_sim(
+    cfg: Config, ctx: SyncContext, client: SheetsClient | None = None, *, fixed_lines: bool = False
+) -> None:
     """After an edge sync: simulate every built lineup on Lineups and write Median / p90 / P(cash) / P(GPP)
     and the portfolio line (`sheet_lineup_sim`). It reads the Lineups names and Results' typed `Cash Line`
     (read only), writes only its own columns on Lineups, and a failure only says so: the rest of the sync
@@ -2433,6 +2443,8 @@ def _write_lineup_sim(cfg: Config, ctx: SyncContext, client: SheetsClient | None
             results_tab=cfg.results.tab,
             week=ctx.week,
             gpp_target=cfg.sim.gpp_target,
+            lines_config=cfg.sim.lines,
+            fixed_lines=fixed_lines,
         )
     except (SheetsError, OSError, ValueError, KeyError, FileNotFoundError) as e:
         console.print(f"[yellow]Lineup simulator not written:[/yellow] {e}")
@@ -2446,7 +2458,8 @@ def _write_lineup_sim(cfg: Config, ctx: SyncContext, client: SheetsClient | None
                 outcome.portfolio,
                 outcome.simulated,
                 outcome.gpp_target,
-                outcome.cash_line.basis,
+                outcome.lines.cash_basis if outcome.lines else outcome.cash_line.basis,
+                top_label=outcome.lines.top_label if outcome.lines else None,
             )
         except SheetsError as e:
             console.print(f"[yellow]Board portfolio line not written:[/yellow] {e}")
@@ -2829,16 +2842,24 @@ def _read_player_pool_names(client: SheetsClient, player_pool_tab: str) -> set[s
 
 
 def _late_swap_sim_setup(
-    cfg: Config, client: SheetsClient, edge: pd.DataFrame, goal: str | None, now: datetime
+    cfg: Config,
+    client: SheetsClient,
+    edge: pd.DataFrame,
+    goal: str | None,
+    now: datetime,
+    *,
+    fixed_lines: bool = False,
 ):
-    """What the simulator needs to score late-swap candidates: every player's `PlayerSpec`, the cash line (the
-    median of every typed Cash Line in Results this season, read only) and the GPP target. None, with a note,
-    when anything is missing: the swaps are then shown and ranked by projection alone."""
+    """What the simulator needs to score late-swap candidates and Suggested builds: every player's
+    `PlayerSpec` and the lines to score against (`sim_inputs.resolve_lines`): the field's, which move with the
+    slate, or (`fixed_lines`, or before ownership publishes) the fixed cash line (the median of every typed
+    Cash Line in Results this season, read only) and GPP target. None, with a note, when anything is missing:
+    the swaps are then shown and ranked by projection alone."""
     from dfs import injury_beneficiaries as ib
     from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
     from dfs.edge_finder import PLAYERS_FILE
     from dfs.late_swap_sim import SimSettings
-    from dfs.sim_inputs import build_specs, cash_line_from_results
+    from dfs.sim_inputs import build_specs, cash_line_from_results, resolve_lines
 
     try:
         try:
@@ -2856,11 +2877,12 @@ def _late_swap_sim_setup(
         week = SyncContext.current(week=None, season=None).week
         cash = cash_line_from_results(rows[0] if rows else [], rows[1:], before_week=week)
         specs = build_specs(edge, depth, gsis_by_id)
+        lines = resolve_lines(edge, specs, cash, cfg.sim.gpp_target, cfg.sim.lines, fixed_lines=fixed_lines)
     except (SheetsError, OSError, ValueError, KeyError) as e:
         console.print(f"[yellow]Simulator unavailable ({e}): swaps are ranked by projection only.[/yellow]")
         return None
     console.print(
-        f"Simulator: cash line {cash.value:g} ({cash.note}), GPP target {cfg.sim.gpp_target:g}; "
+        f"Simulator: {lines.note} "
         + (
             f"swaps ranked by change in P({goal})."
             if goal
@@ -2868,7 +2890,13 @@ def _late_swap_sim_setup(
         )
         + "\n"
     )
-    return specs, SimSettings(cash_line=cash.value, gpp_target=cfg.sim.gpp_target, goal=goal)
+    return specs, SimSettings(
+        cash_line=lines.cash_line,
+        gpp_target=lines.gpp_target,
+        goal=goal,
+        field=lines.field,
+        lines=lines,
+    )
 
 
 def _run_late_swap(
@@ -2880,6 +2908,7 @@ def _run_late_swap(
     now: datetime,
     client: SheetsClient | None = None,
     goal: str | None = None,
+    fixed_lines: bool = False,
 ) -> None:
     """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
     point in the slate; the command passes the real clock. `goal` None reads each lineup's Cash/GPP marker
@@ -2913,7 +2942,7 @@ def _run_late_swap(
         )
     console.print()
 
-    sim_setup = _late_swap_sim_setup(cfg, client, edge, goal, now)
+    sim_setup = _late_swap_sim_setup(cfg, client, edge, goal, now, fixed_lines=fixed_lines)
 
     any_shown = False
     for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
@@ -3005,6 +3034,7 @@ def lineups_late_swap(
         help="Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each "
         "lineup's Cash/GPP marker (column A of its Total row; cash if blank).",
     ),
+    fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
 ) -> None:
     """Check every built lineup in the Lineups tab against real kickoff
     times, then suggest what to swap: the best full re-fill of the open
@@ -3031,6 +3061,7 @@ def lineups_late_swap(
         all_players=all_players,
         now=datetime.now(UTC),
         goal=goal.value if goal else None,
+        fixed_lines=fixed_lines,
     )
 
 
@@ -3056,15 +3087,20 @@ def lineups_suggest(
         help="How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool "
         "when the run says the time limit cut it short.",
     ),
+    fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
     Suggested tab.
 
-    Cash builds (default 3) have the best chance of beating the typical cash
-    line. GPP builds each hold a stack (a QB, two of his pass catchers and a
+    Cash builds (default 3) have the best chance of beating the double-up
+    cash line, which moves with the slate (the field's average score plus a
+    small margin, worked out from projected ownership; before ownership
+    publishes, or with `--fixed-lines`, your typed Cash Line median). GPP
+    builds each hold a stack (a QB, two of his pass catchers and a
     bring-back): left to itself, every QB stack in your pool gets a build and
     ideally two (`--gpp N` asks for the N best builds instead), ranked by the
-    chance of reaching the GPP target. Cash builds use the Cash and Both
+    chance of reaching the Top 1% line (the field's average plus 63 points;
+    with `--fixed-lines`, the fixed GPP target). Cash builds use the Cash and Both
     players of your pool; GPP builds may use anyone in it, but never a lineup
     of nothing but Cash-marked players. Nobody OUT or IR or already kicked
     off, and every build follows the salary cap, the roster slots, no DST
@@ -3076,7 +3112,15 @@ def lineups_suggest(
     Copy build to Lineups. Reads the last sync's data; run `dfs sync` (or
     `dfs sync --live`) first for the freshest picture."""
     cfg = _load_config_or_exit()
-    _run_suggest(cfg, cash=cash, gpp=gpp, write=not no_write, now=datetime.now(UTC), seconds=seconds)
+    _run_suggest(
+        cfg,
+        cash=cash,
+        gpp=gpp,
+        write=not no_write,
+        now=datetime.now(UTC),
+        seconds=seconds,
+        fixed_lines=fixed_lines,
+    )
 
 
 def _run_suggest(
@@ -3088,6 +3132,7 @@ def _run_suggest(
     now: datetime,
     client: SheetsClient | None = None,
     seconds: float = TIME_LIMIT_SECONDS,
+    fixed_lines: bool = False,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
     in the slate; the command passes the real clock."""
@@ -3116,7 +3161,7 @@ def _run_suggest(
             "(Cash, GPP or Both) and run this again.[/yellow]"
         )
         raise typer.Exit(code=1)
-    sim_setup = _late_swap_sim_setup(cfg, client, edge, None, now)
+    sim_setup = _late_swap_sim_setup(cfg, client, edge, None, now, fixed_lines=fixed_lines)
     if sim_setup is None:
         console.print("[red]The simulator is needed to score builds and could not be set up.[/red]")
         raise typer.Exit(code=1)
@@ -3133,6 +3178,7 @@ def _run_suggest(
         cash_builds=cash,
         gpp_builds=gpp,
         time_limit=seconds,
+        field=settings.field,
     )
     console.print(
         f"Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
@@ -3159,6 +3205,7 @@ def _run_suggest(
                 metric=metric,
                 cash_line=settings.cash_line,
                 gpp_target=settings.gpp_target,
+                lines_text=settings.lines.status if settings.lines is not None else None,
             )
         )
     except SheetsError as e:

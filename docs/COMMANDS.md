@@ -88,6 +88,7 @@ Fetch data sources and upload them to the connected Google Sheet.
 | `--live` | Re-sync only fast-moving sources (odds, DK statuses, TFFB projections, weather) plus edge, and print what changed in EdgeRaw's Flag column since the last sync. The Sunday-afternoon command -- not a substitute for a full `dfs sync`. |
 | `--sheet-id STR` | Write to this sheet instead of config.toml's (e.g. the template). |
 | `--props` | Player props from The Odds API (about 6 credits a game, see docs/WORKFLOW.md). A plain full sync pulls them ONCE per NFL week, on the first full sync of a Saturday or Sunday. With --live this refreshes only the games whose players' DraftKings status changed since the last pull (nothing spent if none did); on a full sync it forces a pull. A plain --live never spends credits, and every pull must fit the budget (credits left / NFL weekends before the monthly reset). |
+| `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
 
 ### `dfs lineups suggest`
 
@@ -99,6 +100,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--gpp INT RANGE` | How many GPP builds (0 for none). Left off, every QB stack gets a build and ideally two. |
 | `--no-write` | Print the builds here and leave the Suggested tab alone. |
 | `--seconds FLOAT RANGE` | How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. Default: `60.0`. |
+| `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
 
 ### `dfs export`
 
@@ -118,6 +120,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | `--metric CHOICE` | What to rank swaps by: CalPts, ProjPts or AggPts. Default: config.toml's [projection] default (CalPts, with ProjPts where CalPts is blank). |
 | `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
 | `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each lineup's Cash/GPP marker (column A of its Total row; cash if blank). |
+| `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
 
 ### `dfs week close`
 
@@ -267,7 +270,7 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 
 ## Reference: the lineup simulator (only when needed)
 
-The Typical, Big night, Cash % and 190+ % numbers on each Lineups Total row are written by every `dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.
+The Typical, Big night, Cash % and 190+ % numbers on each Lineups Total row are written by every `dfs sync` (Cash % and the last number are measured against lines that move with the slate; `--fixed-lines` on `dfs sync`, `dfs lineups suggest` and `dfs lineups late-swap` gives the old fixed ones); these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.
 
 ### `dfs sim fit`
 

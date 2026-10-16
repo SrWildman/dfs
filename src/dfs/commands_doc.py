@@ -125,9 +125,10 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
     (
         "Reference: the lineup simulator (only when needed)",
         "The Typical, Big night, Cash % and 190+ % numbers on each Lineups Total row are written by every "
-        "`dfs sync`; these commands rebuild or check the correlations behind them. They read the model cache "
-        "`dfs model fetch` "
-        "fills and never touch a sheet.",
+        "`dfs sync` (Cash % and the last number are measured against lines that move with the slate; "
+        "`--fixed-lines` on `dfs sync`, `dfs lineups suggest` and `dfs lineups late-swap` gives the old "
+        "fixed ones); these commands rebuild or check the correlations behind them. They read the model "
+        "cache `dfs model fetch` fills and never touch a sheet.",
         [
             "dfs sim fit",
             "dfs sim backtest",

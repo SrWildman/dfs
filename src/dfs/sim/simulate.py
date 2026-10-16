@@ -17,6 +17,13 @@ R is assembled from the shipped table: a pair in different games is 0; in the sa
 assembled from separately estimated values need not form a valid correlation matrix, so R is repaired to the
 nearest positive semi-definite matrix by eigenvalue clipping and rescaling to a unit diagonal; the result
 records whether that was needed and the largest entry it moved.
+
+**Lines.** By default a lineup is scored against two FIXED numbers (`cash_line`, `gpp_target`). Passing a
+`field` (`dfs.sim.field.FieldModel`) scores it against the FIELD instead: the top-owned players join the
+lineups' players in the same correlated draw, each draw's field mean is the ownership-weighted sum of their
+points, and `p_cash` / `p_gpp` become P(score >= field mean + the double-up offset) and P(score >= field
+mean + the top-1% offset), per draw. `p_gpp` is the "Top 1%" column in that mode; the names stay for the
+fixed-line callers (the back-test, the tests).
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import ndtr
 
+from dfs.sim import field as field_model
 from dfs.sim import marginal
 from dfs.sim.correlation import CorrelationLookup, load_correlations
 from dfs.sim.roles import ROLE_POSITION, normalize_role
@@ -95,6 +103,14 @@ class SimResult:
     repair: RepairInfo
     notes: list[str] = field(default_factory=list)
     scores: np.ndarray | None = None  # n_sims x lineups
+    # "fixed": scored against `cash_line` / `gpp_target`. "relative": against the field mean per draw, and
+    # then `cash_line` / `gpp_target` hold the MEAN of those per-draw lines (what they came to on average).
+    lines: str = "fixed"
+    field_mean: float | None = None  # relative lines: mean and sd of the double-up field's average score
+    field_sd: float | None = None
+    field_extra_players: int = 0  # simulated only for the field (not in any lineup)
+    cash_lines: np.ndarray | None = None  # relative lines, with keep_scores: each draw's cash line ...
+    top_lines: np.ndarray | None = None  # ... and top-end line
 
     def table(self) -> pd.DataFrame:
         """One row per lineup."""
@@ -215,15 +231,22 @@ def simulate_lineups(
     tables: pd.DataFrame | None = None,
     independent: bool = False,
     keep_scores: bool = False,
+    field: field_model.FieldModel | None = None,
 ) -> SimResult:
     """Simulate every lineup on the same draws.
 
     `correlations` defaults to `models/sim/correlations.csv`, `tables` to the shipped distribution tables;
     `independent=True` zeroes every correlation (the comparison the back-test runs). Deterministic in `seed`.
+
+    `field` switches to relative lines (see the module docstring): `cash_line` and `gpp_target` are then
+    ignored, and the players of `field.cover` are simulated alongside the lineups' (a player who is in both is
+    one random variable, so a lineup of chalk is correlated with the field mean).
     """
     if not lineups or not all(lineups):
         raise ValueError("lineups must be non-empty lists of players")
-    players = _distinct_players(lineups)
+    field_cover = field.cover_players if field is not None else []
+    players = _distinct_players([*lineups, field_cover] if field_cover else lineups)
+    lineup_ids = {p.id for lineup in lineups for p in lineup}
     index = {p.id: i for i, p in enumerate(players)}
     m = len(players)
     notes: list[str] = []
@@ -245,14 +268,28 @@ def simulate_lineups(
             points[:, col] = marginal.ppf(mg, k, u[:, col])
 
     scores = np.column_stack([points[:, [index[p.id] for p in lineup]].sum(axis=1) for lineup in lineups])
+    cash_thr: float | np.ndarray = cash_line  # a number, or (relative lines) one threshold per draw
+    gpp_thr: float | np.ndarray = gpp_target
+    lines, f_mean, f_sd, cash_lines, top_lines = "fixed", None, None, None, None
+    if field is not None:
+        cash_lines, top_lines, tail_notes = _field_lines(field, points, index, tables)
+        notes.extend(tail_notes)
+        cash_thr, gpp_thr = cash_lines[:, None], top_lines[:, None]
+        lines, f_mean, f_sd = (
+            "relative",
+            float((cash_lines - field.cash_offset).mean()),
+            float((cash_lines - field.cash_offset).std()),
+        )
+        cash_line, gpp_target = float(cash_lines.mean()), float(top_lines.mean())
     q = np.quantile(scores, QUANTILE_LEVELS, axis=0)
+    hit_cash, hit_gpp = scores >= cash_thr, scores >= gpp_thr
     stats = [
         LineupStats(
             mean=float(scores[:, k].mean()),
             sd=float(scores[:, k].std()),
             quantiles={level: float(q[i, k]) for i, level in enumerate(QUANTILE_LEVELS)},
-            p_cash=float((scores[:, k] >= cash_line).mean()),
-            p_gpp=float((scores[:, k] >= gpp_target).mean()),
+            p_cash=float(hit_cash[:, k].mean()),
+            p_gpp=float(hit_gpp[:, k].mean()),
         )
         for k in range(scores.shape[1])
     ]
@@ -260,9 +297,9 @@ def simulate_lineups(
         corr = np.corrcoef(scores.T) if scores.shape[1] > 1 else np.ones((1, 1))
     return SimResult(
         lineups=stats,
-        p_any_gpp=float((scores >= gpp_target).any(axis=1).mean()),
-        p_any_cash=float((scores >= cash_line).any(axis=1).mean()),
-        expected_cashing=float((scores >= cash_line).sum(axis=1).mean()),
+        p_any_gpp=float(hit_gpp.any(axis=1).mean()),
+        p_any_cash=float(hit_cash.any(axis=1).mean()),
+        expected_cashing=float(hit_cash.sum(axis=1).mean()),
         score_correlation=corr,
         cash_line=cash_line,
         gpp_target=gpp_target,
@@ -271,7 +308,38 @@ def simulate_lineups(
         repair=repair,
         notes=notes,
         scores=scores if keep_scores else None,
+        lines=lines,
+        field_mean=f_mean,
+        field_sd=f_sd,
+        field_extra_players=len(players) - len(lineup_ids) if field is not None else 0,
+        cash_lines=cash_lines if keep_scores else None,
+        top_lines=top_lines if keep_scores else None,
     )
+
+
+def _field_lines(
+    field: field_model.FieldModel, points: np.ndarray, index: dict[str, int], tables
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Each draw's cash line and top-end line: the field mean (the ownership-weighted sum of the draw's
+    points) plus the offset. A field player who was simulated enters at his drawn points; the rest of the
+    ownership (the tail) enters at his expected points, a constant."""
+    drawn = [(k, index[p.id]) for k, p in enumerate(field.players) if p.id in index]
+    tail = [k for k, p in enumerate(field.players) if p.id not in index]
+    ks, cols = [k for k, _ in drawn], [c for _, c in drawn]
+    tail_points = (
+        field_model.expected_points([field.players[k] for k in tail], tables=tables) if tail else np.zeros(0)
+    )
+    means = []
+    for weights in (field.cash_weights, field.top_weights):
+        means.append(points[:, cols] @ weights[ks] + float(weights[tail] @ tail_points))
+    notes = []
+    if tail:
+        share = float(field.cash_weights[tail].sum() / field.cash_weights.sum())
+        notes.append(
+            f"field: {len(drawn)} players simulated, {len(tail)} more at their expected points "
+            f"({share:.1%} of the ownership)"
+        )
+    return means[0] + field.cash_offset, means[1] + field.top_offset, notes
 
 
 def swap_impact(
