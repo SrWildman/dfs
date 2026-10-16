@@ -253,8 +253,9 @@ MEANINGS = {
         "no chips).  ·  Do: 'Watch' rising or falling roles; the Why line says what moved."
     ),
     "MATCHUPS (CONTEXT)": (
-        "How soft or tough each offense's matchup is: Soft is the 8 best, Tough the 4 worst. Context only, "
-        "it moves no projection.  ·  Do: open a team (click +) to see its top players and set their Pool."
+        "How soft or tough each offense's matchup is, best first: Soft is the 8 best, Tough the 4 worst, "
+        "Middle the rest. Context only, it moves no projection.  ·  Do: open a team (click +) to see its "
+        "top players and set their Pool."
     ),
     "CONTEXT SIGNALS": (
         "FADE↓ (TEs), USAGE↑ and USAGE↓ (RBs): unproven chips.  ·  Do: use them as a tiebreaker at most; "
@@ -643,6 +644,19 @@ class _Builder:
         self._open = (key, row)
         self.set_key(row, key)
         return row
+
+    def folded(self, part: pd.DataFrame, visible: int, noun: str, key: str):
+        """Yield `part`'s rows; those past the first `visible` sit in a collapsed "▸ N more <noun>" group
+        (opened and closed here), the same fold the position blocks use, so no capped list hides players."""
+        total = len(part)
+        for index, (_, r) in enumerate(part.iterrows()):
+            if index == visible:
+                self.open_group(
+                    f"▸ {total - visible} more {noun} (click + to show)", f"{self.section_key}|{key}|more"
+                )
+            yield r
+        if total > visible:
+            self.close_group()
 
     def close_group(self) -> None:
         key, row = self._open
@@ -1371,10 +1385,10 @@ def _leverage_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
         part = leverage_plays(edge, pos)
         if part.empty:
             continue
-        shown = part.head(LEVERAGE_ROWS_PER_POSITION)
-        b.sub(f"{pos}  —  top {len(shown)} of {len(part)} by Lev")
+        shown = part.head(MAX_PER_POSITION)
+        b.sub(f"{pos}  —  top {min(LEVERAGE_ROWS_PER_POSITION, len(part))} of {len(part)} by Lev")
         b.position_header()
-        for _, r in shown.iterrows():
+        for r in b.folded(shown, LEVERAGE_ROWS_PER_POSITION, _plural(pos), pos):
             lev = r["Lev"]
             b.player_row(
                 _lead(r, pos),
@@ -1406,12 +1420,12 @@ def _chalk_section(b: _Builder, edge: pd.DataFrame, published: bool) -> None:
         b.end_section()
         return
     for pos in POSITIONS:
-        part = chalk_players(edge, pos).head(CHALK_ROWS_PER_POSITION)
+        part = chalk_players(edge, pos).head(MAX_PER_POSITION)
         if part.empty:
             continue
-        b.sub(f"{pos}  —  the {len(part)} highest-owned")
+        b.sub(f"{pos}  —  the {min(CHALK_ROWS_PER_POSITION, len(part))} highest-owned")
         b.position_header()
-        for _, r in part.iterrows():
+        for r in b.folded(part, CHALK_ROWS_PER_POSITION, _plural(pos), pos):
             verb = chalk_verb(float(r["BustPct"]))
             third = {"Chalk: eat": "bottom", "Chalk: fade candidate": "top"}.get(verb, "middle")
             b.player_row(
@@ -1440,10 +1454,11 @@ def _punt_section(b: _Builder, edge: pd.DataFrame) -> None:
         if part.empty:
             b.sub(f"{pos}  —  no rosterable player within {money(PUNT_SALARY_WINDOW)} of the cheapest")
             continue
-        shown = part.head(PUNT_ROWS_PER_POSITION)
-        b.sub(f"{pos}  —  best {len(shown)} of {len(part)} within {money(PUNT_SALARY_WINDOW)} of {_k(floor)}")
+        shown = part.head(MAX_PER_POSITION)
+        best = min(PUNT_ROWS_PER_POSITION, len(part))
+        b.sub(f"{pos}  —  best {best} of {len(part)} within {money(PUNT_SALARY_WINDOW)} of {_k(floor)}")
         b.position_header()
-        for _, r in shown.iterrows():
+        for r in b.folded(shown, PUNT_ROWS_PER_POSITION, _plural(pos), pos):
             gap = float(r["Salary"]) - floor
             above = f"{money(gap)} above the cheapest {pos}" if gap else f"the cheapest {pos} on the slate"
             b.player_row(
@@ -1475,14 +1490,19 @@ def _disagreement_section(b: _Builder, edge: pd.DataFrame, fitted) -> None:
             ("up", "CalPts above TFFB", "Look closer ▲"),
             ("down", "CalPts below TFFB", "Caution ▼"),
         ):
-            part = disagreements(edge, pos, direction).head(DISAGREEMENT_PER_DIRECTION)
+            part = disagreements(edge, pos, direction).head(MAX_PER_POSITION)
+            # the first DISAGREEMENT_PER_DIRECTION always show; the "more" group holds only gaps worth a look
+            # (not the whole position sorted by a difference that has shrunk to nothing or flipped sign)
+            sign = 1 if direction == "up" else -1
+            worth = (part["Diff"] * sign) >= GAP_WORTH_EXPLAINING
+            part = part[(np.arange(len(part)) < DISAGREEMENT_PER_DIRECTION) | worth]
             if part.empty:
                 continue
             b.sub(f"{pos}  —  {label}")
             if not started:
                 b.position_header()
                 started = True
-            for _, r in part.iterrows():
+            for r in b.folded(part, DISAGREEMENT_PER_DIRECTION, _plural(pos), f"{pos}|{direction}"):
                 b.player_row(
                     _lead(r, pos),
                     [
@@ -1524,11 +1544,10 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
             ("out", "Confirmed out", BENEFICIARY_CONFIRMED_N, False, "Bump ▲"),
             ("questionable", "Questionable", BENEFICIARY_QUESTIONABLE_N, True, "Watch"),
         ):
-            part = ben[ben["OutStatus"] == status].head(cap)
+            part = ben[ben["OutStatus"] == status].head(MAX_PER_POSITION)
             total = int((ben["OutStatus"] == status).sum())
             if part.empty:
                 continue
-            more = max(total - cap, 0)
             explain = (
                 "DraftKings or the injury report says he is out"
                 if status == "out"
@@ -1536,10 +1555,10 @@ def _injury_section(b: _Builder, inputs: Inputs, by_gsis: pd.DataFrame) -> None:
             )
             b.sub(
                 "",
-                label=f"{label} · {len(part)} of {total}",
-                detail=f"{explain}" + (f" (+{more} more not shown)" if more else ""),
+                label=f"{label} · {min(cap, len(part))} of {total}",
+                detail=explain,
             )
-            for _, r in part.iterrows():
+            for r in b.folded(part, cap, "backs", status):
                 info = by_gsis.loc[r["GsisId"]] if r["GsisId"] in by_gsis.index else None
                 games = info["Games"] if info is not None and "Games" in info else np.nan
                 priced = r.get("PricedIn", "")
@@ -1688,7 +1707,7 @@ def _trend_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
 
 
 def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
-    b.begin_section("MATCHUPS (CONTEXT)  —  the 8 best and 4 toughest offenses (DST: the defense's spot)")
+    b.begin_section("MATCHUPS (CONTEXT)  —  every offense, softest first (DST: the defense's spot)")
     b.header([], lead=MATCHUP_LEAD)  # the team rows have no numbers: those headers sit in each group
     mu = inputs.matchups
     if mu.empty:
@@ -1700,13 +1719,15 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
         part = mu[mu["Position"] == pos]
         if part.empty:
             continue
+        if "Score" in part.columns:
+            part = part.sort_values("Score", ascending=False)  # softest first, the toughest last
         b.sub(pos)
         for _, r in part.iterrows():
             players = team_players(edge, r["Team"], pos)
-            soft = r["Group"] == "top"
+            grade = {"top": "Soft", "middle": "Middle"}.get(r["Group"], "Tough")
             row = b.open_group(f"{r['Team']} vs {r['Opp']}", f"MATCHUPS|{pos}|{r['Team']}", team=True)
             cells = b.layout.rows[row - 1]
-            cells[pos_i], cells[grade_i] = pos, "Soft" if soft else "Tough"
+            cells[pos_i], cells[grade_i] = pos, grade
             if not players.empty:  # one cell that overflows right; the salaries are on the player rows below
                 cells[players_i] = ", ".join(players["Name"])
             cells[FIRST_TRAILING + TRAILING_HEADERS.index("Do")] = "Context only"
@@ -1716,7 +1737,7 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             )
             cells[FIRST_TRAILING + TRAILING_HEADERS.index("Why")] = short_why(reason)
             b.layout.notes[row] = reason
-            if not soft:
+            if grade == "Tough":
                 b.layout.muted_rows.append(row)
             if not players.empty:
                 b.inner_header(MATCHUP_COLUMNS)
@@ -1768,7 +1789,7 @@ def _r6_signal_blocks(b: _Builder, edge: pd.DataFrame) -> None:
         )
         if not part.empty:  # these columns are not the section's (Token | xFP/G | DK/G L3): name them
             b.inner_header(R6_SIGNAL_COLUMNS)
-        for _, r in part.head(R6_SIGNAL_ROWS).iterrows():
+        for r in b.folded(part.head(MAX_PER_POSITION), R6_SIGNAL_ROWS, "flagged", chip.id):
             b.player_row(
                 _lead(r),
                 [read.split(" ")[0], r["CalPts"], r["ProjPts"]],
@@ -1780,8 +1801,6 @@ def _r6_signal_blocks(b: _Builder, edge: pd.DataFrame) -> None:
                 edge=r.get("Edge", ""),
                 muted=chip.weaker,
             )
-        if len(part) > R6_SIGNAL_ROWS:
-            b.note(f"+{len(part) - R6_SIGNAL_ROWS} more flagged")
 
 
 def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
@@ -1793,12 +1812,8 @@ def _signal_section(b: _Builder, edge: pd.DataFrame) -> None:
         part = edge[has & pool & available(edge)].sort_values("CalPts", ascending=False)
         if part.empty:
             continue
-        more = max(len(part) - SIGNALS_PER_TOKEN, 0)
-        b.sub(
-            f"{token}  —  {min(len(part), SIGNALS_PER_TOKEN)} of {len(part)}"
-            + (f" (+{more} more)" if more else "")
-        )
-        for _, r in part.head(SIGNALS_PER_TOKEN).iterrows():
+        b.sub(f"{token}  —  {min(len(part), SIGNALS_PER_TOKEN)} of {len(part)}")
+        for r in b.folded(part.head(MAX_PER_POSITION), SIGNALS_PER_TOKEN, "players", token):
             b.player_row(
                 _lead(r),
                 [token, r["xFP/G"], r.get("DkG", "")],

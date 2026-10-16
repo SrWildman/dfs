@@ -546,7 +546,10 @@ EDGE_FINDER_TAB_NOTES = {
     "Change": "Last 3 minus Earlier.",
     "Trend": "▲ rising or ▼ falling, only when the move is bigger than normal week-to-week noise.",
     "Matchup": "The offense and the opponent it faces. Click + to open the team's top players.",
-    "Grade": "Soft is one of the 8 easiest matchups on the slate, Tough one of the 4 hardest. Context only.",
+    "Grade": (
+        "Soft is one of the 8 easiest matchups on the slate, Tough one of the 4 hardest, Middle the rest. "
+        "Context only."
+    ),
     "Players": "How many of the team's players are listed under it.",
     "Token": "The context chip that fired for him (see Edge). Unproven: a tiebreaker at most.",
     "DK/G L3": "His actual DraftKings points per game over his last 3 games.",

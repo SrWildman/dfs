@@ -1460,6 +1460,17 @@ def polish_edge(client: SheetsClient, edge_tab: str) -> str:
         client, edge_tab, edge_header, data_start=2, last_row=EDGE_ROWS, pool_column=POOL_HEADER
     )
 
+    # The Pool cell shows its Cash / GPP / Both colour here too, the same chips as the Edge Finder and the
+    # Board (the typed-input fill stays under a blank cell).
+    for state, fmt in POOL_TYPE_CHIPS.items():
+        client.add_boolean_rule(
+            edge_tab,
+            f"{POOL_COLUMN}2:{POOL_COLUMN}{EDGE_ROWS}",
+            condition_type="TEXT_EQ",
+            values=[state],
+            fmt=fmt,
+        )
+
     apply_edge_column_groups(client, edge_tab, clear=False)
     # One-hover definition on every header (`sheet_column_notes.player_tab_notes`); replaces what was there.
     apply_header_notes(client, edge_tab, 1, edgeraw_notes())

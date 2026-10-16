@@ -41,6 +41,7 @@ from dfs.sheet_style import (
     OK_BG,
     OK_FG,
     POOL_TAG_TINTS,
+    POOL_TYPE_CHIPS,
     POSITION_TINTS,
     VENUE_CHIPS,
     WARN_BG,
@@ -463,6 +464,17 @@ def test_polish_edge_clears_column_groups_before_re_adding_them():
     assert clear_index < first_group_index
     # ... and before the unhide, or the unhide skips columns that a stale collapsed group is hiding.
     assert clear_index < client.calls.index("hide_columns")
+
+
+def test_polish_edge_colours_the_pool_cell_by_cash_gpp_or_both_like_the_other_tabs():
+    client = FakeEdgeClient()
+    polish_edge(client, "EdgeRaw")
+    pool_rules = {
+        rule["values"][0]: rule["fmt"]
+        for rng, rule in client.boolean_rule_calls
+        if rng.startswith("A2:A") and rule["condition_type"] == "TEXT_EQ"
+    }
+    assert pool_rules == {state: fmt for state, fmt in POOL_TYPE_CHIPS.items()}
 
 
 class SheetsLikeColumnClient(FakeEdgeClient):

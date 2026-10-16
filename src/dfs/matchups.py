@@ -22,8 +22,9 @@ position; the opponent's EPA allowed (pass for QB/WR/TE, rush for RB); the team'
 renormalise. **DST** (the defense, facing offense X): X's adjusted DST points allowed, plus X's implied
 total inverted.
 
-The output keeps the top `MATCHUP_TOP_N` and bottom `MATCHUP_BOTTOM_N` per position, each with its two
-biggest reasons in words and the team's top two players at the position.
+The output lists EVERY scored offense per position, best first: the top `MATCHUP_TOP_N` are `top` (Soft), the
+bottom `MATCHUP_BOTTOM_N` are `bottom` (Tough) and the rest are `middle`, each with its two biggest reasons in
+words and the team's top two players at the position. Only `top` and `bottom` feed Model Check's matchup rows.
 """
 
 from __future__ import annotations
@@ -45,7 +46,7 @@ PROE_SIGN = {"QB": 1.0, "WR": 1.0, "TE": 1.0, "RB": -1.0}
 EPA_COLUMN = {"QB": "DefEPA/Pass", "WR": "DefEPA/Pass", "TE": "DefEPA/Pass", "RB": "DefEPA/Rush"}
 FEATURES_DST = ("allowed", "implied")
 
-GROUP_TOP, GROUP_BOTTOM = "top", "bottom"
+GROUP_TOP, GROUP_MIDDLE, GROUP_BOTTOM = "top", "middle", "bottom"
 MATCHUP_COLUMNS = [
     "Position",
     "Team",
@@ -251,20 +252,22 @@ def top_reasons(row: pd.Series, *, bottom: bool, k: int = 2) -> str:
 def select_groups(
     scores: pd.DataFrame, *, top: int = MATCHUP_TOP_N, bottom: int = MATCHUP_BOTTOM_N
 ) -> pd.DataFrame:
-    """Per position, the best `top` and worst `bottom` rows (`Group`, `Reasons` filled), in order; rows with
-    no score are left out. A position with fewer teams than `top + bottom` never lists a team twice."""
+    """Per position, every scored team in score order: the best `top` are `top`, the worst `bottom` are
+    `bottom`, the rest `middle` (`Group`, `Reasons` filled); rows with no score are left out. A position with
+    fewer teams than `top + bottom` never lists a team twice."""
     pieces = []
     for _position, part in scores.dropna(subset=["Score"]).groupby("Position", sort=False):
         part = part.sort_values("Score", ascending=False)
         n = len(part)
-        top_rows = part.head(top).assign(Group=GROUP_TOP)
-        bottom_rows = part.tail(min(bottom, max(n - top, 0))).assign(Group=GROUP_BOTTOM)
-        for group in (top_rows, bottom_rows):
-            group = group.copy()
-            group["Reasons"] = [
-                top_reasons(r, bottom=(r["Group"] == GROUP_BOTTOM)) for _, r in group.iterrows()
-            ]
-            pieces.append(group)
+        n_bottom = min(bottom, max(n - top, 0))
+        groups = (
+            [GROUP_TOP] * min(top, n)
+            + [GROUP_MIDDLE] * max(n - top - n_bottom, 0)
+            + [GROUP_BOTTOM] * n_bottom
+        )
+        part = part.assign(Group=groups)
+        part["Reasons"] = [top_reasons(r, bottom=(r["Group"] == GROUP_BOTTOM)) for _, r in part.iterrows()]
+        pieces.append(part)
     if not pieces:
         return pd.DataFrame(columns=[*MATCHUP_COLUMNS])
     out = pd.concat(pieces, ignore_index=True)

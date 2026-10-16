@@ -1595,7 +1595,7 @@ current "all games before the slate, blended with last season" rule stands.
   across the teams on the slate, of the opponent's adjusted points allowed, `OppEPA` (pass for QB/WR/TE, rush for RB),
   team implied total, pace (faster is better) and PROE (+ for QB/WR/TE, - for RB). **DST**: the opponent offense's
   adjusted DST points allowed plus the opponent's implied total, inverted. A missing input drops out and the weights
-  renormalise. Output: top `MATCHUP_TOP_N` = 8 and bottom `MATCHUP_BOTTOM_N` = 4 per position, each with its two biggest
+  renormalise. Output: every scored offense per position in score order, the top `MATCHUP_TOP_N` = 8 as `top` (Soft), the bottom `MATCHUP_BOTTOM_N` = 4 as `bottom` (Tough) and the rest as `middle` (only top and bottom feed Model Check), each with its two biggest
   reasons in words and the team's top 2 players by `CalPts`.
 
 ### No lookahead, everywhere

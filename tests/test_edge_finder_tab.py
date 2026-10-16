@@ -891,6 +891,12 @@ def _section_rows(layout, title):
     return [r for r in layout.player_rows if start < r < (later[0] if later else 10**6)]
 
 
+def _unfolded(layout, rows):
+    """The rows of `rows` not inside a collapsed "▸ N more" group (what shows before anything is expanded)."""
+    folds = [g for g in layout.groups if g.depth == 2]
+    return [r for r in rows if not any(g.first <= r <= g.last for g in folds)]
+
+
 def test_lev_is_boom_rank_minus_own_rank_within_position_and_blank_until_ownership_is_out():
     rows = [_owned(i, boom=10.0 + i, own=0.30 - i / 100) for i in range(1, 5)]  # boom up, ownership down
     rows += [_owned(i, boom=10.0 + i, own=0.05 + i / 100, pos="RB") for i in range(11, 15)]  # both up
@@ -914,8 +920,10 @@ def test_gpp_leverage_needs_lev_at_least_25_and_a_top_half_boom():
 def test_the_leverage_section_lists_the_top_five_per_position_by_lev_among_top_half_booms():
     rows = [_owned(i, boom=10.0 + i, own=0.40 - i / 50) for i in range(1, 13)]
     layout = eft.build_layout(_inputs(_edge(rows)))
-    shown = _section_rows(layout, "LEVERAGE PLAYS")
+    everyone = _section_rows(layout, "LEVERAGE PLAYS")
+    shown = _unfolded(layout, everyone)
     assert len(shown) == eft.LEVERAGE_ROWS_PER_POSITION == 5
+    assert len(everyone) > len(shown)  # the rest are in the "more" group, not dropped
     names = [layout.rows[r - 1][NAME] for r in shown]
     levs = [layout.rows[r - 1][S0 + 3] for r in shown]
     assert levs == sorted(levs, reverse=True) and names[0] == "WR12"  # best boom, lowest owned
@@ -931,8 +939,10 @@ def test_chalk_lists_the_three_highest_owned_per_position_with_an_eat_or_fade_ve
     busts = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
     rows = [_owned(i, boom=15.0, own=0.10 + i / 100, **{"Bust%": busts[i - 1]}) for i in range(1, 7)]
     layout = eft.build_layout(_inputs(_edge(rows)))
-    shown = _section_rows(layout, "CHALK TO FADE OR EAT")
+    everyone = _section_rows(layout, "CHALK TO FADE OR EAT")
+    shown = _unfolded(layout, everyone)
     assert [layout.rows[r - 1][NAME] for r in shown] == ["WR6", "WR5", "WR4"]  # the three highest-owned
+    assert len(everyone) == 6  # the other three sit in the "more" group
     verbs = {layout.rows[r - 1][NAME]: layout.rows[r - 1][_col(eft.DO_COL)] for r in shown}
     assert verbs == {"WR6": "Chalk: fade candidate", "WR5": "Chalk: fade candidate", "WR4": "Chalk"}
     assert eft.chalk_verb(0.2) == "Chalk: eat" and eft.chalk_verb(1 / 3) == "Chalk: eat"

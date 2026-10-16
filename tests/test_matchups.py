@@ -186,6 +186,9 @@ def test_top_eight_and_bottom_four_split_a_full_slate():
     qb = groups[groups["Position"] == "QB"]
     assert (qb["Group"] == "top").sum() == matchups.MATCHUP_TOP_N
     assert (qb["Group"] == "bottom").sum() == matchups.MATCHUP_BOTTOM_N
+    assert (qb["Group"] == "middle").sum() == 16 - matchups.MATCHUP_TOP_N - matchups.MATCHUP_BOTTOM_N
+    assert list(qb["Group"]) == sorted(qb["Group"], key=["top", "middle", "bottom"].index)  # in score order
+    assert qb["Team"].nunique() == 16  # every team on the slate is listed, both sides of every game
     assert qb.iloc[0]["Rank"] == 1 and qb.iloc[-1]["Rank"] == 16
 
 

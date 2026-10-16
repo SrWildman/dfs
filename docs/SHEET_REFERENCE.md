@@ -658,6 +658,8 @@ downgrades a `Cash add`, so that player is left out). The same two lists (ids in
 repeats the section's column header** in the same dark bar, smaller (`Layout.repeat_header_rows`): the labels are never more than about 12 rows up. (The overflow groups and the
 team groups do not repeat it.)
 
+**Every capped list expands.** Wherever a list shows only its first rows (Leverage 5, Chalk 3, Punt 5, Disagreements 2 per direction, Beneficiaries 12 confirmed / 6 questionable, each R6 signal 8, each context token 6, Usage trends 8), the rest sit under a collapsed "▸ N more" row (click + to show; `_Builder.folded`, up to 40 per block), as the position blocks always did. Disagreements' fold holds only gaps of at least `GAP_WORTH_EXPLAINING` (0.5 pts) in the stated direction.
+
 **Consider (soft yellow).** A player whose Do is `Cash add`, `GPP add` or `GPP leverage` and who is not in your pool has a soft-yellow Name, on the Edge Finder (from the row's own `Pool` and
 `Do`), the Board's Chalk map and Model likes lists, and EdgeRaw (from the hidden lists above, read through `INDIRECT`: `sheet_consider.py`). It goes away the moment he is pooled; the lists
 themselves refresh with each sync. Player Pool lists only pooled players, so nothing is ever yellow there. The `Name` header notes say so.
@@ -683,7 +685,7 @@ upside) and a second line, "what it is · what to do".
 - **Usage trends** (context, no chips): per position, the players whose last-3-games usage moved beyond R6's measured band against the 6
   games before (arrow thresholds in `models/research/trend_bands.json`; none for a player with fewer than 9 earlier games), one row per
   player (his biggest move; the others are named in Why), the first `TREND_ROWS_PER_POSITION` (8) shown and up to 40 in all, the rest in a collapsed "▸ N more" group like the other sections. Do: `Watch`. Last 3 / Earlier / Change are numbers, right-aligned and formatted by the row's metric (shares as `43%` with the change in points, `+9 pts`; WOPR to two places; per-game rows to one).
-- **Matchups (context)**: a row per team reading `Matchup | Pos | Grade | Players` (`Soft` top 8 / `Tough` bottom 4; the top 3 players by `CalPts` are named in one left-aligned cell that overflows right), the reasons and score in
+- **Matchups (context)**: a row per team reading `Matchup | Pos | Grade | Players` (every offense on the slate, softest first: `Soft` top 8, `Middle` the rest, `Tough` bottom 4; the top 3 players by `CalPts` are named in one left-aligned cell that overflows right), the reasons and score in
   Why (the full text is the note). The team's players sit in a collapsed row group under it, which opens on its own small header over the standard player columns (`Pool | Name | Pos | Team | Salary | Own% | CalPts | Hit3x% | Boom%`), so their Salary, Own% and numbers carry the sheet-wide formats. Feeds nothing.
 - **Context signals**: `FADE↓` (TE only; its `xFP/G` and `DK/G L3` are left uncoloured because a high DK/G against xFP/G is the warning there), `USAGE↑ USAGE↓` (RB carry share only), muted, unproven; then **R6 usage signals**, each of the 12
   as its own sub-block (who is flagged, the measured effect, the evidence tier). Every player row's Why also names the R6 signals behind his
