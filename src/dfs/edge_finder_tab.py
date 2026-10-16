@@ -211,7 +211,11 @@ SIGNAL_COLUMNS = ["Token", "xFP/G", "DK/G L3"]
 R6_SIGNAL_COLUMNS = ["Read", "CalPts", "ProjPts"]
 
 MEANINGS = {
-    "TOP PLAYS": "The model's best plays this week. Pool them here; the detail is below.",
+    "TOP PLAYS": (
+        "The model's best plays this week. Pool them here; the detail is below.  ·  Do: pool the 'Cash add', "
+        "'GPP add' and 'GPP leverage' rows. A grey row is a 'Next up' (filler, not a pick) or thin evidence "
+        "(under 3 games, or a '?' Proj chip)."
+    ),
     "CASH CORE": (
         "Players most likely to score 3× their salary, the pace that usually cashes.  ·  Do: pool the "
         "'Cash add' rows for cash lineups; 'Cash option' rows are the next tier."

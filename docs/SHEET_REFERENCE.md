@@ -651,7 +651,7 @@ final `dfs sync --live` about 90 minutes before kickoff, with the first kickoff.
 **Top plays and the repeated headers (Week 6).** The first section is **Top plays**, the model's best plays at a glance, stacked (Cash block, then
 GPP block; two blocks side by side would need about 1,700 px because every column below is shared with them): the Cash block lists, per position (QB 3, RB 5, WR 6, TE 3, DST 3 by `Hit3x%`), the rows whose Do is
 `Cash add` first (the model's own picks: top 3 `Hit3x%` of a position with `Bust%` under its median), then **greyed `Next up` rows**, the best `Hit3x%` left in the Cash core, to fill the list (a `Next up` is never a pick
-and never gets the Consider highlight), the GPP
+and never gets the Consider highlight; a grey row is either a `Next up` or a thin-evidence player, and the section's "What it is" line and the Name header note say so), the GPP
 block the `GPP add` and `GPP leverage` rows (QB 3, RB 4, WR 6, TE 3, DST 3 by `Boom%`, with `Lev`). It uses the Do exactly as the detail rows show it (a `Proj ▼` chip
 downgrades a `Cash add`, so that player is left out). The same two lists (ids in rank order, Cash then GPP) sit in hidden columns `Q` and `R`
 (`edge_finder_tab.FAVOURITE_*`) for the Board's list and the Consider highlight. Sheets freezes rows only at the top of a tab, so **every position block after a section's first

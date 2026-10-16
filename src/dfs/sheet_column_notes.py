@@ -502,10 +502,14 @@ MODEL_CHECK_NOTES = {
 
 # The Edge Finder's own headers (the player tabs' dicts cover Pool, Name, Pos, Team, Salary, Own%, CalPts,
 # Hit3x%, Boom%, Bust%, Floor, CeilM, ValAdj, ProjPts and Edge there too).
+GREY_NOTE = (
+    "Grey row = 'Next up' (filler that rounds out Top plays, not a model pick) or thin evidence "
+    "(under 3 games, or a Proj chip marked '?'); the Do and the Why say which."
+)
 NAME_WITH_CONSIDER = f"{CORE_NOTES['Name']} {CONSIDER_NOTE}"
 
 EDGE_FINDER_TAB_NOTES = {
-    "Name": NAME_WITH_CONSIDER,
+    "Name": f"{NAME_WITH_CONSIDER} {GREY_NOTE}",
     "Do": (
         "The verb: what to do with him. 'Cash add', 'GPP add' and 'GPP leverage' are the pool candidates; "
         "'Next up' (greyed, in Top plays' Cash block) only fills the list, it is not a model pick; "
