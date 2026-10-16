@@ -14,7 +14,9 @@ roster slots (FLEX takes an RB, WR or TE), no DST against his own QB and at most
 (the simulator's chance of beating the typical cash line), each differing from the builds before it by at
 least `MIN_DIFFERENCE` players.
 
-**GPP builds** (default 5). Every candidate holds a stack: the QB, at least two of his pass catchers (WR /
+**GPP builds** (every QB stack, ideally `BUILDS_PER_QB` = 2 each; `--gpp N` asks for the N best
+instead; any pool player may be used, but never a lineup of only Cash-marked ones). Every candidate holds
+a stack: the QB, at least two of his pass catchers (WR /
 TE) and at least one player from the opponent (the bring-back). A branch-and-bound that cannot see a stack
 would spend its whole budget on lineups without one, so each QB is searched on his own (`stacked_lineups`),
 cutting every branch that can no longer reach a stack.
@@ -35,7 +37,7 @@ among tied lineups can then not depend on iteration order or on how the machine 
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -55,7 +57,7 @@ from dfs.sim.simulate import PlayerSpec
 from dfs.sim_inputs import N_SIMS, SEED, lineup_from_names
 
 DEFAULT_CASH_BUILDS = 3
-DEFAULT_GPP_BUILDS = 5
+BUILDS_PER_QB = 2  # GPP builds: every QB with a stack gets one build, and ideally this many
 MIN_DIFFERENCE = 3  # each build differs from every earlier one by at least this many players
 MAX_EXPOSURE = 0.6  # no player in more than this share of the GPP builds
 CASH_TOP_K = 300  # how many of the best cash lineups by projection are simulated
@@ -65,7 +67,8 @@ CASH_SHARE_OF_TIME = 0.4  # the cash search may use this share of it; GPP gets t
 PASS_CATCHERS = ("WR", "TE")
 
 CASH_TAGS = frozenset({"Cash", "Both"})
-GPP_TAGS = frozenset({"GPP", "Both"})
+GPP_TAGS = frozenset({"Cash", "GPP", "Both"})  # a GPP build may use anyone in the pool, whatever the mark
+GPP_MIN_NOT_CASH_ONLY = 1  # ...but not a lineup of nothing but Cash-marked players (small-field contests)
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,16 @@ def is_stacked(players: Sequence[SwapPlayer]) -> bool:
         return False
     mates = sum(1 for p in players if p.team == qb.team and p.position in PASS_CATCHERS)
     return mates >= 2 and any(p.team == qb.opp and p.position != "DST" for p in players)
+
+
+def not_all_cash(tags: dict[str, str]):
+    """The GPP test on a finished lineup: at least `GPP_MIN_NOT_CASH_ONLY` of its players are marked GPP or
+    Both, so a GPP build is never nine Cash-marked players."""
+
+    def ok(players: Sequence[SwapPlayer]) -> bool:
+        return sum(1 for p in players if tags.get(p.name) != "Cash") >= GPP_MIN_NOT_CASH_ONLY
+
+    return ok
 
 
 def stack_name(players: Sequence[SwapPlayer]) -> str:
@@ -197,9 +210,10 @@ def stacked_lineups(
     k: int | None = None,
     per_qb: int = PER_QB,
     deadline: float | None = None,
+    leaf_ok: Callable[[Sequence[SwapPlayer]], bool] | None = None,
 ) -> tuple[list[list[SwapPlayer]], bool]:
     """The best stacked lineups from `pool` by projection, best first: `per_qb` for each quarterback (all of
-    them, or the best `k` of those when `k` is given).
+    them, or the best `k` of those when `k` is given). `leaf_ok` is an extra test a finished lineup must pass.
 
     One search per QB: he is fixed in the QB slot and the other eight slots are searched exactly for the best
     `per_qb` lineups that hold two of his pass catchers and one of his opponent's players (`is_stacked`),
@@ -219,7 +233,12 @@ def stacked_lineups(
         )
         rest = [p for p in pool if p.name != qb.name and p.position != "QB"]
         assignments, done = top_lineups(
-            state, rest, k=per_qb, leaf_filter=is_stacked, feasible=_stack_feasible(qb), time_limit=share
+            state,
+            rest,
+            k=per_qb,
+            leaf_filter=lambda ps: is_stacked(ps) and (leaf_ok is None or leaf_ok(ps)),
+            feasible=_stack_feasible(qb),
+            time_limit=share,
         )
         complete = complete and done
         for assignment in assignments:
@@ -419,6 +438,53 @@ def choose(
     return [ordered[i] for i in found] if found is not None else chosen
 
 
+def choose_per_qb(
+    scored: list[Scored],
+    *,
+    key,  # noqa: ANN001 - Scored -> sort key, best first
+    min_difference: int = MIN_DIFFERENCE,
+    share: float = MAX_EXPOSURE,
+) -> list[Scored]:
+    """GPP builds that cover every QB stack: one round gives each quarterback his best lineup, a second round
+    a second one (`BUILDS_PER_QB`), quarterbacks in order of their best lineup, each build differing from the
+    earlier ones by `min_difference` players and (from the second round on) no player past the exposure cap:
+    every QB gets his first build whatever the cap says. The cap is a share of the
+    number of builds, which is only known at the end, so it is re-run until the cap fits the builds it made.
+    Returned best first by `key`."""
+
+    def ranked(s: Scored) -> tuple:
+        k = key(s)
+        return (*(k if isinstance(k, tuple) else (k,)), lineup_key(s))
+
+    by_qb: dict[str, list[Scored]] = {}
+    for candidate in sorted(scored, key=ranked):
+        qb = next((p.name for p in candidate.players if p.position == "QB"), None)
+        if qb is not None:
+            by_qb.setdefault(qb, []).append(candidate)
+    order = sorted(by_qb, key=lambda qb: ranked(by_qb[qb][0]))
+
+    def run(cap: int) -> list[Scored]:
+        chosen: list[Scored] = []
+        uses: dict[str, int] = {}
+        for round_ in range(BUILDS_PER_QB):
+            limit = None if round_ == 0 else cap  # a QB's first build is never given up to the exposure cap
+            for qb in order:
+                for candidate in by_qb[qb]:
+                    if candidate not in chosen and _fits(candidate, chosen, uses, min_difference, limit):
+                        chosen.append(candidate)
+                        for p in candidate.players:
+                            uses[p.name] = uses.get(p.name, 0) + 1
+                        break
+        return chosen
+
+    cap = exposure_cap(BUILDS_PER_QB * len(order), share)
+    chosen = run(cap)
+    while chosen and exposure_cap(len(chosen), share) < cap:
+        cap = exposure_cap(len(chosen), share)
+        chosen = run(cap)
+    return sorted(chosen, key=ranked)
+
+
 def suggest_builds(
     edge: pd.DataFrame,
     tags: dict[str, str],
@@ -430,7 +496,7 @@ def suggest_builds(
     gpp_target: float,
     metric: str,
     cash_builds: int = DEFAULT_CASH_BUILDS,
-    gpp_builds: int = DEFAULT_GPP_BUILDS,
+    gpp_builds: int | None = None,  # None: every QB stack, `BUILDS_PER_QB` builds each; 0: no GPP builds
     n_sims: int = N_SIMS,
     seed: int = SEED,
     time_limit: float = TIME_LIMIT_SECONDS,
@@ -449,7 +515,7 @@ def suggest_builds(
     number = 1
 
     cash_pool = pool_for(edge, tags, CASH_TAGS, now=now, metric=metric) if cash_builds else []
-    gpp_pool = pool_for(edge, tags, GPP_TAGS, now=now, metric=metric) if gpp_builds else []
+    gpp_pool = pool_for(edge, tags, GPP_TAGS, now=now, metric=metric) if gpp_builds != 0 else []
     report.candidates = {"cash": len(cash_pool), "gpp": len(gpp_pool)}
 
     if cash_builds:
@@ -468,13 +534,16 @@ def suggest_builds(
                 f"{cash_builds} legal lineups that differ by {MIN_DIFFERENCE}+ players."
             )
 
-    if gpp_builds:
-        lineups, done = stacked_lineups(gpp_pool, cap=cap, deadline=deadline)
+    if gpp_builds != 0:
+        lineups, done = stacked_lineups(gpp_pool, cap=cap, deadline=deadline, leaf_ok=not_all_cash(tags))
         report.complete = report.complete and done
         scored = score(
             lineups, specs, kickoff, cash_line=cash_line, gpp_target=gpp_target, n_sims=n_sims, seed=seed
         )
-        picks = choose(scored, gpp_builds, key=gpp_key, max_per_player=exposure_cap(gpp_builds))
+        if gpp_builds is None:
+            picks = choose_per_qb(scored, key=gpp_key)
+        else:
+            picks = choose(scored, gpp_builds, key=gpp_key, max_per_player=exposure_cap(gpp_builds))
         for pick in picks:
             name = stack_name(pick.players)
             report.builds.append(_build(number, "gpp", f"GPP build {number}  ·  {name}", pick, stack=name))
@@ -482,14 +551,27 @@ def suggest_builds(
         if not lineups:
             report.notes.append(
                 "No stacked GPP lineup fits: a stack needs a QB, two of his pass catchers and one of his "
-                f"opponent's players from your GPP pool ({len(gpp_pool)} players)."
+                f"opponent's players from your pool ({len(gpp_pool)} players)."
             )
-        elif len(picks) < gpp_builds:
-            report.notes.append(
-                f"Only {len(picks)} GPP build(s): {len(lineups)} stacked lineups, but not {gpp_builds} that "
-                f"differ by {MIN_DIFFERENCE}+ players with no player in more than "
-                f"{exposure_cap(gpp_builds)} builds."
-            )
+        else:
+            stacked_qbs = {p.name for s in scored for p in s.players if p.position == "QB"}
+            built = {p.name for pick in picks for p in pick.players if p.position == "QB"}
+            counts = {qb: sum(1 for pick in picks if any(p.name == qb for p in pick.players)) for qb in built}
+            missing = sorted(stacked_qbs - built)
+            thin = sorted(qb for qb, n in counts.items() if n < BUILDS_PER_QB)
+            if gpp_builds is None and missing:
+                report.notes.append(
+                    f"No GPP build for {', '.join(missing)}: every legal lineup with that stack sat within "
+                    f"{MIN_DIFFERENCE - 1} players of a better build, or over the exposure cap."
+                )
+            elif gpp_builds is None and thin:
+                report.notes.append("Only one GPP build for " + ", ".join(thin) + ".")
+            elif gpp_builds is not None and len(picks) < gpp_builds:
+                report.notes.append(
+                    f"Only {len(picks)} GPP build(s): {len(lineups)} stacked lineups, but not {gpp_builds} "
+                    f"that differ by {MIN_DIFFERENCE}+ players with no player in more than "
+                    f"{exposure_cap(gpp_builds)} builds."
+                )
 
     report.seconds = time.monotonic() - started
     if not report.complete:

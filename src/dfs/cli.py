@@ -63,7 +63,7 @@ from dfs.launcher import (
     suggested_commands,
 )
 from dfs.line_movement import LineMovementError, diff_odds
-from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, DEFAULT_GPP_BUILDS, TIME_LIMIT_SECONDS, suggest_builds
+from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, TIME_LIMIT_SECONDS, suggest_builds
 from dfs.lineups import (
     build_salary_lookup,
     export_csv,
@@ -3039,8 +3039,12 @@ def lineups_suggest(
     cash: int = typer.Option(
         DEFAULT_CASH_BUILDS, "--cash", min=0, max=20, help="How many cash builds (0 for none)."
     ),
-    gpp: int = typer.Option(
-        DEFAULT_GPP_BUILDS, "--gpp", min=0, max=20, help="How many GPP builds (0 for none)."
+    gpp: int | None = typer.Option(
+        None,
+        "--gpp",
+        min=0,
+        max=60,
+        help="How many GPP builds (0 for none). Left off, every QB stack gets a build and ideally two.",
     ),
     no_write: bool = typer.Option(
         False, "--no-write", help="Print the builds here and leave the Suggested tab alone."
@@ -3057,13 +3061,16 @@ def lineups_suggest(
     Suggested tab.
 
     Cash builds (default 3) have the best chance of beating the typical cash
-    line. GPP builds (default 5) each hold a stack (a QB, two of his pass
-    catchers and a bring-back) and have the best chance of reaching the GPP
-    target. Players come only from your pool (Cash and Both for cash builds,
-    GPP and Both for GPP builds), never OUT or IR or already kicked off, and
-    every build follows the salary cap, the roster slots, no DST against your
-    own QB and one RB per game. Each build differs from the earlier ones by at
-    least 3 players, and the FLEX holds the latest kickoff.
+    line. GPP builds each hold a stack (a QB, two of his pass catchers and a
+    bring-back): left to itself, every QB stack in your pool gets a build and
+    ideally two (`--gpp N` asks for the N best builds instead), ranked by the
+    chance of reaching the GPP target. Cash builds use the Cash and Both
+    players of your pool; GPP builds may use anyone in it, but never a lineup
+    of nothing but Cash-marked players. Nobody OUT or IR or already kicked
+    off, and every build follows the salary cap, the roster slots, no DST
+    against your own QB and one RB per game. Each build differs from the
+    earlier ones by at least 3 players, and FLEX (any RB, WR or TE) holds the
+    latest kickoff.
 
     Your own lineups are never touched: copy a build in with Lineup Tools >
     Copy build to Lineups. Reads the last sync's data; run `dfs sync` (or
@@ -3076,7 +3083,7 @@ def _run_suggest(
     cfg: Config,
     *,
     cash: int,
-    gpp: int,
+    gpp: int | None,
     write: bool,
     now: datetime,
     client: SheetsClient | None = None,

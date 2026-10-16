@@ -96,7 +96,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | Option | What it does |
 |---|---|
 | `--cash INT RANGE` | How many cash builds (0 for none). Default: `3`. |
-| `--gpp INT RANGE` | How many GPP builds (0 for none). Default: `5`. |
+| `--gpp INT RANGE` | How many GPP builds (0 for none). Left off, every QB stack gets a build and ideally two. |
 | `--no-write` | Print the builds here and leave the Suggested tab alone. |
 | `--seconds FLOAT RANGE` | How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. Default: `60.0`. |
 

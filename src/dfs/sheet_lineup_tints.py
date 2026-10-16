@@ -93,10 +93,18 @@ def tint_formulas(
 
 
 def apply_lineup_tints(
-    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]]
+    client: SheetsClient,
+    tab: str,
+    *,
+    header_row: int,
+    name_blocks: list[tuple[int, int]],
+    header_names: dict[str, str] | None = None,
 ) -> str:
     """Adds the three tint rules to every lineup block's identity cells
     (columns Name..Team). Columns found by header text, never by letter.
+    `header_names` maps a role (`Name`, `Pos.`, `Team`, `Opp.`, `GameID`) to the header the tab uses for it
+    when that differs from Lineups' (the Suggested tab reads its Slot as the position: only QB and DST matter,
+    and FLEX is never either).
     Not idempotent by itself -- called from the polish run, which clears the
     tab's conditional formats first."""
     if not client.tab_exists(tab):
@@ -104,10 +112,11 @@ def apply_lineup_tints(
     header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
     header = header_rows[0] if header_rows else []
     needed = ["Name", "Pos.", "Team", "Opp.", "GameID"]
-    missing = [n for n in needed if n not in header]
+    titles = {n: (header_names or {}).get(n, n) for n in needed}
+    missing = [titles[n] for n in needed if titles[n] not in header]
     if missing:
         return f"{tab}: column(s) {missing} not found -- correlation tints skipped"
-    cols = {n: column_letter(header.index(n)) for n in needed}
+    cols = {n: column_letter(header.index(titles[n])) for n in needed}
     first, last = cols["Name"], cols["Team"]
 
     specs: list[dict] = []

@@ -284,8 +284,10 @@ _TAB_ROWS: list[tuple[str, str]] = [
     (
         "Suggested",
         "Complete lineups built from your pool by dfs lineups suggest: 3 cash builds, ranked by Cash %, "
-        "and 5 GPP builds, each with a stack and ranked by the chance of reaching the GPP target. Every "
-        "build shows salary, CalPts, kickoff and ownership, with the FLEX on the latest kickoff. Copy one "
+        "and GPP builds, a stack for every QB and two each when they fit, ranked by the chance of reaching "
+        "the GPP target (GPP builds may use anyone in your pool, never all Cash-marked). Every "
+        "build shows salary, CalPts, kickoff and total ownership, with the FLEX on the latest kickoff. "
+        "Copy one "
         "into the first empty lineup with Lineup Tools, Copy build to Lineups; nothing here changes "
         "Lineups on its own.",
     ),

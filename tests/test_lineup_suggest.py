@@ -4,6 +4,7 @@ the time budget, on a synthetic slate (no sheet, no network)."""
 import time
 from datetime import UTC, datetime
 from itertools import combinations
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -105,10 +106,28 @@ def report(edge):
     return run(edge)
 
 
-def test_the_defaults_are_three_cash_builds_and_five_gpp_builds(report):
-    assert [b.kind for b in report.builds] == ["cash"] * 3 + ["gpp"] * 5
-    assert [b.number for b in report.builds] == list(range(1, 9))
-    assert report.complete and report.notes == []
+def _qb(build):
+    return next(p.name for p in build.players if p.position == "QB")
+
+
+def test_the_defaults_are_three_cash_builds_and_a_gpp_build_for_every_qb_stack_two_when_they_fit(
+    report, edge
+):
+    kinds = [b.kind for b in report.builds]
+    assert kinds[:3] == ["cash"] * 3 and set(kinds[3:]) == {"gpp"}
+    assert [b.number for b in report.builds] == list(range(1, len(report.builds) + 1))
+    quarterbacks = {
+        p.name
+        for p in ls.pool_for(edge, tags_for(edge), ls.GPP_TAGS, now=NOW, metric="CalPts")
+        if p.position == "QB"
+    }
+    per_qb = {}
+    for build in (b for b in report.builds if b.kind == "gpp"):
+        per_qb[_qb(build)] = per_qb.get(_qb(build), 0) + 1
+    assert set(per_qb) == quarterbacks  # every QB stack has a build...
+    assert all(1 <= n <= ls.BUILDS_PER_QB for n in per_qb.values())  # ...and at most two each
+    assert any(n == ls.BUILDS_PER_QB for n in per_qb.values())
+    assert report.complete
 
 
 def test_every_build_is_a_legal_lineup(report):
@@ -132,8 +151,10 @@ def test_every_gpp_build_holds_a_stack_and_its_title_names_it(report):
         assert build.stack == f"{qb.team} stack + {qb.opp} bring-back" and build.stack in build.title
 
 
-def test_no_player_is_in_more_than_sixty_percent_of_the_gpp_builds(report):
-    gpp = [b for b in report.builds if b.kind == "gpp"]
+def test_no_player_is_in_more_than_sixty_percent_of_the_gpp_builds(edge):
+    # `--gpp N` (the N best): the exposure cap binds every build. The default covers every QB first, and a
+    # QB's first build is never given up to the cap (only its second round respects it).
+    gpp = run(edge, cash_builds=0, gpp_builds=5).builds
     cap = ls.exposure_cap(len(gpp))
     assert cap == 3  # 60% of five builds
     uses: dict[str, int] = {}
@@ -192,6 +213,7 @@ def test_only_pool_players_with_the_right_tag_who_are_playing_and_have_not_kicke
     assert frame.loc[started, "Name"] in cash and frame.loc[started, "Name"] not in later  # his game started
     assert frame.loc[2, "Name"] not in cash and frame.loc[2, "Name"] in gpp  # GPP-only: not a cash candidate
     assert frame.loc[3, "Name"] in cash and frame.loc[3, "Name"] in gpp  # Both is in each
+    assert frame.loc[started, "Name"] in gpp  # a Cash-marked player is a GPP candidate too: any mark will do
     assert ls.pool_for(frame, {}, ls.CASH_TAGS, now=NOW, metric="CalPts") == []  # an empty pool
 
 
@@ -386,14 +408,11 @@ def test_stacked_lineups_are_all_stacked_legal_and_best_first(edge):
 # --- when it cannot be done --------------------------------------------------
 
 
-def test_a_pool_with_no_possible_stack_says_so_and_still_builds_the_cash_lineups(edge):
-    # only one QB's team and nobody from his opponent in the GPP pool
+def test_a_pool_with_no_possible_stack_says_so_and_builds_no_gpp_lineup(edge):
+    # only one QB's team and nobody from his opponent in the pool (a GPP build may use any mark)
     qb = edge[edge["Position"] == "QB"].iloc[0]
-    tags = {name: "Cash" for name in edge["Name"]} | {
-        n: "GPP" for n in edge.loc[(edge["Team"] == qb["Team"]) & (edge["Position"] != "DST"), "Name"]
-    }
+    tags = {n: "GPP" for n in edge.loc[(edge["Team"] == qb["Team"]) & (edge["Position"] != "DST"), "Name"]}
     report = run(edge, tags)
-    assert [b.kind for b in report.builds].count("cash") == 3
     assert not [b for b in report.builds if b.kind == "gpp"]
     assert any("No stacked GPP lineup fits" in n for n in report.notes)
 
@@ -424,3 +443,13 @@ def test_asking_for_no_cash_or_no_gpp_builds_skips_that_search(edge):
     ]
     only_cash = run(edge, cash_builds=2, gpp_builds=0)
     assert [b.kind for b in only_cash.builds] == ["cash", "cash"]
+
+
+def test_a_gpp_build_is_never_a_lineup_of_nothing_but_cash_marked_players():
+    ok = ls.not_all_cash({"a": "Cash", "b": "Cash", "c": "GPP", "d": "Both"})
+
+    def players(*names):
+        return [SimpleNamespace(name=n) for n in names]
+
+    assert not ok(players("a", "b"))  # all Cash-marked
+    assert ok(players("a", "c")) and ok(players("a", "d"))  # one GPP or Both player is enough

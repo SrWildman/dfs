@@ -115,7 +115,7 @@ are listed here so they are findable, not because you need to read them. Run `df
 | `dfs week new "<url>"` | starting a new week: it checks the new sheet, carries your bankroll and Results forward, and runs a full sync. |
 | `dfs sync` [`--live`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed. |
 | `dfs export -o <file>` | your lineups are built and paired to DK entries, ready to upload. |
-| `dfs lineups suggest` | building lineups: complete builds from your pool on the Suggested tab (3 cash, 5 GPP with a stack; `--cash N`, `--gpp N`, `--no-write`). Copy one in with Lineup Tools > Copy build to Lineups. |
+| `dfs lineups suggest` | building lineups: complete builds from your pool on the Suggested tab (3 cash, and GPP builds with a stack for every QB, two each when they fit; `--cash N`, `--gpp N`, `--seconds N`, `--no-write`). Copy one in with Lineup Tools > Copy build to Lineups. |
 | `dfs lineups late-swap` | gameday: which rostered players are still swappable, and the best swaps for them within the salary cap, with each swap's change in P(cash) / P(GPP) (`--goal cash|gpp`, `--metric CalPts|ProjPts|AggPts`, default `[projection] default` = CalPts, `--all-players`). |
 | `dfs week close` | the week is over: reconciles Cash/GPP into Bankroll and Results (newest history export in Downloads, or `--csv <file>`), keeps your DraftKings history and standings downloads, fills a blank Cash Line, rebuilds `Contests`, then scores the week's projections into `Model Check`. |
 | `dfs contests update` | just the contest part of the close: keep the downloads, learn from the standings, rebuild `Contests` (`--sheet-id`, `--no-sheet`). |

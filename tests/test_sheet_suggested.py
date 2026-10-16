@@ -46,6 +46,7 @@ def _edge(builds):
             "Name": names,
             "GameStart": ["2026-10-18T13:00:00Z"] * len(names),
             "Own%": [0.123 if i % 2 else 0.0 for i in range(len(names))],
+            "GameID": [f"G{i % 3}" for i in range(len(names))],
         }
     )
 
@@ -90,13 +91,17 @@ def test_each_build_is_a_bar_a_header_nine_player_rows_and_a_total_row_then_a_bl
         "Big night",
         "Cash %",
         "190+ %",
+        "GameID",  # the hidden helper the stack tints group by
     ]
     players = layout.player_rows[:9]
+    assert [layout.rows[r - 1][12] for r in players] == [f"G{i % 3}" for i in range(9)]
     assert players == list(range(header + 1, header + 10))
     assert [layout.rows[r - 1][0] for r in players] == list(ROSTER_SLOTS)
     total = layout.total_rows[0]
     assert total == header + 10 and layout.rows[total - 1][0] == "Total"
     assert layout.rows[total - 1][4] == cash.salary and layout.rows[total - 1][5] == cash.projection
+    own = [layout.rows[r - 1][7] for r in players]
+    assert layout.rows[total - 1][7] == round(sum(o for o in own if o != ""), 4) > 0  # total ownership
     assert layout.rows[total - 1][8:12] == [131.3, 166.0, 0.512, 0.0432]  # Typical, Big night, Cash %, 190+ %
     assert layout.rows[total] == [""] * ss.COLUMN_COUNT  # a blank row between blocks
     assert layout.bar_rows[1] == total + 2
@@ -186,10 +191,19 @@ class _Client:
     def add_boolean_rule(self, tab, rng, *, condition_type, values, fmt):
         self.rules.append((rng, condition_type, values))
 
+    def hide_columns(self, tab, first, last, *, hidden=True):
+        self.hidden = (first, last)
+
+    def read_range(self, tab, rng):
+        return [self.written[1][int(rng.split(":")[0][1:]) - 1]]  # the header row, "A<row>:<row>"
+
+    def add_boolean_rules(self, tab, specs):
+        self.tints = specs
+
 
 def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_the_gpp_chance_at_five():
     cash = _build(1, "cash", "Cash build 1")
-    client = _Client()
+    client = _Client(exists=True)
     message = ss.write_suggested(
         client, _report(cash), _edge([cash]), metric="CalPts", cash_line=143.9, gpp_target=190.0
     )
@@ -200,6 +214,11 @@ def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_the_gp
     assert (f"K{total}", "NUMBER_GREATER_THAN_EQ", ["0.5"]) in client.rules
     assert (f"L{total}", "NUMBER_GREATER_THAN_EQ", ["0.05"]) in client.rules
     assert client.widths["B"] == 170  # the Name column
+    assert client.hidden == ("M", "M")  # the GameID helper
+    # Lineups' three correlation tints over the build's Name and Team cells (B:C); Slot is the position
+    first_player = total - 9
+    assert {spec["a1_range"] for spec in client.tints} == {f"B{first_player}:C{total - 1}"}
+    assert len(client.tints) == 3 and "$A" in client.tints[0]["values"][0]  # the Slot column
     assert any(rng == f"K{total}" and fmt["numberFormat"]["pattern"] == "0%" for rng, fmt in client.formats)
 
 

@@ -26,6 +26,7 @@ import pandas as pd
 from dfs.kickoff import kickoff_label
 from dfs.lineup_suggest import Build, SuggestReport
 from dfs.models import ROSTER_SLOTS
+from dfs.sheet_lineup_tints import apply_lineup_tints
 from dfs.sheets import SheetsClient, column_letter
 
 TAB = "Suggested"
@@ -44,13 +45,16 @@ COLUMNS = [
     "Cash %",
     "190+ %",
 ]
-COLUMN_COUNT = len(COLUMNS)
-LAST_COLUMN = column_letter(COLUMN_COUNT - 1)
+LAST_COLUMN = column_letter(len(COLUMNS) - 1)  # the last visible column
+GAME_COLUMN = "GameID"  # a hidden helper after the visible columns: the correlation tints group by game
+COLUMN_COUNT = len(COLUMNS) + 1
+GAME_COLUMN_LETTER = column_letter(len(COLUMNS))
 TOTAL_LABEL = "Total"
 TITLE = "SUGGESTED LINEUPS  —  complete builds from your pool, scored by the simulator"
 HOW_TO = (
     "To use one: Lineup Tools > Copy build to Lineups (it goes into the first empty block and never "
-    "overwrites your names). Nothing on this tab changes Lineups on its own."
+    "overwrites your names). Nothing on this tab changes Lineups on its own. Name and Team tints, as on "
+    "Lineups: blue = the QB's stack, amber = his bring-back, lavender = other correlated players."
 )
 EMPTY = "No builds yet. Put players in your pool (Cash, GPP or Both) and run `dfs lineups suggest`."
 WIDTHS = [56, 170, 48, 48, 70, 62, 92, 56, 66, 74, 62, 62]
@@ -100,12 +104,31 @@ def _details(edge: pd.DataFrame) -> dict[str, tuple[str, float | str]]:
     return out
 
 
+def _game_ids(edge: pd.DataFrame) -> dict[str, str]:
+    """Name -> the player's game (EdgeRaw's `GameID`), for the stack tints."""
+    if "GameID" not in edge.columns:
+        return {}
+    out: dict[str, str] = {}
+    for name, game in zip(edge["Name"], edge["GameID"], strict=True):
+        if pd.notna(game) and str(game).strip():
+            out.setdefault(str(name), str(game))
+    return out
+
+
+def _total_own(build: Build, details: dict[str, tuple[str, float | str]]) -> float | str:
+    """The build's total ownership (the nine players' `Own%` added up, like Lineups' Total row), blank when no
+    ownership is out yet."""
+    shares = [details.get(p.name, ("", ""))[1] for p in build.players]
+    numbers = [x for x in shares if isinstance(x, float)]
+    return round(sum(numbers), 4) if numbers else ""
+
+
 def build_layout(
     report: SuggestReport, edge: pd.DataFrame, *, metric: str, cash_line: float, gpp_target: float
 ) -> Layout:
     """The tab's rows (1-based numbers resolved) and which rows are bars, headers, players and totals."""
     layout = Layout(rows=[])
-    header = [*COLUMNS]
+    header = [*COLUMNS, GAME_COLUMN]
     header[COLUMNS.index("CalPts")] = projection_label(metric)
     header[COLUMNS.index("190+ %")] = f"{gpp_target:g}+ %"
 
@@ -122,6 +145,7 @@ def build_layout(
     if not report.builds:
         layout.status_rows.append(add([EMPTY]))
     details = _details(edge)
+    games = _game_ids(edge)
     for build in report.builds:
         layout.bar_rows.append(
             add([f"{BUILD_LABEL} {build.number}", "Cash" if build.kind == "cash" else "GPP", build.title])
@@ -130,11 +154,15 @@ def build_layout(
         for slot, player in zip(ROSTER_SLOTS, build.players, strict=True):
             kickoff, own = details.get(player.name, ("", ""))
             layout.player_rows.append(
-                add([slot, player.name, player.team, player.opp, player.salary, player.value, kickoff, own])
+                add(
+                    [slot, player.name, player.team, player.opp, player.salary, player.value, kickoff, own]
+                    + [""] * 4
+                    + [games.get(player.name, "")]
+                )
             )
         layout.total_rows.append(
             add(
-                [TOTAL_LABEL, "", "", "", build.salary, build.projection, "", ""]
+                [TOTAL_LABEL, "", "", "", build.salary, build.projection, "", _total_own(build, details)]
                 + [
                     round(build.typical, 1),
                     round(build.big_night, 1),
@@ -241,6 +269,7 @@ def write_suggested(
             {**_num("$#,##0", "CURRENCY"), "horizontalAlignment": "RIGHT"},
         )
         client.format_range(TAB, f"{number['CalPts']}{row}", {**_num("0.0"), "horizontalAlignment": "RIGHT"})
+        client.format_range(TAB, f"{number['Own%']}{row}", {**_num("0%"), "horizontalAlignment": "RIGHT"})
         client.format_range(
             TAB,
             f"{number['Typical']}{row}:{number['Big night']}{row}",
@@ -260,6 +289,17 @@ def write_suggested(
                     {"red": 0.85, "green": 0.94, "blue": 0.85}, {"red": 0.10, "green": 0.45, "blue": 0.25}
                 ),
             )
+    if report.builds:
+        client.hide_columns(TAB, GAME_COLUMN_LETTER, GAME_COLUMN_LETTER)
+        # The same stack / bring-back / other tints as Lineups, over each build's Name and Team cells. The
+        # Slot stands in for the position (only QB and DST matter to the rules; FLEX is never either).
+        apply_lineup_tints(
+            client,
+            TAB,
+            header_row=layout.header_rows[0],
+            name_blocks=_runs(layout.player_rows),
+            header_names={"Pos.": "Slot", "Opp.": "Opp"},
+        )
     return (
         f"{TAB}: {len(report.builds)} build(s) written ({len(layout.rows)} rows)"
         if report.builds
