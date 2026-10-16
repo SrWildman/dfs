@@ -82,6 +82,16 @@ def test_it_prints_each_build_and_writes_the_suggested_tab(cfg, edge, capsys, mo
     )
 
 
+def test_seconds_sets_the_search_time_limit_and_defaults_to_a_minute(cfg, edge, capsys, monkeypatch):
+    seen = []
+    real = cli.suggest_builds
+    monkeypatch.setattr(cli, "suggest_builds", lambda *a, **k: seen.append(k["time_limit"]) or real(*a, **k))
+    tags = dict.fromkeys(edge["Name"], "Both")
+    run(cfg, edge, tags, capsys, write=False)
+    run(cfg, edge, tags, capsys, write=False, seconds=180.0)
+    assert seen == [60.0, 180.0]
+
+
 def test_no_write_leaves_the_tab_alone(cfg, edge, capsys, monkeypatch):
     monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: pytest.fail("the tab must not be written"))
     out = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys, write=False)

@@ -63,7 +63,7 @@ from dfs.launcher import (
     suggested_commands,
 )
 from dfs.line_movement import LineMovementError, diff_odds
-from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, DEFAULT_GPP_BUILDS, suggest_builds
+from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, DEFAULT_GPP_BUILDS, TIME_LIMIT_SECONDS, suggest_builds
 from dfs.lineups import (
     build_salary_lookup,
     export_csv,
@@ -3045,6 +3045,13 @@ def lineups_suggest(
     no_write: bool = typer.Option(
         False, "--no-write", help="Print the builds here and leave the Suggested tab alone."
     ),
+    seconds: float = typer.Option(
+        TIME_LIMIT_SECONDS,
+        "--seconds",
+        min=1.0,
+        help="How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool "
+        "when the run says the time limit cut it short.",
+    ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
     Suggested tab.
@@ -3062,11 +3069,18 @@ def lineups_suggest(
     Copy build to Lineups. Reads the last sync's data; run `dfs sync` (or
     `dfs sync --live`) first for the freshest picture."""
     cfg = _load_config_or_exit()
-    _run_suggest(cfg, cash=cash, gpp=gpp, write=not no_write, now=datetime.now(UTC))
+    _run_suggest(cfg, cash=cash, gpp=gpp, write=not no_write, now=datetime.now(UTC), seconds=seconds)
 
 
 def _run_suggest(
-    cfg: Config, *, cash: int, gpp: int, write: bool, now: datetime, client: SheetsClient | None = None
+    cfg: Config,
+    *,
+    cash: int,
+    gpp: int,
+    write: bool,
+    now: datetime,
+    client: SheetsClient | None = None,
+    seconds: float = TIME_LIMIT_SECONDS,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
     in the slate; the command passes the real clock."""
@@ -3111,6 +3125,7 @@ def _run_suggest(
         metric=metric,
         cash_builds=cash,
         gpp_builds=gpp,
+        time_limit=seconds,
     )
     console.print(
         f"Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "

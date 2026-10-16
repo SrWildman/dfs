@@ -60,7 +60,7 @@ MIN_DIFFERENCE = 3  # each build differs from every earlier one by at least this
 MAX_EXPOSURE = 0.6  # no player in more than this share of the GPP builds
 CASH_TOP_K = 300  # how many of the best cash lineups by projection are simulated
 PER_QB = 80  # stacked lineups kept per quarterback while building the GPP candidates
-TIME_LIMIT_SECONDS = 20.0  # the whole search, cash and GPP together
+TIME_LIMIT_SECONDS = 60.0  # the whole search, cash and GPP together
 CASH_SHARE_OF_TIME = 0.4  # the cash search may use this share of it; GPP gets the rest
 PASS_CATCHERS = ("WR", "TE")
 
@@ -493,7 +493,9 @@ def suggest_builds(
 
     report.seconds = time.monotonic() - started
     if not report.complete:
-        report.notes.append("The time limit cut the search short: a better build may exist.")
+        report.notes.append(
+            "The time limit cut the search short: a better build may exist (raise it with `--seconds`)."
+        )
     return report
 
 
