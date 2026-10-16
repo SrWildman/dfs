@@ -17,7 +17,7 @@ import tomllib
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from dfs.paths import CONFIG_EXAMPLE_FILE, CONFIG_FILE
 
@@ -132,13 +132,66 @@ class SeasonConfig(BaseModel):
 SIM_GPP_TARGET_DEFAULT = 190.0
 
 
+# Where each contest line sits relative to that contest's FIELD MEAN (the mean entry score, which is exactly
+# the ownership-weighted sum of the players' points), measured on Sam's 20 real standings files (Weeks 2, 4
+# and 5, 2026); see docs/SIM.md "Relative lines". Points above the field mean.
+SIM_DOUBLE_UP_OFFSET = 0.6  # the double-up cash line (7 contests, sd 4.9)
+SIM_GPP_CASH_OFFSET = 17.9  # a GPP's min-cash line, 21-26% paid (13 contests, sd 1.9)
+SIM_GPP_TOP10_OFFSET = 31.9  # the GPP top-10% line (9 contests, sd 1.2)
+SIM_GPP_TOP1_OFFSET = 63.2  # the GPP top-1% line, fields of 700+ (9 contests, sd 5.7)
+SIM_OWN_COVERAGE = 0.95  # the simulated field players hold at least this share of the total ownership
+
+
+class SimLinesConfig(BaseModel):
+    """`[sim.lines]`: the lines the lineup simulator scores against, as offsets from the field mean.
+
+    Cash % is P(lineup >= field mean + `double_up_offset`) and Top 1% is P(lineup >= field mean +
+    `gpp_top1_offset`); the other two offsets are the measured min-cash and top-10% lines, kept here for
+    reference (the simulator does not report them yet). Before ownership publishes (Own% is blank) there is no
+    field to measure against, and the simulator falls back to FIXED lines: `fallback_cash_line` /
+    `fallback_top1_line`, which left unset mean the old fixed numbers (the season median of the Cash Lines Sam
+    typed on Results, and `[sim] gpp_target`).
+
+    `double_up_own_curve` / `gpp_own_curve` map PROJECTED Own% to the Own% a contest type is expected to have:
+    a list of `[projected, expected]` points (fractions), piecewise-linear, anchored at (0, 0) and (1, 1);
+    empty (the default) is the identity. Double-ups are chalkier than the large-field projection (players
+    projected over 15% were owned about 39% in Sam's files), so the local session fits that curve."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    double_up_offset: float = SIM_DOUBLE_UP_OFFSET
+    gpp_cash_offset: float = SIM_GPP_CASH_OFFSET
+    gpp_top10_offset: float = SIM_GPP_TOP10_OFFSET
+    gpp_top1_offset: float = SIM_GPP_TOP1_OFFSET
+    fallback_cash_line: float | None = None
+    fallback_top1_line: float | None = None
+    double_up_own_curve: list[tuple[float, float]] = []
+    gpp_own_curve: list[tuple[float, float]] = []
+    own_coverage: float = Field(SIM_OWN_COVERAGE, gt=0.0, le=1.0)
+
+    @field_validator("double_up_own_curve", "gpp_own_curve")
+    @classmethod
+    def _curve_is_monotone(cls, curve: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        points = sorted(curve)
+        if any(not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0) for x, y in points):
+            raise ValueError("ownership curve points are fractions between 0 and 1")
+        if any(b[0] <= a[0] for a, b in zip(points, points[1:], strict=False)):
+            raise ValueError("ownership curve: the projected values must be strictly increasing")
+        if any(b[1] < a[1] for a, b in zip(points, points[1:], strict=False)):
+            raise ValueError("ownership curve: the expected values must not decrease")
+        return curve
+
+
 class SimConfig(BaseModel):
-    """`[sim]`: the lineup simulator's one setting. The cash line is NOT here: it is Sam's typed `Cash Line`
-    in Results (the median of every typed week this season), read from the sheet each time."""
+    """`[sim]`: the lineup simulator's settings. `gpp_target` is the FIXED top-end line (the old `190+ %`;
+    used with `--fixed-lines` and as the fallback before ownership publishes). The fixed cash line is NOT
+    here: it is Sam's typed `Cash Line` in Results (the median of every typed week this season), read from
+    the sheet each time. The lines that move with the slate are `[sim.lines]`."""
 
     model_config = ConfigDict(extra="forbid")
 
     gpp_target: float = SIM_GPP_TARGET_DEFAULT
+    lines: SimLinesConfig = SimLinesConfig()
 
 
 PROJECTION_CHOICES = ("CalPts", "ProjPts", "AggPts")

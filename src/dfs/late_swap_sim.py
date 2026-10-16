@@ -17,8 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dfs.late_swap_search import LineupSuggestions, Swap
+from dfs.sim.field import FieldModel
 from dfs.sim.simulate import PlayerSpec
-from dfs.sim_inputs import swap_deltas
+from dfs.sim_inputs import SimLines, swap_deltas
 
 GOALS = ("cash", "gpp")
 OVERSAMPLE = 4
@@ -26,9 +27,14 @@ OVERSAMPLE = 4
 
 @dataclass(frozen=True)
 class SimSettings:
+    """`cash_line` / `gpp_target` are the FIXED lines; a `field` replaces them with lines that move with the
+    slate (`lines` says which and why, for the printed summary)."""
+
     cash_line: float
     gpp_target: float
     goal: str = "cash"
+    field: FieldModel | None = None
+    lines: SimLines | None = None
 
 
 def swap_names(swap: Swap) -> tuple[list[str], list[str]]:
@@ -69,6 +75,7 @@ def attach_probabilities(
         [(out, ins) for _, out, ins in rated],
         cash_line=settings.cash_line,
         gpp_target=settings.gpp_target,
+        field=settings.field,
     )
     for (swap, _out, _ins), d in zip(rated, deltas, strict=True):
         swap.delta_p_cash, swap.delta_p_gpp = d.delta_p_cash, d.delta_p_gpp

@@ -504,8 +504,9 @@ portfolio-level counterpart: `Distinct QBs`, `Shared QB?` (Yes/No), and
 **The lineup simulator and the Cash/GPP marker (usability round, 2026-10-08).** Each lineup's **Total row** now carries the four
 outcome numbers up front, in the four columns right after `Pts` that are blank there (`AggPts`, `CalPts`, `Val`, `ValAdj`, found by
 header name), with small labels on the **Remaining row** under them: `Typical`, `Big night` (the simulated median and 90th-percentile score),
-`Cash %` (the chance the lineup beats a typical cash line; **green at 50% or more**) and `190+ %` (the chance it reaches the GPP target;
-the number in the label is `[sim] gpp_target` in `config.toml`, default 190; **green at 5% or more**). They were `Median`, `p90`,
+`Cash %` (the chance the lineup beats the double-up cash line, which moves with the slate: the field's average score + 0.6; **green at 50% or more**) and `190+ %` (since Round F
+the chance it reaches the large-field **top-1% line**, the field's average + 63.2, which moves with the slate; **green at 5% or more**, a bar a top-1% chance rarely reaches; the label is still
+`190+ %` until the local session relabels it `Top 1%`, and `[sim] gpp_target`, default 190, is the FIXED line used by `--fixed-lines` and before ownership publishes; `docs/SIM.md`, "Relative lines"). They were `Median`, `p90`,
 `P(cash)` and `P(190+)` until the Week 6 round (renamed: Sam did not know what they meant). They are numbers, written by
 `dfs sync` (Python, `sheet_lineup_sim.py`; not formulas). The old far-right `Median`..`P(190+)` columns were retired
 (`sheet_reorder.retire_lineup_sim_columns`, a real column delete) and the **portfolio line** moved to the Board's Pool summary.

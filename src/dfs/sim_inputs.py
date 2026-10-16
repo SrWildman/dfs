@@ -20,6 +20,14 @@ Pts`, `Cash Line`, `Cash Results`), so no GPP value can be in it. It reads "cash
 weeks)" wherever it is shown (`CashLine.basis`). With no typed line yet the simulator's placeholder (145) is
 used and says so.
 
+**Lines.** `resolve_lines` decides what a lineup is scored against. Normally the lines move with the slate
+(`dfs.sim.field`): Cash % is P(lineup >= field mean + the double-up offset) and Top 1% is P(lineup >= field
+mean + the top-1% offset), the field mean being the ownership-weighted sum of the draw's points
+(`[sim.lines]`). Before ownership publishes (EdgeRaw's `Own%` is blank) there is no field, and it falls back
+to the FIXED lines (`[sim.lines] fallback_cash_line` / `fallback_top1_line`, left unset the old numbers: the
+cash line above and `[sim] gpp_target`) and says so; `--fixed-lines` asks for the fixed lines on purpose, for
+one season, so the old and new numbers can be compared.
+
 **Swaps.** `swap_deltas` simulates a lineup and every candidate swap of it in ONE run, so players the versions
 share have identical draws and the difference in P(cash) / P(GPP) is the swap's own effect (this is
 `dfs.sim.simulate.swap_impact`, generalised from one player to the 2-for-2 swaps and full re-fills that late
@@ -35,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 from dfs.player_join import normalize_team
+from dfs.sim.field import FieldModel, build_field, has_ownership
 from dfs.sim.roles import ROLE_NAMES
 from dfs.sim.simulate import DEFAULT_CASH_LINE, PlayerSpec, simulate_lineups
 
@@ -102,6 +111,120 @@ def cash_line_from_results(header: list, rows: list[list], *, before_week: int) 
     return CashLine(
         value, weeks, f"season median of your typed Cash Line, Weeks {', '.join(str(w) for w in weeks)}"
     )
+
+
+@dataclass(frozen=True)
+class SimLines:
+    """What the simulator scores lineups against, and how to say so.
+
+    `mode` is "relative" (against the field mean: `field` is set and the two fixed numbers are unused),
+    "fixed" (`--fixed-lines`) or "fallback" (ownership is blank, so the fixed numbers stand in). `cash_line`
+    and `gpp_target` are the fixed numbers (what "fixed" and "fallback" use)."""
+
+    mode: str
+    cash_line: float
+    gpp_target: float
+    field: FieldModel | None
+    note: str  # one line for the terminal / the sync summary
+    cash_basis: str  # how the cash line was reached, for a hover note or the Board's portfolio line
+    top_label: str  # what the top-end number is called in a sentence: "Top 1%" or "190+"
+
+    @property
+    def relative(self) -> bool:
+        return self.field is not None
+
+    @property
+    def status(self) -> str:
+        """The line on the Suggested tab: what the Cash % and Top 1% numbers were measured against."""
+        if self.field is None:
+            return f"cash line {self.cash_line:g}  ·  GPP target {self.gpp_target:g}  ·  {self.mode} lines"
+        return (
+            f"lines move with the slate: Cash % = field average +{self.field.cash_offset:g}, "
+            f"Top 1% (the {self.gpp_target:g}+ % column) = field average +{self.field.top_offset:g}"
+        )
+
+
+def ownership_by_name(edge: pd.DataFrame) -> dict[str, float]:
+    """`{Name: Own%}` from the synced EdgeRaw frame (fractions: 0.146 is 14.6%); first row wins for a
+    repeated name. Blank / non-numeric cells are left out. Empty when the column is missing or blank (Own% is
+    blank until TFFB publishes ownership)."""
+    if "Own%" not in edge.columns or "Name" not in edge.columns:
+        return {}
+    own: dict[str, float] = {}
+    for name, value in zip(edge["Name"], pd.to_numeric(edge["Own%"], errors="coerce"), strict=True):
+        key = str(name or "").strip()
+        if key and key not in own and pd.notna(value):
+            own[key] = float(value)
+    return own
+
+
+def resolve_lines(
+    edge: pd.DataFrame,
+    specs: dict[str, PlayerSpec],
+    cash: CashLine,
+    gpp_target: float,
+    lines,  # noqa: ANN001 - dfs.config.SimLinesConfig
+    *,
+    fixed_lines: bool = False,
+) -> SimLines:
+    """The lines to simulate against: relative to the field when ownership is published, else fixed (see the
+    module docstring). `specs` must hold every player the field should include (build them for the whole
+    slate, not just the lineups' teams)."""
+    if fixed_lines:
+        return SimLines(
+            "fixed",
+            cash.value,
+            gpp_target,
+            None,
+            f"FIXED lines (--fixed-lines): cash line {cash.value:g} ({cash.note}), "
+            f"GPP target {gpp_target:g}.",
+            cash.basis,
+            gpp_label(gpp_target),
+        )
+    own = ownership_by_name(edge)
+    field = (
+        build_field(
+            specs.values(),
+            own,
+            cash_offset=lines.double_up_offset,
+            top_offset=lines.gpp_top1_offset,
+            cash_curve=lines.double_up_own_curve,
+            top_curve=lines.gpp_own_curve,
+            coverage=lines.own_coverage,
+        )
+        if has_ownership(own)
+        else None
+    )
+    if field is None:
+        cash_line = lines.fallback_cash_line if lines.fallback_cash_line is not None else cash.value
+        top_line = lines.fallback_top1_line if lines.fallback_top1_line is not None else gpp_target
+        source = "[sim.lines] fallback" if lines.fallback_cash_line is not None else cash.note
+        return SimLines(
+            "fallback",
+            cash_line,
+            top_line,
+            None,
+            f"Ownership has not published (Own% is blank), so there is no field to measure against: using "
+            f"FIXED lines, cash line {cash_line:g} ({source}) and a {top_line:g}-point top-end line.",
+            f"cash line {cash_line:g}, fixed (ownership not published yet)",
+            gpp_label(top_line),
+        )
+    return SimLines(
+        "relative",
+        cash.value,
+        gpp_target,
+        field,
+        f"Lines move with the slate: Cash % beats the field average +{lines.double_up_offset:g}, Top 1% "
+        f"beats it +{lines.gpp_top1_offset:g} (ownership of {len(field.players)} players, "
+        f"{len(field.cover)} simulated with your lineups).",
+        f"cash line = the field's average score +{lines.double_up_offset:g}",
+        "Top 1%",
+    )
+
+
+def gpp_label(target: float) -> str:
+    """`190+` for a 190 target."""
+    return f"{target:g}+"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -249,12 +372,14 @@ def swap_deltas(
     gpp_target: float,
     n_sims: int = N_SIMS,
     seed: int = SEED,
+    field: FieldModel | None = None,
 ) -> list[SwapDelta]:
     """The change in P(cash) and P(GPP) for each candidate swap, `(names going out, specs coming in)`.
 
     The lineup and every swapped version are simulated in a single run (the same draws for every player they
     share), so a difference is the swap's own effect and the sampling noise left in it is the incoming
-    players'. Deterministic in `seed`. An empty `swaps` simulates nothing."""
+    players'. Deterministic in `seed`. An empty `swaps` simulates nothing. A `field` scores against the
+    field's lines (Cash % / Top 1%) instead of `cash_line` / `gpp_target`."""
     if not swaps:
         return []
     versions = []
@@ -262,7 +387,7 @@ def swap_deltas(
         gone = set(out_names)
         versions.append([p for p in lineup if p.id not in gone] + list(ins))
     result = simulate_lineups(
-        [lineup, *versions], n_sims=n_sims, seed=seed, cash_line=cash_line, gpp_target=gpp_target
+        [lineup, *versions], n_sims=n_sims, seed=seed, cash_line=cash_line, gpp_target=gpp_target, field=field
     )
     base, rest = result.lineups[0], result.lineups[1:]
     return [
