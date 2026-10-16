@@ -74,8 +74,10 @@ def diff_queue_changes(previous: pd.DataFrame, current: pd.DataFrame) -> pd.Data
     )
 
     merged = cur.merge(prev, on="Id", how="left")
-    merged["OldAvail"] = merged["OldAvail"].fillna("")
-    merged["OldFlag"] = merged["OldFlag"].fillna("")
+    # Both sides: a frame read back from CSV carries NaN (not "") for an empty Flags/Avail cell, and a NaN on
+    # the new side would compare unequal to "" for every unflagged player and print as "nan".
+    for column in ("OldAvail", "OldFlag", "NewAvail", "NewFlag"):
+        merged[column] = merged[column].fillna("")
     merged["OldSalary"] = merged["OldSalary"].fillna(merged["NewSalary"])
 
     flag_changed = merged["OldFlag"] != merged["NewFlag"]

@@ -187,3 +187,12 @@ def test_diff_queue_changes_returns_empty_frame_when_nothing_changed():
     changes = diff_queue_changes(previous, current)
 
     assert changes.empty
+
+
+def test_diff_queue_changes_treats_nan_flags_as_no_flags():
+    # A frame read back from CSV has NaN for an empty Flags/Avail cell: that is "no flags", not a change
+    # (it used to queue every unflagged player as "Flags (none) -> nan").
+    previous = pd.DataFrame([_queue_row("1", "Player A", "RB", "KC", "", "", 6000)])
+    current = pd.DataFrame([_queue_row("1", "Player A", "RB", "KC", float("nan"), float("nan"), 6000)])
+
+    assert diff_queue_changes(previous, current).empty
