@@ -82,6 +82,34 @@ def test_it_prints_each_build_and_writes_the_suggested_tab(cfg, edge, capsys, mo
     )
 
 
+def test_it_prints_how_long_every_phase_took_in_the_order_they_ran(cfg, edge, capsys, monkeypatch):
+    """Sam, 2026-10-17: it felt idle after printing the builds. Every phase is timed and shown, the sheet ones
+    with their request counts; `--no-write` shows the phases that ran without the two sheet-write ones."""
+
+    def fake_write(client, report, frame, *, timings=None, **kw):
+        timings["write tab"], timings["format tab"] = (0.4, 2), (1.2, 3)
+        return "Suggested: ok"
+
+    monkeypatch.setattr(cli, "write_suggested", fake_write)
+    out = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys)
+    block = out[out.index("Phase times:") :]
+    names = [
+        "read sheet",
+        "set up simulator",
+        "candidates",
+        "search",
+        "simulate",
+        "choose",
+        "write tab",
+        "format tab",
+    ]
+    positions = [block.index(f"  {n}") for n in names]
+    assert positions == sorted(positions) and "total" in block
+    assert "3 requests" in block and "2 requests" in block  # the sheet phases show their request counts
+    quiet = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys, write=False)
+    assert "Phase times:" in quiet and "write tab" not in quiet and "search" in quiet
+
+
 def test_seconds_sets_the_search_time_limit_and_defaults_to_a_minute(cfg, edge, capsys, monkeypatch):
     seen = []
     real = cli.suggest_builds

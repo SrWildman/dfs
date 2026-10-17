@@ -545,7 +545,7 @@ def test_find_lineup_blocks_numbers_header_first_player_and_total_rows(node_modu
     assert got["skipped"] == []
 
 
-# --- Copy build to Lineups (Week 6): the Suggested layout is read by Python and by the script alike -------
+# --- Copy builds to Lineups (plural since version 6): Python and the script read the same Suggested grid ---
 
 
 def _suggested_grid(builds=((1, "Cash"), (2, "GPP"), (3, "GPP")), names_per_build=9):
@@ -567,7 +567,7 @@ def test_the_script_names_match_the_suggested_tab_python_writes():
 
     assert _const("SUGGESTED_TAB") == ss.TAB == "Suggested" and _const("BUILD_LABEL") == ss.BUILD_LABEL
     assert _list_const("MARKER_VALUES") == MARKER_OPTIONS == ["Cash", "GPP"]
-    assert ".addItem('Copy build to Lineups', 'copyBuildToLineups')" in SOURCE
+    assert ".addItem('Copy builds to Lineups…', 'copyBuildsToLineups')" in SOURCE
 
 
 @needs_node
@@ -594,33 +594,70 @@ def _empty_lineups(blocks=3, filled=()):
     return grid
 
 
+def _plan(node_module, suggested, text, lineups):
+    return _run_node(
+        node_module, f"m.planCopyBuilds({json.dumps(suggested)}, {json.dumps(text)}, {json.dumps(lineups)})"
+    )
+
+
 @needs_node
-def test_copy_build_goes_into_the_first_empty_block_and_sets_the_marker(node_module):
+def test_copy_builds_fill_the_empty_blocks_in_order_and_set_each_marker(node_module):
     suggested, lineups = _suggested_grid(), _empty_lineups(blocks=3, filled=(0,))
-    plan = _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 2, {json.dumps(lineups)})")
-    assert plan["status"] == "ok" and plan["marker"] == "GPP"
-    assert plan["build"]["number"] == 2 and plan["build"]["names"][0] == "B2 Player 0"
-    assert plan["block"] == {"header": 14, "first": 15, "total": 24}  # block 0 has a name in it: skipped
-    cash = _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 1, {json.dumps(lineups)})")
-    assert cash["marker"] == "Cash"
+    plan = _plan(node_module, suggested, "3, 1", lineups)
+    assert plan["status"] == "ok" and plan["unplaced"] == [] and plan["unknown"] == []
+    # block 0 holds a name (skipped); builds go in the order typed, into blocks 1 and 2 in order
+    assert [(p["build"]["number"], p["marker"], p["block"]) for p in plan["placements"]] == [
+        (3, "GPP", {"header": 14, "first": 15, "total": 24}),
+        (1, "Cash", {"header": 27, "first": 28, "total": 37}),
+    ]
+    assert plan["placements"][0]["build"]["names"][0] == "B3 Player 0"
 
 
 @needs_node
-def test_copy_build_never_overwrites_a_block_with_a_name_and_says_when_nothing_is_free(node_module):
+def test_copy_all_takes_every_build_in_order_and_reports_what_did_not_fit(node_module):
+    suggested = _suggested_grid()
+    plan = _plan(node_module, suggested, "ALL", _empty_lineups(blocks=2))
+    assert [p["build"]["number"] for p in plan["placements"]] == [1, 2]  # two empty blocks, three builds
+    assert [b["number"] for b in plan["unplaced"]] == [3]
+    summary = _run_node(node_module, f"m.planSummary({json.dumps(plan)}, true)")
+    assert (
+        "Build 1 (Cash) into the lineup at row 1" in summary and "No empty lineup left for build 3" in summary
+    )
+    after = _run_node(node_module, f"m.planSummary({json.dumps(plan)}, false)")
+    assert after.startswith("Copied:") and "went into" in after and "not copied" in after
+
+
+@needs_node
+def test_copy_reports_numbers_not_on_suggested_and_text_it_cannot_read(node_module):
+    plan = _plan(node_module, _suggested_grid(), "2; 9 x 2 12", _empty_lineups(blocks=3))
+    assert [p["build"]["number"] for p in plan["placements"]] == [2]  # a number typed twice is used once
+    assert plan["unknown"] == [9, 12] and plan["unreadable"] == ["x"]
+    summary = _run_node(node_module, f"m.planSummary({json.dumps(plan)}, true)")
+    assert "Not on Suggested: 9, 12." in summary and "Not understood: x." in summary
+
+
+@needs_node
+def test_copy_builds_never_overwrite_a_block_with_a_name_and_say_when_nothing_is_free(node_module):
     suggested = _suggested_grid()
     full = _empty_lineups(blocks=2, filled=(0, 1))  # a name in every block
-    assert _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 1, {json.dumps(full)})") == {
-        "status": "noBlock"
-    }
+    got = _plan(node_module, suggested, "1", full)
+    assert got["status"] == "noBlock" and [b["number"] for b in got["builds"]] == [1]
     free = _empty_lineups(blocks=2)
-    assert _run_node(node_module, f"m.planCopyBuild({json.dumps(suggested)}, 9, {json.dumps(free)})") == {
-        "status": "noBuild"
-    }
-    assert _run_node(node_module, f"m.planCopyBuild([], 1, {json.dumps(free)})") == {"status": "noBuild"}
+    assert _plan(node_module, suggested, "9", free) == {"status": "noBuild", "unknown": [9], "unreadable": []}
+    assert _plan(node_module, [], "1", free)["status"] == "noBuild"
+    assert _plan(node_module, suggested, "  ", free) == {"status": "noChoice", "unreadable": []}
+    assert _plan(node_module, suggested, "what", free) == {"status": "noChoice", "unreadable": ["what"]}
+
+
+@needs_node
+def test_the_prompt_lists_the_builds_as_runs_by_kind(node_module):
+    builds = _run_node(node_module, f"m.parseBuilds({json.dumps(_suggested_grid())})")
+    assert _run_node(node_module, f"m.describeBuilds({json.dumps(builds)})") == "Cash 1, GPP 2-3"
 
 
 def test_the_copy_action_asks_before_it_writes_and_only_writes_names_and_the_marker():
-    body = SOURCE.split("function copyBuildToLineups")[1].split("// ----")[0]
+    body = SOURCE.split("function copyBuildsToLineups")[1].split("// ----")[0]
     assert "ButtonSet.YES_NO" in body and "getActiveSheet" not in SOURCE
-    assert body.count(".setValues(") == 1 and body.count(".setValue(") == 1  # the nine names, the marker
+    assert body.count(".setValues(") == 1 and body.count(".setValue(") == 1  # per build: nine names, marker
+    assert body.index("ButtonSet.YES_NO") < body.index(".setValues(")  # it asks before it writes
     assert "clearContent" not in body

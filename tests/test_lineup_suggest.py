@@ -167,11 +167,56 @@ def test_no_player_is_in_more_than_sixty_percent_of_the_gpp_builds(edge):
     assert max(uses.values()) <= cap
 
 
-def test_cash_builds_are_ranked_by_cash_percent_and_gpp_builds_by_the_gpp_chance(report):
-    cash = [b.p_cash for b in report.builds if b.kind == "cash"]
-    assert cash == sorted(cash, reverse=True)
-    gpp = [b.p_gpp for b in report.builds if b.kind == "gpp"]
-    assert gpp == sorted(gpp, reverse=True)
+def test_builds_are_listed_cash_then_gpp_by_qb_then_calpts_total_and_numbered_down_the_list(report):
+    """Sam, 2026-10-17: ordered by QB, then CalPts total, within Cash and GPP; Build N follows that order."""
+    assert [b.number for b in report.builds] == list(range(1, len(report.builds) + 1))
+    kinds = [b.kind for b in report.builds]
+    assert kinds == sorted(kinds, key=lambda k: k != "cash")  # every cash build before every GPP build
+    for kind in ("cash", "gpp"):
+        part = [b for b in report.builds if b.kind == kind]
+        keys = [(_qb(b), -round(b.projection, 6)) for b in part]
+        assert keys == sorted(keys), kind  # QB name A-Z, the higher CalPts total first within a QB
+    for b in report.builds:  # the title carries the number it is listed under
+        assert b.title.startswith(f"{'Cash' if b.kind == 'cash' else 'GPP'} build {b.number}")
+
+
+def test_a_run_times_its_search_phases_and_phase_lines_lays_them_out_with_a_total(edge):
+    report = run(edge, cash_builds=1, gpp_builds=1)
+    assert list(report.phases) == ["candidates", "search", "simulate", "choose"]
+    assert all(seconds >= 0 for seconds in report.phases.values())
+    assert sum(report.phases.values()) <= report.seconds + 1e-6
+    lines = ls.phase_lines({"read sheet": (1.0, 2), "search": (2.0, 0), "format tab": (1.0, 1)})
+    assert lines[0] == "Phase times:"
+    assert "read sheet" in lines[1] and "2 requests" in lines[1] and " 25%" in lines[1]
+    assert "request" not in lines[2] and " 50%" in lines[2]  # no sheet calls, nothing to show
+    assert "1 request" in lines[3] and "requests" not in lines[3]
+    assert lines[-1].split() == ["total", "4.0", "s"]
+    assert ls.phase_lines({})[-1].strip().startswith("total")  # an empty run does not divide by zero
+
+
+def test_display_order_is_the_same_whatever_order_the_picks_were_made_in():
+    def pick(qb, total, extra="x"):
+        players = tuple(P(n, pos) for n, pos in ((qb, "QB"), (f"{extra}1", "RB"), (f"{extra}2", "WR")))
+        return ls.Scored(players, total, 50000, 0.5, 0.1, 100.0, 130.0)
+
+    picked = [
+        ("gpp", pick("Zed", 130.0, "a"), "T stack"),
+        ("cash", pick("Bob", 120.0, "b"), ""),
+        ("gpp", pick("Abe", 125.0, "c"), "U stack"),
+        ("cash", pick("Bob", 135.0, "d"), ""),
+        ("gpp", pick("Abe", 140.0, "e"), "U stack"),
+    ]
+    forward = ls.number_builds(picked)
+    backward = ls.number_builds(picked[::-1])
+    assert [(b.kind, b.players[0].name, b.projection) for b in forward] == [
+        ("cash", "Bob", 135.0),
+        ("cash", "Bob", 120.0),
+        ("gpp", "Abe", 140.0),
+        ("gpp", "Abe", 125.0),
+        ("gpp", "Zed", 130.0),
+    ]
+    assert [b.title for b in forward] == [b.title for b in backward]
+    assert [b.title for b in forward][0] == "Cash build 1" and forward[2].title == "GPP build 3  ·  U stack"
 
 
 def test_the_flex_of_every_build_is_the_latest_kickoff_of_its_surplus_position(report, edge):
@@ -220,6 +265,39 @@ def test_only_pool_players_with_the_right_tag_who_are_playing_and_have_not_kicke
     assert ls.pool_for(frame, {}, ls.CASH_TAGS, now=NOW, metric="CalPts") == []  # an empty pool
 
 
+def test_any_dst_on_the_slate_is_a_candidate_pooled_or_not_but_never_one_ruled_out_or_kicked_off(edge):
+    """Sam, 2026-10-17: builds may use ANY defense. Here nobody pooled a DST at all."""
+    frame = edge.copy()
+    dst = frame["Position"] == "DST"
+    tags = {name: "Both" for name in frame.loc[~dst, "Name"]}
+    out = frame.index[dst][0]
+    started = frame.index[dst & (frame["GameStart"] == EARLY)][-1]
+    frame.loc[out, "Avail"] = "OUT"
+    after_early = datetime(2026, 10, 18, 18, 0, tzinfo=UTC)
+    now = {p.name for p in ls.pool_for(frame, tags, ls.CASH_TAGS, now=NOW, metric="CalPts", any_dst=True)}
+    late = {
+        p.name for p in ls.pool_for(frame, tags, ls.GPP_TAGS, now=after_early, metric="CalPts", any_dst=True)
+    }
+    dsts = set(frame.loc[dst, "Name"])
+    assert dsts - {frame.loc[out, "Name"]} <= now  # every other defense, none of them pooled
+    assert frame.loc[out, "Name"] not in now
+    assert frame.loc[started, "Name"] in now and frame.loc[started, "Name"] not in late  # his game started
+    plain = {p.name for p in ls.pool_for(frame, tags, ls.CASH_TAGS, now=NOW, metric="CalPts")}
+    assert not plain & dsts  # the default stays "pool only"
+    assert ls.pool_for(frame, {}, ls.CASH_TAGS, now=NOW, metric="CalPts", any_dst=True) == []  # empty pool
+
+
+def test_builds_use_defenses_nobody_pooled_and_never_one_against_the_builds_own_qb(edge):
+    dst = edge["Position"] == "DST"
+    tags = {name: "Both" for name in edge.loc[~dst, "Name"]}
+    report = run(edge, tags)
+    assert report.builds
+    for build in report.builds:
+        assert_legal(build)  # no DST against his own QB
+    used = {p.name for b in report.builds for p in b.players if p.position == "DST"}
+    assert used and not used & set(tags)  # every defense used is one nobody pooled
+
+
 def test_a_player_with_no_calpts_is_projected_at_his_projpts():
     frame = slate()
     frame.loc[0, "CalPts"] = np.nan
@@ -232,6 +310,38 @@ def test_a_player_with_no_calpts_is_projected_at_his_projpts():
 
 def P(name, pos, team="A", opp="B", salary=5000, value=10.0, game="g"):
     return SwapPlayer(name, pos, team, opp, game, salary, value)
+
+
+def test_can_stack_needs_two_pass_catchers_and_a_bring_back_in_the_pool():
+    qb = P("QB1", "QB", "A", "B")
+    mates = [P("A WR1", "WR", "A", "B"), P("A TE1", "TE", "A", "B")]
+    back = P("B WR1", "WR", "B", "A")
+    assert ls.can_stack(qb, [qb, *mates, back])
+    assert not ls.can_stack(qb, [qb, mates[0], back])  # one pass catcher
+    assert not ls.can_stack(qb, [qb, *mates])  # nobody from the other side
+    assert not ls.can_stack(qb, [qb, *mates, P("B DST", "DST", "B", "A"), P("B QB", "QB", "B", "A")])
+    assert not ls.can_stack(
+        qb, [qb, P("A RB1", "RB", "A", "B"), *mates[:1], back]
+    )  # a back is no pass catcher
+
+
+def test_a_qb_who_cannot_stack_is_not_searched_so_it_cannot_eat_the_time_limit(edge, monkeypatch):
+    """Real pool, 2026-10-17: 7 of 12 QBs had no possible stack; each still spent its share of the 60 s."""
+    pool = ls.pool_for(edge, tags_for(edge), ls.GPP_TAGS, now=NOW, metric="CalPts")
+    stuck = next(p for p in pool if p.position == "QB")
+    pool = [p for p in pool if not (p.team == stuck.team and p.position in ("WR", "TE"))]  # his catchers go
+    assert not ls.can_stack(stuck, pool)
+    searched = []
+    real = ls.top_lineups
+    monkeypatch.setattr(
+        ls, "top_lineups", lambda state, *a, **k: searched.append(state.fixed[0].name) or real(state, *a, **k)
+    )
+    lineups, complete = ls.stacked_lineups(pool, cap=CAP, deadline=time.monotonic() + 60)
+    assert complete and lineups
+    quarterbacks = {p.name for p in pool if p.position == "QB"}
+    assert stuck.name in quarterbacks and stuck.name not in searched  # he was never searched...
+    assert set(searched) == quarterbacks - {stuck.name}  # ...and everyone else was
+    assert all(stuck.name not in {p.name for p in lu} for lu in lineups)  # and no lineup has him
 
 
 def test_is_stacked_needs_two_pass_catchers_and_one_opponent():
@@ -456,3 +566,4 @@ def test_a_gpp_build_is_never_a_lineup_of_nothing_but_cash_marked_players():
 
     assert not ok(players("a", "b"))  # all Cash-marked
     assert ok(players("a", "c")) and ok(players("a", "d"))  # one GPP or Both player is enough
+    assert not ok(players("a", "b", "an-unpooled-dst"))  # a defense nobody pooled is not marked GPP

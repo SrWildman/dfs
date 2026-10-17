@@ -321,6 +321,24 @@ def phase(name: str):  # noqa: ANN201
         )
 
 
+@contextmanager
+def measure(into: dict[str, tuple[float, int]] | None, name: str):  # noqa: ANN201
+    """Like `phase`, but also adds `name -> (seconds, API requests)` to `into` (when it is not None), for a
+    command that prints its own phase times. A name used twice adds up."""
+    started = time.perf_counter()
+    requests_before = STATS.requests
+    with phase(name):
+        try:
+            yield
+        finally:
+            if into is not None:
+                seconds, count = into.get(name, (0.0, 0))
+                into[name] = (
+                    seconds + time.perf_counter() - started,
+                    count + STATS.requests - requests_before,
+                )
+
+
 def timed(name: str | None = None):  # noqa: ANN201
     """Decorator form of `phase` -- wraps a function so every call is a
     recorded phase named after it (or `name`)."""

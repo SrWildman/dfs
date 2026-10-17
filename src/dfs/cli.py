@@ -63,7 +63,7 @@ from dfs.launcher import (
     suggested_commands,
 )
 from dfs.line_movement import LineMovementError, diff_odds
-from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, TIME_LIMIT_SECONDS, suggest_builds
+from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, TIME_LIMIT_SECONDS, phase_lines, suggest_builds
 from dfs.lineups import (
     build_salary_lookup,
     export_csv,
@@ -1948,7 +1948,8 @@ def sheets_protect(
     formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement --
     plus Player Pool, Exposure and Lineups protected everywhere EXCEPT
     their own typed cells (Player Pool's add-a-player control; Exposure's
-    Target and lineup-count cell; each lineup block's Name column).
+    Target and lineup-count cell; each lineup block's Name column and
+    its Cash/GPP marker).
     EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own
     docstring for why. Safe to re-run: each tab's protected ranges are
     cleared before being re-added, never stacked.
@@ -3117,8 +3118,8 @@ def lineups_suggest(
     earlier ones by at least 3 players, and FLEX (any RB, WR or TE) holds the
     latest kickoff.
 
-    Your own lineups are never touched: copy a build in with Lineup Tools >
-    Copy build to Lineups. Reads the last sync's data; run `dfs sync` (or
+    Your own lineups are never touched: copy builds in with Lineup Tools >
+    Copy builds to Lineups (type 1,4,6 or all). Reads the last sync's data; run `dfs sync` (or
     `dfs sync --live`) first for the freshest picture."""
     cfg = _load_config_or_exit()
     _run_suggest(
@@ -3155,9 +3156,11 @@ def _run_suggest(
         console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
         raise typer.Exit(code=1)
     client = client or SheetsClient(cfg.google_sheets)
+    phases: dict[str, tuple[float, int]] = {}  # name -> (seconds, API requests): printed at the end
     try:
-        title, url = client.describe()
-        tags = {p.name: p.pool_value for p in read_players(client, edge_tab) if p.pooled}
+        with perf.measure(phases, "read sheet"):
+            title, url = client.describe()
+            tags = {p.name: p.pool_value for p in read_players(client, edge_tab) if p.pooled}
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
@@ -3170,7 +3173,8 @@ def _run_suggest(
             "(Cash, GPP or Both) and run this again.[/yellow]"
         )
         raise typer.Exit(code=1)
-    sim_setup = _late_swap_sim_setup(cfg, client, edge, None, now, fixed_lines=fixed_lines)
+    with perf.measure(phases, "set up simulator"):
+        sim_setup = _late_swap_sim_setup(cfg, client, edge, None, now, fixed_lines=fixed_lines)
     if sim_setup is None:
         console.print("[red]The simulator is needed to score builds and could not be set up.[/red]")
         raise typer.Exit(code=1)
@@ -3201,8 +3205,11 @@ def _run_suggest(
         console.print()
     for note in report.notes:
         console.print(f"[yellow]{note}[/yellow]")
+    for name, seconds in report.phases.items():  # the search phases, between the two sheet-side groups
+        phases[name] = (seconds, 0)
     if not write:
         console.print("[dim]--no-write: the Suggested tab was not changed.[/dim]")
+        _print_phases(phases)
         return
     try:
         console.print(
@@ -3215,11 +3222,20 @@ def _run_suggest(
                 cash_line=settings.cash_line,
                 gpp_target=settings.gpp_target,
                 lines_text=settings.lines.status if settings.lines is not None else None,
+                timings=phases,
             )
         )
     except SheetsError as e:
         console.print(f"[red]Sheets error writing the Suggested tab:[/red] {e}")
         raise typer.Exit(code=1) from e
+    _print_phases(phases)
+
+
+def _print_phases(phases: dict[str, tuple[float, int]]) -> None:
+    """`dfs lineups suggest`: how long each phase took (so a slow one can be seen, not guessed at)."""
+    console.print()
+    for line in phase_lines(phases):
+        console.print(line, markup=False, highlight=False)
 
 
 def _carry_results_team_colour_headers(

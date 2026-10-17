@@ -2,12 +2,14 @@
 
 `dfs lineups suggest` writes them to the `Suggested` tab (`sheet_suggested.py`); nothing here touches a
 sheet. Sam's own lineups are never overwritten: he copies a build into an empty Lineups block himself
-(Lineup Tools > Copy build to Lineups).
+(Lineup Tools > Copy builds to Lineups).
 
-**Candidates.** Only the players in his pool (`Cash` and `Both` for cash builds, `GPP` and `Both` for GPP
-builds), nobody listed OUT or IR, nobody whose game has started (`late_swap_search.swap_pool`), ranked by
-the projection (`CalPts`, `ProjPts` where CalPts is blank). The rules are late swap's: the salary cap, the
-roster slots (FLEX takes an RB, WR or TE), no DST against his own QB and at most one RB per game.
+**Candidates.** The players in his pool (`Cash` and `Both` for cash builds, `GPP` and `Both` for GPP
+builds) plus EVERY defense on the slate, pooled or not (Sam, 2026-10-17: the DST is the cheapest slot to
+get wrong and the least worth hand-picking), nobody listed OUT or IR, nobody whose game has started
+(`late_swap_search.swap_pool`), ranked by the projection (`CalPts`, `ProjPts` where CalPts is blank). The
+rules are late swap's: the salary cap, the roster slots (FLEX takes an RB, WR or TE), no DST against his own
+QB and at most one RB per game.
 
 **Cash builds** (default 3). The best `CASH_TOP_K` lineups by projection (the branch-and-bound of
 `late_swap_search`, `top_lineups`) are all simulated, and the builds are the ones with the highest `Cash %`
@@ -26,6 +28,10 @@ Candidates are ranked by `Top 1%` (the simulator's chance of reaching the large-
 field's average score plus 63 points; with `--fixed-lines` the old fixed GPP target), each differing from the
 earlier builds by at least `MIN_DIFFERENCE` players, and no player is in more than `MAX_EXPOSURE` of the
 builds. A build's title names its stack ("DET stack + ARI bring-back").
+
+**Order.** The builds are listed Cash first, then GPP; inside each by quarterback (name, A to Z), then the
+highest `CalPts` total first (`display_key`), and numbered 1..n down that list (`number_builds`). Which
+lineups are chosen is decided by the odds above; the order only changes how they are shown.
 
 **FLEX** is always the player with the latest kickoff among the position that has one more player than its
 own slots (`flex_order`; Sam's rule), so a build is ready to enter as it stands.
@@ -73,6 +79,7 @@ PASS_CATCHERS = ("WR", "TE")
 
 CASH_TAGS = frozenset({"Cash", "Both"})
 GPP_TAGS = frozenset({"Cash", "GPP", "Both"})  # a GPP build may use anyone in the pool, whatever the mark
+GPP_MARKS = frozenset({"GPP", "Both"})  # the pool marks that count as "GPP" for the rule below
 GPP_MIN_NOT_CASH_ONLY = 1  # ...but not a lineup of nothing but Cash-marked players (small-field contests)
 
 
@@ -103,6 +110,7 @@ class SuggestReport:
     seconds: float = 0.0
     candidates: dict[str, int] = field(default_factory=dict)  # "cash" / "gpp" -> players considered
     complete: bool = True  # False when the time limit cut a search short
+    phases: dict[str, float] = field(default_factory=dict)  # phase -> seconds, in the order they ran
 
 
 # ---------------------------------------------------------------------------------------------
@@ -116,11 +124,27 @@ def _all_open_state(cap: int) -> LineupState:
     )
 
 
+def slate_dsts(edge: pd.DataFrame) -> set[str]:
+    """Every defense on the slate (the names of EdgeRaw's DST rows), pooled or not."""
+    if "Position" not in edge.columns:
+        return set()
+    return {str(name) for name in edge.loc[edge["Position"] == "DST", "Name"]}
+
+
 def pool_for(
-    edge: pd.DataFrame, tags: dict[str, str], wanted: frozenset[str], *, now: datetime, metric: str
+    edge: pd.DataFrame,
+    tags: dict[str, str],
+    wanted: frozenset[str],
+    *,
+    now: datetime,
+    metric: str,
+    any_dst: bool = False,
 ) -> list[SwapPlayer]:
-    """The pool players tagged with one of `wanted` who can still be used: not OUT or IR, game not started."""
+    """The pool players tagged with one of `wanted` who can still be used: not OUT or IR, game not started.
+    With `any_dst`, every defense on the slate too (Sam, 2026-10-17: any DST, pooled or not)."""
     names = {name for name, tag in tags.items() if tag in wanted}
+    if any_dst and tags:  # an empty pool stays empty: there is nothing to build around
+        names |= slate_dsts(edge)
     return swap_pool(edge, now=now, metric=metric, pool_names=names)
 
 
@@ -135,10 +159,11 @@ def is_stacked(players: Sequence[SwapPlayer]) -> bool:
 
 def not_all_cash(tags: dict[str, str]):
     """The GPP test on a finished lineup: at least `GPP_MIN_NOT_CASH_ONLY` of its players are marked GPP or
-    Both, so a GPP build is never nine Cash-marked players."""
+    Both, so a GPP build is never nine Cash-marked players. A defense nobody pooled is not marked GPP either:
+    it does not count toward the minimum."""
 
     def ok(players: Sequence[SwapPlayer]) -> bool:
-        return sum(1 for p in players if tags.get(p.name) != "Cash") >= GPP_MIN_NOT_CASH_ONLY
+        return sum(1 for p in players if tags.get(p.name) in GPP_MARKS) >= GPP_MIN_NOT_CASH_ONLY
 
     return ok
 
@@ -193,6 +218,16 @@ def cash_lineups(
     return [[a[i] for i in range(len(ROSTER_SLOTS))] for a in found], complete
 
 
+def can_stack(qb: SwapPlayer, pool: Sequence[SwapPlayer]) -> bool:
+    """Can ANY lineup stack this QB from `pool`: at least two of his pass catchers and one non-DST player from
+    his opponent (the `is_stacked` rule)? A QB who cannot is left out of the GPP search: the search cannot see
+    that, so it used to spend its whole share of the time limit on a stack that does not exist (a 2026-10-17
+    run of a real 63-player pool: 7 of 12 QBs, 57 of 60 seconds, and the other five left short of time)."""
+    mates = sum(1 for p in pool if p.team == qb.team and p.position in PASS_CATCHERS)
+    back = any(p.team == qb.opp and p.position not in ("DST", "QB") for p in pool)
+    return mates >= 2 and back
+
+
 def _stack_feasible(qb: SwapPlayer):
     """A `top_lineups(feasible=...)` for one QB's stack: from a partial lineup, can the slots still to fill
     hold the pass catchers and the bring-back it still needs? (Never says no to a lineup that can pass.)"""
@@ -224,7 +259,7 @@ def stacked_lineups(
     `per_qb` lineups that hold two of his pass catchers and one of his opponent's players (`is_stacked`),
     cutting every branch that can no longer reach a stack (`_stack_feasible`). The time left is shared out
     evenly, so a short budget thins every QB's list instead of dropping the last QBs."""
-    quarterbacks = [p for p in pool if p.position == "QB"]
+    quarterbacks = [qb for qb in pool if qb.position == "QB" and can_stack(qb, pool)]
     qb_slot = ROSTER_SLOTS.index("QB")
     found: dict[frozenset[str], list[SwapPlayer]] = {}
     complete = True
@@ -536,15 +571,25 @@ def suggest_builds(
             edge["Name"], edge.get("GameStart", pd.Series("", index=edge.index)), strict=True
         )
     }
-    number = 1
+    picked: list[tuple[str, Scored, str]] = []  # (kind, pick, stack name), in the order chosen
 
-    cash_pool = pool_for(edge, tags, CASH_TAGS, now=now, metric=metric) if cash_builds else []
-    gpp_pool = pool_for(edge, tags, GPP_TAGS, now=now, metric=metric) if gpp_builds != 0 else []
+    def timed(phase: str, since: float) -> float:
+        """Add the time since `since` to `phase` (a phase that runs twice, cash and GPP, adds up)."""
+        now_ = time.monotonic()
+        report.phases[phase] = report.phases.get(phase, 0.0) + now_ - since
+        return now_
+
+    t = time.monotonic()
+    cash_pool = pool_for(edge, tags, CASH_TAGS, now=now, metric=metric, any_dst=True) if cash_builds else []
+    gpp_pool = pool_for(edge, tags, GPP_TAGS, now=now, metric=metric, any_dst=True) if gpp_builds != 0 else []
     report.candidates = {"cash": len(cash_pool), "gpp": len(gpp_pool)}
+    timed("candidates", t)
 
     if cash_builds:
+        t = time.monotonic()
         lineups, done = cash_lineups(cash_pool, cap=cap, deadline=cash_deadline)
         report.complete = report.complete and done
+        t = timed("search", t)
         scored = score(
             lineups,
             specs,
@@ -555,10 +600,10 @@ def suggest_builds(
             seed=seed,
             field=field,
         )
+        t = timed("simulate", t)
         picks = choose(scored, cash_builds, key=cash_key)
-        for pick in picks:
-            report.builds.append(_build(number, "cash", f"Cash build {number}", pick))
-            number += 1
+        timed("choose", t)
+        picked.extend(("cash", pick, "") for pick in picks)
         if len(picks) < cash_builds:
             report.notes.append(
                 f"Only {len(picks)} cash build(s): the cash pool ({len(cash_pool)} players) does not hold "
@@ -566,8 +611,10 @@ def suggest_builds(
             )
 
     if gpp_builds != 0:
+        t = time.monotonic()
         lineups, done = stacked_lineups(gpp_pool, cap=cap, deadline=deadline, leaf_ok=not_all_cash(tags))
         report.complete = report.complete and done
+        t = timed("search", t)
         scored = score(
             lineups,
             specs,
@@ -578,14 +625,13 @@ def suggest_builds(
             seed=seed,
             field=field,
         )
+        t = timed("simulate", t)
         if gpp_builds is None:
             picks = choose_per_qb(scored, key=gpp_key)
         else:
             picks = choose(scored, gpp_builds, key=gpp_key, max_per_player=exposure_cap(gpp_builds))
-        for pick in picks:
-            name = stack_name(pick.players)
-            report.builds.append(_build(number, "gpp", f"GPP build {number}  ·  {name}", pick, stack=name))
-            number += 1
+        timed("choose", t)
+        picked.extend(("gpp", pick, stack_name(pick.players)) for pick in picks)
         if not lineups:
             report.notes.append(
                 "No stacked GPP lineup fits: a stack needs a QB, two of his pass catchers and one of his "
@@ -611,12 +657,53 @@ def suggest_builds(
                     f"{exposure_cap(gpp_builds)} builds."
                 )
 
+    report.builds = number_builds(picked)
+
     report.seconds = time.monotonic() - started
     if not report.complete:
         report.notes.append(
             "The time limit cut the search short: a better build may exist (raise it with `--seconds`)."
         )
     return report
+
+
+def display_key(kind_and_pick: tuple[str, Scored, str]):
+    """The order builds are listed in: Cash before GPP, then by quarterback (name, A to Z), then the highest
+    `CalPts` total first, then the cheaper lineup and the names, so the order never depends on input order."""
+    kind, pick, _ = kind_and_pick
+    qb = next((p.name for p in pick.players if p.position == "QB"), "")
+    return (
+        kind != "cash",
+        qb,
+        -round(pick.projection, VALUE_DECIMALS),
+        pick.salary,
+        lineup_key(pick),
+    )
+
+
+def number_builds(picked: Sequence[tuple[str, Scored, str]]) -> list[Build]:
+    """The chosen lineups as `Build`s in display order (`display_key`), numbered 1..n down that order (Sam,
+    2026-10-17: Copy builds' "1,4,6" must match what the Suggested tab shows). Which lineups were chosen is
+    decided by the simulator's odds; this only orders and numbers them."""
+    builds = []
+    for number, (kind, pick, name) in enumerate(sorted(picked, key=display_key), start=1):
+        title = f"Cash build {number}" if kind == "cash" else f"GPP build {number}  ·  {name}"
+        builds.append(_build(number, kind, title, pick, stack=name))
+    return builds
+
+
+def phase_lines(phases: dict[str, tuple[float, int]]) -> list[str]:
+    """The run's phase times for the terminal, in the order they ran, one per line: seconds, the share of the
+    total and (where the phase talks to the sheet) the API requests it made, then a total. `phases` maps a
+    name to (seconds, requests); a phase that made no sheet request shows none."""
+    total = sum(seconds for seconds, _ in phases.values())
+    lines = ["Phase times:"]
+    for name, (seconds, requests) in phases.items():
+        share = f"{seconds / total:>4.0%}" if total > 0 else "   -"
+        calls = f"  {requests} request{'' if requests == 1 else 's'}" if requests else ""
+        lines.append(f"  {name:<18}{seconds:>6.1f} s  {share}{calls}")
+    lines.append(f"  {'total':<18}{total:>6.1f} s")
+    return lines
 
 
 def _build(number: int, kind: str, title: str, pick: Scored, stack: str = "") -> Build:

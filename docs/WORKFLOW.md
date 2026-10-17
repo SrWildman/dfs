@@ -206,7 +206,7 @@ dfs export -o lineups.csv
 ```
 
 Before that, if you want a starting point: `dfs lineups suggest` writes complete builds from your pool to the **Suggested** tab (3 cash, and GPP builds with a stack for every QB, two each when they fit, each at least 3 players
-apart, FLEX on the latest kickoff), and **Lineup Tools > Copy build to Lineups** drops one into the first empty lineup. It never touches a lineup that has names.
+apart, FLEX on the latest kickoff), and **Lineup Tools > Copy builds to Lineups** asks which builds (`1,4,6` or `all`) and drops them into the empty lineups in order, telling you which went where and what did not fit. It never touches a lineup that has names.
 
 Pair each finished lineup to a real DK contest entry in DK Upload (Entry
 ID, Contest Name, Contest ID, Entry Fee, then the roster-slot columns),

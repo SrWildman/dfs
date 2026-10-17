@@ -264,7 +264,7 @@ CORE_NOTES = {
         "Where his salary ranks among his team's players at his position (1 = the highest-priced). A proxy "
         "for the depth chart, not a measured share: TmRank 1 at WR is that team's WR1 by price."
     ),
-    "CEIL": _GROUP + " This one is ceiling detail: CeilPct, Leverage, OwnStatus, Floor, CeilM and Bust%.",
+    "CEIL": _GROUP + " This one is ceiling detail: CeilPct, Leverage, OwnStatus, Floor and CeilM.",
     "CeilPct": "His Ceiling's percentile within his position, 0-100. A proxy for upside before ownership.",
     "Leverage": (
         "CeilPct minus his ownership percentile within his position (-100 to +100). Positive = more upside "

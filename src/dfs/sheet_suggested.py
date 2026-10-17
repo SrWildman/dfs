@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from dfs import perf
 from dfs.kickoff import kickoff_label
 from dfs.lineup_suggest import Build, SuggestReport
 from dfs.models import ROSTER_SLOTS
@@ -53,10 +54,12 @@ GAME_COLUMN_LETTER = column_letter(len(COLUMNS))
 TOTAL_LABEL = "Total"
 TITLE = "SUGGESTED LINEUPS  —  complete builds from your pool, scored by the simulator"
 HOW_TO = (
-    "To use one: Lineup Tools > Copy build to Lineups (it goes into the first empty block and never "
-    "overwrites your names). Nothing on this tab changes Lineups on its own. Name and Team tints, as on "
-    "Lineups: blue = the QB's stack, amber = his bring-back, lavender = other correlated players."
+    "To use some: Lineup Tools > Copy builds to Lineups (type 1,4,6 or all; they go into the empty blocks "
+    "in order and never overwrite your names). Cash builds first, then GPP; each by QB, best CalPts total "
+    "first. Name and Team tints, as on Lineups: blue = the QB's stack, amber = his bring-back, lavender = "
+    "other correlated players."
 )
+ANY_DST_NOTE = "plus any DST on the slate (pooled or not)"
 EMPTY = "No builds yet. Put players in your pool (Cash, GPP or Both) and run `dfs lineups suggest`."
 WIDTHS = [56, 170, 48, 48, 70, 62, 92, 56, 66, 74, 62, 62]
 FIRST_BUILD_ROW = 5  # rows 1-3 are the title, the status and the how-to; row 4 is blank
@@ -85,13 +88,15 @@ def status_line(
     gpp_target: float,
     lines_text: str | None = None,
 ) -> str:
-    """ "CalPts · pool 47 Cash / 51 GPP · cash line 143.9 · GPP target 190 · 8 builds in 3 s". `lines_text`
-    (what the Cash % and Top 1% were measured against, `SimLines.status`) replaces the two fixed numbers."""
+    """ "CalPts · pool 47 Cash / 51 GPP + any DST · cash line 143.9 · GPP target 190 · 8 builds in 3 s".
+    `lines_text` (what the Cash % and Top 1% were measured against, `SimLines.status`) replaces the two fixed
+    numbers. The pool counts include every defense on the slate (any DST may be used, pooled or not)."""
     pool = report.candidates
     if not pool and not report.builds:  # nothing has been run yet (a fresh template or week)
         return "Not run yet: `dfs lineups suggest` fills this tab from your pool."
     return (
-        f"{metric}  ·  pool {pool.get('cash', 0)} for Cash / {pool.get('gpp', 0)} for GPP  ·  "
+        f"{metric}  ·  pool {pool.get('cash', 0)} for Cash / {pool.get('gpp', 0)} for GPP, "
+        f"{ANY_DST_NOTE}  ·  "
         + (lines_text or f"cash line {cash_line:g}  ·  GPP target {gpp_target:g}")
         + f"  ·  {len(report.builds)} build"
         f"{'' if len(report.builds) == 1 else 's'} in {report.seconds:.0f} s"
@@ -232,15 +237,31 @@ def write_suggested(
     cash_line: float,
     gpp_target: float,
     lines_text: str | None = None,
+    timings: dict[str, tuple[float, int]] | None = None,
 ) -> str:
-    """Write and style the whole tab (it is rebuilt from scratch every run)."""
-    from dfs.sheet_style import _HEADER_FMT, _SUBHEAD_FMT, _TITLE_FMT, INK_MUTED, WHITE, _chip, _num
-
+    """Write and style the whole tab (it is rebuilt from scratch every run). The styling is one batch (the
+    formatting requests are queued and sent together: it used to be one round trip per cell range, several
+    hundred of them for a full set of builds, which is what made the run sit idle after printing).
+    `timings`, when given, gets `"write tab"` and `"format tab"` -> (seconds, API requests)."""
     layout = build_layout(
         report, edge, metric=metric, cash_line=cash_line, gpp_target=gpp_target, lines_text=lines_text
     )
+    with perf.measure(timings, "write tab"):
+        client.write_tab(TAB, layout.rows)
+    with perf.measure(timings, "format tab"), client.batched():
+        _style(client, layout, report)
+    return (
+        f"{TAB}: {len(report.builds)} build(s) written ({len(layout.rows)} rows)"
+        if report.builds
+        else f"{TAB}: cleared (no builds)"
+    )
+
+
+def _style(client: SheetsClient, layout: Layout, report: SuggestReport) -> None:
+    """Every format, rule, width and tint of the tab, for the rows `layout` describes."""
+    from dfs.sheet_style import _HEADER_FMT, _SUBHEAD_FMT, _TITLE_FMT, INK_MUTED, WHITE, _chip, _num
+
     last_row = max(len(layout.rows), 40)
-    client.write_tab(TAB, layout.rows)
     client.clear_conditional_formats(TAB)
     client.format_range(
         TAB,
@@ -325,11 +346,6 @@ def write_suggested(
             name_blocks=_runs(layout.player_rows),
             header_names={"Pos.": "Slot", "Opp.": "Opp"},
         )
-    return (
-        f"{TAB}: {len(report.builds)} build(s) written ({len(layout.rows)} rows)"
-        if report.builds
-        else f"{TAB}: cleared (no builds)"
-    )
 
 
 def _runs(rows: list[int]) -> list[tuple[int, int]]:

@@ -132,6 +132,7 @@ IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 # `Boom%` right after `ValAdj`, `Edge` (the token chips) right after `Flags` -- not merged into `Flags`, so
 # bold names and flag priority are unchanged. All four are linked (VLOOKUP against EdgeRaw, where they
 # are APPENDED after `NameKey`; display order here is independent of EdgeRaw's).
+# `Bust%` (2026-10-17): moved out of `CEILING_DETAIL` to sit right after `Boom%`, its mirror image.
 # Shadow projections (2026-10-17): `EspnPts` and `PropPts` right after `CalPts`, on all three tabs, linked
 # like `CalPts`. Context only until Model Check has 3 scored weeks of them (`derived.EDGE_SOURCE_COLUMNS`).
 DECISION = [
@@ -145,6 +146,7 @@ DECISION = [
     "ValAdj",
     "Hit3x%",
     "Boom%",
+    "Bust%",
     "Ceil",
     "CeilVal",
     "Own%",
@@ -193,8 +195,8 @@ GAME = [
 # `LevBasis` renamed to `OwnStatus` in that same pass (Leverage's own
 # demotion left it gating `Own%`, a spine column, not describing
 # Leverage -- the old name no longer said what it does).
-# Edge Finder: the model's own `Floor`, `CeilM` and `Bust%` join the group (beside TFFB's `Ceil`/`Leverage`).
-CEILING_DETAIL = ["CeilPct", "Leverage", "OwnStatus", "Floor", "CeilM", "Bust%"]
+# Edge Finder: the model's own `Floor` and `CeilM` join the group (beside TFFB's `Ceil`/`Leverage`).
+CEILING_DETAIL = ["CeilPct", "Leverage", "OwnStatus", "Floor", "CeilM"]
 
 # All linked (VLOOKUP against EdgeRaw).
 MOVEMENT = ["ImpliedMove", "TotMove", "SpdMove", "GameStart"]
@@ -261,6 +263,7 @@ LINKED_COLUMNS = [
     "ValAdj",
     "Hit3x%",
     "Boom%",
+    "Bust%",
     "CeilVal",
     "Avail",
     "Flags",

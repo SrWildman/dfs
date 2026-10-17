@@ -30,7 +30,7 @@ from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
-from dfs.sheet_lineup_sim import RETIRED_SLOT_HEADERS, SIM_SLOT_HEADERS, labels, sim_slots
+from dfs.sheet_lineup_sim import MARKER_HEADER, RETIRED_SLOT_HEADERS, SIM_SLOT_HEADERS, labels, sim_slots
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_pool_cells import POOL_OPTIONS
@@ -100,6 +100,11 @@ class DoctorClient:
 
     def time_zone(self) -> str | None:  # pragma: no cover
         """The workbook's time zone; None (not checked) for a client that cannot say."""
+        return None
+
+    def read_protection(self, tab_name: str) -> list[dict] | None:  # pragma: no cover
+        """The tab's protected ranges (`SheetsClient.read_protection`); None (not checked) for a client that
+        cannot say."""
         return None
 
     def has_data_validation(self, tab_name: str, a1_cell: str) -> bool | None:  # pragma: no cover
@@ -368,6 +373,54 @@ def _check_lineup_scoreboard(
                 "lineups-scoreboard",
                 f"{tab!r}: the Remaining-row labels under the scoreboard are wrong or stale at row(s) {bad} "
                 f"(expected {labels()} in {[names[i] for i in slots]}) -- run `dfs setup polish`",
+            )
+        ]
+    return []
+
+
+def _covers(bounds: tuple, row: int, col: int) -> bool:
+    """Is the 1-based `row`, 0-based `col` inside a grid range given as 0-based half-open
+    `(first_row, last_row, first_col, last_col)` where None is "no bound"?"""
+    first_row, last_row, first_col, last_col = bounds
+    return (
+        (first_row is None or row - 1 >= first_row)
+        and (last_row is None or row - 1 < last_row)
+        and (first_col is None or col >= first_col)
+        and (last_col is None or col < last_col)
+    )
+
+
+def _check_lineup_markers_are_typeable(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
+) -> list[DoctorIssue]:
+    """The Cash / GPP marker (column A of each lineup's Total row) is something Sam sets on every lineup, so
+    it must be carved out of Lineups' warning-only protection like the Name cells (2026-10-17). Reads the
+    protection only; says nothing when the tab has no whole-sheet protection or the client cannot read it."""
+    tab = cfg.lineups.builder_tab
+    if tab not in tab_titles:
+        return []
+    header = [str(h).strip() for h in headers_by_tab.get(tab, [])]
+    if MARKER_HEADER not in header:
+        return []
+    column = header.index(MARKER_HEADER)
+    protections = client.read_protection(tab)
+    if protections is None:
+        return []
+    markers = [end + 1 for _start, end in LINEUPS_NAME_BLOCKS]
+    bad: list[int] = []
+    for protection in protections:
+        if not protection["whole_sheet"]:
+            continue
+        for row in markers:
+            if not any(_covers(b, row, column) for b in protection["unprotected"]) and row not in bad:
+                bad.append(row)
+    if bad:
+        cells = [f"{column_letter(column)}{row}" for row in sorted(bad)]
+        return [
+            DoctorIssue(
+                "lineups-marker-protected",
+                f"{tab!r}: the Cash/GPP marker cell(s) {cells} are behind the sheet protection, so setting "
+                "one shows a warning -- run `dfs setup protect`",
             )
         ]
     return []
@@ -721,6 +774,7 @@ def run_doctor(
     issues += _check_linked_edge_columns(cfg, tab_titles, headers_by_tab)
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
     issues += _check_lineup_scoreboard(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_lineup_markers_are_typeable(client, cfg, tab_titles, headers_by_tab)
     issues += _check_dk_upload_header(cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)

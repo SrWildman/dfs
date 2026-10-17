@@ -1284,8 +1284,8 @@ def test_top_plays_is_the_first_section_with_one_line_under_the_title_and_a_cash
         "Own%",
         "CalPts",
         "Boom%",
+        "Bust%",
         "Lev",
-        "",
         "",
         "Edge",
     ]
@@ -1375,3 +1375,21 @@ def test_the_writer_puts_the_favourites_in_two_hidden_columns_with_a_label_in_ro
     assert [r[gpp_col] for r in rows[1 : 1 + len(layout.favourites_gpp)]] == layout.favourites_gpp
     assert eft.KEY_COL == "P" and (eft.FAVOURITE_CASH_COL, eft.FAVOURITE_GPP_COL) == ("Q", "R")
     assert writer.HIDDEN_FIRST == eft.ID_COL and writer.HIDDEN_LAST == eft.LAST_COLUMN == "R"
+
+
+def test_bust_pct_follows_boom_pct_in_every_gpp_block_and_the_matchup_rows():
+    """Sam, 2026-10-17: Bust% next to Boom% in the GPP blocks (it took CeilM's slot), Top plays GPP and the
+    nested Matchup player rows. Every block keeps its slot count: Edge is still the last of the six."""
+    for columns in (eft.GPP_COLUMNS, eft.TOP_GPP_COLUMNS, eft.MATCHUP_COLUMNS):
+        assert columns[columns.index("Boom%") + 1] == "Bust%"
+    assert "CeilM" not in eft.GPP_COLUMNS
+    assert eft.COLOUR_KINDS["Bust%"] == eft.COLOUR_BAD  # the red scale: high is bad
+    layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
+    gpp_header = next(h for h in layout.header_rows if "Boom%" in layout.rows[h - 1][: eft.FIRST_TRAILING])
+    names = layout.rows[gpp_header - 1]
+    assert names[names.index("Boom%") + 1] == "Bust%"
+    bust = names.index("Bust%")
+    assert any(
+        kind == eft.COLOUR_BAD and letter == eft.column_letter(bust)
+        for kind, letter, _a, _b in layout.colour_blocks
+    )

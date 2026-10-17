@@ -12,8 +12,9 @@ One small Google Apps Script is bound to the sheet. It does six things, and noth
    (column A only; the Total row's marker and every formula stay). It reads each player's `Position` and `GameStart` from EdgeRaw by name, treats "now" as Eastern time (`America/New_York`, the
    zone TFFB writes kickoffs in) and **never moves a player whose game has started**. The dialog lists every lineup it would change and asks before it writes; a tie, a missing kickoff or a started game is left
    alone and reported. The rule is `src/dfs/flex_order.py`'s, and `tests/test_apps_script.py` runs the same cases through both.
-5. **Lineup Tools > Copy build to Lineups** (version 4). Asks for a build number from the **Suggested** tab (the dialog lists them), then copies that build's nine names into the **first lineup block on Lineups with no name in it** and
-   sets its Cash / GPP marker; it shows what it will copy and asks first, never writes into a block that has a name, and says so when every block is taken. `tests/test_apps_script.py` reads the same Suggested grid with
+5. **Lineup Tools > Copy builds to Lineups…** (version 6; versions 4 and 5 copied one build). Asks which builds of the **Suggested** tab: type `1,4,6` or `all` (the prompt lists the builds by kind). It copies each one's nine
+   names, in the order typed (`all` is Suggested's own order), into the **next lineup block on Lineups with no name in it**, in block order, and sets that block's Cash / GPP marker. It shows what will go where and asks first, never writes
+   into a block that has a name, then reports which build went into which lineup and which builds found no empty block left (or are not on Suggested, or were not understood). `tests/test_apps_script.py` reads the same Suggested grid with
    both this script and `sheet_suggested.parse_builds`.
 6. **Version stamp.** Each time the sheet is opened it writes its version into a hidden named range, `DFS_SCRIPT_VERSION` (a cell on the hidden `NameAlias` tab).
    `dfs doctor` reads it and warns if the script is missing or older than the repo's.
@@ -27,7 +28,7 @@ If the script cannot find the player (his `Id` is blank, or EdgeRaw does not hav
 The script before this one is kept for the record in `apps_script/legacy_Code.gs`. Do not paste it back: it acts on whichever sheet is active (run from Player Pool it wipes the Name formulas)
 and clears every row between the lineup headers, Totals included.
 
-## Paste it (5 steps; do the template once and Week 5 once, weekly copies inherit it)
+## Paste it (5 steps; do the template once and the live week once, weekly copies inherit it)
 
 1. Open the sheet in a browser: **Extensions > Apps Script**. A script editor opens with one file, `Code.gs`.
 2. Click inside the editor, select everything (Cmd-A) and delete it.
@@ -47,7 +48,7 @@ dropdown with the `Pool` dropdown and added the add-a-player box: a sheet still 
 script's `restoreFormula_` lets EdgeRaw settle, tries the plain write, and if a strict dropdown refuses the formula's result (a player taken out of the pool shows a blank) it lifts the rule for that one
 write and puts it back. `dfs setup polish` and every Edge Finder write now also make the Pool dropdowns warnings rather than rejections, so a sheet that has been polished never needs the workaround.
 
-**Version 4** (the Week 6 round) adds **Lineup Tools > Fix FLEX order** and **Copy build to Lineups**; a sheet still on version 3 simply has no such menu item. **Version 5** moves the add-a-player box into the Name column of row 1 (it held a separate label with the box one cell to its right: a name typed over the label left the version-4 script nowhere to look, and the box did nothing). Until version 5 is pasted, the new layout works only through `dfs sync`, which adds a name left in the box.
+**Version 4** (the Week 6 round) adds **Lineup Tools > Fix FLEX order** and **Copy build to Lineups**; a sheet still on version 3 simply has no such menu item. **Version 5** moves the add-a-player box into the Name column of row 1 (it held a separate label with the box one cell to its right: a name typed over the label left the version-4 script nowhere to look, and the box did nothing). Until version 5 is pasted, the new layout works only through `dfs sync`, which adds a name left in the box. **Version 6** (2026-10-17) turns **Copy build to Lineups** into **Copy builds to Lineups…**: several builds at once (`1,4,6` or `all`) into the empty blocks in order. Until it is pasted the old single-build menu item keeps working.
 
 ## Manual test checklist (needs a browser; the pure functions are unit-tested with node in `tests/test_apps_script.py`)
 
@@ -62,5 +63,6 @@ write and puts it back. `dfs setup polish` and every Edge Finder write now also 
   and Player Pool's Name formulas are untouched.
 - Lineups: build one lineup with a WR in FLEX whose game is earlier than a WR in a WR slot, then **Lineup Tools > Fix FLEX order**: the dialog names both players ("X to FLEX (plays SNF), Y to WR");
   YES swaps the two typed names and nothing else. Run it again: "already has the latest kickoff". Late on Sunday with the early games started, it leaves the lineup alone and says why.
-- Suggested: after `dfs lineups suggest`, **Lineup Tools > Copy build to Lineups**, enter a build number: the dialog names the build and the empty lineup it will use; YES fills column A of that block and the
-  Total row's marker. Run it again with another build: it goes to the next empty block. With every block holding a name it refuses.
+- Suggested: after `dfs lineups suggest`, **Lineup Tools > Copy builds to Lineups…**, enter `1,4,6`: the dialog names each build and the empty lineup it will use; YES fills column A of those blocks and each Total row's marker, then
+  an alert reports what went where. Enter `all` with more builds than empty blocks: the extra builds are listed as "No empty lineup left". Run it again: it goes to the next empty blocks. Enter `99` or `x`: it says so and writes nothing.
+  With every block holding a name it refuses.

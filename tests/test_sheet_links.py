@@ -431,7 +431,9 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
         # GameEnv..Wind merged, plus USAGE's Snap% and the five usage metrics (Round 5 1b; usage work
         # 2026-10-02): this fixture has no USAGE label column between them, so they merge too.
         # (L..AL until `EspnPts` / `PropPts` joined the linked columns, 2026-10-17: two more ahead of it)
-        ("Player Pool", "N", "AN", True),
+        # (N..AN until `Bust%` moved out of the Ceiling detail group to sit after `Boom%`, 2026-10-17: the
+        # merged block starts one column later, its end is unchanged)
+        ("Player Pool", "O", "AN", True),
     ]
 
 
@@ -453,8 +455,8 @@ def test_link_edge_columns_groups_independently_once_zone_labels_separate_them()
     assert all(collapsed is True for _tab, _start, _end, collapsed in client.group_calls)
     expected = [
         (column_letter(header.index("O/U")), column_letter(header.index("TmRank"))),
-        # Edge Finder: Floor, CeilM and Bust% joined the Ceiling detail group
-        (column_letter(header.index("CeilPct")), column_letter(header.index("Bust%"))),
+        # Floor and CeilM joined the Ceiling detail group (Bust% moved up beside Boom%)
+        (column_letter(header.index("CeilPct")), column_letter(header.index("CeilM"))),
         (column_letter(header.index("ImpliedMove")), column_letter(header.index("GameStart"))),
         (column_letter(header.index("Venue")), column_letter(header.index("Wind"))),
         # USAGE: xFP/G (Edge Finder) is its last member
@@ -571,3 +573,22 @@ def test_write_edge_row_links_honors_a_non_default_header_row():
     client = HeaderRowSpy(header_row=["Name", "Edge ↗"])
     write_edge_row_links(client, "Lineups", [(12, 13)], "EdgeRaw", header_row=11)
     assert {a1 for _, a1, _ in client.update_calls} == {"B12:B13"}
+
+
+def test_bust_pct_sits_right_after_boom_pct_on_all_three_tabs_and_is_linked_once():
+    """Sam, 2026-10-17: Bust% wherever Boom% shows. It left the Ceiling detail group for the spine, linked
+    once (a second copy would be a duplicate link)."""
+    from dfs.sheet_columns import (
+        CEILING_DETAIL,
+        DECISION,
+        LINEUPS_COLUMN_ORDER,
+        PLAYER_POOL_COLUMN_ORDER,
+        PLAYER_POOL_RAW_COLUMN_ORDER,
+    )
+
+    assert DECISION.index("Bust%") == DECISION.index("Boom%") + 1
+    assert "Bust%" not in CEILING_DETAIL
+    for order in (PLAYER_POOL_RAW_COLUMN_ORDER, PLAYER_POOL_COLUMN_ORDER, LINEUPS_COLUMN_ORDER):
+        assert order.count("Bust%") == 1
+        assert order.index("Bust%") == order.index("Boom%") + 1
+    assert LINKED_EDGE_COLUMNS.count("Bust%") == 1
