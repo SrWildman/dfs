@@ -12,7 +12,20 @@ from dfs.sheets import column_letter
 
 BLOCKS = [(2, 10), (15, 23)]
 REPEATS = [14]
-HEADER = ["Name", "Pos.", "Team", "Opp.", "DK Sal", "Pts", *sls.SIM_SLOT_HEADERS, "Hit3x%", "Edge ↗"]
+HEADER = [
+    "Name",
+    "Pos.",
+    "Team",
+    "Opp.",
+    "DK Sal",
+    "Pts",
+    "AggPts",
+    "CalPts",
+    "EspnPts",
+    "PropPts",
+    *sls.SIM_SLOT_HEADERS,
+    "Edge ↗",
+]
 RESULTS = [
     ["Week", "Cash Pts", "Cash Line"],
     ["1", "131", "147.56"],
@@ -145,7 +158,8 @@ def test_each_built_lineup_gets_its_four_numbers_on_its_total_row_and_a_blank_fo
     report = _run(client)
     assert report.simulated == 1 and report.skipped == 1
     first, _, _, last = _slot_letters()
-    assert (first, last) == ("G", "J")  # the four columns right after Pts: AggPts, CalPts, Val, ValAdj
+    # the four columns right after the shadow totals: Val, ValAdj, Hit3x%, Boom%
+    assert (first, last) == ("K", "N")
     row_a = client.updates[f"{first}11:{last}11"][0]  # block 1's Total row is end + 1
     assert row_a[0] > 0 and row_a[1] > row_a[0] and 0 <= row_a[3] <= row_a[2] <= 1
     assert client.updates[f"{first}24:{last}24"] == [["", "", "", ""]]  # the unbuilt block is cleared
@@ -236,7 +250,7 @@ def test_the_lineups_column_order_no_longer_has_the_four_columns():
 
     assert not [h for h in LINEUPS_COLUMN_ORDER if sls.is_retired_sim_header(h)]
     assert all(h in LINEUPS_COLUMN_ORDER for h in sls.SIM_SLOT_HEADERS)
-    i = LINEUPS_COLUMN_ORDER.index("Pts")
+    i = LINEUPS_COLUMN_ORDER.index("PropPts")  # the scoreboard starts right after the shadow totals
     assert LINEUPS_COLUMN_ORDER[i + 1 : i + 5] == list(sls.SIM_SLOT_HEADERS)
 
 
@@ -262,20 +276,23 @@ def test_the_scoreboard_formats_the_marker_the_greens_and_the_matching_highlight
         ("A11", ["Cash", "GPP"]),
         ("A24", ["Cash", "GPP"]),
     ]  # column A of each Total row
+    typical, big, cash, top1 = _slot_letters()
     green = {(rng, v[0]) for rng, kind, v in client.rules if kind == "NUMBER_GREATER_THAN_EQ"}
-    assert ("I11", "0.5") in green and ("J11", "0.02") in green  # Cash % 50%, Top 1% 2%
+    assert (f"{cash}11", "0.5") in green and (f"{top1}11", "0.02") in green  # Cash % 50%, Top 1% 2%
     highlight = {(rng, v[0]) for rng, kind, v in client.rules if kind == "CUSTOM_FORMULA"}
-    assert ("I11", '=$A$11="Cash"') in highlight and ("J11", '=$A$11="GPP"') in highlight
+    assert (f"{cash}11", '=$A$11="Cash"') in highlight and (f"{top1}11", '=$A$11="GPP"') in highlight
     formats = dict(client.formats)
-    assert formats["G11:H11"]["numberFormat"]["pattern"] == "0.0"
-    assert formats["I11:J11"]["numberFormat"]["type"] == "PERCENT"
+    assert formats[f"{typical}11:{big}11"]["numberFormat"]["pattern"] == "0.0"
+    assert formats[f"{cash}11:{top1}11"]["numberFormat"]["type"] == "PERCENT"
+    # the cells the scoreboard used to sit in (AggPts, CalPts) lose the tiny muted label look
+    assert formats["G12"]["textFormat"]["bold"] is False and formats["H12"] == formats["G12"]
     assert "backgroundColor" in formats["A11"]  # the pale-yellow input look
 
 
 def test_label_notes_land_on_the_first_lineups_remaining_row():
     client = _ScoreboardClient()
     assert sls.apply_label_notes(client, "Lineups", header_row=1, name_blocks=BLOCKS, target=190.0) == 4
-    assert [cell for cell, _ in client.notes] == ["G12", "H12", "I12", "J12"]
+    assert [cell for cell, _ in client.notes] == [f"{c}12" for c in _slot_letters()]
 
 
 def test_lineup_types_reads_column_a_of_each_total_row_and_blank_means_both():
@@ -329,6 +346,7 @@ def test_an_older_wording_on_the_labels_is_replaced_even_when_no_lineup_has_play
     first, _, _, last = _slot_letters()
     assert client.updates[f"{first}12:{last}12"] == [["Typical", "Big night", "Cash %", "Top 1%"]]
     assert client.updates[f"{first}25:{last}25"] == [["Typical", "Big night", "Cash %", "Top 1%"]]
+    assert client.updates["G12"] == [[""]] and client.updates["H25"] == [[""]]  # the old homes are blanked
     assert client.notes  # and their notes
 
 
@@ -338,10 +356,37 @@ def test_write_labels_puts_the_current_wording_on_every_remaining_row_and_nothin
     message = sls.write_labels(client, "Lineups", header_row=1, name_blocks=BLOCKS)
     first, _, _, last = _slot_letters()
     assert client.updates == {
-        f"{first}{end + 2}:{last}{end + 2}": [["Typical", "Big night", "Cash %", "Top 1%"]]
-        for _start, end in BLOCKS
+        **{
+            f"{first}{end + 2}:{last}{end + 2}": [["Typical", "Big night", "Cash %", "Top 1%"]]
+            for _start, end in BLOCKS
+        },
+        # AggPts and CalPts held the labels before the scoreboard moved right: blanked, by header name
+        **{f"{letter}{end + 2}": [[""]] for letter in ("G", "H") for _start, end in BLOCKS},
     }
     assert "labels written" in message and client.single == [] and client.notes == []
+
+
+def test_the_scoreboard_is_found_by_label_wherever_the_columns_sit():
+    """Everything that reads the four numbers goes through `sim_slots` (header names), so moving the run, as
+    the shadow-projection columns did, changes nothing but where the letters land."""
+    base = ["Name", "Pos.", "Team", "Opp.", "DK Sal", "Pts"]
+    for header in (
+        [*base, "AggPts", "CalPts", *sls.SIM_SLOT_HEADERS, "Edge ↗"],
+        [*base, "AggPts", "CalPts", "EspnPts", "PropPts", *sls.SIM_SLOT_HEADERS, "Edge ↗"],
+        ["Note", *base, "x", "y", "z", *sls.SIM_SLOT_HEADERS],
+    ):
+        slots = sls.sim_slots(header)
+        assert slots is not None and [header[i] for i in slots] == list(sls.SIM_SLOT_HEADERS)
+        client = _ScoreboardClient()
+        client.header = header
+        assert sls.write_labels(client, "Lineups", header_row=1, name_blocks=BLOCKS)
+        first, last = column_letter(slots[0]), column_letter(slots[-1])
+        assert client.updates[f"{first}12:{last}12"] == [sls.labels()]
+        assert sls.apply_label_notes(client, "Lineups", header_row=1, name_blocks=BLOCKS, target=190.0) == 4
+        assert [cell for cell, _ in client.notes] == [f"{column_letter(i)}12" for i in slots]
+    # a split run is not a scoreboard: nothing is written, the message says why
+    split = [*base, sls.SIM_SLOT_HEADERS[0], "EspnPts", *sls.SIM_SLOT_HEADERS[1:]]
+    assert sls.sim_slots(split) is None
 
 
 def test_old_numbers_left_on_cleared_lineups_are_blanked_not_skipped():

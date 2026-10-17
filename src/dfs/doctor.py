@@ -30,6 +30,7 @@ from dfs.sheet_empty_guards import find_unguarded
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, describe_gap, find_gaps, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
+from dfs.sheet_lineup_sim import RETIRED_SLOT_HEADERS, SIM_SLOT_HEADERS, labels, sim_slots
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_pool_cells import POOL_OPTIONS
@@ -317,6 +318,56 @@ def _check_lineups_header_repeats(
                 "lineups-header-repeats",
                 f"{tab!r}: expected column A == {_LINEUPS_HEADER_MARKER!r} at row(s) "
                 f"{bad_rows} (per LINEUPS_NAME_BLOCKS) -- header repeats have drifted",
+            )
+        ]
+    return []
+
+
+def _check_lineup_scoreboard(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
+) -> list[DoctorIssue]:
+    """The simulator's four numbers sit in the columns named by `SIM_SLOT_HEADERS`, found by header text: they
+    must be one contiguous run, and every lineup's Remaining row must carry the four labels in them (and
+    nothing in the columns the scoreboard used to occupy). Reads Lineups only."""
+    tab = cfg.lineups.builder_tab
+    if tab not in tab_titles:
+        return []
+    header = headers_by_tab.get(tab, [])
+    slots = sim_slots(header)
+    if slots is None:
+        return [
+            DoctorIssue(
+                "lineups-scoreboard",
+                f"{tab!r}: {list(SIM_SLOT_HEADERS)} are not one contiguous run in the header -- the "
+                "simulator's Typical / Big night / Cash % / Top 1% have no home",
+            )
+        ]
+    names = [str(h).strip() for h in header]
+    stale_cols = [names.index(h) for h in RETIRED_SLOT_HEADERS if h in names]
+    first_remaining = LINEUPS_NAME_BLOCKS[0][1] + 2
+    last_remaining = LINEUPS_NAME_BLOCKS[-1][1] + 2
+    lo = min([slots[0], *stale_cols])
+    hi = max([slots[-1], *stale_cols])
+    rows = client.read_range(tab, f"{column_letter(lo)}{first_remaining}:{column_letter(hi)}{last_remaining}")
+
+    def cell(row: int, col: int) -> str:
+        r = row - first_remaining
+        c = col - lo
+        if r < 0 or r >= len(rows) or c >= len(rows[r]):
+            return ""
+        return str(rows[r][c]).strip()
+
+    bad = []
+    for _start, end in LINEUPS_NAME_BLOCKS:
+        row = end + 2
+        if [cell(row, i) for i in slots] != labels() or any(cell(row, i) for i in stale_cols):
+            bad.append(row)
+    if bad:
+        return [
+            DoctorIssue(
+                "lineups-scoreboard",
+                f"{tab!r}: the Remaining-row labels under the scoreboard are wrong or stale at row(s) {bad} "
+                f"(expected {labels()} in {[names[i] for i in slots]}) -- run `dfs setup polish`",
             )
         ]
     return []
@@ -669,6 +720,7 @@ def run_doctor(
     issues += _check_edge_header(cfg, tab_titles, headers_by_tab)
     issues += _check_linked_edge_columns(cfg, tab_titles, headers_by_tab)
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
+    issues += _check_lineup_scoreboard(client, cfg, tab_titles, headers_by_tab)
     issues += _check_dk_upload_header(cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)

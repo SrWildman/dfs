@@ -790,7 +790,7 @@ so) and the GPP target is `[sim] gpp_target` in `config.toml`, default 190 (the 
 
 **Lineups tab.** `dfs sync` (the full sync and `--live`) simulates every complete lineup together (20,000 draws, seed 0; with relative lines, the top-owned players of the whole
 slate join the run, so EdgeRaw's specs are built for every team, not only the lineups')
-and writes `Typical`, `Big night`, `Cash %` and `Top 1%` onto each lineup's Total row (under `AggPts`..`ValAdj`, labels on the Remaining row), plus the portfolio line (now on the Board) from the first
+and writes `Typical`, `Big night`, `Cash %` and `Top 1%` onto each lineup's Total row (under `Val`..`Boom%` since 2026-10-17, found by header name: `sheet_lineup_sim.SIM_SLOT_HEADERS`; labels on the Remaining row), plus the portfolio line (now on the Board) from the first
 lineup's `Remaining` row (`Portfolio`, expected cashes under `p90`, P(at least one cashes) under `P(cash)`, P(at least one
 reaches the target) under the GPP column). A half-built lineup or an unknown name is left blank. The numbers are not
 conditioned on games already played. Changing `gpp_target` no longer renames anything: the label is always `Top 1%`.

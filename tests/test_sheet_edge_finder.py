@@ -222,7 +222,18 @@ def test_gradients_are_per_position_block_and_the_pooled_override_is_a_condition
         for _rng, kind, v in client.rules
         if kind == "TEXT_CONTAINS" and v[0] not in ("add", "leverage", "In pool")
     }
-    assert chips == {"INJ+", "FADE↓", "USAGE↑", "USAGE↓", "Proj ▲", "Proj ▼", "Proj ▲?", "Proj ▼?"}
+    assert chips == {
+        "INJ+",
+        "FADE↓",
+        "USAGE↑",
+        "USAGE↓",
+        "Proj ▲",
+        "Proj ▼",
+        "Proj ▲?",
+        "Proj ▼?",
+        "Props ▲",
+        "Props ▼",
+    }
 
 
 def _wr_edge(n):
@@ -310,7 +321,9 @@ def test_edge_and_do_take_the_width_of_their_longest_real_value_capped():
     stacked = writer.fit_widths(
         eft.build_layout(_inputs(_edge([_player(1, Edge="INJ+ USAGE↑ Proj ▼ FADE↓ more chips")])))
     )
-    assert short[eft.EDGE_COL] < stacked[eft.EDGE_COL] <= writer.EDGE_MAX  # follows the value, never past 140
+    assert (
+        short[eft.EDGE_COL] < stacked[eft.EDGE_COL] <= writer.EDGE_MAX
+    )  # follows the value, never past EDGE_MAX
     assert stacked[eft.EDGE_COL] == writer.EDGE_MAX
     assert writer.DO_MAX >= short[eft.DO_COL] >= 90
 

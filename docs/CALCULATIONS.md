@@ -1995,6 +1995,24 @@ in the newest standings file. **Cash line vs same-format peers** = for each week
 format, the series' mean cash line minus the mean cash line of the *other* series in that week; averaged over those weeks
 (`sheet_contests.peer_gaps`). Positive = it took a higher score to cash. No shrinkage: `Weeks behind it` is the evidence.
 
+### The Props chip (2026-10-17, `signals.props_token`)
+
+`Props ▲ +x.x` / `Props ▼ -x.x` goes in a player's `Edge` cell when `PropPts - CalPts` is at least **3.0** either way
+(`signals.PROPS_CHIP_MIN_GAP`; the number is the gap to one decimal, `+` when the props are higher). It needs both numbers: a
+player with no `PropPts` (every DST, anyone missing a market) or no `CalPts` has no chip. It is **context only**: it is added
+to the joined `Edge` tokens after everything else is computed, so `CalPts`, every probability, `Flags`, the Edge Finder's
+`Do` verbs and Lineups' numbers are exactly what they were without it (`tests/test_signals.py` compares the two frames).
+The chip is grey both ways (`sheet_style.EDGE_CHIPS`): it says the props see him differently, not that either number is
+right. Model Check tracks it like the other chips, as two signal rows (`Props ▲ (3+ above CalPts)`, `Props ▼ (3+ below
+CalPts)`): n, the mean of actual minus `ProjPts` and minus `CalPts`, and a hit when he lands on the side the chip points
+to. A chipped player is not in an `Unflagged` baseline (any `Edge` token takes him out, as for the older chips). 3.0 is
+Sam's first-pass threshold, not fitted to anything; revisit it with the Model Check rows once a few weeks of them exist.
+
+**Lineups totals.** `EspnPts` and `PropPts` sit right after `CalPts` on Player Pool, PlayerPoolRaw and Lineups. A Lineups Total
+row shows the sum of a shadow projection only when **all nine slots have a number**
+(`sheet_style._shadow_total_formula`: `=IF(COUNT(range)=9,SUM(range),"")`, the 9 from the block), else blank, never a partial
+sum: a DST never has `PropPts`, so a `PropPts` Total is blank for every lineup that has a DST.
+
 ### `EspnPts` and the shadow gating (2026-10-13)
 
 **`EspnPts`** (`sources/espn_projections.py`) is ESPN's own weekly projection from its public fantasy API

@@ -407,3 +407,43 @@ def test_implied_totals_come_from_the_projections_per_team():
     implied = signals.implied_by_team(projections)
     assert implied["LAR"] == 24.0 and implied["DEN"] == 20.5
     assert signals.implied_by_team(None).empty
+
+
+def test_the_props_chip_fires_at_a_three_point_gap_either_way_and_stays_quiet_otherwise():
+    assert signals.PROPS_CHIP_MIN_GAP == 3.0
+    assert signals.props_token(10.0, 14.2) == "Props ▲ +4.2"
+    assert signals.props_token(14.2, 10.0) == "Props ▼ -4.2"
+    assert signals.props_token(10.0, 13.0) == "Props ▲ +3.0"  # exactly 3.0 counts
+    assert signals.props_token(10.0, 12.9) == "" and signals.props_token(10.0, 7.1) == ""
+    for blank in (np.nan, None, ""):  # no props (a DST, an unrated player): no chip, never a guess
+        assert signals.props_token(10.0, blank) == "" and signals.props_token(blank, 10.0) == ""
+
+
+def test_props_tokens_follow_the_frame_and_need_both_columns():
+    frame = pd.DataFrame({"CalPts": [10.0, 10.0, np.nan, 20.0], "PropPts": [15.0, np.nan, 15.0, 11.0]})
+    assert list(signals.props_tokens(frame)) == ["Props ▲ +5.0", "", "", "Props ▼ -9.0"]
+    assert list(signals.props_tokens(frame.drop(columns="PropPts"))) == [""] * 4
+
+
+def test_the_props_chip_sits_after_the_other_tokens_in_the_edge_cell():
+    joined = signals._join_tokens(
+        pd.Series(["INJ+"]),
+        pd.Series([""]),
+        pd.Series([""]),
+        pd.Series(["Proj ▼"]),
+        pd.Series(["Props ▲ +4.2"]),
+    )
+    assert list(joined) == ["INJ+ Proj ▼ Props ▲ +4.2"]
+
+
+def test_a_props_projection_far_from_calpts_adds_the_chip_and_moves_no_number():
+    """Context only: the chip is in `Edge`, and CalPts and every probability are what they were without it."""
+    plain = _frame(avail_rb="").assign(CalPts=[15.0, 11.0, 5.0, 7.0, 14.0, 8.0])
+    with_props = plain.assign(PropPts=[19.0, 11.5, np.nan, 3.0, 14.0, np.nan])
+    a = signals.build_signals(plain, _data(), week=4).players.set_index("Name")
+    b = signals.build_signals(with_props, _data(), week=4).players.set_index("Name")
+    assert b.loc["Star", "Edge"].endswith("Props ▲ +4.0") and b.loc["Te One", "Edge"].endswith("Props ▼ -4.0")
+    assert "Props" not in b.loc["Wr Two", "Edge"] and "Props" not in b.loc["Wr Three", "Edge"]  # close / none
+    assert b.loc["Rb One", "Edge"] == a.loc["Rb One", "Edge"]  # a gap under 3.0 changes nothing
+    numbers = [c for c in a.columns if c != "Edge"]
+    pd.testing.assert_frame_equal(a[numbers], b[numbers])  # CalPts, Hit3x%, Boom%, ... all identical

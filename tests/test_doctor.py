@@ -5,10 +5,11 @@ from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
 from dfs.doctor import run_doctor
 from dfs.lineups import DK_UPLOAD_HEADER
-from dfs.sheet_columns import INTERNAL
+from dfs.sheet_columns import INTERNAL, LINEUPS_COLUMN_ORDER
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
 from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
+from dfs.sheet_lineup_sim import RETIRED_SLOT_HEADERS, labels, sim_slots
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_season_view import HEADER as SEASON_HEADER
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, edge_group_spans
@@ -122,7 +123,7 @@ def _base_config(**overrides) -> Config:
 _ALL_GOOD_TABS = {
     "EdgeRaw": [POOL_HEADER, *EDGE_SHEET_ORDER],
     "DK Upload": list(DK_UPLOAD_HEADER),
-    "Lineups": ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
+    "Lineups": list(LINEUPS_COLUMN_ORDER),
     "Player Pool": ["Pool", "Name", "Pos.", *LINKED_EDGE_COLUMNS],
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
     "Bankroll": [],
@@ -163,6 +164,24 @@ def _good_lineups_rows() -> list[list[str]]:
 _PLAYER_POOL_HEADER_RANGE = f"A{PLAYER_POOL_HEADER_ROW}:{PLAYER_POOL_HEADER_ROW}"
 
 
+def _scoreboard_read(header: list[str], *, stale: str | None = None, label_rows=None):
+    """The (range, grid) `_check_lineup_scoreboard` reads: every Remaining row's cells from the first
+    scoreboard (or retired) column to the last, with the four labels (`stale` in the first retired column)."""
+    slots = sim_slots(header)
+    retired = [header.index(h) for h in RETIRED_SLOT_HEADERS if h in header]
+    lo, hi = min([slots[0], *retired]), max([slots[-1], *retired])
+    first, last = LINEUPS_NAME_BLOCKS[0][1] + 2, LINEUPS_NAME_BLOCKS[-1][1] + 2
+    grid = [[""] * (hi - lo + 1) for _ in range(first, last + 1)]
+    for _start, end in LINEUPS_NAME_BLOCKS:
+        if label_rows is not None and end + 2 not in label_rows:
+            continue
+        for i, text in zip(slots, labels(), strict=True):
+            grid[end + 2 - first][i - lo] = text
+        if stale and retired:
+            grid[end + 2 - first][retired[0] - lo] = stale
+    return (f"{column_letter(lo)}{first}:{column_letter(hi)}{last}"), grid
+
+
 def _lineups_rows(player_pool_header: list[str] | None = None) -> dict[tuple[str, str], list[list[str]]]:
     # run_doctor re-reads Player Pool's header from PLAYER_POOL_HEADER_ROW
     # (A3: row 1 became the add-a-player control) -- defaults to
@@ -178,6 +197,8 @@ def _lineups_rows(player_pool_header: list[str] | None = None) -> dict[tuple[str
     # "all good" without knowing about this check; a test that
     # deliberately wants a bad H1 overrides this entry itself.
     rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [["6"]]
+    rng, grid = _scoreboard_read(_ALL_GOOD_TABS["Lineups"])
+    rows[("Lineups", rng)] = grid
     return rows
 
 
@@ -347,6 +368,38 @@ def test_run_doctor_flags_lineups_header_repeats_drift():
 
     issues = run_doctor(client, cfg, title="Week 1")
     assert any(i.check == "lineups-header-repeats" for i in issues)
+
+
+def test_run_doctor_flags_a_scoreboard_label_that_is_missing_stale_or_whose_columns_are_split():
+    cfg = _base_config()
+    header = _ALL_GOOD_TABS["Lineups"]
+    # healthy: nothing reported
+    assert not [
+        i
+        for i in run_doctor(FakeDoctorClient(_ALL_GOOD_TABS, _lineups_rows()), cfg, title="Week 1")
+        if i.check == "lineups-scoreboard"
+    ]
+    # one lineup's Remaining row has lost its labels (and one still carries an old `Typical` where AggPts is)
+    for kwargs in ({"label_rows": {12}}, {"stale": "Typical"}):
+        rows = _lineups_rows()
+        rng, grid = _scoreboard_read(header, **kwargs)
+        rows[("Lineups", rng)] = grid
+        found = [
+            i
+            for i in run_doctor(FakeDoctorClient(_ALL_GOOD_TABS, rows), cfg, title="Week 1")
+            if i.check == "lineups-scoreboard"
+        ]
+        assert len(found) == 1 and "dfs setup polish" in found[0].detail
+    # the four columns no longer one run: the scoreboard has no home
+    split = list(header)
+    split.insert(split.index("ValAdj"), "Stray")
+    tabs = {**_ALL_GOOD_TABS, "Lineups": split}
+    found = [
+        i
+        for i in run_doctor(FakeDoctorClient(tabs, _lineups_rows()), cfg, title="Week 1")
+        if i.check == "lineups-scoreboard"
+    ]
+    assert len(found) == 1 and "contiguous" in found[0].detail
 
 
 def test_run_doctor_flags_lineups_header_wrong_at_row_one():

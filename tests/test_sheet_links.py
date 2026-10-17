@@ -150,11 +150,16 @@ def test_already_linked_columns_positions_never_move():
     # or before `Snap%` (39) moves.
     # Edge Finder (2026-10-07) APPENDED ten columns after `NameKey` (the last column): nothing at or before
     # it moves, so the pinned list below is the linked columns that existed before, unchanged.
-    from dfs.derived import EDGE_FINDER_COLUMNS
+    # Shadow projections (2026-10-17): `EspnPts` / `PropPts` joined LINKED_EDGE_COLUMNS (right after `CalPts`
+    # on Player Pool / PlayerPoolRaw / Lineups). They were already EdgeRaw columns APPENDED after the Edge
+    # Finder ones (2026-10-13), so, like those, they are not in the pinned list: nothing before them moves.
+    from dfs.derived import EDGE_FINDER_COLUMNS, EDGE_SOURCE_COLUMNS
 
-    appended = [c for c in LINKED_EDGE_COLUMNS if c in EDGE_FINDER_COLUMNS]
+    appended_names = {*EDGE_FINDER_COLUMNS, *EDGE_SOURCE_COLUMNS}
+    appended = [c for c in LINKED_EDGE_COLUMNS if c in appended_names]
     assert appended and all(EDGE_COLUMNS.index(c) > EDGE_COLUMNS.index("NameKey") for c in appended)
-    assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS if c not in EDGE_FINDER_COLUMNS] == [
+    assert all(c in LINKED_EDGE_COLUMNS for c in EDGE_SOURCE_COLUMNS)
+    assert [EDGE_COLUMNS.index(c) for c in LINKED_EDGE_COLUMNS if c not in appended_names] == [
         6,
         8,
         10,
@@ -425,7 +430,8 @@ def test_link_edge_columns_groups_and_collapses_game_ceiling_detail_movement_and
     assert client.group_calls == [
         # GameEnv..Wind merged, plus USAGE's Snap% and the five usage metrics (Round 5 1b; usage work
         # 2026-10-02): this fixture has no USAGE label column between them, so they merge too.
-        ("Player Pool", "L", "AL", True),
+        # (L..AL until `EspnPts` / `PropPts` joined the linked columns, 2026-10-17: two more ahead of it)
+        ("Player Pool", "N", "AN", True),
     ]
 
 

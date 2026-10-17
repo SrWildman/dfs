@@ -25,6 +25,8 @@ from dfs.results_analysis import is_thin, usable
 
 log = get_logger("results_signals")
 
+PROPS_UP_GROUP = f"Props ▲ ({signals.PROPS_CHIP_MIN_GAP:g}+ above CalPts)"
+PROPS_DOWN_GROUP = f"Props ▼ ({signals.PROPS_CHIP_MIN_GAP:g}+ below CalPts)"
 SIGNAL_GROUPS = [
     ("FADE↓", "down"),
     ("USAGE↑", "up"),
@@ -33,6 +35,8 @@ SIGNAL_GROUPS = [
     ("INJ+ questionable", "up"),
     ("Matchup top 8", "up"),
     ("Matchup bottom 4", "down"),
+    (PROPS_UP_GROUP, "up"),
+    (PROPS_DOWN_GROUP, "down"),
 ]
 BASELINE_POSITIONS = ("QB", "RB", "WR", "TE")
 BASELINE_PREFIX = "Unflagged "  # "Unflagged RB": the rosterable pool at that position in no signal group
@@ -271,6 +275,8 @@ def signal_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
         "INJ+ questionable": frame["InjFrom"] == "questionable",
         "Matchup top 8": (frame["MatchupGroup"] == "top") & frame["MatchupTop"],
         "Matchup bottom 4": (frame["MatchupGroup"] == "bottom") & frame["MatchupTop"],
+        PROPS_UP_GROUP: has.map(lambda parts: any(t.startswith(usage_r6.PROPS_UP) for t in parts)),
+        PROPS_DOWN_GROUP: has.map(lambda parts: any(t.startswith(usage_r6.PROPS_DOWN) for t in parts)),
     }
     r6_masks = {
         name: frame[column].fillna(False).astype(bool)

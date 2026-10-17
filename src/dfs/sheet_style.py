@@ -901,6 +901,10 @@ EDGE_CHIPS = {
     "Proj ▼": _chip(_SOFT_CRIT_BG, CRIT_FG),
     "Proj ▲?": _chip(FLAT_BG, FLAT_FG),
     "Proj ▼?": _chip(FLAT_BG, FLAT_FG),
+    # The shadow projection's chip (`Props ▲ +4.2`): flat grey both ways, since it only says the props see him
+    # differently, not that either number is right. Context only.
+    "Props ▲": _chip(FLAT_BG, FLAT_FG),
+    "Props ▼": _chip(FLAT_BG, FLAT_FG),
 }
 # Header text of the model's probability and range columns, muted for a low-projected DST (see
 # `probabilities.PROB_DST_LOW_CONFIDENCE_BELOW`): the values are shown but understate upside.
@@ -1551,6 +1555,10 @@ BUILDER_WIDTHS = {
     "Pts": 65,
     "AggPts": 65,  # Part C, C5: same width as Pts, right beside it
     "CalPts": 68,  # Edge Finder: right after AggPts
+    # Shadow projections (2026-10-17): narrow, one decimal. Sam asked for ~56, but "EspnPts" clips there; he
+    # chose 69, which is what the content fit (`sheet_clipping`) lands on.
+    "EspnPts": 69,
+    "PropPts": 69,
     "Hit3x%": 70,
     "Boom%": 70,
     "Bust%": 70,
@@ -2070,6 +2078,18 @@ def polish_lineups_identity_cells(
     return f"{tab}: Name/Pos./Team plain white across {len(name_blocks)} lineup block(s)"
 
 
+# The shadow projections that get a Total on Lineups (2026-10-17).
+SHADOW_TOTAL_COLUMNS = ("EspnPts", "PropPts")
+
+
+def _shadow_total_formula(letter: str, start: int, end: int) -> str:
+    """A lineup's total of one shadow projection, but only when EVERY slot has a number: a partial sum would
+    read as a low projection (a DST never has `PropPts`, and a player the source did not rate is blank), so
+    the cell stays blank instead. The slot count comes from the block, not a literal."""
+    cells = f"{letter}{start}:{letter}{end}"
+    return f'=IF(COUNT({cells})={end - start + 1},SUM({cells}),"")'
+
+
 def polish_lineups_totals_rows(
     client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]], salary_cap: int
 ) -> str:
@@ -2147,8 +2167,11 @@ def polish_lineups_totals_rows(
     def col(name: str) -> str | None:
         return column_letter(header.index(name)) if name in header else None
 
+    # The shadow projections' totals are written below, so they are not "dead" here.
     dead_columns = [
-        c for c in ("O/U", "Spread", "Team Implied", "OppPosRank", *LINKED_EDGE_COLUMNS) if col(c)
+        c
+        for c in ("O/U", "Spread", "Team Implied", "OppPosRank", *LINKED_EDGE_COLUMNS)
+        if col(c) and c not in SHADOW_TOTAL_COLUMNS
     ]
     ceil_col = col("Ceil")
     pts_col = col("Pts")
@@ -2183,6 +2206,11 @@ def polish_lineups_totals_rows(
             pts_sum = f"=SUM({pts_col}{start}:{pts_col}{end})"
             client.update_range(tab, f"{pts_col}{totals_row}", [[pts_sum]])
             summed += 1
+        for shadow in SHADOW_TOTAL_COLUMNS:
+            if col(shadow):
+                shadow_total = _shadow_total_formula(col(shadow), start, end)
+                client.update_range(tab, f"{col(shadow)}{totals_row}", [[shadow_total]])
+                summed += 1
         if rstr_col:
             rstr_sum = f"=SUM({rstr_col}{start}:{rstr_col}{end})"
             client.update_range(tab, f"{rstr_col}{totals_row}", [[rstr_sum]])

@@ -16,6 +16,7 @@ from dfs.sheet_color_scales import (
     ZERO_EXCLUDED_COLUMNS,
     ZERO_GREY_BG,
 )
+from dfs.sheet_lineup_sim import SIM_SLOT_HEADERS
 from dfs.sheet_style import (
     AVAIL_CHIPS,
     BAND_BG,
@@ -1218,6 +1219,23 @@ def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
 
     assert "1 totals row(s)" in result
     assert "3 sum(s) written" in result
+
+
+def test_the_shadow_projection_totals_only_count_a_lineup_with_a_number_in_every_slot():
+    """EspnPts / PropPts get a Total on Lineups (not cleared like the other linked columns), blank unless all
+    nine slots have a value: a partial sum would read as a low projection (a DST never has PropPts)."""
+    header = ["Name", "Pos.", "Team", "Opp.", "DK Sal", "Pts", "AggPts", "CalPts", "EspnPts", "PropPts"]
+    client = FakeGuardrailsClient([*header, "Val", "Ceil", "Own%"])
+    polish_lineups_totals_rows(
+        client, "Lineups", header_row=1, name_blocks=[(2, 10), (15, 23)], salary_cap=50000
+    )
+    calls = {a1: rows for a1, rows in client.update_calls}
+    assert calls["I11"] == [['=IF(COUNT(I2:I10)=9,SUM(I2:I10),"")']]
+    assert calls["J11"] == [['=IF(COUNT(J2:J10)=9,SUM(J2:J10),"")']]
+    assert calls["J24"] == [['=IF(COUNT(J15:J23)=9,SUM(J15:J23),"")']]  # the slot count comes from the block
+    assert calls["G11"] == [[""]] and calls["H11"] == [[""]]  # AggPts / CalPts totals stay cleared
+    # written once each: not also blanked by the dead-column pass
+    assert [a for a, _ in client.update_calls].count("I11") == 1
 
 
 def test_polish_lineups_totals_rows_clears_the_totals_row_name_cells_typo_guard():
@@ -2666,7 +2684,13 @@ def test_style_board_colours_each_chalk_position_block_by_the_per_block_scheme()
 
 
 # Week 6, Slice 1: a lineup marked Cash whose Cash % is under 40% says so in Issues.
-_SIM_SLOTS_HEADER = [h for h in _HEADER_FOR_GUARDRAILS if h != "Val"] + ["AggPts", "CalPts", "Val", "ValAdj"]
+_SIM_SLOTS_HEADER = [h for h in _HEADER_FOR_GUARDRAILS if h != "Val"] + [
+    "AggPts",
+    "CalPts",
+    "EspnPts",
+    "PropPts",
+    *SIM_SLOT_HEADERS,
+]
 
 
 def test_weak_cash_formula_reads_the_marker_and_the_cash_percent_on_the_total_row():

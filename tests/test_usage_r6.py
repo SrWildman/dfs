@@ -126,6 +126,11 @@ def test_the_why_says_what_fired_how_big_the_measured_effect_is_and_when_the_evi
     assert "snap share down 11+ points" in u.chip_why(BY_ID["snap_pct|WR|change_down"])
 
 
+def test_edge_tokens_keep_the_props_chip_whole():
+    assert u.edge_tokens("INJ+ Props ▲ +4.2 Proj ▼") == ["INJ+", "Props ▲ +4.2", "Proj ▼"]
+    assert u.edge_tokens("Props ▼ -12.0") == ["Props ▼ -12.0"]
+
+
 def test_edge_tokens_keep_the_proj_chips_whole():
     assert u.edge_tokens("INJ+ FADE↓ Proj ▼") == ["INJ+", "FADE↓", "Proj ▼"]
     assert u.edge_tokens("Proj ▲? USAGE↑") == ["Proj ▲?", "USAGE↑"]

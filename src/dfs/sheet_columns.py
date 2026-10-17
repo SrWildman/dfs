@@ -132,11 +132,15 @@ IDENTITY = ["Name", "Pos.", "Team", "Opp."]
 # `Boom%` right after `ValAdj`, `Edge` (the token chips) right after `Flags` -- not merged into `Flags`, so
 # bold names and flag priority are unchanged. All four are linked (VLOOKUP against EdgeRaw, where they
 # are APPENDED after `NameKey`; display order here is independent of EdgeRaw's).
+# Shadow projections (2026-10-17): `EspnPts` and `PropPts` right after `CalPts`, on all three tabs, linked
+# like `CalPts`. Context only until Model Check has 3 scored weeks of them (`derived.EDGE_SOURCE_COLUMNS`).
 DECISION = [
     "DK Sal",
     "Pts",
     "AggPts",
     "CalPts",
+    "EspnPts",
+    "PropPts",
     "Val",
     "ValAdj",
     "Hit3x%",
@@ -252,6 +256,8 @@ BASE_COLUMN_ORDER = [
 LINKED_COLUMNS = [
     "AggPts",
     "CalPts",
+    "EspnPts",
+    "PropPts",
     "ValAdj",
     "Hit3x%",
     "Boom%",

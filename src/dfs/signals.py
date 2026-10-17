@@ -65,6 +65,31 @@ TOKEN_ORDER = [
     r6.PROJ_UP + r6.WEAK_MARK,
 ]
 SOURCE_NAMES = ("ffopportunity", "injuries", "depth")
+# The shadow-projection chip (2026-10-17): the props' projection and CalPts this far apart (either way)
+# puts `Props ▲ +x.x` / `Props ▼ -x.x` in the Edge cell. Context only: nothing reads it but Model Check.
+PROPS_CHIP_MIN_GAP = 3.0
+
+
+def props_token(cal: object, prop: object) -> str:
+    """`Props ▲ +4.2` when `PropPts` is at least `PROPS_CHIP_MIN_GAP` above `CalPts`, `Props ▼ -4.2` when
+    that far below, else "" (also "" when either is blank: a player with no props has no chip)."""
+    try:
+        gap = float(prop) - float(cal)
+    except (TypeError, ValueError):
+        return ""
+    if gap != gap or abs(gap) < PROPS_CHIP_MIN_GAP:
+        return ""
+    return f"{r6.PROPS_UP} +{gap:.1f}" if gap > 0 else f"{r6.PROPS_DOWN} -{abs(gap):.1f}"
+
+
+def props_tokens(frame: pd.DataFrame) -> pd.Series:
+    """`props_token` for every row of a frame with `CalPts` and `PropPts` (all "" when either column is
+    missing), aligned to the frame's index."""
+    if "CalPts" not in frame.columns or "PropPts" not in frame.columns:
+        return pd.Series("", index=frame.index)
+    return pd.Series(
+        [props_token(c, p) for c, p in zip(frame["CalPts"], frame["PropPts"], strict=True)], index=frame.index
+    )
 
 
 @dataclass
@@ -510,7 +535,9 @@ def build_signals(
         if r6_tokens is not None and not r6_tokens.empty
         else pd.Series("", index=players.index)
     )
-    players["Edge"] = _join_tokens(inj_token, tokens["TokenFade"], tokens["TokenUsage"], proj_token)
+    players["Edge"] = _join_tokens(
+        inj_token, tokens["TokenFade"], tokens["TokenUsage"], proj_token, props_tokens(players)
+    )
     return SignalOutput(
         players=players[[c for c in SIGNAL_COLUMNS if c in players.columns]],
         outs=outs,

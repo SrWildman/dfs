@@ -47,7 +47,9 @@ POOL_TAB = pc.POOL_TAB
 # grow. `fit_widths` does it.
 NAME_MIN, NAME_MAX = 155, 170
 WHY_MIN, WHY_MAX = 220, 300
-EDGE_MAX = 140
+# 205: four chips (`INJ+ USAGE↑ Proj ▼ Props ▲ +4.2`) need ~203 px (the Props chip, 2026-10-17); the column
+# is only that wide when a real value needs it, and Why gives the difference up.
+EDGE_MAX = 205
 DO_MAX = 160  # Sam said 140, but the audit (final say) cut "GPP leverage ★ (Proj ▼)", which needs ~153
 BUDGET = 1270
 SLOT_PX = 64

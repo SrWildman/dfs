@@ -114,7 +114,9 @@ EDGE_FINDER_NOTES = {
         "points over 3 games; USAGE↑ / USAGE↓ a back whose carry share rose 10+ points / fell 5+ points "
         "over his last 2 games against the 6 before; Proj ▼ / Proj ▲ the projection is likely too high / too "
         "low, because his recent usage spiked or slumped (the research shows projections over-react to both; "
-        "a ? means only the weaker evidence supports it). "
+        "a ? means only the weaker evidence supports it); Props ▲ +x.x / Props ▼ -x.x the Vegas props "
+        "projection (PropPts) is x.x above / below CalPts, shown when they are 3.0 or more apart. The Props "
+        "chip is context only: it changes nothing in Do, CalPts or any probability; Model Check tracks it. "
         f"{_CONTEXT_LABEL} Not part of Flags: bold names are unchanged."
     ),
 }
@@ -639,15 +641,16 @@ ISSUES_TOTAL_NOTE = (
 
 SHADOW_SOURCE_NOTES = {
     "EspnPts": (
-        "SHADOW: ESPN's own weekly projection, scored to DraftKings rules from its component stats (never "
-        "ESPN's fantasy points). Scored in Model Check every week; kept out of CalPts until it has 3 scored "
-        "weeks. Blank where ESPN has no projection for him."
+        "SHADOW: not in CalPts until 3 scored weeks. ESPN's own weekly projection, scored to DraftKings "
+        "rules from its component stats (never ESPN's fantasy points). Scored in Model Check every week. "
+        "Blank where ESPN has no projection for him."
     ),
     "PropPts": (
-        "SHADOW: Vegas player props turned into a DraftKings score (de-vigged lines and anytime-TD odds from "
-        "The Odds API, every book in the US region). Needs all the markets his position uses, so it is blank "
-        "rather than partial. Scored in Model Check every week; kept out of CalPts until it has 3 scored "
-        "weeks. Pulled Saturday (and refreshed Sunday for games not yet started)."
+        "SHADOW: not in CalPts until 3 scored weeks. Vegas player props turned into a DraftKings score "
+        "(de-vigged lines and anytime-TD odds from The Odds API, every book in the US region). Needs all the "
+        "markets his position uses, so it is blank rather than partial (always blank for a DST). Scored in "
+        "Model Check every week. Pulled Saturday (and refreshed Sunday for games not yet started). When it "
+        "is 3.0 or more from CalPts the Edge column shows a Props chip: context only."
     ),
 }
 
@@ -660,6 +663,7 @@ def player_tab_notes() -> dict[str, str]:
         **PERCENTILE_HELPER_NOTES,
         **SLATE_GAME_NOTES,
         **EDGE_FINDER_NOTES,
+        **SHADOW_SOURCE_NOTES,
         **usage_notes(),
     }
 
@@ -667,7 +671,7 @@ def player_tab_notes() -> dict[str, str]:
 def edgeraw_notes() -> dict[str, str]:
     """EdgeRaw's: the player tabs' plus the soft-yellow "Consider" explanation on `Name` (it lists everyone,
     pooled or not; Player Pool and Lineups never show the yellow)."""
-    return {**player_tab_notes(), **SHADOW_SOURCE_NOTES, "Name": NAME_WITH_CONSIDER}
+    return {**player_tab_notes(), "Name": NAME_WITH_CONSIDER}
 
 
 def edge_finder_tab_notes() -> dict[str, str]:

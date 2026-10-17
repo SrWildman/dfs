@@ -192,6 +192,25 @@ def test_signal_report_computes_means_and_hit_rates_by_hand():
     assert report["Thin"].all()
 
 
+def test_the_props_chip_is_tracked_as_two_directed_signal_rows_and_leaves_the_baseline():
+    """`Props ▲ +x.x` / `Props ▼ -x.x` (PropPts 3+ from CalPts) are signal rows like the other chips: n, the
+    mean residual against ProjPts and CalPts, and a hit when he lands on the side the chip points to."""
+    frame = _eval(
+        [
+            {"Edge": "Props ▲ +4.2", "DkActual": 16.0, "CalPts": 12.0},  # above CalPts: a hit for the ▲
+            {"Edge": "USAGE↑ Props ▲ +3.0", "Position": "RB", "DkActual": 9.0, "CalPts": 12.0},  # a miss
+            {"Edge": "Props ▼ -5.5", "DkActual": 5.0, "CalPts": 12.0},  # below CalPts: a hit for the ▼
+            {"DkActual": 10.0},  # unflagged WR
+        ]
+    )
+    report = results_signals.signal_report(frame).set_index("Signal")
+    up, down = report.loc[results_signals.PROPS_UP_GROUP], report.loc[results_signals.PROPS_DOWN_GROUP]
+    assert up["n"] == 2 and up["HitCal"] == 0.5 and up["VsCal"] == pytest.approx((4.0 - 3.0) / 2)
+    assert down["n"] == 1 and down["HitCal"] == 1.0 and down["VsCal"] == -7.0
+    assert report.loc["Unflagged WR", "n"] == 1  # the chipped WRs are not "unflagged"
+    assert report.loc["USAGE↑", "n"] == 1  # the older chip still counts once, beside Props
+
+
 def test_every_position_gets_an_unflagged_baseline_row_with_mean_residual_and_n():
     frame = _eval(
         [

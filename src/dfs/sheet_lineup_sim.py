@@ -8,8 +8,9 @@ they are the old fixed lines (the typed Cash Line median, `[sim] gpp_target`). *
 `Top 1%`** (it was `190+ %`, a header that followed `gpp_target`, until the Week 6 relabel); with the
 fixed lines the number under it is the chance of reaching `gpp_target`, and its hover note says so.
 
-**Where they sit** (usability round, slice 5). On each lineup's **Total row**, in the four columns right
-after `Pts` that are blank there (`AggPts`, `CalPts`, `Val`, `ValAdj`, found by header name), with small
+**Where they sit** (usability round, slice 5; moved right two columns on 2026-10-17 to make room for the
+`EspnPts`/`PropPts` totals). On each lineup's **Total row**, in the four columns that are blank there
+(`Val`, `ValAdj`, `Hit3x%`, `Boom%`, found by header name: `SIM_SLOT_HEADERS`), with small
 labels on the **Remaining row** under them (`Typical`, `Big night`, `Cash %`, `Top 1%`; they were `Median`,
 `p90`, `P(cash)`, `P(190+)` until the Week 6 round), scoreboard style. They are numbers, so they colour:
 Cash % goes green at 50% or more and Top 1% at 2% or more (twice what an average entry has). They used to
@@ -60,8 +61,12 @@ OLD_P_CASH_HEADER = "P(cash)"
 TOP1_HEADER = "Top 1%"  # the fourth label; it was `190+ %` (following `[sim] gpp_target`) until Week 6
 # The retired far-right column (`P(190+)`, `P(187.5+)`): matched so an old sheet is cleaned up.
 GPP_HEADER_RE = re.compile(r"^P\((\d+(?:\.\d+)?)\+\)$")
-# The columns the four numbers sit in: blank on a Total row, right after `Pts`.
-SIM_SLOT_HEADERS = ("AggPts", "CalPts", "Val", "ValAdj")
+# The columns the four numbers sit in: blank on a Total row, the four right after the shadow-projection totals
+# (`EspnPts`, `PropPts`; they were `AggPts`..`ValAdj` until those two columns went in on 2026-10-17). Every
+# reader finds the run by these names (`sim_slots`), never by position, so moving it is this one line.
+SIM_SLOT_HEADERS = ("Val", "ValAdj", "Hit3x%", "Boom%")
+# What the run was called before: `write_labels` clears the stale labels the move leaves in those columns.
+RETIRED_SLOT_HEADERS = ("AggPts", "CalPts")
 MARKER_HEADER = "Name"  # the marker is column A of the Total row: under the Name column
 MARKER_OPTIONS = ["Cash", "GPP"]
 P_CASH_GREEN = 0.5  # P(cash) at or above this reads green
@@ -90,6 +95,14 @@ def sim_slots(header: list) -> list[int] | None:
         return None
     indices = [names.index(h) for h in SIM_SLOT_HEADERS]
     return indices if indices == list(range(indices[0], indices[0] + len(indices))) else None
+
+
+def stale_label_cells(header: list, name_blocks: list[tuple[int, int]]) -> dict[str, list[list]]:
+    """Blank updates for the Remaining-row cells the scoreboard used to sit in (`RETIRED_SLOT_HEADERS`), so a
+    sheet that moved it (2026-10-17) keeps no `Typical` / `Big night` label behind. Found by header name."""
+    names = [str(h).strip() for h in header]
+    letters = [column_letter(names.index(h)) for h in RETIRED_SLOT_HEADERS if h in names]
+    return {f"{letter}{end + 2}": [[""]] for letter in letters for _start, end in name_blocks}
 
 
 def lineup_sim_notes(
@@ -256,8 +269,11 @@ def write_lineup_sim(
             client.update_ranges(
                 tab,
                 {
-                    f"{first_letter}{end + 2}:{last_letter}{end + 2}": [labels()]
-                    for _start, end in name_blocks
+                    **{
+                        f"{first_letter}{end + 2}:{last_letter}{end + 2}": [labels()]
+                        for _start, end in name_blocks
+                    },
+                    **stale_label_cells(header, name_blocks),
                 },
             )
             apply_label_notes(client, tab, header_row=header_row, name_blocks=name_blocks, target=gpp_target)
@@ -301,6 +317,7 @@ def write_lineup_sim(
         updates[f"{first_letter}{total_row}:{last_letter}{total_row}"] = [values]
         updates[f"{first_letter}{remaining_row}:{last_letter}{remaining_row}"] = [labels()]
 
+    updates.update(stale_label_cells(header, name_blocks))
     portfolio = portfolio_summary(result) if result else None
     with perf.phase("lineup sim: write sheet"):
         client.update_ranges(tab, updates)
@@ -331,6 +348,9 @@ LABEL_FORMAT = {
     "horizontalAlignment": "CENTER",
 }
 MARKER_FORMAT = {"horizontalAlignment": "CENTER", "textFormat": {"bold": True}}
+PLAIN_TEXT_FORMAT = {
+    "textFormat": {"bold": False, "fontSize": 10, "foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0}}
+}
 
 
 def format_sim_columns(
@@ -357,9 +377,14 @@ def format_sim_columns(
     # stays whatever the green rule says.
     highlight = {"textFormat": {"bold": True, "foregroundColor": {"red": 0.05, "green": 0.2, "blue": 0.6}}}
     green = {"backgroundColor": GRAD_MAX}
+    names = [str(h).strip() for h in header]
+    retired = [column_letter(names.index(h)) for h in RETIRED_SLOT_HEADERS if h in names]
     with client.batched():
         for _start, end in name_blocks:
             total, remaining = end + 1, end + 2
+            # The old scoreboard cells' tiny muted label look goes with the labels (`stale_label_cells`).
+            for letter in retired:
+                client.format_range(tab, f"{letter}{remaining}", PLAIN_TEXT_FORMAT)
             client.format_range(tab, f"{median}{total}:{p90}{total}", POINT_FORMAT)
             client.format_range(tab, f"{p_cash}{total}:{p_gpp}{total}", PERCENT_FORMAT)
             client.format_range(
@@ -427,8 +452,13 @@ def write_labels(
     if slots is None:
         return f"{tab}: simulator columns not found (run `dfs setup reorder-columns` first) -- skipped"
     first, last = column_letter(slots[0]), column_letter(slots[-1])
+    header = list(rows[0])
     client.update_ranges(
-        tab, {f"{first}{end + 2}:{last}{end + 2}": [labels()] for _start, end in name_blocks}
+        tab,
+        {
+            **{f"{first}{end + 2}:{last}{end + 2}": [labels()] for _start, end in name_blocks},
+            **stale_label_cells(header, name_blocks),
+        },
     )
     return f"{tab}: simulator labels written on {len(name_blocks)} Remaining rows"
 

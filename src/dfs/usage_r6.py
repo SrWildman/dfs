@@ -383,12 +383,14 @@ def signal_why(signal: PlayerSignal, chips: dict[str, Chip]) -> str:
 
 
 WEAK_MARK = "?"  # a Proj chip resting only on the test-led (weaker evidence) rows reads `Proj ▼?`
-TOKEN_RE = re.compile(r"Proj [▲▼]\??|\S+")
+PROPS_UP = "Props ▲"  # the shadow-projection chip (`signals.props_token`): `Props ▲ +4.2`
+PROPS_DOWN = "Props ▼"
+TOKEN_RE = re.compile(r"Proj [▲▼]\??|Props [▲▼] [+-]\d+(?:\.\d+)?|\S+")
 
 
 def edge_tokens(text: object) -> list[str]:
     """The tokens of an `Edge` cell: whitespace-separated, except that `Proj ▼` / `Proj ▲` (and the `?` form)
-    contain a space and stay whole."""
+    and `Props ▲ +4.2` / `Props ▼ -4.2` contain spaces and stay whole."""
     return TOKEN_RE.findall("" if text is None or (isinstance(text, float) and text != text) else str(text))
 
 
