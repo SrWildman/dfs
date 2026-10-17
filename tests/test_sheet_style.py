@@ -1221,19 +1221,24 @@ def test_polish_lineups_totals_rows_clears_dead_vlookups_sums_ceil_and_labels():
     assert "3 sum(s) written" in result
 
 
-def test_the_shadow_projection_totals_only_count_a_lineup_with_a_number_in_every_slot():
-    """EspnPts / PropPts get a Total on Lineups (not cleared like the other linked columns), blank unless all
-    nine slots have a value: a partial sum would read as a low projection (a DST never has PropPts)."""
+def test_the_projection_totals_only_count_a_lineup_with_a_number_in_every_slot():
+    """AggPts, CalPts, EspnPts and PropPts get a Total on Lineups (not cleared like the other linked columns),
+    blank unless all nine slots have a value: a partial sum would read as a low projection (a DST never has
+    PropPts), and formatted like the Pts total."""
     header = ["Name", "Pos.", "Team", "Opp.", "DK Sal", "Pts", "AggPts", "CalPts", "EspnPts", "PropPts"]
     client = FakeGuardrailsClient([*header, "Val", "Ceil", "Own%"])
     polish_lineups_totals_rows(
         client, "Lineups", header_row=1, name_blocks=[(2, 10), (15, 23)], salary_cap=50000
     )
     calls = {a1: rows for a1, rows in client.update_calls}
+    assert calls["G11"] == [['=IF(COUNT(G2:G10)=9,SUM(G2:G10),"")']]  # AggPts
+    assert calls["H11"] == [['=IF(COUNT(H2:H10)=9,SUM(H2:H10),"")']]  # CalPts, the headline total
     assert calls["I11"] == [['=IF(COUNT(I2:I10)=9,SUM(I2:I10),"")']]
     assert calls["J11"] == [['=IF(COUNT(J2:J10)=9,SUM(J2:J10),"")']]
     assert calls["J24"] == [['=IF(COUNT(J15:J23)=9,SUM(J15:J23),"")']]  # the slot count comes from the block
-    assert calls["G11"] == [[""]] and calls["H11"] == [[""]]  # AggPts / CalPts totals stay cleared
+    assert calls["K11"] == [[""]]  # Val (a stale total cell) is still cleared
+    formats = dict(client.format_calls)
+    assert all(formats[f"{c}11"] == FIELD_FORMATS["Pts"] for c in "GHIJ")  # same look as the Pts total
     # written once each: not also blanked by the dead-column pass
     assert [a for a, _ in client.update_calls].count("I11") == 1
 

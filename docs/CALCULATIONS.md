@@ -2009,9 +2009,11 @@ to. A chipped player is not in an `Unflagged` baseline (any `Edge` token takes h
 Sam's first-pass threshold, not fitted to anything; revisit it with the Model Check rows once a few weeks of them exist.
 
 **Lineups totals.** `EspnPts` and `PropPts` sit right after `CalPts` on Player Pool, PlayerPoolRaw and Lineups. A Lineups Total
-row shows the sum of a shadow projection only when **all nine slots have a number**
-(`sheet_style._shadow_total_formula`: `=IF(COUNT(range)=9,SUM(range),"")`, the 9 from the block), else blank, never a partial
-sum: a DST never has `PropPts`, so a `PropPts` Total is blank for every lineup that has a DST.
+row shows the sum of `AggPts`, `CalPts` (the headline one), `EspnPts` or `PropPts` only when **all nine slots have a number**
+(`sheet_style._nine_slot_total_formula`: `=IF(COUNT(range)=9,SUM(range),"")`, the 9 from the block), else blank, never a
+partial sum: a DST never has `PropPts`, so a `PropPts` Total is blank for every lineup that has a DST. The four cells carry the
+same number format as the `Pts` total (`FIELD_FORMATS["Pts"]`, `0.0`). (`AggPts` and `CalPts` were free there once the
+scoreboard moved to `Val`..`Boom%`; 2026-10-17, same day.)
 
 ### `EspnPts` and the shadow gating (2026-10-13)
 
