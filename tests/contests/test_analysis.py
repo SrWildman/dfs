@@ -97,6 +97,7 @@ def test_write_produces_every_csv_and_nothing_else(tmp_path):
             "field_stats.csv",
             "field_stacks.csv",
             "field_unmatched.csv",
+            "winners.csv",
             "lineup_errors.csv",
             "toughness_series.csv",
             "toughness_formats.csv",
@@ -210,7 +211,7 @@ def test_the_command_runs_writes_csvs_and_prints_a_summary(tmp_path):
     assert (
         "formats:" in result.output
         and "toughness: week treatment" in result.output
-        and "OK wrote 16 file(s)" in result.output
+        and "OK wrote 17 file(s)" in result.output
     )
     assert (out / "toughness_series.csv").exists() and (out / "field_stats.csv").exists()
 

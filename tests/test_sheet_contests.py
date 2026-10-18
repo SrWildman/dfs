@@ -41,7 +41,7 @@ def test_every_row_is_padded_to_the_tab_width_and_the_last_column_matches():
 def test_an_empty_log_still_builds_every_section_with_a_plain_sentence():
     layout = sc.build_layout(sc.Tables(*[pd.DataFrame()] * 6), SEASON)
     titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
-    assert [t.split()[0] for t in titles] == ["SERIES", "CASH", "HOW", "HEAD", "LEFT"]
+    assert [t.split()[0] for t in titles] == ["SERIES", "CASH", "HOW", "WHAT", "HEAD", "LEFT"]
     assert "No Classic entries logged this season yet." in _text(layout)
 
 
@@ -52,6 +52,7 @@ def test_sections_come_in_the_decided_order(tables):
         "SERIES YOU PLAY, 2025",
         "CASH LINES FROM YOUR STANDINGS FILES",
         "HOW THE FIELD BUILDS",
+        "WHAT WINS IN YOUR CONTESTS",
         "HEAD TO HEAD",
         "LEFT OUT OF THE ROI ABOVE",
     ]
@@ -182,3 +183,44 @@ def test_the_writer_resets_the_tab_then_styles_it_and_sets_header_notes(tables):
     assert reset[1][2]["numberFormat"] is None and reset[1][2]["horizontalAlignment"] is None
     assert "clear_notes" in names and "clear_conditional_formats" in names and "set_row_notes" in names
     assert "built" in summary
+
+
+def _winners_table():
+    return pd.DataFrame(
+        {
+            "measure": [
+                "Stack + a bring-back",
+                "QB + 1 or more teammates (any position)",
+                "Ownership sum of the nine",
+                "Ownership product of the nine (median)",
+                "Salary left ($)",
+            ],
+            "kind": ["share", "share", "mean", "median", "mean"],
+            "top1": [0.68, 0.96, 1.21, 2.0e-8, 125.0],
+            "field": [0.52, 0.89, 1.40, 4.0e-8, 120.0],
+            "diff": [0.16, 0.07, -0.19, -2.0e-8, 5.0],
+            "n_top1": [333] * 5,
+            "n_field": [33041] * 5,
+            "contests": [9] * 5,
+        }
+    )
+
+
+def test_what_wins_lists_each_measure_with_the_gap_and_calls_out_the_biggest_ones():
+    layout = sc.build_layout(sc.Tables(*[pd.DataFrame()] * 6, winners=_winners_table()), SEASON)
+    text = _text(layout)
+    rows = {str(r[0]): r for r in layout.rows}
+    assert rows["Stack + a bring-back"][1:4] == [0.68, 0.52, 0.16]
+    assert rows["Ownership product of the nine (median)"][1:4] == ["2.0e-08", "4.0e-08", "0.50x"]
+    assert any(
+        t.startswith("Biggest gaps (top 1% minus the field): stack + a bring-back +16 pts") for t in text
+    )
+    assert "directional, not proof" in " ".join(text)
+    from dfs.sheet_column_notes import CONTESTS_NOTES
+
+    assert set(sc.WINNERS_HEADERS) <= set(CONTESTS_NOTES)
+
+
+def test_what_wins_says_so_plainly_with_no_large_gpp_standings():
+    layout = sc.build_layout(sc.Tables(*[pd.DataFrame()] * 6), SEASON)
+    assert "No large GPP standings with lineups yet (700+ entries)." in _text(layout)

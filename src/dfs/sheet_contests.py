@@ -80,6 +80,7 @@ class Tables:
     field_stats: pd.DataFrame
     h2h_bands: pd.DataFrame
     h2h_opponents: pd.DataFrame
+    winners: pd.DataFrame = field(default_factory=pd.DataFrame)  # contests/winners.csv: top 1% vs field
 
 
 def _read(path: Path, **kw) -> pd.DataFrame:
@@ -96,6 +97,7 @@ def load_tables(folder: Path) -> Tables:
         field_stats=_read(folder / "field_stats.csv", dtype={"contest_id": str}),
         h2h_bands=_read(folder / "h2h_bands.csv"),
         h2h_opponents=_read(folder / "h2h_opponents.csv"),
+        winners=_read(folder / "winners.csv"),
     )
 
 
@@ -330,6 +332,61 @@ def _range(letter: str, first: int, last: int) -> str:
     return f"{letter}{first}:{letter}{last}"
 
 
+WINNERS_HEADERS = [
+    "Build feature",
+    "Top 1% did",
+    "Whole field did",
+    "Gap (top 1% minus field)",
+    "Top-1% lineups counted",
+    "Field lineups counted",
+]
+WINNERS_BIG_GAP = 0.05  # a share that differs by this much between the top 1% and the field is called out
+WINNERS_NOTE = (
+    "The top 1% of each of your large GPPs (700+ entries, standings files only) beside every lineup in "
+    "the same contests, by how the lineup was built. Your stack is the QB and one to three teammates at "
+    "any skill position; the bring-back is a RB, WR or TE of the QB's opponent. Ownership is what the "
+    "contest's own standings say, not the projection. Rebuilt at every week close."
+)
+
+
+def _add_winners(b: _Builder, winners: pd.DataFrame) -> None:
+    """'What wins in your contests': the top 1% of the large GPPs beside the field, one row per measure."""
+    lay = b.layout
+    b.section("WHAT WINS IN YOUR CONTESTS  -  the top 1% of your large GPPs beside the field")
+    if winners.empty:
+        b.verdict("No large GPP standings with lineups yet (700+ entries).")
+        return
+    b.note(WINNERS_NOTE)
+    big = winners[(winners["kind"] == "share") & (winners["diff"].abs() >= WINNERS_BIG_GAP)]
+    if len(big):
+        top = big.reindex(big["diff"].abs().sort_values(ascending=False).index)
+        b.verdict(
+            "Biggest gaps (top 1% minus the field): "
+            + "; ".join(f"{r.measure.lower()} {r.diff * 100:+.0f} pts" for r in top.head(3).itertuples())
+            + f". Based on {int(winners['n_top1'].max()):,} top-1% lineups from "
+            f"{int(winners['contests'].max())} contests: directional, not proof."
+        )
+    b.header(WINNERS_HEADERS)
+    percent, money = [], []
+    first = b.next_row
+    for rec in winners.itertuples(index=False):
+        row = b.next_row
+        if rec.kind == "share" or rec.measure.startswith(("Ownership sum", "DST ownership")):
+            percent.append(row)
+            cells = [rec.top1, rec.field, rec.diff]
+        elif rec.measure.startswith("Salary"):
+            money.append(row)
+            cells = [rec.top1, rec.field, rec.diff]
+        else:  # the ownership product: tiny numbers, shown as text with the ratio as the difference
+            ratio = rec.top1 / rec.field if rec.field else float("nan")
+            cells = [f"{rec.top1:.1e}", f"{rec.field:.1e}", f"{ratio:.2f}x" if ratio == ratio else ""]
+        b.add([rec.measure, *cells, rec.n_top1, rec.n_field])
+    last = b.next_row - 1
+    lay.count_cells += [_range("E", first, last), _range("F", first, last)]
+    lay.percent_cells += [_range(c, r, r) for r in percent for c in "BCD"]
+    lay.money_cells += [_range(c, r, r) for r in money for c in "BCD"]
+
+
 def build_layout(tables: Tables, season: int) -> Layout:
     b = _Builder()
     lay = b.layout
@@ -500,6 +557,8 @@ def build_layout(tables: Tables, season: int) -> Layout:
         lay.count_cells += [_range("B", first, last), _range("F", first, last)]
         lay.percent_cells += [_range(c, first, last) for c in "CDEGHIJLMN"]
         lay.number_cells.append(_range("K", first, last))
+
+    _add_winners(b, tables.winners)
 
     # 4. head to head
     b.section("HEAD TO HEAD")

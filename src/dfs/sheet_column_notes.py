@@ -319,6 +319,20 @@ CORE_NOTES = {
 }
 
 CONTESTS_NOTES = {
+    "Build feature": (
+        "How a lineup was put together: a stack, a bring-back, RB + his own DST, ownership, salary left."
+    ),
+    "Top 1% did": (
+        "The share of the best 1% of lineups (or their average, for ownership and salary) in your large GPPs "
+        "that did this."
+    ),
+    "Whole field did": "The same measure over every lineup in those contests.",
+    "Gap (top 1% minus field)": (
+        "What the winners did more or less than the field: percentage points for shares, a ratio (x) for the "
+        "ownership product. Directional until more weeks pile up."
+    ),
+    "Top-1% lineups counted": "How many top-1% lineups the first column rests on.",
+    "Field lineups counted": "How many lineups the second column rests on.",
     "Series": "The contest's name, without the entry counter, the Showdown matchup or the H2H opponent.",
     "Format": "The kind of contest: H2H, 50/50, Double Up, Multiplier (Triple Up ...), SE GPP, N-max GPP.",
     "Fee": "The entry fee (the middle one, if it changed).",

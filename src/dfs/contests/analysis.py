@@ -12,6 +12,7 @@ Output files (all in `out_dir`):
 - `class_disagreements.csv`  rows where the payout-ratio band and the format disagree about cash vs GPP
 - `profiles.csv`         the score profile of every standings contest (entrants, cash line, top 10%, ...)
 - `field_stats.csv`, `field_stacks.csv`, `field_unmatched.csv`   how the fields build (see `field.py`)
+- `winners.csv`          what wins: the top 1% of each large GPP beside its field (see `winners.py`)
 - `lineup_errors.csv`    lineups that did not parse, with the reason
 - `toughness_series.csv`, `toughness_formats.csv`, `toughness_weeks.csv`   the curves and the week effects
 - `toughness_models.csv`, `toughness_k.csv`   the leave-one-week-out comparison of the three week
@@ -31,7 +32,7 @@ import httpx
 import pandas as pd
 
 from dfs.contests import field as field_mod
-from dfs.contests import history, slate_index, standings, toughness
+from dfs.contests import history, slate_index, standings, toughness, winners
 from dfs.contests import series as series_mod
 from dfs.sources.nflverse_results import ResultsFetchError
 
@@ -57,6 +58,9 @@ class Analysis:
     index: pd.DataFrame = field(default_factory=pd.DataFrame)
     index_candidate: str = ""
     toughness: toughness.ToughnessResult | None = None
+    winners: pd.DataFrame = field(
+        default_factory=pd.DataFrame
+    )  # winners.WINNERS_COLUMNS (GPPs, top 1% vs field)
     h2h_bands: pd.DataFrame = field(default_factory=pd.DataFrame)
     h2h_opponents: pd.DataFrame = field(default_factory=pd.DataFrame)
     warnings: list[str] = field(default_factory=list)
@@ -197,6 +201,7 @@ def run(
         result.typed.drop_duplicates("contest_key").set_index("contest_key") if len(result.typed) else None
     )
     profile_rows, error_rows, field_rows, stack_rows, miss_rows = [], [], [], [], []
+    winner_rows: list[pd.DataFrame] = []
     profile_inputs: list[tuple[standings.ScoreProfile, str, str, int, int]] = []
 
     if standings_dir is not None:
@@ -276,6 +281,8 @@ def run(
                 result.warnings.append(
                     f"contest {source.contest_id}: field measures skipped ({stats.skipped})"
                 )
+            if fmt == "gpp" and parsed.kind == "Classic":  # "what wins": the top 1% of each large GPP
+                winner_rows.append(winners.contest_lineups(parsed, players_for(season, week)))
             field_rows.append(stats.rows)
             stack_rows.append(stats.stacks)
             miss_rows.append(stats.unmatched)
@@ -289,6 +296,7 @@ def run(
     result.field_rows = stack(field_rows, field_mod.FIELD_COLUMNS)
     result.field_stacks = stack(stack_rows, ["contest_id", "group", "team", "n", "share"])
     result.field_unmatched = stack(miss_rows, ["contest_id", "player", "slot", "reason"])
+    result.winners = winners.summarize(stack(winner_rows)).table
 
     supplied = slate_index.read_index_file(index_file) if index_file is not None else None
     previous_path = out_dir / "slate_index.csv"
@@ -319,6 +327,7 @@ def write(result: Analysis) -> list[Path]:
         "field_stats.csv": result.field_rows,
         "field_stacks.csv": result.field_stacks,
         "field_unmatched.csv": result.field_unmatched,
+        "winners.csv": result.winners,
         "lineup_errors.csv": result.lineup_errors,
         "toughness_series.csv": tough.series_table if tough else pd.DataFrame(),
         "toughness_formats.csv": tough.format_table if tough else pd.DataFrame(),
@@ -378,6 +387,12 @@ def summary_lines(result: Analysis) -> list[str]:
                 if sub["avg_unspent"].notna().any()
                 else f"field [{group}] {len(sub)} contest(s): QB+1 {_pct(sub['qb_stack1'].mean())}"
             )
+    if len(result.winners):
+        top = result.winners.iloc[0]
+        lines.append(
+            f"what wins: {len(result.winners)} measures, top 1% vs field over {int(top['contests'])} large "
+            f"GPP(s), {int(top['n_top1']):,} top-1% lineups (winners.csv)"
+        )
     for (season, week), snapshot in sorted(result.frame_sources.items()):
         lines.append(f"players for Week {week} {season}: {snapshot}")
     if len(result.field_unmatched):
