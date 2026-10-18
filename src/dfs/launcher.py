@@ -278,6 +278,7 @@ MORE_LABELS = {
     "dfs lineups clear": "Clear last week's typed-in lineups",
     "dfs sim fit": "Rebuild the simulator's player-correlation table (needs model fetch)",
     "dfs sim backtest": "Back-test the simulator on past seasons (slow)",
+    "dfs sim script": "Test whether the spread or implied total changes a correlation (slow)",
     "dfs sim demo": "Worked example: two lineups, one stacked, and a swap",
     "dfs auth tffb": "Log in to The Fantasy Footballers (one time)",
     "dfs auth dk": "Log in to DraftKings (one time)",

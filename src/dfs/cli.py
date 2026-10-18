@@ -162,6 +162,7 @@ from dfs.sheet_views import (
     write_queue_section,
 )
 from dfs.sheets import SheetsClient, SheetsError, column_letter
+from dfs.sim.dups import DEFAULT_DOUBLE_UP_ENTRIES, DEFAULT_GPP_ENTRIES
 from dfs.sources import SOURCES
 from dfs.sources.base import SyncContext
 from dfs.sync import run_sync
@@ -3097,6 +3098,19 @@ def lineups_suggest(
         "when the run says the time limit cut it short.",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
+    gpp_entries: int = typer.Option(
+        DEFAULT_GPP_ENTRIES,
+        "--gpp-entries",
+        min=2,
+        help="Size of the GPP the builds are for. Duplicates are expected in proportion to it, and GPP "
+        "builds rank by Top 1% share (Top 1% divided by 1 + the copies expected).",
+    ),
+    double_up_entries: int = typer.Option(
+        DEFAULT_DOUBLE_UP_ENTRIES,
+        "--double-up-entries",
+        min=2,
+        help="Size of a double-up, for the warning on a cash build many entries are expected to share.",
+    ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
     Suggested tab.
@@ -3129,6 +3143,8 @@ def lineups_suggest(
         now=datetime.now(UTC),
         seconds=seconds,
         fixed_lines=fixed_lines,
+        gpp_entries=gpp_entries,
+        double_up_entries=double_up_entries,
     )
 
 
@@ -3142,6 +3158,8 @@ def _run_suggest(
     client: SheetsClient | None = None,
     seconds: float = TIME_LIMIT_SECONDS,
     fixed_lines: bool = False,
+    gpp_entries: int = DEFAULT_GPP_ENTRIES,
+    double_up_entries: int = DEFAULT_DOUBLE_UP_ENTRIES,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
     in the slate; the command passes the real clock."""
@@ -3188,6 +3206,8 @@ def _run_suggest(
         gpp_builds=gpp,
         time_limit=seconds,
         field=settings.field,
+        gpp_entries=gpp_entries,
+        double_up_entries=double_up_entries,
     )
     console.print(
         f"Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "

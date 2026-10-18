@@ -99,6 +99,64 @@ def sim_backtest(
         console.print(f"[green]OK[/green] wrote {path}")
 
 
+@sim_app.command("script")
+def sim_script(
+    lineups: int = typer.Option(
+        50, "--lineups", help="Lineups per family and week for the lineup-level test (0 skips that part)."
+    ),
+    jobs: int = typer.Option(1, "--jobs", help="Worker processes for the lineup-level test."),
+    shuffles: int = typer.Option(200, "--shuffles", help="Shuffled-context scans behind the chance flags."),
+    null_draws: int = typer.Option(
+        300, "--null-draws", help="Shuffled-context tables behind the out-of-sample control."
+    ),
+    seed: int = typer.Option(0, "--seed", help="Seed for every random draw."),
+    save: bool = typer.Option(False, "--save", help="Also write the report to models/sim/script.md."),
+    results_path: Path = typer.Option(None, "--results", help="Also write the per-lineup results (parquet)."),
+    from_results: Path = typer.Option(
+        None, "--from-results", help="Use saved per-lineup results instead of re-simulating them."
+    ),
+) -> None:
+    """Game script: does a pair's correlation depend on the spread or the team's implied total, do the
+    projections already price it, and does any conditional table beat the pooled one on 2023-2025? Fetches the
+    play-by-play for the mechanism tables (cached under data/model_cache). About 15 minutes on four cores with
+    the defaults; `--lineups 0` skips the slowest part. Never touches a sheet."""
+    import pandas as pd
+
+    from dfs.model.history import load_history
+    from dfs.model.predict import available_seasons
+    from dfs.sim import script, script_backtest, script_report
+    from dfs.sim.correlation import SIM_DIR
+
+    frame = _load_frame_or_exit()
+    history, _ = load_history(available_seasons(int(frame["season"].max())))
+    results = None
+    if from_results:
+        results = pd.read_parquet(from_results)
+    elif lineups:
+        results = script_backtest.run(
+            script.with_context(frame), n_per_family=lineups, seed=seed, n_jobs=jobs, log=_say
+        )
+        if results_path:
+            results.to_parquet(results_path)
+    try:
+        analysis = script_report.analyse(
+            frame, history, n_shuffle=shuffles, n_null=null_draws, seed=seed, lineup_results=results, log=_say
+        )
+    except Exception as e:  # noqa: BLE001 - the play-by-play fetch raises ModelDataError
+        from dfs.model.data import ModelDataError
+
+        if isinstance(e, ModelDataError):
+            raise _fail(str(e)) from e
+        raise
+    text = script_report.render(analysis)
+    console.print(text, markup=False, highlight=False, soft_wrap=True)
+    console.print(script_report.verdict_line(analysis))
+    if save:
+        path = SIM_DIR / "script.md"
+        path.write_text(text)
+        console.print(f"[green]OK[/green] wrote {path}")
+
+
 @sim_app.command("demo")
 def sim_demo(
     cash_line: float = typer.Option(None, "--cash-line", help="Cash line in points (default 145)."),

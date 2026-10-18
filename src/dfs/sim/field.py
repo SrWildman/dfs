@@ -64,6 +64,13 @@ class FieldModel:
     def cover_players(self) -> list[PlayerSpec]:
         return [self.players[i] for i in self.cover]
 
+    def shares(self, contest: str = "top") -> dict[str, float]:
+        """`{player id: share of the contest's lineups holding him}` (they sum to 9): `contest` is `"top"`
+        for the large-field GPP field, `"cash"` for the double-up field. The ownership every duplicate
+        estimate uses (`dfs.sim.dups`)."""
+        weights = self.top_weights if contest == "top" else self.cash_weights
+        return {p.id: float(w) for p, w in zip(self.players, weights, strict=True)}
+
 
 def apply_curve(own: np.ndarray, curve: Curve = ()) -> np.ndarray:
     """Projected ownership -> expected ownership through a piecewise-linear curve of `(projected, expected)`

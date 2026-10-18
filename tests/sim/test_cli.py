@@ -14,7 +14,7 @@ runner = CliRunner()
 def test_sim_is_registered_and_listed_in_the_main_help():
     command = typer.main.get_command(app)
     assert not command.commands["sim"].hidden
-    assert set(command.commands["sim"].commands) == {"fit", "backtest", "demo"}
+    assert set(command.commands["sim"].commands) == {"fit", "backtest", "script", "demo"}
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert re.search(r"^[│\s]*sim\s{2,}", strip_ansi(result.output), re.MULTILINE)

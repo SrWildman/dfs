@@ -68,6 +68,10 @@ class PlayerSpec:
     role: str
     projection: float
     salary: float | None = None
+    # The team's closing spread (positive = favoured) and implied total. Ignored by the shipped pooled table;
+    # read only by a conditional lookup (`script.ContextLookup`, the game-script research).
+    spread: float | None = None
+    implied: float | None = None
 
 
 @dataclass(frozen=True)
@@ -189,7 +193,10 @@ def correlation_matrix(players: list[PlayerSpec], lookup: CorrelationLookup) -> 
                 notes.append(
                     f"{a.id} and {b.id} are both {role_a} on {a.team}; used the {role_a}-{role_b} value"
                 )
-            r[i, j] = r[j, i] = lookup.rho(relation, role_a, role_b)
+            rho_pair = getattr(lookup, "rho_pair", None)  # a context-aware lookup also sees the two specs
+            r[i, j] = r[j, i] = (
+                rho_pair(relation, role_a, role_b, a, b) if rho_pair else lookup.rho(relation, role_a, role_b)
+            )
     return r, notes
 
 

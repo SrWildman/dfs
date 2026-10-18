@@ -11,7 +11,7 @@ and his WR1 boom together -- and that is what this adds. It uses **public nflver
 through the UM model's existing loaders (`dfs.model`); no sheet, no credentials, no TFFB. Nothing in
 `src/dfs/sim/` writes to a sheet. See [MODEL.md](MODEL.md) for the distribution engine it builds on.
 
-`dfs sim` is a **visible command group** (`fit`, `backtest`, `demo`; the launcher's `MORE_LABELS`,
+`dfs sim` is a **visible command group** (`fit`, `backtest`, `script`, `demo`; the launcher's `MORE_LABELS`,
 `commands_doc.SECTIONS` and `docs/COMMANDS.md` list them). **In the sheet** (PROMPT_EDGE_V3 Part 5, 2026-10-08), the
 simulator runs on every `dfs sync` and fills the Lineups tab, and `dfs lineups late-swap` scores swaps with it:
 see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself writes to a sheet; the integration is in
@@ -26,6 +26,8 @@ see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself wri
 | Relative lines | `field.py` | The field mean per draw: ownership weights, the ownership curve, the 95% cover, the tail's expected points. See "Relative lines". |
 | Back-test | `backtest.py` | Random legal lineups for 2023-2025, predicted with correlations fitted on 2014-2022 only. |
 | Text | `report.py`, `cli.py` | The tables printed by `dfs sim fit / backtest / demo` and used in this file. |
+| Game script | `script.py`, `script_pbp.py`, `script_backtest.py`, `script_report.py` | Spread and implied total against the pooled table, the play-by-play mechanism, the lineup-level bar (`dfs sim script`). |
+| Duplicates | `dups.py` | Expected identical entries, the Top 1% share, the fit. Used by `lineup_suggest.py`. |
 
 ## Using it
 
@@ -34,6 +36,7 @@ dfs model fetch      # the cache (once; shared with dfs model)
 dfs sim fit          # rebuild models/sim/correlations.csv (about 80 s)
 dfs sim backtest --jobs 4   # the back-test below (about 5 minutes on 4 cores, 35 on one; --lineups-per-week 20 for a look)
 dfs sim demo         # two lineups from 2025 week 12, one stacked, one not, plus a swap
+dfs sim script       # game script: spread and implied total against the pooled table (about 30 minutes; --lineups 0 skips the slowest part)
 ```
 
 ```python
@@ -627,8 +630,10 @@ shift, which neither the copula nor a static table can model.
 - **Bins in a week are not independent draws:** lineups in one week share players and games, so a reliability bin
   of 1,080 lineups carries less information than 1,080 independent ones; the standard errors shown for the
   paired differences use weeks as the unit.
-- **No game-total dependence is modelled.** The tercile analysis found only what chance produces (see above), so
-  every pair has one pooled value whatever the game's total.
+- **No game-total, spread or implied-total dependence is modelled.** The tercile analysis found only what chance
+  produces (see above) and the spread / implied-total study did not beat the pooled table out of sample ("Game
+  script"), so every pair has one pooled value. **The Gaussian copula under-states joint booms** of stack pairs by
+  30-45% (same section).
 
 ## Files
 
@@ -638,6 +643,7 @@ shift, which neither the copula nor a static table can model.
 | `models/sim/correlations_detail.csv` | Every fitted row, including the report-only tercile rows, with the unshrunk `r_raw`, its interval and the `conditional` flag. |
 | `models/sim/correlations_meta.json` | Seed, bootstrap size, shrinkage prior, total cutoffs, the cross-game check. |
 | `models/sim/backtest.md` | The complete back-test report (`dfs sim backtest --save`). |
+| `models/sim/script.md` | The complete game-script report (`dfs sim script --save`). |
 | `src/dfs/sim/` | `marginal.py`, `roles.py`, `correlation.py`, `simulate.py`, `field.py`, `backtest.py`, `pipeline.py`, `report.py`, `cli.py`. |
 | `tests/sim/` | Normal scores ~ N(0,1), PSD repair, the copula reproducing a known correlation, a shared player being one variable, cross-game independence, determinism, back-test legality, speed; `test_field.py`: the field-mean identity, relative lines, the ownership curve. |
 
@@ -800,3 +806,283 @@ swaps) with the change in P(cash) and P(GPP): the lineup and all its candidate v
 players they share have identical draws (this is `swap_impact`, generalised from one player to several). `--goal cash|gpp`
 (default cash) ranks by the matching change, projection gain breaking ties; the search keeps four times as many candidates
 as it shows so a swap that wins on probability but not on projection can surface.
+
+## Game script: spread and implied total, tested
+
+Cloud task G, 2026-10-17. The tercile analysis above tested only the game **total**. This tests the closing **spread**
+(team-relative: positive = this team favoured; buckets BD / SD / SF / BF = big dog, small dog, small favourite, big
+favourite, the line at a touchdown) and the team's **implied total** (training terciles 21.0 and 24.5), for every one
+of the 110 role pairs that have a team-relative orientation, on the same normal scores. Fit on 2014-2022 (38,332
+player-games), judged on 2023-2025 (12,935). Code: `script.py` (the tests), `script_pbp.py` (the mechanism),
+`script_backtest.py` (the lineup-level bar), `script_report.py`; **`dfs sim script`** reruns all of it (the report is
+`models/sim/script.md`).
+
+### Ruling: nothing conditional ships. The pooled table stands.
+
+1. **There is a little signal and not enough of it to use.** Scanning the training seasons, 11 of 110 pairs have a
+   spread slope with |t| > 1.96 and 13 have an implied-total slope, against 5.8 and 5.6 when the games' contexts are
+   shuffled among games of the same season (95th percentiles 10 and 9). The largest |t| over all pairs is 2.8 (spread)
+   and 3.6 (implied), against shuffled 95th percentiles of 3.4 and 3.5, and none is a pair that matters to
+   a stack. The fitted tables carry a faint real component (a table fitted on shuffled contexts loses 0.22 / 0.18 log
+   likelihood per 1,000 held-out pairs against the pooled value; the real ones lose 0.05 / gain 0.02), but the net
+   out-of-sample gain over the pooled table is **zero, to within an SE of 0.07 per 1,000**.
+2. **The named pairs.** Spread-conditioning only the 11 pairs the task named gains +0.265 per 1,000 held-out pairs
+   (SE 0.149), better than 98.3% of the 300 shuffled-context tables (a p of 0.017); implied total gains +0.08
+   (34% of the shuffles do as well). At the lineup level (10,800 lineups, 50 each of random, stack, RB1 + own DST
+   and game-stack, per week, on the same draws) it improves the pinball loss by **0.007%** (t +3.2 shipped
+   marginals, +2.6 train-only) and neither Brier score loses by a standard error. That is 25 times smaller than the
+   0.18% the correlation itself buys over independence, from 22 comparisons (11 pairs x 2 variables) on the same
+   three seasons.
+3. **The bar** (`script_backtest.py`): pinball better by more than two paired SE under both marginal sets, no Brier
+   loss beyond one SE, and an out-of-sample pair-likelihood gain that beats the shuffled-context control with the 5% error
+   shared across the four tables examined (spread and implied, each over all pairs and over the named pairs): 1.25% per table.
+   Named-pairs spread passes the first two and **misses the third (1.7% against 1.25%)**; the all-pairs spread table
+   loses outright (-0.05, and a cash Brier worse by 1.4-1.6 SE); implied clears neither the first nor the second.
+   `script_report.ruling` prints this table. It is a borderline call on a negligible effect, and it is Sam's if
+   he wants the named-pairs spread table anyway: the shipping path is `script.ContextLookup` over the pooled
+   lookup, the players' `spread` / `implied` on `PlayerSpec` (the hook is in `simulate.correlation_matrix` and
+   is inert for the pooled table), and one more CSV beside `correlations.csv`.
+
+### The named pairs, by bucket (training seasons, unshrunk r)
+
+| Pair | pooled | BD | SD | SF | BF | t (spread) | t (implied) |
+|---|---|---|---|---|---|---|---|
+| RB1 with his own DST | +0.061 | +0.093 | +0.068 | +0.050 | -0.006 | -0.5 | -1.0 |
+| RB1 with the opposing DST | -0.236 | -0.195 | -0.246 | -0.247 | -0.188 | -1.1 | -2.1 |
+| QB1 with WR1 | +0.333 | +0.314 | +0.343 | +0.327 | +0.338 | -0.2 | +0.8 |
+| QB1 with WR2 | +0.284 | +0.243 | +0.272 | +0.302 | +0.302 | +1.7 | +3.0 |
+| QB1 with TE1 | +0.260 | +0.255 | +0.254 | +0.248 | +0.291 | +1.2 | +2.0 |
+| QB1 with the opposing WR1 (bring-back) | +0.085 | +0.051 | +0.085 | +0.108 | +0.078 | +1.4 | +0.5 |
+| WR1 with WR2 (cannibalisation) | +0.003 | +0.065 | +0.007 | -0.020 | -0.012 | -1.6 | -1.3 |
+| favourite's RB1 with the dog's WR1 | +0.020 | -0.001 | +0.027 | +0.025 | +0.026 | +0.4 | +0.2 |
+| favourite's RB1 with the dog's WR2 | +0.008 | -0.062 | +0.006 | +0.037 | +0.023 | +1.8 | +2.3 |
+| favourite's RB1 with the dog's TE1 | +0.041 | +0.032 | +0.057 | +0.025 | +0.067 | +0.3 | +0.5 |
+| QB1 with the opposing RB1 | +0.025 | +0.040 | +0.033 | +0.040 | -0.011 | -0.2 | +0.1 |
+
+(`models/sim/script.md` has the implied-total buckets and the multiplicity-adjusted p.) The two ideas the task named do
+not show up: **RB1 + own DST is not stronger for favourites** (+0.09 for big dogs, -0.01 for big favourites; the 4for4 claim
+is a statement about the DST scoring 15+, which is a tail event, not a bucket correlation), and **the favourite's RB1 is
+not tied to the dog's receivers** (+0.02 to +0.04 in every bucket).
+
+### Why: the mechanism, in play-by-play
+
+nflverse play-by-play, 2014-2025, 398,362 designed plays (dropbacks and designed runs).
+
+| Offense's score at the snap | Pass rate | Share of snaps |
+|---|---|---|
+| trail 15+ | 75.1% | 9% |
+| trail 9-14 | 70.2% | 12% |
+| trail 1-8 | 63.5% | 26% |
+| tied | 57.6% | 19% |
+| lead 1-8 | 55.7% | 20% |
+| lead 9-14 | 51.3% | 8% |
+| lead 15+ | 42.8% | 5% |
+
+The in-game score moves the pass rate by 32 points; the **pre-game spread, at the same score, by 2-7 points and the
+wrong way** (big favourites pass slightly more than big dogs at the same score). The spread works by changing how
+often a team is in each state, and the state is realized, not forecast: per +1 point of pre-game spread the team-game
+pass rate moves -0.22 points (t -10); per +1 point of final margin -0.39; per +1 point of average lead on offense
+-0.67. By volume, per team-game:
+
+| Per +10 points | pass attempts | RB carries | WR + TE targets | RB targets |
+|---|---|---|---|---|
+| pre-game spread | -0.03 (t -0.1) | **+1.69 (t +11)** | +0.16 (t +1.1) | -0.08 (t -1.2) |
+| final margin | -1.54 (t -21) | +2.41 (t +41) | -1.03 (t -17) | -0.42 (t -15) |
+
+**The spread moves rushing, not passing**: a favourite runs about 1.7 more times per ten points of spread and throws
+and targets the same; the dog's receivers are not fed by the spread. The realized margin moves everything, and it is the
+common factor behind the pairs. The surprises (z-scores) correlate with the team's own final margin at +0.63 for the DST,
++0.29 for the QB1, +0.25 for the RB1, and **-0.11 / -0.09 / -0.07 for the opposing WR1 / WR2 / TE1**: a team that loses
+big does worse than its projection, trailing volume notwithstanding. Removing the margin from both z-scores
+(a quadratic) moves RB1-DST from +0.06 to -0.13, QB1-DST from -0.08 to -0.36, QB1-opposing RB1 from +0.03 to +0.11 and
+leaves QB1-WR1 at +0.30: **the margin is what makes the DST pairs positive or negative, and a pair's pooled value is
+already the average over the margins the games produced.** The spread is an unbiased
+forecast of the margin (slope 1.05) but a modest one: the final margin has a standard deviation of 14.8 points and
+the spread explains a fifth of its variance (r 0.45), which is why conditioning on it adds so little to the pair.
+
+### Do the projections already price it? Mostly.
+
+Change in (actual - projection), DK points per +10 points of spread; a projection that priced the script fully would
+miss by 0. The naive baseline is each player's mean over his previous three games. "z" is where the actual lands in
+the projection's own distribution, per +10 points (the engine's tables, which the copula reads).
+
+| Role | Projection moves per +10 | Naive misses (2014-22) | Projection misses (2014-22) | Projection misses (2023-25) | z per +10 (2014-22 / 2023-25) |
+|---|---|---|---|---|---|
+| QB1 | +2.40 | +0.27 (t 1.4) | +0.68 (t 4.0) | +0.00 (t 0.0) | +0.15 (7.6) / +0.06 (1.5) |
+| RB1 | +1.01 | +0.43 (t 2.0) | +0.73 (t 3.7) | +1.34 (t 3.6) | +0.09 (3.9) / +0.16 (3.9) |
+| WR1 | +1.78 | +0.23 (t 1.0) | +0.31 (t 1.5) | -0.44 (t -1.3) | +0.04 (1.8) / -0.05 (-1.2) |
+| WR2 | +0.83 | +0.15 (t 0.8) | +0.33 (t 1.9) | +0.40 (t 1.3) | +0.04 (1.7) / +0.04 (1.1) |
+| TE1 | +0.83 | +0.30 (t 1.6) | +0.44 (t 2.6) | +0.38 (t 1.4) | +0.07 (3.1) / +0.08 (2.0) |
+| DST | +2.28 | +1.11 (t 6.8) | +0.04 (t 0.3) | +0.46 (t 1.8) | +0.20 (8.2) / +0.29 (6.8) |
+
+(These are the shipped UM projections, the only ones in the public data; TFFB / Sleeper / FantasyPros history is on Sam's
+machine.) The projections do move with the spread, by 1-2.4 points per ten, and in points they are close: the
+numbers that hold in **both** eras are a **RB1** under-projection of +0.7 then +1.3 points per ten points of spread (a
+big favourite's RB1 outscores the projection by a point or two; the projection already adds a point) and a
+**DST that lands higher in its own distribution** the more it is favoured (+0.2 and +0.3 sd per ten; its mean is on target
+in points, so favourites' defenses have a fatter right tail than the engine's per-projection table gives them). QB1 (+0.7,
+then 0.0) and TE1 (+0.4, then n.s.) did not hold. Since the projection already carries the spread, the gain from
+modelling the script is in the correlation, and the correlation does not move with it. The two marginal effects are the
+engine's and the Week 8 recalibration's to take up; they are not touched here.
+
+### Tails: the one thing the copula misses
+
+Both z-scores above +1 or +1.5 sd, against what a bivariate normal with the pair's own correlation gives:
+
+| Pair | Both above | Observed | Gaussian, same r | Ratio | 90% interval |
+|---|---|---|---|---|---|
+| QB1 - WR1 | +1.5 sd | 0.0171 | 0.0120 | 1.43 | [1.18, 1.70] |
+| QB1 - WR2 | +1.5 sd | 0.0145 | 0.0110 | 1.32 | [1.10, 1.59] |
+| QB1 - TE1 | +1.5 sd | 0.0145 | 0.0103 | 1.41 | [1.14, 1.72] |
+| QB1 - opposing QB1 | +1.5 sd | 0.0138 | 0.0088 | 1.57 | [1.18, 1.99] |
+| QB1 - opposing WR1 | +1.5 sd | 0.0084 | 0.0060 | 1.39 | [1.04, 1.69] |
+| QB1 - RB1 | +1.5 sd | 0.0063 | 0.0057 | 1.10 | [0.81, 1.41] |
+| RB1 - own DST | +1.5 sd | 0.0060 | 0.0056 | 1.07 | [0.81, 1.36] |
+
+(At +1 sd: 1.25, 1.20, 1.31, 1.30, 1.13, 1.17, 1.13.) **Stack booms happen together 30-45% more often than a Gaussian
+copula with the same correlation says** (the bring-back 39%), and a shootout (QB against QB) 57% more. RB1 with his own DST is about Gaussian,
+which is also the answer to the "RB1 gets a bump when his DST scores 15+" idea: there is no excess joint tail there.
+This is the finding that matters most for a tournament and the one this study did not act on: the dependence is a
+copula-shape question (a t-copula or a shared game factor), the simulator's engine, and a separate decision. A Gaussian
+copula under-states exactly the event a GPP is built to hit.
+
+### What survived, in plain English
+
+| When ... | ... moves by about | Evidence |
+|---|---|---|
+| a team is favoured by 10 more points | its RB carries rise by 1.7 a game; its pass attempts and WR + TE targets do not change | t +11 / -0.1 / +1.1, 2014-2025 |
+| a team is favoured by 10 more points | its RB1 outscores a spread-aware projection by 0.7 to 1.3 points, and its DST lands 0.2 to 0.3 sd higher in its distribution | both eras, t 3.6 to 8 |
+| a team is leading by 15+ rather than trailing by 15+ | its pass rate falls from 75% to 43% | 398,362 plays; the pre-game spread adds 2-7 points at a given score, the wrong way |
+| a team's final margin is 10 points higher | its DST scores +0.6 sd, its QB1 +0.3, its RB1 +0.25, the other side's WR1 -0.1 | realized, not forecast |
+| a QB1 booms | his WR1 / WR2 / TE1 booms with him 30-45% more often than the correlation says | 90% intervals exclude 1 |
+| (conditional correlation, by spread or implied total) | nothing that survived out of sample | the ruling above |
+
+**For the local session:** (1) rerun the section "Do the projections already price it?" on the scored tables (Model Check)
+with CalPts / TFFB in place of the UM projection: the RB1 and DST rows say where a spread-aware adjustment might pay, and it
+is a calibration question for the Week 8 round; (2) the named-pairs spread table is yours to take or leave (above);
+(3) the tail finding wants a decision on a t-copula / shared game factor before it is a task.
+
+## Duplicates, the Top 1% share and build shapes
+
+Cloud task G, part B. The Suggested GPP builds used to be ranked by the chance of reaching the top-1% line
+(`Top 1%`) among stacks with a bring-back. A top-1% score that is one of 50 identical entries pays a fraction, so the
+GPP candidates are now drawn from several shapes and ranked by the **Top 1% share**. Cash builds are unchanged.
+
+**Product ownership, not the sum.** Every build reports both the ownership **sum** (the nine players' shares added up) and
+the **product** (multiplied): the product is the stronger predictor of duplicates (ETR: R-squared 0.43).
+Pure functions in `sim/dups.py`, shares from `FieldModel.shares("top" | "cash")`, which are `sim/field.py`'s field
+weights (projected Own% through the optional per-contest-type curve, summing to 9).
+
+**Expected duplicates.** If a field lineup chose its players independently, the chance it equals ours is the
+product of our nine shares and a field of N holds `N * product` copies. That is the *independence approximation* and
+it is biased low, for three reasons: chalk is correlated (the field herds into the same stacks and value plays); the
+salary cap removes most of the independent draws; and (the other way, by a factor of 5-10 over a lineup) a fixed number
+of slots makes inclusion negatively dependent. Sam's Week 4 double-up lineup was one of about 500 identical
+entries in 4,597: that needs a product of 0.109, and a lineup of nine 50%-owned players gives 0.002, an estimate of 9
+copies, 50 times short. **The stated correction is a power on the product**, `E[dups] = N * product ** 0.5`
+(`DUP_EXPONENT`): about half as many independent choices as players. It lands a lineup of 55-60% average ownership in a
+4,597-entry field at 310-460 copies (independence: 20-50), a typical GPP build (summed ownership 120%) at a tenth of
+a copy in 1,000 entries, and a chalky one (30% a player) at several. **It is set from that one anchor and the
+structure, not fitted**, because the standings files are Sam's: `dups.fit_dup_model(products, entries, copies)` fits
+`(scale, exponent)` to them. A player with no ownership number counts at 0.5%.
+
+**The objective.** `top1_share = P(score >= top-1% line) / (1 + E[dups])`, the mean over draws of the top-1% indicator
+discounted by the copies expected. `Top 1%` stays a column; the objective ranks the GPP candidates (then `Top 1%`,
+projection, salary, names). **Contest size is an input**: `--gpp-entries`, default **1,000** (Sam's typical SE GPP is
+800-1,500; this is the one number to confirm). With no ownership published the objective is the plain `Top 1%` and a note
+says so.
+
+**Shapes** (`lineup_shapes.py`; soft shapes, rules on an exact search, never hard-coded picks):
+
+| Shape | Rule | Part A evidence |
+|---|---|---|
+| `stack` | QB, two of his pass catchers, one player of his opponent | QB1-WR1/WR2/TE1 +0.25 to +0.31, held out; QB1-opposing WR1 +0.08 |
+| `game` | QB, one of his pass catchers, two RB/WR/TE of the other team | the bring-back pairs; QB1-QB1 +0.19; tail ratio 1.3-1.6 |
+| `double` | QB, two pass catchers, a RB of his team | QB1-RB1 +0.07 (+0.08 out of sample, t 2.0); weak |
+| `rb_dst` | a stack, and a RB with his own team's DST | RB1-DST +0.06 (+0.07 held out, t 1.3); weak, not larger for favourites |
+| `contrarian` | a stack whose summed ownership is in the bottom third of the stacks the plain search found | none needed |
+
+"Only where Part A supports it": `double` and `rb_dst` are enabled on the strength of a small, stable, positive pooled
+correlation (held-out r +0.076 and +0.072), nothing about spread; the simulator, which already prices both pairs, is the
+arbiter. `GPP_SHAPES` takes any subset (`shapes=("stack",)` is the old behaviour). A lineup that matches several shapes is
+kept once, tagged with all of them and named by the most specific; a build's title names the shape and the copies
+expected ("GPP build 5  ·  T00 stack + RB/DST  ·  ~0.1 dupes"). Selection is `choose_per_qb`, unchanged (per-QB coverage,
+diversity, exposure cap), on the new key.
+
+**Cash builds** keep `Cash %` against the relative line. Each reports its expected copies among `--double-up-entries`
+(default 3,000; his double-ups ran 2,758-4,597) under the cash weights, and a build expected to be shared by 25 or more
+entries gets a **warning, never a filter** (the Week 4 lesson: a duplicate cashes or busts with you).
+
+**Cost.** The two shapes whose rule the search's bound cannot see were slow when searched per QB (a RB with his DST:
+35-51 s; a stack under an ownership cut: 160-177 s, on a 64-player pool). They fix more than the QB instead: `rb_dst`
+searches each QB with his best three DSTs and a RB of the DST's team fixed, `contrarian` with his three best stack cores
+under the cut fixed (exact inside each anchor, which anchors is the heuristic). On the worked slate below (64 players,
+8 teams, 20,000 draws): the GPP candidate search goes from 16.5 s to 31.7 s (640 to 908 candidates), the simulation
+of them from 3.3 s to 4.1 s, and a whole `suggest_builds` from **20.8 s to 37.3 s**, complete and inside the 60 s
+budget (`TIME_LIMIT_SECONDS`). The plain stack search may use half the GPP time; the other shapes split the rest, each
+best-effort inside its box, and a note says so when one is cut. The synthetic slate is the slower kind (its
+projections tie a lot, which weakens the search's bound; the doc elsewhere puts a real 60-player pool at about 4 s).
+
+### Worked slate
+
+A synthetic 8-team slate (`tests/test_lineup_suggest.py::slate`, seed 4), a 64-player pool (each team's QB1, RB1-2, WR1-3,
+TE1, DST, all marked Both), ownership from value (position totals QB 100%, RB 220%, WR 340%, TE 110%, DST 100%),
+1,000 entries, 20,000 draws, cap 50,000. Old = stack shape, ranked by Top 1% alone; new = all shapes, ranked by the share.
+The same candidates in the first table, then the builds each chooses.
+
+| # | Old ranking | Top 1% | own sum / product | E[dups] | share |
+|---|---|---|---|---|---|
+| 1 | T02 stack + T03 bring-back | 0.54% | 153% / 4.0e-08 | 0.20 | 0.450% |
+| 2 | T05 game stack | 0.51% | 155% / 8.5e-08 | 0.29 | 0.395% |
+| 3 | T05 stack + T04 bring-back | 0.50% | 170% / 1.8e-07 | 0.42 | 0.352% |
+| 4 | T05 stack + T04 bring-back | 0.50% | 153% / 7.4e-08 | 0.27 | 0.389% |
+| 5 | T02 stack + T03 bring-back | 0.48% | 144% / 2.5e-08 | 0.16 | 0.418% |
+
+Re-ranked by the share (same candidates), #1 stays; the T05 game stack (0.29 copies) drops from second to fifth and the
+170%-ownership T05 stack (0.42 copies) from third out of the top eight, below stacks of 135-144% with a lower Top 1%.
+
+| # | New ranking (all shapes) | Top 1% | own sum / product | E[dups] | share |
+|---|---|---|---|---|---|
+| 1 | T02 stack + T03 bring-back | 0.46% | 153% / 4.0e-08 | 0.20 | 0.387% |
+| 2 | T05 stack + T04 bring-back | 0.45% | 136% / 2.7e-08 | 0.16 | 0.387% |
+| 3 | T05 stack + T04 bring-back | 0.43% | 140% / 1.8e-08 | 0.13 | 0.379% |
+| 4 | T00 stack + RB/DST | 0.39% | 131% / 1.0e-08 | 0.10 | 0.354% |
+| 5 | T06 contrarian stack | 0.36% | 116% / 4.4e-09 | 0.07 | 0.333% |
+| 6 | T02 stack + RB/DST | 0.36% | 124% / 1.0e-08 | 0.10 | 0.327% |
+
+(The same lineup reads 0.54% in the first table and 0.46% in the second: the correlated draws depend on which players
+are in the run, and a candidate set of 908 is a different run from one of 640. A Top 1% of 0.5% on 20,000 draws is 100
+hits, a Monte Carlo error of about 10% either way, and the discount below is the same size.)
+
+The chosen builds: 15 old, 14 new (the exposure rules, on a different candidate set, decide which QBs get a second build). New: five plain stacks, four contrarian, three
+stack + RB/DST, one double, one game stack; mean E[dups] 0.175 old, 0.119 new; mean Top 1% 0.35% old, 0.33% new; mean
+share 0.291% old, 0.292% new. **Read it for what it is.** On a synthetic slate whose ownership is mild the copies
+expected are 0.06 to 0.42, so the discount moves a candidate's rank by up to 30%, the size of the simulator's own noise;
+the objective earns its keep on a chalky slate, where a few candidates are 3-10 copies and a quarter of their value, and it
+costs nothing (the mean share is level) on a flat one. The shapes are what changes the builds here: the old set is all
+stacks; the new one gives Sam low-owned stacks and RB + DST builds at a cost of 0.02 points of Top 1% each.
+
+### Tests
+
+`tests/sim/test_dups.py` (the maths, the objective on equal-Top-1% examples, the Week 4 order of magnitude with a stated
+stand-in lineup, the fit), `tests/test_lineup_shapes.py` (the rules, each generator legal and matching its shape, the best
+lineup found exactly against an enumeration of the top 3,000, determinism, the prune), `tests/test_lineup_suggest.py`
+(objective ordering, sum / product / copies on every build, contest size, cash builds unchanged by ownership, the
+double-up warning, determinism under a seed, the time budget), `tests/sim/test_script.py` (buckets, the clustered slope,
+the scan finding a planted dependence and not a null one, the lookup, the out-of-sample score, the simulator hook).
+
+### What the local session must do after merge
+
+1. `dfs lineups suggest --no-write` on the live week: confirm the run is inside the budget on a real pool, read the
+   titles ("~0.3 dupes") and the notes, and **confirm `--gpp-entries`** (default 1,000) against the contests Sam
+   actually enters (and `--double-up-entries`, 3,000).
+2. **Calibrate the duplicate model on Sam's standings files** (13 GPP, 7 double-up): for each lineup in a file, its
+   players' `%Drafted` product and the number of identical lineups in that file, then
+   `dfs.sim.dups.fit_dup_model(products, entries, copies)` to replace `DUP_EXPONENT`; check the Week 4 lineup's actual
+   product against the 500 copies. Until then 0.5 is a stated placeholder.
+3. The sheet does not change in this PR (the Suggested tab's columns are untouched): the shape and the copies are in
+   the build's title, and the sum, product and copies in the terminal. A column for the product would be a structural
+   edit (template first, `dfs doctor`, a changelog row). The Suggested tab's how-to line and the Instructions tab
+   (live and template) could mention that the titles now carry the shape and the copies.
+4. Run the "Do the projections already price it?" check on the scored tables (above), and decide the named-pairs spread
+   table and the t-copula.
