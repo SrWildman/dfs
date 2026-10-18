@@ -274,6 +274,9 @@ def save_fit(fit: Fit, directory: Path = SIM_DIR, extra_meta: dict | None = None
     meta = fit.meta | (extra_meta or {})
     (directory / META_FILE).write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
     load_correlations.cache_clear()
+    from dfs.sim import shape_table  # the shape layer sits on this table, so it is read again too
+
+    shape_table.default_lookup.cache_clear()
     return path
 
 

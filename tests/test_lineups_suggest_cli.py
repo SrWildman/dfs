@@ -138,3 +138,25 @@ def test_the_command_is_registered_with_the_documented_options():
     assert {"suggest", "late-swap", "clear"} <= names
     suggest = next(c for c in cli.lineups_app.registered_commands if c.name == "suggest")
     assert suggest.callback is cli.lineups_suggest
+
+
+def test_rank_defaults_to_the_top_1_chance_and_share_is_opt_in(cfg, edge, capsys, monkeypatch):
+    seen = []
+    real = cli.suggest_builds
+    monkeypatch.setattr(cli, "suggest_builds", lambda *a, **k: seen.append(k["rank"]) or real(*a, **k))
+    tags = dict.fromkeys(edge["Name"], "Both")
+    run(cfg, edge, tags, capsys, write=False)
+    run(cfg, edge, tags, capsys, write=False, rank="share")
+    assert seen == ["top1", "share"]
+
+
+def test_the_rank_option_takes_top1_or_share_and_defaults_to_top1():
+    from typer.testing import CliRunner
+
+    suggest = next(c for c in cli.lineups_app.registered_commands if c.name == "suggest")
+    import inspect
+
+    default = inspect.signature(suggest.callback).parameters["rank"].default.default
+    assert default is cli.SuggestRank.top1
+    bad = CliRunner().invoke(cli.app, ["lineups", "suggest", "--rank", "ev"])
+    assert bad.exit_code == 2 and "top1" in bad.output and "share" in bad.output

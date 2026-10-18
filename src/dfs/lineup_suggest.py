@@ -27,12 +27,13 @@ holds a RB, a game stack, a stack with a RB and his own DST and a contrarian sta
 for every QB that can reach it. A branch-and-bound that cannot see a stack would spend its whole budget on
 lineups without one, so each QB is searched on his own, cutting every branch that can no longer reach the
 shape.
-Candidates are ranked by their Top 1% share (`Scored.gpp_value`: `Top 1%`, the simulator's chance of reaching
+Candidates are ranked by `--rank`: `top1` (the default) by their `Top 1%`, the simulator's chance of reaching
 the large-field top-1% line, the field's average score plus 63 points (with `--fixed-lines` the old fixed GPP
-target), divided by 1 + the identical entries expected, `sim/dups.py`), each differing from the earlier
-builds by at least `MIN_DIFFERENCE` players, and no player is in more than `MAX_EXPOSURE` of the builds. A
-build's title names its shape, its make-up and the copies expected ("DET stack QB+WR+TE + ARI bring-back  ·
-~0.3 dupes").
+target); `share` by their Top 1% share (`Scored.gpp_value`: that chance divided by 1 + the identical entries
+expected, `sim/dups.py`). Sam, 2026-10-18: the share is not the default until he has seen it retro-tested
+on his own weeks. Either way each pick differs from the earlier builds by at least `MIN_DIFFERENCE` players,
+no player is in more than `MAX_EXPOSURE` of the builds, and a build's title names its shape, its make-up and
+the copies expected ("DET stack QB+WR+TE + ARI bring-back  ·  ~0.3 dupes").
 
 **Order.** The builds are listed Cash first, then GPP; inside each by quarterback (name, A to Z), then the
 highest `CalPts` total first (`display_key`), and numbered 1..n down that list (`number_builds`). Which
@@ -84,6 +85,8 @@ PER_QB = 80  # stacked lineups kept per quarterback while building the GPP candi
 TIME_LIMIT_SECONDS = 60.0  # the whole search, cash and GPP together
 CASH_SHARE_OF_TIME = 0.4  # the cash search may use this share of it; GPP gets the rest
 GPP_SHAPES = shapes_mod.SHAPES  # the shapes the GPP candidates are drawn from (lineup_shapes.py)
+RANKS = ("top1", "share")  # `--rank`: what orders the GPP candidates (see `rank_key`)
+DEFAULT_RANK = "top1"  # the share becomes the default only after Sam has seen it retro-tested on his weeks
 # GPP candidate searches, in the order they run: (shape, lineups kept per quarterback, time weight). The
 # stack with a bring-back goes first and has the biggest share; each shape's time box is its weight's share of
 # what is left when it starts (so time a shape does not use rolls forward to the next).
@@ -394,9 +397,9 @@ def cash_key(s: Scored):
 
 
 def gpp_key(s: Scored):
-    """Best first: the Top 1% share (`Scored.gpp_value`: the Top 1% chance discounted by the duplicates
-    expected; the plain chance when no ownership is published), then the Top 1% chance itself, projection,
-    the cheaper lineup, then names."""
+    """Best first, `--rank share`: the Top 1% share (`Scored.gpp_value`: the Top 1% chance discounted by the
+    duplicates expected; the plain chance when no ownership is published), then the Top 1% chance itself,
+    projection, the cheaper lineup, then names."""
     return (
         -round(s.gpp_value, PROB_DECIMALS),
         -round(s.p_gpp, PROB_DECIMALS),
@@ -404,6 +407,24 @@ def gpp_key(s: Scored):
         s.salary,
         lineup_key(s),
     )
+
+
+def top1_key(s: Scored):
+    """Best first, `--rank top1` (the default): the Top 1% chance alone, then projection, the cheaper lineup,
+    then names. The duplicates expected are still worked out and shown, they just do not rank."""
+    return (
+        -round(s.p_gpp, PROB_DECIMALS),
+        -round(s.projection, VALUE_DECIMALS),
+        s.salary,
+        lineup_key(s),
+    )
+
+
+def rank_key(rank: str):
+    """The GPP sort key for `rank` ("top1" or "share")."""
+    if rank not in RANKS:
+        raise ValueError(f"rank must be one of {', '.join(RANKS)}, not {rank!r}")
+    return gpp_key if rank == "share" else top1_key
 
 
 def _fits(
@@ -625,6 +646,7 @@ def suggest_builds(
     gpp_entries: int = dups.DEFAULT_GPP_ENTRIES,
     double_up_entries: int = dups.DEFAULT_DOUBLE_UP_ENTRIES,
     shapes: Sequence[str] = GPP_SHAPES,
+    rank: str = DEFAULT_RANK,
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -632,7 +654,9 @@ def suggest_builds(
 
     `gpp_entries` is the size of the GPP the builds are for (the duplicates it expects are read against it);
     `double_up_entries` the size of a double-up, for the cash builds' duplication warning; `shapes` which
-    GPP shapes to search (`lineup_shapes.SHAPES`)."""
+    GPP shapes to search (`lineup_shapes.SHAPES`); `rank` what orders the GPP candidates: "top1" (the
+    default) the Top 1% chance alone, "share" that chance divided by 1 + the duplicates expected."""
+    gpp_order = rank_key(rank)
     started = time.monotonic()
     deadline = started + time_limit
     cash_deadline = started + time_limit * CASH_SHARE_OF_TIME  # the GPP search gets the rest
@@ -718,9 +742,9 @@ def suggest_builds(
         t = timed("simulate", t)
         scored = annotate(scored, shares, gpp_entries, objective=True, contrarian_at=cutoff)
         if gpp_builds is None:
-            picks = choose_per_qb(scored, key=gpp_key)
+            picks = choose_per_qb(scored, key=gpp_order)
         else:
-            picks = choose(scored, gpp_builds, key=gpp_key, max_per_player=exposure_cap(gpp_builds))
+            picks = choose(scored, gpp_builds, key=gpp_order, max_per_player=exposure_cap(gpp_builds))
         timed("choose", t)
         picked.extend(("gpp", pick, shapes_mod.shape_name(pick.players, pick.shapes)) for pick in picks)
         if not lineups:

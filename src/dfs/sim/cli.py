@@ -49,17 +49,27 @@ def sim_fit(
     seed: int = typer.Option(0, "--seed", help="Seed for every random draw."),
     out_dir: Path = typer.Option(None, "--out-dir", help="Where to write (default: models/sim/)."),
 ) -> None:
-    """Rebuild models/sim/correlations.csv from the cached history (about half a minute)."""
-    from dfs.sim import report
+    """Rebuild models/sim/correlations.csv (and the QB1-TE1 team-shape table beside it) from the cached
+    history (about a minute)."""
+    from dfs.model.history import load_history
+    from dfs.model.predict import available_seasons
+    from dfs.sim import report, shape_table
     from dfs.sim.correlation import SIM_DIR, fit_correlations, save_fit
 
     frame = _load_frame_or_exit()
     _say(f"fitting {len(frame):,} out-of-fold player-games")
     fit = fit_correlations(frame, seed=seed, n_boot=n_boot)
     checks = report.fit_checks(fit, seed)
-    path = save_fit(fit, out_dir or SIM_DIR, extra_meta=checks)
+    directory = out_dir or SIM_DIR
+    path = save_fit(fit, directory, extra_meta=checks)
     console.print(report.fit_summary(fit, checks), markup=False, highlight=False, soft_wrap=True)
     console.print(f"[green]OK[/green] wrote {path} ({len(fit.shipped)} rows)")
+    history, _ = load_history(available_seasons(int(frame["season"].max())))
+    shape = shape_table.fit_shape(shape_table.with_live_tshare(fit.scored, history))
+    shape_path = shape_table.save_shape(shape, directory)
+    console.print(
+        f"[green]OK[/green] wrote {shape_path} ({len(shape)} rows: QB1-TE1 by the TE's target share)"
+    )
 
 
 @sim_app.command("backtest")

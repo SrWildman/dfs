@@ -27,6 +27,7 @@ see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself wri
 | Back-test | `backtest.py` | Random legal lineups for 2023-2025, predicted with correlations fitted on 2014-2022 only. |
 | Text | `report.py`, `cli.py` | The tables printed by `dfs sim fit / backtest / demo` and used in this file. |
 | Game script | `script.py`, `script_pbp.py`, `script_backtest.py`, `script_report.py` | Spread and implied total against the pooled table, the play-by-play mechanism, the lineup-level bar (`dfs sim script`). |
+| Team shape | `shape_table.py`, `script_shape.py` | The one shipped modifier: QB1-TE1 by the tight end's target share (`correlations_shape.csv`), a layer on the pooled table that `simulate_lineups` reads by default. `script_shape.py` is the research behind it. |
 | Duplicates | `dups.py` | Expected identical entries, the Top 1% share, the fit. Used by `lineup_suggest.py`. |
 
 ## Using it
@@ -329,7 +330,8 @@ link between total and correlation) and the whole fit repeated five times: **7, 
 flagged, mean 8.0 -- against 8 on the real totals.** None of the eight is a pair that matters for stacking
 (QB1 with his receivers), the patterns jump up and down (mid unlike low and high) rather than rising or falling
 with the total, and most rest on a few hundred pairs. **Ruling: pooled values only.** `correlations.csv` ships
-the pooled value of every pair, the simulator takes no game total, and this table is the whole of what the
+the pooled value of every pair, the simulator takes no game total (a later round added one team-shape layer, QB1-TE1 by the tight end's
+target share: "Game script, team shape and the bring-back, tested" below), and this table is the whole of what the
 tercile analysis contributes (`correlations_detail.csv` keeps every row of it).
 
 ## Back-test
@@ -824,7 +826,7 @@ Code: `script.py` (spread and implied), `script_shape.py` (team shape), `script_
 mechanism), `script_backtest.py` (the lineup-level bar), `script_report.py`; **`dfs sim script`** reruns all of it (the
 report is `models/sim/script.md`).
 
-### Ruling: nothing conditional ships by the bar. The pooled table stands. One finding is a decision for Sam.
+### Ruling: nothing conditional passes the bar. The pooled table stands, plus one pair Sam chose to ship (QB1-TE1).
 
 The bar (`script_backtest.py`): a conditional table ships only if, out of sample, (1) it beats the pooled one on the
 pinball loss of the lineup quantiles by more than two paired SE under BOTH marginal sets, (2) it does not lose on
@@ -856,9 +858,29 @@ But a correlation that moves from +0.19 to +0.31 for one of nine players is a ro
 lineup, so the pinball loss moves by 0.002-0.011% (t +0.3 to +1.1; the QB + TE family alone: +0.006%, t +0.9 shipped,
 +0.007%, t +1.1 train-only) and the top-end Brier score is a hair worse (-0.05%, t -1.7 / -1.4). **By the task's bar it
 does not ship, and the bar is the problem, not the effect**: a pair-level likelihood is the sensitive test of a
-correlation, and it says yes; the lineup-level measures are blunt. Whether to ship it on the pair-level evidence is
-Sam's call (below). The path is built and inert: `PlayerSpec.tshare`, `script_shape.ShapeLookup` layered on the pooled
-lookup, and EdgeRaw's `Tgt%` (the player's targets over his team's, last three games played) as the live feature.
+correlation, and it says yes; the lineup-level measures are blunt.
+
+**Decision (Sam, 2026-10-18): ship QB1-TE1 only.** The other five receiver pairs (QB1 with RB1, RB2, WR1, WR2 and WR3, by the
+receiver's target share) **stay at the pooled value and are to be re-tested later, not dropped**: the research code still
+carries all 22 tests (`script_shape.TESTS`, rerun with `dfs sim script`), and a pair is added to the shipped table by
+adding it to `shape_table.SHIPPED_TESTS` and refitting. What ships:
+
+- `models/sim/correlations_shape.csv` (three rows, written by `dfs sim fit` beside `correlations.csv`): the raw
+  normal-score correlation of QB1 and TE1 in each third of the tight end's `Tgt%` -- low (under 12.9%) +0.19 on 1,683
+  pairs, mid +0.29, high (18.3% and up) +0.33 on 1,693 -- and the two cut points;
+- `shape_table.py`: the fit, the file, and `default_lookup()`, the pooled table with the `ShapeLookup` layer on top, which
+  `simulate_lineups` now reads when it is not handed a table. Each third is shrunk toward the pooled value with the pooled
+  table's prior, so the loaded QB1-TE1 correlation is +0.20 at a 5% target share, +0.28 at 15% and +0.32 at 25%, against
+  the pooled +0.25. A tight end with no `Tgt%` (week 1, a rookie) is the pooled +0.25;
+- `sim_inputs.build_specs` sets `PlayerSpec.tshare` from EdgeRaw's `Tgt%`. No sheet column, tab or formula changed.
+
+**The shipped feature is the live one, and it tests weaker than the research one.** The research feature is the mean of a
+player's per-game target shares over his three previous games, across the season boundary (+4.47 per 1,000 held-out pairs,
+3.4 SE). EdgeRaw's `Tgt%` is a ratio of window sums over his last three games played THIS season, blank in week 1 (94% of TE1
+rows have it). The table is fitted on that quantity (it is what `build_specs` hands the simulator), fitted on 2014-2022 and
+judged on 2023-2025: **+3.25 per 1,000 held-out pairs (SE 1.59, 2.0 SE); 1.5% of 200 shuffled-feature tables do as well.**
+Same shape, still positive and still beyond chance, but not the 3.4 SE the write-up quoted for the research feature: the
+case for the pair is firm, its size is not. (Whether the research feature is worth computing live is for the re-test.)
 
 ### The named pairs, by bucket (training seasons, unshrunk r)
 
@@ -1043,13 +1065,13 @@ copula under-states exactly the event a GPP is built to hit.
 
 **For the local session and Sam:**
 
-1. **Decide whether to ship the team-shape table** (QB1 with each receiver and back, by the receiver's target share). By
-   the lineup-level bar it fails; by the pair-level likelihood, the sensitive test, the tight-end effect is strong
-   (3.4 SE) and the table beats every shuffled one. If yes: fit `ShapeLookup` on 2014-2025 into
-   `models/sim/correlations_shape.csv` (beside `correlations.csv`, from `dfs sim fit`), have `sim_inputs.build_specs` set
-   `PlayerSpec.tshare` from EdgeRaw's `Tgt%` (the same three-game share), and load the lookup as `simulate_lineups`'s
-   default. Recommended scope if yes: the six same-team QB1 x {RB1, RB2, WR1, WR2, WR3, TE1} tests, which is
-   `script_shape.RECEIVER_TESTS`; nothing from `qb_rush`, `proe` or `conc`.
+1. **QB1-TE1 shipped (decided); the other five receiver pairs are to be re-tested.** `dfs sim fit` writes
+   `correlations_shape.csv` next to `correlations.csv`. The committed `correlations.csv` came from an earlier run: a refit
+   in the cloud session reproduced the same counts but different correlations (up to 0.010 apart), so it was left alone and
+   the shape table was fitted from that refit's scores; refit both in one `dfs sim fit` locally if you want them from one
+   run. Re-test the five: RB1 (+0.02 to +0.10 by target share, t +1.3, no held-out gain) and WR1/WR2 (significant in
+   training, small held out) are the ones the data does not yet support; to add one, extend `shape_table.SHIPPED_TESTS`.
+   Nothing from `qb_rush`, `proe` or `conc` (they did nothing).
 2. Rerun "Do the projections already price it?" on the scored tables (Model Check) with CalPts / TFFB in place of the UM
    projection: the RB1 and DST rows say where a spread-aware adjustment might pay; it is a calibration question for the
    Week 8 round.
@@ -1061,7 +1083,9 @@ copula under-states exactly the event a GPP is built to hit.
 
 Cloud task G, part B. The Suggested GPP builds used to be ranked by the chance of reaching the top-1% line
 (`Top 1%`) among stacks with a bring-back. A top-1% score that is one of 50 identical entries pays a fraction, so the
-GPP candidates are now drawn from several shapes and ranked by the **Top 1% share**. Cash builds are unchanged.
+GPP candidates are now drawn from several shapes and can be ranked by the **Top 1% share** (`dfs lineups suggest --rank share`;
+the default, `--rank top1`, ranks by the Top 1% chance alone until Sam has seen the share retro-tested on his own weeks). Every
+build shows its copies expected whichever way it is ranked. Cash builds are unchanged.
 
 **Product ownership, not the sum.** Every build reports both the ownership **sum** (the nine players' shares added up) and
 the **product** (multiplied): the product is the stronger predictor of duplicates (ETR: R-squared 0.43).
@@ -1082,8 +1106,9 @@ structure, not fitted**, because the standings files are Sam's: `dups.fit_dup_mo
 `(scale, exponent)` to them. A player with no ownership number counts at 0.5%.
 
 **The objective.** `top1_share = P(score >= top-1% line) / (1 + E[dups])`, the mean over draws of the top-1% indicator
-discounted by the copies expected. `Top 1%` stays a column; the objective ranks the GPP candidates (then `Top 1%`,
-projection, salary, names). **Contest size is an input**: `--gpp-entries`, default **1,000** (Sam's typical SE GPP is
+discounted by the copies expected. `Top 1%` stays a column. **`--rank share`** ranks the GPP candidates by this objective
+(then `Top 1%`, projection, salary, names); **`--rank top1`, the default**, ranks them by `Top 1%` alone (then projection,
+salary, names) and only reports the copies. The share becomes the default only after Sam has seen it on a local retro-test. **Contest size is an input**: `--gpp-entries`, default **1,000** (Sam's typical SE GPP is
 800-1,500; this is the one number to confirm). With no ownership published the objective is the plain `Top 1%` and a note
 says so.
 
@@ -1131,7 +1156,8 @@ A synthetic 8-team slate (`tests/test_lineup_suggest.py::slate`, seed 4), a 64-p
 DST, all marked Both), ownership from value (position totals QB 100%, RB 220%, WR 340%, TE 110%, DST 100%), 1,000 entries, 20,000
 draws, cap 50,000. All 772 candidates are simulated in ONE call, so the old and new views below share draws. **Old** = the
 candidates that fit the previous definition of a stack (QB, two WR/TE and a bring-back: 96 of the 772), ranked by Top 1% alone;
-**new** = every shape, ranked by the Top 1% share.
+**new** = every shape, ranked by the Top 1% share (`--rank share`; the table after the next paragraph is the default
+`--rank top1` on the same candidates).
 
 | # | Old ranking | Top 1% | own sum / product | E[dups] | share |
 |---|---|---|---|---|---|
@@ -1166,6 +1192,14 @@ quarter of their value, and it costs nothing (the mean share is level) on a flat
 old set is one kind of stack; the new one gives Sam naked stacks, QB+RB and QB+TE stacks, low-owned stacks and RB + DST
 builds, and the simulator ranks them against each other.
 
+**The default, `--rank top1`, on the same 772 candidates**: it picks 12 builds (mean Top 1% 0.344%, mean copies 0.172, mean share
+0.291%) against 12 for the old definition (0.310%, 0.150, 0.264%) and 13 for `--rank share` (0.317%, 0.117, 0.281%); 8 of the
+builds are the same either way. The top of the ranking is the first table above (it is the old ranking, now over every
+shape): the stack with a bring-back at 0.56%, the game stacks at 0.45-0.46%, a QB+TE game stack at 0.45%. As expected, ranking by
+the chance alone buys a higher Top 1% and more copies, and ranking by the share buys fewer copies; on this mild-ownership slate
+the mean shares are within the simulator's noise (0.291% vs 0.281%), so the slate cannot say which is better. That is what
+the retro-test on Sam's weeks is for.
+
 ### Tests
 
 `tests/sim/test_dups.py` (the maths, the objective on equal-Top-1% examples, the Week 4 order of magnitude with a stated
@@ -1173,6 +1207,9 @@ stand-in lineup, the fit), `tests/test_lineup_shapes.py` (the rules on hand-buil
 generator legal and matching its shape, the best lineup found exactly against an enumeration of the top 3,000, determinism,
 the prune), `tests/test_lineup_suggest.py` (objective ordering, sum / product / copies on every build, contest size, cash
 builds unchanged by ownership, the double-up warning, determinism under a seed, the time budget, the new `is_stacked`),
+`tests/sim/test_shape_table.py` (the live `Tgt%` feature -- a ratio of window sums, this season only, never the game itself
+-- the fit, the layer moving only QB1-TE1 and only with the tight end's share, the simulator reading it by default, the
+committed file), the `--rank` cases in `tests/test_lineup_suggest.py` and `tests/test_lineups_suggest_cli.py`,
 `tests/sim/test_script.py` and `tests/sim/test_script_shape.py` (buckets, the clustered slope, the scans finding a planted
 dependence and not a null one, the features using only three previous games, the lookups, the out-of-sample scores, the
 simulator hook, the bring-back lift on a planted link).
@@ -1180,16 +1217,21 @@ simulator hook, the bring-back lift on a planted link).
 ### What the local session must do after merge
 
 1. `dfs lineups suggest --no-write` on the live week: confirm the run is inside the budget on a real pool (read the phase
-   times; `--seconds` lengthens the shape searches), read the titles ("~0.3 dupes") and the notes, and **confirm
-   `--gpp-entries`** (default 1,000) against the contests Sam actually enters (and `--double-up-entries`, 3,000).
+   times; `--seconds` lengthens the shape searches) and read the titles ("~0.3 dupes") and the notes. The contest sizes are
+   settled (Sam, 2026-10-18): `--gpp-entries` 1,000 and `--double-up-entries` 3,000. Run it once with the default
+   `--rank top1` and once with `--rank share`; the cloud session could only time the synthetic pool.
 2. **Calibrate the duplicate model on Sam's standings files** (13 GPP, 7 double-up): for each lineup in a file, its
    players' `%Drafted` product and the number of identical lineups in that file, then
    `dfs.sim.dups.fit_dup_model(products, entries, copies)` to replace `DUP_EXPONENT`; check the Week 4 lineup's actual
    product against the 500 copies. Until then 0.5 is a stated placeholder.
+   **Retro-test `--rank share` against `--rank top1` on Sam's weeks** with the calibrated model: the share becomes the default
+   only after Sam has seen that result (`lineup_suggest.DEFAULT_RANK`, one constant; the CLI help and docs say "default top1").
 3. The sheet does not change in this PR (the Suggested tab's columns are untouched): the shape and the copies are in
    the build's title, and the sum, product and copies in the terminal. A column for the product would be a structural
    edit (template first, `dfs doctor`, a changelog row). The Suggested tab's how-to line and the Instructions tab
    (live and template) could mention that the titles now carry the shape and the copies, and that a stack no longer
    needs a bring-back.
-4. The decisions in "What survived" above: the team-shape table (QB x receiver by target share, led by the tight end), the
-   projection-calibration check on the scored tables, and the t-copula.
+4. The projection-calibration check on the scored tables ("Do the projections already price it?" with CalPts / TFFB in place
+   of the UM projection) and the t-copula decision. Both, with items 1 and 2, run locally after merge and do not hold up the PR.
+5. Re-test the five QB1-with-receiver pairs that stayed pooled (see "Decision (Sam, 2026-10-18)" above), and, if the live
+   `Tgt%` is the weaker feature, whether the research feature (mean of per-game shares, across seasons) is worth computing live.

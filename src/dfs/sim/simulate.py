@@ -36,8 +36,9 @@ from scipy.special import ndtr
 
 from dfs.sim import field as field_model
 from dfs.sim import marginal
-from dfs.sim.correlation import CorrelationLookup, load_correlations
+from dfs.sim.correlation import CorrelationLookup
 from dfs.sim.roles import ROLE_POSITION, normalize_role
+from dfs.sim.shape_table import default_lookup
 
 # Placeholders, not advice: Sam types his own cash line each week, and the local integration (which owns the
 # sheet) passes it in. 145 is a typical 50/50 / double-up line on a full NFL main slate, 190 a typical
@@ -249,8 +250,10 @@ def simulate_lineups(
 ) -> SimResult:
     """Simulate every lineup on the same draws.
 
-    `correlations` defaults to `models/sim/correlations.csv`, `tables` to the shipped distribution tables;
-    `independent=True` zeroes every correlation (the comparison the back-test runs). Deterministic in `seed`.
+    `correlations` defaults to `models/sim/correlations.csv` with the shipped team-shape layer on top
+    (`shape_table`: QB1-TE1 by the tight end's target share; a player whose `tshare` is unknown gets the
+    pooled value), `tables` to the shipped distribution tables; `independent=True` zeroes every correlation
+    (the comparison the back-test runs). Deterministic in `seed`.
 
     `field` switches to relative lines (see the module docstring): `cash_line` and `gpp_target` are then
     ignored, and the players of `field.cover` are simulated alongside the lineups' (a player who is in both is
@@ -267,7 +270,7 @@ def simulate_lineups(
     if independent:
         r, repair = np.eye(m), RepairInfo(m, False, 1.0, 0.0)
     else:
-        raw, notes = correlation_matrix(players, correlations or load_correlations())
+        raw, notes = correlation_matrix(players, correlations or default_lookup())
         r, repair = repair_correlation(raw)
 
     rng = np.random.default_rng(seed)

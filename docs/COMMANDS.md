@@ -101,8 +101,9 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--no-write` | Print the builds here and leave the Suggested tab alone. |
 | `--seconds FLOAT RANGE` | How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. Default: `60.0`. |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
-| `--gpp-entries INT RANGE` | Size of the GPP the builds are for. Duplicates are expected in proportion to it, and GPP builds rank by Top 1% share (Top 1% divided by 1 + the copies expected). Default: `1000`. |
+| `--gpp-entries INT RANGE` | Size of the GPP the builds are for. The duplicates each build is expected to share are read against it (shown on every GPP build; they rank only with --rank share). Default: `1000`. |
 | `--double-up-entries INT RANGE` | Size of a double-up, for the warning on a cash build many entries are expected to share. Default: `3000`. |
+| `--rank CHOICE` | What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by 1 + the identical entries expected). Default: `top1`. |
 
 ### `dfs export`
 
@@ -276,7 +277,7 @@ The Typical, Big night, Cash % and Top 1% numbers on each Lineups Total row are 
 
 ### `dfs sim fit`
 
-Rebuild models/sim/correlations.csv from the cached history (about half a minute).
+Rebuild models/sim/correlations.csv (and the QB1-TE1 team-shape table beside it) from the cached history (about a minute).
 
 | Option | What it does |
 |---|---|

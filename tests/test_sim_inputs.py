@@ -53,6 +53,19 @@ def test_game_team_and_opponent_come_from_edgeraw():
     assert si.build_specs(no_game)["A"].game_id == "DEN-KC"  # a stable fallback shared by both teams' players
 
 
+def test_a_pass_catchers_tgt_percent_rides_along_as_tshare_and_blank_is_unknown():
+    edge = _edge(
+        [
+            {"Id": 1, "Name": "Hog", "Position": "TE", "Team": "DEN", "Tgt%": 0.27},
+            {"Id": 2, "Name": "Rookie", "Position": "TE", "Team": "DEN", "Tgt%": np.nan},
+            {"Id": 3, "Name": "Passer", "Position": "QB", "Team": "DEN"},
+        ]
+    )
+    specs = si.build_specs(edge)
+    assert specs["Hog"].tshare == pytest.approx(0.27)
+    assert specs["Rookie"].tshare is None and specs["Passer"].tshare is None
+
+
 def test_qb_is_qb1_and_a_defense_is_dst():
     edge = _edge(
         [

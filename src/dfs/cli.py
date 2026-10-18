@@ -63,7 +63,14 @@ from dfs.launcher import (
     suggested_commands,
 )
 from dfs.line_movement import LineMovementError, diff_odds
-from dfs.lineup_suggest import DEFAULT_CASH_BUILDS, TIME_LIMIT_SECONDS, phase_lines, suggest_builds
+from dfs.lineup_suggest import (
+    DEFAULT_CASH_BUILDS,
+    DEFAULT_RANK,
+    RANKS,
+    TIME_LIMIT_SECONDS,
+    phase_lines,
+    suggest_builds,
+)
 from dfs.lineups import (
     build_salary_lookup,
     export_csv,
@@ -2818,6 +2825,16 @@ class SwapGoal(StrEnum):
     gpp = "gpp"
 
 
+class SuggestRank(StrEnum):
+    """What `dfs lineups suggest` ranks GPP candidates by (`lineup_suggest.RANKS`)."""
+
+    top1 = "top1"
+    share = "share"
+
+
+assert tuple(r.value for r in SuggestRank) == RANKS  # one list of ranks, spelled once in the suggest module
+
+
 class SwapMetric(StrEnum):
     """What `dfs lineups late-swap` ranks by (`late_swap_search.METRICS`); never Leverage."""
 
@@ -3103,14 +3120,20 @@ def lineups_suggest(
         DEFAULT_GPP_ENTRIES,
         "--gpp-entries",
         min=2,
-        help="Size of the GPP the builds are for. Duplicates are expected in proportion to it, and GPP "
-        "builds rank by Top 1% share (Top 1% divided by 1 + the copies expected).",
+        help="Size of the GPP the builds are for. The duplicates each build is expected to share are read "
+        "against it (shown on every GPP build; they rank only with --rank share).",
     ),
     double_up_entries: int = typer.Option(
         DEFAULT_DOUBLE_UP_ENTRIES,
         "--double-up-entries",
         min=2,
         help="Size of a double-up, for the warning on a cash build many entries are expected to share.",
+    ),
+    rank: SuggestRank = typer.Option(
+        SuggestRank(DEFAULT_RANK),
+        "--rank",
+        help="What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by "
+        "1 + the identical entries expected).",
     ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
@@ -3125,10 +3148,11 @@ def lineups_suggest(
     with a RB, a game stack, a stack with a RB and his DST and a contrarian
     stack): left to itself, every QB stack in your pool gets a build and
     ideally two (`--gpp N` asks for the N best builds instead), ranked by
-    Top 1% share: the chance of reaching the Top 1% line (the field's average
-    plus 63 points; with `--fixed-lines`, the fixed GPP target) divided by 1 +
-    the identical entries expected in a GPP of `--gpp-entries`. Each build
-    shows its ownership sum and product and its expected duplicates; a cash
+    `--rank`: `top1` (the default) by the chance of reaching the Top 1% line
+    (the field's average plus 63 points; with `--fixed-lines`, the fixed GPP
+    target), `share` by that chance divided by 1 + the identical entries
+    expected in a GPP of `--gpp-entries`. Each build shows its ownership sum
+    and product and its expected duplicates either way; a cash
     build many entries of a `--double-up-entries` double-up are expected to
     share gets a warning, never a different pick. Cash builds use the Cash and Both
     players of your pool; GPP builds may use anyone in it, but never a lineup
@@ -3152,6 +3176,7 @@ def lineups_suggest(
         fixed_lines=fixed_lines,
         gpp_entries=gpp_entries,
         double_up_entries=double_up_entries,
+        rank=rank.value,
     )
 
 
@@ -3167,6 +3192,7 @@ def _run_suggest(
     fixed_lines: bool = False,
     gpp_entries: int = DEFAULT_GPP_ENTRIES,
     double_up_entries: int = DEFAULT_DOUBLE_UP_ENTRIES,
+    rank: str = DEFAULT_RANK,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
     in the slate; the command passes the real clock."""
@@ -3218,6 +3244,7 @@ def _run_suggest(
         field=settings.field,
         gpp_entries=gpp_entries,
         double_up_entries=double_up_entries,
+        rank=rank,
     )
     console.print(
         f"Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "

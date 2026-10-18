@@ -616,6 +616,39 @@ def test_the_gpp_objective_ranks_equal_top_1_percent_by_fewer_duplicates():
     assert ls.gpp_key(_cand("f", 0.03)) < ls.gpp_key(_cand("g", 0.02))
 
 
+def test_top1_ranks_by_the_chance_alone_and_share_discounts_the_duplicates():
+    unique, chalk = _cand("a", 0.020, 0.1), _cand("b", 0.021, 5.0)
+    assert [s.players[0].name for s in sorted([unique, chalk], key=ls.top1_key)] == ["b", "a"]
+    assert [s.players[0].name for s in sorted([unique, chalk], key=ls.gpp_key)] == ["a", "b"]
+    # with the chance tied, the projection decides under top1 (the duplicates are only shown)
+    tied = [_cand("c", 0.02, 5.0), _cand("d", 0.02, 0.1)]
+    assert ls.top1_key(tied[0])[:3] == ls.top1_key(tied[1])[:3]  # the chance, projection and salary tie
+
+
+def test_the_default_rank_is_top1_and_an_unknown_rank_is_refused():
+    assert ls.DEFAULT_RANK == "top1" and ls.RANKS == ("top1", "share")
+    assert ls.rank_key("top1") is ls.top1_key and ls.rank_key("share") is ls.gpp_key
+    with pytest.raises(ValueError, match="rank must be one of top1, share"):
+        ls.rank_key("ev")
+
+
+def test_a_gpp_run_defaults_to_top1_and_either_rank_still_reports_the_duplicates(edge, owned_report):
+    explicit = run(owned(edge), rank="top1")
+    assert [_build_key(b) for b in explicit.builds] == [_build_key(b) for b in owned_report.builds]
+    shared = run(owned(edge), rank="share")
+    for report in (explicit, shared):
+        gpp = [b for b in report.builds if b.kind == "gpp"]
+        assert gpp and all(b.e_dups is not None and b.objective is not None for b in gpp)
+        for b in report.builds:
+            assert_legal(b)
+    # the same lineups are scored either way; only the order they are picked in can differ
+    assert {b.p_cash for b in shared.builds if b.kind == "cash"} == {
+        b.p_cash for b in explicit.builds if b.kind == "cash"
+    }
+    with pytest.raises(ValueError):
+        run(owned(edge), rank="bogus")
+
+
 def test_every_gpp_build_reports_sum_product_dupes_and_the_top_1_share(owned_report):
     from dfs.sim import dups
 
