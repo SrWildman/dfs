@@ -3682,8 +3682,8 @@ def week_close(
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
     csv = _resolve_history_csv(cfg, csv)
     _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
+    _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
-    _score_results_after_close(cfg)
 
 
 def _keep_history_export(csv: Path) -> None:
@@ -3726,6 +3726,7 @@ def _contests_after_close(cfg: Config, csv: Path) -> None:
             cfg,
             csv,
             client=SheetsClient(cfg.google_sheets),
+            log_pool=True,
             progress=lambda line: console.print(escape(line)),
         )
     except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; never fail the close over this

@@ -319,6 +319,9 @@ CORE_NOTES = {
 }
 
 CONTESTS_NOTES = {
+    "Your decisions, season": "A measure of your own choices, added up over every week of standings files.",
+    "So far": "The season's number for that measure.",
+    "Based on": "How many weeks or entries the number rests on.",
     "Build feature": (
         "How a lineup was put together: a stack, a bring-back, RB + his own DST, ownership, salary left."
     ),

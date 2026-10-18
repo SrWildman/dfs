@@ -49,6 +49,7 @@ def test_sections_come_in_the_decided_order(tables):
     layout = sc.build_layout(tables, SEASON)
     titles = [layout.rows[r - 1][0] for r in layout.section_rows]
     assert [t.split("  ")[0] for t in titles] == [
+        "THIS WEEK, YOUR DECISIONS",
         "SERIES YOU PLAY, 2025",
         "CASH LINES FROM YOUR STANDINGS FILES",
         "HOW THE FIELD BUILDS",
@@ -224,3 +225,92 @@ def test_what_wins_lists_each_measure_with_the_gap_and_calls_out_the_biggest_one
 def test_what_wins_says_so_plainly_with_no_large_gpp_standings():
     layout = sc.build_layout(sc.Tables(*[pd.DataFrame()] * 6), SEASON)
     assert "No large GPP standings with lineups yet (700+ entries)." in _text(layout)
+
+
+def _entries(**kw):
+    base = {
+        "contest_id": ["a", "b", "c", "d"],
+        "season": [2026] * 4,
+        "week": [5] * 4,
+        "series": [
+            "NFL GIANT $25 Double Up [Single Entry]",
+            "NFL GIANT $10 Double Up [Single Entry]",
+            "NFL $8K Fair Catch [Single Entry]",
+            "NFL $4K Singleback [5 Entry Max]",
+        ],
+        "format": ["Double Up", "Double Up", "SE GPP", "N-max GPP"],
+        "cls": ["cash", "cash", "gpp", "gpp"],
+        "points": [152.6, 152.6, 181.5, 110.3],
+        "pct": [0.44, 0.38, 0.02, 0.82],
+        "cashed": [False, True, True, False],
+        "margin": [-0.5, 5.1, 27.0, -42.0],
+        "copies": [4, 5, 0, 0],
+        "sib_total": [0, 0, 6, 6],
+        "sib_cashed": [0, 0, 6, 0],
+    }
+    return pd.DataFrame({**base, **kw})
+
+
+def _post_mortem(**extra):
+    swings = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [5],
+            "contest_id": ["c"],
+            "series": ["NFL $8K Fair Catch [Single Entry]"],
+            "player": ["Christian Watson"],
+            "player_own": [0.096],
+            "player_pts": [35.3],
+            "alt": ["Michael Wilson"],
+            "alt_own": [0.545],
+            "alt_pts": [7.28],
+            "swing": [28.02],
+        }
+    )
+    pool = pd.DataFrame(
+        {"season": [2026], "week": [5], "pooled": [40], "pooled_hits": [18], "likes": [12], "likes_hits": [4]}
+    )
+    return sc.Tables(*[pd.DataFrame()] * 6, decisions=_entries(), swings=swings, pool_hits=pool, **extra)
+
+
+def test_the_monday_post_mortem_is_five_lines_numbers_first_at_the_top_of_the_tab():
+    SEASON = 2026
+    layout = sc.build_layout(_post_mortem(), SEASON)
+    assert layout.rows[layout.section_rows[0] - 1][0] == "THIS WEEK, YOUR DECISIONS  -  Week 5"
+    week, lines = sc.decision_lines(_post_mortem(), SEASON)
+    assert week == 5 and [line.split(":")[0] for line in lines] == [
+        "Cash",
+        "GPP",
+        "Biggest swing",
+        "Pool hit rate",
+        "Contest choice",
+    ]
+    cash, gpp, swing, pool, choice = lines
+    assert "GIANT $10 Double Up cashed by 5.1" in cash and "GIANT $25 Double Up missed by 0.5" in cash
+    assert "6 identical entries (including yours)" in cash  # the most copies is 5 others
+    assert "2 entries, average finish top 42%, 1 cashed, best top 2% in $8K Fair Catch" in gpp
+    assert "Christian Watson (10% owned, 35.3 pts) instead of Michael Wilson (55%, 7.3 pts)" in swing
+    assert "won 28.0 points" in swing
+    assert "18 of 40 pooled players beat their CalPts (45%), against 4 of 12 model favourites" in pool
+    assert "cashed in 6 of 12 (lineup, other contest) pairs" in choice
+
+
+def test_the_post_mortem_shows_a_dash_for_what_it_has_no_data_for():
+    tables = sc.Tables(*[pd.DataFrame()] * 6, decisions=_entries().iloc[:2])  # cash only, no swing, no pool
+    _, lines = sc.decision_lines(tables, 2026)
+    assert lines[1].startswith("GPP: - (no GPP entries in Week 5)")
+    assert lines[2] == "Biggest swing: -." and lines[3].startswith("Pool hit rate: - (not logged for Week 5")
+    assert lines[4].startswith("Contest choice: - (no other contest")
+    assert sc.decision_lines(sc.Tables(*[pd.DataFrame()] * 6), 2026) == (None, [])
+
+
+def test_the_season_block_adds_the_same_measures_up():
+    rows = {r[0]: r[1:] for r in sc.decision_season_rows(_post_mortem(), 2026)}
+    assert rows["Cash entries cashed"] == ["1 of 2 (50%)", "1 week(s)"]
+    assert rows["GPP: average finish"] == ["top 42%", "2 entries"]
+    assert rows["Biggest weekly swing: won / cost"] == ["1 won, 0 cost", "1 week(s)"]
+    assert rows["Pool hit rate (pooled / model favourites left out)"] == ["45% / 33%", "1 week(s) logged"]
+    assert rows["Same lineups cashing in other contests"] == ["6 of 12 pairs", "2 entries"]
+    assert set(sc.DECISIONS_HEADERS) <= set(
+        __import__("dfs.sheet_column_notes", fromlist=["x"]).CONTESTS_NOTES
+    )
