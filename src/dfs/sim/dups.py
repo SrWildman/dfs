@@ -97,7 +97,7 @@ class DupModel:
 
 
 # Fitted on Sam's 2026 standings (Weeks 2, 4 and 5: 33,576 lineups in 13 GPPs), with the ownership the tool
-# itself applies it to (the field model's `top` shares, from the pre-lock EdgeRaw snapshot), by `fit_dup_model`.
+# itself applies it to (the field model's `top` shares, from the pre-lock EdgeRaw snapshot).
 # The stated placeholder (scale 1, exponent 0.5) overstated GPP copies 2.4x in total and 20x for the
 # least-owned lineups; this tracks the top decile of products (observed 2.65 copies, fitted 2.66).
 # docs/SIM.md has the table.
