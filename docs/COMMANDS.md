@@ -101,6 +101,9 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--no-write` | Print the builds here and leave the Suggested tab alone. |
 | `--seconds FLOAT RANGE` | How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. Default: `60.0`. |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
+| `--gpp-entries INT RANGE` | Size of the GPP the builds are for. The duplicates each build is expected to share are read against it (shown on every GPP build; they rank only with --rank share). Default: `1000`. |
+| `--double-up-entries INT RANGE` | Size of a double-up, for the warning on a cash build many entries are expected to share. Default: `3000`. |
+| `--rank CHOICE` | What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by 1 + the identical entries expected). Default: `top1`. |
 
 ### `dfs export`
 
@@ -274,7 +277,7 @@ The Typical, Big night, Cash % and Top 1% numbers on each Lineups Total row are 
 
 ### `dfs sim fit`
 
-Rebuild models/sim/correlations.csv from the cached history (about half a minute).
+Rebuild models/sim/correlations.csv (and the QB1-TE1 team-shape table beside it) from the cached history (about a minute).
 
 | Option | What it does |
 |---|---|
@@ -295,6 +298,22 @@ Back-test on 2023-2025: random legal lineups, correlations fitted on 2014-2022 o
 | `--save` | Also write the report to models/sim/backtest.md. |
 | `--results PATH` | Also write the per-lineup results (parquet). |
 | `--from-results PATH` | Print the report for saved per-lineup results instead of re-simulating. |
+
+### `dfs sim script`
+
+Game script: does a pair's correlation depend on the spread or the team's implied total, do the projections already price it, and does any conditional table beat the pooled one on 2023-2025? Fetches the play-by-play for the mechanism tables (cached under data/model_cache). About 15 minutes on four cores with the defaults; `--lineups 0` skips the slowest part. Never touches a sheet.
+
+| Option | What it does |
+|---|---|
+| `--lineups INT` | Lineups per family and week for the lineup-level test (0 skips that part). Default: `50`. |
+| `--jobs INT` | Worker processes for the lineup-level test. Default: `1`. |
+| `--shuffles INT` | Shuffled-context scans behind the chance flags. Default: `200`. |
+| `--null-draws INT` | Shuffled-context tables behind the out-of-sample control. Default: `300`. |
+| `--seed INT` | Seed for every random draw. |
+| `--save` | Also write the report to models/sim/script.md. |
+| `--results PATH` | Also write the per-lineup results (parquet). |
+| `--from-results PATH` | Use saved per-lineup results instead of re-simulating them. |
+| `--keep PATH` | Also pickle the whole analysis, to re-render the report without refitting. |
 
 ### `dfs sim demo`
 

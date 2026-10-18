@@ -303,7 +303,8 @@ def build_specs(
 ) -> dict[str, PlayerSpec]:
     """One `PlayerSpec` per EdgeRaw player, keyed by `Name`. A row with no projection (neither `CalPts` nor
     `ProjPts`), team or position is left out (a lineup naming him can then not be simulated). The first row
-    wins for a name that appears twice.
+    wins for a name that appears twice. A pass-catcher's `Tgt%` (his share of his team's targets over his last
+    three games) rides along as `tshare`: the simulator's QB1-TE1 correlation reads it (`sim.shape_table`).
 
     `only_names` limits the work to the teams those players are on (a role depends only on his own team's
     players), which is what keeps the sync's simulator step quick; the result then holds the whole of those
@@ -336,6 +337,7 @@ def build_specs(
             role=role,
             projection=projection,
             salary=_clean(row.get("Salary")),
+            tshare=_clean(row.get("Tgt%")),
         )
     return specs
 

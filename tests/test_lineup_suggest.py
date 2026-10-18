@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import LineupState, OpenSlot, SwapPlayer, conflicts, top_lineups
@@ -145,13 +146,17 @@ def test_every_build_differs_from_the_earlier_ones_of_its_kind_by_at_least_three
             assert len({p.name for p in a.players} - {p.name for p in b.players}) >= floor
 
 
-def test_every_gpp_build_holds_a_stack_and_its_title_names_it(report):
+def test_every_gpp_build_has_a_shape_it_really_matches_and_its_title_names_it(report):
     for build in (b for b in report.builds if b.kind == "gpp"):
         qb = next(p for p in build.players if p.position == "QB")
-        mates = [p for p in build.players if p.team == qb.team and p.position in ("WR", "TE")]
-        backs = [p for p in build.players if p.team == qb.opp and p.position != "DST"]
-        assert len(mates) >= 2 and len(backs) >= 1
-        assert build.stack == f"{qb.team} stack + {qb.opp} bring-back" and build.stack in build.title
+        mates = [p for p in build.players if p.team == qb.team and p.position in ("RB", "WR", "TE")]
+        assert 1 <= len(mates) <= 3  # every shape ties the QB to one to three teammates
+        assert build.shapes and set(build.shapes) <= set(shapes_mod.SHAPES)
+        assert tuple(shapes_mod.shapes_of(build.players)) == tuple(
+            s for s in build.shapes if s != shapes_mod.CONTRARIAN
+        )
+        assert build.stack == shapes_mod.shape_name(build.players, build.shapes)
+        assert build.stack.startswith(qb.team) and build.stack in build.title
 
 
 def test_no_player_is_in_more_than_sixty_percent_of_the_gpp_builds(edge):
@@ -312,49 +317,56 @@ def P(name, pos, team="A", opp="B", salary=5000, value=10.0, game="g"):
     return SwapPlayer(name, pos, team, opp, game, salary, value)
 
 
-def test_can_stack_needs_two_pass_catchers_and_a_bring_back_in_the_pool():
+def test_can_stack_needs_one_teammate_of_any_skill_position_in_the_pool():
     qb = P("QB1", "QB", "A", "B")
-    mates = [P("A WR1", "WR", "A", "B"), P("A TE1", "TE", "A", "B")]
-    back = P("B WR1", "WR", "B", "A")
-    assert ls.can_stack(qb, [qb, *mates, back])
-    assert not ls.can_stack(qb, [qb, mates[0], back])  # one pass catcher
-    assert not ls.can_stack(qb, [qb, *mates])  # nobody from the other side
-    assert not ls.can_stack(qb, [qb, *mates, P("B DST", "DST", "B", "A"), P("B QB", "QB", "B", "A")])
-    assert not ls.can_stack(
-        qb, [qb, P("A RB1", "RB", "A", "B"), *mates[:1], back]
-    )  # a back is no pass catcher
+    assert ls.can_stack(qb, [qb, P("A WR1", "WR", "A", "B")])
+    assert ls.can_stack(qb, [qb, P("A RB1", "RB", "A", "B")]) and ls.can_stack(
+        qb, [qb, P("A TE1", "TE", "A", "B")]
+    )
+    assert not ls.can_stack(qb, [qb])  # alone
+    assert not ls.can_stack(qb, [qb, P("A DST", "DST", "A", "B")])  # a DST is not a teammate for a stack
+    assert not ls.can_stack(qb, [qb, P("B WR1", "WR", "B", "A")])  # only the other team's players
 
 
 def test_a_qb_who_cannot_stack_is_not_searched_so_it_cannot_eat_the_time_limit(edge, monkeypatch):
     """Real pool, 2026-10-17: 7 of 12 QBs had no possible stack; each still spent its share of the 60 s."""
     pool = ls.pool_for(edge, tags_for(edge), ls.GPP_TAGS, now=NOW, metric="CalPts")
     stuck = next(p for p in pool if p.position == "QB")
-    pool = [p for p in pool if not (p.team == stuck.team and p.position in ("WR", "TE"))]  # his catchers go
+    pool = [
+        p for p in pool if not (p.team == stuck.team and p.position in ("RB", "WR", "TE"))
+    ]  # no teammates
     assert not ls.can_stack(stuck, pool)
     searched = []
-    real = ls.top_lineups
+    real = shapes_mod.top_lineups
     monkeypatch.setattr(
-        ls, "top_lineups", lambda state, *a, **k: searched.append(state.fixed[0].name) or real(state, *a, **k)
+        shapes_mod,
+        "top_lineups",
+        lambda state, *a, **k: searched.append(state.fixed[0].name) or real(state, *a, **k),
     )
     lineups, complete = ls.stacked_lineups(pool, cap=CAP, deadline=time.monotonic() + 60)
     assert complete and lineups
     quarterbacks = {p.name for p in pool if p.position == "QB"}
     assert stuck.name in quarterbacks and stuck.name not in searched  # he was never searched...
-    assert set(searched) == quarterbacks - {stuck.name}  # ...and everyone else was
+    # ...and everyone else was, except the QB facing him, whose stack-WITH-a-bring-back has no bring-back left
+    opponent = {p.name for p in pool if p.position == "QB" and p.team == stuck.opp}
+    assert set(searched) == quarterbacks - {stuck.name} - opponent
     assert all(stuck.name not in {p.name for p in lu} for lu in lineups)  # and no lineup has him
 
 
-def test_is_stacked_needs_two_pass_catchers_and_one_opponent():
+def test_is_stacked_needs_the_qb_and_one_to_three_teammates_and_names_the_stack():
     qb = P("QB", "QB", "DET", "ARI")
     wr1, wr2, te = P("W1", "WR", "DET", "ARI"), P("W2", "WR", "DET", "ARI"), P("T", "TE", "DET", "ARI")
+    rb = P("R", "RB", "DET", "ARI")
     back = P("Back", "WR", "ARI", "DET")
-    assert (
-        ls.is_stacked([qb, wr1, te, back])
-        and ls.stack_name([qb, wr1, te, back]) == "DET stack + ARI bring-back"
-    )
-    assert not ls.is_stacked([qb, wr1, back])  # one pass catcher
-    assert not ls.is_stacked([qb, wr1, wr2])  # no bring-back
-    assert not ls.is_stacked([qb, wr1, wr2, P("D", "DST", "ARI", "DET")])  # a DST is not a bring-back
+    assert ls.is_stacked([qb, wr1, te, back])
+    assert ls.stack_name([qb, wr1, te, back]) == "DET stack QB+WR+TE + ARI bring-back"
+    assert ls.is_stacked([qb, wr1, back]) and ls.is_stacked([qb, wr1, wr2])  # one teammate, or no bring-back
+    assert ls.stack_name([qb, rb, wr1]) == "DET naked stack QB+RB+WR"
+    assert ls.is_stacked(
+        [qb, wr1, wr2, P("D", "DST", "ARI", "DET")]
+    )  # a DST is neither a teammate nor a back
+    assert not ls.is_stacked([qb, back])  # no teammate
+    assert not ls.is_stacked([qb, wr1, wr2, te, rb])  # four teammates
     assert not ls.is_stacked([wr1, wr2, back])  # no QB
     assert ls.stack_name([wr1]) == ""
 
@@ -542,8 +554,8 @@ def test_the_gpp_builds_are_found_whatever_the_simulation_draws_turn_out_to_be(e
     found. Five builds (no player in more than 3) and two (none shared) exist whichever seed is drawn."""
     five = run(edge, cash_builds=0, gpp_builds=5, seed=seed)
     two = run(edge, cash_builds=0, gpp_builds=2, seed=seed)
-    assert len(five.builds) == 5 and five.notes == [], five.notes
-    assert len(two.builds) == 2 and two.notes == [], two.notes
+    problems = [n for n in five.notes + two.notes if "Ownership has not published" not in n]
+    assert len(five.builds) == 5 and len(two.builds) == 2 and problems == [], problems
     for build in (*five.builds, *two.builds):
         assert_legal(build)
 
@@ -567,3 +579,149 @@ def test_a_gpp_build_is_never_a_lineup_of_nothing_but_cash_marked_players():
     assert not ok(players("a", "b"))  # all Cash-marked
     assert ok(players("a", "c")) and ok(players("a", "d"))  # one GPP or Both player is enough
     assert not ok(players("a", "b", "an-unpooled-dst"))  # a defense nobody pooled is not marked GPP
+
+
+# --- shapes, duplicates and the Top 1% share ----------------------------------------------------------------
+
+
+def owned(edge, seed=1):
+    """`edge` with a plausible ownership: popular where value is high, position totals as on a real slate."""
+    rng = np.random.default_rng(seed)
+    out = edge.copy()
+    value = (out["CalPts"] / out["Salary"] * 1000) ** 3 * rng.uniform(0.6, 1.4, len(out))
+    for pos, total in {"QB": 1.0, "RB": 2.2, "WR": 3.4, "TE": 1.1, "DST": 1.0}.items():
+        mask = out["Position"] == pos
+        out.loc[mask, "Own%"] = (value[mask] / value[mask].sum() * total).clip(upper=0.6)
+    return out
+
+
+@pytest.fixture(scope="module")
+def owned_report(edge):
+    return run(owned(edge))
+
+
+def _cand(names_values, p_gpp, e_dups=None):
+    players = tuple(SwapPlayer(n, "WR", "T", "U", "G", 5000, 10.0) for n in names_values)
+    objective = None if e_dups is None else p_gpp / (1 + e_dups)
+    return ls.Scored(players, 90.0, 45000, 0.5, p_gpp, 100.0, 130.0, (), None, None, e_dups, objective)
+
+
+def test_the_gpp_objective_ranks_equal_top_1_percent_by_fewer_duplicates():
+    unique, chalk, no_info = _cand("a", 0.02, 0.1), _cand("b", 0.02, 5.0), _cand("c", 0.02)
+    ranked = sorted([chalk, unique], key=ls.gpp_key)
+    assert [s.players[0].name for s in ranked] == ["a", "b"]
+    # a higher Top 1% loses to enough extra copies; without ownership the plain chance decides
+    assert ls.gpp_key(_cand("d", 0.021, 5.0)) > ls.gpp_key(_cand("e", 0.020, 0.1))
+    assert no_info.gpp_value == pytest.approx(0.02)
+    assert ls.gpp_key(_cand("f", 0.03)) < ls.gpp_key(_cand("g", 0.02))
+
+
+def test_top1_ranks_by_the_chance_alone_and_share_discounts_the_duplicates():
+    unique, chalk = _cand("a", 0.020, 0.1), _cand("b", 0.021, 5.0)
+    assert [s.players[0].name for s in sorted([unique, chalk], key=ls.top1_key)] == ["b", "a"]
+    assert [s.players[0].name for s in sorted([unique, chalk], key=ls.gpp_key)] == ["a", "b"]
+    # with the chance tied, the projection decides under top1 (the duplicates are only shown)
+    tied = [_cand("c", 0.02, 5.0), _cand("d", 0.02, 0.1)]
+    assert ls.top1_key(tied[0])[:3] == ls.top1_key(tied[1])[:3]  # the chance, projection and salary tie
+
+
+def test_the_default_rank_is_top1_and_an_unknown_rank_is_refused():
+    assert ls.DEFAULT_RANK == "top1" and ls.RANKS == ("top1", "share")
+    assert ls.rank_key("top1") is ls.top1_key and ls.rank_key("share") is ls.gpp_key
+    with pytest.raises(ValueError, match="rank must be one of top1, share"):
+        ls.rank_key("ev")
+
+
+def test_a_gpp_run_defaults_to_top1_and_either_rank_still_reports_the_duplicates(edge, owned_report):
+    explicit = run(owned(edge), rank="top1")
+    assert [_build_key(b) for b in explicit.builds] == [_build_key(b) for b in owned_report.builds]
+    shared = run(owned(edge), rank="share")
+    for report in (explicit, shared):
+        gpp = [b for b in report.builds if b.kind == "gpp"]
+        assert gpp and all(b.e_dups is not None and b.objective is not None for b in gpp)
+        for b in report.builds:
+            assert_legal(b)
+    # the same lineups are scored either way; only the order they are picked in can differ
+    assert {b.p_cash for b in shared.builds if b.kind == "cash"} == {
+        b.p_cash for b in explicit.builds if b.kind == "cash"
+    }
+    with pytest.raises(ValueError):
+        run(owned(edge), rank="bogus")
+
+
+def test_every_gpp_build_reports_sum_product_dupes_and_the_top_1_share(owned_report):
+    from dfs.sim import dups
+
+    edge = owned(slate())
+    specs = build_specs(edge)
+    from dfs.sim_inputs import ownership_by_name
+
+    shares = ls.ownership_shares(specs, edge, None, "top")
+    assert shares and sum(shares.values()) == pytest.approx(9.0)
+    assert ownership_by_name(edge)  # the shares come from the edge's Own%
+    gpp = [b for b in owned_report.builds if b.kind == "gpp"]
+    assert gpp
+    for b in gpp:
+        own = dups.shares_for([p.name for p in b.players], shares)
+        assert b.own_sum == pytest.approx(dups.ownership_sum(own))
+        assert b.own_product == pytest.approx(dups.ownership_product(own))
+        assert b.e_dups == pytest.approx(dups.expected_dups(own, dups.DEFAULT_GPP_ENTRIES))
+        assert b.entries == dups.DEFAULT_GPP_ENTRIES
+        assert b.objective == pytest.approx(b.p_gpp / (1 + b.e_dups))
+        assert dups.dups_label(b.e_dups) in b.title and b.stack in b.title
+        assert b.shapes
+
+
+def test_the_contest_size_is_an_input(edge, owned_report):
+    small = run(owned(edge), cash_builds=0, gpp_entries=800)
+    base = [b for b in owned_report.builds if b.kind == "gpp"]
+    assert {x.entries for x in small.builds} == {800} and {x.entries for x in base} == {1000}
+    # the same lineup has proportionally more copies in a bigger field
+    by_players = {tuple(p.name for p in b.players): b for b in base}
+    shared = [b for b in small.builds if tuple(p.name for p in b.players) in by_players]
+    assert shared
+    for b in shared:
+        assert by_players[tuple(p.name for p in b.players)].e_dups == pytest.approx(b.e_dups * 1000 / 800)
+
+
+def test_without_ownership_the_gpp_objective_is_the_plain_top_1_percent(report):
+    assert any("Ownership has not published" in n for n in report.notes)
+    for b in (b for b in report.builds if b.kind == "gpp"):
+        assert b.objective is None and b.e_dups is None and "dupes" not in b.title
+
+
+def test_cash_builds_are_not_changed_by_ownership_only_read_out(edge, owned_report, report):
+    plain = [b for b in report.builds if b.kind == "cash"]
+    with_own = [b for b in owned_report.builds if b.kind == "cash"]
+    assert [[p.name for p in b.players] for b in plain] == [[p.name for p in b.players] for b in with_own]
+    assert [b.p_cash for b in plain] == [b.p_cash for b in with_own]
+    assert all(b.e_dups is None for b in plain) and all(b.e_dups is not None for b in with_own)
+    assert all(b.objective is None for b in with_own)  # nothing ranks on it
+
+
+def test_a_cash_build_many_entries_share_gets_a_warning_and_is_still_built(edge):
+    loud = run(owned(edge), gpp_builds=0, double_up_entries=5_000_000)
+    assert len([b for b in loud.builds if b.kind == "cash"]) == 3  # never a filter
+    assert any("identical entries" in n for n in loud.notes)
+    quiet = run(owned(edge), gpp_builds=0, double_up_entries=10)
+    assert not any("identical entries" in n for n in quiet.notes)
+
+
+def test_the_candidates_cover_the_shapes_and_the_builds_are_tagged(edge, owned_report):
+    seen = {s for b in owned_report.builds if b.kind == "gpp" for s in b.shapes}
+    assert shapes_mod.STACK in seen and len(seen) > 1
+    stack_only = run(owned(edge), cash_builds=0, shapes=(shapes_mod.STACK,))
+    assert all(b.shapes and shapes_mod.STACK in b.shapes for b in stack_only.builds)
+
+
+def test_the_shaped_builds_are_deterministic_under_a_seed(edge, owned_report):
+    again = run(owned(edge))
+    assert [_build_key(b) for b in again.builds] == [_build_key(b) for b in owned_report.builds]
+
+
+def _build_key(b):
+    return (b.title, [p.name for p in b.players], b.p_cash, b.p_gpp, b.shapes, b.e_dups, b.objective)
+
+
+def test_the_shaped_search_stays_inside_the_time_budget(owned_report):
+    assert owned_report.complete and owned_report.seconds < ls.TIME_LIMIT_SECONDS

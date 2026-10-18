@@ -1,0 +1,4 @@
+relation,role_a,role_b,side,feature,bucket,n,r,cut_lo,cut_hi
+same_team,QB1,TE1,b,tshare,low,1683,0.19050,0.12871,0.18333
+same_team,QB1,TE1,b,tshare,mid,1698,0.28739,0.12871,0.18333
+same_team,QB1,TE1,b,tshare,high,1693,0.33039,0.12871,0.18333

@@ -36,8 +36,9 @@ from scipy.special import ndtr
 
 from dfs.sim import field as field_model
 from dfs.sim import marginal
-from dfs.sim.correlation import CorrelationLookup, load_correlations
+from dfs.sim.correlation import CorrelationLookup
 from dfs.sim.roles import ROLE_POSITION, normalize_role
+from dfs.sim.shape_table import default_lookup
 
 # Placeholders, not advice: Sam types his own cash line each week, and the local integration (which owns the
 # sheet) passes it in. 145 is a typical 50/50 / double-up line on a full NFL main slate, 190 a typical
@@ -68,6 +69,17 @@ class PlayerSpec:
     role: str
     projection: float
     salary: float | None = None
+    # The team's closing spread (positive = favoured) and implied total. Ignored by the shipped pooled table;
+    # read only by a conditional lookup (`script.ContextLookup`, the game-script research).
+    spread: float | None = None
+    implied: float | None = None
+    # The player's / team's shape (three-game priors; `script_shape.FEATURES`): his share of the team's
+    # targets, a QB's share of the team's carries, the team's pass rate over expected and its target
+    # concentration. Read only by a shape lookup (`script_shape.ShapeLookup`); ignored by the pooled table.
+    tshare: float | None = None
+    qb_rush: float | None = None
+    proe: float | None = None
+    conc: float | None = None
 
 
 @dataclass(frozen=True)
@@ -189,7 +201,10 @@ def correlation_matrix(players: list[PlayerSpec], lookup: CorrelationLookup) -> 
                 notes.append(
                     f"{a.id} and {b.id} are both {role_a} on {a.team}; used the {role_a}-{role_b} value"
                 )
-            r[i, j] = r[j, i] = lookup.rho(relation, role_a, role_b)
+            rho_pair = getattr(lookup, "rho_pair", None)  # a context-aware lookup also sees the two specs
+            r[i, j] = r[j, i] = (
+                rho_pair(relation, role_a, role_b, a, b) if rho_pair else lookup.rho(relation, role_a, role_b)
+            )
     return r, notes
 
 
@@ -235,8 +250,10 @@ def simulate_lineups(
 ) -> SimResult:
     """Simulate every lineup on the same draws.
 
-    `correlations` defaults to `models/sim/correlations.csv`, `tables` to the shipped distribution tables;
-    `independent=True` zeroes every correlation (the comparison the back-test runs). Deterministic in `seed`.
+    `correlations` defaults to `models/sim/correlations.csv` with the shipped team-shape layer on top
+    (`shape_table`: QB1-TE1 by the tight end's target share; a player whose `tshare` is unknown gets the
+    pooled value), `tables` to the shipped distribution tables; `independent=True` zeroes every correlation
+    (the comparison the back-test runs). Deterministic in `seed`.
 
     `field` switches to relative lines (see the module docstring): `cash_line` and `gpp_target` are then
     ignored, and the players of `field.cover` are simulated alongside the lineups' (a player who is in both is
@@ -253,7 +270,7 @@ def simulate_lineups(
     if independent:
         r, repair = np.eye(m), RepairInfo(m, False, 1.0, 0.0)
     else:
-        raw, notes = correlation_matrix(players, correlations or load_correlations())
+        raw, notes = correlation_matrix(players, correlations or default_lookup())
         r, repair = repair_correlation(raw)
 
     rng = np.random.default_rng(seed)

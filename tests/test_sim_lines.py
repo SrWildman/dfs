@@ -19,6 +19,7 @@ import test_sheet_lineup_sim as tsls  # noqa: E402
 
 from dfs import cli  # noqa: E402
 from dfs import config as C  # noqa: E402
+from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
 from dfs import sim_inputs as si  # noqa: E402
 from dfs.late_swap_sim import SimSettings  # noqa: E402
@@ -264,7 +265,7 @@ def test_the_exposure_diversity_and_stack_rules_are_unchanged(relative_report):
     for build in relative_report.builds:
         syn.assert_legal(build)
         if build.kind == "gpp":
-            assert ls.is_stacked(build.players)
+            assert build.shapes and all(s in shapes_mod.SHAPES for s in build.shapes)
     for kind, minimum in (("cash", ls.MIN_DIFFERENCE), ("gpp", ls.SECOND_BUILD_MIN_DIFFERENCE)):
         picks = [frozenset(p.name for p in b.players) for b in relative_report.builds if b.kind == kind]
         assert all(len(x - y) >= minimum for i, x in enumerate(picks) for y in picks[:i])

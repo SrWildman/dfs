@@ -132,6 +132,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         [
             "dfs sim fit",
             "dfs sim backtest",
+            "dfs sim script",
             "dfs sim demo",
         ],
     ),

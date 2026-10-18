@@ -360,10 +360,18 @@ def _runs(rows: list[int]) -> list[tuple[int, int]]:
 
 def build_summary(build: Build) -> str:
     """One terminal line for a build: number, kind, title, salary, projection and the odds."""
-    return (
+    line = (
         f"Build {build.number}  {build.kind.upper():<4} ${build.salary:,}  {build.projection:.1f} pts  "
         f"Cash {build.p_cash:.0%}  Top 1% {build.p_gpp:.1%}  {build.title}"
     )
+    if build.e_dups is None or build.own_sum is None or build.own_product is None:
+        return line
+    own = (
+        f"own sum {build.own_sum:.0%} product {build.own_product:.1e}  "
+        f"~{build.e_dups:.2g} copies in {build.entries:,}"
+    )
+    share = f"  Top 1% share {build.objective:.2%}" if build.objective is not None else ""
+    return f"{line}\n    {own}{share}"
 
 
 def build_lines(build: Build, edge: pd.DataFrame) -> list[str]:
