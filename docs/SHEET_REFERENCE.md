@@ -957,7 +957,15 @@ cell note (hover the corner mark) with its plain-English definition (`sheet_colu
 Season-level, read-only, **rebuilt from `data/contests/` by `dfs week close` and `dfs contests update`**; nothing is typed, and a
 whole-tab warning protection (`sheet_protection.FULLY_PROTECTED_TABS`) says so. It sits after Model Check
 (`sheet_style.WEEK_ORDER`); built by `sheet_contests.build_layout` / `write_contests` from the CSVs the contests engine writes
-(`docs/CONTESTS.md`). Five blocks, top to bottom:
+(`docs/CONTESTS.md`). Two blocks added 2026-10-18 and five older ones, top to bottom:
+
+0. **This week, your decisions** (top of the tab, `sheet_contests._add_decisions`, from `contests/decisions.py`) -- the Monday
+   post-mortem of your own choices in five lines, numbers first: cash (your lineup's score against each double-up's cash line, and its
+   copies in the field), GPP (each entry's finish, the average), the biggest swing (your player against the field's most-owned player at
+   the same position within $400 of his salary), the pool hit rate (your pooled players, and the Board's Model likes you left out,
+   against their CalPts; logged at the close because it needs your live pool), and contest choice (the same lineups in the other
+   contests of your standings files). Everything comes from the standings files and actual stats; a missing measure reads `-`. A
+   season block under it adds the same measures up. Written by `dfs week close` (which now scores the week first).
 
 1. **Series you play, this season** -- one row per series in H2H, 50/50, Double Up, Multiplier, SE GPP and N-max GPP, by format.
    `Fee`, `Field` (typical entrants), `Paid %`, `Played` (this season), `ROI` (winnings less fees over fees; freerolls are not here),
@@ -972,6 +980,10 @@ whole-tab warning protection (`sheet_protection.FULLY_PROTECTED_TABS`) says so. 
 3. **How the field builds** -- per format, averaged over the contests logged: for the field, the top 10 % and you: QB + 1 / + 2
    catchers, bring-back, salary left, share leaving $1,000+, FLEX position, chalk (how many of the contest's five most-owned players a
    lineup holds), DST with / against the QB, and the share of duplicate lineups.
+3b. **What wins in your contests** (`sheet_contests._add_winners`, from `contests/winners.py`) -- the top 1 % of your large GPPs (700+
+   entries) beside every lineup in them: QB + 1 / + 2 teammates at any position (and the older WR/TE-only count), stack + bring-back, game
+   stack, a RB with his own DST, ownership sum and (median) product, salary left, DST ownership, with the lineup counts and the biggest
+   gaps called out. Directional until more weeks pile up.
 4. **Head to head** -- your win rate by score band, and your record against the 15 opponents you have met most (2 or more times), with
    the one-line use: favour opponents you beat; skip the ones who beat you.
 5. **Left out of the ROI above** -- freerolls, Showdown, private and unrecognised contests: entries and net this season and overall,
