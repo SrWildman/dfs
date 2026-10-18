@@ -762,7 +762,10 @@ def _add_shadow_sources(b: _Builder, scored: pd.DataFrame) -> None:
         f"{label} {'in the blend' if joined else f'{weeks} of {needed} scored weeks'}"
         for label, weeks, needed, joined in progress
     )
-    race = calibration.shadow_race(scored, shadow=policy)
+    race = pd.concat(
+        [calibration.shadow_race(scored, shadow=policy), calibration.rb1_spread_race(scored)],
+        ignore_index=True,
+    )
     b.section("SHADOW SOURCES  —  scored every week, kept out of CalPts until they have enough weeks")
     b.verdict(f"Shadow status: {status}.")
     if race.empty:
@@ -796,7 +799,9 @@ def _add_shadow_sources(b: _Builder, scored: pd.DataFrame) -> None:
     b.note(
         "Each shadow source is judged on the players it rated, beside TFFB and CalPts (weeks CalPts did "
         "not train on). A source joins the CalPts blend, through the same weighting and shrinkage, once it "
-        "has the weeks shown above; until then CalPts is unchanged by it."
+        "has the weeks shown above; until then CalPts is unchanged by it. The RB1 spread row is CalPts plus "
+        f"{calibration.RB1_SPREAD_PER_POINT:g} point per point of spread in his team's favour, for each "
+        "team's top running back only; it is not a blend source and joins CalPts only if it beats CalPts."
     )
 
 

@@ -67,6 +67,7 @@ SCORED_COLUMNS = [
     "DkActual",
     "GsisId",
     "UmPts",  # the UM model's mean, added by `results_signals.attach_um`
+    "Spread",  # his team's spread at the reference snapshot (negative = favoured); the RB1 shadow's input
     # Shadow sources (`calibration.ShadowPolicy`): scored from their first week, in the CalPts blend only
     # after `shadow_min_weeks`. Blank for every week before the source existed.
     "EspnPts",

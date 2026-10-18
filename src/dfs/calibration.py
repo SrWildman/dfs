@@ -478,6 +478,52 @@ def backtest(
     return score_predictions(frame, PROJECTIONS_WITH_UM if with_um else PROJECTIONS)
 
 
+# RB1 spread shadow (cloud G, docs/SIM.md "Do the projections already price it?"): a team's top running back
+# outscores his projection by about +0.7 to +1.3 DK points per +10 points of spread in favour, in both eras.
+# CalPts plus this many points per point of favouritism, for RB1s only. A MODEL CHECK ROW ONLY: it joins
+# CalPts after `shadow_min_weeks` scored weeks and only if it beats CalPts. It is not a blend source.
+RB1_SPREAD_PER_POINT = 0.1
+RB1_SPREAD_SOURCE = "Rb1SpreadPts"
+RB1_SPREAD_LABEL = "CalPts + RB1 spread (shadow)"
+
+
+def with_rb1_spread(frame: pd.DataFrame) -> pd.DataFrame:
+    """`frame` plus `Rb1SpreadPts`: for each team-week's RB1 (the running back with the highest `AggPts`, a
+    pre-game fact), `CalPts - RB1_SPREAD_PER_POINT * Spread` (Spread is negative for the favourite); NaN for
+    everyone else and where the spread is unknown."""
+    out = frame.copy()
+    out[RB1_SPREAD_SOURCE] = float("nan")
+    if "Spread" not in out.columns or "CalPts" not in out.columns or out.empty:
+        return out
+    rb = out[out["Position"] == "RB"].dropna(subset=["AggPts"])
+    if rb.empty:
+        return out
+    rb1 = rb.groupby(["week", "Team"])["AggPts"].idxmax().dropna()
+    spread = pd.to_numeric(out.loc[rb1, "Spread"], errors="coerce")
+    out.loc[rb1, RB1_SPREAD_SOURCE] = (out.loc[rb1, "CalPts"] - RB1_SPREAD_PER_POINT * spread).round(
+        CAL_DECIMALS
+    )
+    return out
+
+
+def rb1_spread_race(scored: pd.DataFrame, *, season: int | None = None) -> pd.DataFrame:
+    """The RB1 spread shadow beside TFFB and CalPts on the RB1s it adjusted, out of sample (weeks CalPts did
+    not train on): `SHADOW_RACE_COLUMNS` rows with "Rated by" = "RB1 spread". Empty before any RB1 has a
+    spread."""
+    frame = backtest_frame(scored, season=season, with_um=False)
+    if frame.empty:
+        return pd.DataFrame(columns=SHADOW_RACE_COLUMNS)
+    rated = with_rb1_spread(frame)
+    rated = rated[rated[RB1_SPREAD_SOURCE].notna()]
+    if rated.empty:
+        return pd.DataFrame(columns=SHADOW_RACE_COLUMNS)
+    table = score_predictions(
+        rated, (("TFFB", TFFB_SOURCE), ("CalPts", "CalPts"), (RB1_SPREAD_LABEL, RB1_SPREAD_SOURCE))
+    )
+    table.insert(0, "Rated by", "RB1 spread")
+    return table
+
+
 SHADOW_RACE_COLUMNS = ["Rated by", "Source", "Position", "n", "Rho", "MAE", "Bias"]
 
 
