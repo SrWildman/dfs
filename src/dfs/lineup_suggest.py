@@ -649,8 +649,8 @@ def suggest_builds(
     double_up_entries: int = dups.DEFAULT_DOUBLE_UP_ENTRIES,
     shapes: Sequence[str] = GPP_SHAPES,
     rank: str = DEFAULT_RANK,
-    gpp_dup_model: dups.DupModel = dups.DupModel(),
-    cash_dup_model: dups.DupModel = dups.DupModel(),
+    gpp_dup_model: dups.DupModel = dups.DUP_MODEL_GPP,
+    cash_dup_model: dups.DupModel = dups.DUP_MODEL_CASH,
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the

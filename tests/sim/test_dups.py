@@ -85,3 +85,17 @@ def test_fit_recovers_the_scale_and_exponent_of_a_known_field():
         dups.fit_dup_model(
             [0.1, 0.1, 0.1], 1000, [1, 2, 3]
         )  # no spread in the products to fit an exponent on
+
+
+def test_the_gpp_model_is_the_fitted_one_and_the_cash_model_is_still_the_placeholder():
+    assert (dups.DUP_MODEL_GPP.scale, dups.DUP_MODEL_GPP.exponent) == (10.02, 0.712)
+    assert (dups.DUP_MODEL_CASH.scale, dups.DUP_MODEL_CASH.exponent) == (dups.DUP_SCALE, dups.DUP_EXPONENT)
+    own = [0.12, 0.15, 0.10, 0.20, 0.12, 0.08, 0.10, 0.06, 0.08]
+    assert dups.DUP_MODEL_GPP.expected(own, 1000) == pytest.approx(
+        dups.expected_dups(own, 1000, exponent=0.712, scale=10.02)
+    )
+    # the fit gives a typical build far fewer copies than the placeholder did, and a chalky one about as many
+    assert dups.DUP_MODEL_GPP.expected(own, 1000) < dups.DUP_MODEL_CASH.expected(own, 1000)
+    chalky = [0.30] * 9
+    ratio = dups.DUP_MODEL_GPP.expected(chalky, 1000) / dups.DUP_MODEL_CASH.expected(chalky, 1000)
+    assert 0.5 < ratio < 2.0

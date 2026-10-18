@@ -96,6 +96,18 @@ class DupModel:
         return expected_dups(own, entries, exponent=self.exponent, scale=self.scale)
 
 
+# Fitted on Sam's 2026 standings (Weeks 2, 4 and 5: 33,576 lineups in 13 GPPs), with the ownership the tool
+# itself applies it to (the field model's `top` shares, from the pre-lock EdgeRaw snapshot), by `fit_dup_model`.
+# The stated placeholder (scale 1, exponent 0.5) overstated GPP copies 2.4x in total and 20x for the
+# least-owned lineups; this tracks the top decile of products (observed 2.65 copies, fitted 2.66).
+# docs/SIM.md has the table.
+DUP_MODEL_GPP = DupModel(scale=10.02, exponent=0.712)
+# The double-up model is still the placeholder: the same fit on the projected shares is poor (a few heavily
+# duplicated lineups carry most copies, and double-ups are chalkier than projected). It waits for the
+# per-player double-up ownership model (Contests Phase 2). Cash builds only WARN on the number.
+DUP_MODEL_CASH = DupModel()
+
+
 def top1_share(p_top1: float, e_dups: float) -> float:
     """The GPP objective: the chance of reaching the top-1% line divided by `1 + E[dups]`, an approximation of
     how much of a top-1% payout the lineup keeps once ties split it."""

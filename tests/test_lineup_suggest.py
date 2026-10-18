@@ -665,7 +665,7 @@ def test_every_gpp_build_reports_sum_product_dupes_and_the_top_1_share(owned_rep
         own = dups.shares_for([p.name for p in b.players], shares)
         assert b.own_sum == pytest.approx(dups.ownership_sum(own))
         assert b.own_product == pytest.approx(dups.ownership_product(own))
-        assert b.e_dups == pytest.approx(dups.expected_dups(own, dups.DEFAULT_GPP_ENTRIES))
+        assert b.e_dups == pytest.approx(dups.DUP_MODEL_GPP.expected(own, dups.DEFAULT_GPP_ENTRIES))
         assert b.entries == dups.DEFAULT_GPP_ENTRIES
         assert b.objective == pytest.approx(b.p_gpp / (1 + b.e_dups))
         assert dups.dups_label(b.e_dups) in b.title and b.stack in b.title
