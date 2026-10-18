@@ -77,6 +77,7 @@ from dfs.lineups import (
     kickoffs_by_id,
     parse_entries,
     reorder_flex,
+    split_blank_entries,
     validate_entry,
 )
 from dfs.live_diff import diff_edge_flags, diff_queue_changes
@@ -256,6 +257,10 @@ week_app = typer.Typer(help="Start a new week's sheet, or close out the one you'
 pool_app = typer.Typer(
     help="Add or remove players from your pool without opening the sheet.", cls=PromptingGroup
 )
+entries_app = typer.Typer(
+    help="Fill DraftKings' entries file from your lineups (you choose each entry's lineup).",
+    cls=PromptingGroup,
+)
 ownership_app = typer.Typer(help="Log actual DK contest ownership (Phase 6, Part 7.8).", cls=PromptingGroup)
 results_app = typer.Typer(
     help="Score every projection against what actually happened (Model Check).", cls=PromptingGroup
@@ -270,6 +275,7 @@ app.add_typer(week_app, name="week")
 app.add_typer(results_app, name="results")
 app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
+app.add_typer(entries_app, name="entries")
 # `hidden=False` overrides the groups' own `hidden=True` (set in model/ and research/, which this layer
 # does not edit): both are visible now, listed in the launcher and docs/COMMANDS.md.
 app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model", hidden=False)
@@ -1099,6 +1105,39 @@ def sheets_fix_lineups_dst_label(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+
+
+@setup_app.command("dk-upload", short_help="Build DK Upload's entries layout (Lineup dropdown, Suggested).")
+def sheets_dk_upload(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template "
+        "(always the template first).",
+    ),
+) -> None:
+    """Put the entries layout on the DK Upload tab: DK's columns, then Format, a typed Lineup dropdown
+    (L1..L20, pale-yellow, the one cell exempt from the tab's protection), and the grey Suggested and Why
+    columns `dfs entries fill` writes. Safe to re-run: it never touches an entry row's values."""
+    from dfs import sheet_dk_upload as dku
+    from dfs.sheet_protection import protect_dk_upload
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    batch = client.batched()
+    batch.__enter__()
+    try:
+        title, url = client.describe()
+        console.print(f"Building DK Upload on: [bold]{title}[/bold]\n{url}\n")
+        results = dku.build_dk_upload(client, cfg.lineups.upload_tab)
+        results.append(protect_dk_upload(client, cfg.lineups.upload_tab))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
 
 
 @setup_app.command("add-pool-control", short_help="Create/refresh Player Pool's add-a-player control row.")
@@ -1971,7 +2010,10 @@ def sheets_protect(
         title, url = client.describe()
         console.print(f"Protecting: [bold]{title}[/bold]\n{url}\n")
         results = protect_workbook(
-            client, player_pool_tab=cfg.lineups.player_pool_tab, lineups_tab=cfg.lineups.builder_tab
+            client,
+            player_pool_tab=cfg.lineups.player_pool_tab,
+            lineups_tab=cfg.lineups.builder_tab,
+            dk_upload_tab=cfg.lineups.upload_tab,
         )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -2119,6 +2161,9 @@ def setup_sheet(
        mean re-deriving nothing extra -- no reason to run it earlier.
     4. `add-filters` -- filter views on EdgeRaw plus the four view tabs
        from step 2. Depends on 2 (see above).
+    4b. `dk-upload` -- DK Upload's entries layout (Format / Lineup dropdown /
+       Suggested / Why after DK's own columns). Before `protect`, which
+       carves the Lineup dropdown out of the tab's protection.
     5. `protect` -- warning-only protection on every fully formula-driven
        tab, including the four view tabs. Runs after every structural
        tab/column exists so it's protecting the real final layout, not a
@@ -2146,6 +2191,7 @@ def setup_sheet(
         ("build-views", lambda: sheets_build_views(sheet_id=sheet_id)),
         ("link-edge", lambda: sheets_link_edge(sheet_id=sheet_id)),
         ("add-filters", lambda: sheets_add_filters(sheet_id=sheet_id)),
+        ("dk-upload", lambda: sheets_dk_upload(sheet_id=sheet_id)),
         ("protect", lambda: sheets_protect(sheet_id=sheet_id)),
         ("polish", lambda: sheets_polish(sheet_id=sheet_id, skip_chrome=False)),
         ("audit-style", lambda: sheets_audit_style(sheet_id=sheet_id)),
@@ -2703,6 +2749,16 @@ def export(
         console.print(f"[yellow]No entries found in {cfg.lineups.upload_tab!r} (all rows blank).[/yellow]")
         raise typer.Exit(code=1)
 
+    entries, blank = split_blank_entries(entries)
+    if blank:
+        noun = "entry" if len(blank) == 1 else "entries"
+        console.print(f"[dim]{len(blank)} {noun} with no lineup left out (they just do not go).[/dim]")
+    if not entries:
+        console.print(
+            f"[yellow]Every entry in {cfg.lineups.upload_tab!r} is blank: nothing to export.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
     lookup = build_salary_lookup(salary_df)
     results = [validate_entry(e, lookup, salary_cap=cfg.lineups.salary_cap) for e in entries]
 
@@ -2753,6 +2809,194 @@ def export(
         entry_word = "entry" if invalid_count == 1 else "entries"
         console.print(f"[red]{invalid_count} {entry_word} skipped due to validation errors above.[/red]")
         raise typer.Exit(code=1)
+
+
+def _gs_config(cfg: Config, sheet_id: str | None):
+    return cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+
+
+def _entries_now() -> datetime:
+    """The moment `entries` judges "has this game started?" at (a function so a test can replay the slate)."""
+    return datetime.now(tz=UTC)
+
+
+def _entries_file(cfg: Config, csv: Path | None):
+    """The entries file to read (the one given, else the newest in Downloads by its header row), parsed. Says
+    which it used; stops with a plain message when there is none or it is not DK's."""
+    from dfs import entries as ent
+
+    path, how = ent.resolve_entries_file(csv, Path(cfg.contests.downloads_dir).expanduser())
+    if path is None:
+        console.print(f"[red]{how}.[/red] Download it from DraftKings (Edit entries) or pass --csv.")
+        raise typer.Exit(code=1)
+    console.print(f"Entries file: [bold]{path}[/bold] ({how}).")
+    try:
+        return ent.read_entries_file(path)
+    except (ent.EntriesFileError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+
+
+@entries_app.command("fill")
+def entries_fill(
+    csv: Path = typer.Option(
+        None,
+        "--csv",
+        help="Path to a DraftKings entries file (Edit entries). Left out, the newest one in your Downloads "
+        "folder is used (found by its header row) and the command says which.",
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Also write upload_<timestamp>.csv: only the entries you set that DK does not already hold.",
+    ),
+    output: Path = typer.Option(None, "--output", "-o", help="Where --write puts the file (default: here)."),
+    again: bool = typer.Option(
+        False,
+        "--again",
+        help="After a late swap changed a lineup: rewrite only the entries whose lineup now differs from the "
+        "slots on DK Upload. Nothing else on the tab changes.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Read and report only: write neither the DK Upload tab nor a file."
+    ),
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Use a different sheet instead of config.toml's (e.g. the template)."
+    ),
+) -> None:
+    """Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
+
+    You choose every entry's lineup in the tab's Lineup dropdown (L1..L20); nothing is ever assigned for you.
+    The command lists each Classic main-slate entry from DK's entries file on DK Upload (Showdown and
+    other-slate entries are skipped and reported), keeps every Lineup you already set (matched by Entry ID),
+    writes a grey `Suggested` pick beside it by contest format (Cash-marked lineups for H2H, 50/50 and Double
+    Up, GPP-marked by Top 1% for GPPs, never the same lineup twice in one contest), fills the nine slots of
+    every entry you set from its lineup (FLEX = latest kickoff; a started player is never touched), and
+    prints checks (a lineup twice in a contest, a GPP lineup in a cash contest, an incomplete lineup, entries
+    left blank). `--write` makes the upload file."""
+    from dfs import entries as ent
+    from dfs import sheet_dk_upload as dku
+    from dfs.lineups import DK_UPLOAD_SHEET_HEADER
+
+    cfg = _load_config_or_exit()
+    parsed = _entries_file(cfg, csv)
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    tab = cfg.lineups.upload_tab
+    try:
+        title, url = client.describe()
+        console.print(f"Sheet: [bold]{title}[/bold]\n{url}\n")
+        top = client.read_range(tab, "A1:1")
+        header = [str(c).strip() for c in (top[0] if top else [])]
+        if header[: len(DK_UPLOAD_SHEET_HEADER)] != list(DK_UPLOAD_SHEET_HEADER):
+            console.print(
+                f"[red]{tab!r} does not have the entries layout yet.[/red] Run `dfs setup dk-upload` "
+                "(on the template first, then this sheet)."
+            )
+            raise typer.Exit(code=1)
+        tab_rows = dku.read_tab_rows(client, tab)
+        lineups = dku.read_lineups(client, cfg.lineups.builder_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    plan = ent.plan_fill(parsed, tab_rows, lineups, now=_entries_now(), again=again)
+    for reason, n in plan.skipped.items():
+        console.print(f"[yellow]Skipped {n} entr{'y' if n == 1 else 'ies'}: {reason}.[/yellow]")
+    if not plan.rows:
+        console.print("[yellow]No Classic main-slate entries in this file: nothing to fill.[/yellow]")
+        raise typer.Exit(code=0)
+    listed = {r.entry.entry_id for r in plan.rows}
+    kept = [t for t in tab_rows.values() if t.entry_id not in listed]
+    if len(plan.rows) + len(kept) > dku.LAST_ROW - dku.FIRST_ROW + 1:
+        console.print(f"[red]{len(plan.rows) + len(kept)} entries do not fit DK Upload's rows.[/red]")
+        raise typer.Exit(code=1)
+    if kept:
+        console.print(
+            f"[yellow]{len(kept)} row(s) on {tab!r} are not in this entries file; they stay as they are "
+            "and are not uploaded.[/yellow]"
+        )
+
+    console.print(f"\n[bold]{escape(plan.summary)}[/bold]")
+    for line in plan.flex_notes:
+        console.print(f"[cyan]{escape(line)}[/cyan]")
+    for line in plan.checks:
+        console.print(f"[yellow]- {escape(line)}[/yellow]")
+    changed = [r for r in plan.rows if r.changed]
+    to_upload = ent.upload_entries(plan)
+    held = plan.unchanged_at_dk
+    console.print(
+        f"{len(to_upload)} to upload ({held} set entr{'y' if held == 1 else 'ies'} already hold their "
+        "lineup at DK)."
+    )
+
+    if dry_run:
+        console.print("[dim]Dry run: nothing was written.[/dim]")
+        return
+    try:
+        if again:
+            console.print(dku.write_changed_slots(client, tab, changed, tab_rows))
+        else:
+            console.print(dku.write_tab_rows(client, tab, dku.tab_grid(plan.rows, kept), len(tab_rows)))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    if write:
+        if not to_upload:
+            console.print("[yellow]Nothing to upload: no entry you set differs from what DK holds.[/yellow]")
+            return
+        path = output or Path(f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        n = export_csv(to_upload, path)
+        console.print(
+            f"[green]Wrote {n} entr{'y' if n == 1 else 'ies'} to {path}[/green]; upload it at DraftKings."
+        )
+
+
+@entries_app.command("print")
+def entries_print(
+    csv: Path = typer.Option(
+        None,
+        "--csv",
+        help="Path to a DraftKings entries file. Left out, the newest one in your Downloads folder is used "
+        "(found by its header row) and the command says which.",
+    ),
+    output: Path = typer.Option(
+        None, "--output", "-o", help="Where to write the file (default: dk_lineups_<timestamp>.csv here)."
+    ),
+    sheet_id: str = typer.Option(None, "--sheet-id", help="Read a different sheet instead of config.toml's."),
+) -> None:
+    """Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, and write it to a file.
+
+    For when you pair lineups to contests yourself. One row per built lineup: CalPts, ProjPts and the summed
+    Own% first, then QB RB RB WR WR WR TE FLEX DST as `Name (ID)` using the ids in the entries file's own
+    player table (FLEX = latest kickoff). It needs no entry pairing and never writes to a sheet. A player
+    whose game has started is flagged and left where he is."""
+    from dfs import entries as ent
+    from dfs import sheet_dk_upload as dku
+
+    cfg = _load_config_or_exit()
+    parsed = _entries_file(cfg, csv)
+    if parsed.kind != "classic":
+        console.print("[red]That is a Showdown entries file: only Classic lineups are printed.[/red]")
+        raise typer.Exit(code=1)
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+        console.print(f"Lineups from: [bold]{title}[/bold]\n{url}\n")
+        lineups = dku.read_lineups(client, cfg.lineups.builder_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    rows = ent.print_rows(lineups, parsed.players, _entries_now())
+    if not rows:
+        console.print("[yellow]No lineup has any name typed in it yet.[/yellow]")
+        raise typer.Exit(code=1)
+    console.print(" | ".join(ent.PRINT_HEADER))
+    for r in rows:
+        console.print(" | ".join(r.as_record()), markup=False, highlight=False, soft_wrap=True)
+    path = output or Path(f"dk_lineups_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    n = ent.write_print_csv(rows, path)
+    console.print(f"\n[green]Wrote {n} lineup(s) to {path}[/green] (ids from {parsed.path.name}).")
 
 
 @lineups_app.command("clear")

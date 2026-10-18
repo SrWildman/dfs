@@ -56,7 +56,10 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
         "4",
         "Lineups are built",
         "dfs export -o lineups.csv",
-        "Validates your lineups and writes DraftKings' bulk-upload CSV.",
+        "Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download "
+        "DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose "
+        "each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes "
+        "the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`.",
     ),
     (
         "5",
@@ -93,6 +96,8 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs week new",
             "dfs sync",
             "dfs lineups suggest",
+            "dfs entries fill",
+            "dfs entries print",
             "dfs export",
             "dfs lineups late-swap",
             "dfs week close",
@@ -163,6 +168,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs setup link-edge",
             "dfs setup reorder-columns",
             "dfs setup add-pool-control",
+            "dfs setup dk-upload",
             "dfs setup add-filters",
             "dfs setup protect",
             "dfs setup audit-style",

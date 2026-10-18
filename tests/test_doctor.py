@@ -1,10 +1,11 @@
 import re
 from dataclasses import dataclass
 
+from dfs import sheet_dk_upload as dku
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
 from dfs.doctor import run_doctor
-from dfs.lineups import DK_UPLOAD_HEADER
+from dfs.lineups import DK_UPLOAD_HEADER, DK_UPLOAD_SHEET_HEADER
 from dfs.sheet_columns import INTERNAL, LINEUPS_COLUMN_ORDER
 from dfs.sheet_formula_ranges import DKSALCLEAN_TAB, RESULTS_FORMULA_HEADERS, formula_ranges
 from dfs.sheet_instructions import INSTRUCTIONS_LAST_ROW, INSTRUCTIONS_TAB, render_instructions_grid
@@ -12,7 +13,7 @@ from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_sim import RETIRED_SLOT_HEADERS, labels, sim_slots
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_season_view import HEADER as SEASON_HEADER
-from dfs.sheet_style import EDGE_HIDDEN_HELPERS, edge_group_spans
+from dfs.sheet_style import EDGE_HIDDEN_HELPERS, INPUT_BG, edge_group_spans
 from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
@@ -127,7 +128,7 @@ def _base_config(**overrides) -> Config:
 
 _ALL_GOOD_TABS = {
     "EdgeRaw": [POOL_HEADER, *EDGE_SHEET_ORDER],
-    "DK Upload": list(DK_UPLOAD_HEADER),
+    "DK Upload": list(DK_UPLOAD_SHEET_HEADER),
     "Lineups": list(LINEUPS_COLUMN_ORDER),
     "Player Pool": ["Pool", "Name", "Pos.", *LINKED_EDGE_COLUMNS],
     PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
@@ -876,3 +877,66 @@ def test_run_doctor_flags_a_pool_formula_that_looks_up_edgerais_id_where_it_no_l
     assert not [i for i in run(good) if i.check == "pool-cell-stale-id-column"]
     (found,) = [i for i in run(stale) if i.check == "pool-cell-stale-id-column"]
     assert "Edge Finder" in found.detail and f"{POOL_COL}3" in found.detail
+
+
+# -- DK Upload's entries layout (`dfs entries fill`) --------------------------------------------------------
+
+
+def _dk_upload_issues(client=None, tab_header=None):
+    tabs = {**_ALL_GOOD_TABS, "DK Upload": tab_header or list(DK_UPLOAD_SHEET_HEADER)}
+    client = client or FakeDoctorClient(tabs, _lineups_rows())
+    client._tabs = tabs
+    return [i for i in run_doctor(client, _base_config(), title="Week 1") if i.check.startswith("dk-upload-")]
+
+
+def test_run_doctor_passes_a_healthy_entries_layout():
+    assert _dk_upload_issues() == []
+
+
+def test_run_doctor_flags_a_dk_upload_that_has_not_had_the_entries_layout_built():
+    found = _dk_upload_issues(tab_header=list(DK_UPLOAD_HEADER))
+    assert [i.check for i in found] == ["dk-upload-layout"]
+    assert "dfs setup dk-upload" in found[0].detail and "Lineup" in found[0].detail
+
+
+def test_run_doctor_flags_a_lineup_column_that_lost_its_dropdown():
+    client = FakeDoctorClient(_ALL_GOOD_TABS, _lineups_rows())
+    letter = column_letter(DK_UPLOAD_SHEET_HEADER.index("Lineup"))
+    client.no_dropdown.add(("DK Upload", f"{letter}{dku.FIRST_ROW}"))
+    found = _dk_upload_issues(client)
+    assert [i.check for i in found] == ["dk-upload-lineup-dropdown"]
+    assert f"{letter}{dku.FIRST_ROW}" in found[0].detail
+
+
+def test_run_doctor_flags_a_lineup_column_that_lost_the_typed_cell_cue():
+    class WithFormats(FakeDoctorClient):
+        fill = INPUT_BG
+
+        def get_cell_formats(self, tab_name, a1_range):
+            return [[{"backgroundColor": self.fill}]]
+
+    client = WithFormats(_ALL_GOOD_TABS, _lineups_rows())
+    assert _dk_upload_issues(client) == []
+    client.fill = {"red": 1, "green": 1, "blue": 1}  # plain white: no cue
+    found = _dk_upload_issues(client)
+    assert [i.check for i in found] == ["dk-upload-lineup-cue"]
+
+
+def test_run_doctor_flags_a_lineup_column_that_is_behind_the_dk_upload_protection():
+    column = DK_UPLOAD_SHEET_HEADER.index("Lineup")
+
+    def found(protection):
+        client = FakeDoctorClient(_ALL_GOOD_TABS, _lineups_rows())
+        client.protection = protection
+        return _dk_upload_issues(client)
+
+    exempt = (dku.FIRST_ROW - 1, dku.LAST_ROW, column, column + 1)
+    assert found(None) == [] and found({"DK Upload": []}) == []  # cannot say / nothing protected
+    assert found({"DK Upload": _whole_sheet_protection(exempt)}) == []
+    behind = found({"DK Upload": _whole_sheet_protection()})
+    assert [i.check for i in behind] == ["dk-upload-lineup-protected"]
+    assert "dfs setup protect" in behind[0].detail
+    short = (dku.FIRST_ROW - 1, dku.LAST_ROW - 10, column, column + 1)  # stops 10 rows short
+    assert [i.check for i in found({"DK Upload": _whole_sheet_protection(short)})] == [
+        "dk-upload-lineup-protected"
+    ]

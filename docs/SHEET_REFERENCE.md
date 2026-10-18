@@ -764,7 +764,16 @@ Where you pair a finished lineup to a real DK contest entry: DraftKings'
 own "bulk edit entries" layout (Entry ID, Contest Name, Contest ID, Entry
 Fee, then the 9 roster-slot columns). Row 1 is DK Classic's header (`lineups.DK_UPLOAD_HEADER`: `Entry ID, Contest Name, Contest ID, Entry Fee, QB, RB, RB, WR, WR, WR, TE, FLEX, DST`); `dfs setup polish` restores it and `dfs doctor` checks it (every sheet once carried a Showdown `CPT / FLEX x5` header by hand; `dfs export` reads the slots by position, so it never broke, but it misled). `dfs export` reads this tab as-is,
 validates it against the current salary data, and writes DK's own
-upload-ready CSV. Pairing lineups to entries stays a manual step.
+upload-ready CSV.
+
+**The entries layout** (2026-10-18, `dfs setup dk-upload`; `lineups.DK_UPLOAD_SHEET_HEADER`): DK's 13 columns stay first and in
+DK's order, then four more -- `Format` (the contest's series format, `dfs.contests.series`), **`Lineup`** (a dropdown, `L1`..`L20`,
+pale-yellow: the one cell on the tab you type, and the one exempt from its warning-only protection), `Suggested` and `Why` (grey,
+read-only: the tool's hint by format, never copied into `Lineup`, never read by the export). `dfs entries fill` writes one row per
+Classic main-slate entry in DraftKings' entries file (Showdown and other-slate entries skipped), keeps every `Lineup` you set
+(matched by Entry ID) and fills the nine slots of each entry you set from its lineup (FLEX = latest kickoff, a started player
+never touched). **You choose every entry's lineup; the tool never assigns one.** `dfs doctor` checks the layout, the dropdown, the
+typed-cell cue and the protection exemption.
 
 `Scratch` (a blank drafting grid) and `EntriesRaw`/`GPPin`/`DKLineupsRaw`/
 `DKLineupsFinal` (the hand-paste DK contest-history chain) were removed

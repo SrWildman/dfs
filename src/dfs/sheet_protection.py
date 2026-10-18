@@ -12,13 +12,14 @@ support ticket against his own sheet. It also never blocks this client's
 own service-account writes, so leaving protection on every formula tab
 is safe for every future `dfs sync`/`dfs setup polish` run.
 
-Exactly four things are typed by hand in the whole workbook (see
+Exactly five things are typed by hand in the whole workbook (see
 `sheet_style.py`'s visual-grammar docstring): EdgeRaw's Pool column,
 Player Pool's own add-a-player control cell (A3, `sheet_pool_control.py`
 -- replaced the old separate `Pool Picks` tab), Lineups' block column A (plus each block's Cash/GPP marker),
 and Exposure's Target column plus its `LINEUP_COUNT_CELL` (moved here
 from the pool deck's own B1/D1/F1 controls when the deck was removed
-entirely, Phase 5, 2026-09-16). EdgeRaw is deliberately absent from
+entirely, Phase 5, 2026-09-16), plus DK Upload's Lineup dropdown (`protect_dk_upload`: the
+one choice Sam makes per contest entry). EdgeRaw is deliberately absent from
 `protect_workbook` below: its ENTIRE point is that Sam types into it (the
 Pool column) constantly, protecting it would mean protecting the one
 thing this task exists to make typeable. Player Pool, Exposure and
@@ -30,6 +31,7 @@ from __future__ import annotations
 
 from dfs import edge_finder_tab as eft
 from dfs.sheet_contests import CONTESTS_TAB
+from dfs.sheet_dk_upload import unprotected_ranges as dk_upload_unprotected_ranges
 from dfs.sheet_links import PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_control import control_cells
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
@@ -63,6 +65,25 @@ def lineups_unprotected_ranges(name_blocks: list[tuple[int, int]] = LINEUPS_NAME
     return [f"A{start}:A{end}" for start, end in name_blocks] + [f"A{end + 1}" for _start, end in name_blocks]
 
 
+def protect_dk_upload(client: SheetsClient, tab: str) -> str:
+    """DK Upload: the whole tab warns on an edit (every column but one is written by `dfs entries fill`)
+    except the Lineup dropdown, the one cell Sam types per contest entry
+    (`sheet_dk_upload.unprotected_ranges`)."""
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    header = client.read_range(tab, "A1:1")
+    if "Lineup" not in [str(c).strip() for c in (header[0] if header else [])]:
+        return f"{tab}: the entries layout is not built yet (run `dfs setup dk-upload`) -- left as it is"
+    client.clear_protected_ranges(tab)
+    exempt = dk_upload_unprotected_ranges()
+    client.protect_sheet(
+        tab,
+        unprotected_ranges=exempt,
+        description=f"{_FORMULA_DESCRIPTION} (except the Lineup dropdown, {', '.join(exempt)})",
+    )
+    return f"{tab}: whole tab protected except the Lineup dropdown ({', '.join(exempt)})"
+
+
 def protect_workbook(
     client: SheetsClient,
     *,
@@ -70,6 +91,7 @@ def protect_workbook(
     player_pool_tab: str = "Player Pool",
     lineups_tab: str,
     name_blocks: list[tuple[int, int]] = LINEUPS_NAME_BLOCKS,
+    dk_upload_tab: str | None = None,
 ) -> list[str]:
     """Re-runnable: every tab's existing protected ranges are cleared
     before this tab's own are (re-)added, so running twice never stacks
@@ -137,5 +159,8 @@ def protect_workbook(
         results.append(
             f"{lineups_tab}: whole tab protected except each block's Name column and Cash/GPP marker"
         )
+
+    if dk_upload_tab:
+        results.append(protect_dk_upload(client, dk_upload_tab))
 
     return results

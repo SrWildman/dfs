@@ -26,7 +26,7 @@ This is what most weeks are -- **sections 1 to 7 below are the standard week**; 
 | 1 | a new week starts | `dfs week new "<url-of-the-copy>"` |
 | 2 | any time as lines/injuries move | `dfs sync` |
 | 3 | research, pool, lineups | in the sheet (no command) |
-| 4 | lineups are built | `dfs export -o lineups.csv` |
+| 4 | lineups are built | `dfs entries fill` (pick each entry's Lineup), then `dfs export -o lineups.csv` or `dfs entries fill --write` |
 | 5 | gameday | `dfs sync --live`, then `dfs lineups late-swap` |
 | 6 | after the games | `dfs week close` (reconciles Bankroll, keeps your DraftKings downloads and rebuilds Contests, **and** scores the week into Model Check) |
 
@@ -202,15 +202,35 @@ gameday) to refresh Avail flags before finalizing.
 **Tabs:** DK Upload.
 
 ```
-dfs export -o lineups.csv
+dfs entries fill            # lay out DK's entries on DK Upload; then choose each entry's Lineup there
+dfs entries fill --write    # fill the slots and write upload_<timestamp>.csv (or `dfs export -o lineups.csv`)
 ```
 
 Before that, if you want a starting point: `dfs lineups suggest` writes complete builds from your pool to the **Suggested** tab (3 cash, and GPP builds in several shapes (a QB with one to three teammates of any position, with or without a bring-back; a stack holding a RB; a game stack; a stack with a RB and his DST; a contrarian stack; the title names the shape, the make-up and the identical entries expected, "DET stack QB+WR+TE + ARI bring-back · ~0.3 dupes") for every QB, two each when they fit, ranked by the Top 1% chance (`--rank share` discounts it by the identical entries expected), each at least 3 players
 apart, FLEX on the latest kickoff), and **Lineup Tools > Copy builds to Lineups** asks which builds (`1,4,6` or `all`) and drops them into the empty lineups in order, telling you which went where and what did not fit. It never touches a lineup that has names.
 
-Pair each finished lineup to a real DK contest entry in DK Upload (Entry
-ID, Contest Name, Contest ID, Entry Fee, then the roster-slot columns),
-then run `dfs export` and upload the resulting file on DraftKings.
+**You decide which lineup goes in which contest; nothing is assigned for you.** Download DraftKings' entries file
+(My Contests > Edit entries; the tool never fetches from DK) and run `dfs entries fill`. It finds the newest entries file
+in Downloads by its header row (not its name) and says which, then lists every Classic main-slate entry on **DK Upload**
+(Showdown and other-slate entries are skipped and reported): Entry ID, Contest Name, Contest ID, Entry Fee, the nine slots,
+the contest's **Format**, a **Lineup** dropdown (L1..L20, the one yellow cell), and a grey **Suggested** pick with its **Why**.
+Suggested is only a hint: Cash-marked lineups (best Cash %) for H2H, 50/50 and Double Up, GPP-marked lineups (best Top 1%)
+for GPPs and multipliers, never the same lineup twice in one contest. It is never copied into Lineup.
+
+Choose each entry's Lineup, then run `dfs entries fill` again (**re-running never overwrites a dropdown you set**, entries
+are matched by Entry ID). It fills the nine slots of every entry you set from that lineup (the FLEX rule below; a player
+whose game has started is never touched) and prints its checks: the same lineup twice in one multi-entry contest, a GPP
+lineup in a cash contest or a Cash one in a GPP, an empty or incomplete lineup, and the entries with no Lineup (they just
+do not go). The summary line reads like `27 entries: 24 set (20 H2H + 3 DU <- L1; 1 GPP <- L4), 3 blank`. Add `--write`
+to write `upload_<timestamp>.csv` (DK's format) with **only** the entries you set that DK does not already hold, and upload
+it on DraftKings. `dfs entries fill --dry-run` reports without writing the tab or a file; `--again` after a late swap
+rewrites only the entries whose lineup changed.
+
+`dfs entries print` is for pairing by hand (or in a hurry at a lock): every built lineup as `Name (ID)` in DK's slot order
+(QB RB RB WR WR WR TE FLEX DST) with its CalPts, ProjPts and summed Own% in front, printed and written to
+`dk_lineups_<timestamp>.csv`, using the ids in the entries file's own player table. It needs no pairing, says which file it
+used, never writes a sheet and flags (never moves) a started player. `dfs export` still writes DK's bulk-upload CSV from
+the slots on DK Upload (rows with no lineup are left out).
 
 `dfs export` also applies the **FLEX rule** before it writes the file: the FLEX slot holds whichever of its position's players kicks
 off last (RB beyond 2, WR beyond 3 or TE beyond 1), so it stays open to a swap the longest. It swaps two names in the exported rows

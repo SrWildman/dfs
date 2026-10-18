@@ -78,10 +78,18 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   never fails). Projection = last TFFB snapshot before each player's own kickoff; flags/ValAdj recomputed from the
   raw archives with current code.
 
+- `dfs entries fill [--csv <file>] [--write] [--again] [--dry-run] [--sheet-id <id>]` -- DK's entries file (newest in
+  Downloads, by header) onto `DK Upload`: one row per Classic main-slate entry; **Sam picks each entry's `Lineup`**
+  (dropdown) and nothing is ever auto-assigned (`Suggested` is a grey hint, `entries.suggest_pick`, the hook
+  Contests Phase 2's "Best in" replaces); re-runs match rows by Entry ID and never overwrite a dropdown; `--write` writes
+  `upload_<timestamp>.csv` (only set entries DK does not hold); `--again` after a late swap; a started player is never
+  touched. `dfs entries print` lists every lineup as `Name (ID)` (CalPts, ProjPts, Own% first). Needs
+  `dfs setup dk-upload` (DK Upload's layout: `lineups.DK_UPLOAD_SHEET_HEADER`; template first) once per sheet.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
-  `LINEUPS_NAME_BLOCKS` expects, and the hand-built per-row formula ranges on
+  `LINEUPS_NAME_BLOCKS` expects, DK Upload's entries layout with its
+  Lineup dropdown, typed-cell cue and protection exemption, and the hand-built per-row formula ranges on
   Results, Season, DkSalClean and PlayerPoolRaw have a formula on every row).
   Run this after any structural change, against both sheets. Never writes
   anything. `dfs setup repair-formula-ranges [--sheet-id <id>]` rewrites the

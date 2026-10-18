@@ -153,8 +153,11 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "lineups "
         "on the Lineups tab: type names in column A, set Cash or GPP on the Total row, and read Cash % and "
         f"{TOP1_HEADER} there (see Reading the numbers). Exposure shows how concentrated "
-        "your lineups are. When they are final, pair them to your contest entries in DK Upload, run: dfs "
-        "export, and upload the file to DraftKings.",
+        "your lineups are. When they are final, download DraftKings' entries file (Edit entries), run: dfs "
+        "entries fill, pick each entry's Lineup in DK Upload (you choose; the grey Suggested column is only "
+        "a hint), run it again, then run: dfs export (or add --write to the fill) and upload the file to "
+        "DraftKings. "
+        "dfs entries print lists every lineup as Name (ID) if you would rather pair them yourself.",
     ),
     (
         "Sunday: late swap",
@@ -308,8 +311,11 @@ _TAB_ROWS: list[tuple[str, str]] = [
     ),
     (
         "DK Upload",
-        "Pair a finished lineup to a real contest entry (Entry ID, contest, fee), then run dfs export and "
-        "upload the file it writes to DraftKings.",
+        "One row per DraftKings entry, laid out by dfs entries fill from the entries file you download. "
+        "Choose each entry's Lineup (the yellow dropdown, L1 to L20); the grey Suggested column is the "
+        "tool's hint and never fills it. Run dfs entries fill again to put the chosen lineup's players in "
+        "the slots, add --write for the upload file (only entries you set that DraftKings does not already "
+        "hold), and --again after a late swap. Started players are never touched.",
     ),
     (
         "Exposure",

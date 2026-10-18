@@ -94,7 +94,7 @@ from dfs.derived import (
     edge_sheet_letter,
 )
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP
-from dfs.lineups import DK_UPLOAD_HEADER
+from dfs.lineups import DK_UPLOAD_EXTRA_HEADERS, DK_UPLOAD_HEADER
 from dfs.models import ROSTER_SLOTS
 from dfs.sheet_color_scales import (
     BLOCK_BAD,
@@ -2786,7 +2786,9 @@ TAB_NOTES: dict[str, str] = {
     "Lineups": (
         f"LINEUPS -- one block per lineup; type names in column A, set Cash or GPP on the Total row. {MORE}"
     ),
-    "DK Upload": f"DK UPLOAD -- `dfs export` writes the DraftKings upload file here. Read-only. {MORE}",
+    "DK Upload": (
+        f"DK UPLOAD -- one entry per row: choose its Lineup, `dfs entries fill` does the slots. {MORE}"
+    ),
     "Movement": f"MOVEMENT -- how each team's line has moved this week. Read-only. {MORE}",
     "Exposure": f"EXPOSURE -- how much of your lineups each player is in. Type a Target. {MORE}",
     "Bankroll": f"BANKROLL -- Cash and GPP ledgers; `dfs week close` appends rows. {MORE}",
@@ -3542,7 +3544,10 @@ def restore_dk_upload_header(client: SheetsClient, tab: str = "DK Upload") -> st
     rows = client.read_range(tab, "A1:1")
     current = [c.strip() for c in (rows[0] if rows else [])]
     expected = list(DK_UPLOAD_HEADER)
-    if current[: len(expected)] == expected and not any(current[len(expected) :]):
+    beyond = current[len(expected) :]  # the entries layout's Format/Lineup/Suggested/Why are allowed there
+    if current[: len(expected)] == expected and (
+        not any(beyond) or beyond[: len(DK_UPLOAD_EXTRA_HEADERS)] == list(DK_UPLOAD_EXTRA_HEADERS)
+    ):
         return f"{tab}: header already DK Classic"
     client.update_range(tab, f"A1:{column_letter(len(expected) - 1)}1", [expected])
     return f"{tab}: header restored to DK Classic"

@@ -85,7 +85,9 @@ log forward from the sheet you're leaving:
 dfs week new "<url-of-the-copy>"  # 1. new week: point config.toml at a fresh sheet copy, sync (quote the URL)
 dfs sync                          # 2. re-run any time as lines/injuries/weather move
 # 3. research, tick your pool and build lineups in the sheet (see WORKFLOW.md)
-dfs export -o lineups.csv         # 4. validate + export DK's bulk-upload format
+dfs entries fill                  # 4. DK's entries file -> DK Upload; you pick each entry's Lineup, run it
+                                  #    again to fill the slots (`--write` makes the upload file itself)
+dfs export -o lineups.csv         #    ...or validate + export DK's bulk-upload format from the slots
 dfs sync --live                   # 5. gameday: fast-moving sources only, prints what changed (also refreshes
                                   #    the Edge Finder tab: CalPts, Hit3x%/Boom%, injury beneficiaries)
 dfs lineups late-swap             #    ...and what to swap them for (best re-fill, 2-for-2, 1-for-1)
@@ -114,7 +116,9 @@ are listed here so they are findable, not because you need to read them. Run `df
 |---|---|
 | `dfs week new "<url>"` | starting a new week: it checks the new sheet, carries your bankroll and Results forward, and runs a full sync. |
 | `dfs sync` [`--live`] | you want fresh data in the sheet; `--live` on gameday for odds/statuses/weather only, printing what changed. |
-| `dfs export -o <file>` | your lineups are built and paired to DK entries, ready to upload. |
+| `dfs export -o <file>` | your lineups are built and paired to DK entries, ready to upload. Entries with no lineup are left out. |
+| `dfs entries fill` [`--write`, `--again`, `--dry-run`, `--csv <file>`] | pairing lineups to contests: lists DK's entries file (newest one in Downloads, found by its header) on `DK Upload`, **you** choose each entry's Lineup (L1..L20), it fills the slots (FLEX = latest kickoff, a started player never touched), prints checks, and `--write` makes `upload_<timestamp>.csv` with only the entries you set that DK does not already hold. A grey `Suggested` column is a hint by contest format; it never fills anything. `--again` after a late swap rewrites only the entries using the changed lineup. |
+| `dfs entries print` [`--csv <file>`, `-o <file>`] | every lineup on the Lineups tab as `Name (ID)` in DK's slot order with CalPts, ProjPts and summed Own% in front, printed and written to a file; no pairing needed. |
 | `dfs lineups suggest` | building lineups: complete builds from your pool on the Suggested tab (3 cash, and GPP builds in several shapes (a QB with one to three teammates of any position, with or without a bring-back; a stack holding a RB; a game stack; a stack with a RB and his DST; a contrarian stack) for every QB, two each when they fit, ranked by `--rank top1` (the default: the Top 1% chance) or `--rank share` (that chance divided by 1 + the identical entries expected); `--cash N`, `--gpp N`, `--seconds N`, `--gpp-entries N`, `--double-up-entries N`, `--rank top1|share`, `--no-write`, `--fixed-lines`). Cash % and Top 1% are measured against lines that move with the slate (`docs/SIM.md`, "Relative lines"). Copy one in with Lineup Tools > Copy builds to Lineups. |
 | `dfs lineups late-swap` | gameday: which rostered players are still swappable, and the best swaps for them within the salary cap, with each swap's change in P(cash) / P(GPP) (`--goal cash|gpp`, `--metric CalPts|ProjPts|AggPts`, default `[projection] default` = CalPts, `--all-players`, `--fixed-lines`). |
 | `dfs week close` | the week is over: reconciles Cash/GPP into Bankroll and Results (newest history export in Downloads, or `--csv <file>`), keeps your DraftKings history and standings downloads, fills a blank Cash Line, rebuilds `Contests`, then scores the week's projections into `Model Check`. |
