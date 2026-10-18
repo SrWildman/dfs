@@ -340,8 +340,9 @@ def test_what_wins_looks_only_at_classic_gpps(tmp_path, monkeypatch):
         return real(parsed, players)
 
     monkeypatch.setattr(analysis.winners, "contest_lineups", spy)
-    res = run(tmp_path)
-    formats = res.profiles.set_index("contest_id")["format"]
-    assert seen and all(formats[c] in ("SE GPP", "N-max GPP") for c in seen)
-    assert "900000001" not in seen  # the Double Up
-    assert res.winners.empty  # the fixtures are far below the 700-entry floor
+    run(tmp_path)
+    assert "900000001" not in seen  # the Double Up is not looked at
+    seen.clear()
+    monkeypatch.setattr(analysis.series_mod, "SE_GPP", "Double Up")  # ...but a GPP format would be
+    run(tmp_path / "again")
+    assert seen == ["900000001"]
