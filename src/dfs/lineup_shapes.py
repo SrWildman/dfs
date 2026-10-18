@@ -1,27 +1,27 @@
 """Build shapes for GPP candidates: what a lineup looks like, as constraints on the exact search.
 
 `dfs lineups suggest` used to hold one shape, the QB stack with a bring-back. A tournament is won by being
-different from the field where it counts, so the candidate set now covers several shapes, each a SOFT shape:
-a rule a finished lineup must satisfy (and a prune that cuts branches which cannot satisfy it), searched with
+different from the field where it counts, so the candidate set covers several shapes, each a SOFT shape: a
+rule a finished lineup must satisfy (and a prune that cuts branches which cannot satisfy it), searched with
 the same exact branch-and-bound as everything else -- never a hard-coded pick. The simulator then scores every
 candidate and the selection picks among them (`lineup_suggest`).
 
-- `stack`: the QB, at least two of his pass catchers and one player from his opponent (a bring-back).
-  Evidence: QB1-WR1/WR2/TE1 +0.25 to +0.31 and QB1-opposing WR1 +0.08, all held out of sample.
-- `game`: the QB, one of his pass catchers and at least two of the other team's RB/WR/TE. Evidence: the
-  bring-back pairs, QB1-QB1 +0.19, and tail dependence of 1.3-1.6x a Gaussian.
-- `double`: the QB, at least two of his pass catchers and a RB of his team. Evidence: QB1-RB1 +0.07 (+0.08
-  out of sample); weak.
-- `rb_dst`: a stack, and a RB with his own team's DST. Evidence: RB1-DST +0.06 (+0.07 out of sample); weak,
-  and not larger for favourites.
-- `contrarian`: a stack whose summed ownership is in the bottom third of the stacks. About the field, not
-  the correlation.
+**A stack is the QB plus one to three of his teammates of ANY skill position** (RB, WR or TE, in any mix:
+QB+RB, QB+RB+WR, QB+WR+TE all count), with or without a bring-back (a player of the other team's offense). The
+bring-back is NOT required: whether it earns its place is the simulator's call, and `docs/SIM.md` ("Game
+script") measures what it adds by the stacked team's spread.
 
-(`docs/SIM.md`, "Game script", has the numbers and what did not survive: nothing is conditioned on the
-spread.)
+- `stack`: a stack with a bring-back.
+- `naked`: a stack without one (no player of the opponent's RB / WR / TE).
+- `rb_stack`: a stack that holds a RB of the QB's team (QB+RB combinations; whether a back moves with his
+  QB depends on how much he catches, see `docs/SIM.md`, "Team shape").
+- `game`: the QB, a teammate and at least two RB / WR / TE of the other team.
+- `rb_dst`: a stack, and a RB with his own team's DST.
+- `contrarian`: a stack whose summed ownership is in the bottom third of the stacks.
 
-A lineup can match several shapes. Every candidate is tagged with ALL it matches (`shapes_of`) and named by
-the most specific (`SPECIFICITY`).
+A lineup can match several shapes. Every candidate is tagged with ALL it matches (`shapes_of`); its name
+(`shape_name`) says its teammates and whether it carries a bring-back ("DET stack QB+WR+TE + ARI
+bring-back", "DET naked stack QB+RB+WR").
 
 No sheet, no network, no randomness.
 """
@@ -29,6 +29,7 @@ No sheet, no network, no randomness.
 from __future__ import annotations
 
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
@@ -38,16 +39,22 @@ from dfs.models import ROSTER_SLOTS
 
 PASS_CATCHERS = ("WR", "TE")
 SKILL = ("RB", "WR", "TE")
+MAX_MATES = 3  # a stack is the QB and one to three teammates
 
-STACK, GAME, DOUBLE, RB_DST, CONTRARIAN = "stack", "game", "double", "rb_dst", "contrarian"
-SHAPES = (STACK, GAME, DOUBLE, RB_DST, CONTRARIAN)
-# The name a shape gives a build, most specific first (a contrarian stack that also pairs a RB with his DST is
-# still named for what makes it different from the field).
-SPECIFICITY = (CONTRARIAN, RB_DST, DOUBLE, GAME, STACK)
+STACK, NAKED, RB_STACK, GAME, RB_DST, CONTRARIAN = (
+    "stack",
+    "naked",
+    "rb_stack",
+    "game",
+    "rb_dst",
+    "contrarian",
+)
+SHAPES = (STACK, NAKED, RB_STACK, GAME, RB_DST, CONTRARIAN)
 SHAPE_LABELS = {
-    STACK: "stack + {opp} bring-back",
+    STACK: "stack + bring-back",
+    NAKED: "naked stack",
+    RB_STACK: "RB stack",
     GAME: "game stack",
-    DOUBLE: "double stack",
     RB_DST: "stack + RB/DST",
     CONTRARIAN: "contrarian stack",
 }
@@ -66,41 +73,47 @@ def _qb(players: Sequence[SwapPlayer]) -> SwapPlayer | None:
     return next((p for p in players if p.position == "QB"), None)
 
 
-def own_catchers(players: Sequence[SwapPlayer], qb: SwapPlayer) -> list[SwapPlayer]:
-    return [p for p in players if p.team == qb.team and p.position in PASS_CATCHERS]
+def teammates(players: Sequence[SwapPlayer], qb: SwapPlayer) -> list[SwapPlayer]:
+    """The QB's teammates at RB / WR / TE."""
+    return [p for p in players if p.team == qb.team and p.position in SKILL]
+
+
+def bring_backs(players: Sequence[SwapPlayer], qb: SwapPlayer) -> list[SwapPlayer]:
+    """The other team's RB / WR / TE (a DST is not a bring-back)."""
+    return [p for p in players if p.team == qb.opp and p.position in SKILL]
 
 
 def is_stacked(players: Sequence[SwapPlayer]) -> bool:
-    """The stack rule: the QB, at least two of his pass catchers and at least one player from his opponent
-    (a DST is not a bring-back)."""
+    """The stack rule: the QB and one to `MAX_MATES` of his teammates at RB / WR / TE, in any mix. A
+    bring-back is neither required nor excluded."""
     qb = _qb(players)
-    if qb is None:
-        return False
-    return len(own_catchers(players, qb)) >= 2 and any(
-        p.team == qb.opp and p.position != "DST" for p in players
-    )
+    return qb is not None and 1 <= len(teammates(players, qb)) <= MAX_MATES
+
+
+def has_bring_back(players: Sequence[SwapPlayer]) -> bool:
+    qb = _qb(players)
+    return qb is not None and bool(bring_backs(players, qb))
+
+
+def is_stack_with_bring_back(players: Sequence[SwapPlayer]) -> bool:
+    return is_stacked(players) and has_bring_back(players)
+
+
+def is_naked_stack(players: Sequence[SwapPlayer]) -> bool:
+    return is_stacked(players) and not has_bring_back(players)
+
+
+def is_rb_stack(players: Sequence[SwapPlayer]) -> bool:
+    """A stack that holds a RB of the QB's team."""
+    qb = _qb(players)
+    return is_stacked(players) and any(p.team == qb.team and p.position == "RB" for p in players)
 
 
 def is_game_stack(players: Sequence[SwapPlayer]) -> bool:
-    """3-4 from one game on both sides: the QB, at least one of his pass catchers and at least two RB / WR
-    / TE of the other team."""
+    """3-4 from one game on both sides: the QB, a teammate (one to three) and at least two RB / WR / TE of the
+    other team."""
     qb = _qb(players)
-    if qb is None:
-        return False
-    return (
-        len(own_catchers(players, qb)) >= 1
-        and sum(1 for p in players if p.team == qb.opp and p.position in SKILL) >= 2
-    )
-
-
-def is_double_stack(players: Sequence[SwapPlayer]) -> bool:
-    """The QB, at least two of his pass catchers and a RB of his own team."""
-    qb = _qb(players)
-    if qb is None:
-        return False
-    return len(own_catchers(players, qb)) >= 2 and any(
-        p.team == qb.team and p.position == "RB" for p in players
-    )
+    return is_stacked(players) and len(bring_backs(players, qb)) >= 2
 
 
 def has_rb_dst(players: Sequence[SwapPlayer]) -> bool:
@@ -110,18 +123,23 @@ def has_rb_dst(players: Sequence[SwapPlayer]) -> bool:
 
 
 def stack_core(players: Sequence[SwapPlayer]) -> tuple[SwapPlayer, ...]:
-    """The correlated group of a stack: the QB, his pass catchers and the other team's non-DST players of his
-    game (the bring-back). Empty for a lineup without a QB."""
+    """The correlated group of a stack: the QB, his teammates and the other team's RB / WR / TE (the
+    bring-back). Empty for a lineup without a QB."""
     qb = _qb(players)
     if qb is None:
         return ()
     return tuple(
-        p
-        for p in players
-        if p is qb
-        or (p.team == qb.team and p.position in PASS_CATCHERS)
-        or (p.team == qb.opp and p.position != "DST")
+        p for p in players if p is qb or p in teammates(players, qb) or p in bring_backs(players, qb)
     )
+
+
+def composition(players: Sequence[SwapPlayer]) -> str:
+    """ "QB+RB+WR+WR" written "QB+RB+2WR": the QB and his teammates by position."""
+    qb = _qb(players)
+    if qb is None:
+        return ""
+    counts = Counter(p.position for p in teammates(players, qb))
+    return "QB" + "".join(f"+{counts[pos] if counts[pos] > 1 else ''}{pos}" for pos in SKILL if counts[pos])
 
 
 def stack_ownership(players: Sequence[SwapPlayer], own: Mapping[str, float]) -> float:
@@ -151,12 +169,14 @@ def shapes_of(
 ) -> tuple[str, ...]:
     """Every shape the lineup matches, in `SHAPES` order. `contrarian` needs the cutoff and the ownership."""
     out = []
-    if is_stacked(players):
+    if is_stack_with_bring_back(players):
         out.append(STACK)
+    if is_naked_stack(players):
+        out.append(NAKED)
+    if is_rb_stack(players):
+        out.append(RB_STACK)
     if is_game_stack(players):
         out.append(GAME)
-    if is_double_stack(players):
-        out.append(DOUBLE)
     if is_stacked(players) and has_rb_dst(players):
         out.append(RB_DST)
     if contrarian_at is not None and own is not None and is_stacked(players):
@@ -165,30 +185,53 @@ def shapes_of(
     return tuple(out)
 
 
-def primary_shape(shapes: Sequence[str]) -> str:
-    """The most specific of `shapes` ('' when there are none)."""
-    return next((s for s in SPECIFICITY if s in shapes), "")
-
-
-def shape_name(players: Sequence[SwapPlayer], shapes: Sequence[str]) -> str:
-    """ "DET game stack", "DET stack + ARI bring-back": the QB's team and the primary shape."""
+def shape_name(players: Sequence[SwapPlayer], shapes: Sequence[str] = ()) -> str:
+    """The build's name: the QB's team, what is special about it, the stack's make-up and its bring-back --
+    "DET stack QB+WR+TE + ARI bring-back", "DET naked stack QB+RB+WR", "DET contrarian game stack QB+WR + ARI
+    bring-back", "DET stack QB+WR+WR + RB/DST". Empty for a lineup that is not a stack."""
     qb = _qb(players)
-    shape = primary_shape(shapes)
-    if qb is None or not shape:
+    if qb is None or not is_stacked(players):
         return ""
-    return f"{qb.team} " + SHAPE_LABELS[shape].format(opp=qb.opp)
+    words = ["contrarian"] * (CONTRARIAN in shapes) + ["game"] * (GAME in shapes)
+    words.append("naked stack" if not has_bring_back(players) else "stack")
+    name = f"{qb.team} {' '.join(words)} {composition(players)}"
+    if has_bring_back(players):
+        name += f" + {qb.opp} bring-back"
+    if RB_DST in shapes:
+        name += " + RB/DST"
+    return name
 
 
 # --- the search -----------------------------------------------------------------------------------------
 
 
-def _slots_left(rest: Sequence[str]) -> tuple[int, int, int]:
-    """(slots that can hold a pass catcher: TE / WR / FLEX, slots that can hold a RB: RB / FLEX, skill "
-    "slots)."""
-    receivers = sum(1 for s in rest if s in ("TE", "WR", "FLEX"))
+def can_stack(qb: SwapPlayer, pool: Sequence[SwapPlayer]) -> bool:
+    """Can ANY lineup stack this QB from `pool`: does he have at least one teammate at RB / WR / TE? A QB who
+    cannot is left out of the GPP search: the search cannot see that, so it used to spend its whole share of
+    the time limit on a stack that does not exist (a 2026-10-17 run of a real 63-player pool: 7 of 12 QBs,
+    57 of 60 seconds, and the other five left short of time)."""
+    return any(p.team == qb.team and p.position in SKILL for p in pool)
+
+
+def can_reach(shape: str, qb: SwapPlayer, pool: Sequence[SwapPlayer]) -> bool:
+    """Can ANY lineup from `pool` hold `shape` around this QB? (Searching when none can is wasted time.)"""
+    if not can_stack(qb, pool):
+        return False
+    opp = sum(1 for p in pool if p.team == qb.opp and p.position in SKILL)
+    if shape == STACK:
+        return opp >= 1
+    if shape == GAME:
+        return opp >= 2
+    if shape == RB_STACK:
+        return any(p.team == qb.team and p.position == "RB" for p in pool)
+    return True
+
+
+def _slots_left(rest: Sequence[str]) -> tuple[int, int]:
+    """(slots that can hold a RB: RB / FLEX, slots that can hold any skill player: RB / WR / TE / FLEX)."""
     backs = sum(1 for s in rest if s in ("RB", "FLEX"))
     skill = sum(1 for s in rest if s in ("RB", "TE", "WR", "FLEX"))
-    return receivers, backs, skill
+    return backs, skill
 
 
 def feasible_for(
@@ -205,49 +248,42 @@ def feasible_for(
 
     `dst` (the `rb_dst` shape searches each DST on its own) adds "a RB of that DST's team". With `own` and
     `max_stack_own` (the `contrarian` cut) a branch is also cut once its stack's summed ownership, plus the
-    least the players it still needs can add, is over the cut: ownership only ever adds up as a stack
+    least the teammates it still needs can add, is over the cut: ownership only ever adds up as a stack
     fills."""
-    floor = {}
+    floor = None
     if own is not None and max_stack_own is not None:
-        mates = [own.get(p.name, 0.0) for p in pool if p.team == qb.team and p.position in PASS_CATCHERS]
-        backs = [own.get(p.name, 0.0) for p in pool if p.team == qb.opp and p.position != "DST"]
-        floor = {
-            "mate": max(OWN_FLOOR, min(mates, default=OWN_FLOOR)),
-            "back": max(OWN_FLOOR, min(backs, default=OWN_FLOOR)),
-        }
-
-    def mates(placed) -> int:
-        return sum(1 for p in placed if p.team == qb.team and p.position in PASS_CATCHERS)
-
-    def opp_skill(placed) -> int:
-        return sum(1 for p in placed if p.team == qb.opp and p.position in SKILL)
-
-    def stack_needs(placed) -> tuple[int, int]:
-        back = any(p.team == qb.opp and p.position != "DST" for p in placed)
-        return max(0, 2 - mates(placed)), 0 if back else 1
+        owned = [own.get(p.name, 0.0) for p in pool if p.team == qb.team and p.position in SKILL]
+        floor = max(OWN_FLOOR, min(owned, default=OWN_FLOOR))
 
     def feasible(placed: list[SwapPlayer], rest: list[str]) -> bool:
-        receivers, backs, skill = _slots_left(rest)
-        if shape in (STACK, CONTRARIAN, RB_DST):
-            need_mates, need_back = stack_needs(placed)
-            if not (need_mates <= receivers and need_mates + need_back <= skill):
-                return False
-            if shape == RB_DST and dst is not None:
-                if not any(p.team == dst.team and p.position == "RB" for p in placed) and backs < 1:
-                    return False
-            if floor:
-                core = sum(max(OWN_FLOOR, own.get(p.name, 0.0)) for p in stack_core(placed))
-                if core + need_mates * floor["mate"] + need_back * floor["back"] > max_stack_own + 1e-12:
-                    return False
-            return True
+        backs, skill = _slots_left(rest)
+        m = sum(1 for p in placed if p.team == qb.team and p.position in SKILL)
+        b = sum(1 for p in placed if p.team == qb.opp and p.position in SKILL)
+        if m > MAX_MATES:
+            return False
+        need_m = max(0, 1 - m)
+        if shape == NAKED:
+            return b == 0 and need_m <= skill
         if shape == GAME:
-            need_mates, need_opp = max(0, 1 - mates(placed)), max(0, 2 - opp_skill(placed))
-            return need_mates <= receivers and need_mates + need_opp <= skill
-        if shape == DOUBLE:
-            need_mates = max(0, 2 - mates(placed))
-            need_rb = 0 if any(p.team == qb.team and p.position == "RB" for p in placed) else 1
-            return need_mates <= receivers and need_rb <= backs and need_mates + need_rb <= skill
-        raise ValueError(f"unknown shape {shape!r}")
+            return need_m + max(0, 2 - b) <= skill
+        if shape == STACK:
+            return need_m + (0 if b else 1) <= skill
+        if shape == RB_STACK:
+            has_rb = any(p.team == qb.team and p.position == "RB" for p in placed)
+            return (has_rb or backs >= 1) and need_m + (0 if has_rb else 1) - (
+                0 if has_rb else need_m
+            ) <= skill
+        # rb_dst and contrarian: a stack, optionally with a bring-back
+        if need_m > skill:
+            return False
+        if shape == RB_DST and dst is not None:
+            if not any(p.team == dst.team and p.position == "RB" for p in placed) and backs < 1:
+                return False
+        if floor is not None:
+            core = sum(max(OWN_FLOOR, own.get(p.name, 0.0)) for p in stack_core(placed))
+            if core + need_m * floor > max_stack_own + 1e-12:
+                return False
+        return True
 
     return feasible
 
@@ -256,9 +292,10 @@ def rule_for(shape: str) -> Callable[[Sequence[SwapPlayer]], bool]:
     """The finished-lineup test of one shape (`contrarian` is a stack; its ownership cut is applied by
     `shape_lineups` from `own` / `max_stack_own`)."""
     return {
-        STACK: is_stacked,
+        STACK: is_stack_with_bring_back,
+        NAKED: is_naked_stack,
+        RB_STACK: is_rb_stack,
         GAME: is_game_stack,
-        DOUBLE: is_double_stack,
         RB_DST: lambda ps: is_stacked(ps) and has_rb_dst(ps),
         CONTRARIAN: is_stacked,
     }[shape]
@@ -281,15 +318,15 @@ def seat(players: Sequence[SwapPlayer]) -> dict[int, SwapPlayer] | None:
 def stack_cores(
     qb: SwapPlayer, pool: Sequence[SwapPlayer], own: Mapping[str, float], max_stack_own: float, limit: int
 ) -> list[tuple[SwapPlayer, ...]]:
-    """The `limit` best stack cores of `qb` (him, two of his pass catchers, one non-DST player of his
+    """The `limit` best stack cores of `qb` (him and two teammates, with or without one player of his
     opponent) whose summed ownership is within `max_stack_own`, by the cores' projection."""
-    mates = [p for p in pool if p.team == qb.team and p.position in PASS_CATCHERS]
-    backs = [p for p in pool if p.team == qb.opp and p.position != "DST"]
+    mates = [p for p in pool if p.team == qb.team and p.position in SKILL]
+    backs = [p for p in pool if p.team == qb.opp and p.position in SKILL]
     cores = []
     for i, m1 in enumerate(mates):
         for m2 in mates[i + 1 :]:
-            for back in backs:
-                core = (qb, m1, m2, back)
+            for back in (None, *backs):
+                core = (qb, m1, m2) if back is None else (qb, m1, m2, back)
                 total = sum(max(OWN_FLOOR, own.get(p.name, 0.0)) for p in core)
                 if total <= max_stack_own + 1e-12:
                     cores.append((-sum(p.value for p in core), tuple(sorted(p.name for p in core)), core))
@@ -320,12 +357,13 @@ def shape_lineups(
     (DST value plus his team's best RB ranks the DSTs); `contrarian` (which needs `own` and `max_stack_own`,
     the cut on a stack's summed ownership) searches each QB with his best `contrarian_cores` stack cores
     under the cut fixed. Inside each such anchor the search is exact; which anchors are tried is the
-    heuristic. The time left is shared out over the searches (each may use up to twice its even share or a
-    quarter of what is left). Returns the lineups and whether every search finished."""
+    heuristic. The time left is shared out over the searches: evenly for the plain stack, and for the other
+    shapes each may use up to twice its even share or a quarter of what is left. Returns the lineups and
+    whether every search finished."""
     if shape == CONTRARIAN and (own is None or max_stack_own is None):
         raise ValueError("the contrarian shape needs ownership and a cutoff")
     rule = rule_for(shape)
-    quarterbacks = [p for p in pool if p.position == "QB"]
+    quarterbacks = [p for p in pool if p.position == "QB" and can_reach(shape, p, pool)]
 
     best_rb: dict[str, float] = {}
     for p in pool:
@@ -339,6 +377,8 @@ def shape_lineups(
             return None
         names = {p.name for p in fixed_players}
         rest = [p for p in pool if p.name not in names and p.position != "QB"]
+        if shape == NAKED:  # no player of the other team's offense: they are not in the pool being searched
+            rest = [p for p in rest if not (p.team == qb.opp and p.position in SKILL)]
         if any(p.position == "DST" for p in fixed_players):
             rest = [p for p in rest if p.position != "DST"]
         return fixed, rest, feasible_for(shape, qb, **feasible_kwargs)
@@ -371,10 +411,16 @@ def shape_lineups(
     complete = True
     for n, (fixed, rest, feasible, k) in enumerate(searches):
         left = None if deadline is None else max(0.0, deadline - time.monotonic())
-        # Searches differ in cost, and a cheap one that follows leaves its unused time to nobody if the early
-        # ones are cut at exactly 1/n: a search may use up to twice its even share, or a quarter of what is
-        # left if that is more (a few slow ones cannot starve the rest: the time left shrinks geometrically)
-        share = None if left is None else min(left, max(2 * left / (len(searches) - n), 0.25 * left))
+        if (
+            shape == STACK
+        ):  # the base search: an even share, so a short budget thins every QB, never drops the last
+            share = None if left is None else left / (len(searches) - n)
+        else:
+            # Searches differ in cost, and a cheap one that follows leaves its unused time to nobody if the
+            # early ones are cut at exactly 1/n: a search may use up to twice its even share, or a quarter of
+            # what is left if that is more (a few slow ones cannot starve the rest: the time shrinks
+            # geometrically)
+            share = None if left is None else min(left, max(2 * left / (len(searches) - n), 0.25 * left))
         state = LineupState(
             cap=cap,
             fixed=fixed,

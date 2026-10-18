@@ -115,6 +115,9 @@ def sim_script(
     from_results: Path = typer.Option(
         None, "--from-results", help="Use saved per-lineup results instead of re-simulating them."
     ),
+    keep: Path = typer.Option(
+        None, "--keep", help="Also pickle the whole analysis, to re-render the report without refitting."
+    ),
 ) -> None:
     """Game script: does a pair's correlation depend on the spread or the team's implied total, do the
     projections already price it, and does any conditional table beat the pooled one on 2023-2025? Fetches the
@@ -148,6 +151,10 @@ def sim_script(
         if isinstance(e, ModelDataError):
             raise _fail(str(e)) from e
         raise
+    if keep:
+        import pickle
+
+        keep.write_bytes(pickle.dumps(analysis))
     text = script_report.render(analysis)
     console.print(text, markup=False, highlight=False, soft_wrap=True)
     console.print(script_report.verdict_line(analysis))

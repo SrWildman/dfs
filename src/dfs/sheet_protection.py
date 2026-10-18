@@ -15,7 +15,7 @@ is safe for every future `dfs sync`/`dfs setup polish` run.
 Exactly four things are typed by hand in the whole workbook (see
 `sheet_style.py`'s visual-grammar docstring): EdgeRaw's Pool column,
 Player Pool's own add-a-player control cell (A3, `sheet_pool_control.py`
--- replaced the old separate `Pool Picks` tab), Lineups' block column A,
+-- replaced the old separate `Pool Picks` tab), Lineups' block column A (plus each block's Cash/GPP marker),
 and Exposure's Target column plus its `LINEUP_COUNT_CELL` (moved here
 from the pool deck's own B1/D1/F1 controls when the deck was removed
 entirely, Phase 5, 2026-09-16). EdgeRaw is deliberately absent from
@@ -43,7 +43,7 @@ FULLY_PROTECTED_TABS = [
     PLAYER_POOL_RAW_TAB,
     "Slate Grid",
     "Movement",
-    SUGGESTED_TAB,  # written by `dfs lineups suggest`; Lineup Tools > Copy build to Lineups only reads it
+    SUGGESTED_TAB,  # written by `dfs lineups suggest`; Lineup Tools > Copy builds to Lineups only reads it
     CONTESTS_TAB,  # rebuilt by `dfs week close` / `dfs contests update`; nothing on it is typed
 ]
 # Deliberately NOT protected (Sam, 2026-10-09): opening or closing a row group counts as an edit of
@@ -54,6 +54,13 @@ FULLY_PROTECTED_TABS = [
 UNPROTECTED_VIEW_TABS = [eft.EDGE_FINDER_TAB, BOARD_TAB]
 
 _FORMULA_DESCRIPTION = "Formula-driven -- check before typing here (dfs setup protect)"
+
+
+def lineups_unprotected_ranges(name_blocks: list[tuple[int, int]] = LINEUPS_NAME_BLOCKS) -> list[str]:
+    """What Sam types on Lineups: each block's nine Name cells (column A) and the Cash / GPP marker, which is
+    column A of the block's Total row, the row right under them (`weekly_reset.LINEUPS_TOTALS_ROWS`). The
+    marker was behind the warning until 2026-10-17: it is a dropdown he sets on every lineup."""
+    return [f"A{start}:A{end}" for start, end in name_blocks] + [f"A{end + 1}" for _start, end in name_blocks]
 
 
 def protect_workbook(
@@ -121,12 +128,14 @@ def protect_workbook(
         results.append(f"{lineups_tab}: not present -- skipped")
     else:
         client.clear_protected_ranges(lineups_tab)
-        unprotected = [f"A{start}:A{end}" for start, end in name_blocks]
+        unprotected = lineups_unprotected_ranges(name_blocks)
         client.protect_sheet(
             lineups_tab,
             unprotected_ranges=unprotected,
-            description=f"{_FORMULA_DESCRIPTION} (except each block's Name column)",
+            description=f"{_FORMULA_DESCRIPTION} (except each block's Name column and its Cash/GPP marker)",
         )
-        results.append(f"{lineups_tab}: whole tab protected except each block's Name column")
+        results.append(
+            f"{lineups_tab}: whole tab protected except each block's Name column and Cash/GPP marker"
+        )
 
     return results

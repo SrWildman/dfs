@@ -2078,14 +2078,15 @@ def polish_lineups_identity_cells(
     return f"{tab}: Name/Pos./Team plain white across {len(name_blocks)} lineup block(s)"
 
 
-# The shadow projections that get a Total on Lineups (2026-10-17).
-SHADOW_TOTAL_COLUMNS = ("EspnPts", "PropPts")
+# The projections that get a nine-slot Total on Lineups (2026-10-17): `CalPts` is the headline one, `AggPts`
+# and the two shadow sources sit beside it. `Pts` has its own plain SUM.
+NINE_SLOT_TOTAL_COLUMNS = ("AggPts", "CalPts", "EspnPts", "PropPts")
 
 
-def _shadow_total_formula(letter: str, start: int, end: int) -> str:
-    """A lineup's total of one shadow projection, but only when EVERY slot has a number: a partial sum would
-    read as a low projection (a DST never has `PropPts`, and a player the source did not rate is blank), so
-    the cell stays blank instead. The slot count comes from the block, not a literal."""
+def _nine_slot_total_formula(letter: str, start: int, end: int) -> str:
+    """A lineup's total of one projection column (`AggPts`, `CalPts`, `EspnPts`, `PropPts`), but only when
+    EVERY slot has a number: a partial sum would read as a low projection (a DST never has `PropPts`, and a
+    player a source did not rate is blank), so the cell stays blank. The slot count comes from the block."""
     cells = f"{letter}{start}:{letter}{end}"
     return f'=IF(COUNT({cells})={end - start + 1},SUM({cells}),"")'
 
@@ -2167,11 +2168,11 @@ def polish_lineups_totals_rows(
     def col(name: str) -> str | None:
         return column_letter(header.index(name)) if name in header else None
 
-    # The shadow projections' totals are written below, so they are not "dead" here.
+    # The nine-slot projection totals are written below, so they are not "dead" here.
     dead_columns = [
         c
         for c in ("O/U", "Spread", "Team Implied", "OppPosRank", *LINKED_EDGE_COLUMNS)
-        if col(c) and c not in SHADOW_TOTAL_COLUMNS
+        if col(c) and c not in NINE_SLOT_TOTAL_COLUMNS
     ]
     ceil_col = col("Ceil")
     pts_col = col("Pts")
@@ -2206,10 +2207,14 @@ def polish_lineups_totals_rows(
             pts_sum = f"=SUM({pts_col}{start}:{pts_col}{end})"
             client.update_range(tab, f"{pts_col}{totals_row}", [[pts_sum]])
             summed += 1
-        for shadow in SHADOW_TOTAL_COLUMNS:
-            if col(shadow):
-                shadow_total = _shadow_total_formula(col(shadow), start, end)
-                client.update_range(tab, f"{col(shadow)}{totals_row}", [[shadow_total]])
+        for projection in NINE_SLOT_TOTAL_COLUMNS:
+            if col(projection):
+                letter = col(projection)
+                client.update_range(
+                    tab, f"{letter}{totals_row}", [[_nine_slot_total_formula(letter, start, end)]]
+                )
+                # formatted exactly like the Pts total beside them, so CalPts reads as the same kind of number
+                client.format_range(tab, f"{letter}{totals_row}", FIELD_FORMATS["Pts"])
                 summed += 1
         if rstr_col:
             rstr_sum = f"=SUM({rstr_col}{start}:{rstr_col}{end})"

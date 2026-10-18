@@ -22,7 +22,11 @@ class FakeProtectionClient:
     def protect_sheet(
         self, tab_name: str, *, warning_only: bool = True, unprotected_ranges=None, description=None
     ):
-        kwargs = {"unprotected_ranges": unprotected_ranges, "warning_only": warning_only}
+        kwargs = {
+            "unprotected_ranges": unprotected_ranges,
+            "warning_only": warning_only,
+            "description": description,
+        }
         self.protect_calls.append((tab_name, kwargs))
 
 
@@ -69,6 +73,23 @@ def test_lineups_leaves_every_block_name_column_unprotected():
     assert "B1" not in unprotected
     for start, end in LINEUPS_NAME_BLOCKS:
         assert f"A{start}:A{end}" in unprotected
+
+
+def test_lineups_also_leaves_each_blocks_cash_gpp_marker_unprotected():
+    """Sam, 2026-10-17: the marker (column A of each Total row, right under the nine names) is a dropdown he
+    sets on every lineup; it warned like a formula cell. Its row is `weekly_reset.LINEUPS_TOTALS_ROWS`."""
+    from dfs.weekly_reset import LINEUPS_TOTALS_ROWS
+
+    client = FakeProtectionClient()
+    results = protect_workbook(client, lineups_tab="Lineups")
+
+    _tab, kwargs = next(c for c in client.protect_calls if c[0] == "Lineups")
+    unprotected = kwargs["unprotected_ranges"]
+    for total in LINEUPS_TOTALS_ROWS:
+        assert f"A{total}" in unprotected
+    assert len(unprotected) == 2 * len(LINEUPS_NAME_BLOCKS)  # nothing else was opened up
+    assert "Cash/GPP marker" in kwargs["description"]
+    assert any("Cash/GPP marker" in r for r in results if r.startswith("Lineups"))
 
 
 def test_skips_a_missing_tab_without_erroring():

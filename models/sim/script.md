@@ -44,54 +44,106 @@ Log-likelihood gain of the bucket correlation (shrunk toward the pooled value, p
 
 ## 4. Lineup level (the shipping bar)
 
-| Marginals | Conditional table | Lineups | Measure | Pooled | Conditional | Better by | SE (units) | t |
-|---|---|---|---|---|---|---|---|---|
-| shipped | spread | all | Pinball loss (p10-p99) | 6.17385 | 6.17345 | +0.007% | 0.00017 | +2.4 |
-| shipped | spread | all | Brier, P(>= cash line) | 0.15314 | 0.15315 | -0.006% | 0.00001 | -1.4 |
-| shipped | spread | all | Brier, P(>= top end) | 0.02186 | 0.02186 | +0.003% | 0.00000 | +0.3 |
-| shipped | spread | rb_dst | Pinball loss (p10-p99) | 5.96874 | 5.96815 | +0.010% | 0.00028 | +2.1 |
-| shipped | spread | rb_dst | Brier, P(>= cash line) | 0.15838 | 0.15838 | -0.001% | 0.00001 | -0.2 |
-| shipped | spread | rb_dst | Brier, P(>= top end) | 0.02149 | 0.02149 | +0.026% | 0.00000 | +1.3 |
-| shipped | spread_named | all | Pinball loss (p10-p99) | 6.17385 | 6.17341 | +0.007% | 0.00014 | +3.2 |
-| shipped | spread_named | all | Brier, P(>= cash line) | 0.15314 | 0.15314 | +0.004% | 0.00001 | +0.9 |
-| shipped | spread_named | all | Brier, P(>= top end) | 0.02186 | 0.02186 | -0.002% | 0.00000 | -0.2 |
-| shipped | spread_named | rb_dst | Pinball loss (p10-p99) | 5.96874 | 5.96827 | +0.008% | 0.00017 | +2.8 |
-| shipped | spread_named | rb_dst | Brier, P(>= cash line) | 0.15838 | 0.15837 | +0.004% | 0.00001 | +0.8 |
-| shipped | spread_named | rb_dst | Brier, P(>= top end) | 0.02149 | 0.02149 | +0.000% | 0.00000 | +0.0 |
-| shipped | implied | all | Pinball loss (p10-p99) | 6.17385 | 6.17376 | +0.001% | 0.00018 | +0.5 |
-| shipped | implied | all | Brier, P(>= cash line) | 0.15314 | 0.15315 | -0.005% | 0.00001 | -1.3 |
-| shipped | implied | all | Brier, P(>= top end) | 0.02186 | 0.02186 | -0.006% | 0.00000 | -0.7 |
-| shipped | implied | rb_dst | Pinball loss (p10-p99) | 5.96874 | 5.96899 | -0.004% | 0.00028 | -0.9 |
-| shipped | implied | rb_dst | Brier, P(>= cash line) | 0.15838 | 0.15839 | -0.008% | 0.00001 | -1.3 |
-| shipped | implied | rb_dst | Brier, P(>= top end) | 0.02149 | 0.02150 | -0.008% | 0.00001 | -0.3 |
-| train-only | spread | all | Pinball loss (p10-p99) | 6.17965 | 6.17917 | +0.008% | 0.00019 | +2.6 |
-| train-only | spread | all | Brier, P(>= cash line) | 0.15350 | 0.15351 | -0.006% | 0.00001 | -1.6 |
-| train-only | spread | all | Brier, P(>= top end) | 0.02190 | 0.02190 | -0.003% | 0.00000 | -0.3 |
-| train-only | spread | rb_dst | Pinball loss (p10-p99) | 5.97665 | 5.97611 | +0.009% | 0.00029 | +1.8 |
-| train-only | spread | rb_dst | Brier, P(>= cash line) | 0.15867 | 0.15866 | +0.004% | 0.00001 | +0.5 |
-| train-only | spread | rb_dst | Brier, P(>= top end) | 0.02157 | 0.02157 | +0.005% | 0.00000 | +0.3 |
-| train-only | spread_named | all | Pinball loss (p10-p99) | 6.17965 | 6.17920 | +0.007% | 0.00017 | +2.6 |
-| train-only | spread_named | all | Brier, P(>= cash line) | 0.15350 | 0.15350 | +0.001% | 0.00001 | +0.3 |
-| train-only | spread_named | all | Brier, P(>= top end) | 0.02190 | 0.02190 | -0.004% | 0.00000 | -0.3 |
-| train-only | spread_named | rb_dst | Pinball loss (p10-p99) | 5.97665 | 5.97642 | +0.004% | 0.00020 | +1.1 |
-| train-only | spread_named | rb_dst | Brier, P(>= cash line) | 0.15867 | 0.15866 | +0.006% | 0.00001 | +1.2 |
-| train-only | spread_named | rb_dst | Brier, P(>= top end) | 0.02157 | 0.02157 | -0.005% | 0.00000 | -0.3 |
-| train-only | implied | all | Pinball loss (p10-p99) | 6.17965 | 6.17938 | +0.004% | 0.00018 | +1.5 |
-| train-only | implied | all | Brier, P(>= cash line) | 0.15350 | 0.15351 | -0.006% | 0.00001 | -1.6 |
-| train-only | implied | all | Brier, P(>= top end) | 0.02190 | 0.02190 | -0.010% | 0.00000 | -1.0 |
-| train-only | implied | rb_dst | Pinball loss (p10-p99) | 5.97665 | 5.97683 | -0.003% | 0.00027 | -0.7 |
-| train-only | implied | rb_dst | Brier, P(>= cash line) | 0.15867 | 0.15867 | -0.003% | 0.00001 | -0.4 |
-| train-only | implied | rb_dst | Brier, P(>= top end) | 0.02157 | 0.02157 | -0.022% | 0.00001 | -0.9 |
+Better than the pooled table by (percent of its loss; positive = better; t over weeks), all lineups:
+
+| Marginals | Conditional table | Pinball | Brier cash | Brier top end |
+|---|---|---|---|---|
+| shipped | spread | +0.0031% (t +1.4) | -0.0057% (t -1.8) | -0.0030% (t -0.3) |
+| shipped | spread_named | +0.0035% (t +1.8) | +0.0025% (t +0.9) | -0.0024% (t -0.3) |
+| shipped | implied | +0.0004% (t +0.2) | -0.0034% (t -1.1) | -0.0052% (t -0.8) |
+| shipped | shape_tshare | +0.0022% (t +0.4) | +0.0008% (t +0.1) | -0.0129% (t -0.7) |
+| shipped | shape_all | +0.0026% (t +0.3) | +0.0077% (t +0.7) | -0.0213% (t -0.6) |
+| train-only | spread | +0.0039% (t +1.7) | -0.0034% (t -1.2) | +0.0074% (t +0.7) |
+| train-only | spread_named | +0.0049% (t +2.4) | +0.0025% (t +0.9) | -0.0001% (t -0.0) |
+| train-only | implied | +0.0016% (t +0.7) | -0.0003% (t -0.1) | -0.0040% (t -0.6) |
+| train-only | shape_tshare | +0.0029% (t +0.6) | +0.0004% (t +0.1) | -0.0200% (t -0.9) |
+| train-only | shape_all | +0.0033% (t +0.4) | +0.0065% (t +0.6) | -0.0372% (t -0.9) |
+
+Pinball loss by lineup family:
+
+| Marginals | Conditional table | random | stack | rb_dst | game | qb_te | qb_rb |
+|---|---|---|---|---|---|---|---|
+| shipped | spread | -0.0007% (t -0.2) | +0.0039% (t +0.6) | +0.0133% (t +2.7) | +0.0040% (t +0.5) | -0.0025% (t -0.6) | +0.0009% (t +0.1) |
+| shipped | spread_named | +0.0026% (t +1.2) | +0.0030% (t +0.6) | +0.0086% (t +2.5) | +0.0072% (t +1.1) | +0.0004% (t +0.1) | -0.0009% (t -0.3) |
+| shipped | implied | +0.0020% (t +0.5) | -0.0013% (t -0.2) | -0.0004% (t -0.1) | +0.0047% (t +0.7) | +0.0010% (t +0.2) | -0.0036% (t -0.8) |
+| shipped | shape_tshare | +0.0042% (t +1.1) | -0.0011% (t -0.1) | -0.0035% (t -1.2) | +0.0055% (t +0.5) | +0.0064% (t +0.9) | +0.0016% (t +0.2) |
+| shipped | shape_all | +0.0116% (t +1.6) | +0.0030% (t +0.1) | -0.0038% (t -0.7) | +0.0001% (t +0.0) | +0.0101% (t +0.7) | -0.0053% (t -0.5) |
+| train-only | spread | +0.0001% (t +0.0) | +0.0062% (t +1.0) | +0.0107% (t +2.4) | +0.0059% (t +0.7) | +0.0012% (t +0.3) | -0.0009% (t -0.1) |
+| train-only | spread_named | +0.0028% (t +1.4) | +0.0055% (t +1.1) | +0.0071% (t +2.4) | +0.0117% (t +1.5) | +0.0018% (t +0.6) | +0.0002% (t +0.1) |
+| train-only | implied | +0.0030% (t +0.8) | +0.0024% (t +0.4) | -0.0006% (t -0.1) | +0.0062% (t +0.8) | +0.0010% (t +0.3) | -0.0027% (t -0.6) |
+| train-only | shape_tshare | +0.0066% (t +1.7) | +0.0018% (t +0.1) | -0.0031% (t -1.0) | +0.0052% (t +0.5) | +0.0070% (t +1.1) | -0.0003% (t -0.1) |
+| train-only | shape_all | +0.0123% (t +1.6) | +0.0014% (t +0.1) | -0.0054% (t -0.9) | +0.0047% (t +0.2) | +0.0113% (t +0.8) | -0.0046% (t -0.5) |
+
+## 4b. Team shape: who the players are, as a modifier on the pair
+
+Terciles (cut on the training seasons) of each modifier, three previous games only: target share of the receiver or back, the QB's carry share, the team's pass rate over expected, target concentration. Route participation is not in the weekly data this repo loads; target share stands in for it. Correlations are unshrunk; `p adj.` is the share of shuffled scans (the feature shuffled among rows of the same role and season) whose largest |t| over all 22 tests is at least this test's.
+
+| Pair, by modifier | n | pooled | low | mid | high | t | p adj. |
+|---|---|---|---|---|---|---|---|
+| QB1 with RB1, by the back's target share | 4463 | +0.069 | +0.021 | +0.082 | +0.102 | +1.3 | 0.99 |
+| QB1 with TE1, by the tight end's target share | 3978 | +0.260 | +0.189 | +0.283 | +0.310 | +2.9 | 0.07 |
+| QB1 with WR1, by his target share | 4506 | +0.333 | +0.281 | +0.327 | +0.390 | +3.3 | 0.03 |
+| QB1 with WR1, by target concentration | 4506 | +0.333 | +0.285 | +0.314 | +0.397 | +2.7 | 0.14 |
+| QB1 with RB1, by the QB's rush share | 4463 | +0.069 | +0.109 | +0.039 | +0.058 | -0.8 | 1.00 |
+| QB1 with WR1, by the team's PROE | 4506 | +0.333 | +0.328 | +0.342 | +0.332 | +0.2 | 1.00 |
+| WR1 with WR2, by target concentration | 4511 | +0.003 | +0.017 | -0.014 | +0.008 | -0.1 | 1.00 |
+
+Held-out gain of each named test (2023-2025), then the totals against the shuffled-feature control:
+
+| Pair, by modifier | n | Held-out gain per 1,000 | SE |
+|---|---|---|---|
+| QB1 with RB1, by the QB's rush share | 1566.0 | -0.812 | 0.589 |
+| QB1 with RB1, by the back's target share | 1566.0 | -0.124 | 0.683 |
+| QB1 with TE1, by the tight end's target share | 1413.0 | +4.468 | 1.299 |
+| QB1 with WR1, by target concentration | 1580.0 | +0.987 | 1.370 |
+| QB1 with WR1, by the team's PROE | 1580.0 | -0.221 | 0.426 |
+| QB1 with WR1, by his target share | 1580.0 | +0.267 | 1.410 |
+| WR1 with WR2, by target concentration | 1558.0 | -0.236 | 0.262 |
+
+| Tests | Gain per 1,000 | SE | Shuffled features: mean | 95th pct | Share of shuffles >= real |
+|---|---|---|---|---|---|
+| all 22 tests | +0.454 | 0.222 | +0.012 | +0.237 | 0.000 |
+| receiver target share (6 tests) | +1.284 | 0.488 | +0.050 | +0.581 | 0.000 |
 
 ### The ruling
 
-| Conditional table | Pinball t (shipped / train-only) | Control share | pinball > 2 SE, both marginal sets | no Brier loss beyond 1 SE | gain > 0 and control share <= 0.0125 | Ships |
+| Conditional table | Pinball t (shipped / train-only) | Control share | pinball > 2 SE, both marginal sets | no Brier loss beyond 1 SE | gain > 0 and control share <= 0.0083 | Ships |
 |---|---|---|---|---|---|---|
-| spread | +2.4 / +2.6 | 0.017 | yes | NO | NO | NO |
-| spread_named | +3.2 / +2.6 | 0.017 | yes | yes | NO | NO |
-| implied | +0.5 / +1.5 | 0.007 | NO | NO | yes | NO |
+| spread | +1.4 / +1.7 | 0.017 | NO | NO | NO | NO |
+| spread_named | +1.8 / +2.4 | 0.017 | NO | yes | NO | NO |
+| implied | +0.2 / +0.7 | 0.007 | NO | NO | yes | NO |
+| shape_tshare | +0.4 / +0.6 | 0.000 | NO | yes | yes | NO |
+| shape_all | +0.3 / +0.4 | 0.000 | NO | yes | yes | NO |
 
-## 5. Do the projections already price the spread?
+## 5. What a bring-back adds, by the stacked team's spread
+
+Lift = P(stack + the other side's player reaches the tail) / P(stack + an unrelated player of the same role and spread bucket does), 2014-2025 actual DK points; above 1 the bring-back helps, at 1 it adds nothing, below 1 it hurts. 90% interval from resampling games; the top-1% hit counts are in brackets, and are small.
+
+| Stack | Plus the other side's | Tail of S + B | BD | SD | SF | BF | all |
+|---|---|---|---|---|---|---|---|
+| QB+WR1+WR2 | WR1 | top 10% | 1.16 [0.98, 1.36] (57) | 1.02 [0.95, 1.09] (199) | 1.04 [0.98, 1.11] (245) | 1.05 [0.97, 1.12] (118) | 1.05 [1.00, 1.09] (619) |
+| QB+WR1+WR2 | WR1 | top 5% | 1.03 [0.74, 1.32] (23) | 1.22 [1.10, 1.34] (120) | 1.20 [1.10, 1.32] (142) | 1.10 [0.95, 1.23] (63) | 1.17 [1.10, 1.24] (348) |
+| QB+WR1+WR2 | WR1 | top 1% | 1.93 [1.15, 2.50] (7) | 1.44 [1.17, 1.80] (30) | 1.35 [1.06, 1.71] (32) | 1.44 [0.94, 2.01] (15) | 1.44 [1.24, 1.67] (84) |
+| QB+WR1+WR2 | TE1 | top 10% | 1.22 [1.04, 1.40] (51) | 1.10 [1.03, 1.17] (188) | 1.03 [0.97, 1.10] (208) | 1.05 [0.97, 1.12] (114) | 1.07 [1.03, 1.11] (561) |
+| QB+WR1+WR2 | TE1 | top 5% | 0.98 [0.76, 1.25] (19) | 1.01 [0.91, 1.13] (86) | 1.08 [0.99, 1.18] (105) | 1.05 [0.96, 1.15] (62) | 1.04 [0.99, 1.11] (272) |
+| QB+WR1+WR2 | TE1 | top 1% | 0.00 [0.00, 0.00] (0) | 1.16 [0.90, 1.46] (21) | 1.16 [0.87, 1.43] (22) | 0.79 [0.51, 1.08] (10) | 1.00 [0.84, 1.16] (53) |
+| QB+WR1 | WR1 | top 10% | 1.06 [0.89, 1.22] (62) | 1.11 [1.02, 1.20] (221) | 1.05 [0.98, 1.12] (248) | 1.04 [0.95, 1.15] (117) | 1.07 [1.02, 1.12] (648) |
+| QB+WR1 | WR1 | top 5% | 1.09 [0.80, 1.42] (30) | 1.14 [1.01, 1.28] (111) | 1.08 [0.97, 1.18] (130) | 1.08 [0.93, 1.24] (62) | 1.10 [1.02, 1.18] (333) |
+| QB+WR1 | WR1 | top 1% | 1.69 [0.93, 2.61] (8) | 1.24 [0.94, 1.53] (27) | 1.36 [1.01, 1.69] (33) | 1.61 [1.08, 2.18] (17) | 1.39 [1.15, 1.62] (85) |
+| QB+RB1 | WR1 | top 10% | 0.94 [0.77, 1.11] (61) | 1.08 [0.99, 1.17] (210) | 1.09 [1.00, 1.17] (266) | 1.15 [1.02, 1.28] (112) | 1.08 [1.03, 1.13] (649) |
+| QB+RB1 | WR1 | top 5% | 1.00 [0.75, 1.28] (32) | 1.15 [1.00, 1.31] (108) | 1.13 [1.00, 1.25] (146) | 0.97 [0.80, 1.15] (46) | 1.10 [1.01, 1.18] (332) |
+| QB+RB1 | WR1 | top 1% | 1.51 [0.75, 2.46] (8) | 1.38 [0.96, 1.75] (23) | 1.52 [1.19, 1.88] (42) | 2.02 [1.33, 2.79] (17) | 1.55 [1.32, 1.79] (90) |
+
+Pearson r of the stack's points with the opposing WR1's, by the stacked team's spread bucket:
+
+| Stack | BD | SD | SF | BF | all |
+|---|---|---|---|---|---|
+| QB+RB1 | +0.019 | +0.083 | +0.120 | +0.146 | +0.064 |
+| QB+WR1 | +0.053 | +0.103 | +0.126 | +0.095 | +0.076 |
+| QB+WR1+TE1 | +0.025 | +0.090 | +0.122 | +0.094 | +0.065 |
+| QB+WR1+WR2 | +0.032 | +0.123 | +0.128 | +0.113 | +0.084 |
+
+## 6. Do the projections already price the spread?
 
 Change in (actual - projection) DK points per +10 points of spread; a projection that priced the script fully would miss by 0. The naive baseline is each player's mean over his previous three games.
 
@@ -104,7 +156,7 @@ Change in (actual - projection) DK points per +10 points of spread; a projection
 | TE1 | 9.4 | +0.83 | +0.30 (t +1.6) | +0.44 (t +2.6) | +0.38 (t +1.4) | +0.07 (t +3.1) / +0.08 (t +2.0) |
 | DST | 6.8 | +2.28 | +1.11 (t +6.8) | +0.04 (t +0.3) | +0.46 (t +1.8) | +0.20 (t +8.2) / +0.29 (t +6.8) |
 
-## 6. The mechanism
+## 7. The mechanism
 
 Pass rate by the offense's score at the snap and its pre-game spread (2014-2025 designed plays). Per +1 point of pre-game spread the team-game pass rate moves -0.22 points (t -10); per +1 point of average lead on offense -0.67; per +1 point of final margin -0.39.
 
@@ -145,7 +197,7 @@ The final margin and the surprises (quadratic in the margin of role A's team rem
 | QB1 - DST | 6096 | -0.084 | -0.360 | +0.286 | +0.634 |
 | QB1 - DST (opp.) | 6096 | -0.363 | -0.246 | +0.286 | -0.633 |
 
-## 7. Tails: do the booms of a pair cluster more than a Gaussian copula says?
+## 8. Tails: do the booms of a pair cluster more than a Gaussian copula says?
 
 | Pair | Both above | n | r | Observed | Gaussian, same r | Ratio | 90% interval of ratio |
 |---|---|---|---|---|---|---|---|
@@ -164,7 +216,7 @@ The final margin and the surprises (quadratic in the margin of role A's team rem
 | QB1 - WR1 (opp.) | +1 sd | 6084 | +0.085 | 0.0344 | 0.0304 | 1.13 | [0.99, 1.27] |
 | QB1 - WR1 (opp.) | +1.5 sd | 6084 | +0.085 | 0.0084 | 0.0060 | 1.39 | [1.04, 1.69] |
 
-## 8. Pooled correlation against independence, out of sample
+## 9. Pooled correlation against independence, out of sample
 
 | pair | train_rho | test_r | n | gain | t |
 |---|---|---|---|---|---|

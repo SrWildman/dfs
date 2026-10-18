@@ -35,48 +35,60 @@ DST_DET, DST_KC, DST_ARI = (
 )
 
 
-def test_the_stack_rule_is_the_qb_two_pass_catchers_and_a_bring_back():
-    assert sh.is_stacked([QB, W1, TE, OPP_WR])
-    assert not sh.is_stacked([QB, W1, OPP_WR])  # one pass catcher
-    assert not sh.is_stacked([QB, W1, W2])  # no bring-back
-    assert not sh.is_stacked([QB, W1, W2, DST_ARI])  # a DST is not a bring-back
+def test_a_stack_is_the_qb_and_one_to_three_teammates_of_any_skill_position_with_or_without_a_bring_back():
+    assert sh.is_stacked([QB, W1])  # one teammate is enough
+    assert sh.is_stacked([QB, RB_OWN]) and sh.is_stacked([QB, RB_OWN, W1]) and sh.is_stacked([QB, W1, TE])
+    assert sh.is_stacked([QB, W1, W2, TE]) and sh.is_stacked([QB, W1, OPP_WR])  # a bring-back is allowed
+    assert not sh.is_stacked([QB, W1, W2, TE, RB_OWN])  # four teammates is not a 1-3 stack
+    assert not sh.is_stacked([QB, OPP_WR, DST_DET])  # no teammate (a DST is not one)
     assert not sh.is_stacked([W1, W2, OPP_WR])  # no QB
 
 
-def test_the_game_stack_is_the_qb_a_pass_catcher_and_two_players_of_the_other_team():
+def test_the_stack_with_a_bring_back_and_the_naked_stack_split_every_stack():
+    with_back, naked = [QB, W1, TE, OPP_WR], [QB, W1, TE]
+    assert sh.is_stack_with_bring_back(with_back) and not sh.is_naked_stack(with_back)
+    assert sh.is_naked_stack(naked) and not sh.is_stack_with_bring_back(naked)
+    assert sh.is_naked_stack([QB, W1, DST_ARI])  # a DST is not a bring-back
+    assert sh.shapes_of(with_back) == (sh.STACK,) and sh.shapes_of(naked) == (sh.NAKED,)
+
+
+def test_the_rb_stack_is_a_stack_holding_a_back_of_the_qbs_team():
+    assert sh.is_rb_stack([QB, RB_OWN]) and sh.is_rb_stack([QB, RB_OWN, W1, OPP_WR])
+    assert not sh.is_rb_stack([QB, W1, W2]) and not sh.is_rb_stack([QB, RB_OTHER])
+    assert sh.RB_STACK in sh.shapes_of([QB, RB_OWN, W1])
+
+
+def test_the_game_stack_is_a_stack_plus_two_players_of_the_other_team():
     assert sh.is_game_stack([QB, W1, OPP_WR, OPP_RB])  # a RB counts on the other side
     assert not sh.is_game_stack([QB, W1, OPP_WR])  # one opponent
-    assert not sh.is_game_stack([QB, RB_OWN, OPP_WR, OPP_TE])  # no pass catcher of his own
+    assert not sh.is_game_stack([QB, OPP_WR, OPP_TE])  # no teammate
     assert not sh.is_game_stack([QB, W1, OPP_WR, DST_ARI])  # a DST is not a player of the game's offense
-
-
-def test_the_double_stack_is_a_stack_core_plus_a_rb_of_the_same_team_and_no_bring_back_is_needed():
-    assert sh.is_double_stack([QB, W1, W2, RB_OWN])
-    assert not sh.is_double_stack([QB, W1, W2, RB_OTHER])
-    assert not sh.is_double_stack([QB, W1, RB_OWN])  # one pass catcher
 
 
 def test_rb_dst_needs_the_rb_and_the_dst_of_one_team_and_a_stack():
     assert sh.has_rb_dst([RB_OTHER, DST_KC]) and not sh.has_rb_dst([RB_OTHER, DST_DET])
-    assert sh.shapes_of([QB, W1, TE, OPP_WR, RB_OTHER, DST_KC]).count(sh.RB_DST) == 1
-    assert sh.RB_DST not in sh.shapes_of([QB, W1, OPP_WR, RB_OTHER, DST_KC])  # no stack
+    assert sh.RB_DST in sh.shapes_of([QB, W1, TE, RB_OTHER, DST_KC])
+    assert sh.RB_DST not in sh.shapes_of([QB, OPP_WR, RB_OTHER, DST_KC])  # no stack
 
 
-def test_a_lineup_carries_every_shape_it_matches_and_is_named_by_the_most_specific():
+def test_a_lineup_carries_every_shape_it_matches_and_is_named_by_its_make_up():
     lineup = [QB, W1, W2, OPP_WR, OPP_RB, RB_OWN]
-    shapes = sh.shapes_of(lineup)
-    assert set(shapes) == {sh.STACK, sh.GAME, sh.DOUBLE}
-    assert sh.primary_shape(shapes) == sh.DOUBLE
-    assert sh.shape_name(lineup, shapes) == "DET double stack"
-    assert sh.shape_name([QB, W1, TE, OPP_WR], (sh.STACK,)) == "DET stack + ARI bring-back"
-    assert sh.shape_name([W1], ()) == ""
+    assert set(sh.shapes_of(lineup)) == {sh.STACK, sh.RB_STACK, sh.GAME}
+    assert sh.composition(lineup) == "QB+RB+2WR"
+    assert sh.shape_name(lineup, sh.shapes_of(lineup)) == "DET game stack QB+RB+2WR + ARI bring-back"
+    assert sh.shape_name([QB, W1, TE, OPP_WR]) == "DET stack QB+WR+TE + ARI bring-back"
+    assert sh.shape_name([QB, RB_OWN, W1]) == "DET naked stack QB+RB+WR"
+    assert sh.shape_name([QB, W1, RB_OTHER, DST_KC], (sh.RB_DST,)) == "DET naked stack QB+WR + RB/DST"
+    assert sh.shape_name([W1], ()) == "" and sh.shape_name([QB, OPP_WR]) == ""
 
 
 def test_the_stack_core_and_its_ownership_and_the_bottom_third_cutoff():
     lineup = [QB, W1, TE, OPP_WR, RB_OTHER, DST_KC]
     assert {p.name for p in sh.stack_core(lineup)} == {"qb", "w1", "te", "o_wr"}
     own = {"qb": 0.1, "w1": 0.2, "te": 0.05, "o_wr": 0.15, "rb_other": 0.9}
-    assert sh.stack_ownership(lineup, own) == pytest.approx(0.5)  # the RB and DST are not in the stack
+    assert sh.stack_ownership(lineup, own) == pytest.approx(
+        0.5
+    )  # the other game's RB and the DST are not in it
     assert sh.stack_ownership(lineup, {}) == pytest.approx(4 * sh.OWN_FLOOR)
 
     def stack(qb_name, share):
@@ -92,7 +104,7 @@ def test_the_stack_core_and_its_ownership_and_the_bottom_third_cutoff():
     cut = sh.contrarian_cutoff(cores, owns)
     below = [lu for lu in cores if sh.stack_ownership(lu, owns) <= cut]
     assert len(below) == 2  # the bottom third of six stacks
-    assert sh.contrarian_cutoff([[W1, W2]], owns) is None  # no stack, no cutoff
+    assert sh.contrarian_cutoff([[OPP_WR, W2]], owns) is None  # no stack, no cutoff
     flagged = [sh.CONTRARIAN in sh.shapes_of(lu, contrarian_at=cut, own=owns) for lu in cores]
     assert flagged == [True, True, False, False, False, False]
 
@@ -119,7 +131,7 @@ def test_each_generator_yields_only_legal_lineups_that_match_its_shape(pool, sha
     assert totals == sorted(totals, reverse=True)  # best first
 
 
-@pytest.mark.parametrize("shape", [sh.STACK, sh.GAME, sh.DOUBLE, sh.RB_DST])
+@pytest.mark.parametrize("shape", [sh.STACK, sh.NAKED, sh.RB_STACK, sh.GAME, sh.RB_DST])
 def test_each_generator_finds_the_best_lineup_of_its_shape_exactly(pool, shape):
     """Against every legal lineup in the top 3,000 by projection (the prune must never hide a lineup)."""
     best, _ = sh.shape_lineups(pool, shape, cap=syn.CAP, per_qb=1, rb_dst_options=99)
@@ -167,15 +179,20 @@ def test_the_stack_wrapper_is_the_stack_shape(pool):
 def test_feasibility_prunes_only_what_cannot_pass():
     """The prune never says no to a partial lineup that has a passing completion (checked on slot counts)."""
     qb = QB
-    for shape in (sh.STACK, sh.GAME, sh.DOUBLE, sh.RB_DST, sh.CONTRARIAN):
-        feasible = sh.feasible_for(shape, qb)
-        # a full set of open slots can always still reach any shape
-        assert feasible([qb], ["DST", "TE", "RB", "RB", "WR", "WR", "WR", "FLEX"])
-    f = sh.feasible_for(sh.DOUBLE, qb)
-    assert not f([qb, W1, W2, RB_OTHER], ["DST", "TE", "WR"])  # no RB/FLEX slot left for his RB
-    assert f([qb, W1, W2, RB_OTHER], ["DST", "TE", "WR", "FLEX"])  # the FLEX can still take it
-    g = sh.feasible_for(sh.GAME, qb)
-    assert not g([qb, OPP_WR], ["DST", "TE"])  # needs a pass catcher and one more opponent, only a TE slot
+    open_slots = ["DST", "TE", "RB", "RB", "WR", "WR", "WR", "FLEX"]
+    for shape in sh.SHAPES:
+        assert sh.feasible_for(shape, qb)([qb], open_slots)  # all slots open: any shape can still be reached
+    rb_stack = sh.feasible_for(sh.RB_STACK, qb)
+    assert not rb_stack([qb, W1, W2], ["DST", "TE", "WR"])  # no RB / FLEX slot left for his back
+    assert rb_stack([qb, W1, W2], ["DST", "TE", "WR", "FLEX"])  # the FLEX can still take it
+    assert not sh.feasible_for(sh.NAKED, qb)([qb, W1, OPP_WR], ["DST", "TE"])  # an opponent is placed
+    assert not sh.feasible_for(sh.STACK, qb)([qb], ["DST"])  # no skill slot left for a teammate
+    assert sh.feasible_for(sh.STACK, qb)([qb, W1], ["DST", "WR"])  # the bring-back can still come
+    assert not sh.feasible_for(sh.STACK, qb)([qb, W1], ["DST"])  # ...but not with no skill slot left
+    assert not sh.feasible_for(sh.GAME, qb)(
+        [qb, OPP_WR], ["DST", "TE"]
+    )  # needs a teammate and one more opponent
+    assert not sh.feasible_for(sh.STACK, qb)([qb, W1, W2, TE, RB_OWN], ["DST"])  # four teammates
 
 
 def test_a_time_limit_is_respected_and_reported(pool):

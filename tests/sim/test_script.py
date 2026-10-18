@@ -258,8 +258,12 @@ def test_the_reduction_keeps_designed_passes_and_runs_with_the_offense_score():
             "qb_scramble": [0, 0, 0, 0, 0, 0],
             "rush": [0, 1, 0, 0, 1, 0],
             "game_seconds_remaining": [3000.0] * 6,
+            "pass_oe": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         }
     )
     out = script_pbp.reduce_pbp(raw)
     assert list(out["pass"]) == [1, 0, 1]  # the spike, the kneel and the no-offense row are gone
     assert list(out["diff"]) == [0.0, 3.0, 3.0]
+    assert list(out["pass_oe"]) == [1.0, 2.0, 3.0]
+    proe = script_pbp.team_game_proe(out.assign(team="A"))
+    assert proe["proe"].iloc[0] == pytest.approx(0.02)  # mean pass_oe of 2 points, as a fraction

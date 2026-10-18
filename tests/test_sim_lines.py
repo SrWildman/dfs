@@ -245,13 +245,18 @@ def _key(report):
 
 
 def test_cash_builds_rank_by_the_new_cash_percent_and_gpp_builds_by_top_1_percent(
-    relative_report, fixed_report
+    relative_report, fixed_report, owned_edge, field_for
 ):
     cash = [b for b in relative_report.builds if b.kind == "cash"]
     gpp = [b for b in relative_report.builds if b.kind == "gpp"]
     assert len(cash) == 3 and gpp
-    assert [b.p_cash for b in cash] == sorted((b.p_cash for b in cash), reverse=True)
-    assert [b.p_gpp for b in gpp[:2]] == sorted((b.p_gpp for b in gpp[:2]), reverse=True)  # best first
+    # The tab lists builds by QB then CalPts (2026-10-17), so "ranked" is read from what a run asking for only
+    # the best one picks: it is the highest Cash % of the three, and the best GPP build is the highest Top 1%.
+    best_cash = _suggest(owned_edge, field=field_for, cash_builds=1, gpp_builds=0).builds[0]
+    assert {p.name for p in best_cash.players} in [{p.name for p in b.players} for b in cash]
+    assert best_cash.p_cash == max(b.p_cash for b in cash)
+    best_gpp = _suggest(owned_edge, field=field_for, cash_builds=0, gpp_builds=1).builds[0]
+    assert best_gpp.p_gpp == max(b.p_gpp for b in gpp)
     # the numbers are the relative ones: a fixed 145 / 190 on this slate gives different Cash %
     assert [b.p_cash for b in cash] != [b.p_cash for b in fixed_report.builds if b.kind == "cash"]
 

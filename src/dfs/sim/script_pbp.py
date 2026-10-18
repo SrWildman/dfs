@@ -36,6 +36,7 @@ PBP_COLUMNS = [
     "qb_scramble",
     "rush",
     "game_seconds_remaining",
+    "pass_oe",
 ]
 
 # The offense's lead (+) or deficit (-) at the snap, in the buckets football people use.
@@ -51,7 +52,7 @@ def state_bucket(diff) -> np.ndarray:
 
 
 def cache_file(season: int):
-    return data.CACHE_DIR / f"pbp_script_{season}.parquet"
+    return data.CACHE_DIR / f"pbp_script_v2_{season}.parquet"
 
 
 def reduce_pbp(raw: pd.DataFrame) -> pd.DataFrame:
@@ -69,6 +70,7 @@ def reduce_pbp(raw: pd.DataFrame) -> pd.DataFrame:
             "qtr": p["qtr"].astype(int),
             "diff": p["score_differential"].astype(float),
             "seconds_left": p["game_seconds_remaining"].astype(float),
+            "pass_oe": p["pass_oe"].astype(float),
             "pass": dropback[p.index].astype(int),
         }
     )
@@ -96,6 +98,14 @@ def load_pbp(seasons: list[int], log=lambda msg: None) -> pd.DataFrame:
 
 
 # --- tables ---------------------------------------------------------------------------------------------
+
+
+def team_game_proe(pbp: pd.DataFrame) -> pd.DataFrame:
+    """`game_id, team, proe`: each team-game's pass rate over expected (nflfastR's `pass_oe`, in points,
+    averaged over the designed plays and returned as a fraction: 0.05 = passed 5 points more than the
+    situations called for)."""
+    g = pbp.dropna(subset=["pass_oe"]).groupby(["game_id", "team"], as_index=False)["pass_oe"].mean()
+    return g.assign(proe=g.pop("pass_oe") / 100.0)
 
 
 def pass_rate_by_state(pbp: pd.DataFrame, ctx: pd.DataFrame, *, first_half: bool = False) -> pd.DataFrame:

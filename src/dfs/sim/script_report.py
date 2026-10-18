@@ -15,7 +15,7 @@ import pandas as pd
 
 from dfs.model import data
 from dfs.model.history import team_game_context
-from dfs.sim import script, script_pbp
+from dfs.sim import script, script_bringback, script_pbp, script_shape
 from dfs.sim.correlation import normal_scores
 from dfs.sim.report import md_table, signed
 
@@ -50,6 +50,10 @@ class Analysis:
     pooled_vs_zero: pd.DataFrame | None = None
     lineups: pd.DataFrame | None = None
     counts: dict = field(default_factory=dict)
+    shape_scan: script_shape.ShapeScan | None = None
+    shape_oos: dict = field(default_factory=dict)  # "all" / "receiver" -> held-out gain; "per_test"
+    shape_null: dict = field(default_factory=dict)  # "all" / "receiver" -> gains of shuffled-feature tables
+    bringback: script_bringback.Lift | None = None
 
 
 def analyse(
@@ -66,6 +70,10 @@ def analyse(
     games = data.read_games()
     f = script.with_context(frame, games)
     f = f.assign(z=normal_scores(f, seed=seed))
+    log("play-by-play")
+    seasons = list(range(data.FIRST_SEASON, int(f["season"].max()) + 1))
+    pbp = script_pbp.load_pbp(seasons, log=log)
+    f = script_shape.shape_features(f, history, script_pbp.team_game_proe(pbp))
     train, test = f[f["season"] <= script.TRAIN_THROUGH], f[f["season"] > script.TRAIN_THROUGH]
     pairs = script.family_pairs()
     log("scanning the training seasons")
@@ -107,11 +115,38 @@ def analyse(
             null[v]["named"].append(script.summarize_gain(long, named)["per_1000"])
     out.null = {v: {k: np.array(x) for k, x in d.items()} for v, d in null.items()}
 
+    log("team shape")
+    out.shape_scan = shape_sc = script_shape.scan(train, n_shuffle=n_shuffle, seed=seed)
+    lookups = {
+        "all": script_shape.ShapeLookup(base, shape_sc.buckets, shape_sc.cuts),
+        "receiver": script_shape.ShapeLookup(
+            base, shape_sc.buckets, shape_sc.cuts, tests=set(script_shape.RECEIVER_TESTS)
+        ),
+    }
+    long = script_shape.shape_gain(test, lookups["all"])
+    out.shape_oos = {
+        "all": script_shape.summarize(long),
+        "receiver": script_shape.summarize(long, tests=set(script_shape.RECEIVER_TESTS)),
+        "per_test": long.groupby(["relation", "role_a", "role_b", "side", "feature"])
+        .apply(lambda g: pd.Series(script.summarize_gain(g)), include_groups=False)
+        .reset_index(),
+    }
+    log(f"shuffled-feature control ({n_null} draws)")
+    rng = np.random.default_rng(seed + 9)
+    shape_null = {"all": [], "receiver": []}
+    for _ in range(n_null):
+        scn = script_shape.scan(script_shape.shuffled_features(train, rng), n_shuffle=0)
+        gain = script_shape.shape_gain(test, script_shape.ShapeLookup(base, scn.buckets, scn.cuts))
+        shape_null["all"].append(script_shape.summarize(gain)["per_1000"])
+        shape_null["receiver"].append(
+            script_shape.summarize(gain, tests=set(script_shape.RECEIVER_TESTS))["per_1000"]
+        )
+    out.shape_null = {k: np.array(v) for k, v in shape_null.items()}
+    log("bring-back lift")
+    out.bringback = script_bringback.lift_table(f, seed=seed)
+
     log("marginal effects")
     out.marginal = script.marginal_effects(f, script.naive_baseline(history))
-    log("play-by-play")
-    seasons = list(range(data.FIRST_SEASON, int(f["season"].max()) + 1))
-    pbp = script_pbp.load_pbp(seasons, log=log)
     ctx = team_game_context(games)
     out.pass_rate = script_pbp.pass_rate_by_state(pbp, ctx)
     out.pass_rate_first_half = script_pbp.pass_rate_by_state(pbp, ctx, first_half=True)
@@ -243,33 +278,41 @@ def oos_text(a: Analysis) -> str:
 
 
 def lineup_text(results: pd.DataFrame) -> str:
+    """The lineup-level comparison: each conditional table against the pooled one on the same draws -- the
+    three measures over all lineups, then the pinball loss by lineup family (the families that contain the
+    pairs a table changes are `rb_dst`, `qb_te`, `qb_rb`, `game` and `stack`)."""
     from dfs.sim import script_backtest as sb
 
-    rows = []
+    names = [
+        n
+        for n in ("spread", "spread_named", "implied", "shape_tshare", "shape_all")
+        if f"shipped.{n}.p50" in results
+    ]
+    overall, by_family = [], []
     for marginals in ("shipped", "train-only"):
-        for name in ("spread", "spread_named", "implied"):
-            if f"{marginals}.{name}.p50" not in results:
-                continue
+        for name in names:
             c = sb.comparison(results, marginals, name)
-            for family in ("all", *sb.FAMILIES):
-                for measure in ("Pinball loss (p10-p99)", "Brier, P(>= cash line)", "Brier, P(>= top end)"):
-                    r = c[(c.family == family) & (c.measure == measure)].iloc[0]
-                    if family not in ("all", "rb_dst"):
-                        continue
-                    rows.append(
-                        {
-                            "Marginals": marginals,
-                            "Conditional table": name,
-                            "Lineups": family,
-                            "Measure": measure,
-                            "Pooled": f"{r['baseline']:.5f}",
-                            "Conditional": f"{r['conditional']:.5f}",
-                            "Better by": f"{r['relative']:+.3f}%",
-                            "SE (units)": f"{r['se']:.5f}",
-                            "t": f"{r['improvement'] / r['se']:+.1f}",
-                        }
-                    )
-    return md_table(pd.DataFrame(rows))
+            row = {"Marginals": marginals, "Conditional table": name}
+            for measure, label in (
+                ("Pinball loss (p10-p99)", "Pinball"),
+                ("Brier, P(>= cash line)", "Brier cash"),
+                ("Brier, P(>= top end)", "Brier top end"),
+            ):
+                r = c[(c.family == "all") & (c.measure == measure)].iloc[0]
+                row[label] = f"{r['relative']:+.4f}% (t {r['improvement'] / r['se']:+.1f})"
+            overall.append(row)
+            fam = {"Marginals": marginals, "Conditional table": name}
+            for family in sb.FAMILIES:
+                r = c[(c.family == family) & (c.measure == "Pinball loss (p10-p99)")].iloc[0]
+                fam[family] = f"{r['relative']:+.4f}% (t {r['improvement'] / r['se']:+.1f})"
+            by_family.append(fam)
+    return (
+        "Better than the pooled table by (percent of its loss; positive = better; t over weeks), "
+        "all lineups:\n\n"
+        + md_table(pd.DataFrame(overall))
+        + "\n\nPinball loss by lineup family:\n\n"
+        + md_table(pd.DataFrame(by_family))
+    )
 
 
 def marginal_text(a: Analysis) -> str:
@@ -368,8 +411,103 @@ def pooled_text(a: Analysis) -> str:
     return md_table(p, {"train_rho": "+.3f", "test_r": "+.3f", "gain": "+.1f", "t": "+.1f"})
 
 
+def bringback_text(a: Analysis) -> str:
+    """The bring-back's lift by spread bucket of the stacked team, for the main stacks."""
+    t = a.bringback.table
+    rows = []
+    for stack, back in (
+        ("QB+WR1+WR2", "WR1"),
+        ("QB+WR1+WR2", "TE1"),
+        ("QB+WR1", "WR1"),
+        ("QB+RB1", "WR1"),
+    ):
+        for tail in ("top 10%", "top 5%", "top 1%"):
+            sel = t[(t["stack"] == stack) & (t["back"] == back) & (t["tail"] == tail)].set_index("bucket")
+            if sel.empty:
+                continue
+            row = {"Stack": stack, "Plus the other side's": back, "Tail of S + B": tail}
+            for bucket in (*script.SPREAD_BUCKETS, "all"):
+                if bucket in sel.index:
+                    r = sel.loc[bucket]
+                    row[bucket] = f"{r['lift']:.2f} [{r['lo']:.2f}, {r['hi']:.2f}] ({int(r['hits'])})"
+            rows.append(row)
+    corr = t[(t["tail"] == "top 10%") & (t["back"] == "WR1")].drop_duplicates(["stack", "bucket"])
+    corr_rows = (
+        corr.pivot(index="stack", columns="bucket", values="corr")
+        .reindex(columns=[*script.SPREAD_BUCKETS, "all"])
+        .reset_index()
+        .rename(columns={"stack": "Stack"})
+    )
+    return (
+        md_table(pd.DataFrame(rows))
+        + "\n\nPearson r of the stack's points with the opposing WR1's, by the stacked team's "
+        "spread bucket:\n\n" + md_table(corr_rows, {c: "+.3f" for c in corr_rows.columns[1:]})
+    )
+
+
+def shape_text(a: Analysis) -> str:
+    """The named team-shape tests, tercile by tercile, then the out-of-sample gains."""
+    t = a.shape_scan.table.set_index(["relation", "role_a", "role_b", "side", "feature"])
+    rows = []
+    for rel, x, y, side, feat, label in script_shape.NAMED:
+        key = (rel, x, y, side, feat)
+        if key not in t.index:
+            continue
+        r = t.loc[key]
+        rows.append(
+            {
+                "Pair, by modifier": label,
+                "n": int(r["n"]),
+                "pooled": f"{r['r_pooled']:+.3f}",
+                "low": f"{r['r_low']:+.3f}",
+                "mid": f"{r['r_mid']:+.3f}",
+                "high": f"{r['r_high']:+.3f}",
+                "t": f"{r['t']:+.1f}",
+                "p adj.": f"{r['p_adj']:.2f}",
+            }
+        )
+    named = md_table(pd.DataFrame(rows))
+    per = a.shape_oos["per_test"].copy()
+    per = per[
+        [
+            (r, x, y, s_, f) in {n[:5] for n in script_shape.NAMED}
+            for r, x, y, s_, f in zip(
+                per.relation, per.role_a, per.role_b, per.side, per.feature, strict=True
+            )
+        ]
+    ]
+    per["Pair, by modifier"] = [
+        {n[:5]: n[5] for n in script_shape.NAMED}[(r, x, y, s_, f)]
+        for r, x, y, s_, f in zip(per.relation, per.role_a, per.role_b, per.side, per.feature, strict=True)
+    ]
+    per = per[["Pair, by modifier", "n", "per_1000", "se_per_1000"]]
+    per.columns = ["Pair, by modifier", "n", "Held-out gain per 1,000", "SE"]
+    totals = []
+    for label, key in (("all 22 tests", "all"), ("receiver target share (6 tests)", "receiver")):
+        g, null = a.shape_oos[key], a.shape_null[key]
+        totals.append(
+            {
+                "Tests": label,
+                "Gain per 1,000": f"{g['per_1000']:+.3f}",
+                "SE": f"{g['se_per_1000']:.3f}",
+                "Shuffled features: mean": f"{null.mean():+.3f}",
+                "95th pct": f"{np.quantile(null, 0.95):+.3f}",
+                "Share of shuffles >= real": f"{(null >= g['per_1000']).mean():.3f}",
+            }
+        )
+    return (
+        named + "\n\nHeld-out gain of each named test (2023-2025), then the totals against the "
+        "shuffled-feature control:\n\n"
+        + md_table(per, {"Held-out gain per 1,000": "+.3f", "SE": ".3f"})
+        + "\n\n"
+        + md_table(pd.DataFrame(totals))
+    )
+
+
 FAMILY_ALPHA = 0.05
-TABLES_EXAMINED = 4  # spread and implied total, each over all pairs and over the named pairs
+TABLES_EXAMINED = (
+    6  # spread and implied total, each over all pairs and the named pairs, and the two shape tables
+)
 
 
 def ruling(a: Analysis) -> pd.DataFrame:
@@ -380,14 +518,16 @@ def ruling(a: Analysis) -> pd.DataFrame:
     from dfs.sim import script_backtest as sb
 
     rows = []
-    for name, variable, scope in (
-        ("spread", "spread", "all"),
-        ("spread_named", "spread", "named"),
-        ("implied", "implied", "all"),
+    for name, gain, null in (
+        ("spread", a.oos["spread"]["all"]["per_1000"], a.null["spread"]["all"]),
+        ("spread_named", a.oos["spread"]["named"]["per_1000"], a.null["spread"]["named"]),
+        ("implied", a.oos["implied"]["all"]["per_1000"], a.null["implied"]["all"]),
+        ("shape_tshare", a.shape_oos["receiver"]["per_1000"], a.shape_null["receiver"]),
+        ("shape_all", a.shape_oos["all"]["per_1000"], a.shape_null["all"]),
     ):
-        gain = a.oos[variable][scope]["per_1000"]
-        share = float((a.null[variable][scope] >= gain).mean())
-        pinball, brier_ok, seen = [], True, a.lineups is not None
+        share = float((null >= gain).mean())
+        seen = a.lineups is not None and f"shipped.{name}.p50" in a.lineups
+        pinball, brier_ok = [], True
         if seen:
             for marginals in ("shipped", "train-only"):
                 c = sb.comparison(a.lineups, marginals, name)
@@ -450,14 +590,34 @@ def render(a: Analysis) -> str:
         oos_text(a),
         "\n## 4. Lineup level (the shipping bar)\n",
         lineup_text(a.lineups) if a.lineups is not None else "(not run: pass `--lineups N`)",
+        "\n## 4b. Team shape: who the players are, as a modifier on the pair\n",
+        "Terciles (cut on the training seasons) of each modifier, three previous games only: target share "
+        "of the "
+        "receiver or back, the QB's carry share, the team's pass rate over expected, target concentration. "
+        "Route "
+        "participation is not in the weekly data this repo loads; target share stands in for it. "
+        "Correlations are "
+        "unshrunk; `p adj.` is the share of shuffled scans (the feature shuffled among rows of the same "
+        "role and "
+        "season) whose largest |t| over all 22 tests is at least this test's.\n",
+        shape_text(a),
         "\n### The ruling\n",
         md_table(ruling(a)),
-        "\n## 5. Do the projections already price the spread?\n",
+        "\n## 5. What a bring-back adds, by the stacked team's spread\n",
+        "Lift = P(stack + the other side's player reaches the tail) / P(stack + an unrelated player of the "
+        "same role "
+        "and spread bucket does), 2014-2025 actual DK points; above 1 the bring-back helps, at 1 it adds "
+        "nothing, "
+        "below 1 it hurts. 90% interval from resampling games; the top-1% hit counts are in brackets, and "
+        "are "
+        "small.\n",
+        bringback_text(a),
+        "\n## 6. Do the projections already price the spread?\n",
         "Change in (actual - projection) DK points per +10 points of spread; a projection that priced the "
         "script fully "
         "would miss by 0. The naive baseline is each player's mean over his previous three games.\n",
         marginal_text(a),
-        "\n## 6. The mechanism\n",
+        "\n## 7. The mechanism\n",
         f"Pass rate by the offense's score at the snap and its pre-game spread (2014-2025 designed plays). "
         f"Per +1 point "
         f"of pre-game spread the team-game pass rate moves {a.team_slopes['spread'][0] * 100:+.2f} points "
@@ -470,9 +630,9 @@ def render(a: Analysis) -> str:
         "\nThe final margin and the surprises (quadratic in the margin of role A's team removed from "
         "both):\n",
         mechanism_text(a),
-        "\n## 7. Tails: do the booms of a pair cluster more than a Gaussian copula says?\n",
+        "\n## 8. Tails: do the booms of a pair cluster more than a Gaussian copula says?\n",
         tails_text(a),
-        "\n## 8. Pooled correlation against independence, out of sample\n",
+        "\n## 9. Pooled correlation against independence, out of sample\n",
         pooled_text(a),
         f"\n(Shuffled-context control for the named pairs: spread mean {ns.mean():+.3f}, 95th pct "
         f"{np.quantile(ns, 0.95):+.3f}; implied mean {ni.mean():+.3f}, 95th pct "

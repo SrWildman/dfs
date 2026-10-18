@@ -1,5 +1,6 @@
-"""The shipping test for a conditional (spread / implied-total) correlation table: the existing back-test's
-lineups and measures, run with the pooled table and with each conditional table on the SAME draws.
+"""The shipping test for a conditional (spread, implied-total or team-shape) correlation table: the
+existing back-test's lineups and measures, run with the pooled table and with each conditional table on
+the SAME draws.
 
 `backtest.py` builds random legal lineups for 2023-2025 and compares the simulator's predicted lineup
 quantiles with what the lineup scored. This module reuses its lineup generator and measures and changes two
@@ -8,9 +9,10 @@ things only:
 - the lookups: every lineup is simulated once per lookup (the pooled table fitted on 2014-2022, and the
   conditional tables fitted on the same seasons), with the same seed, so the draws are identical and the only
   difference is the correlation matrix;
-- two extra lineup families that contain the pairs under test -- **rb_dst** (a RB1 and his own DST) and
-  **game** (a QB, one of his pass catchers and two players of the opposing team) -- so a pair the
-  conditional table changes is actually in some lineups. `random` and `stack` are the existing two.
+- four extra lineup families that contain the pairs under test -- **rb_dst** (a RB1 and his own DST),
+  **game** (a QB, one of his pass catchers and two players of the opposing team), **qb_te** (a QB and his TE1)
+  and **qb_rb** (a QB and his RB1) -- so a pair a conditional table changes is actually in some lineups.
+  `random` and `stack` are the existing two.
 
 The bar (docs/SIM.md, "Game script"): a conditional table ships only if, out of sample, (1) it beats the
 pooled one on the pinball loss of the lineup quantiles by more than two paired standard errors (weeks are the
@@ -29,10 +31,11 @@ import pandas as pd
 from dfs.model import distribution as dist
 from dfs.sim import backtest as bt
 from dfs.sim import script
+from dfs.sim import script_shape as shape
 from dfs.sim.correlation import fit_correlations
 from dfs.sim.simulate import DEFAULT_CASH_LINE, DEFAULT_GPP_TARGET, PlayerSpec, simulate_lineups
 
-FAMILIES = ("random", "stack", "rb_dst", "game")
+FAMILIES = ("random", "stack", "rb_dst", "game", "qb_te", "qb_rb")
 LINEUPS_PER_FAMILY = 50
 SKILL = ("RB", "WR", "TE")
 
@@ -56,12 +59,23 @@ def _game(rng: np.random.Generator, week: pd.DataFrame, power: float) -> pd.Data
     return pd.concat([qb, mate, bt._pick(rng, others, 2, power)])
 
 
+def _qb_mate(rng: np.random.Generator, week: pd.DataFrame, power: float, role: str) -> pd.DataFrame:
+    """A QB and his team's TE1 or RB1 (`role`)."""
+    qb = bt._pick(rng, week[week["position"] == "QB"], 1, power)
+    mate = week[(week["team"] == qb["team"].iloc[0]) & (week["role"] == role)]
+    if mate.empty:
+        raise ValueError(f"no {role} for the QB's team")
+    return pd.concat([qb, mate.iloc[:1]])
+
+
 def generate(week: pd.DataFrame, n_per_family: int, rng: np.random.Generator) -> list[tuple[str, bt.Lineup]]:
     """`n_per_family` legal lineups in each family, as (family, Lineup). A draw that is illegal is redrawn."""
     season, wk = int(week["season"].iloc[0]), int(week["week"].iloc[0])
     seeds = {"random": lambda r, p: week.iloc[0:0], "stack": lambda r, p: bt._stack(r, week, p)}
     seeds["rb_dst"] = lambda r, p: _rb_dst(r, week, p)
     seeds["game"] = lambda r, p: _game(r, week, p)
+    seeds["qb_te"] = lambda r, p: _qb_mate(r, week, p, "TE1")
+    seeds["qb_rb"] = lambda r, p: _qb_mate(r, week, p, "RB1")
     out = []
     for family in FAMILIES:
         for _ in range(n_per_family):
@@ -93,6 +107,10 @@ def to_specs(rows: pd.DataFrame, tag: str) -> list[PlayerSpec]:
             projection=float(r.pred),
             spread=float(r.spread),
             implied=float(r.implied),
+            tshare=None if pd.isna(r.tshare) else float(r.tshare),
+            qb_rush=None if pd.isna(r.qb_rush) else float(r.qb_rush),
+            proe=None if pd.isna(r.proe) else float(r.proe),
+            conc=None if pd.isna(r.conc) else float(r.conc),
         )
         for r in rows.itertuples()
     ]
@@ -117,6 +135,7 @@ def make_lookups(
     for name, tables in (("shipped", None), ("train-only", train_tables)):
         fit = fit_correlations(train, tables=tables, seed=seed, n_boot=n_boot)
         sc = script.scan(fit.scored, n_shuffle=0, n_boot=10, seed=seed)
+        shape_sc = shape.scan(fit.scored, n_shuffle=0, seed=seed)
         base = fit.lookup()
         out[name] = (
             tables,
@@ -131,6 +150,10 @@ def make_lookups(
                 "implied": script.ContextLookup(
                     base, sc.buckets, sc.cutoffs, prior_n=prior_n, use=("implied",)
                 ),
+                "shape_tshare": shape.ShapeLookup(
+                    base, shape_sc.buckets, shape_sc.cuts, prior_n=prior_n, tests=set(shape.RECEIVER_TESTS)
+                ),
+                "shape_all": shape.ShapeLookup(base, shape_sc.buckets, shape_sc.cuts, prior_n=prior_n),
             },
         )
     return out

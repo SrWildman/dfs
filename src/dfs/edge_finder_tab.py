@@ -189,9 +189,9 @@ NEXT_UP_VERB = "Next up"  # a Top plays Cash row the model does not pick: filler
 TOP_CASH_PER_POSITION = {"QB": 3, "RB": 5, "WR": 6, "TE": 3, "DST": 3}
 TOP_GPP_PER_POSITION = {"QB": 3, "RB": 4, "WR": 6, "TE": 3, "DST": 3}
 TOP_CASH_COLUMNS = ["CalPts", "Hit3x%", "Edge"]
-TOP_GPP_COLUMNS = ["CalPts", "Boom%", "Lev", "Edge"]
+TOP_GPP_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "Edge"]
 CASH_COLUMNS = ["CalPts", "Hit3x%", "Bust%", "ProjPts", "Floor", "Edge"]
-GPP_COLUMNS = ["CalPts", "Boom%", "CeilM", "Lev", "ValAdj", "Edge"]
+GPP_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "ValAdj", "Edge"]  # Bust% took CeilM's slot (Sam)
 LEVERAGE_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "ValAdj", "Edge"]
 CHALK_COLUMNS = ["CalPts", "Boom%", "Bust%", "ProjPts", "ValAdj", "Edge"]
 PUNT_COLUMNS = ["CalPts", "ValAdj", "Hit3x%", "Boom%", "Floor", "Edge"]
@@ -203,7 +203,7 @@ TREND_HEADERS = ["Metric", "Last 3", "Earlier", "Change", "Trend"]
 # overflows right). The player rows nested under it have their own small header row, the standard player
 # columns, so their Salary / Own% / CalPts ... carry the sheet-wide formats and colours.
 MATCHUP_LEAD = ["", "Matchup", "Pos", "Grade", "Players", ""]
-MATCHUP_COLUMNS = ["CalPts", "Hit3x%", "Boom%"]  # the nested player rows' number columns
+MATCHUP_COLUMNS = ["CalPts", "Hit3x%", "Boom%", "Bust%"]  # the nested player rows' number columns
 # The slot columns are 64-72 px wide, so a value shown in one is short; the Why's note has the full words.
 METHOD_SHORT = {"with-or-without": "w/wo", "measured table": "table"}
 TREND_METRIC_SHORT = {"Air-yards share": "AY share"}
@@ -1744,7 +1744,7 @@ def _matchup_section(b: _Builder, inputs: Inputs, edge: pd.DataFrame) -> None:
             for _, p in players.iterrows():
                 b.player_row(
                     _lead(p, pos),
-                    [p["CalPts"], p["Hit3x%"], p["Boom%"]],
+                    [p["CalPts"], p["Hit3x%"], p["Boom%"], p["Bust%"]],
                     why=f"CalPts {p['CalPts']:.1f} vs TFFB {p['ProjPts']:.1f}",
                     short=gap_short(p, b.fitted),
                     verb="Context only",

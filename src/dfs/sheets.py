@@ -1731,6 +1731,31 @@ class SheetsClient:
                 sheet.batch_update({"requests": requests})
             break
 
+    def read_protection(self, tab_name: str) -> list[dict]:
+        """The protected ranges on this tab, read only: one dict per range with `whole_sheet` (the range names
+        no rows or columns, i.e. "protect the sheet"), `warning_only`, and `unprotected`: the cells carved out
+        of it, each as 0-based half-open `(first_row, last_row, first_col, last_col)` (a missing bound is
+        None). `dfs doctor` uses it to confirm the cells Sam types into are not behind a warning."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),protectedRanges)"})
+        out: list[dict] = []
+        for tab in meta.get("sheets", []):
+            if tab.get("properties", {}).get("sheetId") != ws.id:
+                continue
+            for pr in tab.get("protectedRanges", []) or []:
+                grid = pr.get("range", {})
+                bounds = ("startRowIndex", "endRowIndex", "startColumnIndex", "endColumnIndex")
+                out.append(
+                    {
+                        "whole_sheet": not any(k in grid for k in bounds),
+                        "warning_only": bool(pr.get("warningOnly")),
+                        "unprotected": [
+                            tuple(u.get(k) for k in bounds) for u in pr.get("unprotectedRanges", []) or []
+                        ],
+                    }
+                )
+        return out
+
     def protect_sheet(
         self,
         tab_name: str,

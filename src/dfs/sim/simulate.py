@@ -72,6 +72,13 @@ class PlayerSpec:
     # read only by a conditional lookup (`script.ContextLookup`, the game-script research).
     spread: float | None = None
     implied: float | None = None
+    # The player's / team's shape (three-game priors; `script_shape.FEATURES`): his share of the team's
+    # targets, a QB's share of the team's carries, the team's pass rate over expected and its target
+    # concentration. Read only by a shape lookup (`script_shape.ShapeLookup`); ignored by the pooled table.
+    tshare: float | None = None
+    qb_rush: float | None = None
+    proe: float | None = None
+    conc: float | None = None
 
 
 @dataclass(frozen=True)

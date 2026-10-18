@@ -19,7 +19,7 @@ This is what most weeks look like. Everything below it is reference.
 |---|---|---|---|
 | 1 | Tuesday/Wednesday: a new week starts | `dfs week new "<url-of-the-sheet-copy>"` | Points the CLI at a fresh copy of the template, carries your bankroll and Results forward, runs a full sync. Then check `dfs status`. |
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
-| 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy build to Lineups drops one in). |
+| 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy builds to Lineups drops one in). |
 | 4 | Lineups are built | `dfs export -o lineups.csv` | Validates your lineups and writes DraftKings' bulk-upload CSV. |
 | 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close` | Reconciles Cash/GPP into Bankroll and Results from the newest contest-history export in Downloads (or `--csv <file>`), keeps your DraftKings downloads (history copy, standings files) and rebuilds the Contests tab, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
@@ -312,6 +312,7 @@ Game script: does a pair's correlation depend on the spread or the team's implie
 | `--save` | Also write the report to models/sim/script.md. |
 | `--results PATH` | Also write the per-lineup results (parquet). |
 | `--from-results PATH` | Use saved per-lineup results instead of re-simulating them. |
+| `--keep PATH` | Also pickle the whole analysis, to re-render the report without refitting. |
 
 ### `dfs sim demo`
 
@@ -443,7 +444,7 @@ Fix 1: sorting and searching are real features that were invisible -- filter vie
 
 ### `dfs setup protect`
 
-Warning-only protection (never a hard lock) on every fully formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement -- plus Player Pool, Exposure and Lineups protected everywhere EXCEPT their own typed cells (Player Pool's add-a-player control; Exposure's Target and lineup-count cell; each lineup block's Name column). EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own docstring for why. Safe to re-run: each tab's protected ranges are cleared before being re-added, never stacked.
+Warning-only protection (never a hard lock) on every fully formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement -- plus Player Pool, Exposure and Lineups protected everywhere EXCEPT their own typed cells (Player Pool's add-a-player control; Exposure's Target and lineup-count cell; each lineup block's Name column and its Cash/GPP marker). EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own docstring for why. Safe to re-run: each tab's protected ranges are cleared before being re-added, never stacked.
 
 | Option | What it does |
 |---|---|

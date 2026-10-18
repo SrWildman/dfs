@@ -50,7 +50,7 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
         "Board, Slate Grid, EdgeRaw, Player Pool, Lineups",
         "Research, tick your pool, build lineups. `dfs pool add|remove|list` does the pool without opening "
         "the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup "
-        "Tools > Copy build to Lineups drops one in).",
+        "Tools > Copy builds to Lineups drops one in).",
     ),
     (
         "4",

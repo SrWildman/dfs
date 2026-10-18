@@ -88,6 +88,11 @@ class FakeDoctorClient:
     def has_data_validation(self, tab_name: str, a1_cell: str) -> bool:
         return (tab_name, a1_cell) not in self.no_dropdown
 
+    protection: dict[str, list[dict]] | None = None  # a test sets this to give a tab a protection to read
+
+    def read_protection(self, tab_name: str):
+        return None if self.protection is None else self.protection.get(tab_name, [])
+
     def row_count(self, tab_name: str) -> int:
         return 30
 
@@ -400,6 +405,38 @@ def test_run_doctor_flags_a_scoreboard_label_that_is_missing_stale_or_whose_colu
         if i.check == "lineups-scoreboard"
     ]
     assert len(found) == 1 and "contiguous" in found[0].detail
+
+
+def _whole_sheet_protection(*unprotected):
+    """What `SheetsClient.read_protection` returns for a warning-only whole-tab protection."""
+    return [{"whole_sheet": True, "warning_only": True, "unprotected": list(unprotected)}]
+
+
+def test_run_doctor_flags_a_cash_gpp_marker_that_is_behind_the_lineups_protection():
+    """Sam, 2026-10-17: the marker is set on every lineup, so it must be exempt like the Name cells."""
+    from dfs.sheet_protection import lineups_unprotected_ranges
+    from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
+
+    cfg = _base_config()
+
+    def found(protection):
+        client = FakeDoctorClient(_ALL_GOOD_TABS, _lineups_rows())
+        client.protection = protection
+        return [i for i in run_doctor(client, cfg, title="Week 1") if i.check == "lineups-marker-protected"]
+
+    names_only = [(start - 1, end, 0, 1) for start, end in LINEUPS_NAME_BLOCKS]
+    with_markers = [*names_only, *[(end, end + 1, 0, 1) for _s, end in LINEUPS_NAME_BLOCKS]]
+    assert not found(None)  # a client that cannot read protection says nothing
+    assert not found({"Lineups": []})  # nothing protected: nothing warns
+    assert not found({"Lineups": _whole_sheet_protection(*with_markers)})  # healthy
+    bad = found({"Lineups": _whole_sheet_protection(*names_only)})  # the marker still warns
+    assert len(bad) == 1 and "dfs setup protect" in bad[0].detail
+    first_marker = f"A{LINEUPS_NAME_BLOCKS[0][1] + 1}"
+    assert first_marker in bad[0].detail
+    one_missing = found({"Lineups": _whole_sheet_protection(*with_markers[:-1])})  # the last marker is not
+    assert len(one_missing) == 1 and f"A{LINEUPS_NAME_BLOCKS[-1][1] + 1}" in one_missing[0].detail
+    assert first_marker not in one_missing[0].detail
+    assert len(lineups_unprotected_ranges()) == 2 * len(LINEUPS_NAME_BLOCKS)
 
 
 def test_run_doctor_flags_lineups_header_wrong_at_row_one():

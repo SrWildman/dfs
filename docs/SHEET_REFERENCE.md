@@ -166,7 +166,7 @@ actually matches.
 | `Val` | `ProjPts / (Salary / 1000)` -- points per $1k salary. Highlighted as a gradient over the whole column ("Highlighting", below). No longer EdgeRaw's sort key (see `ValAdj`) -- kept for its `>= 3.0` cash-line threshold. |
 | `ValAdj` | `ProjPts - E[ProjPts \| Salary, Position]` -- Part 7.2's replacement for `Val` as **EdgeRaw's default sort**: a per-position regression residual, so it isn't biased toward cheap players or QBs the way `Val` is. See `docs/CALCULATIONS.md` for the regression. Banded on its own value (already a 0-100, position-comparable score by construction), not through a percentile helper -- see "Highlighting", below. |
 | `CeilVal` | `Ceiling / (Salary / 1000)` -- blank wherever `Ceiling` is blank. Highlighted as a gradient over the whole column ("Highlighting", below). |
-| `CalPts`, `Hit3x%`, `Boom%`, `Bust%`, `Floor`, `CeilM`, `xFP/G`, `Edge`, `CalPts%ile`, `xFP/G%ile` | **Edge Finder (2026-10-07)**, APPENDED after `NameKey` (`EDGE_COLUMNS` is append-only; `derived.EDGE_FINDER_COLUMNS`), filled by `edge_finder.enrich` after the base build. `CalPts` = the bias-corrected ensemble projection; `Hit3x%`/`Boom%`/`Bust%` = P(actual >= 3x / >= 4x / < 2x salary per $1,000), 0-100; `Floor`/`CeilM` = the 20th/85th percentile; `xFP/G` = expected DK points per game over his last 3 games; `Edge` = the context tokens `INJ+ BUY↑ FADE↓ USAGE↑ USAGE↓` (not part of `Flags`), plus `Props ▲ +x.x` / `Props ▼ -x.x` when `PropPts` is 3.0 or more from `CalPts` (2026-10-17, `signals.props_token`; context only, grey; nothing but Model Check reads it); the two `*%ile` columns are hidden within-position helpers for `CalPts` and `xFP/G`. QBs under 10 projected points are blank on the five model columns; low-projected DSTs are muted. Definitions and every constant: `docs/CALCULATIONS.md` ("Edge Finder"). On `PlayerPoolRaw`, `Player Pool` and `Lineups` they are linked in and placed by `sheet_columns`: `CalPts` right after `AggPts`, `Hit3x%` and `Boom%` right after `ValAdj`, `Edge` right after `Flags`, `Floor`/`CeilM`/`Bust%` in the Ceiling detail group, `xFP/G` in the USAGE group. |
+| `CalPts`, `Hit3x%`, `Boom%`, `Bust%`, `Floor`, `CeilM`, `xFP/G`, `Edge`, `CalPts%ile`, `xFP/G%ile` | **Edge Finder (2026-10-07)**, APPENDED after `NameKey` (`EDGE_COLUMNS` is append-only; `derived.EDGE_FINDER_COLUMNS`), filled by `edge_finder.enrich` after the base build. `CalPts` = the bias-corrected ensemble projection; `Hit3x%`/`Boom%`/`Bust%` = P(actual >= 3x / >= 4x / < 2x salary per $1,000), 0-100; `Floor`/`CeilM` = the 20th/85th percentile; `xFP/G` = expected DK points per game over his last 3 games; `Edge` = the context tokens `INJ+ BUY↑ FADE↓ USAGE↑ USAGE↓` (not part of `Flags`), plus `Props ▲ +x.x` / `Props ▼ -x.x` when `PropPts` is 3.0 or more from `CalPts` (2026-10-17, `signals.props_token`; context only, grey; nothing but Model Check reads it); the two `*%ile` columns are hidden within-position helpers for `CalPts` and `xFP/G`. QBs under 10 projected points are blank on the five model columns; low-projected DSTs are muted. Definitions and every constant: `docs/CALCULATIONS.md` ("Edge Finder"). On `PlayerPoolRaw`, `Player Pool` and `Lineups` they are linked in and placed by `sheet_columns`: `CalPts` right after `AggPts`, `Hit3x%`, `Boom%` and `Bust%` right after `ValAdj` (`Bust%` moved there from the Ceiling detail group on 2026-10-17), `Edge` right after `Flags`, `Floor`/`CeilM` in the Ceiling detail group, `xFP/G` in the USAGE group. |
 | `CeilPct` | This player's `Ceiling` percentile rank **within their position** (0-100). The "how often could this player realistically be optimal" proxy. |
 | `Leverage` | `CeilPct` minus an internal ownership percentile (computed the same way, from `Own%`) -- both are percentiles, so this is a real gap, roughly −100..100, centered near 0. Blank while `Own%` is unpublished (pre-midweek) -- see `OwnStatus`. Demoted off EdgeRaw's own decision columns into the collapsed Ceiling detail group in Phase 6, Part 2 (Part 7.1). The ownership percentile itself (`OwnPct`) is **not a sheet column any more** -- Part 7.9 dropped it entirely, since this Leverage formula was its only consumer anywhere in the codebase (verified by grep before removing). |
 | `OwnStatus` | Renamed from `LevBasis` in Phase 6, Part 7.9 (Leverage's own demotion left this marker gating `Own%`, a spine column, not describing Leverage -- the old name no longer said what it does). `"real"` once any player has non-zero `Own%` this week, else `"unpublished"`. A data-freshness marker only -- tells you whether `Leverage` has a real number yet. |
@@ -233,11 +233,11 @@ disagree:
 | Zone | Columns |
 |---|---|
 | IDENTITY (spine) | `Name` `Pos.` `Team` `Opp.` |
-| DECISION (spine) | `DK Sal` `Pts` `AggPts` `CalPts` `EspnPts` `PropPts` `Val` `ValAdj` `Hit3x%` `Boom%` `Ceil` `CeilVal` `Own%` `Avail` `Flags` `Edge` |
+| DECISION (spine) | `DK Sal` `Pts` `AggPts` `CalPts` `EspnPts` `PropPts` `Val` `ValAdj` `Hit3x%` `Boom%` `Bust%` `Ceil` `CeilVal` `Own%` `Avail` `Flags` `Edge` |
 | — label `GAME` — | (always visible, not part of any group) |
 | GAME (collapsed) | `O/U` `Spread` `Team Implied` `GameEnv` `Pace` `PROE` `Expl%` `OppPosRank` `OppEPA` `GameID` `TmRank` |
 | — label `CEIL` — | (always visible, not part of any group) |
-| CEILING DETAIL (collapsed) | `CeilPct` `Leverage` `OwnStatus` |
+| CEILING DETAIL (collapsed) | `CeilPct` `Leverage` `OwnStatus` `Floor` `CeilM` |
 | — label `MOVE` — | (always visible, not part of any group) |
 | MOVEMENT (collapsed) | `ImpliedMove` `TotMove` `SpdMove` `GameStart` |
 | — label `WX` — | (always visible, not part of any group) |
@@ -472,7 +472,8 @@ lineup block's `Name` column (the only typed column on the tab) has a
 live dropdown validated against `PlayerPoolRaw`'s real Name column
 (non-strict -- a warning, not a hard block) so a typo doesn't silently
 propagate as `#N/A` across the whole row; everything else on the tab is
-protected (warning-only).
+protected (warning-only) except each lineup's Cash/GPP marker (column A of its Total row, exempt since 2026-10-17;
+`sheet_protection.lineups_unprotected_ranges`, and `dfs doctor` checks it).
 
 `Lineups`' `Issues` column (right after `Flags`, `dfs setup polish`) is a
 per-lineup guardrail: on each roster slot, `DUPLICATE` if that name
@@ -672,7 +673,7 @@ upside) and a second line, "what it is · what to do".
   Columns `CalPts`, `Hit3x%`, `Bust%`, `ProjPts`, `Floor` (his 20th-percentile points, the cash-relevant number), `Edge` (there is no Rank column: the rows are in order and the sub-header says "top 10 of 32"). Do: `Cash add` (top 3 `Hit3x%` at the position AND `Bust%`
   below the position median) or `Cash option`. A **thin week** line sits under a position's header when the block's best `Hit3x%` is below
   the median best of earlier weeks (no history, no line).
-- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `CeilM`, `Lev`, `ValAdj`, `Edge` (`Own%` is column F). `Lev` = his `Boom%` percentile rank minus his `Own%` percentile rank within his
+- **GPP upside**: best `Boom%` per position; `CalPts`, `Boom%`, `Bust%` (took `CeilM`'s slot, 2026-10-17), `Lev`, `ValAdj`, `Edge` (`Own%` is column F). `Lev` = his `Boom%` percentile rank minus his `Own%` percentile rank within his
   position (the rosterable, available players), a signed whole number coloured within the position block; blank until ownership is out. Do: `GPP leverage` (`Lev` at least +25 AND `Boom%` in the top half of
   the position), `GPP add` (`Boom%` in the top quartile), else `GPP option`. A **★** is appended when his `Boom%` is top-quartile AND his ownership is below the position's median (the original definition, unchanged).
 - **Leverage plays**: the top 5 per position by `Lev` among players with `Boom%` in the top half; `CalPts`, `Boom%`, `Bust%`, `Lev`, `ValAdj`, `Edge`. Do: `GPP leverage` or `GPP option`. A note says "Ownership not out yet; GPP leverage appears when it does." until `OwnStatus` is real.
@@ -709,11 +710,11 @@ four plus **Cash** (Avail blank, `Hit3x%` not blank, sorted `Hit3x%` high to low
 ### Suggested
 
 Written by `dfs lineups suggest` (`lineup_suggest.py`, `sheet_suggested.py`); created empty by `dfs setup build-views`, between Player Pool and Lineups in the tab strip, whole-tab warning
-protection (nothing is typed). Three lines on top (what it is, the projection / pool sizes / cash line / GPP target / seconds taken, how to use a build), then one block per build,
-all stacked, Cash builds first then GPP, numbered 1..N: a dark bar (`Build 4 | GPP | NO stack + NYG bring-back`), a column header (`Slot | Name | Team | Opp | Salary | CalPts | Kickoff | Own% |
+protection (nothing is typed). Three lines on top (what it is, the projection / pool sizes (every defense on the slate counts: a build may use ANY DST, pooled or not, never against its own QB) / cash line / GPP target / seconds taken, how to use a build), then one block per build,
+all stacked, Cash builds first then GPP, each by quarterback (name A-Z) and then the highest `CalPts` total first, numbered 1..N down the tab (2026-10-17): a dark bar (`Build 4 | GPP | NO stack + NYG bring-back`), a column header (`Slot | Name | Team | Opp | Salary | CalPts | Kickoff | Own% |
 Typical | Big night | Cash % | Top 1%`; `CalPts` is the projection used), nine player rows in roster-slot order with the FLEX on the latest kickoff, and a Total row
 (salary, projection and the simulator's four numbers; Cash % green at 50%, Top 1% at 2%, the lines Lineups uses). It is rewritten from scratch each run and **never touches Lineups**:
-**Lineup Tools > Copy build to Lineups** (`Code.gs`) asks for a build number and copies its nine names into the first lineup block with no name in it, setting that block's Cash / GPP marker. How the
+**Lineup Tools > Copy builds to Lineups** (`Code.gs`) asks which builds (`1,4,6` or `all`, in the order typed) and copies each one's nine names into the next lineup block with no name in it, in block order, setting that block's Cash / GPP marker; it asks before it writes and then reports which build went into which lineup and which had no empty block left. How the
 builds are chosen: `docs/CALCULATIONS.md` ("Suggested lineups"). `dfs sync --live` does not refresh it (Sam: only when he asks).
 
 ### Slate Grid

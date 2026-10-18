@@ -21,9 +21,11 @@
 //      latest kickoff (among the position that has one more player than its own slots hold) in the FLEX slot,
 //      by swapping two typed names. Never moves a player whose game has started. Kickoffs come from EdgeRaw's
 //      `GameStart` by name; "now" is read in Eastern time, the zone those kickoffs are written in.
-//   5. Lineup Tools > Copy build to Lineups: asks for a build number from the Suggested tab and copies that
-//      build's nine names into the FIRST EMPTY lineup block on Lineups, setting its Cash / GPP marker. It
-//      never overwrites a block that has a name in it and does nothing when every block is taken.
+//   5. Lineup Tools > Copy builds to Lineups: asks which builds of the Suggested tab ("1,4,6" or "all", in the
+//      order typed) and copies each one's nine names into the next EMPTY lineup block on Lineups, in order,
+//      setting that block's Cash / GPP marker. It never overwrites a block that has a name in it; it shows
+//      what will go where (and what has no empty block left) before it writes, and reports afterwards
+//      (version 6; version 4 and 5 copied one build into the first empty block).
 //   6. onOpen: the menu, plus a version stamp in the hidden named range DFS_SCRIPT_VERSION so `dfs
 //      doctor` can tell whether this script is pasted and current.
 //
@@ -31,7 +33,7 @@
 // functions at the bottom are unit-tested with node (tests/test_apps_script.py).
 
 // Bump this whenever this file changes: `dfs doctor` warns when the sheet's stamp is older.
-var DFS_SCRIPT_VERSION = 5;
+var DFS_SCRIPT_VERSION = 6;
 
 var VERSION_RANGE_NAME = 'DFS_SCRIPT_VERSION';
 var VERSION_TAB = 'NameAlias'; // a hidden tab nothing rewrites
@@ -77,7 +79,7 @@ function onOpen(e) {
     .createMenu('Lineup Tools')
     .addItem('Clear Lineup Names', 'clearLineupNames')
     .addItem('Fix FLEX order', 'fixFlexOrder')
-    .addItem('Copy build to Lineups', 'copyBuildToLineups')
+    .addItem('Copy builds to Lineups…', 'copyBuildsToLineups')
     .addToUi();
   try {
     stampVersion_();
@@ -234,43 +236,43 @@ function edgeKickoffs_(edge) {
 // Copy build to Lineups
 // ---------------------------------------------------------------------------------------------
 
-function copyBuildToLineups() {
+function copyBuildsToLineups() {
   var ui = SpreadsheetApp.getUi();
+  var title = 'Copy builds to Lineups';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var suggested = ss.getSheetByName(SUGGESTED_TAB);
   var lineups = ss.getSheetByName(LINEUPS_TAB);
   if (!suggested || !lineups) {
-    ui.alert('Copy build to Lineups', 'This needs the "' + SUGGESTED_TAB + '" and "' + LINEUPS_TAB + '" tabs.', ui.ButtonSet.OK);
+    ui.alert(title, 'This needs the "' + SUGGESTED_TAB + '" and "' + LINEUPS_TAB + '" tabs.', ui.ButtonSet.OK);
     return;
   }
   var sGrid = suggested.getLastRow() > 0 ? suggested.getRange(1, 1, suggested.getLastRow(), Math.min(3, suggested.getLastColumn() || 3)).getValues() : [];
-  var available = parseBuilds(sGrid).map(function (b) { return b.number; });
+  var available = parseBuilds(sGrid);
   if (available.length === 0) {
-    ui.alert('Copy build to Lineups', 'The Suggested tab has no builds yet. Run `dfs lineups suggest` first.', ui.ButtonSet.OK);
+    ui.alert(title, 'The Suggested tab has no builds yet. Run `dfs lineups suggest` first.', ui.ButtonSet.OK);
     return;
   }
-  var answer = ui.prompt('Copy build to Lineups', 'Which build? (' + available.join(', ') + ')', ui.ButtonSet.OK_CANCEL);
+  var answer = ui.prompt(
+    title,
+    'Which builds? Type numbers like 1,4,6 or all.\n\nOn ' + SUGGESTED_TAB + ': ' + describeBuilds(available),
+    ui.ButtonSet.OK_CANCEL
+  );
   if (answer.getSelectedButton() !== ui.Button.OK) return;
-  var number = parseInt(String(answer.getResponseText()).replace(/[^0-9]/g, ''), 10);
 
   var lastRow = lineups.getLastRow();
   var lGrid = lastRow > 0 ? lineups.getRange(1, 1, lastRow, Math.min(lineups.getLastColumn(), LABEL_SEARCH_COLUMNS)).getValues() : [];
-  var plan = planCopyBuild(sGrid, number, lGrid);
-  if (plan.status === 'noBuild') {
-    ui.alert('Copy build to Lineups', 'There is no build ' + answer.getResponseText() + ' on ' + SUGGESTED_TAB + '. Builds: ' + available.join(', ') + '.', ui.ButtonSet.OK);
+  var plan = planCopyBuilds(sGrid, answer.getResponseText(), lGrid);
+  if (plan.status !== 'ok') {
+    ui.alert(title, planProblem(plan, available), ui.ButtonSet.OK);
     return;
   }
-  if (plan.status === 'noBlock') {
-    ui.alert('Copy build to Lineups', 'Every lineup block on ' + LINEUPS_TAB + ' already has a name in it, so nothing was copied. Clear a lineup first.', ui.ButtonSet.OK);
-    return;
-  }
-  var message = 'Copy build ' + plan.build.number + ' (' + plan.build.kind + ': ' + plan.build.title + ') into the lineup at row ' + plan.block.header +
-    ' of ' + LINEUPS_TAB + '?\n\n' + plan.build.names.join(', ') + '\n\nIt is an empty lineup; nothing is overwritten.';
-  if (ui.alert('Copy build to Lineups', message, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+  if (ui.alert(title, planSummary(plan, true), ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
 
-  lineups.getRange(plan.block.first, 1, plan.build.names.length, 1).setValues(plan.build.names.map(function (n) { return [n]; }));
-  if (plan.marker) lineups.getRange(plan.block.total, 1).setValue(plan.marker);
-  toast_('Build ' + plan.build.number + ' copied to the lineup at row ' + plan.block.header + '.');
+  plan.placements.forEach(function (p) {
+    lineups.getRange(p.block.first, 1, p.build.names.length, 1).setValues(p.build.names.map(function (n) { return [n]; }));
+    if (p.marker) lineups.getRange(p.block.total, 1).setValue(p.marker);
+  });
+  ui.alert(title, planSummary(plan, false), ui.ButtonSet.OK);
 }
 
 
@@ -549,31 +551,114 @@ function parseBuilds(grid) {
 }
 
 /**
- * Where build `number` goes: the FIRST lineup block whose nine name cells (column A) are all empty. Returns
- * {status: 'ok', build, block: {header, first, total}, marker} with the Cash / GPP marker to set on the block's
- * Total row, {status: 'noBuild'} when `number` is not on the Suggested grid, or {status: 'noBlock'} when every
- * block already has a name in it. A block that has any name in it is never chosen.
+ * The Suggested builds as a short line for the prompt, "Cash 1-3, GPP 4-15": consecutive numbers of one kind
+ * are collapsed into a run (the numbers are never assumed to be consecutive).
  */
-function planCopyBuild(suggestedGrid, number, lineupsGrid) {
-  var build = null;
-  parseBuilds(suggestedGrid).forEach(function (b) { if (b.number === number) build = b; });
-  if (build === null) return { status: 'noBuild' };
-  var blocks = findLineupBlocks(lineupsGrid).blocks;
-  for (var i = 0; i < blocks.length; i++) {
-    var empty = true;
-    for (var r = blocks[i].first; r < blocks[i].first + PLAYERS_PER_BLOCK; r++) {
-      if (String(lineupsGrid[r - 1][0]).trim() !== '') { empty = false; break; }
-    }
-    if (empty) {
-      return {
-        status: 'ok',
-        build: build,
-        block: blocks[i],
-        marker: MARKER_VALUES.indexOf(build.kind) === -1 ? '' : build.kind
-      };
-    }
+function describeBuilds(builds) {
+  var parts = [];
+  var i = 0;
+  while (i < builds.length) {
+    var j = i;
+    while (j + 1 < builds.length && builds[j + 1].number === builds[j].number + 1 && builds[j + 1].kind === builds[i].kind) j++;
+    var span = i === j ? String(builds[i].number) : builds[i].number + '-' + builds[j].number;
+    parts.push(builds[i].kind + ' ' + span);
+    i = j + 1;
   }
-  return { status: 'noBlock' };
+  return parts.join(', ');
+}
+
+/**
+ * The build numbers a typed answer asks for: "1,4,6" (commas, spaces or semicolons), or "all". Returns
+ * {numbers: [ints, in the order typed, each once], all: bool, unreadable: [tokens that are neither]}.
+ */
+function parseBuildChoice(text) {
+  var tokens = String(text === undefined || text === null ? '' : text).split(/[\s,;]+/).filter(function (t) { return t !== ''; });
+  var out = { numbers: [], all: false, unreadable: [] };
+  tokens.forEach(function (t) {
+    if (t.toLowerCase() === 'all') { out.all = true; return; }
+    if (/^[0-9]+$/.test(t)) {
+      var n = parseInt(t, 10);
+      if (out.numbers.indexOf(n) === -1) out.numbers.push(n);
+      return;
+    }
+    out.unreadable.push(t);
+  });
+  return out;
+}
+
+/** The empty lineup blocks of a Lineups grid, in order: the nine name cells (column A) all blank. */
+function emptyLineupBlocks(lineupsGrid) {
+  return findLineupBlocks(lineupsGrid).blocks.filter(function (block) {
+    for (var r = block.first; r < block.first + PLAYERS_PER_BLOCK; r++) {
+      if (String(lineupsGrid[r - 1][0]).trim() !== '') return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Where the builds asked for go: each, in the order asked ("all" is every build on Suggested, in order), into
+ * the next EMPTY lineup block, in block order. A block with any name in it is never chosen, and a build that
+ * finds no empty block left is not placed. Returns
+ * {status: 'ok', placements: [{build, block: {header, first, total}, marker}], unplaced: [builds with no block],
+ *  unknown: [numbers not on Suggested], unreadable: [tokens]}, or {status: 'noChoice'} when nothing was typed,
+ * {status: 'noBuild', unknown, unreadable} when no build asked for is on Suggested, or {status: 'noBlock',
+ * builds} when every lineup block already has a name.
+ */
+function planCopyBuilds(suggestedGrid, choiceText, lineupsGrid) {
+  var choice = parseBuildChoice(choiceText);
+  if (choice.numbers.length === 0 && !choice.all) return { status: 'noChoice', unreadable: choice.unreadable };
+  var available = parseBuilds(suggestedGrid);
+  var byNumber = {};
+  available.forEach(function (b) { byNumber[b.number] = b; });
+  var wanted = choice.all ? available.map(function (b) { return b.number; }) : choice.numbers;
+  var builds = [];
+  var unknown = [];
+  wanted.forEach(function (n) {
+    if (byNumber[n]) builds.push(byNumber[n]); else unknown.push(n);
+  });
+  if (builds.length === 0) return { status: 'noBuild', unknown: unknown, unreadable: choice.unreadable };
+  var blocks = emptyLineupBlocks(lineupsGrid);
+  if (blocks.length === 0) return { status: 'noBlock', builds: builds };
+  var placements = [];
+  var unplaced = [];
+  builds.forEach(function (b, i) {
+    if (i < blocks.length) {
+      placements.push({ build: b, block: blocks[i], marker: MARKER_VALUES.indexOf(b.kind) === -1 ? '' : b.kind });
+    } else {
+      unplaced.push(b);
+    }
+  });
+  return { status: 'ok', placements: placements, unplaced: unplaced, unknown: unknown, unreadable: choice.unreadable };
+}
+
+/** The message for a plan that is not 'ok'. */
+function planProblem(plan, available) {
+  if (plan.status === 'noChoice') {
+    return 'Nothing to copy: type build numbers like 1,4,6, or all.' + (plan.unreadable.length ? ' Not understood: ' + plan.unreadable.join(', ') + '.' : '');
+  }
+  if (plan.status === 'noBuild') {
+    return 'None of those builds is on ' + SUGGESTED_TAB + (plan.unknown.length ? ' (' + plan.unknown.join(', ') + ')' : '') + '. On it: ' + describeBuilds(available) + '.';
+  }
+  return 'Every lineup block on ' + LINEUPS_TAB + ' already has a name in it, so nothing was copied. Clear a lineup first.';
+}
+
+/**
+ * What the plan does, as the dialog's text: `before` is the question ("will go"), else the report ("went").
+ * Names the builds that went into which lineup (by its header row), and what did not fit or was not found.
+ */
+function planSummary(plan, before) {
+  var lines = [before ? 'Copy these into empty lineups on ' + LINEUPS_TAB + '? Nothing is overwritten.' : 'Copied:'];
+  plan.placements.forEach(function (p) {
+    lines.push('Build ' + p.build.number + ' (' + p.build.kind + ') ' + (before ? 'into' : 'went into') + ' the lineup at row ' + p.block.header);
+  });
+  if (plan.unplaced.length) {
+    lines.push('');
+    lines.push('No empty lineup left for build' + (plan.unplaced.length === 1 ? ' ' : 's ') + plan.unplaced.map(function (b) { return b.number; }).join(', ') + (before ? ' (it will not be copied).' : ' (not copied).'));
+  }
+  if (plan.unknown.length) lines.push('Not on ' + SUGGESTED_TAB + ': ' + plan.unknown.join(', ') + '.');
+  if (plan.unreadable.length) lines.push('Not understood: ' + plan.unreadable.join(', ') + '.');
+  return lines.join('\n');
 }
 
 /** A name as the sheets compare it: trimmed and lower-case. */
@@ -737,7 +822,11 @@ if (typeof module !== 'undefined' && module.exports) {
     planFlexSwap: planFlexSwap,
     parseKickoff: parseKickoff,
     parseBuilds: parseBuilds,
-    planCopyBuild: planCopyBuild,
+    planCopyBuilds: planCopyBuilds,
+    parseBuildChoice: parseBuildChoice,
+    describeBuilds: describeBuilds,
+    planSummary: planSummary,
+    planProblem: planProblem,
     playsLabel: playsLabel,
     normalizeName: normalizeName,
     SLOT_ORDER: SLOT_ORDER,

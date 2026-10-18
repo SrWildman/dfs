@@ -1,5 +1,7 @@
 """The Suggested tab (Week 6, slice 4): layout, the parser that reads it back, the writer, the empty state."""
 
+from contextlib import contextmanager
+
 import pandas as pd
 
 from dfs import sheet_suggested as ss
@@ -62,7 +64,8 @@ def test_the_tab_opens_with_a_title_a_status_line_and_how_to_use_a_build_then_a_
     rows = layout.rows
     assert rows[0][0] == ss.TITLE
     assert rows[1][0] == (
-        "CalPts  ·  pool 47 for Cash / 51 for GPP  ·  cash line 143.9  ·  GPP target 190  ·  2 builds in 3 s"
+        "CalPts  ·  pool 47 for Cash / 51 for GPP, plus any DST on the slate (pooled or not)  ·  "
+        "cash line 143.9  ·  GPP target 190  ·  2 builds in 3 s"
     )
     assert rows[2][0] == ss.HOW_TO and rows[3] == [""] * ss.COLUMN_COUNT
     assert layout.bar_rows[0] == ss.FIRST_BUILD_ROW
@@ -171,6 +174,7 @@ def test_parse_builds_reads_back_the_numbered_blocks_and_skips_anything_incomple
 class _Client:
     def __init__(self, exists=False):
         self.exists = exists
+        self.batches, self.in_batch, self.formats_in_batch = 0, False, 0
         self.written, self.formats, self.rules, self.widths, self.cleared = None, [], [], None, 0
 
     def tab_exists(self, tab):
@@ -182,8 +186,18 @@ class _Client:
     def clear_conditional_formats(self, tab):
         self.cleared += 1
 
+    @contextmanager
+    def batched(self):
+        self.batches += 1
+        self.in_batch = True
+        try:
+            yield self
+        finally:
+            self.in_batch = False
+
     def format_range(self, tab, rng, fmt):
         self.formats.append((rng, fmt))
+        self.formats_in_batch += self.in_batch
 
     def set_column_widths(self, tab, widths):
         self.widths = widths
@@ -220,6 +234,24 @@ def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_top_on
     assert {spec["a1_range"] for spec in client.tints} == {f"B{first_player}:C{total - 1}"}
     assert len(client.tints) == 3 and "$A" in client.tints[0]["values"][0]  # the Slot column
     assert any(rng == f"K{total}" and fmt["numberFormat"]["pattern"] == "0%" for rng, fmt in client.formats)
+
+
+def test_every_format_is_sent_in_one_batch_and_the_two_phases_are_timed():
+    """The run used to sit idle after printing the builds: one round trip per format range. Now the styling is
+    one queued batch, and the write and the format phase report their seconds and request counts."""
+    cash, gpp = (
+        _build(1, "cash", "Cash build 1"),
+        _build(2, "gpp", "GPP build 2  ·  DET stack + ARI bring-back"),
+    )
+    client, timings = _Client(exists=True), {}
+    ss.write_suggested(
+        client, _report(cash, gpp), _edge([cash, gpp]), metric="CalPts", cash_line=143.9, gpp_target=190.0,
+        timings=timings,
+    )  # fmt: skip
+    assert client.batches == 1  # one block, not one per build
+    assert client.formats and client.formats_in_batch == len(client.formats)  # every format is inside it
+    assert set(timings) == {"write tab", "format tab"}
+    assert all(seconds >= 0 and requests >= 0 for seconds, requests in timings.values())
 
 
 def test_build_views_creates_the_tab_empty_and_never_touches_one_that_exists():
