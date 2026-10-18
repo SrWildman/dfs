@@ -59,6 +59,14 @@ HOW_TO = (
     "first. Name and Team tints, as on Lineups: blue = the QB's stack, amber = his bring-back, lavender = "
     "other correlated players."
 )
+TITLE_KEY = (
+    "A GPP bar reads: shape, copies expected in a GPP of the size the run assumed, the nine players' "
+    "ownership sum and product, and the Top 1% share (Top 1% divided by 1 + the copies)."
+)
+RANK_NOTES = {
+    "top1": "GPP builds are ranked by Top 1%.",
+    "share": "GPP builds are ranked by the Top 1% share.",
+}
 ANY_DST_NOTE = "plus any DST on the slate (pooled or not)"
 EMPTY = "No builds yet. Put players in your pool (Cash, GPP or Both) and run `dfs lineups suggest`."
 WIDTHS = [56, 170, 48, 48, 70, 62, 92, 56, 66, 74, 62, 62]
@@ -130,6 +138,15 @@ def _game_ids(edge: pd.DataFrame) -> dict[str, str]:
     return out
 
 
+def bar_text(build: Build) -> str:
+    """The text on a build's bar: its title, and for a build with ownership the nine players' ownership sum
+    and product and (GPP) the Top 1% share. The title already names the shape and the copies expected."""
+    if build.own_sum is None or build.own_product is None:
+        return build.title
+    text = f"{build.title}  ·  own {build.own_sum:.0%}, product {build.own_product:.1e}"
+    return text + (f"  ·  Top 1% share {build.objective:.2%}" if build.objective is not None else "")
+
+
 def _total_own(build: Build, details: dict[str, tuple[str, float | str]]) -> float | str:
     """The build's total ownership (the nine players' `Own%` added up, like Lineups' Total row), blank when no
     ownership is out yet."""
@@ -166,7 +183,8 @@ def build_layout(
             ]
         )
     )
-    layout.status_rows.append(add([HOW_TO]))
+    how_to = f"{HOW_TO} {RANK_NOTES.get(report.rank, '')} {TITLE_KEY}".strip() if report.builds else HOW_TO
+    layout.status_rows.append(add([how_to]))
     add([])
     if not report.builds:
         layout.status_rows.append(add([EMPTY]))
@@ -174,7 +192,7 @@ def build_layout(
     games = _game_ids(edge)
     for build in report.builds:
         layout.bar_rows.append(
-            add([f"{BUILD_LABEL} {build.number}", "Cash" if build.kind == "cash" else "GPP", build.title])
+            add([f"{BUILD_LABEL} {build.number}", "Cash" if build.kind == "cash" else "GPP", bar_text(build)])
         )
         layout.header_rows.append(add(header))
         for slot, player in zip(ROSTER_SLOTS, build.players, strict=True):

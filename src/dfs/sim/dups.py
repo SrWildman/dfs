@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import minimize
@@ -49,6 +50,7 @@ DEFAULT_GPP_ENTRIES = 1000  # Sam's typical single-entry GPP: about 800-1,500 en
 DEFAULT_DOUBLE_UP_ENTRIES = 3000  # his double-ups ran 2,758-4,597 entries (Weeks 4 and 5)
 OWN_FLOOR = 0.005  # a player with no (or a tiny) ownership number counts as owned by 0.5% of the field
 DUP_EXPONENT = 0.5  # the stated chalk correction (module docstring); 1.0 is the plain independence estimate
+DUP_SCALE = 1.0  # the multiplier on `entries * product ** exponent`; 1.0 for the stated placeholder
 DUP_WARN_COPIES = 25.0  # a double-up build expected to be held by this many entries or more gets a warning
 
 
@@ -72,14 +74,26 @@ def expected_dups(
     entries: int,
     *,
     exponent: float = DUP_EXPONENT,
+    scale: float = DUP_SCALE,
     floor: float = OWN_FLOOR,
 ) -> float:
     """Expected number of OTHER entries identical to a lineup with these players' shares, in a field of
-    `entries`: `entries * product ** exponent`. Exponent 1.0 is the independence estimate (see the module
-    docstring for what it gets wrong and the stated correction)."""
+    `entries`: `scale * entries * product ** exponent`. Exponent 1.0 and scale 1.0 is the independence
+    estimate (see the module docstring for what it gets wrong and the stated correction)."""
     if entries <= 0:
         return 0.0
-    return float(entries * ownership_product(own, floor=floor) ** exponent)
+    return float(scale * entries * ownership_product(own, floor=floor) ** exponent)
+
+
+@dataclass(frozen=True)
+class DupModel:
+    """`E[dups] = scale * entries * product ** exponent` for one kind of contest (see `fit_dup_model`)."""
+
+    scale: float = DUP_SCALE
+    exponent: float = DUP_EXPONENT
+
+    def expected(self, own: Iterable[float], entries: int) -> float:
+        return expected_dups(own, entries, exponent=self.exponent, scale=self.scale)
 
 
 def top1_share(p_top1: float, e_dups: float) -> float:

@@ -67,7 +67,8 @@ def test_the_tab_opens_with_a_title_a_status_line_and_how_to_use_a_build_then_a_
         "CalPts  ·  pool 47 for Cash / 51 for GPP, plus any DST on the slate (pooled or not)  ·  "
         "cash line 143.9  ·  GPP target 190  ·  2 builds in 3 s"
     )
-    assert rows[2][0] == ss.HOW_TO and rows[3] == [""] * ss.COLUMN_COUNT
+    assert rows[2][0].startswith(ss.HOW_TO) and rows[3] == [""] * ss.COLUMN_COUNT
+    assert ss.RANK_NOTES["top1"] in rows[2][0] and ss.TITLE_KEY in rows[2][0]
     assert layout.bar_rows[0] == ss.FIRST_BUILD_ROW
 
 
@@ -267,3 +268,15 @@ def test_a_tab_nothing_has_written_to_says_it_has_not_been_run_instead_of_showin
         SuggestReport(), pd.DataFrame({"Name": []}), metric="CalPts", cash_line=0.0, gpp_target=0.0
     )
     assert layout.rows[1][0] == "Not run yet: `dfs lineups suggest` fills this tab from your pool."
+
+
+def test_a_bar_adds_the_ownership_sum_and_product_and_the_share_when_the_build_has_them():
+    from dataclasses import replace
+
+    plain = _build(2, "gpp", "GPP build 2  ·  DET stack")
+    assert ss.bar_text(plain) == plain.title  # no ownership published: the bar is the title
+    owned = replace(plain, own_sum=1.16, own_product=1.2e-8, e_dups=0.1, objective=0.0031)
+    assert (
+        ss.bar_text(owned) == "GPP build 2  ·  DET stack  ·  own 116%, product 1.2e-08  ·  Top 1% share 0.31%"
+    )
+    assert "Top 1% share" not in ss.bar_text(replace(owned, objective=None))  # a cash build has none

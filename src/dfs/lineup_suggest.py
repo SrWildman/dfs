@@ -141,6 +141,7 @@ class SuggestReport:
     candidates: dict[str, int] = field(default_factory=dict)  # "cash" / "gpp" -> players considered
     complete: bool = True  # False when the time limit cut a search short
     phases: dict[str, float] = field(default_factory=dict)  # phase -> seconds, in the order they ran
+    rank: str = DEFAULT_RANK  # what ordered the GPP candidates ("top1" or "share")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -298,6 +299,7 @@ def annotate(
     *,
     objective: bool,
     contrarian_at: float | None = None,
+    dup_model: dups.DupModel = dups.DupModel(),
 ) -> list[Scored]:
     """`scored` with each lineup's ownership sum and product, its expected duplicates among `entries` entries
     (`dups.expected_dups`), the shapes it matches and, for a GPP candidate (`objective`), its Top 1% share.
@@ -309,7 +311,7 @@ def annotate(
             out.append(replace(s, shapes=matched))
             continue
         own = dups.shares_for([p.name for p in s.players], shares)
-        e = dups.expected_dups(own, entries)
+        e = dup_model.expected(own, entries)
         out.append(
             replace(
                 s,
@@ -647,6 +649,8 @@ def suggest_builds(
     double_up_entries: int = dups.DEFAULT_DOUBLE_UP_ENTRIES,
     shapes: Sequence[str] = GPP_SHAPES,
     rank: str = DEFAULT_RANK,
+    gpp_dup_model: dups.DupModel = dups.DupModel(),
+    cash_dup_model: dups.DupModel = dups.DupModel(),
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -660,7 +664,7 @@ def suggest_builds(
     started = time.monotonic()
     deadline = started + time_limit
     cash_deadline = started + time_limit * CASH_SHARE_OF_TIME  # the GPP search gets the rest
-    report = SuggestReport()
+    report = SuggestReport(rank=rank)
     kickoff = {
         str(name): parse_kickoff(start)
         for name, start in zip(
@@ -701,7 +705,11 @@ def suggest_builds(
         timed("choose", t)
         # The Week 4 lesson, as a warning and never a filter: a double-up build many entries share.
         picks = annotate(
-            picks, ownership_shares(specs, edge, field, "cash"), double_up_entries, objective=False
+            picks,
+            ownership_shares(specs, edge, field, "cash"),
+            double_up_entries,
+            objective=False,
+            dup_model=cash_dup_model,
         )
         picked.extend(("cash", pick, "") for pick in picks)
         if len(picks) < cash_builds:
@@ -740,7 +748,9 @@ def suggest_builds(
             field=field,
         )
         t = timed("simulate", t)
-        scored = annotate(scored, shares, gpp_entries, objective=True, contrarian_at=cutoff)
+        scored = annotate(
+            scored, shares, gpp_entries, objective=True, contrarian_at=cutoff, dup_model=gpp_dup_model
+        )
         if gpp_builds is None:
             picks = choose_per_qb(scored, key=gpp_order)
         else:
