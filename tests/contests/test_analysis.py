@@ -328,3 +328,20 @@ def test_importing_the_command_does_not_import_the_analysis_stack():
 
     code = "import sys, dfs.contests.cli; sys.exit(1 if 'dfs.contests.analysis' in sys.modules else 0)"
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+def test_what_wins_looks_only_at_classic_gpps(tmp_path, monkeypatch):
+    """The top-1% comparison is for GPP formats: a Double Up's top 1% is not a winners' lineup."""
+    seen = []
+    real = analysis.winners.contest_lineups
+
+    def spy(parsed, players):
+        seen.append(parsed.contest_id)
+        return real(parsed, players)
+
+    monkeypatch.setattr(analysis.winners, "contest_lineups", spy)
+    res = run(tmp_path)
+    formats = res.profiles.set_index("contest_id")["format"]
+    assert seen and all(formats[c] in ("SE GPP", "N-max GPP") for c in seen)
+    assert "900000001" not in seen  # the Double Up
+    assert res.winners.empty  # the fixtures are far below the 700-entry floor

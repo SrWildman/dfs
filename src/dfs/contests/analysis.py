@@ -281,7 +281,9 @@ def run(
                 result.warnings.append(
                     f"contest {source.contest_id}: field measures skipped ({stats.skipped})"
                 )
-            if fmt == "gpp" and parsed.kind == "Classic":  # "what wins": the top 1% of each large GPP
+            if (
+                fmt in (series_mod.SE_GPP, series_mod.N_MAX_GPP) and parsed.kind == "Classic"
+            ):  # "what wins": the top 1% of each large GPP
                 winner_rows.append(winners.contest_lineups(parsed, players_for(season, week)))
             field_rows.append(stats.rows)
             stack_rows.append(stats.stacks)
