@@ -292,6 +292,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "and GPP builds, a stack for every QB and two each when they fit, ranked by Top 1% "
         "(GPP builds may use anyone in your pool, never all Cash-marked). Every "
         "build shows salary, CalPts, kickoff and total ownership, with the FLEX on the latest kickoff. "
+        "A GPP bar names the shape, the copies expected, the ownership sum and product and the Top 1% share; "
+        "a stack no longer needs a bring-back. "
         "Copy some or all "
         "into the empty lineups with Lineup Tools, Copy builds to Lineups (type 1,4,6 or all); nothing "
         "here changes Lineups on its own.",

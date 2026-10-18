@@ -1306,7 +1306,7 @@ them, so the discount rarely changes a pick; at 12,000 entries it costs about ni
 
 A full search (every shape to completion) takes 53 to 152 s on the replayed pre-lock pools (Week 4 113 s and 53 s, Week 5 109 s
 and 152 s, Week 2 94 s and 64 s for the CalPts and value pools). Per shape on Week 5: stack 19 s, naked 7, rb_stack 40, game 30,
-rb_dst 3, contrarian 2 (102 s). At the 60 s default the rb_stack and game searches hit their time boxes.
+rb_dst 3, contrarian 2 (102 s). At the old 60 s default the rb_stack and game searches hit their time boxes; the default is now 120 s (Sam, 2026-10-18).
 
 ### `dfs sim fit`, refitted locally
 

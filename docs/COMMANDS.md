@@ -99,7 +99,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--cash INT RANGE` | How many cash builds (0 for none). Default: `3`. |
 | `--gpp INT RANGE` | How many GPP builds (0 for none). Left off, every QB stack gets a build and ideally two. |
 | `--no-write` | Print the builds here and leave the Suggested tab alone. |
-| `--seconds FLOAT RANGE` | How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. Default: `60.0`. |
+| `--seconds FLOAT RANGE` | How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. Default: `120.0`. |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
 | `--gpp-entries INT RANGE` | Size of the GPP the builds are for. The duplicates each build is expected to share are read against it (shown on every GPP build; they rank only with --rank share). Default: `1000`. |
 | `--double-up-entries INT RANGE` | Size of a double-up, for the warning on a cash build many entries are expected to share. Default: `3000`. |
