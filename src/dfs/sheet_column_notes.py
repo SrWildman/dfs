@@ -318,6 +318,24 @@ CORE_NOTES = {
     ),
 }
 
+# The STAKES block on Bankroll (`sheet_stakes.py`): both tables' headers, matched by text.
+STAKES_NOTES = {
+    "Format": "The kind of contest (`series.classify`); the Cash and GPP rows add up their formats.",
+    "Entries": "How many entries you made, whatever the fee.",
+    "ROI": 'Winnings minus fees, divided by fees. "–" when you paid no fees (freerolls).',
+    "Cash rate": "The share of entries that finished in a paid place.",
+    "Weekly SD": (
+        "The standard deviation of your weekly net (winnings minus fees, one number per NFL week with "
+        'entries). A bigger number is a bumpier ride. "–" under 2 weeks.'
+    ),
+    "Bucket": "Cash (H2H, 50/50, Double Up) or GPP (every other format): the two bankrolls this tab keeps.",
+    "Weight on own ROI": "min(1, entries / 100): how much of the share comes from the bucket's own ROI.",
+    "ROI share": "The bucket's ROI divided by the ROI total of the buckets at or above the floor.",
+    "Even share": "An equal split among the buckets at or above the floor.",
+    "Note": "Why a bucket gets nothing from the default split (no history, or ROI below the floor).",
+    "Share": "Weight x ROI share + (1 - weight) x even share: the default split of the planned spend.",
+}
+
 CONTESTS_NOTES = {
     "Your decisions, season": "A measure of your own choices, added up over every week of standings files.",
     "So far": "The season's number for that measure.",

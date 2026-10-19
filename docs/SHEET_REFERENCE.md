@@ -904,6 +904,30 @@ GPP's real extent can outgrow its configured `last_row` over time (Sam:
 rewrite the tab), fill down its `% Paid`/`Place %` formulas onto the new
 rows, and bump `[bankroll.gpp].last_row` in `config.toml` to match.
 
+**STAKES** (columns `sheet_stakes.STAKES_FIRST_COLUMN` (N) to the right, from row 1; `dfs bankroll stakes`, and `dfs week new` on
+the new sheet): a block to the RIGHT of the ledgers, so no row is inserted and nothing above moves (the
+Betting/Cash/GPP ledgers and the KPI block sit in A:J, L is the hidden dedupe key). Rebuilt from scratch on every run
+from `data/contests/contest_log.csv`, the tab's own Starting Bankroll and Weekly Budget cells
+(`week.BANKROLL_STARTING_CELL`, `BANKROLL_WEEKLY_BUDGET_CELL`) and `[stakes]` in config; nothing is typed in it, and
+the writer refuses (writes nothing) when its area holds anything that is not a previous STAKES block. Three
+sections, top to bottom:
+
+1. **Your numbers by format**: one row per format in the log, then Cash (H2H, 50/50, Double Up), GPP (every other
+   format) and All formats. For this season and for every season in the log: `Entries`, `ROI` (winnings minus fees,
+   over fees), `Cash rate` (finished in a paid place) and `Weekly SD` (the standard deviation of the weekly net, from
+   2 weeks). A figure the data cannot support is `–` (a freeroll has no ROI; one week has no SD), never a guess.
+2. **This week's plan**: the Weekly Budget (B6) and Starting Bankroll (B1) as read, the two rules and the split, and
+   the arithmetic sentence "Your rules give: cash $X, GPP $Y; largest entry $Z". A rule left out of `[stakes]` says
+   `not set` and the plan is the arithmetic without it. A `WARNING:` line (red) appears when the plan breaks one of
+   your rules: the budget above `max_pct_bankroll_per_week`, this week's ledgers already over the planned spend, the
+   largest entry over `max_entry_fee_pct`, or your own `split` funding a bucket the default would leave out.
+3. **How the default split is worked out**: per bucket its entries, ROI, weight, ROI share, even share and share,
+   with the formula and the floor in a note (math: docs/CALCULATIONS.md "Stake sizing").
+
+Header hover notes are `sheet_column_notes.STAKES_NOTES`. The weekly budget is not a config key: it already lives in
+B6 and is carried by `dfs week new`. `dfs doctor` reports a Bankroll tab with no STAKES block (`stakes-block`).
+Arithmetic on your own history and rules, not financial advice.
+
 ### Results
 
 A season-level results log (Week, Cash Pts/Line, H2H Entered/Win, then three

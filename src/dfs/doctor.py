@@ -36,6 +36,7 @@ from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_pool_cells import POOL_OPTIONS
 from dfs.sheet_pool_control import control_cells
+from dfs.sheet_stakes import STAKES_FIRST_COLUMN, STAKES_TITLE
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, INPUT_BG, edge_group_spans
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
@@ -449,6 +450,25 @@ def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[s
     return issues
 
 
+def _check_stakes_block(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Bankroll tab's STAKES block (`sheet_stakes.py`) must start where it is written. A sheet without
+    it (the template before `dfs bankroll stakes --sheet-id <template>` ran) has drifted from one with it."""
+    tab = cfg.bankroll.tab
+    if tab not in tab_titles:
+        return []
+    cell = client.read_range(tab, f"{STAKES_FIRST_COLUMN}1:{STAKES_FIRST_COLUMN}1")
+    found = str(cell[0][0]).strip() if cell and cell[0] else ""
+    if found.startswith(STAKES_TITLE.split()[0]):
+        return []
+    return [
+        DoctorIssue(
+            "stakes-block",
+            f"{tab!r}: no STAKES block at {STAKES_FIRST_COLUMN}1 (reads {found or '(blank)'!r}) -- "
+            "`dfs bankroll stakes` writes it (template first)",
+        )
+    ]
+
+
 def _check_dk_upload_header(
     cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
 ) -> list[DoctorIssue]:
@@ -859,6 +879,7 @@ def run_doctor(
     issues += _check_dk_upload_layout(cfg, tab_titles, headers_by_tab)
     issues += _check_dk_upload_lineup_column(client, cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
+    issues += _check_stakes_block(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)

@@ -3893,6 +3893,8 @@ def week_new(
     for line in summary:
         console.print(f"[green]OK[/green] {line}")
 
+    _refresh_stakes_block(cfg, new_client)
+
     # Fix 2.14: blank every synced source's tab BEFORE the first sync
     # runs, not after -- a source that fails partway through must leave
     # an empty tab, never the template's own stale (real-looking, but
@@ -3940,6 +3942,25 @@ def week_new(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _refresh_stakes_block(cfg: Config, client: SheetsClient) -> None:
+    """Rebuild the Bankroll tab's STAKES block on the new week's sheet (it reads the carried Weekly Budget and
+    Starting Bankroll). NEVER fails `week new`: a template without the block, or anything in the way, is
+    reported and skipped; `dfs bankroll stakes` does it by hand."""
+    from dfs.nfl_calendar import current_season
+    from dfs.sheet_stakes import refresh_block
+
+    try:
+        summary, plan = refresh_block(client, cfg, current_season())
+    except Exception as e:  # noqa: BLE001 - the week itself is already set up; never fail it over this
+        console.print(
+            f"[yellow]STAKES block not rebuilt ({escape(str(e))}); run `dfs bankroll stakes`.[/yellow]"
+        )
+        return
+    console.print(f"[green]OK[/green] {summary}")
+    for warning in plan.warnings:
+        console.print(f"[yellow]WARNING:[/yellow] {escape(warning)}")
 
 
 def _opening_lines_line(ctx: SyncContext) -> str:
@@ -4250,6 +4271,62 @@ def bankroll_build_betting_ledger(
         f"{BLOCK_ROWS} rows -- update config.toml's [bankroll.cash]/[bankroll.gpp] row numbers "
         f"to match (old value + {BLOCK_ROWS}), then run `dfs doctor`."
     )
+
+
+@bankroll_app.command("stakes")
+def bankroll_stakes(
+    propose: bool = typer.Option(
+        False,
+        "--propose",
+        help="Print values for max_pct_bankroll_per_week and max_entry_fee_pct worked out from your own "
+        "bankroll and weekly volatility, with the arithmetic. Read-only: nothing is written anywhere.",
+    ),
+    no_sheet: bool = typer.Option(
+        False, "--no-sheet", help="Print the plan; do not write the STAKES block to the sheet."
+    ),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Read and write this sheet instead of config.toml's (e.g. the template: template first, "
+        "then the live sheet).",
+    ),
+) -> None:
+    """Rebuild the STAKES block on the Bankroll tab: your own ROI, cash rate and weekly volatility by format
+    (this season and every season in the contest log), and this week's plan from the Weekly Budget on the tab
+    and the rules you set under `[stakes]` in config.toml. Arithmetic on your history and your rules, not
+    advice. `--propose` only prints; the block is rebuilt from scratch each run and nothing else on the tab
+    is touched (it refuses if its area holds anything that is not a STAKES block)."""
+    from dfs.nfl_calendar import current_season
+    from dfs.sheet_stakes import StakesError, compute, load_typed, read_inputs, write_stakes
+    from dfs.stakes import NOT_ADVICE
+    from dfs.stakes import plan_line as stakes_plan_line
+    from dfs.stakes import propose as propose_rules
+
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Stakes on: [bold]{title}[/bold]\n{url}\n")
+        inputs = read_inputs(client, cfg.bankroll)
+        typed = load_typed()
+        season = current_season()
+        _, plan, layout = compute(cfg.stakes, typed, inputs, season)
+        if propose:
+            for line in propose_rules(typed, inputs.bankroll).lines:
+                console.print(escape(line))
+            console.print("\nNothing was written. Put the values you choose under [stakes] in config.toml.")
+            return
+        console.print(escape(stakes_plan_line(plan)))
+        for warning in plan.warnings:
+            console.print(f"[yellow]WARNING:[/yellow] {escape(warning)}")
+        console.print(NOT_ADVICE)
+        if no_sheet:
+            return
+        console.print(write_stakes(client, layout, cfg.bankroll.tab))
+    except (SheetsError, StakesError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
 
 
 @ownership_app.command("log")

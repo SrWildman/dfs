@@ -149,6 +149,15 @@ shadow_min_weeks = 3
 downloads_dir = "~/Downloads"
 cash_line_series = "NFL GIANT $25 Double Up [Single Entry]"
 
+# Staking rules for the Bankroll tab's STAKES block (`dfs bankroll stakes`). All optional, all OFF until you set them:
+# the block then says so and shows the arithmetic without them. `dfs bankroll stakes --propose` prints values worked
+# out from your own history (nothing is written). Percentages are percent of the week's Starting Bankroll. The weekly
+# budget is the Bankroll tab's own Weekly Budget cell, not a setting here. Arithmetic on your numbers, not advice.
+[stakes]
+# max_pct_bankroll_per_week = 5.0     # a week's total entry fees stay under this share of the bankroll
+# max_entry_fee_pct = 1.0             # no single entry above this share of the bankroll
+# split = { cash = 70, gpp = 30 }     # your own split of the spend; overrides the default (ROI-based) split
+
 # The Odds API (the-odds-api.com), for player props. Put your own key here; config.toml is gitignored and the key is
 # never printed or committed.
 [odds_api]

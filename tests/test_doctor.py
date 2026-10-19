@@ -13,6 +13,7 @@ from dfs.sheet_lineup_keys import LINEUP_KEY_HEADER
 from dfs.sheet_lineup_sim import RETIRED_SLOT_HEADERS, labels, sim_slots
 from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_season_view import HEADER as SEASON_HEADER
+from dfs.sheet_stakes import STAKES_FIRST_COLUMN, STAKES_TITLE
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, INPUT_BG, edge_group_spans
 from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_letter
@@ -205,6 +206,8 @@ def _lineups_rows(player_pool_header: list[str] | None = None) -> dict[tuple[str
     rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [["6"]]
     rng, grid = _scoreboard_read(_ALL_GOOD_TABS["Lineups"])
     rows[("Lineups", rng)] = grid
+    # The Bankroll tab's STAKES block title, which _check_stakes_block reads: present by default.
+    rows[("Bankroll", f"{STAKES_FIRST_COLUMN}1:{STAKES_FIRST_COLUMN}1")] = [[STAKES_TITLE]]
     return rows
 
 
@@ -940,3 +943,16 @@ def test_run_doctor_flags_a_lineup_column_that_is_behind_the_dk_upload_protectio
     assert [i.check for i in found({"DK Upload": _whole_sheet_protection(short)})] == [
         "dk-upload-lineup-protected"
     ]
+
+
+def test_run_doctor_flags_a_bankroll_tab_with_no_stakes_block():
+    rows = _lineups_rows()
+    del rows[("Bankroll", f"{STAKES_FIRST_COLUMN}1:{STAKES_FIRST_COLUMN}1")]
+    issues = run_doctor(FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows), _base_config(), title="Week 1")
+    assert any(i.check == "stakes-block" and "dfs bankroll stakes" in i.detail for i in issues)
+
+
+def test_run_doctor_passes_a_bankroll_tab_with_the_stakes_block():
+    rows = _lineups_rows()
+    issues = run_doctor(FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows), _base_config(), title="Week 1")
+    assert not [i for i in issues if i.check == "stakes-block"]

@@ -49,7 +49,8 @@ set. It also runs `dfs doctor` against the new copy first (catches a
 stale/malformed template before anything depends on it, and now checks
 the title itself parses -- see below), rewrites `config.toml`'s
 `sheet_id`, carries Bankroll and Results forward from the outgoing sheet,
-clears last week's lineups, blanks every synced tab AND every local
+clears last week's lineups, rebuilds the Bankroll tab's STAKES block (your ROI by format and this week's
+plan from the carried Weekly Budget and your `[stakes]` rules; `dfs bankroll stakes` does it by hand), blanks every synced tab AND every local
 synced-data cache (so a source that fails on the first sync reads as
 no-data-yet rather than a previous week's now-mismatched numbers), and
 runs a full `dfs sync`. It then prints which saved odds snapshot the week's line movement is measured against, e.g. "Opening lines: Tue 9:30 am ET snapshot (after the previous week's last game)"

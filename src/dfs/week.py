@@ -32,14 +32,17 @@ _WEEK_TITLE_RE = re.compile(r"^Week (\d+)$")
 # which meant every new week came up with the TEMPLATE's placeholders ($10 deposited, $100
 # weekly budget) instead of the real $170 / $150 (found Week 4, 2026-10-01). They are plain
 # typed numbers, never formulas, so copying the resolved value is exact.
+BANKROLL_STARTING_CELL = "B1"  # Starting Bankroll: the week's bankroll, carried from last week's Ending
+BANKROLL_WEEKLY_BUDGET_CELL = "B6"  # Weekly Budget: typed, carried; the STAKES block reads it from here
+BANKROLL_WEEKLY_COST_CELL = "B7"  # Weekly Cost: Cash + GPP + Betting entry fees so far this week
 BANKROLL_CARRYOVER_CELLS = [
-    ("B2", "B1"),
+    ("B2", BANKROLL_STARTING_CELL),
     ("I2", "I1"),
     ("L2", "L1"),
     ("D1", "D1"),
     ("D2", "D2"),
     ("D3", "D3"),
-    ("B6", "B6"),
+    (BANKROLL_WEEKLY_BUDGET_CELL, BANKROLL_WEEKLY_BUDGET_CELL),
 ]
 
 # The Results tab's column layout: A=Week, B=Cash Pts, C=Cash Line,

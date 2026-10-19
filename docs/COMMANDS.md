@@ -211,7 +211,7 @@ Save the current betting lines (and nothing else): no sheet, no other source. Li
 
 ## Reference: bankroll, logs and accounts (only when needed)
 
-Reconciling results and keeping records, and one-time logins. `dfs week close` already calls `bankroll sync` for you.
+Reconciling results and keeping records, and one-time logins. `dfs week close` already calls `bankroll sync` for you, and `dfs week new` rebuilds the STAKES block (`bankroll stakes`).
 
 ### `dfs bankroll sync`
 
@@ -221,6 +221,16 @@ Classify contest entries into Cash/GPP and append new ones to the bankroll tab, 
 |---|---|
 | `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). Left out, the newest history export in your Downloads folder is used (found by its header row). |
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
+
+### `dfs bankroll stakes`
+
+Rebuild the STAKES block on the Bankroll tab: your own ROI, cash rate and weekly volatility by format (this season and every season in the contest log), and this week's plan from the Weekly Budget on the tab and the rules you set under `[stakes]` in config.toml. Arithmetic on your history and your rules, not advice. `--propose` only prints; the block is rebuilt from scratch each run and nothing else on the tab is touched (it refuses if its area holds anything that is not a STAKES block).
+
+| Option | What it does |
+|---|---|
+| `--propose` | Print values for max_pct_bankroll_per_week and max_entry_fee_pct worked out from your own bankroll and weekly volatility, with the arithmetic. Read-only: nothing is written anywhere. |
+| `--no-sheet` | Print the plan; do not write the STAKES block to the sheet. |
+| `--sheet-id STR` | Read and write this sheet instead of config.toml's (e.g. the template: template first, then the live sheet). |
 
 ### `dfs contests update`
 

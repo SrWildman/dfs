@@ -136,7 +136,7 @@ Also handy most weeks:
 | `dfs edge` / `dfs odds movement` | a terminal look at the top leverage plays / how lines have moved. |
 | `dfs odds snapshot` | saving the week's opening lines (run it Monday or Tuesday morning, before `dfs week new`). |
 
-**Reference, only when needed:** `dfs bankroll sync`, `dfs ownership log`, `dfs lineups clear`, `dfs auth ...`
+**Reference, only when needed:** `dfs bankroll sync`, `dfs bankroll stakes` (the Bankroll tab's STAKES block: your ROI by format and this week's plan from your own `[stakes]` rules), `dfs ownership log`, `dfs lineups clear`, `dfs auth ...`
 (one-time logins), `dfs setup ...` (building, styling and repairing a sheet; `dfs setup sheet` runs the whole
 build in order), and `dfs --profile <command>` (a slow command's wall-clock and API-call breakdown). All in
 [docs/COMMANDS.md](docs/COMMANDS.md).

@@ -113,9 +113,10 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
     (
         "Reference: bankroll, logs and accounts (only when needed)",
         "Reconciling results and keeping records, and one-time logins. `dfs week close` already calls "
-        "`bankroll sync` for you.",
+        "`bankroll sync` for you, and `dfs week new` rebuilds the STAKES block (`bankroll stakes`).",
         [
             "dfs bankroll sync",
+            "dfs bankroll stakes",
             "dfs contests update",
             "dfs contests analyze",
             "dfs ownership log",
