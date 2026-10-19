@@ -85,3 +85,45 @@ def attach_probabilities(
         for index, swaps in suggestions.singles.items()
     }
     return suggestions
+
+
+SIT_PROJECTION = 0.1  # a player who sits scores nothing; the simulator needs a projection above zero
+
+
+@dataclass(frozen=True)
+class SitEffect:
+    name: str
+    p_cash: float  # the lineup's chances if he plays (the baseline)
+    p_gpp: float
+    sit_p_cash: float  # ... and if he does not
+    sit_p_gpp: float
+
+
+def sit_effects(lineup: list[PlayerSpec], names: list[str], settings: SimSettings) -> list[SitEffect]:
+    """For each named player of `lineup` (a Questionable or Doubtful one): the lineup's P(cash) and P(GPP)
+    with him playing and with him sitting (a near-zero projection), simulated together so the difference is
+    his own effect. A name that is not in the lineup is skipped."""
+    from dataclasses import replace
+
+    present = [p for p in lineup if p.id in set(names)]
+    if not present:
+        return []
+    deltas = swap_deltas(
+        lineup,
+        [([p.id], [replace(p, id=f"{p.id} (sits)", projection=SIT_PROJECTION)]) for p in present],
+        cash_line=settings.cash_line,
+        gpp_target=settings.gpp_target,
+        field=settings.field,
+    )
+    out = []
+    for p, d in zip(present, deltas, strict=True):
+        out.append(
+            SitEffect(
+                p.id,
+                d.p_cash - d.delta_p_cash,
+                d.p_gpp - d.delta_p_gpp,
+                d.p_cash,
+                d.p_gpp,
+            )
+        )
+    return out

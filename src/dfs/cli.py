@@ -3174,7 +3174,7 @@ def _late_swap_sim_setup(
 LATE_SWAP_STALE_MINUTES = 30
 
 
-def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> pd.DataFrame:
+def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> tuple[pd.DataFrame, list]:
     """Say how old the sync's injury status is, and with `--refresh-injuries` lay ESPN's game-day feed over it
     (`late_swap_news`): escalations only, each printed with its time. A failed fetch is a warning."""
     from dfs import late_swap_news as news
@@ -3193,12 +3193,12 @@ def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> pd.D
             )
         )
     if not refresh:
-        return edge
+        return edge, []
     try:
         feed = news.fetch_news()
     except news.NewsError as e:
         console.print(f"[yellow]Could not read ESPN's injuries ({e}); using the sync's Avail.[/yellow]")
-        return edge
+        return edge, []
     edge, changes = news.apply_news(edge, feed)
     console.print(f"ESPN injuries read now: {len(changes)} change(s) to Avail.")
     for c in changes[:25]:
@@ -3206,7 +3206,7 @@ def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> pd.D
         console.print(
             escape(f"  {c.name}: {c.before or '-'} -> {c.after}{when}  {c.note[:90]}"), highlight=False
         )
-    return edge
+    return edge, changes
 
 
 def _run_late_swap(
@@ -3230,7 +3230,8 @@ def _run_late_swap(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from e
 
-    edge = _late_swap_news(edge, now=now, refresh=refresh_injuries)
+    edge, news_changes = _late_swap_news(edge, now=now, refresh=refresh_injuries)
+    news_by_name = {c.name: c for c in news_changes}
 
     client = client or SheetsClient(cfg.google_sheets)
     try:
@@ -3294,6 +3295,14 @@ def _run_late_swap(
                 s.flag or "",
             )
         console.print(table)
+        for s in statuses:  # news that changed one of THIS lineup's players since the sync
+            c = news_by_name.get(s.name)
+            if c is not None:
+                console.print(
+                    escape(f"[NEWS] {c.name}: {c.before or '-'} -> {c.after}. {c.note[:100]}"),
+                    style="yellow",
+                    highlight=False,
+                )
 
         state = lineup_state(statuses, edge, cap=cfg.lineups.salary_cap, metric=metric)
         lineup_goal = resolve_goal(goal, markers[lineup_number - 1])
@@ -3303,6 +3312,17 @@ def _run_late_swap(
             from dfs.sim_inputs import lineup_from_names
 
             lineup_specs = lineup_from_names(names, sim_setup[0])
+            risky = [s.name for s in statuses if s.found and not s.locked and s.avail in ("Q", "D")]
+            if lineup_specs is not None and risky:
+                from dfs.late_swap_sim import sit_effects
+
+                sit_settings = dataclasses.replace(sim_setup[1], goal=lineup_goal)
+                for e in sit_effects(lineup_specs, risky, sit_settings):
+                    console.print(
+                        f"If {e.name} sits: Cash % {e.p_cash:.0%} -> {e.sit_p_cash:.0%}, "
+                        f"Top 1% {e.p_gpp:.1%} -> {e.sit_p_gpp:.1%}.",
+                        highlight=False,
+                    )
         suggestions = suggest(
             state,
             pool,
