@@ -535,6 +535,14 @@ Round 5 follow-up item 2 (2026-09-29): `dfs doctor` now requires a formula on ev
 |---|---|
 | `--sheet-id STR` | Repair a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
 
+### `dfs setup lineup-chalk`
+
+Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete lineup that holds none of the heavily owned players (projected 15%+ owned; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on the tab changes. Template first, then the live sheet; run `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- the template first. |
+
 ### `dfs setup guard-empty-states`
 
 Round 5 cleanup item 2 (2026-09-29). Wraps the divisions and averages on Results, Bankroll and Season in a guard that returns a blank when its inputs are empty (`=F2/E2` becomes `=IF(E2="","",IFERROR(F2/E2,""))`), and rebuilds the Season chart with its `#N/A` helper block (S:W) hidden and "plot hidden data" on. Safe to re-run: guarded formulas are left alone. Template first, then the live sheet; run `dfs doctor` after.

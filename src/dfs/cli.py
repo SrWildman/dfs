@@ -857,6 +857,40 @@ def sheets_repair_formula_ranges(
 
 
 @setup_app.command(
+    "lineup-chalk",
+    short_help="Add the missing-chalk warning to Lineups' Issues column (re-runnable).",
+)
+def sheets_lineup_chalk(
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Apply to a different sheet instead of config.toml's -- the template first."
+    ),
+) -> None:
+    """Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete
+    lineup that holds none of the heavily owned players (projected 15%+ owned; 25%+ for a lineup marked GPP)
+    shows "Chalk: Name N% +k" on its Total row. Nothing else on the tab changes. Template first, then the live
+    sheet; run `dfs doctor` after."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Adding the chalk warning to: [bold]{title}[/bold]\n{url}\n")
+        first = LINEUPS_NAME_BLOCKS[0][0] - 1
+        line = polish_guardrails(
+            client,
+            cfg.lineups.builder_tab,
+            header_row=first,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            header_repeats_at=[start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]],
+            edge_tab=cfg.google_sheets.tab_mappings["edge"],
+        )
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] {escape(line)}")
+
+
+@setup_app.command(
     "guard-empty-states",
     short_help="Blank instead of #DIV/0!/#N/A on Results, Bankroll and Season when nothing is entered yet.",
 )
@@ -1313,6 +1347,7 @@ def sheets_polish(
                 header_row=lineups_header_row,
                 name_blocks=LINEUPS_NAME_BLOCKS,
                 header_repeats_at=header_repeats_at,
+                edge_tab=cfg.google_sheets.tab_mappings["edge"],
             )
         )
         results.append(

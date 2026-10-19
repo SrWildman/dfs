@@ -185,6 +185,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         "you should not need them. `CONTRIBUTING.md`'s structural changelog says when each ran.",
         [
             "dfs setup repair-formula-ranges",
+            "dfs setup lineup-chalk",
             "dfs setup guard-empty-states",
             "dfs setup resize-player-pool",
             "dfs setup fix-opp-pos-rank",

@@ -1821,6 +1821,7 @@ _GUARDRAILS_CHIPS = [
     ("TEXT_EQ", "Q", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "INCOMPLETE", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "Weak for cash", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "Chalk:", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "to FLEX", _chip(WARN_BG, WARN_FG)),
     ("TEXT_EQ", "OK", _chip(OK_BG, OK_FG)),
 ]
@@ -2007,6 +2008,31 @@ def _weak_cash_formula(totals_row: int, cash_pct_col: str) -> str:
     )
 
 
+def _chalk_formula(start: int, end: int, totals_row: int, edge_tab: str) -> str:
+    """ "Chalk: Simone 70% +1" on the Total row when this (complete) lineup holds none of the players
+    projected at `chalk_watch.CASH_PROJECTED_OWN` (a lineup marked Cash or blank) or `GPP_PROJECTED_OWN`
+    (marked GPP) who are not OUT or IR: the most owned one and how many more. Empty otherwise. Read
+    straight from EdgeRaw's Name, Own% and Avail columns, found by `derived.edge_sheet_letter`; Own% is a
+    projection, so a double-up's real chalk can be higher (`chalk_watch`)."""
+    from dfs.chalk_watch import CASH_PROJECTED_OWN, GPP_PROJECTED_OWN
+
+    def col(name: str) -> str:
+        letter = edge_sheet_letter(name)
+        return f"{edge_tab}!${letter}$2:${letter}"
+
+    names, own, avail = col("Name"), col("Own%"), col("Avail")
+    mine = f"$A${start}:$A${end}"
+    found = (
+        f'FILTER({{{names},{own}}},ISNUMBER({own}),{own}>=IF($A{totals_row}="GPP",'
+        f'{GPP_PROJECTED_OWN:g},{CASH_PROJECTED_OWN:g}),{names}<>"",ISNA(MATCH({names},{mine},0)),'
+        f'{avail}<>"OUT",{avail}<>"IR")'
+    )
+    return (
+        f'IF(COUNTA({mine})<9,"",LET(f,{found},IFERROR("Chalk: "&INDEX(SORT(f,2,FALSE),1,1)&" "&'
+        f'TEXT(INDEX(SORT(f,2,FALSE),1,2),"0%")&IF(ROWS(f)>1," +"&(ROWS(f)-1),""),"")))'
+    )
+
+
 def _totals_check_formula(
     start: int,
     end: int,
@@ -2015,6 +2041,7 @@ def _totals_check_formula(
     *,
     stack_check: str | None = None,
     weak_cash: str | None = None,
+    chalk: str | None = None,
 ) -> str:
     """Salary cap, roster completeness, or OK -- on the block's totals
     row (Fix 2.4: `totals_row` is `end + 1`, a real separate row now, not
@@ -2042,7 +2069,7 @@ def _totals_check_formula(
         f"IF(COUNTA($A${start}:$A${end})<9,"
         f'"INCOMPLETE "&COUNTA($A${start}:$A${end})&"/9","OK")))'
     )
-    extras = [x for x in (stack_check, weak_cash) if x]
+    extras = [x for x in (stack_check, weak_cash, chalk) if x]
     if not extras:
         return f"={cap_or_completeness}"
     extra = extras[0] if len(extras) == 1 else f'TEXTJOIN(" ",TRUE,{",".join(extras)})'
@@ -2377,6 +2404,7 @@ def polish_guardrails(
     header_row: int,
     name_blocks: list[tuple[int, int]],
     header_repeats_at: list[int] | None = None,
+    edge_tab: str = "EdgeRaw",
 ) -> str:
     """Each lineup block currently checks exactly one thing (salary
     remaining, via its own DK Sal-column formulas). This adds the checks
@@ -2478,10 +2506,17 @@ def polish_guardrails(
             else None
         )
         weak_cash = _weak_cash_formula(totals_row, cash_pct_col) if cash_pct_col else None
+        chalk = _chalk_formula(start, end, totals_row, edge_tab) if client.tab_exists(edge_tab) else None
         rows.append(
             [
                 _totals_check_formula(
-                    start, end, totals_row, salary_col, stack_check=stack_check, weak_cash=weak_cash
+                    start,
+                    end,
+                    totals_row,
+                    salary_col,
+                    stack_check=stack_check,
+                    weak_cash=weak_cash,
+                    chalk=chalk,
                 )
             ]
         )

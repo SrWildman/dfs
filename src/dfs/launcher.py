@@ -303,6 +303,7 @@ MORE_LABELS = {
     "dfs setup build-season": "Build the Season tab",
     "dfs setup inspect": "List every tab with its size and headers",
     "dfs setup repair-formula-ranges": "Repair the formula gaps `dfs doctor` reports",
+    "dfs setup lineup-chalk": "Add the missing-chalk warning to Lineups' Issues column",
     "dfs setup guard-empty-states": "Restore the empty-state guards on division cells",
     "dfs setup resize-player-pool": "Resize the Player Pool position blocks",
     "dfs setup fix-opp-pos-rank": "One-time fix: opponent position rank",

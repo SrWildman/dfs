@@ -1415,6 +1415,7 @@ def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avai
     guardrails_col = column_letter(_HEADER_FOR_GUARDRAILS.index("Issues"))
     assert (avail_col, salary_col, guardrails_col) == ("X", "K", "Z")
 
+    client.tab_exists = lambda name: name == "Lineups"  # no EdgeRaw here: the chalk check is left out
     polish_guardrails(client, "Lineups", header_row=8, name_blocks=[(9, 17)])
 
     header_call = next(c for c in client.update_calls if c[0] == f"{guardrails_col}8")
@@ -2761,3 +2762,18 @@ def test_polish_guardrails_puts_the_flex_check_on_the_flex_row_only():
     flex_row = rows[7]  # QB RB RB WR WR WR TE FLEX DST
     assert flex_row.startswith('=TEXTJOIN(" ",TRUE,IF($A16=""') and "Move " in flex_row
     assert not any("Move " in r for i, r in enumerate(rows) if i != 7)  # no other row carries it
+
+
+def test_chalk_formula_reads_edgeraws_columns_and_the_lineups_marker_and_rides_after_the_other_checks():
+    from dfs.derived import edge_sheet_letter
+    from dfs.sheet_style import _chalk_formula, _totals_check_formula
+
+    f = _chalk_formula(2, 10, 11, "EdgeRaw")
+    for name in ("Name", "Own%", "Avail"):
+        assert f"EdgeRaw!${edge_sheet_letter(name)}$2:${edge_sheet_letter(name)}" in f
+    assert '$A11="GPP"' in f and "0.25" in f and "0.15" in f  # the GPP bar is higher than the cash one
+    assert 'COUNTA($A$2:$A$10)<9,""' in f  # only a complete lineup is judged
+    assert '"OUT"' in f and '"IR"' in f
+    both = _totals_check_formula(2, 10, 11, "K", stack_check='"DST/QB"', chalk=f)
+    assert both.count(f) >= 2 and "DST/QB" in both  # never masks another warning
+    assert _totals_check_formula(2, 10, 11, "K", chalk=None) == _totals_check_formula(2, 10, 11, "K")
