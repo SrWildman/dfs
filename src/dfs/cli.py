@@ -3269,6 +3269,24 @@ def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> tupl
     return edge, changes
 
 
+def _chalk_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]], now: datetime) -> None:
+    """Heavy chalk (projected Own%) in none of the built cash lineups, or none of the GPP ones, and whose game
+    has not kicked off: a warning only (`chalk_watch`). A blank marker counts as cash (`resolve_goal`)."""
+    from dfs import chalk_watch as cw
+    from dfs.kickoff import parse_kickoff
+
+    kicked = {
+        str(n)
+        for n, g in zip(edge["Name"], edge.get("GameStart", pd.Series("", index=edge.index)), strict=True)
+        if (k := parse_kickoff(g)) is not None and k <= now
+    }
+    for goal, threshold in (("cash", cw.CASH_PROJECTED_OWN), ("gpp", cw.GPP_PROJECTED_OWN)):
+        sets = [names for names, g in built if g == goal]
+        line = cw.warning_line(cw.missing_chalk(edge, sets, threshold=threshold, started=kicked), kind=goal)
+        if line:
+            console.print(escape(line.replace("your gpp", "your GPP")), style="yellow", highlight=False)
+
+
 def _run_late_swap(
     cfg: Config,
     *,
@@ -3319,6 +3337,7 @@ def _run_late_swap(
     sim_setup = _late_swap_sim_setup(cfg, client, edge, goal, now, fixed_lines=fixed_lines)
 
     any_shown = False
+    built_lineups: list[tuple[list[str], str]] = []  # (names, goal by marker)
     for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
         # Each block IS the 9 roster rows now (ROSTER_SLOTS order) --
         # the salary-total row directly below it is no longer part of the
@@ -3328,6 +3347,7 @@ def _run_late_swap(
         names = [_sheet_cell(raw, offset + i) for i in range(len(ROSTER_SLOTS))]
         if not any(n.strip() for n in names):
             continue  # lineup not built yet
+        built_lineups.append((names, resolve_goal(None, markers[lineup_number - 1])))
 
         statuses = lineup_slot_status(names, edge, now=now)
         if all(s.locked is True for s in statuses):
@@ -3401,6 +3421,7 @@ def _run_late_swap(
             console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
 
+    _chalk_warnings(edge, built_lineups, now)
     if not any_shown:
         console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
 

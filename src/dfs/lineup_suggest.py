@@ -58,6 +58,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from dfs import chalk_watch
 from dfs import lineup_shapes as shapes_mod
 from dfs.flex_order import BASE_SLOTS
 from dfs.kickoff import parse_kickoff
@@ -825,6 +826,11 @@ def suggest_builds(
                 )
 
     report.builds = number_builds(picked, gpp_entries=gpp_entries, double_up_entries=double_up_entries)
+    for kind, threshold in (("cash", chalk_watch.CASH_PROJECTED_OWN), ("gpp", chalk_watch.GPP_PROJECTED_OWN)):
+        sets = [[p.name for p in b.players] for b in report.builds if b.kind == kind]
+        line = chalk_watch.warning_line(chalk_watch.missing_chalk(edge, sets, threshold=threshold), kind=kind)
+        if line:
+            report.notes.append(line.replace("your gpp", "your GPP"))
     for build in report.builds:
         if build.kind == "cash" and build.e_dups is not None and build.e_dups >= dups.DUP_WARN_COPIES:
             report.notes.append(
