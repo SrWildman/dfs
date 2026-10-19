@@ -388,7 +388,7 @@ _MORE_ROWS: list[tuple[str, str]] = [
 _ITERATE_ROWS: list[tuple[str, str]] = [
     (
         "Decide",
-        "On each build's bar, set Keep (stays as it is), Rebuild (the blank default: searched again around "
+        "On each build's bar, set Keep (the blank default: stays as it is), Rebuild (searched again around "
         "its locks), Drop (replaced) or Vary N (N alternatives that keep its locks, 2+ players apart).",
     ),
     (
@@ -399,7 +399,8 @@ _ITERATE_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Rules box",
-        "Above the builds: Always use, Never use, Max exposure (Stafford: 4, more Stafford), Stack rules "
+        "Above the builds: Always use, Never use, Max exposure (Stafford: 4 is at most 4; = 4, >= 2, < 4, "
+        "more Stafford), Stack rules "
         "(LAR: no bring-back, DET: QB+RB ok, no stacks from GB) and Builds wanted (cash 3, gpp 8). A line it "
         "cannot read is reported.",
     ),

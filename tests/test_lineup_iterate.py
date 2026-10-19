@@ -306,7 +306,7 @@ def test_a_removed_bring_back_stays_removed_unless_the_gain_is_large(edge, specs
             _numbered(held.report, 2), edge, metric="CalPts", cash_line=145.0, gpp_target=190.0
         ).rows
     )
-    again_tab.builds[0].decision, again_tab.builds[0].locked = "", [False] * 9  # nothing locked: free again
+    again_tab.builds[0].decision, again_tab.builds[0].locked = "Rebuild", [False] * 9  # nothing locked
     second = rerun(edge, specs, again_tab, round2, bring_back_gain=10.0)
     free = next(b for b in second.report.builds if b.origin == "rebuilt")
     assert not shapes_mod.has_bring_back(free.players) and "as you left it" in free.note
@@ -448,7 +448,7 @@ def test_a_name_can_be_part_of_one_players_name_and_a_line_it_cannot_read_is_rep
 
 def test_decisions_parse_in_any_case_and_unknown_ones_leave_the_build_alone(edge, specs, tab):
     assert [st.parse_decision(t) for t in ("", "keep", "REBUILD", "Drop", "vary 3", "Vary3")] == [
-        st.Decision("rebuild"),
+        st.Decision("keep"),  # blank is Keep
         st.Decision("keep"),
         st.Decision("rebuild"),
         st.Decision("drop"),
@@ -506,7 +506,7 @@ def test_max_exposure_targets_count_the_kept_builds_and_more_prefers_a_player(ed
     target = "T04 QB1"
     for b in tab_state.builds:
         b.decision = "Keep" if b.kind == "cash" else "Drop"
-    tab_state.rules = st.RulesText(exposure=f"{target}: 2", wanted="cash 3, gpp 5")
+    tab_state.rules = st.RulesText(exposure=f"{target}: = 2", wanted="cash 3, gpp 5")
     result = rerun(edge, specs, tab_state, prior)
     uses = sum(1 for b in result.report.builds if b.kind == "gpp" and target in names(b))
     assert uses <= 2 and uses >= 1  # a cap of two, and new builds are steered toward it
@@ -534,3 +534,11 @@ def test_an_empty_tab_with_a_builds_wanted_line_builds_that_many(edge, specs):
     assert kinds[0] == "cash" and kinds.count("cash") == 1 and 2 <= kinds.count("gpp") <= 4
     assert all(b.origin == "new" for b in result.report.builds)
     assert [b.number for b in result.report.builds] == list(range(1, len(kinds) + 1))
+
+
+def test_max_exposure_operators():
+    text = st.RulesText(exposure="Aa: 4, Bb: <= 3, Cc: < 3, Dd: = 2, Ee: >= 2, Ff: > 1, more Gg")
+    rules = st.parse_rules(text, ["Aa", "Bb", "Cc", "Dd", "Ee", "Ff", "Gg"], [])
+    assert rules.caps == {"Aa": 4, "Bb": 3, "Cc": 2, "Dd": 2}  # a bare N and <= are only a cap
+    assert rules.floors == {"Dd": 2, "Ee": 2, "Ff": 2}  # = is a cap and a target; >= and > are targets
+    assert rules.more == {"Gg"} and not rules.problems

@@ -14,7 +14,7 @@ block in the Lineups layout (Sam approved it, Week 6):
          bring-back → McBride (yours, was ...); Cash % 61% → 64%                (the note, when there is one)
 
 The bar's first cell names it (`Build N`), the second its kind (Cash or GPP, over the lock column), the third
-is the DECISION (Keep / Rebuild / Drop / Vary N; blank is Rebuild) and the rest its title. The second row is
+is the DECISION (Keep / Rebuild / Drop / Vary N; blank is Keep) and the rest its title. The second row is
 the column header, then nine player rows in `ROSTER_SLOTS` order, then the Total row: salary and projection,
 and the simulator's four numbers under their own labels. A blank row separates blocks. Above the first build:
 the title, a status line ("Round 3  ·  ..."), how to use it, and the RULES box (one typed line each for Always

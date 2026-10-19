@@ -5,7 +5,7 @@ Nothing here touches a sheet: `cli._run_suggest` reads the tab (`sheet_suggested
 as a fresh run's (`lineup_suggest`, `lineup_shapes`, `late_swap_search`): fixed slots, the exact search, the
 simulator's odds, the same objectives (`--rank top1|share`, the duplicate model) and shapes.
 
-**What a decision means** (the cell on each build's bar; blank is Rebuild):
+**What a decision means** (the cell on each build's bar; blank is Keep):
 
 - `Keep`: the build stays exactly as it is (his typed-in picks included) and is only rescored.
 - `Rebuild`: the build is searched again, kind for kind, with its locked players fixed: the lock ticks and
@@ -24,8 +24,9 @@ rule may seat him in another of his position's slots, so the ticks follow the na
 
 **The rules box** (`suggest_state.py` has the syntax) applies to every rebuilt and new build: Always-use
 players are fixed in each (unless the locks leave no room), Never-use players are left out of the search, Max
-exposure sets a player's cap on the GPP builds (`Stafford: 4`: at most four, new builds are steered to reach
-it; `more Stafford`: no cap, preferred), stack rules reject a lineup, "Builds wanted" is how many of each kind
+exposure sets a player's cap on the GPP builds (`Stafford: 4` or `<= 4`: at most four and nothing more;
+`= 4`: exactly four, new builds are steered to reach it; `>= 2`: at least two, steered; `more Stafford`: no
+cap, preferred), stack rules reject a lineup, "Builds wanted" is how many of each kind
 the tab should hold (blank: as many as it holds now; an empty tab: 3 cash, 8 GPP). New builds must differ from
 every other build by `MIN_DIFFERENCE` players and respect the exposure cap (the default share, `MAX_EXPOSURE`,
 counted over all the GPP builds on the tab, the kept ones included); a GPP top-up spreads over quarterbacks
@@ -736,9 +737,9 @@ def _minimum(other: Entry, job: Job, minimum: int, free: int) -> int:
 
 
 def _boost(rules: st.Rules, uses: Counter, kind: str) -> Callable[[ls.Scored], int] | None:
-    """`more Name`, and `Name: N` while he is below N: a GPP candidate holding more of those players is
-    preferred."""
-    wanted = set(rules.more) | {n for n, target in rules.caps.items() if uses[n] < target}
+    """`more Name`, and `Name: = N` / `>= N` while he is below N: a GPP candidate holding more of those
+    players is preferred. A bare `Name: N` is only a cap and steers nothing."""
+    wanted = set(rules.more) | {n for n, target in rules.floors.items() if uses[n] < target}
     if not wanted or kind != "gpp":
         return None
     return lambda s: sum(1 for p in s.players if p.name in wanted)
@@ -831,8 +832,9 @@ def _exposure_notes(rules: st.Rules, final: list[Entry], by_name: dict[str, Swap
             out.append(
                 f"{name} is in {uses[name]} GPP builds, over the {cap} you asked for (a lock or a Keep)."
             )
-        elif uses[name] < cap and name in by_name:
-            out.append(f"{name} is in {uses[name]} GPP builds; you asked for {cap} and no more fit.")
+    for name, floor in sorted(rules.floors.items()):
+        if uses[name] < floor and name in by_name:
+            out.append(f"{name} is in {uses[name]} GPP builds; you asked for {floor} and no more fit.")
     return out
 
 

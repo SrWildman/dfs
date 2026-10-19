@@ -15,8 +15,9 @@ and written on the tab), never guessed:
 
     Always use     names every new or rebuilt build must contain       Bijan, Nacua
     Never use      names no new or rebuilt build may contain           Kyren
-    Max exposure   `Name: 4` (in at most 4 GPP builds; new ones are steered to reach 4), `more Name` (no
-                   cap, new builds prefer him)                          Stafford: 4; more Nacua
+    Max exposure   `Name: 4` or `<= 4` (in at most 4 GPP builds, a cap only), `< 4`, `= 4` (exactly 4: a cap
+                   and new builds are steered to reach it), `>= 2` / `> 1` (at least: steered), `more Name`
+                   (no cap, new builds prefer him)                      Stafford: 4; Nacua: >= 2; more Kelce
     Stack rules    `TEAM: no bring-back`, `TEAM: QB+RB ok` (that team's stacks must be exactly that make-up;
                    several allowed make-ups on separate items), `no stacks from TEAM`
     Builds wanted  `cash 3, gpp 8`
@@ -44,7 +45,8 @@ STATE_DIR = DATA_DIR / "suggest_state"
 RULE_LABELS = ("Always use", "Never use", "Max exposure", "Stack rules", "Builds wanted")
 RULE_FIELDS = dict(zip(RULE_LABELS, ("always", "never", "exposure", "stack", "wanted"), strict=True))
 RULE_SYNTAX = (
-    "Names: a full name or part of one (Stafford). Max exposure: `Stafford: 4` or `more Stafford`. Stack "
+    "Names: a full name or part of one (Stafford). Max exposure: `Stafford: 4` (at most), `= 4`, `>= 2`, "
+    "`< 4` or `more Stafford`. Stack "
     "rules: `LAR: no bring-back`, `DET: QB+RB ok`, `no stacks from GB`. Builds wanted: `cash 3, gpp 8`. "
     "Separate items with commas or semicolons."
 )
@@ -116,11 +118,11 @@ class Decision:
 
 
 def parse_decision(text: str) -> Decision | None:
-    """`Keep`, `Rebuild` (blank too), `Drop` or `Vary N` (1 to `VARY_MAX`), any case; None when unreadable."""
+    """`Keep` (blank too), `Rebuild`, `Drop` or `Vary N` (1 to `VARY_MAX`), any case; None when unreadable."""
     t = re.sub(r"\s+", " ", str(text or "").strip().casefold())
-    if t in ("", "rebuild"):
-        return Decision("rebuild")
-    if t in ("keep", "drop"):
+    if t in ("", "keep"):
+        return Decision("keep")
+    if t in ("rebuild", "drop"):
         return Decision(t)
     m = re.fullmatch(r"vary ?(\d+)", t)
     if m and 1 <= int(m.group(1)) <= VARY_MAX:
@@ -216,7 +218,10 @@ class Rules:
 
     always: list[str] = field(default_factory=list)
     never: set[str] = field(default_factory=set)
-    caps: dict[str, int] = field(default_factory=dict)  # `Name: N`
+    caps: dict[str, int] = field(default_factory=dict)  # `Name: N`, `<= N`, `< N`, `= N`: at most
+    floors: dict[str, int] = field(
+        default_factory=dict
+    )  # `Name: >= N`, `> N`, `= N`: at least (new builds are steered)
     more: set[str] = field(default_factory=set)  # `more Name`
     stacks: StackRules = field(default_factory=StackRules)
     wanted: dict[str, int] = field(default_factory=dict)  # "cash" / "gpp" -> how many
@@ -245,13 +250,29 @@ def parse_rules(text: RulesText, names: Sequence[str], teams: Iterable[str]) -> 
             rules.never.add(name)
     for item in split_items(text.exposure):
         more = re.fullmatch(r"more\s+(.+)", item, flags=re.IGNORECASE)
-        capped = re.fullmatch(r"(.+?)\s*[:=]\s*(\d+)\s*(?:builds?)?", item, flags=re.IGNORECASE)
+        capped = re.fullmatch(
+            r"(.+?)\s*:?\s*(<=|>=|==|=|<|>)?\s*(\d+)\s*(?:builds?)?", item, flags=re.IGNORECASE
+        )
         if more and (name := player("Max exposure", more.group(1))) is not None:
             rules.more.add(name)
         elif capped and (name := player("Max exposure", capped.group(1))) is not None:
-            rules.caps[name] = int(capped.group(2))
+            op, n = capped.group(2) or "<=", int(capped.group(3))
+            if op in ("<=", "=", "=="):
+                rules.caps[name] = n
+            elif op == "<":
+                rules.caps[name] = max(0, n - 1)
+            if op in ("=", "=="):
+                rules.floors[name] = n
+            elif op == ">=":
+                rules.floors[name] = n
+            elif op == ">":
+                rules.floors[name] = n + 1
         elif not more and not capped:
-            rules.problems.append(f"Max exposure: cannot read '{item}' (write `Name: 4` or `more Name`)")
+            rules.problems.append(
+                f"Max exposure: cannot read '{item}' (write `Name: 4` for at most 4, or `= 4`, `<= 4`, "
+                "`< 4`, "
+                "`>= 2`, `> 1`, or `more Name`)"
+            )
     for item in split_items(text.stack):
         _stack_item(rules, item, team_set)
     for item in split_items(text.wanted):
