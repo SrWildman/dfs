@@ -3320,6 +3320,28 @@ def _chalk_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]], now:
         line = cw.warning_line(cw.missing_chalk(edge, sets, threshold=threshold, started=kicked), kind=goal)
         if line:
             console.print(escape(line.replace("your gpp", "your GPP")), style="yellow", highlight=False)
+    _lineup_set_warnings(edge, built)
+
+
+def _lineup_set_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]]) -> None:
+    """Players in more than half of the built lineups, and each GPP-marked built lineup whose summed
+    projected Own% is outside the GPP target band (`lineup_watch`). Warnings only: a Cash or blank marker
+    gets no meter."""
+    from dfs import lineup_watch as lw
+
+    line = lw.overuse_line(lw.overused([names for names, _ in built]))
+    if line:
+        console.print(escape(line), style="yellow", highlight=False)
+    own = pd.to_numeric(edge.get("Own%"), errors="coerce") if "Own%" in edge.columns else None
+    if own is None:
+        return
+    by_name = dict(zip(edge["Name"], own, strict=True))
+    for number, (names, goal) in enumerate(built, start=1):
+        shares = [by_name.get(n) for n in names if n]
+        if len(shares) == 9 and all(s is not None and s == s for s in shares):
+            msg = lw.own_meter(sum(shares), goal)
+            if msg:
+                console.print(escape(f"Built lineup {number}: {msg}."), style="yellow", highlight=False)
 
 
 def _run_late_swap(

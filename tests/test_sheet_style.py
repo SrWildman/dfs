@@ -1430,12 +1430,15 @@ def test_polish_guardrails_writes_slot_and_totals_formulas_against_the_real_avai
     assert rows[0] == [
         f'=IF($A9="","",IF(COUNTIF($A$9:$A$17,$A9)>1,"DUPLICATE",IF(${avail_col}9<>"",${avail_col}9,"")))'
     ]
-    # Totals row (18): cap / completeness / OK, against DK Sal's column.
-    assert rows[-1] == [
-        '=IF(COUNTA($A$9:$A$17)=0,"",'
+    # Totals row (18): cap / completeness / OK against DK Sal's column, then the overuse check and the GPP
+    # ownership meter (the fixture has an Own% column).
+    totals = rows[-1][0]
+    assert totals.startswith(
+        '=IF((IF(COUNTA($A$9:$A$17)=0,"",'
         f'IF({salary_col}18>50000,"OVER "&TEXT({salary_col}18-50000,"$#,##0"),'
-        'IF(COUNTA($A$9:$A$17)<9,"INCOMPLETE "&COUNTA($A$9:$A$17)&"/9","OK")))'
-    ]
+        'IF(COUNTA($A$9:$A$17)<9,"INCOMPLETE "&COUNTA($A$9:$A$17)&"/9","OK"))))="",""'
+    )
+    assert "Overused: " in totals and "Own sum" in totals
 
 
 def test_polish_guardrails_puts_the_full_warnings_in_a_note_on_every_issues_cell():

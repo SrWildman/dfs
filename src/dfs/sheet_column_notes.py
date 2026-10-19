@@ -672,6 +672,8 @@ ISSUES_TOTAL_NOTE = (
     "Weak for cash: Cash % N%: a lineup marked Cash whose simulated Cash % is under 40%.\n"
     "Chalk: Name N% +k: a complete lineup holding none of the players projected at 15%+ owned (25%+ if "
     "marked GPP), most owned first; the field is usually chalkier than the projection in a double-up.\n"
+    "Overused: Name 9/14 +k: a player of this lineup who is in more than half of your built lineups.\n"
+    "Own sum N%: a lineup marked GPP whose total Own% is outside the 125%-145% GPP target (none for Cash).\n"
     "More than one can show at once."
 )
 

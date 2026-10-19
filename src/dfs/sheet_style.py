@@ -1822,6 +1822,8 @@ _GUARDRAILS_CHIPS = [
     ("TEXT_CONTAINS", "INCOMPLETE", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "Weak for cash", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "Chalk:", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "Overused:", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "Own sum", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "to FLEX", _chip(WARN_BG, WARN_FG)),
     ("TEXT_EQ", "OK", _chip(OK_BG, OK_FG)),
 ]
@@ -2033,6 +2035,41 @@ def _chalk_formula(start: int, end: int, totals_row: int, edge_tab: str) -> str:
     )
 
 
+def _overuse_formula(start: int, end: int, name_blocks: list[tuple[int, int]]) -> str:
+    """ "Overused: Bijan Robinson 9/14 +1" on the Total row: a player of THIS lineup who is in more than
+    `lineup_watch.OVERUSE_SHARE` of the built lineups (complete ones, counted by formula from `name_blocks`;
+    nothing below `MIN_LINEUPS`). Names are counted over the whole Name column, where only players appear."""
+    from dfs.lineup_watch import MIN_LINEUPS, OVERUSE_SHARE
+
+    first, last = name_blocks[0][0], name_blocks[-1][1] + 1
+    column = f"$A${first}:$A${last}"
+    mine = f"$A${start}:$A${end}"
+    built = "+".join(f"(COUNTA($A${s}:$A${e})=9)" for s, e in name_blocks)
+    return (
+        f'IF(COUNTA({mine})<9,"",LET(n,{built},f,FILTER({mine},{mine}<>"",'
+        f"COUNTIF({column},{mine})/n>{OVERUSE_SHARE:g}),"
+        f'IF(n<{MIN_LINEUPS},"",IFERROR("Overused: "&INDEX(f,1)&" "&COUNTIF({column},INDEX(f,1))&"/"&n&'
+        f'IF(ROWS(f)>1," +"&(ROWS(f)-1),""),""))))'
+    )
+
+
+def _own_meter_formula(totals_row: int, own_col: str) -> str:
+    """ "Own sum 207%: over the 125%-145% GPP target" for a lineup marked GPP (column A of its Total row),
+    whose summed Own% (the Total row's Own% cell) is outside `lineup_watch.GPP_OWN_LOW`..`GPP_OWN_HIGH`;
+    empty otherwise, so a Cash or blank marker never gets a meter."""
+    from dfs.lineup_watch import GPP_OWN_HIGH, GPP_OWN_LOW
+
+    cell = f"{own_col}{totals_row}"
+    text = f'"Own sum "&TEXT({cell},"0%")&": '
+    band = f"{GPP_OWN_LOW:.0%}-{GPP_OWN_HIGH:.0%} GPP target"
+    under = f'{text}under the {band}"'
+    over = f'{text}over the {band}"'
+    return (
+        f'IF(AND($A{totals_row}="GPP",ISNUMBER({cell})),'
+        f'IF({cell}<{GPP_OWN_LOW:g},{under},IF({cell}>{GPP_OWN_HIGH:g},{over},"")),"")'
+    )
+
+
 def _totals_check_formula(
     start: int,
     end: int,
@@ -2042,6 +2079,8 @@ def _totals_check_formula(
     stack_check: str | None = None,
     weak_cash: str | None = None,
     chalk: str | None = None,
+    overuse: str | None = None,
+    own_meter: str | None = None,
 ) -> str:
     """Salary cap, roster completeness, or OK -- on the block's totals
     row (Fix 2.4: `totals_row` is `end + 1`, a real separate row now, not
@@ -2069,7 +2108,7 @@ def _totals_check_formula(
         f"IF(COUNTA($A${start}:$A${end})<9,"
         f'"INCOMPLETE "&COUNTA($A${start}:$A${end})&"/9","OK")))'
     )
-    extras = [x for x in (stack_check, weak_cash, chalk) if x]
+    extras = [x for x in (stack_check, weak_cash, chalk, overuse, own_meter) if x]
     if not extras:
         return f"={cap_or_completeness}"
     extra = extras[0] if len(extras) == 1 else f'TEXTJOIN(" ",TRUE,{",".join(extras)})'
@@ -2454,6 +2493,7 @@ def polish_guardrails(
     avail_col = column_letter(header.index("Avail"))
     salary_col = column_letter(header.index("DK Sal"))
     guardrails_col = column_letter(header.index(_GUARDRAILS_HEADER))
+    own_col = column_letter(header.index("Own%")) if "Own%" in header else None
     key_col = column_letter(header.index(LINEUP_KEY_HEADER)) if LINEUP_KEY_HEADER in header else "A"
 
     # Part 7.4: the two stack checks are additive, not required -- a
@@ -2507,6 +2547,8 @@ def polish_guardrails(
         )
         weak_cash = _weak_cash_formula(totals_row, cash_pct_col) if cash_pct_col else None
         chalk = _chalk_formula(start, end, totals_row, edge_tab) if client.tab_exists(edge_tab) else None
+        overuse = _overuse_formula(start, end, name_blocks)
+        own_meter = _own_meter_formula(totals_row, own_col) if own_col else None
         rows.append(
             [
                 _totals_check_formula(
@@ -2517,6 +2559,8 @@ def polish_guardrails(
                     stack_check=stack_check,
                     weak_cash=weak_cash,
                     chalk=chalk,
+                    overuse=overuse,
+                    own_meter=own_meter,
                 )
             ]
         )
