@@ -18,7 +18,6 @@ Pure functions where possible; the loaders read files under `data/raw`.
 from __future__ import annotations
 
 import collections
-import glob
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -158,21 +157,65 @@ class ContestField:
         }
 
 
-def load_contests(week: int | None = None, folder: Path = STANDINGS_DIR) -> list[ContestField]:
-    """Every Classic contest in the standings folder (optionally one week), with the history log's size,
-    series and places paid."""
+def class_from_name(series: str, fee: float | None) -> str:
+    """`cash` / `gpp` from a contest's name and fee when the history log has no row for it yet (a week not
+    yet closed): a Double Up or 50/50 is cash; a head-to-head, Showdown, Captain or free contest is ignored
+    (""); the rest are GPPs."""
+    s = series.casefold()
+    if any(w in s for w in ("showdown", "captain", " vs. ", "vs.", "h2h")) or (fee is not None and fee <= 0):
+        return ""
+    return "cash" if ("double up" in s or "50/50" in s) else "gpp"
+
+
+def entries_file_meta(path: str | Path, week: int) -> dict[str, dict]:
+    """`{contest id: {week, series, fee}}` from a DraftKings entries download (`DraftKings Entries (N).csv`:
+    Entry ID, Contest Name, Contest ID, Entry Fee ...), for the contests of a week whose history export has
+    not been kept yet. Places paid are not in it."""
+    frame = pd.read_csv(path, dtype=str, usecols=["Contest Name", "Contest ID", "Entry Fee"])
+    out = {}
+    for rec in frame.drop_duplicates("Contest ID").itertuples(index=False):
+        fee = pd.to_numeric(str(rec[2]).replace("$", ""), errors="coerce")
+        out[str(rec[1])] = {"week": week, "series": str(rec[0]), "fee": None if pd.isna(fee) else float(fee)}
+    return out
+
+
+def load_contests(
+    week: int | None = None, folder: Path = STANDINGS_DIR, extra_meta: dict[str, dict] | None = None
+) -> list[ContestField]:
+    """Every Classic contest under the standings folder (bare CSVs and zips; optionally one week), with the
+    history log's size, series and places paid; a contest the log lacks takes `extra_meta` (see
+    `entries_file_meta`), with `places_paid` 0 (unknown: its `cash` finish is then always False)."""
     log = pd.read_csv("data/contests/contest_log.csv", low_memory=False)
     log = log[log["Season"] == SEASON]
     out = []
-    for path in sorted(glob.glob(str(folder / "contest-standings-*.csv"))):
-        cid = re.search(r"(\d+)\.csv$", path).group(1)
+    for source in sorted(st.scan_standings(folder).sources, key=lambda s: s.contest_id):
+        cid = source.contest_id
         meta = log[log["Contest_Key"] == int(cid)]
-        if meta.empty:
+        if not meta.empty:
+            m = meta.iloc[0]
+            info = {
+                "week": int(m["Week"]),
+                "series": str(m["Series"]),
+                "fmt": str(m["Format_Class"]),
+                "entries": int(m["Contest_Entries"]),
+                "places": int(m["Places_Paid"]),
+            }
+        elif extra_meta and cid in extra_meta:
+            x = extra_meta[cid]
+            info = {
+                "week": x["week"],
+                "series": x["series"],
+                "fmt": class_from_name(x["series"], x.get("fee")),
+                "entries": None,
+                "places": 0,
+            }
+            if not info["fmt"]:
+                continue
+        else:
             continue
-        m = meta.iloc[0]
-        if week is not None and int(m["Week"]) != week:
+        if week is not None and info["week"] != week:
             continue
-        s = st.parse_standings(Path(path).read_bytes(), contest_id=cid, places_paid=int(m["Places_Paid"]))
+        s = st.parse_standings(source.raw, contest_id=cid, places_paid=info["places"] or None)
         if s.kind != "Classic" or s.lineups.empty:
             continue
         pts = np.sort(s.lineups["points"].to_numpy(dtype=float))[::-1]
@@ -188,11 +231,11 @@ def load_contests(week: int | None = None, folder: Path = STANDINGS_DIR) -> list
         out.append(
             ContestField(
                 contest_id=cid,
-                week=int(m["Week"]),
-                series=str(m["Series"]),
-                fmt=str(m["Format_Class"]),
-                entries=int(m["Contest_Entries"]),
-                places_paid=int(m["Places_Paid"]),
+                week=info["week"],
+                series=info["series"],
+                fmt=info["fmt"],
+                entries=info["entries"] or len(pts),
+                places_paid=info["places"],
                 points=pts,
                 fpts=fpts,
                 copies=keys,
