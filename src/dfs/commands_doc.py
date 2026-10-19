@@ -50,7 +50,8 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
         "Board, Slate Grid, EdgeRaw, Player Pool, Lineups",
         "Research, tick your pool, build lineups. `dfs pool add|remove|list` does the pool without opening "
         "the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup "
-        "Tools > Copy builds to Lineups drops one in).",
+        "Tools > Copy builds to Lineups drops one in); keep, lock, edit or drop builds there and run "
+        "`dfs lineups suggest --iterate` to rebuild around your decisions.",
     ),
     (
         "4",
@@ -172,6 +173,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs setup dk-upload",
             "dfs setup add-filters",
             "dfs setup protect",
+            "dfs setup suggested-controls",
             "dfs setup audit-style",
             "dfs setup build-season",
             "dfs setup inspect",

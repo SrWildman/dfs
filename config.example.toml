@@ -142,6 +142,12 @@ default = "CalPts"
 shadow_sources = ["EspnPts", "PropPts"]
 shadow_min_weeks = 3
 
+# `dfs lineups suggest --iterate`: when you remove a build's bring-back, a rebuild of it keeps none unless the best
+# build WITH one is better than the best without by more than this share (relative: 0.25 = 25% better on the
+# probability that build is ranked by, Cash % for a cash build, Top 1% for a GPP build). Raise it to overrule you less.
+[suggest]
+bring_back_gain = 0.25
+
 # Contest selection (dfs week close): where to find the two files you download from DraftKings by hand -- the
 # contest-entry history export and the per-contest "export full standings" files -- and which double-up's
 # standings fill Results' blank Cash Line (a value you typed is never overwritten).

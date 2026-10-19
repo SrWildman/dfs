@@ -16,15 +16,16 @@ Exactly five things are typed by hand in the whole workbook (see
 `sheet_style.py`'s visual-grammar docstring): EdgeRaw's Pool column,
 Player Pool's own add-a-player control cell (A3, `sheet_pool_control.py`
 -- replaced the old separate `Pool Picks` tab), Lineups' block column A (plus each block's Cash/GPP marker),
-and Exposure's Target column plus its `LINEUP_COUNT_CELL` (moved here
+Exposure's Target column plus its `LINEUP_COUNT_CELL` (moved here
 from the pool deck's own B1/D1/F1 controls when the deck was removed
 entirely, Phase 5, 2026-09-16), plus DK Upload's Lineup dropdown (`protect_dk_upload`: the
-one choice Sam makes per contest entry). EdgeRaw is deliberately absent from
+one choice Sam makes per contest entry) and the Suggested tab's lock ticks and Name column (the
+decision cells, the rules box and the names he types over a build's players:
+`sheet_suggested.typed_ranges`). EdgeRaw is deliberately absent from
 `protect_workbook` below: its ENTIRE point is that Sam types into it (the
 Pool column) constantly, protecting it would mean protecting the one
-thing this task exists to make typeable. Player Pool, Exposure and
-Lineups all need the `unprotectedRanges` carve-out instead of a blanket
-protection for the same reason.
+thing this task exists to make typeable. Player Pool, Exposure, Lineups and Suggested all need the
+`unprotectedRanges` carve-out instead of a blanket protection for the same reason.
 """
 
 from __future__ import annotations
@@ -34,7 +35,9 @@ from dfs.sheet_contests import CONTESTS_TAB
 from dfs.sheet_dk_upload import unprotected_ranges as dk_upload_unprotected_ranges
 from dfs.sheet_links import PLAYER_POOL_RAW_TAB
 from dfs.sheet_pool_control import control_cells
+from dfs.sheet_suggested import PROTECTION_DESCRIPTION as SUGGESTED_DESCRIPTION
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
+from dfs.sheet_suggested import typed_ranges as suggested_typed_ranges
 from dfs.sheet_views import BOARD_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
@@ -45,7 +48,6 @@ FULLY_PROTECTED_TABS = [
     PLAYER_POOL_RAW_TAB,
     "Slate Grid",
     "Movement",
-    SUGGESTED_TAB,  # written by `dfs lineups suggest`; Lineup Tools > Copy builds to Lineups only reads it
     CONTESTS_TAB,  # rebuilt by `dfs week close` / `dfs contests update`; nothing on it is typed
 ]
 # Deliberately NOT protected (Sam, 2026-10-09): opening or closing a row group counts as an edit of
@@ -113,6 +115,21 @@ def protect_workbook(
         client.clear_protected_ranges(tab)
         results.append(
             f"{tab}: left unprotected (folding its groups must not warn); any old protection removed"
+        )
+
+    if not client.tab_exists(SUGGESTED_TAB):
+        results.append(f"{SUGGESTED_TAB}: not present -- skipped")
+    else:
+        # Written by `dfs lineups suggest` (Copy builds to Lineups only reads it) and iterated on by hand: the
+        # lock column and the Name column (decisions, rules box, typed-over names) are carved out. Whole
+        # columns, because the rows move with every run.
+        client.clear_protected_ranges(SUGGESTED_TAB)
+        client.protect_sheet(
+            SUGGESTED_TAB, unprotected_ranges=suggested_typed_ranges(), description=SUGGESTED_DESCRIPTION
+        )
+        results.append(
+            f"{SUGGESTED_TAB}: whole tab protected except the lock column and the Name column "
+            "(decisions, rules box, typed names)"
         )
 
     if not client.tab_exists(player_pool_tab):

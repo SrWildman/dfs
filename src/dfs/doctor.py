@@ -38,6 +38,9 @@ from dfs.sheet_pool_cells import POOL_OPTIONS
 from dfs.sheet_pool_control import control_cells
 from dfs.sheet_stakes import STAKES_FIRST_COLUMN, STAKES_TITLE
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, INPUT_BG, edge_group_spans
+from dfs.sheet_suggested import FIRST_BUILD_ROW as SUGGESTED_FIRST_ROW
+from dfs.sheet_suggested import LOCK_INDEX as SUGGESTED_LOCK_INDEX
+from dfs.sheet_suggested import NAME_INDEX as SUGGESTED_NAME_INDEX
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_index, column_letter
@@ -426,6 +429,42 @@ def _check_lineup_markers_are_typeable(
             )
         ]
     return []
+
+
+def _check_suggested_typed_cells(client: DoctorClient, tab_titles: set[str]) -> list[DoctorIssue]:
+    """What Sam types on the Suggested tab must be carved out of its warning-only protection, as Lineups'
+    names are: the lock column (a tick per player) and the Name column, which holds each build's decision
+    cell, the rules box and the names he types over a player. Reads the protection only; says nothing when
+    the tab has no whole-sheet protection or the client cannot read it. The rows move with every run, so the
+    carve-outs are whole columns (`sheet_suggested.typed_ranges`)."""
+    if SUGGESTED_TAB not in tab_titles:
+        return []
+    protections = client.read_protection(SUGGESTED_TAB)
+    if protections is None:
+        return []
+    row = SUGGESTED_FIRST_ROW + 2  # a row inside the builds
+    issues = []
+    for check, column, what in (
+        ("suggested-lock-protected", SUGGESTED_LOCK_INDEX, "the lock column"),
+        (
+            "suggested-decision-protected",
+            SUGGESTED_NAME_INDEX,
+            "the Name column (decision cells, rules box, typed names)",
+        ),
+    ):
+        behind = any(
+            protection["whole_sheet"] and not any(_covers(b, row, column) for b in protection["unprotected"])
+            for protection in protections
+        )
+        if behind:
+            issues.append(
+                DoctorIssue(
+                    check,
+                    f"{SUGGESTED_TAB!r}: {what} ({column_letter(column)}) is behind the sheet protection, so "
+                    "ticking or typing there shows a warning -- run `dfs setup protect`",
+                )
+            )
+    return issues
 
 
 def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
@@ -875,6 +914,7 @@ def run_doctor(
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
     issues += _check_lineup_scoreboard(client, cfg, tab_titles, headers_by_tab)
     issues += _check_lineup_markers_are_typeable(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_suggested_typed_cells(client, tab_titles)
     issues += _check_dk_upload_header(cfg, tab_titles, headers_by_tab)
     issues += _check_dk_upload_layout(cfg, tab_titles, headers_by_tab)
     issues += _check_dk_upload_lineup_column(client, cfg, tab_titles, headers_by_tab)

@@ -275,6 +275,17 @@ class StakesConfig(BaseModel):
     split: StakesSplitConfig | None = None
 
 
+class SuggestConfig(BaseModel):
+    """`[suggest]`: how `dfs lineups suggest --iterate` treats what Sam decided."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # When Sam removed a build's bring-back, a rebuild of it keeps none unless the best build WITH one beats
+    # the best without by more than this share (relative: 0.25 = 25% better on the probability that build's
+    # kind is ranked by, Cash % or Top 1%).
+    bring_back_gain: float = Field(0.25, ge=0.0)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -289,6 +300,7 @@ class Config(BaseModel):
     contests: ContestsConfig = ContestsConfig()
     odds_api: OddsApiConfig = OddsApiConfig()
     stakes: StakesConfig = StakesConfig()
+    suggest: SuggestConfig = SuggestConfig()
 
 
 def _missing_config_message() -> str:

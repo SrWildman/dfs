@@ -179,6 +179,20 @@ def lineup_state(
     return LineupState(cap=cap, fixed=fixed, open=open_slots)
 
 
+def edge_players(edge: pd.DataFrame, metric: str = DEFAULT_METRIC) -> dict[str, SwapPlayer]:
+    """Every EdgeRaw player who has a salary and a projection, by name (the first row of a name wins): the
+    lookup for anyone Sam names, whether or not he is in the pool, playing or still to kick off."""
+    out: dict[str, SwapPlayer] = {}
+    for _, row in edge.iterrows():
+        name = str(row["Name"])
+        if name in out:
+            continue
+        player = _player(row, metric)
+        if player is not None:
+            out[name] = player
+    return out
+
+
 def swap_pool(
     edge: pd.DataFrame,
     *,

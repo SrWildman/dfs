@@ -298,6 +298,7 @@ MORE_LABELS = {
     "dfs setup dk-upload": "Build DK Upload's entries layout (Lineup dropdown, Suggested)",
     "dfs setup add-filters": "Add the sort/search filters",
     "dfs setup protect": "Add warning-only protection to formula ranges",
+    "dfs setup suggested-controls": "Set up the Suggested tab's rules box and typed cells",
     "dfs setup audit-style": "Check every tab's styling (read-only)",
     "dfs setup build-season": "Build the Season tab",
     "dfs setup inspect": "List every tab with its size and headers",

@@ -549,16 +549,37 @@ def test_find_lineup_blocks_numbers_header_first_player_and_total_rows(node_modu
 
 
 def _suggested_grid(builds=((1, "Cash"), (2, "GPP"), (3, "GPP")), names_per_build=9):
-    """A Suggested grid in `sheet_suggested`'s layout: three lines, a blank, then the blocks."""
+    """A Suggested grid in `sheet_suggested`'s layout: three lines, a blank, then the blocks (a bar with the
+    kind over the lock column, the decision over Name and the title after it; a lock tick before each name)."""
     grid = [["SUGGESTED LINEUPS"], ["status"], ["how to"], []]
     for number, kind in builds:
-        grid.append([f"Build {number}", kind, f"{kind} build {number}"])
-        grid.append(["Slot", "Name", "Team", "Opp"])
+        grid.append([f"Build {number}", kind, "Keep", f"{kind} build {number}"])
+        grid.append(["Slot", "🔒", "Name", "Team", "Opp"])
         for i in range(names_per_build):
-            grid.append([_SLOTS[i] if i < len(_SLOTS) else "", f"B{number} Player {i}", "DET", "ARI"])
-        grid.append(["Total", "", "", "", 49900])
+            slot = _SLOTS[i] if i < len(_SLOTS) else ""
+            grid.append([slot, i == 0, f"B{number} Player {i}", "DET", "ARI"])
+        grid.append(["Total", "", "", "", "", 49900])
         grid.append([])
     return grid
+
+
+def _int_const(name: str) -> int:
+    match = re.search(rf"^var {name} = (\d+);", SOURCE, re.MULTILINE)
+    assert match, f"Code.gs has no `var {name} = <number>;`"
+    return int(match.group(1))
+
+
+def test_the_suggested_columns_the_script_reads_are_the_ones_python_derives_from_its_column_list():
+    """The lock column moved Name one column right (version 7): the script keeps its own copies of where the
+    kind, the Name and the title sit, and they must be the positions `sheet_suggested` derives from COLUMNS."""
+    from dfs import sheet_suggested as ss
+
+    assert ss.COLUMNS[ss.NAME_INDEX] == "Name" and ss.COLUMNS[ss.LOCK_INDEX] == ss.LOCK_HEADER
+    assert _int_const("SUGGESTED_NAME_COL") == ss.NAME_INDEX
+    assert _int_const("SUGGESTED_KIND_COL") == ss.KIND_INDEX
+    assert _int_const("SUGGESTED_TITLE_COL") == ss.TITLE_INDEX
+    assert _int_const("SUGGESTED_READ_COLUMNS") == ss.TITLE_INDEX + 1
+    assert apps_script.repo_script_version() >= 7
 
 
 def test_the_script_names_match_the_suggested_tab_python_writes():
@@ -580,6 +601,41 @@ def test_parse_builds_agrees_with_the_python_parser_on_the_same_grid(node_module
         from_js = _run_node(node_module, f"m.parseBuilds({json.dumps(g)})")
         assert from_js == ss.parse_builds(g)
     assert [b["number"] for b in ss.parse_builds(grid + short[4:])] == [1, 2, 3]
+
+
+@needs_node
+def test_the_script_reads_the_grid_the_writer_really_produces_on_any_round(node_module):
+    """Not just the fixture: the real `build_layout` (a decision on the bar, ticks, a note row, the rules box
+    above and a History block below) read by the script and by Python alike."""
+    import pandas as pd
+
+    from dfs import sheet_suggested as ss
+    from dfs.late_swap_search import SwapPlayer
+    from dfs.lineup_suggest import Build, SuggestReport
+    from dfs.models import ROSTER_SLOTS
+
+    def build(number, kind):
+        positions = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "WR", "DST"]
+        players = tuple(
+            SwapPlayer(f"B{number} {slot}{i}", pos, "DET", "ARI", "g", 5000, 10.0)
+            for i, (slot, pos) in enumerate(zip(ROSTER_SLOTS, positions, strict=True))
+        )
+        return Build(
+            number, kind, f"{kind} build {number}", players, 45000, 90.0, 0.5, 0.02, 100.0, 130.0,
+            decision="Keep", locked=(players[0].name,), yours=(players[1].name,), note="kept as it was",
+        )  # fmt: skip
+
+    report = SuggestReport(
+        builds=[build(1, "cash"), build(2, "gpp")], seconds=1.0, round=3,
+        rules={"Always use": "Bijan"}, history=["Round 1  ·  fresh run", "Round 3  ·  rerun"],
+    )  # fmt: skip
+    names = [p.name for b in report.builds for p in b.players]
+    edge = pd.DataFrame({"Name": names, "GameStart": [""] * len(names)})
+    grid = ss.build_layout(report, edge, metric="CalPts", cash_line=1.0, gpp_target=2.0).rows
+    from_js = _run_node(node_module, f"m.parseBuilds({json.dumps(grid)})")
+    assert from_js == ss.parse_builds(grid) and [b["number"] for b in from_js] == [1, 2]
+    assert [b["kind"] for b in from_js] == ["Cash", "GPP"] and from_js[1]["title"] == "gpp build 2"
+    assert from_js[0]["names"] == [p.name for p in report.builds[0].players]
 
 
 def _empty_lineups(blocks=3, filled=()):

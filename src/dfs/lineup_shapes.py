@@ -345,6 +345,7 @@ def shape_lineups(
     max_stack_own: float | None = None,
     rb_dst_options: int = RB_DST_OPTIONS,
     contrarian_cores: int = CONTRARIAN_CORES,
+    fixed: Sequence[SwapPlayer] = (),
 ) -> tuple[list[list[SwapPlayer]], bool]:
     """The best lineups of `shape` from `pool` by projection: about `per_qb` for each quarterback, best first
     (ties by salary, then names). One exact search per QB, as `lineup_suggest.stacked_lineups` always did: he
@@ -359,11 +360,23 @@ def shape_lineups(
     under the cut fixed. Inside each such anchor the search is exact; which anchors are tried is the
     heuristic. The time left is shared out over the searches: evenly for the plain stack, and for the other
     shapes each may use up to twice its even share or a quarter of what is left. Returns the lineups and
-    whether every search finished."""
+    whether every search finished.
+
+    `fixed` players (the iterate rerun's locks and Always-use names) are seated in every lineup: a fixed QB
+    is the only QB searched, and a fixed DST is the only DST (`rb_dst` then tries just him). `pool` must hold
+    them (a locked player outside the pool is added by the caller). Players that cannot be seated together
+    (two QBs, three RBs and no FLEX left) leave no lineup at all."""
     if shape == CONTRARIAN and (own is None or max_stack_own is None):
         raise ValueError("the contrarian shape needs ownership and a cutoff")
     rule = rule_for(shape)
-    quarterbacks = [p for p in pool if p.position == "QB" and can_reach(shape, p, pool)]
+    extra = list(fixed)
+    fixed_qb = next((p.name for p in extra if p.position == "QB"), None)
+    fixed_dst = next((p.name for p in extra if p.position == "DST"), None)
+    quarterbacks = [
+        p
+        for p in pool
+        if p.position == "QB" and can_reach(shape, p, pool) and (fixed_qb is None or p.name == fixed_qb)
+    ]
 
     best_rb: dict[str, float] = {}
     for p in pool:
@@ -372,14 +385,15 @@ def shape_lineups(
     dsts = [p for p in pool if p.position == "DST" and p.team in best_rb]  # (rb_dst) needs a RB on his team
 
     def search(fixed_players, qb, **feasible_kwargs):
-        fixed = seat(fixed_players)
+        merged = list({p.name: p for p in [*fixed_players, *extra]}.values())  # the anchor, then the fixed
+        fixed = seat(merged)
         if fixed is None:
             return None
-        names = {p.name for p in fixed_players}
+        names = {p.name for p in merged}
         rest = [p for p in pool if p.name not in names and p.position != "QB"]
         if shape == NAKED:  # no player of the other team's offense: they are not in the pool being searched
             rest = [p for p in rest if not (p.team == qb.opp and p.position in SKILL)]
-        if any(p.position == "DST" for p in fixed_players):
+        if any(p.position == "DST" for p in merged):
             rest = [p for p in rest if p.position != "DST"]
         return fixed, rest, feasible_for(shape, qb, **feasible_kwargs)
 
@@ -387,7 +401,7 @@ def shape_lineups(
     for qb in quarterbacks:
         if shape == RB_DST:
             options = sorted(
-                (d for d in dsts if d.team != qb.opp),
+                (d for d in dsts if d.team != qb.opp and (fixed_dst is None or d.name == fixed_dst)),
                 key=lambda d: (-(d.value + best_rb.get(d.team, 0.0)), d.name),
             )[:rb_dst_options]
             found_ = [

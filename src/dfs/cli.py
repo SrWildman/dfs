@@ -27,7 +27,17 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from dfs import edge_finder_tab, nfl_calendar, odds_credits, paths, perf, sheet_edge_finder, store
+from dfs import (
+    edge_finder_tab,
+    lineup_iterate,
+    nfl_calendar,
+    odds_credits,
+    paths,
+    perf,
+    sheet_edge_finder,
+    store,
+    suggest_state,
+)
 from dfs.apps_script import script_warnings
 from dfs.bankroll import (
     backfill_entry_keys,
@@ -63,6 +73,7 @@ from dfs.launcher import (
     suggested_commands,
 )
 from dfs.line_movement import LineMovementError, diff_odds
+from dfs.lineup_iterate import ITERATE_TIME_LIMIT
 from dfs.lineup_suggest import (
     DEFAULT_CASH_BUILDS,
     DEFAULT_RANK,
@@ -157,7 +168,14 @@ from dfs.sheet_style import (
     style_tier23_tabs,
     style_view_tabs,
 )
-from dfs.sheet_suggested import build_lines, build_summary, ensure_suggested_tab, write_suggested
+from dfs.sheet_suggested import (
+    build_lines,
+    build_summary,
+    ensure_suggested_tab,
+    setup_controls,
+    write_suggested,
+)
+from dfs.sheet_suggested import read_state as read_suggested_state
 from dfs.sheet_tab_removal import remove_retired_tabs
 from dfs.sheet_typo_guard import add_lineups_typo_guard
 from dfs.sheet_views import (
@@ -2025,6 +2043,45 @@ def sheets_protect(
         console.print(f"[green]OK[/green] {line}")
 
 
+@setup_app.command(
+    "suggested-controls",
+    short_help="The Suggested tab's rules box, typed cells and protection (for --iterate).",
+)
+def setup_suggested_controls(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Set up a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Make the Suggested tab ready to iterate on (`dfs lineups suggest
+    --iterate`). Safe to re-run.
+
+    A Suggested tab with no builds (a fresh template or a new week's copy) is
+    rewritten empty with the rules box (Always use, Never use, Max exposure,
+    Stack rules, Builds wanted) in pale-yellow typed cells, keeping any rules
+    already typed there; one that holds builds is left as the last run wrote it
+    (the lock ticks, decision cells and "your pick" tint are written beside the
+    builds by `dfs lineups suggest`, since the rows move with every run). Its
+    warning-only protection is replaced by one that leaves the lock column and
+    the Name column (decision cells, rules box, names typed over a player)
+    typeable. Run it on the template first, then the live week; `dfs doctor`
+    checks the protection.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Setting up the Suggested tab on: [bold]{title}[/bold]\n{url}\n")
+        results = setup_controls(client)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
 @app.command("doctor", short_help="Check the sheet structure is intact.")
 def sheets_doctor(
     sheet_id: str = typer.Option(
@@ -2167,7 +2224,9 @@ def setup_sheet(
     5. `protect` -- warning-only protection on every fully formula-driven
        tab, including the four view tabs. Runs after every structural
        tab/column exists so it's protecting the real final layout, not a
-       moving target.
+       moving target. (It also carves the Suggested tab's typed columns out of that tab's protection.)
+    5b. `suggested-controls` -- the Suggested tab's rules box and typed-cell styling on a tab that holds no
+       builds yet, and its protection (so the lock ticks, decision cells and rules box are typeable).
     6. `polish` -- presentation only (widths, freeze, number formats,
        chips, tab order). Never inserts/deletes/moves anything, so it's
        safe last -- and running it last means it's styling the finished
@@ -2193,6 +2252,7 @@ def setup_sheet(
         ("add-filters", lambda: sheets_add_filters(sheet_id=sheet_id)),
         ("dk-upload", lambda: sheets_dk_upload(sheet_id=sheet_id)),
         ("protect", lambda: sheets_protect(sheet_id=sheet_id)),
+        ("suggested-controls", lambda: setup_suggested_controls(sheet_id=sheet_id)),
         ("polish", lambda: sheets_polish(sheet_id=sheet_id, skip_chrome=False)),
         ("audit-style", lambda: sheets_audit_style(sheet_id=sheet_id)),
         ("doctor", lambda: sheets_doctor(sheet_id=sheet_id)),
@@ -3421,12 +3481,13 @@ def lineups_suggest(
     no_write: bool = typer.Option(
         False, "--no-write", help="Print the builds here and leave the Suggested tab alone."
     ),
-    seconds: float = typer.Option(
-        TIME_LIMIT_SECONDS,
+    seconds: float | None = typer.Option(
+        None,
         "--seconds",
         min=1.0,
-        help="How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool "
-        "when the run says the time limit cut it short.",
+        help=f"How long the search may run, in seconds (default {TIME_LIMIT_SECONDS:g}, or "
+        f"{ITERATE_TIME_LIMIT:g} for --iterate; a fresh run gives cash 40%, GPP the rest). Raise it for a "
+        "big pool when the run says the time limit cut it short.",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
     gpp_entries: int = typer.Option(
@@ -3447,6 +3508,21 @@ def lineups_suggest(
         "--rank",
         help="What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by "
         "1 + the identical entries expected).",
+    ),
+    iterate: bool = typer.Option(
+        False,
+        "--iterate",
+        help="Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each "
+        "build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept "
+        "builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are "
+        "ignored: the rules box's Builds wanted line says how many.",
+    ),
+    round_: int | None = typer.Option(
+        None,
+        "--round",
+        min=1,
+        help="Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a "
+        "new round (the state is kept in data/suggest_state/<week>.json).",
     ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
@@ -3475,6 +3551,14 @@ def lineups_suggest(
     earlier ones by at least 3 players, and FLEX (any RB, WR or TE) holds the
     latest kickoff.
 
+    Iterate on them: set a build's decision cell (Keep, Rebuild, Drop or
+    Vary N), tick the lock beside players who stay, type another name over a
+    player (it counts as a lock) and fill the rules box (Always use, Never
+    use, Max exposure, Stack rules, Builds wanted), then run with
+    `--iterate`. Every run is a round, kept in data/suggest_state/<week>.json
+    with the tab's state; `--round N` brings round N back. A run without
+    `--iterate` builds from scratch (the rules box is carried over, not applied).
+
     Your own lineups are never touched: copy builds in with Lineup Tools >
     Copy builds to Lineups (type 1,4,6 or all). Reads the last sync's data; run `dfs sync` (or
     `dfs sync --live`) first for the freshest picture."""
@@ -3490,7 +3574,17 @@ def lineups_suggest(
         gpp_entries=gpp_entries,
         double_up_entries=double_up_entries,
         rank=rank.value,
+        iterate=iterate,
+        restore_round=round_,
     )
+
+
+def _suggest_week(title: str) -> int:
+    """The week a sheet is for: its title (`Week 7`), else (the template) the calendar's."""
+    try:
+        return parse_week_from_title(title)
+    except ValueError:
+        return nfl_calendar.current_week()
 
 
 def _run_suggest(
@@ -3501,14 +3595,17 @@ def _run_suggest(
     write: bool,
     now: datetime,
     client: SheetsClient | None = None,
-    seconds: float = TIME_LIMIT_SECONDS,
+    seconds: float | None = None,
     fixed_lines: bool = False,
     gpp_entries: int = DEFAULT_GPP_ENTRIES,
     double_up_entries: int = DEFAULT_DOUBLE_UP_ENTRIES,
     rank: str = DEFAULT_RANK,
+    iterate: bool = False,
+    restore_round: int | None = None,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
-    in the slate; the command passes the real clock."""
+    in the slate; the command passes the real clock. A fresh run, `iterate` (rerun around the tab's
+    decisions) and `restore_round` (an earlier round, back) each record a round in the week's state file."""
     try:
         edge = store.load_current("edge")
     except FileNotFoundError as e:
@@ -3542,25 +3639,101 @@ def _run_suggest(
         console.print("[red]The simulator is needed to score builds and could not be set up.[/red]")
         raise typer.Exit(code=1)
     specs, settings = sim_setup
-    report = suggest_builds(
-        edge,
-        tags,
-        specs,
-        now=now,
-        cap=cfg.lineups.salary_cap,
-        cash_line=settings.cash_line,
-        gpp_target=settings.gpp_target,
-        metric=metric,
-        cash_builds=cash,
-        gpp_builds=gpp,
-        time_limit=seconds,
-        field=settings.field,
-        gpp_entries=gpp_entries,
-        double_up_entries=double_up_entries,
-        rank=rank,
+    week = _suggest_week(title)
+    try:
+        state = suggest_state.load_state(week)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    try:
+        with perf.measure(phases, "read tab"):
+            tab = read_suggested_state(client)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error reading the Suggested tab:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    prior = state.latest
+    restored: int | None = None
+    if restore_round is not None:
+        restored = restore_round
+        prior = state.get(restore_round)
+        if prior is None:
+            have = ", ".join(str(r.round) for r in state.rounds) or "none yet"
+            console.print(
+                f"[red]There is no round {restore_round} for week {week} (rounds on file: {have}).[/red]"
+            )
+            raise typer.Exit(code=1)
+        tab = lineup_iterate.tab_from_record(prior)
+    command = "restore" if restored is not None else "iterate" if iterate else "suggest"
+    if command == "suggest":
+        report = suggest_builds(
+            edge,
+            tags,
+            specs,
+            now=now,
+            cap=cfg.lineups.salary_cap,
+            cash_line=settings.cash_line,
+            gpp_target=settings.gpp_target,
+            metric=metric,
+            cash_builds=cash,
+            gpp_builds=gpp,
+            time_limit=seconds if seconds is not None else TIME_LIMIT_SECONDS,
+            field=settings.field,
+            gpp_entries=gpp_entries,
+            double_up_entries=double_up_entries,
+            rank=rank,
+        )
+        records = lineup_iterate.records_from_report(report)
+        report.rules = tab.rules.by_label()  # a fresh run carries the rules box over; it does not apply it
+        if not tab.rules.blank():
+            report.notes.append(
+                "The rules box was kept but not applied: a fresh run builds from the pool alone. "
+                "`--iterate` applies it."
+            )
+        if tab.builds and state.latest is not None:
+            report.notes.append(
+                f"This run replaced the {len(tab.builds)} build(s) of round {state.latest.round} (their "
+                f"decisions, locks and typed names are in {suggest_state.state_path(week).name}: "
+                f"`dfs lineups suggest --round {state.latest.round}` brings them back; `--iterate` keeps "
+                "them)."
+            )
+    else:
+        gain = getattr(getattr(cfg, "suggest", None), "bring_back_gain", lineup_iterate.BRING_BACK_GAIN)
+        iterated = lineup_iterate.iterate_builds(
+            edge,
+            tags,
+            specs,
+            tab,
+            prior,
+            now=now,
+            cap=cfg.lineups.salary_cap,
+            cash_line=settings.cash_line,
+            gpp_target=settings.gpp_target,
+            metric=metric,
+            time_limit=seconds if seconds is not None else ITERATE_TIME_LIMIT,
+            field=settings.field,
+            gpp_entries=gpp_entries,
+            double_up_entries=double_up_entries,
+            rank=rank,
+            bring_back_gain=gain,
+            freeze=restored is not None,
+        )
+        report, records = iterated.report, iterated.records
+    record = suggest_state.RoundRecord(
+        round=state.next_round(),
+        at=now.astimezone(UTC).isoformat(timespec="seconds"),
+        command=command,
+        rules=dict(report.rules),
+        builds=records,
+        notes=list(report.notes),
+        seconds=round(report.seconds, 2),
+        restored_from=restored,
     )
+    state.rounds.append(record)
+    report.round = record.round
+    report.history = suggest_state.history_lines(state)
+    how = {"suggest": "fresh run", "iterate": "rerun", "restore": f"round {restored} restored"}[command]
     console.print(
-        f"Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
+        f"Round {record.round} ({how}). Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
         f"{report.candidates.get('gpp', 0)} for GPP builds. {len(report.builds)} build(s) in "
         f"{report.seconds:.1f} s.\n"
     )
@@ -3568,13 +3741,15 @@ def _run_suggest(
         console.print(build_summary(build), markup=False, highlight=False, soft_wrap=True)
         for line in build_lines(build, edge):
             console.print("  " + line, markup=False, highlight=False, soft_wrap=True)
+        if build.note:
+            console.print(f"  -> {build.note}", markup=False, highlight=False, soft_wrap=True)
         console.print()
     for note in report.notes:
         console.print(f"[yellow]{note}[/yellow]")
-    for name, seconds in report.phases.items():  # the search phases, between the two sheet-side groups
-        phases[name] = (seconds, 0)
+    for name, took in report.phases.items():  # the search phases, between the two sheet-side groups
+        phases[name] = (took, 0)
     if not write:
-        console.print("[dim]--no-write: the Suggested tab was not changed.[/dim]")
+        console.print("[dim]--no-write: the Suggested tab and the state file were not changed.[/dim]")
         _print_phases(phases)
         return
     try:
@@ -3594,6 +3769,8 @@ def _run_suggest(
     except SheetsError as e:
         console.print(f"[red]Sheets error writing the Suggested tab:[/red] {e}")
         raise typer.Exit(code=1) from e
+    path = suggest_state.save_state(state)  # after the tab: the file mirrors what the tab shows
+    console.print(f"[green]OK[/green] round {record.round} saved to {path}")
     _print_phases(phases)
 
 
