@@ -55,6 +55,7 @@ the removal's own details.
 from __future__ import annotations
 
 from dfs.config import EntryTableConfig
+from dfs.lineups import DK_UPLOAD_SHEET_HEADER
 from dfs.sheets import SheetsClient, column_letter
 
 # Fix 2.4: each tuple is now the NINE REAL ROSTER ROWS ONLY (QB, RB, RB,
@@ -136,7 +137,8 @@ PLAYER_POOL_CONTROL_DEFAULT_TYPE = "Both"
 
 # Full-grid tab: clear everything below the header, generously past any
 # row/column count actually seen so far.
-DK_UPLOAD_RANGE = "A2:M1000"
+# (DK's nine slots plus the Format / Lineup / Suggested / Why columns: `lineups.DK_UPLOAD_SHEET_HEADER`.)
+DK_UPLOAD_RANGE = f"A2:{column_letter(len(DK_UPLOAD_SHEET_HEADER) - 1)}1000"
 
 
 def _clear_bankroll_bucket(

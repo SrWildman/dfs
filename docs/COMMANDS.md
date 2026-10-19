@@ -20,7 +20,7 @@ This is what most weeks look like. Everything below it is reference.
 | 1 | Tuesday/Wednesday: a new week starts | `dfs week new "<url-of-the-sheet-copy>"` | Points the CLI at a fresh copy of the template, carries your bankroll and Results forward, runs a full sync. Then check `dfs status`. |
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
 | 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy builds to Lineups drops one in). |
-| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates your lineups and writes DraftKings' bulk-upload CSV. |
+| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`. |
 | 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close` | Reconciles Cash/GPP into Bankroll and Results from the newest contest-history export in Downloads (or `--csv <file>`), keeps your DraftKings downloads (history copy, standings files) and rebuilds the Contests tab, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
 
@@ -104,6 +104,29 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--gpp-entries INT RANGE` | Size of the GPP the builds are for. The duplicates each build is expected to share are read against it (shown on every GPP build; they rank only with --rank share). Default: `1000`. |
 | `--double-up-entries INT RANGE` | Size of a double-up, for the warning on a cash build many entries are expected to share. Default: `3000`. |
 | `--rank CHOICE` | What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by 1 + the identical entries expected). Default: `top1`. |
+
+### `dfs entries fill`
+
+Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
+
+| Option | What it does |
+|---|---|
+| `--csv PATH` | Path to a DraftKings entries file (Edit entries). Left out, the newest one in your Downloads folder is used (found by its header row) and the command says which. |
+| `--write` | Also write upload_<timestamp>.csv: only the entries you set that DK does not already hold. |
+| `--output / -o PATH` | Where --write puts the file (default: here). |
+| `--again` | After a late swap changed a lineup: rewrite only the entries whose lineup now differs from the slots on DK Upload. Nothing else on the tab changes. |
+| `--dry-run` | Read and report only: write neither the DK Upload tab nor a file. |
+| `--sheet-id STR` | Use a different sheet instead of config.toml's (e.g. the template). |
+
+### `dfs entries print`
+
+Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, and write it to a file.
+
+| Option | What it does |
+|---|---|
+| `--csv PATH` | Path to a DraftKings entries file. Left out, the newest one in your Downloads folder is used (found by its header row) and the command says which. |
+| `--output / -o PATH` | Where to write the file (default: dk_lineups_<timestamp>.csv here). |
+| `--sheet-id STR` | Read a different sheet instead of config.toml's. |
 
 ### `dfs export`
 
@@ -435,6 +458,14 @@ A3: create (or refresh) Player Pool's own "add a player" row -- a type dropdown 
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Add/refresh the control row on a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+
+### `dfs setup dk-upload`
+
+Put the entries layout on the DK Upload tab: DK's columns, then Format, a typed Lineup dropdown (L1..L20, pale-yellow, the one cell exempt from the tab's protection), and the grey Suggested and Why columns `dfs entries fill` writes. Safe to re-run: it never touches an entry row's values.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
 
 ### `dfs setup add-filters`
 

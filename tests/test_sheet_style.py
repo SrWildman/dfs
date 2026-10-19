@@ -2279,6 +2279,14 @@ def test_restore_dk_upload_header_replaces_a_showdown_row_and_leaves_a_classic_o
     assert classic.update_calls == []
 
 
+def test_restore_dk_upload_header_leaves_the_entries_layouts_extra_columns_alone():
+    from dfs.lineups import DK_UPLOAD_SHEET_HEADER
+
+    client = FakeTier23Client(list(DK_UPLOAD_SHEET_HEADER))
+    assert "already" in restore_dk_upload_header(client)
+    assert client.update_calls == []
+
+
 def test_style_tier23_tabs_covers_every_expected_tab():
     client = FakeTier23Client(["A", "B"])
     results = style_tier23_tabs(
