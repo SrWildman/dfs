@@ -550,7 +550,8 @@ def test_find_lineup_blocks_numbers_header_first_player_and_total_rows(node_modu
 
 def _suggested_grid(builds=((1, "Cash"), (2, "GPP"), (3, "GPP")), names_per_build=9):
     """A Suggested grid in `sheet_suggested`'s layout: three lines, a blank, then the blocks (a bar with the
-    kind over the lock column, the decision over Name and the title after it; a lock tick before each name)."""
+    kind over the lock column, the decision over Name and the title after it; a lock tick before each
+    name)."""
     grid = [["SUGGESTED LINEUPS"], ["status"], ["how to"], []]
     for number, kind in builds:
         grid.append([f"Build {number}", kind, "Keep", f"{kind} build {number}"])
@@ -571,7 +572,8 @@ def _int_const(name: str) -> int:
 
 def test_the_suggested_columns_the_script_reads_are_the_ones_python_derives_from_its_column_list():
     """The lock column moved Name one column right (version 7): the script keeps its own copies of where the
-    kind, the Name and the title sit, and they must be the positions `sheet_suggested` derives from COLUMNS."""
+    kind, the Name and the title sit, and they must be the positions `sheet_suggested` derives from
+    COLUMNS."""
     from dfs import sheet_suggested as ss
 
     assert ss.COLUMNS[ss.NAME_INDEX] == "Name" and ss.COLUMNS[ss.LOCK_INDEX] == ss.LOCK_HEADER

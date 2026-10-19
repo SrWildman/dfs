@@ -384,6 +384,33 @@ _MORE_ROWS: list[tuple[str, str]] = [
     ),
 ]
 
+# The "Iterate on Suggested" box: four lines (`dfs lineups suggest --iterate`, `lineup_iterate.py`).
+_ITERATE_ROWS: list[tuple[str, str]] = [
+    (
+        "Decide",
+        "On each build's bar, set Keep (stays as it is), Rebuild (the blank default: searched again around "
+        "its locks), Drop (replaced) or Vary N (N alternatives that keep its locks, 2+ players apart).",
+    ),
+    (
+        "Lock and edit",
+        "Tick the lock beside a player to keep him in that build. Type another name over a player and it "
+        "counts as a lock (green); an illegal name is refused and the build is left as it was, with the "
+        "reason under it.",
+    ),
+    (
+        "Rules box",
+        "Above the builds: Always use, Never use, Max exposure (Stafford: 4, more Stafford), Stack rules "
+        "(LAR: no bring-back, DET: QB+RB ok, no stacks from GB) and Builds wanted (cash 3, gpp 8). A line it "
+        "cannot read is reported.",
+    ),
+    (
+        "Rerun",
+        "Run dfs lineups suggest --iterate (about 15 seconds). Kept builds are only rescored. Each run is a "
+        "round, listed in History under the builds; dfs lineups suggest --round N brings one back. Copy "
+        "builds to Lineups works on any round.",
+    ),
+]
+
 # (kind, column A, column B): "title", "section" (a dark band) or "row".
 _LAYOUT: list[tuple[str, str, str]] = [
     ("title", _TITLE, ""),
@@ -397,6 +424,8 @@ _LAYOUT: list[tuple[str, str, str]] = [
     *(("row", a, b) for a, b in _NUMBER_ROWS),
     ("section", "THE TABS", "What each one is for"),
     *(("row", a, b) for a, b in _TAB_ROWS),
+    ("section", "ITERATE ON SUGGESTED", "Four lines"),
+    *(("row", a, b) for a, b in _ITERATE_ROWS),
     ("section", "MORE DETAIL", ""),
     *(("row", a, b) for a, b in _MORE_ROWS),
 ]

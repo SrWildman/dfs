@@ -443,6 +443,30 @@ def test_run_doctor_flags_a_cash_gpp_marker_that_is_behind_the_lineups_protectio
     assert len(lineups_unprotected_ranges()) == 2 * len(LINEUPS_NAME_BLOCKS)
 
 
+def test_run_doctor_flags_the_suggested_lock_column_and_decision_cells_behind_the_protection():
+    """The lock ticks and the decision cells (the Name column: rules box and typed names too) are typed
+    cells."""
+    cfg = _base_config()
+
+    def found(protection):
+        client = FakeDoctorClient(_ALL_GOOD_TABS, _lineups_rows())
+        client.protection = protection
+        return {i.check for i in run_doctor(client, cfg, title="Week 1") if i.check.startswith("suggested-")}
+
+    lock_only = (None, None, 1, 2)  # whole-column carve-outs, 0-based half-open: B
+    name_only = (None, None, 2, 3)  # C
+    assert found(None) == set() and found({"Suggested": []}) == set()
+    assert found({"Suggested": _whole_sheet_protection(lock_only, name_only)}) == set()  # healthy
+    assert found({"Suggested": _whole_sheet_protection(name_only)}) == {"suggested-lock-protected"}
+    assert found({"Suggested": _whole_sheet_protection(lock_only)}) == {"suggested-decision-protected"}
+    both = found({"Suggested": _whole_sheet_protection()})
+    assert both == {"suggested-lock-protected", "suggested-decision-protected"}
+    client = FakeDoctorClient(_ALL_GOOD_TABS, _lineups_rows())
+    client.protection = {"Suggested": _whole_sheet_protection()}
+    details = [i.detail for i in run_doctor(client, cfg, title="Week 1") if i.check.startswith("suggested-")]
+    assert all("dfs setup protect" in d for d in details)
+
+
 def test_run_doctor_flags_lineups_header_wrong_at_row_one():
     # Row 1 is LINEUPS_NAME_BLOCKS' own first "header row" entry now that
     # the pool deck (which used to sit above it) is gone -- the same

@@ -127,6 +127,11 @@ URL; check it before any write).
 | "sync" | `dfs sync`, then `dfs doctor` | each source's status (name any failure, e.g. an expired TFFB login), doctor findings |
 | "final sync" | `dfs sync --live`, then `dfs doctor` | what changed since the last sync (the terminal diff / the Board's Queue), anyone in his pool now OUT or Q |
 | "build me lineups" | `dfs lineups suggest` (his pool must not be empty: if it is, say so and stop) | each build in one line (cash or GPP, shape, salary, Cash % / Top 1% (GPP builds rank by Top 1%; `--rank share` ranks by Top 1% share, only if Sam asks), and for a GPP build its ownership sum and product and expected duplicates: the numbers the terminal prints; say so if a cash build carries a duplicate warning), and that **Lineup Tools > Copy builds to Lineups** (type `1,4,6` or `all`) puts them in |
+| "keep build 2" | set build 2's decision cell to `Keep` on the Suggested tab (a write to the live week's sheet: say the sheet), then `dfs lineups suggest --iterate` | the round produced and what changed (each build's note) |
+| "lock Stafford and Nacua in build 4, swap the bring-back for McBride, rerun" | tick the locks and type the name over the bring-back cell on Suggested (the sheet and the chat must never disagree), then `dfs lineups suggest --iterate` | the round, build 4's note ("bring-back → McBride (yours); ...; Cash % 61% → 64%") or why the edit was refused |
+| "give me 3 more like build 5" | set build 5 to `Vary 3`, then `dfs lineups suggest --iterate` | the round and the three variations (what differs, their Cash % / Top 1%) |
+| "never Kyren", "always Bijan", "no bring-back for LAR" | write the rules box lines (`Never use`, `Always use`, `Stack rules`), then `dfs lineups suggest --iterate` | the round, which builds changed, and any rules line it could not read |
+| "go back to round 2" | `dfs lineups suggest --round 2` | the round it was written as (a new round) and the builds |
 | "fix flex" | nothing to run: tell him to use **Lineup Tools > Fix FLEX order** on Lineups (a sheet script); `dfs export` also puts the FLEX right in the file it writes | which of the two did it |
 | "late swap" | `dfs lineups late-swap --refresh-injuries` (it covers every built lineup; the flag lays ESPN's game-day injury feed over the last sync's status first) | a summary per lineup: who is still swappable, the best change and its Cash % / GPP % effect, or "nothing beats it" |
 | "close the week" | `dfs week close` (it finds the newest history export in Downloads by its header and says which; pass `--csv <file>` if he names one) | the Model Check verdict and the learned block, the bankroll lines it reconciled, and what it kept and filled on the contest side (standings moved, empty downloads, Cash Line, the Contests tab), then the Contests tab's THIS WEEK, YOUR DECISIONS block (five lines) |
@@ -136,6 +141,7 @@ Guardrails:
 
 - **Ask before `dfs week new`**, and before writing to any sheet other than the live week (the one `config.toml` points at).
 - **Never touch a closed week** (a previous week's sheet is read only).
+- **Iterating on Suggested:** `dfs lineups suggest --iterate` reads the tab (decisions, locks, typed names, rules box) and `data/suggest_state/<week>.json`; always say **which round** it produced and what changed. A plain `dfs lineups suggest` builds from scratch and replaces the tab (the previous round stays in the file: `--round N`). Edits made through chat go in the same cells, only on the live week's sheet.
 - **Never push** (or open a PR) without Sam's OK in chat.
 - A command that fails: show the error and stop; do not retry in a loop or work around it. Google calls hang now and
   then: run a long job detached with a log file and read the log.

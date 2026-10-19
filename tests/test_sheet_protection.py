@@ -125,3 +125,20 @@ def test_edge_finder_and_board_are_not_protected_and_any_old_protection_is_clear
     protected = {tab for tab, _ in client.protect_calls}
     for tab in UNPROTECTED_VIEW_TABS:
         assert tab not in protected and tab in client.clear_calls  # folding a group must not warn
+
+
+def test_suggested_is_protected_except_the_lock_column_and_the_name_column():
+    """Typed cells: the lock ticks, and the Name column (decision cells, rules box, names typed over a
+    player).
+    Whole columns, because the rows move with every run; not a fully protected tab any more."""
+    from dfs.sheet_suggested import TAB, typed_ranges
+
+    client = FakeProtectionClient()
+    results = protect_workbook(client, lineups_tab="Lineups")
+    assert TAB not in FULLY_PROTECTED_TABS
+    calls = [kwargs for tab, kwargs in client.protect_calls if tab == TAB]
+    assert len(calls) == 1 and calls[0]["unprotected_ranges"] == typed_ranges() == ["B:B", "C:C"]
+    assert calls[0]["warning_only"] is True and client.clear_calls.count(TAB) == 1
+    assert any(line.startswith(f"{TAB}:") and "lock column" in line for line in results)
+    missing = FakeProtectionClient(missing={TAB})
+    assert f"{TAB}: not present -- skipped" in protect_workbook(missing, lineups_tab="Lineups")
