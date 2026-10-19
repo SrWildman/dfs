@@ -258,9 +258,11 @@ def build_layout(
         f"share = w x (ROI share) + (1 - w) x (even share). w = min(1, entries / {stakes.SHRINK_ENTRIES}): a "
         f"bucket under {stakes.SHRINK_ENTRIES} entries is pulled toward an even split by how short of "
         f"{stakes.SHRINK_ENTRIES} it is. ROI share = its ROI / the eligible buckets' ROI total. Floor: a "
-        f"bucket whose ROI over every season in the log is below {stakes.ROI_FLOOR:.0%} (or that has no "
-        "history) gets $0. Cash and GPP are split because those are the two bankrolls this tab keeps; your "
-        "[stakes] split overrides all of it.",
+        f"bucket whose money format ({stakes.MONEY_FORMATS[stakes.CASH]} for Cash, "
+        f"{stakes.MONEY_FORMATS[stakes.GPP]} for GPP) has an ROI over every season "
+        f"in the log below {stakes.ROI_FLOOR:.0%} (or no history) gets $0. "
+        "Only those two formats get money: H2H, 50/50, multi-entry GPP and Showdown get $0. Cash and GPP are "
+        "split because those are the two bankrolls this tab keeps; your [stakes] split overrides all of it.",
         lay.note_rows,
     )
     b.lines(NOT_ADVICE, lay.note_rows)
