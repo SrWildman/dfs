@@ -1965,6 +1965,38 @@ close` time -- a pure-Python re-derivation of the same arithmetic
 verified against the same real 4-bet example (win/loss/push/pending) used
 to verify those formulas live.
 
+## Stake sizing (`stakes.py`, the Bankroll tab's STAKES block)
+
+Arithmetic on Sam's own contest log and his own `[stakes]` rules; nothing here predicts anything and nothing is advice.
+
+**His numbers**, per format and for the Cash and GPP totals (Cash = `series.CASH_FORMATS`: H2H, 50/50, Double Up), over
+the current season and over every season in `data/contests/contest_log.csv`: `ROI = (winnings - fees) / fees` (blank when
+no fee was paid), `cash rate` = the share of entries that finished in a paid place (`sheet_contests._cashed`), `weekly SD` =
+the sample standard deviation (n-1) of the weekly net, one number per `(season, week)` with an entry in that group, blank
+under 2 weeks. An entry with no NFL week (playoffs, off-season) counts in ROI and cash rate but not in a week.
+
+**The plan.** `week_cap = max_pct_bankroll_per_week% x Starting Bankroll` (B1), `spend = min(Weekly Budget (B6), week_cap)`,
+`entry_cap = max_entry_fee_pct% x Starting Bankroll`. A rule that is unset is off. Warnings: budget above the weekly cap;
+this week's ledgers already above `spend` or above `entry_cap`; a `split` that funds a bucket the default would leave out.
+
+**The default split** between Cash and GPP (the two bankrolls the tab keeps):
+
+    eligible   entries > 0 and all-seasons ROI >= ROI_FLOOR (0%)       (below the floor, or no history: $0)
+    w_b        = min(1, entries_b / 100)                                (SHRINK_ENTRIES)
+    roi_share  = roi_b / sum(roi_eligible)                              (an even share when that sum is 0)
+    raw_b      = w_b * roi_share_b + (1 - w_b) / k                      (k = eligible buckets)
+    share_b    = raw_b / sum(raw)                                       (renormalised: the weights differ)
+
+so a bucket under 100 entries is pulled toward an even split by how far it is from 100, and at 100+ it is split purely by
+ROI. **"Floor" is a 0% ROI over every season in the log** (the most conservative reading of "never a format with negative
+5-season ROI above its floor": the allocation above the floor is nothing). Sam's own `[stakes] split` overrides the lot.
+
+**The proposal** (`dfs bankroll stakes --propose`, read-only), for the two rules he has not set: `k = weekly SD of net /
+average weekly entry fees` over every week with fees paid; a bad week is `BAD_WEEK_Z = 2` standard deviations, costing
+`2k` of the spend; allowing that at most `BAD_WEEK_LOSS_PCT = 10`% of the bankroll gives `max_pct_bankroll_per_week =
+10 / (2k)` (capped at 100, rounded DOWN to 0.5); `max_entry_fee_pct = that / MIN_ENTRIES_PER_WEEK (5)` (rounded DOWN to 0.1).
+The 2, the 10% and the 5 are the proposal's own assumptions, not findings. Needs 8 weeks of entries.
+
 ## Empty weeks read blank, not an error (Round 5 cleanup, 2026-09-29)
 
 Every division and average on Results, Bankroll and Season carries a guard that returns

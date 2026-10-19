@@ -126,8 +126,9 @@ _WEEK_ROWS: list[tuple[str, str]] = [
     (
         "Start of week",
         'File, then Make a copy of the template, and run: dfs week new "<link to the copy>". It checks the '
-        "copy, titles it Week <n>, carries your bankroll and Results log forward, clears last week's lineups "
-        "and runs the first full sync. It asks you to confirm before it writes anything.",
+        "copy, titles it Week <n>, carries your bankroll and Results log forward, clears last week's "
+        "lineups, rebuilds the STAKES block on Bankroll and runs the first full sync. It asks you to "
+        "confirm before it writes anything.",
     ),
     (
         "Tue / Wed: judge, then build the pool",
@@ -324,7 +325,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
     (
         "Bankroll",
         "Cash, GPP and betting ledgers with starting and ending bankroll. Betting is typed by hand; Cash "
-        "and GPP rows are added by dfs week close.",
+        "and GPP rows are added by dfs week close. STAKES, to the right of the ledgers, is rebuilt by "
+        "dfs bankroll stakes: your ROI by format and this week's plan from your own rules.",
     ),
     (
         "Season",

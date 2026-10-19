@@ -78,6 +78,14 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   never fails). Projection = last TFFB snapshot before each player's own kickoff; flags/ValAdj recomputed from the
   raw archives with current code.
 
+- `dfs bankroll stakes [--propose] [--no-sheet] [--sheet-id <id>]` -- rebuilds the **STAKES** block on Bankroll
+  (to the right of the ledgers, `sheet_stakes.STAKES_FIRST_COLUMN`): his ROI / cash rate / weekly SD / entries by
+  format, this season and all seasons in the contest log, and this week's plan from the tab's own Weekly Budget
+  (`week.BANKROLL_WEEKLY_BUDGET_CELL`, never a second copy in config) and the optional `[stakes]` rules
+  (`max_pct_bankroll_per_week`, `max_entry_fee_pct`, `split`). Math in `stakes.py`; phrased as arithmetic on his
+  own settings, never advice. `--propose` prints suggested rule values with the arithmetic and writes nothing.
+  `dfs week new` rebuilds the block on the new sheet (never failing); `doctor` flags a sheet without it.
+
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
