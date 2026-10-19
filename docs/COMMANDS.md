@@ -124,6 +124,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
 | `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each lineup's Cash/GPP marker (column A of its Total row; cash if blank). |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
+| `--refresh-injuries` | Lay ESPN's game-day injury feed over the last sync's Avail first (Out, IR, Doubtful and Questionable only escalate a status, never clear one), and list what changed. Use it in the late window, after news breaks. |
 
 ### `dfs week close`
 

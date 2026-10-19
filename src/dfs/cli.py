@@ -2927,6 +2927,44 @@ def _late_swap_sim_setup(
     )
 
 
+LATE_SWAP_STALE_MINUTES = 30
+
+
+def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> pd.DataFrame:
+    """Say how old the sync's injury status is, and with `--refresh-injuries` lay ESPN's game-day feed over it
+    (`late_swap_news`): escalations only, each printed with its time. A failed fetch is a warning."""
+    from dfs import late_swap_news as news
+
+    path = store.CURRENT_DIR / "edge.csv"
+    if path.exists():
+        age = news.age_minutes(datetime.fromtimestamp(path.stat().st_mtime, UTC), now)
+        stale = age > LATE_SWAP_STALE_MINUTES
+        console.print(
+            f"Injury status (Avail) is from the last sync, {age:.0f} min ago."
+            + (
+                " [yellow]That is stale for the late window: run `dfs sync --live` or add "
+                "`--refresh-injuries`.[/yellow]"
+                if stale and not refresh
+                else ""
+            )
+        )
+    if not refresh:
+        return edge
+    try:
+        feed = news.fetch_news()
+    except news.NewsError as e:
+        console.print(f"[yellow]Could not read ESPN's injuries ({e}); using the sync's Avail.[/yellow]")
+        return edge
+    edge, changes = news.apply_news(edge, feed)
+    console.print(f"ESPN injuries read now: {len(changes)} change(s) to Avail.")
+    for c in changes[:25]:
+        when = f" ({news.age_minutes(c.updated, now):.0f} min old)" if c.updated else ""
+        console.print(
+            escape(f"  {c.name}: {c.before or '-'} -> {c.after}{when}  {c.note[:90]}"), highlight=False
+        )
+    return edge
+
+
 def _run_late_swap(
     cfg: Config,
     *,
@@ -2937,6 +2975,7 @@ def _run_late_swap(
     client: SheetsClient | None = None,
     goal: str | None = None,
     fixed_lines: bool = False,
+    refresh_injuries: bool = False,
 ) -> None:
     """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
     point in the slate; the command passes the real clock. `goal` None reads each lineup's Cash/GPP marker
@@ -2946,6 +2985,8 @@ def _run_late_swap(
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from e
+
+    edge = _late_swap_news(edge, now=now, refresh=refresh_injuries)
 
     client = client or SheetsClient(cfg.google_sheets)
     try:
@@ -3063,6 +3104,13 @@ def lineups_late_swap(
         "lineup's Cash/GPP marker (column A of its Total row; cash if blank).",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
+    refresh_injuries: bool = typer.Option(
+        False,
+        "--refresh-injuries",
+        help="Lay ESPN's game-day injury feed over the last sync's Avail first (Out, IR, Doubtful and "
+        "Questionable only escalate a status, never clear one), and list what changed. Use it in the late "
+        "window, after news breaks.",
+    ),
 ) -> None:
     """Check every built lineup in the Lineups tab against real kickoff
     times, then suggest what to swap: the best full re-fill of the open
@@ -3090,6 +3138,7 @@ def lineups_late_swap(
         now=datetime.now(UTC),
         goal=goal.value if goal else None,
         fixed_lines=fixed_lines,
+        refresh_injuries=refresh_injuries,
     )
 
 
