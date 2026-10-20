@@ -632,6 +632,30 @@ in points. The table is evaluated between the 0.5th and 99.5th percentile of eac
 
 The full set of quantile levels is in `distribution.csv`.
 
+## Recalibrating Hit3x%, Boom% and Bust% on 2026 results (Week 8 round): not shipped
+
+`python -m dfs.prob_recal` (code: `prob_recal.py`). Two corrections, both shrunk toward "no change" with the repository's convention
+(`n / (n + 200)` of the fitted amount): **scale**, which asks the engine about `c * CalPts` with `c` per position (least squares on the
+three Brier scores together; the tables themselves are untouched), and **Platt**, `logistic(a + b * logit(p))` per measure about the
+fit rows' mean logit. Judged on weeks the fit did not see, on the probabilities as the sheet shows them (1,332 pool rows, Weeks 1-6),
+Brier score and the paired difference old - new with a team-week-clustered SE:
+
+| | Hit 3x | Boom 4x | Bust under 2x |
+|---|---|---|---|
+| shown on the day, test Weeks 5-6 (432 rows) | 0.1542 | 0.0976 | 0.2004 |
+| scale per position, fit Weeks 1-4 | +0.0005 (0.0008) | +0.0003 (0.0004) | +0.0008 (0.0009) |
+| Platt, fit Weeks 1-4 | -0.0017 (0.0017) | -0.0001 (0.0003) | -0.0005 (0.0006) |
+| scale per position, rolling (fit before each of Weeks 3-6, 887 rows) | +0.0001 (0.0006) | -0.0001 (0.0003) | -0.0003 (0.0007) |
+| Platt, rolling | -0.0012 (0.0011) | -0.0003 (0.0003) | -0.0017 (0.0008) |
+
+**Nothing improves held-out Brier** (every difference is inside one SE, and Platt is negative), so there is no switch and no change to
+`probabilities.outcome_columns`. The reason is in the weeks: Hit 3x ran 25.9% predicted against 22.2% realized in Weeks 1-4 (CalPts
+averaged 10.6 and 10.2 in Weeks 1-2 against 10.3 and 8.6 scored) and 22.1% against 22.9% in Weeks 5-6, so a correction fitted on the
+early weeks fixes a gap that has already closed. Position-level gaps are real in the whole sample (RB: Hit 17.3% against 12.1%,
+Boom 8.1 against 5.5, Bust 65.8 against 69.3; TE the other way, 26.0 against 33.1) and the fitted scales point the same way (RB 0.94,
+WR 0.95, TE 1.07, QB and DST 1.00), but 140 to 520 rows per position cannot carry them out of sample yet. Rerun after Week 7 (fit 1-5,
+test 6-7): the machinery is `evaluate`, and a fit would be written with `prob_recal.save` only if it clears.
+
 ## Using it
 
 ```
