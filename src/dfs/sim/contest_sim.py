@@ -7,7 +7,8 @@ scored, each candidate is placed among the field, and paid from the contest's pa
 its duplicates splitting the prize. Over the draws that gives, per candidate per contest:
 
 - `e_dollars` (E[$]) and `roi` (E[$] / fee - 1); `e_top` is the part of E[$] paid by the top 0.1% of places,
-  so `e_dollars - e_top` is what remains without the thin top of the payout curve;
+  so `e_dollars - e_top` is what remains without the thin top of the payout curve; `e_dollars_herd_copies`
+  is E[$] with only a herd lineup's copies splitting its prize (no dup-model discount for any other lineup);
 - `p_cash` (finishing in the paid places), `p_top1` (in the top 1%);
 - `e_copies`: the other entries expected to hold the identical lineup. A herd lineup's copies are the herd's
   own count in each draw; any other lineup's are the dup model's (`dups.DUP_MODEL_GPP` for a GPP,
@@ -162,6 +163,7 @@ class ContestSimResult:
     lines: dict[str, np.ndarray]  # contest label -> (draws x 2): each draw's cash line and top-1% line
     n_sims: int
     seconds: float = 0.0
+    scores: np.ndarray | None = None  # draws x candidates: each candidate's points per draw
 
 
 RESULT_COLUMNS = [
@@ -174,6 +176,7 @@ RESULT_COLUMNS = [
     "roi",
     "e_top",
     "e_dollars_ex_top",
+    "e_dollars_herd_copies",
     "p_cash",
     "p_top1",
     "e_copies",
@@ -289,6 +292,8 @@ def simulate_contests(
         copies = np.where(b["match"][None, :] >= 0, herd_copies, model_copies[None, :])
         pay = block_payout(cum, place, copies)
         pay_top = block_payout(cum_top, place, copies)
+        # the variant with no dup-model discount: only a herd lineup's copies split its prize
+        pay_herd = block_payout(cum, place, np.where(b["match"][None, :] >= 0, herd_copies, 0.0))
         m = int(kind.places_paid)
         label = kind.series
         for j, name in enumerate(labels):
@@ -305,6 +310,7 @@ def simulate_contests(
                     "roi": e / kind.fee - 1.0 if kind.fee > 0 else math.nan,
                     "e_top": et,
                     "e_dollars_ex_top": e - et,
+                    "e_dollars_herd_copies": float(pay_herd[:, j].mean()),
                     "p_cash": float((place[:, j] <= m).mean()),
                     "p_top1": float((place[:, j] <= max(1.0, TOP_FRACTION * n)).mean()),
                     "e_copies": float(copies[:, j].mean()),
@@ -325,6 +331,7 @@ def simulate_contests(
         lines=lines,
         n_sims=n_draws,
         seconds=time.perf_counter() - start,
+        scores=cand_scores,
     )
 
 

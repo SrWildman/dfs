@@ -578,6 +578,22 @@ def retro_week(
             "mean": [s.mean for s in base.lineups],
         }
     )
+    # the same two numbers against the GENERATOR's per-draw lines (herd lead drawn per draw): Cash % against
+    # the double-up field's cash line (the week's biggest double-up), Top 1% against the GPP field's top-1%
+    # line
+    sc = res.scores.astype(float)
+    cash_kinds = [k for k in kinds if k.cash]
+    gpp_kinds = [k for k in kinds if not k.cash]
+    if cash_kinds:
+        line = res.lines[max(cash_kinds, key=lambda k: k.entries).series][:, 0]
+        baseline["gen_cash_pct"] = (sc >= line[:, None]).mean(axis=0)
+    else:
+        baseline["gen_cash_pct"] = np.nan
+    if gpp_kinds:
+        line = res.lines[max(gpp_kinds, key=lambda k: k.entries).series][:, 1]
+        baseline["gen_top1_pct"] = (sc >= line[:, None]).mean(axis=0)
+    else:
+        baseline["gen_top1_pct"] = np.nan
 
     # realized
     pts = week_points(contests, week)
@@ -650,3 +666,298 @@ def retro_week(
         "lead_decay": lead,
         "seconds": res.seconds,
     }
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The whole retro, its summary, and the weekly hook (`dfs research refresh`)
+# ---------------------------------------------------------------------------------------------------------
+
+SHIP_BAR = (
+    "A ranking ships only if, held out by week, its within-contest Spearman with realized dollars beats "
+    "today's (Top 1% for GPPs, Cash % for cash) by more than two standard errors over contests AND in a "
+    "majority of the weeks, with at least 4 weeks scored."
+)
+MEASURES = {
+    "e_dollars": "E[$]",
+    "e_dollars_herd_copies": "E[$], herd copies only",
+    "e_dollars_ex_top": "E[$] without the top 0.1%",
+    "gen_line": "today's number on the generator's lines",
+}
+
+
+def run_retro(
+    through: int, *, weeks: list[int] | None = None, n_sims: int = 4000, log=print
+) -> dict[int, dict]:
+    """`retro_week` for every week with standings up to `through` (or `weeks`)."""
+    contests = load_real_contests()
+    chalks, keys = {}, {}
+    for wk in sorted({c.week for c in contests}):
+        slate = slate_for(week_slate_frame(wk), "tffb")
+        chalks[wk] = field_gen.chalk_lineups(slate)
+        keys[wk] = chalk_keys(slate, chalks[wk])
+    mc = payouts.fit_min_cash(
+        payouts.paid_entries(history.typed(history.read_log("data/contests/contest_log.csv")))
+    )
+    chosen = weeks or sorted(w for w in {c.week for c in contests} if w <= through)
+    out = {}
+    for wk in chosen:
+        out[wk] = retro_week(wk, contests, keys=keys, chalks=chalks, min_cash=mc, n_sims=n_sims)
+        log(f"week {wk}: {out[wk]['table']['lineup'].nunique()} lineups, sim {out[wk]['seconds']:.1f}s")
+    return out
+
+
+def _rho(x: pd.Series, y: pd.Series) -> float:
+    from scipy.stats import spearmanr
+
+    return float(spearmanr(x, y).statistic) if x.nunique() > 1 and y.nunique() > 1 else float("nan")
+
+
+def ranking_table(table: pd.DataFrame) -> pd.DataFrame:
+    """One row per contest (15+ lineups): the Spearman of each measure with realized dollars. `today` is Top
+    1% for a GPP and Cash % for a cash contest; `gen_line` is the same number on the generator's lines."""
+    rows = []
+    for (week, contest, fmt), d in table.groupby(["week", "contest", "fmt"]):
+        if len(d) < 15 or d["realized"].nunique() < 2:
+            continue
+        today, gen = ("top1_pct", "gen_top1_pct") if fmt == "gpp" else ("cash_pct", "gen_cash_pct")
+        row = {
+            "week": week,
+            "contest": contest,
+            "fmt": fmt,
+            "n": len(d),
+            "today": _rho(d[today], d["realized"]),
+        }
+        row["gen_line"] = _rho(d[gen], d["realized"])
+        for m in ("e_dollars", "e_dollars_herd_copies", "e_dollars_ex_top"):
+            row[m] = _rho(d[m], d["realized"])
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def compare(rank: pd.DataFrame, measure: str, fmt: str) -> dict[str, float]:
+    """`measure` against today's ranking in one format: mean difference over contests, its standard error,
+    the contests and weeks where it was better."""
+    d = rank[rank["fmt"] == fmt].dropna(subset=[measure, "today"])
+    if d.empty:
+        return {
+            "diff": float("nan"),
+            "se": float("nan"),
+            "contests_better": 0,
+            "contests": 0,
+            "weeks_better": 0,
+            "weeks": 0,
+        }
+    diff = d[measure] - d["today"]
+    by_week = diff.groupby(d["week"]).mean()
+    return {
+        "rho": float(d[measure].mean()),
+        "rho_today": float(d["today"].mean()),
+        "diff": float(diff.mean()),
+        "se": float(diff.std(ddof=1) / np.sqrt(len(diff))) if len(diff) > 1 else float("nan"),
+        "contests_better": int((diff > 0).sum()),
+        "contests": int(len(diff)),
+        "weeks_better": int((by_week > 0).sum()),
+        "weeks": int(len(by_week)),
+    }
+
+
+def passes_bar(c: dict[str, float]) -> bool:
+    return bool(c["weeks"] >= 4 and c["diff"] > 2 * c["se"] and c["weeks_better"] > c["weeks"] / 2)
+
+
+def cash_recalibration(table: pd.DataFrame) -> dict[str, float]:
+    """Fix (c2): P(cash) in cash contests recalibrated by a logistic map `logit(p') = a + b logit(p)` fitted
+    on the OTHER weeks' (lineup, contest) pairs, judged on the held-out week: Brier and log loss before and
+    after, over all pairs and over Sam's own entries."""
+    from scipy.optimize import minimize
+
+    d = table[table["fmt"] == "cash"].copy()
+    if d["week"].nunique() < 2:
+        return {}
+    d["y"] = (d["realized"] > 0).astype(float)
+    eps = 1e-4
+    d["z"] = np.log(np.clip(d["p_cash"], eps, 1 - eps) / (1 - np.clip(d["p_cash"], eps, 1 - eps)))
+    d["p_new"] = np.nan
+    for wk in d["week"].unique():
+        train = d[d["week"] != wk]
+
+        def nll(theta, z=train["z"].to_numpy(), y=train["y"].to_numpy()):
+            q = 1 / (1 + np.exp(-(theta[0] + theta[1] * z)))
+            q = np.clip(q, eps, 1 - eps)
+            return -float(np.sum(y * np.log(q) + (1 - y) * np.log(1 - q)))
+
+        a, b = minimize(nll, [0.0, 1.0], method="Nelder-Mead").x
+        m = d["week"] == wk
+        d.loc[m, "p_new"] = 1 / (1 + np.exp(-(a + b * d.loc[m, "z"])))
+
+    def scores(x: pd.DataFrame, col: str) -> tuple[float, float]:
+        p = np.clip(x[col], eps, 1 - eps)
+        return float(((p - x["y"]) ** 2).mean()), float(
+            -(x["y"] * np.log(p) + (1 - x["y"]) * np.log(1 - p)).mean()
+        )
+
+    out = {}
+    for label, x in (("all", d), ("sam", d[(d["source"] == "sam") & d["entered"]])):
+        if x.empty:
+            continue
+        b0, l0 = scores(x, "p_cash")
+        b1, l1 = scores(x, "p_new")
+        out.update(
+            {
+                f"{label} brier": b0,
+                f"{label} brier recal": b1,
+                f"{label} logloss": l0,
+                f"{label} logloss recal": l1,
+                f"{label} p_cash": float(x["p_cash"].mean()),
+                f"{label} p_recal": float(x["p_new"].mean()),
+                f"{label} cash rate": float(x["y"].mean()),
+                f"{label} n": int(len(x)),
+            }
+        )
+    return out
+
+
+def simlev_check(opt: pd.DataFrame) -> dict[str, float]:
+    """Did high-SimLev players land in the real top 1% of the week's big GPPs more than ownership implied?
+    Players projected or owned 1%+: correlation of SimLev with (real top-1% share - real ownership), and that
+    excess in the top and bottom fifths of SimLev."""
+    o = opt[(opt["own"] >= 0.01) | (opt["real_own"] >= 0.01)].copy()
+    if o.empty:
+        return {}
+    o["excess"] = o["real_opt"] - o["real_own"]
+    q = pd.qcut(o["sim_lev"].rank(method="first"), 5, labels=False)
+    by_week = {
+        int(w): float(np.corrcoef(x["sim_lev"], x["excess"])[0, 1])
+        for w, x in o.groupby("week")
+        if len(x) > 10
+    }
+    return {
+        "n": int(len(o)),
+        "corr": float(np.corrcoef(o["sim_lev"], o["excess"])[0, 1]),
+        "rank_corr": _rho(o["sim_lev"], o["excess"]),
+        "top_fifth_excess": float(o.loc[q == 4, "excess"].mean()),
+        "bottom_fifth_excess": float(o.loc[q == 0, "excess"].mean()),
+        "top_fifth_real_opt": float(o.loc[q == 4, "real_opt"].mean()),
+        "top_fifth_real_own": float(o.loc[q == 4, "real_own"].mean()),
+        "weeks_positive": int(sum(v > 0 for v in by_week.values())),
+        "weeks": len(by_week),
+        **{f"corr week {w}": v for w, v in by_week.items()},
+    }
+
+
+def best_in_check(table: pd.DataFrame, column: str = "roi") -> dict[str, float]:
+    """Best in (the week's contest with the highest predicted `column` for each of Sam's lineups) against
+    where he entered it: mean realized ROI of each, paired difference and its standard error."""
+    sam = table[table["source"] == "sam"].copy()
+    if sam.empty:
+        return {}
+    if column != "roi":
+        sam[column] = sam[column.removeprefix("roi_")] / sam["fee"] - 1
+    best = sam.loc[sam.groupby(["week", "lineup"])[column].idxmax()].set_index(["week", "lineup"])[
+        "realized_roi"
+    ]
+    entered = sam[sam["entered"]].groupby(["week", "lineup"])["realized_roi"].mean()
+    diff = (best - entered).dropna()
+    return {
+        "lineups": int(len(diff)),
+        "best_in_roi": float(best.mean()),
+        "entered_roi": float(entered.mean()),
+        "diff": float(diff.mean()),
+        "se": float(diff.std(ddof=1) / np.sqrt(len(diff))) if len(diff) > 1 else float("nan"),
+    }
+
+
+def summarize_retro(out: dict[int, dict]) -> dict:
+    """Every number the STOP reports and the weekly refresh read, from `run_retro`'s output."""
+    table = pd.concat([o["table"] for o in out.values()], ignore_index=True)
+    cover = pd.concat([o["cover"] for o in out.values()], ignore_index=True)
+    opts = [o["opt"] for o in out.values() if "real_opt" in o["opt"]]
+    rank = ranking_table(table)
+    big = cover[cover["entries"] >= 700]
+    gpp = table[table["fmt"] == "gpp"]
+    return {
+        "weeks": sorted(out),
+        "table": table,
+        "rank": rank,
+        "compare": {(m, f): compare(rank, m, f) for m in MEASURES for f in ("gpp", "cash")},
+        "coverage": big.groupby(["fmt", "line", "mode"])["inside"].mean().to_dict(),
+        "top_share": float(gpp["e_top"].sum() / gpp["e_dollars"].sum()) if len(gpp) else float("nan"),
+        "calibration": {
+            f: {
+                "pred_roi": float(x["roi"].mean()),
+                "real_roi": float(x["realized_roi"].mean()),
+                "p_cash": float(x["p_cash"].mean()),
+                "cash_rate": float((x["realized"] > 0).mean()),
+            }
+            for f, x in table.groupby("fmt")
+        },
+        "cash_recal": cash_recalibration(table),
+        "simlev": simlev_check(pd.concat(opts, ignore_index=True)) if opts else {},
+        "best_in": {
+            c: best_in_check(table, c) for c in ("roi", "roi_e_dollars_ex_top", "roi_e_dollars_herd_copies")
+        },
+    }
+
+
+def refresh_summary(season: int, through: int) -> dict:
+    """The weekly hook for `dfs research refresh` (session B's contract): reruns the retro on every week with
+    standings up to `through` and returns `{"headline": [...], "metrics": {...}, "ship_bar": str}`."""
+    if season != SEASON:
+        return {
+            "headline": [f"The contest retro is wired for {SEASON} only."],
+            "metrics": {},
+            "ship_bar": SHIP_BAR,
+        }
+    return refresh_from(run_retro(through, log=lambda _msg: None))
+
+
+def refresh_from(out: dict[int, dict]) -> dict:
+    """`refresh_summary`'s dictionary from a `run_retro` output already in hand."""
+    s = summarize_retro(out)
+    metrics: dict[str, float | bool] = {"weeks": len(s["weeks"])}
+    lines = []
+    for (m, f), c in s["compare"].items():
+        if not c.get("contests"):
+            continue
+        ok = passes_bar(c)
+        metrics[f"{f} {m} rho"] = round(c["rho"], 4)
+        metrics[f"{f} {m} minus today"] = round(c["diff"], 4)
+        metrics[f"{f} {m} ships"] = ok
+        lines.append(
+            f"- {f.upper()} {MEASURES[m]}: rho {c['rho']:.3f} vs today {c['rho_today']:.3f} "
+            f"({c['diff']:+.3f} +/- {c['se']:.3f}; better in {c['contests_better']}/{c['contests']} "
+            f"contests, {c['weeks_better']}/{c['weeks']} weeks){' SHIPS' if ok else ''}"
+        )
+    shipping = [k for k, v in metrics.items() if k.endswith("ships") and v]
+    head = f"Contest retro, weeks {', '.join(map(str, s['weeks']))}: " + (
+        f"{len(shipping)} ranking(s) clear the bar." if shipping else "no ranking clears the bar yet."
+    )
+    sl = s["simlev"]
+    if sl:
+        metrics.update(
+            {"simlev corr": round(sl["corr"], 4), "simlev top fifth excess": round(sl["top_fifth_excess"], 4)}
+        )
+        lines.append(
+            f"- SimLev vs the real top 1%: corr {sl['corr']:.3f} (n {sl['n']}); top fifth "
+            f"{sl['top_fifth_excess']:+.3f}, bottom fifth {sl['bottom_fifth_excess']:+.3f} over ownership"
+        )
+    bi = s["best_in"]["roi"]
+    if bi:
+        metrics.update({"best in minus entered roi": round(bi["diff"], 4)})
+        lines.append(
+            f"- Best in vs where he entered: {bi['best_in_roi']:+.3f} vs {bi['entered_roi']:+.3f} ROI "
+            f"({bi['diff']:+.3f} +/- {bi['se']:.3f}, {bi['lineups']} lineups)"
+        )
+    for key, v in s["coverage"].items():
+        metrics[f"coverage {' '.join(key)}"] = round(float(v), 4)
+    metrics["gpp top 0.1% share of E[$]"] = round(s["top_share"], 4)
+    rc = s["cash_recal"]
+    if rc:
+        metrics.update(
+            {"cash brier": round(rc["all brier"], 4), "cash brier recal": round(rc["all brier recal"], 4)}
+        )
+        lines.append(
+            f"- Cash P(cash) recalibrated held out: Brier {rc['all brier']:.4f} -> "
+            f"{rc['all brier recal']:.4f}"
+        )
+    return {"headline": [head, *lines], "metrics": metrics, "ship_bar": SHIP_BAR}
