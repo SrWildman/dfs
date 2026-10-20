@@ -867,8 +867,8 @@ def sheets_lineup_chalk(
 ) -> None:
     """Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete
     lineup that holds none of the heavily owned players (projected 16%+ owned, about 20% expected in a
-    double-up; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on the tab changes. Template first, then the live
-    sheet; run `dfs doctor` after."""
+    double-up; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on
+    the tab changes. Template first, then the live sheet; run `dfs doctor` after."""
     cfg = _load_config_or_exit()
     gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
     client = SheetsClient(gs_cfg)
