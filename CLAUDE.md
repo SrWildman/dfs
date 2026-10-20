@@ -99,6 +99,13 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `FILL`, `ok`). `dfs sync --live` and `dfs lineups late-swap` refresh it, **only on a sheet that already has the tab** (they never create it
   and never fail over it); `late-swap` saves its run to `data/cockpit/late_swap.json` for it (`late_swap_store`). Template first, then live,
   `dfs doctor` after (check `cockpit-tab`). Layout: `cockpit.py` (pure), I/O: `sheet_cockpit.py`.
+- `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one
+  command, no sheet: the five-pair shape retest, the teammate-bump race, the probability recalibration check, the
+  tails check, the field_own scores and the ESPN / props shadows (and `sim/contest_retro` once it is on main; it
+  plugs in through `refresh_summary(season, through)`, see `research/refresh.py`). Each fails soft; it writes
+  `docs/research/weekly/<season>-wk<NN>.md` (gitignored) with one block per study (headline numbers, ship bar,
+  "changed since last week" against the previous report), prints ten lines with each study's time. About two
+  minutes. Run after `dfs week close`.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, the Cockpit tab is there, `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where

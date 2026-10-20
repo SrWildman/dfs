@@ -329,6 +329,12 @@ every projection with what actually happened and rebuilds the **Model Check** ta
 a week's stats a day or two after the games, so if you close early it prints "stats not published yet" and carries on --
 run `dfs results update` later and the tab fills in. It never fails the close.
 
+**Then, if you want the research reruns:** `dfs research refresh` (offline, about two minutes, no sheet) reruns the
+five-pair shape retest, the teammate-bump race, the probability recalibration check, the tails check, the
+ownership shadow's scores and the ESPN / props shadows with the weeks closed so far, and writes
+`docs/research/weekly/<season>-wk<NN>.md` (gitignored): one block per study with its headline numbers, the bar it
+must clear and what changed since last week's report. A study that breaks says so and the rest still run.
+
 **Done looks like:** Bankroll's running total moved by the amount you'd
 expect from the week's actual results, and Results' row for the week you
 just closed shows real `Cash Pts`/`H2H Entered`/`H2H Win` numbers.

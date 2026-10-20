@@ -155,6 +155,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs model info",
             "dfs research fetch",
             "dfs research run",
+            "dfs research refresh",
         ],
     ),
     (

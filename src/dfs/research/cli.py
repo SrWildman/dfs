@@ -67,3 +67,44 @@ def research_run(
         raise _fail(str(e)) from e
     for path in written:
         console.print(f"[green]OK[/green] wrote {path}")
+
+
+@research_app.command("refresh")
+def research_refresh(
+    through: int = typer.Option(
+        None, "--through", help="Last closed week to include (default: the newest scored week)."
+    ),
+    season: int = typer.Option(None, "--season", help="Override the auto-detected NFL season."),
+    shuffles: int = typer.Option(
+        40, "--shuffles", help="Shuffled-feature tables behind the five-pair retest's chance control."
+    ),
+    only: str = typer.Option(
+        None,
+        "--only",
+        help="Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, contest_retro.",
+    ),
+) -> None:
+    """Rerun the weekly offline studies with the closed weeks so far and write one report.
+
+    The five-pair shape retest, the teammate-bump race, the probability recalibration check, the tails check,
+    the field-ownership scores and the ESPN / props shadows (and the contest retro when it is on main), each
+    failing soft. Writes docs/research/weekly/<season>-wk<NN>.md (gitignored) with each study's headline
+    numbers, its ship bar and what changed since the previous report, prints a short summary with the time
+    each study took, and never touches a sheet. About two minutes.
+    """
+    from dfs.nfl_calendar import current_season
+    from dfs.research import refresh
+
+    season = season or current_season()
+    last = refresh.latest_scored_week(season)
+    if through is None:
+        through = last
+    if through is None:
+        raise _fail(f"no scored weeks for {season} yet -- run `dfs results update` first")
+    keys = [k.strip() for k in only.split(",") if k.strip()] if only else None
+    try:
+        path, studies, load_seconds = refresh.refresh(season, through, shuffles=shuffles, only=keys, log=_say)
+    except ValueError as e:
+        raise _fail(str(e)) from e
+    for line in refresh.summary_lines(studies, load_seconds, path, season, through):
+        console.print(escape(line), highlight=False, soft_wrap=True)
