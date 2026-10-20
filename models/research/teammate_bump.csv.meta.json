@@ -1,0 +1,19 @@
+{
+  "study": "r7",
+  "seasons": [
+    2014,
+    2025
+  ],
+  "fit_seasons": [
+    2014,
+    2021
+  ],
+  "test_seasons": [
+    2022,
+    2025
+  ],
+  "n": 6579,
+  "generated": "2026-10-20",
+  "code_version": "a09da9d+dirty",
+  "tau2": 1.152977450480869
+}
