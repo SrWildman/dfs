@@ -1313,3 +1313,73 @@ rb_dst 3, contrarian 2 (102 s). At the old 60 s default the rb_stack and game se
 `correlations.csv` differs from the committed table by at most 0.0104 (opposing QB1-DST, -0.342 to -0.352) and 0.0016 on average;
 QB1-WR1, WR2 and TE1 move by about +0.006. `correlations_shape.csv` is identical.
 
+## Week 8 round: the five receiver pairs re-tested, and the copula against two alternatives (2026-10-20)
+
+Offline, from the cached 2014-2026 history (2026 through Week 6). Code: `sim/shape_retest.py` and `sim/copula_test.py`
+(`python -m dfs.sim.shape_retest --frame <parquet>`, `python -m dfs.sim.copula_test --frame <parquet>`, the frame being
+`pipeline.load_frame(2026)` saved as parquet). **Nothing in `models/sim/` was refitted.** Rerun both after Week 7 is added.
+
+### QB1 with RB1, RB2, WR1, WR2, WR3 by target share: none clears the bar
+
+The bar QB1-TE1 cleared: fit 2014-2023 (cut points, pooled value, tercile table), judge on 2024-2026 held out, gain over the pooled
+value per 1,000 pairs, more than 2 game-clustered SE. The feature is the live one (`shape_table.live_tshare`). The last column is
+the share of 200 shuffled-feature tables (`tshare` permuted within role and season, refitted) that gain at least as much.
+
+| Pair | pooled r | low / mid / high | train t | held-out pairs | gain per 1,000 (SE) | z | shuffled as good | ships |
+|---|---|---|---|---|---|---|---|---|
+| QB1-RB1 | +0.067 | +0.041 / +0.065 / +0.091 | +1.6 | 1,128 | -0.26 (0.49) | -0.5 | 0.72 | no |
+| QB1-RB2 | +0.060 | -0.021 / +0.110 / +0.093 | +3.8 | 772 | +1.04 (1.71) | +0.6 | 0.055 | no |
+| QB1-WR1 | +0.328 | +0.300 / +0.297 / +0.383 | +3.2 | 1,129 | +1.30 (1.36) | +1.0 | 0.010 | no |
+| QB1-WR2 | +0.278 | +0.196 / +0.303 / +0.336 | +3.9 | 1,075 | +1.41 (1.99) | +0.7 | 0.040 | no |
+| QB1-WR3 | +0.222 | +0.190 / +0.253 / +0.227 | +0.8 | 794 | -0.15 (0.84) | -0.2 | 0.525 | no |
+| *QB1-TE1 (control)* | +0.267 | +0.186 / +0.301 / +0.315 | +3.4 | 1,007 | +3.04 (1.81) | +1.7 | 0.005 | *no, on this split* |
+
+WR1 and WR2 point the same way as the training slope and WR1 beats its shuffles (p 0.01), but their held-out gains are 1.0 and 0.7 SE:
+a real, small effect the data cannot yet price. RB1 and WR3 are nothing. **The control slipped:** on the original split (fit 2014-2022,
+judge 2023-2025) the module reproduces the shipped QB1-TE1 number (+3.23 per 1,000, SE 1.65, 2.0 SE; the write-up has +3.25, SE 1.59),
+but on fit 2014-2023 / judge 2024-2026 it is +3.04 (SE 1.81, 1.7 SE), by season +0.19 (2024), +6.14 (2025), +1.67 (2026, 137 pairs).
+Beats-its-shuffles (0.005) still holds, so the shipped pair stays; it is worth knowing it is not as clean as 3.4 SE said.
+
+### A t-copula or a shared game factor against the Gaussian: no clear winner
+
+Per game, the vector of normal scores of every (team, role) on the field (up to 22, or the passing core QB1, WR1-3, TE1 of each
+team), the correlation matrix assembled from the pooled pair table exactly as the simulator does and repaired the same way. Fit on
+2,591 games of 2014-2023, scored on 637 held-out games (2024-2026). Three models share the matrix: the Gaussian copula (shipped); a
+t-copula (one chi-square mixing draw per game scales everyone in it), with the shipped matrix or the Kendall-tau one (`sin(pi tau / 2)`);
+and a game factor (`R(m) = (1 - m) I + m R`, a random per-game scale `m = m0 exp(tau s - tau^2 / 2)`). A game's repaired `R` is
+nearly singular, so `R(m)` is a correlation matrix only for `m` up to about 1: **the factor can dampen the shipped correlations in
+some games but cannot exceed them**, which is why its base `m0` is fitted (it chose 1). `nu`, `tau` and `m0` are chosen on the training games.
+
+Held-out copula log-likelihood per game, minus the Gaussian's (SE across games):
+
+| Model | all 22 roles | passing core |
+|---|---|---|
+| t-copula, shipped R, nu chosen on training (50) | +0.0107 (0.0071), 1.5 SE | +0.0091 (0.0042), 2.2 SE |
+| t-copula, Kendall R, nu = 50 | +0.0086 (0.0078), 1.1 SE | +0.0110 (0.0046), 2.4 SE |
+| game factor, tau = 0.2, m0 = 1 | +0.0066 (0.0042), 1.6 SE | +0.0061 (0.0022), 2.7 SE |
+| Gaussian with the Kendall R | -0.0025 (0.0035) | +0.0016 (0.0022) |
+
+**Heavy tails lose outright:** on the 22-role vector a t-copula with nu = 10 is -0.095 per game (SE 0.023), nu = 15 -0.034 (0.017),
+nu = 25 -0.001, and the training seasons pick nu = 50, which is the Gaussian to within noise. A base `m0` below 1 loses 0.007 to 0.085. The
+gains that exist are 0.006 to 0.011 nats per game on a 20-dimensional vector, 1.1 to 2.7 SE, and are what one would expect from
+slight over-shrinkage of some pairs and some games having lower correlation; none is a case for changing the engine. The same table
+with the normal scores clipped at 0.0005 instead of 0.005 (the clip hides the very tail being tested) gives the same picture.
+
+**The joint-boom excess is not what a heavier copula fixes.** Players above the 90th percentile of their own distribution together
+(QB1 and his WR1; plus the other team's WR1), observed against what each fitted model says for the same games:
+
+| Event | sample | observed | Gaussian expects | t(50), Kendall R | game factor |
+|---|---|---|---|---|---|
+| QB1 + WR1 | all seasons (6,268 team-games) | 193 | 140.5 (ratio 1.37, SE 0.10) | 147.4 (1.31) | 141.6 (1.36) |
+| QB1 + WR1 + opp WR1 | all seasons | 31 | 17.7 (1.76, SE 0.36) | 19.7 (1.57) | 18.2 (1.70) |
+| QB1 + WR1 | held out (1,231) | 33 | 27.8 (1.19, SE 0.20) | 29.4 (1.12) | 27.6 (1.20) |
+| QB1 + WR1 + opp WR1 | held out | 7 | 3.5 (2.0, SE 0.76) | 3.9 (1.80) | 3.5 (2.0) |
+
+Two things sit in that ratio. **First, the margins:** the normal scores exceed their own 90th percentile 10.65% of the time for QB1 and
+10.82% for WR1 (not 10%), so two independent margins already give 1.15 times the expected joint rate; the Gaussian ratio is about
+1.19 (all seasons, SE 0.09) after that, not 1.37, and the table's top decile being a point light is a calibration question, not a
+dependence one. **Second, the rest** (about 1.2 on the pair, 1.4 on the three-player event, 1.4 to 2.2 SE) no copula tried closes: the
+t-copula at the best nu takes off about a quarter of it. So the held-out evidence for switching is nothing, and **the Top 1% effect for stacked
+versus unstacked builds was not recomputed** (the prompt asked for it only if one model won clearly). If a decision is wanted anyway,
+the lever the numbers point to is the top of the marginal tables, not the copula.
+
