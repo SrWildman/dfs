@@ -1,9 +1,11 @@
 """Chalk you are not holding: a heavily owned player in none of your lineups.
 
 Sam, 2026-10-19: he missed a player owned about 70% and got buried. In a double-up the field is chalkier
-than the large-field projection says (players projected over 15% were owned about 39% in his 2026
-standings), so a cash lineup set is warned at `CASH_PROJECTED_OWN`, a GPP set only at the higher
-`GPP_PROJECTED_OWN`. A warning, never a filter: leaving the chalk out is sometimes the point of a GPP build.
+than the large-field projection says (`dups.DOUBLE_UP_OWN_CURVE`: projected 19% -> 27% owned, 31% -> 55%), so
+a cash lineup set is warned when a player's EXPECTED double-up ownership reaches `CASH_EXPECTED_OWN` (the
+same bar as a projected Own% of `CASH_PROJECTED_OWN`, which is what the sheet reads), a GPP set only at the
+higher `GPP_PROJECTED_OWN` (GPP projections are calibrated). A warning, never a filter: leaving the chalk
+out is sometimes the point of a GPP build.
 
 Pure: takes the edge frame (`Name`, `Position`, `Team`, `Own%`, `Avail`) and the names in each lineup.
 """
@@ -16,8 +18,11 @@ from dataclasses import dataclass
 import pandas as pd
 
 from dfs.derived import OUT_STATUSES
+from dfs.sim import dups
 
-CASH_PROJECTED_OWN = 0.15  # projected (large-field) Own% at which a double-up field is already chalky
+CASH_EXPECTED_OWN = 0.20  # expected double-up ownership (`dups.double_up_ownership`) that counts as chalk
+# ... as a projected (large-field) Own%: the same bar for the sheet, whose formula reads the projection
+CASH_PROJECTED_OWN = round(dups.projected_for_double_up(CASH_EXPECTED_OWN), 3)
 GPP_PROJECTED_OWN = 0.25
 MAX_LISTED = 6
 
@@ -53,10 +58,17 @@ def missing_chalk(
 
 
 def warning_line(chalk: list[Chalk], *, kind: str) -> str:
-    """One sentence for a terminal or a Suggested note; empty when nobody is missing."""
+    """One sentence for a terminal or a Suggested note; empty when nobody is missing. For a cash set each
+    player also shows his expected double-up ownership (the curve)."""
     if not chalk:
         return ""
-    shown = ", ".join(f"{c.name} ({c.position} {c.team}, {c.own:.0%} projected)" for c in chalk[:MAX_LISTED])
+
+    def show(c: Chalk) -> str:
+        base = f"{c.name} ({c.position} {c.team}, {c.own:.0%} projected"
+        if kind == "cash":
+            base += f", ~{dups.double_up_ownership(c.own):.0%} in a double-up"
+        return base + ")"
+
+    shown = ", ".join(show(c) for c in chalk[:MAX_LISTED])
     more = f" and {len(chalk) - MAX_LISTED} more" if len(chalk) > MAX_LISTED else ""
-    extra = " A double-up field is usually chalkier than the projection." if kind == "cash" else ""
-    return f"Heavy chalk in none of your {kind} lineups: {shown}{more}.{extra}"
+    return f"Heavy chalk in none of your {kind} lineups: {shown}{more}."

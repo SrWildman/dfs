@@ -2774,7 +2774,7 @@ def test_chalk_formula_reads_edgeraws_columns_and_the_lineups_marker_and_rides_a
     f = _chalk_formula(2, 10, 11, "EdgeRaw")
     for name in ("Name", "Own%", "Avail"):
         assert f"EdgeRaw!${edge_sheet_letter(name)}$2:${edge_sheet_letter(name)}" in f
-    assert '$A11="GPP"' in f and "0.25" in f and "0.15" in f  # the GPP bar is higher than the cash one
+    assert '$A11="GPP"' in f and "0.25" in f and "0.161" in f  # the GPP bar is higher than the cash one
     assert 'COUNTA($A$2:$A$10)<9,""' in f  # only a complete lineup is judged
     assert '"OUT"' in f and '"IR"' in f
     both = _totals_check_formula(2, 10, 11, "K", stack_check='"DST/QB"', chalk=f)

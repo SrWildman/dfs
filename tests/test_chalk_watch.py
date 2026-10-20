@@ -45,6 +45,6 @@ def test_a_game_that_has_started_is_not_a_warning_and_no_lineups_means_no_warnin
 
 def test_the_sentence():
     line = cw.warning_line(cw.missing_chalk(_edge(), [["Held Guy"]], threshold=0.5), kind="cash")
-    assert line.startswith("Heavy chalk in none of your cash lineups: Simone (RB A, 70% projected)")
-    assert "chalkier than the projection" in line
+    assert line.startswith("Heavy chalk in none of your cash lineups: Simone (RB A, 70% projected, ~")
+    assert "in a double-up" in line
     assert cw.warning_line([], kind="gpp") == ""

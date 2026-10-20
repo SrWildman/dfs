@@ -747,9 +747,10 @@ def suggest_builds(
         picks = choose(scored, cash_builds, key=cash_key)
         timed("choose", t)
         # The Week 4 lesson, as a warning and never a filter: a double-up build many entries share.
+        cash_shares = ownership_shares(specs, edge, field, "cash")
         picks = annotate(
             picks,
-            ownership_shares(specs, edge, field, "cash"),
+            None if cash_shares is None else dups.double_up_shares(cash_shares),
             double_up_entries,
             objective=False,
             dup_model=cash_dup_model,

@@ -102,10 +102,53 @@ class DupModel:
 # least-owned lineups; this tracks the top decile of products (observed 2.65 copies, fitted 2.66).
 # docs/SIM.md has the table.
 DUP_MODEL_GPP = DupModel(scale=10.02, exponent=0.712)
-# The double-up model is still the placeholder: the same fit on the projected shares is poor (a few heavily
-# duplicated lineups carry most copies, and double-ups are chalkier than projected). It waits for the
-# per-player double-up ownership model (Contests Phase 2). Cash builds only WARN on the number.
-DUP_MODEL_CASH = DupModel()
+# The double-up ownership curve (Sam, 2026-10-20): the large-field projection is right below about 10% but
+# understates double-up chalk above it (projected 0.19 -> 0.27 owned, 0.31 -> 0.55, 0.40 -> 0.76; weeks 4-6,
+# 3 contests a week). Applied to each player's projected share it predicts held-out-week double-up ownership
+# clearly better (RMSE 0.077 -> 0.060, 0.074 -> 0.050, 0.075 -> 0.057, leave one week out). It is used
+# ONLY for
+# the chalk warning and the cash duplicate estimate; the Cash % lines stay on the current method (the field
+# mean it implies was no better). Points are (projected, expected); anchored at (0, 0) and (1, 1).
+DOUBLE_UP_OWN_CURVE = (
+    (0.010, 0.005),
+    (0.045, 0.021),
+    (0.077, 0.043),
+    (0.123, 0.098),
+    (0.186, 0.269),
+    (0.313, 0.551),
+    (0.404, 0.761),
+)
+
+
+def double_up_ownership(projected: float) -> float:
+    """Expected double-up ownership (a fraction) of a player projected at `projected`, through the curve."""
+    xs = [0.0, *[x for x, _ in DOUBLE_UP_OWN_CURVE], 1.0]
+    ys = [0.0, *[y for _, y in DOUBLE_UP_OWN_CURVE], 1.0]
+    return float(np.interp(projected, xs, ys))
+
+
+def projected_for_double_up(expected: float) -> float:
+    """The projected ownership at which a player is expected to reach `expected` in a double-up (the curve
+    inverted): how a threshold on double-up ownership becomes one on the sheet's projected Own%."""
+    xs = [0.0, *[x for x, _ in DOUBLE_UP_OWN_CURVE], 1.0]
+    ys = [0.0, *[y for _, y in DOUBLE_UP_OWN_CURVE], 1.0]
+    return float(np.interp(expected, ys, xs))
+
+
+def double_up_shares(shares: Mapping[str, float]) -> dict[str, float]:
+    """A field's player shares (`FieldModel.shares`, nine players' worth) pushed through the double-up curve
+    and scaled back to the same total, for the cash duplicate estimate."""
+    total = sum(shares.values())
+    curved = {name: double_up_ownership(share) for name, share in shares.items()}
+    scale = total / sum(curved.values()) if sum(curved.values()) > 0 else 1.0
+    return {name: value * scale for name, value in curved.items()}
+
+
+# The cash model is fitted on the CURVED projected shares (`double_up_shares`) against the identical-lineup
+# counts of his 2026 double-ups (Weeks 4-6, 34,501 lineups): scale 33.68, exponent 0.684. The error against
+# the observed copies falls from 2.20 to 1.61 (log-rmse) against the placeholder on raw shares; the real
+# %Drafted gives 0.98, so it is better, not exact. Cash builds only WARN on the number.
+DUP_MODEL_CASH = DupModel(scale=33.68, exponent=0.684)
 
 
 def top1_share(p_top1: float, e_dups: float) -> float:

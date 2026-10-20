@@ -320,6 +320,7 @@ Rebuild models/sim/correlations.csv (and the QB1-TE1 team-shape table beside it)
 | `--n-boot INT` | Bootstrap resamples for each interval. Default: `1000`. |
 | `--seed INT` | Seed for every random draw. |
 | `--out-dir PATH` | Where to write (default: models/sim/). |
+| `--through INT` | Last season to fit on. Default: the shipped model's last complete season; the current season (`dfs model fetch` first) adds the weeks played so far. |
 
 ### `dfs sim backtest`
 
@@ -537,7 +538,7 @@ Round 5 follow-up item 2 (2026-09-29): `dfs doctor` now requires a formula on ev
 
 ### `dfs setup lineup-chalk`
 
-Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete lineup that holds none of the heavily owned players (projected 15%+ owned; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on the tab changes. Template first, then the live sheet; run `dfs doctor` after.
+Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete lineup that holds none of the heavily owned players (projected 16%+ owned, about 20% expected in a double-up; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on the tab changes. Template first, then the live sheet; run `dfs doctor` after.
 
 | Option | What it does |
 |---|---|
