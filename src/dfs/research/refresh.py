@@ -9,19 +9,18 @@ Studies, each with the bar it must clear to matter:
 | key | study | module |
 |---|---|---|
 | `shape` | the five QB1-receiver pairs re-tested by target share | `dfs.sim.shape_retest` |
-| `bump` | the teammate-bump shadow's Model Check race | `dfs.teammate_bump`,
-`calibration.teammate_bump_race` |
+| `bump` | the teammate-bump shadow's Model Check race | `dfs.teammate_bump` |
 | `recal` | recalibrating Hit3x% / Boom% / Bust% | `dfs.prob_recal` |
 | `tails` | the top of the marginal tables (coverage, per-role stretch) | `dfs.tail_check` |
-| `ownership` | the field-ownership shadow's scores and where CalPts and TFFB disagree | `dfs.field_own` |
-| `shadows` | the ESPN and props shadow projections against CalPts | `calibration.shadow_race` |
+| `ownership` | the field-ownership shadow's scores, where CalPts and TFFB disagree | `dfs.field_own` |
+| `shadows` | ESPN and props shadow projections against CalPts (the blend gate) | `calibration.shadow_race` |
+| `props` | the PROPS SHADOW: does ESPN beat the prop market's price | `dfs.props_edge.build_shadow` |
 | `contest_retro` | session A's contest retro (hook below) | `dfs.sim.contest_retro` |
 
 **The contest retro hook.** `dfs.sim.contest_retro` is not on main yet. When it is, it plugs in by exposing
 
-    refresh_summary(season: int, through: int) -> dict   # {"headline": [str, ...], "metrics": {str: float |
-    bool},
-                                                         #  "ship_bar": str}
+    refresh_summary(season, through) -> {"headline": [str, ...], "metrics": {str: float | bool},
+                                         "ship_bar": str}
 
 and the study appears in the report; until then the study is reported as skipped, with that line.
 
@@ -428,6 +427,53 @@ def study_shadows(ctx: Context) -> Study:
     return s
 
 
+def props_metrics(table: pd.DataFrame) -> dict[str, float | bool]:
+    """Per band of the "All markets" rows: scored player-markets, how often ESPN's favoured side won, the win
+    rate the prices needed, the return per unit staked, and whether the verdict reads "beat the price"."""
+    out: dict[str, float | bool] = {}
+    allm = table[table["Market"] == "All markets"] if not table.empty else table
+    for _, r in allm.iterrows():
+        band = str(r["Band"])
+        out[f"{band} n"] = int(r["n"])
+        if r["n"]:
+            out[f"{band} won"] = round(float(r["Won"]), 4)
+            out[f"{band} needed"] = round(float(r["Needed"]), 4)
+            out[f"{band} return"] = round(float(r["Return"]), 4)
+        out[f"{band} beat the price"] = r["Verdict"] == "beat the price"
+    return out
+
+
+def study_props(ctx: Context) -> Study:
+    from dfs import props_edge
+
+    s = Study(
+        "props",
+        "PROPS SHADOW (ESPN against the prop market)",
+        f"a verdict word only at {props_edge.MIN_N_VERDICT}+ scored player-markets in a cell; "
+        '"beat the price" means ESPN\'s favoured side won more often than the price needed by more than '
+        "2 SE. "
+        "Analysis only: nothing here is a bet, and nothing in the sheet uses it",
+    )
+    shadow = props_edge.build_shadow(props_edge.latest_stats_player(), season=ctx.season)
+    rows = shadow.rows[shadow.rows["Week"] <= ctx.through] if not shadow.rows.empty else shadow.rows
+    table = props_edge.band_table(rows)
+    shadow = props_edge.Shadow(
+        rows,
+        table,
+        shadow.fit,
+        shadow.counts,
+        sorted(int(w) for w in rows["Week"].unique()),
+        shadow.fit_weeks,
+    )
+    s.headline = [props_edge.headline(shadow), "", *props_edge.summary_lines(shadow)[:1]]
+    allm = table[table["Market"] == "All markets"] if not table.empty else table
+    if not allm.empty:
+        s.headline += [""] + _md_table(allm[["Band", "n", "Won", "Needed", "Return", "Verdict"]], 3)
+    s.metrics = props_metrics(table)
+    s.verdict = props_edge.headline(shadow)
+    return s
+
+
 CONTEST_RETRO_MODULE = "dfs.sim.contest_retro"
 
 
@@ -465,6 +511,7 @@ STUDIES: dict[str, Callable[[Context], Study]] = {
     "tails": study_tails,
     "ownership": study_ownership,
     "shadows": study_shadows,
+    "props": study_props,
     "contest_retro": study_contest_retro,
 }
 TITLES = {
@@ -474,6 +521,7 @@ TITLES = {
     "tails": "Top of the marginal tables",
     "ownership": "Field-ownership shadow",
     "shadows": "ESPN / props shadows",
+    "props": "PROPS SHADOW",
     "contest_retro": "Contest retro",
 }
 
@@ -509,8 +557,10 @@ def _json_number(o):
     return bool(o) if isinstance(o, np.bool_) else float(o)
 
 
-def report_path(season: int, through: int, directory: Path | None = None) -> Path:
-    return (directory or REPORT_DIR) / f"{season}-wk{through:02d}.md"
+def report_path(season: int, through: int, directory: Path | None = None, partial: bool = False) -> Path:
+    """The week's report; a run of only some studies (`--only`) writes `<season>-wk<NN>-partial.md` so it
+    never replaces a full report (and is never taken as "last week's" by the comparison)."""
+    return (directory or REPORT_DIR) / f"{season}-wk{through:02d}{'-partial' if partial else ''}.md"
 
 
 def previous_report(season: int, through: int, directory: Path | None = None) -> tuple[Path, dict] | None:
@@ -606,10 +656,13 @@ def render(
 def summary_lines(
     studies: list[Study], load_seconds: float, path: Path, season: int, through: int
 ) -> list[str]:
-    """The ten lines the command prints: a header, the shared load, one line per study (seven), the report."""
+    """The ten lines the command prints: a header (with the shared load), one line per study (eight), the
+    report."""
     total = sum(s.seconds for s in studies) + load_seconds
-    out = [f"research refresh {season} through Week {through}: {total:.0f} s in all"]
-    out.append(f"  shared history + out-of-fold frame: {load_seconds:.0f} s")
+    out = [
+        f"research refresh {season} through Week {through}: {total:.0f} s in all "
+        f"({load_seconds:.0f} s loading the shared history and out-of-fold frame)"
+    ]
     for s in studies:
         out.append(f"  {s.key:<13} {s.status:<7} {s.seconds:>4.0f} s  {s.verdict}")
     out.append(f"  report: {path}")
@@ -628,7 +681,7 @@ def refresh(
     """Run the studies and write the report. Returns (path, studies, seconds spent loading shared inputs)."""
     ctx = Context(season, through, shuffles)
     studies = run_studies(ctx, only, log)
-    path = report_path(season, through, directory)
+    path = report_path(season, through, directory, partial=only is not None)
     text = render(studies, season, through, ctx.load_seconds, previous_report(season, through, directory))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)

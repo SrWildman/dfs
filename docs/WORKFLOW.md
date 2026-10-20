@@ -54,7 +54,8 @@ plan from the carried Weekly Budget and your `[stakes]` rules; `dfs bankroll sta
 synced-data cache (so a source that fails on the first sync reads as
 no-data-yet rather than a previous week's now-mismatched numbers), and
 runs a full `dfs sync`. It then prints which saved odds snapshot the week's line movement is measured against, e.g. "Opening lines: Tue 9:30 am ET snapshot (after the previous week's last game)"
-(or says it is using the current lines when none is older).
+(or says it is using the current lines when none is older). If the new sheet has a Cockpit tab (a copied template does), the
+sync is followed by a rebuild of it from the data just synced, so last week's render is gone at once; it never fails the week.
 
 **The opening lines.** Movement (`ImpliedMove`, `TotMove`, `SpdMove`, the Movement tab) is measured against the week's *opening* lines: the earliest saved `nfl_odds` snapshot that shows the new
 week's slate, not whenever `dfs week new` happened to run (`store.opening_snapshot`). The odds source only ever shows the current slate, so the opening is on record only if the lines were saved

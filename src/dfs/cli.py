@@ -4027,6 +4027,10 @@ def week_new(
     4b (2026-09-22, see CONTRIBUTING.md's changelog) -- nothing left here
     to clear for any of the five.
 
+    After the sync, a Cockpit tab on the new sheet (a copied template has one) is rewritten from the data just
+    synced, so the template's stale render is replaced at once (`_rebuild_cockpit_on_new_sheet`; never fails
+    the week).
+
     Carrying Results forward means copying every already-typed week's row
     (config.toml's `[results]` table -- Week, Cash Pts/Line, H2H Entered/
     Win, the three team-colour columns) from the current sheet to the new one, since
@@ -4282,8 +4286,23 @@ def week_new(
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
 
+    _rebuild_cockpit_on_new_sheet(new_cfg, new_client)
+
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _rebuild_cockpit_on_new_sheet(cfg: Config, client: SheetsClient) -> None:
+    """Rewrite the Cockpit on the new week's sheet from the edge frame the sync just saved, so a copied
+    template's stale render (last week's open slots, entries and exposure) is replaced at once. Only when the
+    sheet has a Cockpit tab (`dfs setup cockpit` is what creates one); with no saved edge frame there is
+    nothing to render. NEVER fails `week new`: anything in the way is reported and skipped."""
+    try:
+        _refresh_cockpit(cfg, client)
+    except Exception as e:  # noqa: BLE001 - the week itself is already set up; never fail it over this
+        console.print(
+            f"[yellow]Cockpit not rebuilt ({escape(str(e))}); `dfs setup cockpit` rebuilds it.[/yellow]"
+        )
 
 
 def _refresh_stakes_block(cfg: Config, client: SheetsClient) -> None:
