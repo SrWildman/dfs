@@ -2093,3 +2093,30 @@ byte-identical). A week counts when the source rated at least 20 players. `PropP
 TFFB's projections: each player's row is from the **last props snapshot taken before his own kickoff**
 (`results_loop.props_for_week`); `EspnPts` through the snapshot at the week's reference time, like Sleeper's.
 
+## Props shadow (`props_edge.py`, 2026-10-20)
+
+Question: when ESPN's stat-level projection sits away from the prop market's line, does the side ESPN favours
+beat the price? Analysis only: no sportsbook is touched, no bet is tracked, no player column or pick is shown,
+and it reads saved files only (`data/raw/odds_props/*.json`, `data/raw/espn/*.csv`, nflverse `stats_player`), so
+it costs no Odds API credits. Model Check's **PROPS SHADOW** block is rebuilt by `dfs results update` (and so by
+`dfs week close`, which never fails over it); `python -m dfs.props_edge [--rows]` prints it from the terminal.
+
+**Per player-market.** Book line = the most-quoted line (a tie goes to the one nearer the median); market
+probability = the median over the books on that line of the de-vigged Over (Yes for a TD; a Yes-only quote takes
+`props.ANYTD_YES_ONLY_VIG`), prices = the median quoted decimal price per side at that line. The pull used is the
+last one before the event's kickoff that holds the event; ESPN's projection is the last ESPN snapshot at or
+before that pull.
+
+**ESPN's distribution.** Mean = ESPN's projected stat (not re-centred). Spread: `phi = sum((actual - proj)^2) /
+sum(proj)` per (position, stat) over every ESPN-projected player who played (projection above
+`props_history.CASES`' floor), shrunk to `props.dispersion` (the nflverse-history prior) as
+`(n * phi_raw + 50 * prior) / (n + 50)` (`SHRINK_PLAYERS = 50`). A week is judged with a `phi` fitted from the other
+weeks (the prior alone when there are none), so a result never uses the spread it helped fit. P(Over) =
+`props.over_probability(stat, mean, phi, line)`; anytime TD: `1 - exp(-(rush_td + rec_td))`.
+
+**The table.** The side with the higher ESPN probability is "bet" at the median price for that side; a push is
+dropped, a player who did not play voids the prop and is dropped, an anytime-TD No is bettable only where a book
+quoted one. Per market and per band of `|ESPN P - market P|` (5+, 10+, 15+ points, cumulative): `n`, how often the
+side won, the win rate the prices needed (mean of 1 / decimal price) and the return per unit staked. A verdict word
+("beat the price" / "missed the price" / "no edge shown", at two standard errors) appears only from
+`MIN_N_VERDICT = 100` rows in a cell. Shadow until about Week 10 and Sam's OK.
