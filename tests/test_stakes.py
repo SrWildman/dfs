@@ -303,8 +303,11 @@ def test_fifty_fifty_counts_with_double_up_in_the_cash_bucket_and_h2h_does_not()
             "winnings": [0.0, 20.0, 50.0, 0.0, 100.0],
             "season": [2026] * 5,
             "week": [1.0] * 5,
+            "place": [1, 1, 1, 5, 1],
+            "places_paid": [2, 2, 2, 2, 2],
+            "entries": [4, 4, 2, 100, 100],
         }
     )
     s = stakes.bucket_stats(typed)
-    assert s[CASH].entries == 2 and s[CASH].net == 10.0  # Double Up + 50/50, not H2H
+    assert s[CASH].entries == 2 and s[CASH].net == 0.0  # Double Up + 50/50, not H2H
     assert s[GPP].entries == 1  # SE GPP only, not the N-max GPP
