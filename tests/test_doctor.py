@@ -15,7 +15,7 @@ from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_season_view import HEADER as SEASON_HEADER
 from dfs.sheet_stakes import STAKES_FIRST_COLUMN, STAKES_TITLE
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, INPUT_BG, edge_group_spans
-from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL
+from dfs.sheet_views import EXPOSURE_TAB, LINEUP_COUNT_CELL, lineups_built_formula
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
@@ -50,7 +50,10 @@ class FakeDoctorClient:
     ):
         self._tabs = tabs
         self._rows = rows or {}
-        self._formulas = formulas or {}
+        self._formulas = {
+            (EXPOSURE_TAB, f"{LINEUP_COUNT_CELL}:{LINEUP_COUNT_CELL}"): [[lineups_built_formula("Lineups")]],
+            **(formulas or {}),
+        }
         self._hidden_names = hidden_names or {}
         self._groups = groups or {}
         self.zone = "America/New_York"
@@ -553,26 +556,41 @@ def test_run_doctor_passes_bankroll_header_row_when_present():
     assert not any(i.check == "bankroll-header-row" for i in issues)
 
 
-def test_run_doctor_flags_lineup_count_cell_when_non_numeric():
-    cfg = _base_config()
+def _count_cell_issues(*, formula=None, value="6"):
     rows = _lineups_rows()
-    rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [[""]]
-    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [[value]]
+    formulas = (
+        {(EXPOSURE_TAB, f"{LINEUP_COUNT_CELL}:{LINEUP_COUNT_CELL}"): [[formula]]}
+        if formula is not None
+        else None
+    )
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows, formulas=formulas)
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    return [i for i in issues if i.check == "lineup-count-cell"]
 
-    issues = run_doctor(client, cfg, title="Week 1")
-    matches = [i for i in issues if i.check == "lineup-count-cell"]
-    assert any("not a number" in i.detail for i in matches)
+
+def test_run_doctor_flags_a_typed_lineup_count_in_h1():
+    # 2026-10-20: the typed divisor stayed at 6 through a 15-lineup week and Exposure read 150%.
+    found = _count_cell_issues(formula="6")
+    assert len(found) == 1 and "typed value" in found[0].detail and "dfs setup build-views" in found[0].detail
 
 
-def test_run_doctor_flags_lineup_count_cell_when_out_of_range():
-    cfg = _base_config()
-    rows = _lineups_rows()
-    rows[(EXPOSURE_TAB, LINEUP_COUNT_CELL)] = [[str(len(LINEUPS_NAME_BLOCKS) + 1)]]
-    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+def test_run_doctor_flags_a_count_formula_missing_a_lineup_block():
+    short = "=" + "+".join(['(COUNTIF(Lineups!$A$2:$A$10,"?*")>0)'] * (len(LINEUPS_NAME_BLOCKS) - 1))
+    found = _count_cell_issues(formula=short)
+    assert len(found) == 1 and f"expected {len(LINEUPS_NAME_BLOCKS)}" in found[0].detail
 
-    issues = run_doctor(client, cfg, title="Week 1")
-    matches = [i for i in issues if i.check == "lineup-count-cell"]
-    assert any("expected 1.." in i.detail for i in matches)
+
+def test_run_doctor_flags_a_count_that_is_not_a_number_or_out_of_range():
+    assert "not a number" in _count_cell_issues(value="")[0].detail
+    over = _count_cell_issues(value=str(len(LINEUPS_NAME_BLOCKS) + 1))
+    assert "expected 0.." in over[0].detail
+
+
+def test_run_doctor_passes_a_counted_h1_including_zero_lineups():
+    assert _count_cell_issues() == []
+    assert _count_cell_issues(value="0") == []
+    assert _count_cell_issues(value="15") == []
 
 
 def test_run_doctor_skips_lineup_count_cell_when_exposure_tab_absent():

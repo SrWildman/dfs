@@ -100,7 +100,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   and never fail over it); `late-swap` saves its run to `data/cockpit/late_swap.json` for it (`late_swap_store`). Template first, then live,
   `dfs doctor` after (check `cockpit-tab`). Layout: `cockpit.py` (pure), I/O: `sheet_cockpit.py`.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
-  exist, the Cockpit tab is there, EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
+  exist, the Cockpit tab is there, `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
   `LINEUPS_NAME_BLOCKS` expects, DK Upload's entries layout with its
   Lineup dropdown, typed-cell cue and protection exemption, and the hand-built per-row formula ranges on

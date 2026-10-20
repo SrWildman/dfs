@@ -1,6 +1,5 @@
 from dfs.sheet_columns import PLAYER_POOL_COLUMN_ORDER
 from dfs.sheet_protection import FULLY_PROTECTED_TABS, UNPROTECTED_VIEW_TABS, protect_workbook
-from dfs.sheet_views import LINEUP_COUNT_CELL
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_CONTROL_ROW
 
 
@@ -59,7 +58,7 @@ def test_exposure_leaves_target_and_lineup_count_cell_unprotected():
     protect_workbook(client, lineups_tab="Lineups")
 
     _tab, kwargs = next(c for c in client.protect_calls if c[0] == "Exposure")
-    assert kwargs["unprotected_ranges"] == ["F:F", LINEUP_COUNT_CELL]
+    assert kwargs["unprotected_ranges"] == ["F:F"]  # H1 is counted by a formula now, not typed
 
 
 def test_lineups_leaves_every_block_name_column_unprotected():

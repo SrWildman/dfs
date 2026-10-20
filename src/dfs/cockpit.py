@@ -536,6 +536,13 @@ def _warnings_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]
     )
 
 
+def exposure_divisor(built: list[SheetLineup]) -> int:
+    """What a share of lineups is divided by: the number of lineups holding a player. This is the count
+    `Exposure!H1` carries (`sheet_views.lineups_built_formula`, a term per Lineups name block), so the
+    Cockpit and the Exposure tab agree; never less than 1."""
+    return max(len(built), 1)
+
+
 def _exposure_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]) -> None:
     b.section(f"5. EXPOSURE, TOP {TOP_EXPOSURE}  —  who is in how many of your lineups")
     if not built:
@@ -553,7 +560,7 @@ def _exposure_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]
     b.header("Player", "Pos Team", "Lineups", "Share", "Target", "Own%", "CalPts")
     first = b.next_row
     for p in held[:TOP_EXPOSURE]:
-        share = len(p.lineups) / len(built)
+        share = len(p.lineups) / exposure_divisor(built)
         target = inputs.targets.get(p.name)
         b.line(
             "",
@@ -570,8 +577,8 @@ def _exposure_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]
         b.layout.percent_cells += [f"E{first}:G{last}"]
         b.layout.number_cells += [f"H{first}:H{last}"]
     b.note(
-        f"Of {len(built)} built lineups. Target is the Exposure tab's typed Target; "
-        "Own% is the sync's projection."
+        f"Of {len(built)} built lineups (the count Exposure!H1 holds). Target is the Exposure tab's "
+        "typed Target; Own% is the sync's projection."
     )
 
 

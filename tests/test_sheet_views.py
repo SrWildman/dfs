@@ -73,7 +73,6 @@ from dfs.sheet_views import (
     BOARD_STACKS_COLHEADER,
     BOARD_STACKS_FIRST_ROW,
     BOARD_STACKS_HEADER_ROW,
-    DEFAULT_LINEUP_COUNT,
     EXPOSURE_TAB,
     LINEUP_COUNT_CELL,
     MOVEMENT_EMPTY,
@@ -105,6 +104,7 @@ from dfs.sheet_views import (
     build_exposure,
     build_movement,
     build_slate_grid,
+    lineups_built_formula,
     queue_body,
     queue_player_count,
     size_slate_shape,
@@ -113,6 +113,7 @@ from dfs.sheet_views import (
     write_queue_section,
 )
 from dfs.sheets import column_letter
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
 
 
 class _CapturingClient:
@@ -163,6 +164,7 @@ class FakeSheetsClient:
         self.update_calls: list[tuple[str, str, list[list]]] = []
         self.note_calls: list[tuple[str, str]] = []
         self.number_range_validation_calls: list[tuple[str, int, int]] = []
+        self.cleared_validation_calls: list[str] = []
 
     def tab_exists(self, tab_name: str) -> bool:
         return True
@@ -201,6 +203,9 @@ class FakeSheetsClient:
     ) -> None:
         self.number_range_validation_calls.append((a1_range, minimum, maximum))
 
+    def clear_data_validation(self, tab_name: str, a1_range: str) -> None:
+        self.cleared_validation_calls.append(a1_range)
+
 
 def test_col_and_rng_use_edge_columns_positions():
     assert _col("Name") == "B"  # index 0 + EDGE_DATA_OFFSET (Pool occupies column A)
@@ -230,7 +235,7 @@ def test_build_exposure_preserves_typed_targets_keyed_by_name_across_rebuild():
     post_write_names = ["Christian McCaffrey", "Justin Jefferson", "Brand New Guy"]
     client = FakeSheetsClient(existing_rows=existing_rows, post_write_names=post_write_names)
 
-    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     assert "2 target(s) preserved" in result
     assert len(client.write_tab_calls) == 1
@@ -252,54 +257,60 @@ def test_build_exposure_preserves_typed_targets_keyed_by_name_across_rebuild():
     assert restored[2] == [""]  # Brand New Guy never had a target
 
 
-def test_build_exposure_divides_by_lineup_count_cell_not_capacity():
-    # Phase 5A: the old bug divided by lineup_count (capacity, 20) even
-    # though Sam builds far fewer lineups than that -- the live divisor
-    # must be Exposure's own H1 (LINEUP_COUNT_CELL), with lineup_count
-    # only as the fallback for a blank/zero H1.
+def test_build_exposure_divides_by_the_counted_h1_never_a_typed_number_or_capacity():
     client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     tab_name, rows = client.write_tab_calls[0]
-    row2_exposure = rows[1][4]
-    assert "$H$1" in row2_exposure
-    assert "20" in row2_exposure  # capacity fallback still present
-    row3_exposure = rows[2][4]
-    assert "$H$1" in row3_exposure
+    for row in rows[1:3]:
+        assert "MAX(1,N($H$1))" in row[4]  # an empty Lineups tab reads 0%, never #DIV/0!
+        assert "20" not in row[4]  # no capacity fallback any more
 
 
-def test_build_exposure_defaults_lineup_count_cell_when_blank():
+def test_h1_is_a_formula_with_a_term_per_lineup_block_not_a_typed_number():
     client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
-    tab_name, rows = client.write_tab_calls[0]
-    assert rows[0][7] == str(DEFAULT_LINEUP_COUNT)
-
-
-def test_build_exposure_preserves_typed_lineup_count_across_rebuild():
-    client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"], existing_lineup_count="4")
-
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
-
-    tab_name, rows = client.write_tab_calls[0]
-    assert rows[0][7] == "4"
+    h1 = client.write_tab_calls[0][1][0][7]
+    assert h1 == lineups_built_formula("Lineups") and h1.startswith("=")
+    assert h1.count("COUNTIF(") == len(LINEUPS_NAME_BLOCKS)
+    for start, end in LINEUPS_NAME_BLOCKS:
+        assert f'COUNTIF(Lineups!$A${start}:$A${end},"?*")>0' in h1
 
 
-def test_build_exposure_sets_note_and_validation_on_lineup_count_cell():
+def test_h1_formula_follows_the_name_blocks_it_is_given():
+    formula = lineups_built_formula("My Lineups", name_blocks=[(2, 10), (13, 21)])
+    assert formula == (
+        "=(COUNTIF('My Lineups'!$A$2:$A$10,\"?*\")>0)+(COUNTIF('My Lineups'!$A$13:$A$21,\"?*\")>0)"
+    )
+
+
+def test_a_typed_h1_left_by_an_older_build_is_replaced_not_restored():
+    client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"], existing_lineup_count="6")
+
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
+
+    assert client.write_tab_calls[0][1][0][7] != "6"
+    assert client.write_tab_calls[0][1][0][7].startswith("=")
+
+
+def test_h1_gets_a_note_and_loses_the_old_typed_number_rule():
     client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     assert client.note_calls and client.note_calls[0][0] == LINEUP_COUNT_CELL
-    assert client.number_range_validation_calls == [(LINEUP_COUNT_CELL, 1, 20)]
+    assert "counted, not typed" in client.note_calls[0][1]
+    assert client.cleared_validation_calls == [LINEUP_COUNT_CELL]
+    assert client.number_range_validation_calls == []
 
 
 def test_build_exposure_skips_restore_when_nothing_was_typed_before():
     client = FakeSheetsClient(existing_rows=[], post_write_names=["Someone"])
 
-    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     assert "target(s) preserved" not in result
     assert client.update_calls == []  # nothing to restore, so no F-column write at all
@@ -310,7 +321,7 @@ def test_build_exposure_counts_the_whole_lineups_column():
     # whole column is always the right range, no start-row parameter needed.
     client = FakeSheetsClient(existing_rows=[], post_write_names=[])
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     tab_name, rows = client.write_tab_calls[0]
     assert "Lineups!$A$1:$A" in rows[0][9]
@@ -326,7 +337,7 @@ def test_build_exposure_counts_resolved_names_when_lineups_has_a_player_key_colu
         lineups_header=["Name", "Pos.", "GameID", LINEUP_KEY_HEADER],
     )
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     header, roster_row = client.write_tab_calls[0][1][0], client.write_tab_calls[0][1][1]
     key = "Lineups!$D$1:$D"
@@ -344,7 +355,7 @@ def test_build_exposure_adds_portfolio_headline_when_lineups_pos_and_gameid_link
         existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
     )
 
-    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     header = client.write_tab_calls[0][1][0]
     assert header[10:16] == [
@@ -370,7 +381,7 @@ def test_build_exposure_shared_qb_is_no_when_zero_real_qbs_are_rostered():
         existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
     )
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     header = client.write_tab_calls[0][1][0]
     shared_qb_formula = header[13]
@@ -389,7 +400,7 @@ def test_build_exposure_distinct_games_excludes_the_gameid_header_repeat_text():
         existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
     )
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     header = client.write_tab_calls[0][1][0]
     distinct_games_formula = header[15]
@@ -412,7 +423,7 @@ def test_build_exposure_distinct_games_degrades_to_zero_not_an_na_error():
         existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
     )
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     header = client.write_tab_calls[0][1][0]
     distinct_games_formula = header[15]
@@ -424,7 +435,7 @@ def test_build_exposure_distinct_games_degrades_to_zero_not_an_na_error():
 def test_build_exposure_skips_portfolio_headline_when_gameid_not_linked_yet():
     client = FakeSheetsClient(existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos."])
 
-    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    result = build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
 
     header = client.write_tab_calls[0][1][0]
     assert header[10:16] == ["Distinct QBs", "", "Shared QB?", "", "Distinct games", ""]
@@ -436,7 +447,7 @@ def test_build_exposure_reads_lineups_own_header_row_not_row_1():
         existing_rows=[], post_write_names=[], lineups_header=["Name", "Pos.", "GameID"]
     )
 
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20, lineups_header_row=8)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineups_header_row=8)
 
     header = client.write_tab_calls[0][1][0]
     assert "QB" in header[11]  # formula still built -- read succeeded against row 8, not row 1
@@ -1079,7 +1090,7 @@ def test_board_slate_gps_check_helper_sits_in_the_hidden_join_key_block():
 
 def test_exposure_header_row_matches_style_exposures_column_assumptions():
     client = FakeSheetsClient(existing_rows=[], post_write_names=[])
-    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups", lineup_count=20)
+    build_exposure(client, edge_tab="EdgeRaw", lineups_tab="Lineups")
     tab_name, rows = client.write_tab_calls[0]
     header = rows[0]
     assert tab_name == EXPOSURE_TAB

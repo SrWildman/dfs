@@ -352,3 +352,7 @@ game that locked since the run is shown as `LOOK`, never as current. Run `dfs li
 They only refresh a sheet that already has the tab. `dfs doctor` says `cockpit-tab` when it is missing; `dfs setup cockpit` creates it (template first). A yellow "Cockpit not refreshed (...)" line means
 the refresh itself failed (a Sheets error, usually); the sync or late-swap result above it still stands. `dfs setup cockpit` rebuilds it.
 
+**Exposure shows a player above 100%.**
+`Exposure!H1` is the divisor and it must be the formula that counts built lineups, not a typed number (a typed 6 stayed put through a 15-lineup week and read 150%). `dfs doctor` says `lineup-count-cell`
+when H1 holds a typed value; `dfs setup build-views` rewrites it (template first, then the live week; your Targets are kept).
+

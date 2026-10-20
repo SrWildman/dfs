@@ -1567,7 +1567,6 @@ def sheets_build_views(
                 client,
                 edge_tab=edge_tab,
                 lineups_tab=cfg.lineups.builder_tab,
-                lineup_count=len(LINEUPS_NAME_BLOCKS),
                 lineups_header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
             ),
             build_movement(client, edge_tab=edge_tab),
@@ -2083,7 +2082,7 @@ def sheets_protect(
     formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement --
     plus Player Pool, Exposure and Lineups protected everywhere EXCEPT
     their own typed cells (Player Pool's add-a-player control; Exposure's
-    Target and lineup-count cell; each lineup block's Name column and
+    Target column; each lineup block's Name column and
     its Cash/GPP marker).
     EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own
     docstring for why. Safe to re-run: each tab's protected ranges are

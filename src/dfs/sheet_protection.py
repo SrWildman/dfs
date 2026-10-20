@@ -16,9 +16,8 @@ Exactly five things are typed by hand in the whole workbook (see
 `sheet_style.py`'s visual-grammar docstring): EdgeRaw's Pool column,
 Player Pool's own add-a-player control cell (A3, `sheet_pool_control.py`
 -- replaced the old separate `Pool Picks` tab), Lineups' block column A (plus each block's Cash/GPP marker),
-Exposure's Target column plus its `LINEUP_COUNT_CELL` (moved here
-from the pool deck's own B1/D1/F1 controls when the deck was removed
-entirely, Phase 5, 2026-09-16), plus DK Upload's Lineup dropdown (`protect_dk_upload`: the
+Exposure's Target column (its lineup-count cell H1 was typed until 2026-10-20 and is a formula now),
+plus DK Upload's Lineup dropdown (`protect_dk_upload`: the
 one choice Sam makes per contest entry) and the Suggested tab's lock ticks and Name column (the
 decision cells, the rules box and the names he types over a build's players:
 `sheet_suggested.typed_ranges`). EdgeRaw is deliberately absent from
@@ -39,7 +38,7 @@ from dfs.sheet_pool_control import control_cells
 from dfs.sheet_suggested import PROTECTION_DESCRIPTION as SUGGESTED_DESCRIPTION
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_suggested import typed_ranges as suggested_typed_ranges
-from dfs.sheet_views import BOARD_TAB, LINEUP_COUNT_CELL
+from dfs.sheet_views import BOARD_TAB
 from dfs.sheets import SheetsClient, column_letter
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
@@ -160,10 +159,10 @@ def protect_workbook(
         client.clear_protected_ranges(exposure_tab)
         client.protect_sheet(
             exposure_tab,
-            unprotected_ranges=["F:F", LINEUP_COUNT_CELL],
-            description=f"{_FORMULA_DESCRIPTION} (except Target, column F, and {LINEUP_COUNT_CELL})",
+            unprotected_ranges=["F:F"],
+            description=f"{_FORMULA_DESCRIPTION} (except Target, column F)",
         )
-        results.append(f"{exposure_tab}: whole tab protected except Target (F) and {LINEUP_COUNT_CELL}")
+        results.append(f"{exposure_tab}: whole tab protected except Target (F)")
 
     if not client.tab_exists(lineups_tab):
         results.append(f"{lineups_tab}: not present -- skipped")

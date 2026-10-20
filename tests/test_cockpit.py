@@ -357,3 +357,21 @@ def test_a_long_overuse_list_is_cut_with_a_count_of_the_rest():
     rows = [r for r in section(layout, 4) if r[1] == "Overused"]
     assert len(rows) == cockpit.OVERUSE_LISTED + 1
     assert rows[-1][2] == "and 4 more players in over half of them"
+
+
+def test_exposure_divides_by_the_built_lineups_so_nine_of_fifteen_is_sixty_percent_not_150():
+    # Week 6: Exposure's typed divisor stayed at 6 while 15 lineups were built, so a player in 9 read 150%.
+    other = [f"Other {i}" for i in range(9)]
+    held = [lineup(n) if n <= 9 else lineup(n, names=other) for n in range(1, 16)]
+    layout = cockpit.build_layout(inputs(lineups=held))
+    rows = {r[1]: r for r in section(layout, 5) if r[1] and isinstance(r[3], int)}
+    assert rows["Qb One"][3] == 9 and rows["Qb One"][4] == 0.6
+    assert all(r[4] <= 1.0 for r in rows.values())
+
+
+def test_the_exposure_divisor_counts_lineups_that_hold_a_player_and_is_never_zero():
+    built = [lineup(1), lineup(2)]
+    assert cockpit.exposure_divisor(built) == 2
+    assert cockpit.exposure_divisor([]) == 1
+    empty = lineup(3, names=[""] * 9)
+    assert not empty.built  # an all-blank block does not count, as in H1's COUNTIF(.., "?*") > 0

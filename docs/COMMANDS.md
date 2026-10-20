@@ -498,7 +498,7 @@ Fix 1: sorting and searching are real features that were invisible -- filter vie
 
 ### `dfs setup protect`
 
-Warning-only protection (never a hard lock) on every fully formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement -- plus Player Pool, Exposure and Lineups protected everywhere EXCEPT their own typed cells (Player Pool's add-a-player control; Exposure's Target and lineup-count cell; each lineup block's Name column and its Cash/GPP marker). EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own docstring for why. Safe to re-run: each tab's protected ranges are cleared before being re-added, never stacked.
+Warning-only protection (never a hard lock) on every fully formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement -- plus Player Pool, Exposure and Lineups protected everywhere EXCEPT their own typed cells (Player Pool's add-a-player control; Exposure's Target column; each lineup block's Name column and its Cash/GPP marker). EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own docstring for why. Safe to re-run: each tab's protected ranges are cleared before being re-added, never stacked.
 
 | Option | What it does |
 |---|---|

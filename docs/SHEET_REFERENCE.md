@@ -821,24 +821,18 @@ nowhere in the sheet.
 Built/rebuilt by `dfs setup build-views` (`sheet_views.build_exposure`) --
 a pivot-style count of how many times each `EdgeRaw`-sourced player name
 appears across `Lineups`, how concentrated your week's lineups are on a
-given player. `Exposure = # Lineups / H1`, not the sheet's 20-lineup
-capacity -- dividing by capacity was a live bug (Phase 5A): a player
-rostered in every one of a 6-lineup build read as 30% instead of 100%. A
-blank/zero/out-of-range `H1` falls back to capacity in the formula
-itself, so it can't produce `#DIV/0!` or silently read as 100%.
+given player. `Exposure = # Lineups / MAX(1, H1)`, and **`H1` is the number of lineups you have built,
+counted by a formula** (`sheet_views.lineups_built_formula`: one `COUNTIF(<block's nine name cells>, "?*") > 0` term per
+`weekly_reset.LINEUPS_NAME_BLOCKS` entry, so a lineup counts the moment you type a player into it). The Cockpit's
+exposure block divides by the same count (`cockpit.exposure_divisor`). An empty Lineups tab reads 0%, never `#DIV/0!`.
 
-Two typed inputs on this tab survive a rebuild -- both read back before
-`build-views` rewrites the tab, and re-placed into the fresh copy:
-`Target` (column F, the one typed input for setting exposure targets),
-and `H1` (how many lineups you're actually building this week, defaulting
-to 6, with a note carrying the label since row 1 is otherwise all column
-headers with nothing free next to it, and a warn-only 1..20 range check).
-`H1` originally lived on `Lineups` itself (the one free cell in the pool
-deck's row-1 control strip) -- moved here when the deck was removed
-entirely (2026-09-16); it was never really about the deck, just parked
-there for lack of anywhere better, and this is the one tab that actually
-reads it. `H1` survives `dfs week new` too (nothing here clears it) --
-it's still the right number until you change it.
+`H1` was a typed number ("how many lineups this week", default 6) until 2026-10-20. It stayed at 6 while Week 6
+grew to 15 lineups, so a player in 9 of 15 read 150%; a typed divisor can go stale, a counted one cannot, so the
+typed cell and its 1..20 rule are gone (a note on `H1` says it is counted). `dfs setup build-views` rewrites a typed `H1`
+left on an older sheet; `dfs doctor` flags one (check `lineup-count-cell`) and a formula that no longer has a term
+per lineup block. There is no override. Exposure's **only** typed input is now `Target` (column F; typed as `60%`,
+`0.6` or `60`, all read as 60%; the Cockpit shows it beside the share), read back before `build-views` rewrites the
+tab and re-placed into the fresh copy by player name. The tab's protection is whole-tab except column F.
 
 ### Instructions
 
