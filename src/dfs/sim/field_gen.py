@@ -81,15 +81,54 @@ class FieldRates:
 
 @dataclass(frozen=True)
 class HerdModel:
-    """The share of the field on the chalk lineups and how fast it falls off down their ranking."""
+    """The share of the field on the chalk lineups and how fast it falls off down their ranking.
+
+    `weights` puts the most on the highest-product lineup. Real fields pick their megadup further down now and
+    then (Week 4's was the fifth), so `draw_weights` picks the LEAD lineup per draw: rank `j` with probability
+    proportional to `lead_decay ** j` (0: always the first), and the lead takes the share the first lineup has
+    in `weights`, the others the rest in rank order."""
 
     share: float = 0.0
     decay: float = 0.5
     k: int = HERD_K
+    lead_decay: float = 0.0
 
     def weights(self, n_lineups: int) -> np.ndarray:
         w = self.decay ** np.arange(n_lineups, dtype=float)
         return w / w.sum() if n_lineups else w
+
+    def lead_probabilities(self, n_lineups: int) -> np.ndarray:
+        if n_lineups == 0:
+            return np.zeros(0)
+        if self.lead_decay <= 0:
+            return np.eye(n_lineups)[0]
+        p = self.lead_decay ** np.arange(n_lineups, dtype=float)
+        return p / p.sum()
+
+    def draw_weights(self, n_lineups: int, n_draws: int, rng: np.random.Generator) -> np.ndarray:
+        """(n_draws x n_lineups): each draw's split of the herd over the chalk lineups (rows sum to 1)."""
+        base = self.weights(n_lineups)
+        if n_lineups == 0:
+            return np.zeros((n_draws, 0))
+        leads = rng.choice(n_lineups, size=n_draws, p=self.lead_probabilities(n_lineups))
+        out = np.empty((n_draws, n_lineups))
+        for lead in np.unique(leads):
+            order = [lead, *[j for j in range(n_lineups) if j != lead]]
+            row = np.empty(n_lineups)
+            row[order] = base
+            out[leads == lead] = row
+        return out
+
+    def expected_weights(self, n_lineups: int) -> np.ndarray:
+        """The mean of `draw_weights` over draws: what the herd holds on average."""
+        base = self.weights(n_lineups)
+        out = np.zeros(n_lineups)
+        for lead, p in enumerate(self.lead_probabilities(n_lineups)):
+            order = [lead, *[j for j in range(n_lineups) if j != lead]]
+            row = np.empty(n_lineups)
+            row[order] = base
+            out += p * row
+        return out
 
 
 def rates_from_features(features: pd.DataFrame) -> FieldRates:
@@ -449,15 +488,30 @@ def generate_field(
     rest = n - len(herd_rows)
     held = np.bincount(herd_rows.ravel(), minlength=len(slate)) / max(n, 1)
     need = np.maximum(t - held, 0.0) * n / max(rest, 1)  # what the sampler's lineups must hold
-    w = np.maximum(need, 1e-6).copy()
     size = min(rake_size or RAKE_SIZE, max(rest, 1000))
+    w = rake_weights(slate, rates, need, rng, rake_rounds=rake_rounds, size=size)
+    lineups = sample_lineups(slate, rates, rest, w, rng) if rest > 0 else herd_rows[:0]
+    return Field(slate=slate, lineups=np.concatenate([herd_rows, lineups]), weights=w)
+
+
+def rake_weights(
+    slate: Slate,
+    rates: FieldRates,
+    need: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    rake_rounds: int = RAKE_ROUNDS,
+    size: int = RAKE_SIZE,
+) -> np.ndarray:
+    """The sampler's per-player weights after raking toward `need` (each player's share of the sampler's
+    lineups): each round samples `size` lineups and multiplies each weight by need over the share held."""
+    w = np.maximum(need, 1e-6).copy()
     for _ in range(rake_rounds):
         lineups = sample_lineups(slate, rates, size, w, rng)
         got = np.bincount(lineups.ravel(), minlength=len(slate)) / max(len(lineups), 1)
         ratio = np.where(got > 0, need / np.maximum(got, 1e-9), 2.0)
         w = np.maximum(w * np.clip(ratio, 0.2, 5.0) ** RAKE_POWER, 1e-9)
-    lineups = sample_lineups(slate, rates, rest, w, rng) if rest > 0 else herd_rows[:0]
-    return Field(slate=slate, lineups=np.concatenate([herd_rows, lineups]), weights=w)
+    return w
 
 
 def model_copies(field: Field, own: Mapping[str, float] | np.ndarray, model, entries: int) -> np.ndarray:

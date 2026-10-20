@@ -264,6 +264,26 @@ def with_field_own(
     return out
 
 
+def pre_lock_edge(week: int, season: int = SEASON) -> pd.DataFrame:
+    """The last pre-lock EdgeRaw snapshot with a `CalPts` for every scored row (the calibration fitted on the
+    weeks before, where the snapshot had none)."""
+    from dfs import results_update
+
+    path, _ = retro.edge_snapshot_before(week, season)
+    return retro.with_calpts(pd.read_csv(path), results_update.load_all_scored(season), week, season)
+
+
+def slate_specs(slate: field_gen.Slate, frame: pd.DataFrame, edge: pd.DataFrame) -> list:
+    """Each slate player's simulator spec (`sim_inputs.build_specs` on the pre-lock EdgeRaw, CalPts first),
+    joined by normalised name and team; None for a player the simulator cannot rate."""
+    from dfs import sim_inputs
+
+    specs = sim_inputs.build_specs(edge)
+    by_key = {(normalize_name(n), s.team.upper()): s for n, s in specs.items()}
+    team = dict(zip(frame["name"], frame["team"], strict=False))
+    return [by_key.get((name, str(team.get(name, "")).upper())) for name in slate.names]
+
+
 def week_points(contests: list[RealContest], week: int) -> dict[str, float]:
     """Every player's actual DK points that week, from the union of the week's contests' player tables."""
     out: dict[str, float] = {}
@@ -394,4 +414,239 @@ def validate_contest(
         "top1_real": rl["top1"],
         "top1_fixed": fixed_mean + 63.2,
         "n_gen": len(gen),
+    }
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Part 4: the retro of the contest simulator
+# ---------------------------------------------------------------------------------------------------------
+
+ME = "srwildman"
+FIELD_SAMPLE = {"gpp": 60, "cash": 40}  # random real field lineups per week, besides all of Sam's
+
+
+def lead_ranks(contests: list[RealContest], keys: dict[int, list[tuple[str, ...]]]) -> dict[int, int]:
+    """Per week, the product rank (0 = highest) of the chalk lineup the week's real contests copied most
+    (copies pooled over every contest of the week; weeks where no chalk lineup was copied are left out)."""
+    out = {}
+    for week, ks in keys.items():
+        total = np.zeros(len(ks))
+        for c in contests:
+            if c.week == week:
+                cp = c.copies()
+                total += [cp.get(k, 0) for k in ks]
+        if total.max() > 1:
+            out[week] = int(total.argmax())
+    return out
+
+
+def fit_lead_decay(ranks: dict[int, int], *, exclude_week: int | None) -> float:
+    """The geometric decay of the lead lineup's rank, by maximum likelihood on the other weeks' ranks:
+    `q = mean / (1 + mean)` (0 when every lead was the highest-product lineup)."""
+    rs = [r for w, r in ranks.items() if w != exclude_week]
+    if not rs:
+        return 0.0
+    mean = float(np.mean(rs))
+    return mean / (1.0 + mean)
+
+
+def real_lineup_indices(slots, index: dict[str, int]) -> np.ndarray | None:
+    k = [index.get(normalize_name(n)) for _, n in slots]
+    return None if any(i is None for i in k) else np.sort(np.array(k))
+
+
+def realized_payout(
+    c: RealContest, kind: payouts.ContestKind, lineup_names: tuple[str, ...], points: float, own_entry: bool
+) -> float:
+    """What the lineup was actually paid (or would have been, entered once more) in contest `c`: its place
+    among the real scores and its real copies, paid from the contest's table."""
+    from dfs.sim import contest_sim as csim
+
+    copies = c.copies().get(lineup_names, 0)
+    if own_entry:
+        copies = max(copies - 1, 0)
+    place = 1 + int((c.points > points + 1e-9).sum())
+    cum = csim._cumulative(payouts.payout_table(kind))  # noqa: SLF001
+    return float(csim.block_payout(cum, np.array([place], float), np.array([copies], float))[0])
+
+
+def retro_week(
+    week: int,
+    contests: list[RealContest],
+    *,
+    keys: dict[int, list[tuple[str, ...]]],
+    chalks: dict[int, np.ndarray],
+    min_cash: payouts.MinCash,
+    n_sims: int = 4000,
+    seed: int = 0,
+) -> dict:
+    """One week of the retro: Sam's real lineups and a sample of real field lineups, simulated in every real
+    contest of the week from pre-lock inputs (fields, herd, rates fitted on the other weeks), beside today's
+    Cash % / Top 1% and what each lineup was actually paid. Returns frames for `summarize_retro`."""
+    from dfs import sim_inputs
+    from dfs.sim import contest_sim as csim
+    from dfs.sim import field as field_model
+    from dfs.sim import simulate
+
+    week_cs = [c for c in contests if c.week == week]
+    frame = week_slate_frame(week)
+    edge = pre_lock_edge(week)
+    slate = slate_for(frame, "tffb")
+    specs = slate_specs(slate, frame, edge)
+    index = {n: i for i, n in enumerate(slate.names)}
+    chalk = chalks[week]
+    ranks = lead_ranks(contests, keys)
+    lead = fit_lead_decay(ranks, exclude_week=week)
+    herd_keys = {w: set(v) for w, v in keys.items()}
+    fields = {}
+    for fmt in sorted({c.fmt for c in week_cs}):
+        rates = rates_for(contests, fmt, exclude_week=week, herd_keys=herd_keys)
+        h = fit_herd(contests, keys, fmt, exclude_week=week)
+        herd = field_gen.HerdModel(share=h.share, decay=h.decay, k=h.k, lead_decay=lead)
+        targets = slate.targets(dups.double_up_ownership if fmt == "cash" else None)
+        fields[fmt] = csim.build_field(slate, rates, herd, fmt=fmt, chalk=chalk, targets=targets, seed=seed)
+
+    # candidates: every lineup of Sam's that week, then a random sample of real field lineups
+    rng = np.random.default_rng(seed + week)
+    cand: dict[tuple, dict] = {}
+    for c in week_cs:
+        rows = c.standings.lineups
+        mine = rows["entry_name"].astype(str).str.casefold() == ME
+        for slots in rows.loc[mine, "slots"]:
+            idx = real_lineup_indices(slots, index)
+            if idx is not None and all(specs[i] is not None for i in idx):
+                cand.setdefault(tuple(idx), {"source": "sam", "entered": set()})["entered"].add(c.contest_id)
+    for fmt, n in FIELD_SAMPLE.items():
+        pool = [(c, s) for c in week_cs if c.fmt == fmt for s in c.standings.lineups["slots"]]
+        if not pool:
+            continue
+        for j in rng.permutation(len(pool))[: n * 3]:
+            c, slots = pool[j]
+            idx = real_lineup_indices(slots, index)
+            if idx is None or any(specs[i] is None for i in idx) or tuple(idx) in cand:
+                continue
+            cand[tuple(idx)] = {"source": f"field_{fmt}", "entered": {c.contest_id}}
+            if sum(v["source"] == f"field_{fmt}" for v in cand.values()) >= n:
+                break
+    lineups = np.array(list(cand), dtype=int)
+    labels = [f"w{week}-{i}" for i in range(len(lineups))]
+    kinds = []
+    for c in week_cs:
+        k = c.kind
+        if k.format in payouts.GPP_FORMATS:
+            k = payouts.ContestKind(
+                k.series + f" #{c.contest_id}",
+                k.format,
+                k.entries,
+                k.places_paid,
+                k.prize_pool,
+                k.fee,
+                min_cash.lookup(c.series, c.fee, c.format),
+                k.max_entries,
+            )
+        else:
+            k = payouts.ContestKind(
+                k.series + f" #{c.contest_id}",
+                k.format,
+                k.entries,
+                k.places_paid,
+                k.prize_pool,
+                k.fee,
+                None,
+                k.max_entries,
+            )
+        kinds.append(k)
+    res = csim.simulate_contests(fields, specs, lineups, kinds, labels=labels, n_sims=n_sims, seed=seed)
+    fixed_herd = csim.simulate_contests(
+        fields, specs, lineups[:1], kinds, n_sims=n_sims, seed=seed, per_draw_herd=False
+    )
+
+    # today's Cash % / Top 1% (relative lines on the projected field), same lineups
+    edge_specs = sim_inputs.build_specs(edge)
+    by_key = {(normalize_name(n), s.team.upper()): s for n, s in edge_specs.items()}
+    team = dict(zip(frame["name"], frame["team"], strict=False))
+    as_specs = [[by_key[(slate.names[i], str(team[slate.names[i]]).upper())] for i in row] for row in lineups]
+    fm = field_model.build_field(
+        edge_specs.values(), sim_inputs.ownership_by_name(edge), cash_offset=0.6, top_offset=63.2
+    )
+    base = simulate.simulate_lineups(as_specs, n_sims=n_sims, seed=seed, field=fm)
+    baseline = pd.DataFrame(
+        {
+            "lineup": labels,
+            "cash_pct": [s.p_cash for s in base.lineups],
+            "top1_pct": [s.p_gpp for s in base.lineups],
+            "mean": [s.mean for s in base.lineups],
+        }
+    )
+
+    # realized
+    pts = week_points(contests, week)
+    real_rows = []
+    for (key, meta), label in zip(cand.items(), labels, strict=True):
+        names = tuple(sorted(slate.names[i] for i in key))
+        for c, k in zip(week_cs, kinds, strict=True):
+            p = sum(c.fpts.get(n, pts.get(n, 0.0)) for n in names)
+            real_rows.append(
+                {
+                    "lineup": label,
+                    "contest": k.series,
+                    "source": meta["source"],
+                    "entered": c.contest_id in meta["entered"],
+                    "points": p,
+                    "realized": realized_payout(c, k, names, p, c.contest_id in meta["entered"]),
+                }
+            )
+    table = res.table.merge(pd.DataFrame(real_rows), on=["lineup", "contest"]).merge(baseline, on="lineup")
+    table["week"] = week
+    table["fmt"] = np.where(table["format"].isin(list(CASH_FORMATS)), "cash", "gpp")
+    table["realized_roi"] = table["realized"] / table["fee"] - 1.0
+
+    # line coverage: the real lines against the sim's 10-90% band, with and without the per-draw herd
+    cover = []
+    for c, k in zip(week_cs, kinds, strict=True):
+        real = {
+            "cash": float(c.standings.profile.cash_line),
+            "top1": float(c.points[max(1, round(0.01 * len(c.points))) - 1]),
+        }
+        for mode, r in (("per_draw", res), ("fixed", fixed_herd)):
+            band = r.lines[k.series]
+            for j, line in enumerate(("cash", "top1")):
+                lo, mid, hi = np.percentile(band[:, j], [10, 50, 90])
+                cover.append(
+                    {
+                        "week": week,
+                        "contest": k.series,
+                        "fmt": c.fmt,
+                        "entries": c.entries,
+                        "mode": mode,
+                        "line": line,
+                        "real": real[line],
+                        "p10": lo,
+                        "p50": mid,
+                        "p90": hi,
+                        "inside": lo <= real[line] <= hi,
+                    }
+                )
+
+    # Opt% / SimLev against the real top 1% of the week's big GPPs
+    big = [c for c in week_cs if c.fmt == "gpp" and c.entries >= 700]
+    opt = res.opt.copy()
+    if big:
+        top_counts, n_top = collections.Counter(), 0
+        for c in big:
+            rows = c.standings.lineups.sort_values("points", ascending=False)
+            cut = max(1, round(0.01 * len(rows)))
+            for slots in rows["slots"].head(cut):
+                top_counts.update(normalize_name(n) for _, n in slots)
+            n_top += cut
+        real_own = pd.DataFrame({c.contest_id: pd.Series(c.own) for c in big}).fillna(0.0).mean(axis=1)
+        opt["real_opt"] = opt["name"].map(lambda n: top_counts.get(n, 0) / n_top)
+        opt["real_own"] = opt["name"].map(real_own).fillna(0.0)
+        opt["week"] = week
+    return {
+        "table": table,
+        "cover": pd.DataFrame(cover),
+        "opt": opt,
+        "lead_decay": lead,
+        "seconds": res.seconds,
     }
