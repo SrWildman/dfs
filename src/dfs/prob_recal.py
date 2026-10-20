@@ -148,9 +148,9 @@ def _logit(p):
 
 
 def fit_platt(rows: pd.DataFrame, prior_n: int = PRIOR_N) -> tuple[dict, dict]:
-    """`(platt, n)`: per measure, the (a, b) minimising the log loss of `logistic(c + a + b * (logit(p) - c))`,
-    c the centre, over the rows' shown probabilities (`<measure>` columns), then pulled toward (0, 1) by
-    `prior_n / (n + prior_n)`."""
+    """`(platt, n)`: per measure, the (a, b) minimising the log loss of
+    `logistic(c + a + b * (logit(p) - c))`, c the centre, over the rows' shown probabilities (`<measure>`
+    columns), then pulled toward (0, 1) by `prior_n / (n + prior_n)`."""
     from scipy.optimize import minimize
 
     y_all = outcomes(rows)
