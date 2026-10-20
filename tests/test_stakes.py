@@ -155,7 +155,7 @@ BOTH_POSITIVE = {CASH: stat(300, 0.30), GPP: stat(300, 0.10)}
 
 def plan(cfg=None, **kw):
     args = {"budget": 200.0, "bankroll": 1000.0, "stats": BOTH_POSITIVE} | kw
-    return stakes.make_plan(cfg or StakesConfig(), **args)
+    return stakes.make_plan(cfg or StakesConfig(betting_pct=0), **args)
 
 
 def test_rules_unset_the_plan_is_the_budget_split_by_roi_with_no_limits_and_no_warnings():
@@ -164,40 +164,46 @@ def test_rules_unset_the_plan_is_the_budget_split_by_roi_with_no_limits_and_no_w
     assert p.week_cap is None and p.entry_cap is None
     assert p.amounts[CASH] == pytest.approx(150.0) and p.amounts[GPP] == pytest.approx(50.0)
     assert p.warnings == []
-    assert stakes.plan_line(p) == "Your rules give: cash $150.00, GPP $50.00; largest entry no limit set"
-    assert stakes.unset_rules(StakesConfig()) == ["max_pct_bankroll_per_week", "max_entry_fee_pct"]
+    assert (
+        stakes.plan_line(p)
+        == "Your rules give: cash $150.00, GPP $50.00, betting $0.00; largest entry no limit set"
+    )
+    assert stakes.unset_rules(StakesConfig(betting_pct=0)) == [
+        "max_pct_bankroll_per_week",
+        "max_entry_fee_pct",
+    ]
 
 
 def test_max_entry_fee_pct_gives_the_largest_entry():
-    p = plan(StakesConfig(max_entry_fee_pct=2.5))
+    p = plan(StakesConfig(betting_pct=0, max_entry_fee_pct=2.5))
     assert p.entry_cap == pytest.approx(25.0)
     assert stakes.plan_line(p).endswith("largest entry $25.00")
     assert p.arithmetic["entry_cap"] == "2.5% x $1,000.00"
 
 
 def test_a_weekly_cap_below_the_budget_lowers_the_spend_and_warns():
-    p = plan(StakesConfig(max_pct_bankroll_per_week=10))
+    p = plan(StakesConfig(betting_pct=0, max_pct_bankroll_per_week=10))
     assert p.week_cap == pytest.approx(100.0) and p.spend == pytest.approx(100.0)
     assert p.amounts[CASH] == pytest.approx(75.0)
     assert any("above your max_pct_bankroll_per_week" in w and "$100.00" in w for w in p.warnings)
 
 
 def test_a_weekly_cap_above_the_budget_changes_nothing():
-    p = plan(StakesConfig(max_pct_bankroll_per_week=50))
+    p = plan(StakesConfig(betting_pct=0, max_pct_bankroll_per_week=50))
     assert p.spend == 200.0 and p.warnings == []
 
 
 def test_this_weeks_ledgers_over_the_plan_or_over_the_entry_rule_warn():
-    p = plan(StakesConfig(max_entry_fee_pct=1), spent_so_far=260.0, largest_entry_so_far=12.0)
+    p = plan(StakesConfig(betting_pct=0, max_entry_fee_pct=1), spent_so_far=260.0, largest_entry_so_far=12.0)
     text = " ".join(p.warnings)
     assert "already hold $260.00" in text and "above $200.00" in text
     assert "largest entry fee $12.00 is above your max_entry_fee_pct rule" in text
-    ok = plan(StakesConfig(max_entry_fee_pct=1), spent_so_far=200.0, largest_entry_so_far=10.0)
+    ok = plan(StakesConfig(betting_pct=0, max_entry_fee_pct=1), spent_so_far=200.0, largest_entry_so_far=10.0)
     assert ok.warnings == []
 
 
 def test_a_split_override_replaces_the_default_and_warns_only_when_it_funds_a_floored_bucket():
-    cfg = StakesConfig(split={"cash": 40, "gpp": 60})
+    cfg = StakesConfig(betting_pct=0, split={"cash": 40, "gpp": 60})
     p = plan(cfg)
     assert p.split_source == "your split"
     assert p.amounts[CASH] == pytest.approx(80.0) and p.amounts[GPP] == pytest.approx(120.0)
@@ -205,32 +211,32 @@ def test_a_split_override_replaces_the_default_and_warns_only_when_it_funds_a_fl
     losing = {CASH: stat(300, 0.30), GPP: stat(300, -0.20)}
     w = plan(cfg, stats=losing).warnings
     assert len(w) == 1 and "puts 60% on GPP" in w[0] and "-20.0%" in w[0]
-    zero = plan(StakesConfig(split={"cash": 100, "gpp": 0}), stats=losing)
+    zero = plan(StakesConfig(betting_pct=0, split={"cash": 100, "gpp": 0}), stats=losing)
     assert zero.warnings == []
 
 
 def test_no_bucket_above_the_floor_allocates_nothing_and_says_how_to_override():
     losing = {CASH: stat(300, -0.1), GPP: stat(300, -0.2)}
     p = plan(stats=losing)
-    assert p.amounts == {CASH: 0.0, GPP: 0.0}
+    assert p.amounts == {CASH: 0.0, GPP: 0.0, stakes.BETTING: 0.0}
     assert any("set [stakes] split" in w for w in p.warnings)
 
 
 def test_a_rule_set_with_no_bankroll_is_reported_not_guessed():
-    p = plan(StakesConfig(max_pct_bankroll_per_week=5, max_entry_fee_pct=1), bankroll=None)
+    p = plan(StakesConfig(betting_pct=0, max_pct_bankroll_per_week=5, max_entry_fee_pct=1), bankroll=None)
     assert p.week_cap is None and p.entry_cap is None and p.spend == 200.0
     assert sum("Starting Bankroll" in w for w in p.warnings) == 2
 
 
 def test_a_blank_budget_is_reported_and_leaves_the_amounts_blank():
     p = plan(budget=None)
-    assert p.spend is None and p.amounts == {CASH: None, GPP: None}
+    assert p.spend is None and p.amounts == {CASH: None, GPP: None, stakes.BETTING: None}
     assert any("Weekly Budget cell is blank" in w for w in p.warnings)
-    assert stakes.plan_line(p) == "Your rules give: cash –, GPP –; largest entry no limit set"
+    assert stakes.plan_line(p) == "Your rules give: cash –, GPP –, betting –; largest entry no limit set"
 
 
 def test_a_blank_budget_with_a_weekly_rule_plans_the_rule():
-    p = plan(StakesConfig(max_pct_bankroll_per_week=10), budget=None)
+    p = plan(StakesConfig(betting_pct=0, max_pct_bankroll_per_week=10), budget=None)
     assert p.spend == pytest.approx(100.0)
 
 
@@ -269,3 +275,19 @@ def test_too_few_weeks_gives_no_numbers_and_says_so():
     p = stakes.propose(weekly_log([10, -10, 5]), 500.0)
     assert p.max_pct_bankroll_per_week is None and p.max_entry_fee_pct is None
     assert "Not enough history" in p.lines[0]
+
+
+def test_betting_is_its_own_budget_line_and_the_contest_split_shares_the_rest():
+    p = plan(StakesConfig())  # betting_pct defaults to 20
+    assert p.shares[stakes.BETTING] == pytest.approx(0.20)
+    assert p.shares[stakes.CASH] + p.shares[stakes.GPP] == pytest.approx(0.80)
+    assert p.amounts[stakes.BETTING] == pytest.approx(0.20 * p.spend)
+    assert sum(p.amounts.values()) == pytest.approx(p.spend)  # the three lines add up to the budget
+    assert "betting " in stakes.plan_line(p)
+
+
+def test_a_betting_share_of_zero_leaves_the_contest_split_whole_and_an_override_is_scaled_too():
+    p = plan(StakesConfig(betting_pct=0, split={"cash": 40, "gpp": 60}))
+    assert p.amounts[stakes.BETTING] == 0 and p.shares[stakes.CASH] == pytest.approx(0.4)
+    q = plan(StakesConfig(betting_pct=50, split={"cash": 40, "gpp": 60}))
+    assert q.shares[stakes.CASH] == pytest.approx(0.2) and q.shares[stakes.GPP] == pytest.approx(0.3)

@@ -209,7 +209,7 @@ def build_layout(
             "your [stakes] split" if plan.split_source == "your split" else "default: ROI-based, see below",
         ]
     )
-    for bucket in stakes.BUCKETS:
+    for bucket in stakes.PLAN_BUCKETS:
         amount = plan.amounts[bucket]
         row = val(
             [

@@ -36,7 +36,7 @@ LOG = typed_log(
 
 def build(cfg=None, inputs=None, typed=LOG):
     inputs = inputs or ss.SheetInputs(budget=200.0, bankroll=1000.0, spent=None, largest_entry=None)
-    return ss.compute(cfg or StakesConfig(), typed, inputs, 2026)
+    return ss.compute(cfg or StakesConfig(betting_pct=0), typed, inputs, 2026)
 
 
 def texts(layout):
@@ -92,7 +92,7 @@ def test_unset_rules_say_so_and_show_the_plan_with_them_off():
 
 
 def test_set_rules_show_their_arithmetic_and_a_broken_rule_is_a_warning_row():
-    cfg = StakesConfig(max_pct_bankroll_per_week=10, max_entry_fee_pct=2)
+    cfg = StakesConfig(betting_pct=0, max_pct_bankroll_per_week=10, max_entry_fee_pct=2)
     _, plan, layout = build(cfg)
     flat = " ".join(texts(layout))
     assert "10% x $1,000.00 = $100.00" in flat and "2% x $1,000.00 = $20.00" in flat
@@ -113,7 +113,11 @@ def test_an_empty_log_still_builds_every_section():
     titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
     assert len(titles) == 3
     assert "All formats" in [r[0] for r in layout.rows]
-    assert plan.amounts == {stakes.CASH: 0.0, stakes.GPP: 0.0}  # nothing to allocate on: no history
+    assert plan.amounts == {
+        stakes.CASH: 0.0,
+        stakes.GPP: 0.0,
+        stakes.BETTING: 0.0,
+    }  # nothing to allocate on: no history
 
 
 def test_every_header_in_the_block_has_a_hover_note():
@@ -359,7 +363,7 @@ def test_week_new_prints_the_block_summary_and_its_warnings(monkeypatch, capsys)
 
     stat = stakes.Stat(300, 1.0, 0.1, 0.1, 0.5, 5.0, 8)
     plan = stakes.make_plan(
-        StakesConfig(max_pct_bankroll_per_week=10),
+        StakesConfig(betting_pct=0, max_pct_bankroll_per_week=10),
         budget=200.0,
         bankroll=500.0,
         stats={stakes.CASH: stat, stakes.GPP: stat},
@@ -374,7 +378,9 @@ def test_no_cell_of_the_block_is_cut_off_at_the_widths_it_is_written_with():
     """`dfs setup audit-style` reads Bankroll for clipping: the block must fit `write_stakes`' widths."""
     from dfs.sheet_clipping import find_clipped
 
-    cfg = StakesConfig(max_pct_bankroll_per_week=10, max_entry_fee_pct=2, split={"cash": 40, "gpp": 60})
+    cfg = StakesConfig(
+        betting_pct=0, max_pct_bankroll_per_week=10, max_entry_fee_pct=2, split={"cash": 40, "gpp": 60}
+    )
     _, _, layout = build(cfg)
 
     def shown(value):

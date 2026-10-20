@@ -47,7 +47,9 @@ from dfs.sheet_contests import _cashed
 
 CASH, GPP = "cash", "gpp"
 BUCKETS = (CASH, GPP)
-BUCKET_LABEL = {CASH: "Cash", GPP: "GPP"}
+BUCKET_LABEL = {CASH: "Cash", GPP: "GPP", "betting": "Betting"}
+BETTING = "betting"  # a budget line only: `[stakes] betting_pct` of the weekly budget, never split by ROI
+PLAN_BUCKETS = (CASH, GPP, BETTING)
 
 SHRINK_ENTRIES = 100  # a bucket reaches full weight on its own ROI at this many entries
 ROI_FLOOR = 0.0  # all-seasons ROI below this: the default split allocates nothing to the bucket
@@ -281,7 +283,12 @@ def make_plan(
                 "Neither Cash nor GPP clears the ROI floor over your history, so the default split "
                 "allocates $0; set [stakes] split to allocate anyway."
             )
-    amounts = {b: (None if spend is None else spend * shares[b]) for b in BUCKETS}
+    betting = cfg.betting_pct / 100
+    shares = {
+        b: s * (1 - betting) for b, s in shares.items()
+    }  # the contest split shares the rest of the budget
+    shares[BETTING] = betting
+    amounts = {b: (None if spend is None else spend * shares[b]) for b in PLAN_BUCKETS}
 
     if spend is not None and spent_so_far is not None and spent_so_far > spend + 1e-9:
         warnings.append(
@@ -301,8 +308,8 @@ def plan_line(plan: Plan) -> str:
     """The sentence the plan leads with: "Your rules give: cash $X, GPP $Y; largest entry $Z"."""
     largest = money(plan.entry_cap) if plan.entry_cap is not None else "no limit set"
     return (
-        f"Your rules give: cash {money(plan.amounts[CASH])}, GPP {money(plan.amounts[GPP])}; "
-        f"largest entry {largest}"
+        f"Your rules give: cash {money(plan.amounts[CASH])}, GPP {money(plan.amounts[GPP])}, "
+        f"betting {money(plan.amounts[BETTING])}; largest entry {largest}"
     )
 
 

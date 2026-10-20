@@ -273,6 +273,10 @@ class StakesConfig(BaseModel):
     max_pct_bankroll_per_week: float | None = Field(default=None, gt=0, le=100)
     max_entry_fee_pct: float | None = Field(default=None, gt=0, le=100)
     split: StakesSplitConfig | None = None
+    # Share of the weekly budget set aside for betting, as its own budget line (percent; Sam, 2026-10-20: 20).
+    # Only a line in the plan: nothing here tracks a bet or talks to a sportsbook. The rest is split between
+    # Double Up and single-entry GPP as before.
+    betting_pct: float = Field(default=20.0, ge=0, le=100)
 
 
 class SuggestConfig(BaseModel):
