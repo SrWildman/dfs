@@ -303,6 +303,9 @@ class _Client:
     def describe(self):
         return ("Week 6", "https://example.test/sheet")
 
+    def tab_exists(self, tab):
+        return False  # no Suggested tab yet: nothing to read back
+
     def read_range(self, tab, a1):
         from dfs.derived import edge_sheet_index
 
@@ -319,7 +322,10 @@ class _Client:
         return rows
 
 
-def test_suggest_passes_the_flag_the_field_and_the_lines_text_through(monkeypatch, capsys):
+def test_suggest_passes_the_flag_the_field_and_the_lines_text_through(monkeypatch, capsys, tmp_path):
+    from dfs import suggest_state
+
+    monkeypatch.setattr(suggest_state, "STATE_DIR", tmp_path)  # rounds are saved: never to the real data/
     edge = _owned_slate(teams=4)
     monkeypatch.setattr(cli.store, "load_current", lambda name: edge)
     cfg = SimpleNamespace(

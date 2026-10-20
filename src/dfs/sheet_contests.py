@@ -34,6 +34,7 @@ import pandas as pd
 
 from dfs.contests import history
 from dfs.contests import series as series_mod
+from dfs.contests.decisions import short_series
 from dfs.sheet_clipping import fit_tab_widths
 from dfs.sheet_column_notes import CONTESTS_NOTES, apply_notes_to_values
 from dfs.sheets import SheetsClient
@@ -80,6 +81,10 @@ class Tables:
     field_stats: pd.DataFrame
     h2h_bands: pd.DataFrame
     h2h_opponents: pd.DataFrame
+    winners: pd.DataFrame = field(default_factory=pd.DataFrame)  # contests/winners.csv: top 1% vs field
+    decisions: pd.DataFrame = field(default_factory=pd.DataFrame)  # decisions.csv: his entries, scored
+    swings: pd.DataFrame = field(default_factory=pd.DataFrame)  # decision_swings.csv: biggest swing a contest
+    pool_hits: pd.DataFrame = field(default_factory=pd.DataFrame)  # pool_hits.csv: logged at each week close
 
 
 def _read(path: Path, **kw) -> pd.DataFrame:
@@ -96,6 +101,10 @@ def load_tables(folder: Path) -> Tables:
         field_stats=_read(folder / "field_stats.csv", dtype={"contest_id": str}),
         h2h_bands=_read(folder / "h2h_bands.csv"),
         h2h_opponents=_read(folder / "h2h_opponents.csv"),
+        winners=_read(folder / "winners.csv"),
+        decisions=_read(folder / "decisions.csv", dtype={"contest_id": str}),
+        swings=_read(folder / "decision_swings.csv", dtype={"contest_id": str}),
+        pool_hits=_read(folder / "pool_hits.csv"),
     )
 
 
@@ -330,6 +339,248 @@ def _range(letter: str, first: int, last: int) -> str:
     return f"{letter}{first}:{letter}{last}"
 
 
+DECISIONS_HEADERS = ["Your decisions, season", "So far", "Based on"]
+DASH = "-"
+
+
+def _rate(hits: float, total: float) -> str:
+    return f"{hits / total:.0%}" if total else DASH
+
+
+def _top(pct: float) -> str:
+    """A finish share as 'top 4%' (lower is better)."""
+    return f"top {pct * 100:.0f}%" if pct >= 0.01 else f"top {pct * 100:.1f}%"
+
+
+def decision_lines(tables: Tables, season: int) -> tuple[int | None, list[str]]:
+    """`(week, five lines)` for the latest week with graded entries of `season`: the Monday post-mortem. Each
+    line leads with numbers; a measure with no data reads '-'."""
+    d = tables.decisions
+    if d.empty or "season" not in d.columns:
+        return None, []
+    d = d[d["season"] == season]
+    if d.empty:
+        return None, []
+    week = int(d["week"].max())
+    cur = d[d["week"] == week]
+    cash, gpp = cur[cur["cls"] == "cash"], cur[cur["cls"] == "gpp"]
+    lines = []
+
+    if cash.empty:
+        lines.append(f"Cash: {DASH} (no double-up entries in Week {week}).")
+    else:
+        per = "; ".join(
+            f"{short_series(r.series)} {'cashed by' if r.cashed else 'missed by'} {abs(r.margin):.1f}"
+            if r.margin == r.margin
+            else f"{short_series(r.series)} {DASH}"
+            for r in cash.sort_values("margin", ascending=False).itertuples(index=False)
+        )
+        copies = int(cash["copies"].max())
+        lines.append(
+            f"Cash: scored {', '.join(f'{p:.1f}' for p in sorted(set(cash['points'].round(1))))}  -  {per}. "
+            f"Copies of your lineup in the field: {copies + 1 if copies else 1} identical "
+            f"entr{'ies' if copies else 'y'} (including yours)."
+        )
+
+    if gpp.empty:
+        lines.append(f"GPP: {DASH} (no GPP entries in Week {week}).")
+    else:
+        best = gpp.loc[gpp["pct"].idxmin()]
+        by_contest = "; ".join(
+            f"{short_series(series)} {', '.join(_top(p) for p in sub.sort_values('pct')['pct'])}"
+            for series, sub in gpp.groupby("series", sort=False)
+        )
+        lines.append(
+            f"GPP: {len(gpp)} entries, average finish {_top(gpp['pct'].mean())}, "
+            f"{int(gpp['cashed'].sum())} cashed, best {_top(best['pct'])} in {short_series(best['series'])}. "
+            f"{by_contest}."
+        )
+
+    swings = tables.swings
+    swings = swings[(swings["season"] == season) & (swings["week"] == week)] if len(swings) else swings
+    if swings.empty:
+        lines.append(f"Biggest swing: {DASH}.")
+    else:
+        s = swings.loc[swings["swing"].abs().idxmax()]
+        lines.append(
+            f"Biggest swing: you played {s['player']} ({s['player_own']:.0%} owned, "
+            f"{s['player_pts']:.1f} pts) instead of {s['alt']} ({s['alt_own']:.0%}, {s['alt_pts']:.1f} pts), "
+            "the field's favourite at the "
+            f"same position and price: {'won' if s['swing'] > 0 else 'cost'} {abs(s['swing']):.1f} points "
+            f"in the {short_series(s['series'])}."
+        )
+
+    hits = tables.pool_hits
+    hit = hits[(hits["season"] == season) & (hits["week"] == week)] if len(hits) else hits
+    if hit.empty:
+        lines.append(f"Pool hit rate: {DASH} (not logged for Week {week}: it needs your pool at the close).")
+    else:
+        h = hit.iloc[0]
+        lines.append(
+            f"Pool hit rate: {int(h['pooled_hits'])} of {int(h['pooled'])} pooled players beat their CalPts "
+            f"({_rate(h['pooled_hits'], h['pooled'])}), against {int(h['likes_hits'])} of {int(h['likes'])} "
+            f"model favourites you left out ({_rate(h['likes_hits'], h['likes'])})."
+        )
+
+    sib = cur[cur["sib_total"] > 0]
+    if sib.empty:
+        lines.append(
+            f"Contest choice: {DASH} (no other contest of the same kind in your standings files that week)."
+        )
+    else:
+        lines.append(
+            f"Contest choice: the same lineups would have cashed in {int(sib['sib_cashed'].sum())} of "
+            f"{int(sib['sib_total'].sum())} (lineup, other contest) pairs among the contests in your "
+            "standings files."
+        )
+    return week, lines
+
+
+def decision_season_rows(tables: Tables, season: int) -> list[list[str]]:
+    """The season block: the same measures added up over every week in the standings files."""
+    d = tables.decisions
+    d = d[d["season"] == season] if len(d) and "season" in d.columns else d
+    if d.empty:
+        return []
+    weeks = int(d["week"].nunique())
+    cash, gpp = d[d["cls"] == "cash"], d[d["cls"] == "gpp"]
+    rows = []
+    if len(cash):
+        margin = cash["margin"].dropna()
+        rows.append(
+            [
+                "Cash entries cashed",
+                f"{int(cash['cashed'].sum())} of {len(cash)} ({_rate(cash['cashed'].sum(), len(cash))})",
+                f"{weeks} week(s)",
+            ]
+        )
+        if len(margin):
+            rows.append(
+                ["Cash: average margin to the cash line", f"{margin.mean():+.1f}", f"{len(margin)} entries"]
+            )
+        rows.append(
+            ["Cash: most copies of one lineup", f"{int(cash['copies'].max()) + 1}", f"{len(cash)} entries"]
+        )
+    if len(gpp):
+        rows.append(["GPP: average finish", _top(gpp["pct"].mean()), f"{len(gpp)} entries"])
+        rows.append(
+            [
+                "GPP: entries in the top 10%",
+                _rate((gpp["pct"] <= 0.10).sum(), len(gpp)),
+                f"{len(gpp)} entries",
+            ]
+        )
+        rows.append(["GPP: entries cashed", _rate(gpp["cashed"].sum(), len(gpp)), f"{len(gpp)} entries"])
+    swings = tables.swings
+    swings = swings[swings["season"] == season] if len(swings) else swings
+    if len(swings):
+        per_week = swings.loc[swings.groupby("week")["swing"].apply(lambda s: s.abs().idxmax())]
+        rows.append(
+            [
+                "Biggest weekly swing: won / cost",
+                f"{int((per_week['swing'] > 0).sum())} won, {int((per_week['swing'] < 0).sum())} cost",
+                f"{len(per_week)} week(s)",
+            ]
+        )
+    hits = tables.pool_hits
+    hits = hits[hits["season"] == season] if len(hits) else hits
+    if len(hits):
+        rows.append(
+            [
+                "Pool hit rate (pooled / model favourites left out)",
+                f"{_rate(hits['pooled_hits'].sum(), hits['pooled'].sum())} / "
+                f"{_rate(hits['likes_hits'].sum(), hits['likes'].sum())}",
+                f"{len(hits)} week(s) logged",
+            ]
+        )
+    sib = d[d["sib_total"] > 0]
+    if len(sib):
+        rows.append(
+            [
+                "Same lineups cashing in other contests",
+                f"{int(sib['sib_cashed'].sum())} of {int(sib['sib_total'].sum())} pairs",
+                f"{len(sib)} entries",
+            ]
+        )
+    return rows
+
+
+def _add_decisions(b: _Builder, tables: Tables, season: int) -> None:
+    """The Monday post-mortem of his own decisions, then the season block under it."""
+    week, lines = decision_lines(tables, season)
+    if week is None:
+        return
+    b.section(f"THIS WEEK, YOUR DECISIONS  -  Week {week}")
+    for line in lines:
+        b.verdict(line)
+    b.note(
+        "Everything above comes from your standings files and the actual stats: nothing is estimated. "
+        "Finish is place divided by entrants (lower is better); a swing compares your player's points with "
+        "the field's most-owned player at the same position within $400 of his salary."
+    )
+    rows = decision_season_rows(tables, season)
+    if rows:
+        b.blank()
+        b.header(DECISIONS_HEADERS)
+        for row in rows:
+            b.add(row)
+
+
+WINNERS_HEADERS = [
+    "Build feature",
+    "Top 1% did",
+    "Whole field did",
+    "Gap (top 1% minus field)",
+    "Top-1% lineups counted",
+    "Field lineups counted",
+]
+WINNERS_BIG_GAP = 0.05  # a share that differs by this much between the top 1% and the field is called out
+WINNERS_NOTE = (
+    "The top 1% of each of your large GPPs (700+ entries, standings files only) beside every lineup in "
+    "the same contests, by how the lineup was built. Your stack is the QB and one to three teammates at "
+    "any skill position; the bring-back is a RB, WR or TE of the QB's opponent. Ownership is what the "
+    "contest's own standings say, not the projection. Rebuilt at every week close."
+)
+
+
+def _add_winners(b: _Builder, winners: pd.DataFrame) -> None:
+    """'What wins in your contests': the top 1% of the large GPPs beside the field, one row per measure."""
+    lay = b.layout
+    b.section("WHAT WINS IN YOUR CONTESTS  -  the top 1% of your large GPPs beside the field")
+    if winners.empty:
+        b.verdict("No large GPP standings with lineups yet (700+ entries).")
+        return
+    b.note(WINNERS_NOTE)
+    big = winners[(winners["kind"] == "share") & (winners["diff"].abs() >= WINNERS_BIG_GAP)]
+    if len(big):
+        top = big.reindex(big["diff"].abs().sort_values(ascending=False).index)
+        b.verdict(
+            "Biggest gaps (top 1% minus the field): "
+            + "; ".join(f"{r.measure.lower()} {r.diff * 100:+.0f} pts" for r in top.head(3).itertuples())
+            + f". Based on {int(winners['n_top1'].max()):,} top-1% lineups from "
+            f"{int(winners['contests'].max())} contests: directional, not proof."
+        )
+    b.header(WINNERS_HEADERS)
+    percent, money = [], []
+    first = b.next_row
+    for rec in winners.itertuples(index=False):
+        row = b.next_row
+        if rec.kind == "share" or rec.measure.startswith(("Ownership sum", "DST ownership")):
+            percent.append(row)
+            cells = [rec.top1, rec.field, rec.diff]
+        elif rec.measure.startswith("Salary"):
+            money.append(row)
+            cells = [rec.top1, rec.field, rec.diff]
+        else:  # the ownership product: tiny numbers, shown as text with the ratio as the difference
+            ratio = rec.top1 / rec.field if rec.field else float("nan")
+            cells = [f"{rec.top1:.1e}", f"{rec.field:.1e}", f"{ratio:.2f}x" if ratio == ratio else ""]
+        b.add([rec.measure, *cells, rec.n_top1, rec.n_field])
+    last = b.next_row - 1
+    lay.count_cells += [_range("E", first, last), _range("F", first, last)]
+    lay.percent_cells += [_range(c, r, r) for r in percent for c in "BCD"]
+    lay.money_cells += [_range(c, r, r) for r in money for c in "BCD"]
+
+
 def build_layout(tables: Tables, season: int) -> Layout:
     b = _Builder()
     lay = b.layout
@@ -343,6 +594,8 @@ def build_layout(tables: Tables, season: int) -> Layout:
             "Rebuilt by dfs week close; nothing here is typed."
         ]
     )
+
+    _add_decisions(b, tables, season)
 
     # 1. series
     b.section(f"SERIES YOU PLAY, {season}  -  by format")
@@ -500,6 +753,8 @@ def build_layout(tables: Tables, season: int) -> Layout:
         lay.count_cells += [_range("B", first, last), _range("F", first, last)]
         lay.percent_cells += [_range(c, first, last) for c in "CDEGHIJLMN"]
         lay.number_cells.append(_range("K", first, last))
+
+    _add_winners(b, tables.winners)
 
     # 4. head to head
     b.section("HEAD TO HEAD")

@@ -104,7 +104,11 @@ def test_attach_fills_by_id_and_leaves_unknown_players_blank_never_zero():
 def test_the_edge_finder_columns_are_appended_after_namekey_so_nothing_earlier_moves():
     cols = derived.EDGE_COLUMNS
     assert cols.index("NameKey") < cols.index("CalPts")
-    assert cols[cols.index("NameKey") + 1 :] == [*derived.EDGE_FINDER_COLUMNS, *derived.EDGE_SOURCE_COLUMNS]
+    assert cols[cols.index("NameKey") + 1 :] == [
+        *derived.EDGE_FINDER_COLUMNS,
+        *derived.EDGE_SOURCE_COLUMNS,
+        *derived.FIELD_OWN_COLUMNS,
+    ]
     assert cols.index("AggPts") == 6 and cols.index("Id") + 1 == cols.index("Flag")  # untouched
 
 

@@ -123,3 +123,41 @@ def test_an_analysis_failure_is_reported_and_never_raised(world, monkeypatch):
     )
     report = contests_close.run_contests(cfg, None, fetch_season=None, season=2025)
     assert "Contest analysis failed (boom)" in "\n".join(report.lines)
+
+
+def test_the_pool_hit_row_is_logged_for_the_latest_graded_week_and_replaced_on_a_rerun(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from dfs import calibration, contests_close, pool, results_update
+
+    monkeypatch.setattr(contests_close, "CONTESTS_DIR", tmp_path)
+    scored = pd.DataFrame({"season": [2026] * 2, "week": [5, 5]})
+    rows = pd.DataFrame(
+        {
+            "Status": "scored",
+            "Name": ["Josh Allen", "Sleeper Pick"],
+            "DkActual": [30.0, 20.0],
+            "CalPts": [20.0, 12.0],
+        }
+    )
+    monkeypatch.setattr(results_update, "load_all_scored", lambda season: scored)
+    monkeypatch.setattr(calibration, "calpts_for_week", lambda s, week, season=None: (rows, None))
+    monkeypatch.setattr(
+        pool, "read_players", lambda client, tab: [SimpleNamespace(name="Josh Allen", pooled=True)]
+    )
+    monkeypatch.setattr(contests_close, "board_likes", lambda client: {"Sleeper Pick"})
+    cfg = SimpleNamespace(google_sheets=SimpleNamespace(tab_mappings={"edge": "EdgeRaw"}))
+    result = SimpleNamespace(decisions=pd.DataFrame({"season": [2026], "week": [5]}))
+
+    said = contests_close.log_pool_hits(cfg, object(), result, 2026)
+    assert (
+        said == "Pool hit rate, Week 5: 1 of 1 pooled players beat CalPts; 1 of 1 model favourites left out."
+    )
+    contests_close.log_pool_hits(cfg, object(), result, 2026)  # a rerun replaces the week, never doubles it
+    logged = pd.read_csv(tmp_path / contests_close.POOL_HITS_FILE)
+    assert len(logged) == 1 and logged.iloc[0]["pooled_hits"] == 1
+    # a week that is not scored yet says so
+    monkeypatch.setattr(results_update, "load_all_scored", lambda season: scored.assign(week=4))
+    assert "not scored yet" in contests_close.log_pool_hits(cfg, object(), result, 2026)

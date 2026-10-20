@@ -318,7 +318,42 @@ CORE_NOTES = {
     ),
 }
 
+# The STAKES block on Bankroll (`sheet_stakes.py`): both tables' headers, matched by text.
+STAKES_NOTES = {
+    "Format": "The kind of contest (`series.classify`); the Cash and GPP rows add up their formats.",
+    "Entries": "How many entries you made, whatever the fee.",
+    "ROI": 'Winnings minus fees, divided by fees. "–" when you paid no fees (freerolls).',
+    "Cash rate": "The share of entries that finished in a paid place.",
+    "Weekly SD": (
+        "The standard deviation of your weekly net (winnings minus fees, one number per NFL week with "
+        'entries). A bigger number is a bumpier ride. "–" under 2 weeks.'
+    ),
+    "Bucket": "Cash (H2H, 50/50, Double Up) or GPP (every other format): the two bankrolls this tab keeps.",
+    "Weight on own ROI": "min(1, entries / 100): how much of the share comes from the bucket's own ROI.",
+    "ROI share": "The bucket's ROI divided by the ROI total of the buckets at or above the floor.",
+    "Even share": "An equal split among the buckets at or above the floor.",
+    "Note": "Why a bucket gets nothing from the default split (no history, or ROI below the floor).",
+    "Share": "Weight x ROI share + (1 - weight) x even share: the default split of the planned spend.",
+}
+
 CONTESTS_NOTES = {
+    "Your decisions, season": "A measure of your own choices, added up over every week of standings files.",
+    "So far": "The season's number for that measure.",
+    "Based on": "How many weeks or entries the number rests on.",
+    "Build feature": (
+        "How a lineup was put together: a stack, a bring-back, RB + his own DST, ownership, salary left."
+    ),
+    "Top 1% did": (
+        "The share of the best 1% of lineups (or their average, for ownership and salary) in your large GPPs "
+        "that did this."
+    ),
+    "Whole field did": "The same measure over every lineup in those contests.",
+    "Gap (top 1% minus field)": (
+        "What the winners did more or less than the field: percentage points for shares, a ratio (x) for the "
+        "ownership product. Directional until more weeks pile up."
+    ),
+    "Top-1% lineups counted": "How many top-1% lineups the first column rests on.",
+    "Field lineups counted": "How many lineups the second column rests on.",
     "Series": "The contest's name, without the entry counter, the Showdown matchup or the H2H opponent.",
     "Format": "The kind of contest: H2H, 50/50, Double Up, Multiplier (Triple Up ...), SE GPP, N-max GPP.",
     "Fee": "The entry fee (the middle one, if it changed).",
@@ -635,6 +670,11 @@ ISSUES_TOTAL_NOTE = (
     "DST/QB: your DST plays against your own QB, which works against you.\n"
     "RB/GAME: two of your RBs are from the same game.\n"
     "Weak for cash: Cash % N%: a lineup marked Cash whose simulated Cash % is under 40%.\n"
+    "Chalk: Name N% +k: a complete lineup holding none of the players projected at 16%+ owned (about 20% "
+    "expected in a double-up; 25%+ if marked GPP), most owned first; double-up chalk runs above the "
+    "projection (projected 31% is about 55% owned).\n"
+    "Overused: Name 9/14 +k: a player of this lineup who is in more than half of your built lineups.\n"
+    "Own sum N%: a lineup marked GPP whose total Own% is outside the 125%-145% GPP target (none for Cash).\n"
     "More than one can show at once."
 )
 
@@ -654,6 +694,23 @@ SHADOW_SOURCE_NOTES = {
     ),
 }
 
+FIELD_OWN_NOTES = {
+    "GppOwn": (
+        "SHADOW: nothing reads it. TFFB's projected Own%, sharpened for your GPPs (TFFB runs about 5 points "
+        "light on the chalk). Scored against your contests' real ownership in Model Check every week. "
+        "Blank until TFFB publishes ownership."
+    ),
+    "CashOwn": (
+        "SHADOW: nothing reads it. The same for your double-ups, where the chalk is much heavier. Scored in "
+        "Model Check every week. Blank until TFFB publishes ownership."
+    ),
+    "OurOwn": (
+        "SHADOW: nothing reads it. What your GPPs would own if the field used CalPts instead of its own "
+        "projection. OurOwn above GppOwn = the field is light on a player we like. Model Check's WHEN WE "
+        "DISAGREE says whether that gap has come true."
+    ),
+}
+
 
 def player_tab_notes() -> dict[str, str]:
     """Every header on EdgeRaw, Player Pool and Lineups (and the Edge Finder's number columns), by text.
@@ -664,6 +721,7 @@ def player_tab_notes() -> dict[str, str]:
         **SLATE_GAME_NOTES,
         **EDGE_FINDER_NOTES,
         **SHADOW_SOURCE_NOTES,
+        **FIELD_OWN_NOTES,
         **usage_notes(),
     }
 

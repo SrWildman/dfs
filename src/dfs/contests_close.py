@@ -11,7 +11,9 @@ two files are ones Sam downloaded by hand.
    taken before that week's lock), toughness, head to head;
 4. log each standings file's actual ownership (`data/ownership_log.csv`, one set of rows per contest);
 5. fill Results' blank `Cash Line` from the standings of the configured double-up (live sheet only);
-6. rebuild the `Contests` tab.
+6. log the pool hit rate of the week just graded (his pool and the Board's "Model likes" as they stand at the
+   close, against that week's scored CalPts; live sheet only);
+7. rebuild the `Contests` tab (its top block is the Monday post-mortem of his decisions).
 """
 
 from __future__ import annotations
@@ -104,12 +106,13 @@ def run_contests(
     downloads: Path | None = None,
     client: SheetsClient | None = None,
     fill_cash_line: bool = True,
+    log_pool: bool = False,
     season: int | None = None,
     progress: Callable[[str], None] | None = None,
     fetch_season: Callable[[int], pd.DataFrame] | None = slate_index.compute_season,
 ) -> UpdateReport:
     """The whole contest step. `client` None = files only (no sheet is touched); `fill_cash_line=False` keeps
-    Results alone (a template run)."""
+    Results alone (a template run); `log_pool=True` (the week close) also logs the pool hit rate."""
     report = UpdateReport()
     say = report.say if progress is None else (lambda text: (report.say(text), progress(text)))
     downloads = Path(downloads) if downloads else Path(cfg.contests.downloads_dir).expanduser()
@@ -176,6 +179,11 @@ def run_contests(
                 say(line)
         except Exception as e:  # noqa: BLE001
             say(f"Cash Line not filled ({e}).")
+    if log_pool:  # only at the close: afterwards the live pool is the next week's
+        try:
+            say(log_pool_hits(cfg, client, result, season))
+        except Exception as e:  # noqa: BLE001
+            say(f"Pool hit rate not logged ({e}).")
     try:
         from dfs import sheet_contests
 
@@ -185,6 +193,54 @@ def run_contests(
     except Exception as e:  # noqa: BLE001
         say(f"Contests tab not written ({e}).")
     return report
+
+
+POOL_HITS_FILE = "pool_hits.csv"
+
+
+def board_likes(client: SheetsClient) -> set[str]:
+    """The Board's "Model likes" player names as they stand (the model's favourites he has not pooled)."""
+    from dfs import sheet_views as sv
+    from dfs.sheets import column_letter
+
+    col = column_letter(sv.BOARD_LIKES_COLHEADER.index("Player"))
+    rows = client.read_range(sv.BOARD_TAB, f"{col}{sv.BOARD_LIKES_FIRST_ROW}:{col}{sv.BOARD_LIKES_LAST_ROW}")
+    return {str(r[0]).strip() for r in rows if r and str(r[0]).strip()}
+
+
+def log_pool_hits(cfg: Config, client: SheetsClient, result: analysis.Analysis, season: int) -> str:
+    """Add (or replace) the pool-hit row of the latest graded week in `data/contests/pool_hits.csv`: of his
+    pooled players, and of the model's favourites he left out, how many beat their CalPts. Needs his pool as
+    it stands now and the week scored (`dfs results update`); says plainly when it cannot."""
+    from dfs import calibration, results_update
+    from dfs.contests import decisions
+    from dfs.pool import read_players
+
+    entries = result.decisions
+    if entries.empty or not (entries["season"] == season).any():
+        return "Pool hit rate: no graded entries this season."
+    week = int(entries.loc[entries["season"] == season, "week"].max())
+    scored = results_update.load_all_scored(season)
+    if scored.empty or not (scored["week"] == week).any():
+        return (
+            f"Pool hit rate: Week {week} is not scored yet "
+            "(run `dfs results update`, then `dfs contests update`)."
+        )
+    rows, _ = calibration.calpts_for_week(scored, week, season=season)
+    pool = {p.name for p in read_players(client, cfg.google_sheets.tab_mappings["edge"]) if p.pooled}
+    row = decisions.pool_hit_row(
+        season, week, rows.assign(week=week, season=season), pool, board_likes(client)
+    )
+    if row is None:
+        return f"Pool hit rate: Week {week} has no scored players with a CalPts."
+    path = CONTESTS_DIR / POOL_HITS_FILE
+    old = pd.read_csv(path) if path.exists() and path.stat().st_size else pd.DataFrame(columns=list(row))
+    old = old[~((old["season"] == season) & (old["week"] == week))]
+    pd.concat([old, pd.DataFrame([row])], ignore_index=True).to_csv(path, index=False)
+    return (
+        f"Pool hit rate, Week {week}: {row['pooled_hits']} of {row['pooled']} pooled players beat CalPts; "
+        f"{row['likes_hits']} of {row['likes']} model favourites left out."
+    )
 
 
 def _me() -> str:

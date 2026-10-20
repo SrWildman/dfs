@@ -50,13 +50,17 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
         "Board, Slate Grid, EdgeRaw, Player Pool, Lineups",
         "Research, tick your pool, build lineups. `dfs pool add|remove|list` does the pool without opening "
         "the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup "
-        "Tools > Copy builds to Lineups drops one in).",
+        "Tools > Copy builds to Lineups drops one in); keep, lock, edit or drop builds there and run "
+        "`dfs lineups suggest --iterate` to rebuild around your decisions.",
     ),
     (
         "4",
         "Lineups are built",
         "dfs export -o lineups.csv",
-        "Validates your lineups and writes DraftKings' bulk-upload CSV.",
+        "Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download "
+        "DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose "
+        "each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes "
+        "the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`.",
     ),
     (
         "5",
@@ -93,6 +97,8 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs week new",
             "dfs sync",
             "dfs lineups suggest",
+            "dfs entries fill",
+            "dfs entries print",
             "dfs export",
             "dfs lineups late-swap",
             "dfs week close",
@@ -108,9 +114,10 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
     (
         "Reference: bankroll, logs and accounts (only when needed)",
         "Reconciling results and keeping records, and one-time logins. `dfs week close` already calls "
-        "`bankroll sync` for you.",
+        "`bankroll sync` for you, and `dfs week new` rebuilds the STAKES block (`bankroll stakes`).",
         [
             "dfs bankroll sync",
+            "dfs bankroll stakes",
             "dfs contests update",
             "dfs contests analyze",
             "dfs ownership log",
@@ -163,8 +170,10 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs setup link-edge",
             "dfs setup reorder-columns",
             "dfs setup add-pool-control",
+            "dfs setup dk-upload",
             "dfs setup add-filters",
             "dfs setup protect",
+            "dfs setup suggested-controls",
             "dfs setup audit-style",
             "dfs setup build-season",
             "dfs setup inspect",
@@ -176,6 +185,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         "you should not need them. `CONTRIBUTING.md`'s structural changelog says when each ran.",
         [
             "dfs setup repair-formula-ranges",
+            "dfs setup lineup-chalk",
             "dfs setup guard-empty-states",
             "dfs setup resize-player-pool",
             "dfs setup fix-opp-pos-rank",

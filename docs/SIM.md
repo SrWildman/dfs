@@ -1235,3 +1235,81 @@ simulator hook, the bring-back lift on a planted link).
    of the UM projection) and the t-copula decision. Both, with items 1 and 2, run locally after merge and do not hold up the PR.
 5. Re-test the five QB1-with-receiver pairs that stayed pooled (see "Decision (Sam, 2026-10-18)" above), and, if the live
    `Tgt%` is the weaker feature, whether the research feature (mean of per-game shares, across seasons) is worth computing live.
+
+## Local results after PR #10 (2026-10-18)
+
+Run on Sam's machine from the files in `data/raw` (never in git). The pool, the contests and the weeks are small; read every
+number as directional.
+
+### Do the projections price it? CalPts and TFFB (2026 Weeks 1-5, n = 122 team-weeks per role)
+
+Change in (actual - projection), DK points per +10 points of the team's spread in its favour (Spread is negative for the
+favourite; pre-lock `nflverse_games` line; roles are the team's top player at the position by `AggPts`), game-clustered t:
+
+| Role | TFFB | CalPts | UM |
+|---|---|---|---|
+| QB1 | -1.60 (t -1.4) | -1.19 (-1.0) | -0.14 (-0.1) |
+| RB1 | +1.56 (+1.2) | +1.17 (+0.9) | +2.18 (+1.6) |
+| WR1 | +0.31 (+0.2) | -0.41 (-0.3) | -0.01 (0.0) |
+| WR2 | -1.76 (-2.0) | -1.79 (-2.0) | -0.98 (-1.0) |
+| TE1 | +0.87 (+0.7) | +1.06 (+0.9) | +1.14 (+0.9) |
+| DST | -0.68 (-0.9) | -0.15 (-0.2) | +0.14 (+0.2) |
+
+RB1 has the same sign and size as the 2014-25 result (+0.7 then +1.3 on UM) but is not significant on five weeks. The DST's
+mean is on target in points (G's finding was in its own distribution, which this table does not measure).
+
+**The RB1 spread shadow** (`calibration.RB1_SPREAD_PER_POINT` = 0.1 point per point of favouritism, each team's RB1 only), leave
+one week out: MAE 6.739 against CalPts 6.733 (paired difference +0.007, SE 0.049, n = 122); per-week slopes 0.4 to 1.8 per 10.
+Out of sample on Weeks 2-5 (98 RB1s) the Model Check row reads MAE 6.22 against CalPts 6.24, rho .325 against .328. A wash, so
+it stays a Model Check row; it joins CalPts only after 3 scored weeks and only if it beats CalPts.
+
+### Duplicate model, fitted to Sam's standings
+
+58,429 lineups in 20 files (13 GPP, 7 double-up; Weeks 2, 4, 5). `fit_dup_model` on each lineup's ownership product and the
+count of identical lineups:
+
+| | on the contest's own %Drafted | on the tool's projected shares (what the tool applies it to) |
+|---|---|---|
+| GPP (33,576 lineups) | scale 3.30, exponent 0.657 | **scale 10.02, exponent 0.712** |
+| Double-up (24,853 lineups) | scale 17.6, exponent 0.884 | scale 141, exponent 0.599 |
+
+The placeholder (scale 1, exponent 0.5) predicts 27,495 copies in the GPPs against 11,536 observed (2.4x), and 70,542 against
+2,747,334 in the double-ups (39x too few). On the projected shares the GPP fit tracks the top decile of products (observed 2.65
+copies, fitted 2.66; the placeholder says 4.7) and over-predicts the low deciles less than the placeholder did (observed 0.04,
+fitted 0.0002 to 0.04, placeholder 0.006 to 0.18; the floor is the same user entering one lineup twice in a multi-entry
+contest). **`dups.DUP_MODEL_GPP` is the fitted GPP model.** The double-up fit on projected shares is poor (a few heavily
+duplicated lineups carry most copies, and double-ups are chalkier than projected: Week 4's 724-copy lineup fits 198, the
+placeholder says 5, low products over-predict 10 to 40 times), so `DUP_MODEL_CASH` stays the placeholder until the per-player
+double-up ownership model (Contests Phase 2). Cash builds only warn on the number.
+
+### Retro-test of `--rank` on Sam's contests (Weeks 4 and 5, plus the Week 2 Hundo)
+
+Week 6 has no standings yet. Sam's real past pools are not stored, so the pool is constructed (his Week 6 counts, QB 9, RB 13,
+WR 17, TE 10, DST 8): the main-slate players with the highest CalPts, or by `Val` among the top 2N. Builds come from the last
+pre-lock EdgeRaw snapshot, every shape searched to completion, each build scored against every GPP of its week with the
+contest's own `FPTS` table (`sim/retro.py`). Mean finish percentile (lower is better) / share of builds in the top 10% / in
+the top 1%:
+
+| Arm | CalPts pool | Value pool |
+|---|---|---|
+| top stacks by CalPts only | 0.256 / 35% / 5.7% | 0.314 / 30% / 4.7% |
+| `--rank top1` | 0.238 / 50% / 6.0% | 0.262 / 52% / 13.0% |
+| `--rank share`, 1,000 entries, fitted model | 0.239 / 43% / 6.6% | 0.287 / 42% / 13.9% |
+| `--rank share`, 12,000 entries | 0.313 / 26% / 0% | 0.352 / 34% / 17.9% |
+
+The smart builds beat points-max by 10 to 19 points of top-10% rate but the standard error by build is 0.11 to 0.12 (about 30
+builds an arm, 5 to 7 correlated contests a week). `share` against `top1` at 1,000 entries is a wash (-0.001 +/- 0.063 and
++0.032 +/- 0.066 in mean percentile): the chosen builds' fitted E[dups] is 0.01 to 0.08 and the real fields held about no copies of
+them, so the discount rarely changes a pick; at 12,000 entries it costs about nine real points a build. `top1` stays the default.
+
+### Timing on real slates
+
+A full search (every shape to completion) takes 53 to 152 s on the replayed pre-lock pools (Week 4 113 s and 53 s, Week 5 109 s
+and 152 s, Week 2 94 s and 64 s for the CalPts and value pools). Per shape on Week 5: stack 19 s, naked 7, rb_stack 40, game 30,
+rb_dst 3, contrarian 2 (102 s). At the old 60 s default the rb_stack and game searches hit their time boxes; the default is now 120 s (Sam, 2026-10-18).
+
+### `dfs sim fit`, refitted locally
+
+`correlations.csv` differs from the committed table by at most 0.0104 (opposing QB1-DST, -0.342 to -0.352) and 0.0016 on average;
+QB1-WR1, WR2 and TE1 move by about +0.006. `correlations_shape.csv` is identical.
+

@@ -27,6 +27,12 @@ from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS, Player, Position
 _ENTRY_COLUMNS = 4  # Entry ID, Contest Name, Contest ID, Entry Fee
 # Row 1 of the DK Upload tab, and of the CSV `dfs export` writes (DK Classic).
 DK_UPLOAD_HEADER: tuple[str, ...] = ("Entry ID", "Contest Name", "Contest ID", "Entry Fee", *ROSTER_SLOTS)
+# What `dfs setup dk-upload` adds to the right of DK's own columns (A..M, which `dfs export` reads by
+# position and `dfs doctor` checks): the contest's format, the typed Lineup dropdown (L1..L20, filled only
+# by Sam), and the tool's read-only guess with its reason (`entries.suggest_pick`). Their positions are
+# always derived from this tuple (`sheet_dk_upload`), never typed as a letter.
+DK_UPLOAD_EXTRA_HEADERS: tuple[str, ...] = ("Format", "Lineup", "Suggested", "Why")
+DK_UPLOAD_SHEET_HEADER: tuple[str, ...] = (*DK_UPLOAD_HEADER, *DK_UPLOAD_EXTRA_HEADERS)
 _CELL_RE = re.compile(r"^(.*?)\s*\((\d+)\)$")
 
 
@@ -93,6 +99,14 @@ def parse_entries(rows: list[list[str]]) -> list[ParsedEntry]:
             )
         )
     return entries
+
+
+def split_blank_entries(entries: list[ParsedEntry]) -> tuple[list[ParsedEntry], list[ParsedEntry]]:
+    """`(entries with a lineup, entries with every slot blank)`. A blank entry is a reservation, or one Sam
+    has not set on DK Upload: it just does not go in the file (DK's own rule: only rows you want to update),
+    so the export reports it instead of failing on it."""
+    blank = [e for e in entries if not any(c.strip() for c in e.slot_cells)]
+    return [e for e in entries if e not in blank], blank
 
 
 def build_salary_lookup(df: pd.DataFrame) -> dict[str, Player]:

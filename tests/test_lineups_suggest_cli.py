@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, "tests")
 import test_lineup_suggest as syn  # noqa: E402
 
-from dfs import cli  # noqa: E402
+from dfs import cli, suggest_state  # noqa: E402
 from dfs.derived import edge_sheet_index  # noqa: E402
 from dfs.late_swap_sim import SimSettings  # noqa: E402
 from dfs.sim_inputs import build_specs  # noqa: E402
@@ -18,9 +18,16 @@ NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 
 
 class StubClient:
-    def __init__(self, edge, tags):
+    def __init__(self, edge, tags, suggested=None):
         self.edge, self.tags = edge, tags
         self.written = None
+        self.suggested = suggested  # the Suggested tab's grid, when a test wants one on the sheet
+
+    def tab_exists(self, tab):
+        return self.suggested is not None
+
+    def read_tab(self, tab):
+        return self.suggested or []
 
     def describe(self):
         return ("Week 6", "https://example.test/sheet")
@@ -37,6 +44,13 @@ class StubClient:
             row[edge_sheet_index("Salary")] = str(r["Salary"])
             rows.append(row)
         return rows
+
+
+@pytest.fixture(autouse=True)
+def state_dir(tmp_path, monkeypatch):
+    """Rounds are saved to data/suggest_state/<week>.json: never the real one."""
+    monkeypatch.setattr(suggest_state, "STATE_DIR", tmp_path / "suggest_state")
+    return tmp_path / "suggest_state"
 
 
 @pytest.fixture
@@ -96,6 +110,7 @@ def test_it_prints_how_long_every_phase_took_in_the_order_they_ran(cfg, edge, ca
     names = [
         "read sheet",
         "set up simulator",
+        "read tab",
         "candidates",
         "search",
         "simulate",
@@ -110,14 +125,14 @@ def test_it_prints_how_long_every_phase_took_in_the_order_they_ran(cfg, edge, ca
     assert "Phase times:" in quiet and "write tab" not in quiet and "search" in quiet
 
 
-def test_seconds_sets_the_search_time_limit_and_defaults_to_a_minute(cfg, edge, capsys, monkeypatch):
+def test_seconds_sets_the_search_time_limit_and_defaults_to_two_minutes(cfg, edge, capsys, monkeypatch):
     seen = []
     real = cli.suggest_builds
     monkeypatch.setattr(cli, "suggest_builds", lambda *a, **k: seen.append(k["time_limit"]) or real(*a, **k))
     tags = dict.fromkeys(edge["Name"], "Both")
     run(cfg, edge, tags, capsys, write=False)
     run(cfg, edge, tags, capsys, write=False, seconds=180.0)
-    assert seen == [60.0, 180.0]
+    assert seen == [120.0, 180.0]
 
 
 def test_no_write_leaves_the_tab_alone(cfg, edge, capsys, monkeypatch):
@@ -160,3 +175,57 @@ def test_the_rank_option_takes_top1_or_share_and_defaults_to_top1():
     assert default is cli.SuggestRank.top1
     bad = CliRunner().invoke(cli.app, ["lineups", "suggest", "--rank", "ev"])
     assert bad.exit_code == 2 and "top1" in bad.output and "share" in bad.output
+
+
+def test_rounds_are_kept_and_iterate_and_round_restore_work_end_to_end(
+    cfg, edge, capsys, monkeypatch, state_dir
+):
+    """fresh run = round 1; the tab it wrote, edited, is what --iterate reads (round 2); --round 1 brings
+    round
+    1 back as round 3. Nothing but the (faked) tab write and the state file is touched."""
+    from dfs import sheet_suggested as ss
+
+    written = []
+    monkeypatch.setattr(
+        cli, "write_suggested", lambda client, report, frame, **kw: written.append(report) or "Suggested: ok"
+    )
+    tags = dict.fromkeys(edge["Name"], "Both")
+
+    def go(**kw):
+        client = StubClient(edge, tags, suggested=kw.pop("grid", None))
+        kw.setdefault("cash", 1)
+        kw.setdefault("gpp", 2)
+        kw.setdefault("write", True)
+        cli._run_suggest(cfg, now=NOW, client=client, **kw)
+        return capsys.readouterr().out
+
+    out = go()
+    first = written[-1]
+    assert first.round == 1 and "round 1 saved" in out and (state_dir / "6.json").exists()
+    grid = ss.build_layout(first, edge, metric="CalPts", cash_line=145.0, gpp_target=190.0).rows
+    grid = [list(r) for r in grid]
+    cash_bar = next(r for r in grid if r[0] == "Build 1")
+    cash_bar[ss.DECISION_INDEX] = "Keep"
+    second_bar = next(r for r in grid if r[0] == "Build 2")
+    second_bar[ss.DECISION_INDEX] = "Drop"
+    out = go(iterate=True, grid=grid, seconds=20.0)
+    second = written[-1]
+    assert second.round == 2 and "Round 2 (rerun)" in out and "what changed" not in out
+    assert [b.origin for b in second.builds].count("kept") >= 1 and len(second.builds) == len(first.builds)
+    assert second.history[0].startswith("Round 1") and second.history[1].startswith("Round 2")
+    state = suggest_state.load_state(6)
+    assert [r.round for r in state.rounds] == [1, 2] and state.rounds[1].command == "iterate"
+    out = go(
+        restore_round=1, grid=ss.build_layout(second, edge, metric="CalPts", cash_line=1, gpp_target=2).rows
+    )
+    third = written[-1]
+    assert third.round == 3 and "round 1 restored" in out
+    assert [[p.name for p in b.players] for b in third.builds] == [
+        [p.name for p in b.players] for b in first.builds
+    ]
+    assert suggest_state.load_state(6).rounds[2].restored_from == 1
+    with pytest.raises(cli.typer.Exit):
+        go(restore_round=9)
+    assert "There is no round 9" in capsys.readouterr().out
+    go(iterate=True, write=False, grid=grid)  # --no-write: no round is saved
+    assert len(suggest_state.load_state(6).rounds) == 3

@@ -94,7 +94,7 @@ from dfs.derived import (
     edge_sheet_letter,
 )
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP
-from dfs.lineups import DK_UPLOAD_HEADER
+from dfs.lineups import DK_UPLOAD_EXTRA_HEADERS, DK_UPLOAD_HEADER
 from dfs.models import ROSTER_SLOTS
 from dfs.sheet_color_scales import (
     BLOCK_BAD,
@@ -319,6 +319,10 @@ FIELD_FORMATS = {
     "CalPts": _num("0.0"),
     "EspnPts": _num("0.0"),  # shadow sources (EdgeRaw only)
     "PropPts": _num("0.0"),
+    # Field ownership shadow (2026-10-20): fractions, like Own%.
+    "GppOwn": _num("0.0%", "PERCENT"),
+    "CashOwn": _num("0.0%", "PERCENT"),
+    "OurOwn": _num("0.0%", "PERCENT"),
     "Hit3x%": _num('0"%"'),
     "Boom%": _num('0"%"'),
     "Bust%": _num('0"%"'),
@@ -753,6 +757,9 @@ EDGE_WIDTHS = {
     "CalPts": 80,
     "EspnPts": 80,
     "PropPts": 80,
+    "GppOwn": 80,
+    "CashOwn": 80,
+    "OurOwn": 80,
     "Hit3x%": 80,
     "Boom%": 80,
     "Bust%": 80,
@@ -1821,6 +1828,9 @@ _GUARDRAILS_CHIPS = [
     ("TEXT_EQ", "Q", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "INCOMPLETE", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "Weak for cash", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "Chalk:", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "Overused:", _chip(WARN_BG, WARN_FG)),
+    ("TEXT_CONTAINS", "Own sum", _chip(WARN_BG, WARN_FG)),
     ("TEXT_CONTAINS", "to FLEX", _chip(WARN_BG, WARN_FG)),
     ("TEXT_EQ", "OK", _chip(OK_BG, OK_FG)),
 ]
@@ -2007,6 +2017,66 @@ def _weak_cash_formula(totals_row: int, cash_pct_col: str) -> str:
     )
 
 
+def _chalk_formula(start: int, end: int, totals_row: int, edge_tab: str) -> str:
+    """ "Chalk: Simone 70% +1" on the Total row when this (complete) lineup holds none of the players
+    projected at `chalk_watch.CASH_PROJECTED_OWN` (a lineup marked Cash or blank) or `GPP_PROJECTED_OWN`
+    (marked GPP) who are not OUT or IR: the most owned one and how many more. Empty otherwise. Read
+    straight from EdgeRaw's Name, Own% and Avail columns, found by `derived.edge_sheet_letter`; Own% is a
+    projection, so a double-up's real chalk can be higher (`chalk_watch`)."""
+    from dfs.chalk_watch import CASH_PROJECTED_OWN, GPP_PROJECTED_OWN
+
+    def col(name: str) -> str:
+        letter = edge_sheet_letter(name)
+        return f"{edge_tab}!${letter}$2:${letter}"
+
+    names, own, avail = col("Name"), col("Own%"), col("Avail")
+    mine = f"$A${start}:$A${end}"
+    found = (
+        f'FILTER({{{names},{own}}},ISNUMBER({own}),{own}>=IF($A{totals_row}="GPP",'
+        f'{GPP_PROJECTED_OWN:g},{CASH_PROJECTED_OWN:g}),{names}<>"",ISNA(MATCH({names},{mine},0)),'
+        f'{avail}<>"OUT",{avail}<>"IR")'
+    )
+    return (
+        f'IF(COUNTA({mine})<9,"",LET(f,{found},IFERROR("Chalk: "&INDEX(SORT(f,2,FALSE),1,1)&" "&'
+        f'TEXT(INDEX(SORT(f,2,FALSE),1,2),"0%")&IF(ROWS(f)>1," +"&(ROWS(f)-1),""),"")))'
+    )
+
+
+def _overuse_formula(start: int, end: int, name_blocks: list[tuple[int, int]]) -> str:
+    """ "Overused: Bijan Robinson 9/14 +1" on the Total row: a player of THIS lineup who is in more than
+    `lineup_watch.OVERUSE_SHARE` of the built lineups (complete ones, counted by formula from `name_blocks`;
+    nothing below `MIN_LINEUPS`). Names are counted over the whole Name column, where only players appear."""
+    from dfs.lineup_watch import MIN_LINEUPS, OVERUSE_SHARE
+
+    first, last = name_blocks[0][0], name_blocks[-1][1] + 1
+    column = f"$A${first}:$A${last}"
+    mine = f"$A${start}:$A${end}"
+    built = "+".join(f"(COUNTA($A${s}:$A${e})=9)" for s, e in name_blocks)
+    return (
+        f'IF(COUNTA({mine})<9,"",LET(n,{built},f,FILTER({mine},{mine}<>"",'
+        f"COUNTIF({column},{mine})/n>{OVERUSE_SHARE:g}),"
+        f'IF(n<{MIN_LINEUPS},"",IFERROR("Overused: "&INDEX(f,1)&" "&COUNTIF({column},INDEX(f,1))&"/"&n&'
+        f'IF(ROWS(f)>1," +"&(ROWS(f)-1),""),""))))'
+    )
+
+
+def _own_meter_formula(totals_row: int, own_col: str) -> str:
+    """ "Own sum 207%: over the 125%-145% GPP target" for a lineup marked GPP (column A of its Total row),
+    whose summed Own% (the Total row's Own% cell) is outside `lineup_watch.GPP_OWN_LOW`..`GPP_OWN_HIGH`;
+    empty otherwise, so a Cash or blank marker never gets a meter."""
+    from dfs.lineup_watch import GPP_OWN_HIGH, GPP_OWN_LOW
+
+    cell = f"{own_col}{totals_row}"
+    text = f'"Own sum "&TEXT({cell},"0%")&": '
+    band = f"{GPP_OWN_LOW:.0%}-{GPP_OWN_HIGH:.0%} GPP target"
+    under = f'{text}under the {band}"'
+    over = f'{text}over the {band}"'
+    return (
+        f'IF(AND($A{totals_row}="GPP",ISNUMBER({cell})),'
+        f'IF({cell}<{GPP_OWN_LOW:g},{under},IF({cell}>{GPP_OWN_HIGH:g},{over},"")),"")'
+    )
+
+
 def _totals_check_formula(
     start: int,
     end: int,
@@ -2015,6 +2085,9 @@ def _totals_check_formula(
     *,
     stack_check: str | None = None,
     weak_cash: str | None = None,
+    chalk: str | None = None,
+    overuse: str | None = None,
+    own_meter: str | None = None,
 ) -> str:
     """Salary cap, roster completeness, or OK -- on the block's totals
     row (Fix 2.4: `totals_row` is `end + 1`, a real separate row now, not
@@ -2042,7 +2115,7 @@ def _totals_check_formula(
         f"IF(COUNTA($A${start}:$A${end})<9,"
         f'"INCOMPLETE "&COUNTA($A${start}:$A${end})&"/9","OK")))'
     )
-    extras = [x for x in (stack_check, weak_cash) if x]
+    extras = [x for x in (stack_check, weak_cash, chalk, overuse, own_meter) if x]
     if not extras:
         return f"={cap_or_completeness}"
     extra = extras[0] if len(extras) == 1 else f'TEXTJOIN(" ",TRUE,{",".join(extras)})'
@@ -2377,6 +2450,7 @@ def polish_guardrails(
     header_row: int,
     name_blocks: list[tuple[int, int]],
     header_repeats_at: list[int] | None = None,
+    edge_tab: str = "EdgeRaw",
 ) -> str:
     """Each lineup block currently checks exactly one thing (salary
     remaining, via its own DK Sal-column formulas). This adds the checks
@@ -2426,6 +2500,7 @@ def polish_guardrails(
     avail_col = column_letter(header.index("Avail"))
     salary_col = column_letter(header.index("DK Sal"))
     guardrails_col = column_letter(header.index(_GUARDRAILS_HEADER))
+    own_col = column_letter(header.index("Own%")) if "Own%" in header else None
     key_col = column_letter(header.index(LINEUP_KEY_HEADER)) if LINEUP_KEY_HEADER in header else "A"
 
     # Part 7.4: the two stack checks are additive, not required -- a
@@ -2478,10 +2553,21 @@ def polish_guardrails(
             else None
         )
         weak_cash = _weak_cash_formula(totals_row, cash_pct_col) if cash_pct_col else None
+        chalk = _chalk_formula(start, end, totals_row, edge_tab) if client.tab_exists(edge_tab) else None
+        overuse = _overuse_formula(start, end, name_blocks)
+        own_meter = _own_meter_formula(totals_row, own_col) if own_col else None
         rows.append(
             [
                 _totals_check_formula(
-                    start, end, totals_row, salary_col, stack_check=stack_check, weak_cash=weak_cash
+                    start,
+                    end,
+                    totals_row,
+                    salary_col,
+                    stack_check=stack_check,
+                    weak_cash=weak_cash,
+                    chalk=chalk,
+                    overuse=overuse,
+                    own_meter=own_meter,
                 )
             ]
         )
@@ -2786,7 +2872,9 @@ TAB_NOTES: dict[str, str] = {
     "Lineups": (
         f"LINEUPS -- one block per lineup; type names in column A, set Cash or GPP on the Total row. {MORE}"
     ),
-    "DK Upload": f"DK UPLOAD -- `dfs export` writes the DraftKings upload file here. Read-only. {MORE}",
+    "DK Upload": (
+        f"DK UPLOAD -- one entry per row: choose its Lineup, `dfs entries fill` does the slots. {MORE}"
+    ),
     "Movement": f"MOVEMENT -- how each team's line has moved this week. Read-only. {MORE}",
     "Exposure": f"EXPOSURE -- how much of your lineups each player is in. Type a Target. {MORE}",
     "Bankroll": f"BANKROLL -- Cash and GPP ledgers; `dfs week close` appends rows. {MORE}",
@@ -3542,7 +3630,10 @@ def restore_dk_upload_header(client: SheetsClient, tab: str = "DK Upload") -> st
     rows = client.read_range(tab, "A1:1")
     current = [c.strip() for c in (rows[0] if rows else [])]
     expected = list(DK_UPLOAD_HEADER)
-    if current[: len(expected)] == expected and not any(current[len(expected) :]):
+    beyond = current[len(expected) :]  # the entries layout's Format/Lineup/Suggested/Why are allowed there
+    if current[: len(expected)] == expected and (
+        not any(beyond) or beyond[: len(DK_UPLOAD_EXTRA_HEADERS)] == list(DK_UPLOAD_EXTRA_HEADERS)
+    ):
         return f"{tab}: header already DK Classic"
     client.update_range(tab, f"A1:{column_letter(len(expected) - 1)}1", [expected])
     return f"{tab}: header restored to DK Classic"

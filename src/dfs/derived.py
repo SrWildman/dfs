@@ -322,6 +322,11 @@ EDGE_FINDER_COLUMNS = [*EDGE_FINDER_VALUE_COLUMNS, *EDGE_FINDER_PCT_COLUMNS.valu
 # scored weeks (`calibration.ShadowPolicy`). Appended after the Edge Finder columns (`EDGE_COLUMNS` is
 # append-only), filled by `edge_finder.enrich`, blank until then and for a player the source did not rate.
 EDGE_SOURCE_COLUMNS = ["EspnPts", "PropPts"]
+# Field ownership shadow (2026-10-20, `field_own.py`): what his GPPs / double-ups own, and what his GPPs
+# would own on CalPts. Appended after the shadow sources, and at the END of the EdgeRaw tab too, so no
+# existing letter or VLOOKUP index moves. Blank until `edge_finder.enrich` fills them. Not in
+# `LINKED_EDGE_COLUMNS`: Player Pool and Lineups do not show them.
+FIELD_OWN_COLUMNS = ["GppOwn", "CashOwn", "OurOwn"]
 # Every hidden within-position percentile helper, old and new.
 ALL_PCT_COLUMNS = {**PLAYER_METRIC_PCT_COLUMNS, **EDGE_FINDER_PCT_COLUMNS}
 
@@ -453,6 +458,8 @@ EDGE_COLUMNS = [
     *EDGE_FINDER_COLUMNS,
     # Shadow sources (2026-10-13), appended after the Edge Finder columns; shown beside CalPts on the tab.
     *EDGE_SOURCE_COLUMNS,
+    # Field ownership shadow (2026-10-20), appended after the shadow sources.
+    *FIELD_OWN_COLUMNS,
 ]
 
 # What the EdgeRaw TAB is written in (actions round, slice 5, 2026-10-09): a designed order that mirrors
@@ -518,6 +525,8 @@ EDGE_SHEET_ORDER = [
     "Flag",
     *ALL_PCT_COLUMNS.values(),
     "NameKey",
+    # The tab's last three columns (2026-10-20): appended, so nothing above moved.
+    *FIELD_OWN_COLUMNS,
 ]
 assert sorted(EDGE_SHEET_ORDER) == sorted(EDGE_COLUMNS)  # noqa: S101 - EDGE_SHEET_ORDER is a permutation
 
@@ -1415,7 +1424,7 @@ def build_edge_frame(
         merged[label] = ""
     for column in EDGE_FINDER_COLUMNS:
         merged[column] = "" if column == "Edge" else float("nan")
-    for column in EDGE_SOURCE_COLUMNS:
+    for column in [*EDGE_SOURCE_COLUMNS, *FIELD_OWN_COLUMNS]:
         merged[column] = float("nan")
 
     return EdgeBuildResult(

@@ -146,3 +146,15 @@ def test_a_field_in_the_settings_reaches_the_simulation_and_changes_the_lines():
     assert all(-1.0 <= d <= 1.0 for d in moving_deltas)
     star = next(s for lst in moving.singles.values() for s in lst if swap_names(s)[1] == ["Star WR"])
     assert star.delta_p_cash > 0  # a 20-point WR for a 12-point one still helps against the field's line
+
+
+def test_a_player_who_sits_lowers_the_lineups_chances_and_only_the_named_players_are_simulated():
+    from dfs.late_swap_sim import sit_effects
+
+    settings = SimSettings(cash_line=140.0, gpp_target=190.0)
+    effects = sit_effects(LINEUP, ["QB", "Nobody"], settings)
+    assert [e.name for e in effects] == ["QB"]  # a name that is not in the lineup is skipped
+    qb = effects[0]
+    assert qb.sit_p_cash < qb.p_cash and qb.sit_p_gpp <= qb.p_gpp
+    assert sit_effects(LINEUP, [], settings) == []
+    assert sit_effects(LINEUP, ["QB"], settings) == effects  # deterministic

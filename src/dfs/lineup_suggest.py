@@ -58,6 +58,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from dfs import chalk_watch
 from dfs import lineup_shapes as shapes_mod
 from dfs.flex_order import BASE_SLOTS
 from dfs.kickoff import parse_kickoff
@@ -82,7 +83,7 @@ MIN_DIFFERENCE = 3  # each build differs from every earlier one by at least this
 MAX_EXPOSURE = 0.6  # no player in more than this share of the GPP builds
 CASH_TOP_K = 300  # how many of the best cash lineups by projection are simulated
 PER_QB = 80  # stacked lineups kept per quarterback while building the GPP candidates
-TIME_LIMIT_SECONDS = 60.0  # the whole search, cash and GPP together
+TIME_LIMIT_SECONDS = 120.0  # the whole search, cash and GPP together (a real slate needs 53-152 s)
 CASH_SHARE_OF_TIME = 0.4  # the cash search may use this share of it; GPP gets the rest
 GPP_SHAPES = shapes_mod.SHAPES  # the shapes the GPP candidates are drawn from (lineup_shapes.py)
 RANKS = ("top1", "share")  # `--rank`: what orders the GPP candidates (see `rank_key`)
@@ -129,6 +130,14 @@ class Build:
     )
     entries: int = 0  # the contest size e_dups assumes
     objective: float | None = None  # a GPP build's Top 1% share: p_gpp / (1 + e_dups); None without ownership
+    # The iterate rerun's state (`lineup_iterate`; blank on a plain run): what Sam decided, what he locked,
+    # which players he typed in himself, why the build is what it is and where it came from.
+    decision: str = ""  # "Keep", "Rebuild" or "" (blank: Rebuild); the bar's decision cell
+    locked: tuple[str, ...] = ()  # names that stay in this build (the lock column's ticks)
+    yours: tuple[str, ...] = ()  # locked names Sam typed in over another player ("your pick")
+    note: str = ""  # the one-line "what changed" under the build
+    problem: bool = False  # the note is a refusal (an invalid edit), shown in red
+    origin: str = "new"  # "kept", "rebuilt" or "new"
 
 
 @dataclass
@@ -141,6 +150,12 @@ class SuggestReport:
     candidates: dict[str, int] = field(default_factory=dict)  # "cash" / "gpp" -> players considered
     complete: bool = True  # False when the time limit cut a search short
     phases: dict[str, float] = field(default_factory=dict)  # phase -> seconds, in the order they ran
+    rank: str = DEFAULT_RANK  # what ordered the GPP candidates ("top1" or "share")
+    # The iterate state shown on the tab (`sheet_suggested`): which round this is, the typed rules box (label
+    # -> text, carried from the tab) and the one-line history of every round.
+    round: int = 0
+    rules: dict[str, str] = field(default_factory=dict)
+    history: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -227,13 +242,39 @@ def seat(players: Sequence[SwapPlayer], kickoff: dict[str, datetime | None]) -> 
 
 
 def cash_lineups(
-    pool: list[SwapPlayer], *, cap: int, k: int = CASH_TOP_K, deadline: float | None = None
+    pool: list[SwapPlayer],
+    *,
+    cap: int,
+    k: int = CASH_TOP_K,
+    deadline: float | None = None,
+    fixed: Sequence[SwapPlayer] = (),
+    leaf_ok: Callable[[Sequence[SwapPlayer]], bool] | None = None,
 ) -> tuple[list[list[SwapPlayer]], bool]:
-    """The best `k` legal lineups from `pool` by projection (any shape), best first."""
-    state = _all_open_state(cap)
+    """The best `k` legal lineups from `pool` by projection (any shape), best first. `fixed` players (an
+    iterate rerun's locks) are in every lineup; `leaf_ok` is an extra test a finished lineup must pass."""
     remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
-    found, complete = top_lineups(state, pool, k=k, time_limit=remaining)
-    return [[a[i] for i in range(len(ROSTER_SLOTS))] for a in found], complete
+    if not fixed:
+        found, complete = top_lineups(
+            _all_open_state(cap), pool, k=k, leaf_filter=leaf_ok, time_limit=remaining
+        )
+        return [[a[i] for i in range(len(ROSTER_SLOTS))] for a in found], complete
+    seated = shapes_mod.seat(list(fixed))
+    if seated is None:
+        return [], True  # they cannot share a lineup
+    state = LineupState(
+        cap=cap,
+        fixed=seated,
+        open=[OpenSlot(i, slot, None) for i, slot in enumerate(ROSTER_SLOTS) if i not in seated],
+    )
+    names = {p.name for p in fixed}
+    found, complete = top_lineups(
+        state,
+        [p for p in pool if p.name not in names],
+        k=k,
+        leaf_filter=leaf_ok,
+        time_limit=remaining,
+    )
+    return [[*seated.values(), *a.values()] for a in found], complete
 
 
 def stacked_lineups(
@@ -298,6 +339,7 @@ def annotate(
     *,
     objective: bool,
     contrarian_at: float | None = None,
+    dup_model: dups.DupModel = dups.DupModel(),
 ) -> list[Scored]:
     """`scored` with each lineup's ownership sum and product, its expected duplicates among `entries` entries
     (`dups.expected_dups`), the shapes it matches and, for a GPP candidate (`objective`), its Top 1% share.
@@ -309,7 +351,7 @@ def annotate(
             out.append(replace(s, shapes=matched))
             continue
         own = dups.shares_for([p.name for p in s.players], shares)
-        e = dups.expected_dups(own, entries)
+        e = dup_model.expected(own, entries)
         out.append(
             replace(
                 s,
@@ -586,6 +628,8 @@ def gpp_candidates(
     shapes: Sequence[str],
     shares: dict[str, float] | None,
     notes: list[str],
+    fixed: Sequence[SwapPlayer] = (),
+    plan: Sequence[tuple[str, int, float]] | None = None,
 ) -> tuple[list[list[SwapPlayer]], bool, float | None]:
     """Every GPP candidate: the best lineups of each shape in `shapes`, merged (a lineup that two shapes both
     produce is kept once). The searches run in `GPP_PLAN` order, each inside its share of the time left, and
@@ -593,11 +637,12 @@ def gpp_candidates(
     search (with a bring-back) is the one that must finish; the others are best-effort inside their boxes (a
     shape that does not finish keeps what it had found and says so in `notes`). Returns the lineups, whether
     the plain stack search finished and the contrarian cutoff (summed stack ownership; None when there is no
-    ownership or no stack)."""
+    ownership or no stack). `fixed` players are in every lineup (`shape_lineups`); `plan` replaces `GPP_PLAN`
+    (the rerun searches fewer lineups per quarterback)."""
     found: dict[frozenset[str], list[SwapPlayer]] = {}
     complete = True
     cutoff = None
-    plan = [step for step in GPP_PLAN if step[0] in shapes]
+    plan = [step for step in (GPP_PLAN if plan is None else plan) if step[0] in shapes]
     for n, (shape, per_qb, weight) in enumerate(plan):
         now = time.monotonic()
         weights_left = sum(w for _, _, w in plan[n:])
@@ -611,7 +656,7 @@ def gpp_candidates(
                 continue  # no ownership published: the one note about it is written by suggest_builds
             kwargs = {"own": shares, "max_stack_own": cutoff}
         lineups, done = shapes_mod.shape_lineups(
-            pool, shape, cap=cap, per_qb=per_qb, deadline=box, leaf_ok=leaf_ok, **kwargs
+            pool, shape, cap=cap, per_qb=per_qb, deadline=box, leaf_ok=leaf_ok, fixed=fixed, **kwargs
         )
         if shape == shapes_mod.STACK:
             complete = done
@@ -647,6 +692,8 @@ def suggest_builds(
     double_up_entries: int = dups.DEFAULT_DOUBLE_UP_ENTRIES,
     shapes: Sequence[str] = GPP_SHAPES,
     rank: str = DEFAULT_RANK,
+    gpp_dup_model: dups.DupModel = dups.DUP_MODEL_GPP,
+    cash_dup_model: dups.DupModel = dups.DUP_MODEL_CASH,
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -660,7 +707,7 @@ def suggest_builds(
     started = time.monotonic()
     deadline = started + time_limit
     cash_deadline = started + time_limit * CASH_SHARE_OF_TIME  # the GPP search gets the rest
-    report = SuggestReport()
+    report = SuggestReport(rank=rank)
     kickoff = {
         str(name): parse_kickoff(start)
         for name, start in zip(
@@ -700,8 +747,13 @@ def suggest_builds(
         picks = choose(scored, cash_builds, key=cash_key)
         timed("choose", t)
         # The Week 4 lesson, as a warning and never a filter: a double-up build many entries share.
+        cash_shares = ownership_shares(specs, edge, field, "cash")
         picks = annotate(
-            picks, ownership_shares(specs, edge, field, "cash"), double_up_entries, objective=False
+            picks,
+            None if cash_shares is None else dups.double_up_shares(cash_shares),
+            double_up_entries,
+            objective=False,
+            dup_model=cash_dup_model,
         )
         picked.extend(("cash", pick, "") for pick in picks)
         if len(picks) < cash_builds:
@@ -740,7 +792,9 @@ def suggest_builds(
             field=field,
         )
         t = timed("simulate", t)
-        scored = annotate(scored, shares, gpp_entries, objective=True, contrarian_at=cutoff)
+        scored = annotate(
+            scored, shares, gpp_entries, objective=True, contrarian_at=cutoff, dup_model=gpp_dup_model
+        )
         if gpp_builds is None:
             picks = choose_per_qb(scored, key=gpp_order)
         else:
@@ -773,6 +827,11 @@ def suggest_builds(
                 )
 
     report.builds = number_builds(picked, gpp_entries=gpp_entries, double_up_entries=double_up_entries)
+    for kind, threshold in (("cash", chalk_watch.CASH_PROJECTED_OWN), ("gpp", chalk_watch.GPP_PROJECTED_OWN)):
+        sets = [[p.name for p in b.players] for b in report.builds if b.kind == kind]
+        line = chalk_watch.warning_line(chalk_watch.missing_chalk(edge, sets, threshold=threshold), kind=kind)
+        if line:
+            report.notes.append(line.replace("your gpp", "your GPP"))
     for build in report.builds:
         if build.kind == "cash" and build.e_dups is not None and build.e_dups >= dups.DUP_WARN_COPIES:
             report.notes.append(
@@ -813,16 +872,29 @@ def number_builds(
     2026-10-17: Copy builds' "1,4,6" must match what the Suggested tab shows). Which lineups were chosen is
     decided by the simulator's odds; this only orders and numbers them. A GPP build's title names its shape
     and the copies expected ("GPP build 5  ·  DET game stack  ·  ~0.3 dupes")."""
-    builds = []
-    for number, (kind, pick, name) in enumerate(sorted(picked, key=display_key), start=1):
-        if kind == "cash":
-            builds.append(_build(number, kind, f"Cash build {number}", pick, entries=double_up_entries))
-            continue
-        title = f"GPP build {number}  ·  {name}" + (
-            f"  ·  {dups.dups_label(pick.e_dups)}" if pick.e_dups is not None else ""
-        )
-        builds.append(_build(number, kind, title, pick, stack=name, entries=gpp_entries))
-    return builds
+    return [
+        build_from(number, kind, pick, name, gpp_entries=gpp_entries, double_up_entries=double_up_entries)
+        for number, (kind, pick, name) in enumerate(sorted(picked, key=display_key), start=1)
+    ]
+
+
+def build_from(
+    number: int,
+    kind: str,
+    pick: Scored,
+    name: str,
+    *,
+    gpp_entries: int = dups.DEFAULT_GPP_ENTRIES,
+    double_up_entries: int = dups.DEFAULT_DOUBLE_UP_ENTRIES,
+) -> Build:
+    """One `Build` with its title: "Cash build 2", or "GPP build 5  ·  DET game stack  ·  ~0.3 dupes" (`name`
+    is the GPP build's shape name; a lineup with no stack says so)."""
+    if kind == "cash":
+        return _build(number, kind, f"Cash build {number}", pick, entries=double_up_entries)
+    title = f"GPP build {number}  ·  {name or 'no stack'}" + (
+        f"  ·  {dups.dups_label(pick.e_dups)}" if pick.e_dups is not None else ""
+    )
+    return _build(number, kind, title, pick, stack=name, entries=gpp_entries)
 
 
 def phase_lines(phases: dict[str, tuple[float, int]]) -> list[str]:

@@ -27,7 +27,17 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from dfs import edge_finder_tab, nfl_calendar, odds_credits, paths, perf, sheet_edge_finder, store
+from dfs import (
+    edge_finder_tab,
+    lineup_iterate,
+    nfl_calendar,
+    odds_credits,
+    paths,
+    perf,
+    sheet_edge_finder,
+    store,
+    suggest_state,
+)
 from dfs.apps_script import script_warnings
 from dfs.bankroll import (
     backfill_entry_keys,
@@ -63,6 +73,7 @@ from dfs.launcher import (
     suggested_commands,
 )
 from dfs.line_movement import LineMovementError, diff_odds
+from dfs.lineup_iterate import ITERATE_TIME_LIMIT
 from dfs.lineup_suggest import (
     DEFAULT_CASH_BUILDS,
     DEFAULT_RANK,
@@ -77,6 +88,7 @@ from dfs.lineups import (
     kickoffs_by_id,
     parse_entries,
     reorder_flex,
+    split_blank_entries,
     validate_entry,
 )
 from dfs.live_diff import diff_edge_flags, diff_queue_changes
@@ -156,7 +168,14 @@ from dfs.sheet_style import (
     style_tier23_tabs,
     style_view_tabs,
 )
-from dfs.sheet_suggested import build_lines, build_summary, ensure_suggested_tab, write_suggested
+from dfs.sheet_suggested import (
+    build_lines,
+    build_summary,
+    ensure_suggested_tab,
+    setup_controls,
+    write_suggested,
+)
+from dfs.sheet_suggested import read_state as read_suggested_state
 from dfs.sheet_tab_removal import remove_retired_tabs
 from dfs.sheet_typo_guard import add_lineups_typo_guard
 from dfs.sheet_views import (
@@ -256,6 +275,10 @@ week_app = typer.Typer(help="Start a new week's sheet, or close out the one you'
 pool_app = typer.Typer(
     help="Add or remove players from your pool without opening the sheet.", cls=PromptingGroup
 )
+entries_app = typer.Typer(
+    help="Fill DraftKings' entries file from your lineups (you choose each entry's lineup).",
+    cls=PromptingGroup,
+)
 ownership_app = typer.Typer(help="Log actual DK contest ownership (Phase 6, Part 7.8).", cls=PromptingGroup)
 results_app = typer.Typer(
     help="Score every projection against what actually happened (Model Check).", cls=PromptingGroup
@@ -270,6 +293,7 @@ app.add_typer(week_app, name="week")
 app.add_typer(results_app, name="results")
 app.add_typer(pool_app, name="pool")
 app.add_typer(ownership_app, name="ownership")
+app.add_typer(entries_app, name="entries")
 # `hidden=False` overrides the groups' own `hidden=True` (set in model/ and research/, which this layer
 # does not edit): both are visible now, listed in the launcher and docs/COMMANDS.md.
 app.add_typer(__import__("dfs.model.cli", fromlist=["model_app"]).model_app, name="model", hidden=False)
@@ -833,6 +857,40 @@ def sheets_repair_formula_ranges(
 
 
 @setup_app.command(
+    "lineup-chalk",
+    short_help="Add the missing-chalk warning to Lineups' Issues column (re-runnable).",
+)
+def sheets_lineup_chalk(
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Apply to a different sheet instead of config.toml's -- the template first."
+    ),
+) -> None:
+    """Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete
+    lineup that holds none of the heavily owned players (projected 16%+ owned, about 20% expected in a
+    double-up; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on
+    the tab changes. Template first, then the live sheet; run `dfs doctor` after."""
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Adding the chalk warning to: [bold]{title}[/bold]\n{url}\n")
+        first = LINEUPS_NAME_BLOCKS[0][0] - 1
+        line = polish_guardrails(
+            client,
+            cfg.lineups.builder_tab,
+            header_row=first,
+            name_blocks=LINEUPS_NAME_BLOCKS,
+            header_repeats_at=[start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]],
+            edge_tab=cfg.google_sheets.tab_mappings["edge"],
+        )
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] {escape(line)}")
+
+
+@setup_app.command(
     "guard-empty-states",
     short_help="Blank instead of #DIV/0!/#N/A on Results, Bankroll and Season when nothing is entered yet.",
 )
@@ -1101,6 +1159,39 @@ def sheets_fix_lineups_dst_label(
         raise typer.Exit(code=1) from e
 
 
+@setup_app.command("dk-upload", short_help="Build DK Upload's entries layout (Lineup dropdown, Suggested).")
+def sheets_dk_upload(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template "
+        "(always the template first).",
+    ),
+) -> None:
+    """Put the entries layout on the DK Upload tab: DK's columns, then Format, a typed Lineup dropdown
+    (L1..L20, pale-yellow, the one cell exempt from the tab's protection), and the grey Suggested and Why
+    columns `dfs entries fill` writes. Safe to re-run: it never touches an entry row's values."""
+    from dfs import sheet_dk_upload as dku
+    from dfs.sheet_protection import protect_dk_upload
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    batch = client.batched()
+    batch.__enter__()
+    try:
+        title, url = client.describe()
+        console.print(f"Building DK Upload on: [bold]{title}[/bold]\n{url}\n")
+        results = dku.build_dk_upload(client, cfg.lineups.upload_tab)
+        results.append(protect_dk_upload(client, cfg.lineups.upload_tab))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    finally:
+        batch.__exit__(None, None, None)
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
 @setup_app.command("add-pool-control", short_help="Create/refresh Player Pool's add-a-player control row.")
 def sheets_add_pool_control(
     sheet_id: str = typer.Option(
@@ -1256,6 +1347,7 @@ def sheets_polish(
                 header_row=lineups_header_row,
                 name_blocks=LINEUPS_NAME_BLOCKS,
                 header_repeats_at=header_repeats_at,
+                edge_tab=cfg.google_sheets.tab_mappings["edge"],
             )
         )
         results.append(
@@ -1971,7 +2063,10 @@ def sheets_protect(
         title, url = client.describe()
         console.print(f"Protecting: [bold]{title}[/bold]\n{url}\n")
         results = protect_workbook(
-            client, player_pool_tab=cfg.lineups.player_pool_tab, lineups_tab=cfg.lineups.builder_tab
+            client,
+            player_pool_tab=cfg.lineups.player_pool_tab,
+            lineups_tab=cfg.lineups.builder_tab,
+            dk_upload_tab=cfg.lineups.upload_tab,
         )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -1979,6 +2074,45 @@ def sheets_protect(
     finally:
         batch.__exit__(None, None, None)  # flush anything still queued
 
+    for line in results:
+        console.print(f"[green]OK[/green] {line}")
+
+
+@setup_app.command(
+    "suggested-controls",
+    short_help="The Suggested tab's rules box, typed cells and protection (for --iterate).",
+)
+def setup_suggested_controls(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Set up a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+) -> None:
+    """Make the Suggested tab ready to iterate on (`dfs lineups suggest
+    --iterate`). Safe to re-run.
+
+    A Suggested tab with no builds (a fresh template or a new week's copy) is
+    rewritten empty with the rules box (Always use, Never use, Max exposure,
+    Stack rules, Builds wanted) in pale-yellow typed cells, keeping any rules
+    already typed there; one that holds builds is left as the last run wrote it
+    (the lock ticks, decision cells and "your pick" tint are written beside the
+    builds by `dfs lineups suggest`, since the rows move with every run). Its
+    warning-only protection is replaced by one that leaves the lock column and
+    the Name column (decision cells, rules box, names typed over a player)
+    typeable. Run it on the template first, then the live week; `dfs doctor`
+    checks the protection.
+    """
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Setting up the Suggested tab on: [bold]{title}[/bold]\n{url}\n")
+        results = setup_controls(client)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
     for line in results:
         console.print(f"[green]OK[/green] {line}")
 
@@ -2119,10 +2253,15 @@ def setup_sheet(
        mean re-deriving nothing extra -- no reason to run it earlier.
     4. `add-filters` -- filter views on EdgeRaw plus the four view tabs
        from step 2. Depends on 2 (see above).
+    4b. `dk-upload` -- DK Upload's entries layout (Format / Lineup dropdown /
+       Suggested / Why after DK's own columns). Before `protect`, which
+       carves the Lineup dropdown out of the tab's protection.
     5. `protect` -- warning-only protection on every fully formula-driven
        tab, including the four view tabs. Runs after every structural
        tab/column exists so it's protecting the real final layout, not a
-       moving target.
+       moving target. (It also carves the Suggested tab's typed columns out of that tab's protection.)
+    5b. `suggested-controls` -- the Suggested tab's rules box and typed-cell styling on a tab that holds no
+       builds yet, and its protection (so the lock ticks, decision cells and rules box are typeable).
     6. `polish` -- presentation only (widths, freeze, number formats,
        chips, tab order). Never inserts/deletes/moves anything, so it's
        safe last -- and running it last means it's styling the finished
@@ -2146,7 +2285,9 @@ def setup_sheet(
         ("build-views", lambda: sheets_build_views(sheet_id=sheet_id)),
         ("link-edge", lambda: sheets_link_edge(sheet_id=sheet_id)),
         ("add-filters", lambda: sheets_add_filters(sheet_id=sheet_id)),
+        ("dk-upload", lambda: sheets_dk_upload(sheet_id=sheet_id)),
         ("protect", lambda: sheets_protect(sheet_id=sheet_id)),
+        ("suggested-controls", lambda: setup_suggested_controls(sheet_id=sheet_id)),
         ("polish", lambda: sheets_polish(sheet_id=sheet_id, skip_chrome=False)),
         ("audit-style", lambda: sheets_audit_style(sheet_id=sheet_id)),
         ("doctor", lambda: sheets_doctor(sheet_id=sheet_id)),
@@ -2703,6 +2844,16 @@ def export(
         console.print(f"[yellow]No entries found in {cfg.lineups.upload_tab!r} (all rows blank).[/yellow]")
         raise typer.Exit(code=1)
 
+    entries, blank = split_blank_entries(entries)
+    if blank:
+        noun = "entry" if len(blank) == 1 else "entries"
+        console.print(f"[dim]{len(blank)} {noun} with no lineup left out (they just do not go).[/dim]")
+    if not entries:
+        console.print(
+            f"[yellow]Every entry in {cfg.lineups.upload_tab!r} is blank: nothing to export.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
     lookup = build_salary_lookup(salary_df)
     results = [validate_entry(e, lookup, salary_cap=cfg.lineups.salary_cap) for e in entries]
 
@@ -2753,6 +2904,194 @@ def export(
         entry_word = "entry" if invalid_count == 1 else "entries"
         console.print(f"[red]{invalid_count} {entry_word} skipped due to validation errors above.[/red]")
         raise typer.Exit(code=1)
+
+
+def _gs_config(cfg: Config, sheet_id: str | None):
+    return cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+
+
+def _entries_now() -> datetime:
+    """The moment `entries` judges "has this game started?" at (a function so a test can replay the slate)."""
+    return datetime.now(tz=UTC)
+
+
+def _entries_file(cfg: Config, csv: Path | None):
+    """The entries file to read (the one given, else the newest in Downloads by its header row), parsed. Says
+    which it used; stops with a plain message when there is none or it is not DK's."""
+    from dfs import entries as ent
+
+    path, how = ent.resolve_entries_file(csv, Path(cfg.contests.downloads_dir).expanduser())
+    if path is None:
+        console.print(f"[red]{how}.[/red] Download it from DraftKings (Edit entries) or pass --csv.")
+        raise typer.Exit(code=1)
+    console.print(f"Entries file: [bold]{path}[/bold] ({how}).")
+    try:
+        return ent.read_entries_file(path)
+    except (ent.EntriesFileError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+
+
+@entries_app.command("fill")
+def entries_fill(
+    csv: Path = typer.Option(
+        None,
+        "--csv",
+        help="Path to a DraftKings entries file (Edit entries). Left out, the newest one in your Downloads "
+        "folder is used (found by its header row) and the command says which.",
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Also write upload_<timestamp>.csv: only the entries you set that DK does not already hold.",
+    ),
+    output: Path = typer.Option(None, "--output", "-o", help="Where --write puts the file (default: here)."),
+    again: bool = typer.Option(
+        False,
+        "--again",
+        help="After a late swap changed a lineup: rewrite only the entries whose lineup now differs from the "
+        "slots on DK Upload. Nothing else on the tab changes.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Read and report only: write neither the DK Upload tab nor a file."
+    ),
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Use a different sheet instead of config.toml's (e.g. the template)."
+    ),
+) -> None:
+    """Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
+
+    You choose every entry's lineup in the tab's Lineup dropdown (L1..L20); nothing is ever assigned for you.
+    The command lists each Classic main-slate entry from DK's entries file on DK Upload (Showdown and
+    other-slate entries are skipped and reported), keeps every Lineup you already set (matched by Entry ID),
+    writes a grey `Suggested` pick beside it by contest format (Cash-marked lineups for H2H, 50/50 and Double
+    Up, GPP-marked by Top 1% for GPPs, never the same lineup twice in one contest), fills the nine slots of
+    every entry you set from its lineup (FLEX = latest kickoff; a started player is never touched), and
+    prints checks (a lineup twice in a contest, a GPP lineup in a cash contest, an incomplete lineup, entries
+    left blank). `--write` makes the upload file."""
+    from dfs import entries as ent
+    from dfs import sheet_dk_upload as dku
+    from dfs.lineups import DK_UPLOAD_SHEET_HEADER
+
+    cfg = _load_config_or_exit()
+    parsed = _entries_file(cfg, csv)
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    tab = cfg.lineups.upload_tab
+    try:
+        title, url = client.describe()
+        console.print(f"Sheet: [bold]{title}[/bold]\n{url}\n")
+        top = client.read_range(tab, "A1:1")
+        header = [str(c).strip() for c in (top[0] if top else [])]
+        if header[: len(DK_UPLOAD_SHEET_HEADER)] != list(DK_UPLOAD_SHEET_HEADER):
+            console.print(
+                f"[red]{tab!r} does not have the entries layout yet.[/red] Run `dfs setup dk-upload` "
+                "(on the template first, then this sheet)."
+            )
+            raise typer.Exit(code=1)
+        tab_rows = dku.read_tab_rows(client, tab)
+        lineups = dku.read_lineups(client, cfg.lineups.builder_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    plan = ent.plan_fill(parsed, tab_rows, lineups, now=_entries_now(), again=again)
+    for reason, n in plan.skipped.items():
+        console.print(f"[yellow]Skipped {n} entr{'y' if n == 1 else 'ies'}: {reason}.[/yellow]")
+    if not plan.rows:
+        console.print("[yellow]No Classic main-slate entries in this file: nothing to fill.[/yellow]")
+        raise typer.Exit(code=0)
+    listed = {r.entry.entry_id for r in plan.rows}
+    kept = [t for t in tab_rows.values() if t.entry_id not in listed]
+    if len(plan.rows) + len(kept) > dku.LAST_ROW - dku.FIRST_ROW + 1:
+        console.print(f"[red]{len(plan.rows) + len(kept)} entries do not fit DK Upload's rows.[/red]")
+        raise typer.Exit(code=1)
+    if kept:
+        console.print(
+            f"[yellow]{len(kept)} row(s) on {tab!r} are not in this entries file; they stay as they are "
+            "and are not uploaded.[/yellow]"
+        )
+
+    console.print(f"\n[bold]{escape(plan.summary)}[/bold]")
+    for line in plan.flex_notes:
+        console.print(f"[cyan]{escape(line)}[/cyan]")
+    for line in plan.checks:
+        console.print(f"[yellow]- {escape(line)}[/yellow]")
+    changed = [r for r in plan.rows if r.changed]
+    to_upload = ent.upload_entries(plan)
+    held = plan.unchanged_at_dk
+    console.print(
+        f"{len(to_upload)} to upload ({held} set entr{'y' if held == 1 else 'ies'} already hold their "
+        "lineup at DK)."
+    )
+
+    if dry_run:
+        console.print("[dim]Dry run: nothing was written.[/dim]")
+        return
+    try:
+        if again:
+            console.print(dku.write_changed_slots(client, tab, changed, tab_rows))
+        else:
+            console.print(dku.write_tab_rows(client, tab, dku.tab_grid(plan.rows, kept), len(tab_rows)))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    if write:
+        if not to_upload:
+            console.print("[yellow]Nothing to upload: no entry you set differs from what DK holds.[/yellow]")
+            return
+        path = output or Path(f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        n = export_csv(to_upload, path)
+        console.print(
+            f"[green]Wrote {n} entr{'y' if n == 1 else 'ies'} to {path}[/green]; upload it at DraftKings."
+        )
+
+
+@entries_app.command("print")
+def entries_print(
+    csv: Path = typer.Option(
+        None,
+        "--csv",
+        help="Path to a DraftKings entries file. Left out, the newest one in your Downloads folder is used "
+        "(found by its header row) and the command says which.",
+    ),
+    output: Path = typer.Option(
+        None, "--output", "-o", help="Where to write the file (default: dk_lineups_<timestamp>.csv here)."
+    ),
+    sheet_id: str = typer.Option(None, "--sheet-id", help="Read a different sheet instead of config.toml's."),
+) -> None:
+    """Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, and write it to a file.
+
+    For when you pair lineups to contests yourself. One row per built lineup: CalPts, ProjPts and the summed
+    Own% first, then QB RB RB WR WR WR TE FLEX DST as `Name (ID)` using the ids in the entries file's own
+    player table (FLEX = latest kickoff). It needs no entry pairing and never writes to a sheet. A player
+    whose game has started is flagged and left where he is."""
+    from dfs import entries as ent
+    from dfs import sheet_dk_upload as dku
+
+    cfg = _load_config_or_exit()
+    parsed = _entries_file(cfg, csv)
+    if parsed.kind != "classic":
+        console.print("[red]That is a Showdown entries file: only Classic lineups are printed.[/red]")
+        raise typer.Exit(code=1)
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+        console.print(f"Lineups from: [bold]{title}[/bold]\n{url}\n")
+        lineups = dku.read_lineups(client, cfg.lineups.builder_tab)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    rows = ent.print_rows(lineups, parsed.players, _entries_now())
+    if not rows:
+        console.print("[yellow]No lineup has any name typed in it yet.[/yellow]")
+        raise typer.Exit(code=1)
+    console.print(" | ".join(ent.PRINT_HEADER))
+    for r in rows:
+        console.print(" | ".join(r.as_record()), markup=False, highlight=False, soft_wrap=True)
+    path = output or Path(f"dk_lineups_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    n = ent.write_print_csv(rows, path)
+    console.print(f"\n[green]Wrote {n} lineup(s) to {path}[/green] (ids from {parsed.path.name}).")
 
 
 @lineups_app.command("clear")
@@ -2927,6 +3266,84 @@ def _late_swap_sim_setup(
     )
 
 
+LATE_SWAP_STALE_MINUTES = 30
+
+
+def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> tuple[pd.DataFrame, list]:
+    """Say how old the sync's injury status is, and with `--refresh-injuries` lay ESPN's game-day feed over it
+    (`late_swap_news`): escalations only, each printed with its time. A failed fetch is a warning."""
+    from dfs import late_swap_news as news
+
+    path = store.CURRENT_DIR / "edge.csv"
+    if path.exists():
+        age = news.age_minutes(datetime.fromtimestamp(path.stat().st_mtime, UTC), now)
+        stale = age > LATE_SWAP_STALE_MINUTES
+        console.print(
+            f"Injury status (Avail) is from the last sync, {age:.0f} min ago."
+            + (
+                " [yellow]That is stale for the late window: run `dfs sync --live` or add "
+                "`--refresh-injuries`.[/yellow]"
+                if stale and not refresh
+                else ""
+            )
+        )
+    if not refresh:
+        return edge, []
+    try:
+        feed = news.fetch_news()
+    except news.NewsError as e:
+        console.print(f"[yellow]Could not read ESPN's injuries ({e}); using the sync's Avail.[/yellow]")
+        return edge, []
+    edge, changes = news.apply_news(edge, feed)
+    console.print(f"ESPN injuries read now: {len(changes)} change(s) to Avail.")
+    for c in changes[:25]:
+        when = f" ({news.age_minutes(c.updated, now):.0f} min old)" if c.updated else ""
+        console.print(
+            escape(f"  {c.name}: {c.before or '-'} -> {c.after}{when}  {c.note[:90]}"), highlight=False
+        )
+    return edge, changes
+
+
+def _chalk_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]], now: datetime) -> None:
+    """Heavy chalk (projected Own%) in none of the built cash lineups, or none of the GPP ones, and whose game
+    has not kicked off: a warning only (`chalk_watch`). A blank marker counts as cash (`resolve_goal`)."""
+    from dfs import chalk_watch as cw
+    from dfs.kickoff import parse_kickoff
+
+    kicked = {
+        str(n)
+        for n, g in zip(edge["Name"], edge.get("GameStart", pd.Series("", index=edge.index)), strict=True)
+        if (k := parse_kickoff(g)) is not None and k <= now
+    }
+    for goal, threshold in (("cash", cw.CASH_PROJECTED_OWN), ("gpp", cw.GPP_PROJECTED_OWN)):
+        sets = [names for names, g in built if g == goal]
+        line = cw.warning_line(cw.missing_chalk(edge, sets, threshold=threshold, started=kicked), kind=goal)
+        if line:
+            console.print(escape(line.replace("your gpp", "your GPP")), style="yellow", highlight=False)
+    _lineup_set_warnings(edge, built)
+
+
+def _lineup_set_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]]) -> None:
+    """Players in more than half of the built lineups, and each GPP-marked built lineup whose summed
+    projected Own% is outside the GPP target band (`lineup_watch`). Warnings only: a Cash or blank marker
+    gets no meter."""
+    from dfs import lineup_watch as lw
+
+    line = lw.overuse_line(lw.overused([names for names, _ in built]))
+    if line:
+        console.print(escape(line), style="yellow", highlight=False)
+    own = pd.to_numeric(edge.get("Own%"), errors="coerce") if "Own%" in edge.columns else None
+    if own is None:
+        return
+    by_name = dict(zip(edge["Name"], own, strict=True))
+    for number, (names, goal) in enumerate(built, start=1):
+        shares = [by_name.get(n) for n in names if n]
+        if len(shares) == 9 and all(s is not None and s == s for s in shares):
+            msg = lw.own_meter(sum(shares), goal)
+            if msg:
+                console.print(escape(f"Built lineup {number}: {msg}."), style="yellow", highlight=False)
+
+
 def _run_late_swap(
     cfg: Config,
     *,
@@ -2937,6 +3354,7 @@ def _run_late_swap(
     client: SheetsClient | None = None,
     goal: str | None = None,
     fixed_lines: bool = False,
+    refresh_injuries: bool = False,
 ) -> None:
     """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
     point in the slate; the command passes the real clock. `goal` None reads each lineup's Cash/GPP marker
@@ -2946,6 +3364,9 @@ def _run_late_swap(
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from e
+
+    edge, news_changes = _late_swap_news(edge, now=now, refresh=refresh_injuries)
+    news_by_name = {c.name: c for c in news_changes}
 
     client = client or SheetsClient(cfg.google_sheets)
     try:
@@ -2973,6 +3394,7 @@ def _run_late_swap(
     sim_setup = _late_swap_sim_setup(cfg, client, edge, goal, now, fixed_lines=fixed_lines)
 
     any_shown = False
+    built_lineups: list[tuple[list[str], str]] = []  # (names, goal by marker)
     for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
         # Each block IS the 9 roster rows now (ROSTER_SLOTS order) --
         # the salary-total row directly below it is no longer part of the
@@ -2982,6 +3404,7 @@ def _run_late_swap(
         names = [_sheet_cell(raw, offset + i) for i in range(len(ROSTER_SLOTS))]
         if not any(n.strip() for n in names):
             continue  # lineup not built yet
+        built_lineups.append((names, resolve_goal(None, markers[lineup_number - 1])))
 
         statuses = lineup_slot_status(names, edge, now=now)
         if all(s.locked is True for s in statuses):
@@ -3009,6 +3432,14 @@ def _run_late_swap(
                 s.flag or "",
             )
         console.print(table)
+        for s in statuses:  # news that changed one of THIS lineup's players since the sync
+            c = news_by_name.get(s.name)
+            if c is not None:
+                console.print(
+                    escape(f"[NEWS] {c.name}: {c.before or '-'} -> {c.after}. {c.note[:100]}"),
+                    style="yellow",
+                    highlight=False,
+                )
 
         state = lineup_state(statuses, edge, cap=cfg.lineups.salary_cap, metric=metric)
         lineup_goal = resolve_goal(goal, markers[lineup_number - 1])
@@ -3018,6 +3449,17 @@ def _run_late_swap(
             from dfs.sim_inputs import lineup_from_names
 
             lineup_specs = lineup_from_names(names, sim_setup[0])
+            risky = [s.name for s in statuses if s.found and not s.locked and s.avail in ("Q", "D")]
+            if lineup_specs is not None and risky:
+                from dfs.late_swap_sim import sit_effects
+
+                sit_settings = dataclasses.replace(sim_setup[1], goal=lineup_goal)
+                for e in sit_effects(lineup_specs, risky, sit_settings):
+                    console.print(
+                        f"If {e.name} sits: Cash % {e.p_cash:.0%} -> {e.sit_p_cash:.0%}, "
+                        f"Top 1% {e.p_gpp:.1%} -> {e.sit_p_gpp:.1%}.",
+                        highlight=False,
+                    )
         suggestions = suggest(
             state,
             pool,
@@ -3036,6 +3478,7 @@ def _run_late_swap(
             console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
 
+    _chalk_warnings(edge, built_lineups, now)
     if not any_shown:
         console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
 
@@ -3063,6 +3506,13 @@ def lineups_late_swap(
         "lineup's Cash/GPP marker (column A of its Total row; cash if blank).",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
+    refresh_injuries: bool = typer.Option(
+        False,
+        "--refresh-injuries",
+        help="Lay ESPN's game-day injury feed over the last sync's Avail first (Out, IR, Doubtful and "
+        "Questionable only escalate a status, never clear one), and list what changed. Use it in the late "
+        "window, after news breaks.",
+    ),
 ) -> None:
     """Check every built lineup in the Lineups tab against real kickoff
     times, then suggest what to swap: the best full re-fill of the open
@@ -3090,6 +3540,7 @@ def lineups_late_swap(
         now=datetime.now(UTC),
         goal=goal.value if goal else None,
         fixed_lines=fixed_lines,
+        refresh_injuries=refresh_injuries,
     )
 
 
@@ -3108,12 +3559,13 @@ def lineups_suggest(
     no_write: bool = typer.Option(
         False, "--no-write", help="Print the builds here and leave the Suggested tab alone."
     ),
-    seconds: float = typer.Option(
-        TIME_LIMIT_SECONDS,
+    seconds: float | None = typer.Option(
+        None,
         "--seconds",
         min=1.0,
-        help="How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool "
-        "when the run says the time limit cut it short.",
+        help=f"How long the search may run, in seconds (default {TIME_LIMIT_SECONDS:g}, or "
+        f"{ITERATE_TIME_LIMIT:g} for --iterate; a fresh run gives cash 40%, GPP the rest). Raise it for a "
+        "big pool when the run says the time limit cut it short.",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
     gpp_entries: int = typer.Option(
@@ -3134,6 +3586,21 @@ def lineups_suggest(
         "--rank",
         help="What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by "
         "1 + the identical entries expected).",
+    ),
+    iterate: bool = typer.Option(
+        False,
+        "--iterate",
+        help="Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each "
+        "build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept "
+        "builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are "
+        "ignored: the rules box's Builds wanted line says how many.",
+    ),
+    round_: int | None = typer.Option(
+        None,
+        "--round",
+        min=1,
+        help="Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a "
+        "new round (the state is kept in data/suggest_state/<week>.json).",
     ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
@@ -3162,6 +3629,14 @@ def lineups_suggest(
     earlier ones by at least 3 players, and FLEX (any RB, WR or TE) holds the
     latest kickoff.
 
+    Iterate on them: set a build's decision cell (Keep, Rebuild, Drop or
+    Vary N), tick the lock beside players who stay, type another name over a
+    player (it counts as a lock) and fill the rules box (Always use, Never
+    use, Max exposure, Stack rules, Builds wanted), then run with
+    `--iterate`. Every run is a round, kept in data/suggest_state/<week>.json
+    with the tab's state; `--round N` brings round N back. A run without
+    `--iterate` builds from scratch (the rules box is carried over, not applied).
+
     Your own lineups are never touched: copy builds in with Lineup Tools >
     Copy builds to Lineups (type 1,4,6 or all). Reads the last sync's data; run `dfs sync` (or
     `dfs sync --live`) first for the freshest picture."""
@@ -3177,7 +3652,17 @@ def lineups_suggest(
         gpp_entries=gpp_entries,
         double_up_entries=double_up_entries,
         rank=rank.value,
+        iterate=iterate,
+        restore_round=round_,
     )
+
+
+def _suggest_week(title: str) -> int:
+    """The week a sheet is for: its title (`Week 7`), else (the template) the calendar's."""
+    try:
+        return parse_week_from_title(title)
+    except ValueError:
+        return nfl_calendar.current_week()
 
 
 def _run_suggest(
@@ -3188,14 +3673,17 @@ def _run_suggest(
     write: bool,
     now: datetime,
     client: SheetsClient | None = None,
-    seconds: float = TIME_LIMIT_SECONDS,
+    seconds: float | None = None,
     fixed_lines: bool = False,
     gpp_entries: int = DEFAULT_GPP_ENTRIES,
     double_up_entries: int = DEFAULT_DOUBLE_UP_ENTRIES,
     rank: str = DEFAULT_RANK,
+    iterate: bool = False,
+    restore_round: int | None = None,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
-    in the slate; the command passes the real clock."""
+    in the slate; the command passes the real clock. A fresh run, `iterate` (rerun around the tab's
+    decisions) and `restore_round` (an earlier round, back) each record a round in the week's state file."""
     try:
         edge = store.load_current("edge")
     except FileNotFoundError as e:
@@ -3229,25 +3717,101 @@ def _run_suggest(
         console.print("[red]The simulator is needed to score builds and could not be set up.[/red]")
         raise typer.Exit(code=1)
     specs, settings = sim_setup
-    report = suggest_builds(
-        edge,
-        tags,
-        specs,
-        now=now,
-        cap=cfg.lineups.salary_cap,
-        cash_line=settings.cash_line,
-        gpp_target=settings.gpp_target,
-        metric=metric,
-        cash_builds=cash,
-        gpp_builds=gpp,
-        time_limit=seconds,
-        field=settings.field,
-        gpp_entries=gpp_entries,
-        double_up_entries=double_up_entries,
-        rank=rank,
+    week = _suggest_week(title)
+    try:
+        state = suggest_state.load_state(week)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    try:
+        with perf.measure(phases, "read tab"):
+            tab = read_suggested_state(client)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error reading the Suggested tab:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    prior = state.latest
+    restored: int | None = None
+    if restore_round is not None:
+        restored = restore_round
+        prior = state.get(restore_round)
+        if prior is None:
+            have = ", ".join(str(r.round) for r in state.rounds) or "none yet"
+            console.print(
+                f"[red]There is no round {restore_round} for week {week} (rounds on file: {have}).[/red]"
+            )
+            raise typer.Exit(code=1)
+        tab = lineup_iterate.tab_from_record(prior)
+    command = "restore" if restored is not None else "iterate" if iterate else "suggest"
+    if command == "suggest":
+        report = suggest_builds(
+            edge,
+            tags,
+            specs,
+            now=now,
+            cap=cfg.lineups.salary_cap,
+            cash_line=settings.cash_line,
+            gpp_target=settings.gpp_target,
+            metric=metric,
+            cash_builds=cash,
+            gpp_builds=gpp,
+            time_limit=seconds if seconds is not None else TIME_LIMIT_SECONDS,
+            field=settings.field,
+            gpp_entries=gpp_entries,
+            double_up_entries=double_up_entries,
+            rank=rank,
+        )
+        records = lineup_iterate.records_from_report(report)
+        report.rules = tab.rules.by_label()  # a fresh run carries the rules box over; it does not apply it
+        if not tab.rules.blank():
+            report.notes.append(
+                "The rules box was kept but not applied: a fresh run builds from the pool alone. "
+                "`--iterate` applies it."
+            )
+        if tab.builds and state.latest is not None:
+            report.notes.append(
+                f"This run replaced the {len(tab.builds)} build(s) of round {state.latest.round} (their "
+                f"decisions, locks and typed names are in {suggest_state.state_path(week).name}: "
+                f"`dfs lineups suggest --round {state.latest.round}` brings them back; `--iterate` keeps "
+                "them)."
+            )
+    else:
+        gain = getattr(getattr(cfg, "suggest", None), "bring_back_gain", lineup_iterate.BRING_BACK_GAIN)
+        iterated = lineup_iterate.iterate_builds(
+            edge,
+            tags,
+            specs,
+            tab,
+            prior,
+            now=now,
+            cap=cfg.lineups.salary_cap,
+            cash_line=settings.cash_line,
+            gpp_target=settings.gpp_target,
+            metric=metric,
+            time_limit=seconds if seconds is not None else ITERATE_TIME_LIMIT,
+            field=settings.field,
+            gpp_entries=gpp_entries,
+            double_up_entries=double_up_entries,
+            rank=rank,
+            bring_back_gain=gain,
+            freeze=restored is not None,
+        )
+        report, records = iterated.report, iterated.records
+    record = suggest_state.RoundRecord(
+        round=state.next_round(),
+        at=now.astimezone(UTC).isoformat(timespec="seconds"),
+        command=command,
+        rules=dict(report.rules),
+        builds=records,
+        notes=list(report.notes),
+        seconds=round(report.seconds, 2),
+        restored_from=restored,
     )
+    state.rounds.append(record)
+    report.round = record.round
+    report.history = suggest_state.history_lines(state)
+    how = {"suggest": "fresh run", "iterate": "rerun", "restore": f"round {restored} restored"}[command]
     console.print(
-        f"Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
+        f"Round {record.round} ({how}). Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
         f"{report.candidates.get('gpp', 0)} for GPP builds. {len(report.builds)} build(s) in "
         f"{report.seconds:.1f} s.\n"
     )
@@ -3255,13 +3819,15 @@ def _run_suggest(
         console.print(build_summary(build), markup=False, highlight=False, soft_wrap=True)
         for line in build_lines(build, edge):
             console.print("  " + line, markup=False, highlight=False, soft_wrap=True)
+        if build.note:
+            console.print(f"  -> {build.note}", markup=False, highlight=False, soft_wrap=True)
         console.print()
     for note in report.notes:
         console.print(f"[yellow]{note}[/yellow]")
-    for name, seconds in report.phases.items():  # the search phases, between the two sheet-side groups
-        phases[name] = (seconds, 0)
+    for name, took in report.phases.items():  # the search phases, between the two sheet-side groups
+        phases[name] = (took, 0)
     if not write:
-        console.print("[dim]--no-write: the Suggested tab was not changed.[/dim]")
+        console.print("[dim]--no-write: the Suggested tab and the state file were not changed.[/dim]")
         _print_phases(phases)
         return
     try:
@@ -3281,6 +3847,8 @@ def _run_suggest(
     except SheetsError as e:
         console.print(f"[red]Sheets error writing the Suggested tab:[/red] {e}")
         raise typer.Exit(code=1) from e
+    path = suggest_state.save_state(state)  # after the tab: the file mirrors what the tab shows
+    console.print(f"[green]OK[/green] round {record.round} saved to {path}")
     _print_phases(phases)
 
 
@@ -3580,6 +4148,8 @@ def week_new(
     for line in summary:
         console.print(f"[green]OK[/green] {line}")
 
+    _refresh_stakes_block(cfg, new_client)
+
     # Fix 2.14: blank every synced source's tab BEFORE the first sync
     # runs, not after -- a source that fails partway through must leave
     # an empty tab, never the template's own stale (real-looking, but
@@ -3627,6 +4197,25 @@ def week_new(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _refresh_stakes_block(cfg: Config, client: SheetsClient) -> None:
+    """Rebuild the Bankroll tab's STAKES block on the new week's sheet (it reads the carried Weekly Budget and
+    Starting Bankroll). NEVER fails `week new`: a template without the block, or anything in the way, is
+    reported and skipped; `dfs bankroll stakes` does it by hand."""
+    from dfs.nfl_calendar import current_season
+    from dfs.sheet_stakes import refresh_block
+
+    try:
+        summary, plan = refresh_block(client, cfg, current_season())
+    except Exception as e:  # noqa: BLE001 - the week itself is already set up; never fail it over this
+        console.print(
+            f"[yellow]STAKES block not rebuilt ({escape(str(e))}); run `dfs bankroll stakes`.[/yellow]"
+        )
+        return
+    console.print(f"[green]OK[/green] {summary}")
+    for warning in plan.warnings:
+        console.print(f"[yellow]WARNING:[/yellow] {escape(warning)}")
 
 
 def _opening_lines_line(ctx: SyncContext) -> str:
@@ -3682,8 +4271,8 @@ def week_close(
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
     csv = _resolve_history_csv(cfg, csv)
     _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
+    _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
-    _score_results_after_close(cfg)
 
 
 def _keep_history_export(csv: Path) -> None:
@@ -3726,6 +4315,7 @@ def _contests_after_close(cfg: Config, csv: Path) -> None:
             cfg,
             csv,
             client=SheetsClient(cfg.google_sheets),
+            log_pool=True,
             progress=lambda line: console.print(escape(line)),
         )
     except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; never fail the close over this
@@ -3936,6 +4526,62 @@ def bankroll_build_betting_ledger(
         f"{BLOCK_ROWS} rows -- update config.toml's [bankroll.cash]/[bankroll.gpp] row numbers "
         f"to match (old value + {BLOCK_ROWS}), then run `dfs doctor`."
     )
+
+
+@bankroll_app.command("stakes")
+def bankroll_stakes(
+    propose: bool = typer.Option(
+        False,
+        "--propose",
+        help="Print values for max_pct_bankroll_per_week and max_entry_fee_pct worked out from your own "
+        "bankroll and weekly volatility, with the arithmetic. Read-only: nothing is written anywhere.",
+    ),
+    no_sheet: bool = typer.Option(
+        False, "--no-sheet", help="Print the plan; do not write the STAKES block to the sheet."
+    ),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Read and write this sheet instead of config.toml's (e.g. the template: template first, "
+        "then the live sheet).",
+    ),
+) -> None:
+    """Rebuild the STAKES block on the Bankroll tab: your own ROI, cash rate and weekly volatility by format
+    (this season and every season in the contest log), and this week's plan from the Weekly Budget on the tab
+    and the rules you set under `[stakes]` in config.toml. Arithmetic on your history and your rules, not
+    advice. `--propose` only prints; the block is rebuilt from scratch each run and nothing else on the tab
+    is touched (it refuses if its area holds anything that is not a STAKES block)."""
+    from dfs.nfl_calendar import current_season
+    from dfs.sheet_stakes import StakesError, compute, load_typed, read_inputs, write_stakes
+    from dfs.stakes import NOT_ADVICE
+    from dfs.stakes import plan_line as stakes_plan_line
+    from dfs.stakes import propose as propose_rules
+
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Stakes on: [bold]{title}[/bold]\n{url}\n")
+        inputs = read_inputs(client, cfg.bankroll)
+        typed = load_typed()
+        season = current_season()
+        _, plan, layout = compute(cfg.stakes, typed, inputs, season)
+        if propose:
+            for line in propose_rules(typed, inputs.bankroll).lines:
+                console.print(escape(line))
+            console.print("\nNothing was written. Put the values you choose under [stakes] in config.toml.")
+            return
+        console.print(escape(stakes_plan_line(plan)))
+        for warning in plan.warnings:
+            console.print(f"[yellow]WARNING:[/yellow] {escape(warning)}")
+        console.print(NOT_ADVICE)
+        if no_sheet:
+            return
+        console.print(write_stakes(client, layout, cfg.bankroll.tab))
+    except (SheetsError, StakesError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
 
 
 @ownership_app.command("log")

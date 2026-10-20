@@ -139,6 +139,8 @@ append-only: it is the data frame's, `edge.csv`'s and the saved snapshots' order
 
 **`EspnPts` and `PropPts`** (2026-10-13) are SHADOW projections shown beside `CalPts` on EdgeRaw only (not linked into Player Pool or Lineups): ESPN's weekly projection and Vegas player props, each scored to DraftKings points (`docs/CALCULATIONS.md`, "`EspnPts` and the shadow gating"). Blank where the source did not rate him (and `PropPts` is blank, never partial, unless every market his position needs is quoted). Model Check scores both from their first week in its SHADOW SOURCES block; neither is in `CalPts` until it has 3 scored weeks. Hover notes on both headers say so.
 
+**`GppOwn`, `CashOwn`, `OurOwn`** (2026-10-20) are the SHADOW ownership columns, the last three on EdgeRaw only (appended after `NameKey`; not linked into Player Pool or Lineups; fractions shown as `0.0%` like `Own%`). `GppOwn` is TFFB's `Own%` sharpened for Sam's GPPs; `CashOwn` is the same for his double-ups; `OurOwn` is what his GPPs would own if the field used `CalPts` instead of its own projection (above `GppOwn` = the field is light on a player we like). Blank until a model is fitted (`dfs results update` refits it weekly) and until TFFB publishes ownership; 0 for a player who is OUT, IR or doubtful. Nothing reads them but Model Check (OWNERSHIP and WHEN WE DISAGREE). The model: `docs/CALCULATIONS.md`, "Field ownership shadow".
+
 The derived "which players are actually worth a look" tab -- computed
 locally by joining the tabs above, no network call of its own. Rows are
 pre-sorted by `Leverage` descending. Full design rationale in
@@ -709,13 +711,15 @@ four plus **Cash** (Avail blank, `Hit3x%` not blank, sorted `Hit3x%` high to low
 
 ### Suggested
 
-Written by `dfs lineups suggest` (`lineup_suggest.py`, `sheet_suggested.py`); created empty by `dfs setup build-views`, between Player Pool and Lineups in the tab strip, whole-tab warning
-protection (nothing is typed). Three lines on top (what it is, the projection / pool sizes (every defense on the slate counts: a build may use ANY DST, pooled or not, never against its own QB) / cash line / GPP target / seconds taken, how to use a build), then one block per build,
+Written by `dfs lineups suggest` (`lineup_suggest.py`, `sheet_suggested.py`); created empty by `dfs setup build-views`, between Player Pool and Lineups in the tab strip, warning-only
+protection except the lock and Name columns (see Iterate layout below). Three lines on top (what it is, the projection / pool sizes (every defense on the slate counts: a build may use ANY DST, pooled or not, never against its own QB) / cash line / GPP target / seconds taken, how to use a build), then one block per build,
 all stacked, Cash builds first then GPP, each by quarterback (name A-Z) and then the highest `CalPts` total first, numbered 1..N down the tab (2026-10-17): a dark bar (`Build 4 | GPP | NO stack + NYG bring-back`), a column header (`Slot | Name | Team | Opp | Salary | CalPts | Kickoff | Own% |
 Typical | Big night | Cash % | Top 1%`; `CalPts` is the projection used), nine player rows in roster-slot order with the FLEX on the latest kickoff, and a Total row
 (salary, projection and the simulator's four numbers; Cash % green at 50%, Top 1% at 2%, the lines Lineups uses). It is rewritten from scratch each run and **never touches Lineups**:
 **Lineup Tools > Copy builds to Lineups** (`Code.gs`) asks which builds (`1,4,6` or `all`, in the order typed) and copies each one's nine names into the next lineup block with no name in it, in block order, setting that block's Cash / GPP marker; it asks before it writes and then reports which build went into which lineup and which had no empty block left. How the
 builds are chosen: `docs/CALCULATIONS.md` ("Suggested lineups"). `dfs sync --live` does not refresh it (Sam: only when he asks).
+
+**Iterate layout (Week 7).** Columns: `Slot | 🔒 | Name | Team | Opp | Salary | CalPts | Kickoff | Own% | Typical | Big night | Cash % | Top 1%`, then two hidden helpers (`GameID`, `Yours`); every position derives from `sheet_suggested.COLUMNS` (`LOCK_INDEX`, `NAME_INDEX`, `TITLE_INDEX`), and Code.gs v7 keeps copies a test compares. A build's bar is `Build N | Cash/GPP (over the lock column) | decision (over Name) | title`; a note row under the Total says what changed (red when an edit was refused). Above the builds: the status line (`Round N  ·  ...`), the how-to and the RULES box (one row per label in column A, the typed text in the Name column). Below: the run's notes and a History block (one line per round). Typed cells (pale yellow): the lock ticks, the decision cells, the rules lines and any name typed over a player; the lock column and the Name column are carved out of the tab's warning-only protection as whole columns (`dfs setup protect` / `dfs setup suggested-controls`; `dfs doctor` checks `suggested-lock-protected` and `suggested-decision-protected`). A typed-in name is tinted mint (`YOUR_PICK_TINT`, a rule of its own above the correlation tints). **Rules box** (five typed lines above the builds; items separated by commas, semicolons or line breaks; a name is a full name or any part that matches one player): `Always use` (`Bijan, Nacua`: every new or rebuilt build holds them, unless the locks leave no room), `Never use` (`Kyren`), `Max exposure` (`Stafford: 4`: in at most 4 GPP builds and new ones are steered to reach 4; `more Stafford`: no cap, preferred), `Stack rules` (`LAR: no bring-back`, `DET: QB+RB ok` = DET stacks must be exactly that make-up, several allowed on separate items, `no stacks from GB`) and `Builds wanted` (`cash 3, gpp 8`; blank = as many of each as the tab holds, an empty tab 3 cash and 8 GPP). An item it cannot read is printed and written under the builds, never guessed.
 
 ### Slate Grid
 
@@ -764,7 +768,16 @@ Where you pair a finished lineup to a real DK contest entry: DraftKings'
 own "bulk edit entries" layout (Entry ID, Contest Name, Contest ID, Entry
 Fee, then the 9 roster-slot columns). Row 1 is DK Classic's header (`lineups.DK_UPLOAD_HEADER`: `Entry ID, Contest Name, Contest ID, Entry Fee, QB, RB, RB, WR, WR, WR, TE, FLEX, DST`); `dfs setup polish` restores it and `dfs doctor` checks it (every sheet once carried a Showdown `CPT / FLEX x5` header by hand; `dfs export` reads the slots by position, so it never broke, but it misled). `dfs export` reads this tab as-is,
 validates it against the current salary data, and writes DK's own
-upload-ready CSV. Pairing lineups to entries stays a manual step.
+upload-ready CSV.
+
+**The entries layout** (2026-10-18, `dfs setup dk-upload`; `lineups.DK_UPLOAD_SHEET_HEADER`): DK's 13 columns stay first and in
+DK's order, then four more -- `Format` (the contest's series format, `dfs.contests.series`), **`Lineup`** (a dropdown, `L1`..`L20`,
+pale-yellow: the one cell on the tab you type, and the one exempt from its warning-only protection), `Suggested` and `Why` (grey,
+read-only: the tool's hint by format, never copied into `Lineup`, never read by the export). `dfs entries fill` writes one row per
+Classic main-slate entry in DraftKings' entries file (Showdown and other-slate entries skipped), keeps every `Lineup` you set
+(matched by Entry ID) and fills the nine slots of each entry you set from its lineup (FLEX = latest kickoff, a started player
+never touched). **You choose every entry's lineup; the tool never assigns one.** `dfs doctor` checks the layout, the dropdown, the
+typed-cell cue and the protection exemption.
 
 `Scratch` (a blank drafting grid) and `EntriesRaw`/`GPPin`/`DKLineupsRaw`/
 `DKLineupsFinal` (the hand-paste DK contest-history chain) were removed
@@ -895,6 +908,30 @@ GPP's real extent can outgrow its configured `last_row` over time (Sam:
 rewrite the tab), fill down its `% Paid`/`Place %` formulas onto the new
 rows, and bump `[bankroll.gpp].last_row` in `config.toml` to match.
 
+**STAKES** (columns `sheet_stakes.STAKES_FIRST_COLUMN` (N) to the right, from row 1; `dfs bankroll stakes`, and `dfs week new` on
+the new sheet): a block to the RIGHT of the ledgers, so no row is inserted and nothing above moves (the
+Betting/Cash/GPP ledgers and the KPI block sit in A:J, L is the hidden dedupe key). Rebuilt from scratch on every run
+from `data/contests/contest_log.csv`, the tab's own Starting Bankroll and Weekly Budget cells
+(`week.BANKROLL_STARTING_CELL`, `BANKROLL_WEEKLY_BUDGET_CELL`) and `[stakes]` in config; nothing is typed in it, and
+the writer refuses (writes nothing) when its area holds anything that is not a previous STAKES block. Three
+sections, top to bottom:
+
+1. **Your numbers by format**: one row per format in the log, then Cash (H2H, 50/50, Double Up), GPP (every other
+   format) and All formats. For this season and for every season in the log: `Entries`, `ROI` (winnings minus fees,
+   over fees), `Cash rate` (finished in a paid place) and `Weekly SD` (the standard deviation of the weekly net, from
+   2 weeks). A figure the data cannot support is `–` (a freeroll has no ROI; one week has no SD), never a guess.
+2. **This week's plan**: the Weekly Budget (B6) and Starting Bankroll (B1) as read, the two rules and the split, and
+   the arithmetic sentence "Your rules give: cash $X, GPP $Y; largest entry $Z". A rule left out of `[stakes]` says
+   `not set` and the plan is the arithmetic without it. A `WARNING:` line (red) appears when the plan breaks one of
+   your rules: the budget above `max_pct_bankroll_per_week`, this week's ledgers already over the planned spend, the
+   largest entry over `max_entry_fee_pct`, or your own `split` funding a bucket the default would leave out.
+3. **How the default split is worked out**: per bucket its entries, ROI, weight, ROI share, even share and share,
+   with the formula and the floor in a note (math: docs/CALCULATIONS.md "Stake sizing").
+
+Header hover notes are `sheet_column_notes.STAKES_NOTES`. The weekly budget is not a config key: it already lives in
+B6 and is carried by `dfs week new`. `dfs doctor` reports a Bankroll tab with no STAKES block (`stakes-block`).
+Arithmetic on your own history and rules, not financial advice.
+
 ### Results
 
 A season-level results log (Week, Cash Pts/Line, H2H Entered/Win, then three
@@ -937,7 +974,7 @@ note, so a new column cannot ship unexplained.
 ### Model Check
 
 Season-level, read-only, **rebuilt from `data/results/` every time `dfs results update` runs** (also at the end of
-`dfs week close`, which never fails over it). Nothing is typed. Ten blocks, top to bottom: a status line (weeks
+`dfs week close`, which never fails over it). Nothing is typed. Ten blocks, top to bottom (plus, since 2026-10-20, the shadow **OWNERSHIP** and **WHEN WE DISAGREE** blocks after SHADOW SOURCES; see CALCULATIONS.md, "Field ownership shadow"): a status line (weeks
 scored, rosterable-pool players scored / did not play / not found), the **Projection Race** (2026-10-07: TFFB, AggPts and CalPts on everyone, then with UM as its own row on the players UM rates, judged on weeks they never trained on; by position plus a per-week trend -- the table Sam uses to choose a default projection), **Reliability** (predicted decile against realized for `Hit3x%`, `Boom%` and `Bust%`, n shown, a decile more than 8 points off with n >= 30 flagged), **Ceiling** (how often a player beat his
 published `Ceiling`, with its 90% interval, `Ceiling is really the Nth percentile` and `Ceiling skill (80th/85th/90th pct)` -- the headline), **Projection accuracy** (bias, MAE,
 calibration slope, R squared, Spearman, calibration buckets), **ValAdj** quintiles, **Sources compared** (labelled
@@ -957,7 +994,15 @@ cell note (hover the corner mark) with its plain-English definition (`sheet_colu
 Season-level, read-only, **rebuilt from `data/contests/` by `dfs week close` and `dfs contests update`**; nothing is typed, and a
 whole-tab warning protection (`sheet_protection.FULLY_PROTECTED_TABS`) says so. It sits after Model Check
 (`sheet_style.WEEK_ORDER`); built by `sheet_contests.build_layout` / `write_contests` from the CSVs the contests engine writes
-(`docs/CONTESTS.md`). Five blocks, top to bottom:
+(`docs/CONTESTS.md`). Two blocks added 2026-10-18 and five older ones, top to bottom:
+
+0. **This week, your decisions** (top of the tab, `sheet_contests._add_decisions`, from `contests/decisions.py`) -- the Monday
+   post-mortem of your own choices in five lines, numbers first: cash (your lineup's score against each double-up's cash line, and its
+   copies in the field), GPP (each entry's finish, the average), the biggest swing (your player against the field's most-owned player at
+   the same position within $400 of his salary), the pool hit rate (your pooled players, and the Board's Model likes you left out,
+   against their CalPts; logged at the close because it needs your live pool), and contest choice (the same lineups in the other
+   contests of your standings files). Everything comes from the standings files and actual stats; a missing measure reads `-`. A
+   season block under it adds the same measures up. Written by `dfs week close` (which now scores the week first).
 
 1. **Series you play, this season** -- one row per series in H2H, 50/50, Double Up, Multiplier, SE GPP and N-max GPP, by format.
    `Fee`, `Field` (typical entrants), `Paid %`, `Played` (this season), `ROI` (winnings less fees over fees; freerolls are not here),
@@ -972,6 +1017,10 @@ whole-tab warning protection (`sheet_protection.FULLY_PROTECTED_TABS`) says so. 
 3. **How the field builds** -- per format, averaged over the contests logged: for the field, the top 10 % and you: QB + 1 / + 2
    catchers, bring-back, salary left, share leaving $1,000+, FLEX position, chalk (how many of the contest's five most-owned players a
    lineup holds), DST with / against the QB, and the share of duplicate lineups.
+3b. **What wins in your contests** (`sheet_contests._add_winners`, from `contests/winners.py`) -- the top 1 % of your large GPPs (700+
+   entries) beside every lineup in them: QB + 1 / + 2 teammates at any position (and the older WR/TE-only count), stack + bring-back, game
+   stack, a RB with his own DST, ownership sum and (median) product, salary left, DST ownership, with the lineup counts and the biggest
+   gaps called out. Directional until more weeks pile up.
 4. **Head to head** -- your win rate by score band, and your record against the 15 opponents you have met most (2 or more times), with
    the one-line use: favour opponents you beat; skip the ones who beat you.
 5. **Left out of the ROI above** -- freerolls, Showdown, private and unrecognised contests: entries and net this season and overall,

@@ -33,12 +33,12 @@ def _fail(message: str) -> typer.Exit:
     return typer.Exit(1)
 
 
-def _load_frame_or_exit():
+def _load_frame_or_exit(through: int | None = None):
     from dfs.model.data import ModelDataError
     from dfs.sim.pipeline import load_frame
 
     try:
-        return load_frame(log=_say)
+        return load_frame(through, log=_say)
     except ModelDataError as e:
         raise _fail(str(e)) from e
 
@@ -48,6 +48,12 @@ def sim_fit(
     n_boot: int = typer.Option(1000, "--n-boot", help="Bootstrap resamples for each interval."),
     seed: int = typer.Option(0, "--seed", help="Seed for every random draw."),
     out_dir: Path = typer.Option(None, "--out-dir", help="Where to write (default: models/sim/)."),
+    through: int = typer.Option(
+        None,
+        "--through",
+        help="Last season to fit on. Default: the shipped model's last complete season; the current season "
+        "(`dfs model fetch` first) adds the weeks played so far.",
+    ),
 ) -> None:
     """Rebuild models/sim/correlations.csv (and the QB1-TE1 team-shape table beside it) from the cached
     history (about a minute)."""
@@ -56,7 +62,7 @@ def sim_fit(
     from dfs.sim import report, shape_table
     from dfs.sim.correlation import SIM_DIR, fit_correlations, save_fit
 
-    frame = _load_frame_or_exit()
+    frame = _load_frame_or_exit(through)
     _say(f"fitting {len(frame):,} out-of-fold player-games")
     fit = fit_correlations(frame, seed=seed, n_boot=n_boot)
     checks = report.fit_checks(fit, seed)

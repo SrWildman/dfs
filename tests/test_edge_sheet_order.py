@@ -27,7 +27,7 @@ def test_the_sheet_order_is_a_permutation_of_the_append_only_frame_order():
         EDGE_SHEET_ORDER
     )
     assert EDGE_SHEET_ORDER != EDGE_COLUMNS  # the tab has its own designed order
-    appended = [*derived.EDGE_FINDER_COLUMNS, *derived.EDGE_SOURCE_COLUMNS]
+    appended = [*derived.EDGE_FINDER_COLUMNS, *derived.EDGE_SOURCE_COLUMNS, *derived.FIELD_OWN_COLUMNS]
     assert EDGE_COLUMNS[-len(appended) :] == appended  # still append-only
 
 
@@ -57,7 +57,9 @@ def test_the_designed_order_pool_name_spine_then_zones_then_hidden_helpers():
     zones = [EDGE_SHEET_ORDER.index(label) for label in ZONE_LABELS]
     assert zones == sorted(zones) and zones[0] > EDGE_SHEET_ORDER.index("Edge")
     hidden = ["Id", "Flag", *derived.ALL_PCT_COLUMNS.values(), "NameKey"]
-    assert EDGE_SHEET_ORDER[-len(hidden) :] == hidden  # helpers last
+    own = derived.FIELD_OWN_COLUMNS  # the ownership shadow (2026-10-20) is appended after the helpers
+    assert EDGE_SHEET_ORDER[-len(hidden) - len(own) : -len(own)] == hidden  # helpers last, bar the shadow
+    assert EDGE_SHEET_ORDER[-len(own) :] == own == ["GppOwn", "CashOwn", "OurOwn"]
     for name in ("Floor", "CeilM", "Bust%"):  # the CEIL group
         assert (
             EDGE_SHEET_ORDER.index("CeilPct")

@@ -164,3 +164,28 @@ def test_a_long_row_is_taller_than_a_short_one():
     longest = max(range(1, INSTRUCTIONS_LAST_ROW + 1), key=lambda n: len(render_instructions_grid()[n][1]))
     assert client.heights[longest] > client.heights[1]
     assert set(client.heights) == set(range(1, INSTRUCTIONS_LAST_ROW + 1))
+
+
+def test_iterate_on_suggested_is_a_four_line_box_that_names_the_decisions_the_rules_and_the_command():
+    start = next(
+        i for i, (kind, a, _b) in enumerate(_LAYOUT) if kind == "section" and a == "ITERATE ON SUGGESTED"
+    )
+    rows = []
+    for kind, a, b in _LAYOUT[start + 1 :]:
+        if kind != "row":
+            break
+        rows.append((a, b))
+    assert [a for a, _ in rows] == ["Decide", "Lock and edit", "Rules box", "Rerun"]
+    text = " ".join(b for _, b in rows)
+    for word in (
+        "Keep",
+        "Rebuild",
+        "Drop",
+        "Vary N",
+        "Always use",
+        "Never use",
+        "Max exposure",
+        "Stack rules",
+    ):
+        assert word in text
+    assert "Builds wanted" in text and "--iterate" in text and "--round N" in text

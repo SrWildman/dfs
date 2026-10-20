@@ -25,7 +25,9 @@
 //      order typed) and copies each one's nine names into the next EMPTY lineup block on Lineups, in order,
 //      setting that block's Cash / GPP marker. It never overwrites a block that has a name in it; it shows
 //      what will go where (and what has no empty block left) before it writes, and reports afterwards
-//      (version 6; version 4 and 5 copied one build into the first empty block).
+//      (version 6; version 4 and 5 copied one build into the first empty block). Version 7 reads the
+//      Suggested tab's new layout: a lock column left of Name (so Name moved one column right) and a decision
+//      cell on each bar, so it works on any round of `dfs lineups suggest --iterate`.
 //   6. onOpen: the menu, plus a version stamp in the hidden named range DFS_SCRIPT_VERSION so `dfs
 //      doctor` can tell whether this script is pasted and current.
 //
@@ -33,7 +35,7 @@
 // functions at the bottom are unit-tested with node (tests/test_apps_script.py).
 
 // Bump this whenever this file changes: `dfs doctor` warns when the sheet's stamp is older.
-var DFS_SCRIPT_VERSION = 6;
+var DFS_SCRIPT_VERSION = 7;
 
 var VERSION_RANGE_NAME = 'DFS_SCRIPT_VERSION';
 var VERSION_TAB = 'NameAlias'; // a hidden tab nothing rewrites
@@ -58,6 +60,12 @@ var KEY_HEADER = 'Player Key'; // Lineups: DraftKings' canonical name for what w
 var KICKOFF_TIMEZONE = 'America/New_York';
 var SUGGESTED_TAB = 'Suggested';
 var BUILD_LABEL = 'Build'; // column A of a Suggested block's bar row reads "Build 4"
+// Where a Suggested block keeps things, as 0-based columns (src/dfs/sheet_suggested.py derives them from its
+// COLUMNS list; tests/test_apps_script.py compares): the bar's kind and title, every player row's name.
+var SUGGESTED_KIND_COL = 1; // the bar's second cell, Cash or GPP (over the lock column)
+var SUGGESTED_NAME_COL = 2; // the Name column (the bar's third cell is the decision)
+var SUGGESTED_TITLE_COL = 3; // the bar's title
+var SUGGESTED_READ_COLUMNS = 4; // the leftmost columns of the tab that are read
 var MARKER_VALUES = ['Cash', 'GPP'];
 
 var ID_HEADER = 'Id';
@@ -246,7 +254,7 @@ function copyBuildsToLineups() {
     ui.alert(title, 'This needs the "' + SUGGESTED_TAB + '" and "' + LINEUPS_TAB + '" tabs.', ui.ButtonSet.OK);
     return;
   }
-  var sGrid = suggested.getLastRow() > 0 ? suggested.getRange(1, 1, suggested.getLastRow(), Math.min(3, suggested.getLastColumn() || 3)).getValues() : [];
+  var sGrid = suggested.getLastRow() > 0 ? suggested.getRange(1, 1, suggested.getLastRow(), Math.min(SUGGESTED_READ_COLUMNS, suggested.getLastColumn() || SUGGESTED_READ_COLUMNS)).getValues() : [];
   var available = parseBuilds(sGrid);
   if (available.length === 0) {
     ui.alert(title, 'The Suggested tab has no builds yet. Run `dfs lineups suggest` first.', ui.ButtonSet.OK);
@@ -525,8 +533,9 @@ function rowHasLabel(row, label) {
 
 /**
  * The builds on a Suggested grid (`src/dfs/sheet_suggested.py` `parse_builds` does the same in Python): a bar row
- * whose column A reads "Build N" (column B the kind, Cash or GPP, column C the title), then the column header,
- * then nine player rows with the name in column B. A block without nine names is left out. Returns
+ * whose column A reads "Build N" (the kind, Cash or GPP, in SUGGESTED_KIND_COL and the title in
+ * SUGGESTED_TITLE_COL; the decision cell between them is not read), then the column header, then nine player
+ * rows with the name in SUGGESTED_NAME_COL. A block without nine names is left out. Returns
  * [{number, kind, title, names: [9 names]}].
  */
 function parseBuilds(grid) {
@@ -537,13 +546,13 @@ function parseBuilds(grid) {
     if (!match || label.indexOf(BUILD_LABEL) !== 0) continue;
     var names = [];
     for (var j = i + 2; j < i + 2 + SLOT_ORDER.length && j < grid.length; j++) {
-      names.push(String(grid[j][1] === undefined ? '' : grid[j][1]).trim());
+      names.push(String(grid[j][SUGGESTED_NAME_COL] === undefined ? '' : grid[j][SUGGESTED_NAME_COL]).trim());
     }
     if (names.length !== SLOT_ORDER.length || names.some(function (n) { return n === ''; })) continue;
     builds.push({
       number: parseInt(match[1], 10),
-      kind: String(grid[i][1] === undefined ? '' : grid[i][1]).trim(),
-      title: String(grid[i][2] === undefined ? '' : grid[i][2]).trim(),
+      kind: String(grid[i][SUGGESTED_KIND_COL] === undefined ? '' : grid[i][SUGGESTED_KIND_COL]).trim(),
+      title: String(grid[i][SUGGESTED_TITLE_COL] === undefined ? '' : grid[i][SUGGESTED_TITLE_COL]).trim(),
       names: names
     });
   }

@@ -19,8 +19,8 @@ This is what most weeks look like. Everything below it is reference.
 |---|---|---|---|
 | 1 | Tuesday/Wednesday: a new week starts | `dfs week new "<url-of-the-sheet-copy>"` | Points the CLI at a fresh copy of the template, carries your bankroll and Results forward, runs a full sync. Then check `dfs status`. |
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
-| 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy builds to Lineups drops one in). |
-| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates your lineups and writes DraftKings' bulk-upload CSV. |
+| 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy builds to Lineups drops one in); keep, lock, edit or drop builds there and run `dfs lineups suggest --iterate` to rebuild around your decisions. |
+| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`. |
 | 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close` | Reconciles Cash/GPP into Bankroll and Results from the newest contest-history export in Downloads (or `--csv <file>`), keeps your DraftKings downloads (history copy, standings files) and rebuilds the Contests tab, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
 
@@ -99,11 +99,36 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--cash INT RANGE` | How many cash builds (0 for none). Default: `3`. |
 | `--gpp INT RANGE` | How many GPP builds (0 for none). Left off, every QB stack gets a build and ideally two. |
 | `--no-write` | Print the builds here and leave the Suggested tab alone. |
-| `--seconds FLOAT RANGE` | How long the search may run, in seconds (cash gets 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. Default: `60.0`. |
+| `--seconds FLOAT RANGE` | How long the search may run, in seconds (default 120, or 12 for --iterate; a fresh run gives cash 40%, GPP the rest). Raise it for a big pool when the run says the time limit cut it short. |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
 | `--gpp-entries INT RANGE` | Size of the GPP the builds are for. The duplicates each build is expected to share are read against it (shown on every GPP build; they rank only with --rank share). Default: `1000`. |
 | `--double-up-entries INT RANGE` | Size of a double-up, for the warning on a cash build many entries are expected to share. Default: `3000`. |
 | `--rank CHOICE` | What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by 1 + the identical entries expected). Default: `top1`. |
+| `--iterate` | Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are ignored: the rules box's Builds wanted line says how many. |
+| `--round INT RANGE` | Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a new round (the state is kept in data/suggest_state/<week>.json). |
+
+### `dfs entries fill`
+
+Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
+
+| Option | What it does |
+|---|---|
+| `--csv PATH` | Path to a DraftKings entries file (Edit entries). Left out, the newest one in your Downloads folder is used (found by its header row) and the command says which. |
+| `--write` | Also write upload_<timestamp>.csv: only the entries you set that DK does not already hold. |
+| `--output / -o PATH` | Where --write puts the file (default: here). |
+| `--again` | After a late swap changed a lineup: rewrite only the entries whose lineup now differs from the slots on DK Upload. Nothing else on the tab changes. |
+| `--dry-run` | Read and report only: write neither the DK Upload tab nor a file. |
+| `--sheet-id STR` | Use a different sheet instead of config.toml's (e.g. the template). |
+
+### `dfs entries print`
+
+Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, and write it to a file.
+
+| Option | What it does |
+|---|---|
+| `--csv PATH` | Path to a DraftKings entries file. Left out, the newest one in your Downloads folder is used (found by its header row) and the command says which. |
+| `--output / -o PATH` | Where to write the file (default: dk_lineups_<timestamp>.csv here). |
+| `--sheet-id STR` | Read a different sheet instead of config.toml's. |
 
 ### `dfs export`
 
@@ -124,6 +149,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
 | `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each lineup's Cash/GPP marker (column A of its Total row; cash if blank). |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
+| `--refresh-injuries` | Lay ESPN's game-day injury feed over the last sync's Avail first (Out, IR, Doubtful and Questionable only escalate a status, never clear one), and list what changed. Use it in the late window, after news breaks. |
 
 ### `dfs week close`
 
@@ -187,7 +213,7 @@ Save the current betting lines (and nothing else): no sheet, no other source. Li
 
 ## Reference: bankroll, logs and accounts (only when needed)
 
-Reconciling results and keeping records, and one-time logins. `dfs week close` already calls `bankroll sync` for you.
+Reconciling results and keeping records, and one-time logins. `dfs week close` already calls `bankroll sync` for you, and `dfs week new` rebuilds the STAKES block (`bankroll stakes`).
 
 ### `dfs bankroll sync`
 
@@ -197,6 +223,16 @@ Classify contest entries into Cash/GPP and append new ones to the bankroll tab, 
 |---|---|
 | `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). Left out, the newest history export in your Downloads folder is used (found by its header row). |
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
+
+### `dfs bankroll stakes`
+
+Rebuild the STAKES block on the Bankroll tab: your own ROI, cash rate and weekly volatility by format (this season and every season in the contest log), and this week's plan from the Weekly Budget on the tab and the rules you set under `[stakes]` in config.toml. Arithmetic on your history and your rules, not advice. `--propose` only prints; the block is rebuilt from scratch each run and nothing else on the tab is touched (it refuses if its area holds anything that is not a STAKES block).
+
+| Option | What it does |
+|---|---|
+| `--propose` | Print values for max_pct_bankroll_per_week and max_entry_fee_pct worked out from your own bankroll and weekly volatility, with the arithmetic. Read-only: nothing is written anywhere. |
+| `--no-sheet` | Print the plan; do not write the STAKES block to the sheet. |
+| `--sheet-id STR` | Read and write this sheet instead of config.toml's (e.g. the template: template first, then the live sheet). |
 
 ### `dfs contests update`
 
@@ -284,6 +320,7 @@ Rebuild models/sim/correlations.csv (and the QB1-TE1 team-shape table beside it)
 | `--n-boot INT` | Bootstrap resamples for each interval. Default: `1000`. |
 | `--seed INT` | Seed for every random draw. |
 | `--out-dir PATH` | Where to write (default: models/sim/). |
+| `--through INT` | Last season to fit on. Default: the shipped model's last complete season; the current season (`dfs model fetch` first) adds the weeks played so far. |
 
 ### `dfs sim backtest`
 
@@ -435,6 +472,14 @@ A3: create (or refresh) Player Pool's own "add a player" row -- a type dropdown 
 |---|---|
 | `--sheet-id STR` | Add/refresh the control row on a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
 
+### `dfs setup dk-upload`
+
+Put the entries layout on the DK Upload tab: DK's columns, then Format, a typed Lineup dropdown (L1..L20, pale-yellow, the one cell exempt from the tab's protection), and the grey Suggested and Why columns `dfs entries fill` writes. Safe to re-run: it never touches an entry row's values.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+
 ### `dfs setup add-filters`
 
 Fix 1: sorting and searching are real features that were invisible -- filter views live behind Data > Filter views, easy to never notice.
@@ -450,6 +495,14 @@ Warning-only protection (never a hard lock) on every fully formula-driven tab --
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Protect a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+
+### `dfs setup suggested-controls`
+
+Make the Suggested tab ready to iterate on (`dfs lineups suggest --iterate`). Safe to re-run.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Set up a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
 
 ### `dfs setup audit-style`
 
@@ -482,6 +535,14 @@ Round 5 follow-up item 2 (2026-09-29): `dfs doctor` now requires a formula on ev
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Repair a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+
+### `dfs setup lineup-chalk`
+
+Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete lineup that holds none of the heavily owned players (projected 16%+ owned, about 20% expected in a double-up; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on the tab changes. Template first, then the live sheet; run `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- the template first. |
 
 ### `dfs setup guard-empty-states`
 

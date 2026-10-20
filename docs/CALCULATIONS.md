@@ -832,8 +832,10 @@ game not started (`late_swap_search.swap_pool`), valued at the configured projec
 slots with FLEX taking an RB, WR or TE, nobody twice, no DST against his own QB, at most one RB per game. **Cash builds** (default 3): the best `CASH_TOP_K = 300` lineups by projection
 (`late_swap_search.top_lineups`, branch-and-bound with the Lagrangian salary bound, exact) are all simulated in one run (`sim_inputs.N_SIMS = 20,000` draws, seed 0) and the builds are the highest
 `Cash %` (the chance of beating the cash line, the median of Sam's typed Results `Cash Line`s). **GPP builds** (`choose_per_qb`: one build for every QB stack and a second for each when it fits, quarterbacks in order of their best lineup, so the count follows the pool; `--gpp N` asks for the N best builds instead (`choose`, below); a GPP build may use ANY pool player, whatever the mark, but never nine Cash-marked ones, `GPP_MIN_NOT_CASH_ONLY`): every candidate is one of the SHAPES in `lineup_shapes.py` (exact branch-and-bound with the shape as a rule on the finished lineup and a prune on the partial one, never a hard-coded pick). **A stack is the QB and one to three of his teammates at any skill position** (RB, WR or TE in any mix), **with or without a bring-back** (Sam, 2026-10-18: not forced, the simulator decides): `stack` (with a bring-back, a RB / WR / TE of the other team), `naked` (without), `rb_stack` (holds a RB of the QB's team), `game` (a stack and at least two RB / WR / TE of the other team), `rb_dst` (a stack and a RB with his own team's DST) and `contrarian` (a stack whose summed ownership is in the bottom third of the stacks the earlier searches found). Each QB is searched on his own, per shape for his best 40 (`stack`), 20 (`naked`, `rb_stack`) or 10 lineups (`GPP_PLAN`; a QB who cannot reach the shape in the pool, e.g. with no teammate in it, is skipped: `can_stack` / `can_reach`; the search cannot see that and used to spend his whole share of the time limit on it), cutting branches that can no longer reach the shape (`lineup_shapes.feasible_for`: it never rejects a lineup that can pass). `rb_dst` also fixes each QB's best `RB_DST_OPTIONS = 3` DSTs and a RB of the DST's team, `contrarian` his best `CONTRARIAN_CORES = 3` stack cores under the ownership cut, because a rule the search's bound cannot see makes a plain search slow. The searches run in the `GPP_PLAN` order and each gets its weight's share of the time left (the stack with a bring-back first, the biggest share), each other shape best-effort inside its time box (a note says when one is cut). A lineup that matches several shapes is kept once and tagged with all; its name says its make-up ("DET naked stack QB+RB+WR", "DET stack QB+2WR + ARI bring-back"). Candidates are ranked by `--rank`: `top1` (the default) by `p_gpp` alone, then projection, salary, names; `share` (Sam: not the default until it is retro-tested on his weeks) by their **Top 1% share**, `p_gpp / (1 + E[dups])` (`sim/dups.py`: `E[dups] = N * product(ownership) ** 0.5`, N = `--gpp-entries`, default 1,000; the exponent is a stated correction to the independence estimate, see `docs/SIM.md`, "Duplicates, the Top 1% share and build shapes"), then by `p_gpp`; without published ownership both ranks are `p_gpp` alone. Every build reports its ownership sum and product and its E[dups] whichever way it is ranked. A cash build also reports E[dups] in a double-up (`--double-up-entries`, default 3,000) and gets a warning at 25 or more, never a different pick. **Diversity:** each build differs from the earlier ones of its kind by at least `MIN_DIFFERENCE = 3` players. **Exposure:**
-no player in more than `exposure_cap(n) = max(1, round(0.6 n))` of the GPP builds. The per-QB rounds pick greedily and the cap binds from the second round on (a QB's FIRST build is never given up to it, and the cap is never below the number of QBs plus one, so a stack's core players can be in every QB's first build and one more); a QB can go without a build only when every lineup of his sits within 2 players of a better build, and a note says so. The CASH builds use `choose`: greedy by rank, and when the exposure cap leaves it short it searches EVERY candidate for the first set (in rank order) that fits - exactly, so the limit is a count of placements (`BACKTRACK_NODES = 20,000`), never the clock. **Ties are canonical:** chances are counts of draws (on a quiet slate most GPP lineups reach the target in 0-5 of 1,500), so every ordering compares probabilities at `PROB_DECIMALS = 9` and ends in the lineup's sorted names, never in input order or the last bits of a float sum. **FLEX:** the latest kickoff of the surplus position (`flex_order`), ties to the lowest projection. **Time:** a 60 s budget (`dfs lineups suggest --seconds N` changes it) (cash 40%, GPP the
+no player in more than `exposure_cap(n) = max(1, round(0.6 n))` of the GPP builds. The per-QB rounds pick greedily and the cap binds from the second round on (a QB's FIRST build is never given up to it, and the cap is never below the number of QBs plus one, so a stack's core players can be in every QB's first build and one more); a QB can go without a build only when every lineup of his sits within 2 players of a better build, and a note says so. The CASH builds use `choose`: greedy by rank, and when the exposure cap leaves it short it searches EVERY candidate for the first set (in rank order) that fits - exactly, so the limit is a count of placements (`BACKTRACK_NODES = 20,000`), never the clock. **Ties are canonical:** chances are counts of draws (on a quiet slate most GPP lineups reach the target in 0-5 of 1,500), so every ordering compares probabilities at `PROB_DECIMALS = 9` and ends in the lineup's sorted names, never in input order or the last bits of a float sum. **FLEX:** the latest kickoff of the surplus position (`flex_order`), ties to the lowest projection. **Time:** a 120 s budget (`dfs lineups suggest --seconds N` changes it) (cash 40%, GPP the
 rest, shared evenly between QBs); a 60-player pool takes about 4 s for the plain stacks (more on a real slate, see the phase times `dfs lineups suggest` prints) and the other shapes use what time is left; a cut-short search says so on the tab. Titles: `GPP build 4  ·  NO stack QB+2WR + NYG bring-back  ·  ~0.3 dupes`, `GPP build 5  ·  DET naked stack QB+RB+WR  ·  ~0.1 dupes`. **Order (2026-10-17):** the chosen lineups are listed Cash then GPP, each by quarterback (name A-Z) and then the highest `CalPts` total first (`display_key`), and numbered 1..n down that order (`number_builds`, so the title's number is the listed number); which lineups are chosen is still decided by the odds above. **Phase times:** the run prints how long each phase took (`SuggestReport.phases`: candidates, search, simulate, choose; the command adds the sheet read, simulator set-up, tab write and format).
+
+**Iterate (`dfs lineups suggest --iterate`, `lineup_iterate.py`).** A rerun reads the Suggested tab (decision per build, lock ticks, typed-over names, the rules box) and the last round in `data/suggest_state/<week>.json`. A name typed over a player is an edit when it differs from the last round's name at that slot; it must be a player on the slate in a slot of his position, nobody twice, no DST against his QB, one RB per game, and the nine under the cap, else the whole build is left as it was and says why. Keep builds are rescored; Rebuild, Vary N and top-ups are searched with the locked (and Always-use) players fixed (`top_lineups(fixed)`, `shape_lineups(fixed=...)`, the exact searches of a fresh run, a halved per-QB plan when no QB is fixed), all candidates are simulated in one pass and the chosen builds plus the kept ones are rescored together. A new build differs from every other build by `MIN_DIFFERENCE` (a variation from its build and its siblings by `VARY_MIN_DIFFERENCE` = 2), respects the exposure cap (`exposure_cap` of the GPP builds planned, kept ones counted; locks exempt) and a GPP top-up takes a QB's third build only when no QB with fewer has one. A removed bring-back stays removed unless the best build with one beats the best without by more than `[suggest] bring_back_gain` (default 0.25, relative, on Cash % for cash and Top 1% (Top 1% share with `--rank share`) for GPP). Order: kept, rebuilt, new; inside a group Cash first, then by QB and CalPts total. Deterministic.
 
 ## Top plays and Consider (Edge Finder, Week 6)
 
@@ -1964,6 +1966,64 @@ close` time -- a pure-Python re-derivation of the same arithmetic
 `record_formula`/`expected_vs_actual_formula` compute on the sheet,
 verified against the same real 4-bet example (win/loss/push/pending) used
 to verify those formulas live.
+
+## Stake sizing (`stakes.py`, the Bankroll tab's STAKES block)
+
+Arithmetic on Sam's own contest log and his own `[stakes]` rules; nothing here predicts anything and nothing is advice.
+
+**His numbers**, per format and for the Cash and GPP totals (Cash = `series.CASH_FORMATS`: H2H, 50/50, Double Up), over
+the current season and over every season in `data/contests/contest_log.csv`: `ROI = (winnings - fees) / fees` (blank when
+no fee was paid), `cash rate` = the share of entries that finished in a paid place (`sheet_contests._cashed`), `weekly SD` =
+the sample standard deviation (n-1) of the weekly net, one number per `(season, week)` with an entry in that group, blank
+under 2 weeks. An entry with no NFL week (playoffs, off-season) counts in ROI and cash rate but not in a week.
+
+**The plan.** `week_cap = max_pct_bankroll_per_week% x Starting Bankroll` (B1), `spend = min(Weekly Budget (B6), week_cap)`,
+`entry_cap = max_entry_fee_pct% x Starting Bankroll`. A rule that is unset is off. Warnings: budget above the weekly cap;
+this week's ledgers already above `spend` or above `entry_cap`; a `split` that funds a bucket the default would leave out.
+
+**The default split** between Cash and GPP (the two bankrolls the tab keeps):
+
+    eligible   entries > 0 and all-seasons ROI >= ROI_FLOOR (0%)       (below the floor, or no history: $0)
+    w_b        = min(1, entries_b / 100)                                (SHRINK_ENTRIES)
+    roi_share  = roi_b / sum(roi_eligible)                              (an even share when that sum is 0)
+    raw_b      = w_b * roi_share_b + (1 - w_b) / k                      (k = eligible buckets)
+    share_b    = raw_b / sum(raw)                                       (renormalised: the weights differ)
+
+so a bucket under 100 entries is pulled toward an even split by how far it is from 100, and at 100+ it is split purely by
+ROI. **"Floor" is a 0% ROI over every season in the log** (the most conservative reading of "never a format with negative
+5-season ROI above its floor": the allocation above the floor is nothing). Sam's own `[stakes] split` overrides the lot.
+
+**The proposal** (`dfs bankroll stakes --propose`, read-only), for the two rules he has not set: `k = weekly SD of net /
+average weekly entry fees` over every week with fees paid; a bad week is `BAD_WEEK_Z = 2` standard deviations, costing
+`2k` of the spend; allowing that at most `BAD_WEEK_LOSS_PCT = 10`% of the bankroll gives `max_pct_bankroll_per_week =
+10 / (2k)` (capped at 100, rounded DOWN to 0.5); `max_entry_fee_pct = that / MIN_ENTRIES_PER_WEEK (5)` (rounded DOWN to 0.1).
+The 2, the 10% and the 5 are the proposal's own assumptions, not findings. Needs 8 weeks of entries.
+
+## Field ownership shadow (`field_own.py`, 2026-10-20)
+
+Three EdgeRaw columns, scored in Model Check every week, read by nothing else until they have proven themselves out of
+sample and Sam says so (earliest Week 9). Research and numbers: `docs/planning/RESEARCH_OWNERSHIP_2026-10-20.md`.
+
+- **`GppOwn`**: TFFB's projected `Own%`, sharpened for Sam's GPPs. TFFB understates the chalk (players who finished at 20%+
+  were about 5.5 points light in every test week).
+- **`CashOwn`**: the same for his double-ups, where the chalk is much heavier (the role `dups.DOUBLE_UP_OWN_CURVE` plays today).
+- **`OurOwn`**: what his GPPs would own if the field used `CalPts` instead of its own projection. `OurOwn - GppOwn` is where we
+  disagree with the field.
+
+**The model.** Within each position a player's share is `exp(score) / sum(exp(score))` over the eligible players (not OUT, IR
+or doubtful), times the position's average total ownership in that format. `score = k * log(Own%)` with one `k` per format
+(`field_own.fit_exponent`: within-position cross-entropy against his standings' `%Drafted`, the mean over a week's contests of
+that format; `Own%` below `OWN_FLOOR` counts as 0.2%). For `OurOwn` the GPP score gains `r * (log CalPts - log ProjPts)`, where
+`r` (`fit_response`) is the field's response to its own projection at a fixed salary. No player shows above `MAX_OWN` (95%).
+The fit is `data/model_cache/field_own.json` (gitignored), refitted by every `dfs results update` (so by `dfs week close`);
+`dfs sync` only reads it. No lookahead: the fit uses each week's last EdgeRaw snapshot before the lock, with `CalPts` fitted on
+earlier weeks only.
+
+**Model Check.** OWNERSHIP: per format and model, the mean absolute miss on players owned 5%+ (actual or TFFB's projection) and the
+chalk bias (projected minus actual on players drafted 20%+ GPP / 30%+ cash), each week judged on a fit from the weeks before it
+(`score_weeks`, `score_summary`; the cash rows include the double-up curve). WHEN WE DISAGREE (`disagreement`): the share of the
+`CalPts - ProjPts` gap that came true (the slope of actual minus `ProjPts` on the gap), and actual minus `ProjPts` for the fifth
+we liked most and least, on rosterable players projected at 1%+ who played.
 
 ## Empty weeks read blank, not an error (Round 5 cleanup, 2026-09-29)
 

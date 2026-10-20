@@ -17,13 +17,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from dfs import sheet_dk_upload as dk_upload
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER, edge_sheet_letter
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
 from dfs.edge_finder_tab import ID_COL as EDGE_FINDER_ID_COL
 from dfs.edge_finder_tab import POOL_COL as EDGE_FINDER_POOL_COL
 from dfs.kickoff import KICKOFF_TIMEZONE
-from dfs.lineups import DK_UPLOAD_HEADER
+from dfs.lineups import DK_UPLOAD_EXTRA_HEADERS, DK_UPLOAD_HEADER, DK_UPLOAD_SHEET_HEADER
 from dfs.sheet_columns import INTERNAL
 from dfs.sheet_empty_guards import describe as describe_unguarded
 from dfs.sheet_empty_guards import find_unguarded
@@ -35,7 +36,11 @@ from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_pool_cells import POOL_OPTIONS
 from dfs.sheet_pool_control import control_cells
-from dfs.sheet_style import EDGE_HIDDEN_HELPERS, edge_group_spans
+from dfs.sheet_stakes import STAKES_FIRST_COLUMN, STAKES_TITLE
+from dfs.sheet_style import EDGE_HIDDEN_HELPERS, INPUT_BG, edge_group_spans
+from dfs.sheet_suggested import FIRST_BUILD_ROW as SUGGESTED_FIRST_ROW
+from dfs.sheet_suggested import LOCK_INDEX as SUGGESTED_LOCK_INDEX
+from dfs.sheet_suggested import NAME_INDEX as SUGGESTED_NAME_INDEX
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_index, column_letter
@@ -426,6 +431,42 @@ def _check_lineup_markers_are_typeable(
     return []
 
 
+def _check_suggested_typed_cells(client: DoctorClient, tab_titles: set[str]) -> list[DoctorIssue]:
+    """What Sam types on the Suggested tab must be carved out of its warning-only protection, as Lineups'
+    names are: the lock column (a tick per player) and the Name column, which holds each build's decision
+    cell, the rules box and the names he types over a player. Reads the protection only; says nothing when
+    the tab has no whole-sheet protection or the client cannot read it. The rows move with every run, so the
+    carve-outs are whole columns (`sheet_suggested.typed_ranges`)."""
+    if SUGGESTED_TAB not in tab_titles:
+        return []
+    protections = client.read_protection(SUGGESTED_TAB)
+    if protections is None:
+        return []
+    row = SUGGESTED_FIRST_ROW + 2  # a row inside the builds
+    issues = []
+    for check, column, what in (
+        ("suggested-lock-protected", SUGGESTED_LOCK_INDEX, "the lock column"),
+        (
+            "suggested-decision-protected",
+            SUGGESTED_NAME_INDEX,
+            "the Name column (decision cells, rules box, typed names)",
+        ),
+    ):
+        behind = any(
+            protection["whole_sheet"] and not any(_covers(b, row, column) for b in protection["unprotected"])
+            for protection in protections
+        )
+        if behind:
+            issues.append(
+                DoctorIssue(
+                    check,
+                    f"{SUGGESTED_TAB!r}: {what} ({column_letter(column)}) is behind the sheet protection, so "
+                    "ticking or typing there shows a warning -- run `dfs setup protect`",
+                )
+            )
+    return issues
+
+
 def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
     tab = cfg.bankroll.tab
     if tab not in tab_titles:
@@ -448,6 +489,25 @@ def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[s
     return issues
 
 
+def _check_stakes_block(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Bankroll tab's STAKES block (`sheet_stakes.py`) must start where it is written. A sheet without
+    it (the template before `dfs bankroll stakes --sheet-id <template>` ran) has drifted from one with it."""
+    tab = cfg.bankroll.tab
+    if tab not in tab_titles:
+        return []
+    cell = client.read_range(tab, f"{STAKES_FIRST_COLUMN}1:{STAKES_FIRST_COLUMN}1")
+    found = str(cell[0][0]).strip() if cell and cell[0] else ""
+    if found.startswith(STAKES_TITLE.split()[0]):
+        return []
+    return [
+        DoctorIssue(
+            "stakes-block",
+            f"{tab!r}: no STAKES block at {STAKES_FIRST_COLUMN}1 (reads {found or '(blank)'!r}) -- "
+            "`dfs bankroll stakes` writes it (template first)",
+        )
+    ]
+
+
 def _check_dk_upload_header(
     cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
 ) -> list[DoctorIssue]:
@@ -467,6 +527,85 @@ def _check_dk_upload_header(
             f"({', '.join(expected)}); `dfs setup polish` restores it",
         )
     ]
+
+
+def _check_dk_upload_layout(
+    cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
+) -> list[DoctorIssue]:
+    """DK Upload carries the entries layout `dfs entries fill` writes: DK's own columns, then Format / Lineup
+    / Suggested / Why (`lineups.DK_UPLOAD_SHEET_HEADER`). A tab still on DK's bare header (a sheet that has
+    not had `dfs setup dk-upload` yet) reads as drift, template first."""
+    tab = cfg.lineups.upload_tab
+    if tab not in tab_titles:
+        return []
+    found = [str(c).strip() for c in headers_by_tab.get(tab, [])]
+    if found[: len(DK_UPLOAD_SHEET_HEADER)] == list(DK_UPLOAD_SHEET_HEADER):
+        return []
+    if found[: len(DK_UPLOAD_HEADER)] != list(DK_UPLOAD_HEADER):
+        return []  # `dk-upload-header` already says the DK part is wrong
+    return [
+        DoctorIssue(
+            "dk-upload-layout",
+            f"{tab!r}: row 1 has no {', '.join(DK_UPLOAD_EXTRA_HEADERS)} columns after DK's own (found "
+            f"{', '.join(found[len(DK_UPLOAD_HEADER) :]) or 'nothing'}) -- `dfs setup dk-upload` builds them",
+        )
+    ]
+
+
+def _same_fill(found: dict | None, expected: dict) -> bool:
+    return bool(found) and all(abs(found.get(k, -1) - v) < 0.01 for k, v in expected.items())
+
+
+def _check_dk_upload_lineup_column(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
+) -> list[DoctorIssue]:
+    """DK Upload's Lineup column is the one thing Sam types on that tab, so it must still be a dropdown, still
+    wear the pale-yellow typed-cell cue (`INPUT_BG`), and be carved out of the tab's warning-only protection
+    (`sheet_dk_upload.unprotected_ranges`). Reads only; a client that cannot say a thing is not asked."""
+    tab = cfg.lineups.upload_tab
+    found = [str(c).strip() for c in headers_by_tab.get(tab, [])]
+    if tab not in tab_titles or found[: len(DK_UPLOAD_SHEET_HEADER)] != list(DK_UPLOAD_SHEET_HEADER):
+        return []
+    column = dk_upload.column_index(dk_upload.LINEUP_HEADER)
+    letter = column_letter(column)
+    cells = [f"{letter}{dk_upload.FIRST_ROW}", f"{letter}{dk_upload.LAST_ROW}"]
+    problems = []
+    lost = [c for c in cells if client.has_data_validation(tab, c) is False]
+    if lost:
+        problems.append(
+            ("dk-upload-lineup-dropdown", f"{', '.join(lost)} has lost the Lineup dropdown (L1..L20)")
+        )
+    read_formats = getattr(client, "get_cell_formats", None)
+    if read_formats is not None:
+        formats = read_formats(tab, cells[0])
+        fmt = formats[0][0] if formats and formats[0] else {}
+        if not _same_fill(fmt.get("backgroundColor"), INPUT_BG):
+            problems.append(
+                (
+                    "dk-upload-lineup-cue",
+                    f"{cells[0]} has lost the pale-yellow typed-cell cue (the Lineup column)",
+                )
+            )
+    protections = client.read_protection(tab)
+    if protections is not None:
+        for protection in protections:
+            if not protection["whole_sheet"]:
+                continue
+            behind = [
+                r
+                for r in (dk_upload.FIRST_ROW, dk_upload.LAST_ROW)
+                if not any(_covers(b, r, column) for b in protection["unprotected"])
+            ]
+            if behind:
+                problems.append(
+                    (
+                        "dk-upload-lineup-protected",
+                        f"the Lineup column ({letter}) is behind the sheet protection, so choosing a lineup "
+                        "shows a warning -- run `dfs setup protect`",
+                    )
+                )
+                break
+    return [DoctorIssue(check, f"{tab!r}: {detail}") for check, detail in problems]
 
 
 def _check_lineup_count_cell(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
@@ -775,8 +914,12 @@ def run_doctor(
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
     issues += _check_lineup_scoreboard(client, cfg, tab_titles, headers_by_tab)
     issues += _check_lineup_markers_are_typeable(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_suggested_typed_cells(client, tab_titles)
     issues += _check_dk_upload_header(cfg, tab_titles, headers_by_tab)
+    issues += _check_dk_upload_layout(cfg, tab_titles, headers_by_tab)
+    issues += _check_dk_upload_lineup_column(client, cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
+    issues += _check_stakes_block(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)

@@ -11,7 +11,8 @@ from dfs import derived, results_loop
 def test_the_shadow_columns_sit_right_after_calpts_on_the_tab_and_are_appended_to_the_frame():
     order = derived.EDGE_SHEET_ORDER
     assert order[order.index("CalPts") : order.index("CalPts") + 3] == ["CalPts", "EspnPts", "PropPts"]
-    assert derived.EDGE_COLUMNS[-2:] == ["EspnPts", "PropPts"]  # append-only: nothing earlier moved
+    shadow = derived.EDGE_COLUMNS[-2 - len(derived.FIELD_OWN_COLUMNS) : -len(derived.FIELD_OWN_COLUMNS)]
+    assert shadow == ["EspnPts", "PropPts"]  # append-only: nothing earlier moved
     assert sorted(order) == sorted(derived.EDGE_COLUMNS)
     # `Val` is the next column after them: everything from there on moved right by two
     assert derived.edge_sheet_index("Val") == derived.edge_sheet_index("PropPts") + 1

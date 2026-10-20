@@ -17,7 +17,7 @@ import tomllib
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from dfs.paths import CONFIG_EXAMPLE_FILE, CONFIG_FILE
 
@@ -247,6 +247,49 @@ class ContestsConfig(BaseModel):
     tab: str = "Contests"
 
 
+class StakesSplitConfig(BaseModel):
+    """`[stakes] split`: your own cash/GPP split of the weekly spend, in percent (overrides the default)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cash: float = Field(ge=0, le=100)
+    gpp: float = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _adds_to_100(self) -> StakesSplitConfig:
+        if abs(self.cash + self.gpp - 100) > 0.01:
+            raise ValueError(f"split must add up to 100 (cash {self.cash:g} + gpp {self.gpp:g})")
+        return self
+
+
+class StakesConfig(BaseModel):
+    """`[stakes]`: the staking rules you set for the Bankroll tab's STAKES block (`stakes.py`). Every rule is
+    optional and OFF until set; the block then says so and shows the arithmetic without it. The weekly budget
+    is not here: it already lives on the Bankroll tab (its Weekly Budget cell, carried week to week), and the
+    block reads it from there. Percentages are percent (5 means 5%), of the week's Starting Bankroll."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_pct_bankroll_per_week: float | None = Field(default=None, gt=0, le=100)
+    max_entry_fee_pct: float | None = Field(default=None, gt=0, le=100)
+    split: StakesSplitConfig | None = None
+    # Share of the weekly budget set aside for betting, as its own budget line (percent; Sam, 2026-10-20: 20).
+    # Only a line in the plan: nothing here tracks a bet or talks to a sportsbook. The rest is split between
+    # Double Up and single-entry GPP as before.
+    betting_pct: float = Field(default=20.0, ge=0, le=100)
+
+
+class SuggestConfig(BaseModel):
+    """`[suggest]`: how `dfs lineups suggest --iterate` treats what Sam decided."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # When Sam removed a build's bring-back, a rebuild of it keeps none unless the best build WITH one beats
+    # the best without by more than this share (relative: 0.25 = 25% better on the probability that build's
+    # kind is ranked by, Cash % or Top 1%).
+    bring_back_gain: float = Field(0.25, ge=0.0)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -260,6 +303,8 @@ class Config(BaseModel):
     projection: ProjectionConfig = ProjectionConfig()
     contests: ContestsConfig = ContestsConfig()
     odds_api: OddsApiConfig = OddsApiConfig()
+    stakes: StakesConfig = StakesConfig()
+    suggest: SuggestConfig = SuggestConfig()
 
 
 def _missing_config_message() -> str:

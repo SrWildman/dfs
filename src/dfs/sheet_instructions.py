@@ -126,8 +126,9 @@ _WEEK_ROWS: list[tuple[str, str]] = [
     (
         "Start of week",
         'File, then Make a copy of the template, and run: dfs week new "<link to the copy>". It checks the '
-        "copy, titles it Week <n>, carries your bankroll and Results log forward, clears last week's lineups "
-        "and runs the first full sync. It asks you to confirm before it writes anything.",
+        "copy, titles it Week <n>, carries your bankroll and Results log forward, clears last week's "
+        "lineups, rebuilds the STAKES block on Bankroll and runs the first full sync. It asks you to "
+        "confirm before it writes anything.",
     ),
     (
         "Tue / Wed: judge, then build the pool",
@@ -153,8 +154,11 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "lineups "
         "on the Lineups tab: type names in column A, set Cash or GPP on the Total row, and read Cash % and "
         f"{TOP1_HEADER} there (see Reading the numbers). Exposure shows how concentrated "
-        "your lineups are. When they are final, pair them to your contest entries in DK Upload, run: dfs "
-        "export, and upload the file to DraftKings.",
+        "your lineups are. When they are final, download DraftKings' entries file (Edit entries), run: dfs "
+        "entries fill, pick each entry's Lineup in DK Upload (you choose; the grey Suggested column is only "
+        "a hint), run it again, then run: dfs export (or add --write to the fill) and upload the file to "
+        "DraftKings. "
+        "dfs entries print lists every lineup as Name (ID) if you would rather pair them yourself.",
     ),
     (
         "Sunday: late swap",
@@ -292,6 +296,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "and GPP builds, a stack for every QB and two each when they fit, ranked by Top 1% "
         "(GPP builds may use anyone in your pool, never all Cash-marked). Every "
         "build shows salary, CalPts, kickoff and total ownership, with the FLEX on the latest kickoff. "
+        "A GPP bar names the shape, the copies expected, the ownership sum and product and the Top 1% share; "
+        "a stack no longer needs a bring-back. "
         "Copy some or all "
         "into the empty lineups with Lineup Tools, Copy builds to Lineups (type 1,4,6 or all); nothing "
         "here changes Lineups on its own.",
@@ -308,8 +314,11 @@ _TAB_ROWS: list[tuple[str, str]] = [
     ),
     (
         "DK Upload",
-        "Pair a finished lineup to a real contest entry (Entry ID, contest, fee), then run dfs export and "
-        "upload the file it writes to DraftKings.",
+        "One row per DraftKings entry, laid out by dfs entries fill from the entries file you download. "
+        "Choose each entry's Lineup (the yellow dropdown, L1 to L20); the grey Suggested column is the "
+        "tool's hint and never fills it. Run dfs entries fill again to put the chosen lineup's players in "
+        "the slots, add --write for the upload file (only entries you set that DraftKings does not already "
+        "hold), and --again after a late swap. Started players are never touched.",
     ),
     (
         "Exposure",
@@ -324,7 +333,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
     (
         "Bankroll",
         "Cash, GPP and betting ledgers with starting and ending bankroll. Betting is typed by hand; Cash "
-        "and GPP rows are added by dfs week close.",
+        "and GPP rows are added by dfs week close. STAKES, to the right of the ledgers, is rebuilt by "
+        "dfs bankroll stakes: your ROI by format and this week's plan from your own rules.",
     ),
     (
         "Season",
@@ -374,6 +384,34 @@ _MORE_ROWS: list[tuple[str, str]] = [
     ),
 ]
 
+# The "Iterate on Suggested" box: four lines (`dfs lineups suggest --iterate`, `lineup_iterate.py`).
+_ITERATE_ROWS: list[tuple[str, str]] = [
+    (
+        "Decide",
+        "On each build's bar, set Keep (the blank default: stays as it is), Rebuild (searched again around "
+        "its locks), Drop (replaced) or Vary N (N alternatives that keep its locks, 2+ players apart).",
+    ),
+    (
+        "Lock and edit",
+        "Tick the lock beside a player to keep him in that build. Type another name over a player and it "
+        "counts as a lock (green); an illegal name is refused and the build is left as it was, with the "
+        "reason under it.",
+    ),
+    (
+        "Rules box",
+        "Above the builds: Always use, Never use, Max exposure (Stafford: 4 is at most 4; = 4, >= 2, < 4, "
+        "more Stafford), Stack rules "
+        "(LAR: no bring-back, DET: QB+RB ok, no stacks from GB) and Builds wanted (cash 3, gpp 8). A line it "
+        "cannot read is reported.",
+    ),
+    (
+        "Rerun",
+        "Run dfs lineups suggest --iterate (about 15 seconds). Kept builds are only rescored. Each run is a "
+        "round, listed in History under the builds; dfs lineups suggest --round N brings one back. Copy "
+        "builds to Lineups works on any round.",
+    ),
+]
+
 # (kind, column A, column B): "title", "section" (a dark band) or "row".
 _LAYOUT: list[tuple[str, str, str]] = [
     ("title", _TITLE, ""),
@@ -387,6 +425,8 @@ _LAYOUT: list[tuple[str, str, str]] = [
     *(("row", a, b) for a, b in _NUMBER_ROWS),
     ("section", "THE TABS", "What each one is for"),
     *(("row", a, b) for a, b in _TAB_ROWS),
+    ("section", "ITERATE ON SUGGESTED", "Four lines"),
+    *(("row", a, b) for a, b in _ITERATE_ROWS),
     ("section", "MORE DETAIL", ""),
     *(("row", a, b) for a, b in _MORE_ROWS),
 ]
