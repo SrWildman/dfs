@@ -312,3 +312,27 @@ def test_the_ownership_shadow_sections_are_left_out_without_their_tables():
 def test_empty_ownership_tables_say_so_instead_of_rendering_a_blank_table():
     layout = build_layout(_scored(), weeks=[3], ownership=pd.DataFrame(), ownership_gaps=pd.DataFrame())
     assert sum("Not enough data yet" in t for t in _text(layout)) >= 2
+
+
+def test_the_teammate_bump_row_sits_in_the_shadow_block_beside_the_others():
+    from dfs import sheet_model_check as smc
+    from dfs import teammate_bump
+
+    race = pd.DataFrame(
+        {
+            "Rated by": ["Teammate bump"] * 3,
+            "Source": ["TFFB", "CalPts", teammate_bump.LABEL],
+            "Position": ["All"] * 3,
+            "n": [40, 40, 40],
+            "Rho": [0.40, 0.41, 0.43],
+            "MAE": [5.0, 4.9, 4.7],
+            "Bias": [-1.0, -0.8, -0.1],
+        }
+    )
+    scored = _two_weeks().assign(UmPts=float("nan"))
+    shown = " ".join(
+        str(c) for r in smc.build_layout(scored, weeks=[3, 4], teammate_race=race).rows for c in r
+    )
+    assert teammate_bump.LABEL in shown and "teammate-bump row" in shown
+    without = " ".join(str(c) for r in smc.build_layout(scored, weeks=[3, 4]).rows for c in r)
+    assert teammate_bump.LABEL not in without  # left out when the shadow could not be built
