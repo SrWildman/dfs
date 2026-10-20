@@ -694,6 +694,23 @@ SHADOW_SOURCE_NOTES = {
     ),
 }
 
+FIELD_OWN_NOTES = {
+    "GppOwn": (
+        "SHADOW: nothing reads it. TFFB's projected Own%, sharpened for your GPPs (TFFB runs about 5 points "
+        "light on the chalk). Scored against your contests' real ownership in Model Check every week. "
+        "Blank until TFFB publishes ownership."
+    ),
+    "CashOwn": (
+        "SHADOW: nothing reads it. The same for your double-ups, where the chalk is much heavier. Scored in "
+        "Model Check every week. Blank until TFFB publishes ownership."
+    ),
+    "OurOwn": (
+        "SHADOW: nothing reads it. What your GPPs would own if the field used CalPts instead of its own "
+        "projection. OurOwn above GppOwn = the field is light on a player we like. Model Check's WHEN WE "
+        "DISAGREE says whether that gap has come true."
+    ),
+}
+
 
 def player_tab_notes() -> dict[str, str]:
     """Every header on EdgeRaw, Player Pool and Lineups (and the Edge Finder's number columns), by text.
@@ -704,6 +721,7 @@ def player_tab_notes() -> dict[str, str]:
         **SLATE_GAME_NOTES,
         **EDGE_FINDER_NOTES,
         **SHADOW_SOURCE_NOTES,
+        **FIELD_OWN_NOTES,
         **usage_notes(),
     }
 

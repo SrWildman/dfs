@@ -45,7 +45,18 @@ NOTE_WRAP_CHARS = 150
 FIRST_COLUMN_PX = 190
 OTHER_COLUMN_PX = 118
 _COUNT_HEADERS = {"n", "Unflagged n", "Weeks", "Week", "Decile"}
-_TEXT_HEADERS = {"Source", "Flag", "Quintile", "Projection", "Signal", "Measure", "Off?", "Players rated by"}
+_TEXT_HEADERS = {
+    "Format",
+    "Model",
+    "Source",
+    "Flag",
+    "Quintile",
+    "Projection",
+    "Signal",
+    "Measure",
+    "Off?",
+    "Players rated by",
+}
 
 
 @dataclass
@@ -252,9 +263,12 @@ def build_layout(
     weeks: list[int],
     signal_table: pd.DataFrame | None = None,
     reliability: pd.DataFrame | None = None,
+    ownership: pd.DataFrame | None = None,
+    ownership_gaps: pd.DataFrame | None = None,
 ) -> Layout:
     """The whole tab as rows plus formatting instructions. Pure. `signal_table` is
-    `results_signals.signal_report` (None when no signals archive exists yet)."""
+    `results_signals.signal_report` (None when no signals archive exists yet); `ownership` is
+    `field_own.score_summary` and `ownership_gaps` `field_own.disagreement` (None leaves the sections out)."""
     b = _Builder()
     pool = scored[scored["RosterablePool"].astype(bool)] if not scored.empty else scored
     counts = ra.dnp_counts(pool) if not pool.empty else {"scored": 0, "dnp": 0, "unmatched": 0}
@@ -281,6 +295,8 @@ def build_layout(
     _add_learned(b, scored, signal_table, reliability)
     _add_projection_race(b, scored)
     _add_shadow_sources(b, scored)
+    _add_ownership(b, ownership)
+    _add_ownership_gaps(b, ownership_gaps)
     _add_reliability(b, reliability)
 
     # ---- Ceiling (the headline) ---------------------------------------------------------------
@@ -802,6 +818,63 @@ def _add_shadow_sources(b: _Builder, scored: pd.DataFrame) -> None:
         "has the weeks shown above; until then CalPts is unchanged by it. The RB1 spread row is CalPts plus "
         f"{calibration.RB1_SPREAD_PER_POINT:g} point per point of spread in his team's favour, for each "
         "team's top running back only; it is not a blend source and joins CalPts only if it beats CalPts."
+    )
+
+
+def _add_ownership(b: _Builder, ownership: pd.DataFrame | None) -> None:
+    """Shadow ownership (`field_own`): how far each ownership number is from what his contests really
+    drafted, and how light it runs on the chalk. Left out when it could not be built."""
+    if ownership is None:
+        return
+    b.section("OWNERSHIP  —  GppOwn and CashOwn against what your contests really drafted (shadow)")
+    if ownership.empty:
+        b.note("Not enough data yet -- needs two weeks of your contest standings in a format.")
+        return
+    b.table(
+        ownership,
+        [
+            ("Format", "Format"),
+            ("Model", "Model"),
+            ("Weeks", "Weeks"),
+            ("MAE", "MAE"),
+            ("Chalk bias", "Chalk bias"),
+        ],
+        percent={"MAE", "Chalk bias"},
+        signed={"Chalk bias"},
+    )
+    b.note(
+        "MAE is the mean miss in ownership points on players owned 5%+ (actual or TFFB's projection). Chalk "
+        "bias is projected minus actual on the players your contests drafted at 20%+ (GPP) or 30%+ (cash); "
+        "negative = the projection ran light. Each week is judged on a fit from the weeks before it. Shadow: "
+        "nothing reads GppOwn, CashOwn or OurOwn until three scored weeks out of sample and your OK."
+    )
+
+
+def _add_ownership_gaps(b: _Builder, gaps: pd.DataFrame | None) -> None:
+    """When CalPts and TFFB disagreed (the premise behind `OurOwn`): who was right."""
+    if gaps is None:
+        return
+    b.section("WHEN WE DISAGREE  —  did the gap between CalPts and TFFB's projection come true? (shadow)")
+    if gaps.empty:
+        b.note("Not enough data yet -- needs a scored week with a pre-lock snapshot.")
+        return
+    b.table(
+        gaps,
+        [
+            ("Week", "Week"),
+            ("n", "n"),
+            ("Gap share", "Gap share"),
+            ("Top fifth", "Top fifth"),
+            ("Bottom fifth", "Bottom fifth"),
+        ],
+        three_decimals={"Gap share"},
+        signed={"Top fifth", "Bottom fifth"},
+    )
+    b.note(
+        "Gap share is how much of CalPts minus ProjPts came true (1 = CalPts was right, 0 = TFFB was, "
+        "negative = the gap went the wrong way). Top / Bottom fifth are actual minus ProjPts for the fifth "
+        "of players CalPts liked most / least relative to TFFB; if CalPts is right the top is positive and "
+        "the bottom negative. Players projected at 1%+ owned who played."
     )
 
 

@@ -273,3 +273,42 @@ def test_a_shadow_source_never_changes_calpts_while_it_is_in_shadow():
     with_shadow = scored.assign(EspnPts=scored["DkActual"], PropPts=scored["DkActual"] + 5.0)  # absurdly good
     after = calibration.calpts_for_week(with_shadow, 4, season=None, sources=calibration.CAL_SOURCES)[0]
     pd.testing.assert_series_equal(without["CalPts"], after["CalPts"])
+
+
+def _ownership():
+    return pd.DataFrame(
+        [
+            ["gpp", "TFFB Own%", 2, 0.034, -0.055],
+            ["gpp", "Ours", 2, 0.034, 0.02],
+            ["cash", "Double-up curve", 2, 0.061, -0.01],
+        ],
+        columns=["Format", "Model", "Weeks", "MAE", "Chalk bias"],
+    )
+
+
+def _gaps():
+    return pd.DataFrame(
+        [[6, 120, -0.2, 0.1, 0.3], ["All", 480, 0.52, 0.8, -0.4]],
+        columns=["Week", "n", "Gap share", "Top fifth", "Bottom fifth"],
+    )
+
+
+def test_the_ownership_shadow_sections_render_when_given_their_tables():
+    layout = build_layout(_scored(), weeks=[3], ownership=_ownership(), ownership_gaps=_gaps())
+    titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
+    assert titles.index("OWNERSHIP") == titles.index("SHADOW SOURCES") + 1
+    assert titles[titles.index("OWNERSHIP") + 1] == "WHEN WE DISAGREE"
+    text = _text(layout)
+    assert "TFFB Own%" in text and "Chalk bias" in text and "Gap share" in text
+
+
+def test_the_ownership_shadow_sections_are_left_out_without_their_tables():
+    layout = build_layout(_scored(), weeks=[3])
+    titles = [layout.rows[r - 1][0].split("  ")[0] for r in layout.section_rows]
+    assert "OWNERSHIP" not in titles and "WHEN WE DISAGREE" not in titles
+    assert all(len(row) == COLUMN_COUNT for row in layout.rows)
+
+
+def test_empty_ownership_tables_say_so_instead_of_rendering_a_blank_table():
+    layout = build_layout(_scored(), weeks=[3], ownership=pd.DataFrame(), ownership_gaps=pd.DataFrame())
+    assert sum("Not enough data yet" in t for t in _text(layout)) >= 2

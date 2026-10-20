@@ -22,11 +22,12 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from dfs import results_actual, results_loop, results_signals, signals_data
+from dfs import field_own, results_actual, results_loop, results_signals, signals_data
 from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheet_model_check import MODEL_CHECK_TAB, build_layout, write_model_check
 from dfs.sheets import SheetsClient
+from dfs.sim import dups
 from dfs.sources import nflverse_results
 
 log = get_logger("results_update")
@@ -192,12 +193,44 @@ def update_results(
             evaluation = results_signals.evaluation_frame(scored, season, _r6_history(season))
             signal_table = results_signals.signal_report(evaluation)
             reliability = results_signals.reliability_report(evaluation)
-        layout = build_layout(scored, weeks=all_weeks, signal_table=signal_table, reliability=reliability)
+        ownership, ownership_gaps = _refit_field_own(season, scored, report)
+        layout = build_layout(
+            scored,
+            weeks=all_weeks,
+            signal_table=signal_table,
+            reliability=reliability,
+            ownership=ownership,
+            ownership_gaps=ownership_gaps,
+        )
         with client.batched():  # the header notes are one request each; send them together
             summary = write_model_check(client, layout, MODEL_CHECK_TAB)
         report.say(f"{summary} on {title}")
         _slot_into_tab_strip(client)
     return report
+
+
+def _refit_field_own(
+    season: int, scored: pd.DataFrame, report: UpdateReport
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """The weekly refit of the ownership shadow (`field_own`): fit on every week with standings, save the
+    model for the next sync, and return Model Check's two tables. Fail soft: (None, None) leaves them out."""
+    try:
+        frame, counts = field_own.training_frame(season)
+        if frame.empty:
+            return pd.DataFrame(), pd.DataFrame()
+        model = field_own.fit(frame, counts)
+        if model is not None:
+            field_own.save(model)
+            report.say(
+                f"Ownership shadow refitted on weeks {', '.join(str(w) for w in model.weeks)} "
+                f"(GPP k {model.exponent['gpp']:.2f}, cash k {model.exponent['cash']:.2f})."
+            )
+        scores = field_own.score_weeks(frame, curve=dups.double_up_ownership)
+        return field_own.score_summary(scores), field_own.disagreement(frame, scored)
+    except Exception as e:  # noqa: BLE001 - never fail a results update over a shadow
+        log.warning("ownership shadow skipped: %s", e)
+        report.say(f"Ownership shadow skipped ({e}); Model Check's ownership tables will be missing.")
+        return None, None
 
 
 def _r6_history(season: int):

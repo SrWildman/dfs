@@ -1999,6 +1999,32 @@ average weekly entry fees` over every week with fees paid; a bad week is `BAD_WE
 10 / (2k)` (capped at 100, rounded DOWN to 0.5); `max_entry_fee_pct = that / MIN_ENTRIES_PER_WEEK (5)` (rounded DOWN to 0.1).
 The 2, the 10% and the 5 are the proposal's own assumptions, not findings. Needs 8 weeks of entries.
 
+## Field ownership shadow (`field_own.py`, 2026-10-20)
+
+Three EdgeRaw columns, scored in Model Check every week, read by nothing else until they have proven themselves out of
+sample and Sam says so (earliest Week 9). Research and numbers: `docs/planning/RESEARCH_OWNERSHIP_2026-10-20.md`.
+
+- **`GppOwn`**: TFFB's projected `Own%`, sharpened for Sam's GPPs. TFFB understates the chalk (players who finished at 20%+
+  were about 5.5 points light in every test week).
+- **`CashOwn`**: the same for his double-ups, where the chalk is much heavier (the role `dups.DOUBLE_UP_OWN_CURVE` plays today).
+- **`OurOwn`**: what his GPPs would own if the field used `CalPts` instead of its own projection. `OurOwn - GppOwn` is where we
+  disagree with the field.
+
+**The model.** Within each position a player's share is `exp(score) / sum(exp(score))` over the eligible players (not OUT, IR
+or doubtful), times the position's average total ownership in that format. `score = k * log(Own%)` with one `k` per format
+(`field_own.fit_exponent`: within-position cross-entropy against his standings' `%Drafted`, the mean over a week's contests of
+that format; `Own%` below `OWN_FLOOR` counts as 0.2%). For `OurOwn` the GPP score gains `r * (log CalPts - log ProjPts)`, where
+`r` (`fit_response`) is the field's response to its own projection at a fixed salary. No player shows above `MAX_OWN` (95%).
+The fit is `data/model_cache/field_own.json` (gitignored), refitted by every `dfs results update` (so by `dfs week close`);
+`dfs sync` only reads it. No lookahead: the fit uses each week's last EdgeRaw snapshot before the lock, with `CalPts` fitted on
+earlier weeks only.
+
+**Model Check.** OWNERSHIP: per format and model, the mean absolute miss on players owned 5%+ (actual or TFFB's projection) and the
+chalk bias (projected minus actual on players drafted 20%+ GPP / 30%+ cash), each week judged on a fit from the weeks before it
+(`score_weeks`, `score_summary`; the cash rows include the double-up curve). WHEN WE DISAGREE (`disagreement`): the share of the
+`CalPts - ProjPts` gap that came true (the slope of actual minus `ProjPts` on the gap), and actual minus `ProjPts` for the fifth
+we liked most and least, on rosterable players projected at 1%+ who played.
+
 ## Empty weeks read blank, not an error (Round 5 cleanup, 2026-09-29)
 
 Every division and average on Results, Bankroll and Season carries a guard that returns

@@ -319,6 +319,19 @@ def test_run_doctor_passes_when_edgeraw_pool_column_is_correct():
     assert run_doctor(client, cfg, title="Week 1") == []
 
 
+def test_run_doctor_passes_an_edgeraw_header_ending_with_the_ownership_shadow_and_fails_one_without():
+    # 2026-10-20: GppOwn / CashOwn / OurOwn are the tab's last three columns.
+    assert EDGE_SHEET_ORDER[-3:] == ["GppOwn", "CashOwn", "OurOwn"]
+    cfg = _base_config()
+    good = dict(_ALL_GOOD_TABS)
+    good["EdgeRaw"] = [POOL_HEADER, *EDGE_SHEET_ORDER]
+    assert run_doctor(FakeDoctorClient(tabs=good, rows=_lineups_rows()), cfg, title="Week 1") == []
+    old = dict(_ALL_GOOD_TABS)
+    old["EdgeRaw"] = [POOL_HEADER, *EDGE_SHEET_ORDER[:-3]]
+    issues = run_doctor(FakeDoctorClient(tabs=old, rows=_lineups_rows()), cfg, title="Week 1")
+    assert any(i.check == "edgeraw-header" for i in issues)
+
+
 def test_run_doctor_flags_a_wrong_label_in_edgeraw_pool_column():
     tabs = dict(_ALL_GOOD_TABS)
     tabs["EdgeRaw"] = ["SomethingElse", *EDGE_COLUMNS]

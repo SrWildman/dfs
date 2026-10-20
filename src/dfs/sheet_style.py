@@ -319,6 +319,10 @@ FIELD_FORMATS = {
     "CalPts": _num("0.0"),
     "EspnPts": _num("0.0"),  # shadow sources (EdgeRaw only)
     "PropPts": _num("0.0"),
+    # Field ownership shadow (2026-10-20): fractions, like Own%.
+    "GppOwn": _num("0.0%", "PERCENT"),
+    "CashOwn": _num("0.0%", "PERCENT"),
+    "OurOwn": _num("0.0%", "PERCENT"),
     "Hit3x%": _num('0"%"'),
     "Boom%": _num('0"%"'),
     "Bust%": _num('0"%"'),
@@ -753,6 +757,9 @@ EDGE_WIDTHS = {
     "CalPts": 80,
     "EspnPts": 80,
     "PropPts": 80,
+    "GppOwn": 80,
+    "CashOwn": 80,
+    "OurOwn": 80,
     "Hit3x%": 80,
     "Boom%": 80,
     "Bust%": 80,

@@ -27,7 +27,17 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from dfs import calibration, perf, results_loop, results_signals, signals, signals_data, store, usage_r6
+from dfs import (
+    calibration,
+    field_own,
+    perf,
+    results_loop,
+    results_signals,
+    signals,
+    signals_data,
+    store,
+    usage_r6,
+)
 from dfs.derived import (
     EDGE_FINDER_VALUE_COLUMNS,
     EDGE_SOURCE_COLUMNS,
@@ -182,6 +192,10 @@ def _enrich(
             enriched[column] = pd.to_numeric(
                 enriched["Id"].map(df.drop_duplicates("Id").set_index("Id")[column]), errors="coerce"
             )
+    try:  # the ownership shadow: blank columns on any failure, never a failed sync
+        enriched = field_own.attach(enriched, field_own.load())
+    except Exception as e:  # noqa: BLE001 - shadow columns must never fail the Edge Finder
+        log.warning("Field ownership columns skipped: %s", e)
 
     if write:
         _write_outputs(output, ctx, now, fitted, data, df, notes, join, enriched, proj_snaps)

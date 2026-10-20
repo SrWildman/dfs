@@ -139,6 +139,8 @@ append-only: it is the data frame's, `edge.csv`'s and the saved snapshots' order
 
 **`EspnPts` and `PropPts`** (2026-10-13) are SHADOW projections shown beside `CalPts` on EdgeRaw only (not linked into Player Pool or Lineups): ESPN's weekly projection and Vegas player props, each scored to DraftKings points (`docs/CALCULATIONS.md`, "`EspnPts` and the shadow gating"). Blank where the source did not rate him (and `PropPts` is blank, never partial, unless every market his position needs is quoted). Model Check scores both from their first week in its SHADOW SOURCES block; neither is in `CalPts` until it has 3 scored weeks. Hover notes on both headers say so.
 
+**`GppOwn`, `CashOwn`, `OurOwn`** (2026-10-20) are the SHADOW ownership columns, the last three on EdgeRaw only (appended after `NameKey`; not linked into Player Pool or Lineups; fractions shown as `0.0%` like `Own%`). `GppOwn` is TFFB's `Own%` sharpened for Sam's GPPs; `CashOwn` is the same for his double-ups; `OurOwn` is what his GPPs would own if the field used `CalPts` instead of its own projection (above `GppOwn` = the field is light on a player we like). Blank until a model is fitted (`dfs results update` refits it weekly) and until TFFB publishes ownership; 0 for a player who is OUT, IR or doubtful. Nothing reads them but Model Check (OWNERSHIP and WHEN WE DISAGREE). The model: `docs/CALCULATIONS.md`, "Field ownership shadow".
+
 The derived "which players are actually worth a look" tab -- computed
 locally by joining the tabs above, no network call of its own. Rows are
 pre-sorted by `Leverage` descending. Full design rationale in
@@ -972,7 +974,7 @@ note, so a new column cannot ship unexplained.
 ### Model Check
 
 Season-level, read-only, **rebuilt from `data/results/` every time `dfs results update` runs** (also at the end of
-`dfs week close`, which never fails over it). Nothing is typed. Ten blocks, top to bottom: a status line (weeks
+`dfs week close`, which never fails over it). Nothing is typed. Ten blocks, top to bottom (plus, since 2026-10-20, the shadow **OWNERSHIP** and **WHEN WE DISAGREE** blocks after SHADOW SOURCES; see CALCULATIONS.md, "Field ownership shadow"): a status line (weeks
 scored, rosterable-pool players scored / did not play / not found), the **Projection Race** (2026-10-07: TFFB, AggPts and CalPts on everyone, then with UM as its own row on the players UM rates, judged on weeks they never trained on; by position plus a per-week trend -- the table Sam uses to choose a default projection), **Reliability** (predicted decile against realized for `Hit3x%`, `Boom%` and `Bust%`, n shown, a decile more than 8 points off with n >= 30 flagged), **Ceiling** (how often a player beat his
 published `Ceiling`, with its 90% interval, `Ceiling is really the Nth percentile` and `Ceiling skill (80th/85th/90th pct)` -- the headline), **Projection accuracy** (bias, MAE,
 calibration slope, R squared, Spearman, calibration buckets), **ValAdj** quintiles, **Sources compared** (labelled
