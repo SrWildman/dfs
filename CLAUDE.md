@@ -93,8 +93,14 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   own settings, never advice. `--propose` prints suggested rule values with the arithmetic and writes nothing.
   `dfs week new` rebuilds the block on the new sheet (never failing); `doctor` flags a sheet without it.
 
+- `dfs setup cockpit [--sheet-id <id>]` -- creates (or rebuilds) the read-only **Cockpit** tab right after Board: Sunday's last 90
+  minutes on one page (new Q / D / OUT in his lineups, open slots with the best change from the last `late-swap` run, wind, the Lineups
+  warnings, exposure top 10, DK Upload entries without a Lineup, budget). Nothing on it is typed; column A is the cue (`SWAP`, `LOOK`,
+  `FILL`, `ok`). `dfs sync --live` and `dfs lineups late-swap` refresh it, **only on a sheet that already has the tab** (they never create it
+  and never fail over it); `late-swap` saves its run to `data/cockpit/late_swap.json` for it (`late_swap_store`). Template first, then live,
+  `dfs doctor` after (check `cockpit-tab`). Layout: `cockpit.py` (pure), I/O: `sheet_cockpit.py`.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
-  exist, EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
+  exist, the Cockpit tab is there, EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
   `LINEUPS_NAME_BLOCKS` expects, DK Upload's entries layout with its
   Lineup dropdown, typed-cell cue and protection exemption, and the hand-built per-row formula ranges on
@@ -125,7 +131,7 @@ URL; check it before any write).
 |---|---|---|
 | "start week N" | 1) `dfs odds snapshot` if no opening snapshot exists for the week yet (`dfs odds movement` shows what is saved); 2) **ask Sam to confirm, and for the new sheet's URL** if he has not given it, then `dfs week new "<url>"`; 3) `dfs doctor` | the new sheet's title and URL, what `week new` carried over, any doctor findings |
 | "sync" | `dfs sync`, then `dfs doctor` | each source's status (name any failure, e.g. an expired TFFB login), doctor findings |
-| "final sync" | `dfs sync --live`, then `dfs doctor` | what changed since the last sync (the terminal diff / the Board's Queue), anyone in his pool now OUT or Q |
+| "final sync" | `dfs sync --live`, then `dfs doctor` | what changed since the last sync (the terminal diff / the Board's Queue), anyone in his pool now OUT or Q; then read the **Cockpit** tab (the sync refreshed it) and report its `SWAP` / `FILL` rows |
 | "build me lineups" | `dfs lineups suggest` (his pool must not be empty: if it is, say so and stop) | each build in one line (cash or GPP, shape, salary, Cash % / Top 1% (GPP builds rank by Top 1%; `--rank share` ranks by Top 1% share, only if Sam asks), and for a GPP build its ownership sum and product and expected duplicates: the numbers the terminal prints; say so if a cash build carries a duplicate warning), and that **Lineup Tools > Copy builds to Lineups** (type `1,4,6` or `all`) puts them in |
 | "keep build 2" | set build 2's decision cell to `Keep` on the Suggested tab (a write to the live week's sheet: say the sheet), then `dfs lineups suggest --iterate` | the round produced and what changed (each build's note) |
 | "lock Stafford and Nacua in build 4, swap the bring-back for McBride, rerun" | tick the locks and type the name over the bring-back cell on Suggested (the sheet and the chat must never disagree), then `dfs lineups suggest --iterate` | the round, build 4's note ("bring-back → McBride (yours); ...; Cash % 61% → 64%") or why the edit was refused |
@@ -133,7 +139,7 @@ URL; check it before any write).
 | "never Kyren", "always Bijan", "no bring-back for LAR" | write the rules box lines (`Never use`, `Always use`, `Stack rules`), then `dfs lineups suggest --iterate` | the round, which builds changed, and any rules line it could not read |
 | "go back to round 2" | `dfs lineups suggest --round 2` | the round it was written as (a new round) and the builds |
 | "fix flex" | nothing to run: tell him to use **Lineup Tools > Fix FLEX order** on Lineups (a sheet script); `dfs export` also puts the FLEX right in the file it writes | which of the two did it |
-| "late swap" | `dfs lineups late-swap --refresh-injuries` (it covers every built lineup; the flag lays ESPN's game-day injury feed over the last sync's status first) | a summary per lineup: who is still swappable (and any heavy chalk in none of his lineups, the yellow warning at the end), the best change and its Cash % / GPP % effect, or "nothing beats it" |
+| "late swap" | `dfs lineups late-swap --refresh-injuries` (it covers every built lineup; the flag lays ESPN's game-day injury feed over the last sync's status first) | a summary per lineup: who is still swappable (and any heavy chalk in none of his lineups, the yellow warning at the end), the best change and its Cash % / GPP % effect, or "nothing beats it" (the run also refreshes the Cockpit tab where the sheet has one) |
 | "close the week" | `dfs week close` (it finds the newest history export in Downloads by its header and says which; pass `--csv <file>` if he names one) | the Model Check verdict and the learned block, the bankroll lines it reconciled, and what it kept and filled on the contest side (standings moved, empty downloads, Cash Line, the Contests tab), then the Contests tab's THIS WEEK, YOUR DECISIONS block (five lines) |
 | "how did we do" | read (do not write) Model Check: the opening verdict sentences and "What the model learned this week" | five lines: who leads the projection race by position, what CalPts learned, how the signals are running, whether the probabilities hold, the Week 8 checkpoint |
 

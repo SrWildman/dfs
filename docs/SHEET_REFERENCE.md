@@ -633,6 +633,36 @@ cell by finding the nearest `Pool` header above it and the `Id` in that header r
 `derived.EDGE_COLUMNS` layout every time `build-views` runs (`sheet_views._rng`/`_col`): re-run it after any EdgeRaw column reorder. Pool-derived
 sections do the same against `sheet_columns.PLAYER_POOL_COLUMN_ORDER`. `style_board` also clears any stale format left by an earlier layout.
 
+### Cockpit
+
+Sunday's last 90 minutes on one **read-only** page, right after `Board` in the tab strip (`sheet_style.WEEK_ORDER`, family `decide`). Nothing on it is
+typed and it holds no formula: Python rewrites it whole (`cockpit.build_layout`, pure; `sheet_cockpit` reads the inputs and writes it), so it cannot disturb
+Board, Exposure or anything Sam types, and it has warning-only protection (`sheet_protection.FULLY_PROTECTED_TABS`). **Created by `dfs setup cockpit`** (template first, then the live
+week; `dfs doctor` flags a sheet without the tab, check `cockpit-tab`); **refreshed** by `dfs sync --live` and `dfs lineups late-swap`, and only on a sheet that already has it
+(a refresh never creates or moves a tab, and never fails the command that ran it: a problem prints a yellow line and `dfs setup cockpit` rebuilds it).
+
+**Layout.** Eight narrow columns (about 62 characters of text: lines overflow to the right across empty cells) so it fits beside the sheet in a split screen. **Column A is
+the action cue, left of the player**: `SWAP` (act now: a player is out, or a better lineup exists), `LOOK` (check it), `FILL` (an entry needs a Lineup), `ok` (nothing to do). Row 1 is the
+title with the Eastern clock of the refresh, row 2 the sheet title, then **NEXT LOCK** (the next kickoff window, the countdown, how many games and how many of your slots
+lock then, and the later windows). Seven blocks, most urgent first:
+
+1. **News in your lineups.** Q / D / OUT / IR among the players in built lineups whose game has not started: new since the previous sync (`Avail` now against the sync before it,
+   "OUT (was Q)"), escalated by ESPN's game-day feed in the last `late-swap --refresh-injuries` run ("· ESPN"), or standing. `SWAP` for OUT / IR, `LOOK` otherwise; which lineups hold him and his kickoff.
+2. **Still swappable.** Per built lineup, the slots whose game has not started (counted now) and the best change from the last `late-swap` run: who goes out and in, and the change in
+   Cash % and Top 1% in percentage points (or the projection gain when the simulator could not score it). A lineup edited since the run, a run from an earlier day (12 hours,
+   `late_swap_store.STALE_AFTER`), or a game that locked since the run is shown as `LOOK` ("re-run late-swap"), never as current. Fully locked lineups collapse to one line (`L1-L3 L6`). The note
+   gives the run's time.
+3. **Weather.** The games of your open slots, windy first (`WIND` flag at `derived.WIND_FLAG_THRESHOLD_MPH`), wind, roof, your slots, kickoff.
+4. **Lineup warnings.** The Lineups tab's checks in one list: players in more than half of your lineups (`lineup_watch.overused`, five listed), the GPP ownership meter (`lineup_watch.own_meter`, GPP-marked lineups only),
+   and heavy chalk in none of your cash / GPP lineups (`chalk_watch.missing_chalk`; a blank marker counts as cash).
+5. **Exposure, top 10.** Most-held players across built lineups: lineups, share, the Exposure tab's typed Target (read only), Own%, CalPts.
+6. **DK Upload.** Entries without a Lineup picked (`FILL`, with the format and fee mix), entries pointing at a lineup that is not built. Nothing is picked or assigned for you.
+7. **Budget.** What the picked entries cost against the Bankroll tab's Weekly Budget and `[stakes]` (the same plan the STAKES block shows, `stakes.make_plan`), what entering all of them would cost, the largest entry fee against `max_entry_fee_pct`, and the plan's warnings.
+
+A block whose input could not be read says so and why ("DK Upload could not be read: ...") instead of going blank. **Inactives** here means `Avail` from the last sync plus ESPN's game-day injury feed when
+`late-swap --refresh-injuries` last ran; it is not DraftKings' or the NFL's official inactive list. The late-swap result is kept in `data/cockpit/late_swap.json` (`late_swap_store`, gitignored with `data/`);
+each late-swap run replaces it, and `dfs sync --live` shows it without a new search.
+
 ### Edge Finder
 
 Visible tab right after `Board` (`sheet_style.WEEK_ORDER`), **written by Python on every `dfs sync`** (`edge_finder_tab.build_layout`

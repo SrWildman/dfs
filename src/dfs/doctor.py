@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 
 from dfs import sheet_dk_upload as dk_upload
+from dfs.cockpit import COCKPIT_TAB
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER, edge_sheet_letter
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
@@ -508,6 +509,20 @@ def _check_stakes_block(client: DoctorClient, cfg: Config, tab_titles: set[str])
     ]
 
 
+def _check_cockpit_tab(tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Cockpit tab (`cockpit.py`) must exist: `dfs sync --live` and `late-swap` only refresh a sheet that
+    has one, so a sheet without it (the template before `dfs setup cockpit --sheet-id <template>` ran) has
+    drifted from one with it. Nothing on the tab is typed, so existence is the whole check."""
+    if COCKPIT_TAB in tab_titles:
+        return []
+    return [
+        DoctorIssue(
+            "cockpit-tab",
+            f"no {COCKPIT_TAB!r} tab -- `dfs setup cockpit` creates it right after Board (template first)",
+        )
+    ]
+
+
 def _check_dk_upload_header(
     cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
 ) -> list[DoctorIssue]:
@@ -920,6 +935,7 @@ def run_doctor(
     issues += _check_dk_upload_lineup_column(client, cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_stakes_block(client, cfg, tab_titles)
+    issues += _check_cockpit_tab(tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)

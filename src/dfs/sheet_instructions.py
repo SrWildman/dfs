@@ -272,6 +272,14 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "the best QB with his pass catchers in the best games.",
     ),
     (
+        "Cockpit",
+        "Sunday's last 90 minutes on one read-only page, most urgent first: new Q / D / OUT among your "
+        "players, which lineups still have open slots and the best change from the last late-swap run, wind "
+        "in your games, the Lineups warnings, your top 10 exposure, entries still without a Lineup and the "
+        "budget. Nothing is typed. Rewritten by dfs sync --live and dfs lineups late-swap; column A says "
+        "what to do (SWAP, LOOK, FILL, ok).",
+    ),
+    (
         "Edge Finder",
         "Written by the sync. Per position, the best cash plays and best GPP plays, where CalPts disagrees "
         "with TFFB, who benefits from an injury, matchups and the usage trends and signals, each with a Why "

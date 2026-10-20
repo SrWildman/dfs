@@ -296,6 +296,7 @@ MORE_LABELS = {
     "dfs setup reorder-columns": "Reorder the Pool/Lineups columns",
     "dfs setup add-pool-control": "Add Player Pool's add-a-player row",
     "dfs setup dk-upload": "Build DK Upload's entries layout (Lineup dropdown, Suggested)",
+    "dfs setup cockpit": "Create the read-only Cockpit tab (Sunday's last 90 minutes)",
     "dfs setup add-filters": "Add the sort/search filters",
     "dfs setup protect": "Add warning-only protection to formula ranges",
     "dfs setup suggested-controls": "Set up the Suggested tab's rules box and typed cells",

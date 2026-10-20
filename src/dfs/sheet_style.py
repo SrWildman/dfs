@@ -2746,6 +2746,9 @@ WEEK_ORDER = [
     # Slate Grid before Board (Sam, 2026-09-30): the slate-level view comes first.
     ("Slate Grid", "decide"),
     ("Board", "decide"),
+    # Cockpit (2026-10-20): Sunday's last 90 minutes on one read-only page. Written by Python (`dfs setup
+    # cockpit`, then every `sync --live` / `late-swap`); nothing on it is typed.
+    ("Cockpit", "decide"),
     # Edge Finder (2026-10-07): right after Board. Written by the sync, nothing on it is typed.
     ("Edge Finder", "decide"),
     ("EdgeRaw", "decide"),

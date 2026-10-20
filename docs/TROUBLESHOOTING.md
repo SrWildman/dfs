@@ -342,3 +342,13 @@ reset (`[odds_api] reset_day`) would not cover it. `dfs doctor` warns under 100 
 ESPN has no weekly projection for him (its API returns an empty entry for a player it expects out or on a bye), so there is nothing to score.
 It is a shadow column: Model Check scores it where it exists.
 
+---
+
+**The Cockpit says "no late-swap result", "lineup changed since the late-swap run" or "open slots differ from the run".**
+Not a fault. Its best-change lines are from the last `dfs lineups late-swap` run (kept in `data/cockpit/late_swap.json`), and a lineup you edited since, a run from an earlier day, or a
+game that locked since the run is shown as `LOOK`, never as current. Run `dfs lineups late-swap` (it refreshes the tab).
+
+**`dfs sync --live` or `late-swap` did not touch the Cockpit.**
+They only refresh a sheet that already has the tab. `dfs doctor` says `cockpit-tab` when it is missing; `dfs setup cockpit` creates it (template first). A yellow "Cockpit not refreshed (...)" line means
+the refresh itself failed (a Sheets error, usually); the sync or late-swap result above it still stands. `dfs setup cockpit` rebuilds it.
+
