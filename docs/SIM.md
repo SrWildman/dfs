@@ -1375,11 +1375,66 @@ with the normal scores clipped at 0.0005 instead of 0.005 (the clip hides the ve
 | QB1 + WR1 | held out (1,231) | 33 | 27.8 (1.19, SE 0.20) | 29.4 (1.12) | 27.6 (1.20) |
 | QB1 + WR1 + opp WR1 | held out | 7 | 3.5 (2.0, SE 0.76) | 3.9 (1.80) | 3.5 (2.0) |
 
-Two things sit in that ratio. **First, the margins:** the normal scores exceed their own 90th percentile 10.65% of the time for QB1 and
-10.82% for WR1 (not 10%), so two independent margins already give 1.15 times the expected joint rate; the Gaussian ratio is about
-1.19 (all seasons, SE 0.09) after that, not 1.37, and the table's top decile being a point light is a calibration question, not a
-dependence one. **Second, the rest** (about 1.2 on the pair, 1.4 on the three-player event, 1.4 to 2.2 SE) no copula tried closes: the
-t-copula at the best nu takes off about a quarter of it. So the held-out evidence for switching is nothing, and **the Top 1% effect for stacked
-versus unstacked builds was not recomputed** (the prompt asked for it only if one model won clearly). If a decision is wanted anyway,
-the lever the numbers point to is the top of the marginal tables, not the copula.
+Two things sit in that ratio. **First, the margins** (corrected below, "The top of the marginal tables"): scored through the shipped tables the
+normal scores exceed their own 90th percentile 10.65% of the time for QB1 and 10.82% for WR1, which would be 1.15 times the joint rate by itself; that
+turned out to be table population and role mix, not a light top, and it explains much less than it seemed. **Second, the rest** (about 1.2 on the pair,
+1.4 on the three-player event, 1.4 to 2.2 SE) no copula tried closes: the t-copula at the best nu takes off about a quarter of it. So the held-out
+evidence for switching is nothing, and **the Top 1% effect for stacked versus unstacked builds was not recomputed** here (see the next section).
+
+## The top of the marginal tables, tested (2026-10-20)
+
+Offline; code `dfs/tail_check.py`, `sim/tail_backtest.py` (`python -m dfs.tail_check --frame <parquet>`, `python -m dfs.sim.tail_backtest --frame <parquet>`),
+tables and every fit from 2014-2022 only, judged on 2023-2026 (2026 through Week 6). The starting point was QB1 and WR1 beating their own 90th percentile
+10.7-10.8% of the time in the copula study. **It does not survive a held-out check, and no tail adjustment ships.**
+
+**Where the 10.7% came from.** (1) The shipped QB table is fitted on every quarterback who played, backups included (6,886 rows against 6,281 QB1s);
+QB1s scored against it beat the 90th percentile 10.75% of the time in 2014-2022, but with a QB table fitted that way on 2014-2022 and scored on
+2023-2026 the share is **10.23% (z +0.3)**. (2) WR is one pooled table for WR1 to WR4, and the roles are not alike (below). (3) Elsewhere, in the held-out
+seasons the tables are slightly **heavy** at the top, not light.
+
+Share of actuals above the predicted 90th / 95th / 99th percentile, 2023-2026 (z against the nominal rate for 90th):
+
+| | n | >90th | z | >95th | >99th |
+|---|---|---|---|---|---|
+| QB (table on all QBs) | 1,770 | 10.23% | +0.3 | 5.14% | 0.90% |
+| RB | 3,327 | 9.02% | -1.9 | 4.06% | 0.96% |
+| WR | 5,334 | 8.83% | -2.9 | 4.67% | 1.09% |
+| TE | 2,174 | 10.81% | +1.3 | 5.15% | 0.78% |
+| DST | 1,817 | 8.31% | -2.4 | 3.41% | 0.83% |
+
+The top-decile projection band of every position is at or under nominal (QB 6.1%, RB 9.2%, WR 7.8%, TE 6.4%, DST 8.5% above the 90th percentile);
+the one in-sample misfit is the LOW end of QB (12.8% above the 90th in the bottom projection band, 3.3 SE), not the top. 2026 alone (shipped tables,
+183 to 546 rows a position) reads QB 9.8%, RB 10.1%, WR 9.7%, TE 11.5%, DST 5.9%: nothing there.
+
+**What is real is a role effect**, which a table per position cannot see (share above the 90th percentile, 2014-2022 / 2023-2026, role-frame tables):
+RB1 **12.3% / 12.4%** (z +5.3 / +3.3), TE1 10.9 / 11.5, WR1 10.8 / 9.7, QB1 9.95 / 9.2, DST 10.0 / 8.3 against RB2 8.9 / **5.6**, RB3 3.9 / 3.0, WR4 6.0 / 6.4,
+TE2 7.5 / 8.7. The starters sit a little above their projection's table and the depth players well below it (mean actual minus projection: RB1 +0.4, RB3 -1.6,
+WR4 -1.4 in 2023-2026).
+
+**The adjustment tested** (fitted 2014-2022 by pinball loss at the 90/95/99 quantiles, judged 2023-2026 by pinball loss and by the conditional log-likelihood
+of the rows beyond the old 90th percentile; the paired SE is clustered by game): the ratio quantiles above the median stretched about it by `1 + delta`,
+one `delta` per group.
+- **Per position:** the fitted `delta` is -0.001 to -0.009 for every position (the position tables are already at their 90/95/99 in sample, by
+  construction); the held-out gain is 0.0005 points of pinball (SE 0.0001) and no position clears both measures. Nothing to ship.
+- **Per role:** the only roles that clear 2 SE on both measures are **RB2** (`delta` -0.053; pinball +0.057, SE 0.008; tail log-likelihood +0.067, SE 0.023)
+  and **WR4** (-0.213; +0.126, SE 0.046; +0.178, SE 0.062), both lowering the top. RB3 (-0.344, pinball +0.37 SE 0.09) and TE2 (-0.111, log-likelihood
+  +0.14 SE 0.05) point the same way on one measure. RB1 (+0.073) is the other direction and is worse on the tail log-likelihood (-0.078, SE 0.018). A level
+  scale per role added on top fits the 2014-2022 data into odd corners (RB1 `delta` 0.55 with scale 0.79) and does no better held out.
+
+**Top 1% for stacked and unstacked builds** (`sim/backtest.py`'s random legal lineups, half stacked, 100 a week, 60 weeks of 2023-2026, 6,000 lineups; the simulator
+takes a new `tail_delta` role map, default off). P(lineup >= 190 points): realized 2.65%, as shipped 2.51%, with every role's `delta` 2.84%, with the depth
+roles' (RB2, RB3, WR4, TE2) only 2.49%. The shipped simulator was already calibrated at these lines (150: 20.4% against 19.8%; 170: 8.1% against 8.0%).
+Paired Brier gain over shipped (x1e-4, positive = better): every role -0.45 (SE 0.60) at 190 and -0.23 (SE 0.09) at 210; depth roles only -0.03 (SE 0.04). The
+stacked/unstacked ratio of P(>= 190) is 0.71 realized, 0.69 as shipped, 0.70 and 0.69 adjusted: **an adjustment does not move how stacks compare with
+non-stacks.** The depth roles sit in a lineup's FLEX and WR3, and lowering their tops changes a lineup's tail by about 1% of itself.
+
+**How much of the remaining stack-boom ratio it closes: about a tenth.** Observed over Gaussian-expected top-decile joint rates with margins from tables fitted
+2014-2022 and the pair table fitted 2014-2022: QB1 + WR1 **1.29** (183 against 142; 1.24 on 2023-2026), + the other team's WR1 1.48 (27 against 18). With the
+role-adjusted margins 1.26 and 1.42; with each role's margin forced exactly uniform (an in-sample ceiling for ANY marginal correction) 1.26 and 1.43 (held out
+1.15, on 46 events, SE about 0.18). The excess is a dependence effect between QB and receiver, not one in either's marginal.
+
+**Standing.** No change to `models/um/` or the simulator's default. Two things to know: the shipped QB table includes backups and QB1s are fitted against it
+(held-out calibration is fine, 10.2%), and RB2, RB3, WR4 and TE2 are over-credited with upside by the pooled position tables, which matters for the value
+column more than for lineup probabilities. A role dimension in the tables (or an RB2/WR4 stretch of -0.05/-0.21 as a shadow) is the next step if wanted;
+rerun after Week 7.
 

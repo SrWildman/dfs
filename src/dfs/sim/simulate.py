@@ -247,6 +247,7 @@ def simulate_lineups(
     independent: bool = False,
     keep_scores: bool = False,
     field: field_model.FieldModel | None = None,
+    tail_delta: dict[str, float] | None = None,
 ) -> SimResult:
     """Simulate every lineup on the same draws.
 
@@ -254,6 +255,9 @@ def simulate_lineups(
     (`shape_table`: QB1-TE1 by the tight end's target share; a player whose `tshare` is unknown gets the
     pooled value), `tables` to the shipped distribution tables; `independent=True` zeroes every correlation
     (the comparison the back-test runs). Deterministic in `seed`.
+
+    `tail_delta` (role -> delta, default none) stretches each player's upper quantiles about his median by
+    `1 + delta` for his role (`dfs.tail_check`, a research hook: the shipped simulator passes none).
 
     `field` switches to relative lines (see the module docstring): `cash_line` and `gpp_target` are then
     ignored, and the players of `field.cover` are simulated alongside the lineups' (a player who is in both is
@@ -280,7 +284,8 @@ def simulate_lineups(
         cols = [i for i, p in enumerate(players) if p.position == position and p.projection > 0]
         if not cols:
             continue
-        mg = marginal.marginals(position, [players[i].projection for i in cols], tables=tables)
+        delta = None if tail_delta is None else [tail_delta.get(players[i].role, 0.0) for i in cols]
+        mg = marginal.marginals(position, [players[i].projection for i in cols], tables=tables, delta=delta)
         for k, col in enumerate(cols):
             points[:, col] = marginal.ppf(mg, k, u[:, col])
 
