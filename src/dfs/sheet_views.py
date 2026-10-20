@@ -12,10 +12,9 @@ Like `sheet_style.py`, EdgeRaw column references are derived from
 to that list moves these formulas with it instead of silently pointing them
 at the wrong column.
 
-Re-runnable: each builder overwrites its own tab. Two pieces of typed
-user input across all four are read back and restored before the
-rewrite, so re-running never costs them: Exposure's Target column, and
-`LINEUP_COUNT_CELL` below.
+Re-runnable: each builder overwrites its own tab. The one piece of typed user input across all four,
+Exposure's Target column, is read back and restored before the rewrite, so re-running never costs it.
+(`LINEUP_COUNT_CELL` below was a second typed input until 2026-10-20; a formula counts it now.)
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ from dfs.sources.nflverse_games import GAMES_COLUMNS
 from dfs.sources.nflverse_pbp import TEAM_METRIC_COLUMNS
 from dfs.sources.tffb_gps import GPS_COLUMNS
 from dfs.sources.weather import WEATHER_COLUMNS
-from dfs.weekly_reset import PLAYER_POOL_NAME_BLOCKS
+from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_NAME_BLOCKS
 
 # PROMPT_BOARD_FIXES.md item 1: GamesRaw's own column order, for anything
 # that needs a GamesRaw letter without hardcoding one -- `GAMES_COLUMNS`
@@ -64,17 +63,13 @@ MOVEMENT_TAB = "Movement"
 # How far down the source tabs the formulas look. EdgeRaw runs ~743 rows.
 _EXPOSURE_ROWS = 180
 
-# Phase 5A (originally) / Phase 5-removal (relocated here, 2026-09-16):
-# "how many lineups are you building this week" -- Exposure's own
-# divisor, typed by Sam, defaulting to 6. Originally lived on `Lineups!H1`
-# (the one free cell in the pool deck's row-1 control strip); moved here
-# when the deck was removed entirely -- it was never really about the
-# deck, just parked in its row 1 for lack of anywhere better, and
-# Exposure is the one tab that actually reads it. H1 is free on Exposure
-# too (row 1 is all column headers -- A "Name" through G "vs Target", I
-# "Slots filled" -- H sits between G and I with nothing of its own).
+# "How many lineups did you build": Exposure's own divisor, in H1 (row 1 is all column headers, A "Name"
+# through G "vs Target", I "Slots filled"; H sits between G and I with nothing of its own). Originally a
+# typed number (Phase 5A, on the pool deck; moved here in Phase 5-removal) that stayed at 6 while Week 6
+# grew to 15 lineups, so Exposure showed a player in 9 of 15 lineups at 150% (2026-10-20). It is now a
+# FORMULA, never typed: the number of Lineups name blocks that hold at least one player
+# (`lineups_built_formula`), the same count the Cockpit divides by (`entries.SheetLineup.built`).
 LINEUP_COUNT_CELL = "H1"
-DEFAULT_LINEUP_COUNT = 6
 
 
 def _q(tab: str) -> str:
@@ -1382,12 +1377,21 @@ def build_slate_grid(
 # ---------------------------------------------------------------------------
 
 
+def lineups_built_formula(lineups_tab: str, name_blocks=LINEUPS_NAME_BLOCKS) -> str:
+    """`Exposure!H1`: how many lineup blocks hold at least one player. One term per block in `name_blocks`
+    (the nine player rows of each; the Total row is not in it), so the divisor follows the blocks and counts
+    a lineup the moment Sam types a player into it. Range references shift with the sheet when rows move;
+    nothing here is a hardcoded row or position beyond the block table itself."""
+    q = _q(lineups_tab)
+    terms = [f'(COUNTIF({q}!$A${start}:$A${end},"?*")>0)' for start, end in name_blocks]
+    return "=" + "+".join(terms)
+
+
 def build_exposure(
     client: SheetsClient,
     *,
     edge_tab: str,
     lineups_tab: str,
-    lineup_count: int,
     lineups_header_row: int = 1,
 ) -> str:
     """Fills the Exposure tab, which has been a documented feature and a
@@ -1398,18 +1402,13 @@ def build_exposure(
     that can never collide with a real player name, so this works
     regardless of how the twenty blocks are laid out or move.
 
-    Two typed inputs survive a rebuild: Target (column F, read back and
-    restored before the rewrite) and `LINEUP_COUNT_CELL` (`H1`, read back
-    and re-placed into the new row 1 below).
+    One typed input survives a rebuild: Target (column F, read back and restored before the rewrite).
 
-    Exposure's divisor is `LINEUP_COUNT_CELL` ("how many lineups this
-    week," Sam's own typed number, defaulting to `DEFAULT_LINEUP_COUNT`),
-    not `lineup_count` (the sheet's fixed capacity,
-    `len(LINEUPS_NAME_BLOCKS)`). Dividing by capacity instead of actual
-    usage was a live bug -- a player rostered in every one of a 6-lineup
-    build read as 30% (6/20) instead of 100%. `lineup_count` is kept as
-    the divisor's fallback (a blank or zero `H1` must never produce
-    `#DIV/0!` or silently divide by 1).
+    Exposure's divisor is `LINEUP_COUNT_CELL` (`H1`), a formula (`lineups_built_formula`): the number of
+    Lineups blocks that hold a player. It was a typed number until 2026-10-20, when it stayed at 6 through
+    a 15-lineup week and Exposure read 150%; a typed divisor can go stale, a counted one cannot. The share
+    is `# Lineups / MAX(1, H1)`, so an empty Lineups tab reads 0%, never `#DIV/0!`. Rebuilding replaces a
+    typed H1 left by an older build.
 
     Part 7.5's portfolio-level headline: distinct QBs used and distinct
     games represented, across the WHOLE build (not per-lineup, which is
@@ -1443,12 +1442,10 @@ def build_exposure(
                 portfolio_cols[col_name] = column_letter(lineups_header.index(col_name))
 
     usage_cell = f"${LINEUP_COUNT_CELL[0]}${LINEUP_COUNT_CELL[1:]}"
-    divisor = f"IF(N({usage_cell})>0,N({usage_cell}),{lineup_count})"
+    divisor = f"MAX(1,N({usage_cell}))"
 
-    # Preserve any targets already typed, keyed by player name, and the
-    # typed lineup count -- both read back before the rewrite below.
+    # Preserve any targets already typed, keyed by player name: read back before the rewrite below.
     existing: dict[str, str] = {}
-    lineup_count_value: str = str(DEFAULT_LINEUP_COUNT)
     if client.tab_exists(EXPOSURE_TAB):
         try:
             current = client.read_range(EXPOSURE_TAB, f"A2:F{_EXPOSURE_ROWS}")
@@ -1457,12 +1454,6 @@ def build_exposure(
                     existing[row[0].strip()] = row[5]
         except Exception:  # noqa: BLE001 - a malformed old tab must not block a rebuild
             existing = {}
-        try:
-            current_count = client.read_range(EXPOSURE_TAB, LINEUP_COUNT_CELL)
-            if current_count and current_count[0] and current_count[0][0].strip():
-                lineup_count_value = current_count[0][0]
-        except Exception:  # noqa: BLE001 - a malformed old tab must not block a rebuild
-            pass
 
     roster = f'=IFERROR(SORT(FILTER({{{name},{pos},{salary}}},{name}<>"",COUNTIF({lu},{name})>0),3,FALSE),"")'
 
@@ -1520,7 +1511,7 @@ def build_exposure(
             "Exposure",
             "Target",
             "vs Target",
-            lineup_count_value,
+            lineups_built_formula(lineups_tab),
             "Slots filled",
             f'=COUNTIF({lu_typed},"?*")-COUNTIF({lu_typed},"Name")',
             "Distinct QBs",
@@ -1557,18 +1548,15 @@ def build_exposure(
             restored.append([""])
         client.update_range(EXPOSURE_TAB, f"F2:F{_EXPOSURE_ROWS}", restored)
 
-    # H1 has no room for a separate label cell in this header row -- a
-    # note stands in for one, same reasoning as the deck's old H1 had.
-    # Kept non-strict (warn, not reject): the divisor above already
-    # clamps a blank/zero/out-of-range H1 to full capacity rather than
-    # dividing by it, so a temporarily "wrong" H1 degrades to a safe
-    # number, not a broken one.
+    # H1 has no room for a separate label cell in this header row -- a note stands in for one. An older build
+    # left a "typed number" rule on the cell: clear it, the cell is a formula now.
     client.set_note(
         EXPOSURE_TAB,
         LINEUP_COUNT_CELL,
-        "How many lineups are you building this week? Exposure divides by this, not by capacity.",
+        "Lineups built: how many Lineups blocks hold a player (counted, not typed). "
+        "Exposure divides by this.",
     )
-    client.set_number_range_validation(EXPOSURE_TAB, LINEUP_COUNT_CELL, minimum=1, maximum=lineup_count)
+    client.clear_data_validation(EXPOSURE_TAB, LINEUP_COUNT_CELL)
 
     note = f", {len(existing)} target(s) preserved" if existing else ""
     portfolio_note = (
@@ -1578,7 +1566,7 @@ def build_exposure(
     )
     return (
         f"{EXPOSURE_TAB}: built off {lineups_tab} "
-        f"(divisor: {EXPOSURE_TAB}!{LINEUP_COUNT_CELL}, falling back to {lineup_count}-lineup capacity)"
+        f"(divisor: {EXPOSURE_TAB}!{LINEUP_COUNT_CELL}, the number of built lineups, counted)"
         f"{note}{portfolio_note}"
     )
 

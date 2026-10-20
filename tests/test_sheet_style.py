@@ -2780,3 +2780,11 @@ def test_chalk_formula_reads_edgeraws_columns_and_the_lineups_marker_and_rides_a
     both = _totals_check_formula(2, 10, 11, "K", stack_check='"DST/QB"', chalk=f)
     assert both.count(f) >= 2 and "DST/QB" in both  # never masks another warning
     assert _totals_check_formula(2, 10, 11, "K", chalk=None) == _totals_check_formula(2, 10, 11, "K")
+
+
+def test_the_cockpit_sits_right_after_the_board_in_the_decide_family():
+    from dfs.sheet_style import WEEK_ORDER
+
+    tabs = [tab for tab, _family in WEEK_ORDER]
+    assert tabs.index("Cockpit") == tabs.index("Board") + 1
+    assert dict(WEEK_ORDER)["Cockpit"] == "decide"

@@ -59,6 +59,9 @@ class StubClient:
     def describe(self):
         return ("Week X", "https://example.test/sheet")
 
+    def tab_exists(self, tab):  # no Cockpit tab on this sheet
+        return False
+
     def batch_read_ranges(self, specs):  # the Cash/GPP markers on the Total rows: all blank (both)
         return [[] for _ in specs]
 
@@ -128,3 +131,38 @@ def test_a_lineup_with_every_slot_locked_is_skipped(cfg, capsys, monkeypatch):
     out = _run(cfg, capsys, pool=["Better RB"])
     assert "No lineup currently has an open (not-yet-locked) slot" in out
     assert len(LINEUP) == len(ROSTER_SLOTS)
+
+
+def test_the_run_is_saved_for_the_cockpit(cfg, capsys):
+    from dfs import late_swap_store
+
+    _run(cfg, capsys, pool=["Better RB"])
+    saved = late_swap_store.load()
+    assert saved.saved_at == NOW and not saved.refreshed_injuries
+    result = saved.for_lineup(1)
+    assert result.names == tuple(LINEUP) and result.open_slots == ("RB",)
+    assert result.best.into == ("Better RB",) and result.best.out == ("Open RB",)
+    assert saved.for_lineup(2) is None  # only built lineups with an open slot are recorded
+
+
+def test_a_run_with_nothing_open_still_saves_so_the_cockpit_knows_when_it_ran(cfg, capsys, monkeypatch):
+    from dfs import late_swap_store
+
+    monkeypatch.setattr(cli.store, "load_current", lambda name: _edge().assign(GameStart=EARLY))
+    _run(cfg, capsys, pool=["Better RB"])
+    assert late_swap_store.load().lineups == ()
+
+
+def test_the_cockpit_is_refreshed_from_the_edge_the_run_used(cfg, capsys, monkeypatch):
+    from dfs import sheet_cockpit
+
+    seen = {}
+
+    def fake_refresh(client, config, *, edge, previous_edge=None, now=None):
+        seen.update(edge=edge, now=now)
+        return True, "Cockpit: built (60 rows)"
+
+    monkeypatch.setattr(sheet_cockpit, "refresh_if_present", fake_refresh)
+    out = _run(cfg, capsys, pool=["Better RB"])
+    assert seen["now"] == NOW and "Better RB" in set(seen["edge"]["Name"])
+    assert "Cockpit: built (60 rows)" in out

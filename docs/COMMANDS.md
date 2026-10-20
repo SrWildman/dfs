@@ -480,6 +480,14 @@ Put the entries layout on the DK Upload tab: DK's columns, then Format, a typed 
 |---|---|
 | `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
 
+### `dfs setup cockpit`
+
+Create the `Cockpit` tab right after Board, or rebuild it. One read-only page for the last 90 minutes of a game day: new Q / D / OUT among your players, what is still swappable with the best change from the last late-swap run, wind, the Lineups warnings, your exposure, entries without a lineup and the budget. Nothing on it is typed. `dfs sync --live` and `dfs lineups late-swap` keep it fresh from then on (only on a sheet that has the tab). Template first, then the live week; `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+
 ### `dfs setup add-filters`
 
 Fix 1: sorting and searching are real features that were invisible -- filter views live behind Data > Filter views, easy to never notice.
@@ -490,7 +498,7 @@ Fix 1: sorting and searching are real features that were invisible -- filter vie
 
 ### `dfs setup protect`
 
-Warning-only protection (never a hard lock) on every fully formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement -- plus Player Pool, Exposure and Lineups protected everywhere EXCEPT their own typed cells (Player Pool's add-a-player control; Exposure's Target and lineup-count cell; each lineup block's Name column and its Cash/GPP marker). EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own docstring for why. Safe to re-run: each tab's protected ranges are cleared before being re-added, never stacked.
+Warning-only protection (never a hard lock) on every fully formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement -- plus Player Pool, Exposure and Lineups protected everywhere EXCEPT their own typed cells (Player Pool's add-a-player control; Exposure's Target column; each lineup block's Name column and its Cash/GPP marker). EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own docstring for why. Safe to re-run: each tab's protected ranges are cleared before being re-added, never stacked.
 
 | Option | What it does |
 |---|---|

@@ -29,6 +29,7 @@ from rich.table import Table
 
 from dfs import (
     edge_finder_tab,
+    late_swap_store,
     lineup_iterate,
     nfl_calendar,
     odds_credits,
@@ -1192,6 +1193,40 @@ def sheets_dk_upload(
         console.print(f"[green]OK[/green] {line}")
 
 
+@setup_app.command("cockpit", short_help="Create the read-only Cockpit tab (Sunday's last 90 minutes).")
+def setup_cockpit(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template "
+        "(always the template first).",
+    ),
+) -> None:
+    """Create the `Cockpit` tab right after Board, or rebuild it. One read-only page for the last 90
+    minutes of a game day: new Q / D / OUT among your players, what is still swappable with the best change
+    from the last late-swap run, wind, the Lineups warnings, your exposure, entries without a lineup and
+    the budget. Nothing on it is typed. `dfs sync --live` and `dfs lineups late-swap` keep it fresh from then
+    on (only on a sheet that has the tab). Template first, then the live week; `dfs doctor` after."""
+    from dfs import sheet_cockpit
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+        console.print(f"Building the Cockpit on: [bold]{title}[/bold]\n{url}\n")
+        edge = store.load_current("edge")
+        summary = sheet_cockpit.refresh(client, cfg, edge=edge)
+        placed = sheet_cockpit.place_after_board(client)
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red] Run `dfs sync` first.")
+        raise typer.Exit(code=1) from e
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] {summary}")
+    console.print(f"[green]OK[/green] {placed}")
+
+
 @setup_app.command("add-pool-control", short_help="Create/refresh Player Pool's add-a-player control row.")
 def sheets_add_pool_control(
     sheet_id: str = typer.Option(
@@ -1532,7 +1567,6 @@ def sheets_build_views(
                 client,
                 edge_tab=edge_tab,
                 lineups_tab=cfg.lineups.builder_tab,
-                lineup_count=len(LINEUPS_NAME_BLOCKS),
                 lineups_header_row=LINEUPS_NAME_BLOCKS[0][0] - 1,
             ),
             build_movement(client, edge_tab=edge_tab),
@@ -2048,7 +2082,7 @@ def sheets_protect(
     formula-driven tab -- PlayerPoolRaw, Board, Slate Grid, Movement --
     plus Player Pool, Exposure and Lineups protected everywhere EXCEPT
     their own typed cells (Player Pool's add-a-player control; Exposure's
-    Target and lineup-count cell; each lineup block's Name column and
+    Target column; each lineup block's Name column and
     its Cash/GPP marker).
     EdgeRaw is left alone entirely -- see `sheet_protection.py`'s own
     docstring for why. Safe to re-run: each tab's protected ranges are
@@ -2489,6 +2523,8 @@ def sync(
         _print_live_flag_diff(
             old_edge, client=live_client, edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
         )
+        if live_client is not None and "edge" in source_names:
+            _refresh_cockpit(cfg, live_client, previous_edge=old_edge)
 
     if any_failed:
         raise typer.Exit(code=1)
@@ -2677,6 +2713,28 @@ def _print_live_flag_diff(
             console.print(f"[green]OK[/green] {result}")
         except SheetsError as e:
             console.print(f"[yellow]Could not update the Board's Queue section:[/yellow] {e}")
+
+
+def _refresh_cockpit(
+    cfg: Config,
+    client: SheetsClient,
+    *,
+    previous_edge: pd.DataFrame | None = None,
+    edge: pd.DataFrame | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Rewrite the Cockpit tab when the sheet has one (`sheet_cockpit.refresh_if_present`). Never fails the
+    command that called it: `dfs setup cockpit` is the one that creates the tab."""
+    from dfs import sheet_cockpit
+
+    if edge is None:
+        try:
+            edge = store.load_current("edge")
+        except FileNotFoundError:
+            return
+    ok, line = sheet_cockpit.refresh_if_present(client, cfg, edge=edge, previous_edge=previous_edge, now=now)
+    if line:
+        console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
 
 
 @app.command(short_help="Sync, check the sheet, and report what changed -- in one go.")
@@ -3344,6 +3402,31 @@ def _lineup_set_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]])
                 console.print(escape(f"Built lineup {number}: {msg}."), style="yellow", highlight=False)
 
 
+def _save_late_swap(
+    results: list[late_swap_store.LineupResult], news_changes: list, *, now: datetime, refreshed: bool
+) -> None:
+    """Keep this run for the Cockpit tab (`late_swap_store`). A failed save is a warning, never an error."""
+    saved = late_swap_store.Saved(
+        saved_at=now,
+        refreshed_injuries=refreshed,
+        lineups=tuple(results),
+        news=tuple(
+            late_swap_store.NewsItem(
+                name=c.name,
+                before=c.before or "",
+                after=c.after,
+                note=(c.note or "")[:120],
+                updated=c.updated.isoformat() if c.updated else "",
+            )
+            for c in news_changes
+        ),
+    )
+    try:
+        late_swap_store.save(saved)
+    except OSError as e:
+        console.print(f"[yellow]Could not save this run for the Cockpit: {escape(str(e))}[/yellow]")
+
+
 def _run_late_swap(
     cfg: Config,
     *,
@@ -3395,6 +3478,7 @@ def _run_late_swap(
 
     any_shown = False
     built_lineups: list[tuple[list[str], str]] = []  # (names, goal by marker)
+    swap_results: list[late_swap_store.LineupResult] = []  # what the Cockpit shows afterwards
     for lineup_number, (start, _end) in enumerate(LINEUPS_NAME_BLOCKS, start=1):
         # Each block IS the 9 roster rows now (ROSTER_SLOTS order) --
         # the salary-total row directly below it is no longer part of the
@@ -3477,10 +3561,13 @@ def _run_late_swap(
         for line in format_suggestions(suggestions, metric=metric, goal=lineup_goal if scored else None):
             console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
+        swap_results.append(late_swap_store.summarize(lineup_number, lineup_goal, names, suggestions))
 
     _chalk_warnings(edge, built_lineups, now)
     if not any_shown:
         console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
+    _save_late_swap(swap_results, news_changes, now=now, refreshed=refresh_injuries)
+    _refresh_cockpit(cfg, client, edge=edge, now=now)
 
 
 @lineups_app.command("late-swap")

@@ -454,6 +454,14 @@ MODEL_CHECK_NOTES = {
         "Coloured red below zero, green above."
     ),
     "MAE": "Mean absolute error: the average miss in points, ignoring direction.",
+    "ESPN vs market": (
+        "How far ESPN's chance of the Over (Yes for an anytime TD) sits from the books', in points. "
+        "Each band includes the bigger gaps."
+    ),
+    "ESPN side won": "How often the side ESPN favoured won. Pushes and players who sat are left out.",
+    "Price needed": "The win rate the median quoted prices asked for (the mean of 1 / decimal price).",
+    "Return": "Profit per unit staked on ESPN's side at the median quoted price. Shadow: nothing is bet.",
+    "Verdict": "A word only from 100 rows in a cell: ESPN's side beat or missed its price by 2 SEs.",
     "Slope": (
         "Calibration slope: regress actual on projected. 1.0 = well calibrated; below 1 = the "
         "projections are "

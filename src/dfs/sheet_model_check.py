@@ -23,8 +23,9 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from dfs import calibration, results_signals
+from dfs import calibration, props_edge, results_signals
 from dfs import results_analysis as ra
+from dfs.props_edge import Shadow
 from dfs.sheet_clipping import fit_tab_widths
 from dfs.sheet_column_notes import MODEL_CHECK_NOTES, apply_notes_to_values
 from dfs.sheets import SheetsClient
@@ -56,6 +57,8 @@ _TEXT_HEADERS = {
     "Measure",
     "Off?",
     "Players rated by",
+    "ESPN vs market",
+    "Verdict",
 }
 
 
@@ -265,10 +268,12 @@ def build_layout(
     reliability: pd.DataFrame | None = None,
     ownership: pd.DataFrame | None = None,
     ownership_gaps: pd.DataFrame | None = None,
+    props_shadow: Shadow | None = None,
 ) -> Layout:
     """The whole tab as rows plus formatting instructions. Pure. `signal_table` is
     `results_signals.signal_report` (None when no signals archive exists yet); `ownership` is
-    `field_own.score_summary` and `ownership_gaps` `field_own.disagreement` (None leaves the sections out)."""
+    `field_own.score_summary` and `ownership_gaps` `field_own.disagreement` (None leaves the sections out);
+    `props_shadow` is `props_edge.Shadow` (None leaves PROPS SHADOW out)."""
     b = _Builder()
     pool = scored[scored["RosterablePool"].astype(bool)] if not scored.empty else scored
     counts = ra.dnp_counts(pool) if not pool.empty else {"scored": 0, "dnp": 0, "unmatched": 0}
@@ -297,6 +302,7 @@ def build_layout(
     _add_shadow_sources(b, scored)
     _add_ownership(b, ownership)
     _add_ownership_gaps(b, ownership_gaps)
+    _add_props_shadow(b, props_shadow)
     _add_reliability(b, reliability)
 
     # ---- Ceiling (the headline) ---------------------------------------------------------------
@@ -875,6 +881,41 @@ def _add_ownership_gaps(b: _Builder, gaps: pd.DataFrame | None) -> None:
         "negative = the gap went the wrong way). Top / Bottom fifth are actual minus ProjPts for the fifth "
         "of players CalPts liked most / least relative to TFFB; if CalPts is right the top is positive and "
         "the bottom negative. Players projected at 1%+ owned who played."
+    )
+
+
+def _add_props_shadow(b: _Builder, shadow: Shadow | None) -> None:
+    """ESPN's stat projections against the prop market (`props_edge`): when ESPN sat away from the book's
+    line, did its side beat the price? Left out when it could not be built."""
+    if shadow is None:
+        return
+    b.section("PROPS SHADOW  —  when ESPN differs from the prop line, does its side beat the price? (shadow)")
+    if shadow.table.empty:
+        b.note("Not enough data yet -- needs a saved props pull and ESPN snapshot from a completed week.")
+        return
+    b.verdict(props_edge.headline(shadow))
+    b.table(
+        shadow.table,
+        [
+            ("Market", "Market"),
+            ("ESPN vs market", "Band"),
+            ("n", "n"),
+            ("ESPN side won", "Won"),
+            ("Price needed", "Needed"),
+            ("Return", "Return"),
+            ("Verdict", "Verdict"),
+        ],
+        percent={"ESPN side won", "Price needed", "Return"},
+        signed={"Return"},
+    )
+    b.note(
+        "ESPN vs market is how far ESPN's chance of the Over (Yes for a TD) sits from the book's, in points; "
+        "each band includes the bigger gaps. ESPN side won is how often the side ESPN favoured won (pushes "
+        "and players who did not play dropped); Price needed is the win rate the median quoted prices "
+        "asked for; Return is per unit staked at those prices. ESPN's spread comes from "
+        f"{shadow.counts.get('fit_players', 0)} projections, week(s) {_weeks_text(shadow.fit_weeks)}, shrunk "
+        "toward nflverse history, and a week is judged on a spread fitted without it. A verdict word needs "
+        f"{props_edge.MIN_N_VERDICT} rows in the cell. Shadow: no player column, no picks, nothing reads it."
     )
 
 

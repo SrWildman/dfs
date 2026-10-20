@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from dfs import field_own, results_actual, results_loop, results_signals, signals_data
+from dfs import field_own, props_edge, results_actual, results_loop, results_signals, signals_data
 from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheet_model_check import MODEL_CHECK_TAB, build_layout, write_model_check
@@ -201,12 +201,26 @@ def update_results(
             reliability=reliability,
             ownership=ownership,
             ownership_gaps=ownership_gaps,
+            props_shadow=_props_shadow(season, stats_player, report),
         )
         with client.batched():  # the header notes are one request each; send them together
             summary = write_model_check(client, layout, MODEL_CHECK_TAB)
         report.say(f"{summary} on {title}")
         _slot_into_tab_strip(client)
     return report
+
+
+def _props_shadow(season: int, stats_player: pd.DataFrame, report: UpdateReport) -> props_edge.Shadow | None:
+    """Model Check's PROPS SHADOW from the saved pulls and ESPN snapshots (no network, no Odds API credits).
+    Fail soft: None leaves the section out."""
+    try:
+        shadow = props_edge.build_shadow(stats_player, season=season)
+    except Exception as e:  # noqa: BLE001 - never fail a results update over a shadow
+        log.warning("props shadow skipped: %s", e)
+        report.say(f"Props shadow skipped ({e}); Model Check's PROPS SHADOW will be missing.")
+        return None
+    report.say(f"Props shadow: {props_edge.headline(shadow)}")
+    return shadow
 
 
 def _refit_field_own(

@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 
 from dfs import sheet_dk_upload as dk_upload
+from dfs.cockpit import COCKPIT_TAB
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_SHEET_ORDER, edge_sheet_letter
 from dfs.edge_finder_tab import EDGE_FINDER_TAB
@@ -508,6 +509,20 @@ def _check_stakes_block(client: DoctorClient, cfg: Config, tab_titles: set[str])
     ]
 
 
+def _check_cockpit_tab(tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Cockpit tab (`cockpit.py`) must exist: `dfs sync --live` and `late-swap` only refresh a sheet that
+    has one, so a sheet without it (the template before `dfs setup cockpit --sheet-id <template>` ran) has
+    drifted from one with it. Nothing on the tab is typed, so existence is the whole check."""
+    if COCKPIT_TAB in tab_titles:
+        return []
+    return [
+        DoctorIssue(
+            "cockpit-tab",
+            f"no {COCKPIT_TAB!r} tab -- `dfs setup cockpit` creates it right after Board (template first)",
+        )
+    ]
+
+
 def _check_dk_upload_header(
     cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
 ) -> list[DoctorIssue]:
@@ -609,38 +624,41 @@ def _check_dk_upload_lineup_column(
 
 
 def _check_lineup_count_cell(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
-    """Phase 5A (moved to Exposure when the pool deck was removed
-    entirely, Phase 5-removal): `Exposure!H1` is Exposure's own live
-    divisor (the "how many lineups this week" control) -- a blank/zero/
-    non-numeric H1 falls back safely to full capacity in the formula
-    itself, so this can't corrupt Exposure, but a value outside
-    1..capacity is still a sign the control was typed into wrong (or
-    overwritten by something that doesn't know what it is) and is worth
-    flagging."""
+    """`Exposure!H1` is Exposure's divisor: the number of Lineups blocks that hold a player, COUNTED by a
+    formula (`sheet_views.lineups_built_formula`). It was a typed number until 2026-10-20 and stayed at 6
+    through a 15-lineup week, so Exposure showed a player at 150%. Flag a cell that holds a typed value (or a
+    formula that no longer has a term per lineup block), and a value outside 0..capacity."""
     if EXPOSURE_TAB not in tab_titles:
         return []
 
+    capacity = len(LINEUPS_NAME_BLOCKS)
+    where = f"{EXPOSURE_TAB!r}: {LINEUP_COUNT_CELL} (lineups built, Exposure's divisor)"
+    formula = client.read_formula(EXPOSURE_TAB, f"{LINEUP_COUNT_CELL}:{LINEUP_COUNT_CELL}")
+    text = str(formula[0][0]) if formula and formula[0] else ""
+    if not text.startswith("="):
+        return [
+            DoctorIssue(
+                "lineup-count-cell",
+                f"{where} holds {text!r}, a typed value that goes stale; it should be the formula that "
+                "counts the built lineups -- `dfs setup build-views` rewrites it (template first)",
+            )
+        ]
+    if text.count("COUNTIF(") != capacity:
+        return [
+            DoctorIssue(
+                "lineup-count-cell",
+                f"{where} counts {text.count('COUNTIF(')} lineup block(s), expected {capacity} -- "
+                "`dfs setup build-views` rewrites it",
+            )
+        ]
     raw = client.read_range(EXPOSURE_TAB, LINEUP_COUNT_CELL)
     value = raw[0][0] if raw and raw[0] else ""
-    capacity = len(LINEUPS_NAME_BLOCKS)
     try:
         number = float(value)
     except (TypeError, ValueError):
-        return [
-            DoctorIssue(
-                "lineup-count-cell",
-                f"{EXPOSURE_TAB!r}: {LINEUP_COUNT_CELL} (lineup count, Exposure's own divisor) "
-                f"is {value!r}, not a number",
-            )
-        ]
-    if not (1 <= number <= capacity):
-        return [
-            DoctorIssue(
-                "lineup-count-cell",
-                f"{EXPOSURE_TAB!r}: {LINEUP_COUNT_CELL} (lineup count, Exposure's own divisor) "
-                f"is {number!r}, expected 1..{capacity}",
-            )
-        ]
+        return [DoctorIssue("lineup-count-cell", f"{where} is {value!r}, not a number")]
+    if not (0 <= number <= capacity):
+        return [DoctorIssue("lineup-count-cell", f"{where} is {number!r}, expected 0..{capacity}")]
     return []
 
 
@@ -920,6 +938,7 @@ def run_doctor(
     issues += _check_dk_upload_lineup_column(client, cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_stakes_block(client, cfg, tab_titles)
+    issues += _check_cockpit_tab(tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)
