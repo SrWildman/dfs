@@ -132,17 +132,16 @@ def build_stats(typed: pd.DataFrame, season: int) -> list[StatRow]:
     return rows
 
 
-# The formats that get money (Sam, 2026-10-18): Double Up in the Cash bucket and single-entry GPP in the GPP
-# bucket. Every other format (H2H, 50/50, multi-entry GPP, Showdown, ...) gets $0 whatever its history.
-MONEY_FORMATS = {CASH: series_mod.DOUBLE_UP, GPP: series_mod.SE_GPP}
+# The formats that get money (Sam, 2026-10-20): Double Up and 50/50 (the same thing to him) in the Cash bucket
+# and single-entry GPP in the GPP bucket. Every other format (H2H, multi-entry GPP, Showdown, ...) gets $0
+# whatever its history.
+MONEY_FORMATS = {CASH: (series_mod.DOUBLE_UP, series_mod.FIFTY_FIFTY), GPP: (series_mod.SE_GPP,)}
 
 
-def bucket_stats(rows: list[StatRow]) -> dict[str, Stat]:
-    """The all-seasons Stat that decides each bucket's share: its money format's own row (Double Up for Cash,
-    SE GPP for GPP), so the floor is applied by format and not by the bucket's total."""
-    by_label = {r.label: r for r in rows if r.kind == "format"}
-    empty = _stat(pd.DataFrame())
-    return {b: by_label[MONEY_FORMATS[b]].overall if MONEY_FORMATS[b] in by_label else empty for b in BUCKETS}
+def bucket_stats(typed: pd.DataFrame) -> dict[str, Stat]:
+    """The all-seasons Stat that decides each bucket's share: its money formats together (Double Up and 50/50
+    for Cash, SE GPP for GPP), so the floor is applied by format and not by the bucket's total."""
+    return {b: _stat(typed[typed["format"].isin(MONEY_FORMATS[b])]) for b in BUCKETS}
 
 
 # ---- the default split ----------------------------------------------------------------------------

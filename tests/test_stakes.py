@@ -291,3 +291,20 @@ def test_a_betting_share_of_zero_leaves_the_contest_split_whole_and_an_override_
     assert p.amounts[stakes.BETTING] == 0 and p.shares[stakes.CASH] == pytest.approx(0.4)
     q = plan(StakesConfig(betting_pct=50, split={"cash": 40, "gpp": 60}))
     assert q.shares[stakes.CASH] == pytest.approx(0.2) and q.shares[stakes.GPP] == pytest.approx(0.3)
+
+
+def test_fifty_fifty_counts_with_double_up_in_the_cash_bucket_and_h2h_does_not():
+    import pandas as pd
+
+    typed = pd.DataFrame(
+        {
+            "format": ["Double Up", "50/50", "H2H", "SE GPP", "N-max GPP"],
+            "fee": [10.0, 10.0, 10.0, 10.0, 10.0],
+            "winnings": [0.0, 20.0, 50.0, 0.0, 100.0],
+            "season": [2026] * 5,
+            "week": [1.0] * 5,
+        }
+    )
+    s = stakes.bucket_stats(typed)
+    assert s[CASH].entries == 2 and s[CASH].net == 10.0  # Double Up + 50/50, not H2H
+    assert s[GPP].entries == 1  # SE GPP only, not the N-max GPP
