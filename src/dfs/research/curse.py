@@ -124,6 +124,21 @@ def results_lines(client=None, path: Path = RESULTS_CACHE) -> dict[int, float]:
     return out
 
 
+def lines_through(season: int, through: int, cache: Path = RESULTS_CACHE) -> dict[int, float]:
+    """Each week's real cash line up to `through`, without the sheet: Sam's typed values as cached by
+    `results_lines`, and for a week the cache does not hold, the double-up's own standings
+    (`contests_cash_line.standings_cash_lines`, the same series `dfs week close` fills Results from)."""
+    from dfs import contests_cash_line
+    from dfs.config import load_config
+    from dfs.sheet_contests import load_tables
+
+    typed = results_lines(path=cache) if cache.exists() else {}
+    series = load_config().contests.cash_line_series
+    profiles = load_tables(Path("data/contests")).profiles
+    found = contests_cash_line.standings_cash_lines(profiles, season, series)
+    return {w: typed.get(w, found.get(w)) for w in range(1, through + 1) if w in typed or w in found}
+
+
 def main_slate(edge: pd.DataFrame, week: int, season: int = SEASON) -> pd.DataFrame:
     slate = retro.main_slate_names(week, season)
     if slate is None:
@@ -586,10 +601,10 @@ def passes(c: dict) -> bool:
 class Study:
     """The weeks' inputs, built once per process."""
 
-    def __init__(self, weeks: Sequence[int]):
+    def __init__(self, weeks: Sequence[int], lines: dict[int, float] | None = None):
         from dfs import results_update
 
-        self.lines = results_lines()
+        self.lines = results_lines() if lines is None else lines
         self.scored = results_update.load_all_scored(SEASON)
         self.contests = retro.load_contests()
         self.weeks = {
@@ -658,11 +673,11 @@ def all_jobs(weeks: Sequence[int]) -> list[tuple[int, str]]:
 _STUDY: Study | None = None
 
 
-def _worker(args: tuple[tuple[int, ...], int, str]) -> str:
+def _worker(args: tuple[tuple[int, ...], dict | None, int, str]) -> str:
     global _STUDY
-    weeks, week, variant = args
+    weeks, lines, week, variant = args
     if _STUDY is None:
-        _STUDY = Study(weeks)
+        _STUDY = Study(weeks, lines)
     import time
 
     t = time.monotonic()
@@ -671,17 +686,24 @@ def _worker(args: tuple[tuple[int, ...], int, str]) -> str:
 
 
 def run_all(
-    weeks: Sequence[int], workers: int = 6, log=print, jobs: Sequence[tuple[int, str]] | None = None
+    weeks: Sequence[int],
+    workers: int = 6,
+    log=print,
+    jobs: Sequence[tuple[int, str]] | None = None,
+    lines: dict[int, float] | None = None,
 ) -> None:
-    """Every job not saved yet (`all_jobs`, or `jobs`), `workers` processes at a time."""
+    """Every job not saved yet (`all_jobs`, or `jobs`), `workers` processes at a time. `lines`: the cash
+    lines the workers use (default `results_lines()`)."""
     import multiprocessing as mp
 
     todo = [
-        (tuple(weeks), w, v)
+        (tuple(weeks), lines, w, v)
         for w, v in (all_jobs(weeks) if jobs is None else jobs)
         if not (OUT_DIR / "jobs" / f"{job_name(w, v)}.json").exists()
     ]
     log(f"{len(todo)} jobs")
+    if not todo:
+        return
     with mp.get_context("spawn").Pool(workers) as pool:
         for line in pool.imap_unordered(_worker, todo):
             log(line)
@@ -904,8 +926,139 @@ def summarize(tables: dict) -> dict:
     return {"per_week": per_week, "fixes": fixes, "calibration": calibration}
 
 
+# ---------------------------------------------------------------------------------------------------------
+# The weekly rerun (`dfs research refresh`)
+# ---------------------------------------------------------------------------------------------------------
+
+REFRESH_FIXES = ("shrink_salary", "shrink_tffb", "noise_cv", "noise_0.10_rep")
+
+
+def cached_tables(study: Study, out_dir: Path = OUT_DIR, log=print) -> dict:
+    """`assemble`'s tables, reused while the weeks and the saved jobs are the ones they were built from."""
+    import pickle
+
+    path = out_dir / "tables.pkl"
+    key = {"weeks": sorted(study.weeks), "jobs": sorted(p.stem for p in (out_dir / "jobs").glob("*.json"))}
+    if path.exists():
+        tables = pickle.loads(path.read_bytes())
+        if tables.get("key") == key:
+            return tables
+    tables = {**assemble(study, out_dir, log=log), "key": key}
+    path.write_bytes(pickle.dumps(tables))
+    return tables
+
+
+def refresh_summary(season: int, through: int) -> dict:
+    """The weekly hook for `dfs research refresh` (session B's contract): runs the builder jobs of any week
+    not run yet (`run_all`, resumable: about 15 minutes for a new week, nothing for the others), reassembles
+    when the weeks changed, and returns `{"headline": [...], "metrics": {...}, "ship_bar": str}`."""
+    if season != SEASON:
+        return {
+            "headline": [f"The curse study is wired for {SEASON} only."],
+            "metrics": {},
+            "ship_bar": SHIP_BAR,
+        }
+    lines = lines_through(season, through)
+    weeks = sorted(lines)
+    if len(weeks) < 3:
+        return {
+            "headline": [f"The curse study needs 3 weeks with a cash line; it has {len(weeks)}."],
+            "metrics": {},
+            "ship_bar": SHIP_BAR,
+        }
+    run_all(weeks, log=lambda _m: None, lines=lines)
+    tables = cached_tables(Study(weeks, lines), log=lambda _m: None)
+    return refresh_from(summarize(tables), weeks)
+
+
+def refresh_from(summary: dict, weeks: Sequence[int]) -> dict:
+    """`refresh_summary`'s dictionary from `summarize`'s output: the curse (shown minus realized, builds and
+    random lineups, and the part due to selection), each fix against today, and the display shift."""
+    pw = summary["per_week"]
+    cash = pw[pw["kind"] == "cash"].pivot(index="week", columns="variant", values=["cash_gap", "pts_gap"])
+
+    def mean_se(d: pd.Series) -> tuple[float, float]:
+        d = d.dropna()
+        return float(d.mean()), float(d.std(ddof=1) / np.sqrt(len(d))) if len(d) > 1 else float("nan")
+
+    gap, gap_se = mean_se(cash["cash_gap"]["today"])
+    rnd, rnd_se = mean_se(cash["cash_gap"]["random"])
+    sel, sel_se = mean_se(cash["cash_gap"]["today"] - cash["cash_gap"]["random"])
+    sel_pts, sel_pts_se = mean_se(cash["pts_gap"]["today"] - cash["pts_gap"]["random"])
+    metrics: dict[str, float | bool] = {
+        "weeks": len(weeks),
+        "cash builds cash gap": round(gap, 4),
+        "random cash gap": round(rnd, 4),
+        "selection cash gap": round(sel, 4),
+        "selection pts gap": round(sel_pts, 2),
+    }
+    lines = [
+        f"- Cash builds: shown Cash % minus cashed {gap:+.1%} ({gap_se:.1%}); random same-pool lineups "
+        f"{rnd:+.1%} ({rnd_se:.1%}); the part due to selection {sel:+.1%} ({sel_se:.1%}), "
+        f"{sel_pts:+.1f} ({sel_pts_se:.1f}) points a week",
+    ]
+
+    def cleared(fix: str) -> list[str]:
+        c = summary["fixes"].get(("cash", fix), {})
+        return [
+            label
+            for col, label in (("realized", "points"), ("cashed", "cash rate"))
+            if passes(c.get(col, {}))
+        ]
+
+    rep_runs = bool(summary["fixes"].get(("cash", "noise_0.10_rep"), {}).get("realized"))
+    clearing = []
+    for fix in REFRESH_FIXES:
+        pts, rate = (summary["fixes"].get(("cash", fix), {}).get(c, {}) for c in ("realized", "cashed"))
+        gpp = summary["fixes"].get(("gpp", fix), {}).get("realized", {})
+        if not pts:
+            continue
+        on = cleared(fix)
+        # the noise pick counts only when its independent rerun (other draws) clears too: one pass is luck
+        unreplicated = fix == "noise_cv" and on and rep_runs and not cleared("noise_0.10_rep")
+        ok = bool(on) and not unreplicated
+        metrics.update(
+            {
+                f"{fix} cash pts": round(pts["mean"], 2),
+                f"{fix} cash rate": round(rate["mean"], 4),
+                f"{fix} gpp pts": round(gpp.get("mean", float("nan")), 2),
+                f"{fix} clears": ok,
+            }
+        )
+        clearing += [f"{fix} ({', '.join(on)})"] if ok else []
+        note = ""
+        if ok:
+            note = f"; clears the bar on {' and '.join(on)}"
+        elif unreplicated:
+            note = f"; clears on {' and '.join(on)}, but its rerun does not"
+        lines.append(
+            f"- {fix}: cash builds {pts['mean']:+.1f} pts ({pts['se']:.1f}, {pts['better']}/{pts['weeks']} "
+            f"weeks), cash rate {rate['mean']:+.1%} ({rate['se']:.1%}, {rate['better']}/{rate['weeks']}); "
+            f"GPP builds {gpp.get('mean', float('nan')):+.1f} pts{note}"
+        )
+    shift = summary["calibration"]["cash"]["gain"]["shift"]
+    metrics.update(
+        {"display shift brier gain": round(shift["mean"], 4), "display shift clears": passes(shift)}
+    )
+    lines.append(
+        f"- Display shift: cash Brier gain {shift['mean']:+.3f} ({shift['se']:.3f}, "
+        f"{shift['better']}/{shift['weeks']} weeks){'; clears the bar' if passes(shift) else ''}"
+    )
+    head = (
+        f"Optimizer's curse, weeks {', '.join(map(str, weeks))}: shown Cash % {gap:+.1%} against cashed, "
+        f"{sel:+.1%} of it from selection; "
+        + (
+            f"clearing the bar (a candidate, not a ship: Sam decides): {', '.join(clearing)}."
+            if clearing
+            else "no fix clears the bar."
+        )
+    )
+    return {"headline": [head, "", *lines], "metrics": metrics, "ship_bar": SHIP_BAR}
+
+
 def main(argv: Sequence[str] | None = None) -> None:
-    """`python -m dfs.research.curse run|assemble [weeks]`: the builder jobs (resumable), then the tables."""
+    """`python -m dfs.research.curse run|replicate|assemble|refresh [weeks]`: the builder jobs (resumable),
+    then the tables."""
     import pickle
     import sys
 
@@ -914,6 +1067,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     weeks = [int(w) for w in args[0].split(",")] if args else list(range(1, 7))
     if step == "run":
         run_all(weeks)
+        return
+    if step == "refresh":  # what `dfs research refresh` runs, through the given last week
+        out = refresh_summary(SEASON, max(weeks))
+        print("\n".join(out["headline"]))
         return
     if step == "replicate":  # a second, independent set of noise draws for the sigma that was chosen
         sigma = NOISE_SIGMAS[0]

@@ -1175,7 +1175,9 @@ typed `Cash Line`, the GIANT $25 Double Up from Week 4); Top 1% = at or above th
 4-6), else that line + 62.6 (proxy). Every fitted number comes from the other five weeks. Standard errors are **over weeks** (six):
 builds in one week share players and one line, so they are nowhere near 20 independent tries. Run: `python -m dfs.research.curse run`
 (114 builder jobs, ~35 min on 6 processes, resumable), `... replicate` (the noise rerun below), `... assemble` (tables to
-`data/research/curse/`, gitignored).
+`data/research/curse/`, gitignored). Weekly: `dfs research refresh` reruns it (`curse.refresh_summary`): it runs the builder jobs of a
+newly closed week (its cash line from the double-up's standings until Results' typed one is cached), reassembles and reports the curse
+and every fix's held-out numbers.
 
 ### The curse's size
 
@@ -1229,7 +1231,7 @@ today 0.271; **shift** (each build's simulated score moved by the points the bui
   throws the projection away and loses badly.
 - Shrinking toward the salary line clears the bar on cash rate (2.2 SE, 4 of 6) but not on points (1.5 SE, 3 of 6), costs the GPP
   builds, and is one of 20 comparisons in this table, about one of which would clear 2 SE by chance. It is the one candidate worth carrying
-  forward: rerun with Weeks 7-8 (`python -m dfs.research.curse run 1,2,3,4,5,6,7`) before it is offered behind a switch.
+  forward: rerun with Weeks 7-8 (`dfs research refresh` does it after each close) before it is offered behind a switch.
 - The display shift does not clear its own bar (0.9 SE). What would fix the shown Cash % is the **line**: the double-up field's mean
   (its ownership: double-ups are far chalkier than projected) is where the 16 points go, which is session A's finding too.
 

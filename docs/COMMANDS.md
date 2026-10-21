@@ -430,7 +430,7 @@ Rerun the weekly offline studies with the closed weeks so far and write one repo
 | `--through INT` | Last closed week to include (default: the newest scored week). |
 | `--season INT` | Override the auto-detected NFL season. |
 | `--shuffles INT` | Shuffled-feature tables behind the five-pair retest's chance control. Default: `40`. |
-| `--only STR` | Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, contest_retro. |
+| `--only STR` | Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, props, contest_retro, curse. |
 
 ## Reference: building and styling a sheet (only when needed)
 

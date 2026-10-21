@@ -122,3 +122,48 @@ def test_held_out_noise_ignores_the_replication():
     )
     out = curse.held_out_noise(per_week, "cash")
     assert set(out["chosen"]) <= {"noise_0.10", "noise_0.20"}
+
+
+def _summary():
+    weeks = [1, 2, 3, 4]
+    gaps = {"today": [-0.2, -0.1, -0.15, -0.2], "random": [-0.1, -0.1, -0.1, -0.1]}
+    per_week = pd.DataFrame(
+        [
+            {"week": w, "variant": v, "kind": "cash", "cash_gap": g, "pts_gap": 10 * g}
+            for v, gs in gaps.items()
+            for w, g in zip(weeks, gs, strict=True)
+        ]
+    )
+    good = {"weeks": 4, "mean": 0.1, "se": 0.02, "z": 5.0, "better": 4, "by_week": {}}
+    flat = {**good, "mean": 0.0, "z": 0.0, "better": 2}
+    fixes = {("cash", "shrink_salary"): {"realized": flat, "cashed": good}}
+    fixes[("gpp", "shrink_salary")] = {"realized": flat, "top1": flat}
+    return {"per_week": per_week, "fixes": fixes, "calibration": {"cash": {"gain": {"shift": flat}}}}
+
+
+def test_refresh_from_reports_the_curse_the_selection_part_and_each_fix():
+    out = curse.refresh_from(_summary(), [1, 2, 3, 4])
+    m = out["metrics"]
+    assert m["weeks"] == 4 and m["cash builds cash gap"] == pytest.approx(-0.1625)
+    assert m["random cash gap"] == pytest.approx(-0.1)
+    assert m["selection cash gap"] == pytest.approx(-0.0625)
+    assert m["shrink_salary clears"] is True and m["display shift clears"] is False
+    assert "shrink_tffb cash pts" not in m  # a fix with no runs is left out, not reported as zero
+    assert "shrink_salary (cash rate)" in out["headline"][0]
+    assert out["ship_bar"] == curse.SHIP_BAR
+
+
+def test_refresh_summary_is_wired_for_its_season_only():
+    out = curse.refresh_summary(curse.SEASON - 1, 6)
+    assert out["metrics"] == {} and str(curse.SEASON) in out["headline"][0]
+
+
+def test_a_noise_pass_counts_only_when_its_rerun_clears_too():
+    s = _summary()
+    good, flat = s["fixes"][("cash", "shrink_salary")]["cashed"], s["fixes"][("gpp", "shrink_salary")]["top1"]
+    s["fixes"][("cash", "noise_cv")] = {"realized": flat, "cashed": good}
+    s["fixes"][("cash", "noise_0.10_rep")] = {"realized": flat, "cashed": flat}
+    out = curse.refresh_from(s, [1, 2, 3, 4])
+    assert out["metrics"]["noise_cv clears"] is False
+    assert any("its rerun does not" in line for line in out["headline"])
+    assert "noise_cv" not in out["headline"][0]
