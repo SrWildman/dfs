@@ -158,6 +158,7 @@ from dfs.sheet_style import (
     apply_tab_chrome,
     apply_tab_notes,
     fix_lineups_dst_slot_label,
+    hidden_source_tabs,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
@@ -1557,7 +1558,9 @@ def sheets_polish(
         )
 
         if not skip_chrome:
-            results.extend(apply_tab_chrome(client))
+            results.extend(
+                apply_tab_chrome(client, extra_hidden=hidden_source_tabs(cfg.google_sheets.tab_mappings))
+            )
 
         # Fix 3/1.5: a short cell note on every visible tab's A1 explaining
         # what it's for (and, for the tabs that got a basic filter in `dfs

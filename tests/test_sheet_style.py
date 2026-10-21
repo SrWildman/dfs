@@ -55,6 +55,7 @@ from dfs.sheet_style import (
     apply_tab_chrome,
     column_alignment,
     edge_group_spans,
+    hidden_source_tabs,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
@@ -794,6 +795,33 @@ def test_apply_tab_chrome_orders_present_tabs_then_hides_staging_tabs():
         assert color == FAMILY_COLORS["feed"]
         assert hidden is True
         assert index >= len(expected_order)
+
+
+def test_the_config_named_source_tabs_are_hidden_with_the_staging_tabs():
+    mappings = {
+        "sleeper": "SleeperRaw",
+        "fantasypros": "FantasyProsRaw",
+        "snaps": "SnapsRaw",
+        "edge": "EdgeRaw",
+    }
+    assert hidden_source_tabs(mappings) == ["SleeperRaw", "FantasyProsRaw", "SnapsRaw"]
+    assert hidden_source_tabs({"snaps": "Snaps2", "edge": "EdgeRaw"}) == [
+        "Snaps2"
+    ]  # the NAME is the config's
+
+    client = FakeChromeClient({"EdgeRaw", "DKSalRaw", "SleeperRaw", "FantasyProsRaw", "SnapsRaw", "Snaps2"})
+    apply_tab_chrome(client, extra_hidden=hidden_source_tabs({**mappings, "snaps": "Snaps2"}))
+    hidden = [c[0] for c in client.calls if c[3]]
+    assert hidden == ["DKSalRaw", "SleeperRaw", "FantasyProsRaw", "Snaps2"]
+    assert "SnapsRaw" not in hidden  # no longer the configured name, so not touched
+
+    # the shipped example config maps all three
+    import tomllib
+    from pathlib import Path
+
+    example = Path(__file__).resolve().parents[1] / "config.example.toml"
+    mapped = tomllib.loads(example.read_text())["google_sheets"]["tab_mappings"]
+    assert hidden_source_tabs(mapped) == ["SleeperRaw", "FantasyProsRaw", "SnapsRaw"]
 
 
 class FakeNotesClient:

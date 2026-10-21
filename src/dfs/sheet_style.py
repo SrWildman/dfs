@@ -81,6 +81,8 @@ function happens to touch it first.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from dfs import perf
 from dfs.derived import (
     ALL_PCT_COLUMNS,
@@ -2819,10 +2821,23 @@ HIDE_TABS = [
 ]
 
 
-def apply_tab_chrome(client: SheetsClient, *, hide_staging: bool = True) -> list[str]:
+# The raw tabs named in config.toml's `tab_mappings` (by key) that no formula or person opens directly.
+# Their NAMES come from the config, never from here (a rename there must not leave one visible).
+HIDE_SOURCE_KEYS = ("sleeper", "fantasypros", "snaps")
+
+
+def hidden_source_tabs(tab_mappings: dict[str, str]) -> list[str]:
+    """The config-named raw tabs for `HIDE_SOURCE_KEYS` that are mapped, in that order."""
+    return [tab_mappings[key] for key in HIDE_SOURCE_KEYS if tab_mappings.get(key)]
+
+
+def apply_tab_chrome(
+    client: SheetsClient, *, hide_staging: bool = True, extra_hidden: Sequence[str] = ()
+) -> list[str]:
     """Order the tab strip by phase of the week, colour it by family, and
-    hide the staging tabs. Order, colour and visibility only -- no renames,
-    so nothing in `tab_mappings` or `config.toml` is affected.
+    hide the staging tabs (`HIDE_TABS` plus `extra_hidden`, the config-named
+    raw tabs from `hidden_source_tabs`). Order, colour and visibility only --
+    no renames, so nothing in `tab_mappings` or `config.toml` is affected.
     """
     results = []
     index = 0
@@ -2835,7 +2850,7 @@ def apply_tab_chrome(client: SheetsClient, *, hide_staging: bool = True) -> list
 
     if hide_staging:
         hidden = 0
-        for tab in HIDE_TABS:
+        for tab in [*HIDE_TABS, *(t for t in extra_hidden if t not in HIDE_TABS)]:
             if not client.tab_exists(tab):
                 continue
             client.set_tab_properties(tab, color=FAMILY_COLORS["feed"], index=index, hidden=True)
@@ -3692,6 +3707,7 @@ for _name in (
     "polish_guardrails",
     "polish_bankroll",
     "apply_tab_chrome",
+    "hidden_source_tabs",
     "apply_tab_notes",
     "style_board",
     "style_slate_grid",
