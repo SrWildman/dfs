@@ -142,6 +142,9 @@ class TabState:
     round: int | None = None
     rules: RulesText = field(default_factory=RulesText)
     builds: list[TabBuild] = field(default_factory=list)
+    layout_problem: str | None = (
+        None  # set when the tab is in an old layout (`sheet_suggested.layout_problem`)
+    )
 
 
 @dataclass(frozen=True)

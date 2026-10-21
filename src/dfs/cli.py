@@ -4044,6 +4044,9 @@ def _run_suggest(
     except SheetsError as e:
         console.print(f"[red]Sheets error reading the Suggested tab:[/red] {e}")
         raise typer.Exit(code=1) from e
+    if iterate and restore_round is None and tab.builds and tab.layout_problem:
+        console.print(f"[red]{escape(tab.layout_problem[0].upper() + tab.layout_problem[1:])}.[/red]")
+        raise typer.Exit(code=1)
     prior = state.latest
     restored: int | None = None
     if restore_round is not None:
@@ -4275,6 +4278,10 @@ def week_new(
     4b (2026-09-22, see CONTRIBUTING.md's changelog) -- nothing left here
     to clear for any of the five.
 
+    The new sheet's Suggested tab is reset to the current empty layout (rules box, no builds): a copy
+    never carries last week's builds or typed rules, and an old-layout tab is replaced (never fails the
+    command; `dfs setup suggested-controls` does it by hand).
+
     After the sync, a Cockpit tab on the new sheet (a copied template has one) is rewritten from the data just
     synced, so the template's stale render is replaced at once (`_rebuild_cockpit_on_new_sheet`; never fails
     the week). Likewise a Player tab's hidden raw tabs (`_rebuild_player_card_on_new_sheet`).
@@ -4352,6 +4359,8 @@ def week_new(
     except SheetsError as e:
         console.print(f"[red]Sheets error checking the new sheet:[/red] {e}")
         raise typer.Exit(code=1) from e
+    # An old-layout Suggested tab is what the reset below replaces: not a reason to stop before it.
+    issues = [i for i in issues if i.check != "suggested-layout"]
     if issues:
         for issue in issues:
             console.print(_fail_line(issue.check, issue.detail))
@@ -4487,6 +4496,7 @@ def week_new(
     for line in summary:
         console.print(f"[green]OK[/green] {line}")
 
+    _reset_suggested_on_new_sheet(new_client)
     _refresh_stakes_block(cfg, new_client)
 
     # Fix 2.14: blank every synced source's tab BEFORE the first sync
@@ -4568,6 +4578,21 @@ def _rebuild_player_card_on_new_sheet(cfg: Config, client: SheetsClient, ctx: Sy
     ok, line = sheet_player_card.refresh_raw_if_present(client, cfg, edge, ctx.week, ctx.season)
     if line:
         console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
+
+
+def _reset_suggested_on_new_sheet(client: SheetsClient) -> None:
+    """Put the new week's Suggested tab back to the current empty layout (rules box, no builds): a copied
+    sheet's builds and typed rules are last week's, and an old-layout tab cannot be iterated on. NEVER fails
+    `week new`: anything in the way is reported and skipped (`dfs setup suggested-controls` does it by
+    hand)."""
+    try:
+        for line in setup_controls(client, reset=True):
+            console.print(f"[green]OK[/green] {line}")
+    except Exception as e:  # noqa: BLE001 - the week itself is already set up; never fail it over this
+        console.print(
+            f"[yellow]Suggested tab not reset ({escape(str(e))}); "
+            "run `dfs setup suggested-controls`.[/yellow]"
+        )
 
 
 def _refresh_stakes_block(cfg: Config, client: SheetsClient) -> None:
