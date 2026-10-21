@@ -93,7 +93,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   own settings, never advice. `--propose` prints suggested rule values with the arithmetic and writes nothing.
   `dfs week new` rebuilds the block on the new sheet (never failing); `doctor` flags a sheet without it.
 
-- `dfs setup cockpit [--sheet-id <id>]` -- creates (or rebuilds) the read-only **Cockpit** tab right after Board: Sunday's last 90
+- `dfs setup cockpit [--sheet-id <id>]` -- creates (or rebuilds) the read-only **Cockpit** tab right before Board (to its left): Sunday's last 90
   minutes on one page (new Q / D / OUT in his lineups, open slots with the best change from the last `late-swap` run, wind, the Lineups
   warnings, exposure top 10, DK Upload entries without a Lineup, budget). Nothing on it is typed; column A is the cue (`SWAP`, `LOOK`,
   `FILL`, `ok`). `dfs sync --live` and `dfs lineups late-swap` refresh it, **only on a sheet that already has the tab** (they never create it

@@ -3,8 +3,8 @@
 The tab is Python's end to end: nothing on it is typed, and it holds no formula, so it is rewritten whole on
 every refresh and cannot disturb Board, Exposure or anything Sam types. It is only ever REFRESHED by
 `dfs sync --live` and `dfs lineups late-swap` when it already exists (`refresh_if_present`); creating it, and
-placing it right after Board, is `dfs setup cockpit` (template first, then the live week, `dfs doctor` after),
-so a structural change to the tab strip is always a deliberate step.
+placing it right before Board, is `dfs setup cockpit` (template first, then the live week, `dfs doctor`
+after), so a structural change to the tab strip is always a deliberate step.
 
 Every read is fail-soft per block: a tab that cannot be read becomes a line saying so on the Cockpit
 (`CockpitInputs.unavailable`), never a failed sync.
@@ -241,20 +241,20 @@ def write_cockpit(client: SheetsClient, layout: Layout, tab: str = COCKPIT_TAB) 
     return f"{tab}: built ({len(layout.rows)} rows)"
 
 
-def place_after_board(client: SheetsClient, tab: str = COCKPIT_TAB) -> str:
-    """Put the tab right after Board in the strip, coloured with the `decide` family. Only `dfs setup cockpit`
-    does this: a refresh never moves tabs."""
+def place_before_board(client: SheetsClient, tab: str = COCKPIT_TAB) -> str:
+    """Put the tab right before Board (to its left) in the strip, coloured with the `decide` family. Only
+    `dfs setup cockpit` does this: a refresh never moves tabs."""
     from dfs.sheet_style import FAMILY_COLORS
     from dfs.sheet_views import BOARD_TAB
 
     tabs = [t.title for t in client.list_tabs()]
     if BOARD_TAB not in tabs:
         return f"{tab}: left where it was ({BOARD_TAB} not found)"
-    index = tabs.index(BOARD_TAB) + 1
+    index = tabs.index(BOARD_TAB)
     if tab in tabs and tabs.index(tab) < tabs.index(BOARD_TAB):
         index -= 1  # moving it from before Board shifts Board left by one
     client.set_tab_properties(tab, color=FAMILY_COLORS["decide"], index=index, hidden=False)
-    return f"{tab}: placed right after {BOARD_TAB}"
+    return f"{tab}: placed right before {BOARD_TAB}"
 
 
 def refresh(

@@ -26,6 +26,7 @@ The layout is built by `build_layout` (pure, no sheet) and written by `write_con
 from __future__ import annotations
 
 import math
+import re
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -339,7 +340,13 @@ def _range(letter: str, first: int, last: int) -> str:
     return f"{letter}{first}:{letter}{last}"
 
 
-DECISIONS_HEADERS = ["Your decisions, season", "So far", "Based on"]
+DECISIONS_HEADERS = ["Your decisions", "So far", "Based on"]  # the first cell is `decisions_title(...)`
+DECISIONS_NOTE = (
+    "H2H entries and weeks without a standings file are not in this block, so its counts differ from "
+    "Bankroll's."
+)
+DECISIONS_TITLE_START = "Your decisions \u2014"
+MINUS = "\u2212"  # a real minus sign: a leading '-' would be read as a formula
 DASH = "-"
 
 
@@ -436,61 +443,123 @@ def decision_lines(tables: Tables, season: int) -> tuple[int | None, list[str]]:
     return week, lines
 
 
+def _note_header(row: list) -> list:
+    """The row as the hover-note lookup sees it: the decisions block's dated title is keyed as the plain
+    `DECISIONS_HEADERS[0]`."""
+    if str(row[0]).startswith(DECISIONS_TITLE_START):
+        return [DECISIONS_HEADERS[0], *row[1:]]
+    return row
+
+
+def decision_weeks(tables: Tables, season: int) -> list[int]:
+    """The weeks of `season` that have graded entries (a standings file), ascending."""
+    d = tables.decisions
+    if d.empty or "season" not in d.columns:
+        return []
+    return sorted(int(w) for w in d[d["season"] == season]["week"].unique())
+
+
+def decisions_title(weeks: list[int]) -> str:
+    return f"{DECISIONS_TITLE_START} weeks with your standings files ({', '.join(str(w) for w in weeks)})"
+
+
+def _n_of(hits: float, total: float, unit: str = "") -> str:
+    """'7 of 43 (16%)': a count out of a total, never a bare fraction or percentage."""
+    return f"{int(hits)} of {int(total)}{unit} ({_rate(hits, total)})"
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def _based_on(frame: pd.DataFrame, unit: str = "entry") -> str:
+    """'7 entries in 3 weeks': how many entries, and how many different weeks they come from."""
+    entries = len(frame)
+    unit_text = unit if entries == 1 else "entries" if unit == "entry" else f"{unit}s"
+    return f"{entries} {unit_text} in {_plural(int(frame['week'].nunique()), 'week')}"
+
+
+def _contest_name(series: str) -> str:
+    """'NFL GIANT $10 Double Up [Single Entry]' -> 'NFL GIANT $10 Double Up'."""
+    return re.sub(r"\s*\[[^\]]*\]\s*$", "", str(series)).strip()
+
+
+def _signed(value: float) -> str:
+    return f"+{value:.1f}" if value >= 0 else f"{MINUS}{abs(value):.1f}"
+
+
 def decision_season_rows(tables: Tables, season: int) -> list[list[str]]:
-    """The season block: the same measures added up over every week in the standings files."""
+    """The season block: the same measures added up over every week in the standings files. Every value is
+    text that reads on its own ('7 of 43 (16%)'); 'Based on' counts the entries and their weeks."""
     d = tables.decisions
     d = d[d["season"] == season] if len(d) and "season" in d.columns else d
     if d.empty:
         return []
-    weeks = int(d["week"].nunique())
     cash, gpp = d[d["cls"] == "cash"], d[d["cls"] == "gpp"]
     rows = []
     if len(cash):
-        margin = cash["margin"].dropna()
         rows.append(
             [
                 "Cash entries cashed",
-                f"{int(cash['cashed'].sum())} of {len(cash)} ({_rate(cash['cashed'].sum(), len(cash))})",
-                f"{weeks} week(s)",
+                _n_of(cash["cashed"].sum(), len(cash)),
+                _based_on(cash),
             ]
         )
-        if len(margin):
+        scored = cash[cash["margin"].notna()]
+        if len(scored):
             rows.append(
-                ["Cash: average margin to the cash line", f"{margin.mean():+.1f}", f"{len(margin)} entries"]
+                [
+                    "Cash: average margin to the cash line",
+                    f"{_signed(scored['margin'].mean())} points",
+                    _based_on(scored),
+                ]
             )
+        most = cash.loc[cash["copies"].idxmax()]
         rows.append(
-            ["Cash: most copies of one lineup", f"{int(cash['copies'].max()) + 1}", f"{len(cash)} entries"]
+            [
+                "Cash: most copies of one lineup",
+                f"{int(most['copies']) + 1} copies of your lineup "
+                f"(Week {int(most['week'])}, {_contest_name(most['series'])})",
+                _based_on(cash),
+            ]
         )
     if len(gpp):
-        rows.append(["GPP: average finish", _top(gpp["pct"].mean()), f"{len(gpp)} entries"])
+        rows.append(["GPP: average finish", _top(gpp["pct"].mean()), _based_on(gpp)])
         rows.append(
             [
                 "GPP: entries in the top 10%",
-                _rate((gpp["pct"] <= 0.10).sum(), len(gpp)),
-                f"{len(gpp)} entries",
+                _n_of((gpp["pct"] <= 0.10).sum(), len(gpp)),
+                _based_on(gpp),
             ]
         )
-        rows.append(["GPP: entries cashed", _rate(gpp["cashed"].sum(), len(gpp)), f"{len(gpp)} entries"])
+        rows.append(["GPP: entries cashed", _n_of(gpp["cashed"].sum(), len(gpp)), _based_on(gpp)])
     swings = tables.swings
     swings = swings[swings["season"] == season] if len(swings) else swings
     if len(swings):
         per_week = swings.loc[swings.groupby("week")["swing"].apply(lambda s: s.abs().idxmax())]
-        rows.append(
-            [
-                "Biggest weekly swing: won / cost",
-                f"{int((per_week['swing'] > 0).sum())} won, {int((per_week['swing'] < 0).sum())} cost",
-                f"{len(per_week)} week(s)",
-            ]
-        )
+        won, cost = per_week[per_week["swing"] > 0], per_week[per_week["swing"] < 0]
+        text = f"Won {_plural(len(won), 'week')}, cost {len(cost)}."
+
+        def _pick(r) -> str:
+            return f"Wk {int(r['week'])} {r['player']} over {r['alt']} {_signed(r['swing'])}"
+
+        clauses = []
+        if len(won):
+            clauses.append(f"Biggest: {_pick(won.loc[won['swing'].idxmax()])}")
+        if len(cost):
+            clauses.append(f"{'worst' if clauses else 'Worst'}: {_pick(cost.loc[cost['swing'].idxmin()])}")
+        if clauses:
+            text += " " + "; ".join(clauses)
+        rows.append(["Biggest weekly swing: won / cost", text, _plural(len(per_week), "week")])
     hits = tables.pool_hits
     hits = hits[hits["season"] == season] if len(hits) else hits
     if len(hits):
         rows.append(
             [
-                "Pool hit rate (pooled / model favourites left out)",
-                f"{_rate(hits['pooled_hits'].sum(), hits['pooled'].sum())} / "
-                f"{_rate(hits['likes_hits'].sum(), hits['likes'].sum())}",
-                f"{len(hits)} week(s) logged",
+                "Beat their projection: your pool / model favourites you left out",
+                f"{_n_of(hits['pooled_hits'].sum(), hits['pooled'].sum())} / "
+                f"{_n_of(hits['likes_hits'].sum(), hits['likes'].sum())}",
+                f"{_plural(len(hits), 'week')} logged",
             ]
         )
     sib = d[d["sib_total"] > 0]
@@ -498,8 +567,8 @@ def decision_season_rows(tables: Tables, season: int) -> list[list[str]]:
         rows.append(
             [
                 "Same lineups cashing in other contests",
-                f"{int(sib['sib_cashed'].sum())} of {int(sib['sib_total'].sum())} pairs",
-                f"{len(sib)} entries",
+                _n_of(sib["sib_cashed"].sum(), sib["sib_total"].sum(), " pairs"),
+                _based_on(sib),
             ]
         )
     return rows
@@ -521,7 +590,8 @@ def _add_decisions(b: _Builder, tables: Tables, season: int) -> None:
     rows = decision_season_rows(tables, season)
     if rows:
         b.blank()
-        b.header(DECISIONS_HEADERS)
+        b.note(DECISIONS_NOTE)
+        b.header([decisions_title(decision_weeks(tables, season)), *DECISIONS_HEADERS[1:]])
         for row in rows:
             b.add(row)
 
@@ -907,7 +977,7 @@ def write_contests(client: SheetsClient, layout: Layout, tab: str = CONTESTS_TAB
         )
     client.freeze(tab, rows=layout.status_row, cols=0)
     notes = sum(
-        apply_notes_to_values(client, tab, row, layout.rows[row - 1], CONTESTS_NOTES)
+        apply_notes_to_values(client, tab, row, _note_header(layout.rows[row - 1]), CONTESTS_NOTES)
         for row in layout.header_rows
     )
     fit_tab_widths(client, tab)

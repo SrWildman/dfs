@@ -261,7 +261,7 @@ dfs sync --live              # re-pull odds/DK status/TFFB projections/weather, 
 dfs lineups late-swap         # who's still swappable, and the best swaps for them
 ```
 
-**The Cockpit tab** (right after Board) is the one page for these last 90 minutes: new Q / D / OUT among your players, which lineups still have open slots and the best change from the last
+**The Cockpit tab** (right before Board) is the one page for these last 90 minutes: new Q / D / OUT among your players, which lineups still have open slots and the best change from the last
 `late-swap` run, wind in your games, the Lineups warnings, your top 10 exposure, entries still without a Lineup and the budget. Column A says what to do (`SWAP`, `LOOK`, `FILL`, `ok`). Nothing on it is
 typed. Both commands above rewrite it when the sheet has the tab (`dfs setup cockpit` creates it, template first); its "best change" lines are from the last `late-swap` run and say when that was, so run
 `late-swap` (add `--refresh-injuries` once news breaks) before trusting them.

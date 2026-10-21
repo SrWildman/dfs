@@ -531,7 +531,7 @@ def _check_cockpit_tab(tab_titles: set[str]) -> list[DoctorIssue]:
     return [
         DoctorIssue(
             "cockpit-tab",
-            f"no {COCKPIT_TAB!r} tab -- `dfs setup cockpit` creates it right after Board (template first)",
+            f"no {COCKPIT_TAB!r} tab -- `dfs setup cockpit` creates it right before Board (template first)",
         )
     ]
 

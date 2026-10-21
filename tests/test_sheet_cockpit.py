@@ -199,18 +199,22 @@ def test_write_cockpit_styles_every_cue_and_section_and_freezes_the_title(monkey
     assert widths["A"] == sheet_cockpit.CUE_PX and len(widths) == cockpit.COLUMN_COUNT
 
 
-def test_the_tab_is_placed_right_after_board_and_a_refresh_never_moves_it():
+def test_the_tab_is_placed_right_before_board_and_a_refresh_never_moves_it():
     client = FakeClient(tabs=("Instructions", "Slate Grid", "Board", "Edge Finder", "Cockpit"))
-    assert sheet_cockpit.place_after_board(client).endswith("right after Board")
+    assert sheet_cockpit.place_before_board(client).endswith("right before Board")
     props = next(c for c in client.calls if c[0] == "set_tab_properties")
-    assert props[1] == "Cockpit" and props[2]["index"] == 3 and props[2]["hidden"] is False
+    assert props[1] == "Cockpit" and props[2]["index"] == 2 and props[2]["hidden"] is False
 
-    before = FakeClient(tabs=("Cockpit", "Board", "Edge Finder"))
-    sheet_cockpit.place_after_board(before)
-    assert next(c for c in before.calls if c[0] == "set_tab_properties")[2]["index"] == 1
+    # already just left of Board: stays put; further left: moves up to sit beside it
+    beside = FakeClient(tabs=("Slate Grid", "Cockpit", "Board", "Edge Finder"))
+    sheet_cockpit.place_before_board(beside)
+    assert next(c for c in beside.calls if c[0] == "set_tab_properties")[2]["index"] == 1
+    far = FakeClient(tabs=("Cockpit", "Slate Grid", "Board", "Edge Finder"))
+    sheet_cockpit.place_before_board(far)
+    assert next(c for c in far.calls if c[0] == "set_tab_properties")[2]["index"] == 1
 
     no_board = FakeClient(tabs=("Cockpit",))
-    assert "left where it was" in sheet_cockpit.place_after_board(no_board)
+    assert "left where it was" in sheet_cockpit.place_before_board(no_board)
     assert not [c for c in no_board.calls if c[0] == "set_tab_properties"]
 
 
