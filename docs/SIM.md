@@ -29,6 +29,7 @@ see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself wri
 | Game script | `script.py`, `script_pbp.py`, `script_backtest.py`, `script_report.py` | Spread and implied total against the pooled table, the play-by-play mechanism, the lineup-level bar (`dfs sim script`). |
 | Team shape | `shape_table.py`, `script_shape.py` | The one shipped modifier: QB1-TE1 by the tight end's target share (`correlations_shape.csv`), a layer on the pooled table that `simulate_lineups` reads by default. `script_shape.py` is the research behind it. |
 | Duplicates | `dups.py` | Expected identical entries, the Top 1% share, the fit. Used by `lineup_suggest.py`. |
+| Contest sim (shadow) | `payouts.py`, `field_gen.py`, `contest_sim.py`, `contest_retro.py` | Payout curves, a generated field, E[$] / ROI / P(cash) per lineup per contest, and the retro against his real contests. Not wired into anything but `dfs research refresh`. See "Contest sim (shadow)". |
 
 ## Using it
 
@@ -1438,3 +1439,94 @@ role-adjusted margins 1.26 and 1.42; with each role's margin forced exactly unif
 column more than for lineup probabilities. A role dimension in the tables (or an RB2/WR4 stretch of -0.05/-0.21 as a shadow) is the next step if wanted;
 rerun after Week 7.
 
+
+## Contest sim (shadow) (2026-10-20)
+
+**What it is.** A contest-level layer on the simulator: for each of his lineups and each contest he could enter, the expected
+dollars (E[$]), ROI, P(cash), P(top 1%) and expected copies, against a *generated* field scored on the same draws. It answers
+"which contest is this lineup best in" and "does a field-aware number rank lineups better than today's Cash % / Top 1%".
+**It is shadow only:** no sheet column, no CLI command, nothing in `lineup_suggest.py` or EdgeRaw reads it. Its only consumer is
+`dfs research refresh` (study `contest_retro`), which reruns the retro each week. Nothing ships until a ranking clears the bar below.
+
+| Module | What it does |
+|---|---|
+| `payouts.py` | Payout tables from the contest log. Flat formats (Double Up, 50/50, Multiplier) pay prize pool / places paid, exact on all 94 of his paid entries. GPPs: a shifted power law `c * fee + A * (r^-b - M^-b)` over the paid places, `PAYOUT_EXPONENT = 1.011` (1.002-1.028 held out by week), the min cash per series from his own entries in the bottom half of paid places (then the fee's median, then the format's). Held out by week on 267 paid GPP entries: $2,226 predicted against $2,149 paid (+3.6%), $1.03 mean absolute error per entry, median error 7.3% (a floored form: +7.8%, $1.42). |
+| `field_gen.py` | The field: a **chalk herd** on the top `HERD_K = 20` lineups by ownership product (exact, MILP with no-good cuts), with a share and a geometric decay, plus a sampler at the real fields' stack / bring-back / salary rates, raked so the whole field matches the ownership forecast (TFFB Own%; for cash fields through the double-up curve, `dups.double_up_ownership`). `OWN_FLOOR = 0.0001`: a 0.2% floor put about a full slot on the ~300 near-unowned players and dragged the field mean down. |
+| `contest_sim.py` | One set of draws for every player; each candidate placed in each simulated field; prizes split with its copies (the dup model's, or the herd's own count when the lineup is a herd lineup). The herd's lead lineup is drawn per draw; E[$] is also reported without the top 0.1% of prizes, and with herd copies only. Opt% / SimLev: each player's share of the simulated top 1% of the GPP field, minus his ownership. About 110 lineups x 10 contests x 4,000 draws in 8 s, plus about 45 s to build the two fields. |
+| `contest_retro.py` | The retro: his real contests (standings, payouts, pre-lock ownership) for each closed week, every number held out by week, and `refresh_summary(season, through)` for `dfs research refresh`. |
+
+**The finding behind the herd.** In every double-up, one lineup holds 6-21% of the field. It is the legal lineup with the largest
+ownership product from pre-lock TFFB Own%, matching 7-9 of its 9 players. The dup model alone overstates the copies of the other
+top-product lineups 5-100x, so the herd carries that mass explicitly. The lead's rank by week was 4, 1 and 0 (Weeks 4-6); the
+retro draws it per draw with a decay fitted on the other weeks.
+
+### STOP 1: the generated field against the real ones
+
+Fields of 700+ entries, Weeks 4-6. Mean absolute miss in points, the generated field against the fixed offsets the Lineups tab
+uses today:
+
+| | Field mean | Cash line | Top-1% line |
+|---|---|---|---|
+| Double-ups | 6.5 vs 9.3 | 9.0 vs 12.7 | 6.8 vs 17.8 |
+| GPPs | 3.5 vs 3.3 | 3.9 vs 3.2 | 3.6 vs 7.0 |
+
+- The top-1% line is where it helps: Week 6 misses by -2 to -5 points against +12 to +16 for the fixed offsets.
+- With the real (post-lock) ownership plugged in, the misses fall to 1-3 points, so **what is left is the ownership forecast**,
+  not the generator. GppOwn / CashOwn (Weeks 5-6 only) did no better than TFFB with the double-up curve.
+- Week 4's double-ups miss by about 19: that week's megadup was product rank 5, and it busted.
+
+### STOP 2: the retro (Weeks 2, 4, 5, 6)
+
+His 34 lineups plus 360 field lineups, 29 contests, 3,168 lineup-contest pairs, everything held out by week. The measure is the
+within-contest Spearman of each ranking with the realized dollars, averaged over contests.
+
+| Ranking | GPP | Cash |
+|---|---|---|
+| **Today** (Top 1% for GPPs, Cash % for cash) | **0.118** | **0.023** |
+| Today's Cash % / Top 1% on the generator's per-draw lines | 0.112 (-0.006, SE 0.017; better in 6 of 19 contests, 1 of 4 weeks) | 0.017 |
+| E[$] | 0.062 (-0.056, SE 0.017) | 0.011 |
+| E[$], herd copies only (no dup-model discount off the herd) | 0.059 | |
+| E[$] without the top 0.1% of prizes | 0.070 | |
+
+Only Week 6 favours the generator's lines (0.252 against 0.158). **Nothing clears the bar.**
+
+| Check | Result |
+|---|---|
+| Calibration, GPP | ROI -7.2% predicted, -7.7% realized; P(cash) 25.2% against 24.0% |
+| Calibration, cash | ROI -11.4% predicted, -4.1% realized |
+| Cash recalibration (logistic, held out by week) | Brier 0.259 -> 0.276 over all pairs (worse); his 10 entries 0.369 -> 0.233. Not shippable. |
+| SimLev against the real top 1% | correlation 0.13 (n 367); top fifth +2.3 points over ownership, bottom fifth -2.0; by week 0.10, 0.29, 0.00 |
+| Line coverage (real line inside the sim's 10-90% band) | GPP 13/13 for both lines; double-up top-1% 10/10; double-up cash line 5/10. The per-draw herd lead moves the lines by under a point. |
+| Top 0.1% of prizes as a share of GPP E[$] | 9.1% overall; 18-27% in the $1 contests of 4,756-11,890 entries |
+
+"Best in" (each lineup's top-E[$] contest) against where he entered, realized ROI over his 34 lineups:
+
+| Best in, ranked by | Realized ROI | Where he entered | Difference |
+|---|---|---|---|
+| ROI | +16.3% | +18.1% | -1.9 (SE 17.6) |
+| ROI without the top 0.1% | +35.6% | +18.1% | +17.5 (SE 18; the picks flip) |
+| Herd-copies ROI | +22.2% | +18.1% | +4.0 (SE 17.8) |
+
+The ROI picks lean on the big $1 fields, where a fifth of the E[$] is the thin top of the payout curve (only 3 of his entries
+ever finished in the top 1% of paid places, so that end of the curve is the least known).
+
+### The ship bar
+
+`contest_retro.SHIP_BAR`: a ranking ships only if, held out by week, its within-contest Spearman with realized dollars beats
+today's (Top 1% for GPPs, Cash % for cash) **by more than two standard errors over contests AND in a majority of the weeks,
+with at least 4 weeks scored.** Double-ups have 3 weeks so far. `dfs research refresh` reports the bar and the numbers each week.
+
+### Parked leads (not built)
+
+- **Per-player double-up ownership.** The main error source: the oracle run says the generator is within 1-3 points once the
+  ownership is right, and about 25 points of double-up duplicate share sit outside the chalk top 20.
+- **His own cash overconfidence.** On his 10 double-up entries the sim predicted P(cash) 62% against a 20% cash rate. Ten entries
+  is too few to fit a correction (the general recalibration made the other pairs worse).
+- **GPP bands too wide.** 13 of 13 real lines inside an 80% band over 3 weeks: the band should miss about one in five.
+- Smaller: stack rates move week to week; generated GPPs leave about $25 less salary unspent than real fields; the retro's
+  min cash comes from a fit on all weeks, not a held-out one.
+
+**If a ranking ever clears the bar:** OptPct / SimLev at EdgeRaw's end, a `dfs contests sim` command, the docs (CALCULATIONS.md,
+SHEET_REFERENCE.md, COMMANDS.md), launcher entries. Tests: `tests/sim/test_payouts.py`, `test_field_gen.py`,
+`test_contest_sim.py`, `test_contest_retro.py`. Rerun the retro after each week closes (`dfs research refresh`, or
+`contest_retro.run_retro(<week>)`).

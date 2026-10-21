@@ -99,6 +99,7 @@ def test_the_summary_is_ten_lines_for_eight_studies(tmp_path):
 
 def test_the_contest_retro_is_skipped_until_the_module_exists_and_used_when_it_does(monkeypatch):
     ctx = refresh.Context(2026, 6, 1)
+    monkeypatch.setitem(sys.modules, "dfs.sim.contest_retro", None)  # the module is on main now: hide it
     skipped = refresh.study_contest_retro(ctx)
     assert skipped.status == "skipped" and "not on this branch" in skipped.verdict
     fake = types.ModuleType("dfs.sim.contest_retro")
