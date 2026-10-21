@@ -4171,9 +4171,10 @@ def lineups_suggest(
         None,
         "--seconds",
         min=1.0,
-        help=f"How long the search may run, in seconds (default {TIME_LIMIT_SECONDS:g}, or "
-        f"{ITERATE_TIME_LIMIT:g} for --iterate; a fresh run gives cash 40%, GPP the rest). Raise it for a "
-        "big pool when the run says the time limit cut it short.",
+        help=f"The search budget, in seconds of search work (default {TIME_LIMIT_SECONDS:g}, or "
+        f"{ITERATE_TIME_LIMIT:g} for --iterate; a fresh run gives cash 40%, GPP the rest). A second is a "
+        "fixed amount of search, about a real second on a Mac, so the same pool always gives the same "
+        "builds. Raise it for a big pool when the run says the time limit cut it short.",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
     gpp_entries: int = typer.Option(

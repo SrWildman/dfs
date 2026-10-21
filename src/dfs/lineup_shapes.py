@@ -28,12 +28,12 @@ No sheet, no network, no randomness.
 
 from __future__ import annotations
 
-import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
 
+from dfs import search_clock as clock
 from dfs.late_swap_search import LineupState, OpenSlot, SwapPlayer, top_lineups
 from dfs.models import ROSTER_SLOTS
 
@@ -424,7 +424,7 @@ def shape_lineups(
     found: dict[frozenset[str], list[SwapPlayer]] = {}
     complete = True
     for n, (fixed, rest, feasible, k) in enumerate(searches):
-        left = None if deadline is None else max(0.0, deadline - time.monotonic())
+        left = None if deadline is None else max(0.0, deadline - clock.now())
         if (
             shape == STACK
         ):  # the base search: an even share, so a short budget thins every QB, never drops the last
