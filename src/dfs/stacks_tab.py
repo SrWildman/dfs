@@ -43,7 +43,7 @@ STACK_HEADERS = [
     "Field %",
     "Boom %",
     "Lev",
-    "+BB",
+    "BB edge",
     "Type in the rules box",
 ]
 GAME_HEADERS = ["Game", "Total", "Pace", "Spread", "Stack %", "Game stack %", "Best Lev"]
@@ -207,7 +207,7 @@ def build_layout(inputs: StackTabInputs) -> Layout:
         "Top 1% = chance a lineup built on the stack, the rest filled the way the field fills it, finishes "
         "in the field's top 1% (1% is an average lineup; Lift is Top 1% over 1%). Field % = share of the "
         "generated field playing exactly this stack. Boom % = share of the simulated top 1% that plays it. "
-        "Lev = Boom % - Field %, in points of the field. +BB = Top 1% with a bring-back minus without."
+        "Lev = Boom % - Field %, in points of the field. BB edge = Top 1% with a bring-back minus without."
     )
     if not published:
         b.note("Field %, Boom % and Lev appear once TFFB publishes ownership (the next sync fills them).")
