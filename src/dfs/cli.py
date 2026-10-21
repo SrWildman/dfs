@@ -173,6 +173,7 @@ from dfs.sheet_suggested import (
     build_lines,
     build_summary,
     ensure_suggested_tab,
+    read_my_frame,
     setup_controls,
     write_suggested,
 )
@@ -2128,7 +2129,7 @@ def setup_suggested_controls(
 
     A Suggested tab with no builds (a fresh template or a new week's copy) is
     rewritten empty with the rules box (Always use, Never use, Max exposure,
-    Stack rules, Builds wanted) in pale-yellow typed cells, keeping any rules
+    Stack rules, Builds wanted, Adjust, Ownership, Build rules) in pale-yellow typed cells, keeping any rules
     already typed there; one that holds builds is left as the last run wrote it
     (the lock ticks, decision cells and "your pick" tint are written beside the
     builds by `dfs lineups suggest`, since the rows move with every run). Its
@@ -3463,7 +3464,17 @@ def _run_late_swap(
         raise typer.Exit(code=1) from e
 
     console.print(f"Checking lineups in: [bold]{title}[/bold]\n{url}\n")
-    console.print(f"Projection: {projection_note(metric)}.\n")
+    console.print(f"Projection: {projection_note(metric)}.")
+    from dfs.suggest_state import frame_note
+
+    raw_edge = edge  # the Cockpit applies the frame itself: it must be handed the raw slate
+    frame, frame_notes = read_my_frame(client, edge, metric)  # the rules box's Adjust / Ownership lines
+    edge = frame.edge
+    if frame:
+        console.print(frame_note(frame))
+    for note in frame_notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+    console.print()
     pool = swap_pool(edge, now=now, metric=metric, pool_names=pool_names, all_players=all_players)
     scope = "your Player Pool plus the rosterable pool" if all_players else "your Player Pool"
     console.print(f"Swap candidates: {len(pool)} player(s) from {scope} whose game has not started.")
@@ -3567,7 +3578,7 @@ def _run_late_swap(
     if not any_shown:
         console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
     _save_late_swap(swap_results, news_changes, now=now, refreshed=refresh_injuries)
-    _refresh_cockpit(cfg, client, edge=edge, now=now)
+    _refresh_cockpit(cfg, client, edge=raw_edge, now=now)
 
 
 @lineups_app.command("late-swap")
@@ -3719,10 +3730,11 @@ def lineups_suggest(
     Iterate on them: set a build's decision cell (Keep, Rebuild, Drop or
     Vary N), tick the lock beside players who stay, type another name over a
     player (it counts as a lock) and fill the rules box (Always use, Never
-    use, Max exposure, Stack rules, Builds wanted), then run with
-    `--iterate`. Every run is a round, kept in data/suggest_state/<week>.json
+    use, Max exposure, Stack rules, Builds wanted, Adjust, Ownership, Build
+    rules), then run with `--iterate`. Every run is a round, kept in data/suggest_state/<week>.json
     with the tab's state; `--round N` brings round N back. A run without
-    `--iterate` builds from scratch (the rules box is carried over, not applied).
+    `--iterate` builds from scratch (the rules box is carried over; only its Adjust and
+    Ownership lines, your projections and ownership, are applied).
 
     Your own lineups are never touched: copy builds in with Lineup Tools >
     Copy builds to Lineups (type 1,4,6 or all). Reads the last sync's data; run `dfs sync` (or
@@ -3798,12 +3810,6 @@ def _run_suggest(
             "(Cash, GPP or Both) and run this again.[/yellow]"
         )
         raise typer.Exit(code=1)
-    with perf.measure(phases, "set up simulator"):
-        sim_setup = _late_swap_sim_setup(cfg, client, edge, None, now, fixed_lines=fixed_lines)
-    if sim_setup is None:
-        console.print("[red]The simulator is needed to score builds and could not be set up.[/red]")
-        raise typer.Exit(code=1)
-    specs, settings = sim_setup
     week = _suggest_week(title)
     try:
         state = suggest_state.load_state(week)
@@ -3829,6 +3835,16 @@ def _run_suggest(
             raise typer.Exit(code=1)
         tab = lineup_iterate.tab_from_record(prior)
     command = "restore" if restored is not None else "iterate" if iterate else "suggest"
+    # Your frame (the Adjust / Ownership lines): every number below, the simulator's field too, reads it.
+    raw_edge = edge
+    frame, frame_notes = suggest_state.frame_from_rules(tab.rules, raw_edge, metric)
+    edge = frame.edge
+    with perf.measure(phases, "set up simulator"):
+        sim_setup = _late_swap_sim_setup(cfg, client, edge, None, now, fixed_lines=fixed_lines)
+    if sim_setup is None:
+        console.print("[red]The simulator is needed to score builds and could not be set up.[/red]")
+        raise typer.Exit(code=1)
+    specs, settings = sim_setup
     if command == "suggest":
         report = suggest_builds(
             edge,
@@ -3847,12 +3863,17 @@ def _run_suggest(
             double_up_entries=double_up_entries,
             rank=rank,
         )
+        report.builds = [
+            dataclasses.replace(b, note="; ".join(t for p in b.players if (t := frame.tag(p.name))))
+            for b in report.builds
+        ]
         records = lineup_iterate.records_from_report(report)
         report.rules = tab.rules.by_label()  # a fresh run carries the rules box over; it does not apply it
+        report.notes.extend(frame_notes)
         if not tab.rules.blank():
             report.notes.append(
-                "The rules box was kept but not applied: a fresh run builds from the pool alone. "
-                "`--iterate` applies it."
+                "The rules box was kept but only Adjust and Ownership applied: a fresh run builds from the "
+                "pool alone. `--iterate` applies the other lines."
             )
         if tab.builds and state.latest is not None:
             report.notes.append(
@@ -3883,6 +3904,11 @@ def _run_suggest(
             freeze=restored is not None,
         )
         report, records = iterated.report, iterated.records
+        report.notes.extend(
+            n for n in frame_notes if n not in report.notes
+        )  # parse problems come from iterate
+    if frame:
+        report.notes.insert(0, suggest_state.frame_note(frame))
     record = suggest_state.RoundRecord(
         round=state.next_round(),
         at=now.astimezone(UTC).isoformat(timespec="seconds"),

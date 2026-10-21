@@ -28,9 +28,15 @@ exposure sets a player's cap on the GPP builds (`Stafford: 4` or `<= 4`: at most
 `= 4`: exactly four, new builds are steered to reach it; `>= 2`: at least two, steered; `more Stafford`: no
 cap, preferred), stack rules reject a lineup, "Builds wanted" is how many of each kind
 the tab should hold (blank: as many as it holds now; an empty tab: 3 cash, 8 GPP). New builds must differ from
-every other build by `MIN_DIFFERENCE` players and respect the exposure cap (the default share, `MAX_EXPOSURE`,
-counted over all the GPP builds on the tab, the kept ones included); a GPP top-up spreads over quarterbacks
+every other build by `MIN_DIFFERENCE` players (or the `min unique N` of the Build rules line, which is never
+relaxed; `max from one game N` rejects any lineup with more than N players from one game) and respect the
+exposure cap (the default share, `MAX_EXPOSURE`, counted over all the GPP builds on the tab, the kept ones
+included); a GPP top-up spreads over quarterbacks
 (two builds a QB before a third).
+
+**Your frame** (`my_frame.py`). The `edge` handed in is already your frame: the Adjust and Ownership lines
+have changed the projections and Own% every search, simulation and duplicate estimate reads. Here they only
+show: each build's note names the players in it whose numbers are yours ("Nacua +2 (yours)").
 
 **A removed bring-back stays removed.** If Sam typed a non-bring-back over a build's bring-back, a rebuild of
 it keeps none (the flag survives later rounds) unless the best build WITH one beats the best without by more
@@ -56,6 +62,7 @@ import pandas as pd
 
 from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
+from dfs import my_frame
 from dfs import suggest_state as st
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import SwapPlayer, conflicts, edge_players
@@ -95,6 +102,7 @@ class Entry:
     was: int | None = None  # the number it had on the tab
     notes: list[str] = field(default_factory=list)  # the pieces of the "what changed" line, in order
     problem: bool = False
+    adjusted: tuple[str, ...] = ()  # `Nacua +2 (yours)` for each player in it whose numbers are yours
     prior_names: tuple[str, ...] = ()  # who was in it before this run (the diff)
     prior: dict[str, float] = field(default_factory=dict)  # its numbers before this run
     scored: ls.Scored | None = None
@@ -446,9 +454,12 @@ def iterate_builds(
                         return got
                 return _pick_with_bring_back(job, ordered, others(minimum), args, metric_of, bring_back_gain)
 
-            chosen = attempt(ls.MIN_DIFFERENCE)
+            chosen = attempt(rules.min_unique or ls.MIN_DIFFERENCE)
             relaxed = False
-            if chosen is None:  # the locks leave little room: the best that still respects exposure
+            # Your `min unique` is a rule, not a default: it is never relaxed.
+            if (
+                chosen is None and rules.min_unique is None
+            ):  # the locks leave little room: still respects exposure
                 chosen = attempt(0)
                 relaxed = chosen is not None
             if chosen is None:
@@ -458,6 +469,10 @@ def iterate_builds(
             final = [e for e in final if e is not replaced] + [new]
             replaced = None
     notes.extend(_exposure_notes(rules, final, by_name))
+    for e in final:
+        e.adjusted = tuple(
+            text for p in e.players if (text := my_frame.tag(p.name, rules.adjust, rules.ownership))
+        )
     timed("choose", t)
 
     # --- rescore everything together, order, number, explain ------------------------------------------------
@@ -708,12 +723,19 @@ def _pool_with(
     return out + [p for p in fixed if p.name not in have]
 
 
+def most_from_one_game(players: Sequence[SwapPlayer]) -> int:
+    """The most players of a lineup that share a game (a player with no game on file counts for none)."""
+    return max(Counter(p.game for p in players if p.game).values(), default=0)
+
+
 def _leaf(rules: st.Rules, tags: dict[str, str], kind: str) -> Callable[[Sequence[SwapPlayer]], bool] | None:
     """The whole-lineup test a finished candidate must pass: the stack rules, and (GPP) never nine players the
     pool marks Cash only."""
     tests: list[Callable[[Sequence[SwapPlayer]], bool]] = []
     if rules.stacks:
         tests.append(rules.stacks.ok)
+    if rules.max_per_game is not None:
+        tests.append(lambda players: most_from_one_game(players) <= rules.max_per_game)
     if kind == "gpp":
         tests.append(ls.not_all_cash(tags))
     if not tests:
@@ -872,6 +894,7 @@ def _note(entry: Entry, scored: ls.Scored) -> str:
     parts = list(entry.notes)
     if entry.origin == KEPT and not parts:
         parts.append("kept as it was")
+    parts.extend(entry.adjusted)
     if entry.origin == REBUILT and entry.prior_names:
         parts.append(_change(entry.prior_names, [p.name for p in scored.players]))
     old = entry.prior
