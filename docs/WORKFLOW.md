@@ -287,6 +287,18 @@ P(GPP) against the top-1% line (the field's average plus about 63 points; `docs/
 ownership publishes, or with `--fixed-lines`, they are the old fixed lines (the median of every typed `Cash Line` in
 Results this season and `[sim] gpp_target`, default 190); the top of the output says which.
 
+**Optional, Sunday about 1:30 pm ET: score against the real field.** After the 1 pm lock, download a contest's standings
+by hand (DraftKings > the contest > export full standings; your biggest GPP, and a Double Up for the cash line) and run
+`dfs lineups late-swap --field auto` (or `--field <file>`, repeated for two). The export holds every entrant's lineup,
+its points so far and each player's real %Drafted, so the swaps are scored against the line that field is heading for:
+the cash line is the score at the last paid place (a Double Up pays about 45%: the median of your logged Double Ups),
+the top line the score at the top 1%, per simulated draw, with the games already played known and the rest drawn. The
+output, the saved run and the Cockpit all say `field: real (<contest>, exported <time>)` or `field: projected`; the
+players' `Own%` is the contest's real one for that run. `auto` takes the newest live exports in your Downloads folder
+from this week and says which; the entries file there tells it each contest's format (without it one file sets both
+lines, and the output says so). Without `--field` nothing changes. It is information, not advice: the back-test
+(`python -m dfs.late_swap_retro`; `docs/RESEARCH.md`) says how much it was worth in Weeks 4-6.
+
 After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `Top 1%` (the chance of the top-1% line;
 green at 2% or more) on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and

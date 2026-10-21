@@ -196,6 +196,20 @@ def test_best_change_from_the_saved_run_is_a_swap_row_with_point_changes():
     assert two[0] == "ok" and two[3] == "nothing beats it"
 
 
+def test_the_swappable_note_says_which_field_the_run_was_scored_against():
+    best = lss.BestChange("single", ("Rb One",), ("Rb Nine",), 1.5, 0.031, -0.004)
+    for source, shown in (
+        (lss.FIELD_PROJECTED, "Field: projected."),
+        (
+            "field: real (NFL $5 Double Up, exported Sun 1:32 pm ET)",
+            "Field: real (NFL $5 Double Up, exported",
+        ),
+    ):
+        saved = lss.Saved(NOW, False, (result(1, best=best, open_slots=ALL_OPEN),), field_source=source)
+        layout = cockpit.build_layout(inputs(saved_swap=saved))
+        assert any(shown in str(c) for r in section(layout, 2) for c in r)
+
+
 def test_a_lineup_edited_since_the_run_is_not_shown_as_current():
     changed = [*NAMES[:-1], "Other DST"]
     saved = lss.Saved(NOW, False, (result(1, names=changed, open_slots=ALL_OPEN),))

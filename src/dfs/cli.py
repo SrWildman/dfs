@@ -3630,12 +3630,18 @@ def _lineup_set_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]])
 
 
 def _save_late_swap(
-    results: list[late_swap_store.LineupResult], news_changes: list, *, now: datetime, refreshed: bool
+    results: list[late_swap_store.LineupResult],
+    news_changes: list,
+    *,
+    now: datetime,
+    refreshed: bool,
+    field_source: str = late_swap_store.FIELD_PROJECTED,
 ) -> None:
     """Keep this run for the Cockpit tab (`late_swap_store`). A failed save is a warning, never an error."""
     saved = late_swap_store.Saved(
         saved_at=now,
         refreshed_injuries=refreshed,
+        field_source=field_source,
         lineups=tuple(results),
         news=tuple(
             late_swap_store.NewsItem(
@@ -3654,6 +3660,80 @@ def _save_late_swap(
         console.print(f"[yellow]Could not save this run for the Cockpit: {escape(str(e))}[/yellow]")
 
 
+FIELD_HELP = (
+    "Score swaps against the REAL field of a live contest: the standings export you downloaded by hand after "
+    "the 1 pm lock (DraftKings > the contest > export full standings). Pass a file (repeat for a Double Up "
+    "and a GPP), or `auto` for the newest live exports in your Downloads folder (this week's, found by their "
+    "content; the entries file there says each contest's format). Without it, swaps are scored against the "
+    "projected-ownership line."
+)
+
+
+def _field_files(cfg: Config, edge: pd.DataFrame, field: list[str] | None) -> list:
+    """The live contest exports named by `--field` (`auto`, or one or more files), parsed. Says which files it
+    used and why it passed over any it did not. An unreadable file is a warning: the run falls back to the
+    projected field."""
+    from dfs import entries as ent
+    from dfs import late_swap_field as lsf
+    from dfs.contests import standings as standings_mod
+    from dfs.kickoff import format_et
+
+    downloads = Path(cfg.contests.downloads_dir).expanduser()
+    entries_path, _ = ent.resolve_entries_file(None, downloads)
+    formats = lsf.entry_formats(entries_path) if entries_path is not None else {}
+    files: list = []
+    if [f.strip().lower() for f in field] == ["auto"]:
+        kickoffs = [k for k in lsf.kickoffs_from_edge(edge).values() if k is not None]
+        files, notes = lsf.find_auto(
+            downloads, first_kickoff=min(kickoffs) if kickoffs else None, formats=formats
+        )
+        for note in notes:
+            console.print(f"[dim]field: {escape(note)}[/dim]")
+        if not files:
+            console.print(
+                f"[yellow]--field auto: no live standings export for this week in {escape(str(downloads))}; "
+                "using the projected field.[/yellow]"
+            )
+    else:
+        for raw in field:
+            try:
+                files.append(lsf.read_field(Path(raw).expanduser(), formats=formats))
+            except (standings_mod.StandingsError, OSError, ValueError) as e:
+                console.print(f"[yellow]--field {escape(raw)}: {escape(str(e))}[/yellow]")
+    for f in files:
+        kind = {"cash": "Double Up", "gpp": "GPP", "unknown": "format unknown"}[f.kind]
+        when = f", downloaded {format_et(f.exported_at)}" if f.exported_at else ""
+        console.print(
+            f"Field file: {escape(f.label)} ({kind}, {f.entrants:,} lineups{when}) from {escape(f.origin)}"
+        )
+    return files
+
+
+def _live_lines(files: list, specs: dict, edge: pd.DataFrame, now: datetime):
+    """The live-field lines (`late_swap_field.build_live_lines`) for the parsed `files` or None."""
+    from dfs import late_swap_field as lsf
+    from dfs.contests import history
+    from dfs.paths import CONTESTS_DIR
+
+    log = None
+    try:
+        log = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
+    except (OSError, ValueError, KeyError, history.HistoryError):
+        pass
+    try:
+        live = lsf.build_live_lines(files, specs, edge, now, cash_fraction=lsf.default_cash_fraction(log))
+    except (ValueError, KeyError) as e:
+        console.print(
+            f"[yellow]Live field unavailable ({escape(str(e))}): using the projected field.[/yellow]"
+        )
+        return None
+    console.print(f"{live.source}")
+    for note in live.notes:
+        console.print(f"[yellow]field: {escape(note)}[/yellow]")
+    console.print()
+    return live
+
+
 def _run_late_swap(
     cfg: Config,
     *,
@@ -3665,6 +3745,7 @@ def _run_late_swap(
     goal: str | None = None,
     fixed_lines: bool = False,
     refresh_injuries: bool = False,
+    field: list[str] | None = None,
 ) -> None:
     """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
     point in the slate; the command passes the real clock. `goal` None reads each lineup's Cash/GPP marker
@@ -3693,6 +3774,12 @@ def _run_late_swap(
     console.print(f"Projection: {projection_note(metric)}.")
     from dfs.suggest_state import frame_note
 
+    field_files = _field_files(cfg, edge, field) if field else []
+    if field_files:  # real ownership (the GPP export's, else the only one) replaces the projected Own%
+        from dfs import late_swap_field as lsf
+
+        ownership_file = next((f for f in field_files if f.kind == "gpp"), field_files[0])
+        edge = lsf.overlay_ownership(edge, lsf.real_ownership(ownership_file.standings, list(edge["Name"])))
     raw_edge = edge  # the Cockpit applies the frame itself: it must be handed the raw slate
     frame, frame_notes = read_my_frame(client, edge, metric)  # the rules box's Adjust / Ownership lines
     edge = frame.edge
@@ -3712,6 +3799,14 @@ def _run_late_swap(
     console.print()
 
     sim_setup = _late_swap_sim_setup(cfg, client, edge, goal, now, fixed_lines=fixed_lines)
+    field_source = late_swap_store.FIELD_PROJECTED
+    if field_files and sim_setup is not None:
+        live = _live_lines(field_files, sim_setup[0], raw_edge, now)
+        if live is not None:
+            sim_setup = (sim_setup[0], dataclasses.replace(sim_setup[1], live=live))
+            field_source = live.source
+    elif field_files:
+        console.print("[yellow]No simulator, so the field file is only used for Own%.[/yellow]")
 
     any_shown = False
     built_lineups: list[tuple[list[str], str]] = []  # (names, goal by marker)
@@ -3770,6 +3865,17 @@ def _run_late_swap(
             from dfs.sim_inputs import lineup_from_names
 
             lineup_specs = lineup_from_names(names, sim_setup[0])
+            live = sim_setup[1].live
+            if live is not None and lineup_specs is not None:
+                for missing in live.missing_points(lineup_specs):
+                    console.print(
+                        escape(
+                            f"[field] {missing} has started but is not in the field export: his points so "
+                            "far count as 0."
+                        ),
+                        style="yellow",
+                        highlight=False,
+                    )
             risky = [s.name for s in statuses if s.found and not s.locked and s.avail in ("Q", "D")]
             if lineup_specs is not None and risky:
                 from dfs.late_swap_sim import sit_effects
@@ -3803,7 +3909,9 @@ def _run_late_swap(
     _chalk_warnings(edge, built_lineups, now)
     if not any_shown:
         console.print("[dim]No lineup currently has an open (not-yet-locked) slot to check.[/dim]")
-    _save_late_swap(swap_results, news_changes, now=now, refreshed=refresh_injuries)
+    _save_late_swap(
+        swap_results, news_changes, now=now, refreshed=refresh_injuries, field_source=field_source
+    )
     _refresh_cockpit(cfg, client, edge=raw_edge, now=now)
 
 
@@ -3830,6 +3938,7 @@ def lineups_late_swap(
         "lineup's Cash/GPP marker (column A of its Total row; cash if blank).",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
+    field: list[str] = typer.Option(None, "--field", help=FIELD_HELP),
     refresh_injuries: bool = typer.Option(
         False,
         "--refresh-injuries",
@@ -3865,6 +3974,7 @@ def lineups_late_swap(
         goal=goal.value if goal else None,
         fixed_lines=fixed_lines,
         refresh_injuries=refresh_injuries,
+        field=field,
     )
 
 

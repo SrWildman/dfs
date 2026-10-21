@@ -357,6 +357,10 @@ def _news_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]) ->
     )
 
 
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def _swappable_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]) -> None:
     b.section("2. STILL SWAPPABLE  —  open slots and the best change from the last late-swap run")
     if not built:
@@ -436,7 +440,7 @@ def _swappable_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup
         refreshed = " (ESPN injuries read)" if fresh.refreshed_injuries else ""
         b.note(
             f"Best changes are from the late-swap run at {clock(fresh.saved_at)} ET{refreshed}; open slots "
-            "are counted now. Cash % / Top 1% are percentage-point changes."
+            f"are counted now. Cash % / Top 1% are percentage-point changes. {_sentence(fresh.field_source)}."
         )
 
 

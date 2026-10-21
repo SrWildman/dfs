@@ -1238,6 +1238,72 @@ today 0.271; **shift** (each build's simulated score moved by the points the bui
 Caveats: six weeks; a constructed pool, not Sam's; 20 cash builds where he enters about 3; the builder's search is time-boxed, so runs
 on a loaded machine can differ slightly; Top 1% has real lines in three weeks only.
 
+## R9. Late swap against the real field (Weeks 4-6)
+
+`dfs lineups late-swap --field <file>|auto` (`dfs.late_swap_field`) scores swaps against the cash and top-1% lines of a LIVE
+contest, from the standings export Sam downloads by hand after the 1 pm lock: every field lineup's points so far plus its open
+players drawn from the same correlated simulation as his own lineup, the line read per draw at the contest's last paid place and
+at the top 1%. Opt-in; without it nothing changes. The back-test is `python -m dfs.late_swap_retro` (a quarter of an hour for the
+28 contests); this is what it said.
+
+**Method.** At the Weeks 4-6 locks (Sunday 1 pm ET) every game already kicked off is final with its ACTUAL points (the standings'
+`FPTS`); later games are drawn from the last pre-lock EdgeRaw snapshot. 7,617 test lineups: up to 300 sampled from each of the
+28 paid Classic contests with a standings file (10 Double Ups, 18 GPPs) plus Sam's 50 entries, each treated as if its late slots were
+still open. Swaps: the 12 best one-for-one projection improvements per open slot (what the live command ranks by probability), each
+rated by the mode's change in P(cash) (Double Up) or P(top 1%) (GPP); a mode keeps the lineup when no swap raises it. Realized =
+the swapped lineup's actual points and finish in the contest's real final scores. Three modes on the same lineups: **P** today
+(every player at full-game draws, the projected-ownership line), **PS** the projected line on state-aware draws (the played games
+known), **R** the real field.
+
+**Lines.** The contest's ACTUAL line against each mode's per-draw distribution of it:
+
+| | Mode | Contests | Mean error | Mean abs error | Mean sd | Mean percentile of the actual line |
+|---|---|---|---|---|---|---|
+| Double Up cash line | P projected (today) | 10 | -2.9 | 14.9 | 11.1 | 0.52 |
+| | PS | 10 | -0.5 | 10.1 | 7.8 | 0.46 |
+| | **R real field** | 10 | -1.1 | **8.7** | 14.5 | 0.55 |
+| GPP top-1% line | P | 18 | +3.4 | 9.7 | 11.3 | 0.44 |
+| | PS | 18 | +6.9 | 9.1 | 8.1 | 0.35 |
+| | **R real field** | 18 | +4.6 | **7.4** | 11.2 | 0.41 |
+
+The real field is the better line: the double-up cash line's miss falls from 14.9 to 8.7 points. Most of it is who the field IS: Sam's
+double-ups are far chalkier than TFFB's projected ownership (the real field's expected score, under our own projections, was 136.5
+in Week 6 against 127.0 for the projected field), which is session A's and F's "the 16 points are the ownership" finding again.
+
+**Swap choices** (realized, mean paired difference per lineup, SE over lineups; contests share a slate, so those SEs are floors):
+
+| Comparison | Points | Cashed | Finish percentile (negative is better) | By week (points) |
+|---|---|---|---|---|
+| R - P | +0.20 (0.05) | +0.5 pts (0.2) | -0.004 (0.001) | W4 -0.03, W5 -0.10, **W6 +0.75** |
+| R - PS | -0.04 (0.03) | 0.0 pts (0.1) | +0.000 (0.000) | W4 -0.07, W5 0.00, W6 -0.07 |
+| PS - P | +0.24 (0.05) | +0.6 pts (0.1) | -0.004 (0.001) | W4 +0.04, W5 -0.11, W6 +0.82 |
+
+By contest (28): R beats P on cash rate in 18 of 26 that differ (+0.5 pts, 2.4 SE over contests) and on points in 16 of 28 (+0.22, 1.9
+SE), but the points gain is all Week 6 (Weeks 4 and 5 are slightly negative). R - PS by contest: points -0.06 (0.06), cash -0.1 pts
+(0.2), 13 of 28 and 11 of 22 positive. By goal: cash lineups R - P +0.7 pts of cash (0.2); GPP lineups +0.25 points, top 10% +0.2
+pts, top 1% unresolvable (about 1 lineup in 140 hits it). Sam's 50 entries: nothing detectable.
+
+**What it says.**
+
+- **Knowing where the slate stands is where the swap gain is, not the real field.** PS - P carries all of R - P; R - PS is zero to
+  within noise (slightly negative for GPP lineups: -0.18 points, -0.5 pts of cash, 0.2 pts less top 10%). Scoring a swap while
+  treating the 1 pm players as unplayed (today) mis-judges the lineups that already have points; a field file brings those points.
+  The real field then fixes the LINE: the Cash % shown is closer to what the contest paid, with a wider and more honest spread.
+- Not the ship bar for a default (one week carries the points; Weeks 4 and 5 are flat), and nothing shipped is default: `--field` is
+  opt-in. Three weeks is not enough to separate "the real field helps" from "the state helps", and the state does not need the field
+  to be real (a Double Up and a GPP export are the only source of live points we have, so the download is needed either way).
+- Absolute value is NOT shown: the unswapped final lineups out-score every mode's swapped lineups (126.3 points, 31.5% cashed
+  against 125.8 and 30.5% for P, 126.0 and 31.0% for PS and R). The test lineups are the ones that ended up in the contests, with
+  their own late swaps already in them, so a projection-improving swap has less to find than in real life; it says which mode ranks
+  swaps better, not that swapping pays.
+
+**Caveats.** The test lineups are final lineups (1 pm lineups are not stored); the real field is the final one, which includes
+swaps made after 1:30, so it is slightly better informed than a 1:30 export; at 1 pm the played games are treated as FINAL, while a
+1:30 export has them mid-game (the live command counts a started player's remaining share by the clock, `GAME_HOURS` = 3.25 h, and
+does not condition his remaining draw on what he has scored); one-for-one swaps only; a Double Up's paid places are the history
+median share (45%) when the file does not say. A live export's format is known only from the entries file in Downloads; without it
+one file sets both lines and says so.
+
 ## Anything that contradicts the local round's design
 
 - The **60% next-man-up rule (0.30 to the rest of the position, 0.10 spill, nothing unassigned)** is contradicted for targets and approximate for carries (R1).
