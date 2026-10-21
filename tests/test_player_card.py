@@ -81,7 +81,7 @@ def test_helpers_sit_in_row_1_and_every_field_formula_reads_them():
     row1 = lay.rows[0]
     assert row1[1] == "Jordan Love"  # B1 keeps the typed name through a rebuild
     assert row1[7].startswith("=IFERROR(MATCH($B$1,EdgeRaw!$B$2:$B,0)")
-    assert edge_sheet_letter("NameKey") in row1[8] and "H1" in row1[8]
+    assert edge_sheet_letter("NameKey") in row1[8] and pc.ROW_REF in row1[8]
     assert pc.ROW_CELL == "H1" and pc.KEY_CELL == "I1" and pc.NAME_CELL == "B1"
     assert pc.unprotected_ranges() == ["B1"]
 
@@ -381,3 +381,24 @@ def test_render_text_shows_every_block_from_the_same_spec_as_the_sheet():
 def test_render_text_for_an_unknown_name_says_so():
     edge, raw, rows = _frames()
     assert "not on this week's EdgeRaw" in pc.render_text("Nobody", edge, raw, rows)
+
+
+def test_no_player_picked_never_indexes_by_a_blank_row():
+    """With `B1` empty `H1` is "" and `INDEX(range, "")` spills a whole column: every formula that indexes
+    EdgeRaw by `H1` (and the `I1` key) must test `H1` first (the template shows this state)."""
+    layout = pc.build_layout(
+        edge_tab="EdgeRaw",
+        lineups_tab="Lineups",
+        exposure_tab="Exposure",
+        exposure=None,
+        lineup_count_cell="H1",
+    )
+    guarded = f'=IF({pc.ROW_REF}="","",'
+    by_row = [
+        c
+        for row in layout.rows
+        for c in row
+        if isinstance(c, str) and f",{pc.ROW_REF})" in c and c.startswith("=")
+    ]
+    assert by_row
+    assert all(c.startswith(guarded) for c in by_row), [c for c in by_row if not c.startswith(guarded)][:3]

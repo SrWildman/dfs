@@ -239,17 +239,23 @@ def _blank_safe(expr: str) -> str:
     return f'=IFERROR(IF({expr}="","",{expr}),"")'
 
 
+def _with_row(body: str) -> str:
+    """Guard a formula that INDEXes by `ROW_REF`: with no player picked `H1` is "" and `INDEX(range, "")`
+    spills the whole column (#REF! across the tab), so say blank instead."""
+    return f'=IF({ROW_REF}="","",{body})'
+
+
 def formula(spec: Field, edge_tab: str) -> str:
     """The cell formula for a field, keyed off the helper cells in row 1."""
     if spec.source == EDGE:
-        return _blank_safe(f"INDEX({edge_range(edge_tab, spec.column)},{ROW_REF})")
+        return _with_row(_blank_safe(f"INDEX({edge_range(edge_tab, spec.column)},{ROW_REF})")[1:])
     if spec.source == RAW:
         match = f"MATCH({KEY_REF},{raw_range('NameKey')},0)"
         return _blank_safe(f"INDEX({raw_range(spec.column)},{match})")
     if spec.column == IMPLIED.column:
         total = f"INDEX({edge_range(edge_tab, 'OverUnder')},{ROW_REF})"
         spread = f"INDEX({edge_range(edge_tab, 'Spread')},{ROW_REF})"
-        return f'=IFERROR(IF(OR({total}="",{spread}=""),"",({total}-{spread})/2),"")'
+        return _with_row(f'IFERROR(IF(OR({total}="",{spread}=""),"",({total}-{spread})/2),"")')
     raise KeyError(spec.column)
 
 
@@ -338,7 +344,7 @@ def build_layout(
     """Every row of the Player tab. `name` keeps the typed `B1` through a rebuild."""
     lay = Layout()
     row_match = f'=IFERROR(MATCH({NAME_REF},{edge_range(edge_tab, "Name")},0),"")'
-    key_expr = f'=IFERROR(INDEX({edge_range(edge_tab, "NameKey")},{ROW_CELL}),"")'
+    key_expr = _with_row(f'IFERROR(INDEX({edge_range(edge_tab, "NameKey")},{ROW_REF}),"")')
     lay.add(["Player", name, "", "", "", "", "helpers ->", row_match, key_expr])
     lay.title_rows.append(1)
 
