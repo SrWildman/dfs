@@ -44,6 +44,7 @@ from dfs.sheet_suggested import FIRST_BUILD_ROW as SUGGESTED_FIRST_ROW
 from dfs.sheet_suggested import LOCK_INDEX as SUGGESTED_LOCK_INDEX
 from dfs.sheet_suggested import NAME_INDEX as SUGGESTED_NAME_INDEX
 from dfs.sheet_suggested import TAB as SUGGESTED_TAB
+from dfs.sheet_suggested import layout_problem as suggested_layout_problem
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_index, column_letter
 from dfs.sources.edge import POOL_HEADER
@@ -432,6 +433,16 @@ def _check_lineup_markers_are_typeable(
             )
         ]
     return []
+
+
+def _check_suggested_layout(client: DoctorClient, tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Suggested tab must be in the current layout (lock column, rules box). A sheet whose last run
+    predates them holds builds with Name in column B: `--iterate` and the rules box cannot read it. Reads the
+    top of the tab only (the rules box and the first build's header sit well inside it)."""
+    if SUGGESTED_TAB not in tab_titles:
+        return []
+    problem = suggested_layout_problem(client.read_range(SUGGESTED_TAB, "A1:C40"))
+    return [DoctorIssue("suggested-layout", f"{SUGGESTED_TAB!r}: {problem}")] if problem else []
 
 
 def _check_suggested_typed_cells(client: DoctorClient, tab_titles: set[str]) -> list[DoctorIssue]:
@@ -1010,6 +1021,7 @@ def run_doctor(
     issues += _check_lineups_header_repeats(client, cfg, tab_titles)
     issues += _check_lineup_scoreboard(client, cfg, tab_titles, headers_by_tab)
     issues += _check_lineup_markers_are_typeable(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_suggested_layout(client, tab_titles)
     issues += _check_suggested_typed_cells(client, tab_titles)
     issues += _check_dk_upload_header(cfg, tab_titles, headers_by_tab)
     issues += _check_dk_upload_layout(cfg, tab_titles, headers_by_tab)

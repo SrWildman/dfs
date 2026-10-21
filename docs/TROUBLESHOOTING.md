@@ -374,3 +374,9 @@ The track-record row is the retro of past weeks: it compares the 20 highest-leve
 `Exposure!H1` is the divisor and it must be the formula that counts built lineups, not a typed number (a typed 6 stayed put through a 15-lineup week and read 150%). `dfs doctor` says `lineup-count-cell`
 when H1 holds a typed value; `dfs setup build-views` rewrites it (template first, then the live week; your Targets are kept).
 
+
+---
+
+**`dfs doctor` says `suggested-layout`, or `--iterate` says the Suggested tab is in an old layout.**
+Cause: the tab was last written before the lock column and the rules box existed (Name sits in column B, there is no 🔒 column and no RULES block), so `--iterate` would read the Team column as player names and the Adjust / Ownership lines have nowhere to be typed. Typical for builds left on a sheet from an earlier week.
+Fix: run a plain `dfs lineups suggest` (it builds from scratch, replaces the tab with the current layout and starts a round); `--iterate` works from then on. An empty old tab without the rules box is rewritten by `dfs setup suggested-controls`. `dfs week new` resets the new sheet's Suggested tab itself, so a fresh week never starts here.

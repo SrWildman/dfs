@@ -124,7 +124,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   "changed since last week" against the previous report), prints ten lines with each study's time. About two
   minutes. Run after `dfs week close`.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
-  exist, the Cockpit and Stacks tabs are there, `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
+  exist, the Cockpit and Stacks tabs are there, the Suggested tab is in the current layout (lock column, rules box; an old one
+  says to run a plain `dfs lineups suggest`), `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
   `LINEUPS_NAME_BLOCKS` expects, DK Upload's entries layout with its
   Lineup dropdown, typed-cell cue and protection exemption, and the hand-built per-row formula ranges on

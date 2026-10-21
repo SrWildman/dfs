@@ -342,6 +342,43 @@ def _ticked(value: object) -> bool:
     return value is True or str(value).strip().upper() in ("TRUE", "1", "YES")
 
 
+OLD_LAYOUT_FIX = "run a plain `dfs lineups suggest`"
+OLD_LAYOUT_MESSAGE = (
+    "the Suggested tab is in an old layout (Name in column B, no lock column or rules box), which "
+    f"--iterate cannot read: {OLD_LAYOUT_FIX} (it writes the current layout)"
+)
+NO_RULES_BOX_MESSAGE = (
+    "the Suggested tab has no rules box (an old layout): run `dfs setup suggested-controls` "
+    "(or a plain `dfs lineups suggest`) to write the current one"
+)
+
+
+def layout_problem(grid: list[list]) -> str | None:
+    """Why the Suggested tab is not in the current layout, or None. Only the layout before the rules box and
+    the lock column is flagged (a build's header has `Name` in column B, not the lock column's tick): a tab
+    that holds builds says to run a plain `dfs lineups suggest`, an empty one without the rules box says to
+    run `dfs setup suggested-controls`. Reads the first build's header row, or the rules labels when there is
+    no build; a tab it cannot place is left alone."""
+    bar = next(
+        (
+            i
+            for i, row in enumerate(grid)
+            if row
+            and str(row[0]).strip().partition(" ")[0] == BUILD_LABEL
+            and str(row[0]).strip()[6:].isdigit()
+        ),
+        None,
+    )
+    if bar is not None:
+        header = grid[bar + 1] if bar + 1 < len(grid) else []
+        lock = str(header[LOCK_INDEX]).strip() if len(header) > LOCK_INDEX else ""
+        return None if lock == LOCK_HEADER or not header else OLD_LAYOUT_MESSAGE
+    labelled = {str(row[0]).strip() for row in grid if row}
+    if grid and not labelled & set(RULE_LABELS):
+        return NO_RULES_BOX_MESSAGE
+    return None
+
+
 def parse_state(grid: list[list]) -> TabState:
     """What the rerun reads off the tab: the round the status line names, the rules box (found by its labels
     in column A, the text beside them) and every build with its decision, its nine names AS TYPED (a blank
@@ -363,6 +400,7 @@ def parse_state(grid: list[list]) -> TabState:
         if label in RULE_LABELS and label not in typed:
             typed[label] = str(row[NAME_INDEX]) if len(row) > NAME_INDEX else ""
     state.rules = RulesText.from_labels(typed)
+    state.layout_problem = layout_problem(grid)
     for i, row in enumerate(grid):
         label = str(row[0]).strip() if row else ""
         head, _, number = label.partition(" ")
@@ -637,7 +675,7 @@ def ensure_suggested_tab(client: SheetsClient) -> str:
     return f"{TAB}: created (empty)"
 
 
-def setup_controls(client: SheetsClient) -> list[str]:
+def setup_controls(client: SheetsClient, *, reset: bool = False) -> list[str]:
     """`dfs setup suggested-controls` (idempotent): the Suggested tab's typed controls and its protection.
 
     - A tab with no builds (a fresh template, or a new week's copy) is rewritten empty with the rules box,
@@ -645,9 +683,21 @@ def setup_controls(client: SheetsClient) -> list[str]:
       is left as the last run wrote it: the lock ticks, decision cells and "your pick" tint arrive with the
       next `dfs lineups suggest` run (the rows move with every run, so they are written then, never here).
     - Its warning-only protection is replaced by one that carves out the typed columns (`typed_ranges`: the
-      lock ticks and the Name column with the decision cells, the rules box and the names Sam types over)."""
+      lock ticks and the Name column with the decision cells, the rules box and the names Sam types over).
+    - `reset` (`dfs week new`): the tab is rewritten empty whatever it holds, and the rules typed there go
+      too. A new week starts with no builds and no rules; a copied sheet's builds are last week's."""
     results = []
-    if client.tab_exists(TAB):
+    if reset:
+        write_suggested(
+            client,
+            SuggestReport(),
+            pd.DataFrame({"Name": []}),
+            metric="CalPts",
+            cash_line=0.0,
+            gpp_target=0.0,
+        )
+        results.append(f"{TAB}: reset to the current layout (rules box, no builds)")
+    elif client.tab_exists(TAB):
         state = read_state(client)
         if state.builds:
             results.append(
