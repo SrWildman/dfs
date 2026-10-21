@@ -16,6 +16,7 @@ never seen keeps today's pick, and the plan says so.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -36,6 +37,8 @@ PLAN_DIR = DATA_DIR / "suggest_state"
 FLAG = "portfolio"  # the name `dfs backtest` registers this under (session J's settings registry)
 DEFAULT_OBJECTIVE = "edollars"
 DEFAULT_SIMS = 4000
+WIDE_KEEP = 100  # wide-pool lineups that join the builds (portfolio_retro.WIDE_POOL)
+WIDE_SECONDS = 15.0  # the builder's search budget per noisy run
 GPP_FORMATS = payouts.GPP_FORMATS
 
 
@@ -63,6 +66,7 @@ class PortfolioPlan:
     # the plan against today's pick, on the same draws: the numbers `format_plan` prints
     portfolio: dict[str, float] = field(default_factory=dict)
     today: dict[str, float] = field(default_factory=dict)
+    new_lineups: list[list[str]] = field(default_factory=list)  # chosen wide-pool lineups that are not builds
 
     def for_contest(self, contest_id: str) -> PlannedContest | None:
         return next((c for c in self.contests if c.contest_id == contest_id), None)
@@ -131,6 +135,50 @@ def contest_kinds(
 # ---------------------------------------------------------------------------------------------------------
 
 
+def noisy_inputs(
+    edge: pd.DataFrame, specs: Mapping[str, object], metric: str, sigma: float, rng: np.random.Generator
+) -> tuple[pd.DataFrame, dict]:
+    """`edge` and `specs` with every player's projection times `exp(sigma z - sigma^2 / 2)` (mean one), the
+    same factor in both (`research/curse.py`'s `noisy_edge`, applied to the projection the builder searches
+    on and the one the simulator scores with)."""
+    names = edge["Name"].astype(str).tolist()
+    factor = dict(zip(names, np.exp(sigma * rng.standard_normal(len(names)) - sigma**2 / 2), strict=True))
+    out = edge.copy()
+    base = pd.to_numeric(out[metric], errors="coerce")
+    scaled = base * pd.Series([factor[n] for n in names], index=out.index)
+    out[metric] = scaled.where(base.isna() | (scaled > 0.1), 0.1).where(base.notna())
+    noisy = {
+        n: dataclasses.replace(s, projection=max(s.projection * factor.get(n, 1.0), 0.1))
+        for n, s in specs.items()
+    }
+    return out, noisy
+
+
+def wide_lineups(
+    edge: pd.DataFrame,
+    specs: Mapping[str, object],
+    metric: str,
+    builder: Callable[[pd.DataFrame, dict], Sequence],
+    runs: int,
+    seed: int = 0,
+) -> list[list]:
+    """The GPP lineups (players) the builder chooses on `runs` noisy copies of the projections, alternating
+    the curse study's two noise levels: the wide pool the retro's `_wide` arms drew from."""
+    from dfs.research.curse import NOISE_SIGMAS
+
+    out, seen = [], set()
+    for run in range(runs):
+        sigma = NOISE_SIGMAS[run % len(NOISE_SIGMAS)]
+        rng = np.random.default_rng([seed, run, int(sigma * 1000)])
+        noisy_edge, noisy_specs = noisy_inputs(edge, specs, metric, sigma, rng)
+        for b in builder(noisy_edge, noisy_specs):
+            key = tuple(sorted(p.name for p in b.players))
+            if b.kind == "gpp" and key not in seen:
+                seen.add(key)
+                out.append(list(b.players))
+    return out
+
+
 def plan_portfolio(
     *,
     week: int,
@@ -148,11 +196,15 @@ def plan_portfolio(
     max_overlap: int | None = None,
     min_cash: payouts.MinCash | None = None,
     now: datetime | None = None,
-    log_fn: Callable[[str], None] | None = None,
+    wide: Sequence[Sequence] = (),
+    wide_keep: int = WIDE_KEEP,
 ) -> PortfolioPlan:
-    """Assign the GPP builds to the GPP entries in `entries` (module docstring). `builds` are the report's
-    `Build`s (their `kind`, `number`, `players` and `p_gpp`), `specs` the simulator specs by player name,
-    `edge` the (framed) edge the builds were scored on."""
+    """Assign the GPP builds (and, with `wide`, the wide pool's lineups) to the GPP entries in `entries`
+    (module docstring). `builds` are the report's `Build`s (`kind`, `number`, `players`, `p_gpp`), `specs` the
+    simulator specs by player name, `edge` the (framed) edge the builds were scored on, `wide` lineups of
+    players from `wide_lineups` (the `wide_keep` best of them by quick E[$] join the candidates). `robust` is
+    chosen on shocked draws (`portfolio.shocked_points`), the others on the simulator's own. Today's pick, for
+    comparison, uses the builds only. A chosen wide lineup that is not a build is in `plan.new_lineups`."""
     plan = PortfolioPlan(week, objective, (now or datetime.now(UTC)).isoformat(timespec="seconds"))
     model = stacks_inputs.load_field_model()
     if model is None:
@@ -165,27 +217,32 @@ def plan_portfolio(
     if not covered:
         plan.notes.append("no GPP entries to plan" if not skipped else "no GPP entry the plan can cover")
         return plan
-    gpp = [b for b in builds if b.kind == "gpp"]
-    frame = stacks_inputs.slate_frame(edge)
+    from dfs import stacks
     from dfs.sim import field_gen
 
-    slate = field_gen.Slate.from_frame(frame, own_column="own")
+    slate = field_gen.Slate.from_frame(stacks_inputs.slate_frame(edge), own_column="own")
     spec_list = [specs.get(n) for n in slate.names]
     index = {n: i for i, n in enumerate(slate.names)}
-    keep, rows = [], []
-    for b in gpp:
-        idx = [index.get(p.name) for p in b.players]
-        if len(idx) == 9 and all(i is not None and spec_list[i] is not None for i in idx):
-            keep.append(b)
-            rows.append(sorted(idx))
-    if not keep:
+
+    def rated(players) -> list[int] | None:
+        idx = [index.get(p.name) for p in players]
+        ok = len(idx) == 9 and all(i is not None and spec_list[i] is not None for i in idx)
+        return sorted(idx) if ok else None
+
+    cands: list[tuple[tuple[str, ...], list, int | None, float]] = []  # (key, players, build number, p_gpp)
+    rows, seen = [], set()
+    for b in builds:
+        key = tuple(sorted(p.name for p in b.players))
+        if b.kind == "gpp" and key not in seen and (idx := rated(b.players)) is not None:
+            seen.add(key)
+            cands.append((key, list(b.players), b.number, float(b.p_gpp)))
+            rows.append(idx)
+    if not cands:
         plan.notes.append("no GPP build the simulator can rate: nothing to plan")
         return plan
-    lineups = np.array(rows, dtype=int)
-    from dfs import stacks
-
+    n_builds = len(cands)
     chalk = stacks_inputs.top_chalk(slate, model.herd)
-    gpp_field = stacks.build_gpp_field(slate, model.rates, model.herd, chalk=chalk, seed=seed)
+    fields = {"gpp": stacks.build_gpp_field(slate, model.rates, model.herd, chalk=chalk, seed=seed).sim}
     kinds = [
         payouts.ContestKind(
             f"{name} #{cid}",
@@ -199,18 +256,40 @@ def plan_portfolio(
         )
         for cid, (name, k, _n) in covered.items()
     ]
-    res = csim.simulate_contests(
-        {"gpp": gpp_field.sim}, spec_list, lineups, kinds, n_sims=n_sims, seed=seed, keep_draws=True
+    extra, extra_rows = [], []
+    for players in wide:
+        key = tuple(sorted(p.name for p in players))
+        if key not in seen and (idx := rated(players)) is not None:
+            seen.add(key)
+            extra.append((key, list(players), None, float("nan")))
+            extra_rows.append(idx)
+    if extra:
+        best = pf.top_by_edollars(
+            fields, spec_list, np.array(extra_rows, dtype=int), kinds, wide_keep, seed=seed + 5
+        )
+        cands += [extra[j] for j in best]
+        rows += [extra_rows[j] for j in best]
+        plan.notes.append(
+            f"wide pool: {len(best)} of {len(extra)} lineups from the noisy runs joined the builds"
+        )
+    lineups = np.array(rows, dtype=int)
+    points = (
+        pf.shocked_points(spec_list, n_sims, seed=seed)
+        if objective == "robust"
+        else csim.draw_points(spec_list, n_sims, seed=seed)
     )
-    ok = np.ones(len(keep), dtype=bool)
+    res = csim.simulate_contests(
+        fields, spec_list, lineups, kinds, n_sims=len(points), seed=seed, points=points, keep_draws=True
+    )
+    every = np.ones(len(cands), dtype=bool)
+    only_builds = np.arange(len(cands)) < n_builds
     contests = []
     for (_cid, (_name, _k, n_mine)), k in zip(covered.items(), kinds, strict=True):
         place, copies = res.detail[k.series]
         contests.append(
-            pf.Contest(k.series, k, n_mine, place.astype(float), copies.astype(float), ok, group="gpp")
+            pf.Contest(k.series, k, n_mine, place.astype(float), copies.astype(float), every, group="gpp")
         )
-    keys = [tuple(sorted(p.name for p in b.players)) for b in keep]
-    problem = pf.Problem(contests, res.scores.astype(float), keys, lineups)
+    problem = pf.Problem(contests, res.scores.astype(float), [c[0] for c in cands], lineups)
     chosen = pf.select(
         problem,
         objective,
@@ -218,8 +297,10 @@ def plan_portfolio(
         max_player_share=max_player_share,
         max_overlap=max_overlap,
     )
-    value = {"gpp": np.array([b.p_gpp for b in keep], dtype=float)}
-    today = pf.ranked_assignment(problem, value)
+    narrow = dataclasses.replace(
+        problem, contests=[dataclasses.replace(c, eligible=only_builds) for c in problem.contests]
+    )
+    today = pf.ranked_assignment(narrow, {"gpp": np.nan_to_num(np.array([c[3] for c in cands]), nan=-1.0)})
     plan.portfolio = pf.evaluate(problem, chosen.assignment)
     plan.today = pf.evaluate(problem, today)
     plan.notes.extend(chosen.unfilled)
@@ -230,13 +311,43 @@ def plan_portfolio(
                 cid,
                 name,
                 k.fee,
-                [[p.name for p in keep[j].players] if j is not None else None for j in js],
-                [keep[j].number if j is not None else None for j in js],
+                [[p.name for p in cands[j][1]] if j is not None else None for j in js],
+                [cands[j][2] if j is not None else None for j in js],
             )
         )
-    if log_fn:
-        log_fn(f"{len(keep)} GPP builds, {len(covered)} contests, {res.n_sims} draws")
+        for j in js:
+            if (
+                j is not None
+                and cands[j][2] is None
+                and [p.name for p in cands[j][1]] not in plan.new_lineups
+            ):
+                plan.new_lineups.append([p.name for p in cands[j][1]])
     return plan
+
+
+def add_new_builds(plan: PortfolioPlan, builds: Sequence, scored: Sequence, *, gpp_entries: int) -> list:
+    """The plan's wide-pool picks as new GPP builds numbered after `builds` (`scored`: their `lineup_suggest.
+    Scored`s, in any order), so Copy builds to Lineups can bring them in; the plan's build numbers are filled
+    in to match. Returns the new builds."""
+    from dfs import lineup_suggest as ls
+
+    by_key = {tuple(sorted(p.name for p in s.players)): s for s in scored}
+    number = max((b.number for b in builds), default=0)
+    added, numbers = [], {}
+    for names in plan.new_lineups:
+        s = by_key.get(tuple(sorted(names)))
+        if s is None:
+            continue
+        number += 1
+        b = ls.build_from(number, "gpp", s, ls.stack_name(s.players), gpp_entries=gpp_entries)
+        added.append(dataclasses.replace(b, note="portfolio pick (wide pool)"))
+        numbers[tuple(sorted(names))] = number
+    for c in plan.contests:
+        c.builds = [
+            numbers.get(tuple(sorted(n)), b) if n is not None and b is None else b
+            for n, b in zip(c.lineups, c.builds, strict=True)
+        ]
+    return added
 
 
 def format_plan(plan: PortfolioPlan) -> list[str]:

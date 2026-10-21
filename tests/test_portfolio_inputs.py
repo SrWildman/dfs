@@ -158,3 +158,73 @@ def test_a_lineup_sam_already_put_in_the_contest_is_not_hinted_again(tmp_path):
     rows = {r.entry.entry_id: r for r in plan.rows}
     assert rows["9004"].lineup == 4  # his pick stands
     assert rows["9005"].suggested == "L3"
+
+
+# -- the wide pool -----------------------------------------------------------------------------------------
+
+
+def test_noisy_inputs_scale_the_edge_and_the_specs_by_the_same_factor():
+    import numpy as np
+
+    edge = syn.slate(teams=4, seed=1)
+    specs = build_specs(edge)
+    noisy_edge, noisy_specs = pi.noisy_inputs(edge, specs, "CalPts", 0.2, np.random.default_rng(3))
+    for name, spec in specs.items():
+        row = edge.index[edge["Name"] == name][0]
+        edge_factor = noisy_edge.loc[row, "CalPts"] / edge.loc[row, "CalPts"]
+        assert noisy_specs[name].projection / spec.projection == pytest.approx(edge_factor, rel=1e-6)
+    assert not noisy_edge["CalPts"].equals(edge["CalPts"]) and (noisy_edge["CalPts"] > 0).all()
+
+
+def quick_builds(edge, specs, **kw):
+    return ls.suggest_builds(
+        edge, dict.fromkeys(edge["Name"], "Both"), specs, now=NOW, cap=50000, cash_line=145.0,
+        gpp_target=190.0, metric="CalPts", n_sims=200, time_limit=10, **kw,
+    ).builds  # fmt: skip
+
+
+def test_the_wide_pool_comes_from_noisy_builder_runs_and_its_picks_become_new_builds(field_model):
+    edge = syn.slate(teams=8, seed=2)
+    specs = build_specs(edge)
+    builds = quick_builds(edge, specs, cash_builds=1, gpp_builds=2)
+    wide = pi.wide_lineups(
+        edge, specs, "CalPts", lambda e, s: quick_builds(e, s, cash_builds=0, gpp_builds=6), runs=2
+    )
+    assert wide and all(len(lu) == 9 for lu in wide)
+    entries = [entry(str(i), SINGLEBACK, "703", "$5", "N-max GPP") for i in range(3)]
+    plan = pi.plan_portfolio(
+        week=7, builds=builds, specs=specs, edge=edge, entries=entries, log=history_log(), season=2026,
+        objective="top1", n_sims=300, min_cash=payouts.MinCash(), now=NOW, wide=wide,
+    )  # fmt: skip
+    assert any("wide pool" in n for n in plan.notes)
+    picks = plan.for_contest("703")
+    assert len(picks.lineups) == 3  # three entries filled though there are only two GPP builds
+    assert plan.new_lineups and None in picks.builds
+    players = {p.name: p for lineup in wide for p in lineup}
+    scored = ls.score(
+        [[players[n] for n in names] for names in plan.new_lineups],
+        specs, {}, cash_line=145.0, gpp_target=190.0, n_sims=200,
+    )  # fmt: skip
+    added = pi.add_new_builds(plan, builds, scored, gpp_entries=1000)
+    top = max(b.number for b in builds)
+    assert [b.number for b in added] == list(range(top + 1, top + 1 + len(added)))
+    assert all(b.kind == "gpp" and b.note == "portfolio pick (wide pool)" for b in added)
+    assert None not in plan.for_contest("703").builds  # the plan now names them by their new numbers
+
+
+def test_robust_is_chosen_on_shocked_draws(field_model, monkeypatch):
+    from dfs import portfolio as pf
+
+    edge = syn.slate(teams=8, seed=2)
+    specs = build_specs(edge)
+    builds = quick_builds(edge, specs, cash_builds=0, gpp_builds=3)
+    used = []
+    real = pf.shocked_points
+    monkeypatch.setattr(pf, "shocked_points", lambda *a, **k: used.append(1) or real(*a, **k))
+    entries = [entry("1", FAIR_CATCH, "704", "$12", "SE GPP")]
+    kw = dict(week=7, builds=builds, specs=specs, edge=edge, entries=entries, log=history_log(), season=2026,
+              n_sims=200, min_cash=payouts.MinCash(), now=NOW)  # fmt: skip
+    pi.plan_portfolio(objective="edollars", **kw)
+    assert not used
+    pi.plan_portfolio(objective="robust", **kw)
+    assert used

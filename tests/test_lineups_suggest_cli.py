@@ -317,3 +317,40 @@ def test_portfolio_with_no_write_saves_nothing(cfg, edge, capsys, monkeypatch, t
     )
     assert "Portfolio (edollars)" in out and "portfolio plan was not saved" in out
     assert not portfolio_dir.exists()
+
+
+def test_a_wide_pool_pick_joins_the_round_as_a_new_gpp_build(
+    cfg, edge, capsys, monkeypatch, tmp_path, portfolio_dir, state_dir
+):
+    import test_entries as te
+
+    from dfs import portfolio_inputs
+    from dfs.contests import history
+
+    written = {}
+
+    def plan(**kw):
+        out = fake_plan({})(**kw)
+        # the plan says this lineup is not a build (the plumbing does not check: any legal nine works)
+        lineup = [p.name for p in kw["builds"][-1].players]
+        out.new_lineups = [lineup]
+        out.contests[0].lineups, out.contests[0].builds = [lineup], [None]
+        return out
+
+    monkeypatch.setattr(portfolio_inputs, "plan_portfolio", plan)
+    monkeypatch.setattr(history, "read_log", lambda path: history.pd.DataFrame(columns=history.LOG_COLUMNS))
+    monkeypatch.setattr(
+        cli, "write_suggested", lambda client, report, frame, **kw: written.update(report=report) or "ok"
+    )
+    path = te.write_entries_file(tmp_path / "DraftKings Entries (3).csv")
+    out = run(
+        cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys, portfolio_objective="robust",
+        portfolio_wide=0, entries_csv=path,
+    )  # fmt: skip
+    builds = written["report"].builds
+    assert len(builds) == 3 and builds[-1].note == "portfolio pick (wide pool)" and builds[-1].number == 3
+    assert "wide-pool pick(s) added as GPP build(s) 3" in out
+    saved = portfolio_inputs.load_plan(6)
+    assert saved.contests[0].builds == [3]
+    state = suggest_state.load_state(6)
+    assert [b.number for b in state.latest.builds] == [1, 2, 3]  # the round records it too

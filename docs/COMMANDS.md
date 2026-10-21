@@ -108,6 +108,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--round INT RANGE` | Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a new round (the state is kept in data/suggest_state/<week>.json). |
 | `--portfolio` | Also choose which GPP build goes in which of your GPP entries as one set (DK's entries file, the newest in Downloads, says which contests and how many entries) and print the plan beside today's pick; `dfs entries fill` then shows it as the grey Suggested hint. Off by default: it has not been proven yet. Needs `dfs stacks --refit` once. |
 | `--portfolio-objective CHOICE` | What --portfolio maximises: edollars (expected winnings), top1 (the chance at least one entry finishes in a top 1%) or robust (risk-adjusted winnings on draws where the projections are wrong together). Default: `edollars`. |
+| `--portfolio-wide INT RANGE` | With --portfolio: also run the builder N times on noisy copies of the projections (about 15 s each) and let the plan choose from those lineups too (the retro's wide pool); a chosen one that is not a build is added as a new GPP build. 0 (the default): the builds only. |
 | `--entries-csv PATH` | With --portfolio: the DraftKings entries file to read (default: the newest in Downloads). |
 
 ### `dfs stacks`

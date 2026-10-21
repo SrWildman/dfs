@@ -55,16 +55,14 @@ import pandas as pd
 from dfs import portfolio as pf
 from dfs.contests import history
 from dfs.player_join import normalize_name
+from dfs.portfolio import SHOCK_PLAYER, SHOCK_TEAM, WORLDS, shocked_points, shocked_specs  # noqa: F401
 from dfs.sim import contest_retro as cr
 from dfs.sim import contest_sim as csim
 from dfs.sim import dups, field_gen, payouts
 
 CURSE_JOBS = Path("data/research/curse/jobs")
 N_SIMS = 8000
-WORLDS = 8
 WIDE_POOL = 100  # noise-run GPP lineups added to the wide pool, best by quick E[$]
-SHOCK_PLAYER = 0.20
-SHOCK_TEAM = 0.10
 ROBUST_TIGHT = (
     2.0  # B of the `robust_tight` arm, in weeks of fees (the default is portfolio.BANKROLL_MULTIPLE)
 )
@@ -233,17 +231,12 @@ def prefilter(
     if len(noise) <= keep:
         return cands
     gpp = [k for c, k in zip(setup.contests, setup.kinds, strict=True) if c.fmt == "gpp"]
-    res = csim.simulate_contests(
-        setup.fields,
-        setup.specs,
-        cands.lineups[noise],
-        gpp,
-        n_sims=n_sims,
-        seed=seed + 5,
-        labels=[str(j) for j in noise],
-    )
-    mean = res.table.groupby("lineup")["e_dollars"].mean()
-    best = {int(j) for j in mean.sort_values(ascending=False).index[:keep]}
+    best = {
+        int(noise[j])
+        for j in pf.top_by_edollars(
+            setup.fields, setup.specs, cands.lineups[noise], gpp, keep, n_sims=n_sims, seed=seed + 5
+        )
+    }
     chosen = [j for j in range(len(cands.keys)) if j not in set(noise.tolist()) or j in best]
     return Candidates(
         cands.lineups[chosen],
@@ -259,44 +252,8 @@ def prefilter(
 # ---------------------------------------------------------------------------------------------------------
 
 
-def shocked_specs(specs: list, rng: np.random.Generator, sigma_player: float, sigma_team: float) -> list:
-    """The specs with every projection scaled by `exp(s_p z - s_p^2 / 2)` per player and `exp(s_t z - s_t^2 /
-    2)` per offense (a defense takes no team shock): one world in which the projections were wrong the way
-    a slate's can be, together."""
-    teams = sorted({s.team for s in specs if s is not None})
-    team = {t: float(np.exp(sigma_team * rng.standard_normal() - sigma_team**2 / 2)) for t in teams}
-    out = []
-    for s in specs:
-        if s is None:
-            out.append(None)
-            continue
-        f = float(np.exp(sigma_player * rng.standard_normal() - sigma_player**2 / 2))
-        if s.position != "DST":
-            f *= team[s.team]
-        out.append(dataclasses.replace(s, projection=max(s.projection * f, 0.1)))
-    return out
-
-
 def nominal_points(specs: list, n_sims: int = N_SIMS, seed: int = 0) -> np.ndarray:
     return csim.draw_points(specs, n_sims, seed=seed)
-
-
-def shocked_points(
-    specs: list,
-    n_sims: int = N_SIMS,
-    worlds: int = WORLDS,
-    seed: int = 0,
-    sigma_player: float = SHOCK_PLAYER,
-    sigma_team: float = SHOCK_TEAM,
-) -> np.ndarray:
-    """`n_sims` draws in `worlds` equal blocks, each block under its own shocked projections."""
-    rng = np.random.default_rng(seed + 7)
-    per_world = n_sims // worlds
-    parts = [
-        csim.draw_points(shocked_specs(specs, rng, sigma_player, sigma_team), per_world, seed=seed + 100 + w)
-        for w in range(worlds)
-    ]
-    return np.concatenate(parts)
 
 
 def build_problem(

@@ -38,12 +38,14 @@ Pure functions; deterministic. No network, no sheet.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
 
+from dfs.sim import contest_sim as csim
 from dfs.sim.contest_sim import TOP_FRACTION, _cumulative, block_payout  # noqa: PLC2701
 from dfs.sim.payouts import ContestKind, payout_table
 
@@ -52,6 +54,11 @@ BANKROLL_MULTIPLE = (
     10.0  # B, in weeks of fees: log growth is nearly linear (E[$]) at this scale, mildly concave
 )
 TIE = 1e-9  # the E[$] tie-break weight of the top1 objective
+# The `robust` objective's draws: every player's mean scaled by exp(s_p z - s_p^2/2), every offense's by
+# exp(s_t z - s_t^2/2), in WORLDS blocks (assumptions, not fitted; research/curse.py's NOISE_SIGMAS for s_p).
+SHOCK_PLAYER = 0.20
+SHOCK_TEAM = 0.10
+WORLDS = 8
 
 
 @dataclass
@@ -342,3 +349,65 @@ def ranked_assignment(
         ranked = [int(j) for j in np.argsort(-v, kind="stable") if c.eligible[j]]
         out[label] = [ranked[i] if i < len(ranked) else None for i in range(c.slots)]
     return out
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Draws for `robust`, and the wide pool's candidate generation (shared by the live plan and the retro)
+# ---------------------------------------------------------------------------------------------------------
+
+
+def shocked_specs(specs: list, rng: np.random.Generator, sigma_player: float, sigma_team: float) -> list:
+    """The specs with every projection scaled by `exp(s_p z - s_p^2 / 2)` per player and `exp(s_t z - s_t^2 /
+    2)` per offense (a defense takes no team shock): one world in which the projections were wrong the way
+    a slate's can be, together."""
+    teams = sorted({s.team for s in specs if s is not None})
+    team = {t: float(np.exp(sigma_team * rng.standard_normal() - sigma_team**2 / 2)) for t in teams}
+    out = []
+    for s in specs:
+        if s is None:
+            out.append(None)
+            continue
+        f = float(np.exp(sigma_player * rng.standard_normal() - sigma_player**2 / 2))
+        if s.position != "DST":
+            f *= team[s.team]
+        out.append(dataclasses.replace(s, projection=max(s.projection * f, 0.1)))
+    return out
+
+
+def shocked_points(
+    specs: list,
+    n_sims: int = 8000,
+    worlds: int = WORLDS,
+    seed: int = 0,
+    sigma_player: float = SHOCK_PLAYER,
+    sigma_team: float = SHOCK_TEAM,
+) -> np.ndarray:
+    """`n_sims` draws in `worlds` equal blocks, each block under its own shocked projections."""
+    rng = np.random.default_rng(seed + 7)
+    per_world = n_sims // worlds
+    parts = [
+        csim.draw_points(shocked_specs(specs, rng, sigma_player, sigma_team), per_world, seed=seed + 100 + w)
+        for w in range(worlds)
+    ]
+    return np.concatenate(parts)
+
+
+def top_by_edollars(
+    fields: dict,
+    specs: Sequence,
+    lineups: np.ndarray,
+    kinds: Sequence[ContestKind],
+    keep: int,
+    *,
+    n_sims: int = 2000,
+    seed: int = 0,
+) -> list[int]:
+    """The indices of the `keep` lineups with the highest mean E[$] over `kinds` on a quick simulation: the
+    candidate generation a wide-pool search starts from."""
+    if len(lineups) <= keep:
+        return list(range(len(lineups)))
+    res = csim.simulate_contests(
+        fields, specs, lineups, kinds, n_sims=n_sims, seed=seed, labels=[str(j) for j in range(len(lineups))]
+    )
+    mean = res.table.groupby("lineup")["e_dollars"].mean().sort_values(ascending=False)
+    return [int(j) for j in mean.index[:keep]]

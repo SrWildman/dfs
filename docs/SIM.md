@@ -1833,7 +1833,9 @@ hooks in `field.py`, `simulate.py`, `field_gen.py`, `contest_sim.py`, `contest_r
 simulator's shared draws, his entries in one N-max contest placed together (each one's place counts the others
 that scored more; an identical lineup twice splits its own prize). Math: `docs/CALCULATIONS.md`, "Portfolio
 selection". Live hook: `dfs lineups suggest --portfolio` (GPP entries only, from DK's entries file), saved for
-`dfs entries fill`'s grey hint. **Off by default: the retro below does not clear the ship bar.**
+`dfs entries fill`'s grey hint; `--portfolio-wide N` gives it the retro's wide pool (N noisy builder runs; a chosen lineup
+that is not a build joins the round as a new GPP build). **Off by default: the retro below does not clear the ship bar.**
+The live wide pool is smaller than the retro's (8 runs of 15 s against the curse study's 24 of 120 s).
 
 **What it can and cannot do.** Expected dollars add across contests, so with a correct model joint selection
 cannot raise E[$] in single-entry contests; it can only matter inside N-max contests, for objectives that are not

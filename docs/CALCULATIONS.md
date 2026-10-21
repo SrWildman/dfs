@@ -2196,7 +2196,12 @@ candidate compute the objective's gain from adding it (including its effect on t
 take the largest. Options: `max_lineup_share` and `max_player_share` (shares of the GPP entries, `ceil(share x
 entries)` each), `max_overlap` (players two entries of one contest may share), `allow_repeat`. A slot nothing
 may fill is left empty and reported, never relaxed. Cash entries are outside the live hook (`portfolio_inputs`
-plans GPP entries only).
+plans GPP entries only). Live, `robust` is chosen on the same shocked draws (`portfolio.shocked_points`), and
+`--portfolio-wide N` adds the wide pool: the builder (`suggest_builds`, GPP only, 15 s each) on N copies of the
+projections times `exp(s z - s^2/2)` per player, `s` alternating 0.10 / 0.20 (`portfolio_inputs.noisy_inputs`,
+the same factor on the edge and the specs), the `WIDE_KEEP` = 100 best of those lineups by mean E[$] over the
+entered contests on 2,000 quick draws (`portfolio.top_by_edollars`) joining the builds. Today's pick, shown
+beside the plan, ranks the builds only.
 
 **Reported numbers** (`portfolio.evaluate`): `e_dollars`, `profit` = minus fees, `p_any_top1`, `e_top1`
 (expected entries in a top 1%), `log_growth` (the `robust` utility), `p_profit`, `cvar` (mean profit of the worst

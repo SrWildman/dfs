@@ -83,6 +83,7 @@ from dfs.lineup_suggest import (
     DEFAULT_RANK,
     RANKS,
     TIME_LIMIT_SECONDS,
+    SuggestReport,
     phase_lines,
     suggest_builds,
 )
@@ -4247,6 +4248,15 @@ def lineups_suggest(
         "finishes in a top 1%) or robust (risk-adjusted winnings on draws where the projections are wrong "
         "together).",
     ),
+    portfolio_wide: int = typer.Option(
+        0,
+        "--portfolio-wide",
+        min=0,
+        max=24,
+        help="With --portfolio: also run the builder N times on noisy copies of the projections (about 15 s "
+        "each) and let the plan choose from those lineups too (the retro's wide pool); a chosen one that is "
+        "not a build is added as a new GPP build. 0 (the default): the builds only.",
+    ),
     entries_csv: Path = typer.Option(
         None,
         "--entries-csv",
@@ -4306,6 +4316,7 @@ def lineups_suggest(
         iterate=iterate,
         restore_round=round_,
         portfolio_objective=portfolio_objective.value if portfolio_ else None,
+        portfolio_wide=portfolio_wide,
         entries_csv=entries_csv,
     )
 
@@ -4334,6 +4345,7 @@ def _run_suggest(
     iterate: bool = False,
     restore_round: int | None = None,
     portfolio_objective: str | None = None,
+    portfolio_wide: int = 0,
     entries_csv: Path | None = None,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
@@ -4477,6 +4489,18 @@ def _run_suggest(
         report.notes.extend(
             n for n in frame_notes if n not in report.notes
         )  # parse problems come from iterate
+    portfolio_plan, portfolio_lines = None, []
+    if portfolio_objective is not None:
+        started = datetime.now(UTC)
+        portfolio_plan, added, portfolio_lines = _run_portfolio(
+            cfg, report, specs, edge, tags, settings, week, portfolio_objective, entries_csv, now,
+            metric=metric, wide_runs=portfolio_wide, gpp_entries=gpp_entries,
+            double_up_entries=double_up_entries, rank=rank,
+        )  # fmt: skip
+        phases["portfolio"] = ((datetime.now(UTC) - started).total_seconds(), 0)
+        if added:  # wide-pool picks join the round as builds, so Copy builds to Lineups can bring them in
+            report.builds = [*report.builds, *added]
+            records = [*records, *lineup_iterate.records_from_report(SuggestReport(builds=list(added)))]
     if frame:
         report.notes.insert(0, suggest_state.frame_note(frame))
     record = suggest_state.RoundRecord(
@@ -4509,13 +4533,12 @@ def _run_suggest(
         console.print(f"[yellow]{note}[/yellow]")
     for name, took in report.phases.items():  # the search phases, between the two sheet-side groups
         phases[name] = (took, 0)
-    if portfolio_objective is not None:
-        with perf.measure(phases, "portfolio"):
-            _run_portfolio(
-                cfg, report.builds, specs, edge, week, portfolio_objective, entries_csv, write, now
-            )
+    for line in portfolio_lines:
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
     if not write:
         console.print("[dim]--no-write: the Suggested tab and the state file were not changed.[/dim]")
+        if portfolio_plan is not None and portfolio_plan.portfolio:
+            console.print("[dim]--no-write: the portfolio plan was not saved.[/dim]")
         _print_phases(phases)
         return
     try:
@@ -4537,70 +4560,100 @@ def _run_suggest(
         raise typer.Exit(code=1) from e
     path = suggest_state.save_state(state)  # after the tab: the file mirrors what the tab shows
     console.print(f"[green]OK[/green] round {record.round} saved to {path}")
+    if portfolio_plan is not None and portfolio_plan.portfolio:
+        saved = portfolio_inputs.save_plan(portfolio_plan)
+        console.print(
+            f"[green]OK[/green] portfolio plan saved to {saved} (`dfs entries fill` shows it as the hint)"
+        )
     _print_phases(phases)
 
 
 def _run_portfolio(
     cfg: Config,
-    builds,
+    report,
     specs,
     edge: pd.DataFrame,
+    tags: dict[str, str],
+    settings,
     week: int,
     objective: str,
     entries_csv: Path | None,
-    write: bool,
     now: datetime,
-) -> None:
-    """`--portfolio`: the GPP builds assigned to DK's GPP entries as a set, printed and (on a write) saved for
-    `dfs entries fill`. Never fails the suggest run: a problem is said and the builds stand."""
+    *,
+    metric: str,
+    wide_runs: int,
+    gpp_entries: int,
+    double_up_entries: int,
+    rank: str,
+):
+    """`--portfolio`: the GPP builds (and with `wide_runs`, the wide pool) assigned to DK's GPP entries as a
+    set. Returns `(plan or None, new builds for the wide-pool picks, lines to print)`; saving is the caller's,
+    after the tab. Never fails the suggest run: a problem is said and the builds stand."""
     from dfs import entries as ent
     from dfs.contests import history
+    from dfs.kickoff import parse_kickoff
+    from dfs.late_swap_search import swap_pool
+    from dfs.lineup_suggest import annotate, ownership_shares, score
     from dfs.paths import CONTESTS_DIR
     from dfs.sim import retro
 
-    console.print()
+    lines = [""]
     if entries_csv is not None:
         path, how = entries_csv, "given with --entries-csv"
     else:
         path, how = ent.resolve_entries_file(None, Path(cfg.contests.downloads_dir).expanduser())
     if path is None:
-        console.print(
-            f"[yellow]Portfolio skipped: {escape(how)}. Download DK's entries file (Edit entries) or pass "
-            "--entries-csv.[/yellow]"
+        lines.append(
+            f"Portfolio skipped: {how}. Download DK's entries file (Edit entries) or pass --entries-csv."
         )
-        return
+        return None, [], lines
     try:
         parsed = ent.read_entries_file(path)
     except (ent.EntriesFileError, OSError) as e:
-        console.print(f"[yellow]Portfolio skipped: {escape(str(e))}[/yellow]")
-        return
+        return None, [], [*lines, f"Portfolio skipped: {e}"]
     classified, _skipped = ent.classify_entries(parsed)
-    console.print(
-        f"Portfolio from [bold]{path.name}[/bold] ({how}): {len(classified)} Classic main-slate entries."
-    )
+    lines.append(f"Portfolio from {path.name} ({how}): {len(classified)} Classic main-slate entries.")
+    wide = []
+    if wide_runs > 0:
+
+        def builder(noisy_edge, noisy_specs):
+            return suggest_builds(
+                noisy_edge, tags, noisy_specs, now=now, cap=cfg.lineups.salary_cap,
+                cash_line=settings.cash_line, gpp_target=settings.gpp_target, metric=metric, cash_builds=0,
+                gpp_builds=20, time_limit=portfolio_inputs.WIDE_SECONDS, field=settings.field,
+                gpp_entries=gpp_entries, double_up_entries=double_up_entries, rank=rank,
+            ).builds  # fmt: skip
+
+        wide = portfolio_inputs.wide_lineups(edge, specs, metric, builder, wide_runs)
     log = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
     plan = portfolio_inputs.plan_portfolio(
-        week=week,
-        builds=builds,
-        specs=specs,
-        edge=edge,
-        entries=classified,
-        log=log,
-        season=retro.SEASON,
-        objective=objective,
-        now=now,
-    )
-    for line in portfolio_inputs.format_plan(plan):
-        console.print(line, markup=False, highlight=False, soft_wrap=True)
-    if not plan.portfolio:
-        return
-    if write:
-        saved = portfolio_inputs.save_plan(plan)
-        console.print(
-            f"[green]OK[/green] portfolio plan saved to {saved} (`dfs entries fill` shows it as the hint)"
+        week=week, builds=report.builds, specs=specs, edge=edge, entries=classified, log=log,
+        season=retro.SEASON, objective=objective, now=now, wide=wide,
+    )  # fmt: skip
+    added = []
+    if plan.new_lineups:
+        names = {n for lineup in plan.new_lineups for n in lineup}
+        by_name = {p.name: p for p in swap_pool(edge, now=now, metric=metric, pool_names=names)}
+        kickoff = {
+            str(n): parse_kickoff(g)
+            for n, g in zip(edge["Name"], edge.get("GameStart", pd.Series("", index=edge.index)), strict=True)
+        }
+        lineups = [
+            [by_name[n] for n in lineup] for lineup in plan.new_lineups if all(n in by_name for n in lineup)
+        ]
+        scored = score(
+            lineups, specs, kickoff, cash_line=settings.cash_line, gpp_target=settings.gpp_target,
+            field=settings.field,
+        )  # fmt: skip
+        shares = ownership_shares(specs, edge, settings.field, "top")
+        scored = annotate(scored, shares, gpp_entries, objective=True)
+        added = portfolio_inputs.add_new_builds(plan, report.builds, scored, gpp_entries=gpp_entries)
+        lines.append(
+            f"{len(added)} wide-pool pick(s) added as GPP build(s) "
+            + ", ".join(str(b.number) for b in added)
+            + " (Copy builds to Lineups brings them in)."
         )
-    else:
-        console.print("[dim]--no-write: the portfolio plan was not saved.[/dim]")
+    return plan, added, [*lines, *portfolio_inputs.format_plan(plan)]
 
 
 def _print_phases(phases: dict[str, tuple[float, int]]) -> None:
