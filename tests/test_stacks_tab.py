@@ -95,6 +95,15 @@ def test_the_tab_has_the_title_status_track_record_and_both_blocks():
     assert col(lay, "B", gfirst, gfirst + 1) == ["AAA v BBB", "CCC v DDD"]
 
 
+def test_no_text_cell_can_be_read_by_sheets_as_a_formula():
+    """A header typed as `+BB` came back `#NAME?` on the live sheet (values are written as typed)."""
+    for kw in ({}, {"verdict": "weak"}, {"verdict": None}, {"ownership_published": False}):
+        for row in stacks_tab.build_layout(inputs(**kw)).rows:
+            for cell in row:
+                if isinstance(cell, str) and cell:
+                    assert cell[0] not in "=+@" and not (cell[0] == "-" and cell != "-"), cell
+
+
 def test_the_cue_is_build_only_for_positive_leverage_and_lift_when_the_signal_is_tested_or_weak():
     for verdict in ("tested", "weak"):
         lay = stacks_tab.build_layout(inputs(verdict=verdict))
