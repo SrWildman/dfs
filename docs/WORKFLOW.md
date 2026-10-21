@@ -299,6 +299,16 @@ from this week and says which; the entries file there tells it each contest's fo
 lines, and the output says so). Without `--field` nothing changes. It is information, not advice: the back-test
 (`python -m dfs.late_swap_retro`; `docs/RESEARCH.md`) says how much it was worth in Weeks 4-6.
 
+**Without a download: `--state live`.** `dfs lineups late-swap --state live` takes every started player's points so far from
+ESPN's public box scores (the same public site as `--refresh-injuries`; nothing from DraftKings) and the share of each game
+left from its period and clock, and scores the swaps against the projected-ownership line on that state: the games already
+played are known, the rest simulated. That is where the back-test found the swap gain (the real field mostly sharpened the
+line itself). The points are DraftKings scoring applied to the box scores and matched the real Weeks 4-6 points for 99% of the
+players who scored (a two-point conversion and a defense's blocked kick can be a couple of points off). The output, the saved
+run and the Cockpit say `field: projected + live scores (ESPN, read <time>)`. If ESPN cannot be read, or ownership is not out
+yet, it says so and runs as plain `late-swap`. Not together with `--field`, whose export carries the same points and the
+real field.
+
 After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `Top 1%` (the chance of the top-1% line;
 green at 2% or more) on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and

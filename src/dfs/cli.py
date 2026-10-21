@@ -3669,6 +3669,20 @@ FIELD_HELP = (
 )
 
 
+STATE_HELP = (
+    "`live`: take every started player's points so far from ESPN's public box scores (no download from "
+    "DraftKings) and score swaps against the projected-ownership line on that state: the games already "
+    "played are known, the rest simulated. If ESPN cannot be read, says so and runs as without it. Not "
+    "with --field, whose export has the same points and the real field."
+)
+
+
+class SwapState(StrEnum):
+    """Where late swap gets the games' state from."""
+
+    live = "live"
+
+
 def _field_files(cfg: Config, edge: pd.DataFrame, field: list[str] | None) -> list:
     """The live contest exports named by `--field` (`auto`, or one or more files), parsed. Says which files it
     used and why it passed over any it did not. An unreadable file is a warning: the run falls back to the
@@ -3709,6 +3723,34 @@ def _field_files(cfg: Config, edge: pd.DataFrame, field: list[str] | None) -> li
     return files
 
 
+def _scores_lines(cfg: Config, specs: dict, edge: pd.DataFrame, now: datetime):
+    """The lines from the projected field plus ESPN's live box scores (`late_swap_field.build_scores_lines`),
+    or None, saying why: ESPN unreachable or no projected ownership yet. The run then goes on as it would
+    without `--state live`."""
+    from dfs import late_swap_field as lsf
+    from dfs import live_scores
+
+    dates = live_scores.kickoff_dates(lsf.kickoffs_from_edge(edge).values())
+    try:
+        scores = live_scores.fetch_scores(dates)
+    except live_scores.ScoresError as e:
+        console.print(
+            f"[yellow]--state live: ESPN's scores could not be read ({escape(str(e))}); "
+            "running as today.[/yellow]"
+        )
+        return None
+    try:
+        live = lsf.build_scores_lines(scores, specs, edge, now, cfg.sim.lines)
+    except (ValueError, KeyError) as e:
+        console.print(f"[yellow]--state live: {escape(str(e))}; running as today.[/yellow]")
+        return None
+    console.print(f"{live.source}: {scores.describe()}")
+    for note in live.notes:
+        console.print(f"[yellow]scores: {escape(note)}[/yellow]")
+    console.print()
+    return live
+
+
 def _live_lines(files: list, specs: dict, edge: pd.DataFrame, now: datetime):
     """The live-field lines (`late_swap_field.build_live_lines`) for the parsed `files` or None."""
     from dfs import late_swap_field as lsf
@@ -3746,6 +3788,7 @@ def _run_late_swap(
     fixed_lines: bool = False,
     refresh_injuries: bool = False,
     field: list[str] | None = None,
+    state: str | None = None,
 ) -> None:
     """Everything `dfs lineups late-swap` does. `now` is a parameter so a run can be replayed at a chosen
     point in the slate; the command passes the real clock. `goal` None reads each lineup's Cash/GPP marker
@@ -3807,6 +3850,15 @@ def _run_late_swap(
             field_source = live.source
     elif field_files:
         console.print("[yellow]No simulator, so the field file is only used for Own%.[/yellow]")
+    elif state == "live" and sim_setup is not None:
+        live = _scores_lines(cfg, sim_setup[0], edge, now)
+        if live is not None:
+            sim_setup = (sim_setup[0], dataclasses.replace(sim_setup[1], live=live))
+            field_source = live.source
+    elif state == "live":
+        console.print(
+            "[yellow]--state live: no simulator, so there is nothing to score the scores with.[/yellow]"
+        )
 
     any_shown = False
     built_lineups: list[tuple[list[str], str]] = []  # (names, goal by marker)
@@ -3939,6 +3991,7 @@ def lineups_late_swap(
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
     field: list[str] = typer.Option(None, "--field", help=FIELD_HELP),
+    state: SwapState = typer.Option(None, "--state", help=STATE_HELP),
     refresh_injuries: bool = typer.Option(
         False,
         "--refresh-injuries",
@@ -3965,6 +4018,10 @@ def lineups_late_swap(
     anything.
     """
     cfg = _load_config_or_exit()
+    if field and state:
+        raise typer.BadParameter(
+            "--field and --state live both bring the games' points: use one", param_hint="--state"
+        )
     _run_late_swap(
         cfg,
         top=top,
@@ -3975,6 +4032,7 @@ def lineups_late_swap(
         fixed_lines=fixed_lines,
         refresh_injuries=refresh_injuries,
         field=field,
+        state=state.value if state else None,
     )
 
 
