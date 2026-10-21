@@ -54,8 +54,23 @@ def _extend(ratios: np.ndarray) -> np.ndarray:
     return np.column_stack([lo, ratios, hi])
 
 
-def marginals(position: str, projections, *, tables: pd.DataFrame | None = None) -> Marginals:
-    """The distribution of each player projected at `projections` (all > 0) at `position`."""
+def stretch_upper(ratios: np.ndarray, delta) -> np.ndarray:
+    """Ratio quantile rows with the quantiles above the median stretched about it by `1 + delta` (a scalar or
+    one value per row): a heavier top for `delta > 0`, a lighter one for `delta < 0`. A research hook
+    (`dfs.tail_check`); the shipped tables never pass a `delta`."""
+    levels = np.asarray(dist.LEVELS, dtype=float)
+    upper, median = levels > 0.5, int(np.argmin(np.abs(levels - 0.5)))
+    out = ratios.copy()
+    med = out[:, [median]]
+    gain = 1.0 + np.asarray(delta, dtype=float).reshape(-1, 1) if np.ndim(delta) else 1.0 + float(delta)
+    out[:, upper] = med + gain * (out[:, upper] - med)
+    return np.maximum.accumulate(out, axis=1)
+
+
+def marginals(position: str, projections, *, tables: pd.DataFrame | None = None, delta=None) -> Marginals:
+    """The distribution of each player projected at `projections` (all > 0) at `position`. `delta` (one
+    value per player, default none) stretches each player's upper quantiles about his median
+    (`stretch_upper`)."""
     proj = np.asarray(projections, dtype=float)
     if proj.size and (np.isnan(proj).any() or (proj <= 0).any()):
         raise ValueError("projections must be positive numbers")
@@ -63,6 +78,8 @@ def marginals(position: str, projections, *, tables: pd.DataFrame | None = None)
         empty = np.empty((0, len(KNOT_LEVELS)))
         return Marginals(position, proj, empty, proj.copy(), proj.copy())
     ratios, p_zero = dist._interpolated(dist._table(position, tables), proj)
+    if delta is not None:
+        ratios = stretch_upper(ratios, delta)
     knots = _extend(ratios)
     lo0 = np.array([np.interp(-_EPS, k, KNOT_LEVELS) for k in knots])
     return Marginals(position, proj, knots, lo0, p_zero)

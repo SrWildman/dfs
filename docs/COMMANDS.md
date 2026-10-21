@@ -410,6 +410,17 @@ Rebuild the study outputs under models/research/ from the cache (no network).
 |---|---|
 | `--study STR` | r1, r2, r3, r4, r5, r6 or all. Default: `all`. |
 
+### `dfs research refresh`
+
+Rerun the weekly offline studies with the closed weeks so far and write one report.
+
+| Option | What it does |
+|---|---|
+| `--through INT` | Last closed week to include (default: the newest scored week). |
+| `--season INT` | Override the auto-detected NFL season. |
+| `--shuffles INT` | Shuffled-feature tables behind the five-pair retest's chance control. Default: `40`. |
+| `--only STR` | Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, contest_retro. |
+
 ## Reference: building and styling a sheet (only when needed)
 
 You do not run these in a normal week. Run against the TEMPLATE first, then the live sheet (`--sheet-id`), then `dfs doctor` and `dfs setup audit-style` on both. `dfs setup sheet` runs the whole build in the one order that works.

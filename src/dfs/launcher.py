@@ -322,6 +322,7 @@ MORE_LABELS = {
     "dfs model info": "Show which model version is installed and how it scored",
     "dfs research fetch": "Download the extra history the research studies read",
     "dfs research run": "Rebuild the research studies from the cache",
+    "dfs research refresh": "Rerun the weekly offline studies and write one report",
     "dfs setup remove-model-implied": "Remove the retired model-implied column",
 }
 

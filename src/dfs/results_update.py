@@ -22,7 +22,16 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from dfs import field_own, props_edge, results_actual, results_loop, results_signals, signals_data
+from dfs import (
+    calibration,
+    field_own,
+    props_edge,
+    results_actual,
+    results_loop,
+    results_signals,
+    signals_data,
+    teammate_bump,
+)
 from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheet_model_check import MODEL_CHECK_TAB, build_layout, write_model_check
@@ -202,6 +211,7 @@ def update_results(
             ownership=ownership,
             ownership_gaps=ownership_gaps,
             props_shadow=_props_shadow(season, stats_player, report),
+            teammate_race=_teammate_bump_race(season, scored),
         )
         with client.batched():  # the header notes are one request each; send them together
             summary = write_model_check(client, layout, MODEL_CHECK_TAB)
@@ -245,6 +255,16 @@ def _refit_field_own(
         log.warning("ownership shadow skipped: %s", e)
         report.say(f"Ownership shadow skipped ({e}); Model Check's ownership tables will be missing.")
         return None, None
+
+
+def _teammate_bump_race(season: int, scored: pd.DataFrame) -> pd.DataFrame | None:
+    """The teammate-bump shadow's Model Check rows (`calibration.teammate_bump_race`). Fail soft: None (no
+    row) when the nflverse cache is missing or anything in the join breaks."""
+    try:
+        return calibration.teammate_bump_race(scored, teammate_bump.season_roles(season))
+    except Exception as e:  # noqa: BLE001 - never fail a results update over a shadow
+        log.warning("teammate bump shadow skipped: %s", e)
+        return None
 
 
 def _r6_history(season: int):

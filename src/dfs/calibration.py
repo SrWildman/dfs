@@ -524,6 +524,29 @@ def rb1_spread_race(scored: pd.DataFrame, *, season: int | None = None) -> pd.Da
     return table
 
 
+def teammate_bump_race(
+    scored: pd.DataFrame, roles: pd.DataFrame | None, *, season: int | None = None
+) -> pd.DataFrame:
+    """The teammate-bump shadow (`dfs.teammate_bump`) beside TFFB and CalPts on the players it adjusted, out
+    of sample (weeks CalPts did not train on): `SHADOW_RACE_COLUMNS` rows with "Rated by" = "Teammate bump".
+    Empty without `roles` (the nflverse cache), without a regular listed out, or before the table exists."""
+    from dfs import teammate_bump as tb
+
+    empty = pd.DataFrame(columns=SHADOW_RACE_COLUMNS)
+    if roles is None or roles.empty:
+        return empty
+    frame = backtest_frame(scored, season=season, with_um=False)
+    if frame.empty:
+        return empty
+    rated = tb.with_teammate_bump(frame, scored, roles)
+    rated = rated[rated[tb.SOURCE].notna()]
+    if rated.empty:
+        return empty
+    table = score_predictions(rated, (("TFFB", TFFB_SOURCE), ("CalPts", "CalPts"), (tb.LABEL, tb.SOURCE)))
+    table.insert(0, "Rated by", "Teammate bump")
+    return table
+
+
 SHADOW_RACE_COLUMNS = ["Rated by", "Source", "Position", "n", "Rho", "MAE", "Bias"]
 
 

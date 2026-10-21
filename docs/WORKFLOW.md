@@ -54,7 +54,8 @@ plan from the carried Weekly Budget and your `[stakes]` rules; `dfs bankroll sta
 synced-data cache (so a source that fails on the first sync reads as
 no-data-yet rather than a previous week's now-mismatched numbers), and
 runs a full `dfs sync`. It then prints which saved odds snapshot the week's line movement is measured against, e.g. "Opening lines: Tue 9:30 am ET snapshot (after the previous week's last game)"
-(or says it is using the current lines when none is older).
+(or says it is using the current lines when none is older). If the new sheet has a Cockpit tab (a copied template does), the
+sync is followed by a rebuild of it from the data just synced, so last week's render is gone at once; it never fails the week.
 
 **The opening lines.** Movement (`ImpliedMove`, `TotMove`, `SpdMove`, the Movement tab) is measured against the week's *opening* lines: the earliest saved `nfl_odds` snapshot that shows the new
 week's slate, not whenever `dfs week new` happened to run (`store.opening_snapshot`). The odds source only ever shows the current slate, so the opening is on record only if the lines were saved
@@ -328,6 +329,12 @@ fills a **blank** Results `Cash Line` from the GIANT $25 Double Up's standings (
 every projection with what actually happened and rebuilds the **Model Check** tab (section 9). nflverse posts
 a week's stats a day or two after the games, so if you close early it prints "stats not published yet" and carries on --
 run `dfs results update` later and the tab fills in. It never fails the close.
+
+**Then, if you want the research reruns:** `dfs research refresh` (offline, about two minutes, no sheet) reruns the
+five-pair shape retest, the teammate-bump race, the probability recalibration check, the tails check, the
+ownership shadow's scores and the ESPN / props shadows with the weeks closed so far, and writes
+`docs/research/weekly/<season>-wk<NN>.md` (gitignored): one block per study with its headline numbers, the bar it
+must clear and what changed since last week's report. A study that breaks says so and the rest still run.
 
 **Done looks like:** Bankroll's running total moved by the amount you'd
 expect from the week's actual results, and Results' row for the week you

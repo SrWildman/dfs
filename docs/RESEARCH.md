@@ -28,6 +28,7 @@ n, date generated, code version):
 | `models/research/quick_checks.json` | R5: short week, divisional, home / away, back-to-back road |
 | `models/research/usage_signals.json` | R6: 13 usage candidates as levels and changes, thresholds, effects, verdicts, the shuffle baseline |
 | `models/research/trend_bands.json` | R6: how far L3 usage normally moves from the 6 games before, per metric and position, and the arrow thresholds |
+| `models/research/teammate_bump.csv` (+ `.csv.meta.json`) | R7: what a teammate scores above UM when a starter is out, per (absent role, teammate role), with the shrunk `bump` that the shadow reads |
 
 ## Headlines
 
@@ -1109,6 +1110,53 @@ RB, 7 for a TE; about 20 points of snap share for everyone). **Routes run** does
 - **Salary-based chips** remain untestable (no historical salary).
 
 ---
+
+## R7. When a starter is out, what do his teammates score against their projection?
+
+R1 followed the VOLUME (targets, carries); a lineup cares about POINTS. The projection is UM's out-of-fold mean (blind to who is
+missing: its inputs are the player's own prior games and the game's Vegas context), so `actual - UM` is exactly what the absence adds
+that the projection did not know. Events are R1's clean events (one regular out, 15% of targets or 30% of carries over the prior 3
+games), beneficiaries the teammates who played, labelled by their rank in that window; controls are team-games with a full window and
+no regular out. Effect = mean residual in the event games minus the same role's in the controls (both demeaned within position and
+season), with a game-clustered 90% interval and the fit (2014-2021) / test (2022-2025) split. Run: `python -m dfs.research.r7_teammate_bump
+[--write]` (about two minutes; `--write` refreshes `models/research/teammate_bump.csv`). Code: `research/r7_teammate_bump.py`.
+
+6,745 teammate-games across the clean events, 28,099 control games. The cells the shadow uses (effect in DK points, SE, then the fit /
+test periods; `bump` is the effect shrunk toward 0 by `tau2 / (tau2 + SE^2)` with the between-cell variance `tau2` = 1.15, and a cell
+ships only if the two periods agree in sign, it has 15+ events and the absent role is WR1, WR2, TE1 or RB1):
+
+| Out | Teammate | n | effect (SE) | fit / test | bump |
+|---|---|---|---|---|---|
+| RB1 | RB2 | 292 | **+5.27 (0.52)** | +4.83 / +6.35 | +4.27 |
+| RB1 | RB3+ | 151 | +2.66 (0.59) | +2.66 / +2.74 | +2.05 |
+| RB1 | TE2+ | 120 | -0.86 (0.40) | -0.52 / -1.80 | -0.75 |
+| WR1 | WR4+ | 143 | +2.42 (0.58) | +2.52 / +2.17 | +1.87 |
+| WR1 | WR2 | 217 | +1.86 (0.53) | +1.12 / +2.96 | +1.49 |
+| WR1 | WR3 | 166 | +1.66 (0.53) | +1.81 / +1.53 | +1.33 |
+| WR1 | QB1 | 198 | -1.74 (0.57) | -2.01 / -1.32 | -1.35 |
+| WR2 | RB1 | 194 | +2.04 (0.70) | +0.73 / +4.19 | +1.43 |
+| WR2 | WR3 | 153 | +1.85 (0.62) | +1.67 / +2.20 | +1.39 |
+| TE1 | TE2+ | 51 | +2.92 (1.02) | +4.00 / +0.55 | +1.53 |
+
+Everything else (22 cells ship in all) is small or flips sign between periods; a TE1 out moves nobody reliably except the next tight end.
+The negative QB1 cell (-1.7 points when a WR1 is out) fits R1's "about a quarter of a vacated target goes nowhere".
+
+**Out of sample** (the table fitted on 2014-2021 only, applied to the 2,216 teammate-games of 2022-2025 events; the sign-agreement rule
+cannot be used with one period, so every cell with 15+ events, or the ones with |t| >= 2, is used):
+
+| | rows moved | squared error old -> new | old - new (SE) | absolute error old -> new | mean residual old -> new |
+|---|---|---|---|---|---|
+| every cell with 15+ events | 1,912 | 63.65 -> 62.50 | **+1.16 (0.41)** | 5.94 -> 6.00 | +0.73 -> +0.30 |
+| cells with fit |t| >= 2 | 436 | 62.70 -> 57.04 | **+5.65 (1.73)** | 5.85 -> 5.91 | +1.32 -> -0.06 |
+
+The bump helps the squared error (2.8 and 3.3 SE) and removes the bias, and does not help the median miss (absolute error is a touch
+worse): it is about the big nights teammates have when a starter sits, not the typical one. **It is measured against UM**, which
+cannot see the absence; whether TFFB, Sleeper and FantasyPros already price it into CalPts is exactly what the live race answers.
+
+**Shipped as a shadow** (`dfs.teammate_bump`): `teammate_bump(out_player, team_frame)` and Model Check's SHADOW SOURCES row
+"CalPts + teammate bump (shadow)", scored beside TFFB and CalPts like the RB1 spread row on the teammates of the one regular listed
+OUT or IR (`Avail`) before kickoff. It does not touch CalPts or late swap. Through Week 6 of 2026: 14 team-weeks, 65 teammate rows,
+MAE 4.79 for CalPts and 4.88 for the bump (RB 5.07 -> 4.85, WR 4.61 -> 5.01): far too thin to say anything, as expected for three weeks.
 
 ## Anything that contradicts the local round's design
 
