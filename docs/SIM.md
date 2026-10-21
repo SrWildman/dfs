@@ -1584,3 +1584,20 @@ mimics the live clock; the report prints a caution when a run still hit the cloc
 **Limits.** Four weeks of real fields (Week 2 has one contest); the constructed pool is not his pool; the payout table is a fit
 (about 14% rich on his GPP lineups); the extra-entry assumption moves a place by one; his multipliers, H2H and the $3.5M
 Millionaire have no standings and are out (the report prints the share of his fees the scored contests cover).
+
+**First result: today's defaults on Weeks 2, 4, 5, 6** (constructed pool, search run to the end; 29 of his contests, 53 entries,
+85% of his main-slate Classic fees; identical on two runs).
+
+| | entries | ROI | cash rate | top 1% | ROI without the best ticket |
+|---|---|---|---|---|---|
+| Builds, as entered | 53 | +19% | 49% | 1.9% | +14% |
+| Builds, any build | 218 | +145% | 45% | 3.7% | +106% |
+| Sam, as DraftKings paid | 53 | -8% | 28% | 1.9% | -28% |
+| Sam, on the same fitted table | 53 | +4% | 28% | 1.9% | -23% |
+
+By week (builds / Sam as paid): W2 -100% / +700%, W4 +99% / +32%, W5 +53% / -35%, W6 -56% / -54%. Builds minus Sam: -161% by
+week (SE 214%, driven by his Week 2 $10 Hundo), ahead in 2 of 4 weeks. Not distinguishable from Sam on this evidence; the builds
+are positive in both ROI measures and ahead on cash rate (his double-ups cashed 2 of 10, the builds' best cash build 3 of 3 weeks),
+but "any build" GPP ROI rests on one Week 5 lineup (206 points), and three weeks of cash is three coin flips.
+At the live 120 s clock the same code gave +50% and +103% ROI as entered on two runs (Week 2 -100% vs +1,402%): the noise that
+`seconds = 600` removes.
