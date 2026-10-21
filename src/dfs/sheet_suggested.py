@@ -39,7 +39,7 @@ from dfs.lineup_suggest import Build, SuggestReport
 from dfs.models import ROSTER_SLOTS
 from dfs.sheet_lineup_sim import P_CASH_GREEN, P_GPP_GREEN, TOP1_HEADER
 from dfs.sheet_lineup_tints import apply_lineup_tints
-from dfs.sheets import SheetsClient, column_letter
+from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.suggest_state import DECISION_OPTIONS, RULE_LABELS, RULE_SYNTAX, RulesText, TabBuild, TabState
 
 TAB = "Suggested"
@@ -393,6 +393,22 @@ def read_state(client: SheetsClient) -> TabState:
     if not client.tab_exists(TAB):
         return TabState()
     return parse_state(client.read_tab(TAB))
+
+
+def read_my_frame(client: SheetsClient, edge: pd.DataFrame, metric: str = "CalPts"):  # noqa: ANN201
+    """Your frame (`my_frame.py`) for the sheet's current rules box: `(MyFrame, notes)`. The rules box is read
+    straight off the Suggested tab, so what late-swap and the Cockpit use is what Suggested shows. A tab that
+    cannot be read means no adjustments (and a note saying so), never a failed command."""
+    from dfs.suggest_state import frame_from_rules
+
+    try:
+        text = read_state(client).rules
+    except SheetsError as e:
+        frame, _ = frame_from_rules(RulesText(), edge, metric)
+        return frame, [
+            f"Your Adjust / Ownership lines could not be read from Suggested ({e}); raw numbers used."
+        ]
+    return frame_from_rules(text, edge, metric)
 
 
 def write_suggested(

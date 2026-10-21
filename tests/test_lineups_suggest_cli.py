@@ -109,8 +109,8 @@ def test_it_prints_how_long_every_phase_took_in_the_order_they_ran(cfg, edge, ca
     block = out[out.index("Phase times:") :]
     names = [
         "read sheet",
+        "read tab",  # before the simulator: the tab's rules box holds your Adjust / Ownership lines
         "set up simulator",
-        "read tab",
         "candidates",
         "search",
         "simulate",

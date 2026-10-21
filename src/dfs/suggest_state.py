@@ -21,9 +21,18 @@ and written on the tab), never guessed:
     Stack rules    `TEAM: no bring-back`, `TEAM: QB+RB ok` (that team's stacks must be exactly that make-up;
                    several allowed make-ups on separate items), `no stacks from TEAM`
     Builds wanted  `cash 3, gpp 8`
+    Adjust         your projection for a player (his MyPts, `my_frame.py`): `Nacua +2` (points), `Kyren -15%`
+                   (percent of his projection; the sign is required), `Stafford 24` (a value set outright)
+    Ownership      your Own% for a player, in builds, duplicates, chalk watch and the field: `Kyren 40%`
+    Build rules    `min unique 2` (a new build differs from every other build by at least 2 players; the
+                   default is 3), `max from one game 5` (no new build holds more than 5 players from one game)
 
 A name is a full name or any part of one that matches a single player on the slate ("Stafford", "Bijan").
-Locks beat rules: a locked player stays even when he is on the Never list or outside the pool."""
+Locks beat rules: a locked player stays even when he is on the Never list or outside the pool.
+
+**Adjust and Ownership are not constraints, they are your view of the slate**, so they apply to every run that
+reads the box (a fresh `suggest` included, and `late-swap` and the Cockpit); the other lines steer only the
+rebuilt and new builds of `--iterate`."""
 
 from __future__ import annotations
 
@@ -35,20 +44,41 @@ from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import pandas as pd
+
 from dfs import lineup_shapes as shapes_mod
+from dfs import my_frame
 from dfs.late_swap_search import SwapPlayer
+from dfs.my_frame import ADD, PERCENT, SET, Adjustment
 from dfs.paths import DATA_DIR
 
 STATE_DIR = DATA_DIR / "suggest_state"
 
 # The rules box: each label is the text in column A, each value the typed text beside it.
-RULE_LABELS = ("Always use", "Never use", "Max exposure", "Stack rules", "Builds wanted")
-RULE_FIELDS = dict(zip(RULE_LABELS, ("always", "never", "exposure", "stack", "wanted"), strict=True))
+RULE_LABELS = (
+    "Always use",
+    "Never use",
+    "Max exposure",
+    "Stack rules",
+    "Builds wanted",
+    "Adjust",
+    "Ownership",
+    "Build rules",
+)
+RULE_FIELDS = dict(
+    zip(
+        RULE_LABELS,
+        ("always", "never", "exposure", "stack", "wanted", "adjust", "ownership", "build"),
+        strict=True,
+    )
+)
+FRAME_LABELS = ("Adjust", "Ownership")  # the lines that are Sam's view of the slate, applied by every run
 RULE_SYNTAX = (
     "Names: a full name or part of one (Stafford). Max exposure: `Stafford: 4` (at most), `= 4`, `>= 2`, "
     "`< 4` or `more Stafford`. Stack "
     "rules: `LAR: no bring-back`, `DET: QB+RB ok`, `no stacks from GB`. Builds wanted: `cash 3, gpp 8`. "
-    "Separate items with commas or semicolons."
+    "Adjust: `Nacua +2`, `Kyren -15%` or `Stafford 24` (your projection). Ownership: `Kyren 40%`. Build "
+    "rules: `min unique 2`, `max from one game 5`. Separate items with commas or semicolons."
 )
 
 DECISIONS = ("keep", "rebuild", "drop", "vary")
@@ -78,6 +108,9 @@ class RulesText:
     exposure: str = ""
     stack: str = ""
     wanted: str = ""
+    adjust: str = ""
+    ownership: str = ""
+    build: str = ""
 
     def by_label(self) -> dict[str, str]:
         return {label: getattr(self, attr) for label, attr in RULE_FIELDS.items()}
@@ -225,10 +258,17 @@ class Rules:
     more: set[str] = field(default_factory=set)  # `more Name`
     stacks: StackRules = field(default_factory=StackRules)
     wanted: dict[str, int] = field(default_factory=dict)  # "cash" / "gpp" -> how many
+    adjust: dict[str, Adjustment] = field(default_factory=dict)  # `Name +2`, `Name -15%`, `Name 24`
+    ownership: dict[str, float] = field(default_factory=dict)  # `Name 40%`: 0.4
+    min_unique: int | None = None  # `min unique N`: a new build differs from every other by this many players
+    max_per_game: int | None = None  # `max from one game N`
     problems: list[str] = field(default_factory=list)
 
 
 _BRING_BACK = r"bring[- ]?backs?"
+MIN_UNIQUE_RANGE = (1, 8)  # nine players: differing by all nine is not a rule anyone means
+MAX_PER_GAME_RANGE = (2, 9)  # a QB and his own pass catcher are already two from one game
+_NUMBER = r"\d+(?:\.\d+)?"
 
 
 def parse_rules(text: RulesText, names: Sequence[str], teams: Iterable[str]) -> Rules:
@@ -285,10 +325,98 @@ def parse_rules(text: RulesText, names: Sequence[str], teams: Iterable[str]) -> 
             rules.problems.append(f"Builds wanted: {kind} {count} is more than {WANTED_MAX[kind]}")
             continue
         rules.wanted[kind] = count
+    for item in split_items(text.adjust):
+        _adjust_item(rules, item, player)
+    for item in split_items(text.ownership):
+        _ownership_item(rules, item, player)
+    for item in split_items(text.build):
+        _build_item(rules, item)
     for name in sorted(rules.never & set(rules.always)):
         rules.problems.append(f"{name} is on both the Always use and Never use lines: Never wins")
     rules.always = [n for n in rules.always if n not in rules.never]
     return rules
+
+
+def frame_from_rules(
+    text: RulesText, edge: pd.DataFrame, metric: str = "CalPts"
+) -> tuple[my_frame.MyFrame, list[str]]:
+    """Your frame for a rules box: `edge` with the Adjust and Ownership lines applied, and the notes a run
+    prints about them (an unreadable line, an item that could not land). Only these two lines are read, so a
+    fresh run, `late-swap` and the Cockpit apply exactly what `--iterate` does to the numbers."""
+    names = list(dict.fromkeys(str(n) for n in edge["Name"]))
+    teams = set(edge["Team"].dropna().astype(str)) if "Team" in edge.columns else set()
+    rules = parse_rules(text, names, teams)
+    frame = my_frame.apply(edge, rules.adjust, rules.ownership, metric)
+    problems = [p for p in rules.problems if p.split(":", 1)[0] in FRAME_LABELS]
+    return frame, [*problems, *frame.notes]
+
+
+def frame_note(frame: my_frame.MyFrame) -> str:
+    """The line a run prints and writes on Suggested when the frame is not the raw slate."""
+    return (
+        f"Your frame: {', '.join(frame.lines())}. Builds, odds, duplicates and chalk use these; "
+        "Model Check and the model's CalPts do not."
+    )
+
+
+def _adjust_item(rules: Rules, item: str, player) -> None:  # noqa: ANN001 - the closure parse_rules built
+    """`Nacua +2`, `Kyren -15%`, `Stafford 24`. A percent needs its sign (`15%` alone could mean a raise or a
+    cut), so it is reported rather than guessed."""
+    m = re.fullmatch(rf"(.+?)\s*:?\s*([+-]\s*{_NUMBER}\s*%?|{_NUMBER})", item)
+    if not m:
+        rules.problems.append(
+            f"Adjust: cannot read '{item}' (write `Nacua +2`, `Kyren -15%` or `Stafford 24`; a percent needs "
+            "its + or -)"
+        )
+        return
+    if (name := player("Adjust", m.group(1))) is None:
+        return
+    raw = re.sub(r"\s+", "", m.group(2))
+    if raw.endswith("%"):
+        rules.adjust[name] = Adjustment(PERCENT, float(raw[:-1]))
+    elif raw[0] in "+-":
+        rules.adjust[name] = Adjustment(ADD, float(raw))
+    else:
+        rules.adjust[name] = Adjustment(SET, float(raw))
+
+
+def _ownership_item(rules: Rules, item: str, player) -> None:  # noqa: ANN001 - the closure parse_rules built
+    """`Kyren 40%`: his Own% for every build, duplicate estimate and chalk check."""
+    m = re.fullmatch(rf"(.+?)\s*:?\s*({_NUMBER})\s*%", item)
+    if not m:
+        rules.problems.append(f"Ownership: cannot read '{item}' (write `Kyren 40%`)")
+        return
+    share = float(m.group(2))
+    if share > 100:
+        rules.problems.append(f"Ownership: {share:g}% is more than 100% ('{item}')")
+        return
+    if (name := player("Ownership", m.group(1))) is not None:
+        rules.ownership[name] = share / 100
+
+
+def _build_item(rules: Rules, item: str) -> None:
+    """`min unique 2` and `max from one game 5`."""
+    unique = re.fullmatch(r"min(?:imum)?\s+unique\s*[:=]?\s*(\d+)", item, flags=re.IGNORECASE)
+    game = re.fullmatch(
+        r"max(?:imum)?\s+(?:from\s+)?(?:one|a|1)\s+game\s*[:=]?\s*(\d+)", item, flags=re.IGNORECASE
+    )
+    for match, low_high, label in (
+        (unique, MIN_UNIQUE_RANGE, "min unique"),
+        (game, MAX_PER_GAME_RANGE, "max from one game"),
+    ):
+        if match is None:
+            continue
+        n = int(match.group(1))
+        if not low_high[0] <= n <= low_high[1]:
+            rules.problems.append(f"Build rules: {label} must be {low_high[0]} to {low_high[1]} ('{item}')")
+        elif label == "min unique":
+            rules.min_unique = n
+        else:
+            rules.max_per_game = n
+        return
+    rules.problems.append(
+        f"Build rules: cannot read '{item}' (write `min unique 2` or `max from one game 5`)"
+    )
 
 
 def _stack_item(rules: Rules, item: str, teams: set[str]) -> None:

@@ -409,8 +409,10 @@ _ITERATE_ROWS: list[tuple[str, str]] = [
         "Rules box",
         "Above the builds: Always use, Never use, Max exposure (Stafford: 4 is at most 4; = 4, >= 2, < 4, "
         "more Stafford), Stack rules "
-        "(LAR: no bring-back, DET: QB+RB ok, no stacks from GB) and Builds wanted (cash 3, gpp 8). A line it "
-        "cannot read is reported.",
+        "(LAR: no bring-back, DET: QB+RB ok, no stacks from GB) Builds wanted (cash 3, gpp 8), Adjust "
+        "(your projection: Nacua +2, Kyren -15%, Stafford 24), Ownership (Kyren 40%) and Build rules (min "
+        "unique 2, max from one game 5). Adjust and Ownership count in every build, odds and late swap; "
+        "Model Check keeps the raw CalPts. A line it cannot read is reported.",
     ),
     (
         "Rerun",

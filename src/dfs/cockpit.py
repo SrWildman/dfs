@@ -93,6 +93,7 @@ class CockpitInputs:
     plan: PlanNumbers | None = None
     targets: dict[str, float] = field(default_factory=dict)  # Exposure tab's typed Target, by player name
     unavailable: dict[str, str] = field(default_factory=dict)  # block key -> why its input could not be read
+    adjustments: tuple[str, ...] = ()  # the active Adjust / Ownership items (`my_frame`): `Nacua +2`, ...
 
 
 # ---------------------------------------------------------------------------------------------
@@ -677,6 +678,19 @@ def build_layout(inputs: CockpitInputs) -> Layout:
     b.add(
         [f"{inputs.sheet_title}  ·  {len(built)} lineup{'s' if len(built) != 1 else ''} built  ·  read-only"]
     )
+    if "frame" in inputs.unavailable:
+        b.line(
+            CUE_LOOK,
+            "YOUR FRAME",
+            f"could not be read from Suggested ({inputs.unavailable['frame']}): raw numbers are shown",
+        )
+    elif inputs.adjustments:
+        b.line(
+            "",
+            "YOUR FRAME",
+            ", ".join(inputs.adjustments),
+            "(typed on Suggested; every number on this tab uses them)",
+        )
     b.blank()
     _next_lock(b, inputs, built)
     _news_block(b, inputs, built)

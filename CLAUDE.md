@@ -145,6 +145,9 @@ URL; check it before any write).
 | "lock Stafford and Nacua in build 4, swap the bring-back for McBride, rerun" | tick the locks and type the name over the bring-back cell on Suggested (the sheet and the chat must never disagree), then `dfs lineups suggest --iterate` | the round, build 4's note ("bring-back → McBride (yours); ...; Cash % 61% → 64%") or why the edit was refused |
 | "give me 3 more like build 5" | set build 5 to `Vary 3`, then `dfs lineups suggest --iterate` | the round and the three variations (what differs, their Cash % / Top 1%) |
 | "never Kyren", "always Bijan", "no bring-back for LAR" | write the rules box lines (`Never use`, `Always use`, `Stack rules`), then `dfs lineups suggest --iterate` | the round, which builds changed, and any rules line it could not read |
+| "bump Nacua 2", "Kyren -15%", "Stafford to 24" | write the `Adjust` rules line (`Nacua +2`, `Kyren -15%`, `Stafford 24`; a percent needs its sign), then `dfs lineups suggest --iterate` | the round, which builds hold him (each note says "Nacua +2 (yours)") and how their Cash % / Top 1% moved; say that Model Check still scores the raw CalPts |
+| "Kyren 40% owned" | write the `Ownership` rules line (`Kyren 40%`), then `dfs lineups suggest --iterate` | the round and what it moved (builds, dups, chalk watch); if Own% has not published yet, say the line waits for it |
+| "min unique 2", "no more than 5 from one game" | write the `Build rules` line (`min unique 2`, `max from one game 5`), then `dfs lineups suggest --iterate` | the round and whether every new build honoured it (a build that cannot is reported, never relaxed) |
 | "go back to round 2" | `dfs lineups suggest --round 2` | the round it was written as (a new round) and the builds |
 | "fix flex" | nothing to run: tell him to use **Lineup Tools > Fix FLEX order** on Lineups (a sheet script); `dfs export` also puts the FLEX right in the file it writes | which of the two did it |
 | "late swap" | `dfs lineups late-swap --refresh-injuries` (it covers every built lineup; the flag lays ESPN's game-day injury feed over the last sync's status first) | a summary per lineup: who is still swappable (and any heavy chalk in none of his lineups, the yellow warning at the end), the best change and its Cash % / GPP % effect, or "nothing beats it" (the run also refreshes the Cockpit tab where the sheet has one) |
@@ -155,6 +158,10 @@ Guardrails:
 
 - **Ask before `dfs week new`**, and before writing to any sheet other than the live week (the one `config.toml` points at).
 - **Never touch a closed week** (a previous week's sheet is read only).
+- **Your numbers are a copy.** The rules box's `Adjust` and `Ownership` lines (`my_frame.py`) turn the synced slate
+  into "your" frame (`MyPts`); `lineups suggest`, `--iterate`, `late-swap`, the simulator's field, chalk watch and
+  the Cockpit all read it, and Model Check / `data/current/edge.csv` never do. Never hand the framed edge to
+  anything that saves or scores the model, and never apply the frame twice (the Cockpit applies it itself).
 - **Iterating on Suggested:** `dfs lineups suggest --iterate` reads the tab (decisions, locks, typed names, rules box) and `data/suggest_state/<week>.json`; always say **which round** it produced and what changed. A plain `dfs lineups suggest` builds from scratch and replaces the tab (the previous round stays in the file: `--round N`). Edits made through chat go in the same cells, only on the live week's sheet.
 - **Never push** (or open a PR) without Sam's OK in chat.
 - A command that fails: show the error and stop; do not retry in a loop or work around it. Google calls hang now and

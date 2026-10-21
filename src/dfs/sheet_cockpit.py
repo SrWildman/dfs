@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from dfs import cockpit, late_swap_store, stakes
+from dfs import cockpit, late_swap_store, my_frame, stakes
 from dfs import sheet_dk_upload as dku
 from dfs.cockpit import COCKPIT_TAB, DkEntry, Layout, PlanNumbers
 from dfs.config import Config
@@ -154,10 +154,19 @@ def gather(
         targets = exposure_targets(client, EXPOSURE_TAB)
     except (SheetsError, OSError, ValueError, KeyError) as e:
         log.warning("cockpit: Exposure targets unreadable: %s", e)
+    from dfs.sheet_suggested import read_my_frame
+
+    try:  # Suggested's Adjust / Ownership lines: unreadable means raw numbers, said on the tab
+        frame, frame_notes = read_my_frame(client, edge, cfg.projection.default)
+        if frame_notes:
+            log.warning("cockpit: %s", "; ".join(frame_notes))
+    except Exception as e:  # noqa: BLE001 - one unreadable block must not stop the others
+        frame = my_frame.apply(edge, {}, {})
+        unavailable["frame"] = str(e)
     return cockpit.CockpitInputs(
         now=now,
         sheet_title=title,
-        edge=edge,
+        edge=frame.edge,
         lineups=lineups,
         week=week,
         previous_edge=previous_edge,
@@ -166,6 +175,7 @@ def gather(
         plan=plan,
         targets=targets,
         unavailable=unavailable,
+        adjustments=tuple(frame.lines()),
     )
 
 

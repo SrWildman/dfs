@@ -52,6 +52,7 @@ class FakeClient:
 def cfg():
     return SimpleNamespace(
         lineups=SimpleNamespace(builder_tab="Lineups", upload_tab="DK Upload"),
+        projection=SimpleNamespace(default="CalPts"),
         bankroll=object(),
         stakes=object(),
     )
@@ -216,3 +217,40 @@ def test_the_tab_is_placed_right_after_board_and_a_refresh_never_moves_it():
 @pytest.mark.parametrize("cue", cockpit.CUES)
 def test_every_cue_has_a_colour(cue):
     assert cue in sheet_cockpit.CUE_COLORS
+
+
+class SuggestedClient(FakeClient):
+    """A sheet whose Suggested tab holds `grid` (or raises `error` when read)."""
+
+    def __init__(self, grid=None, error=None):
+        super().__init__(tabs=("Board", "Lineups", "Cockpit", "Suggested"))
+        self.grid, self.error = grid, error
+
+    def read_tab(self, tab):
+        if self.error:
+            raise self.error
+        return self.grid
+
+
+def test_the_cockpit_reads_the_adjustments_off_suggested_and_lists_them(monkeypatch):
+    from dfs.sheet_suggested import NAME_INDEX
+
+    patch_reads(monkeypatch)
+    frame = edge().assign(CalPts=10.0)
+    grid = [["Adjust", *[""] * (NAME_INDEX - 1), "Qb One +2.5"]]
+    inputs = sheet_cockpit.gather(SuggestedClient(grid), cfg(), edge=frame, now=NOW, season=2026)
+    assert inputs.adjustments == ("Qb One +2.5",) and "frame" not in inputs.unavailable
+    assert float(inputs.edge.loc[inputs.edge["Name"] == "Qb One", "CalPts"].iloc[0]) == 12.5
+    assert float(frame.loc[frame["Name"] == "Qb One", "CalPts"].iloc[0]) == 10.0  # the raw slate is untouched
+    layout = cockpit.build_layout(inputs)
+    assert any(r[1] == "YOUR FRAME" and "Qb One +2.5" in r[2] for r in layout.rows)
+
+
+def test_an_unreadable_suggested_tab_means_raw_numbers_and_says_so(monkeypatch):
+    patch_reads(monkeypatch)
+    inputs = sheet_cockpit.gather(
+        SuggestedClient(error=RuntimeError("boom")), cfg(), edge=edge(), now=NOW, season=2026
+    )
+    assert inputs.adjustments == () and "boom" in inputs.unavailable["frame"]
+    layout = cockpit.build_layout(inputs)
+    assert any(r[1] == "YOUR FRAME" and "raw numbers are shown" in r[2] for r in layout.rows)
