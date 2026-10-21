@@ -633,6 +633,24 @@ cell by finding the nearest `Pool` header above it and the `Id` in that header r
 `derived.EDGE_COLUMNS` layout every time `build-views` runs (`sheet_views._rng`/`_col`): re-run it after any EdgeRaw column reorder. Pool-derived
 sections do the same against `sheet_columns.PLAYER_POOL_COLUMN_ORDER`. `style_board` also clears any stale format left by an earlier layout.
 
+### Player
+
+One page per player, right after `Edge Finder` (`sheet_style.WEEK_ORDER`, family `decide`). **`B1` is the only typed cell**: a dropdown over EdgeRaw's Name column (it warns, never
+rejects, a name outside it); the tab has warning-only protection with `B1` carved out (`sheet_protection.protect_player_card`). Everything else is a formula. Two helper cells in row 1
+turn the name into EdgeRaw's row (`H1`, a `MATCH`) and his `NameKey` (`I1`); every field is an `INDEX` into an EdgeRaw column (the letter always from `derived.edge_sheet_letter`, so a
+column insert on EdgeRaw cannot leave it pointing at the wrong thing; `dfs doctor` checks the helpers) or into one of two hidden tabs `dfs sync` rewrites (`PlayerCardRaw`: one row per
+player, his Sleeper and FantasyPros projections, kickoff in ET and last five games; `PlayerCardRows`: his prop lines and signals, keyed `<NameKey>|prop|n` / `|sig|n`). **Created by
+`dfs setup player-card`** (template first, then the live week; `dfs doctor` after); **refreshed** by every `dfs sync` that runs the edge step, only on a sheet that has the tab, and a
+failed refresh prints a yellow line and never fails the sync.
+
+Blocks, top to bottom: **PLAYER** (team, position, salary, opponent, kickoff, status, flags); **PROJECTIONS** (TFFB, Sleeper, FantasyPros, ESPN, Props, AggPts, CalPts side by side, then Hit3x% / Boom% /
+Bust% / floor / ceilings, then Val, ValAdj, CeilVal, xFP/G; ESPN and Props are shadow sources, not in CalPts); **OWNERSHIP** (TFFB `Own%`, and `GppOwn` / `CashOwn` / `OurOwn`, labelled shadow: models, not published numbers);
+**USAGE, LAST 5 GAMES** (snap share, targets, carries, target share, red-zone looks, looks inside the 5 and DK points for his last five games PLAYED, with an average row; QBs show no target share);
+**MATCHUP AND GAME** (total, spread, implied total = (total - spread) / 2, GameEnv, pace, PROE, Expl%, OppPosRank, OppEPA, stadium, roof, wind); **PROPS** (the newest saved pull FOR THIS WEEK, one line per market with
+the de-vigged Over/Yes probability and the number of books; another week's pull is never shown); **SIGNALS AND FLAGS** (his `Flags`, his `Edge` chips, and for each chip a short why and Model Check's record
+for it as of the last `dfs results update`, `results_update.signal_table_path`); **IN YOUR LINEUPS** (how many built lineups, which `L<n>`, and the Exposure tab's share, Target and gap). Source code:
+`player_card` (pure; one `Field` spec drives both the formula and the text), `sheet_player_card` (I/O), `sources/player_log` (the last-five-games data).
+
 ### Cockpit
 
 Sunday's last 90 minutes on one **read-only** page, right after `Board` in the tab strip (`sheet_style.WEEK_ORDER`, family `decide`). Nothing on it is

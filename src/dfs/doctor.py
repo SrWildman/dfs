@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from dfs import player_card
 from dfs import sheet_dk_upload as dk_upload
 from dfs.cockpit import COCKPIT_TAB
 from dfs.config import Config
@@ -523,6 +524,68 @@ def _check_cockpit_tab(tab_titles: set[str]) -> list[DoctorIssue]:
     ]
 
 
+def _check_player_card(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Player tab (`player_card.py`) must exist with its two hidden raw tabs, `B1` must still be a
+    dropdown and outside the tab's protection, and the two helper formulas must still point at EdgeRaw's
+    Name and NameKey columns (the letters come from `derived`; an EdgeRaw column moved without the card
+    following shows up here, not as a blank card)."""
+    tab = player_card.PLAYER_CARD_TAB
+    if tab not in tab_titles:
+        return [
+            DoctorIssue(
+                "player-card-tab",
+                f"no {tab!r} tab -- `dfs setup player-card` creates it right after Edge Finder "
+                "(template first)",
+            )
+        ]
+    issues = [
+        DoctorIssue(
+            "player-card-raw",
+            f"no {raw!r} tab -- `dfs setup player-card` (or the next `dfs sync`) writes it",
+        )
+        for raw in (player_card.RAW_TAB, player_card.ROWS_TAB)
+        if raw not in tab_titles
+    ]
+    if client.has_data_validation(tab, player_card.NAME_CELL) is False:
+        issues.append(
+            DoctorIssue(
+                "player-card-dropdown",
+                f"{tab!r}: {player_card.NAME_CELL} has lost its player dropdown -- `dfs setup player-card`",
+            )
+        )
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
+    helpers = client.read_formula(tab, f"{player_card.ROW_CELL}:{player_card.KEY_CELL}")
+    found = [str(c) for c in (helpers[0] if helpers else [])]
+    expected = (
+        player_card.edge_range(edge_tab, "Name"),
+        player_card.edge_range(edge_tab, "NameKey"),
+    )
+    cells = (player_card.ROW_CELL, player_card.KEY_CELL)
+    for cell, text, want in zip(cells, found + [""] * 2, expected, strict=False):
+        if want not in text:
+            issues.append(
+                DoctorIssue(
+                    "player-card-helpers",
+                    f"{tab!r}: {cell} does not read {want} -- EdgeRaw's columns moved; "
+                    "`dfs setup player-card` rewrites the card",
+                )
+            )
+    protections = client.read_protection(tab)
+    if protections is not None:
+        col = ord(player_card.NAME_CELL[0]) - ord("A")
+        for protection in protections:
+            if protection["whole_sheet"] and not any(_covers(b, 1, col) for b in protection["unprotected"]):
+                issues.append(
+                    DoctorIssue(
+                        "player-card-protected",
+                        f"{tab!r}: {player_card.NAME_CELL} is behind the sheet protection, so picking a "
+                        "player shows a warning -- run `dfs setup protect`",
+                    )
+                )
+                break
+    return issues
+
+
 def _check_dk_upload_header(
     cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
 ) -> list[DoctorIssue]:
@@ -939,6 +1002,7 @@ def run_doctor(
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_stakes_block(client, cfg, tab_titles)
     issues += _check_cockpit_tab(tab_titles)
+    issues += _check_player_card(client, cfg, tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)

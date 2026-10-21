@@ -30,6 +30,7 @@ thing this task exists to make typeable. Player Pool, Exposure, Lineups and Sugg
 from __future__ import annotations
 
 from dfs import edge_finder_tab as eft
+from dfs import player_card as pc
 from dfs.cockpit import COCKPIT_TAB
 from dfs.sheet_contests import CONTESTS_TAB
 from dfs.sheet_dk_upload import unprotected_ranges as dk_upload_unprotected_ranges
@@ -49,6 +50,8 @@ FULLY_PROTECTED_TABS = [
     "Slate Grid",
     "Movement",
     CONTESTS_TAB,  # rebuilt by `dfs week close` / `dfs contests update`; nothing on it is typed
+    pc.RAW_TAB,  # the Player card's hidden raw data, rewritten whole by `dfs sync`
+    pc.ROWS_TAB,
     COCKPIT_TAB,  # rewritten whole by `dfs sync --live` / `late-swap` / `setup cockpit`; nothing is typed
 ]
 # Deliberately NOT protected (Sam, 2026-10-09): opening or closing a row group counts as an edit of
@@ -85,6 +88,20 @@ def protect_dk_upload(client: SheetsClient, tab: str) -> str:
         description=f"{_FORMULA_DESCRIPTION} (except the Lineup dropdown, {', '.join(exempt)})",
     )
     return f"{tab}: whole tab protected except the Lineup dropdown ({', '.join(exempt)})"
+
+
+def protect_player_card(client: SheetsClient, tab: str = pc.PLAYER_CARD_TAB) -> str:
+    """The Player card: the whole tab warns on an edit except `B1`, the one cell Sam types."""
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    client.clear_protected_ranges(tab)
+    exempt = pc.unprotected_ranges()
+    client.protect_sheet(
+        tab,
+        unprotected_ranges=exempt,
+        description=f"{_FORMULA_DESCRIPTION} (except the player picker, {', '.join(exempt)})",
+    )
+    return f"{tab}: whole tab protected except the player picker ({', '.join(exempt)})"
 
 
 def protect_workbook(
@@ -132,6 +149,8 @@ def protect_workbook(
             f"{SUGGESTED_TAB}: whole tab protected except the lock column and the Name column "
             "(decisions, rules box, typed names)"
         )
+
+    results.append(protect_player_card(client))
 
     if not client.tab_exists(player_pool_tab):
         results.append(f"{player_pool_tab}: not present -- skipped")

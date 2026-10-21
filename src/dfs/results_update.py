@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -201,6 +202,7 @@ def update_results(
         if write_signals:
             evaluation = results_signals.evaluation_frame(scored, season, _r6_history(season))
             signal_table = results_signals.signal_report(evaluation)
+            _save_signal_table(signal_table, season)
             reliability = results_signals.reliability_report(evaluation)
         ownership, ownership_gaps = _refit_field_own(season, scored, report)
         layout = build_layout(
@@ -218,6 +220,23 @@ def update_results(
         report.say(f"{summary} on {title}")
         _slot_into_tab_strip(client)
     return report
+
+
+def signal_table_path(season: int):
+    """Where the Model Check signal records are kept for the Player card (`player_card.record_line`)."""
+    return results_loop.RESULTS_DIR / f"signal_table_{season}.csv"
+
+
+def _save_signal_table(table: pd.DataFrame, season: int) -> None:
+    """Keep the signal records so the Player card can quote them at every sync without rebuilding them
+    (the R6 history takes minutes). A failed save never fails the update."""
+    try:
+        results_loop.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        table.assign(AsOf=datetime.now(UTC).strftime("%Y-%m-%d")).to_csv(
+            signal_table_path(season), index=False
+        )
+    except OSError as e:
+        log.warning("signal records not saved for the Player card: %s", e)
 
 
 def _props_shadow(season: int, stats_player: pd.DataFrame, report: UpdateReport) -> props_edge.Shadow | None:

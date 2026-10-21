@@ -100,6 +100,11 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   and never fail over it); `late-swap` saves its run to `data/cockpit/late_swap.json` for it (`late_swap_store`). Template first, then live,
   `dfs doctor` after (check `cockpit-tab`). `dfs week new` rebuilds it on the new sheet after the sync
   (fail-soft, only if the copied template has the tab) so the template's stale render never survives. Layout: `cockpit.py` (pure), I/O: `sheet_cockpit.py`.
+- `dfs setup player-card [--sheet-id <id>]` -- creates (or rebuilds) the **Player** tab right after Edge Finder: pick a name in `B1` (the only typed cell, a dropdown over EdgeRaw's names)
+  and read one player on one page (projections side by side, ownership, last five games of usage, matchup, props, signals with Model Check's record, his place in your lineups). Formulas over
+  EdgeRaw (columns from `derived.edge_sheet_letter`) plus two hidden raw tabs, `PlayerCardRaw` / `PlayerCardRows`, that every `dfs sync` rewrites **only on a sheet that already has the tab** (never
+  fails the sync). Template first, then live, `dfs doctor` after (checks `player-card-*`). Layout and spec: `player_card.py` (pure; one `Field` spec drives formula and text), I/O: `sheet_player_card.py`,
+  data: `sources/player_log.py`. A rebuild keeps the name in `B1`.
 - `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one
   command, no sheet: the five-pair shape retest, the teammate-bump race, the probability recalibration check, the
   tails check, the field_own scores, the ESPN / props blend gate and the PROPS SHADOW (`props_edge.build_shadow`) (and `sim/contest_retro` once it is on main; it

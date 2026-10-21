@@ -2751,6 +2751,9 @@ WEEK_ORDER = [
     ("Cockpit", "decide"),
     # Edge Finder (2026-10-07): right after Board. Written by the sync, nothing on it is typed.
     ("Edge Finder", "decide"),
+    # Player card (2026-10-21): pick a player in B1, see everything about him on one page. Formulas over
+    # EdgeRaw and two hidden raw tabs (`HIDE_TABS`); `dfs setup player-card` creates it, `dfs sync` feeds it.
+    ("Player", "decide"),
     ("EdgeRaw", "decide"),
     ("Player Pool", "build"),
     # Suggested builds (Week 6): written by `dfs lineups suggest`; between the pool and the lineups you type.
@@ -2801,6 +2804,9 @@ HIDE_TABS = [
     "TeamMetricsRaw",
     # Round 5 item 6: static DST alias lookup (`sheet_names.NameAlias`).
     "NameAlias",
+    # Player card (2026-10-21): the card's raw data, written by `dfs sync` (`sheet_player_card.refresh_raw`).
+    "PlayerCardRaw",
+    "PlayerCardRows",
     "SoSQB",
     "SoSRB",
     "SoSWr",
@@ -2862,6 +2868,9 @@ TAB_NOTES: dict[str, str] = {
     "EdgeRaw": f"EDGERAW -- every synced player by ValAdj. Pick Pool to add a player. {MORE}",
     "Edge Finder": (
         f"EDGE FINDER -- written by `dfs sync`; pick Pool to add a player, clear it to remove. {MORE}"
+    ),
+    "Player": (
+        f"PLAYER -- pick a name in B1 and read everything about him on one page. Only B1 is typed. {MORE}"
     ),
     "Slate Grid": f"SLATE GRID -- one row per game, then every team by implied total. Read-only. {MORE}",
     "Player Pool": (

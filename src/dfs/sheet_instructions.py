@@ -287,6 +287,13 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "hover it for the full reason. Overflow lists are folded under a plus sign.",
     ),
     (
+        "Player",
+        "One page per player. Pick a name in B1 (the only typed cell) and read his projections side by side, "
+        "ownership, his last five games of usage, matchup and game, props, the signals firing on him with "
+        "Model Check's record for each, and how many of your lineups he is in. Everything is a formula "
+        "over EdgeRaw; the sync keeps the data under it fresh.",
+    ),
+    (
         "EdgeRaw",
         "Every player of the week sorted by ValAdj, with the Pool dropdown to add him. Sort or search from "
         "the column headers; saved filter views under Data, then Filter views, give Cash and GPP orders.",

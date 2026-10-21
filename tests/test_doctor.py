@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 
+from dfs import player_card
 from dfs import sheet_dk_upload as dku
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
@@ -52,6 +53,12 @@ class FakeDoctorClient:
         self._rows = rows or {}
         self._formulas = {
             (EXPOSURE_TAB, f"{LINEUP_COUNT_CELL}:{LINEUP_COUNT_CELL}"): [[lineups_built_formula("Lineups")]],
+            (player_card.PLAYER_CARD_TAB, f"{player_card.ROW_CELL}:{player_card.KEY_CELL}"): [
+                [
+                    f'=IFERROR(MATCH($B$1,{player_card.edge_range("EdgeRaw", "Name")},0),"")',
+                    f'=IFERROR(INDEX({player_card.edge_range("EdgeRaw", "NameKey")},H1),"")',
+                ]
+            ],
             **(formulas or {}),
         }
         self._hidden_names = hidden_names or {}
@@ -153,6 +160,9 @@ _ALL_GOOD_TABS = {
     "Suggested": [],
     "Contests": [],
     "Cockpit": [],
+    "Player": [],
+    "PlayerCardRaw": [],
+    "PlayerCardRows": [],
     EXPOSURE_TAB: [],
 }
 
@@ -1021,3 +1031,42 @@ def test_run_doctor_flags_a_sheet_with_no_cockpit_tab_and_passes_one_with_it():
     assert any(i.check == "cockpit-tab" and "dfs setup cockpit" in i.detail for i in issues)
     issues = run_doctor(FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows), _base_config(), title="Week 1")
     assert not [i for i in issues if i.check == "cockpit-tab"]
+
+
+def test_run_doctor_flags_a_sheet_with_no_player_card_and_a_card_with_no_raw_tabs():
+    rows = _lineups_rows()
+    without = {t: h for t, h in _ALL_GOOD_TABS.items() if t != "Player"}
+    issues = run_doctor(FakeDoctorClient(tabs=without, rows=rows), _base_config(), title="Week 1")
+    assert any(i.check == "player-card-tab" and "dfs setup player-card" in i.detail for i in issues)
+    no_raw = {t: h for t, h in _ALL_GOOD_TABS.items() if t != "PlayerCardRows"}
+    issues = run_doctor(FakeDoctorClient(tabs=no_raw, rows=rows), _base_config(), title="Week 1")
+    assert [i.check for i in issues if i.check.startswith("player-card")] == ["player-card-raw"]
+
+
+def test_run_doctor_flags_a_player_card_that_lost_its_dropdown_or_points_at_the_wrong_column():
+    rows = _lineups_rows()
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    client.no_dropdown.add(("Player", player_card.NAME_CELL))
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    assert [i.check for i in issues if i.check.startswith("player-card")] == ["player-card-dropdown"]
+
+    moved = {
+        (player_card.PLAYER_CARD_TAB, f"{player_card.ROW_CELL}:{player_card.KEY_CELL}"): [
+            ['=IFERROR(MATCH($B$1,EdgeRaw!$Q$2:$Q,0),"")', '=IFERROR(INDEX(EdgeRaw!$ZZ$2:$ZZ,H1),"")']
+        ]
+    }
+    issues = run_doctor(
+        FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows, formulas=moved), _base_config(), title="Week 1"
+    )
+    assert [i.check for i in issues if i.check.startswith("player-card")] == ["player-card-helpers"] * 2
+
+
+def test_run_doctor_flags_a_player_card_whose_picker_is_behind_the_protection():
+    rows = _lineups_rows()
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    client.protection = {"Player": [{"whole_sheet": True, "unprotected": []}]}
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    assert [i.check for i in issues if i.check.startswith("player-card")] == ["player-card-protected"]
+    client.protection = {"Player": [{"whole_sheet": True, "unprotected": [(0, 1, 1, 2)]}]}
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    assert not [i for i in issues if i.check.startswith("player-card")]

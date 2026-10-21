@@ -499,6 +499,14 @@ Create the `Cockpit` tab right after Board, or rebuild it. One read-only page fo
 |---|---|
 | `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
 
+### `dfs setup player-card`
+
+Create the `Player` tab right after Edge Finder, or rebuild it. Pick a player in B1 (a dropdown over EdgeRaw's names, the only typed cell) and read everything about him on one page: projections side by side, ownership, his last five games of usage, matchup and game, props, the signals firing on him with Model Check's record for each, and how many of your lineups he is in. Formulas over EdgeRaw plus two hidden raw tabs that `dfs sync` keeps fresh (only on a sheet that has the tab). Template first, then the live week; `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+
 ### `dfs setup add-filters`
 
 Fix 1: sorting and searching are real features that were invisible -- filter views live behind Data > Filter views, easy to never notice.
@@ -668,6 +676,7 @@ What `dfs sync --only NAME[,NAME]` takes. A plain `dfs sync` runs all of them in
 | `snaps` | `SnapsRaw` | - | nflverse's free, unauthenticated snap-count release -- Part C, C6. |
 | `pbp` | `TeamMetricsRaw` | - | nflverse's free, unauthenticated play-by-play release -- Part C, C7. |
 | `usage` | `(none)` | - | Per-player usage (`Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G`); no sheet tab, it feeds EdgeRaw. |
+| `player_log` | `(none)` | - | Each QB / RB / WR / TE's last five games played, for the Player card (`player_card.usage_log`). |
 | `ffopportunity` | `(none)` | - | Per-player-week expected points (`xFP`), current and prior season; no sheet tab. |
 | `nflverse_injuries` | `(none)` | yes | This season's injury reports; no sheet tab. |
 | `nflverse_depth` | `(none)` | yes | Recent depth-chart snapshots; no sheet tab. |

@@ -2788,3 +2788,12 @@ def test_the_cockpit_sits_right_after_the_board_in_the_decide_family():
     tabs = [tab for tab, _family in WEEK_ORDER]
     assert tabs.index("Cockpit") == tabs.index("Board") + 1
     assert dict(WEEK_ORDER)["Cockpit"] == "decide"
+
+
+def test_the_player_card_sits_right_after_edge_finder_and_its_raw_tabs_are_hidden():
+    from dfs.sheet_style import HIDE_TABS, WEEK_ORDER
+
+    tabs = [tab for tab, _family in WEEK_ORDER]
+    assert tabs.index("Player") == tabs.index("Edge Finder") + 1
+    assert dict(WEEK_ORDER)["Player"] == "decide"
+    assert {"PlayerCardRaw", "PlayerCardRows"} <= set(HIDE_TABS)
