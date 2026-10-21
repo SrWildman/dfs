@@ -16,13 +16,15 @@ Studies, each with the bar it must clear to matter:
 | `shadows` | ESPN and props shadow projections against CalPts (the blend gate) | `calibration.shadow_race` |
 | `props` | the PROPS SHADOW: does ESPN beat the prop market's price | `dfs.props_edge.build_shadow` |
 | `contest_retro` | session A's contest retro (hook below) | `dfs.sim.contest_retro` |
+| `curse` | the optimizer's curse and its held-out fixes (hook below) | `dfs.research.curse` |
 
-**The contest retro hook.** `dfs.sim.contest_retro` is not on main yet. When it is, it plugs in by exposing
+**The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study) plugs in by
+exposing
 
     refresh_summary(season, through) -> {"headline": [str, ...], "metrics": {str: float | bool},
                                          "ship_bar": str}
 
-and the study appears in the report; until then the study is reported as skipped, with that line.
+and the study appears in the report; a branch without the module reports it as skipped, with that line.
 
 **Changed since last week** compares the previous report of the season (the highest week below this one) by
 the numbers each study puts in `metrics`, which every report embeds as a JSON comment at its end.
@@ -475,26 +477,28 @@ def study_props(ctx: Context) -> Study:
 
 
 CONTEST_RETRO_MODULE = "dfs.sim.contest_retro"
+CURSE_MODULE = "dfs.research.curse"
+HOOK_MODULES = {"contest_retro": CONTEST_RETRO_MODULE, "curse": CURSE_MODULE}
 
 
-def study_contest_retro(ctx: Context) -> Study:
-    s = Study(
-        "contest_retro", "Contest retro (session A)", "defined by the module (`refresh_summary`'s `ship_bar`)"
-    )
+def hook_study(ctx: Context, key: str, title: str) -> Study:
+    """A study whose module exposes `refresh_summary(season, through)` (module docstring)."""
+    name = HOOK_MODULES[key]
+    s = Study(key, title, "defined by the module (`refresh_summary`'s `ship_bar`)")
     try:
-        module = importlib.import_module(CONTEST_RETRO_MODULE)
+        module = importlib.import_module(name)
     except ModuleNotFoundError:
         s.status = "skipped"
-        s.verdict = f"{CONTEST_RETRO_MODULE} is not on this branch"
+        s.verdict = f"{name} is not on this branch"
         s.headline = [
-            f"`{CONTEST_RETRO_MODULE}` is not on main yet, so this study is skipped. It plugs in by exposing "
+            f"`{name}` is not on this branch, so this study is skipped. It plugs in by exposing "
             '`refresh_summary(season, through) -> {"headline": [...], "metrics": {...}, "ship_bar": str}`.'
         ]
         return s
     hook = getattr(module, "refresh_summary", None)
     if hook is None:
         s.status = "skipped"
-        s.verdict = f"{CONTEST_RETRO_MODULE} has no refresh_summary(season, through)"
+        s.verdict = f"{name} has no refresh_summary(season, through)"
         s.headline = [s.verdict + "; see `dfs.research.refresh` for the contract."]
         return s
     out = hook(ctx.season, ctx.through)
@@ -502,6 +506,14 @@ def study_contest_retro(ctx: Context) -> Study:
     s.ship_bar = out.get("ship_bar", s.ship_bar)
     s.verdict = s.headline[0] if s.headline else "ran"
     return s
+
+
+def study_contest_retro(ctx: Context) -> Study:
+    return hook_study(ctx, "contest_retro", "Contest retro (session A)")
+
+
+def study_curse(ctx: Context) -> Study:
+    return hook_study(ctx, "curse", "Optimizer's curse (session F)")
 
 
 STUDIES: dict[str, Callable[[Context], Study]] = {
@@ -513,6 +525,7 @@ STUDIES: dict[str, Callable[[Context], Study]] = {
     "shadows": study_shadows,
     "props": study_props,
     "contest_retro": study_contest_retro,
+    "curse": study_curse,
 }
 TITLES = {
     "shape": "Five QB1-receiver pairs",
@@ -523,6 +536,7 @@ TITLES = {
     "shadows": "ESPN / props shadows",
     "props": "PROPS SHADOW",
     "contest_retro": "Contest retro",
+    "curse": "Optimizer's curse",
 }
 
 
@@ -656,8 +670,7 @@ def render(
 def summary_lines(
     studies: list[Study], load_seconds: float, path: Path, season: int, through: int
 ) -> list[str]:
-    """The ten lines the command prints: a header (with the shared load), one line per study (eight), the
-    report."""
+    """The lines the command prints: a header (with the shared load), one line per study, the report."""
     total = sum(s.seconds for s in studies) + load_seconds
     out = [
         f"research refresh {season} through Week {through}: {total:.0f} s in all "

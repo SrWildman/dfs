@@ -118,11 +118,11 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   (check `stacks-tab`). Needs `dfs stacks --refit` once.
 - `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one
   command, no sheet: the five-pair shape retest, the teammate-bump race, the probability recalibration check, the
-  tails check, the field_own scores, the ESPN / props blend gate and the PROPS SHADOW (`props_edge.build_shadow`) (and `sim/contest_retro` once it is on main; it
-  plugs in through `refresh_summary(season, through)`, see `research/refresh.py`). Each fails soft; it writes
+  tails check, the field_own scores, the ESPN / props blend gate and the PROPS SHADOW (`props_edge.build_shadow`), `sim/contest_retro` and the optimizer's-curse study
+  (`research/curse.py`; both plug in through `refresh_summary(season, through)`, see `research/refresh.py`). Each fails soft; it writes
   `docs/research/weekly/<season>-wk<NN>.md` (gitignored; an `--only` run writes `-partial.md` instead) with one block per study (headline numbers, ship bar,
-  "changed since last week" against the previous report), prints ten lines with each study's time. About two
-  minutes. Run after `dfs week close`.
+  "changed since last week" against the previous report), prints a line per study with its time. About two
+  minutes, plus about 15 the first run after a week closes (the curse study's builder runs for the new week). Run after `dfs week close`.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, the Cockpit and Stacks tabs are there, the Suggested tab is in the current layout (lock column, rules box; an old one
   says to run a plain `dfs lineups suggest`), `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is

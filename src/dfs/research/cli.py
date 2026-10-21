@@ -81,16 +81,18 @@ def research_refresh(
     only: str = typer.Option(
         None,
         "--only",
-        help="Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, contest_retro.",
+        help="Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, props, "
+        "contest_retro, curse.",
     ),
 ) -> None:
     """Rerun the weekly offline studies with the closed weeks so far and write one report.
 
     The five-pair shape retest, the teammate-bump race, the probability recalibration check, the tails check,
-    the field-ownership scores and the ESPN / props shadows (and the contest retro when it is on main), each
-    failing soft. Writes docs/research/weekly/<season>-wk<NN>.md (gitignored) with each study's headline
+    the field-ownership scores, the ESPN / props shadows, the contest retro and the optimizer's-curse study,
+    each failing soft. Writes docs/research/weekly/<season>-wk<NN>.md (gitignored) with each study's headline
     numbers, its ship bar and what changed since the previous report, prints a short summary with the time
-    each study took, and never touches a sheet. About two minutes.
+    each study took, and never touches a sheet. About two minutes, plus about 15 the first time a week is in
+    it (the curse study's builder runs for that week; saved, so later reruns reuse them).
     """
     from dfs.nfl_calendar import current_season
     from dfs.research import refresh

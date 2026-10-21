@@ -1158,6 +1158,86 @@ cannot see the absence; whether TFFB, Sleeper and FantasyPros already price it i
 OUT or IR (`Avail`) before kickoff. It does not touch CalPts or late swap. Through Week 6 of 2026: 14 team-weeks, 65 teammate rows,
 MAE 4.79 for CalPts and 4.88 for the bump (RB 5.07 -> 4.85, WR 4.61 -> 5.01): far too thin to say anything, as expected for three weeks.
 
+## R8. The optimizer's curse: do the chosen builds fall short because they were chosen?
+
+Unlike R1-R7 this is a 2026 study on Sam's own weeks (`dfs.research.curse`), shadow only. The question: Suggested shows a cash build at
+64-68%, Sam's 2026 double-up cash rate is 43%, and session A's retro saw his own double-up entries promised 62% and cash 20% (n 10). Is
+that the **optimizer's curse** (the builder keeps the lineups the projection likes most, and those carry the most projection error in
+their favour), and does shrinking the projection, building on noisy projections, or recalibrating the shown number fix it?
+
+**Method.** For each 2026 week 1-6: the last EdgeRaw snapshot before Sunday's lock with a no-lookahead `CalPts`, cut to the main slate;
+a constructed pool (`retro.pool_tags`: Sam's Week 6 counts, top CalPts per position; his real pool is not stored) plus every slate
+defense; today's `suggest_builds` with today's lines (relative to the projected field; Week 1 had no ownership, so its fixed fallback),
+20 cash and up to 20 GPP builds. Compared against 300 random salary-legal lineups ($48,000+) from the **same pool** (same players, no
+selection) and 150 + 150 real lineups from the week's standings (Weeks 2, 4-6). Every lineup is scored by today's simulator from the
+same pre-lock inputs. Realized: DK points (standings `FPTS`, else nflverse); cashed = at or above the real double-up line (Results'
+typed `Cash Line`, the GIANT $25 Double Up from Week 4); Top 1% = at or above the real top-1% score of the week's biggest GPP (Weeks
+4-6), else that line + 62.6 (proxy). Every fitted number comes from the other five weeks. Standard errors are **over weeks** (six):
+builds in one week share players and one line, so they are nowhere near 20 independent tries. Run: `python -m dfs.research.curse run`
+(114 builder jobs, ~35 min on 6 processes, resumable), `... replicate` (the noise rerun below), `... assemble` (tables to
+`data/research/curse/`, gitignored). Weekly: `dfs research refresh` reruns it (`curse.refresh_summary`): it runs the builder jobs of a
+newly closed week (its cash line from the double-up's standings until Results' typed one is cached), reassembles and reports the curse
+and every fix's held-out numbers.
+
+### The curse's size
+
+Mean over the six weeks (realized minus shown), with the SE over weeks:
+
+| Lineups | Shown Cash % | Cashed | Gap | Points gap (realized - projected) |
+|---|---|---|---|---|
+| Today's 20 cash builds | 65.9% | 50.0% | **-15.9 (6.9)** | -3.9 (7.4) |
+| Random lineups, same pool | 44.3% | 29.9% | -14.3 (11.3) | -1.7 (4.6) |
+| Real double-up lineups (Weeks 4-6) | 54.6% | 49.3% | -5.3 (10.0) | -5.3 (6.4) |
+
+| Lineups | Shown Top 1% (sum) | Top-1% finishes |
+|---|---|---|
+| Today's GPP builds (82) | 2.27 | 2 |
+| Random lineups (1,800) | 16.3 | 14 |
+| Real GPP lineups (549) | 5.1 | 5 |
+
+- **The selection-specific curse is not detectable.** Builds miss their promise by about as much as random lineups from the same pool
+  do: the difference is -1.6 (9.9) points of Cash % and -2.2 (8.0) DK points a week (by week, points: -28.6, +10.8, +23.0, -6.3, +7.7,
+  -19.8). What the builds and random lineups share is the **week's line**: the real cash line sat far from the projected field mean in
+  some weeks (Weeks 2-3 random lineups were shown 53-56% and cashed 3-16%), and every lineup of that week moves together.
+- **The shown Cash % is too high, by about 16 points (2.3 SE), but it is the line, not the choice.** Top 1% is calibrated (2 hits
+  where 2.3 were promised; 14 vs 16 for random; 5 vs 5 for the real field).
+- **Selection still pays:** the builds out-scored random lineups from the same pool by +14.6 points a week (better in 5 of 6) and
+  cashed 50% vs 30%. The ranking inside the 20 builds carries no information (ranks 1-5 cashed 47%, 11-20 52%), and among random lineups
+  the projected spread between the bottom and top fifth (9.4 points) realized as 5.9: some shrinkage is real at the lineup level.
+- At the player level CalPts is not over-spread: the slope of actual on CalPts is 1.07-1.29 at QB, RB, WR and TE, and 0.54 at DST (the
+  one position where the projection's spread is too wide). But salary knows something CalPts does not: the held-out weight toward the
+  position's salary line is 0.3-0.7 at RB, WR, TE and DST and 0 at QB.
+
+### The fixes, held out by week
+
+Each fix minus today, mean (SE over weeks), weeks better. The ship bar: > 2 SE AND better in most weeks.
+
+| Fix | Cash builds: points | Cash builds: cash rate | GPP builds: points | GPP builds: Top 1% rate |
+|---|---|---|---|---|
+| Shrink toward the salary line (weights 0.2-0.7; QB 0) | +2.6 (1.7), 3/6 | **+7.5% (3.4), 4/6** | -3.4 (6.7), 2/6 | -1.5% (3.0), 1/6 |
+| Shrink toward TFFB (QB 0.4-0.6, TE 0.5-1, WR 0-0.2, RB and DST 0) | +1.6 (1.0), 5/6 | +3.3% (3.1), 2/6 | +0.8 (2.4), 3/6 | -0.3% (0.3), 0/6 |
+| Noise, sd 10%, 8 draws, most-chosen builds | +1.5 (1.1), 3/6 | **+7.5% (2.8), 5/6** | -3.6 (2.0), 1/6 | +0.8% (0.8), 1/6 |
+| Same, 8 **new** draws (replication) | +2.3 (3.0), 4/6 | +5.8% (8.1), 3/6 | +1.7 (3.8), 4/6 | +0.8% (0.8), 1/6 |
+| Noise, sd 20% | **-11.4 (4.7), 0/6** | **-18.3% (7.0), 0/6** | **-7.6 (2.7), 0/6** | -0.1% (2.3), 2/6 |
+
+(The sd chosen on the other weeks was 10% in every week.) Display only, Brier of the shown Cash % on today's builds (lower is better):
+today 0.271; **shift** (each build's simulated score moved by the points the builds missed by on the other weeks) 0.261, a gain of
++0.010 (0.011), 5/6; **Platt** (logit refit) 0.300, worse. For Top 1% both recalibrations are worse (0.0257 -> 0.0262 / 0.0311).
+
+**Verdict: nothing ships.**
+
+- The noise fix cleared the bar on cash rate and then **failed its own replication**: eight fresh draws gave +5.8% (8.1), 3/6, and the
+  two runs share 0-3 of their 20 builds a week. Its "pass" was the luck of which lineups the draws happened to favour. Noise at 20%
+  throws the projection away and loses badly.
+- Shrinking toward the salary line clears the bar on cash rate (2.2 SE, 4 of 6) but not on points (1.5 SE, 3 of 6), costs the GPP
+  builds, and is one of 20 comparisons in this table, about one of which would clear 2 SE by chance. It is the one candidate worth carrying
+  forward: rerun with Weeks 7-8 (`dfs research refresh` does it after each close) before it is offered behind a switch.
+- The display shift does not clear its own bar (0.9 SE). What would fix the shown Cash % is the **line**: the double-up field's mean
+  (its ownership: double-ups are far chalkier than projected) is where the 16 points go, which is session A's finding too.
+
+Caveats: six weeks; a constructed pool, not Sam's; 20 cash builds where he enters about 3; the builder's search is time-boxed, so runs
+on a loaded machine can differ slightly; Top 1% has real lines in three weeks only.
+
 ## Anything that contradicts the local round's design
 
 - The **60% next-man-up rule (0.30 to the rest of the position, 0.10 spill, nothing unassigned)** is contradicted for targets and approximate for carries (R1).

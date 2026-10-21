@@ -89,31 +89,36 @@ def test_the_previous_report_is_the_newest_earlier_week_of_the_same_season(two_s
     assert refresh.previous_report(2026, 3, tmp_path) is None
 
 
-def test_the_summary_is_ten_lines_for_eight_studies(tmp_path):
+def test_the_summary_is_a_line_per_study_between_a_header_and_the_report(tmp_path):
     studies = [refresh.Study(k, k, "bar", verdict="v", seconds=1.0) for k in refresh.STUDIES]
     lines = refresh.summary_lines(studies, 12.0, tmp_path / "r.md", 2026, 6)
-    assert len(refresh.STUDIES) == 8 and len(lines) == 10
+    assert len(refresh.STUDIES) == 9 and len(lines) == 11
     assert lines[0].startswith("research refresh 2026 through Week 6") and "shared history" in lines[0]
     assert lines[-1].strip().startswith("report:")
 
 
-def test_the_contest_retro_is_skipped_until_the_module_exists_and_used_when_it_does(monkeypatch):
+@pytest.mark.parametrize(
+    "key, run",
+    [("contest_retro", refresh.study_contest_retro), ("curse", refresh.study_curse)],
+)
+def test_a_hook_study_is_skipped_without_its_module_and_used_when_it_has_one(monkeypatch, key, run):
     ctx = refresh.Context(2026, 6, 1)
-    monkeypatch.setitem(sys.modules, "dfs.sim.contest_retro", None)  # the module is on main now: hide it
-    skipped = refresh.study_contest_retro(ctx)
+    name = refresh.HOOK_MODULES[key]
+    monkeypatch.setitem(sys.modules, name, None)  # the module is on main now: hide it
+    skipped = run(ctx)
     assert skipped.status == "skipped" and "not on this branch" in skipped.verdict
-    fake = types.ModuleType("dfs.sim.contest_retro")
+    fake = types.ModuleType(name)
     fake.refresh_summary = lambda season, through: {
-        "headline": [f"retro {season} wk{through}"],
+        "headline": [f"{key} {season} wk{through}"],
         "metrics": {"edge": 0.5},
         "ship_bar": "its own",
     }
-    monkeypatch.setitem(sys.modules, "dfs.sim.contest_retro", fake)
-    used = refresh.study_contest_retro(ctx)
-    assert used.status == "ok" and used.metrics == {"edge": 0.5} and used.headline == ["retro 2026 wk6"]
-    bare = types.ModuleType("dfs.sim.contest_retro")
-    monkeypatch.setitem(sys.modules, "dfs.sim.contest_retro", bare)
-    assert refresh.study_contest_retro(ctx).status == "skipped"
+    monkeypatch.setitem(sys.modules, name, fake)
+    used = run(ctx)
+    assert used.status == "ok" and used.metrics == {"edge": 0.5} and used.headline == [f"{key} 2026 wk6"]
+    assert used.ship_bar == "its own" and used.key == key
+    monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    assert run(ctx).status == "skipped"
 
 
 def test_the_command_is_registered_and_fails_cleanly_with_nothing_scored(monkeypatch):
