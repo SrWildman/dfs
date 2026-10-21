@@ -17,6 +17,7 @@ Studies, each with the bar it must clear to matter:
 | `props` | the PROPS SHADOW: does ESPN beat the prop market's price | `dfs.props_edge.build_shadow` |
 | `contest_retro` | session A's contest retro (hook below) | `dfs.sim.contest_retro` |
 | `curse` | the optimizer's curse and its held-out fixes (hook below) | `dfs.research.curse` |
+| `backtest` | Flashback: build settings scored in his real contests (optional: `--only`) | `dfs.backtest` |
 
 **The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study) plugs in by
 exposing
@@ -478,7 +479,8 @@ def study_props(ctx: Context) -> Study:
 
 CONTEST_RETRO_MODULE = "dfs.sim.contest_retro"
 CURSE_MODULE = "dfs.research.curse"
-HOOK_MODULES = {"contest_retro": CONTEST_RETRO_MODULE, "curse": CURSE_MODULE}
+BACKTEST_MODULE = "dfs.backtest"
+HOOK_MODULES = {"contest_retro": CONTEST_RETRO_MODULE, "curse": CURSE_MODULE, "backtest": BACKTEST_MODULE}
 
 
 def hook_study(ctx: Context, key: str, title: str) -> Study:
@@ -516,6 +518,10 @@ def study_curse(ctx: Context) -> Study:
     return hook_study(ctx, "curse", "Optimizer's curse (session F)")
 
 
+def study_backtest(ctx: Context) -> Study:
+    return hook_study(ctx, "backtest", "Flashback backtest (session J)")
+
+
 STUDIES: dict[str, Callable[[Context], Study]] = {
     "shape": study_shape,
     "bump": study_bump,
@@ -526,7 +532,9 @@ STUDIES: dict[str, Callable[[Context], Study]] = {
     "props": study_props,
     "contest_retro": study_contest_retro,
     "curse": study_curse,
+    "backtest": study_backtest,
 }
+OPTIONAL = frozenset({"backtest"})  # in STUDIES, but run only when asked for (`--only backtest`)
 TITLES = {
     "shape": "Five QB1-receiver pairs",
     "bump": "Teammate bump shadow",
@@ -537,6 +545,7 @@ TITLES = {
     "props": "PROPS SHADOW",
     "contest_retro": "Contest retro",
     "curse": "Optimizer's curse",
+    "backtest": "Flashback backtest",
 }
 
 
@@ -544,7 +553,7 @@ def run_studies(
     ctx: Context, only: list[str] | None = None, log: Callable[[str], None] = lambda m: None
 ) -> list[Study]:
     """Run each study, timing it; a study that raises is reported as failed and the rest still run."""
-    keys = only or list(STUDIES)
+    keys = only or [k for k in STUDIES if k not in OPTIONAL]
     unknown = [k for k in keys if k not in STUDIES]
     if unknown:
         raise ValueError(f"unknown studies {unknown}; choose from {', '.join(STUDIES)}")

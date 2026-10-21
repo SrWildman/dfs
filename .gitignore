@@ -85,3 +85,6 @@ docs/planning/
 
 # Weekly research reports (`dfs research refresh`): personal output, regenerated every week.
 docs/research/weekly/
+
+# Flashback backtest reports (`dfs backtest`): personal output, regenerated on demand.
+docs/research/backtest/

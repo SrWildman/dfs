@@ -35,6 +35,7 @@ from dfs import (
     odds_credits,
     paths,
     perf,
+    pool_store,
     sheet_edge_finder,
     store,
     suggest_state,
@@ -2593,6 +2594,14 @@ def sync(
             console.print(f"[green]OK[/green] {added}")
         except SheetsError as e:
             console.print(f"[yellow]Could not check the add-a-player box:[/yellow] {e}")
+        _save_pool_snapshot(
+            cfg,
+            live_client or SheetsClient(cfg.google_sheets),
+            ctx.season,
+            ctx.week,
+            source="sync",
+            sheet=title,
+        )
 
     if "edge" in source_names and not no_upload:
         _write_edge_finder_tabs(cfg, ctx)
@@ -2612,6 +2621,29 @@ def sync(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _save_pool_snapshot(
+    cfg: Config,
+    client: SheetsClient,
+    season: int,
+    week: int,
+    *,
+    source: str,
+    sheet: str = "",
+    tags: dict[str, str] | None = None,
+    rules: dict[str, str] | None = None,
+) -> None:
+    """Keep Sam's real pool (`data/pools/<season>-wk<NN>.json`, `pool_store`) so `dfs backtest` can build from
+    what he picked. Never fails the command that calls it: a sheet or disk problem just means no snapshot
+    this time."""
+    try:
+        if tags is None:
+            edge_tab = cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
+            tags = {p.name: p.pool_value for p in read_players(client, edge_tab) if p.pooled}
+        pool_store.save(season, week, tags, source=source, sheet=sheet, rules=rules)
+    except Exception:  # noqa: BLE001 - a bookkeeping copy must never stop a sync or a build
+        log.debug("pool snapshot not saved", exc_info=True)
 
 
 def _refresh_player_card(cfg: Config, ctx: SyncContext) -> None:
@@ -2962,6 +2994,90 @@ def stacks_command(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+
+
+@app.command(
+    "backtest",
+    short_help="Flashback: rebuild past weeks with today's code, score them in your real contests.",
+)
+def backtest_command(
+    weeks: str = typer.Option(
+        "2,4,5,6",
+        "--weeks",
+        help="Comma-separated weeks to rebuild (each needs standings and a pre-lock snapshot on disk).",
+    ),
+    settings: Path = typer.Option(
+        None,
+        "--settings",
+        exists=True,
+        dir_okay=False,
+        help="A settings TOML (builds, rules lines, named flags; see dfs.backtest_settings). Left off: "
+        "today's defaults, what a plain `dfs lineups suggest` builds (with a search that runs to the end).",
+    ),
+    compare: Path = typer.Option(
+        None,
+        "--compare",
+        exists=True,
+        dir_okay=False,
+        help="A second settings TOML to backtest on the same contests; prints the paired difference "
+        "(--settings minus --compare, so name the baseline here) with standard errors and weeks won.",
+    ),
+    fresh: bool = typer.Option(
+        False, "--fresh", help="Rebuild even where a saved run of the same code exists."
+    ),
+    workers: int = typer.Option(6, "--workers", min=1, max=12, help="Weeks built in parallel."),
+    no_report: bool = typer.Option(False, "--no-report", help="Print the summary; write no report file."),
+) -> None:
+    """Would these build settings have made money? Rebuilds each week with today's code from the last pre-lock
+    snapshot (no lookahead), on your pool where one was saved (`data/pools/`, written at every sync and
+    `suggest`; earlier weeks use the constructed pool of the contest retro), puts the builds into the contests
+    you actually entered and scores them against those contests' real fields and payouts: dollars, ROI, cash
+    rate and top-1% hits beside your own lineups in the same contests. Local and read-only: no sheet, no
+    DraftKings. Writes docs/research/backtest/ (gitignored) and prints a short summary. About 6 minutes for
+    four weeks: the search runs to the end, so a rerun of the same settings gives the same builds."""
+    from dfs import backtest as backtest_mod
+    from dfs import backtest_report, backtest_settings
+
+    try:
+        week_list = sorted({int(w) for w in weeks.split(",") if w.strip()})
+        chosen = [backtest_settings.load(settings)]
+        if compare is not None:
+            chosen.append(backtest_settings.load(compare))
+            if chosen[1].name == chosen[0].name:
+                chosen[1] = dataclasses.replace(chosen[1], name=f"{chosen[1].name} (baseline)")
+        if not week_list:
+            raise ValueError("--weeks needs at least one week")
+    except (backtest_settings.SettingsError, ValueError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    for s in chosen:
+        for name in s.unsupported_rules():
+            console.print(
+                f"[yellow]'{s.name}': the {name} rules line is not applied by the backtest.[/yellow]"
+            )
+    try:
+        results = backtest_mod.backtest(
+            week_list,
+            chosen,
+            fresh=fresh,
+            workers=workers,
+            log=lambda m: console.print(f"[dim]{escape(m)}[/dim]"),
+        )
+    except (OSError, ValueError, KeyError, FileNotFoundError) as e:
+        console.print(f"[red]Backtest failed: {escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    ordered = [results[s.name] for s in chosen]
+    paired = backtest_report.compare_lines(ordered[0], ordered[1]) if len(ordered) == 2 else None
+    console.print()
+    for r in ordered:
+        for line in backtest_report.summary_lines(r):
+            console.print(line, markup=False, highlight=False, soft_wrap=True)
+        console.print()
+    for line in paired or []:
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+    if not no_report:
+        path = backtest_report.write_report(ordered, paired)
+        console.print(f"[green]OK[/green] report written to {path}")
 
 
 @app.command(short_help="Sync, check the sheet, and report what changed -- in one go.")
@@ -4232,6 +4348,17 @@ def _run_suggest(
             raise typer.Exit(code=1)
         tab = lineup_iterate.tab_from_record(prior)
     command = "restore" if restored is not None else "iterate" if iterate else "suggest"
+    if restored is None:  # the pool and rules box this build is made from, for `dfs backtest`
+        _save_pool_snapshot(
+            cfg,
+            client,
+            nfl_calendar.current_season(),
+            week,
+            source="suggest",
+            sheet=title,
+            tags=tags,
+            rules=tab.rules.by_label(),
+        )
     # Your frame (the Adjust / Ownership lines): every number below, the simulator's field too, reads it.
     raw_edge = edge
     frame, frame_notes = suggest_state.frame_from_rules(tab.rules, raw_edge, metric)
