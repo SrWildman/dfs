@@ -9,12 +9,12 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
+from test_stacks_tab import games, table
 from typer.testing import CliRunner
 
 from dfs import cli, sheet_stacks, stacks, stacks_inputs, stacks_tab
 from dfs.sim import field_gen
 from dfs.sim.stacks_retro import FieldModel
-from tests.test_stacks_tab import games, table
 
 runner = CliRunner()
 NOW = datetime(2026, 10, 21, 15, 0, tzinfo=UTC)
@@ -341,7 +341,7 @@ def test_the_protection_list_and_doctor_know_the_tab():
 
 
 def test_compute_runs_the_whole_pipeline_on_a_synthetic_edge_frame(monkeypatch, tmp_path):
-    from tests.test_stacks import RATES, TEAMS, make_slate
+    from test_stacks import RATES, TEAMS, make_slate
 
     slate, specs = make_slate()
     rows = []
