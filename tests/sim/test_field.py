@@ -303,3 +303,54 @@ def test_a_field_player_who_differs_from_the_lineups_copy_of_him_is_refused():
     changed = S.PlayerSpec("qb_a", "QB", "T_qb_a", "ZZZ", "G_qb_a", "QB1", 25.0)
     with pytest.raises(ValueError, match="appears twice"):
         S.simulate_lineups([[changed]], n_sims=100, correlations=lookup(), field=fld)
+
+
+# --- ownership uncertainty (session H, default off) ------------------------------------------------------
+
+
+def _error_model(**means):
+    from dfs.sim import own_error as oe
+
+    return oe.OwnershipErrorModel(
+        formats={"gpp": oe.FormatError(0.3, 0.01), "cash": oe.FormatError(0.3, 0.01)}, means=means
+    )
+
+
+def test_ownership_draws_give_each_simulation_its_own_field():
+    specs, own = hand_built()
+    fld = F.build_field(specs, own, cash_offset=0.6, top_offset=63.2, coverage=1.0)
+    drawn = F.with_ownership_draws(fld, own, _error_model(), scenarios=50, seed=1)
+    assert drawn.cash_draws.shape == (50, len(fld.players))
+    assert drawn.cash_draws.sum(axis=1) == pytest.approx(9.0)
+    # no fitted mean: the weights stay the mean
+    np.testing.assert_allclose(drawn.cash_weights, fld.cash_weights)
+    res = S.simulate_lineups(
+        [[p] for p in fld.players], n_sims=200, seed=4, correlations=lookup(), keep_scores=True, field=drawn
+    )
+    expected = (res.scores * drawn.cash_draws[np.arange(200) % 50]).sum(axis=1)
+    np.testing.assert_allclose(res.cash_lines - 0.6, expected, atol=1e-9)
+    # and it is the same calculation as known ownership when every scenario is the mean
+    still = F.FieldModel(**{**fld.__dict__, "cash_draws": np.tile(fld.cash_weights, (5, 1))})
+    a = S.simulate_lineups(
+        [[specs[0]]], n_sims=500, seed=3, correlations=lookup(), keep_scores=True, field=fld
+    )
+    b = S.simulate_lineups(
+        [[specs[0]]], n_sims=500, seed=3, correlations=lookup(), keep_scores=True, field=still
+    )
+    np.testing.assert_allclose(a.cash_lines, b.cash_lines, atol=1e-9)
+
+
+def test_a_fitted_mean_replaces_the_weights_and_draws_can_be_left_off():
+    from dfs.sim import own_error as oe
+
+    specs, own = hand_built()
+    fld = F.build_field(specs, own, cash_offset=0.6, top_offset=63.2, coverage=1.0)
+    sharp = oe.MeanModel(k=3.0, totals={"QB": 1.0, "RB": 4.0, "WR": 4.0})
+    out = F.with_ownership_draws(fld, own, _error_model(cash=sharp), draws=False)
+    assert out.cash_draws is None and out.top_draws is None
+    assert out.cash_weights.sum() == pytest.approx(9.0)
+    ids = [p.id for p in fld.players]
+    a, b = ids.index("qb_a"), ids.index("qb_b")
+    # the sharper mean leans harder on the chalk QB
+    assert out.cash_weights[a] / out.cash_weights[b] > fld.cash_weights[a] / fld.cash_weights[b]
+    np.testing.assert_allclose(out.top_weights, fld.top_weights)  # no GPP mean: unchanged

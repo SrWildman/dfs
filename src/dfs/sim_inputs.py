@@ -195,6 +195,9 @@ def resolve_lines(
         if has_ownership(own)
         else None
     )
+    uncertainty = ""
+    if field is not None and getattr(lines, "ownership_uncertainty", False):
+        field, uncertainty = _with_uncertainty(field, own, lines.ownership_scenarios)
     if field is None:
         cash_line = lines.fallback_cash_line if lines.fallback_cash_line is not None else cash.value
         top_line = lines.fallback_top1_line if lines.fallback_top1_line is not None else gpp_target
@@ -216,10 +219,23 @@ def resolve_lines(
         field,
         f"Lines move with the slate: Cash % beats the field average +{lines.double_up_offset:g}, Top 1% "
         f"beats it +{lines.gpp_top1_offset:g} (ownership of {len(field.players)} players, "
-        f"{len(field.cover)} simulated with your lineups).",
+        f"{len(field.cover)} simulated with your lineups){uncertainty}.",
         f"cash line = the field's average score +{lines.double_up_offset:g}",
         "Top 1%",
     )
+
+
+def _with_uncertainty(field: FieldModel, own: dict[str, float], scenarios: int) -> tuple[FieldModel, str]:
+    """`[sim.lines] ownership_uncertainty`: the field's ownership drawn per simulation (`dfs.sim.own_error`);
+    unchanged, and said so, while there is no fitted model."""
+    from dfs.sim import own_error
+    from dfs.sim.field import with_ownership_draws
+
+    model = own_error.load()
+    if model is None:
+        return field, "; ownership uncertainty is on but no model is fitted, so ownership is taken as known"
+    drawn = with_ownership_draws(field, own, model, scenarios=scenarios, seed=SEED)
+    return drawn, f"; ownership drawn per simulation ({scenarios} field scenarios)"
 
 
 def gpp_label(target: float) -> str:

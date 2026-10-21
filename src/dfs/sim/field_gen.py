@@ -523,6 +523,55 @@ def rake_weights(
     return w
 
 
+SCENARIO_ROUNDS = 40
+SCENARIO_STEP = 0.5  # damping: a lineup holds nine players, so a full step overshoots
+
+
+def scenario_weights(
+    lineups: np.ndarray,
+    n_players: int,
+    targets: np.ndarray,
+    *,
+    rounds: int = SCENARIO_ROUNDS,
+    step: float = SCENARIO_STEP,
+) -> np.ndarray:
+    """(scenarios x lineups): one set of lineup weights per row of `targets` (scenarios x players, each a
+    share of lineups), each row summing to 1, so that the SAME generated lineups hold each player at that
+    scenario's share. The weights are an exponential tilt, `w_m ~ exp(sum of beta_i over lineup m's
+    players)`, fitted by damped iterative scaling: ownership uncertainty without regenerating the field. A
+    player no lineup holds cannot be given ownership; `scenario_fit` says how close each row came."""
+    lineups = np.asarray(lineups, dtype=int)
+    targets = np.atleast_2d(np.asarray(targets, dtype=float))
+    x = np.zeros((len(lineups), n_players), dtype=np.float32)
+    np.add.at(x, (np.repeat(np.arange(len(lineups)), lineups.shape[1]), lineups.ravel()), 1.0)
+    held = x.any(axis=0)
+    beta = np.zeros((len(targets), n_players))
+    for _ in range(rounds):
+        w = _tilt(beta, lineups)
+        own = w @ x
+        ratio = np.where(held[None, :] & (own > 0), targets / np.maximum(own, 1e-12), 1.0)
+        beta += step * np.log(np.clip(ratio, 0.2, 5.0))
+    return _tilt(beta, lineups)
+
+
+def _tilt(beta: np.ndarray, lineups: np.ndarray) -> np.ndarray:
+    logw = beta[:, lineups].sum(axis=2)
+    w = np.exp(logw - logw.max(axis=1, keepdims=True))
+    return w / w.sum(axis=1, keepdims=True)
+
+
+def scenario_fit(lineups: np.ndarray, n_players: int, weights: np.ndarray, targets: np.ndarray) -> dict:
+    """How well `scenario_weights` met its targets: the mean absolute miss over players with a target of 1%+
+    (share points) and the effective number of lineups per scenario (`1 / sum w^2`), averaged over rows."""
+    lineups = np.asarray(lineups, dtype=int)
+    own = np.stack([np.bincount(lineups.ravel(), np.repeat(w, lineups.shape[1]), n_players) for w in weights])
+    rel = targets >= 0.01
+    return {
+        "mae": float(np.abs(own - targets)[rel].mean()) if rel.any() else 0.0,
+        "ess": float((1.0 / (weights**2).sum(axis=1)).mean()),
+    }
+
+
 def model_copies(field: Field, own: Mapping[str, float] | np.ndarray, model, entries: int) -> np.ndarray:
     """The dup model's expected copies for each generated lineup in a contest of `entries`, on the ownership
     `own` (the projected shares the model was fitted on)."""

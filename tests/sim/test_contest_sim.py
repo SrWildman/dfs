@@ -148,3 +148,42 @@ def test_draw_points_follow_the_specs_and_the_seed():
     assert (a[:, 1] == 0).all()
     assert a[:, 0].mean() == pytest.approx(20.0, rel=0.1)
     assert np.corrcoef(a[:, 0], a[:, 2])[0, 1] > 0.2  # a QB and his WR1 move together
+
+
+def test_scenarios_reweight_the_same_lineups_to_each_drawn_ownership():
+    rng = np.random.default_rng(0)
+    sampler = np.sort(np.array([rng.choice(N_PLAYERS, 9, replace=False) for _ in range(800)]), axis=1)
+    field = _field(sampler, np.zeros((0, 9), int), fg.HerdModel())
+    base = np.bincount(sampler.ravel(), minlength=N_PLAYERS) / len(sampler)
+    tilt = base * np.exp(rng.normal(0, 0.3, (4, N_PLAYERS)))
+    targets = tilt * (9.0 / tilt.sum(axis=1, keepdims=True))
+    out = csim.with_scenarios(field, targets)
+    assert out.scenarios.shape == (4, len(sampler))
+    assert out.scenarios.sum(axis=1) == pytest.approx(1.0)
+    fit = fg.scenario_fit(sampler, N_PLAYERS, out.scenarios, targets)
+    unweighted = fg.scenario_fit(sampler, N_PLAYERS, np.full((4, len(sampler)), 1 / len(sampler)), targets)
+    assert fit["mae"] < unweighted["mae"] / 4
+    assert 50 < fit["ess"] < len(sampler)
+    # the sim runs on the reweighted field, and draw d uses scenario d % 4
+    res = csim.simulate_contests(
+        {"gpp": out}, [None] * N_PLAYERS, sampler[:2], [GPP], points=_ranked_points(8), seed=0
+    )
+    assert len(res.table) == 2
+
+
+def test_a_field_keyed_by_a_contest_is_used_for_that_contest_only():
+    weak = _field(np.array([np.arange(9) + 21] * 4), np.zeros((0, 9), int), fg.HerdModel())  # worst lineups
+    strong = _field(np.array([np.arange(9)] * 4), np.zeros((0, 9), int), fg.HerdModel())  # the best lineup
+    mid = np.arange(9) + 10
+    other = pay.ContestKind(
+        "other", "SE GPP", entries=1000, places_paid=200, prize_pool=8400.0, fee=10.0, min_cash=2.0
+    )
+    res = csim.simulate_contests(
+        {"gpp": weak, "other": strong},
+        [None] * N_PLAYERS,
+        np.array([mid]),
+        [GPP, other],
+        points=_ranked_points(),
+    )
+    by = res.table.set_index("contest")["p_cash"]
+    assert by["gpp"] == 1.0 and by["other"] == 0.0  # beats the weak field, loses to its own strong one

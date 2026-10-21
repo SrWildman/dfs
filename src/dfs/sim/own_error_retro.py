@@ -111,11 +111,16 @@ def fit_mean(data: dict[int, WeekData], weeks: list[int], fmt: str) -> field_own
     )
 
 
-def mean_shares(
-    week: WeekData, model: field_own.FieldOwnModel, fmt: str, kind: str = "softmax"
-) -> np.ndarray:
-    """The forecast of the week's ownership in a format: `softmax` (field_own: the default), `raw` (TFFB's
-    Own% scaled to the position totals) or `curve` (the double-up curve, scaled the same way)."""
+def mean_shares(week: WeekData, model, fmt: str, kind: str = "softmax") -> np.ndarray:
+    """The forecast of the week's ownership in a format. `model` is a fitted `own_error.MeanModel` (pooled
+    over the week's big contests), or a `field_own.FieldOwnModel` read as `kind`: `softmax` (the default),
+    `raw` (TFFB's Own% scaled to the position totals) or `curve` (the double-up curve, scaled alike)."""
+    if isinstance(model, own_error.MeanModel):  # the fitted mean: its forecast for the pooled big contests
+        big = [c for c in week.by_format(fmt) if c.entries >= MIN_ENTRIES_POOLED] or week.by_format(fmt)
+        if not big:
+            return model.shares(week.frame["tffb"].to_numpy(), week.frame["position"].to_numpy())
+        w = np.array([c.entries for c in big], dtype=float)
+        return np.column_stack([contest_mean(week, c, model) for c in big]) @ (w / w.sum())
     edge = week.edge_like().assign(week=week.week)
     if kind == "softmax":
         return field_own.predict(edge, model, fmt).to_numpy()
@@ -407,28 +412,218 @@ def level_table(res: pd.DataFrame, errors: dict[str, own_error.FormatError]) -> 
     )
 
 
-def fit_model(data: dict[int, WeekData], family: str = "hybrid") -> own_error.OwnershipErrorModel:
-    """The error model on every week there is: `(c0, c1)` by composite likelihood, `team_corr` and `tilt_sd`
-    by moments on residuals whose mean model never saw their own week. This is the fit Part 2 draws from."""
+# The mean each format draws around, chosen by held-out fit (`compare_means`, docs/SIM.md): GPPs a power of
+# TFFB's Own% that flattens as the field grows, double-ups a power with curvature
+CHOSEN_SPECS = {"gpp": "size", "cash": "quad"}
+FOLD_DIR = own_error.MODEL_FILE.parent / "own_error"
+
+
+def fit_model(
+    data: dict[int, WeekData], family: str = "hybrid", specs: dict[str, str] | None = None
+) -> own_error.OwnershipErrorModel:
+    """The model on every week in `data`: per format the chosen mean (`specs`, default `CHOSEN_SPECS`; None
+    for a spec name keeps Part 1's field_own mean) with the hybrid error's `(c0, c1)` by composite likelihood,
+    and `team_corr` / `tilt_sd` by moments on residuals whose mean never saw their own week. What the sim and
+    the backtest draw from."""
+    specs = dict(CHOSEN_SPECS if specs is None else specs)
     avail = formats_in(data)
-    formats = {}
+    formats, means = {}, {}
     for fmt in own_error.FORMATS:
         weeks = avail[fmt]
         if not weeks:
             continue
-        mean = fit_mean(data, weeks, fmt)
-        c0, c1 = fit_family(
-            data,
-            weeks,
-            fmt,
-            family,
-            lambda w, fmt=fmt, m=mean: mean_shares(data[w], m, fmt),
-            mean.totals[fmt],
-        )
-        models = {w: fit_mean(data, [x for x in weeks if x != w] or weeks, fmt) for w in weeks}
+        spec = specs.get(fmt)
+        if spec is None:
+            mean = fit_mean(data, weeks, fmt)
+            c0, c1 = fit_family(
+                data,
+                weeks,
+                fmt,
+                family,
+                lambda w, fmt=fmt, m=mean: mean_shares(data[w], m, fmt),
+                mean.totals[fmt],
+            )
+            models = {w: fit_mean(data, [x for x in weeks if x != w] or weeks, fmt) for w in weeks}
+        else:
+            mean, (c0, c1) = fit_joint(data, weeks, fmt, spec)
+            means[fmt] = mean
+            models = {
+                w: fit_joint(data, [x for x in weeks if x != w], fmt, spec)[0] if len(weeks) > 1 else mean
+                for w in weeks
+            }
         corr, tilt = fit_dependence(residual_table(data, weeks, fmt, models))
         formats[fmt] = own_error.FormatError(c0=c0, c1=c1, team_corr=corr, tilt_sd=tilt)
-    return own_error.OwnershipErrorModel(formats=formats, weeks=tuple(sorted(data)))
+    return own_error.OwnershipErrorModel(formats=formats, weeks=tuple(sorted(data)), means=means)
+
+
+def model_without(
+    week: int, *, earlier_only: bool = False, data: dict[int, WeekData] | None = None, folder=None
+) -> own_error.OwnershipErrorModel | None:
+    """The model fitted without `week`: on every other week with standings, or (`earlier_only`) the weeks
+    before it; None when there is none to fit on. Cached per week in `data/model_cache/own_error/` (refitted
+    when the weeks on hand change)."""
+    from pathlib import Path
+
+    folder = Path(folder) if folder is not None else FOLD_DIR
+    data = load_weeks() if data is None else data
+    train = {w: d for w, d in data.items() if (w < week if earlier_only else w != week)}
+    if not train:
+        return None
+    path = folder / f"{'before' if earlier_only else 'without'}_wk{week:02d}.json"
+    cached = own_error.load(path)
+    if cached is not None and cached.weeks == tuple(sorted(train)):
+        return cached
+    model = fit_model(train)
+    own_error.save(model, path)
+    return model
+
+
+def model_before(week: int) -> own_error.OwnershipErrorModel | None:
+    """What a backtest of `week` may know: the model fitted on the weeks before it."""
+    return model_without(week, earlier_only=True)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The mean, chosen by held-out fit (Part 2's first step; Part 3's stake and size terms are in the same family)
+# ---------------------------------------------------------------------------------------------------------
+
+# spec -> the MeanModel fields fitted (with c0, c1) by composite likelihood; "tffb" fixes k = 1, "power_ce"
+# fixes k at field_own's cross-entropy fit (today's GppOwn / CashOwn)
+MEAN_SPECS: dict[str, tuple[str, ...]] = {
+    "tffb": (),
+    "power_ce": (),
+    "power": ("k",),
+    "quad": ("k", "curve"),
+    "fee": ("k", "k_fee"),
+    "size": ("k", "k_size"),
+    "stake": ("k", "k_fee", "k_size"),
+}
+CHALK_CUT = {"gpp": 0.20, "cash": 0.30}  # field_own's chalk lines, for the bias rows
+EXPONENT_RANGE = (0.5, 4.0)  # as field_own's bounds on k
+LOG_C_RANGE = (np.log(1e-4), np.log(5.0))  # c0, c1 kept in a sane range
+SCORED_OWN = 0.05  # MAE on players owned 5%+ (actual) or projected 5%+ (TFFB), as field_own scores
+
+
+def contest_mean(week: WeekData, contest, mean: own_error.MeanModel) -> np.ndarray:
+    return mean.shares(
+        week.frame["tffb"].to_numpy(),
+        week.frame["position"].to_numpy(),
+        fee=contest.fee,
+        entries=contest.entries,
+    )
+
+
+def contest_loglik(week: WeekData, contest, mean: own_error.MeanModel, c0: float, c1: float) -> float:
+    """The contest's composite log-likelihood on the players TFFB projects at 1%+: a set fixed by the INPUT,
+    so every mean is scored on the same players (selecting on the candidate's own forecast lets an extreme
+    exponent drop players from the score and win by it)."""
+    mu = contest_mean(week, contest, mean)
+    sel = week.frame["tffb"].fillna(0.0).to_numpy() >= own_error.MIN_MU
+    mass = own_error.theta_mass(
+        "hybrid", mu[sel], week.frame["position"].to_numpy()[sel], mean.totals, (c0, c1)
+    )
+    return float(own_error.count_loglik(week.counts(contest)[sel], contest.entries, mass).sum())
+
+
+def fit_joint(
+    data: dict[int, WeekData], train: list[int], fmt: str, spec: str
+) -> tuple[own_error.MeanModel, tuple[float, float]]:
+    """The mean `spec` (`MEAN_SPECS`) and the hybrid error's `(c0, c1)` fitted together on `train` weeks by
+    composite likelihood over every contest of `fmt` (each contest with its own stake and size)."""
+    base = fit_mean(data, train, fmt)
+    totals = base.totals[fmt]
+    k0 = 1.0 if spec == "tffb" else float(base.exponent[fmt])
+    free = MEAN_SPECS[spec]
+    contests = [(data[w], c) for w in train for c in data[w].by_format(fmt)]
+
+    def build(p: np.ndarray) -> tuple[own_error.MeanModel, float, float]:
+        values = dict(zip(free, p[2:], strict=True))
+        k = float(np.clip(values.pop("k", k0), *EXPONENT_RANGE))
+        mean = own_error.MeanModel(k=k, totals=totals, **values)
+        return mean, float(np.exp(np.clip(p[0], *LOG_C_RANGE))), float(np.exp(np.clip(p[1], *LOG_C_RANGE)))
+
+    def loss(p: np.ndarray) -> float:
+        mean, c0, c1 = build(p)
+        return -sum(contest_loglik(w, c, mean, c0, c1) for w, c in contests)
+
+    start = np.array([np.log(0.1), np.log(0.01), *[k0 if f == "k" else 0.0 for f in free]])
+    res = minimize(loss, start, method="Nelder-Mead", options={"xatol": 1e-3, "fatol": 0.5, "maxiter": 600})
+    mean, c0, c1 = build(res.x)
+    return mean, (c0, c1)
+
+
+def _scores(actual: np.ndarray, mu: np.ndarray, tffb: np.ndarray, fmt: str) -> dict[str, float]:
+    """MAE (points) on the players that matter, and the chalk bias (forecast - actual, points) two ways: on
+    the players who FINISHED as chalk (selected on the outcome, as field_own scores it) and on the players the
+    forecast CALLED chalk (selected on the forecast)."""
+    cut = CHALK_CUT[fmt]
+    rel = (actual >= SCORED_OWN) | (tffb >= SCORED_OWN)
+    by_actual, by_forecast = actual >= cut, mu >= cut
+    return {
+        "mae": 100 * float(np.abs(mu - actual)[rel].mean()),
+        "bias_on_actual": 100 * float((mu - actual)[by_actual].mean()) if by_actual.any() else np.nan,
+        "n_on_forecast": int(by_forecast.sum()),
+        "bias_on_forecast": 100 * float((mu - actual)[by_forecast].mean()) if by_forecast.any() else np.nan,
+    }
+
+
+def compare_means(
+    data: dict[int, WeekData], specs: tuple[str, ...] = tuple(MEAN_SPECS), *, earlier_only: bool = False
+) -> tuple[pd.DataFrame, dict[tuple[int, str, str], tuple[own_error.MeanModel, tuple[float, float]]]]:
+    """Every mean spec fitted without each week and judged on each of its contests: composite log-likelihood,
+    MAE and the two chalk biases. Returns the table (one row per contest and spec) and the fits."""
+    avail = formats_in(data)
+    rows, fits = [], {}
+    for fmt in own_error.FORMATS:
+        for week in avail[fmt]:
+            train = [w for w in avail[fmt] if (w < week if earlier_only else w != week)]
+            if not train:
+                continue
+            for spec in specs:
+                mean, (c0, c1) = fit_joint(data, train, fmt, spec)
+                fits[(week, fmt, spec)] = (mean, (c0, c1))
+                wd = data[week]
+                tffb = wd.frame["tffb"].fillna(0.0).to_numpy()
+                for c in wd.by_format(fmt):
+                    actual = wd.frame["name"].map(c.own).fillna(0.0).to_numpy()
+                    mu = contest_mean(wd, c, mean)
+                    rows.append(
+                        {
+                            "week": week,
+                            "format": fmt,
+                            "spec": spec,
+                            "contest": c.contest_id,
+                            "entries": c.entries,
+                            "fee": c.fee,
+                            "loglik": contest_loglik(wd, c, mean, c0, c1),
+                            **_scores(actual, mu, tffb, fmt),
+                            "k_c": mean.exponent(c.fee, c.entries),
+                        }
+                    )
+    return pd.DataFrame(rows), fits
+
+
+def summarize_means(table: pd.DataFrame) -> pd.DataFrame:
+    """Per format and spec: the held-out log-likelihood summed (and against TFFB as is), the weeks it beats
+    TFFB in, the mean MAE and chalk biases over contests."""
+    by_week = table.groupby(["format", "spec", "week"], sort=False)["loglik"].sum().unstack("spec")
+    out = (
+        table.groupby(["format", "spec"], sort=False)
+        .agg(
+            loglik=("loglik", "sum"),
+            mae=("mae", "mean"),
+            bias_on_actual=("bias_on_actual", "mean"),
+            bias_on_forecast=("bias_on_forecast", "mean"),
+        )
+        .reset_index()
+    )
+    base = out[out["spec"] == "tffb"].set_index("format")["loglik"]
+    out["vs tffb"] = out["loglik"] - out["format"].map(base)
+    out["weeks better"] = [
+        f"{int((by_week.loc[f][s] > by_week.loc[f]['tffb']).sum())}/{len(by_week.loc[f])}"
+        for f, s in zip(out["format"], out["spec"], strict=True)
+    ]
+    return out
 
 
 def summarize_field_mean(table: pd.DataFrame) -> pd.DataFrame:

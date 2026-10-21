@@ -148,3 +148,66 @@ def test_fit_model_and_summaries(data):
     assert (team["model_sd"] > none["model_sd"]).all()
     levels = r.level_table(chk.assign(mu=0.1, e=0.0, e0=0.0), {f: model.formats[f] for f in oe.FORMATS})
     assert {"n", "sd_e", "model_sigma"} <= set(levels.columns)
+
+
+def test_compare_means_scores_every_spec_on_the_same_players(data):
+    table, fits = r.compare_means(data, specs=("tffb", "power", "size"))
+    assert set(table["spec"]) == {"tffb", "power", "size"}
+    # the data were drawn around TFFB itself, so a fitted exponent lands near 1
+    for (_week, _fmt, spec), (mean, _) in fits.items():
+        if spec == "power":
+            assert 0.7 < mean.k < 1.4
+        if spec == "tffb":
+            assert mean.k == 1.0
+    s = r.summarize_means(table)
+    assert {"vs tffb", "weeks better", "mae", "bias_on_actual", "bias_on_forecast"} <= set(s.columns)
+    assert (s[s["spec"] == "tffb"]["vs tffb"] == 0).all()
+
+
+def test_model_without_leaves_the_week_out_and_caches_it(data, tmp_path, monkeypatch):
+    calls = []
+    real = r.fit_model
+    monkeypatch.setattr(
+        r,
+        "fit_model",
+        lambda d, **kw: calls.append(sorted(d)) or real(d, specs={"gpp": "power", "cash": "power"}),
+    )
+    m = r.model_without(3, data=data, folder=tmp_path)
+    assert m.weeks == (2, 4) and calls == [[2, 4]]
+    assert r.model_without(3, data=data, folder=tmp_path) == m and len(calls) == 1  # from the cache
+    before = r.model_without(4, data=data, folder=tmp_path, earlier_only=True)
+    assert before.weeks == (2, 3)
+    assert r.model_without(2, data=data, folder=tmp_path, earlier_only=True) is None
+    assert set(m.means) == set(oe.FORMATS)
+
+
+def test_the_backtest_flag_swaps_the_field_and_leaves_an_unpublished_week_alone(monkeypatch):
+    from dataclasses import dataclass
+
+    from dfs.sim import field as F
+    from dfs.sim import own_error_flag as flag
+    from dfs.sim.simulate import PlayerSpec
+
+    specs = [PlayerSpec(f"p{i}", "WR", f"T{i}", "Z", f"G{i}", "WR1", 10.0) for i in range(4)]
+    own = {s.id: 0.25 for s in specs}
+    fld = F.build_field(specs, own, cash_offset=0.6, top_offset=63.2, coverage=1.0)
+
+    @dataclass
+    class Lines:
+        field: object
+
+    ctx = SimpleNamespace(
+        week=6, edge=pd.DataFrame({"Name": list(own), "Own%": list(own.values())}), lines=Lines(fld), notes=[]
+    )
+    model = oe.OwnershipErrorModel(
+        formats={"gpp": oe.FormatError(0.2, 0.01), "cash": oe.FormatError(0.2, 0.01)}, weeks=(2, 4, 5)
+    )
+    monkeypatch.setattr(r, "model_before", lambda week: model if week == 6 else None)
+    out = flag.prepare(ctx, True)
+    assert out.lines.field.cash_draws is not None and "weeks [2, 4, 5]" in out.notes[-1]
+    mean_only = flag.prepare(SimpleNamespace(**{**vars(ctx), "lines": Lines(fld), "notes": []}), "mean")
+    assert mean_only.lines.field.cash_draws is None
+    assert flag.prepare(SimpleNamespace(**{**vars(ctx), "lines": Lines(None)}), True).lines.field is None
+    early = flag.prepare(SimpleNamespace(**{**vars(ctx), "week": 2, "lines": Lines(fld), "notes": []}), True)
+    assert early.lines.field is fld and "no earlier weeks" in early.notes[-1]
+    assert flag.prepare(ctx, False) is ctx

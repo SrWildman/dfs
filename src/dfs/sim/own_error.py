@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -80,15 +80,72 @@ class FormatError:
         return np.sqrt(np.log1p(self.c0 + self.c1 / mu))
 
 
+REFERENCE_FEE = 5.0  # the stake and field size the mean's exponent is quoted at
+REFERENCE_ENTRIES = 2000
+OWN_FLOOR = 0.002  # as field_own: a player with no (or a tiny) projected Own% counts as 0.2%
+CURVE_CENTRE = math.log(0.05)  # the curvature term is centred on a 5% projection
+
+
+@dataclass(frozen=True)
+class MeanModel:
+    """The forecast of one format's ownership from TFFB's Own%, per contest.
+
+    Within each position a player's share is `exp(score) / sum(exp(score))` times the position's total, with
+    `score = k_c * L + curve * (L - log 5%)^2`, `L = log Own%`, and the exponent moving with the contest's
+    stake
+    and size: `k_c = k + k_fee * log(fee / $5) + k_size * log(entries / 2,000)`. `k = 1` and nothing else is
+    TFFB as is (scaled to the totals); `field_own`'s GppOwn / CashOwn is a `k` fitted by cross-entropy."""
+
+    k: float
+    totals: dict[str, float]
+    curve: float = 0.0
+    k_fee: float = 0.0
+    k_size: float = 0.0
+
+    def exponent(self, fee: float | None = None, entries: int | None = None) -> float:
+        k = self.k
+        if fee is not None and fee > 0:
+            k += self.k_fee * math.log(fee / REFERENCE_FEE)
+        if entries is not None and entries > 0:
+            k += self.k_size * math.log(entries / REFERENCE_ENTRIES)
+        return k
+
+    def shares(
+        self,
+        own: np.ndarray,
+        positions: Sequence[str],
+        *,
+        fee: float | None = None,
+        entries: int | None = None,
+    ) -> np.ndarray:
+        """Each player's forecast share of lineups (0 for a position without a total)."""
+        lo = np.log(np.maximum(np.nan_to_num(np.asarray(own, dtype=float), nan=0.0), OWN_FLOOR))
+        score = self.exponent(fee, entries) * lo + self.curve * (lo - CURVE_CENTRE) ** 2
+        pos = np.asarray(positions)
+        out = np.zeros(len(lo))
+        for position in POSITIONS:
+            m = pos == position
+            if m.any():
+                e = np.exp(score[m] - score[m].max())
+                out[m] = e / e.sum() * self.totals.get(position, 0.0)
+        return np.minimum(out, MAX_OWN)
+
+
 @dataclass(frozen=True)
 class OwnershipErrorModel:
-    """The fitted error model: a `FormatError` per format, and the weeks it was fitted on."""
+    """The fitted model: per format the error (`formats`) and the mean it is drawn around (`means`), and the
+    weeks it was fitted on."""
 
     formats: dict[str, FormatError]
     weeks: tuple[int, ...] = ()
+    means: dict[str, MeanModel] = field(default_factory=dict)
 
     def to_json(self) -> dict:
-        return {"formats": {k: asdict(v) for k, v in self.formats.items()}, "weeks": list(self.weeks)}
+        return {
+            "formats": {k: asdict(v) for k, v in self.formats.items()},
+            "means": {k: asdict(v) for k, v in self.means.items()},
+            "weeks": list(self.weeks),
+        }
 
     @classmethod
     def from_json(cls, data: dict) -> OwnershipErrorModel:
@@ -97,6 +154,16 @@ class OwnershipErrorModel:
                 k: FormatError(**{f: float(x) for f, x in v.items()}) for k, v in data["formats"].items()
             },
             weeks=tuple(int(w) for w in data.get("weeks", ())),
+            means={
+                k: MeanModel(
+                    k=float(v["k"]),
+                    totals={p: float(x) for p, x in v["totals"].items()},
+                    curve=float(v.get("curve", 0.0)),
+                    k_fee=float(v.get("k_fee", 0.0)),
+                    k_size=float(v.get("k_size", 0.0)),
+                )
+                for k, v in data.get("means", {}).items()
+            },
         )
 
 

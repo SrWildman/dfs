@@ -118,3 +118,37 @@ def test_json_round_trip_and_missing_file(tmp_path):
     assert oe.load(tmp_path / "nope.json") is None
     (tmp_path / "bad.json").write_text("{")
     assert oe.load(tmp_path / "bad.json") is None
+
+
+def test_mean_model_k_one_is_tffb_scaled_and_the_exponent_moves_with_stake_and_size():
+    own = np.array([0.30, 0.10, 0.60, 0.20, 0.20])
+    pos = ["QB", "QB", "WR", "WR", "WR"]
+    m = oe.MeanModel(k=1.0, totals={"QB": 1.0, "WR": 2.0})
+    s = m.shares(own, pos)
+    assert s[:2] == pytest.approx([0.75, 0.25])
+    assert s[2:] == pytest.approx([1.2 * 0.95 / 1.2, 0.4, 0.4], abs=0.21)  # the 60% WR is capped at MAX_OWN
+    assert s[2] == pytest.approx(oe.MAX_OWN)
+    sized = oe.MeanModel(k=1.1, totals={"QB": 1.0}, k_fee=0.1, k_size=-0.1)
+    assert sized.exponent() == pytest.approx(1.1)
+    assert sized.exponent(fee=5.0, entries=2000) == pytest.approx(1.1)
+    assert sized.exponent(fee=50.0) == pytest.approx(1.1 + 0.1 * math.log(10))
+    assert sized.exponent(entries=20000) == pytest.approx(1.1 - 0.1 * math.log(10))
+    # a sharper exponent puts more on the favourite; a missing Own% counts at the floor, not as an error
+    flat = oe.MeanModel(k=1.0, totals={"QB": 1.0}).shares(np.array([0.6, 0.4]), ["QB", "QB"])
+    sharp = oe.MeanModel(k=2.0, totals={"QB": 1.0}).shares(np.array([0.6, 0.4]), ["QB", "QB"])
+    assert sharp[0] > flat[0]
+    assert np.isfinite(m.shares(np.array([np.nan, 0.5]), ["QB", "QB"])).all()
+
+
+def test_json_round_trip_keeps_the_means_and_reads_a_part_one_file(tmp_path):
+    model = oe.OwnershipErrorModel(
+        formats={"gpp": oe.FormatError(0.07, 0.008)},
+        weeks=(2,),
+        means={"gpp": oe.MeanModel(k=1.05, totals={"QB": 1.0}, k_size=-0.08)},
+    )
+    assert oe.load(oe.save(model, tmp_path / "m.json")) == model
+    old = tmp_path / "old.json"
+    old.write_text(
+        '{"formats": {"gpp": {"c0": 0.1, "c1": 0.01, "team_corr": 0, "tilt_sd": 0}}, "weeks": [2]}'
+    )
+    assert oe.load(old).means == {}

@@ -352,8 +352,13 @@ def _field_lines(
         field_model.expected_points([field.players[k] for k in tail], tables=tables) if tail else np.zeros(0)
     )
     means = []
-    for weights in (field.cash_weights, field.top_weights):
-        means.append(points[:, cols] @ weights[ks] + float(weights[tail] @ tail_points))
+    for weights, drawn_own in ((field.cash_weights, field.cash_draws), (field.top_weights, field.top_draws)):
+        if drawn_own is None:
+            means.append(points[:, cols] @ weights[ks] + float(weights[tail] @ tail_points))
+            continue
+        # ownership uncertainty: draw d is scored against scenario d % scenarios's field
+        w = drawn_own[np.arange(len(points)) % len(drawn_own)]
+        means.append((points[:, cols] * w[:, ks]).sum(axis=1) + w[:, tail] @ tail_points)
     notes = []
     if tail:
         share = float(field.cash_weights[tail].sum() / field.cash_weights.sum())

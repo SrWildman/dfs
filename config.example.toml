@@ -128,6 +128,10 @@ gpp_top1_offset = 63.2
 # fractions, piecewise-linear, anchored at (0, 0) and (1, 1). Empty = identity. Double-ups are chalkier.
 # double_up_own_curve = [[0.05, 0.05], [0.15, 0.39]]
 # gpp_own_curve = []
+# Ownership uncertainty (shadow, off): draw the field's ownership per simulation around the fitted mean instead of
+# taking Own% as known (docs/SIM.md "Ownership uncertainty"; needs data/model_cache/own_error.json).
+# ownership_uncertainty = false
+# ownership_scenarios = 200
 
 # Which projection the model-driven tools act on: late swap, the Lineups simulator, the Suggested builds and the
 # Board's portfolio line. "CalPts" is our corrected projection (TFFB corrected for its known biases and blended with

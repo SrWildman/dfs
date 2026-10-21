@@ -424,3 +424,27 @@ def test_the_suggested_status_line_carries_the_lines_text_when_given():
     assert ss.build_summary(ls.Build(1, "gpp", "t", (), 50000, 120.0, 0.51, 0.0123, 110.0, 150.0)).startswith(
         "Build 1  GPP  $50,000  120.0 pts  Cash 51%  Top 1% 1.2%"
     )
+
+
+# --- ownership uncertainty (session H): a config switch, default off ---------------------------------------
+
+
+def test_ownership_uncertainty_is_off_by_default_and_needs_a_fitted_model(monkeypatch):
+    from dfs.sim import own_error as oe
+
+    assert C.SimLinesConfig().ownership_uncertainty is False
+    edge = _owned_slate()
+    specs = si.build_specs(edge)
+    off = si.resolve_lines(edge, specs, CASH, 190.0, C.SimLinesConfig())
+    assert off.field.cash_draws is None and "ownership drawn" not in off.note
+    on = C.SimLinesConfig(ownership_uncertainty=True, ownership_scenarios=20)
+    monkeypatch.setattr(oe, "load", lambda path=None: None)
+    unfitted = si.resolve_lines(edge, specs, CASH, 190.0, on)
+    assert unfitted.field.cash_draws is None and "no model is fitted" in unfitted.note
+    model = oe.OwnershipErrorModel(
+        formats={"gpp": oe.FormatError(0.1, 0.01), "cash": oe.FormatError(0.3, 0.01)}
+    )
+    monkeypatch.setattr(oe, "load", lambda path=None: model)
+    drawn = si.resolve_lines(edge, specs, CASH, 190.0, on)
+    assert drawn.field.cash_draws.shape[0] == 20 and drawn.field.top_draws.shape[0] == 20
+    assert "ownership drawn per simulation (20 field scenarios)" in drawn.note

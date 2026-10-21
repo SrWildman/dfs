@@ -168,6 +168,10 @@ class SimLinesConfig(BaseModel):
     double_up_own_curve: list[tuple[float, float]] = []
     gpp_own_curve: list[tuple[float, float]] = []
     own_coverage: float = Field(SIM_OWN_COVERAGE, gt=0.0, le=1.0)
+    # Ownership uncertainty (shadow, default off; docs/SIM.md "Ownership uncertainty"): the field's ownership
+    # is drawn per simulation around the fitted mean (`data/model_cache/own_error.json`), not taken as known
+    ownership_uncertainty: bool = False
+    ownership_scenarios: int = Field(200, ge=1, le=5000)
 
     @field_validator("double_up_own_curve", "gpp_own_curve")
     @classmethod
