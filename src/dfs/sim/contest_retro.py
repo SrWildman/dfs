@@ -675,7 +675,7 @@ def retro_week(
 SHIP_BAR = (
     "A ranking ships only if, held out by week, its within-contest Spearman with realized dollars beats "
     "today's (Top 1% for GPPs, Cash % for cash) by more than two standard errors over contests AND in a "
-    "majority of the weeks, with at least 4 weeks scored."
+    "majority of the weeks, with at least 4 weeks scored"  # no full stop: the refresh report adds one
 )
 MEASURES = {
     "e_dollars": "E[$]",
