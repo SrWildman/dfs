@@ -1826,3 +1826,66 @@ F's curse rows (today's builds, random lineups from the same pool, real field li
 `own_error_retro.py` (loading, folds, fits, the field-mean check, `fit_model`); tests `tests/sim/test_own_error.py`,
 `test_own_error_retro.py`; Parts 2-3: `own_error_sim_retro.py` (the measures), `own_error_flag.py` (the backtest switch), the
 hooks in `field.py`, `simulate.py`, `field_gen.py`, `contest_sim.py`, `contest_retro.py`, `sim_inputs.py` and `config.py`.
+
+## Portfolio selection (shadow, default off) (2026-10-21)
+
+`portfolio.py` chooses the lineups for all of a week's entries as one set: greedy marginal gain on the contest
+simulator's shared draws, his entries in one N-max contest placed together (each one's place counts the others
+that scored more; an identical lineup twice splits its own prize). Math: `docs/CALCULATIONS.md`, "Portfolio
+selection". Live hook: `dfs lineups suggest --portfolio` (GPP entries only, from DK's entries file), saved for
+`dfs entries fill`'s grey hint. **Off by default: the retro below does not clear the ship bar.**
+
+**What it can and cannot do.** Expected dollars add across contests, so with a correct model joint selection
+cannot raise E[$] in single-entry contests; it can only matter inside N-max contests, for objectives that are not
+a plain sum (P(any top-1%), log growth), and when the model is wrong in a correlated way.
+
+### The retro (`sim/portfolio_retro.py`; Weeks 2, 4, 5, 6; 53 entries, $454 in fees)
+
+Each week's real contests with Sam's real entry counts; candidates are today's builder's builds at the lock (the
+curse study's saved `today` jobs), and for the `_wide` arms also the 100 best (quick E[$]) of the builder's runs
+on noisy projections (~330 lineups a week). Every arm is chosen on 8,000 draws and its model numbers are
+reported on a fresh 8,000; the field, herd and construction rates are fitted on the other weeks. Realized =
+the arm's lineups placed among the real field (his own entries removed), real copies, the contest's payout table.
+`today` = `entries.suggest_pick`: the best build (Top 1% / Cash %) in every contest.
+
+| Arm | Profit | ROI | Profit without its best contest | Worst week | Top-1% / top-10% / paid entries | Mean finish (share of field) |
+|---|---|---|---|---|---|---|
+| Sam's actual | +$17 | +4% | -$183 | -$91 | 1 / 7 / 15 | 0.46 |
+| today | +$39 | +9% | -$52 | -$100 | 1 / 10 / 23 | 0.44 |
+| edollars | +$93 | +21% | +$6 | -$180 | 1 / 14 / 24 | 0.44 |
+| top1 | +$139 | +31% | +$9 | -$88 | 2 / 12 / 23 | 0.42 |
+| robust (B = 10 weeks of fees, shocked draws) | +$754 | +166% | +$429 | -$150 | 3 / 11 / 26 | 0.36 |
+| robust_tight (B = 2 weeks) | +$556 | +123% | +$232 | -$160 | 3 / 17 / 24 | 0.36 |
+| edollars_wide | +$110 | +24% | -$6 | -$180 | 0 / 13 / 22 | 0.44 |
+| top1_wide | +$125 | +28% | -$58 | -$108 | 0 / 12 / 19 | 0.45 |
+| robust_wide | +$1,153 | +254% | +$493 | -$70 | 2 / 21 / 30 | 0.31 |
+
+(`edollars_capped`, a 75% player and 40% lineup cap on GPP entries, left 8 slots empty under the caps: the
+builds share their core too much to fill 18 GPP entries; +$57.)
+
+**Paired against today, weeks as units (n = 4):** profit: robust_wide +$278/week, SE $234, z 1.2, 4 of 4 weeks;
+robust +$179 (z 1.1, 3 of 4); top1 +$25 (z 0.4); edollars +$14 (z 0.4). Paid entries: robust_wide +1.75/week
+(z 3.7, 4/4); top-10% entries +2.75 (z 2.3, 4/4); mean finish -0.20 of the field (z -2.0). Nothing else reaches
+z 2 on anything. Per contest (n = 29, correlated within a week): robust_wide +$38 (SE $24), better in 13, worse in
+7. Most of every robust arm's profit is Week 5's single-entry GPPs.
+
+**In the model (fresh draws):** edollars buys +$3 of E[$] a week over today (+2%), as the arithmetic says; top1
+doubles P(any top-1%) (8.9% -> 16.3%; 20% wide) for -5% of E[$]; robust and robust_wide are slightly below
+today's E[$] even on fresh shocked draws (171 / 164 vs 175; shocked 179 / 171 vs 174): their in-sample shocked
+E[$] was flattered by $9-32 (8 worlds is a small sample of "how the projections are wrong"). Selection bias on
+nominal draws is under $1 for the narrow arms, $5 for edollars_wide.
+
+**Concentration (GPP entries a week, 10.75 on average):** today puts one player in 100% of them, on 4 distinct
+lineups, two entries of one contest sharing 4.7 players; Sam's own: 66%, 8.5 lineups, 1.3 players. top1_wide
+spreads most (87%, all distinct, 2.6 shared); robust_wide 94%, 8 lineups, 3.9.
+
+### Verdict
+
+**Not proven; ships default off.** No arm beats today on realized profit by 2 SE (best z 1.2), the comparison
+spans 4 weeks with one dominant week, and nine arms were tried (the best of nine z's near 1 is what noise gives).
+The one consistent sign: **robust_wide** (risk-adjusted, chosen on correlated-shock draws, from the wider pool)
+won all 4 weeks on profit, paid entries and top-10% entries and finished best by mean place, while the model
+itself does not prefer it. That pattern (better in reality than in the model) fits "the real projection error is
+larger and more correlated than the simulator's", which is the Week 6 story, but four weeks cannot separate that
+from luck. **Next:** rerun with Week 7 when its standings land (`run_retro`), and keep `robust_wide` as the
+candidate; the bar stays >2 SE over weeks and most weeks.

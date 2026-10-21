@@ -54,11 +54,12 @@ def state_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def cfg():
+def cfg(tmp_path):
     return SimpleNamespace(
         google_sheets=SimpleNamespace(tab_mappings={"edge": "EdgeRaw"}),
         lineups=SimpleNamespace(salary_cap=50000),
         projection=SimpleNamespace(default="CalPts"),
+        contests=SimpleNamespace(downloads_dir=str(tmp_path / "downloads")),
     )
 
 
@@ -229,3 +230,90 @@ def test_rounds_are_kept_and_iterate_and_round_restore_work_end_to_end(
     assert "There is no round 9" in capsys.readouterr().out
     go(iterate=True, write=False, grid=grid)  # --no-write: no round is saved
     assert len(suggest_state.load_state(6).rounds) == 3
+
+
+# -- --portfolio ----------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def portfolio_dir(tmp_path, monkeypatch):
+    from dfs import portfolio_inputs
+
+    monkeypatch.setattr(portfolio_inputs, "PLAN_DIR", tmp_path / "plans")
+    return tmp_path / "plans"
+
+
+def fake_plan(seen):
+    from dfs import portfolio_inputs as pi
+
+    def plan(**kw):
+        seen.update(kw)
+        out = pi.PortfolioPlan(kw["week"], kw["objective"], "2026-10-18T12:00:00+00:00")
+        out.contests = [pi.PlannedContest("703", "NFL $4K Singleback [3 Entry Max]", 5.0, [["a"]], [2])]
+        out.portfolio = {"e_dollars": 2.0, "p_any_top1": 0.2, "max_player_share": 0.5}
+        out.today = {"e_dollars": 1.5, "p_any_top1": 0.1, "max_player_share": 1.0}
+        return out
+
+    return plan
+
+
+def test_portfolio_is_off_unless_asked(cfg, edge, capsys, monkeypatch, portfolio_dir):
+    from dfs import portfolio_inputs
+
+    monkeypatch.setattr(portfolio_inputs, "plan_portfolio", lambda **k: pytest.fail("not asked for"))
+    monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: "Suggested: ok")
+    out = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys)
+    assert "Portfolio" not in out and not portfolio_dir.exists()
+
+
+def test_portfolio_without_an_entries_file_says_so_and_the_builds_stand(cfg, edge, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: "Suggested: ok")
+    out = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys, portfolio_objective="top1")
+    assert "Portfolio skipped: no DraftKings entries file found" in out
+    assert "Suggested: ok" in out and "GPP build 2" in out
+
+
+def test_portfolio_reads_the_entries_file_prints_the_plan_and_saves_it(
+    cfg, edge, capsys, monkeypatch, tmp_path, portfolio_dir
+):
+    import test_entries as te
+
+    from dfs import portfolio_inputs
+    from dfs.contests import history
+
+    seen = {}
+    monkeypatch.setattr(portfolio_inputs, "plan_portfolio", fake_plan(seen))
+    monkeypatch.setattr(history, "read_log", lambda path: history.pd.DataFrame(columns=history.LOG_COLUMNS))
+    monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: "Suggested: ok")
+    path = te.write_entries_file(tmp_path / "DraftKings Entries (3).csv")
+    out = run(
+        cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys, portfolio_objective="top1", entries_csv=path
+    )
+    assert "Portfolio (top1)" in out and "NFL $4K Singleback [3 Entry Max]: build 2" in out
+    assert "E[$] 2.00 vs 1.50" in out and "given with --entries-csv" in out
+    assert seen["objective"] == "top1" and seen["week"] == 6
+    assert {b.kind for b in seen["builds"]} == {"cash", "gpp"} and len(seen["entries"]) == 8
+    assert (portfolio_dir / "6_portfolio.json").exists()
+    assert "plan saved" in out
+
+
+def test_portfolio_with_no_write_saves_nothing(cfg, edge, capsys, monkeypatch, tmp_path, portfolio_dir):
+    import test_entries as te
+
+    from dfs import portfolio_inputs
+    from dfs.contests import history
+
+    monkeypatch.setattr(portfolio_inputs, "plan_portfolio", fake_plan({}))
+    monkeypatch.setattr(history, "read_log", lambda path: history.pd.DataFrame(columns=history.LOG_COLUMNS))
+    path = te.write_entries_file(tmp_path / "DraftKings Entries (3).csv")
+    out = run(
+        cfg,
+        edge,
+        dict.fromkeys(edge["Name"], "Both"),
+        capsys,
+        write=False,
+        portfolio_objective="edollars",
+        entries_csv=path,
+    )
+    assert "Portfolio (edollars)" in out and "portfolio plan was not saved" in out
+    assert not portfolio_dir.exists()

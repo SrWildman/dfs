@@ -106,6 +106,9 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--rank CHOICE` | What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by 1 + the identical entries expected). Default: `top1`. |
 | `--iterate` | Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are ignored: the rules box's Builds wanted line says how many. |
 | `--round INT RANGE` | Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a new round (the state is kept in data/suggest_state/<week>.json). |
+| `--portfolio` | Also choose which GPP build goes in which of your GPP entries as one set (DK's entries file, the newest in Downloads, says which contests and how many entries) and print the plan beside today's pick; `dfs entries fill` then shows it as the grey Suggested hint. Off by default: it has not been proven yet. Needs `dfs stacks --refit` once. |
+| `--portfolio-objective CHOICE` | What --portfolio maximises: edollars (expected winnings), top1 (the chance at least one entry finishes in a top 1%) or robust (risk-adjusted winnings on draws where the projections are wrong together). Default: `edollars`. |
+| `--entries-csv PATH` | With --portfolio: the DraftKings entries file to read (default: the newest in Downloads). |
 
 ### `dfs stacks`
 

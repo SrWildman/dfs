@@ -187,3 +187,21 @@ def test_a_field_keyed_by_a_contest_is_used_for_that_contest_only():
     )
     by = res.table.set_index("contest")["p_cash"]
     assert by["gpp"] == 1.0 and by["other"] == 0.0  # beats the weak field, loses to its own strong one
+
+
+def test_keep_draws_returns_each_contests_places_and_copies_and_refuses_repeated_labels():
+    field = _field(np.array([np.arange(9) + k for k in range(5, 20)]), np.zeros((0, 9), int), fg.HerdModel())
+    lineups = np.array([np.arange(9), np.arange(21, 30)])
+    other = pay.ContestKind("gpp2", "SE GPP", 1000, 200, 8400.0, 10.0, 2.0)
+    kw = dict(labels=["best", "worst"], points=_ranked_points(4))
+    res = csim.simulate_contests(
+        {"gpp": field}, [None] * N_PLAYERS, lineups, [GPP, other], keep_draws=True, **kw
+    )
+    assert set(res.detail) == {"gpp", "gpp2"}
+    place, copies = res.detail["gpp"]
+    assert place.shape == copies.shape == (4, 2)
+    assert (place[:, 0] == 1.0).all() and (place[:, 1] > place[:, 0]).all()  # the best lineup wins every draw
+    assert np.allclose(place, res.detail["gpp2"][0])  # same field and draws, whatever the payout table
+    assert csim.simulate_contests({"gpp": field}, [None] * N_PLAYERS, lineups, [GPP], **kw).detail is None
+    with pytest.raises(ValueError, match="distinct"):
+        csim.simulate_contests({"gpp": field}, [None] * N_PLAYERS, lineups, [GPP, GPP], keep_draws=True, **kw)

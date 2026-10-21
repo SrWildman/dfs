@@ -36,6 +36,8 @@ from dfs import (
     paths,
     perf,
     pool_store,
+    portfolio,
+    portfolio_inputs,
     sheet_edge_finder,
     store,
     suggest_state,
@@ -3395,7 +3397,15 @@ def entries_fill(
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
 
-    plan = ent.plan_fill(parsed, tab_rows, lineups, now=_entries_now(), again=again)
+    suggester = ent.suggest_pick
+    saved = portfolio_inputs.load_plan(_suggest_week(title))
+    if saved is not None and saved.portfolio:
+        suggester = portfolio_inputs.portfolio_suggester(saved, ent.suggest_pick)
+        console.print(
+            f"GPP hints come from the portfolio plan made {saved.made_at} ({saved.objective}); cash entries "
+            "keep today's pick.\n"
+        )
+    plan = ent.plan_fill(parsed, tab_rows, lineups, now=_entries_now(), again=again, suggester=suggester)
     for reason, n in plan.skipped.items():
         console.print(f"[yellow]Skipped {n} entr{'y' if n == 1 else 'ies'}: {reason}.[/yellow]")
     if not plan.rows:
@@ -3573,6 +3583,17 @@ class SuggestRank(StrEnum):
 
 
 assert tuple(r.value for r in SuggestRank) == RANKS  # one list of ranks, spelled once in the suggest module
+
+
+class PortfolioObjective(StrEnum):
+    """What `dfs lineups suggest --portfolio` maximises over all the GPP entries (`portfolio.OBJECTIVES`)."""
+
+    edollars = "edollars"
+    top1 = "top1"
+    robust = "robust"
+
+
+assert tuple(o.value for o in PortfolioObjective) == portfolio.OBJECTIVES
 
 
 class SwapMetric(StrEnum):
@@ -4211,6 +4232,26 @@ def lineups_suggest(
         help="Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a "
         "new round (the state is kept in data/suggest_state/<week>.json).",
     ),
+    portfolio_: bool = typer.Option(
+        False,
+        "--portfolio",
+        help="Also choose which GPP build goes in which of your GPP entries as one set (DK's entries file, "
+        "the newest in Downloads, says which contests and how many entries) and print the plan beside "
+        "today's pick; `dfs entries fill` then shows it as the grey Suggested hint. Off by default: it has "
+        "not been proven yet. Needs `dfs stacks --refit` once.",
+    ),
+    portfolio_objective: PortfolioObjective = typer.Option(
+        PortfolioObjective(portfolio_inputs.DEFAULT_OBJECTIVE),
+        "--portfolio-objective",
+        help="What --portfolio maximises: edollars (expected winnings), top1 (the chance at least one entry "
+        "finishes in a top 1%) or robust (risk-adjusted winnings on draws where the projections are wrong "
+        "together).",
+    ),
+    entries_csv: Path = typer.Option(
+        None,
+        "--entries-csv",
+        help="With --portfolio: the DraftKings entries file to read (default: the newest in Downloads).",
+    ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
     Suggested tab.
@@ -4264,6 +4305,8 @@ def lineups_suggest(
         rank=rank.value,
         iterate=iterate,
         restore_round=round_,
+        portfolio_objective=portfolio_objective.value if portfolio_ else None,
+        entries_csv=entries_csv,
     )
 
 
@@ -4290,6 +4333,8 @@ def _run_suggest(
     rank: str = DEFAULT_RANK,
     iterate: bool = False,
     restore_round: int | None = None,
+    portfolio_objective: str | None = None,
+    entries_csv: Path | None = None,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
     in the slate; the command passes the real clock. A fresh run, `iterate` (rerun around the tab's
@@ -4464,6 +4509,11 @@ def _run_suggest(
         console.print(f"[yellow]{note}[/yellow]")
     for name, took in report.phases.items():  # the search phases, between the two sheet-side groups
         phases[name] = (took, 0)
+    if portfolio_objective is not None:
+        with perf.measure(phases, "portfolio"):
+            _run_portfolio(
+                cfg, report.builds, specs, edge, week, portfolio_objective, entries_csv, write, now
+            )
     if not write:
         console.print("[dim]--no-write: the Suggested tab and the state file were not changed.[/dim]")
         _print_phases(phases)
@@ -4488,6 +4538,69 @@ def _run_suggest(
     path = suggest_state.save_state(state)  # after the tab: the file mirrors what the tab shows
     console.print(f"[green]OK[/green] round {record.round} saved to {path}")
     _print_phases(phases)
+
+
+def _run_portfolio(
+    cfg: Config,
+    builds,
+    specs,
+    edge: pd.DataFrame,
+    week: int,
+    objective: str,
+    entries_csv: Path | None,
+    write: bool,
+    now: datetime,
+) -> None:
+    """`--portfolio`: the GPP builds assigned to DK's GPP entries as a set, printed and (on a write) saved for
+    `dfs entries fill`. Never fails the suggest run: a problem is said and the builds stand."""
+    from dfs import entries as ent
+    from dfs.contests import history
+    from dfs.paths import CONTESTS_DIR
+    from dfs.sim import retro
+
+    console.print()
+    if entries_csv is not None:
+        path, how = entries_csv, "given with --entries-csv"
+    else:
+        path, how = ent.resolve_entries_file(None, Path(cfg.contests.downloads_dir).expanduser())
+    if path is None:
+        console.print(
+            f"[yellow]Portfolio skipped: {escape(how)}. Download DK's entries file (Edit entries) or pass "
+            "--entries-csv.[/yellow]"
+        )
+        return
+    try:
+        parsed = ent.read_entries_file(path)
+    except (ent.EntriesFileError, OSError) as e:
+        console.print(f"[yellow]Portfolio skipped: {escape(str(e))}[/yellow]")
+        return
+    classified, _skipped = ent.classify_entries(parsed)
+    console.print(
+        f"Portfolio from [bold]{path.name}[/bold] ({how}): {len(classified)} Classic main-slate entries."
+    )
+    log = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
+    plan = portfolio_inputs.plan_portfolio(
+        week=week,
+        builds=builds,
+        specs=specs,
+        edge=edge,
+        entries=classified,
+        log=log,
+        season=retro.SEASON,
+        objective=objective,
+        now=now,
+    )
+    for line in portfolio_inputs.format_plan(plan):
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+    if not plan.portfolio:
+        return
+    if write:
+        saved = portfolio_inputs.save_plan(plan)
+        console.print(
+            f"[green]OK[/green] portfolio plan saved to {saved} (`dfs entries fill` shows it as the hint)"
+        )
+    else:
+        console.print("[dim]--no-write: the portfolio plan was not saved.[/dim]")
 
 
 def _print_phases(phases: dict[str, tuple[float, int]]) -> None:

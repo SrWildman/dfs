@@ -2167,3 +2167,37 @@ and the tab's track-record row.
 **Speed.** About a minute on a full slate (`dfs stacks`). `field_gen._Batch.fits` was rewritten for it (the same
 rule laid out per player by gather, tested against the original in `tests/sim/test_field_gen.py`: same lineups
 for the same seed, about twice as fast).
+
+## Portfolio selection (`portfolio.py`, `portfolio_inputs.py`, 2026-10-21; shadow, default off)
+
+Choosing the lineups for ALL of one week's entries as a set, on the contest simulator's shared draws
+(`sim/contest_sim.simulate_contests(..., keep_draws=True)`: per candidate, per draw, the place among the field
+alone, `1 + (entries - 1) x` the field's share that scored strictly more, and the identical field entries
+expected, `copies`).
+
+**His entries together in one contest.** For his lineups `i` in a contest, in draw `d`, with `s` the lineup's
+points: `place_i = place_field_i + #(j != i : s_j > s_i)` and `copies_i = copies_field_i + #(j != i : lineup_j
+is lineup_i)`; each entry is paid `block_payout(place_i, copies_i)` (the average of the payout table over
+places `place .. place + copies`, `contest_sim.block_payout`) and the contest pays the sum. An identical lineup
+twice therefore splits its prize with itself, and a second entry that scores more pushes the first down a
+place. Expected dollars add across contests, so for single-entry contests this changes nothing: the
+arithmetic only bites inside an N-max GPP.
+
+**Objectives** (`portfolio.OBJECTIVES`), on one set of draws: `edollars` = mean over draws of the week's total
+payout; `top1` = P(at least one entry of any contest in its top 1%, `place <= max(1, 0.01 x entries)`) with E[$]
+as a `1e-9`-weighted tie-break; `robust` = mean of `log(1 + (payout - fees) / B)`, `fees` the week's entry fees,
+`B` the bankroll scale (`BANKROLL_MULTIPLE` = 10 weeks of fees by default; a `B` not above the fees is refused,
+`log(0)`). `robust` is only different from `edollars` on draws that carry correlated projection error: the
+retro's `shocked` draws (`portfolio_retro.shocked_specs`) scale each player's mean by `exp(0.20 z - 0.02)` and
+each offense's by `exp(0.10 z - 0.005)`, in 8 blocks (assumed, not fitted).
+
+**Selection.** Greedy: with `n` slots in total, repeat `n` times: for every open contest and every eligible
+candidate compute the objective's gain from adding it (including its effect on the entries already there), and
+take the largest. Options: `max_lineup_share` and `max_player_share` (shares of the GPP entries, `ceil(share x
+entries)` each), `max_overlap` (players two entries of one contest may share), `allow_repeat`. A slot nothing
+may fill is left empty and reported, never relaxed. Cash entries are outside the live hook (`portfolio_inputs`
+plans GPP entries only).
+
+**Reported numbers** (`portfolio.evaluate`): `e_dollars`, `profit` = minus fees, `p_any_top1`, `e_top1`
+(expected entries in a top 1%), `log_growth` (the `robust` utility), `p_profit`, `cvar` (mean profit of the worst
+20% of draws), and the concentration `max_lineup_share` / `max_player_share`.
