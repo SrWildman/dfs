@@ -55,7 +55,7 @@ synced-data cache (so a source that fails on the first sync reads as
 no-data-yet rather than a previous week's now-mismatched numbers), and
 runs a full `dfs sync`. It then prints which saved odds snapshot the week's line movement is measured against, e.g. "Opening lines: Tue 9:30 am ET snapshot (after the previous week's last game)"
 (or says it is using the current lines when none is older). If the new sheet has a Cockpit tab (a copied template does), the
-sync is followed by a rebuild of it from the data just synced, so last week's render is gone at once; it never fails the week.
+sync is followed by a rebuild of it from the data just synced, so last week's render is gone at once; it never fails the week. A Player tab's hidden raw tabs are rewritten the same way.
 
 **The opening lines.** Movement (`ImpliedMove`, `TotMove`, `SpdMove`, the Movement tab) is measured against the week's *opening* lines: the earliest saved `nfl_odds` snapshot that shows the new
 week's slate, not whenever `dfs week new` happened to run (`store.opening_snapshot`). The odds source only ever shows the current slate, so the opening is on record only if the lines were saved
@@ -83,7 +83,7 @@ copied every week.
 
 ## 2. Research
 
-**Tabs:** Board, Edge Finder, Slate Grid, EdgeRaw, Movement (once the slate is live).
+**Tabs:** Board, Edge Finder, Player, Slate Grid, EdgeRaw, Movement (once the slate is live).
 
 ```
 dfs sync              # re-run any time through the week as lines/injuries/weather move
@@ -96,6 +96,9 @@ Every sync also rewrites the **Edge Finder** tab (cash core and GPP upside per p
 `CalPts` disagrees with TFFB, who inherits an out back's carries, every absent regular as context, usage trends, matchups (context only), and
 the unproven context signals; your open/closed sections survive the rewrite). The final `dfs sync --live` after inactives (about 90 minutes before kickoff) is the one that
 matters for the injury list. `CalPts` is **not** the default projection: it is tracked in Model Check.
+
+The **Player** tab is the one-page look at a single player: pick a name in B1 and it shows his projections side by side, ownership, last five games of usage, matchup, props, the signals firing on him with
+Model Check's record for each, and how many of your lineups he is in. `dfs sync` keeps its data fresh (on a sheet that has the tab: `dfs setup player-card` creates it, template first).
 
 Check Board first each week -- it's a landing view, five collapsible
 sections: Slate shape (games ranked by total, with Fav/Spread/Pace/wind/shootout

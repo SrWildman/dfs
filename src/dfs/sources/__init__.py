@@ -22,6 +22,7 @@ from dfs.sources.nflverse_pbp import NflversePbpSource
 from dfs.sources.nflverse_snaps import NflverseSnapsSource
 from dfs.sources.nflverse_usage import NflverseUsageSource
 from dfs.sources.odds_props import OddsPropsSource
+from dfs.sources.player_log import PlayerLogSource
 from dfs.sources.rotowire_odds import RotowireOddsSource
 from dfs.sources.sleeper_projections import SleeperProjectionsSource
 from dfs.sources.tffb_gps import TffbGpsSource
@@ -72,6 +73,8 @@ SOURCES: dict[str, Source] = {
     "snaps": NflverseSnapsSource(),
     "pbp": NflversePbpSource(),
     "usage": NflverseUsageSource(),
+    # The Player card's last five games per player; reads the stats snapshot `usage` just saved.
+    "player_log": PlayerLogSource(),
     "ffopportunity": FfopportunitySource(),
     "nflverse_injuries": NflverseInjuriesSource(),
     "nflverse_depth": NflverseDepthSource(),

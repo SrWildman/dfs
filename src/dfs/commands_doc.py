@@ -173,6 +173,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs setup add-pool-control",
             "dfs setup dk-upload",
             "dfs setup cockpit",
+            "dfs setup player-card",
             "dfs setup add-filters",
             "dfs setup protect",
             "dfs setup suggested-controls",

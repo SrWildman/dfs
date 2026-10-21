@@ -128,10 +128,11 @@ def team_week_totals(stats: pd.DataFrame) -> pd.DataFrame:
     return totals.rename(columns={"targets": "team_targets", "carries": "team_carries", "air": "team_air"})
 
 
-def red_zone_counts(pbp: pd.DataFrame) -> pd.DataFrame:
+def red_zone_counts(pbp: pd.DataFrame, *, goal_line: int | None = None) -> pd.DataFrame:
     """Per (gsis id, week): `rz` = targets + carries from inside the opponent's 20, `hvt` = the
     same from inside the 10. Real scrimmage plays only (pass/run), no two-point attempts, no
-    deleted plays."""
+    deleted plays. With `goal_line` (the Player card's "inside the 5") a `gl` column counts the same
+    from inside that yard line; without it the frame is exactly what it always was."""
     plays = pbp
     if "season_type" in plays.columns:
         plays = plays[plays["season_type"] == "REG"]
@@ -152,7 +153,11 @@ def red_zone_counts(pbp: pd.DataFrame) -> pd.DataFrame:
     all_touches = pd.concat(touches, ignore_index=True)
     all_touches["rz"] = (all_touches["yard"] <= RZ_YARDLINE).astype(int)
     all_touches["hvt"] = (all_touches["yard"] <= HVT_YARDLINE).astype(int)
-    return all_touches.groupby(["GsisId", "week"], as_index=False)[["rz", "hvt"]].sum()
+    columns = ["rz", "hvt"]
+    if goal_line is not None:
+        all_touches["gl"] = (all_touches["yard"] <= goal_line).astype(int)
+        columns.append("gl")
+    return all_touches.groupby(["GsisId", "week"], as_index=False)[columns].sum()
 
 
 def player_usage(

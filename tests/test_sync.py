@@ -202,5 +202,7 @@ def test_only_the_per_player_context_sources_declare_no_sheet_tab():
     no_tab = {"usage", "ffopportunity", "nflverse_injuries", "nflverse_depth"}
     # The shadow sources (ESPN, props) reach the sheet through EdgeRaw's `EspnPts` / `PropPts` columns alone.
     no_tab |= {"espn", "odds_props"}
+    # The Player card's last five games per player reach the sheet through its hidden raw tab alone.
+    no_tab |= {"player_log"}
     assert all(not SOURCES[name].uploads_to_sheet for name in no_tab)
     assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name not in no_tab)
