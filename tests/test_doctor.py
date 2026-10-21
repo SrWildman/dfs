@@ -163,6 +163,7 @@ _ALL_GOOD_TABS = {
     "Player": [],
     "PlayerCardRaw": [],
     "PlayerCardRows": [],
+    "Stacks": [],
     EXPOSURE_TAB: [],
 }
 
@@ -1022,6 +1023,15 @@ def test_run_doctor_passes_a_bankroll_tab_with_the_stakes_block():
     rows = _lineups_rows()
     issues = run_doctor(FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows), _base_config(), title="Week 1")
     assert not [i for i in issues if i.check == "stakes-block"]
+
+
+def test_run_doctor_flags_a_sheet_with_no_stacks_tab_and_passes_one_with_it():
+    rows = _lineups_rows()
+    without = {t: h for t, h in _ALL_GOOD_TABS.items() if t != "Stacks"}
+    issues = run_doctor(FakeDoctorClient(tabs=without, rows=rows), _base_config(), title="Week 1")
+    assert any(i.check == "stacks-tab" and "dfs setup stacks" in i.detail for i in issues)
+    issues = run_doctor(FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows), _base_config(), title="Week 1")
+    assert not [i for i in issues if i.check == "stacks-tab"]
 
 
 def test_run_doctor_flags_a_sheet_with_no_cockpit_tab_and_passes_one_with_it():

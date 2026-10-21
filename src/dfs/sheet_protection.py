@@ -41,6 +41,7 @@ from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_suggested import typed_ranges as suggested_typed_ranges
 from dfs.sheet_views import BOARD_TAB
 from dfs.sheets import SheetsClient, column_letter
+from dfs.stacks_tab import STACKS_TAB
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW
 
 # Whole tab, no exceptions -- entirely computed or spilled-array output,
@@ -53,6 +54,7 @@ FULLY_PROTECTED_TABS = [
     pc.RAW_TAB,  # the Player card's hidden raw data, rewritten whole by `dfs sync`
     pc.ROWS_TAB,
     COCKPIT_TAB,  # rewritten whole by `dfs sync --live` / `late-swap` / `setup cockpit`; nothing is typed
+    STACKS_TAB,  # rewritten whole by `dfs stacks` / `dfs sync` / `setup stacks`; nothing is typed
 ]
 # Deliberately NOT protected (Sam, 2026-10-09): opening or closing a row group counts as an edit of
 # the rows it hides, so whole-tab protection showed a "Heads up" dialog on every fold. Their safety is

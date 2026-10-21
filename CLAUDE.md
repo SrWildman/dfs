@@ -105,6 +105,17 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   EdgeRaw (columns from `derived.edge_sheet_letter`) plus two hidden raw tabs, `PlayerCardRaw` / `PlayerCardRows`, that every `dfs sync` rewrites **only on a sheet that already has the tab** (never
   fails the sync). Template first, then live, `dfs doctor` after (checks `player-card-*`). Layout and spec: `player_card.py` (pure; one `Field` spec drives formula and text), I/O: `sheet_player_card.py`,
   data: `sources/player_log.py`. A rebuild keeps the name in `B1`.
+- `dfs stacks [--sheet-id <id>] [--no-sheet] [--refit] [--retro]` -- ranks every QB's stacks of one and two teammates (WR/TE, or a RB
+  whose `Tgt%` is in the top third of the slate's RB1/RB2; with and without a bring-back) by simulated Top 1% rate against how much of the
+  generated GPP field plays them, and writes the read-only **Stacks** tab (right after Suggested; top 20 stacks, top 8 games, the retro's
+  track record on top, column A `BUILD` = type the last cell's `Always use: ...` line into Suggested's rules box). Prints the same page; writes the sheet
+  only where the tab exists. Before TFFB publishes ownership the field %/leverage columns read `-` (a CalPts stand-in drives the field). `--refit` refits
+  the field model on the real standings (about two minutes, saved in `data/model_cache/stack_field.json`); `--retro` refits and reruns the retro
+  that is the tab's track record (`data/model_cache/stacks_retro.json`, several minutes; run it after `dfs week close`). Math in `stacks.py`
+  (pure), layout `stacks_tab.py`, I/O `sheet_stacks.py`, retro `sim/stacks_retro.py`, live inputs `stacks_inputs.py`. A plain `dfs sync` refreshes the tab
+  (about a minute; never on `--live`, never fails the sync); `dfs week new` refreshes it on the new sheet after its sync. An information view: the verdict on its leverage signal (`tested` / `weak` / `untested`) is on the tab.
+- `dfs setup stacks [--sheet-id <id>]` -- creates (or rebuilds) the Stacks tab right after Suggested. Template first, then live, `dfs doctor` after
+  (check `stacks-tab`). Needs `dfs stacks --refit` once.
 - `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one
   command, no sheet: the five-pair shape retest, the teammate-bump race, the probability recalibration check, the
   tails check, the field_own scores, the ESPN / props blend gate and the PROPS SHADOW (`props_edge.build_shadow`) (and `sim/contest_retro` once it is on main; it
@@ -113,7 +124,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   "changed since last week" against the previous report), prints ten lines with each study's time. About two
   minutes. Run after `dfs week close`.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
-  exist, the Cockpit tab is there, `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
+  exist, the Cockpit and Stacks tabs are there, `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
   linked exactly once, Lineups' header repeats are where
   `LINEUPS_NAME_BLOCKS` expects, DK Upload's entries layout with its
   Lineup dropdown, typed-cell cue and protection exemption, and the hand-built per-row formula ranges on

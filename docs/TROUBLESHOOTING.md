@@ -361,6 +361,15 @@ game that locked since the run is shown as `LOOK`, never as current. Run `dfs li
 They only refresh a sheet that already has the tab. `dfs doctor` says `cockpit-tab` when it is missing; `dfs setup cockpit` creates it (template first). A yellow "Cockpit not refreshed (...)" line means
 the refresh itself failed (a Sheets error, usually); the sync or late-swap result above it still stands. `dfs setup cockpit` rebuilds it.
 
+**The Stacks tab shows `-` in Field %, Boom % and Lev.**
+Not a fault. TFFB has not published ownership yet (usually midweek), so the generated field is built from a CalPts stand-in and the numbers that depend on the field's make-up are left out; the list sorts by the simulated Top 1% until the next `dfs sync` after ownership is out.
+
+**`dfs sync` did not touch the Stacks tab, or says "Stacks not refreshed".**
+A sync only refreshes a sheet that already has the tab (`dfs doctor` says `stacks-tab` when it is missing; `dfs setup stacks` creates it, template first), never on `--live`. "no fitted field model yet" means run `dfs stacks --refit` once (about two minutes; it parses the saved standings). Any other message is the refresh failing (a Sheets error, usually); the sync above it still stands, and `dfs stacks` rebuilds the tab.
+
+**The Stacks tab says "weak signal" or "untested".**
+The track-record row is the retro of past weeks: it compares the 20 highest-leverage stacks with the same number of stacks picked at random. Until the combined result is clear, the leverage order is shown as is with that label (weak) or the list is sorted by boom share (untested). `dfs stacks --retro` reruns it after a close.
+
 **Exposure shows a player above 100%.**
 `Exposure!H1` is the divisor and it must be the formula that counts built lineups, not a typed number (a typed 6 stayed put through a 15-lineup week and read 150%). `dfs doctor` says `lineup-count-cell`
 when H1 holds a typed value; `dfs setup build-views` rewrites it (template first, then the live week; your Targets are kept).
