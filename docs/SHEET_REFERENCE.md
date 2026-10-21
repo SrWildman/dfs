@@ -653,7 +653,7 @@ for it as of the last `dfs results update`, `results_update.signal_table_path`);
 
 ### Cockpit
 
-Sunday's last 90 minutes on one **read-only** page, right after `Board` in the tab strip (`sheet_style.WEEK_ORDER`, family `decide`). Nothing on it is
+Sunday's last 90 minutes on one **read-only** page, right before `Board` (to its left) in the tab strip (`sheet_style.WEEK_ORDER`, family `decide`). Nothing on it is
 typed and it holds no formula: Python rewrites it whole (`cockpit.build_layout`, pure; `sheet_cockpit` reads the inputs and writes it), so it cannot disturb
 Board, Exposure or anything Sam types, and it has warning-only protection (`sheet_protection.FULLY_PROTECTED_TABS`). **Created by `dfs setup cockpit`** (template first, then the live
 week; `dfs doctor` flags a sheet without the tab, check `cockpit-tab`); **refreshed** by `dfs sync --live` and `dfs lineups late-swap`, and only on a sheet that already has it

@@ -159,7 +159,9 @@ def test_every_header_on_the_tab_has_a_note(tables):
     from dfs.sheet_column_notes import CONTESTS_NOTES
 
     layout = sc.build_layout(tables, SEASON)
-    headers = {str(c).strip() for r in layout.header_rows for c in layout.rows[r - 1] if c != ""}
+    headers = {
+        str(c).strip() for r in layout.header_rows for c in sc._note_header(layout.rows[r - 1]) if c != ""
+    }
     assert not [h for h in headers if h not in CONTESTS_NOTES], "a header with no hover note"
 
 
@@ -306,11 +308,66 @@ def test_the_post_mortem_shows_a_dash_for_what_it_has_no_data_for():
 
 def test_the_season_block_adds_the_same_measures_up():
     rows = {r[0]: r[1:] for r in sc.decision_season_rows(_post_mortem(), 2026)}
-    assert rows["Cash entries cashed"] == ["1 of 2 (50%)", "1 week(s)"]
-    assert rows["GPP: average finish"] == ["top 42%", "2 entries"]
-    assert rows["Biggest weekly swing: won / cost"] == ["1 won, 0 cost", "1 week(s)"]
-    assert rows["Pool hit rate (pooled / model favourites left out)"] == ["45% / 33%", "1 week(s) logged"]
-    assert rows["Same lineups cashing in other contests"] == ["6 of 12 pairs", "2 entries"]
-    assert set(sc.DECISIONS_HEADERS) <= set(
-        __import__("dfs.sheet_column_notes", fromlist=["x"]).CONTESTS_NOTES
+    assert rows["Cash entries cashed"] == ["1 of 2 (50%)", "2 entries in 1 week"]
+    assert rows["GPP: average finish"] == ["top 42%", "2 entries in 1 week"]
+    assert rows["GPP: entries in the top 10%"] == ["1 of 2 (50%)", "2 entries in 1 week"]
+    assert rows["GPP: entries cashed"] == ["1 of 2 (50%)", "2 entries in 1 week"]
+    assert rows["Cash: most copies of one lineup"][0] == (
+        "6 copies of your lineup (Week 5, NFL GIANT $10 Double Up)"
     )
+    swing = rows["Biggest weekly swing: won / cost"]
+    assert swing[0].startswith("Won 1 week, cost 0. Biggest: Wk 5 Christian Watson over Michael Wilson +28.0")
+    assert swing[1] == "1 week"
+    assert rows["Beat their projection: your pool / model favourites you left out"] == [
+        "18 of 40 (45%) / 4 of 12 (33%)",
+        "1 week logged",
+    ]
+    assert rows["Same lineups cashing in other contests"] == ["6 of 12 pairs (50%)", "2 entries in 1 week"]
+    for label, (value, based_on) in rows.items():
+        assert isinstance(value, str) and isinstance(based_on, str), label
+        assert not value.replace(".", "").isdigit() and "/" not in value.replace(" / ", ""), label
+    from dfs.sheet_column_notes import CONTESTS_NOTES
+
+    assert set(sc.DECISIONS_HEADERS) <= set(CONTESTS_NOTES)
+
+
+def test_the_season_block_has_a_title_that_lists_the_weeks_and_says_what_is_left_out():
+    layout = sc.build_layout(_post_mortem(), 2026)
+    headers = [layout.rows[r - 1][0] for r in layout.header_rows]
+    assert "Your decisions \u2014 weeks with your standings files (5)" in headers
+    assert sc._note_header(layout.rows[layout.header_rows[-1] - 1])[0] == "Your decisions"
+    notes = [layout.rows[r - 1][0] for r in layout.note_rows]
+    assert any("H2H" in n for n in notes) and any("Bankroll" in n for n in notes)
+    assert sc.decision_weeks(_post_mortem(), 2026) == [5]
+    assert (
+        sc.decisions_title([2, 4, 5, 6])
+        == "Your decisions \u2014 weeks with your standings files (2, 4, 5, 6)"
+    )
+
+
+def test_based_on_counts_the_weeks_a_row_comes_from_and_a_loss_week_is_worded():
+    d = _entries().copy()
+    d.loc[d.index[0], "week"] = 4  # one cash entry from another week
+    swings = pd.DataFrame(
+        {
+            "season": [2026, 2026, 2026],
+            "week": [4, 5, 6],
+            "contest_id": ["1", "2", "3"],
+            "series": ["NFL $5 Double Up [Single Entry]"] * 3,
+            "player": ["Lamb", "Watson", "Johnson"],
+            "player_own": [0.1] * 3,
+            "player_pts": [44.3, 35.3, 0.0],
+            "alt": ["Chase", "Wilson", "Likely"],
+            "alt_own": [0.2] * 3,
+            "alt_pts": [5.7, 7.3, 23.9],
+            "swing": [38.6, 28.0, -23.9],
+        }
+    )
+    tables = sc.Tables(*[pd.DataFrame()] * 6, decisions=d, swings=swings)
+    rows = {r[0]: r[1:] for r in sc.decision_season_rows(tables, 2026)}
+    assert rows["Cash entries cashed"][1] == "2 entries in 2 weeks"
+    assert rows["Biggest weekly swing: won / cost"] == [
+        "Won 2 weeks, cost 1. Biggest: Wk 4 Lamb over Chase +38.6; "
+        f"worst: Wk 6 Johnson over Likely {sc.MINUS}23.9",
+        "3 weeks",
+    ]

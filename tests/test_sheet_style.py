@@ -2790,11 +2790,11 @@ def test_the_stacks_tab_sits_right_after_suggested_in_the_build_family():
     assert dict(WEEK_ORDER)["Stacks"] == "build"
 
 
-def test_the_cockpit_sits_right_after_the_board_in_the_decide_family():
+def test_the_cockpit_sits_right_before_the_board_in_the_decide_family():
     from dfs.sheet_style import WEEK_ORDER
 
     tabs = [tab for tab, _family in WEEK_ORDER]
-    assert tabs.index("Cockpit") == tabs.index("Board") + 1
+    assert tabs.index("Cockpit") == tabs.index("Board") - 1
     assert dict(WEEK_ORDER)["Cockpit"] == "decide"
 
 

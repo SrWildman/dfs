@@ -75,8 +75,8 @@ def test_setup_cockpit_builds_then_places_the_tab_and_names_the_sheet(monkeypatc
     )
     monkeypatch.setattr(
         sheet_cockpit,
-        "place_after_board",
-        lambda c: order.append("place") or "Cockpit: placed right after Board",
+        "place_before_board",
+        lambda c: order.append("place") or "Cockpit: placed right before Board",
     )
     result = runner.invoke(cli.app, ["setup", "cockpit", "--sheet-id", "abc"])
     assert result.exit_code == 0, result.output

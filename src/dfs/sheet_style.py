@@ -2745,10 +2745,11 @@ WEEK_ORDER = [
     ("Instructions", "decide"),
     # Slate Grid before Board (Sam, 2026-09-30): the slate-level view comes first.
     ("Slate Grid", "decide"),
-    ("Board", "decide"),
     # Cockpit (2026-10-20): Sunday's last 90 minutes on one read-only page. Written by Python (`dfs setup
-    # cockpit`, then every `sync --live` / `late-swap`); nothing on it is typed.
+    # cockpit`, then every `sync --live` / `late-swap`); nothing on it is typed. Moved to the LEFT of Board
+    # (Sam, 2026-10-21).
     ("Cockpit", "decide"),
+    ("Board", "decide"),
     # Edge Finder (2026-10-07): right after Board. Written by the sync, nothing on it is typed.
     ("Edge Finder", "decide"),
     # Player card (2026-10-21): pick a player in B1, see everything about him on one page. Formulas over
