@@ -107,6 +107,17 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--iterate` | Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are ignored: the rules box's Builds wanted line says how many. |
 | `--round INT RANGE` | Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a new round (the state is kept in data/suggest_state/<week>.json). |
 
+### `dfs stacks`
+
+Rank every QB's stacks of one and two teammates (with and without a bring-back) by what the simulator thinks of them against how much of the generated field plays them, and write the `Stacks` tab where the sheet has one (`dfs setup stacks` creates it). Prints the same page. Before TFFB publishes ownership the field rate and leverage are left out. An information view: the tab shows its retro track record beside it.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Write to a different sheet instead of config.toml's (the template, say). |
+| `--no-sheet` | Print the ranking; write nothing. |
+| `--refit` | Refit the field model on the real standings first, and save it (about two minutes). |
+| `--retro` | Refit, then rerun the retro on the weeks with standings and save the track record the tab shows (several minutes). |
+
 ### `dfs entries fill`
 
 Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
@@ -502,6 +513,14 @@ Create the `Cockpit` tab right after Board, or rebuild it. One read-only page fo
 ### `dfs setup player-card`
 
 Create the `Player` tab right after Edge Finder, or rebuild it. Pick a player in B1 (a dropdown over EdgeRaw's names, the only typed cell) and read everything about him on one page: projections side by side, ownership, his last five games of usage, matchup and game, props, the signals firing on him with Model Check's record for each, and how many of your lineups he is in. Formulas over EdgeRaw plus two hidden raw tabs that `dfs sync` keeps fresh (only on a sheet that has the tab). Template first, then the live week; `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+
+### `dfs setup stacks`
+
+Create the `Stacks` tab right after Suggested, or rebuild it: the top 20 QB stacks and top 8 games ranked by simulated upside against how much of the field plays them, with the retro's track record on top. Nothing on it is typed. `dfs stacks` and `dfs sync` keep it fresh from then on (only on a sheet that has the tab). Needs the fitted field model (`dfs stacks --refit` once). Template first, then the live week; `dfs doctor` after.
 
 | Option | What it does |
 |---|---|

@@ -2758,6 +2758,9 @@ WEEK_ORDER = [
     ("Player Pool", "build"),
     # Suggested builds (Week 6): written by `dfs lineups suggest`; between the pool and the lineups you type.
     ("Suggested", "build"),
+    # Stacks (2026-10-21): the QB stack ranker, right after Suggested. Written by Python (`dfs setup stacks`,
+    # then `dfs stacks` / `dfs sync`); nothing on it is typed.
+    ("Stacks", "build"),
     ("Lineups", "build"),
     ("DK Upload", "build"),
     ("Exposure", "contest"),

@@ -1264,6 +1264,44 @@ def setup_player_card(
         console.print(f"[green]OK[/green] {line}")
 
 
+@setup_app.command("stacks", short_help="Create the read-only Stacks tab (the QB stack ranker).")
+def setup_stacks(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template "
+        "(always the template first).",
+    ),
+) -> None:
+    """Create the `Stacks` tab right after Suggested, or rebuild it: the top 20 QB stacks and top 8 games
+    ranked by simulated upside against how much of the field plays them, with the retro's track record on
+    top. Nothing on it is typed. `dfs stacks` and `dfs sync` keep it fresh from then on (only on a sheet that
+    has the tab). Needs the fitted field model (`dfs stacks --refit` once). Template first, then the live
+    week; `dfs doctor` after."""
+    from dfs import sheet_stacks
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+        console.print(f"Building the Stacks tab on: [bold]{title}[/bold]\n{url}\n")
+        edge = store.load_current("edge")
+        depth_rows, gsis_by_id = _depth_and_gsis()
+        summary = sheet_stacks.refresh(client, cfg, edge=edge, depth_rows=depth_rows, gsis_by_id=gsis_by_id)
+        placed = sheet_stacks.place_after_suggested(client)
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red] Run `dfs sync` first.")
+        raise typer.Exit(code=1) from e
+    except sheet_stacks.StacksUnavailable as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]OK[/green] {summary}")
+    console.print(f"[green]OK[/green] {placed}")
+
+
 @setup_app.command("add-pool-control", short_help="Create/refresh Player Pool's add-a-player control row.")
 def sheets_add_pool_control(
     sheet_id: str = typer.Option(
@@ -2555,6 +2593,8 @@ def sync(
     if "edge" in source_names and not no_upload:
         _write_edge_finder_tabs(cfg, ctx)
         _write_lineup_sim(cfg, ctx, live_client, fixed_lines=fixed_lines)
+        if not live:  # Sunday's sync stays quick: the Stacks tab is a midweek page
+            _refresh_stacks(cfg, live_client or SheetsClient(cfg.google_sheets))
 
     if live:
         _print_live_flag_diff(
@@ -2792,6 +2832,132 @@ def _refresh_cockpit(
     ok, line = sheet_cockpit.refresh_if_present(client, cfg, edge=edge, previous_edge=previous_edge, now=now)
     if line:
         console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
+
+
+def _depth_and_gsis() -> tuple:
+    """The depth chart and GSIS ids the simulator's roles are built from (None / {} when not synced)."""
+    from dfs import injury_beneficiaries as ib
+    from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
+    from dfs.edge_finder import PLAYERS_FILE
+
+    try:
+        players = pd.read_csv(EDGE_FINDER_DIR / PLAYERS_FILE, usecols=["Id", "GsisId"])
+        gsis_by_id = {
+            i: g for i, g in zip(players["Id"], players["GsisId"], strict=True) if isinstance(g, str)
+        }
+    except (OSError, ValueError):
+        gsis_by_id = {}
+    try:
+        depth_rows = ib.latest_depth(store.load_current("nflverse_depth"), None)
+    except FileNotFoundError:
+        depth_rows = None
+    return depth_rows, gsis_by_id
+
+
+def _refresh_stacks(cfg: Config, client: SheetsClient) -> None:
+    """Rewrite the Stacks tab when the sheet has one (`sheet_stacks.refresh_if_present`). Never fails the
+    command that called it: `dfs setup stacks` is the one that creates the tab."""
+    import time
+
+    from dfs import sheet_stacks
+
+    try:
+        edge = store.load_current("edge")
+    except FileNotFoundError:
+        return
+    started = time.perf_counter()
+    try:
+        depth_rows, gsis_by_id = _depth_and_gsis()
+        ok, line = sheet_stacks.refresh_if_present(
+            client, cfg, edge=edge, depth_rows=depth_rows, gsis_by_id=gsis_by_id
+        )
+    except Exception as e:  # noqa: BLE001 - a sync or a new week must never fail over the Stacks tab
+        ok, line = False, f"Stacks not refreshed ({e}); `dfs stacks` rebuilds it."
+    if line:
+        seconds = time.perf_counter() - started
+        console.print(
+            f"[green]OK[/green] {line} ({seconds:.0f}s)" if ok else f"[yellow]{escape(line)}[/yellow]"
+        )
+
+
+@app.command("stacks", short_help="Rank the slate's QB stacks by simulated upside against the field.")
+def stacks_command(
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Write to a different sheet instead of config.toml's (the template, say)."
+    ),
+    no_sheet: bool = typer.Option(False, "--no-sheet", help="Print the ranking; write nothing."),
+    refit: bool = typer.Option(
+        False,
+        "--refit",
+        help="Refit the field model on the real standings first, and save it (about two minutes).",
+    ),
+    retro: bool = typer.Option(
+        False,
+        "--retro",
+        help="Refit, then rerun the retro on the weeks with standings and save the track record the tab "
+        "shows (several minutes).",
+    ),
+) -> None:
+    """Rank every QB's stacks of one and two teammates (with and without a bring-back) by what the simulator
+    thinks of them against how much of the generated field plays them, and write the `Stacks` tab where the
+    sheet has one (`dfs setup stacks` creates it). Prints the same page. Before TFFB publishes ownership the
+    field rate and leverage are left out. An information view: the tab shows its retro track record beside
+    it."""
+    from dfs import sheet_stacks, stacks_tab
+    from dfs.sim import stacks_retro
+
+    cfg = _load_config_or_exit()
+    if refit or retro:
+        console.print("Refitting the field model" + (" and rerunning the retro" if retro else "") + "...")
+        try:
+            if retro:
+                stacks_retro.refit_and_save(log=lambda m: console.print(f"[dim]{escape(m)}[/dim]"))
+            else:
+                model = stacks_retro.refit_field_model()
+                console.print(f"[green]OK[/green] field model fitted on weeks {list(model.weeks)}")
+        except (OSError, ValueError, KeyError, FileNotFoundError) as e:
+            console.print(f"[red]Could not refit: {escape(str(e))}[/red]")
+            raise typer.Exit(code=1) from e
+    try:
+        edge = store.load_current("edge")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red] Run `dfs sync` first.")
+        raise typer.Exit(code=1) from e
+    client = None if no_sheet else SheetsClient(_gs_config(cfg, sheet_id))
+    title, week = "(no sheet)", None
+    if client is not None:
+        try:
+            title, url = client.describe()
+            console.print(f"Sheet: [bold]{title}[/bold]\n{url}\n")
+            from dfs.week import parse_week_from_title
+
+            week = parse_week_from_title(title)
+        except ValueError:
+            week = None
+        except SheetsError as e:
+            console.print(f"[red]Sheets error:[/red] {e}")
+            raise typer.Exit(code=1) from e
+    depth_rows, gsis_by_id = _depth_and_gsis()
+    try:
+        result, live, model = sheet_stacks.compute(
+            edge, depth_rows=depth_rows, gsis_by_id=gsis_by_id, week=week
+        )
+    except sheet_stacks.StacksUnavailable as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    layout = stacks_tab.build_layout(sheet_stacks.tab_inputs(result, live, model, sheet_title=title))
+    console.print(escape(stacks_tab.render_text(layout)))
+    console.print(f"\n[dim]{result.meta['stacks']} stacks, {result.meta['seconds']:.0f}s[/dim]")
+    if client is None:
+        return
+    try:
+        if client.tab_exists(stacks_tab.STACKS_TAB):
+            console.print(f"[green]OK[/green] {sheet_stacks.write_stacks(client, layout)}")
+        else:
+            console.print("[yellow]This sheet has no Stacks tab:[/yellow] `dfs setup stacks` creates it.")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
 
 
 @app.command(short_help="Sync, check the sheet, and report what changed -- in one go.")
@@ -4370,6 +4536,7 @@ def week_new(
 
     _rebuild_cockpit_on_new_sheet(new_cfg, new_client)
     _rebuild_player_card_on_new_sheet(new_cfg, new_client, ctx)
+    _refresh_stacks(new_cfg, new_client)
 
     if any_failed:
         raise typer.Exit(code=1)

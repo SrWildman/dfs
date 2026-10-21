@@ -291,6 +291,8 @@ class _Batch:
         self.budget = np.full(n, SALARY_CAP)
         self.banned = np.zeros((n, len(slate)), dtype=bool)
         self.rows = np.arange(n)
+        self.salary32 = slate.salary.astype(np.int32)
+        self.position_index = np.array([POSITIONS.index(p) for p in slate.position], dtype=int)
         self.min_salary = {
             p: int(slate.salary[slate.position == p].min()) if (slate.position == p).any() else 0
             for p in POSITIONS
@@ -316,23 +318,30 @@ class _Batch:
 
     def fits(self, left_at_most: np.ndarray | None = None) -> np.ndarray:
         """(n x players): the player fits an open slot, is not taken or banned, keeps the lineup completable
-        under the cap and (with `left_at_most`) still lets the open slots spend down to that much left."""
-        pos = self.s.position
-        fits_slot = np.zeros((self.n, len(self.s)), dtype=bool)
-        slot_min = np.zeros((self.n, len(self.s)))
-        slot_max = np.zeros((self.n, len(self.s)))
-        for p in POSITIONS:
-            col = pos == p
+        under the cap and (with `left_at_most`) still lets the open slots spend down to that much left.
+
+        Per lineup and position the salary a player may have is an interval; a position with no open slot (and
+        no FLEX for it) gets an empty one. The intervals are laid out per player by gather, which keeps this
+        to a few passes over the (lineups x players) array."""
+        room = self.budget - self.min_cost()
+        floor = None if left_at_most is None else self.budget - left_at_most - self.max_cost()
+        none = np.iinfo(np.int32).max
+        hi = np.empty((self.n, len(POSITIONS)), dtype=np.int32)
+        lo = np.full((self.n, len(POSITIONS)), -none, dtype=np.int32)
+        for j, p in enumerate(POSITIONS):
             own_slot = self.open[p] > 0
             via_flex = (self.flex > 0) & ~own_slot if p in FLEX_POSITIONS else np.zeros(self.n, dtype=bool)
-            fits_slot[:, col] = (own_slot | via_flex)[:, None]
-            slot_min[:, col] = np.where(own_slot, self.min_salary[p], self.min_flex)[:, None]
-            slot_max[:, col] = np.where(own_slot, self.max_salary[p], self.max_flex)[:, None]
-        salary = self.s.salary[None, :]
-        ok = salary <= (self.budget - self.min_cost())[:, None] + slot_min
-        if left_at_most is not None:
-            ok &= salary >= (self.budget - left_at_most - self.max_cost())[:, None] + slot_max
-        return fits_slot & ok & ~self.chosen & ~self.banned
+            usable = own_slot | via_flex
+            hi[:, j] = np.where(usable, room + np.where(own_slot, self.min_salary[p], self.min_flex), -none)
+            if floor is not None:
+                need = np.ceil(floor + np.where(own_slot, self.max_salary[p], self.max_flex))
+                lo[:, j] = np.clip(need, -none, none).astype(np.int32)
+        salary = self.salary32[None, :]
+        ok = salary <= hi[:, self.position_index]
+        ok &= salary >= lo[:, self.position_index]
+        ok &= ~self.chosen
+        ok &= ~self.banned
+        return ok
 
     def take(self, rows: np.ndarray, players: np.ndarray) -> None:
         ok = players >= 0

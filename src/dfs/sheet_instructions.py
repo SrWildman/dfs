@@ -318,6 +318,16 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "here changes Lineups on its own.",
     ),
     (
+        "Stacks",
+        "Every QB's stacks of one and two teammates, with and without a bring-back, ranked by what the "
+        "simulator thinks of them against how much of the field plays them: Top 1% (the chance a lineup "
+        "built on the stack finishes in the field's top 1%), Field % (the share of the field playing exactly "
+        "it), Boom % (its share of the simulated top 1%) and Lev (Boom % minus Field %). Below it, the best "
+        "games. The track record from past weeks sits on top; before TFFB publishes ownership the field "
+        "columns are left out. Read-only; BUILD in column A means type the last cell into Suggested's rules "
+        "box. Rewritten by dfs stacks and dfs sync.",
+    ),
+    (
         "Lineups",
         f"Type names in column A, starting at row {LINEUPS_NAME_BLOCKS[0][0]}. Each lineup is one "
         f"{len(ROSTER_SLOTS)}-player roster block ({_roster_slots_text()}); there are "

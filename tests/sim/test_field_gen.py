@@ -144,3 +144,38 @@ def test_rates_from_features_split_the_bring_back_by_stack():
     assert (r.stack1, r.stack2, r.bringback_stacked, r.bringback_unstacked) == (0.5, 0.25, 0.5, 0.5)
     assert r.unspent == (0.0, 50.0, 100.0, 300.0)
     assert r.stack2_given_stack1 == 0.5
+
+
+def _reference_fits(b, left_at_most=None):
+    """The lineup-by-player 'fits' test as it was first written (one float array per bound); `_Batch.fits` is
+    a faster layout of the same rule and must agree with it everywhere."""
+    pos = b.s.position
+    fits_slot = np.zeros((b.n, len(b.s)), dtype=bool)
+    slot_min = np.zeros((b.n, len(b.s)))
+    slot_max = np.zeros((b.n, len(b.s)))
+    for p in fg.POSITIONS:
+        col = pos == p
+        own_slot = b.open[p] > 0
+        via_flex = (b.flex > 0) & ~own_slot if p in fg.FLEX_POSITIONS else np.zeros(b.n, dtype=bool)
+        fits_slot[:, col] = (own_slot | via_flex)[:, None]
+        slot_min[:, col] = np.where(own_slot, b.min_salary[p], b.min_flex)[:, None]
+        slot_max[:, col] = np.where(own_slot, b.max_salary[p], b.max_flex)[:, None]
+    salary = b.s.salary[None, :]
+    ok = salary <= (b.budget - b.min_cost())[:, None] + slot_min
+    if left_at_most is not None:
+        ok &= salary >= (b.budget - left_at_most - b.max_cost())[:, None] + slot_max
+    return fits_slot & ok & ~b.chosen & ~b.banned
+
+
+def test_fits_agrees_with_the_reference_rule_through_a_whole_lineup(slate):
+    rng = np.random.default_rng(11)
+    n = 300
+    b = fg._Batch(slate, n)
+    left = rng.choice(np.asarray(RATES.unspent, dtype=float), size=n)
+    b.banned[:, rng.integers(0, len(slate), size=20)] = True
+    weights = np.maximum(slate.targets(), 1e-6)
+    for _ in range(fg.LINEUP_SIZE):
+        for bound in (None, left):
+            np.testing.assert_array_equal(b.fits(bound), _reference_fits(b, bound))
+        pick = fg._pick(weights, b.fits(left) | b.fits(), rng)
+        b.take(b.rows, pick)

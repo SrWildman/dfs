@@ -2782,6 +2782,14 @@ def test_chalk_formula_reads_edgeraws_columns_and_the_lineups_marker_and_rides_a
     assert _totals_check_formula(2, 10, 11, "K", chalk=None) == _totals_check_formula(2, 10, 11, "K")
 
 
+def test_the_stacks_tab_sits_right_after_suggested_in_the_build_family():
+    from dfs.sheet_style import WEEK_ORDER
+
+    tabs = [tab for tab, _family in WEEK_ORDER]
+    assert tabs.index("Stacks") == tabs.index("Suggested") + 1
+    assert dict(WEEK_ORDER)["Stacks"] == "build"
+
+
 def test_the_cockpit_sits_right_after_the_board_in_the_decide_family():
     from dfs.sheet_style import WEEK_ORDER
 

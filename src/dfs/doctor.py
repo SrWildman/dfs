@@ -47,6 +47,7 @@ from dfs.sheet_suggested import TAB as SUGGESTED_TAB
 from dfs.sheet_views import BOARD_ID_COL, BOARD_LIST_POOL_COL, BOARD_TAB, EXPOSURE_TAB, LINEUP_COUNT_CELL
 from dfs.sheets import column_index, column_letter
 from dfs.sources.edge import POOL_HEADER
+from dfs.stacks_tab import STACKS_TAB
 from dfs.week import parse_week_from_title
 from dfs.weekly_reset import (
     LINEUPS_NAME_BLOCKS,
@@ -586,6 +587,20 @@ def _check_player_card(client: DoctorClient, cfg: Config, tab_titles: set[str]) 
     return issues
 
 
+def _check_stacks_tab(tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Stacks tab (`stacks_tab.py`) must exist: `dfs stacks` and `dfs sync` only refresh a sheet that has
+    one, so a sheet without it (the template before `dfs setup stacks --sheet-id <template>` ran) has drifted
+    from one with it. Nothing on the tab is typed, so existence is the whole check."""
+    if STACKS_TAB in tab_titles:
+        return []
+    return [
+        DoctorIssue(
+            "stacks-tab",
+            f"no {STACKS_TAB!r} tab -- `dfs setup stacks` creates it right after Suggested (template first)",
+        )
+    ]
+
+
 def _check_dk_upload_header(
     cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list]
 ) -> list[DoctorIssue]:
@@ -1003,6 +1018,7 @@ def run_doctor(
     issues += _check_stakes_block(client, cfg, tab_titles)
     issues += _check_cockpit_tab(tab_titles)
     issues += _check_player_card(client, cfg, tab_titles)
+    issues += _check_stacks_tab(tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)
     issues += _check_empty_guards(client, cfg, tab_titles)

@@ -2124,3 +2124,46 @@ quoted one. Per market and per band of `|ESPN P - market P|` (5+, 10+, 15+ point
 side won, the win rate the prices needed (mean of 1 / decimal price) and the return per unit staked. A verdict word
 ("beat the price" / "missed the price" / "no edge shown", at two standard errors) appears only from
 `MIN_N_VERDICT = 100` rows in a cell. Shadow until about Week 10 and Sam's OK.
+
+
+## Stack ranker (`stacks.py`, 2026-10-21)
+
+Question: for each QB, which stacks of one or two teammates give the best chance of a top-1% GPP finish, and how
+much of the field already plays them? Everything runs on the contest simulator's pieces (`sim/contest_sim.py`,
+`sim/field_gen.py`); nothing is fitted to the stacks themselves.
+
+**A stack** is a QB plus exactly the teammates named (no other RB / WR / TE of his team), with a bring-back (at
+least one RB / WR / TE of the QB's opponent) or without one (none). Exact, so two stacks never overlap. Mates:
+the team's `CATCHERS_PER_TEAM` (5) best WR / TE by CalPts and up to `RBS_PER_TEAM` (2) running backs who catch
+(RB1 / RB2 whose `Tgt%` is in the top third of the slate's RB1 / RB2: the third the shape research found moves
+with its QB, `docs/SIM.md` "Team shape"), never two backs. The best QB of each team, at most `MAX_QBS` (24).
+
+**Top 1% rate.** 4,000 correlated draws of the whole slate. Each draw's *top-1% line* is the score with 1% of the
+field's weight above it (the generated GPP field: the chalk herd at its per-draw shares plus the structured
+sampler, raked to the projected ownership). A lineup is built on the stack by the field's own sampler with the
+stack forced (the QB's other RB / WR / TE and, without a bring-back, all of the opponent's offence barred; with
+one, one opposing RB / WR / TE forced), `LINEUPS_PER_VARIANT` (60) lineups per variant. `top1` is the share of
+(draw, lineup) pairs above the line, mixing the with- and without-bring-back variants at the rate real stacked
+fields carry one (`FieldRates.bringback_stacked`). `lift = top1 / 1%`.
+
+**Field rate.** The share of 12,000 generated field lineups plus the herd's expected holdings that play exactly
+the stack. A stack with 6 or fewer lineups behind it uses the product of its players' projected ownership and
+says so (`field_src` `own`).
+
+**Boom share and leverage.** `boom_share = top1 x field / 1%`: the share of the field's top 1% that plays the
+stack. `lev = boom_share - field`, in points of the field (the arithmetic of `SimLev` for a player).
+
+**Retro (`sim/stacks_retro.py`).** From each past week's pre-lock inputs (the last EdgeRaw snapshot, CalPts,
+published ownership; the field's construction rates and chalk herd fitted on the OTHER weeks' real fields), take
+the 20 stacks with the highest leverage and count them in the real top-1% lineups of that week's big GPPs
+(700+ entries) against the real field. `lift` = top-1% share on those stacks over their share of the field.
+Winning lineups are stacked more often than the field, so any stack set has a lift above 1: the baseline is the
+lift of every candidate stack (`lift_all`) and the position of the flagged set among 300 random sets of the same
+size (`pctile`). The weeks' percentiles combine as normal scores (Stouffer); **tested** needs a one-sided p below
+0.05 and a lift above the baseline's, **weak** a lift above the baseline's in most weeks without that, otherwise
+**untested**. Result (2026-10-21, weeks 4-6; week 2 has no GPP of 700): see `data/model_cache/stacks_retro.json`
+and the tab's track-record row.
+
+**Speed.** About a minute on a full slate (`dfs stacks`). `field_gen._Batch.fits` was rewritten for it (the same
+rule laid out per player by gather, tested against the original in `tests/sim/test_field_gen.py`: same lineups
+for the same seed, about twice as fast).
