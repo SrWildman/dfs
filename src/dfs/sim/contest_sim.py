@@ -98,10 +98,32 @@ class SimField:
     chalk: np.ndarray
     herd: field_gen.HerdModel
     own: np.ndarray
+    # ownership uncertainty (`with_scenarios`, default off): scenarios x sampler lineups, each row summing to
+    # 1; draw d weighs the sampler by row d % scenarios. None: every sampler lineup weighs the same
+    scenarios: np.ndarray | None = None
 
     @property
     def herd_share(self) -> float:
         return self.herd.share if len(self.chalk) else 0.0
+
+
+def with_scenarios(field: SimField, targets: np.ndarray, *, own: np.ndarray | None = None) -> SimField:
+    """`field` with one weighting of its sampler per row of `targets` (scenarios x slate players: a drawn
+    ownership of the whole field, `dfs.sim.own_error`; one row: a fixed reweighting, e.g. to one contest's
+    own mean): what the sampler must hold once the herd's expected holdings are taken out, met by
+    reweighting the same lineups (`field_gen.scenario_weights`). `own` replaces the field's target ownership
+    (what its duplicate estimate reads)."""
+    from dataclasses import replace
+
+    targets = np.atleast_2d(np.asarray(targets, dtype=float))
+    share = field.herd_share
+    held = np.zeros(len(field.slate))
+    if share > 0:
+        ew = field.herd.expected_weights(len(field.chalk))
+        np.add.at(held, field.chalk.ravel(), np.repeat(ew * share, field.chalk.shape[1]))
+    need = np.maximum(targets - held[None, :], 0.0) / max(1.0 - share, 1e-9)
+    weights = field_gen.scenario_weights(field.sampler, len(field.slate), need)
+    return replace(field, scenarios=weights, own=field.own if own is None else np.asarray(own, dtype=float))
 
 
 def build_field(
@@ -204,7 +226,8 @@ def simulate_contests(
     points: np.ndarray | None = None,
 ) -> ContestSimResult:
     """Every candidate (row of slate indices) in every contest kind: see the module docstring. `fields` holds
-    one `SimField` per format the kinds need ("cash" for Double Up / 50-50, "gpp" for the rest; a Multiplier
+    one `SimField` per format the kinds need ("cash" for Double Up / 50-50, "gpp" for the rest; a field keyed
+    by a kind's `series` is that contest's own and is used for it instead; a Multiplier
     is flat but plays a GPP-style field). `specs[i]` is slate player i's spec (None: scores 0).
     `per_draw_herd` False keeps the herd on its fixed weights (lead = the highest-product lineup) in every
     draw. `points` (draws x slate players) replaces the simulated draws (fixed outcomes, for tests)."""
@@ -240,7 +263,12 @@ def simulate_contests(
             ss = pts[lo:hi][:, f.sampler].sum(axis=2)
             hs = pts[lo:hi][:, f.chalk].sum(axis=2) if len(f.chalk) else np.zeros((hi - lo, 0), np.float32)
             scores = np.concatenate([ss, hs], axis=1)
-            weights = np.concatenate([np.full((hi - lo, n_s), w_s, np.float32), herd_w[lo:hi]], axis=1)
+            if f.scenarios is None:
+                sampler_w = np.full((hi - lo, n_s), w_s, np.float32)
+            else:
+                rows_ = np.arange(lo, hi) % len(f.scenarios)
+                sampler_w = (f.scenarios[rows_] * (1.0 - f.herd_share)).astype(np.float32)
+            weights = np.concatenate([sampler_w, herd_w[lo:hi]], axis=1)
             order = np.argsort(-scores, axis=1, kind="stable")
             s_sorted = np.take_along_axis(scores, order, axis=1)
             cum = np.cumsum(np.take_along_axis(weights, order, axis=1), axis=1)
@@ -276,7 +304,7 @@ def simulate_contests(
         fmt = "cash" if kind.cash else "gpp"
         if fmt not in by_fmt:
             fmt = next(iter(by_fmt))
-        b = by_fmt[fmt]
+        b = by_fmt.get(kind.series, by_fmt[fmt])  # a field of the contest's own, when given one
         n = int(kind.entries)
         table = payouts.payout_table(kind)
         cum = _cumulative(table)

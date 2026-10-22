@@ -25,8 +25,8 @@ A settings file is TOML; every key is optional and a missing one is today's defa
     portfolio = { size = 20 }
 
 **The registry.** A flag is a `Flag`: a name, one line of doc, and any of three optional hooks, registered
-with `register(Flag(...))` from the module that implements it (session H registers `ownership_uncertainty`,
-session I `portfolio`) so `dfs backtest` never needs editing for a new switch:
+with `register(Flag(...))` from the module that implements it (session H registers `ownership_mean` and
+`ownership_uncertainty`, session I `portfolio`) so `dfs backtest` never needs editing for a new switch:
 
 - `prepare(ctx, value) -> ctx`: change what the builder is given (the projections, the specs, the lines or the
   simulated field in `ctx.lines`), e.g. swap in a field that draws ownership per simulation;
@@ -60,7 +60,7 @@ from dfs import lineup_suggest as ls
 from dfs import suggest_state
 
 # Modules that call `register` at import. Sessions H and I add theirs here (one line each).
-PLUGIN_MODULES: tuple[str, ...] = ()
+PLUGIN_MODULES: tuple[str, ...] = ("dfs.sim.own_error_flag",)
 
 # The live builder stops its search after 120 s, so runs of one slate differ (two runs agree on 13 of 14
 # builds, and only 5 of 13 match a search that finishes; under load, more). A backtest compares settings, so

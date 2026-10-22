@@ -425,6 +425,42 @@ ME = "srwildman"
 FIELD_SAMPLE = {"gpp": 60, "cash": 40}  # random real field lineups per week, besides all of Sam's
 
 
+OWNERSHIP_SCENARIOS = 200
+OWNERSHIP_CONTEST = {"cash": (10.0, 3000), "gpp": (5.0, 2000)}  # the stake and size the field stands for
+
+
+def _ownership_targets(
+    slate: field_gen.Slate,
+    model,
+    fmt: str,
+    n_sims: int,
+    draws: bool,
+    seed: int,
+    *,
+    contest: tuple[float, int] | None = None,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """The generated field's targets from the ownership model: its fitted mean for `fmt` (TFFB's Own% in, at
+    `contest`'s stake and size, default the format's representative one), and (with `draws`) scenarios drawn
+    around it."""
+    from dfs.sim import own_error
+
+    mean_model = model.means.get(fmt)
+    fee, entries = contest or OWNERSHIP_CONTEST[fmt]
+    pos = list(slate.position)
+    if mean_model is None:
+        mean = slate.targets(dups.double_up_ownership if fmt == "cash" else None)
+        totals = {p: float(mean[slate.position == p].sum()) for p in own_error.POSITIONS}
+    else:
+        mean = mean_model.shares(slate.own, pos, fee=fee, entries=entries)
+        totals = mean_model.totals
+    error = model.formats.get(fmt)
+    if not draws or error is None:
+        return mean, None
+    rng = np.random.default_rng(seed + 7)
+    k = min(OWNERSHIP_SCENARIOS, n_sims)
+    return mean, own_error.draw_shares(mean, pos, list(slate.team), totals, error, k, rng)
+
+
 def lead_ranks(contests: list[RealContest], keys: dict[int, list[tuple[str, ...]]]) -> dict[int, int]:
     """Per week, the product rank (0 = highest) of the chalk lineup the week's real contests copied most
     (copies pooled over every contest of the week; weeks where no chalk lineup was copied are left out)."""
@@ -479,10 +515,19 @@ def retro_week(
     min_cash: payouts.MinCash,
     n_sims: int = 4000,
     seed: int = 0,
+    ownership=None,  # dfs.sim.own_error.OwnershipErrorModel fitted without this week, or None (today)
+    ownership_draws: bool = True,
+    ownership_per_contest: bool = False,
 ) -> dict:
     """One week of the retro: Sam's real lineups and a sample of real field lineups, simulated in every real
     contest of the week from pre-lock inputs (fields, herd, rates fitted on the other weeks), beside today's
-    Cash % / Top 1% and what each lineup was actually paid. Returns frames for `summarize_retro`."""
+    Cash % / Top 1% and what each lineup was actually paid. Returns frames for `summarize_retro`.
+
+    `ownership` (session H, shadow): the fields are raked to the model's fitted mean instead of TFFB / the
+    double-up curve and (with `ownership_draws`) reweighted per draw to ownership drawn around it; today's
+    Cash % / Top 1% get the same treatment (`field.with_ownership_draws`). `ownership_per_contest` gives each
+    contest a field of its own: the format's field reweighted to the mean at THAT contest's stake and size
+    (and drawn around it), which its duplicate estimate reads too."""
     from dfs import sim_inputs
     from dfs.sim import contest_sim as csim
     from dfs.sim import field as field_model
@@ -504,7 +549,11 @@ def retro_week(
         h = fit_herd(contests, keys, fmt, exclude_week=week)
         herd = field_gen.HerdModel(share=h.share, decay=h.decay, k=h.k, lead_decay=lead)
         targets = slate.targets(dups.double_up_ownership if fmt == "cash" else None)
+        if ownership is not None:
+            targets, scenarios = _ownership_targets(slate, ownership, fmt, n_sims, ownership_draws, seed)
         fields[fmt] = csim.build_field(slate, rates, herd, fmt=fmt, chalk=chalk, targets=targets, seed=seed)
+        if ownership is not None and scenarios is not None:
+            fields[fmt] = csim.with_scenarios(fields[fmt], scenarios)
 
     # candidates: every lineup of Sam's that week, then a random sample of real field lineups
     rng = np.random.default_rng(seed + week)
@@ -556,6 +605,13 @@ def retro_week(
                 k.max_entries,
             )
         kinds.append(k)
+    if ownership is not None and ownership_per_contest:
+        for c, k in zip(week_cs, kinds, strict=True):
+            mean, scenarios = _ownership_targets(
+                slate, ownership, c.fmt, n_sims, ownership_draws, seed, contest=(c.fee, c.entries)
+            )
+            rows_ = scenarios if scenarios is not None else mean[None, :]
+            fields[k.series] = csim.with_scenarios(fields[c.fmt], rows_, own=mean)
     res = csim.simulate_contests(fields, specs, lineups, kinds, labels=labels, n_sims=n_sims, seed=seed)
     fixed_herd = csim.simulate_contests(
         fields, specs, lineups[:1], kinds, n_sims=n_sims, seed=seed, per_draw_herd=False
@@ -569,6 +625,10 @@ def retro_week(
     fm = field_model.build_field(
         edge_specs.values(), sim_inputs.ownership_by_name(edge), cash_offset=0.6, top_offset=63.2
     )
+    if ownership is not None:
+        fm = field_model.with_ownership_draws(
+            fm, sim_inputs.ownership_by_name(edge), ownership, seed=seed, draws=ownership_draws
+        )
     base = simulate.simulate_lineups(as_specs, n_sims=n_sims, seed=seed, field=fm)
     baseline = pd.DataFrame(
         {
@@ -686,9 +746,17 @@ MEASURES = {
 
 
 def run_retro(
-    through: int, *, weeks: list[int] | None = None, n_sims: int = 4000, log=print
+    through: int,
+    *,
+    weeks: list[int] | None = None,
+    n_sims: int = 4000,
+    log=print,
+    ownership=None,
+    ownership_draws: bool = True,
+    ownership_per_contest: bool = False,
 ) -> dict[int, dict]:
-    """`retro_week` for every week with standings up to `through` (or `weeks`)."""
+    """`retro_week` for every week with standings up to `through` (or `weeks`). `ownership(week)` (optional)
+    returns the ownership model fitted without that week (session H's shadow; None: today)."""
     contests = load_real_contests()
     chalks, keys = {}, {}
     for wk in sorted({c.week for c in contests}):
@@ -701,7 +769,17 @@ def run_retro(
     chosen = weeks or sorted(w for w in {c.week for c in contests} if w <= through)
     out = {}
     for wk in chosen:
-        out[wk] = retro_week(wk, contests, keys=keys, chalks=chalks, min_cash=mc, n_sims=n_sims)
+        out[wk] = retro_week(
+            wk,
+            contests,
+            keys=keys,
+            chalks=chalks,
+            min_cash=mc,
+            n_sims=n_sims,
+            ownership=ownership(wk) if ownership is not None else None,
+            ownership_draws=ownership_draws,
+            ownership_per_contest=ownership_per_contest,
+        )
         log(f"week {wk}: {out[wk]['table']['lineup'].nunique()} lineups, sim {out[wk]['seconds']:.1f}s")
     return out
 

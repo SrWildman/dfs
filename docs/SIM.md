@@ -30,6 +30,7 @@ see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself wri
 | Team shape | `shape_table.py`, `script_shape.py` | The one shipped modifier: QB1-TE1 by the tight end's target share (`correlations_shape.csv`), a layer on the pooled table that `simulate_lineups` reads by default. `script_shape.py` is the research behind it. |
 | Duplicates | `dups.py` | Expected identical entries, the Top 1% share, the fit. Used by `lineup_suggest.py`. |
 | Contest sim (shadow) | `payouts.py`, `field_gen.py`, `contest_sim.py`, `contest_retro.py` | Payout curves, a generated field, E[$] / ROI / P(cash) per lineup per contest, and the retro against his real contests. Not wired into anything but `dfs research refresh`. See "Contest sim (shadow)". |
+| Ownership uncertainty (shadow) | `own_error.py`, `own_error_retro.py` | A random draw of the field's ownership around the forecast, fitted and checked on his real contests, held out by week. Not wired into anything yet. See "Ownership uncertainty (shadow)". |
 
 ## Using it
 
@@ -1616,3 +1617,212 @@ mostly the clock, and a 120 s search is a cut one either way.
 (`lineup_suggest`, `lineup_shapes`, `lineup_iterate`, late swap's `top_lineups`) is measured in it. Three simultaneous Week 6 runs on a busy
 machine gave identical builds; a solo run takes 97-112 s of wall for Weeks 5-6 (about two minutes), 170 s when three run at once. The phase
 timers still show wall seconds. `search_clock.wall_clock()` restores real seconds. Nothing else about the builder changed.
+
+## Ownership uncertainty (shadow) (2026-10-21)
+
+**Why.** Every sim above treats projected ownership as known. It is a forecast: TFFB misses by about 3.4 points a player, and
+his double-ups run far chalkier than projected and swing with one megadup lineup. Haugh & Singal (Management Science 2021) put
+the field's ownership at the centre of their model as a random draw and report the largest documented DFS edge from it.
+`own_error.py` is that draw; `own_error_retro.py` fits it on his real contests and judges it held out by week
+(`python -m dfs.sim.own_error_retro`, about a minute). Part 1 only: nothing in the sim reads it yet.
+
+**The data.** The 29 Classic contests of Weeks 2, 4, 5 and 6 (19 GPPs, 10 double-ups; Week 7's standings land Monday), each with the
+pre-lock EdgeRaw snapshot (`contest_retro.week_slate_frame`). A player held by `c` of a contest's `N` lineups has
+`c ~ Binomial(N, theta)`, `theta` his true share, so the contest's own finite size is NOT counted as ownership error (a generated
+field reproduces that by itself). Everything below is the composite likelihood of those counts over the players forecast at 1%+,
+the fit on the other weeks, the judging on the held-out one.
+
+**The model.**
+
+    mean   = field_own's sharpened TFFB (exp(k log Own%) within position, scaled to the position's total), k per format
+    theta  = mean * exp(sigma * e - sigma^2/2),   sigma^2 = ln(1 + c0 + c1 / mean)     then scaled back to the position total
+
+`c0` is the relative variance every player carries, `c1 / mean` the Poisson-like part that grows as a share shrinks (a Dirichlet is
+the `c0 = 0` case); the QB, WR and TE of one team share a factor (`team_corr`); a week can tilt toward or away from the chalk
+(`tilt_sd`). RB and DST errors are independent.
+
+### The families, held out by week
+
+Composite log-likelihood summed over the held-out weeks (higher is better; the same mean in every row):
+
+| | Point forecast (today) | Dirichlet | Log-normal | **Hybrid** (`c0`, `c1`) |
+|---|---|---|---|---|
+| GPP (Weeks 2, 4, 5, 6; leave one week out) | -41,828 | -8,721 (alpha 118-141) | -8,796 (sigma 0.45-0.52) | **-8,690** (c0 0.06-0.09, c1 0.006-0.009) |
+| Double-up (Weeks 4, 5, 6) | -56,091 | -4,950 (alpha 40-43) | **-4,760** (sigma 0.76-0.80) | -4,772 (c0 0-0.56, c1 0.014-0.057) |
+| GPP, fitted on EARLIER weeks only (Weeks 4-6) | -47,085 | -8,288 | -8,336 | **-8,279** |
+| Double-up, earlier weeks only (Weeks 5-6) | -29,281 | -2,669 | -2,605 | **-2,594** |
+
+- **Treating ownership as known is wrong by tens of thousands of nats**, not a close call: a 5,000-entry contest's counts are so
+  tight that any forecast miss is hopeless for a point forecast.
+- **Log-normal beats Dirichlet** for double-ups (190 nats), **the Dirichlet is close in GPPs** (75 nats better than the plain
+  log-normal); the hybrid is within 12 nats of the best in every row and best in three of four, so it is the one family kept. The cash
+  `c0` is poorly identified (three weeks: 0, 0.56, 0.44); the likelihood is flat along that ridge.
+- ~~The mean matters as much as the spread: field_own's softmax beats raw TFFB by a wide margin.~~ **Withdrawn (Part 2):** these
+  numbers scored only the players each mean itself forecast at 1%+, so a sharper mean dropped players from the score and won by it. On a
+  fixed set (TFFB 1%+) field_own's GppOwn / CashOwn are no better than TFFB as is; see "The mean, chosen by held-out fit" below. The
+  family ranking above is unaffected (every family there shares one mean).
+- Fitted on all four weeks: **GPP `c0` 0.074, `c1` 0.0082** (sigma 0.80 at a 1% share, 0.46 at 5%, 0.33 at 20%, 0.30 at 40%);
+  **double-up `c0` 0.46, `c1` 0.017** (sigma 1.08, 0.77, 0.66, 0.64). Observed log-residual sd by level (pooled big contests, mean
+  model fitted without the week): GPP 0.50 / 0.43 / 0.42 / 0.34 / 0.23 / 0.20 for forecasts of 2-4 / 4-7 / 7-12 / 12-20 / 20-35 / 35%+,
+  against the model's 0.57 / 0.47 / 0.40 / 0.35 / 0.32 / 0.29: the model is too wide at the very top. Double-ups 0.83 / 0.73 / 0.56 /
+  0.68 / 0.67 / **0.29** against 0.80 / 0.71 / 0.67 / 0.63 / 0.61 / **0.60**: the same, more so.
+
+### What the marginal likelihood cannot see: errors move together
+
+| Residual (log actual - log forecast, minus the week-position mean) | GPP | Double-up |
+|---|---|---|
+| QB with his WR / TE | **+0.33** (75 pairs) | **+0.46** (47 pairs) |
+| WR with TE | +0.22 | +0.18 |
+| WR with WR | -0.34 (position competition) | not enough pairs |
+| RB with anyone, DST with anyone | -0.25 to +0.11, noise | noise |
+| Week-wide tilt toward the chalk (slope on log forecast), by week | -0.19, -0.16, -0.16 | +0.10, +0.18, +0.01 |
+
+A QB's popularity does pull his receivers (`team_corr` 0.33 / 0.46 fitted). The GPP tilt is the **same sign every week**: it is not
+a random effect but the mean model forecasting the chalk about 25% too high in log terms at 35%+ and the longshots too low; the
+double-up tilt does vary by week (`tilt_sd` 0.062; the GPP's 0.022 is its scatter about that bias). Fixing the GPP mean's shape is a lead
+(the quadratic helps cash only).
+
+### The end-to-end test: where does the real field mean fall?
+
+A contest's field mean is `sum(share_i * points_i)`. With the week's real points and the ownership drawn from the model (plus the
+contest's own finite-size noise), the real field mean should fall inside the 10-90% band four times in five (z = real minus model,
+over the model's sd; 1.0 = calibrated). Dependence parameters from the other weeks:
+
+| | Contests | Inside 80% band | rms z | Model sd (points) | Mean abs miss (points) |
+|---|---|---|---|---|---|
+| GPP, ownership known | 19 | 21% | 5.31 | 2.0 | 4.74 |
+| GPP, independent errors | 19 | 63% | 1.19 | 4.35 | 4.65 |
+| GPP, + team factor | 19 | 63% | 1.19 | 4.46 | 4.73 |
+| GPP, + team factor + tilt | 19 | 63% | 1.17 | 4.48 | 4.70 |
+| Double-up, ownership known | 10 | 0% | 15.7 | 0.76 | 10.46 |
+| Double-up, independent errors | 10 | 60% | 1.85 | 6.98 | 8.27 |
+| Double-up, + team factor | 10 | 60% | 1.86 | 7.13 | 8.38 |
+| Double-up, + team factor + tilt | 10 | 60% | 1.85 | 7.17 | 8.24 |
+
+By week (real field mean vs the model's, sd): double-ups Week 4 **110.2 vs 127.3 (5.9), z -2.9**, Week 5 143.4 vs 147.4 (8.7), z -0.5, Week 6
+126.6 vs 127.7 (7.2), z -0.2; GPPs Week 4 117.0 vs 122.8 (z -1.4), Week 5 136.2 vs 140.9 (-1.0), Week 6 125.3 vs 122.8 (+0.6).
+
+- **A known-ownership sim claims a field mean good to 0.8 points (double-up) or 2 (GPP) and is wrong by 10 and 5.** With the error the
+  band is honest to within the data: GPPs are slightly under-dispersed (63% inside; z 1.19), double-ups over-dispersed by one bad week (Week 4,
+  the megadup week, is 17 points off; Weeks 5-6 are inside by 0.2-0.5 sd).
+- **The team factor and the tilt barely move the field mean's spread** (4.35 -> 4.48 points). Their effect is on the lineup side: a stack of
+  a QB and his receivers is correlated with the field's mean through the same players, which Part 2 measures.
+- The draws do not change the model's MEAN (abs miss 4.65 vs 4.74): the error model widens the lines, it does not move them. A better mean
+  is the mean-model lead above.
+- **Caveats.** Four weeks; the contests of a week share one realisation of the field's error, so the real sample is 3-4 weeks and the band
+  rates are +/- 20 points; Week 2 is a single 100-entry contest; `tilt_sd` rests on 2-3 weekly slopes.
+
+### The mean, chosen by held-out fit (Part 2, step 1; Part 3's stake and size terms)
+
+**Reconciling with the ownership research (2026-10-20), which said TFFB runs LIGHT on GPP chalk.** Both are true; they condition on
+different players. Selected on the OUTCOME (players who finished 20%+) any forecast looks light, because those are the players who beat it;
+selected on the FORECAST, the question is whether what it calls chalk shows up. Scored per contest: TFFB as is is -8.0 points on actual
+20%+ and -7.3 on forecast 20%+ (light both ways); field_own's GppOwn (k 1.29) is -0.4 / **+2.6**; in Part 1's pooled numbers, weighted to the
+$1 fields of 4,756-11,890 entries (the least chalky), GppOwn was **+10.3 points on the players it forecast at 35%+** (actual 0.77 of
+the forecast: Gibbs 49.6% forecast vs 29.0% real, Addison 37.6 vs 24.5, Nacua 53.6 vs 42.2). That is the "25% too high": GppOwn, on its own
+35%+ calls, in big cheap fields.
+
+`MeanModel` (`own_error.py`): within position `exp(k_c L + curve (L - log 5%)^2)`, `L = log Own%`, scaled to the position totals, with
+`k_c = k + k_fee log(fee / $5) + k_size log(entries / 2,000)`. Each spec fitted jointly with the error by composite likelihood, every contest
+on its own stake and size, scored on the SAME players for every spec (TFFB 1%+). Leave one week out:
+
+| | Spec | Log-lik vs TFFB | Weeks better | MAE (pts) | Chalk bias, on actual / on forecast |
+|---|---|---|---|---|---|
+| GPP | TFFB as is | 0 | | 3.92 | -8.0 / -7.3 |
+| | GppOwn (k 1.29, cross-entropy) | -149 | 1/4 | 3.80 | -0.4 / +2.6 |
+| | power (k by likelihood, ~1.08) | +19 | 3/4 | 3.76 | -5.6 / -4.0 |
+| | fee (k ~1.08, +0.08 to +0.12 per log fee) | +38 | 3/4 | 3.65 | -5.0 / -3.0 |
+| | **size** (k ~1.05, **-0.08 to -0.10** per log entries) | **+70** | **4/4** | **3.59** | -4.9 / -2.6 |
+| | fee + size | +62 | 4/4 | 3.60 | -5.0 / -2.6 |
+| Double-up | TFFB as is | 0 | | 8.65 | -30.2 / -32.1 |
+| | CashOwn (k 1.8) | -7 | 1/3 | 5.76 | -10.3 / -6.8 |
+| | power (k ~1.5) | +82 | 3/3 | 6.56 | -16.8 / -13.2 |
+| | **quad** (k ~1.36, curvature ~0.2) | **+121** | **3/3** | **5.69** | -15.5 / -10.3 |
+| | fee + size | +88 | 3/3 | 6.49 | -16.4 / -12.7 |
+
+- Fitted on EARLIER weeks only nothing in GPPs beats TFFB (best: size -26, 1 of 3; Week 4 has only the Week 2 Hundo to learn from); in
+  double-ups size / stake win 2 of 2 by +23 to +26.
+- The likelihood wants LESS sharpening than the chalk bias does (GppOwn's k 1.29 fixes the chalk and starves the tail): a mild exponent that
+  flattens as the field grows is what holds up across all the players.
+- **Part 3, stake and field size.** GPPs: the size term is the same sign in every fold (-0.08 to -0.10): an 11,890-entry field is about
+  0.2 flatter in exponent than a 784-entry one (k 0.91 vs 1.13). Fee alone is positive, but fee and size are confounded in his contests
+  (the $1 contests are the big ones) and the size term fits better. Double-ups: no stable stake or size term (all are 2,758-4,597 entries).
+- Chosen (`own_error_retro.CHOSEN_SPECS`): **GPP `size`, double-up `quad`**. Neither clears 2 SE on held-out weeks; both ride the switch.
+
+### Into the sim (Part 2)
+
+- `field.with_ownership_draws`: the relative lines' field takes the fitted mean (at a representative contest: double-up $10 / 3,000,
+  GPP $5 / 2,000) and `ownership_scenarios` (200) drawn ownerships; draw d of the simulator is scored against scenario d mod 200
+  (`simulate._field_lines`). Two switches, both default **false**: `[sim.lines] ownership_mean` (the fitted mean only, no draws: most
+  of the Cash % gain below) and `ownership_uncertainty` (the mean and the draws). `sim_inputs.resolve_lines` names the one that is on in
+  its note, and says when no model is fitted.
+- The contest sim: `contest_sim.with_scenarios` reweights the SAME generated lineups to each drawn ownership (`field_gen.scenario_weights`,
+  an exponential tilt by damped iterative scaling: drawn ownerships met to 0.25 share points against 2.5 unweighted, 857 effective lineups
+  of 5,000 per scenario), and a field keyed by a contest's series is that contest's own (Part 3: each contest reweighted to the mean at its
+  own stake and size, its duplicate estimate on that mean). Regenerating per scenario was not needed.
+- Backtest: `own_error_flag` registers the same two as Flashback flags (`ownership_mean`, `ownership_uncertainty`); a backtest of week N
+  uses the model fitted on the weeks before N only (`own_error_retro.model_before`, cached in `data/model_cache/own_error/`). After each
+  close: one `dfs backtest --compare` per flag, and `python -m dfs.sim.own_error_sim_retro` with the new week.
+
+### The measures, held out by week
+
+Every model fitted without the week it is judged on (`own_error_sim_retro`, `python -m dfs.sim.own_error_sim_retro`). Settings: **today**
+(ownership known), **mean** (the fitted mean, no draws), **draws** (mean + draws), **per contest** (draws, each contest's own field).
+
+A's contest retro (his lineups and real field lineups in every real contest, Weeks 2 and 4-6):
+
+| | today | mean | draws | per contest |
+|---|---|---|---|---|
+| Double-up cash line inside the 10-90% band (10 contests) | 5/10 | **8/10** | 7/10 | 7/10 |
+| Double-up top-1% line / GPP min-cash / GPP top-1% inside | 10/10, 13/13, 13/13 | same | same | same |
+| Cash % in double-ups: shown vs realized 48.0% (1,107 pairs) | 52.7% | 41.7% | 44.2% | 44.2% |
+| Brier, Cash % in double-ups | 0.2555 | 0.2493 | 0.2490 | 0.2490 |
+| Top 1% in GPPs of 700+: shown vs realized 1.32% (1,442 pairs); Brier | 0.83%; 0.0130 | 0.77%; 0.0130 | 0.89%; 0.0130 | 0.89%; 0.0130 |
+| Ranking: today's number vs dollars, GPP (19 contests) | 0.118 | -0.003 (SE 0.003), 3/4 wks | +0.002 (0.003), 2/4 | +0.002 (0.003), 2/4 |
+| Ranking, cash (10 contests) | 0.023 | +0.013 (0.010), 2/3 | +0.009 (0.008), 2/3 | +0.009 (0.008), 2/3 |
+| E[$] ranking, GPP (vs today's Top 1% ranking) | 0.062 (-0.056, SE 0.017) | 0.079 | 0.093 (-0.025, 0.016) | **0.101 (-0.017, 0.013)** |
+
+F's curse rows (today's builds, random lineups from the same pool, real field lineups; Weeks 1-6, the real cash and top-1% lines):
+
+| Cash % shown minus cashed (SE over weeks) | today | mean | draws |
+|---|---|---|---|
+| Cash builds (120) | **+15.5 (6.9)** | +7.1 (6.0) | **+8.4 (6.0)** |
+| GPP builds (82) | +11.1 (10.5) | +3.2 (9.9) | +4.6 (9.9) |
+| Random lineups (1,800) | +14.3 (11.2) | +7.4 (10.4) | +9.0 (10.6) |
+| Real field lineups (999) | +12.4 (10.3) | +2.0 (10.3) | +4.4 (10.4) |
+
+| Brier of Cash %, draws minus today (SE; weeks better) | Cash builds -0.027 (0.021; 3/5) | GPP builds -0.022 (0.026; 3/5) | Random **-0.024 (0.012; 4/5)** | Field -0.012 (0.012; 2/4) |
+|---|---|---|---|---|
+
+| Top 1%: shown summed / hits | today | draws |
+|---|---|---|
+| GPP builds | 2.12 / 2 | 2.21 / 2 |
+| Random | 16.3 / 14 | 17.4 / 14 |
+| Field | 8.7 / 9 | 9.4 / 9 |
+
+| Ranking inside a week (Spearman of the shown number with realized points), draws minus today | |
+|---|---|
+| GPP builds (Top 1%) | **-0.057 (SE 0.062), better in 1 of 6 weeks** (mean only: -0.096, 0.055, 2/6) |
+| Cash builds (Cash %) | -0.015 (0.035), 2/6 |
+| Random lineups | -0.002 (0.006) |
+
+**Verdict: nothing clears the ship bar; the code ships default off.**
+
+- **What it fixes is the Cash % level.** About half of the 16-point overstatement F found goes away (cash builds +15.5 -> +8.4), and the
+  Brier improves in every set (random lineups 4 of 5 weeks, 2.0 SE: the closest thing to a pass). It is almost all the MEAN (the chalkier
+  double-up field raises the field mean the line sits on); the draws give back a little of it (they add spread, and a lineup's Cash % moves
+  toward 50%).
+- **The double-up cash line lands in its band 7-8 times in 10, up from 5.** The GPP lines were already always inside (too wide, A's finding).
+- **Top 1% is unchanged** (calibrated before and after): not worse.
+- **The build ranking is the thing to watch.** Inside 20 GPP builds the Top 1% ranking's correlation with points falls 0.06 (under 1 SE,
+  but 5 of the 6 weeks it changed in were not better); in A's retro over his and the field's lineups it does not move. The bar says "must not
+  get worse": not proven worse, not shown safe.
+- **Part 3:** per-contest fields leave Cash % / Top 1% (the lineup sim's numbers) and the lines where they were; they help E[$]'s ranking
+  (0.062 -> 0.101, now 1.3 SE from today's Top 1% where it was 3.3 SE behind), not enough to beat it.
+- Caveats: 4 weeks of standings (3 of double-ups), 6 of builds; contests of a week share one realisation; Week 1 has no ownership, so it is
+  identical in every setting; F's rows use a constructed pool, not his.
+
+**Files.** `own_error.py` (pure: the families, `draw_shares`, `OwnershipErrorModel` saved to `data/model_cache/own_error.json`),
+`own_error_retro.py` (loading, folds, fits, the field-mean check, `fit_model`); tests `tests/sim/test_own_error.py`,
+`test_own_error_retro.py`; Parts 2-3: `own_error_sim_retro.py` (the measures), `own_error_flag.py` (the backtest switch), the
+hooks in `field.py`, `simulate.py`, `field_gen.py`, `contest_sim.py`, `contest_retro.py`, `sim_inputs.py` and `config.py`.

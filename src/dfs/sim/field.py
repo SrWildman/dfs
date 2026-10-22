@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -59,6 +59,10 @@ class FieldModel:
     cash_offset: float
     top_offset: float
     coverage: float = DEFAULT_COVERAGE
+    # ownership uncertainty (`with_ownership_draws`, default off): scenarios x players, each row a drawn
+    # field ownership summing to 9; draw d of the simulator uses row d % scenarios. None: the weights above
+    cash_draws: np.ndarray | None = None
+    top_draws: np.ndarray | None = None
 
     @property
     def cover_players(self) -> list[PlayerSpec]:
@@ -185,3 +189,72 @@ def expected_points(specs: Sequence[PlayerSpec], *, tables=None) -> np.ndarray:
         for k, col in enumerate(cols):
             out[col] = float(marginal.ppf(mg, k, u).mean())
     return out
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Ownership uncertainty (shadow, default off: `[sim.lines] ownership_uncertainty`)
+# ---------------------------------------------------------------------------------------------------------
+
+DEFAULT_SCENARIOS = 200  # drawn field ownerships per run; the simulator's draws cycle through them
+# the contest each line stands for: the double-up cash line is his GIANT double-ups', the top-1% line a
+# large-field GPP's (the stake and size the mean's exponent is read at)
+CASH_CONTEST = (10.0, 3000)
+TOP_CONTEST = (5.0, 2000)
+
+
+def with_ownership_draws(
+    field: FieldModel,
+    own: Mapping[str, object],
+    model,  # dfs.sim.own_error.OwnershipErrorModel
+    *,
+    scenarios: int = DEFAULT_SCENARIOS,
+    seed: int = 0,
+    cash_contest: tuple[float, int] = CASH_CONTEST,
+    top_contest: tuple[float, int] = TOP_CONTEST,
+    draws: bool = True,
+) -> FieldModel:
+    """`field` with its ownership treated as a forecast (`dfs.sim.own_error`, `docs/SIM.md` "Ownership
+    uncertainty"): each format's weights become the model's fitted mean for that contest (from TFFB's Own% in
+    `own`), and (`draws`) `scenarios` field ownerships are drawn around it, so every simulated draw scores
+    against its own field. A format the model has no mean for keeps its weights as the mean. The cover is
+    widened to the new means' 95%."""
+    from dfs.sim import own_error
+
+    shares = clean_ownership(own)
+    raw = np.array([shares.get(p.id, 0.0) for p in field.players])
+    pos = [p.position for p in field.players]
+    team = [p.team for p in field.players]
+    rng = np.random.default_rng(seed)
+    out: dict[str, np.ndarray | None] = {}
+    for fmt, weights, contest in (
+        ("cash", field.cash_weights, cash_contest),
+        ("top", field.top_weights, top_contest),
+    ):
+        key = "cash" if fmt == "cash" else "gpp"
+        mean_model = model.means.get(key)
+        if mean_model is not None:
+            mean = normalise(mean_model.shares(raw, pos, fee=contest[0], entries=contest[1]))
+            totals = mean_model.totals
+        else:
+            mean = weights
+            totals = {q: float(weights[np.array(pos) == q].sum()) for q in set(pos)}
+        out[f"{fmt}_weights"] = mean
+        error = model.formats.get(key)
+        if draws and error is not None:
+            d = own_error.draw_shares(mean, pos, team, totals, error, scenarios, rng)
+            out[f"{fmt}_draws"] = d * (LINEUP_SIZE / d.sum(axis=1, keepdims=True))
+        else:
+            out[f"{fmt}_draws"] = None
+    cover = sorted(
+        set(field.cover)
+        | set(cover_indices(out["cash_weights"], field.coverage))
+        | set(cover_indices(out["top_weights"], field.coverage))
+    )
+    return replace(
+        field,
+        cash_weights=out["cash_weights"],
+        top_weights=out["top_weights"],
+        cash_draws=out["cash_draws"],
+        top_draws=out["top_draws"],
+        cover=tuple(cover),
+    )
