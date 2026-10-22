@@ -25,6 +25,7 @@ Model Check's, as of the last `dfs results update`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -254,6 +255,31 @@ def _q(tab: str) -> str:
 def edge_range(edge_tab: str, column: str) -> str:
     letter = edge_sheet_letter(column)
     return f"{_q(edge_tab)}!${letter}$2:${letter}"
+
+
+def edge_letters(formula: str, edge_tab: str) -> list[str]:
+    """The EdgeRaw column letters a formula reads (`EdgeRaw!$BW$2:$BW` -> `BW`), in order."""
+    return re.findall(re.escape(_q(edge_tab)) + r"!\$([A-Z]+)\$2:\$[A-Z]+", str(formula))
+
+
+def shifted_refs(
+    expected: list[list], found: list[list], edge_tab: str
+) -> list[tuple[str, list[str], list[str]]]:
+    """Every card cell whose EdgeRaw column letters differ from what a fresh build writes: `(cell, found
+    letters, expected letters)`. The card is built from `derived.edge_sheet_letter`, so a difference means
+    EdgeRaw's columns moved (or grew) under it and Sheets shifted the references: the cell reads blank or
+    the wrong column with no error."""
+    out = []
+    for r, want_row in enumerate(expected):
+        have_row = found[r] if r < len(found) else []
+        for c, want_cell in enumerate(want_row):
+            want = edge_letters(want_cell, edge_tab)
+            if not want:
+                continue
+            have = edge_letters(have_row[c], edge_tab) if c < len(have_row) else []
+            if have != want:
+                out.append((f"{chr(ord('A') + c)}{r + 1}", have, want))
+    return out
 
 
 def raw_range(column: str) -> str:

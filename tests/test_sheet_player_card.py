@@ -180,3 +180,45 @@ def test_props_never_show_another_weeks_pull(monkeypatch):
     monkeypatch.setattr(props_edge, "load_pulls", lambda: [(stamp, {"week": 6, "events": []})])
     rows, note = sheet_player_card._props(edge(), 7)
     assert rows == [] and "No props pulled for week 7" in note
+
+
+def test_a_card_is_rebuilt_only_when_edgeraws_width_changed_and_the_sheet_has_the_tab():
+    client = FakeClient(tabs=("Edge Finder", "EdgeRaw", "Exposure", "Player"))
+    ok, line = sheet_player_card.rebuild_card_if_widened(client, cfg(), 74, 90)
+    assert ok and "74 to 90" in line
+    assert client.named("write_tab")[0][1] == "Player"
+
+    for before in (90, None):  # same width, or a width that could not be read: leave the card alone
+        quiet = FakeClient(tabs=("Edge Finder", "EdgeRaw", "Exposure", "Player"))
+        assert sheet_player_card.rebuild_card_if_widened(quiet, cfg(), before, 90) == (True, "")
+        assert quiet.calls == []
+
+    bare = FakeClient()  # no Player tab: `dfs setup player-card` creates it, a sync never does
+    assert sheet_player_card.rebuild_card_if_widened(bare, cfg(), 74, 90) == (True, "")
+    assert bare.calls == []
+
+
+def test_a_failed_card_rebuild_is_a_warning_line_and_never_an_exception():
+    client = FakeClient(tabs=("Edge Finder", "EdgeRaw", "Exposure", "Player"))
+
+    def boom(tab, rows, **kw):
+        raise SheetsError("quota")
+
+    client.write_tab = boom
+    ok, line = sheet_player_card.rebuild_card_if_widened(client, cfg(), 74, 90)
+    assert not ok and "not rebuilt" in line and "dfs setup player-card" in line
+
+
+def test_edge_width_is_the_header_rows_length_or_none_when_unreadable():
+    class Header(FakeClient):
+        def read_range(self, tab, rng):
+            return [["Pool", "Id", "Name"]]
+
+    assert sheet_player_card.edge_width(Header(), "EdgeRaw") == 3
+    assert sheet_player_card.edge_width(FakeClient(), "EdgeRaw") is None  # an empty read
+
+    class Broken(FakeClient):
+        def read_range(self, tab, rng):
+            raise SheetsError("down")
+
+    assert sheet_player_card.edge_width(Broken(), "EdgeRaw") is None

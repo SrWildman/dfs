@@ -112,7 +112,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs setup player-card [--sheet-id <id>]` -- creates (or rebuilds) the **Player** tab right after Edge Finder: pick a name in `B1` (the only typed cell, a dropdown over EdgeRaw's names)
   and read one player on one page (projections side by side, ownership, last five games of usage, matchup, props, signals with Model Check's record, his place in your lineups). Formulas over
   EdgeRaw (columns from `derived.edge_sheet_letter`) plus two hidden raw tabs, `PlayerCardRaw` / `PlayerCardRows`, that every `dfs sync` rewrites **only on a sheet that already has the tab** (never
-  fails the sync). Template first, then live, `dfs doctor` after (checks `player-card-*`). Layout and spec: `player_card.py` (pure; one `Field` spec drives formula and text), I/O: `sheet_player_card.py`,
+  fails the sync; it also rebuilds the card itself when the sync changed EdgeRaw's width). Template first, then live, `dfs doctor` after (checks `player-card-*`, including `player-card-refs`: every EdgeRaw reference on the card is the column `derived.edge_sheet_letter` gives). Layout and spec: `player_card.py` (pure; one `Field` spec drives formula and text), I/O: `sheet_player_card.py`,
   data: `sources/player_log.py`. A rebuild keeps the name in `B1`.
 - `dfs stacks [--sheet-id <id>] [--no-sheet] [--refit] [--retro]` -- ranks every QB's stacks of one and two teammates (WR/TE, or a RB
   whose `Tgt%` is in the top third of the slate's RB1/RB2; with and without a bring-back) by simulated Top 1% rate against how much of the

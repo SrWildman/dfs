@@ -140,6 +140,35 @@ def refresh_raw_if_present(
         return False, f"Player card data not refreshed ({e}); `dfs setup player-card` rebuilds it."
 
 
+def edge_width(client: SheetsClient, edge_tab: str) -> int | None:
+    """How many columns EdgeRaw's header row holds right now (None when it cannot be read): read before a sync
+    rewrites the tab, so `rebuild_card_if_widened` can tell the sync changed it."""
+    try:
+        header = client.read_range(edge_tab, "A1:1")
+    except Exception:  # noqa: BLE001 - only a hint for a fail-soft step
+        return None
+    return len(header[0]) if header and header[0] else None
+
+
+def rebuild_card_if_widened(
+    client: SheetsClient, cfg: Config, before: int | None, after: int
+) -> tuple[bool, str]:
+    """For `dfs sync`: when EdgeRaw's width changed this run (`before` -> `after`), rewrite the card itself,
+    because Sheets shifts a card reference that sat at or past the old edge when the tab grows (`$BW` became
+    `$CM`: blank cells, no error). Only on a sheet that already has the Player tab; never fails the sync.
+    Returns (ok, one line to print); (True, "") when nothing needed doing."""
+    if before is None or before == after:
+        return True, ""
+    try:
+        if not client.tab_exists(CARD_TAB):
+            return True, ""
+        build_card(client, cfg)
+        return True, f"Player card rebuilt (EdgeRaw grew from {before} to {after} columns)"
+    except Exception as e:  # noqa: BLE001 - a sync must never fail over the Player card
+        log.warning("player card not rebuilt: %s", e)
+        return False, f"Player card not rebuilt ({e}); `dfs setup player-card` rebuilds it."
+
+
 def _rgb(hex_color: str) -> dict:
     h = hex_color.lstrip("#")
     return {k: int(h[i : i + 2], 16) / 255 for k, i in (("red", 0), ("green", 2), ("blue", 4))}
