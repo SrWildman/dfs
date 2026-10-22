@@ -228,3 +228,21 @@ def test_robust_is_chosen_on_shocked_draws(field_model, monkeypatch):
     assert not used
     pi.plan_portfolio(objective="robust", **kw)
     assert used
+
+
+def test_a_noisy_runs_field_holds_the_same_noisy_specs_as_its_lineups():
+    import dataclasses
+    from types import SimpleNamespace
+
+    from dfs import portfolio_inputs as pi
+
+    a, b = SimpleNamespace(id="A", projection=10.0), SimpleNamespace(id="B", projection=5.0)
+
+    @dataclasses.dataclass(frozen=True)
+    class Field:
+        players: tuple
+
+    noisy = {"A name": SimpleNamespace(id="A", projection=12.0)}
+    out = pi.with_specs(Field((a, b)), noisy)
+    assert [p.projection for p in out.players] == [12.0, 5.0]  # B has no noisy spec: kept
+    assert pi.with_specs(None, noisy) is None

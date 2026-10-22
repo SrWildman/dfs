@@ -17,8 +17,9 @@ constructed.
 series, fee and size; the standings' own `srwildman` rows say how many entries he made), the best `k` builds
 of that contest's kind go in, ranked as the tool ranks them (Cash %, or Top 1%): a double-up gets the best
 cash build, a 5-entry-max GPP the best five GPP builds. A settings flag can choose differently
-(`Flag.assign`). The report also scores **every** build of the kind in every contest ("any build"), which is
-the same question with far less luck in it: a single-entry double-up is one coin flip a week.
+(`Flag.assign` per contest, `Flag.choose` for the week's contests as one set). The report also scores
+**every** build of the kind in every contest ("any build"), which is the same question with far less luck
+in it: a single-entry double-up is one coin flip a week.
 
 **Scored against the real field.** A lineup's points are DraftKings' own (the standings' `FPTS`); its place is
 among the contest's real final scores (the builds are an extra entry, as in the contest retro) and it shares
@@ -187,11 +188,20 @@ def default_builder(ctx: bs.BuildContext) -> list[ls.Build]:
 def run_builder(ctx: bs.BuildContext) -> list[ls.Build]:
     """The settings' flags around the default builder: `prepare` hooks in order, then the `build` hooks nested
     (the first registered is the outermost)."""
-    flags = ctx.settings.active_flags()
-    for f in flags:
+    return build_prepared(prepare_context(ctx))
+
+
+def prepare_context(ctx: bs.BuildContext) -> bs.BuildContext:
+    """The `prepare` hooks in order, then the specs and lines any of them left out."""
+    for f in ctx.settings.active_flags():
         if f.prepare is not None:
             ctx = f.prepare(ctx, ctx.settings.flags[f.name])
-    ensure_sim(ctx)
+    return ensure_sim(ctx)
+
+
+def build_prepared(ctx: bs.BuildContext) -> list[ls.Build]:
+    """The `build` hooks nested around the default builder on a prepared context."""
+    flags = ctx.settings.active_flags()
     fn: Callable[[bs.BuildContext], list[ls.Build]] = default_builder
     for f in reversed(flags):
         if f.build is not None:
@@ -201,6 +211,33 @@ def run_builder(ctx: bs.BuildContext) -> list[ls.Build]:
 
 def _wrap(flag: bs.Flag, value, inner):  # noqa: ANN001, ANN202
     return lambda c: flag.build(c, value, inner)
+
+
+def week_contests(week: int) -> list[bs.WeekContest]:
+    """The contests Sam entered in `week` as a `choose` hook may see them (no standings)."""
+    return [
+        bs.WeekContest(e.c.contest_id, e.c.series, e.fmt, e.kind, e.k)
+        for e in load_entered([week])
+        if e.c.week == week
+    ]
+
+
+def run_choose(
+    ctx: bs.BuildContext,
+    builds: list[ls.Build],
+    contests: Callable[[], list[bs.WeekContest]],
+) -> dict[str, list[list[str]]]:
+    """The `choose` hooks in order (a later one overrides an earlier one's contests); `contests` is called
+    only when a hook is on."""
+    hooks = [f for f in ctx.settings.active_flags() if f.choose is not None]
+    if not hooks:
+        return {}
+    week = contests()
+    out: dict[str, list[list[str]]] = {}
+    for f in hooks:
+        picked = f.choose(ctx, builds, week, ctx.settings.flags[f.name])
+        out.update({str(cid): [list(map(str, names)) for names in v] for cid, v in picked.items()})
+    return out
 
 
 def build_record(b: ls.Build) -> dict:
@@ -230,8 +267,9 @@ def run_week(
         return json.loads(path.read_text())
     bs.check_flags(settings)
     started = time.monotonic()
-    ctx = make_context(wi, settings)
-    builds = run_builder(ctx)
+    ctx = prepare_context(make_context(wi, settings))
+    builds = build_prepared(ctx)
+    chosen = run_choose(ctx, builds, lambda: week_contests(wi.week))
     out = {
         "week": wi.week,
         "settings": settings.name,
@@ -241,6 +279,8 @@ def run_week(
         "pool": next((n[6:] for n in ctx.notes if n.startswith("pool: ")), ""),
         "builds": [build_record(b) for b in builds],
     }
+    if chosen:
+        out["chosen"] = chosen  # contest id -> the lineups a `choose` hook entered there
     if code != "nogit":
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(out))
@@ -445,6 +485,7 @@ def score_week(
     pts = week_points(entered, week)
     builds = run["builds"]
     assign = [f.assign for f in settings.active_flags() if f.assign is not None]
+    chosen = run.get("chosen", {})
     rows, dropped = [], []
     cache: dict[tuple, float] = {}
     for e in (x for x in entered if x.c.week == week):
@@ -454,7 +495,9 @@ def score_week(
                 if scope == "entry"
                 else entry_order(builds, e.fmt, settings.rank)
             )
-            if scope == "entry" and assign:
+            if scope == "entry" and e.c.contest_id in chosen:
+                picked = [{"names": names} for names in chosen[e.c.contest_id]]
+            elif scope == "entry" and assign:
                 objs = [_AsBuild(b) for b in builds]
                 for hook in assign:
                     objs = hook(objs, e, e.k, settings.flags)

@@ -4620,7 +4620,8 @@ def _run_portfolio(
             return suggest_builds(
                 noisy_edge, tags, noisy_specs, now=now, cap=cfg.lineups.salary_cap,
                 cash_line=settings.cash_line, gpp_target=settings.gpp_target, metric=metric, cash_builds=0,
-                gpp_builds=20, time_limit=portfolio_inputs.WIDE_SECONDS, field=settings.field,
+                gpp_builds=20, time_limit=portfolio_inputs.WIDE_SECONDS,
+                field=portfolio_inputs.with_specs(settings.field, noisy_specs),
                 gpp_entries=gpp_entries, double_up_entries=double_up_entries, rank=rank,
             ).builds  # fmt: skip
 

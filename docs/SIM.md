@@ -1567,12 +1567,16 @@ registry), `backtest_report.py` (text), `pool_store.py` (Sam's saved pool). Test
 `seconds`; `[rules]` the rules-box lines (applied: `Adjust`, `Ownership` as your frame, `Never use` as a pool removal; the
 others need a built tab to iterate on and are reported as not applied); `[flags]` named switches. Unknown keys are errors.
 
-**The registry for other sessions.** `backtest_settings.register(Flag(name, doc, prepare=, build=, assign=, version=))` from the
+**The registry for other sessions.** `backtest_settings.register(Flag(name, doc, prepare=, build=, assign=, choose=, version=))` from the
 module that implements the switch, and add the module's dotted path to `backtest_settings.PLUGIN_MODULES` (imported when a
 settings file names a flag nothing has registered; a module that is not on this branch is skipped). `prepare(ctx, value)`
 returns the `BuildContext` the builder is given (change `ctx.edge`, `ctx.specs`, or `ctx.lines` to swap the simulated field);
 `build(ctx, value, inner)` replaces or wraps the builder (`inner(ctx)` is today's, so a portfolio flag can take its candidates and
-choose a set); `assign(builds, contest, k, flags)` chooses which builds enter a contest. Bump `version` when the implementation
+choose a set); `assign(builds, contest, k, flags)` chooses which builds enter a contest; `choose(ctx, builds, contests, value)`
+chooses the week's entries as one set across every contest (`contests`: `WeekContest`s, the payout table and his entry count,
+never the standings), runs once per week right after the builds on the same context, and is saved with them (`"chosen"` in the
+run). A flag that chooses entries (`assign` / `choose`) leaves the "any build" rows alike on both sides, so `--compare` judges it
+on the ship bar **as entered**. Bump `version` when the implementation
 changes: saved builds are keyed by the settings, the active flags' versions and the code (HEAD plus a hash of uncommitted
 `src/` changes), so a rerun of the same thing is free and a changed thing is rebuilt.
 
@@ -1891,3 +1895,17 @@ itself does not prefer it. That pattern (better in reality than in the model) fi
 larger and more correlated than the simulator's", which is the Week 6 story, but four weeks cannot separate that
 from luck. **Next:** rerun with Week 7 when its standings land (`run_retro`), and keep `robust_wide` as the
 candidate; the bar stays >2 SE over weeks and most weeks.
+
+**As a backtest flag (2026-10-22).** `sim/portfolio_flag.py` registers `portfolio` with Flashback (a `choose` hook), so the
+Week 7 decision is `dfs backtest --weeks 2,4,5,6,7 --settings portfolio.toml --compare today.toml`, with `portfolio.toml`:
+
+    name = "portfolio (robust wide)"
+    [flags]
+    portfolio = true          # or { objective = "robust", wide = 8, sims = 4000 }
+
+`true` is `robust_wide` as the live hook would run it: robust on shocked draws, the builds plus the wide pool of 8 noisy builder
+runs (`--portfolio-wide 8`), GPP contests only (cash keeps today's pick, as live). Two differences from the retro above, both
+toward the live hook: the wide pool is the live one (not the curse study's 24 longer runs), and the generated GPP field is fitted
+on the weeks **before** the backtested one only (`field_model_before`; the retro fitted on every other week), so Week 2, with no
+GPP field before it, keeps today's pick. The backtest also scores against its own fitted payout tables and the backtest's own
+builds (Sam's saved pool from Week 7 on), so its numbers are not the retro's.

@@ -160,6 +160,41 @@ def test_run_builder_applies_prepare_hooks_in_order_and_nests_the_build_hooks(mo
     assert seen == [("builder", ["one:1", "two:2"])]
 
 
+def test_choose_hooks_run_in_order_and_only_ask_for_the_contests_when_one_is_on(monkeypatch):
+    monkeypatch.setattr(bs, "FLAGS", {})
+    asked = []
+
+    def contests():
+        asked.append(1)
+        return [bs.WeekContest("1", "S", "gpp", None, 2), bs.WeekContest("2", "T", "gpp", None, 1)]
+
+    ctx = bs.BuildContext(
+        week=4, edge=pd.DataFrame(), tags={}, now=None, cap=50000, metric="CalPts", settings=bs.Settings()
+    )
+    assert bt.run_choose(ctx, [], contests) == {} and asked == []
+    bs.register(bs.Flag("a", "d", choose=lambda c, b, cs, v: {x.contest_id: [["A"]] * x.entries for x in cs}))
+    bs.register(bs.Flag("b", "d", choose=lambda c, b, cs, v: {"2": [["B"]]}))
+    ctx.settings = bs.Settings(flags={"a": True, "b": True})
+    assert bt.run_choose(ctx, [], contests) == {"1": [["A"], ["A"]], "2": [["B"]]}  # the later one wins "2"
+    assert asked == [1]
+
+
+def test_a_chosen_contest_enters_the_hooks_lineups_and_the_others_keep_todays(monkeypatch):
+    names = {n: [f"{n}{i}" for i in range(9)] for n in ("X", "P1", "P2")}
+    builds = [build("gpp", 1, p_gpp=0.2, names=names["P1"]), build("gpp", 2, p_gpp=0.1, names=names["P2"])]
+    a, b = contest([100, 50], k=1), contest([100, 50], k=1)
+    b.c.contest_id = "2"
+    pts = {"X": 9.0, "P1": 8.0, "P2": 7.0}
+    wi = SimpleNamespace(actual={n: pts[k] for k, v in names.items() for n in v})
+    monkeypatch.setattr(bt, "week_points", lambda entered, week: {})
+    run = {"builds": builds, "chosen": {"1": [names["X"]]}}
+    out, dropped = bt.score_week(4, run, [a, b], wi, bs.Settings())
+    entry = out[out["scope"] == "entry"].set_index("contest")["points"]
+    assert entry["1"] == pytest.approx(81.0) and entry["2"] == pytest.approx(72.0)  # X; today's best build
+    assert sorted(out[out["scope"] == "any"]["points"]) == [63.0, 63.0, 72.0, 72.0]  # every build, not X
+    assert dropped == []
+
+
 def test_the_cache_key_is_the_settings_and_the_code(tmp_path):
     s = bs.Settings()
     a = bt.job_path(s, "abc", 6, tmp_path)

@@ -237,9 +237,12 @@ def compare_lines(a: bt.Result, b: bt.Result) -> list[str]:
             by_week = f"by week {p['diff_week']:+.1%} (SE {p['se_week']:.1%})"
             by_week += f", A wins {p['weeks_won']} of {p['weeks']} weeks"
             out.append(f"- {label}, {flabel}: {per_contest}; {by_week}")
-    p = bt.paired_vs(t, "A", "B", "any", None)
-    ex = _ex_top_diff(rows)
-    out.append(f"Verdict on the ship bar (any build, all formats): {verdict(p, p['weeks'], ex_top=ex)}")
+    # a flag that changes which builds go in (not the builds) shows only as entered: judge it there
+    scope = "entry" if enters_differently(a) or enters_differently(b) else "any"
+    p = bt.paired_vs(t, "A", "B", scope, None)
+    ex = _ex_top_diff(rows, scope)
+    label = "as entered" if scope == "entry" else "any build"
+    out.append(f"Verdict on the ship bar ({label}, all formats): {verdict(p, p['weeks'], ex_top=ex)}")
     cut = [(r.name, timebox_weeks(r)) for r in (a, b) if timebox_weeks(r)]
     if cut:
         who = "; ".join(f"{name} in week(s) {weeks_text(w)}" for name, w in cut)
@@ -251,11 +254,16 @@ def compare_lines(a: bt.Result, b: bt.Result) -> list[str]:
     return out
 
 
-def _ex_top_diff(rows: pd.DataFrame) -> float | None:
-    """A's ROI minus B's with each side's single best ticket removed (any-build scope)."""
+def enters_differently(r: bt.Result) -> bool:
+    """Whether a flag of `r`'s settings chooses which builds go into each contest (`assign` / `choose`)."""
+    return any(f.assign is not None or f.choose is not None for f in r.settings.active_flags())
+
+
+def _ex_top_diff(rows: pd.DataFrame, scope: str = "any") -> float | None:
+    """A's ROI minus B's with each side's single best ticket removed (in `scope`)."""
     vals = []
     for side in ("A", "B"):
-        d = rows[(rows["side"] == side) & (rows["scope"] == "any")]
+        d = rows[(rows["side"] == side) & (rows["scope"] == scope)]
         if d.empty:
             return None
         ex = d.drop(index=d["paid"].idxmax())

@@ -154,6 +154,16 @@ def noisy_inputs(
     return out, noisy
 
 
+def with_specs(field, specs: Mapping[str, object]):  # noqa: ANN001, ANN201 - sim.field.FieldModel | None
+    """`field` with its players' specs replaced by `specs`' (by id): the field of a noisy run must hold the
+    same noisy projections as the lineups it is simulated with (the simulator refuses two different specs
+    for one player)."""
+    if field is None:
+        return None
+    by_id = {s.id: s for s in specs.values()}
+    return dataclasses.replace(field, players=tuple(by_id.get(p.id, p) for p in field.players))
+
+
 def wide_lineups(
     edge: pd.DataFrame,
     specs: Mapping[str, object],
@@ -185,8 +195,8 @@ def plan_portfolio(
     builds: Sequence,
     specs: Mapping[str, object],
     edge: pd.DataFrame,
-    entries: Sequence,
-    log: pd.DataFrame,
+    entries: Sequence = (),
+    log: pd.DataFrame | None = None,
     season: int,
     objective: str = DEFAULT_OBJECTIVE,
     n_sims: int = DEFAULT_SIMS,
@@ -198,19 +208,26 @@ def plan_portfolio(
     now: datetime | None = None,
     wide: Sequence[Sequence] = (),
     wide_keep: int = WIDE_KEEP,
+    covered: Mapping[str, tuple[str, payouts.ContestKind, int]] | None = None,
+    model=None,  # noqa: ANN001 - sim.stacks_retro.FieldModel
 ) -> PortfolioPlan:
     """Assign the GPP builds (and, with `wide`, the wide pool's lineups) to the GPP entries in `entries`
     (module docstring). `builds` are the report's `Build`s (`kind`, `number`, `players`, `p_gpp`), `specs` the
     simulator specs by player name, `edge` the (framed) edge the builds were scored on, `wide` lineups of
     players from `wide_lineups` (the `wide_keep` best of them by quick E[$] join the candidates). `robust` is
     chosen on shocked draws (`portfolio.shocked_points`), the others on the simulator's own. Today's pick, for
-    comparison, uses the builds only. A chosen wide lineup that is not a build is in `plan.new_lineups`."""
+    comparison, uses the builds only. A chosen wide lineup that is not a build is in `plan.new_lineups`.
+    `covered` (`{contest id: (name, kind, entries)}`) stands in for `entries` + `log`, and `model` for the
+    saved field model: `dfs backtest`'s flag passes both (`sim/portfolio_flag.py`)."""
     plan = PortfolioPlan(week, objective, (now or datetime.now(UTC)).isoformat(timespec="seconds"))
-    model = stacks_inputs.load_field_model()
+    model = model if model is not None else stacks_inputs.load_field_model()
     if model is None:
         plan.notes.append("no fitted field model yet: run `dfs stacks --refit` once (about two minutes)")
         return plan
-    covered, skipped = contest_kinds(entries, log, season, min_cash)
+    if covered is None:
+        covered, skipped = contest_kinds(entries, log, season, min_cash)
+    else:
+        covered, skipped = dict(covered), {}
     plan.notes.extend(skipped.values())
     for cid, why in skipped.items():
         plan.contests.append(PlannedContest(cid, why.split(":")[0], 0.0, [], [], why))

@@ -22,9 +22,9 @@ A settings file is TOML; every key is optional and a missing one is today's defa
 
     [flags]                                # named switches other sessions register (below)
     ownership_uncertainty = true
-    portfolio = { size = 20 }
+    portfolio = { objective = "robust", wide = 8 }
 
-**The registry.** A flag is a `Flag`: a name, one line of doc, and any of three optional hooks, registered
+**The registry.** A flag is a `Flag`: a name, one line of doc, and any of four optional hooks, registered
 with `register(Flag(...))` from the module that implements it (session H registers `ownership_mean` and
 `ownership_uncertainty`, session I `portfolio`) so `dfs backtest` never needs editing for a new switch:
 
@@ -33,7 +33,12 @@ with `register(Flag(...))` from the module that implements it (session H registe
 - `build(ctx, value, inner) -> builds`: replace or wrap the builder; `inner(ctx)` is today's builder, so a
   flag can take its candidates and choose a different set;
 - `assign(builds, contest, entries, value) -> builds`: which of the week's builds go into one contest Sam
-  entered (`entries` of them); today's is the first `entries` of the contest's kind, in build order.
+  entered (`entries` of them); today's is the first `entries` of the contest's kind, in build order;
+- `choose(ctx, builds, contests, value) -> {contest id: [lineups]}`: the week's entries chosen as one set,
+  across every contest at once (`contests`: the week's `WeekContest`s, what Sam knew before the lock: the
+  payout table and his entry count, never the standings), each lineup a list of player names (a build's or
+  any other legal lineup). It runs once per week right after the builds, on the same context, and is saved
+  with them; a contest it leaves out keeps `assign` / today's.
 
 Flags apply in registration order; a flag set to `false` is off. A module that registers flags is named in
 `PLUGIN_MODULES` (imported when a settings file names a flag nothing has registered yet; one that is not on
@@ -60,7 +65,7 @@ from dfs import lineup_suggest as ls
 from dfs import suggest_state
 
 # Modules that call `register` at import. Sessions H and I add theirs here (one line each).
-PLUGIN_MODULES: tuple[str, ...] = ("dfs.sim.own_error_flag",)
+PLUGIN_MODULES: tuple[str, ...] = ("dfs.sim.own_error_flag", "dfs.sim.portfolio_flag")
 
 # The live builder stops its search after 120 s, so runs of one slate differ (two runs agree on 13 of 14
 # builds, and only 5 of 13 match a search that finishes; under load, more). A backtest compares settings, so
@@ -96,12 +101,27 @@ Assign = Callable[[list[ls.Build], Any, int, Any], list[ls.Build]]
 
 
 @dataclass(frozen=True)
+class WeekContest:
+    """One contest Sam entered that week as a `choose` hook sees it: what he knew before the lock."""
+
+    contest_id: str
+    name: str  # the series
+    fmt: str  # "cash" / "gpp"
+    kind: Any  # sim.payouts.ContestKind: size, payout table, fee
+    entries: int  # how many entries he made in it
+
+
+Choose = Callable[[BuildContext, list[ls.Build], list[WeekContest], Any], dict[str, list[list[str]]]]
+
+
+@dataclass(frozen=True)
 class Flag:
     name: str
     doc: str
     prepare: Prepare | None = None
     build: Build | None = None
     assign: Assign | None = None
+    choose: Choose | None = None
     version: str = "1"  # bump when the implementation changes: it is part of the cache key
 
 

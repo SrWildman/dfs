@@ -139,7 +139,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   history log), and pays them against the real field (place among the real scores, shared with real copies, on the fitted payout table) beside his
   real lineups (as DK paid, and on the same table). ROI / cash rate / top-1% / ROI without the best ticket, "as entered" and "any build"; the
   standard errors are across weeks. `--compare` pairs two settings files (`--settings` minus `--compare`) with the ship bar's verdict. Settings TOML
-  and the flag registry other sessions plug into: `backtest_settings.py` (`register(Flag(...))`, hooks `prepare` / `build` / `assign`, plugin modules in
+  and the flag registry other sessions plug into: `backtest_settings.py` (`register(Flag(...))`, hooks `prepare` / `build` / `assign` / `choose` (the week's entries as one set), plugin modules in
   `PLUGIN_MODULES`). The search runs to the end (`seconds = 600` default; the live clock is 120 and its runs differ), so reruns give the same builds. Saved builds (`data/research/backtest/jobs/<fingerprint>/`) are keyed by settings + code, `--fresh` ignores them. Report in
   `docs/research/backtest/` (gitignored). Read-only: no sheet. Also `dfs research refresh --only backtest` (optional study). Math/orchestration
   `backtest.py`, text `backtest_report.py`.
