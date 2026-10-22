@@ -1,11 +1,11 @@
 """`dfs backtest` on the command line: the argument errors, and one run with the backtest itself stubbed."""
 
+from test_backtest import result
 from typer.testing import CliRunner
 
 from dfs import backtest as bt
 from dfs import backtest_settings as bs
 from dfs.cli import app
-from tests.test_backtest import result
 
 runner = CliRunner()
 
