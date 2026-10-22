@@ -32,13 +32,13 @@ under 2 s) and checks the search against brute force.
 from __future__ import annotations
 
 import heapq
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
 import pandas as pd
 
+from dfs import search_clock as clock
 from dfs.derived import _rosterable_pool_mask
 from dfs.kickoff import parse_kickoff
 from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS
@@ -333,7 +333,7 @@ class _Search:
         self.stages = [slot for pos in _STAGE_ORDER for slot in slots if slot == pos]
         self.need = {pos: slots.count(pos) for pos in ("QB", "RB", "WR", "TE", "DST") if slots.count(pos)}
         self.flex = "FLEX" in slots
-        self.deadline = None if time_limit is None else time.monotonic() + time_limit
+        self.deadline = None if time_limit is None else clock.now() + time_limit
         self.timed_out = False
         self.budget = state.cap - state.fixed_salary
         self.best_obj = float("-inf")
@@ -389,8 +389,10 @@ class _Search:
 
     def _descend(self, depth, placed, used, budget, obj, chosen, floor) -> None:
         self.nodes += 1
-        if self.deadline is not None and self.nodes % 512 == 0 and time.monotonic() > self.deadline:
-            self.timed_out = True
+        if self.nodes % clock.CHECK_EVERY == 0:
+            clock.advance()
+            if self.deadline is not None and clock.now() > self.deadline:
+                self.timed_out = True
         if self.timed_out:
             return
         if depth == len(self.stages):

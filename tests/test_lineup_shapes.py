@@ -13,6 +13,7 @@ import test_lineup_suggest as syn  # noqa: E402
 
 from dfs import lineup_shapes as sh  # noqa: E402
 from dfs import lineup_suggest as ls  # noqa: E402
+from dfs import search_clock as clock  # noqa: E402
 from dfs.late_swap_search import SwapPlayer  # noqa: E402
 
 
@@ -197,6 +198,6 @@ def test_feasibility_prunes_only_what_cannot_pass():
 
 def test_a_time_limit_is_respected_and_reported(pool):
     started = time.monotonic()
-    _, complete = sh.shape_lineups(pool, sh.GAME, cap=syn.CAP, per_qb=200, deadline=time.monotonic() + 0.01)
+    _, complete = sh.shape_lineups(pool, sh.GAME, cap=syn.CAP, per_qb=200, deadline=clock.now() + 0.01)
     assert time.monotonic() - started < 5
     assert complete in (True, False)

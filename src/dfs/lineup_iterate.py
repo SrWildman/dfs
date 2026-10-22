@@ -63,6 +63,7 @@ import pandas as pd
 from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
 from dfs import my_frame
+from dfs import search_clock as clock
 from dfs import suggest_state as st
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import SwapPlayer, conflicts, edge_players
@@ -333,11 +334,11 @@ def iterate_builds(
     for job in jobs:
         if job.want:
             keys.setdefault(job.key, job)
-    deadline = time.monotonic() + time_limit
+    deadline = clock.now() + time_limit
     candidates: dict[tuple, list[list[SwapPlayer]]] = {}
     cutoffs: list[float] = []
     for n, (key, job) in enumerate(keys.items()):
-        t = time.monotonic()
+        t = clock.now()
         pool = _pool_with(pools[job.kind], job.fixed, never)
         box = t + max(0.0, deadline - t) / (len(keys) - n)
         leaf = _leaf(rules, tags, job.kind)

@@ -1601,3 +1601,18 @@ are positive in both ROI measures and ahead on cash rate (his double-ups cashed 
 but "any build" GPP ROI rests on one Week 5 lineup (206 points), and three weeks of cash is three coin flips.
 At the live 120 s clock the same code gave +50% and +103% ROI as entered on two runs (Week 2 -100% vs +1,402%): the noise that
 `seconds = 600` removes.
+
+## Deterministic search budget (2026-10-21)
+
+The builder's search budget (`dfs lineups suggest --seconds`, default 120) used to be wall-clock seconds, so a busy machine gave
+different builds. Measured with `dfs backtest`'s Weeks 4, 5, 6 on an almost idle machine (one other session's core busy): the
+120 s search did **not** finish in any of them (the RB-stack and game-stack searches ran out of their boxes; Week 6 and Week 4 also the
+plain stack search), the search phase took 90-95 s of the 120, and two runs of Week 6 agreed on 13 of 14 builds while only 5-7 of 14
+matched a search that finishes (about 290 s). Under load (eight builds at once) the result moved much more. So the non-determinism was
+mostly the clock, and a 120 s search is a cut one either way.
+
+`search_clock.py` now counts the budget in search work: `late_swap_search._Search` reports every 512 nodes, `now()` is nodes divided by
+`NODES_PER_SECOND` (33,000, measured: a 120 s wall-clock Week 6 search visited 3.27 million nodes in 99 s), and every deadline
+(`lineup_suggest`, `lineup_shapes`, `lineup_iterate`, late swap's `top_lineups`) is measured in it. Three simultaneous Week 6 runs on a busy
+machine gave identical builds; a solo run takes 97-112 s of wall for Weeks 5-6 (about two minutes), 170 s when three run at once. The phase
+timers still show wall seconds. `search_clock.wall_clock()` restores real seconds. Nothing else about the builder changed.

@@ -12,6 +12,7 @@ import pytest
 
 from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
+from dfs import search_clock as clock
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import LineupState, OpenSlot, SwapPlayer, conflicts, top_lineups
 from dfs.models import ROSTER_SLOTS
@@ -343,7 +344,7 @@ def test_a_qb_who_cannot_stack_is_not_searched_so_it_cannot_eat_the_time_limit(e
         "top_lineups",
         lambda state, *a, **k: searched.append(state.fixed[0].name) or real(state, *a, **k),
     )
-    lineups, complete = ls.stacked_lineups(pool, cap=CAP, deadline=time.monotonic() + 60)
+    lineups, complete = ls.stacked_lineups(pool, cap=CAP, deadline=clock.now() + 60)
     assert complete and lineups
     quarterbacks = {p.name for p in pool if p.position == "QB"}
     assert stuck.name in quarterbacks and stuck.name not in searched  # he was never searched...

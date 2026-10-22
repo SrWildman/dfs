@@ -60,6 +60,7 @@ import pandas as pd
 
 from dfs import chalk_watch
 from dfs import lineup_shapes as shapes_mod
+from dfs import search_clock as clock
 from dfs.flex_order import BASE_SLOTS
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import (
@@ -252,7 +253,7 @@ def cash_lineups(
 ) -> tuple[list[list[SwapPlayer]], bool]:
     """The best `k` legal lineups from `pool` by projection (any shape), best first. `fixed` players (an
     iterate rerun's locks) are in every lineup; `leaf_ok` is an extra test a finished lineup must pass."""
-    remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+    remaining = None if deadline is None else max(0.0, deadline - clock.now())
     if not fixed:
         found, complete = top_lineups(
             _all_open_state(cap), pool, k=k, leaf_filter=leaf_ok, time_limit=remaining
@@ -644,7 +645,7 @@ def gpp_candidates(
     cutoff = None
     plan = [step for step in (GPP_PLAN if plan is None else plan) if step[0] in shapes]
     for n, (shape, per_qb, weight) in enumerate(plan):
-        now = time.monotonic()
+        now = clock.now()
         weights_left = sum(w for _, _, w in plan[n:])
         box = now + max(0.0, deadline - now) * weight / weights_left
         kwargs = {}
@@ -705,8 +706,9 @@ def suggest_builds(
     default) the Top 1% chance alone, "share" that chance divided by 1 + the duplicates expected."""
     gpp_order = rank_key(rank)
     started = time.monotonic()
-    deadline = started + time_limit
-    cash_deadline = started + time_limit * CASH_SHARE_OF_TIME  # the GPP search gets the rest
+    budget_start = clock.now()  # the budget is search work, not wall seconds (search_clock.py)
+    deadline = budget_start + time_limit
+    cash_deadline = budget_start + time_limit * CASH_SHARE_OF_TIME  # the GPP search gets the rest
     report = SuggestReport(rank=rank)
     kickoff = {
         str(name): parse_kickoff(start)
