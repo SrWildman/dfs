@@ -81,6 +81,16 @@ def test_save_then_load_round_trips(tmp_path):
     assert loaded.for_lineup(2).best.delta_p_cash == 0.031 and loaded.for_lineup(9) is None
 
 
+def test_the_field_a_run_was_scored_against_is_saved_and_defaults_to_projected(tmp_path):
+    real = "field: real (NFL GIANT $10 Double Up, 3,448 lineups, exported Sun 1:32 pm ET)"
+    lss.save(lss.Saved(NOW, False, field_source=real), tmp_path)
+    assert lss.load(tmp_path).field_source == real
+    assert lss.Saved(NOW, False).field_source == "field: projected"
+    # a file written before the field existed reads as projected
+    (tmp_path / lss.STORE_FILE).write_text('{"saved_at": "2026-10-25T16:00:00+00:00", "lineups": []}')
+    assert lss.load(tmp_path).field_source == lss.FIELD_PROJECTED
+
+
 def test_a_missing_or_corrupt_file_loads_as_none(tmp_path):
     assert lss.load(tmp_path) is None
     (tmp_path / lss.STORE_FILE).write_text("{not json")

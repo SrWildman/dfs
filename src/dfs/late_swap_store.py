@@ -24,6 +24,7 @@ from dfs.paths import DATA_DIR
 
 STORE_DIR = DATA_DIR / "cockpit"
 STORE_FILE = "late_swap.json"
+FIELD_PROJECTED = "field: projected"  # what a run without a live export says it scored against
 STALE_AFTER = timedelta(hours=12)  # a late-swap run from an earlier day is not Sunday's picture
 _GAIN_EPSILON = 1e-9
 
@@ -64,6 +65,7 @@ class Saved:
     refreshed_injuries: bool
     lineups: tuple[LineupResult, ...] = field(default_factory=tuple)
     news: tuple[NewsItem, ...] = field(default_factory=tuple)
+    field_source: str = FIELD_PROJECTED  # "field: real (<contest>, exported <time>)" when `--field` was used
 
     def for_lineup(self, number: int) -> LineupResult | None:
         return next((r for r in self.lineups if r.number == number), None)
@@ -118,6 +120,7 @@ def to_json(saved: Saved) -> dict:
     return {
         "saved_at": saved.saved_at.astimezone(UTC).isoformat(),
         "refreshed_injuries": saved.refreshed_injuries,
+        "field_source": saved.field_source,
         "lineups": [
             {
                 "number": r.number,
@@ -182,6 +185,7 @@ def from_json(data: dict) -> Saved:
         refreshed_injuries=bool(data.get("refreshed_injuries", False)),
         lineups=tuple(lineups),
         news=news,
+        field_source=str(data.get("field_source") or FIELD_PROJECTED),
     )
 
 

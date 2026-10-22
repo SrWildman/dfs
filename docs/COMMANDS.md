@@ -160,6 +160,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | `--all-players` | Also consider the whole rosterable pool, not only your Player Pool. |
 | `--goal CHOICE` | Rank swaps by the simulator's change in P(cash) or P(GPP); both are shown. Default: each lineup's Cash/GPP marker (column A of its Total row; cash if blank). |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
+| `--field STR` | Score swaps against the REAL field of a live contest: the standings export you downloaded by hand after the 1 pm lock (DraftKings > the contest > export full standings). Pass a file (repeat for a Double Up and a GPP), or `auto` for the newest live exports in your Downloads folder (this week's, found by their content; the entries file there says each contest's format). Without it, swaps are scored against the projected-ownership line. |
 | `--refresh-injuries` | Lay ESPN's game-day injury feed over the last sync's Avail first (Out, IR, Doubtful and Questionable only escalate a status, never clear one), and list what changed. Use it in the late window, after news breaks. |
 
 ### `dfs week close`

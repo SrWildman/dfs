@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dfs.late_swap_field import LiveLines
 from dfs.late_swap_search import LineupSuggestions, Swap
 from dfs.sim.field import FieldModel
 from dfs.sim.simulate import PlayerSpec
@@ -28,13 +29,15 @@ OVERSAMPLE = 4
 @dataclass(frozen=True)
 class SimSettings:
     """`cash_line` / `gpp_target` are the FIXED lines; a `field` replaces them with lines that move with the
-    slate (`lines` says which and why, for the printed summary)."""
+    slate (`lines` says which and why, for the printed summary). `live` (a real contest's export,
+    `late_swap_field`) replaces both with the lines that field is heading for, on its own draws."""
 
     cash_line: float
     gpp_target: float
     goal: str = "cash"
     field: FieldModel | None = None
     lines: SimLines | None = None
+    live: LiveLines | None = None
 
 
 def swap_names(swap: Swap) -> tuple[list[str], list[str]]:
@@ -70,13 +73,16 @@ def attach_probabilities(
         out, new = swap_names(swap)
         if all(n in specs for n in new):
             rated.append((swap, out, [specs[n] for n in new]))
-    deltas = swap_deltas(
-        lineup,
-        [(out, ins) for _, out, ins in rated],
-        cash_line=settings.cash_line,
-        gpp_target=settings.gpp_target,
-        field=settings.field,
-    )
+    if settings.live is not None:
+        deltas = settings.live.swap_deltas(lineup, [(out, ins) for _, out, ins in rated])
+    else:
+        deltas = swap_deltas(
+            lineup,
+            [(out, ins) for _, out, ins in rated],
+            cash_line=settings.cash_line,
+            gpp_target=settings.gpp_target,
+            field=settings.field,
+        )
     for (swap, _out, _ins), d in zip(rated, deltas, strict=True):
         swap.delta_p_cash, swap.delta_p_gpp = d.delta_p_cash, d.delta_p_gpp
     suggestions.pairs = sorted(suggestions.pairs, key=lambda s: _rank_key(s, settings.goal))[:top]
@@ -108,13 +114,16 @@ def sit_effects(lineup: list[PlayerSpec], names: list[str], settings: SimSetting
     present = [p for p in lineup if p.id in set(names)]
     if not present:
         return []
-    deltas = swap_deltas(
-        lineup,
-        [([p.id], [replace(p, id=f"{p.id} (sits)", projection=SIT_PROJECTION)]) for p in present],
-        cash_line=settings.cash_line,
-        gpp_target=settings.gpp_target,
-        field=settings.field,
-    )
+    if settings.live is not None:  # sitting: he adds nothing from here on (a started player keeps his points)
+        deltas = settings.live.swap_deltas(lineup, [([p.id], []) for p in present])
+    else:
+        deltas = swap_deltas(
+            lineup,
+            [([p.id], [replace(p, id=f"{p.id} (sits)", projection=SIT_PROJECTION)]) for p in present],
+            cash_line=settings.cash_line,
+            gpp_target=settings.gpp_target,
+            field=settings.field,
+        )
     out = []
     for p, d in zip(present, deltas, strict=True):
         out.append(
