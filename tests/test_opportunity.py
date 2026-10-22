@@ -307,3 +307,47 @@ def test_the_price_gap_section_writes_rows_with_the_pool_cue_and_a_why():
     empty = edge_finder_tab._Builder(None, None)
     edge_finder_tab._price_gap_section(empty, _edge_rows().assign(PriceGap=np.nan))
     assert not empty.layout.player_rows and any("Week 4" in " ".join(map(str, r)) for r in empty.layout.rows)
+
+
+# ---- the PRICE GAP block's track-record line -------------------------------------------------------------
+
+
+def _record_table(**over):
+    row = {
+        "Signal": results_signals.PRICE_GAP_RECORD_GROUP,
+        "n": 66,
+        "VsCal": -0.58,
+        "Z": -0.67,
+        "FirstWeek": 4,
+        "LastWeek": 6,
+    }
+    return pd.DataFrame([{**row, **over}])
+
+
+def test_the_record_line_says_not_proven_with_the_gap_weeks_and_n():
+    line = results_signals.price_gap_record_line(_record_table())
+    assert line == "Not proven: PriceGap ≥ +1 ran −0.58 vs CalPts, Weeks 4-6, n 66"
+    one = results_signals.price_gap_record_line(_record_table(FirstWeek=4, LastWeek=4))
+    assert "Week 4," in one
+    beat = results_signals.price_gap_record_line(_record_table(VsCal=0.9, Z=2.4))
+    assert beat.startswith("Beat CalPts so far")
+
+
+def test_the_record_line_is_blank_without_a_table_or_a_fired_group():
+    assert results_signals.price_gap_record_line(None) == ""
+    assert results_signals.price_gap_record_line(pd.DataFrame()) == ""
+    assert results_signals.price_gap_record_line(_record_table(n=0, VsCal=np.nan)) == ""
+
+
+def test_the_price_gap_block_opens_with_the_record_line_when_there_is_one():
+    plain = edge_finder_tab._Builder(None, None)
+    edge_finder_tab._price_gap_section(plain, _edge_rows())
+    assert not any("Not proven" in " ".join(map(str, r)) for r in plain.layout.rows)
+    b = edge_finder_tab._Builder(None, None)
+    b.price_gap_record = results_signals.price_gap_record_line(_record_table())
+    edge_finder_tab._price_gap_section(b, _edge_rows())
+    texts = [" ".join(map(str, r)) for r in b.layout.rows]
+    title = next(i for i, t in enumerate(texts) if "PRICE GAP" in t)
+    line = next(i for i, t in enumerate(texts) if "Not proven: PriceGap" in t)
+    assert "Track record" in texts[line] and line > title  # under the title and its "What it is" rows
+    assert b.layout.player_rows and b.layout.player_rows[0] - 1 > line  # above the header and the players

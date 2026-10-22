@@ -205,6 +205,7 @@ def update_results(
             _save_signal_table(signal_table, season)
             reliability = results_signals.reliability_report(evaluation)
             opportunity = _opportunity_report(season, evaluation)
+            _save_opportunity_table(opportunity, season)
         ownership, ownership_gaps = _refit_field_own(season, scored, report)
         layout = build_layout(
             scored,
@@ -239,6 +240,25 @@ def _save_signal_table(table: pd.DataFrame, season: int) -> None:
         )
     except OSError as e:
         log.warning("signal records not saved for the Player card: %s", e)
+
+
+def opportunity_table_path(season: int):
+    """Where the opportunity-per-dollar record is kept for the Edge Finder's PRICE GAP line."""
+    return results_loop.RESULTS_DIR / f"opportunity_table_{season}.csv"
+
+
+def _save_opportunity_table(table: pd.DataFrame | None, season: int) -> None:
+    """Keep the opportunity record so the Edge Finder can quote it at every sync. A failed save never fails
+    the update; a report that could not be built leaves the last saved one."""
+    if table is None or table.empty:
+        return
+    try:
+        results_loop.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        table.assign(AsOf=datetime.now(UTC).strftime("%Y-%m-%d")).to_csv(
+            opportunity_table_path(season), index=False
+        )
+    except OSError as e:
+        log.warning("opportunity record not saved for the Edge Finder: %s", e)
 
 
 def _props_shadow(season: int, stats_player: pd.DataFrame, report: UpdateReport) -> props_edge.Shadow | None:

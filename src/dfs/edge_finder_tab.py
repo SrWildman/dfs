@@ -308,6 +308,7 @@ class Inputs:
     calibration: calibration.Calibration | None = None
     r6: R6View | None = None
     history: dict[str, tuple[float, int]] = field(default_factory=dict)
+    price_gap_record: str = ""  # Model Check's one-line record of the PRICE GAP signal (blank until saved)
 
 
 @dataclass
@@ -442,6 +443,7 @@ def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None
     if status.get("week") and (season or status.get("season")):
         history = typical_best_hit3x(int(season or status["season"]), int(status["week"]))
     return Inputs(
+        price_gap_record=_price_gap_record(season or status.get("season")),
         edge=edge,
         players=players,
         beneficiaries=_read(OUTPUT_DIR / BENEFICIARIES_FILE),
@@ -452,6 +454,19 @@ def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None
         r6=load_r6(edge, players),
         history=history,
     )
+
+
+def _price_gap_record(season) -> str:  # noqa: ANN001
+    """The PRICE GAP line from Model Check's saved opportunity report ("" until `results update` saves it)."""
+    from dfs import results_signals, results_update
+
+    if not season:
+        return ""
+    try:
+        table = pd.read_csv(results_update.opportunity_table_path(int(season)))
+    except (OSError, ValueError):
+        return ""
+    return results_signals.price_gap_record_line(table)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -534,6 +549,7 @@ class _Builder:
     def __init__(self, r6: R6View | None = None, fitted=None) -> None:  # noqa: ANN001
         self.r6 = r6
         self.fitted = fitted  # for `gap_short`
+        self.price_gap_record = ""  # the PRICE GAP block's track-record line
         self.layout = Layout(rows=[])
         self._section: tuple[str, int] | None = None
         self._open: tuple[str, int] | None = None  # (key, header row) of an open depth-2 group
@@ -1103,6 +1119,7 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
     b = _Builder(
         inputs.r6 if inputs is not None else None, inputs.calibration if inputs is not None else None
     )
+    b.price_gap_record = inputs.price_gap_record if inputs is not None else ""
     b.text_row(
         "EDGE FINDER  —  calibrated projections, outcome odds and the signals that matter",
         None,
@@ -1527,6 +1544,8 @@ def _price_gap_why(r: pd.Series) -> str:
 
 def _price_gap_section(b: _Builder, edge: pd.DataFrame) -> None:
     b.begin_section("PRICE GAP  —  opportunity the price hasn't caught")
+    if b.price_gap_record:
+        b.text_row(b.price_gap_record, b.layout.note_rows, label="Track record", detail=b.price_gap_record)
     part = price_gap_plays(edge)
     if part.empty:
         b.note("Nobody yet: it needs three games this season, so it fills in from Week 4.")

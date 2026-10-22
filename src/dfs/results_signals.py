@@ -464,8 +464,11 @@ OPPORTUNITY_REPORT_COLUMNS = [
     "HitCal",
     "Weeks",
     "WeeksUp",
+    "FirstWeek",
+    "LastWeek",
     "Thin",
 ]
+PRICE_GAP_RECORD_GROUP = f"PriceGap +{OPP_GAP_FLAG:g} or more"  # the group the Edge Finder quotes
 OPPORTUNITY_GROUPS = [
     # (name, feature column, positions, direction): thresholds fixed here before any score was read
     (f"PriceGap +{OPP_GAP_FLAG:g} or more", "PriceGap", None, "up"),
@@ -587,7 +590,27 @@ def opportunity_report(frame: pd.DataFrame) -> pd.DataFrame:
                 "HitCal": round(float((sign * vs_cal > 0).mean()), 3) if direction else np.nan,
                 "Weeks": int(len(by_week)),
                 "WeeksUp": int((sign * by_week > 0).sum()) if direction else np.nan,
+                "FirstWeek": int(by_week.index.min()),
+                "LastWeek": int(by_week.index.max()),
                 "Thin": is_thin(n),
             }
         )
     return pd.DataFrame(rows, columns=OPPORTUNITY_REPORT_COLUMNS)
+
+
+def price_gap_record_line(table: pd.DataFrame | None) -> str:
+    """One line for the top of the Edge Finder's PRICE GAP block, from the saved opportunity report: how the
+    flagged group ran against CalPts, so the block reads as information and not an edge. Empty when the report
+    has not been saved or the group never fired. "Not proven" unless it beat CalPts by 2+ SE."""
+    if table is None or table.empty or "Signal" not in table.columns:
+        return ""
+    row = table[table["Signal"] == PRICE_GAP_RECORD_GROUP]
+    if row.empty or not int(row.iloc[0]["n"]) or pd.isna(row.iloc[0]["VsCal"]):
+        return ""
+    r = row.iloc[0]
+    z = r["Z"]
+    verdict = "Beat CalPts so far" if pd.notna(z) and z >= 2 else "Not proven"
+    first, last = r.get("FirstWeek"), r.get("LastWeek")
+    weeks = f"Week {int(first)}" if first == last else f"Weeks {int(first)}-{int(last)}"
+    ran = f"{float(r['VsCal']):+.2f}".replace("-", "\u2212")
+    return f"{verdict}: PriceGap \u2265 +{OPP_GAP_FLAG:g} ran {ran} vs CalPts, {weeks}, n {int(r['n'])}"
