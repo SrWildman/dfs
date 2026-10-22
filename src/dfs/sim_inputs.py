@@ -196,8 +196,9 @@ def resolve_lines(
         else None
     )
     uncertainty = ""
-    if field is not None and getattr(lines, "ownership_uncertainty", False):
-        field, uncertainty = _with_uncertainty(field, own, lines.ownership_scenarios)
+    draws = getattr(lines, "ownership_uncertainty", False)
+    if field is not None and (draws or getattr(lines, "ownership_mean", False)):
+        field, uncertainty = _with_uncertainty(field, own, lines.ownership_scenarios, draws=draws)
     if field is None:
         cash_line = lines.fallback_cash_line if lines.fallback_cash_line is not None else cash.value
         top_line = lines.fallback_top1_line if lines.fallback_top1_line is not None else gpp_target
@@ -225,17 +226,23 @@ def resolve_lines(
     )
 
 
-def _with_uncertainty(field: FieldModel, own: dict[str, float], scenarios: int) -> tuple[FieldModel, str]:
-    """`[sim.lines] ownership_uncertainty`: the field's ownership drawn per simulation (`dfs.sim.own_error`);
-    unchanged, and said so, while there is no fitted model."""
+def _with_uncertainty(
+    field: FieldModel, own: dict[str, float], scenarios: int, *, draws: bool = True
+) -> tuple[FieldModel, str]:
+    """`[sim.lines] ownership_mean` / `ownership_uncertainty`: the field's ownership is the fitted mean, and
+    (`draws`) drawn per simulation around it (`dfs.sim.own_error`); unchanged, and said so, while there is no
+    fitted model."""
     from dfs.sim import own_error
     from dfs.sim.field import with_ownership_draws
 
+    switch = "ownership uncertainty" if draws else "the fitted ownership mean"
     model = own_error.load()
     if model is None:
-        return field, "; ownership uncertainty is on but no model is fitted, so ownership is taken as known"
-    drawn = with_ownership_draws(field, own, model, scenarios=scenarios, seed=SEED)
-    return drawn, f"; ownership drawn per simulation ({scenarios} field scenarios)"
+        return field, f"; {switch} is on but no model is fitted, so ownership is taken as known"
+    out = with_ownership_draws(field, own, model, scenarios=scenarios, seed=SEED, draws=draws)
+    if not draws:
+        return out, "; field ownership is the fitted mean (stake and field size), not Own% as is"
+    return out, f"; ownership drawn per simulation around the fitted mean ({scenarios} field scenarios)"
 
 
 def gpp_label(target: float) -> str:

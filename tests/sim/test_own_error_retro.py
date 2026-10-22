@@ -205,8 +205,9 @@ def test_the_backtest_flag_swaps_the_field_and_leaves_an_unpublished_week_alone(
     monkeypatch.setattr(r, "model_before", lambda week: model if week == 6 else None)
     out = flag.prepare(ctx, True)
     assert out.lines.field.cash_draws is not None and "weeks [2, 4, 5]" in out.notes[-1]
-    mean_only = flag.prepare(SimpleNamespace(**{**vars(ctx), "lines": Lines(fld), "notes": []}), "mean")
-    assert mean_only.lines.field.cash_draws is None
+    assert out.notes[-1].startswith("ownership_uncertainty")
+    mean_only = flag.prepare_mean(SimpleNamespace(**{**vars(ctx), "lines": Lines(fld), "notes": []}), True)
+    assert mean_only.lines.field.cash_draws is None and mean_only.notes[-1].startswith("ownership_mean")
     assert flag.prepare(SimpleNamespace(**{**vars(ctx), "lines": Lines(None)}), True).lines.field is None
     early = flag.prepare(SimpleNamespace(**{**vars(ctx), "week": 2, "lines": Lines(fld), "notes": []}), True)
     assert early.lines.field is fld and "no earlier weeks" in early.notes[-1]

@@ -128,8 +128,10 @@ gpp_top1_offset = 63.2
 # fractions, piecewise-linear, anchored at (0, 0) and (1, 1). Empty = identity. Double-ups are chalkier.
 # double_up_own_curve = [[0.05, 0.05], [0.15, 0.39]]
 # gpp_own_curve = []
-# Ownership uncertainty (shadow, off): draw the field's ownership per simulation around the fitted mean instead of
-# taking Own% as known (docs/SIM.md "Ownership uncertainty"; needs data/model_cache/own_error.json).
+# Ownership as a forecast (shadow, off; docs/SIM.md "Ownership uncertainty"; needs data/model_cache/own_error.json).
+# ownership_mean: the field's ownership is the fitted mean (Own% through the stake / field-size curve), no draws.
+# ownership_uncertainty: the same mean, and the field's ownership drawn per simulation around it.
+# ownership_mean = false
 # ownership_uncertainty = false
 # ownership_scenarios = 200
 

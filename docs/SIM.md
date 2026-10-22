@@ -1753,15 +1753,16 @@ on its own stake and size, scored on the SAME players for every spec (TFFB 1%+).
 
 - `field.with_ownership_draws`: the relative lines' field takes the fitted mean (at a representative contest: double-up $10 / 3,000,
   GPP $5 / 2,000) and `ownership_scenarios` (200) drawn ownerships; draw d of the simulator is scored against scenario d mod 200
-  (`simulate._field_lines`). Behind `[sim.lines] ownership_uncertainty` (default **false**; `sim_inputs.resolve_lines` says so in its note,
-  and says when no model is fitted).
+  (`simulate._field_lines`). Two switches, both default **false**: `[sim.lines] ownership_mean` (the fitted mean only, no draws: most
+  of the Cash % gain below) and `ownership_uncertainty` (the mean and the draws). `sim_inputs.resolve_lines` names the one that is on in
+  its note, and says when no model is fitted.
 - The contest sim: `contest_sim.with_scenarios` reweights the SAME generated lineups to each drawn ownership (`field_gen.scenario_weights`,
   an exponential tilt by damped iterative scaling: drawn ownerships met to 0.25 share points against 2.5 unweighted, 857 effective lineups
   of 5,000 per scenario), and a field keyed by a contest's series is that contest's own (Part 3: each contest reweighted to the mean at its
   own stake and size, its duplicate estimate on that mean). Regenerating per scenario was not needed.
-- Backtest: `own_error_flag` registers `ownership_uncertainty` (true: mean + draws; "mean": the mean only) in Flashback's registry; a
-  backtest of week N uses the model fitted on the weeks before N only (`own_error_retro.model_before`, cached in
-  `data/model_cache/own_error/`).
+- Backtest: `own_error_flag` registers the same two as Flashback flags (`ownership_mean`, `ownership_uncertainty`); a backtest of week N
+  uses the model fitted on the weeks before N only (`own_error_retro.model_before`, cached in `data/model_cache/own_error/`). After each
+  close: one `dfs backtest --compare` per flag, and `python -m dfs.sim.own_error_sim_retro` with the new week.
 
 ### The measures, held out by week
 

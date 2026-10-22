@@ -447,4 +447,7 @@ def test_ownership_uncertainty_is_off_by_default_and_needs_a_fitted_model(monkey
     monkeypatch.setattr(oe, "load", lambda path=None: model)
     drawn = si.resolve_lines(edge, specs, CASH, 190.0, on)
     assert drawn.field.cash_draws.shape[0] == 20 and drawn.field.top_draws.shape[0] == 20
-    assert "ownership drawn per simulation (20 field scenarios)" in drawn.note
+    assert "ownership drawn per simulation around the fitted mean (20 field scenarios)" in drawn.note
+    assert C.SimLinesConfig().ownership_mean is False
+    mean_only = si.resolve_lines(edge, specs, CASH, 190.0, C.SimLinesConfig(ownership_mean=True))
+    assert mean_only.field.cash_draws is None and "the fitted mean" in mean_only.note
