@@ -162,3 +162,73 @@ def test_field_auto_with_nothing_in_downloads_says_so_and_runs_projected(cfg, ca
     out = run(cfg, capsys, field=["auto"])
     assert "no live standings export for this week" in out
     assert late_swap_store.load().field_source == "field: projected"
+
+
+# ---- --state live: ESPN's scores, no download -------------------------------------------------------------
+
+
+def _scores():
+    from dfs import live_scores
+
+    return live_scores.LiveScores(
+        {
+            "quinn early": 18.0,
+            "rex early": 9.0,
+            "walt one": 7.0,
+            "walt two": 12.0,
+            "walt three": 3.0,
+            "tom early": 6.0,
+        },
+        {name: 1.0 for name in ("AAA", "BBB", "EEE", "FFF", "GGG", "HHH", "III", "JJJ")},
+        [],
+        NOW,
+    )
+
+
+@pytest.fixture
+def state_cfg(cfg):
+    from dfs.config import SimLinesConfig
+
+    cfg.sim = SimpleNamespace(lines=SimLinesConfig())
+    return cfg
+
+
+def test_state_live_scores_swaps_on_the_projected_field_plus_espns_points(state_cfg, capsys, monkeypatch):
+    from dfs import live_scores
+
+    monkeypatch.setattr(live_scores, "fetch_scores", lambda dates, **kw: _scores())
+    out = run(state_cfg, capsys, state="live")
+    assert "field: projected + live scores (ESPN" in out and "P(cash)" in out
+    assert late_swap_store.load().field_source.startswith("field: projected + live scores")
+
+
+def test_state_live_with_espn_down_says_so_and_runs_as_today(state_cfg, capsys, monkeypatch):
+    from dfs import live_scores
+
+    def down(dates, **kw):
+        raise live_scores.ScoresError("scoreboard 20261011: boom")
+
+    monkeypatch.setattr(live_scores, "fetch_scores", down)
+    out = run(state_cfg, capsys, state="live")
+    flat = " ".join(out.split())
+    assert "ESPN's scores could not be read" in flat and "running as today" in flat
+    assert "P(cash)" in out  # the fixed-line run still rates the swaps
+    assert late_swap_store.load().field_source == "field: projected"
+
+
+def test_state_live_without_published_ownership_runs_as_today(state_cfg, capsys, monkeypatch):
+    from dfs import live_scores
+
+    monkeypatch.setattr(live_scores, "fetch_scores", lambda dates, **kw: _scores())
+    monkeypatch.setattr(cli.store, "load_current", lambda name: edge().assign(**{"Own%": float("nan")}))
+    out = run(state_cfg, capsys, state="live")
+    assert "no projected ownership has been published" in " ".join(out.split())
+    assert late_swap_store.load().field_source == "field: projected"
+
+
+def test_field_and_state_together_are_refused(state_cfg, monkeypatch):
+    from typer.testing import CliRunner
+
+    monkeypatch.setattr(cli, "_load_config_or_exit", lambda: state_cfg)
+    result = CliRunner().invoke(cli.app, ["lineups", "late-swap", "--field", "x.csv", "--state", "live"])
+    assert result.exit_code != 0 and "use one" in " ".join(result.output.split())

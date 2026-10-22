@@ -302,3 +302,15 @@ def test_a_player_ruled_out_scores_nothing_in_any_lineup():
     draws = lf.simulate_remaining(state, n_sims=200)
     assert (draws.final[:, draws.column["Quinn Ace"]] == 0).all()
     assert draws.final[:, draws.column["Rex Ace"]].mean() > 5  # the rest of the slate still plays
+
+
+def test_espn_game_progress_sets_the_share_of_a_started_game_left():
+    specs = specs_of(NAMES, [20, 15, 12, 14, 12, 10, 9, 8, 7])
+    kick = lf.kickoffs_from_edge(edge_of(NAMES, [EARLY] * 9))
+    flat = lf.slate_state(specs, kick, NOW, {})
+    assert flat.frac[0] == pytest.approx(1 - 0.5 / lf.GAME_HOURS)  # the flat clock: half an hour in
+    by_clock = lf.slate_state(specs, kick, NOW, {}, progress={"AAA": 0.5, "BBB": 1.0})
+    column = by_clock.column
+    assert by_clock.frac[column["Quinn Ace"]] == pytest.approx(0.5)  # ESPN: halftime
+    assert by_clock.frac[column["Rex Ace"]] == 0.0  # final
+    assert by_clock.frac[column["Rex Bee"]] == pytest.approx(flat.frac[column["Rex Bee"]])  # team not named

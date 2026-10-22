@@ -165,8 +165,9 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "Between kickoffs run: dfs sync --live, then: dfs lineups late-swap. It checks every lineup against "
         "real kickoff times, shows who is still swappable and suggests the best swaps with the change in "
         "P(cash) and P(GPP) for each. It aims at what the Total row's Cash or GPP marker says. Optional at "
-        "about 1:30 pm: download a live contest's standings from DraftKings and add --field auto to score "
-        "swaps against the real field.",
+        "about 1:30 pm: add --state live to score swaps knowing the games already played (ESPN's box scores, "
+        "nothing to download), or download a live contest's standings from DraftKings and add --field auto "
+        "to score them against the real field.",
     ),
     (
         "Mon / Tue: close the week",

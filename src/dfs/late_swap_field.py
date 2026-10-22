@@ -39,11 +39,13 @@ import pandas as pd
 from scipy import sparse
 from scipy.special import ndtr
 
+from dfs import sim_inputs
 from dfs.contests import series
 from dfs.contests import standings as st
 from dfs.kickoff import format_et, parse_kickoff
-from dfs.player_join import normalize_name
+from dfs.player_join import normalize_name, normalize_team
 from dfs.sim import marginal
+from dfs.sim.field import build_field
 from dfs.sim.shape_table import default_lookup
 from dfs.sim.simulate import (
     PlayerSpec,
@@ -270,12 +272,14 @@ def slate_state(
     *,
     game_hours: float | None = GAME_HOURS,
     out: Collection[str] = (),
+    progress: Mapping[str, float] | None = None,
 ) -> SlateState:
     """The state of `specs` at `now`. A player with no readable kickoff counts as not started. A started
     player's points so far are `fpts_by_key[normalize_name(id)]` (0 when the export has none: nobody drafted
     him); the share of his game left is `1 - elapsed / game_hours`, and with `game_hours=None` every started
-    player is final (the back-test's 1 pm state: the early games are over). A player named in `out` (ruled
-    OUT or on IR) scores nothing, whatever lineups hold him."""
+    player is final (the back-test's 1 pm state: the early games are over). `progress` ({team code: share of
+    the game played}, ESPN's clock, `live_scores`) replaces the flat clock for a started player whose team it
+    names. A player named in `out` (ruled OUT or on IR) scores nothing, whatever lineups hold him."""
     ordered = sorted(specs.values(), key=lambda p: p.id)
     now_pts = np.zeros(len(ordered))
     frac = np.ones(len(ordered))
@@ -287,7 +291,10 @@ def slate_state(
         if start is None or now < start:
             continue
         now_pts[i] = float(fpts_by_key.get(normalize_name(spec.id), 0.0))
-        if game_hours is None:
+        played = None if progress is None else progress.get(normalize_team(spec.team))
+        if played is not None:
+            frac[i] = float(np.clip(1.0 - played, 0.0, 1.0))
+        elif game_hours is None:
             frac[i] = 0.0
         else:
             elapsed = (now - start).total_seconds() / 3600
@@ -531,6 +538,59 @@ def pick_files(files: Sequence[FieldFile]) -> tuple[FieldFile, FieldFile, list[s
         notes.append(f"no GPP export: Top 1% uses {cash.label}'s field")
         gpp = cash
     return cash, gpp, notes
+
+
+def projected_lines(
+    draws: SlateDraws, edge: pd.DataFrame, specs: Mapping[str, PlayerSpec], lines
+) -> tuple[np.ndarray, np.ndarray]:
+    """Today's lines (the field mean from TFFB's `Own%` through the config's curves, plus the offsets,
+    `sim.field`) on `draws`: every player of the field model is in the draws, so there is no tail to
+    approximate. `lines` is the config's `[sim.lines]`. Raises ValueError when no ownership is published."""
+    own = sim_inputs.ownership_by_name(edge)
+    model = build_field(
+        specs.values(),
+        own,
+        cash_offset=lines.double_up_offset,
+        top_offset=lines.gpp_top1_offset,
+        cash_curve=lines.double_up_own_curve,
+        top_curve=lines.gpp_own_curve,
+        coverage=lines.own_coverage,
+    )
+    if model is None:
+        raise ValueError("no projected ownership has been published (Own% is blank)")
+    cols = [draws.column[p.id] for p in model.players]
+    final = draws.final[:, cols]
+    return final @ model.cash_weights + model.cash_offset, final @ model.top_weights + model.top_offset
+
+
+def build_scores_lines(
+    scores,  # noqa: ANN001 - live_scores.LiveScores
+    specs: Mapping[str, PlayerSpec],
+    edge: pd.DataFrame,
+    now: datetime,
+    lines,  # noqa: ANN001 - config.SimLinesConfig
+    *,
+    n_sims: int = N_SIMS,
+    seed: int = SEED,
+) -> LiveLines:
+    """Lines from the projected field on the state ESPN's box scores give (the back-test's PS mode): started
+    players' points so far and the game clock from `scores`, everyone else drawn, the cash and top-1% lines at
+    the projected-ownership field mean plus the offsets. No download of any kind."""
+    from dfs import live_scores
+
+    state = slate_state(
+        specs,
+        kickoffs_from_edge(edge),
+        now,
+        live_scores.points_for_specs(scores, specs.values()),
+        out=unavailable(edge),
+        progress=scores.progress,
+    )
+    draws = simulate_remaining(state, n_sims=n_sims, seed=seed)
+    cash, top = projected_lines(draws, edge, specs, lines)
+    source = f"field: projected + live scores (ESPN, read {format_et(scores.fetched_at)})"
+    known = frozenset(normalize_name(p.id) for p in specs.values())
+    return LiveLines(draws, cash, top, source, list(scores.notes), known)
 
 
 def build_live_lines(

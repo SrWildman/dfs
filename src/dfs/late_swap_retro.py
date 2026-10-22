@@ -55,11 +55,11 @@ from dfs.late_swap_search import lineup_state, one_for_one, swap_pool
 from dfs.models import ROSTER_SLOTS
 from dfs.player_join import normalize_name
 from dfs.sim import contest_retro as cr
-from dfs.sim.field import build_field
 from dfs.sim.simulate import PlayerSpec
 
 SEASON = cr.SEASON
 SALARY_CAP = 50000
+ESPN_CACHE = Path("data/research_cache/espn_box")  # final box scores never change; kept (gitignored data/)
 SWAPS_PER_SLOT = 12
 MODES = ("P", "PS", "R")
 MODE_NAMES = {"P": "projected (today)", "PS": "projected + state", "R": "real field"}
@@ -80,35 +80,14 @@ def ordered_names(slots: tuple[tuple[str, str], ...]) -> list[str] | None:
     return out
 
 
-def projected_lines(
-    draws: lf.SlateDraws, edge: pd.DataFrame, specs: dict[str, PlayerSpec], lines: SimLinesConfig
-) -> tuple[np.ndarray, np.ndarray]:
-    """Today's lines (field mean from TFFB's `Own%` through the config's curves, plus the offsets) on `draws`:
-    every player of the field model is in the draws, so there is no tail to approximate."""
-    own = sim_inputs.ownership_by_name(edge)
-    field = build_field(
-        specs.values(),
-        own,
-        cash_offset=lines.double_up_offset,
-        top_offset=lines.gpp_top1_offset,
-        cash_curve=lines.double_up_own_curve,
-        top_curve=lines.gpp_own_curve,
-        coverage=lines.own_coverage,
-    )
-    if field is None:
-        raise ValueError("no projected ownership in the snapshot")
-    cols = [draws.column[p.id] for p in field.players]
-    final = draws.final[:, cols]
-    return final @ field.cash_weights + field.cash_offset, final @ field.top_weights + field.top_offset
-
-
 @dataclass
 class WeekSetup:
     week: int
     edge: pd.DataFrame
     specs: dict[str, PlayerSpec]
     contests: list[cr.RealContest]
-    fpts: dict[str, float]
+    fpts: dict[str, float]  # every player's ACTUAL points: what a lineup is scored with afterwards
+    state_fpts: dict[str, float]  # the started players' points the state is built from
     state: lf.SlateState
     draws: lf.SlateDraws
     draws_all: lf.SlateDraws  # every player at full-game draws, the way today's late swap simulates
@@ -116,26 +95,35 @@ class WeekSetup:
     projected_state: lf.LiveLines  # PS
 
 
-def setup_week(week: int, *, n_sims: int, seed: int = lf.SEED) -> WeekSetup:
+def setup_week(
+    week: int, *, n_sims: int, seed: int = lf.SEED, points: str = "actual", espn_cache: Path | None = None
+) -> WeekSetup:
     edge = cr.pre_lock_edge(week)
     specs = sim_inputs.build_specs(edge)
     lock = week_frames.lock_utc(SEASON, week)
     contests = cr.load_real_contests({week})
     fpts = cr.week_points(contests, week)
     kickoffs = lf.kickoffs_from_edge(edge)
-    state = lf.slate_state(specs, kickoffs, lock, fpts, game_hours=None, out=lf.unavailable(edge))
+    state_fpts = fpts
+    if points == "espn":  # the no-download state: the started players' points as ESPN's box scores give them
+        from dfs import live_scores
+
+        scores = live_scores.fetch_scores(live_scores.kickoff_dates(kickoffs.values()), cache_dir=espn_cache)
+        state_fpts = live_scores.points_for_specs(scores, specs.values())
+    state = lf.slate_state(specs, kickoffs, lock, state_fpts, game_hours=None, out=lf.unavailable(edge))
     blank = lf.slate_state(specs, {}, lock, {}, game_hours=None)  # nobody started: today's behaviour
     draws = lf.simulate_remaining(state, n_sims=n_sims, seed=seed)
     draws_all = lf.simulate_remaining(blank, n_sims=n_sims, seed=seed)
     lines = SimLinesConfig()
-    p_cash, p_top = projected_lines(draws_all, edge, specs, lines)
-    ps_cash, ps_top = projected_lines(draws, edge, specs, lines)
+    p_cash, p_top = lf.projected_lines(draws_all, edge, specs, lines)
+    ps_cash, ps_top = lf.projected_lines(draws, edge, specs, lines)
     return WeekSetup(
         week,
         edge,
         specs,
         contests,
         fpts,
+        state_fpts,
         state,
         draws,
         draws_all,
@@ -203,7 +191,7 @@ def run_contest(
 ) -> tuple[list[dict], dict]:
     goal = "cash" if c.fmt == "cash" else "gpp"
     now = week_frames.lock_utc(SEASON, setup.week)
-    real = lf.real_lines(c.standings, setup.draws, setup.fpts, places_paid=c.places_paid)
+    real = lf.real_lines(c.standings, setup.draws, setup.state_fpts, places_paid=c.places_paid)
     lives = {
         "P": setup.projected,
         "PS": setup.projected_state,
@@ -264,12 +252,12 @@ def run_contest(
 
 
 def run(
-    weeks: list[int], *, n_lineups: int, n_sims: int, seed: int = lf.SEED
+    weeks: list[int], *, n_lineups: int, n_sims: int, seed: int = lf.SEED, points: str = "actual"
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     lineup_rows, line_rows = [], []
     for week in weeks:
         print(f"Week {week}: setting up ...", flush=True)
-        setup = setup_week(week, n_sims=n_sims, seed=seed)
+        setup = setup_week(week, n_sims=n_sims, seed=seed, points=points, espn_cache=ESPN_CACHE)
         key_to_name: dict[str, str] = {}
         for name in setup.specs:
             key_to_name.setdefault(normalize_name(name), name)
@@ -383,9 +371,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--weeks", default="4,5,6")
     parser.add_argument("--lineups", type=int, default=120, help="test lineups sampled per contest")
     parser.add_argument("--sims", type=int, default=10000)
+    parser.add_argument(
+        "--points",
+        choices=("actual", "espn"),
+        default="actual",
+        help="where the started players' points come from: the contests' own FPTS (a downloaded export), or "
+        "ESPN's box scores (`--state live`, no download; the R mode then uses them too)",
+    )
     parser.add_argument("--out", default=None, help="also save the per-lineup rows to this CSV")
     args = parser.parse_args(argv)
-    df, lines = run([int(w) for w in args.weeks.split(",")], n_lineups=args.lineups, n_sims=args.sims)
+    df, lines = run(
+        [int(w) for w in args.weeks.split(",")], n_lineups=args.lineups, n_sims=args.sims, points=args.points
+    )
     print()
     print(report(df, lines))
     if args.out:

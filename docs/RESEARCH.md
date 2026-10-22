@@ -1297,6 +1297,15 @@ pts, top 1% unresolvable (about 1 lineup in 140 hits it). Sam's 50 entries: noth
   their own late swaps already in them, so a projection-improving swap has less to find than in real life; it says which mode ranks
   swaps better, not that swapping pays.
 
+**The no-download version (`--state live`).** PS is what the back-test found worth having, and it needs only the played games'
+points, which ESPN's public box scores carry (`dfs.live_scores`: DraftKings scoring on the realized stats, the game clock from the
+period and clock). Checked against the real points of every player who scored in Weeks 4-6 (601 players in 39 games): **99.0% exact, mean error 0.017 points**. The misses are five of 65 defenses, off by 1-2 points (a blocked kick the box score does not
+carry), and nothing at QB, RB, TE or WR once two-point conversions are read from the scoring plays and DK's "Mitch" is matched to ESPN's
+"Mitchell". The back-test rerun with the started players' points taken from the ESPN box scores instead of the contests' own
+`FPTS` gave the same table to within rounding (PS - P: +0.23 points, +0.6 pts of cash, both SE 0.05 / 0.1; the lines' misses
+10.1 and 9.1 points): the ESPN state is as good as the export's. What it does not give is the real field's line (cash-line miss
+10.1 against 8.7) or its ownership.
+
 **Caveats.** The test lineups are final lineups (1 pm lineups are not stored); the real field is the final one, which includes
 swaps made after 1:30, so it is slightly better informed than a 1:30 export; at 1 pm the played games are treated as FINAL, while a
 1:30 export has them mid-game (the live command counts a started player's remaining share by the clock, `GAME_HOURS` = 3.25 h, and
