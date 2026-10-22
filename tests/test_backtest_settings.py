@@ -63,8 +63,8 @@ def test_a_typo_is_an_error_not_a_silent_default(tmp_path, text, fragment):
 def test_an_unregistered_flag_is_an_error_naming_the_registered_ones(tmp_path):
     bs.register(bs.Flag("portfolio", "a set"))
     with pytest.raises(bs.SettingsError) as e:
-        bs.load(write(tmp_path, "[flags]\nownership_uncertainty = true\n"))
-    assert "ownership_uncertainty" in str(e.value) and "portfolio" in str(e.value)
+        bs.load(write(tmp_path, "[flags]\nno_such_flag = true\n"))
+    assert "no_such_flag" in str(e.value) and "portfolio" in str(e.value)
 
 
 def test_a_flag_set_false_is_off_and_needs_no_registration(tmp_path):

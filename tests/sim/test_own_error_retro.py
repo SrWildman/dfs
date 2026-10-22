@@ -115,6 +115,7 @@ def test_team_correlation_needs_pairs_and_tilts_need_a_spread():
     empty = pd.DataFrame({"week": [1], "position": ["QB"], "team": ["A"], "e0": [0.1], "lmu": [-2.0]})
     assert r.team_correlation(empty) == (0.0, 0)
     assert r.fit_dependence(empty) == (0.0, 0.0)
+    assert r.fit_dependence(pd.DataFrame()) == (0.0, 0.0)  # no week with a big contest of the format
     rng = np.random.default_rng(0)
     lmu = np.log(rng.uniform(0.02, 0.4, 40))
     res = pd.DataFrame({"week": 1, "position": "WR", "team": "A", "lmu": lmu, "e0": 0.3 * (lmu - lmu.mean())})
@@ -212,3 +213,10 @@ def test_the_backtest_flag_swaps_the_field_and_leaves_an_unpublished_week_alone(
     early = flag.prepare(SimpleNamespace(**{**vars(ctx), "week": 2, "lines": Lines(fld), "notes": []}), True)
     assert early.lines.field is fld and "no earlier weeks" in early.notes[-1]
     assert flag.prepare(ctx, False) is ctx
+
+
+def test_the_plugin_modules_register_both_ownership_switches():
+    from dfs import backtest_settings as bs
+
+    assert "dfs.sim.own_error_flag" in bs.PLUGIN_MODULES and bs.load_plugins() == []
+    assert {"ownership_mean", "ownership_uncertainty"} <= set(bs.FLAGS)

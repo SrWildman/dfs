@@ -9,15 +9,14 @@ A backtest of week N uses the model fitted on the weeks BEFORE N only (`own_erro
 per week), so it never sees its own week's ownership. They match `[sim.lines] ownership_mean` /
 `ownership_uncertainty`.
 
-The registry (`dfs.backtest_settings`) lives on the Flashback branch; on a branch without it this module
-registers nothing. Importing it is the whole hook: Flashback's `PLUGIN_MODULES` names
-`dfs.sim.own_error_flag`.
+Importing this module is the whole hook: `dfs.backtest_settings.PLUGIN_MODULES` names it.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 
+from dfs import backtest_settings as bs
 from dfs import sim_inputs
 from dfs.sim.field import with_ownership_draws
 
@@ -28,11 +27,16 @@ DRAWS_FLAG = "ownership_uncertainty"
 def prepare(ctx, value, *, draws: bool = True):  # noqa: ANN001, ANN201 - backtest_settings.BuildContext
     """The context with its field's ownership as the fitted mean and (`draws`) drawn per simulation. A falsy
     `value`, or a context with no field (ownership not published), is returned unchanged."""
+    from dfs import backtest
     from dfs.sim import own_error_retro
 
     name = DRAWS_FLAG if draws else MEAN_FLAG
-    lines = getattr(ctx, "lines", None)
-    if not value or lines is None or lines.field is None:
+    if not value:
+        return ctx
+    if ctx.lines is None:  # the backtest derives the lines after the hooks; the field is needed now
+        ctx = backtest.ensure_sim(ctx)
+    lines = ctx.lines
+    if lines is None or lines.field is None:
         return ctx
     model = own_error_retro.model_before(int(ctx.week))
     if model is None:
@@ -49,24 +53,19 @@ def prepare_mean(ctx, value):  # noqa: ANN001, ANN201
     return prepare(ctx, value, draws=False)
 
 
-try:  # the Flashback registry is on session J's branch
-    from dfs import backtest_settings as _bs
-except ImportError:  # pragma: no cover - a branch without `dfs backtest`
-    FLAGS = ()
-else:
-    FLAGS = (
-        _bs.register(
-            _bs.Flag(
-                name=MEAN_FLAG,
-                doc="the field's ownership is the fitted mean (stake and field size), not Own% as is",
-                prepare=prepare_mean,
-            )
-        ),
-        _bs.register(
-            _bs.Flag(
-                name=DRAWS_FLAG,
-                doc="the fitted mean, and the field's ownership drawn per simulation around it",
-                prepare=prepare,
-            )
-        ),
-    )
+FLAGS = (
+    bs.register(
+        bs.Flag(
+            name=MEAN_FLAG,
+            doc="the field's ownership is the fitted mean (stake and field size), not Own% as is",
+            prepare=prepare_mean,
+        )
+    ),
+    bs.register(
+        bs.Flag(
+            name=DRAWS_FLAG,
+            doc="the fitted mean, and the field's ownership drawn per simulation around it",
+            prepare=prepare,
+        )
+    ),
+)

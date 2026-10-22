@@ -313,7 +313,10 @@ def week_tilts(res: pd.DataFrame) -> dict[int, float]:
 
 def fit_dependence(res: pd.DataFrame) -> tuple[float, float]:
     """`(team_corr, tilt_sd)` from a residual table: the QB-receiver correlation (floored at 0) and the sd of
-    the weekly tilts about their mean (0 with fewer than two weeks)."""
+    the weekly tilts about their mean (0 with fewer than two weeks). An empty table (no week with a big
+    contest of the format, e.g. Week 4's model, trained on Week 2 alone) gives `(0, 0)`."""
+    if res.empty:
+        return 0.0, 0.0
     corr, _ = team_correlation(res)
     tilts = list(week_tilts(res).values())
     sd = float(np.std(tilts, ddof=1)) if len(tilts) >= 2 else 0.0
