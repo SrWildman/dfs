@@ -84,6 +84,27 @@ def test_sync_hook_prints_the_ok_line_stays_silent_without_a_tab_and_warns_on_fa
     assert "not refreshed (x)" in capsys.readouterr().out
 
 
+def test_sync_hook_rebuilds_the_card_when_edgeraw_widened_this_run_and_says_so(monkeypatch, capsys):
+    from dfs.derived import EDGE_DATA_OFFSET, EDGE_SHEET_ORDER
+
+    width = len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET
+    monkeypatch.setattr(cli, "SheetsClient", lambda gs: Client())
+    monkeypatch.setattr(cli.store, "load_current", lambda name: EDGE)
+    monkeypatch.setattr(sheet_player_card, "refresh_raw_if_present", lambda *a: (True, ""))
+    cfg, ctx = SimpleNamespace(google_sheets=None), SimpleNamespace(week=7, season=2026)
+    monkeypatch.setattr(
+        sheet_player_card, "rebuild_card_if_widened", lambda c, g, b, a: (b != a, f"{b}->{a}")
+    )
+
+    cli._refresh_player_card(cfg, ctx, edge_width_before=width - 16)
+    assert f"{width - 16}->{width}" in capsys.readouterr().out
+    monkeypatch.setattr(
+        sheet_player_card, "rebuild_card_if_widened", lambda c, g, b, a: (True, "" if b is None else "x")
+    )
+    cli._refresh_player_card(cfg, ctx)  # nothing known about the old width: the hook prints nothing
+    assert capsys.readouterr().out == ""
+
+
 def test_sync_hook_does_nothing_without_a_saved_edge(monkeypatch):
     def no_edge(name):
         raise FileNotFoundError(name)

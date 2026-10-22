@@ -2566,6 +2566,7 @@ def sync(
 
     console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
 
+    edge_width_before = _edge_width_now(cfg) if "edge" in source_names and not no_upload else None
     results = run_sync(cfg, source_names, ctx, upload=not no_upload)
 
     table = Table(title="Sync results")
@@ -2620,7 +2621,7 @@ def sync(
             _refresh_cockpit(cfg, live_client, previous_edge=old_edge)
 
     if "edge" in source_names and not no_upload:
-        _refresh_player_card(cfg, ctx)
+        _refresh_player_card(cfg, ctx, edge_width_before=edge_width_before)
 
     if any_failed:
         raise typer.Exit(code=1)
@@ -2649,11 +2650,25 @@ def _save_pool_snapshot(
         log.debug("pool snapshot not saved", exc_info=True)
 
 
-def _refresh_player_card(cfg: Config, ctx: SyncContext) -> None:
-    """After an edge sync: rewrite the Player card's hidden raw tabs when the sheet has the tab
-    (`sheet_player_card.refresh_raw_if_present`). Never fails the sync; `dfs setup player-card` creates
-    the tab."""
+def _edge_width_now(cfg: Config) -> int | None:
+    """EdgeRaw's header width before a sync rewrites it (None when unreadable)."""
     from dfs import sheet_player_card
+
+    try:
+        return sheet_player_card.edge_width(
+            SheetsClient(cfg.google_sheets), cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
+        )
+    except Exception:  # noqa: BLE001 - only a hint for a fail-soft step
+        return None
+
+
+def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: int | None = None) -> None:
+    """After an edge sync: rewrite the Player card's hidden raw tabs when the sheet has the tab
+    (`sheet_player_card.refresh_raw_if_present`), and the card itself when EdgeRaw's width changed this run
+    (`rebuild_card_if_widened`: Sheets shifts the card's references when the tab grows). Never fails the
+    sync; `dfs setup player-card` creates the tab."""
+    from dfs import sheet_player_card
+    from dfs.derived import EDGE_DATA_OFFSET, EDGE_SHEET_ORDER
 
     try:
         edge = store.load_current("edge")
@@ -2661,6 +2676,11 @@ def _refresh_player_card(cfg: Config, ctx: SyncContext) -> None:
         return
     ok, line = sheet_player_card.refresh_raw_if_present(
         SheetsClient(cfg.google_sheets), cfg, edge, ctx.week, ctx.season
+    )
+    if line:
+        console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
+    ok, line = sheet_player_card.rebuild_card_if_widened(
+        SheetsClient(cfg.google_sheets), cfg, edge_width_before, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET
     )
     if line:
         console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")

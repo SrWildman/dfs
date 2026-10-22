@@ -582,6 +582,7 @@ def _check_player_card(client: DoctorClient, cfg: Config, tab_titles: set[str]) 
                     "`dfs setup player-card` rewrites the card",
                 )
             )
+    issues += _check_player_card_refs(client, cfg, tab, edge_tab)
     protections = client.read_protection(tab)
     if protections is not None:
         col = ord(player_card.NAME_CELL[0]) - ord("A")
@@ -596,6 +597,35 @@ def _check_player_card(client: DoctorClient, cfg: Config, tab_titles: set[str]) 
                 )
                 break
     return issues
+
+
+def _check_player_card_refs(client: DoctorClient, cfg: Config, tab: str, edge_tab: str) -> list[DoctorIssue]:
+    """Every Player card formula that reads EdgeRaw must read the column `derived.edge_sheet_letter` gives for
+    that name. A card built before EdgeRaw widened had every reference to the new columns shifted right by
+    Sheets (`$BW` became `$CM`): blank cells, no error. Compared cell by cell against a fresh build."""
+    expected = player_card.build_layout(
+        edge_tab=edge_tab,
+        lineups_tab=cfg.lineups.builder_tab,
+        exposure_tab=EXPOSURE_TAB,
+        exposure=None,
+        lineup_count_cell=LINEUP_COUNT_CELL,
+    ).rows
+    found = client.read_formula(tab, f"A1:{player_card.LAST_COLUMN}{len(expected)}")
+    bad = player_card.shifted_refs(expected, found, edge_tab)
+    if not bad:
+        return []
+    names = {edge_sheet_letter(n): n for n in EDGE_SHEET_ORDER}
+    examples = []
+    for cell, have, want in bad[:3]:
+        label = ", ".join(names.get(w, w) for w in want)
+        examples.append(f"{cell} reads {'/'.join(have) or 'nothing'} but {label} is {'/'.join(want)}")
+    return [
+        DoctorIssue(
+            "player-card-refs",
+            f"{tab!r}: {len(bad)} cell(s) read the wrong EdgeRaw column ({'; '.join(examples)}) -- EdgeRaw "
+            "grew or moved under the card; `dfs setup player-card` rewrites it",
+        )
+    ]
 
 
 def _check_stacks_tab(tab_titles: set[str]) -> list[DoctorIssue]:

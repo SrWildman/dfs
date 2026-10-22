@@ -347,11 +347,11 @@ It is a shadow column: Model Check scores it where it exists.
 **The Player card shows blanks for a player (or `-` everywhere).**
 Check `B1` first: the name must match EdgeRaw's (pick from the dropdown). A blank usage block means no games on file for him (a rookie, a bye, a new team) or `player_log` has not synced (`dfs sync` prints
 its status; a failed nflverse file blanks only its columns). A blank PROPS block is the weekend pull not having run yet (the line under it says which week it has). A signal saying "no record yet" means
-`dfs results update` has not saved Model Check's records since the card was built. `dfs doctor` says `player-card-helpers` if EdgeRaw's columns moved under the card: `dfs setup player-card` rewrites it.
+`dfs results update` has not saved Model Check's records since the card was built. `dfs doctor` says `player-card-helpers` or `player-card-refs` if EdgeRaw's columns moved or grew under the card (Sheets shifts its references, so cells go blank with no error): `dfs setup player-card` rewrites it.
 
 **`dfs sync` did not touch the Player card.**
 It only refreshes the card's hidden raw tabs on a sheet that already has the Player tab (`dfs setup player-card` creates it, template first). A yellow "Player card data not refreshed (...)" line means the write
-itself failed; the sync result above it still stands.
+itself failed; the sync result above it still stands. When EdgeRaw's width changed during the sync, it also rebuilds the card itself ("Player card rebuilt (EdgeRaw grew from N to M columns)"), because Sheets shifts the card's references when the tab grows.
 
 **The Cockpit says "no late-swap result", "lineup changed since the late-swap run" or "open slots differ from the run".**
 Not a fault. Its best-change lines are from the last `dfs lineups late-swap` run (kept in `data/cockpit/late_swap.json`), and a lineup you edited since, a run from an earlier day, or a

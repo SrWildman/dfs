@@ -65,6 +65,7 @@ class FakeDoctorClient:
         self._groups = groups or {}
         self.zone = "America/New_York"
         self.no_dropdown: set[tuple[str, str]] = set()
+        self.card_formulas: list[list[str]] | None = None  # a test sets this to give the Player card a fault
 
     def time_zone(self) -> str:
         return self.zone
@@ -113,10 +114,38 @@ class FakeDoctorClient:
         no formula-range findings; a test that wants a gap passes its own grid."""
         if (tab_name, a1_range) in self._formulas:
             return self._formulas[(tab_name, a1_range)]
+        if tab_name == player_card.PLAYER_CARD_TAB and a1_range.startswith("A1:"):
+            return self.card_formulas or _healthy_card()
         m = re.fullmatch(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", a1_range)
         first, last = int(m.group(2)), int(m.group(4))
         width = column_index(m.group(3)) + 1
         return [[f"=X{r}"] * width for r in range(first, last + 1)]
+
+
+def _healthy_card() -> list[list[str]]:
+    """The Player card exactly as `dfs setup player-card` writes it today."""
+    return player_card.build_layout(
+        edge_tab="EdgeRaw",
+        lineups_tab="Lineups",
+        exposure_tab=EXPOSURE_TAB,
+        exposure=None,
+        lineup_count_cell=LINEUP_COUNT_CELL,
+    ).rows
+
+
+def _shift_edge_refs(rows: list[list[str]], first_letter: str, by: int) -> list[list[str]]:
+    """The card as Sheets leaves it when EdgeRaw grows under it: every EdgeRaw reference at or past
+    `first_letter` moves `by` columns right."""
+    from dfs.sheets import column_index, column_letter
+
+    start = column_index(first_letter)
+
+    def move(m: re.Match) -> str:
+        letter = m.group(1)
+        new = column_letter(column_index(letter) + by) if column_index(letter) >= start else letter
+        return f"EdgeRaw!${new}$2:${new}"
+
+    return [[re.sub(r"EdgeRaw!\$([A-Z]+)\$2:\$[A-Z]+", move, str(c)) for c in row] for row in rows]
 
 
 def _base_config(**overrides) -> Config:
@@ -1071,6 +1100,27 @@ def test_run_doctor_flags_a_player_card_that_lost_its_dropdown_or_points_at_the_
         FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows, formulas=moved), _base_config(), title="Week 1"
     )
     assert [i.check for i in issues if i.check.startswith("player-card")] == ["player-card-helpers"] * 2
+
+
+def test_run_doctor_flags_a_player_card_whose_edge_references_were_shifted_right_by_a_widening():
+    rows = _lineups_rows()
+    healthy = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    assert not [
+        i for i in run_doctor(healthy, _base_config(), title="Week 1") if i.check == "player-card-refs"
+    ]
+
+    shifted = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    shifted.card_formulas = _shift_edge_refs(_healthy_card(), derived.edge_sheet_letter("SleeperPts"), 16)
+    issues = [i for i in run_doctor(shifted, _base_config(), title="Week 1") if i.check == "player-card-refs"]
+    assert len(issues) == 1
+    detail = issues[0].detail
+    assert "SleeperPts is BW" in detail and "reads CM" in detail and "dfs setup player-card" in detail
+
+    blank = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)  # a card whose formulas were wiped
+    blank.card_formulas = [["" for _ in row] for row in _healthy_card()]
+    assert [
+        i.check for i in run_doctor(blank, _base_config(), title="Week 1") if i.check == "player-card-refs"
+    ]
 
 
 def test_run_doctor_flags_a_player_card_whose_picker_is_behind_the_protection():
