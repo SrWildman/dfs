@@ -1567,12 +1567,16 @@ registry), `backtest_report.py` (text), `pool_store.py` (Sam's saved pool). Test
 `seconds`; `[rules]` the rules-box lines (applied: `Adjust`, `Ownership` as your frame, `Never use` as a pool removal; the
 others need a built tab to iterate on and are reported as not applied); `[flags]` named switches. Unknown keys are errors.
 
-**The registry for other sessions.** `backtest_settings.register(Flag(name, doc, prepare=, build=, assign=, version=))` from the
+**The registry for other sessions.** `backtest_settings.register(Flag(name, doc, prepare=, build=, assign=, choose=, version=))` from the
 module that implements the switch, and add the module's dotted path to `backtest_settings.PLUGIN_MODULES` (imported when a
 settings file names a flag nothing has registered; a module that is not on this branch is skipped). `prepare(ctx, value)`
 returns the `BuildContext` the builder is given (change `ctx.edge`, `ctx.specs`, or `ctx.lines` to swap the simulated field);
 `build(ctx, value, inner)` replaces or wraps the builder (`inner(ctx)` is today's, so a portfolio flag can take its candidates and
-choose a set); `assign(builds, contest, k, flags)` chooses which builds enter a contest. Bump `version` when the implementation
+choose a set); `assign(builds, contest, k, flags)` chooses which builds enter a contest; `choose(ctx, builds, contests, value)`
+chooses the week's entries as one set across every contest (`contests`: `WeekContest`s, the payout table and his entry count,
+never the standings), runs once per week right after the builds on the same context, and is saved with them (`"chosen"` in the
+run). A flag that chooses entries (`assign` / `choose`) leaves the "any build" rows alike on both sides, so `--compare` judges it
+on the ship bar **as entered**. Bump `version` when the implementation
 changes: saved builds are keyed by the settings, the active flags' versions and the code (HEAD plus a hash of uncommitted
 `src/` changes), so a rerun of the same thing is free and a changed thing is rebuilt.
 
@@ -1826,3 +1830,88 @@ F's curse rows (today's builds, random lineups from the same pool, real field li
 `own_error_retro.py` (loading, folds, fits, the field-mean check, `fit_model`); tests `tests/sim/test_own_error.py`,
 `test_own_error_retro.py`; Parts 2-3: `own_error_sim_retro.py` (the measures), `own_error_flag.py` (the backtest switch), the
 hooks in `field.py`, `simulate.py`, `field_gen.py`, `contest_sim.py`, `contest_retro.py`, `sim_inputs.py` and `config.py`.
+
+## Portfolio selection (shadow, default off) (2026-10-21)
+
+`portfolio.py` chooses the lineups for all of a week's entries as one set: greedy marginal gain on the contest
+simulator's shared draws, his entries in one N-max contest placed together (each one's place counts the others
+that scored more; an identical lineup twice splits its own prize). Math: `docs/CALCULATIONS.md`, "Portfolio
+selection". Live hook: `dfs lineups suggest --portfolio` (GPP entries only, from DK's entries file), saved for
+`dfs entries fill`'s grey hint; `--portfolio-wide N` gives it the retro's wide pool (N noisy builder runs; a chosen lineup
+that is not a build joins the round as a new GPP build). **Off by default: the retro below does not clear the ship bar.**
+The live wide pool is smaller than the retro's (8 runs of 15 s against the curse study's 24 of 120 s).
+
+**What it can and cannot do.** Expected dollars add across contests, so with a correct model joint selection
+cannot raise E[$] in single-entry contests; it can only matter inside N-max contests, for objectives that are not
+a plain sum (P(any top-1%), log growth), and when the model is wrong in a correlated way.
+
+### The retro (`sim/portfolio_retro.py`; Weeks 2, 4, 5, 6; 53 entries, $454 in fees)
+
+Each week's real contests with Sam's real entry counts; candidates are today's builder's builds at the lock (the
+curse study's saved `today` jobs), and for the `_wide` arms also the 100 best (quick E[$]) of the builder's runs
+on noisy projections (~330 lineups a week). Every arm is chosen on 8,000 draws and its model numbers are
+reported on a fresh 8,000; the field, herd and construction rates are fitted on the other weeks. Realized =
+the arm's lineups placed among the real field (his own entries removed), real copies, the contest's payout table.
+`today` = `entries.suggest_pick`: the best build (Top 1% / Cash %) in every contest.
+
+| Arm | Profit | ROI | Profit without its best contest | Worst week | Top-1% / top-10% / paid entries | Mean finish (share of field) |
+|---|---|---|---|---|---|---|
+| Sam's actual | +$17 | +4% | -$183 | -$91 | 1 / 7 / 15 | 0.46 |
+| today | +$39 | +9% | -$52 | -$100 | 1 / 10 / 23 | 0.44 |
+| edollars | +$93 | +21% | +$6 | -$180 | 1 / 14 / 24 | 0.44 |
+| top1 | +$139 | +31% | +$9 | -$88 | 2 / 12 / 23 | 0.42 |
+| robust (B = 10 weeks of fees, shocked draws) | +$754 | +166% | +$429 | -$150 | 3 / 11 / 26 | 0.36 |
+| robust_tight (B = 2 weeks) | +$556 | +123% | +$232 | -$160 | 3 / 17 / 24 | 0.36 |
+| edollars_wide | +$110 | +24% | -$6 | -$180 | 0 / 13 / 22 | 0.44 |
+| top1_wide | +$125 | +28% | -$58 | -$108 | 0 / 12 / 19 | 0.45 |
+| robust_wide | +$1,153 | +254% | +$493 | -$70 | 2 / 21 / 30 | 0.31 |
+
+(`edollars_capped`, a 75% player and 40% lineup cap on GPP entries, left 8 slots empty under the caps: the
+builds share their core too much to fill 18 GPP entries; +$57.)
+
+**Paired against today, weeks as units (n = 4):** profit: robust_wide +$278/week, SE $234, z 1.2, 4 of 4 weeks;
+robust +$179 (z 1.1, 3 of 4); top1 +$25 (z 0.4); edollars +$14 (z 0.4). Paid entries: robust_wide +1.75/week
+(z 3.7, 4/4); top-10% entries +2.75 (z 2.3, 4/4); mean finish -0.20 of the field (z -2.0). Nothing else reaches
+z 2 on anything. Per contest (n = 29, correlated within a week): robust_wide +$38 (SE $24), better in 13, worse in
+7. Most of every robust arm's profit is Week 5's single-entry GPPs.
+
+**In the model (fresh draws):** edollars buys +$3 of E[$] a week over today (+2%), as the arithmetic says; top1
+doubles P(any top-1%) (8.9% -> 16.3%; 20% wide) for -5% of E[$]; robust and robust_wide are slightly below
+today's E[$] even on fresh shocked draws (171 / 164 vs 175; shocked 179 / 171 vs 174): their in-sample shocked
+E[$] was flattered by $9-32 (8 worlds is a small sample of "how the projections are wrong"). Selection bias on
+nominal draws is under $1 for the narrow arms, $5 for edollars_wide.
+
+**Concentration (GPP entries a week, 10.75 on average):** today puts one player in 100% of them, on 4 distinct
+lineups, two entries of one contest sharing 4.7 players; Sam's own: 66%, 8.5 lineups, 1.3 players. top1_wide
+spreads most (87%, all distinct, 2.6 shared); robust_wide 94%, 8 lineups, 3.9.
+
+### Verdict
+
+**Not proven; ships default off.** No arm beats today on realized profit by 2 SE (best z 1.2), the comparison
+spans 4 weeks with one dominant week, and nine arms were tried (the best of nine z's near 1 is what noise gives).
+The one consistent sign: **robust_wide** (risk-adjusted, chosen on correlated-shock draws, from the wider pool)
+won all 4 weeks on profit, paid entries and top-10% entries and finished best by mean place, while the model
+itself does not prefer it. That pattern (better in reality than in the model) fits "the real projection error is
+larger and more correlated than the simulator's", which is the Week 6 story, but four weeks cannot separate that
+from luck. **Next:** rerun with Week 7 when its standings land (`run_retro`), and keep `robust_wide` as the
+candidate; the bar stays >2 SE over weeks and most weeks.
+
+**As a backtest flag (2026-10-22).** `sim/portfolio_flag.py` registers `portfolio` with Flashback (a `choose` hook), so the
+Week 7 decision is `dfs backtest --weeks 2,4,5,6,7 --settings portfolio.toml --compare today.toml`, with `portfolio.toml`:
+
+    name = "portfolio (robust wide)"
+    [flags]
+    portfolio = true          # or { objective = "robust", wide = 8, sims = 4000 }
+
+`true` is `robust_wide` as the live hook would run it: robust on shocked draws, the builds plus the wide pool of 8 noisy builder
+runs (`--portfolio-wide 8`), GPP contests only (cash keeps today's pick, as live). Two differences from the retro above, both
+toward the live hook: the wide pool is the live one (not the curse study's 24 longer runs), and the generated GPP field is fitted
+on the weeks **before** the backtested one only (`field_model_before`; the retro fitted on every other week), so Week 2, with no
+GPP field before it, keeps today's pick. The backtest also scores against its own fitted payout tables and the backtest's own
+builds (Sam's saved pool from Week 7 on), so its numbers are not the retro's.
+
+**First backtest run (Weeks 2, 4, 5, 6; 29 contests, 53 entries, $454).** As entered, `portfolio = true` returned -8% ROI
+against today's +19%: -23.0 ROI points by week (SE 13.4), winning 0 of 4 weeks (Week 2 is identical by construction, Week 6
+tied at -56%; Weeks 4 and 5 lost, +57% vs +99% and +3% vs +53%). The model preferred the plan every week (E[$] +13% to +26%,
+P(a top-1%) about double). So on the backtest's own builds and earlier-weeks field the retro's `robust_wide` edge does not
+reproduce: **not proven, stays default off**; Week 7 is the next point, and a second straight loss argues for dropping it.

@@ -93,6 +93,15 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   own settings, never advice. `--propose` prints suggested rule values with the arithmetic and writes nothing.
   `dfs week new` rebuilds the block on the new sheet (never failing); `doctor` flags a sheet without it.
 
+- `dfs lineups suggest --portfolio [--portfolio-objective edollars|top1|robust] [--portfolio-wide N] [--entries-csv <file>]` -- **default off, shadow**
+  (the retro did not prove it): after the builds, picks which GPP build goes in which of his GPP entries as one set (greedy marginal gain
+  on shared sim draws, `portfolio.py`; his N-max entries compete for the same places, so they are placed together), prints the plan beside
+  today's pick (`entries.suggest_pick`: the best build in every contest) and, on a write run, saves `data/suggest_state/<week>_portfolio.json`;
+  `dfs entries fill` then shows its lineup as the grey Suggested hint for GPP entries once the builds are on Lineups (cash entries keep today's
+  pick; a hint is never a choice). `--portfolio-wide N` adds the retro's wide pool (the builder run N times on noisy projections, ~15 s
+  each); a chosen lineup that is not a build joins the round as a new GPP build (note `portfolio pick (wide pool)`). The retro's lead
+  candidate is `--portfolio-objective robust --portfolio-wide 8` (robust is chosen on correlated-shock draws). Needs DK's entries file (downloaded by hand) and `dfs stacks --refit` once. Never writes a sheet. Plan I/O:
+  `portfolio_inputs.py`; the retro behind the verdict: `sim/portfolio_retro.py` (needs the curse study's saved builds).
 - `dfs setup cockpit [--sheet-id <id>]` -- creates (or rebuilds) the read-only **Cockpit** tab right before Board (to its left): Sunday's last 90
   minutes on one page (new Q / D / OUT in his lineups, open slots with the best change from the last `late-swap` run, wind, the Lineups
   warnings, exposure top 10, DK Upload entries without a Lineup, budget). Nothing on it is typed; column A is the cue (`SWAP`, `LOOK`,
@@ -130,7 +139,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   history log), and pays them against the real field (place among the real scores, shared with real copies, on the fitted payout table) beside his
   real lineups (as DK paid, and on the same table). ROI / cash rate / top-1% / ROI without the best ticket, "as entered" and "any build"; the
   standard errors are across weeks. `--compare` pairs two settings files (`--settings` minus `--compare`) with the ship bar's verdict. Settings TOML
-  and the flag registry other sessions plug into: `backtest_settings.py` (`register(Flag(...))`, hooks `prepare` / `build` / `assign`, plugin modules in
+  and the flag registry other sessions plug into: `backtest_settings.py` (`register(Flag(...))`, hooks `prepare` / `build` / `assign` / `choose` (the week's entries as one set), plugin modules in
   `PLUGIN_MODULES`). The search runs to the end (`seconds = 600` default; the live clock is 120 and its runs differ), so reruns give the same builds. Saved builds (`data/research/backtest/jobs/<fingerprint>/`) are keyed by settings + code, `--fresh` ignores them. Report in
   `docs/research/backtest/` (gitignored). Read-only: no sheet. Also `dfs research refresh --only backtest` (optional study). Math/orchestration
   `backtest.py`, text `backtest_report.py`.

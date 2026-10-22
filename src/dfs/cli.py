@@ -36,6 +36,8 @@ from dfs import (
     paths,
     perf,
     pool_store,
+    portfolio,
+    portfolio_inputs,
     sheet_edge_finder,
     store,
     suggest_state,
@@ -81,6 +83,7 @@ from dfs.lineup_suggest import (
     DEFAULT_RANK,
     RANKS,
     TIME_LIMIT_SECONDS,
+    SuggestReport,
     phase_lines,
     suggest_builds,
 )
@@ -3395,7 +3398,15 @@ def entries_fill(
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
 
-    plan = ent.plan_fill(parsed, tab_rows, lineups, now=_entries_now(), again=again)
+    suggester = ent.suggest_pick
+    saved = portfolio_inputs.load_plan(_suggest_week(title))
+    if saved is not None and saved.portfolio:
+        suggester = portfolio_inputs.portfolio_suggester(saved, ent.suggest_pick)
+        console.print(
+            f"GPP hints come from the portfolio plan made {saved.made_at} ({saved.objective}); cash entries "
+            "keep today's pick.\n"
+        )
+    plan = ent.plan_fill(parsed, tab_rows, lineups, now=_entries_now(), again=again, suggester=suggester)
     for reason, n in plan.skipped.items():
         console.print(f"[yellow]Skipped {n} entr{'y' if n == 1 else 'ies'}: {reason}.[/yellow]")
     if not plan.rows:
@@ -3573,6 +3584,17 @@ class SuggestRank(StrEnum):
 
 
 assert tuple(r.value for r in SuggestRank) == RANKS  # one list of ranks, spelled once in the suggest module
+
+
+class PortfolioObjective(StrEnum):
+    """What `dfs lineups suggest --portfolio` maximises over all the GPP entries (`portfolio.OBJECTIVES`)."""
+
+    edollars = "edollars"
+    top1 = "top1"
+    robust = "robust"
+
+
+assert tuple(o.value for o in PortfolioObjective) == portfolio.OBJECTIVES
 
 
 class SwapMetric(StrEnum):
@@ -4211,6 +4233,35 @@ def lineups_suggest(
         help="Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a "
         "new round (the state is kept in data/suggest_state/<week>.json).",
     ),
+    portfolio_: bool = typer.Option(
+        False,
+        "--portfolio",
+        help="Also choose which GPP build goes in which of your GPP entries as one set (DK's entries file, "
+        "the newest in Downloads, says which contests and how many entries) and print the plan beside "
+        "today's pick; `dfs entries fill` then shows it as the grey Suggested hint. Off by default: it has "
+        "not been proven yet. Needs `dfs stacks --refit` once.",
+    ),
+    portfolio_objective: PortfolioObjective = typer.Option(
+        PortfolioObjective(portfolio_inputs.DEFAULT_OBJECTIVE),
+        "--portfolio-objective",
+        help="What --portfolio maximises: edollars (expected winnings), top1 (the chance at least one entry "
+        "finishes in a top 1%) or robust (risk-adjusted winnings on draws where the projections are wrong "
+        "together).",
+    ),
+    portfolio_wide: int = typer.Option(
+        0,
+        "--portfolio-wide",
+        min=0,
+        max=24,
+        help="With --portfolio: also run the builder N times on noisy copies of the projections (about 15 s "
+        "each) and let the plan choose from those lineups too (the retro's wide pool); a chosen one that is "
+        "not a build is added as a new GPP build. 0 (the default): the builds only.",
+    ),
+    entries_csv: Path = typer.Option(
+        None,
+        "--entries-csv",
+        help="With --portfolio: the DraftKings entries file to read (default: the newest in Downloads).",
+    ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
     Suggested tab.
@@ -4264,6 +4315,9 @@ def lineups_suggest(
         rank=rank.value,
         iterate=iterate,
         restore_round=round_,
+        portfolio_objective=portfolio_objective.value if portfolio_ else None,
+        portfolio_wide=portfolio_wide,
+        entries_csv=entries_csv,
     )
 
 
@@ -4290,6 +4344,9 @@ def _run_suggest(
     rank: str = DEFAULT_RANK,
     iterate: bool = False,
     restore_round: int | None = None,
+    portfolio_objective: str | None = None,
+    portfolio_wide: int = 0,
+    entries_csv: Path | None = None,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
     in the slate; the command passes the real clock. A fresh run, `iterate` (rerun around the tab's
@@ -4432,6 +4489,18 @@ def _run_suggest(
         report.notes.extend(
             n for n in frame_notes if n not in report.notes
         )  # parse problems come from iterate
+    portfolio_plan, portfolio_lines = None, []
+    if portfolio_objective is not None:
+        started = datetime.now(UTC)
+        portfolio_plan, added, portfolio_lines = _run_portfolio(
+            cfg, report, specs, edge, tags, settings, week, portfolio_objective, entries_csv, now,
+            metric=metric, wide_runs=portfolio_wide, gpp_entries=gpp_entries,
+            double_up_entries=double_up_entries, rank=rank,
+        )  # fmt: skip
+        phases["portfolio"] = ((datetime.now(UTC) - started).total_seconds(), 0)
+        if added:  # wide-pool picks join the round as builds, so Copy builds to Lineups can bring them in
+            report.builds = [*report.builds, *added]
+            records = [*records, *lineup_iterate.records_from_report(SuggestReport(builds=list(added)))]
     if frame:
         report.notes.insert(0, suggest_state.frame_note(frame))
     record = suggest_state.RoundRecord(
@@ -4464,8 +4533,12 @@ def _run_suggest(
         console.print(f"[yellow]{note}[/yellow]")
     for name, took in report.phases.items():  # the search phases, between the two sheet-side groups
         phases[name] = (took, 0)
+    for line in portfolio_lines:
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
     if not write:
         console.print("[dim]--no-write: the Suggested tab and the state file were not changed.[/dim]")
+        if portfolio_plan is not None and portfolio_plan.portfolio:
+            console.print("[dim]--no-write: the portfolio plan was not saved.[/dim]")
         _print_phases(phases)
         return
     try:
@@ -4487,7 +4560,101 @@ def _run_suggest(
         raise typer.Exit(code=1) from e
     path = suggest_state.save_state(state)  # after the tab: the file mirrors what the tab shows
     console.print(f"[green]OK[/green] round {record.round} saved to {path}")
+    if portfolio_plan is not None and portfolio_plan.portfolio:
+        saved = portfolio_inputs.save_plan(portfolio_plan)
+        console.print(
+            f"[green]OK[/green] portfolio plan saved to {saved} (`dfs entries fill` shows it as the hint)"
+        )
     _print_phases(phases)
+
+
+def _run_portfolio(
+    cfg: Config,
+    report,
+    specs,
+    edge: pd.DataFrame,
+    tags: dict[str, str],
+    settings,
+    week: int,
+    objective: str,
+    entries_csv: Path | None,
+    now: datetime,
+    *,
+    metric: str,
+    wide_runs: int,
+    gpp_entries: int,
+    double_up_entries: int,
+    rank: str,
+):
+    """`--portfolio`: the GPP builds (and with `wide_runs`, the wide pool) assigned to DK's GPP entries as a
+    set. Returns `(plan or None, new builds for the wide-pool picks, lines to print)`; saving is the caller's,
+    after the tab. Never fails the suggest run: a problem is said and the builds stand."""
+    from dfs import entries as ent
+    from dfs.contests import history
+    from dfs.kickoff import parse_kickoff
+    from dfs.late_swap_search import swap_pool
+    from dfs.lineup_suggest import annotate, ownership_shares, score
+    from dfs.paths import CONTESTS_DIR
+    from dfs.sim import retro
+
+    lines = [""]
+    if entries_csv is not None:
+        path, how = entries_csv, "given with --entries-csv"
+    else:
+        path, how = ent.resolve_entries_file(None, Path(cfg.contests.downloads_dir).expanduser())
+    if path is None:
+        lines.append(
+            f"Portfolio skipped: {how}. Download DK's entries file (Edit entries) or pass --entries-csv."
+        )
+        return None, [], lines
+    try:
+        parsed = ent.read_entries_file(path)
+    except (ent.EntriesFileError, OSError) as e:
+        return None, [], [*lines, f"Portfolio skipped: {e}"]
+    classified, _skipped = ent.classify_entries(parsed)
+    lines.append(f"Portfolio from {path.name} ({how}): {len(classified)} Classic main-slate entries.")
+    wide = []
+    if wide_runs > 0:
+
+        def builder(noisy_edge, noisy_specs):
+            return suggest_builds(
+                noisy_edge, tags, noisy_specs, now=now, cap=cfg.lineups.salary_cap,
+                cash_line=settings.cash_line, gpp_target=settings.gpp_target, metric=metric, cash_builds=0,
+                gpp_builds=20, time_limit=portfolio_inputs.WIDE_SECONDS,
+                field=portfolio_inputs.with_specs(settings.field, noisy_specs),
+                gpp_entries=gpp_entries, double_up_entries=double_up_entries, rank=rank,
+            ).builds  # fmt: skip
+
+        wide = portfolio_inputs.wide_lineups(edge, specs, metric, builder, wide_runs)
+    log = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
+    plan = portfolio_inputs.plan_portfolio(
+        week=week, builds=report.builds, specs=specs, edge=edge, entries=classified, log=log,
+        season=retro.SEASON, objective=objective, now=now, wide=wide,
+    )  # fmt: skip
+    added = []
+    if plan.new_lineups:
+        names = {n for lineup in plan.new_lineups for n in lineup}
+        by_name = {p.name: p for p in swap_pool(edge, now=now, metric=metric, pool_names=names)}
+        kickoff = {
+            str(n): parse_kickoff(g)
+            for n, g in zip(edge["Name"], edge.get("GameStart", pd.Series("", index=edge.index)), strict=True)
+        }
+        lineups = [
+            [by_name[n] for n in lineup] for lineup in plan.new_lineups if all(n in by_name for n in lineup)
+        ]
+        scored = score(
+            lineups, specs, kickoff, cash_line=settings.cash_line, gpp_target=settings.gpp_target,
+            field=settings.field,
+        )  # fmt: skip
+        shares = ownership_shares(specs, edge, settings.field, "top")
+        scored = annotate(scored, shares, gpp_entries, objective=True)
+        added = portfolio_inputs.add_new_builds(plan, report.builds, scored, gpp_entries=gpp_entries)
+        lines.append(
+            f"{len(added)} wide-pool pick(s) added as GPP build(s) "
+            + ", ".join(str(b.number) for b in added)
+            + " (Copy builds to Lineups brings them in)."
+        )
+    return plan, added, [*lines, *portfolio_inputs.format_plan(plan)]
 
 
 def _print_phases(phases: dict[str, tuple[float, int]]) -> None:

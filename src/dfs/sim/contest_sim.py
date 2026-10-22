@@ -186,6 +186,10 @@ class ContestSimResult:
     n_sims: int
     seconds: float = 0.0
     scores: np.ndarray | None = None  # draws x candidates: each candidate's points per draw
+    # With `keep_draws`: contest label -> (place, copies), each draws x candidates: a candidate's place among
+    # the field alone (1 + (entries - 1) x the field share that scored strictly more) and the identical
+    # entries expected beside it. What `portfolio` needs to place several of one user's entries together.
+    detail: dict[str, tuple[np.ndarray, np.ndarray]] | None = None
 
 
 RESULT_COLUMNS = [
@@ -224,13 +228,16 @@ def simulate_contests(
     seed: int = 0,
     per_draw_herd: bool = True,
     points: np.ndarray | None = None,
+    keep_draws: bool = False,
 ) -> ContestSimResult:
     """Every candidate (row of slate indices) in every contest kind: see the module docstring. `fields` holds
     one `SimField` per format the kinds need ("cash" for Double Up / 50-50, "gpp" for the rest; a field keyed
     by a kind's `series` is that contest's own and is used for it instead; a Multiplier
     is flat but plays a GPP-style field). `specs[i]` is slate player i's spec (None: scores 0).
     `per_draw_herd` False keeps the herd on its fixed weights (lead = the highest-product lineup) in every
-    draw. `points` (draws x slate players) replaces the simulated draws (fixed outcomes, for tests)."""
+    draw. `points` (draws x slate players) replaces the simulated draws (fixed outcomes, for tests).
+    `keep_draws` keeps each contest's per-draw places and copies (`ContestSimResult.detail`; kind labels must
+    then be distinct)."""
     import time
 
     start = time.perf_counter()
@@ -300,6 +307,7 @@ def simulate_contests(
         }
 
     rows, lines = [], {}
+    detail: dict[str, tuple[np.ndarray, np.ndarray]] | None = {} if keep_draws else None
     for kind in kinds:
         fmt = "cash" if kind.cash else "gpp"
         if fmt not in by_fmt:
@@ -324,6 +332,10 @@ def simulate_contests(
         pay_herd = block_payout(cum, place, np.where(b["match"][None, :] >= 0, herd_copies, 0.0))
         m = int(kind.places_paid)
         label = kind.series
+        if detail is not None:
+            if label in detail:
+                raise ValueError(f"keep_draws needs distinct contest labels; {label!r} repeats")
+            detail[label] = (place.astype(np.float32), copies.astype(np.float32))
         for j, name in enumerate(labels):
             e = float(pay[:, j].mean())
             et = float(pay_top[:, j].mean())
@@ -360,6 +372,7 @@ def simulate_contests(
         n_sims=n_draws,
         seconds=time.perf_counter() - start,
         scores=cand_scores,
+        detail=detail,
     )
 
 
