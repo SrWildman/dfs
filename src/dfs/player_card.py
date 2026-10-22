@@ -3,9 +3,12 @@
 The `Player` tab (right after Edge Finder) is FORMULAS keyed off the one typed cell, `B1` (a dropdown over
 EdgeRaw's names). A helper pair in row 1 turns the name into EdgeRaw's row (`ROW_CELL`) and the join key
 (`KEY_CELL`); every field below is an `INDEX` into an EdgeRaw column, a `PlayerCardRaw` column (one row per
-player: the two projection sources EdgeRaw does not carry, the kickoff in ET and his last five games) or a
-`PlayerCardRows` row (the variable-length lists: props, signals). Python writes the two hidden raw tabs on
-every `dfs sync` (`sheet_player_card.refresh_raw`); it writes the card itself only in `dfs setup player-card`.
+player: his last five games, game by game) or a `PlayerCardRows` row (the variable-length lists: props,
+signals). Python writes the two hidden raw tabs on every `dfs sync` (`sheet_player_card.refresh_raw`); it
+writes the card itself only in `dfs setup player-card`.
+EdgeRaw is the one place for every per-player NUMBER (2026-10-21): Sleeper's and FantasyPros' projections, the
+kickoff, the last-five-game averages and the opportunity-per-dollar measures (`opportunity.py`) are EdgeRaw
+columns the card reads like any other; the hidden raw tab keeps only what is a list per player (the games).
 
 One spec drives both the sheet and the text render. A `Field` names where a value lives (an EdgeRaw column, a
 raw column) and how it is shown; `formula()` turns it into the cell formula, `value()` reads the same thing
@@ -28,7 +31,6 @@ import pandas as pd
 
 from dfs import usage_metrics
 from dfs.derived import edge_sheet_letter
-from dfs.kickoff import format_et, parse_kickoff
 from dfs.player_join import normalize_name, normalize_position
 from dfs.weekly_reset import LINEUPS_NAME_BLOCKS
 
@@ -52,9 +54,6 @@ LAST_COLUMN = chr(ord("A") + COLUMN_COUNT - 1)
 GAME_FIELDS = ["Wk", "Opp", "Snap%", "Tgt", "Car", "Tgt%", "RZ", "In5", "DK"]
 RAW_COLUMNS = [
     "NameKey",
-    "Kickoff",
-    "Sleeper",
-    "FantasyPros",
     *[f"{name}{game}" for game in range(1, GAMES + 1) for name in GAME_FIELDS],
 ]
 ROWS_COLUMNS = ["Key", "A", "B", "C", "D"]
@@ -88,6 +87,7 @@ def rows_index(name: str) -> int:
 # ---------------------------------------------------------------------------------------------
 
 PTS, PCT0, PCT1, PCT100, INT, MONEY, TEXT = "pts", "pct0", "pct1", "pct100", "int", "money", "text"
+PTS2, ZSCORE = "pts2", "z"
 SHEET_PATTERNS = {
     PTS: "0.0",
     PCT0: "0%",
@@ -97,6 +97,8 @@ SHEET_PATTERNS = {
     MONEY: "$#,##0",
     TEXT: "@",
     "pts3": "0.000",
+    "pts2": "0.00",
+    "z": "+0.0;-0.0;0.0",
 }
 EDGE, RAW, DERIVED = "edge", "raw", "derived"
 
@@ -126,15 +128,15 @@ HEADER_STRIPE = [
     _edge("Pos", "Position"),
     _edge("Salary", "Salary", MONEY),
     _edge("Opp", "Opp"),
-    _raw("Kickoff (ET)", "Kickoff"),
+    _edge("Kickoff (ET)", "Kickoff"),
     _edge("Status", "Avail"),
     _edge("Flags", "Flags"),
 ]
 PROJECTION_STRIPES = [
     [
         _edge("TFFB", "ProjPts", PTS),
-        _raw("Sleeper", "Sleeper", PTS),
-        _raw("FantasyPros", "FantasyPros", PTS),
+        _edge("Sleeper", "SleeperPts", PTS),
+        _edge("FantasyPros", "FantasyProsPts", PTS),
         _edge("ESPN", "EspnPts", PTS),
         _edge("Props", "PropPts", PTS),
         _edge("AggPts", "AggPts", PTS),
@@ -193,6 +195,31 @@ MATCHUP_STRIPES = [
 MATCHUP_NOTE = "OppPosRank: 1 = softest. OppEPA: higher = softer for every position."
 USAGE_HEADER = ["Game", "Opp", "Snap%", "Targets", "Carries", "Tgt share", "RZ looks", "Inside 5", "DK pts"]
 USAGE_FORMATS = [TEXT, TEXT, PCT0, INT, INT, PCT0, INT, INT, PTS]
+# Each Average-row cell that EdgeRaw carries: header column -> its `derived.LAST5_COLUMNS` name. The others
+# (target share, red-zone and goal-line looks) have no EdgeRaw column and stay a formula over the five rows.
+USAGE_AVERAGE_EDGE = {"Snap%": "Snap% L5", "Targets": "Tgt L5", "Carries": "Car L5", "DK pts": "DK L5"}
+OPPORTUNITY_STRIPES = [
+    [
+        _edge("TPRR~ (proxy)", "TPRR~", PCT0),
+        _edge("TPRR~ last 3", "TPRR~ L3", PCT0),
+        _edge("xFP / game", "xFP Szn", PTS),
+        _edge("xFP last 3", "xFP L3", PTS),
+        _edge("xFP trend", "xFP trend", ZSCORE),
+    ],
+    [
+        _edge("xFP per $1k", "xFP/$", PTS2),
+        _edge("Targets per $1k", "Tgt/$", PTS2),
+        _edge("HVT per $1k (RB)", "HVT/$", PTS2),
+        _edge("PriceGap (SD)", "PriceGap", ZSCORE),
+    ],
+]
+OPPORTUNITY_NOTE = (
+    "This season only, games he played before this slate. TPRR~ is a PROXY for targets per route run: "
+    "routes are estimated as his offensive snaps x his team's dropback rate that game (no free in-season "
+    "route counts exist). PriceGap = how many SDs more expected scoring (xFP) his role has than a typical "
+    "player at his salary and position: positive = the opportunity is bigger than the price. Context, not "
+    "a projection; scored in Model Check."
+)
 USAGE_NOTE = (
     "His last five games played (nflverse box score and play-by-play). RZ looks = targets + carries from "
     "inside the opponent's 20; Inside 5 = the same from inside the 5. Blank = not recorded or not applicable."
@@ -389,11 +416,19 @@ def build_layout(
     avg = ["Average"]
     for i in range(1, COLUMN_COUNT):
         col = _letter(i)
-        avg.append(f'=IFERROR(AVERAGE({col}{first}:{col}{last}),"")' if USAGE_FORMATS[i] != TEXT else "")
+        if USAGE_HEADER[i] in USAGE_AVERAGE_EDGE:
+            avg.append(formula(_edge("", USAGE_AVERAGE_EDGE[USAGE_HEADER[i]]), edge_tab))
+        else:
+            avg.append(f'=IFERROR(AVERAGE({col}{first}:{col}{last}),"")' if USAGE_FORMATS[i] != TEXT else "")
     row = lay.add(avg)
-    for i, fmt in enumerate(USAGE_FORMATS):
-        lay.patterns.append((f"{_letter(i)}{row}", SHEET_PATTERNS[fmt]))
+    for i, fmt in enumerate(USAGE_FORMATS):  # an average of counts is not a whole number
+        lay.patterns.append((f"{_letter(i)}{row}", SHEET_PATTERNS[PTS if fmt == INT else fmt]))
     note(USAGE_NOTE)
+
+    section("OPPORTUNITY PER DOLLAR")
+    for fields in OPPORTUNITY_STRIPES:
+        stripe(fields)
+    note(OPPORTUNITY_NOTE)
 
     section("MATCHUP AND GAME")
     for fields in MATCHUP_STRIPES:
@@ -554,27 +589,8 @@ def usage_log(
 # ---------------------------------------------------------------------------------------------
 
 
-def _by_key(source: pd.DataFrame | None) -> dict[tuple[str, str], float]:
-    if source is None or source.empty:
-        return {}
-    out: dict[tuple[str, str], float] = {}
-    for row in source.itertuples(index=False):
-        points = pd.to_numeric(getattr(row, "DkPts", None), errors="coerce")
-        if pd.isna(points):
-            continue
-        out[(normalize_name(row.Name), normalize_position(getattr(row, "Position", "")))] = float(points)
-    return out
-
-
-def raw_frame(
-    edge: pd.DataFrame,
-    *,
-    sleeper: pd.DataFrame | None = None,
-    fantasypros: pd.DataFrame | None = None,
-    log: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    """`PlayerCardRaw`: one row per EdgeRaw player (`RAW_COLUMNS`)."""
-    sleeper_pts, fantasypros_pts = _by_key(sleeper), _by_key(fantasypros)
+def raw_frame(edge: pd.DataFrame, *, log: pd.DataFrame | None = None) -> pd.DataFrame:
+    """`PlayerCardRaw`: one row per EdgeRaw player (`RAW_COLUMNS`), his last five games game by game."""
     games: dict[tuple[str, str], dict[int, pd.Series]] = {}
     if log is not None and not log.empty:
         for row in log.to_dict("records"):
@@ -583,13 +599,7 @@ def raw_frame(
     for player in edge.itertuples(index=False):
         key = normalize_name(player.Name)
         position = normalize_position(player.Position)
-        start = parse_kickoff(getattr(player, "GameStart", None))
-        out: dict[str, object] = {
-            "NameKey": key,
-            "Kickoff": format_et(start) if start else "",
-            "Sleeper": sleeper_pts.get((key, position)),
-            "FantasyPros": fantasypros_pts.get((key, position)),
-        }
+        out: dict[str, object] = {"NameKey": key}
         for back in range(1, GAMES + 1):
             game = games.get((key, position), {}).get(back)
             for name in GAME_FIELDS:
@@ -757,6 +767,8 @@ def format_value(fmt: str, value: object) -> str:
         "pts3": f"{number:.3f}",
         PCT0: f"{number:.0%}",
         PCT1: f"{number:.1%}",
+        PTS2: f"{number:.2f}",
+        ZSCORE: f"{number:+.1f}",
         PCT100: f"{number:.1f}%",
         INT: f"{number:.0f}",
         MONEY: f"${number:,.0f}",
@@ -825,6 +837,17 @@ def render_text(
         usage_rows.append(cells)
     out += _table(USAGE_HEADER, usage_rows) if usage_rows else ["  (no games on file for him)"]
     out.append("  " + USAGE_NOTE)
+
+    average = [
+        f"{label}: {format_value(fmt, player.get(USAGE_AVERAGE_EDGE[label]))}"
+        for label, fmt in zip(USAGE_HEADER, USAGE_FORMATS, strict=True)
+        if label in USAGE_AVERAGE_EDGE
+    ]
+    out.append("  Last-5 average (EdgeRaw): " + "   ".join(average))
+    out.append("\nOPPORTUNITY PER DOLLAR")
+    for fields in OPPORTUNITY_STRIPES:
+        out += _stripe_text(fields, player, raw_row)
+    out.append("  " + OPPORTUNITY_NOTE)
 
     out.append("\nMATCHUP AND GAME")
     for fields in MATCHUP_STRIPES:

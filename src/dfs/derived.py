@@ -327,6 +327,25 @@ EDGE_SOURCE_COLUMNS = ["EspnPts", "PropPts"]
 # existing letter or VLOOKUP index moves. Blank until `edge_finder.enrich` fills them. Not in
 # `LINKED_EDGE_COLUMNS`: Player Pool and Lineups do not show them.
 FIELD_OWN_COLUMNS = ["GppOwn", "CashOwn", "OurOwn"]
+# EdgeRaw is the one place for every per-player number (Sam, 2026-10-21), so the per-player fields that
+# only the Player card's hidden `PlayerCardRaw` tab carried move here, APPENDED at the very end with the
+# opportunity-per-dollar columns (`opportunity.py`). Blank until `edge_finder.enrich` fills them. Not in
+# `LINKED_EDGE_COLUMNS`.
+SOURCE_PTS_COLUMNS = ["SleeperPts", "FantasyProsPts"]  # two sources behind AggPts that EdgeRaw did not show
+KICKOFF_COLUMN = "Kickoff"  # GameStart in ET, as text ("Sun 1:00 PM")
+OPPORTUNITY_COLUMNS = [
+    "TPRR~",
+    "TPRR~ L3",
+    "xFP Szn",
+    "xFP L3",
+    "xFP trend",
+    "xFP/$",
+    "Tgt/$",
+    "HVT/$",
+    "PriceGap",
+]
+LAST5_COLUMNS = ["Snap% L5", "Tgt L5", "Car L5", "DK L5"]  # mean of his last five games played
+ONE_PLACE_COLUMNS = [*SOURCE_PTS_COLUMNS, KICKOFF_COLUMN, *OPPORTUNITY_COLUMNS, *LAST5_COLUMNS]
 # Every hidden within-position percentile helper, old and new.
 ALL_PCT_COLUMNS = {**PLAYER_METRIC_PCT_COLUMNS, **EDGE_FINDER_PCT_COLUMNS}
 
@@ -460,6 +479,8 @@ EDGE_COLUMNS = [
     *EDGE_SOURCE_COLUMNS,
     # Field ownership shadow (2026-10-20), appended after the shadow sources.
     *FIELD_OWN_COLUMNS,
+    # One place for every per-player number (2026-10-21), appended after the field ownership shadow.
+    *ONE_PLACE_COLUMNS,
 ]
 
 # What the EdgeRaw TAB is written in (actions round, slice 5, 2026-10-09): a designed order that mirrors
@@ -527,6 +548,8 @@ EDGE_SHEET_ORDER = [
     "NameKey",
     # The tab's last three columns (2026-10-20): appended, so nothing above moved.
     *FIELD_OWN_COLUMNS,
+    # The tab's last sixteen columns (2026-10-21): appended, so nothing above moved.
+    *ONE_PLACE_COLUMNS,
 ]
 assert sorted(EDGE_SHEET_ORDER) == sorted(EDGE_COLUMNS)  # noqa: S101 - EDGE_SHEET_ORDER is a permutation
 
@@ -1424,8 +1447,9 @@ def build_edge_frame(
         merged[label] = ""
     for column in EDGE_FINDER_COLUMNS:
         merged[column] = "" if column == "Edge" else float("nan")
-    for column in [*EDGE_SOURCE_COLUMNS, *FIELD_OWN_COLUMNS]:
+    for column in [*EDGE_SOURCE_COLUMNS, *FIELD_OWN_COLUMNS, *ONE_PLACE_COLUMNS]:
         merged[column] = float("nan")
+    merged[KICKOFF_COLUMN] = ""
 
     return EdgeBuildResult(
         frame=merged[EDGE_COLUMNS],

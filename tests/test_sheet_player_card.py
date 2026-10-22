@@ -143,8 +143,8 @@ def test_gather_raw_fails_soft_per_part_and_names_what_is_missing(monkeypatch):
         sheet_player_card, "_props", lambda e, w: (_ for _ in ()).throw(ValueError("bad pull"))
     )
     raw, rows, missing = sheet_player_card.gather_raw(edge(), 7, 2026)
-    assert len(raw) == 1 and raw["Sleeper"].isna().all()
-    assert {"sleeper", "fantasypros", "player_log"} <= set(missing) and any("props" in m for m in missing)
+    assert len(raw) == 1 and raw["Wk1"].isna().all()
+    assert "player_log" in set(missing) and any("props" in m for m in missing)
     meta = rows.set_index("Key")["A"]
     assert meta["meta|props"] == "Props could not be read."
     assert "No Model Check records saved yet" in meta["meta|signals"]

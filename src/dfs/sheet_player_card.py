@@ -75,11 +75,10 @@ def _props(edge: pd.DataFrame, week: int) -> tuple[list[dict], str]:
 def gather_raw(edge: pd.DataFrame, week: int, season: int) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     """`(PlayerCardRaw frame, PlayerCardRows frame, what could not be read)`."""
     missing: list[str] = []
-    sleeper, fantasypros, log_frame = _load("sleeper"), _load("fantasypros"), _load("player_log")
-    for label, frame in (("sleeper", sleeper), ("fantasypros", fantasypros), ("player_log", log_frame)):
-        if frame is None:
-            missing.append(label)
-    raw = pc.raw_frame(edge, sleeper=sleeper, fantasypros=fantasypros, log=log_frame)
+    log_frame = _load("player_log")
+    if log_frame is None:
+        missing.append("player_log")
+    raw = pc.raw_frame(edge, log=log_frame)
 
     try:
         props_rows, props_note = _props(edge, week)

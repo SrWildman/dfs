@@ -371,7 +371,7 @@ def _static_formats(client: SheetsClient, layout: eft.Layout) -> None:
         client.format_range(TAB, rng, {**_num('0"%"'), "horizontalAlignment": "RIGHT"})
     for rng in layout.chip_ranges:
         client.format_range(TAB, rng, {"horizontalAlignment": "CENTER"})
-    for cell, pattern, kind in layout.cell_formats:
+    for cell, pattern, kind in [*layout.cell_formats, *layout.range_formats]:
         client.format_range(TAB, cell, {**_num(pattern, kind), "horizontalAlignment": "RIGHT"})
     # Own% is a 0-1 fraction on EdgeRaw, shown as a percent; Lev is a signed whole number.
     for rng in layout.own_cells:

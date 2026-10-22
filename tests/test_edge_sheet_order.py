@@ -27,7 +27,12 @@ def test_the_sheet_order_is_a_permutation_of_the_append_only_frame_order():
         EDGE_SHEET_ORDER
     )
     assert EDGE_SHEET_ORDER != EDGE_COLUMNS  # the tab has its own designed order
-    appended = [*derived.EDGE_FINDER_COLUMNS, *derived.EDGE_SOURCE_COLUMNS, *derived.FIELD_OWN_COLUMNS]
+    appended = [
+        *derived.EDGE_FINDER_COLUMNS,
+        *derived.EDGE_SOURCE_COLUMNS,
+        *derived.FIELD_OWN_COLUMNS,
+        *derived.ONE_PLACE_COLUMNS,
+    ]
     assert EDGE_COLUMNS[-len(appended) :] == appended  # still append-only
 
 
@@ -58,8 +63,12 @@ def test_the_designed_order_pool_name_spine_then_zones_then_hidden_helpers():
     assert zones == sorted(zones) and zones[0] > EDGE_SHEET_ORDER.index("Edge")
     hidden = ["Id", "Flag", *derived.ALL_PCT_COLUMNS.values(), "NameKey"]
     own = derived.FIELD_OWN_COLUMNS  # the ownership shadow (2026-10-20) is appended after the helpers
-    assert EDGE_SHEET_ORDER[-len(hidden) - len(own) : -len(own)] == hidden  # helpers last, bar the shadow
-    assert EDGE_SHEET_ORDER[-len(own) :] == own == ["GppOwn", "CashOwn", "OurOwn"]
+    one_place = derived.ONE_PLACE_COLUMNS  # the per-player numbers (2026-10-21) after that
+    tail = len(own) + len(one_place)
+    assert EDGE_SHEET_ORDER[-len(hidden) - tail : -tail] == hidden  # helpers last, bar the appended blocks
+    assert EDGE_SHEET_ORDER[-tail : -len(one_place)] == own == ["GppOwn", "CashOwn", "OurOwn"]
+    assert EDGE_SHEET_ORDER[-len(one_place) :] == one_place
+    assert len(one_place) == 16 and one_place[:3] == ["SleeperPts", "FantasyProsPts", "Kickoff"]
     for name in ("Floor", "CeilM", "Bust%"):  # the CEIL group
         assert (
             EDGE_SHEET_ORDER.index("CeilPct")

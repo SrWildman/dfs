@@ -198,12 +198,14 @@ def update_results(
             gs = gs.model_copy(update={"sheet_id": sheet_id})
         client = SheetsClient(gs)
         title, _url = client.describe()
-        signal_table = reliability = None
+        signal_table = reliability = opportunity = None
         if write_signals:
             evaluation = results_signals.evaluation_frame(scored, season, _r6_history(season))
             signal_table = results_signals.signal_report(evaluation)
             _save_signal_table(signal_table, season)
             reliability = results_signals.reliability_report(evaluation)
+            opportunity = _opportunity_report(season, evaluation)
+            _save_opportunity_table(opportunity, season)
         ownership, ownership_gaps = _refit_field_own(season, scored, report)
         layout = build_layout(
             scored,
@@ -214,6 +216,7 @@ def update_results(
             ownership_gaps=ownership_gaps,
             props_shadow=_props_shadow(season, stats_player, report),
             teammate_race=_teammate_bump_race(season, scored),
+            opportunity=opportunity,
         )
         with client.batched():  # the header notes are one request each; send them together
             summary = write_model_check(client, layout, MODEL_CHECK_TAB)
@@ -237,6 +240,25 @@ def _save_signal_table(table: pd.DataFrame, season: int) -> None:
         )
     except OSError as e:
         log.warning("signal records not saved for the Player card: %s", e)
+
+
+def opportunity_table_path(season: int):
+    """Where the opportunity-per-dollar record is kept for the Edge Finder's PRICE GAP line."""
+    return results_loop.RESULTS_DIR / f"opportunity_table_{season}.csv"
+
+
+def _save_opportunity_table(table: pd.DataFrame | None, season: int) -> None:
+    """Keep the opportunity record so the Edge Finder can quote it at every sync. A failed save never fails
+    the update; a report that could not be built leaves the last saved one."""
+    if table is None or table.empty:
+        return
+    try:
+        results_loop.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        table.assign(AsOf=datetime.now(UTC).strftime("%Y-%m-%d")).to_csv(
+            opportunity_table_path(season), index=False
+        )
+    except OSError as e:
+        log.warning("opportunity record not saved for the Edge Finder: %s", e)
 
 
 def _props_shadow(season: int, stats_player: pd.DataFrame, report: UpdateReport) -> props_edge.Shadow | None:
@@ -283,6 +305,25 @@ def _teammate_bump_race(season: int, scored: pd.DataFrame) -> pd.DataFrame | Non
         return calibration.teammate_bump_race(scored, teammate_bump.season_roles(season))
     except Exception as e:  # noqa: BLE001 - never fail a results update over a shadow
         log.warning("teammate bump shadow skipped: %s", e)
+        return None
+
+
+def _opportunity_report(season: int, evaluation: pd.DataFrame) -> pd.DataFrame | None:
+    """Opportunity per dollar scored against the scored weeks (`results_signals.opportunity_report`), every
+    feature built from games before its own week. None when the saved ffopportunity weeks cannot be read, so
+    Model Check simply has no such section yet."""
+    from dfs import opportunity
+
+    try:
+        data, _notes = signals_data.load_current_data(season, refresh=False)
+        if data.ffo_weeks is None or data.ffo_weeks.empty:
+            return None
+        snaps, pbp, players = opportunity.read_research_frames(season, [])
+        games = opportunity.player_games(data.ffo_weeks, snaps, pbp, players)
+        frame = results_signals.attach_opportunity(evaluation, games, season)
+        return results_signals.opportunity_report(frame)
+    except (OSError, ValueError, KeyError) as e:
+        log.warning("Opportunity per dollar skipped in Model Check: %s", e)
         return None
 
 

@@ -2003,6 +2003,25 @@ average weekly entry fees` over every week with fees paid; a bad week is `BAD_WE
 10 / (2k)` (capped at 100, rounded DOWN to 0.5); `max_entry_fee_pct = that / MIN_ENTRIES_PER_WEEK (5)` (rounded DOWN to 0.1).
 The 2, the 10% and the 5 are the proposal's own assumptions, not findings. Needs 8 weeks of entries.
 
+## Opportunity per dollar (`opportunity.py`, 2026-10-21; shadow)
+
+Sam's question: "targets per route run, weighted opportunities, targets per dollar ... help identify good plays for their price." Our research says a usage model does not beat TFFB as a projection and `USAGE↑` is weak, so this is the PRICE angle, not a projection: nothing feeds `CalPts` or a build. Everything is this season only, over the games a player PLAYED strictly before the slate week (a missed game is skipped, never a zero), with no prior-season blend (roles change between seasons); a player with no game yet is blank.
+
+| Column | Definition | Applies to | Needs |
+|---|---|---|---|
+| `xFP Szn`, `xFP L3` | mean ffopportunity expected DK points per game (`xfp.py`) over the season so far / his last 3 games | QB RB WR TE | 1 game |
+| `xFP trend` | `xFP L3 - xFP Szn` | QB RB WR TE | 4 games |
+| `TPRR~`, `TPRR~ L3` | sum of targets / sum of estimated routes over the season / last 3 games; **a proxy**: routes of a game = his offensive snaps (nflverse snap counts, through the PFR-gsis crosswalk) x his team's dropback rate that game (quarterback dropbacks, sacks and scrambles included, over scrimmage pass and run plays, two-point tries out). Overstates routes for a back or tight end who stays in to block. A game with no snap row is skipped, not counted as zero routes | RB WR TE | `MIN_ROUTES` = 40 estimated routes |
+| `xFP/$` | `xFP Szn` / (salary / 1000) | QB RB WR TE | `MIN_GAMES` = 3 |
+| `Tgt/$` | targets per game / (salary / 1000) | RB WR TE | 3 games |
+| `HVT/$` | high-value touches (targets + carries inside the opponent's 10, the `HVT/G` definition) per game / (salary / 1000) | RB | 3 games |
+| `PriceGap` | within a position's rosterable pool (players with an `xFP/$`, at least 8), fit `xFP Szn` on salary in $1k with a straight line; the gap is the player's residual over the residual SD (ddof 2). +1.0 = one SD more expected scoring than a typical player at his price | QB RB WR TE | 3 games; 8 fitted players |
+| `Snap% L5`, `Tgt L5`, `Car L5`, `DK L5` | mean over his last five games played of the Player card's game log (`player_card.usage_log`): offensive snap share, targets, carries, real DK points | QB RB WR TE (a QB's targets are blank) | 1 game |
+
+`SleeperPts`, `FantasyProsPts` and `Kickoff` (ET text of `GameStart`) are the other per-player fields that used to live only on the Player card's hidden `PlayerCardRaw`; they are EdgeRaw columns now.
+
+**Scoring (Model Check, "OPPORTUNITY PER DOLLAR").** `results_signals.attach_opportunity` rebuilds every feature for each scored week from games before that week only (`tests/test_opportunity.py` rewrites the week's own and later games and asserts nothing moves); salary and position are the week's own snapshot's. Groups (thresholds fixed before any score was read): `PriceGap` at or above +1.0 (up) and at or below -1.0 (down); top third of the week's position (rosterable, at least 6 players) on `xFP/$` (QB RB WR TE), `TPRR~` and `Tgt/$` (RB WR TE), `HVT/$` (RB); and the baseline "everyone with a PriceGap". Per group: `n`, mean actual minus ProjPts, minus CalPts, minus the salary-expected score (a straight line of actual points on salary per position, fit on EARLIER weeks only), the standard error of the CalPts mean, `Z = sign x mean / SE` (positive = the signal pointed the right way; player-games are treated as independent, so it reads generous), the hit rate against CalPts, the weeks it fired in and how many of them beat CalPts. Every row is out of sample by construction (no parameter is fitted to the scores). Ship bar for any promotion: beats CalPts by more than 2 SE on held-out weeks and in most weeks, and Sam says so.
+
 ## Field ownership shadow (`field_own.py`, 2026-10-20)
 
 Three EdgeRaw columns, scored in Model Check every week, read by nothing else until they have proven themselves out of
