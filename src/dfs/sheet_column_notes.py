@@ -720,6 +720,44 @@ FIELD_OWN_NOTES = {
 }
 
 
+ONE_PLACE_NOTES = {
+    "SleeperPts": "Sleeper's own projection in DraftKings points. One of the three sources behind AggPts.",
+    "FantasyProsPts": (
+        "FantasyPros' own projection in DraftKings points. One of the three sources behind AggPts."
+    ),
+    "Kickoff": "His game's kickoff in Eastern time.",
+    "TPRR~": (
+        "PROXY for targets per route run, this season. Routes are estimated as his offensive snaps x his "
+        "team's dropback rate that game (free in-season route counts do not exist). Overstates routes for a "
+        "back or a tight end who stays in to block. Blank under 40 estimated routes, for a QB, and before "
+        "his first game this season. Context only: nothing reads it."
+    ),
+    "TPRR~ L3": "The same proxy over his last three games played this season.",
+    "xFP Szn": (
+        "Expected fantasy points per game this season (ffopportunity's model of his touches and targets, in "
+        "DraftKings scoring): what the opportunity was worth, not what he scored. Games played before this "
+        "slate."
+    ),
+    "xFP L3": "Expected fantasy points per game over his last three games played this season.",
+    "xFP trend": "xFP L3 minus xFP Szn. Positive = his role is growing. Needs four games.",
+    "xFP/$": "xFP Szn per $1,000 of salary. Needs three games.",
+    "Tgt/$": "Targets per game this season per $1,000 of salary (RB, WR, TE). Needs three games.",
+    "HVT/$": (
+        "High-value touches (targets + carries inside the opponent's 10) per game per $1,000 of salary. RB "
+        "only. Needs three games."
+    ),
+    "PriceGap": (
+        "SHADOW: nothing reads it. How many standard deviations more xFP Szn he has than a typical "
+        "rosterable player at his position and salary (a straight-line fit of xFP on salary). Positive = "
+        "the opportunity is bigger than the price. Scored in Model Check's OPPORTUNITY PER DOLLAR."
+    ),
+    "Snap% L5": "His offensive snap share, averaged over his last five games played.",
+    "Tgt L5": "Targets per game over his last five games played.",
+    "Car L5": "Carries per game over his last five games played.",
+    "DK L5": "Real DraftKings points per game over his last five games played.",
+}
+
+
 def player_tab_notes() -> dict[str, str]:
     """Every header on EdgeRaw, Player Pool and Lineups (and the Edge Finder's number columns), by text.
     The usage notes carry the week the usage data runs through, so this reads the latest sync."""
@@ -730,6 +768,7 @@ def player_tab_notes() -> dict[str, str]:
         **EDGE_FINDER_NOTES,
         **SHADOW_SOURCE_NOTES,
         **FIELD_OWN_NOTES,
+        **ONE_PLACE_NOTES,
         **usage_notes(),
     }
 

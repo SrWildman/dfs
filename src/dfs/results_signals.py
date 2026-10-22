@@ -443,3 +443,151 @@ def reliability_report(frame: pd.DataFrame) -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows, columns=RELIABILITY_COLUMNS)
+
+
+# ---------------------------------------------------------------------------------------------
+# Opportunity per dollar (shadow; `opportunity.py`)
+# ---------------------------------------------------------------------------------------------
+
+OPP_GAP_FLAG = 1.0  # PriceGap at or above +1.0 SD (or at or below -1.0) is a flagged player-game
+OPP_TOP_SHARE = 1 / 3  # "top third" within the week's position
+OPP_MIN_GROUP = 6  # players with a value in a week-position before "top third" means anything
+SALARY_FIT_MIN_ROWS = 30  # earlier player-games at a position before a salary-expected line is fitted
+OPPORTUNITY_REPORT_COLUMNS = [
+    "Signal",
+    "n",
+    "VsProj",
+    "VsCal",
+    "VsSal",
+    "SE",
+    "Z",
+    "HitCal",
+    "Weeks",
+    "WeeksUp",
+    "Thin",
+]
+OPPORTUNITY_GROUPS = [
+    # (name, feature column, positions, direction): thresholds fixed here before any score was read
+    (f"PriceGap +{OPP_GAP_FLAG:g} or more", "PriceGap", None, "up"),
+    (f"PriceGap -{OPP_GAP_FLAG:g} or less", "PriceGap", None, "down"),
+    ("xFP/$ top third of position", "xFP/$", ("QB", "RB", "WR", "TE"), "up"),
+    ("TPRR~ top third (RB/WR/TE)", "TPRR~", ("RB", "WR", "TE"), "up"),
+    ("Tgt/$ top third (RB/WR/TE)", "Tgt/$", ("RB", "WR", "TE"), "up"),
+    ("HVT/$ top third (RB)", "HVT/$", ("RB",), "up"),
+]
+OPPORTUNITY_BASELINE = "Everyone with a PriceGap"
+
+
+def attach_opportunity(frame: pd.DataFrame, games: pd.DataFrame | None, season: int) -> pd.DataFrame:
+    """The evaluation frame with `opportunity.FEATURE_COLUMNS` as the sheet would have shown them for each
+    row's week: built from games before that week only (`opportunity.attach_features`). The salary and
+    position are the ones the week's own snapshot carried; nothing from the week itself reaches a feature."""
+    from dfs import opportunity
+
+    if frame is None or frame.empty or games is None or games.empty:
+        return frame
+    out = frame.reset_index(drop=True)
+    parts = []
+    for week in sorted(int(w) for w in out["week"].unique()):
+        rows = out[out["week"] == week]
+        pool = (
+            rows["RosterablePool"] if "RosterablePool" in rows.columns else pd.Series(True, index=rows.index)
+        )
+        keyed = rows.assign(GsisId=rows["GsisId"].replace("", np.nan), RosterablePool=pool.astype(bool))
+        parts.append(opportunity.attach_features(keyed, games, season, week))
+    features = pd.concat(parts).reindex(out.index)
+    return pd.concat([out.drop(columns=[c for c in features.columns if c in out.columns]), features], axis=1)
+
+
+def salary_expected(frame: pd.DataFrame) -> pd.Series:
+    """What a player at this salary and position scored on average in the weeks BEFORE his row's week: a
+    straight-line fit of actual DK points on salary per position (rosterable rows only). NaN when fewer than
+    `SALARY_FIT_MIN_ROWS` earlier player-games exist (week 1, a thin position)."""
+    out = pd.Series(np.nan, index=frame.index, dtype=float)
+    actual = pd.to_numeric(frame["DkActual"], errors="coerce")
+    salary = pd.to_numeric(frame["Salary"], errors="coerce") / 1000.0
+    for position in BASELINE_POSITIONS:
+        at = (frame["Position"] == position) & actual.notna() & salary.notna()
+        for week in sorted(int(w) for w in frame.loc[at, "week"].unique()):
+            history = at & (frame["week"] < week)
+            if history.sum() < SALARY_FIT_MIN_ROWS:
+                continue
+            slope, intercept = np.polyfit(salary[history], actual[history], 1)
+            now = at & (frame["week"] == week)
+            out[now] = slope * salary[now] + intercept
+    return out
+
+
+def opportunity_masks(frame: pd.DataFrame) -> dict[str, tuple[pd.Series, str]]:
+    """`name -> (mask, direction)` for each `OPPORTUNITY_GROUPS` row present in `frame`, then the baseline."""
+    masks: dict[str, tuple[pd.Series, str]] = {}
+    for name, column, positions, direction in OPPORTUNITY_GROUPS:
+        if column not in frame.columns:
+            continue
+        values = pd.to_numeric(frame[column], errors="coerce")
+        in_scope = values.notna() & (frame["Position"].isin(positions) if positions else True)
+        if column == "PriceGap":
+            masks[name] = (
+                (in_scope & (values >= OPP_GAP_FLAG))
+                if direction == "up"
+                else (in_scope & (values <= -OPP_GAP_FLAG)),
+                direction,
+            )
+            continue
+        keys = [frame["week"], frame["Position"]]
+        scoped = values.where(in_scope)
+        size = scoped.groupby(keys).transform("count")
+        pct = scoped.groupby(keys).rank(pct=True, method="first")
+        masks[name] = (in_scope & (size >= OPP_MIN_GROUP) & (pct > 1 - OPP_TOP_SHARE), direction)
+    if "PriceGap" in frame.columns:
+        masks[OPPORTUNITY_BASELINE] = (pd.to_numeric(frame["PriceGap"], errors="coerce").notna(), "")
+    return masks
+
+
+def opportunity_report(frame: pd.DataFrame) -> pd.DataFrame:
+    """The opportunity-per-dollar signals scored like the others: per group, n, mean (actual - ProjPts), mean
+    (actual - CalPts), mean (actual - salary-expected), the standard error of the CalPts mean and its z
+    (positive = the signal pointed the right way), the hit rate against CalPts, and the weeks it fired in
+    and how many of those it beat CalPts in. Every feature is built from earlier games only, so every row is
+    out of sample; the standard error treats player-games as independent (a player reappears week to week), so
+    read it as generous. A group that never fired is listed with n = 0."""
+    if frame is None or frame.empty or "week" not in frame.columns:
+        return pd.DataFrame(columns=OPPORTUNITY_REPORT_COLUMNS)
+    proj = pd.to_numeric(frame["ProjPts"], errors="coerce")
+    cal = pd.to_numeric(frame.get("CalPts"), errors="coerce")
+    actual = pd.to_numeric(frame["DkActual"], errors="coerce")
+    expected = salary_expected(frame)
+    rows = []
+    for name, (mask, direction) in opportunity_masks(frame).items():
+        sign = {"up": 1.0, "down": -1.0}.get(direction, 1.0)
+        n = int(mask.sum())
+        vs_cal = (actual - cal)[mask].dropna()
+        if n == 0 or vs_cal.empty:
+            rows.append(
+                {
+                    "Signal": name,
+                    "n": n,
+                    **dict.fromkeys(OPPORTUNITY_REPORT_COLUMNS[2:-1], np.nan),
+                    "Thin": True,
+                }
+            )
+            continue
+        vs_sal = (actual - expected)[mask].dropna()
+        se = float(vs_cal.std(ddof=1) / np.sqrt(len(vs_cal))) if len(vs_cal) > 1 else np.nan
+        by_week = (actual - cal)[mask].groupby(frame["week"][mask]).mean().dropna()
+        rows.append(
+            {
+                "Signal": name,
+                "n": n,
+                "VsProj": round(float((actual - proj)[mask].mean()), 2),
+                "VsCal": round(float(vs_cal.mean()), 2),
+                "VsSal": round(float(vs_sal.mean()), 2) if len(vs_sal) else np.nan,
+                "SE": round(se, 2) if not np.isnan(se) else np.nan,
+                "Z": round(sign * float(vs_cal.mean()) / se, 2) if se and not np.isnan(se) else np.nan,
+                "HitCal": round(float((sign * vs_cal > 0).mean()), 3) if direction else np.nan,
+                "Weeks": int(len(by_week)),
+                "WeeksUp": int((sign * by_week > 0).sum()) if direction else np.nan,
+                "Thin": is_thin(n),
+            }
+        )
+    return pd.DataFrame(rows, columns=OPPORTUNITY_REPORT_COLUMNS)

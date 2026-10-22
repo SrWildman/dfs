@@ -74,6 +74,8 @@ TREND_ROWS_PER_POSITION = 8
 R6_SIGNAL_ROWS = 8  # players listed per R6 signal in Context signals
 PUNT_SALARY_WINDOW = 1000  # dollars above each position's cheapest salary on the slate (the Board's old rule)
 PUNT_ROWS_PER_POSITION = 5
+PRICE_GAP_ROWS = 10  # "Opportunity the price hasn't caught": the top players by PriceGap, all positions
+PRICE_GAP_MIN = 0.5  # SDs of expected scoring above what his salary buys; below this the list stops
 MATCHUP_PLAYERS = 3
 MUTED_BELOW_GAMES = 3
 CASH_CORE_MIN_CALPTS_PCT = 50.0
@@ -195,6 +197,14 @@ GPP_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "ValAdj", "Edge"]  # Bust% too
 LEVERAGE_COLUMNS = ["CalPts", "Boom%", "Bust%", "Lev", "ValAdj", "Edge"]
 CHALK_COLUMNS = ["CalPts", "Boom%", "Bust%", "ProjPts", "ValAdj", "Edge"]
 PUNT_COLUMNS = ["CalPts", "ValAdj", "Hit3x%", "Boom%", "Floor", "Edge"]
+PRICE_GAP_COLUMNS = ["CalPts", "PriceGap", "xFP/$", "TPRR~", "xFP trend", "Edge"]
+# number formats the usage-per-dollar columns need (pattern, Sheets type), chosen by header name
+PRICE_GAP_FORMATS = {
+    "PriceGap": ("+0.0;-0.0;0.0", "NUMBER"),
+    "xFP trend": ("+0.0;-0.0;0.0", "NUMBER"),
+    "xFP/$": ("0.00", "NUMBER"),
+    "TPRR~": ("0%", "PERCENT"),
+}
 DISAGREE_COLUMNS = ["TFFB", "Sleeper", "FantPros", "CalPts", "Diff", "Edge"]
 BENEFICIARY_COLUMNS = ["CalPts", "+Car/G", "+xFP/G", "Method", "Priced?", "Edge"]
 ABSENCE_COLUMNS = ["Role", "Tgt/G", "Car/G", "Missed"]
@@ -238,6 +248,12 @@ MEANINGS = {
     "PUNT PLAYS": (
         "The best value within $1,000 of each position's cheapest salary on the slate.  ·  Do: pick one to "
         "free up salary for your stars; the top row at a position is the best punt."
+    ),
+    "PRICE GAP": (
+        "Players whose role (expected fantasy points from his targets and touches this season) is bigger "
+        "than his salary usually buys at his position. PriceGap is in standard deviations; TPRR~ is a proxy "
+        "for targets per route.  ·  Do: a price check, not a pick: look at the player, then pool him if the "
+        "projection agrees. Context only; Model Check scores it against CalPts."
     ),
     "PROJECTION DISAGREEMENTS": (
         "Where our corrected projection (CalPts) differs most from TFFB's, which most of the field uses.  ·  "
@@ -339,6 +355,8 @@ class Layout:
     lev_cells: list[str] = field(default_factory=list)  # Lev ranges (a signed whole number)
     # (cell, pattern, type): a number format chosen per ROW (usage trends mix percents and per-game numbers)
     cell_formats: list[tuple[str, str, str]] = field(default_factory=list)
+    # (range, pattern, type): a number format for a whole column run, chosen by header name (PRICE GAP)
+    range_formats: list[tuple[str, str, str]] = field(default_factory=list)
     money_cells: list[str] = field(default_factory=list)
     point_cells: list[str] = field(default_factory=list)
     chip_ranges: list[str] = field(default_factory=list)  # `Edge` / token cells
@@ -1100,6 +1118,7 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
             "LEVERAGE PLAYS  —  the most upside for the ownership",
             "CHALK TO FADE OR EAT  —  the highest-owned at each position",
             "PUNT PLAYS  —  the best value near each position's cheapest salary",
+            "PRICE GAP  —  opportunity the price hasn't caught",
             "PROJECTION DISAGREEMENTS  —  where CalPts differs most from TFFB",
             "INJURY BENEFICIARIES  —  who inherits a back's carries; absences are context",
             "USAGE TRENDS  —  whose usage moved beyond normal noise",
@@ -1128,6 +1147,7 @@ def build_layout(inputs: Inputs | None, *, edge_tab_name: str = "EdgeRaw") -> La
     _leverage_section(b, edge, published)
     _chalk_section(b, edge, published)
     _punt_section(b, edge)
+    _price_gap_section(b, edge)
     _disagreement_section(b, edge, inputs.calibration)
     by_gsis = (
         edge.drop_duplicates("GsisId").set_index("GsisId") if "GsisId" in edge.columns else pd.DataFrame()
@@ -1476,6 +1496,60 @@ def _punt_section(b: _Builder, edge: pd.DataFrame) -> None:
                 edge=r.get("Edge", ""),
                 muted=_muted(r),
             )
+    b.end_section()
+
+
+def price_gap_plays(edge: pd.DataFrame) -> pd.DataFrame:
+    """Rosterable, available players with a PriceGap of at least `PRICE_GAP_MIN`, biggest first, at most
+    `PRICE_GAP_ROWS`. Empty (never an error) on an EdgeRaw that predates the column."""
+    if "PriceGap" not in edge.columns:
+        return edge.iloc[0:0]
+    gap = pd.to_numeric(edge["PriceGap"], errors="coerce")
+    part = edge[available(edge) & rosterable(edge) & (gap >= PRICE_GAP_MIN)]
+    order = pd.to_numeric(part["PriceGap"], errors="coerce").sort_values(ascending=False).index
+    return part.loc[order].head(PRICE_GAP_ROWS)
+
+
+def _price_gap_why(r: pd.Series) -> str:
+    xfp = pd.to_numeric(r.get("xFP Szn"), errors="coerce")
+    parts = [
+        f"{xfp:.1f} expected points a game at {money(r['Salary'])}: {float(r['PriceGap']):+.1f} SD "
+        f"against what that salary buys at {r['Position']}"
+    ]
+    trend = pd.to_numeric(r.get("xFP trend"), errors="coerce")
+    if pd.notna(trend) and abs(trend) >= 1:
+        parts.append(f"last 3 games {trend:+.1f} against his season")
+    tprr = pd.to_numeric(r.get("TPRR~"), errors="coerce")
+    if pd.notna(tprr):
+        parts.append(f"about {tprr:.0%} of his routes end in a target (proxy)")
+    return _join(*parts)
+
+
+def _price_gap_section(b: _Builder, edge: pd.DataFrame) -> None:
+    b.begin_section("PRICE GAP  —  opportunity the price hasn't caught")
+    part = price_gap_plays(edge)
+    if part.empty:
+        b.note("Nobody yet: it needs three games this season, so it fills in from Week 4.")
+        b.end_section()
+        return
+    b.header(PRICE_GAP_COLUMNS)
+    b.sub(f"Top {len(part)} by PriceGap (SDs of expected scoring above his salary's usual)")
+    for _, r in part.iterrows():
+        xfp = pd.to_numeric(r.get("xFP Szn"), errors="coerce")
+        b.player_row(
+            _lead(r),
+            [r["CalPts"], r["PriceGap"], r["xFP/$"], r["TPRR~"], r["xFP trend"], r["Edge"]],
+            why=_price_gap_why(r),
+            short=_short(
+                f"{xfp:.1f} xFP/g · {float(r['PriceGap']):+.1f} SD for {_k(float(r['Salary']))}",
+                _thin_short(r.get("Games")),
+            ),
+            verb="Price check",
+            pid=r["Id"],
+            gsis=r.get("GsisId"),
+            edge=r.get("Edge", ""),
+            muted=_muted(r),
+        )
     b.end_section()
 
 
@@ -1885,6 +1959,10 @@ COLOUR_KINDS: dict[str, str] = {
             "DK/G L3",
             "Tgt/G",
             "Car/G",
+            "PriceGap",
+            "xFP/$",
+            "TPRR~",
+            "xFP trend",
         ),
         COLOUR_GOOD,
     ),
@@ -1977,6 +2055,8 @@ def _mark_formats(layout: Layout) -> None:
                 layout.lev_cells.append(rng)
             elif name in CHIP_HEADERS:
                 layout.chip_ranges.append(rng)
+            elif name in PRICE_GAP_FORMATS:
+                layout.range_formats.append((rng, *PRICE_GAP_FORMATS[name]))
 
 
 # ---------------------------------------------------------------------------------------------

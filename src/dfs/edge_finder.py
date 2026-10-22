@@ -30,6 +30,7 @@ import pandas as pd
 from dfs import (
     calibration,
     field_own,
+    opportunity,
     perf,
     results_loop,
     results_signals,
@@ -41,10 +42,14 @@ from dfs import (
 from dfs.derived import (
     EDGE_FINDER_VALUE_COLUMNS,
     EDGE_SOURCE_COLUMNS,
+    KICKOFF_COLUMN,
+    LAST5_COLUMNS,
+    OPPORTUNITY_COLUMNS,
+    SOURCE_PTS_COLUMNS,
     _rosterable_pool_mask,
     attach_edge_finder_columns,
 )
-from dfs.kickoff import kickoff_utc
+from dfs.kickoff import format_et, kickoff_utc, parse_kickoff
 from dfs.log import get_logger
 from dfs.paths import CURRENT_DIR
 from dfs.research_constants import ResearchConstantsError
@@ -197,10 +202,45 @@ def _enrich(
     except Exception as e:  # noqa: BLE001 - shadow columns must never fail the Edge Finder
         log.warning("Field ownership columns skipped: %s", e)
 
+    try:  # EdgeRaw's one-place columns: blank on any failure, never a failed sync
+        enriched = _attach_one_place(enriched, df, data, ctx, notes)
+    except Exception as e:  # noqa: BLE001 - these columns must never fail the Edge Finder
+        log.warning("Opportunity and per-player columns skipped: %s", e)
+
     if write:
         _write_outputs(output, ctx, now, fitted, data, df, notes, join, enriched, proj_snaps)
         _save_r6_features(r6_features, ctx)
     return enriched
+
+
+def _attach_one_place(
+    enriched: pd.DataFrame,
+    df: pd.DataFrame,
+    data: signals.SeasonData,
+    ctx: SyncContext,
+    notes: list[str],
+) -> pd.DataFrame:
+    """EdgeRaw is the one place for every per-player number: the two source projections, the kickoff, the
+    last five games' averages and the opportunity-per-dollar measures (`opportunity.py`), all blank where
+    unknown."""
+    out = enriched.copy()
+    by_id = df.drop_duplicates("Id").set_index("Id")
+    for column in SOURCE_PTS_COLUMNS:
+        if column in by_id.columns:
+            out[column] = pd.to_numeric(out["Id"].map(by_id[column]), errors="coerce")
+    starts = out["GameStart"].map(parse_kickoff)
+    out[KICKOFF_COLUMN] = [format_et(s) if s else "" for s in starts]
+    out[LAST5_COLUMNS] = opportunity.attach_last5(out, _try_current("player_log"))
+
+    snaps, pbp, players = opportunity.read_research_frames(ctx.season, notes)
+    weeks = data.ffo_weeks if data.ffo_weeks is not None else pd.DataFrame()
+    games = opportunity.player_games(weeks, snaps, pbp, players)
+    keyed = out.assign(
+        GsisId=out["Id"].map(by_id["GsisId"]) if "GsisId" in by_id.columns else float("nan"),
+        RosterablePool=out["Id"].map(by_id["RosterablePool"]).fillna(False).astype(bool),
+    )
+    out[OPPORTUNITY_COLUMNS] = opportunity.attach_features(keyed, games, ctx.season, ctx.week)
+    return out
 
 
 R6_FEATURES_FILE = usage_r6.SAVED_FILE

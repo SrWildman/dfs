@@ -51,8 +51,8 @@ def test_raw_positions_follow_the_column_lists():
     assert pc.raw_letter("NameKey") == "A"
     assert pc.raw_letter(pc.RAW_COLUMNS[-1]) == pc._letter(len(pc.RAW_COLUMNS) - 1)
     assert pc.rows_index("Key") == 1 and pc.rows_index("C") == 4
-    spec = pc.Field("Sleeper", pc.RAW, "Sleeper", pc.PTS)
-    letter = pc.raw_letter("Sleeper")
+    spec = pc.Field("Tgt 1", pc.RAW, "Tgt1", pc.INT)
+    letter = pc.raw_letter("Tgt1")
     assert f"{pc.RAW_TAB}!${letter}$2:${letter}" in pc.formula(spec, "EdgeRaw")
 
 
@@ -96,7 +96,13 @@ def test_usage_block_has_five_game_rows_and_an_average_row():
     games = lay.rows[header + 1 : header + 1 + pc.GAMES]
     assert all(r[0].startswith("=IFERROR(IF(INDEX(PlayerCardRaw!") for r in games)
     avg = lay.rows[header + 1 + pc.GAMES]
-    assert avg[0] == "Average" and avg[2].startswith("=IFERROR(AVERAGE(C")
+    assert avg[0] == "Average"
+    # EdgeRaw is the one place for per-player numbers: the average cells that have an EdgeRaw column read it
+    for label, column in pc.USAGE_AVERAGE_EDGE.items():
+        cell = avg[pc.USAGE_HEADER.index(label)]
+        assert edge_sheet_letter(column) in cell and "EdgeRaw" in cell and "PlayerCardRaw" not in cell
+    share = pc.USAGE_HEADER.index("Tgt share")  # no EdgeRaw column: still a formula over the five rows
+    assert avg[share].startswith(f"=IFERROR(AVERAGE({pc._letter(share)}")
     assert avg[1] == ""  # the opponent column is text: no average
 
 
@@ -268,15 +274,13 @@ def _edge():
     )
 
 
-def test_raw_frame_has_one_row_per_player_with_the_projection_sources_and_games():
+def test_raw_frame_has_one_row_per_player_with_the_games_only():
     edge = _edge()
-    sleeper = pd.DataFrame({"Name": ["Wide One"], "Position": ["WR"], "DkPts": [16.2]})
     log = pc.usage_log(_stats_frame(), None, None)
-    raw = pc.raw_frame(edge, sleeper=sleeper, fantasypros=None, log=log)
+    raw = pc.raw_frame(edge, log=log)
     assert list(raw.columns) == pc.RAW_COLUMNS and len(raw) == 2
+    assert not {"Kickoff", "Sleeper", "FantasyPros"} & set(raw.columns)  # those are EdgeRaw columns now
     one = raw[raw["NameKey"] == "wide one"].iloc[0]
-    assert one["Sleeper"] == pytest.approx(16.2) and pd.isna(one["FantasyPros"])
-    assert one["Kickoff"].startswith("Sun") and "ET" in one["Kickoff"]
     assert one["Wk1"] == 7 and one["Wk5"] == 3 and one["Tgt1"] == 6
 
 

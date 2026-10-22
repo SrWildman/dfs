@@ -198,6 +198,7 @@ def test_the_empty_state_layout_has_every_section_and_says_nothing_yet():
         "LEVERAGE PLAYS",
         "CHALK TO FADE OR EAT",
         "PUNT PLAYS",
+        "PRICE GAP",
         "PROJECTION DISAGREEMENTS",
         "INJURY BENEFICIARIES",
         "USAGE TRENDS",
