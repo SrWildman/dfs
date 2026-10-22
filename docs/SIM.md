@@ -1909,3 +1909,9 @@ toward the live hook: the wide pool is the live one (not the curse study's 24 lo
 on the weeks **before** the backtested one only (`field_model_before`; the retro fitted on every other week), so Week 2, with no
 GPP field before it, keeps today's pick. The backtest also scores against its own fitted payout tables and the backtest's own
 builds (Sam's saved pool from Week 7 on), so its numbers are not the retro's.
+
+**First backtest run (Weeks 2, 4, 5, 6; 29 contests, 53 entries, $454).** As entered, `portfolio = true` returned -8% ROI
+against today's +19%: -23.0 ROI points by week (SE 13.4), winning 0 of 4 weeks (Week 2 is identical by construction, Week 6
+tied at -56%; Weeks 4 and 5 lost, +57% vs +99% and +3% vs +53%). The model preferred the plan every week (E[$] +13% to +26%,
+P(a top-1%) about double). So on the backtest's own builds and earlier-weeks field the retro's `robust_wide` edge does not
+reproduce: **not proven, stays default off**; Week 7 is the next point, and a second straight loss argues for dropping it.
