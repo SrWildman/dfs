@@ -432,7 +432,20 @@ Rerun the weekly offline studies with the closed weeks so far and write one repo
 | `--through INT` | Last closed week to include (default: the newest scored week). |
 | `--season INT` | Override the auto-detected NFL season. |
 | `--shuffles INT` | Shuffled-feature tables behind the five-pair retest's chance control. Default: `40`. |
-| `--only STR` | Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, props, contest_retro, curse. |
+| `--only STR` | Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, props, contest_retro, curse; backtest (the Flashback backtest, about 6 minutes) runs only when named here. |
+
+### `dfs backtest`
+
+Would these build settings have made money? Rebuilds each week with today's code from the last pre-lock snapshot (no lookahead), on your pool where one was saved (`data/pools/`, written at every sync and `suggest`; earlier weeks use the constructed pool of the contest retro), puts the builds into the contests you actually entered and scores them against those contests' real fields and payouts: dollars, ROI, cash rate and top-1% hits beside your own lineups in the same contests. Local and read-only: no sheet, no DraftKings. Writes docs/research/backtest/ (gitignored) and prints a short summary. About 6 minutes for four weeks: the search runs to the end, so a rerun of the same settings gives the same builds.
+
+| Option | What it does |
+|---|---|
+| `--weeks STR` | Comma-separated weeks to rebuild (each needs standings and a pre-lock snapshot on disk). Default: `2,4,5,6`. |
+| `--settings FILE` | A settings TOML (builds, rules lines, named flags; see dfs.backtest_settings). Left off: today's defaults, what a plain `dfs lineups suggest` builds (with a search that runs to the end). |
+| `--compare FILE` | A second settings TOML to backtest on the same contests; prints the paired difference (--settings minus --compare, so name the baseline here) with standard errors and weeks won. |
+| `--fresh` | Rebuild even where a saved run of the same code exists. |
+| `--workers INT RANGE` | Weeks built in parallel. Default: `6`. |
+| `--no-report` | Print the summary; write no report file. |
 
 ## Reference: building and styling a sheet (only when needed)
 

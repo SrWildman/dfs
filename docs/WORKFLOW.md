@@ -364,6 +364,15 @@ ESPN / props shadows, the contest retro and the optimizer's-curse study with the
 `docs/research/weekly/<season>-wk<NN>.md` (gitignored): one block per study with its headline numbers, the bar it
 must clear and what changed since last week's report. A study that breaks says so and the rest still run.
 
+**Or, to test a way of building against your own contests:** `dfs backtest` (offline, no sheet, about six minutes for
+four weeks) rebuilds the weeks with standings from what was known at the lock, puts the builds into the contests you
+actually entered, pays them against the real fields and prints the result beside your own lineups in the same
+contests. `--settings <file.toml>` tries a different way of building (a rules-box line, a rank, a named switch) and
+`--compare <baseline.toml>` prints the paired difference with its standard errors and weeks won. Your real pool is
+saved at every `dfs sync` and `dfs lineups suggest` (`data/pools/`), so from Week 7 on it builds from what you picked.
+Four or five weeks of real fields is thin: the report says "not proven yet" until a change wins by more than two
+standard errors and in most weeks.
+
 **Done looks like:** Bankroll's running total moved by the amount you'd
 expect from the week's actual results, and Results' row for the week you
 just closed shows real `Cash Pts`/`H2H Entered`/`H2H Win` numbers.

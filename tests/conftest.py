@@ -21,3 +21,12 @@ def _isolated_signal_table(tmp_path, monkeypatch):
     monkeypatch.setattr(
         results_update, "signal_table_path", lambda season: tmp_path / f"signals_{season}.csv"
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_pool_store(tmp_path, monkeypatch):
+    """`dfs sync` and `dfs lineups suggest` keep Sam's pool under `data/pools/` for `dfs backtest`; no test
+    may write there (`data/` is a symlink to a real week's data in a worktree)."""
+    from dfs import pool_store
+
+    monkeypatch.setattr(pool_store, "POOL_DIR", tmp_path / "pools")

@@ -92,14 +92,18 @@ def test_the_previous_report_is_the_newest_earlier_week_of_the_same_season(two_s
 def test_the_summary_is_a_line_per_study_between_a_header_and_the_report(tmp_path):
     studies = [refresh.Study(k, k, "bar", verdict="v", seconds=1.0) for k in refresh.STUDIES]
     lines = refresh.summary_lines(studies, 12.0, tmp_path / "r.md", 2026, 6)
-    assert len(refresh.STUDIES) == 9 and len(lines) == 11
+    assert len(refresh.STUDIES) == 10 and len(lines) == 12
     assert lines[0].startswith("research refresh 2026 through Week 6") and "shared history" in lines[0]
     assert lines[-1].strip().startswith("report:")
 
 
 @pytest.mark.parametrize(
     "key, run",
-    [("contest_retro", refresh.study_contest_retro), ("curse", refresh.study_curse)],
+    [
+        ("contest_retro", refresh.study_contest_retro),
+        ("curse", refresh.study_curse),
+        ("backtest", refresh.study_backtest),
+    ],
 )
 def test_a_hook_study_is_skipped_without_its_module_and_used_when_it_has_one(monkeypatch, key, run):
     ctx = refresh.Context(2026, 6, 1)
@@ -259,3 +263,12 @@ def test_a_partial_run_never_replaces_the_full_report_or_becomes_last_weeks(two_
     assert full.read_text() == before
     prev = refresh.previous_report(2026, 6, tmp_path)
     assert prev is not None and prev[0].name == "2026-wk05.md"
+
+
+def test_the_backtest_is_optional_so_a_plain_refresh_does_not_run_it(monkeypatch):
+    monkeypatch.setattr(
+        refresh, "STUDIES", {"a": fake_study("a", {}), "backtest": fake_study("backtest", {})}
+    )
+    ctx = refresh.Context(2026, 6, 1)
+    assert [s.key for s in refresh.run_studies(ctx)] == ["a"]
+    assert [s.key for s in refresh.run_studies(ctx, ["backtest"])] == ["backtest"]

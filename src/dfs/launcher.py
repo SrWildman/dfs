@@ -326,6 +326,7 @@ MORE_LABELS = {
     "dfs research fetch": "Download the extra history the research studies read",
     "dfs research run": "Rebuild the research studies from the cache",
     "dfs research refresh": "Rerun the weekly offline studies and write one report",
+    "dfs backtest": "Flashback: would these build settings have made money? (your real contests)",
     "dfs setup remove-model-implied": "Remove the retired model-implied column",
 }
 

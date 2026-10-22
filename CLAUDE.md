@@ -123,6 +123,17 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `docs/research/weekly/<season>-wk<NN>.md` (gitignored; an `--only` run writes `-partial.md` instead) with one block per study (headline numbers, ship bar,
   "changed since last week" against the previous report), prints a line per study with its time. About two
   minutes, plus about 15 the first run after a week closes (the curse study's builder runs for the new week). Run after `dfs week close`.
+- `dfs backtest [--weeks 2,4,5,6] [--settings <file.toml>] [--compare <file.toml>] [--fresh] [--workers N] [--no-report]` -- Flashback, the
+  settings backtest: rebuilds each past week with today's `suggest_builds` from the last pre-lock snapshot (`curse.week_inputs`), on Sam's saved
+  pool where the week has one (`pool_store`, `data/pools/<season>-wk<NN>.json`, written by every `dfs sync` and `dfs lineups suggest`; fail-soft,
+  gitignored) else the constructed pool, enters the best `k` builds of each kind in the contests he entered (the standings' `srwildman` rows and the
+  history log), and pays them against the real field (place among the real scores, shared with real copies, on the fitted payout table) beside his
+  real lineups (as DK paid, and on the same table). ROI / cash rate / top-1% / ROI without the best ticket, "as entered" and "any build"; the
+  standard errors are across weeks. `--compare` pairs two settings files (`--settings` minus `--compare`) with the ship bar's verdict. Settings TOML
+  and the flag registry other sessions plug into: `backtest_settings.py` (`register(Flag(...))`, hooks `prepare` / `build` / `assign`, plugin modules in
+  `PLUGIN_MODULES`). The search runs to the end (`seconds = 600` default; the live clock is 120 and its runs differ), so reruns give the same builds. Saved builds (`data/research/backtest/jobs/<fingerprint>/`) are keyed by settings + code, `--fresh` ignores them. Report in
+  `docs/research/backtest/` (gitignored). Read-only: no sheet. Also `dfs research refresh --only backtest` (optional study). Math/orchestration
+  `backtest.py`, text `backtest_report.py`.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, the Cockpit and Stacks tabs are there, the Suggested tab is in the current layout (lock column, rules box; an old one
   says to run a plain `dfs lineups suggest`), `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is

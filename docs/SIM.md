@@ -1530,3 +1530,74 @@ with at least 4 weeks scored.** Double-ups have 3 weeks so far. `dfs research re
 SHEET_REFERENCE.md, COMMANDS.md), launcher entries. Tests: `tests/sim/test_payouts.py`, `test_field_gen.py`,
 `test_contest_sim.py`, `test_contest_retro.py`. Rerun the retro after each week closes (`dfs research refresh`, or
 `contest_retro.run_retro(<week>)`).
+
+## Flashback: the settings backtest (2026-10-21)
+
+`dfs backtest` answers "would these build settings have made money?" by rebuilding past slates with today's code and scoring
+the builds in the contests Sam actually entered, against those contests' real fields and payouts. It is the proof harness for
+any change to how lineups are built (the ownership-uncertainty field, portfolio selection, a rank, a rules-box line); it ships
+nothing and writes no sheet. Code: `backtest.py` (inputs, builds, scoring), `backtest_settings.py` (settings file and flag
+registry), `backtest_report.py` (text), `pool_store.py` (Sam's saved pool). Tests: `tests/test_backtest*.py`,
+`tests/test_pool_store.py`.
+
+**Method.**
+
+- *No lookahead.* Each week is `research.curse.week_inputs`: the last EdgeRaw snapshot before Sunday 1 pm ET, `CalPts` on every
+  rated row, the main slate. The builder is today's `lineup_suggest.suggest_builds` with the specs and lines
+  `dfs lineups suggest` would use (3 cash builds, every QB stack in several GPP shapes, rank `top1`, the 120-second search
+  budget), on **Sam's pool** where the week has one (`data/pools/<season>-wk<NN>.json`, saved by every `dfs sync` and
+  `dfs lineups suggest` from now on) and otherwise the constructed pool of `sim/retro.pool_tags` (his Week 6 counts, top `CalPts`
+  per position). Weeks 2, 4, 5 and 6 predate the saved pool, so they are constructed, and the report says so per week.
+- *Entering.* For each contest he entered that week with a standings file (the standings' `srwildman` rows say how many entries,
+  the history log gives the series, fee and size) the best `k` builds of the contest's kind go in, ranked as the tool ranks them
+  (Cash %, or Top 1%; `--rank share`: that chance over 1 + the duplicates expected). The report also scores **every** build in
+  every contest ("any build"): the same question with far less luck, since a single-entry double-up is one coin flip a week.
+- *Paying.* A build's points are DraftKings' own (the standings' `FPTS`); its place is among the contest's real final scores
+  (the build is an extra entry); it shares the payout with the real copies of the identical lineup in the field
+  (`contest_sim.block_payout`); the payout table is `payouts.payout_table` with the min-cash tier fitted on his own results.
+  Cashed = paid anything; Top 1% = at or above the contest's real top-1% score.
+- *Beside Sam.* His real lineups in the same contests, twice: as DraftKings paid them (the history log) and re-paid on the same
+  fitted table as the builds. The gap between the two is the table's error, printed as a check ("Payout table check").
+- *Standard errors* are across **weeks**, the unit that is roughly independent: contests of one week share their players and the
+  slate's luck (a week's three double-ups score the same build the same way). "ROI without the best ticket" removes the single
+  biggest payout, because one GPP hit decides most week-level ROIs.
+
+**Settings file** (TOML, every key optional; a plain `dfs backtest` is today's defaults): `[builds]` `cash`, `gpp`, `rank`,
+`seconds`; `[rules]` the rules-box lines (applied: `Adjust`, `Ownership` as your frame, `Never use` as a pool removal; the
+others need a built tab to iterate on and are reported as not applied); `[flags]` named switches. Unknown keys are errors.
+
+**The registry for other sessions.** `backtest_settings.register(Flag(name, doc, prepare=, build=, assign=, version=))` from the
+module that implements the switch, and add the module's dotted path to `backtest_settings.PLUGIN_MODULES` (imported when a
+settings file names a flag nothing has registered; a module that is not on this branch is skipped). `prepare(ctx, value)`
+returns the `BuildContext` the builder is given (change `ctx.edge`, `ctx.specs`, or `ctx.lines` to swap the simulated field);
+`build(ctx, value, inner)` replaces or wraps the builder (`inner(ctx)` is today's, so a portfolio flag can take its candidates and
+choose a set); `assign(builds, contest, k, flags)` chooses which builds enter a contest. Bump `version` when the implementation
+changes: saved builds are keyed by the settings, the active flags' versions and the code (HEAD plus a hash of uncommitted
+`src/` changes), so a rerun of the same thing is free and a changed thing is rebuilt.
+
+**Noise.** The live builder is time-boxed at 120 s. Two runs of one week at 120 s agree on 13 of 14 builds, only 5 of 13 match a
+search that finishes, and under load (eight builds at once) the Week 2 result moved from -100% to +1,402% ROI on a different
+handful of builds. So the backtest's default is `seconds = 600`: the search finishes (about 5 minutes a week, four weeks in
+parallel about 6 minutes) and gives the same builds every run, which is what a comparison of two settings needs. `seconds = 120`
+mimics the live clock; the report prints a caution when a run still hit the clock (a bigger pool than the constructed one).
+
+**Limits.** Four weeks of real fields (Week 2 has one contest); the constructed pool is not his pool; the payout table is a fit
+(about 14% rich on his GPP lineups); the extra-entry assumption moves a place by one; his multipliers, H2H and the $3.5M
+Millionaire have no standings and are out (the report prints the share of his fees the scored contests cover).
+
+**First result: today's defaults on Weeks 2, 4, 5, 6** (constructed pool, search run to the end; 29 of his contests, 53 entries,
+85% of his main-slate Classic fees; identical on two runs).
+
+| | entries | ROI | cash rate | top 1% | ROI without the best ticket |
+|---|---|---|---|---|---|
+| Builds, as entered | 53 | +19% | 49% | 1.9% | +14% |
+| Builds, any build | 218 | +145% | 45% | 3.7% | +106% |
+| Sam, as DraftKings paid | 53 | -8% | 28% | 1.9% | -28% |
+| Sam, on the same fitted table | 53 | +4% | 28% | 1.9% | -23% |
+
+By week (builds / Sam as paid): W2 -100% / +700%, W4 +99% / +32%, W5 +53% / -35%, W6 -56% / -54%. Builds minus Sam: -161% by
+week (SE 214%, driven by his Week 2 $10 Hundo), ahead in 2 of 4 weeks. Not distinguishable from Sam on this evidence; the builds
+are positive in both ROI measures and ahead on cash rate (his double-ups cashed 2 of 10, the builds' best cash build 3 of 3 weeks),
+but "any build" GPP ROI rests on one Week 5 lineup (206 points), and three weeks of cash is three coin flips.
+At the live 120 s clock the same code gave +50% and +103% ROI as entered on two runs (Week 2 -100% vs +1,402%): the noise that
+`seconds = 600` removes.
