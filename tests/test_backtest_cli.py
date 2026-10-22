@@ -1,5 +1,6 @@
 """`dfs backtest` on the command line: the argument errors, and one run with the backtest itself stubbed."""
 
+from cli_text import strip_ansi
 from test_backtest import result
 from typer.testing import CliRunner
 
@@ -17,7 +18,7 @@ def write(tmp_path, text, name="s.toml"):
 
 
 def test_the_command_is_listed_and_documented():
-    out = runner.invoke(app, ["backtest", "--help"]).output
+    out = strip_ansi(runner.invoke(app, ["backtest", "--help"]).output)
     for needle in ("--weeks", "--settings", "--compare", "--fresh", "--no-report"):
         assert needle in out
 
