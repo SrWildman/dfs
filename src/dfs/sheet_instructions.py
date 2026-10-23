@@ -297,6 +297,13 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "over EdgeRaw; the sync keeps the data under it fresh.",
     ),
     (
+        "Compare",
+        "The Player card for up to four players side by side. Pick names in B1:E1 (the only typed cells) and "
+        "read projections, ownership, usage, opportunity per dollar, matchup and your lineups one column "
+        "each; the best value in a row is green (lowest for salary, Bust%, ownership and OppPosRank). "
+        "Compare within one position. Everything is a formula over EdgeRaw.",
+    ),
+    (
         "EdgeRaw",
         "Every player of the week sorted by ValAdj, with the Pool dropdown to add him. Sort or search from "
         "the column headers; saved filter views under Data, then Filter views, give Cash and GPP orders.",

@@ -292,23 +292,24 @@ def _blank_safe(expr: str) -> str:
     return f'=IFERROR(IF({expr}="","",{expr}),"")'
 
 
-def _with_row(body: str) -> str:
-    """Guard a formula that INDEXes by `ROW_REF`: with no player picked `H1` is "" and `INDEX(range, "")`
-    spills the whole column (#REF! across the tab), so say blank instead."""
-    return f'=IF({ROW_REF}="","",{body})'
+def _with_row(body: str, row_ref: str = ROW_REF) -> str:
+    """Guard a formula that INDEXes by `row_ref`: with no player picked the helper is "" and
+    `INDEX(range, "")` spills the whole column (#REF! across the tab), so say blank instead."""
+    return f'=IF({row_ref}="","",{body})'
 
 
-def formula(spec: Field, edge_tab: str) -> str:
-    """The cell formula for a field, keyed off the helper cells in row 1."""
+def formula(spec: Field, edge_tab: str, row_ref: str = ROW_REF) -> str:
+    """The cell formula for a field, keyed off the helper cell `row_ref` (the Player card's `$H$1`; the
+    Compare tab passes each picker's own `B$2`). `RAW` fields are the Player card's alone."""
     if spec.source == EDGE:
-        return _with_row(_blank_safe(f"INDEX({edge_range(edge_tab, spec.column)},{ROW_REF})")[1:])
+        return _with_row(_blank_safe(f"INDEX({edge_range(edge_tab, spec.column)},{row_ref})")[1:], row_ref)
     if spec.source == RAW:
         match = f"MATCH({KEY_REF},{raw_range('NameKey')},0)"
         return _blank_safe(f"INDEX({raw_range(spec.column)},{match})")
     if spec.column == IMPLIED.column:
-        total = f"INDEX({edge_range(edge_tab, 'OverUnder')},{ROW_REF})"
-        spread = f"INDEX({edge_range(edge_tab, 'Spread')},{ROW_REF})"
-        return _with_row(f'IFERROR(IF(OR({total}="",{spread}=""),"",({total}-{spread})/2),"")')
+        total = f"INDEX({edge_range(edge_tab, 'OverUnder')},{row_ref})"
+        spread = f"INDEX({edge_range(edge_tab, 'Spread')},{row_ref})"
+        return _with_row(f'IFERROR(IF(OR({total}="",{spread}=""),"",({total}-{spread})/2),"")', row_ref)
     raise KeyError(spec.column)
 
 
@@ -331,13 +332,13 @@ def meta_lookup(kind: str, column: str) -> str:
 # ---------------------------------------------------------------------------------------------
 
 
-def lineup_terms(lineups_tab: str, blocks=LINEUPS_NAME_BLOCKS) -> list[str]:
-    name = NAME_REF
+def lineup_terms(lineups_tab: str, blocks=LINEUPS_NAME_BLOCKS, name_ref: str = NAME_REF) -> list[str]:
+    name = name_ref
     return [f"(COUNTIF({_q(lineups_tab)}!$A${s}:$A${e},{name})>0)" for s, e in blocks]
 
 
-def in_lineups_formula(lineups_tab: str, blocks=LINEUPS_NAME_BLOCKS) -> str:
-    return f'=IF({NAME_REF}="","",' + "+".join(lineup_terms(lineups_tab, blocks)) + ")"
+def in_lineups_formula(lineups_tab: str, blocks=LINEUPS_NAME_BLOCKS, name_ref: str = NAME_REF) -> str:
+    return f'=IF({name_ref}="","",' + "+".join(lineup_terms(lineups_tab, blocks, name_ref)) + ")"
 
 
 def which_lineups_formula(lineups_tab: str, blocks=LINEUPS_NAME_BLOCKS) -> str:
@@ -360,9 +361,11 @@ def exposure_columns(header: list) -> dict[str, str] | None:
     return {key: _letter(cells.index(label)) for key, label in wanted.items()}
 
 
-def exposure_formula(exposure_tab: str, columns: dict[str, str], column: str) -> str:
+def exposure_formula(
+    exposure_tab: str, columns: dict[str, str], column: str, name_ref: str = NAME_REF
+) -> str:
     rng = lambda c: f"{_q(exposure_tab)}!${columns[c]}$2:${columns[c]}"  # noqa: E731
-    expr = f"INDEX({rng(column)},MATCH({NAME_REF},{rng('Name')},0))"
+    expr = f"INDEX({rng(column)},MATCH({name_ref},{rng('Name')},0))"
     return f'=IFERROR(IF({expr}="","",{expr}),"")'
 
 

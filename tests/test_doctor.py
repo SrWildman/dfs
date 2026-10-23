@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 
-from dfs import derived, player_card
+from dfs import compare_card, derived, player_card
 from dfs import sheet_dk_upload as dku
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
@@ -59,6 +59,9 @@ class FakeDoctorClient:
                     f'=IFERROR(INDEX({player_card.edge_range("EdgeRaw", "NameKey")},H1),"")',
                 ]
             ],
+            (compare_card.COMPARE_TAB, "B2:E2"): [
+                [f'=IFERROR(MATCH({c}$1,{player_card.edge_range("EdgeRaw", "Name")},0),"")' for c in "BCDE"]
+            ],
             **(formulas or {}),
         }
         self._hidden_names = hidden_names or {}
@@ -66,6 +69,7 @@ class FakeDoctorClient:
         self.zone = "America/New_York"
         self.no_dropdown: set[tuple[str, str]] = set()
         self.card_formulas: list[list[str]] | None = None  # a test sets this to give the Player card a fault
+        self.compare_formulas: list[list[str]] | None = None  # ... and this one, the Compare tab
 
     def time_zone(self) -> str:
         return self.zone
@@ -116,10 +120,23 @@ class FakeDoctorClient:
             return self._formulas[(tab_name, a1_range)]
         if tab_name == player_card.PLAYER_CARD_TAB and a1_range.startswith("A1:"):
             return self.card_formulas or _healthy_card()
+        if tab_name == compare_card.COMPARE_TAB and a1_range.startswith("A1:"):
+            return self.compare_formulas or _healthy_compare()
         m = re.fullmatch(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", a1_range)
         first, last = int(m.group(2)), int(m.group(4))
         width = column_index(m.group(3)) + 1
         return [[f"=X{r}"] * width for r in range(first, last + 1)]
+
+
+def _healthy_compare() -> list[list[str]]:
+    """The Compare tab exactly as `dfs setup compare` writes it today."""
+    return compare_card.build_layout(
+        edge_tab="EdgeRaw",
+        lineups_tab="Lineups",
+        exposure_tab=EXPOSURE_TAB,
+        exposure=None,
+        lineup_count_cell=LINEUP_COUNT_CELL,
+    ).rows
 
 
 def _healthy_card() -> list[list[str]]:
@@ -190,6 +207,7 @@ _ALL_GOOD_TABS = {
     "Contests": [],
     "Cockpit": [],
     "Player": [],
+    "Compare": [],
     "PlayerCardRaw": [],
     "PlayerCardRows": [],
     "Stacks": [],
@@ -1132,3 +1150,66 @@ def test_run_doctor_flags_a_player_card_whose_picker_is_behind_the_protection():
     client.protection = {"Player": [{"whole_sheet": True, "unprotected": [(0, 1, 1, 2)]}]}
     issues = run_doctor(client, _base_config(), title="Week 1")
     assert not [i for i in issues if i.check.startswith("player-card")]
+
+
+def test_run_doctor_flags_a_sheet_with_no_compare_tab():
+    rows = _lineups_rows()
+    without = {t: h for t, h in _ALL_GOOD_TABS.items() if t != "Compare"}
+    issues = run_doctor(FakeDoctorClient(tabs=without, rows=rows), _base_config(), title="Week 1")
+    assert [i.check for i in issues if i.check.startswith("compare")] == ["compare-tab"]
+    assert any("dfs setup compare" in i.detail for i in issues)
+
+
+def test_run_doctor_flags_a_compare_tab_that_lost_a_dropdown_or_whose_helper_points_elsewhere():
+    rows = _lineups_rows()
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    client.no_dropdown.update({("Compare", "C1"), ("Compare", "E1")})
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    detail = [i.detail for i in issues if i.check == "compare-dropdown"]
+    assert len(detail) == 2 and "C1" in detail[0] and "E1" in detail[1]
+
+    moved = {
+        ("Compare", "B2:E2"): [
+            ['=IFERROR(MATCH(B$1,EdgeRaw!$B$2:$B,0),"")', '=IFERROR(MATCH(C$1,EdgeRaw!$Q$2:$Q,0),"")', "", ""]
+        ]
+    }
+    issues = run_doctor(
+        FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows, formulas=moved), _base_config(), title="Week 1"
+    )
+    assert [i.check for i in issues if i.check.startswith("compare")] == ["compare-helpers"] * 3
+
+
+def test_run_doctor_flags_a_compare_tab_whose_edge_references_were_shifted_by_a_widening():
+    rows = _lineups_rows()
+    healthy = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    assert not [
+        i for i in run_doctor(healthy, _base_config(), title="Week 1") if i.check.startswith("compare")
+    ]
+
+    shifted = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    shifted.compare_formulas = _shift_edge_refs(
+        _healthy_compare(), derived.edge_sheet_letter("SleeperPts"), 16
+    )
+    issues = [i for i in run_doctor(shifted, _base_config(), title="Week 1") if i.check == "compare-refs"]
+    assert len(issues) == 1
+    detail = issues[0].detail
+    # Kickoff (BY) is the first shifted column the tab reads, top to bottom; the shift is sixteen columns
+    assert "reads CO but Kickoff is BY" in detail and "dfs setup compare" in detail
+
+    blank = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)  # a tab whose formulas were wiped
+    blank.compare_formulas = [["" for _ in row] for row in _healthy_compare()]
+    assert [i.check for i in run_doctor(blank, _base_config(), title="Week 1") if i.check == "compare-refs"]
+
+
+def test_run_doctor_flags_compare_pickers_that_are_behind_the_protection():
+    rows = _lineups_rows()
+    client = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)
+    client.protection = {"Compare": [{"whole_sheet": True, "unprotected": []}]}
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    assert [i.check for i in issues if i.check.startswith("compare")] == ["compare-protected"]
+    client.protection = {"Compare": [{"whole_sheet": True, "unprotected": [(0, 1, 1, 2)]}]}  # only B1
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    assert "C1, D1, E1" in next(i.detail for i in issues if i.check == "compare-protected")
+    client.protection = {"Compare": [{"whole_sheet": True, "unprotected": [(0, 1, 1, 5)]}]}  # B1:E1
+    issues = run_doctor(client, _base_config(), title="Week 1")
+    assert not [i for i in issues if i.check.startswith("compare")]

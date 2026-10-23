@@ -537,6 +537,14 @@ Create the `Player` tab right after Edge Finder, or rebuild it. Pick a player in
 |---|---|
 | `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
 
+### `dfs setup compare`
+
+Create the `Compare` tab right after the Player tab, or rebuild it. Pick up to four players in B1:E1 (dropdowns over EdgeRaw's names, the only typed cells) and read the Player card's measures side by side: projections, ownership, usage, opportunity per dollar, matchup and game, and your lineups. The best value in each row is green (lowest for salary, Bust%, ownership and OppPosRank). Formulas over EdgeRaw only; a sync that widens EdgeRaw rebuilds it (only on a sheet that has the tab). Needs the Player tab (`dfs setup player-card`) to place it after. Template first, then the live week; `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+
 ### `dfs setup stacks`
 
 Create the `Stacks` tab right after Suggested, or rebuild it: the top 20 QB stacks and top 8 games ranked by simulated upside against how much of the field plays them, with the retro's track record on top. Nothing on it is typed. `dfs stacks` and `dfs sync` keep it fresh from then on (only on a sheet that has the tab). Needs the fitted field model (`dfs stacks --refit` once). Template first, then the live week; `dfs doctor` after.
