@@ -109,6 +109,7 @@ def test_the_edge_finder_columns_are_appended_after_namekey_so_nothing_earlier_m
         *derived.EDGE_SOURCE_COLUMNS,
         *derived.FIELD_OWN_COLUMNS,
         *derived.ONE_PLACE_COLUMNS,
+        *derived.EDGE_ONLY_LABELS,
     ]
     assert cols.index("AggPts") == 6 and cols.index("Id") + 1 == cols.index("Flag")  # untouched
 

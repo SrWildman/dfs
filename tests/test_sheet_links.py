@@ -231,12 +231,14 @@ def test_edge_lookup_formula_uses_correct_range_and_column_index():
     # Slice 5 (2026-10-09): the tab is written in `EDGE_SHEET_ORDER` (Leverage was 32nd counting from Name).
     # Shadow sources (2026-10-13): `EspnPts` and `PropPts` sit right after `CalPts`, ahead of Leverage: 34th.
     # Every linked formula was rewritten (`dfs setup link-edge --force`) on both sheets.
-    assert edge_vlookup_index("Leverage") == 34
+    # The regroup (2026-10-22): the SRC and OWN groups (label + 4 sources, label + 3 ownership) sit
+    # ahead of GAME and `EspnPts` / `PropPts` left the spine: 41st.
+    assert edge_vlookup_index("Leverage") == 41
     start_col = edge_sheet_letter("Name")
     end_col = edge_last_letter()
     key = resolve_name_expr("$A5", "EdgeRaw")
     assert edge_lookup_formula(5, "EdgeRaw", "Leverage") == (
-        f'=IF($A5="","",VLOOKUP({key},EdgeRaw!${start_col}:${end_col},34,false))'
+        f'=IF($A5="","",VLOOKUP({key},EdgeRaw!${start_col}:${end_col},41,false))'
     )
 
 

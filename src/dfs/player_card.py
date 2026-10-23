@@ -207,8 +207,8 @@ OPPORTUNITY_STRIPES = [
         _edge("TPRR~ (proxy)", "TPRR~", PCT0),
         _edge("TPRR~ last 3", "TPRR~ L3", PCT0),
         _edge("xFP / game", "xFP Szn", PTS),
-        _edge("xFP last 3", "xFP L3", PTS),
         _edge("xFP trend", "xFP trend", ZSCORE),
+        _edge("Receiving share of xFP", "xFP Rec%", PCT0),
     ],
     [
         _edge("xFP per $1k", "xFP/$", PTS2),

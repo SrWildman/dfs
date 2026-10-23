@@ -10,8 +10,11 @@ PRICE angle, a read on what the salary has not caught, scored in Model Check as 
 with no 2026 game yet is blank): over the games he PLAYED strictly before the slate week (a missed game is
 skipped, never a zero), as of the slate, nothing from the week being predicted.
 
-- `xFP Szn` / `xFP L3`: ffopportunity's expected fantasy points (DK scoring, `xfp.py`) per game, over the
-  season so far and over his last three games; `xFP trend` = L3 minus Szn (needs four games).
+- `xFP Szn`: ffopportunity's expected fantasy points (DK scoring, `xfp.py`) per game over the season so far;
+  `xFP trend` = his last three games minus Szn (needs four games; `xFP/G` is the last-3 figure itself, which
+  reaches back into last season early on, so it is not repeated here). `xFP Rec%` = the share of his
+  season xFP that is receiving (RB / WR / TE): carries and targets are worth different points, and xFP prices
+  each, so this says where a back's points come from (about 60% = a pass-game back, 15% = a pure rusher).
 - `TPRR~` / `TPRR~ L3`: targets per route run, a PROXY. Free in-season route counts do not exist in bulk,
   so a game's routes are estimated as `offensive snaps x his team's dropback rate in that game` (nflverse
   snap counts and play-by-play: quarterback dropbacks, sacks and scrambles included, over scrimmage pass
@@ -65,6 +68,7 @@ GAME_COLUMNS = [
     "season",
     "week",
     "xfp",
+    "rec_xfp",
     "targets",
     "hvt",
     "routes",
@@ -183,7 +187,9 @@ def player_games(
         games["routes"] = games["snaps"] * games["dropback_rate"]
     if "dk_actual" not in games.columns:
         games["dk_actual"] = np.nan
-    for column in ("xfp", "targets", "dk_actual"):
+    if "rec_xfp" not in games.columns:
+        games["rec_xfp"] = np.nan
+    for column in ("xfp", "rec_xfp", "targets", "dk_actual"):
         games[column] = pd.to_numeric(games[column], errors="coerce")
     return games[GAME_COLUMNS].reset_index(drop=True)
 
@@ -196,11 +202,21 @@ def _window_ratio(window: pd.DataFrame) -> float:
     return float(rows["targets"].sum() / rows["routes"].sum())
 
 
+def _rec_share(window: pd.DataFrame) -> float:
+    """The share of the window's xFP that is receiving: the weight of his pass-game role (a back's carries and
+    targets are worth different points, and xFP already prices each; this says where the points come from)."""
+    total = window["xfp"].sum(min_count=1)
+    rec = window["rec_xfp"].sum(min_count=1)
+    if pd.isna(total) or pd.isna(rec) or total <= 0:
+        return np.nan
+    return float(min(max(rec / total, 0.0), 1.0))
+
+
 def player_features(games: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
     """Per player (indexed by `GsisId`): `Games`, and the season-to-date and last-three measures of the games
-    PLAYED before `(season, week)` in `season` only: `xfp_szn`, `xfp_l3`, `xfp_trend`, `tgt_pg`, `hvt_pg`,
-    `tprr`, `tprr_l3`. Nothing at or after the slate week can reach a feature."""
-    cols = ["Games", "xfp_szn", "xfp_l3", "xfp_trend", "tgt_pg", "hvt_pg", "tprr", "tprr_l3"]
+    PLAYED before `(season, week)` in `season` only: `xfp_szn`, `xfp_l3`, `xfp_trend`, `rec_share`, `tgt_pg`,
+    `hvt_pg`, `tprr`, `tprr_l3`. Nothing at or after the slate week can reach a feature."""
+    cols = ["Games", "xfp_szn", "xfp_l3", "xfp_trend", "rec_share", "tgt_pg", "hvt_pg", "tprr", "tprr_l3"]
     if games is None or games.empty:
         return pd.DataFrame(columns=cols)
     past = games[(games["season"] == season) & (games["week"] < week)]
@@ -218,6 +234,7 @@ def player_features(games: pd.DataFrame, season: int, week: int) -> pd.DataFrame
             "xfp_szn": szn,
             "xfp_l3": l3,
             "xfp_trend": l3 - szn if n >= TREND_MIN_GAMES else np.nan,
+            "rec_share": _rec_share(g),
             "tgt_pg": g["targets"].mean(),
             "hvt_pg": g["hvt"].mean(),
             "tprr": _window_ratio(g),
@@ -274,8 +291,8 @@ def attach_features(frame: pd.DataFrame, games: pd.DataFrame, season: int, week:
     put("TPRR~", f["tprr"], receiver)
     put("TPRR~ L3", f["tprr_l3"], receiver)
     put("xFP Szn", f["xfp_szn"], skill)
-    put("xFP L3", f["xfp_l3"], skill)
     put("xFP trend", f["xfp_trend"], skill)
+    put("xFP Rec%", f["rec_share"], receiver)
     put("xFP/$", f["xfp_szn"] / per_k.reindex(f.index), skill & played)
     put("Tgt/$", f["tgt_pg"] / per_k.reindex(f.index), receiver & played)
     put("HVT/$", f["hvt_pg"] / per_k.reindex(f.index), rb & played)
