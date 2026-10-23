@@ -1201,8 +1201,12 @@ def test_run_doctor_flags_a_compare_tab_whose_edge_references_were_shifted_by_a_
     issues = [i for i in run_doctor(shifted, _base_config(), title="Week 1") if i.check == "compare-refs"]
     assert len(issues) == 1
     detail = issues[0].detail
-    # Kickoff (BY) is the first shifted column the tab reads, top to bottom; the shift is sixteen columns
-    assert "reads CO but Kickoff is BY" in detail and "dfs setup compare" in detail
+    # Kickoff is the first shifted column the tab reads, top to bottom; the shift is sixteen columns
+    from dfs.sheets import column_index, column_letter
+
+    kick = derived.edge_sheet_letter("Kickoff")
+    moved = column_letter(column_index(kick) + 16)
+    assert f"reads {moved} but Kickoff is {kick}" in detail and "dfs setup compare" in detail
 
     blank = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)  # a tab whose formulas were wiped
     blank.compare_formulas = [["" for _ in row] for row in _healthy_compare()]
