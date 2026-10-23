@@ -104,8 +104,9 @@ SECTIONS: list[tuple[str, list[Row]]] = [
             _row("DK pts L5", "DK L5", pc.PTS),
             _row("Target share", "Tgt%", pc.PCT1),
             _row("xFP / game", "xFP Szn", pc.PTS),
-            _row("xFP last 3", "xFP L3", pc.PTS),
+            _row("xFP last 3", "xFP/G", pc.PTS),
             _row("xFP trend", "xFP trend", pc.ZSCORE),
+            _row("Receiving share of xFP", "xFP Rec%", pc.PCT0),
         ],
     ),
     (

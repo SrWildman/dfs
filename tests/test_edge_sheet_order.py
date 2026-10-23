@@ -32,6 +32,7 @@ def test_the_sheet_order_is_a_permutation_of_the_append_only_frame_order():
         *derived.EDGE_SOURCE_COLUMNS,
         *derived.FIELD_OWN_COLUMNS,
         *derived.ONE_PLACE_COLUMNS,
+        *derived.EDGE_ONLY_LABELS,
     ]
     assert EDGE_COLUMNS[-len(appended) :] == appended  # still append-only
 
@@ -59,16 +60,20 @@ def test_the_designed_order_pool_name_spine_then_zones_then_hidden_helpers():
     )
     assert spine[-4:] == ["Own%", "Avail", "Flags", "Edge"][-4:] or spine[-1] == "Edge"
     assert edge_sheet_letter("Name") == "B" and EDGE_DATA_OFFSET == 1  # Pool is column A
-    zones = [EDGE_SHEET_ORDER.index(label) for label in ZONE_LABELS]
+    labels = [*derived.EDGE_ONLY_LABELS[:2], *ZONE_LABELS, derived.OPPORTUNITY_LABEL]
+    zones = [EDGE_SHEET_ORDER.index(label) for label in labels]
     assert zones == sorted(zones) and zones[0] > EDGE_SHEET_ORDER.index("Edge")
-    hidden = ["Id", "Flag", *derived.ALL_PCT_COLUMNS.values(), "NameKey"]
-    own = derived.FIELD_OWN_COLUMNS  # the ownership shadow (2026-10-20) is appended after the helpers
-    one_place = derived.ONE_PLACE_COLUMNS  # the per-player numbers (2026-10-21) after that
-    tail = len(own) + len(one_place)
-    assert EDGE_SHEET_ORDER[-len(hidden) - tail : -tail] == hidden  # helpers last, bar the appended blocks
-    assert EDGE_SHEET_ORDER[-tail : -len(one_place)] == own == ["GppOwn", "CashOwn", "OurOwn"]
-    assert EDGE_SHEET_ORDER[-len(one_place) :] == one_place
-    assert len(one_place) == 16 and one_place[:3] == ["SleeperPts", "FantasyProsPts", "Kickoff"]
+    # the regroup (2026-10-22): sources, ownership, game, ceiling, movement, weather, usage, opportunity
+    assert EDGE_SHEET_ORDER[-len(derived.ALL_PCT_COLUMNS) - 3 :] == [
+        "Id",
+        "Flag",
+        *derived.ALL_PCT_COLUMNS.values(),
+        "NameKey",
+    ]  # the hidden helpers are last
+    assert EDGE_SHEET_ORDER.index("Kickoff") == EDGE_SHEET_ORDER.index("GameStart") + 1  # next to its twin
+    assert EDGE_SHEET_ORDER.index("DK L5") == EDGE_SHEET_ORDER.index("xFP/G") + 4  # last five beside usage
+    assert set(derived.ONE_PLACE_COLUMNS) <= set(EDGE_SHEET_ORDER)
+    assert len(derived.ONE_PLACE_COLUMNS) == 16 and "xFP L3" not in EDGE_COLUMNS
     for name in ("Floor", "CeilM", "Bust%"):  # the CEIL group
         assert (
             EDGE_SHEET_ORDER.index("CeilPct")
@@ -90,8 +95,9 @@ def test_each_column_group_is_a_contiguous_run_of_the_sheet_order_with_its_label
     for first, last in EDGE_COLUMN_GROUPS:
         i, j = EDGE_SHEET_ORDER.index(first), EDGE_SHEET_ORDER.index(last)
         assert i < j
-        assert EDGE_SHEET_ORDER[i - 1] in ZONE_LABELS, (first, last)  # a visible label sits outside the fold
-        assert not set(ZONE_LABELS) & set(EDGE_SHEET_ORDER[i : j + 1])
+        everything = {*ZONE_LABELS, *derived.EDGE_ONLY_LABELS}
+        assert EDGE_SHEET_ORDER[i - 1] in everything, (first, last)  # a visible label sits outside the fold
+        assert not everything & set(EDGE_SHEET_ORDER[i : j + 1])
 
 
 def test_the_edgeraw_rows_are_written_in_sheet_order_with_pool_first():
