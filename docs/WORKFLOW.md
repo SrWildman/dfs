@@ -100,7 +100,7 @@ matters for the injury list. `CalPts` is **not** the default projection: it is t
 The **Player** tab is the one-page look at a single player: pick a name in B1 and it shows his projections side by side, ownership, last five games of usage, matchup, props, the signals firing on him with
 Model Check's record for each, and how many of your lineups he is in. `dfs sync` keeps its data fresh (on a sheet that has the tab: `dfs setup player-card` creates it, template first).
 
-The **Compare** tab is the same card for up to four players side by side: pick names in B1:E1 and the best value in each row is green (lowest for salary, Bust%, ownership and OppPosRank). Compare within a position.
+The **Compare** tab is the same card for up to four players side by side: pick names in B1:E1 and the best value in each row is green (lowest for Bust% and OppPosRank; salary and ownership are never shaded, the better side depends on cash vs GPP). Compare within a position.
 It is formulas over EdgeRaw (`dfs setup compare` creates it, template first); a sync that widens EdgeRaw rebuilds it.
 
 Check Board first each week -- it's a landing view, five collapsible

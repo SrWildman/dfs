@@ -187,13 +187,16 @@ MATCHUP_STRIPES = [
     ],
     [
         _edge("OppPosRank", "OppPosRank", INT),
-        _edge("OppEPA", "OppEPA", "pts3"),
+        _edge("OppEPA (whole defense)", "OppEPA", "pts3"),
         _edge("Stadium", "Stadium"),
         _edge("Roof", "Roof"),
         _edge("Wind (mph)", "Wind", PTS),
     ],
 ]
-MATCHUP_NOTE = "OppPosRank: 1 = softest. OppEPA: higher = softer for every position."
+MATCHUP_NOTE = (
+    "OppPosRank: 1 = softest. OppEPA: higher = softer for every position. OppPosRank is that defense against "
+    "his position, OppEPA the defense overall, so they can disagree."
+)
 USAGE_HEADER = ["Game", "Opp", "Snap%", "Targets", "Carries", "Tgt share", "RZ looks", "Inside 5", "DK pts"]
 USAGE_FORMATS = [TEXT, TEXT, PCT0, INT, INT, PCT0, INT, INT, PTS]
 # Each Average-row cell that EdgeRaw carries: header column -> its `derived.LAST5_COLUMNS` name. The others

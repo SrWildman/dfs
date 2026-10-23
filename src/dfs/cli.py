@@ -1284,9 +1284,10 @@ def setup_compare(
     """Create the `Compare` tab right after the Player tab, or rebuild it. Pick up to four players in B1:E1
     (dropdowns over EdgeRaw's names, the only typed cells) and read the Player card's measures side by side:
     projections, ownership, usage, opportunity per dollar, matchup and game, and your lineups. The best value
-    in each row is green (lowest for salary, Bust%, ownership and OppPosRank). Formulas over EdgeRaw only; a
-    sync that widens EdgeRaw rebuilds it (only on a sheet that has the tab). Needs the Player tab (`dfs setup
-    player-card`) to place it after. Template first, then the live week; `dfs doctor` after."""
+    in each row is green (lowest for Bust% and OppPosRank; salary and ownership are never shaded). Formulas
+    over EdgeRaw only; a sync that widens EdgeRaw rebuilds it (only on a sheet that has the tab). Needs the
+    Player tab (`dfs setup player-card`) to place it after. Template first, then the live week; `dfs doctor`
+    after."""
     from dfs import sheet_compare
 
     cfg = _load_config_or_exit()

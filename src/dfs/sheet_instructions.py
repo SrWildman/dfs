@@ -300,8 +300,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Compare",
         "The Player card for up to four players side by side. Pick names in B1:E1 (the only typed cells) and "
         "read projections, ownership, usage, opportunity per dollar, matchup and your lineups one column "
-        "each; the best value in a row is green (lowest for salary, Bust%, ownership and OppPosRank). "
-        "Compare within one position. Everything is a formula over EdgeRaw.",
+        "each; the best value in a row is green (lowest for Bust% and OppPosRank; salary and ownership are "
+        "never shaded). Compare within one position. Everything is a formula over EdgeRaw.",
     ),
     (
         "EdgeRaw",

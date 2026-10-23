@@ -52,16 +52,16 @@ def _row(label: str, column: str, fmt: str, better: str | None = HIGH) -> Row:
 
 
 # (section title, [Row, ...]). Directions: shaded = the best of the picked players. LOW rows are the ones
-# where "better" is not "bigger" -- salary (cheaper), Bust%, ownership (fewer other lineups have him: the
-# leverage view) and OppPosRank (1 = softest matchup). Spread, wind, team/status text and the lineup counts
-# have no clear direction and are never shaded.
+# where "better" is not "bigger": Bust% and OppPosRank (1 = softest matchup). Salary and the three ownership
+# rows are NOT shaded (Sam, 2026-10-22): which way is better depends on cash vs GPP. Spread, wind, team/status
+# text and the lineup counts have no clear direction either.
 SECTIONS: list[tuple[str, list[Row]]] = [
     (
         "PLAYER",
         [
             _row("Team", "Team", pc.TEXT, None),
             _row("Pos", "Position", pc.TEXT, None),
-            _row("Salary", "Salary", pc.MONEY, LOW),
+            _row("Salary", "Salary", pc.MONEY, None),
             _row("Opp", "Opp", pc.TEXT, None),
             _row("Kickoff (ET)", "Kickoff", pc.TEXT, None),
             _row("Status", "Avail", pc.TEXT, None),
@@ -89,9 +89,9 @@ SECTIONS: list[tuple[str, list[Row]]] = [
     (
         "OWNERSHIP",
         [
-            _row("Own% (TFFB)", "Own%", pc.PCT1, LOW),
-            _row("GppOwn (shadow)", "GppOwn", pc.PCT1, LOW),
-            _row("CashOwn (shadow)", "CashOwn", pc.PCT1, LOW),
+            _row("Own% (TFFB)", "Own%", pc.PCT1, None),
+            _row("GppOwn (shadow)", "GppOwn", pc.PCT1, None),
+            _row("CashOwn (shadow)", "CashOwn", pc.PCT1, None),
             _row("Leverage", "Leverage", pc.PTS),
         ],
     ),
@@ -125,7 +125,7 @@ SECTIONS: list[tuple[str, list[Row]]] = [
             _row("Spread", "Spread", pc.PTS, None),
             Row(pc.IMPLIED, HIGH),
             _row("OppPosRank", "OppPosRank", pc.INT, LOW),
-            _row("OppEPA", "OppEPA", "pts3"),
+            _row("OppEPA (whole defense)", "OppEPA", "pts3"),
             _row("Wind (mph)", "Wind", pc.PTS, None),
         ],
     ),
@@ -138,8 +138,9 @@ SAME_POSITION_NOTE = (
 PICK_NOTE = f"Pick up to four players in {PICKER_RANGE}: type a name or choose from the list."
 HIGHLIGHT_NOTE = (
     "Green = the best of the picked players, when two or more have a number and they differ. Lowest is best "
-    "for Salary, Bust%, Own% / GppOwn / CashOwn (fewer lineups share him) and OppPosRank (1 = softest); "
-    "highest for everything else. Spread, wind, team, status, flags and your lineups are never shaded."
+    "for Bust% and OppPosRank (1 = softest); highest for the projections, Val, Leverage, usage and "
+    "opportunity rows. Salary, ownership (the better side depends on cash vs GPP), spread, wind, team, "
+    "status, flags and your lineups are never shaded."
 )
 NOTES = {
     "PROJECTIONS": (
