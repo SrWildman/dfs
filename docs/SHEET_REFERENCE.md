@@ -654,6 +654,21 @@ the de-vigged Over/Yes probability and the number of books; another week's pull 
 for it as of the last `dfs results update`, `results_update.signal_table_path`); **IN YOUR LINEUPS** (how many built lineups, which `L<n>`, and the Exposure tab's share, Target and gap). Source code:
 `player_card` (pure; one `Field` spec drives both the formula and the text), `sheet_player_card` (I/O), `sources/player_log` (the last-five-games data).
 
+### Compare
+
+The Player card for up to four players side by side, right after `Player` (`sheet_style.WEEK_ORDER`, family `decide`). **`B1:E1` are the only typed cells**: name dropdowns over EdgeRaw's Name column (warn, never reject);
+warning-only protection with those four carved out (`sheet_protection.protect_compare`). Row 2 is a small helper row (each picker's position in EdgeRaw, a `MATCH`, blank when the picker is empty); row 3 asks for a pick, or says
+"different positions picked" when they differ. Every other cell is an `INDEX` into an EdgeRaw column (letter from `derived.edge_sheet_letter`, through the Player card's `Field` specs) behind the helper's blank guard, so an empty
+picker is a blank column, never an error. Rows, top to bottom: **PLAYER** (team, position, salary, opponent, kickoff, status, flags); **PROJECTIONS** (TFFB, Sleeper, FantasyPros, ESPN, Props, AggPts, CalPts, Hit3x%, Boom%, Bust%,
+model ceiling, Val, ValAdj); **OWNERSHIP** (Own%, GppOwn, CashOwn, Leverage); **USAGE** (Snap% / targets / carries / DK points over the last five games, target share, xFP per game, last three, trend); **OPPORTUNITY PER DOLLAR**
+(TPRR~, xFP, targets and HVT per $1k, PriceGap); **MATCHUP AND GAME** (total, spread, implied, OppPosRank, OppEPA, wind); **IN YOUR LINEUPS** (count and Exposure). The game-by-game rows, props and signals stay on `Player`.
+
+The best value per row is green: **lowest** for Bust% and OppPosRank (1 = softest), **highest** for the projections, Val, Leverage, usage and opportunity rows. Salary and the three ownership rows are never shaded (Sam,
+2026-10-22: the better side depends on cash vs GPP), nor are spread, wind, team, status, flags and the lineup counts. The OppEPA row is labelled "OppEPA (whole defense)" here and on `Player`: OppPosRank is that defense against his
+position, OppEPA the defense overall, so they can disagree. A cell is shaded only when two or more players have a number and they are not all equal (`compare_card.best_columns`; one conditional-format rule per row,
+`compare_card.highlight_specs`). **Created by `dfs setup compare`** (template first, then the live week; `dfs doctor` after); **rebuilt** by a `dfs sync` that widens EdgeRaw, only on a sheet that has the tab (`sheet_compare.rebuild_if_widened`),
+keeping the four names. Source code: `compare_card` (pure), `sheet_compare` (I/O).
+
 ### Cockpit
 
 Sunday's last 90 minutes on one **read-only** page, right before `Board` (to its left) in the tab strip (`sheet_style.WEEK_ORDER`, family `decide`). Nothing on it is

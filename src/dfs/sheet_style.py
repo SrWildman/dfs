@@ -2790,6 +2790,9 @@ WEEK_ORDER = [
     # Player card (2026-10-21): pick a player in B1, see everything about him on one page. Formulas over
     # EdgeRaw and two hidden raw tabs (`HIDE_TABS`); `dfs setup player-card` creates it, `dfs sync` feeds it.
     ("Player", "decide"),
+    # Compare (2026-10-22): the Player card's measures for up to four players side by side (pickers B1:E1).
+    # Formulas over EdgeRaw only; `dfs setup compare` creates it, a sync that widens EdgeRaw rebuilds it.
+    ("Compare", "decide"),
     ("EdgeRaw", "decide"),
     ("Player Pool", "build"),
     # Suggested builds (Week 6): written by `dfs lineups suggest`; between the pool and the lineups you type.
@@ -2923,6 +2926,9 @@ TAB_NOTES: dict[str, str] = {
     ),
     "Player": (
         f"PLAYER -- pick a name in B1 and read everything about him on one page. Only B1 is typed. {MORE}"
+    ),
+    "Compare": (
+        f"COMPARE -- pick up to four names in B1:E1 and read them side by side. Only B1:E1 are typed. {MORE}"
     ),
     "Slate Grid": f"SLATE GRID -- one row per game, then every team by implied total. Read-only. {MORE}",
     "Player Pool": (

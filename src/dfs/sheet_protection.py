@@ -29,6 +29,7 @@ thing this task exists to make typeable. Player Pool, Exposure, Lineups and Sugg
 
 from __future__ import annotations
 
+from dfs import compare_card as cc
 from dfs import edge_finder_tab as eft
 from dfs import player_card as pc
 from dfs.cockpit import COCKPIT_TAB
@@ -106,6 +107,20 @@ def protect_player_card(client: SheetsClient, tab: str = pc.PLAYER_CARD_TAB) -> 
     return f"{tab}: whole tab protected except the player picker ({', '.join(exempt)})"
 
 
+def protect_compare(client: SheetsClient, tab: str = cc.COMPARE_TAB) -> str:
+    """The Compare tab: the whole tab warns on an edit except `B1:E1`, the four cells Sam types."""
+    if not client.tab_exists(tab):
+        return f"{tab}: not present -- skipped"
+    client.clear_protected_ranges(tab)
+    exempt = cc.unprotected_ranges()
+    client.protect_sheet(
+        tab,
+        unprotected_ranges=exempt,
+        description=f"{_FORMULA_DESCRIPTION} (except the player pickers, {', '.join(exempt)})",
+    )
+    return f"{tab}: whole tab protected except the player pickers ({', '.join(exempt)})"
+
+
 def protect_workbook(
     client: SheetsClient,
     *,
@@ -153,6 +168,7 @@ def protect_workbook(
         )
 
     results.append(protect_player_card(client))
+    results.append(protect_compare(client))
 
     if not client.tab_exists(player_pool_tab):
         results.append(f"{player_pool_tab}: not present -- skipped")

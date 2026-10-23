@@ -349,6 +349,11 @@ Check `B1` first: the name must match EdgeRaw's (pick from the dropdown). A blan
 its status; a failed nflverse file blanks only its columns). A blank PROPS block is the weekend pull not having run yet (the line under it says which week it has). A signal saying "no record yet" means
 `dfs results update` has not saved Model Check's records since the card was built. `dfs doctor` says `player-card-helpers` or `player-card-refs` if EdgeRaw's columns moved or grew under the card (Sheets shifts its references, so cells go blank with no error): `dfs setup player-card` rewrites it.
 
+**The Compare tab shows blank columns or no green.**
+A picker in `B1:E1` that is empty (or not on EdgeRaw's list) is a blank column by design. A row is green only when two or more picked players have a number and the numbers differ; rows with no clear better direction (spread, wind, team,
+status, flags, your lineups) are never shaded. `dfs doctor` says `compare-refs` or `compare-helpers` if EdgeRaw grew or moved under the tab (Sheets shifts its references: blank cells, no error): `dfs setup compare` rewrites it,
+keeping the names. A sync that widens EdgeRaw does that itself ("Compare tab rebuilt (EdgeRaw grew from N to M columns)").
+
 **`dfs sync` did not touch the Player card.**
 It only refreshes the card's hidden raw tabs on a sheet that already has the Player tab (`dfs setup player-card` creates it, template first). A yellow "Player card data not refreshed (...)" line means the write
 itself failed; the sync result above it still stands. When EdgeRaw's width changed during the sync, it also rebuilds the card itself ("Player card rebuilt (EdgeRaw grew from N to M columns)"), because Sheets shifts the card's references when the tab grows.

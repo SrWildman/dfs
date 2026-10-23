@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from dfs import player_card
+from dfs import compare_card, player_card
 from dfs import sheet_dk_upload as dk_upload
 from dfs.cockpit import COCKPIT_TAB
 from dfs.config import Config
@@ -628,6 +628,98 @@ def _check_player_card_refs(client: DoctorClient, cfg: Config, tab: str, edge_ta
     ]
 
 
+def _check_compare(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
+    """The Compare tab (`compare_card.py`) must exist, each of its four pickers must still be a dropdown and
+    outside the tab's protection, its helper row must still point at EdgeRaw's Name column, and every EdgeRaw
+    reference on it must be the column `derived.edge_sheet_letter` gives (the refs check from the Player card:
+    a tab built before EdgeRaw widened reads the wrong columns, blank, with no error)."""
+    tab = compare_card.COMPARE_TAB
+    if tab not in tab_titles:
+        return [
+            DoctorIssue(
+                "compare-tab",
+                f"no {tab!r} tab -- `dfs setup compare` creates it right after the Player tab "
+                "(template first)",
+            )
+        ]
+    issues = [
+        DoctorIssue(
+            "compare-dropdown",
+            f"{tab!r}: {column}{compare_card.PICKER_ROW} has lost its player dropdown -- `dfs setup compare`",
+        )
+        for column in compare_card.PICKER_COLUMNS
+        if client.has_data_validation(tab, f"{column}{compare_card.PICKER_ROW}") is False
+    ]
+    edge_tab = cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
+    want = player_card.edge_range(edge_tab, "Name")
+    helpers = client.read_formula(
+        tab,
+        f"{compare_card.PICKER_COLUMNS[0]}{compare_card.HELPER_ROW}:"
+        f"{compare_card.PICKER_COLUMNS[-1]}{compare_card.HELPER_ROW}",
+    )
+    found = [str(c) for c in (helpers[0] if helpers else [])]
+    for column, text in zip(
+        compare_card.PICKER_COLUMNS, found + [""] * len(compare_card.PICKER_COLUMNS), strict=False
+    ):
+        if want not in text:
+            issues.append(
+                DoctorIssue(
+                    "compare-helpers",
+                    f"{tab!r}: {column}{compare_card.HELPER_ROW} does not read {want} -- EdgeRaw's columns "
+                    "moved; `dfs setup compare` rewrites the tab",
+                )
+            )
+    expected = compare_card.build_layout(
+        edge_tab=edge_tab,
+        lineups_tab=cfg.lineups.builder_tab,
+        exposure_tab=EXPOSURE_TAB,
+        exposure=None,
+        lineup_count_cell=LINEUP_COUNT_CELL,
+    ).rows
+    grid = client.read_formula(tab, f"A1:{compare_card.LAST_COLUMN}{len(expected)}")
+    bad = compare_card.shifted_refs(expected, grid, edge_tab)
+    if bad:
+        names = {edge_sheet_letter(n): n for n in EDGE_SHEET_ORDER}
+        examples = []
+        for cell, have, letters in bad[:3]:
+            label = ", ".join(dict.fromkeys(names.get(w, w) for w in letters))
+            examples.append(
+                f"{cell} reads {'/'.join(dict.fromkeys(have)) or 'nothing'} but {label} is "
+                f"{'/'.join(dict.fromkeys(letters))}"
+            )
+        issues.append(
+            DoctorIssue(
+                "compare-refs",
+                f"{tab!r}: {len(bad)} cell(s) read the wrong EdgeRaw column ({'; '.join(examples)}) -- "
+                "EdgeRaw grew or moved under the tab; `dfs setup compare` rewrites it",
+            )
+        )
+    protections = client.read_protection(tab)
+    if protections is not None:
+        for protection in protections:
+            if not protection["whole_sheet"]:
+                continue
+            uncovered = [
+                column
+                for column in compare_card.PICKER_COLUMNS
+                if not any(
+                    _covers(b, compare_card.PICKER_ROW, column_index(column))
+                    for b in protection["unprotected"]
+                )
+            ]
+            if uncovered:
+                issues.append(
+                    DoctorIssue(
+                        "compare-protected",
+                        f"{tab!r}: {', '.join(c + str(compare_card.PICKER_ROW) for c in uncovered)} "
+                        "is behind the sheet protection, so picking a player shows a warning -- run "
+                        "`dfs setup protect`",
+                    )
+                )
+                break
+    return issues
+
+
 def _check_stacks_tab(tab_titles: set[str]) -> list[DoctorIssue]:
     """The Stacks tab (`stacks_tab.py`) must exist: `dfs stacks` and `dfs sync` only refresh a sheet that has
     one, so a sheet without it (the template before `dfs setup stacks --sheet-id <template>` ran) has drifted
@@ -1060,6 +1152,7 @@ def run_doctor(
     issues += _check_stakes_block(client, cfg, tab_titles)
     issues += _check_cockpit_tab(tab_titles)
     issues += _check_player_card(client, cfg, tab_titles)
+    issues += _check_compare(client, cfg, tab_titles)
     issues += _check_stacks_tab(tab_titles)
     issues += _check_lineup_count_cell(client, cfg, tab_titles)
     issues += _check_formula_ranges(client, cfg, headers_by_tab)

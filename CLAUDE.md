@@ -114,6 +114,10 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   EdgeRaw (columns from `derived.edge_sheet_letter`) plus two hidden raw tabs, `PlayerCardRaw` / `PlayerCardRows`, that every `dfs sync` rewrites **only on a sheet that already has the tab** (never
   fails the sync; it also rebuilds the card itself when the sync changed EdgeRaw's width). Template first, then live, `dfs doctor` after (checks `player-card-*`, including `player-card-refs`: every EdgeRaw reference on the card is the column `derived.edge_sheet_letter` gives). Layout and spec: `player_card.py` (pure; one `Field` spec drives formula and text), I/O: `sheet_player_card.py`,
   data: `sources/player_log.py`. A rebuild keeps the name in `B1`.
+- `dfs setup compare [--sheet-id <id>]` -- creates (or rebuilds) the **Compare** tab right after Player: four pickers in `B1:E1` (the only typed cells, dropdowns over EdgeRaw's names) and the Player card's
+  measures one column per player (header, projections, ownership, usage, opportunity per dollar, matchup and game, your lineups); the best value per row is green (lowest for Bust% and OppPosRank; no shade on salary or ownership, whose better side
+  depends on cash vs GPP, nor anywhere there is no clear direction). Formulas over EdgeRaw only (reuses the card's `Field` specs, so nothing is forked); a sync that **widens EdgeRaw rebuilds it** (only on a sheet that has the tab).
+  Template first, then live, `dfs doctor` after (checks `compare-*`, including `compare-refs`). Layout and rules: `compare_card.py` (pure), I/O: `sheet_compare.py`. A rebuild keeps the four names.
 - `dfs stacks [--sheet-id <id>] [--no-sheet] [--refit] [--retro]` -- ranks every QB's stacks of one and two teammates (WR/TE, or a RB
   whose `Tgt%` is in the top third of the slate's RB1/RB2; with and without a bring-back) by simulated Top 1% rate against how much of the
   generated GPP field plays them, and writes the read-only **Stacks** tab (right after Suggested; top 20 stacks, top 8 games, the retro's

@@ -1270,6 +1270,39 @@ def setup_player_card(
         console.print(f"[green]OK[/green] {line}")
 
 
+@setup_app.command(
+    "compare", short_help="Create the Compare tab (up to four players side by side; pick names)."
+)
+def setup_compare(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template "
+        "(always the template first).",
+    ),
+) -> None:
+    """Create the `Compare` tab right after the Player tab, or rebuild it. Pick up to four players in B1:E1
+    (dropdowns over EdgeRaw's names, the only typed cells) and read the Player card's measures side by side:
+    projections, ownership, usage, opportunity per dollar, matchup and game, and your lineups. The best value
+    in each row is green (lowest for Bust% and OppPosRank; salary and ownership are never shaded). Formulas
+    over EdgeRaw only; a sync that widens EdgeRaw rebuilds it (only on a sheet that has the tab). Needs the
+    Player tab (`dfs setup player-card`) to place it after. Template first, then the live week; `dfs doctor`
+    after."""
+    from dfs import sheet_compare
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+        console.print(f"Building the Compare tab on: [bold]{title}[/bold]\n{url}\n")
+        lines = sheet_compare.setup(client, cfg)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in lines:
+        console.print(f"[green]OK[/green] {line}")
+
+
 @setup_app.command("stacks", short_help="Create the read-only Stacks tab (the QB stack ranker).")
 def setup_stacks(
     sheet_id: str = typer.Option(
@@ -2665,8 +2698,9 @@ def _edge_width_now(cfg: Config) -> int | None:
 def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: int | None = None) -> None:
     """After an edge sync: rewrite the Player card's hidden raw tabs when the sheet has the tab
     (`sheet_player_card.refresh_raw_if_present`), and the card itself when EdgeRaw's width changed this run
-    (`rebuild_card_if_widened`: Sheets shifts the card's references when the tab grows). Never fails the
-    sync; `dfs setup player-card` creates the tab."""
+    (`rebuild_card_if_widened`: Sheets shifts the card's references when the tab grows); the Compare tab
+    (formulas only, no raw tab) is rebuilt on the same widening. Never fails the sync; `dfs setup
+    player-card` / `dfs setup compare` create the tabs."""
     from dfs import sheet_player_card
     from dfs.derived import EDGE_DATA_OFFSET, EDGE_SHEET_ORDER
 
@@ -2680,6 +2714,13 @@ def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: in
     if line:
         console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
     ok, line = sheet_player_card.rebuild_card_if_widened(
+        SheetsClient(cfg.google_sheets), cfg, edge_width_before, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET
+    )
+    if line:
+        console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
+    from dfs import sheet_compare
+
+    ok, line = sheet_compare.rebuild_if_widened(
         SheetsClient(cfg.google_sheets), cfg, edge_width_before, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET
     )
     if line:
