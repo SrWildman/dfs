@@ -85,8 +85,10 @@ by bradikal36`). The **format** is decided by `Game_Type` first, then:
 | | `[N Entry Max]` N > 1, or a counter `(x/N)` N > 1 | `N-max GPP` |
 | | nothing above | `Other` (listed in the summary so a rule can be added) |
 
-`bankroll.classify_entry` is kept as a **cross-check**: `class_disagreements.csv` lists rows where it and the
-format disagree about cash vs GPP (cash = H2H, 50/50, Double Up). It never overrides. The Week 4 bug
+`bankroll.classify_entry` (what the Bankroll ledgers use) is "cash" exactly when the format is H2H, 50/50 or
+Double Up. The old payout-ratio band, `bankroll.payout_band_class`, is kept as a **cross-check** (the log's
+`Bankroll_Class` column): `class_disagreements.csv` lists rows where it and the format disagree about cash vs
+GPP. It never overrides. A Discord-Only / Discord contest is `Other` (a $0 fee makes it `Freeroll` first). The Week 4 bug
 (`NFL Single Stat $1 7-Player (Top 3 Win)`, 3 of 7 paid) is `Other`, and has its own test.
 
 ## How the field builds (`field.py`)

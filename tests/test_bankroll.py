@@ -10,6 +10,7 @@ from dfs.bankroll import (
     classify_entry,
     entries_for_week,
     parse_contest_history,
+    payout_band_class,
     sync_bucket,
 )
 from dfs.config import EntryTableConfig
@@ -102,40 +103,83 @@ def test_week_close_week_override_bypasses_title_parsing():
 
 def test_classify_double_up_is_cash():
     # real ratio from the user's own history: 1000/2298 = 0.435
-    e = _entry(entries=2298, places_paid=1000)
+    name = "NFL GIANT $10 Double Up [Single Entry]"
+    e = _entry(entry=name, entries=2298, places_paid=1000, entry_fee=Decimal("10"))
+    assert classify_entry(e) == "cash"
+
+
+def test_classify_fifty_fifty_is_cash():
+    e = _entry(entry="NFL $5 50/50", entries=100, places_paid=50, entry_fee=Decimal("5"))
     assert classify_entry(e) == "cash"
 
 
 def test_classify_h2h_is_cash():
-    e = _entry(entries=2, places_paid=1)
+    e = _entry(entry="NFL $1 srwildman vs. spree456", entries=2, places_paid=1, entry_fee=Decimal("1"))
     assert classify_entry(e) == "cash"
 
 
 def test_classify_large_gpp_is_gpp():
     # real ratio from the user's own history: 752/3676 = 0.205
-    e = _entry(entries=3676, places_paid=752)
+    name = "NFL $8K Fair Catch [Single Entry]"
+    e = _entry(entry=name, entries=3676, places_paid=752, entry_fee=Decimal("5"))
     assert classify_entry(e) == "gpp"
 
 
 def test_classify_zero_entries_defaults_gpp():
-    e = _entry(entries=None, places_paid=None)
+    e = _entry(entries=None, places_paid=None, entry_fee=Decimal("5"))
     assert classify_entry(e) == "gpp"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Week 7, found live: both paid 3 of 5 (a 0.6 ratio, in the old cash band) and sat in the Cash ledger.
+        "UFC $1K Discord-Only Contest [Read Contest Description!]",
+        "NHL $1K Discord-Only Contest [Read Contest Description!]",
+        "NFL Discord-Only Around the World Contest [Read Contest Description!]",
+    ],
+)
+def test_a_zero_fee_discord_contest_is_gpp_whatever_it_pays(name):
+    assert classify_entry(_entry(entry=name, entries=5, places_paid=3, entry_fee=Decimal("0"))) == "gpp"
+
+
+def test_a_discord_contest_with_a_fee_is_still_gpp():
+    e = _entry(entry="NFL $2 Discord Double Up", entries=100, places_paid=50, entry_fee=Decimal(2))
+    assert classify_entry(e) == "gpp"
+
+
+def test_a_zero_fee_freeroll_is_gpp_even_when_it_pays_half():
+    e = _entry(entry="NFL Free Double Up", entries=100, places_paid=50, entry_fee=Decimal("0"))
+    assert classify_entry(e) == "gpp"
+
+
+def test_a_private_contest_is_gpp_even_when_it_pays_half():
+    e = _entry(entry="DREAMERS DFS  by bradikal36 #5", entries=12, places_paid=6, entry_fee=Decimal("5"))
+    assert classify_entry(e) == "gpp"
+
+
+def test_an_unrecognised_name_paying_half_is_not_cash():
+    # Only a Double Up / 50/50 / H2H format is cash now; the payout band alone no longer decides it.
+    e = _entry(entry="Some Contest", entries=100, places_paid=50, entry_fee=Decimal("5"))
+    assert classify_entry(e) == "gpp"
+    assert payout_band_class(e) == "cash"
 
 
 @pytest.mark.parametrize("game_type", ["Single Stat", "Showdown Captain Mode", "Best Ball", ""])
 def test_classify_only_a_classic_contest_can_be_cash(game_type):
     # Found live on Week 4: "NFL Single Stat $1 7-Player (Top 3 Win)" paid 3 of 7 (0.43), in the cash band.
-    assert classify_entry(_entry(entries=7, places_paid=3, game_type=game_type)) == "gpp"
-    assert classify_entry(_entry(entries=7, places_paid=3, game_type="Classic")) == "cash"
+    kw = dict(entry="NFL $1 srwildman vs. rival", entries=2, places_paid=1, entry_fee=Decimal("1"))
+    assert classify_entry(_entry(game_type=game_type, **kw)) == "gpp"
+    assert classify_entry(_entry(game_type="Classic", **kw)) == "cash"
 
 
-def test_classify_boundary_values():
+def test_payout_band_boundary_values():
     e_low = _entry(entries=100, places_paid=int(CASH_PAYOUT_RATIO_LOW * 100))
-    assert classify_entry(e_low) == "cash"
+    assert payout_band_class(e_low) == "cash"
     e_high = _entry(entries=100, places_paid=int(CASH_PAYOUT_RATIO_HIGH * 100))
-    assert classify_entry(e_high) == "cash"
+    assert payout_band_class(e_high) == "cash"
     e_just_under = _entry(entries=100, places_paid=int(CASH_PAYOUT_RATIO_LOW * 100) - 1)
-    assert classify_entry(e_just_under) == "gpp"
+    assert payout_band_class(e_just_under) == "gpp"
 
 
 def test_parse_contest_history_maps_dk_columns():
