@@ -110,3 +110,22 @@ def test_save_replaces_atomically_and_leaves_no_temp_file(tmp_path):
     lss.save(lss.Saved(NOW + timedelta(minutes=5), False), tmp_path)
     assert sorted(p.name for p in tmp_path.iterdir()) == [lss.STORE_FILE]
     assert lss.load(tmp_path).saved_at == NOW + timedelta(minutes=5)
+
+
+def test_the_overlap_label_and_the_position_are_kept_for_the_cockpit(tmp_path):
+    from dfs.late_swap_position import SwapOverlap
+
+    swapped = swap("A", "B", 1.0, p_cash=0.0, p_gpp=0.02)
+    swapped.overlap = SwapOverlap("LEVERAGE", 0.3, 0.05)
+    result = lss.summarize(4, "gpp", ["a"] * 9, suggestions(singles={3: [swapped]}), "top 12%, 18 pts behind")
+    assert result.best.overlap == "LEVERAGE" and result.position == "top 12%, 18 pts behind"
+    lss.save(lss.Saved(NOW, False, (result,)), tmp_path)
+    loaded = lss.load(tmp_path).for_lineup(4)
+    assert loaded == result
+    # a file from before the label reads without one
+    (tmp_path / lss.STORE_FILE).write_text(
+        '{"saved_at": "2026-10-25T16:00:00+00:00", "lineups": [{"number": 1, "goal": "gpp", "names": [], '
+        '"open_slots": [], "best": {"kind": "single", "out": ["A"], "into": ["B"], "delta_pts": 1.0}}]}'
+    )
+    old = lss.load(tmp_path).for_lineup(1)
+    assert old.best.overlap == "" and old.position == ""

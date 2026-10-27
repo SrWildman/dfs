@@ -39,6 +39,7 @@ class BestChange:
     delta_pts: float
     delta_p_cash: float | None = None
     delta_p_gpp: float | None = None
+    overlap: str = ""  # LEVERAGE / HOLD / EVEN (`late_swap_position`), "" where not labelled
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class LineupResult:
     names: tuple[str, ...]  # the nine names the search ran on
     open_slots: tuple[str, ...]
     best: BestChange | None  # None: nothing beats the lineup
+    position: str = ""  # a GPP lineup's place on the top-1% line, in words (`late_swap_position`)
 
 
 @dataclass(frozen=True)
@@ -98,10 +100,13 @@ def best_change(suggestions: LineupSuggestions, goal: str) -> BestChange | None:
             return None
         kind, swap = max(improving, key=lambda ks: ks[1].delta)
     out, into = swap_names(swap)
-    return BestChange(kind, tuple(out), tuple(into), swap.delta, swap.delta_p_cash, swap.delta_p_gpp)
+    overlap = swap.overlap.label if swap.overlap is not None else ""
+    return BestChange(kind, tuple(out), tuple(into), swap.delta, swap.delta_p_cash, swap.delta_p_gpp, overlap)
 
 
-def summarize(number: int, goal: str, names: list[str], suggestions: LineupSuggestions) -> LineupResult:
+def summarize(
+    number: int, goal: str, names: list[str], suggestions: LineupSuggestions, position: str = ""
+) -> LineupResult:
     """One lineup's result from its search."""
     return LineupResult(
         number=number,
@@ -109,6 +114,7 @@ def summarize(number: int, goal: str, names: list[str], suggestions: LineupSugge
         names=tuple(names),
         open_slots=tuple(s.slot for s in suggestions.state.open),
         best=best_change(suggestions, goal),
+        position=position,
     )
 
 
@@ -127,6 +133,7 @@ def to_json(saved: Saved) -> dict:
                 "goal": r.goal,
                 "names": list(r.names),
                 "open_slots": list(r.open_slots),
+                "position": r.position,
                 "best": None
                 if r.best is None
                 else {
@@ -136,6 +143,7 @@ def to_json(saved: Saved) -> dict:
                     "delta_pts": r.best.delta_pts,
                     "delta_p_cash": r.best.delta_p_cash,
                     "delta_p_gpp": r.best.delta_p_gpp,
+                    "overlap": r.best.overlap,
                 },
             }
             for r in saved.lineups
@@ -167,7 +175,9 @@ def from_json(data: dict) -> Saved:
                     delta_pts=float(best["delta_pts"]),
                     delta_p_cash=best.get("delta_p_cash"),
                     delta_p_gpp=best.get("delta_p_gpp"),
+                    overlap=str(best.get("overlap") or ""),
                 ),
+                position=str(item.get("position") or ""),
             )
         )
     news = tuple(

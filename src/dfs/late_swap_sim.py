@@ -14,9 +14,11 @@ rate (a name with no spec) keeps `delta_p_*` of None and sorts after the rated o
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from dfs.late_swap_field import LiveLines
+from dfs.late_swap_position import attach_overlap
 from dfs.late_swap_search import LineupSuggestions, Swap
 from dfs.sim.field import FieldModel
 from dfs.sim.simulate import PlayerSpec
@@ -38,6 +40,7 @@ class SimSettings:
     field: FieldModel | None = None
     lines: SimLines | None = None
     live: LiveLines | None = None
+    ownership: Mapping[str, float] | None = None  # {name: Own% fraction}: labels each swap LEVERAGE / HOLD
 
 
 def swap_names(swap: Swap) -> tuple[list[str], list[str]]:
@@ -85,6 +88,8 @@ def attach_probabilities(
         )
     for (swap, _out, _ins), d in zip(rated, deltas, strict=True):
         swap.delta_p_cash, swap.delta_p_gpp = d.delta_p_cash, d.delta_p_gpp
+    if settings.ownership and settings.goal == "gpp":  # overlap with the field matters for a GPP lineup
+        attach_overlap(everything, settings.ownership)
     suggestions.pairs = sorted(suggestions.pairs, key=lambda s: _rank_key(s, settings.goal))[:top]
     suggestions.singles = {
         index: sorted(swaps, key=lambda s: _rank_key(s, settings.goal))[:top]

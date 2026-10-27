@@ -196,6 +196,18 @@ def test_best_change_from_the_saved_run_is_a_swap_row_with_point_changes():
     assert two[0] == "ok" and two[3] == "nothing beats it"
 
 
+def test_a_gpp_lineup_shows_its_swap_label_and_position():
+    best = lss.BestChange("single", ("Rb One",), ("Rb Nine",), 1.5, 0.0, 0.012, "LEVERAGE")
+    gpp = lss.LineupResult(1, "gpp", tuple(NAMES), ALL_OPEN, best, "top 12%, 18 pts behind the top-1% line")
+    quiet = lss.LineupResult(2, "gpp", tuple(NAMES), ALL_OPEN, None, "top 3%, on the top-1% line")
+    layout = cockpit.build_layout(inputs(saved_swap=lss.Saved(NOW, False, (gpp, quiet))))
+    rows = section(layout, 2)
+    one = next(r for r in rows if r[1] == "L1 cash")
+    assert one[3] == "LEVERAGE  Rb One -> Rb Nine  [top 12%, 18 pts behind the top-1% line]"
+    two = next(r for r in rows if r[1] == "L2 cash")
+    assert two[3] == "nothing beats it (top 3%, on the top-1% line)"
+
+
 def test_the_swappable_note_says_which_field_the_run_was_scored_against():
     best = lss.BestChange("single", ("Rb One",), ("Rb Nine",), 1.5, 0.031, -0.004)
     for source, shown in (

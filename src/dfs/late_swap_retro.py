@@ -33,6 +33,14 @@ Double Up and in P(top 1%) for a GPP. A mode keeps the lineup when no swap raise
 score** is what the swapped lineup actually scored: points, the share that cashed, reached the top 10% and
 top 1% of the contest's real final scores, and its finish percentile. Differences are paired by lineup.
 
+**By position (2026-10-27).** For each GPP lineup the real-field mode also gives where it stands at the 1 pm
+state (`late_swap_position.lineup_position`: its median gap to the top-1% line in units of that gap's spread,
+bucketed `behind` / `near` / `ahead`), and each mode's chosen swap is labelled LEVERAGE / HOLD / EVEN
+(`late_swap_position.swap_overlap`: the ownership of the players in against the ones out, by the contest's
+real final Own% and, beside it, the projected Own%). `leverage_table` reports, per bucket, how often the
+swap that maximises Top 1% is a LEVERAGE one, against the share of all the candidates that are (so a bucket
+reads "the objective picked leverage X% of the time from a pool that was Y% leverage").
+
 Run: `python -m dfs.late_swap_retro [--weeks 4,5,6] [--lineups 120] [--sims 10000]`. Offline, read-only.
 """
 
@@ -51,6 +59,7 @@ from dfs import sim_inputs
 from dfs.config import SimLinesConfig
 from dfs.contests import series, week_frames
 from dfs.late_swap import lineup_slot_status
+from dfs.late_swap_position import EVEN, FINISH_LADDER, HOLD, LEVERAGE, lineup_position, swap_overlap
 from dfs.late_swap_search import lineup_state, one_for_one, swap_pool
 from dfs.models import ROSTER_SLOTS
 from dfs.player_join import normalize_name
@@ -61,8 +70,16 @@ SEASON = cr.SEASON
 SALARY_CAP = 50000
 ESPN_CACHE = Path("data/research_cache/espn_box")  # final box scores never change; kept (gitignored data/)
 SWAPS_PER_SLOT = 12
-MODES = ("P", "PS", "R")
-MODE_NAMES = {"P": "projected (today)", "PS": "projected + state", "R": "real field"}
+MODES = ("P", "PS", "PSK", "R")
+MODE_NAMES = {
+    "P": "projected (today)",
+    "PS": "projected + state",
+    "PSK": "projected + state, swings x1.5",
+    "R": "real field",
+}
+SWING_FACTOR = (
+    1.5  # the real top-1% line swung 1.1-1.7x the projected one's SD in Weeks 5-7 (see leverage notes)
+)
 GAIN = 1e-9
 
 
@@ -186,17 +203,47 @@ def best_swap(
     return top if top[0] > GAIN else None
 
 
+def position_columns(
+    live: lf.LiveLines, lineup: list[PlayerSpec], swaps: list, own_real: dict, own_proj: dict
+) -> dict:
+    """Where the lineup stands on the real field's top-1% line, and how many of its candidate swaps are
+    LEVERAGE (by the real Own% and by the projected one): the pool the objective chooses from."""
+    try:
+        pos = lineup_position(live, lineup)
+    except KeyError:
+        return {"bucket": "", "gap": np.nan, "p_top1": np.nan}
+    out = {"bucket": pos.bucket, "gap": pos.gap, "p_top1": pos.p_top1}
+    for tag, own in (("real", own_real), ("proj", own_proj)):
+        labels = [swap_overlap(s, own).label for s in swaps]
+        known = [x for x in labels if x]
+        out[f"cand_{tag}_n"] = len(known)
+        out[f"cand_{tag}_lev"] = sum(x == LEVERAGE for x in known)
+    return out
+
+
 def run_contest(
     setup: WeekSetup, c: cr.RealContest, *, n_lineups: int, seed: int, key_to_name: dict[str, str]
 ) -> tuple[list[dict], dict]:
     goal = "cash" if c.fmt == "cash" else "gpp"
     now = week_frames.lock_utc(SEASON, setup.week)
-    real = lf.real_lines(c.standings, setup.draws, setup.state_fpts, places_paid=c.places_paid)
+    real = lf.real_lines(
+        c.standings, setup.draws, setup.state_fpts, places_paid=c.places_paid, ladder=FINISH_LADDER
+    )
     lives = {
         "P": setup.projected,
         "PS": setup.projected_state,
-        "R": lf.LiveLines(setup.draws, real.cash, real.top, "real"),
+        "PSK": setup.projected_state.amplified(SWING_FACTOR),
+        "R": lf.LiveLines(
+            setup.draws,
+            real.cash,
+            real.top,
+            "real",
+            ladder_fractions=real.ladder_fractions,
+            ladder=real.ladder,
+        ),
     }
+    own_real = lf.real_ownership(c.standings, list(setup.edge["Name"]))
+    own_proj = sim_inputs.ownership_by_name(setup.edge)
     profile = c.standings.profile
     actual = profile.cash_line if goal == "cash" else profile.top1
     line_of = {m: (lives[m].cash_line if goal == "cash" else lives[m].top_line) for m in MODES}
@@ -234,6 +281,8 @@ def run_contest(
             "options": len(swaps),
             **{f"base_{k}": v for k, v in base.items()},
         }
+        if goal == "gpp":
+            row.update(position_columns(lives["R"], lineup, swaps, own_real, own_proj))
         for mode in MODES:
             pick = best_swap(lives[mode], lineup, swaps, specs, goal) if swaps else None
             if pick is None:
@@ -245,6 +294,11 @@ def run_contest(
                 after = realised(sum(setup.fpts.get(normalize_name(n), 0.0) for n in variant), c)
             row[f"{mode}_swap"] = bool(ins)
             row[f"{mode}_in"] = ",".join(p.id for p in ins)
+            if goal == "gpp":
+                for tag, own in (("real", own_real), ("proj", own_proj)):
+                    o = swap_overlap(pick[2], own) if pick is not None else None
+                    row[f"{mode}_{tag}_label"] = o.label if o is not None else ""
+                    row[f"{mode}_{tag}_ownchg"] = o.delta if o is not None and o.delta is not None else np.nan
             for k, v in after.items():
                 row[f"{mode}_{k}"] = v
         rows.append(row)
@@ -301,7 +355,7 @@ def compare_table(df: pd.DataFrame) -> pd.DataFrame:
     for label, part in groups.items():
         if part.empty:
             continue
-        for a, b in (("R", "P"), ("R", "PS"), ("PS", "P")):
+        for a, b in (("R", "P"), ("R", "PS"), ("PS", "P"), ("PSK", "PS"), ("R", "PSK")):
             row = {"group": label, "compare": f"{a} - {b}", "lineups": len(part)}
             for m in METRICS:
                 mean, se = paired(part, a, b, m)
@@ -309,6 +363,48 @@ def compare_table(df: pd.DataFrame) -> pd.DataFrame:
                 row[f"{m}_se"] = se
             row["differ"] = float((part[f"{a}_in"] != part[f"{b}_in"]).mean())
             rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def leverage_table(df: pd.DataFrame, tag: str = "real") -> pd.DataFrame:
+    """GPP lineups only. Per (mode, bucket): the lineups, the share where the mode swapped at all, the split
+    of its swaps into LEVERAGE / HOLD / EVEN, the mean change in summed ownership of the swap it chose, and
+    the LEVERAGE share of all the candidates it chose from. Buckets: where the lineup stands on the real
+    top-1% line (`behind` / `near` / `ahead` by its chance of finishing above it), the same lineups split in
+    thirds by their gap in points ("far", "mid", "close"), and "all"."""
+    if "bucket" not in df:
+        return pd.DataFrame()
+    g = df[(df["goal"] == "gpp") & df["bucket"].astype(bool)].copy()
+    if g.empty:
+        return pd.DataFrame()
+    g["third"] = pd.qcut(g["gap"], 3, labels=["far", "mid", "close"])
+    groups = [(b, g[g["bucket"] == b]) for b in ("behind", "near", "ahead")]
+    groups += [(f"gap {t}", g[g["third"] == t]) for t in ("far", "mid", "close")] + [("all", g)]
+    rows = []
+    for mode in MODES:
+        for bucket, part in groups:
+            if part.empty:
+                continue
+            swapped = part[part[f"{mode}_swap"].astype(bool)]
+            labels = swapped[f"{mode}_{tag}_label"]
+            n = max(len(swapped), 1)
+            cand_n = part[f"cand_{tag}_n"].sum()
+            rows.append(
+                {
+                    "mode": mode,
+                    "bucket": bucket,
+                    "lineups": len(part),
+                    "swapped": len(swapped) / len(part),
+                    "n swaps": len(swapped),
+                    "LEVERAGE": float((labels == LEVERAGE).sum()) / n,
+                    "HOLD": float((labels == HOLD).sum()) / n,
+                    "EVEN": float((labels == EVEN).sum()) / n,
+                    "mean own change": float(swapped[f"{mode}_{tag}_ownchg"].mean())
+                    if len(swapped)
+                    else np.nan,
+                    "pool LEVERAGE": float(part[f"cand_{tag}_lev"].sum() / cand_n) if cand_n else np.nan,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -350,6 +446,16 @@ def report(df: pd.DataFrame, lines: pd.DataFrame) -> str:
             f"{r['group']:14s} {r['compare']:8s} n={int(r['lineups']):5d}  {cells}  differ {r['differ']:.0%}"
         )
     out.append("")
+    if "bucket" in df and df["bucket"].astype(bool).any():
+        gpp = df[(df["goal"] == "gpp") & df["bucket"].astype(bool)]
+        mix = ", ".join(f"{b} {int((gpp['bucket'] == b).sum())}" for b in ("behind", "near", "ahead"))
+        out.append(f"LEVERAGE OR HOLD, by where the GPP lineup stands on the real top-1% line ({mix})")
+        for tag, what in (("real", "the contest's real Own%"), ("proj", "projected Own%")):
+            out.append(
+                f"  labelled by {what}; share of the swaps each mode chose, and the pool's LEVERAGE share"
+            )
+            out.append(leverage_table(df, tag).round(3).to_string(index=False))
+        out.append("")
     swapped = {m: float(df[f"{m}_swap"].mean()) for m in MODES}
     out.append("Lineups where the mode swapped at all: " + ", ".join(f"{m} {swapped[m]:.0%}" for m in MODES))
     base = {k: float(df[f"base_{k}"].mean()) for k in METRICS}

@@ -302,7 +302,7 @@ output, the saved run and the Cockpit all say `field: real (<contest>, exported 
 players' `Own%` is the contest's real one for that run. `auto` takes the newest live exports in your Downloads folder
 from this week and says which; the entries file there tells it each contest's format (without it one file sets both
 lines, and the output says so). Without `--field` nothing changes. It is information, not advice: the back-test
-(`python -m dfs.late_swap_retro`; `docs/RESEARCH.md`) says how much it was worth in Weeks 4-6.
+(`python -m dfs.late_swap_retro`; `docs/RESEARCH.md`) says how much it was worth in Weeks 4-6. On a live state (`--field` or `--state live`) each GPP lineup also prints where it stands on the top-1% line (`top 12%, 18 pts behind the top-1% line`) and each of its swaps is headed LEVERAGE (the players in are less owned: it gets more different), HOLD (more owned: it gets on chalk) or EVEN; the ranking is still the change in Top 1% (`docs/SIM.md`, "Late swap by position").
 
 **Without a download: `--state live`.** `dfs lineups late-swap --state live` takes every started player's points so far from
 ESPN's public box scores (the same public site as `--refresh-injuries`; nothing from DraftKings) and the share of each game

@@ -41,6 +41,7 @@ import pandas as pd
 from dfs import search_clock as clock
 from dfs.derived import _rosterable_pool_mask
 from dfs.kickoff import parse_kickoff
+from dfs.late_swap_position import SwapOverlap
 from dfs.models import FLEX_ELIGIBLE, ROSTER_SLOTS
 
 METRICS = ("CalPts", "ProjPts", "AggPts")
@@ -123,6 +124,8 @@ class Swap:
     # not be) scored.
     delta_p_cash: float | None = None
     delta_p_gpp: float | None = None
+    # LEVERAGE / HOLD / EVEN from ownership (`late_swap_position.SwapOverlap`); None when it was not computed.
+    overlap: SwapOverlap | None = None
 
 
 # ---------------------------------------------------------------------------------------------
