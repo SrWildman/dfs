@@ -15,7 +15,7 @@ Studies, each with the bar it must clear to matter:
 | `ownership` | the field-ownership shadow's scores, where CalPts and TFFB disagree | `dfs.field_own` |
 | `shadows` | ESPN and props shadow projections against CalPts (the blend gate) | `calibration.shadow_race` |
 | `props` | the PROPS SHADOW: does ESPN beat the prop market's price | `dfs.props_edge.build_shadow` |
-| `contest_retro` | session A's contest retro (hook below) | `dfs.sim.contest_retro` |
+| `contest_retro` | the contest retro (hook below) | `dfs.sim.contest_retro` |
 | `curse` | the optimizer's curse and its held-out fixes (hook below) | `dfs.research.curse` |
 | `backtest` | Flashback: build settings scored in his real contests (optional: `--only`) | `dfs.backtest` |
 
@@ -25,7 +25,8 @@ exposing
     refresh_summary(season, through) -> {"headline": [str, ...], "metrics": {str: float | bool},
                                          "ship_bar": str}
 
-and the study appears in the report; a branch without the module reports it as skipped, with that line.
+and the study appears in the report; a module that cannot be imported (or has no `refresh_summary`) is
+reported as skipped, with that line.
 
 **Changed since last week** compares the previous report of the season (the highest week below this one) by
 the numbers each study puts in `metrics`, which every report embeds as a JSON comment at its end.
@@ -491,9 +492,9 @@ def hook_study(ctx: Context, key: str, title: str) -> Study:
         module = importlib.import_module(name)
     except ModuleNotFoundError:
         s.status = "skipped"
-        s.verdict = f"{name} is not on this branch"
+        s.verdict = f"{name} could not be imported"
         s.headline = [
-            f"`{name}` is not on this branch, so this study is skipped. It plugs in by exposing "
+            f"`{name}` could not be imported, so this study is skipped. It plugs in by exposing "
             '`refresh_summary(season, through) -> {"headline": [...], "metrics": {...}, "ship_bar": str}`.'
         ]
         return s
