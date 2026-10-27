@@ -57,6 +57,7 @@ def _weeks(rows):
                 "week": w,
                 "targets": t,
                 "xfp": x,
+                "rec_xfp": 0.4 * x,
                 "dk_actual": 10.0,
             }
             for g, pos, s, w, t, x in rows
@@ -105,12 +106,24 @@ def _games(xfps, gsis="p1", season=SEASON):
             "season": season,
             "week": range(1, len(xfps) + 1),
             "xfp": xfps,
+            "rec_xfp": [0.4 * x for x in xfps],
             "targets": [5.0] * len(xfps),
             "hvt": [2.0] * len(xfps),
             "routes": [np.nan] * len(xfps),
             "dk_actual": [10.0] * len(xfps),
         }
     )
+
+
+def test_the_receiving_share_is_the_seasons_rec_xfp_over_its_xfp_and_blank_without_xfp():
+    games = _games([10.0, 12.0, 14.0, 20.0, 99.0])
+    row = opportunity.player_features(games, SEASON, 5).loc["p1"]
+    assert row["rec_share"] == pytest.approx(0.4)
+    # a back who only catches passes in the last game: the share is the ratio of SUMS, not a mean of ratios
+    mixed = games.assign(rec_xfp=[0.0, 0.0, 0.0, 20.0, 0.0])
+    assert opportunity.player_features(mixed, SEASON, 5).loc["p1", "rec_share"] == pytest.approx(20 / 56)
+    none = games.assign(rec_xfp=np.nan)
+    assert pd.isna(opportunity.player_features(none, SEASON, 5).loc["p1", "rec_share"])
 
 
 def test_windows_use_this_season_games_before_the_slate_only():
@@ -165,6 +178,9 @@ def test_blanks_where_a_measure_does_not_apply_or_there_is_no_history():
     feats = opportunity.attach_features(frame, games, SEASON, 5)
     assert pd.isna(feats.loc[0, "TPRR~"]) and pd.isna(feats.loc[0, "Tgt/$"])  # no QB targets role
     assert pd.notna(feats.loc[0, "xFP Szn"])
+    assert (
+        pd.isna(feats.loc[0, "xFP Rec%"]) and feats["xFP Rec%"].iloc[1:].notna().any()
+    )  # a QB has no pass-game share
     week1 = opportunity.attach_features(frame, games, SEASON, 1)
     assert week1.isna().all().all()  # week 1: no game this season yet
     short = opportunity.attach_features(frame, games, SEASON, 3)  # two games: below MIN_GAMES

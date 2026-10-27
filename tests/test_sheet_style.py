@@ -100,6 +100,23 @@ from dfs.sheet_views import (
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER
 
+# Opportunity per dollar and the last-five averages (2026-10-22): colour-scaled like the older columns.
+OPPORTUNITY_SCALED = (
+    "PriceGap",
+    "xFP trend",
+    "xFP/$",
+    "Tgt/$",
+    "HVT/$",
+    "xFP Szn",
+    "xFP Rec%",
+    "TPRR~",
+    "TPRR~ L3",
+    "Snap% L5",
+    "Tgt L5",
+    "Car L5",
+    "DK L5",
+)
+
 
 def test_edge_widths_and_groups_only_name_real_edge_columns():
     # Each dict is keyed by EdgeRaw column NAME so a reordered EDGE_COLUMNS
@@ -159,6 +176,8 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "Rush%",
         "RZ/G",
         "HVT/G",
+        # Opportunity per dollar and the last-five averages (2026-10-22).
+        *OPPORTUNITY_SCALED,
     }
     assert "Salary" not in FIELD_COLOR_SCALES  # a constraint, not a quality -- left neutral
     # Movement diverges around zero, Own% is the warm chalk scale, Leverage is zero-centred.
@@ -573,11 +592,19 @@ def test_polish_edge_groups_game_through_weather_collapsed_by_default():
     polish_edge(client, "EdgeRaw")
 
     assert client.group_calls == [
+        ("EdgeRaw", _edge_letter("SleeperPts"), _edge_letter("PropPts"), True),  # SRC: the four sources
+        ("EdgeRaw", _edge_letter("GppOwn"), _edge_letter("OurOwn"), True),  # OWN
         ("EdgeRaw", _edge_letter("OverUnder"), _edge_letter("TmRank"), True),
         ("EdgeRaw", _edge_letter("CeilPct"), _edge_letter("Bust%"), True),  # CEIL: + Floor, CeilM, Bust%
-        ("EdgeRaw", _edge_letter("ImpliedMove"), _edge_letter("GameStart"), True),
+        ("EdgeRaw", _edge_letter("ImpliedMove"), _edge_letter("Kickoff"), True),  # MOVE: + GameStart, Kickoff
         ("EdgeRaw", _edge_letter("Stadium"), _edge_letter("Wind"), True),
-        ("EdgeRaw", _edge_letter("Snap%"), _edge_letter("xFP/G"), True),  # USAGE: Snap%, usage metrics, xFP/G
+        (
+            "EdgeRaw",
+            _edge_letter("Snap%"),
+            _edge_letter("DK L5"),
+            True,
+        ),  # USAGE: usage metrics, xFP/G, last 5
+        ("EdgeRaw", _edge_letter("PriceGap"), _edge_letter("TPRR~ L3"), True),  # OPP$: opportunity per dollar
     ]
 
 
@@ -633,15 +660,16 @@ def test_polish_edge_clears_banding_before_re_adding_it():
 def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per_position_runs():
     edge_header = [POOL_HEADER, *EDGE_SHEET_ORDER]
     matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
-    assert len(matched) == 30  # nothing is skipped on EdgeRaw (20 + five usage metrics + five Edge Finder)
+    # nothing is skipped on EdgeRaw (20 + five usage metrics + five Edge Finder + the 13 opportunity columns)
+    assert len(matched) == 30 + len(OPPORTUNITY_SCALED)
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
 
     # The 15 within-position/0-100 columns (8 + five usage metrics + CalPts and xFP/G) are 26 steps each;
-    # the other 15 (12 + Hit3x%, Boom%, Bust%) are one gradient each.
+    # the other 15 (12 + Hit3x%, Boom%, Bust%) and the 13 opportunity columns are one gradient each.
     # Either way: whole-column rules (they follow any sort or filter), no per-position row runs.
-    assert len(client.color_scale_calls) == 15
+    assert len(client.color_scale_calls) == 15 + len(OPPORTUNITY_SCALED)
     assert client.multi_range_color_scale_calls == []
     steps = [
         a1
@@ -654,7 +682,8 @@ def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per
     # A grey zero chip on every column where zero means "missing" (not the four zero-centred
     # diverging columns, and not Spread, where 0 is a real pick'em).
     zero_chips = [a1 for a1, k in client.boolean_rule_calls if k["condition_type"] == "NUMBER_EQ"]
-    assert len(zero_chips) == 30 - 5
+    # (the 13 opportunity columns add 11: PriceGap and xFP trend are zero-centred like the diverging four)
+    assert len(zero_chips) == 30 - 5 + len(OPPORTUNITY_SCALED) - 2
     assert len(client.boolean_rule_calls) < 520  # a handful per column, not ~1,400 in total
 
 
@@ -693,7 +722,8 @@ def test_polish_edge_move_scales_are_diverging_at_zero():
     ]
     # ImpliedMove, TotMove, SpdMove and Leverage (CeilPct - OwnPct, centred on 0). Spread is
     # a monotonic "lower is better" reading, so it is reversed, not diverging-at-zero.
-    assert len(diverging) == 4
+    # (+ `PriceGap` and `xFP trend`, signed and white at zero: the opportunity per dollar columns)
+    assert len(diverging) == 6
 
 
 def test_polish_edge_own_pct_midpoint_is_the_chalk_threshold_not_the_median():

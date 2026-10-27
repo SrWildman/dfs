@@ -188,9 +188,11 @@ def test_the_edgeraw_column_names_are_the_ones_derived_appends():
     from dfs import derived
 
     assert list(fo.COLUMNS) == derived.FIELD_OWN_COLUMNS
-    tail = len(derived.ONE_PLACE_COLUMNS)  # the per-player columns (2026-10-21) are appended after them
+    # the per-player columns (2026-10-21) and the three group labels (2026-10-22) are appended after them
+    tail = len(derived.ONE_PLACE_COLUMNS) + len(derived.EDGE_ONLY_LABELS)
     assert derived.EDGE_COLUMNS[-3 - tail : -tail] == derived.FIELD_OWN_COLUMNS
-    assert derived.EDGE_SHEET_ORDER[-3 - tail : -tail] == derived.FIELD_OWN_COLUMNS
+    order = derived.EDGE_SHEET_ORDER  # on the tab they sit behind the OWN label, right after the spine
+    assert order[order.index("OWN") + 1 : order.index("OWN") + 4] == derived.FIELD_OWN_COLUMNS
 
 
 def test_the_ownership_shadow_is_not_linked_onto_player_pool_or_lineups():
