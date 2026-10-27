@@ -5195,8 +5195,27 @@ def week_close(
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
     csv = _resolve_history_csv(cfg, csv)
     _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
+    _keep_dk_files_before_scoring(cfg, csv)
     _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
+
+
+def _keep_dk_files_before_scoring(cfg: Config, csv: Path) -> None:
+    """Keep the week's DK files and merge the history into the contest log BEFORE Model Check is scored: its
+    ownership and WHEN WE DISAGREE tables are built from the kept standings and the log, so scored first they
+    stopped at the week before (found on Week 7: no Week 7 row, "refitted on weeks 2, 4, 5, 6"). The contests
+    step that follows finds the files already kept. Soft: a failure here leaves the later step to do it."""
+    from dfs.contests import capture
+    from dfs.paths import DK_STANDINGS_DIR
+
+    console.print("\n[bold]Keeping the week's DK files[/bold] (Model Check scores against them)...")
+    try:
+        _keep_history_export(csv)
+        got = capture.capture_standings(Path(cfg.contests.downloads_dir).expanduser(), DK_STANDINGS_DIR)
+        for line in capture.describe(got):
+            console.print(escape(line))
+    except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; the contests step retries
+        console.print(f"[yellow]Could not keep the DK files first ({e}); the contests step will.[/yellow]")
 
 
 def _keep_history_export(csv: Path) -> None:
