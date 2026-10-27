@@ -721,6 +721,11 @@ FIELD_OWN_NOTES = {
 
 
 ONE_PLACE_NOTES = {
+    "SRC": _GROUP
+    + " This one is the projection sources side by side: Sleeper, FantasyPros, ESPN and the props.",
+    "OWN": _GROUP
+    + " This one is the ownership shadow: what your contests own, and what your GPPs would own.",
+    "OPP$": _GROUP + " This one is opportunity per dollar: where his role is bigger than his salary.",
     "SleeperPts": "Sleeper's own projection in DraftKings points. One of the three sources behind AggPts.",
     "FantasyProsPts": (
         "FantasyPros' own projection in DraftKings points. One of the three sources behind AggPts."
@@ -738,8 +743,16 @@ ONE_PLACE_NOTES = {
         "DraftKings scoring): what the opportunity was worth, not what he scored. Games played before this "
         "slate."
     ),
-    "xFP L3": "Expected fantasy points per game over his last three games played this season.",
-    "xFP trend": "xFP L3 minus xFP Szn. Positive = his role is growing. Needs four games.",
+    "xFP trend": (
+        "His last three games' xFP per game minus xFP Szn, both this season only. Positive = his role is "
+        "growing. Needs four games. (xFP/G, in Usage, is the last-three figure on its own and reaches back "
+        "into last season early on.)"
+    ),
+    "xFP Rec%": (
+        "The share of his season xFP that is receiving (RB, WR, TE). Carries and targets are worth different "
+        "points and xFP prices each; this says where a back's points come from: about 60% is a pass-game "
+        "back, 15% a pure rusher. Context, not a projection."
+    ),
     "xFP/$": "xFP Szn per $1,000 of salary. Needs three games.",
     "Tgt/$": "Targets per game this season per $1,000 of salary (RB, WR, TE). Needs three games.",
     "HVT/$": (

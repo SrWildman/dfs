@@ -131,6 +131,21 @@ FIELD_COLOR_SCALES = {
     "OverUnder": _GRADIENT,
     "Total": _GRADIENT,
     "GPS": _GRADIENT,
+    # Opportunity per dollar and the last-five averages (2026-10-22): gradients over the column (more is
+    # more opportunity); PriceGap and the trend are signed, so zero is the white.
+    "PriceGap": _DIVERGING,
+    "xFP trend": _DIVERGING,
+    "xFP/$": _GRADIENT,
+    "Tgt/$": _GRADIENT,
+    "HVT/$": _GRADIENT,
+    "xFP Szn": _GRADIENT,
+    "xFP Rec%": _GRADIENT,
+    "TPRR~": _GRADIENT,
+    "TPRR~ L3": _GRADIENT,
+    "Snap% L5": _GRADIENT,
+    "Tgt L5": _GRADIENT,
+    "Car L5": _GRADIENT,
+    "DK L5": _GRADIENT,
     # Higher = softer matchup for every position (DST sign-flipped).
     "OppEPA": _GRADIENT,
     # Slate Grid's TEAMS section: more is better for an offence on all of these. For "Opp Def"

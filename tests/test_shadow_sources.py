@@ -8,15 +8,16 @@ import pandas as pd
 from dfs import derived, results_loop
 
 
-def test_the_shadow_columns_sit_right_after_calpts_on_the_tab_and_are_appended_to_the_frame():
+def test_the_shadow_columns_sit_in_the_sources_group_on_the_tab_and_are_appended_to_the_frame():
     order = derived.EDGE_SHEET_ORDER
-    assert order[order.index("CalPts") : order.index("CalPts") + 3] == ["CalPts", "EspnPts", "PropPts"]
-    after = len(derived.FIELD_OWN_COLUMNS) + len(derived.ONE_PLACE_COLUMNS)
+    # the regroup (2026-10-22): behind the SRC label, with the other projection sources, after the spine
+    start = order.index("SRC") + 1
+    assert order[start : start + 4] == ["SleeperPts", "FantasyProsPts", "EspnPts", "PropPts"]
+    assert order.index("Edge") < order.index("SRC") and order.index("Val") < order.index("SRC")
+    after = len(derived.FIELD_OWN_COLUMNS) + len(derived.ONE_PLACE_COLUMNS) + len(derived.EDGE_ONLY_LABELS)
     shadow = derived.EDGE_COLUMNS[-2 - after : -after]
     assert shadow == ["EspnPts", "PropPts"]  # append-only: nothing earlier moved
     assert sorted(order) == sorted(derived.EDGE_COLUMNS)
-    # `Val` is the next column after them: everything from there on moved right by two
-    assert derived.edge_sheet_index("Val") == derived.edge_sheet_index("PropPts") + 1
 
 
 def test_the_edge_frame_leaves_the_shadow_columns_blank_until_the_sources_fill_them():

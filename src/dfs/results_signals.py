@@ -477,6 +477,7 @@ OPPORTUNITY_GROUPS = [
     ("TPRR~ top third (RB/WR/TE)", "TPRR~", ("RB", "WR", "TE"), "up"),
     ("Tgt/$ top third (RB/WR/TE)", "Tgt/$", ("RB", "WR", "TE"), "up"),
     ("HVT/$ top third (RB)", "HVT/$", ("RB",), "up"),
+    ("xFP Rec% top third (RB)", "xFP Rec%", ("RB",), "up"),  # the pass-game backs
 ]
 OPPORTUNITY_BASELINE = "Everyone with a PriceGap"
 

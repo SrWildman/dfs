@@ -87,6 +87,7 @@ from dfs import perf
 from dfs.derived import (
     ALL_PCT_COLUMNS,
     EDGE_DATA_OFFSET,
+    EDGE_ONLY_LABELS,
     EDGE_SHEET_ORDER,
     SPLIT_TFFB_HIGH,
     SPLIT_TFFB_LOW,
@@ -330,9 +331,9 @@ FIELD_FORMATS = {
     "SleeperPts": _num("0.0"),
     "FantasyProsPts": _num("0.0"),
     "TPRR~": _num("0.0%", "PERCENT"),
+    "xFP Rec%": _num("0%", "PERCENT"),
     "TPRR~ L3": _num("0.0%", "PERCENT"),
     "xFP Szn": _num("0.0"),
-    "xFP L3": _num("0.0"),
     "xFP trend": _num("+0.0;-0.0;0.0"),
     "xFP/$": _num("0.00"),
     "Tgt/$": _num("0.00"),
@@ -451,7 +452,9 @@ FIELD_FORMATS = {
 # stay centred, header included. `Issues` is text with chips but was not in that
 # list when the rule was agreed, so it stays an ordinary text column.
 # ---------------------------------------------------------------------------
-CENTERED_COLUMNS = frozenset({"Avail", "Flags", "Venue", "Pool", "OwnStatus", "Edge ↗", *ZONE_LABELS})
+CENTERED_COLUMNS = frozenset(
+    {"Avail", "Flags", "Venue", "Pool", "OwnStatus", "Edge ↗", *ZONE_LABELS, *EDGE_ONLY_LABELS}
+)
 _NUMERIC_FORMAT_TYPES = frozenset({"NUMBER", "CURRENCY", "PERCENT"})
 # Numbers with no FIELD_FORMATS entry: Player Pool's `Used` count and the hidden
 # within-position percentile helpers.
@@ -761,6 +764,9 @@ EDGE_WIDTHS = {
     # text -- see `sheet_style._apply_zone_label_style` for the rest of
     # their look (centered, muted, a light tint to read as a divider
     # rather than a data column).
+    "SRC": 40,  # the three EdgeRaw-only group labels (2026-10-22)
+    "OWN": 40,
+    "OPP$": 48,
     "GAME": 52,
     "CEIL": 52,
     "MOVE": 56,
@@ -785,7 +791,7 @@ EDGE_WIDTHS = {
     "TPRR~": 66,
     "TPRR~ L3": 78,
     "xFP Szn": 72,
-    "xFP L3": 66,
+    "xFP Rec%": 70,
     "xFP trend": 78,
     "xFP/$": 62,
     "Tgt/$": 62,
@@ -833,6 +839,10 @@ EDGE_WIDTHS = {
 # hide_columns call) -- a group would just be a second click for
 # something that never needs to come back.
 EDGE_COLUMN_GROUPS = [
+    # The regroup (2026-10-22): the source projections and the ownership shadow, each behind its own label,
+    # right after the spine.
+    ("SleeperPts", "PropPts"),
+    ("GppOwn", "OurOwn"),
     # Part 7.4 (2026-09-18) added GameID/TmRank to EDGE_COLUMNS right
     # after OppPosRank -- this tuple's own "last" member missed updating
     # at the time, leaving both sitting outside the collapsed GAME range
@@ -841,11 +851,13 @@ EDGE_COLUMN_GROUPS = [
     # Lineups, where `sheet_columns.GAME` already included them).
     ("OverUnder", "TmRank"),
     ("CeilPct", "Bust%"),
-    ("ImpliedMove", "GameStart"),
+    ("ImpliedMove", "Kickoff"),
     ("Stadium", "Wind"),
     # Round 5 1b: USAGE (Snap%) was never grouped -- the "arrow" Sam saw beside it
-    # was the hidden Id/Flag columns, not a fold control. One real group, like the rest.
-    ("Snap%", "xFP/G"),
+    # was the hidden Id/Flag columns, not a fold control. One real group, like the rest. It now
+    # also holds his last-five averages.
+    ("Snap%", "DK L5"),
+    ("PriceGap", "TPRR~ L3"),
 ]
 
 # The only EdgeRaw columns that are hidden outright (everything else is either visible or inside a
@@ -1201,7 +1213,7 @@ def _apply_zone_label_style(
     without needing a different background too -- the data-row tint below
     it is what actually needs to be different, since that's the part that
     would otherwise look like an unexplained blank column."""
-    for name in ZONE_LABELS:
+    for name in (*ZONE_LABELS, *EDGE_ONLY_LABELS):
         if name not in header:
             continue
         letter = column_letter(header.index(name))

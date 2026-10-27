@@ -382,16 +382,19 @@ def test_run_doctor_passes_when_edgeraw_pool_column_is_correct():
 
 
 def test_run_doctor_passes_an_edgeraw_header_ending_with_the_one_place_columns_and_fails_one_without():
-    # 2026-10-20: GppOwn / CashOwn / OurOwn were the tab's last three columns; 2026-10-21 appended the sixteen
-    # per-player columns (derived.ONE_PLACE_COLUMNS) after them.
-    assert EDGE_SHEET_ORDER[-16:] == derived.ONE_PLACE_COLUMNS
-    assert EDGE_SHEET_ORDER[-19:-16] == ["GppOwn", "CashOwn", "OurOwn"]
+    # 2026-10-22 (the regroup): the ownership shadow, the sources and the sixteen per-player columns sit in
+    # labelled groups after the spine, and the hidden helpers are last again.
+    assert EDGE_SHEET_ORDER[-1] == "NameKey" and set(derived.ONE_PLACE_COLUMNS) <= set(EDGE_SHEET_ORDER)
+    assert EDGE_SHEET_ORDER[EDGE_SHEET_ORDER.index("OWN") + 1 :][:3] == ["GppOwn", "CashOwn", "OurOwn"]
     cfg = _base_config()
     good = dict(_ALL_GOOD_TABS)
     good["EdgeRaw"] = [POOL_HEADER, *EDGE_SHEET_ORDER]
     assert run_doctor(FakeDoctorClient(tabs=good, rows=_lineups_rows()), cfg, title="Week 1") == []
     old = dict(_ALL_GOOD_TABS)
-    old["EdgeRaw"] = [POOL_HEADER, *EDGE_SHEET_ORDER[:-16]]  # a sheet from before the one-place columns
+    old["EdgeRaw"] = [  # a sheet from before the one-place columns
+        POOL_HEADER,
+        *[c for c in EDGE_SHEET_ORDER if c not in derived.ONE_PLACE_COLUMNS],
+    ]
     issues = run_doctor(FakeDoctorClient(tabs=old, rows=_lineups_rows()), cfg, title="Week 1")
     assert any(i.check == "edgeraw-header" for i in issues)
 
@@ -1132,7 +1135,12 @@ def test_run_doctor_flags_a_player_card_whose_edge_references_were_shifted_right
     issues = [i for i in run_doctor(shifted, _base_config(), title="Week 1") if i.check == "player-card-refs"]
     assert len(issues) == 1
     detail = issues[0].detail
-    assert "SleeperPts is BW" in detail and "reads CM" in detail and "dfs setup player-card" in detail
+    assert "cell(s) read the wrong EdgeRaw column" in detail and "dfs setup player-card" in detail
+    letter = derived.edge_sheet_letter("SleeperPts")
+    moved = player_card.shifted_refs(_healthy_card(), shifted.card_formulas, "EdgeRaw")
+    assert any(
+        set(want) == {letter} for _cell, _have, want in moved
+    )  # the Sleeper cell is among the shifted ones
 
     blank = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)  # a card whose formulas were wiped
     blank.card_formulas = [["" for _ in row] for row in _healthy_card()]
@@ -1193,8 +1201,12 @@ def test_run_doctor_flags_a_compare_tab_whose_edge_references_were_shifted_by_a_
     issues = [i for i in run_doctor(shifted, _base_config(), title="Week 1") if i.check == "compare-refs"]
     assert len(issues) == 1
     detail = issues[0].detail
-    # Kickoff (BY) is the first shifted column the tab reads, top to bottom; the shift is sixteen columns
-    assert "reads CO but Kickoff is BY" in detail and "dfs setup compare" in detail
+    # Kickoff is the first shifted column the tab reads, top to bottom; the shift is sixteen columns
+    from dfs.sheets import column_index, column_letter
+
+    kick = derived.edge_sheet_letter("Kickoff")
+    moved = column_letter(column_index(kick) + 16)
+    assert f"reads {moved} but Kickoff is {kick}" in detail and "dfs setup compare" in detail
 
     blank = FakeDoctorClient(tabs=_ALL_GOOD_TABS, rows=rows)  # a tab whose formulas were wiped
     blank.compare_formulas = [["" for _ in row] for row in _healthy_compare()]

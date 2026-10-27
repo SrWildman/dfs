@@ -337,8 +337,8 @@ OPPORTUNITY_COLUMNS = [
     "TPRR~",
     "TPRR~ L3",
     "xFP Szn",
-    "xFP L3",
-    "xFP trend",
+    "xFP trend",  # last 3 minus season (both this season only); `xFP/G` already is the last-3 figure
+    "xFP Rec%",  # the share of his season xFP that is receiving (RB / WR / TE): a back's pass-game weight
     "xFP/$",
     "Tgt/$",
     "HVT/$",
@@ -346,6 +346,13 @@ OPPORTUNITY_COLUMNS = [
 ]
 LAST5_COLUMNS = ["Snap% L5", "Tgt L5", "Car L5", "DK L5"]  # mean of his last five games played
 ONE_PLACE_COLUMNS = [*SOURCE_PTS_COLUMNS, KICKOFF_COLUMN, *OPPORTUNITY_COLUMNS, *LAST5_COLUMNS]
+# Labels of the three EdgeRaw-only groups (2026-10-22, the regroup): like the zone labels, a native column
+# right before the group naming what is inside, header text only. Appended to `EDGE_COLUMNS`; NOT in
+# `ZONE_LABELS`, which Player Pool, Lineups and PlayerPoolRaw also carry (these three exist on EdgeRaw alone).
+SOURCES_LABEL = "SRC"
+FIELD_OWN_LABEL = "OWN"
+OPPORTUNITY_LABEL = "OPP$"
+EDGE_ONLY_LABELS = (SOURCES_LABEL, FIELD_OWN_LABEL, OPPORTUNITY_LABEL)
 # Every hidden within-position percentile helper, old and new.
 ALL_PCT_COLUMNS = {**PLAYER_METRIC_PCT_COLUMNS, **EDGE_FINDER_PCT_COLUMNS}
 
@@ -481,6 +488,8 @@ EDGE_COLUMNS = [
     *FIELD_OWN_COLUMNS,
     # One place for every per-player number (2026-10-21), appended after the field ownership shadow.
     *ONE_PLACE_COLUMNS,
+    # The EdgeRaw-only group labels (2026-10-22).
+    *EDGE_ONLY_LABELS,
 ]
 
 # What the EdgeRaw TAB is written in (actions round, slice 5, 2026-10-09): a designed order that mirrors
@@ -492,6 +501,7 @@ EDGE_COLUMNS = [
 # (`tests/test_edge_sheet_order.py` fails if anything else computes one). Add a new column to `EDGE_COLUMNS`
 # (append) and to the right place here.
 EDGE_SHEET_ORDER = [
+    # SPINE (visible, the same grammar as Player Pool and Lineups)
     "Name",
     "Position",
     "Team",
@@ -500,7 +510,6 @@ EDGE_SHEET_ORDER = [
     "ProjPts",
     "AggPts",
     "CalPts",
-    *EDGE_SOURCE_COLUMNS,
     "Val",
     "ValAdj",
     "Hit3x%",
@@ -511,6 +520,15 @@ EDGE_SHEET_ORDER = [
     "Avail",
     "Flags",
     "Edge",
+    # The regroup (2026-10-22): after the spine, each concept in its own labelled, collapsed group, in the
+    # order you read a player: what the sources project, who owns him, then the game, the ceiling detail,
+    # the line movement, the weather, his usage and last the opportunity per dollar.
+    SOURCES_LABEL,
+    "SleeperPts",
+    "FantasyProsPts",
+    *EDGE_SOURCE_COLUMNS,
+    FIELD_OWN_LABEL,
+    *FIELD_OWN_COLUMNS,
     GAME_LABEL,
     "OverUnder",
     "Spread",
@@ -534,6 +552,7 @@ EDGE_SHEET_ORDER = [
     "TotMove",
     "SpdMove",
     "GameStart",
+    KICKOFF_COLUMN,
     WEATHER_LABEL,
     "Stadium",
     "Roof",
@@ -542,14 +561,21 @@ EDGE_SHEET_ORDER = [
     "Snap%",
     *USAGE_METRIC_COLUMNS,
     "xFP/G",
+    *LAST5_COLUMNS,
+    OPPORTUNITY_LABEL,
+    "PriceGap",
+    "xFP/$",
+    "Tgt/$",
+    "HVT/$",
+    "xFP Szn",
+    "xFP trend",
+    "xFP Rec%",
+    "TPRR~",
+    "TPRR~ L3",
     "Id",
     "Flag",
     *ALL_PCT_COLUMNS.values(),
     "NameKey",
-    # The tab's last three columns (2026-10-20): appended, so nothing above moved.
-    *FIELD_OWN_COLUMNS,
-    # The tab's last sixteen columns (2026-10-21): appended, so nothing above moved.
-    *ONE_PLACE_COLUMNS,
 ]
 assert sorted(EDGE_SHEET_ORDER) == sorted(EDGE_COLUMNS)  # noqa: S101 - EDGE_SHEET_ORDER is a permutation
 
@@ -1443,7 +1469,7 @@ def build_edge_frame(
 
     # Zone labels carry no per-row data -- text lives in the header only
     # (see ZONE_LABELS' own comment for why they exist at all).
-    for label in ZONE_LABELS:
+    for label in (*ZONE_LABELS, *EDGE_ONLY_LABELS):
         merged[label] = ""
     for column in EDGE_FINDER_COLUMNS:
         merged[column] = "" if column == "Edge" else float("nan")
