@@ -1017,7 +1017,7 @@ team-colour columns H:J -- the template calls them Red/Blue/Black, Sam renames t
 one row per week -- unlike every other tab here, this one is
 **not** reset by a new weekly sheet copy. Each row's `Cash Results`
 (column D) and `H2H %` (column G) are formulas already built in
-(`=IF(B, B>C, "")` / `=IF(E="","",IFERROR(F/E,""))` -- blank, not `#DIV/0!`, on a week with no
+(`=IF(B, B>=C, "")` (a score equal to the cash line cashed: DK pays ties at the last paid place) / `=IF(E="","",IFERROR(F/E,""))` -- blank, not `#DIV/0!`, on a week with no
 H2H entries); every other column is typed by hand. `dfs
 week new` copies the typed-value columns from the outgoing sheet to the
 new one (config.toml's `[results]` table controls the row range) -- and the team-colour columns' header names
