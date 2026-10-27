@@ -41,12 +41,28 @@ DKSALCLEAN_TAB = "DkSalClean"
 
 # Header names of the hand-built formula columns on Results and Season (every other
 # column on those tabs is typed or written by `dfs week close`).
-RESULTS_FORMULA_HEADERS = ("Cash Results", "H2H %")
+CASH_RESULTS_HEADER = "Cash Results"
+RESULTS_FORMULA_HEADERS = (CASH_RESULTS_HEADER, "H2H %")
 SEASON_FORMULA_HEADERS = ("Total Net", "Cum. Cash", "Cum. GPP", "Cum. Betting", "Cum. Total")
 
 # A relative A1 cell reference: `D2`, `$A2`, `DKSalRaw!H745`. Not `A$2`/`$A$2` (a
 # deliberately anchored row), not a function call like `LOG10(`, not the tail of a name.
 _REF = re.compile(r"(?<![A-Za-z0-9_$])(\$?[A-Z]{1,3})(\d+)(?![\d(A-Za-z_])")
+
+
+# `Cash Results` is `=IF(B2, B2>=C2, "")`: DraftKings pays ties at the last paid place, so a score equal to
+# the cash line cashed (Week 7: 551 entries tied at the line, the double-ups paid). A strict `>` reads that
+# as a miss.
+_STRICT_GREATER = re.compile(r"(?<![<>=!])>(?!=)")
+
+
+def is_strict_tie_formula(formula: str) -> bool:
+    return bool(_STRICT_GREATER.search(formula))
+
+
+def count_ties_as_cashed(formula: str) -> str:
+    """`=IF(B2, B2>C2, "")` -> `=IF(B2, B2>=C2, "")`; a formula that already has `>=` is unchanged."""
+    return _STRICT_GREATER.sub(">=", formula)
 
 
 @dataclass(frozen=True)
@@ -74,7 +90,7 @@ class FormulaGap:
     column: str  # letter
     header: str
     rows: tuple[int, ...]
-    kind: str  # "missing" | "wrong-row" | "unguarded"
+    kind: str  # "missing" | "wrong-row" | "unguarded" | "strict-tie"
 
 
 def referenced_rows(formula: str) -> set[int]:
@@ -147,6 +163,7 @@ def find_gaps(client, spec: FormulaRange) -> list[FormulaGap]:
         missing: list[int] = []
         wrong: list[int] = []
         unguarded: list[int] = []
+        strict: list[int] = []
         for r in range(spec.first_row, spec.last_row + 1):
             cell = _grid_cell(grid, r - spec.first_row, col)
             if not cell.startswith("="):
@@ -155,6 +172,8 @@ def find_gaps(client, spec: FormulaRange) -> list[FormulaGap]:
                 wrong.append(r)
             elif spec.guarded and is_unguarded(cell):
                 unguarded.append(r)
+            elif header == CASH_RESULTS_HEADER and is_strict_tie_formula(cell):
+                strict.append(r)
         letter = column_letter(col)
         if missing:
             gaps.append(FormulaGap(spec.tab, letter, header, tuple(missing), "missing"))
@@ -162,6 +181,8 @@ def find_gaps(client, spec: FormulaRange) -> list[FormulaGap]:
             gaps.append(FormulaGap(spec.tab, letter, header, tuple(wrong), "wrong-row"))
         if unguarded:
             gaps.append(FormulaGap(spec.tab, letter, header, tuple(unguarded), "unguarded"))
+        if strict:
+            gaps.append(FormulaGap(spec.tab, letter, header, tuple(strict), "strict-tie"))
     return gaps
 
 
@@ -181,6 +202,8 @@ def describe_gap(gap: FormulaGap) -> str:
         "missing": "have no formula",
         "wrong-row": "hold a formula pointing at another row",
         "unguarded": "divide with no empty-state guard (`dfs setup repair-formula-ranges`)",
+        "strict-tie": "count a tie at the cash line as a miss (DK pays ties; "
+        "`dfs setup repair-formula-ranges`)",
     }[gap.kind]
     return f"{gap.tab!r} column {gap.column} ({gap.header}): row(s) {spans} {what}"
 
@@ -209,6 +232,17 @@ def repair_formula_ranges(client, cfg: Config, headers_by_tab: dict[str, list[st
                         report.append(
                             f"{spec.tab}!{gap.column}{a}:{gap.column}{b} guarded, e.g. {rows[0][0]}"
                         )
+                    continue
+                if gap.kind == "strict-tie":
+                    col = index_of[gap.column]
+                    for a, b in _runs(gap.rows):
+                        rows = [
+                            [count_ties_as_cashed(_grid_cell(grid, r - spec.first_row, col))]
+                            for r in range(a, b + 1)
+                        ]
+                        client.update_range(spec.tab, f"{gap.column}{a}:{gap.column}{b}", rows)
+                        span = f"{spec.tab}!{gap.column}{a}:{gap.column}{b}"
+                        report.append(f"{span} ties count as cashed, e.g. {rows[0][0]}")
                     continue
                 by_col.setdefault(gap.column, set()).update(gap.rows)
             for letter, bad_rows in sorted(by_col.items()):

@@ -604,7 +604,9 @@ class Study:
     def __init__(self, weeks: Sequence[int], lines: dict[int, float] | None = None):
         from dfs import results_update
 
-        self.lines = results_lines() if lines is None else lines
+        # the cached typed lines stop at the last week they were read; a week closed since has its line in the
+        # standings (Week 7: the cache made every `dfs backtest --weeks ...7` fail with KeyError: 7)
+        self.lines = lines_through(SEASON, max(weeks)) if lines is None else lines
         self.scored = results_update.load_all_scored(SEASON)
         self.contests = retro.load_contests()
         self.weeks = {

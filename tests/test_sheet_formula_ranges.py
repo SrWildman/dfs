@@ -3,9 +3,11 @@ from dfs.config import Config
 from dfs.sheet_formula_ranges import (
     DKSALCLEAN_TAB,
     FormulaRange,
+    count_ties_as_cashed,
     describe_gap,
     find_gaps,
     formula_ranges,
+    is_strict_tie_formula,
     referenced_rows,
     repair_formula_ranges,
     shift_rows,
@@ -179,3 +181,34 @@ def test_repair_guards_an_unguarded_row_in_place_and_guards_rows_it_rewrites(mon
     written = {a1: rows for _, a1, rows in client.updates}
     assert written["G3:G3"] == [['=IF(E3="","",IFERROR(F3/E3,""))']]
     assert written["G4:G4"] == [['=IF(E4="","",IFERROR(F4/E4,""))']]
+
+
+def test_count_ties_as_cashed_turns_the_strict_comparison_into_greater_or_equal():
+    assert count_ties_as_cashed('=IF(B8, B8>C8, "")') == '=IF(B8, B8>=C8, "")'
+    assert count_ties_as_cashed('=IF(B8, B8>=C8, "")') == '=IF(B8, B8>=C8, "")'  # idempotent
+    assert is_strict_tie_formula('=IF(B2, B2>C2, "")')
+    assert not is_strict_tie_formula('=IF(B2, B2>=C2, "")')
+    assert not is_strict_tie_formula('=IF(E2="","",IFERROR(F2/E2,""))')
+
+
+def _cash_results() -> FormulaRange:
+    return FormulaRange("Results", {3: "Cash Results"}, 2, 4, guarded=True)
+
+
+def test_a_cash_results_formula_that_misses_a_tie_is_flagged_and_repaired_in_place(monkeypatch):
+    tab = {2: {3: '=IF(B2, B2>=C2, "")'}, 3: {3: '=IF(B3, B3>C3, "")'}, 4: {3: '=IF(B4, B4>C4, "")'}}
+    spec = _cash_results()
+    gaps = find_gaps(FakeClient({"Results": tab}), spec)
+    assert [(g.kind, g.rows) for g in gaps] == [("strict-tie", (3, 4))]
+    assert "count a tie at the cash line as a miss" in describe_gap(gaps[0])
+    client = FakeClient({"Results": tab})
+    monkeypatch.setattr(mod, "formula_ranges", lambda cfg, headers: [spec])
+    repair_formula_ranges(client, _cfg(), {})
+    assert [(a1, rows) for _, a1, rows in client.updates] == [
+        ("D3:D4", [['=IF(B3, B3>=C3, "")'], ['=IF(B4, B4>=C4, "")']])
+    ]
+
+
+def test_a_tie_aware_cash_results_range_has_no_gaps():
+    tab = {r: {3: f'=IF(B{r}, B{r}>=C{r}, "")'} for r in range(2, 5)}
+    assert find_gaps(FakeClient({"Results": tab}), _cash_results()) == []

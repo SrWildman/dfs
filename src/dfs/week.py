@@ -46,7 +46,7 @@ BANKROLL_CARRYOVER_CELLS = [
 ]
 
 # The Results tab's column layout: A=Week, B=Cash Pts, C=Cash Line,
-# D=Cash Results (formula, =IF(B, B>C, "")), E=H2H Entered, F=H2H Win,
+# D=Cash Results (formula, =IF(B, B>=C, "")), E=H2H Entered, F=H2H Win,
 # G=H2H % (formula, =F/E), H:J = the three team-colour columns (the template
 # calls them Red, Blue, Black; Sam renamed them to the colours he really
 # plays, e.g. "Red/Orange"). D and G are already

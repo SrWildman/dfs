@@ -110,7 +110,7 @@ def test_a_hook_study_is_skipped_without_its_module_and_used_when_it_has_one(mon
     name = refresh.HOOK_MODULES[key]
     monkeypatch.setitem(sys.modules, name, None)  # the module is on main now: hide it
     skipped = run(ctx)
-    assert skipped.status == "skipped" and "not on this branch" in skipped.verdict
+    assert skipped.status == "skipped" and "could not be imported" in skipped.verdict
     fake = types.ModuleType(name)
     fake.refresh_summary = lambda season, through: {
         "headline": [f"{key} {season} wk{through}"],
