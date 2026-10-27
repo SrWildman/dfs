@@ -65,7 +65,7 @@ from dfs import lineup_suggest as ls
 from dfs import suggest_state
 
 # Modules that call `register` at import. Sessions H and I add theirs here (one line each).
-PLUGIN_MODULES: tuple[str, ...] = ("dfs.sim.own_error_flag", "dfs.sim.portfolio_flag")
+PLUGIN_MODULES: tuple[str, ...] = ("dfs.sim.shrink_flag", "dfs.sim.own_error_flag", "dfs.sim.portfolio_flag")
 
 # The live builder stops its search after 120 s, so runs of one slate differ (two runs agree on 13 of 14
 # builds, and only 5 of 13 match a search that finishes; under load, more). A backtest compares settings, so
