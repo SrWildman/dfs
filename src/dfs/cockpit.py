@@ -397,10 +397,15 @@ def _swappable_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup
                 )
             )
         elif result.best is None:
-            rows.append((CUE_OK, lineup, goal, open_now, "nothing beats it", "", ""))
+            where = f" ({result.position})" if result.position else ""
+            rows.append((CUE_OK, lineup, goal, open_now, f"nothing beats it{where}", "", ""))
         else:
             best = result.best
             change = f"{' + '.join(best.out) or '(empty)'} -> {' + '.join(best.into)}"
+            if best.overlap:  # LEVERAGE (gets different) / HOLD (gets on chalk), GPP lineups on a live state
+                change = f"{best.overlap}  {change}"
+            if result.position:
+                change += f"  [{result.position}]"
             if best.delta_p_cash is None and best.delta_p_gpp is None:
                 change += f"  ({best.delta_pts:+.1f} pts)"
             rows.append(

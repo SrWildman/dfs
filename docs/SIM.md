@@ -1915,3 +1915,52 @@ against today's +19%: -23.0 ROI points by week (SE 13.4), winning 0 of 4 weeks (
 tied at -56%; Weeks 4 and 5 lost, +57% vs +99% and +3% vs +53%). The model preferred the plan every week (E[$] +13% to +26%,
 P(a top-1%) about double). So on the backtest's own builds and earlier-weeks field the retro's `robust_wide` edge does not
 reproduce: **not proven, stays default off**; Week 7 is the next point, and a second straight loss argues for dropping it.
+
+## Late swap by position, and the projection-shrink flags (Week 8 round, 2026-10-27)
+
+**Late swap by position** (`late_swap_position.py`). "Late swap isn't always about best projection": Sam swaps to get *different*
+when he is behind and to get on chalk (*hold position*) when his different pieces already hit. On a live state (`--state live` or
+`--field`) each GPP lineup now prints its position (`Position: top 12%, 18 pts behind the top-1% line (Top 1% 3.2%)`: the real
+field's own order statistics when an export is loaded, `about top X%` from the measured line offsets (top 1% = field mean + 63.2, top
+10% = + 31.9, Double Up = + 0.6 at about 45%) when it is not), and every swap is headed **LEVERAGE** (the players in are less owned than
+the ones out), **HOLD** (more owned) or **EVEN** (the summed ownership moves under a point), with the in/out ownership; ownership is
+the real %Drafted under `--field`, else Own%. The Cockpit's swap block shows the label and the position. Nothing about the ranking
+changed: swaps are still ordered by the change in P(Top 1%); the label only says what kind of swap it is.
+
+**The retro** (`python -m dfs.late_swap_retro --weeks 4,5,6,7`, the 1 pm state; 2,542 sampled GPP lineups, 739 swaps by today's
+projected line). By the lineup's chance of finishing above the real top-1% line it is `behind` (under 1%: 90% of the sample, a median 60
+points under the line), `near` (1-10%) or `ahead` (10%+). Does the Top-1%-maximising swap go LEVERAGE when behind and HOLD when ahead?
+
+| mode | behind: LEVERAGE / HOLD | near | ahead (n = 12-13 swaps) | all swaps LEVERAGE | pool LEVERAGE |
+|---|---|---|---|---|---|
+| P, today (projected line) | 30% / 58% | 33% / 56% | 23% / 69% | 30% | 25% |
+| PS (+ the started games known) | 33% / 52% | 36% / 56% | 15% / 69% | 33% | 25% |
+| PSK (PS, line swings x1.5) | 42% / 43% | 41% / 48% | 17% / 67% | 41% | 25% |
+| R (the real field's line) | 45% / 40% | 40% / 47% | 17% / 75% | 43% | 25% |
+
+(labelled by the real Own%; the projected-Own% labels differ by a few points.) **Partly.** Ahead of the line every mode goes HOLD
+(67-75%, from a pool that is 12-18% leverage), as Sam does; but only the real-field line goes LEVERAGE when behind (R 45% against 40%
+HOLD; the near-the-line lineups 40%), and today's projected line holds on chalk everywhere, 58-62% HOLD whatever the position, and the
+deeper behind the more (the farthest third of lineups: 65% HOLD). **Why:** the projected top-1% line is the field mean plus a constant,
+and it swings less with the slate than the real line does (SD of the line over the draws in Weeks 5-7: real 10-14 points, projected 7-10),
+which plausibly understates what a slate-wide swing does to a lineup that shares players with the field (the mechanism is a reading of the
+SD, not a measured one: per-player slopes of the line on a player's points were too noisy to separate). Widening the projected line's swings to the real
+ones (PSK, x1.5, a measured ratio of about 1.1-1.7) moves its choices to the real field's (mean ownership change of the chosen swap
++0.039 -> +0.015 against R's +0.013; LEVERAGE 33% -> 41%). **But the realised result does not move:** PSK minus PS is points -0.03
+(SE 0.04), top 1% +0.000 (SE 0.000), finish percentile +0.000 (SE 0.001) over 4,338 lineups, and the retro has little power at a 0.6%
+base rate. So the default is unchanged (`late_swap_field.LiveLines.amplified` exists for the test only); the label and the position
+are what ship. The sampled lineups are the contests' FINAL lineups, which already hold whatever late swapping their owners did.
+
+**Backtest flags added** (`sim/shrink_flag.py`, `sim/own_error_flag.py`; `dfs backtest --compare`, Weeks 2, 4-7, 38 contests; all default
+off): `shrink_salary` / `shrink_tffb` pull each CalPts toward the position's salary line / TFFB's projection with the curse study's
+per-position weights, fitted on the weeks **before** the backtested one only (Week 2 on Week 1 alone); `ownership_uncertainty_gpp` is
+`ownership_uncertainty` for the GPP builds only (the cash builds are scored on the plain field). ROI points, flag minus today:
+
+| flag | as entered, cash | as entered, GPP | any build, cash | any build, GPP | any build, all (by week, SE; weeks won) |
+|---|---|---|---|---|---|
+| `shrink_salary` | -50 (SE 50, 0/4) | +105 (SE 86, 2/5) | -17 (SE 42, 1/4) | -85 (SE 98, 2/5) | -80 (SE 81), 3/5 |
+| `shrink_tffb` | -50 (SE 50, 0/4) | +51 (SE 34, 2/5) | -10 (SE 20, 1/4) | -35 (SE 15, 0/5) | -28 (SE 9), 0/5 |
+| `ownership_uncertainty_gpp` | 0 (identical) | +74 (SE 74, 2/5) | 0 (identical) | +144 (SE 121, 3/5) | +120 (SE 102), 4/5 |
+
+Neither shrink clears the ship bar; both lose on cash as entered (0 of 4 weeks) and on any-build ROI. The GPP-only ownership variant
+matches `ownership_uncertainty`'s Week 7 result (+121, SE 102; all of its gain was GPP, and here cash is identical to today by construction); not proven either.

@@ -54,6 +54,7 @@ from dfs.config import Config, ConfigError, ResultsConfig, load_config
 from dfs.doctor import run_doctor
 from dfs.kickoff import KICKOFF_TIMEZONE, games_state
 from dfs.late_swap import lineup_slot_status
+from dfs.late_swap_position import lineup_position, position_text
 from dfs.late_swap_report import format_suggestions
 from dfs.late_swap_search import (
     METRICS,
@@ -4041,6 +4042,13 @@ def _run_late_swap(
     console.print()
 
     sim_setup = _late_swap_sim_setup(cfg, client, edge, goal, now, fixed_lines=fixed_lines)
+    if sim_setup is not None:  # each GPP swap is labelled LEVERAGE / HOLD from Own% (real, with a --field)
+        from dfs.sim_inputs import ownership_by_name
+
+        sim_setup = (
+            sim_setup[0],
+            dataclasses.replace(sim_setup[1], ownership=ownership_by_name(edge) or None),
+        )
     field_source = late_swap_store.FIELD_PROJECTED
     if field_files and sim_setup is not None:
         live = _live_lines(field_files, sim_setup[0], raw_edge, now)
@@ -4152,10 +4160,27 @@ def _run_late_swap(
             console.print(
                 "[dim]Probabilities skipped: this lineup is incomplete or has an unknown name.[/dim]"
             )
-        for line in format_suggestions(suggestions, metric=metric, goal=lineup_goal if scored else None):
+        position = None
+        live_now = sim_setup[1].live if sim_setup is not None else None
+        if scored and lineup_goal == "gpp" and live_now is not None and lineup_specs is not None:
+            try:
+                position = lineup_position(live_now, lineup_specs)
+            except KeyError:  # a player the draws do not hold: no position, the swaps still stand
+                position = None
+        for line in format_suggestions(
+            suggestions, metric=metric, goal=lineup_goal if scored else None, position=position
+        ):
             console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
-        swap_results.append(late_swap_store.summarize(lineup_number, lineup_goal, names, suggestions))
+        swap_results.append(
+            late_swap_store.summarize(
+                lineup_number,
+                lineup_goal,
+                names,
+                suggestions,
+                position_text(position) if position is not None else "",
+            )
+        )
 
     _chalk_warnings(edge, built_lineups, now)
     if not any_shown:

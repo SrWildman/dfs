@@ -314,3 +314,26 @@ def test_espn_game_progress_sets_the_share_of_a_started_game_left():
     assert by_clock.frac[column["Quinn Ace"]] == pytest.approx(0.5)  # ESPN: halftime
     assert by_clock.frac[column["Rex Ace"]] == 0.0  # final
     assert by_clock.frac[column["Rex Bee"]] == pytest.approx(flat.frac[column["Rex Bee"]])  # team not named
+
+
+def test_the_ladder_reads_the_field_at_more_places_in_every_draw():
+    """Twenty lineups of 81 ... 100 points: the 5% place is the best (100), the 50% place the 10th (91)."""
+    base = NAMES[:7] + ["Dallas D"]
+    flex = [f"Flex {chr(65 + i)}" for i in range(20)]
+    specs = specs_of(NAMES, [10] * 9)
+    for name in flex:
+        specs[name] = spec(name, "WR", "ZZZ", "WR4", 5.0, f"g{name}")
+    kick = lf.kickoffs_from_edge(edge_of(list(specs), [EARLY] * len(specs)))
+    fpts = {lf.normalize_name(n): 10.0 for n in base}
+    fpts.update({lf.normalize_name(n): float(i + 1) for i, n in enumerate(flex)})
+    state = lf.slate_state(specs, kick, NOW, fpts, game_hours=None)
+    draws = lf.simulate_remaining(state, n_sims=10)
+    lineups = [[*NAMES[:7], f, "Dallas D"] for f in flex]
+    points = [80.0 + i + 1 for i in range(20)]
+    table = [(n, "WR", 100.0, fpts[lf.normalize_name(n)]) for n in [*base, *flex]]
+    parsed = st.parse_standings(standings_csv(lineups, points, table), contest_id="3")
+    lines = lf.real_lines(parsed, draws, fpts, places_paid=5, ladder=(0.05, 0.25, 0.50))
+    assert lines.ladder_fractions == (0.05, 0.25, 0.50) and lines.ladder.shape == (3, 10)
+    assert np.allclose(lines.ladder[0], 100.0) and np.allclose(lines.ladder[1], 96.0)
+    assert np.allclose(lines.ladder[2], 91.0)
+    assert lf.real_lines(parsed, draws, fpts, places_paid=5).ladder is None

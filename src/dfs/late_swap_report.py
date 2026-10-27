@@ -8,6 +8,7 @@ when nothing beats the current lineup the report says so.
 
 from __future__ import annotations
 
+from dfs.late_swap_position import Position, overlap_text, position_text
 from dfs.late_swap_search import LineupSuggestions, Swap, SwapPlayer
 from dfs.models import ROSTER_SLOTS
 
@@ -41,13 +42,21 @@ def _headline(swap: Swap) -> str:
     text = f"{swap.delta:+.1f} pts, {_money(swap.salary_left)} left"
     if swap.delta_p_cash is not None or swap.delta_p_gpp is not None:
         text += f", P(cash) {_pct(swap.delta_p_cash)}, P(GPP) {_pct(swap.delta_p_gpp)}"
-    return text
+    overlap = overlap_text(swap.overlap)
+    return f"{overlap}: {text}" if overlap else text
 
 
-def format_suggestions(suggestions: LineupSuggestions, *, metric: str, goal: str | None = None) -> list[str]:
+def format_suggestions(
+    suggestions: LineupSuggestions,
+    *,
+    metric: str,
+    goal: str | None = None,
+    position: Position | None = None,
+) -> list[str]:
     """The report for one lineup as lines of text (no colour, no markup). With `goal` ("cash" or "gpp") the
     swaps were ranked by the simulator's change in that probability (projection breaking ties) and each shows
-    both changes, in percentage points, beside the projection delta."""
+    both changes, in percentage points, beside the projection delta. `position` (a GPP lineup on a live state)
+    adds where it stands on the top-1% line; a swap with an overlap label is headed LEVERAGE / HOLD / EVEN."""
     state = suggestions.state
     open_names = ", ".join(s.slot for s in state.open) or "none"
     ranked = f"Ranked by {metric}." if goal is None else f"Ranked by change in P({goal}), then {metric}."
@@ -55,6 +64,8 @@ def format_suggestions(suggestions: LineupSuggestions, *, metric: str, goal: str
         f"Open slots: {open_names}.  Locked salary {_money(state.fixed_salary)}, "
         f"{_money(state.cap - state.fixed_salary)} for the open slots.  {ranked}"
     ]
+    if position is not None:
+        lines.append(f"Position: {position_text(position)}.")
     if not state.open:
         return lines + ["Nothing left to swap: every slot is locked."]
 

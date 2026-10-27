@@ -388,6 +388,8 @@ class RealLines:
     unresolved: int  # open-slot players in the field that the simulator could not rate
     open_slots: int  # field lineup slots with a game still to come
     points_match: float  # share of lineups whose points so far equal the export's own Points
+    ladder_fractions: tuple[float, ...] = ()  # when asked: the places below, as fractions of the field
+    ladder: np.ndarray | None = None  # (places, draws): the score at each of those places, in every draw
 
 
 def field_scores_base(
@@ -433,9 +435,11 @@ def real_lines(
     *,
     cash_fraction: float = DEFAULT_CASH_FRACTION,
     places_paid: int | None = None,
+    ladder: Sequence[float] = (),
 ) -> RealLines:
     """The contest's per-draw cash line and top-1% line. `places_paid` (when known) sets the cash line's rank;
-    otherwise `cash_fraction` of the entrants."""
+    otherwise `cash_fraction` of the entrants. `ladder`: more places to read in every draw, as fractions of
+    the field (`late_swap_position.FINISH_LADDER`), for a lineup's projected finish."""
     a, base, unresolved, open_slots, matched = field_scores_base(standings, draws.state, fpts)
     n = a.shape[0]
     cash_rank = int(min(max(places_paid or round(cash_fraction * n), 1), n))
@@ -443,11 +447,17 @@ def real_lines(
     remaining = draws.remaining()
     cash = np.empty(draws.n_sims)
     top = np.empty(draws.n_sims)
+    places = [int(min(max(math.ceil(f * n), 1), n)) for f in ladder]
+    steps = np.empty((len(places), draws.n_sims)) if places else None
+    wanted = sorted({*places}) if places else []
     for lo in range(0, draws.n_sims, CHUNK):
         part = base[:, None] + a @ remaining[lo : lo + CHUNK].T  # lineups x draws
         cash[lo : lo + CHUNK] = kth_largest(part, cash_rank)
         top[lo : lo + CHUNK] = kth_largest(part, top_rank)
-    return RealLines(cash, top, n, cash_rank, top_rank, unresolved, open_slots, matched)
+        if steps is not None:
+            ordered = -np.partition(-part, [k - 1 for k in wanted], axis=0)
+            steps[:, lo : lo + CHUNK] = ordered[[k - 1 for k in places]]
+    return RealLines(cash, top, n, cash_rank, top_rank, unresolved, open_slots, matched, tuple(ladder), steps)
 
 
 def projected_state_lines(
@@ -480,6 +490,27 @@ class LiveLines:
     source: str
     notes: list[str] = field(default_factory=list)
     known_points: frozenset[str] = frozenset()  # normalised names the exports' player tables hold
+    # The GPP field's score at each of `ladder_fractions` of its places, in every draw
+    # (`real_lines(ladder=)`), for a lineup's projected finish. None with no export (the position module
+    # approximates one).
+    ladder_fractions: tuple[float, ...] = ()
+    ladder: np.ndarray | None = None
+
+    def amplified(self, factor: float) -> LiveLines:
+        """The same draws with both lines' swings around their means scaled by `factor` (the projected lines
+        move less with the slate than the real field's; `late_swap_retro` tests whether matching it helps)."""
+        cash = self.cash_line.mean() + factor * (self.cash_line - self.cash_line.mean())
+        top = self.top_line.mean() + factor * (self.top_line - self.top_line.mean())
+        return LiveLines(
+            self.draws,
+            cash,
+            top,
+            f"{self.source} (swings x{factor:g})",
+            list(self.notes),
+            self.known_points,
+            self.ladder_fractions,
+            self.ladder,
+        )
 
     def missing_points(self, lineup: Sequence[PlayerSpec]) -> list[str]:
         """Players of `lineup` whose game has started but whom no export's player table lists (nobody in that
@@ -613,8 +644,20 @@ def build_live_lines(
     ruled_out = unavailable(edge)
     state = slate_state(specs, kickoffs_from_edge(edge), now, fpts, game_hours=game_hours, out=ruled_out)
     draws = simulate_remaining(state, n_sims=n_sims, seed=seed)
-    cash_lines = real_lines(cash_file.standings, draws, fpts, cash_fraction=cash_fraction)
-    top_lines = cash_lines if top_file is cash_file else real_lines(top_file.standings, draws, fpts)
+    from dfs.late_swap_position import FINISH_LADDER
+
+    cash_lines = real_lines(
+        cash_file.standings,
+        draws,
+        fpts,
+        cash_fraction=cash_fraction,
+        ladder=FINISH_LADDER if top_file is cash_file else (),
+    )
+    top_lines = (
+        cash_lines
+        if top_file is cash_file
+        else real_lines(top_file.standings, draws, fpts, ladder=FINISH_LADDER)
+    )
     checked = [(cash_file, cash_lines)] + ([] if top_file is cash_file else [(top_file, top_lines)])
     for f, lines in checked:
         if lines.points_match < 0.9:
@@ -627,4 +670,13 @@ def build_live_lines(
     source = "field: real (" + cash_file.describe() + ")"
     if top_file is not cash_file:
         source = f"field: real (Cash % from {cash_file.describe()}; Top 1% from {top_file.describe()})"
-    return LiveLines(draws, cash_lines.cash, top_lines.top, source, notes, frozenset(fpts))
+    return LiveLines(
+        draws,
+        cash_lines.cash,
+        top_lines.top,
+        source,
+        notes,
+        frozenset(fpts),
+        top_lines.ladder_fractions,
+        top_lines.ladder,
+    )

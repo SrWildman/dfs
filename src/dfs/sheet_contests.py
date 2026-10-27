@@ -44,7 +44,7 @@ CONTESTS_TAB = "Contests"
 COLUMN_COUNT = 14  # A..N
 LAST_COLUMN = "N"
 NOTE_WRAP_CHARS = 170
-FIRST_COLUMN_PX = 300
+FIRST_COLUMN_PX = 308  # the audit measured the widest column-A cell at 308 px; 300 cut it
 OTHER_COLUMN_PX = 92
 MAIN_FORMATS = (
     series_mod.H2H,
