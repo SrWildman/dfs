@@ -31,6 +31,9 @@ def _entry(**overrides) -> ContestEntry:
     return ContestEntry(**base)
 
 
+_FIFTY = dict(entry="NFL $5 50/50", entry_fee=Decimal("5"))
+
+
 def test_entries_grouped_by_the_nfl_week_their_own_date_falls_in():
     entries = [
         _entry(entry_key="w1", contest_date=_WEEK1_DATE),
@@ -41,9 +44,9 @@ def test_entries_grouped_by_the_nfl_week_their_own_date_falls_in():
 
 
 def test_cash_pts_is_the_points_of_a_cash_classified_entry():
-    # 50/50, entries=100, paid=50 -> ratio 0.5 -> cash (bankroll.classify_entry).
+    # a 50/50 is cash (bankroll.classify_entry), a GPP is not.
     entries = [
-        _entry(entry_key="cash1", points=131.5, contest_entries=100, places_paid=50),
+        _entry(entry_key="cash1", **_FIFTY, points=131.5, contest_entries=100, places_paid=50),
         _entry(entry_key="gpp1", points=999.0, contest_entries=1000, places_paid=100),
     ]
     results = compute_week_results(entries, _SEASON)
@@ -55,7 +58,7 @@ def test_a_single_stat_contest_never_feeds_cash_pts():
     # became Cash Pts; the real cash lineup scored 104.38.
     entries = [
         _entry(entry_key="ss", game_type="Single Stat", points=344.0, contest_entries=7, places_paid=3),
-        _entry(entry_key="cash", points=104.38, contest_entries=100, places_paid=50),
+        _entry(entry_key="cash", **_FIFTY, points=104.38, contest_entries=100, places_paid=50),
     ]
     assert compute_week_results(entries, _SEASON)[1].cash_pts == 104.38
     only_single_stat = [e for e in entries if e.entry_key == "ss"]
@@ -92,7 +95,7 @@ def test_real_week_one_numbers_match_the_live_results_row():
     # Matches the actual live Results!A2:F2 row: H2H Entered=20, Win=7.
     entries = [_entry(entry_key=f"h2h{i}", contest_entries=2, place=1) for i in range(7)]
     entries += [_entry(entry_key=f"h2h_lost{i}", contest_entries=2, place=2) for i in range(13)]
-    entries.append(_entry(entry_key="cash", points=131.5, contest_entries=100, places_paid=50))
+    entries.append(_entry(entry_key="cash", **_FIFTY, points=131.5, contest_entries=100, places_paid=50))
 
     results = compute_week_results(entries, _SEASON)
     assert results[1].h2h_entered == 20

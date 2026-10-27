@@ -9,12 +9,13 @@ range-scoped read/update, so existing formulas are never touched and nothing
 outside the configured row range is written.
 
 Classification rule (confirmed with you directly, not guessed): a "cash"
-entry is a Classic contest that pays out roughly half the field -- 50/50s and Double-Ups included --
-or is a straight 2-person head-to-head; everything else (tiered/top-heavy
-payouts) is GPP. Validated against your own contest history: real
-Double-Ups sit at a Places_Paid/Contest_Entries ratio of ~0.44-0.52, H2H at
-exactly 0.5, and the large GPP cluster sits at ~0.2-0.3 with a clean gap in
-between -- see the 0.40-0.60 band below.
+entry is a Classic Double-Up, 50/50 or straight 2-person head-to-head, by the
+contest's series format (`contests.series.classify`); everything else
+(tiered/top-heavy payouts, freerolls, Discord-Only and Private contests) is
+GPP. The old rule, a Places_Paid/Contest_Entries ratio in the 0.40-0.60 band
+(real Double-Ups ~0.44-0.52, H2H exactly 0.5, the large GPP cluster ~0.2-0.3),
+filed two Week 7 Discord-Only contests as cash; it survives as
+`payout_band_class`, the cross-check.
 """
 
 from __future__ import annotations
@@ -69,17 +70,39 @@ def entries_for_week(entries: list[ContestEntry], week: int, season: int) -> lis
 CLASSIC_GAME_TYPE = "Classic"
 
 
-def classify_entry(entry: ContestEntry) -> str:
-    """Returns "cash" or "gpp". Only a Classic contest can be "cash": Single Stat, Showdown and Best Ball
-    pay by their own rules (found live on Week 4: a $1 Single Stat contest, 3 of 7 paid, fell inside the cash
-    band and fed Cash Pts and Cash Results a score that was not the cash lineup's). Their money still lands
-    in the GPP ledger, so the bankroll stays whole."""
+def payout_band_class(entry: ContestEntry) -> str:
+    """The word "cash" or "gpp" from `Game_Type` and the payout ratio alone (a Classic contest paying 40-60%
+    of the field is cash). No longer what the ledgers use: `classify_entry` reads the contest's format. Kept
+    as the cross-check `contests.series.crosscheck` reports against."""
     if entry.game_type.strip().lower() != CLASSIC_GAME_TYPE.lower():
         return "gpp"
     if not entry.contest_entries:
         return "gpp"
     ratio = (entry.places_paid or 0) / entry.contest_entries
     return "cash" if CASH_PAYOUT_RATIO_LOW <= ratio <= CASH_PAYOUT_RATIO_HIGH else "gpp"
+
+
+def classify_entry(entry: ContestEntry) -> str:
+    """Returns "cash" or "gpp". "cash" is a Classic contest whose series format is Double Up, 50/50 or H2H
+    (`contests.series.classify`, which reads the name, the fee and the field); everything else is GPP, so a
+    $0-fee freeroll, a Discord-Only contest and a Private contest are never cash however they pay (found live
+    on Week 7: two Discord-Only contests, UFC and NHL, paid 3 of 5 and landed in the Cash ledger from the
+    payout-ratio band). Single Stat, Showdown and Best Ball are GPP too (Week 4: a $1 Single Stat contest,
+    3 of 7 paid, fed Cash Pts and Cash Results a score that was not the cash lineup's). Their money still
+    lands in the GPP ledger, so the bankroll stays whole."""
+    # series imports this module for `payout_band_class`
+    from dfs.contests import series
+
+    if entry.game_type.strip().lower() != CLASSIC_GAME_TYPE.lower():
+        return "gpp"
+    info = series.classify(
+        entry.game_type,
+        entry.entry,
+        fee=entry.entry_fee,
+        contest_entries=entry.contest_entries,
+        places_paid=entry.places_paid,
+    )
+    return "cash" if info.format in series.CASH_FORMATS else "gpp"
 
 
 def _money(value) -> Decimal:

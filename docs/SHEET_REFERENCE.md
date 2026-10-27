@@ -968,9 +968,9 @@ bucket's typed entry columns (A-H) and its dedupe-key column when moving
 to a new week (Fix 5H) -- the two formula columns per row and the
 Starting/Ending balance cells are never touched. `dfs bankroll sync --csv
 <file>` (or `dfs week close --csv <file>`, a thin wrapper over it)
-classifies each contest entry as Cash or GPP by payout shape (a Classic contest that
-pays roughly half the field, or a straight head-to-head, counts as Cash; everything
-else is GPP, and so is every Single Stat, Showdown or Best Ball contest whatever its payout
+classifies each contest entry as Cash or GPP by its contest format (a Classic Double Up, 50/50 or
+straight head-to-head counts as Cash; everything else is GPP, and so is every $0-fee freeroll, Discord-Only
+or Discord contest, Private contest, Single Stat, Showdown or Best Ball contest whatever its payout
 shape: they never feed Results' Cash Pts) and appends new rows here -- it only ever writes into its
 configured row range and dedupe-key column (`[bankroll.cash]`/
 `[bankroll.gpp]`'s `entry_key_column` in `config.toml`), never touching

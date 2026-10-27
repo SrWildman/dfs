@@ -10,8 +10,9 @@ N-max GPP / Multiplier / Freeroll / Private; any Showdown-family type is `Showdo
 for the Week 4 bug where `NFL Single Stat $1 7-Player (Top 3 Win)` (3 of 7 paid, a 0.43 payout ratio) read as
 "cash" from its payout ratio alone.
 
-`bankroll.classify_entry` (the payout-ratio band) is kept as a cross-check: `crosscheck` reports every row
-where it and the format disagree about cash vs GPP. It never overrides the format.
+`bankroll.classify_entry` (what the Bankroll ledgers use) is "cash" exactly when the format is H2H, 50/50 or
+Double Up. `bankroll.payout_band_class` (the payout-ratio band) is kept as a cross-check: `crosscheck` reports
+every row where it and the format disagree about cash vs GPP. It never overrides the format.
 """
 
 from __future__ import annotations
@@ -63,6 +64,7 @@ MULTIPLE_WORDS = {"triple up": 3, "quadruple up": 4, "quintuple up": 5}
 _COUNTER = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)")
 _MATCHUP = re.compile(r"\(\s*([A-Za-z]{2,4})\s*@\s*([A-Za-z]{2,4})\s*\)")
 _H2H_NAME = re.compile(r"^(?P<lead>(?:NFL\s+)?)\$(?P<fee>[\d.,]+[KkMm]?)\s+(?P<a>\S+)\s+vs\.?\s+(?P<b>\S+)$")
+_DISCORD = re.compile(r"\bdiscord\b", re.IGNORECASE)
 _CREATOR = re.compile(r"\bby\s+\S+", re.IGNORECASE)
 _BOOSTER = re.compile(r"\b(\d+)x\s+(?:\w+\s+)?booster\b", re.IGNORECASE)
 _TOP_WIN = re.compile(r"\[\s*top\s+\d+\s+win\s+\$\s*([\d.,]+)\s*([km]?)\s*\]", re.IGNORECASE)
@@ -98,7 +100,7 @@ class SeriesInfo:
     entry_no: int | None  # the "2" of "(2/5)"
     entry_max: int | None  # the "5" of "(2/5)"
     multiple: float | None  # Multiplier only: 3, 5, 10 ... times the fee, else None
-    bankroll_class: str  # bankroll.classify_entry: "cash" / "gpp"
+    bankroll_class: str  # bankroll.payout_band_class: "cash" / "gpp"
     format_class: str  # "cash" if the format is H2H / 50/50 / Double Up, else "gpp"
 
     @property
@@ -139,12 +141,12 @@ def _fee_text(fee: Decimal | float | None) -> str:
 
 
 def bankroll_class(game_type: str, contest_entries: int | None, places_paid: int | None) -> str:
-    """What `bankroll.classify_entry` (the Game_Type-first payout-ratio band) says about this entry. It only
-    reads these three fields, so the model is built without validation rather than with made-up others."""
+    """What `bankroll.payout_band_class` (the Game_Type-first payout-ratio band) says about this entry. It
+    only reads these three fields, so the model is built without validation, not with made-up others."""
     entry = ContestEntry.model_construct(
         game_type=str(game_type), contest_entries=contest_entries, places_paid=places_paid
     )
-    return bankroll.classify_entry(entry)
+    return bankroll.payout_band_class(entry)
 
 
 def _prize_text(amount: str, suffix: str) -> float | None:
@@ -200,6 +202,8 @@ def classify(
             fmt = FREEROLL
         elif not text.upper().startswith("NFL") and _CREATOR.search(text) and not _PRESENTED_BY.search(text):
             fmt, series = PRIVATE, _TRAILING_NUMBER.sub("", text)
+        elif _DISCORD.search(text):
+            fmt = OTHER  # a Discord contest is a GPP whatever it pays (a nonzero fee is the rare case)
         elif h2h or contest_entries == 2:
             fmt = H2H
             series = f"H2H ${h2h[0] if h2h else _fee_text(fee)}".rstrip()
