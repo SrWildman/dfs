@@ -167,3 +167,23 @@ def test_a_noise_pass_counts_only_when_its_rerun_clears_too():
     assert out["metrics"]["noise_cv clears"] is False
     assert any("its rerun does not" in line for line in out["headline"])
     assert "noise_cv" not in out["headline"][0]
+
+
+def test_a_study_takes_its_cash_lines_from_the_cache_and_the_standings(monkeypatch):
+    # Week 7 closed after the typed-lines cache was written: the cache alone made `Study` raise KeyError: 7.
+    from dfs import results_update
+    from dfs.sim import retro
+
+    monkeypatch.setattr(results_update, "load_all_scored", lambda season: pd.DataFrame())
+    monkeypatch.setattr(retro, "load_contests", lambda *a, **k: [])
+    monkeypatch.setattr(curse, "results_lines", lambda *a, **k: {6: 128.38})
+    monkeypatch.setattr(curse, "lines_through", lambda season, through: {6: 128.38, 7: 114.06})
+    seen = {}
+
+    def fake_week_inputs(week, *, lines, scored, contests):
+        seen[week] = lines[week]
+        return week
+
+    monkeypatch.setattr(curse, "week_inputs", fake_week_inputs)
+    curse.Study([6, 7])
+    assert seen == {6: 128.38, 7: 114.06}
