@@ -461,6 +461,18 @@ Rest-of-season points in a league's scoring (top players), or with --check the a
 | `--check` | The held-out accuracy check of the blend. |
 | `--top INT` | Players to list. Default: `25`. |
 
+### `dfs season outlook`
+
+Playoff odds (byes, divisions), chopped survival curves, power rankings with their week-over-week move, and strength of schedule for every team and player, by simulating the rest of each league's season. Writes the Outlook tab (sync also does). With --check, scores the simulation from earlier weeks.
+
+| Option | What it does |
+|---|---|
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--all` | Every league in season.toml. (the default). |
+| `--check` | The held-out check: the odds from earlier weeks scored against what happened (Brier), and the odds history back-filled from the leagues' own matchups. |
+| `--no-sheet` | Print only; write nothing. |
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
 ### `dfs season setup`
 
 Build (or rebuild) the Season sheet's tabs, pickers, targeting box and protection. Keeps what is typed in the pickers and the box. Then run `dfs season sync`.

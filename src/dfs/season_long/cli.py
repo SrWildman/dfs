@@ -6,6 +6,7 @@ DraftKings or the weekly DFS sheet. Heavy imports stay inside the commands.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 
 import typer
@@ -72,7 +73,17 @@ def _client(cfg, sheet_id: str | None):
     return client
 
 
-def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: bool = True, targets=None):
+def _run(
+    lc,
+    cfg,
+    table,
+    filters=None,
+    top: int = 20,
+    find: bool = True,
+    waive: bool = True,
+    targets=None,
+    look: bool = False,
+):
     """One league's view, evaluator, market and ideas (`season_tabs.LeagueRun`). With `targets` (the buy
     list), the targeted ideas are ADDED to the standard ones, never instead of them."""
     from dfs.season_long import finder as fd
@@ -109,6 +120,10 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
         if idea.analysis.partner in inactive:
             last = run.activity[idea.analysis.partner].last_move
             idea.why += f"; they look inactive (last move Week {last})" if last else "; they look inactive"
+    if look:
+        from dfs.season_long import outlook_run
+
+        run.outlook = outlook_run.compute(run)
     run.plan = lu.plan(view, ev)
     run.alerts = lu.check(view, ev, _news())
     run.streams = lu.streams(view, ev)
@@ -192,6 +207,10 @@ def _summary(run) -> list[str]:
         )
     else:
         odds = f"playoffs {o.p_playoffs:.0%}"
+        if o.p_bye == o.p_bye and o.p_bye > 0:
+            odds += f", bye {o.p_bye:.0%}"
+        if o.p_division == o.p_division:
+            odds += f", division {o.p_division:.0%}"
     lines = [
         f"{lg.name} ({lg.title}): {lg.me.label}; {odds}; needs {st.needs_text(run, lg.my_roster_id)}",
         f"  free move first: {st.free_move_text(run)}",
@@ -240,7 +259,7 @@ def season_sync(
         _say(f"{lc.name}: syncing")
         try:
             targets = None if open_search or not cfg.buy_list else list(cfg.buy_list)
-            runs.append(_run(lc, cfg, table, top=top, targets=targets))
+            runs.append(_run(lc, cfg, table, top=top, targets=targets, look=True))
         except Exception as e:  # noqa: BLE001 -- one league failing never stops the others
             console.print(f"[red]FAIL[/red] {escape(lc.name)}: {escape(str(e))}")
             continue
@@ -249,6 +268,10 @@ def season_sync(
     if client is not None and runs:
         if len(runs) < len(cfg.leagues):
             _say("Only some leagues ran: the sheet's raw tabs, Overview and My Teams show just these.")
+        from dfs.season_long import outlook_run
+
+        for run in runs:
+            outlook_run.save_history(run)
         _print([f"[sheet] {line}" for line in ss.write_sync(client, runs)])
 
 
@@ -526,6 +549,80 @@ def season_ros(
                 for _, r in s.iterrows()
             ]
         )
+
+
+def _outlook_lines(run) -> list[str]:
+    o, lg = run.outlook, run.view.league
+    lines = [f"{lg.name} ({lg.title}), after Week {o.through}: {o.rules}", f"  {o.spread_note}"]
+    for t in o.teams:
+        you = "  <- you" if t.mine else ""
+        mv = "" if t.move is None else f" ({'=' if t.move == 0 else format(t.move, '+d')})"
+        if lg.chopped:
+            lines.append(
+                f"  {t.rank:2d}{mv:6s} {t.label[:24]:24s} survive {t.p_survive:4.0%}  "
+                f"exp weeks {t.exp_weeks:4.1f}  "
+                f"last one alive {t.p_last:5.1%}{you}"
+            )
+        else:
+            div = "" if math.isnan(t.p_division) else f"  division {t.p_division:4.0%}"
+            lines.append(
+                f"  {t.rank:2d}{mv:6s} {t.label[:24]:24s} {t.record:6s} playoffs {t.p_playoffs:4.0%}  "
+                f"bye {t.p_bye:4.0%}{div}  opp {t.opp_strength:+5.1f}  NFL ease {t.nfl_ros:.2f} "
+                f"(playoffs {t.nfl_playoffs:.2f}){you}"
+            )
+    return lines
+
+
+@season_app.command("outlook")
+def season_outlook(
+    league: str = typer.Option(None, "--league", help=LEAGUE_HELP),
+    all_leagues: bool = typer.Option(False, "--all", help=ALL_HELP + " (the default)."),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="The held-out check: the odds from earlier weeks scored against what happened (Brier), and the "
+        "odds history back-filled from the leagues' own matchups.",
+    ),
+    no_sheet: bool = typer.Option(False, "--no-sheet", help="Print only; write nothing."),
+    sheet_id: str = typer.Option(None, "--sheet-id", help="A Season sheet other than season.toml's."),
+) -> None:
+    """Playoff odds (byes, divisions), chopped survival curves, power rankings with their week-over-week move,
+    and strength of schedule for every team and player, by simulating the rest of each league's season.
+    Writes the Outlook tab (sync also does). With --check, scores the simulation from earlier weeks."""
+    from dfs.season_long import calibration, outlook_check, outlook_run
+    from dfs.season_long import sheet_season as ss
+    from dfs.season_long import sleeper_league as sl_mod
+
+    cfg = _config()
+    table = _table()
+    if check:
+        df = outlook_check.run_check(cfg, table, log=_say)
+        scale = calibration.cached_scale(cfg, table, int(df["cutoff"].max()) + 1 if len(df) else 0)
+        calibration.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        df.to_csv(calibration.CACHE_DIR / "backtest.csv", index=False)
+        _print(outlook_check.report_lines(df, scale.line()))
+        league0 = next(lc for lc in cfg.leagues if lc.platform == "sleeper")
+        _print(
+            outlook_check.sos_check(
+                sl_mod.load_league(league0.name, league0.league_id, league0.username), table
+            )
+        )
+        _say("History back-filled for the weeks that had no snapshot (a real sync's is never replaced).")
+        return
+    chosen = _leagues(cfg, league, all_leagues, default_all=True)
+    client = None if no_sheet else _client(cfg, sheet_id)
+    runs = []
+    for lc in chosen:
+        runs.append(_run(lc, cfg, table, find=False, waive=False, look=True))
+        _print(_outlook_lines(runs[-1]))
+    if runs:
+        for run in runs:
+            outlook_run.save_history(run)
+    if client is not None and runs:
+        if len(runs) < len([lc for lc in cfg.leagues if lc.platform == "sleeper"]):
+            _say("Only some leagues ran: the Outlook tab keeps the last full sync (--all rewrites it).")
+        else:
+            _print([f"[sheet] {ss.write_outlook(client, runs)}"])
 
 
 @season_app.command("setup")

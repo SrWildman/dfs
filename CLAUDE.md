@@ -240,7 +240,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   filters, protection, styling), in the one order that works; its own docstring
   (`setup_sheet` in `cli.py`) explains why that order. Everything under
   `dfs setup ...` is also runnable as an individual step.
-- `dfs season sync|waivers|lineups|check|trades|trade|ros|setup|doctor [--league <name> | --all]` -- Sam's season-long Sleeper leagues
+- `dfs season sync|waivers|lineups|check|trades|trade|ros|outlook|setup|doctor [--league <name> | --all]` -- Sam's season-long Sleeper leagues
   (`src/dfs/season_long/`; leagues in the gitignored `season.toml` beside config.toml, NOT config.toml) on their own
   **Season** sheet (season.toml's `sheet_id`; never the weekly DFS sheet, no template, nothing copied week to week).
   Rest-of-season points in each league's scoring (Sleeper's projections rescored, held-out accuracy in
@@ -254,6 +254,12 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   league's own claims, handcuffs, a chopped bid plan; the Waivers tab), `lineups` (this week's best lineup with
   floor-ceiling and close calls decided by the matchup: win, median game or survival; K/DEF streams; My Teams),
   `check` (the Sunday check, read-only), playoff-week schedules (Players) and manager activity (League).
+  Phase 4 (`outlook`): playoff odds by simulating every remaining game (byes, divisions, the median game; the team
+  spread scaled by `calibration.py`'s measurement on the leagues' real scores), a chopped league's survival curve for
+  every team, strength of schedule (team and player), power rankings with the week-over-week move (`history.py`,
+  `data/season/history/`), on the Outlook tab; Overview also carries "this week across leagues" (`across.py`) and an
+  odds history line per league. `outlook --check` scores the simulation from earlier weeks against what happened
+  (Brier, vs record-only and scoring-only models; `outlook_check.py`) and back-fills the history.
   Nothing is ever written to Sleeper. `dfs season doctor` is the Season sheet's structural check. Method: `docs/SEASON.md`.
 - `dfs sheets ...` is a deprecated spelling of the `setup` commands (plus
   `doctor`) kept working this season as a compatibility alias -- prefer
@@ -300,6 +306,7 @@ Season-long shortcuts (the Season sheet; `dfs season ...` prints its title and U
 | Sam says | Run | Report back |
 |---|---|---|
 | "season sync" | `dfs season sync` (all leagues; a few minutes, run it detached with a log) | per league: his odds (playoffs, or survive this week / last man standing), this week's win / survive chance, lineup alerts, the free move first, the best pickup with its bid, the top 3 ideas |
+| "playoff odds" / "power rankings" | `dfs season outlook` (a sync writes the same tab) | per league: his playoff odds (and bye / division), where the others stand, his power rank and move, the schedule ease; in Choppa his survival curve; then Overview's "this week across leagues" in order |
 | "check my lineups" | `dfs season check` (read-only; ESPN's game-day feed laid over Sleeper's statuses) | every `SWAP` (empty slot, bye, OUT / Doubtful, with the swap to make) and `LOOK` (Questionable, a better bench option), per league; or that every league is clean |
 | "set my lineups" | `dfs season lineups` (prints; Sam sets them in Sleeper by hand, nothing is written to Sleeper) | per league: the lineup with each starter's floor-ceiling, the close calls and why, the win / median / survive odds, the K/DEF streams |
 | "best pickups in <league>" | `dfs season waivers --league <league>` | the top pickups (add, drop, gain, this week, the bid range and who could outbid him), handcuffs, and in Choppa the bid plan |

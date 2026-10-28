@@ -271,6 +271,7 @@ MORE_LABELS = {
     "dfs season trades": "Season leagues: find realistic trades (get / give / keep / partner)",
     "dfs season trade": "Season leagues: analyze one trade (+ FAAB on either side)",
     "dfs season ros": "Season leagues: rest-of-season points, or the accuracy check",
+    "dfs season outlook": "Season leagues: playoff odds, power rankings, schedule strength (or the check)",
     "dfs season setup": "Season leagues: build the Season sheet's tabs",
     "dfs season doctor": "Season leagues: check the Season sheet's structure",
     "dfs doctor": "Check the sheet's structure",

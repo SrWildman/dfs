@@ -1,9 +1,11 @@
 """The Season sheet's layout, pure: every tab's rows from the leagues' views and trade ideas.
 
-One sheet for every league; leagues are rows and pickers, never extra tabs (Sam, 2026-10-29). Six visible
+One sheet for every league; leagues are rows and pickers, never extra tabs (Sam, 2026-10-29). Eight visible
 tabs and three hidden raw ones:
 
-- **Overview**: one row per league, then Sam's exposure (each player he rosters and in how many leagues);
+- **Overview**: one row per league, this week across leagues (`across.py`), the odds history, then Sam's
+  exposure (each player he rosters and in how many leagues);
+- **Outlook**: playoff odds, power rankings and strength of schedule for every team (`outlook_run.py`);
 - **My Teams**: one block per league (roster with values and this week's lineup, the needs line);
 - **Trade Finder**: the targeting box (`BOX_FIELDS`, the only typed cells besides the pickers) and every
   league's ideas in one list with a League column;
@@ -25,6 +27,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from dfs.season_long import across, history
 from dfs.season_long import finder as fd
 from dfs.season_long import roster_moves as rm
 from dfs.season_long import trade as tr
@@ -39,8 +42,10 @@ LEAGUE_TAB = "League"
 PLAYERS_TAB = "Players"
 ANALYZER_TAB = "Analyzer"
 WAIVERS_TAB = "Waivers"
+OUTLOOK_TAB = "Outlook"
 VISIBLE_TABS = (
     OVERVIEW_TAB,
+    OUTLOOK_TAB,
     MY_TEAMS_TAB,
     WAIVERS_TAB,
     TRADE_FINDER_TAB,
@@ -58,14 +63,16 @@ RAW_ROWS = 5000
 SLOT_TYPES = ("QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "WRRB_FLEX", "REC_FLEX", "K", "DEF")
 TEAM_COLUMNS = [
     "League", "Team", "Manager", "Mine", "Record", "PointsFor", "FAAB", "ValueRank", "TeamValue",
-    "PlayoffOdds", "SurviveThisWeek", "ExpWeeksSurvived", "LastManStanding", "BiggestNeed", "Needs",
+    "PlayoffOdds", "SurviveThisWeek", "ExpWeeksSurvived", "LastManStanding", "ByeOdds", "DivisionOdds",
+    "ExpWins", "PowerMove", "BiggestNeed", "Needs",
     *[f"{s} pts/wk" for s in SLOT_TYPES],
     "Activity", "Moves", "Trades", "TradedPositions", "LastMove", "LineupMisses",
+    "OppStrength", "NFLEaseROS", "NFLEasePlayoffs",
 ]  # fmt: skip
 PLAYER_COLUMNS = [
     "League", "Name", "Pos", "NFL", "Status", "Owner", "Mine", "ROS", "ROSWeighted", "PlayoffWeeks",
     "NextWeek", "GamesLeft", "OurValue", "Consensus", "OursMinusConsensus", "Read", "PlayoffOpp",
-    "PlayoffEase",
+    "PlayoffEase", "DefIndexROS", "DefIndexPlayoffs",
 ]  # fmt: skip
 # The League and Players tabs show these raw columns (all but League, which the picker already says), sorted.
 LEAGUE_VIEW = [c for c in TEAM_COLUMNS if c not in {"League", "Mine"}]
@@ -88,6 +95,17 @@ OVERVIEW_HEADER = [
     "Lineup alerts", "Biggest need", "Free move first", "Best pickup", "Best trade idea", "Ours vs market",
     "Note",
 ]  # fmt: skip
+ACROSS_TITLE = (
+    "This week across leagues: lineup alerts first, then the biggest pickups and trades "
+    "(size = the change over the spread of the league's teams)"
+)
+HISTORY_TITLE = (
+    "Odds history: your playoff odds after each scored week (a chopped league: your chance of being the "
+    "last one alive)"
+)
+EXPOSURE_TITLE = "Your exposure: each player you roster, and in how many leagues"
+EXPOSURE_HEADER = ["Player", "Pos", "Leagues", "Which"]
+HISTORY_FIXED = ["League", "Metric"]
 MEDIAN_NOTE = "Plays a second game each week against the league median: weekly points count double."
 
 
@@ -126,6 +144,7 @@ class LeagueRun:
     streams: dict = field(default_factory=dict)  # lineups.streams
     activity: dict = field(default_factory=dict)  # activity.manager_activity
     schedule: object = None  # activity.playoff_schedule
+    outlook: object = None  # outlook_run.LeagueOutlook
 
 
 def _standing(view: LeagueView, rid: int) -> int:
@@ -144,6 +163,10 @@ def needs_text(run: LeagueRun, rid: int, n: int = 3) -> str:
     return (
         ", ".join(f"{s} {d:+.1f}/wk (#{r})" for s, d, r in run.view.needs.get(rid, [])[:n] if d < 0) or "none"
     )
+
+
+def _r(x: float, n: int) -> float:
+    return x if x is None or (isinstance(x, float) and math.isnan(x)) else round(float(x), n)
 
 
 def _num(x: object) -> object:
@@ -176,6 +199,7 @@ def teams_frame(runs: list[LeagueRun]) -> pd.DataFrame:
             o = base[t.roster_id]
             need = v.needs.get(t.roster_id, [])
             strength = v.strengths.get(t.roster_id, {})
+            to = run.outlook.team(t.roster_id) if run.outlook is not None else None
             rows.append({
                 "League": lg.name, "Team": t.label, "Manager": t.manager,
                 "Mine": "Y" if t.roster_id == lg.my_roster_id else "",
@@ -186,10 +210,17 @@ def teams_frame(runs: list[LeagueRun]) -> pd.DataFrame:
                 "SurviveThisWeek": round(o.p_survive_now, 3) if lg.chopped else "",
                 "ExpWeeksSurvived": round(o.expected_weeks, 2) if lg.chopped else "",
                 "LastManStanding": round(o.p_last_standing, 3) if lg.chopped else "",
+                "ByeOdds": "" if lg.chopped else _num(_r(o.p_bye, 3)),
+                "DivisionOdds": "" if lg.chopped else _num(_r(o.p_division, 3)),
+                "ExpWins": "" if lg.chopped else _num(_r(o.exp_wins, 1)),
+                "PowerMove": "" if to is None or to.move is None else to.move,
                 "BiggestNeed": need[0][0] if need and need[0][1] < 0 else "",
                 "Needs": needs_text(run, t.roster_id),
                 **{f"{s} pts/wk": strength.get(s, "") for s in SLOT_TYPES},
                 **_activity_cells(run, t.roster_id),
+                "OppStrength": "" if to is None else _num(_r(to.opp_strength, 1)),
+                "NFLEaseROS": "" if to is None else _num(_r(to.nfl_ros, 3)),
+                "NFLEasePlayoffs": "" if to is None else _num(_r(to.nfl_playoffs, 3)),
             })  # fmt: skip
     return pd.DataFrame(rows, columns=TEAM_COLUMNS)
 
@@ -220,17 +251,24 @@ def players_frame(runs: list[LeagueRun]) -> pd.DataFrame:
                 "OursMinusConsensus": round(gap, 1), "Read": read,
                 "PlayoffOpp": run.schedule["PlayoffOpp"].get(pid, "") if run.schedule is not None else "",
                 "PlayoffEase": _num(run.schedule["PlayoffEase"].get(pid)) if run.schedule is not None else "",
+                "DefIndexROS": _num(_r(run.outlook.sos_ros.get(pid), 3)) if run.outlook is not None else "",
+                "DefIndexPlayoffs": (
+                    _num(_r(run.outlook.sos_playoffs.get(pid), 3)) if run.outlook is not None else ""
+                ),
             })  # fmt: skip
     frame = pd.DataFrame(rows, columns=PLAYER_COLUMNS)
     return frame.sort_values(["League", "ROSWeighted"], ascending=[True, False]).head(RAW_ROWS - 1)
 
 
+SPARKLINE = "=SPARKLINE("
 _DATE_LIKE = re.compile(r"^\d{1,4}[-/]\d{1,2}([-/]\d{1,4})?$")
 
 
 def literal(value: object) -> object:
     """A text cell as typed text. Sheets parses what it is sent (USER_ENTERED), so "8-6" became a date and
     "+33.4 value" a broken formula; a leading apostrophe keeps either as the text it is. Numbers pass."""
+    if isinstance(value, str) and value.startswith(SPARKLINE):
+        return value  # the odds-history trend cell is a real formula
     if isinstance(value, str) and (value[:1] in {"=", "+", "-"} or _DATE_LIKE.match(value)):
         return "'" + value
     return value
@@ -316,10 +354,15 @@ def overview_rows(runs: list[LeagueRun]) -> list[list]:
                 note,
             ]
         )
+    rows += [[""], [ACROSS_TITLE], *across.rows(runs)]
+    # Rows so far + a blank + the title + the header = where the first league row lands (1-based).
+    hist = history_rows(runs, len(rows) + 4)
+    if hist:
+        rows += [[""], [HISTORY_TITLE], *hist]
     rows += [
         [""],
-        ["Your exposure: each player you roster, and in how many leagues"],
-        ["Player", "Pos", "Leagues", "Which"],
+        [EXPOSURE_TITLE],
+        EXPOSURE_HEADER,
     ]
     seen: dict[str, list[str]] = defaultdict(list)
     pos: dict[str, str] = {}
@@ -331,6 +374,55 @@ def overview_rows(runs: list[LeagueRun]) -> list[list]:
     for name in sorted(seen, key=lambda n: (-len(seen[n]), n)):
         rows.append([name, pos[name], len(seen[name]), ", ".join(seen[name])])
     return rows
+
+
+def history_rows(runs: list[LeagueRun], first_data_row: int) -> list[list]:
+    """The odds-history block: a header (League, Metric, one column per scored week, Trend), a row per league
+    with Sam's odds after each week and a sparkline over them. `first_data_row`: the 1-based sheet row of the
+    first league row (the sparkline names its own row). Empty when no league has a snapshot."""
+    series = {}
+    for run in runs:
+        lg = run.view.league
+        data = history.load(lg.name)
+        field_ = "p_last" if lg.chopped else "p_playoffs"
+        series[lg.name] = (
+            "Last one alive" if lg.chopped else "Playoffs",
+            {k: v for k, v in history.series(data, lg.my_roster_id, field_) if v is not None},
+        )
+    weeks = sorted({k for _, d in series.values() for k in d})
+    if not weeks:
+        return []
+    first = column_letter(len(HISTORY_FIXED))
+    last = column_letter(len(HISTORY_FIXED) + len(weeks) - 1)
+    out: list[list] = [[*HISTORY_FIXED, *[f"After wk {w}" for w in weeks], "Trend"]]
+    for name, (metric, d) in series.items():
+        n = first_data_row + len(out) - 1
+        trend = f'{SPARKLINE}{first}{n}:{last}{n},{{"charttype","line"}})'
+        out.append([name, metric, *[round(d[w], 3) if w in d else "" for w in weeks], trend])
+    return out
+
+
+def overview_marks(rows: list[list]) -> tuple[list[int], list[int], list[tuple[int, int, int]]]:
+    """(title rows, header rows, percent blocks) of the Overview, 1-based, found by text. A percent block
+    is (first row, last row, last column index) of the odds-history numbers."""
+    titles, headers, pct = [], [], []
+    for i, r in enumerate(rows, 1):
+        head = r[:1]
+        if (
+            head
+            and isinstance(head[0], str)
+            and head[0].startswith(("Season:", ACROSS_TITLE[:20], HISTORY_TITLE[:20], EXPOSURE_TITLE[:20]))
+        ):
+            titles.append(i)
+        if r == OVERVIEW_HEADER or r == across.ACROSS_HEADER or r == EXPOSURE_HEADER:
+            headers.append(i)
+        if r[:2] == HISTORY_FIXED:
+            headers.append(i)
+            j = i
+            while j < len(rows) and rows[j] and rows[j][0]:
+                j += 1
+            pct.append((i + 1, j, len(r) - 2))
+    return titles, headers, pct
 
 
 @dataclass
@@ -587,4 +679,67 @@ def waivers_block(runs: list[LeagueRun]) -> Block:
                 )
             if plan.rivals:
                 rows.append(["Most FAAB: " + ", ".join(f"{n} ${f}" for n, f in plan.rivals)])
+    return Block(rows, titles, headers)
+
+
+OUTLOOK_REDRAFT_HEADER = [
+    "Power", "Move", "Team", "Manager", "Record", "Team value", "Playoffs", "Bye", "Division", "Exp wins",
+    "Opp strength", "NFL ease (rest)", "NFL ease (playoffs)", "",
+]  # fmt: skip
+OUTLOOK_CHOPPED_HEADER = ["Power", "Move", "Team", "Manager", "Team value", "Survive this week", "Exp weeks",
+                          "Last one alive"]  # fmt: skip
+OUTLOOK_NOTE = (
+    "Power = rank by team value over the rest of the season (the same Team value rank as Overview); Move = "
+    "places gained since the last scored week's snapshot. Opp strength = the teams you still face, in points "
+    "per game over the league's average team (positive = harder). NFL ease = the starters' opponents' "
+    "softness from Sleeper's "
+    "weekly projections (1.00 = average, above 1 = easier)."
+)
+
+
+def _move_text(m: int | None) -> str:
+    return "" if m is None else ("=" if m == 0 else f"{m:+d}")
+
+
+def _fmt(x: float, spec: str) -> str:
+    return "" if x is None or (isinstance(x, float) and math.isnan(x)) else format(x, spec)
+
+
+def outlook_block(runs: list[LeagueRun]) -> Block:
+    """Per league: the rules, then every team by power rank with its odds (or survival curve) and schedule."""
+    rows: list[list] = [
+        ["Outlook: playoff odds, power rankings and strength of schedule, every league"],
+        [OUTLOOK_NOTE],
+    ]
+    titles, headers = [1], []
+    for run in runs:
+        o = run.outlook
+        if o is None:
+            continue
+        lg = run.view.league
+        rows += [[""], [f"{lg.name}: {lg.title} (after Week {o.through})"], [f"{o.rules} {o.spread_note}"]]
+        titles.append(len(rows) - 1)
+        if lg.chopped:
+            rows.append(
+                [*OUTLOOK_CHOPPED_HEADER, *[f"Alive after wk {w}" for w in o.weeks], "NFL ease (rest)", ""]
+            )
+        else:
+            rows.append(OUTLOOK_REDRAFT_HEADER)
+        headers.append(len(rows))
+        for t in o.teams:
+            you = "<- you" if t.mine else ""
+            if lg.chopped:
+                rows.append([
+                    t.rank, _move_text(t.move), t.label, t.manager, round(t.value, 3),
+                    _fmt(t.p_survive, ".0%"),
+                    _fmt(t.exp_weeks, ".1f"), _fmt(t.p_last, ".1%"), *[_fmt(a, ".0%") for a in t.alive],
+                    _fmt(t.nfl_ros, ".2f"), you,
+                ])  # fmt: skip
+            else:
+                rows.append([
+                    t.rank, _move_text(t.move), t.label, t.manager, t.record, round(t.value, 1),
+                    _fmt(t.p_playoffs, ".0%"), _fmt(t.p_bye, ".0%"), _fmt(t.p_division, ".0%"),
+                    _fmt(t.exp_wins, ".1f"), _fmt(t.opp_strength, "+.1f"), _fmt(t.nfl_ros, ".2f"),
+                    _fmt(t.nfl_playoffs, ".2f"), you,
+                ])  # fmt: skip
     return Block(rows, titles, headers)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from dfs.season_long import ros
+from dfs.season_long import calibration, ros
 from dfs.season_long import sleeper_league as sl
 from dfs.season_long import team_value as tvm
 from dfs.season_long.config import LeagueConfig, SeasonLongConfig
@@ -24,6 +24,9 @@ class LeagueView:
     survival: tvm.Survival | None
     positions: dict[str, tuple[str, ...]]
     cfg: SeasonLongConfig
+    # Real team-week scores over the model's spread (`calibration.spread_scale`): the simulations' scale.
+    spread_scale: float = 1.0
+    spread_note: str = ""
 
     def name(self, pid: str) -> str:
         return str(self.table.at[pid, "name"]) if pid in self.table.index else pid
@@ -60,9 +63,31 @@ def build(lc: LeagueConfig, cfg: SeasonLongConfig, table: pd.DataFrame | None = 
     if lc.playoff_week_start and not league.playoff_week_start:
         league.playoff_week_start = lc.playoff_week_start
     table = ros.player_table(sl.fetch_players()) if table is None else table
-    result = ros.build_ros(league, table, ir_weeks_out=cfg.ir_weeks_out, playoff_weight=cfg.playoff_weight)
+    scale = calibration.cached_scale(cfg, table, league.last_scored_week)
+    return assemble(league, table, cfg, scale)
+
+
+def assemble(
+    league: sl.League,
+    table: pd.DataFrame,
+    cfg: SeasonLongConfig,
+    scale: calibration.Scale,
+    *,
+    through: int | None = None,
+    final_through: int | None = None,
+) -> LeagueView:
+    """The view of a league as it stands (`through` None) or as it stood after week `through` (a back-test:
+    `league` is then the league as of that week and `final_through` the real last scored week)."""
+    result = ros.build_ros(
+        league,
+        table,
+        ir_weeks_out=cfg.ir_weeks_out,
+        playoff_weight=cfg.playoff_weight,
+        through=through,
+        final_through=final_through,
+    )
     positions = positions_of(table)
-    view = LeagueView(league, table, result, {}, {}, {}, None, positions, cfg)
+    view = LeagueView(league, table, result, {}, {}, {}, None, positions, cfg, scale.scale, scale.line())
     for t in league.alive_teams():
         view.values[t.roster_id] = view.team_value(t.roster_id, t.players)
     view.strengths = {
