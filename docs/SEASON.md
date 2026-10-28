@@ -24,8 +24,9 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
 
    A top-level `buy_list = ["Chuba Hubbard", ...]` makes the trade finder targeted: `dfs season sync` and a
    plain `dfs season trades` keep only trades that land a name from the list (on another roster in that
-   league; one Sam owns there is skipped) or a player at his weakest spot there (FLEX counts as RB/WR/TE).
-   `--open` searches everything.
+   league; one Sam owns there is skipped) or a player at his weakest spot there (FLEX counts as RB/WR/TE;
+   K and DEF are streamed, so the next spot is used). List names match the full name only, never a last
+   name alone. `--open` searches everything.
 
    Optional top-level numbers: `playoff_weight` (1.5), `starter_miss_rate` (0.06), `ir_weeks_out` (4),
    `survival_decay` (0.8), `survival_draws` (4000).

@@ -78,13 +78,24 @@ def parse_shapes(text: str | None) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _match_exact(term: str, pool: list[str], view: LeagueView) -> list[str]:
+    """A list name (buy list, `--players`) matches its own player only: the full name, never a last name
+    alone (Sam's "Jonah Coleman" matched another team's Keon Coleman in a league where Jonah is his)."""
+    q = normalize_name(term)
+    return [p for p in pool if normalize_name(view.name(p)) == q]
+
+
+# Kickers and defenses are streamed from waivers, not traded for: the targeted "weakest spot" skips them.
+STREAMED_SLOTS = {"K", "DEF"}
+
+
 def players_in(
     terms: list[str], mine: list[str], others: list[str], view: LeagueView
 ) -> tuple[set[str], set[str]]:
     """(sells, buys): each name matched once in this league, to Sam's roster or another; others skipped."""
     sells, buys = set(), set()
     for term in terms:
-        hits = tr._match(term, [*mine, *others], view)
+        hits = _match_exact(term, [*mine, *others], view)
         if len(hits) == 1:
             (sells if hits[0] in mine else buys).add(hits[0])
     return sells, buys
@@ -103,7 +114,8 @@ def _resolve(
         if t.upper() in ros.POSITIONS or t.upper() == "DST":
             positions.add("DEF" if t.upper() == "DST" else t.upper())
             continue
-        hits = tr._match(t, pool, view)
+        # A list run over every league (`missing`) matches full names only, like the buy list.
+        hits = _match_exact(t, pool, view) if missing is not None else tr._match(t, pool, view)
         if not hits and missing is not None:
             missing.append(t)
             continue
@@ -222,9 +234,11 @@ def find_trades(
     target_pos: set[str] = set()
     if filters.targets is not None:
         target_ids = {
-            p for t in filters.targets if len(hits := tr._match(t, others, view)) == 1 for p in hits
+            p for t in filters.targets if len(hits := _match_exact(t, others, view)) == 1 for p in hits
         }
-        need = next(((slot, d) for slot, d, _ in view.needs.get(me, []) if d < 0), None)
+        need = next(
+            ((slot, d) for slot, d, _ in view.needs.get(me, []) if d < 0 and slot not in STREAMED_SLOTS), None
+        )
         if need is not None:
             target_pos = set(tvm.slot_eligible(need[0]))
         if notes is not None:

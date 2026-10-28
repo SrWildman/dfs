@@ -163,3 +163,24 @@ def test_targets_are_the_buy_list_or_the_weakest_spot(monkeypatch):
         got = i.analysis.get.players
         assert "wr5" in got or any(p.startswith("rb") for p in got)
     assert notes[0].startswith("targets: your buy list (WR5) and your weakest spot, RB")
+
+
+def test_list_names_never_match_by_last_name_alone(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    v.table.loc["wr1", "name"] = "Jonah Coleman"  # Sam's
+    v.table.loc["wr5", "name"] = "Keon Coleman"  # team 3's
+    others = [p for r in (2, 3) for p in ev.rosters[r]]
+    assert fd.players_in(["Jonah Coleman"], ev.rosters[1], others, v) == ({"wr1"}, set())
+    notes: list[str] = []
+    fd.find_trades(v, ev, syn.market(v), fd.Filters(targets=["Jonah Coleman"]), notes=notes)
+    assert "your buy list (none here)" in notes[0]
+
+
+def test_the_weakest_spot_skips_streamed_slots(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    v.needs[1] = [("DEF", -6.0, 3), ("RB", -2.0, 3), ("WR", 3.0, 1)]
+    notes: list[str] = []
+    fd.find_trades(v, ev, syn.market(v), fd.Filters(targets=[]), notes=notes)
+    assert notes[0].endswith("your weakest spot, RB (-2.0/wk)")
