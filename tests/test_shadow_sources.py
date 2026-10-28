@@ -184,3 +184,46 @@ def test_score_week_keeps_the_sources_values_when_the_edge_frame_already_has_the
     assert out.loc[101, "PropPts"] == 25.85 and pd.isna(out.loc[102, "PropPts"])
     assert out.loc[101, "SleeperPts"] == 24.0 and out.loc[102, "SleeperPts"] == 18.0
     assert pd.isna(out.loc[103, "EspnPts"])
+
+
+def test_espn_comes_from_the_last_snapshot_before_each_teams_own_kickoff(monkeypatch):
+    # BUF plays Thursday night, LAR on Sunday. Three ESPN snapshots: Wednesday, Thursday after BUF kicked
+    # off, Sunday morning. BUF must keep Wednesday's number; LAR gets Sunday's; a team the slate does not
+    # know (SEA) falls back to the latest snapshot at or before the reference moment.
+    def snap(allen, nacua, seattle):
+        return pd.DataFrame(
+            {
+                "Name": ["Josh Allen", "Puka Nacua", "Geno Smith"],
+                "Team": ["BUF", "LAR", "SEA"],
+                "Position": ["QB", "WR", "QB"],
+                "DkPts": [allen, nacua, seattle],
+            }
+        )
+
+    stamps = [
+        datetime(2026, 10, 21, 15, tzinfo=UTC),  # Wednesday
+        datetime(
+            2026, 10, 23, 2, tzinfo=UTC
+        ),  # Thursday night, BUF already kicked off (8:15 pm ET = 00:15 UTC)
+        datetime(2026, 10, 25, 14, tzinfo=UTC),  # Sunday morning
+    ]
+    snaps = dict(
+        zip(stamps, [snap(20.0, 10.0, 15.0), snap(26.0, 11.0, 16.0), snap(27.0, 12.0, 17.0)], strict=True)
+    )
+    monkeypatch.setattr(results_loop, "snapshot_files", lambda source: [(t, t) for t in stamps])
+    monkeypatch.setattr(results_loop, "read_snapshot", lambda t: snaps[t])
+    selected = pd.DataFrame(
+        {
+            "Team": ["BUF", "LAR"],
+            "GameStart": [
+                "2026-10-22T20:15:00Z",
+                "2026-10-25T13:00:00Z",
+            ],  # TFFB writes Eastern time with a Z
+        }
+    )
+    out = results_loop.espn_before_kickoff(selected, datetime(2026, 10, 25, 16, 30, tzinfo=UTC))
+    by_team = out.set_index("Team")["DkPts"]
+    assert by_team["BUF"] == 20.0
+    assert by_team["LAR"] == 12.0
+    assert by_team["SEA"] == 17.0
+    assert len(out) == 3
