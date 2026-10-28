@@ -82,10 +82,12 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
     view = league_view.build(lc, cfg, table)
     ev = objective.Evaluator(view)
     market = tr.build_market(view, ev)
-    ideas = fd.find_trades(view, ev, market, filters or fd.Filters(), top=top) if find else []
+    found: list[str] = []
+    ideas = fd.find_trades(view, ev, market, filters or fd.Filters(), top=top, notes=found) if find else []
     run = st.LeagueRun(
         view, ev, market, ideas, tr.free_move(view, ev, view.league.my_roster_id, tr.free_agents(view))
     )
+    run.notes += found
     lg = view.league
     from dfs.season_long import consensus_check
 
@@ -142,7 +144,7 @@ def _table():
     return ros.player_table(sl.fetch_players())
 
 
-def _filters(get, give, keep, partner, shapes, max_loss, lopsided=False):
+def _filters(get, give, keep, partner, shapes, max_loss, lopsided=False, players=None):
     from dfs.season_long import finder as fd
     from dfs.season_long import trade as tr
 
@@ -162,6 +164,7 @@ def _filters(get, give, keep, partner, shapes, max_loss, lopsided=False):
             shapes=fd.parse_shapes(shapes),
             max_consensus_loss=loss,
             show_lopsided=bool(lopsided),
+            players=fd.normalize_terms(players),
         )
     except tr.TradeError as e:
         raise _fail(str(e)) from e
@@ -234,6 +237,11 @@ def season_trades(
         None, "--give", help='Sell a player or move a position ("Garrett Wilson", "WR").'
     ),
     keep: str = typer.Option(None, "--keep", help='Untouchables, never offered ("Nacua, Love").'),
+    players: str = typer.Option(
+        None,
+        "--players",
+        help='Trades moving any of these either way ("Hubbard, Coleman"): yours are sells, the rest buys.',
+    ),
     partner: str = typer.Option(None, "--partner", help='One team only ("Team 4", a team or manager name).'),
     shapes: str = typer.Option(
         None, "--shapes", help="You give - you get: 1-1, 2-1, 1-2, 2-2 (default all)."
@@ -262,7 +270,7 @@ def season_trades(
 
     cfg = _config()
     client = None if no_sheet else _client(cfg, sheet_id)
-    typed = [get, give, keep, partner, shapes, max_consensus_loss, lopsided]
+    typed = [get, give, keep, partner, shapes, max_consensus_loss, lopsided, players]
     if client is not None and (from_sheet or not any(typed)):
         box = ss.read_box(client)
         if box:
@@ -275,7 +283,7 @@ def season_trades(
                 box.get("Max consensus loss"),
             )
             lopsided = lopsided or box.get("Show lopsided", "").strip().lower() in {"yes", "y", "true", "1"}
-    filters = _filters(get, give, keep, partner, shapes, max_consensus_loss, lopsided)
+    filters = _filters(get, give, keep, partner, shapes, max_consensus_loss, lopsided, players)
     chosen = _leagues(cfg, league, all_leagues)
     table = _table()
     runs = []

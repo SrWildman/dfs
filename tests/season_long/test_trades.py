@@ -128,3 +128,25 @@ def test_shapes():
     assert fd.parse_shapes("1-1, 2-1") == ("1-1", "2-1")
     with pytest.raises(tr.TradeError):
         fd.parse_shapes("3-1")
+
+
+def test_a_player_list_sorts_into_sells_and_buys_per_league(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    sells, buys = fd.players_in(
+        ["WR3", "RB2", "Nobody Here"], ev.rosters[1], [p for r in (2, 3) for p in ev.rosters[r]], v
+    )
+    assert sells == {"wr3"} and buys == {"rb2"}
+    ideas = fd.find_trades(v, ev, syn.market(v), fd.Filters(players=["WR3", "RB2"]))
+    assert ideas and all("wr3" in i.analysis.give.players or "rb2" in i.analysis.get.players for i in ideas)
+    assert fd.find_trades(v, ev, syn.market(v), fd.Filters(players=["Nobody Here"])) == []
+
+
+def test_a_sell_list_skips_names_not_on_the_roster_and_never_widens_to_everything(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    notes: list[str] = []
+    ideas = fd.find_trades(v, ev, syn.market(v), fd.Filters(give=["WR3", "Somebody Else"]), notes=notes)
+    assert ideas and all("wr3" in i.analysis.give.players for i in ideas)
+    assert notes == ["not on your roster here, skipped: Somebody Else"]
+    assert fd.find_trades(v, ev, syn.market(v), fd.Filters(give=["Somebody Else"])) == []

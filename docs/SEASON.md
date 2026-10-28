@@ -37,6 +37,8 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
 | `dfs season waivers [--league X] [--player "Name"]` | Best pickups for your team with a FAAB bid guide, handcuffs, a chopped league's bid plan; writes the Waivers tab |
 | `dfs season lineups [--league X]` | This week's best lineup per league: ranges, close calls decided by the matchup, K/DEF streams; writes My Teams (all leagues only) |
 | `dfs season check` | The Sunday check across every league (read-only) |
+| `dfs season trades --all --give "X, Y, Z"` | Sell any of these: a league where you own none of them is skipped (and says which names it skipped); `--get` works the same way for buys |
+| `dfs season trades --all --players "A, B, C"` | Trades that move any of these, either way: per league a name you own is a sell, one on another roster a buy |
 | `dfs season trades ... --lopsided` | Also show ideas the market has over 125% for the partner, each with the FAAB to ask back |
 | `dfs season ros --league X [--check]` | Rest-of-season points, or the accuracy check |
 | `dfs season setup`, `dfs season doctor` | Build and check the sheet |

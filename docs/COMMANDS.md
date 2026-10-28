@@ -385,6 +385,7 @@ Find realistic trades: you gain, the partner gains by our model, and the market 
 | `--get STR` | Land a player or a position ("Bijan", "RB"). |
 | `--give STR` | Sell a player or move a position ("Garrett Wilson", "WR"). |
 | `--keep STR` | Untouchables, never offered ("Nacua, Love"). |
+| `--players STR` | Trades moving any of these either way ("Hubbard, Coleman"): yours are sells, the rest buys. |
 | `--partner STR` | One team only ("Team 4", a team or manager name). |
 | `--shapes STR` | You give - you get: 1-1, 2-1, 1-2, 2-2 (default all). |
 | `--max-consensus-loss STR` | How far below fair (by the market) the partner may come out (5%). |

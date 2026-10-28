@@ -48,6 +48,9 @@ class Filters:
     shapes: tuple[str, ...] = SHAPES
     max_consensus_loss: float = tr.DEFAULT_MAX_CONSENSUS_LOSS
     show_lopsided: bool = False
+    # Names to move either way, sorted per league (`players_in`): one Sam owns is a sell, one on another
+    # roster a buy; a trade that moves at least one of them counts. A name not in a league is skipped there.
+    players: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -71,8 +74,23 @@ def parse_shapes(text: str | None) -> tuple[str, ...]:
     return tuple(out)
 
 
-def _resolve(terms: list[str], pool: list[str], view: LeagueView) -> tuple[set[str], set[str]]:
-    """Names -> player ids in `pool`; position codes stay positions."""
+def players_in(
+    terms: list[str], mine: list[str], others: list[str], view: LeagueView
+) -> tuple[set[str], set[str]]:
+    """(sells, buys): each name matched once in this league, to Sam's roster or another; others skipped."""
+    sells, buys = set(), set()
+    for term in terms:
+        hits = tr._match(term, [*mine, *others], view)
+        if len(hits) == 1:
+            (sells if hits[0] in mine else buys).add(hits[0])
+    return sells, buys
+
+
+def _resolve(
+    terms: list[str], pool: list[str], view: LeagueView, missing: list[str] | None = None
+) -> tuple[set[str], set[str]]:
+    """Names -> player ids in `pool`; position codes stay positions. With `missing`, a name matching nobody in
+    the pool is noted there and skipped (a list run over every league: not yours, or not theirs, here)."""
     players, positions = set(), set()
     for term in terms:
         t = term.strip()
@@ -82,6 +100,9 @@ def _resolve(terms: list[str], pool: list[str], view: LeagueView) -> tuple[set[s
             positions.add("DEF" if t.upper() == "DST" else t.upper())
             continue
         hits = tr._match(t, pool, view)
+        if not hits and missing is not None:
+            missing.append(t)
+            continue
         if len(hits) != 1:
             who = ", ".join(view.name(h) for h in hits[:5]) or "nobody"
             raise tr.TradeError(f"{t!r} matches {who}; type more of the name.")
@@ -161,7 +182,12 @@ def _why(view: LeagueView, ev: Evaluator, a: tr.Analysis, ask: int, lopsided: bo
 
 
 def find_trades(
-    view: LeagueView, ev: Evaluator, market: tr.Market, filters: Filters, top: int = 20
+    view: LeagueView,
+    ev: Evaluator,
+    market: tr.Market,
+    filters: Filters,
+    top: int = 20,
+    notes: list[str] | None = None,
 ) -> list[Idea]:
     lg = view.league
     me = lg.my_roster_id
@@ -169,8 +195,25 @@ def find_trades(
     mine = ev.rosters[me]
     others = [p for rid, r in ev.rosters.items() if rid != me for p in r]
     keep, _ = _resolve(filters.keep, mine, view)
-    give_p, give_pos = _resolve(filters.give, mine, view)
-    get_p, get_pos = _resolve(filters.get, others, view)
+    not_mine: list[str] = []
+    not_theirs: list[str] = []
+    give_p, give_pos = _resolve(filters.give, mine, view, not_mine)
+    get_p, get_pos = _resolve(filters.get, others, view, not_theirs)
+    if notes is not None:
+        if not_mine:
+            notes.append(f"not on your roster here, skipped: {', '.join(not_mine)}")
+        if not_theirs:
+            notes.append(f"not on another roster here, skipped: {', '.join(not_theirs)}")
+    # Every name asked for is missing here (and no position was): nothing to search, not everything.
+    if (filters.give and not give_p and not give_pos) or (filters.get and not get_p and not get_pos):
+        return []
+    sells, buys = players_in(filters.players, mine, others, view)
+    if filters.players and notes is not None:
+        sold = ", ".join(view.name(p) for p in sorted(sells)) or "none"
+        bought = ", ".join(view.name(p) for p in sorted(buys)) or "none"
+        notes.append(f"from your list: selling {sold}; buying {bought}")
+    if filters.players and not (sells or buys):
+        return []
     partners = [rid for rid in ev.ids if rid != me]
     if filters.partner:
         partners = [lg.find_team(filters.partner).roster_id]
@@ -186,11 +229,11 @@ def find_trades(
         ]
         return list(dict.fromkeys([*[p for p in must if p in roster], *ranked[:POOL_SIZE]]))
 
-    my_pool = top_players(mine, keep, give_p)
+    my_pool = top_players(mine, keep, give_p | (sells - keep))
     ideas: list[Idea] = []
     for rid in partners:
         theirs = ev.rosters[rid]
-        their_pool = top_players(theirs, set(), get_p)
+        their_pool = top_players(theirs, set(), get_p | buys)
         candidates = []
         for shape in filters.shapes:
             n_give, n_get = int(shape[0]), int(shape[2])
@@ -203,6 +246,8 @@ def find_trades(
                     if get_p and not (get_p & set(get)):
                         continue
                     if get_pos and not any(pos.get(p) in get_pos for p in get):
+                        continue
+                    if filters.players and not ((sells & set(give)) or (buys & set(get))):
                         continue
                     cons_in = sum(market.consensus.get(p, 0.0) for p in give)
                     cons_out = sum(market.consensus.get(p, 0.0) for p in get)
