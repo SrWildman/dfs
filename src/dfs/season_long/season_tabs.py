@@ -19,6 +19,7 @@ as a letter, so a column added to a raw tab moves every formula with it.
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -177,9 +178,24 @@ def players_frame(runs: list[LeagueRun]) -> pd.DataFrame:
     return frame.sort_values(["League", "ROSWeighted"], ascending=[True, False]).head(RAW_ROWS - 1)
 
 
+_DATE_LIKE = re.compile(r"^\d{1,4}[-/]\d{1,2}([-/]\d{1,4})?$")
+
+
+def literal(value: object) -> object:
+    """A text cell as typed text. Sheets parses what it is sent (USER_ENTERED), so "8-6" became a date and
+    "+33.4 value" a broken formula; a leading apostrophe keeps either as the text it is. Numbers pass."""
+    if isinstance(value, str) and (value[:1] in {"=", "+", "-"} or _DATE_LIKE.match(value)):
+        return "'" + value
+    return value
+
+
+def literal_rows(rows: list[list]) -> list[list]:
+    return [[literal(v) for v in row] for row in rows]
+
+
 def cells(frame: pd.DataFrame) -> list[list]:
     body = frame.astype(object).where(frame.notna(), "").values.tolist()
-    return [list(frame.columns), *body]
+    return literal_rows([list(frame.columns), *body])
 
 
 # -- visible tabs ------------------------------------------------------------------------------------------
@@ -357,8 +373,10 @@ def box_rows(values: dict[str, str]) -> list[list]:
 def view_formula(raw: str, columns: list[str], view: list[str], sort_by: str, ascending: bool) -> str:
     """`=SORT(FILTER({cols}, League = B1), sort col, asc)` over the raw tab, columns by name."""
     league = raw_letter(columns, "League")
-    picks = ", ".join(f"{raw}!{raw_letter(columns, c)}2:{raw_letter(columns, c)}{RAW_ROWS}" for c in view)
-    cond = f"{raw}!{league}2:{league}{RAW_ROWS}=$B$1"
+    # Open-ended ranges (`B2:B`): a sync that grows a raw tab inserts rows, and Sheets moves a fixed end row
+    # (B2:B5000 became B2:B6085 on the first real sync), which the doctor then reads as stale.
+    picks = ", ".join(f"{raw}!{raw_letter(columns, c)}2:{raw_letter(columns, c)}" for c in view)
+    cond = f"{raw}!{league}2:{league}=$B$1"
     sort_index = view.index(sort_by) + 1
     return (
         f'=IFERROR(SORT(FILTER({{{picks}}}, {cond}), {sort_index}, {"TRUE" if ascending else "FALSE"}), "")'

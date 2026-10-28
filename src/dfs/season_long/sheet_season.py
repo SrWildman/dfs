@@ -141,7 +141,9 @@ def _write_block(
     width = max(len(r) for r in rows) if rows else 1
     client.clear_ranges(tab, [f"A1:{column_letter(max(width, 12) - 1)}{max(len(rows) + 50, 200)}"])
     client.update_range(
-        tab, f"A1:{column_letter(width - 1)}{len(rows)}", [r + [""] * (width - len(r)) for r in rows]
+        tab,
+        f"A1:{column_letter(width - 1)}{len(rows)}",
+        st.literal_rows([r + [""] * (width - len(r)) for r in rows]),
     )
     with client.batched():
         client.format_range(
@@ -198,7 +200,9 @@ def _write_ideas_table(client: SheetsClient, ideas: list[list], names: list[str]
     tf = st.TRADE_FINDER_TAB
     client.clear_ranges(tf, [f"A{first}:{column_letter(len(st.IDEAS_HEADER) - 1)}{first + 500}"])
     client.update_range(
-        tf, f"A{first}:{column_letter(len(st.IDEAS_HEADER) - 1)}{first + len(ideas) - 1}", ideas
+        tf,
+        f"A{first}:{column_letter(len(st.IDEAS_HEADER) - 1)}{first + len(ideas) - 1}",
+        st.literal_rows(ideas),
     )
     header, *_ = _style()
     client.format_range(tf, f"A{first}:{column_letter(len(st.IDEAS_HEADER) - 1)}{first}", header)

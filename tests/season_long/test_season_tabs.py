@@ -9,8 +9,8 @@ def test_view_formulas_find_columns_by_name():
     formula = st.league_tab_rows()[-1][0]
     team = st.raw_letter(st.TEAM_COLUMNS, "Team")
     league = st.raw_letter(st.TEAM_COLUMNS, "League")
-    assert f"{st.TEAMS_RAW}!{team}2:{team}{st.RAW_ROWS}" in formula
-    assert f"{st.TEAMS_RAW}!{league}2:{league}{st.RAW_ROWS}=$B$1" in formula
+    assert f"{st.TEAMS_RAW}!{team}2:{team}," in formula
+    assert f"{st.TEAMS_RAW}!{league}2:{league}=$B$1" in formula
     assert f", {st.LEAGUE_VIEW.index(st.LEAGUE_SORT) + 1}, TRUE)" in formula
     players = st.players_tab_rows()
     assert players[st.VIEW_HEADER_ROW - 1] == st.PLAYERS_VIEW
@@ -44,3 +44,11 @@ def test_tabs_from_a_synthetic_run(monkeypatch):
     assert block.rows[block.title_rows[0] - 1][0].startswith("Test: Team 1")
     rows = st.ideas_rows([run])
     assert rows[0] == st.IDEAS_HEADER and len(rows) == len(ideas) + 1
+
+
+def test_text_that_sheets_would_parse_is_written_as_text():
+    assert st.literal("8-6") == "'8-6" and st.literal("+33.4 value") == "'+33.4 value"
+    assert st.literal("=SUM(A1)") == "'=SUM(A1)" and st.literal("-1.4/wk") == "'-1.4/wk"
+    assert st.literal("Bourbon") == "Bourbon" and st.literal(12.5) == 12.5 and st.literal("124%") == "124%"
+    frame = st.pd.DataFrame({"Record": ["8-6"], "Gain": ["+3.1"]})
+    assert st.cells(frame) == [["Record", "Gain"], ["'8-6", "'+3.1"]]
