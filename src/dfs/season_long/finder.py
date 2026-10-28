@@ -34,6 +34,9 @@ SHAPES = ("1-1", "2-1", "1-2", "2-2")
 SCREEN_PARTNER_SLACK = 5.0
 # Ask for FAAB when the market has the partner this far ahead.
 ASK_MARGIN = 0.15
+# Beyond this (the partner's consensus in over out), an idea is "lopsided": too good for them to look like
+# a real offer, so it is hidden unless asked for, and always carries the FAAB to ask back (2026-10-28).
+LOPSIDED_MARKET = 1.25
 
 
 @dataclass
@@ -44,6 +47,7 @@ class Filters:
     partner: str | None = None
     shapes: tuple[str, ...] = SHAPES
     max_consensus_loss: float = tr.DEFAULT_MAX_CONSENSUS_LOSS
+    show_lopsided: bool = False
 
 
 @dataclass
@@ -52,6 +56,7 @@ class Idea:
     shape: str
     why: str
     ask_faab: int = 0
+    lopsided: bool = False
 
 
 def parse_shapes(text: str | None) -> tuple[str, ...]:
@@ -131,7 +136,7 @@ def _slot_line(view: LeagueView, ev: Evaluator, old: list[str], new: list[str]) 
     return f"{best} {b[best] - a[best]:+.1f}/wk"
 
 
-def _why(view: LeagueView, ev: Evaluator, a: tr.Analysis, ask: int) -> str:
+def _why(view: LeagueView, ev: Evaluator, a: tr.Analysis, ask: int, lopsided: bool = False) -> str:
     me, partner = view.league.my_roster_id, a.partner
     mine_old, theirs_old = ev.rosters[me], ev.rosters[partner]
     mine_new = [p for p in mine_old if p not in a.give.players] + a.get.players
@@ -150,6 +155,8 @@ def _why(view: LeagueView, ev: Evaluator, a: tr.Analysis, ask: int) -> str:
     parts += a.labels
     if ask:
         parts.append(f"could ask ${ask} FAAB back")
+    elif lopsided:
+        parts.append(f"lopsided, but they have ${ev.faab[partner]} FAAB to give back")
     return "; ".join(parts)
 
 
@@ -207,6 +214,9 @@ def find_trades(
                         sweet = math.ceil(short / market.points_per_dollar)
                         if sweet > ev.faab[me]:
                             continue
+                    if not filters.show_lopsided and cons_out > 0:
+                        if (cons_in + sweet * market.points_per_dollar) / cons_out > LOPSIDED_MARKET:
+                            continue
                     new_me, _, _ = tr.settle(
                         [p for p in mine if p not in give] + list(get), len(mine), view, fa
                     )
@@ -233,11 +243,18 @@ def find_trades(
             fair = a.fair_ratio >= 1 - filters.max_consensus_loss
             if a.me.delta <= 0 or a.them.delta <= 0 or not fair:
                 continue
+            lopsided = a.fair_ratio > LOPSIDED_MARKET
+            if lopsided and not filters.show_lopsided:
+                continue
             ask = 0
-            if market.points_per_dollar > 0 and a.fair_ratio > 1 + ASK_MARGIN and math.isfinite(a.fair_ratio):
+            if market.points_per_dollar > 0 and a.fair_ratio > 1 + ASK_MARGIN:
                 surplus = a.them.consensus_in - a.them.consensus_out * (1 + ASK_MARGIN / 2)
-                ask = int(min(surplus / market.points_per_dollar, ev.faab[rid]))
-            ideas.append(Idea(a, shape, _why(view, ev, a, ask), ask))
+                ask = (
+                    int(min(surplus / market.points_per_dollar, ev.faab[rid]))
+                    if math.isfinite(surplus)
+                    else 0
+                )
+            ideas.append(Idea(a, shape, _why(view, ev, a, ask, lopsided), ask, lopsided))
     ideas.sort(key=lambda i: -i.analysis.me.delta)
     return ideas[:top]
 

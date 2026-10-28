@@ -95,6 +95,7 @@ def player_table(players: dict) -> pd.DataFrame:
                 "team": p.get("team") or "",
                 "injury_status": p.get("injury_status") or "",
                 "search_rank": p.get("search_rank") if p.get("search_rank") is not None else 9_999_999,
+                "depth": p.get("depth_chart_order") if p.get("depth_chart_order") is not None else 99,
             }
         )
     return pd.DataFrame(rows).set_index("player_id")

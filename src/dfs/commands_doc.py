@@ -138,6 +138,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         "`dfs season sync`; docs/SEASON.md has the method.",
         [
             "dfs season sync",
+            "dfs season waivers",
             "dfs season trades",
             "dfs season trade",
             "dfs season ros",

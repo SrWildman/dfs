@@ -72,7 +72,7 @@ def _client(cfg, sheet_id: str | None):
     return client
 
 
-def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True):
+def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: bool = True):
     """One league's view, evaluator, market and ideas (`season_tabs.LeagueRun`)."""
     from dfs.season_long import finder as fd
     from dfs.season_long import league_view, objective
@@ -87,6 +87,16 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True):
         view, ev, market, ideas, tr.free_move(view, ev, view.league.my_roster_id, tr.free_agents(view))
     )
     lg = view.league
+    from dfs.season_long import consensus_check
+
+    consensus_check.archive_ours(lg.name, view.ros.summary)
+    run.check = consensus_check.score(lg.name, lg.scoring, lg.season, lg.last_scored_week, view.table).line()
+    if waive:
+        from dfs.season_long import waivers as wv
+
+        run.pickups = wv.rank_pickups(view, ev, top=5)
+        run.cuffs = wv.handcuffs(view, ev)
+        run.chop = wv.chop_plan(view, ev)
     if lg.raw_settings.get("league_average_match"):
         run.notes.append(st.MEDIAN_NOTE)
     if lg.raw_settings.get("divisions") and not lg.chopped:
@@ -103,7 +113,7 @@ def _table():
     return ros.player_table(sl.fetch_players())
 
 
-def _filters(get, give, keep, partner, shapes, max_loss):
+def _filters(get, give, keep, partner, shapes, max_loss, lopsided=False):
     from dfs.season_long import finder as fd
     from dfs.season_long import trade as tr
 
@@ -122,6 +132,7 @@ def _filters(get, give, keep, partner, shapes, max_loss):
             partner=partner or None,
             shapes=fd.parse_shapes(shapes),
             max_consensus_loss=loss,
+            show_lopsided=bool(lopsided),
         )
     except tr.TradeError as e:
         raise _fail(str(e)) from e
@@ -202,6 +213,11 @@ def season_trades(
         None, "--max-consensus-loss", help="How far below fair (by the market) the partner may come out (5%)."
     ),
     top: int = typer.Option(20, "--top", help="Ideas to keep."),
+    lopsided: bool = typer.Option(
+        False,
+        "--lopsided",
+        help="Also show ideas the market has over 125% for the partner (with the FAAB to ask back).",
+    ),
     from_sheet: bool = typer.Option(
         False,
         "--from-sheet",
@@ -217,7 +233,7 @@ def season_trades(
 
     cfg = _config()
     client = None if no_sheet else _client(cfg, sheet_id)
-    typed = [get, give, keep, partner, shapes, max_consensus_loss]
+    typed = [get, give, keep, partner, shapes, max_consensus_loss, lopsided]
     if client is not None and (from_sheet or not any(typed)):
         box = ss.read_box(client)
         if box:
@@ -229,7 +245,8 @@ def season_trades(
                 box.get("Shapes"),
                 box.get("Max consensus loss"),
             )
-    filters = _filters(get, give, keep, partner, shapes, max_consensus_loss)
+            lopsided = lopsided or box.get("Show lopsided", "").strip().lower() in {"yes", "y", "true", "1"}
+    filters = _filters(get, give, keep, partner, shapes, max_consensus_loss, lopsided)
     chosen = _leagues(cfg, league, all_leagues)
     table = _table()
     runs = []
@@ -241,6 +258,63 @@ def season_trades(
         _print(_summary(runs[-1]))
     if client is not None and runs:
         _print([f"[sheet] {ss.write_ideas(client, runs)}"])
+
+
+@season_app.command("waivers")
+def season_waivers(
+    league: str = typer.Option(None, "--league", help=LEAGUE_HELP),
+    all_leagues: bool = typer.Option(False, "--all", help=ALL_HELP + " (the default)."),
+    player: str = typer.Option(
+        None, "--player", help='One free agent: what he adds and what to bid ("Bo Nix").'
+    ),
+    top: int = typer.Option(5, "--top", help="Pickups per league."),
+    no_sheet: bool = typer.Option(False, "--no-sheet", help="Print only; write nothing."),
+    sheet_id: str = typer.Option(None, "--sheet-id", help="A Season sheet other than season.toml's."),
+) -> None:
+    """Free agents ranked by what each adds to your team (the drop that pays for him, this week apart), with
+    a FAAB bid guide from the league's own claims, handcuffs to stash, and a chopped league's bid plan.
+    Writes the Waivers tab (sync also does)."""
+    from dfs.season_long import finder as fd
+    from dfs.season_long import season_tabs as st
+    from dfs.season_long import sheet_season as ss
+    from dfs.season_long import trade as tr
+    from dfs.season_long import waivers as wv
+
+    cfg = _config()
+    chosen = _leagues(cfg, league, all_leagues, default_all=True)
+    client = None if (no_sheet or player) else _client(cfg, sheet_id)
+    table = _table()
+    runs = []
+    for lc in chosen:
+        run = _run(lc, cfg, table, find=False, waive=player is None)
+        v = run.view
+        if player:
+            try:
+                hits = fd._resolve([player], tr.free_agents(v), v)[0]
+            except tr.TradeError as e:
+                raise _fail(f"{lc.name}: {e} (only free agents can be bid on)") from e
+            picks = wv.rank_pickups(v, run.ev, only=list(hits))
+            _print([f"{lc.name}: {wv.pickup_line(v, p)}" for p in picks])
+            continue
+        lines = [f"{lc.name}: FAAB ${v.league.me.faab_left}; free move first: {st.free_move_text(run)}"]
+        lines += [f"  {i}. {wv.pickup_line(v, p)}" for i, p in enumerate(run.pickups[:top], 1)]
+        lines += [
+            f"  handcuff: {v.name(pid)} (+{val:.1f}, backs up {v.name(rb1)})" for pid, val, rb1 in run.cuffs
+        ]
+        if run.chop is not None:
+            c = run.chop
+            lines.append(
+                f"  bid plan: {c.team} is {c.chop_risk:.0%} likely chopped this week; you have ${c.faab}"
+            )
+            for pid, gain, worth, price in c.picks:
+                lines.append(
+                    f"    {v.name(pid)}: survival {gain:+.3f}, worth ${worth}, the league paid ${price:.0f} "
+                    f"for that pick -> {c.bid(worth, price)}"
+                )
+        _print(lines)
+        runs.append(run)
+    if client is not None and runs:
+        _print([f"[sheet] {ss.write_waivers(client, runs)}"])
 
 
 @season_app.command("trade")

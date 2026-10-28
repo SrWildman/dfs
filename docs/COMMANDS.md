@@ -341,6 +341,19 @@ Sync every league from Sleeper, rebuild values and trade ideas, and write the Se
 | `--no-sheet` | Print only; write nothing. |
 | `--sheet-id STR` | A Season sheet other than season.toml's. |
 
+### `dfs season waivers`
+
+Free agents ranked by what each adds to your team (the drop that pays for him, this week apart), with a FAAB bid guide from the league's own claims, handcuffs to stash, and a chopped league's bid plan. Writes the Waivers tab (sync also does).
+
+| Option | What it does |
+|---|---|
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--all` | Every league in season.toml. (the default). |
+| `--player STR` | One free agent: what he adds and what to bid ("Bo Nix"). |
+| `--top INT` | Pickups per league. Default: `5`. |
+| `--no-sheet` | Print only; write nothing. |
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
 ### `dfs season trades`
 
 Find realistic trades: you gain, the partner gains by our model, and the market calls it fair for them. Writes this league's ideas onto the Trade Finder tab.
@@ -356,6 +369,7 @@ Find realistic trades: you gain, the partner gains by our model, and the market 
 | `--shapes STR` | You give - you get: 1-1, 2-1, 1-2, 2-2 (default all). |
 | `--max-consensus-loss STR` | How far below fair (by the market) the partner may come out (5%). |
 | `--top INT` | Ideas to keep. Default: `20`. |
+| `--lopsided` | Also show ideas the market has over 125% for the partner (with the FAAB to ask back). |
 | `--from-sheet` | Use the Trade Finder tab's targeting box (also used when no filter is given). |
 | `--no-sheet` | Print only; write nothing. |
 | `--sheet-id STR` | A Season sheet other than season.toml's. |

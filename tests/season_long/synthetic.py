@@ -30,7 +30,7 @@ PLAYERS = {
 def table() -> pd.DataFrame:
     rows = [
         {"player_id": p, "name": p.upper(), "position": pos, "fantasy_positions": (pos,), "team": "NFL",
-         "injury_status": "", "search_rank": 1}
+         "injury_status": "", "search_rank": 1, "depth": 1}
         for p, (pos, _, _) in PLAYERS.items()
     ]  # fmt: skip
     return pd.DataFrame(rows).set_index("player_id")
