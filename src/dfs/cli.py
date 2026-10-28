@@ -5200,6 +5200,13 @@ def week_close(
         help="Reconcile this week's ledger instead of the week the connected sheet's own "
         "title says it is. Only needed to hand-reconcile a specific week.",
     ),
+    research: bool = typer.Option(
+        False,
+        "--research",
+        help="After the close, run Monday's offline studies unattended (research refresh, the stacks retro, "
+        "the ownership-uncertainty backtests, the sim retro; under 45 minutes) and write one report, "
+        "docs/research/weekly/<season>-wk<NN>-close.md. Fail-soft: the close itself is already done.",
+    ),
 ) -> None:
     """End-of-week bankroll reconciliation -- currently a thin wrapper over
     `dfs bankroll sync --csv`; see below for why it isn't more than that yet.
@@ -5217,12 +5224,79 @@ def week_close(
     tradeoff -- this is his account, his call.
     """
     cfg = _load_config_or_exit()
+    if research:
+        console.record = True  # the report quotes what the close printed
+        console.export_text(clear=True)
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
     csv = _resolve_history_csv(cfg, csv)
     _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
     _keep_dk_files_before_scoring(cfg, csv)
     _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
+    if research:
+        _research_after_close(cfg, week)
+
+
+def _research_after_close(cfg: Config, week: int | None) -> None:
+    """`week close --research`: Monday's offline studies and their one report. NEVER fails the close (it is
+    done); the studies run as child processes under `caffeinate` where there is one and stop at the
+    deadline."""
+    from dfs import close_research
+    from dfs.nfl_calendar import current_season
+    from dfs.research import refresh
+
+    close_text = console.export_text(clear=False)
+    console.record = False
+    console.print("\n[bold]Research[/bold] (the weekly studies, unattended; under 45 minutes)...")
+    try:
+        season = current_season()
+        scored = refresh.latest_scored_week(season)
+        client = SheetsClient(cfg.google_sheets)
+        title, _url = client.describe()
+        from dfs.week import parse_week_from_title
+
+        try:
+            closed = week if week is not None else parse_week_from_title(title)
+        except ValueError:
+            closed = scored
+        if closed is None or scored is None or scored < closed:
+            console.print(
+                f"[yellow]Week {closed} is not scored yet (nflverse posts stats a day or two late); run "
+                "`dfs results update`, then `dfs research close-report`.[/yellow]"
+            )
+            return
+        close_research.save_close_text(season, closed, close_text)
+        decisions = close_research.decisions_from_tab(client)
+        keep_awake = _keep_awake()
+        try:
+            path, results, wall = close_research.run(
+                season,
+                closed,
+                close_text=close_text,
+                decisions=decisions,
+                log=lambda line: console.print(escape(line)),
+            )
+        finally:
+            if keep_awake is not None:
+                keep_awake.terminate()
+        for line in close_research.summary_lines(results, season, closed, path, wall, decisions):
+            console.print(escape(line), highlight=False, soft_wrap=True)
+    except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over the studies
+        console.print(
+            f"[yellow]Research not run ({escape(str(e))}); `dfs research close-report` runs it.[/yellow]"
+        )
+
+
+def _keep_awake():  # noqa: ANN202 - a Popen or None
+    """Hold off idle sleep for as long as this process runs (a sleeping Mac froze long jobs for an hour).
+    macOS `caffeinate -i -w <pid>`; None where it is not available."""
+    import os
+    import subprocess
+
+    try:
+        return subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])  # noqa: S603, S607
+    except OSError:
+        return None
 
 
 def _keep_dk_files_before_scoring(cfg: Config, csv: Path) -> None:

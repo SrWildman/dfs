@@ -1766,7 +1766,8 @@ on its own stake and size, scored on the SAME players for every spec (TFFB 1%+).
   own stake and size, its duplicate estimate on that mean). Regenerating per scenario was not needed.
 - Backtest: `own_error_flag` registers the same two as Flashback flags (`ownership_mean`, `ownership_uncertainty`); a backtest of week N
   uses the model fitted on the weeks before N only (`own_error_retro.model_before`, cached in `data/model_cache/own_error/`). After each
-  close: one `dfs backtest --compare` per flag, and `python -m dfs.sim.own_error_sim_retro` with the new week.
+  close: one `dfs backtest --compare` per flag, and `python -m dfs.sim.own_error_sim_retro` with the new week
+  (`dfs week close --research` does both, from `research/settings/*.toml`, and folds them into the week's close report).
 
 ### The measures, held out by week
 

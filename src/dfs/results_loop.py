@@ -227,9 +227,52 @@ def props_for_week(week: int, season: int) -> pd.DataFrame | None:
     return chosen if not chosen.empty else None
 
 
-def load_week_inputs(week: int, season: int, when: datetime) -> WeekInputs | None:
+def _week_began(week: int, season: int) -> datetime:
+    """The week's first moment (its Tuesday, 00:00 UTC): what separates its snapshots
+    from the week before's."""
+    return datetime.combine(nfl_calendar.week_start_date(week, season), datetime.min.time(), tzinfo=UTC)
+
+
+def espn_before_kickoff(
+    selected: pd.DataFrame, fallback: datetime, since: datetime | None = None
+) -> pd.DataFrame | None:
+    """ESPN's projection per player from the last ESPN snapshot taken BEFORE HIS TEAM'S kickoff (`selected`
+    carries `Team` and `GameStart`), the rule TFFB's and the props' projections get. `as_of` the week's
+    reference moment alone let a Thursday or early-window player have ESPN's later (post-kickoff) numbers. A
+    team `selected` does not know keeps the latest snapshot at or before `fallback`. None when there is no
+    ESPN snapshot to use. `since` drops snapshots before the week began (an earlier week's numbers for a
+    player the newer snapshots no longer list)."""
+    kickoffs = {}
+    if {"Team", "GameStart"} <= set(selected.columns):
+        starts = kickoff_utc(selected["GameStart"])
+        kickoffs = dict(zip(selected["Team"], starts, strict=True))
+    rows = []
+    for stamp, path in snapshot_files("espn"):
+        if since is not None and stamp < since:
+            continue
+        frame = read_snapshot(path)
+        if frame is None or frame.empty or "Team" not in frame.columns:
+            continue
+        start = frame["Team"].map(kickoffs)
+        usable = (start > pd.Timestamp(stamp)).fillna(False).astype(bool)
+        unknown = start.isna() & (stamp <= fallback)
+        framed = frame[usable | unknown].copy()
+        framed["_stamp"] = pd.Timestamp(stamp)
+        rows.append(framed)
+    if not rows:
+        return None
+    pooled = pd.concat(rows, ignore_index=True)
+    best = pooled.sort_values("_stamp").groupby(["Name", "Team", "Position"], as_index=False).tail(1)
+    return best.drop(columns="_stamp").reset_index(drop=True)
+
+
+def load_week_inputs(
+    week: int, season: int, when: datetime, selected: pd.DataFrame | None = None
+) -> WeekInputs | None:
     """Every source the edge build reads, as of `when`. None when no DraftKings file exists yet
-    (nothing to score against)."""
+    (nothing to score against). Given `selected` (the week's projection rows), ESPN comes per player from
+    the last snapshot before his team's kickoff (`espn_before_kickoff`) instead of as of `when` for
+    everyone."""
     salaries = as_of("draftkings", when)
     if salaries is None:
         return None
@@ -245,7 +288,9 @@ def load_week_inputs(week: int, season: int, when: datetime) -> WeekInputs | Non
         snaps=as_of("snaps", when),
         team_metrics=as_of("pbp", when),
         present=[],
-        espn=as_of("espn", when),
+        espn=as_of("espn", when)
+        if selected is None
+        else espn_before_kickoff(selected, when, _week_began(week, season)),
         props=props_for_week(week, season),
     )
     inputs.present = [
@@ -433,7 +478,7 @@ def score_week(
     if reference is None:
         log.warning("week %s: no projection snapshot before kickoff", week)
         return None
-    inputs = load_week_inputs(week, season, reference)
+    inputs = load_week_inputs(week, season, reference, selected)
     if inputs is None:
         log.warning("week %s: no DraftKings salary file as of %s", week, reference)
         return None

@@ -176,6 +176,7 @@ End-of-week bankroll reconciliation -- currently a thin wrapper over `dfs bankro
 |---|---|
 | `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). Left out, the newest history export in your Downloads folder is used (found by its header row; [contests] downloads_dir in config.toml changes the folder). |
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
+| `--research` | After the close, run Monday's offline studies unattended (research refresh, the stacks retro, the ownership-uncertainty backtests, the sim retro; under 45 minutes) and write one report, docs/research/weekly/<season>-wk<NN>-close.md. Fail-soft: the close itself is already done. |
 
 ### `dfs results update`
 
@@ -437,6 +438,17 @@ Rerun the weekly offline studies with the closed weeks so far and write one repo
 | `--season INT` | Override the auto-detected NFL season. |
 | `--shuffles INT` | Shuffled-feature tables behind the five-pair retest's chance control. Default: `40`. |
 | `--only STR` | Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, props, contest_retro, curse; backtest (the Flashback backtest, about 6 minutes) runs only when named here. |
+
+### `dfs research close-report`
+
+Monday's offline studies and their one report, on their own (`dfs week close --research` runs the same after the close): research refresh, the stacks retro, the ownership-uncertainty backtests against today and the sim retro. Reads no sheet and writes none; the stages run side by side, each with a log under data/research/close/. Writes docs/research/weekly/<season>-wk<NN>-close.md and prints a 15-line summary.
+
+| Option | What it does |
+|---|---|
+| `--week INT` | The closed week to study (default: the newest scored week). |
+| `--season INT` | Override the auto-detected NFL season. |
+| `--only STR` | Comma-separated stages: refresh, stacks, backtest, own_error (default: all four). |
+| `--deadline FLOAT` | Minutes after which a stage still running is stopped. Default: `45.0`. |
 
 ### `dfs backtest`
 

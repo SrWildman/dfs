@@ -1,0 +1,5 @@
+# The same draws for the GPP builds only; the cash builds are scored on the plain field. Shadow, default off.
+name = "ownership uncertainty (GPP only)"
+
+[flags]
+ownership_uncertainty_gpp = true

@@ -111,3 +111,43 @@ def research_refresh(
         raise _fail(str(e)) from e
     for line in refresh.summary_lines(studies, load_seconds, path, season, through):
         console.print(escape(line), highlight=False, soft_wrap=True)
+
+
+@research_app.command("close-report")
+def research_close_report(
+    week: int = typer.Option(
+        None, "--week", help="The closed week to study (default: the newest scored week)."
+    ),
+    season: int = typer.Option(None, "--season", help="Override the auto-detected NFL season."),
+    only: str = typer.Option(
+        None,
+        "--only",
+        help="Comma-separated stages: refresh, stacks, backtest, own_error (default: all four).",
+    ),
+    deadline: float = typer.Option(
+        45.0, "--deadline", help="Minutes after which a stage still running is stopped."
+    ),
+) -> None:
+    """Monday's offline studies and their one report, on their own (`dfs week close --research` runs the
+    same after the close): research refresh, the stacks retro, the ownership-uncertainty backtests against
+    today and the sim retro. Reads no sheet and writes none; the stages run side by side, each with a log
+    under data/research/close/. Writes docs/research/weekly/<season>-wk<NN>-close.md and prints a 15-line
+    summary."""
+    from dfs import close_research
+    from dfs.nfl_calendar import current_season
+    from dfs.research import refresh
+
+    season = season or current_season()
+    if week is None:
+        week = refresh.latest_scored_week(season)
+    if week is None:
+        raise _fail(f"no scored weeks for {season} yet -- run `dfs results update` first")
+    stages = tuple(k.strip() for k in only.split(",") if k.strip()) if only else close_research.STAGE_NAMES
+    unknown = [k for k in stages if k not in close_research.STAGE_NAMES]
+    if unknown:
+        raise _fail(f"unknown stages {unknown}; choose from {', '.join(close_research.STAGE_NAMES)}")
+    path, results, wall = close_research.run(
+        season, week, stages=stages, deadline_minutes=deadline, log=lambda m: console.print(escape(m))
+    )
+    for line in close_research.summary_lines(results, season, week, path, wall):
+        console.print(escape(line), highlight=False, soft_wrap=True)
