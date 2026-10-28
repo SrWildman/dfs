@@ -217,6 +217,7 @@ def update_results(
             props_shadow=_props_shadow(season, stats_player, report),
             teammate_race=_teammate_bump_race(season, scored),
             opportunity=opportunity,
+            our_dst_race=_our_dst_race(season, scored),
         )
         with client.batched():  # the header notes are one request each; send them together
             summary = write_model_check(client, layout, MODEL_CHECK_TAB)
@@ -305,6 +306,18 @@ def _teammate_bump_race(season: int, scored: pd.DataFrame) -> pd.DataFrame | Non
         return calibration.teammate_bump_race(scored, teammate_bump.season_roles(season))
     except Exception as e:  # noqa: BLE001 - never fail a results update over a shadow
         log.warning("teammate bump shadow skipped: %s", e)
+        return None
+
+
+def _our_dst_race(season: int, scored: pd.DataFrame) -> pd.DataFrame | None:
+    """OurDST's Model Check rows (`dfs.model.dst_study.model_check_race`). Fail soft: None (no row) when the
+    nflverse cache is missing or anything in the model breaks."""
+    try:
+        from dfs.model import dst_study
+
+        return dst_study.model_check_race(scored, season)
+    except Exception as e:  # noqa: BLE001 - never fail a results update over a shadow
+        log.warning("OurDST shadow skipped: %s", e)
         return None
 
 

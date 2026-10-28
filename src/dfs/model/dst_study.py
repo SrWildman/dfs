@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from dfs.calibration import backtest_frame
+from dfs.calibration import SHADOW_RACE_COLUMNS, backtest_frame, score_predictions
 from dfs.model import data, distribution, dst
 from dfs.model.history import team_game_context
 from dfs.paths import DATA_DIR
@@ -49,11 +49,12 @@ TRAILING_GAMES = 8
 SHIP_SE = 2.0
 # UM's DST row on the same held-out seasons (docs/MODEL.md, "DST 4,670 / 1,632"): quoted, not rerun.
 UM_HOLDOUT = {"MAE": 4.683, "Rho": 0.187}
+CALPTS_SET = "Weeks 2+ (CalPts)"
 
 
-def load_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """`dst_games`, `qb_games` and the schedule from the model cache."""
-    seasons = list(range(data.FIRST_SEASON, SEASON + 1))
+def load_inputs(season: int = SEASON) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """`dst_games`, `qb_games` and the schedule from the model cache, through `season`."""
+    seasons = list(range(data.FIRST_SEASON, season + 1))
     stats_team = data.read_season_files("stats_team", seasons)
     stats_player = data.read_season_files("stats_player", seasons)
     games = data.read_games()
@@ -254,9 +255,14 @@ def load_scored(season: int = SEASON) -> pd.DataFrame:
     return pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
 
 
-def slate_rows(frame: pd.DataFrame, games: pd.DataFrame, season: int) -> pd.DataFrame:
+def slate_rows(
+    frame: pd.DataFrame, games: pd.DataFrame, season: int, qb_games: pd.DataFrame | None = None
+) -> pd.DataFrame:
     """`dst.ROW_COLUMNS` for every DST row of `frame` (`Team`, `week`) from the schedule: opponent, Vegas,
-    roof and the opponent's starting QB. Index follows `frame`; a team with no game that week is dropped."""
+    roof and the opponent's starting QB. Where the schedule names no starter yet (a game not played, or
+    nflverse not updated), the opponent's starter in its previous game (`dst.previous_starters`, given
+    `qb_games`): an unknown QB would otherwise read as a rookie. Index follows `frame`; a team with no game
+    that week is dropped."""
     sched = games[(games["season"] == season) & (games["game_type"] == "REG")]
     ctx = team_game_context(sched)
     side = pd.concat(
@@ -292,6 +298,11 @@ def slate_rows(frame: pd.DataFrame, games: pd.DataFrame, season: int) -> pd.Data
     merged = rows.merge(side, on=["team", "week"], how="inner").set_index("_i")
     merged.index.name = None
     merged["season"] = season
+    if qb_games is not None:
+        merged["opp_qb_id"] = merged["opp_qb_id"].astype(object)  # all-NaN arrives as float
+        missing = merged["opp_qb_id"].isna()
+        if missing.any():
+            merged.loc[missing, "opp_qb_id"] = dst.previous_starters(merged[missing], qb_games)
     return merged[dst.ROW_COLUMNS]
 
 
@@ -317,7 +328,7 @@ def season_race(
     week1 = scored[pd.to_numeric(scored["week"]) == scored["week"].min()]
     frame = pd.concat([usable(week1, "pool").assign(CalPts=np.nan), frame], ignore_index=True)
     frame = frame[frame["Position"] == "DST"].reset_index(drop=True)
-    rows = slate_rows(frame, games, season)
+    rows = slate_rows(frame, games, season, qb_games)
     pred, draws = dst.predict(model, rows, dst_games, qb_games)
     feats = dst.dst_features(rows, dst_games, qb_games, model.priors, model.params)
     frame["OurDST"] = pred["dst_mean"].reindex(frame.index)
@@ -330,7 +341,7 @@ def season_race(
     weekly = pd.concat(
         [
             week_metrics(frame, ["OurDST", "TFFB", "Vegas", "UM"]).assign(Set="Weeks 1+"),
-            week_metrics(frame, ["OurDST", "TFFB", "CalPts", "Vegas"]).assign(Set="Weeks 2+ (CalPts)"),
+            week_metrics(frame, ["OurDST", "TFFB", "CalPts", "Vegas"]).assign(Set=CALPTS_SET),
         ],
         ignore_index=True,
     )
@@ -424,6 +435,79 @@ def report(hold: HoldoutResult, race: SeasonResult) -> str:
     pivot.columns = [f"{a} {b}" for a, b in pivot.columns]
     lines.append(_table(pivot.reset_index()))
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Model Check and the weekly refresh
+# ---------------------------------------------------------------------------------------------------------
+
+LABEL = "OurDST (shadow)"
+SHIP_BAR = (
+    "OurDST feeds nothing. It would be worth putting in front of CalPts only if it beat CalPts at DST by "
+    "more than 2 SE of the per-week paired difference (MAE or rho) and in most weeks."
+)
+
+
+def model_check_race(
+    scored: pd.DataFrame,
+    season: int = SEASON,
+    inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None = None,
+) -> pd.DataFrame:
+    """Model Check's SHADOW SOURCES rows for OurDST: `calibration.SHADOW_RACE_COLUMNS` with "Rated by" =
+    "OurDST", the DST row of TFFB, CalPts and OurDST on the DSTs of the weeks CalPts did not train on (Week 2
+    on). OurDST is fitted on every season before `season` and each week's rows see only earlier games.
+    Empty before a DST has been scored."""
+    empty = pd.DataFrame(columns=SHADOW_RACE_COLUMNS)
+    frame = backtest_frame(scored, season=season)
+    if frame.empty:
+        return empty
+    frame = frame[frame["Position"] == "DST"]
+    if frame.empty:
+        return empty
+    dst_games, qb_games, games = inputs or load_inputs(season)
+    model = dst.fit(dst_games, qb_games, (data.FIRST_SEASON, season - 1))
+    rows = slate_rows(frame, games, season, qb_games)
+    pred, _ = dst.predict(model, rows, dst_games, qb_games)
+    frame = frame.assign(OurDST=pred["dst_mean"].round(2).reindex(frame.index))
+    rated = frame[frame["OurDST"].notna()]
+    if rated.empty:
+        return empty
+    table = score_predictions(rated, (("TFFB", "ProjPts"), ("CalPts", "CalPts"), (LABEL, "OurDST")))
+    table = table[table["Position"] == "DST"].reset_index(drop=True)
+    table.insert(0, "Rated by", "OurDST")
+    return table
+
+
+def refresh_summary(season: int, through: int) -> dict:
+    """The weekly hook for `dfs research refresh`: OurDST against TFFB and CalPts over the season's scored
+    weeks through `through`, with the paired ship bar."""
+    scored = load_scored(season)
+    scored = scored[pd.to_numeric(scored["week"], errors="coerce") <= through]
+    dst_games, qb_games, games = load_inputs(season)
+    race = season_race(dst_games, qb_games, games, scored, season)
+    cal = race.weekly[race.weekly["Set"] == CALPTS_SET]
+    tab = summary(cal).set_index("Source")
+    vs_cal = {m: paired(cal, m, "OurDST", "CalPts") for m in ("MAE", "Rho")}
+    vs_tffb = {m: paired(cal, m, "OurDST", "TFFB") for m in ("MAE", "Rho")}
+    ships = any(p.passes for p in vs_cal.values())
+    verdict = (
+        "OurDST beats CalPts at DST" if ships else "OurDST does not beat CalPts at DST"
+    ) + f" (Weeks 2-{through}, {int(tab.loc['OurDST', 'n'])} DSTs)."
+    headline = [
+        verdict,
+        "",
+        *_table(summary(cal)).splitlines(),
+        "",
+        *(f"- {p.line()}" for p in (*vs_cal.values(), *vs_tffb.values())),
+    ]
+    metrics: dict[str, float | bool] = {"weeks": int(tab.loc["OurDST", "Weeks"])}
+    for source in ("OurDST", "CalPts", "TFFB"):
+        metrics[f"{source} MAE"] = round(float(tab.loc[source, "MAE"]), 3)
+        metrics[f"{source} rho"] = round(float(tab.loc[source, "Rho"]), 3)
+    for metric, p in vs_cal.items():
+        metrics[f"vs CalPts {metric} z"] = round(p.z, 2)
+    metrics["beats CalPts"] = ships
+    return {"headline": headline, "metrics": metrics, "ship_bar": SHIP_BAR}
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -656,7 +656,13 @@ Boom 8.1 against 5.5, Bust 65.8 against 69.3; TE the other way, 26.0 against 33.
 WR 0.95, TE 1.07, QB and DST 1.00), but 140 to 520 rows per position cannot carry them out of sample yet. Rerun after Week 7 (fit 1-5,
 test 6-7): the machinery is `evaluate`, and a fit would be written with `prob_recal.save` only if it clears.
 
-## OurDST: our own DST projection (study; nothing reads it)
+## OurDST: our own DST projection (shadow: Model Check and the weekly refresh; nothing else reads it)
+
+Shown as the **OurDST** row of Model Check's SHADOW SOURCES (DST, weeks CalPts did not train on, beside TFFB and CalPts;
+fitted on every season before the current one) and as the `dst` study of `dfs research refresh`. It feeds no projection, no
+build and no sheet column. The opposing starter is the schedule's; where the schedule names none yet, his team's starter in its
+previous game (`dst.previous_starters`). Using that for every game instead changes nothing measurable (it matches the schedule
+86% of the time; OurDST moves 0.02 points on average and every number below stays the same to three decimals).
 
 `python -m dfs.model.dst_study` (model: `dst.py`). DK DST points as the sum of their parts, each from what drives it:
 **sacks** from a Poisson regression on the defense's sack and QB-hit rates per dropback faced, the opposing offense's sack rate

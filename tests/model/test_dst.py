@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from dfs.dk_scoring import score_dst_actual_row
-from dfs.model import dst
+from dfs.model import dst, dst_study
 from dfs.model.dst_study import Paired, paired, week_metrics
 
 TEAMS = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"]
@@ -220,3 +220,76 @@ def test_week_metrics_scores_only_rows_every_column_has():
     assert got.loc["a", "n"] == 6
     assert got.loc["a", "MAE"] == 0.0
     assert math.isnan(got.loc["a", "Rho"])  # 6 rows is under the rank-correlation minimum
+
+
+def _schedule(games: pd.DataFrame, qbs_known: bool = True) -> pd.DataFrame:
+    """nflverse-shaped schedule rows for the synthetic league (one per game, from the home side)."""
+    home = games[games["home"] == 1]
+    away = games[games["home"] == 0].set_index("game_id")
+    return pd.DataFrame(
+        {
+            "game_id": home["game_id"],
+            "season": home["season"],
+            "week": home["week"],
+            "game_type": "REG",
+            "home_team": home["team"],
+            "away_team": home["opp"],
+            # each row's opp_qb_id is the OPPONENT's QB: the home QB sits on the away side's row
+            "home_qb_id": home["game_id"].map(away["opp_qb_id"]) if qbs_known else np.nan,
+            "away_qb_id": home["opp_qb_id"] if qbs_known else np.nan,
+            "spread_line": home["spread"],
+            "total_line": home["total"],
+            "roof": "outdoors",
+        }
+    )
+
+
+def test_previous_starters_is_the_opponents_last_starter_before_the_week(league):
+    games, qbs = league
+    extra = qbs.assign(team=qbs["qb_id"].str[3:])
+    backup = extra[(extra["team"] == "BBB") & (extra["t"] == 201502)].assign(qb_id="QB-BBB-2", dropbacks=999)
+    extra = pd.concat([extra, backup], ignore_index=True)
+    rows = pd.DataFrame(
+        {"opp": ["BBB", "BBB", "BBB", "ZZZ"], "season": [2014, 2015, 2015, 2015], "week": [1, 3, 2, 3]}
+    )
+    got = dst.previous_starters(rows, extra)
+    assert pd.isna(got.iloc[0])  # nothing before the first week
+    assert got.iloc[1] == "QB-BBB-2"  # the most dropbacks in BBB's latest earlier game (week 2)
+    assert got.iloc[2] == "QB-BBB"  # week 2 itself is not seen
+    assert pd.isna(got.iloc[3])
+
+
+def test_slate_rows_falls_back_to_the_previous_starter_when_the_schedule_names_none(league):
+    games, qbs = league
+    qbs = qbs.assign(team=qbs["qb_id"].str[3:])
+    frame = pd.DataFrame({"Team": ["AAA", "CCC"], "week": [5, 5]}, index=[10, 11])
+    known = dst_study.slate_rows(frame, _schedule(games), 2017, qbs)
+    unknown = dst_study.slate_rows(frame, _schedule(games, qbs_known=False), 2017, qbs)
+    assert list(known.index) == [10, 11]
+    assert known["opp_qb_id"].notna().all()
+    pd.testing.assert_series_equal(known["opp_qb_id"], unknown["opp_qb_id"])  # here the starter never changes
+    assert dst_study.slate_rows(frame, _schedule(games, qbs_known=False), 2017)["opp_qb_id"].isna().all()
+
+
+def test_model_check_race_is_the_dst_row_of_tffb_calpts_and_ours(monkeypatch, league):
+    games, qbs = league
+    qbs = qbs.assign(team=qbs["qb_id"].str[3:])
+    season = games[games["season"] == 2017]
+    frame = pd.DataFrame(
+        {
+            "season": 2017,
+            "week": season["week"],
+            "Team": season["team"],
+            "Position": "DST",
+            "ProjPts": 7.0,
+            "CalPts": 6.5 + 0.1 * season["week"],
+            "DkActual": season["dk"],
+        }
+    ).reset_index(drop=True)
+    monkeypatch.setattr(dst_study, "backtest_frame", lambda scored, season: frame)
+    race = dst_study.model_check_race(frame, 2017, inputs=(games, qbs, _schedule(games)))
+    assert list(race.columns) == ["Rated by", "Source", "Position", "n", "Rho", "MAE", "Bias"]
+    assert list(race["Source"]) == ["TFFB", "CalPts", dst_study.LABEL]
+    assert (race["Position"] == "DST").all() and (race["n"] == len(frame)).all()
+    monkeypatch.setattr(dst_study, "backtest_frame", lambda scored, season: frame.assign(Position="QB"))
+    assert dst_study.model_check_race(frame, 2017, inputs=(games, qbs, _schedule(games))).empty

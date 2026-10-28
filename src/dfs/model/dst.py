@@ -179,7 +179,7 @@ def _dk_points(fields: pd.DataFrame) -> pd.Series:
 
 
 def build_qb_games(stats_player: pd.DataFrame) -> pd.DataFrame:
-    """One row per QB-game (any team): `qb_id`, `t`, `dropbacks`, `attempts`, `sacks`, `ints`, `fumbles`
+    """One row per QB-game: `qb_id`, `team`, `t`, `dropbacks`, `attempts`, `sacks`, `ints`, `fumbles`
     (lost). Regular season only."""
     sp = stats_player[(stats_player["season_type"] == "REG") & (stats_player["position"] == "QB")].copy()
     sp["season"] = sp["season"].astype(int)
@@ -189,6 +189,7 @@ def build_qb_games(stats_player: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(
         {
             "qb_id": sp["player_id"],
+            "team": sp["team"].map(data.normalize_team),
             "season": sp["season"],
             "week": sp["week"],
             "t": time_key(sp["season"], sp["week"]),
@@ -202,6 +203,31 @@ def build_qb_games(stats_player: pd.DataFrame) -> pd.DataFrame:
     # A QB who only handed off or knelt is not a passing sample.
     out = out[out["dropbacks"] > 0]
     return out.sort_values(["qb_id", "t"]).reset_index(drop=True)
+
+
+def previous_starters(rows: pd.DataFrame, qb_games: pd.DataFrame) -> pd.Series:
+    """For each row (`opp`, `season`, `week`), the opposing team's starter in its latest game strictly before
+    the row's week: the QB with the most dropbacks for that team that game. What is known before the game
+    (a QB change that week is missed); NaN when the team has no earlier game. Index follows `rows`."""
+    games = qb_games.sort_values(["team", "t", "dropbacks"]).groupby(["team", "t"]).tail(1)
+    left = pd.DataFrame(
+        {
+            "team": rows["opp"].to_numpy(),
+            "t": time_key(rows["season"].astype(int), rows["week"].astype(int)).to_numpy(),
+            "_row": range(len(rows)),
+        }
+    ).dropna(subset=["team"])
+    merged = pd.merge_asof(
+        left.sort_values("t"),
+        games[["team", "t", "qb_id"]].sort_values("t"),
+        on="t",
+        by="team",
+        direction="backward",
+        allow_exact_matches=False,
+    ).sort_values("_row")
+    out = pd.Series(np.nan, index=rows.index, dtype=object)
+    out.iloc[merged["_row"].to_numpy()] = merged["qb_id"].to_numpy()
+    return out
 
 
 # -----------------------------------------------------------------------------------------------------
@@ -261,6 +287,9 @@ def state_before(
     left["_row"] = range(len(left))
     right = state.rename(columns={state_key: "_k", "season": "_state_season"})
     left = left[left["_k"].notna()]
+    # one key type on both sides (nflverse ids arrive as pandas strings, a slate's as objects)
+    left["_k"] = left["_k"].astype(str)
+    right["_k"] = right["_k"].astype(str)
     merged = pd.merge_asof(
         left.sort_values("t"),
         right.sort_values("t"),

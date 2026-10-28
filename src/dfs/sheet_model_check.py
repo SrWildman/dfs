@@ -271,13 +271,15 @@ def build_layout(
     props_shadow: Shadow | None = None,
     teammate_race: pd.DataFrame | None = None,
     opportunity: pd.DataFrame | None = None,
+    our_dst_race: pd.DataFrame | None = None,
 ) -> Layout:
     """The whole tab as rows plus formatting instructions. Pure. `signal_table` is
     `results_signals.signal_report` (None when no signals archive exists yet); `ownership` is
     `field_own.score_summary` and `ownership_gaps` `field_own.disagreement` (None leaves the sections out);
     `props_shadow` is `props_edge.Shadow` (None leaves PROPS SHADOW out); `teammate_race` is
     `calibration.teammate_bump_race` (the SHADOW SOURCES row for a starter's absence; None leaves it out);
-    `opportunity` is `results_signals.opportunity_report` (OPPORTUNITY PER DOLLAR; None leaves it out)."""
+    `opportunity` is `results_signals.opportunity_report` (OPPORTUNITY PER DOLLAR; None leaves it out);
+    `our_dst_race` is `dfs.model.dst_study.model_check_race` (the OurDST row; None leaves it out)."""
     b = _Builder()
     pool = scored[scored["RosterablePool"].astype(bool)] if not scored.empty else scored
     counts = ra.dnp_counts(pool) if not pool.empty else {"scored": 0, "dnp": 0, "unmatched": 0}
@@ -303,7 +305,7 @@ def build_layout(
 
     _add_learned(b, scored, signal_table, reliability)
     _add_projection_race(b, scored)
-    _add_shadow_sources(b, scored, teammate_race)
+    _add_shadow_sources(b, scored, teammate_race, our_dst_race)
     _add_ownership(b, ownership)
     _add_ownership_gaps(b, ownership_gaps)
     _add_props_shadow(b, props_shadow)
@@ -777,7 +779,12 @@ def _add_projection_race(b: _Builder, scored: pd.DataFrame) -> None:
     )
 
 
-def _add_shadow_sources(b: _Builder, scored: pd.DataFrame, teammate_race: pd.DataFrame | None = None) -> None:
+def _add_shadow_sources(
+    b: _Builder,
+    scored: pd.DataFrame,
+    teammate_race: pd.DataFrame | None = None,
+    our_dst_race: pd.DataFrame | None = None,
+) -> None:
     """Shadow sources (ESPN, props): tracked from their first scored week, in the CalPts blend only after
     `shadow_min_weeks`. A status line always; the table (the source beside TFFB and CalPts on the players it
     rated, marked "shadow") once a source has rated anyone."""
@@ -793,9 +800,7 @@ def _add_shadow_sources(b: _Builder, scored: pd.DataFrame, teammate_race: pd.Dat
         [
             calibration.shadow_race(scored, shadow=policy),
             calibration.rb1_spread_race(scored),
-            teammate_race
-            if teammate_race is not None
-            else pd.DataFrame(columns=calibration.SHADOW_RACE_COLUMNS),
+            *(race for race in (teammate_race, our_dst_race) if race is not None and not race.empty),
         ],
         ignore_index=True,
     )
@@ -837,7 +842,9 @@ def _add_shadow_sources(b: _Builder, scored: pd.DataFrame, teammate_race: pd.Dat
         "team's top running back only; it is not a blend source and joins CalPts only if it beats CalPts. "
         "The teammate-bump row is CalPts plus what the research measured teammates scoring above "
         "projection when a regular WR1, WR2, TE1 or RB1 was listed OUT (models/research/teammate_bump.csv), "
-        "on the teammates of the one regular out; it does not touch CalPts or late swap."
+        "on the teammates of the one regular out; it does not touch CalPts or late swap. The OurDST row is "
+        "our own DST projection (the Vegas line, both units' sack rates and the league's recent turnover "
+        "level, fitted on 2014 to last season; docs/MODEL.md), on every DST CalPts rated; nothing reads it."
     )
 
 
