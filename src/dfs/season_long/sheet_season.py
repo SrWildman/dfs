@@ -16,6 +16,10 @@ from dfs.config import GoogleSheetsConfig, load_config
 from dfs.season_long import season_tabs as st
 from dfs.sheets import SheetsClient, SheetsError, column_letter
 
+PLAIN_FMT = {
+    "backgroundColor": {"red": 1, "green": 1, "blue": 1},
+    "textFormat": {"bold": False, "foregroundColor": {"red": 0, "green": 0, "blue": 0}},
+}
 PROTECT_NOTE = "Written by dfs season sync; edits here are overwritten."
 
 
@@ -204,7 +208,13 @@ def write_ideas(client: SheetsClient, runs: list[st.LeagueRun]) -> str:
 def _write_ideas_table(client: SheetsClient, ideas: list[list], names: list[str]) -> str:
     first = st.IDEAS_HEADER_ROW
     tf = st.TRADE_FINDER_TAB
-    client.clear_ranges(tf, [f"A{first}:{column_letter(len(st.IDEAS_HEADER) - 1)}{first + 500}"])
+    last_col = column_letter(len(st.IDEAS_HEADER) - 1)
+    # Clear from just below the box's note, not from the header: when the box grew a field (2026-10-28) the
+    # list moved down a row and the old header stayed behind above the new one.
+    below_box = st.BOX_FIRST_ROW + len(st.BOX_FIELDS) + 1
+    client.clear_ranges(tf, [f"A{below_box}:{last_col}{first + 500}"])
+    if below_box < first:
+        client.format_range(tf, f"A{below_box}:{last_col}{first - 1}", PLAIN_FMT)
     client.update_range(
         tf,
         f"A{first}:{column_letter(len(st.IDEAS_HEADER) - 1)}{first + len(ideas) - 1}",

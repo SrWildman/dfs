@@ -143,3 +143,15 @@ def test_setup_grows_the_raw_tabs_before_writing_formulas_over_them():
     ss.setup(client, ["Test"])
     assert client.widths[st.TEAMS_RAW] >= len(st.TEAM_COLUMNS) > 26
     assert client.widths[st.PLAYERS_RAW] >= len(st.PLAYER_COLUMNS)
+
+
+def test_a_stale_header_above_the_ideas_list_is_cleared(monkeypatch):
+    client = FakeClient()
+    ss.setup(client, ["Test"])
+    stale = st.IDEAS_HEADER_ROW - 1
+    client.update_range(st.TRADE_FINDER_TAB, f"A{stale}", [st.IDEAS_HEADER])  # the box was one field shorter
+    ss.write_ideas(client, [_run(monkeypatch)])
+    assert client.read_range(st.TRADE_FINDER_TAB, f"A{stale}:B{stale}") == []
+    assert client.read_range(st.TRADE_FINDER_TAB, f"A{st.IDEAS_HEADER_ROW}:B{st.IDEAS_HEADER_ROW}") == [
+        ["League", "#"]
+    ]
