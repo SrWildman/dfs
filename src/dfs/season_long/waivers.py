@@ -32,7 +32,6 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from dfs.paths import REPO_ROOT
 from dfs.season_long import faab as faab_mod
 from dfs.season_long import objective, ros
 from dfs.season_long import sleeper_league as sl
@@ -45,7 +44,6 @@ POOL = 40
 FULL = 12
 COMP_PTS = 3.0
 MIN_COMPS = 3
-BUMP_TABLE = REPO_ROOT / "models" / "research" / "teammate_bump.csv"
 # The top list shows at most this many players of one position (five backup QBs all do one job).
 PER_POSITION = 2
 THIS_WEEK_MISS = {"Questionable": 0.25, "Doubtful": 0.75, "Out": 1.0}
@@ -153,43 +151,89 @@ def bid_guide(
 # -- contingency --------------------------------------------------------------------------------
 
 
-def rb2_bump() -> float:
-    try:
-        table = pd.read_csv(BUMP_TABLE)
-    except OSError:
-        return 0.0
-    row = table[(table["absent"] == "RB1") & (table["beneficiary"] == "RB2")]
-    return float(row["bump"].iloc[0]) if len(row) else 0.0
+# What a backup RB2 adds over his projection when his RB1 sits, by the RB1's share of his team's carries
+# over his last three games (DraftKings points, so a PPR measure, used as is). Measured 2026-10-28 on the DFS
+# side's R7 events (2014-2025 nflverse game logs, exactly one regular out, beneficiary residuals against UM):
+#   RB1 under 55% of the carries (a committee): fit 2014-21 +3.7 (n=142), test 2022-25 +5.6 (n=70), all +4.3;
+#   RB1 at 55% or more (a lead back):           fit +7.0 (n=68),  test +8.0 (n=12),            all +7.1.
+# Fit and test agree in order; a pure 70%+ workhorse (8 events) was too thin to split further.
+RB2_BUMP_TIERS = ((0.55, 7.1), (0.0, 4.3))
+SHARE_WEEKS = 3
+
+
+def rb2_bump(rb1_share: float | None) -> float:
+    share = 0.0 if rb1_share is None else rb1_share
+    return next(b for floor, b in RB2_BUMP_TIERS if share >= floor)
+
+
+def carry_shares(view: LeagueView) -> dict[str, float]:
+    """Each player's share of his team's carries over the last `SHARE_WEEKS` finished weeks (Sleeper)."""
+    from dfs.season_long.scoring import stats_frame
+
+    lg = view.league
+    weeks = range(max(1, lg.last_scored_week - SHARE_WEEKS + 1), lg.last_scored_week + 1)
+    frames = []
+    for w in weeks:
+        f = stats_frame(sl.fetch_week_stats(lg.season, w, final=True))
+        if not f.empty and "rush_att" in f.columns:
+            frames.append(f[["player_id", "team", "rush_att"]])
+    if not frames:
+        return {}
+    all_ = pd.concat(frames)
+    all_["rush_att"] = pd.to_numeric(all_["rush_att"], errors="coerce").fillna(0.0)
+    mine = all_.groupby(["player_id", "team"], as_index=False)["rush_att"].sum()
+    team = mine.groupby("team")["rush_att"].transform("sum")
+    mine["share"] = (mine["rush_att"] / team.where(team > 0)).fillna(0.0)
+    return dict(zip(mine["player_id"], mine["share"], strict=True))
+
+
+@dataclass
+class Handcuff:
+    player_id: str
+    value: float  # expected lineup gain to Sam from the weeks his RB1 misses
+    rb1: str
+    rb1_share: float | None
+    if_out: float  # his projection next game with the bump, if the RB1 sits
+    rb1_status: str = ""  # the RB1's injury tag (Questionable / Doubtful / Out), the week a stash matters
 
 
 def handcuff_value(
-    view: LeagueView, ev: Evaluator, pid: str, roster: list[str], bump: float
-) -> tuple[float, str]:
-    """Expected lineup gain from the weeks his RB1 misses, and the RB1's id ('' if not a backup RB2)."""
+    view: LeagueView, ev: Evaluator, pid: str, roster: list[str], shares: dict[str, float]
+) -> Handcuff | None:
+    """A backup RB2's contingency value, None when he is not one (no RB1 ahead of him on the depth chart)."""
     t = view.table
-    if pid not in t.index or t.at[pid, "position"] != "RB" or int(t.at[pid, "depth"]) != 2 or bump <= 0:
-        return 0.0, ""
+    if pid not in t.index or t.at[pid, "position"] != "RB" or int(t.at[pid, "depth"]) != 2:
+        return None
     team = t.at[pid, "team"]
     starters = t[(t["team"] == team) & (t["position"] == "RB") & (t["depth"] == 1)]
     if starters.empty:
-        return 0.0, ""
+        return None
     rb1 = str(starters.index[0])
+    share = shares.get(rb1)
+    bump = rb2_bump(share)
     status = str(t.at[rb1, "injury_status"])
     weekly = view.ros.weekly
     pts = weekly[weekly["player_id"] == pid].set_index("week")["pts"]
-    total = 0.0
+    total, if_out = 0.0, 0.0
     for i, w in enumerate(ev.weeks):
         p_miss = (
             THIS_WEEK_MISS.get(status, view.cfg.starter_miss_rate) if i == 0 else view.cfg.starter_miss_rate
         )
-        if p_miss <= 0 or float(pts.get(w, 0.0)) <= 0:
+        mine = float(pts.get(w, 0.0))
+        if mine <= 0:
+            continue
+        if not if_out:
+            if_out = mine + bump
+        if p_miss <= 0:
             continue
         base = ev._pts.get(w, {})
         bumped = {p: base.get(p, 0.0) for p in roster}
-        bumped[pid] = float(pts.get(w, 0.0)) + bump
+        bumped[pid] = mine + bump
         with_him = tvm.best_lineup(bumped, view.positions, view.league.slots)[0]
         total += p_miss * max(0.0, with_him - ev.lineup_total(roster, w))
-    return round(total, 1), rb1
+    return Handcuff(
+        pid, round(total, 1), rb1, share, round(if_out, 1), status if status in THIS_WEEK_MISS else ""
+    )
 
 
 # -- the ranking --------------------------------------------------------------------------------
@@ -208,7 +252,7 @@ def rank_pickups(
     fa = tr.free_agents(view)
     pool = only if only is not None else fa[:POOL]
     weights = _weights(view, ev)
-    bump = rb2_bump()
+    shares = carry_shares(view)
 
     def screen_total(roster: list[str]) -> float:
         return sum(weights[w] * ev.lineup_total(roster, w) for w in ev.weeks)
@@ -219,7 +263,8 @@ def rank_pickups(
         new, dropped, _ = tr.settle([*mine, pid], len(mine), view, [], ev)
         if pid not in new:
             continue
-        cuff, _ = handcuff_value(view, ev, pid, [p for p in new if p != pid] + [pid], bump)
+        hc = handcuff_value(view, ev, pid, [p for p in new if p != pid] + [pid], shares)
+        cuff = hc.value if hc is not None else 0.0
         screened.append((screen_total(new) - base_total + cuff, pid, new, dropped, cuff))
     screened.sort(key=lambda x: -x[0])
     base = ev.base()[me]
@@ -260,16 +305,30 @@ def rank_pickups(
     return shown[:top]
 
 
-def handcuffs(view: LeagueView, ev: Evaluator, top: int = 3) -> list[tuple[str, float, str]]:
-    """Free-agent RB2s by contingency value to Sam's lineup: (player_id, value, his RB1's id)."""
+def handcuffs(view: LeagueView, ev: Evaluator, top: int = 3) -> list[Handcuff]:
+    """Free-agent RB2s to stash: those with contingency value to Sam's lineup, every backup to a lead back
+    (55%+ of the carries), and every backup whose RB1 is hurt right now, even when the value is small today.
+    The hurt ones first (the week a stash matters), then by value."""
     mine = ev.rosters[view.league.my_roster_id]
-    bump = rb2_bump()
+    shares = carry_shares(view)
     out = []
     for pid in tr.free_agents(view)[: POOL * 3]:
-        value, rb1 = handcuff_value(view, ev, pid, [*mine, pid], bump)
-        if value > 0:
-            out.append((pid, value, rb1))
-    return sorted(out, key=lambda x: -x[1])[:top]
+        hc = handcuff_value(view, ev, pid, [*mine, pid], shares)
+        lead = (hc.rb1_share or 0.0) >= RB2_BUMP_TIERS[0][0] if hc is not None else False
+        if hc is not None and (hc.value > 0 or lead or hc.rb1_status):
+            out.append(hc)
+    hurt = sorted((h for h in out if h.rb1_status), key=lambda h: (-h.value, -h.if_out))
+    rest = sorted((h for h in out if not h.rb1_status), key=lambda h: (-h.value, -h.if_out))
+    return (hurt + rest)[:top]
+
+
+def handcuff_text(view: LeagueView, h: Handcuff) -> str:
+    share = f", {h.rb1_share:.0%} of the carries" if h.rb1_share is not None else ""
+    share += f", {h.rb1_status} now" if h.rb1_status else ""
+    return (
+        f"{view.name(h.player_id)}: backs up {view.name(h.rb1)}{share}; about {h.if_out:.0f} pts a game "
+        f"if he sits; worth +{h.value:.1f} to your lineup now"
+    )
 
 
 def _weights(view: LeagueView, ev: Evaluator) -> dict[int, float]:

@@ -155,10 +155,18 @@ little (3.47 to 3.42 in Bourbon, in-sample).
   - The range runs from the median to the 80th percentile of those winning bids.
   - Shown beside it: what the player is worth to Sam (his gain over the league's points per dollar), and the
     rivals with enough FAAB who need the position. Inactive managers are left out of the rivals.
-- **Handcuffs.** A free-agent RB2 is valued for the weeks his RB1 misses, from the DFS side's measured
-  teammate bump (RB1 out: RB2 +4.27 DraftKings points a game, shrunk; a PPR measure, used as is). His RB1's
-  chance of missing a week is `starter_miss_rate`, or 25% this week if Questionable and 75% if Doubtful. The
-  values come out small; that is the honest answer.
+- **Handcuffs.** A free-agent RB2 is valued for the weeks his RB1 misses. What he adds then depends on how
+  much of the backfield the RB1 has: his share of his team's carries over the last three games (Sleeper).
+  Measured on the DFS side's R7 events (2014-2025, DraftKings points over the projection; fit 2014-21, test
+  2022-25):
+  - RB1 under 55% of the carries (a committee): +4.3 (fit +3.7, test +5.6);
+  - RB1 at 55% or more (a lead back): +7.1 (fit +7.0, test +8.0).
+  His RB1's chance of missing a week is `starter_miss_rate`, or 25% this week if Questionable, 75% if
+  Doubtful, 100% if Out. The stash list shows, hurt starters first:
+  - every backup whose RB1 is tagged right now;
+  - every backup to a lead back;
+  - any other backup with lineup value.
+  Each comes with what he would score if the starter sits.
 - **Chopped bid plan.** For the team most likely chopped this week: its best three players, what each adds to
   Sam's survival, that in dollars, and what the league has paid for a chopped roster's first, second and third
   pick. The bid runs from the league's price up to his worth, capped at Sam's FAAB.

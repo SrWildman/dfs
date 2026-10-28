@@ -534,11 +534,18 @@ def waivers_block(runs: list[LeagueRun]) -> Block:
     for run in runs:
         v = run.view
         if run.cuffs:
-            rows += [[""], [f"{v.league.name}: handcuffs to stash (value if his RB1 misses time)"]]
+            rows += [
+                [""],
+                [f"{v.league.name}: handcuffs to stash (what each is worth if his RB1 misses time)"],
+            ]
             titles.append(len(rows))
-            for pid, value, rb1 in run.cuffs:
-                rows.append([v.league.name, "", v.name(pid), "RB", v.ros.summary["team"].get(pid, ""), "",
-                             f"+{value:.1f}", "", f"backs up {v.name(rb1)}", ""])  # fmt: skip
+            for h in run.cuffs:
+                share = f" ({h.rb1_share:.0%} of the carries)" if h.rb1_share is not None else ""
+                share += f", {h.rb1_status} now" if h.rb1_status else ""
+                team = v.ros.summary["team"].get(h.player_id, "")
+                backs = f"backs up {v.name(h.rb1)}{share}"
+                rows.append([v.league.name, "", v.name(h.player_id), "RB", team, "", f"+{h.value:.1f}",
+                             f"{h.if_out:.0f} if he sits", backs, ""])  # fmt: skip
         plan = run.chop
         if plan is not None:
             rows += [

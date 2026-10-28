@@ -59,9 +59,16 @@ def test_handcuff_value_needs_an_rb2_behind_a_starter(monkeypatch):
     v.table["depth"] = 3
     v.table.loc["rb4", "depth"] = 2
     v.table.loc["rb2", "depth"] = 1
-    value, rb1 = wv.handcuff_value(v, ev, "rb4", [*ev.rosters[1], "rb4"], bump=5.0)
-    assert rb1 == "rb2" and value > 0
-    assert wv.handcuff_value(v, ev, "wr4", [*ev.rosters[1], "wr4"], bump=5.0) == (0.0, "")
+    lead = wv.handcuff_value(v, ev, "rb4", [*ev.rosters[1], "rb4"], {"rb2": 0.7})
+    committee = wv.handcuff_value(v, ev, "rb4", [*ev.rosters[1], "rb4"], {"rb2": 0.4})
+    assert lead.rb1 == "rb2" and lead.value > committee.value > 0
+    assert lead.if_out == 14 + 7.1 and committee.if_out == 14 + 4.3
+    assert wv.handcuff_value(v, ev, "wr4", [*ev.rosters[1], "wr4"], {}) is None
+
+
+def test_the_rb2_bump_follows_the_rb1s_carry_share():
+    assert wv.rb2_bump(0.75) == wv.rb2_bump(0.55) == 7.1
+    assert wv.rb2_bump(0.4) == wv.rb2_bump(None) == 4.3
 
 
 def test_chop_plan_bid_range():
@@ -110,3 +117,26 @@ def test_consensus_check_waits_for_a_week_then_scores_both_views(monkeypatch):
 def test_weeks_after_a_snapshot():
     assert cc.weeks_after(date(2026, 10, 28), 2026, 9) == [8, 9]
     assert cc.weeks_after(date(2026, 10, 31), 2026, 9) == [9]
+
+
+def test_a_hurt_starters_backup_is_always_listed(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    v.table["depth"] = 3
+    v.table.loc["rb2", "depth"] = 1
+    v.table.loc[
+        "fa2", ["name", "position", "fantasy_positions", "team", "injury_status", "search_rank", "depth"]
+    ] = ["FA2", "RB", ("RB",), "NFL", "", 1, 2]
+    v.table.loc["rb2", "injury_status"] = "Questionable"
+    v.ros.summary.loc["fa2"] = v.ros.summary.loc["fa1"]
+    v.ros.summary.loc["fa2", ["name", "position"]] = ["FA2", "RB"]
+    import pandas as pd
+
+    extra = pd.DataFrame(
+        [("fa2", w, 2.0, 1.0) for w in syn.WEEKS], columns=["player_id", "week", "pts", "sd"]
+    )
+    v.ros.weekly = pd.concat([v.ros.weekly, extra], ignore_index=True)
+    monkeypatch.setattr(wv, "carry_shares", lambda view: {"rb2": 0.4})
+    cuffs = wv.handcuffs(v, ev)
+    assert cuffs and cuffs[0].player_id == "fa2" and cuffs[0].rb1_status == "Questionable"
+    assert "Questionable now" in wv.handcuff_text(v, cuffs[0])

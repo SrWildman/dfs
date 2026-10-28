@@ -352,9 +352,7 @@ def season_waivers(
             continue
         lines = [f"{lc.name}: FAAB ${v.league.me.faab_left}; free move first: {st.free_move_text(run)}"]
         lines += [f"  {i}. {wv.pickup_line(v, p)}" for i, p in enumerate(run.pickups[:top], 1)]
-        lines += [
-            f"  handcuff: {v.name(pid)} (+{val:.1f}, backs up {v.name(rb1)})" for pid, val, rb1 in run.cuffs
-        ]
+        lines += [f"  handcuff: {wv.handcuff_text(v, h)}" for h in run.cuffs]
         if run.chop is not None:
             c = run.chop
             lines.append(
