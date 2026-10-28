@@ -108,11 +108,44 @@ def test_no_props_ever_pulled_means_no_inputs(monkeypatch):
 
 def test_the_edge_frame_really_carries_blank_source_columns_the_merge_has_to_replace():
     """The cause of the 0-of-3 bug: `build_edge_frame` hands `score_week` these columns already, blank."""
-    from tests.test_derived import _projections, _salaries
-
-    frame = derived.build_edge_frame(
-        _projections([{"Id": "1", "Name": "Matched Player"}]), _salaries([{"ID": "1"}])
-    ).frame
+    projections = pd.DataFrame(
+        [
+            {
+                "Id": "1",
+                "Name": "Matched Player",
+                "Position": "RB",
+                "Team": "DET",
+                "Opp": "NO",
+                "ProjPts": 15.0,
+                "ProjOwn": 0,
+                "Salary": 8000,
+                "Ceiling": 30.0,
+                "ImpPts": 25.0,
+                "OU": 46.5,
+                "Spread": -3.0,
+                "Game": "Detroit Lions_New Orleans Saints",
+                "GameStart": "2026-09-13T17:00:00Z",
+                "Venue": "H",
+            }
+        ]
+    )
+    salaries = pd.DataFrame(
+        [
+            {
+                "Position": "RB",
+                "Name + ID": "",
+                "Name": "",
+                "ID": "1",
+                "Roster Position": "RB",
+                "Salary": 8000,
+                "Game Info": "",
+                "TeamAbbrev": "DET",
+                "AvgPointsPerGame": 15.0,
+                "Status": "",
+            }
+        ]
+    )
+    frame = derived.build_edge_frame(projections, salaries).frame
     for column in ("EspnPts", "PropPts", "SleeperPts", "FantasyProsPts"):
         assert column in frame.columns and frame[column].isna().all()
 
