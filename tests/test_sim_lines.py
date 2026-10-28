@@ -451,3 +451,52 @@ def test_ownership_uncertainty_is_off_by_default_and_needs_a_fitted_model(monkey
     assert C.SimLinesConfig().ownership_mean is False
     mean_only = si.resolve_lines(edge, specs, CASH, 190.0, C.SimLinesConfig(ownership_mean=True))
     assert mean_only.field.cash_draws is None and "the fitted mean" in mean_only.note
+
+
+# --- `[sim.lines] calibrated_cash_offset`: the shown Cash % only ---------------------------------------
+
+
+def test_the_calibrated_offset_round_trips_and_a_bad_file_reads_as_none(tmp_path):
+    from dfs.sim import du_line
+
+    cal = du_line.OffsetCalibration(offset=7.0, weeks=(4, 5, 6, 7), passes=False, z=-0.7, fitted="2026-10-27")
+    path = du_line.save_calibration(cal, tmp_path / "du_line.json")
+    assert du_line.load_calibration(path) == cal
+    assert du_line.load_calibration(tmp_path / "missing.json") is None
+    (tmp_path / "bad.json").write_text("{not json")
+    assert du_line.load_calibration(tmp_path / "bad.json") is None
+
+
+def test_the_switch_adds_a_display_field_and_leaves_the_ranking_field_alone(monkeypatch, tmp_path):
+    from dfs.sim import du_line
+
+    edge = _owned_slate()
+    specs = si.build_specs(edge)
+    off = si.resolve_lines(edge, specs, CASH, 190.0, C.SimLinesConfig())
+    assert off.display_field is None and off.shown_field is off.field
+    on = C.SimLinesConfig(calibrated_cash_offset=True)
+    monkeypatch.setattr(du_line, "CALIBRATION_FILE", tmp_path / "none.json")
+    monkeypatch.setattr(du_line, "load_calibration", lambda path=None: None)
+    missing = si.resolve_lines(edge, specs, CASH, 190.0, on)
+    assert missing.display_field is None and "no calibration is saved" in missing.note
+    cal = du_line.OffsetCalibration(offset=7.0, weeks=(4, 5, 6, 7), passes=False, z=-0.7, fitted="2026-10-27")
+    monkeypatch.setattr(du_line, "load_calibration", lambda path=None: cal)
+    lines = si.resolve_lines(edge, specs, CASH, 190.0, on)
+    assert lines.field.cash_offset == 0.6  # what builds and late swap rank on
+    assert lines.display_field.cash_offset == 7.0 and lines.shown_field is lines.display_field
+    assert lines.display_field.top_offset == lines.field.top_offset  # Top 1% is untouched
+    assert "field average +7 (calibrated)" in lines.status and "NOT proven" in lines.note
+    assert "+7" in lines.cash_basis
+
+
+def test_shown_cash_rescoring_changes_only_the_cash_percent(owned_edge, field_for, relative_report):
+    import dataclasses
+
+    builds = relative_report.builds
+    higher = dataclasses.replace(field_for, cash_offset=field_for.cash_offset + 10.0)
+    shown = ls.with_shown_cash(builds, si.build_specs(owned_edge), higher, n_sims=1500)
+    assert [b.title for b in shown] == [b.title for b in builds]
+    assert all(s.p_cash < b.p_cash for s, b in zip(shown, builds, strict=True))  # a higher line, less often
+    assert [dataclasses.replace(s, p_cash=0.0) for s in shown] == [
+        dataclasses.replace(b, p_cash=0.0) for b in builds
+    ]

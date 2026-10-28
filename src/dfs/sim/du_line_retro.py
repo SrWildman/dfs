@@ -11,8 +11,9 @@ shipped `[sim.lines]`), the pre-lock herd lineup alongside; each draw then gets 
 - `shift`: the line model with no herd: the double-up field's shift and its week-to-week spread, and the
   paid quantile of a normal field;
 - `du_line`: the full model (the herd's own score in the draw, its share, the shift);
-- `offset`: field mean + an offset in the simulator's own points, calibrated so that the real double-up
-  lineups' shown Cash % adds up to how many of them cashed (`calibrated_value`);
+- `offset`: field mean + an offset in the simulator's own points, calibrated so that every entry of the
+  reference double-up, weighted by copies, has a shown Cash % adding up to the paid share
+  (`reference_entries`, `calibrated_value`);
 - `herd_offset`: the full model with its shift calibrated the same way (no week-to-week spread).
 
 Every model and calibration uses the OTHER weeks only (`du_line.fit(..., exclude_week=week)`). A
@@ -39,9 +40,9 @@ SETTINGS = ("today", "shift", "du_line", "offset", "herd_offset")
 SETS = ("cash builds", "GPP builds", "random", "field (double-up)", "field (GPP)")
 SHIP_SE = 2.0
 SHIP_BAR = (
-    "The shown Cash % changes (display only, behind `[sim.lines] du_line_model`) only if, held out by week, "
-    "its Brier score AND its calibration gap (|shown - cashed|) are both better than today's by more than "
-    "2 SE of the per-week paired difference, over every lineup set."
+    "`[sim.lines] calibrated_cash_offset` (display only) is worth turning on only if, held out by week, the "
+    "calibrated Cash %'s Brier score AND its calibration gap (|shown - cashed|) are both better than today's "
+    "by more than 2 SE of the per-week paired difference, over every lineup set."
 )
 
 
@@ -139,7 +140,29 @@ def week_lineups(wi, contests: list, jobs: dict, rng: np.random.Generator) -> pd
     for fmt, label in (("cash", "field (double-up)"), ("gpp", "field (GPP)")):
         for lu in curse.field_lineups(wi, contests, fmt, curse.FIELD_LINEUPS[fmt], rng):
             rows.append((label, tuple(sorted(lu))))
-    return pd.DataFrame(rows, columns=["set", "names"])
+    out = pd.DataFrame(rows, columns=["set", "names"]).assign(weight=1.0)
+    return pd.concat([out, reference_entries(wi, contests)], ignore_index=True)
+
+
+def reference_entries(wi, contests: list) -> pd.DataFrame:
+    """Every distinct lineup of the week's reference double-up (the one whose real line is the week's line,
+    the GIANT $25 Results records; the largest on a tie), `weight` = its entries, by edge Name: the
+    calibration set. Its entries cash at the contest's paid share exactly, so the target carries no
+    sampling noise. A lineup with a player the edge does not name is left out. Empty when the week has no
+    double-up."""
+    from dfs.player_join import normalize_name
+
+    cash = [c for c in contests if c.week == wi.week and c.fmt == "cash" and c.places_paid > 0]
+    if not cash:
+        return pd.DataFrame(columns=["set", "names", "weight"])
+    ref = min(cash, key=lambda c: (abs(float(c.points[c.places_paid - 1]) - wi.cash_line), -len(c.points)))
+    by_norm = {normalize_name(x): str(x) for x in wi.edge["Name"]}
+    rows = []
+    for key, count in ref.copies.items():
+        names = [by_norm.get(k) for k in key]
+        if None not in names:
+            rows.append((CALIBRATION_SET, tuple(sorted(names)), float(count)))
+    return pd.DataFrame(rows, columns=["set", "names", "weight"])
 
 
 @dataclass
@@ -197,10 +220,10 @@ def today_line(draws: WeekDraws) -> np.ndarray:
 
 
 # The level calibration: the line offset (points, in the simulator's own units) chosen on the OTHER weeks so
-# that the real double-up lineups' shown Cash % adds up to how many of them cashed. Those lineups are the one
-# set whose cash rate is pinned by the contest itself (43.5% of a double-up is paid), so they calibrate the
-# level without using the builds the number is shown on.
-CALIBRATION_SET = "field (double-up)"
+# that every entry of the reference double-up, weighted by its copies, has a shown Cash % that adds up to how
+# many cashed: the contest's paid share, exactly (`reference_entries`). It calibrates the level without the
+# builds the number is shown on, and without the sampling noise of a sample of distinct lineups.
+CALIBRATION_SET = "entries (double-up)"
 OFFSET_GRID = np.arange(-10.0, 30.01, 0.5)
 
 
@@ -208,8 +231,8 @@ def calibrated_value(
     weeks: dict[int, tuple[pd.DataFrame, WeekDraws]], exclude: int, line_for, grid: np.ndarray
 ) -> float:
     """The `grid` value whose lines (`line_for(draws, value)`) make the calibration set's shown Cash % sum to
-    its cashed count over every week but `exclude` (the first such value when none has a calibration set:
-    nothing to fit)."""
+    its cashed count, both weighted by entries, over every week but `exclude` (the first such value when none
+    has a calibration set: nothing to fit)."""
     best, best_miss = float(grid[0]), None
     for value in grid:
         miss = 0.0
@@ -220,10 +243,37 @@ def calibrated_value(
             p = du_line.cash_probability(
                 draws.scores[:, frame["col"].to_numpy()[mask]], line_for(draws, value)
             )
-            miss += float(p.sum() - frame.loc[mask, "cashed"].sum())
+            w = frame.loc[mask, "weight"].to_numpy(float)
+            miss += float(w @ p - w @ frame.loc[mask, "cashed"].to_numpy(float))
         if best_miss is None or abs(miss) < best_miss:
             best, best_miss = float(value), abs(miss)
     return best
+
+
+def offset_miss(frame: pd.DataFrame, draws: WeekDraws, grid: np.ndarray) -> np.ndarray | None:
+    """For a plain offset (line = field mean + v), the calibration set's weighted shown-minus-cashed at every
+    `grid` value in one pass: the shown Cash % at v is the weighted share of (draw, lineup) margins over the
+    field mean that reach v, so one sort of those margins answers every v. None without a calibration set.
+    Equal to `calibrated_value`'s per-value sum (a test pins it)."""
+    mask = (frame["set"] == CALIBRATION_SET).to_numpy()
+    if not mask.any():
+        return None
+    cols = frame["col"].to_numpy()[mask]
+    w = frame.loc[mask, "weight"].to_numpy(float)
+    margins = (draws.scores[:, cols] - draws.field_mean[:, None]).astype(float)
+    n = margins.shape[0]
+    order = np.argsort(margins, axis=None, kind="stable")
+    flat = margins.ravel()[order]
+    weights = np.broadcast_to(w, margins.shape).ravel()[order] / n
+    below = np.concatenate([[0.0], np.cumsum(weights)])  # weight strictly below each sorted position
+    shown = w.sum() - below[np.searchsorted(flat, grid, side="left")]
+    return shown - float(w @ frame.loc[mask, "cashed"].to_numpy(float))
+
+
+def calibrated_offset(misses: dict[int, np.ndarray | None], exclude: int, grid: np.ndarray) -> float:
+    """The `grid` offset whose summed miss over every week but `exclude` is closest to 0 (`offset_miss`)."""
+    total = sum((m for w, m in misses.items() if w != exclude and m is not None), np.zeros(len(grid)))
+    return float(grid[int(np.argmin(np.abs(total)))])
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -236,17 +286,99 @@ class Retro:
     rows: pd.DataFrame  # week, set, names, realized, cashed, p_<setting>
     lines: pd.DataFrame  # week, setting, real line, the line's p10 / p50 / p90 over draws
     models: dict[int, du_line.DuLineModel]
-    offsets: dict[
-        int, dict[str, float]
-    ]  # week -> the calibrated offset and the herd model's calibrated shift
+    # week -> the calibrated offset and the herd model's calibrated shift
+    offsets: dict[int, dict[str, float]]
+    final_offset: float = float("nan")  # the offset calibrated on EVERY week (what the display switch uses)
+    calibration_weeks: tuple[int, ...] = ()  # the weeks with real double-up lineups behind it
+    entries: pd.DataFrame | None = None  # the calibration set's rows (weighted by entries), each fold's p
 
 
-def run(weeks: list[int], *, n_sims: int = 5000, seed: int = 0, log=print) -> Retro:
+# Each simulated week is kept (`data/research/du_line/weeks/`, gitignored), so the weekly refresh only
+# simulates the week just closed. Bump the version when anything that feeds a week's draws changes.
+WEEK_CACHE_VERSION = 3
+
+
+def _week_cache_path(week: int, n_sims: int, seed: int) -> Path:
+    return OUT_DIR / "weeks" / f"w{week:02d}_n{n_sims}_s{seed}_v{WEEK_CACHE_VERSION}.pkl"
+
+
+def save_week(path: Path, frame: pd.DataFrame, draws: WeekDraws) -> None:
+    """The week's lineups and draws as plain arrays (no class of this module is pickled, so a file written by
+    `python -m dfs.sim.du_line_retro` reads back under `dfs research refresh`)."""
+    import pickle
+
+    payload = {
+        "frame": frame,
+        "kept": [list(k) for k in draws.kept],
+        "scores": np.asarray(draws.scores, dtype=np.float32),
+        "field_mean": np.asarray(draws.field_mean, dtype=float),
+        "herd": None if draws.herd is None else np.asarray(draws.herd, dtype=float),
+        "offset": float(draws.offset),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as fh:
+        pickle.dump(payload, fh)
+
+
+def load_week(path: Path) -> tuple[pd.DataFrame, WeekDraws]:
+    import pickle
+
+    with open(path, "rb") as fh:
+        d = pickle.load(fh)  # noqa: S301 - our own file under data/
+    draws = WeekDraws([tuple(k) for k in d["kept"]], d["scores"], d["field_mean"], d["herd"], d["offset"])
+    return d["frame"], draws
+
+
+def simulated_week(
+    week: int, inputs: dict, *, n_sims: int, seed: int, cache: bool
+) -> tuple[pd.DataFrame, WeekDraws] | None:
+    """The week's lineups (with `realized`, `cashed`, `line` and their `col` in the draws) and its draws, from
+    the cache when `cache` and it is there. `inputs`: `lines`, `scored`, `contests`, `jobs` (built once)."""
     from dfs.research import curse
-    from dfs.sim import contest_retro
 
-    study = curse.Study(weeks)
-    jobs = curse.load_jobs()
+    path = _week_cache_path(week, n_sims, seed)
+    if cache and path.exists():
+        return load_week(path)
+    wi = curse.week_inputs(week, lines=inputs["lines"], scored=inputs["scored"], contests=inputs["contests"])
+    rng = np.random.default_rng([seed, week])
+    lus = week_lineups(wi, inputs["contests"], inputs["jobs"], rng)
+    draws = simulate_week(wi, list(dict.fromkeys(lus["names"])), herd_names(wi.edge), n_sims=n_sims)
+    if draws is None:
+        return None
+    index = {k: i for i, k in enumerate(draws.kept)}
+    frame = lus[lus["names"].isin(index)].copy()
+    frame["week"] = week
+    frame["realized"] = [sum(wi.actual.get(n, np.nan) for n in k) for k in frame["names"]]
+    frame = frame[frame["realized"].notna()].copy()
+    frame["cashed"] = (frame["realized"] >= wi.cash_line).astype(float)
+    frame["line"] = wi.cash_line
+    frame["col"] = frame["names"].map(index)
+    draws.scores = draws.scores.astype(np.float32)
+    save_week(path, frame, draws)
+    return frame, draws
+
+
+def run(
+    weeks: list[int],
+    *,
+    n_sims: int = 5000,
+    seed: int = 0,
+    cache: bool = True,
+    herd_offset: bool = True,
+    log=print,
+) -> Retro:
+    """The retro over `weeks`. `herd_offset=False` skips the herd model's calibrated shift (a grid search over
+    every week's draws, several minutes): the weekly refresh needs only the plain offset."""
+    from dfs import results_update
+    from dfs.research import curse
+    from dfs.sim import contest_retro, retro
+
+    inputs = {
+        "lines": curse.lines_through(curse.SEASON, max(weeks)),
+        "scored": results_update.load_all_scored(curse.SEASON),
+        "contests": retro.load_contests(),
+        "jobs": curse.load_jobs(),
+    }
     real = contest_retro.load_real_contests()
     frames = {}
     for w in sorted({c.week for c in real if c.fmt == "cash"}):
@@ -255,47 +387,38 @@ def run(weeks: list[int], *, n_sims: int = 5000, seed: int = 0, log=print) -> Re
         except FileNotFoundError:
             continue
     stats = contest_stats(real, frames)
-    rng = np.random.default_rng(seed)
     simulated: dict[int, tuple[pd.DataFrame, WeekDraws]] = {}
     for week in weeks:
-        wi = study.weeks[week]
-        lus = week_lineups(wi, study.contests, jobs, rng)
-        draws = simulate_week(wi, list(dict.fromkeys(lus["names"])), herd_names(wi.edge), n_sims=n_sims)
-        if draws is None:
+        got = simulated_week(week, inputs, n_sims=n_sims, seed=seed, cache=cache)
+        if got is None:
             log(f"week {week}: no ownership, skipped")
             continue
-        index = {k: i for i, k in enumerate(draws.kept)}
-        frame = lus[lus["names"].isin(index)].copy()
-        frame["week"] = week
-        frame["realized"] = [sum(wi.actual.get(n, np.nan) for n in k) for k in frame["names"]]
-        frame = frame[frame["realized"].notna()].copy()
-        frame["cashed"] = (frame["realized"] >= wi.cash_line).astype(float)
-        frame["line"] = wi.cash_line
-        frame["col"] = frame["names"].map(index)
-        simulated[week] = (frame, draws)
-        log(f"week {week}: {len(frame)} lineups, herd {'found' if draws.herd is not None else 'none'}")
+        simulated[week] = got
+        log(f"week {week}: {len(got[0])} lineups, herd {'found' if got[1].herd is not None else 'none'}")
 
+    misses = {w: offset_miss(f, d, OFFSET_GRID) for w, (f, d) in simulated.items()}
+    settings = SETTINGS if herd_offset else tuple(s for s in SETTINGS if s != "herd_offset")
     parts, line_rows, models, offsets = [], [], {}, {}
     for week, (frame, draws) in simulated.items():
         model = du_line.fit(stats, exclude_week=week)
         no_herd = replace(model, herd_share=0.0)
-        offset = calibrated_value(simulated, week, lambda d, v: d.field_mean + v, OFFSET_GRID)
+        offset = calibrated_offset(misses, week, OFFSET_GRID)
 
         def herd_line(d: WeekDraws, v: float, model=model) -> np.ndarray:
             return du_line.lines(d.field_mean, d.herd, replace(model, shift=v, shift_sd=0.0))
 
-        shift = calibrated_value(simulated, week, herd_line, OFFSET_GRID)
+        shift = calibrated_value(simulated, week, herd_line, OFFSET_GRID) if herd_offset else float("nan")
         models[week], offsets[week] = model, {"offset": offset, "herd_shift": shift}
         line_by = {
             "today": today_line(draws),
             "shift": du_line.lines(draws.field_mean, None, no_herd),
             "du_line": du_line.lines(draws.field_mean, draws.herd, model),
             "offset": draws.field_mean + offset,
-            "herd_offset": herd_line(draws, shift),
+            "herd_offset": herd_line(draws, shift) if herd_offset else None,
         }
         frame = frame.copy()
         cols = frame["col"].to_numpy()
-        for setting in SETTINGS:
+        for setting in settings:
             line = line_by[setting]
             frame[f"p_{setting}"] = du_line.cash_probability(draws.scores[:, cols], line)
             q10, q50, q90 = np.quantile(line, [0.1, 0.5, 0.9])
@@ -312,7 +435,20 @@ def run(weeks: list[int], *, n_sims: int = 5000, seed: int = 0, log=print) -> Re
                 }
             )
         parts.append(frame.drop(columns=["col", "line"]))
-    return Retro(pd.concat(parts, ignore_index=True), pd.DataFrame(line_rows), models, offsets)
+    final = calibrated_offset(misses, -1, OFFSET_GRID)
+    calibration_weeks = tuple(
+        w for w, (f, _) in sorted(simulated.items()) if (f["set"] == CALIBRATION_SET).any()
+    )
+    every = pd.concat(parts, ignore_index=True)
+    return Retro(
+        every[every["set"] != CALIBRATION_SET].reset_index(drop=True),
+        pd.DataFrame(line_rows),
+        models,
+        offsets,
+        final_offset=final,
+        calibration_weeks=calibration_weeks,
+        entries=every[every["set"] == CALIBRATION_SET].reset_index(drop=True),
+    )
 
 
 def brier(p: pd.Series, y: pd.Series) -> float:
@@ -325,6 +461,8 @@ def calibration(rows: pd.DataFrame) -> pd.DataFrame:
     out = []
     for setting in SETTINGS:
         p = f"p_{setting}"
+        if p not in rows.columns:
+            continue
         for label in (*SETS, "all"):
             d = rows if label == "all" else rows[rows["set"] == label]
             if d.empty:
@@ -408,22 +546,100 @@ def report(retro: Retro) -> str:
     lines += ["", "Cash % shown against the cash rate (gap = shown - cashed, its SE over weeks):", ""]
     lines.append(calibration(rows).round(4).to_string(index=False))
     lines += ["", "Paired against today, per week:", ""]
-    for setting in SETTINGS[1:]:
+    for setting in (s for s in SETTINGS[1:] if f"p_{s}" in rows.columns):
         for group in ("all", *SETS):
             for p in paired_weeks(rows, setting, group):
                 lines.append(f"- {p.line()}")
+    if retro.entries is not None and not retro.entries.empty:
+        lines += ["", "The calibration set (every entry of the reference double-up, weighted by copies):", ""]
+        for week, g in retro.entries.groupby("week"):
+            w = g["weight"].to_numpy(float)
+            cashed, today = np.average(g["cashed"], weights=w), np.average(g["p_today"], weights=w)
+            held = np.average(g["p_offset"], weights=w)
+            lines.append(
+                f"- Week {week}: {int(w.sum())} entries in {len(g)} lineups; cashed {cashed:.1%}, "
+                f"shown today {today:.1%}, calibrated (held out) {held:.1%}"
+            )
     lines += ["", "The real line against each setting's 10-90% band of lines:", ""]
     lines.append(retro.lines.round(1).to_string(index=False))
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The weekly refresh and the display switch's calibration
+# ---------------------------------------------------------------------------------------------------------
+
+FIRST_WEEK = 2  # Week 1 has no ownership, so no relative line to calibrate
+
+
+def verdict(retro: Retro) -> tuple[bool, PairedWeeks, PairedWeeks]:
+    """(passes, Brier pair, |gap| pair) for the calibrated offset against today, over every lineup set."""
+    pair_brier, pair_gap = paired_weeks(retro.rows, "offset", "all")
+    return pair_brier.passes and pair_gap.passes, pair_brier, pair_gap
+
+
+def refresh_summary(season: int, through: int) -> dict:
+    """The weekly hook for `dfs research refresh`: the retro over Weeks 2 to `through` (only new weeks are
+    simulated), the calibrated offset's verdict against today, and the offset fitted on every week saved for
+    `[sim.lines] calibrated_cash_offset` (`du_line.save_calibration`)."""
+    from datetime import date
+
+    from dfs.research import curse
+
+    if season != curse.SEASON or through < FIRST_WEEK + 2:
+        return {
+            "headline": [
+                f"The double-up line study needs {curse.SEASON} and three weeks from Week {FIRST_WEEK}."
+            ],
+            "metrics": {},
+            "ship_bar": SHIP_BAR,
+        }
+    retro = run(list(range(FIRST_WEEK, through + 1)), herd_offset=False, log=lambda _m: None)
+    passes, pair_brier, pair_gap = verdict(retro)
+    du_line.save_calibration(
+        du_line.OffsetCalibration(
+            offset=retro.final_offset,
+            weeks=retro.calibration_weeks,
+            passes=passes,
+            z=pair_brier.z,
+            fitted=date.today().isoformat(),
+        )
+    )
+    table = calibration(retro.rows).set_index(["setting", "set"])
+    gap_today, gap_offset = table.loc[("today", "all"), "gap"], table.loc[("offset", "all"), "gap"]
+    weeks = ", ".join(str(w) for w in retro.calibration_weeks)
+    action = (
+        "it clears the bar: `[sim.lines] calibrated_cash_offset = true` can go on"
+        if passes
+        else "it does not clear the bar: leave `[sim.lines] calibrated_cash_offset` off"
+    )
+    headline = [
+        f"Cash % against field average +{retro.final_offset:g} (calibrated on the double-ups of Weeks "
+        f"{weeks}): {action}.",
+        f"Shown minus cashed, all lineups: today {gap_today:+.1%}, calibrated {gap_offset:+.1%}.",
+        f"- {pair_brier.line()}",
+        f"- {pair_gap.line()}",
+    ]
+    metrics: dict[str, float | bool] = {
+        "offset": round(retro.final_offset, 2),
+        "gap today": round(float(gap_today), 4),
+        "gap calibrated": round(float(gap_offset), 4),
+        "Brier diff": round(pair_brier.mean, 4),
+        "Brier z": round(pair_brier.z, 2),
+        "gap z": round(pair_gap.z, 2),
+        "clears the bar": passes,
+    }
+    return {"headline": headline, "metrics": metrics, "ship_bar": SHIP_BAR}
 
 
 def main(argv: list[str] | None = None) -> None:  # pragma: no cover - the study, run by hand
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--weeks", default="2,3,4,5,6,7")
     parser.add_argument("--sims", type=int, default=5000)
+    parser.add_argument("--fresh", action="store_true", help="simulate every week again (ignore the cache)")
     args = parser.parse_args(argv)
     weeks = [int(w) for w in args.weeks.split(",")]
-    retro = run(weeks, n_sims=args.sims)
+    retro = run(weeks, n_sims=args.sims, cache=not args.fresh)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     retro.rows.assign(names=retro.rows["names"].map("|".join)).to_csv(OUT_DIR / "rows.csv", index=False)
     text = report(retro)

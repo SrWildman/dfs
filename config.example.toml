@@ -134,6 +134,11 @@ gpp_top1_offset = 63.2
 # ownership_mean = false
 # ownership_uncertainty = false
 # ownership_scenarios = 200
+# calibrated_cash_offset: the Cash % SHOWN on Lineups and Suggested is measured against the field average + the offset
+# `dfs research refresh` calibrates on your real double-ups (data/model_cache/du_line.json; docs/SIM.md "The double-up
+# cash line"). Display only: builds, late swap and rankings keep today's line. The refresh report says when it clears
+# the bar; until then leave it off.
+# calibrated_cash_offset = false
 
 # Which projection the model-driven tools act on: late swap, the Lineups simulator, the Suggested builds and the
 # Board's portfolio line. "CalPts" is our corrected projection (TFFB corrected for its known biases and blended with

@@ -1985,39 +1985,55 @@ maximiser (TFFB or CalPts) matches it worse, except CalPts in Week 7. The foreca
 real double-up mean by -14.4, +7.5, +4.5 and -6.7 (Weeks 4-7), the same sign as the herd's result every week: double-up fields
 are chalkier than TFFB's ownership.
 
-**Held out by week** (every parameter from the other weeks' double-ups): Weeks 2-7, 3,299 lineups (today's 20 cash and 20 GPP
+**Held out by week** (every parameter from the other weeks' double-ups): Weeks 2-7, 3,303 lineups (today's 20 cash and 20 GPP
 builds, 300 random, up to 150 real double-up and 150 real GPP lineups a week), one simulation per week, the real line = the
 GIANT $25 Double Up's (Results).
 
 | Setting | Shown | Cashed | Brier | Brier vs today (SE over weeks; weeks better) |
 |---|---|---|---|---|
-| today: field mean + 0.6 | 50.4% | 38.7% | 0.2548 | |
-| the line model (herd, shift, week-to-week spread) | 51.5% | | 0.2665 | +0.0113 (0.0040; 1 of 6) worse |
-| the same without the herd | 51.0% | | 0.2650 | +0.0093 (0.0040; 1 of 6) worse |
-| **offset calibrated on the real double-up lineups** (+3.0 to +9.5 by fold, +7 typical) | 40.5% | | **0.2479** | -0.0158 (0.0212; 4 of 6) |
-| the line model with its shift calibrated the same way | 40.4% | | 0.2487 | -0.0148 (0.0211; 4 of 6) |
+| today: field mean + 0.6 | 50.6% | 38.1% | 0.2529 | |
+| the line model (herd, shift, week-to-week spread) | 51.7% | | 0.2642 | +0.011 worse |
+| the same without the herd | 51.2% | | 0.2628 | +0.010 worse |
+| **offset calibrated on every entry of the reference double-up** (+7.5 to +10 by fold) | 38.0% | | **0.2363** | **-0.026 (0.023; 4 of 6)**, z 1.2 |
+| the line model with its shift calibrated the same way | 38.1% | | 0.2365 | -0.026 |
+
+The calibration set is every entry of that week's reference double-up (the one whose line Results records), each distinct
+lineup weighted by its copies (1,500-2,000 lineups, 2,750-3,440 entries a week): its entries cash at the paid share exactly
+(43.6%; 52.2% in Week 7, where the 666-copy herd tied at the line and was paid), so the target carries no sampling noise. A
+first version calibrated on a sample of 150 DISTINCT double-up lineups a week, whose cash rate is not pinned (43.6% in one sample,
+48.0% in another), and its offset moved with the sample (+7 vs +4.5); that is why the calibration is on weighted entries.
 
 | Calibrated offset, by set | Shown (today) | Cashed |
 |---|---|---|
-| Cash builds | 59.2% (69.4%) | 51.7% |
-| GPP builds | 55.6% (65.4%) | 50.0% |
-| Random | 37.6% (47.4%) | 34.2% |
-| Real double-up lineups | 43.9% (54.2%) | 43.6% |
-| Real GPP lineups | 40.0% (49.7%) | 42.6% |
+| Cash builds | 56.2% (69.4%) | 51.7% |
+| GPP builds | 52.7% (65.3%) | 50.0% |
+| Random | 35.2% (47.5%) | 32.2% |
+| Real double-up lineups (distinct, sampled) | 41.1% (54.7%) | 48.0% |
+| Real GPP lineups | 37.5% (50.1%) | 40.8% |
+| Every reference double-up entry, Weeks 4 / 5 / 6 / 7 (held out) | 51.1 / 40.9 / 47.5 / 43.9% (62.6 / 56.2 / 60.4 / 60.2%) | 43.6 / 43.6 / 43.7 / 52.2% |
 
-- **The miss is a level, not the line's shape.** By construction 43.5% of a double-up cashes, yet today's simulation gives the
-  average real double-up lineup 54%: in the simulator's own points the line sits about 7 points too low. Calibrating that
-  one number on the real double-up lineups of the other weeks cuts the overall gap from +15.6 to +5.7 points and the cash
-  builds' from +17.7 to +7.5 (the rest is the builds' own selection, F's finding).
-- **The herd adds nothing measurable on top** (Brier 0.2487 vs 0.2479), and the line model's week-to-week spread makes it
+- **The miss is a level, not the line's shape.** Today's simulation gives the average double-up ENTRY 56-63% against a paid share
+  of 43.6%: in the simulator's own points the line sits about 8 points too low. Calibrating that one number on the other weeks
+  cuts the overall gap from +16.5 to +3.9 points and the cash builds' from +17.7 to +4.5.
+- **The herd adds nothing measurable on top** (Brier 0.2365 vs 0.2363), and the line model's week-to-week spread makes it
   WORSE: more spread pulls every Cash % toward 50%, the wrong way for the random and field lineups.
-- **Nothing clears the bar** (`du_line_retro.SHIP_BAR`: Brier and calibration both better by more than 2 SE across weeks).
-  The calibrated offset is better in 4 of 6 weeks, z 0.7. The reason is the weeks: each has one line, and the same kinds of
-  lineups cashed 8% (Week 3) to 67% (Week 4) of the time while every display sits at 40-55%. The simulator's line band is also
-  too narrow: the real line fell outside today's 10-90% band in 4 of 6 weeks, by up to 24 points (Week 3: 158.7 against
-  110.7-134.4). That is slate-level variance the simulator does not have, for the lineups and the line alike; a different
+- **Nothing clears the bar** (`du_line_retro.SHIP_BAR`: Brier and calibration both better by more than 2 SE across weeks). The
+  calibrated offset is better in 4 of 6 weeks, Brier z 1.2, calibration z 0.7. The reason is the weeks: each has one line, and the
+  same kinds of lineups cashed 8% (Week 3) to 67% (Week 4) of the time while every display sits at 35-55%. The simulator's line
+  band is also too narrow: the real line fell outside today's 10-90% band in 4 of 6 weeks, by up to 24 points (Week 3: 158.7
+  against 110.5-134.4). That is slate-level variance the simulator does not have, for the lineups and the line alike; a different
   line alone cannot supply it.
 - Caveats: 6 weeks of lines, 4 of double-up standings; Weeks 2-3 have no double-up lineups and use the line Results records.
 
-Code: `du_line.py` (pure: `lines`, `cash_probability`, `fit`), `du_line_retro.py` (the retro, `calibrated_value`); tests
-`tests/sim/test_du_line.py`. No switch reads it: nothing on Lineups or Suggested changes.
+**The switch (Sam, 2026-10-27): `[sim.lines] calibrated_cash_offset`, default off, display only.** On, the Cash % SHOWN on
+Lineups (the sync's scoreboard and its hover note) and on Suggested (the builds' Cash % and the status line) is measured
+against field average + the calibrated offset (`SimLines.display_field`; `lineup_suggest.with_shown_cash` re-scores the
+chosen builds). Builds are still searched, ranked and saved on today's line, late swap ranks on it, Top 1% is untouched,
+and Suggested's round notes ("Cash % 61% -> 64%") compare today's numbers. The offset is the one calibrated on every
+double-up week so far (+8.5 on Weeks 4-7, 2026-10-27), written to `data/model_cache/du_line.json` by `dfs research refresh`
+(study `du_line`: it reruns the retro each close, simulating only the new week, about a minute plus two or three for the
+new week, and says whether it clears the bar). On with no file saved, Cash % is
+today's and the note says so.
+
+Code: `du_line.py` (pure: `lines`, `cash_probability`, `fit`; the saved calibration), `du_line_retro.py` (the retro,
+`calibrated_value`, `refresh_summary`); tests `tests/sim/test_du_line.py`, `tests/test_sim_lines.py`.

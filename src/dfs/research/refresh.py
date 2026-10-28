@@ -19,9 +19,10 @@ Studies, each with the bar it must clear to matter:
 | `curse` | the optimizer's curse and its held-out fixes (hook below) | `dfs.research.curse` |
 | `backtest` | Flashback: build settings scored in his real contests (optional: `--only`) | `dfs.backtest` |
 | `dst` | OurDST, our own DST projection, against TFFB and CalPts (hook below) | `dfs.model.dst_study` |
+| `du_line` | the calibrated double-up Cash % offset (saved for its switch) | `dfs.sim.du_line_retro` |
 
-**The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study, OurDST)
-plugs in by exposing
+**The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study, OurDST, the
+double-up line) plugs in by exposing
 
     refresh_summary(season, through) -> {"headline": [str, ...], "metrics": {str: float | bool},
                                          "ship_bar": str}
@@ -483,11 +484,13 @@ CONTEST_RETRO_MODULE = "dfs.sim.contest_retro"
 CURSE_MODULE = "dfs.research.curse"
 BACKTEST_MODULE = "dfs.backtest"
 DST_MODULE = "dfs.model.dst_study"
+DU_LINE_MODULE = "dfs.sim.du_line_retro"
 HOOK_MODULES = {
     "contest_retro": CONTEST_RETRO_MODULE,
     "curse": CURSE_MODULE,
     "backtest": BACKTEST_MODULE,
     "dst": DST_MODULE,
+    "du_line": DU_LINE_MODULE,
 }
 
 
@@ -534,6 +537,10 @@ def study_dst(ctx: Context) -> Study:
     return hook_study(ctx, "dst", "OurDST, our own DST projection (session O)")
 
 
+def study_du_line(ctx: Context) -> Study:
+    return hook_study(ctx, "du_line", "The double-up cash line: calibrated Cash % (session O)")
+
+
 STUDIES: dict[str, Callable[[Context], Study]] = {
     "shape": study_shape,
     "bump": study_bump,
@@ -546,6 +553,7 @@ STUDIES: dict[str, Callable[[Context], Study]] = {
     "curse": study_curse,
     "backtest": study_backtest,
     "dst": study_dst,
+    "du_line": study_du_line,
 }
 OPTIONAL = frozenset({"backtest"})  # in STUDIES, but run only when asked for (`--only backtest`)
 TITLES = {
@@ -560,6 +568,7 @@ TITLES = {
     "curse": "Optimizer's curse",
     "backtest": "Flashback backtest",
     "dst": "OurDST",
+    "du_line": "Double-up Cash % offset",
 }
 
 

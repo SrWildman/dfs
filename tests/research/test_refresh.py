@@ -92,7 +92,7 @@ def test_the_previous_report_is_the_newest_earlier_week_of_the_same_season(two_s
 def test_the_summary_is_a_line_per_study_between_a_header_and_the_report(tmp_path):
     studies = [refresh.Study(k, k, "bar", verdict="v", seconds=1.0) for k in refresh.STUDIES]
     lines = refresh.summary_lines(studies, 12.0, tmp_path / "r.md", 2026, 6)
-    assert len(refresh.STUDIES) == 11 and len(lines) == 13
+    assert len(refresh.STUDIES) == 12 and len(lines) == 14
     assert lines[0].startswith("research refresh 2026 through Week 6") and "shared history" in lines[0]
     assert lines[-1].strip().startswith("report:")
 
@@ -104,6 +104,7 @@ def test_the_summary_is_a_line_per_study_between_a_header_and_the_report(tmp_pat
         ("curse", refresh.study_curse),
         ("backtest", refresh.study_backtest),
         ("dst", refresh.study_dst),
+        ("du_line", refresh.study_du_line),
     ],
 )
 def test_a_hook_study_is_skipped_without_its_module_and_used_when_it_has_one(monkeypatch, key, run):

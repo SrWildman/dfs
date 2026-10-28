@@ -366,6 +366,31 @@ def annotate(
     return out
 
 
+def with_shown_cash(
+    builds: list[Build],
+    specs: dict[str, PlayerSpec],
+    field: FieldModel,
+    *,
+    n_sims: int = N_SIMS,
+    seed: int = SEED,
+) -> list[Build]:
+    """`builds` with `p_cash` re-scored against `field` (`SimLines.display_field`, `[sim.lines]
+    calibrated_cash_offset`): the Cash % SHOWN for builds already chosen and ranked on today's line. Nothing
+    else about a build changes; a build the simulator cannot rate keeps its number."""
+    from dfs.sim.simulate import simulate_lineups
+
+    rated = [
+        (i, s) for i, b in enumerate(builds) if (s := lineup_from_names([p.name for p in b.players], specs))
+    ]
+    if not rated:
+        return builds
+    result = simulate_lineups([s for _, s in rated], n_sims=n_sims, seed=seed, field=field)
+    out = list(builds)
+    for (i, _), stats in zip(rated, result.lineups, strict=True):
+        out[i] = replace(out[i], p_cash=float(stats.p_cash))
+    return out
+
+
 def score(
     lineups: list[list[SwapPlayer]],
     specs: dict[str, PlayerSpec],

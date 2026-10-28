@@ -175,6 +175,11 @@ class SimLinesConfig(BaseModel):
     ownership_mean: bool = False
     ownership_uncertainty: bool = False
     ownership_scenarios: int = Field(200, ge=1, le=5000)
+    # The SHOWN Cash % against field average + the offset `dfs research refresh` calibrates on his real
+    # double-ups (`data/model_cache/du_line.json`; docs/SIM.md "The double-up cash line"), instead of +
+    # `double_up_offset`. Display only (Lineups and Suggested): builds, late swap and every ranking keep
+    # today's line. Default off.
+    calibrated_cash_offset: bool = False
 
     @field_validator("double_up_own_curve", "gpp_own_curve")
     @classmethod

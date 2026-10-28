@@ -21,22 +21,29 @@ once per draw): double-up fields are chalkier than the projected ownership, so t
 
 The parameters are measured on real double-up standings (`fit`); the herd's score per draw is the pre-lock
 top ownership-product lineup's (`field_gen.chalk_lineups`, k = 1; it shares 6-9 of the real herd's 9
-players). `dfs.sim.du_line_retro` judges it held out by week. Nothing reads it unless `[sim.lines]
-du_line_model` is on, and then only the SHOWN Cash %: builds keep ranking on today's number.
+players). `dfs.sim.du_line_retro` judges it held out by week: it does not beat a plain offset, so nothing
+reads it. What `[sim.lines] calibrated_cash_offset` (default off, the SHOWN Cash % only) reads is that plain
+offset, calibrated by the retro and saved here (`OffsetCalibration`).
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import numpy as np
 from scipy.stats import norm
+
+from dfs.paths import DATA_DIR
 
 # DraftKings double-ups pay 43.5% of the field (every one Sam played but two: 45.1% and 50.1%).
 PAID_SHARE = 0.435
 # Draws of the week-level shift come from a fixed stream, so a display is the same on every run.
 SHIFT_SEED = 7
+# The calibrated offset `[sim.lines] calibrated_cash_offset` shows Cash % against (`dfs research refresh`).
+CALIBRATION_FILE = DATA_DIR / "model_cache" / "du_line.json"
 
 
 @dataclass(frozen=True)
@@ -122,3 +129,40 @@ def fit(stats: Sequence[ContestStats], *, exclude_week: int | None = None) -> Du
         paid=float(weekly(lambda s: s.paid).mean()),
         weeks=tuple(weeks),
     )
+
+
+@dataclass(frozen=True)
+class OffsetCalibration:
+    """The display offset (points above the simulated field mean) fitted on the real double-up lineups of
+    `weeks`, and whether the held-out retro cleared the ship bar when it was fitted (`passes`, `z` the Brier
+    difference's z against today)."""
+
+    offset: float
+    weeks: tuple[int, ...]
+    passes: bool
+    z: float
+    fitted: str  # ISO date
+
+    def to_dict(self) -> dict:
+        return {**asdict(self), "weeks": list(self.weeks)}
+
+
+def save_calibration(cal: OffsetCalibration, path: Path = CALIBRATION_FILE) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cal.to_dict(), indent=2) + "\n")
+    return path
+
+
+def load_calibration(path: Path = CALIBRATION_FILE) -> OffsetCalibration | None:
+    """The saved calibration, or None when there is none (or it cannot be read)."""
+    try:
+        d = json.loads(path.read_text())
+        return OffsetCalibration(
+            offset=float(d["offset"]),
+            weeks=tuple(int(w) for w in d["weeks"]),
+            passes=bool(d["passes"]),
+            z=float(d["z"]),
+            fitted=str(d["fitted"]),
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return None

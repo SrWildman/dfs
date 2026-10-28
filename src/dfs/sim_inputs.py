@@ -36,6 +36,7 @@ swap finds).
 
 from __future__ import annotations
 
+import dataclasses
 import statistics
 from dataclasses import dataclass
 
@@ -128,19 +129,29 @@ class SimLines:
     note: str  # one line for the terminal / the sync summary
     cash_basis: str  # how the cash line was reached, for a hover note or the Board's portfolio line
     top_label: str  # what the top-end number is called in a sentence: "Top 1%" or "190+"
+    # `[sim.lines] calibrated_cash_offset`: `field` with the calibrated cash offset, for the Cash % SHOWN on
+    # Lineups and Suggested only (None: the switch is off, or no calibration is saved). Rankings use `field`.
+    display_field: FieldModel | None = None
 
     @property
     def relative(self) -> bool:
         return self.field is not None
 
     @property
+    def shown_field(self) -> FieldModel | None:
+        """The field the SHOWN numbers are measured against: the calibrated display field, if any."""
+        return self.display_field if self.display_field is not None else self.field
+
+    @property
     def status(self) -> str:
         """The line on the Suggested tab: what the Cash % and Top 1% numbers were measured against."""
-        if self.field is None:
+        field = self.shown_field
+        if field is None:
             return f"cash line {self.cash_line:g}  ·  GPP target {self.gpp_target:g}  ·  {self.mode} lines"
+        calibrated = " (calibrated)" if self.display_field is not None else ""
         return (
-            f"lines move with the slate: Cash % = field average +{self.field.cash_offset:g}, "
-            f"Top 1% = field average +{self.field.top_offset:g}"
+            f"lines move with the slate: Cash % = field average +{field.cash_offset:g}{calibrated}, "
+            f"Top 1% = field average +{field.top_offset:g}"
         )
 
 
@@ -213,6 +224,9 @@ def resolve_lines(
             f"cash line {cash_line:g}, fixed (ownership not published yet)",
             gpp_label(top_line),
         )
+    display, calibrated = (
+        _calibrated_display(field) if getattr(lines, "calibrated_cash_offset", False) else (None, "")
+    )
     return SimLines(
         "relative",
         cash.value,
@@ -220,9 +234,29 @@ def resolve_lines(
         field,
         f"Lines move with the slate: Cash % beats the field average +{lines.double_up_offset:g}, Top 1% "
         f"beats it +{lines.gpp_top1_offset:g} (ownership of {len(field.players)} players, "
-        f"{len(field.cover)} simulated with your lineups){uncertainty}.",
-        f"cash line = the field's average score +{lines.double_up_offset:g}",
+        f"{len(field.cover)} simulated with your lineups){uncertainty}.{calibrated}",
+        f"cash line = the field's average score +{(display or field).cash_offset:g}",
         "Top 1%",
+        display,
+    )
+
+
+def _calibrated_display(field: FieldModel) -> tuple[FieldModel | None, str]:
+    """`[sim.lines] calibrated_cash_offset`: `field` with the saved calibrated cash offset, for the SHOWN
+    Cash % only, and a sentence saying so (or that no calibration is saved, and Cash % is today's)."""
+    from dfs.sim import du_line
+
+    cal = du_line.load_calibration()
+    if cal is None:
+        return None, (
+            " calibrated_cash_offset is on but no calibration is saved yet (`dfs research refresh` writes "
+            "it): Cash % is today's."
+        )
+    weeks = ", ".join(str(w) for w in cal.weeks)
+    bar = "cleared the bar" if cal.passes else f"NOT proven (z {cal.z:+.1f})"
+    return dataclasses.replace(field, cash_offset=cal.offset), (
+        f" Cash % SHOWN against the field average +{cal.offset:g} (calibrated on your double-ups, Weeks "
+        f"{weeks}; {bar}); builds and late swap rank on +{field.cash_offset:g}."
     )
 
 

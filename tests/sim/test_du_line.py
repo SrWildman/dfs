@@ -72,7 +72,7 @@ def test_fit_counts_each_week_once_and_leaves_one_out():
     assert du_line.fit([]) == du_line.DuLineModel()
 
 
-def test_the_calibrated_offset_makes_the_other_weeks_double_up_lineups_add_up():
+def test_the_calibrated_offset_makes_the_other_weeks_double_up_entries_add_up():
     import pandas as pd
 
     from dfs.sim import du_line_retro as retro
@@ -84,16 +84,47 @@ def test_the_calibrated_offset_makes_the_other_weeks_double_up_lineups_add_up():
         scores = mu[:, None] + rng.normal(0, 20, (4000, 200))
         frame = pd.DataFrame(
             {
-                "set": ["field (double-up)"] * 150 + ["random"] * 50,
+                "set": [retro.CALIBRATION_SET] * 150 + ["random"] * 50,
                 "col": range(200),
-                # 40% of the real double-up lineups cashed, whatever the week
-                "cashed": [1.0] * 60 + [0.0] * 90 + [0.0] * 50,
+                # 40% of the entries cashed, whatever the week: 60 lineups of one entry and one of 30 copies
+                # cashed (120 of 300 entries); the random lineups do not count
+                "cashed": [1.0] * 60 + [0.0] * 90 + [1.0] * 50,
+                "weight": [1.0] * 59 + [61.0] + [1.0] * 89 + [91.0] + [1.0] * 50,
             }
         )
         weeks[week] = (frame, retro.WeekDraws([], scores, mu, None, 0.6))
     grid = np.arange(-10.0, 20.01, 0.5)
     offset = retro.calibrated_value(weeks, 6, lambda d, v: d.field_mean + v, grid)
+    misses = {w: retro.offset_miss(f, d, grid) for w, (f, d) in weeks.items()}
+    assert retro.calibrated_offset(misses, 6, grid) == offset  # the one-sort path agrees with the grid search
+    one = retro.offset_miss(*weeks[4], grid)
+    for k in (0, 20, 40):
+        frame, draws = weeks[4]
+        p = du_line.cash_probability(
+            draws.scores[:, frame["col"].to_numpy()[:150]], draws.field_mean + grid[k]
+        )
+        brute = float(frame["weight"][:150] @ p - frame["weight"][:150] @ frame["cashed"][:150])
+        assert one[k] == pytest.approx(brute, abs=1e-6)
     # P(N(0, 20) >= offset) = 0.40 at offset ~ 5.1: the grid's nearest point
     assert offset == pytest.approx(20 * norm.ppf(0.6), abs=0.6)
     no_set = {w: (f.assign(set="random"), d) for w, (f, d) in weeks.items()}
     assert retro.calibrated_value(no_set, 6, lambda d, v: d.field_mean + v, grid) == grid[0]
+
+
+def test_a_cached_week_reads_back_without_this_modules_classes(tmp_path):
+    import pickle
+
+    import pandas as pd
+
+    from dfs.sim import du_line_retro as retro
+
+    frame = pd.DataFrame({"set": ["random"], "col": [0], "cashed": [1.0]})
+    draws = retro.WeekDraws([("A", "B")], np.ones((3, 1)), np.arange(3.0), None, 0.6)
+    path = tmp_path / "w.pkl"
+    retro.save_week(path, frame, draws)
+    raw = pickle.loads(path.read_bytes())
+    assert isinstance(raw, dict)  # plain data: no `__main__.WeekDraws` to fail under another entry point
+    got_frame, got = retro.load_week(path)
+    pd.testing.assert_frame_equal(got_frame, frame)
+    assert got.kept == [("A", "B")] and got.herd is None and got.offset == 0.6
+    assert np.array_equal(got.scores, draws.scores) and np.array_equal(got.field_mean, draws.field_mean)
