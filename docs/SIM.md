@@ -1965,3 +1965,59 @@ per-position weights, fitted on the weeks **before** the backtested one only (We
 
 Neither shrink clears the ship bar; both lose on cash as entered (0 of 4 weeks) and on any-build ROI. The GPP-only ownership variant
 matches `ownership_uncertainty`'s Week 7 result (+121, SE 102; all of its gain was GPP, and here cash is identical to today by construction); not proven either.
+
+## The double-up cash line, modelled per contest (shadow, 2026-10-27)
+
+**Why.** Cash % reads about 16 points high: builds, random lineups and real field lineups alike (the curse study). The
+suspect was the line: `field mean + 0.6` with a fixed offset, while the real double-up line sits -4 to +8 points from its
+field's mean. `python -m dfs.sim.du_line_retro` (model `du_line.py`, about 15 minutes; results to `data/research/du_line/`).
+
+**What decides the line, in his 15 double-ups (Weeks 4-7; contests of a week share one line to within 3 points).** One lineup
+holds 6-24% of every double-up, and 43.5% of the field is paid, so the herd's own score sets the side: when it busts the line
+is the rest of the field's `0.435 / (1 - s)` quantile, just above it (Week 4: herd 104.4, line 106.0); when it booms it takes
+`s` of the paid places and the line rises (Week 5: herd 159.0, line 153.1); in between it straddles and the line IS its score
+(Week 7: 114.06; his lineup was the herd, tied and cashed). A normal rest-of-field around the field mean, plus the herd, gives
+all three from one formula (`du_line.lines`), and with the real inputs it lands within 1-3 points of the real lines.
+
+Pre-lock, the herd is found as the top ownership-product lineup (`field_gen.chalk_lineups`, k = 1): it shares 7, 8, 9 and 6
+of the real herd's 9 players (Weeks 4-7). The real herd was the product rank 4, 1, 0 and outside the top 5; a projection
+maximiser (TFFB or CalPts) matches it worse, except CalPts in Week 7. The forecast field mean on the REAL points misses the
+real double-up mean by -14.4, +7.5, +4.5 and -6.7 (Weeks 4-7), the same sign as the herd's result every week: double-up fields
+are chalkier than TFFB's ownership.
+
+**Held out by week** (every parameter from the other weeks' double-ups): Weeks 2-7, 3,299 lineups (today's 20 cash and 20 GPP
+builds, 300 random, up to 150 real double-up and 150 real GPP lineups a week), one simulation per week, the real line = the
+GIANT $25 Double Up's (Results).
+
+| Setting | Shown | Cashed | Brier | Brier vs today (SE over weeks; weeks better) |
+|---|---|---|---|---|
+| today: field mean + 0.6 | 50.4% | 38.7% | 0.2548 | |
+| the line model (herd, shift, week-to-week spread) | 51.5% | | 0.2665 | +0.0113 (0.0040; 1 of 6) worse |
+| the same without the herd | 51.0% | | 0.2650 | +0.0093 (0.0040; 1 of 6) worse |
+| **offset calibrated on the real double-up lineups** (+3.0 to +9.5 by fold, +7 typical) | 40.5% | | **0.2479** | -0.0158 (0.0212; 4 of 6) |
+| the line model with its shift calibrated the same way | 40.4% | | 0.2487 | -0.0148 (0.0211; 4 of 6) |
+
+| Calibrated offset, by set | Shown (today) | Cashed |
+|---|---|---|
+| Cash builds | 59.2% (69.4%) | 51.7% |
+| GPP builds | 55.6% (65.4%) | 50.0% |
+| Random | 37.6% (47.4%) | 34.2% |
+| Real double-up lineups | 43.9% (54.2%) | 43.6% |
+| Real GPP lineups | 40.0% (49.7%) | 42.6% |
+
+- **The miss is a level, not the line's shape.** By construction 43.5% of a double-up cashes, yet today's simulation gives the
+  average real double-up lineup 54%: in the simulator's own points the line sits about 7 points too low. Calibrating that
+  one number on the real double-up lineups of the other weeks cuts the overall gap from +15.6 to +5.7 points and the cash
+  builds' from +17.7 to +7.5 (the rest is the builds' own selection, F's finding).
+- **The herd adds nothing measurable on top** (Brier 0.2487 vs 0.2479), and the line model's week-to-week spread makes it
+  WORSE: more spread pulls every Cash % toward 50%, the wrong way for the random and field lineups.
+- **Nothing clears the bar** (`du_line_retro.SHIP_BAR`: Brier and calibration both better by more than 2 SE across weeks).
+  The calibrated offset is better in 4 of 6 weeks, z 0.7. The reason is the weeks: each has one line, and the same kinds of
+  lineups cashed 8% (Week 3) to 67% (Week 4) of the time while every display sits at 40-55%. The simulator's line band is also
+  too narrow: the real line fell outside today's 10-90% band in 4 of 6 weeks, by up to 24 points (Week 3: 158.7 against
+  110.7-134.4). That is slate-level variance the simulator does not have, for the lineups and the line alike; a different
+  line alone cannot supply it.
+- Caveats: 6 weeks of lines, 4 of double-up standings; Weeks 2-3 have no double-up lineups and use the line Results records.
+
+Code: `du_line.py` (pure: `lines`, `cash_probability`, `fit`), `du_line_retro.py` (the retro, `calibrated_value`); tests
+`tests/sim/test_du_line.py`. No switch reads it: nothing on Lineups or Suggested changes.
