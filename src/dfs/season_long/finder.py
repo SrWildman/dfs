@@ -23,6 +23,7 @@ from itertools import combinations
 
 from dfs.player_join import normalize_name
 from dfs.season_long import ros
+from dfs.season_long import team_value as tvm
 from dfs.season_long import trade as tr
 from dfs.season_long.league_view import LeagueView
 from dfs.season_long.objective import Evaluator
@@ -51,6 +52,9 @@ class Filters:
     # Names to move either way, sorted per league (`players_in`): one Sam owns is a sell, one on another
     # roster a buy; a trade that moves at least one of them counts. A name not in a league is skipped there.
     players: list[str] = field(default_factory=list)
+    # The targeted search (`dfs season sync` / `trades` when season.toml has a buy list): a trade must land a
+    # name from this list (one on another roster in this league) or a player at Sam's weakest position here.
+    targets: list[str] | None = None
 
 
 @dataclass
@@ -214,6 +218,21 @@ def find_trades(
         notes.append(f"from your list: selling {sold}; buying {bought}")
     if filters.players and not (sells or buys):
         return []
+    target_ids: set[str] = set()
+    target_pos: set[str] = set()
+    if filters.targets is not None:
+        target_ids = {
+            p for t in filters.targets if len(hits := tr._match(t, others, view)) == 1 for p in hits
+        }
+        need = next(((slot, d) for slot, d, _ in view.needs.get(me, []) if d < 0), None)
+        if need is not None:
+            target_pos = set(tvm.slot_eligible(need[0]))
+        if notes is not None:
+            names = ", ".join(view.name(p) for p in sorted(target_ids)) or "none here"
+            weak = f"{need[0]} ({need[1]:+.1f}/wk)" if need else "none"
+            notes.append(f"targets: your buy list ({names}) and your weakest spot, {weak}")
+        if not target_ids and not target_pos:
+            return []
     partners = [rid for rid in ev.ids if rid != me]
     if filters.partner:
         partners = [lg.find_team(filters.partner).roster_id]
@@ -233,7 +252,9 @@ def find_trades(
     ideas: list[Idea] = []
     for rid in partners:
         theirs = ev.rosters[rid]
-        their_pool = top_players(theirs, set(), get_p | buys)
+        at_need = [p for p in s["ros_pts"].reindex(theirs).dropna().sort_values(ascending=False).index
+                   if pos.get(p) in target_pos][:3]  # fmt: skip
+        their_pool = top_players(theirs, set(), get_p | buys | target_ids | set(at_need))
         candidates = []
         for shape in filters.shapes:
             n_give, n_get = int(shape[0]), int(shape[2])
@@ -248,6 +269,10 @@ def find_trades(
                     if get_pos and not any(pos.get(p) in get_pos for p in get):
                         continue
                     if filters.players and not ((sells & set(give)) or (buys & set(get))):
+                        continue
+                    if filters.targets is not None and not (
+                        (target_ids & set(get)) or any(pos.get(p) in target_pos for p in get)
+                    ):
                         continue
                     cons_in = sum(market.consensus.get(p, 0.0) for p in give)
                     cons_out = sum(market.consensus.get(p, 0.0) for p in get)

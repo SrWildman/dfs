@@ -150,3 +150,16 @@ def test_a_sell_list_skips_names_not_on_the_roster_and_never_widens_to_everythin
     assert ideas and all("wr3" in i.analysis.give.players for i in ideas)
     assert notes == ["not on your roster here, skipped: Somebody Else"]
     assert fd.find_trades(v, ev, syn.market(v), fd.Filters(give=["Somebody Else"])) == []
+
+
+def test_targets_are_the_buy_list_or_the_weakest_spot(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    notes: list[str] = []
+    # Sam is thinnest at RB; his buy list names a WR on team 3 and one of his own players (skipped).
+    ideas = fd.find_trades(v, ev, syn.market(v), fd.Filters(targets=["WR5", "WR1"]), notes=notes)
+    assert ideas
+    for i in ideas:
+        got = i.analysis.get.players
+        assert "wr5" in got or any(p.startswith("rb") for p in got)
+    assert notes[0].startswith("targets: your buy list (WR5) and your weakest spot, RB")

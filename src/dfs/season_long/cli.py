@@ -202,11 +202,16 @@ def season_sync(
     league: str = typer.Option(None, "--league", help=LEAGUE_HELP),
     all_leagues: bool = typer.Option(False, "--all", help=ALL_HELP + " (the default)."),
     top: int = typer.Option(20, "--top", help="Trade ideas kept per league."),
+    open_search: bool = typer.Option(
+        False, "--open", help="Search every trade, not just season.toml's buy list and your weakest spot."
+    ),
     no_sheet: bool = typer.Option(False, "--no-sheet", help="Print only; write nothing."),
     sheet_id: str = typer.Option(None, "--sheet-id", help="A Season sheet other than season.toml's."),
 ) -> None:
     """Sync every league from Sleeper, rebuild values and trade ideas, and write the Season sheet (a few
-    minutes for four leagues)."""
+    minutes for four leagues). With a buy list in season.toml, the trade ideas are the targeted ones (your
+    list and each league's weakest spot) unless --open."""
+    from dfs.season_long import finder as fd
     from dfs.season_long import sheet_season as ss
 
     cfg = _config()
@@ -217,7 +222,8 @@ def season_sync(
     for lc in chosen:
         _say(f"{lc.name}: syncing")
         try:
-            runs.append(_run(lc, cfg, table, top=top))
+            targets = None if open_search or not cfg.buy_list else list(cfg.buy_list)
+            runs.append(_run(lc, cfg, table, fd.Filters(targets=targets), top=top))
         except Exception as e:  # noqa: BLE001 -- one league failing never stops the others
             console.print(f"[red]FAIL[/red] {escape(lc.name)}: {escape(str(e))}")
             continue
@@ -255,6 +261,9 @@ def season_trades(
         "--lopsided",
         help="Also show ideas the market has over 125% for the partner (with the FAAB to ask back).",
     ),
+    open_search: bool = typer.Option(
+        False, "--open", help="With no filter, search every trade rather than the buy list and weakest spot."
+    ),
     from_sheet: bool = typer.Option(
         False,
         "--from-sheet",
@@ -284,6 +293,8 @@ def season_trades(
             )
             lopsided = lopsided or box.get("Show lopsided", "").strip().lower() in {"yes", "y", "true", "1"}
     filters = _filters(get, give, keep, partner, shapes, max_consensus_loss, lopsided, players)
+    if not any([get, give, partner, players]) and cfg.buy_list and not open_search:
+        filters.targets = list(cfg.buy_list)
     chosen = _leagues(cfg, league, all_leagues)
     table = _table()
     runs = []

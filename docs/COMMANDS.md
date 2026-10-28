@@ -331,13 +331,14 @@ Your Sleeper leagues (in `season.toml`), on their own Season sheet: rest-of-seas
 
 ### `dfs season sync`
 
-Sync every league from Sleeper, rebuild values and trade ideas, and write the Season sheet (a few minutes for four leagues).
+Sync every league from Sleeper, rebuild values and trade ideas, and write the Season sheet (a few minutes for four leagues). With a buy list in season.toml, the trade ideas are the targeted ones (your list and each league's weakest spot) unless --open.
 
 | Option | What it does |
 |---|---|
 | `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
 | `--all` | Every league in season.toml. (the default). |
 | `--top INT` | Trade ideas kept per league. Default: `20`. |
+| `--open` | Search every trade, not just season.toml's buy list and your weakest spot. |
 | `--no-sheet` | Print only; write nothing. |
 | `--sheet-id STR` | A Season sheet other than season.toml's. |
 
@@ -391,6 +392,7 @@ Find realistic trades: you gain, the partner gains by our model, and the market 
 | `--max-consensus-loss STR` | How far below fair (by the market) the partner may come out (5%). |
 | `--top INT` | Ideas to keep. Default: `20`. |
 | `--lopsided` | Also show ideas the market has over 125% for the partner (with the FAAB to ask back). |
+| `--open` | With no filter, search every trade rather than the buy list and weakest spot. |
 | `--from-sheet` | Use the Trade Finder tab's targeting box (also used when no filter is given). |
 | `--no-sheet` | Print only; write nothing. |
 | `--sheet-id STR` | A Season sheet other than season.toml's. |

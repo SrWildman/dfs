@@ -22,6 +22,11 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
    # faab_point_value = 1.5    # override the fitted points per FAAB dollar
    ```
 
+   A top-level `buy_list = ["Chuba Hubbard", ...]` makes the trade finder targeted: `dfs season sync` and a
+   plain `dfs season trades` keep only trades that land a name from the list (on another roster in that
+   league; one Sam owns there is skipped) or a player at his weakest spot there (FLEX counts as RB/WR/TE).
+   `--open` searches everything.
+
    Optional top-level numbers: `playoff_weight` (1.5), `starter_miss_rate` (0.06), `ir_weeks_out` (4),
    `survival_decay` (0.8), `survival_draws` (4000).
 2. Share the Season sheet with the service account as an Editor, then `dfs season setup` and `dfs season sync`.
