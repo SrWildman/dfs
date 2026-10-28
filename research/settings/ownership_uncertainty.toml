@@ -1,0 +1,6 @@
+# The field's ownership drawn per simulation around the fitted mean (`[sim.lines] ownership_uncertainty`),
+# for the cash and GPP builds alike. Shadow, default off.
+name = "ownership uncertainty"
+
+[flags]
+ownership_uncertainty = true

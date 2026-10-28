@@ -1,0 +1,3 @@
+# The baseline every weekly comparison is judged against: today's defaults (what a plain
+# `dfs lineups suggest` builds), with the search run to the end so a rerun gives the same builds.
+name = "today"

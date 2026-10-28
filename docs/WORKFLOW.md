@@ -28,7 +28,7 @@ This is what most weeks are -- **sections 1 to 7 below are the standard week**; 
 | 3 | research, pool, lineups | in the sheet (no command) |
 | 4 | lineups are built | `dfs entries fill` (pick each entry's Lineup), then `dfs export -o lineups.csv` or `dfs entries fill --write` |
 | 5 | gameday | `dfs sync --live`, then `dfs lineups late-swap` |
-| 6 | after the games | `dfs week close` (reconciles Bankroll, keeps your DraftKings downloads and rebuilds Contests, **and** scores the week into Model Check) |
+| 6 | after the games | `dfs week close --research` (reconciles Bankroll, keeps your DraftKings downloads and rebuilds Contests, **and** scores the week into Model Check; `--research` then runs Monday's offline studies unattended, under 45 minutes, into one report) |
 
 Sections 8 (log ownership) and 9 (read Model Check) are optional extras. The full command list is in
 [COMMANDS.md](COMMANDS.md).
@@ -336,8 +336,12 @@ Before you run it, in DraftKings: **My Contests > History > export** (the contes
 weeks, then sends an empty file**, so grab them on Monday or Tuesday; they cannot be backfilled.
 
 ```
-dfs week close
+dfs week close --research
 ```
+
+`--research` is the Monday option: once the close is done it runs the weekly offline studies (research refresh, the stacks retro, the
+ownership-uncertainty backtests, the sim retro) side by side and writes ONE report, `docs/research/weekly/<season>-wk<NN>-close.md`,
+plus a 15-line summary to paste to planning. Leave it off for a close on its own.
 
 With no `--csv` it uses the newest history export in your Downloads folder (found by its header row, `[contests] downloads_dir` changes
 the folder) and says which file. `--csv <file>` still works.

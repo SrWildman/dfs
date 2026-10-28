@@ -42,19 +42,38 @@ def _model_for(week: int):
 # ---------------------------------------------------------------------------------------------------------
 
 
-def contest_runs(*, n_sims: int = 4000, through: int = 99, log=print) -> dict[str, dict[int, dict]]:
-    out = {}
-    for setting in CONTEST_SETTINGS:
-        log(f"contest retro: {setting}")
-        out[setting] = contest_retro.run_retro(
-            through,
-            n_sims=n_sims,
-            log=log,
-            ownership=None if setting == "today" else _model_for,
-            ownership_draws=setting in ("draws", "per_contest"),
-            ownership_per_contest=setting == "per_contest",
-        )
-    return out
+def _contest_run(setting: str, n_sims: int, through: int, log=print) -> dict[int, dict]:
+    log(f"contest retro: {setting}")
+    return contest_retro.run_retro(
+        through,
+        n_sims=n_sims,
+        log=log,
+        ownership=None if setting == "today" else _model_for,
+        ownership_draws=setting in ("draws", "per_contest"),
+        ownership_per_contest=setting == "per_contest",
+    )
+
+
+def _contest_run_job(args: tuple) -> tuple[str, dict[int, dict]]:
+    setting, n_sims, through = args
+    return setting, _contest_run(
+        setting, n_sims, through, log=lambda m: print(f"[{setting}] {m}", flush=True)
+    )
+
+
+def contest_runs(
+    *, n_sims: int = 4000, through: int = 99, log=print, workers: int = 1
+) -> dict[str, dict[int, dict]]:
+    """A's contest retro under each setting. With `workers` > 1 the settings run in separate processes (the
+    models must already be fitted: `model_without` for every week, which `run` does first)."""
+    if workers <= 1:
+        return {s: _contest_run(s, n_sims, through, log) for s in CONTEST_SETTINGS}
+    import multiprocessing as mp
+
+    jobs = [(s, n_sims, through) for s in CONTEST_SETTINGS]
+    with mp.get_context("spawn").Pool(min(workers, len(jobs))) as pool:
+        done = dict(pool.imap_unordered(_contest_run_job, jobs))
+    return {s: done[s] for s in CONTEST_SETTINGS}
 
 
 def coverage(runs: dict[str, dict[int, dict]]) -> pd.DataFrame:
@@ -205,27 +224,44 @@ def score_setting(wi, lineups: list[list[str]], setting: str, *, n_sims: int = 5
     return {tuple(sorted(p.name for p in s.players)): (float(s.p_cash), float(s.p_gpp)) for s in scored}
 
 
-def curse_rescore(rows: pd.DataFrame | None = None, *, log=print) -> pd.DataFrame:
+def _curse_week(args: tuple) -> list[pd.DataFrame]:
+    """One week's curse rows rescored under every setting."""
+    week, wi, g = args
+    names = sorted({n for n in g["names"]})
+    lus = [n.split("|") for n in names]
+    key = g["names"].map(lambda s: tuple(sorted(s.split("|"))))
+    parts = []
+    for setting in SETTINGS:
+        got = score_setting(wi, lus, setting)
+        parts.append(
+            g.assign(
+                setting=setting,
+                shown_cash=key.map(lambda k, got=got: got.get(k, (np.nan, np.nan))[0]),
+                shown_top1=key.map(lambda k, got=got: got.get(k, (np.nan, np.nan))[1]),
+            )
+        )
+    return parts
+
+
+def curse_rescore(rows: pd.DataFrame | None = None, *, log=print, workers: int = 1) -> pd.DataFrame:
     """F's rows (today's builds, random and real field lineups) with the shown Cash % / Top 1% under every
-    setting."""
+    setting. `workers` > 1 rescores the weeks in separate processes."""
     rows = pd.read_csv(CURSE_ROWS) if rows is None else rows
     rows = rows[rows["variant"].isin(CURSE_SETS)].copy()
     wis = _week_inputs(sorted(int(w) for w in rows["week"].unique()))
-    parts = []
-    for week, g in rows.groupby("week"):
-        names = sorted({n for n in g["names"]})
-        lus = [n.split("|") for n in names]
-        for setting in SETTINGS:
-            got = score_setting(wis[int(week)], lus, setting)
-            key = g["names"].map(lambda s: tuple(sorted(s.split("|"))))
-            parts.append(
-                g.assign(
-                    setting=setting,
-                    shown_cash=key.map(lambda k, got=got: got.get(k, (np.nan, np.nan))[0]),
-                    shown_top1=key.map(lambda k, got=got: got.get(k, (np.nan, np.nan))[1]),
-                )
-            )
-        log(f"curse rows: week {week} rescored")
+    jobs = [(int(week), wis[int(week)], g) for week, g in rows.groupby("week")]
+    parts: list[pd.DataFrame] = []
+    if workers <= 1 or len(jobs) < 2:
+        for job in jobs:
+            parts += _curse_week(job)
+            log(f"curse rows: week {job[0]} rescored")
+    else:
+        import multiprocessing as mp
+
+        with mp.get_context("spawn").Pool(min(workers, len(jobs))) as pool:
+            for week_parts in pool.imap(_curse_week, jobs):
+                parts += week_parts
+                log(f"curse rows: {len(parts) // len(SETTINGS)} of {len(jobs)} weeks rescored")
     return pd.concat(parts, ignore_index=True)
 
 
@@ -274,22 +310,31 @@ def curse_calibration(res: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def main() -> None:  # pragma: no cover - the study, run by hand
-    pd.set_option("display.width", 220)
-    pd.set_option("display.max_columns", 30)
+def run(*, log=print, workers: int = 1) -> dict[str, pd.DataFrame]:
+    """The study: refit each week's model without it, run both harnesses, return the four tables
+    (`coverage`, `contest_calibration`, `ranking`, `curse_calibration`) and save the raw runs to `OUT_DIR`."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     data = own_error_retro.load_weeks()
     for week in sorted(data):
         own_error_retro.model_without(week, data=data)
-    runs = contest_runs()
+    runs = contest_runs(log=log, workers=workers)
     with open(OUT_DIR / "contest_runs.pkl", "wb") as fh:
         pickle.dump(runs, fh)
-    print(coverage(runs).round(3).to_string(index=False))
-    print(contest_calibration(runs).round(4).to_string(index=False))
-    print(ranking(runs).round(4).to_string(index=False))
-    res = curse_rescore()
+    res = curse_rescore(log=log, workers=workers)
     res.to_csv(OUT_DIR / "curse_rescored.csv", index=False)
-    print(curse_calibration(res).round(4).to_string(index=False))
+    return {
+        "coverage": coverage(runs),
+        "contest_calibration": contest_calibration(runs),
+        "ranking": ranking(runs),
+        "curse_calibration": curse_calibration(res),
+    }
+
+
+def main() -> None:  # pragma: no cover - the study, run by hand
+    pd.set_option("display.width", 220)
+    pd.set_option("display.max_columns", 30)
+    for table in run().values():
+        print(table.round(4).to_string(index=False))
 
 
 if __name__ == "__main__":  # pragma: no cover
