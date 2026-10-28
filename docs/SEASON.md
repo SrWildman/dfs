@@ -34,6 +34,10 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
 | `dfs season sync [--league X \| --all]` | Everything below for every league, written to the sheet |
 | `dfs season trades --league X [--get ..] [--give ..] [--keep ..] [--partner ..] [--shapes ..] [--max-consensus-loss ..]` | The finder; with no filter it reads the Trade Finder tab's targeting box |
 | `dfs season trade "Give A, B + $10 FAAB" "Get C" --league X` | The analyzer; writes the Analyzer tab |
+| `dfs season waivers [--league X] [--player "Name"]` | Best pickups for your team with a FAAB bid guide, handcuffs, a chopped league's bid plan; writes the Waivers tab |
+| `dfs season lineups [--league X]` | This week's best lineup per league: ranges, close calls decided by the matchup, K/DEF streams; writes My Teams (all leagues only) |
+| `dfs season check` | The Sunday check across every league (read-only) |
+| `dfs season trades ... --lopsided` | Also show ideas the market has over 125% for the partner, each with the FAAB to ask back |
 | `dfs season ros --league X [--check]` | Rest-of-season points, or the accuracy check |
 | `dfs season setup`, `dfs season doctor` | Build and check the sheet |
 
@@ -131,17 +135,76 @@ little (3.47 to 3.42 in Bourbon, in-sample).
   - It keeps trades where Sam gains, the partner gains by our model, and the market calls it fair for them.
   - Ideas are ranked by Sam's gain.
 
+### Waivers (`waivers.py`)
+
+- **Value.** Each of the best 40 free agents (plus each position's best, so a K or DEF is never missed) is
+  added to Sam's roster in place of the player he misses least: never a needed bye or injury cover, because
+  dropping one would cost lineup points. The full objective decides, with this week's gain shown apart. At
+  most two per position make the top list.
+- **Bid guide.** The league's own completed paid claims of the same position, for players Sleeper projected
+  (for the claim's week, in this league's scoring) within 3 points a week of this one.
+  - The range runs from the median to the 80th percentile of those winning bids.
+  - Shown beside it: what the player is worth to Sam (his gain over the league's points per dollar), and the
+    rivals with enough FAAB who need the position. Inactive managers are left out of the rivals.
+- **Handcuffs.** A free-agent RB2 is valued for the weeks his RB1 misses, from the DFS side's measured
+  teammate bump (RB1 out: RB2 +4.27 DraftKings points a game, shrunk; a PPR measure, used as is). His RB1's
+  chance of missing a week is `starter_miss_rate`, or 25% this week if Questionable and 75% if Doubtful. The
+  values come out small; that is the honest answer.
+- **Chopped bid plan.** For the team most likely chopped this week: its best three players, what each adds to
+  Sam's survival, that in dollars, and what the league has paid for a chopped roster's first, second and third
+  pick. The bid runs from the league's price up to his worth, capped at Sam's FAAB.
+
+### Lineups (`lineups.py`)
+
+- **The lineup** is the best legal lineup on this week's points. Each starter shows floor and ceiling, the
+  10th and 90th percentiles of his weekly spread.
+- **Close calls** are bench players within 1.5 points of a starter they could replace. Each is decided by
+  what the league rewards this week, computed for both versions:
+  - head-to-head: P(beat this week's opponent's best lineup);
+  - median-game leagues: expected wins, that P plus P(above the week's median), so the total counts twice;
+  - chopped: P(not the lowest score).
+  An underdog's answer is the higher ceiling and a favourite's the higher floor, with no hand-set threshold.
+- **K/DEF streams.** The best free agents for each of the next three weeks, by Sleeper's matchup-aware weekly
+  projections in the league's scoring.
+- **The Sunday check** (`dfs season check`, read-only). Sam's lineup as set in Sleeper, slot by slot, with
+  ESPN's game-day injury feed (the one DFS late swap reads) laid over Sleeper's status:
+  - `SWAP` (with the best bench or free-agent replacement): an empty slot, a bye, or OUT / IR / suspended /
+    Doubtful;
+  - `LOOK`: Questionable, or a bench player projected 2+ points more than the starter he could replace.
+  Nothing is ever written to Sleeper.
+
+### More edges (`activity.py`, `consensus_check.py`)
+
+- **Playoff schedule.** Each player's opponents in the league's playoff weeks, and his schedule ease: playoff
+  per-game projection over rest-of-season per-game (above 1, an easier run-in). On the Players tab.
+- **Manager activity**, from transactions and past matchups: moves, trades and the positions traded, the last
+  week of either, and lineup misses over the last 3 weeks (an empty slot, or a starter whose team did not
+  play).
+  - `inactive`: no move in 3 weeks plus a recent lineup miss. The finder's why line says so; the bid guide
+    drops them as rivals.
+  - `trader`: 2+ trades.
+  On the League tab.
+- **Ours vs the market, held out.** Every season command keeps a dated copy of FantasyPros' rest-of-season
+  ranks and of ours. Each finished week since then scores both: Spearman rank correlation with the actual
+  points per game, by position, over the players either ranks in its top 24 QB / 40 RB / 50 WR / 20 TE. On
+  Overview.
+  - There is no backfill: the Internet Archive holds only off-season copies.
+  - The series needs one season command a week before games.
+- **Lopsided trades.** Ideas the market has above 125% for the partner are hidden unless asked for
+  (`--lopsided`, or "Show lopsided: yes" in the box), and always carry the FAAB to ask back.
+
 ## The Season sheet
 
 One sheet for every league. Leagues are rows and pickers, never extra tabs.
 
 | Tab | What it shows |
 |---|---|
-| Overview | One row per league: record, standing, value rank, odds, biggest need, free move, best idea, notes (a league with a median game says weekly points count double there). Below: Sam's exposure, each player he rosters and in how many leagues |
-| My Teams | One block per league: roster with this week's slot, values and the market's; needs |
-| Trade Finder | The targeting box (`B2:B8`: League, Get, Give, Keep, Partner, Shapes, Max consensus loss); every league's ideas in one list (League column, a filter view per league) |
-| League | Picker in `B1`: every team's value, odds and strength by slot |
-| Players | Picker in `B1`: every player's rest-of-season points in that league's scoring, ours vs the market's |
+| Overview | The weekly report, one row per league: record, standing, value rank, odds, this week (win / median / survive), lineup alerts, biggest need, free move, best pickup, best idea, ours vs market, notes (a league with a median game says weekly points count double there). Below: Sam's exposure, each player he rosters and in how many leagues |
+| My Teams | One block per league: this week's recommended lineup (floor-ceiling, close calls), the check's alerts, K/DEF streams, the bench; values and the market's; needs |
+| Waivers | Every league's best pickups with bid guides, then each league's handcuffs and a chopped league's bid plan |
+| Trade Finder | The targeting box (`B2:B9`: League, Get, Give, Keep, Partner, Shapes, Max consensus loss, Show lopsided); every league's ideas in one list (League column, a filter view per league) |
+| League | Picker in `B1`: every team's value, odds, strength by slot and manager activity |
+| Players | Picker in `B1`: every player's rest-of-season points in that league's scoring, ours vs the market's, playoff-week opponents and schedule ease |
 | Analyzer | The last trade analyzed |
 | `SeasonLeaguesRaw`, `SeasonTeamsRaw`, `SeasonPlayersRaw` | Hidden; rewritten whole by every sync |
 

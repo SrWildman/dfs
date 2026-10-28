@@ -59,10 +59,12 @@ TEAM_COLUMNS = [
     "League", "Team", "Manager", "Mine", "Record", "PointsFor", "FAAB", "ValueRank", "TeamValue",
     "PlayoffOdds", "SurviveThisWeek", "ExpWeeksSurvived", "LastManStanding", "BiggestNeed", "Needs",
     *[f"{s} pts/wk" for s in SLOT_TYPES],
+    "Activity", "Moves", "Trades", "TradedPositions", "LastMove", "LineupMisses",
 ]  # fmt: skip
 PLAYER_COLUMNS = [
     "League", "Name", "Pos", "NFL", "Status", "Owner", "Mine", "ROS", "ROSWeighted", "PlayoffWeeks",
-    "NextWeek", "GamesLeft", "OurValue", "Consensus", "OursMinusConsensus", "Read",
+    "NextWeek", "GamesLeft", "OurValue", "Consensus", "OursMinusConsensus", "Read", "PlayoffOpp",
+    "PlayoffEase",
 ]  # fmt: skip
 # The League and Players tabs show these raw columns (all but League, which the picker already says), sorted.
 LEAGUE_VIEW = [c for c in TEAM_COLUMNS if c not in {"League", "Mine"}]
@@ -120,6 +122,8 @@ class LeagueRun:
     plan: object = None  # lineups.Plan for the coming week
     alerts: list = field(default_factory=list)  # lineups.Alert, the Sunday check
     streams: dict = field(default_factory=dict)  # lineups.streams
+    activity: dict = field(default_factory=dict)  # activity.manager_activity
+    schedule: object = None  # activity.playoff_schedule
 
 
 def _standing(view: LeagueView, rid: int) -> int:
@@ -138,6 +142,27 @@ def needs_text(run: LeagueRun, rid: int, n: int = 3) -> str:
     return (
         ", ".join(f"{s} {d:+.1f}/wk (#{r})" for s, d, r in run.view.needs.get(rid, [])[:n] if d < 0) or "none"
     )
+
+
+def _num(x: object) -> object:
+    return "" if x is None or (isinstance(x, float) and math.isnan(x)) else x
+
+
+def _activity_cells(run: LeagueRun, rid: int) -> dict:
+    a = run.activity.get(rid)
+    if a is None:
+        return {
+            "Activity": "",
+            "Moves": "",
+            "Trades": "",
+            "TradedPositions": "",
+            "LastMove": "",
+            "LineupMisses": "",
+        }
+    return {
+        "Activity": a.label(run.view.league.current_week), "Moves": a.moves, "Trades": a.trades,
+        "TradedPositions": a.positions_text(), "LastMove": a.last_move or "", "LineupMisses": a.lineup_misses,
+    }  # fmt: skip
 
 
 def teams_frame(runs: list[LeagueRun]) -> pd.DataFrame:
@@ -162,6 +187,7 @@ def teams_frame(runs: list[LeagueRun]) -> pd.DataFrame:
                 "BiggestNeed": need[0][0] if need and need[0][1] < 0 else "",
                 "Needs": needs_text(run, t.roster_id),
                 **{f"{s} pts/wk": strength.get(s, "") for s in SLOT_TYPES},
+                **_activity_cells(run, t.roster_id),
             })  # fmt: skip
     return pd.DataFrame(rows, columns=TEAM_COLUMNS)
 
@@ -190,6 +216,8 @@ def players_frame(runs: list[LeagueRun]) -> pd.DataFrame:
                 "NextWeek": "" if pd.isna(r["next_week"]) else round(float(r["next_week"]), 1),
                 "GamesLeft": int(r["games_left"]), "OurValue": round(ours, 1), "Consensus": round(cons, 1),
                 "OursMinusConsensus": round(gap, 1), "Read": read,
+                "PlayoffOpp": run.schedule["PlayoffOpp"].get(pid, "") if run.schedule is not None else "",
+                "PlayoffEase": _num(run.schedule["PlayoffEase"].get(pid)) if run.schedule is not None else "",
             })  # fmt: skip
     frame = pd.DataFrame(rows, columns=PLAYER_COLUMNS)
     return frame.sort_values(["League", "ROSWeighted"], ascending=[True, False]).head(RAW_ROWS - 1)

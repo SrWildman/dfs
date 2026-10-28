@@ -122,6 +122,7 @@ def bid_guide(
     values: pd.Series,
     pid: str,
     worth: int | None,
+    inactive: set[int] | None = None,
 ) -> BidGuide:
     lg = view.league
     s = view.ros.summary
@@ -139,7 +140,8 @@ def bid_guide(
     me = lg.my_roster_id
     rivals = []
     for t in lg.alive_teams():
-        if t.roster_id == me or t.faab_left < max(low, 1):
+        # An inactive manager (`activity`) is not a bidder to worry about.
+        if t.roster_id == me or t.faab_left < max(low, 1) or t.roster_id in (inactive or set()):
             continue
         need = dict((slot, d) for slot, d, _ in view.needs.get(t.roster_id, []))
         if need.get(pos, 0.0) < 0:
@@ -194,7 +196,11 @@ def handcuff_value(
 
 
 def rank_pickups(
-    view: LeagueView, ev: Evaluator, top: int = 10, only: list[str] | None = None
+    view: LeagueView,
+    ev: Evaluator,
+    top: int = 10,
+    only: list[str] | None = None,
+    inactive: set[int] | None = None,
 ) -> list[Pickup]:
     lg = view.league
     me = lg.my_roster_id
@@ -234,7 +240,7 @@ def rank_pickups(
             value=round(delta, 3 if lg.chopped else 1),
             this_week=round(this_week, 1),
             drop=dropped[0] if dropped else None,
-            bid=bid_guide(view, history, values, pid, worth),
+            bid=bid_guide(view, history, values, pid, worth, inactive),
             handcuff=cuff,
             expected_weeks=after.expected_weeks - base.expected_weeks if lg.chopped else float("nan"),
         )

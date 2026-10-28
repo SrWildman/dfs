@@ -91,15 +91,23 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
 
     consensus_check.archive_ours(lg.name, view.ros.summary)
     run.check = consensus_check.score(lg.name, lg.scoring, lg.season, lg.last_scored_week, view.table).line()
+    from dfs.season_long import activity as act
     from dfs.season_long import lineups as lu
 
+    run.activity = act.manager_activity(view)
+    run.schedule = act.playoff_schedule(view)
+    inactive = {rid for rid in run.activity if act.is_inactive(run.activity, rid, lg.current_week)}
+    for idea in run.ideas:
+        if idea.analysis.partner in inactive:
+            last = run.activity[idea.analysis.partner].last_move
+            idea.why += f"; they look inactive (last move Week {last})" if last else "; they look inactive"
     run.plan = lu.plan(view, ev)
     run.alerts = lu.check(view, ev, _news())
     run.streams = lu.streams(view, ev)
     if waive:
         from dfs.season_long import waivers as wv
 
-        run.pickups = wv.rank_pickups(view, ev, top=5)
+        run.pickups = wv.rank_pickups(view, ev, top=5, inactive=inactive)
         run.cuffs = wv.handcuffs(view, ev)
         run.chop = wv.chop_plan(view, ev)
     if lg.raw_settings.get("league_average_match"):
