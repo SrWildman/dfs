@@ -64,6 +64,7 @@ class Idea:
     why: str
     ask_faab: int = 0
     lopsided: bool = False
+    target: str = ""  # set by the targeted search: "buy list: X" or "weakest spot: RB"
 
 
 def parse_shapes(text: str | None) -> tuple[str, ...]:
@@ -232,6 +233,7 @@ def find_trades(
         return []
     target_ids: set[str] = set()
     target_pos: set[str] = set()
+    need = None
     if filters.targets is not None:
         target_ids = {
             p for t in filters.targets if len(hits := _match_exact(t, others, view)) == 1 for p in hits
@@ -338,7 +340,15 @@ def find_trades(
                     if math.isfinite(surplus)
                     else 0
                 )
-            ideas.append(Idea(a, shape, _why(view, ev, a, ask, lopsided), ask, lopsided))
+            idea = Idea(a, shape, _why(view, ev, a, ask, lopsided), ask, lopsided)
+            if filters.targets is not None:
+                hit = sorted(target_ids & set(a.get.players))
+                idea.target = (
+                    "buy list: " + ", ".join(view.name(p) for p in hit)
+                    if hit
+                    else (f"weakest spot: {need[0]}" if need else "target")
+                )
+            ideas.append(idea)
     ideas.sort(key=lambda i: -i.analysis.me.delta)
     return ideas[:top]
 
@@ -358,8 +368,9 @@ def idea_line(view: LeagueView, idea: Idea) -> str:
         f"you drop {view.name(p)}" for p in a.me.dropped
     ]
     extra = f" ({'; '.join(moves)})" if moves else ""
+    tag = f"[TARGET {idea.target}] " if idea.target else ""
     return (
-        f"give {side(a.give)} | get {side(a.get)}{extra} | with "
+        f"{tag}give {side(a.give)} | get {side(a.get)}{extra} | with "
         f"{view.league.team(a.partner).label} | {gain} | "
         f"{idea.why}"
     )
@@ -367,3 +378,28 @@ def idea_line(view: LeagueView, idea: Idea) -> str:
 
 def normalize_terms(text: str | None) -> list[str]:
     return [t.strip() for t in (text or "").split(",") if t.strip() and normalize_name(t)]
+
+
+def merge_targeted(standard: list[Idea], targeted: list[Idea]) -> list[Idea]:
+    """The standard ideas, then the targeted ones they do not already hold, each tagged with its target.
+    A standard idea that also lands a target is tagged in place."""
+
+    def key(i: Idea) -> tuple:
+        a = i.analysis
+        return (
+            a.partner,
+            tuple(sorted(a.give.players)),
+            a.give.faab,
+            tuple(sorted(a.get.players)),
+            a.get.faab,
+        )
+
+    tags = {key(i): i.target for i in targeted}
+    out = []
+    for i in standard:
+        if key(i) in tags:
+            i.target = tags[key(i)]
+        out.append(i)
+    seen = {key(i) for i in standard}
+    out += [i for i in targeted if key(i) not in seen]
+    return out

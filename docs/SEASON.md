@@ -22,11 +22,12 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
    # faab_point_value = 1.5    # override the fitted points per FAAB dollar
    ```
 
-   A top-level `buy_list = ["Chuba Hubbard", ...]` makes the trade finder targeted: `dfs season sync` and a
-   plain `dfs season trades` keep only trades that land a name from the list (on another roster in that
-   league; one Sam owns there is skipped) or a player at his weakest spot there (FLEX counts as RB/WR/TE;
-   K and DEF are streamed, so the next spot is used). List names match the full name only, never a last
-   name alone. `--open` searches everything.
+   A top-level `buy_list = ["Chuba Hubbard", ...]` ADDS targeted ideas to the standard search: `dfs season
+   sync` and a plain `dfs season trades` keep their usual best trades and add up to 10 per league that land a
+   name from the list (on another roster in that league; one Sam owns there is skipped) or a player at his
+   weakest spot there (FLEX counts as RB/WR/TE; K and DEF are streamed, so the next spot is used), each
+   tagged `TARGET buy list: ...` or `TARGET weakest spot: ...`. List names match the full name only, never a
+   last name alone. `--open` leaves the extra ideas out.
 
    Optional top-level numbers: `playoff_weight` (1.5), `starter_miss_rate` (0.06), `ir_weeks_out` (4),
    `survival_decay` (0.8), `survival_draws` (4000).

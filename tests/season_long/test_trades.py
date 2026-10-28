@@ -184,3 +184,18 @@ def test_the_weakest_spot_skips_streamed_slots(monkeypatch):
     notes: list[str] = []
     fd.find_trades(v, ev, syn.market(v), fd.Filters(targets=[]), notes=notes)
     assert notes[0].endswith("your weakest spot, RB (-2.0/wk)")
+
+
+def test_targeted_ideas_are_added_to_the_standard_ones_not_instead(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    m = syn.market(v)
+    standard = fd.find_trades(v, ev, m, fd.Filters(), top=3)
+    aimed = fd.find_trades(v, ev, m, fd.Filters(targets=["WR5"]), top=10)
+    merged = fd.merge_targeted(standard, aimed)
+    assert merged[: len(standard)] == standard  # the standard ideas first, all kept
+    assert all(i.target for i in merged[len(standard) :])  # every extra one says what it targets
+    assert len(merged) == len(
+        {(i.analysis.partner, tuple(i.analysis.give.players), tuple(i.analysis.get.players)) for i in merged}
+    )
+    assert any(i.target.startswith(("buy list: WR5", "weakest spot: RB")) for i in aimed)

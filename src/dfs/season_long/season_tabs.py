@@ -449,7 +449,7 @@ def ideas_rows(runs: list[LeagueRun]) -> list[list]:
                     gain_text(a, a.me),
                     gain_text(a, a.them),
                     f"{a.fair_ratio:.0%}" if math.isfinite(a.fair_ratio) else "all gain",
-                    "; ".join(a.labels),
+                    "; ".join(([f"TARGET {idea.target}"] if idea.target else []) + a.labels),
                     idea.why,
                 ]
             )

@@ -72,8 +72,12 @@ def _client(cfg, sheet_id: str | None):
     return client
 
 
-def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: bool = True):
-    """One league's view, evaluator, market and ideas (`season_tabs.LeagueRun`)."""
+TARGETED_TOP = 10
+
+
+def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: bool = True, targets=None):
+    """One league's view, evaluator, market and ideas (`season_tabs.LeagueRun`). With `targets` (the buy
+    list), the targeted ideas are ADDED to the standard ones, never instead of them."""
     from dfs.season_long import finder as fd
     from dfs.season_long import league_view, objective
     from dfs.season_long import season_tabs as st
@@ -84,6 +88,11 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
     market = tr.build_market(view, ev)
     found: list[str] = []
     ideas = fd.find_trades(view, ev, market, filters or fd.Filters(), top=top, notes=found) if find else []
+    if find and targets:
+        aimed = fd.find_trades(
+            view, ev, market, fd.Filters(targets=list(targets)), top=TARGETED_TOP, notes=found
+        )
+        ideas = fd.merge_targeted(ideas, aimed)
     run = st.LeagueRun(
         view, ev, market, ideas, tr.free_move(view, ev, view.league.my_roster_id, tr.free_agents(view))
     )
@@ -203,15 +212,14 @@ def season_sync(
     all_leagues: bool = typer.Option(False, "--all", help=ALL_HELP + " (the default)."),
     top: int = typer.Option(20, "--top", help="Trade ideas kept per league."),
     open_search: bool = typer.Option(
-        False, "--open", help="Search every trade, not just season.toml's buy list and your weakest spot."
+        False, "--open", help="Leave out the extra ideas for season.toml's buy list and your weakest spot."
     ),
     no_sheet: bool = typer.Option(False, "--no-sheet", help="Print only; write nothing."),
     sheet_id: str = typer.Option(None, "--sheet-id", help="A Season sheet other than season.toml's."),
 ) -> None:
     """Sync every league from Sleeper, rebuild values and trade ideas, and write the Season sheet (a few
-    minutes for four leagues). With a buy list in season.toml, the trade ideas are the targeted ones (your
-    list and each league's weakest spot) unless --open."""
-    from dfs.season_long import finder as fd
+    minutes for four leagues). With a buy list in season.toml, ideas for it and each league's weakest spot
+    are added to the standard ones (tagged "target"), unless --open."""
     from dfs.season_long import sheet_season as ss
 
     cfg = _config()
@@ -223,7 +231,7 @@ def season_sync(
         _say(f"{lc.name}: syncing")
         try:
             targets = None if open_search or not cfg.buy_list else list(cfg.buy_list)
-            runs.append(_run(lc, cfg, table, fd.Filters(targets=targets), top=top))
+            runs.append(_run(lc, cfg, table, top=top, targets=targets))
         except Exception as e:  # noqa: BLE001 -- one league failing never stops the others
             console.print(f"[red]FAIL[/red] {escape(lc.name)}: {escape(str(e))}")
             continue
@@ -262,7 +270,7 @@ def season_trades(
         help="Also show ideas the market has over 125% for the partner (with the FAAB to ask back).",
     ),
     open_search: bool = typer.Option(
-        False, "--open", help="With no filter, search every trade rather than the buy list and weakest spot."
+        False, "--open", help="With no filter, leave out the extra buy-list / weakest-spot ideas."
     ),
     from_sheet: bool = typer.Option(
         False,
@@ -293,14 +301,15 @@ def season_trades(
             )
             lopsided = lopsided or box.get("Show lopsided", "").strip().lower() in {"yes", "y", "true", "1"}
     filters = _filters(get, give, keep, partner, shapes, max_consensus_loss, lopsided, players)
+    targets = None
     if not any([get, give, partner, players]) and cfg.buy_list and not open_search:
-        filters.targets = list(cfg.buy_list)
+        targets = list(cfg.buy_list)
     chosen = _leagues(cfg, league, all_leagues)
     table = _table()
     runs = []
     for lc in chosen:
         try:
-            runs.append(_run(lc, cfg, table, filters, top))
+            runs.append(_run(lc, cfg, table, filters, top, targets=targets))
         except tr.TradeError as e:
             raise _fail(f"{lc.name}: {e}") from e
         _print(_summary(runs[-1]))
