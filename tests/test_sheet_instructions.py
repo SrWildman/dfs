@@ -91,6 +91,13 @@ def test_every_step_of_the_week_names_a_day_and_the_commands_sam_runs():
         assert day in text, day
 
 
+def test_the_close_the_week_line_tells_him_to_run_the_studies_with_research():
+    (text,) = [b for kind, a, b in _LAYOUT if kind == "row" and a == "Mon / Tue: close the week"]
+    assert "dfs week close --research" in text
+    assert "every study" in text and "summary to paste to planning" in text
+    assert "plain dfs week close skips" in text
+
+
 def test_every_number_and_chip_sam_asked_about_has_a_plain_line():
     labels = {a for kind, a, _b in _LAYOUT if kind == "row"}
     for name in ("CalPts", "Hit3x%", "Boom%", "Bust%", "CeilM", "ValAdj", "Cash %", "Top 1%", "The chips"):
