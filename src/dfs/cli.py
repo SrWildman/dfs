@@ -87,6 +87,7 @@ from dfs.lineup_suggest import (
     SuggestReport,
     phase_lines,
     suggest_builds,
+    with_shown_cash,
 )
 from dfs.lineups import (
     build_salary_lookup,
@@ -4602,6 +4603,10 @@ def _run_suggest(
     state.rounds.append(record)
     report.round = record.round
     report.history = suggest_state.history_lines(state)
+    if settings.lines is not None and settings.lines.display_field is not None:
+        # `[sim.lines] calibrated_cash_offset`: the builds were chosen and saved on today's line; only the
+        # Cash % shown below and on the tab is measured against the calibrated one
+        report.builds = with_shown_cash(report.builds, specs, settings.lines.display_field)
     how = {"suggest": "fresh run", "iterate": "rerun", "restore": f"round {restored} restored"}[command]
     console.print(
         f"Round {record.round} ({how}). Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "

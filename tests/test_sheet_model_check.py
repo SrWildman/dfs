@@ -336,3 +336,26 @@ def test_the_teammate_bump_row_sits_in_the_shadow_block_beside_the_others():
     assert teammate_bump.LABEL in shown and "teammate-bump row" in shown
     without = " ".join(str(c) for r in smc.build_layout(scored, weeks=[3, 4]).rows for c in r)
     assert teammate_bump.LABEL not in without  # left out when the shadow could not be built
+
+
+def test_the_our_dst_row_joins_the_shadow_sources_table_when_built():
+    from dfs import sheet_model_check as smc
+
+    race = pd.DataFrame(
+        {
+            "Rated by": ["OurDST"] * 3,
+            "Source": ["TFFB", "CalPts", "OurDST (shadow)"],
+            "Position": ["DST"] * 3,
+            "n": [40, 40, 40],
+            "Rho": [0.20, 0.28, 0.26],
+            "MAE": [4.1, 4.0, 4.1],
+            "Bias": [-0.5, -0.2, -0.4],
+        }
+    )
+    scored = _two_weeks().assign(UmPts=float("nan"))
+    shown = " ".join(
+        str(c) for r in smc.build_layout(scored, weeks=[3, 4], our_dst_race=race).rows for c in r
+    )
+    assert "OurDST (shadow)" in shown and "The OurDST row" in shown
+    without = " ".join(str(c) for r in smc.build_layout(scored, weeks=[3, 4]).rows for c in r)
+    assert "OurDST (shadow)" not in without

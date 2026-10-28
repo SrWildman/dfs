@@ -369,7 +369,9 @@ run `dfs results update` later and the tab fills in. It never fails the close.
 **Then, if you want the research reruns:** `dfs research refresh` (offline, about two minutes, no sheet; about 15 more
 the first time after a close, for the curse study's builder runs) reruns the five-pair shape retest, the
 teammate-bump race, the probability recalibration check, the tails check, the ownership shadow's scores, the
-ESPN / props shadows, the contest retro and the optimizer's-curse study with the weeks closed so far, and writes
+ESPN / props shadows, the contest retro, the optimizer's-curse study, OurDST (our own DST projection against
+TFFB and CalPts; also a row in Model Check's SHADOW SOURCES) and the calibrated double-up Cash % offset (its block
+says when `[sim.lines] calibrated_cash_offset` has earned turning on) with the weeks closed so far, and writes
 `docs/research/weekly/<season>-wk<NN>.md` (gitignored): one block per study with its headline numbers, the bar it
 must clear and what changed since last week's report. A study that breaks says so and the rest still run.
 

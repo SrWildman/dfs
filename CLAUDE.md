@@ -140,8 +140,10 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   (check `stacks-tab`). Needs `dfs stacks --refit` once.
 - `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one
   command, no sheet: the five-pair shape retest, the teammate-bump race, the probability recalibration check, the
-  tails check, the field_own scores, the ESPN / props blend gate and the PROPS SHADOW (`props_edge.build_shadow`), `sim/contest_retro` and the optimizer's-curse study
-  (`research/curse.py`; both plug in through `refresh_summary(season, through)`, see `research/refresh.py`). Each fails soft; it writes
+  tails check, the field_own scores, the ESPN / props blend gate and the PROPS SHADOW (`props_edge.build_shadow`), `sim/contest_retro`, the optimizer's-curse study
+  (`research/curse.py`), OurDST, our own DST projection against TFFB and CalPts (`model/dst_study.py`), and the calibrated
+  double-up Cash % offset (`sim/du_line_retro.py`; it saves the offset `[sim.lines] calibrated_cash_offset` shows Cash % against,
+  default off, and says when it clears the bar; all four plug in through `refresh_summary(season, through)`, see `research/refresh.py`). Each fails soft; it writes
   `docs/research/weekly/<season>-wk<NN>.md` (gitignored; an `--only` run writes `-partial.md` instead) with one block per study (headline numbers, ship bar,
   "changed since last week" against the previous report), prints a line per study with its time. About two
   minutes, plus about 15 the first run after a week closes (the curse study's builder runs for the new week). Run after `dfs week close`.

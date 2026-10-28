@@ -18,9 +18,11 @@ Studies, each with the bar it must clear to matter:
 | `contest_retro` | the contest retro (hook below) | `dfs.sim.contest_retro` |
 | `curse` | the optimizer's curse and its held-out fixes (hook below) | `dfs.research.curse` |
 | `backtest` | Flashback: build settings scored in his real contests (optional: `--only`) | `dfs.backtest` |
+| `dst` | OurDST, our own DST projection, against TFFB and CalPts (hook below) | `dfs.model.dst_study` |
+| `du_line` | the calibrated double-up Cash % offset (saved for its switch) | `dfs.sim.du_line_retro` |
 
-**The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study) plugs in by
-exposing
+**The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study, OurDST, the
+double-up line) plugs in by exposing
 
     refresh_summary(season, through) -> {"headline": [str, ...], "metrics": {str: float | bool},
                                          "ship_bar": str}
@@ -481,7 +483,15 @@ def study_props(ctx: Context) -> Study:
 CONTEST_RETRO_MODULE = "dfs.sim.contest_retro"
 CURSE_MODULE = "dfs.research.curse"
 BACKTEST_MODULE = "dfs.backtest"
-HOOK_MODULES = {"contest_retro": CONTEST_RETRO_MODULE, "curse": CURSE_MODULE, "backtest": BACKTEST_MODULE}
+DST_MODULE = "dfs.model.dst_study"
+DU_LINE_MODULE = "dfs.sim.du_line_retro"
+HOOK_MODULES = {
+    "contest_retro": CONTEST_RETRO_MODULE,
+    "curse": CURSE_MODULE,
+    "backtest": BACKTEST_MODULE,
+    "dst": DST_MODULE,
+    "du_line": DU_LINE_MODULE,
+}
 
 
 def hook_study(ctx: Context, key: str, title: str) -> Study:
@@ -523,6 +533,14 @@ def study_backtest(ctx: Context) -> Study:
     return hook_study(ctx, "backtest", "Flashback backtest (session J)")
 
 
+def study_dst(ctx: Context) -> Study:
+    return hook_study(ctx, "dst", "OurDST, our own DST projection (session O)")
+
+
+def study_du_line(ctx: Context) -> Study:
+    return hook_study(ctx, "du_line", "The double-up cash line: calibrated Cash % (session O)")
+
+
 STUDIES: dict[str, Callable[[Context], Study]] = {
     "shape": study_shape,
     "bump": study_bump,
@@ -534,6 +552,8 @@ STUDIES: dict[str, Callable[[Context], Study]] = {
     "contest_retro": study_contest_retro,
     "curse": study_curse,
     "backtest": study_backtest,
+    "dst": study_dst,
+    "du_line": study_du_line,
 }
 OPTIONAL = frozenset({"backtest"})  # in STUDIES, but run only when asked for (`--only backtest`)
 TITLES = {
@@ -547,6 +567,8 @@ TITLES = {
     "contest_retro": "Contest retro",
     "curse": "Optimizer's curse",
     "backtest": "Flashback backtest",
+    "dst": "OurDST",
+    "du_line": "Double-up Cash % offset",
 }
 
 

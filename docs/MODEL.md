@@ -656,6 +656,52 @@ Boom 8.1 against 5.5, Bust 65.8 against 69.3; TE the other way, 26.0 against 33.
 WR 0.95, TE 1.07, QB and DST 1.00), but 140 to 520 rows per position cannot carry them out of sample yet. Rerun after Week 7 (fit 1-5,
 test 6-7): the machinery is `evaluate`, and a fit would be written with `prob_recal.save` only if it clears.
 
+## OurDST: our own DST projection (shadow: Model Check and the weekly refresh; nothing else reads it)
+
+Shown as the **OurDST** row of Model Check's SHADOW SOURCES (DST, weeks CalPts did not train on, beside TFFB and CalPts;
+fitted on every season before the current one) and as the `dst` study of `dfs research refresh`. It feeds no projection, no
+build and no sheet column. The opposing starter is the schedule's; where the schedule names none yet, his team's starter in its
+previous game (`dst.previous_starters`). Using that for every game instead changes nothing measurable (it matches the schedule
+86% of the time; OurDST moves 0.02 points on average and every number below stays the same to three decimals).
+
+`python -m dfs.model.dst_study` (model: `dst.py`). DK DST points as the sum of their parts, each from what drives it:
+**sacks** from a Poisson regression on the defense's sack and QB-hit rates per dropback faced, the opposing offense's sack rate
+allowed, the opposing starting QB's own sack rate and experience, and the line; **takeaways** at the league's recent level
+(about two seasons, recency-weighted) scaled by the line; **return TDs** in proportion to takeaways, **safeties and blocks** at the
+league level; **points allowed** from the opponent's implied total (plus small terms for the two teams' recent scoring), its DK tier
+integrated over the real residuals. Rates are recency-weighted over games (half-life 16 games, earlier seasons x0.6 per boundary)
+and shrunk toward the league rate. Boom% resamples the parts' residuals jointly from real games, so a turnover-heavy game is also a
+low-scoring one. Settings were chosen on a validation split (fit 2015-2019, judge 2020-2022) before the held-out seasons were read.
+
+What held out: on validation the team and QB rates add signal to **sacks** only (within-week rho 0.17 on the line alone, 0.24
+with the rates); takeaways, return TDs and points allowed are the line. So OurDST is mostly the Vegas line (correlation 0.98 with
+a Vegas-only fit) plus the sacks and the league level.
+
+| Held out 2023-2025, 1,632 team-games, 54 weeks | MAE | rho (within week) | bias |
+|---|---|---|---|
+| OurDST | 4.329 | 0.321 | -0.24 |
+| Vegas only (opp. implied, spread, home; same fit seasons) | 4.397 | 0.314 | -0.55 |
+| Trailing 8 games | 4.710 | 0.103 | -0.08 |
+| UM's DST row (quoted from the table above) | 4.683 | 0.187 | |
+
+Against Vegas only: MAE better by 0.067 (z 5.5, 40 of 54 weeks), rho +0.007 (z 1.1). P(DST >= 10 / 12 / 14) from the joint
+resampling reads 26.6 / 18.1 / 12.1% against 26.8 / 18.1 / 11.8% real; the engine on the same mean reads 1-1.5 points high
+(Brier better at 10 by 2.2 SE, inside 2 SE at 12 and 14).
+
+**2026, Weeks 1-7, Model Check's DST rows (162; CalPts from Week 2, 138):**
+
+| | MAE | rho | bias |
+|---|---|---|---|
+| OurDST | 4.128 | 0.277 | -0.42 |
+| TFFB | 4.175 | 0.186 | -0.52 |
+| UM | 4.326 | 0.207 | -0.73 |
+| Weeks 2-7: OurDST / TFFB / CalPts | 4.090 / 4.138 / **4.004** | 0.265 / 0.200 / **0.284** | |
+
+OurDST out-ranks TFFB (rho +0.091, z 2.4, 6 of 7 weeks) but **not CalPts**: CalPts' MAE is better in all 6 weeks (z 3.4) and its
+rho is level (OurDST -0.019, z 1.2). An equal average of the two is no better than CalPts (MAE +0.028, rho -0.001). Boom% (4x
+salary) is a tie: Brier 0.1404 OurDST, 0.1396 engine on CalPts, 0.1419 on TFFB (shown 18.4 / 20.3 / 21.2% against 16.7% real).
+The Vegas line is the schedule's (the closing line for past games), the same one UM reads.
+
 ## Using it
 
 ```

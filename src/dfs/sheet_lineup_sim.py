@@ -114,7 +114,7 @@ def lineup_sim_notes(
     instead of the fixed ones."""
     notes = _fixed_notes(target, cash_basis)
     if lines is not None and lines.relative:
-        offsets = lines.field
+        offsets = lines.shown_field
         notes[P_CASH_HEADER] = (
             "CASH %: the chance this lineup beats the double-up cash line. That line moves with the slate: "
             f"it sits about {offsets.cash_offset:g} points above the field's average score, which the "
@@ -302,7 +302,7 @@ def write_lineup_sim(
                 seed=seed,
                 cash_line=lines.cash_line if lines else cash_line.value,
                 gpp_target=lines.gpp_target if lines else gpp_target,
-                field=lines.field if lines else None,
+                field=lines.shown_field if lines else None,  # the calibrated display field when switched on
             )
             if lineups
             else None
