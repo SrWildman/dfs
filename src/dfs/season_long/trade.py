@@ -119,6 +119,19 @@ def free_agents(view: LeagueView) -> list[str]:
 
 
 FA_CANDIDATES = 15
+# ...plus this many of the best at every position: a kicker or a defense never makes the overall top 15, and
+# an empty K or DEF slot is the biggest free gain there is.
+FA_PER_POSITION = 3
+
+
+def fa_candidates(view: LeagueView, fa: list[str], roster: list[str]) -> list[str]:
+    """The free agents worth trying in a roster spot: the best `FA_CANDIDATES` and each position's top few."""
+    pool = [p for p in fa if p not in roster]
+    pos = view.ros.summary["position"]
+    out = list(pool[:FA_CANDIDATES])
+    for position in pos.reindex(pool).dropna().unique():
+        out += [p for p in pool if pos.get(p) == position][:FA_PER_POSITION]
+    return list(dict.fromkeys(out))
 
 
 def _lineup_sum(ev: Evaluator, roster: list[str]) -> float:
@@ -157,7 +170,7 @@ def settle(
     while len(roster) < min(size_before, limit) and pool:
         if ev is not None:
             base = _lineup_sum(ev, roster)
-            pick = max(pool[:FA_CANDIDATES], key=lambda p: _lineup_sum(ev, [*roster, p]) - base)
+            pick = max(fa_candidates(view, pool, roster), key=lambda p: _lineup_sum(ev, [*roster, p]) - base)
         else:
             pick = pool[0]
         pool.remove(pick)
@@ -179,7 +192,7 @@ def best_swap(
     base = _lineup_sum(ev, roster)
     best: tuple[list[str] | None, str, str] = (None, "", "")
     best_gain = MIN_FREE_GAIN
-    for pid in [p for p in fa if p not in roster][:FA_CANDIDATES]:
+    for pid in fa_candidates(view, fa, roster):
         after, dropped, _ = settle([*roster, pid], len(roster), view, [], ev)
         gain = _lineup_sum(ev, after) - base
         if gain > best_gain and dropped and dropped[0] != pid:

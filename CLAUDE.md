@@ -174,7 +174,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   filters, protection, styling), in the one order that works; its own docstring
   (`setup_sheet` in `cli.py`) explains why that order. Everything under
   `dfs setup ...` is also runnable as an individual step.
-- `dfs season sync|trades|trade|ros|setup|doctor [--league <name> | --all]` -- Sam's season-long Sleeper leagues
+- `dfs season sync|waivers|lineups|check|trades|trade|ros|setup|doctor [--league <name> | --all]` -- Sam's season-long Sleeper leagues
   (`src/dfs/season_long/`; leagues in the gitignored `season.toml` beside config.toml, NOT config.toml) on their own
   **Season** sheet (season.toml's `sheet_id`; never the weekly DFS sheet, no template, nothing copied week to week).
   Rest-of-season points in each league's scoring (Sleeper's projections rescored, held-out accuracy in
@@ -183,7 +183,12 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   "Get B"`, writes the Analyzer tab) and finder (`dfs season trades --get/--give/--keep/--partner/--shapes/
   --max-consensus-loss`; with no filter it reads the Trade Finder tab's targeting box). Every trade is measured
   from each side's best free waiver move, never crediting a pickup anyone could make. Market value = FantasyPros'
-  public ROS consensus. `dfs season doctor` is the Season sheet's structural check. Method: `docs/SEASON.md`.
+  public ROS consensus (archived daily and scored held out beside ours on Overview; lopsided ideas, over 125% for the
+  partner, are hidden unless `--lopsided`). Phase 2: `waivers` (pickups by value to his team, a FAAB bid guide from the
+  league's own claims, handcuffs, a chopped bid plan; the Waivers tab), `lineups` (this week's best lineup with
+  floor-ceiling and close calls decided by the matchup: win, median game or survival; K/DEF streams; My Teams),
+  `check` (the Sunday check, read-only), playoff-week schedules (Players) and manager activity (League).
+  Nothing is ever written to Sleeper. `dfs season doctor` is the Season sheet's structural check. Method: `docs/SEASON.md`.
 - `dfs sheets ...` is a deprecated spelling of the `setup` commands (plus
   `doctor`) kept working this season as a compatibility alias -- prefer
   the current names above in new code and docs.
@@ -221,7 +226,11 @@ Season-long shortcuts (the Season sheet; `dfs season ...` prints its title and U
 
 | Sam says | Run | Report back |
 |---|---|---|
-| "season sync" | `dfs season sync` (all leagues; a few minutes, run it detached with a log) | per league: his odds (playoffs, or survive this week / last man standing), needs, the free move first, the top 3 ideas |
+| "season sync" | `dfs season sync` (all leagues; a few minutes, run it detached with a log) | per league: his odds (playoffs, or survive this week / last man standing), this week's win / survive chance, lineup alerts, the free move first, the best pickup with its bid, the top 3 ideas |
+| "check my lineups" | `dfs season check` (read-only; ESPN's game-day feed laid over Sleeper's statuses) | every `SWAP` (empty slot, bye, OUT / Doubtful, with the swap to make) and `LOOK` (Questionable, a better bench option), per league; or that every league is clean |
+| "set my lineups" | `dfs season lineups` (prints; Sam sets them in Sleeper by hand, nothing is written to Sleeper) | per league: the lineup with each starter's floor-ceiling, the close calls and why, the win / median / survive odds, the K/DEF streams |
+| "best pickups in <league>" | `dfs season waivers --league <league>` | the top pickups (add, drop, gain, this week, the bid range and who could outbid him), handcuffs, and in Choppa the bid plan |
+| "what should I bid on <player>" | `dfs season waivers --league <league> --player "<player>"` | what he adds, the drop, the bid range from similar claims, what he is worth to Sam, the rivals |
 | "find me trades in <league>" | `dfs season trades --league <league>` | the top 10 ideas (give / get / partner / his gain / market for them / the why line) |
 | "find me an RB" (in <league>, else every league) | `dfs season trades --get RB [--league <league> \| --all]` | the same, per league |
 | "who'll buy <player>" | `dfs season trades --give "<player>" --league <league>` | the partners and what each gives back |

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
@@ -28,6 +29,7 @@ from dfs.player_join import join_key, normalize_team
 log = get_logger("season.consensus")
 
 CACHE_DIR = DATA_DIR / "season" / "fantasypros"
+HISTORY_DIR = CACHE_DIR / "history"
 MAX_AGE_S = 24 * 3600
 PAGES = {1.0: "ros-ppr-overall", 0.5: "ros-half-point-ppr-overall", 0.0: "ros-overall"}
 URL = "https://www.fantasypros.com/nfl/rankings/{page}.php"
@@ -75,7 +77,31 @@ def fetch_ecr(scoring: dict[str, float]) -> pd.DataFrame:
         else:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(resp.text)
-    return parse_ecr(cache.read_text())
+    frame = parse_ecr(cache.read_text())
+    archive(page, frame, datetime.fromtimestamp(cache.stat().st_mtime, tz=UTC).date())
+    return frame
+
+
+def archive(page: str, frame: pd.DataFrame, day: date) -> Path:
+    """Keep one dated copy of each day's ranks (the cache above is overwritten daily), so the market's
+    rest-of-season view can be scored later against what happened (`consensus_check`)."""
+    path = HISTORY_DIR / page / f"{day.isoformat()}.csv"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False)
+    return path
+
+
+def history(page: str) -> dict[date, pd.DataFrame]:
+    """Every archived day of one page's ranks, oldest first."""
+    folder = HISTORY_DIR / page
+    out = {}
+    for path in sorted(folder.glob("*.csv")) if folder.exists() else []:
+        try:
+            out[date.fromisoformat(path.stem)] = pd.read_csv(path)
+        except (ValueError, OSError):
+            continue
+    return out
 
 
 def match_to_sleeper(ecr: pd.DataFrame, table: pd.DataFrame) -> pd.Series:

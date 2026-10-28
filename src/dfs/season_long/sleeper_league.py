@@ -246,7 +246,8 @@ def parse_league(
             manager=str(user.get("display_name") or f"Team {r['roster_id']}"),
             team_name=str(((user.get("metadata") or {}).get("team_name")) or ""),
             players=players,
-            starters=[str(p) for p in (r.get("starters") or []) if p and p != "0"],
+            # One entry per starting slot, in `slots` order; "" is a slot left empty.
+            starters=["" if not p or p == "0" else str(p) for p in (r.get("starters") or [])],
             wins=int(rs.get("wins") or 0),
             losses=int(rs.get("losses") or 0),
             ties=int(rs.get("ties") or 0),

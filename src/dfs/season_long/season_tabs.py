@@ -37,7 +37,16 @@ TRADE_FINDER_TAB = "Trade Finder"
 LEAGUE_TAB = "League"
 PLAYERS_TAB = "Players"
 ANALYZER_TAB = "Analyzer"
-VISIBLE_TABS = (OVERVIEW_TAB, MY_TEAMS_TAB, TRADE_FINDER_TAB, LEAGUE_TAB, PLAYERS_TAB, ANALYZER_TAB)
+WAIVERS_TAB = "Waivers"
+VISIBLE_TABS = (
+    OVERVIEW_TAB,
+    MY_TEAMS_TAB,
+    WAIVERS_TAB,
+    TRADE_FINDER_TAB,
+    LEAGUE_TAB,
+    PLAYERS_TAB,
+    ANALYZER_TAB,
+)
 LEAGUES_RAW = "SeasonLeaguesRaw"
 TEAMS_RAW = "SeasonTeamsRaw"
 PLAYERS_RAW = "SeasonPlayersRaw"
@@ -50,10 +59,12 @@ TEAM_COLUMNS = [
     "League", "Team", "Manager", "Mine", "Record", "PointsFor", "FAAB", "ValueRank", "TeamValue",
     "PlayoffOdds", "SurviveThisWeek", "ExpWeeksSurvived", "LastManStanding", "BiggestNeed", "Needs",
     *[f"{s} pts/wk" for s in SLOT_TYPES],
+    "Activity", "Moves", "Trades", "TradedPositions", "LastMove", "LineupMisses",
 ]  # fmt: skip
 PLAYER_COLUMNS = [
     "League", "Name", "Pos", "NFL", "Status", "Owner", "Mine", "ROS", "ROSWeighted", "PlayoffWeeks",
-    "NextWeek", "GamesLeft", "OurValue", "Consensus", "OursMinusConsensus", "Read",
+    "NextWeek", "GamesLeft", "OurValue", "Consensus", "OursMinusConsensus", "Read", "PlayoffOpp",
+    "PlayoffEase",
 ]  # fmt: skip
 # The League and Players tabs show these raw columns (all but League, which the picker already says), sorted.
 LEAGUE_VIEW = [c for c in TEAM_COLUMNS if c not in {"League", "Mine"}]
@@ -63,7 +74,7 @@ PLAYERS_SORT = "ROSWeighted"
 VIEW_HEADER_ROW = 3
 
 BOX_TITLE_ROW = 1
-BOX_FIELDS = ("League", "Get", "Give", "Keep", "Partner", "Shapes", "Max consensus loss")
+BOX_FIELDS = ("League", "Get", "Give", "Keep", "Partner", "Shapes", "Max consensus loss", "Show lopsided")
 BOX_FIRST_ROW = 2
 IDEAS_HEADER = [
     "League", "#", "You give", "You get", "Partner", "Your gain", "Their gain", "Market for them",
@@ -72,8 +83,9 @@ IDEAS_HEADER = [
 IDEAS_HEADER_ROW = BOX_FIRST_ROW + len(BOX_FIELDS) + 2
 
 OVERVIEW_HEADER = [
-    "League", "Sleeper league", "Kind", "Record", "Standing", "Team value rank", "Odds", "Biggest need",
-    "Free move first", "Best trade idea", "Note",
+    "League", "Sleeper league", "Kind", "Record", "Standing", "Team value rank", "Odds", "This week",
+    "Lineup alerts", "Biggest need", "Free move first", "Best pickup", "Best trade idea", "Ours vs market",
+    "Note",
 ]  # fmt: skip
 MEDIAN_NOTE = "Plays a second game each week against the league median: weekly points count double."
 
@@ -103,6 +115,15 @@ class LeagueRun:
     ideas: list[fd.Idea]
     free_move: tuple[list[str] | None, list[str], list[str]] = (None, [], [])
     notes: list[str] = field(default_factory=list)
+    check: str = ""  # consensus_check.CheckResult.line()
+    pickups: list = field(default_factory=list)  # waivers.Pickup, best first
+    cuffs: list = field(default_factory=list)  # waivers.handcuffs
+    chop: object = None  # waivers.ChopPlan in a chopped league
+    plan: object = None  # lineups.Plan for the coming week
+    alerts: list = field(default_factory=list)  # lineups.Alert, the Sunday check
+    streams: dict = field(default_factory=dict)  # lineups.streams
+    activity: dict = field(default_factory=dict)  # activity.manager_activity
+    schedule: object = None  # activity.playoff_schedule
 
 
 def _standing(view: LeagueView, rid: int) -> int:
@@ -121,6 +142,27 @@ def needs_text(run: LeagueRun, rid: int, n: int = 3) -> str:
     return (
         ", ".join(f"{s} {d:+.1f}/wk (#{r})" for s, d, r in run.view.needs.get(rid, [])[:n] if d < 0) or "none"
     )
+
+
+def _num(x: object) -> object:
+    return "" if x is None or (isinstance(x, float) and math.isnan(x)) else x
+
+
+def _activity_cells(run: LeagueRun, rid: int) -> dict:
+    a = run.activity.get(rid)
+    if a is None:
+        return {
+            "Activity": "",
+            "Moves": "",
+            "Trades": "",
+            "TradedPositions": "",
+            "LastMove": "",
+            "LineupMisses": "",
+        }
+    return {
+        "Activity": a.label(run.view.league.current_week), "Moves": a.moves, "Trades": a.trades,
+        "TradedPositions": a.positions_text(), "LastMove": a.last_move or "", "LineupMisses": a.lineup_misses,
+    }  # fmt: skip
 
 
 def teams_frame(runs: list[LeagueRun]) -> pd.DataFrame:
@@ -145,6 +187,7 @@ def teams_frame(runs: list[LeagueRun]) -> pd.DataFrame:
                 "BiggestNeed": need[0][0] if need and need[0][1] < 0 else "",
                 "Needs": needs_text(run, t.roster_id),
                 **{f"{s} pts/wk": strength.get(s, "") for s in SLOT_TYPES},
+                **_activity_cells(run, t.roster_id),
             })  # fmt: skip
     return pd.DataFrame(rows, columns=TEAM_COLUMNS)
 
@@ -173,6 +216,8 @@ def players_frame(runs: list[LeagueRun]) -> pd.DataFrame:
                 "NextWeek": "" if pd.isna(r["next_week"]) else round(float(r["next_week"]), 1),
                 "GamesLeft": int(r["games_left"]), "OurValue": round(ours, 1), "Consensus": round(cons, 1),
                 "OursMinusConsensus": round(gap, 1), "Read": read,
+                "PlayoffOpp": run.schedule["PlayoffOpp"].get(pid, "") if run.schedule is not None else "",
+                "PlayoffEase": _num(run.schedule["PlayoffEase"].get(pid)) if run.schedule is not None else "",
             })  # fmt: skip
     frame = pd.DataFrame(rows, columns=PLAYER_COLUMNS)
     return frame.sort_values(["League", "ROSWeighted"], ascending=[True, False]).head(RAW_ROWS - 1)
@@ -259,9 +304,13 @@ def overview_rows(runs: list[LeagueRun]) -> list[list]:
                 standing,
                 f"{_value_ranks(run)[me]} of {len(lg.alive_teams())}",
                 odds,
+                this_week_text(run),
+                alerts_text(run),
                 f"{need[0][0]} {need[0][1]:+.1f}/wk" if need and need[0][1] < 0 else "none",
                 free_move_text(run),
+                pickup_text(run),
                 idea,
+                run.check,
                 note,
             ]
         )
@@ -289,52 +338,97 @@ class Block:
     header_rows: list[int]
 
 
+def this_week_text(run: LeagueRun) -> str:
+    p = run.plan
+    if p is None:
+        return ""
+    if run.view.league.chopped:
+        return f"survive Week {p.week} {_pct(p.survive_prob)}; {p.mean:.0f} pts"
+    parts = [f"win {_pct(p.win_prob)} vs {p.opponent}"] if p.opponent else []
+    if not math.isnan(p.median_prob):
+        parts.append(f"above the median {_pct(p.median_prob)}")
+    return "; ".join(parts + [f"{p.mean:.0f} pts"])
+
+
+def alerts_text(run: LeagueRun) -> str:
+    if not run.alerts:
+        return "none"
+    return "; ".join(f"{a.cue} {a.slot} {a.player}: {a.swap or a.reason}" for a in run.alerts)
+
+
+def pickup_text(run: LeagueRun) -> str:
+    if not run.pickups:
+        return "none"
+    p = run.pickups[0]
+    b = p.bid
+    bid = f"bid ${b.low}-{b.high}" if b.comps else "no comparable bids"
+    return (
+        f"add {run.view.name(p.player_id)} for {run.view.name(p.drop) if p.drop else 'an open spot'} ({bid})"
+    )
+
+
+MY_TEAMS_HEADER = [
+    "Slot", "Player", "Pos", "NFL", "Status", "This week", "Floor-ceiling", "ROS", "ROS weighted", "Market",
+    "Close call",
+]  # fmt: skip
+
+
 def my_teams_block(runs: list[LeagueRun]) -> Block:
     rows: list[list] = []
     titles, headers = [], []
     for run in runs:
         v, lg = run.view, run.view.league
         me = lg.me
-        week = lg.remaining_weeks[0] if lg.remaining_weeks else None
-        lineup = next((w for w in run.ev.lineups(me.players) if w.week == week), None)
-        slot_of = {pid: lg.slots[j] for j, pid in (lineup.starters.items() if lineup else [])}
+        s = v.ros.summary
         titles.append(len(rows) + 1)
         rows.append([f"{lg.name}: {me.label} ({lg.title})"])
         rows.append([f"Needs: {needs_text(run, me.roster_id)}. Free move first: {free_move_text(run)}."])
+        if run.plan is not None:
+            rows.append(
+                [f"Week {run.plan.week}: {this_week_text(run)}; close calls decided by {run.plan.objective}."]
+            )
+        if run.alerts:
+            rows.append([f"Lineup check: {alerts_text(run)}"])
+        for pos, picks in (run.streams or {}).items():
+            listed = ", ".join(
+                f"{name if name.startswith('yours') else v.name(name)} {w}" for name, w in picks
+            )
+            rows.append([f"Stream {pos} (next weeks): {listed}"])
         headers.append(len(rows) + 1)
-        rows.append(
-            [
-                f"Week {week} slot",
-                "Player",
-                "Pos",
-                "NFL",
-                "Status",
-                f"Wk {week}",
-                "ROS",
-                "ROS weighted",
-                "Market",
-            ]
-        )
-        s = v.ros.summary
-        roster = s.reindex(me.players).sort_values("ros_weighted", ascending=False)
-        order = sorted(
-            roster.index, key=lambda p: (p not in slot_of, lg.slots.index(slot_of[p]) if p in slot_of else 0)
-        )
-        for pid in order:
-            r = roster.loc[pid]
+        rows.append(MY_TEAMS_HEADER)
+        starters = run.plan.starters if run.plan is not None else []
+        for st_ in starters:
+            pid = st_.player_id
+            r = s.loc[pid] if pid in s.index else None
+
+            def col(name: str, r=r) -> object:
+                return r[name] if r is not None else ""
+
             rows.append(
                 [
-                    slot_of.get(pid, "bench"),
-                    r["name"],
-                    r["position"],
-                    r["team"],
-                    r["injury_status"],
-                    "" if pd.isna(r["next_week"]) else round(float(r["next_week"]), 1),
-                    r["ros_pts"],
-                    r["ros_weighted"],
+                    st_.slot,
+                    v.name(pid) if pid else "(empty)",
+                    col("position"),
+                    col("team"),
+                    col("injury_status"),
+                    round(st_.pts, 1),
+                    f"{st_.floor:.0f}-{st_.ceiling:.0f}" if pid else "",
+                    col("ros_pts"),
+                    col("ros_weighted"),
                     round(float(run.market.consensus.get(pid, 0.0)), 1),
+                    st_.close,
                 ]
             )
+        started = {x.player_id for x in starters}
+        bench = s.reindex([p for p in me.players if p not in started]).sort_values(
+            "ros_weighted", ascending=False
+        )
+        for pid, r in bench.iterrows():
+            rows.append([
+                "bench", r["name"], r["position"], r["team"], r["injury_status"],
+                "" if pd.isna(r["next_week"]) else round(float(r["next_week"]), 1), "", r["ros_pts"],
+                r["ros_weighted"], round(float(run.market.consensus.get(pid, 0.0)), 1), "",
+            ])  # fmt: skip
         rows.append([""])
     return Block(rows, titles, headers)
 
@@ -366,7 +460,12 @@ def box_rows(values: dict[str, str]) -> list[list]:
     rows = [['Targeting (type in column B, then say "find me trades")']]
     for name in BOX_FIELDS:
         rows.append([name, values.get(name, "")])
-    rows.append(["Names or positions, comma-separated. Shapes: 1-1, 2-1, 1-2, 2-2. Loss: e.g. 10%."])
+    rows.append(
+        [
+            "Names or positions, comma-separated. Shapes: 1-1, 2-1, 1-2, 2-2. Loss: e.g. 10%. "
+            "Show lopsided: yes adds ideas the market has over 125% for the partner."
+        ]
+    )
     return rows
 
 
@@ -412,3 +511,58 @@ def analyzer_rows(view: LeagueView, lines: list[str], a: tr.Analysis, when: str)
         tag = " (playoffs)" if w in view.league.playoff_weeks else ""
         rows.append([f"{w}{tag}", a.me.weekly_gain[w], a.them.weekly_gain.get(w, 0.0)])
     return rows
+
+
+WAIVERS_HEADER = ["League", "#", "Add", "Pos", "NFL", "Drop", "Your gain", "This week", "Bid guide", "Note"]
+
+
+def waivers_block(runs: list[LeagueRun]) -> Block:
+    """Every league's best pickups in one list, then each league's handcuffs and, if chopped, the bid plan."""
+    rows: list[list] = [["Waivers: the best free agents for your team, and what to bid"], WAIVERS_HEADER]
+    titles, headers = [1], [2]
+    for run in runs:
+        v = run.view
+        s = v.ros.summary
+        for i, p in enumerate(run.pickups, 1):
+            gain = f"{p.expected_weeks:+.2f} wks survived" if v.league.chopped else f"{p.value:+.1f} value"
+            rows.append([
+                v.league.name, i, v.name(p.player_id), s["position"].get(p.player_id, ""),
+                s["team"].get(p.player_id, ""), v.name(p.drop) if p.drop else "open spot", gain,
+                f"{p.this_week:+.1f}", p.bid.text(v.league.me.faab_left), p.note,
+            ])  # fmt: skip
+    for run in runs:
+        v = run.view
+        if run.cuffs:
+            rows += [[""], [f"{v.league.name}: handcuffs to stash (value if his RB1 misses time)"]]
+            titles.append(len(rows))
+            for pid, value, rb1 in run.cuffs:
+                rows.append([v.league.name, "", v.name(pid), "RB", v.ros.summary["team"].get(pid, ""), "",
+                             f"+{value:.1f}", "", f"backs up {v.name(rb1)}", ""])  # fmt: skip
+        plan = run.chop
+        if plan is not None:
+            rows += [
+                [""],
+                [
+                    f"{v.league.name}: bid plan for {plan.team} "
+                    f"({plan.chop_risk:.0%} likely chopped this week)"
+                ],
+            ]
+            titles.append(len(rows))
+            rows.append(
+                [
+                    "Player",
+                    "Your survival gain",
+                    "Worth to you",
+                    "League paid",
+                    "Bid",
+                    f"You have ${plan.faab}",
+                ]
+            )
+            headers.append(len(rows))
+            for pid, gain, worth, price in plan.picks:
+                rows.append(
+                    [v.name(pid), f"{gain:+.3f}", f"${worth}", f"${price:.0f}", plan.bid(worth, price)]
+                )
+            if plan.rivals:
+                rows.append(["Most FAAB: " + ", ".join(f"{n} ${f}" for n, f in plan.rivals)])
+    return Block(rows, titles, headers)

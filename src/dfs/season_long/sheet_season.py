@@ -173,6 +173,7 @@ def write_sync(client: SheetsClient, runs: list[st.LeagueRun]) -> list[str]:
     _write_block(client, st.OVERVIEW_TAB, overview, [1, exposure_header - 1], [2, exposure_header])
     block = st.my_teams_block(runs)
     _write_block(client, st.MY_TEAMS_TAB, block.rows, block.title_rows, block.header_rows)
+    write_waivers(client, runs)
     lines = [
         f"{st.TEAMS_RAW}: {len(teams)} teams, {st.PLAYERS_RAW}: {len(players)} players",
         f"{st.OVERVIEW_TAB}: {len(runs)} leagues; {st.MY_TEAMS_TAB}: {len(runs)} blocks",
@@ -216,6 +217,23 @@ def _write_ideas_table(client: SheetsClient, ideas: list[list], names: list[str]
             criteria={0: {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": name}]}}},
         )
     return f"{tf}: {len(ideas) - 1} ideas, a filter view per league"
+
+
+def write_my_teams(client: SheetsClient, runs: list[st.LeagueRun]) -> str:
+    """`dfs season lineups`: My Teams alone (the other tabs keep the last sync)."""
+    if not client.tab_exists(st.MY_TEAMS_TAB):
+        raise SheetsError("The Season sheet is not set up yet: run `dfs season setup` first.")
+    block = st.my_teams_block(runs)
+    _write_block(client, st.MY_TEAMS_TAB, block.rows, block.title_rows, block.header_rows)
+    return f"{st.MY_TEAMS_TAB}: {len(runs)} leagues"
+
+
+def write_waivers(client: SheetsClient, runs: list[st.LeagueRun]) -> str:
+    if not client.tab_exists(st.WAIVERS_TAB):
+        raise SheetsError("The Season sheet has no Waivers tab yet: run `dfs season setup` first.")
+    block = st.waivers_block(runs)
+    _write_block(client, st.WAIVERS_TAB, block.rows, block.title_rows, block.header_rows)
+    return f"{st.WAIVERS_TAB}: {sum(len(r.pickups) for r in runs)} pickups"
 
 
 def write_analyzer(client: SheetsClient, rows: list[list]) -> str:
