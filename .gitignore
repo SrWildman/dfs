@@ -77,6 +77,8 @@ Thumbs.db
 # New CLI rebuild
 data/
 config.toml
+# Season-long leagues (dfs season): league ids, sheet id, overrides.
+season.toml
 
 # Personal notes/strategy/session-prompts -- not for the public repo.
 # One folder, not a per-file list, so a new planning doc never needs a

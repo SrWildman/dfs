@@ -325,6 +325,81 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 |---|---|
 | `--sheet-id STR` | Build on a different sheet instead of config.toml's -- template first, then live, per the two-sheet rule. This is a one-time structural build, not a per-week command. |
 
+## Reference: season-long leagues and the Season sheet (only when needed)
+
+Your Sleeper leagues (in `season.toml`), on their own Season sheet: rest-of-season values in each league's scoring, playoff odds (survival odds in a chopped league), a trade analyzer and a trade finder. Nothing here touches DraftKings or the weekly sheet. `dfs season setup` once, then `dfs season sync`; docs/SEASON.md has the method.
+
+### `dfs season sync`
+
+Sync every league from Sleeper, rebuild values and trade ideas, and write the Season sheet (a few minutes for four leagues).
+
+| Option | What it does |
+|---|---|
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--all` | Every league in season.toml. (the default). |
+| `--top INT` | Trade ideas kept per league. Default: `20`. |
+| `--no-sheet` | Print only; write nothing. |
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
+### `dfs season trades`
+
+Find realistic trades: you gain, the partner gains by our model, and the market calls it fair for them. Writes this league's ideas onto the Trade Finder tab.
+
+| Option | What it does |
+|---|---|
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--all` | Every league in season.toml. |
+| `--get STR` | Land a player or a position ("Bijan", "RB"). |
+| `--give STR` | Sell a player or move a position ("Garrett Wilson", "WR"). |
+| `--keep STR` | Untouchables, never offered ("Nacua, Love"). |
+| `--partner STR` | One team only ("Team 4", a team or manager name). |
+| `--shapes STR` | You give - you get: 1-1, 2-1, 1-2, 2-2 (default all). |
+| `--max-consensus-loss STR` | How far below fair (by the market) the partner may come out (5%). |
+| `--top INT` | Ideas to keep. Default: `20`. |
+| `--from-sheet` | Use the Trade Finder tab's targeting box (also used when no filter is given). |
+| `--no-sheet` | Print only; write nothing. |
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
+### `dfs season trade`
+
+Analyze one trade: each side's change in team value (regular season and playoffs, or survival in a chopped league), the market's view, and a one-line verdict. Writes the Analyzer tab.
+
+| Option | What it does |
+|---|---|
+| `give STR` | What you give: "Garrett Wilson, Tuten + $10 FAAB". **Required.** |
+| `get STR` | What you get: "Bijan Robinson". **Required.** |
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--partner STR` | The partner, when what you get is only FAAB. |
+| `--no-sheet` | Print only; write nothing. |
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
+### `dfs season ros`
+
+Rest-of-season points in a league's scoring (top players), or with --check the accuracy of the blend against the season and last-3 averages on this season's finished weeks.
+
+| Option | What it does |
+|---|---|
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--all` | Every league in season.toml. |
+| `--check` | The held-out accuracy check of the blend. |
+| `--top INT` | Players to list. Default: `25`. |
+
+### `dfs season setup`
+
+Build (or rebuild) the Season sheet's tabs, pickers, targeting box and protection. Keeps what is typed in the pickers and the box. Then run `dfs season sync`.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
+### `dfs season doctor`
+
+Read-only structure check of the Season sheet.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
 ## Reference: the lineup simulator (only when needed)
 
 The Typical, Big night, Cash % and Top 1% numbers on each Lineups Total row are written by every `dfs sync` (Cash % and the last number are measured against lines that move with the slate; `--fixed-lines` on `dfs sync`, `dfs lineups suggest` and `dfs lineups late-swap` gives the old fixed ones); these commands rebuild or check the correlations behind them. They read the model cache `dfs model fetch` fills and never touch a sheet.

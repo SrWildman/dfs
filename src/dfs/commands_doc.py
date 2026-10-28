@@ -131,6 +131,21 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         ],
     ),
     (
+        "Reference: season-long leagues and the Season sheet (only when needed)",
+        "Your Sleeper leagues (in `season.toml`), on their own Season sheet: rest-of-season values in each "
+        "league's scoring, playoff odds (survival odds in a chopped league), a trade analyzer and a trade "
+        "finder. Nothing here touches DraftKings or the weekly sheet. `dfs season setup` once, then "
+        "`dfs season sync`; docs/SEASON.md has the method.",
+        [
+            "dfs season sync",
+            "dfs season trades",
+            "dfs season trade",
+            "dfs season ros",
+            "dfs season setup",
+            "dfs season doctor",
+        ],
+    ),
+    (
         "Reference: the lineup simulator (only when needed)",
         "The Typical, Big night, Cash % and Top 1% numbers on each Lineups Total row are written by every "
         "`dfs sync` (Cash % and the last number are measured against lines that move with the slate; "

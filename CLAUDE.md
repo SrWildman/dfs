@@ -174,6 +174,16 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   filters, protection, styling), in the one order that works; its own docstring
   (`setup_sheet` in `cli.py`) explains why that order. Everything under
   `dfs setup ...` is also runnable as an individual step.
+- `dfs season sync|trades|trade|ros|setup|doctor [--league <name> | --all]` -- Sam's season-long Sleeper leagues
+  (`src/dfs/season_long/`; leagues in the gitignored `season.toml` beside config.toml, NOT config.toml) on their own
+  **Season** sheet (season.toml's `sheet_id`; never the weekly DFS sheet, no template, nothing copied week to week).
+  Rest-of-season points in each league's scoring (Sleeper's projections rescored, held-out accuracy in
+  `docs/SEASON.md`), team value (redraft: playoff weeks weighted by the team's own playoff odds; chopped: the survival
+  simulation with chopped rosters going to waivers by FAAB), a trade analyzer (`dfs season trade "Give A + $10 FAAB"
+  "Get B"`, writes the Analyzer tab) and finder (`dfs season trades --get/--give/--keep/--partner/--shapes/
+  --max-consensus-loss`; with no filter it reads the Trade Finder tab's targeting box). Every trade is measured
+  from each side's best free waiver move, never crediting a pickup anyone could make. Market value = FantasyPros'
+  public ROS consensus. `dfs season doctor` is the Season sheet's structural check. Method: `docs/SEASON.md`.
 - `dfs sheets ...` is a deprecated spelling of the `setup` commands (plus
   `doctor`) kept working this season as a compatibility alias -- prefer
   the current names above in new code and docs.
@@ -207,6 +217,17 @@ URL; check it before any write).
 | "close the week" | `dfs week close --research` (it finds the newest history export in Downloads by its header and says which; pass `--csv <file>` if he names one). The close runs first, as always; then the offline studies run unattended (under 45 minutes, about as long as the slowest one: run it detached with a log, `caffeinate -i`, and read the log; a stage that fails or times out is reported, never retried). If the close itself fails, show the error and stop | the Model Check verdict and the learned block, the bankroll lines it reconciled, and what it kept and filled on the contest side (standings moved, empty downloads, Cash Line, the Contests tab), then the Contests tab's THIS WEEK, YOUR DECISIONS block (five lines); then the 15-line research summary it prints (paste it to planning as is) and the path of the one report, `docs/research/weekly/<season>-wk<NN>-close.md` |
 | "how did we do" | read (do not write) Model Check: the opening verdict sentences and "What the model learned this week" | five lines: who leads the projection race by position, what CalPts learned, how the signals are running, whether the probabilities hold, the Week 8 checkpoint |
 
+Season-long shortcuts (the Season sheet; `dfs season ...` prints its title and URL before any write):
+
+| Sam says | Run | Report back |
+|---|---|---|
+| "season sync" | `dfs season sync` (all leagues; a few minutes, run it detached with a log) | per league: his odds (playoffs, or survive this week / last man standing), needs, the free move first, the top 3 ideas |
+| "find me trades in <league>" | `dfs season trades --league <league>` | the top 10 ideas (give / get / partner / his gain / market for them / the why line) |
+| "find me an RB" (in <league>, else every league) | `dfs season trades --get RB [--league <league> \| --all]` | the same, per league |
+| "who'll buy <player>" | `dfs season trades --give "<player>" --league <league>` | the partners and what each gives back |
+| "trades for <player>" | `dfs season trades --get "<player>" --league <league>` | the same |
+| "analyze trade X for Y + $10 FAAB in <league>" | `dfs season trade "X" "Y + $10 FAAB" --league <league>` (FAAB goes on the side that pays it) | both sides' change, the market line and the verdict; it wrote the Analyzer tab |
+
 Guardrails:
 
 - **Ask before `dfs week new`**, and before writing to any sheet other than the live week (the one `config.toml` points at).
@@ -232,6 +253,7 @@ Guardrails:
 | `docs/TROUBLESHOOTING.md` | Something looks wrong on the sheet and you want symptom -> cause -> fix. |
 | `docs/SHEET_REFERENCE.md` | You need to know what a specific tab or column means, or the canonical column order for a shared tab. |
 | `docs/CALCULATIONS.md` | You want the exact formula/threshold behind a computed column -- the one place the math is supposed to live; don't let a docstring's summary of it drift into "close enough." |
+| `docs/SEASON.md` | You're working on `src/dfs/season_long/` (season-long leagues, the Season sheet): setup, method, accuracy, the sheet's tabs. |
 | `docs/CONTESTS.md` | You're working on `src/dfs/contests/` (the contests engine: history log, series/format tagging, standings parsing, field stats, slate index, toughness curves). Method, the slate-index finding, every assumption, and what the local session must wire up. The command is hidden until it is. |
 | `docs/planning/README.md` | **Gitignored, personal.** Start here for anything under `docs/planning/`: it names `HANDOFF.md` as the file to read first and says which one `PROMPT_*.md` is the active round. |
 | `docs/planning/HANDOFF.md` | **Gitignored, personal.** The starting point for a new session: what the tool is, the sheet ids, the standing rules, the gotchas, and where each kind of decision lives. Current facts only -- no history. Keep it that way; don't try to `git add` it. |

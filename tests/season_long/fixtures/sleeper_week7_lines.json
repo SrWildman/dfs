@@ -1,0 +1,238 @@
+{
+ "lines": [
+  {
+   "player_id": "5967",
+   "position": "RB",
+   "stats": {
+    "gp": 1.0,
+    "pts_half_ppr": 35.0,
+    "pts_ppr": 36.5,
+    "pts_std": 33.5,
+    "rec": 3.0,
+    "rec_yd": 26.0,
+    "rush_td": 3.0,
+    "rush_yd": 129.0
+   }
+  },
+  {
+   "player_id": "9488",
+   "position": "WR",
+   "stats": {
+    "gp": 1.0,
+    "pts_half_ppr": 26.8,
+    "pts_ppr": 31.3,
+    "pts_std": 22.3,
+    "rec": 9.0,
+    "rec_td": 1.0,
+    "rec_yd": 150.0,
+    "rush_yd": 13.0
+   }
+  },
+  {
+   "player_id": "6770",
+   "position": "QB",
+   "stats": {
+    "gp": 1.0,
+    "pass_td": 4.0,
+    "pass_yd": 292.0,
+    "pts_half_ppr": 28.88,
+    "pts_ppr": 28.88,
+    "pts_std": 28.88,
+    "rush_yd": 12.0
+   }
+  },
+  {
+   "player_id": "11564",
+   "position": "QB",
+   "stats": {
+    "gp": 1.0,
+    "pass_int": 1.0,
+    "pass_td": 2.0,
+    "pass_yd": 321.0,
+    "pts_half_ppr": 28.44,
+    "pts_ppr": 28.44,
+    "pts_std": 28.44,
+    "rush_td": 1.0,
+    "rush_yd": 26.0
+   }
+  },
+  {
+   "player_id": "9997",
+   "position": "WR",
+   "stats": {
+    "gp": 1.0,
+    "pts_half_ppr": 23.7,
+    "pts_ppr": 27.7,
+    "pts_std": 19.7,
+    "rec": 8.0,
+    "rec_td": 1.0,
+    "rec_yd": 137.0
+   }
+  },
+  {
+   "player_id": "8130",
+   "position": "TE",
+   "stats": {
+    "gp": 1.0,
+    "pts_half_ppr": 22.1,
+    "pts_ppr": 27.1,
+    "pts_std": 17.1,
+    "rec": 10.0,
+    "rec_td": 1.0,
+    "rec_yd": 111.0
+   }
+  },
+  {
+   "player_id": "TB",
+   "position": "DEF",
+   "stats": {
+    "blk_kick": 1.0,
+    "def_st_fum_rec": 1.0,
+    "def_td": 1.0,
+    "ff": 1.0,
+    "fum_rec": 1.0,
+    "gp": 1.0,
+    "int": 2.0,
+    "pts_allow_7_13": 1.0,
+    "pts_half_ppr": 25.0,
+    "pts_ppr": 25.0,
+    "pts_std": 25.0,
+    "sack": 5.0
+   }
+  },
+  {
+   "player_id": "11584",
+   "position": "RB",
+   "stats": {
+    "fum": 1.0,
+    "gp": 1.0,
+    "pts_half_ppr": 23.5,
+    "pts_ppr": 24.0,
+    "pts_std": 23.0,
+    "rec": 1.0,
+    "rec_yd": 4.0,
+    "rush_td": 2.0,
+    "rush_yd": 106.0
+   }
+  },
+  {
+   "player_id": "11533",
+   "position": "K",
+   "stats": {
+    "fgm_20_29": 2.0,
+    "fgm_50_59": 1.0,
+    "fgm_50p": 1.0,
+    "gp": 1.0,
+    "pts_half_ppr": 14.0,
+    "pts_ppr": 14.0,
+    "pts_std": 14.0,
+    "xpm": 3.0
+   }
+  },
+  {
+   "player_id": "3678",
+   "position": "K",
+   "stats": {
+    "fgm_30_39": 1.0,
+    "fgm_40_49": 2.0,
+    "gp": 1.0,
+    "pts_half_ppr": 14.0,
+    "pts_ppr": 14.0,
+    "pts_std": 14.0,
+    "xpm": 3.0
+   }
+  },
+  {
+   "player_id": "ATL",
+   "position": "DEF",
+   "stats": {
+    "ff": 3.0,
+    "fum_rec": 2.0,
+    "gp": 1.0,
+    "int": 2.0,
+    "pts_allow_14_20": 1.0,
+    "pts_half_ppr": 14.0,
+    "pts_ppr": 14.0,
+    "pts_std": 14.0,
+    "sack": 2.0
+   }
+  },
+  {
+   "player_id": "2020",
+   "position": "K",
+   "stats": {
+    "fgm_30_39": 1.0,
+    "fgm_40_49": 1.0,
+    "fgm_50_59": 1.0,
+    "fgm_50p": 1.0,
+    "fgmiss": 1.0,
+    "fgmiss_50_59": 1.0,
+    "fgmiss_50p": 1.0,
+    "gp": 1.0,
+    "pts_half_ppr": 14.0,
+    "pts_ppr": 14.0,
+    "pts_std": 14.0,
+    "xpm": 3.0
+   }
+  },
+  {
+   "player_id": "SEA",
+   "position": "DEF",
+   "stats": {
+    "ff": 1.0,
+    "gp": 1.0,
+    "int": 1.0,
+    "pts_allow_1_6": 1.0,
+    "pts_half_ppr": 11.0,
+    "pts_ppr": 11.0,
+    "pts_std": 11.0,
+    "sack": 1.0
+   }
+  }
+ ],
+ "scoring_ppr": {
+  "blk_kick": 2.0,
+  "def_st_ff": 1.0,
+  "def_st_fum_rec": 1.0,
+  "def_st_td": 6.0,
+  "def_td": 6.0,
+  "ff": 1.0,
+  "fgm_0_19": 3.0,
+  "fgm_20_29": 3.0,
+  "fgm_30_39": 3.0,
+  "fgm_40_49": 4.0,
+  "fgm_50_59": 5.0,
+  "fgm_60p": 6.0,
+  "fgmiss": -1.0,
+  "fum": 0.0,
+  "fum_lost": -2.0,
+  "fum_rec": 2.0,
+  "fum_rec_td": 6.0,
+  "int": 2.0,
+  "pass_2pt": 2.0,
+  "pass_int": -1.0,
+  "pass_td": 4.0,
+  "pass_yd": 0.04,
+  "pts_allow_0": 10.0,
+  "pts_allow_14_20": 1.0,
+  "pts_allow_1_6": 7.0,
+  "pts_allow_21_27": 0.0,
+  "pts_allow_28_34": -1.0,
+  "pts_allow_35p": -4.0,
+  "pts_allow_7_13": 4.0,
+  "rec": 1.0,
+  "rec_2pt": 2.0,
+  "rec_td": 6.0,
+  "rec_yd": 0.1,
+  "rush_2pt": 2.0,
+  "rush_td": 6.0,
+  "rush_yd": 0.1,
+  "sack": 1.0,
+  "safe": 2.0,
+  "st_ff": 1.0,
+  "st_fum_rec": 1.0,
+  "st_td": 6.0,
+  "xpm": 1.0,
+  "xpmiss": -1.0
+ }
+}
