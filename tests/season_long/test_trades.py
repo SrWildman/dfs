@@ -199,3 +199,16 @@ def test_targeted_ideas_are_added_to_the_standard_ones_not_instead(monkeypatch):
         {(i.analysis.partner, tuple(i.analysis.give.players), tuple(i.analysis.get.players)) for i in merged}
     )
     assert any(i.target.startswith(("buy list: WR5", "weakest spot: RB")) for i in aimed)
+
+
+def test_every_buy_list_name_keeps_its_best_ideas(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    m = syn.market(v)
+    ideas = fd.find_trades(v, ev, m, fd.Filters(targets=["WR5", "RB6"]), top=200)
+    picked = fd.pick_targeted(ideas)
+    for name in ("WR5", "RB6"):
+        have = [i for i in ideas if name in i.target]
+        kept = [i for i in picked if name in i.target]
+        assert len(kept) == min(len(have), fd.PER_BUY_TARGET)
+    assert sum(1 for i in picked if i.target.startswith("weakest")) <= fd.WEAKEST_SPOT_IDEAS

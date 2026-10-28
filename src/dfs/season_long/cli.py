@@ -72,9 +72,6 @@ def _client(cfg, sheet_id: str | None):
     return client
 
 
-TARGETED_TOP = 10
-
-
 def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: bool = True, targets=None):
     """One league's view, evaluator, market and ideas (`season_tabs.LeagueRun`). With `targets` (the buy
     list), the targeted ideas are ADDED to the standard ones, never instead of them."""
@@ -89,8 +86,8 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
     found: list[str] = []
     ideas = fd.find_trades(view, ev, market, filters or fd.Filters(), top=top, notes=found) if find else []
     if find and targets:
-        aimed = fd.find_trades(
-            view, ev, market, fd.Filters(targets=list(targets)), top=TARGETED_TOP, notes=found
+        aimed = fd.pick_targeted(
+            fd.find_trades(view, ev, market, fd.Filters(targets=list(targets)), top=200, notes=found)
         )
         ideas = fd.merge_targeted(ideas, aimed)
     run = st.LeagueRun(

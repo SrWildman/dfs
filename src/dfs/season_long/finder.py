@@ -403,3 +403,24 @@ def merge_targeted(standard: list[Idea], targeted: list[Idea]) -> list[Idea]:
     seen = {key(i) for i in standard}
     out += [i for i in targeted if key(i) not in seen]
     return out
+
+
+PER_BUY_TARGET = 2
+WEAKEST_SPOT_IDEAS = 5
+
+
+def pick_targeted(ideas: list[Idea]) -> list[Idea]:
+    """From the targeted search (best first): each buy-list name's best `PER_BUY_TARGET` ideas, so a name is
+    never crowded out by bigger weakest-spot gains, then the best `WEAKEST_SPOT_IDEAS` weakest-spot ones."""
+    per_name: dict[str, int] = {}
+    buys, spots = [], []
+    for i in ideas:
+        if i.target.startswith("buy list: "):
+            names = i.target.removeprefix("buy list: ").split(", ")
+            if any(per_name.get(n, 0) < PER_BUY_TARGET for n in names):
+                for n in names:
+                    per_name[n] = per_name.get(n, 0) + 1
+                buys.append(i)
+        elif len(spots) < WEAKEST_SPOT_IDEAS:
+            spots.append(i)
+    return sorted(buys + spots, key=lambda i: -i.analysis.me.delta)

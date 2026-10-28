@@ -77,7 +77,7 @@ BOX_TITLE_ROW = 1
 BOX_FIELDS = ("League", "Get", "Give", "Keep", "Partner", "Shapes", "Max consensus loss", "Show lopsided")
 BOX_FIRST_ROW = 2
 IDEAS_HEADER = [
-    "League", "#", "You give", "You get", "Partner", "Your gain", "Their gain", "Market for them",
+    "League", "#", "Target", "You give", "You get", "Partner", "Your gain", "Their gain", "Market for them",
     "Read", "Why",
 ]  # fmt: skip
 IDEAS_HEADER_ROW = BOX_FIRST_ROW + len(BOX_FIELDS) + 2
@@ -443,13 +443,14 @@ def ideas_rows(runs: list[LeagueRun]) -> list[list]:
                 [
                     v.league.name,
                     i,
+                    idea.target,
                     side_text(v, a.give),
                     side_text(v, a.get),
                     v.league.team(a.partner).label,
                     gain_text(a, a.me),
                     gain_text(a, a.them),
                     f"{a.fair_ratio:.0%}" if math.isfinite(a.fair_ratio) else "all gain",
-                    "; ".join(([f"TARGET {idea.target}"] if idea.target else []) + a.labels),
+                    "; ".join(a.labels),
                     idea.why,
                 ]
             )
