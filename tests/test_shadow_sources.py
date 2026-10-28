@@ -104,3 +104,50 @@ def test_a_players_props_come_from_the_last_snapshot_before_his_own_kickoff(monk
 def test_no_props_ever_pulled_means_no_inputs(monkeypatch):
     monkeypatch.setattr(results_loop, "snapshot_files", lambda source: [])
     assert results_loop.props_for_week(6, 2026) is None
+
+
+def test_the_edge_frame_really_carries_blank_source_columns_the_merge_has_to_replace():
+    """The cause of the 0-of-3 bug: `build_edge_frame` hands `score_week` these columns already, blank."""
+    from tests.test_derived import _projections, _salaries
+
+    frame = derived.build_edge_frame(
+        _projections([{"Id": "1", "Name": "Matched Player"}]), _salaries([{"ID": "1"}])
+    ).frame
+    for column in ("EspnPts", "PropPts", "SleeperPts", "FantasyProsPts"):
+        assert column in frame.columns and frame[column].isna().all()
+
+
+def test_score_week_keeps_the_sources_values_when_the_edge_frame_already_has_the_columns():
+    # An ESPN snapshot as `data/raw/espn/*.csv` is written (DkPts plus the stat lines) and a props snapshot
+    # as `data/raw/odds_props/*.csv` is (one row per player, DK Id, GameStart, PropPts, Missing, Flags).
+    espn = pd.DataFrame(
+        {
+            "Name": ["Josh Allen", "Puka Nacua"],
+            "Team": ["BUF", "LAR"],
+            "Position": ["QB", "WR"],
+            "DkPts": [26.95, 24.34],
+            "pass_yd": [250.77, 0.0],
+            "rush_yd": [44.06, 4.81],
+        }
+    )
+    sleeper = espn.assign(DkPts=[24.0, 18.0])
+    props = pd.DataFrame(
+        {
+            "Id": [101, 102],
+            "Name": ["Josh Allen", "Puka Nacua"],
+            "GameStart": ["2026-10-18T13:00:00Z"] * 2,
+            "PropPts": [25.85, float("nan")],
+            "Missing": ["", "rush_yd"],
+            "Flags": ["td:yes_only", ""],
+        }
+    )
+    blank = float("nan")
+    frame = _frame().assign(EspnPts=blank, PropPts=blank, SleeperPts=blank, FantasyProsPts=blank)
+    out = results_loop.attach_source_projections(
+        frame, _inputs(espn=espn, props=props, sleeper=sleeper)
+    ).set_index("Id")
+    assert [c for c in out.columns if c.endswith(("_x", "_y"))] == []
+    assert out.loc[101, "EspnPts"] == 26.95 and out.loc[102, "EspnPts"] == 24.34
+    assert out.loc[101, "PropPts"] == 25.85 and pd.isna(out.loc[102, "PropPts"])
+    assert out.loc[101, "SleeperPts"] == 24.0 and out.loc[102, "SleeperPts"] == 18.0
+    assert pd.isna(out.loc[103, "EspnPts"])

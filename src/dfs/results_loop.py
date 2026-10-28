@@ -326,6 +326,17 @@ def source_projection_columns(frame: pd.DataFrame, inputs) -> pd.DataFrame:  # n
     return out
 
 
+def attach_source_projections(frame: pd.DataFrame, inputs) -> pd.DataFrame:  # noqa: ANN001 - WeekInputs or a namespace
+    """`frame` with each outside source's projection (`source_projection_columns`) laid over it. The edge
+    frame already carries blank `SleeperPts` / `FantasyProsPts` / `EspnPts` / `PropPts` columns (EdgeRaw's
+    shape), so a plain merge made `_x` / `_y` twins and `SCORED_COLUMNS` then found neither: the shadow
+    sources were scored blank from Week 6 and the Week 7 file lost Sleeper and FantasyPros too. The sources'
+    own values replace those columns."""
+    sources = source_projection_columns(frame, inputs)
+    stale = [c for c in sources.columns if c != "Id" and c in frame.columns]
+    return frame.drop(columns=stale).merge(sources, on="Id", how="left")
+
+
 # ---------------------------------------------------------------------------------------------
 # Join actual points
 # ---------------------------------------------------------------------------------------------
@@ -433,7 +444,7 @@ def score_week(
         on="Id",
         how="left",
     )
-    frame = frame.merge(source_projection_columns(frame, inputs), on="Id", how="left")
+    frame = attach_source_projections(frame, inputs)
     frame["RosterablePool"] = _rosterable_pool_mask(frame["ProjPts"], frame["Position"])
     frame["season"] = season
     frame["week"] = week
