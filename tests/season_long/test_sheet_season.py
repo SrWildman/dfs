@@ -5,7 +5,8 @@ from dfs.season_long import season_tabs as st
 from dfs.season_long import sheet_season as ss
 from dfs.season_long import trade as tr
 from dfs.sheets import TabInfo, column_index
-from tests.season_long import synthetic as syn
+
+from . import synthetic as syn
 
 
 class FakeClient:

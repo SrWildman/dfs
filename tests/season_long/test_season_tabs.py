@@ -1,7 +1,8 @@
 from dfs.season_long import finder as fd
 from dfs.season_long import season_tabs as st
 from dfs.season_long import trade as tr
-from tests.season_long import synthetic as syn
+
+from . import synthetic as syn
 
 
 def test_view_formulas_find_columns_by_name():

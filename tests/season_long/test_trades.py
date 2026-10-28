@@ -6,7 +6,8 @@ from dfs.season_long import consensus as cs
 from dfs.season_long import finder as fd
 from dfs.season_long import objective
 from dfs.season_long import trade as tr
-from tests.season_long import synthetic as syn
+
+from . import synthetic as syn
 
 
 def test_finder_trades_sams_wr_surplus_for_the_rb_team_needs(monkeypatch):
