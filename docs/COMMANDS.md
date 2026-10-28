@@ -331,13 +331,14 @@ Your Sleeper leagues (in `season.toml`), on their own Season sheet: rest-of-seas
 
 ### `dfs season sync`
 
-Sync every league from Sleeper, rebuild values and trade ideas, and write the Season sheet (a few minutes for four leagues).
+Sync every league from Sleeper, rebuild values and trade ideas, and write the Season sheet (a few minutes for four leagues). With a buy list in season.toml, ideas for it and each league's weakest spot are added to the standard ones (tagged "target"), unless --open.
 
 | Option | What it does |
 |---|---|
 | `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
 | `--all` | Every league in season.toml. (the default). |
 | `--top INT` | Trade ideas kept per league. Default: `20`. |
+| `--open` | Leave out the extra ideas for season.toml's buy list and your weakest spot. |
 | `--no-sheet` | Print only; write nothing. |
 | `--sheet-id STR` | A Season sheet other than season.toml's. |
 
@@ -385,11 +386,13 @@ Find realistic trades: you gain, the partner gains by our model, and the market 
 | `--get STR` | Land a player or a position ("Bijan", "RB"). |
 | `--give STR` | Sell a player or move a position ("Garrett Wilson", "WR"). |
 | `--keep STR` | Untouchables, never offered ("Nacua, Love"). |
+| `--players STR` | Trades moving any of these either way ("Hubbard, Coleman"): yours are sells, the rest buys. |
 | `--partner STR` | One team only ("Team 4", a team or manager name). |
 | `--shapes STR` | You give - you get: 1-1, 2-1, 1-2, 2-2 (default all). |
 | `--max-consensus-loss STR` | How far below fair (by the market) the partner may come out (5%). |
 | `--top INT` | Ideas to keep. Default: `20`. |
 | `--lopsided` | Also show ideas the market has over 125% for the partner (with the FAAB to ask back). |
+| `--open` | With no filter, leave out the extra buy-list / weakest-spot ideas. |
 | `--from-sheet` | Use the Trade Finder tab's targeting box (also used when no filter is given). |
 | `--no-sheet` | Print only; write nothing. |
 | `--sheet-id STR` | A Season sheet other than season.toml's. |

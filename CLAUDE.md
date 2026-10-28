@@ -235,6 +235,9 @@ Season-long shortcuts (the Season sheet; `dfs season ...` prints its title and U
 | "find me an RB" (in <league>, else every league) | `dfs season trades --get RB [--league <league> \| --all]` | the same, per league |
 | "who'll buy <player>" | `dfs season trades --give "<player>" --league <league>` | the partners and what each gives back |
 | "trades for <player>" | `dfs season trades --get "<player>" --league <league>` | the same |
+| "add X, Y to my buy list" / "take X off my buy list" | edit `buy_list` in season.toml (gitignored, beside config.toml; keep its comment) | the list as it now stands; the next "season sync" / "find me trades" ADDS ideas for it and each league's weakest spot (tagged TARGET) to the standard ones (`--open` leaves them out) |
+| "I want to trade away X, Y, Z" (any leagues) | `dfs season trades --all --give "X, Y, Z"` (a trade that sends any one of them counts; in a league where he owns none of them, that league is skipped and the output says so) | per league: the top ideas that move them, and any name he does not own there |
+| "find me trades for A, B, C and D" (a list, any leagues) | `dfs season trades --all --players "A, B, C, D"` (per league, a name he owns is a sell and one on another roster a buy; names not in a league are skipped there) | per league: which names were sells and which buys, and the top ideas |
 | "analyze trade X for Y + $10 FAAB in <league>" | `dfs season trade "X" "Y + $10 FAAB" --league <league>` (FAAB goes on the side that pays it) | both sides' change, the market line and the verdict; it wrote the Analyzer tab |
 
 Guardrails:

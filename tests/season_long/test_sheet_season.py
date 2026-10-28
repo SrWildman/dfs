@@ -15,6 +15,7 @@ class FakeClient:
     def __init__(self):
         self.tabs = {"Sheet1": {}}
         self.validations, self.protected, self.filter_views, self.calls = set(), {}, {}, []
+        self.widths: dict[str, int] = {}
 
     def __getattr__(self, name):  # formatting and other presentation calls: recorded only
         return lambda *a, **k: self.calls.append(name)
@@ -72,6 +73,9 @@ class FakeClient:
 
     def set_range_dropdown_validation(self, tab, a1, **_):
         self.validations.add((tab, a1))
+
+    def ensure_column_capacity(self, tab, min_cols):
+        self.widths[tab] = max(self.widths.get(tab, 26), min_cols)
 
     def has_data_validation(self, tab, a1):
         return (tab, a1) in self.validations
@@ -131,3 +135,23 @@ def test_doctor_flags_a_missing_tab_and_a_stale_formula():
     del client.tabs[st.ANALYZER_TAB]
     bad = {name for name, ok, _ in ss.doctor(client) if not ok}
     assert bad == {f"tab {st.ANALYZER_TAB}", f"{st.LEAGUE_TAB} formula"}
+
+
+def test_setup_grows_the_raw_tabs_before_writing_formulas_over_them():
+    """A raw tab narrower than its columns makes Sheets shift formula references when a sync grows it."""
+    client = FakeClient()
+    ss.setup(client, ["Test"])
+    assert client.widths[st.TEAMS_RAW] >= len(st.TEAM_COLUMNS) > 26
+    assert client.widths[st.PLAYERS_RAW] >= len(st.PLAYER_COLUMNS)
+
+
+def test_a_stale_header_above_the_ideas_list_is_cleared(monkeypatch):
+    client = FakeClient()
+    ss.setup(client, ["Test"])
+    stale = st.IDEAS_HEADER_ROW - 1
+    client.update_range(st.TRADE_FINDER_TAB, f"A{stale}", [st.IDEAS_HEADER])  # the box was one field shorter
+    ss.write_ideas(client, [_run(monkeypatch)])
+    assert client.read_range(st.TRADE_FINDER_TAB, f"A{stale}:B{stale}") == []
+    assert client.read_range(st.TRADE_FINDER_TAB, f"A{st.IDEAS_HEADER_ROW}:B{st.IDEAS_HEADER_ROW}") == [
+        ["League", "#"]
+    ]

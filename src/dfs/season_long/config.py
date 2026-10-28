@@ -51,6 +51,9 @@ class SeasonLongConfig(BaseModel):
     # Chopped leagues: week w ahead weighs `survival_decay ** w` (this week 1.0).
     survival_decay: float = Field(0.8, gt=0.0, le=1.0)
     survival_draws: int = Field(4000, ge=200)
+    # Sam's buy list, across leagues: the trade finder's targets (`finder.Filters.targets`), with each
+    # league's weakest position. A name he already owns in a league is skipped there.
+    buy_list: list[str] = Field(default_factory=list)
 
 
 def load_season_config(path: Path | None = None) -> SeasonLongConfig:

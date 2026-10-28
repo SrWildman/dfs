@@ -22,6 +22,13 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
    # faab_point_value = 1.5    # override the fitted points per FAAB dollar
    ```
 
+   A top-level `buy_list = ["Chuba Hubbard", ...]` ADDS targeted ideas to the standard search: `dfs season
+   sync` and a plain `dfs season trades` keep their usual best trades and add up to 10 per league that land a
+   name from the list (on another roster in that league; one Sam owns there is skipped) or a player at his
+   weakest spot there (FLEX counts as RB/WR/TE; K and DEF are streamed, so the next spot is used), each
+   tagged `TARGET buy list: ...` or `TARGET weakest spot: ...`. List names match the full name only, never a
+   last name alone. `--open` leaves the extra ideas out.
+
    Optional top-level numbers: `playoff_weight` (1.5), `starter_miss_rate` (0.06), `ir_weeks_out` (4),
    `survival_decay` (0.8), `survival_draws` (4000).
 2. Share the Season sheet with the service account as an Editor, then `dfs season setup` and `dfs season sync`.
@@ -37,6 +44,8 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
 | `dfs season waivers [--league X] [--player "Name"]` | Best pickups for your team with a FAAB bid guide, handcuffs, a chopped league's bid plan; writes the Waivers tab |
 | `dfs season lineups [--league X]` | This week's best lineup per league: ranges, close calls decided by the matchup, K/DEF streams; writes My Teams (all leagues only) |
 | `dfs season check` | The Sunday check across every league (read-only) |
+| `dfs season trades --all --give "X, Y, Z"` | Sell any of these: a league where you own none of them is skipped (and says which names it skipped); `--get` works the same way for buys |
+| `dfs season trades --all --players "A, B, C"` | Trades that move any of these, either way: per league a name you own is a sell, one on another roster a buy |
 | `dfs season trades ... --lopsided` | Also show ideas the market has over 125% for the partner, each with the FAAB to ask back |
 | `dfs season ros --league X [--check]` | Rest-of-season points, or the accuracy check |
 | `dfs season setup`, `dfs season doctor` | Build and check the sheet |
@@ -146,10 +155,18 @@ little (3.47 to 3.42 in Bourbon, in-sample).
   - The range runs from the median to the 80th percentile of those winning bids.
   - Shown beside it: what the player is worth to Sam (his gain over the league's points per dollar), and the
     rivals with enough FAAB who need the position. Inactive managers are left out of the rivals.
-- **Handcuffs.** A free-agent RB2 is valued for the weeks his RB1 misses, from the DFS side's measured
-  teammate bump (RB1 out: RB2 +4.27 DraftKings points a game, shrunk; a PPR measure, used as is). His RB1's
-  chance of missing a week is `starter_miss_rate`, or 25% this week if Questionable and 75% if Doubtful. The
-  values come out small; that is the honest answer.
+- **Handcuffs.** A free-agent RB2 is valued for the weeks his RB1 misses. What he adds then depends on how
+  much of the backfield the RB1 has: his share of his team's carries over the last three games (Sleeper).
+  Measured on the DFS side's R7 events (2014-2025, DraftKings points over the projection; fit 2014-21, test
+  2022-25):
+  - RB1 under 55% of the carries (a committee): +4.3 (fit +3.7, test +5.6);
+  - RB1 at 55% or more (a lead back): +7.1 (fit +7.0, test +8.0).
+  His RB1's chance of missing a week is `starter_miss_rate`, or 25% this week if Questionable, 75% if
+  Doubtful, 100% if Out. The stash list shows, hurt starters first:
+  - every backup whose RB1 is tagged right now;
+  - every backup to a lead back;
+  - any other backup with lineup value.
+  Each comes with what he would score if the starter sits.
 - **Chopped bid plan.** For the team most likely chopped this week: its best three players, what each adds to
   Sam's survival, that in dollars, and what the league has paid for a chopped roster's first, second and third
   pick. The bid runs from the league's price up to his worth, capped at Sam's FAAB.

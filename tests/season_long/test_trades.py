@@ -128,3 +128,87 @@ def test_shapes():
     assert fd.parse_shapes("1-1, 2-1") == ("1-1", "2-1")
     with pytest.raises(tr.TradeError):
         fd.parse_shapes("3-1")
+
+
+def test_a_player_list_sorts_into_sells_and_buys_per_league(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    sells, buys = fd.players_in(
+        ["WR3", "RB2", "Nobody Here"], ev.rosters[1], [p for r in (2, 3) for p in ev.rosters[r]], v
+    )
+    assert sells == {"wr3"} and buys == {"rb2"}
+    ideas = fd.find_trades(v, ev, syn.market(v), fd.Filters(players=["WR3", "RB2"]))
+    assert ideas and all("wr3" in i.analysis.give.players or "rb2" in i.analysis.get.players for i in ideas)
+    assert fd.find_trades(v, ev, syn.market(v), fd.Filters(players=["Nobody Here"])) == []
+
+
+def test_a_sell_list_skips_names_not_on_the_roster_and_never_widens_to_everything(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    notes: list[str] = []
+    ideas = fd.find_trades(v, ev, syn.market(v), fd.Filters(give=["WR3", "Somebody Else"]), notes=notes)
+    assert ideas and all("wr3" in i.analysis.give.players for i in ideas)
+    assert notes == ["not on your roster here, skipped: Somebody Else"]
+    assert fd.find_trades(v, ev, syn.market(v), fd.Filters(give=["Somebody Else"])) == []
+
+
+def test_targets_are_the_buy_list_or_the_weakest_spot(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    notes: list[str] = []
+    # Sam is thinnest at RB; his buy list names a WR on team 3 and one of his own players (skipped).
+    ideas = fd.find_trades(v, ev, syn.market(v), fd.Filters(targets=["WR5", "WR1"]), notes=notes)
+    assert ideas
+    for i in ideas:
+        got = i.analysis.get.players
+        assert "wr5" in got or any(p.startswith("rb") for p in got)
+    assert notes[0].startswith("targets: your buy list (WR5) and your weakest spot, RB")
+
+
+def test_list_names_never_match_by_last_name_alone(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    v.table.loc["wr1", "name"] = "Jonah Coleman"  # Sam's
+    v.table.loc["wr5", "name"] = "Keon Coleman"  # team 3's
+    others = [p for r in (2, 3) for p in ev.rosters[r]]
+    assert fd.players_in(["Jonah Coleman"], ev.rosters[1], others, v) == ({"wr1"}, set())
+    notes: list[str] = []
+    fd.find_trades(v, ev, syn.market(v), fd.Filters(targets=["Jonah Coleman"]), notes=notes)
+    assert "your buy list (none here)" in notes[0]
+
+
+def test_the_weakest_spot_skips_streamed_slots(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    v.needs[1] = [("DEF", -6.0, 3), ("RB", -2.0, 3), ("WR", 3.0, 1)]
+    notes: list[str] = []
+    fd.find_trades(v, ev, syn.market(v), fd.Filters(targets=[]), notes=notes)
+    assert notes[0].endswith("your weakest spot, RB (-2.0/wk)")
+
+
+def test_targeted_ideas_are_added_to_the_standard_ones_not_instead(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    m = syn.market(v)
+    standard = fd.find_trades(v, ev, m, fd.Filters(), top=3)
+    aimed = fd.find_trades(v, ev, m, fd.Filters(targets=["WR5"]), top=10)
+    merged = fd.merge_targeted(standard, aimed)
+    assert merged[: len(standard)] == standard  # the standard ideas first, all kept
+    assert all(i.target for i in merged[len(standard) :])  # every extra one says what it targets
+    assert len(merged) == len(
+        {(i.analysis.partner, tuple(i.analysis.give.players), tuple(i.analysis.get.players)) for i in merged}
+    )
+    assert any(i.target.startswith(("buy list: WR5", "weakest spot: RB")) for i in aimed)
+
+
+def test_every_buy_list_name_keeps_its_best_ideas(monkeypatch):
+    v = syn.view()
+    ev = syn.evaluator(v, monkeypatch)
+    m = syn.market(v)
+    ideas = fd.find_trades(v, ev, m, fd.Filters(targets=["WR5", "RB6"]), top=200)
+    picked = fd.pick_targeted(ideas)
+    for name in ("WR5", "RB6"):
+        have = [i for i in ideas if name in i.target]
+        kept = [i for i in picked if name in i.target]
+        assert len(kept) == min(len(have), fd.PER_BUY_TARGET)
+    assert sum(1 for i in picked if i.target.startswith("weakest")) <= fd.WEAKEST_SPOT_IDEAS
