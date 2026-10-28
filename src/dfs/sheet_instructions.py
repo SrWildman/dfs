@@ -172,10 +172,12 @@ _WEEK_ROWS: list[tuple[str, str]] = [
     (
         "Mon / Tue: close the week",
         "Export your contest history from DraftKings, and download each contest's standings (DraftKings only "
-        "keeps them about two weeks). Then run: dfs week close. It finds the newest history export in "
-        "Downloads (or pass --csv <file>), reconciles Cash and GPP results into Bankroll and Season, keeps "
-        "your downloads, fills a blank Cash Line in Results, rebuilds Contests and scores the week's "
-        "projections into Model Check. If the stats are not posted yet it says so; run dfs results update a "
+        "keeps them about two weeks). Then run: dfs week close --research. It finds the newest history "
+        "export in Downloads (or pass --csv <file>), reconciles Cash and GPP results into Bankroll and "
+        "Season, keeps your downloads, fills a blank Cash Line in Results, rebuilds Contests and scores the "
+        "week's projections into Model Check. With --research it then runs every study (the weekly research "
+        "reruns, up to about 45 minutes, unattended) and prints a short summary to paste to planning; plain "
+        "dfs week close skips them. If the stats are not posted yet it says so; run dfs results update a "
         "day later.",
     ),
 ]
