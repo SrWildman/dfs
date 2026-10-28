@@ -91,6 +91,11 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
 
     consensus_check.archive_ours(lg.name, view.ros.summary)
     run.check = consensus_check.score(lg.name, lg.scoring, lg.season, lg.last_scored_week, view.table).line()
+    from dfs.season_long import lineups as lu
+
+    run.plan = lu.plan(view, ev)
+    run.alerts = lu.check(view, ev, _news())
+    run.streams = lu.streams(view, ev)
     if waive:
         from dfs.season_long import waivers as wv
 
@@ -104,6 +109,22 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
     if lg.chopped:
         run.notes.append("Chopped: last man standing; the lowest score each week is eliminated.")
     return run
+
+
+_NEWS: list = []
+
+
+def _news():
+    """ESPN's game-day injury feed (the one DFS late swap reads), once per command; None when unreachable."""
+    from dfs.late_swap_news import NewsError, fetch_news
+
+    if not _NEWS:
+        try:
+            _NEWS.append(fetch_news())
+        except NewsError as e:
+            _say(f"ESPN's injury feed could not be read ({e}); the check uses Sleeper's statuses only.")
+            _NEWS.append(None)
+    return _NEWS[0]
 
 
 def _table():
@@ -315,6 +336,72 @@ def season_waivers(
         runs.append(run)
     if client is not None and runs:
         _print([f"[sheet] {ss.write_waivers(client, runs)}"])
+
+
+@season_app.command("lineups")
+def season_lineups(
+    league: str = typer.Option(None, "--league", help=LEAGUE_HELP),
+    all_leagues: bool = typer.Option(False, "--all", help=ALL_HELP + " (the default)."),
+    no_sheet: bool = typer.Option(False, "--no-sheet", help="Print only; write nothing."),
+    sheet_id: str = typer.Option(None, "--sheet-id", help="A Season sheet other than season.toml's."),
+) -> None:
+    """This week's recommended lineup per league: each starter's floor-ceiling, close calls decided by the
+    matchup (win probability, the median game, or survival in a chopped league), K/DEF streams. Sam sets them
+    in Sleeper by hand; nothing is written to Sleeper. Writes My Teams."""
+    from dfs.season_long import lineups as lu
+    from dfs.season_long import sheet_season as ss
+
+    cfg = _config()
+    chosen = _leagues(cfg, league, all_leagues, default_all=True)
+    client = None if no_sheet else _client(cfg, sheet_id)
+    table = _table()
+    runs = []
+    for lc in chosen:
+        run = _run(lc, cfg, table, find=False, waive=False)
+        lines = lu.plan_lines(run.view, run.plan)
+        for pos, picks in run.streams.items():
+            lines.append(f"  stream {pos}: " + ", ".join(
+                f"{n if n.startswith('yours') else run.view.name(n)} {w}" for n, w in picks))  # fmt: skip
+        lines += [
+            f"  {a.cue} {a.slot} {a.player}: {a.reason}" + (f" -> {a.swap}" if a.swap else "")
+            for a in run.alerts
+        ]
+        _print(lines)
+        runs.append(run)
+    if client is not None and runs:
+        if len(runs) < len([lc for lc in cfg.leagues if lc.platform == "sleeper"]):
+            _say("Only some leagues ran: My Teams keeps the last full sync (run with --all to rewrite it).")
+        else:
+            _print([f"[sheet] {ss.write_my_teams(client, runs)}"])
+
+
+@season_app.command("check")
+def season_check(
+    league: str = typer.Option(None, "--league", help=LEAGUE_HELP),
+    all_leagues: bool = typer.Option(False, "--all", help=ALL_HELP + " (the default)."),
+) -> None:
+    """The Sunday check across every league: your lineups as set in Sleeper against byes, empty slots and
+    OUT / Doubtful / Questionable (Sleeper's status plus ESPN's game-day feed), each with the swap to make.
+    Read-only: writes nothing anywhere."""
+    from dfs.season_long import league_view, objective
+    from dfs.season_long import lineups as lu
+
+    cfg = _config()
+    table = _table()
+    clean = []
+    for lc in _leagues(cfg, league, all_leagues, default_all=True):
+        view = league_view.build(lc, cfg, table)
+        alerts = lu.check(view, objective.Evaluator(view), _news())
+        if not alerts:
+            clean.append(lc.name)
+        for a in alerts:
+            mark = "[red]SWAP[/red]" if a.cue == "SWAP" else "[yellow]LOOK[/yellow]"
+            swap = f" -> {escape(a.swap)}" if a.swap else ""
+            console.print(
+                f"{mark} {escape(lc.name)} {escape(a.slot)} {escape(a.player)}: {escape(a.reason)}{swap}"
+            )
+    if clean:
+        console.print(f"[green]ok[/green] {', '.join(clean)}: every starter is set, playing and healthy")
 
 
 @season_app.command("trade")

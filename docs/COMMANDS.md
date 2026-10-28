@@ -341,6 +341,26 @@ Sync every league from Sleeper, rebuild values and trade ideas, and write the Se
 | `--no-sheet` | Print only; write nothing. |
 | `--sheet-id STR` | A Season sheet other than season.toml's. |
 
+### `dfs season lineups`
+
+This week's recommended lineup per league: each starter's floor-ceiling, close calls decided by the matchup (win probability, the median game, or survival in a chopped league), K/DEF streams. Sam sets them in Sleeper by hand; nothing is written to Sleeper. Writes My Teams.
+
+| Option | What it does |
+|---|---|
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--all` | Every league in season.toml. (the default). |
+| `--no-sheet` | Print only; write nothing. |
+| `--sheet-id STR` | A Season sheet other than season.toml's. |
+
+### `dfs season check`
+
+The Sunday check across every league: your lineups as set in Sleeper against byes, empty slots and OUT / Doubtful / Questionable (Sleeper's status plus ESPN's game-day feed), each with the swap to make. Read-only: writes nothing anywhere.
+
+| Option | What it does |
+|---|---|
+| `--league STR` | A league's short name from season.toml (e.g. Bourbon). |
+| `--all` | Every league in season.toml. (the default). |
+
 ### `dfs season waivers`
 
 Free agents ranked by what each adds to your team (the drop that pays for him, this week apart), with a FAAB bid guide from the league's own claims, handcuffs to stash, and a chopped league's bid plan. Writes the Waivers tab (sync also does).

@@ -81,8 +81,9 @@ IDEAS_HEADER = [
 IDEAS_HEADER_ROW = BOX_FIRST_ROW + len(BOX_FIELDS) + 2
 
 OVERVIEW_HEADER = [
-    "League", "Sleeper league", "Kind", "Record", "Standing", "Team value rank", "Odds", "Biggest need",
-    "Free move first", "Best trade idea", "Ours vs market", "Note",
+    "League", "Sleeper league", "Kind", "Record", "Standing", "Team value rank", "Odds", "This week",
+    "Lineup alerts", "Biggest need", "Free move first", "Best pickup", "Best trade idea", "Ours vs market",
+    "Note",
 ]  # fmt: skip
 MEDIAN_NOTE = "Plays a second game each week against the league median: weekly points count double."
 
@@ -116,6 +117,9 @@ class LeagueRun:
     pickups: list = field(default_factory=list)  # waivers.Pickup, best first
     cuffs: list = field(default_factory=list)  # waivers.handcuffs
     chop: object = None  # waivers.ChopPlan in a chopped league
+    plan: object = None  # lineups.Plan for the coming week
+    alerts: list = field(default_factory=list)  # lineups.Alert, the Sunday check
+    streams: dict = field(default_factory=dict)  # lineups.streams
 
 
 def _standing(view: LeagueView, rid: int) -> int:
@@ -272,8 +276,11 @@ def overview_rows(runs: list[LeagueRun]) -> list[list]:
                 standing,
                 f"{_value_ranks(run)[me]} of {len(lg.alive_teams())}",
                 odds,
+                this_week_text(run),
+                alerts_text(run),
                 f"{need[0][0]} {need[0][1]:+.1f}/wk" if need and need[0][1] < 0 else "none",
                 free_move_text(run),
+                pickup_text(run),
                 idea,
                 run.check,
                 note,
@@ -303,52 +310,97 @@ class Block:
     header_rows: list[int]
 
 
+def this_week_text(run: LeagueRun) -> str:
+    p = run.plan
+    if p is None:
+        return ""
+    if run.view.league.chopped:
+        return f"survive Week {p.week} {_pct(p.survive_prob)}; {p.mean:.0f} pts"
+    parts = [f"win {_pct(p.win_prob)} vs {p.opponent}"] if p.opponent else []
+    if not math.isnan(p.median_prob):
+        parts.append(f"above the median {_pct(p.median_prob)}")
+    return "; ".join(parts + [f"{p.mean:.0f} pts"])
+
+
+def alerts_text(run: LeagueRun) -> str:
+    if not run.alerts:
+        return "none"
+    return "; ".join(f"{a.cue} {a.slot} {a.player}: {a.swap or a.reason}" for a in run.alerts)
+
+
+def pickup_text(run: LeagueRun) -> str:
+    if not run.pickups:
+        return "none"
+    p = run.pickups[0]
+    b = p.bid
+    bid = f"bid ${b.low}-{b.high}" if b.comps else "no comparable bids"
+    return (
+        f"add {run.view.name(p.player_id)} for {run.view.name(p.drop) if p.drop else 'an open spot'} ({bid})"
+    )
+
+
+MY_TEAMS_HEADER = [
+    "Slot", "Player", "Pos", "NFL", "Status", "This week", "Floor-ceiling", "ROS", "ROS weighted", "Market",
+    "Close call",
+]  # fmt: skip
+
+
 def my_teams_block(runs: list[LeagueRun]) -> Block:
     rows: list[list] = []
     titles, headers = [], []
     for run in runs:
         v, lg = run.view, run.view.league
         me = lg.me
-        week = lg.remaining_weeks[0] if lg.remaining_weeks else None
-        lineup = next((w for w in run.ev.lineups(me.players) if w.week == week), None)
-        slot_of = {pid: lg.slots[j] for j, pid in (lineup.starters.items() if lineup else [])}
+        s = v.ros.summary
         titles.append(len(rows) + 1)
         rows.append([f"{lg.name}: {me.label} ({lg.title})"])
         rows.append([f"Needs: {needs_text(run, me.roster_id)}. Free move first: {free_move_text(run)}."])
+        if run.plan is not None:
+            rows.append(
+                [f"Week {run.plan.week}: {this_week_text(run)}; close calls decided by {run.plan.objective}."]
+            )
+        if run.alerts:
+            rows.append([f"Lineup check: {alerts_text(run)}"])
+        for pos, picks in (run.streams or {}).items():
+            listed = ", ".join(
+                f"{name if name.startswith('yours') else v.name(name)} {w}" for name, w in picks
+            )
+            rows.append([f"Stream {pos} (next weeks): {listed}"])
         headers.append(len(rows) + 1)
-        rows.append(
-            [
-                f"Week {week} slot",
-                "Player",
-                "Pos",
-                "NFL",
-                "Status",
-                f"Wk {week}",
-                "ROS",
-                "ROS weighted",
-                "Market",
-            ]
-        )
-        s = v.ros.summary
-        roster = s.reindex(me.players).sort_values("ros_weighted", ascending=False)
-        order = sorted(
-            roster.index, key=lambda p: (p not in slot_of, lg.slots.index(slot_of[p]) if p in slot_of else 0)
-        )
-        for pid in order:
-            r = roster.loc[pid]
+        rows.append(MY_TEAMS_HEADER)
+        starters = run.plan.starters if run.plan is not None else []
+        for st_ in starters:
+            pid = st_.player_id
+            r = s.loc[pid] if pid in s.index else None
+
+            def col(name: str, r=r) -> object:
+                return r[name] if r is not None else ""
+
             rows.append(
                 [
-                    slot_of.get(pid, "bench"),
-                    r["name"],
-                    r["position"],
-                    r["team"],
-                    r["injury_status"],
-                    "" if pd.isna(r["next_week"]) else round(float(r["next_week"]), 1),
-                    r["ros_pts"],
-                    r["ros_weighted"],
+                    st_.slot,
+                    v.name(pid) if pid else "(empty)",
+                    col("position"),
+                    col("team"),
+                    col("injury_status"),
+                    round(st_.pts, 1),
+                    f"{st_.floor:.0f}-{st_.ceiling:.0f}" if pid else "",
+                    col("ros_pts"),
+                    col("ros_weighted"),
                     round(float(run.market.consensus.get(pid, 0.0)), 1),
+                    st_.close,
                 ]
             )
+        started = {x.player_id for x in starters}
+        bench = s.reindex([p for p in me.players if p not in started]).sort_values(
+            "ros_weighted", ascending=False
+        )
+        for pid, r in bench.iterrows():
+            rows.append([
+                "bench", r["name"], r["position"], r["team"], r["injury_status"],
+                "" if pd.isna(r["next_week"]) else round(float(r["next_week"]), 1), "", r["ros_pts"],
+                r["ros_weighted"], round(float(run.market.consensus.get(pid, 0.0)), 1), "",
+            ])  # fmt: skip
         rows.append([""])
     return Block(rows, titles, headers)
 
