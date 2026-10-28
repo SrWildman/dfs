@@ -65,6 +65,11 @@ def _ensure_tabs(client: SheetsClient) -> None:
     for tab in (*st.VISIBLE_TABS, *st.RAW_TABS):
         if not client.tab_exists(tab):
             client.write_tab(tab, [[""]])
+    # Grow the raw tabs to their full width BEFORE the League / Players formulas are written: a later sync
+    # that had to grow the grid itself made Sheets shift every reference past the old edge (AA..AE became
+    # AF..AJ on 2026-10-28, when the activity columns took SeasonTeamsRaw past column Z).
+    for tab, columns in ((st.TEAMS_RAW, st.TEAM_COLUMNS), (st.PLAYERS_RAW, st.PLAYER_COLUMNS)):
+        client.ensure_column_capacity(tab, len(columns))
     _, _, _, family, _ = _style()
     for i, tab in enumerate(st.VISIBLE_TABS):
         client.set_tab_properties(tab, index=i, color=family["decide"])
