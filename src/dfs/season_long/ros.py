@@ -16,7 +16,8 @@ two naive baselines, the season average and the last-3 average.
 
 **Availability.** A bye week is 0 (a team plays week t when Sleeper projects it an opponent). `Out` is 0 this
 week, `Doubtful` this week times `DOUBTFUL_FACTOR`; IR / PUP / NFI / suspended are 0 for
-`ir_weeks_out` weeks (season.toml). A player with no NFL team is 0.
+`ir_weeks_out` weeks (season.toml). A player with no NFL team is 0, and so is one Sleeper projects in no
+remaining week (a backup's one big game is not a rate).
 
 **Spread.** For the chopped-league simulation, each week's points carry a standard deviation
 `sd = a_pos + b_pos * points`, fitted per position on this season's weekly misses of Sleeper's projections
@@ -458,7 +459,11 @@ def build_ros(
             else:
                 pw = proj_w[w].get(pid, np.nan) if w in proj_w.columns else np.nan
                 if np.isnan(pw):
-                    pts = season_rate if n else 0.0
+                    # Sleeper projects everyone with a role: a week it skips counts only for a player it
+                    # projects in other weeks (his blended rate); a backup it never projects is 0.
+                    row = proj_w.loc[pid] if pid in proj_w.index else None
+                    fwd = float(row.mean()) if row is not None and row.notna().any() else np.nan
+                    pts = 0.0 if np.isnan(fwd) else (a * season_rate + (1 - a) * fwd if n else fwd)
                 else:
                     pts = a * season_rate + (1 - a) * pw if n else pw
                 pts *= availability(meta["injury_status"], w, first, ir_weeks_out)

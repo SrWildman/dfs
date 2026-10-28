@@ -57,6 +57,8 @@ def build(lc: LeagueConfig, cfg: SeasonLongConfig, table: pd.DataFrame | None = 
     if lc.platform != "sleeper":
         raise sl.SleeperError(f"{lc.name}: {lc.platform} leagues come in phase 2; only Sleeper syncs today.")
     league = sl.load_league(lc.name, lc.league_id, lc.username)
+    if lc.playoff_week_start and not league.playoff_week_start:
+        league.playoff_week_start = lc.playoff_week_start
     table = ros.player_table(sl.fetch_players()) if table is None else table
     result = ros.build_ros(league, table, ir_weeks_out=cfg.ir_weeks_out, playoff_weight=cfg.playoff_weight)
     positions = positions_of(table)

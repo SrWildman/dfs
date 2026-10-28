@@ -1788,6 +1788,13 @@ class SheetsClient:
             ]
         sheet.batch_update({"requests": [{"addProtectedRange": {"protectedRange": protected_range}}]})
 
+    def rename_tab(self, old: str, new: str) -> None:
+        """Rename a tab (the Season sheet's blank `Sheet1` becomes Overview)."""
+        _, ws = self._ws(old)
+        ws.update_title(new)
+        self._ws_cache.pop(old, None)
+        self._ws_cache[new] = ws
+
     def set_tab_properties(
         self,
         tab_name: str,

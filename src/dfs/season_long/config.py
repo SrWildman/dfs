@@ -29,6 +29,11 @@ class LeagueConfig(BaseModel):
     platform: Literal["sleeper", "espn", "yahoo"] = "sleeper"
     league_id: str
     username: str
+    # When Sleeper's settings have no playoff start (Mega's say 0), the week its playoffs start.
+    playoff_week_start: int | None = Field(None, ge=1, le=18)
+    # What one FAAB dollar is worth in this league, in team-value points; overrides the one fitted from the
+    # league's own winning bids (`faab.py`). Not used in a chopped league, where FAAB is simulated.
+    faab_point_value: float | None = Field(None, ge=0.0)
 
 
 class SeasonLongConfig(BaseModel):

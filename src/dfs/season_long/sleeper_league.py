@@ -122,6 +122,17 @@ def fetch_transactions(league_id: str, week: int, *, final: bool) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
+def fetch_matchups(league_id: str, week: int, *, final: bool) -> list[dict]:
+    """One record per roster: `matchup_id` (a future week's is the schedule), `starters`, `points`."""
+    url = f"{API}/league/{league_id}/matchups/{week}"
+    data = cached_get(
+        url,
+        CACHE_DIR / "leagues" / league_id / f"matchups-wk{week:02d}.json",
+        None if final else PROJECTIONS_MAX_AGE_S,
+    )
+    return data if isinstance(data, list) else []
+
+
 @dataclass
 class Team:
     roster_id: int

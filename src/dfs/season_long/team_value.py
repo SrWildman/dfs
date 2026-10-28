@@ -172,25 +172,65 @@ class Survival:
     chop_now: dict[int, float]  # P(chopped this coming week)
 
 
-def survival(teams: dict[int, list[WeekLineup]], decay: float, draws: int, seed: int = 7) -> Survival:
-    """Monte Carlo of the remaining chops. `teams` maps each ALIVE roster to its week lineups (same weeks)."""
+@dataclass
+class Pickups:
+    """The chopped rosters going to waivers (`objective.pickup_gains` builds it).
+
+    `gain[t, c, k, i]`: what team t's lineup gains in week i from adding team c's k-th best player;
+    `faab[t]`: each alive team's FAAB; `price[k]`: what the k-th best player of a chopped roster has cost in
+    this league's own bids. Each pick goes to a surviving team with probability in proportion to its
+    FAAB + $1, which then pays the price (never more than it has)."""
+
+    gain: np.ndarray
+    faab: np.ndarray
+    price: np.ndarray
+
+
+def survival(
+    teams: dict[int, list[WeekLineup]],
+    decay: float,
+    draws: int,
+    seed: int = 7,
+    pickups: Pickups | None = None,
+    normals: np.ndarray | None = None,
+) -> Survival:
+    """Monte Carlo of the remaining chops. `teams` maps each ALIVE roster to its week lineups (same weeks).
+
+    `normals` (draws x weeks x teams) lets two calls share their random numbers, so the difference between two
+    rosters is the rosters, not the noise; `pickups` hands each chopped roster's best players to survivors."""
     ids = sorted(teams)
     weeks = sorted({w.week for wl in teams.values() for w in wl})
     rng = np.random.default_rng(seed)
     mean = np.array([[{w.week: w.value for w in teams[t]}.get(wk, 0.0) for t in ids] for wk in weeks])
     sd = np.array([[{w.week: w.sd for w in teams[t]}.get(wk, 0.0) for t in ids] for wk in weeks])
+    if normals is None:
+        normals = rng.standard_normal((draws, len(weeks), len(ids)))
+    draws = normals.shape[0]
     alive = np.ones((draws, len(ids)), dtype=bool)
     alive_after = np.zeros((len(weeks), len(ids)))
+    boost = np.zeros((draws, len(ids), len(weeks)))
+    faab = np.tile(pickups.faab.astype(float), (draws, 1)) if pickups is not None else None
+    every = np.arange(draws)
     for i in range(len(weeks)):
         if alive.sum(axis=1).max() <= 1:
             alive_after[i] = alive.mean(axis=0)
             continue
-        score = mean[i] + sd[i] * rng.standard_normal((draws, len(ids)))
+        score = mean[i] + boost[:, :, i] + sd[i] * normals[:, i, :]
         score = np.where(alive, score, np.inf)
         lowest = np.argmin(score, axis=1)
         still = alive.sum(axis=1) > 1
-        alive[np.arange(draws)[still], lowest[still]] = False
+        alive[every[still], lowest[still]] = False
         alive_after[i] = alive.mean(axis=0)
+        if pickups is None or i + 1 >= len(weeks):
+            continue
+        for k in range(pickups.gain.shape[2]):
+            weight = np.where(alive, faab + 1.0, 0.0)
+            cum = np.cumsum(weight, axis=1)
+            pick = rng.random(draws) * cum[:, -1]
+            winner = np.minimum((cum < pick[:, None]).sum(axis=1), len(ids) - 1)
+            ok = still & alive[every, winner]
+            boost[every[ok], winner[ok], i + 1 :] += pickups.gain[winner[ok], lowest[ok], k, i + 1 :]
+            faab[every[ok], winner[ok]] -= np.minimum(pickups.price[k], faab[every[ok], winner[ok]])
     weights = decay ** np.arange(len(weeks))
     value = {t: float((alive_after[:, j] * weights).sum()) for j, t in enumerate(ids)}
     return Survival(

@@ -262,6 +262,12 @@ def answer_to_args(param: MissingParam, answer: str) -> list[str]:
 # tests/test_launcher.py fails if a command in docs/COMMANDS.md has no label here (a new command needs one).
 MORE_LABELS = {
     "dfs status": "Config, sheet and how fresh each data source is",
+    "dfs season sync": "Season leagues: sync from Sleeper, values, trade ideas, Season sheet",
+    "dfs season trades": "Season leagues: find realistic trades (get / give / keep / partner)",
+    "dfs season trade": "Season leagues: analyze one trade (+ FAAB on either side)",
+    "dfs season ros": "Season leagues: rest-of-season points, or the accuracy check",
+    "dfs season setup": "Season leagues: build the Season sheet's tabs",
+    "dfs season doctor": "Season leagues: check the Season sheet's structure",
     "dfs doctor": "Check the sheet's structure",
     "dfs pool add": "Add a player to your pool",
     "dfs pool remove": "Remove a player from your pool",
@@ -343,6 +349,12 @@ MORE_TOPICS: list[tuple[str, str, str, tuple[str, ...]]] = [
         "Everyday extras",
         "Top plays, clear your pool, odds snapshot",
         ("Also used most weeks",),
+    ),
+    (
+        "l",
+        "Season-long leagues",
+        "Your Sleeper leagues: trades, values, the Season sheet",
+        ("Reference: season-long leagues and the Season sheet (only when needed)",),
     ),
     (
         "b",
