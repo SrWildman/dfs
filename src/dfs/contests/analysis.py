@@ -444,11 +444,19 @@ def summary_lines(result: Analysis) -> list[str]:
                 f"  {rec.format}: {rec.n_entries} entries, expected cash line in an average week "
                 f"{rec.expected_cash_line:.1f}" + (f" ({rec.note})" if rec.note else "")
             )
-        ranked = tough.series_table.dropna(subset=["toughness"])
-        ranked = ranked[ranked["n"] >= 5].sort_values("toughness", ascending=False)
-        for label, sub in (("toughest", ranked.head(3)), ("softest", ranked.tail(3)[::-1])):
-            for rec in sub.itertuples(index=False):
-                lines.append(f"  {label}: {rec.series} ({rec.format}) {rec.toughness:+.1f} pts, n={rec.n}")
+        if toughness.no_signal(tough.series_table, tough.k):
+            lines.append(
+                f"  {toughness.NO_SIGNAL}: the leave-one-week-out fit shrinks every series to its format "
+                f"(k={tough.k:g}), so no series reads tougher or softer than its format"
+            )
+        else:
+            ranked = tough.series_table.dropna(subset=["toughness"])
+            ranked = ranked[ranked["n"] >= 5].sort_values("toughness", ascending=False)
+            for label, sub in (("toughest", ranked.head(3)), ("softest", ranked.tail(3)[::-1])):
+                for rec in sub.itertuples(index=False):
+                    lines.append(
+                        f"  {label}: {rec.series} ({rec.format}) {rec.toughness:+.1f} pts, n={rec.n}"
+                    )
     if len(result.h2h_bands):
         lines.append(
             "H2H by score band: "

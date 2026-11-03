@@ -72,9 +72,27 @@ def test_the_series_table_has_one_row_per_series_with_roi_and_cash_rate(tables):
     assert not series["format"].isin(["Freeroll", "Showdown", "Private", "Other"]).any()
 
 
-def test_a_series_toughness_note_explains_why_gaps_replace_the_engines_number(tables):
-    text = " ".join(_text(sc.build_layout(tables, SEASON)))
-    assert "not separable yet" in text and "same weeks" in text
+def test_a_degenerate_toughness_fit_says_no_signal_yet(tables):
+    """Plan D item 6: every series shrunk to its format reads "no signal yet", never a column of +0.0."""
+    import dataclasses
+
+    flat = dataclasses.replace(tables, tough_series=tables.tough_series.assign(toughness=0.0))
+    text = " ".join(_text(sc.build_layout(flat, SEASON)))
+    assert "Toughness: no signal yet" in text and "same weeks" in text
+    real = dataclasses.replace(tables, tough_series=tables.tough_series.assign(toughness=1.5))
+    text = " ".join(_text(sc.build_layout(real, SEASON)))
+    assert "no signal yet" not in text and "expected cash line for each series" in text
+
+
+def test_no_signal_reads_k_at_its_cap_or_flat_toughness():
+    import pandas as pd
+
+    from dfs.contests import toughness as t
+
+    assert t.no_signal(pd.DataFrame({"toughness": [0.0, 0.01, None]}))
+    assert t.no_signal(pd.DataFrame({"toughness": [2.0, -1.0]}), k=max(t.GRID_K))
+    assert not t.no_signal(pd.DataFrame({"toughness": [2.0, -1.0]}), k=10.0)
+    assert t.no_signal(pd.DataFrame())
 
 
 def test_the_cash_line_gap_is_against_the_other_series_of_the_same_format_in_the_same_week():

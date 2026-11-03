@@ -288,3 +288,20 @@ def report_lines(
     out.append("")
     out.append("Arithmetic on your own log and your own [contest_plan] settings, not advice.")
     return out
+
+
+def sheet_budget(cfg, *, warn=print) -> tuple[float | None, str]:  # noqa: ANN001 - dfs.config.Config
+    """The Bankroll tab's Weekly Budget on the live week's sheet, and where it came from (read only). Kept out
+    of `dfs.contests`, which holds no sheet code."""
+    from dfs.sheet_stakes import _cell
+    from dfs.sheets import SheetsClient, SheetsError
+    from dfs.week import BANKROLL_WEEKLY_BUDGET_CELL
+
+    try:
+        client = SheetsClient(cfg.google_sheets)
+        title, _ = client.describe()
+        value = _cell(client, cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
+    except SheetsError as e:
+        warn(f"Could not read the Weekly Budget ({e}); planning without a total cap.")
+        return None, "no sheet"
+    return value, f"{title}'s {cfg.bankroll.tab}!{BANKROLL_WEEKLY_BUDGET_CELL}"

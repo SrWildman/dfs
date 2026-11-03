@@ -181,7 +181,7 @@ def plan(
         raise typer.Exit(code=1)
     source = "--budget"
     if budget is None and not no_sheet:
-        budget, source = _sheet_budget(cfg)
+        budget, source = contest_plan.sheet_budget(cfg, warn=console.print)
     opponents_path = CONTESTS_DIR / "h2h_opponents.csv"
     opponents = pd.read_csv(opponents_path) if opponents_path.exists() else None
     lines = contest_plan.report_lines(
@@ -195,21 +195,3 @@ def plan(
     )
     for line in lines:
         console.print(escape(line), highlight=False)
-
-
-def _sheet_budget(cfg) -> tuple[float | None, str]:  # noqa: ANN001 - dfs.config.Config
-    """The Bankroll tab's Weekly Budget on the live week's sheet, and where it came from."""
-    from dfs.sheet_stakes import _cell
-    from dfs.sheets import SheetsClient, SheetsError
-    from dfs.week import BANKROLL_WEEKLY_BUDGET_CELL
-
-    try:
-        client = SheetsClient(cfg.google_sheets)
-        title, _ = client.describe()
-        value = _cell(client, cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
-    except SheetsError as e:
-        console.print(
-            f"[yellow]Could not read the Weekly Budget ({e}); planning without a total cap.[/yellow]"
-        )
-        return None, "no sheet"
-    return value, f"{title}'s {cfg.bankroll.tab}!{BANKROLL_WEEKLY_BUDGET_CELL}"
