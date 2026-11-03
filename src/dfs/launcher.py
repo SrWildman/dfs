@@ -278,6 +278,7 @@ MORE_LABELS = {
     "dfs results update": "Score the projections into Model Check",
     "dfs entries fill": "Fill DK's entries file: you pick each entry's lineup, then upload",
     "dfs entries print": "Print every lineup as Name (ID) for DK, and write a file",
+    "dfs entries record": "At lock: record what you entered, where, and which build it came from",
     "dfs go": "Sync, check the sheet and report what changed, in one go",
     "dfs edge": "Show the top leverage plays from the last sync",
     "dfs pool clear": "Clear your whole pool",

@@ -3660,6 +3660,89 @@ def entries_fill(
         )
 
 
+@entries_app.command("record")
+def entries_record(
+    csv: Path = typer.Option(
+        None,
+        "--csv",
+        help="Path to DraftKings' entries file (Edit entries), downloaded after you entered. Left out, the "
+        "newest one in your Downloads folder is used (found by its header row); with none, the Lineups tab "
+        "is read.",
+    ),
+    from_sheet: bool = typer.Option(
+        False, "--from-sheet", help="Read the Lineups tab even when an entries file is in Downloads."
+    ),
+    sheet_id: str = typer.Option(None, "--sheet-id", help="Read a different sheet instead of config.toml's."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the record; write no file."),
+) -> None:
+    """Record what you entered this week, at lock: every lineup, its contest(s), and which Suggested build it
+    came from (8 or more of its 9 players in one saved build of the week, any round) or "own".
+
+    Reads DK's entries file (download it from DraftKings' Edit entries after you have entered; Classic
+    main-slate entries only) or, with none, the Lineups tab (lineups only: the tab does not know the
+    contests). Writes `data/entered/<season>-wk<NN>.json` (re-running replaces it); `dfs week close` warns
+    when the week has none, and its cash post-mortem compares the entered cash lineup to the nearest
+    build. Never writes a sheet."""
+    from dfs import entered
+    from dfs import entries as ent
+    from dfs import sheet_dk_upload as dku
+    from dfs.nfl_calendar import current_season
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    week, season = _suggest_week(title), current_season()
+    console.print(f"Sheet: [bold]{title}[/bold] (Week {week})\n{url}\n")
+
+    path = None
+    if not from_sheet:
+        path, how = ent.resolve_entries_file(csv, Path(cfg.contests.downloads_dir).expanduser())
+        if path is None and csv is None:
+            console.print(f"[yellow]{how}: reading the Lineups tab instead (no contests).[/yellow]")
+        elif path is None:
+            console.print(f"[red]{how}.[/red]")
+            raise typer.Exit(code=1)
+    if path is not None:
+        console.print(f"Entries file: [bold]{path}[/bold]")
+        try:
+            parsed = ent.read_entries_file(path)
+        except (ent.EntriesFileError, OSError) as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            raise typer.Exit(code=1) from e
+        found = entered.file_week(parsed.players)
+        if found != (season, week):
+            seen = f"Week {found[1]} of {found[0]}" if found and found[1] else "no week"
+            console.print(
+                f"[red]{path.name} is for {seen}, not Week {week} of {season}.[/red] Download this week's "
+                "entries file from DraftKings (Edit entries), or pass --csv / --from-sheet."
+            )
+            raise typer.Exit(code=1)
+        kept, skipped = ent.classify_entries(parsed)
+        lineups = entered.from_entries(kept, parsed.players)
+        record = entered.make_record(season, week, f"entries file {path.name}", lineups, skipped=skipped)
+    else:
+        try:
+            sheet = dku.read_lineups(client, cfg.lineups.builder_tab)
+        except SheetsError as e:
+            console.print(f"[red]Sheets error:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        record = entered.make_record(season, week, f"Lineups tab of {title}", entered.from_sheet(sheet))
+    if not record.lineups:
+        console.print("[yellow]No entered lineup found: nothing to record.[/yellow]")
+        raise typer.Exit(code=1)
+    for line in entered.summary_lines(record):
+        console.print(escape(line), highlight=False, soft_wrap=True)
+    if dry_run:
+        console.print("[dim]Dry run: nothing was written.[/dim]")
+        return
+    out = entered.save(record)
+    console.print(f"[green]Recorded to {out}[/green]")
+
+
 @entries_app.command("print")
 def entries_print(
     csv: Path = typer.Option(
@@ -5412,6 +5495,7 @@ def week_close(
     _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
     _contest_plan_after_close(cfg, week)
+    _entered_record_warning(week)
     if research:
         _research_after_close(cfg, week)
 
@@ -5541,6 +5625,19 @@ def _contests_after_close(cfg: Config, csv: Path) -> None:
         )
     except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; never fail the close over this
         console.print(f"[yellow]Contests not updated ({e}); run `dfs contests update` later.[/yellow]")
+
+
+def _entered_record_warning(week: int | None) -> None:
+    """Warn when the closed week has no `dfs entries record` file (Plan D item 5). Never fails the close."""
+    from dfs import entered
+    from dfs.nfl_calendar import current_season, current_week
+
+    try:
+        text = entered.missing_warning(current_season(), week if week is not None else current_week())
+    except Exception:  # noqa: BLE001 - a warning only
+        return
+    if text:
+        console.print(f"\n[yellow]{escape(text)}[/yellow]")
 
 
 def _contest_plan_after_close(cfg: Config, week: int | None) -> None:

@@ -20,7 +20,7 @@ This is what most weeks look like. Everything below it is reference.
 | 1 | Tuesday/Wednesday: a new week starts | `dfs week new "<url-of-the-sheet-copy>"` | Points the CLI at a fresh copy of the template, carries your bankroll and Results forward, runs a full sync. Then check `dfs status`. |
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
 | 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy builds to Lineups drops one in); keep, lock, edit or drop builds there and run `dfs lineups suggest --iterate` to rebuild around your decisions. |
-| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`. |
+| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`. At lock, after entering, download the entries file again and run `dfs entries record` (what went where, and which Suggested build each lineup came from). |
 | 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close` | Reconciles Cash/GPP into Bankroll and Results from the newest contest-history export in Downloads (or `--csv <file>`), keeps your DraftKings downloads (history copy, standings files) and rebuilds the Contests tab, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
 
@@ -144,6 +144,17 @@ Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, an
 | `--csv PATH` | Path to a DraftKings entries file. Left out, the newest one in your Downloads folder is used (found by its header row) and the command says which. |
 | `--output / -o PATH` | Where to write the file (default: dk_lineups_<timestamp>.csv here). |
 | `--sheet-id STR` | Read a different sheet instead of config.toml's. |
+
+### `dfs entries record`
+
+Record what you entered this week, at lock: every lineup, its contest(s), and which Suggested build it came from (8 or more of its 9 players in one saved build of the week, any round) or "own".
+
+| Option | What it does |
+|---|---|
+| `--csv PATH` | Path to DraftKings' entries file (Edit entries), downloaded after you entered. Left out, the newest one in your Downloads folder is used (found by its header row); with none, the Lineups tab is read. |
+| `--from-sheet` | Read the Lineups tab even when an entries file is in Downloads. |
+| `--sheet-id STR` | Read a different sheet instead of config.toml's. |
+| `--dry-run` | Print the record; write no file. |
 
 ### `dfs export`
 

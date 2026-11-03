@@ -60,7 +60,9 @@ STANDARD_WEEK: list[tuple[str, str, str, str]] = [
         "Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download "
         "DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose "
         "each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes "
-        "the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`.",
+        "the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`. At lock, after "
+        "entering, download the entries file again and run `dfs entries record` (what went where, and which "
+        "Suggested build each lineup came from).",
     ),
     (
         "5",
@@ -100,6 +102,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs stacks",
             "dfs entries fill",
             "dfs entries print",
+            "dfs entries record",
             "dfs export",
             "dfs lineups late-swap",
             "dfs week close",
