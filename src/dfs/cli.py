@@ -28,6 +28,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from dfs import (
+    cash_postmortem,
     edge_finder_tab,
     late_swap_store,
     lineup_iterate,
@@ -4863,6 +4864,10 @@ def _run_suggest(
         console.print()
     for note in report.notes:
         console.print(f"[yellow]{note}[/yellow]")
+    # Plan D item 8b: double-up chalk and how many cash builds use him (display only)
+    cash_names = [[p.name for p in b.players] for b in report.builds if b.kind == "cash"]
+    for line in cash_postmortem.chalk_check(edge, cash_names):
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
     for name, took in report.phases.items():  # the search phases, between the two sheet-side groups
         phases[name] = (took, 0)
     for line in portfolio_lines:
@@ -5494,8 +5499,10 @@ def week_close(
     _keep_dk_files_before_scoring(cfg, csv)
     _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
-    _contest_plan_after_close(cfg, week)
-    _entered_record_warning(week)
+    closed = _closed_week(cfg, week)
+    _contest_plan_after_close(cfg, closed)
+    _entered_record_warning(closed)
+    _cash_postmortem_after_close(closed)
     if research:
         _research_after_close(cfg, week)
 
@@ -5627,13 +5634,46 @@ def _contests_after_close(cfg: Config, csv: Path) -> None:
         console.print(f"[yellow]Contests not updated ({e}); run `dfs contests update` later.[/yellow]")
 
 
+def _closed_week(cfg: Config, week: int | None) -> int | None:
+    """The week being closed: `--week`, else the connected sheet's title (None when neither can be read)."""
+    if week is not None:
+        return week
+    from dfs.week import parse_week_from_title
+
+    try:
+        return parse_week_from_title(SheetsClient(cfg.google_sheets).describe()[0])
+    except Exception:  # noqa: BLE001 - the steps that need it say they were skipped
+        return None
+
+
+def _cash_postmortem_after_close(week: int | None) -> None:
+    """The cash post-mortem for the week just closed (Plan D item 8): terminal, and the close report through
+    the recorded console. Appends to data/contests/cash_postmortem.csv. NEVER fails the close."""
+    from dfs import cash_postmortem
+    from dfs.nfl_calendar import current_season
+
+    console.print("")
+    if week is None:
+        console.print("[yellow]Cash post-mortem skipped (the closed week is not known).[/yellow]")
+        return
+    try:
+        lines = cash_postmortem.run(current_season(), week)
+    except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over this
+        console.print(f"[yellow]Cash post-mortem skipped ({escape(str(e))}).[/yellow]")
+        return
+    for line in lines:
+        console.print(escape(line), highlight=False, soft_wrap=True)
+
+
 def _entered_record_warning(week: int | None) -> None:
     """Warn when the closed week has no `dfs entries record` file (Plan D item 5). Never fails the close."""
     from dfs import entered
-    from dfs.nfl_calendar import current_season, current_week
+    from dfs.nfl_calendar import current_season
 
+    if week is None:
+        return
     try:
-        text = entered.missing_warning(current_season(), week if week is not None else current_week())
+        text = entered.missing_warning(current_season(), week)
     except Exception:  # noqa: BLE001 - a warning only
         return
     if text:
@@ -5653,7 +5693,7 @@ def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
     try:
         season = current_season()
         typed = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
-        closed = week if week is not None else contest_plan.last_week(typed, season)
+        closed = week if week is not None else contest_plan.last_week(typed, season)  # the log's last week
         if closed is None:
             return
         budget = _cell(SheetsClient(cfg.google_sheets), cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
