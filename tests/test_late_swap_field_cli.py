@@ -211,9 +211,11 @@ def test_state_live_with_espn_down_says_so_and_runs_as_today(state_cfg, capsys, 
     monkeypatch.setattr(live_scores, "fetch_scores", down)
     out = run(state_cfg, capsys, state="live")
     flat = " ".join(out.split())
-    assert "ESPN's scores could not be read" in flat and "running as today" in flat
+    assert "LIVE SCORES UNAVAILABLE: ESPN's scores could not be read" in flat
+    assert "PROJECTIONS ONLY" in flat
     assert "P(cash)" in out  # the fixed-line run still rates the swaps
-    assert late_swap_store.load().field_source == "field: projected"
+    saved = late_swap_store.load().field_source
+    assert saved.startswith("field: projected (live scores unavailable: ESPN's scores could not be read")
 
 
 def test_state_live_without_published_ownership_runs_as_today(state_cfg, capsys, monkeypatch):
@@ -222,8 +224,46 @@ def test_state_live_without_published_ownership_runs_as_today(state_cfg, capsys,
     monkeypatch.setattr(live_scores, "fetch_scores", lambda dates, **kw: _scores())
     monkeypatch.setattr(cli.store, "load_current", lambda name: edge().assign(**{"Own%": float("nan")}))
     out = run(state_cfg, capsys, state="live")
-    assert "no projected ownership has been published" in " ".join(out.split())
+    flat = " ".join(out.split())
+    assert "LIVE SCORES UNAVAILABLE: no projected ownership has been published" in flat
+    assert late_swap_store.load().field_source.startswith("field: projected (live scores unavailable")
+
+
+def test_state_live_before_any_kickoff_reads_nothing_and_runs_projected(state_cfg, capsys, monkeypatch):
+    from dfs import live_scores
+
+    def never(dates, **kw):
+        raise AssertionError("ESPN must not be read before a game starts")
+
+    monkeypatch.setattr(live_scores, "fetch_scores", never)
+    monkeypatch.setattr(cli.store, "load_current", lambda name: edge().assign(GameStart=LATE))
+    out = run(state_cfg, capsys, state="live")
+    assert "no game has started yet" in out and "UNAVAILABLE" not in out
     assert late_swap_store.load().field_source == "field: projected"
+
+
+def _state_passed(state_cfg, monkeypatch, args):
+    from typer.testing import CliRunner
+
+    seen = {}
+    monkeypatch.setattr(cli, "_load_config_or_exit", lambda: state_cfg)
+    monkeypatch.setattr(cli, "_run_late_swap", lambda cfg, **kw: seen.update(kw))
+    state_cfg.projection = SimpleNamespace(default="CalPts")
+    result = CliRunner().invoke(cli.app, ["lineups", "late-swap", *args])
+    assert result.exit_code == 0, result.output
+    return seen["state"], seen["field"]
+
+
+def test_late_swap_is_live_by_default(state_cfg, monkeypatch):
+    assert _state_passed(state_cfg, monkeypatch, []) == ("live", None)
+
+
+def test_state_projected_opts_out(state_cfg, monkeypatch):
+    assert _state_passed(state_cfg, monkeypatch, ["--state", "projected"]) == (None, None)
+
+
+def test_a_field_file_overrides_the_live_default(state_cfg, monkeypatch):
+    assert _state_passed(state_cfg, monkeypatch, ["--field", "auto"]) == (None, ["auto"])
 
 
 def test_field_and_state_together_are_refused(state_cfg, monkeypatch):
