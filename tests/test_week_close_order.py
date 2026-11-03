@@ -15,7 +15,8 @@ def test_the_dk_files_are_kept_before_model_check_is_scored_and_the_contests_ste
     monkeypatch.setattr(cli, "_contests_after_close", lambda *a, **k: calls.append("contests"))
     monkeypatch.setattr(cli, "_contest_plan_after_close", lambda *a, **k: calls.append("plan"))
     cli.week_close(csv=None, week=None)
-    assert calls == ["bankroll", "keep", "score", "contests", "plan"]  # the plan reads the log contests updated
+    # the plan line reads the log the contests step just updated
+    assert calls == ["bankroll", "keep", "score", "contests", "plan"]
 
 
 def test_the_plan_check_never_fails_the_close():
