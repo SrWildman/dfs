@@ -163,7 +163,9 @@ def test_gather_raw_quotes_the_saved_signal_records(monkeypatch, tmp_path):
             "AsOf": ["2026-10-21"],
         }
     )
-    table.to_csv(results_update.signal_table_path(2026), index=False)
+    path = results_update.signal_table_path(2026)  # under the test's own data dir (tests/conftest.py)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(path, index=False)
     monkeypatch.setattr(store, "load_current", lambda name: (_ for _ in ()).throw(FileNotFoundError(name)))
     monkeypatch.setattr(sheet_player_card, "_props", lambda e, w: ([], "No props pulled for week 7 yet."))
     e = edge().assign(Edge="USAGE↑", ProjPts=15.0, **{"xFP/G": 18.0})
