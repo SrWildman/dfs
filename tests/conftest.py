@@ -15,7 +15,13 @@ Two layers:
 - The guard: an audit hook (`sys.addaudithook`) fails any in-process write, create, rename or delete under
   the real `data/` while the tests run, naming the path. At the end of the session a snapshot of `data/`
   (or its absence) is compared too, which also sees child processes; a difference is printed loudly and
-  fails the run."""
+  fails the run.
+- **No test may open the network** (Plan D item 9): the same audit hook fails any `socket.connect` or
+  `socket.getaddrinfo` to anything but this machine (localhost, a Unix socket), naming the host. A test that
+  needs data from a service fakes the call; in the cloud a real call got a 403 and failed.
+
+The guard stays off outside a test's own body (`pytest_runtest_call`), so collection and fixtures that only
+import are unaffected; a fixture that reaches the network is caught by its test."""
 
 from __future__ import annotations
 
@@ -127,8 +133,28 @@ def _opens_for_write(args: tuple) -> bool:
     return bool((flags or 0) & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND))
 
 
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
+
+
+def _is_local(address: object) -> bool:
+    if isinstance(address, (str, bytes)):  # a Unix socket path
+        return True
+    host = address[0] if isinstance(address, tuple) and address else address
+    if isinstance(host, bytes):
+        host = host.decode(errors="replace")
+    return host is None or str(host).lower() in _LOCAL_HOSTS or str(host).startswith("127.")
+
+
 def _audit(event: str, args: tuple) -> None:
     if not _GUARD["on"]:
+        return
+    if event in ("socket.connect", "socket.getaddrinfo"):
+        address = args[1] if event == "socket.connect" else (args[0],)  # getaddrinfo: a host name
+        if not _is_local(address):
+            raise PermissionError(
+                f"a test tried to reach the network ({event} {address!r}); fake the call instead "
+                "(tests/conftest.py blocks every non-local connection)"
+            )
         return
     if event == "open":
         targets = [args[0]] if args and _opens_for_write(args) else []

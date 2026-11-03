@@ -80,3 +80,29 @@ def test_a_week_whose_history_was_moved_aside_says_so():
     assert "moved aside (_polluted_6.json)" in suggest_state.missing_history_note(6)
     assert suggest_state.missing_history_note(7) == ""
     assert "no `dfs lineups suggest` run" in suggest_state.missing_history_note(5)
+
+
+def test_a_test_cannot_reach_the_network():
+    import socket
+
+    with pytest.raises(PermissionError, match="reach the network"):
+        socket.getaddrinfo("api.sleeper.app", 443)
+    sock = socket.socket()
+    try:
+        with pytest.raises(PermissionError, match="reach the network"):
+            sock.connect(("93.184.216.34", 80))
+    finally:
+        sock.close()
+
+
+def test_local_sockets_are_allowed():
+    import socket
+
+    server = socket.socket()
+    try:
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        client = socket.create_connection(server.getsockname(), timeout=2)
+        client.close()
+    finally:
+        server.close()
