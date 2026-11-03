@@ -135,6 +135,7 @@ Also handy most weeks:
 | Command | Reach for it when... |
 |---|---|
 | `dfs` (no arguments) | you are not sure what to run: it shows where you are in the week and what makes sense next. |
+| `dfs week page` | you want the whole week on one page: today's steps (with the phrase to say and the command), each decision answered from what the tool already saved (contest plan, cash, GPP, unknowns, Sunday, season-long, last week) with its trust, and every command and phrase with when you last ran it. Read-only; rebuilt after `sync`, `lineups suggest`, `lineups late-swap`, `contests plan`, `season sync` / `check` and `week close`. |
 | `dfs status` / `dfs doctor` | which sheet am I on and how fresh is the data / has the sheet's structure drifted. |
 | `dfs go` | `sync` + `doctor` + what-changed, back to back. |
 | `dfs pool add\|remove\|list\|clear` | managing your pool without opening the sheet. |

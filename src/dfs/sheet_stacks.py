@@ -109,10 +109,12 @@ def tab_inputs(
 
 def write_stacks(client: SheetsClient, layout: Layout, tab: str = STACKS_TAB) -> str:
     """Write the rows, then style them. The tab is reset first (it is rebuilt from scratch every time)."""
+    from dfs import week_inputs
     from dfs.sheet_style import _HEADER_FMT, _PANEL_FMT, _TITLE_FMT, INK_MUTED, WHITE, _num
 
     last = max(len(layout.rows) + 5, 60)
     client.write_tab(tab, layout.rows)
+    week_inputs.save_stacks(layout)  # the Week page's top 3 (fail-soft)
     client.clear_notes(tab, f"A1:{LAST_COLUMN}{last}")
     client.format_range(
         tab,

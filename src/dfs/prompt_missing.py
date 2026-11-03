@@ -69,8 +69,42 @@ def install(command: Any) -> None:
     command._dfs_prompts_for_missing = True
 
 
+def _after_run(root: Any, argv: list[str], ok: bool) -> None:
+    """The run log line (`runlog.py`) and, after a command that changes what the Week page shows, a fresh
+    page (`week_page.after_command`). Never raises: neither may fail the command that just ran."""
+    try:
+        from dfs import runlog
+
+        command = runlog.command_from_args(root, argv)
+        if command is None:
+            return
+        runlog.record(command, ok)
+        if ok:
+            from dfs import week_page
+
+            week_page.after_command(command)
+    except Exception:  # noqa: BLE001
+        return
+
+
 class PromptingGroup(TyperGroup):
-    """A Typer group whose leaf commands ask for missing required parameters (see module docstring)."""
+    """A Typer group whose leaf commands ask for missing required parameters (see module docstring). The
+    top-level one is also the entry point that writes the run log (`runlog.py`)."""
+
+    def main(self, *args: Any, **kwargs: Any):
+        argv = kwargs["args"] if "args" in kwargs else (args[0] if args else None)
+        argv = list(sys.argv[1:] if argv is None else argv)
+        code = 0
+        try:
+            return super().main(*args, **kwargs)
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+            raise
+        except BaseException as e:
+            code = getattr(e, "exit_code", 1)
+            raise
+        finally:
+            _after_run(self, argv, code == 0)
 
     def resolve_command(self, ctx: Any, args: list[str]):
         name, command, rest = super().resolve_command(ctx, args)
