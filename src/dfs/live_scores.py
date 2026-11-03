@@ -1,5 +1,5 @@
 """Every started player's DraftKings points so far, from ESPN's public box scores: late swap's state with no
-download (`dfs lineups late-swap --state live`).
+download (`dfs lineups late-swap`, live by default once a game has started).
 
 `site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=YYYYMMDD` lists a day's games with their
 status (period and clock); `.../summary?event=<id>` holds each game's box score, player by player. Same public

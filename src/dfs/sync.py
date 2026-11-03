@@ -9,15 +9,18 @@ the whole run succeeding.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
-from dfs import perf
+import pandas as pd
+
+from dfs import perf, sync_guard
 from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheets import SheetsClient, SheetsError
 from dfs.sources import get_source
 from dfs.sources.base import SourceSkipped, SyncContext
-from dfs.store import record_failure, record_success, save
+from dfs.store import load_current, record_failure, record_success, save
 
 log = get_logger("sync")
 
@@ -28,6 +31,18 @@ class SourceResult:
     ok: bool
     rows: int | None
     error: str | None
+    # What the game-day guard kept instead of taking the feed (`sync_guard`), one line each.
+    notes: list[str] = field(default_factory=list)
+
+
+def _previous(name: str) -> pd.DataFrame | None:
+    """The source's last saved copy, for the guard; None when there is none or it cannot be read."""
+    if name not in sync_guard.POLICIES:
+        return None
+    try:
+        return load_current(name)
+    except (FileNotFoundError, OSError, ValueError, pd.errors.EmptyDataError):
+        return None
 
 
 def run_sync(
@@ -36,7 +51,11 @@ def run_sync(
     ctx: SyncContext,
     *,
     upload: bool = True,
+    now: datetime | None = None,
 ) -> list[SourceResult]:
+    """Fetch, guard, save and upload each source in order. The guard (`sync_guard.guard`) merges a feed
+    with the last saved copy first, so a game-day sync never blanks a started player or a whole column."""
+    now = now or datetime.now(UTC)
     client = SheetsClient(cfg.google_sheets) if upload else None
     results: list[SourceResult] = []
 
@@ -51,6 +70,10 @@ def run_sync(
         try:
             with perf.phase(f"fetch {name}"):
                 df = source.fetch(ctx)
+            guarded = sync_guard.guard(name, df, _previous(name), week=ctx.week, season=ctx.season, now=now)
+            df = guarded.frame
+            for note in guarded.notes:
+                log.warning("%s", note)
             save(name, df)
 
             if upload and source.uploads_to_sheet:
@@ -66,7 +89,7 @@ def run_sync(
                     source.post_upload(client, tab, df, preserved)
 
             record_success(name, len(df))
-            results.append(SourceResult(name, True, len(df), None))
+            results.append(SourceResult(name, True, len(df), None, guarded.notes))
         except SourceSkipped as e:
             log.info("skipped %s: %s", name, e)
             results.append(SourceResult(name, True, 0, f"skipped: {e}"))

@@ -302,17 +302,24 @@ output, the saved run and the Cockpit all say `field: real (<contest>, exported 
 players' `Own%` is the contest's real one for that run. `auto` takes the newest live exports in your Downloads folder
 from this week and says which; the entries file there tells it each contest's format (without it one file sets both
 lines, and the output says so). Without `--field` nothing changes. It is information, not advice: the back-test
-(`python -m dfs.late_swap_retro`; `docs/RESEARCH.md`) says how much it was worth in Weeks 4-6. On a live state (`--field` or `--state live`) each GPP lineup also prints where it stands on the top-1% line (`top 12%, 18 pts behind the top-1% line`) and each of its swaps is headed LEVERAGE (the players in are less owned: it gets more different), HOLD (more owned: it gets on chalk) or EVEN; the ranking is still the change in Top 1% (`docs/SIM.md`, "Late swap by position").
+(`python -m dfs.late_swap_retro`; `docs/RESEARCH.md`) says how much it was worth in Weeks 4-6. On a live state (`--field`, or the live default once games are on) each GPP lineup also prints where it stands on the top-1% line (`top 12%, 18 pts behind the top-1% line`) and each of its swaps is headed LEVERAGE (the players in are less owned: it gets more different), HOLD (more owned: it gets on chalk) or EVEN; the ranking is still the change in Top 1% (`docs/SIM.md`, "Late swap by position").
 
-**Without a download: `--state live`.** `dfs lineups late-swap --state live` takes every started player's points so far from
+**Live by default (no download).** Once a game has started, every `dfs lineups late-swap` takes every started player's points so far from
 ESPN's public box scores (the same public site as `--refresh-injuries`; nothing from DraftKings) and the share of each game
 left from its period and clock, and scores the swaps against the projected-ownership line on that state: the games already
 played are known, the rest simulated. That is where the back-test found the swap gain (the real field mostly sharpened the
 line itself). The points are DraftKings scoring applied to the box scores and matched the real Weeks 4-6 points for 99% of the
 players who scored (a two-point conversion and a defense's blocked kick can be a couple of points off). The output, the saved
 run and the Cockpit say `field: projected + live scores (ESPN, read <time>)`. If ESPN cannot be read, or ownership is not out
-yet, it says so and runs as plain `late-swap`. Not together with `--field`, whose export carries the same points and the
-real field.
+yet, it prints `LIVE SCORES UNAVAILABLE` in red, scores on projections alone, and the Cockpit says `field: projected (live
+scores unavailable: ...)`. `--state projected` ignores the games played on purpose (the old default); `--field` replaces the
+live state with the real contest export. Before the first kickoff there is nothing live to read and it says so.
+
+**`dfs sync --live` is safe at any time on Sunday.** Every sync merges each feed with the last saved copy first
+(`sync_guard.py`): a player whose game has started keeps his last pre-kickoff values in every column, a row a feed drops is
+kept, a column never loses more than 3 values at once, and when DraftKings moves on to a later slate after the 1 pm lock the
+main slate stays (only the unstarted players' Status is refreshed, by name). Each kept value is printed under the sync table.
+Late swap itself never syncs: it reads the last sync's EdgeRaw (`data/current/edge.csv`) and ESPN directly.
 
 After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `Top 1%` (the chance of the top-1% line;
 green at 2% or more) on every built lineup's Total row (set its Cash/GPP marker in column A) and a

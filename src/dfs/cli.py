@@ -238,6 +238,9 @@ GAMES_FINISHED_AFTER_HOURS = 3.5
 # Injuries and depth charts (nflverse, updated daily) are re-pulled too: they feed the injury
 # beneficiaries and Edge tokens. `nflverse_games` (stadium/roof/schedule -- static for the week) and
 # the slower once-a-week sources are deliberately left out.
+# Safe after kickoff: `run_sync`'s guard (`sync_guard`) freezes every started player at his last values,
+# keeps rows a feed dropped, refuses to blank a column wholesale, and keeps DraftKings' main slate once DK
+# moves on to a later slate (Week 7's 3:18 pm sync lost every Status that way).
 LIVE_SYNC_SOURCES = [
     "nfl_odds",
     "draftkings",
@@ -2619,6 +2622,7 @@ def sync(
             any_failed = True
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
+    _print_guard_notes(results)
 
     # A name left in Player Pool's add-a-player box (the bound Apps Script normally handles it the moment
     # it is typed; an API write never fires the script) is set on EdgeRaw's Pool now -- see
@@ -2661,6 +2665,17 @@ def sync(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _print_guard_notes(results: list) -> None:
+    """What the game-day guard kept instead of taking a feed (`sync_guard`): a started player's values, a row
+    the feed dropped, a column it blanked, DraftKings' post-lock slate. One yellow line each."""
+    notes = [note for r in results for note in getattr(r, "notes", [])]
+    if not notes:
+        return
+    console.print("[yellow]Kept from the last sync (a sync never wipes data):[/yellow]")
+    for note in notes:
+        console.print(f"[yellow]  {escape(note)}[/yellow]", highlight=False)
 
 
 def _save_pool_snapshot(
@@ -3872,10 +3887,11 @@ FIELD_HELP = (
 
 
 STATE_HELP = (
-    "`live`: take every started player's points so far from ESPN's public box scores (no download from "
-    "DraftKings) and score swaps against the projected-ownership line on that state: the games already "
-    "played are known, the rest simulated. If ESPN cannot be read, says so and runs as without it. Not "
-    "with --field, whose export has the same points and the real field."
+    "Where the games' state comes from. `live` (the default once a game has started): every started "
+    "player's points so far from ESPN's public box scores (no download from DraftKings), swaps scored "
+    "against the projected-ownership line on that state: the games already played are known, the rest "
+    "simulated. If ESPN cannot be read it says so loudly and scores on projections alone. `projected`: "
+    "ignore the games played (the old default). --field replaces it with the real contest export."
 )
 
 
@@ -3883,6 +3899,7 @@ class SwapState(StrEnum):
     """Where late swap gets the games' state from."""
 
     live = "live"
+    projected = "projected"
 
 
 def _field_files(cfg: Config, edge: pd.DataFrame, field: list[str] | None) -> list:
@@ -3926,9 +3943,9 @@ def _field_files(cfg: Config, edge: pd.DataFrame, field: list[str] | None) -> li
 
 
 def _scores_lines(cfg: Config, specs: dict, edge: pd.DataFrame, now: datetime):
-    """The lines from the projected field plus ESPN's live box scores (`late_swap_field.build_scores_lines`),
-    or None, saying why: ESPN unreachable or no projected ownership yet. The run then goes on as it would
-    without `--state live`."""
+    """`(lines, None)`: the lines from the projected field plus ESPN's live box scores
+    (`late_swap_field.build_scores_lines`); or `(None, why)` when ESPN cannot be read or no projected
+    ownership is out yet. The caller says so loudly and scores on projections alone."""
     from dfs import late_swap_field as lsf
     from dfs import live_scores
 
@@ -3936,21 +3953,33 @@ def _scores_lines(cfg: Config, specs: dict, edge: pd.DataFrame, now: datetime):
     try:
         scores = live_scores.fetch_scores(dates)
     except live_scores.ScoresError as e:
-        console.print(
-            f"[yellow]--state live: ESPN's scores could not be read ({escape(str(e))}); "
-            "running as today.[/yellow]"
-        )
-        return None
+        return None, f"ESPN's scores could not be read ({e})"
     try:
         live = lsf.build_scores_lines(scores, specs, edge, now, cfg.sim.lines)
     except (ValueError, KeyError) as e:
-        console.print(f"[yellow]--state live: {escape(str(e))}; running as today.[/yellow]")
-        return None
+        return None, str(e)
     console.print(f"{live.source}: {scores.describe()}")
     for note in live.notes:
         console.print(f"[yellow]scores: {escape(note)}[/yellow]")
     console.print()
-    return live
+    return live, None
+
+
+def _live_scores_failed(why: str) -> str:
+    """Say loudly that the run lost its game state, and return what the Cockpit records as the field."""
+    console.print(
+        f"[bold red]LIVE SCORES UNAVAILABLE: {escape(why)}.[/bold red]\n"
+        "[bold red]The swaps below are scored on PROJECTIONS ONLY: the games already played are not "
+        "counted, so being behind or ahead does not change them.[/bold red]\n"
+    )
+    return f"{late_swap_store.FIELD_PROJECTED} (live scores unavailable: {why})"
+
+
+def _any_game_started(edge: pd.DataFrame, now: datetime) -> bool:
+    if "GameStart" not in edge.columns:
+        return False
+    started, _ = games_state(edge["GameStart"], now, GAMES_FINISHED_AFTER_HOURS)
+    return started
 
 
 def _live_lines(files: list, specs: dict, edge: pd.DataFrame, now: datetime):
@@ -4059,15 +4088,17 @@ def _run_late_swap(
             field_source = live.source
     elif field_files:
         console.print("[yellow]No simulator, so the field file is only used for Own%.[/yellow]")
+    elif state == "live" and not _any_game_started(edge, now):
+        console.print("[dim]Live scores: no game has started yet, so there is nothing live to read.[/dim]\n")
     elif state == "live" and sim_setup is not None:
-        live = _scores_lines(cfg, sim_setup[0], edge, now)
+        live, why = _scores_lines(cfg, sim_setup[0], edge, now)
         if live is not None:
             sim_setup = (sim_setup[0], dataclasses.replace(sim_setup[1], live=live))
             field_source = live.source
+        else:
+            field_source = _live_scores_failed(why or "unknown")
     elif state == "live":
-        console.print(
-            "[yellow]--state live: no simulator, so there is nothing to score the scores with.[/yellow]"
-        )
+        field_source = _live_scores_failed("no simulator, so there is nothing to score the scores with")
 
     any_shown = False
     built_lineups: list[tuple[list[str], str]] = []  # (names, goal by marker)
@@ -4238,16 +4269,19 @@ def lineups_late_swap(
     players in your Player Pool whose game has not started; `--all-players`
     widens that to the rosterable pool. Only swaps that beat your current
     lineup are listed. Reads EdgeRaw locally (`store.load_current`) and the
-    Lineups tab's typed Name column plus the Player Pool's names -- no
-    Sheets write, so nothing here needs confirmation. Run `dfs sync --live`
-    first for the freshest picture; this command itself doesn't re-sync
-    anything.
+    Lineups tab's typed Name column plus the Player Pool's names, and the
+    games' live state from ESPN's box scores by default (`--state projected`
+    to ignore it). It never syncs: EdgeRaw and the raw tabs are untouched
+    (it refreshes only the Cockpit, where the sheet has one). `dfs sync
+    --live` first is optional; it is safe after kickoff (`sync_guard`).
     """
     cfg = _load_config_or_exit()
-    if field and state:
+    if field and state == SwapState.live:
         raise typer.BadParameter(
             "--field and --state live both bring the games' points: use one", param_hint="--state"
         )
+    # Live by default (Plan C): the late-swap retro's gain is the game state. --field brings its own state.
+    resolved_state = None if field else (state or SwapState.live).value
     _run_late_swap(
         cfg,
         top=top,
@@ -4258,7 +4292,7 @@ def lineups_late_swap(
         fixed_lines=fixed_lines,
         refresh_injuries=refresh_injuries,
         field=field,
-        state=state.value if state else None,
+        state=resolved_state if resolved_state == SwapState.live.value else None,
     )
 
 
@@ -5102,6 +5136,7 @@ def week_new(
             any_failed = True
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
+    _print_guard_notes(results)
 
     _rebuild_cockpit_on_new_sheet(new_cfg, new_client)
     _rebuild_player_card_on_new_sheet(new_cfg, new_client, ctx)
