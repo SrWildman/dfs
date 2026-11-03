@@ -71,3 +71,12 @@ def test_snapshot_changes_names_what_moved():
     assert snapshot_changes(None, None) == []
     assert snapshot_changes(None, {"x": (1, 1)})[0].startswith("created ")
     assert snapshot_changes(before, before) == []
+
+
+def test_a_week_whose_history_was_moved_aside_says_so():
+    suggest_state.STATE_DIR.mkdir(parents=True)
+    (suggest_state.STATE_DIR / "_polluted_6.json").write_text("{}")
+    (suggest_state.STATE_DIR / "7.json").write_text("{}")
+    assert "moved aside (_polluted_6.json)" in suggest_state.missing_history_note(6)
+    assert suggest_state.missing_history_note(7) == ""
+    assert "no `dfs lineups suggest` run" in suggest_state.missing_history_note(5)
