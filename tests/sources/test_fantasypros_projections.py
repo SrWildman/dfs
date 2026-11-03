@@ -7,6 +7,7 @@ from dfs.sources.fantasypros_projections import (
     FantasyProsAuthError,
     FantasyProsFetchError,
     _blank_unprojected_rows,
+    _dst_team_code,
     _dst_row_stats,
     _flatten_columns,
     _offense_row_stats,
@@ -125,3 +126,60 @@ def test_url_template_builds_position_and_week():
     assert "projections/qb.php" in url
     assert "week=3" in url
     assert "scoring=PPR" in url
+
+
+@pytest.mark.parametrize(
+    ("label", "code"),
+    [
+        ("Philadelphia Eagles PHI DST", "PHI"),  # the page's current label format
+        ("Kansas City Chiefs", "KC"),  # the older bare full name
+        ("Kansas City Chiefs KC DST", "KC"),
+        ("Washington Commanders WAS DST", "WAS"),
+        ("Los Angeles Rams LAR DST", "LAR"),
+        ("San Francisco 49ers SF DST", "SF"),
+        ("Jacksonville Jaguars JAC DST", "JAX"),  # full name wins over a drifting code
+        ("Some New Franchise XYZ DST", "XYZ"),  # unknown name: the code token, normalized later
+        ("Garbage", ""),
+    ],
+)
+def test_dst_team_code_reads_both_label_formats(label, code):
+    assert _dst_team_code(label) == code
+
+
+def test_every_team_in_the_current_label_format_gets_a_distinct_code():
+    labels = [f"{name} {code} DST" for name, code in FULL_TEAM_NAME_TO_CODE.items()]
+    codes = [_dst_team_code(label) for label in labels]
+    assert codes == list(FULL_TEAM_NAME_TO_CODE.values())
+    assert len(set(codes)) == 32  # no blank Team, so no 29 collapsed duplicate rows
+
+
+def test_current_format_dst_rows_join_to_dk_dsts_without_duplicates():
+    from dfs.player_join import join_source_to_dk
+
+    labels = ["Philadelphia Eagles PHI DST", "Houston Texans HOU DST"]
+    fp = pd.DataFrame(
+        {
+            "Name": labels,
+            "Team": [_dst_team_code(x) for x in labels],
+            "Position": ["DST", "DST"],
+            "DkPts": [7.15, 8.36],
+        }
+    )
+    dk = pd.DataFrame(
+        {
+            "Id": [1, 2],
+            "Name": ["Eagles", "Texans"],
+            "Team": ["PHI", "HOU"],
+            "Position": ["DST", "DST"],
+        }
+    )
+    result = join_source_to_dk(
+        dk,
+        fp,
+        source_name_col="Name",
+        source_team_col="Team",
+        source_position_col="Position",
+        source="fantasypros",
+    )
+    assert result.pool_matched == result.pool_total == 2
+    assert sorted(result.matched["DkPts"]) == [7.15, 8.36]
