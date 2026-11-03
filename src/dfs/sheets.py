@@ -594,6 +594,34 @@ class SheetsClient:
             }
         )
 
+    def insert_columns(self, tab_name: str, *, at_column: str, count: int = 1) -> None:
+        """Insert `count` blank columns before `at_column` (A1 letter) via a real `insertDimension`, so
+        Sheets shifts every formula range, chart range and conditional format on the tab right along with
+        it -- the column counterpart of `insert_rows`. The new columns inherit the format of the column
+        BEFORE the insertion point (`inheritFromBefore=True`), never of what was pushed right (which may
+        be hidden)."""
+        sheet, ws = self._ws(tab_name)
+        start = column_index(f"{at_column}1")
+        if start == 0:
+            raise SheetsError("insert_columns cannot inherit from before column A")
+        sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "insertDimension": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": start,
+                                "endIndex": start + count,
+                            },
+                            "inheritFromBefore": True,
+                        }
+                    }
+                ]
+            }
+        )
+
     def delete_rows(self, tab_name: str, *, at_row: int, count: int) -> None:
         """Delete `count` rows starting at `at_row` (1-indexed) via a real
         Sheets API `deleteDimension` request -- everything below shifts up

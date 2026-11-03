@@ -319,6 +319,7 @@ MORE_LABELS = {
     "dfs setup repair-formula-ranges": "Repair the formula gaps `dfs doctor` reports",
     "dfs setup lineup-chalk": "Add the missing-chalk warning to Lineups' Issues column",
     "dfs setup guard-empty-states": "Restore the empty-state guards on division cells",
+    "dfs setup other-sports": "Give non-NFL contests their own Bankroll ledger and Season columns",
     "dfs setup resize-player-pool": "Resize the Player Pool position blocks",
     "dfs setup fix-opp-pos-rank": "One-time fix: opponent position rank",
     "dfs setup fix-pct-of-cap": "One-time fix: the % of Own column",

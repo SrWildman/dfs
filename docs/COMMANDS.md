@@ -749,6 +749,17 @@ Round 5 cleanup item 2 (2026-09-29). Wraps the divisions and averages on Results
 |---|---|
 | `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
 
+### `dfs setup other-sports`
+
+Plan D item 2 (Sam, 2026-11-03: "own category, but it's the same total bankroll"). Bankroll: an "Other Sports Entry" ledger under GPP and a Weekly Other line on row 11, folded into Weekly Cost / Weekly Net so Ending Bankroll still counts every dollar; GPP's summary sums narrowed to GPP's own rows. Season: Other Net / Other Risked in R/S (a real column insert at S moves the hidden chart block to T:X), Total Net and Cum. Total count them, and an "Other sports" YTD row under Total. From then on `week close` files MLB, NHL, UFC, CFB ... entries in the Other ledger. Nothing moves; it stops, writing nothing, if a target cell is not blank. Template first, then the live sheet (with --history); run `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--history` | Also split the Season rows already written (non-NFL money out of GPP into Other, from the kept DK history export) and re-read last week's row from its own Bankroll. The live week only, never the template. |
+| `--csv PATH` | The DK contest-history export for --history (default: the newest kept one). |
+| `--dry-run` | Print what would change; write nothing. |
+
 ### `dfs setup resize-player-pool`
 
 PROMPT_BOARD_FIXES.md item 8 (2026-09-25): grows each of Player Pool's five position blocks to `weekly_reset.PLAYER_POOL_BLOCK_ROWS`' row counts (QB/TE 10->17, RB 20->22, WR 25->27, DST 10->12) via real `insertDimension` calls (`sheet_pool_resize.resize_player_pool`) -- restoring the player capacity `sheet_pool_formulas._grouped_with_ separators_formula`'s own blank separator rows (Fix 3/A7) had been silently eating into.

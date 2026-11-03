@@ -85,8 +85,7 @@ def _redirect(value: object, fake_root: Path) -> object:
     return value if rel is None else fake_root / rel
 
 
-# --- the guard
-# -------------------------------------------------------------------------------------------------
+# --- the guard ---------------------------------------------------------------------------------------------
 
 _GUARD = {"on": False}
 # audit event -> the positions of its path arguments that get written

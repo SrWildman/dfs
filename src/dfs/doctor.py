@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 
 from dfs import compare_card, player_card
+from dfs import sheet_bankroll_other as bankroll_other
 from dfs import sheet_dk_upload as dk_upload
 from dfs.cockpit import COCKPIT_TAB
 from dfs.config import Config
@@ -38,6 +39,7 @@ from dfs.sheet_links import LINKED_EDGE_COLUMNS, PLAYER_POOL_RAW_TAB
 from dfs.sheet_names import ALIAS_TAB
 from dfs.sheet_pool_cells import POOL_OPTIONS
 from dfs.sheet_pool_control import control_cells
+from dfs.sheet_season_view import OTHER_NET_HEADER, OTHER_RISKED_HEADER, other_columns_state
 from dfs.sheet_stakes import STAKES_FIRST_COLUMN, STAKES_TITLE
 from dfs.sheet_style import EDGE_HIDDEN_HELPERS, INPUT_BG, edge_group_spans
 from dfs.sheet_suggested import FIRST_BUILD_ROW as SUGGESTED_FIRST_ROW
@@ -498,6 +500,32 @@ def _check_bankroll_headers(client: DoctorClient, cfg: Config, tab_titles: set[s
                     "bankroll-header-row",
                     f"{tab!r}: bankroll.{label}.header_row ({table.header_row}) is blank -- "
                     f"expected a header row there",
+                )
+            )
+    return issues
+
+
+def _check_other_sports(
+    client: DoctorClient, cfg: Config, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
+) -> list[DoctorIssue]:
+    """Plan D item 2: the Bankroll tab's Other Sports ledger and weekly line (Cash/GPP NFL only, every dollar
+    still in Ending Bankroll) and the Season tab's Other Net / Other Risked columns. `dfs setup
+    other-sports` builds both (template first)."""
+    issues = []
+    other, gpp = cfg.bankroll.other_table(), cfg.bankroll.gpp
+    if cfg.bankroll.tab in tab_titles and other is not None and gpp is not None:
+        state = bankroll_other.read_state(client, cfg.bankroll.tab, other)
+        for problem in bankroll_other.problems(state, other, gpp):
+            issues.append(
+                DoctorIssue("bankroll-other", f"{cfg.bankroll.tab!r}: {problem} -- `dfs setup other-sports`")
+            )
+    if cfg.season.tab in tab_titles:
+        if other_columns_state(headers_by_tab.get(cfg.season.tab, [])) != "done":
+            issues.append(
+                DoctorIssue(
+                    "season-other",
+                    f"{cfg.season.tab!r}: R/S are not {OTHER_NET_HEADER!r} / {OTHER_RISKED_HEADER!r} -- "
+                    "`dfs setup other-sports`",
                 )
             )
     return issues
@@ -1150,6 +1178,7 @@ def run_doctor(
     issues += _check_dk_upload_lineup_column(client, cfg, tab_titles, headers_by_tab)
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_stakes_block(client, cfg, tab_titles)
+    issues += _check_other_sports(client, cfg, tab_titles, headers_by_tab)
     issues += _check_cockpit_tab(tab_titles)
     issues += _check_player_card(client, cfg, tab_titles)
     issues += _check_compare(client, cfg, tab_titles)

@@ -213,6 +213,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs setup repair-formula-ranges",
             "dfs setup lineup-chalk",
             "dfs setup guard-empty-states",
+            "dfs setup other-sports",
             "dfs setup resize-player-pool",
             "dfs setup fix-opp-pos-rank",
             "dfs setup fix-pct-of-cap",
