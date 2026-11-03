@@ -154,11 +154,15 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "lineups "
         "on the Lineups tab: type names in column A, set Cash or GPP on the Total row, and read Cash % and "
         f"{TOP1_HEADER} there (see Reading the numbers). Exposure shows how concentrated "
-        "your lineups are. When they are final, download DraftKings' entries file (Edit entries), run: dfs "
+        "your lineups are. Before entering, dfs contests plan shows this week's plan by format (Showdown and "
+        "big-field GPPs capped, the rest to double-ups, H2Hs and small single-entry GPPs, within the Weekly "
+        "Budget). When they are final, download DraftKings' entries file (Edit entries), run: dfs "
         "entries fill, pick each entry's Lineup in DK Upload (you choose; the grey Suggested column is only "
         "a hint), run it again, then run: dfs export (or add --write to the fill) and upload the file to "
         "DraftKings. "
-        "dfs entries print lists every lineup as Name (ID) if you would rather pair them yourself.",
+        "dfs entries print lists every lineup as Name (ID) if you would rather pair them yourself. "
+        "At lock, once you have entered, download the entries file again and run: dfs entries record (what "
+        "went in which contest, and which Suggested build each lineup came from).",
     ),
     (
         "Sunday: late swap",
@@ -175,8 +179,11 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "Export your contest history from DraftKings, and download each contest's standings (DraftKings only "
         "keeps them about two weeks). Then run: dfs week close --research. It finds the newest history "
         "export in Downloads (or pass --csv <file>), reconciles Cash and GPP results into Bankroll and "
-        "Season, keeps your downloads, fills a blank Cash Line in Results, rebuilds Contests and scores the "
-        "week's projections into Model Check. With --research it then runs every study (the weekly research "
+        "Season (NFL only; other sports have their own ledger), keeps your downloads, fills a blank Cash "
+        "Line in Results, rebuilds Contests, scores the week's projections into Model Check, prints spent vs "
+        "the contest plan and the cash post-mortem (which players separated the double-up cashers, which of "
+        "our cash builds would have cashed, your cash lineup against its nearest build). With --research it "
+        "then runs every study (the weekly research "
         "reruns, up to about 45 minutes, unattended) and prints a short summary to paste to planning; plain "
         "dfs week close skips them. If the stats are not posted yet it says so; run dfs results update a "
         "day later.",

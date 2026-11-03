@@ -936,6 +936,13 @@ to move anything else out of the way again (Round 5 item 7, 2026-09-28;
 see `sheet_bankroll_view.py`'s module docstring for the full reasoning and
 before/after row numbers).
 
+**Other Sports** (`[bankroll.other]`, default header row 151, data rows 152-171, two rows under GPP; Plan D
+item 2, 2026-11): DK contests in any sport but NFL, written by `dfs bankroll sync` / `dfs week close` (by the
+export's `Sport`), same columns as GPP through `Place %`, deduped by the hidden Entry_Key column `L`. Its
+weekly line is row 11 (`Weekly Other %`, Cost `D11`, Winnings `F11`, Net `H11`), and Weekly Cost / Weekly
+Net (`B7`, `B9`) sum rows 11-14, so Ending Bankroll counts it; the GPP line's sums (`D13`/`F13`) cover GPP's
+own rows only. `dfs setup other-sports` builds it; `dfs doctor` checks it (`bankroll-other`).
+
 **Betting** (`[bankroll.bets]`, header row 16, data rows 17-36 -- 20 bet
 slots, Sam: "max 20 spots for bets"): a hand-entered ledger for Sam's DK
 Sportsbook bets -- Name, Odds % (typed, accepts `53.3`, `53.3%`, or
@@ -1121,11 +1128,14 @@ reset by a new weekly copy, carried forward by `dfs week new`" rule as
 Results (`season.extract_season_value_columns`).
 
 Columns: `Week` | `Cash Net` | `GPP Net` | `Betting Net` | `Total Net`
-(formula, `=B+C+D`) | `Ending Bankroll` | `Cash Risked` | `GPP Risked` |
+(formula, `=B+C+D+R`) | `Ending Bankroll` | `Cash Risked` | `GPP Risked` |
 `Betting Risked` | `Betting Wins`/`Losses`/`Pushes` | `Betting Exp. Wins`
 | four cumulative columns (`Cum. Cash`/`GPP`/`Betting`/`Total`, running
-`SUM`s -- chart source only, not meant to be read directly). The chart's own helper block,
-`S:W` (Week 0 baseline, then each week's cumulative net, `#N/A` for weeks not played yet), is
+`SUM`s -- chart source only, not meant to be read directly) | `Other Net` | `Other Risked` (`R`/`S`,
+Plan D item 2, 2026-11: non-NFL DK contests, from the Bankroll tab's Other Sports ledger, so `Cash Net` and
+`GPP Net` are NFL only while `Total Net`, `Cum. Total` and `Ending Bankroll` still count every dollar; the
+year-to-date block gains an `Other sports` row, 27). The chart's own helper block,
+`T:X` (moved from `S:W` by the `Other Risked` insert; Week 0 baseline, then each week's cumulative net, `#N/A` for weeks not played yet), is
 hidden; the chart is set to plot hidden data so it still draws.
 
 **Cash/GPP** (`B`/`C`, plus `G`/`H` risked): backfilled the same way
