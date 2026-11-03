@@ -20,7 +20,7 @@ This is what most weeks look like. Everything below it is reference.
 | 1 | Tuesday/Wednesday: a new week starts | `dfs week new "<url-of-the-sheet-copy>"` | Points the CLI at a fresh copy of the template, carries your bankroll and Results forward, runs a full sync. Then check `dfs status`. |
 | 2 | Through the week, as lines and injuries move | `dfs sync` | Re-pulls every source into the sheet. Safe to run as often as you like. |
 | 3 | In the sheet (no command) | Board, Slate Grid, EdgeRaw, Player Pool, Lineups | Research, tick your pool, build lineups. `dfs pool add/remove/list` does the pool without opening the sheet. `dfs lineups suggest` writes complete builds from your pool to the Suggested tab (Lineup Tools > Copy builds to Lineups drops one in); keep, lock, edit or drop builds there and run `dfs lineups suggest --iterate` to rebuild around your decisions. |
-| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`. |
+| 4 | Lineups are built | `dfs export -o lineups.csv` | Validates the slots on DK Upload and writes DraftKings' bulk-upload CSV. Before it: download DraftKings' entries file and run `dfs entries fill` (it lists the entries on DK Upload; you choose each entry's Lineup there), then run it again to fill the slots (`dfs entries fill --write` writes the upload file itself). `dfs entries print` lists every lineup as `Name (ID)`. At lock, after entering, download the entries file again and run `dfs entries record` (what went where, and which Suggested build each lineup came from). |
 | 5 | Sunday, before and between kickoffs | `dfs sync --live` | Fast refresh of odds, DK statuses, TFFB projections (with projected ownership) and weather only; prints what changed. Then `dfs lineups late-swap` shows who is still swappable and the best swaps for them. |
 | 6 | After the games (nflverse posts stats a day or two late) | `dfs week close` | Reconciles Cash/GPP into Bankroll and Results from the newest contest-history export in Downloads (or `--csv <file>`), keeps your DraftKings downloads (history copy, standings files) and rebuilds the Contests tab, then scores the week's projections into the Model Check tab. `dfs results update` does just the scoring, any time. |
 
@@ -145,6 +145,17 @@ Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, an
 | `--output / -o PATH` | Where to write the file (default: dk_lineups_<timestamp>.csv here). |
 | `--sheet-id STR` | Read a different sheet instead of config.toml's. |
 
+### `dfs entries record`
+
+Record what you entered this week, at lock: every lineup, its contest(s), and which Suggested build it came from (8 or more of its 9 players in one saved build of the week, any round) or "own".
+
+| Option | What it does |
+|---|---|
+| `--csv PATH` | Path to DraftKings' entries file (Edit entries), downloaded after you entered. Left out, the newest one in your Downloads folder is used (found by its header row); with none, the Lineups tab is read. |
+| `--from-sheet` | Read the Lineups tab even when an entries file is in Downloads. |
+| `--sheet-id STR` | Read a different sheet instead of config.toml's. |
+| `--dry-run` | Print the record; write no file. |
+
 ### `dfs export`
 
 Validate paired lineups in the lineups tab and export DK's upload CSV.
@@ -261,6 +272,16 @@ The contest side of `dfs week close`, on its own: keeps the history export and m
 | `--csv PATH` | A DraftKings contest-history export. Left out, the newest one in your Downloads folder ([contests] downloads_dir) is used, found by its header row. |
 | `--sheet-id STR` | Write the Contests tab to this sheet instead of config.toml's (the template first). Results' Cash Line is only ever filled on config.toml's own sheet. |
 | `--no-sheet` | Keep the files and run the engine; touch no sheet. |
+
+### `dfs contests plan`
+
+The weekly contest plan and the last week against it, from your own contest log (Plan D item 3): Showdown and big-field N-max GPPs capped (`[contest_plan]` in config.toml), the rest to double-ups, H2Hs and small single-entry GPPs, the total within the Bankroll tab's Weekly Budget. Then ROI by format (this season and all seasons), the effective rake by format and field size, and the H2H regulars to avoid. Terminal only: writes nothing.
+
+| Option | What it does |
+|---|---|
+| `--week INT` | Check this week against the plan (default: the last one played). |
+| `--budget FLOAT` | The weekly budget to plan with (default: the Bankroll tab's Weekly Budget). |
+| `--no-sheet` | Read no sheet (the plan then has no total cap). |
 
 ### `dfs contests analyze`
 
@@ -748,6 +769,17 @@ Round 5 cleanup item 2 (2026-09-29). Wraps the divisions and averages on Results
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+
+### `dfs setup other-sports`
+
+Plan D item 2 (Sam, 2026-11-03: "own category, but it's the same total bankroll"). Bankroll: an "Other Sports Entry" ledger under GPP and a Weekly Other line on row 11, folded into Weekly Cost / Weekly Net so Ending Bankroll still counts every dollar; GPP's summary sums narrowed to GPP's own rows. Season: Other Net / Other Risked in R/S (a real column insert at S moves the hidden chart block to T:X), Total Net and Cum. Total count them, and an "Other sports" YTD row under Total. From then on `week close` files MLB, NHL, UFC, CFB ... entries in the Other ledger. Nothing moves; it stops, writing nothing, if a target cell is not blank. Template first, then the live sheet (with --history); run `dfs doctor` after.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--history` | Also split the Season rows already written (non-NFL money out of GPP into Other, from the kept DK history export) and re-read last week's row from its own Bankroll. The live week only, never the template. |
+| `--csv PATH` | The DK contest-history export for --history (default: the newest kept one). |
+| `--dry-run` | Print what would change; write nothing. |
 
 ### `dfs setup resize-player-pool`
 

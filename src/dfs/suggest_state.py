@@ -550,3 +550,21 @@ def history_lines(state: StateFile) -> list[str]:
             f"{len(r.builds) - cash} GPP)"
         )
     return lines
+
+
+POLLUTED_PREFIX = "_polluted_"
+
+
+def missing_history_note(week: int) -> str:
+    """Why a week has no suggest history, for anything that reads past rounds (`dfs entries record`, the cash
+    post-mortem): "" when the week's file is there. Week 6's file was synthetic test output (a test wrote it,
+    Oct 28) and was moved aside to `_polluted_6.json` (Plan D item 1): Week 6 has no record of its builds.
+    """
+    if state_path(week).exists():
+        return ""
+    if (STATE_DIR / f"{POLLUTED_PREFIX}{week}.json").exists():
+        return (
+            f"Week {week} has no suggest history: its file was test output and was moved aside "
+            f"({POLLUTED_PREFIX}{week}.json)"
+        )
+    return f"Week {week} has no suggest history (no `dfs lineups suggest` run was saved)"

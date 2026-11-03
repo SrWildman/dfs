@@ -91,6 +91,28 @@ class BankrollConfig(BaseModel):
     # there's no CSV sync or dedupe key for hand-typed bets --
     # `entry_key_column` is simply unused for this bucket.
     bets: EntryTableConfig | None = None
+    # Plan D item 2 (Sam, 2026-11-03: "own category, but it's the same total bankroll"): DK entries in any
+    # sport but NFL (MLB, NHL, UFC, CFB, ...) go to their own "Other Sports Entry" ledger, so Cash and GPP
+    # are NFL-only. Leave it out and it sits right under the GPP ledger (`other_table`).
+    other: EntryTableConfig | None = None
+
+    def other_table(self) -> EntryTableConfig | None:
+        """The Other Sports ledger: `[bankroll.other]` when set, else derived from the GPP ledger (header one
+        blank row below GPP's last row, `OTHER_LEDGER_ROWS` data rows, the same dedupe-key column)."""
+        if self.other is not None:
+            return self.other
+        if self.gpp is None:
+            return None
+        header = self.gpp.last_row + 2
+        return EntryTableConfig(
+            header_row=header,
+            first_row=header + 1,
+            last_row=header + OTHER_LEDGER_ROWS,
+            entry_key_column=self.gpp.entry_key_column,
+        )
+
+
+OTHER_LEDGER_ROWS = 20
 
 
 class ResultsConfig(BaseModel):
@@ -291,6 +313,19 @@ class StakesConfig(BaseModel):
     betting_pct: float = Field(default=20.0, ge=0, le=100)
 
 
+class ContestPlanConfig(BaseModel):
+    """`[contest_plan]`: the weekly contest plan `dfs contests plan` shows and `week close` checks (Plan D
+    item 3). Dollars a week; field sizes in entrants. The weekly total is the Bankroll tab's Weekly
+    Budget."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    showdown_max: float = Field(default=5.0, ge=0)
+    big_nmax_max: float = Field(default=10.0, ge=0)
+    big_field_entrants: int = Field(default=2000, gt=0)
+    small_field_entrants: int = Field(default=1000, gt=0)
+
+
 class SuggestConfig(BaseModel):
     """`[suggest]`: how `dfs lineups suggest --iterate` treats what Sam decided."""
 
@@ -317,6 +352,7 @@ class Config(BaseModel):
     odds_api: OddsApiConfig = OddsApiConfig()
     stakes: StakesConfig = StakesConfig()
     suggest: SuggestConfig = SuggestConfig()
+    contest_plan: ContestPlanConfig = ContestPlanConfig()
 
 
 def _missing_config_message() -> str:

@@ -13,8 +13,17 @@ def test_the_dk_files_are_kept_before_model_check_is_scored_and_the_contests_ste
     monkeypatch.setattr(cli, "_keep_dk_files_before_scoring", lambda *a, **k: calls.append("keep"))
     monkeypatch.setattr(cli, "_score_results_after_close", lambda *a, **k: calls.append("score"))
     monkeypatch.setattr(cli, "_contests_after_close", lambda *a, **k: calls.append("contests"))
+    monkeypatch.setattr(cli, "_contest_plan_after_close", lambda *a, **k: calls.append("plan"))
+    monkeypatch.setattr(cli, "_entered_record_warning", lambda *a, **k: calls.append("record?"))
+    monkeypatch.setattr(cli, "_cash_postmortem_after_close", lambda *a, **k: calls.append("postmortem"))
+    monkeypatch.setattr(cli, "_closed_week", lambda cfg, week: 8)
     cli.week_close(csv=None, week=None)
-    assert calls == ["bankroll", "keep", "score", "contests"]
+    # the plan line reads the log the contests step just updated
+    assert calls == ["bankroll", "keep", "score", "contests", "plan", "record?", "postmortem"]
+
+
+def test_the_plan_check_never_fails_the_close():
+    cli._contest_plan_after_close(object(), 8)  # no config at all: prints a warning, does not raise
 
 
 def test_a_failure_while_keeping_the_files_does_not_stop_the_close(monkeypatch, tmp_path):

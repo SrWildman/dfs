@@ -2645,9 +2645,11 @@ _PERCENT = _num("0.0%", "PERCENT")
 # The KPI block at the top of Bankroll, addressed by the cells the tab
 # already uses. Rows 1-13 only; both ledgers live below row 15 and are not
 # touched here beyond their header rows and money columns.
-BANKROLL_CURRENCY_CELLS = ["B1:B2", "D1:D3", "F1", "I1:I2", "B6:B7", "B9", "D12:D13", "F12:F13", "H12:H13"]
-BANKROLL_PERCENT_CELLS = ["D4", "F2", "B8", "B10", "B12:B13"]
-BANKROLL_LABEL_CELLS = ["A1:A13", "C1:C4", "E1:E2", "G12:G13", "H1:H2", "C12:E13"]
+# Row 11 is the Weekly Other line (Plan D item 2, `sheet_bankroll_other.OTHER_SUMMARY_ROW`; blank on a
+# sheet without it, where formatting it changes nothing visible).
+BANKROLL_CURRENCY_CELLS = ["B1:B2", "D1:D3", "F1", "I1:I2", "B6:B7", "B9", "D11:D13", "F11:F13", "H11:H13"]
+BANKROLL_PERCENT_CELLS = ["D4", "F2", "B8", "B10", "B11:B13"]
+BANKROLL_LABEL_CELLS = ["A1:A13", "C1:C4", "E1:E2", "G11:G13", "H1:H2", "C11:E13"]
 # The KPI block is rows 1..BANKROLL_KPI_LAST_ROW (the Betting summary row is the last;
 # a test pins it to `sheet_bankroll_view.SUMMARY_ROW`). Its numeric value cells align
 # right and everything else in it (labels, the W-L-P record text) aligns left. Declared
@@ -2661,13 +2663,13 @@ BANKROLL_VALUE_CELLS = [
     "F1:F2",
     "I1:I2",
     "B6:B10",
-    "B12:B14",
-    "D12:D14",
-    "F12:F14",
-    "H12:H14",
+    "B11:B14",
+    "D11:D14",
+    "F11:F14",
+    "H11:H14",
 ]
 # Every ledger is a text column A (entry name) and numbers across the rest.
-BANKROLL_LEDGER_LAST_COLUMN = {"betting": "F", "cash": "J", "gpp": "J"}
+BANKROLL_LEDGER_LAST_COLUMN = {"betting": "F", "cash": "J", "gpp": "J", "other": "J"}
 
 
 def polish_bankroll(
@@ -2677,6 +2679,7 @@ def polish_bankroll(
     cash: tuple[int, int, int],
     gpp: tuple[int, int, int],
     betting: tuple[int, int, int] | None = None,
+    other: tuple[int, int, int] | None = None,
     entry_key_columns: tuple[str, ...] = (),
 ) -> str:
     """Direction G: the same ledger, read as a scoreboard.
@@ -2718,7 +2721,7 @@ def polish_bankroll(
     for cell in ("B1", "B2", "F1"):
         client.format_range(tab, cell, {"textFormat": {"bold": True, "fontSize": 12, "foregroundColor": INK}})
 
-    for header_row, first, last in (cash, gpp):
+    for header_row, first, last in (cash, gpp, *([other] if other else [])):
         client.format_range(tab, f"A{header_row}:J{header_row}", _HEADER_FMT)
         client.format_range(tab, f"B{first}:B{last}", _num("0"))
         client.format_range(tab, f"C{first}:C{last}", _num("0.0"))
@@ -2737,6 +2740,7 @@ def polish_bankroll(
     for rng in BANKROLL_VALUE_CELLS:
         client.format_range(tab, rng, {"horizontalAlignment": "RIGHT"})
     ledgers = [("cash", cash), ("gpp", gpp)] + ([("betting", betting)] if betting else [])
+    ledgers += [("other", other)] if other else []
     for key, (header_row, _first, last) in ledgers:
         last_col = BANKROLL_LEDGER_LAST_COLUMN[key]
         client.format_range(tab, f"A{header_row}:A{last}", {"horizontalAlignment": "LEFT"})
@@ -2744,7 +2748,7 @@ def polish_bankroll(
 
     # Net green when positive, red when negative -- on the season net, the
     # weekly net, and the Cash/GPP/Betting weekly nets.
-    for rng in ("F1", "B9", "H12:H14"):
+    for rng in ("F1", "B9", "H11:H14"):
         client.add_boolean_rule(
             tab,
             rng,

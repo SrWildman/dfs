@@ -234,6 +234,16 @@ to write `upload_<timestamp>.csv` (DK's format) with **only** the entries you se
 it on DraftKings. `dfs entries fill --dry-run` reports without writing the tab or a file; `--again` after a late swap
 rewrites only the entries whose lineup changed.
 
+**Before you enter: `dfs contests plan`.** It prints this week's plan by format (Showdown at most $5, N-max GPPs with
+2,000+ entrants at most $10, the rest to double-ups, 50/50s, H2Hs and single-entry GPPs under 1,000 entrants, the total
+within the Bankroll tab's Weekly Budget; `[contest_plan]` in config.toml changes the caps), last week against it, ROI and
+effective rake by format and field size, and the H2H regulars to avoid. Terminal only.
+
+**At lock, after entering: `dfs entries record`.** Download DK's entries file again (Edit entries) once you have entered,
+then run it: it records every lineup you entered, the contests it went into and the Suggested build it came from (8 or
+more of its 9 players in one saved build of the week, any round) or "own", to `data/entered/<season>-wk<NN>.json`. With
+no entries file it reads the Lineups tab (lineups only). `dfs week close` warns when the week has no record.
+
 `dfs entries print` is for pairing by hand (or in a hurry at a lock): every built lineup as `Name (ID)` in DK's slot order
 (QB RB RB WR WR WR TE FLEX DST) with its CalPts, ProjPts and summed Own% in front, printed and written to
 `dk_lineups_<timestamp>.csv`, using the ids in the entries file's own player table. It needs no pairing, says which file it

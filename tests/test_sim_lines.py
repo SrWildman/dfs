@@ -485,8 +485,16 @@ def test_the_switch_adds_a_display_field_and_leaves_the_ranking_field_alone(monk
     assert lines.field.cash_offset == 0.6  # what builds and late swap rank on
     assert lines.display_field.cash_offset == 7.0 and lines.shown_field is lines.display_field
     assert lines.display_field.top_offset == lines.field.top_offset  # Top 1% is untouched
-    assert "field average +7 (calibrated)" in lines.status and "NOT proven" in lines.note
-    assert "+7" in lines.cash_basis
+    assert (
+        "field average +7 (calibrated on Weeks 4-7 double-ups)" in lines.status and "NOT proven" in lines.note
+    )
+    assert "+7 (calibrated on Weeks 4-7 double-ups)" in lines.cash_basis
+
+
+def test_week_span():
+    assert si.week_span((4, 5, 6, 7, 8)) == "Weeks 4-8"
+    assert si.week_span((8, 4, 6)) == "Weeks 4, 6, 8"
+    assert si.week_span((5,)) == "Week 5"
 
 
 def test_shown_cash_rescoring_changes_only_the_cash_percent(owned_edge, field_for, relative_report):

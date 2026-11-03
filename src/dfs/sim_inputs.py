@@ -132,6 +132,7 @@ class SimLines:
     # `[sim.lines] calibrated_cash_offset`: `field` with the calibrated cash offset, for the Cash % SHOWN on
     # Lineups and Suggested only (None: the switch is off, or no calibration is saved). Rankings use `field`.
     display_field: FieldModel | None = None
+    calibrated_on: str = ""  # "Weeks 4-8 double-ups": what the display field was calibrated on
 
     @property
     def relative(self) -> bool:
@@ -148,7 +149,11 @@ class SimLines:
         field = self.shown_field
         if field is None:
             return f"cash line {self.cash_line:g}  ·  GPP target {self.gpp_target:g}  ·  {self.mode} lines"
-        calibrated = " (calibrated)" if self.display_field is not None else ""
+        calibrated = (
+            f" (calibrated on {self.calibrated_on or 'your double-ups'})"
+            if self.display_field is not None
+            else ""
+        )
         return (
             f"lines move with the slate: Cash % = field average +{field.cash_offset:g}{calibrated}, "
             f"Top 1% = field average +{field.top_offset:g}"
@@ -224,8 +229,8 @@ def resolve_lines(
             f"cash line {cash_line:g}, fixed (ownership not published yet)",
             gpp_label(top_line),
         )
-    display, calibrated = (
-        _calibrated_display(field) if getattr(lines, "calibrated_cash_offset", False) else (None, "")
+    display, calibrated, calibrated_on = (
+        _calibrated_display(field) if getattr(lines, "calibrated_cash_offset", False) else (None, "", "")
     )
     return SimLines(
         "relative",
@@ -235,28 +240,45 @@ def resolve_lines(
         f"Lines move with the slate: Cash % beats the field average +{lines.double_up_offset:g}, Top 1% "
         f"beats it +{lines.gpp_top1_offset:g} (ownership of {len(field.players)} players, "
         f"{len(field.cover)} simulated with your lineups){uncertainty}.{calibrated}",
-        f"cash line = the field's average score +{(display or field).cash_offset:g}",
+        f"cash line = the field's average score +{(display or field).cash_offset:g}"
+        + (f" (calibrated on {calibrated_on})" if display is not None else ""),
         "Top 1%",
         display,
+        calibrated_on if display is not None else "",
     )
 
 
-def _calibrated_display(field: FieldModel) -> tuple[FieldModel | None, str]:
+def week_span(weeks: tuple[int, ...]) -> str:
+    """ "Weeks 4-8" for a run of consecutive weeks, else "Weeks 4, 6, 7"; "Week 5" for one."""
+    if len(weeks) == 1:
+        return f"Week {weeks[0]}"
+    ordered = sorted(weeks)
+    if ordered == list(range(ordered[0], ordered[-1] + 1)):
+        return f"Weeks {ordered[0]}-{ordered[-1]}"
+    return "Weeks " + ", ".join(str(w) for w in ordered)
+
+
+def _calibrated_display(field: FieldModel) -> tuple[FieldModel | None, str, str]:
     """`[sim.lines] calibrated_cash_offset`: `field` with the saved calibrated cash offset, for the SHOWN
-    Cash % only, and a sentence saying so (or that no calibration is saved, and Cash % is today's)."""
+    Cash % only, a sentence saying so (or that no calibration is saved, and Cash % is today's), and what it
+    was calibrated on ("Weeks 4-8 double-ups")."""
     from dfs.sim import du_line
 
     cal = du_line.load_calibration()
     if cal is None:
-        return None, (
+        return (
+            None,
             " calibrated_cash_offset is on but no calibration is saved yet (`dfs research refresh` writes "
-            "it): Cash % is today's."
+            "it): Cash % is today's.",
+            "",
         )
-    weeks = ", ".join(str(w) for w in cal.weeks)
+    on = f"{week_span(cal.weeks)} double-ups"
     bar = "cleared the bar" if cal.passes else f"NOT proven (z {cal.z:+.1f})"
-    return dataclasses.replace(field, cash_offset=cal.offset), (
-        f" Cash % SHOWN against the field average +{cal.offset:g} (calibrated on your double-ups, Weeks "
-        f"{weeks}; {bar}); builds and late swap rank on +{field.cash_offset:g}."
+    return (
+        dataclasses.replace(field, cash_offset=cal.offset),
+        f" Cash % SHOWN against the field average +{cal.offset:g} (calibrated on your {on}; {bar}); builds "
+        f"and late swap rank on +{field.cash_offset:g}.",
+        on,
     )
 
 

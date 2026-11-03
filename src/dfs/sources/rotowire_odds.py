@@ -78,6 +78,12 @@ def parse_draftkings_odds(raw_games: list[dict]) -> list[dict]:
     return parsed
 
 
+# The oddsraw tab's columns, A onward: the parsed field each one holds ("" = left blank). oddsFinal VLOOKUPs
+# into this tab by column NUMBER (`sheet_literal_lookups.ODDS_FINAL_LOOKUPS`; a test ties the two together),
+# so a column added here goes at the end.
+ODDSRAW_COLUMNS = ("team", "date", "moneyline", "spread", "total", "", "team_points", "", "")
+
+
 class RotowireOddsSource(Source):
     name = "nfl_odds"
 
@@ -127,9 +133,7 @@ class RotowireOddsSource(Source):
             ],
         ]
         for _, r in df.iterrows():
-            rows.append(
-                [r["team"], r["date"], r["moneyline"], r["spread"], r["total"], "", r["team_points"], "", ""]
-            )
+            rows.append([r[field] if field else "" for field in ODDSRAW_COLUMNS])
         return rows
 
     def post_upload(self, client, tab: str, df: pd.DataFrame, preserved: object | None) -> None:

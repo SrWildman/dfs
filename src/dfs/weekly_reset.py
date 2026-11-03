@@ -183,6 +183,7 @@ def clear_previous_week(
     bankroll_cash: EntryTableConfig | None = None,
     bankroll_gpp: EntryTableConfig | None = None,
     bankroll_bets: EntryTableConfig | None = None,
+    bankroll_other: EntryTableConfig | None = None,
 ) -> list[str]:
     """Clear last week's lineup data. Returns a human-readable line per tab
     describing what was cleared, for CLI display.
@@ -257,6 +258,9 @@ def clear_previous_week(
         summary.append(_clear_bankroll_bucket(client, bankroll_tab, "GPP", bankroll_gpp))
     if bankroll_tab and bankroll_bets:
         summary.append(_clear_bankroll_bets(client, bankroll_tab, bankroll_bets))
+    if bankroll_tab and bankroll_other:
+        # Plan D item 2: the Other Sports ledger, the same typed A-H block + dedupe key as Cash and GPP.
+        summary.append(_clear_bankroll_bucket(client, bankroll_tab, "other sports", bankroll_other))
 
     return summary
 

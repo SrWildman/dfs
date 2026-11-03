@@ -105,6 +105,20 @@ def classify_entry(entry: ContestEntry) -> str:
     return "cash" if info.format in series.CASH_FORMATS else "gpp"
 
 
+NFL_SPORT = "NFL"
+
+
+def is_nfl(entry: ContestEntry) -> bool:
+    return entry.sport.strip().upper() == NFL_SPORT
+
+
+def ledger_bucket(entry: ContestEntry) -> str:
+    """Which Bankroll ledger an entry goes in: "other" for any sport but NFL (Plan D item 2: MLB/NHL contests
+    used to land in GPP, so Week 4's GPP read +$201 when NFL GPP was +$77), else `classify_entry`'s "cash"
+    or "gpp"."""
+    return classify_entry(entry) if is_nfl(entry) else "other"
+
+
 def _money(value) -> Decimal:
     if pd.isna(value):
         return Decimal("0")
@@ -330,3 +344,18 @@ def backfill_entry_keys(
         result.backfilled.append((row_num, key))
 
     return result
+
+
+def other_sports_by_week(entries: list[ContestEntry], season: int) -> dict[int, tuple[float, float]]:
+    """{NFL week: (net, entry fees)} of the non-NFL entries in a contest-history export, by the NFL week each
+    contest's date falls in (`nfl_calendar.season_week_for_date`, the same rule the ledgers use)."""
+    out: dict[int, tuple[float, float]] = {}
+    for e in entries:
+        if is_nfl(e):
+            continue
+        week = nfl_calendar.season_week_for_date(e.contest_date.date(), season)
+        if week is None:
+            continue
+        net, fees = out.get(week, (0.0, 0.0))
+        out[week] = (net + float(e.total_winnings - e.entry_fee), fees + float(e.entry_fee))
+    return out

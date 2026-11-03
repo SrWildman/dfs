@@ -28,6 +28,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from dfs import (
+    cash_postmortem,
     edge_finder_tab,
     late_swap_store,
     lineup_iterate,
@@ -45,8 +46,8 @@ from dfs import (
 from dfs.apps_script import script_warnings
 from dfs.bankroll import (
     backfill_entry_keys,
-    classify_entry,
     entries_for_week,
+    ledger_bucket,
     parse_contest_history,
     sync_bucket,
 )
@@ -105,19 +106,23 @@ from dfs.ownership import append_ownership, parse_ownership_export
 from dfs.pool import clear_all, find_matches, read_players, set_pool
 from dfs.prompt_missing import PromptingGroup, ask
 from dfs.results_autofill import compute_week_results, write_results_updates
+from dfs.season import LAST_VALUE_COLUMN as LAST_SEASON_VALUE_COLUMN
 from dfs.season import (
+    OTHER_NET_COLUMN,
     extract_season_value_columns,
-    read_ledger_week_totals,
-    write_season_betting_and_ending,
-    write_season_cash_gpp,
+    has_other_columns,
+    read_season_row,
+    read_week_close,
+    season_row_changes,
+    write_week_close,
 )
 from dfs.sheet_audit import SKIPPED_TABS, fit_workbook_widths, run_audit
+from dfs.sheet_bankroll_other import has_other_ledger
 from dfs.sheet_bankroll_view import (
     BETTING_LEDGER_HEADER,
     BLOCK_ROWS,
     HEADER_ROW,
     build_betting_ledger,
-    compute_weekly_betting_stats,
 )
 from dfs.sheet_bankroll_view import (
     FIRST_ROW as BETTING_FIRST_ROW,
@@ -904,6 +909,124 @@ def sheets_lineup_chalk(
 
 
 @setup_app.command(
+    "other-sports",
+    short_help="Bankroll's Other Sports ledger + Season's Other columns: Cash/GPP NFL only, same bankroll.",
+)
+def sheets_other_sports(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Apply to a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
+    ),
+    history: bool = typer.Option(
+        False,
+        "--history",
+        help="Also split the Season rows already written (non-NFL money out of GPP into Other, from the kept "
+        "DK history export) and re-read last week's row from its own Bankroll. The live week only, never the "
+        "template.",
+    ),
+    csv: Path = typer.Option(
+        None, "--csv", help="The DK contest-history export for --history (default: the newest kept one)."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would change; write nothing."),
+) -> None:
+    """Plan D item 2 (Sam, 2026-11-03: "own category, but it's the same total bankroll"). Bankroll: an "Other
+    Sports Entry" ledger under GPP and a Weekly Other line on row 11, folded into Weekly Cost / Weekly Net
+    so Ending Bankroll still counts every dollar; GPP's summary sums narrowed to GPP's own rows. Season:
+    Other Net / Other Risked in R/S (a real column insert at S moves the hidden chart block to T:X), Total
+    Net and Cum. Total count them, and an "Other sports" YTD row under Total. From then on `week close`
+    files MLB, NHL, UFC, CFB ... entries in the Other ledger. Nothing moves; it stops, writing nothing, if
+    a target cell is not blank. Template first, then the live sheet (with --history); run `dfs doctor`
+    after."""
+    from dfs import paths as dfs_paths
+    from dfs.bankroll import other_sports_by_week
+    from dfs.season import apply_other_split, plan_other_split, read_season_rows
+    from dfs.sheet_bankroll_other import OtherBlockError, build_other_sports_block, has_other_ledger
+    from dfs.sheet_season_view import SeasonOtherError, add_other_columns, other_columns_state
+
+    cfg = _load_config_or_exit()
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    other, gpp = cfg.bankroll.other_table(), cfg.bankroll.gpp
+    if other is None or gpp is None:
+        console.print(
+            "[red]config.toml has no [bankroll.gpp] -- nothing to put the Other ledger under.[/red]"
+        )
+        raise typer.Exit(code=1)
+    try:
+        title, url = client.describe()
+        console.print(f"Other sports on: [bold]{title}[/bold]\n{url}\n")
+        if history and "template" in title.lower():
+            console.print("[red]--history is for the live week, never the template.[/red]")
+            raise typer.Exit(code=1)
+        header = client.read_range(cfg.season.tab, f"A{cfg.season.header_row}:Z{cfg.season.header_row}")
+        season_state = other_columns_state(header[0] if header else [])
+        ledger_there = has_other_ledger(client, cfg.bankroll.tab, other)
+        console.print(
+            f"{cfg.bankroll.tab}: Other Sports ledger rows {other.header_row}-{other.last_row} "
+            f"({'already there' if ledger_there else 'to build'}); Weekly Other line on row 11; B7/B9 count "
+            f"it; GPP's sums read rows {gpp.first_row}-{gpp.last_row}"
+        )
+        console.print(f"{cfg.season.tab}: Other Net / Other Risked at R/S ({season_state})")
+        if not dry_run:
+            for line in build_other_sports_block(client, cfg.bankroll.tab, other=other, gpp=gpp):
+                console.print(f"[green]OK[/green] {escape(line)}")
+            for line in add_other_columns(client, cfg.season.tab):
+                console.print(f"[green]OK[/green] {escape(line)}")
+        if not history:
+            return
+        source = csv or _newest_kept_history(dfs_paths.DK_HISTORY_DIR)
+        if source is None or not source.exists():
+            console.print("[red]No DK contest-history export to split the history from (pass --csv).[/red]")
+            raise typer.Exit(code=1)
+        by_week = other_sports_by_week(
+            parse_contest_history(pd.read_csv(source)), nfl_calendar.current_season()
+        )
+        # R is blank on a tab from before the upgrade too, so the plan reads the same either way.
+        plan = plan_other_split(read_season_rows(client, cfg.season), by_week)
+        console.print(f"\nSeason history from {source.name}:")
+        for item in plan:
+            console.print(
+                f"  Week {item.week}: GPP net {item.gpp_net[0]:+.2f} -> {item.gpp_net[1]:+.2f}, risked "
+                f"{item.gpp_risked[0]:.2f} -> {item.gpp_risked[1]:.2f}; Other {item.other_net:+.2f} on "
+                f"{item.other_risked:.2f}"
+            )
+        if not by_week:
+            console.print("  no non-NFL entries this season")
+        if dry_run:
+            return
+        apply_other_split(client, cfg.season, plan)
+        console.print(f"[green]OK[/green] {cfg.season.tab}: split {len(plan)} week(s)")
+        if cfg.google_sheets.previous_sheet_id and not sheet_id:
+            previous = SheetsClient(
+                cfg.google_sheets.model_copy(update={"sheet_id": cfg.google_sheets.previous_sheet_id})
+            )
+            previous_title, _ = previous.describe()
+            _refresh_closed_week_row(cfg, previous, client, old_title=previous_title, other_columns=True)
+    except (OtherBlockError, SeasonOtherError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+def _other_ledger_rows(cfg: Config, client: SheetsClient) -> tuple[int, int, int] | None:
+    """(header, first, last) of the Other Sports ledger when this sheet has it, for `polish_bankroll`."""
+    from dfs.sheet_bankroll_other import has_other_ledger
+
+    other = cfg.bankroll.other_table()
+    if other is None or not has_other_ledger(client, cfg.bankroll.tab, other):
+        return None
+    return (other.header_row, other.first_row, other.last_row)
+
+
+def _newest_kept_history(directory: Path) -> Path | None:
+    files = sorted(directory.glob("*.csv"), key=lambda f: f.stat().st_mtime) if directory.exists() else []
+    return files[-1] if files else None
+
+
+@setup_app.command(
     "guard-empty-states",
     short_help="Blank instead of #DIV/0!/#N/A on Results, Bankroll and Season when nothing is entered yet.",
 )
@@ -1573,6 +1696,7 @@ def sheets_polish(
                         cfg.bankroll.gpp.last_row,
                     ),
                     betting=(HEADER_ROW, BETTING_FIRST_ROW, BETTING_LAST_ROW),
+                    other=_other_ledger_rows(cfg, client),
                     entry_key_columns=(
                         cfg.bankroll.cash.entry_key_column,
                         cfg.bankroll.gpp.entry_key_column,
@@ -3537,6 +3661,89 @@ def entries_fill(
         )
 
 
+@entries_app.command("record")
+def entries_record(
+    csv: Path = typer.Option(
+        None,
+        "--csv",
+        help="Path to DraftKings' entries file (Edit entries), downloaded after you entered. Left out, the "
+        "newest one in your Downloads folder is used (found by its header row); with none, the Lineups tab "
+        "is read.",
+    ),
+    from_sheet: bool = typer.Option(
+        False, "--from-sheet", help="Read the Lineups tab even when an entries file is in Downloads."
+    ),
+    sheet_id: str = typer.Option(None, "--sheet-id", help="Read a different sheet instead of config.toml's."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the record; write no file."),
+) -> None:
+    """Record what you entered this week, at lock: every lineup, its contest(s), and which Suggested build it
+    came from (8 or more of its 9 players in one saved build of the week, any round) or "own".
+
+    Reads DK's entries file (download it from DraftKings' Edit entries after you have entered; Classic
+    main-slate entries only) or, with none, the Lineups tab (lineups only: the tab does not know the
+    contests). Writes `data/entered/<season>-wk<NN>.json` (re-running replaces it); `dfs week close` warns
+    when the week has none, and its cash post-mortem compares the entered cash lineup to the nearest
+    build. Never writes a sheet."""
+    from dfs import entered
+    from dfs import entries as ent
+    from dfs import sheet_dk_upload as dku
+    from dfs.nfl_calendar import current_season
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    week, season = _suggest_week(title), current_season()
+    console.print(f"Sheet: [bold]{title}[/bold] (Week {week})\n{url}\n")
+
+    path = None
+    if not from_sheet:
+        path, how = ent.resolve_entries_file(csv, Path(cfg.contests.downloads_dir).expanduser())
+        if path is None and csv is None:
+            console.print(f"[yellow]{how}: reading the Lineups tab instead (no contests).[/yellow]")
+        elif path is None:
+            console.print(f"[red]{how}.[/red]")
+            raise typer.Exit(code=1)
+    if path is not None:
+        console.print(f"Entries file: [bold]{path}[/bold]")
+        try:
+            parsed = ent.read_entries_file(path)
+        except (ent.EntriesFileError, OSError) as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            raise typer.Exit(code=1) from e
+        found = entered.file_week(parsed.players)
+        if found != (season, week):
+            seen = f"Week {found[1]} of {found[0]}" if found and found[1] else "no week"
+            console.print(
+                f"[red]{path.name} is for {seen}, not Week {week} of {season}.[/red] Download this week's "
+                "entries file from DraftKings (Edit entries), or pass --csv / --from-sheet."
+            )
+            raise typer.Exit(code=1)
+        kept, skipped = ent.classify_entries(parsed)
+        lineups = entered.from_entries(kept, parsed.players)
+        record = entered.make_record(season, week, f"entries file {path.name}", lineups, skipped=skipped)
+    else:
+        try:
+            sheet = dku.read_lineups(client, cfg.lineups.builder_tab)
+        except SheetsError as e:
+            console.print(f"[red]Sheets error:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        record = entered.make_record(season, week, f"Lineups tab of {title}", entered.from_sheet(sheet))
+    if not record.lineups:
+        console.print("[yellow]No entered lineup found: nothing to record.[/yellow]")
+        raise typer.Exit(code=1)
+    for line in entered.summary_lines(record):
+        console.print(escape(line), highlight=False, soft_wrap=True)
+    if dry_run:
+        console.print("[dim]Dry run: nothing was written.[/dim]")
+        return
+    out = entered.save(record)
+    console.print(f"[green]Recorded to {out}[/green]")
+
+
 @entries_app.command("print")
 def entries_print(
     csv: Path = typer.Option(
@@ -4642,6 +4849,12 @@ def _run_suggest(
         # `[sim.lines] calibrated_cash_offset`: the builds were chosen and saved on today's line; only the
         # Cash % shown below and on the tab is measured against the calibrated one
         report.builds = with_shown_cash(report.builds, specs, settings.lines.display_field)
+        # the saved round keeps both: `p_cash` (today's line, what ranked it) and `p_cash_shown` (what the tab
+        # and the Week page show)
+        shown = {b.number: b.p_cash for b in report.builds}
+        for rec in record.builds:
+            if shown.get(rec.number) is not None:
+                rec.metrics["p_cash_shown"] = round(float(shown[rec.number]), 4)
     how = {"suggest": "fresh run", "iterate": "rerun", "restore": f"round {restored} restored"}[command]
     console.print(
         f"Round {record.round} ({how}). Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
@@ -4657,6 +4870,10 @@ def _run_suggest(
         console.print()
     for note in report.notes:
         console.print(f"[yellow]{note}[/yellow]")
+    # Plan D item 8b: double-up chalk and how many cash builds use him (display only)
+    cash_names = [[p.name for p in b.players] for b in report.builds if b.kind == "cash"]
+    for line in cash_postmortem.chalk_check(edge, cash_names):
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
     for name, took in report.phases.items():  # the search phases, between the two sheet-side groups
         phases[name] = (took, 0)
     for line in portfolio_lines:
@@ -4996,8 +5213,16 @@ def week_new(
 
     season_cfg = cfg.season
     season_rows: list[list[str]] = []
+    old_season_other = new_season_other = False
     try:
-        season_rows = old_client.read_range(season_cfg.tab, f"A{season_cfg.first_row}:M{season_cfg.last_row}")
+        # R:S (Other Net/Risked, Plan D item 2) only where both sheets have them: on an older Season tab S
+        # is the hidden chart block, which must neither be read as money nor overwritten.
+        old_season_other = has_other_columns(old_client, season_cfg)
+        new_season_other = has_other_columns(new_client, season_cfg)
+        last_col = LAST_SEASON_VALUE_COLUMN if old_season_other else "M"
+        season_rows = old_client.read_range(
+            season_cfg.tab, f"A{season_cfg.first_row}:{last_col}{season_cfg.last_row}"
+        )
     except SheetsError:
         console.print(
             f"\n[yellow]No {season_cfg.tab!r} tab on the current sheet -- nothing to carry forward.[/yellow]"
@@ -5062,6 +5287,8 @@ def week_new(
     if season_rows:
         try:
             for col_range, values in extract_season_value_columns(season_rows).items():
+                if col_range == f"{OTHER_NET_COLUMN}:{LAST_SEASON_VALUE_COLUMN}" and not new_season_other:
+                    continue
                 start, _, end = col_range.partition(":")
                 end = end or start
                 new_client.update_range(
@@ -5071,6 +5298,9 @@ def week_new(
             console.print(f"[red]Could not write {season_cfg.tab!r} on the new sheet:[/red] {e}")
             raise typer.Exit(code=1) from e
         console.print(f"[green]OK[/green] carried {season_cfg.tab!r} forward")
+        _refresh_closed_week_row(
+            cfg, old_client, new_client, old_title=old_title, other_columns=new_season_other
+        )
 
     try:
         summary = clear_previous_week(
@@ -5082,6 +5312,7 @@ def week_new(
             bankroll_cash=cfg.bankroll.cash,
             bankroll_gpp=cfg.bankroll.gpp,
             bankroll_bets=cfg.bankroll.bets,
+            bankroll_other=cfg.bankroll.other_table(),
         )
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
@@ -5274,6 +5505,10 @@ def week_close(
     _keep_dk_files_before_scoring(cfg, csv)
     _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
+    closed = _closed_week(cfg, week)
+    _contest_plan_after_close(cfg, closed)
+    _entered_record_warning(closed)
+    _cash_postmortem_after_close(closed)
     if research:
         _research_after_close(cfg, week)
 
@@ -5403,6 +5638,75 @@ def _contests_after_close(cfg: Config, csv: Path) -> None:
         )
     except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; never fail the close over this
         console.print(f"[yellow]Contests not updated ({e}); run `dfs contests update` later.[/yellow]")
+
+
+def _closed_week(cfg: Config, week: int | None) -> int | None:
+    """The week being closed: `--week`, else the connected sheet's title (None when neither can be read)."""
+    if week is not None:
+        return week
+    from dfs.week import parse_week_from_title
+
+    try:
+        return parse_week_from_title(SheetsClient(cfg.google_sheets).describe()[0])
+    except Exception:  # noqa: BLE001 - the steps that need it say they were skipped
+        return None
+
+
+def _cash_postmortem_after_close(week: int | None) -> None:
+    """The cash post-mortem for the week just closed (Plan D item 8): terminal, and the close report through
+    the recorded console. Appends to data/contests/cash_postmortem.csv. NEVER fails the close."""
+    from dfs import cash_postmortem
+    from dfs.nfl_calendar import current_season
+
+    console.print("")
+    if week is None:
+        console.print("[yellow]Cash post-mortem skipped (the closed week is not known).[/yellow]")
+        return
+    try:
+        lines = cash_postmortem.run(current_season(), week)
+    except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over this
+        console.print(f"[yellow]Cash post-mortem skipped ({escape(str(e))}).[/yellow]")
+        return
+    for line in lines:
+        console.print(escape(line), highlight=False, soft_wrap=True)
+
+
+def _entered_record_warning(week: int | None) -> None:
+    """Warn when the closed week has no `dfs entries record` file (Plan D item 5). Never fails the close."""
+    from dfs import entered
+    from dfs.nfl_calendar import current_season
+
+    if week is None:
+        return
+    try:
+        text = entered.missing_warning(current_season(), week)
+    except Exception:  # noqa: BLE001 - a warning only
+        return
+    if text:
+        console.print(f"\n[yellow]{escape(text)}[/yellow]")
+
+
+def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
+    """`spent $X vs plan $Y; over in: ...` for the week just closed, from the contest log the contests step
+    just updated (Plan D item 3; `dfs contests plan` has the whole report). NEVER fails the close."""
+    from dfs import contest_plan
+    from dfs.contests import history
+    from dfs.nfl_calendar import current_season
+    from dfs.paths import CONTESTS_DIR
+    from dfs.sheet_stakes import _cell
+    from dfs.week import BANKROLL_WEEKLY_BUDGET_CELL
+
+    try:
+        season = current_season()
+        typed = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
+        closed = week if week is not None else contest_plan.last_week(typed, season)  # the log's last week
+        if closed is None:
+            return
+        budget = _cell(SheetsClient(cfg.google_sheets), cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
+        check = contest_plan.check_week(typed, season, closed, cfg.contest_plan, budget)
+        console.print("\n" + escape(check.line()), highlight=False)
+    except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over this
+        console.print(f"[yellow]Contest plan check skipped ({e}); `dfs contests plan` shows it.[/yellow]")
 
 
 def _score_results_after_close(cfg: Config) -> None:
@@ -5733,6 +6037,33 @@ def ownership_log(
     )
 
 
+def _refresh_closed_week_row(
+    cfg: Config, closed: SheetsClient, target: SheetsClient, *, old_title: str, other_columns: bool
+) -> None:
+    """Rewrites the closed week's Season row on `target` from the closed sheet's own Bankroll tab as it
+    stands now (`season.read_week_close`): edits Sam made to that ledger after its close then reach
+    Season, and Season's Ending matches the next week's Starting Bankroll (the Week 8 gap, Plan D item 2).
+    Reads the closed sheet, never writes it. Never fails the caller."""
+    try:
+        week = parse_week_from_title(old_title)
+        before = read_season_row(target, cfg.season, week)
+        close = read_week_close(closed, cfg.bankroll, week)
+        if not write_week_close(target, cfg.season, close, other_columns=other_columns):
+            return
+        after = read_season_row(target, cfg.season, week)
+    except (SheetsError, ValueError) as e:
+        console.print(f"[yellow]Season: could not refresh the closed week's row ({e}).[/yellow]")
+        return
+    changed = season_row_changes(before, after)
+    if changed:
+        console.print(
+            f"[green]OK[/green] {cfg.season.tab!r} week {week} re-read from {old_title!r}'s Bankroll (edited "
+            f"after its close): " + "; ".join(changed)
+        )
+    else:
+        console.print(f"[green]OK[/green] {cfg.season.tab!r} week {week} matches {old_title!r}'s Bankroll")
+
+
 def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, close: bool = False) -> None:
     """Shared by `bankroll sync` and `week close` -- see week_close's
     docstring for why `week close` doesn't yet pull contest history itself
@@ -5820,19 +6151,43 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, 
             "skipped here -- but still included in the Results backfill below)."
         )
 
-    cash_entries = [e for e in ledger_entries if classify_entry(e) == "cash"]
-    gpp_entries = [e for e in ledger_entries if classify_entry(e) == "gpp"]
-    console.print(f"This week: {len(cash_entries)} cash, {len(gpp_entries)} GPP.")
+    # Plan D item 2: Cash and GPP are NFL only; other sports go to the Other Sports ledger (same bankroll).
+    other_table = cfg.bankroll.other_table()
+    try:
+        other_ledger_present = other_table is not None and has_other_ledger(
+            client, cfg.bankroll.tab, other_table
+        )
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    buckets = {e.entry_key: ledger_bucket(e) for e in ledger_entries}
+    cash_entries = [e for e in ledger_entries if buckets[e.entry_key] == "cash"]
+    gpp_entries = [e for e in ledger_entries if buckets[e.entry_key] == "gpp"]
+    other_entries = [e for e in ledger_entries if buckets[e.entry_key] == "other"]
+    if other_entries and not other_ledger_present:
+        console.print(
+            f"[yellow]{len(other_entries)} non-NFL entr{'y' if len(other_entries) == 1 else 'ies'} go in the "
+            "GPP "
+            f"ledger: this sheet has no Other Sports ledger yet (`dfs setup other-sports`).[/yellow]"
+        )
+        gpp_entries, other_entries = gpp_entries + other_entries, []
+    console.print(
+        f"This week: {len(cash_entries)} cash, {len(gpp_entries)} GPP, {len(other_entries)} other sports."
+    )
 
     try:
-        cash_result = sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.cash, cash_entries, "cash")
-        gpp_result = sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.gpp, gpp_entries, "gpp")
+        results = [
+            sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.cash, cash_entries, "cash"),
+            sync_bucket(client, cfg.bankroll.tab, cfg.bankroll.gpp, gpp_entries, "gpp"),
+        ]
+        if other_ledger_present:
+            results.append(sync_bucket(client, cfg.bankroll.tab, other_table, other_entries, "other sports"))
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
 
     any_skipped = False
-    for result in (cash_result, gpp_result):
+    for result in results:
         console.print(
             f"\n[bold]{result.bucket}[/bold]: wrote {len(result.written_entries)}, "
             f"already synced {result.already_synced}, skipped (table full) {result.skipped_full}"
@@ -5858,71 +6213,50 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, 
         console.print(f"\n[green]OK[/green] updated {cfg.results.tab!r} for week(s): {weeks_str}")
 
     # Round 5, item 7d (revised 2026-09-29): Season follows the LEDGER. This
-    # week's Cash/GPP net and cost come from the Bankroll tab's own weekly
+    # week's Cash/GPP/Other net and cost come from the Bankroll tab's own weekly
     # summary (so a promo entry Sam zeroed stays zero), and past weeks are
     # never re-derived from the export. Betting net/risked/record and Ending
     # are gated to `week close` (`close=True`): mid-week they'd be incomplete.
     try:
-        season_written = write_season_cash_gpp(
-            client,
-            cfg.season,
-            {resolved_week: read_ledger_week_totals(client, cfg.bankroll.tab, resolved_week)},
-        )
+        other_columns = has_other_columns(client, cfg.season)
+        week_close = read_week_close(client, cfg.bankroll, resolved_week)
+        if not close:
+            week_close.betting = None
+            week_close.ending_bankroll = None
+        season_written = write_week_close(client, cfg.season, week_close, other_columns=other_columns)
     except SheetsError as e:
         console.print(f"[red]Could not write {cfg.season.tab!r}:[/red] {e}")
         raise typer.Exit(code=1) from e
     if season_written:
+        t = week_close.totals
+        line = f"cash {t.cash_net:+.2f}, GPP {t.gpp_net:+.2f}"
+        if other_columns:
+            line += f", other sports {t.other_net:+.2f}"
         console.print(
-            f"[green]OK[/green] updated {cfg.season.tab!r} Cash/GPP for week {resolved_week} "
-            "from this sheet's ledger"
+            f"[green]OK[/green] updated {cfg.season.tab!r} week {resolved_week} from this sheet's ledger: "
+            f"{line}"
         )
-
-    if close and cfg.bankroll.bets is not None:
-        bets_cfg = cfg.bankroll.bets
-        try:
-            # Unformatted reads -- Odds %/Entered/Won carry currency/percent
-            # DISPLAY formats (see sheet_bankroll_view.py), and a formatted
-            # read would hand back strings like "$10.00"/"53.3%" that
-            # compute_weekly_betting_stats expects as plain floats.
-            ledger_rows = client.read_range_unformatted(
-                cfg.bankroll.tab, f"B{bets_cfg.first_row}:E{bets_cfg.last_row}"
-            )
-            ending_rows = client.read_range_unformatted(cfg.bankroll.tab, "B2")
-        except SheetsError as e:
-            console.print(f"[red]Could not read {cfg.bankroll.tab!r} for the Season close:[/red] {e}")
-            raise typer.Exit(code=1) from e
-
-        def _cell(row: list, idx: int) -> float | None:
-            if idx >= len(row):
-                return None
-            v = row[idx]
-            return v if isinstance(v, (int, float)) else None
-
-        betting_rows = [(_cell(r, 0), _cell(r, 2), _cell(r, 3)) for r in ledger_rows]
-        betting_stats = compute_weekly_betting_stats(betting_rows)
-        ending_bankroll = _cell(ending_rows[0], 0) if ending_rows and ending_rows[0] else None
-
-        try:
-            closed = write_season_betting_and_ending(
-                client,
-                cfg.season,
-                resolved_week,
-                betting_stats=betting_stats,
-                ending_bankroll=ending_bankroll,
-            )
-        except SheetsError as e:
-            console.print(f"[red]Could not write {cfg.season.tab!r} Betting/Ending:[/red] {e}")
-            raise typer.Exit(code=1) from e
-        if closed:
+        if close and week_close.betting is not None:
             console.print(
                 f"[green]OK[/green] {cfg.season.tab!r} week {resolved_week}: betting net "
-                f"{betting_stats.net:.2f}, ending bankroll {ending_bankroll}"
+                f"{week_close.betting.net:.2f}, ending bankroll {week_close.ending_bankroll}"
             )
-        else:
-            console.print(
-                f"[yellow]{cfg.season.tab!r} has no row for week {resolved_week} -- Betting/Ending not "
-                "written.[/yellow]"
+    else:
+        console.print(
+            f"[yellow]{cfg.season.tab!r} has no row for week {resolved_week} -- not written.[/yellow]"
+        )
+
+    if close and cfg.google_sheets.previous_sheet_id:
+        try:
+            previous = SheetsClient(
+                cfg.google_sheets.model_copy(update={"sheet_id": cfg.google_sheets.previous_sheet_id})
             )
+            previous_title, _ = previous.describe()
+            _refresh_closed_week_row(
+                cfg, previous, client, old_title=previous_title, other_columns=other_columns
+            )
+        except (SheetsError, ValueError) as e:
+            console.print(f"[yellow]Could not re-read last week's Bankroll for its Season row:[/yellow] {e}")
 
     if any_skipped:
         console.print(

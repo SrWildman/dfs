@@ -423,6 +423,21 @@ def leave_one_week_out(obs: pd.DataFrame, mode: str, grid_k=GRID_K, grid_kw=GRID
     return pd.DataFrame(rows, columns=["k", "k_w", "mae", "n_scored"])
 
 
+NO_SIGNAL = "toughness: no signal yet"
+FLAT = 0.05  # points: a series toughness this close to zero reads as none
+
+
+def no_signal(series_table: pd.DataFrame, k: float | None = None) -> bool:
+    """True when the fit is degenerate (Plan D item 6): the series penalty `k` at the top of its grid, or
+    every series' toughness flat at zero, so a "+0.0 pts" row would only look like information."""
+    if k is not None and k >= max(GRID_K):
+        return True
+    if "toughness" not in series_table:
+        return True
+    values = pd.to_numeric(series_table["toughness"], errors="coerce").dropna()
+    return values.empty or bool((values.abs() < FLAT).all())
+
+
 def best_penalties(errors: pd.DataFrame) -> tuple[float, float, float] | None:
     """`(k, k_w, mae)` of the lowest error; ties go to the larger penalties (more shrinkage)."""
     scored = errors.dropna(subset=["mae"])

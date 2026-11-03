@@ -1945,15 +1945,16 @@ account.
 
 ## Season tab (Round 5, item 7d, 2026-09-28)
 
-**Total Net** (`E`, per week): `=B+C+D` (Cash + GPP + Betting Net). Blank
-inputs act as 0 in Sheets' own `+`, so a week with no bets yet still
-totals correctly from just Cash/GPP.
+**Total Net** (`E`, per week): `=B+C+D+R` (Cash + GPP + Betting + Other
+sports Net; `R` since Plan D item 2, 2026-11, when non-NFL contests left the
+GPP column). Blank inputs act as 0 in Sheets' own `+`, so a week with no
+bets yet still totals correctly from just Cash/GPP.
 
 **Cumulative columns** (`N`-`Q`, chart source only): each a running
 `SUM($col$2:col{row})` -- e.g. `N5 = SUM($B$2:B5)`. `Cum. Total` is the
-three cumulative columns added together (`=N+O+P`), not its own running
-sum of `E`, so it can never drift from the per-bucket cumulatives even if
-a row's `E` and `B+C+D` were ever briefly out of sync mid-edit.
+running sum of `Total Net` (`=SUM($E$2:E{row})`, since Plan D item 2) so it
+includes other sports, which have no cumulative column of their own; before,
+it was `=N+O+P`.
 
 **Year-to-date ROI** (`D23:D26`): `Net / Risked` for that bucket, over
 the full season range (`SUM(B2:B19)/SUM(G2:G19)` for Cash, etc.) --
@@ -1970,6 +1971,48 @@ close` time -- a pure-Python re-derivation of the same arithmetic
 `record_formula`/`expected_vs_actual_formula` compute on the sheet,
 verified against the same real 4-bet example (win/loss/push/pending) used
 to verify those formulas live.
+
+**A closed week's row is re-read from its own Bankroll** (Plan D item 2): the row
+`dfs week close` writes is a snapshot, and hand edits to that week's ledger afterwards
+(a promo fee zeroed, a win corrected, bets settled) used to leave Season behind the
+Bankroll tab (Week 8: $16.33). `dfs week new` and the next `dfs week close` re-read the
+previous week's Bankroll (`season.read_week_close`) and rewrite its row, printing what
+moved (`season.season_row_changes`).
+
+## Contest plan and effective rake (`contest_plan.py`, `dfs contests plan`; Plan D item 3)
+
+Each paid NFL entry in the contest log falls under one plan line (`plan_bucket`): **Showdown**;
+**Big N-max GPP** (N-max GPP with `big_field_entrants`, 2,000, or more entrants); **Cash + small SE
+GPP** (Double Up, 50/50, H2H, and SE GPP under `small_field_entrants`, 1,000); **Outside the plan**
+(everything else). Caps: `showdown_max` ($5), `big_nmax_max` ($10), the rest of the Bankroll tab's
+Weekly Budget for the preferred line, $0 outside it, and the week's total at most the budget.
+`week close` prints `spent $X vs plan $Y; over in: ...` naming every line over its cap.
+
+**Effective rake** per contest: `1 - prize_pool / (entrants x fee)` (negative when a contest
+overlaid); the table shows its median over the distinct contests played, by format and, for Classic
+GPPs, by field size (up to 200, 201-1,000, 1,001-5,000, 5,001+), beside the ROI of those entries.
+
+**H2H opponents to avoid** (`h2h_avoid`, from `data/contests/h2h_opponents.csv`): winless at 0-3 or
+worse, or under 30% wins over 5 or more games.
+
+## Cash post-mortem (`cash_postmortem.py`, `dfs week close`; Plan D item 8)
+
+Over every lineup in the week's Double Up standings (`contest_retro.load_real_contests`), a lineup
+**cashed** when its points are at least its contest's cash line. For each player in at least 8% of
+those lineups: `in cashers` = share of cashing lineups holding him, `in non-cashers` likewise, and the
+**gap** is the difference; the 10 biggest gaps are listed. Tags: **in N cash builds** (the week's
+distinct cash builds, every round of `data/suggest_state/<week>.json`), **pool only** (in the saved
+pool before the lock, `pool_store.pool_at`, as Cash or GPP), **missed entirely**; with no build record
+the tag says so. Ranks are within position on the last pre-lock EdgeRaw (CalPts, and Value =
+CalPts / Salary x 1000); `CashOwn` predicted against actual double-up ownership (his share of the
+lineups). Each distinct cash build is scored with the players' real DK points from the standings
+against the lowest double-up cash line. The entered cash lineup (`data/entered/`, else the standings'
+`srwildman` rows) is compared to the build sharing most players: who is out, who is in, and the points
+that cost. Rows go to `data/contests/cash_postmortem.csv` (one per listed player; a rerun replaces the
+week).
+
+**Cash chalk check** (`dfs lineups suggest`): every player with `CashOwn` of 30% or more and how many of
+the round's cash builds hold him. Display only.
 
 ## Stake sizing (`stakes.py`, the Bankroll tab's STAKES block)
 

@@ -6,6 +6,7 @@ from dfs.sheet_season_view import (
     YTD_BETTING_ROW,
     YTD_CASH_ROW,
     YTD_GPP_ROW,
+    YTD_OTHER_ROW,
     YTD_TOTAL_ROW,
     add_season_chart,
     build_season_grid,
@@ -28,7 +29,7 @@ def test_total_net_formula_sums_cash_gpp_betting_for_its_own_row():
     grid = build_season_grid()
     row_5 = grid[5]  # week 5, sheet row FIRST_ROW + 5 - 1
     sheet_row = FIRST_ROW + 5 - 1
-    assert row_5[4] == f"=B{sheet_row}+C{sheet_row}+D{sheet_row}"
+    assert row_5[4] == f"=B{sheet_row}+C{sheet_row}+D{sheet_row}+R{sheet_row}"  # R: other sports
 
 
 def test_cumulative_columns_are_running_sums_from_first_row():
@@ -36,7 +37,7 @@ def test_cumulative_columns_are_running_sums_from_first_row():
     row_3 = grid[3]  # week 3
     sheet_row = FIRST_ROW + 3 - 1
     assert row_3[13] == f"=SUM($B${FIRST_ROW}:B{sheet_row})"
-    assert row_3[16] == f"=N{sheet_row}+O{sheet_row}+P{sheet_row}"
+    assert row_3[16] == f"=SUM($E${FIRST_ROW}:E{sheet_row})"  # Total Net to date, other sports included
 
 
 def test_ytd_rows_sum_the_full_week_range():
@@ -61,13 +62,17 @@ def test_ytd_rows_sum_the_full_week_range():
 
 def test_every_ytd_roi_cell_is_guarded_so_an_empty_season_reads_blank():
     grid = build_season_grid()
-    for row in (YTD_CASH_ROW, YTD_GPP_ROW, YTD_BETTING_ROW, YTD_TOTAL_ROW):
+    for row in (YTD_CASH_ROW, YTD_GPP_ROW, YTD_BETTING_ROW, YTD_TOTAL_ROW, YTD_OTHER_ROW):
         assert grid[row - 1][3] == f'=IF(C{row}="","",IFERROR(B{row}/C{row},""))'
 
 
 class _ChartClient:
-    def __init__(self):
+    def __init__(self, header=None):
         self.calls = []
+        self.header = list(HEADER) if header is None else header
+
+    def read_range(self, tab, a1):
+        return [self.header]
 
     def update_range(self, *a, **k):
         self.calls.append(("update_range", a))
@@ -89,5 +94,13 @@ def test_the_chart_helper_block_is_hidden_and_the_chart_still_plots_it():
     client = _ChartClient()
     add_season_chart(client, "Season")
     chart = next(k for name, k in client.calls if name == "add_line_chart")
-    assert chart["plot_hidden_data"] is True  # else hiding S:W would blank the chart
-    assert ("hide_columns", ("Season", "S", "W")) in client.calls
+    assert chart["plot_hidden_data"] is True  # else hiding T:X would blank the chart
+    assert ("hide_columns", ("Season", "T", "X")) in client.calls
+
+
+def test_the_chart_is_not_rebuilt_on_a_tab_from_before_the_other_columns():
+    """Its chart block still sits at S:W there: writing T:X would leave the chart reading stale cells."""
+    old = list(HEADER[:17]) + ["", "Week"]
+    client = _ChartClient(header=old)
+    assert "other-sports" in add_season_chart(client, "Season")
+    assert client.calls == []

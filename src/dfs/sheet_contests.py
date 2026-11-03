@@ -15,9 +15,9 @@ so nothing on it is typed and no hand-edited cell survives. Contents, top to bot
    more;
 5. **Left out of the ROI above**: freerolls, Showdown, private and unrecognised contests with their results.
 
-Series toughness from the engine (`toughness.py`) is NOT shown as a number: with the data so far the engine's
-own leave-one-week-out check shrinks every series to its format, so the honest statement is "not
-separable yet".
+Series toughness from the engine (`toughness.py`) is NOT shown as a number. While its leave-one-week-out
+fit is degenerate (`toughness.no_signal`: every series shrunk to its format) the tab says "Toughness: no
+signal yet" (`NO_SIGNAL_NOTE`).
 The within-week cash-line gaps in section 1 are the measured version of the same idea.
 
 The layout is built by `build_layout` (pure, no sheet) and written by `write_contests`.
@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from dfs.contests import history
+from dfs.contests import history, toughness
 from dfs.contests import series as series_mod
 from dfs.contests.decisions import short_series
 from dfs.sheet_clipping import fit_tab_widths
@@ -63,10 +63,15 @@ LEFT_OUT_FORMATS = (
 FIELD_GROUPS = (("all", "field"), ("top10", "top 10%"), ("me", "you"))
 TEXT_HEADERS = {"Series", "Format", "Latest cash line", "Your score", "Opponent (2+ meetings)"}
 OPPONENTS_SHOWN = 15  # the most-met opponents
-TOUGHNESS_NOTE = (
-    "Series toughness is not separable yet: the engine's own leave-one-week-out check finds a series no "
-    "different from its format, so the gap to the other series of the same format in the same weeks "
-    "(a real number from the standings files) is shown instead. It firms up as standings pile up."
+TOUGHNESS_NOTE = (  # the fit separates series (see NO_SIGNAL_NOTE for when it does not)
+    "'Cash line (avg slate)' is the engine's expected cash line for each series in an average week; the gap "
+    "to the other series of the same format in the same weeks is the measured version from the standings."
+)
+NO_SIGNAL_NOTE = (
+    "Toughness: no signal yet. The engine's leave-one-week-out fit shrinks every series to its format, so "
+    "'Cash line (avg slate)' is the format's; the gap to the other series of the same format in the same "
+    "weeks (a real number from the standings files) is the measured difference. It firms up as standings "
+    "pile up."
 )
 H2H_USE = "H2H lobby: favour opponents you beat; skip the ones who beat you."
 _FORMULA_STARTS = ("=", "+", "-", "@")
@@ -670,7 +675,7 @@ def build_layout(tables: Tables, season: int) -> Layout:
     # 1. series
     b.section(f"SERIES YOU PLAY, {season}  -  by format")
     series = series_rows(tables, season)
-    b.note(TOUGHNESS_NOTE)
+    b.note(NO_SIGNAL_NOTE if toughness.no_signal(tables.tough_series) else TOUGHNESS_NOTE)
     if series.empty:
         b.verdict("No Classic entries logged this season yet.")
     else:

@@ -54,10 +54,18 @@ class LedgerClient:
 def test_read_ledger_week_totals_uses_the_sheets_own_summary_cells():
     """Season follows the ledger (a promo entry Sam zeroed stays zero), so
     Cash/GPP cost and net are the Bankroll summary's D/H on rows 12/13."""
-    client = LedgerClient({"D12": 55.0, "H12": 56.0, "D13": 88.0, "H13": -18.0})
+    client = LedgerClient({"D12": 55.0, "H12": 56.0, "D13": 88.0, "H13": -18.0, "D11": 6.0, "H11": -6.0})
     got = read_ledger_week_totals(client, "Bankroll", 3)
-    assert got == WeekBankrollNet(week=3, cash_net=56.0, cash_risked=55.0, gpp_net=-18.0, gpp_risked=88.0)
-    assert sorted(client.reads) == ["D12", "D13", "H12", "H13"]
+    assert got == WeekBankrollNet(
+        week=3,
+        cash_net=56.0,
+        cash_risked=55.0,
+        gpp_net=-18.0,
+        gpp_risked=88.0,
+        other_net=-6.0,
+        other_risked=6.0,
+    )
+    assert sorted(client.reads) == ["D11", "D12", "D13", "H11", "H12", "H13"]  # row 11: the Other Sports line
 
 
 def test_read_ledger_week_totals_treats_blank_or_text_as_zero():

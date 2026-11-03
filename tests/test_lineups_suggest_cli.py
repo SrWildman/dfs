@@ -354,3 +354,26 @@ def test_a_wide_pool_pick_joins_the_round_as_a_new_gpp_build(
     assert saved.contests[0].builds == [3]
     state = suggest_state.load_state(6)
     assert [b.number for b in state.latest.builds] == [1, 2, 3]  # the round records it too
+
+
+def test_the_saved_round_keeps_the_calibrated_cash_percent_as_p_cash_shown(cfg, edge, capsys, monkeypatch):
+    """Plan D item 9: with `[sim.lines] calibrated_cash_offset` on, the round file keeps `p_cash` (today's
+    line, what ranked the builds) and `p_cash_shown` (the calibrated number the tab and Week page show)."""
+    import dataclasses
+
+    lines = SimpleNamespace(display_field=object(), status="", note="", cash_basis="")
+    monkeypatch.setattr(
+        cli,
+        "_late_swap_sim_setup",
+        lambda *a, **k: (build_specs(edge), SimSettings(145.0, 190.0, "cash", lines=lines)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "with_shown_cash",
+        lambda builds, specs, field: [dataclasses.replace(b, p_cash=0.42) for b in builds],
+    )
+    monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: "Suggested: ok")
+    run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys)
+    (rnd,) = suggest_state.load_state(6).rounds
+    assert all(b.metrics["p_cash_shown"] == 0.42 for b in rnd.builds)
+    assert all(b.metrics.get("p_cash") != 0.42 for b in rnd.builds if b.kind == "cash")

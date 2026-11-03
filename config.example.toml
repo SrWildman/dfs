@@ -92,6 +92,15 @@ first_row = 86
 last_row = 149
 entry_key_column = "L"
 
+# Non-NFL DK contests (MLB, NHL, UFC, ...) go to their own Other Sports ledger, two rows under GPP, so Cash and GPP
+# are NFL only; Ending Bankroll still counts every dollar. `dfs setup other-sports` builds it. Left out, it is
+# header_row = gpp.last_row + 2 with 20 rows (151-171 on the template); set it only if your sheet differs.
+# [bankroll.other]
+# header_row = 151
+# first_row = 152
+# last_row = 171
+# entry_key_column = "L"
+
 # The season-level Results log -- NOT reset by a new weekly sheet copy.
 # `dfs week new` copies its typed-value columns (Week, Cash Pts/Line, H2H
 # Entered/Win, Red/Blue/Black) from the outgoing sheet to the new one, so
@@ -174,6 +183,15 @@ cash_line_series = "NFL GIANT $25 Double Up [Single Entry]"
 # max_pct_bankroll_per_week = 5.0     # a week's total entry fees stay under this share of the bankroll
 # max_entry_fee_pct = 1.0             # no single entry above this share of the bankroll
 # split = { cash = 70, gpp = 30 }     # your own split of the spend; overrides the default (ROI-based) split
+
+# The weekly contest plan `dfs contests plan` shows and `dfs week close` checks: Showdown and big-field N-max GPPs
+# capped (dollars a week), the rest of the Bankroll tab's Weekly Budget to double-ups, 50/50s, H2Hs and single-entry
+# GPPs under `small_field_entrants`. These are the defaults; leave the section out to use them.
+# [contest_plan]
+# showdown_max = 5.0
+# big_nmax_max = 10.0
+# big_field_entrants = 2000
+# small_field_entrants = 1000
 
 # The Odds API (the-odds-api.com), for player props. Put your own key here; config.toml is gitignored and the key is
 # never printed or committed.
