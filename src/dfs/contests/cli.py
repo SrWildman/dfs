@@ -195,3 +195,11 @@ def plan(
     )
     for line in lines:
         console.print(escape(line), highlight=False)
+    from dfs import week_inputs
+    from dfs.nfl_calendar import current_week
+
+    checked = week if week is not None else contest_plan.last_week(typed, season)
+    payload = contest_plan.week_page_payload(
+        typed, opponents, season=season, week=checked, cfg=cfg.contest_plan, budget=budget
+    )
+    week_inputs.save_input("contest_plan", payload, season=season, week=current_week())  # for the Week page

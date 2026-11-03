@@ -305,3 +305,34 @@ def sheet_budget(cfg, *, warn=print) -> tuple[float | None, str]:  # noqa: ANN00
         warn(f"Could not read the Weekly Budget ({e}); planning without a total cap.")
         return None, "no sheet"
     return value, f"{title}'s {cfg.bankroll.tab}!{BANKROLL_WEEKLY_BUDGET_CELL}"
+
+
+def week_page_payload(
+    typed: pd.DataFrame,
+    opponents: pd.DataFrame | None,
+    *,
+    season: int,
+    week: int | None,
+    cfg: ContestPlanConfig,
+    budget: float | None,
+) -> dict:
+    """What `dfs contests plan` leaves for the Week page (`week_inputs.save_input("contest_plan", ...)`, the
+    shape of the page's `CONTEST_PLAN_SHAPE`)."""
+    lines = plan_lines(cfg, budget)
+    check = check_week(typed, season, week, cfg, budget) if week is not None else None
+    roi = [
+        {"format": r.label, "entries": r.entries, "roi": r.roi, "rake": r.rake} for r in rake_by_format(typed)
+    ]
+    return {
+        "caps": {line.bucket: line.cap for line in lines},
+        "spent": dict(check.spent) if check else {},
+        "budget": budget,
+        "total_spent": check.total if check else None,
+        "over": list(check.over) if check else [],
+        "roi": roi,
+        "h2h_avoid": [{"opponent": o.name, "record": o.record} for o in h2h_avoid(opponents)]
+        if opponents is not None
+        else [],
+        "line": check.line() if check else "",
+        "checked_week": week,
+    }

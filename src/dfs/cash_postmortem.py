@@ -492,10 +492,51 @@ def load_week(season: int, week: int) -> WeekInputs:
     return WeekInputs(season, week, contests, builds, pool, edge, entered, notes)
 
 
+def week_page_payload(pm: PostMortem) -> dict:
+    """What `week close` leaves for the Week page (`week_inputs.save_input("postmortem", ...)`, the page's
+    `POSTMORTEM_SHAPE`): one headline and a line per separator."""
+    if pm.builds:
+        cashed = sum(s.cashed for s in pm.builds)
+        best = max(s.points for s in pm.builds)
+        headline = (
+            f"{cashed} of our {len(pm.builds)} cash builds would have cashed (line {pm.cash_line:.1f}, "
+            f"best {best:.1f})"
+        )
+    else:
+        headline = (
+            f"{pm.cashers:,} of {pm.lineups:,} double-up lineups cashed (line {pm.cash_line:.1f}); "
+            "no build record"
+        )
+    entered = [frozenset(key(n) for n in d.names) for d in pm.entered]
+    lines = []
+    for g in pm.gaps:
+        mine = ""
+        if entered:
+            held = any(key(g.name) in e for e in entered)
+            mine = ", in your entry" if held else ", missing from your entry"
+        lines.append(
+            f"{g.name}: {g.tag_text}, in {g.in_cashers:.0%} of cashers vs {g.in_non_cashers:.0%} of "
+            f"non-cashers (CashOwn {_pct(g.cash_own)} vs {_pct(g.field)} actual){mine}"
+        )
+    for d in pm.entered:
+        if d.nearest is not None and d.out:
+            lines.append(
+                f"Your entry ({d.points:.1f}) against {d.nearest.build.label}: left out "
+                + ", ".join(n for n, _ in d.out)
+                + f" ({'cost' if d.cost > 0 else 'gained'} {abs(d.cost):.1f} pts)"
+            )
+    return {"headline": headline, "lines": lines, "week": pm.week}
+
+
 def run(season: int, week: int, *, append: bool = True) -> list[str]:
-    """The post-mortem's lines for the week (and its rows appended to the running file)."""
+    """The post-mortem's lines for the week (and its rows appended to the running file and its summary left
+    for the Week page)."""
+    from dfs import week_inputs
+
     pm = postmortem(load_week(season, week))
     lines = report_lines(pm)
     if append and pm.gaps:
         lines.append(f"  Kept in {append_csv(pm)}")
+    if append:
+        week_inputs.save_input("postmortem", week_page_payload(pm), season=season, week=week)
     return lines

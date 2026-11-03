@@ -169,3 +169,16 @@ def test_chalk_check_counts_cash_builds_for_every_double_up_chalk_player():
     assert cp.chalk_check(_edge(), []) == []
     fade = cp.chalk_check(_edge(), [WITHOUT])
     assert any("Star Wide" in line and "a fade" in line for line in fade)
+
+
+def test_the_week_page_payload_has_a_headline_and_a_line_per_separator():
+    builds = [
+        cp.CashBuild(tuple(WITH_STAR), "build 1 (round 1)"),
+        cp.CashBuild(tuple(WITHOUT), "build 2 (round 1)"),
+    ]
+    pm = cp.postmortem(_inputs(builds, entered=[(tuple(WITHOUT), "x")]))
+    p = cp.week_page_payload(pm)
+    assert p["headline"] == "1 of our 2 cash builds would have cashed (line 115.0, best 115.0)"
+    assert p["lines"][0].startswith("Star Wide: in 1 cash build, in 100% of cashers vs 0% of non-cashers")
+    assert p["lines"][0].endswith("missing from your entry")
+    assert "no build record" in cp.week_page_payload(cp.postmortem(_inputs(None)))["headline"]

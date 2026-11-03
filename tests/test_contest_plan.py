@@ -121,3 +121,24 @@ def test_report_lines_hold_every_section():
         assert heading in text
     assert "over in: Showdown $10.00 (cap $5.00)" in text
     assert "no h2h_opponents.csv yet" in text
+
+
+def test_the_week_page_payload_has_the_pages_shape():
+    log = _log([(8, s.SHOWDOWN, 100, 31.0, 0.0, 90.0, "a"), (8, s.DOUBLE_UP, 100, 25.0, 45.0, 2200.0, "d")])
+    opp = pd.DataFrame(
+        {"opponent": ["x"], "meetings": [3], "wins": [0], "losses": [3], "ties": [0], "net": [-3.0]}
+    )
+    p = cp.week_page_payload(log, opp, season=2026, week=8, cfg=CFG, budget=100.0)
+    assert p["caps"][cp.SHOWDOWN] == 5.0 and p["spent"][cp.SHOWDOWN] == 31.0
+    assert p["budget"] == 100.0 and p["total_spent"] == 56.0
+    assert p["over"] == ["Showdown $31.00 (cap $5.00)"] and p["line"].startswith("Contest plan, Week 8")
+    assert {r["format"] for r in p["roi"]} == {s.SHOWDOWN, s.DOUBLE_UP} and "rake" in p["roi"][0]
+    assert p["h2h_avoid"] == [{"opponent": "x", "record": "0-3"}]
+
+
+def test_save_input_writes_under_the_test_data_dir():
+    from dfs import paths, week_inputs
+
+    assert week_inputs.save_input("contest_plan", {"line": "x"}, season=2026, week=9)
+    path = paths.DATA_DIR / "week" / "inputs" / "2026-wk09-contest_plan.json"
+    assert path.exists() and week_inputs.load_input("contest_plan", 2026, 9)["line"] == "x"
