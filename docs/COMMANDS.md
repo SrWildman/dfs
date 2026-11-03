@@ -262,6 +262,16 @@ The contest side of `dfs week close`, on its own: keeps the history export and m
 | `--sheet-id STR` | Write the Contests tab to this sheet instead of config.toml's (the template first). Results' Cash Line is only ever filled on config.toml's own sheet. |
 | `--no-sheet` | Keep the files and run the engine; touch no sheet. |
 
+### `dfs contests plan`
+
+The weekly contest plan and the last week against it, from your own contest log (Plan D item 3): Showdown and big-field N-max GPPs capped (`[contest_plan]` in config.toml), the rest to double-ups, H2Hs and small single-entry GPPs, the total within the Bankroll tab's Weekly Budget. Then ROI by format (this season and all seasons), the effective rake by format and field size, and the H2H regulars to avoid. Terminal only: writes nothing.
+
+| Option | What it does |
+|---|---|
+| `--week INT` | Check this week against the plan (default: the last one played). |
+| `--budget FLOAT` | The weekly budget to plan with (default: the Bankroll tab's Weekly Budget). |
+| `--no-sheet` | Read no sheet (the plan then has no total cap). |
+
 ### `dfs contests analyze`
 
 Merges your DraftKings history into a durable log, tags every contest with its series and format, scores how tough each series is (and your head-to-head record), and, given a folder of standings files, measures how the fields build their lineups. Writes CSVs under --out and prints a short summary; it never touches a sheet and never contacts DraftKings.

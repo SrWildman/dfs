@@ -5411,6 +5411,7 @@ def week_close(
     _keep_dk_files_before_scoring(cfg, csv)
     _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
     _contests_after_close(cfg, csv)
+    _contest_plan_after_close(cfg, week)
     if research:
         _research_after_close(cfg, week)
 
@@ -5540,6 +5541,29 @@ def _contests_after_close(cfg: Config, csv: Path) -> None:
         )
     except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; never fail the close over this
         console.print(f"[yellow]Contests not updated ({e}); run `dfs contests update` later.[/yellow]")
+
+
+def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
+    """`spent $X vs plan $Y; over in: ...` for the week just closed, from the contest log the contests step
+    just updated (Plan D item 3; `dfs contests plan` has the whole report). NEVER fails the close."""
+    from dfs import contest_plan
+    from dfs.contests import history
+    from dfs.nfl_calendar import current_season
+    from dfs.paths import CONTESTS_DIR
+    from dfs.sheet_stakes import _cell
+    from dfs.week import BANKROLL_WEEKLY_BUDGET_CELL
+
+    try:
+        season = current_season()
+        typed = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
+        closed = week if week is not None else contest_plan.last_week(typed, season)
+        if closed is None:
+            return
+        budget = _cell(SheetsClient(cfg.google_sheets), cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
+        check = contest_plan.check_week(typed, season, closed, cfg.contest_plan, budget)
+        console.print("\n" + escape(check.line()), highlight=False)
+    except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over this
+        console.print(f"[yellow]Contest plan check skipped ({e}); `dfs contests plan` shows it.[/yellow]")
 
 
 def _score_results_after_close(cfg: Config) -> None:

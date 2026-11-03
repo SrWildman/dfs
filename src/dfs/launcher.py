@@ -285,6 +285,7 @@ MORE_LABELS = {
     "dfs bankroll sync": "Reconcile a DK contest-history CSV into Bankroll",
     "dfs bankroll stakes": "Rebuild the STAKES block: your ROI by format and this week's plan",
     "dfs contests update": "Keep the DK downloads, learn from the standings, rebuild the Contests tab",
+    "dfs contests plan": "This week's contest plan by format, and last week against it (terminal only)",
     "dfs contests analyze": "Run the contests engine on files only (no sheet)",
     "dfs ownership log": "Log a contest's actual ownership",
     "dfs lineups clear": "Clear last week's typed-in lineups",

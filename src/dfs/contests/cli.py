@@ -145,3 +145,71 @@ def update(
     )
     if report.history_used is None:
         raise typer.Exit(code=1)
+
+
+@contests_app.command("plan")
+def plan(
+    week: int = typer.Option(
+        None, "--week", help="Check this week against the plan (default: the last one played)."
+    ),
+    budget: float = typer.Option(
+        None, "--budget", help="The weekly budget to plan with (default: the Bankroll tab's Weekly Budget)."
+    ),
+    no_sheet: bool = typer.Option(
+        False, "--no-sheet", help="Read no sheet (the plan then has no total cap)."
+    ),
+) -> None:
+    """The weekly contest plan and the last week against it, from your own contest log (Plan D item 3):
+    Showdown and big-field N-max GPPs capped (`[contest_plan]` in config.toml), the rest to double-ups,
+    H2Hs and small single-entry GPPs, the total within the Bankroll tab's Weekly Budget. Then ROI by
+    format (this season and all seasons), the effective rake by format and field size, and the H2H
+    regulars to avoid. Terminal only: writes nothing."""
+    import pandas as pd
+
+    from dfs import contest_plan
+    from dfs.config import load_config
+    from dfs.contests import history
+    from dfs.nfl_calendar import current_season
+
+    cfg = load_config()
+    season = current_season()
+    typed = history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv"))
+    if typed.empty:
+        console.print(
+            "[yellow]No contest log yet: `dfs week close` (or `dfs contests update`) builds it.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+    source = "--budget"
+    if budget is None and not no_sheet:
+        budget, source = _sheet_budget(cfg)
+    opponents_path = CONTESTS_DIR / "h2h_opponents.csv"
+    opponents = pd.read_csv(opponents_path) if opponents_path.exists() else None
+    lines = contest_plan.report_lines(
+        typed,
+        opponents,
+        season=season,
+        week=week if week is not None else contest_plan.last_week(typed, season),
+        cfg=cfg.contest_plan,
+        budget=budget,
+        budget_source=source,
+    )
+    for line in lines:
+        console.print(escape(line), highlight=False)
+
+
+def _sheet_budget(cfg) -> tuple[float | None, str]:  # noqa: ANN001 - dfs.config.Config
+    """The Bankroll tab's Weekly Budget on the live week's sheet, and where it came from."""
+    from dfs.sheet_stakes import _cell
+    from dfs.sheets import SheetsClient, SheetsError
+    from dfs.week import BANKROLL_WEEKLY_BUDGET_CELL
+
+    try:
+        client = SheetsClient(cfg.google_sheets)
+        title, _ = client.describe()
+        value = _cell(client, cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
+    except SheetsError as e:
+        console.print(
+            f"[yellow]Could not read the Weekly Budget ({e}); planning without a total cap.[/yellow]"
+        )
+        return None, "no sheet"
+    return value, f"{title}'s {cfg.bankroll.tab}!{BANKROLL_WEEKLY_BUDGET_CELL}"
