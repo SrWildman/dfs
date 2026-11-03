@@ -531,6 +531,42 @@ def _check_other_sports(
     return issues
 
 
+def _check_literal_lookups(
+    client: DoctorClient, tab_titles: set[str], headers_by_tab: dict[str, list[str]]
+) -> list[DoctorIssue]:
+    """Plan D item 7: PlayerPoolRaw's and oddsFinal's hand-built VLOOKUPs with a typed column number are
+    still the formulas `sheet_literal_lookups` holds (whose numbers a test ties to the writers' order)."""
+    from dfs import sheet_literal_lookups as sll
+
+    issues: list[DoctorIssue] = []
+    for tab in (sll.PLAYER_POOL_RAW, sll.ODDS_FINAL):
+        if tab not in tab_titles:
+            continue
+        header = [str(c).strip() for c in headers_by_tab.get(tab, [])]
+        wanted = [lu for lu in sll.ALL_LOOKUPS if lu.tab == tab and lu.header in header]
+        formulas: list = []
+        if wanted:
+            last = column_letter(max(header.index(lu.header) for lu in wanted))
+            row = client.read_formula(tab, f"A{sll.FORMULA_ROW}:{last}{sll.FORMULA_ROW}")
+            formulas = row[0] if row else []
+        for lookup in (lu for lu in sll.ALL_LOOKUPS if lu.tab == tab):
+            if lookup.header not in header:
+                issues.append(DoctorIssue("literal-lookups", f"{tab!r}: no {lookup.header!r} column"))
+                continue
+            i = header.index(lookup.header)
+            found = str(formulas[i]).strip() if i < len(formulas) else ""
+            if found != lookup.formula:
+                issues.append(
+                    DoctorIssue(
+                        "literal-lookups",
+                        f"{tab!r} {lookup.header!r} row {sll.FORMULA_ROW} is {found or '(blank)'!r}, "
+                        f"expected {lookup.formula!r} (its column number is checked against the writer's "
+                        "order; see sheet_literal_lookups.py)",
+                    )
+                )
+    return issues
+
+
 def _check_stakes_block(client: DoctorClient, cfg: Config, tab_titles: set[str]) -> list[DoctorIssue]:
     """The Bankroll tab's STAKES block (`sheet_stakes.py`) must start where it is written. A sheet without
     it (the template before `dfs bankroll stakes --sheet-id <template>` ran) has drifted from one with it."""
@@ -1179,6 +1215,7 @@ def run_doctor(
     issues += _check_bankroll_headers(client, cfg, tab_titles)
     issues += _check_stakes_block(client, cfg, tab_titles)
     issues += _check_other_sports(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_literal_lookups(client, tab_titles, headers_by_tab)
     issues += _check_cockpit_tab(tab_titles)
     issues += _check_player_card(client, cfg, tab_titles)
     issues += _check_compare(client, cfg, tab_titles)

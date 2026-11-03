@@ -1,8 +1,9 @@
 import re
 from dataclasses import dataclass
 
-from dfs import compare_card, derived, player_card
+from dfs import compare_card, derived, doctor, player_card
 from dfs import sheet_dk_upload as dku
+from dfs import sheet_literal_lookups as sll
 from dfs.config import Config
 from dfs.derived import ALL_PCT_COLUMNS, EDGE_COLUMNS, EDGE_SHEET_ORDER
 from dfs.doctor import run_doctor
@@ -125,7 +126,13 @@ class FakeDoctorClient:
         m = re.fullmatch(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", a1_range)
         first, last = int(m.group(2)), int(m.group(4))
         width = column_index(m.group(3)) + 1
-        return [[f"=X{r}"] * width for r in range(first, last + 1)]
+        grid = [[f"=X{r}"] * width for r in range(first, last + 1)]
+        if first == sll.FORMULA_ROW and tab_name in (sll.PLAYER_POOL_RAW, sll.ODDS_FINAL):
+            header = self._tabs.get(tab_name, [])
+            for lu in sll.ALL_LOOKUPS:  # a healthy sheet holds the hand-built lookups as written
+                if lu.tab == tab_name and lu.header in header and header.index(lu.header) < width:
+                    grid[0][header.index(lu.header)] = lu.formula
+        return grid
 
 
 def _healthy_compare() -> list[list[str]]:
@@ -188,7 +195,13 @@ _ALL_GOOD_TABS = {
     "DK Upload": list(DK_UPLOAD_SHEET_HEADER),
     "Lineups": list(LINEUPS_COLUMN_ORDER),
     "Player Pool": ["Pool", "Name", "Pos.", *LINKED_EDGE_COLUMNS],
-    PLAYER_POOL_RAW_TAB: ["Name", "Pos.", *LINKED_EDGE_COLUMNS],
+    PLAYER_POOL_RAW_TAB: [
+        "Name",
+        "Pos.",
+        *LINKED_EDGE_COLUMNS,
+        *(lu.header for lu in sll.PLAYER_POOL_RAW_LOOKUPS),
+    ],
+    sll.ODDS_FINAL: list(sll.ODDS_FINAL_COLUMNS[:2]) + [lu.header for lu in sll.ODDS_FINAL_LOOKUPS],
     "Bankroll": [],
     "Results": [
         "Week",
@@ -1225,3 +1238,22 @@ def test_run_doctor_flags_compare_pickers_that_are_behind_the_protection():
     client.protection = {"Compare": [{"whole_sheet": True, "unprotected": [(0, 1, 1, 5)]}]}  # B1:E1
     issues = run_doctor(client, _base_config(), title="Week 1")
     assert not [i for i in issues if i.check.startswith("compare")]
+
+
+def test_a_hand_built_lookup_that_changed_on_the_sheet_is_reported():
+    """Plan D item 7: PlayerPoolRaw's typed VLOOKUP column numbers are checked against the writers' order by a
+    test; doctor checks the sheet still holds those exact formulas."""
+    header = _ALL_GOOD_TABS[PLAYER_POOL_RAW_TAB]
+    width = header.index("Team Implied")
+    row = ["=X2"] * (width + 1)
+    for lu in sll.PLAYER_POOL_RAW_LOOKUPS:
+        row[header.index(lu.header)] = lu.formula
+    row[header.index("Pts")] = row[header.index("Pts")].replace(",4,", ",5,")  # a column moved upstream
+    from dfs.sheets import column_letter
+
+    rng = f"A2:{column_letter(width)}2"
+    client = FakeDoctorClient(dict(_ALL_GOOD_TABS), formulas={(PLAYER_POOL_RAW_TAB, rng): [row]})
+    issues = doctor._check_literal_lookups(client, set(_ALL_GOOD_TABS), dict(_ALL_GOOD_TABS))
+    assert [i.check for i in issues] == ["literal-lookups"] and "'Pts'" in issues[0].detail
+    healthy = FakeDoctorClient(dict(_ALL_GOOD_TABS))
+    assert doctor._check_literal_lookups(healthy, set(_ALL_GOOD_TABS), dict(_ALL_GOOD_TABS)) == []

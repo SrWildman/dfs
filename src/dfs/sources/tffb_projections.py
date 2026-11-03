@@ -66,6 +66,10 @@ PLAYERS_ENDPOINT_MARKER = "players/dk/classic"
 # column F, so appending more fields here can't break them.
 CORE_FIELDS = ["Id", "Name", "Position", "TeamAbbrev", "ProjPts", "ProjOwn"]
 EXTRA_FIELDS = ["Opp", "Salary", "Ceiling", "ImpPts", "OU", "Spread", "Game", "GameStart", "Venue"]
+# TFFBOptoRaw's columns, A onward, when TFFB sends every field. PlayerPoolRaw VLOOKUPs into this tab by column
+# NUMBER (`sheet_literal_lookups.PLAYER_POOL_RAW_LOOKUPS`; a test ties the two together), so a new field goes
+# at the end of EXTRA_FIELDS, never in the middle.
+SHEET_COLUMNS = ["Team" if f == "TeamAbbrev" else f for f in CORE_FIELDS] + EXTRA_FIELDS
 
 
 class TffbProjectionsFetchError(Exception):
