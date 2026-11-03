@@ -238,6 +238,9 @@ GAMES_FINISHED_AFTER_HOURS = 3.5
 # Injuries and depth charts (nflverse, updated daily) are re-pulled too: they feed the injury
 # beneficiaries and Edge tokens. `nflverse_games` (stadium/roof/schedule -- static for the week) and
 # the slower once-a-week sources are deliberately left out.
+# Safe after kickoff: `run_sync`'s guard (`sync_guard`) freezes every started player at his last values,
+# keeps rows a feed dropped, refuses to blank a column wholesale, and keeps DraftKings' main slate once DK
+# moves on to a later slate (Week 7's 3:18 pm sync lost every Status that way).
 LIVE_SYNC_SOURCES = [
     "nfl_odds",
     "draftkings",
@@ -2619,6 +2622,7 @@ def sync(
             any_failed = True
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
+    _print_guard_notes(results)
 
     # A name left in Player Pool's add-a-player box (the bound Apps Script normally handles it the moment
     # it is typed; an API write never fires the script) is set on EdgeRaw's Pool now -- see
@@ -2661,6 +2665,17 @@ def sync(
 
     if any_failed:
         raise typer.Exit(code=1)
+
+
+def _print_guard_notes(results: list) -> None:
+    """What the game-day guard kept instead of taking a feed (`sync_guard`): a started player's values, a row
+    the feed dropped, a column it blanked, DraftKings' post-lock slate. One yellow line each."""
+    notes = [note for r in results for note in getattr(r, "notes", [])]
+    if not notes:
+        return
+    console.print("[yellow]Kept from the last sync (a sync never wipes data):[/yellow]")
+    for note in notes:
+        console.print(f"[yellow]  {escape(note)}[/yellow]", highlight=False)
 
 
 def _save_pool_snapshot(
@@ -5102,6 +5117,7 @@ def week_new(
             any_failed = True
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
+    _print_guard_notes(results)
 
     _rebuild_cockpit_on_new_sheet(new_cfg, new_client)
     _rebuild_player_card_on_new_sheet(new_cfg, new_client, ctx)
