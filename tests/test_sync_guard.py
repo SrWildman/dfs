@@ -243,3 +243,91 @@ def test_run_sync_saves_the_guarded_frame_and_reports_it(monkeypatch, cfg, tmp_p
     assert saved.loc[1, "ProjPts"] == 20.0
     assert saved.loc[3, "ProjPts"] == 21.0
     assert result.notes
+
+
+# --- a kept row never resurrects an OUT player ------------------------------------------------------------
+
+
+def _tffb(rows: list[tuple]) -> pd.DataFrame:
+    base = {
+        "Position": "RB",
+        "Team": "DET",
+        "Opp": "GB",
+        "ProjOwn": 0,
+        "Salary": 6000,
+        "Ceiling": 30.0,
+        "ImpPts": 25.0,
+        "OU": 46.5,
+        "Spread": -3.0,
+        "Game": "Green Bay Packers_Detroit Lions",
+        "GameStart": LATE,
+        "Venue": "H",
+    }
+    return pd.DataFrame([{**base, "Id": i, "Name": n, "ProjPts": p} for i, n, p in rows])
+
+
+def _salary_file(statuses: dict[int, str]) -> pd.DataFrame:
+    names = {10: "Star Back", 11: "Other Back", 12: "Third Back"}
+    return pd.DataFrame(
+        [
+            {
+                "Position": "RB",
+                "Name + ID": f"{names[i]} ({i})",
+                "Name": names[i],
+                "ID": i,
+                "Roster Position": "RB/FLEX",
+                "Salary": 6000,
+                "Game Info": LATE_INFO,
+                "TeamAbbrev": "DET",
+                "AvgPointsPerGame": 15.0,
+                "Status": status,
+            }
+            for i, status in statuses.items()
+        ]
+    )
+
+
+@pytest.mark.parametrize("dk_status", ["OUT", "IR"])
+def test_a_dropped_row_that_dk_marks_out_is_never_built_or_offered(dk_status):
+    """Rule 2 keeps Star Back's projection row when TFFB's feed drops him; DraftKings has ruled him out. The
+    kept row must not bring him back: not in the builder's pool, not offered as a late swap."""
+    from dfs.derived import build_edge_frame
+    from dfs.late_swap_search import swap_pool
+    from dfs.lineup_suggest import CASH_TAGS, GPP_TAGS, pool_for
+
+    full = [(10, "Star Back", 30.0), (11, "Other Back", 15.0), (12, "Third Back", 12.0)]
+    old_proj, old_dk = _tffb(full), _salary_file({10: "", 11: "", 12: ""})
+    old_edge = build_edge_frame(old_proj, old_dk).frame
+
+    proj = _run("projections", _tffb(full[1:]), old_proj).frame  # the feed dropped him: kept
+    dk = _run("draftkings", _salary_file({10: dk_status, 11: "", 12: ""}), old_dk).frame
+    edge = _run("edge", build_edge_frame(proj, dk).frame, old_edge).frame
+
+    assert "Star Back" in proj["Name"].tolist()  # rule 2 did keep the row
+    assert edge.set_index("Name").loc["Star Back", "Avail"] == dk_status
+    tags = {"Star Back": "Both", "Other Back": "Both", "Third Back": "Both"}
+    for wanted in (CASH_TAGS, GPP_TAGS):
+        built = pool_for(edge, tags, wanted, now=AFTER_EARLY_KICKOFF, metric="ProjPts")
+        assert "Star Back" not in [p.name for p in built] and built
+    offered = swap_pool(
+        edge, now=AFTER_EARLY_KICKOFF, metric="ProjPts", pool_names=set(tags), all_players=True
+    )
+    assert "Star Back" not in [p.name for p in offered] and offered
+
+
+def test_the_same_kept_row_is_used_when_he_is_active():
+    """The control: with no DK status he is the best back in both pools."""
+    from dfs.derived import build_edge_frame
+    from dfs.late_swap_search import swap_pool
+    from dfs.lineup_suggest import CASH_TAGS, pool_for
+
+    full = [(10, "Star Back", 30.0), (11, "Other Back", 15.0), (12, "Third Back", 12.0)]
+    old_proj, old_dk = _tffb(full), _salary_file({10: "", 11: "", 12: ""})
+    proj = _run("projections", _tffb(full[1:]), old_proj).frame
+    edge = build_edge_frame(proj, _run("draftkings", old_dk, old_dk).frame).frame
+    tags = {"Star Back": "Both", "Other Back": "Both"}
+    assert "Star Back" in [
+        p.name for p in pool_for(edge, tags, CASH_TAGS, now=AFTER_EARLY_KICKOFF, metric="ProjPts")
+    ]
+    offered = swap_pool(edge, now=AFTER_EARLY_KICKOFF, metric="ProjPts", pool_names=set(tags))
+    assert "Star Back" in [p.name for p in offered]
