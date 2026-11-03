@@ -267,6 +267,13 @@ def _rank(v: float | None) -> str:
     return "-" if v is None else f"#{v:.0f}"
 
 
+def _points(points: float, line: float) -> str:
+    """One decimal, or two when one would hide which side of the cash line it fell on."""
+    if round(points, 1) == round(line, 1) and points != line:
+        return f"{points:.2f} (line {line:.2f})"
+    return f"{points:.1f}"
+
+
 def report_lines(pm: PostMortem) -> list[str]:
     out = [
         f"CASH POST-MORTEM, Week {pm.week}: {pm.lineups:,} double-up lineups, {pm.cashers:,} cashed "
@@ -304,13 +311,15 @@ def report_lines(pm: PostMortem) -> list[str]:
             out.append(f"    {s.build.label:<20} {s.points:6.1f} {'CASHED' if s.cashed else '      '}{shown}")
     for d in pm.entered:
         out.append(
-            f"  Entered ({d.origin}): {d.points:.1f} {'cashed' if d.cashed else 'did not cash'}"
+            f"  Entered ({d.origin}): {_points(d.points, pm.cash_line)} "
+            f"{'cashed' if d.cashed else 'did not cash'}"
             + (f"; nearest {d.nearest.build.label} ({d.nearest.points:.1f})" if d.nearest is not None else "")
         )
         if d.nearest is not None and (d.out or d.into):
             swaps = ", ".join(f"{a} ({pa:.1f})" for a, pa in d.out)
             ins = ", ".join(f"{b} ({pb:.1f})" for b, pb in d.into)
-            out.append(f"    left out {swaps}; put in {ins}: {d.cost:+.1f} pts against the build")
+            effect = f"cost {d.cost:.1f} pts" if d.cost > 0 else f"gained {-d.cost:.1f} pts"
+            out.append(f"    left out {swaps}; put in {ins}: {effect} against the build")
         elif d.nearest is not None:
             out.append("    the same nine as the build")
     if not pm.entered:

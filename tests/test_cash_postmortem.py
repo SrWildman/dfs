@@ -120,7 +120,8 @@ def test_entered_lineup_against_its_nearest_build_names_the_swaps():
     pm = cp.postmortem(_inputs(builds, entered=[(tuple(WITHOUT), "double-up standings")]))
     d = pm.entered[0]
     assert d.out == [("Star Wide", 30.0)] and d.into == [("Walt Dee", 2.0)] and d.cost == 28.0
-    assert "left out Star Wide (30.0); put in Walt Dee (2.0): +28.0 pts" in "\n".join(cp.report_lines(pm))
+    assert "left out Star Wide (30.0); put in Walt Dee (2.0): cost 28.0 pts" in "\n".join(cp.report_lines(pm))
+    assert cp._points(114.08, 114.12) == "114.08 (line 114.12)" and cp._points(110.0, 114.1) == "110.0"
 
 
 def test_no_build_record_says_so():
