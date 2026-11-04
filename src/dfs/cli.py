@@ -3188,6 +3188,9 @@ def stacks_command(
         console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(code=1) from e
     layout = stacks_tab.build_layout(sheet_stacks.tab_inputs(result, live, model, sheet_title=title))
+    from dfs import week_inputs
+
+    week_inputs.save_stacks(layout)  # the Week page's top 3 (fail-soft)
     console.print(escape(stacks_tab.render_text(layout)))
     console.print(f"\n[dim]{result.meta['stacks']} stacks, {result.meta['seconds']:.0f}s[/dim]")
     if client is None:
@@ -5035,6 +5038,27 @@ def _carry_results_team_colour_headers(
     except SheetsError as e:
         console.print(f"[yellow]Could not carry the {results_cfg.tab!r} team-colour headers: {e}[/yellow]")
         return None
+
+
+@week_app.command("page", short_help="Open the Week page: today's steps, every decision, every tool.")
+def week_page_command(
+    week: int = typer.Option(
+        None, "--week", help="Build the page for this week (default: the current week)."
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open the page in your browser (default: open it)."
+    ),
+) -> None:
+    """Write one self-contained HTML page for the week and open it: today's steps (with the phrase to say and
+    the command), each decision answered from outputs the tool already saved (the contest plan, cash, GPP,
+    unknowns, Sunday, the season-long leagues, last week), each with its trust (Proven / Shadow / Untested),
+    and every command and phrase with when you last ran it. Read-only: no sheet, no network. A section whose
+    input does not exist says "not run yet". `sync`, `lineups suggest`, `lineups late-swap`, `contests plan`,
+    `season sync`, `season check` and `week close` rebuild it when they finish."""
+    from dfs import week_page
+
+    path = week_page.generate(week=week, open_browser=open_browser)
+    console.print(f"[green]OK[/green] {escape(str(path))}")
 
 
 @week_app.command("new", short_help="Point config.toml at a new weeks sheet copy and sync.")

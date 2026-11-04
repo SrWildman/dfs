@@ -262,6 +262,7 @@ def answer_to_args(param: MissingParam, answer: str) -> list[str]:
 # tests/test_launcher.py fails if a command in docs/COMMANDS.md has no label here (a new command needs one).
 MORE_LABELS = {
     "dfs status": "Config, sheet and how fresh each data source is",
+    "dfs week page": "The Week page: today's steps, every decision and every tool, in your browser",
     "dfs season sync": "Season leagues: sync from Sleeper, values, trade ideas, Season sheet",
     "dfs season lineups": "Season leagues: this week's best lineups, with ranges and close calls",
     "dfs season check": "Season leagues: the Sunday check (OUT, bye, empty slots) across every league",

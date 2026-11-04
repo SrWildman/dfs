@@ -83,7 +83,8 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
         "Nothing fills in until you have run dfs sync once this week. The sheet is fed by a small program on "
         "your computer called dfs; it is not a Google add-on and nothing updates on its own. Typing just dfs "
         "with nothing after it shows where you are in the week and a menu of the standard week, and asks for "
-        "anything it needs.",
+        "anything it needs. Typing dfs week page opens the Week page in your browser: what to do today, "
+        "every decision with how far to trust it, and every tool with when you last ran it.",
     ),
     (
         "The Pool dropdown",

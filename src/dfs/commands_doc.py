@@ -93,6 +93,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         "plays, and the commands the standard week calls for you.",
         [
             "dfs status",
+            "dfs week page",
             "dfs doctor",
             "dfs go",
             "dfs edge",

@@ -203,6 +203,16 @@ def _summary(run) -> list[str]:
     return lines
 
 
+def _remember(run) -> None:
+    """Leave this league's summary for the Week page (`dfs week page`). Never fails the command."""
+    try:
+        from dfs import week_inputs
+
+        week_inputs.save_season_league(week_inputs.season_run_summary(run, _summary(run)))
+    except Exception:  # noqa: BLE001
+        return
+
+
 @season_app.command("sync")
 def season_sync(
     league: str = typer.Option(None, "--league", help=LEAGUE_HELP),
@@ -233,6 +243,7 @@ def season_sync(
             console.print(f"[red]FAIL[/red] {escape(lc.name)}: {escape(str(e))}")
             continue
         _print(_summary(runs[-1]))
+        _remember(runs[-1])
     if client is not None and runs:
         if len(runs) < len(cfg.leagues):
             _say("Only some leagues ran: the sheet's raw tabs, Overview and My Teams show just these.")
@@ -425,6 +436,12 @@ def season_check(
         alerts = lu.check(view, objective.Evaluator(view), _news())
         if not alerts:
             clean.append(lc.name)
+        try:
+            from dfs import week_inputs
+
+            week_inputs.save_season_alerts(lc.name, [week_inputs.alert_line(a) for a in alerts])
+        except Exception:  # noqa: BLE001 - the Week page's copy; never fails the check
+            pass
         for a in alerts:
             mark = "[red]SWAP[/red]" if a.cue == "SWAP" else "[yellow]LOOK[/yellow]"
             swap = f" -> {escape(a.swap)}" if a.swap else ""
