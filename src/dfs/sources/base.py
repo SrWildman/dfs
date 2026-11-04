@@ -37,6 +37,12 @@ class SourceSkipped(Exception):
     reports it as a skip, saves nothing and leaves the source's last data as it was."""
 
 
+class SourcePending(Exception):
+    """A source whose data for this week is not out yet (TFFB's Pace of Play article goes up on Wednesday):
+    neither a failure nor a skip. `run_sync` reports it as pending (exit code 0), saves nothing and leaves
+    the source's last data as it was. A real error (login expired, page changed, bad file) is not this."""
+
+
 class Source(ABC):
     name: str
     needs_auth: bool = False

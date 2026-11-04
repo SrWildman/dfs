@@ -22,6 +22,7 @@ Idempotent.
 
 from __future__ import annotations
 
+from dfs import contest_tiers
 from dfs.models import ROSTER_SLOTS
 from dfs.sheet_lineup_sim import P_CASH_GREEN, P_GPP_GREEN, TOP1_HEADER
 from dfs.sheet_pool_cells import POOL_OPTIONS
@@ -65,6 +66,28 @@ def _pool_options_text() -> str:
     return ", ".join(POOL_OPTIONS[:-1]) + f" or {POOL_OPTIONS[-1]}"
 
 
+def _tier_split_text() -> str:
+    """The Weekly Budget split across the tiers, from the tier module's own constants: C is its share, A and B
+    split the rest two to one."""
+    c = contest_tiers.SHARE_C
+    a = (1 - c) * 2 / 3
+    b = (1 - c) / 3
+    return (
+        f"about {a:.0%} to A, {b:.0%} to B and at most {c:.0%} (and ${contest_tiers.C_MAX_DOLLARS:.0f}) to C"
+    )
+
+
+def _contest_plan_text() -> str:
+    return (
+        "dfs contests plan sorts the Weekly Budget into tiers: A is head-to-heads and single-entry "
+        f"double-ups and 50/50s in fields under {contest_tiers.CASH_MAX_FIELD:,}; B is single-entry or "
+        f"{contest_tiers.GPP_MAX_ENTRIES_B}-max Classic GPPs under {contest_tiers.GPP_MAX_FIELD:,} entrants; "
+        f"C is the lottery, Showdown and big-field multi-entry GPPs ({contest_tiers.BIG_FIELD:,}+ entrants); "
+        f"Avoid is what your own history says loses. The money goes {_tier_split_text()}. It also shows last "
+        "week against the plan and the head-to-head opponents to avoid. "
+    )
+
+
 _TITLE = "How to use this sheet"
 
 _ONE_THING_ROWS: list[tuple[str, str]] = [
@@ -87,12 +110,41 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
         "every decision with how far to trust it, and every tool with when you last ran it.",
     ),
     (
+        "The Week page",
+        "dfs week page opens one page in your browser (nothing to sign in to, nothing it changes). Today is "
+        "at the top: the steps for the day, each with the phrase to say and the command. Then Plays (five "
+        "a position by CalPts per $1,000, the cash core, GPP upside with leverage, and the fades), Slate "
+        "(every game by total with spread, implied totals, movement since the opening line, weather and key "
+        "injuries) and What changed (the last two syncs side by side: status changes for your pool, new "
+        "OUTs, CalPts moves of 2 or more, line moves of 1 or more). Below them each decision, with how far "
+        "to trust it (Proven, Shadow or Untested), and every tool with when you last ran it. A source that "
+        "has not published yet (TFFB's ownership midweek) shows as pending, not as a failure.",
+    ),
+    (
+        "The Week server",
+        "dfs week serve runs that page as an app on this computer only: the link it prints carries a "
+        "private token and nothing else can open it. Claude is docked on the right: every action that needs "
+        "approval shows what will run, with Approve and Deny, and nothing runs by itself. An Ask button sits "
+        "beside every phrase; every command has a run button with live output (one at a time, with Stop); "
+        "the Plays tick boxes add players to your pool; and the drop zone takes DraftKings' entries file at "
+        "lock and the history export and standings at close, then offers the matching command. It writes to "
+        "no sheet itself; the commands do. Ctrl-C stops it.",
+    ),
+    (
+        "One command at a time",
+        "Any command that writes (sync, week new, week close, the setup commands, lineups suggest, entries "
+        "record and fill, bankroll, contests plan) takes a lock, so the terminal, the chat and the buttons "
+        "never write at once. A second one is refused and says what is running, since when and from where. "
+        "Commands that only read (status, doctor, week page) never wait.",
+    ),
+    (
         "The Pool dropdown",
         "The Pool cell at the left of every player on the Edge Finder, the Board and Player Pool shows "
         "whether he is in your pool and is the control: pick Cash, GPP or Both to add him, or press Delete "
         "to take him out. It needs the one-time Lineup Tools script pasted into the sheet (Extensions, then "
         "Apps Script; the dfs doctor check says when it is missing). Until then, use the Pool dropdown on "
-        "EdgeRaw, which does the same thing.",
+        "EdgeRaw, which does the same thing. To add by name from the terminal or the chat: dfs pool add "
+        '"Name" "Name".',
     ),
 ]
 
@@ -126,7 +178,9 @@ _MODEL_ROWS: list[tuple[str, str]] = [
 _WEEK_ROWS: list[tuple[str, str]] = [
     (
         "Start of week",
-        'File, then Make a copy of the template, and run: dfs week new "<link to the copy>". It checks the '
+        "If this week has no opening lines saved yet, run dfs odds snapshot first (dfs odds movement shows "
+        "what is saved). Then File, Make a copy of the template, and run: "
+        'dfs week new "<link to the copy>". It checks the '
         "copy, titles it Week <n>, carries your bankroll and Results log forward, clears last week's "
         "lineups, rebuilds the STAKES block on Bankroll and runs the first full sync. It asks you to "
         "confirm before it writes anything.",
@@ -147,7 +201,18 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "projection, "
         "a FADE chip), and Pool summary shows how many you have per position and where you are short of "
         "what a lineup needs. Fix them with the Pool dropdown (clear it to remove). Movement shows how each "
-        "team's line has moved.",
+        "team's line has moved (dfs odds movement prints the same).",
+    ),
+    (
+        "Sat / Sun morning: the contest plan",
+        _contest_plan_text()
+        + "To judge one contest before you enter it, use the check this contest form on the Week page (dfs "
+        "week serve): format, fee, entrants so far and the most it can hold, entries per user, prize pool or "
+        "min-cash. It answers with the tier, the rake and the reason. Saturday: set the plan before you "
+        "build, and enter against it. Sunday morning: look at the lobby once more for small fields "
+        "released late and for an overlay (a guaranteed contest under "
+        f"{contest_tiers.OVERLAY_FILL:.0%} full within two hours of lock). Dropping DraftKings' entries file "
+        "on the Week page shows what you have spent by tier against the plan while you can still withdraw.",
     ),
     (
         "Sunday: final sync, then lineups",
@@ -155,15 +220,16 @@ _WEEK_ROWS: list[tuple[str, str]] = [
         "lineups "
         "on the Lineups tab: type names in column A, set Cash or GPP on the Total row, and read Cash % and "
         f"{TOP1_HEADER} there (see Reading the numbers). Exposure shows how concentrated "
-        "your lineups are. Before entering, dfs contests plan shows this week's plan by format (Showdown and "
-        "big-field GPPs capped, the rest to double-ups, H2Hs and small single-entry GPPs, within the Weekly "
-        "Budget). When they are final, download DraftKings' entries file (Edit entries), run: dfs "
+        "your lineups are. Before entering, check the contest plan (Sat / Sun morning, above). When they "
+        "are final, download DraftKings' entries file (Edit entries), run: dfs "
         "entries fill, pick each entry's Lineup in DK Upload (you choose; the grey Suggested column is only "
         "a hint), run it again, then run: dfs export (or add --write to the fill) and upload the file to "
         "DraftKings. "
         "dfs entries print lists every lineup as Name (ID) if you would rather pair them yourself. "
         "At lock, once you have entered, download the entries file again and run: dfs entries record (what "
-        "went in which contest, and which Suggested build each lineup came from).",
+        "went in which contest, and which Suggested build each lineup came from), or drop the file on the "
+        "Week page and press Record these entries. Say record my entries and Claude does the same. "
+        "Without it the close warns that it has no record of what you entered.",
     ),
     (
         "Sunday: late swap",

@@ -229,7 +229,7 @@ def launcher_state(
     import pandas as pd
 
     state = launcher.LauncherState(week=week, pool_count=pool_count)
-    state.synced_sources = sum(1 for v in manifest.values() if not v.get("error"))
+    state.synced_sources = sum(1 for v in manifest.values() if not v.get("error") and not v.get("pending"))
     stamps = []
     for v in manifest.values():
         try:
@@ -263,6 +263,7 @@ def stale_items(
         except (KeyError, TypeError, ValueError):
             continue
     failed = sorted(n for n, v in manifest.items() if v.get("error"))
+    pending = sorted(n for n, v in manifest.items() if v.get("pending") and not v.get("error"))
     if not manifest:
         items.append("Nothing is synced: run `dfs sync` (the page has no data to read).")
     else:
@@ -273,6 +274,8 @@ def stale_items(
             )
         if failed:
             items.append(f"Failed their last sync: {', '.join(failed)}.")
+        if pending:
+            items.append(f"Pending (not published yet, not a failure): {', '.join(pending)}.")
         if suggest_at and newest and suggest_at < newest - timedelta(minutes=5):
             items.append(
                 f"The builds on Suggested are from {when(now, suggest_at)}, before the last sync "

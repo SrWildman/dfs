@@ -382,7 +382,7 @@ def gather_state() -> LauncherState:
     state.week = SyncContext.current().week
 
     manifest = store.read_manifest()
-    state.synced_sources = sum(1 for v in manifest.values() if not v.get("error"))
+    state.synced_sources = sum(1 for v in manifest.values() if not v.get("error") and not v.get("pending"))
     timestamps = [v["synced_at"] for v in manifest.values() if v.get("synced_at")]
     if timestamps:
         latest = max(datetime.fromisoformat(t) for t in timestamps)
@@ -616,6 +616,14 @@ def status() -> None:
         elif entry.get("error"):
             table.add_row(
                 source, tab, entry.get("synced_at", "-"), "-", f"[red]failed: {entry['error']}[/red]"
+            )
+        elif entry.get("pending"):
+            table.add_row(
+                source,
+                tab,
+                entry.get("synced_at", "-"),
+                "-",
+                f"[yellow]pending: {escape(entry['pending'])}[/yellow]",
             )
         else:
             table.add_row(
@@ -2738,7 +2746,9 @@ def sync(
     table.add_column("status")
     any_failed = False
     for r in results:
-        if r.ok and r.error:  # a source that chose not to run (a budget guard): not a failure
+        if r.pending:  # this week's data is not out yet: pending, not failed (exit code stays 0)
+            table.add_row(r.source, "-", f"[yellow]pending: {escape(r.error or '')}[/yellow]")
+        elif r.ok and r.error:  # a source that chose not to run (a budget guard): not a failure
             table.add_row(r.source, "-", f"[yellow]{escape(r.error)}[/yellow]")
         elif r.ok:
             table.add_row(r.source, str(r.rows), "[green]ok[/green]")

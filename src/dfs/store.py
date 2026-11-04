@@ -186,6 +186,19 @@ def record_success(source_name: str, rows: int) -> None:
     _write_manifest(manifest)
 
 
+def record_pending(source_name: str, reason: str) -> None:
+    """This week's data for the source is not out yet: not an error (`error` stays None) and not a success
+    (no rows); `pending` carries the reason so the status table and the Week page can say so."""
+    manifest = read_manifest()
+    manifest[source_name] = {
+        "synced_at": datetime.now(UTC).isoformat(),
+        "rows": None,
+        "error": None,
+        "pending": reason,
+    }
+    _write_manifest(manifest)
+
+
 def record_failure(source_name: str, error: str) -> None:
     manifest = read_manifest()
     manifest[source_name] = {

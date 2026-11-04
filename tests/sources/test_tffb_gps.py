@@ -68,3 +68,13 @@ def test_parse_gps_csv_coerces_non_numeric_to_nan():
 )
 def test_is_pace_of_play_link(href, text, week, expected):
     assert _is_pace_of_play_link(href, text, week) is expected
+
+
+def test_a_missing_article_is_pending_but_every_other_fetch_problem_is_a_real_error():
+    from dfs.sources.base import SourcePending
+    from dfs.sources.tffb_gps import TffbGpsPending
+
+    assert issubclass(TffbGpsPending, SourcePending) and issubclass(TffbGpsPending, TffbGpsFetchError)
+    assert not issubclass(
+        TffbGpsFetchError, SourcePending
+    )  # a missing CSV link, a 500, a drifted header fail

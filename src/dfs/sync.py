@@ -19,8 +19,8 @@ from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheets import SheetsClient, SheetsError
 from dfs.sources import get_source
-from dfs.sources.base import SourceSkipped, SyncContext
-from dfs.store import load_current, record_failure, record_success, save
+from dfs.sources.base import SourcePending, SourceSkipped, SyncContext
+from dfs.store import load_current, record_failure, record_pending, record_success, save
 
 log = get_logger("sync")
 
@@ -33,6 +33,8 @@ class SourceResult:
     error: str | None
     # What the game-day guard kept instead of taking the feed (`sync_guard`), one line each.
     notes: list[str] = field(default_factory=list)
+    # This week's data is not out yet (`SourcePending`): ok, with the reason in `error`, nothing saved.
+    pending: bool = False
 
 
 def _previous(name: str) -> pd.DataFrame | None:
@@ -90,6 +92,10 @@ def run_sync(
 
             record_success(name, len(df))
             results.append(SourceResult(name, True, len(df), None, guarded.notes))
+        except SourcePending as e:
+            log.warning("pending %s: %s", name, e)
+            record_pending(name, str(e))
+            results.append(SourceResult(name, True, 0, str(e), pending=True))
         except SourceSkipped as e:
             log.info("skipped %s: %s", name, e)
             results.append(SourceResult(name, True, 0, f"skipped: {e}"))

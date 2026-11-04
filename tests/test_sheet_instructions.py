@@ -196,3 +196,41 @@ def test_iterate_on_suggested_is_a_four_line_box_that_names_the_decisions_the_ru
     ):
         assert word in text
     assert "Builds wanted" in text and "--iterate" in text and "--round N" in text
+
+
+def _shortcut_commands() -> set[str]:
+    """Every registered command CLAUDE.md's weekly-shortcuts table has Sam run (the "Run, in order" column
+    of the DFS table; the season-long table belongs to the Season sheet, which has its own docs)."""
+    from pathlib import Path
+
+    from dfs import commands_doc
+
+    registered = set(commands_doc.all_commands()) | {"dfs week serve"}
+    text = (Path(__file__).resolve().parents[1] / "CLAUDE.md").read_text()
+    start = text.index("## Sam's weekly shortcuts")
+    end = text.index("Season-long shortcuts", start)
+    found: set[str] = set()
+    for line in text[start:end].splitlines():
+        cells = line.split("|")
+        if not line.startswith("|") or len(cells) < 4:
+            continue
+        for snippet in re.findall(r"`(dfs [^`]*)`", cells[2]):
+            words = snippet.split()
+            # The longest registered command that opens this snippet (the rest is options and arguments).
+            for size in range(len(words), 1, -1):
+                if " ".join(words[:size]) in registered:
+                    found.add(" ".join(words[:size]))
+                    break
+    return found
+
+
+def test_every_command_with_a_claude_md_shortcut_is_in_the_instructions_text():
+    """So the tab cannot drift from the shortcuts again: a command Sam is told to run (or told that Claude
+    runs for him) has to be findable on the Instructions tab, written out as `dfs <command>`."""
+    commands = _shortcut_commands()
+    assert {"dfs sync", "dfs week serve", "dfs entries record", "dfs pool add"} <= commands  # the parse works
+    text = _text()
+    missing = sorted(c for c in commands if c not in text)
+    assert not missing, (
+        f"CLAUDE.md has shortcuts for these but the Instructions tab never names them: {missing}"
+    )

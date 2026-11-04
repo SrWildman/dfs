@@ -509,6 +509,37 @@ def test_stale_items():
     )
 
 
+def test_the_page_header_counts_a_pending_source_apart_from_synced_and_failed(full):
+    stamp = (SAT - timedelta(hours=1)).astimezone(UTC).isoformat()
+    manifest = {
+        "edge": {"synced_at": stamp, "error": None},
+        "tffb_gps": {"synced_at": stamp, "error": None, "pending": "GPS not published"},
+        "tffb": {"synced_at": stamp, "error": "login expired"},
+    }
+    page = week_page.render(replace(full, manifest=manifest), registered=set(commands_doc.all_commands()))
+    assert "1 of 3 sources synced, 1 pending (tffb_gps), 1 failed (tffb)" in page
+
+
+def test_a_pending_source_is_shown_as_pending_not_as_failed_or_synced():
+    now = SAT
+    stamp = (now - timedelta(hours=1)).astimezone(UTC).isoformat()
+    manifest = {
+        "edge": {"synced_at": stamp, "error": None},
+        "tffb_gps": {"synced_at": stamp, "error": None, "pending": "GPS not published for Week 9 yet"},
+        "tffb": {"synced_at": stamp, "error": "login expired"},
+    }
+    items = week_today.stale_items(
+        now=now, manifest=manifest, suggest_at=None, late_swap_at=None, season_at=None, day=0
+    )
+    text = " ".join(items)
+    assert "Failed their last sync: tffb." in text  # the real error is named alone
+    assert "Pending (not published yet, not a failure): tffb_gps." in text
+    state = week_today.launcher_state(
+        week=9, now=now, manifest=manifest, game_starts=[], pool_count=0, finished_after_hours=3.5
+    )
+    assert state.synced_sources == 1  # only edge: a pending source is not "synced"
+
+
 def test_the_launcher_state_the_page_builds_comes_from_local_files():
     now = datetime(2026, 11, 8, 18, 0, tzinfo=UTC)  # 1 pm ET Sunday: the 1 pm games have started
     manifest = {"edge": {"synced_at": (now - timedelta(hours=3)).isoformat(), "error": None}}

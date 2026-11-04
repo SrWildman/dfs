@@ -38,16 +38,17 @@ recompute it are already right there per team).
 
 **Not in `LIVE_SYNC_SOURCES`** -- this changes once a week, like `sos_*`/
 `snaps`/`pbp`. **Timing:** the article goes up Wednesday. If this week's
-isn't published yet, `fetch()` raises `TffbGpsFetchError` (never falls
-back to last week's file -- `dfs week new` already clears `data/current/`,
-and this module never reads anything off disk itself) -- the normal
-`sync.py` catch-and-`record_failure` path turns that into "log a warning
-and move on", the same as any other source's fetch failure; no separate
-mechanism needed for "not published yet" specifically.
+isn't published yet, `fetch()` raises `TffbGpsPending` (a `SourcePending`,
+and a `TffbGpsFetchError`; never falls back to last week's file -- `dfs week
+new` already clears `data/current/`, and this module never reads anything
+off disk itself) -- `sync.py` reports that as **pending** (a yellow line,
+exit code 0, the Week page shows it as pending), not as a failure. Every
+other problem (a missing CSV link, a bad status, a changed header, a page
+that never loaded) is still a `TffbGpsFetchError` and still fails.
 
 **Fail-soft downstream, not here:** `fetch()` still follows the base
-`Source` contract (raise on any failure, real or "not published yet" --
-never return a partial frame). It's whoever reads this source's snapshot
+`Source` contract (raise on any failure, or `SourcePending` for "not
+published yet" -- never return a partial frame). It's whoever reads this source's snapshot
 back (`derived.py`'s `_attach_gps`, `sheet_views.py`'s Slate Grid/Board
 formulas) that degrades gracefully to blank columns when there's nothing
 on disk yet, the same pattern `pbp`/`team_metrics` already established.
@@ -65,7 +66,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from dfs.browser import persistent_context
 from dfs.log import get_logger
 from dfs.player_join import normalize_team
-from dfs.sources.base import Source, SyncContext
+from dfs.sources.base import Source, SourcePending, SyncContext
 
 log = get_logger("sources.tffb_gps")
 
@@ -105,6 +106,11 @@ GPS_COLUMNS = ["Team", "ImpliedTotal", "GPS"]
 
 class TffbGpsFetchError(Exception):
     pass
+
+
+class TffbGpsPending(SourcePending, TffbGpsFetchError):
+    """This week's Pace of Play article is not on TFFB's listing yet (it goes up Wednesday): pending, not
+    failed. Still a `TffbGpsFetchError`, so a caller that catches the family keeps working."""
 
 
 def _is_pace_of_play_link(href: str, text: str, week: int) -> bool:
@@ -179,7 +185,7 @@ class TffbGpsSource(Source):
             try:
                 article_url = _find_article_url(page, ctx.week)
                 if article_url is None:
-                    raise TffbGpsFetchError(
+                    raise TffbGpsPending(
                         f"GPS not published for Week {ctx.week} yet -- no matching article found "
                         f"in TFFB's {LISTING_URL} listing."
                     )
