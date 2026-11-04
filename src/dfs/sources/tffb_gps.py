@@ -146,12 +146,34 @@ def _find_csv_url(page: Page, article_url: str) -> str | None:
     return links[0] if links else None
 
 
+# Where to look for the real header row. Weeks 2-8 had three lines above the data
+# (title, group-label banner, header); Week 9 (2026-11-04) had two (title and banner
+# merged into one line), so the header is found by its label, not by a fixed line.
+_HEADER_SEARCH_LINES = 6
+_LEGACY_HEADER_LINE = 2  # the old fixed position -- used when no header row is found
+# Header names TFFB has spelled two ways; the value is the spelling `GPS_EXPECTED_HEADER` uses.
+_HEADER_ALIASES = {"PROE": "PROE %"}
+
+
+def _header_line(text: str) -> int:
+    """Index of the header line: the first of the top `_HEADER_SEARCH_LINES` lines whose
+    first cell is `Team` and that has an `Implied Total` column. Falls back to the old
+    fixed position so a file with no such row still fails with the header-drift error."""
+    for i, line in enumerate(text.splitlines()[:_HEADER_SEARCH_LINES]):
+        if line.split(",", 1)[0].strip() == "Team" and "Implied Total" in line:
+            return i
+    return _LEGACY_HEADER_LINE
+
+
 def parse_gps_csv(text: str) -> pd.DataFrame:
     """Pure: the raw CSV text (already decoded) -> `GPS_COLUMNS` shape.
-    Raises `TffbGpsFetchError` if the real header (third line) doesn't
-    match `GPS_EXPECTED_HEADER` exactly -- see module docstring for why
-    that's the right line to check and what a drift would mean."""
-    df = pd.read_csv(io.StringIO(text), skiprows=2)
+    Raises `TffbGpsFetchError` if the real header row doesn't match
+    `GPS_EXPECTED_HEADER` exactly (after `_HEADER_ALIASES`) -- see module
+    docstring for what a drift would mean. The header row is found by its
+    `Team` label (two or three lines down), and `PROE` / `PROE %` are both
+    accepted (Week 9 dropped the `%`)."""
+    df = pd.read_csv(io.StringIO(text), skiprows=_header_line(text))
+    df = df.rename(columns=_HEADER_ALIASES)
     header = list(df.columns)
     if header != GPS_EXPECTED_HEADER:
         raise TffbGpsFetchError(
