@@ -20,6 +20,9 @@ chosen (`trade.settle`, so the waivers, the finder, the analyzer and the chopped
    active roster, with a slot open, is moved there instead of anyone being dropped. A reserve player whose
    tag has cleared is flagged: activate him.
 5. **Never a drop from an IR slot, and never a drop that leaves a starting slot empty.**
+6. **A same-position swap has to be worth it.** A QB / K / DEF swapped for the incumbent is suggested only
+   when its rest-of-season lineup gain is at least `[roster] min_swap_gain` (default 5 points): a coin-flip
+   backup is not worth the move. An empty-slot fill (nobody active there) and a bye-week stream are exempt.
 
 This module is pure helpers over a `LeagueView`: positions, caps, who sits in reserve, who may go to IR.
 """
@@ -59,6 +62,13 @@ def position_caps(view: LeagueView) -> dict[str, int]:
         "K": max(view.cfg.roster.max_k, starts("K")),
         "DEF": max(view.cfg.roster.max_def, starts("DEF")),
     }
+
+
+def is_same_position_swap(view: LeagueView, pid: str, dropped: list[str], to_ir: list[str]) -> bool:
+    """Adding `pid` (a QB / K / DEF) sent his own position's incumbent out, dropped or to IR. False for an
+    empty-slot fill (nobody left) and for any other position."""
+    pos = position(view, pid)
+    return pos in CAPPED and any(position(view, p) == pos for p in [*dropped, *to_ir])
 
 
 def reserve_of(view: LeagueView, roster: list[str], before: list[str] | None = None) -> set[str]:

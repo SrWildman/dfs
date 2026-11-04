@@ -9,14 +9,15 @@ seasons of paid NFL entries plus the industry's game-selection research). One mo
 **Tiers**
 
 - **A, about 60% of the week's money.** H2H at $1-$5; single-entry double-ups and 50/50s at $2-$25 with a
-  field under 6,000. (Casual-only contests would be A too, but Sam is not eligible: `[contest_plan]
-  casual_eligible = false`.)
+  field under 6,000. A cash contest outside that fee or field band is still A, flagged `bigger field /
+  higher fee than ideal` (a fee under the band says so). (Casual-only contests would be A too, but Sam is not
+  eligible: `[contest_plan] casual_eligible = false`.)
 - **B, about 30%.** Classic GPPs that are single-entry or 3-max, a field under 2,500, a fee of $3-$15 (more
   where the rake is 13% or less), rake 16% or less, min-cash at least 2x. Prefer the smallest version of a
   family.
 - **C, the lottery: at most 10% of the money and $15 a week, of which Showdown $5 and big-field multi-entry
-  $10.** Showdown; GPPs with 5,000+ entrants and 4 or more entries a user; anything that is neither A nor B
-  nor Avoid (a GPP past Tier B's field size, a fee outside the band, a format the history says nothing about).
+  $10.** Showdown; GPPs with 5,000+ entrants and 4 or more entries a user; a GPP that is not B (past Tier B's
+  field size, a fee outside the band); a format the history says nothing about. Never a cash contest.
 - **Avoid**, with the reason: a multi-entry double-up or 50/50; a 4+-max GPP with 1,000-5,000 entrants (Sam's
   worst bucket, -64% over 235 entries); rake above 17%; a GPP whose min-cash is under 2x; an H2H opponent who
   is a regular to avoid (0-3 or worse, or under 30% over 5+ games).
@@ -64,6 +65,10 @@ MIN_CASH_FLOOR = 2.0
 WORST_BUCKET = (1000, 5000)  # multi-entry GPPs here lost 64% over 235 entries
 BIG_FIELD = 5000
 OVERLAY_FILL = 0.80
+
+# A cash contest (H2H, double-up, 50/50) outside Tier A's fee or field band is still Tier A, with this flag
+# (a fee under the band says so instead): the money belongs with the cash plan, only the size is off.
+BIGGER_THAN_IDEAL = "bigger field / higher fee than ideal"
 
 # What the money is split into (the Weekly Budget): A and B share what C leaves, two to one.
 SHARE_C = 0.10
@@ -167,6 +172,11 @@ def _flags(contest: Contest, rake: float | None) -> list[str]:
     return flags
 
 
+def _band_flag(fee: float, band: tuple[float, float], text: str) -> str:
+    """The flag for a cash fee outside its band: too high is the shared "bigger than ideal" wording."""
+    return BIGGER_THAN_IDEAL if fee > band[1] else f"fee {_money(fee)} is under the {text} band"
+
+
 def classify(
     contest: Contest, *, avoid_opponents: Iterable[str] = (), casual_eligible: bool = False
 ) -> Verdict:
@@ -178,8 +188,8 @@ def classify(
     flags = tuple(_flags(contest, rake))
     n, entries = contest.entrants, contest.entry_max
 
-    def v(tier: str, reason: str, bucket: str = "") -> Verdict:
-        return Verdict(tier, reason, rake, flags, bucket)
+    def v(tier: str, reason: str, bucket: str = "", extra_flags: tuple[str, ...] = ()) -> Verdict:
+        return Verdict(tier, reason, rake, flags + extra_flags, bucket)
 
     if fee <= 0:
         return v(A, "free entry: no fee, no rake")
@@ -209,20 +219,23 @@ def classify(
     if fmt == series_mod.H2H:
         if H2H_FEE[0] <= fee <= H2H_FEE[1]:
             return v(A, f"H2H at {_money(fee)}")
-        return v(C, f"H2H at {_money(fee)} is outside the ${H2H_FEE[0]:g}-${H2H_FEE[1]:g} band", "Other")
+        return v(
+            A,
+            f"H2H at {_money(fee)}",
+            extra_flags=(_band_flag(fee, H2H_FEE, f"${H2H_FEE[0]:g}-${H2H_FEE[1]:g}"),),
+        )
     if fmt in (series_mod.DOUBLE_UP, series_mod.FIFTY_FIFTY):
         kind = "single-entry " if entries == 1 else ""
+        extra = []
         if not CASH_FEE[0] <= fee <= CASH_FEE[1]:
-            return v(
-                C, f"{fmt.lower()} at {_money(fee)} is outside ${CASH_FEE[0]:g}-${CASH_FEE[1]:g}", "Other"
-            )
+            extra.append(_band_flag(fee, CASH_FEE, f"${CASH_FEE[0]:g}-${CASH_FEE[1]:g}"))
         if n is not None and n >= CASH_MAX_FIELD:
-            return v(
-                C,
-                f"{fmt.lower()} field of {n:,} is past ~{CASH_MAX_FIELD:,} (5k-20k fields cashed 49%)",
-                "Other",
-            )
-        return v(A, f"{kind}{fmt.lower()} at {_money(fee)}" + (f", {n:,} entrants" if n is not None else ""))
+            extra.append(BIGGER_THAN_IDEAL)
+        return v(
+            A,
+            f"{kind}{fmt.lower()} at {_money(fee)}" + (f", {n:,} entrants" if n is not None else ""),
+            extra_flags=tuple(dict.fromkeys(extra)),
+        )
 
     # --- Tier C by format -------------------------------------------------------------------------------
     if fmt == series_mod.SHOWDOWN:

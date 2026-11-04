@@ -278,14 +278,14 @@ false` and they are never counted.
 
 | Tier | Share of the Weekly Budget | Rule |
 |---|---|---|
-| A | about 60% | H2H at $1-$5; single-entry double-ups and 50/50s at $2-$25 with a field under about 6,000 |
+| A | about 60% | H2H at $1-$5; single-entry double-ups and 50/50s at $2-$25 with a field under about 6,000. A cash contest outside that fee or field band is still A, flagged `bigger field / higher fee than ideal` |
 | B | about 30% | Classic GPPs, single-entry or 3-max, field under 2,500, fee $3-$15 (more where the rake is 13% or less), rake 16% or less, min-cash at least 2x; prefer the smallest version of a family |
-| C | at most 10% and $15 | Showdown (at most $5); GPPs with 5,000+ entrants and 4+ entries a user (at most $10); anything that is neither A, B nor Avoid |
+| C | at most 10% and $15 | Showdown (at most $5); GPPs with 5,000+ entrants and 4+ entries a user (at most $10); a GPP that is not B; a format with no history. Never a cash contest |
 | Avoid | $0 | a multi-entry double-up or 50/50; a 4+-max GPP with 1,000-5,000 entrants; rake above 17%; a GPP whose min-cash is under 2x; an H2H regular (0-3 or worse, or under 30% over 5+ games) |
 
 A and B split what C leaves two to one, so a $50 budget is $30 / $15 / $5. An input that was not given never makes a
 rule fire; the verdict flags it (`field size unknown`, `min-cash unknown`). **Flags**: `overlay possible` (guaranteed
-and under 80% full), `late release`, `smaller sibling exists`.
+and under 80% full), `late release`, `smaller sibling exists`, `bigger field / higher fee than ideal` (a cash contest outside Tier A's band).
 
 One reading to know: Tier B takes up to **3** entries a user and the Avoid bucket takes **4 or more**, so a 3-max with
 1,000-2,500 entrants is B and a 20-max of the same size is Avoid.

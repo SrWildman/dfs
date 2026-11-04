@@ -62,7 +62,7 @@ def real(key: str, **over) -> ct.Contest:
         ("showdown", ct.C),
         ("big_multi", ct.C),
         ("big_se_gpp", ct.C),
-        ("big_double_up", ct.C),
+        ("big_double_up", ct.A),  # 13,021 entrants: flagged bigger than ideal, still cash
         ("worst_bucket", ct.AVOID),
     ],
 )
@@ -70,6 +70,8 @@ def test_real_contests_land_in_their_tier(key, tier):
     verdict = ct.classify(real(key))
     assert verdict.tier == tier, verdict.line()
     assert verdict.reason  # always says why
+    if key == "big_double_up":
+        assert ct.BIGGER_THAN_IDEAL in verdict.flags
 
 
 def test_real_log_rows_classify_the_same_as_hand_built_contests():
@@ -156,10 +158,43 @@ def test_tier_b_limits_field_fee_and_rake():
     )  # 16.0+%
 
 
-def test_cash_contests_outside_the_band_are_tier_c_not_a():
-    assert ct.classify(ct.Contest(sr.H2H, 25.0, entrants=2, entry_max=1)).tier == ct.C
-    assert ct.classify(ct.Contest(sr.DOUBLE_UP, 50.0, entrants=500, entry_max=1)).tier == ct.C
-    assert ct.classify(ct.Contest(sr.FIFTY_FIFTY, 1.0, entrants=500, entry_max=1)).tier == ct.C
+def test_cash_contests_outside_the_band_are_tier_a_with_a_flag_never_c():
+    ideal = ct.BIGGER_THAN_IDEAL
+    assert ideal == "bigger field / higher fee than ideal"
+    h2h = ct.classify(ct.Contest(sr.H2H, 25.0, entrants=2, entry_max=1))  # fee above $1-$5
+    assert h2h.tier == ct.A and ideal in h2h.flags
+    big_fee = ct.classify(ct.Contest(sr.DOUBLE_UP, 50.0, entrants=500, entry_max=1))  # fee above $2-$25
+    assert big_fee.tier == ct.A and ideal in big_fee.flags
+    big_field = ct.classify(ct.Contest(sr.FIFTY_FIFTY, 5.0, entrants=20000, entry_max=1))  # 6,000+ field
+    assert big_field.tier == ct.A and ideal in big_field.flags
+    both = ct.classify(ct.Contest(sr.DOUBLE_UP, 50.0, entrants=20000, entry_max=1))
+    assert both.tier == ct.A and both.flags.count(ideal) == 1
+    cheap = ct.classify(ct.Contest(sr.FIFTY_FIFTY, 1.0, entrants=500, entry_max=1))  # under the band
+    assert cheap.tier == ct.A and ideal not in cheap.flags
+    assert any("under the $2-$25 band" in f for f in cheap.flags)
+    assert "bigger field" in big_field.line()
+
+
+def test_cash_contests_inside_the_band_carry_no_size_flag():
+    for contest in (
+        ct.Contest(sr.H2H, 3.0, entrants=2, entry_max=1),
+        ct.Contest(sr.DOUBLE_UP, 10.0, entrants=2873, entry_max=1),
+        ct.Contest(sr.FIFTY_FIFTY, 25.0, entrants=5999, entry_max=1),
+    ):
+        verdict = ct.classify(contest)
+        assert verdict.tier == ct.A and not verdict.flags
+
+
+def test_tier_c_is_gpps_and_showdown_only_and_cash_never_lands_there():
+    cash = [
+        ct.Contest(f, fee, entrants=n, entry_max=1)
+        for f in (sr.H2H, sr.DOUBLE_UP, sr.FIFTY_FIFTY)
+        for fee in (0.5, 3.0, 30.0, 100.0)
+        for n in (2, 500, 6000, 50000)
+    ]
+    assert all(ct.classify(c).tier in (ct.A, ct.AVOID) for c in cash)
+    assert ct.classify(ct.Contest(sr.SHOWDOWN, 5.0, entrants=1000)).tier == ct.C
+    assert ct.classify(ct.Contest(sr.N_MAX_GPP, 5.0, entrants=20000, entry_max=20)).tier == ct.C
 
 
 def test_unknown_formats_count_as_the_lottery_and_free_entries_cost_nothing():

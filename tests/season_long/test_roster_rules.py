@@ -201,6 +201,100 @@ def test_the_roster_table_loads_from_season_toml(tmp_path):
     assert load_season_config(f).roster.max_k == 1
 
 
+# -- a same-position swap has to be worth min_swap_gain ----------------------------------------------------
+
+
+def _bourbon_with(free_extra, **kw):
+    """Bourbon with only `free_extra` as free agents (so the list is just what the test adds)."""
+    return fx.build(
+        fx.bourbon_mine(), free_extra, slots=fx.BOURBON_SLOTS, bench=5, reserve_slots=1,
+        reserve=["smith"], **kw,
+    )  # fmt: skip
+
+
+def _qb(pts):
+    return {"stroud": ("C.J. Stroud", "QB", "", fx.flat(pts))}
+
+
+def test_min_swap_gain_defaults_to_five_points_and_loads_from_season_toml(tmp_path):
+    assert RosterConfig().min_swap_gain == 5.0
+    f = tmp_path / "season.toml"
+    f.write_text('[roster]\nmin_swap_gain = 8\n\n[[leagues]]\nname="A"\nleague_id="1"\nusername="u"\n')
+    assert load_season_config(f).roster.min_swap_gain == 8.0
+    f.write_text("[roster]\nmin_swap_gain = -1\n")
+    with pytest.raises(SeasonConfigError):
+        load_season_config(f)
+
+
+def test_a_small_qb_swap_is_not_suggested_but_a_big_one_is(monkeypatch):
+    # Stroud 1 point a game over Daniels: 3 weeks + the playoff week at 1.5x = 4.5 points, under 5.
+    small = _bourbon_with(_qb(23))
+    ev, got = picks(small, monkeypatch)
+    assert not [p for p in got if p.player_id == "stroud"]
+    # 2 points a game is 9: over the bar, so the swap comes through.
+    big = _bourbon_with(_qb(24))
+    ev, got = picks(big, monkeypatch)
+    qb = next(p for p in got if p.player_id == "stroud")
+    assert qb.drop == "daniels" and qb.value == pytest.approx(9.0, abs=0.5)
+
+
+def test_the_bar_is_the_leagues_own_setting(monkeypatch):
+    for bar, offered in ((0.0, True), (4.5, True), (4.6, False), (20.0, False)):
+        v = _bourbon_with(_qb(23), roster=RosterConfig(min_swap_gain=bar))
+        ev, got = picks(v, monkeypatch)
+        assert bool([p for p in got if p.player_id == "stroud"]) is offered, bar
+
+
+def test_the_bar_covers_a_kicker_and_a_defense_too(monkeypatch):
+    free = {
+        "bass": ("Tyler Bass", "K", "", fx.flat(8.5)),  # +0.5 a game over Little
+        "jaguars": ("Jacksonville Jaguars", "DEF", "", fx.flat(9.5)),  # +0.5 over the Broncos
+    }
+    ev, got = picks(_bourbon_with(free), monkeypatch)
+    assert not [p for p in got if pos(_bourbon_with(free), p.player_id) in {"K", "DEF"}]
+    v = _bourbon_with(free, roster=RosterConfig(min_swap_gain=0.0))
+    ev, got = picks(v, monkeypatch)
+    assert {p.player_id for p in got} >= {"bass", "jaguars"}
+
+
+def test_an_empty_slot_fill_is_exempt_from_the_bar(monkeypatch):
+    v = fx.choppa(roster=RosterConfig(min_swap_gain=1000.0))  # no QB at all
+    ev, got = picks(v, monkeypatch)
+    qbs = [p for p in got if pos(v, p.player_id) == "QB"]
+    assert {p.player_id for p in qbs} == {"stafford", "mccarthy"} and all(p.drop == "bench2" for p in qbs)
+
+
+def test_a_bye_week_stream_is_exempt_from_the_bar(monkeypatch):
+    v = fx.bourbon(daniels=fx.bye(22), roster=RosterConfig(min_swap_gain=1000.0))
+    ev, got = picks(v, monkeypatch)
+    qb = next(p for p in got if pos(v, p.player_id) == "QB")
+    assert qb.stream_week == 8 and qb.drop == "corum"  # the stream stands; no rest-of-season swap beside it
+
+
+def test_a_named_free_agent_is_still_reported_under_the_bar(monkeypatch):
+    v = _bourbon_with(_qb(23))
+    ev = syn.evaluator(v, monkeypatch)
+    named = wv.rank_pickups(v, ev, only=["stroud"])
+    assert [p.player_id for p in named] == ["stroud"] and named[0].drop == "daniels"
+
+
+def test_the_free_move_follows_the_same_bar(monkeypatch):
+    v = _bourbon_with(_qb(23))  # +1 a game over 4 weeks = 4 points: over the 3-point free-move floor
+    ev = syn.evaluator(v, monkeypatch)
+    roster = ev.rosters[1]
+    assert tr.best_swap(v, ev, roster, ["stroud"]) == (None, "", "")
+    easy = _bourbon_with(_qb(23), roster=RosterConfig(min_swap_gain=0.0))
+    ev = syn.evaluator(easy, monkeypatch)
+    after, added, dropped = tr.best_swap(easy, ev, ev.rosters[1], ["stroud"])
+    assert (added, dropped) == ("stroud", "daniels") and after is not None
+
+
+def test_an_ordinary_skill_pickup_never_meets_the_bar(monkeypatch):
+    v = _bourbon_with({"wr9": ("WR Nine", "WR", "", fx.flat(13))}, roster=RosterConfig(min_swap_gain=1000.0))
+    ev, got = picks(v, monkeypatch)
+    assert [p.player_id for p in got] == ["wr9"]
+
+
 # -- IR housekeeping --------------------------------------------------------------------------------------
 
 

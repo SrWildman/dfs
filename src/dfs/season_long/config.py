@@ -40,12 +40,17 @@ class RosterConfig(BaseModel):
     """`[roster]` in season.toml: how many of a streaming position Sam keeps active. A kicker or a defense is
     streamed in the week it is needed, so one is plenty. (A 1-QB league keeps one QB for the same reason; that
     cap is read from the league's own slots, so a superflex league still carries two.) A league that starts
-    more than this at a position raises the cap to its own slot count. Players in IR slots never count."""
+    more than this at a position raises the cap to its own slot count. Players in IR slots never count.
+
+    `min_swap_gain`: a same-position QB / K / DEF swap (a new one for the incumbent) is suggested only when
+    its rest-of-season lineup gain is at least this many points; an empty-slot fill and a bye-week stream
+    are exempt."""
 
     model_config = ConfigDict(extra="forbid")
 
     max_k: int = Field(1, ge=0)
     max_def: int = Field(1, ge=0)
+    min_swap_gain: float = Field(5.0, ge=0.0)
 
 
 class SeasonLongConfig(BaseModel):
