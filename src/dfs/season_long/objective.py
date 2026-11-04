@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from dfs.season_long import outlook
 from dfs.season_long import sleeper_league as sl
 from dfs.season_long import team_value as tvm
 from dfs.season_long.league_view import LeagueView
@@ -45,6 +46,10 @@ class Outcome:
     expected_weeks: float = float("nan")
     p_survive_now: float = float("nan")
     p_last_standing: float = float("nan")  # chopped: alive after the final week
+    p_bye: float = float("nan")  # redraft: a first-round bye
+    p_division: float = float("nan")  # redraft with divisions: the division title
+    exp_wins: float = float("nan")  # redraft: wins at the end of the regular season
+    alive: tuple[float, ...] = ()  # chopped: P(alive after each remaining week)
 
 
 def pickup_prices(league: sl.League) -> np.ndarray:
@@ -90,25 +95,10 @@ def playoff_odds(
     median_game: bool,
     spots: int,
 ) -> np.ndarray:
-    """P(top `spots` by wins, then points for) per team. mean/sd: weeks x teams; normals: draws "
-    "x weeks x teams."""
-    draws = normals.shape[0]
-    w = np.tile(wins.astype(float), (draws, 1))
-    pf = np.tile(points_for.astype(float), (draws, 1))
-    col = {rid: j for j, rid in enumerate(ids)}
-    for i in range(mean.shape[0]):
-        score = mean[i] + sd[i] * normals[:, i, :]
-        pf += score
-        for a, b in pairs[i]:
-            if a in col and b in col:
-                ja, jb = col[a], col[b]
-                w[:, ja] += score[:, ja] > score[:, jb]
-                w[:, jb] += score[:, jb] > score[:, ja]
-        if median_game:
-            w += score > np.median(score, axis=1, keepdims=True)
-    key = w * 1e5 + pf
-    rank = (-key).argsort(axis=1).argsort(axis=1)
-    return (rank < spots).mean(axis=0)
+    """P(top `spots` by wins, then points for) per team (no divisions, no byes: `outlook.simulate` has them).
+    mean/sd: weeks x teams; normals: draws x weeks x teams."""
+    rules = outlook.Rules(spots=spots, median_game=median_game)
+    return outlook.simulate(ids, mean, sd, normals, pairs, wins, points_for, rules).p_playoffs
 
 
 class Evaluator:
@@ -132,7 +122,10 @@ class Evaluator:
             self.prices = pickup_prices(lg)
         else:
             self.pairs = schedule(lg, self.regular)
-            self.median_game = bool(lg.raw_settings.get("league_average_match"))
+            self.rules = outlook.rules_for(lg)
+            self.median_game = self.rules.median_game
+        # The team-total spread measured on the leagues' real weekly scores (`calibration.spread_scale`).
+        self.spread_scale = float(getattr(view, "spread_scale", 1.0))
         self._base: dict[int, Outcome] | None = None
         self._base_gain: np.ndarray | None = None
         self._totals: dict[tuple[frozenset, int], float] = {}
@@ -181,8 +174,12 @@ class Evaluator:
             by = {w.week: w for w in self.lineups(rosters[rid])}
             for i, wk in enumerate(self.weeks):
                 if wk in by:
-                    mean[i, j], sd[i, j] = by[wk].value, by[wk].sd
+                    mean[i, j], sd[i, j] = by[wk].value, by[wk].sd * self.spread_scale
         return mean, sd
+
+    def team_arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """Expected points and spread, weeks x teams (`self.ids`), for the rosters as they are."""
+        return self._arrays(self.rosters)
 
     # -- chopped -------------------------------------------------------------------------------------------
     def pickup_gains(self, rosters: dict[int, list[str]], changed: set[int] | None = None) -> np.ndarray:
@@ -235,15 +232,18 @@ class Evaluator:
                     p_survive_now=1 - s.chop_now[rid],
                     p_last_standing=float(s.alive_after[rid][-1]) if len(s.weeks) else 1.0,
                     regular_pts=float(mean[:, j].sum()),
+                    alive=tuple(float(x) for x in s.alive_after[rid]),
                 )
                 for j, rid in enumerate(self.ids)
             }
         lg = self.view.league
         reg_idx = [i for i, w in enumerate(self.weeks) if w in self.regular]
         po_idx = [i for i, w in enumerate(self.weeks) if w in self.playoff]
-        if po_idx and reg_idx:
+        nan = np.full(len(self.ids), np.nan)
+        p_bye = p_div = exp_wins = nan
+        if po_idx:
             teams_by = {t.roster_id: t for t in lg.teams}
-            p = playoff_odds(
+            st = outlook.simulate(
                 self.ids,
                 mean[reg_idx],
                 sd[reg_idx],
@@ -251,9 +251,9 @@ class Evaluator:
                 [self.pairs.get(self.weeks[i], []) for i in reg_idx],
                 np.array([teams_by[rid].wins for rid in self.ids]),
                 np.array([teams_by[rid].points_for for rid in self.ids]),
-                self.median_game,
-                lg.playoff_teams or 6,
+                self.rules,
             )
+            p, p_bye, p_div, exp_wins = st.p_playoffs, st.p_bye, st.p_division, st.exp_wins
         else:
             p = np.ones(len(self.ids))
         w_po = self.view.cfg.playoff_weight
@@ -262,7 +262,13 @@ class Evaluator:
             reg = float(mean[reg_idx, j].sum()) if reg_idx else 0.0
             po = float(mean[po_idx, j].sum()) if po_idx else 0.0
             out[rid] = Outcome(
-                value=reg + w_po * p[j] * po, regular_pts=reg, playoff_pts=po, p_playoffs=float(p[j])
+                value=reg + w_po * p[j] * po,
+                regular_pts=reg,
+                playoff_pts=po,
+                p_playoffs=float(p[j]),
+                p_bye=float(p_bye[j]),
+                p_division=float(p_div[j]),
+                exp_wins=float(exp_wins[j]),
             )
         return out
 

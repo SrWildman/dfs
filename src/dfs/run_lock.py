@@ -67,6 +67,7 @@ WRITERS = frozenset(
         "dfs research run",
         "dfs results update",
         "dfs season lineups",
+        "dfs season outlook",
         "dfs season ros",
         "dfs season setup",
         "dfs season sync",

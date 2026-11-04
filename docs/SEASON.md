@@ -57,6 +57,7 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
 | `dfs season trades --all --players "A, B, C"` | Trades that move any of these, either way: per league a name you own is a sell, one on another roster a buy |
 | `dfs season trades ... --lopsided` | Also show ideas the market has over 125% for the partner, each with the FAAB to ask back |
 | `dfs season ros --league X [--check]` | Rest-of-season points, or the accuracy check |
+| `dfs season outlook [--league X \| --all] [--check]` | Playoff odds (byes, divisions), chopped survival curves, power rankings with their move, strength of schedule; writes the Outlook tab. `--check` scores the simulation from earlier weeks and back-fills the odds history |
 | `dfs season setup`, `dfs season doctor` | Build and check the sheet |
 
 ## Method
@@ -108,7 +109,7 @@ little (3.47 to 3.42 in Bourbon, in-sample).
 - **Redraft**: `regular-season points + playoff_weight x P(make the playoffs) x playoff-week points`.
   P(make the playoffs) simulates the rest of the regular season on Sleeper's schedule, with the extra game
   against the weekly median where the league plays one. Teams go in on wins, then points for; divisions are
-  not modelled.
+  modelled (see "Playoff odds" below).
   - A team that is safely in weighs its playoff weeks fully.
   - A team still fighting for a spot gets most of a trade's value from what it does to its odds (Sam: "we
     need to get to the playoffs first").
@@ -122,7 +123,8 @@ little (3.47 to 3.42 in Bourbon, in-sample).
 - **Spread check**: real Sleeper team scores, Weeks 1-7, every league, against the model's spread of the actual
   starters' projections. The miss runs 0.97x the modelled spread (Choppa 1.06x, within the noise of 105
   team-weeks), so there is no correlation term. Choppa's real chops scored a log loss of 2.33 against 2.70 for
-  a uniform guess: real but noisy.
+  a uniform guess: real but noisy. `calibration.py` now measures it for every sync (below) and the simulations
+  multiply their team spread by it.
 - **Needs**: per slot type, points per week from that slot in the team's best lineups, against the league
   median.
 - **Free moves**: the best single free-agent swap a team can make with no trade.
@@ -253,13 +255,108 @@ a trade brings in.
 - **Lopsided trades.** Ideas the market has above 125% for the partner are hidden unless asked for
   (`--lopsided`, or "Show lopsided: yes" in the box), and always carry the FAAB to ask back.
 
+## Playoff odds, power rankings and schedule (`outlook.py`, `calibration.py`, `outlook_run.py`)
+
+`dfs season outlook` (and every `dfs season sync`) writes the **Outlook** tab: every league, every team, by power
+rank. The odds are the evaluator's own (`Evaluator.base()`), so the Outlook tab, Overview and the trade finder never
+disagree.
+
+### Playoff odds
+
+- **Redraft.** Every remaining regular-season game is played 4000 times. A team's week is a normal draw around its
+  best lineup's expected points (the cover term included), with the lineup's spread times the **spread scale**.
+  Head-to-head games go to the higher score; where the league plays the median, every team above the week's median
+  score also wins a second game (Sleeper counts it in the record). Final standings sort by wins, then points for.
+  The top `playoff_teams` make it and the top `bye` seeds skip round one (a bracket rounds up to a power of two: 6
+  teams, 2 byes).
+- **Divisions** (Agile has three). Odds of a division title are always shown. With Sleeper's `playoff_seed_type` 1
+  (Agile's) division leaders are seeded first, ahead of the wildcards, the NFL way. That is our reading of the
+  setting, not something Sleeper documents: if Agile's real seeding is by record alone, set it to 0 in Sleeper and the
+  Outlook follows (bye odds are what it changes).
+- **Chopped.** The survival simulation, with a curve for every team: P(alive after each remaining week), P(survive
+  this week), expected weeks and P(last one alive).
+- **Spread scale** (`calibration.py`). For every team-week so far: the real score against the summed Sleeper projection
+  of the starters actually set, in units of the model's spread for that lineup. The scale is the standard deviation of
+  that over every league's team-weeks: **0.97x** over 357 team-weeks, Weeks 1-7 (Agile 1.02, Bourbon 0.96, Choppa 1.06,
+  Mega 0.81: Mega's 84 team-weeks are about 2.5 standard errors under 1, so Mega's odds may run slightly too
+  uncertain). Real scores ran 99% of the starters' projections. Pooled, clipped to 0.7-1.5, refitted each scored week,
+  cached in `data/season/outlook/`.
+
+### Held out: the simulation from earlier weeks against what happened
+
+`dfs season outlook --check`. Each cutoff week c (2 to 6) is rebuilt from the league's own matchups (`outlook_check.py`):
+wins and points for through c, each roster as set for week c + 1, injuries blank, the blend, spread scale and
+`Evaluator` the production ones. The predictions are scored on the weeks after c, up to the last scored week
+(Week 7). Brier score, lower is better; **ours** against the naive models. `record` is a rating from the record alone
+(no scores, no rosters); `scoring` is each team's average real score so far, shrunk toward the league average by how
+much of the spread between teams is real (empirical Bayes, fitted on weeks 1..c), no rosters or projections.
+
+| What is predicted | ours | scoring only | record only | constant | n |
+|---|---|---|---|---|---|
+| a game's winner | **0.233** | 0.250 | 0.268 | 0.250 (a coin) | 270 |
+| in the playoff places after Week 7 | **0.127** | 0.141 | 0.143 | 0.250 (base rate) | 180 |
+| in a bye place after Week 7 | **0.050** | 0.066 | 0.072 | 0.139 (base rate) | 180 |
+| still alive after each next week (Choppa) | **0.116** | 0.133 | - | 0.128 (an even chop) | 220 |
+
+Paired over the 15 league-cutoffs (5 in Choppa), ours minus the naive model, with the standard error (optimistic: the
+cutoffs overlap in time):
+
+- vs record only: games -0.029 (se 0.009), playoff places -0.016 (0.009), byes -0.022 (0.009);
+- vs scoring only: games -0.017 (0.006), playoff places -0.014 (0.008), byes -0.016 (0.006), Choppa survival -0.010 (0.009);
+- vs a coin / the base rate: games -0.014 (0.007), playoff places -0.123 (0.016), byes -0.089 (0.011), Choppa survival
+  vs an even chop -0.008 (0.006).
+
+Read it as: the lineup-based simulation beats both naive models on every event and clearly (2+ standard errors) on
+games and byes; on playoff places and Choppa survival it is ahead by 1-2 standard errors, so those two are
+supported, not proven. A game is mostly luck (a coin scores 0.250, ours 0.233), so no one should expect more. The
+record-only model scores worse than a coin on games because a 3-1 start says little. The spread scale makes no
+measurable difference at this sample (0.2328 either way). The horizon is 1-5 weeks (the weeks played so far), not
+the playoffs themselves; nothing here tests the odds of a seed in Week 15. One caveat: Sleeper's projections for
+weeks after c are its last ones before those games, a little fresher than a forecast made at c would have had.
+The scoring-only survival model has no waiver pickups from the chopped rosters; ours does.
+
+### Power rankings
+
+Rank by team value rest of season (the same Team value rank as Overview). **Move** = places gained since the
+previous scored week's snapshot (`history.py`, `data/season/history/<league>.json`, written by every sync or
+`outlook`). The earlier weeks were rebuilt from the leagues' own matchup history by `outlook --check` (tagged
+`backfill`; a real sync's snapshot is never replaced by one), so the odds history starts at Week 2.
+
+### Strength of schedule
+
+- **NFL ease, per player and per team** (`outlook.defense_index`). How soft a defense is for a position, taken from
+  the weekly projections themselves: each player's projection against that defense over his own average projection,
+  averaged over the players who face it (weighted by his average, shrunk toward 1). A player's ease is the mean
+  index of his opponents over the rest of the season and over the playoff weeks (Players tab: `DefIndexROS`,
+  `DefIndexPlayoffs`); a team's is its players' ease weighted by their points. 1.00 is average, above 1 is easier.
+- **Opp strength, per team** (redraft): the head-to-head opponents still to face, their average expected weekly points
+  over the league's average team (points per game; positive = harder). Not defined for the playoff weeks, whose
+  opponents depend on the bracket.
+- **How much to trust it.** The index runs only 0.93-1.08 between offense-facing defenses (DEF 0.89-1.14) and a team's
+  average lands in 0.98-1.02, so this is a tiebreaker, not a lever. Held out (Bourbon's scoring, 32 defenses,
+  correlation of the index with what defenses really allowed per position; concurrent / index from projections of
+  Weeks 1-4 against real Weeks 5-7 / for comparison, real Weeks 1-4 against real Weeks 5-7):
+  QB 0.54 / 0.39 / 0.39, RB 0.37 / 0.28 / -0.13, WR 0.15 / 0.03 / -0.04, TE 0.27 / 0.35 / 0.29. Sleeper's projected
+  matchups carry real information for QB, RB and TE (more than last month's points allowed, for RB), and almost none
+  for WR.
+
+### Overview
+
+Below the league rows: **This week across leagues** (`across.py`) lists every lineup alert, pickup and trade idea in
+priority order: `SWAP` alerts first, then `LOOK` alerts (and, in a chopped league, a 25%+ chance of being chopped),
+then pickups and trades by size. Leagues count in different units, so size is the change over the spread of the
+league's teams (the standard deviation of team value there; expected weeks survived when chopped). **Odds history** is
+one row per league: his playoff odds (Choppa: his chance of being the last one alive) after each scored week, with a
+sparkline.
+
 ## The Season sheet
 
 One sheet for every league. Leagues are rows and pickers, never extra tabs.
 
 | Tab | What it shows |
 |---|---|
-| Overview | The weekly report, one row per league: record, standing, value rank, odds, this week (win / median / survive), lineup alerts, biggest need, free move, best pickup, best idea, ours vs market, notes (a league with a median game says weekly points count double there). Below: Sam's exposure, each player he rosters and in how many leagues |
+| Outlook | Every league's teams by power rank with the week-over-week move: playoff / bye / division odds, expected wins, opponent strength and NFL ease; a chopped league's survival curve for every team |
+| Overview | The weekly report, one row per league: record, standing, value rank, odds, this week (win / median / survive), lineup alerts, biggest need, free move, best pickup, best idea, ours vs market, notes (a league with a median game says weekly points count double there). Below: this week across leagues (every alert, pickup and trade idea in priority order), the odds history (a line per league), then Sam's exposure, each player he rosters and in how many leagues |
 | My Teams | One block per league: this week's recommended lineup (floor-ceiling, close calls), the check's alerts, K/DEF streams, the bench; values and the market's; needs |
 | Waivers | Every league's best pickups with bid guides, then each league's handcuffs and a chopped league's bid plan |
 | Trade Finder | The targeting box (`B2:B9`: League, Get, Give, Keep, Partner, Shapes, Max consensus loss, Show lopsided); every league's ideas in one list (League column, a filter view per league) |

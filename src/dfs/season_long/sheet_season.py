@@ -1,11 +1,11 @@
 """Write and check the Season sheet (`season_tabs` is the pure layout).
 
-- `setup` (`dfs season setup`): creates the nine tabs in order (the blank sheet's `Sheet1` becomes Overview),
+- `setup` (`dfs season setup`): creates the ten tabs in order (the blank sheet's `Sheet1` becomes Overview),
   the League / Players pickers (a dropdown over `SeasonLeaguesRaw`, like Player!B1), their FILTER formulas,
   the Trade Finder's targeting box, styling, and warning-only protection on every visible tab except the
   pickers and the box. Template-free: there is one Season sheet. Keeps what is typed in the pickers and box.
-- `write_sync` (`dfs season sync`): the raw tabs whole, Overview, My Teams, the Trade Finder's ideas (never
-  its box) and one filter view per league.
+- `write_sync` (`dfs season sync`): the raw tabs whole, Overview (with the cross-league block and the odds
+  history), Outlook, My Teams, Waivers, the Trade Finder's ideas (never its box) and a filter view per league.
 - `write_analyzer` (`dfs season trade`): the Analyzer tab.
 - `doctor` (`dfs season doctor`): read-only structure check.
 """
@@ -178,8 +178,15 @@ def write_sync(client: SheetsClient, runs: list[st.LeagueRun]) -> list[str]:
     client.write_tab(st.TEAMS_RAW, st.cells(teams))
     client.write_tab(st.PLAYERS_RAW, st.cells(players))
     overview = st.overview_rows(runs)
-    exposure_header = next(i for i, r in enumerate(overview) if r[:1] == ["Player"]) + 1
-    _write_block(client, st.OVERVIEW_TAB, overview, [1, exposure_header - 1], [2, exposure_header])
+    titles, headers, pct = st.overview_marks(overview)
+    _write_block(client, st.OVERVIEW_TAB, overview, titles, headers)
+    for first, last, last_col in pct:
+        client.format_range(
+            st.OVERVIEW_TAB,
+            f"{column_letter(len(st.HISTORY_FIXED))}{first}:{column_letter(last_col)}{last}",
+            {"numberFormat": {"type": "PERCENT", "pattern": "0%"}},
+        )
+    write_outlook(client, runs)
     block = st.my_teams_block(runs)
     _write_block(client, st.MY_TEAMS_TAB, block.rows, block.title_rows, block.header_rows)
     write_waivers(client, runs)
@@ -249,6 +256,15 @@ def write_waivers(client: SheetsClient, runs: list[st.LeagueRun]) -> str:
     block = st.waivers_block(runs)
     _write_block(client, st.WAIVERS_TAB, block.rows, block.title_rows, block.header_rows)
     return f"{st.WAIVERS_TAB}: {sum(len(r.pickups) for r in runs)} pickups"
+
+
+def write_outlook(client: SheetsClient, runs: list[st.LeagueRun]) -> str:
+    """The Outlook tab alone (`dfs season outlook`; a sync also writes it)."""
+    if not client.tab_exists(st.OUTLOOK_TAB):
+        raise SheetsError("The Season sheet has no Outlook tab yet: run `dfs season setup` first.")
+    block = st.outlook_block(runs)
+    _write_block(client, st.OUTLOOK_TAB, block.rows, block.title_rows, block.header_rows)
+    return f"{st.OUTLOOK_TAB}: {sum(1 for r in runs if r.outlook is not None)} leagues"
 
 
 def write_analyzer(client: SheetsClient, rows: list[list]) -> str:

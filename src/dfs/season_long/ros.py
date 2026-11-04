@@ -423,21 +423,26 @@ def build_ros(
     ir_weeks_out: int,
     playoff_weight: float,
     through: int | None = None,
+    final_through: int | None = None,
 ) -> RosResult:
+    """`through`: the weeks known (the default: the league's last scored). `final_through`: the weeks whose
+    Sleeper projections are final and cached forever (default `through`); a back-test at an earlier cutoff
+    passes the league's real last scored week so no finished week is ever re-fetched as a live one."""
     scoring, season = league.scoring, league.season
     through = league.last_scored_week if through is None else through
+    final_through = through if final_through is None else final_through
     remaining = league.remaining_weeks
     finished = list(range(1, through + 1))
     act = actuals(scoring, season, finished)
     k = fit_blend_k(scoring, season, through)
     spread = fit_spread(scoring, season, through, table) if through >= 2 else dict(DEFAULT_SPREAD)
-    proj = projections(scoring, season, remaining, through)
+    proj = projections(scoring, season, remaining, final_through)
     playing = teams_playing(proj)
     first = remaining[0] if remaining else through + 1
     sources: list[str] = []
     if remaining:
         factor, sources = consensus_factor(
-            scoring, season, first, projection_stats(season, first, final=False), table
+            scoring, season, first, projection_stats(season, first, final=first <= final_through), table
         )
         is_first = proj["week"] == first
         proj.loc[is_first, "proj"] = proj.loc[is_first, "proj"] * proj.loc[is_first, "player_id"].map(

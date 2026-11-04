@@ -160,6 +160,7 @@ class Team:
     alive: bool = True
     # Sleeper's `reserve`: the players sitting in an IR slot. They are in `players` too.
     reserve: list[str] = field(default_factory=list)
+    division: int = 0  # Sleeper's roster division (0 = the league has none)
 
     @property
     def label(self) -> str:
@@ -284,6 +285,7 @@ def parse_league(
             # A chopped team's roster is emptied onto waivers.
             alive=not (chopped and not players),
             reserve=[str(p) for p in (r.get("reserve") or []) if str(p) in players],
+            division=int(rs.get("division") or 0),
         )
         teams.append(team)
         if owner == my_user_id:

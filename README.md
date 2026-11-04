@@ -151,7 +151,8 @@ build in order), and `dfs --profile <command>` (a slow command's wall-clock and 
 
 **Season-long leagues** (Sleeper, on their own Season sheet): `dfs season sync`, `dfs season trades` (the trade
 finder), `dfs season trade "Give A" "Get B"` (the analyzer), `dfs season waivers` (pickups and FAAB bids),
-`dfs season lineups` and `dfs season check` (this week's lineups, the Sunday check). Setup and method:
+`dfs season lineups` and `dfs season check` (this week's lineups, the Sunday check), `dfs season outlook` (playoff
+odds, power rankings, strength of schedule). Setup and method:
 [docs/SEASON.md](docs/SEASON.md).
 
 `dfs sheets ...` (the pre-reorganisation spelling of every `setup`

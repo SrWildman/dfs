@@ -150,6 +150,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs season trades",
             "dfs season trade",
             "dfs season ros",
+            "dfs season outlook",
             "dfs season setup",
             "dfs season doctor",
         ],
