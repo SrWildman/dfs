@@ -94,6 +94,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         [
             "dfs status",
             "dfs week page",
+            "dfs week serve",
             "dfs doctor",
             "dfs go",
             "dfs edge",

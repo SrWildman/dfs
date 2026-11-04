@@ -20,6 +20,7 @@ from typing import Any
 import typer
 from typer.core import TyperGroup
 
+from dfs import runlog
 from dfs.launcher import MissingParam, answer_to_args, prompt_spec
 
 
@@ -87,6 +88,37 @@ def _after_run(root: Any, argv: list[str], ok: bool) -> None:
         return
 
 
+class _LockRefused(Exception):
+    """Another writer holds `data/.run.lock`; the reason has been printed."""
+
+
+def _run_lock_for(root: Any, argv: list[str]):
+    """The run lock (`run_lock.py`) for the command `argv` names when it writes; a no-op for a command that
+    only reads, `--help`, or the menu. A refusal prints what is running, since when and from where."""
+    from contextlib import contextmanager
+
+    from dfs import run_lock
+
+    try:
+        command = runlog.command_from_args(root, argv)
+    except Exception:  # noqa: BLE001 - never fail a command over classifying it
+        command = None
+
+    @contextmanager
+    def held():
+        if not command or not run_lock.takes_lock(command):
+            yield
+            return
+        try:
+            with run_lock.hold(command):
+                yield
+        except run_lock.LockHeld as e:
+            print(str(e), file=sys.stderr)
+            raise _LockRefused from None
+
+    return held()
+
+
 class PromptingGroup(TyperGroup):
     """A Typer group whose leaf commands ask for missing required parameters (see module docstring). The
     top-level one is also the entry point that writes the run log (`runlog.py`)."""
@@ -94,6 +126,13 @@ class PromptingGroup(TyperGroup):
     def main(self, *args: Any, **kwargs: Any):
         argv = kwargs["args"] if "args" in kwargs else (args[0] if args else None)
         argv = list(sys.argv[1:] if argv is None else argv)
+        try:
+            with _run_lock_for(self, argv):
+                return self._main_logged(argv, *args, **kwargs)
+        except _LockRefused:
+            raise SystemExit(1) from None
+
+    def _main_logged(self, argv: list[str], *args: Any, **kwargs: Any):
         code = 0
         try:
             return super().main(*args, **kwargs)

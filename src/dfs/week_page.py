@@ -260,9 +260,79 @@ def round_label(inp: WeekInputs) -> str:
     return f"round {s.get('round', '?')}, {week_today.when(inp.now, at)}" if at else ""
 
 
+LIVE_CONTEST = "<!--live:contest-->"  # where the server's check form, drop zone and spend table go
+LIVE_RUN = "<!--live:run-->"  # where the server's run buttons go
+
+
+def weekly_budget(inp: WeekInputs) -> float | None:
+    """The Weekly Budget: what `dfs contests plan` read from the Bankroll tab, else the one typed on the live
+    page."""
+    for source in (inp.contest_plan, inp.budget_input):
+        value = num((source or {}).get("budget"))
+        if value:
+            return value
+    return None
+
+
+def tier_plan_html(inp: WeekInputs) -> str:
+    """This week's plan by tier (`contest_tiers`): dollars from the Weekly Budget and, in plain words, what to
+    look for in the lobby, plus the day's reminder. Rules, not a list of contests."""
+    from dfs import contest_tiers as ct
+
+    settings = inp.config.get("contest_plan") or {}
+    budget = weekly_budget(inp)
+    plan = (
+        ct.plan_dollars(
+            budget,
+            showdown_max=float(settings.get("showdown_max", ct.DEFAULT_SHOWDOWN_MAX)),
+            big_multi_max=float(settings.get("big_nmax_max", ct.DEFAULT_BIG_MULTI_MAX)),
+        )
+        if budget
+        else None
+    )
+    rows = []
+    for tier, name in ((ct.A, "Tier A"), (ct.B, "Tier B"), (ct.C, "Tier C")):
+        money = e(dollars(plan.dollars(tier))) if plan else "-"
+        rows.append([f"<b>{e(name)}</b>", money, e(ct.LOOK_FOR[tier])])
+    rows.append(["<b>Avoid</b>", "$0", e(ct.AVOID_LOOK_FOR)])
+    head = (
+        f"<p><b>Weekly Budget {e(dollars(budget))}</b>: about 60% to Tier A, 30% to Tier B and at most 10% "
+        f"(and ${ct.C_MAX_DOLLARS:,.0f}) to Tier C"
+        + (
+            f", of which Showdown ${plan.c_showdown:,.0f} and big-field multi-entry ${plan.c_big_multi:,.0f}"
+            if plan
+            else ""
+        )
+        + ".</p>"
+        if budget
+        else '<p class="notrun"><b>No Weekly Budget yet.</b> Say <code class="say">"contest plan"</code> '
+        "(<code>dfs contests plan</code> reads it from the Bankroll tab) or type it on the live page.</p>"
+    )
+    day = inp.now.astimezone().weekday()
+    reminder = ""
+    if day == 5:
+        reminder = "Saturday: set the plan before you build, and enter against it."
+    elif day == 6:
+        reminder = (
+            "Sunday morning: check the lobby for late-released small fields and for overlay (a guaranteed "
+            "contest under ~80% full within 2 hours of lock)."
+        )
+    return (
+        "<h4>This week's plan, by tier</h4>"
+        + head
+        + table(["Tier", "This week", "What to look for in the lobby"], rows)
+        + (f'<p class="flag">{e(reminder)}</p>' if reminder else "")
+        + note(
+            "Tiers are rules on a contest's format, fee, field size, entries a user and rake, so they hold "
+            "when the lobby changes. The evidence is in docs/CONTESTS.md."
+        )
+    )
+
+
 def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Section:
     trust = TRUST["contest_plan"]
     plan = inp.contest_plan
+    tiers = tier_plan_html(inp)
     if not plan:
         built = registered is None or "dfs contests plan" in registered
         why = (
@@ -273,7 +343,7 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
         return Section(
             "contest-plan",
             "Contest plan",
-            not_run(why, command="dfs contests plan" if built else None),
+            tiers + not_run(why, command="dfs contests plan" if built else None),
             trust,
             ran=False,
         )
@@ -311,7 +381,7 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
             "<h4>H2H opponents to avoid</h4>"
             + bullets([f"{e(o['opponent'])} ({e(o.get('record', ''))})" for o in plan["h2h_avoid"]])
         )
-    return Section("contest-plan", "Contest plan", "".join(parts), trust, asof=_saved(inp, plan))
+    return Section("contest-plan", "Contest plan", tiers + "".join(parts), trust, asof=_saved(inp, plan))
 
 
 def _saved(inp: WeekInputs, payload: dict | None) -> str:
@@ -707,6 +777,10 @@ def last_week_section(inp: WeekInputs) -> Section:
         "fees).</p>",
         table(["Format", "Entries", "Fees", "Net", "ROI"], rows),
     ]
+    tw = inp.tier_week
+    if tw and tw.get("line"):
+        over = f' <span class="bad">Over: {e("; ".join(tw["over"]))}</span>' if tw.get("over") else ""
+        body.append(f"<h4>The week by tier (planned against spent)</h4><p><b>{e(tw['line'])}</b>{over}</p>")
     pm = inp.postmortem
     body.append("<h4>Cash post-mortem</h4>")
     if pm and pm.get("headline"):
@@ -870,7 +944,8 @@ def render(
         f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p>{nav}</header><main>'
         + today_html(inp, registered)
         + '<h2 class="sec">Decisions</h2>'
-        + "".join(s.html() for s in sections)
+        + "".join(s.html() + (LIVE_CONTEST if s.id == "contest-plan" else "") for s in sections)
+        + LIVE_RUN
         + tools_html(inp, tools)
         + "</main><footer>Read-only: built from files the tool already saved; nothing here writes a sheet. "
         "Regenerated after sync, suggest, late-swap, contests plan, season sync/check and week close; "

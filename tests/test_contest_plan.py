@@ -142,3 +142,72 @@ def test_save_input_writes_under_the_test_data_dir():
     assert week_inputs.save_input("contest_plan", {"line": "x"}, season=2026, week=9)
     path = paths.DATA_DIR / "week" / "inputs" / "2026-wk09-contest_plan.json"
     assert path.exists() and week_inputs.load_input("contest_plan", 2026, 9)["line"] == "x"
+
+
+# --- the tier view (`contest_tiers`) ------------------------------------------------------------------------
+
+
+def _tier_log() -> pd.DataFrame:
+    log = _log(
+        [
+            (8, s.H2H, 2, 3.0, 5.4, 5.4, "h"),
+            (8, s.DOUBLE_UP, 2873, 10.0, 0.0, 25000.0, "d"),
+            (8, s.N_MAX_GPP, 784, 15.0, 0.0, 10000.0, "g"),
+            (8, s.SHOWDOWN, 210025, 12.0, 0.0, 2142264.75, "s"),
+            (8, s.N_MAX_GPP, 2941, 8.0, 0.0, 20000.0, "w"),
+        ]
+    )
+    log["entry_max"] = pd.array([1, 1, 3, pd.NA, 5], dtype="Float64")
+    log["entry"] = [
+        "NFL $3 srwildman vs. x",
+        "NFL Double Up",
+        "Screen Pass (1/3)",
+        "Showdown",
+        "Engage Eight (1/5)",
+    ]
+    log["opponent"] = ["x", "", "", "", ""]
+    return log
+
+
+def test_the_week_is_tiered_against_the_budget_split_by_tier():
+    spend = cp.check_week_tiers(_tier_log(), 2026, 8, CFG, 100.0)
+    assert spend.spent == {"A": 13.0, "B": 15.0, "C": 12.0, "Avoid": 8.0}
+    assert "Showdown $12 (cap $5)" in spend.over and "Avoid $8 (the plan is $0)" in spend.over
+    assert cp.check_week_tiers(_tier_log(), 2026, 8, CFG, None) is None  # no budget, no dollars
+
+
+def test_an_h2h_regular_in_last_weeks_log_is_avoid():
+    opponents = pd.DataFrame(
+        {"opponent": ["x"], "meetings": [4], "wins": [0], "losses": [4], "ties": [0], "net": [-12.0]}
+    )
+    spend = cp.check_week_tiers(_tier_log(), 2026, 8, CFG, 100.0, opponents)
+    assert spend.spent["A"] == 10.0 and spend.spent["Avoid"] == 11.0
+
+
+def test_report_lines_add_the_tier_view_after_the_format_view():
+    text = "\n".join(
+        cp.report_lines(_tier_log(), None, season=2026, week=8, cfg=CFG, budget=100.0, budget_source="x")
+    )
+    assert text.index("ROI BY FORMAT") < text.index("THIS WEEK'S PLAN, BY TIER")
+    assert "Tier A $60.00  |  Tier B $30.00  |  Tier C $10.00" in text
+    assert "Last week by tier (Week 8): A $13 of $60, B $15 of $30, C $12 of $10 (over); Avoid $8" in text
+    assert "B: Single-entry or 3-max Classic GPPs, under ~2,500 entrants" in text
+    no_budget = "\n".join(
+        cp.report_lines(_tier_log(), None, season=2026, week=8, cfg=CFG, budget=None, budget_source="x")
+    )
+    assert "No budget, so no dollars by tier" in no_budget
+
+
+def test_the_page_payload_carries_the_tiers():
+    payload = cp.week_page_payload(_tier_log(), None, season=2026, week=8, cfg=CFG, budget=100.0)
+    tiers = payload["tiers"]
+    assert tiers["plan"] == {"A": 60.0, "B": 30.0, "C": 10.0, "showdown": 5.0, "big_multi": 10.0}
+    assert tiers["spent"]["B"] == 15.0 and tiers["line"].startswith("A $13 of $60")
+    assert (
+        cp.week_page_payload(_tier_log(), None, season=2026, week=8, cfg=CFG, budget=None)["tiers"]["plan"]
+        is None
+    )
+
+
+def test_casual_contests_are_off_by_default():
+    assert ContestPlanConfig().casual_eligible is False

@@ -324,6 +324,9 @@ class ContestPlanConfig(BaseModel):
     big_nmax_max: float = Field(default=10.0, ge=0)
     big_field_entrants: int = Field(default=2000, gt=0)
     small_field_entrants: int = Field(default=1000, gt=0)
+    # DraftKings' Beginner / Casual contests (Tier A where they exist) are for players without an experience
+    # badge. Sam checked on Nov 4: he is not eligible, so they are never counted or suggested.
+    casual_eligible: bool = False
 
 
 class SuggestConfig(BaseModel):

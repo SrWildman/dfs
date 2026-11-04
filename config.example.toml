@@ -192,6 +192,7 @@ cash_line_series = "NFL GIANT $25 Double Up [Single Entry]"
 # big_nmax_max = 10.0
 # big_field_entrants = 2000
 # small_field_entrants = 1000
+# casual_eligible = false       # DK's Beginner / Casual contests are for players without an experience badge
 
 # The Odds API (the-odds-api.com), for player props. Put your own key here; config.toml is gitignored and the key is
 # never printed or committed.

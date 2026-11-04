@@ -2793,11 +2793,12 @@ def sync(
 
 def _print_guard_notes(results: list) -> None:
     """What the game-day guard kept instead of taking a feed (`sync_guard`): a started player's values, a row
-    the feed dropped, a column it blanked, DraftKings' post-lock slate. One yellow line each."""
+    the feed dropped, a column it wiped (and, when it blanked only a few players, who lost a value),
+    DraftKings' post-lock slate. One yellow line each."""
     notes = [note for r in results for note in getattr(r, "notes", [])]
     if not notes:
         return
-    console.print("[yellow]Kept from the last sync (a sync never wipes data):[/yellow]")
+    console.print("[yellow]Kept from the last sync, and who lost a value (a sync never wipes data):[/yellow]")
     for note in notes:
         console.print(f"[yellow]  {escape(note)}[/yellow]", highlight=False)
 
@@ -5061,6 +5062,30 @@ def week_page_command(
     console.print(f"[green]OK[/green] {escape(str(path))}")
 
 
+@week_app.command("serve", short_help="The Week page as a local app: Claude chat, run buttons, file drops.")
+def week_serve_command(
+    week: int = typer.Option(
+        None, "--week", help="Serve this week (default: the current week; an earlier week is read only)."
+    ),
+    port: int = typer.Option(0, "--port", help="Port to listen on (default: any free one)."),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open the page in your browser (default: open it)."
+    ),
+) -> None:
+    """Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code
+    docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with
+    live output, drop DraftKings' entries file at lock and the history / standings at close, and check a
+    contest against the tiers. Claude Code runs here in the main checkout under your own login and asks you
+    (Approve / Deny on the page) before anything that needs approval; commands that write take the run lock,
+    so the chat, the buttons and a terminal cannot write at once. Writes no sheet itself. Ctrl-C stops it.
+    `dfs week page` still writes the static file."""
+    from dfs import week_server
+
+    week_server.serve(
+        week=week, port=port, open_browser=open_browser, echo=lambda line: console.print(escape(line))
+    )
+
+
 @week_app.command("new", short_help="Point config.toml at a new weeks sheet copy and sync.")
 def week_new(
     sheet_url: str = typer.Argument(
@@ -5729,8 +5754,39 @@ def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
         budget = _cell(SheetsClient(cfg.google_sheets), cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
         check = contest_plan.check_week(typed, season, closed, cfg.contest_plan, budget)
         console.print("\n" + escape(check.line()), highlight=False)
+        _tier_line_after_close(typed, season, closed, cfg, budget)
     except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over this
         console.print(f"[yellow]Contest plan check skipped ({e}); `dfs contests plan` shows it.[/yellow]")
+
+
+def _tier_line_after_close(typed, season: int, closed: int, cfg: Config, budget: float | None) -> None:  # noqa: ANN001
+    """The week against the plan by tier (`contest_tiers`), one line in the close report, saved for the Week
+    page's "Last week". Skipped quietly without a budget; the caller never fails over it."""
+    import pandas as pd
+
+    from dfs import contest_plan, week_inputs
+    from dfs.nfl_calendar import current_week
+    from dfs.paths import CONTESTS_DIR
+
+    path = CONTESTS_DIR / "h2h_opponents.csv"
+    opponents = pd.read_csv(path) if path.exists() else None
+    spend = contest_plan.check_week_tiers(typed, season, closed, cfg.contest_plan, budget, opponents)
+    if spend is None:
+        return
+    over = "; over in: " + ", ".join(spend.over) if spend.over else "; within the tier plan"
+    console.print(escape(f"Tier plan, Week {closed}: {spend.line()}{over}"), highlight=False)
+    week_inputs.save_input(
+        "tier_week",
+        {
+            "week": closed,
+            "line": spend.line(),
+            "over": list(spend.over),
+            "plan": {t: spend.plan.dollars(t) for t in ("A", "B", "C")},
+            "spent": dict(spend.spent),
+        },
+        season=season,
+        week=current_week(),
+    )
 
 
 def _score_results_after_close(cfg: Config) -> None:

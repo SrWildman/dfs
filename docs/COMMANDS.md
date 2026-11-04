@@ -53,6 +53,16 @@ Write one self-contained HTML page for the week and open it: today's steps (with
 | `--week INT` | Build the page for this week (default: the current week). |
 | `--open` | Open the page in your browser (default: open it). Default: `True`. |
 
+### `dfs week serve`
+
+Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with live output, drop DraftKings' entries file at lock and the history / standings at close, and check a contest against the tiers. Claude Code runs here in the main checkout under your own login and asks you (Approve / Deny on the page) before anything that needs approval; commands that write take the run lock, so the chat, the buttons and a terminal cannot write at once. Writes no sheet itself. Ctrl-C stops it. `dfs week page` still writes the static file.
+
+| Option | What it does |
+|---|---|
+| `--week INT` | Serve this week (default: the current week; an earlier week is read only). |
+| `--port INT` | Port to listen on (default: any free one). |
+| `--open` | Open the page in your browser (default: open it). Default: `True`. |
+
 ### `dfs doctor`
 
 Read-only structural check: every tab named in config.toml exists, EdgeRaw's header matches derived.EDGE_COLUMNS, LINKED_EDGE_COLUMNS is linked exactly once (not zero, not twice) on Player Pool/Lineups/ PlayerPoolRaw, Lineups' header repeats fall exactly where LINEUPS_NAME_BLOCKS expects, and Bankroll's configured header rows aren't blank. Never writes anything. Exits non-zero on any failure -- this is the check that would have caught a stale template's missing tabs and drifted column positions before they broke `dfs export`/`dfs lineups clear`/`dfs setup link-edge` on a fresh weekly copy, instead of surfacing three commands later as a crash or a silently wrong formula. It also WARNS (without failing) when the bound Apps Script behind the `Set` dropdowns is not pasted or is older than apps_script/Code.gs, and when fewer than 100 Odds API credits are left.

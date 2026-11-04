@@ -380,6 +380,15 @@ The track-record row is the retro of past weeks: it compares the 20 highest-leve
 when H1 holds a typed value; `dfs setup build-views` rewrites it (template first, then the live week; your Targets are kept).
 
 
+**A command says "Not started: `dfs ...` is running (started 14:02:11, from the Week page's chat, pid 4121)".**
+Not a fault: `data/.run.lock` allows one command that writes at a time across the terminal, the Week page's chat and its run buttons. Wait for the one it names, or stop it (the chat's Stop, the Run card's Stop, or Ctrl-C in the terminal). There is no `--force`. A run that crashed leaves nothing stuck (the OS drops the lock with the process). `dfs status`, `dfs doctor` and `dfs week page` never take it.
+
+**`dfs week serve` opens a page that says "forbidden", or the chat and buttons do nothing.**
+Every request needs the random token in the link `dfs week serve` printed and a `localhost` / `127.0.0.1` address. Reopen the exact link it printed (a new run makes a new token), and use the same host name it used; a copy of the link on another machine, or through a proxy or tunnel, is refused on purpose. "Claude Code is not installed on this Mac" means no `claude` on the PATH: the chat needs Claude Code logged in as you.
+
+**A file dropped on the Week page is refused.**
+Only DraftKings' entries file, your contest-history export and the standings (`contest-standings-<id>.csv`, or a zip of them) are taken, as `.csv` / `.zip` under 25 MB / 150 MB. The message names the reason (not one of the three, too large, a zip that unpacks too large). A recognised file is saved into your Downloads folder (a number is added rather than overwrite a file), where `dfs entries record` and `dfs week close` look.
+
 ---
 
 **`dfs doctor` says `suggested-layout`, or `--iterate` says the Suggested tab is in an old layout.**

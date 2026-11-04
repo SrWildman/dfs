@@ -11,7 +11,7 @@ from dfs import nfl_calendar
 from dfs.config import Config
 from dfs.sources.base import Source, SyncContext
 from dfs.sync import run_sync
-from dfs.sync_guard import BLANK_GUARD_MAX_ROWS, guard
+from dfs.sync_guard import guard
 
 SEASON = 2026
 SUNDAY = date(2026, 10, 25)  # EDT: 1 pm ET = 17:00 UTC
@@ -79,27 +79,60 @@ def _wide_slate(n: int) -> pd.DataFrame:
     return _projections([(i, f"Late {i}", "DET", 10.0 + i, 5.0, LATE) for i in range(1, n + 1)])
 
 
-def test_a_column_blanked_for_more_than_a_few_rows_keeps_its_values():
+def test_a_wipe_keeps_the_previous_values():
+    """More than 20% of a column's populated rows blank at once: the feed broke, keep what was there."""
     old = _wide_slate(10)
     new = old.copy()
-    lost = BLANK_GUARD_MAX_ROWS + 1
-    new.loc[: lost - 1, "ProjOwn"] = None
+    new.loc[:2, "ProjOwn"] = None  # 3 of 10 = 30%
 
     result = _run("projections", new, old, now=BEFORE_ANY_KICKOFF)
 
     assert result.frame["ProjOwn"].notna().all()
-    assert any(f"blanked ProjOwn for {lost} row(s)" in n for n in result.notes)
+    assert any("blanked ProjOwn for 3 of 10 row(s)" in n for n in result.notes)
 
 
-def test_a_few_blanks_are_taken():
+def test_a_whole_column_blanked_is_a_wipe():
     old = _wide_slate(10)
+    new = old.assign(ProjOwn=None)
+    result = _run("projections", new, old, now=BEFORE_ANY_KICKOFF)
+    assert result.frame["ProjOwn"].notna().all()
+
+
+def test_a_small_loss_passes_through_and_is_listed():
+    """Week 9's Wednesday sync: FantasyPros blanked 9 of 374 players. 9 is well under 20%: nothing is held,
+    and the sync names who lost a value."""
+    old = _wide_slate(374).assign(FantasyProsPts=5.0)
     new = old.copy()
-    new.loc[: BLANK_GUARD_MAX_ROWS - 1, "ProjOwn"] = None
+    new.loc[:8, "FantasyProsPts"] = None
 
     result = _run("projections", new, old, now=BEFORE_ANY_KICKOFF)
 
-    assert result.frame["ProjOwn"].isna().sum() == BLANK_GUARD_MAX_ROWS
-    assert result.notes == []
+    assert result.frame["FantasyProsPts"].isna().sum() == 9
+    [note] = result.notes
+    assert "dropped FantasyProsPts for 9 player(s)" in note and "Late 1" in note and "took the blanks" in note
+
+
+def test_exactly_twenty_percent_is_not_a_wipe():
+    old = _wide_slate(10)
+    new = old.copy()
+    new.loc[:1, "ProjOwn"] = None  # 2 of 10
+    assert _run("projections", new, old, now=BEFORE_ANY_KICKOFF).frame["ProjOwn"].isna().sum() == 2
+
+
+def test_a_wipe_never_holds_a_player_dk_marks_out_or_ir():
+    old = _wide_slate(10).assign(FantasyProsPts=5.0, Avail="")
+    new = old.copy()
+    new.loc[:5, "FantasyProsPts"] = None  # a wipe: 6 of 10
+    new.loc[0, "Avail"] = "OUT"
+    new.loc[1, "Avail"] = "IR"
+    old.loc[2, "Avail"] = "IR"  # on file as IR, and the new feed has dropped the flag
+
+    result = _run("edge", new, old, now=BEFORE_ANY_KICKOFF)
+
+    got = result.frame.set_index("Id")["FantasyProsPts"]
+    assert got.loc[[1, 2, 3]].isna().all()  # OUT, IR (new), IR (on file): not held
+    assert got.loc[[4, 5, 6]].eq(5.0).all()  # the rest of the wipe is held
+    assert any("except for 3 player(s) DraftKings has OUT / IR" in n for n in result.notes)
 
 
 def test_edge_flags_may_clear_for_many_rows():

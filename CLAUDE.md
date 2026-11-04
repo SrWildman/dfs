@@ -195,6 +195,27 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `tests/test_runlog.py` guards the real file. Two inputs are left by commands for the page, in `data/week/inputs/`:
   the Stacks tab's top rows (`dfs stacks`, the Stacks writer) and the season-long view (`season sync` / `check`); Plan D's
   `contest_plan` and `postmortem` use the same `week_inputs.save_input`.
+- `dfs week serve [--week N] [--port P] [--no-open]` -- **the Week page as a local app** (`week_server.py`; the static `dfs week page` is
+  unchanged): serves the page on this Mac only (`127.0.0.1`; the link it opens carries a random token, and every request needs the
+  token and a localhost `Host`), with **Claude Code docked on the right** (`week_chat.py`: `claude -p` in stream-JSON mode in the main
+  checkout under Sam's own login; model / effort / New chat / Stop / this week's chats; a call that needs approval shows on the page as
+  Approve / Deny with exactly what will run, nothing is auto-approved, `bypassPermissions` is never used, "auto" is a switch he turns
+  on), an **Ask** button beside every phrase, **run buttons** for every command with live output (`week_jobs.py`: one job at a time,
+  Stop, history; `week new` / `week close` / `lineups clear` / `pool clear` / `setup ...` need the command typed out; a closed week is
+  read only), a **check this contest** form and the **file drop zone** (`week_drops.py`: DK's entries file at lock, the history export
+  and standings at close; only .csv / .zip, size and zip-bomb limits, existing parsers only, filed into Downloads where `entries record`
+  and `week close` look, never deleted; after a drop it shows what was recognised and offers the matching command). No sheet writes of
+  its own, no DK access; the log (`data/week/serve.log`) never holds prompts. Ctrl-C stops it.
+- **The run lock** (`run_lock.py`): `data/.run.lock` makes one command that writes (sync, week new/close, setup *, lineups suggest,
+  entries record/fill, bankroll *, season sync, contests plan, ...; `run_lock.WRITERS`) run at a time across the terminal, the chat and
+  the buttons. A second writer is refused with what is running, since when and from where (terminal / chat / button); no `--force`.
+  Read-only commands (status, doctor, week page, ...; `run_lock.READ_ONLY`) never take it; a dead owner's lock is replaced; a `dfs`
+  started by the holder (`week close --research`'s children) passes. A new command must be added to one of the two sets (a test fails).
+- **Contest tiers** (`contest_tiers.py`, evidence in `docs/CONTESTS.md`): rules, not a lobby list. A / B / C / Avoid from a contest's
+  format, fee, field, entries per user, prize pool and min-cash, with the rake, a reason and flags; the Weekly Budget splits about
+  60 / 30 / at most 10% (and $15) across A / B / C. On the Week page: the plan in dollars, what to look for, the day's reminder, the
+  check form, and the entries drop's spend by tier against the plan before lock. `dfs contests plan` adds the tier view; `week close`
+  prints one line (planned against spent by tier). `[contest_plan] casual_eligible = false`: Sam is not eligible for Casual contests.
 - `dfs doctor [--sheet-id <id>]` -- read-only structural check (tabs
   exist, the Cockpit and Stacks tabs are there, the Suggested tab is in the current layout (lock column, rules box; an old one
   says to run a plain `dfs lineups suggest`), `Exposure!H1` is the formula that counts built lineups (not a typed number), EdgeRaw's header matches `EDGE_COLUMNS`, `LINKED_EDGE_COLUMNS` is
@@ -245,7 +266,7 @@ URL; check it before any write).
 | "sync" | `dfs sync`, then `dfs doctor` | each source's status (name any failure, e.g. an expired TFFB login), doctor findings |
 | "final sync" | `dfs sync --live`, then `dfs doctor` (safe at any time on Sunday: `sync_guard` keeps every started player's pre-kickoff values, rows a feed dropped, and DK's main slate after lock; report any "Kept from the last sync" lines it prints) | what changed since the last sync (the terminal diff / the Board's Queue), anyone in his pool now OUT or Q; then read the **Cockpit** tab (the sync refreshed it) and report its `SWAP` / `FILL` rows |
 | "build me lineups" | `dfs lineups suggest` (his pool must not be empty: if it is, say so and stop) | each build in one line (cash or GPP, shape, salary, Cash % / Top 1% (GPP builds rank by Top 1%; `--rank share` ranks by Top 1% share, only if Sam asks), and for a GPP build its ownership sum and product and expected duplicates: the numbers the terminal prints; say so if a cash build carries a duplicate warning), the cash chalk check (any CashOwn 30%+ player in none of the cash builds), and that **Lineup Tools > Copy builds to Lineups** (type `1,4,6` or `all`) puts them in |
-| "contest plan" | `dfs contests plan` | the plan by format with this week's budget, last week against it (what was over), and the H2H opponents to avoid |
+| "contest plan" | `dfs contests plan` | the plan by format and by tier (A / B / C dollars from this week's budget and what to look for), last week against it (what was over, by format and by tier), and the H2H opponents to avoid |
 | "record my entries" | `dfs entries record` (he downloads DK's entries file again after entering; never fetch it) | how many lineups, which came from a Suggested build and which are his own, the contests each went into; say if it fell back to the Lineups tab |
 | "keep build 2" | set build 2's decision cell to `Keep` on the Suggested tab (a write to the live week's sheet: say the sheet), then `dfs lineups suggest --iterate` | the round produced and what changed (each build's note) |
 | "lock Stafford and Nacua in build 4, swap the bring-back for McBride, rerun" | tick the locks and type the name over the bring-back cell on Suggested (the sheet and the chat must never disagree), then `dfs lineups suggest --iterate` | the round, build 4's note ("bring-back → McBride (yours); ...; Cash % 61% → 64%") or why the edit was refused |
@@ -260,6 +281,9 @@ URL; check it before any write).
 | "late swap with live scores" | the same as "late swap" (live is the default now). "late swap on projections only" adds `--state projected` | the same summary as "late swap", plus the "field: projected + live scores (ESPN, read <time>)" line the output prints |
 | "close the week" | `dfs week close --research` (it finds the newest history export in Downloads by its header and says which; pass `--csv <file>` if he names one). The close runs first, as always; then the offline studies run unattended (under 45 minutes, about as long as the slowest one: run it detached with a log, `caffeinate -i`, and read the log; a stage that fails or times out is reported, never retried). If the close itself fails, show the error and stop | the Model Check verdict and the learned block, the bankroll lines it reconciled, and what it kept and filled on the contest side (standings moved, empty downloads, Cash Line, the Contests tab), then the Contests tab's THIS WEEK, YOUR DECISIONS block (five lines), the contest plan line (spent vs plan, over in), the cash post-mortem's headline (how many cash builds would have cashed, the top separators and their tags, his cash lineup against its nearest build), and any "no record of what was entered" warning; then the 15-line research summary it prints (paste it to planning as is) and the path of the one report, `docs/research/weekly/<season>-wk<NN>-close.md` |
 | "show me the week", "what now" | `dfs week page` (builds the page and opens it in the browser; it only reads what the tool already saved: no sheet, no network) | today's steps from the page (the phrase and command for each), what it says is stale, and every section that says "not run yet" with what to say to fill it |
+| "open the week" | `dfs week serve` (opens the Week page as a local app with the chat docked beside it; leave it running; Ctrl-C stops it) | the link it printed, and say that the chat, buttons and drops live on that page |
+| "check a contest" | nothing to run: tell him to use the **check this contest** form on the Week page (`dfs week serve`): format, fee, entrants so far / max, entries per user, prize pool or min-cash | the tier, the rake and the reason the form returns |
+| "drop my entries" | nothing to run: tell him to drop DK's entries file (downloaded again after entering) on the Week page's drop zone, then press **Record these entries** (it runs `dfs entries record --csv <that file>`) | how many lineups and contests were recognised, the spend by tier against the plan (and what is over, while he can still withdraw), and any warning that the file is for another week |
 | "how did we do" | read (do not write) Model Check: the opening verdict sentences and "What the model learned this week" | five lines: who leads the projection race by position, what CalPts learned, how the signals are running, whether the probabilities hold, the Week 8 checkpoint |
 
 Season-long shortcuts (the Season sheet; `dfs season ...` prints its title and URL before any write):
