@@ -19,6 +19,8 @@ Every evaluation of one league shares one set of random draws, so two rosters ar
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
@@ -134,6 +136,25 @@ class Evaluator:
         self._base: dict[int, Outcome] | None = None
         self._base_gain: np.ndarray | None = None
         self._totals: dict[tuple[frozenset, int], float] = {}
+
+    def scoped(self, pid: str, through_week: int) -> Evaluator:
+        """This evaluator with `pid` scoring only through `through_week` (zero after): a bye-week stream is
+        worth the coming week and no more, so the roster spot he takes is charged for the rest. Shares the
+        draws and the base outcomes; nobody on a base roster is `pid`, so those stay valid."""
+        self.base()
+        other = copy.copy(self)
+        wk = self.view.ros.weekly
+        weekly = wk.copy()
+        weekly.loc[(weekly["player_id"] == pid) & (weekly["week"] > through_week), ["pts", "sd"]] = 0.0
+        ros = dataclasses.replace(self.view.ros, weekly=weekly)
+        other.view = dataclasses.replace(self.view, ros=ros)
+        # Rosters without `pid` score the same either way, so their lineups carry over.
+        other._lineups = {k: v for k, v in self._lineups.items() if pid not in k}
+        other._totals = {k: v for k, v in self._totals.items() if pid not in k[0]}
+        other._pts = {
+            w: ({**d, pid: 0.0} if w > through_week and pid in d else d) for w, d in self._pts.items()
+        }
+        return other
 
     # -- lineups ---------------------------------------------------------------------------------------------
     def lineups(self, roster: list[str]) -> list[tvm.WeekLineup]:

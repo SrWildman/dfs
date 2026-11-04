@@ -36,6 +36,18 @@ class LeagueConfig(BaseModel):
     faab_point_value: float | None = Field(None, ge=0.0)
 
 
+class RosterConfig(BaseModel):
+    """`[roster]` in season.toml: how many of a streaming position Sam keeps active. A kicker or a defense is
+    streamed in the week it is needed, so one is plenty. (A 1-QB league keeps one QB for the same reason; that
+    cap is read from the league's own slots, so a superflex league still carries two.) A league that starts
+    more than this at a position raises the cap to its own slot count. Players in IR slots never count."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_k: int = Field(1, ge=0)
+    max_def: int = Field(1, ge=0)
+
+
 class SeasonLongConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -54,6 +66,8 @@ class SeasonLongConfig(BaseModel):
     # Sam's buy list, across leagues: the trade finder's targets (`finder.Filters.targets`), with each
     # league's weakest position. A name he already owns in a league is skipped there.
     buy_list: list[str] = Field(default_factory=list)
+    # Roster sense for waivers, trades and the Sunday check (`roster_rules.py`).
+    roster: RosterConfig = Field(default_factory=RosterConfig)
 
 
 def load_season_config(path: Path | None = None) -> SeasonLongConfig:
