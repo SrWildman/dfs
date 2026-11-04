@@ -41,6 +41,15 @@ def stream_applies(view: LeagueView, ev: Evaluator, mine: list[str], pid: str) -
     return all(rr.unavailable_this_week(view, week_pts, p) for p in here)
 
 
+def worth_a_swap(view: LeagueView, ev: Evaluator, mine: list[str], pid: str, option: AddOption) -> bool:
+    """False for a same-position QB / K / DEF swap (the add sends his position's incumbent out) whose
+    rest-of-season gain is under `[roster] min_swap_gain`. Everything else (an empty-slot fill, a stream, any
+    other position) is not this rule's business, so True."""
+    if not rr.is_same_position_swap(view, pid, option.dropped, option.to_ir):
+        return True
+    return screen_gain(option, mine, weights(view, ev)) >= view.cfg.roster.min_swap_gain
+
+
 def add_options(
     view: LeagueView, ev: Evaluator, mine: list[str], pid: str, *, force: bool = False
 ) -> list[AddOption]:
@@ -52,7 +61,9 @@ def add_options(
     keep = frozenset({pid}) if force else frozenset()
     st = tr.settle_full([*mine, pid], len(mine), view, [], ev, before=mine, keep=keep)
     if pid in st.roster:
-        out.append(AddOption("add", st.roster, st.dropped, st.to_ir, ev))
+        option = AddOption("add", st.roster, st.dropped, st.to_ir, ev)
+        if force or worth_a_swap(view, ev, mine, pid, option):
+            out.append(option)
     if stream_applies(view, ev, mine, pid):
         week = ev.weeks[0]
         scoped = ev.scoped(pid, week)

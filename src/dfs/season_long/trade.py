@@ -285,6 +285,10 @@ def best_swap(
     for pid in fa_candidates(view, fa, roster):
         after, dropped, _ = settle([*roster, pid], len(roster), view, [], ev, before=roster)
         gain = _lineup_sum(ev, after) - base
+        # A same-position QB / K / DEF swap needs `[roster] min_swap_gain` too (an empty-slot fill does not).
+        small = gain < view.cfg.roster.min_swap_gain
+        if small and dropped and rr.is_same_position_swap(view, pid, dropped, []):
+            continue
         if gain > best_gain and dropped and dropped[0] != pid:
             best, best_gain = (after, pid, dropped[0]), gain
     return best

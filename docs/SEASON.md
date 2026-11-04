@@ -38,6 +38,7 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
    [roster]
    max_k = 1     # active kickers (default 1)
    max_def = 1   # active defenses (default 1)
+   min_swap_gain = 5   # a same-position QB / K / DEF swap needs this many rest-of-season points (default 5)
    ```
 2. Share the Season sheet with the service account as an Editor, then `dfs season setup` and `dfs season sync`.
    `dfs season doctor` checks the structure.
@@ -178,6 +179,10 @@ analyzer and finder (`trade.settle`), the "free move first", and the Sunday chec
    flagged "IR slot holds a healthy player: activate him". Who is eligible comes from each league's
    `reserve_allow_*` settings: IR, PUP and NFI always; Out, Doubtful, Sus, COV, DNR where the league allows.
 5. **Never a drop from an IR slot, and never a drop that leaves a starting slot empty.**
+6. **A same-position swap has to be worth it.** A QB / K / DEF swapped for the incumbent is suggested only when
+   its rest-of-season lineup gain is at least `[roster] min_swap_gain` (default 5 points), in the waivers and
+   in the "free move first". An empty-slot fill and a bye-week stream are exempt, and a player asked about by
+   name (`--player`) is always reported.
 
 A roster that already breaks a cap (two defenses, say) is not charged for it: the caps bite on what an add or
 a trade brings in.
