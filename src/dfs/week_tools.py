@@ -57,7 +57,14 @@ TOOL_DAY: dict[str, str] = {
 }
 
 # A phrase that runs no command is placed by hand (a sheet script, or reading a tab).
-PHRASE_DAY: dict[str, str] = {"fix flex": SAT, "how did we do": MON, "add X, Y to my buy list": SEASON}
+PHRASE_DAY: dict[str, str] = {
+    "fix flex": SAT,
+    "how did we do": MON,
+    "add X, Y to my buy list": SEASON,
+}
+
+# A phrase whose Run cell names no `dfs` command but means one: listed under that command.
+PHRASE_ALIAS: dict[str, str] = {"late swap with live scores": "dfs lineups late-swap"}  # live is its default
 
 SECTION_DAY = {
     "Also used most weeks": ANY,
@@ -194,7 +201,10 @@ def build(
     for p in phrases:
         for command in p.commands:
             by_path.setdefault(command_path(command), []).append(p)
-        if not p.commands:
+        alias = PHRASE_ALIAS.get(p.says[0])
+        if alias:
+            by_path.setdefault(alias, []).append(p)
+        elif not p.commands:
             sheet_only.append(p)
     tools = []
     for path, command in commands.items():
@@ -237,7 +247,7 @@ def unplaced_phrases(phrases: list[Phrase] | None = None, commands: dict | None 
             path = command_path(command)
             if path in commands and path not in TOOL_DAY and group_of(path) not in (ANY, SEASON):
                 missing.append(path)
-        if not p.commands and p.says[0] not in PHRASE_DAY:
+        if not p.commands and p.says[0] not in PHRASE_DAY and p.says[0] not in PHRASE_ALIAS:
             missing.append(p.says[0])
     for path in commands_doc.standard_week_commands():
         if path not in TOOL_DAY and group_of(path) != ANY:

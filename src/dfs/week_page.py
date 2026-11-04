@@ -45,9 +45,17 @@ REGENERATE_AFTER = {
 # Tests turn this off (tests/conftest.py): a test that runs a CLI command must not write a page.
 AUTO_REGENERATE = True
 
-# Plan C item 4b (a game-day sync never wipes data). Flip when it is merged and `dfs sync --live` is safe on
-# Sunday; the Sunday section says which it is.
-LIVE_SYNC_GUARD_MERGED = False
+
+def sync_guard_merged() -> bool:
+    """Plan C's guard (a game-day sync never wipes data) is in this checkout: `dfs.sync_guard` is importable.
+    Detected, not hand-set, so the Sunday section stays true on any branch."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("dfs.sync_guard") is not None
+    except (ImportError, ValueError):
+        return False
+
 
 CHALK_THRESHOLD = 0.30  # a player this owned in double-ups is "chalk" (the cash chalk check)
 PROVEN, SHADOW, UNTESTED = "Proven", "Shadow", "Untested"
@@ -573,7 +581,7 @@ def sunday_section(inp: WeekInputs) -> Section:
     guard = (
         "Yes: `dfs sync --live` merges and never blanks a started player's numbers, so it is safe to run "
         "any time on Sunday."
-        if LIVE_SYNC_GUARD_MERGED
+        if sync_guard_merged()
         else "Not confirmed. Plan C's guard (a game-day sync never wipes data) is not merged, so "
         "`dfs sync --live` can still blank started players' numbers: until then, treat Sunday's "
         "projections as Saturday's."

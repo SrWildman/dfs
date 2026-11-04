@@ -11,8 +11,8 @@ inputs belong to Plan D (money) and are read the same way once its commands writ
 (`dfs contests plan`) and `postmortem` (`week close`'s cash post-mortem). Their expected shape is the
 docstring of `CONTEST_PLAN_SHAPE` / `POSTMORTEM_SHAPE`; until the file exists the sections say "not run yet".
 
-Paths follow `paths.DATA_DIR` at call time, so tests/conftest.py's `_hermetic_data_dir` (which points it at the
-test's tmp dir) is all that keeps a test off the real `data/`.
+Paths follow `paths.DATA_DIR` at call time, so tests/conftest.py's `_hermetic_data_dir` (which points it at
+the test's tmp dir) is all that keeps a test off the real `data/`.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import Any
 from dfs import paths, runlog
 
 INPUTS_SUBDIR = Path("week") / "inputs"
+
 
 def data_root() -> Path:
     return paths.DATA_DIR

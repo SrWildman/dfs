@@ -258,7 +258,7 @@ def _hermetic_data_dir(tmp_path, monkeypatch):
 def _no_week_page_regeneration(monkeypatch):
     """A CLI command run in a test never regenerates the Week page. The run log (`data/runlog.csv`, written by
     the CLI entry point after EVERY command) and the page's files (`data/week/`) need no override of their
-    own: they resolve `paths.DATA_DIR` at call time, which `_hermetic_data_dir` points at the test's tmp dir."""
+    own: they resolve `paths.DATA_DIR` at call time, which `_hermetic_data_dir` points at the tmp dir."""
     from dfs import week_page
 
     monkeypatch.setattr(week_page, "AUTO_REGENERATE", False)

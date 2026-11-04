@@ -152,12 +152,8 @@ PLANS: dict[int, list[StepSpec]] = {
         StepSpec(
             "late swap",
             "dfs lineups late-swap --refresh-injuries",
-            "Who is still swappable in each lineup, and the best change for each.",
-        ),
-        StepSpec(
-            "late swap with live scores",
-            "dfs lineups late-swap --refresh-injuries --state live",
-            "Between the 1 pm and 4 pm windows: your players' points so far, from ESPN's box scores.",
+            "Who is still swappable in each lineup, and the best change for each. Once a game has started it "
+            "scores swaps on your players' points so far (ESPN's box scores).",
         ),
         StepSpec(
             "set my lineups",

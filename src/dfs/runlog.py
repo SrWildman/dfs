@@ -22,6 +22,7 @@ from dfs import paths
 
 HEADER = ["time", "command", "ok"]
 
+
 def runlog_path() -> Path:
     return paths.DATA_DIR / "runlog.csv"
 

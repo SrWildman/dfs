@@ -344,7 +344,7 @@ def test_every_section_renders_from_fixture_outputs(full):
     assert "OUT or on IR but in a build" in text and "Hurt Guy (OUT, in 1 builds)" in text
     # sunday: the run, its field source, the swap with its label
     assert "Tyler Higbee" in text and "HOLD" in text and "nothing beats it" in text
-    assert "Safe game-day sync" in text and "Not confirmed" in text
+    assert "Safe game-day sync" in text and "never blanks a started player" in text
     # season
     assert "Choppa" in text and "SWAP QB Dak: OUT" in text and "give A | get B" in text
     # last week: the newest week in the log, NFL paid entries only (no MLB, no freeroll)
@@ -383,6 +383,23 @@ def test_a_late_swap_run_from_last_week_is_not_this_weeks(full):
     full.late_swap["saved_at"] = (SAT - timedelta(days=6)).astimezone(UTC).isoformat()
     section = html.unescape(week_page.sunday_section(full).html())
     assert "Late swap has not run this week" in section and "Tyler Higbee" not in section
+
+
+def test_the_game_day_sync_guard_is_detected_not_hand_set(full, monkeypatch):
+    import importlib.util
+
+    assert week_page.sync_guard_merged() is True  # this checkout has dfs.sync_guard
+    assert "never blanks a started player" in week_page.sunday_section(full).html()
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a, **k: None if name == "dfs.sync_guard" else real(name, *a, **k),
+    )
+    assert week_page.sync_guard_merged() is False
+    html_off = week_page.sunday_section(full).html()
+    assert "Not confirmed" in html_off and "never blanks" not in html_off
 
 
 def test_a_run_without_live_scores_says_so(full):
