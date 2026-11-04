@@ -60,6 +60,7 @@ def sync_guard_merged() -> bool:
 BUILD_BUTTON = ("dfs lineups suggest", "Build")
 CHALK_THRESHOLD = 0.30  # a player this owned in double-ups is "chalk" (the cash chalk check)
 PROVEN, SHADOW, UNTESTED = "Proven", "Shadow", "Untested"
+DATA = "Data"  # a feed, not a prediction: trust chips (Proven / Shadow / Untested) are for predictions only
 
 # The audit's verdict on each decision's evidence (docs/planning/audit/AUDIT_2026-11.md), the starting point.
 # One line each, kept here so they can be edited in one place when the evidence moves.
@@ -124,10 +125,11 @@ TRUST: dict[str, tuple[str, str]] = {
         SHADOW,
         "Proj ▼ and USAGE↓ are context chips that have not earned a verdict: shown as a second opinion only.",
     ),
-    "slate": (PROVEN, "Odds, kickoff times, weather and injury statuses are data feeds, not models."),
+    "slate": (DATA, "Odds, kickoff times, weather and injury statuses are data feeds, not predictions."),
     "changes": (
-        PROVEN,
-        "A diff of two syncs: what the feeds said then against now. CalPts moves are the model's.",
+        DATA,
+        "A diff of two syncs: what the feeds said then against now. A CalPts move is the model's number "
+        "moving.",
     ),
 }
 
@@ -1048,8 +1050,12 @@ def plays_section(inp: WeekInputs) -> Section:
             f'<p class="flag">{e(pending_banner)}. The chalk tags and the leverage list appear then.</p>'
         )
 
-    def game_why(p: week_plays.Play) -> tuple[str, str]:
-        return game_cell(p), f'<span class="why-line">{e(p.why)}</span>'
+    def game_why(p: week_plays.Play, token: str = "") -> tuple[str, str]:
+        record = ""
+        if token:
+            line = week_plays.record_line(token, inp.signal_table, inp.scored_weeks)
+            record = f'<br><span class="record">{e(line)}</span>'
+        return game_cell(p), f'<span class="why-line">{e(p.why)}</span>{record}'
 
     body.append(f"<h4>Best projected value {trust_chip('plays_value')}</h4>")
     body.append(note("CalPts per $1K of salary, CalPts breaking ties."))
@@ -1114,7 +1120,12 @@ def plays_section(inp: WeekInputs) -> Section:
             plays_table(
                 ["Player", "Salary", "CalPts", "Game", "Why"],
                 {"TE": view.fades},
-                lambda p: [player_cell(p), e(f"${p.salary:,.0f}"), f1(p.calpts), *game_why(p)],
+                lambda p: [
+                    player_cell(p),
+                    e(f"${p.salary:,.0f}"),
+                    f1(p.calpts),
+                    *game_why(p, week_plays.FADE),
+                ],
             )
         )
         body.append(note("FADE↓ is a tight-end signal: fade him or pay for it on purpose."))
@@ -1126,7 +1137,12 @@ def plays_section(inp: WeekInputs) -> Section:
             plays_table(
                 ["Player", "Salary", "CalPts", "Game", "Why"],
                 {p.pos: [x for x in view.shadow if x.pos == p.pos] for p in view.shadow},
-                lambda p: [player_cell(p), e(f"${p.salary:,.0f}"), f1(p.calpts), *game_why(p)],
+                lambda p: [
+                    player_cell(p),
+                    e(f"${p.salary:,.0f}"),
+                    f1(p.calpts),
+                    *game_why(p, next((c for c in p.chips if c in week_plays.SHADOW_TOKENS), "")),
+                ],
             )
         )
         body.append(
@@ -1135,7 +1151,7 @@ def plays_section(inp: WeekInputs) -> Section:
     body.append(LIVE_POOL)
     body.append(
         f'<p class="note {STATIC_ONLY}">To add players to your pool, say '
-        f"{code(chr(34) + 'add Name, Name to my pool' + chr(34), 'say')} ("
+        f"{code(chr(34) + 'add X, Y to my pool' + chr(34), 'say')} ("
         f"{code('dfs pool add ' + chr(34) + 'Name' + chr(34))}). The served page "
         "(<code>dfs week serve</code>) "
         "has a tick box on every row.</p>"
@@ -1190,7 +1206,7 @@ def slate_section(inp: WeekInputs) -> Section:
             + "".join(
                 f"<td>{c}</td>"
                 for c in [
-                    f"<b>{e(title)}</b>" + (' <span class="sig shadow">top 3 total</span>' if g.top else ""),
+                    f"<b>{e(title)}</b>" + (' <span class="tag">top 3 total</span>' if g.top else ""),
                     e(g.kickoff) or "-",
                     e(f"{g.total:g}") if g.total is not None else "-",
                     e(spread),
@@ -1352,6 +1368,7 @@ margin:0 0 14px}
 .notrun-card{opacity:.85}.notrun{color:var(--dim)}
 .asof{color:var(--dim);font-size:12.5px;margin-left:auto}
 .chip{font-size:11.5px;font-weight:600;border-radius:999px;padding:1px 9px;border:1px solid currentColor}
+.chip.data{color:var(--dim)}
 .chip.proven{color:var(--proven)}.chip.shadow{color:var(--shadow)}.chip.untested{color:var(--untested)}
 .trust{font-size:13px;color:var(--dim);margin:10px 0 0;border-top:1px dashed var(--line);padding-top:8px}
 code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(127,127,127,.14);
@@ -1383,7 +1400,10 @@ ul{margin:4px 0;padding-left:20px}details summary{cursor:pointer}details summary
 border:1px solid currentColor;white-space:nowrap}
 .sig.proven{color:var(--proven)}.sig.shadow{color:var(--shadow)}.sig.untested{color:var(--untested)}
 .sig.bad{color:var(--bad)}
+.tag{display:inline-block;font-size:11px;border-radius:4px;padding:0 6px;background:rgba(31,94,255,.15);
+color:var(--accent);white-space:nowrap}
 .why-line{color:var(--dim)}
+.record{font-size:12px;color:var(--proven)}
 .slate tr.top td{background:rgba(31,94,255,.07)}
 .slate td{min-width:80px}
 .urgent{border:2px solid var(--bad);border-radius:8px;padding:6px 12px;margin:6px 0 10px;color:var(--bad)}
@@ -1406,7 +1426,7 @@ def page_path(season: int, week: int, data_dir: Path | None = None) -> Path:
 # Friday is research (who to play, the games, what moved); Saturday is build and enter; Sunday is game day.
 _REST = ["unknowns", "cash", "gpp", "sunday"]
 DAY_ORDER: dict[int, list[str]] = {
-    0: ["last-week", "contest-plan", "season", "plays", "slate", "changes", *_REST],
+    0: ["last-week", "season", "changes", "plays", "slate", "contest-plan", *_REST],
     1: ["plays", "slate", "changes", "contest-plan", "season", "last-week", *_REST],
     5: [
         "contest-plan",

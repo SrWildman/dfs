@@ -292,10 +292,12 @@ class JobRunner:
 
     def _finish(self, job: Job, code: int) -> None:
         job.returncode = code
+        # History first, then `done`: whoever sees the job end (the page reloading "Recent runs", a test) must
+        # find its line already written. The other order left a window where a finished job was not listed.
+        self._remember(job)
         with job.cond:
             job.done = True
             job.cond.notify_all()
-        self._remember(job)
         self.log(f"job {job.id} ended: rc={code} stopped={job.stopping}")
         try:
             self.on_done(job)

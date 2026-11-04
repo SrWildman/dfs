@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import tomllib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -372,6 +373,29 @@ def load_prev_edge(data_dir: Path, current: list[dict] | None) -> tuple[list[dic
     return rows, at
 
 
+def load_signal_table(data_dir: Path, season: int) -> tuple[dict[str, dict], tuple[int, int] | None]:
+    """Model Check's per-signal record (`results/signal_table_<season>.csv`, written by
+    `dfs results update`) by signal group, and the first and last scored week
+    (`results/scored_<season>_wNN.csv`). Empty when there is none."""
+    results = data_dir / "results"
+    table: dict[str, dict] = {}
+    for r in _read_csv(results / f"signal_table_{season}.csv"):
+        table[r.get("Signal", "")] = {
+            "n": _int(r.get("n")) or 0,
+            "VsProj": _num(r.get("VsProj")),
+            "VsCal": _num(r.get("VsCal")),
+            "HitProj": _num(r.get("HitProj")),
+            "HitCal": _num(r.get("HitCal")),
+            "Thin": str(r.get("Thin")).lower() == "true",
+        }
+    weeks = sorted(
+        int(m.group(1))
+        for f in results.glob(f"scored_{season}_w*.csv")
+        if (m := re.fullmatch(rf"scored_{season}_w(\d+)\.csv", f.name))
+    )
+    return table, ((weeks[0], weeks[-1]) if weeks else None)
+
+
 def load_pool(data_dir: Path, season: int, week: int) -> dict[str, str]:
     snaps = read_json(data_dir / "pools" / f"{season}-wk{week:02d}.json") or []
     return dict(snaps[-1].get("pool") or {}) if snaps else {}
@@ -387,6 +411,8 @@ class WeekInputs:
     edge: list[dict] | None = None
     prev_edge: list[dict] | None = None  # the slate as the sync before the last one saw it
     prev_edge_at: datetime | None = None
+    signal_table: dict[str, dict] | None = None  # Model Check's record by signal
+    scored_weeks: tuple[int, int] | None = None  # the first and last week it was scored over
     pool: dict[str, str] = field(default_factory=dict)
     suggest: dict | None = None  # the latest round of data/suggest_state/<week>.json
     stacks: dict | None = None
@@ -409,6 +435,7 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
     d = data_dir or data_root()
     edge = load_edge(d)
     prev = load_prev_edge(d, edge)
+    signal_table, scored_weeks = load_signal_table(d, season)
     return WeekInputs(
         season=season,
         week=week,
@@ -418,6 +445,8 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         edge=edge,
         prev_edge=prev[0] if prev else None,
         prev_edge_at=prev[1] if prev else None,
+        signal_table=signal_table,
+        scored_weeks=scored_weeks,
         pool=load_pool(d, season, week),
         suggest=latest_round(d, week),
         stacks=load_input("stacks", season, week, d),

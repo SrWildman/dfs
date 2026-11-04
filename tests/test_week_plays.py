@@ -425,8 +425,16 @@ def test_page_is_ordered_by_day(tmp_path, day, lead):
     assert sorted(order) == sorted(week_page.SECTION_IDS)  # nothing dropped on any day
 
 
-def test_monday_leads_with_last_week():
-    assert week_page.section_order(0)[0] == "last-week"
+def test_monday_order_is_last_week_season_changes_plays_slate_contest_plan():
+    assert week_page.section_order(0)[:6] == [
+        "last-week",
+        "season",
+        "changes",
+        "plays",
+        "slate",
+        "contest-plan",
+    ]
+    assert sorted(week_page.section_order(0)) == sorted(week_page.SECTION_IDS)
 
 
 def test_nav_follows_the_page_order(tmp_path):
@@ -445,7 +453,7 @@ def live(page, **kw):
 def test_static_page_has_no_tick_boxes_but_says_the_phrase(tmp_path):
     page = render(inputs(tmp_path, slate_rows()))
     assert 'class="pool-tick"' not in page and "<input" not in page
-    assert "add Name, Name to my pool" in page and "dfs pool add" in page
+    assert "add X, Y to my pool" in page and "dfs pool add" in page
     assert "<button" not in page
 
 
@@ -453,7 +461,7 @@ def test_served_page_has_a_tick_box_per_play_and_the_add_bar(tmp_path):
     page = live(render(inputs(tmp_path, slate_rows())))
     assert 'class="pool-tick" data-name="Qb Alpha"' in page
     assert 'id="pool-add"' in page and "Add ticked to pool" in page
-    assert "add Name, Name to my pool" not in page  # the static hint is gone
+    assert "has a tick box on every row" not in page  # the static hint is gone
     assert "pool-slot" not in page
 
 
@@ -502,3 +510,86 @@ def test_page_reads_only_the_given_data_dir(tmp_path):
     inp = inputs(tmp_path, slate_rows())
     assert inp.data_dir == tmp_path
     assert week_plays.plays(inp.edge, inp.pool).players == 9  # everyone healthy and priced
+
+
+# -- trust labels: chips are for predictions, feeds say "Data" ----------------------------------------
+
+
+def test_slate_and_changes_are_labelled_data_not_proven(tmp_path):
+    write_prev(tmp_path, slate_rows())
+    page = render(inputs(tmp_path, slate_rows()))
+    for sid in ("slate", "changes"):
+        sec = section(page, sid)
+        assert 'class="chip data"' in sec and ">Data<" in sec
+        assert "Proven" not in sec and "Shadow" not in sec and "Untested" not in sec
+    assert week_page.TRUST["slate"][0] == week_page.TRUST["changes"][0] == "Data"
+    assert 'class="chip proven"' in section(page, "plays")  # predictions keep their chips
+    assert ">Shadow<" in section(page, "plays") and ">Untested<" in section(page, "plays")
+
+
+def test_the_slates_top_3_tag_is_not_a_trust_chip(tmp_path):
+    sec = section(render(inputs(tmp_path, slate_rows())), "slate")
+    assert "top 3 total" in sec and 'class="sig shadow"' not in sec
+
+
+# -- a signal's own track record under the fades -----------------------------------------------------------
+
+
+def write_signal_record(d, weeks=range(1, 9)):
+    write_csv(
+        d / "results" / "signal_table_2026.csv",
+        [
+            {
+                "Signal": "FADE↓",
+                "n": "52",
+                "VsProj": "-1.88",
+                "VsCal": "-2.51",
+                "HitProj": "0.673",
+                "HitCal": "0.673",
+                "Thin": "False",
+                "AsOf": "2026-11-03",
+            },
+            {
+                "Signal": "USAGE↓",
+                "n": "124",
+                "VsProj": "-0.9",
+                "VsCal": "-0.6",
+                "HitProj": "0.56",
+                "HitCal": "0.56",
+                "Thin": "False",
+                "AsOf": "2026-11-03",
+            },
+        ],
+    )
+    for w in weeks:
+        write_csv(d / "results" / f"scored_2026_w{w:02d}.csv", [{"Name": "x"}])
+
+
+def test_fade_rows_carry_the_signals_model_check_record(tmp_path):
+    write_signal_record(tmp_path)
+    plays = section(render(inputs(tmp_path, slate_rows())), "plays")
+    fades = plays[plays.index("Fades") : plays.index("Other warning chips")]
+    assert "FADE↓: 67% hit, -2.5 vs CalPts, Weeks 1-8 (n=52)" in fades
+    shadow = plays[plays.index("Other warning chips") :]
+    assert "USAGE↓: 56% hit, -0.6 vs CalPts, Weeks 1-8 (n=124)" in shadow
+
+
+def test_record_line_is_honest_when_there_is_no_record(tmp_path):
+    assert week_plays.record_line("FADE↓", None, None) == "FADE↓: no Model Check record yet"
+    plays = section(render(inputs(tmp_path, slate_rows())), "plays")
+    assert "FADE↓: no Model Check record yet" in plays
+    table = {"FADE↓": {"n": 0}}
+    assert "has not fired" in week_plays.record_line("FADE↓", table, (1, 8))
+    thin = {"FADE↓": {"n": 4, "HitCal": 0.5, "VsCal": 1.0, "Thin": True}}
+    assert (
+        week_plays.record_line("FADE↓", thin, (3, 3))
+        == "FADE↓: 50% hit, +1.0 vs CalPts, Week 3 (n=4), thin sample"
+    )
+
+
+def test_the_pool_shortcut_is_in_claude_md_and_runs_pool_add():
+    from dfs import week_tools
+
+    phrases = {p.says[0]: p for p in week_tools.parse_phrases()}
+    assert "add X, Y to my pool" in phrases
+    assert phrases["add X, Y to my pool"].commands == ["dfs pool add"]

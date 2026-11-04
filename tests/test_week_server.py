@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 import queue
+import shlex
 import signal
 import stat
 import sys
@@ -207,7 +208,15 @@ def stub_python(tmp_path, body="echo ran $@"):
 def make(tmp_path):
     servers = []
 
-    def build(script=say_hello, *, week=WEEK, read_only=False, python_body="echo ran $@", **kw):
+    def build(
+        script=say_hello,
+        *,
+        week=WEEK,
+        read_only=False,
+        python_body="echo ran $@",
+        job_stop_waits=(0.05, 0.05, 0.05),
+        **kw,
+    ):
         runner = FakeRunner(script)
         data = tmp_path / "data"
         chat = week_chat.ChatManager(
@@ -223,7 +232,7 @@ def make(tmp_path):
             week_is_closed=lambda: server.ctx.read_only,
             python=stub_python(tmp_path, python_body),
             history_path=tmp_path / "jobs.jsonl",
-            stop_waits=(0.05, 0.05, 0.05),
+            stop_waits=job_stop_waits,
             cwd=tmp_path,
         )
         server = make_server(
@@ -667,9 +676,36 @@ def test_history_keeps_option_names_not_values(make):
     assert "secret" not in (c.tmp / "jobs.jsonl").read_text()
 
 
+# A job whose death by SIGINT does not depend on how the test run was started. A process launched in the
+# background (`&`, `nohup`, some CI wrappers) inherits SIGINT as IGNORED, and a shell script cannot trap or
+# reset a signal that was ignored on entry, so a `sh` fake job never died of SIGINT: Stop waited out its
+# first interval and escalated to SIGTERM (returncode -SIGTERM, or a job still running when the test gave up).
+# Python can always reset the handler, so the job restores the default SIGINT disposition, and only then
+# prints `ready` (which the test waits for): from that moment the first signal Stop sends kills it by SIGINT.
+SIGINT_JOB = (
+    "exec "
+    + shlex.quote(sys.executable)
+    + """ -c '
+import signal, time
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+print("ready", flush=True)
+time.sleep(30)
+'"""
+)
+
+
+def wait_output(job, text, timeout=10):
+    end = time.time() + timeout
+    while text not in job.lines and time.time() < end:
+        time.sleep(0.02)
+    assert text in job.lines, f"the job never printed {text!r}: {job.lines}"
+
+
 def test_a_second_job_is_refused_while_one_runs(make):
-    c = make(python_body="exec sleep 30")
+    # Generous stop waits: the first signal (SIGINT) always has time to land before any escalation.
+    c = make(python_body=SIGINT_JOB, job_stop_waits=(10.0, 10.0, 10.0))
     _, first = c.post("/api/jobs/start", {"command": "dfs status"})
+    wait_output(c.jobs.jobs[first["job"]], "ready")
     status, body = c.post("/api/jobs/start", {"command": "dfs status"})
     assert status == 409 and "one job at a time" in body["error"]
     assert c.get("/api/status")[1]["job"] == "dfs status"

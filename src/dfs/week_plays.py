@@ -253,6 +253,37 @@ def make_play(row: dict, kind: str, *, pool: dict[str, str], lev: float | None =
     )
 
 
+# -- a signal's own track record (Model Check) ---------------------------------------------------------------
+
+
+def record_line(token: str, table: dict[str, dict] | None, weeks: tuple[int, int] | None) -> str:
+    """Model Check's record for the signal behind a chip, in one line: `FADE↓: 67% hit, -2.5 vs CalPts,
+    Weeks 1-8 (n=52)`. `table` is `results/signal_table_<season>.csv` by signal group (`week_inputs.
+    load_signal_table`); the group is the Model Check row the chip is scored in
+    (`player_card.signal_group`)."""
+    from dfs import player_card
+
+    group = player_card.signal_group(token)
+    if group is None:
+        return f"{token}: no Model Check record for this signal"
+    rec = (table or {}).get(group)
+    if rec is None:
+        return f"{token}: no Model Check record yet"
+    n = int(rec.get("n") or 0)
+    if n == 0:
+        return f"{token}: has not fired in a scored game yet"
+    bits = []
+    hit = rec.get("HitCal") if rec.get("HitCal") is not None else rec.get("HitProj")
+    if hit is not None:
+        bits.append(f"{hit * 100:.0f}% hit")
+    if rec.get("VsCal") is not None:
+        bits.append(f"{rec['VsCal']:+.1f} vs CalPts")
+    if weeks:
+        bits.append(f"Weeks {weeks[0]}-{weeks[1]}" if weeks[0] != weeks[1] else f"Week {weeks[0]}")
+    line = f"{token}: " + ", ".join(bits) + f" (n={n})"
+    return line + (", thin sample" if rec.get("Thin") else "")
+
+
 # -- the lists --------------------------------------------------------------------------------------------
 
 
