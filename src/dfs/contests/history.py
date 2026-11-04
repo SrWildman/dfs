@@ -278,8 +278,8 @@ def typed(log: pd.DataFrame) -> pd.DataFrame:
 
     Columns: `entry_key`, `contest_key`, `date`, `season`, `week` (nullable ints), `slate`, `game_type`,
     `entry` (the raw name), `series`, `format`, `opponent`, `matchup`, `place`, `points`, `entries`,
-    `places_paid`, `fee`, `winnings` (non-ticket + ticket), `prize_pool`, `payout_ratio`
-    (`places_paid / entries`)."""
+    `places_paid`, `entry_max` (entries allowed a user, from the name; blank when it says nothing), `fee`,
+    `winnings` (non-ticket + ticket), `prize_pool`, `payout_ratio` (`places_paid / entries`)."""
     out = pd.DataFrame(
         {
             "entry_key": log["Entry_Key"].astype(str),
@@ -295,6 +295,7 @@ def typed(log: pd.DataFrame) -> pd.DataFrame:
             "opponent": log["Opponent"],
             "matchup": log["Matchup"],
             "multiple": pd.to_numeric(log["Multiple"], errors="coerce"),
+            "entry_max": pd.to_numeric(log["Entry_Max"], errors="coerce").astype("Float64"),
             "place": log["Place"].map(count).astype("Int64"),
             "points": log["Points"].map(number).astype("Float64"),
             "entries": log["Contest_Entries"].map(count).astype("Int64"),

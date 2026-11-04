@@ -707,6 +707,10 @@ def last_week_section(inp: WeekInputs) -> Section:
         "fees).</p>",
         table(["Format", "Entries", "Fees", "Net", "ROI"], rows),
     ]
+    tw = inp.tier_week
+    if tw and tw.get("line"):
+        over = f' <span class="bad">Over: {e("; ".join(tw["over"]))}</span>' if tw.get("over") else ""
+        body.append(f"<h4>The week by tier (planned against spent)</h4><p><b>{e(tw['line'])}</b>{over}</p>")
     pm = inp.postmortem
     body.append("<h4>Cash post-mortem</h4>")
     if pm and pm.get("headline"):

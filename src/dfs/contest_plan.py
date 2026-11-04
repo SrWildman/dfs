@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from dfs import contest_tiers
 from dfs.config import ContestPlanConfig
 from dfs.contests import series as series_mod
 
@@ -124,6 +125,65 @@ def check_week(
     if budget is not None and total > budget + 1e-9:
         over.append(f"the total ${total:,.2f} (budget ${budget:,.2f})")
     return WeekCheck(season, week, spent, total, budget, over)
+
+
+def tier_plan(cfg: ContestPlanConfig, budget: float | None) -> contest_tiers.TierPlan | None:
+    """The Weekly Budget in dollars by tier (`contest_tiers.plan_dollars`); None when there is no budget."""
+    if budget is None:
+        return None
+    return contest_tiers.plan_dollars(budget, showdown_max=cfg.showdown_max, big_multi_max=cfg.big_nmax_max)
+
+
+def avoid_names(opponents: pd.DataFrame | None) -> list[str]:
+    return [] if opponents is None else [o.name for o in h2h_avoid(opponents)]
+
+
+def check_week_tiers(
+    typed: pd.DataFrame,
+    season: int,
+    week: int,
+    cfg: ContestPlanConfig,
+    budget: float | None,
+    opponents: pd.DataFrame | None = None,
+) -> contest_tiers.TierSpend | None:
+    """`week`'s paid entries in the log, each tiered as the contest ended (its real field and prize pool),
+    against the budget split by tier. None when there is no budget to split."""
+    plan = tier_plan(cfg, budget)
+    if plan is None:
+        return None
+    rows = typed[(typed["season"] == season) & (typed["week"] == week) & (typed["fee"] > 0)]
+    avoid = avoid_names(opponents)
+    verdicts = [
+        (
+            contest_tiers.classify(contest_tiers.contest_from_log_row(r), avoid_opponents=avoid),
+            float(r["fee"]),
+        )
+        for _, r in rows.iterrows()
+    ]
+    return contest_tiers.spend_by_tier(verdicts, plan)
+
+
+def tier_lines(
+    plan: contest_tiers.TierPlan | None, spend: contest_tiers.TierSpend | None, week: int | None
+) -> list[str]:
+    """The tier view `dfs contests plan` adds after its format view."""
+    out = ["THIS WEEK'S PLAN, BY TIER  (docs/CONTESTS.md has the rules and the evidence)"]
+    if plan is None:
+        out.append("  No budget, so no dollars by tier. What to look for:")
+    else:
+        out.append(
+            f"  Tier A ${plan.a:,.2f}  |  Tier B ${plan.b:,.2f}  |  Tier C ${plan.c:,.2f} "
+            f"(Showdown at most ${plan.c_showdown:,.2f}, "
+            f"big-field multi-entry at most ${plan.c_big_multi:,.2f})"
+        )
+    for tier in (contest_tiers.A, contest_tiers.B, contest_tiers.C):
+        out.append(f"  {tier}: {contest_tiers.LOOK_FOR[tier]}")
+    out.append(f"  Avoid: {contest_tiers.AVOID_LOOK_FOR}")
+    if spend is not None and week is not None:
+        out.append(f"  Last week by tier (Week {week}): {spend.line()}")
+        if spend.over:
+            out.append("  Over the tier plan: " + "; ".join(spend.over))
+    return out
 
 
 def last_week(typed: pd.DataFrame, season: int) -> int | None:
@@ -286,6 +346,10 @@ def report_lines(
         for o in avoid:
             out.append(f"  {o.name:<24} {o.record:>6}  ({o.games} games, net {_money(o.net)})")
     out.append("")
+    checked = week if week is not None else None
+    tiers = check_week_tiers(typed, season, checked, cfg, budget, opponents) if checked is not None else None
+    out += tier_lines(tier_plan(cfg, budget), tiers, checked)
+    out.append("")
     out.append("Arithmetic on your own log and your own [contest_plan] settings, not advice.")
     return out
 
@@ -320,6 +384,8 @@ def week_page_payload(
     shape of the page's `CONTEST_PLAN_SHAPE`)."""
     lines = plan_lines(cfg, budget)
     check = check_week(typed, season, week, cfg, budget) if week is not None else None
+    plan = tier_plan(cfg, budget)
+    spend = check_week_tiers(typed, season, week, cfg, budget, opponents) if week is not None else None
     roi = [
         {"format": r.label, "entries": r.entries, "roi": r.roi, "rake": r.rake} for r in rake_by_format(typed)
     ]
@@ -335,4 +401,18 @@ def week_page_payload(
         else [],
         "line": check.line() if check else "",
         "checked_week": week,
+        "tiers": {
+            "plan": None
+            if plan is None
+            else {
+                "A": plan.a,
+                "B": plan.b,
+                "C": plan.c,
+                "showdown": plan.c_showdown,
+                "big_multi": plan.c_big_multi,
+            },
+            "spent": None if spend is None else dict(spend.spent),
+            "over": [] if spend is None else list(spend.over),
+            "line": "" if spend is None else spend.line(),
+        },
     }

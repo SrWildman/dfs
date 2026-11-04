@@ -5730,8 +5730,39 @@ def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
         budget = _cell(SheetsClient(cfg.google_sheets), cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
         check = contest_plan.check_week(typed, season, closed, cfg.contest_plan, budget)
         console.print("\n" + escape(check.line()), highlight=False)
+        _tier_line_after_close(typed, season, closed, cfg, budget)
     except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over this
         console.print(f"[yellow]Contest plan check skipped ({e}); `dfs contests plan` shows it.[/yellow]")
+
+
+def _tier_line_after_close(typed, season: int, closed: int, cfg: Config, budget: float | None) -> None:  # noqa: ANN001
+    """The week against the plan by tier (`contest_tiers`), one line in the close report, saved for the Week
+    page's "Last week". Skipped quietly without a budget; the caller never fails over it."""
+    import pandas as pd
+
+    from dfs import contest_plan, week_inputs
+    from dfs.nfl_calendar import current_week
+    from dfs.paths import CONTESTS_DIR
+
+    path = CONTESTS_DIR / "h2h_opponents.csv"
+    opponents = pd.read_csv(path) if path.exists() else None
+    spend = contest_plan.check_week_tiers(typed, season, closed, cfg.contest_plan, budget, opponents)
+    if spend is None:
+        return
+    over = "; over in: " + ", ".join(spend.over) if spend.over else "; within the tier plan"
+    console.print(escape(f"Tier plan, Week {closed}: {spend.line()}{over}"), highlight=False)
+    week_inputs.save_input(
+        "tier_week",
+        {
+            "week": closed,
+            "line": spend.line(),
+            "over": list(spend.over),
+            "plan": {t: spend.plan.dollars(t) for t in ("A", "B", "C")},
+            "spent": dict(spend.spent),
+        },
+        season=season,
+        week=current_week(),
+    )
 
 
 def _score_results_after_close(cfg: Config) -> None:
