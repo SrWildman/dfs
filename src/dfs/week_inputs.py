@@ -300,24 +300,76 @@ def latest_round(data_dir: Path, week: int) -> dict | None:
     return rounds[-1] if rounds else None
 
 
+EDGE_COLUMNS_USED = [
+    "Id",
+    "Name",
+    "Position",
+    "Team",
+    "Opp",
+    "Salary",
+    "ProjPts",
+    "CalPts",
+    "Floor",
+    "Ceiling",
+    "CeilM",
+    "Hit3x%",
+    "Boom%",
+    "Bust%",
+    "Avail",
+    "Edge",
+    "Kickoff",
+    "GameStart",
+    "GameID",
+    "OverUnder",
+    "Spread",
+    "TotMove",
+    "SpdMove",
+    "Roof",
+    "Wind",
+    "WX",
+    "OppPosRank",
+    "Snap% L5",
+    "Tgt L5",
+    "Car L5",
+    "DK L5",
+    "xFP/G",
+    "CashOwn",
+    "GppOwn",
+]
+
+
 def load_edge(data_dir: Path) -> list[dict] | None:
     """The synced slate's rows (only the columns the page uses), or None when nothing is synced."""
-    wanted = [
-        "Name",
-        "Position",
-        "Team",
-        "Salary",
-        "ProjPts",
-        "CalPts",
-        "Avail",
-        "Kickoff",
-        "GameStart",
-        "CashOwn",
-    ]
     rows = _read_csv(data_dir / "current" / "edge.csv")
     if not rows:
         return None
-    return [{k: r.get(k, "") for k in wanted} for r in rows]
+    return [{k: r.get(k, "") for k in EDGE_COLUMNS_USED} for r in rows]
+
+
+SNAPSHOT_STAMP = "%Y%m%dT%H%M%SZ"  # store._SNAPSHOT_STAMP_FORMAT: a raw snapshot's file name
+
+
+def load_prev_edge(data_dir: Path, current: list[dict] | None) -> tuple[list[dict], datetime] | None:
+    """The slate as the sync before the last one saw it (`store.load_previous`'s rule: the second-newest raw
+    snapshot) and when that sync ran, or None when there is none or it is another week's slate (the first sync
+    of a new week must not diff against last week's games)."""
+    raw = data_dir / "raw" / "edge"
+    files = sorted(raw.glob("*.csv")) if raw.exists() else []
+    if len(files) < 2:
+        return None
+    path = files[-2]
+    try:
+        at = datetime.strptime(path.stem, SNAPSHOT_STAMP).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    rows = [{k: r.get(k, "") for k in EDGE_COLUMNS_USED} for r in _read_csv(path)]
+    if not rows:
+        return None
+    now_games = {r["GameID"] for r in current or [] if r.get("GameID")}
+    then_games = {r["GameID"] for r in rows if r.get("GameID")}
+    if now_games and (not then_games or len(now_games & then_games) / len(now_games) < 0.5):
+        return None
+    return rows, at
 
 
 def load_pool(data_dir: Path, season: int, week: int) -> dict[str, str]:
@@ -333,6 +385,8 @@ class WeekInputs:
     data_dir: Path
     manifest: dict = field(default_factory=dict)
     edge: list[dict] | None = None
+    prev_edge: list[dict] | None = None  # the slate as the sync before the last one saw it
+    prev_edge_at: datetime | None = None
     pool: dict[str, str] = field(default_factory=dict)
     suggest: dict | None = None  # the latest round of data/suggest_state/<week>.json
     stacks: dict | None = None
@@ -353,13 +407,17 @@ class WeekInputs:
 def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) -> WeekInputs:
     """Read every saved output for the week. Pure reading: a missing file is a None, never an error."""
     d = data_dir or data_root()
+    edge = load_edge(d)
+    prev = load_prev_edge(d, edge)
     return WeekInputs(
         season=season,
         week=week,
         now=now,
         data_dir=d,
         manifest=read_json(d / "manifest.json") or {},
-        edge=load_edge(d),
+        edge=edge,
+        prev_edge=prev[0] if prev else None,
+        prev_edge_at=prev[1] if prev else None,
         pool=load_pool(d, season, week),
         suggest=latest_round(d, week),
         stacks=load_input("stacks", season, week, d),

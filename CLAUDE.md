@@ -182,9 +182,17 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs week page [--week N] [--open/--no-open]` -- **the Week page**: one self-contained HTML file,
   `data/week/<season>-wk<NN>.html` (inline CSS, no external loads), opened in the browser. Top: **Today**, day-aware
   (Mon close, Tue new week, Wed-Fri research, Sat build, Sun game day; `week_today.py`, reusing
-  `launcher.suggest_actions`): 3-5 steps, each with the phrase to say and the command, and what is stale. Then each decision
-  (contest plan, cash with the chalk check, GPP with the top 3 stacks, unknowns, Sunday, season-long, last week), each
-  with its trust (Proven / Shadow / Untested; `week_page.TRUST`, the audit's verdicts), then **Your tools**: every
+  `launcher.suggest_actions`): 3-5 steps, each with the phrase to say and the command, and what is stale. Then, **ordered by
+  the day** (`week_page.DAY_ORDER`: Tue-Fri research, Sat build, Sun game day): **Plays** (`week_plays.py`: five a position of
+  best CalPts-per-$1K value, cash core, GPP upside with leverage, and FADE↓ fades, each with a football Why line, its game
+  and kickoff and trust chips; ownership columns say "ownership publishes ~Fri/Sat" until CashOwn / GppOwn exist; a tick box
+  per row runs `dfs pool add` in serve mode, a phrase to say in static), **Slate** (every game by total: spread, implied
+  totals, movement since the opening snapshot, weather, key injuries), **What changed** (the last two syncs diffed: status
+  changes for his pool and builds, new OUTs, CalPts moves of 2+, line moves of 1+), then each decision (contest plan by tier
+  for THIS week; cash with the chalk check; GPP with the top 3 stacks; unknowns; Sunday; season-long with urgent SWAPs in
+  red; last week, which holds last week's spend against the plan), each with its trust (Proven / Shadow / Untested;
+  `week_page.TRUST`, the audit's verdicts). In serve mode an empty Cash / GPP section has a **Build** button and an empty
+  Sunday section **Late swap** (the run lock applies). Then **Your tools**: every
   registered command and every phrase in this file's two tables, by day, with when each was last run
   (`week_tools.py`, generated, so a new command appears by itself; a test fails if a phrase or standard-week command has no
   day). Read-only: it reads outputs that already exist (`week_inputs.py`) and a section whose input is missing says "not

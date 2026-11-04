@@ -5,6 +5,9 @@ The static page (`week_page.render`) stays exactly what `dfs week page` writes. 
 returns the live version:
 
 - every `"phrase"` Sam can say gets an **Ask** button that puts it in the chat box (it never sends);
+- every Plays row gets a **tick box** and the section an "Add ticked to pool" button (runs `dfs pool add` through
+  the run buttons' job runner, so the run lock and the closed-week rule apply); an empty Cash / GPP section gets
+  a **Build** button and an empty Sunday section **Late swap** (the static page shows the phrase to say);
 - the `<!--live:contest-->` and `<!--live:run-->` markers become the contest widgets and the Run card (cards
   marked `data-keep`, so a refresh of the page's sections never wipes a half-typed form or a running job's
   output);
@@ -23,6 +26,17 @@ import re
 from dfs import week_chat, week_page
 
 SAY = re.compile(r'(<code class="say">&quot;(.*?)&quot;</code>)')
+POOL_SLOT = re.compile(r'<span class="pool-slot" data-name="([^"]*)"></span>')
+BUTTON_SLOT = re.compile(
+    rf'<span class="{week_page.LIVE_BUTTON}" data-command="([^"]*)" data-label="([^"]*)"></span>'
+)
+STATIC_ONLY = re.compile(rf'<p class="note {week_page.STATIC_ONLY}">.*?</p>', re.S)
+
+POOL_BAR_HTML = (
+    '<div class="poolbar live-card"><button type="button" class="primary" id="pool-add" disabled>'
+    'Add ticked to pool</button><span class="note" id="pool-count">Tick players above; this runs '
+    "<code>dfs pool add</code> on the live sheet.</span></div>"
+)
 
 CSS = """
 body.live{display:flex;align-items:flex-start}
@@ -69,6 +83,9 @@ border-radius:5px;padding:3px 6px}
 .live-card button.primary{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:4px 14px;
 cursor:pointer}
 .live-card button:disabled{opacity:.5;cursor:not-allowed}
+.runbtn{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:3px 12px;cursor:pointer;
+font:inherit;margin-left:6px}
+.poolbar button:disabled{opacity:.5;cursor:not-allowed}
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;margin:8px 0}
 .formgrid label{display:flex;flex-direction:column;font-size:12.5px;color:var(--dim);gap:2px}
 .verdict{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0}
@@ -285,6 +302,7 @@ async function refreshSections() {
       const old = document.getElementById(fresh.id); if (old) old.replaceWith(fresh);
     }
     const sub = doc.querySelector('.sub'), cur = $('.sub'); if (sub && cur) cur.replaceWith(sub);
+    restoreTicks();
   } catch (e) {}
 }
 
@@ -374,6 +392,38 @@ async function loadHistory() {
   } catch (e) {}
 }
 
+
+/* ---------- buttons inside the sections: Build, Late swap, and the Plays tick boxes ---------- */
+const ticked = new Set();   // names ticked on Plays; kept across a refresh of the sections
+async function startJob(command, values) {
+  try {
+    const r = await post('/api/jobs/start', {command, values: values || {}, confirm: ''});
+    $('#live-run').scrollIntoView({block: 'start'});
+    followJob(r.job, command);
+  } catch (e) { showRunError(e.message); $('#live-run').scrollIntoView({block: 'start'}); }
+}
+function syncPoolBar() {
+  const b = $('#pool-add'); if (!b) return;
+  b.disabled = READONLY || !ticked.size;
+  const c = $('#pool-count'); if (c) c.textContent = ticked.size ? ticked.size + ' ticked: ' + [...ticked].join(', ') : 'Tick players above; this runs dfs pool add on the live sheet.';
+}
+function restoreTicks() {
+  for (const box of document.querySelectorAll('input.pool-tick')) box.checked = ticked.has(box.dataset.name);
+  syncPoolBar();
+}
+document.addEventListener('change', (e) => {
+  const box = e.target.closest('input.pool-tick'); if (!box) return;
+  if (box.checked) ticked.add(box.dataset.name); else ticked.delete(box.dataset.name);
+  syncPoolBar();
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button.runbtn'); if (b) { startJob(b.dataset.command, {}); return; }
+  if (e.target.closest('#pool-add') && ticked.size) {
+    const names = [...ticked]; ticked.clear(); restoreTicks();
+    startJob('dfs pool add', {names: names.join(', ')});
+  }
+});
+
 /* ---------- the contest check form, the budget, the drop zone ---------- */
 const checkForm = $('#check-form');
 checkForm.format.onchange = () => { $('#opp-field').hidden = checkForm.format.value !== 'H2H'; };
@@ -432,7 +482,7 @@ function tierTable(t) {
   wrap.append(det); return wrap;
 }
 
-loadCommands().catch((e) => showRunError(e.message)); loadHistory(); loadChats(); status();
+loadCommands().catch((e) => showRunError(e.message)); loadHistory(); loadChats(); status(); syncPoolBar();
 })();
 """
 
@@ -442,6 +492,18 @@ def augment(page: str, *, token: str, nonce: str, read_only: bool, budget: float
     page = SAY.sub(
         lambda m: f'{m.group(1)}<button type="button" class="ask" data-say="{m.group(2)}">Ask</button>', page
     )
+    page = STATIC_ONLY.sub("", page)
+    page = POOL_SLOT.sub(
+        lambda m: (
+            f'<input type="checkbox" class="pool-tick" data-name="{m.group(1)}" title="Add to your pool">'
+        ),
+        page,
+    )
+    page = BUTTON_SLOT.sub(
+        lambda m: f'<button type="button" class="runbtn" data-command="{m.group(1)}">{m.group(2)}</button>',
+        page,
+    )
+    page = page.replace(week_page.LIVE_POOL, POOL_BAR_HTML)
     contest = CONTEST_HTML.replace("%BUDGET%", f"{budget:,.0f}" if budget else "150")
     page = page.replace(week_page.LIVE_CONTEST, contest).replace(week_page.LIVE_RUN, RUN_HTML)
     chat = CHAT_HTML.replace(

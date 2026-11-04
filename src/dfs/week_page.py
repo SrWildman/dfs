@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from dfs import kickoff, launcher, nfl_calendar, runlog, week_today, week_tools
+from dfs import kickoff, launcher, nfl_calendar, runlog, week_plays, week_today, week_tools
 from dfs.week_inputs import WeekInputs, data_root, gather, parse_time
 
 # Run after one of these commands succeeds. `dfs week new` is added to the planned list: a new week's
@@ -57,6 +57,7 @@ def sync_guard_merged() -> bool:
         return False
 
 
+BUILD_BUTTON = ("dfs lineups suggest", "Build")
 CHALK_THRESHOLD = 0.30  # a player this owned in double-ups is "chalk" (the cash chalk check)
 PROVEN, SHADOW, UNTESTED = "Proven", "Shadow", "Untested"
 
@@ -95,6 +96,48 @@ TRUST: dict[str, tuple[str, str]] = {
         "Values are ours against FantasyPros' consensus; no trade has been tracked yet.",
     ),
     "last_week": (PROVEN, "What happened: your contest log and the close."),
+    "plays_value": (
+        PROVEN,
+        "CalPts is the calibrated blend and beat TFFB's own projection on average error in Model Check; "
+        "points per $1K is arithmetic on it, not a second model.",
+    ),
+    "plays_cash": (
+        SHADOW,
+        "CalPts is Proven, but the Floor and the Hit3x% / Bust% odds behind this list are not scored against "
+        "results yet. The 30% chalk tag is a model estimate of double-up ownership.",
+    ),
+    "plays_gpp": (
+        UNTESTED,
+        "Boom% and the ceiling are not scored against results, and leverage (upside against ownership) has "
+        "no measured edge yet: a way to look, not a rule.",
+    ),
+    "plays_own": (
+        PROVEN,
+        "Our ownership estimate beat TFFB's on average error in Model Check. It is an estimate, not the "
+        "field's published ownership.",
+    ),
+    "plays_fade": (
+        PROVEN,
+        "FADE↓ (a tight end scoring above what his usage supports) hit 67% in Week 8's Model Check.",
+    ),
+    "plays_shadow": (
+        SHADOW,
+        "Proj ▼ and USAGE↓ are context chips that have not earned a verdict: shown as a second opinion only.",
+    ),
+    "slate": (PROVEN, "Odds, kickoff times, weather and injury statuses are data feeds, not models."),
+    "changes": (
+        PROVEN,
+        "A diff of two syncs: what the feeds said then against now. CalPts moves are the model's.",
+    ),
+}
+
+SIGNAL_TRUST = {
+    "FADE↓": "plays_fade",
+    "USAGE↑": "plays_shadow",
+    "USAGE↓": "plays_shadow",
+    "INJ+": "plays_shadow",
+    "Proj ▼": "plays_shadow",
+    "Proj ▲": "plays_shadow",
 }
 
 
@@ -173,13 +216,26 @@ class Section:
         )
 
 
-def not_run(what: str, say: str | None = None, command: str | None = None) -> str:
+LIVE_BUTTON = "runbtn-slot"  # `week_live.augment` turns this span into a button that runs its command
+LIVE_POOL = "<!--live:pool-->"  # where the server's "Add ticked to pool" bar goes
+STATIC_ONLY = "static-only"  # a paragraph the live page drops (it has the buttons instead)
+
+
+def run_button(command: str, label: str) -> str:
+    """Empty on the static page (which shows the phrase to say); the served page makes it a button."""
+    return f'<span class="{LIVE_BUTTON}" data-command="{e(command)}" data-label="{e(label)}"></span>'
+
+
+def not_run(
+    what: str, say: str | None = None, command: str | None = None, button: tuple[str, str] | None = None
+) -> str:
     hint = ""
     if say:
         hint += f" Say {code(chr(34) + say + chr(34), 'say')}"
     if command:
         hint += f" ({code(command)})" if say else f" Run {code(command)}"
-    return f'<p class="notrun"><b>Not run yet.</b> {rich(what)}.{hint}</p>'
+    btn = f" {run_button(*button)}" if button else ""
+    return f'<p class="notrun"><b>Not run yet.</b> {rich(what)}.{hint}{btn}</p>'
 
 
 # -- Today ------------------------------------------------------------------------------------------
@@ -347,22 +403,11 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
             trust,
             ran=False,
         )
-    parts = [f"<p><b>{e(plan.get('line', ''))}</b></p>"] if plan.get("line") else []
-    caps, spent = plan.get("caps") or {}, plan.get("spent") or {}
+    parts = []
+    caps = plan.get("caps") or {}
     if caps:
-        rows = []
-        for fmt, cap in caps.items():
-            used = spent.get(fmt)
-            over = used is not None and cap is not None and used > cap
-            rows.append(
-                [
-                    e(fmt),
-                    e(dollars(cap)) if cap is not None else "-",
-                    e(dollars(used)) if used is not None else "-",
-                    '<span class="bad">over</span>' if over else "ok",
-                ]
-            )
-        parts.append(table(["Format", "Cap a week", "Spent last week", ""], rows))
+        rows = [[e(fmt), e(dollars(cap)) if cap is not None else "-"] for fmt, cap in caps.items()]
+        parts.append("<h4>Caps by format, this week</h4>" + table(["Format", "Cap a week"], rows))
     if plan.get("roi"):
         rows = [
             [
@@ -381,6 +426,7 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
             "<h4>H2H opponents to avoid</h4>"
             + bullets([f"{e(o['opponent'])} ({e(o.get('record', ''))})" for o in plan["h2h_avoid"]])
         )
+    parts.append(note("Last week's spend against this plan is under Last week."))
     return Section("contest-plan", "Contest plan", tiers + "".join(parts), trust, asof=_saved(inp, plan))
 
 
@@ -445,6 +491,7 @@ def cash_section(inp: WeekInputs) -> Section:
                 "No cash builds are saved for this week",
                 say="build me lineups",
                 command="dfs lineups suggest",
+                button=BUILD_BUTTON,
             ),
             trust,
             ran=False,
@@ -534,7 +581,10 @@ def gpp_section(inp: WeekInputs) -> Section:
     else:
         body.append(
             not_run(
-                "No GPP builds are saved for this week", say="build me lineups", command="dfs lineups suggest"
+                "No GPP builds are saved for this week",
+                say="build me lineups",
+                command="dfs lineups suggest",
+                button=BUILD_BUTTON,
             )
         )
     stacks = inp.stacks
@@ -665,7 +715,13 @@ def sunday_section(inp: WeekInputs) -> Section:
         return Section(
             "sunday",
             "Sunday",
-            not_run(what, say="late swap", command="dfs lineups late-swap --refresh-injuries") + guard_html,
+            not_run(
+                what,
+                say="late swap",
+                command="dfs lineups late-swap --refresh-injuries",
+                button=("dfs lineups late-swap --refresh-injuries", "Late swap"),
+            )
+            + guard_html,
             trust,
             ran=False,
         )
@@ -697,6 +753,38 @@ def sunday_section(inp: WeekInputs) -> Section:
     return Section("sunday", "Sunday", "".join(body), trust, asof=week_today.when(inp.now, at))
 
 
+_EMPTY_SLOT = re.compile(r"^SWAP (\S+) \(empty\): nobody in this slot(?: -> (.*))?$")
+
+
+def urgent_text(alert: str) -> str:
+    """A SWAP alert as one plain sentence: an empty slot says which one (Choppa with no QB set)."""
+    m = _EMPTY_SLOT.match(alert)
+    if m:
+        slot, swap = m.group(1), m.group(2)
+        return f"no {slot} in your lineup (the {slot} slot is empty)" + (f": {swap}" if swap else "")
+    return alert.removeprefix("SWAP ").strip()
+
+
+def season_urgent(leagues: dict) -> list[tuple[str, str]]:
+    """(league, sentence) for every SWAP alert (an empty slot, a bye, an OUT starter): shown first, in red."""
+    return [
+        (name, urgent_text(a))
+        for name, lg in sorted(leagues.items())
+        for a in (lg.get("alerts") or [])
+        if str(a).startswith("SWAP")
+    ]
+
+
+def top_move(lg: dict) -> str:
+    """The league's best move: the free move the sync printed (headline line 2), else its top pickup."""
+    for line in (lg.get("headline") or [])[1:]:
+        text = str(line).strip()
+        if text.startswith("free move first:"):
+            return text.removeprefix("free move first:").strip()
+    pickups = lg.get("pickups") or []
+    return str(pickups[0]) if pickups else ""
+
+
 def season_section(inp: WeekInputs) -> Section:
     leagues = ((inp.season_long or {}).get("leagues")) or {}
     if not leagues:
@@ -707,6 +795,14 @@ def season_section(inp: WeekInputs) -> Section:
             TRUST["season_pickups"],
             ran=False,
         )
+    urgent = season_urgent(leagues)
+    banner = (
+        '<div class="urgent"><b>Urgent:</b>'
+        + bullets([f"<b>{e(name)}</b>: {e(text)}" for name, text in urgent])
+        + "</div>"
+        if urgent
+        else '<p class="ok">Nothing urgent: every starter is set in every league.</p>'
+    )
     cards = []
     for name, lg in sorted(leagues.items()):
         at = parse_time(lg.get("saved_at"))
@@ -717,13 +813,17 @@ def season_section(inp: WeekInputs) -> Section:
         ]
         if lg.get("headline"):
             parts.append("<p>" + e(lg["headline"][0]) + "</p>")
-            if len(lg["headline"]) > 1:
-                parts.append(f'<p class="note">{e(lg["headline"][1].strip())}</p>')
+        move = top_move(lg)
+        if move:
+            parts.append(f"<p><b>Top move:</b> {e(move)}</p>")
         alert_note = f" (checked {e(week_today.when(inp.now, checked))})" if checked else ""
         parts.append(f"<h5>Lineup problems {_chip('season_alerts')}{alert_note}</h5>")
         parts.append(
             bullets(
-                [f'<span class="{"bad" if a.startswith("SWAP") else "warn"}">{e(a)}</span>' for a in alerts]
+                [
+                    f'<span class="{"bad" if str(a).startswith("SWAP") else "warn"}">{e(a)}</span>'
+                    for a in alerts
+                ]
             )
             if alerts
             else '<p class="ok">None: every starter is set, playing and healthy.</p>'
@@ -742,10 +842,34 @@ def season_section(inp: WeekInputs) -> Section:
     return Section(
         "season",
         "Season-long leagues",
-        f'<div class="leagues">{"".join(cards)}</div>',
+        banner + f'<div class="leagues">{"".join(cards)}</div>',
         None,
         asof=_saved(inp, inp.season_long),
     )
+
+
+def spent_vs_plan_html(plan: dict | None) -> str:
+    """Last week's spend against the format caps (what `dfs contests plan` saved as `spent`)."""
+    plan = plan or {}
+    caps, spent = plan.get("caps") or {}, plan.get("spent") or {}
+    if not caps and not plan.get("line"):
+        return ""
+    out = "<h4>Spent against the plan</h4>"
+    if plan.get("line"):
+        out += f"<p><b>{e(plan['line'])}</b></p>"
+    rows = []
+    for fmt, cap in caps.items():
+        used = spent.get(fmt)
+        over = used is not None and cap is not None and used > cap
+        rows.append(
+            [
+                e(fmt),
+                e(dollars(cap)) if cap is not None else "-",
+                e(dollars(used)) if used is not None else "-",
+                '<span class="bad">over</span>' if over else "ok",
+            ]
+        )
+    return out + (table(["Format", "Cap a week", "Spent", ""], rows) if rows else "")
 
 
 def last_week_section(inp: WeekInputs) -> Section:
@@ -777,6 +901,7 @@ def last_week_section(inp: WeekInputs) -> Section:
         "fees).</p>",
         table(["Format", "Entries", "Fees", "Net", "ROI"], rows),
     ]
+    body.append(spent_vs_plan_html(inp.contest_plan))
     tw = inp.tier_week
     if tw and tw.get("line"):
         over = f' <span class="bad">Over: {e("; ".join(tw["over"]))}</span>' if tw.get("over") else ""
@@ -810,6 +935,358 @@ def last_week_section(inp: WeekInputs) -> Section:
     else:
         body.append(not_run("No double-up standings are saved for that week", say="close the week"))
     return Section("last-week", "Last week", "".join(body), trust)
+
+
+# -- plays, slate, what changed -----------------------------------------------------------------------------
+
+
+def sync_stamp(inp: WeekInputs) -> str:
+    at = max(
+        (parse_time(v.get("synced_at")) for v in inp.manifest.values() if v.get("synced_at")), default=None
+    )
+    return f"as of the sync {week_today.when(inp.now, at)}" if at else ""
+
+
+def signal_chip(token: str) -> str:
+    label, why = TRUST[SIGNAL_TRUST.get(token, "plays_shadow")]
+    return f'<span class="sig {label.lower()}" title="{e(token)}: {e(why)}">{e(token)} {e(label)}</span>'
+
+
+def pool_slot(name: str) -> str:
+    """Empty on the static page; the served page makes it a tick box that adds him with `dfs pool add`."""
+    return f'<span class="pool-slot" data-name="{e(name)}"></span>'
+
+
+def player_cell(p: week_plays.Play) -> str:
+    bits = [f"<b>{e(p.name)}</b>"]
+    if p.avail in week_plays.STATUS_WORD:
+        bits.append(f'<span class="sig bad">{e(week_plays.STATUS_WORD[p.avail])}</span>')
+    bits += [signal_chip(c) for c in p.chips]
+    if p.in_pool:
+        bits.append(f'<span class="sig proven">in pool ({e(p.in_pool)})</span>')
+    return " ".join(bits)
+
+
+def game_cell(p: week_plays.Play) -> str:
+    return e(p.game) + (f'<br><span class="dim">{e(p.kickoff)}</span>' if p.kickoff else "")
+
+
+def own_cell(value: float | None, pending: bool, *, chalk: bool = False) -> str:
+    if pending:
+        return '<span class="dim">publishes ~Fri/Sat</span>'
+    if value is None:
+        return "-"
+    tag = '<br><span class="bad">chalk: play or fade on purpose</span>' if chalk else ""
+    return f"{e(pct(value))}{tag}"
+
+
+def f1(value: float | None) -> str:
+    return "-" if value is None else f"{value:.1f}"
+
+
+def f0(value: float | None) -> str:
+    return "-" if value is None else f"{value:.0f}"
+
+
+def plays_table(headers: list[str], by_pos: dict[str, list], row_cells) -> str:
+    """One table, a band per position; `row_cells(play)` returns the cells after the pool tick."""
+    head = '<th class="poolcol">Pool</th>' + "".join(f"<th>{h}</th>" for h in headers)
+    body = []
+    width = len(headers) + 1
+    for pos in week_plays.POSITIONS:
+        rows = by_pos.get(pos) or []
+        if not rows:
+            continue
+        body.append(f'<tr class="pos"><td colspan="{width}">{e(pos)}</td></tr>')
+        for p in rows:
+            body.append(
+                f'<tr><td class="poolcol">{pool_slot(p.name)}</td>'
+                + "".join(f"<td>{c}</td>" for c in row_cells(p))
+                + "</tr>"
+            )
+    if not body:
+        return '<p class="dim">Nobody qualifies yet.</p>'
+    rows = "".join(body)
+    return (
+        f'<div class="scroll"><table class="playtbl"><thead><tr>{head}</tr></thead>'
+        f"<tbody>{rows}</tbody></table></div>"
+    )
+
+
+def trust_chip(key: str) -> str:
+    return _chip(key)
+
+
+def plays_section(inp: WeekInputs) -> Section:
+    if not inp.edge:
+        return Section(
+            "plays",
+            "Plays",
+            not_run("Nothing is synced, so there are no plays", say="sync", command="dfs sync"),
+            TRUST["plays_value"],
+            ran=False,
+        )
+    view = week_plays.plays(inp.edge, inp.pool)
+    if view.empty:
+        return Section(
+            "plays",
+            "Plays",
+            not_run("The synced slate has no priced, projected players", say="sync", command="dfs sync"),
+            TRUST["plays_value"],
+            ran=False,
+        )
+    cash_pending, gpp_pending = view.cash_own_pending, view.gpp_own_pending
+    body = [
+        note(
+            f"Five a position from {view.players} healthy, priced players on the synced slate. CalPts is the "
+            "calibrated projection; a player who is Questionable stays on the list, tagged."
+        )
+    ]
+    if cash_pending or gpp_pending:
+        pending_banner = week_plays.OWN_NOT_OUT[0].upper() + week_plays.OWN_NOT_OUT[1:]
+        body.append(
+            f'<p class="flag">{e(pending_banner)}. The chalk tags and the leverage list appear then.</p>'
+        )
+
+    def game_why(p: week_plays.Play) -> tuple[str, str]:
+        return game_cell(p), f'<span class="why-line">{e(p.why)}</span>'
+
+    body.append(f"<h4>Best projected value {trust_chip('plays_value')}</h4>")
+    body.append(note("CalPts per $1K of salary, CalPts breaking ties."))
+    body.append(
+        plays_table(
+            ["Player", "Salary", "CalPts", "Per $1K", "Game", "Why"],
+            view.value,
+            lambda p: [player_cell(p), e(f"${p.salary:,.0f}"), f1(p.calpts), f1(p.value), *game_why(p)],
+        )
+    )
+    own_head = "Double-up own" + (f" ({e(week_plays.OWN_NOT_OUT)})" if cash_pending else "")
+    body.append(f"<h4>Cash core candidates {trust_chip('plays_cash')} {trust_chip('plays_own')}</h4>")
+    body.append(
+        note(
+            "CalPts and value both at least the position's median, best Floor first. Floor is the 20th "
+            "percentile of his outcomes."
+        )
+    )
+    body.append(
+        plays_table(
+            ["Player", "Salary", "CalPts", "Floor", "Hit3x / Bust", own_head, "Game", "Why"],
+            view.cash,
+            lambda p: [
+                player_cell(p),
+                e(f"${p.salary:,.0f}"),
+                f1(p.calpts),
+                f1(p.floor),
+                f"{f0(p.hit3x)}% / {f0(p.bust)}%",
+                own_cell(p.cash_own, cash_pending, chalk=p.chalk),
+                *game_why(p),
+            ],
+        )
+    )
+    gpp_note = (
+        "Best Boom% (the chance of 4x salary), ceiling breaking ties. Leverage shows once ownership is out."
+        if gpp_pending
+        else "Top half of each position's Boom%, ordered by leverage: Boom% rank minus ownership rank within "
+        "the position (the sheet's Lev), so low-owned upside comes first."
+    )
+    gpp_head = "GPP own" + (f" ({e(week_plays.OWN_NOT_OUT)})" if gpp_pending else "")
+    body.append(f"<h4>GPP upside {trust_chip('plays_gpp')} {trust_chip('plays_own')}</h4>")
+    body.append(note(gpp_note))
+    body.append(
+        plays_table(
+            ["Player", "Salary", "CalPts", "Ceiling", "Boom%", gpp_head, "Leverage", "Game", "Why"],
+            view.gpp,
+            lambda p: [
+                player_cell(p),
+                e(f"${p.salary:,.0f}"),
+                f1(p.calpts),
+                f1(p.ceiling),
+                f"{f0(p.boom)}%",
+                own_cell(p.gpp_own, gpp_pending),
+                ('<span class="dim">-</span>' if p.lev is None else e(f"{p.lev:+.0f}")),
+                *game_why(p),
+            ],
+        )
+    )
+    body.append(f"<h4>Fades {trust_chip('plays_fade')}</h4>")
+    if view.fades:
+        body.append(
+            plays_table(
+                ["Player", "Salary", "CalPts", "Game", "Why"],
+                {"TE": view.fades},
+                lambda p: [player_cell(p), e(f"${p.salary:,.0f}"), f1(p.calpts), *game_why(p)],
+            )
+        )
+        body.append(note("FADE↓ is a tight-end signal: fade him or pay for it on purpose."))
+    else:
+        body.append('<p class="ok">No FADE↓ on the slate this week.</p>')
+    if view.shadow:
+        body.append(f"<h4>Other warning chips {trust_chip('plays_shadow')}</h4>")
+        body.append(
+            plays_table(
+                ["Player", "Salary", "CalPts", "Game", "Why"],
+                {p.pos: [x for x in view.shadow if x.pos == p.pos] for p in view.shadow},
+                lambda p: [player_cell(p), e(f"${p.salary:,.0f}"), f1(p.calpts), *game_why(p)],
+            )
+        )
+        body.append(
+            note("Shadow: unproven chips on players near the top of the lists. A second opinion only.")
+        )
+    body.append(LIVE_POOL)
+    body.append(
+        f'<p class="note {STATIC_ONLY}">To add players to your pool, say '
+        f"{code(chr(34) + 'add Name, Name to my pool' + chr(34), 'say')} ("
+        f"{code('dfs pool add ' + chr(34) + 'Name' + chr(34))}). The served page "
+        "(<code>dfs week serve</code>) "
+        "has a tick box on every row.</p>"
+    )
+    return Section("plays", "Plays", "".join(body), TRUST["plays_value"], asof=sync_stamp(inp))
+
+
+def signed(value: float | None, digits: int = 1) -> str:
+    if value is None:
+        return "-"
+    return "0" if abs(value) < 0.05 else f"{value:+.{digits}f}"
+
+
+def slate_section(inp: WeekInputs) -> Section:
+    trust = TRUST["slate"]
+    games = week_plays.slate(inp.edge)
+    if not games:
+        return Section(
+            "slate",
+            "Slate",
+            not_run("Nothing is synced", say="sync", command="dfs sync"),
+            trust,
+            ran=False,
+        )
+    rows = []
+    for g in games:
+        title = f"{g.away} @ {g.home}" if g.away and g.home else g.key
+        cls = []
+        if g.top:
+            cls.append("top")
+        if g.moved:
+            cls.append("moved")
+        implied = " / ".join(f"{t} {v:.1f}" for t, v in g.implied.items()) if g.implied else "-"
+        if g.favorite and g.spread is not None:
+            spread = f"{g.favorite} {g.spread:+g}"
+        else:
+            spread = "-"
+        move = (
+            f"total {signed(g.tot_move)}, spread {signed(g.spread_move)}"
+            if g.tot_move is not None or g.spread_move is not None
+            else '<span class="dim">no opening yet</span>'
+        )
+        if g.moved:
+            move = f'<span class="bad">{move}</span>'
+        inj = ", ".join(
+            f"{e(n)} ({e(pos)} {e(week_plays.STATUS_WORD.get(st, st))})" for n, pos, _t, st in g.injuries
+        )
+        rows.append(
+            '<tr class="'
+            + " ".join(cls)
+            + '">'
+            + "".join(
+                f"<td>{c}</td>"
+                for c in [
+                    f"<b>{e(title)}</b>" + (' <span class="sig shadow">top 3 total</span>' if g.top else ""),
+                    e(g.kickoff) or "-",
+                    e(f"{g.total:g}") if g.total is not None else "-",
+                    e(spread),
+                    e(implied),
+                    move,
+                    e(g.weather) or "-",
+                    inj or '<span class="dim">none</span>',
+                ]
+            )
+            + "</tr>"
+        )
+    head = "".join(
+        f"<th>{h}</th>"
+        for h in [
+            "Game",
+            "Kickoff (ET)",
+            "Total",
+            "Spread",
+            "Implied totals",
+            "Moved since the opening",
+            "Weather and roof",
+            "Key injuries (OUT, Doubtful, Questionable)",
+        ]
+    )
+    body = [
+        f'<div class="scroll"><table class="slate"><thead><tr>{head}</tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody></table></div>",
+        note(
+            "Highest total first. The shaded rows are the three best scoring environments; red marks a total "
+            f"that moved {week_plays.TOTAL_MOVED:g}+ points since the opening snapshot. Key injuries are a "
+            "team's likely starters (top salaries: QB1, RB1-2, WR1-3, TE1) who are not healthy."
+        ),
+    ]
+    if not week_plays.opening_known(games):
+        body.append(
+            not_run(
+                "No opening odds snapshot has been diffed yet, so movement is blank. Snapshot the lines "
+                "(Tuesday morning is the opening) and the next sync fills it",
+                command="dfs odds snapshot",
+            )
+        )
+    return Section("slate", "Slate", "".join(body), trust, asof=sync_stamp(inp))
+
+
+def change_list(items: list[week_plays.Change], empty: str, limit: int = 12) -> str:
+    if not items:
+        return f'<p class="ok">{e(empty)}</p>'
+    lines = [("<b>yours</b> " if c.mine else "") + e(c.text) for c in items[:limit]]
+    more = f'<p class="note">and {len(items) - limit} more.</p>' if len(items) > limit else ""
+    return bullets(lines) + more
+
+
+def mine_names(inp: WeekInputs) -> set[str]:
+    names = set(inp.pool)
+    for b in (inp.suggest or {}).get("builds", []):
+        names.update(b.get("names", []))
+    return names
+
+
+def changes_section(inp: WeekInputs) -> Section:
+    trust = TRUST["changes"]
+    if not inp.edge:
+        return Section(
+            "changes",
+            "What changed",
+            not_run("Nothing is synced", say="sync", command="dfs sync"),
+            trust,
+            ran=False,
+        )
+    if not inp.prev_edge:
+        return Section(
+            "changes",
+            "What changed",
+            not_run(
+                "There is no earlier sync of this week to compare with. After the next sync this shows what"
+                " moved",
+                say="sync",
+                command="dfs sync",
+            ),
+            trust,
+            ran=False,
+        )
+    diff = week_plays.changes(inp.edge, inp.prev_edge, mine_names(inp))
+    since = week_today.when(inp.now, inp.prev_edge_at) if inp.prev_edge_at else "the previous sync"
+    body = [
+        note(f"Since the sync {since}: your pool and every Suggested build, new OUTs, and the biggest moves.")
+    ]
+    body.append("<h4>Your players: status changes</h4>")
+    body.append(change_list(diff.status, "No status change for anyone in your pool or builds."))
+    body.append("<h4>New OUTs</h4>")
+    body.append(change_list(diff.new_outs, "Nobody new is OUT or on IR."))
+    body.append(f"<h4>CalPts moves of {week_plays.CALPTS_MOVED:g}+ points</h4>")
+    body.append(change_list(diff.calpts, "No CalPts moved that far."))
+    body.append(f"<h4>Line moves of {week_plays.LINE_MOVED:g}+ point</h4>")
+    body.append(change_list(diff.lines, "No total or spread moved that far."))
+    return Section("changes", "What changed", "".join(body), trust, asof=sync_stamp(inp))
 
 
 # -- tools ------------------------------------------------------------------------------------------
@@ -897,6 +1374,22 @@ table.tools code{white-space:normal;word-break:break-word}
 .leagues{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 .league{border:1px solid var(--line);border-radius:8px;padding:2px 12px 8px}
 ul{margin:4px 0;padding-left:20px}details summary{cursor:pointer}details summary h4{display:inline}
+.playtbl td,.slate td{font-size:13px}
+.playtbl .pos td{background:rgba(127,127,127,.12);font-weight:700;font-size:12px;padding:3px 8px}
+.playtbl td:last-child{min-width:230px}
+.playtbl td:nth-last-child(2){min-width:150px}
+.poolcol{display:none}body.live .poolcol{display:table-cell}
+.sig{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:0 7px;margin-left:2px;
+border:1px solid currentColor;white-space:nowrap}
+.sig.proven{color:var(--proven)}.sig.shadow{color:var(--shadow)}.sig.untested{color:var(--untested)}
+.sig.bad{color:var(--bad)}
+.why-line{color:var(--dim)}
+.slate tr.top td{background:rgba(31,94,255,.07)}
+.slate td{min-width:80px}
+.urgent{border:2px solid var(--bad);border-radius:8px;padding:6px 12px;margin:6px 0 10px;color:var(--bad)}
+.urgent ul{margin:2px 0}
+.pool-tick{width:16px;height:16px}
+.poolbar{margin:10px 0;display:flex;gap:10px;align-items:center}
 footer{max-width:1040px;margin:0 auto;padding:6px 16px 30px;color:var(--dim);font-size:12.5px}
 """
 
@@ -909,6 +1402,58 @@ def page_path(season: int, week: int, data_dir: Path | None = None) -> Path:
     return week_dir(data_dir) / f"{season}-wk{week:02d}.html"
 
 
+# The page is ordered by day: what Sam needs first today comes first, and everything else follows. Tuesday to
+# Friday is research (who to play, the games, what moved); Saturday is build and enter; Sunday is game day.
+_REST = ["unknowns", "cash", "gpp", "sunday"]
+DAY_ORDER: dict[int, list[str]] = {
+    0: ["last-week", "contest-plan", "season", "plays", "slate", "changes", *_REST],
+    1: ["plays", "slate", "changes", "contest-plan", "season", "last-week", *_REST],
+    5: [
+        "contest-plan",
+        "plays",
+        "cash",
+        "gpp",
+        "slate",
+        "changes",
+        "unknowns",
+        "season",
+        "last-week",
+        "sunday",
+    ],
+    6: [
+        "sunday",
+        "changes",
+        "cash",
+        "gpp",
+        "unknowns",
+        "slate",
+        "plays",
+        "contest-plan",
+        "season",
+        "last-week",
+    ],
+}
+DAY_ORDER[2] = DAY_ORDER[3] = DAY_ORDER[4] = DAY_ORDER[1]
+SECTION_IDS = [
+    "plays",
+    "slate",
+    "changes",
+    "contest-plan",
+    "cash",
+    "gpp",
+    "unknowns",
+    "sunday",
+    "season",
+    "last-week",
+]
+
+
+def section_order(day: int) -> list[str]:
+    """The section ids in the order the page shows them on weekday `day` (0 = Monday)."""
+    order = DAY_ORDER.get(day, DAY_ORDER[1])
+    return [i for i in order if i in SECTION_IDS] + [i for i in SECTION_IDS if i not in order]
+
+
 def render(
     inp: WeekInputs, *, registered: set[str] | None = None, tools: list[week_tools.Tool] | None = None
 ) -> str:
@@ -916,15 +1461,22 @@ def render(
     if tools is None:
         tools = week_tools.build(inp.runs)
     day = inp.now.astimezone().weekday()
-    sections = [
-        contest_plan_section(inp, registered),
-        cash_section(inp),
-        gpp_section(inp),
-        unknowns_section(inp),
-        sunday_section(inp),
-        season_section(inp),
-        last_week_section(inp),
-    ]
+    built = {
+        s.id: s
+        for s in (
+            plays_section(inp),
+            slate_section(inp),
+            changes_section(inp),
+            contest_plan_section(inp, registered),
+            cash_section(inp),
+            gpp_section(inp),
+            unknowns_section(inp),
+            sunday_section(inp),
+            season_section(inp),
+            last_week_section(inp),
+        )
+    }
+    sections = [built[i] for i in section_order(day)]
     nav = (
         '<nav><a href="#today">Today</a>'
         + "".join(f'<a href="#{e(s.id)}">{e(s.title)}</a>' for s in sections)
@@ -943,7 +1495,7 @@ def render(
         f"<title>Week {inp.week}</title><style>{CSS}</style></head><body>"
         f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p>{nav}</header><main>'
         + today_html(inp, registered)
-        + '<h2 class="sec">Decisions</h2>'
+        + '<h2 class="sec">This week</h2>'
         + "".join(s.html() + (LIVE_CONTEST if s.id == "contest-plan" else "") for s in sections)
         + LIVE_RUN
         + tools_html(inp, tools)
