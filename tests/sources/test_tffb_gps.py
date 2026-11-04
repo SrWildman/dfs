@@ -31,6 +31,32 @@ def test_parse_gps_csv_real_shape():
     assert list(df["GPS"]) == [2.75, 2.75]
 
 
+def test_parse_gps_csv_week9_shape_two_preamble_lines_and_proe_without_percent():
+    """Week 9 (2026-11-04): the title and group-label lines were merged into ONE
+    line, so the header is on line 2, and the column read `PROE` not `PROE %`."""
+    header = ",".join(GPS_EXPECTED_HEADER).replace("PROE %", "PROE")
+    text = (
+        "Week 9,,,,Pace of Play,,,EPA Ranks per FPts,,,,Game Pace Scores,,,,,\n"
+        f"{header}\n"
+        ",LV,Las Vegas Raiders,20.8,5,63.8,0.2,7,30,27,24,A,,San Francisco 49ers,51.5,MAIN,3.75\n"
+        ",SF,San Francisco 49ers,30.8,20,58.4,3.1,2,4,15,3,H,,Las Vegas Raiders,51.5,MAIN,3.75\n"
+    )
+    df = parse_gps_csv(text)
+    assert list(df["Team"]) == ["LV", "SF"]
+    assert list(df["ImpliedTotal"]) == [20.8, 30.8]
+    assert list(df["GPS"]) == [3.75, 3.75]
+
+
+def test_parse_gps_csv_accepts_proe_with_percent_on_the_old_shape():
+    assert len(parse_gps_csv(_real_csv(3))) == 2  # the 3-line shape still carries `PROE %`
+
+
+def test_parse_gps_csv_no_header_row_still_raises_drift():
+    text = "Week 9,,,,\nsomething,else\nnot,a,header\n,LV,Las Vegas Raiders,20.8\n"
+    with pytest.raises(TffbGpsFetchError, match="doesn't match the expected shape"):
+        parse_gps_csv(text)
+
+
 def test_parse_gps_csv_normalizes_team_code():
     text = _real_csv(3).replace(",JAX,", ",JAC,")  # a known drift normalize_team already fixes
     df = parse_gps_csv(text)
