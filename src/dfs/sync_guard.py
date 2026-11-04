@@ -14,9 +14,12 @@ The rules, applied by `run_sync` to every source that has a `Policy` below, befo
    value from the last sync, so the last pre-kickoff values survive any number of later syncs. Only
    players whose game has not started update.
 2. **A row the feed no longer has is kept** (this week's rows only), with its last values.
-3. **A populated column is never blanked wholesale.** When more than `BLANK_GUARD_MAX_ROWS` rows that had a
-   value in a column come back blank, those rows keep their previous value. Columns where blank is a real
-   state (DK's `Status`: a cleared Questionable; EdgeRaw's flags) are exempt.
+3. **A populated column is never wiped.** When more than `BLANK_GUARD_WIPE_SHARE` (20%) of the rows that had
+   a value in a column come back blank at once, those rows keep their previous value. A smaller loss passes
+   through (mid-week a source normally drops a few players: Week 9's FantasyPros blanked 9 of 374, Xavier
+   Legette on IR and Jacoby Brissett a backup, and the old guard kept their numbers) and the sync lists who
+   lost a value. A player DraftKings marks OUT or IR is never held, wipe or not. Columns where blank is a
+   real state (DK's `Status`: a cleared Questionable; EdgeRaw's flags) are exempt.
 4. **DraftKings switching slates after lock** (rule 1's cause above): when the feed's IDs are mostly new
    and the slate on file has started, the slate on file is kept and only the unstarted players' `Status`
    is refreshed from the new feed, matched by name and team.
@@ -33,14 +36,18 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from dfs import nfl_calendar
 from dfs.kickoff import KICKOFF_TIMEZONE, kickoff_utc
 
-# "More than a few rows" (Plan C 4b): a column may lose up to this many values in one sync (a player's
-# number legitimately withdrawn); more than this and the previous values are kept.
-BLANK_GUARD_MAX_ROWS = 3
+# A wipe (rule 3): more than this share of a column's populated rows come back blank in one sync. Anything
+# smaller is a source dropping a few players, which is normal and passes through.
+BLANK_GUARD_WIPE_SHARE = 0.20
+
+# DraftKings statuses that mean "not playing": such a player's values are never held (rule 3).
+NOT_PLAYING = frozenset({"OUT", "IR"})
 
 # A feed is "a different slate" when fewer than this share of its keys were on file.
 DIFFERENT_SLATE_OVERLAP = 0.5
@@ -62,6 +69,7 @@ class Policy:
     blank_exempt: frozenset[str] = frozenset()
     sort_by: str | None = None
     slate_switch: bool = False  # rule 4 (DraftKings only)
+    status_column: str | None = None  # DK's status for the row (rule 3 never holds an OUT / IR player)
 
 
 @dataclass
@@ -103,7 +111,12 @@ EDGE_BLANK_EXEMPT = frozenset({"Avail", "Flags", "Flag", "Edge"})
 POLICIES: dict[str, Policy] = {
     "projections": Policy(key="Id", kickoffs=_game_start_kickoffs, label="Name"),
     "draftkings": Policy(
-        key="ID", kickoffs=_dk_kickoffs, label="Name", blank_exempt=frozenset({"Status"}), slate_switch=True
+        key="ID",
+        kickoffs=_dk_kickoffs,
+        label="Name",
+        blank_exempt=frozenset({"Status"}),
+        slate_switch=True,
+        status_column="Status",
     ),
     "nfl_odds": Policy(key="abbr", kickoffs=_odds_kickoffs, label="abbr"),
     "edge": Policy(
@@ -112,6 +125,7 @@ POLICIES: dict[str, Policy] = {
         label="Name",
         blank_exempt=EDGE_BLANK_EXEMPT,
         sort_by="ValAdj",
+        status_column="Avail",
     ),
 }
 
@@ -213,18 +227,34 @@ def guard(
             + "."
         )
 
-    # Rule 3: no column loses more than a few values at once (unstarted rows; started ones are frozen above).
+    # Rule 3: no column is wiped (unstarted rows; started ones are frozen above). A small loss passes through
+    # and is listed; an OUT / IR player is never held.
+    not_playing = _not_playing(policy, new, aligned)
     for column in columns:
         if column in policy.blank_exempt:
             continue
-        lost = (present & ~started) & _blank(out[column]).to_numpy() & ~_blank(aligned[column]).to_numpy()
-        if int(lost.sum()) > BLANK_GUARD_MAX_ROWS:
-            mask = pd.Series(lost, index=new.index)
-            out[column] = out[column].where(~mask, aligned[column])
-            labels = out.loc[mask, policy.label] if policy.label in out.columns else new_keys[mask]
+        had = present & ~started & ~_blank(aligned[column]).to_numpy()
+        lost = had & _blank(out[column]).to_numpy()
+        n_lost = int(lost.sum())
+        if not n_lost:
+            continue
+        lost_mask = pd.Series(lost, index=new.index)
+        labels = out.loc[lost_mask, policy.label] if policy.label in out.columns else new_keys[lost_mask]
+        if n_lost > BLANK_GUARD_WIPE_SHARE * int(had.sum()):
+            hold = lost & ~not_playing
+            if hold.any():
+                mask = pd.Series(hold, index=new.index)
+                out[column] = out[column].where(~mask, aligned[column])
+            n_out = n_lost - int(hold.sum())
             notes.append(
-                f"{name}: the feed blanked {column} for {int(lost.sum())} row(s) that had a value "
-                f"(e.g. {_names(labels)}); kept the previous values."
+                f"{name}: the feed blanked {column} for {n_lost} of {int(had.sum())} row(s) that had a value "
+                f"(e.g. {_names(labels)}); kept the previous values"
+                + (f" except for {n_out} player(s) DraftKings has OUT / IR." if n_out else ".")
+            )
+        else:
+            notes.append(
+                f"{name}: the feed dropped {column} for {n_lost} player(s) ({_names(labels)}); "
+                "took the blanks."
             )
 
     # Rule 2: rows the feed dropped are kept.
@@ -244,6 +274,18 @@ def guard(
                 policy.sort_by, ascending=False, na_position="last", kind="stable"
             ).reset_index(drop=True)
     return GuardResult(out, notes)
+
+
+def _not_playing(policy: Policy, new: pd.DataFrame, aligned: pd.DataFrame) -> np.ndarray:
+    """Rows DraftKings marks OUT / IR, in the new feed or in the copy on file: never held by rule 3."""
+    flags = np.zeros(len(new), dtype=bool)
+    column = policy.status_column
+    if column is None:
+        return flags
+    for frame in (new, aligned):
+        if column in frame.columns:
+            flags |= frame[column].astype(str).str.strip().str.upper().isin(NOT_PLAYING).to_numpy()
+    return flags
 
 
 def _same(a: pd.Series, b: pd.Series) -> pd.Series:

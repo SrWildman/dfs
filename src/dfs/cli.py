@@ -2793,11 +2793,12 @@ def sync(
 
 def _print_guard_notes(results: list) -> None:
     """What the game-day guard kept instead of taking a feed (`sync_guard`): a started player's values, a row
-    the feed dropped, a column it blanked, DraftKings' post-lock slate. One yellow line each."""
+    the feed dropped, a column it wiped (and, when it blanked only a few players, who lost a value), DraftKings' post-lock
+    slate. One yellow line each."""
     notes = [note for r in results for note in getattr(r, "notes", [])]
     if not notes:
         return
-    console.print("[yellow]Kept from the last sync (a sync never wipes data):[/yellow]")
+    console.print("[yellow]Kept from the last sync, and who lost a value (a sync never wipes data):[/yellow]")
     for note in notes:
         console.print(f"[yellow]  {escape(note)}[/yellow]", highlight=False)
 
