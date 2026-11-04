@@ -404,6 +404,11 @@ class ChatManager:
         finally:
             proc.close_stdin()
             code = proc.wait(5.0)
+            for sig in (signal.SIGTERM, signal.SIGKILL):  # a turn's process never outlives the turn
+                if code is not None:
+                    break
+                proc.send_signal(sig)
+                code = proc.wait(3.0)
             if not translator.finished and not turn.stopping:
                 tail = proc.stderr_tail().strip()
                 turn.emit(

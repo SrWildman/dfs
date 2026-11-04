@@ -39,6 +39,7 @@ flex-wrap:wrap}
 .chat-controls{padding:6px 10px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12.5px;
 border-bottom:1px solid var(--line)}
 .chat-controls select,.chat-controls button{font:inherit;padding:2px 6px}
+#chat-list{max-width:100%;min-width:0;flex:1 1 140px}
 #lockbar{font-size:12.5px;padding:4px 10px;color:var(--dim);border-bottom:1px solid var(--line)}
 #lockbar.busy{background:var(--flag);color:var(--ink)}
 #chat-log{flex:1;overflow-y:auto;padding:10px;font-size:14px}

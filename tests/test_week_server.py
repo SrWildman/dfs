@@ -1020,3 +1020,24 @@ def test_the_page_reloads_its_sections_when_any_command_rebuilds_the_page_file(m
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text("<html></html>")
     assert c.get("/api/status")[1]["page_stamp"] == page.stat().st_mtime
+
+
+def test_a_turns_process_that_will_not_exit_is_terminated_by_pid(make):
+    class Stubborn(FakeProcess):
+        def wait(self, timeout):
+            return None if not self.signals else 0  # exits only once it is signalled
+
+        def send_signal(self, sig):
+            self.signals.append(sig)
+
+    class Runner(FakeRunner):
+        def start(self, args):
+            proc = Stubborn(self.script)
+            self.processes.append(proc)
+            return proc
+
+    c = make(say_hello)
+    c.chat.runner = Runner(say_hello)
+    c.post("/api/chat/send", {"text": "hi"})
+    wait_turn_done(c.chat.turn, timeout=15)
+    assert c.chat.runner.processes[0].signals == [signal.SIGTERM]
