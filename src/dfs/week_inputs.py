@@ -342,6 +342,7 @@ class WeekInputs:
     contest_plan: dict | None = None
     postmortem: dict | None = None
     tier_week: dict | None = None  # `week close`'s tier plan line for the week it closed
+    budget_input: dict | None = None  # the Weekly Budget typed on the live page (`{"budget": 150}`)
     entered: dict | None = None
     last_week: LastWeek | None = None
     season_long: dict | None = None
@@ -369,6 +370,7 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         # `week close` writes the closing week's post-mortem: Monday it is this week's, Tuesday on last week's
         postmortem=load_input("postmortem", season, week, d) or load_input("postmortem", season, week - 1, d),
         tier_week=load_input("tier_week", season, week, d) or load_input("tier_week", season, week - 1, d),
+        budget_input=load_input("budget", season, week, d),
         entered=read_json(d / "entered" / f"{season}-wk{week:02d}.json"),
         last_week=last_week(d, season),
         season_long=load_input("season_long", None, None, d),

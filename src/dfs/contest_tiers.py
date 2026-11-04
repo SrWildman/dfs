@@ -457,3 +457,107 @@ class TierView:
 
     plan: TierPlan
     look_for: dict[str, str] = field(default_factory=lambda: {**LOOK_FOR, AVOID: AVOID_LOOK_FOR})
+
+
+# --- the "check this contest" form -----------------------------------------------------------------------
+
+FORM_FORMATS = {
+    "h2h": series_mod.H2H,
+    "50/50": series_mod.FIFTY_FIFTY,
+    "double up": series_mod.DOUBLE_UP,
+    "doubleup": series_mod.DOUBLE_UP,
+    "gpp": "GPP",
+    "showdown": series_mod.SHOWDOWN,
+    "other": series_mod.OTHER,
+}
+
+
+class FormError(ValueError):
+    """A field of the check form could not be read; the message names it."""
+
+
+def _amount(text: str, field_name: str) -> float:
+    """`$1,234`, `30k`, `2.5m` -> a number."""
+    cleaned = str(text).strip().lower().replace("$", "").replace(",", "").replace(" ", "")
+    scale = 1.0
+    if cleaned.endswith("k"):
+        cleaned, scale = cleaned[:-1], 1_000.0
+    elif cleaned.endswith("m"):
+        cleaned, scale = cleaned[:-1], 1_000_000.0
+    try:
+        value = float(cleaned) * scale
+    except ValueError as exc:
+        raise FormError(f"{field_name}: {text!r} is not a number") from exc
+    if value < 0:
+        raise FormError(f"{field_name}: cannot be negative")
+    return value
+
+
+def contest_from_form(form: dict[str, Any]) -> Contest:
+    """The five quick fields of the page's check form -> a `Contest`:
+
+    - `format`: H2H, 50/50, Double Up, GPP, Showdown or Other (a GPP is single-entry or N-max by its
+      entry max);
+    - `fee`: dollars;
+    - `entrants`: `1,234 / 2,450` (entered so far / the field's maximum) or just the maximum;
+    - `entry_max`: entries a user may make (blank = unknown);
+    - `prize`: a prize pool (`30000`, `$30k`), a min-cash as a multiple (`2x`), or both (`30000 2x`);
+    - optional `opponent` (H2H) for the regulars lookup."""
+    key = str(form.get("format", "")).strip().lower()
+    if key not in FORM_FORMATS:
+        raise FormError("format: pick one of H2H, 50/50, Double Up, GPP, Showdown, Other")
+    fee_text = str(form.get("fee", "")).strip()
+    if not fee_text:
+        raise FormError("fee: required")
+    fee = _amount(fee_text, "fee")
+
+    entrants = entered = None
+    ent_text = str(form.get("entrants", "")).strip()
+    if ent_text:
+        parts = [p for p in ent_text.replace("of", "/").split("/") if p.strip()]
+        if len(parts) > 2:
+            raise FormError("entrants: type '1,234 / 2,450' (so far / maximum) or just the maximum")
+        numbers = [int(_amount(p, "entrants")) for p in parts]
+        entrants = numbers[-1]
+        entered = numbers[0] if len(numbers) == 2 else None
+        if entered is not None and entered > entrants:
+            raise FormError("entrants: the number so far is larger than the maximum")
+
+    entry_text = str(form.get("entry_max", "")).strip()
+    entry_max = int(_amount(entry_text, "entry max")) if entry_text else None
+
+    prize_pool = min_cash = None
+    for token in str(form.get("prize", "")).replace(",", "").split():
+        if token.lower().endswith("x"):
+            min_cash = _amount(token[:-1], "min-cash")
+        elif token:
+            prize_pool = _amount(token, "prize pool")
+
+    fmt = FORM_FORMATS[key]
+    if fmt == "GPP":
+        fmt = series_mod.SE_GPP if entry_max == 1 else series_mod.N_MAX_GPP
+    if fmt in (series_mod.H2H,) and entry_max is None:
+        entry_max = 1
+    return Contest(
+        format=fmt,
+        fee=fee,
+        entrants=entrants,
+        entry_max=entry_max,
+        prize_pool=prize_pool,
+        min_cash=min_cash,
+        entered=entered,
+        opponent=str(form.get("opponent", "")).strip() if fmt == series_mod.H2H else "",
+    )
+
+
+def verdict_payload(contest: Contest, verdict: Verdict, *, opponent_record: str = "") -> dict[str, Any]:
+    """What the check form shows."""
+    return {
+        "tier": verdict.tier,
+        "reason": verdict.reason,
+        "rake": verdict.rake,
+        "flags": list(verdict.flags),
+        "line": verdict.line(),
+        "format": contest.format,
+        "opponent_record": opponent_record,
+    }

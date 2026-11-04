@@ -287,3 +287,53 @@ def test_an_entries_file_is_tiered_from_the_series_history():
     assert tiers == [(15.0, "B", True), (3.0, "Avoid", False), (2.0, "A", False), (5.0, "C", False)]
     assert "field size unknown" in entered[2].verdict.flags
     assert "regular" in entered[1].verdict.reason
+
+
+# --- the check form -----------------------------------------------------------------------------------------
+
+
+def test_the_form_reads_five_quick_fields():
+    c = ct.contest_from_form(
+        {"format": "GPP", "fee": "$15", "entrants": "1,234 / 2,450", "entry_max": "3", "prize": "30k 2x"}
+    )
+    assert (c.format, c.fee, c.entrants, c.entered, c.entry_max) == (sr.N_MAX_GPP, 15.0, 2450, 1234, 3)
+    assert (c.prize_pool, c.min_cash) == (30000.0, 2.0)
+
+
+def test_a_gpp_is_single_entry_when_the_entry_max_is_one():
+    assert ct.contest_from_form({"format": "gpp", "fee": "5", "entry_max": "1"}).format == sr.SE_GPP
+    assert ct.contest_from_form({"format": "gpp", "fee": "5"}).format == sr.N_MAX_GPP  # unknown: N-max
+    assert ct.contest_from_form({"format": "H2H", "fee": "2"}).entry_max == 1
+
+
+def test_the_form_takes_a_bare_maximum_a_pool_alone_or_a_min_cash_alone():
+    assert ct.contest_from_form({"format": "50/50", "fee": "3", "entrants": "5000"}).entered is None
+    assert ct.contest_from_form({"format": "50/50", "fee": "3", "prize": "$12,500"}).prize_pool == 12500.0
+    only = ct.contest_from_form({"format": "gpp", "fee": "3", "prize": "2x"})
+    assert only.min_cash == 2.0 and only.prize_pool is None
+
+
+@pytest.mark.parametrize(
+    ("form", "message"),
+    [
+        ({"format": "lottery", "fee": "3"}, "format"),
+        ({"format": "H2H"}, "fee: required"),
+        ({"format": "H2H", "fee": "abc"}, "fee"),
+        ({"format": "gpp", "fee": "3", "entrants": "900 / 800"}, "larger than the maximum"),
+        ({"format": "gpp", "fee": "3", "entrants": "1 / 2 / 3"}, "entrants"),
+        ({"format": "gpp", "fee": "-3"}, "negative"),
+    ],
+)
+def test_the_form_names_the_field_it_cannot_read(form, message):
+    with pytest.raises(ct.FormError, match=message):
+        ct.contest_from_form(form)
+
+
+def test_the_form_gives_the_verdict_the_page_shows():
+    contest = ct.contest_from_form(
+        {"format": "gpp", "fee": "15", "entrants": "400 / 784", "entry_max": "3", "prize": "10000 2x"}
+    )
+    payload = ct.verdict_payload(contest, ct.classify(contest))
+    assert payload["tier"] == "B" and payload["rake"] == pytest.approx(1 - 10000 / (784 * 15))
+    assert any(f.startswith("overlay possible: 51% full") for f in payload["flags"])
+    assert payload["line"].startswith("Tier B:")
