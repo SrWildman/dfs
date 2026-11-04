@@ -46,7 +46,7 @@ Show whether config is set up and how fresh each data source is.
 
 ### `dfs week page`
 
-Write one self-contained HTML page for the week and open it: today's steps (with the phrase to say and the command), each decision answered from outputs the tool already saved (the contest plan, cash, GPP, unknowns, Sunday, the season-long leagues, last week), each with its trust (Proven / Shadow / Untested), and every command and phrase with when you last ran it. Read-only: no sheet, no network. A section whose input does not exist says "not run yet". `sync`, `lineups suggest`, `lineups late-swap`, `contests plan`, `season sync`, `season check` and `week close` rebuild it when they finish.
+Write one self-contained HTML page for the week and open it: today's steps (with the phrase to say and the command), then the week's plays by position (best value, cash core, GPP upside, fades), the slate (every game's total, spread, implied totals, line movement, weather, key injuries), what changed since the last sync, and each decision answered from outputs the tool already saved (the contest plan by tier, cash, GPP, unknowns, Sunday, the season-long leagues, last week), each with its trust (Proven / Shadow / Untested), ordered by the day of the week, and every command and phrase with when you last ran it. Read-only: no sheet, no network. A section whose input does not exist says "not run yet". `sync`, `lineups suggest`, `lineups late-swap`, `contests plan`, `season sync`, `season check` and `week close` rebuild it when they finish.
 
 | Option | What it does |
 |---|---|
