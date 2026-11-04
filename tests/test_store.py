@@ -83,6 +83,18 @@ def test_record_success_then_failure_overwrites_entry(monkeypatch, tmp_path):
     assert m["widgets"]["error"] == "boom"
 
 
+def test_record_pending_is_neither_an_error_nor_a_success(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "MANIFEST_FILE", tmp_path / "manifest.json")
+
+    store.record_pending("gps", "not published for Week 9 yet")
+    entry = store.read_manifest()["gps"]
+    assert entry["error"] is None and entry["rows"] is None
+    assert entry["pending"] == "not published for Week 9 yet" and entry["synced_at"]
+
+    store.record_success("gps", 32)  # the article went up: the next sync clears it
+    assert "pending" not in store.read_manifest()["gps"]
+
+
 def _write_snapshot(raw_dir, stamp: str, value: str) -> None:
     (raw_dir).mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"v": [value]}).to_csv(raw_dir / f"{stamp}.csv", index=False)

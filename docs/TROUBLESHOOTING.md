@@ -244,6 +244,14 @@ succeeded.
 
 ---
 
+**`dfs sync` prints a yellow `pending: GPS not published for Week N yet` for `tffb_gps`, and the Week page header says "1 pending".**
+Cause: TFFB's Pace of Play article goes up on Wednesday; a source whose data for this week is not out yet is
+pending, not failed. Nothing is saved for it, the sync exits 0, and the slate-grid pace columns stay blank.
+Fix: nothing is wrong. Run `dfs sync` (or `dfs sync --only tffb_gps`) again after the article is up; the line
+goes away. A red `failed:` on the same source (an expired login, a changed page) is a real error: `dfs auth tffb`.
+
+---
+
 **Model Check says "Not enough data yet", or most rows are muted italic.**
 Cause: no completed week has been scored yet, or the sample is small (a row with n under 30 is "thin" on
 purpose). Early in the season almost everything is thin.

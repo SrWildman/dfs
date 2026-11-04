@@ -206,3 +206,87 @@ def test_only_the_per_player_context_sources_declare_no_sheet_tab():
     no_tab |= {"player_log"}
     assert all(not SOURCES[name].uploads_to_sheet for name in no_tab)
     assert all(s.uploads_to_sheet for name, s in SOURCES.items() if name not in no_tab)
+
+
+class FakePendingSource(Source):
+    name = "pending"
+
+    def fetch(self, ctx: SyncContext) -> pd.DataFrame:
+        from dfs.sources.base import SourcePending
+
+        raise SourcePending("not published for Week 9 yet")
+
+
+def _isolated_store(monkeypatch, tmp_path):
+    import dfs.store as store
+
+    monkeypatch.setattr(store, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(store, "CURRENT_DIR", tmp_path / "current")
+    monkeypatch.setattr(store, "MANIFEST_FILE", tmp_path / "manifest.json")
+    (tmp_path / "current").mkdir()
+    return store
+
+
+def test_a_source_that_is_not_published_yet_is_pending_not_failed(monkeypatch, cfg, tmp_path):
+    store = _isolated_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "dfs.sync.get_source",
+        lambda name: {"good": FakeGoodSource(), "pending": FakePendingSource(), "bad": FakeFailingSource()}[
+            name
+        ],
+    )
+
+    results = run_sync(cfg, ["pending", "good", "bad"], SyncContext(week=9, season=2026), upload=False)
+
+    by_name = {r.source: r for r in results}
+    assert by_name["pending"].pending is True and by_name["pending"].ok is True
+    assert "not published" in by_name["pending"].error
+    assert by_name["good"].pending is False and by_name["bad"].pending is False
+    assert by_name["bad"].ok is False  # a real error still fails
+    manifest = store.read_manifest()
+    assert manifest["pending"]["error"] is None and "not published" in manifest["pending"]["pending"]
+    assert manifest["bad"]["error"] == "upstream is down" and "pending" not in manifest["bad"]
+    assert "pending" not in manifest["good"]
+    assert not (tmp_path / "current" / "pending.csv").exists()  # nothing saved
+
+
+def _sync_cli(monkeypatch, tmp_path, results):
+    """`dfs sync --only good --no-upload` with run_sync faked to return `results`."""
+    from typer.testing import CliRunner
+
+    from dfs import cli
+    from dfs.sync import SourceResult
+
+    cfg = Config.model_validate(
+        {"google_sheets": {"sheet_id": "fake", "credentials_file": "creds.json", "tab_mappings": {}}}
+    )
+    monkeypatch.setattr(cli, "_load_config_or_exit", lambda: cfg)
+    monkeypatch.setattr(
+        cli, "run_sync", lambda *a, **k: [SourceResult(*r[:4], pending=r[4]) for r in results]
+    )
+    monkeypatch.setattr(cli, "_edge_width_now", lambda cfg: None)
+    return CliRunner().invoke(
+        cli.app, ["sync", "--only", "tffb_gps", "--no-upload", "--week", "9", "--season", "2026"]
+    )
+
+
+def test_sync_exits_zero_with_a_yellow_pending_line_when_a_source_is_pending(monkeypatch, tmp_path):
+    result = _sync_cli(
+        monkeypatch, tmp_path, [("tffb_gps", True, 0, "GPS not published for Week 9 yet", True)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "pending: GPS not published for Week 9 yet" in result.output
+    assert "failed" not in result.output
+
+
+def test_sync_still_exits_one_on_a_real_error_even_beside_a_pending_source(monkeypatch, tmp_path):
+    result = _sync_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            ("tffb_gps", True, 0, "GPS not published for Week 9 yet", True),
+            ("tffb_gps", False, None, "login expired", False),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "pending: GPS not published" in result.output and "failed: login expired" in result.output

@@ -1504,10 +1504,13 @@ def render(
     )
     sources = sorted(inp.manifest)
     failed = [n for n in sources if inp.manifest[n].get("error")]
+    pending = [n for n in sources if inp.manifest[n].get("pending") and n not in failed]
     stamp = kickoff.format_et(inp.now)
     sub = (
         f"{e(week_today.DAY_NAMES[day])} &middot; page built {e(stamp)} &middot; "
-        f"{len(sources) - len(failed)} of {len(sources)} sources synced"
+        f"{len(sources) - len(failed) - len(pending)} of {len(sources)} sources synced"
+        + (f", {len(pending)} pending ({e(', '.join(pending))})" if pending else "")
+        + (f", {len(failed)} failed ({e(', '.join(failed))})" if failed else "")
     )
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
