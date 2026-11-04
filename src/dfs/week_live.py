@@ -261,6 +261,7 @@ document.addEventListener('click', (e) => {
 });
 
 /* ---------- status ---------- */
+let stamp = null;   // when the page file was last rebuilt by any command (a terminal's too)
 async function status() {
   try {
     const s = await get('/api/status'); const bar = $('#lockbar');
@@ -268,6 +269,8 @@ async function status() {
     else if (s.job) { bar.textContent = s.job + ' is running from a button.'; bar.className = 'busy'; }
     else { bar.textContent = 'Nothing is running.'; bar.className = ''; }
     if (!chat.running && s.chat_busy && !chat.finished) setRunning(true);
+    if (stamp !== null && s.page_stamp !== stamp) refreshSections();
+    stamp = s.page_stamp;
   } catch (e) {}
 }
 setInterval(status, 4000);

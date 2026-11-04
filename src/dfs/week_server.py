@@ -112,10 +112,20 @@ def render_page(ctx: Context, nonce: str) -> str:
     )
 
 
+def page_stamp(ctx: Context) -> float:
+    """When the static page file was last rebuilt: every command that changes what the page shows rebuilds it
+    (`week_page.after_command`), so a change here tells the open page to reload its sections."""
+    try:
+        return week_page.page_path(ctx.season, ctx.week, ctx.data_dir).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def status(ctx: Context) -> dict[str, Any]:
     holder = run_lock.current_holder()
     job = ctx.jobs.current
     return {
+        "page_stamp": page_stamp(ctx),
         "lock": {"text": holder.describe() + ".", "command": holder.command, "origin": holder.origin}
         if holder
         else None,

@@ -972,3 +972,51 @@ def test_a_python_file_named_csv_is_just_data(make, downloads):
     c = make()
     status, _ = drop(c, "payload.csv", b"import os; os.system('echo pwned')\n")
     assert status == 422 and "pwned" not in sys.modules
+
+
+# -- the chat and the buttons share the run lock -------------------------------------------------------------
+
+
+def _hold_elsewhere(command, origin):
+    import fcntl
+
+    path = run_lock.lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    record = {"pid": os.getppid(), "command": command, "since": "2026-11-07T15:00:00+00:00", "origin": origin}
+    os.write(fd, json.dumps(record).encode())
+    return fd
+
+
+def test_a_command_the_chat_runs_holds_the_lock_and_a_button_is_told_so(make, monkeypatch):
+    """Claude's `dfs` children carry `DFS_RUN_ORIGIN=chat`, so the lock they take names the chat."""
+    c = make()
+    monkeypatch.setenv(run_lock.ORIGIN_ENV, week_chat.chat_env()[run_lock.ORIGIN_ENV])
+    assert run_lock.origin() == "chat"
+    with run_lock.hold("dfs lineups suggest") as record:
+        assert record["origin"] == "chat"
+        status = c.get("/api/status")[1]
+        assert status["lock"]["origin"] == "chat" and "Week page's chat" in status["lock"]["text"]
+        refused = c.post("/api/jobs/start", {"command": "dfs sync"})
+        assert refused[0] == 409 and "Week page's chat" in refused[1]["error"]
+
+
+def test_a_button_job_holds_the_lock_and_the_chats_command_is_told_so(monkeypatch):
+    fd = _hold_elsewhere("dfs sync", "button")
+    try:
+        monkeypatch.setenv(run_lock.ORIGIN_ENV, "chat")
+        with pytest.raises(run_lock.LockHeld) as refused, run_lock.hold("dfs lineups suggest"):
+            pass
+        assert "`dfs sync` is running" in str(refused.value) and "a Week page button" in str(refused.value)
+    finally:
+        os.close(fd)
+
+
+def test_the_page_reloads_its_sections_when_any_command_rebuilds_the_page_file(make, tmp_path):
+    c = make()
+    assert c.get("/api/status")[1]["page_stamp"] == 0.0
+    page = week_page.page_path(SEASON, WEEK, tmp_path / "data")
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("<html></html>")
+    assert c.get("/api/status")[1]["page_stamp"] == page.stat().st_mtime
