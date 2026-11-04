@@ -61,6 +61,8 @@ PHRASE_DAY: dict[str, str] = {
     "fix flex": SAT,
     "how did we do": MON,
     "add X, Y to my buy list": SEASON,
+    "check a contest": SAT,
+    "drop my entries": SAT,
 }
 
 # A phrase whose Run cell names no `dfs` command but means one: listed under that command.

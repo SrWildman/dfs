@@ -263,6 +263,7 @@ def answer_to_args(param: MissingParam, answer: str) -> list[str]:
 MORE_LABELS = {
     "dfs status": "Config, sheet and how fresh each data source is",
     "dfs week page": "The Week page: today's steps, every decision and every tool, in your browser",
+    "dfs week serve": "The Week page as a local app: Claude chat beside it, run buttons, file drops",
     "dfs season sync": "Season leagues: sync from Sleeper, values, trade ideas, Season sheet",
     "dfs season lineups": "Season leagues: this week's best lineups, with ranges and close calls",
     "dfs season check": "Season leagues: the Sunday check (OUT, bye, empty slots) across every league",

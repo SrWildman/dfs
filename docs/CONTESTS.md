@@ -243,6 +243,59 @@ Each is a one-line change if you disagree.
     treatment also uses `w = 0`, so it scores how well the curves predict a week not yet played.
 13. H2H bands use raw points.
 
+## Contest tiers: which contests the money goes to (`contest_tiers.py`)
+
+The lobby changes all week (new contests open, and DraftKings releases smaller fields close to lock), so the
+picker works from **rules on what a contest is**, never from a pasted list. `contest_tiers.classify` takes a
+contest's format, fee, maximum entrants, entries allowed per user, prize pool and min-cash and returns a tier
+(A / B / C / Avoid), the effective rake (`1 - prize pool / (max entrants x fee)`), a one-line reason and flags.
+The Week page, `dfs contests plan` and `dfs week close` all use it.
+
+**What the history says** (`data/contests/contest_log.csv`, NFL, paid entries, 2022-26, 2,795 entries; ROI = net / fees):
+
+- Rake, median by format: H2H 10%, 50/50 10%, Double Up 13%, every GPP and Showdown about 16% at every field size
+  (fields of 200 or fewer sometimes about 10%).
+- Cash: H2H -2.8% over 748 entries (54% wins; breakeven at 10% rake is 55.6%); double-ups with 1k-5k entrants
+  +10.9% over 95 entries (56% cashed); double-ups with 5k-20k entrants -12.8% (49% cashed). Cash results are about
+  one lineup a week across every cash contest, so the signs inform and the sizes do not.
+- Classic GPPs: multi-entry with 1k-5k entrants -64% over 235 entries (Nickel, Engage Eight, Safety); multi-entry
+  5k-20k -40%, 100k+ -31%, 201-1k -2%; single-entry overall +5% but lumpy (the 1k-5k bucket's +37% is one $300 win,
+  -25% without it). By field size: 21-200 -1%, 201-1k -5%, 1k-5k -15%, 5k-20k -48%, 20k-100k -29%, 100k+ -31%.
+- Showdown -45% over 734 entries, negative at every field size.
+- At his volume one cash moves a GPP bucket by 60 points, so GPP choice rests on **structure** (rake, field size,
+  entries per user, payout shape), not on his bucket ROI. What holds across seasons: Showdown and multi-entry GPPs
+  lose.
+
+**What the industry says:** game selection is the easiest way to raise ROI; prefer smaller fields, the lowest rake,
+flat payouts (min-cash 2x) and soft opponents. Single-entry double-ups run about 13% rake; avoid multi-entry
+double-ups, which pros max-enter. H2H under $5 is soft action: create your own, one game per opponent, skip the
+regulars. DraftKings releases smaller fields a few hours before lock (look Sunday morning). A guaranteed contest that
+does not fill near lock (an overlay) has fewer opponents for the same prizes. DraftKings' Beginner and Casual contests
+exclude anyone with an experience badge; Sam is not eligible (checked Nov 4), so `[contest_plan] casual_eligible =
+false` and they are never counted.
+
+**The tiers**
+
+| Tier | Share of the Weekly Budget | Rule |
+|---|---|---|
+| A | about 60% | H2H at $1-$5; single-entry double-ups and 50/50s at $2-$25 with a field under about 6,000 |
+| B | about 30% | Classic GPPs, single-entry or 3-max, field under 2,500, fee $3-$15 (more where the rake is 13% or less), rake 16% or less, min-cash at least 2x; prefer the smallest version of a family |
+| C | at most 10% and $15 | Showdown (at most $5); GPPs with 5,000+ entrants and 4+ entries a user (at most $10); anything that is neither A, B nor Avoid |
+| Avoid | $0 | a multi-entry double-up or 50/50; a 4+-max GPP with 1,000-5,000 entrants; rake above 17%; a GPP whose min-cash is under 2x; an H2H regular (0-3 or worse, or under 30% over 5+ games) |
+
+A and B split what C leaves two to one, so a $50 budget is $30 / $15 / $5. An input that was not given never makes a
+rule fire; the verdict flags it (`field size unknown`, `min-cash unknown`). **Flags**: `overlay possible` (guaranteed
+and under 80% full), `late release`, `smaller sibling exists`.
+
+One reading to know: Tier B takes up to **3** entries a user and the Avoid bucket takes **4 or more**, so a 3-max with
+1,000-2,500 entrants is B and a 20-max of the same size is Avoid.
+
+**Where it shows:** the Week page's contest-plan section (the plan in dollars, what to look for, the day's reminder),
+and on `dfs week serve` a five-field **check this contest** form and a drop zone whose entries file is tiered against
+the plan before lock; `dfs contests plan` adds the tier view after the format view; `dfs week close` prints one line
+(planned against spent by tier) and leaves it for the page's "Last week". An entries file does not give a contest's
+field or prize pool, so those come from the same series' median in the log (a flag when there is none).
+
 ## How it is wired locally (Phase 1)
 
 `dfs week close` runs the contest step after the bankroll reconciliation (soft: a failure is printed and the close still

@@ -5062,6 +5062,30 @@ def week_page_command(
     console.print(f"[green]OK[/green] {escape(str(path))}")
 
 
+@week_app.command("serve", short_help="The Week page as a local app: Claude chat, run buttons, file drops.")
+def week_serve_command(
+    week: int = typer.Option(
+        None, "--week", help="Serve this week (default: the current week; an earlier week is read only)."
+    ),
+    port: int = typer.Option(0, "--port", help="Port to listen on (default: any free one)."),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open the page in your browser (default: open it)."
+    ),
+) -> None:
+    """Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code
+    docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with
+    live output, drop DraftKings' entries file at lock and the history / standings at close, and check a
+    contest against the tiers. Claude Code runs here in the main checkout under your own login and asks you
+    (Approve / Deny on the page) before anything that needs approval; commands that write take the run lock,
+    so the chat, the buttons and a terminal cannot write at once. Writes no sheet itself. Ctrl-C stops it.
+    `dfs week page` still writes the static file."""
+    from dfs import week_server
+
+    week_server.serve(
+        week=week, port=port, open_browser=open_browser, echo=lambda line: console.print(escape(line))
+    )
+
+
 @week_app.command("new", short_help="Point config.toml at a new weeks sheet copy and sync.")
 def week_new(
     sheet_url: str = typer.Argument(

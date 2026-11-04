@@ -202,7 +202,7 @@ def describe_entries(
         raise Rejected(f"DraftKings' entries file could not be read: {exc}", 422) from exc
     kept, skipped = ent.classify_entries(parsed)
     lineups = entered.from_entries(kept, parsed.players)
-    contests = {e.file.contest_id for e in parsed.entries}
+    contests = {e.contest_id for e in parsed.entries}
     summary = [
         f"entries for {len(lineups)} lineup{'s' if len(lineups) != 1 else ''}, "
         f"{len(contests)} contest{'s' if len(contests) != 1 else ''} "
@@ -220,7 +220,7 @@ def describe_entries(
             f"This file is for {seen}, not Week {week} of {season}: `entries record` will refuse it."
         )
 
-    pairs = [(e.file.contest_name, ent.entry_format(e.file), money(e.file.entry_fee)) for e in parsed.entries]
+    pairs = [(e.contest_name, ent.entry_format(e), money(e.entry_fee)) for e in parsed.entries]
     avoid = [] if opponents is None else _avoid_names(opponents)
     history_sizes = contest_tiers.history_by_series(typed) if typed is not None and len(typed) else {}
     tiered = contest_tiers.classify_entered(pairs, history=history_sizes, avoid_opponents=avoid)

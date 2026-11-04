@@ -269,8 +269,11 @@ class Turn:
             self.events.append(event)
             self.cond.notify_all()
 
-    def finish(self) -> None:
+    def finish(self, last: dict | None = None) -> None:
+        """End the turn, adding its last event in the same step so a client that sees it can send at once."""
         with self.cond:
+            if last is not None:
+                self.events.append({**last, "seq": len(self.events)})
             self.done = True
             self.cond.notify_all()
 
@@ -326,7 +329,7 @@ class ChatManager:
         except (OSError, ValueError):
             return None
 
-    def _remember(self, turn: Turn, user_text: str, first: bool) -> None:
+    def _remember(self, turn: Turn, user_text: str, first: bool, last: dict | None = None) -> None:
         """Append this turn to its chat's transcript and index entry. Never raises."""
         try:
             chat_id = turn.chat_id
@@ -334,7 +337,7 @@ class ChatManager:
                 return
             lines = self.transcript(chat_id) or []
             lines.append({"k": "user", "text": user_text})
-            lines.extend(_compact(turn.events))
+            lines.extend(_compact([*turn.events, *([{**last, "seq": 0}] if last else [])]))
             self.store_dir.mkdir(parents=True, exist_ok=True)
             (self.store_dir / f"{chat_id}.json").write_text(json.dumps(lines))
             now = datetime.now(UTC).isoformat(timespec="seconds")
@@ -414,9 +417,9 @@ class ChatManager:
             for request_id in list(turn.pending):
                 turn.pending.pop(request_id, None)
                 turn.emit({"k": "approval_closed", "id": request_id})
-            turn.emit({"k": "done", "stopped": turn.stopping, **translator.summary})
-            self._remember(turn, text, first)
-            turn.finish()
+            last = {"k": "done", "stopped": turn.stopping, **translator.summary}
+            self._remember(turn, text, first, last)
+            turn.finish(last)
             self.log(f"chat turn {turn.id} ended: stopped={turn.stopping} ok={translator.ok}")
 
     def stream(self, turn: Turn, after: int = -1, wait: float = 15.0) -> Iterator[dict | None]:

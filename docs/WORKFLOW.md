@@ -239,6 +239,14 @@ rewrites only the entries whose lineup changed.
 within the Bankroll tab's Weekly Budget; `[contest_plan]` in config.toml changes the caps), last week against it, ROI and
 effective rake by format and field size, and the H2H regulars to avoid. Terminal only.
 
+**By tier, not by list.** The same command (and the Week page) also splits the Weekly Budget by tier: A about 60% (H2H
+at $1-$5, single-entry double-ups and 50/50s at $2-$25), B about 30% (single-entry or 3-max GPPs under ~2,500 entrants,
+$3-15, min-cash 2x or better), C at most 10% and $15 (Showdown, big-field multi-entry), and what to avoid. These are rules
+on a contest's format, fee, field, entries per user, rake and min-cash, so they hold when the lobby changes; Sunday
+morning, look for late-released small fields and overlay. `dfs week serve` adds a **check this contest** form (five
+fields typed while you look at a contest) and a drop zone: drop DK's entries file at lock and it shows the spend so far
+by tier against the plan while you can still withdraw.
+
 **At lock, after entering: `dfs entries record`.** Download DK's entries file again (Edit entries) once you have entered,
 then run it: it records every lineup you entered, the contests it went into and the Suggested build it came from (8 or
 more of its 9 players in one saved build of the week, any round) or "own", to `data/entered/<season>-wk<NN>.json`. With
@@ -460,3 +468,13 @@ number are in [CALCULATIONS.md](CALCULATIONS.md).
 **Done looks like:** the status line shows the weeks scored and a high "joined" percentage; players it could not
 find are listed in `data/results/unmatched_<season>_wNN.csv` (mostly backups who never recorded a stat).
 
+## The Week page as an app: `dfs week serve`
+
+`dfs week serve` opens the Week page on this Mac only, with Claude Code docked on its right. Ask in the chat instead of
+switching to a terminal (the **Ask** buttons put a step's phrase in the box); a call that needs approval appears in the
+chat as Approve / Deny with exactly what will run. The **Run** card has a button for every command, with live output, a
+Stop button and a history; `week new`, `week close`, `lineups clear`, `pool clear` and every `setup ...` need the command
+typed out first, and a closed week is read only. Commands that write take `data/.run.lock`, so the chat, the buttons and
+a terminal session cannot write at once (the second is refused and told what is running). Drop DK's entries file at lock
+and the history export and standings at close on the drop zone; they are filed into Downloads, where `entries record` and
+`week close` look, and the page offers the matching command to run. `dfs week page` still writes the static file.

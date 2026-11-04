@@ -2,7 +2,7 @@
 
 The lobby changes all week (new contests open, DraftKings releases smaller fields near lock), so this works
 from what a contest *is*, not from its name: its format, fee, maximum entrants, entries allowed per user,
-prize pool and min-cash. The evidence behind every rule is in `docs/CONTEST_SELECTION.md` (Sam's five
+prize pool and min-cash. The evidence behind every rule is in `docs/CONTESTS.md` ("Contest tiers": Sam's five
 seasons of paid NFL entries plus the industry's game-selection research). One module serves the Week page,
 `dfs contests plan` and `dfs week close`.
 
@@ -50,7 +50,7 @@ from dfs.contests import series as series_mod
 A, B, C, AVOID = "A", "B", "C", "Avoid"
 TIERS = (A, B, C, AVOID)
 
-# --- the thresholds (docs/CONTEST_SELECTION.md) -----------------------------------------------------------
+# --- the thresholds (docs/CONTESTS.md, "Contest tiers") ---------------------------------------------------
 H2H_FEE = (1.0, 5.0)
 CASH_FEE = (2.0, 25.0)
 CASH_MAX_FIELD = 6000
@@ -476,7 +476,7 @@ class FormError(ValueError):
     """A field of the check form could not be read; the message names it."""
 
 
-def _amount(text: str, field_name: str) -> float:
+def parse_amount(text: str, field_name: str) -> float:
     """`$1,234`, `30k`, `2.5m` -> a number."""
     cleaned = str(text).strip().lower().replace("$", "").replace(",", "").replace(" ", "")
     scale = 1.0
@@ -509,7 +509,7 @@ def contest_from_form(form: dict[str, Any]) -> Contest:
     fee_text = str(form.get("fee", "")).strip()
     if not fee_text:
         raise FormError("fee: required")
-    fee = _amount(fee_text, "fee")
+    fee = parse_amount(fee_text, "fee")
 
     entrants = entered = None
     ent_text = str(form.get("entrants", "")).strip()
@@ -517,21 +517,21 @@ def contest_from_form(form: dict[str, Any]) -> Contest:
         parts = [p for p in ent_text.replace("of", "/").split("/") if p.strip()]
         if len(parts) > 2:
             raise FormError("entrants: type '1,234 / 2,450' (so far / maximum) or just the maximum")
-        numbers = [int(_amount(p, "entrants")) for p in parts]
+        numbers = [int(parse_amount(p, "entrants")) for p in parts]
         entrants = numbers[-1]
         entered = numbers[0] if len(numbers) == 2 else None
         if entered is not None and entered > entrants:
             raise FormError("entrants: the number so far is larger than the maximum")
 
     entry_text = str(form.get("entry_max", "")).strip()
-    entry_max = int(_amount(entry_text, "entry max")) if entry_text else None
+    entry_max = int(parse_amount(entry_text, "entry max")) if entry_text else None
 
     prize_pool = min_cash = None
     for token in str(form.get("prize", "")).replace(",", "").split():
         if token.lower().endswith("x"):
-            min_cash = _amount(token[:-1], "min-cash")
+            min_cash = parse_amount(token[:-1], "min-cash")
         elif token:
-            prize_pool = _amount(token, "prize pool")
+            prize_pool = parse_amount(token, "prize pool")
 
     fmt = FORM_FORMATS[key]
     if fmt == "GPP":
