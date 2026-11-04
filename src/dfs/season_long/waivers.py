@@ -1,10 +1,13 @@
 """Waivers: every free agent ranked by what he adds to Sam's team, with a FAAB bid guide from the league.
 
-**Value.** For each of the best `POOL` free agents (by rest-of-season points), Sam's roster with him added and
-the player he misses least dropped (`trade.settle` with the evaluator: a needed bye or injury cover is never
-the drop, because dropping it would cost lineup points). A quick screen on weighted lineup points, then the
-full objective (`objective.Evaluator`: playoff-odds-weighted team value, or survival in a chopped league) for
-the best `FULL`. This week's lineup gain is shown apart.
+**Value.** For each of the best `POOL` free agents (by rest-of-season points), Sam's roster with him added
+under `roster_rules` (`roster_moves.add_options`): the player he misses least dropped, never one in an IR
+slot and never one who leaves a starting slot empty; an eligible player moved to an open IR slot instead of
+any drop; at QB / K / DEF the add is a swap for the incumbent (one K, one DEF, one QB in a 1-QB league),
+except as a bye-week stream, valued on the coming week alone, when every active player there is out that
+week. A quick screen on weighted lineup points, then the full objective (`objective.Evaluator`:
+playoff-odds-weighted team value, or survival in a chopped league) for the best `FULL`. This week's lineup
+gain is shown apart.
 
 **Bid guide** (`bid_guide`). From the league's own completed waiver claims with a bid: claims of the same
 position whose player was projected (by Sleeper, in this league's scoring, for the claim's week) within
@@ -34,6 +37,7 @@ import pandas as pd
 
 from dfs.season_long import faab as faab_mod
 from dfs.season_long import objective, ros
+from dfs.season_long import roster_moves as rm
 from dfs.season_long import sleeper_league as sl
 from dfs.season_long import team_value as tvm
 from dfs.season_long import trade as tr
@@ -82,6 +86,8 @@ class Pickup:
     handcuff: float = 0.0  # contingency value included in `value`'s screen
     note: str = ""
     expected_weeks: float = float("nan")  # chopped: change in expected weeks survived
+    to_ir: list[str] = field(default_factory=list)  # players moved to an open IR slot instead of a drop
+    stream_week: int | None = None  # a bye-week stream: drop him after this week
 
 
 # -- history --------------------------------------------------------------------------------
@@ -251,29 +257,34 @@ def rank_pickups(
     mine = ev.rosters[me]
     fa = tr.free_agents(view)
     pool = only if only is not None else fa[:POOL]
-    weights = _weights(view, ev)
+    weights = rm.weights(view, ev)
     shares = carry_shares(view)
 
-    def screen_total(roster: list[str]) -> float:
-        return sum(weights[w] * ev.lineup_total(roster, w) for w in ev.weeks)
-
-    base_total = screen_total(mine)
+    base_total = sum(weights[w] * ev.lineup_total(mine, w) for w in ev.weeks)
     screened = []
     for pid in pool:
-        new, dropped, _ = tr.settle([*mine, pid], len(mine), view, [], ev)
-        if pid not in new:
-            continue
-        hc = handcuff_value(view, ev, pid, [p for p in new if p != pid] + [pid], shares)
-        cuff = hc.value if hc is not None else 0.0
-        screened.append((screen_total(new) - base_total + cuff, pid, new, dropped, cuff))
+        best = None
+        for option in rm.add_options(view, ev, mine, pid, force=only is not None):
+            hc = handcuff_value(view, ev, pid, [p for p in option.roster if p != pid] + [pid], shares)
+            cuff = hc.value if hc is not None else 0.0
+            gain = (
+                sum(weights[w] * option.ev.lineup_total(option.roster, w) for w in ev.weeks)
+                - base_total
+                + cuff
+            )
+            if best is None or gain > best[0]:
+                best = (gain, pid, option, cuff)
+        if best is not None:
+            screened.append(best)
     screened.sort(key=lambda x: -x[0])
     base = ev.base()[me]
     history = claims(lg)
     values = claim_values(lg, history)
     dollar = _dollar_value(view, ev)
     out = []
-    for _, pid, new, dropped, cuff in screened[: max(FULL, top) if only is None else len(screened)]:
-        after = ev.evaluate(rosters={me: new})[me]
+    for _, pid, option, cuff in screened[: max(FULL, top) if only is None else len(screened)]:
+        new, dropped = option.roster, option.dropped
+        after = option.ev.evaluate(rosters={me: new})[me]
         # A handcuff's contingency is lineup points; a chopped league's value is survival, so there it is
         # shown, not added.
         delta = after.value - base.value + (0.0 if lg.chopped else cuff)
@@ -288,8 +299,12 @@ def rank_pickups(
             bid=bid_guide(view, history, values, pid, worth, inactive),
             handcuff=cuff,
             expected_weeks=after.expected_weeks - base.expected_weeks if lg.chopped else float("nan"),
+            to_ir=list(option.to_ir),
+            stream_week=option.stream_week,
         )
-        if cuff > 0:
+        if option.stream_week is not None:
+            pick.note = f"bye-week stream: drop him after Week {option.stream_week}"
+        elif cuff > 0:
             pick.note = f"handcuff: +{cuff:.1f} if his RB1 misses time"
         out.append(pick)
     out.sort(key=lambda p: -p.value)
@@ -329,14 +344,6 @@ def handcuff_text(view: LeagueView, h: Handcuff) -> str:
         f"{view.name(h.player_id)}: backs up {view.name(h.rb1)}{share}; about {h.if_out:.0f} pts a game "
         f"if he sits; worth +{h.value:.1f} to your lineup now"
     )
-
-
-def _weights(view: LeagueView, ev: Evaluator) -> dict[int, float]:
-    lg = view.league
-    if lg.chopped:
-        return {w: view.cfg.survival_decay**i for i, w in enumerate(ev.weeks)}
-    p = ev.base()[lg.my_roster_id].p_playoffs
-    return {w: (view.cfg.playoff_weight * p if w in lg.playoff_weeks else 1.0) for w in ev.weeks}
 
 
 def _dollar_value(view: LeagueView, ev: Evaluator) -> float:
@@ -384,7 +391,7 @@ def chop_plan(view: LeagueView, ev: Evaluator, n: int = objective.PICKUPS_PER_CH
     mine = ev.rosters[me]
     picks = []
     for k, pid in enumerate(best):
-        new, _, _ = tr.settle([*mine, pid], len(mine), view, [], ev)
+        new, _, _ = tr.settle([*mine, pid], len(mine), view, [], ev, before=mine)
         gain = ev.evaluate(rosters={me: new})[me].value - base[me].value
         picks.append((pid, round(gain, 3), int(max(gain, 0.0) / dollar), float(ev.prices[k])))
     rivals = sorted(((lg.team(r).label, ev.faab[r]) for r in others if r != target), key=lambda x: -x[1])
@@ -395,9 +402,9 @@ def pickup_line(view: LeagueView, p: Pickup) -> str:
     s = view.ros.summary
     pos = s["position"].get(p.player_id, "")
     gain = f"{p.expected_weeks:+.2f} wks survived" if view.league.chopped else f"{p.value:+.1f} value"
-    drop = f"drop {view.name(p.drop)}" if p.drop else "open spot"
+    move = rm.move_text(view, [p.drop] if p.drop else [], p.to_ir)
     note = f"; {p.note}" if p.note else ""
     return (
-        f"add {view.name(p.player_id)} ({pos}), {drop} | {gain}, this week {p.this_week:+.1f} | "
+        f"add {view.name(p.player_id)} ({pos}), {move} | {gain}, this week {p.this_week:+.1f} | "
         f"{p.bid.text(view.league.me.faab_left)}{note}"
     )

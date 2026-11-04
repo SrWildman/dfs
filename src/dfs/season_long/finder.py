@@ -304,10 +304,10 @@ def find_trades(
                         if (cons_in + sweet * market.points_per_dollar) / cons_out > LOPSIDED_MARKET:
                             continue
                     new_me, _, _ = tr.settle(
-                        [p for p in mine if p not in give] + list(get), len(mine), view, fa
+                        [p for p in mine if p not in give] + list(get), len(mine), view, fa, before=mine
                     )
                     new_th, _, _ = tr.settle(
-                        [p for p in theirs if p not in get] + list(give), len(theirs), view, fa
+                        [p for p in theirs if p not in get] + list(give), len(theirs), view, fa, before=theirs
                     )
                     g_me = screen.gain(me, new_me) - sweet * market.points_per_dollar
                     g_th = screen.gain(rid, new_th)

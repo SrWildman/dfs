@@ -113,8 +113,10 @@ def _run(lc, cfg, table, filters=None, top: int = 20, find: bool = True, waive: 
     run.alerts = lu.check(view, ev, _news())
     run.streams = lu.streams(view, ev)
     if waive:
+        from dfs.season_long import roster_rules as rr
         from dfs.season_long import waivers as wv
 
+        run.ir = rr.ir_lines(view)
         run.pickups = wv.rank_pickups(view, ev, top=5, inactive=inactive)
         run.cuffs = wv.handcuffs(view, ev)
         run.chop = wv.chop_plan(view, ev)
@@ -362,6 +364,7 @@ def season_waivers(
             _print([f"{lc.name}: {wv.pickup_line(v, p)}" for p in picks])
             continue
         lines = [f"{lc.name}: FAAB ${v.league.me.faab_left}; free move first: {st.free_move_text(run)}"]
+        lines += [f"  IR: {x.text}" for x in run.ir]
         lines += [f"  {i}. {wv.pickup_line(v, p)}" for i, p in enumerate(run.pickups[:top], 1)]
         lines += [f"  handcuff: {wv.handcuff_text(v, h)}" for h in run.cuffs]
         if run.chop is not None:

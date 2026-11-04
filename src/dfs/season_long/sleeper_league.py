@@ -37,6 +37,17 @@ FANTASY_POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")
 # Sleeper's `settings.type`: 0 redraft, 1 keeper, 2 dynasty, 3 chopped (guillotine: the lowest score each week
 # is eliminated and its roster goes to waivers).
 LEAGUE_TYPE_CHOPPED = 3
+# Injury tags that can always go to an IR slot, and the ones a league's `reserve_allow_*` settings allow.
+RESERVE_ALWAYS = ("IR", "PUP", "NFI")
+RESERVE_FLAGS = {
+    "Out": "reserve_allow_out",
+    "Sus": "reserve_allow_sus",
+    "Suspended": "reserve_allow_sus",
+    "Doubtful": "reserve_allow_doubtful",
+    "COV": "reserve_allow_cov",
+    "DNR": "reserve_allow_dnr",
+    "NA": "reserve_allow_na",
+}
 # The last fantasy week a league can play when its settings do not say otherwise.
 DEFAULT_LAST_WEEK = 17
 
@@ -147,6 +158,8 @@ class Team:
     points_for: float
     faab_left: int
     alive: bool = True
+    # Sleeper's `reserve`: the players sitting in an IR slot. They are in `players` too.
+    reserve: list[str] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -195,6 +208,21 @@ class League:
     @property
     def remaining_weeks(self) -> list[int]:
         return list(range(max(self.current_week, self.last_scored_week + 1), self.last_week + 1))
+
+    @property
+    def reserve_ids(self) -> set[str]:
+        """Every player sitting in some team's IR slot."""
+        return {p for t in self.teams for p in t.reserve}
+
+    @property
+    def reserve_statuses(self) -> set[str]:
+        """The injury tags this league lets a team move to IR: IR / PUP / NFI always, and Out, Sus, Doubtful,
+        COV, DNR, NA where its `reserve_allow_*` settings are on."""
+        out = set(RESERVE_ALWAYS)
+        for status, key in RESERVE_FLAGS.items():
+            if self.raw_settings.get(key):
+                out.add(status)
+        return out
 
     @property
     def me(self) -> Team:
@@ -255,6 +283,7 @@ def parse_league(
             faab_left=max(0, budget - int(rs.get("waiver_budget_used") or 0)),
             # A chopped team's roster is emptied onto waivers.
             alive=not (chopped and not players),
+            reserve=[str(p) for p in (r.get("reserve") or []) if str(p) in players],
         )
         teams.append(team)
         if owner == my_user_id:
@@ -270,7 +299,8 @@ def parse_league(
         scoring={k: float(v) for k, v in (league.get("scoring_settings") or {}).items()},
         slots=slots,
         bench_slots=positions.count("BN"),
-        reserve_slots=positions.count("IR"),
+        # Sleeper keeps the IR count in `settings.reserve_slots`; `roster_positions` has no "IR" entries.
+        reserve_slots=int(settings.get("reserve_slots") or 0) or positions.count("IR"),
         playoff_week_start=int(settings.get("playoff_week_start") or 0),
         playoff_teams=int(settings.get("playoff_teams") or 0),
         playoff_round_type=int(settings.get("playoff_round_type") or 0),

@@ -52,3 +52,37 @@ def test_text_that_sheets_would_parse_is_written_as_text():
     assert st.literal("Bourbon") == "Bourbon" and st.literal(12.5) == 12.5 and st.literal("124%") == "124%"
     frame = st.pd.DataFrame({"Record": ["8-6"], "Gain": ["+3.1"]})
     assert st.cells(frame) == [["Record", "Gain"], ["'8-6", "'+3.1"]]
+
+
+def test_the_waivers_tab_puts_ir_moves_first_and_shows_the_spot_each_add_takes(monkeypatch):
+    from dfs.season_long import roster_rules as rr
+    from dfs.season_long import waivers as wv
+
+    from . import roster_fixtures as fx
+
+    monkeypatch.setattr(wv.sl, "fetch_transactions", lambda lid, w, final: [])
+    v = fx.agile(reserve_slots=2)
+    ev = syn.evaluator(v, monkeypatch)
+    run = st.LeagueRun(v, ev, syn.market(v), [])
+    run.ir = rr.ir_lines(v)
+    run.pickups = wv.rank_pickups(v, ev, top=5)
+    rows = st.waivers_block([run]).rows
+    body = [r for r in rows[2:] if r and r[0] == "Test"]
+    assert body[0][1] == "IR" and "move Tyler Loop (K, IR) to IR" in body[0][-1]
+    kicker = next(r for r in body if len(r) > 2 and r[2] == "Ka'imi Fairbairn")
+    assert kicker[5] == "Tyler Loop to IR (nobody dropped)"
+    assert st.pickup_text(run).startswith("add ")
+
+
+def test_the_drop_column_holds_a_bare_name(monkeypatch):
+    from dfs.season_long import waivers as wv
+
+    from . import roster_fixtures as fx
+
+    monkeypatch.setattr(wv.sl, "fetch_transactions", lambda lid, w, final: [])
+    v = fx.agile()
+    ev = syn.evaluator(v, monkeypatch)
+    run = st.LeagueRun(v, ev, syn.market(v), [])
+    run.pickups = wv.rank_pickups(v, ev, top=5)
+    row = next(r for r in st.waivers_block([run]).rows if len(r) > 2 and r[2] == "Ka'imi Fairbairn")
+    assert row[5] == "Tyler Loop"

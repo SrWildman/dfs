@@ -22,6 +22,11 @@ week-by-week projections in this league's scoring (they carry the matchup), agai
 or OUT / IR / suspended / Doubtful (Sleeper's status, with ESPN's game-day injury feed laid over it, as DFS
 late swap does) is a `SWAP` with the best replacement (bench first, then free agents); Questionable is a
 `LOOK`; a bench player projected `BENCH_GAP` more than the starter he could replace is a `LOOK` too.
+
+A free agent it suggests comes with the roster spot he takes, under `roster_rules`
+(`roster_moves.best_option`): the player dropped (never one in an IR slot), an eligible player moved to an
+open IR slot instead, or, at QB / K / DEF, the bye-week stream with the drop to make. IR housekeeping (move
+X to IR, activate a healthy reserve player) is a `LOOK` of its own.
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from dfs.player_join import normalize_name
+from dfs.season_long import roster_moves as rm
+from dfs.season_long import roster_rules as rr
 from dfs.season_long import team_value as tvm
 from dfs.season_long import trade as tr
 from dfs.season_long.league_view import LeagueView
@@ -284,7 +291,11 @@ def check(view: LeagueView, ev: Evaluator, news=None) -> list[Alert]:
             ]
             if cands:
                 best = max(cands, key=lambda p: pts.get(p, 0.0))
-                return f"start {view.name(best)} ({label}, {pts.get(best, 0.0):.1f})"
+                move = ""
+                if label == "free agent":
+                    option = rm.best_option(view, ev, roster, best)
+                    move = f"; {rm.move_text(view, option.dropped, option.to_ir)}" if option else ""
+                return f"start {view.name(best)} ({label}, {pts.get(best, 0.0):.1f}){move}"
         return "no one available"
 
     used = set(set_lineup)
@@ -316,6 +327,8 @@ def check(view: LeagueView, ev: Evaluator, news=None) -> list[Alert]:
                     alerts.append(
                         Alert(lg.name, "LOOK", slot, view.name(pid), reason, f"start {view.name(top)}")
                     )
+    for line in rr.ir_lines(view):
+        alerts.append(Alert(lg.name, "LOOK", "IR", view.name(line.player_id), line.text))
     return alerts
 
 

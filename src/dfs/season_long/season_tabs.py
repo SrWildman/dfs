@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from dfs.season_long import finder as fd
+from dfs.season_long import roster_moves as rm
 from dfs.season_long import trade as tr
 from dfs.season_long.league_view import LeagueView
 from dfs.season_long.objective import Evaluator
@@ -116,6 +117,7 @@ class LeagueRun:
     free_move: tuple[list[str] | None, list[str], list[str]] = (None, [], [])
     notes: list[str] = field(default_factory=list)
     check: str = ""  # consensus_check.CheckResult.line()
+    ir: list = field(default_factory=list)  # roster_rules.IRLine: move X to IR, activate a healthy reserve
     pickups: list = field(default_factory=list)  # waivers.Pickup, best first
     cuffs: list = field(default_factory=list)  # waivers.handcuffs
     chop: object = None  # waivers.ChopPlan in a chopped league
@@ -362,8 +364,12 @@ def pickup_text(run: LeagueRun) -> str:
     p = run.pickups[0]
     b = p.bid
     bid = f"bid ${b.low}-{b.high}" if b.comps else "no comparable bids"
-    return (
-        f"add {run.view.name(p.player_id)} for {run.view.name(p.drop) if p.drop else 'an open spot'} ({bid})"
+    ir = [f"{run.view.name(x)} to IR" for x in p.to_ir]
+    spot = (
+        run.view.name(p.drop) if p.drop else (", ".join(ir) + " (nobody dropped)" if ir else "an open spot")
+    )
+    return f"add {run.view.name(p.player_id)} for {spot} ({bid})" + (
+        " [bye-week stream]" if p.stream_week else ""
     )
 
 
@@ -524,11 +530,19 @@ def waivers_block(runs: list[LeagueRun]) -> Block:
     for run in runs:
         v = run.view
         s = v.ros.summary
+        # The IR housekeeping comes first: it frees a spot with nobody dropped.
+        for line in run.ir:
+            pid = line.player_id
+            rows.append([
+                v.league.name, "IR", v.name(pid), s["position"].get(pid, ""), s["team"].get(pid, ""),
+                "to IR (nobody dropped)" if line.kind == "move" else "activate him", "", "", "", line.text,
+            ])  # fmt: skip
         for i, p in enumerate(run.pickups, 1):
             gain = f"{p.expected_weeks:+.2f} wks survived" if v.league.chopped else f"{p.value:+.1f} value"
+            spot = rm.move_text(v, [p.drop] if p.drop else [], p.to_ir, verb=False)
             rows.append([
                 v.league.name, i, v.name(p.player_id), s["position"].get(p.player_id, ""),
-                s["team"].get(p.player_id, ""), v.name(p.drop) if p.drop else "open spot", gain,
+                s["team"].get(p.player_id, ""), spot, gain,
                 f"{p.this_week:+.1f}", p.bid.text(v.league.me.faab_left), p.note,
             ])  # fmt: skip
     for run in runs:

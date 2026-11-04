@@ -31,6 +31,14 @@ league sync, rest-of-season values, team value and needs, a trade analyzer and a
 
    Optional top-level numbers: `playoff_weight` (1.5), `starter_miss_rate` (0.06), `ir_weeks_out` (4),
    `survival_decay` (0.8), `survival_draws` (4000).
+
+   An optional `[roster]` table sets the caps behind the roster rules (see "Roster rules" below):
+
+   ```toml
+   [roster]
+   max_k = 1     # active kickers (default 1)
+   max_def = 1   # active defenses (default 1)
+   ```
 2. Share the Season sheet with the service account as an Editor, then `dfs season setup` and `dfs season sync`.
    `dfs season doctor` checks the structure.
 
@@ -144,12 +152,42 @@ little (3.47 to 3.42 in Bourbon, in-sample).
   - It keeps trades where Sam gains, the partner gains by our model, and the market calls it fair for them.
   - Ideas are ranked by Sam's gain.
 
+### Roster rules (`roster_rules.py`, `roster_moves.py`, `trade.settle_full`)
+
+The evaluators add up rest-of-season lineup points, so a second QB, K or DEF "beats" a bench RB: he covers
+every future bye and injury. That is right arithmetic and wrong roster management (Sam, 2026-11-04: "I would
+never drop a position player for a backup QB except on a bye week. K and DST, I never need more than 1."). So
+the rules sit under every place an add or a drop is chosen: the waivers, the chopped bid plan, the trade
+analyzer and finder (`trade.settle`), the "free move first", and the Sunday check.
+
+1. **Caps.** Active K at most `[roster] max_k`, active DEF at most `max_def` (1 each). Active QB at most the
+   number of slots that can start a QB, read from the league each time: 1 in a 1-QB league, 2 with a
+   SUPER_FLEX (so a superflex league still values a QB2). A league that starts more K / DEF than the cap
+   raises it to its slot count. Players in IR slots (Sleeper's `reserve` list) count toward no cap.
+2. **An add at a capped position is a swap there.** It sends out the incumbent (to an open IR slot if the
+   league lets him go), never an RB, WR or TE; the gain shown is the replacement over the incumbent. With
+   nobody active at the position (Choppa has no QB) the add fills the empty slot and the drop is the player
+   missed least.
+3. **Bye and injury cover counts only the coming scoring week.** A second QB / K / DEF is suggested only
+   when every active player there is on bye or OUT / IR / Doubtful that week. It is then a *bye-week
+   stream*: valued on that week alone (`Evaluator.scoped`), a position player may be dropped for him, and
+   the Waivers note says "bye-week stream: drop him after Week N". The next run suggests the drop again.
+4. **IR slots before any drop.** A player the league lets go to IR on the active roster, with a slot open, is
+   "move X to IR": it frees a spot with nobody dropped, and shows as its own line at the top of the league's
+   list (Waivers tab, `dfs season waivers`, the Sunday check). A reserve player whose tag has cleared is
+   flagged "IR slot holds a healthy player: activate him". Who is eligible comes from each league's
+   `reserve_allow_*` settings: IR, PUP and NFI always; Out, Doubtful, Sus, COV, DNR where the league allows.
+5. **Never a drop from an IR slot, and never a drop that leaves a starting slot empty.**
+
+A roster that already breaks a cap (two defenses, say) is not charged for it: the caps bite on what an add or
+a trade brings in.
+
 ### Waivers (`waivers.py`)
 
 - **Value.** Each of the best 40 free agents (plus each position's best, so a K or DEF is never missed) is
-  added to Sam's roster in place of the player he misses least: never a needed bye or injury cover, because
-  dropping one would cost lineup points. The full objective decides, with this week's gain shown apart. At
-  most two per position make the top list.
+  added to Sam's roster under the roster rules above: the player he misses least goes, an IR move comes
+  before a drop, and a QB / K / DEF add is a swap (or a bye-week stream). The full objective decides, with
+  this week's gain shown apart. At most two per position make the top list.
 - **Bid guide.** The league's own completed paid claims of the same position, for players Sleeper projected
   (for the claim's week, in this league's scoring) within 3 points a week of this one.
   - The range runs from the median to the 80th percentile of those winning bids.

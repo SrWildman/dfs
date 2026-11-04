@@ -25,6 +25,7 @@ import pandas as pd
 from dfs.player_join import normalize_name
 from dfs.season_long import consensus as cs
 from dfs.season_long import faab as faab_mod
+from dfs.season_long import roster_rules as rr
 from dfs.season_long import sleeper_league as sl
 from dfs.season_long.league_view import LeagueView
 from dfs.season_long.objective import Evaluator, Outcome
@@ -138,36 +139,111 @@ def _lineup_sum(ev: Evaluator, roster: list[str]) -> float:
     return sum(ev.lineup_total(roster, w) for w in ev.weeks)
 
 
-def settle(
-    roster: list[str], size_before: int, view: LeagueView, fa: list[str], ev: Evaluator | None = None
-) -> tuple[list[str], list[str], list[str]]:
-    """Legal roster after a trade: (roster, dropped, added).
+@dataclass
+class Settled:
+    """A legal roster after a trade or an add: the roster, who was dropped, who was added from the free
+    agents, and who moved into an open IR slot (nobody dropped for them)."""
 
-    With `ev`, the drop is the player whose loss costs the remaining lineups least and the add the free agent
-    (of the best `FA_CANDIDATES`) who adds most. Without it (the finder's quick screen), the lowest
-    rest-of-season points, never the last player at a position that has a slot of its own."""
-    # A roster already over Sleeper's size (a player on a reserve or taxi spot) keeps its size.
-    limit = max(roster_limit(view.league), size_before)
+    roster: list[str]
+    dropped: list[str]
+    added: list[str]
+    to_ir: list[str]
+
+
+def settle_full(
+    roster: list[str],
+    size_before: int,
+    view: LeagueView,
+    fa: list[str],
+    ev: Evaluator | None = None,
+    *,
+    before: list[str] | None = None,
+    reserve: set[str] | None = None,
+    exempt: frozenset[str] = frozenset(),
+    keep: frozenset[str] = frozenset(),
+) -> Settled:
+    """Legal roster after a trade or an add, under `roster_rules`.
+
+    With `ev`, a drop is the player whose loss costs the remaining lineups least and an add the free agent (of
+    the best `FA_CANDIDATES`) who adds most. Without it (the finder's quick screen), the lowest rest-of-season
+    points. Either way: players in IR slots are never dropped, nobody is dropped who leaves a starting slot
+    empty, an eligible player goes to an open IR slot before anyone is dropped, and a free agent is never
+    added at a position the roster is full at.
+
+    `before` is the roster this one comes from. It turns the position caps on (a QB / K / DEF over the cap
+    sends the one it costs least out, so an add there is a swap) and keeps a roster that already breaks a cap
+    from being charged for it. `exempt` positions skip the caps (a bye-week stream). `keep` players are never
+    the one dropped (a free agent asked about by name is reported with the spot he would take).
+    """
+    lg = view.league
     s = view.ros.summary
-    dedicated = {slot: view.league.slots.count(slot) for slot in set(view.league.slots)}
-    roster, dropped, added = list(roster), [], []
-    while len(roster) > limit:
-        droppable = [p for p in roster if s["injury_status"].get(p, "") not in {"IR", "PUP", "NFI"}] or roster
-        if ev is not None:
-            full = _lineup_sum(ev, roster)
-            worst = min(droppable, key=lambda p: full - _lineup_sum(ev, [q for q in roster if q != p]))
-        else:
-            count = pd.Series([s["position"].get(p, "") for p in roster]).value_counts()
-            spare = [
-                p
-                for p in droppable
-                if count.get(s["position"].get(p, ""), 0) > dedicated.get(s["position"].get(p, ""), 0)
-            ]
-            worst = min(spare or droppable, key=lambda p: float(s["ros_pts"].get(p, 0.0)))
-        roster.remove(worst)
-        dropped.append(worst)
+    caps = rr.position_caps(view)
+    dedicated = {slot: lg.slots.count(slot) for slot in set(lg.slots)}
+    roster, dropped, added, to_ir = list(roster), [], [], []
+    res = set(rr.reserve_of(view, roster, before)) if reserve is None else set(reserve) & set(roster)
+    active_cap = len(lg.slots) + lg.bench_slots
+    # A roster already over Sleeper's size (a taxi spot, say) keeps its size.
+    active_limit = max(active_cap, size_before - len(res))
+    total_limit = max(roster_limit(lg), size_before)
+    # Only a player already on the team can be moved to IR; a free agent is added to the active roster.
+    held_ids = set(before if before is not None else roster)
+
+    def act() -> list[str]:
+        return [p for p in roster if p not in res]
+
+    def lose_cost(p: str) -> float:
+        """What the remaining lineups lose without p (evaluator), else his rest-of-season points."""
+        if ev is None:
+            return float(s["ros_pts"].get(p, 0.0)) if p in s.index else 0.0
+        return _lineup_sum(ev, roster) - _lineup_sum(ev, [q for q in roster if q != p])
+
+    def make_room(candidates: list[str]) -> None:
+        """One of `candidates` leaves the active roster: to an open IR slot if he can go, else dropped."""
+        movable = (
+            [p for p in candidates if p in held_ids and rr.ir_eligible(view, p)]
+            if rr.ir_open(view, res)
+            else []
+        )
+        if movable:
+            pick = min(movable, key=lose_cost)
+            res.add(pick)
+            to_ir.append(pick)
+            return
+        candidates = [p for p in candidates if p not in keep] or candidates
+        pick = min(
+            candidates, key=lambda p: (lose_cost(p), float(s["ros_pts"].get(p, 0.0)) if p in s.index else 0.0)
+        )
+        roster.remove(pick)
+        dropped.append(pick)
+
+    if before is not None:
+        held = rr.counts(view, rr.active(view, before, set(rr.reserve_of(view, before))))
+        for pos in rr.CAPPED:
+            if pos in exempt:
+                continue
+            allowed = max(caps[pos], held.get(pos, 0))
+            while True:
+                here = [p for p in act() if rr.position(view, p) == pos]
+                if len(here) <= allowed:
+                    break
+                make_room(here)
+    while len(act()) > active_limit:
+        have = rr.counts(view, act())
+        pool = act()
+        spare = [
+            p for p in pool if have.get(rr.position(view, p), 0) > dedicated.get(rr.position(view, p), 0)
+        ]
+        make_room(spare or pool)
     pool = [p for p in fa if p not in roster]
-    while len(roster) < min(size_before, limit) and pool:
+    while len(roster) < min(size_before, total_limit) and len(act()) < active_cap and pool:
+        have = rr.counts(view, act())
+        pool = [
+            p
+            for p in pool
+            if (pos := rr.position(view, p)) not in caps or pos in exempt or have.get(pos, 0) < caps[pos]
+        ]
+        if not pool:
+            break
         if ev is not None:
             base = _lineup_sum(ev, roster)
             pick = max(fa_candidates(view, pool, roster), key=lambda p: _lineup_sum(ev, [*roster, p]) - base)
@@ -176,7 +252,21 @@ def settle(
         pool.remove(pick)
         roster.append(pick)
         added.append(pick)
-    return roster, dropped, added
+    return Settled(roster, dropped, added, to_ir)
+
+
+def settle(
+    roster: list[str],
+    size_before: int,
+    view: LeagueView,
+    fa: list[str],
+    ev: Evaluator | None = None,
+    *,
+    before: list[str] | None = None,
+) -> tuple[list[str], list[str], list[str]]:
+    """`settle_full` as (roster, dropped, added). Open-IR moves are not reported here: nobody is dropped."""
+    out = settle_full(roster, size_before, view, fa, ev, before=before)
+    return out.roster, out.dropped, out.added
 
 
 MAX_FREE_MOVES = 3
@@ -193,7 +283,7 @@ def best_swap(
     best: tuple[list[str] | None, str, str] = (None, "", "")
     best_gain = MIN_FREE_GAIN
     for pid in fa_candidates(view, fa, roster):
-        after, dropped, _ = settle([*roster, pid], len(roster), view, [], ev)
+        after, dropped, _ = settle([*roster, pid], len(roster), view, [], ev, before=roster)
         gain = _lineup_sum(ev, after) - base
         if gain > best_gain and dropped and dropped[0] != pid:
             best, best_gain = (after, pid, dropped[0]), gain
@@ -300,8 +390,10 @@ def evaluate_trade(
     fa = free_agents(view) if fa is None else fa
     new_me = [p for p in mine if p not in give.players] + get.players
     new_them = [p for p in theirs if p not in get.players] + give.players
-    new_me, me_drop, me_add = settle(new_me, len(mine), view, fa, ev)
-    new_them, th_drop, th_add = settle(new_them, len(theirs), view, [p for p in fa if p not in me_add], ev)
+    new_me, me_drop, me_add = settle(new_me, len(mine), view, fa, ev, before=mine)
+    new_them, th_drop, th_add = settle(
+        new_them, len(theirs), view, [p for p in fa if p not in me_add], ev, before=theirs
+    )
     faab_after = {me: ev.faab[me] - give.faab + get.faab, partner: ev.faab[partner] + give.faab - get.faab}
     # Whatever a team can do for free on waivers it can do with or without the trade, so both sides are
     # compared after their best free move (`best_swap`), before and after, whichever is worth more: the trade
