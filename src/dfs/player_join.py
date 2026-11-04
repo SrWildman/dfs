@@ -128,9 +128,18 @@ def dst_join_key(team: object) -> str:
 
 @dataclass
 class PlayerAlias:
+    """One override row: "this source's name for this DK player is `alias_name`".
+
+    The DK player is named by `dk_id` OR by `dk_name`. DK's `ID` column is the
+    per-slate draftable id and changes every week (Hollywood Brown was
+    43727757 in Week 1, 44758767 in Week 9), so an id row works for one slate
+    only. A `dk_name` row (DK's own spelling, matched after `normalize_name`)
+    keeps working every week; use it for anything meant to last."""
+
     dk_id: str
     source: str
     alias_name: str
+    dk_name: str = ""
 
 
 def load_player_aliases(path: Path | None = None) -> list[PlayerAlias]:
@@ -142,7 +151,10 @@ def load_player_aliases(path: Path | None = None) -> list[PlayerAlias]:
     if not path.exists():
         return []
     df = pd.read_csv(path, dtype=str).fillna("")
-    return [PlayerAlias(row["dk_id"], row["source"], row["alias_name"]) for _, row in df.iterrows()]
+    return [
+        PlayerAlias(row["dk_id"], row["source"], row["alias_name"], row.get("dk_name", ""))
+        for _, row in df.iterrows()
+    ]
 
 
 @dataclass
@@ -237,14 +249,17 @@ def join_source_to_dk(
 
     if unmatched_mask.any():
         aliases = [a for a in load_player_aliases() if a.source == source]
-        alias_by_id = {a.dk_id: a.alias_name for a in aliases}
-        if alias_by_id:
+        alias_by_id = {a.dk_id: a.alias_name for a in aliases if a.dk_id}
+        alias_by_dk_name = {normalize_name(a.dk_name): a.alias_name for a in aliases if a.dk_name}
+        if alias_by_id or alias_by_dk_name:
             src_by_alias_key: dict[str, pd.Series] = {}
             for _, row in src.iterrows():
                 src_by_alias_key.setdefault(normalize_name(row[source_name_col]), row)
             for idx in merged.index[unmatched_mask]:
                 dk_id = str(merged.at[idx, dk_id_col])
                 alias_name = alias_by_id.get(dk_id)
+                if alias_name is None:
+                    alias_name = alias_by_dk_name.get(normalize_name(merged.at[idx, dk_name_col]))
                 if alias_name is None:
                     continue
                 src_row = src_by_alias_key.get(normalize_name(alias_name))

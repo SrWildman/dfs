@@ -308,6 +308,36 @@ def test_expect_dst_false_leaves_defenses_out_of_the_report():
     assert "DST" not in without.by_position and without.pool_total == 1
 
 
+def test_alias_row_keyed_by_dk_name_survives_a_new_slates_ids(tmp_path, monkeypatch):
+    # DK's ID is per slate (changes weekly); a dk_name row must match whatever Id the player has.
+    alias_file = tmp_path / "aliases.csv"
+    alias_file.write_text("dk_id,source,alias_name,dk_name\n,test,Marquise Brown,Hollywood Brown\n")
+    monkeypatch.setattr("dfs.player_join.PLAYER_ALIASES_FILE", alias_file)
+    source = pd.DataFrame([{"src_name": "Marquise Brown", "src_team": "PHI", "src_pos": "WR", "proj": 3.3}])
+    for slate_id in ("43727757", "44758767"):
+        dk = _dk_frame([{"Id": slate_id, "Name": "Hollywood Brown", "Team": "PHI", "Position": "WR"}])
+        result = join_source_to_dk(
+            dk,
+            source,
+            source_name_col="src_name",
+            source_team_col="src_team",
+            source_position_col="src_pos",
+            source="test",
+        )
+        assert result.pool_matched == 1, slate_id
+        assert result.matched["proj"].tolist() == [3.3]
+
+
+def test_committed_alias_file_maps_the_nickname_players_by_dk_name():
+    from dfs.player_join import load_player_aliases
+
+    got = {(a.source, a.dk_name, a.alias_name) for a in load_player_aliases() if a.dk_name}
+    for source in ("sleeper", "snaps"):
+        assert (source, "Hollywood Brown", "Marquise Brown") in got
+        assert (source, "Bam Knight", "Zonovan Knight") in got
+    assert ("usage", "Hollywood Brown", "Marquise Brown") in got
+
+
 def test_committed_alias_file_resolves_joshua_palmer_for_snaps():
     from dfs.player_join import load_player_aliases
 

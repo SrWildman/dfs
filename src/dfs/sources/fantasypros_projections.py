@@ -36,8 +36,9 @@ publishes, real 0.0 for every row.
 Team codes mostly already match DraftKings' -- the one confirmed live
 drift is `JAC` (FantasyPros) vs `JAX` (DraftKings), handled by
 `player_join.TEAM_ALIASES`, not duplicated here. DST rows have no
-separate team-code column at all -- the `Player` cell IS the full team
-name ("Kansas City Chiefs"), converted here via `FULL_TEAM_NAME_TO_CODE`
+separate team-code column at all -- the `Player` cell is the full team
+name ("Kansas City Chiefs", or "Kansas City Chiefs KC DST" on the current
+page), converted here by `_dst_team_code` via `FULL_TEAM_NAME_TO_CODE`
 (from nflverse's own `teams.csv` `full`/`team` columns, hardcoded since
 all 32 are stable season to season -- verified against a real live
 FantasyPros DST pull, every name present here matched)."""
@@ -127,6 +128,29 @@ def _split_name_team(player_field: str) -> tuple[str, str]:
     team code as the field's last token for every offensive position."""
     parts = str(player_field).rsplit(" ", 1)
     return (parts[0], parts[1]) if len(parts) == 2 else (str(player_field), "")
+
+
+def _dst_team_code(player_field: object) -> str:
+    """The DST page's `Player` cell -> team code, for either label format.
+
+    FantasyPros has served both the bare full name ("Kansas City Chiefs")
+    and, since at least Week 7, "Philadelphia Eagles PHI DST" (full name,
+    team code, literal `DST`). Only the first was mapped, so every row of the
+    second came back with an empty Team and the join collapsed all 32 onto
+    one key (blank `FantasyProsPts` for every DST, Weeks 7-9). The full name
+    wins when it is present (it cannot be misread); otherwise the code
+    token, which `player_join.TEAM_ALIASES` normalizes (`JAC`, `WSH`...).
+    Returns "" when neither is recognized, never a guess."""
+    text = str(player_field).strip()
+    if text.upper().endswith(" DST"):
+        text = text[:-4].strip()
+    if text in FULL_TEAM_NAME_TO_CODE:
+        return FULL_TEAM_NAME_TO_CODE[text]
+    name, code = _split_name_team(text)
+    if name in FULL_TEAM_NAME_TO_CODE:
+        return FULL_TEAM_NAME_TO_CODE[name]
+    code = code.upper()
+    return code if code.isalpha() and 2 <= len(code) <= 3 else ""
 
 
 def _fetch_position_html(context, position_path: str, week: int) -> str:
@@ -237,7 +261,7 @@ def fetch_projections(week: int) -> pd.DataFrame:
                         "FantasyPros returned only 10 DST rows behind its registration wall -- "
                         "the saved session may have expired. Run `dfs auth fantasypros` again."
                     )
-                dst_df["Team"] = dst_df["Player"].map(FULL_TEAM_NAME_TO_CODE).fillna("")
+                dst_df["Team"] = dst_df["Player"].map(_dst_team_code)
                 dst_df["Name"] = dst_df["Player"]
                 stats = dst_df.apply(_dst_row_stats, axis=1, result_type="expand")
                 stats = _blank_unprojected_rows(stats, _DST_PAGE_FIELDS)

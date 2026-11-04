@@ -2294,7 +2294,10 @@ C4 (FantasyPros) and C5/C5b/C6/C7 continue in a later session.
   source's player rows onto DK's own `Id` by `(normalized name, team,
   position)`; DSTs match by team alone. A hand-maintained, committed
   alias file (`src/dfs/player_aliases.csv`, empty until a real miss needs
-  one) is the fallback for the residue normalization can't fix. Verified
+  one) is the fallback for the residue normalization can't fix. A row names
+  the DK player by `dk_id` (DK's draftable id, **new every slate**: good for
+  one week) or by `dk_name` (DK's own spelling, good every week): use `dk_name`
+  for anything meant to last. Verified
   against the real 2026-09-20 snapshot + a live Sleeper pull: 248/250
   (99.2%) rosterable-pool match rate; the two misses (Travis Hunter,
   dual-eligible WR/CB; Kyle Juszczyk, a fullback DK lists as RB) are both
