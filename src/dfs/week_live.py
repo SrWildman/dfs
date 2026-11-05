@@ -198,7 +198,21 @@ function setRunning(on) {
   chat.running = on; $('#chat-stop').disabled = !on; $('#chat-send').disabled = on;
   $('#chat-note').textContent = on ? 'Claude is working...' : '';
 }
-function render(ev) {
+/* "still running: <command>, 4m12s" under a tool that has not returned yet (live turns only). */
+const running = {};
+function since(ms) { const s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60); return m ? m + 'm' + String(s % 60).padStart(2, '0') + 's' : s + 's'; }
+function tick() {
+  const waiting = log.querySelector('.approval .btns button');
+  for (const r of Object.values(running)) {
+    const ms = Date.now() - r.t0;
+    r.line.hidden = !!waiting || ms < 3000;
+    r.line.textContent = 'still running: ' + (r.summary || r.name) + ', ' + since(ms);
+  }
+}
+setInterval(tick, 1000);
+function settle(id) { const r = running[id]; if (r) { r.line.remove(); delete running[id]; } }
+function settleAll() { for (const id of Object.keys(running)) settle(id); }
+function render(ev, live) {
   switch (ev.k) {
     case 'user': chat.bubble = null; add('user', ev.text); break;
     case 'session': chat.id = ev.id; break;
@@ -210,8 +224,12 @@ function render(ev) {
       chat.bubble = null;
       const d = el('details', 'chip'); const s = el('summary'); s.append(el('b', null, ev.name + ' '), document.createTextNode(ev.summary || ''));
       d.append(s, el('pre', null, ev.input || ''), el('pre', 'res'));
-      log.appendChild(d); chat.tools[ev.id] = d; scroll(); break; }
+      log.appendChild(d); chat.tools[ev.id] = d;
+      if (live) { const line = el('div', 'msg note ticker'); line.hidden = true; log.appendChild(line);
+        running[ev.id] = {name: ev.name, summary: ev.summary, t0: Date.now(), line}; }
+      scroll(); break; }
     case 'result': {
+      settle(ev.id);
       const d = chat.tools[ev.id];
       if (d) { d.querySelector('.res').textContent = ev.text; if (ev.error) d.classList.add('err'); }
       break; }
@@ -219,11 +237,17 @@ function render(ev) {
     case 'approval_closed': {
       const c = document.getElementById('appr-' + ev.id);
       if (c) { c.querySelector('.btns').replaceChildren(el('span', 'note', ev.allowed === false ? 'Denied.' : (ev.allowed ? 'Approved.' : 'Closed.'))); }
+      if (ev.allowed) for (const r of Object.values(running)) r.t0 = Date.now();  // the clock starts when it runs
       break; }
     case 'error': chat.bubble = null; add('error', ev.text); break;
-    case 'note': add('note', ev.text); break;
-    case 'done': chat.bubble = null;
-      add('note', ev.stopped ? 'Stopped.' : (ev.ok === false ? 'Finished with an error.' : 'Done' + (ev.cost != null ? ' ($' + Number(ev.cost).toFixed(3) + ')' : '') + '.')); break;
+    case 'note': chat.bubble = null; add('note', ev.text); break;
+    case 'done': chat.bubble = null; settleAll();
+      /* a turn that gave no answer says why, in red: never a silent Done */
+      if (ev.stopped) add('note', 'Stopped.');
+      else if (ev.problem) add('error', ev.problem);
+      else if (ev.ok === false) add('error', 'Finished with an error' + (ev.reason ? ' (' + ev.reason + ')' : '') + '.');
+      else add('note', 'Done' + (ev.cost != null ? ' ($' + Number(ev.cost).toFixed(3) + ')' : '') + '.');
+      break;
   }
 }
 function approvalCard(ev) {
@@ -240,7 +264,7 @@ function follow(turn, after) {
   chat.turn = turn; chat.last = after; chat.finished = false; setRunning(true);
   const es = new EventSource(url('/api/chat/stream?turn=' + turn + '&after=' + after));
   es.onmessage = (m) => {
-    const ev = JSON.parse(m.data); chat.last = ev.seq; render(ev);
+    const ev = JSON.parse(m.data); chat.last = ev.seq; render(ev, true);
     if (ev.k === 'done') { es.close(); chat.finished = true; setRunning(false); loadChats(); refreshSections(); }
   };
   es.onerror = () => { es.close(); if (!chat.finished) setTimeout(() => follow(turn, chat.last), 1000); };

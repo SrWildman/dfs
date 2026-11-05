@@ -1,8 +1,16 @@
 """The Week page's chat: Claude Code, on Sam's Mac, in the main checkout, driven from the browser.
 
 One turn is one `claude -p` process in Claude Code's stream-JSON mode (`--input-format stream-json
---output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio`). The first
-turn of a chat starts a session; each later turn is `--resume <session id>`, so a chat keeps its context.
+--output-format stream-json --verbose --include-partial-messages --replay-user-messages
+--permission-prompt-tool stdio`). The first turn of a chat starts a session; each later turn is
+`--resume <session id>`, so a chat keeps its context.
+
+- **A turn is read to the end.** The panel reads until the process exits, not to its first `result`: one
+  process can print several (a resumed chat's leftover, a later turn after a background task; `Translator`).
+  A turn with no answer (0 turns, no text, an error) ends with a red line saying why, never a silent Done.
+- **No background commands.** `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` (`chat_env`): a turn's process ends
+  with the turn, so a background command would die with it; long commands run in the foreground, and the
+  panel shows "still running: <command>, 4m12s" while one does.
 
 - **Sam's own login.** No API key is passed (an `ANTHROPIC_API_KEY` in the environment is dropped so the
   login is what runs), `--bare` is never used (it skips CLAUDE.md), and nothing is stored in the repo.
@@ -134,6 +142,7 @@ def claude_command(args: StartArgs, claude: str = "claude") -> list[str]:
         "stream-json",
         "--verbose",
         "--include-partial-messages",
+        "--replay-user-messages",  # Claude Code says when it has read Sam's message (see `Translator`)
         "--permission-prompt-tool",
         "stdio",
         "--model",
@@ -148,12 +157,19 @@ def claude_command(args: StartArgs, claude: str = "claude") -> list[str]:
     return cmd
 
 
+NO_BACKGROUND_ENV = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"
+
+
 def chat_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """The environment for Claude Code: this process's, marked as the chat for the run lock, with no API key
-    (so Sam's login is what runs)."""
+    (so Sam's login is what runs) and no background commands: a turn's process ends with the turn, so a
+    command left running in the background would die with it (Week 9: `dfs season trades --all` did).
+    With this set, Claude Code's Bash tool has no `run_in_background`; a long command runs in the
+    foreground."""
     env = run_lock.child_env("chat", base)
     for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
         env.pop(key, None)
+    env[NO_BACKGROUND_ENV] = "1"
     return env
 
 
@@ -390,15 +406,22 @@ class ChatManager:
         return turn
 
     def _drive(self, turn: Turn, text: str, first: bool) -> None:
+        """Send Sam's message, then read until the process exits. Stdin (the only way to answer an approval)
+        stays open until the turn has settled: the answer to his message has arrived and nothing is still
+        waiting on Claude Code's side (an approval, a background task). Closing it then lets the process exit,
+        and anything it still prints (a later turn after a background task) is shown too."""
         proc = turn.process
         assert proc is not None
-        translator = Translator(turn)
+        message_uuid = str(uuid.uuid4())
+        translator = Translator(turn, message_uuid)
+        closed = False
         try:
-            proc.write({"type": "user", "message": {"role": "user", "content": text}})
+            proc.write({"type": "user", "uuid": message_uuid, "message": {"role": "user", "content": text}})
             for event in proc.events():
                 translator.handle(event, proc)
-                if translator.finished:
-                    break
+                if not closed and event.get("type") == "result" and translator.settled:
+                    proc.close_stdin()
+                    closed = True
         except Exception as exc:  # noqa: BLE001
             turn.emit({"k": "error", "text": f"The chat stream failed: {type(exc).__name__}"})
         finally:
@@ -423,6 +446,10 @@ class ChatManager:
                 turn.pending.pop(request_id, None)
                 turn.emit({"k": "approval_closed", "id": request_id})
             last = {"k": "done", "stopped": turn.stopping, **translator.summary}
+            if not turn.stopping:
+                problem = translator.problem()
+                if problem:
+                    last.update(ok=False, problem=problem)
             self._remember(turn, text, first, last)
             turn.finish(last)
             self.log(f"chat turn {turn.id} ended: stopped={turn.stopping} ok={translator.ok}")
@@ -496,25 +523,67 @@ class ChatManager:
 
 
 class Translator:
-    """Claude Code's stream-json events -> the page's events (`k`: session, text, tool, result, approval)."""
+    """Claude Code's stream-json events -> the page's events (`k`: session, text, tool, result, approval).
 
-    def __init__(self, turn: Turn):
+    One process can print **more than one `result`**, and the first is not always the answer to Sam's
+    message. On `--resume` of a chat whose last turn left a background command behind, Claude Code first
+    reports that command as stopped and prints a zero-turn `result` (no API call, the chat's old cost)
+    *before* it reads his message (reproduced on 2.1.318: Week 9's "is it done?" got exactly that and the
+    panel ended the turn on it). So the turn's answer is the first `result` after Claude Code has replayed
+    his message (`--replay-user-messages`, matched by the uuid it was sent with), or after any assistant
+    output, or an error; a zero-turn `result` before any of those is skipped. A background task finishing
+    later starts another turn with its own `result`; every one is read and its text shown."""
+
+    def __init__(self, turn: Turn, message_uuid: str = ""):
         self.turn = turn
-        self.finished = False
+        self.message_uuid = message_uuid
+        self.finished = False  # the answer to Sam's message has arrived
         self.ok = True
         self.summary: dict[str, Any] = {}
+        self.picked_up = False  # Claude Code replayed Sam's message: it has read it
+        self.background: set[str] = set()  # background tasks Claude Code says are running
+        self.turns_run = 0  # the most num_turns any answering result reported
+        self.turns_known = False
+        self.texts = 0
+        self.skipped = 0  # zero-turn results that came before his message was read
+        self._output_since_result = False
         self._streamed: set[str] = set()
         self._message_id = ""
 
+    @property
+    def settled(self) -> bool:
+        """Sam's message is answered and nothing still needs stdin: no approval, no background task."""
+        if self.turn.stopping and self.finished:
+            return True
+        return self.finished and not self.turn.pending and not self.background
+
+    def problem(self) -> str:
+        """Why the turn did not give Sam an answer, or "" when it did. Shown in red: never a silent Done."""
+        if not self.finished:
+            return "No answer: Claude Code ended without finishing this turn."
+        reason = str(self.summary.get("reason") or "")
+        if not self.ok or (reason and reason != "success"):
+            return f"Claude Code ended this turn with an error ({reason or 'is_error'})."
+        if self.turns_known and self.turns_run == 0:
+            return "No answer: Claude Code returned without running this turn (0 turns). Send it again."
+        if not self.texts:
+            return "No answer: Claude Code finished this turn without any text."
+        return ""
+
     def handle(self, event: dict, proc: Process) -> None:
         kind = event.get("type")
-        if kind == "system" and event.get("subtype") == "init":
-            self._session(event.get("session_id"))
+        if kind == "system":
+            self._system(event)
         elif kind == "stream_event":
             self._stream(event.get("event") or {})
         elif kind == "assistant":
+            self._output_since_result = True
             self._assistant(event.get("message") or {})
         elif kind == "user":
+            if event.get("isReplay"):
+                if not self.message_uuid or event.get("uuid") in (None, self.message_uuid):
+                    self.picked_up = True
+                return
             self._tool_results((event.get("message") or {}).get("content"))
         elif kind == "control_request":
             self._control(event, proc)
@@ -523,17 +592,45 @@ class Translator:
             if self.turn.pending.pop(request_id, None) is not None:
                 self.turn.emit({"k": "approval_closed", "id": request_id})
         elif kind == "result":
+            self._result(event)
+
+    def _system(self, event: dict) -> None:
+        subtype = event.get("subtype")
+        if subtype == "init":
             self._session(event.get("session_id"))
-            self.ok = not event.get("is_error")
-            self.summary = {
-                "ok": self.ok,
-                "cost": event.get("total_cost_usd"),
-                "turns": event.get("num_turns"),
-                "reason": event.get("subtype"),
-            }
-            if event.get("is_error") and event.get("result"):
-                self.turn.emit({"k": "error", "text": str(event["result"])[:600]})
-            self.finished = True
+        elif subtype == "background_tasks_changed":
+            tasks = event.get("tasks") or []
+            self.background = {str(t.get("task_id")) for t in tasks if isinstance(t, dict)}
+        elif subtype == "task_started" and event.get("is_backgrounded"):
+            self.background.add(str(event.get("task_id")))
+        elif subtype == "task_notification":
+            self.background.discard(str(event.get("task_id")))
+            summary = str(event.get("summary") or "").strip()
+            status = str(event.get("status") or "").strip()
+            self.turn.emit({"k": "note", "text": f"Background task {status}: {summary}".strip(" :")})
+
+    def _result(self, event: dict) -> None:
+        self._session(event.get("session_id"))
+        turns = event.get("num_turns")
+        is_error = bool(event.get("is_error"))
+        before_message = not (self.picked_up or self._output_since_result or is_error)
+        self._output_since_result = False
+        if before_message and turns == 0:
+            self.skipped += 1  # the resume artefact (see the class docstring): not this turn's answer
+            return
+        self.ok = not is_error
+        if isinstance(turns, int):
+            self.turns_known = True
+            self.turns_run = max(self.turns_run, turns)
+        self.summary = {
+            "ok": self.ok,
+            "cost": event.get("total_cost_usd"),
+            "turns": turns,
+            "reason": event.get("subtype"),
+        }
+        if is_error and event.get("result"):
+            self.turn.emit({"k": "error", "text": str(event["result"])[:600]})
+        self.finished = True
 
     def _session(self, session_id: Any) -> None:
         if session_id and self.turn.chat_id != session_id:
@@ -548,6 +645,8 @@ class Translator:
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text"):
                 self._streamed.add(self._message_id)
+                self._output_since_result = True
+                self.texts += 1
                 self.turn.emit({"k": "text", "delta": delta["text"]})
             elif delta.get("type") == "thinking_delta":
                 self.turn.emit({"k": "thinking"})
@@ -556,6 +655,7 @@ class Translator:
         message_id = str(message.get("id") or "")
         for block in message.get("content") or []:
             if block.get("type") == "text" and message_id not in self._streamed and block.get("text"):
+                self.texts += 1
                 self.turn.emit({"k": "text", "delta": block["text"]})
             elif block.get("type") == "tool_use":
                 tool_input = block.get("input") or {}
@@ -632,7 +732,7 @@ def _compact(events: list[dict]) -> list[dict]:
                 out[-1]["delta"] += event["delta"]
             else:
                 out.append({"k": "text", "delta": event["delta"]})
-        elif kind in ("tool", "result", "error"):
+        elif kind in ("tool", "result", "error", "note"):
             out.append({k: v for k, v in event.items() if k != "seq"})
         elif kind == "approval_closed" and "allowed" in event:
             out.append({"k": "note", "text": "approved" if event["allowed"] else "denied"})
