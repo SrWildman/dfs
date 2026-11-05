@@ -72,6 +72,53 @@ def test_a_free_lock_is_taken_and_released():
         pass
 
 
+def test_the_lock_file_is_removed_when_a_run_ends_normally_with_an_error_or_with_ctrl_c():
+    """Week 9: `data/.run.lock` still named `dfs pool add` (pid 67700) long after it finished."""
+    path = run_lock.lock_path()
+    with run_lock.hold("dfs pool add"):
+        assert json.loads(path.read_text())["command"] == "dfs pool add"
+    assert not path.exists()
+    for exc in (RuntimeError("boom"), KeyboardInterrupt(), SystemExit(2)):
+        with pytest.raises(type(exc)), run_lock.hold("dfs sync"):
+            assert path.exists()
+            raise exc
+        assert not path.exists(), f"left behind after {type(exc).__name__}"
+    assert run_lock.current_holder() is None
+
+
+def test_a_run_that_lets_go_never_removes_a_newer_holders_file():
+    """If the file was replaced while we held ours (a dead-owner replacement elsewhere), it is not ours to
+    remove."""
+    path = run_lock.lock_path()
+    with run_lock.hold("dfs sync"):
+        path.unlink()
+        fd = _other_holder(os.getppid(), "dfs week close")
+    try:
+        assert path.exists() and run_lock.current_holder().command == "dfs week close"
+    finally:
+        os.close(fd)
+
+
+def test_a_lock_taken_on_a_file_that_was_just_removed_is_retried_on_the_new_one(monkeypatch):
+    """Removing the file on release opens a race: a run that opened the old file, then flocks it after the
+    holder let go, holds a lock on nothing. `_try_flock` sees the path names another file and tries again."""
+    path = run_lock.lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    real_flock, swapped = fcntl.flock, []
+
+    def flock(fd, op):
+        if not swapped:  # between our open and our flock, the holder removed it and a new run made another
+            swapped.append(True)
+            path.unlink()
+            path.write_text("")
+        return real_flock(fd, op)
+
+    monkeypatch.setattr(run_lock.fcntl, "flock", flock)
+    fd = run_lock._try_flock(path)
+    assert fd is not None and os.fstat(fd).st_ino == os.stat(path).st_ino
+    os.close(fd)
+
+
 def test_a_second_writer_is_refused_and_told_what_is_running():
     fd = _other_holder(os.getppid(), "dfs week close", origin="chat")
     try:
@@ -181,3 +228,19 @@ def test_the_cli_holds_the_lock_while_a_writer_runs():
     runner.invoke(app, ["sync"])
     assert seen[-1] is not None and seen[-1].pid == os.getpid() and seen[-1].command == "dfs sync"
     assert run_lock.current_holder() is None  # released afterwards
+    assert not run_lock.lock_path().exists()  # and the file is gone
+
+
+def test_the_cli_removes_the_lock_file_when_a_writer_fails():
+    app = typer.Typer(cls=PromptingGroup)
+
+    @app.command()
+    def sync():
+        raise RuntimeError("the sheet said no")
+
+    @app.command()
+    def status():
+        pass
+
+    assert CliRunner().invoke(app, ["sync"]).exit_code != 0
+    assert not run_lock.lock_path().exists()

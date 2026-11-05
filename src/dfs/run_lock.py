@@ -8,7 +8,9 @@ from where, and exits. There is no `--force`: wait, or stop the other one.
 - **The lock is an OS file lock** (`flock`) on `data/.run.lock`; the file's text says who holds it (pid, the
   command, when it started, and the origin: `terminal`, `chat` or `button`). The OS drops the lock when the
   holder dies, so a crashed run never leaves it stuck; a holder whose pid is dead but whose lock somehow
-  survives (an orphaned child that inherited the descriptor) is cleared and replaced.
+  survives (an orphaned child that inherited the descriptor) is cleared and replaced. A run that ends --
+  normally, with an error or with Ctrl-C -- removes the file as it lets go (a `finally`), so no stale
+  `.run.lock` is left naming a finished command; only a killed process leaves one, which the next run ignores.
 - **Which commands take it** is `WRITERS`; the ones that only read are `READ_ONLY` (status, doctor, week page,
   ...). `tests/test_run_lock.py` fails if a registered command is in neither, so a new command has to say.
 - **Children inherit it.** A process that holds the lock exports `DFS_RUN_LOCK_PID`; a `dfs` it starts (`week
@@ -219,15 +221,27 @@ def _read_holder(path: Path) -> Holder | None:
 
 
 def _try_flock(path: Path) -> int | None:
-    """Open the lock file and take the lock without waiting; the descriptor, or None when it is held."""
+    """Open the lock file and take the lock without waiting; the descriptor, or None when it is held.
+
+    A holder removes the file when it lets go (`hold`), so a lock taken on a file that was removed (or
+    replaced) between our open and our flock is a lock on nothing: it is dropped and the open is tried again
+    on whatever the path names now."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    for _ in range(5):
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return None
+        try:
+            same = os.fstat(fd).st_ino == os.stat(path).st_ino
+        except OSError:
+            same = False
+        if same:
+            return fd
         os.close(fd)
-        return None
-    return fd
+    return None
 
 
 def current_holder() -> Holder | None:
@@ -274,6 +288,7 @@ def hold(command: str, *, origin_name: str | None = None):
         if fd is None:
             raise LockHeld(holder)
     previous = os.environ.get(INHERIT_ENV)
+    mine = os.fstat(fd).st_ino
     try:
         record = {
             "pid": os.getpid(),
@@ -290,6 +305,11 @@ def hold(command: str, *, origin_name: str | None = None):
             os.environ.pop(INHERIT_ENV, None)
         else:
             os.environ[INHERIT_ENV] = previous
+        # Remove the file while still holding the lock (only if it is still ours), so a finished run, a
+        # failed one or one stopped by Ctrl-C leaves no `.run.lock` claiming a pid that is gone.
+        with suppress(OSError):
+            if os.stat(path).st_ino == mine:
+                path.unlink()
         with suppress(OSError):
             fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)

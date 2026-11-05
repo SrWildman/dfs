@@ -208,7 +208,9 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   token and a localhost `Host`), with **Claude Code docked on the right** (`week_chat.py`: `claude -p` in stream-JSON mode in the main
   checkout under Sam's own login; model / effort / New chat / Stop / this week's chats; a call that needs approval shows on the page as
   Approve / Deny with exactly what will run, nothing is auto-approved, `bypassPermissions` is never used, "auto" is a switch he turns
-  on), an **Ask** button beside every phrase, **run buttons** for every command with live output (`week_jobs.py`: one job at a time,
+  on; no background commands (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`), a turn is read until its process exits (it can print several
+  `result`s; the answer is the first after Claude Code replays Sam's message), a turn with no answer ends in a red line; after any chat
+  change run `python scripts/chat_smoke.py`, three turns against real Claude, not in pytest), an **Ask** button beside every phrase, **run buttons** for every command with live output (`week_jobs.py`: one job at a time,
   Stop, history; `week new` / `week close` / `lineups clear` / `pool clear` / `setup ...` need the command typed out; a closed week is
   read only), a **check this contest** form and the **file drop zone** (`week_drops.py`: DK's entries file at lock, the history export
   and standings at close; only .csv / .zip, size and zip-bomb limits, existing parsers only, filed into Downloads where `entries record`
@@ -217,7 +219,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - **The run lock** (`run_lock.py`): `data/.run.lock` makes one command that writes (sync, week new/close, setup *, lineups suggest,
   entries record/fill, bankroll *, season sync, contests plan, ...; `run_lock.WRITERS`) run at a time across the terminal, the chat and
   the buttons. A second writer is refused with what is running, since when and from where (terminal / chat / button); no `--force`.
-  Read-only commands (status, doctor, week page, ...; `run_lock.READ_ONLY`) never take it; a dead owner's lock is replaced; a `dfs`
+  Read-only commands (status, doctor, week page, ...; `run_lock.READ_ONLY`) never take it; a dead owner's lock is replaced; a run removes the file as it ends (normally, failing or Ctrl-C); a `dfs`
   started by the holder (`week close --research`'s children) passes. A new command must be added to one of the two sets (a test fails).
 - **Contest tiers** (`contest_tiers.py`, evidence in `docs/CONTESTS.md`): rules, not a lobby list. A / B / C / Avoid from a contest's
   format, fee, field, entries per user, prize pool and min-cash, with the rake, a reason and flags; the Weekly Budget splits about

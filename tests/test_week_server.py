@@ -128,14 +128,21 @@ def delta(text, mid="m1"):
     ]
 
 
-def result(session="sess-1", error=False):
+def result(session="sess-1", error=False, turns=1, cost=0.01, subtype="success"):
     return {
         "type": "result",
-        "subtype": "success",
+        "subtype": subtype,
         "is_error": error,
+        "num_turns": turns,
         "session_id": session,
-        "total_cost_usd": 0.01,
+        "total_cost_usd": cost,
     }
+
+
+def replay(proc):
+    """What `--replay-user-messages` prints once Claude Code has read the page's message (its uuid echoed)."""
+    sent = proc.wait_for(lambda m: m.get("type") == "user")
+    return {"type": "user", "isReplay": True, "uuid": sent["uuid"], "message": sent["message"]}
 
 
 def say_hello(proc):
@@ -444,6 +451,142 @@ def test_the_chat_environment_drops_api_keys(monkeypatch):
     monkeypatch.setenv(run_lock.INHERIT_ENV, "99")
     env = week_chat.chat_env()
     assert "ANTHROPIC_API_KEY" not in env and run_lock.INHERIT_ENV not in env
+
+
+def test_the_chat_process_runs_commands_in_the_foreground_and_replays_the_message(make):
+    """Week 9: a background `dfs season trades --all` died with its turn. The chat's Claude Code has no
+    background commands, and is asked to echo Sam's message so the panel knows when it was read."""
+    c = make()
+    c.post("/api/chat/send", {"text": "hi"})
+    c.sse(f"/api/chat/stream?turn={c.chat.turn.id}&after=-1", until=lambda e: e["k"] == "done")
+    assert c.runner.started[0].env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] == "1"
+    cmd = week_chat.claude_command(c.runner.started[0])
+    assert "--replay-user-messages" in cmd
+    sent = c.runner.processes[0].written[0]
+    assert sent["type"] == "user" and sent["uuid"] and sent["message"]["content"] == "hi"
+
+
+def test_a_resumed_chats_leftover_zero_turn_result_does_not_end_the_turn(make):
+    """The Week 9 "is it done?" failure, as real Claude Code 2.1.318 printed it: on --resume it first reports
+    the last turn's background command as stopped and prints a zero-turn result with the chat's old cost,
+    and only then reads the message. The panel ended the turn there: no text, 0 turns, the old cost."""
+    seen = {}
+
+    def script(proc):
+        proc.emit(
+            {
+                "type": "system",
+                "subtype": "task_notification",
+                "task_id": "b37",
+                "status": "stopped",
+                "summary": "Background shell command didn't finish before the previous session ended",
+            }
+        )
+        proc.emit(init())
+        proc.emit(result(turns=0, cost=0.3258))
+        time.sleep(0.1)
+        seen["stdin_closed_after_leftover"] = proc.stdin_closed
+        proc.emit(replay(proc))
+        for ev in delta("Not yet: it was stopped."):
+            proc.emit(ev)
+        proc.emit(result(turns=1, cost=0.41))
+
+    c = make(script)
+    c.post("/api/chat/send", {"text": "is it done?", "chat_id": "sess-1"})
+    events = c.sse(f"/api/chat/stream?turn={c.chat.turn.id}&after=-1", until=lambda e: e["k"] == "done")
+    assert seen["stdin_closed_after_leftover"] is False  # still open: the message had not been read yet
+    assert "".join(e["delta"] for e in events if e["k"] == "text") == "Not yet: it was stopped."
+    done = events[-1]
+    assert done["ok"] is True and done["turns"] == 1 and done["cost"] == 0.41 and "problem" not in done
+    assert any(e["k"] == "note" and "didn't finish" in e["text"] for e in events)
+    assert c.runner.processes[0].stdin_closed  # closed once the answer arrived, so the process exits
+
+
+def test_a_stream_with_two_results_keeps_the_turn_open_and_shows_both(make):
+    """A background task finishing starts another turn in the same process: its text is shown, and the turn
+    ends at the process's end, not at the first result."""
+    seen = {}
+
+    def script(proc):
+        proc.emit(init())
+        proc.emit(replay(proc))
+        proc.emit({"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "t1"}]})
+        for ev in delta("Started it.", "m1"):
+            proc.emit(ev)
+        proc.emit(result(turns=2, cost=0.02))
+        time.sleep(0.1)
+        seen["stdin_closed_after_first"] = proc.stdin_closed
+        seen["done_after_first"] = c.chat.turn.done
+        proc.emit({"type": "system", "subtype": "task_notification", "task_id": "t1", "status": "completed"})
+        proc.emit({"type": "system", "subtype": "background_tasks_changed", "tasks": []})
+        for ev in delta("It finished: 12 ideas.", "m2"):
+            proc.emit(ev)
+        proc.emit(result(turns=3, cost=0.03))
+
+    c = make(script)
+    c.post("/api/chat/send", {"text": "run it"})
+    events = c.sse(f"/api/chat/stream?turn={c.chat.turn.id}&after=-1", until=lambda e: e["k"] == "done")
+    assert seen == {"stdin_closed_after_first": False, "done_after_first": False}
+    assert "".join(e["delta"] for e in events if e["k"] == "text") == "Started it.It finished: 12 ideas."
+    assert [e["k"] for e in events].count("done") == 1
+    assert events[-1]["ok"] is True and events[-1]["cost"] == 0.03
+    assert c.runner.processes[0].stdin_closed
+
+
+def test_a_zero_turn_answer_ends_with_a_red_line_never_a_silent_done(make):
+    def script(proc):
+        proc.emit(init())
+        proc.emit(replay(proc))
+        proc.emit(result(turns=0))
+
+    c = make(script)
+    c.post("/api/chat/send", {"text": "is it done?"})
+    events = c.sse(f"/api/chat/stream?turn={c.chat.turn.id}&after=-1", until=lambda e: e["k"] == "done")
+    done = events[-1]
+    assert done["ok"] is False and "0 turns" in done["problem"]
+    # the transcript keeps it, so a reopened chat says so too
+    saved = c.get("/api/chat/transcript?id=sess-1")[1]["events"][-1]
+    assert saved["k"] == "done" and "0 turns" in saved["problem"]
+    # and the panel draws `problem` (or any ok=false) as an error line, not the grey Done
+    assert "else if (ev.problem) add('error', ev.problem);" in week_live.JS
+    assert "else if (ev.ok === false) add('error'" in week_live.JS
+
+
+def test_no_text_or_a_non_success_reason_is_a_problem_too(make):
+    def silent(proc):
+        proc.emit(init())
+        proc.emit(replay(proc))
+        proc.emit({"type": "assistant", "message": {"id": "m1", "content": []}})
+        proc.emit(result(turns=1))
+
+    c = make(silent)
+    c.post("/api/chat/send", {"text": "x"})
+    done = c.sse(f"/api/chat/stream?turn={c.chat.turn.id}&after=-1", until=lambda e: e["k"] == "done")[-1]
+    assert done["ok"] is False and "without any text" in done["problem"]
+
+    def maxed(proc):
+        proc.emit(init())
+        proc.emit(replay(proc))
+        for ev in delta("partial"):
+            proc.emit(ev)
+        proc.emit(result(turns=30, error=True, subtype="error_max_turns"))
+
+    c.chat.runner = FakeRunner(maxed)
+    c.post("/api/chat/send", {"text": "y", "chat_id": "sess-1"})
+    done = c.sse(f"/api/chat/stream?turn={c.chat.turn.id}&after=-1", until=lambda e: e["k"] == "done")[-1]
+    assert done["ok"] is False and "error_max_turns" in done["problem"]
+
+
+def test_a_process_that_dies_without_an_answer_is_not_a_silent_done(make):
+    c = make(lambda proc: proc.emit(init()))
+    c.post("/api/chat/send", {"text": "x"})
+    done = c.sse(f"/api/chat/stream?turn={c.chat.turn.id}&after=-1", until=lambda e: e["k"] == "done")[-1]
+    assert done["ok"] is False and done["problem"].startswith("No answer")
+
+
+def test_the_panel_shows_how_long_a_tool_has_been_running():
+    assert "'still running: ' + (r.summary || r.name) + ', ' + since(ms)" in week_live.JS
+    assert "render(ev, true)" in week_live.JS  # only a live turn ticks; a reopened transcript does not
 
 
 def _ask_to_run(tool_use_id="tu1"):
@@ -1047,6 +1190,32 @@ def test_a_button_job_holds_the_lock_and_the_chats_command_is_told_so(monkeypatc
         assert "`dfs sync` is running" in str(refused.value) and "a Week page button" in str(refused.value)
     finally:
         os.close(fd)
+
+
+def test_the_lock_file_is_gone_after_a_job_that_held_it(make, tmp_path):
+    """A run button's job is a real process that takes the run lock (here on a tmp data dir); once it ends,
+    normally or by failing, no `.run.lock` is left naming it (Week 9 left `dfs pool add`, pid 67700)."""
+    data = tmp_path / "jobdata"
+    helper = tmp_path / "takes_lock.py"
+    helper.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from dfs import paths, run_lock\n"
+        f"paths.DATA_DIR = Path({str(data)!r})\n"
+        "with run_lock.hold('dfs pool add'):\n"
+        "    print('held', run_lock.lock_path().exists(), flush=True)\n"
+        "    if '--fail' in sys.argv:\n"
+        "        raise SystemExit(3)\n"
+    )
+    src = Path(week_chat.__file__).resolve().parents[1]
+    run = " ".join(shlex.quote(str(p)) for p in (sys.executable, helper))
+    body = f'PYTHONPATH={shlex.quote(str(src))} exec {run} "$@"'
+    for args, code in (({}, 0), ({"fail": True}, 3)):
+        c = make(python_body=body + (" --fail" if args else ""))
+        _, started = c.post("/api/jobs/start", {"command": "dfs status"})
+        job = wait_job(c, started["job"])
+        assert "held True" in job.lines and job.returncode == code, job.lines
+        assert not (data / ".run.lock").exists()
 
 
 def test_the_page_reloads_its_sections_when_any_command_rebuilds_the_page_file(make, tmp_path):
