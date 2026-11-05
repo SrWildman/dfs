@@ -16,7 +16,7 @@ from dfs import commands_doc, runlog, week_inputs, week_page, week_today, week_t
 from dfs.cli import app
 
 SAT = datetime(2026, 11, 7, 10, 0).astimezone()  # a Saturday, local time; Week 9 of 2026
-SECTION_IDS = ["contest-plan", "cash", "gpp", "unknowns", "sunday", "season", "last-week"]
+SECTION_IDS = ["contest-plan", "cash", "gpp", "sunday", "season", "last-week", "changes"]
 
 
 def write_json(path, payload):
@@ -316,9 +316,10 @@ def test_every_section_says_not_run_yet_on_an_empty_data_dir(tmp_path):
     page = week_page.render(inp, registered=set(commands_doc.all_commands()))
     for section_id in SECTION_IDS:
         assert f'id="{section_id}"' in page
-    assert 'id="today"' in page and 'id="tools"' in page
+    assert 'id="progress"' in page and 'id="brief"' in page and 'id="tools"' in page
     assert page.count("Not run yet") >= len(SECTION_IDS)
-    assert "Nothing is synced" in page  # and Today says so too
+    assert "Nothing is synced" in page  # the stale line says so too
+    assert 'id="board"' in page and 'id="explorer-card"' in page  # both say "Not run yet"
 
 
 def test_every_section_renders_from_fixture_outputs(full):
@@ -353,9 +354,12 @@ def test_every_section_renders_from_fixture_outputs(full):
 
 
 def test_the_page_is_self_contained(full):
+    """No external loads: the Explorer's data and script are inline (a JSON block and one script)."""
     page = week_page.render(full)
     assert "http://" not in page and "https://" not in page
-    assert "<script" not in page and "<link" not in page and " src=" not in page
+    assert "<link" not in page and " src=" not in page and "import(" not in page and "fetch(" not in page
+    scripts = re.findall(r"<script([^>]*)>", page)
+    assert scripts and all("src" not in attrs for attrs in scripts)
 
 
 def test_calibrated_cash_is_labelled_as_such(full):
@@ -466,12 +470,13 @@ def test_every_phrase_on_the_page_is_one_claude_code_knows_and_every_command_exi
                 assert spec.phrase is None  # D's commands get their phrases in CLAUDE.md when they land
 
 
-def test_today_shows_the_day_and_each_steps_last_run(full):
-    runs = [runlog.Run(SAT - timedelta(hours=2), "dfs sync", True)]
-    page = html.unescape(week_page.today_html(replace(full, runs=runs), set(commands_doc.all_commands())))
-    assert "Today: Saturday, build and enter" in page
-    assert 'Say <code class="say">"build me lineups"</code>' in page
-    assert "last run" in page and "no run logged" in page
+def test_the_progress_strip_and_the_next_step_come_from_the_real_state(full):
+    page = html.unescape(week_page.render(full, registered=set(commands_doc.all_commands())))
+    strip = re.search(r'<section class="prog" id="progress".*?</section>', page, re.S).group(0)
+    assert strip.count('class="step ') == 6
+    assert 'class="step next"' in strip  # exactly one next step
+    assert strip.count('class="step next"') == 1
+    assert 'Say <code class="say">"' in page.split('id="brief"')[1].split("</section>")[0]
 
 
 def test_stale_items():
@@ -553,7 +558,9 @@ def test_the_launcher_state_the_page_builds_comes_from_local_files():
     )
     assert state.game_started and not state.games_finished and state.pool_count == 12
     assert state.freshest_sync_age_hours == pytest.approx(3.0)
-    assert [a.command for a in week_page.launcher.suggest_actions(state)][0] == "dfs sync --live"
+    from dfs import launcher
+
+    assert [a.command for a in launcher.suggest_actions(state)][0] == "dfs sync --live"
 
 
 # -- the tool list --------------------------------------------------------------------------------------

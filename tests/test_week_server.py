@@ -357,7 +357,8 @@ def test_the_static_page_has_no_live_parts():
     html = week_page.render(
         week_page.gather(SEASON, WEEK, datetime(2026, 11, 7, 10).astimezone()), registered=set(), tools=[]
     )
-    assert "<aside" not in html and 'class="ask"' not in html and "<script" not in html
+    assert "<aside" not in html and 'class="ask"' not in html and 'id="chat"' not in html
+    assert "/api/" not in html and "dfs-token" not in html  # the Explorer's inline script is not a live part
 
 
 def test_augment_only_touches_say_phrases():
@@ -1246,3 +1247,66 @@ def test_a_turns_process_that_will_not_exit_is_terminated_by_pid(make):
     c.post("/api/chat/send", {"text": "hi"})
     wait_turn_done(c.chat.turn, timeout=15)
     assert c.chat.runner.processes[0].signals == [signal.SIGTERM]
+
+
+# -- the page's own writes: /api/pool, /api/pool/start, /api/decide ------------------------------------------
+
+
+def served_sheet(tmp_path):
+    from test_week_plays import slate_rows, write_csv
+    from test_week_writes import EDGE, FakeSheet, Lock
+
+    from dfs import week_writes
+
+    write_csv(tmp_path / "data" / "current" / "edge.csv", slate_rows())
+    sheet = FakeSheet()
+    for c, h in enumerate(["Pool", "Name", "Id"]):
+        sheet.put(EDGE, 1, c, h)
+    for i, r in enumerate(slate_rows(), start=2):
+        sheet.put(EDGE, i, 1, r["Name"])
+        sheet.put(EDGE, i, 2, r["Id"])
+    edits = week_writes.SheetEdits(
+        sheet, edge_tab=EDGE, log_path=tmp_path / "edits.log", lock=Lock(), title="Wk9 copy"
+    )
+    return sheet, edits
+
+
+def test_the_served_page_shows_the_sheet_and_writes_a_pool_cell(make, tmp_path):
+    sheet, edits = served_sheet(tmp_path)
+    sheet.put("EdgeRaw", 2, 0, "GPP")  # in the sheet, not in the last sync
+    client = make(edits=edits)
+    status, page = client.get("/")
+    assert status == 200 and "sheet: Wk9 copy" in page
+    seg = page.split('<span class="seg" data-id="id-Qb Alpha"')[1].split("</span>")[0]
+    assert 'data-was="GPP"' in seg and "disabled" not in seg  # the live value, writable
+    status, body = client.post("/api/pool", {"changes": [{"id": "id-Wr Value", "value": "Cash", "was": ""}]})
+    assert status == 200 and body["pool"] == {"id-Wr Value": "Cash"} and "Wr Value: Cash" in body["message"]
+    assert sheet.get("EdgeRaw", 4, 0) == "Cash"
+
+
+def test_a_conflict_comes_back_409_with_what_the_sheet_holds(make, tmp_path):
+    sheet, edits = served_sheet(tmp_path)
+    client = make(edits=edits)
+    sheet.put("EdgeRaw", 4, 0, "Both")
+    status, body = client.post("/api/pool", {"changes": [{"id": "id-Wr Value", "value": "Cash", "was": ""}]})
+    assert (
+        status == 409
+        and body["current"] == {"id-Wr Value": "Both"}
+        and "Nothing was written" in body["error"]
+    )
+    assert sheet.writes == []
+
+
+def test_a_closed_week_or_no_sheet_writes_nothing(make, tmp_path):
+    sheet, edits = served_sheet(tmp_path)
+    closed = make(edits=edits, read_only=True)
+    status, body = closed.post("/api/pool", {"changes": [{"id": "id-Wr Value", "value": "Cash", "was": ""}]})
+    assert status == 403 and sheet.writes == []
+    status, body = make().post("/api/decide", {"key": "stack", "option": "a"})
+    assert status == 503 and "No sheet" in body["error"]
+
+
+def test_the_page_writes_need_the_token_like_every_post(make, tmp_path):
+    _, edits = served_sheet(tmp_path)
+    status, _ = make(edits=edits).post("/api/pool/start", {}, token=False)
+    assert status == 403

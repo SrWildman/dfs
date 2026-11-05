@@ -179,43 +179,55 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `PLUGIN_MODULES`). The search runs to the end (`seconds = 600` default; the live clock is 120 and its runs differ), so reruns give the same builds. Saved builds (`data/research/backtest/jobs/<fingerprint>/`) are keyed by settings + code, `--fresh` ignores them. Report in
   `docs/research/backtest/` (gitignored). Read-only: no sheet. Also `dfs research refresh --only backtest` (optional study). Math/orchestration
   `backtest.py`, text `backtest_report.py`.
-- `dfs week page [--week N] [--open/--no-open]` -- **the Week page**: one self-contained HTML file,
-  `data/week/<season>-wk<NN>.html` (inline CSS, no external loads), opened in the browser. Top: **Today**, day-aware
-  (Mon close, Tue new week, Wed-Fri research, Sat build, Sun game day; `week_today.py`, reusing
-  `launcher.suggest_actions`): 3-5 steps, each with the phrase to say and the command, and what is stale. Then, **ordered by
-  the day** (`week_page.DAY_ORDER`: Tue-Fri research, Sat build, Sun game day): **Plays** (`week_plays.py`: five a position of
-  best CalPts-per-$1K value, cash core, GPP upside with leverage, and FADE↓ fades, each with a football Why line, its game
-  and kickoff and trust chips; ownership columns say "ownership publishes ~Fri/Sat" until CashOwn / GppOwn exist; a tick box
-  per row runs `dfs pool add` in serve mode, "add X, Y to my pool" to say in static), **Slate** (every game by total: spread, implied
-  totals, movement since the opening snapshot, weather, key injuries), **What changed** (the last two syncs diffed: status
-  changes for his pool and builds, new OUTs, CalPts moves of 2+, line moves of 1+), then each decision (contest plan by tier
-  for THIS week; cash with the chalk check; GPP with the top 3 stacks; unknowns; Sunday; season-long with urgent SWAPs in
-  red; last week, which holds last week's spend against the plan), each with its trust (Proven / Shadow / Untested;
-  `week_page.TRUST`, the audit's verdicts). In serve mode an empty Cash / GPP section has a **Build** button and an empty
-  Sunday section **Late swap** (the run lock applies). Then **Your tools**: every
-  registered command and every phrase in this file's two tables, by day, with when each was last run
-  (`week_tools.py`, generated, so a new command appears by itself; a test fails if a phrase or standard-week command has no
-  day). Read-only: it reads outputs that already exist (`week_inputs.py`) and a section whose input is missing says "not
-  run yet". `sync`, `lineups suggest`, `lineups late-swap`, `contests plan`, `season sync`, `season check`, `week close`
+- `dfs week page [--week N] [--open/--no-open]` -- **the Week page** (v2): one self-contained HTML file,
+  `data/week/<season>-wk<NN>.html` (inline CSS, an inline JSON block and script for the Explorer, no external loads), opened
+  in the browser. Top, in this order: the **progress strip** (Pool, Contest plan, Builds, Entries recorded, Late swap,
+  Close, each done / next / to do from the real state; `week_board.progress`), **the brief** (5-7 deterministic, day-aware
+  sentences; `week_board.brief`) with the next step, the **pool panel** (Cash / GPP counts by position, gaps, Questionable
+  in the pool, the top 5 the data likes that are not pooled), the **decisions** (30%+ CashOwn Play / Fade, a Questionable
+  star's pivot or wait, the GPP stack between the top two QBs; `week_board.decisions`), **one board** (Plan I's plays,
+  `week_plays.plays`, deduped: each player once with his role chips, top 3 per role and position plus Show more; FADE↓
+  wins and sits last with its record; columns Salary, Proj, Per $1K, DU own, GPP own, Why, Pool) beside the value map,
+  the leverage map (`week_charts`, inline SVG) and the slate's game cards, then the **Explorer** (`week_explorer`: every
+  priced player and every EdgeRaw column, lenses Value / Cash / GPP-Leverage / Usage / Matchup / Projections / Ownership /
+  Signals / All columns, show 3/10/25/all per position or across, filters, sort, a column picker, trust chips on headers, a
+  player drawer from any name; a lens naming a column EdgeRaw no longer has fails `tests/test_week_explorer.py`). Below,
+  collapsed with a one-line summary each and **ordered by the day** (`week_page.DAY_ORDER`): What changed, Contest plan,
+  Season-long, Last week, Cash, GPP, Sunday (with the unknowns), Your tools. Layout `week_top.py`, answers `week_board.py`
+  (pure). Read-only: it reads outputs that already exist (`week_inputs.py`) and a section whose input is missing says
+  "not run yet". `sync`, `lineups suggest`, `lineups late-swap`, `contests plan`, `season sync`, `season check`, `week close`
   and `week new` rebuild it at the end (`week_page.after_command`, called from the CLI entry point; a failure warns and
   the command carries on). The run log behind "last run" is `data/runlog.csv` (time, command, ok; option NAMES only, never
   values), written by `prompt_missing.PromptingGroup.main` for every command; tests redirect it (`tests/conftest.py`) and
-  `tests/test_runlog.py` guards the real file. Two inputs are left by commands for the page, in `data/week/inputs/`:
-  the Stacks tab's top rows (`dfs stacks`, the Stacks writer) and the season-long view (`season sync` / `check`); Plan D's
-  `contest_plan` and `postmortem` use the same `week_inputs.save_input`.
-- `dfs week serve [--week N] [--port P] [--no-open]` -- **the Week page as a local app** (`week_server.py`; the static `dfs week page` is
-  unchanged): serves the page on this Mac only (`127.0.0.1`; the link it opens carries a random token, and every request needs the
-  token and a localhost `Host`), with **Claude Code docked on the right** (`week_chat.py`: `claude -p` in stream-JSON mode in the main
-  checkout under Sam's own login; model / effort / New chat / Stop / this week's chats; a call that needs approval shows on the page as
-  Approve / Deny with exactly what will run, nothing is auto-approved, `bypassPermissions` is never used, "auto" is a switch he turns
-  on; no background commands (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`), a turn is read until its process exits (it can print several
-  `result`s; the answer is the first after Claude Code replays Sam's message), a turn with no answer ends in a red line; after any chat
-  change run `python scripts/chat_smoke.py`, three turns against real Claude, not in pytest), an **Ask** button beside every phrase, **run buttons** for every command with live output (`week_jobs.py`: one job at a time,
-  Stop, history; `week new` / `week close` / `lineups clear` / `pool clear` / `setup ...` need the command typed out; a closed week is
-  read only), a **check this contest** form and the **file drop zone** (`week_drops.py`: DK's entries file at lock, the history export
-  and standings at close; only .csv / .zip, size and zip-bomb limits, existing parsers only, filed into Downloads where `entries record`
-  and `week close` look, never deleted; after a drop it shows what was recognised and offers the matching command). No sheet writes of
-  its own, no DK access; the log (`data/week/serve.log`) never holds prompts. Ctrl-C stops it.
+  `tests/test_runlog.py` guards the real file. Inputs left by commands for the page live in `data/week/inputs/`
+  (`week_inputs.save_input`): the Stacks tab's top rows, the season-long view, `contest_plan`, `postmortem`, and the page's
+  own `decisions` (the pivots lined up).
+- `dfs week serve [--week N] [--port P] [--no-open] [--sheet-id <id>]` -- **the Week page as a local app** (`week_server.py`;
+  the static `dfs week page` is unchanged): serves the page on this Mac only (`127.0.0.1`; the link it opens carries a
+  random token, and every request needs the token and a localhost `Host`), with **Claude Code docked on the right**
+  (`week_chat.py`: `claude -p` in stream-JSON mode in the main checkout under Sam's own login; model / effort / New chat /
+  Stop / this week's chats; a call that needs approval shows on the page as Approve / Deny with exactly what will run,
+  nothing is auto-approved, `bypassPermissions` is never used, "auto" is a switch he turns on; no background commands
+  (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`), a turn is read until its process exits (it can print several `result`s;
+  the answer is the first after Claude Code replays Sam's message), a turn with no answer ends in a red line; after any
+  chat change run `python scripts/chat_smoke.py`, three turns against real Claude, not in pytest), an **Ask** button
+  beside every phrase, **run buttons** for every command with live output (`week_jobs.py`: one job at a time, Stop, history;
+  `week new` / `week close` / `lineups clear` / `pool clear` / `setup ...` need the command typed out; a closed week is
+  read only), a **check this contest** form and the **file drop zone** (`week_drops.py`: DK's entries file at lock, the
+  history export and standings at close; only .csv / .zip, size and zip-bomb limits, existing parsers only, filed into
+  Downloads where `entries record` and `week close` look, never deleted; after a drop it shows what was recognised and
+  offers the matching command). **The page's own writes** (`week_actions.py`
+  over `week_writes.SheetEdits`; routes `/api/pool`, `/api/pool/start`, `/api/decide`): a player's EdgeRaw **Pool** cell
+  (Cash / GPP / Both / none, the dropdown's cell), a decision (Play / Fade = `cash: Name` on Always use / Never use; the
+  stack = `more QB`, `more Mate` on Max exposure; a pivot = his Pool cell to Both plus the `decisions` input; Wait writes
+  nothing; Undo removes only what the answer wrote) and the suggested starting pool. Every write finds cells by header,
+  re-reads and refuses on a change (409 with what the sheet holds), is one batch under the run lock, is read back and is
+  logged to `data/week/edits.log`; a closed week is refused. Every render reads the live Pool column and rules box
+  (a read failure falls back to the last sync, read only). `--sheet-id` points it at a test copy. No DK access; the log
+  (`data/week/serve.log`) never holds prompts. Ctrl-C stops it.
+- **Rules box scope** (`suggest_state.scoped_item`): an Always use / Never use item may start `cash:` or `gpp:` and then
+  applies to that kind of build only (`Rules.always_for(kind)` / `never_for(kind)`; unscoped items read as before, and a
+  scoped conflict says Never wins for that kind).
 - **The run lock** (`run_lock.py`): `data/.run.lock` makes one command that writes (sync, week new/close, setup *, lineups suggest,
   entries record/fill, bankroll *, season sync, contests plan, ...; `run_lock.WRITERS`) run at a time across the terminal, the chat and
   the buttons. A second writer is refused with what is running, since when and from where (terminal / chat / button); no `--force`.

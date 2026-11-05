@@ -542,3 +542,28 @@ def test_max_exposure_operators():
     assert rules.caps == {"Aa": 4, "Bb": 3, "Cc": 2, "Dd": 2}  # a bare N and <= are only a cap
     assert rules.floors == {"Dd": 2, "Ee": 2, "Ff": 2}  # = is a cap and a target; >= and > are targets
     assert rules.more == {"Gg"} and not rules.problems
+
+
+# -- per-kind scope on Always use / Never use (`cash: Name`, `gpp: Name`; Week page decisions) --------------
+
+
+def test_a_cash_scoped_item_reaches_only_cash_builds():
+    rules = st.parse_rules(
+        st.RulesText(always="cash: Aa, Bb", never="gpp: Cc, cash: Dd"), ["Aa", "Bb", "Cc", "Dd"], []
+    )
+    assert rules.always_for("cash") == ["Bb", "Aa"] and rules.always_for("gpp") == ["Bb"]  # every-build first
+    assert rules.never_for("gpp") == {"Cc"} and rules.never_for("cash") == {"Dd"}
+    assert rules.never == set()  # the unscoped set is untouched: old lines read as before
+    assert not rules.problems
+
+
+def test_old_unscoped_lines_read_as_before():
+    rules = st.parse_rules(st.RulesText(always="Aa", never="Bb"), ["Aa", "Bb"], [])
+    assert rules.always_for("cash") == rules.always_for("gpp") == ["Aa"]
+    assert rules.never_for("cash") == rules.never_for("gpp") == {"Bb"}
+
+
+def test_a_scoped_conflict_says_never_wins_for_that_kind():
+    rules = st.parse_rules(st.RulesText(always="cash: Aa", never="Aa"), ["Aa"], [])
+    assert rules.always_for("cash") == []
+    assert any("cash builds" in p and "Never wins" in p for p in rules.problems)
