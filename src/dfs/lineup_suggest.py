@@ -720,6 +720,7 @@ def suggest_builds(
     rank: str = DEFAULT_RANK,
     gpp_dup_model: dups.DupModel = dups.DUP_MODEL_GPP,
     cash_dup_model: dups.DupModel = dups.DUP_MODEL_CASH,
+    cash_fixed: Sequence[str] = (),
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -728,7 +729,9 @@ def suggest_builds(
     `gpp_entries` is the size of the GPP the builds are for (the duplicates it expects are read against it);
     `double_up_entries` the size of a double-up, for the cash builds' duplication warning; `shapes` which
     GPP shapes to search (`lineup_shapes.SHAPES`); `rank` what orders the GPP candidates: "top1" (the
-    default) the Top 1% chance alone, "share" that chance divided by 1 + the duplicates expected."""
+    default) the Top 1% chance alone, "share" that chance divided by 1 + the duplicates expected.
+    `cash_fixed` names players every cash build holds (the backtest's `calls` flag locks the CORE calls;
+    a name not in the cash pool is ignored)."""
     gpp_order = rank_key(rank)
     started = time.monotonic()
     budget_start = clock.now()  # the budget is search work, not wall seconds (search_clock.py)
@@ -757,7 +760,8 @@ def suggest_builds(
 
     if cash_builds:
         t = time.monotonic()
-        lineups, done = cash_lineups(cash_pool, cap=cap, deadline=cash_deadline)
+        fixed = [p for p in cash_pool if p.name in set(cash_fixed)]
+        lineups, done = cash_lineups(cash_pool, cap=cap, deadline=cash_deadline, fixed=fixed)
         report.complete = report.complete and done
         t = timed("search", t)
         scored = score(

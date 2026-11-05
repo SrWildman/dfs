@@ -2269,3 +2269,92 @@ beside the plan, ranks the builds only.
 **Reported numbers** (`portfolio.evaluate`): `e_dollars`, `profit` = minus fees, `p_any_top1`, `e_top1`
 (expected entries in a top 1%), `log_growth` (the `robust` utility), `p_profit`, `cvar` (mean profit of the worst
 20% of draws), and the concentration `max_lineup_share` / `max_player_share`.
+
+## The plays model's calls (`plays.py`, `sim/plays_sim.py`, Plan M M1, 2026-11-05; shadow)
+
+Two calls per rosterable player and week (`plays.rosterable`: per position the top
+`VAL_ADJ_ROSTERABLE_TOP_N` by ProjPts, not OUT / IR / Doubtful). Each call has a score, a label and one reason.
+The inputs come only from `plays.INPUT_COLUMNS`, every one of them known before the lock.
+
+**The slate's simulation** (`plays_sim.simulate_slate`): `N_SIMS = 3000` correlated draws of every playing
+player (`contest_sim.draw_points`, the specs of `sim_inputs.build_specs`). Each role's tails are stretched by
+the tails study's per-role delta (`TAIL_DELTA`: RB2 -0.053, WR4 -0.215, DST -0.001; the only roles that cleared
+2 SE). Every draw is judged by its own lines: the double-up line is the field model's
+`sum(cash_weights * draws) + cash_offset`, the top-1% line is likewise. Before ownership publishes, the fixed
+lines are used instead.
+
+**Cash input `sim`** (`plays_sim.cash_scores`): the reference set is the 30 best cash lineups by Cash %
+(`lineup_suggest.cash_lineups` on the top `CASH_POOL_COUNTS` by CalPts). For each lineup and each slot, every
+eligible candidate is put in the slot and Cash % is recomputed on the same draws. The slate's price of $1K
+`lam` is the median OLS slope of Cash % on salary within those refills. A player's priced value in a lineup is
+`Cash % - lam x salary / 1000`, taken in his best slot. `cash_value` is that number averaged over the reference
+lineups, in points of Cash %.
+
+**GPP input `lev`** (`plays_sim.gpp_scores`): 4,000 field lineups are generated against our ownership
+(`field_gen`, the construction rates fitted on earlier weeks' real GPP fields; no herd). In each draw the top 1%
+of them is taken. `lift = (hits + 20) / (expected + 20)`, `opt_pct = own x lift`, and `lev = opt_pct - own`. A
+quarterback's stack is the two teammates in 25%+ of his top-1% lineups, plus a bring-back in 25%+.
+
+**The other inputs:**
+- `value` is CalPts per $1K.
+- `floor` and `ceiling` are the draws' 10th and 90th percentiles per $1K.
+- `own` is CashOwn for cash and GppOwn for GPP. Either falls back to TFFB Own% before Plan D's model existed.
+- `fade` is 1 for the FADE↓ chip.
+- `bump` is the applied teammate bump divided by 5.
+- `tail` is the role's delta.
+
+Every input except fade, bump and tail is standardised within position and week.
+
+**The score** is the sum of weight times input, with weights per kind and position. The weights come from a
+ridge fit shrunk toward the prior: `w = (X'X + 150 I)^-1 (X'y + 150 w0)`. The prior `w0` is cash sim +0.25, fade
+-0.25, the rest 0; GPP lev +0.20, fade -0.25, the rest 0. Positions with fewer than 5 rows keep the prior.
+- The fit uses only the relevant players: the top `RELEVANT_TOP` by CalPts, or owned 5%+ in either format.
+- The cash target is realized DK points per $1K. The GPP target is his share of the real top-1% lineups minus
+  his real ownership, averaged over the week's GPPs of 700+ entries.
+- Both targets are standardised within position and week and clipped at 3 SD.
+- Week N is always scored on weights fitted through week N-1, saved as
+  `data/research/calls_weights/<season>-wkNN.json` (NN = the week fitted through).
+
+**Cash labels** (`plays.cash_labels`), per position by score:
+- The top `CORE_N` (QB 1, RB 2, WR 3, TE 1, DST 1) are CORE.
+- The next `PLAY_N` (2 / 4 / 6 / 2 / 2) are PLAY.
+- The bottom 30% of the relevant players still NEUTRAL are AVOID.
+- A player at CashOwn 30%+ is CORE unless the best `cash_value` at his position within $500 of his salary is
+  2.0+ points higher. The reason states that gap.
+- FADE↓ is AVOID.
+
+**GPP labels** (`plays.gpp_labels`), per position:
+- TARGET is the top `TARGET_N` (2 / 3 / 4 / 2 / 2) by `opt_pct` among players with `lev >= -0.01`.
+- LEVERAGE is the next `LEVERAGE_N` by score with `lev > 0`.
+- FADE is the bottom 30% by score of those owned 8%+.
+- FADE↓ is FADE.
+
+**News** (`plays.week_news`):
+- A regular (Tgt% 15%+ or Rush% 30%+) listed OUT or Doubtful is news when he was not out on the week's first
+  snapshot nor on the last snapshot before the week began (`carried_out`).
+- When exactly one such regular is out on a team, each teammate gets `teammate_bump.load_table()`'s
+  `(absent role, his role)` points, minus however far his projection has already moved up since the last
+  snapshot before the news, never below 0. The result is added to CalPts before the simulation.
+- News is late when ownership had already published before it. A late beneficiary's ownership is multiplied by
+  `own_lag`: the geometric mean of real / shown ownership over earlier weeks' late beneficiaries, shrunk toward
+  1 with 5 pseudo-players.
+
+**The record:** `data/week/inputs/<season>-wkNN-calls.json` holds the latest calls, `versions` (each sync's
+calls with its time, at most 60) and `moved_up` (each call whose level rose since the previous version). The
+levels are AVOID < NEUTRAL < PLAY < CORE and FADE < NEUTRAL < LEVERAGE = TARGET.
+
+**The backtest** (`research/plays_backtest.py`) runs on weeks 2 and 4-8, each from its last pre-lock snapshot.
+GppOwn and CashOwn come from the field-ownership model fitted on earlier weeks, and FADE↓ from the last pre-lock
+signal archive.
+- Cash: the CORE+PLAY minus AVOID gap in realized points per $1K, paired by week against the same label counts
+  applied to CalPts value and to TFFB ProjPts value. It ships at more than 2 SE of the paired difference and
+  better in most weeks.
+- GPP: the TARGET+LEVERAGE real top-1% excess minus that of the unchosen players at the same position within
+  $500, combined across weeks by Stouffer. It ships at one-sided p < 0.05 and above both baselines in most
+  weeks.
+- Flashback flag `calls` (`plays_flag.py`): CORE locked, AVOID banned, cash builds only
+  (`research/settings/calls_cash.toml` against `today_cash.toml`).
+
+`dfs week close --research`'s `calls` stage scores the week's last live version before the lock (else the
+rebuilt calls). It appends the rows to `data/research/calls_history.csv` and refits the weights through the
+week.

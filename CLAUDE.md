@@ -73,11 +73,12 @@ topic, which is how the "More, by topic" screen reaches it (tests enforce both).
 Typed commands also ask for a missing required argument at a terminal (`prompt_missing.py`; every Typer app needs
 `cls=PromptingGroup`) and fail as before when piped/scripted.
 
-- `dfs week close --research` / `dfs research close-report [--week N] [--only refresh,stacks,backtest,own_error] [--deadline MIN]` -- Monday
-  on autopilot (`close_research.py`): after the close, four stages run side by side as child processes (each with a log under
+- `dfs week close --research` / `dfs research close-report [--week N] [--only refresh,stacks,backtest,own_error,calls] [--deadline MIN]` -- Monday
+  on autopilot (`close_research.py`): after the close, five stages run side by side as child processes (each with a log under
   `data/research/close/<season>-wk<NN>/`; the parent stops any still running at the deadline, 45 min): `dfs research refresh --through
   <week>`, `dfs stacks --retro`, `dfs backtest` of `ownership_uncertainty` and `ownership_uncertainty_gpp` against `today` over every
-  week with standings (settings in `research/settings/*.toml`, in the repo), and `python -m dfs.sim.own_error_sim_retro`. Each fails soft.
+  week with standings (settings in `research/settings/*.toml`, in the repo), `python -m dfs.sim.own_error_sim_retro`, and the plays model's `calls` (the week's calls scored into
+  `data/research/calls_history.csv`, weights refitted; `research/plays_backtest.close_week`). Each fails soft.
   ONE report, `docs/research/weekly/<season>-wk<NN>-close.md` (gitignored): the close summary (what `week close` printed, plus the Contests
   tab's decisions block), each study's headline and ship-bar verdict, "changed since last week" against the previous close report. Nothing
   writes a sheet (`close-report` reads none at all). `week close --research` skips the studies, saying why, when the week is not scored yet.
@@ -157,6 +158,17 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   that is the tab's track record (`data/model_cache/stacks_retro.json`, several minutes; run it after `dfs week close`). Math in `stacks.py`
   (pure), layout `stacks_tab.py`, I/O `sheet_stacks.py`, retro `sim/stacks_retro.py`, live inputs `stacks_inputs.py`. A plain `dfs sync` refreshes the tab
   (about a minute; never on `--live`, never fails the sync); `dfs week new` refreshes it on the new sheet after its sync. An information view: the verdict on its leverage signal (`tested` / `weak` / `untested`) is on the tab.
+- `dfs plays [--position QB,RB] [--per N] [--no-save] [--inactives]` -- **the plays model, SHADOW** (Plan M M1; `plays.py`,
+  `sim/plays_sim.py`): two calls per rosterable player, cash CORE / PLAY / NEUTRAL / AVOID and GPP TARGET / LEVERAGE /
+  NEUTRAL / FADE, each with a score and one reason. The cash score is the sim's priced Cash % over near-optimal cash lineups
+  (chalk 30%+ is CORE unless an alternative at the price is 2+ points of Cash % better; FADE↓ is AVOID). The GPP score is the
+  simulated top-1% share against GppOwn, with the tails stretches, the teammate bump for fresh OUT / Doubtful news minus what
+  the projections already moved, and a QB's best stack. Weights are a ridge fit toward a prior, walk-forward, saved in
+  `data/research/calls_weights/`. Every `dfs sync` (and `week new`'s) adds a timestamped version to
+  `data/week/inputs/<season>-wk<NN>-calls.json` and prints the "new must-plays" (calls that moved up). `--inactives` runs
+  `dfs sync --live` first (which refreshes the Cockpit). Never writes a sheet. The Week page does not show the calls yet (M2).
+  Backtest: `python -m dfs.research.plays_backtest run` (report in `docs/research/plays/`, gitignored). Flashback:
+  `dfs backtest --settings research/settings/calls_cash.toml --compare research/settings/today_cash.toml`.
 - `dfs setup stacks [--sheet-id <id>]` -- creates (or rebuilds) the Stacks tab right after Suggested. Template first, then live, `dfs doctor` after
   (check `stacks-tab`). Needs `dfs stacks --refit` once.
 - `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one

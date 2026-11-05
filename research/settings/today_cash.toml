@@ -1,0 +1,5 @@
+# Today's cash builds alone (no GPP builds): the baseline the `calls` flag is compared against. Shadow.
+name = "today (cash only)"
+
+[builds]
+gpp = 0

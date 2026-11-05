@@ -102,6 +102,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs sync",
             "dfs lineups suggest",
             "dfs stacks",
+            "dfs plays",
             "dfs entries fill",
             "dfs entries print",
             "dfs entries record",
