@@ -336,6 +336,7 @@ EDGE_COLUMNS_USED = [
     "xFP/G",
     "CashOwn",
     "GppOwn",
+    "Leverage",  # Plan K: GPP pivots rank by it
 ]
 
 
@@ -428,6 +429,11 @@ class WeekInputs:
     season_long: dict | None = None
     config: dict = field(default_factory=dict)
     runs: list[runlog.Run] = field(default_factory=list)
+    # Plan K1
+    bankroll: dict | None = None  # `bankroll_health.save`: the Season / Bankroll tabs and the stake guide
+    practice: Any = None  # `practice.WeekPractice` from the raw injury snapshots, or None
+    sheet_lineups: dict | None = None  # the Lineups tab as the last Cockpit refresh read it
+    dup_calibration: dict | None = None  # `sim/dup_calibration.py`'s saved fit and held-out error
 
 
 def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) -> WeekInputs:
@@ -463,4 +469,28 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         season_long=load_input("season_long", None, None, d),
         config=read_config(),
         runs=runlog.read(d / "runlog.csv"),
+        bankroll=load_input("bankroll", season, week, d),
+        practice=_practice(d, season, week, now),
+        sheet_lineups=load_input("sheet_lineups", season, week, d),
+        dup_calibration=read_json(d / "model_cache" / "dup_calibration.json"),
     )
+
+
+def _practice(data_dir: Path, season: int, week: int, now: datetime) -> Any:
+    try:
+        from dfs import practice
+
+        return practice.load_history(data_dir, season=season, week=week, now=now)
+    except Exception:  # noqa: BLE001 - a missing or odd snapshot never stops the page
+        return None
+
+
+def save_sheet_lineups(lineups: Any, *, season: int, week: int) -> None:
+    """The Lineups tab's built lineups as the Cockpit read them (`entries.SheetLineup`), for the page's Sunday
+    check when nothing is recorded in `data/entered/` yet."""
+    rows = [
+        {"label": lu.label, "marker": lu.marker, "names": list(lu.names)}
+        for lu in lineups
+        if getattr(lu, "built", False)
+    ]
+    save_input("sheet_lineups", {"lineups": rows}, season=season, week=week)

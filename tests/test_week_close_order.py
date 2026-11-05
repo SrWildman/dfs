@@ -16,14 +16,28 @@ def test_the_dk_files_are_kept_before_model_check_is_scored_and_the_contests_ste
     monkeypatch.setattr(cli, "_contest_plan_after_close", lambda *a, **k: calls.append("plan"))
     monkeypatch.setattr(cli, "_entered_record_warning", lambda *a, **k: calls.append("record?"))
     monkeypatch.setattr(cli, "_cash_postmortem_after_close", lambda *a, **k: calls.append("postmortem"))
+    monkeypatch.setattr(cli, "_plan_k_after_close", lambda *a, **k: calls.append("plan-k"))
     monkeypatch.setattr(cli, "_closed_week", lambda cfg, week: 8)
     cli.week_close(csv=None, week=None)
-    # the plan line reads the log the contests step just updated
-    assert calls == ["bankroll", "keep", "score", "contests", "plan", "record?", "postmortem"]
+    # the plan line reads the log the contests step just updated; the bankroll curve and the copies
+    # calibration read what the close wrote
+    assert calls == ["bankroll", "keep", "score", "contests", "plan", "record?", "postmortem", "plan-k"]
 
 
 def test_the_plan_check_never_fails_the_close():
     cli._contest_plan_after_close(object(), 8)  # no config at all: prints a warning, does not raise
+
+
+def test_the_plan_k_step_never_fails_the_close(monkeypatch):
+    from dfs.sim import dup_calibration
+
+    def boom(*a, **k):
+        raise ValueError("no standings")
+
+    monkeypatch.setattr(cli, "SheetsClient", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "_save_bankroll_health", lambda *a, **k: None)
+    monkeypatch.setattr(dup_calibration, "run", boom)
+    cli._plan_k_after_close(object(), 8)  # prints a warning, does not raise
 
 
 def test_a_failure_while_keeping_the_files_does_not_stop_the_close(monkeypatch, tmp_path):

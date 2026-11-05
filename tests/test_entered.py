@@ -86,3 +86,38 @@ def test_a_week_with_no_history_says_so_and_reads_as_own():
 def test_file_week_reads_the_latest_kickoff():
     assert entered.file_week([_player(0, "a")]) == (2026, 8)
     assert entered.file_week([]) is None
+
+
+def test_the_entries_the_file_holds_empty_are_kept_by_contest_for_the_entry_plan(tmp_path):
+    from dfs import entered as ent
+    from dfs.entries import Entry, FileEntry
+
+    entries = [
+        Entry(FileEntry("1", "NFL $5 Double Up", "c1", "$5", ("", "")), "Double Up"),
+        Entry(FileEntry("2", "NFL $5 Double Up", "c1", "$5", ("", "")), "Double Up"),
+        Entry(FileEntry("3", "NFL $3 SE", "c2", "$3", ("Name (123)", "")), "SE GPP"),
+    ]
+    blank = ent.blank_entries(entries)
+    assert blank == [
+        {
+            "contest_id": "c1",
+            "name": "NFL $5 Double Up",
+            "entry_fee": "$5",
+            "format": "Double Up",
+            "entry_ids": ["1", "2"],
+        }
+    ]
+    record = ent.EnteredRecord(season=2026, week=9, recorded_at="t", source="s", lineups=[], blank=blank)
+    path = ent.save(record, tmp_path / "r.json")
+    assert ent.load(2026, 9, path).blank == blank
+    assert "  no lineup yet: 2 entries in NFL $5 Double Up" in ent.summary_lines(record)
+
+
+def test_an_old_record_without_blank_entries_still_loads(tmp_path):
+    import json
+
+    from dfs import entered as ent
+
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps({"season": 2026, "week": 8, "recorded_at": "t", "source": "s", "lineups": []}))
+    assert ent.load(2026, 8, path).blank == []

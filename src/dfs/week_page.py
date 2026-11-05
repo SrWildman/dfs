@@ -1005,16 +1005,16 @@ CSS = """
 --accent-soft:#e1ecf5;
 --proven:#2f6b4f;--proven-soft:#e2efe7;--shadow:#8a6d1f;--shadow-soft:#f4ecd4;--untested:#62706a;
 --bad:#b8462e;
---bad-soft:#f7e4de;--warn:#8a5a00;--ok:#2f6b4f;--flag:#fff3d6;--wr:#2d5f8a;--rb:#2f6b4f;--te:#a8781a}
+--bad-soft:#f7e4de;--warn:#8a5a00;--ok:#2f6b4f;--flag:#fff3d6;--wr:#2d5f8a;--rb:#2f6b4f;--te:#a8781a;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#121513;--card:#1a1f1c;--ink:#e6ebe8;
 --dim:#9aa69f;--line:#2d3531;--accent:#7fb2df;--accent-soft:#18283a;--proven:#73c197;--proven-soft:#1d3328;
 --shadow:#d8bf73;--shadow-soft:#332b16;--untested:#9aa69f;--bad:#ec8a72;--bad-soft:#3a221c;--warn:#e0b04a;
---ok:#73c197;--flag:#3a3015;--wr:#7fb2df;--rb:#73c197;--te:#e0b04a}}
+--ok:#73c197;--flag:#3a3015;--wr:#7fb2df;--rb:#73c197;--te:#e0b04a;--s1:#3987e5;--s2:#d95926;--s3:#199e70}}
 :root[data-theme=dark]{--bg:#121513;--card:#1a1f1c;--ink:#e6ebe8;--dim:#9aa69f;--line:#2d3531;
 --accent:#7fb2df;
 --accent-soft:#18283a;--proven:#73c197;--proven-soft:#1d3328;--shadow:#d8bf73;--shadow-soft:#332b16;
 --untested:#9aa69f;--bad:#ec8a72;--bad-soft:#3a221c;--warn:#e0b04a;--ok:#73c197;--flag:#3a3015;--wr:#7fb2df;
---rb:#73c197;--te:#e0b04a}
+--rb:#73c197;--te:#e0b04a;--s1:#3987e5;--s2:#d95926;--s3:#199e70}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,
 BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 header,main{max-width:1240px;margin:0 auto;padding:0 16px}header{padding-top:18px}
@@ -1171,6 +1171,17 @@ table.tools td:nth-child(3){min-width:260px}table.tools code{white-space:normal;
 padding:8px 14px;border-radius:8px;font-size:14px;z-index:30;max-width:90vw}
 .toast.bad{background:var(--bad);color:#fff}
 footer{max-width:1240px;margin:0 auto;padding:6px 16px 30px;color:var(--dim);font-size:12.5px}
+.chart.bank{max-width:760px}.chart .line{fill:none;stroke-width:2}
+.chart .zero{stroke:var(--dim);stroke-width:1}
+.chart .s1{stroke:var(--s1)}.chart .s2{stroke:var(--s2)}.chart .s3{stroke:var(--s3)}
+.chart .st{stroke:var(--ink)}
+.chart .pt{stroke:var(--card);stroke-width:2}.chart .pt.s1{fill:var(--s1)}.chart .pt.s2{fill:var(--s2)}
+.chart .pt.s3{fill:var(--s3)}.chart .pt.st{fill:var(--ink)}
+.legend .lkey{display:inline-block;width:14px;height:3px;border-radius:2px;margin:0 4px 0 10px;
+vertical-align:3px}
+.lkey.s1{background:var(--s1)}.lkey.s2{background:var(--s2)}.lkey.s3{background:var(--s3)}
+.lkey.st{background:var(--ink)}
+.prac{font-size:12px;color:var(--dim);white-space:nowrap}
 main{container-type:inline-size}
 @container (max-width:1060px){.board-grid{grid-template-columns:minmax(0,1fr)}.board-grid .side{display:grid;
 grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 14px}
@@ -1194,13 +1205,74 @@ def page_path(season: int, week: int, data_dir: Path | None = None) -> Path:
 
 # Below the fold, collapsed, ordered by day: what Sam needs first today comes first. Tuesday to Friday is
 # research, Saturday is build and enter, Sunday is game day, Monday the close.
-FOLD_IDS = ["changes", "contest-plan", "season", "last-week", "cash", "gpp", "sunday"]
+FOLD_IDS = [
+    "changes",
+    "contest-plan",
+    "entry-plan",
+    "bankroll",
+    "season",
+    "last-week",
+    "cash",
+    "gpp",
+    "consensus",
+    "inactives",
+    "sunday",
+]
 DAY_ORDER: dict[int, list[str]] = {
-    0: ["last-week", "season", "changes", "contest-plan", "cash", "gpp", "sunday"],
-    1: ["changes", "contest-plan", "season", "last-week", "cash", "gpp", "sunday"],
-    5: ["contest-plan", "cash", "gpp", "changes", "sunday", "season", "last-week"],
-    6: ["sunday", "changes", "cash", "gpp", "contest-plan", "season", "last-week"],
+    0: [
+        "last-week",
+        "bankroll",
+        "season",
+        "changes",
+        "contest-plan",
+        "entry-plan",
+        "cash",
+        "gpp",
+        "consensus",
+        "inactives",
+        "sunday",
+    ],
+    1: [
+        "changes",
+        "contest-plan",
+        "bankroll",
+        "season",
+        "last-week",
+        "cash",
+        "gpp",
+        "consensus",
+        "entry-plan",
+        "inactives",
+        "sunday",
+    ],
+    5: [
+        "contest-plan",
+        "entry-plan",
+        "cash",
+        "gpp",
+        "consensus",
+        "bankroll",
+        "changes",
+        "inactives",
+        "sunday",
+        "season",
+        "last-week",
+    ],
+    6: [
+        "inactives",
+        "sunday",
+        "entry-plan",
+        "changes",
+        "consensus",
+        "cash",
+        "gpp",
+        "contest-plan",
+        "bankroll",
+        "season",
+        "last-week",
+    ],
 }
+OPEN_ON_SUNDAY = "inactives"  # Sunday: the inactives check is open when anything is flagged
 DAY_ORDER[2] = DAY_ORDER[3] = DAY_ORDER[4] = DAY_ORDER[1]
 SECTION_IDS = FOLD_IDS
 
@@ -1254,6 +1326,15 @@ def fold_line(sid: str, inp: WeekInputs, built: dict[str, Section]) -> tuple[str
         return (
             f"{len(bs)} GPP builds, best Top 1% {pct(best, 1)}" if bs else "no GPP builds yet"
         ) + top, False
+    if sid in ("bankroll", "inactives", "consensus", "entry-plan"):
+        from dfs import week_money as wm
+
+        return {
+            "bankroll": wm.bankroll_line,
+            "inactives": wm.inactives_line,
+            "consensus": wm.consensus_line,
+            "entry-plan": wm.entry_plan_line,
+        }[sid](inp)
     if sid == "sunday":
         at = parse_time((inp.late_swap or {}).get("saved_at"))
         return (f"late swap ran {week_today.when(inp.now, at)}" if at else "late swap not run"), False
@@ -1350,7 +1431,7 @@ def render(
     """The whole page as one HTML string. `live` (the served page) adds the controls that write the sheet;
     `sheet` is what the server read from it (`week_writes.LiveSheet`), `answers` the decisions file."""
     from dfs import week_board as wb
-    from dfs import week_explorer, week_top
+    from dfs import week_explorer, week_money, week_top
 
     token = _LIVE.set(live)
     try:
@@ -1383,13 +1464,18 @@ def render(
                 season_section(inp),
                 last_week_section(inp),
                 unknowns_into_sunday(sunday_section(inp), unknowns_section(inp)),
+                week_money.bankroll_section(inp),
+                week_money.inactives_section(inp),
+                week_money.consensus_section(inp),
+                week_money.entry_plan_section(inp),
             )
         }
         folds = []
         for sid in section_order(day):
             line, urgent = fold_line(sid, inp, built)
+            open_ = day == 6 and sid == OPEN_ON_SUNDAY and urgent
             folds.append(
-                fold_html(built[sid], line, urgent) + (LIVE_CONTEST if sid == "contest-plan" else "")
+                fold_html(built[sid], line, urgent, open_) + (LIVE_CONTEST if sid == "contest-plan" else "")
             )
         sources = sorted(inp.manifest)
         failed = [n for n in sources if inp.manifest[n].get("error")]
@@ -1412,7 +1498,14 @@ def render(
             + f" &middot; built {e(kickoff.format_et(inp.now))}"
         )
         stale_html = '<p class="note warn">Stale: ' + e("; ".join(stale)) + "</p>" if stale else ""
-        data = week_explorer.payload(inp, board, by_id, record_lines=record_lines(inp), log=player_log(inp))
+        data = week_explorer.payload(
+            inp,
+            board,
+            by_id,
+            record_lines=record_lines(inp),
+            log=player_log(inp),
+            practice=week_money.practice_by_id(inp),
+        )
         own_out = not board.gpp_pending
         rules_json = json.dumps(rules or {}).replace("</", "<\\/")
         live_data = f'<script type="application/json" id="rules-was">{rules_json}</script>' if live else ""
@@ -1429,7 +1522,7 @@ def render(
             + "</div>"
             + week_top.decisions_html(ds, live, inp.now, rules is not None, by_id)
             + '<div class="grid board-grid">'
-            + week_top.board_html(board, by_id, live)
+            + week_top.board_html(board, by_id, live, week_money.practice_by_id(inp))
             + "<div>"
             + '<div class="side">'
             + week_top.charts_html(inp.edge, own_out)

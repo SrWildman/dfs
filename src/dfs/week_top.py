@@ -273,13 +273,18 @@ def decisions_html(
 # -- the board -----------------------------------------------------------------------------------------------
 
 
-def role_chips(r: wb.BoardRow) -> str:
+def role_chips(r: wb.BoardRow, practice: str = "") -> str:
+    """The row's role chips, then a Q / D tag with the week's practice trend beside it (`practice.py`)."""
     chips = "".join(
         f'<span class="chip {ROLE_CLASS[x]}" title="{e(ROLE_TIP[x])}">{e(x)}</span>' for x in r.roles
     )
     status = wb.avail(r.row)
     if status in ("Q", "D"):
-        chips += f'<span class="chip q" title="{e(week_plays.STATUS_WORD[status])}">{e(status)}</span>'
+        word = week_plays.STATUS_WORD[status]
+        tip = f"{word}. Practice: {practice}" if practice else word
+        chips += f'<span class="chip q" title="{e(tip)}">{e(status)}</span>'
+        if practice:
+            chips += f'<span class="prac">{e(practice)}</span>'
     return chips
 
 
@@ -292,7 +297,9 @@ def own_td(value: float | None, pending: bool) -> str:
     return f'<td class="n{hot}">{pct(value)}</td>'
 
 
-def board_html(b: wb.Board, pool_by_id: dict[str, str], live: bool) -> str:
+def board_html(
+    b: wb.Board, pool_by_id: dict[str, str], live: bool, practice: dict[str, str] | None = None
+) -> str:
     if b.empty:
         return (
             '<section class="card" id="board"><div class="card-head"><h2>The board</h2></div>'
@@ -322,7 +329,7 @@ def board_html(b: wb.Board, pool_by_id: dict[str, str], live: bool) -> str:
             cls = " ".join(c for c in ("fade-row" if r.fade else "", "" if r.shown else "more") if c)
             body.append(
                 f'<tr class="{cls}"{" hidden" if not r.shown else ""}><td class="nm">{pl(r.row)}'
-                f'<div class="tags">{role_chips(r)}</div></td>'
+                f'<div class="tags">{role_chips(r, (practice or {}).get(wb.pid(r.row), ""))}</div></td>'
                 f"<td class=n>${week_plays.salary(r.row):,.0f}</td><td class=n>{r.calpts:.1f}</td>"
                 f"<td class=n>{(wb.per_k(r.row) or 0):.2f}</td>"
                 + own_td(num(r.row.get("CashOwn")), b.cash_pending)
