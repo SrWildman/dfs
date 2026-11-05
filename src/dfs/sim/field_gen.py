@@ -432,13 +432,20 @@ def _sample_once(
     return lineups
 
 
-def chalk_lineups(slate: Slate, k: int = HERD_K, own: np.ndarray | None = None) -> np.ndarray:
+def chalk_lineups(
+    slate: Slate, k: int = HERD_K, own: np.ndarray | None = None, *, objective: str = "product"
+) -> np.ndarray:
     """The `k` legal lineups with the highest product of ownership (`own`, default the slate's projected
     shares), best first: (k x 9) sorted player indices. Exact: each is a MILP on sum(log own) under the roster
-    rules and the cap, with a no-good cut for every lineup already found."""
+    rules and the cap, with a no-good cut for every lineup already found. `objective="sum"` maximises the
+    total ownership instead (the consensus lineup, `dfs.consensus`); on Sam's Weeks 5-8 standings the two gave
+    the same lineup in every contest."""
     from scipy.optimize import Bounds, LinearConstraint, milp
 
+    if objective not in ("product", "sum"):
+        raise ValueError(f"objective must be 'product' or 'sum', not {objective!r}")
     o = np.maximum(slate.own if own is None else np.asarray(own, dtype=float), OWN_FLOOR)
+    gain = np.log(o) if objective == "product" else o
     pos = slate.position
     rows = [np.ones(len(slate))]
     lo, hi = [float(LINEUP_SIZE)], [float(LINEUP_SIZE)]
@@ -454,7 +461,7 @@ def chalk_lineups(slate: Slate, k: int = HERD_K, own: np.ndarray | None = None) 
         cuts = [np.isin(np.arange(len(slate)), f).astype(float) for f in found]
         a = np.vstack(rows + cuts)
         cons = LinearConstraint(a, lo + [-np.inf] * len(cuts), hi + [LINEUP_SIZE - 1.0] * len(cuts))
-        res = milp(-np.log(o), constraints=cons, integrality=np.ones(len(slate)), bounds=Bounds(0, 1))
+        res = milp(-gain, constraints=cons, integrality=np.ones(len(slate)), bounds=Bounds(0, 1))
         if res.x is None:
             break
         found.append(np.sort(np.nonzero(res.x > 0.5)[0]))

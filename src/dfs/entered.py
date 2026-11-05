@@ -78,6 +78,9 @@ class EnteredRecord:
     lineups: list[EnteredLineup]
     note: str = ""  # e.g. "Week 6 has no suggest history ..."
     skipped: dict[str, int] = field(default_factory=dict)
+    # Entries the file held with no lineup yet, one dict per contest: contest_id, name, entry_fee, format,
+    # entry_ids (Plan K item 4: the entry plan's "every contest has a lineup" check).
+    blank: list[dict] = field(default_factory=list)
 
 
 def name_key(name: str) -> str:
@@ -128,6 +131,26 @@ def from_entries(entries, players) -> list[EnteredLineup]:  # noqa: ANN001 - dfs
     return list(lineups.values())
 
 
+def blank_entries(entries) -> list[dict]:  # noqa: ANN001 - dfs.entries.Entry
+    """The Classic entries the file holds with no lineup, grouped by contest."""
+    out: dict[str, dict] = {}
+    for e in entries:
+        if not e.file.blank:
+            continue
+        c = out.setdefault(
+            e.contest_id,
+            {
+                "contest_id": e.contest_id,
+                "name": e.file.contest_name,
+                "entry_fee": e.file.entry_fee,
+                "format": e.format,
+                "entry_ids": [],
+            },
+        )
+        c["entry_ids"].append(e.entry_id)
+    return list(out.values())
+
+
 def from_sheet(lineups) -> list[EnteredLineup]:  # noqa: ANN001 - dfs.entries.SheetLineup
     """The Lineups tab's built lineups (no contests: the tab does not know them)."""
     return [EnteredLineup(names=[n.strip() for n in sl.names], label=sl.label) for sl in lineups if sl.built]
@@ -170,6 +193,7 @@ def load(season: int, week: int, path: Path | None = None) -> EnteredRecord | No
             lineups=lineups,
             note=str(raw.get("note", "")),
             skipped=dict(raw.get("skipped", {})),
+            blank=list(raw.get("blank", [])),
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -203,6 +227,9 @@ def summary_lines(record: EnteredRecord) -> list[str]:
         out.append(f"      {', '.join(lu.names)}")
     for reason, n in record.skipped.items():
         out.append(f"  skipped {n}: {reason}")
+    for c in record.blank:
+        n = len(c.get("entry_ids") or [])
+        out.append(f"  no lineup yet: {n} entr{'y' if n == 1 else 'ies'} in {c.get('name', '')}")
     builds = sum(lu.source is not None for lu in record.lineups)
     out.append(
         f"{builds} of {len(record.lineups)} came from a Suggested build; "

@@ -1,8 +1,9 @@
 """The Cockpit tab: one place for the last 90 minutes of a game day. Pure: frames in, rows out.
 
 Read-only for the CLI's purposes: nothing on the tab is typed, it reads the other tabs and the saved files and
-is rewritten whole by `dfs sync --live`, `dfs lineups late-swap` and `dfs setup cockpit`. Seven blocks, most
-urgent first (the same cue vocabulary everywhere, in column A, left of the player):
+is rewritten whole by `dfs sync` (plain and `--live`), `dfs lineups late-swap` and `dfs setup cockpit`. Nine
+blocks, the first seven most urgent first (the same cue vocabulary everywhere, in column A, left of the
+player):
 
     SWAP  act now: a player is out, or a better lineup exists    LOOK  check it    FILL  an entry needs a
     lineup    ok  nothing to do
@@ -17,6 +18,12 @@ urgent first (the same cue vocabulary everywhere, in column A, left of the playe
 5. **Exposure, top 10** -- who is in how many built lineups.
 6. **DK Upload** -- entries with and without a Lineup picked.
 7. **Budget** -- what the picked entries cost against the Bankroll tab's Weekly Budget and the stakes plan.
+8. **Inactives and pivots** (Plan K) -- every OUT / Doubtful / Questionable player, game not started, in the
+   lineups Sam entered (`data/entered`, else the built lineups), with three pivots each worked out in advance
+   (`inactives.py`: fits the slot, costs at most his salary plus what the lineup leaves, healthy, not started;
+   CalPts for cash, Leverage for GPP).
+9. **Practice reports** (Plan K) -- the week's practice trend (`practice.py`, from our nflverse snapshots) of
+   every Q / D player in those lineups.
 
 Honest limits: "inactives" here is `Avail` from the last sync plus ESPN's game-day injury feed when
 `late-swap --refresh-injuries` last ran, not DraftKings' or the NFL's official list. Every block names its
@@ -94,6 +101,8 @@ class CockpitInputs:
     targets: dict[str, float] = field(default_factory=dict)  # Exposure tab's typed Target, by player name
     unavailable: dict[str, str] = field(default_factory=dict)  # block key -> why its input could not be read
     adjustments: tuple[str, ...] = ()  # the active Adjust / Ownership items (`my_frame`): `Nacua +2`, ...
+    entered: dict | None = None  # `data/entered/<season>-wk<NN>.json` as read JSON (Plan K blocks 8 and 9)
+    practice: object | None = None  # `practice.WeekPractice` (block 9 and the practice column of block 8)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -673,6 +682,113 @@ def _budget_block(b: _Builder, inputs: CockpitInputs) -> None:
     )
 
 
+def _inactive_sources(inputs: CockpitInputs, built: list[SheetLineup]) -> tuple[list, str]:
+    from dfs import inactives as ina
+
+    if inputs.entered and inputs.entered.get("lineups"):
+        return ina.sources_from_entered(inputs.entered), "the lineups you entered (dfs entries record)"
+    return (
+        ina.sources_from_sheet(
+            {"label": lu.label, "marker": lu.marker, "names": list(lu.names)} for lu in built
+        ),
+        "your built lineups (no entries recorded yet)",
+    )
+
+
+def _practice_text(inputs: CockpitInputs, name: str, team: str) -> str:
+    if inputs.practice is None:
+        return ""
+    trend = inputs.practice.for_player(name, team)
+    return trend.text() if trend is not None else ""
+
+
+def _short_name(name: str) -> str:
+    """`Malik Nabers` -> `M. Nabers` (a DST's one word stays): a pivot fits one 170px cell."""
+    parts = name.split()
+    return name if len(parts) < 2 else f"{parts[0][0]}. {' '.join(parts[1:])}"
+
+
+def _pivot_cell(p, ranked_by: str) -> str:  # noqa: ANN001 - inactives.Pivot
+    """`M. Nabers $7.3K 16.7 1:00` (cash: CalPts) or `J. Cowing $3.6K +34 4:25` (GPP: Leverage)."""
+    if ranked_by == "Leverage" and p.leverage is not None:
+        value = f"{p.leverage:+.0f}"
+    else:
+        value = f"{p.calpts:.1f}" if p.calpts is not None else ""
+    when = p.kickoff_text.split(" ", 1)[-1].replace(" pm", "").replace(" am", "") if p.kickoff_text else ""
+    return " ".join(x for x in (_short_name(p.name), f"${p.salary / 1000:.1f}K", value, when) if x)
+
+
+def _inactives_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]) -> list:
+    """Block 8; returns the checks for block 9."""
+    from dfs import inactives as ina
+
+    b.section("8. INACTIVES AND PIVOTS  —  OUT / D / Q in your lineups, three pivots each, games not started")
+    sources, where = _inactive_sources(inputs, built)
+    if not sources:
+        b.line(CUE_OK, "No lineups entered or built yet.")
+        return []
+    found = ina.check(inputs.edge.to_dict("records"), sources, inputs.now)
+    if not found:
+        b.line(CUE_OK, f"No OUT, Doubtful or Questionable player still to play in {len(sources)} lineups.")
+    else:
+        b.header("Player", "Status", "Lineup", "Slot, up to", "Pivot 1", "Pivot 2", "Pivot 3")
+        shown = 0
+        for lc in found:
+            for f in lc.flags:
+                if shown >= MAX_ROWS_PER_BLOCK:
+                    break
+                shown += 1
+                cue = CUE_SWAP if f.status in ("OUT", "IR", "D") else CUE_LOOK
+                pivots = [_pivot_cell(p, f.ranked_by) for p in f.pivots] + ["", "", ""]
+                b.line(
+                    cue,
+                    f"{f.name} {f.position} {f.team}",
+                    f"{ina.STATUS_WORD[f.status]} · {f.kickoff_text}",
+                    f"{lc.source.label} ({lc.source.kind})",
+                    f"{f.slot} {money(f.budget)}" if f.budget is not None else f.slot,
+                    *pivots[:3],
+                )
+        total = sum(len(lc.flags) for lc in found)
+        if total > shown:
+            b.line("", f"and {total - shown} more (the Week page lists every one)")
+    b.note(
+        f"Source: Avail from the last sync, {where}. Pivots fit the slot (FLEX: RB / WR / TE), cost at most "
+        "his salary plus what the lineup leaves, are healthy and not started. Each reads name, salary, then "
+        "CalPts (cash) or Leverage (GPP, signed), then kickoff ET."
+    )
+    return found
+
+
+def _practice_block(b: _Builder, inputs: CockpitInputs, found: list) -> None:
+    b.section("9. PRACTICE REPORTS  —  this week's practice for the Q / D players in your lineups")
+    if inputs.practice is None:
+        b.line("", "No practice reports saved this week (they come with every sync's injury feed).")
+        return
+    seen: dict[tuple[str, str], tuple] = {}
+    for lc in found:
+        for f in lc.flags:
+            if f.status in ("D", "Q"):
+                seen.setdefault((f.name, f.team), (f, []))[1].append(lc.source.label)
+    if not seen:
+        b.line(CUE_OK, "No Questionable or Doubtful player still to play in your lineups.")
+    else:
+        b.header("Player", "Status", "Practice this week", "Trend", "Report", "In")
+        for (name, team), (f, labels) in sorted(seen.items(), key=lambda kv: (kv[1][0].status != "D", kv[0])):
+            trend = inputs.practice.for_player(name, team)
+            b.line(
+                CUE_LOOK,
+                f"{name} {f.position} {team}",
+                f.status,
+                (trend.text() if trend is not None else "") or "no report seen",
+                {"up": "improving", "down": "worse", "flat": "no change"}.get(trend.direction, "")
+                if trend
+                else "",
+                trend.report if trend is not None else "",
+                ", ".join(labels),
+            )
+    b.note(inputs.practice.note())
+
+
 # ---------------------------------------------------------------------------------------------
 # The tab
 # ---------------------------------------------------------------------------------------------
@@ -709,9 +825,11 @@ def build_layout(inputs: CockpitInputs) -> Layout:
     _exposure_block(b, inputs, built)
     _dk_block(b, inputs, built)
     _budget_block(b, inputs)
+    found = _inactives_block(b, inputs, built)
+    _practice_block(b, inputs, found)
     b.blank()
     b.note(
-        "Rebuilt by `dfs sync --live`, `dfs lineups late-swap`, `dfs setup cockpit`; nothing here is typed. "
+        "Rebuilt by `dfs sync`, `dfs lineups late-swap`, `dfs setup cockpit`; nothing here is typed. "
         "Cues: SWAP act now · LOOK check · FILL needs a lineup · ok nothing to do."
     )
     return b.layout

@@ -352,6 +352,7 @@ def payload(
     *,
     record_lines: dict[str, str] | None = None,
     log: dict[str, list[dict]] | None = None,
+    practice: dict[str, str] | None = None,
 ) -> dict:
     """The Explorer's data: columns (key, header, group, trust, format, tip), one array per player, the
     lenses, the Suggested builds per player, the signal records and each player's last five games."""
@@ -403,6 +404,7 @@ def payload(
         "records": record_lines or {},
         "builds": builds,
         "log": log or {},
+        "practice": practice or {},
     }
 
 
@@ -580,7 +582,7 @@ function render(redrawPicker = true) {
     const tr = el('tr');
     for (const k of cols) {
       const c = COL[k]; const td = el('td'); const x = v(r, k);
-      if (k === 'Name') { const a = el('a', 'pl', x); a.dataset.id = id; a.href = '#'; td.append(a); const st = v(r, 'Avail'); if (st) td.append(el('span', 'chip q', st)); for (const role of v(r, 'Roles').split(', ').filter(Boolean)) td.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role)); }
+      if (k === 'Name') { const a = el('a', 'pl', x); a.dataset.id = id; a.href = '#'; td.append(a); const st = v(r, 'Avail'); if (st) { const q = el('span', 'chip q', st); const pr = (D.practice || {})[id]; if (pr && (st === 'Q' || st === 'D')) { q.title = 'Practice: ' + pr; td.append(q, el('span', 'prac', pr)); } else td.append(q); } for (const role of v(r, 'Roles').split(', ').filter(Boolean)) td.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role)); }
       else if (k === 'Pool') td.append(poolSeg(id, v(r, 'Name'), x));
       else { td.textContent = fmt(c, x); if (c.fmt !== 'text') td.className = 'n'; }
       tr.append(td);
@@ -620,6 +622,7 @@ function openDrawer(id) {
   drawer.append(head);
   const sub = [v(r, 'Position'), v(r, 'Team') + ' vs ' + v(r, 'Opp'), fmt(COL.Salary, v(r, 'Salary')), v(r, 'Kickoff')].filter(Boolean).join(' · ');
   drawer.append(el('p', 'dim', sub + (v(r, 'Avail') ? ' · ' + v(r, 'Avail') : '')));
+  const prac = (D.practice || {})[id]; if (prac) drawer.append(el('p', 'prac', 'Practice this week: ' + prac));
   const tags = el('p'); for (const role of v(r, 'Roles').split(', ').filter(Boolean)) tags.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role));
   tags.append(document.createTextNode(' Pool: ')); tags.append(poolSeg(id, v(r, 'Name'), v(r, 'Pool'))); drawer.append(tags);
   const sec = (title, node) => { const d = el('section', 'dsec'); d.append(el('h4', null, title), node); drawer.append(d); };

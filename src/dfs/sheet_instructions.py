@@ -118,8 +118,19 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
         "stack). Then one board, each player once with his roles (Value, Cash core, Upside, Fade), beside a "
         "value map, a leverage map and the slate's games. The Explorer below has every priced player and "
         "every EdgeRaw column, by lens, with filters; click any name for everything about him. The rest of "
-        "the week (what changed, the contest plan, season-long, last week, the builds, Sunday, your tools) "
-        "is collapsed, one line each. A source that has not published yet shows as pending, not failed.",
+        "the week (what changed, the contest plan, the entry plan, bankroll health, season-long, last week, "
+        "the builds, the field's lineup and copies, the Sunday inactives check, Sunday, your tools) is "
+        "collapsed, one line each, in the order that day needs. Bankroll health is the bankroll by week (NFL "
+        "DFS, betting, other sports, total), each week's spend against the bankroll, and a stake guide by "
+        "tier from your [stakes] rules (or, without them, the proposed rule, labelled proposed) beside the "
+        "Weekly Budget. The entry plan checks what you entered: cash builds only in cash contests, GPP "
+        "builds only in GPPs, entry limits, spend by tier, and every entry has a lineup. The field's lineup "
+        "is the most-owned legal lineup, with how many copies of each of yours to expect (a GPP lineup at "
+        "5+ is flagged; dfs contests dupes recalibrates the estimate on your standings and dfs week close "
+        "reruns it). On Sunday the inactives check comes first: every OUT, Doubtful or Questionable player "
+        "in what you entered, with three pivots that fit his slot and the salary left. Every Q or D tag "
+        "shows that player's practice this week (DNP Wed, Limited Thu, ...). A source that has not "
+        "published yet shows as pending, not failed.",
     ),
     (
         "The Week server",
@@ -359,8 +370,10 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "Sunday's last 90 minutes on one read-only page, most urgent first: new Q / D / OUT among your "
         "players, which lineups still have open slots and the best change from the last late-swap run, wind "
         "in your games, the Lineups warnings, your top 10 exposure, entries still without a Lineup and the "
-        "budget. Nothing is typed. Rewritten by dfs sync --live and dfs lineups late-swap; column A says "
-        "what to do (SWAP, LOOK, FILL, ok).",
+        "budget; then every OUT, Doubtful or Questionable player in what you entered with three pivots each "
+        "(name, salary, CalPts for cash or leverage for GPP, kickoff), and the practice week of each Q or D "
+        "player. Nothing is typed. Rewritten by dfs sync (also midweek), dfs sync --live and dfs lineups "
+        "late-swap; column A says what to do (SWAP, LOOK, FILL, ok).",
     ),
     (
         "Edge Finder",

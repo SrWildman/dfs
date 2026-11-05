@@ -317,6 +317,15 @@ Merges your DraftKings history into a durable log, tags every contest with its s
 | `--slate-index STR` | Which slate-scoring index is shown beside each week's fitted effect, and is the 'index' comparator: top_n_lineup, p95_optimal, points_per_game, or 'none' to leave it out. Default: `top_n_lineup`. |
 | `--slate-index-file PATH` | A season,week,index CSV to use instead of computing the index. |
 
+### `dfs contests dupes`
+
+Calibrate the expected-copies estimate on your own saved standings (Plan K item 3): fits `copies = scale x entries x ownership product ^ exponent` per format (double-ups on CashOwn, GPPs on GppOwn), scoring each week on a fit without it (ownership too is fitted without that week), and prints the held-out error. Saves `data/model_cache/dup_calibration.json` for the Week page's consensus block. About a minute; reads files only, no sheet. `dfs week close` reruns it.
+
+| Option | What it does |
+|---|---|
+| `--weeks STR` | Comma-separated weeks to calibrate on (default: every week with saved standings). |
+| `--dry-run` | Print the fit and its error; save nothing. |
+
 ### `dfs ownership log`
 
 Logs one contest's actual per-player ownership into the durable local ownership log (`data/ownership_log.csv`) -- a standalone record, not a calibration pipeline (the ProjOwn-vs-actual calibration this was originally meant to feed is dropped, Week 3 follow-ups Item 3; see `ownership.py`'s module docstring). File-based on purpose, not automated -- see that same docstring for why an automated per-contest fetch was investigated and deliberately not shipped. Safe to re-run against the same file: replaces that contest's rows rather than duplicating them.

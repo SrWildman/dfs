@@ -203,3 +203,38 @@ def plan(
         typed, opponents, season=season, week=checked, cfg=cfg.contest_plan, budget=budget
     )
     week_inputs.save_input("contest_plan", payload, season=season, week=current_week())  # for the Week page
+    if not no_sheet:  # the Week page's bankroll health block reads the same tabs
+        from dfs import bankroll_health
+
+        bankroll_health.save_for_config(cfg, season=season, week=current_week())
+
+
+@contests_app.command("dupes")
+def dupes(
+    weeks: str = typer.Option(
+        None,
+        "--weeks",
+        help="Comma-separated weeks to calibrate on (default: every week with saved standings).",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the fit and its error; save nothing."),
+) -> None:
+    """Calibrate the expected-copies estimate on your own saved standings (Plan K item 3): fits
+    `copies = scale x entries x ownership product ^ exponent` per format (double-ups on CashOwn, GPPs on
+    GppOwn), scoring each week on a fit without it (ownership too is fitted without that week), and prints the
+    held-out error. Saves `data/model_cache/dup_calibration.json` for the Week page's consensus block. About
+    a minute; reads files only, no sheet. `dfs week close` reruns it."""
+    from dfs.nfl_calendar import current_season
+    from dfs.sim import dup_calibration
+
+    chosen = [int(w) for w in weeks.split(",") if w.strip()] if weeks else []
+    try:
+        result = dup_calibration.run(chosen, current_season())
+    except (ValueError, OSError, KeyError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    for line in dup_calibration.report_lines(result):
+        console.print(escape(line), highlight=False)
+    if dry_run:
+        console.print("[dim]Dry run: nothing saved.[/dim]")
+        return
+    console.print(f"[green]Saved {dup_calibration.save(result)}[/green]")

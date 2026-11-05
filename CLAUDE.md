@@ -135,7 +135,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs setup cockpit [--sheet-id <id>]` -- creates (or rebuilds) the read-only **Cockpit** tab right before Board (to its left): Sunday's last 90
   minutes on one page (new Q / D / OUT in his lineups, open slots with the best change from the last `late-swap` run, wind, the Lineups
   warnings, exposure top 10, DK Upload entries without a Lineup, budget). Nothing on it is typed; column A is the cue (`SWAP`, `LOOK`,
-  `FILL`, `ok`). `dfs sync --live` and `dfs lineups late-swap` refresh it, **only on a sheet that already has the tab** (they never create it
+  `FILL`, `ok`). `dfs sync` (plain and `--live`) and `dfs lineups late-swap` refresh it, **only on a sheet that already has the tab** (they never create it
   and never fail over it); `late-swap` saves its run to `data/cockpit/late_swap.json` for it (`late_swap_store`). Template first, then live,
   `dfs doctor` after (check `cockpit-tab`). `dfs week new` rebuilds it on the new sheet after the sync
   (fail-soft, only if the copied template has the tab) so the template's stale render never survives. Layout: `cockpit.py` (pure), I/O: `sheet_cockpit.py`.
@@ -225,6 +225,22 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   logged to `data/week/edits.log`; a closed week is refused. Every render reads the live Pool column and rules box
   (a read failure falls back to the last sync, read only). `--sheet-id` points it at a test copy. No DK access; the log
   (`data/week/serve.log`) never holds prompts. Ctrl-C stops it.
+- **Plan K on the Week page** (`week_money.py`, sections placed by day in `week_page.DAY_ORDER`, each with a trust chip):
+  **bankroll health** (`bankroll_health.py`: the Season tab's curve by week, NFL DFS / betting / other / total, found by
+  header; spend as a share of the bankroll; a stake guide by tier from `[stakes]`, else `stakes.propose` labelled
+  "proposed", beside the Weekly Budget; one "over the guide" sentence; input `bankroll`, saved fail-soft by `dfs sync`,
+  `contests plan`, `bankroll stakes` and `week close`), the **Sunday inactives check** (`inactives.py`: every OUT / D / Q
+  player, game not started, in `data/entered`, else the Lineups tab as the last Cockpit refresh saved it (`sheet_lineups`,
+  only from config's live sheet); three pivots: fits the slot, salary <= freed + left, not started, CalPts for cash /
+  Leverage for GPP; first and open on Sunday), the **field's lineup and copies** (`consensus.py`: max total CashOwn / GppOwn
+  under DK rules via `field_gen.chalk_lineups(objective="sum")`; copies from `sim/dup_calibration.py`'s held-out fit,
+  `data/model_cache/dup_calibration.json`, error shown; 5+ copies flags a GPP lineup, never cash), the **entry plan**
+  (`entry_plan.py`: kind, entry limits, spend by tier, every entry has a lineup (`entered.EnteredRecord.blank`); the hint
+  is `entries.suggest_pick`, Untested, never "Best in", never the portfolio plan), and the **practice trend** beside every
+  Q / D tag (board, Explorer, drawer; `practice.py` from `data/raw/nflverse_injuries/`). The Cockpit gains blocks 8
+  (inactives and pivots) and 9 (practice) below the first seven, and a plain `dfs sync` refreshes it too.
+- `dfs contests dupes [--weeks 4,5,6] [--dry-run]` -- refits the copies estimate on the saved standings (each week held
+  out, ownership too), prints the error, saves `data/model_cache/dup_calibration.json`; files only. `week close` reruns it.
 - **Rules box scope** (`suggest_state.scoped_item`): an Always use / Never use item may start `cash:` or `gpp:` and then
   applies to that kind of build only (`Rules.always_for(kind)` / `never_for(kind)`; unscoped items read as before, and a
   scoped conflict says Never wins for that kind).

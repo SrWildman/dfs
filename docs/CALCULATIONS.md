@@ -2046,6 +2046,64 @@ average weekly entry fees` over every week with fees paid; a bad week is `BAD_WE
 10 / (2k)` (capped at 100, rounded DOWN to 0.5); `max_entry_fee_pct = that / MIN_ENTRIES_PER_WEEK (5)` (rounded DOWN to 0.1).
 The 2, the 10% and the 5 are the proposal's own assumptions, not findings. Needs 8 weeks of entries.
 
+## Bankroll health (`bankroll_health.py`, Week page; Plan K item 1)
+
+Read from the sheet by header and label, never by position: the Season tab's `Week`, `Cash Net`, `GPP Net`, `Betting Net`,
+`Other Net`, `Ending Bankroll` and the four `... Risked` columns; the Bankroll tab's `Starting Bankroll`, `Weekly Budget`,
+`Weekly Cost`, `% Budget Remaining` (the value in the cell to the right of each label, looked for in `A1:L20`).
+
+- **The curve**: per week, `NFL DFS = Cash Net + GPP Net`, `Betting`, `Other sports`, `Total = their sum`, each cumulative
+  from Week 1. A week with no net and no Ending Bankroll is left out.
+- **Spend share**: `(Cash + GPP + Betting + Other Risked) / the previous week's Ending Bankroll` (blank for the first week).
+- **Stake guide**: `week = pct_week% x Starting Bankroll`, `largest entry = pct_entry% x Starting Bankroll`, with `pct_*` from
+  `[stakes]` when set ("your rules"), else from `stakes.propose` ("proposed", the same arithmetic `dfs bankroll stakes
+  --propose` prints). The week splits by tier with `contest_tiers.plan_dollars` (about 60 / 30 / at most 10%). No new rule.
+- **Over the guide**: one sentence when the Weekly Budget is above `week`, with the multiple when it is 2x or more.
+- **Budget left this week**: `Weekly Budget - Weekly Cost`; the season's `% Budget Remaining` is shown beside it.
+
+## Sunday inactives and pivots (`inactives.py`; Week page and Cockpit block 8; Plan K item 2)
+
+Lineups: `data/entered/<season>-wk<NN>.json` (`dfs entries record`), else the Lineups tab's built lineups. Flagged: `Avail` in
+OUT / IR / D / Q from the last sync, game not started (`GameStart` read as Eastern wall time). A lineup's kind is its
+build's, else its contests' (any GPP makes it GPP), else its Lineups marker (blank = cash).
+
+Pivots, all at once: fits the slot (his position; FLEX takes RB / WR / TE; the slot comes from DraftKings' order of the nine
+names), `Salary <= his salary + (50,000 - the lineup's salary)` (only his salary when one of the nine is not on the slate),
+clean `Avail`, game not started, not already in the lineup. Ranked by `CalPts` for cash, by `Leverage` (ceiling rank minus
+ownership rank) for GPP; before ownership publishes a GPP lineup ranks by `CalPts` and says so. Three each.
+
+## Consensus lineup and expected copies (`consensus.py`, `sim/dup_calibration.py`; Plan K item 3)
+
+**The field's lineup** is the legal DraftKings lineup (QB, 2 RB, 3 WR, TE, FLEX, DST, salary <= 50,000) maximising the sum of
+`CashOwn` (double-ups) or `GppOwn` (GPPs), solved exactly by `field_gen.chalk_lineups(objective="sum")`; OUT / IR / Doubtful
+players are left out. On Weeks 5-8 the max-sum and max-product lineups were the same in all 38 of Sam's contests.
+
+**Copies** `E = scale x entries x product ^ exponent`, `product` = the nine ownership shares multiplied, one `(scale,
+exponent)` per format fitted by Poisson maximum likelihood (`dups.fit_dup_model`) on every entry of Sam's saved paid Classic
+standings (observed copies = other entries with the same nine). Held out by week: each week is scored on a fit without it,
+with `CashOwn` / `GppOwn` also refitted without it (`field_own`). Reported: `log error = sqrt(mean((log(1+obs) -
+log(1+pred))^2))` weighted by entries, shown as a factor `e^error`; the most-duplicated lineup per contest and Sam's own
+entries, observed against predicted. Weeks 4-8 (first fit): double-ups `6.38 x entries x product^0.508`, factor 7.7, Sam's
+own cash entries off by about 3x to 280x in single weeks (the herd lineup is not smooth in ownership: a rough guide only); GPPs
+`0.38 x entries x product^0.522`, factor 1.5. Contest size: the series' median field in the contest log, else his typical
+paid double-up / GPP field this season. Cash is never flagged; a GPP lineup at `GPP_COPIES_FLAG` (5) or more is.
+
+## Entry plan checks (`entry_plan.py`; Plan K item 4)
+
+From the entered record: (1) a build's kind against the contest format (`series.CASH_FORMATS` = cash; a lineup of his own is
+not judged); (2) entries per contest (with the ones the file held empty) against `contest_tiers.entry_max_from_name`, an SE
+GPP or H2H counting as 1; (3) fees by tier (`contest_tiers.classify_entered`) against `plan_dollars(Weekly Budget)`
+(`spend_by_tier`'s over list); (4) entries with no lineup. Hint: `entries.suggest_pick` on the latest Suggested round (Cash %
+for cash formats, Top 1% for GPPs), Untested.
+
+## Practice trends (`practice.py`; Plan K item 5)
+
+From our own snapshots of nflverse's injury report (`data/raw/nflverse_injuries/<UTC stamp>.csv`, one per sync) whose
+Eastern date falls in the week (its Tuesday to the following Monday) and whose rows are that season-week: per player
+(name normalised + team), the last status seen each Eastern day (DNP / Limited / Full), collapsed to the changes, e.g.
+`DNP Wed · Limited Thu`. Direction up / down / flat compares the first and last. A Wed / Thu / Fri up to today with no sync
+is named, because a change that day shows on the next sync's day.
+
 ## Opportunity per dollar (`opportunity.py`, 2026-10-21; shadow)
 
 Sam's question: "targets per route run, weighted opportunities, targets per dollar ... help identify good plays for their price." Our research says a usage model does not beat TFFB as a projection and `USAGE↑` is weak, so this is the PRICE angle, not a projection: nothing feeds `CalPts` or a build. Everything is this season only, over the games a player PLAYED strictly before the slate week (a missed game is skipped, never a zero), with no prior-season blend (roles change between seasons); a player with no game yet is blank.

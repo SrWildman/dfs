@@ -247,6 +247,8 @@ morning, look for late-released small fields and overlay. `dfs week serve` adds 
 fields typed while you look at a contest) and a drop zone: drop DK's entries file at lock and it shows the spend so far
 by tier against the plan while you can still withdraw.
 
+**The entry plan** (Week page, Plan K): this week's money by tier, which builds go where, and once `dfs entries record` has run, four checks on what you entered: cash builds only in cash contests and GPP builds only in GPPs, no contest over its entry limit (single entry, `[3 Entry Max]`, an H2H counts as one), spend by tier within the plan, and every entry has a lineup (the record now keeps the entries the file held empty). Each contest carries the same grey hint `dfs entries fill` uses (best Cash % / best Top 1%), labelled Untested. The **field's lineup and copies** block next to it says how many copies of each lineup to expect in each contest: close to the field is fine in cash, 5+ copies in a GPP is flagged (`dfs contests dupes` refits the estimate; `dfs week close` reruns it).
+
 **At lock, after entering: `dfs entries record`.** Download DK's entries file again (Edit entries) once you have entered,
 then run it: it records every lineup you entered, the contests it went into and the Suggested build it came from (8 or
 more of its 9 players in one saved build of the week, any round) or "own", to `data/entered/<season>-wk<NN>.json`. With
@@ -286,7 +288,9 @@ dfs lineups late-swap         # who's still swappable, and the best swaps for th
 
 **The Cockpit tab** (right before Board) is the one page for these last 90 minutes: new Q / D / OUT among your players, which lineups still have open slots and the best change from the last
 `late-swap` run, wind in your games, the Lineups warnings, your top 10 exposure, entries still without a Lineup and the budget. Column A says what to do (`SWAP`, `LOOK`, `FILL`, `ok`). Nothing on it is
-typed. Both commands above rewrite it when the sheet has the tab (`dfs setup cockpit` creates it, template first); its "best change" lines are from the last `late-swap` run and say when that was, so run
+typed. Below those seven blocks, **8. Inactives and pivots** lists every OUT / Doubtful / Questionable player in the lineups you entered (`dfs entries record`;
+else the built lineups) with three pivots each that fit his slot, cost at most his salary plus what the lineup leaves and have not kicked off (cash ranked
+by CalPts, GPP by Leverage), and **9. Practice reports** shows the week's practice for each Q / D player. Both commands above, and a plain `dfs sync`, rewrite it when the sheet has the tab (`dfs setup cockpit` creates it, template first); its "best change" lines are from the last `late-swap` run and say when that was, so run
 `late-swap` (add `--refresh-injuries` once news breaks) before trusting them.
 
 Kickoff times are read as Eastern time (TFFB's `GameStart` is Eastern wall-clock time, not UTC); a player locks at

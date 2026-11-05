@@ -48,6 +48,7 @@ WRITERS = frozenset(
         "dfs bankroll stakes",
         "dfs bankroll sync",
         "dfs contests analyze",
+        "dfs contests dupes",
         "dfs contests plan",
         "dfs contests update",
         "dfs entries fill",

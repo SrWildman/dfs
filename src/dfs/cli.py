@@ -2793,9 +2793,15 @@ def sync(
         )
         if live_client is not None and "edge" in source_names:
             _refresh_cockpit(cfg, live_client, previous_edge=old_edge)
+    elif "edge" in source_names and not no_upload:
+        # Plan K: a plain sync refreshes the Cockpit too (its inactives and practice blocks are a week-long
+        # read), only where the sheet already has the tab, never failing the sync.
+        _refresh_cockpit(cfg, live_client or SheetsClient(cfg.google_sheets))
 
     if "edge" in source_names and not no_upload:
         _refresh_player_card(cfg, ctx, edge_width_before=edge_width_before)
+    if not no_upload:
+        _save_bankroll_health(cfg, live_client or SheetsClient(cfg.google_sheets), ctx.season, ctx.week)
 
     if any_failed:
         raise typer.Exit(code=1)
@@ -3105,6 +3111,18 @@ def _depth_and_gsis() -> tuple:
     except FileNotFoundError:
         depth_rows = None
     return depth_rows, gsis_by_id
+
+
+def _save_bankroll_health(cfg: Config, client: SheetsClient, season: int, week: int) -> None:
+    """Read the Season and Bankroll tabs for the Week page's bankroll health block (`bankroll_health.save`).
+    Never fails the command; says why when the read did not work."""
+    from dfs import bankroll_health
+
+    if not bankroll_health.save(client, cfg, season=season, week=week):
+        console.print(
+            "[yellow]Bankroll health not read (the Season or Bankroll tab); the Week page keeps the last "
+            "one.[/yellow]"
+        )
 
 
 def _refresh_stacks(cfg: Config, client: SheetsClient) -> None:
@@ -3738,7 +3756,14 @@ def entries_record(
             raise typer.Exit(code=1)
         kept, skipped = ent.classify_entries(parsed)
         lineups = entered.from_entries(kept, parsed.players)
-        record = entered.make_record(season, week, f"entries file {path.name}", lineups, skipped=skipped)
+        record = entered.make_record(
+            season,
+            week,
+            f"entries file {path.name}",
+            lineups,
+            skipped=skipped,
+            blank=entered.blank_entries(kept),
+        )
     else:
         try:
             sheet = dku.read_lineups(client, cfg.lineups.builder_tab)
@@ -5584,8 +5609,32 @@ def week_close(
     _contest_plan_after_close(cfg, closed)
     _entered_record_warning(closed)
     _cash_postmortem_after_close(closed)
+    _plan_k_after_close(cfg, closed)
     if research:
         _research_after_close(cfg, week)
+
+
+def _plan_k_after_close(cfg: Config, closed: int | None) -> None:
+    """The Week page's bankroll curve (the Season row the close just wrote) and the copies estimate
+    refitted on the new standings. Never fails the close."""
+    from dfs.nfl_calendar import current_season, current_week
+    from dfs.sim import dup_calibration
+
+    try:
+        _save_bankroll_health(cfg, SheetsClient(cfg.google_sheets), current_season(), current_week())
+    except Exception as e:  # noqa: BLE001 - the close never fails over the Week page
+        console.print(f"[yellow]Bankroll health not read ({escape(str(e))}).[/yellow]")
+    try:
+        result = dup_calibration.run([], current_season())
+        dup_calibration.save(result)
+        console.print(
+            f"[green]OK[/green] copies estimate recalibrated on Weeks {', '.join(map(str, result['weeks']))}"
+        )
+    except Exception as e:  # noqa: BLE001 - the close never fails over a study
+        console.print(
+            f"[yellow]Copies estimate not recalibrated ({escape(str(e))}); `dfs contests dupes` reruns "
+            "it.[/yellow]"
+        )
 
 
 def _research_after_close(cfg: Config, week: int | None) -> None:
@@ -6072,6 +6121,10 @@ def bankroll_stakes(
         if no_sheet:
             return
         console.print(write_stakes(client, layout, cfg.bankroll.tab))
+        if not sheet_id:
+            from dfs.nfl_calendar import current_week
+
+            _save_bankroll_health(cfg, client, season, current_week())
     except (SheetsError, StakesError) as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(code=1) from e

@@ -163,6 +163,18 @@ def gather(
     except Exception as e:  # noqa: BLE001 - one unreadable block must not stop the others
         frame = my_frame.apply(edge, {}, {})
         unavailable["frame"] = str(e)
+    from dfs.nfl_calendar import current_week
+
+    live_id = getattr(getattr(cfg, "google_sheets", None), "sheet_id", None)
+    live = live_id is not None and getattr(getattr(client, "_cfg", None), "sheet_id", None) == live_id
+    entered_record, practice = _plan_k_inputs(
+        season or current_season(),
+        week if week is not None else current_week(),
+        now,
+        lineups,
+        unavailable,
+        save_lineups=live and week is not None,
+    )
     return cockpit.CockpitInputs(
         now=now,
         sheet_title=title,
@@ -176,7 +188,46 @@ def gather(
         targets=targets,
         unavailable=unavailable,
         adjustments=tuple(frame.lines()),
+        entered=entered_record,
+        practice=practice,
     )
+
+
+def _plan_k_inputs(  # noqa: ANN202
+    season: int,
+    week: int,
+    now: datetime,
+    lineups,
+    unavailable: dict[str, str],
+    *,
+    save_lineups: bool,  # noqa: ANN001
+):
+    """Blocks 8 and 9's inputs (the entered record, the week's practice trends) and, for the Week page's
+    Sunday check, the Lineups tab as read here (`week_inputs.save_sheet_lineups`; only from the live sheet in
+    config.toml whose title names its week, so a template or test copy never overwrites it). Each fails
+    soft."""
+    import json
+
+    from dfs import entered, paths, practice, week_inputs
+
+    record = None
+    try:
+        path = entered.record_path(season, week)
+        if path.exists():
+            record = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        unavailable["entered"] = str(e)
+    trends = None
+    try:
+        trends = practice.load_history(paths.DATA_DIR, season=season, week=week, now=now)
+    except Exception as e:  # noqa: BLE001 - an odd snapshot never stops the Cockpit
+        unavailable["practice"] = str(e)
+    if save_lineups:
+        try:
+            week_inputs.save_sheet_lineups(lineups, season=season, week=week)
+        except Exception as e:  # noqa: BLE001
+            log.warning("cockpit: Lineups not saved for the Week page: %s", e)
+    return record, trends
 
 
 # ---------------------------------------------------------------------------------------------
@@ -278,8 +329,9 @@ def refresh_if_present(
     previous_edge: pd.DataFrame | None = None,
     now: datetime | None = None,
 ) -> tuple[bool, str]:
-    """For `sync --live` and `late-swap`: refresh the Cockpit only when the sheet has one, and never fail the
-    command. Returns (ok, one line to print); (True, "") when there is no Cockpit tab to refresh."""
+    """For `sync` (plain and `--live`) and `late-swap`: refresh the Cockpit only when the sheet has one, and
+    never fail the command. Returns (ok, one line to print); (True, "") when there is no Cockpit tab to
+    refresh."""
     try:
         if not client.tab_exists(COCKPIT_TAB):
             return True, ""
