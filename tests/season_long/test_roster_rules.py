@@ -389,3 +389,26 @@ def test_a_stream_is_not_offered_when_the_starter_plays(monkeypatch):
     v2 = fx.bourbon(daniels=fx.bye(22))
     ev2 = syn.evaluator(v2, monkeypatch)
     assert rm.stream_applies(v2, ev2, ev2.rosters[1], "stroud")
+
+
+def test_a_player_already_in_an_ir_slot_is_never_told_to_move_to_ir():
+    """Plan J item 10 (Bourbon, DeVonta Smith): `ir_lines` reads Sleeper's `reserve`, so a hurt player who is
+    already in the IR slot gets no "move to IR" line, even with a second slot open. (On 2026-11-04 Sleeper
+    itself returned `reserve: None` for Sam's Bourbon roster, so a "move Smith to IR" there was Sleeper's
+    state, not this code: the fix is the move in Sleeper.)"""
+    for slots in (1, 2):
+        v = fx.build(
+            fx.bourbon_mine(), fx.bourbon_free(), slots=fx.BOURBON_SLOTS, bench=5, reserve_slots=slots,
+            reserve=["smith"],
+        )  # fmt: skip
+        assert v.ros.summary.loc["smith", "injury_status"]  # hurt: IR-eligible
+        assert all(x.player_id != "smith" for x in rr.ir_lines(v) if x.kind == "move")
+
+
+def test_the_same_hurt_player_off_the_ir_slot_is_told_to_move_when_a_slot_is_open():
+    v = fx.build(
+        fx.bourbon_mine(), fx.bourbon_free(), slots=fx.BOURBON_SLOTS, bench=5, reserve_slots=1, reserve=[]
+    )
+    if "smith" not in v.league.me.players:
+        pytest.skip("the fixture keeps Smith only in the reserve list")
+    assert [x.player_id for x in rr.ir_lines(v) if x.kind == "move"] == ["smith"]

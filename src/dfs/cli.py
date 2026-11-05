@@ -5084,18 +5084,31 @@ def week_serve_command(
     open_browser: bool = typer.Option(
         True, "--open/--no-open", help="Open the page in your browser (default: open it)."
     ),
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Read and write this sheet instead of config.toml's (a test copy). The page's writes go here.",
+    ),
 ) -> None:
     """Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code
     docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with
     live output, drop DraftKings' entries file at lock and the history / standings at close, and check a
     contest against the tiers. Claude Code runs here in the main checkout under your own login and asks you
     (Approve / Deny on the page) before anything that needs approval; commands that write take the run lock,
-    so the chat, the buttons and a terminal cannot write at once. Writes no sheet itself. Ctrl-C stops it.
-    `dfs week page` still writes the static file."""
+    so the chat, the buttons and a terminal cannot write at once. The page itself writes three things to the
+    week's sheet: a player's Pool cell (Cash / GPP / Both / none, the sheet dropdown's cell), a
+    decision's line in Suggested's rules box, and the suggested starting pool; each re-reads the cell first
+    and refuses on a change,
+    takes the run lock, is read back and is logged to data/week/edits.log. A closed week is read only. Ctrl-C
+    stops it. `dfs week page` still writes the static file."""
     from dfs import week_server
 
     week_server.serve(
-        week=week, port=port, open_browser=open_browser, echo=lambda line: console.print(escape(line))
+        week=week,
+        port=port,
+        open_browser=open_browser,
+        echo=lambda line: console.print(escape(line)),
+        sheet_id=sheet_id,
     )
 
 

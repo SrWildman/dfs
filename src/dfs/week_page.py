@@ -19,14 +19,16 @@ only function that touches the disk or the browser.
 from __future__ import annotations
 
 import html
+import json
 import re
 import sys
 import webbrowser
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from dfs import kickoff, launcher, nfl_calendar, runlog, week_plays, week_today, week_tools
+from dfs import kickoff, nfl_calendar, runlog, week_plays, week_today, week_tools
 from dfs.week_inputs import WeekInputs, data_root, gather, parse_time
 
 # Run after one of these commands succeeds. `dfs week new` is added to the planned list: a new week's
@@ -219,7 +221,6 @@ class Section:
 
 
 LIVE_BUTTON = "runbtn-slot"  # `week_live.augment` turns this span into a button that runs its command
-LIVE_POOL = "<!--live:pool-->"  # where the server's "Add ticked to pool" bar goes
 STATIC_ONLY = "static-only"  # a paragraph the live page drops (it has the buttons instead)
 
 
@@ -228,13 +229,18 @@ def run_button(command: str, label: str) -> str:
     return f'<span class="{LIVE_BUTTON}" data-command="{e(command)}" data-label="{e(label)}"></span>'
 
 
+_LIVE: ContextVar[bool] = ContextVar("week_page_live", default=False)  # the served page: no command text
+
+
 def not_run(
     what: str, say: str | None = None, command: str | None = None, button: tuple[str, str] | None = None
 ) -> str:
+    """ "Not run yet" and what produces it: the phrase to say and (static page) the command. The served page
+    shows the phrase (it gets an Ask button) and the run button, never the command text."""
     hint = ""
     if say:
         hint += f" Say {code(chr(34) + say + chr(34), 'say')}"
-    if command:
+    if command and not _LIVE.get():
         hint += f" ({code(command)})" if say else f" Run {code(command)}"
     btn = f" {run_button(*button)}" if button else ""
     return f'<p class="notrun"><b>Not run yet.</b> {rich(what)}.{hint}{btn}</p>'
@@ -250,59 +256,8 @@ def last_tag(inp: WeekInputs, run: runlog.Run | None) -> str:
     return f'<span class="last">last run {e(week_today.when(inp.now, run.time))}{ok}</span>'
 
 
-def launcher_state_for(inp: WeekInputs):
-    from dfs.cli import GAMES_FINISHED_AFTER_HOURS
-
-    return week_today.launcher_state(
-        week=inp.week,
-        now=inp.now,
-        manifest=inp.manifest,
-        game_starts=[r["GameStart"] for r in (inp.edge or []) if r.get("GameStart")],
-        pool_count=len(inp.pool),
-        finished_after_hours=GAMES_FINISHED_AFTER_HOURS,
-    )
-
-
 def suggest_time(inp: WeekInputs) -> datetime | None:
     return parse_time((inp.suggest or {}).get("at"))
-
-
-def today_html(inp: WeekInputs, registered: set[str] | None) -> str:
-    day = inp.now.astimezone().weekday()
-    steps = week_today.steps_for(day, inp.runs, registered)
-    items = []
-    for s in steps:
-        say = f"Say {code(chr(34) + s.phrase + chr(34), 'say')}" if s.phrase else "By hand"
-        run = f"{code(s.command)}" if s.command else ""
-        items.append(
-            f'<li><div class="step-head">{say} {("&rarr; " + run) if run else ""}</div>'
-            f'<div class="why">{rich(s.why)}</div>{last_tag(inp, s.last) if s.command else ""}</li>'
-        )
-    state = launcher_state_for(inp)
-    suggestions = [
-        f"{e(a.label)} {('(' + code(a.command) + ')') if a.command else '(in the sheet)'}"
-        for a in launcher.suggest_actions(state)
-    ]
-    stale = week_today.stale_items(
-        now=inp.now,
-        manifest=inp.manifest,
-        suggest_at=suggest_time(inp),
-        late_swap_at=parse_time((inp.late_swap or {}).get("saved_at")),
-        season_at=parse_time((inp.season_long or {}).get("saved_at")),
-        day=day,
-    )
-    stale_html = (
-        bullets([e(s) for s in stale]) if stale else '<p class="ok">Nothing stale: every input is fresh.</p>'
-    )
-    return (
-        f'<section class="card today" id="today"><div class="card-head"><h2>Today: '
-        f"{e(week_today.DAY_NAMES[day])}, {e(week_today.DAY_THEME[day].lower())}</h2></div>"
-        f'<ol class="steps">{"".join(items)}</ol>'
-        f'<div class="two"><div><h4>What the data says to do next</h4>{bullets(suggestions)}'
-        '<p class="note">The guided menu\'s own suggestions (<code>dfs</code>), from local files: the page '
-        "never opens the sheet, so it cannot see how many lineups are filled.</p></div>"
-        f"<div><h4>What is stale</h4>{stale_html}</div></div></section>"
-    )
 
 
 # -- decisions --------------------------------------------------------------------------------------
@@ -949,308 +904,6 @@ def sync_stamp(inp: WeekInputs) -> str:
     return f"as of the sync {week_today.when(inp.now, at)}" if at else ""
 
 
-def signal_chip(token: str) -> str:
-    label, why = TRUST[SIGNAL_TRUST.get(token, "plays_shadow")]
-    return f'<span class="sig {label.lower()}" title="{e(token)}: {e(why)}">{e(token)} {e(label)}</span>'
-
-
-def pool_slot(name: str) -> str:
-    """Empty on the static page; the served page makes it a tick box that adds him with `dfs pool add`."""
-    return f'<span class="pool-slot" data-name="{e(name)}"></span>'
-
-
-def player_cell(p: week_plays.Play) -> str:
-    bits = [f"<b>{e(p.name)}</b>"]
-    if p.avail in week_plays.STATUS_WORD:
-        bits.append(f'<span class="sig bad">{e(week_plays.STATUS_WORD[p.avail])}</span>')
-    bits += [signal_chip(c) for c in p.chips]
-    if p.in_pool:
-        bits.append(f'<span class="sig proven">in pool ({e(p.in_pool)})</span>')
-    return " ".join(bits)
-
-
-def game_cell(p: week_plays.Play) -> str:
-    return e(p.game) + (f'<br><span class="dim">{e(p.kickoff)}</span>' if p.kickoff else "")
-
-
-def own_cell(value: float | None, pending: bool, *, chalk: bool = False) -> str:
-    if pending:
-        return '<span class="dim">publishes ~Fri/Sat</span>'
-    if value is None:
-        return "-"
-    tag = '<br><span class="bad">chalk: play or fade on purpose</span>' if chalk else ""
-    return f"{e(pct(value))}{tag}"
-
-
-def f1(value: float | None) -> str:
-    return "-" if value is None else f"{value:.1f}"
-
-
-def f0(value: float | None) -> str:
-    return "-" if value is None else f"{value:.0f}"
-
-
-def plays_table(headers: list[str], by_pos: dict[str, list], row_cells) -> str:
-    """One table, a band per position; `row_cells(play)` returns the cells after the pool tick."""
-    head = '<th class="poolcol">Pool</th>' + "".join(f"<th>{h}</th>" for h in headers)
-    body = []
-    width = len(headers) + 1
-    for pos in week_plays.POSITIONS:
-        rows = by_pos.get(pos) or []
-        if not rows:
-            continue
-        body.append(f'<tr class="pos"><td colspan="{width}">{e(pos)}</td></tr>')
-        for p in rows:
-            body.append(
-                f'<tr><td class="poolcol">{pool_slot(p.name)}</td>'
-                + "".join(f"<td>{c}</td>" for c in row_cells(p))
-                + "</tr>"
-            )
-    if not body:
-        return '<p class="dim">Nobody qualifies yet.</p>'
-    rows = "".join(body)
-    return (
-        f'<div class="scroll"><table class="playtbl"><thead><tr>{head}</tr></thead>'
-        f"<tbody>{rows}</tbody></table></div>"
-    )
-
-
-def trust_chip(key: str) -> str:
-    return _chip(key)
-
-
-def plays_section(inp: WeekInputs) -> Section:
-    if not inp.edge:
-        return Section(
-            "plays",
-            "Plays",
-            not_run("Nothing is synced, so there are no plays", say="sync", command="dfs sync"),
-            TRUST["plays_value"],
-            ran=False,
-        )
-    view = week_plays.plays(inp.edge, inp.pool)
-    if view.empty:
-        return Section(
-            "plays",
-            "Plays",
-            not_run("The synced slate has no priced, projected players", say="sync", command="dfs sync"),
-            TRUST["plays_value"],
-            ran=False,
-        )
-    cash_pending, gpp_pending = view.cash_own_pending, view.gpp_own_pending
-    body = [
-        note(
-            f"Five a position from {view.players} healthy, priced players on the synced slate. CalPts is the "
-            "calibrated projection; a player who is Questionable stays on the list, tagged."
-        )
-    ]
-    if cash_pending or gpp_pending:
-        pending_banner = week_plays.OWN_NOT_OUT[0].upper() + week_plays.OWN_NOT_OUT[1:]
-        body.append(
-            f'<p class="flag">{e(pending_banner)}. The chalk tags and the leverage list appear then.</p>'
-        )
-
-    def game_why(p: week_plays.Play, token: str = "") -> tuple[str, str]:
-        record = ""
-        if token:
-            line = week_plays.record_line(token, inp.signal_table, inp.scored_weeks)
-            record = f'<br><span class="record">{e(line)}</span>'
-        return game_cell(p), f'<span class="why-line">{e(p.why)}</span>{record}'
-
-    body.append(f"<h4>Best projected value {trust_chip('plays_value')}</h4>")
-    body.append(note("CalPts per $1K of salary, CalPts breaking ties."))
-    body.append(
-        plays_table(
-            ["Player", "Salary", "CalPts", "Per $1K", "Game", "Why"],
-            view.value,
-            lambda p: [player_cell(p), e(f"${p.salary:,.0f}"), f1(p.calpts), f1(p.value), *game_why(p)],
-        )
-    )
-    own_head = "Double-up own" + (f" ({e(week_plays.OWN_NOT_OUT)})" if cash_pending else "")
-    body.append(f"<h4>Cash core candidates {trust_chip('plays_cash')} {trust_chip('plays_own')}</h4>")
-    body.append(
-        note(
-            "CalPts and value both at least the position's median, best Floor first. Floor is the 20th "
-            "percentile of his outcomes."
-        )
-    )
-    body.append(
-        plays_table(
-            ["Player", "Salary", "CalPts", "Floor", "Hit3x / Bust", own_head, "Game", "Why"],
-            view.cash,
-            lambda p: [
-                player_cell(p),
-                e(f"${p.salary:,.0f}"),
-                f1(p.calpts),
-                f1(p.floor),
-                f"{f0(p.hit3x)}% / {f0(p.bust)}%",
-                own_cell(p.cash_own, cash_pending, chalk=p.chalk),
-                *game_why(p),
-            ],
-        )
-    )
-    gpp_note = (
-        "Best Boom% (the chance of 4x salary), ceiling breaking ties. Leverage shows once ownership is out."
-        if gpp_pending
-        else "Top half of each position's Boom%, ordered by leverage: Boom% rank minus ownership rank within "
-        "the position (the sheet's Lev), so low-owned upside comes first."
-    )
-    gpp_head = "GPP own" + (f" ({e(week_plays.OWN_NOT_OUT)})" if gpp_pending else "")
-    body.append(f"<h4>GPP upside {trust_chip('plays_gpp')} {trust_chip('plays_own')}</h4>")
-    body.append(note(gpp_note))
-    body.append(
-        plays_table(
-            ["Player", "Salary", "CalPts", "Ceiling", "Boom%", gpp_head, "Leverage", "Game", "Why"],
-            view.gpp,
-            lambda p: [
-                player_cell(p),
-                e(f"${p.salary:,.0f}"),
-                f1(p.calpts),
-                f1(p.ceiling),
-                f"{f0(p.boom)}%",
-                own_cell(p.gpp_own, gpp_pending),
-                ('<span class="dim">-</span>' if p.lev is None else e(f"{p.lev:+.0f}")),
-                *game_why(p),
-            ],
-        )
-    )
-    body.append(f"<h4>Fades {trust_chip('plays_fade')}</h4>")
-    if view.fades:
-        body.append(
-            plays_table(
-                ["Player", "Salary", "CalPts", "Game", "Why"],
-                {"TE": view.fades},
-                lambda p: [
-                    player_cell(p),
-                    e(f"${p.salary:,.0f}"),
-                    f1(p.calpts),
-                    *game_why(p, week_plays.FADE),
-                ],
-            )
-        )
-        body.append(note("FADE↓ is a tight-end signal: fade him or pay for it on purpose."))
-    else:
-        body.append('<p class="ok">No FADE↓ on the slate this week.</p>')
-    if view.shadow:
-        body.append(f"<h4>Other warning chips {trust_chip('plays_shadow')}</h4>")
-        body.append(
-            plays_table(
-                ["Player", "Salary", "CalPts", "Game", "Why"],
-                {p.pos: [x for x in view.shadow if x.pos == p.pos] for p in view.shadow},
-                lambda p: [
-                    player_cell(p),
-                    e(f"${p.salary:,.0f}"),
-                    f1(p.calpts),
-                    *game_why(p, next((c for c in p.chips if c in week_plays.SHADOW_TOKENS), "")),
-                ],
-            )
-        )
-        body.append(
-            note("Shadow: unproven chips on players near the top of the lists. A second opinion only.")
-        )
-    body.append(LIVE_POOL)
-    body.append(
-        f'<p class="note {STATIC_ONLY}">To add players to your pool, say '
-        f"{code(chr(34) + 'add X, Y to my pool' + chr(34), 'say')} ("
-        f"{code('dfs pool add ' + chr(34) + 'Name' + chr(34))}). The served page "
-        "(<code>dfs week serve</code>) "
-        "has a tick box on every row.</p>"
-    )
-    return Section("plays", "Plays", "".join(body), TRUST["plays_value"], asof=sync_stamp(inp))
-
-
-def signed(value: float | None, digits: int = 1) -> str:
-    if value is None:
-        return "-"
-    return "0" if abs(value) < 0.05 else f"{value:+.{digits}f}"
-
-
-def slate_section(inp: WeekInputs) -> Section:
-    trust = TRUST["slate"]
-    games = week_plays.slate(inp.edge)
-    if not games:
-        return Section(
-            "slate",
-            "Slate",
-            not_run("Nothing is synced", say="sync", command="dfs sync"),
-            trust,
-            ran=False,
-        )
-    rows = []
-    for g in games:
-        title = f"{g.away} @ {g.home}" if g.away and g.home else g.key
-        cls = []
-        if g.top:
-            cls.append("top")
-        if g.moved:
-            cls.append("moved")
-        implied = " / ".join(f"{t} {v:.1f}" for t, v in g.implied.items()) if g.implied else "-"
-        if g.favorite and g.spread is not None:
-            spread = f"{g.favorite} {g.spread:+g}"
-        else:
-            spread = "-"
-        move = (
-            f"total {signed(g.tot_move)}, spread {signed(g.spread_move)}"
-            if g.tot_move is not None or g.spread_move is not None
-            else '<span class="dim">no opening yet</span>'
-        )
-        if g.moved:
-            move = f'<span class="bad">{move}</span>'
-        inj = ", ".join(
-            f"{e(n)} ({e(pos)} {e(week_plays.STATUS_WORD.get(st, st))})" for n, pos, _t, st in g.injuries
-        )
-        rows.append(
-            '<tr class="'
-            + " ".join(cls)
-            + '">'
-            + "".join(
-                f"<td>{c}</td>"
-                for c in [
-                    f"<b>{e(title)}</b>" + (' <span class="tag">top 3 total</span>' if g.top else ""),
-                    e(g.kickoff) or "-",
-                    e(f"{g.total:g}") if g.total is not None else "-",
-                    e(spread),
-                    e(implied),
-                    move,
-                    e(g.weather) or "-",
-                    inj or '<span class="dim">none</span>',
-                ]
-            )
-            + "</tr>"
-        )
-    head = "".join(
-        f"<th>{h}</th>"
-        for h in [
-            "Game",
-            "Kickoff (ET)",
-            "Total",
-            "Spread",
-            "Implied totals",
-            "Moved since the opening",
-            "Weather and roof",
-            "Key injuries (OUT, Doubtful, Questionable)",
-        ]
-    )
-    body = [
-        f'<div class="scroll"><table class="slate"><thead><tr>{head}</tr></thead>'
-        f"<tbody>{''.join(rows)}</tbody></table></div>",
-        note(
-            "Highest total first. The shaded rows are the three best scoring environments; red marks a total "
-            f"that moved {week_plays.TOTAL_MOVED:g}+ points since the opening snapshot. Key injuries are a "
-            "team's likely starters (top salaries: QB1, RB1-2, WR1-3, TE1) who are not healthy."
-        ),
-    ]
-    if not week_plays.opening_known(games):
-        body.append(
-            not_run(
-                "No opening odds snapshot has been diffed yet, so movement is blank. Snapshot the lines "
-                "(Tuesday morning is the opening) and the next sync fills it",
-                command="dfs odds snapshot",
-            )
-        )
-    return Section("slate", "Slate", "".join(body), trust, asof=sync_stamp(inp))
-
-
 def change_list(items: list[week_plays.Change], empty: str, limit: int = 12) -> str:
     if not items:
         return f'<p class="ok">{e(empty)}</p>'
@@ -1348,69 +1001,186 @@ def tools_html(inp: WeekInputs, tools: list[week_tools.Tool]) -> str:
 # -- the page ---------------------------------------------------------------------------------------
 
 CSS = """
-:root{--bg:#f6f6f3;--card:#fff;--ink:#1d1f24;--dim:#666b75;--line:#dcdde1;--accent:#1f5eff;
---proven:#17794a;--shadow:#9a6400;--untested:#6b6f78;--bad:#b3261e;--warn:#8a5a00;--ok:#17794a;--flag:#fff3d6}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#14161a;--card:#1c1f25;--ink:#e8e9ec;
---dim:#9aa0ab;--line:#2e323a;--accent:#7da2ff;--proven:#58c58e;--shadow:#e0b04a;--untested:#9aa0ab;--bad:#ff8a80;
---warn:#e0b04a;--ok:#58c58e;--flag:#3a3015}}
+:root{--bg:#f5f6f3;--card:#fff;--ink:#1c2420;--dim:#5f6b65;--line:#dde2de;--accent:#2d5f8a;
+--accent-soft:#e1ecf5;
+--proven:#2f6b4f;--proven-soft:#e2efe7;--shadow:#8a6d1f;--shadow-soft:#f4ecd4;--untested:#62706a;
+--bad:#b8462e;
+--bad-soft:#f7e4de;--warn:#8a5a00;--ok:#2f6b4f;--flag:#fff3d6;--wr:#2d5f8a;--rb:#2f6b4f;--te:#a8781a}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#121513;--card:#1a1f1c;--ink:#e6ebe8;
+--dim:#9aa69f;--line:#2d3531;--accent:#7fb2df;--accent-soft:#18283a;--proven:#73c197;--proven-soft:#1d3328;
+--shadow:#d8bf73;--shadow-soft:#332b16;--untested:#9aa69f;--bad:#ec8a72;--bad-soft:#3a221c;--warn:#e0b04a;
+--ok:#73c197;--flag:#3a3015;--wr:#7fb2df;--rb:#73c197;--te:#e0b04a}}
+:root[data-theme=dark]{--bg:#121513;--card:#1a1f1c;--ink:#e6ebe8;--dim:#9aa69f;--line:#2d3531;
+--accent:#7fb2df;
+--accent-soft:#18283a;--proven:#73c197;--proven-soft:#1d3328;--shadow:#d8bf73;--shadow-soft:#332b16;
+--untested:#9aa69f;--bad:#ec8a72;--bad-soft:#3a221c;--warn:#e0b04a;--ok:#73c197;--flag:#3a3015;--wr:#7fb2df;
+--rb:#73c197;--te:#e0b04a}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,
 BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-header,main{max-width:1040px;margin:0 auto;padding:0 16px}header{padding-top:20px}
-h1{font-size:22px;margin:0 0 2px}h2{font-size:18px;margin:0}h3{font-size:16px;margin:0}
-h4{font-size:14px;margin:16px 0 6px}
+header,main{max-width:1240px;margin:0 auto;padding:0 16px}header{padding-top:18px}
+h1{font-size:26px;margin:0}h2{font-size:17px;margin:0}h3{font-size:15.5px;margin:0}h4{font-size:14px;
+margin:14px 0 6px}
 h5{font-size:13px;margin:10px 0 4px;color:var(--dim)}
-.sub{color:var(--dim);margin:0 0 10px}
-nav{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 16px;font-size:14px}
-nav a{color:var(--accent);text-decoration:none}
+.sub{color:var(--dim);margin:2px 0 14px}
+a{color:var(--accent)}a.pl{color:inherit;text-decoration:none;border-bottom:1px dotted var(--dim);
+cursor:pointer}
+a.pl:hover{color:var(--accent);border-color:var(--accent)}
+abbr[title]{text-decoration:underline dotted;cursor:help}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
-margin:0 0 14px}
-.card-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 10px;margin-bottom:6px}
-.notrun-card{opacity:.85}.notrun{color:var(--dim)}
+margin:0 0 14px;
+min-width:0}
+.card-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;margin-bottom:6px}
 .asof{color:var(--dim);font-size:12.5px;margin-left:auto}
-.chip{font-size:11.5px;font-weight:600;border-radius:999px;padding:1px 9px;border:1px solid currentColor}
-.chip.data{color:var(--dim)}
-.chip.proven{color:var(--proven)}.chip.shadow{color:var(--shadow)}.chip.untested{color:var(--untested)}
-.trust{font-size:13px;color:var(--dim);margin:10px 0 0;border-top:1px dashed var(--line);padding-top:8px}
-code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(127,127,127,.14);
-padding:1px 5px;border-radius:4px}
-code.say{background:rgba(31,94,255,.12);color:var(--accent)}
-.steps{margin:6px 0 10px;padding-left:22px}.steps li{margin:0 0 10px}.step-head{font-weight:600}
-.why{color:var(--dim);font-size:14px}.last{font-size:12.5px;color:var(--dim)}
-.last.never{color:var(--warn)}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px}
-@media(max-width:720px){.two{grid-template-columns:1fr}}
+.prog{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:0 0 14px}
+.step{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:flex;
+flex-direction:column;min-width:0}
+.step span{color:var(--dim);font-size:13px}.step.done{border-color:var(--proven);
+background:var(--proven-soft)}
+.step.next{border:2px solid var(--accent);background:var(--accent-soft)}
+.step.done b::before{content:"✓ ";color:var(--proven)}
+.grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;align-items:start}
+.brief ul{margin:4px 0 8px;padding-left:20px}.brief li{margin:5px 0}
+.next-btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:7px 16px;font:inherit;
+font-weight:600;cursor:pointer}
+.nextline{margin:8px 0 0}
+button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--card);color:var(--ink);
+border-radius:6px;padding:3px 9px;cursor:pointer}
+button:disabled{cursor:default;opacity:.55}
+.pool table.counts{width:auto}.pool table.counts td,.pool table.counts th{padding:3px 10px 3px 0;
+text-align:center}
+.pool table.counts td:first-child{text-align:left}
+.dec ul{list-style:none;padding:0;margin:0}.dec li{padding:9px 0;border-top:1px solid var(--line);
+display:flex;
+flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between}
+.dec li:first-child{border-top:0}.dec li>div:first-child{flex:1 1 360px}
+.dec .opts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.dec .opts button.opt{border-color:var(--accent);color:var(--accent)}
+.dec li.answered>div:first-child{opacity:.75}.answer{color:var(--proven);font-weight:600;font-size:13.5px}
+.dec ul.pivots{flex-basis:100%;margin:2px 0 0 14px;padding:0;list-style:disc}
+.dec ul.pivots li{border:0;padding:2px 0;display:list-item}
 .scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13.5px}
-th,td{text-align:left;padding:5px 10px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--dim);font-weight:600;font-size:12.5px}table.tools td:nth-child(1){min-width:150px}
-table.tools td:nth-child(2){min-width:190px}
-table.tools td:nth-child(3){min-width:260px}table.tools td:nth-child(4){min-width:110px}
-table.tools code{white-space:normal;word-break:break-word}
+th,td{text-align:left;padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12.5px}td.n,th.n{text-align:right;
+font-variant-numeric:tabular-nums}
+table.board td.n{padding-right:12px}
+table.board td.nm{min-width:130px}table.board td.nm .tags{display:block}
+table.board tr.ph td{background:var(--bg);font-weight:700;font-size:12.5px;padding:4px 8px}
+table.board .why{color:var(--dim);font-size:13px;min-width:190px}
+table.board tr.fade-row td{background:var(--bad-soft)}td.hot{color:var(--bad);font-weight:600}
+.tags{margin-top:2px}
+.chip{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:0 7px;
+margin:2px 3px 0 0;
+white-space:nowrap}
+.chip.value{background:var(--proven-soft);color:var(--proven)}.chip.cash{background:var(--accent-soft);
+color:var(--accent)}.chip.upside{background:var(--shadow-soft);color:var(--shadow)}
+.chip.fade,.chip.q{background:var(--bad-soft);color:var(--bad)}
+.chip.proven,.chip.shadow,.chip.untested,.chip.data{background:transparent;border:1px solid currentColor;
+font-size:11.5px;padding:0 8px}
+.chip.proven{color:var(--proven)}.chip.shadow{color:var(--shadow)}
+.chip.untested,.chip.data{color:var(--untested)}
+.tchip{display:inline-block;font-size:10px;font-weight:700;border-radius:4px;padding:0 4px;border:1px solid
+currentColor;line-height:1.3}
+.tchip.proven{color:var(--proven)}.tchip.shadow{color:var(--shadow)}
+.tchip.untested,.tchip.data{color:var(--untested)}
+.record{font-size:12px;color:var(--proven)}
+.seg{display:inline-flex;white-space:nowrap}.seg button{margin:0;border-radius:0;padding:2px 5px;
+font-size:12px;
+margin-left:-1px}.seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
+.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button.on{background:var(--accent);color:#fff;border-color:var(--accent);opacity:1}
+.seg.busy{opacity:.5;pointer-events:none}
+.showmore{border:0;color:var(--accent);background:transparent;padding:2px 0}
+.chart{display:block;width:100%;height:auto;max-width:100%}
+.chart .dot{fill:var(--dim);opacity:.55}.chart .dot.WR{fill:var(--wr)}.chart .dot.RB{fill:var(--rb)}
+.chart .dot.TE{fill:var(--te)}.chart .dot.strong{opacity:.95;stroke:var(--card);stroke-width:1}
+.chart .dot,.chart .lbl{cursor:pointer}
+.chart .ref{stroke:var(--bad);stroke-dasharray:5 4;stroke-width:1.5}
+.chart .grid{stroke:var(--line);stroke-width:1}.chart .tick{font-size:12px;fill:var(--dim)}
+.chart .axis{font-size:12.5px;fill:var(--dim)}.chart .lbl{font-size:13px;fill:var(--ink);font-weight:600}
+.chart .ref-lbl{font-size:12px;fill:var(--bad)}.chart .shade{fill:var(--proven-soft)}
+.chart .shade-lbl{font-size:12px;fill:var(--proven)}
+.legend{font-size:12.5px;color:var(--dim);margin:2px 0 4px}.legend .key{display:inline-block;width:10px;
+height:10px;border-radius:50%;margin:0 4px 0 8px;vertical-align:-1px}.legend .key.RB{background:var(--rb)}
+.legend .key.WR{background:var(--wr)}.legend .key.TE{background:var(--te)}
+.games{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.game{border:1px solid var(--line);border-radius:8px;padding:8px 9px;min-width:0}
+.game.top{border-color:var(--accent)}
+.gh{display:flex;justify-content:space-between;font-size:13.5px}.gk{font-size:12px;color:var(--dim);
+margin:0 0 4px}
+.bar{display:grid;grid-template-columns:38px 1fr 34px;align-items:center;gap:6px;font-size:12.5px}
+.bar i{height:8px;background:var(--accent);border-radius:4px;display:block}.bar b{text-align:right}
+.gflags{margin-top:4px}
+.tag{display:inline-block;font-size:11px;border-radius:4px;padding:0 6px;margin:2px 4px 0 0;
+white-space:nowrap}
+.tag.stack{background:var(--shadow-soft);color:var(--shadow);font-weight:600}
+.tag.wx{background:var(--accent-soft);
+color:var(--accent)}.tag.moved{background:var(--bad-soft);color:var(--bad)}
+.lenses{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.lenses button.on,.ex-bar button.on{background:var(--accent);
+color:#fff;border-color:var(--accent)}
+.ex-filters{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;margin:8px 0}
+.ex-filters label{display:flex;flex-direction:column;font-size:12px;color:var(--dim);gap:2px}
+.ex-filters select,.ex-filters input{font:inherit;font-size:13px;background:var(--bg);color:var(--ink);
+border:1px solid var(--line);border-radius:5px;padding:2px 5px}
+.ex-filters .range{display:flex;gap:3px}
+.ex-bar{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin:6px 0;font-size:13px}
+.ex-bar span{display:inline-flex;gap:3px;align-items:center}
+#ex-picker{border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:6px 0;max-height:300px;
+overflow:auto;columns:3 220px;font-size:13px}
+#ex-picker details{break-inside:avoid}.pick{display:block}
+.ex-chart{max-width:560px}
+.ex-scroll{max-height:72vh;overflow:auto}
+table.ex th{position:sticky;top:0;background:var(--card);cursor:pointer;white-space:nowrap;z-index:1}
+table.ex tr.groups th{top:0;cursor:default;color:var(--ink);border-left:1px solid var(--line)}
+table.ex td{white-space:nowrap;padding:4px 10px 4px 0}table.ex tr.pos td{background:var(--bg);font-weight:700;
+font-size:12px}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,100%);background:var(--card);
+border-left:1px solid var(--line);box-shadow:-6px 0 18px rgba(0,0,0,.12);overflow-y:auto;
+padding:12px 16px 30px;
+z-index:20}
+.dhead{display:flex;justify-content:space-between;align-items:center}.dclose{font-size:20px;line-height:1;
+padding:0 8px}
+.dsec h4{margin:12px 0 4px}table.kv th{font-weight:500;color:var(--dim);width:48%}table.kv td,table.kv th{
+padding:3px 6px 3px 0}
+table.log td,table.log th{padding:3px 6px 3px 0}
+.fold{padding:0}.fold>details>summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;
+flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.fold>details>summary::-webkit-details-marker{display:none}
+.fold>details>summary::before{content:"▸";color:var(--dim)}.fold>details[open]>summary::before{content:"▾"}
+.fold .line{color:var(--dim);font-size:13.5px}.fold .line.bad{color:var(--bad)}
+.fold>details>.body{padding:0 16px 14px}
+h2.sec{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:22px 0 8px}
+.notrun{color:var(--dim)}.trust{font-size:13px;color:var(--dim);margin:10px 0 0;
+border-top:1px dashed var(--line);
+padding-top:8px}
+code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(127,127,127,.14);
+padding:1px 5px;
+border-radius:4px}
+code.say{background:var(--accent-soft);color:var(--accent)}
+.why{color:var(--dim);font-size:14px}.last{font-size:12.5px;color:var(--dim)}.last.never{color:var(--warn)}
 .note{color:var(--dim);font-size:13px;margin:6px 0}.ok{color:var(--ok)}.bad{color:var(--bad)}
 .warn{color:var(--warn)}
 .dim{color:var(--dim)}.flag{background:var(--flag);border-radius:8px;padding:8px 12px;margin:8px 0}
-.leagues{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.leagues{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .league{border:1px solid var(--line);border-radius:8px;padding:2px 12px 8px}
 ul{margin:4px 0;padding-left:20px}details summary{cursor:pointer}details summary h4{display:inline}
-.playtbl td,.slate td{font-size:13px}
-.playtbl .pos td{background:rgba(127,127,127,.12);font-weight:700;font-size:12px;padding:3px 8px}
-.playtbl td:last-child{min-width:230px}
-.playtbl td:nth-last-child(2){min-width:150px}
-.poolcol{display:none}body.live .poolcol{display:table-cell}
-.sig{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:0 7px;margin-left:2px;
-border:1px solid currentColor;white-space:nowrap}
-.sig.proven{color:var(--proven)}.sig.shadow{color:var(--shadow)}.sig.untested{color:var(--untested)}
-.sig.bad{color:var(--bad)}
-.tag{display:inline-block;font-size:11px;border-radius:4px;padding:0 6px;background:rgba(31,94,255,.15);
-color:var(--accent);white-space:nowrap}
-.why-line{color:var(--dim)}
-.record{font-size:12px;color:var(--proven)}
-.slate tr.top td{background:rgba(31,94,255,.07)}
-.slate td{min-width:80px}
+table.tools td:nth-child(1){min-width:150px}table.tools td:nth-child(2){min-width:190px}
+table.tools td:nth-child(3){min-width:260px}table.tools code{white-space:normal;word-break:break-word}
 .urgent{border:2px solid var(--bad);border-radius:8px;padding:6px 12px;margin:6px 0 10px;color:var(--bad)}
-.urgent ul{margin:2px 0}
-.pool-tick{width:16px;height:16px}
-.poolbar{margin:10px 0;display:flex;gap:10px;align-items:center}
-footer{max-width:1040px;margin:0 auto;padding:6px 16px 30px;color:var(--dim);font-size:12.5px}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--ink);color:var(--card);
+padding:8px 14px;border-radius:8px;font-size:14px;z-index:30;max-width:90vw}
+.toast.bad{background:var(--bad);color:#fff}
+footer{max-width:1240px;margin:0 auto;padding:6px 16px 30px;color:var(--dim);font-size:12.5px}
+main{container-type:inline-size}
+@container (max-width:1060px){.board-grid{grid-template-columns:minmax(0,1fr)}.board-grid .side{display:grid;
+grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 14px}
+.board-grid .side #games{grid-column:1/-1}
+.board-grid .side .games{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}}
+@container (max-width:640px){.grid{grid-template-columns:minmax(0,1fr)}
+.prog{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.prog{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:520px){.prog{grid-template-columns:repeat(2,1fr)}.games{grid-template-columns:1fr}
+table.board .why{min-width:160px}h1{font-size:22px}}
 """
 
 
@@ -1422,110 +1192,284 @@ def page_path(season: int, week: int, data_dir: Path | None = None) -> Path:
     return week_dir(data_dir) / f"{season}-wk{week:02d}.html"
 
 
-# The page is ordered by day: what Sam needs first today comes first, and everything else follows. Tuesday to
-# Friday is research (who to play, the games, what moved); Saturday is build and enter; Sunday is game day.
-_REST = ["unknowns", "cash", "gpp", "sunday"]
+# Below the fold, collapsed, ordered by day: what Sam needs first today comes first. Tuesday to Friday is
+# research, Saturday is build and enter, Sunday is game day, Monday the close.
+FOLD_IDS = ["changes", "contest-plan", "season", "last-week", "cash", "gpp", "sunday"]
 DAY_ORDER: dict[int, list[str]] = {
-    0: ["last-week", "season", "changes", "plays", "slate", "contest-plan", *_REST],
-    1: ["plays", "slate", "changes", "contest-plan", "season", "last-week", *_REST],
-    5: [
-        "contest-plan",
-        "plays",
-        "cash",
-        "gpp",
-        "slate",
-        "changes",
-        "unknowns",
-        "season",
-        "last-week",
-        "sunday",
-    ],
-    6: [
-        "sunday",
-        "changes",
-        "cash",
-        "gpp",
-        "unknowns",
-        "slate",
-        "plays",
-        "contest-plan",
-        "season",
-        "last-week",
-    ],
+    0: ["last-week", "season", "changes", "contest-plan", "cash", "gpp", "sunday"],
+    1: ["changes", "contest-plan", "season", "last-week", "cash", "gpp", "sunday"],
+    5: ["contest-plan", "cash", "gpp", "changes", "sunday", "season", "last-week"],
+    6: ["sunday", "changes", "cash", "gpp", "contest-plan", "season", "last-week"],
 }
 DAY_ORDER[2] = DAY_ORDER[3] = DAY_ORDER[4] = DAY_ORDER[1]
-SECTION_IDS = [
-    "plays",
-    "slate",
-    "changes",
-    "contest-plan",
-    "cash",
-    "gpp",
-    "unknowns",
-    "sunday",
-    "season",
-    "last-week",
-]
+SECTION_IDS = FOLD_IDS
 
 
 def section_order(day: int) -> list[str]:
-    """The section ids in the order the page shows them on weekday `day` (0 = Monday)."""
+    """The collapsed sections' ids in the order the page shows them on weekday `day` (0 = Monday)."""
     order = DAY_ORDER.get(day, DAY_ORDER[1])
-    return [i for i in order if i in SECTION_IDS] + [i for i in SECTION_IDS if i not in order]
+    return [i for i in order if i in FOLD_IDS] + [i for i in FOLD_IDS if i not in order]
+
+
+# -- one-line summaries of the collapsed sections -------------------------------------------------------
+
+
+def fold_line(sid: str, inp: WeekInputs, built: dict[str, Section]) -> tuple[str, bool]:
+    """(the line a collapsed section shows, whether it is urgent)."""
+    s = built[sid]
+    if sid == "season":
+        leagues = ((inp.season_long or {}).get("leagues")) or {}
+        if not leagues:
+            return "not run yet", False
+        urgent = season_urgent(leagues)
+        if urgent:
+            first = "; ".join(f"{n}: {t}" for n, t in urgent[:2])
+            return f"{len(urgent)} urgent ({first})", True
+        return f"nothing urgent in {len(leagues)} leagues", False
+    if not s.ran:
+        return "not run yet", False
+    if sid == "changes" and inp.edge and inp.prev_edge:
+        d = week_plays.changes(inp.edge, inp.prev_edge, mine_names(inp))
+        return (
+            f"{len(d.status)} status changes for yours, {len(d.new_outs)} new OUTs, {len(d.calpts)} CalPts "
+            f"moves, {len(d.lines)} line moves"
+        ), bool(d.status or d.new_outs)
+    if sid == "contest-plan":
+        budget = weekly_budget(inp)  # this week's plan only: last week's spend is under Last week
+        if not budget:
+            return "no Weekly Budget yet", False
+        return f"Weekly Budget {dollars(budget)}: about 60% Tier A, 30% Tier B, at most 10% Tier C", False
+    if sid == "last-week" and inp.last_week:
+        lw = inp.last_week
+        roi = pct(lw.net / lw.fees if lw.fees else None)
+        return f"Week {lw.week}: {dollars(lw.fees)} in, net {dollars(lw.net)} ({roi})", lw.net < 0
+    if sid in ("cash", "gpp"):
+        bs = builds_of(inp, sid)
+        if sid == "cash":
+            best = max((cash_shown(b)[0] or 0 for b in bs), default=0)
+            return f"{len(bs)} cash builds, best Cash % {pct(best)}", False
+        best = max((num((b.get("metrics") or {}).get("p_gpp")) or 0 for b in bs), default=0)
+        st = ((inp.stacks or {}).get("rows") or [])[:1]
+        top = f"; top stack {st[0].get('qb', '')} + {st[0].get('mates', '')}" if st else ""
+        return (
+            f"{len(bs)} GPP builds, best Top 1% {pct(best, 1)}" if bs else "no GPP builds yet"
+        ) + top, False
+    if sid == "sunday":
+        at = parse_time((inp.late_swap or {}).get("saved_at"))
+        return (f"late swap ran {week_today.when(inp.now, at)}" if at else "late swap not run"), False
+    return s.asof or "", False
+
+
+def fold_html(s: Section, line: str, urgent: bool, open_: bool = False) -> str:
+    chip = ""
+    if s.trust:
+        label, why = s.trust
+        chip = f'<span class="chip {label.lower()}" title="{e(why)}">{e(label)}</span>'
+    trust_line = f'<p class="trust"><b>{e(s.trust[0])}.</b> {rich(s.trust[1])}</p>' if s.trust else ""
+    return (
+        f'<section class="card fold" id="{e(s.id)}"><details{" open" if open_ else ""}>'
+        f"<summary><h3>{e(s.title)}</h3>"
+        f'<span class="line{" bad" if urgent else ""}">{e(line)}</span>{chip}</summary>'
+        f'<div class="body">{s.body}{trust_line}</div></details></section>'
+    )
+
+
+def tools_fold(inp: WeekInputs, tools: list[week_tools.Tool]) -> str:
+    stale, _ = week_tools.not_used_lately(tools, inp.runs, inp.now)
+    inner = tools_html(inp, tools)
+    inner = inner.replace(
+        '<section class="card" id="tools"><div class="card-head"><h2>Your tools</h2></div>', "", 1
+    )
+    inner = inner.removesuffix("</section>")
+    line = f"{len(tools)} commands and phrases" + (f"; {len(stale)} not used in 3+ weeks" if stale else "")
+    return (
+        '<section class="card fold" id="tools"><details><summary><h3>Your tools</h3>'
+        f'<span class="line">{e(line)}</span></summary><div class="body">{inner}</div></details></section>'
+    )
+
+
+def unknowns_into_sunday(sunday: Section, unknowns: Section) -> Section:
+    """Sunday's collapsed section also carries the Questionable / Doubtful list (and an OUT sitting in a
+    build), which used to be a section of its own."""
+    return Section(
+        sunday.id,
+        "Sunday and the unknowns",
+        sunday.body + "<h4>Questionable, Doubtful and OUT</h4>" + unknowns.body,
+        sunday.trust,
+        ran=sunday.ran or unknowns.ran,
+        asof=sunday.asof,
+    )
+
+
+def player_log(inp: WeekInputs) -> dict[str, list[dict]]:
+    """Each player's last five games (`data/current/player_log.csv`, the Player card's), by DK Id."""
+    from dfs.week_inputs import _read_csv
+
+    rows = _read_csv(inp.data_dir / "current" / "player_log.csv")
+    by_key: dict[str, list[dict]] = {}
+    for r in rows:
+        by_key.setdefault(r.get("NameKey", ""), []).append(r)
+    out: dict[str, list[dict]] = {}
+    for r in inp.edge or []:
+        games = by_key.get(str(r.get("NameKey") or ""))
+        if not games or not r.get("Id"):
+            continue
+        games = sorted(games, key=lambda g: int(num(g.get("Back")) or 99))[:5]
+        out[str(r["Id"])] = [
+            {
+                "Wk": g.get("Wk", ""),
+                "Opp": g.get("Opp", ""),
+                "Snap": num(g.get("Snap%")),
+                "Tgt": None if num(g.get("Tgt")) is None else round(num(g.get("Tgt")) or 0),
+                "Car": None if num(g.get("Car")) is None else round(num(g.get("Car")) or 0),
+                "DK": num(g.get("DK")),
+            }
+            for g in games
+        ]
+    return out
+
+
+def record_lines(inp: WeekInputs) -> dict[str, str]:
+    return {
+        t: f"{week_plays.record_line(t, inp.signal_table, inp.scored_weeks)}  "
+        f"[{TRUST[SIGNAL_TRUST.get(t, 'plays_shadow')][0]}]"
+        for t in ("FADE↓", "USAGE↑", "USAGE↓", "INJ+", "Proj ▲", "Proj ▼")
+    }
 
 
 def render(
-    inp: WeekInputs, *, registered: set[str] | None = None, tools: list[week_tools.Tool] | None = None
+    inp: WeekInputs,
+    *,
+    registered: set[str] | None = None,
+    tools: list[week_tools.Tool] | None = None,
+    live: bool = False,
+    nonce: str = "",
+    sheet=None,
+    answers: dict | None = None,
 ) -> str:
-    """The whole page as one HTML string."""
-    if tools is None:
-        tools = week_tools.build(inp.runs)
-    day = inp.now.astimezone().weekday()
-    built = {
-        s.id: s
-        for s in (
-            plays_section(inp),
-            slate_section(inp),
-            changes_section(inp),
-            contest_plan_section(inp, registered),
-            cash_section(inp),
-            gpp_section(inp),
-            unknowns_section(inp),
-            sunday_section(inp),
-            season_section(inp),
-            last_week_section(inp),
+    """The whole page as one HTML string. `live` (the served page) adds the controls that write the sheet;
+    `sheet` is what the server read from it (`week_writes.LiveSheet`), `answers` the decisions file."""
+    from dfs import week_board as wb
+    from dfs import week_explorer, week_top
+
+    token = _LIVE.set(live)
+    try:
+        if tools is None:
+            tools = week_tools.build(inp.runs)
+        day = inp.now.astimezone().weekday()
+        nonce_attr = f' nonce="{e(nonce)}"' if nonce else ""
+        live_pool = sheet.pool if (sheet is not None and sheet.ok) else None
+        rules = sheet.rules if (sheet is not None and sheet.ok and sheet.rules_found) else None
+        pool = wb.pool_by_name(inp, live_pool)
+        by_id = wb.pool_by_id(inp, live_pool)
+        board = wb.board(inp)
+        panel = wb.pool_panel(inp, board, pool)
+        steps = wb.progress(inp, pool)
+        sentences = wb.brief(inp, board, panel)
+        ds = wb.decisions(inp, rules, answers)
+        if sheet is not None and sheet.ok:
+            source = f"from the sheet, {kickoff.format_et(inp.now)}"
+        elif sheet is not None:
+            source = "the sheet could not be read: as of the last sync"
+        else:
+            source = "as of the last sync or build"
+        built = {
+            s.id: s
+            for s in (
+                changes_section(inp),
+                contest_plan_section(inp, registered),
+                cash_section(inp),
+                gpp_section(inp),
+                season_section(inp),
+                last_week_section(inp),
+                unknowns_into_sunday(sunday_section(inp), unknowns_section(inp)),
+            )
+        }
+        folds = []
+        for sid in section_order(day):
+            line, urgent = fold_line(sid, inp, built)
+            folds.append(
+                fold_html(built[sid], line, urgent) + (LIVE_CONTEST if sid == "contest-plan" else "")
+            )
+        sources = sorted(inp.manifest)
+        failed = [n for n in sources if inp.manifest[n].get("error")]
+        pending = [n for n in sources if inp.manifest[n].get("pending") and n not in failed]
+        stale = week_today.stale_items(
+            now=inp.now,
+            manifest=inp.manifest,
+            suggest_at=suggest_time(inp),
+            late_swap_at=parse_time((inp.late_swap or {}).get("saved_at")),
+            season_at=parse_time((inp.season_long or {}).get("saved_at")),
+            day=day,
         )
-    }
-    sections = [built[i] for i in section_order(day)]
-    nav = (
-        '<nav><a href="#today">Today</a>'
-        + "".join(f'<a href="#{e(s.id)}">{e(s.title)}</a>' for s in sections)
-        + '<a href="#tools">Your tools</a></nav>'
-    )
-    sources = sorted(inp.manifest)
-    failed = [n for n in sources if inp.manifest[n].get("error")]
-    pending = [n for n in sources if inp.manifest[n].get("pending") and n not in failed]
-    stamp = kickoff.format_et(inp.now)
-    sub = (
-        f"{e(week_today.DAY_NAMES[day])} &middot; page built {e(stamp)} &middot; "
-        f"{len(sources) - len(failed) - len(pending)} of {len(sources)} sources synced"
-        + (f", {len(pending)} pending ({e(', '.join(pending))})" if pending else "")
-        + (f", {len(failed)} failed ({e(', '.join(failed))})" if failed else "")
-    )
-    return (
-        "<!doctype html><html lang=en><head><meta charset=utf-8>"
-        '<meta name=viewport content="width=device-width,initial-scale=1">'
-        f"<title>Week {inp.week}</title><style>{CSS}</style></head><body>"
-        f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p>{nav}</header><main>'
-        + today_html(inp, registered)
-        + '<h2 class="sec">This week</h2>'
-        + "".join(s.html() + (LIVE_CONTEST if s.id == "contest-plan" else "") for s in sections)
-        + LIVE_RUN
-        + tools_html(inp, tools)
-        + "</main><footer>Read-only: built from files the tool already saved; nothing here writes a sheet. "
-        "Regenerated after sync, suggest, late-swap, contests plan, season sync/check and week close; "
-        "<code>dfs week page</code> rebuilds it now.</footer></body></html>"
-    )
+        theme = week_today.DAY_THEME[day].lower()
+        sub = (
+            f"{e(week_today.DAY_NAMES[day])} &middot; {e(theme)} &middot; "
+            f"{len(sources) - len(failed) - len(pending)} of {len(sources)} sources synced"
+            + (f", {len(pending)} pending ({e(', '.join(pending))})" if pending else "")
+            + (f", {len(failed)} failed ({e(', '.join(failed))})" if failed else "")
+            + (f" &middot; sheet: {e(sheet.title)}" if sheet is not None and sheet.title else "")
+            + f" &middot; built {e(kickoff.format_et(inp.now))}"
+        )
+        stale_html = '<p class="note warn">Stale: ' + e("; ".join(stale)) + "</p>" if stale else ""
+        data = week_explorer.payload(inp, board, by_id, record_lines=record_lines(inp), log=player_log(inp))
+        own_out = not board.gpp_pending
+        rules_json = json.dumps(rules or {}).replace("</", "<\\/")
+        live_data = f'<script type="application/json" id="rules-was">{rules_json}</script>' if live else ""
+        return (
+            "<!doctype html><html lang=en><head><meta charset=utf-8>"
+            '<meta name=viewport content="width=device-width,initial-scale=1">'
+            f"<title>Week {inp.week}</title><style>{CSS}</style></head><body>"
+            f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
+            + week_top.progress_html(steps)
+            + stale_html
+            + '<div class="grid">'
+            + week_top.brief_html(sentences, wb.next_step(steps), live, week_today.DAY_NAMES[day])
+            + week_top.pool_panel_html(panel, live, source)
+            + "</div>"
+            + week_top.decisions_html(ds, live, inp.now, rules is not None, by_id)
+            + '<div class="grid board-grid">'
+            + week_top.board_html(board, by_id, live)
+            + "<div>"
+            + '<div class="side">'
+            + week_top.charts_html(inp.edge, own_out)
+            + week_top.games_html(inp, live)
+            + "</div></div>"
+            + week_top.explorer_html(inp, data)
+            + '<h2 class="sec">The rest of the week</h2>'
+            + "".join(folds)
+            + LIVE_RUN
+            + tools_fold(inp, tools)
+            + "</main>"
+            + week_top.DRAWER
+            + live_data
+            + "<footer>"
+            + (
+                "Served page: pool picks and decisions write the live sheet (the cells the sheet's own "
+                "controls use), re-read first and read back after."
+                if live
+                else "Read-only: built from files the tool already saved; nothing here writes a sheet. "
+                "Regenerated after sync, suggest, late-swap, contests plan, season sync/check and week "
+                "close; "
+                "<code>dfs week page</code> rebuilds it now."
+            )
+            + "</footer>"
+            + week_top.explorer_script(data, nonce_attr)
+            + f"<script{nonce_attr}>{BOARD_JS}</script>"
+            + "</body></html>"
+        )
+    finally:
+        _LIVE.reset(token)
+
+
+# The board's Show more (both pages) and the fold state kept across a refresh of the served page.
+BOARD_JS = r"""
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button.showmore'); if (!b) return;
+  const grp = b.closest('tbody'); for (const tr of grp.querySelectorAll('tr.more')) tr.hidden = false;
+  b.closest('tr').remove();
+});
+"""
 
 
 def generate(

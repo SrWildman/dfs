@@ -15,6 +15,8 @@ and written on the tab), never guessed:
 
     Always use     names every new or rebuilt build must contain       Bijan, Nacua
     Never use      names no new or rebuilt build may contain           Kyren
+                   (either line: `cash: Name` or `gpp: Name` scopes one item to that kind of build only;
+                   a bare name is every build, as always)              Bijan, cash: Woody Marks
     Max exposure   `Name: 4` or `<= 4` (in at most 4 GPP builds, a cap only), `< 4`, `= 4` (exactly 4: a cap
                    and new builds are steered to reach it), `>= 2` / `> 1` (at least: steered), `more Name`
                    (no cap, new builds prefer him)                      Stafford: 4; Nacua: >= 2; more Kelce
@@ -74,7 +76,8 @@ RULE_FIELDS = dict(
 )
 FRAME_LABELS = ("Adjust", "Ownership")  # the lines that are Sam's view of the slate, applied by every run
 RULE_SYNTAX = (
-    "Names: a full name or part of one (Stafford). Max exposure: `Stafford: 4` (at most), `= 4`, `>= 2`, "
+    "Names: a full name or part of one (Stafford); `cash: Name` or `gpp: Name` on Always / Never use is that "
+    "kind of build only. Max exposure: `Stafford: 4` (at most), `= 4`, `>= 2`, "
     "`< 4` or `more Stafford`. Stack "
     "rules: `LAR: no bring-back`, `DET: QB+RB ok`, `no stacks from GB`. Builds wanted: `cash 3, gpp 8`. "
     "Adjust: `Nacua +2`, `Kyren -15%` or `Stafford 24` (your projection). Ownership: `Kyren 40%`. Build "
@@ -252,8 +255,11 @@ class StackRules:
 class Rules:
     """The rules box, read: names resolved, numbers parsed, and every line it could not read in `problems`."""
 
-    always: list[str] = field(default_factory=list)
-    never: set[str] = field(default_factory=set)
+    always: list[str] = field(default_factory=list)  # every build
+    never: set[str] = field(default_factory=set)  # every build
+    # `cash: Name` / `gpp: Name`: that kind of build only ("cash" / "gpp" -> names)
+    always_kind: dict[str, list[str]] = field(default_factory=dict)
+    never_kind: dict[str, set[str]] = field(default_factory=dict)
     caps: dict[str, int] = field(default_factory=dict)  # `Name: N`, `<= N`, `< N`, `= N`: at most
     floors: dict[str, int] = field(
         default_factory=dict
@@ -266,6 +272,28 @@ class Rules:
     min_unique: int | None = None  # `min unique N`: a new build differs from every other by this many players
     max_per_game: int | None = None  # `max from one game N`
     problems: list[str] = field(default_factory=list)
+
+    def always_for(self, kind: str) -> list[str]:
+        """Who a `kind` ("cash" / "gpp") build must hold: the every-build names, then that kind's own."""
+        extra = [n for n in self.always_kind.get(kind, []) if n not in self.always]
+        return [n for n in [*self.always, *extra] if n not in self.never_for(kind)]
+
+    def never_for(self, kind: str) -> set[str]:
+        """Who a `kind` build may not hold: the every-build names and that kind's own."""
+        return self.never | self.never_kind.get(kind, set())
+
+    def never_any(self) -> set[str]:
+        """Everyone on the Never use line, whatever its scope."""
+        return self.never.union(*self.never_kind.values())
+
+
+KIND_SCOPE = re.compile(r"(cash|gpp)\s*:\s*(.+)", flags=re.IGNORECASE)
+
+
+def scoped_item(item: str) -> tuple[str | None, str]:
+    """`cash: Woody Marks` -> ("cash", "Woody Marks"); a bare name -> (None, name)."""
+    m = KIND_SCOPE.fullmatch(item.strip())
+    return (m.group(1).lower(), m.group(2).strip()) if m else (None, item.strip())
 
 
 _BRING_BACK = r"bring[- ]?backs?"
@@ -286,11 +314,16 @@ def parse_rules(text: RulesText, names: Sequence[str], teams: Iterable[str]) -> 
         return name
 
     for item in split_items(text.always):
-        if (name := player("Always use", item)) is not None and name not in rules.always:
-            rules.always.append(name)
+        kind, item = scoped_item(item)
+        if (name := player("Always use", item)) is None:
+            continue
+        target = rules.always if kind is None else rules.always_kind.setdefault(kind, [])
+        if name not in target:
+            target.append(name)
     for item in split_items(text.never):
+        kind, item = scoped_item(item)
         if (name := player("Never use", item)) is not None:
-            rules.never.add(name)
+            (rules.never if kind is None else rules.never_kind.setdefault(kind, set())).add(name)
     for item in split_items(text.exposure):
         more = re.fullmatch(r"more\s+(.+)", item, flags=re.IGNORECASE)
         capped = re.fullmatch(
@@ -337,6 +370,12 @@ def parse_rules(text: RulesText, names: Sequence[str], teams: Iterable[str]) -> 
     for name in sorted(rules.never & set(rules.always)):
         rules.problems.append(f"{name} is on both the Always use and Never use lines: Never wins")
     rules.always = [n for n in rules.always if n not in rules.never]
+    for kind in sorted(rules.always_kind):
+        for name in sorted(rules.never_for(kind) & set(rules.always_kind[kind])):
+            rules.problems.append(
+                f"{name} is on both the Always use and Never use lines for {kind} builds: Never wins"
+            )
+        rules.always_kind[kind] = [n for n in rules.always_kind[kind] if n not in rules.never_for(kind)]
     return rules
 
 

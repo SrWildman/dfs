@@ -111,14 +111,15 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
     ),
     (
         "The Week page",
-        "dfs week page opens one page in your browser (nothing to sign in to, nothing it changes). Today is "
-        "at the top: the steps for the day, each with the phrase to say and the command. Then Plays (five "
-        "a position by CalPts per $1,000, the cash core, GPP upside with leverage, and the fades), Slate "
-        "(every game by total with spread, implied totals, movement since the opening line, weather and key "
-        "injuries) and What changed (the last two syncs side by side: status changes for your pool, new "
-        "OUTs, CalPts moves of 2 or more, line moves of 1 or more). Below them each decision, with how far "
-        "to trust it (Proven, Shadow or Untested), and every tool with when you last ran it. A source that "
-        "has not published yet (TFFB's ownership midweek) shows as pending, not as a failure.",
+        "dfs week page opens one page in your browser (nothing to sign in to, nothing it changes). At the "
+        "top: where the week stands (Pool, Contest plan, Builds, Entries recorded, Late swap, Close; the "
+        "next step is highlighted), a short brief of the slate, your pool by position with its gaps, and the "
+        "week's decisions (30%+ double-up chalk: play or fade; a Questionable star: a pivot or wait; the GPP "
+        "stack). Then one board, each player once with his roles (Value, Cash core, Upside, Fade), beside a "
+        "value map, a leverage map and the slate's games. The Explorer below has every priced player and "
+        "every EdgeRaw column, by lens, with filters; click any name for everything about him. The rest of "
+        "the week (what changed, the contest plan, season-long, last week, the builds, Sunday, your tools) "
+        "is collapsed, one line each. A source that has not published yet shows as pending, not failed.",
     ),
     (
         "The Week server",
@@ -126,9 +127,11 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
         "private token and nothing else can open it. Claude is docked on the right: every action that needs "
         "approval shows what will run, with Approve and Deny, and nothing runs by itself. An Ask button sits "
         "beside every phrase; every command has a run button with live output (one at a time, with Stop); "
-        "the Plays tick boxes add players to your pool; and the drop zone takes DraftKings' entries file at "
-        "lock and the history export and standings at close, then offers the matching command. It writes to "
-        "no sheet itself; the commands do. Ctrl-C stops it.",
+        "and the drop zone takes DraftKings' entries file at lock and the history export and standings at "
+        "close, then offers the matching command. The page itself writes three things to this sheet: a "
+        "player's Pool cell (Cash, GPP, Both or none: the same cell as the dropdown), a decision's line in "
+        "Suggested's rules box, and the suggested starting pool. Each checks the cell first and refuses if "
+        "it changed here, then shows what the sheet holds. A closed week writes nothing. Ctrl-C stops it.",
     ),
     (
         "One command at a time",
@@ -511,8 +514,8 @@ _ITERATE_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Rules box",
-        "Above the builds: Always use, Never use, Max exposure (Stafford: 4 is at most 4; = 4, >= 2, < 4, "
-        "more Stafford), Stack rules "
+        "Above the builds: Always use, Never use (cash: Name or gpp: Name for one kind of build only), Max "
+        "exposure (Stafford: 4 is at most 4; = 4, >= 2, < 4, more Stafford), Stack rules "
         "(LAR: no bring-back, DET: QB+RB ok, no stacks from GB) Builds wanted (cash 3, gpp 8), Adjust "
         "(your projection: Nacua +2, Kyren -15%, Stafford 24), Ownership (Kyren 40%) and Build rules (min "
         "unique 2, max from one game 5). Adjust and Ownership count in every build, odds and late swap; "

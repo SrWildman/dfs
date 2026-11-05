@@ -1,5 +1,6 @@
-"""Plan I: the Week page's Plays, Slate and What-changed sections, the contest plan split between this week
-and last, the season-long urgent block, the Build / Late swap / pool-tick buttons, and the day ordering.
+"""Plan I's definitions as Week page v2 shows them: the board (Plan I's plays, one row per player), the
+slate's game cards, What changed, the contest plan split between this week and last, the season-long
+urgent block, the Build / Late swap buttons, the pool segments, and the collapsed sections' day ordering.
 
 Every test builds its own data under `tmp_path` (conftest keeps the suite off the real `data/`)."""
 
@@ -11,7 +12,7 @@ from datetime import datetime
 
 import pytest
 
-from dfs import commands_doc, week_inputs, week_jobs, week_live, week_page, week_plays
+from dfs import commands_doc, week_inputs, week_live, week_page, week_plays
 
 SAT = datetime(2026, 11, 7, 10, 0).astimezone()
 WED = datetime(2026, 11, 4, 10, 0).astimezone()
@@ -138,21 +139,26 @@ def test_plays_value_is_calpts_per_thousand_with_calpts_tiebreak_and_skips_the_o
     ]  # all 2.0 per $1K: CalPts breaks the tie
 
 
-def test_questionable_stays_on_the_list_tagged(tmp_path):
+def board_row(page, name):
+    sec = section(page, "board")
+    m = re.search(rf"<tr[^>]*>(?:(?!</tr>).)*?>{re.escape(name)}</a>.*?</tr>", sec, re.S)
+    assert m, f"{name} is not on the board"
+    return m.group(0)
+
+
+def test_questionable_stays_on_the_board_tagged(tmp_path):
     page = render(inputs(tmp_path, slate_rows()))
-    star = re.search(r"Wr Star.{0,200}", section(page, "plays"), re.S).group(0)
-    assert "Questionable" in star
+    assert 'class="chip q"' in board_row(page, "Wr Star")
 
 
 def test_ownership_not_published_says_so_instead_of_blank(tmp_path):
-    page = render(inputs(tmp_path, slate_rows()))
-    plays = section(page, "plays")
-    assert "Ownership publishes ~Fri/Sat" in plays
-    assert plays.count("publishes ~Fri/Sat") >= 4  # the banner, the headers and every ownership cell
-    assert "chalk: play or fade on purpose" not in plays
+    board = section(render(inputs(tmp_path, slate_rows())), "board")
+    assert "Ownership publishes ~Fri/Sat" in board
+    assert board.count('title="ownership publishes ~Fri/Sat"') >= 4  # every ownership cell
+    assert " hot" not in board
 
 
-def test_published_cash_ownership_tags_30_percent_chalk(tmp_path):
+def test_published_cash_ownership_marks_30_percent_chalk(tmp_path):
     rows = slate_rows(alpha={"CashOwn": "0.34", "GppOwn": "0.30"}, beta={"CashOwn": "0.05", "GppOwn": "0.04"})
     for r in rows:
         if r["Name"] == "Wr Value":
@@ -160,9 +166,12 @@ def test_published_cash_ownership_tags_30_percent_chalk(tmp_path):
         if r["Name"] == "Wr Star":
             r["CashOwn"], r["GppOwn"] = "0.12", "0.05"
     page = render(inputs(tmp_path, rows))
-    plays = section(page, "plays")
-    assert "publishes ~Fri/Sat" not in plays
-    assert plays.count("chalk: play or fade on purpose") >= 1  # Qb Alpha, a cash core row
+    assert "publishes ~Fri/Sat" not in section(page, "board")
+    assert '<td class="n hot">34%</td>' in board_row(page, "Qb Alpha")
+    assert '<td class="n hot">' not in board_row(page, "Qb Beta")
+    dec = " ".join(page_text(section(page, "decisions")).split())
+    assert "Qb Alpha will be in about 34% of double-up lineups" in dec
+    assert "Wr Value will be in about 31%" in dec and "Wr Star will be in about" not in dec
     view = week_plays.plays(rows)
     assert next(p for p in view.cash["QB"] if p.name == "Qb Alpha").chalk is True
     assert next(p for p in view.value["QB"] if p.name == "Qb Beta").chalk is False
@@ -182,13 +191,13 @@ def test_gpp_leverage_once_gpp_ownership_is_out(tmp_path):
     assert before[0].name == "Cheap Own" and before[0].lev is None  # plain Boom% order until it publishes
 
 
-def test_fades_are_the_fade_chip_and_other_chips_are_shadow(tmp_path):
+def test_a_fade_is_only_a_fade_last_in_its_position(tmp_path):
     page = render(inputs(tmp_path, slate_rows()))
-    plays = section(page, "plays")
-    fades = plays[plays.index("Fades") :]
-    assert "Te Fade" in fades and "FADE↓ Proven" in fades
-    assert "Rb Warn" in plays[plays.index("Other warning chips") :]
-    assert "USAGE↓ Shadow" in plays
+    fade = board_row(page, "Te Fade")
+    assert "fade-row" in fade and 'class="chip fade"' in fade
+    assert 'class="chip value"' not in fade and 'class="chip cash"' not in fade
+    te = re.search(r'<tbody class="posgrp" data-pos="TE">.*?</tbody>', section(page, "board"), re.S).group(0)
+    assert te.rindex("Te Plain") < te.rindex("Te Fade")  # last in his position
     view = week_plays.plays(slate_rows())
     assert [p.name for p in view.fades] == ["Te Fade"]
     assert [p.name for p in view.shadow] == ["Rb Warn"]
@@ -203,15 +212,15 @@ def test_each_play_has_a_football_why_game_and_kickoff(tmp_path):
     assert alpha.game == "DAL -6 vs IND, total 52.5" and alpha.kickoff
 
 
-def test_plays_not_run_without_a_sync(tmp_path):
-    plays = section(render(inputs(tmp_path)), "plays")
-    assert "Not run yet" in plays and "dfs sync" in plays
+def test_board_not_run_without_a_sync(tmp_path):
+    board = section(render(inputs(tmp_path)), "board")
+    assert "Not run yet" in board and "&quot;sync&quot;" in board
 
 
-def test_pool_players_are_marked_not_offered_a_tick(tmp_path):
+def test_pool_players_show_their_pool_value_on_the_board(tmp_path):
     inp = inputs(tmp_path, slate_rows(), pool={"Qb Alpha": "Both"})
-    plays = section(render(inp), "plays")
-    assert "in pool (Both)" in plays
+    alpha = board_row(render(inp), "Qb Alpha")
+    assert '<button type="button" data-v="Both" class=on disabled' in alpha
 
 
 # -- Slate ------------------------------------------------------------------------------------------------
@@ -227,10 +236,10 @@ def test_slate_sorts_by_total_marks_top_games_and_big_moves(tmp_path):
     assert not games[1].moved
     assert ("Wr Star", "WR", "DAL", "Q") in top.injuries  # a likely starter, Questionable
     assert all(i[0] != "Wr Out" or i[3] == "OUT" for i in top.injuries)
-    page = render(inputs(tmp_path, slate_rows()))
-    slate = section(page, "slate")
-    assert "DAL @ IND" in slate and "top 3 total" in slate and "Wr Star (WR Questionable)" in slate
-    assert "Wr Out (WR OUT)" in slate and 'class="bad"' in slate  # the +2.5 total move in red
+    games_card = section(render(inputs(tmp_path, slate_rows())), "games")
+    assert "DAL @ IND" in games_card and '<div class="game top">' in games_card
+    assert "total +2.5 since open" in games_card  # the big move, flagged
+    assert games_card.index("DAL @ IND") < games_card.index("NE @ NYJ") or "NYJ @ NE" in games_card
 
 
 def test_slate_only_lists_likely_starters_not_ir_or_backups(tmp_path):
@@ -250,8 +259,11 @@ def test_slate_without_an_opening_snapshot_says_how_to_get_one(tmp_path):
     rows = slate_rows()
     for r in rows:
         r["TotMove"] = r["SpdMove"] = ""
-    slate = section(render(inputs(tmp_path, rows)), "slate")
-    assert "no opening yet" in slate and "dfs odds snapshot" in slate
+    inp = inputs(tmp_path, rows)
+    games_card = section(render(inp), "games")
+    assert "No opening line saved yet" in games_card and "dfs odds snapshot" in games_card
+    served = section(week_page.render(inp, live=True), "games")
+    assert "No opening line saved yet" in served and "dfs odds snapshot" not in served  # no CLI text served
 
 
 # -- What changed -----------------------------------------------------------------------------------------
@@ -410,14 +422,14 @@ def ids_in_order(page):
 @pytest.mark.parametrize(
     "day,lead",
     [
-        (1, ["plays", "slate", "changes", "contest-plan", "season", "last-week"]),
-        (2, ["plays", "slate", "changes", "contest-plan", "season", "last-week"]),
-        (4, ["plays", "slate", "changes", "contest-plan", "season", "last-week"]),
-        (5, ["contest-plan", "plays", "cash", "gpp"]),
+        (1, ["changes", "contest-plan", "season", "last-week"]),
+        (2, ["changes", "contest-plan", "season", "last-week"]),
+        (4, ["changes", "contest-plan", "season", "last-week"]),
+        (5, ["contest-plan", "cash", "gpp"]),
         (6, ["sunday", "changes", "cash", "gpp"]),
     ],
 )
-def test_page_is_ordered_by_day(tmp_path, day, lead):
+def test_the_collapsed_sections_are_ordered_by_day(tmp_path, day, lead):
     now = datetime(2026, 11, 2 + day, 10, 0).astimezone()
     assert now.weekday() == day
     order = ids_in_order(render(inputs(tmp_path, now=now)))
@@ -425,22 +437,18 @@ def test_page_is_ordered_by_day(tmp_path, day, lead):
     assert sorted(order) == sorted(week_page.SECTION_IDS)  # nothing dropped on any day
 
 
-def test_monday_order_is_last_week_season_changes_plays_slate_contest_plan():
-    assert week_page.section_order(0)[:6] == [
-        "last-week",
-        "season",
-        "changes",
-        "plays",
-        "slate",
-        "contest-plan",
-    ]
+def test_monday_order_is_last_week_season_changes_contest_plan():
+    assert week_page.section_order(0)[:4] == ["last-week", "season", "changes", "contest-plan"]
     assert sorted(week_page.section_order(0)) == sorted(week_page.SECTION_IDS)
 
 
-def test_nav_follows_the_page_order(tmp_path):
-    page = render(inputs(tmp_path, now=SUN))
-    nav = re.findall(r'<a href="#([a-z-]+)">', page.split("<nav>")[1].split("</nav>")[0])
-    assert nav[1:4] == ["sunday", "changes", "cash"]
+def test_every_lower_section_is_collapsed_with_a_one_line_summary(tmp_path):
+    page = render(inputs(tmp_path, slate_rows(), now=SUN))
+    lower = page.split('<h2 class="sec">')[1]
+    for sid in [*week_page.SECTION_IDS, "tools"]:
+        sec = re.search(rf'<section class="card fold" id="{sid}"><details>(.*?)</summary>', lower, re.S)
+        assert sec, f"{sid} is not collapsed"
+        assert '<span class="line' in sec.group(1)
 
 
 # -- buttons ----------------------------------------------------------------------------------------------
@@ -450,31 +458,23 @@ def live(page, **kw):
     return week_live.augment(page, token="tok", nonce="n", read_only=kw.get("read_only", False))
 
 
-def test_static_page_has_no_tick_boxes_but_says_the_phrase(tmp_path):
+def test_static_page_pool_segments_are_read_only_and_say_the_phrase(tmp_path):
     page = render(inputs(tmp_path, slate_rows()))
-    assert 'class="pool-tick"' not in page and "<input" not in page
-    assert "add X, Y to my pool" in page and "dfs pool add" in page
-    assert "<button" not in page
+    seg = re.search(r'<span class="seg" data-id="id-Qb Alpha".*?</span>', page, re.S).group(0)
+    assert seg.count("disabled") == 4  # Cash, GPP, Both, none: shown, not writable
+    assert "add X, Y to my pool" in page and "pool-tick" not in page
 
 
-def test_served_page_has_a_tick_box_per_play_and_the_add_bar(tmp_path):
-    page = live(render(inputs(tmp_path, slate_rows())))
-    assert 'class="pool-tick" data-name="Qb Alpha"' in page
-    assert 'id="pool-add"' in page and "Add ticked to pool" in page
-    assert "has a tick box on every row" not in page  # the static hint is gone
-    assert "pool-slot" not in page
-
-
-def test_tick_box_runs_the_pool_command_through_the_job_runner(tmp_path):
+def test_served_page_pool_segments_write_through_the_api(tmp_path):
+    page = live(week_page.render(inputs(tmp_path, slate_rows()), live=True, nonce="n"))
+    seg = re.search(r'<span class="seg" data-id="id-Qb Alpha".*?</span>', page, re.S).group(0)
+    assert "disabled" not in seg and 'data-was=""' in seg
     js = week_live.JS
-    assert "startJob('dfs pool add', {names: names.join(', ')})" in js
-    assert "/api/jobs/start" in js
-    spec = week_jobs.forms()["dfs pool add"]
-    assert spec["writes"] is True  # takes the run lock: refused while another writer runs
-    argv = week_jobs.build_argv("dfs pool add", {"names": "Qb Alpha, Ja'Marr Chase"})
-    assert argv == ["pool", "add", "Qb Alpha", "Ja'Marr Chase"]
-    with pytest.raises(week_jobs.Refused):
-        week_jobs.build_argv("dfs pool add", {"names": "--all"})
+    assert (
+        "write('/api/pool', {changes: [{id: seg.dataset.id, value: sb.dataset.v, was: seg.dataset.was}]})"
+        in js
+    )
+    assert "pool-tick" not in page and "Add ticked to pool" not in page
 
 
 def test_empty_cash_gpp_and_sunday_get_buttons_only_when_served(tmp_path):
@@ -502,8 +502,10 @@ def test_build_button_gone_once_builds_exist(tmp_path):
     assert "runbtn-slot" not in section(render(inp), "cash")
 
 
-def test_ticks_survive_a_section_refresh_in_the_script():
-    assert "restoreTicks();" in week_live.JS and "const ticked = new Set()" in week_live.JS
+def test_a_section_refresh_keeps_open_sections_open_and_the_explorer():
+    js = week_live.JS
+    assert "now.open = was.open" in js  # a section Sam opened stays open
+    assert "#pagecol section[id]:not([data-keep])" in js
 
 
 def test_page_reads_only_the_given_data_dir(tmp_path):
@@ -515,21 +517,25 @@ def test_page_reads_only_the_given_data_dir(tmp_path):
 # -- trust labels: chips are for predictions, feeds say "Data" ----------------------------------------
 
 
-def test_slate_and_changes_are_labelled_data_not_proven(tmp_path):
+def test_changes_is_labelled_data_not_proven(tmp_path):
     write_prev(tmp_path, slate_rows())
     page = render(inputs(tmp_path, slate_rows()))
-    for sid in ("slate", "changes"):
-        sec = section(page, sid)
-        assert 'class="chip data"' in sec and ">Data<" in sec
-        assert "Proven" not in sec and "Shadow" not in sec and "Untested" not in sec
+    sec = section(page, "changes")
+    assert 'class="chip data"' in sec and ">Data<" in sec
+    assert "Proven" not in sec and "Shadow" not in sec and "Untested" not in sec
     assert week_page.TRUST["slate"][0] == week_page.TRUST["changes"][0] == "Data"
-    assert 'class="chip proven"' in section(page, "plays")  # predictions keep their chips
-    assert ">Shadow<" in section(page, "plays") and ">Untested<" in section(page, "plays")
 
 
-def test_the_slates_top_3_tag_is_not_a_trust_chip(tmp_path):
-    sec = section(render(inputs(tmp_path, slate_rows())), "slate")
-    assert "top 3 total" in sec and 'class="sig shadow"' not in sec
+def test_the_slates_stack_tag_is_not_a_trust_chip(tmp_path):
+    week_inputs.save_input(
+        "stacks",
+        {"rows": [{"qb": "Qb Alpha", "mates": "Wr Value", "game": "DAL v IND"}]},
+        season=2026,
+        week=9,
+        data_dir=tmp_path,
+    )
+    sec = section(render(inputs(tmp_path, slate_rows())), "games")
+    assert '<span class="tag stack"' in sec and 'class="chip' not in sec
 
 
 # -- a signal's own track record under the fades -----------------------------------------------------------
@@ -567,17 +573,14 @@ def write_signal_record(d, weeks=range(1, 9)):
 
 def test_fade_rows_carry_the_signals_model_check_record(tmp_path):
     write_signal_record(tmp_path)
-    plays = section(render(inputs(tmp_path, slate_rows())), "plays")
-    fades = plays[plays.index("Fades") : plays.index("Other warning chips")]
-    assert "FADE↓: 67% hit, -2.5 vs CalPts, Weeks 1-8 (n=52)" in fades
-    shadow = plays[plays.index("Other warning chips") :]
-    assert "USAGE↓: 56% hit, -0.6 vs CalPts, Weeks 1-8 (n=124)" in shadow
+    fade = board_row(render(inputs(tmp_path, slate_rows())), "Te Fade")
+    assert "FADE↓: 67% hit, -2.5 vs CalPts, Weeks 1-8 (n=52)" in fade
 
 
 def test_record_line_is_honest_when_there_is_no_record(tmp_path):
     assert week_plays.record_line("FADE↓", None, None) == "FADE↓: no Model Check record yet"
-    plays = section(render(inputs(tmp_path, slate_rows())), "plays")
-    assert "FADE↓: no Model Check record yet" in plays
+    fade = board_row(render(inputs(tmp_path, slate_rows())), "Te Fade")
+    assert "FADE↓: no Model Check record yet" in fade
     table = {"FADE↓": {"n": 0}}
     assert "has not fired" in week_plays.record_line("FADE↓", table, (1, 8))
     thin = {"FADE↓": {"n": 4, "HitCal": 0.5, "VsCal": 1.0, "Thin": True}}

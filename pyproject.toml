@@ -61,3 +61,6 @@ ignore = ["B008"]
 [tool.ruff.lint.per-file-ignores]
 # The Week page's inline CSS / HTML / JS are text, kept as the browser reads them.
 "src/dfs/week_live.py" = ["E501"]
+"src/dfs/week_top.py" = ["E501"]
+"src/dfs/week_explorer.py" = ["E501"]
+"src/dfs/week_charts.py" = ["E501"]

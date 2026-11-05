@@ -5,9 +5,11 @@ The static page (`week_page.render`) stays exactly what `dfs week page` writes. 
 returns the live version:
 
 - every `"phrase"` Sam can say gets an **Ask** button that puts it in the chat box (it never sends);
-- every Plays row gets a **tick box** and the section an "Add ticked to pool" button (runs `dfs pool add` through
-  the run buttons' job runner, so the run lock and the closed-week rule apply); an empty Cash / GPP section gets
-  a **Build** button and an empty Sunday section **Late swap** (the static page shows the phrase to say);
+- the top of the page (`week_top`) already holds the served controls: every board / Explorer row's Pool
+  segment, the decisions' buttons and "Add the suggested starting pool". The script here sends them to the
+  server (`/api/pool`, `/api/pool/start`, `/api/decide`; `week_actions`), which re-reads the sheet, refuses on a
+  change, writes one batch under the run lock and reads it back; the page then shows what the sheet holds. An
+  empty Cash / GPP section gets a **Build** button and an empty Sunday section **Late swap**;
 - the `<!--live:contest-->` and `<!--live:run-->` markers become the contest widgets and the Run card (cards
   marked `data-keep`, so a refresh of the page's sections never wipes a half-typed form or a running job's
   output);
@@ -26,17 +28,10 @@ import re
 from dfs import week_chat, week_page
 
 SAY = re.compile(r'(<code class="say">&quot;(.*?)&quot;</code>)')
-POOL_SLOT = re.compile(r'<span class="pool-slot" data-name="([^"]*)"></span>')
 BUTTON_SLOT = re.compile(
     rf'<span class="{week_page.LIVE_BUTTON}" data-command="([^"]*)" data-label="([^"]*)"></span>'
 )
 STATIC_ONLY = re.compile(rf'<p class="note {week_page.STATIC_ONLY}">.*?</p>', re.S)
-
-POOL_BAR_HTML = (
-    '<div class="poolbar live-card"><button type="button" class="primary" id="pool-add" disabled>'
-    'Add ticked to pool</button><span class="note" id="pool-count">Tick players above; this runs '
-    "<code>dfs pool add</code> on the live sheet.</span></div>"
-)
 
 CSS = """
 body.live{display:flex;align-items:flex-start}
@@ -85,7 +80,7 @@ cursor:pointer}
 .live-card button:disabled{opacity:.5;cursor:not-allowed}
 .runbtn{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:3px 12px;cursor:pointer;
 font:inherit;margin-left:6px}
-.poolbar button:disabled{opacity:.5;cursor:not-allowed}
+.confirm{margin:8px 0}.confirm button{margin-top:6px}
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;margin:8px 0}
 .formgrid label{display:flex;flex-direction:column;font-size:12.5px;color:var(--dim);gap:2px}
 .verdict{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0}
@@ -183,7 +178,7 @@ async function call(path, opts) {
   const r = await fetch(url(path), opts);
   let body = {};
   try { body = await r.json(); } catch (e) {}
-  if (!r.ok) { const err = new Error(body.error || r.statusText); err.status = r.status; throw err; }
+  if (!r.ok) { const err = new Error(body.error || r.statusText); err.status = r.status; err.body = body; throw err; }
   return body;
 }
 const post = (path, data) => call(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data || {})});
@@ -322,11 +317,17 @@ async function refreshSections() {
   try {
     const r = await fetch(url('/?fragment=1')); if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-    for (const fresh of doc.querySelectorAll('#pagecol section.card[id]:not([data-keep])')) {
-      const old = document.getElementById(fresh.id); if (old) old.replaceWith(fresh);
+    for (const fresh of doc.querySelectorAll('#pagecol section[id]:not([data-keep])')) {
+      const old = document.getElementById(fresh.id); if (!old) continue;
+      const was = old.querySelector(':scope > details'), now = fresh.querySelector(':scope > details');
+      if (was && now) now.open = was.open;   // a section Sam opened stays open
+      old.replaceWith(fresh);
     }
     const sub = doc.querySelector('.sub'), cur = $('.sub'); if (sub && cur) cur.replaceWith(sub);
-    restoreTicks();
+    const rw = doc.querySelector('#rules-was'), rc = $('#rules-was'); if (rw && rc) rc.textContent = rw.textContent;
+    const ed = doc.querySelector('#explorer-data');
+    if (ed && window.dfsExplorer) { try { const d = JSON.parse(ed.textContent); const pi = d.columns.indexOf('Pool');
+      d.rows.forEach((row, i) => window.dfsExplorer.setPool(d.ids[i], row[pi] || '')); window.dfsExplorer.render(); } catch (e) {} }
   } catch (e) {}
 }
 
@@ -417,8 +418,7 @@ async function loadHistory() {
 }
 
 
-/* ---------- buttons inside the sections: Build, Late swap, and the Plays tick boxes ---------- */
-const ticked = new Set();   // names ticked on Plays; kept across a refresh of the sections
+/* ---------- buttons inside the sections: the next step, Build, Late swap ---------- */
 async function startJob(command, values) {
   try {
     const r = await post('/api/jobs/start', {command, values: values || {}, confirm: ''});
@@ -426,26 +426,68 @@ async function startJob(command, values) {
     followJob(r.job, command);
   } catch (e) { showRunError(e.message); $('#live-run').scrollIntoView({block: 'start'}); }
 }
-function syncPoolBar() {
-  const b = $('#pool-add'); if (!b) return;
-  b.disabled = READONLY || !ticked.size;
-  const c = $('#pool-count'); if (c) c.textContent = ticked.size ? ticked.size + ' ticked: ' + [...ticked].join(', ') : 'Tick players above; this runs dfs pool add on the live sheet.';
+
+/* ---------- the page's own writes: Pool cells, decisions, the starting pool (week_actions.py) ---------- */
+function rulesWas() { try { return JSON.parse($('#rules-was').textContent || '{}'); } catch (e) { return {}; } }
+function toast(text, bad) {
+  const t = el('div', 'toast' + (bad ? ' bad' : ''), text); document.body.append(t);
+  setTimeout(() => t.remove(), bad ? 9000 : 4000);
 }
-function restoreTicks() {
-  for (const box of document.querySelectorAll('input.pool-tick')) box.checked = ticked.has(box.dataset.name);
-  syncPoolBar();
-}
-document.addEventListener('change', (e) => {
-  const box = e.target.closest('input.pool-tick'); if (!box) return;
-  if (box.checked) ticked.add(box.dataset.name); else ticked.delete(box.dataset.name);
-  syncPoolBar();
-});
-document.addEventListener('click', (e) => {
-  const b = e.target.closest('button.runbtn'); if (b) { startJob(b.dataset.command, {}); return; }
-  if (e.target.closest('#pool-add') && ticked.size) {
-    const names = [...ticked]; ticked.clear(); restoreTicks();
-    startJob('dfs pool add', {names: names.join(', ')});
+function showPool(values) {
+  for (const [id, v] of Object.entries(values || {})) {
+    for (const seg of document.querySelectorAll('.seg[data-id="' + CSS.escape(id) + '"]')) {
+      seg.dataset.was = v;
+      for (const b of seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === v);
+    }
+    if (window.dfsExplorer) window.dfsExplorer.setPool(id, v);
   }
+}
+let writing = false;
+async function write(path, data) {
+  if (writing) { toast('One change at a time: the last one is still being written.', true); return null; }
+  writing = true;
+  try {
+    const r = await post(path, data); showPool(r.pool); if (r.message) toast(r.message); return r;
+  } catch (e) {
+    if (e.body && e.body.current && path.startsWith('/api/pool')) showPool(e.body.current);
+    toast(e.message, true); return null;
+  } finally { writing = false; await refreshSections(); }
+}
+function askFirst(anchor, text, yes, onYes) {
+  const old = anchor.parentElement.querySelector('.confirm'); if (old) { old.remove(); return; }
+  const box = el('div', 'confirm flag'); box.append(el('div', null, text));
+  const ok = el('button', 'primary', yes), no = el('button', null, 'Cancel');
+  ok.onclick = () => { box.remove(); onYes(); }; no.onclick = () => box.remove();
+  box.append(ok, document.createTextNode(' '), no); anchor.after(box);
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button.runbtn');
+  if (b) { if (b.dataset.form) openForm(b.dataset.command, {}, ''); else startJob(b.dataset.command, {}); return; }
+  if (READONLY && e.target.closest('.seg button, .dec button, #start-pool')) { toast('This week is closed: the page writes nothing.', true); return; }
+  const sb = e.target.closest('.seg[data-id] button[data-v]');
+  if (sb) {
+    const seg = sb.closest('.seg'); if (sb.dataset.v === seg.dataset.was) return;
+    seg.classList.add('busy');
+    await write('/api/pool', {changes: [{id: seg.dataset.id, value: sb.dataset.v, was: seg.dataset.was}]});
+    seg.classList.remove('busy'); return;
+  }
+  if (e.target.closest('button[data-action=start-pool]')) { const sp = $('#start-pool'); if (sp) { sp.scrollIntoView({block: 'center'}); sp.click(); } return; }
+  const sp = e.target.closest('#start-pool');
+  if (sp) {
+    askFirst(sp, 'Add these to your pool on the sheet: ' + sp.dataset.names + '?', 'Yes, add them', () => write('/api/pool/start', {}));
+    return;
+  }
+  const opt = e.target.closest('.dec button.opt');
+  if (opt) {
+    if (opt.dataset.opt === 'pivot') {
+      const ul = document.querySelector('ul.pivots[data-key="' + CSS.escape(opt.dataset.key) + '"]'); if (ul) ul.hidden = !ul.hidden; return;
+    }
+    await write('/api/decide', {key: opt.dataset.key, option: opt.dataset.opt, rules_was: rulesWas()}); return;
+  }
+  const pv = e.target.closest('.dec button.pivot');
+  if (pv) { await write('/api/decide', {key: pv.dataset.key, option: 'pivot', pivot: pv.dataset.pivot, pool_was: pv.dataset.was || '', rules_was: rulesWas()}); return; }
+  const un = e.target.closest('.dec button.undo');
+  if (un) { await write('/api/decide', {key: un.dataset.key, option: 'undo', rules_was: rulesWas()}); }
 });
 
 /* ---------- the contest check form, the budget, the drop zone ---------- */
@@ -506,7 +548,7 @@ function tierTable(t) {
   wrap.append(det); return wrap;
 }
 
-loadCommands().catch((e) => showRunError(e.message)); loadHistory(); loadChats(); status(); syncPoolBar();
+loadCommands().catch((e) => showRunError(e.message)); loadHistory(); loadChats(); status();
 })();
 """
 
@@ -517,17 +559,10 @@ def augment(page: str, *, token: str, nonce: str, read_only: bool, budget: float
         lambda m: f'{m.group(1)}<button type="button" class="ask" data-say="{m.group(2)}">Ask</button>', page
     )
     page = STATIC_ONLY.sub("", page)
-    page = POOL_SLOT.sub(
-        lambda m: (
-            f'<input type="checkbox" class="pool-tick" data-name="{m.group(1)}" title="Add to your pool">'
-        ),
-        page,
-    )
     page = BUTTON_SLOT.sub(
         lambda m: f'<button type="button" class="runbtn" data-command="{m.group(1)}">{m.group(2)}</button>',
         page,
     )
-    page = page.replace(week_page.LIVE_POOL, POOL_BAR_HTML)
     contest = CONTEST_HTML.replace("%BUDGET%", f"{budget:,.0f}" if budget else "150")
     page = page.replace(week_page.LIVE_CONTEST, contest).replace(week_page.LIVE_RUN, RUN_HTML)
     chat = CHAT_HTML.replace(

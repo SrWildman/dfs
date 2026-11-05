@@ -13,8 +13,14 @@ Deliberately minimal and locked down:
   (CSRF, DNS rebinding). Responses are never cached, send a strict Content-Security-Policy (the page's one
   script runs by nonce, nothing loads from outside), and the page sends no referrer.
 - **Standard library only**, no build step, no vendored scripts: the page's JavaScript is in `week_live.py`.
-- **No sheet writes and no DraftKings access.** The server reads the files the CLI already saved. What can
-  write is a `dfs` command Sam starts (a button, or the chat with his approval), and those take the run lock.
+- **No DraftKings access; the sheet writes are the page's own three.** The server reads the files the CLI
+  already saved, plus the live sheet's Pool column and Suggested's rules box on every render. The page writes
+  only a player's Pool cell, the rules box's Always use / Never use / Max exposure lines for a decision, and
+  the
+  suggested starting pool (`week_actions`, through `week_writes.SheetEdits`: re-read first and refused on a
+  change, one batch under the run lock, read back, logged to `data/week/edits.log`; never on a closed week).
+  Anything else that writes is a `dfs` command Sam starts (a button, or the chat with his approval), and those
+  take the run lock too.
 - **The log** (`data/week/serve.log`) holds the time, method, path without its query (so no token) and status
   of each request, and chat turns' settings and counts: never a prompt, a reply, a file's contents or a
   command's arguments.
@@ -44,6 +50,7 @@ from dfs import (
     nfl_calendar,
     paths,
     run_lock,
+    week_actions,
     week_chat,
     week_drops,
     week_inputs,
@@ -51,6 +58,7 @@ from dfs import (
     week_live,
     week_page,
     week_tools,
+    week_writes,
 )
 
 LOOPBACK = "127.0.0.1"
@@ -59,10 +67,11 @@ KEEPALIVE_SECONDS = 15.0
 
 
 class HttpError(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, extra: dict[str, Any] | None = None):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.extra = extra or {}
 
 
 @dataclass
@@ -75,6 +84,7 @@ class Context:
     chat: week_chat.ChatManager
     jobs: week_jobs.JobRunner
     read_only: bool = False
+    edits: Any = None  # week_writes.SheetEdits for the week's sheet; None: no sheet (the page cannot write)
     port: int = 0
     data_dir: Path | None = None
     log_path: Path | None = None
@@ -106,7 +116,16 @@ class Context:
 def render_page(ctx: Context, nonce: str) -> str:
     inp = week_inputs.gather(ctx.season, ctx.week, ctx.now(), ctx.data_dir)
     registered = set(commands_doc.all_commands())
-    page = week_page.render(inp, registered=registered, tools=week_tools.build(inp.runs))
+    sheet = ctx.edits.read() if ctx.edits is not None else None
+    page = week_page.render(
+        inp,
+        registered=registered,
+        tools=week_tools.build(inp.runs),
+        live=not ctx.read_only,
+        nonce=nonce,
+        sheet=sheet,
+        answers=week_actions.answers(inp),
+    )
     return week_live.augment(
         page, token=ctx.token, nonce=nonce, read_only=ctx.read_only, budget=week_page.weekly_budget(inp)
     )
@@ -209,6 +228,28 @@ def receive_drop(ctx: Context, name: str, data: bytes) -> dict[str, Any]:
     return dropped.as_json()
 
 
+def sheet_write(ctx: Context, action: Callable[[week_writes.SheetEdits, week_inputs.WeekInputs], Any]) -> Any:
+    """Run one of the page's writes, its refusals as HTTP errors (a conflict carries what the sheet holds)."""
+    if ctx.read_only:
+        raise HttpError(403, "This week is closed: the page writes nothing to its sheet.")
+    if ctx.edits is None:
+        raise HttpError(503, "No sheet is connected (config.toml), so the page cannot write.")
+    inp = week_inputs.gather(ctx.season, ctx.week, ctx.now(), ctx.data_dir)
+    try:
+        return action(ctx.edits, inp)
+    except week_writes.Conflict as exc:
+        raise HttpError(409, str(exc), {"current": exc.current}) from exc
+    except week_writes.WriteError as exc:
+        raise HttpError(exc.status, str(exc)) from exc
+    except run_lock.LockHeld as exc:
+        raise HttpError(409, f"{exc}") from exc
+
+
+def pool_message(values: dict[str, str], inp: week_inputs.WeekInputs) -> str:
+    names = {str(r.get("Id", "")): str(r.get("Name", "")) for r in inp.edge or []}
+    return "; ".join(f"{names.get(i, i)}: {v or 'out of the pool'}" for i, v in values.items())
+
+
 # -- HTTP ----------------------------------------------------------------------------------------------------
 
 
@@ -303,7 +344,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(404, "not found")
             route(self)
         except HttpError as exc:
-            self._error(exc.status, exc.message)
+            self._json(exc.status, {"error": exc.message, **exc.extra})
         except (BrokenPipeError, ConnectionResetError):
             return
         except Exception as exc:  # noqa: BLE001 - never a stack trace to the browser
@@ -460,6 +501,49 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, receive_drop(self.ctx, name, self._body(week_drops.max_upload_bytes(name))))
 
 
+def _post_pool(self: Handler) -> None:
+    changes = self._json_body().get("changes")
+
+    def act(edits, inp):
+        values = week_actions.pool_change(edits, changes)
+        return {"pool": values, "message": "Pool: " + pool_message(values, inp)}
+
+    self._json(200, sheet_write(self.ctx, act))
+
+
+def _post_pool_start(self: Handler) -> None:
+    self._json_body()
+
+    def act(edits, inp):
+        values = week_actions.start_pool(edits, inp)
+        return {"pool": values, "message": f"Added {len(values)} to your pool: " + pool_message(values, inp)}
+
+    self._json(200, sheet_write(self.ctx, act))
+
+
+def _post_decide(self: Handler) -> None:
+    data = self._json_body()
+    rules_was = data.get("rules_was") if isinstance(data.get("rules_was"), dict) else {}
+
+    def act(edits, inp):
+        text = week_actions.decide(
+            edits,
+            inp,
+            key=str(data.get("key", "")),
+            option=str(data.get("option", "")),
+            rules_was=rules_was,
+            pivot=str(data.get("pivot") or ""),
+            pool_was=str(data.get("pool_was") or ""),
+        )
+        return {"message": text}
+
+    self._json(200, sheet_write(self.ctx, act))
+
+
+Handler.post_pool = _post_pool  # type: ignore[attr-defined]
+Handler.post_pool_start = _post_pool_start  # type: ignore[attr-defined]
+Handler.post_decide = _post_decide  # type: ignore[attr-defined]
+
 GET_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/": Handler.page,
     "/api/status": Handler.get_status,
@@ -479,6 +563,9 @@ POST_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/check": Handler.post_check,
     "/api/budget": Handler.post_budget,
     "/api/drop": Handler.post_drop,
+    "/api/pool": _post_pool,
+    "/api/pool/start": _post_pool_start,
+    "/api/decide": _post_decide,
 }
 
 
@@ -505,6 +592,7 @@ def make_server(
     jobs: week_jobs.JobRunner | None = None,
     chat: week_chat.ChatManager | None = None,
     claude_available: Callable[[], bool] | None = None,
+    edits: Any = None,
 ) -> Server:
     """A server bound to the loopback address only. The caller starts it (`serve_forever`) and stops it."""
     if host != LOOPBACK:
@@ -518,6 +606,7 @@ def make_server(
         chat=None,  # type: ignore[arg-type] - set below, after the logger exists
         jobs=None,  # type: ignore[arg-type]
         read_only=read_only,
+        edits=edits,
         data_dir=data_dir,
         log_path=log_path,
     )
@@ -532,13 +621,45 @@ def make_server(
     return server
 
 
-def serve(week: int | None = None, port: int = 0, open_browser: bool = True, echo=print) -> None:
+def sheet_edits(sheet_id: str | None, read_only: bool) -> tuple[Any, str]:
+    """The page's reads and writes against the configured sheet (or `sheet_id`): (SheetEdits or None, a line
+    to print). No config or no credentials: None, and the page shows the last sync's pool, read only."""
+    try:
+        from dfs.config import load_config
+        from dfs.sheets import SheetsClient
+
+        cfg = load_config()
+        gs = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+        edge_tab = gs.tab_mappings.get("edge")
+        if not edge_tab:
+            return None, "No 'edge' tab mapped in config.toml: the page cannot write the pool."
+        client = SheetsClient(gs)
+        title, url = client.describe()
+    except Exception as exc:  # noqa: BLE001 - the page still works from the saved files
+        return (
+            None,
+            f"No sheet ({type(exc).__name__}: {exc}): the page shows the last sync and writes nothing.",
+        )
+    edits = week_writes.SheetEdits(client, edge_tab=edge_tab, read_only=read_only, title=title)
+    return edits, f"Sheet: {title} ({url}){' (read only)' if read_only else ''}"
+
+
+def serve(
+    week: int | None = None,
+    port: int = 0,
+    open_browser: bool = True,
+    echo=print,
+    sheet_id: str | None = None,
+) -> None:
     """Run the server until Ctrl-C."""
     season = nfl_calendar.current_season()
     week = week if week is not None else nfl_calendar.current_week()
-    server = make_server(season=season, week=week, port=port)
+    read_only = (season, week) < (nfl_calendar.current_season(), nfl_calendar.current_week())
+    edits, line = sheet_edits(sheet_id, read_only)
+    server = make_server(season=season, week=week, port=port, edits=edits, read_only=read_only)
     ctx = server.ctx
     url = f"http://{LOOPBACK}:{ctx.port}/?t={ctx.token}"
+    echo(line)
     echo(f"Week {week} page: {url}")
     echo(
         f"Closed week, read only: {ctx.read_only}. Ctrl-C stops the server."

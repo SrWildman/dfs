@@ -316,8 +316,8 @@ def iterate_builds(
             )
             if wanted > held[kind]:
                 jobs.append(Job(kind, (), wanted - held[kind], replaces=sorted(dropped[kind])))
-    always = [by_name[n] for n in rules.always if n in by_name]
-    for name in rules.always:
+    always = {kind: [by_name[n] for n in rules.always_for(kind) if n in by_name] for kind in KINDS}
+    for name in dict.fromkeys(n for kind in KINDS for n in rules.always_for(kind)):
         if name not in by_name:
             notes.append(
                 f"Always use: {name} has no salary or projection on the slate, so he cannot be used."
@@ -329,7 +329,6 @@ def iterate_builds(
         j.want for j in jobs if j.kind == "gpp" and j.entry is None
     )
     default_cap = ls.exposure_cap(max(gpp_planned, 1))
-    never = frozenset(rules.never)
     keys: dict[tuple, Job] = {}
     for job in jobs:
         if job.want:
@@ -339,7 +338,7 @@ def iterate_builds(
     cutoffs: list[float] = []
     for n, (key, job) in enumerate(keys.items()):
         t = clock.now()
-        pool = _pool_with(pools[job.kind], job.fixed, never)
+        pool = _pool_with(pools[job.kind], job.fixed, frozenset(rules.never_for(job.kind)))
         box = t + max(0.0, deadline - t) / (len(keys) - n)
         leaf = _leaf(rules, tags, job.kind)
         if job.kind == "cash":
@@ -684,18 +683,19 @@ def _read_build(
         has = shapes_mod.has_bring_back(list(players))
         entry.no_bring_back = (had and not has) or (entry.no_bring_back and not has)
     for p in players:
-        if p.name in rules.never:
+        if p.name in rules.never_for(entry.kind):
             entry.notes.append(f"holds {p.name}, who is on your Never use line (kept: he is in the build)")
     return entry, True
 
 
-def _fix_jobs(jobs: list[Job], always: list[SwapPlayer], cap: int, notes: list[str]) -> None:
-    """Add the Always-use players to each job's fixed players, the locks first, as many as seat beside them
-    under the cap (locks win). A rebuild with nine locked has nothing to search."""
+def _fix_jobs(jobs: list[Job], always: dict[str, list[SwapPlayer]], cap: int, notes: list[str]) -> None:
+    """Add the Always-use players of each job's kind (`Rules.always_for`) to its fixed players, the locks
+    first, as many as seat beside them under the cap (locks win). A rebuild with nine locked has nothing to
+    search."""
     unfit: set[str] = set()
     for job in jobs:
         fixed = list(job.fixed)
-        for p in always:
+        for p in always.get(job.kind, []):
             if p.name in {x.name for x in fixed}:
                 continue
             trial = [*fixed, p]
