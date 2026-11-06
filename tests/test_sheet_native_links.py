@@ -70,3 +70,57 @@ def test_rewrite_native_lookup_columns_raises_on_missing_column():
     client = SpySheetsClient(header_row=header)
     with pytest.raises(ValueError, match="Team"):
         rewrite_native_lookup_columns(client, "Player Pool", [(2, 3)])
+
+
+# --- Plan N: stale baked EdgeRaw letters (the Joe Milton #N/A) ----------------------------------------------
+
+
+def test_stale_native_cells_finds_a_formula_that_is_not_todays_and_refresh_rewrites_only_then():
+    from types import SimpleNamespace
+
+    from dfs.sheet_native_links import (
+        NATIVE_LOOKUP_COLUMNS,
+        native_lookup_formula,
+        refresh_native_lookups,
+        stale_native_cells,
+    )
+
+    header = ["Name", *NATIVE_LOOKUP_COLUMNS]
+
+    class Sheet:
+        def __init__(self):
+            self.cells = {
+                (r, i): native_lookup_formula(r, n, name_col="A")
+                for r in (2, 3)
+                for i, n in enumerate(NATIVE_LOOKUP_COLUMNS, start=1)
+            }
+            self.writes = []
+
+        def tab_exists(self, tab):
+            return tab == "Player Pool"
+
+        def read_range(self, tab, a1):
+            return [header]
+
+        def read_formula(self, tab, a1):
+            return [[self.cells[(r, i)] for i in range(1, len(header))] for r in (2, 3)]
+
+        def update_range(self, tab, a1, rows):
+            self.writes.append(a1)
+
+    sheet = Sheet()
+    cfg = SimpleNamespace(lineups=SimpleNamespace(player_pool_tab="Player Pool", builder_tab="Lineups"))
+    import dfs.sheet_native_links as links
+
+    blocks = [(2, 3)]
+    assert stale_native_cells(sheet, "Player Pool", blocks) == []
+    links_tabs = links.native_lookup_tabs
+    try:
+        links.native_lookup_tabs = lambda cfg: [("Player Pool", blocks, 1), ("Lineups", blocks, 1)]
+        assert refresh_native_lookups(sheet, cfg) == [] and sheet.writes == []
+        sheet.cells[(3, 1)] += " "  # any drift from the formula written today (a stale baked letter)
+        assert stale_native_cells(sheet, "Player Pool", blocks) == ["B3"]
+        (line,) = refresh_native_lookups(sheet, cfg)
+        assert "1 stale cell(s), first B3" in line and sheet.writes
+    finally:
+        links.native_lookup_tabs = links_tabs

@@ -2840,6 +2840,7 @@ def sync(
 
     if "edge" in source_names and not no_upload:
         _refresh_player_card(cfg, ctx, edge_width_before=edge_width_before)
+        _refresh_native_lookups(cfg)
     if not no_upload:
         _save_bankroll_health(cfg, live_client or SheetsClient(cfg.google_sheets), ctx.season, ctx.week)
 
@@ -2894,6 +2895,19 @@ def _edge_width_now(cfg: Config) -> int | None:
         return None
 
 
+def _refresh_native_lookups(cfg: Config) -> None:
+    """Plan N: Player Pool's and Lineups' native lookups bake EdgeRaw's Name / NameKey letters; after an edge
+    sync, rewrite any a moved EdgeRaw column left stale (`sheet_native_links.refresh_native_lookups`). Silent
+    when every cell is current; never fails the sync."""
+    try:
+        from dfs.sheet_native_links import refresh_native_lookups
+
+        for line in refresh_native_lookups(SheetsClient(cfg.google_sheets), cfg):
+            console.print(f"[green]OK[/green] {escape(line)}")
+    except Exception as e:  # noqa: BLE001 - never fails the sync
+        console.print(f"[yellow]Native lookups not checked: {escape(str(e))}[/yellow]")
+
+
 def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: int | None = None) -> None:
     """After an edge sync: rewrite the Player card's hidden raw tabs when the sheet has the tab
     (`sheet_player_card.refresh_raw_if_present`), and the card itself when EdgeRaw's width changed this run
@@ -2917,13 +2931,6 @@ def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: in
     )
     if line:
         console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
-    try:  # Plan N: native lookups bake EdgeRaw letters; rewrite any that a moved column left stale
-        from dfs.sheet_native_links import refresh_native_lookups
-
-        for line in refresh_native_lookups(SheetsClient(cfg.google_sheets), cfg):
-            console.print(f"[green]OK[/green] {escape(line)}")
-    except Exception as e:  # noqa: BLE001 - never fails the sync
-        console.print(f"[yellow]Native lookups not checked: {escape(str(e))}[/yellow]")
     from dfs import sheet_compare
 
     ok, line = sheet_compare.rebuild_if_widened(
