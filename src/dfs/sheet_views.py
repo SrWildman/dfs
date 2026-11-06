@@ -215,9 +215,12 @@ ROSTER_FLEX_POSITIONS = ("RB", "WR", "TE")
 ROSTER_MIN_FLEX_POOL = sum(ROSTER_MIN[p] for p in ROSTER_FLEX_POSITIONS) + 1
 
 # Model likes, not in your pool (Week 6): the model's favourites (the Edge Finder's Cash add and GPP add /
-# leverage players, `edge_finder_tab.favourites`) that are not in the pool yet, 6 Cash then 12 GPP (Sam's
-# counts), each with the live Pool dropdown. A formula over the Edge Finder's hidden favourites lists, so a
-# pick makes the row go away at once. A player on both lists shows once, in the Cash block.
+# leverage players, `edge_finder_tab.favourites`) that are not in the pool yet, up to 6 Cash then up to 12
+# GPP (Sam's counts), each with the live Pool dropdown. A formula over the Edge Finder's hidden favourites
+# lists, so a pick makes the row go away at once. A player on both lists shows once, in the Cash part.
+# Plan N item 15 (2026-11-06): ONE spill for both parts (hidden Id + its list in the next helper column), so
+# the rows are always contiguous: with every Cash favourite pooled, the Cash part used to leave six blank rows
+# above the GPP part. The first row after the list says how many qualified (`BOARD_LIKES_FEWER`).
 BOARD_LIKES_COLHEADER = [BOARD_POOL_HEADER, "Player", "Pos", "Team", "Why", "", "", ""]
 BOARD_LIKES_HEADER_ROW = BOARD_CHECK_LAST_ROW + 2
 BOARD_LIKES_COLHEADER_ROW = BOARD_LIKES_HEADER_ROW + 1
@@ -227,6 +230,10 @@ BOARD_LIKES_GPP_ROWS = 12
 BOARD_LIKES_ROWS = BOARD_LIKES_CASH_ROWS + BOARD_LIKES_GPP_ROWS
 BOARD_LIKES_LAST_ROW = BOARD_LIKES_FIRST_ROW + BOARD_LIKES_ROWS - 1
 BOARD_LIKES_EMPTY = "Your pool already has every model favourite."
+BOARD_LIKES_FEWER = (
+    "Fewer than {total} qualify: {cash} Cash (of {cash_max}) and {gpp} GPP (of {gpp_max}); "
+    "every other favourite is in your pool."
+)
 LIKES_FAVOURITE_ROWS = 200  # how far down the Edge Finder's favourites columns the formulas read
 
 BOARD_POOL_HEADER_ROW = BOARD_LIKES_LAST_ROW + 2
@@ -335,6 +342,10 @@ BOARD_SLATE_GPSCHK_COL = column_letter(BOARD_SLATE_GPSCHK_COL_INDEX)
 BOARD_ID_COL = column_letter(BOARD_ID_COL_INDEX)
 BOARD_BUSTCUT_COL = column_letter(BOARD_BUSTCUT_COL_INDEX)
 BOARD_LAST_HELPER_COL_INDEX = BOARD_BUSTCUT_COL_INDEX
+# Model likes' list (Cash / GPP) spills beside its hidden Id, into the Bust-cut helper column: that column's
+# own cells are only on the Pool summary rows, so the two never share a row (Plan N item 15).
+BOARD_LIKES_KIND_COL_INDEX = BOARD_ID_COL_INDEX + 1
+assert BOARD_LIKES_KIND_COL_INDEX == BOARD_BUSTCUT_COL_INDEX
 
 
 # Slate Grid's hidden GPS sanity-check column (see `build_slate_grid`).
@@ -915,42 +926,56 @@ def build_board(
     edge_hit, edge_boom = _rng(edge_tab, "Hit3x%"), _rng(edge_tab, "Boom%")
     fav_cash = _favourites_range(eft.FAVOURITE_CASH_COL)
     fav_gpp = _favourites_range(eft.FAVOURITE_GPP_COL)
-    cash_first = BOARD_LIKES_FIRST_ROW
-    gpp_first = BOARD_LIKES_FIRST_ROW + BOARD_LIKES_CASH_ROWS
-    cash_shown = f"${BOARD_ID_COL}${cash_first}:${BOARD_ID_COL}${gpp_first - 1}"
+    first, last = BOARD_LIKES_FIRST_ROW, BOARD_LIKES_LAST_ROW
+    kind_col = column_letter(BOARD_LIKES_KIND_COL_INDEX)
     unpooled = f'ARRAYFORMULA(COUNTIFS({edge_id},{{fav}},{edge_pool},"<>"))=0'
-    cash_ids = (
-        f'=IFERROR(ARRAY_CONSTRAIN(FILTER({fav_cash},{fav_cash}<>"",{unpooled.format(fav=fav_cash)}),'
+    cash = (
+        f'IFERROR(ARRAY_CONSTRAIN(FILTER({fav_cash},{fav_cash}<>"",{unpooled.format(fav=fav_cash)}),'
         f'{BOARD_LIKES_CASH_ROWS},1),"")'
     )
-    gpp_ids = (
-        f'=IFERROR(ARRAY_CONSTRAIN(FILTER({fav_gpp},{fav_gpp}<>"",{unpooled.format(fav=fav_gpp)},'
-        f'ARRAYFORMULA(COUNTIF({cash_shown},{fav_gpp}))=0),{BOARD_LIKES_GPP_ROWS},1),"")'
+    gpp = (
+        f'IFERROR(ARRAY_CONSTRAIN(FILTER({fav_gpp},{fav_gpp}<>"",{unpooled.format(fav=fav_gpp)},'
+        f'ARRAYFORMULA(ISNA(MATCH({fav_gpp},c,0)))),{BOARD_LIKES_GPP_ROWS},1),"")'
     )
-    _set(cash_first, [cash_ids], start_col=BOARD_ID_COL_INDEX)
-    _set(gpp_first, [gpp_ids], start_col=BOARD_ID_COL_INDEX)
+    # Id and list, Cash first then GPP, blanks dropped: the rows below fill from the top with no gap.
+    spill = (
+        f"=IFERROR(LET(c,{cash},g,{gpp},ids,VSTACK(c,g),"
+        f'kinds,VSTACK(ARRAYFORMULA(IF(LEN(c),"Cash","")),ARRAYFORMULA(IF(LEN(g),"GPP",""))),'
+        f'FILTER(HSTACK(ids,kinds),ids<>"")),"")'
+    )
+    _set(first, [spill], start_col=BOARD_ID_COL_INDEX)
+    kinds = f"${kind_col}${first}:${kind_col}${last}"
+    fewer = BOARD_LIKES_FEWER.format(
+        total=BOARD_LIKES_ROWS,
+        cash=f'"&COUNTIF({kinds},"Cash")&"',
+        cash_max=BOARD_LIKES_CASH_ROWS,
+        gpp=f'"&COUNTIF({kinds},"GPP")&"',
+        gpp_max=BOARD_LIKES_GPP_ROWS,
+    )
     for i in range(BOARD_LIKES_ROWS):
-        row = BOARD_LIKES_FIRST_ROW + i
-        is_cash = i < BOARD_LIKES_CASH_ROWS
+        row = first + i
         id_ref = f"${BOARD_ID_COL}{row}"
         at = f"MATCH({id_ref},{edge_id},0)"
 
         def _pick(column: str, at: str = at) -> str:
             return f"INDEX({column},{at})"
 
-        player = f'IFERROR({_pick(name)},"")'
-        if row == cash_first:  # the one empty-state line, in the first row, when neither block has anyone
-            player = f'IF({id_ref}="",IF(${BOARD_ID_COL}${gpp_first}="","{BOARD_LIKES_EMPTY}",""),{player})'
+        # The first empty row says why the list stops: nobody at all, or fewer than the block holds.
+        if row == first:
+            note = f'"{BOARD_LIKES_EMPTY}"'
+        else:
+            note = f'IF(${BOARD_ID_COL}{row - 1}<>"","{fewer}","")'
+        player = f'=IF({id_ref}="",{note},IFERROR({_pick(name)},""))'
         why = (
-            f'IFERROR("Cash add  ·  "&TEXT({_pick(edge_hit)},"0")&"% to reach 3x salary","")'
-            if is_cash
-            else f'IFERROR("GPP  ·  "&TEXT({_pick(edge_boom)},"0")&"% to reach 4x salary","")'
+            f'IF(${kind_col}{row}="Cash",'
+            f'IFERROR("Cash add  ·  "&TEXT({_pick(edge_hit)},"0")&"% to reach 3x salary",""),'
+            f'IFERROR("GPP  ·  "&TEXT({_pick(edge_boom)},"0")&"% to reach 4x salary",""))'
         )
         _set(
             row,
             [
                 pc.pool_formula(row, edge_tab, id_col=BOARD_ID_COL),
-                f"={player}" if row == cash_first else f'=IF({id_ref}="","",{player})',
+                player,
                 f'=IF({id_ref}="","",IFERROR({_pick(pos)},""))',
                 f'=IF({id_ref}="","",IFERROR({_pick(team)},""))',
                 f'=IF({id_ref}="","",{why})',

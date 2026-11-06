@@ -2459,6 +2459,44 @@ def sheets_doctor(
     raise typer.Exit(code=1)
 
 
+@setup_app.command("native-lookups", short_help="Rewrite Player Pool / Lineups lookups where stale.")
+def setup_native_lookups(
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Fix a different sheet -- template first, then live."
+    ),
+    force: bool = typer.Option(False, "--all", help="Rewrite every native lookup, stale or not."),
+) -> None:
+    """Rewrite Player Pool's and Lineups' native PlayerPoolRaw lookups (Team, DK Sal, Pts, Own%, ...)
+    wherever a cell is not the formula the code writes today (`sheet_native_links.refresh_native_lookups`).
+    Those formulas bake EdgeRaw's Name / NameKey letters, so an EdgeRaw column that moved leaves them stale
+    and a player whose name needs NameKey reads #N/A (Joe Milton, Week 9). A plain `dfs sync` runs the same
+    check. Reads back."""
+    from dfs.sheet_native_links import native_lookup_tabs, refresh_native_lookups, stale_native_cells
+
+    cfg = _load_config_or_exit()
+    if sheet_id and sheet_id == cfg.google_sheets.previous_sheet_id:
+        console.print("[red]That is last week's sheet (previous_sheet_id): a closed week is read only.[/red]")
+        raise typer.Exit(code=1)
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Native lookups on: [bold]{title}[/bold]\n{url}\n")
+        lines = refresh_native_lookups(client, cfg, only_if_stale=not force)
+        for line in lines or ["every native lookup is current: nothing to rewrite"]:
+            console.print(f"[green]OK[/green] {escape(line)}")
+        for tab, blocks, header_row in native_lookup_tabs(cfg):
+            if client.tab_exists(tab):
+                left = stale_native_cells(client, tab, blocks, header_row=header_row)
+                note = (
+                    f"[red]{len(left)} still stale[/red]" if left else "[green]read back: all current[/green]"
+                )
+                console.print(f"  {tab}: {note}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
 @setup_app.command("audit-style", short_help="Check that polish actually landed everywhere it should.")
 def sheets_audit_style(
     sheet_id: str = typer.Option(
@@ -2879,6 +2917,13 @@ def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: in
     )
     if line:
         console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
+    try:  # Plan N: native lookups bake EdgeRaw letters; rewrite any that a moved column left stale
+        from dfs.sheet_native_links import refresh_native_lookups
+
+        for line in refresh_native_lookups(SheetsClient(cfg.google_sheets), cfg):
+            console.print(f"[green]OK[/green] {escape(line)}")
+    except Exception as e:  # noqa: BLE001 - never fails the sync
+        console.print(f"[yellow]Native lookups not checked: {escape(str(e))}[/yellow]")
     from dfs import sheet_compare
 
     ok, line = sheet_compare.rebuild_if_widened(
@@ -6213,7 +6258,8 @@ def bankroll_fix_odds(
     sheet_id: str = typer.Option(
         None,
         "--sheet-id",
-        help="Fix a different sheet instead of config.toml's -- template first, then live. Never a closed week.",
+        help="Fix a different sheet instead of config.toml's -- template first, then live. "
+        "Never a closed week.",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print what would change; write nothing."),
 ) -> None:
@@ -6238,8 +6284,12 @@ def bankroll_fix_odds(
     tab = cfg.bankroll.tab
     try:
         title, url = client.describe()
-        console.print(f"{'Checking' if dry_run else 'Fixing'} the Odds % column on: [bold]{title}[/bold]\n{url}\n")
-        plan = (plan_odds_repair if dry_run else repair_odds_column)(client, tab, bets.first_row, bets.last_row)
+        console.print(
+            f"{'Checking' if dry_run else 'Fixing'} the Odds % column on: [bold]{title}[/bold]\n{url}\n"
+        )
+        plan = (plan_odds_repair if dry_run else repair_odds_column)(
+            client, tab, bets.first_row, bets.last_row
+        )
         for line in plan.lines(tab):
             console.print(f"{'would' if dry_run else '[green]OK[/green]'} {escape(line)}")
         if dry_run:

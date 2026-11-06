@@ -1740,6 +1740,37 @@ class SheetsClient:
                 return True
         return False
 
+    def has_gradient_rule(self, tab_name: str, column_a1: str) -> bool:
+        """Whether a colour-scale (gradient) conditional-format rule covers `column_a1` (any range)."""
+        sheet, ws = self._ws(tab_name)
+        col_index = a1_range_to_grid_range(f"{column_a1}1:{column_a1}1")["startColumnIndex"]
+        for rule in self._conditional_format_rules(sheet, ws):
+            if "gradientRule" not in rule:
+                continue
+            for r in rule.get("ranges", []):
+                if r.get("startColumnIndex", 0) <= col_index < r.get("endColumnIndex", col_index + 1):
+                    return True
+        return False
+
+    def rendered_backgrounds(self, tab_name: str, a1_range: str) -> list[tuple[object, dict]]:
+        """Each cell of a one-column `a1_range` as (its effective value, its EFFECTIVE background colour):
+        what the sheet draws, conditional formatting included. Plan N item 16: a gradient whose anchor
+        formula errors draws nothing, and only the rendered colour shows it. Read-only."""
+        sheet, _ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(
+            params={
+                "ranges": [f"'{tab_name}'!{a1_range}"],
+                "fields": "sheets(data(rowData(values(effectiveValue,effectiveFormat(backgroundColor)))))",
+            }
+        )
+        data = (meta.get("sheets") or [{}])[0].get("data") or [{}]
+        out = []
+        for row in data[0].get("rowData", []):
+            cell = (row.get("values") or [{}])[0]
+            value = next(iter((cell.get("effectiveValue") or {}).values()), None)
+            out.append((value, cell.get("effectiveFormat", {}).get("backgroundColor", {})))
+        return out
+
     def clear_protected_ranges(self, tab_name: str) -> None:
         """Delete every existing protected range on this tab, so
         `protect_sheet` is re-runnable without stacking duplicate

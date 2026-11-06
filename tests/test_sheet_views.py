@@ -32,6 +32,7 @@ from dfs.sheet_views import (
     BOARD_LIKES_FIRST_ROW,
     BOARD_LIKES_GPP_ROWS,
     BOARD_LIKES_HEADER_ROW,
+    BOARD_LIKES_KIND_COL_INDEX,
     BOARD_LIKES_LAST_ROW,
     BOARD_LIST_COLHEADER,
     BOARD_LIST_NAME_COL,
@@ -1330,28 +1331,45 @@ def test_model_likes_has_six_cash_rows_then_twelve_gpp_rows_and_sits_right_after
 def test_model_likes_reads_the_edge_finders_favourites_and_drops_anyone_already_pooled():
     client = _build_board()
     first = BOARD_LIKES_FIRST_ROW
-    gpp_first = first + BOARD_LIKES_CASH_ROWS
-    cash_spill = client.rows[first - 1][BOARD_ID_COL_INDEX]
-    gpp_spill = client.rows[gpp_first - 1][BOARD_ID_COL_INDEX]
-    assert "'Edge Finder'!$Q$2:$Q$200" in cash_spill and ",6,1)" in cash_spill
-    assert "'Edge Finder'!$R$2:$R$200" in gpp_spill and ",12,1)" in gpp_spill
+    spill = client.rows[first - 1][BOARD_ID_COL_INDEX]
+    assert "'Edge Finder'!$Q$2:$Q$200" in spill and ",6,1)" in spill
+    assert "'Edge Finder'!$R$2:$R$200" in spill and ",12,1)" in spill
     # unpooled: no typed Pool value on EdgeRaw for that id (COUNTIFS against the typed Pool column)
-    for spill in (cash_spill, gpp_spill):
-        assert "COUNTIFS(" in spill and '"<>"' in spill and spill.startswith("=IFERROR(")
-    # one player on both lists shows once: the GPP block skips whoever the Cash block already shows
-    shown = f"${BOARD_ID_COL}${first}:${BOARD_ID_COL}${gpp_first - 1}"
-    assert f"COUNTIF({shown}," in gpp_spill
+    assert spill.count("COUNTIFS(") == 2 and '"<>"' in spill and spill.startswith("=IFERROR(")
+    # one player on both lists shows once: the GPP part skips whoever the Cash part already holds
+    assert "ISNA(MATCH(" in spill and ",c,0)" in spill
+
+
+def test_model_likes_is_one_spill_so_the_rows_never_have_a_gap():
+    """Plan N item 15: Week 9 had every Cash favourite pooled and six blank rows above the GPP part. One
+    spill (Cash then GPP, blanks filtered out) fills the rows from the top; the list rides beside the Id."""
+    client = _build_board()
+    spill = client.rows[BOARD_LIKES_FIRST_ROW - 1][BOARD_ID_COL_INDEX]
+    assert "VSTACK(c,g)" in spill and 'FILTER(HSTACK(ids,kinds),ids<>"")' in spill
+    for r in range(BOARD_LIKES_FIRST_ROW + 1, BOARD_LIKES_LAST_ROW + 1):
+        cells = client.rows[r - 1]
+        assert BOARD_ID_COL_INDEX >= len(cells) or cells[BOARD_ID_COL_INDEX] in ("", None)  # spilled into
+    assert BOARD_LIKES_KIND_COL_INDEX == BOARD_ID_COL_INDEX + 1
 
 
 def test_every_model_likes_row_has_the_live_pool_dropdown_formula_and_a_why_that_names_its_list():
     client = _build_board()
+    kind = column_letter(BOARD_LIKES_KIND_COL_INDEX)
     for i in range(BOARD_LIKES_CASH_ROWS + BOARD_LIKES_GPP_ROWS):
         row = BOARD_LIKES_FIRST_ROW + i
         cells = client.rows[row - 1]
         assert cells[BOARD_LIKES_COLHEADER.index("Pool")].startswith(f'=IF(${BOARD_ID_COL}{row}="","",')
         why = cells[BOARD_LIST_REASON_INDEX]
-        assert ("Cash add" in why) if i < BOARD_LIKES_CASH_ROWS else ("GPP" in why and "Cash add" not in why)
-        assert BOARD_ID_COL_INDEX >= len(cells) or cells[BOARD_ID_COL_INDEX] in ("", None) or i in (0, 6)
+        assert f'IF(${kind}{row}="Cash",' in why and "Cash add" in why and "GPP  ·" in why
+
+
+def test_model_likes_says_how_many_qualified_in_the_first_empty_row():
+    client = _build_board()
+    col = BOARD_LIKES_COLHEADER.index("Player")
+    for r in range(BOARD_LIKES_FIRST_ROW + 1, BOARD_LIKES_LAST_ROW + 1):
+        cell = client.rows[r - 1][col]
+        assert f'IF(${BOARD_ID_COL}{r - 1}<>"","Fewer than 18 qualify: ' in cell
+        assert "COUNTIF($" in cell and '"Cash")' in cell and '"GPP")' in cell
 
 
 def test_model_likes_says_the_pool_has_every_favourite_once_in_the_first_row_when_nobody_is_left():

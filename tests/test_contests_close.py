@@ -161,3 +161,16 @@ def test_the_pool_hit_row_is_logged_for_the_latest_graded_week_and_replaced_on_a
     # a week that is not scored yet says so
     monkeypatch.setattr(results_update, "load_all_scored", lambda season: scored.assign(week=4))
     assert "not scored yet" in contests_close.log_pool_hits(cfg, object(), result, 2026)
+
+
+def test_board_likes_reads_only_rows_with_a_player_id():
+    """The line under the Model likes list ("Fewer than 18 qualify ...") is not a player."""
+
+    class Client:
+        def batch_read_ranges(self, specs):
+            return [
+                [["Daniel Jones"], ["Fewer than 18 qualify: 0 Cash (of 6) and 1 GPP (of 12); ..."], []],
+                [["44758317"], [], []],
+            ]
+
+    assert contests_close.board_likes(Client()) == {"Daniel Jones"}

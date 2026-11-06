@@ -119,14 +119,23 @@ def test_the_player_metrics_are_pct_and_the_zero_to_100_scores_are_score():
 def test_a_game_or_team_column_is_red_white_green_with_white_at_the_median():
     (grad,), _ = column_rule_specs("Total", "C", 2, 19)
     assert grad["min_color"] == GRAD_MIN and grad["mid_color"] == WHITE and grad["max_color"] == GRAD_MAX
-    assert grad["mid_value"] == "=MEDIAN(FILTER($C$2:$C$19,$C$2:$C$19<>0))"
+    assert (
+        grad["mid_value"]
+        == '=MEDIAN(FILTER(ARRAYFORMULA(IFERROR($C$2:$C$19,"")),ARRAYFORMULA(IFERROR($C$2:$C$19,""))<>0))'
+    )
 
 
 def test_the_gradient_ends_are_the_5th_and_95th_percentile_of_the_non_zero_values_not_min_max():
     (grad,), _ = column_rule_specs("PROE", "J", 2, 619)
     assert (EDGE_LOW_PERCENTILE, EDGE_HIGH_PERCENTILE) == (0.05, 0.95)
-    assert grad["min_value"] == "=PERCENTILE(FILTER($J$2:$J$619,$J$2:$J$619<>0),0.05)"
-    assert grad["max_value"] == "=PERCENTILE(FILTER($J$2:$J$619,$J$2:$J$619<>0),0.95)"
+    assert (
+        grad["min_value"] == '=PERCENTILE(FILTER(ARRAYFORMULA(IFERROR($J$2:$J$619,"")),'
+        'ARRAYFORMULA(IFERROR($J$2:$J$619,""))<>0),0.05)'
+    )
+    assert (
+        grad["max_value"] == '=PERCENTILE(FILTER(ARRAYFORMULA(IFERROR($J$2:$J$619,"")),'
+        'ARRAYFORMULA(IFERROR($J$2:$J$619,""))<>0),0.95)'
+    )
     assert grad["min_type"] == grad["max_type"] == "NUMBER"
 
 
@@ -166,7 +175,10 @@ def test_own_pct_keeps_the_chalk_anchored_midpoint_so_its_colours_are_not_flat()
 
     (grad,), bools = column_rule_specs("Own%", "H", 2, 100)
     assert grad["mid_type"] == "NUMBER" and grad["mid_value"] == str(CHALK_OWNERSHIP_THRESHOLD)
-    assert grad["min_value"] == '=MINIFS($H$2:$H$100,$H$2:$H$100,"<>0")'
+    assert (
+        grad["min_value"]
+        == '=MIN(FILTER(ARRAYFORMULA(IFERROR($H$2:$H$100,"")),ARRAYFORMULA(IFERROR($H$2:$H$100,""))<>0))'
+    )
     assert "max_value" not in grad  # the real column maximum
     assert [b["condition_type"] for b in bools] == ["NUMBER_EQ"]  # zeros stay grey
 
@@ -181,8 +193,13 @@ def test_a_gradient_column_split_into_blocks_gets_one_rule_over_all_blocks():
     groups = [(3, 19), (21, 42), (44, 70)]
     grad, bools = grouped_column_rule_specs("Total", "F", groups)
     assert grad["a1_ranges"] == ["F3:F19", "F21:F42", "F44:F70"] and "a1_range" not in grad
-    assert grad["mid_value"].count("FILTER(") == 3  # every block feeds the one median
-    assert "{FILTER($F$3:$F$19,$F$3:$F$19<>0);FILTER(" in grad["min_value"]
+    assert (
+        grad["mid_value"].count("IFERROR(") == 6 and grad["mid_value"].count("FILTER(") == 1
+    )  # every block feeds the one median
+    assert (
+        'ARRAYFORMULA({IFERROR($F$3:$F$19,"");IFERROR($F$21:$F$42,"");IFERROR($F$44:$F$70,"")})'
+        in grad["min_value"]
+    )
     (chip,) = bools
     assert chip["a1_range"] == "F3:F70" and chip["condition_type"] == "NUMBER_EQ"
 
@@ -207,13 +224,19 @@ def test_diverging_anchors_are_symmetric_so_a_zero_is_always_the_white_midpoint(
     a = diverging_anchor_kwargs("K2:K19")
     # ABSOLUTE: a relative anchor formula is shifted per row by Sheets, so every cell below the
     # column's only non-zero value would see a window with none in it (zeros rendered green).
-    assert a["min_value"] == "=-MAX(MAX($K$2:$K$19),-MIN($K$2:$K$19))"
-    assert a["max_value"] == "=MAX(MAX($K$2:$K$19),-MIN($K$2:$K$19))"
+    assert (
+        a["min_value"]
+        == '=-MAX(MAX(ARRAYFORMULA(IFERROR($K$2:$K$19,""))),-MIN(ARRAYFORMULA(IFERROR($K$2:$K$19,""))))'
+    )
+    assert (
+        a["max_value"]
+        == '=MAX(MAX(ARRAYFORMULA(IFERROR($K$2:$K$19,""))),-MIN(ARRAYFORMULA(IFERROR($K$2:$K$19,""))))'
+    )
     assert a["min_type"] == a["max_type"] == "NUMBER"
     multi = diverging_anchor_kwargs(["A2:A5", "A9:A12"])
     assert (
-        "MAX($A$2:$A$5,$A$9:$A$12)" in multi["max_value"]
-        and "MIN($A$2:$A$5,$A$9:$A$12)" in multi["max_value"]
+        'MAX(ARRAYFORMULA({IFERROR($A$2:$A$5,"");IFERROR($A$9:$A$12,"")}))' in multi["max_value"]
+        and 'MIN(ARRAYFORMULA({IFERROR($A$2:$A$5,"");IFERROR($A$9:$A$12,"")}))' in multi["max_value"]
     )
 
 
@@ -221,8 +244,8 @@ def test_every_diverging_field_gets_the_symmetric_anchors_and_keeps_its_zero_mid
     for field in ("ImpliedMove", "TotMove", "SpdMove"):
         (grad,), _ = column_rule_specs(field, "K", 2, 50)
         assert grad["mid_type"] == "NUMBER" and grad["mid_value"] == "0"
-        assert grad["min_value"].startswith("=-MAX(MAX($K$2:$K$50)")
-        assert grad["max_value"].startswith("=MAX(MAX($K$2:$K$50)")
+        assert grad["min_value"].startswith('=-MAX(MAX(ARRAYFORMULA(IFERROR($K$2:$K$50,"")))')
+        assert grad["max_value"].startswith('=MAX(MAX(ARRAYFORMULA(IFERROR($K$2:$K$50,"")))')
 
 
 def _every_reference_is_absolute(formula: str) -> bool:
@@ -233,8 +256,14 @@ def _every_reference_is_absolute(formula: str) -> bool:
 
 
 def test_zero_exclude_anchors_use_absolute_references_or_sheets_shifts_them_per_row():
-    assert _zero_exclude_formula("MIN", "K2:K19") == 'MINIFS($K$2:$K$19,$K$2:$K$19,"<>0")'
-    assert _zero_exclude_formula("MEDIAN", "K2:K19") == "MEDIAN(FILTER($K$2:$K$19,$K$2:$K$19<>0))"
+    assert (
+        _zero_exclude_formula("MIN", "K2:K19")
+        == 'MIN(FILTER(ARRAYFORMULA(IFERROR($K$2:$K$19,"")),ARRAYFORMULA(IFERROR($K$2:$K$19,""))<>0))'
+    )
+    assert (
+        _zero_exclude_formula("MEDIAN", "K2:K19")
+        == 'MEDIAN(FILTER(ARRAYFORMULA(IFERROR($K$2:$K$19,"")),ARRAYFORMULA(IFERROR($K$2:$K$19,""))<>0))'
+    )
     multi = ["B3:B12", "B14:B33"]  # one position's rows across several runs
     assert _every_reference_is_absolute(_zero_exclude_formula("MIN", multi))
     assert _every_reference_is_absolute(_zero_exclude_formula("MEDIAN", multi))

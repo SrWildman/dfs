@@ -305,6 +305,7 @@ MORE_LABELS = {
     "dfs bankroll backfill-keys": "Repair: fill in Bankroll's dedupe keys",
     "dfs bankroll build-betting-ledger": "Build the hand-entered Betting ledger",
     "dfs bankroll fix-odds": "Make the Betting ledger's Odds % a true percent",
+    "dfs setup native-lookups": "Rewrite stale Player Pool / Lineups lookups",
     "dfs setup sheet": "Build a whole sheet from scratch (the full setup)",
     "dfs setup polish": "Re-apply widths, formats and header styling",
     "dfs setup build-views": "Rebuild Board, Slate Grid and the other derived tabs",

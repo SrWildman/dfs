@@ -104,3 +104,69 @@ def rewrite_native_lookup_columns(
             client.update_range(tab, f"{start_col}{start}:{end_col}{end}", rows)
 
     return f"{tab}: rewrote {len(NATIVE_LOOKUP_COLUMNS)} native PlayerPoolRaw-lookup column(s)"
+
+
+# -- Plan N item 16 (the Joe Milton #N/A): stale baked EdgeRaw letters ------------------------------------
+#
+# Every formula above resolves the typed name through `resolve_name_expr`, which BAKES EdgeRaw's `Name` and
+# `NameKey` column letters into the text when it is written. EdgeRaw is rewritten by value, never by an
+# insert, so when a new EdgeRaw column lands ahead of `NameKey` nothing shifts those letters: Week 9's Player
+# Pool and Lineups still matched against `$BS:$BS` (NameKey had moved to `CO`), so any player whose typed name
+# needs the NameKey match (Joe Milton for Joe Milton III) read #N/A in every native column.
+
+
+def native_lookup_tabs(cfg) -> list[tuple[str, list[tuple[int, int]], int]]:
+    """(tab, name blocks, header row) for the two tabs that carry native lookups."""
+    from dfs.weekly_reset import LINEUPS_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW, PLAYER_POOL_NAME_BLOCKS
+
+    return [
+        (cfg.lineups.player_pool_tab, PLAYER_POOL_NAME_BLOCKS, PLAYER_POOL_HEADER_ROW),
+        (cfg.lineups.builder_tab, LINEUPS_NAME_BLOCKS, LINEUPS_NAME_BLOCKS[0][0] - 1),
+    ]
+
+
+def stale_native_cells(
+    client, tab: str, name_blocks: list[tuple[int, int]], *, header_row: int = 1
+) -> list[str]:
+    """Every native-lookup cell on `tab` whose formula is not what `native_lookup_formula` writes today (a
+    stale baked letter, a typed value, a blank). Read-only; [] when the tab has no native columns."""
+    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
+    header = list(header_rows[0]) if header_rows else []
+    if any(name not in header for name in NATIVE_LOOKUP_COLUMNS):
+        return []
+    columns = {name: header.index(name) for name in NATIVE_LOOKUP_COLUMNS}
+    name_col = column_letter(header.index("Name")) if "Name" in header else "A"
+    first_index, last_index = min(columns.values()), max(columns.values())
+    first_col, last_col = column_letter(first_index), column_letter(last_index)
+    stale = []
+    for start, end in name_blocks:
+        rows = client.read_formula(tab, f"{first_col}{start}:{last_col}{end}")
+        for offset in range(end - start + 1):
+            row = start + offset
+            cells = rows[offset] if offset < len(rows) else []
+            for name, index in columns.items():
+                i = index - first_index
+                got = str(cells[i]) if i < len(cells) else ""
+                if got != native_lookup_formula(row, name, name_col=name_col):
+                    stale.append(f"{column_letter(index)}{row}")
+    return stale
+
+
+def refresh_native_lookups(client, cfg, *, only_if_stale: bool = True) -> list[str]:
+    """Rewrite the native lookups on Player Pool and Lineups (`rewrite_native_lookup_columns`) wherever a
+    cell is stale (or always, `only_if_stale=False`). One line per tab it rewrote, with its stale count.
+    Run by `dfs setup native-lookups` and, fail-soft, after every plain `dfs sync`."""
+    lines = []
+    for tab, blocks, header_row in native_lookup_tabs(cfg):
+        if not client.tab_exists(tab):
+            continue
+        stale = stale_native_cells(client, tab, blocks, header_row=header_row)
+        if only_if_stale and not stale:
+            continue
+        rewrite_native_lookup_columns(client, tab, blocks, header_row=header_row)
+        lines.append(
+            f"{tab}: native lookups rewritten ({len(stale)} stale cell(s)"
+            + (f", first {stale[0]}" if stale else "")
+            + ")"
+        )
+    return lines

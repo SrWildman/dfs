@@ -83,9 +83,12 @@ EDGE_LOW_PERCENTILE, EDGE_HIGH_PERCENTILE = 0.05, 0.95
 # reads as the workbook's existing warning language.
 _WARM = "warm"
 
+# Plan N item 16 (Sam, 2026-11-06: "Chalk-map orange"): the old white -> #F7E9CF -> #F8DEDA read almost white,
+# so ownership now uses the orange the Board's Chalk map and the Edge Finder's Own% already draw
+# (`BLOCK_ORANGE`, its half-way blend at the 20% chalk line): ownership looks the same on every tab.
 WARM_MIN = WHITE
-WARM_MID = _rgb("#F7E9CF")  # == WARN_BG
-WARM_MAX = _rgb("#F8DEDA")  # == CRIT_BG
+WARM_MID = {k: round(1 - 0.5 * (1 - v), 4) for k, v in BLOCK_ORANGE.items()}  # ~#FEECD4
+WARM_MAX = BLOCK_ORANGE  # ~#FCD9A8
 
 # Every field name in the workbook that gets a colour scale, and which
 # shape -- shared across every tab that happens to carry a column of this
@@ -169,6 +172,10 @@ FIELD_COLOR_SCALES = {
     "TotMove": _DIVERGING,
     "SpdMove": _DIVERGING,
     "Own%": _WARM,
+    # Plan N item 16: the ownership models (GPP, double-up, ours) carry the same warm scale as TFFB's Own%.
+    "GppOwn": _WARM,
+    "CashOwn": _WARM,
+    "OurOwn": _WARM,
     # Low is comfortable, high is concentration, so Exposure is a reversed gradient.
     "Exposure": _REVERSED,
     # A count of lineups using the player: a heavily-used player earning the deepest colour is
@@ -215,31 +222,37 @@ ZERO_EXCLUDED_COLUMNS = frozenset(name for name, kind in FIELD_COLOR_SCALES.item
 ZERO_GREY_BG = _rgb("#EDEEF1")
 
 
+def _numbers(ranges: list[str]) -> str:
+    """The cells of `ranges` (already absolute) as one array with every error cell turned into "" (text, which
+    MIN / MEDIAN / PERCENTILE / MAX ignore). Plan N item 16: a single #N/A in the column (a pooled player a
+    lookup could not find) used to make `MINIFS` -- and so the whole gradient -- error, and Sheets then draws
+    no colour at all (Week 9's Player Pool Own%)."""
+    if len(ranges) == 1:
+        return f'ARRAYFORMULA(IFERROR({ranges[0]},""))'
+    return "ARRAYFORMULA({" + ";".join(f'IFERROR({r},"")' for r in ranges) + "})"
+
+
 def _zero_exclude_formula(fn: str, ranges: str | list[str], q: float | None = None) -> str:
-    """`fn` applied over one range, or the combination of several -- the MINIFS-style min, the
+    """`fn` applied over one range, or the combination of several -- the non-zero min, the
     MEDIAN(FILTER(...)) mid and the PERCENTILE(FILTER(...)) end anchors below all go through
     here. A list of ranges (a column whose data sits in several row blocks) combines every
     block's own non-zero values into the SAME computation rather than picking a value from
-    any one block alone.
+    any one block alone. Error cells are ignored (`_numbers`), so one #N/A never blanks the scale.
 
     Every range goes through `_absolute`: Sheets shifts a RELATIVE reference inside a
     colour-scale anchor formula per row (see `diverging_anchor_kwargs`), so a cell far
     down the column would evaluate a window that has slid off the data."""
     if isinstance(ranges, str):
         ranges = [ranges]
-    ranges = [_absolute(r) for r in ranges]
+    data = _numbers([_absolute(r) for r in ranges])
+    nonzero = f"FILTER({data},{data}<>0)"
     if fn == "MIN":
-        parts = [f'MINIFS({r},{r},"<>0")' for r in ranges]
-        return f"MIN({','.join(parts)})" if len(parts) > 1 else parts[0]
+        return f"MIN({nonzero})"
     if fn == "MEDIAN":
-        parts = [f"FILTER({r},{r}<>0)" for r in ranges]
-        return f"MEDIAN({','.join(parts)})"
+        return f"MEDIAN({nonzero})"
     if fn == "PERCENTILE":
-        parts = [f"FILTER({r},{r}<>0)" for r in ranges]
-        data = parts[0] if len(parts) == 1 else "{" + ";".join(parts) + "}"
-        return f"PERCENTILE({data},{q})"
+        return f"PERCENTILE({nonzero},{q})"
     if fn == "PERCENTILE_ALL":  # zero is a real value here (Spread): no filter
-        data = ranges[0] if len(ranges) == 1 else "{" + ";".join(ranges) + "}"
         return f"PERCENTILE({data},{q})"
     raise ValueError(f"Unsupported zero-exclude function {fn!r}")
 
@@ -266,8 +279,8 @@ def diverging_anchor_kwargs(ranges: str | list[str]) -> dict:
     # ABSOLUTE references, or Sheets shifts the formula per row: a cell below the column's one
     # non-zero value then evaluates a window with none in it, the anchors collapse onto the
     # midpoint, and its zero renders green (found live on Week 4's Slate Grid).
-    joined = ",".join(_absolute(r) for r in ranges)
-    bound = f"MAX(MAX({joined}),-MIN({joined}))"
+    data = _numbers([_absolute(r) for r in ranges])  # an error cell must not blank the scale either
+    bound = f"MAX(MAX({data}),-MIN({data}))"
     return {"min_type": "NUMBER", "min_value": f"=-{bound}", "max_type": "NUMBER", "max_value": f"={bound}"}
 
 

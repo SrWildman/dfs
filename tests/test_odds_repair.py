@@ -19,7 +19,9 @@ TAB = "Bankroll"
 class FakeBankroll:
     """B17:B19 typed like Week 9 (46, 55, 0.7) under the legacy literal-% format; rows 20-36 empty."""
 
-    def __init__(self, values: dict[int, float], pattern: str = LEGACY_ODDS_PCT_PATTERN, kind: str = "NUMBER"):
+    def __init__(
+        self, values: dict[int, float], pattern: str = LEGACY_ODDS_PCT_PATTERN, kind: str = "NUMBER"
+    ):
         self.values = dict(values)
         self.fmt = {r: {"numberFormat": {"type": kind, "pattern": pattern}} for r in range(17, 37)}
         self.formulas: dict[str, str] = {}

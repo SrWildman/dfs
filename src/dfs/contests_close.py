@@ -204,8 +204,19 @@ def board_likes(client: SheetsClient) -> set[str]:
     from dfs.sheets import column_letter
 
     col = column_letter(sv.BOARD_LIKES_COLHEADER.index("Player"))
-    rows = client.read_range(sv.BOARD_TAB, f"{col}{sv.BOARD_LIKES_FIRST_ROW}:{col}{sv.BOARD_LIKES_LAST_ROW}")
-    return {str(r[0]).strip() for r in rows if r and str(r[0]).strip()}
+    first, last = sv.BOARD_LIKES_FIRST_ROW, sv.BOARD_LIKES_LAST_ROW
+    names, ids = client.batch_read_ranges(
+        [
+            (sv.BOARD_TAB, f"{col}{first}:{col}{last}"),
+            (sv.BOARD_TAB, f"{sv.BOARD_ID_COL}{first}:{sv.BOARD_ID_COL}{last}"),
+        ]
+    )
+    # A player row has its hidden Id; the line under the list ("Fewer than 18 qualify...") does not.
+    return {
+        str(n[0]).strip()
+        for i, n in enumerate(names)
+        if n and str(n[0]).strip() and i < len(ids) and ids[i] and str(ids[i][0]).strip()
+    }
 
 
 def log_pool_hits(cfg: Config, client: SheetsClient, result: analysis.Analysis, season: int) -> str:

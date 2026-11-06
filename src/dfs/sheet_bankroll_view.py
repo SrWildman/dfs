@@ -458,6 +458,8 @@ def repair_odds_column(client, tab: str, first_row: int, last_row: int) -> OddsR
     if plan.values:
         client.update_ranges(tab, {f"B{r}": [[after]] for r, _before, after in plan.values})
     client.format_range(tab, f"B{first_row}:B{last_row}", _ODDS_PCT_NUMBER_FORMAT)
-    client.update_range(tab, f"C{first_row}:C{last_row}", [[odds_formula(r)] for r in range(first_row, last_row + 1)])
+    client.update_range(
+        tab, f"C{first_row}:C{last_row}", [[odds_formula(r)] for r in range(first_row, last_row + 1)]
+    )
     client.format_range(tab, f"C{first_row}:C{last_row}", _ODDS_NUMBER_FORMAT)
     return plan

@@ -826,6 +826,15 @@ Round 5 follow-up item 2 (2026-09-29): `dfs doctor` now requires a formula on ev
 |---|---|
 | `--sheet-id STR` | Repair a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
 
+### `dfs setup native-lookups`
+
+Rewrite Player Pool's and Lineups' native PlayerPoolRaw lookups (Team, DK Sal, Pts, Own%, ...) wherever a cell is not the formula the code writes today (`sheet_native_links.refresh_native_lookups`). Those formulas bake EdgeRaw's Name / NameKey letters, so an EdgeRaw column that moved leaves them stale and a player whose name needs NameKey reads #N/A (Joe Milton, Week 9). A plain `dfs sync` runs the same check. Reads back.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Fix a different sheet -- template first, then live. |
+| `--all` | Rewrite every native lookup, stale or not. |
+
 ### `dfs setup lineup-chalk`
 
 Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` runs) so a complete lineup that holds none of the heavily owned players (projected 16%+ owned, about 20% expected in a double-up; 25%+ for a lineup marked GPP) shows "Chalk: Name N% +k" on its Total row. Nothing else on the tab changes. Template first, then the live sheet; run `dfs doctor` after.
