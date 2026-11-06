@@ -1,0 +1,9 @@
+# Plan M, M1.5 (a): today's cash builds with every cash AVOID call out of the pool, nothing locked
+# (`dfs.plays_flag`). Compare with `--compare research/settings/today_cash.toml`. Shadow, default off.
+name = "calls: AVOID bans (cash only)"
+
+[builds]
+gpp = 0
+
+[flags]
+calls = "avoid"

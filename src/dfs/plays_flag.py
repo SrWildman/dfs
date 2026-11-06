@@ -1,4 +1,10 @@
-"""`calls = true` for `dfs backtest` (Plan M, M1): cash builds made only from the plays model's cash calls.
+"""`calls = ...` for `dfs backtest` (Plan M): builds made from the plays model's calls. Three values:
+
+- `true` (M1): cash builds with every CORE locked and every AVOID banned (below);
+- `"avoid"` (M1.5 a): every cash AVOID leaves the pool, nothing is locked (run it with `[builds] gpp = 0`);
+- `"fade"` (M1.5 b): every GPP FADE leaves the pool, nothing is locked (run it with `[builds] cash = 0`).
+
+The two ban-only values change nothing but the pool, so today's builder runs on it as is.
 
 The week's calls are the plays backtest's (`research.plays_backtest`: the features as they stood at the lock,
 the weights fitted on the weeks before it, read from `data/research/calls_weights/`; run
@@ -55,10 +61,35 @@ def feasible_locks(core: list, cap: int) -> list[str]:
     return [c.name for c in chosen]
 
 
+BAN_ONLY = {"avoid": ("cash", "AVOID"), "fade": ("gpp", "FADE")}
+
+
+def mode(value) -> str:  # noqa: ANN001
+    """`"lock"` (true), `"avoid"` or `"fade"`; anything else is refused."""
+    if value is True:
+        return "lock"
+    if isinstance(value, str) and value.lower() in BAN_ONLY:
+        return value.lower()
+    raise ValueError(f'calls = {value!r}: use true, "avoid" or "fade"')
+
+
+def banned(calls, value) -> set[str]:  # noqa: ANN001 - plays.Calls
+    kind, label = BAN_ONLY[mode(value)]
+    return {c.name for c in calls.calls if getattr(c, kind) == label}
+
+
 def prepare(ctx: bs.BuildContext, value) -> bs.BuildContext:  # noqa: ANN001
     if not value:
         return ctx
     calls, weights = week_calls(int(ctx.week))
+    if mode(value) != "lock":
+        out = banned(calls, value)
+        ctx.tags = {n: t for n, t in ctx.tags.items() if n not in out}
+        ctx.notes.append(
+            f"calls = {mode(value)} (weights through Week {weights.through}): banned "
+            f"{len(out)}: {', '.join(sorted(out))}"
+        )
+        return ctx
     names = set(ctx.edge["Name"].astype(str))
     core = [c for c in calls.calls if c.cash == "CORE" and c.name in names]
     avoid = {c.name for c in calls.calls if c.cash == "AVOID"}
@@ -77,7 +108,7 @@ def prepare(ctx: bs.BuildContext, value) -> bs.BuildContext:  # noqa: ANN001
 
 def build(ctx: bs.BuildContext, value, inner):  # noqa: ANN001, ANN201
     """Today's builder with the CORE locks; a lock that leaves no legal cash lineup is dropped."""
-    if not value:
+    if not value or mode(value) != "lock":
         return inner(ctx)
     from dfs import backtest
     from dfs import lineup_suggest as ls
@@ -114,7 +145,9 @@ def build(ctx: bs.BuildContext, value, inner):  # noqa: ANN001, ANN201
 FLAG_DEF = bs.register(
     bs.Flag(
         name=FLAG,
-        doc="cash builds from the plays model's calls: CORE locked, AVOID banned (Plan M, shadow)",
+        doc="builds from the plays model's calls: true = CORE locked + AVOID banned (cash); "
+        '"avoid" = AVOID banned only (cash); "fade" = FADE banned only (GPP) (Plan M, shadow)',
+        version="2",
         prepare=prepare,
         build=build,
     )

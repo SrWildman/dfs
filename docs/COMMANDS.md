@@ -634,7 +634,7 @@ Monday's offline studies and their one report, on their own (`dfs week close --r
 |---|---|
 | `--week INT` | The closed week to study (default: the newest scored week). |
 | `--season INT` | Override the auto-detected NFL season. |
-| `--only STR` | Comma-separated stages: refresh, stacks, backtest, own_error, calls (default: all five). |
+| `--only STR` | Comma-separated stages: refresh, stacks, backtest, own_error, calls, calls_flashback (default: all six). |
 | `--deadline FLOAT` | Minutes after which a stage still running is stopped. Default: `45.0`. |
 
 ### `dfs backtest`

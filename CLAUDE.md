@@ -73,12 +73,13 @@ topic, which is how the "More, by topic" screen reaches it (tests enforce both).
 Typed commands also ask for a missing required argument at a terminal (`prompt_missing.py`; every Typer app needs
 `cls=PromptingGroup`) and fail as before when piped/scripted.
 
-- `dfs week close --research` / `dfs research close-report [--week N] [--only refresh,stacks,backtest,own_error,calls] [--deadline MIN]` -- Monday
-  on autopilot (`close_research.py`): after the close, five stages run side by side as child processes (each with a log under
+- `dfs week close --research` / `dfs research close-report [--week N] [--only refresh,stacks,backtest,own_error,calls,calls_flashback] [--deadline MIN]` -- Monday
+  on autopilot (`close_research.py`): after the close, six stages run side by side as child processes (each with a log under
   `data/research/close/<season>-wk<NN>/`; the parent stops any still running at the deadline, 45 min): `dfs research refresh --through
   <week>`, `dfs stacks --retro`, `dfs backtest` of `ownership_uncertainty` and `ownership_uncertainty_gpp` against `today` over every
   week with standings (settings in `research/settings/*.toml`, in the repo), `python -m dfs.sim.own_error_sim_retro`, and the plays model's `calls` (the week's calls scored into
-  `data/research/calls_history.csv`, weights refitted; `research/plays_backtest.close_week`). Each fails soft.
+  `data/research/calls_history.csv`, weights refitted; `research/plays_backtest.close_week`), and `calls_flashback` (`dfs backtest` of
+  `calls_avoid_cash` against `today_cash` and `calls_fade_gpp` against `today_gpp`, Plan M M1.5's ban-only variants). Each fails soft.
   ONE report, `docs/research/weekly/<season>-wk<NN>-close.md` (gitignored): the close summary (what `week close` printed, plus the Contests
   tab's decisions block), each study's headline and ship-bar verdict, "changed since last week" against the previous close report. Nothing
   writes a sheet (`close-report` reads none at all). `week close --research` skips the studies, saying why, when the week is not scored yet.
@@ -168,7 +169,9 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `data/week/inputs/<season>-wk<NN>-calls.json` and prints the "new must-plays" (calls that moved up). `--inactives` runs
   `dfs sync --live` first (which refreshes the Cockpit). Never writes a sheet. The Week page does not show the calls yet (M2).
   Backtest: `python -m dfs.research.plays_backtest run` (report in `docs/research/plays/`, gitignored). Flashback:
-  `dfs backtest --settings research/settings/calls_cash.toml --compare research/settings/today_cash.toml`.
+  `dfs backtest --settings research/settings/calls_cash.toml --compare research/settings/today_cash.toml`
+  (flag `calls`: `true` = CORE locked + AVOID banned; M1.5's ban-only variants `"avoid"` with `calls_avoid_cash.toml` against
+  `today_cash.toml`, `"fade"` with `calls_fade_gpp.toml` against `today_gpp.toml`).
 - `dfs setup stacks [--sheet-id <id>]` -- creates (or rebuilds) the Stacks tab right after Suggested. Template first, then live, `dfs doctor` after
   (check `stacks-tab`). Needs `dfs stacks --refit` once.
 - `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one

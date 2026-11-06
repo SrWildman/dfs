@@ -159,3 +159,42 @@ def test_the_flag_locks_a_legal_core_set():
     ]
     locks = plays_flag.feasible_locks(core, 50_000)
     assert locks == ["Q1", "R1"]  # one QB seat; the $30K tight end leaves no room
+
+
+def test_ban_only_modes_drop_the_banned_from_the_pool_and_lock_nothing(monkeypatch):
+    from types import SimpleNamespace
+
+    from dfs import plays_flag
+
+    mk = lambda n, cash, gpp: plays.Call(n, "WR", "T", "O", 5000, 10.0, 0.1, 0.1, cash, 0.0, "", gpp, 0.0, "")  # noqa: E731
+    calls = plays.Calls(
+        2026,
+        5,
+        datetime(2026, 10, 11, tzinfo=UTC),
+        [mk("A", "AVOID", "NEUTRAL"), mk("F", "PLAY", "FADE"), mk("C", "CORE", "TARGET")],
+        4,
+    )
+    monkeypatch.setattr(plays_flag, "week_calls", lambda week: (calls, plays.Weights.prior(2026)))
+    tags = {"A": "Cash", "F": "Both", "C": "GPP"}
+    ctx = plays_flag.prepare(SimpleNamespace(week=5, tags=dict(tags), notes=[]), "avoid")
+    assert ctx.tags == {"F": "Both", "C": "GPP"} and not hasattr(ctx, "cash_fixed")
+    ctx = plays_flag.prepare(SimpleNamespace(week=5, tags=dict(tags), notes=[]), "fade")
+    assert ctx.tags == {"A": "Cash", "C": "GPP"}
+    assert "banned 1: F" in ctx.notes[0]
+    built = plays_flag.build(ctx, "fade", lambda c: ["today's builder"])
+    assert built == ["today's builder"]
+    assert plays_flag.mode(True) == "lock" and plays_flag.mode("FADE") == "fade"
+    with pytest.raises(ValueError):
+        plays_flag.mode("core")
+
+
+def test_m15_settings_files_load():
+    from dfs import backtest_settings as bs
+    from dfs.paths import REPO_ROOT
+
+    folder = REPO_ROOT / "research" / "settings"
+    a = bs.load(folder / "calls_avoid_cash.toml")
+    b = bs.load(folder / "calls_fade_gpp.toml")
+    assert a.flags["calls"] == "avoid" and a.gpp == 0
+    assert b.flags["calls"] == "fade" and b.cash == 0
+    assert bs.load(folder / "today_gpp.toml").cash == 0

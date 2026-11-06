@@ -2410,8 +2410,15 @@ signal archive.
 - GPP: the TARGET+LEVERAGE real top-1% excess minus that of the unchosen players at the same position within
   $500, combined across weeks by Stouffer. It ships at one-sided p < 0.05 and above both baselines in most
   weeks.
-- Flashback flag `calls` (`plays_flag.py`): CORE locked, AVOID banned, cash builds only
-  (`research/settings/calls_cash.toml` against `today_cash.toml`).
+- Flashback flag `calls` (`plays_flag.py`), with three values:
+  - `true`: CORE locked and AVOID banned, cash builds only (`research/settings/calls_cash.toml` against
+    `today_cash.toml`).
+  - `"avoid"` (M1.5): every cash AVOID out of the pool and nothing locked (`calls_avoid_cash.toml` against
+    `today_cash.toml`).
+  - `"fade"` (M1.5): every GPP FADE out of the pool and nothing locked (`calls_fade_gpp.toml` against
+    `today_gpp.toml`).
+
+  The two ban-only values run today's builder unchanged on the smaller pool.
 
 `dfs week close --research`'s `calls` stage scores the week's last live version before the lock (else the
 rebuilt calls). It appends the rows to `data/research/calls_history.csv` and refits the weights through the
