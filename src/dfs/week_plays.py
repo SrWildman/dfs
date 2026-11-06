@@ -8,8 +8,11 @@ renders what these functions return.
 **Plays** answer "who are the right plays this week?", by position, five each:
 
 - *Best projected value*: `CalPts` per $1K, `CalPts` the tiebreak.
-- *Cash core*: `CalPts` and value both at least the position's median, best `Floor` first. With
-  `CashOwn` published, the double-up ownership is shown and 30%+ is chalk (Plan D's chalk check).
+- *Cash core* (Plan N item 11, Sam 2026-11-05): among the players in the top half of the position on
+  `CalPts`, the best `Floor` per $1K, at most `CASH_CORE_CAP` per position (4 QB / TE / DST, 8 RB / WR); plus
+  every player predicted in 30%+ of double-up lineups (`CashOwn`), even outside the caps, marked *chalk
+  core* (a player on both lists shows once, as chalk core). It narrows during the week only as the news and
+  the ownership move: the caps never change.
 - *GPP upside*: best `Boom%` (`Ceiling` the tiebreak). With `GppOwn` published, the list is the sheet's
   GPP leverage view (`edge_finder_tab.with_leverage`: Boom% rank minus ownership rank within the
   position, among the top half of the position's Boom%) so low-owned upside comes first.
@@ -33,6 +36,12 @@ POSITIONS = ("QB", "RB", "WR", "TE", "DST")
 PER_POSITION = 5
 UNPLAYABLE = {"OUT", "IR", "D"}  # DraftKings' status: out, injured reserve, doubtful
 CHALK = 0.30  # 30%+ of the double-up field: "play or fade on purpose"
+CASH_CORE_CAP = {"QB": 4, "RB": 8, "WR": 8, "TE": 4, "DST": 4}  # Sam, 2026-11-05 (Plan N item 11)
+CASH_CORE_RULE = (
+    "Cash core: among the top half of the position on CalPts, the best Floor per $1K, at most 4 QB / TE / "
+    "DST and 8 RB / WR; plus every player predicted in 30%+ of double-up lineups (CashOwn), marked chalk "
+    "core. The rule never changes; the list narrows during the week only as the news and the ownership move."
+)
 WIND_MPH = 15.0  # sources/weather.py's WIND_FLAG_THRESHOLD_MPH
 TOTAL_MOVED = 2.0  # a game total that moved this far since the opening snapshot is highlighted
 LINE_MOVED = 1.0  # a total or spread that moved this far since the last sync is listed
@@ -112,6 +121,33 @@ def value_per_k(row: dict) -> float | None:
     return cal / (sal / 1000) if cal is not None and sal > 0 else None
 
 
+def floor_per_k(row: dict) -> float | None:
+    floor, sal = num(row.get("Floor")), salary(row)
+    return floor / (sal / 1000) if floor is not None and sal > 0 else None
+
+
+def cash_core(at: list[dict], pos: str, *, per: int | None = None) -> list[tuple[dict, bool]]:
+    """One position's cash core, as `(row, chalk_core)`: the top `CASH_CORE_CAP[pos]` (and at most `per`) by
+    Floor per $1K among the players at least the position's median CalPts, then every 30%+ CashOwn player
+    the caps left out. A player on both lists is chalk core (flagged True), in his Floor-per-$1K place."""
+    cap = CASH_CORE_CAP.get(pos, PER_POSITION)
+    if per is not None:
+        cap = min(cap, per)
+    cal_mid = median([num(r.get("CalPts")) or 0.0 for r in at]) or 0.0
+    top_half = [r for r in at if (num(r.get("CalPts")) or 0.0) >= cal_mid]
+    ranked = _top(top_half, lambda r: (-(floor_per_k(r) or 0.0), -(num(r.get("CalPts")) or 0.0)), cap)
+
+    def is_chalk(r: dict) -> bool:
+        own = num(r.get("CashOwn"))
+        return own is not None and own >= CHALK
+
+    kept = {id(r) for r in ranked}
+    extra = sorted(
+        (r for r in at if is_chalk(r) and id(r) not in kept), key=lambda r: -(num(r.get("CashOwn")) or 0)
+    )
+    return [(r, is_chalk(r)) for r in ranked] + [(r, True) for r in extra]
+
+
 def own_published(rows: list[dict], column: str) -> bool:
     return any(num(r.get(column)) is not None for r in rows)
 
@@ -142,6 +178,8 @@ class Play:
     gpp_own: float | None = None
     lev: float | None = None
     chalk: bool = False
+    chalk_core: bool = False  # in the cash core because 30%+ of double-ups play him (`CASH_CORE_CAP` aside)
+    floor_per_k: float | None = None
     chips: list[str] = field(default_factory=list)  # signal chips on his row: "FADE↓", "USAGE↑", ...
     in_pool: str = ""  # the pool state when he is already in Sam's pool
 
@@ -248,6 +286,7 @@ def make_play(row: dict, kind: str, *, pool: dict[str, str], lev: float | None =
         gpp_own=gpp_own,
         lev=lev,
         chalk=cash_own is not None and cash_own >= CHALK,
+        floor_per_k=floor_per_k(row),
         chips=chips_of(row),
         in_pool=pool.get(row.get("Name", ""), ""),
     )
@@ -322,21 +361,11 @@ def plays(
             continue
         by_value = _top(at, lambda r: (-(value_per_k(r) or 0.0), -(num(r.get("CalPts")) or 0.0)), per)
         value[pos] = [make_play(r, "value", pool=pool) for r in by_value]
-        cals = [num(r.get("CalPts")) or 0.0 for r in at]
-        vals = [value_per_k(r) or 0.0 for r in at]
-        cal_mid, val_mid = median(cals), median(vals)
-        core = [
-            r
-            for r in at
-            if (num(r.get("CalPts")) or 0.0) >= (cal_mid or 0.0)
-            and (value_per_k(r) or 0.0) >= (val_mid or 0.0)
-        ]
-        cash[pos] = [
-            make_play(r, "cash", pool=pool)
-            for r in _top(
-                core, lambda r: (-(num(r.get("Floor")) or 0.0), -(num(r.get("CalPts")) or 0.0)), per
-            )
-        ]
+        cash[pos] = []
+        for r, chalk_core in cash_core(at, pos, per=per):
+            play = make_play(r, "cash", pool=pool)
+            play.chalk_core = chalk_core
+            cash[pos].append(play)
         gpp[pos] = _gpp(at, pool, gpp_pub, per)
     fades = [
         make_play(r, "fade", pool=pool)

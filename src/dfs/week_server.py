@@ -511,11 +511,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _post_pool(self: Handler) -> None:
-    changes = self._json_body().get("changes")
+    data = self._json_body()
+    changes = data.get("changes")
 
     def act(edits, inp):
         values = week_actions.pool_change(edits, changes)
         return {"pool": values, "message": "Pool: " + pool_message(values, inp)}
+
+    def bulk(edits, inp):
+        results = week_actions.pool_bulk(edits, changes)
+        ok = {i: r["value"] for i, r in results.items() if r["status"] == "ok"}
+        bad = {i: r for i, r in results.items() if r["status"] != "ok"}
+        text = f"Pool: {len(ok)} written" + (f"; {len(bad)} not written (see each row)" if bad else "")
+        return {"pool": ok, "results": results, "message": text}
+
+    if data.get("each"):  # the multi-select: per-cell conflicts, always 200 with each cell's result
+        self._json(200, sheet_write(self.ctx, bulk))
+        return
 
     self._json(200, sheet_write(self.ctx, act))
 
@@ -535,7 +547,7 @@ def _post_decide(self: Handler) -> None:
     rules_was = data.get("rules_was") if isinstance(data.get("rules_was"), dict) else {}
 
     def act(edits, inp):
-        text = week_actions.decide(
+        text, pool = week_actions.decide_pool(
             edits,
             inp,
             key=str(data.get("key", "")),
@@ -544,12 +556,24 @@ def _post_decide(self: Handler) -> None:
             pivot=str(data.get("pivot") or ""),
             pool_was=str(data.get("pool_was") or ""),
         )
-        return {"message": text}
+        return {"message": text, "pool": pool}
+
+    self._json(200, sheet_write(self.ctx, act))
+
+
+def _post_stack(self: Handler) -> None:
+    data = self._json_body()
+    rules_was = data.get("rules_was") if isinstance(data.get("rules_was"), dict) else {}
+    names = data.get("names") if isinstance(data.get("names"), list) else []
+
+    def act(edits, inp):
+        return {"message": week_actions.more_stack(edits, inp, names, rules_was)}
 
     self._json(200, sheet_write(self.ctx, act))
 
 
 Handler.post_pool = _post_pool  # type: ignore[attr-defined]
+Handler.post_stack = _post_stack  # type: ignore[attr-defined]
 Handler.post_pool_start = _post_pool_start  # type: ignore[attr-defined]
 Handler.post_decide = _post_decide  # type: ignore[attr-defined]
 
@@ -575,6 +599,7 @@ POST_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/pool": _post_pool,
     "/api/pool/start": _post_pool_start,
     "/api/decide": _post_decide,
+    "/api/stack": _post_stack,
 }
 
 

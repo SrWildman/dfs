@@ -7,7 +7,9 @@ HTML is `week_top`'s.
 (`week_plays.plays`), unchanged:
 
 - *Value*: CalPts per $1K, CalPts the tiebreak;
-- *Cash core*: CalPts and value both at least the position's median, best Floor first;
+- *Cash core*: the best Floor per $1K among the top half on CalPts, at most 4 QB / TE / DST and 8 RB / WR
+  (`week_plays.cash_core`); *Chalk core*: every 30%+ CashOwn player, shown even outside the caps and never
+  behind Show more (a player on both lists is chalk core);
 - *Upside*: best Boom% (once GppOwn is out, the top half of Boom% by leverage);
 - *Fade*: the `FADE↓` chip.
 
@@ -29,8 +31,9 @@ from dfs import kickoff, nfl_calendar, week_plays
 from dfs.week_inputs import WeekInputs, parse_time
 from dfs.week_plays import FADE, POSITIONS, num
 
-VALUE, CASH, UPSIDE, FADE_ROLE = "Value", "Cash core", "Upside", "Fade"
-ROLES = (VALUE, CASH, UPSIDE, FADE_ROLE)
+VALUE, CASH, CHALK_CORE, UPSIDE, FADE_ROLE = "Value", "Cash core", "Chalk core", "Upside", "Fade"
+ROLES = (VALUE, CASH, CHALK_CORE, UPSIDE, FADE_ROLE)
+CASH_ROLES = (VALUE, CASH, CHALK_CORE)  # a starting-pool Cash
 SHOWN = 3  # per role and position, on the board without Show more
 DEPTH = 8  # per role and position, with Show more
 CHALK = week_plays.CHALK
@@ -206,8 +209,9 @@ def board(inp: WeekInputs) -> Board:
             kept = [p for p in plays if (p.name, p.team) not in faded]  # fade wins
             for rank, p in enumerate(kept):
                 key = (p.name, p.team)
-                roles.setdefault(key, []).append(role)
-                if rank < SHOWN:
+                chalk_core = role == CASH and p.chalk_core
+                roles.setdefault(key, []).append(CHALK_CORE if chalk_core else role)
+                if rank < SHOWN or chalk_core:  # chalk core is never behind Show more
                     shown.add(key)
         rows = [
             BoardRow(by_key[k], r, k in shown, why_facts(by_key[k], ranks))
@@ -293,13 +297,13 @@ def pool_panel(inp: WeekInputs, b: Board, pool: dict[str, str]) -> PoolPanel:
 
 
 def starting_pool(b: Board, pool: dict[str, str]) -> list[tuple[dict, str]]:
-    """The board's shown, healthy, non-fade players not already pooled: Value and Cash core as Cash, Upside
-    as GPP, both kinds as Both. A player Sam already pooled is never changed."""
+    """The board's shown, healthy, non-fade players not already pooled: Value, Cash core and Chalk core as
+    Cash, Upside as GPP, both kinds as Both. A player Sam already pooled is never changed."""
     out = []
     for r in b.rows():
         if not r.shown or r.fade or r.name in pool or avail(r.row) in week_plays.STATUS_WORD:
             continue
-        cash = VALUE in r.roles or CASH in r.roles
+        cash = any(role in r.roles for role in CASH_ROLES)
         gpp = UPSIDE in r.roles
         out.append((r.row, "Both" if cash and gpp else "Cash" if cash else "GPP"))
     return out

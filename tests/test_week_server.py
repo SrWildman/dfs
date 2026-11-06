@@ -1297,6 +1297,19 @@ def test_a_conflict_comes_back_409_with_what_the_sheet_holds(make, tmp_path):
     assert sheet.writes == []
 
 
+def test_the_bulk_pool_route_answers_each_cell(make, tmp_path):
+    sheet, edits = served_sheet(tmp_path)
+    sheet.put("EdgeRaw", 4, 0, "Both")  # Wr Value changed in the sheet
+    changes = [
+        {"id": "id-Wr Value", "value": "Cash", "was": ""},
+        {"id": "id-Qb Beta", "value": "GPP", "was": ""},
+    ]
+    status, body = make(edits=edits).post("/api/pool", {"changes": changes, "each": True})
+    assert status == 200 and body["pool"] == {"id-Qb Beta": "GPP"}
+    assert body["results"]["id-Wr Value"] == {"status": "conflict", "value": "Both"}
+    assert "1 not written" in body["message"] and len(sheet.writes) == 1
+
+
 def test_a_closed_week_or_no_sheet_writes_nothing(make, tmp_path):
     sheet, edits = served_sheet(tmp_path)
     closed = make(edits=edits, read_only=True)

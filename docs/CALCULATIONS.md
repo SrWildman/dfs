@@ -2053,6 +2053,19 @@ average weekly entry fees` over every week with fees paid; a bad week is `BAD_WE
 10 / (2k)` (capped at 100, rounded DOWN to 0.5); `max_entry_fee_pct = that / MIN_ENTRIES_PER_WEEK (5)` (rounded DOWN to 0.1).
 The 2, the 10% and the 5 are the proposal's own assumptions, not findings. Needs 8 weeks of entries.
 
+## The Week page's cash core (`week_plays.cash_core`; Plan N item 11)
+
+Per position, among the healthy players whose `CalPts` is in the top half of the position (at least the median), the
+best `Floor / (Salary / 1000)` (`floor_per_k`) first, at most `CASH_CORE_CAP` of them: **4 QB, 4 TE, 4 DST, 8 RB, 8 WR**
+(Sam, 2026-11-05). Every player at **30%+ `CashOwn`** joins as well, beyond the caps, tagged **Chalk core** and shown
+once (always shown, never behind Show more). The header tooltip is `CASH_CORE_RULE`.
+
+The **chalk check** (Cash section) lists everyone at 30%+ `CashOwn` (`CHALK_CHECK_HEADER`, with the count) and how
+many of the last round's cash builds hold each, then the next `CLOSE_COUNT = 3` under the line, tagged "close".
+
+The **consensus lineup** (`consensus.py`) is shown in DK's roster order (`dk_order`: QB, RB, RB, WR, WR, WR, TE, FLEX,
+DST; the FLEX holds the extra RB / WR / TE with the latest kickoff, `flex_order`'s rule).
+
 ## Bankroll health (`bankroll_health.py`, Week page; Plan K item 1)
 
 Read from the sheet by header and label, never by position: the Season tab's `Week`, `Cash Net`, `GPP Net`, `Betting Net`,

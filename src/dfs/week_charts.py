@@ -163,8 +163,48 @@ def short(name: str) -> str:
     return short_name(name)
 
 
+def value_rows(edge: list[dict] | None) -> list[dict]:
+    """The value map's players (the inline chart and the full-screen viewer draw the same ones)."""
+    return [r for r in _healthy_skill(edge or []) if num(r.get("CalPts")) is not None]
+
+
+def _ceil(r: dict) -> float:
+    return num(r.get("CeilM")) or num(r.get("Ceiling")) or 0.0
+
+
+def leverage_rows(edge: list[dict] | None) -> list[dict]:
+    return [
+        r
+        for r in _healthy_skill(edge or [])
+        if num(r.get("GppOwn")) is not None and _ceil(r) > 0 and (num(r.get("CalPts")) or 0) >= 5
+    ]
+
+
+def _share(value: float | None) -> float | None:
+    return None if value is None else (value * 100 if value <= 1.5 else value)
+
+
+def usage_rows(edge: list[dict] | None) -> list[tuple[dict, float, float]]:
+    """(row, snap share %, target share %) for the usage chart."""
+    out = []
+    for r in _healthy_skill(edge or []):
+        snap, tgt = _share(num(r.get("Snap% L5")) or num(r.get("Snap%"))), _share(num(r.get("Tgt%")))
+        if snap is not None and tgt is not None:
+            out.append((r, snap, tgt))
+    return out
+
+
+LOW_OWN = 10.0  # the leverage quadrant: under 10% GPP owned
+
+
+def leverage_cut(rows: list[dict]) -> float:
+    """The top-quarter ceiling the leverage quadrant starts at."""
+    ceils = sorted(_ceil(r) for r in rows)
+    return ceils[int(len(ceils) * 0.75)]
+
+
 def value_map(edge: list[dict] | None, *, width: int = 400, height: int = 320, labels: int = 8) -> str:
-    rows = [r for r in _healthy_skill(edge or []) if num(r.get("CalPts")) is not None]
+    rows = value_rows(edge)
     if len(rows) < 3:
         return ""
     sal = [week_plays.salary(r) for r in rows]
@@ -204,23 +244,14 @@ def value_map(edge: list[dict] | None, *, width: int = 400, height: int = 320, l
 
 def leverage_map(edge: list[dict] | None, *, width: int = 400, height: int = 320, labels: int = 6) -> str:
     """GPP ownership against the ceiling (CeilM, else Ceiling). Empty until GppOwn exists."""
-    rows = [
-        r
-        for r in _healthy_skill(edge or [])
-        if num(r.get("GppOwn")) is not None
-        and (num(r.get("CeilM")) or num(r.get("Ceiling")) or 0) > 0
-        and (num(r.get("CalPts")) or 0) >= 5
-    ]
+    rows = leverage_rows(edge)
     if len(rows) < 3:
         return ""
-
-    def ceil(r: dict) -> float:
-        return num(r.get("CeilM")) or num(r.get("Ceiling")) or 0.0
-
+    ceil = _ceil
     own = [(num(r.get("GppOwn")) or 0.0) * 100 for r in rows]
     ceils = sorted(ceil(r) for r in rows)
-    hi_ceil = ceils[int(len(ceils) * 0.75)]
-    low_own = 10.0
+    hi_ceil = leverage_cut(rows)
+    low_own = LOW_OWN
     lev = [r for r in rows if (num(r["GppOwn"]) or 0) * 100 < low_own and ceil(r) >= hi_ceil]
     lev.sort(key=lambda r: -ceil(r))
     label_ids = {id(r) for r in lev[:labels]}
@@ -256,12 +287,7 @@ def leverage_map(edge: list[dict] | None, *, width: int = 400, height: int = 320
 
 def usage_map(edge: list[dict] | None, *, width: int = 400, height: int = 320, labels: int = 8) -> str:
     """Target share against snap share (last five games), WR / TE / RB."""
-    rows = []
-    for r in _healthy_skill(edge or []):
-        snap, tgt = num(r.get("Snap% L5")) or num(r.get("Snap%")), num(r.get("Tgt%"))
-        if snap is None or tgt is None:
-            continue
-        rows.append((r, snap * 100 if snap <= 1.5 else snap, tgt * 100 if tgt <= 1.5 else tgt))
+    rows = usage_rows(edge)
     if len(rows) < 3:
         return ""
     top = sorted(rows, key=lambda t: -t[2])[:labels]
@@ -297,3 +323,88 @@ LEGEND = (
     '<div class="legend"><span class="key RB"></span>RB <span class="key WR"></span>WR '
     '<span class="key TE"></span>TE</div>'
 )
+
+
+# -- the full-screen viewer's data (Plan N item 9) -----------------------------------------------------------
+
+HOW = {
+    "value": "Every healthy RB / WR / TE at $3,000+ with a CalPts, from the last sync: salary against CalPts; the "
+    "dashed line is 3 points per $1K; the best per $1K are named.",
+    "leverage": "Every healthy RB / WR / TE at $3,000+ projected 5+ CalPts, once GppOwn is out: GPP ownership "
+    "against the ceiling (CeilM, else TFFB's Ceiling); shaded = under 10% owned with a top-quarter ceiling.",
+    "usage": "Every healthy RB / WR / TE at $3,000+ with usage: snap share over his last five games (else the "
+    "season) against target share; the top target shares are named.",
+}
+
+
+def _pt(r: dict, x: float, y: float, prio: float) -> dict:
+    return {
+        "id": str(r.get("Id") or ""),
+        "name": str(r.get("Name") or ""),
+        "short": short(str(r.get("Name") or "")),
+        "pos": str(r.get("Position") or ""),
+        "team": str(r.get("Team") or ""),
+        "x": round(x, 3),
+        "y": round(y, 3),
+        "sal": week_plays.salary(r),
+        "proj": num(r.get("CalPts")),
+        "du": num(r.get("CashOwn")),
+        "gpp": num(r.get("GppOwn")),
+        "prio": round(prio, 4),
+    }
+
+
+def viewer_data(edge: list[dict] | None, ownership_out: bool = True) -> dict:
+    """Each chart's points and axes for the full-screen viewer: the same players the inline charts draw
+    (`value_rows` / `leverage_rows` / `usage_rows`), with what the hover shows (name, salary, projection,
+    ownership, team) and a label priority (the inline chart's own: value per $1K, ceiling, target share)."""
+    out: dict[str, dict] = {}
+    rows = value_rows(edge)
+    if len(rows) >= 3:
+        x0, x1 = 3000.0, max(week_plays.salary(r) for r in rows) + 200
+        y1 = max(num(r.get("CalPts")) or 0.0 for r in rows) + 2
+        end = min(x1, y1 / 3.0 * 1000)
+        out["value"] = {
+            "title": "Value map",
+            "x": "Salary",
+            "y": "CalPts",
+            "xfmt": "money",
+            "yfmt": "num",
+            "range": [x0, x1, 0.0, y1],
+            "ref": [[x0, x0 * 3 / 1000], [end, end * 3 / 1000], "3 pts per $1K"],
+            "how": HOW["value"],
+            "points": [
+                _pt(r, week_plays.salary(r), num(r.get("CalPts")) or 0.0, week_plays.value_per_k(r) or 0.0)
+                for r in rows
+            ],
+        }
+    rows = leverage_rows(edge) if ownership_out else []
+    if len(rows) >= 3:
+        ceils = sorted(_ceil(r) for r in rows)
+        hi = leverage_cut(rows)
+        y0, y1 = max(0.0, ceils[0] - 2), ceils[-1] + 3
+        x1 = max((num(r.get("GppOwn")) or 0.0) * 100 for r in rows) + 3
+        out["leverage"] = {
+            "title": "Leverage map",
+            "x": "GPP ownership",
+            "y": "Ceiling",
+            "xfmt": "pct",
+            "yfmt": "num",
+            "range": [0.0, x1, y0, y1],
+            "shade": [0.0, LOW_OWN, hi, y1, "leverage: <10% owned, top-quarter ceiling"],
+            "how": HOW["leverage"],
+            "points": [_pt(r, (num(r.get("GppOwn")) or 0.0) * 100, _ceil(r), _ceil(r)) for r in rows],
+        }
+    urows = usage_rows(edge)
+    if len(urows) >= 3:
+        out["usage"] = {
+            "title": "Usage",
+            "x": "Snap share, last 5",
+            "y": "Target share",
+            "xfmt": "pct",
+            "yfmt": "pct",
+            "range": [0.0, 100.0, 0.0, max(t for _, _, t in urows) + 3],
+            "how": HOW["usage"],
+            "points": [_pt(r, snap, tgt, tgt) for r, snap, tgt in urows],
+        }
+    return out

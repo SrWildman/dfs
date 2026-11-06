@@ -121,7 +121,14 @@ def field_review_section(inp: WeekInputs) -> Section:
         rows = [["Won", _lineup_cell(b.get("winner"))]]
         if b.get("cash_line"):
             rows.append(["Last paid place", _lineup_cell(b["cash_line"])])
-        body.append(table(["", "Lineup"], rows))
+        body.append(
+            table(
+                ["", "Lineup"],
+                rows,
+                how="The standings export of the format's largest contest: the winning lineup and the last "
+                "paid place, with their own sum, salary left and stack shape.",
+            )
+        )
         body.append(
             table(
                 [
@@ -135,6 +142,8 @@ def field_review_section(inp: WeekInputs) -> Section:
                     "Top stacks",
                 ],
                 [_tend_row("The field", b.get("field")), _tend_row("You", b.get("mine"))],
+                how="Every lineup in the format's standings exports against yours: the share with a QB "
+                "stack, a bring-back, three RBs, and the average salary left.",
             )
         )
     body.append(
@@ -179,7 +188,12 @@ def scorecard_html(inp: WeekInputs) -> str:
         ]
         out.append(
             "<details><summary>Every override</summary>"
-            + table(["Kind", "Nearest build", "Shared", "Points vs the build", "Swaps (actual points)"], rows)
+            + table(
+                ["Kind", "Nearest build", "Shared", "Points vs the build", "Swaps (actual points)"],
+                rows,
+                how="Each entered lineup against its nearest saved build of its kind (most players shared), "
+                "scored with the actual points.",
+            )
             + "</details>"
         )
     return "".join(out)
@@ -202,17 +216,28 @@ def _expo_rows(rows: list[dict]) -> list[list[str]]:
     ]
 
 
+EXPO_HOW = (
+    "Your GPP entries per contest entry holding each player, against the field's share (GppOwn before lock, "
+    "DK's actual %Drafted after the close); 15+ points over or under."
+)
+SALARY_HOW = (
+    "DK's salary file against last week's main-slate file; the role is steady when snaps or targets held "
+    "within 10% over his last three games."
+)
+
+
 def _expo_block(title: str, v: dict, field_label: str) -> str:
     out = [f"<h4>{e(title)}</h4>"]
     heads = ["Player", "You", field_label, "Gap (pts)", "Entries"]
     if v.get("over"):
         out.append(
             '<p class="flag"><b>Overweight</b> (15+ points above the field)</p>'
-            + table(heads, _expo_rows(v["over"]))
+            + table(heads, _expo_rows(v["over"]), cls="stickyname", how=EXPO_HOW)
         )
     if v.get("under"):
         out.append(
-            '<p class="flag"><b>Underweight</b> (15+ points below)</p>' + table(heads, _expo_rows(v["under"]))
+            '<p class="flag"><b>Underweight</b> (15+ points below)</p>'
+            + table(heads, _expo_rows(v["under"]), cls="stickyname", how=EXPO_HOW)
         )
     if not v.get("over") and not v.get("under"):
         out.append(note("No player 15 points or more away from the field."))
@@ -339,7 +364,14 @@ def numbers_section(inp: WeekInputs) -> Section:
             ]
             for r in proj
         ]
-        body.append(table(["Week", "Players", "CalPts", "TFFB", "CalPts better by"], rows))
+        body.append(
+            table(
+                ["Week", "Players", "CalPts", "TFFB", "CalPts better by"],
+                rows,
+                how="calibration.backtest_by_week: each week's average absolute error against the actual DK "
+                "points, CalPts refit on the earlier weeks only.",
+            )
+        )
         body.append(
             note(
                 "Average absolute error in DK points (lower is better); each week CalPts was refit on the "
@@ -359,7 +391,14 @@ def numbers_section(inp: WeekInputs) -> Section:
         rows.append(
             ["<b>All</b>", f"<b>{a['n']}</b>", f"<b>{pct(a['shown'])}</b>", f"<b>{pct(a['cashed'])}</b>"]
         )
-        body.append(table(["Week", "Cash builds", "Cash % shown (avg)", "Cashed"], rows))
+        body.append(
+            table(
+                ["Week", "Cash builds", "Cash % shown (avg)", "Cashed"],
+                rows,
+                how="data/contests/cash_shown.csv: the Cash % the builds showed before lock against the "
+                "share of them that cleared the real double-up line.",
+            )
+        )
         gap = a["shown"] - a["cashed"]
         if abs(gap) >= 0.1:
             body.append(
@@ -391,7 +430,14 @@ def numbers_section(inp: WeekInputs) -> Section:
             ]
             for r in sig
         ]
-        body.append(table(["Signal", "Fired (n)", "Hit vs CalPts", "Actual - CalPts", "Trust"], rows))
+        body.append(
+            table(
+                ["Signal", "Fired (n)", "Hit vs CalPts", "Actual - CalPts", "Trust"],
+                rows,
+                how="Model Check's signal record: every time a chip fired, whether the player beat or missed "
+                "CalPts the way it pointed.",
+            )
+        )
         body.append(
             note(
                 "Hit = the player went the way the signal points, against CalPts. A thin sample is under 30."
@@ -460,13 +506,15 @@ def salary_section(inp: WeekInputs, log: dict[str, list[dict]]) -> Section:
         "games).</p>"
     ]
     if v["flagged"]:
-        body.append("<h4>Cheaper, same job</h4>" + table(heads, rows(v["flagged"])))
+        body.append(
+            "<h4>Cheaper, same job</h4>" + table(heads, rows(v["flagged"]), cls="stickyname", how=SALARY_HOW)
+        )
     else:
         body.append(note("No $300+ drop with a steady role this week."))
     if v["other_drops"]:
         body.append(
             "<details><summary>Other $300+ drops (the role moved, or no three-game log)</summary>"
-            + table(heads, rows(v["other_drops"]))
+            + table(heads, rows(v["other_drops"]), cls="stickyname", how=SALARY_HOW)
             + "</details>"
         )
     return Section(sid, title, "".join(body), TRUST["salaries"])

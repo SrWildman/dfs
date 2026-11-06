@@ -32,6 +32,7 @@ import json
 from dataclasses import dataclass
 
 from dfs import derived, week_plays
+from dfs.week_board import ROLES as ROLE_NAMES
 from dfs.week_board import Board, implied_total, pid
 from dfs.week_plays import num
 
@@ -115,6 +116,8 @@ TIPS = {  # plain words, the header's tooltip
     "is not on.",
     "Per $1K": "CalPts per $1,000 of salary.",
     "Implied": "His team's implied total from the line: half the total minus half the spread.",
+    "Spread": "His team's spread from the line (minus = favoured).",
+    "OverUnder": "The game's total (over / under).",
     "PropsGap": "Props projection minus CalPts.",
     "SrcSpread": "The widest gap between the sources' projections: high = the sources disagree.",
     "Floor": "Floor: the 20th percentile of his outcomes.",
@@ -228,7 +231,16 @@ class Lens:
     signal_only: bool = False
 
 
-BASE = ("Name", "Position", "Team", "Opp", "Salary")
+BASE = (
+    "Name",
+    "Position",
+    "Team",
+    "Opp",
+    "Spread",
+    "OverUnder",
+    IMPLIED,
+    "Salary",
+)  # Plan N item 4: the game on every lens
 LENSES: tuple[Lens, ...] = (
     Lens(
         "value",
@@ -395,7 +407,7 @@ def payload(
                 "key": lens.key,
                 "label": lens.label,
                 "note": lens.note,
-                "columns": [*BASE, *lens.columns, POOL] if lens.key != "all" else [],
+                "columns": list(dict.fromkeys([*BASE, *lens.columns, POOL])) if lens.key != "all" else [],
                 "sort": lens.sort,
                 "desc": lens.desc,
                 "chart": lens.chart,
@@ -406,6 +418,7 @@ def payload(
         "groups": [{"name": g, "columns": cs} for g, cs in groups()],
         "positions": list(week_plays.POSITIONS),
         "signals": list(SIGNAL_TOKENS),
+        "roles": list(ROLE_NAMES),
         "records": record_lines or {},
         "builds": builds,
         "log": log or {},
@@ -463,7 +476,7 @@ const F = {pos: $('#ex-pos'), team: $('#ex-team'), game: $('#ex-game'), kick: $(
 function opts(sel, values) { for (const x of values) sel.append(new Option(x, x)); }
 const uniq = (key) => [...new Set(D.rows.map((r) => v(r, key)).filter(Boolean))].sort();
 opts(F.pos, D.positions); opts(F.team, uniq('Team')); opts(F.game, uniq('GameID').map((g) => g.split('_').slice(2).join(' @ ')));
-opts(F.kick, uniq('Kickoff')); opts(F.role, ['Value', 'Cash core', 'Upside', 'Fade']); opts(F.sig, D.signals);
+opts(F.kick, uniq('Kickoff')); opts(F.role, D.roles); opts(F.sig, D.signals);
 for (const [k, inp] of Object.entries(F)) {
   if (S.f[k] != null) inp.value = S.f[k];
   inp.addEventListener(inp.tagName === 'INPUT' ? 'input' : 'change', () => { S.f[k] = inp.value; S.page = 0; render(); });
@@ -543,6 +556,7 @@ function visible() {
 /* ---------- the table ---------- */
 function chip(t) { const s = el('a', 'tchip ' + t.toLowerCase(), t[0]); s.href = '#numbers'; s.addEventListener('click', (e) => e.stopPropagation()); return s; }
 function poolSeg(id, name, value) {
+  if (window.dfsPool && !window.dfsPool.saving(id)) value = window.dfsPool.get(id) || value || '';
   const s = el('span', 'seg'); s.dataset.id = id; s.dataset.name = name; s.dataset.was = value || '';
   for (const [val, lab] of [['Cash', 'Cash'], ['GPP', 'GPP'], ['Both', 'Both'], ['', 'none']]) {
     const b = el('button', (value || '') === val ? 'on' : '', lab); b.type = 'button'; b.dataset.v = val;
@@ -585,20 +599,23 @@ function render(redrawPicker = true) {
   for (const r of rows) {
     const id = D.ids[r.__i];
     if (S.per === 'pos' && S.show !== 'all' && v(r, 'Position') !== pos) { pos = v(r, 'Position'); const tr = el('tr', 'pos'); const td = el('td', null, pos); td.colSpan = cols.length; tr.append(td); tb.append(tr); }
-    const tr = el('tr');
+    const tr = el('tr'); tr.dataset.id = id;
     for (const k of cols) {
       const c = COL[k]; const td = el('td'); const x = v(r, k);
-      if (k === 'Name') { const a = el('a', 'pl', x); a.dataset.id = id; a.href = '#'; td.append(a); const st = v(r, 'Avail'); if (st) { const q = el('span', 'chip q', st); const pr = (D.practice || {})[id]; if (pr && (st === 'Q' || st === 'D')) { q.title = 'Practice: ' + pr; td.append(q, el('span', 'prac', pr)); } else td.append(q); } for (const role of v(r, 'Roles').split(', ').filter(Boolean)) td.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role)); }
+      if (k === 'Name') { if (window.dfsSel) td.append(window.dfsSel.box(id)); const a = el('a', 'pl', x); a.dataset.id = id; a.href = '#'; td.append(a); const st = v(r, 'Avail'); if (st) { const q = el('span', 'chip q', st); const pr = (D.practice || {})[id]; if (pr && (st === 'Q' || st === 'D')) { q.title = 'Practice: ' + pr; td.append(q, el('span', 'prac', pr)); } else td.append(q); } for (const role of v(r, 'Roles').split(', ').filter(Boolean)) td.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role)); }
       else if (k === 'Pool') td.append(poolSeg(id, v(r, 'Name'), x));
+      else if ((k === 'Team' || k === 'Opp') && x) td.append(gameLink(r, x));
       else { td.textContent = fmt(c, x); if (c.fmt !== 'text') td.className = 'n'; }
       tr.append(td);
     }
     tb.append(tr);
   }
   table.append(tb);
+  if (window.dfsPool) for (const r of rows) window.dfsPool.paint(D.ids[r.__i]);
   if (redrawPicker && !picker.hidden) drawPicker();
 }
-window.dfsExplorer = { setPool(id, value) { const i = IDX[id]; if (i != null) D.rows[i][COL.Pool.i] = value; }, render };
+function gameLink(r, team) { const a = el('a', 'tm', team); a.href = '#'; a.dataset.team = team; a.dataset.game = v(r, 'GameID') || ''; a.title = 'Open the game'; return a; }
+window.dfsExplorer = { setPool(id, value) { const i = IDX[id]; if (i != null) D.rows[i][COL.Pool.i] = value; }, render: () => render(false) };
 
 /* ---------- the drawer: click any name, anywhere ---------- */
 const drawer = $('#drawer');
@@ -631,8 +648,13 @@ function openDrawer(id) {
   }
   head.append(close);
   drawer.append(head);
-  const sub = [v(r, 'Position'), v(r, 'Team') + ' vs ' + v(r, 'Opp'), fmt(COL.Salary, v(r, 'Salary')), v(r, 'Kickoff')].filter(Boolean).join(' · ');
-  drawer.append(el('p', 'dim', sub + (v(r, 'Avail') ? ' · ' + v(r, 'Avail') : '')));
+  const sub = el('p', 'dim');
+  sub.append(document.createTextNode(v(r, 'Position') + ' · '), gameLink(r, v(r, 'Team')), document.createTextNode(' vs '), gameLink(r, v(r, 'Opp')));
+  const game = [COL.Spread && v(r, 'Spread') != null && v(r, 'Spread') !== '' ? 'spread ' + (v(r, 'Spread') > 0 ? '+' : '') + fmt(COL.Spread, v(r, 'Spread')) : '',
+    COL.OverUnder && v(r, 'OverUnder') ? 'total ' + fmt(COL.OverUnder, v(r, 'OverUnder')) : '',
+    v(r, 'Implied') != null && v(r, 'Implied') !== '' ? 'implied ' + fmt(COL.Implied, v(r, 'Implied')) : ''];
+  const rest = [...game, fmt(COL.Salary, v(r, 'Salary')), v(r, 'Kickoff'), v(r, 'Avail')].filter(Boolean).join(' · ');
+  sub.append(document.createTextNode(' · ' + rest)); sub.className = 'dim dgame'; drawer.append(sub);
   const prac = (D.practice || {})[id]; if (prac) drawer.append(el('p', 'prac', 'Practice this week: ' + prac));
   const tags = el('p'); for (const role of v(r, 'Roles').split(', ').filter(Boolean)) tags.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role));
   tags.append(document.createTextNode(' Pool: ')); tags.append(poolSeg(id, v(r, 'Name'), v(r, 'Pool'))); drawer.append(tags);

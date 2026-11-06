@@ -495,3 +495,19 @@ as Cash, Upside as GPP, both as Both, nobody already pooled is changed; it asks 
 header, re-reads it and refuses if the sheet changed since the page showed it (the page then shows what the sheet
 holds), writes one batch under the run lock, reads it back and logs a line to `data/week/edits.log`. A closed week is
 read only. The next `dfs lineups suggest --iterate` reads the rules box as always.
+
+**Working the page (Plan N).** The chat folds to a thin tab on the right (remembered per browser). The board, the
+charts, the games and the Explorer each take the full width; with the chat open every section is one column. Headers
+stay put as a table scrolls (the board repeats its header at each position) and the name column stays put sideways.
+Every player grid shows Opp, the team's spread, the game total and the team's implied total; a team or Opp cell, or a
+slate card, opens the **game view** (both teams by position with salary, CalPts, ceiling, GPP own and leverage, the
+game's line and its Stacks results; tick a QB, mates and a bring-back to add them as GPP, or write them as a Max
+exposure `more` stack). **Tick boxes** on the board and the Explorer (shift-click for a range) and a bar at the bottom
+set many Pool cells at once: one batched write, each cell checked on its own; a cell that changed in the sheet is
+listed with Try again / Keep the sheet's and never dropped, and changes made while a write runs wait their turn
+("saving..." on each). Every chart opens **full screen** on click: wheel or pinch to zoom, a zoom box, pan, position
+filters, hover for the player, and a select box or lasso that lists the players with the same Cash / GPP / Both /
+none buttons. The decisions move the pool too: Play adds him as Cash, the GPP stack adds the QB and mates as GPP, a
+pivot adds as Both, Fade takes him out only if he was Cash only (else it says so), and Undo reverses both writes.
+Running a command keeps what was open and where you were. Every table and chart has an "how this is built" note
+(hover or tap).
