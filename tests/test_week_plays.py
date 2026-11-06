@@ -422,11 +422,12 @@ def ids_in_order(page):
 @pytest.mark.parametrize(
     "day,lead",
     [
-        (1, ["changes", "contest-plan", "bankroll", "season", "last-week"]),
-        (2, ["changes", "contest-plan", "bankroll", "season", "last-week"]),
-        (4, ["changes", "contest-plan", "bankroll", "season", "last-week"]),
-        (5, ["contest-plan", "entry-plan", "cash", "gpp", "consensus"]),
-        (6, ["inactives", "sunday", "entry-plan", "changes"]),
+        (0, ["field-review", "last-week", "numbers", "exposure", "bankroll"]),
+        (1, ["field-review", "changes", "salaries", "contest-plan", "bankroll"]),
+        (2, ["changes", "salaries", "contest-plan", "bankroll", "season"]),
+        (4, ["changes", "salaries", "contest-plan", "bankroll", "season"]),
+        (5, ["contest-plan", "entry-plan", "exposure", "cash", "gpp"]),
+        (6, ["inactives", "sunday", "entry-plan", "exposure", "changes"]),
     ],
 )
 def test_the_collapsed_sections_are_ordered_by_day(tmp_path, day, lead):
@@ -437,8 +438,8 @@ def test_the_collapsed_sections_are_ordered_by_day(tmp_path, day, lead):
     assert sorted(order) == sorted(week_page.SECTION_IDS)  # nothing dropped on any day
 
 
-def test_monday_order_is_last_week_season_changes_contest_plan():
-    assert week_page.section_order(0)[:5] == ["last-week", "bankroll", "season", "changes", "contest-plan"]
+def test_monday_order_leads_with_what_won_and_last_week():
+    assert week_page.section_order(0)[:3] == ["field-review", "last-week", "numbers"]
     assert sorted(week_page.section_order(0)) == sorted(week_page.SECTION_IDS)
 
 

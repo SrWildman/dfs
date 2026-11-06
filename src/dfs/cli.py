@@ -5182,6 +5182,38 @@ def week_page_command(
     console.print(f"[green]OK[/green] {escape(str(path))}")
 
 
+@week_app.command("review", short_help="Review a closed week for the Week page: what won, your scorecard.")
+def week_review_command(
+    week: int = typer.Option(
+        None, "--week", help="The closed week to review (default: the contest log's newest week)."
+    ),
+) -> None:
+    """Review a closed week from its saved standings and builds, for the Week page (Plan K, K2): what won and
+    how the field built by contest type, with your lineups beside it; the process scorecard (spend by tier
+    against the plan, the chalk decisions against what you played, your overrides from the nearest build and
+    their points); your GPP exposure against the actual and the predicted ownership; and how good our numbers
+    are (CalPts against TFFB by week, Cash % shown against the cash rate, each signal's record). Files only:
+    `data/week/inputs/`, `data/contests/scorecard.csv` and `data/contests/cash_shown.csv`; no sheet.
+    `dfs week close` runs it at its end."""
+    from dfs import contest_plan, week_review
+    from dfs.contests import history
+    from dfs.nfl_calendar import current_season
+    from dfs.paths import CONTESTS_DIR
+
+    season = current_season()
+    target = week
+    if target is None:
+        target = contest_plan.last_week(
+            history.typed(history.read_log(CONTESTS_DIR / "contest_log.csv")), season
+        )
+    if target is None:
+        console.print("[red]The contest log has no week this season: pass --week.[/red]")
+        raise typer.Exit(1)
+    ok = week_review.run(season, target, say=lambda t: console.print(escape(t), highlight=False))
+    if not ok:
+        raise typer.Exit(1)
+
+
 @week_app.command("serve", short_help="The Week page as a local app: Claude chat, run buttons, file drops.")
 def week_serve_command(
     week: int = typer.Option(
@@ -5196,6 +5228,9 @@ def week_serve_command(
         "--sheet-id",
         help="Read and write this sheet instead of config.toml's (a test copy). The page's writes go here.",
     ),
+    stop: bool = typer.Option(
+        False, "--stop", help="Stop the running Week server (SIGTERM to the pid in data/week/serve.pid)."
+    ),
 ) -> None:
     """Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code
     docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with
@@ -5207,9 +5242,14 @@ def week_serve_command(
     decision's line in Suggested's rules box, and the suggested starting pool; each re-reads the cell first
     and refuses on a change,
     takes the run lock, is read back and is logged to data/week/edits.log. A closed week is read only. Ctrl-C
-    stops it. `dfs week page` still writes the static file."""
+    stops it. One server at a time: with one already running this opens its page instead of starting a
+    second, and `--stop` stops it (by its pid, from data/week/serve.pid). `dfs week page` still writes the
+    static file."""
     from dfs import week_server
 
+    if stop:
+        console.print(escape(week_server.stop()))
+        return
     week_server.serve(
         week=week,
         port=port,
@@ -5699,8 +5739,9 @@ def week_close(
 
 
 def _plan_k_after_close(cfg: Config, closed: int | None) -> None:
-    """The Week page's bankroll curve (the Season row the close just wrote) and the copies estimate
-    refitted on the new standings. Never fails the close."""
+    """The Week page's bankroll curve (the Season row the close just wrote), the copies estimate refitted on
+    the new standings, and the closed week's review (`week_review`: what won, the process scorecard, exposure,
+    our numbers). Never fails the close."""
     from dfs.nfl_calendar import current_season, current_week
     from dfs.sim import dup_calibration
 
@@ -5718,6 +5759,19 @@ def _plan_k_after_close(cfg: Config, closed: int | None) -> None:
         console.print(
             f"[yellow]Copies estimate not recalibrated ({escape(str(e))}); `dfs contests dupes` reruns "
             "it.[/yellow]"
+        )
+    if closed is None:
+        return
+    try:
+        from dfs import week_review
+
+        console.print(
+            "\n[bold]The week reviewed[/bold] (what won, the process scorecard, exposure, our numbers)"
+        )
+        week_review.run(current_season(), closed, say=lambda t: console.print(escape(t), highlight=False))
+    except Exception as e:  # noqa: BLE001 - the close never fails over the Week page
+        console.print(
+            f"[yellow]Week review skipped ({escape(str(e))}); `dfs week review` reruns it.[/yellow]"
         )
 
 

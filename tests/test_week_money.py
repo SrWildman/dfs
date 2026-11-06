@@ -75,7 +75,7 @@ def test_the_bankroll_block_has_the_curve_the_guide_and_one_over_sentence(tmp_pa
     ]
     block = {"Starting Bankroll": 175.0, "Weekly Budget": 100.0, "Weekly Cost": 25.0}
     payload = bh.payload(
-        bh.season_rows(grid), block, StakesConfig(max_pct_bankroll_per_week=10), None, sheet="Wk 9"
+        bh.season_rows(grid), block, StakesConfig(max_pct_bankroll_per_week=10), sheet="Wk 9"
     )
     page = render(inputs(tmp_path / "data", rows=slate_rows(), bankroll=payload))
     body = section(page, "bankroll")
@@ -83,9 +83,20 @@ def test_the_bankroll_block_has_the_curve_the_guide_and_one_over_sentence(tmp_pa
     assert '<svg class="chart bank"' in body and body.count('<path class="line') == 4
     assert "Bankroll $175.00" in text and "$75.00 left" in text
     assert text.count("is above what a $175.00 bankroll supports under your 10%-a-week rule") == 1
-    assert "Stake guide (your rules)" in text and "$17.50" in text
-    assert ">Untested<" in body and ">Data<" in body
+    assert "Stake guide (your [stakes] rules)" in text and "$17.50" in text
+    assert ">Data<" in body
     assert "Spent / bankroll" in text  # the table view of the chart
+
+
+def test_without_rules_the_guide_is_the_weekly_budget_by_tier(tmp_path):
+    block = {"Starting Bankroll": 131.69, "Weekly Budget": 250.0, "Weekly Cost": 0.0}
+    payload = bh.payload([], block, StakesConfig(), sheet="Wk 9")
+    inp = inputs(tmp_path / "data", rows=slate_rows(), bankroll=payload)
+    text = re.sub(r"\s+", " ", page_text(section(render(inp), "bankroll")))
+    assert "Stake guide (your Weekly Budget)" in text
+    assert week_money.bankroll_line(inp) == ("Bankroll $131.69; Weekly Budget $250.00 (189.8% of it)", False)
+    assert "$250.00 (189.8% of the bankroll)" in text
+    assert "is above what" not in text and "proposed" not in text
 
 
 def test_inactives_lists_the_q_player_with_pivots_and_his_practice(tmp_path):

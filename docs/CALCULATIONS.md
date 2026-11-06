@@ -2055,10 +2055,12 @@ Read from the sheet by header and label, never by position: the Season tab's `We
 - **The curve**: per week, `NFL DFS = Cash Net + GPP Net`, `Betting`, `Other sports`, `Total = their sum`, each cumulative
   from Week 1. A week with no net and no Ending Bankroll is left out.
 - **Spend share**: `(Cash + GPP + Betting + Other Risked) / the previous week's Ending Bankroll` (blank for the first week).
-- **Stake guide**: `week = pct_week% x Starting Bankroll`, `largest entry = pct_entry% x Starting Bankroll`, with `pct_*` from
-  `[stakes]` when set ("your rules"), else from `stakes.propose` ("proposed", the same arithmetic `dfs bankroll stakes
-  --propose` prints). The week splits by tier with `contest_tiers.plan_dollars` (about 60 / 30 / at most 10%). No new rule.
-- **Over the guide**: one sentence when the Weekly Budget is above `week`, with the multiple when it is 2x or more.
+- **Stake guide**: with `[stakes]` rules set ("your rules"), `week = max_pct_bankroll_per_week% x Starting Bankroll` and
+  **over the guide** is one sentence when the Weekly Budget is above it (with the multiple when it is 2x or more).
+  Without them (Sam, 2026-11-06) the guide is the **Weekly Budget** on the Bankroll tab itself, shown with
+  `Weekly Budget / Starting Bankroll` as a percent; there is then no over sentence and `stakes.propose` is not used.
+  `largest entry = max_entry_fee_pct% x Starting Bankroll` when that rule is set. The week splits by tier with
+  `contest_tiers.plan_dollars` (about 60 / 30 / at most 10%). No new rule.
 - **Budget left this week**: `Weekly Budget - Weekly Cost`; the season's `% Budget Remaining` is shown beside it.
 
 ## Sunday inactives and pivots (`inactives.py`; Week page and Cockpit block 8; Plan K item 2)
@@ -2103,6 +2105,58 @@ Eastern date falls in the week (its Tuesday to the following Monday) and whose r
 (name normalised + team), the last status seen each Eastern day (DNP / Limited / Full), collapsed to the changes, e.g.
 `DNP Wed · Limited Thu`. Direction up / down / flat compares the first and last. A Wed / Thu / Fri up to today with no sync
 is named, because a change that day shows on the next sync's day.
+
+## What won last week (`field_review.py`; Week page; Plan K item 6)
+
+From the closed week's saved standings (Classic double-ups, 50/50s, multipliers and GPPs with a contest-log row,
+`sim.contest_retro.load_real_contests`) and each contest's `contests.field` features, grouped by the log's Format.
+**Winner** = the highest score of the type's largest contest (most entries); **last paid place** = the lineup at
+place `Places_Paid` of that contest (scores sorted high to low). Each with its **own sum** (the nine players'
+`%Drafted` in that contest as fractions, added up; a player the table does not list adds nothing and `own_known`
+says how many it had), **salary left** (`$50,000 - the nine salaries`) and **shape** (`TEAM QB + 1` / `+ 2+ WR/TE`,
+`, bring-back` when any player is from the QB's opponent; `no QB stack`). **Field tendencies** pool every lineup of
+every contest of the type: QB stack = `field.py`'s `stack1` (the QB and one or more of his WR / TE), QB + 2 =
+`stack2`, bring-back = `bringback`, salary left = mean `unspent`, RB in FLEX = share with a RB in the FLEX slot,
+top stacks = the QB teams of the stacked lineups as a share of the resolved ones. **You** = the same over the rows
+whose entry name is `srwildman`.
+
+## The process scorecard (`scorecard.py`; Last week and the close output; Plan K item 7)
+
+- **Spend by tier**: the `tier_week` line `week close` saved (`contest_plan.check_week_tiers`); none without a
+  Weekly Budget.
+- **Chalk decisions**: every `cash: Name` item on the last round's Always use (Play) / Never use (Fade) lines in
+  `data/suggest_state/<week>.json`. Kept = a Play's player is in one of his cash lineups, a Fade's in none.
+- **Overrides**: his distinct lineups by kind (cash = double-up, 50/50, multiplier; else GPP) from his own rows in the
+  standings, each against the saved build of the same kind (any round; first round seen labels a build) that
+  shares the most players (the earlier one on a tie). `delta = sum(his nine actual DK points) - sum(the build's)`.
+  Identical = no override. 8+ shared (`entered.MATCH_MIN`) = an edited build, fewer = his own lineup.
+- **Season line**: over the weeks in `data/contests/scorecard.csv` with lineups, `+sum(positive deltas) /
+  sum(negative deltas)`.
+
+## Exposure against the field (`exposure.py`; Plan K item 8)
+
+GPP only. Exposure = entries holding the player / GPP entries (each contest entry counts). Field = `GppOwn` before
+the close (this week's recorded entries) or, after it, the actual `%Drafted` averaged over the GPPs he entered
+weighted by their entries. Gap = exposure - field; **overweight** at +15 points or more, **underweight** at -15 or
+less (a player the field owns at 15%+ that he has none of is included at 0%).
+
+## How good are our numbers (`numbers.py`; Plan K item 9)
+
+- **CalPts vs TFFB**: `calibration.backtest_by_week` (CalPts refit on earlier weeks only), MAE over the scored
+  players of each week, "All" positions.
+- **Cash % shown vs cashed**: each distinct cash build of a closed week (`cash_postmortem.cash_builds_of`), its
+  shown Cash % (`p_cash`) and whether the sum of its nine actual scores reached that week's lowest double-up cash
+  line (`cash_postmortem.postmortem`); `data/contests/cash_shown.csv`. Shown = mean `p_cash`, cashed = share. The
+  page flags a gap of 10 points or more.
+- **Signals**: `results/signal_table_<season>.csv` without the `Unflagged` baselines or signals that never fired;
+  hit = `HitCal` (else `HitProj`); chip Proven for FADE↓, Shadow for the rest; thin = Model Check's `Thin`.
+
+## Salary watch (`salary_watch.py`; Plan K item 10)
+
+Change = this week's EdgeRaw `Salary` - last week's (the main-slate DraftKings file `contests.week_frames` picks for
+last week), matched on normalised name and team. **Flag**: a drop of $300+ and a steady role: over his last three
+games in the Player card's log, `Snap%` (else targets) each within 10% of their own mean. A drop without one is
+listed apart ("moved", or "no game log" for a player with none, e.g. a DST).
 
 ## Opportunity per dollar (`opportunity.py`, 2026-10-21; shadow)
 

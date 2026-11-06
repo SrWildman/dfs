@@ -25,6 +25,12 @@ Deliberately minimal and locked down:
   of each request, and chat turns' settings and counts: never a prompt, a reply, a file's contents or a
   command's arguments.
 
+- **One server at a time** (`data/week/serve.pid`, Plan K item 10): a running server leaves its pid, port,
+  week and link there (owner-only file mode). `dfs week serve` with a live one opens that one's link instead
+  of starting a second; `dfs week serve --stop` sends SIGTERM to that pid only (never a broad kill), and the
+  server removes the file as it stops. A file whose pid is gone, or is not a `dfs` process, is stale and
+  replaced.
+
 `dfs week page` is unchanged and keeps working as the static file.
 """
 
@@ -32,8 +38,11 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import secrets
 import shutil
+import signal
+import subprocess
 import threading
 import webbrowser
 from collections.abc import Callable
@@ -644,6 +653,75 @@ def sheet_edits(sheet_id: str | None, read_only: bool) -> tuple[Any, str]:
     return edits, f"Sheet: {title} ({url}){' (read only)' if read_only else ''}"
 
 
+def pid_path() -> Path:
+    return paths.DATA_DIR / "week" / "serve.pid"
+
+
+def _is_dfs_process(pid: int) -> bool:
+    """True when `pid` is alive and its command line is a `dfs` one (so a reused pid is never signalled)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return False
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=5, check=False
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "dfs" in out
+
+
+def running(path: Path | None = None, alive: Callable[[int], bool] = _is_dfs_process) -> dict | None:
+    """The live server's pidfile record (`pid`, `port`, `week`, `url`), or None (no file, unreadable, or its
+    process is gone: a stale file)."""
+    path = path or pid_path()
+    try:
+        record = json.loads(path.read_text())
+        pid = int(record["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return record if alive(pid) else None
+
+
+def write_pidfile(record: dict, path: Path | None = None) -> None:
+    path = path or pid_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(record, f)
+
+
+def remove_pidfile(pid: int, path: Path | None = None) -> None:
+    """Remove the pidfile only when it is still this process's."""
+    path = path or pid_path()
+    try:
+        if int(json.loads(path.read_text()).get("pid", -1)) == pid:
+            path.unlink()
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def stop(path: Path | None = None, alive: Callable[[int], bool] = _is_dfs_process, kill=os.kill) -> str:
+    """`dfs week serve --stop`: SIGTERM to the pidfile's pid, and nothing else."""
+    path = path or pid_path()
+    record = running(path, alive)
+    if record is None:
+        if path.exists():
+            path.unlink(missing_ok=True)
+            return "No Week server is running (removed a stale pidfile)."
+        return "No Week server is running."
+    kill(int(record["pid"]), signal.SIGTERM)
+    where = f"pid {record['pid']}, Week {record.get('week')}, port {record.get('port')}"
+    return f"Stopped the Week server ({where})."
+
+
+def _sigterm(signum, frame) -> None:  # noqa: ANN001, ARG001
+    raise KeyboardInterrupt
+
+
 def serve(
     week: int | None = None,
     port: int = 0,
@@ -652,6 +730,16 @@ def serve(
     sheet_id: str | None = None,
 ) -> None:
     """Run the server until Ctrl-C."""
+    existing = running()
+    if existing is not None:
+        echo(
+            f"A Week server is already running (pid {existing['pid']}, Week {existing.get('week')}): "
+            f"{existing.get('url')}"
+        )
+        echo("Opening it instead of starting a second. `dfs week serve --stop` stops it.")
+        if open_browser and existing.get("url"):
+            webbrowser.open(str(existing["url"]))
+        return
     season = nfl_calendar.current_season()
     week = week if week is not None else nfl_calendar.current_week()
     read_only = (season, week) < (nfl_calendar.current_season(), nfl_calendar.current_week())
@@ -667,6 +755,11 @@ def serve(
         else "Ctrl-C stops the server."
     )
     ctx.log(f"server started on port {ctx.port} for week {week}")
+    pid = os.getpid()
+    write_pidfile(
+        {"pid": pid, "port": ctx.port, "week": week, "url": url, "started": datetime.now().isoformat()}
+    )
+    previous = signal.signal(signal.SIGTERM, _sigterm)  # `--stop` ends it the way Ctrl-C does
     if open_browser:
         webbrowser.open(url)
     try:
@@ -674,7 +767,9 @@ def serve(
     except KeyboardInterrupt:
         pass
     finally:
+        signal.signal(signal.SIGTERM, previous)
         if ctx.chat.busy:
             ctx.chat.stop()
         server.server_close()
+        remove_pidfile(pid)
         ctx.log("server stopped")

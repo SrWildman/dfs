@@ -292,6 +292,7 @@ MORE_LABELS = {
     "dfs contests plan": "This week's contest plan by format, and last week against it (terminal only)",
     "dfs contests analyze": "Run the contests engine on files only (no sheet)",
     "dfs contests dupes": "Calibrate the expected-copies estimate on your standings",
+    "dfs week review": "Review a closed week: what won, your process scorecard, exposure, our numbers",
     "dfs ownership log": "Log a contest's actual ownership",
     "dfs lineups clear": "Clear last week's typed-in lineups",
     "dfs sim fit": "Rebuild the simulator's player-correlation table (needs model fetch)",

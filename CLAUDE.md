@@ -217,7 +217,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `tests/test_runlog.py` guards the real file. Inputs left by commands for the page live in `data/week/inputs/`
   (`week_inputs.save_input`): the Stacks tab's top rows, the season-long view, `contest_plan`, `postmortem`, and the page's
   own `decisions` (the pivots lined up).
-- `dfs week serve [--week N] [--port P] [--no-open] [--sheet-id <id>]` -- **the Week page as a local app** (`week_server.py`;
+- `dfs week serve [--week N] [--port P] [--no-open] [--sheet-id <id>] [--stop]` -- **the Week page as a local app** (`week_server.py`;
   the static `dfs week page` is unchanged): serves the page on this Mac only (`127.0.0.1`; the link it opens carries a
   random token, and every request needs the token and a localhost `Host`), with **Claude Code docked on the right**
   (`week_chat.py`: `claude -p` in stream-JSON mode in the main checkout under Sam's own login; model / effort / New chat /
@@ -242,8 +242,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   (`data/week/serve.log`) never holds prompts. Ctrl-C stops it.
 - **Plan K on the Week page** (`week_money.py`, sections placed by day in `week_page.DAY_ORDER`, each with a trust chip):
   **bankroll health** (`bankroll_health.py`: the Season tab's curve by week, NFL DFS / betting / other / total, found by
-  header; spend as a share of the bankroll; a stake guide by tier from `[stakes]`, else `stakes.propose` labelled
-  "proposed", beside the Weekly Budget; one "over the guide" sentence; input `bankroll`, saved fail-soft by `dfs sync`,
+  header; spend as a share of the bankroll; a stake guide by tier: `[stakes]` rules when set (with one "over the
+  guide" sentence), else the Bankroll tab's Weekly Budget itself (Sam, 2026-11-06; `stakes.propose` is not used); input `bankroll`, saved fail-soft by `dfs sync`,
   `contests plan`, `bankroll stakes` and `week close`), the **Sunday inactives check** (`inactives.py`: every OUT / D / Q
   player, game not started, in `data/entered`, else the Lineups tab as the last Cockpit refresh saved it (`sheet_lineups`,
   only from config's live sheet); three pivots: fits the slot, salary <= freed + left, not started, CalPts for cash /
@@ -256,6 +256,20 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   (inactives and pivots) and 9 (practice) below the first seven, and a plain `dfs sync` refreshes it too.
 - `dfs contests dupes [--weeks 4,5,6] [--dry-run]` -- refits the copies estimate on the saved standings (each week held
   out, ownership too), prints the error, saves `data/model_cache/dup_calibration.json`; files only. `week close` reruns it.
+- **Plan K2, the learning loop** (`week_learn.py` on the page; `dfs week review [--week N]`, `week_review.py`, which
+  `week close` runs at its end, fail-soft; files only, saved as inputs under the closed week): **what won**
+  (`field_review.py`: each contest type's winner and last paid place with own sum / salary left / stack shape, the
+  field's QB stack / bring-back / salary left / RB-in-FLEX / top stacks, Sam's lineups beside it; first and open
+  Monday and Tuesday), the **process scorecard** under Last week and in the close output (`scorecard.py`: tier spend
+  from `tier_week`, `cash:` chalk answers on the last round's rules against his cash lineups, each lineup against
+  its nearest build of its kind, edited (8+ shared) or his own; `data/contests/scorecard.csv` gives the season line),
+  **exposure against the field** (`exposure.py`: GPP entries per contest entry against GppOwn this week, against
+  actual %Drafted after the close; 15+ points over / under), **how good are our numbers** (`numbers.py`: CalPts vs
+  TFFB MAE by week from `calibration.backtest_by_week`, Cash % shown vs cashed from `data/contests/cash_shown.csv`,
+  the signal table with chips; **every trust chip on the page links to it**, `week_page.chip_html`) and the
+  **salary watch** (`salary_watch.py`: $300+ drop against last week's DK main-slate file with a steady role, snaps or
+  targets within 10% over three games). The drawer has **Ask Claude** on the served page, and `dfs week serve` keeps
+  `data/week/serve.pid`: a second start opens the running one, `--stop` sends SIGTERM to that pid only.
 - **Rules box scope** (`suggest_state.scoped_item`): an Always use / Never use item may start `cash:` or `gpp:` and then
   applies to that kind of build only (`Rules.always_for(kind)` / `never_for(kind)`; unscoped items read as before, and a
   scoped conflict says Never wins for that kind).
