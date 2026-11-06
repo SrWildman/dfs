@@ -213,8 +213,8 @@ or bottom 5%, so two nearby numbers look nearly the same. They read five hidden 
 each row through any sort or filter. Every column with no position (game/team numbers, `Own%`,
 `Used`, `Exposure`, `Pace`, `Spread`, `OppPosRank`) is one smooth gradient over the whole column,
 white at its median and full colour at its 5th/95th percentile; the signed columns (`ImpliedMove`,
-`TotMove`, `SpdMove`, `Leverage`) are white at zero; low-is-good columns are reversed; `Own%` is the
-white -> amber -> red warm scale with amber at the 20% chalk line. Zeros and blanks are never part of any scale (a zero gets a flat
+`TotMove`, `SpdMove`, `Leverage`) are white at zero; low-is-good columns are reversed; the ownership columns
+(`Own%`, `GppOwn`, `CashOwn`, `OurOwn`) are white -> orange, the Chalk map's colour, light orange at the 20% chalk line. Zeros and blanks are never part of any scale (a zero gets a flat
 grey chip). `Salary` is never highlighted anywhere on this sheet. The exact rules and the reason for
 each choice are in `docs/CALCULATIONS.md`, "Highlighting: within-position steps and smooth
 gradients".
@@ -621,8 +621,9 @@ collapsible row sections, all open by default, in this order (Sam's call):
    listed OUT / D / Q / IR, `Bust%` in the top quartile of his position's rosterable pool, `CalPts` at least 2.0 below `ProjPts`, a `FADE↓` chip.
    Empty states: "Tick players into your pool to see this." / "Nothing in your pool looks worse than when you added it." Up to 10 rows.
 4. **Model likes, not in your pool** (Week 6; `BOARD_LIKES_*`): the Edge Finder's favourites you have not pooled, **6 Cash then 12 GPP** (Sam's counts), each with a live `Pool`
-   dropdown and a soft-yellow name; a formula over the Edge Finder's hidden favourites lists, so a pick removes the row at once. A player on both lists shows once, in the Cash block.
-   Empty state (one line, first row): "Your pool already has every model favourite."
+   dropdown and a soft-yellow name; a formula over the Edge Finder's hidden favourites lists, so a pick removes the row at once. A player on both lists shows once, in the Cash part.
+   One spill (Plan N): Cash first, then GPP, filled from the top with no blank rows; the hidden helper column beside the Id says which list. The row under the
+   last player says "Fewer than 18 qualify: N Cash (of 6) and M GPP (of 12); every other favourite is in your pool." Empty state (first row): "Your pool already has every model favourite."
 5. **Pool summary** (live formulas, updating the moment you change the pool, no sync): a gap line ("Cash: need 1 more TE · GPP: enough to fill a
    lineup"), the **portfolio line** (lineups built, expected cashes, P(at least one cash), P(at least one Top 1%); written by the sync from the
    Lineups simulator), a per-position table (Pooled, Cash, GPP, with Both counting for each; Min / Max / Avg Sal; the cheapest play), and **Your
@@ -945,10 +946,9 @@ own rows only. `dfs setup other-sports` builds it; `dfs doctor` checks it (`bank
 
 **Betting** (`[bankroll.bets]`, header row 16, data rows 17-36 -- 20 bet
 slots, Sam: "max 20 spots for bets"): a hand-entered ledger for Sam's DK
-Sportsbook bets -- Name, Odds % (typed, accepts `53.3`, `53.3%`, or
-`0.533`, displayed with a literal `%` suffix that doesn't affect the
-stored value -- a true Percent-type format would auto-divide bare-number
-input by 100 and break the `0.533` case), Odds (formula, American odds
+Sportsbook bets -- Name, Odds % (typed as a percent, `53.3%`; a true percent column since Plan N, 2026-11-06, so
+the stored value is the probability and `0.7%` can never be read as 70%; a bare `53.3` shows "type it as 46%" in
+Odds), Odds (formula, American odds
 derived from Odds %), Entered (typed stake -- **0 for a promo/free bet**,
 Sam's own convention, and blank behaves identically since every formula
 treats a blank Entered as 0), Won (typed payout -- **blank means still

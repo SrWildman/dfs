@@ -51,6 +51,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from dfs.browser import persistent_context
 from dfs.log import get_logger
+from dfs.player_join import adopt_dk_spelling
 from dfs.sources.base import Source, SyncContext
 
 log = get_logger("sources.tffb_projections")
@@ -138,4 +139,12 @@ class TffbProjectionsSource(Source):
         df = df.copy()
         is_dst = df["Position"] == "DST"
         df.loc[is_dst, "Team"] = df.loc[is_dst, "Name"].apply(_dst_nickname)
+        # Plan N: DK's spelling on the tab PlayerPoolRaw reads Pts / Own% from by exact name (Joe Milton III).
+        try:
+            from dfs import store
+
+            salaries = store.load_current("draftkings")
+        except FileNotFoundError:
+            salaries = None
+        df.loc[~is_dst, "Name"] = adopt_dk_spelling(df.loc[~is_dst, "Name"], df.loc[~is_dst, "Id"], salaries)
         return super().to_sheet_rows(df)

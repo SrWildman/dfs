@@ -64,6 +64,27 @@ def normalize_name(name: object) -> str:
     return " ".join(tokens)
 
 
+def adopt_dk_spelling(names: pd.Series, ids: pd.Series, salaries: pd.DataFrame | None) -> pd.Series:
+    """`names` with DraftKings' own spelling wherever the row's DK `Id` is in `salaries` (the raw
+    draftkings.csv: `ID`, `Name`) and the two spellings are the same player by `normalize_name` -- "Joe
+    Milton" becomes "Joe Milton III", "Oronde Gadsden" "Oronde Gadsden II". Plan N: the sheet's
+    exact-name lookups (PlayerPoolRaw into TFFBOptoRaw, Player Pool into EdgeRaw) are keyed on what a person
+    types or picks from DK's list, so a source's own suffix-less spelling read #N/A. A name that differs in
+    more than punctuation or a suffix is left alone, never guessed."""
+    if salaries is None or salaries.empty or "ID" not in salaries or "Name" not in salaries:
+        return names
+    dk_ids = pd.to_numeric(salaries["ID"], errors="coerce")
+    dk = dict(zip(dk_ids, salaries["Name"].astype(str).str.strip(), strict=True))
+    keys = pd.to_numeric(ids, errors="coerce")
+    out = names.copy()
+    for index, (name, key) in enumerate(zip(names, keys, strict=True)):
+        theirs = dk.get(key)
+        same_player = isinstance(name, str) and normalize_name(theirs) == normalize_name(name)
+        if theirs and theirs != name and same_player:
+            out.iloc[index] = theirs
+    return out
+
+
 def normalize_team(team: object) -> str:
     """Uppercased team code, with the handful of confirmed source-side
     drifts in `TEAM_ALIASES` rewritten to DK's own code. Add to that dict

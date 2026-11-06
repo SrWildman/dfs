@@ -349,7 +349,8 @@ def test_an_ownership_column_without_a_scale_is_a_finding():
 
 
 def test_a_scale_that_draws_nothing_is_a_finding_the_week_9_player_pool_case():
-    cells = [(0.31, {}), (0.12, {"red": 1, "green": 1, "blue": 1}), ("#N/A", {})]
+    banding = {"red": 0.97, "green": 0.97, "blue": 0.98}  # the zebra rows: not the scale's colour
+    cells = [(0.31, banding), (0.12, {"red": 1, "green": 1, "blue": 1}), ("#N/A", {})]
     issues = ownership_colour_issues(_OwnClient(cells=cells), "Player Pool", ["Name", "Own%"], header_row=3)
     assert len(issues) == 1 and "draws no colour" in issues[0]
 

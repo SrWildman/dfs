@@ -272,8 +272,10 @@ OWNERSHIP_COLOURED = ("Own%", "GppOwn", "CashOwn", "OurOwn")
 OWNERSHIP_SAMPLE_ROWS = 300
 
 
-def _is_white(bg: dict) -> bool:
-    return all(abs(bg.get(k, 1) - 1) < 0.02 for k in ("red", "green", "blue"))
+def _is_warm(bg: dict) -> bool:
+    """Drawn by the ownership scale: orange has clearly more red than blue. Banding's pale grey-blue
+    (0.97 / 0.97 / 0.98) and white are not, so a scale that draws nothing cannot pass behind the banding."""
+    return bg.get("red", 1) - bg.get("blue", 1) > 0.04
 
 
 def ownership_colour_issues(client, tab: str, header: list, *, header_row: int) -> list[str]:
@@ -294,7 +296,7 @@ def ownership_colour_issues(client, tab: str, header: list, *, header_row: int) 
         numbers = [(v, bg) for v, bg in cells if isinstance(v, int | float) and not isinstance(v, bool)]
         if not numbers or max(v for v, _ in numbers) <= 0:
             continue  # nothing owned yet (before ownership publishes): nothing to draw
-        if all(_is_white(bg) for v, bg in numbers if v > 0):
+        if not any(_is_warm(bg) for v, bg in numbers if v > 0):
             issues.append(
                 f"{name} ({letter}) has a colour scale but draws no colour "
                 "(its anchor formula likely errors, e.g. on a #N/A cell)"

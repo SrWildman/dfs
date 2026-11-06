@@ -229,9 +229,12 @@ column in several row blocks combines every block into one computation). Values 
 reversed (LOW is good: green at the low end); `Spread` keeps zero as a real value (a pick'em),
 so it has no grey chip. `ImpliedMove`, `TotMove`, `SpdMove` and `Leverage` (CeilPct - OwnPct,
 -100..+100) are *diverging*: white AT ZERO with symmetric ends (`diverging_anchor_kwargs`), no
-grey zero. `Own%` is the one column NOT anchored to its own median: white -> amber -> red (high
-ownership is a caution) with the midpoint at the 20% CHALK line, the low end the lowest non-zero
-value and the high end the real maximum. Ownership is right-skewed, so a median midpoint (~5%)
+grey zero. The ownership columns (`Own%`, `GppOwn`, `CashOwn`, `OurOwn`) are the ones NOT anchored to their own
+median: white -> light orange -> the Chalk map's orange (`#FCD9A8`; Plan N, Sam 2026-11-06: the old amber -> pale
+red read almost white) with the light orange at the 20% CHALK line, the low end the lowest non-zero value and the
+high end the real maximum. Every anchor reads the column through `IFERROR` (`_numbers`): one `#N/A` cell used to
+error the anchor, and Sheets then draws no colour at all (Week 9's Player Pool `Own%`); `dfs setup audit-style`
+checks the colour the sheet actually renders on every ownership column (`sheet_audit.ownership_colour_issues`). Ownership is right-skewed, so a median midpoint (~5%)
 crushes nearly every value into one pale amber -- Week 3 feedback A2, and again 2026-10-02 ("really
 flat in terms of colour spread") when I had moved it to the median under "nothing fixed".
 
@@ -1883,16 +1886,20 @@ the same groups the Lineups tints show.
 ## Betting ledger (`sheet_bankroll_view.py`, Round 5 item 7, 2026-09-28)
 
 **Odds** (American odds from Odds %, a per-row Sheet formula, `column C`):
-`p` is Odds % normalized to a 0-1 fraction (`IF(x>1, x/100, x)`, so `53.3`,
-`53.3%`, and `0.533` all resolve to `p = 0.533`):
+`p` is the Odds % cell itself: the column is a true percent column (Plan N, 2026-11-06), so typing `53.3%` stores
+`0.533` and `0.7%` stores `0.007`. A value that is not a probability (blank aside: `53.3` typed with no `%`, `1`,
+`0`, text) shows "type it as 46%" instead of odds, never a guess. (Before, `IF(x>1, x/100, x)` read a stored `0.7`
+-- shown as "0.7%" by a literal-suffix format -- as 70% and gave -233 for a +14,186 bet; `dfs bankroll fix-odds`
+converts an old column once.)
 
 - `p > 0.5` (favorite): `-ROUND(100 * p / (1 - p))`
 - `p < 0.5` (underdog): `+ROUND(100 * (1 - p) / p)`
 - `p = 0.5`: `+100`
 
 Worked examples (matches `tests/test_sheet_bankroll_view.py`): 53.3% ->
--114, 50% -> +100, 40% -> +150, 75% -> -300, 20% -> +400. Blank when
-Odds % is blank.
+-114, 50% -> +100, 40% -> +150, 75% -> -300, 20% -> +400, 0.7% -> +14,186. Blank when
+Odds % is blank. The weekly expected wins count a stored `p` only when it is in (0, 1) on a repaired column; a
+closed week's unrepaired column keeps its old reading (`odds_cells_are_percent`).
 
 **Net** (`column F`): `Won - Entered`, blank while `Won` is blank
 (pending). A loss writes `Won = 0`.
