@@ -116,6 +116,7 @@ WRITERS = frozenset(
         "dfs sync",
         "dfs week close",
         "dfs week new",
+        "dfs week review",
     }
 )
 

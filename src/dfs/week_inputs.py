@@ -304,6 +304,7 @@ def latest_round(data_dir: Path, week: int) -> dict | None:
 EDGE_COLUMNS_USED = [
     "Id",
     "Name",
+    "NameKey",  # joins the Player card's game log (`week_page.player_log`: the drawer, the salary watch)
     "Position",
     "Team",
     "Opp",
@@ -434,6 +435,13 @@ class WeekInputs:
     practice: Any = None  # `practice.WeekPractice` from the raw injury snapshots, or None
     sheet_lineups: dict | None = None  # the Lineups tab as the last Cockpit refresh read it
     dup_calibration: dict | None = None  # `sim/dup_calibration.py`'s saved fit and held-out error
+    # Plan K2 (`week_review`: saved at the close for the week closed, so this week's page reads last week's)
+    field_review: dict | None = None  # what won and how the field built
+    scorecard: dict | None = None  # the process scorecard
+    exposure_close: dict | None = None  # GPP exposure against actual (and predicted) ownership
+    numbers: dict | None = None  # how good are our numbers
+    salary_prev: dict | None = None  # last week's main-slate salaries by (name, team), for the salary watch
+    salary_prev_note: str = ""
 
 
 def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) -> WeekInputs:
@@ -473,7 +481,27 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         practice=_practice(d, season, week, now),
         sheet_lineups=load_input("sheet_lineups", season, week, d),
         dup_calibration=read_json(d / "model_cache" / "dup_calibration.json"),
+        field_review=_closed("field_review", season, week, d),
+        scorecard=_closed("scorecard", season, week, d),
+        exposure_close=_closed("exposure_close", season, week, d),
+        numbers=_closed("numbers", season, week, d),
+        **_salary_prev(d, season, week),
     )
+
+
+def _closed(name: str, season: int, week: int, data_dir: Path) -> dict | None:
+    """A `week_review` input: saved under the week it closed, so last week's (this week's once it closes)."""
+    return load_input(name, season, week, data_dir) or load_input(name, season, week - 1, data_dir)
+
+
+def _salary_prev(data_dir: Path, season: int, week: int) -> dict:
+    try:
+        from dfs import salary_watch
+
+        prev, note = salary_watch.last_week_salaries(data_dir / "raw" / "draftkings", season, week)
+        return {"salary_prev": prev, "salary_prev_note": note}
+    except Exception as exc:  # noqa: BLE001 - a missing or odd snapshot never stops the page
+        return {"salary_prev": None, "salary_prev_note": f"{type(exc).__name__}: {exc}"}
 
 
 def _practice(data_dir: Path, season: int, week: int, now: datetime) -> Any:

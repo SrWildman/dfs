@@ -130,8 +130,16 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
         "5+ is flagged; dfs contests dupes recalibrates the estimate on your standings and dfs week close "
         "reruns it). On Sunday the inactives check comes first: every OUT, Doubtful or Questionable player "
         "in what you entered, with three pivots that fit his slot and the salary left. Every Q or D tag "
-        "shows that player's practice this week (DNP Wed, Limited Thu, ...). A source that has not "
-        "published yet shows as pending, not failed.",
+        "shows that player's practice this week (DNP Wed, Limited Thu, ...). After the close (dfs week close "
+        "runs dfs week review), Monday and Tuesday open on what won last week: each contest type's winning "
+        "lineup and last paid place, how the field built, and your lineups beside it. Last week carries the "
+        "process scorecard (spend by tier, your chalk answers against what you played, every lineup against "
+        "its nearest build and the points that cost or gained, and the season line). Exposure against the "
+        "field compares your GPP entries with GppOwn, and after the close with the actual ownership. Every "
+        "trust chip (Proven, Shadow, Untested, Data) links to How good are our numbers: CalPts against TFFB "
+        "by week, the Cash % shown against how often those builds cashed, and each signal's record. The "
+        "salary watch lists players $300+ cheaper than last week whose snaps or targets held steady. A "
+        "source that has not published yet shows as pending, not failed.",
     ),
     (
         "The Week server",
@@ -143,7 +151,9 @@ _ONE_THING_ROWS: list[tuple[str, str]] = [
         "close, then offers the matching command. The page itself writes three things to this sheet: a "
         "player's Pool cell (Cash, GPP, Both or none: the same cell as the dropdown), a decision's line in "
         "Suggested's rules box, and the suggested starting pool. Each checks the cell first and refuses if "
-        "it changed here, then shows what the sheet holds. A closed week writes nothing. Ctrl-C stops it.",
+        "it changed here, then shows what the sheet holds. A closed week writes nothing. In the player "
+        "drawer, Ask Claude fills the chat with a question about him. One server at a time: starting it "
+        "again opens the one already running, and dfs week serve --stop stops it. Ctrl-C stops it too.",
     ),
     (
         "One command at a time",

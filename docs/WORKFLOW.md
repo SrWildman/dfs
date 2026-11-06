@@ -417,6 +417,8 @@ standard errors and in most weeks.
 expect from the week's actual results, and Results' row for the week you
 just closed shows real `Cash Pts`/`H2H Entered`/`H2H Win` numbers.
 
+**The learning loop** (Week page, Plan K2; `dfs week close` runs `dfs week review` for you). Monday and Tuesday the page opens on **What won last week**: each contest type's winning lineup and its last paid place (points, ownership sum, salary left, stack shape), how the whole field built (QB stacks, bring-backs, salary left, a RB in the FLEX, the top stacks) and your lineups beside it. **Last week** carries the **process scorecard**: spend by tier against the plan, the chalk Play / Fade answers against what you played, and every lineup that differs from its nearest build with the points it cost or gained, plus the season line ("your overrides against the model: +X / -Y points over N weeks"); the same lines are in the close output. **Exposure against the field** compares your GPP entries with GppOwn this week and with the actual ownership after the close. **How good are our numbers** (every trust chip links to it) holds CalPts against TFFB by week, the Cash % the builds showed against how often they cashed, and each signal's record. Tuesday to Friday the **salary watch** lists players $300+ cheaper than last week whose snaps or targets held steady.
+
 ## 8. Log actual ownership (optional -- a standalone record, not a calibration pipeline)
 
 **Files:** `data/ownership_log.csv` (local, gitignored -- never leaves

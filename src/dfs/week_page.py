@@ -145,6 +145,20 @@ SIGNAL_TRUST = {
 }
 
 
+NUMBERS_ANCHOR = (
+    "numbers"  # "How good are our numbers" (`week_learn.numbers_section`): every chip links there
+)
+
+
+def chip_html(label: str, why: str) -> str:
+    """A trust chip (Proven / Shadow / Untested / Data): a link to the numbers section, its reason on
+    hover."""
+    return (
+        f'<a class="chip {html.escape(label.lower(), quote=True)}" href="#{NUMBERS_ANCHOR}" '
+        f'title="{html.escape(why, quote=True)} (click: how good are our numbers)">{html.escape(label)}</a>'
+    )
+
+
 def e(text: object) -> str:
     return html.escape(str(text), quote=True)
 
@@ -208,7 +222,7 @@ class Section:
         chip = ""
         if self.trust:
             label, why = self.trust
-            chip = f'<span class="chip {label.lower()}" title="{e(why)}">{e(label)}</span>'
+            chip = chip_html(label, why)
         asof = f'<span class="asof">{e(self.asof)}</span>' if self.asof else ""
         trust_line = (
             f'<p class="trust"><b>{e(self.trust[0])}.</b> {rich(self.trust[1])}</p>' if self.trust else ""
@@ -498,7 +512,7 @@ def cash_section(inp: WeekInputs) -> Section:
 
 def _chip(key: str) -> str:
     label, why = TRUST[key]
-    return f'<span class="chip {label.lower()}" title="{e(why)}">{e(label)}</span>'
+    return chip_html(label, why)
 
 
 def stacks_trust(inp: WeekInputs) -> tuple[str, str]:
@@ -546,9 +560,7 @@ def gpp_section(inp: WeekInputs) -> Section:
         )
     stacks = inp.stacks
     label, why = stacks_trust(inp)
-    body.append(
-        f'<h4>Top 3 stacks <span class="chip {label.lower()}" title="{e(why)}">{e(label)}</span></h4>'
-    )
+    body.append(f"<h4>Top 3 stacks {chip_html(label, why)}</h4>")
     if stacks and stacks.get("rows"):
         rows = [
             [
@@ -891,6 +903,9 @@ def last_week_section(inp: WeekInputs) -> Section:
         body.append(bullets(lines) if lines else not_run("No cash entry has a line"))
     else:
         body.append(not_run("No double-up standings are saved for that week", say="close the week"))
+    from dfs import week_learn
+
+    body.append(week_learn.scorecard_html(inp))
     return Section("last-week", "Last week", "".join(body), trust)
 
 
@@ -1078,6 +1093,7 @@ color:var(--accent)}.chip.upside{background:var(--shadow-soft);color:var(--shado
 font-size:11.5px;padding:0 8px}
 .chip.proven{color:var(--proven)}.chip.shadow{color:var(--shadow)}
 .chip.untested,.chip.data{color:var(--untested)}
+a.chip{text-decoration:none;cursor:pointer}a.chip:hover{text-decoration:underline}
 .tchip{display:inline-block;font-size:10px;font-weight:700;border-radius:4px;padding:0 4px;border:1px solid
 currentColor;line-height:1.3}
 .tchip.proven{color:var(--proven)}.tchip.shadow{color:var(--shadow)}
@@ -1206,21 +1222,28 @@ def page_path(season: int, week: int, data_dir: Path | None = None) -> Path:
 # Below the fold, collapsed, ordered by day: what Sam needs first today comes first. Tuesday to Friday is
 # research, Saturday is build and enter, Sunday is game day, Monday the close.
 FOLD_IDS = [
+    "field-review",
     "changes",
+    "salaries",
     "contest-plan",
     "entry-plan",
     "bankroll",
     "season",
     "last-week",
+    "exposure",
     "cash",
     "gpp",
     "consensus",
     "inactives",
     "sunday",
+    "numbers",
 ]
 DAY_ORDER: dict[int, list[str]] = {
-    0: [
+    0: [  # Monday: the close
+        "field-review",
         "last-week",
+        "numbers",
+        "exposure",
         "bankroll",
         "season",
         "changes",
@@ -1229,51 +1252,82 @@ DAY_ORDER: dict[int, list[str]] = {
         "cash",
         "gpp",
         "consensus",
+        "salaries",
         "inactives",
         "sunday",
     ],
-    1: [
+    1: [  # Tuesday: research, last week's lessons still on top
+        "field-review",
         "changes",
+        "salaries",
         "contest-plan",
         "bankroll",
         "season",
         "last-week",
+        "numbers",
         "cash",
         "gpp",
         "consensus",
         "entry-plan",
+        "exposure",
         "inactives",
         "sunday",
     ],
-    5: [
+    2: [  # Wednesday to Friday: research
+        "changes",
+        "salaries",
         "contest-plan",
-        "entry-plan",
+        "bankroll",
+        "season",
+        "last-week",
+        "field-review",
         "cash",
         "gpp",
         "consensus",
-        "bankroll",
-        "changes",
+        "entry-plan",
+        "exposure",
+        "numbers",
         "inactives",
         "sunday",
-        "season",
-        "last-week",
     ],
-    6: [
+    5: [  # Saturday: build and enter
+        "contest-plan",
+        "entry-plan",
+        "exposure",
+        "cash",
+        "gpp",
+        "consensus",
+        "salaries",
+        "bankroll",
+        "changes",
+        "inactives",
+        "sunday",
+        "season",
+        "last-week",
+        "field-review",
+        "numbers",
+    ],
+    6: [  # Sunday: game day
         "inactives",
         "sunday",
         "entry-plan",
+        "exposure",
         "changes",
         "consensus",
         "cash",
         "gpp",
         "contest-plan",
+        "salaries",
         "bankroll",
         "season",
         "last-week",
+        "field-review",
+        "numbers",
     ],
 }
 OPEN_ON_SUNDAY = "inactives"  # Sunday: the inactives check is open when anything is flagged
-DAY_ORDER[2] = DAY_ORDER[3] = DAY_ORDER[4] = DAY_ORDER[1]
+OPEN_ON_DAY = {0: "field-review", 1: "field-review"}  # Monday and Tuesday: what won is open, at the top
+DAY_ORDER[3] = DAY_ORDER[4] = DAY_ORDER[2]
 SECTION_IDS = FOLD_IDS
 
 
@@ -1326,6 +1380,18 @@ def fold_line(sid: str, inp: WeekInputs, built: dict[str, Section]) -> tuple[str
         return (
             f"{len(bs)} GPP builds, best Top 1% {pct(best, 1)}" if bs else "no GPP builds yet"
         ) + top, False
+    if sid in ("field-review", "exposure", "numbers"):
+        from dfs import week_learn as wl
+
+        return {
+            "field-review": wl.field_review_line,
+            "exposure": wl.exposure_line,
+            "numbers": wl.numbers_line,
+        }[sid](inp)
+    if sid == "salaries":
+        from dfs import week_learn as wl
+
+        return wl.salary_line(inp, player_log(inp))
     if sid in ("bankroll", "inactives", "consensus", "entry-plan"):
         from dfs import week_money as wm
 
@@ -1345,7 +1411,7 @@ def fold_html(s: Section, line: str, urgent: bool, open_: bool = False) -> str:
     chip = ""
     if s.trust:
         label, why = s.trust
-        chip = f'<span class="chip {label.lower()}" title="{e(why)}">{e(label)}</span>'
+        chip = chip_html(label, why)
     trust_line = f'<p class="trust"><b>{e(s.trust[0])}.</b> {rich(s.trust[1])}</p>' if s.trust else ""
     return (
         f'<section class="card fold" id="{e(s.id)}"><details{" open" if open_ else ""}>'
@@ -1431,7 +1497,7 @@ def render(
     """The whole page as one HTML string. `live` (the served page) adds the controls that write the sheet;
     `sheet` is what the server read from it (`week_writes.LiveSheet`), `answers` the decisions file."""
     from dfs import week_board as wb
-    from dfs import week_explorer, week_money, week_top
+    from dfs import week_explorer, week_learn, week_money, week_top
 
     token = _LIVE.set(live)
     try:
@@ -1468,12 +1534,18 @@ def render(
                 week_money.inactives_section(inp),
                 week_money.consensus_section(inp),
                 week_money.entry_plan_section(inp),
+                week_learn.field_review_section(inp),
+                week_learn.exposure_section(inp),
+                week_learn.numbers_section(inp),
+                week_learn.salary_section(inp, player_log(inp)),
             )
         }
         folds = []
         for sid in section_order(day):
             line, urgent = fold_line(sid, inp, built)
-            open_ = day == 6 and sid == OPEN_ON_SUNDAY and urgent
+            open_ = (day == 6 and sid == OPEN_ON_SUNDAY and urgent) or (
+                OPEN_ON_DAY.get(day) == sid and built[sid].ran
+            )
             folds.append(
                 fold_html(built[sid], line, urgent, open_) + (LIVE_CONTEST if sid == "contest-plan" else "")
             )

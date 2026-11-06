@@ -20,6 +20,7 @@ from dfs.week_page import (
     UNTESTED,
     Section,
     bullets,
+    chip_html,
     dollars,
     e,
     not_run,
@@ -59,7 +60,7 @@ TRUST: dict[str, tuple[str, str]] = {
 
 def chip(key: str) -> str:
     label, why = TRUST[key]
-    return f'<span class="chip {label.lower()}" title="{e(why)}">{e(label)}</span>'
+    return chip_html(label, why)
 
 
 # -- practice -----------------------------------------------------------------------------------------------
@@ -169,6 +170,28 @@ def bankroll_chart(curve: list[dict], *, width: int = 640, height: int = 220) ->
     return legend + "".join(parts)
 
 
+def guide_of(b: dict) -> dict:
+    """The stake guide to show: the saved one when it is Sam's `[stakes]` rules, else his Weekly Budget worked
+    out here from the saved bankroll and budget (so an input saved before the guide became the Weekly Budget,
+    with the old proposal in it, never shows)."""
+    g = b.get("guide") or {}
+    if g.get("source") == "your rules":
+        return g
+    from dfs import bankroll_health as bh
+    from dfs.config import StakesConfig
+
+    guide = bh.stake_guide(StakesConfig(), b.get("bankroll"), b.get("budget"))
+    return {
+        "source": guide.source,
+        "pct_week": guide.pct_week,
+        "pct_entry": None,
+        "week": guide.week,
+        "entry": None,
+        "tiers": guide.tiers,
+        "lines": guide.lines,
+    }
+
+
 def bankroll_section(inp: WeekInputs) -> Section:
     trust = TRUST["bankroll"]
     b = inp.bankroll
@@ -186,7 +209,7 @@ def bankroll_section(inp: WeekInputs) -> Section:
             trust,
             ran=False,
         )
-    g = b.get("guide") or {}
+    g = guide_of(b)
     body = []
     head = [
         f"<b>Bankroll {e(cents(b['bankroll']))}</b> at the start of the week"
@@ -201,7 +224,7 @@ def bankroll_section(inp: WeekInputs) -> Section:
     if b.get("season_left") is not None:
         head.append(f"season deposit budget {e(pct(b['season_left']))} left")
     body.append("<p>" + " &middot; ".join(head) + ".</p>")
-    if b.get("over"):
+    if b.get("over") and g.get("source") == "your rules":
         body.append(f'<p class="flag bad"><b>{e(b["over"])}</b></p>')
     source = g.get("source")
     label = {"your rules": "your [stakes] rules", "Weekly Budget": "your Weekly Budget"}.get(source, "")
@@ -306,7 +329,7 @@ def bankroll_section(inp: WeekInputs) -> Section:
 
 def bankroll_line(inp: WeekInputs) -> tuple[str, bool]:
     b = inp.bankroll or {}
-    g = b.get("guide") or {}
+    g = guide_of(b)
     if not b:
         return "not run yet", False
     text = f"Bankroll {cents(b['bankroll'])}" if b.get("bankroll") is not None else "Bankroll not read"
@@ -315,7 +338,7 @@ def bankroll_line(inp: WeekInputs) -> tuple[str, bool]:
     elif b.get("budget") is not None:
         share = f" ({g['pct_week']:g}% of it)" if g.get("pct_week") is not None else ""
         text += f"; Weekly Budget {cents(b['budget'])}{share}"
-    return text, bool(b.get("over"))
+    return text, bool(b.get("over")) and g.get("source") == "your rules"
 
 
 # -- 2. Sunday inactives

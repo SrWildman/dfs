@@ -345,6 +345,10 @@ def _cell(column: str, value: object) -> object:
     return None if v is None else round(v, 4)
 
 
+# The served page's drawer pre-fills the docked chat with this (Plan K item 10); `{name}` is the player.
+ASK_PLAYER = "Tell me about {name} this week: role, matchup, ownership, and whether he fits cash or GPP"
+
+
 def payload(
     inp,
     b: Board,
@@ -385,6 +389,7 @@ def payload(
         ],
         "rows": data,
         "ids": ids,
+        "ask_player": ASK_PLAYER,
         "lenses": [
             {
                 "key": lens.key,
@@ -421,6 +426,7 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 const COL = {}; D.columns.forEach((c, i) => { c.i = i; COL[c.key] = c; });
 const IDX = {}; D.ids.forEach((id, i) => { IDX[id] = i; }); D.rows.forEach((r, i) => { r.__i = i; });
 const LIVE = document.body.classList.contains('live');
+const ASK_PLAYER = D.ask_player;
 const PAGE = 100;
 const store = { get(k, d) { try { const v = localStorage.getItem('dfs-explorer-' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
                 set(k, v) { try { localStorage.setItem('dfs-explorer-' + k, JSON.stringify(v)); } catch (e) {} } };
@@ -535,7 +541,7 @@ function visible() {
 }
 
 /* ---------- the table ---------- */
-function chip(t) { const s = el('span', 'tchip ' + t.toLowerCase(), t[0]); return s; }
+function chip(t) { const s = el('a', 'tchip ' + t.toLowerCase(), t[0]); s.href = '#numbers'; s.addEventListener('click', (e) => e.stopPropagation()); return s; }
 function poolSeg(id, name, value) {
   const s = el('span', 'seg'); s.dataset.id = id; s.dataset.name = name; s.dataset.was = value || '';
   for (const [val, lab] of [['Cash', 'Cash'], ['GPP', 'GPP'], ['Both', 'Both'], ['', 'none']]) {
@@ -618,7 +624,12 @@ function openDrawer(id) {
   const r = D.rows[i]; drawer.replaceChildren(); drawer.hidden = false;
   const head = el('div', 'dhead');
   const close = el('button', 'dclose', '×'); close.type = 'button'; close.title = 'Close'; close.addEventListener('click', () => { drawer.hidden = true; });
-  head.append(el('h3', null, v(r, 'Name')), close);
+  head.append(el('h3', null, v(r, 'Name')));
+  if (LIVE) {  // served page: pre-fill the docked chat
+    const ask = el('button', 'ask', 'Ask Claude'); ask.type = 'button';
+    ask.dataset.say = ASK_PLAYER.replace('{name}', v(r, 'Name')); head.append(ask);
+  }
+  head.append(close);
   drawer.append(head);
   const sub = [v(r, 'Position'), v(r, 'Team') + ' vs ' + v(r, 'Opp'), fmt(COL.Salary, v(r, 'Salary')), v(r, 'Kickoff')].filter(Boolean).join(' · ');
   drawer.append(el('p', 'dim', sub + (v(r, 'Avail') ? ' · ' + v(r, 'Avail') : '')));
@@ -654,6 +665,9 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') drawer.hidden = true; });
 window.dfsDrawer = openDrawer;
+// a trust chip links to #numbers: open the collapsed section it points at
+function openHash() { const t = location.hash.length > 1 && document.getElementById(location.hash.slice(1)); const d = t && t.querySelector('details'); if (d) d.open = true; }
+window.addEventListener('hashchange', openHash); openHash();
 render();
 })();
 """

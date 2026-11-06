@@ -2106,6 +2106,58 @@ Eastern date falls in the week (its Tuesday to the following Monday) and whose r
 `DNP Wed · Limited Thu`. Direction up / down / flat compares the first and last. A Wed / Thu / Fri up to today with no sync
 is named, because a change that day shows on the next sync's day.
 
+## What won last week (`field_review.py`; Week page; Plan K item 6)
+
+From the closed week's saved standings (Classic double-ups, 50/50s, multipliers and GPPs with a contest-log row,
+`sim.contest_retro.load_real_contests`) and each contest's `contests.field` features, grouped by the log's Format.
+**Winner** = the highest score of the type's largest contest (most entries); **last paid place** = the lineup at
+place `Places_Paid` of that contest (scores sorted high to low). Each with its **own sum** (the nine players'
+`%Drafted` in that contest as fractions, added up; a player the table does not list adds nothing and `own_known`
+says how many it had), **salary left** (`$50,000 - the nine salaries`) and **shape** (`TEAM QB + 1` / `+ 2+ WR/TE`,
+`, bring-back` when any player is from the QB's opponent; `no QB stack`). **Field tendencies** pool every lineup of
+every contest of the type: QB stack = `field.py`'s `stack1` (the QB and one or more of his WR / TE), QB + 2 =
+`stack2`, bring-back = `bringback`, salary left = mean `unspent`, RB in FLEX = share with a RB in the FLEX slot,
+top stacks = the QB teams of the stacked lineups as a share of the resolved ones. **You** = the same over the rows
+whose entry name is `srwildman`.
+
+## The process scorecard (`scorecard.py`; Last week and the close output; Plan K item 7)
+
+- **Spend by tier**: the `tier_week` line `week close` saved (`contest_plan.check_week_tiers`); none without a
+  Weekly Budget.
+- **Chalk decisions**: every `cash: Name` item on the last round's Always use (Play) / Never use (Fade) lines in
+  `data/suggest_state/<week>.json`. Kept = a Play's player is in one of his cash lineups, a Fade's in none.
+- **Overrides**: his distinct lineups by kind (cash = double-up, 50/50, multiplier; else GPP) from his own rows in the
+  standings, each against the saved build of the same kind (any round; first round seen labels a build) that
+  shares the most players (the earlier one on a tie). `delta = sum(his nine actual DK points) - sum(the build's)`.
+  Identical = no override. 8+ shared (`entered.MATCH_MIN`) = an edited build, fewer = his own lineup.
+- **Season line**: over the weeks in `data/contests/scorecard.csv` with lineups, `+sum(positive deltas) /
+  sum(negative deltas)`.
+
+## Exposure against the field (`exposure.py`; Plan K item 8)
+
+GPP only. Exposure = entries holding the player / GPP entries (each contest entry counts). Field = `GppOwn` before
+the close (this week's recorded entries) or, after it, the actual `%Drafted` averaged over the GPPs he entered
+weighted by their entries. Gap = exposure - field; **overweight** at +15 points or more, **underweight** at -15 or
+less (a player the field owns at 15%+ that he has none of is included at 0%).
+
+## How good are our numbers (`numbers.py`; Plan K item 9)
+
+- **CalPts vs TFFB**: `calibration.backtest_by_week` (CalPts refit on earlier weeks only), MAE over the scored
+  players of each week, "All" positions.
+- **Cash % shown vs cashed**: each distinct cash build of a closed week (`cash_postmortem.cash_builds_of`), its
+  shown Cash % (`p_cash`) and whether the sum of its nine actual scores reached that week's lowest double-up cash
+  line (`cash_postmortem.postmortem`); `data/contests/cash_shown.csv`. Shown = mean `p_cash`, cashed = share. The
+  page flags a gap of 10 points or more.
+- **Signals**: `results/signal_table_<season>.csv` without the `Unflagged` baselines or signals that never fired;
+  hit = `HitCal` (else `HitProj`); chip Proven for FADE↓, Shadow for the rest; thin = Model Check's `Thin`.
+
+## Salary watch (`salary_watch.py`; Plan K item 10)
+
+Change = this week's EdgeRaw `Salary` - last week's (the main-slate DraftKings file `contests.week_frames` picks for
+last week), matched on normalised name and team. **Flag**: a drop of $300+ and a steady role: over his last three
+games in the Player card's log, `Snap%` (else targets) each within 10% of their own mean. A drop without one is
+listed apart ("moved", or "no game log" for a player with none, e.g. a DST).
+
 ## Opportunity per dollar (`opportunity.py`, 2026-10-21; shadow)
 
 Sam's question: "targets per route run, weighted opportunities, targets per dollar ... help identify good plays for their price." Our research says a usage model does not beat TFFB as a projection and `USAGE↑` is weak, so this is the PRICE angle, not a projection: nothing feeds `CalPts` or a build. Everything is this season only, over the games a player PLAYED strictly before the slate week (a missed game is skipped, never a zero), with no prior-season blend (roles change between seasons); a player with no game yet is blank.

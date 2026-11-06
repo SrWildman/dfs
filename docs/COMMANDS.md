@@ -55,7 +55,7 @@ Write one self-contained HTML page for the week and open it: today's steps (with
 
 ### `dfs week serve`
 
-Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with live output, drop DraftKings' entries file at lock and the history / standings at close, and check a contest against the tiers. Claude Code runs here in the main checkout under your own login and asks you (Approve / Deny on the page) before anything that needs approval; commands that write take the run lock, so the chat, the buttons and a terminal cannot write at once. The page itself writes three things to the week's sheet: a player's Pool cell (Cash / GPP / Both / none, the sheet dropdown's cell), a decision's line in Suggested's rules box, and the suggested starting pool; each re-reads the cell first and refuses on a change, takes the run lock, is read back and is logged to data/week/edits.log. A closed week is read only. Ctrl-C stops it. `dfs week page` still writes the static file.
+Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with live output, drop DraftKings' entries file at lock and the history / standings at close, and check a contest against the tiers. Claude Code runs here in the main checkout under your own login and asks you (Approve / Deny on the page) before anything that needs approval; commands that write take the run lock, so the chat, the buttons and a terminal cannot write at once. The page itself writes three things to the week's sheet: a player's Pool cell (Cash / GPP / Both / none, the sheet dropdown's cell), a decision's line in Suggested's rules box, and the suggested starting pool; each re-reads the cell first and refuses on a change, takes the run lock, is read back and is logged to data/week/edits.log. A closed week is read only. Ctrl-C stops it. One server at a time: with one already running this opens its page instead of starting a second, and `--stop` stops it (by its pid, from data/week/serve.pid). `dfs week page` still writes the static file.
 
 | Option | What it does |
 |---|---|
@@ -63,6 +63,7 @@ Serve the Week page on this Mac only (127.0.0.1, a random token in the link it o
 | `--port INT` | Port to listen on (default: any free one). |
 | `--open` | Open the page in your browser (default: open it). Default: `True`. |
 | `--sheet-id STR` | Read and write this sheet instead of config.toml's (a test copy). The page's writes go here. |
+| `--stop` | Stop the running Week server (SIGTERM to the pid in data/week/serve.pid). |
 
 ### `dfs doctor`
 
@@ -338,6 +339,14 @@ Calibrate the expected-copies estimate on your own saved standings (Plan K item 
 |---|---|
 | `--weeks STR` | Comma-separated weeks to calibrate on (default: every week with saved standings). |
 | `--dry-run` | Print the fit and its error; save nothing. |
+
+### `dfs week review`
+
+Review a closed week from its saved standings and builds, for the Week page (Plan K, K2): what won and how the field built by contest type, with your lineups beside it; the process scorecard (spend by tier against the plan, the chalk decisions against what you played, your overrides from the nearest build and their points); your GPP exposure against the actual and the predicted ownership; and how good our numbers are (CalPts against TFFB by week, Cash % shown against the cash rate, each signal's record). Files only: `data/week/inputs/`, `data/contests/scorecard.csv` and `data/contests/cash_shown.csv`; no sheet. `dfs week close` runs it at its end.
+
+| Option | What it does |
+|---|---|
+| `--week INT` | The closed week to review (default: the contest log's newest week). |
 
 ### `dfs ownership log`
 
