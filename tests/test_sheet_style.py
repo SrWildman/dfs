@@ -153,6 +153,10 @@ def test_field_color_scales_covers_every_edgeraw_decision_column_not_salary():
         "ProjPts",
         "AggPts",
         "Own%",
+        # Plan N item 16: the ownership models carry the same warm scale
+        "GppOwn",
+        "CashOwn",
+        "OurOwn",
         "Ceiling",
         "Val",
         "ValAdj",
@@ -297,7 +301,10 @@ def test_apply_field_color_scales_excludes_zero_for_ownership_columns():
     assert scale_call[2]["min_type"] == "NUMBER"
     # Own%: low end = the lowest NON-ZERO value (a zero must not anchor it), midpoint = the 20%
     # CHALK line, high end = the real maximum
-    assert scale_call[2]["min_value"] == '=MINIFS($B$2:$B$100,$B$2:$B$100,"<>0")'
+    assert (
+        scale_call[2]["min_value"]
+        == '=MIN(FILTER(ARRAYFORMULA(IFERROR($B$2:$B$100,"")),ARRAYFORMULA(IFERROR($B$2:$B$100,""))<>0))'
+    )
     assert scale_call[2]["mid_value"] == "0.2"
     assert "max_value" not in scale_call[2]
 
@@ -661,7 +668,7 @@ def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per
     edge_header = [POOL_HEADER, *EDGE_SHEET_ORDER]
     matched = [name for name in edge_header if name in FIELD_COLOR_SCALES]
     # nothing is skipped on EdgeRaw (20 + five usage metrics + five Edge Finder + the 13 opportunity columns)
-    assert len(matched) == 30 + len(OPPORTUNITY_SCALED)
+    assert len(matched) == 33 + len(OPPORTUNITY_SCALED)  # +3: GppOwn / CashOwn / OurOwn (Plan N item 16)
 
     client = FakeEdgeClient()
     polish_edge(client, "EdgeRaw")
@@ -669,7 +676,7 @@ def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per
     # The 15 within-position/0-100 columns (8 + five usage metrics + CalPts and xFP/G) are 26 steps each;
     # the other 15 (12 + Hit3x%, Boom%, Bust%) and the 13 opportunity columns are one gradient each.
     # Either way: whole-column rules (they follow any sort or filter), no per-position row runs.
-    assert len(client.color_scale_calls) == 15 + len(OPPORTUNITY_SCALED)
+    assert len(client.color_scale_calls) == 18 + len(OPPORTUNITY_SCALED)  # +3 ownership models (Plan N)
     assert client.multi_range_color_scale_calls == []
     steps = [
         a1
@@ -683,7 +690,7 @@ def test_polish_edge_colours_every_scaled_column_with_whole_column_rules_not_per
     # diverging columns, and not Spread, where 0 is a real pick'em).
     zero_chips = [a1 for a1, k in client.boolean_rule_calls if k["condition_type"] == "NUMBER_EQ"]
     # (the 13 opportunity columns add 11: PriceGap and xFP trend are zero-centred like the diverging four)
-    assert len(zero_chips) == 30 - 5 + len(OPPORTUNITY_SCALED) - 2
+    assert len(zero_chips) == 33 - 5 + len(OPPORTUNITY_SCALED) - 2  # +3 ownership models (Plan N)
     assert len(client.boolean_rule_calls) < 520  # a handful per column, not ~1,400 in total
 
 
@@ -1863,7 +1870,7 @@ def test_apply_grouped_color_scales_keeps_the_grey_zero_chip_and_the_warm_scale_
     assert spec["a1_ranges"] == ["B3:B12", "B14:B33"]
     assert spec["mid_color"] == WARM_MID
     assert spec["mid_value"] == "0.2"  # the CHALK line, not a median
-    assert spec["min_value"].count("MINIFS(") == 2  # both blocks feed the one non-zero minimum
+    assert spec["min_value"].count("IFERROR(") == 4  # both blocks feed the one non-zero minimum
     assert {a1 for a1, _ in client.boolean_rule_calls} == {"B3:B33"}
 
 
@@ -2510,8 +2517,9 @@ def test_slate_grid_movement_scales_are_zero_centred_with_symmetric_anchors():
     assert [rng for rng, _ in movement] == ["K2:K19", "L2:L19"]
     for rng, kw in movement:
         col = rng[0]
-        assert kw["min_value"] == f"=-MAX(MAX(${col}$2:${col}$19),-MIN(${col}$2:${col}$19))"
-        assert kw["max_value"] == f"=MAX(MAX(${col}$2:${col}$19),-MIN(${col}$2:${col}$19))"
+        d = f'ARRAYFORMULA(IFERROR(${col}$2:${col}$19,""))'
+        assert kw["min_value"] == f"=-MAX(MAX({d}),-MIN({d}))"
+        assert kw["max_value"] == f"=MAX(MAX({d}),-MIN({d}))"
 
 
 def test_week_order_puts_slate_grid_before_board():

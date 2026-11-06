@@ -250,7 +250,12 @@ def read_week_close(client: SheetsClient, bankroll: BankrollConfig, week: int) -
             v = row[idx] if idx < len(row) else None
             return v if isinstance(v, (int, float)) else None
 
-        betting = compute_weekly_betting_stats([(_cell(r, 0), _cell(r, 2), _cell(r, 3)) for r in rows])
+        from dfs.sheet_bankroll_view import odds_cells_are_percent
+
+        betting = compute_weekly_betting_stats(
+            [(_cell(r, 0), _cell(r, 2), _cell(r, 3)) for r in rows],
+            percent_cells=odds_cells_are_percent(client, bankroll.tab, bankroll.bets.first_row),
+        )
     ending_rows = client.read_range_unformatted(bankroll.tab, ENDING_BANKROLL_CELL)
     ending = ending_rows[0][0] if ending_rows and ending_rows[0] else None
     return WeekClose(totals, betting, ending if isinstance(ending, (int, float)) else None)

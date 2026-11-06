@@ -397,6 +397,15 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 |---|---|
 | `--sheet-id STR` | Build on a different sheet instead of config.toml's -- template first, then live, per the two-sheet rule. This is a one-time structural build, not a per-week command. |
 
+### `dfs bankroll fix-odds`
+
+Plan N item 17: make the Betting ledger's Odds % a true percent column, so a typed 0.7% can never be read as 70% again. Converts the typed values while the column still has the old literal-"%" format (each to what it showed: 46 -> 46.0%, 0.7 -> 0.7%), then sets the PERCENT format and rewrites the Odds formulas (`sheet_bankroll_view.repair_odds_column`). Safe to re-run: a repaired column is never converted twice. Reads every changed cell back.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Fix a different sheet instead of config.toml's -- template first, then live. Never a closed week. |
+| `--dry-run` | Print what would change; write nothing. |
+
 ## Reference: season-long leagues and the Season sheet (only when needed)
 
 Your Sleeper leagues (in `season.toml`), on their own Season sheet: rest-of-season values in each league's scoring, playoff odds (survival odds in a chopped league), a trade analyzer and a trade finder. Nothing here touches DraftKings or the weekly sheet. `dfs season setup` once, then `dfs season sync`; docs/SEASON.md has the method.
@@ -816,6 +825,15 @@ Round 5 follow-up item 2 (2026-09-29): `dfs doctor` now requires a formula on ev
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Repair a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+
+### `dfs setup native-lookups`
+
+Rewrite Player Pool's and Lineups' native PlayerPoolRaw lookups (Team, DK Sal, Pts, Own%, ...) wherever a cell is not the formula the code writes today (`sheet_native_links.refresh_native_lookups`). Those formulas bake EdgeRaw's Name / NameKey letters, so an EdgeRaw column that moved leaves them stale and a player whose name needs NameKey reads #N/A (Joe Milton, Week 9). A plain `dfs sync` runs the same check. Reads back.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Fix a different sheet -- template first, then live. |
+| `--all` | Rewrite every native lookup, stale or not. |
 
 ### `dfs setup lineup-chalk`
 

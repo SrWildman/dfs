@@ -1644,3 +1644,16 @@ def test_own_pct_is_blank_not_zero_until_ownership_publishes_and_real_after():
     published_rows = [{**r, "ProjOwn": 5.0 + r["Ceiling"] / 10} for r in rows]
     published = build_edge_frame(_projections(published_rows), sal).frame
     assert published["Own%"].notna().all() and (published["Own%"] > 0).all()
+
+
+def test_edgeraw_takes_dks_spelling_for_the_same_player_plan_n_joe_milton():
+    proj = _projections(
+        [
+            {"Id": "1", "Name": "Joe Milton", "Position": "QB"},
+            {"Id": "2", "Name": "Gabe Davis", "Position": "WR"},
+        ]
+    )
+    sal = _salaries([{"ID": "1", "Name": "Joe Milton III"}, {"ID": "2", "Name": "Gabriel Davis"}])
+    frame = build_edge_frame(proj, sal).frame.set_index("Id")
+    assert frame.loc["1", "Name"] == "Joe Milton III" and frame.loc["1", "NameKey"] == "joe milton"
+    assert frame.loc["2", "Name"] == "Gabe Davis"  # a different spelling is never guessed

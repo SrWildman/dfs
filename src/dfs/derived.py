@@ -74,7 +74,7 @@ import numpy as np
 import pandas as pd
 
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP, LINE_MOVE_FLAG_THRESHOLD
-from dfs.player_join import JoinResult, join_source_to_dk, normalize_name
+from dfs.player_join import JoinResult, adopt_dk_spelling, join_source_to_dk, normalize_name
 from dfs.team_metrics import GAME_ENV_WEIGHTS, combined_by_game, weighted_mean_skipna
 from dfs.usage_metrics import USAGE_METRIC_COLUMNS
 
@@ -1434,6 +1434,12 @@ def build_edge_frame(
     # Part 7.9: "Flag" is just the single highest-priority token (empty
     # string, not NaN, when nothing fired -- consistent with "Flags").
     merged["Flag"] = flag_lists.apply(lambda flags: flags[0] if flags else "")
+    # Plan N: DK's spelling wherever it is the same player (Joe Milton III), so the sheet's exact-name lookups
+    # match what a person picks from DK's list; NameKey (suffix-free) is the same either way.
+    is_player = merged["Position"] != "DST"
+    merged.loc[is_player, "Name"] = adopt_dk_spelling(
+        merged.loc[is_player, "Name"], merged.loc[is_player, "Id"], salaries
+    )
     merged["NameKey"] = merged["Name"].map(normalize_name)
     # Round 5 item 3: within-position percentile of each player metric over the
     # rosterable pool, zeros and blanks excluded (they are neither in the

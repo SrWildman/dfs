@@ -83,6 +83,12 @@ class FakeAuditClient:
     def frozen_rows(self, tab_name: str) -> int:
         return self._frozen
 
+    def has_gradient_rule(self, tab_name: str, column_a1: str) -> bool:
+        return True
+
+    def rendered_backgrounds(self, tab_name: str, a1_range: str):
+        return []
+
     def has_chip_rule(self, tab_name: str, column_a1: str, values: list[str]) -> bool:
         name = self._header[ord(column_a1) - ord("A")] if len(column_a1) == 1 else None
         return name in self._chip_columns
@@ -317,3 +323,41 @@ def test_audited_tabs_lineups_header_row_is_derived_not_hardcoded():
 
     lineups_header_row = next(row for tab, row in AUDITED_TABS if tab == "Lineups")
     assert lineups_header_row == LINEUPS_NAME_BLOCKS[0][0] - 1
+
+
+# --- Plan N item 16: ownership colour is checked by what the sheet draws -----------------------------------
+
+from dfs.sheet_audit import ownership_colour_issues  # noqa: E402
+
+_ORANGE = {"red": 0.99, "green": 0.85, "blue": 0.66}
+
+
+class _OwnClient:
+    def __init__(self, *, rule=True, cells=None):
+        self.rule, self.cells = rule, cells or []
+
+    def has_gradient_rule(self, tab, letter):
+        return self.rule
+
+    def rendered_backgrounds(self, tab, a1):
+        return self.cells
+
+
+def test_an_ownership_column_without_a_scale_is_a_finding():
+    issues = ownership_colour_issues(_OwnClient(rule=False), "Player Pool", ["Name", "Own%"], header_row=3)
+    assert issues == ["Own% (B) has no ownership colour scale"]
+
+
+def test_a_scale_that_draws_nothing_is_a_finding_the_week_9_player_pool_case():
+    banding = {"red": 0.97, "green": 0.97, "blue": 0.98}  # the zebra rows: not the scale's colour
+    cells = [(0.31, banding), (0.12, {"red": 1, "green": 1, "blue": 1}), ("#N/A", {})]
+    issues = ownership_colour_issues(_OwnClient(cells=cells), "Player Pool", ["Name", "Own%"], header_row=3)
+    assert len(issues) == 1 and "draws no colour" in issues[0]
+
+
+def test_a_drawn_scale_and_an_unpublished_column_are_clean():
+    drawn = [(0.31, _ORANGE), (0.02, {"red": 1, "green": 1, "blue": 1})]
+    assert ownership_colour_issues(_OwnClient(cells=drawn), "EdgeRaw", ["GppOwn"], header_row=1) == []
+    unpublished = [(0, {}), (0, {})]
+    assert ownership_colour_issues(_OwnClient(cells=unpublished), "EdgeRaw", ["CashOwn"], header_row=1) == []
+    assert ownership_colour_issues(_OwnClient(rule=False), "EdgeRaw", ["Name", "Pts"], header_row=1) == []

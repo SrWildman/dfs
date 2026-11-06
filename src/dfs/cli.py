@@ -2459,6 +2459,44 @@ def sheets_doctor(
     raise typer.Exit(code=1)
 
 
+@setup_app.command("native-lookups", short_help="Rewrite Player Pool / Lineups lookups where stale.")
+def setup_native_lookups(
+    sheet_id: str = typer.Option(
+        None, "--sheet-id", help="Fix a different sheet -- template first, then live."
+    ),
+    force: bool = typer.Option(False, "--all", help="Rewrite every native lookup, stale or not."),
+) -> None:
+    """Rewrite Player Pool's and Lineups' native PlayerPoolRaw lookups (Team, DK Sal, Pts, Own%, ...)
+    wherever a cell is not the formula the code writes today (`sheet_native_links.refresh_native_lookups`).
+    Those formulas bake EdgeRaw's Name / NameKey letters, so an EdgeRaw column that moved leaves them stale
+    and a player whose name needs NameKey reads #N/A (Joe Milton, Week 9). A plain `dfs sync` runs the same
+    check. Reads back."""
+    from dfs.sheet_native_links import native_lookup_tabs, refresh_native_lookups, stale_native_cells
+
+    cfg = _load_config_or_exit()
+    if sheet_id and sheet_id == cfg.google_sheets.previous_sheet_id:
+        console.print("[red]That is last week's sheet (previous_sheet_id): a closed week is read only.[/red]")
+        raise typer.Exit(code=1)
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    try:
+        title, url = client.describe()
+        console.print(f"Native lookups on: [bold]{title}[/bold]\n{url}\n")
+        lines = refresh_native_lookups(client, cfg, only_if_stale=not force)
+        for line in lines or ["every native lookup is current: nothing to rewrite"]:
+            console.print(f"[green]OK[/green] {escape(line)}")
+        for tab, blocks, header_row in native_lookup_tabs(cfg):
+            if client.tab_exists(tab):
+                left = stale_native_cells(client, tab, blocks, header_row=header_row)
+                note = (
+                    f"[red]{len(left)} still stale[/red]" if left else "[green]read back: all current[/green]"
+                )
+                console.print(f"  {tab}: {note}")
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
 @setup_app.command("audit-style", short_help="Check that polish actually landed everywhere it should.")
 def sheets_audit_style(
     sheet_id: str = typer.Option(
@@ -2802,6 +2840,7 @@ def sync(
 
     if "edge" in source_names and not no_upload:
         _refresh_player_card(cfg, ctx, edge_width_before=edge_width_before)
+        _refresh_native_lookups(cfg)
     if not no_upload:
         _save_bankroll_health(cfg, live_client or SheetsClient(cfg.google_sheets), ctx.season, ctx.week)
 
@@ -2854,6 +2893,19 @@ def _edge_width_now(cfg: Config) -> int | None:
         )
     except Exception:  # noqa: BLE001 - only a hint for a fail-soft step
         return None
+
+
+def _refresh_native_lookups(cfg: Config) -> None:
+    """Plan N: Player Pool's and Lineups' native lookups bake EdgeRaw's Name / NameKey letters; after an edge
+    sync, rewrite any a moved EdgeRaw column left stale (`sheet_native_links.refresh_native_lookups`). Silent
+    when every cell is current; never fails the sync."""
+    try:
+        from dfs.sheet_native_links import refresh_native_lookups
+
+        for line in refresh_native_lookups(SheetsClient(cfg.google_sheets), cfg):
+            console.print(f"[green]OK[/green] {escape(line)}")
+    except Exception as e:  # noqa: BLE001 - never fails the sync
+        console.print(f"[yellow]Native lookups not checked: {escape(str(e))}[/yellow]")
 
 
 def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: int | None = None) -> None:
@@ -6206,6 +6258,56 @@ def bankroll_build_betting_ledger(
         f"{BLOCK_ROWS} rows -- update config.toml's [bankroll.cash]/[bankroll.gpp] row numbers "
         f"to match (old value + {BLOCK_ROWS}), then run `dfs doctor`."
     )
+
+
+@bankroll_app.command("fix-odds")
+def bankroll_fix_odds(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Fix a different sheet instead of config.toml's -- template first, then live. "
+        "Never a closed week.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would change; write nothing."),
+) -> None:
+    """Plan N item 17: make the Betting ledger's Odds % a true percent column, so a typed 0.7% can never be
+    read as 70% again. Converts the typed values while the column still has the old literal-"%" format
+    (each to what it showed: 46 -> 46.0%, 0.7 -> 0.7%), then sets the PERCENT format and rewrites the Odds
+    formulas (`sheet_bankroll_view.repair_odds_column`). Safe to re-run: a repaired column is never
+    converted twice. Reads every changed cell back."""
+    from dfs.sheet_bankroll_view import plan_odds_repair, repair_odds_column
+
+    cfg = _load_config_or_exit()
+    bets = cfg.bankroll.bets
+    if bets is None:
+        console.print("[red]config.toml is missing [bankroll.bets][/red]: nothing to fix.")
+        raise typer.Exit(code=1)
+    target = sheet_id or cfg.google_sheets.sheet_id
+    if cfg.google_sheets.previous_sheet_id and target == cfg.google_sheets.previous_sheet_id:
+        console.print("[red]That is last week's sheet (previous_sheet_id): a closed week is read only.[/red]")
+        raise typer.Exit(code=1)
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    tab = cfg.bankroll.tab
+    try:
+        title, url = client.describe()
+        console.print(
+            f"{'Checking' if dry_run else 'Fixing'} the Odds % column on: [bold]{title}[/bold]\n{url}\n"
+        )
+        plan = (plan_odds_repair if dry_run else repair_odds_column)(
+            client, tab, bets.first_row, bets.last_row
+        )
+        for line in plan.lines(tab):
+            console.print(f"{'would' if dry_run else '[green]OK[/green]'} {escape(line)}")
+        if dry_run:
+            return
+        shown = client.read_range(tab, f"A{bets.first_row}:C{bets.last_row}")
+        for i, row in enumerate(shown):
+            if row and any(str(x).strip() for x in row):
+                console.print(f"  row {bets.first_row + i}: " + " | ".join(str(x) for x in row))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
 
 
 @bankroll_app.command("stakes")

@@ -11,6 +11,7 @@ import re
 import pytest
 
 from dfs.sheet_bankroll_view import (
+    ODDS_TYPE_HINT,
     compute_weekly_betting_stats,
     entered_formula,
     net_formula,
@@ -20,14 +21,15 @@ from dfs.sheet_bankroll_view import (
 )
 
 
-def _odds_value(odds_pct) -> str | float:
-    """A pure-Python re-implementation of `odds_formula`'s own logic, used
-    only to check the GENERATED FORMULA TEXT encodes the right arithmetic --
-    not a substitute for reading the real resolved value back from the
-    sheet."""
-    if odds_pct == "":
+def _odds_value(stored) -> str | float:
+    """A pure-Python model of `odds_formula`'s logic on the STORED cell value (a true percent cell holds
+    the probability: "53.3%" is stored as 0.533), used to check the generated formula's arithmetic. The
+    real resolved values are read back from the sheet (CONTRIBUTING.md's changelog row for item 17)."""
+    if stored == "":
         return ""
-    p = odds_pct / 100 if odds_pct > 1 else odds_pct
+    if not isinstance(stored, int | float) or not 0 < stored < 1:
+        return ODDS_TYPE_HINT
+    p = stored
     if p > 0.5:
         return -round(100 * p / (1 - p))
     if p < 0.5:
@@ -36,30 +38,40 @@ def _odds_value(odds_pct) -> str | float:
 
 
 def test_odds_formula_worked_examples():
-    # Spec's five worked examples: 53.3% -> -114, 50% -> +100, 40% -> +150,
-    # 75% -> -300, 20% -> +400.
-    assert _odds_value(53.3) == -114
-    assert _odds_value(50) == 100
-    assert _odds_value(40) == 150
-    assert _odds_value(75) == -300
-    assert _odds_value(20) == 400
-    # And the fractional-input form (0.533 etc.) reads the same.
+    # The spec's five worked examples, typed as percents (stored as fractions).
     assert _odds_value(0.533) == -114
+    assert _odds_value(0.50) == 100
     assert _odds_value(0.40) == 150
+    assert _odds_value(0.75) == -300
+    assert _odds_value(0.20) == 400
+
+
+def test_odds_formula_reads_a_small_percent_as_a_long_shot():
+    """Week 9's "4 Pick TNF combo": 0.7% is +14,186, never -233 (0.7 read as 70%)."""
+    assert _odds_value(0.007) == 14186
+    assert _odds_value(0.7) == -233  # 70% really is -233: the cell, not the formula, was ambiguous
+
+
+def test_odds_formula_never_guesses_a_bare_number():
+    assert _odds_value(53.3) == ODDS_TYPE_HINT
+    assert _odds_value(1) == ODDS_TYPE_HINT
+    assert _odds_value(0) == ODDS_TYPE_HINT
+    assert _odds_value("53%") == ODDS_TYPE_HINT
 
 
 def test_odds_formula_text_references_own_row_and_column_b():
     f = odds_formula(20)
     assert f.startswith('=IF($B20="","",')
-    assert "$B20" in f
-    assert f.count("$B20") >= 3  # the blank-check, the >1 check, and the LET binding
+    assert f.count("$B20") >= 4  # the blank check, ISNUMBER, the two bounds, the LET binding
+    assert "/100" not in f  # nothing is rescaled: the cell is a true percent
 
 
-def test_odds_formula_blank_when_odds_pct_blank():
+def test_odds_formula_text_is_pinned():
     f = odds_formula(17)
     assert f == (
-        '=IF($B17="","",LET(p,IF($B17>1,$B17/100,$B17),'
-        "IF(p>0.5,-ROUND(100*p/(1-p),0),IF(p<0.5,ROUND(100*(1-p)/p,0),100))))"
+        '=IF($B17="","",IF(AND(ISNUMBER($B17),$B17>0,$B17<1),LET(p,$B17,'
+        "IF(p>0.5,-ROUND(100*p/(1-p),0),IF(p<0.5,ROUND(100*(1-p)/p,0),100))),"
+        f'"{ODDS_TYPE_HINT}"))'
     )
 
 

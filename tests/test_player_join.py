@@ -372,3 +372,21 @@ def test_a_duplicated_source_row_does_not_fan_the_join_out():
 
     assert result.pool_matched == 2 and len(result.matched) == 2
     assert result.matched.set_index("Id").loc["1", "proj"] == 24.5
+
+
+# --- Plan N: DK's spelling, matched by Id ------------------------------------------------------------------
+
+
+def test_adopt_dk_spelling_takes_dks_suffix_by_id_and_never_guesses():
+    import pandas as pd
+
+    from dfs.player_join import adopt_dk_spelling
+
+    salaries = pd.DataFrame(
+        {"ID": [1, 2, 3, 4], "Name": ["Joe Milton III", "Oronde Gadsden II", "Gabriel Davis", "Josh Allen"]}
+    )
+    names = pd.Series(["Joe Milton", "Oronde Gadsden", "Gabe Davis", "Josh Allen", "Nobody"])
+    ids = pd.Series([1, 2, 3, 4, 99])
+    out = adopt_dk_spelling(names, ids, salaries)
+    assert list(out) == ["Joe Milton III", "Oronde Gadsden II", "Gabe Davis", "Josh Allen", "Nobody"]
+    assert list(adopt_dk_spelling(names, ids, None)) == list(names)

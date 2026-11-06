@@ -257,10 +257,51 @@ def audit_tab(client: SheetsClient, tab: str, *, header_row: int) -> TabAudit:
         if not client.has_chip_rule(tab, letter, list(AVAIL_CHIPS)):
             audit.issues.append(f"Avail column ({letter}) has no matching chip rule")
 
+    audit.issues.extend(ownership_colour_issues(client, tab, header, header_row=header_row))
+
     for finding in audit_clipping(client, tab, header_row=header_row):
         audit.issues.append(f"cells cut off (wider than the column, cannot overflow): {finding}")
 
     return audit
+
+
+# Plan N item 16: the ownership columns that must carry a colour, on every audited tab that has them. Week 9's
+# Player Pool Own% had its rule but drew nothing (one #N/A broke the anchor formula), so the check reads what
+# the sheet RENDERS, not only that a rule exists.
+OWNERSHIP_COLOURED = ("Own%", "GppOwn", "CashOwn", "OurOwn")
+OWNERSHIP_SAMPLE_ROWS = 300
+
+
+def _is_warm(bg: dict) -> bool:
+    """Drawn by the ownership scale: orange has clearly more red than blue. Banding's pale grey-blue
+    (0.97 / 0.97 / 0.98) and white are not, so a scale that draws nothing cannot pass behind the banding."""
+    return bg.get("red", 1) - bg.get("blue", 1) > 0.04
+
+
+def ownership_colour_issues(client, tab: str, header: list, *, header_row: int) -> list[str]:
+    """For each `OWNERSHIP_COLOURED` column in `header`: it has a gradient rule, and when the column holds a
+    clearly owned player (the highest value is above zero), at least one cell is drawn in a colour."""
+    issues = []
+    for name in OWNERSHIP_COLOURED:
+        if name not in header:
+            continue
+        letter = column_letter(header.index(name))
+        if not client.has_gradient_rule(tab, letter):
+            issues.append(f"{name} ({letter}) has no ownership colour scale")
+            continue
+        first = header_row + 1
+        cells = client.rendered_backgrounds(
+            tab, f"{letter}{first}:{letter}{first + OWNERSHIP_SAMPLE_ROWS - 1}"
+        )
+        numbers = [(v, bg) for v, bg in cells if isinstance(v, int | float) and not isinstance(v, bool)]
+        if not numbers or max(v for v, _ in numbers) <= 0:
+            continue  # nothing owned yet (before ownership publishes): nothing to draw
+        if not any(_is_warm(bg) for v, bg in numbers if v > 0):
+            issues.append(
+                f"{name} ({letter}) has a colour scale but draws no colour "
+                "(its anchor formula likely errors, e.g. on a #N/A cell)"
+            )
+    return issues
 
 
 def audit_clipping_only(client: SheetsClient, tab: str) -> TabAudit:

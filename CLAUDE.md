@@ -290,10 +290,17 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `LINEUPS_NAME_BLOCKS` expects, DK Upload's entries layout with its
   Lineup dropdown, typed-cell cue and protection exemption, and the hand-built per-row formula ranges on
   Results, Season, DkSalClean and PlayerPoolRaw have a formula on every row).
+  Player Pool's and Lineups' native lookups are the current formula (`native-lookup-stale`: a baked EdgeRaw
+  Name / NameKey letter an EdgeRaw column moved under; `dfs setup native-lookups` rewrites them, and a plain
+  `dfs sync` does too).
   Run this after any structural change, against both sheets. Never writes
   anything. `dfs setup repair-formula-ranges [--sheet-id <id>]` rewrites the
   gaps it reports; it also expects Results/Bankroll/Season divisions to carry their
   empty-state guard (`dfs setup guard-empty-states [--sheet-id <id>]` restores them).
+- `dfs bankroll fix-odds [--sheet-id <id>] [--dry-run]` -- the Betting ledger's Odds % is a true percent column
+  (type 46%; a stored 0.007 is 0.7% and reads +14,186): converts the old literal-"%" values once (each to what it
+  showed), then the format and the Odds formulas; never twice. A cell that is not a probability shows "type it as
+  46%". Template first, then live; a closed week keeps its old reading (`odds_cells_are_percent`).
 - `dfs setup sheet --sheet-id <id>` -- the full one-time sheet build (pool
   deck, Player Pool's add-a-player control row, view tabs, EdgeRaw linking,
   filters, protection, styling), in the one order that works; its own docstring

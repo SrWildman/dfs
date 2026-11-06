@@ -1144,6 +1144,31 @@ def _check_pool_cells_hold_the_formula(
 _POOL_MATCH = re.compile(r"MATCH\(\$[A-Z]+\d+,[^,]*!\$([A-Z]+):\$([A-Z]+),0\)")
 
 
+def _check_native_lookups_current(
+    client: DoctorClient, cfg: Config, tab_titles: set[str]
+) -> list[DoctorIssue]:
+    """Plan N: Player Pool's and Lineups' native lookups bake EdgeRaw's Name / NameKey letters; when an
+    EdgeRaw column moves, the baked letter goes stale and a player whose typed name needs NameKey reads
+    #N/A (Joe Milton, Week 9). Every native cell must be the formula the code writes today."""
+    from dfs.sheet_native_links import native_lookup_tabs, stale_native_cells
+
+    issues = []
+    for tab, blocks, header_row in native_lookup_tabs(cfg):
+        if tab not in tab_titles:
+            continue
+        stale = stale_native_cells(client, tab, blocks, header_row=header_row)
+        if stale:
+            issues.append(
+                DoctorIssue(
+                    "native-lookup-stale",
+                    f"{tab!r}: {len(stale)} native lookup cell(s) are not the current formula (first at "
+                    f"{stale[0]}): an EdgeRaw column moved under a baked Name / NameKey letter. "
+                    "`dfs setup native-lookups` rewrites them (a plain `dfs sync` does too).",
+                )
+            )
+    return issues
+
+
 def _stale_id_letter(formula: str) -> bool:
     """True when a Pool cell's formula finds the player on EdgeRaw by an `Id` column that is no longer where
     EdgeRaw's `Id` is (`derived.edge_sheet_letter("Id")`): the letter is baked into the formula when it is
@@ -1225,5 +1250,6 @@ def run_doctor(
     issues += _check_empty_guards(client, cfg, tab_titles)
     issues += _check_pct_helpers(client, cfg, tab_titles, headers_by_tab)
     issues += _check_pool_cells_hold_the_formula(client, cfg, tab_titles, headers_by_tab)
+    issues += _check_native_lookups_current(client, cfg, tab_titles)
     issues += _check_column_visibility(client, cfg, tab_titles, headers_by_tab)
     return issues

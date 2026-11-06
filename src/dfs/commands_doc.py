@@ -137,6 +137,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs auth fantasypros",
             "dfs bankroll backfill-keys",
             "dfs bankroll build-betting-ledger",
+            "dfs bankroll fix-odds",
         ],
     ),
     (
@@ -221,6 +222,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         "you should not need them. `CONTRIBUTING.md`'s structural changelog says when each ran.",
         [
             "dfs setup repair-formula-ranges",
+            "dfs setup native-lookups",
             "dfs setup lineup-chalk",
             "dfs setup guard-empty-states",
             "dfs setup other-sports",
