@@ -8,12 +8,12 @@ cell to its right). The Week page reads no sheet, so the commands that already t
 them as an input (`save`, fail-soft): `dfs sync`, `dfs contests plan`, `dfs bankroll stakes` and `dfs week
 close`.
 
-**The stake guide.** No new rule: the two rules `[stakes]` holds (`max_pct_bankroll_per_week`,
-`max_entry_fee_pct`); when Sam has not set them, `stakes.propose`'s values, labelled "proposed" (they come
-from his own weekly volatility and the proposal's stated assumptions). The guide a week is that percentage of
-the Starting Bankroll, split by tier the way the contest plan splits a budget (`contest_tiers.plan_dollars`).
-When the Weekly Budget is above the guide the payload carries one plain sentence saying so (`over`), shown
-once.
+**The stake guide.** No new rule. When `[stakes]` holds Sam's own rules (`max_pct_bankroll_per_week`,
+`max_entry_fee_pct`), the guide a week is that percentage of the Starting Bankroll ("your rules"), and when
+the Weekly Budget is above it the payload carries one plain sentence saying so (`over`), shown once. Without
+them the guide IS the Weekly Budget on the Bankroll tab (Sam, 2026-11-06: "We have the weekly budget on the
+bankroll tab, we should use that"), shown with its share of the bankroll; `stakes.propose` is not used here.
+Either way it is split by tier the way the contest plan splits a budget (`contest_tiers.plan_dollars`).
 
 `payload` is pure; `read_sheet` and `save` are the only I/O.
 """
@@ -120,38 +120,45 @@ def block_values(grid: list[list[Any]]) -> dict[str, float]:
 
 @dataclass(frozen=True)
 class Guide:
-    source: str  # "your rules" | "proposed" | "none"
+    source: str  # "your rules" | "Weekly Budget" | "none"
     pct_week: float | None  # percent of the bankroll a week
     pct_entry: float | None
     week: float | None  # dollars a week
     entry: float | None
     tiers: dict[str, float] | None  # A / B / C dollars of `week`
-    lines: list[str]  # the arithmetic (proposal) or where the rule came from
+    lines: list[str]  # where the guide came from
 
 
-def stake_guide(cfg: stakes.StakesConfig, typed, bankroll: float | None) -> Guide:  # noqa: ANN001
-    """The guide from Sam's `[stakes]` rules, else `stakes.propose`'s values (labelled proposed)."""
-    if cfg.max_pct_bankroll_per_week is not None:
-        source, pct_week, pct_entry = "your rules", cfg.max_pct_bankroll_per_week, cfg.max_entry_fee_pct
-        lines = ["From [stakes] in config.toml."]
-    else:
-        proposal = stakes.propose(typed, bankroll)
-        if proposal.max_pct_bankroll_per_week is None:
-            return Guide("none", None, None, None, None, None, proposal.lines)
-        source, pct_week, pct_entry = (
-            "proposed",
-            proposal.max_pct_bankroll_per_week,
-            proposal.max_entry_fee_pct,
-        )
-        lines = proposal.lines
+RULES, BUDGET, NONE = "your rules", "Weekly Budget", "none"
+
+
+def stake_guide(cfg: stakes.StakesConfig, bankroll: float | None, budget: float | None) -> Guide:
+    """The guide from Sam's `[stakes]` rules when set, else his Weekly Budget on the Bankroll tab."""
     has = bankroll is not None and bankroll > 0
-    week = round(bankroll * pct_week / 100, 2) if has else None
+    if cfg.max_pct_bankroll_per_week is not None:
+        source, pct_week, pct_entry = RULES, cfg.max_pct_bankroll_per_week, cfg.max_entry_fee_pct
+        week = round(bankroll * pct_week / 100, 2) if has else None
+        lines = [f"[stakes] in config.toml: at most {pct_week:g}% of the Starting Bankroll a week."]
+    elif budget is not None:
+        source, pct_entry, week = BUDGET, cfg.max_entry_fee_pct, round(budget, 2)
+        pct_week = round(budget / bankroll * 100, 1) if has else None
+        lines = ["The Weekly Budget on the Bankroll tab, split by tier the way the contest plan splits it."]
+    else:
+        return Guide(
+            NONE,
+            None,
+            None,
+            None,
+            None,
+            None,
+            ["No Weekly Budget on the Bankroll tab, and no [stakes] rules."],
+        )
     entry = round(bankroll * pct_entry / 100, 2) if has and pct_entry is not None else None
     tiers = None
     if week is not None:
         plan = contest_tiers.plan_dollars(week)
         tiers = {t: plan.dollars(t) for t in (contest_tiers.A, contest_tiers.B, contest_tiers.C)}
-    return Guide(source, pct_week, pct_entry, week, entry, tiers, list(lines))
+    return Guide(source, pct_week, pct_entry, week, entry, tiers, lines)
 
 
 def curve(rows: list[dict]) -> list[dict]:
@@ -190,27 +197,24 @@ def money(value: float | None) -> str:
 
 
 def over_sentence(budget: float | None, bankroll: float | None, guide: Guide) -> str:
-    """One plain sentence when the Weekly Budget is above the guide ("" when it is not, or either is
-    unknown)."""
-    if budget is None or guide.week is None or budget <= guide.week + 1e-9:
+    """One plain sentence when the Weekly Budget is above Sam's own `[stakes]` rule ("" when it is not, when
+    either is unknown, or when the guide is the Weekly Budget itself)."""
+    if guide.source != RULES or budget is None or guide.week is None or budget <= guide.week + 1e-9:
         return ""
     times = budget / guide.week if guide.week > 0 else None
-    label = "the proposed" if guide.source == "proposed" else "your"
     return (
         f"Your Weekly Budget {money(budget)} is above what a {money(bankroll)} bankroll supports under "
-        f"{label} {guide.pct_week:g}%-a-week rule ({money(guide.week)})"
+        f"your {guide.pct_week:g}%-a-week rule ({money(guide.week)})"
         + (f": {times:.0f} times the guide." if times and times >= 2 else ".")
     )
 
 
-def payload(
-    rows: list[dict], block: dict[str, float], cfg: stakes.StakesConfig, typed, *, sheet: str = ""
-) -> dict:  # noqa: ANN001
+def payload(rows: list[dict], block: dict[str, float], cfg: stakes.StakesConfig, *, sheet: str = "") -> dict:
     """What the Week page shows (pure): the curve, the bankroll block, the guide and the over sentence."""
     bankroll = block.get("Starting Bankroll")
     budget = block.get("Weekly Budget")
     cost = block.get("Weekly Cost")
-    guide = stake_guide(cfg, typed, bankroll)
+    guide = stake_guide(cfg, bankroll, budget)
     return {
         "sheet": sheet,
         "curve": curve(rows),
@@ -252,11 +256,10 @@ def save(client, cfg, *, season: int, week: int) -> bool:  # noqa: ANN001
     not."""
     try:
         from dfs import week_inputs
-        from dfs.sheet_stakes import load_typed
 
         rows, block = read_sheet(client, cfg)
         title, _ = client.describe()
-        body = payload(rows, block, cfg.stakes, load_typed(), sheet=title)
+        body = payload(rows, block, cfg.stakes, sheet=title)
         return week_inputs.save_input("bankroll", body, season=season, week=week)
     except Exception:  # noqa: BLE001 - a command never fails over the page
         return False

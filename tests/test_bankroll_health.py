@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pandas as pd
-
 from dfs import bankroll_health as bh
 from dfs.config import StakesConfig
 
@@ -48,36 +46,43 @@ def test_block_values_are_read_by_label():
     }
 
 
-def test_your_rules_win_over_the_proposal_and_split_by_tier():
-    guide = bh.stake_guide(StakesConfig(max_pct_bankroll_per_week=10, max_entry_fee_pct=2), None, 200.0)
+def test_your_rules_win_over_the_weekly_budget_and_split_by_tier():
+    guide = bh.stake_guide(StakesConfig(max_pct_bankroll_per_week=10, max_entry_fee_pct=2), 200.0, 80.0)
     assert guide.source == "your rules"
     assert guide.week == 20.0 and guide.entry == 4.0
     assert abs(sum(guide.tiers.values()) - 20.0) < 0.05
+    assert bh.over_sentence(80.0, 200.0, guide) == (
+        "Your Weekly Budget $80.00 is above what a $200.00 bankroll supports under your 10%-a-week rule "
+        "($20.00): 4 times the guide."
+    )
 
 
-def test_without_rules_the_guide_is_proposed_and_labelled_so(monkeypatch):
+def test_without_rules_the_guide_is_the_weekly_budget_and_never_over():
+    out = bh.payload(bh.season_rows(GRID), bh.block_values(BLOCK), StakesConfig())
+    g = out["guide"]
+    assert g["source"] == "Weekly Budget"
+    assert g["week"] == 50.0
+    assert g["pct_week"] == round(50 / 175 * 100, 1)
+    assert abs(sum(g["tiers"].values()) - 50.0) < 0.05
+    assert out["over"] == "" and out["budget_left"] == 38.0
+
+
+def test_the_proposal_is_never_used_for_the_guide(monkeypatch):
     from dfs import stakes
 
-    class Proposal:
-        max_pct_bankroll_per_week = 5.0
-        max_entry_fee_pct = 1.0
-        lines = ["arithmetic"]
+    def boom(*a, **k):
+        raise AssertionError("stakes.propose must not be called")
 
-    monkeypatch.setattr(stakes, "propose", lambda typed, bankroll: Proposal())
-    out = bh.payload(bh.season_rows(GRID), bh.block_values(BLOCK), StakesConfig(), pd.DataFrame())
-    assert out["guide"]["source"] == "proposed"
-    assert out["guide"]["week"] == 8.75
-    assert out["budget_left"] == 38.0
-    assert out["over"].startswith("Your Weekly Budget $50.00 is above what a $175.00 bankroll supports")
-    assert "proposed 5%-a-week rule" in out["over"] and "6 times the guide" in out["over"]
+    monkeypatch.setattr(stakes, "propose", boom)
+    assert bh.stake_guide(StakesConfig(), 175.0, 50.0).source == "Weekly Budget"
 
 
-def test_no_over_sentence_within_the_guide_or_when_unknown():
-    guide = bh.stake_guide(StakesConfig(max_pct_bankroll_per_week=50), None, 200.0)
-    assert bh.over_sentence(50.0, 200.0, guide) == ""
-    assert bh.over_sentence(None, 200.0, guide) == ""
-    nothing = bh.stake_guide(StakesConfig(max_pct_bankroll_per_week=5), None, None)
-    assert nothing.week is None and bh.over_sentence(50.0, None, nothing) == ""
+def test_no_budget_and_no_rules_means_no_guide():
+    guide = bh.stake_guide(StakesConfig(), 175.0, None)
+    assert guide.source == "none" and guide.week is None
+    assert bh.over_sentence(None, 175.0, guide) == ""
+    within = bh.stake_guide(StakesConfig(max_pct_bankroll_per_week=50), 200.0, 50.0)
+    assert bh.over_sentence(50.0, 200.0, within) == ""
 
 
 def test_an_empty_sheet_reads_as_nothing():

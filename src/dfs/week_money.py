@@ -25,17 +25,15 @@ from dfs.week_page import (
     not_run,
     note,
     pct,
-    rich,
     table,
 )
 
 TRUST: dict[str, tuple[str, str]] = {
     "bankroll": (DATA, "Your own Season and Bankroll tabs: what happened, not a prediction."),
     "stake_guide": (
-        UNTESTED,
-        "Arithmetic on your own weekly volatility with the proposal's stated assumptions (2 standard "
-        "deviations, "
-        "10% of the bankroll, 5 entries): a rule of thumb, not a finding.",
+        DATA,
+        "Your own Weekly Budget (or your [stakes] rules when set), split by tier the way the contest plan "
+        "splits it: arithmetic on your settings, not a model.",
     ),
     "inactives": (DATA, "Injury statuses from the last sync and kickoff times: a feed, not a model."),
     "pivots_cash": (PROVEN, "Cash pivots are ranked by CalPts, which beat TFFB's projection in Model Check."),
@@ -205,50 +203,52 @@ def bankroll_section(inp: WeekInputs) -> Section:
     body.append("<p>" + " &middot; ".join(head) + ".</p>")
     if b.get("over"):
         body.append(f'<p class="flag bad"><b>{e(b["over"])}</b></p>')
-    label = (
-        "proposed"
-        if g.get("source") == "proposed"
-        else ("your rules" if g.get("source") == "your rules" else "")
-    )
+    source = g.get("source")
+    label = {"your rules": "your [stakes] rules", "Weekly Budget": "your Weekly Budget"}.get(source, "")
     body.append(f"<h4>Stake guide ({e(label)}) {chip('stake_guide')}</h4>")
     if g.get("week") is None:
-        body.append(note(" ".join(g.get("lines") or ["No guide: the bankroll or the history is missing."])))
+        body.append(
+            note(" ".join(g.get("lines") or ["No guide: the Weekly Budget is not on the Bankroll tab."]))
+        )
     else:
         from dfs import contest_tiers as ct
 
         budget = b.get("budget")
-        plan = ct.plan_dollars(budget) if budget else None
-        rows = []
-        for tier in (ct.A, ct.B, ct.C):
-            guide = (g.get("tiers") or {}).get(tier)
-            mine = plan.dollars(tier) if plan else None
-            over = mine is not None and guide is not None and mine > guide + 1e-9
+        share = f" ({g['pct_week']:g}% of the bankroll)" if g.get("pct_week") is not None else ""
+        if source == "your rules":
+            plan = ct.plan_dollars(budget) if budget else None
+            rows = []
+            for tier in (ct.A, ct.B, ct.C):
+                guide = (g.get("tiers") or {}).get(tier)
+                mine = plan.dollars(tier) if plan else None
+                over = mine is not None and guide is not None and mine > guide + 1e-9
+                rows.append(
+                    [
+                        f"<b>Tier {e(tier)}</b>",
+                        e(cents(guide)) if guide is not None else "-",
+                        (
+                            f'<span class="{"bad" if over else ""}">{e(cents(mine))}</span>'
+                            if mine is not None
+                            else "-"
+                        ),
+                    ]
+                )
             rows.append(
                 [
-                    f"<b>Tier {e(tier)}</b>",
-                    e(cents(guide)) if guide is not None else "-",
-                    (
-                        f'<span class="{"bad" if over else ""}">{e(cents(mine))}</span>'
-                        if mine is not None
-                        else "-"
-                    ),
+                    "<b>The week</b>",
+                    f"<b>{e(cents(g['week']))}</b>{e(share)}",
+                    f"<b>{e(cents(budget))}</b>" if budget is not None else "-",
                 ]
             )
-        rows.append(
-            [
-                "<b>The week</b>",
-                f"<b>{e(cents(g['week']))}</b> ({g['pct_week']:g}% of the bankroll)",
-                f"<b>{e(cents(budget))}</b>" if budget is not None else "-",
-            ]
-        )
+            heads = ["", "Your rules allow", "Your Weekly Budget's plan"]
+        else:
+            rows = [[f"<b>Tier {e(t)}</b>", e(cents(v))] for t, v in (g.get("tiers") or {}).items()]
+            rows.append(["<b>The week</b>", f"<b>{e(cents(g['week']))}</b>{e(share)}"])
+            heads = ["", "Your Weekly Budget, by tier"]
         if g.get("entry") is not None:
-            rows.append(["Largest entry", f"{e(cents(g['entry']))} ({g['pct_entry']:g}%)", ""])
-        body.append(table(["", "What the bankroll supports", "Your Weekly Budget's plan"], rows))
-        body.append(
-            "<details><summary>How the guide is worked out</summary>"
-            + bullets([rich(x) for x in g.get("lines") or []])
-            + "</details>"
-        )
+            rows.append(["Largest entry", f"{e(cents(g['entry']))} ({g['pct_entry']:g}% of the bankroll)"])
+        body.append(table(heads, rows))
+        body.append(note(" ".join(g.get("lines") or [])))
     curve = b.get("curve") or []
     if curve:
         body.append("<h4>The bankroll by week</h4>")
@@ -310,8 +310,11 @@ def bankroll_line(inp: WeekInputs) -> tuple[str, bool]:
     if not b:
         return "not run yet", False
     text = f"Bankroll {cents(b['bankroll'])}" if b.get("bankroll") is not None else "Bankroll not read"
-    if b.get("budget") is not None and g.get("week") is not None:
-        text += f"; Weekly Budget {cents(b['budget'])} vs guide {cents(g['week'])}"
+    if b.get("budget") is not None and g.get("source") == "your rules" and g.get("week") is not None:
+        text += f"; Weekly Budget {cents(b['budget'])} vs your rules {cents(g['week'])}"
+    elif b.get("budget") is not None:
+        share = f" ({g['pct_week']:g}% of it)" if g.get("pct_week") is not None else ""
+        text += f"; Weekly Budget {cents(b['budget'])}{share}"
     return text, bool(b.get("over"))
 
 

@@ -2055,10 +2055,12 @@ Read from the sheet by header and label, never by position: the Season tab's `We
 - **The curve**: per week, `NFL DFS = Cash Net + GPP Net`, `Betting`, `Other sports`, `Total = their sum`, each cumulative
   from Week 1. A week with no net and no Ending Bankroll is left out.
 - **Spend share**: `(Cash + GPP + Betting + Other Risked) / the previous week's Ending Bankroll` (blank for the first week).
-- **Stake guide**: `week = pct_week% x Starting Bankroll`, `largest entry = pct_entry% x Starting Bankroll`, with `pct_*` from
-  `[stakes]` when set ("your rules"), else from `stakes.propose` ("proposed", the same arithmetic `dfs bankroll stakes
-  --propose` prints). The week splits by tier with `contest_tiers.plan_dollars` (about 60 / 30 / at most 10%). No new rule.
-- **Over the guide**: one sentence when the Weekly Budget is above `week`, with the multiple when it is 2x or more.
+- **Stake guide**: with `[stakes]` rules set ("your rules"), `week = max_pct_bankroll_per_week% x Starting Bankroll` and
+  **over the guide** is one sentence when the Weekly Budget is above it (with the multiple when it is 2x or more).
+  Without them (Sam, 2026-11-06) the guide is the **Weekly Budget** on the Bankroll tab itself, shown with
+  `Weekly Budget / Starting Bankroll` as a percent; there is then no over sentence and `stakes.propose` is not used.
+  `largest entry = max_entry_fee_pct% x Starting Bankroll` when that rule is set. The week splits by tier with
+  `contest_tiers.plan_dollars` (about 60 / 30 / at most 10%). No new rule.
 - **Budget left this week**: `Weekly Budget - Weekly Cost`; the season's `% Budget Remaining` is shown beside it.
 
 ## Sunday inactives and pivots (`inactives.py`; Week page and Cockpit block 8; Plan K item 2)

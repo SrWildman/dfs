@@ -239,8 +239,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   (`data/week/serve.log`) never holds prompts. Ctrl-C stops it.
 - **Plan K on the Week page** (`week_money.py`, sections placed by day in `week_page.DAY_ORDER`, each with a trust chip):
   **bankroll health** (`bankroll_health.py`: the Season tab's curve by week, NFL DFS / betting / other / total, found by
-  header; spend as a share of the bankroll; a stake guide by tier from `[stakes]`, else `stakes.propose` labelled
-  "proposed", beside the Weekly Budget; one "over the guide" sentence; input `bankroll`, saved fail-soft by `dfs sync`,
+  header; spend as a share of the bankroll; a stake guide by tier: `[stakes]` rules when set (with one "over the
+  guide" sentence), else the Bankroll tab's Weekly Budget itself (Sam, 2026-11-06; `stakes.propose` is not used); input `bankroll`, saved fail-soft by `dfs sync`,
   `contests plan`, `bankroll stakes` and `week close`), the **Sunday inactives check** (`inactives.py`: every OUT / D / Q
   player, game not started, in `data/entered`, else the Lineups tab as the last Cockpit refresh saved it (`sheet_lineups`,
   only from config's live sheet); three pivots: fits the slot, salary <= freed + left, not started, CalPts for cash /
