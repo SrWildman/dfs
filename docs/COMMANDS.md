@@ -397,6 +397,15 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 |---|---|
 | `--sheet-id STR` | Build on a different sheet instead of config.toml's -- template first, then live, per the two-sheet rule. This is a one-time structural build, not a per-week command. |
 
+### `dfs bankroll fix-odds`
+
+Plan N item 17: make the Betting ledger's Odds % a true percent column, so a typed 0.7% can never be read as 70% again. Converts the typed values while the column still has the old literal-"%" format (each to what it showed: 46 -> 46.0%, 0.7 -> 0.7%), then sets the PERCENT format and rewrites the Odds formulas (`sheet_bankroll_view.repair_odds_column`). Safe to re-run: a repaired column is never converted twice. Reads every changed cell back.
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Fix a different sheet instead of config.toml's -- template first, then live. Never a closed week. |
+| `--dry-run` | Print what would change; write nothing. |
+
 ## Reference: season-long leagues and the Season sheet (only when needed)
 
 Your Sleeper leagues (in `season.toml`), on their own Season sheet: rest-of-season values in each league's scoring, playoff odds (survival odds in a chopped league), a trade analyzer and a trade finder. Nothing here touches DraftKings or the weekly sheet. `dfs season setup` once, then `dfs season sync`; docs/SEASON.md has the method.

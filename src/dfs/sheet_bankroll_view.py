@@ -112,14 +112,15 @@ _RESET_FMT = {
     "backgroundColor": _WHITE,
     "textFormat": {"bold": False, "foregroundColor": _BLACK},
 }
-# A literal "%" suffix, NOT a true PERCENT-type format -- Sheets' percent
-# format auto-divides typed input by 100 (so "0.533" would become 0.533%,
-# not 53.3%), which would break two of the three accepted input styles
-# ("53.3" and "0.533" -- see `odds_formula`'s own docstring). Quoting the
-# `%` makes it a literal character with no math attached, so the stored
-# value (and every formula that reads it) is unaffected by this format.
-_ODDS_PCT_NUMBER_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": '0.0"%"'}}
-_ODDS_NUMBER_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": "+0;-0"}}
+# Odds % is a TRUE percent (Plan N item 17, 2026-11-06): the cell stores the probability (0.533) and shows
+# "53.3%"; typing "53.3%" or "0.7%" stores 0.533 / 0.007. The old literal `0.0"%"` suffix (kept below only to
+# recognise a column not yet repaired) stored whatever was typed, so 53.3 and 0.7 sat side by side and the
+# formula's `IF(x>1, x/100, x)` read 0.7 (meaning 0.7%) as 70%: Week 9's "4 Pick TNF combo" showed -233
+# instead of +14,186. Now nothing is guessed: a value that is not a probability says how to type it.
+LEGACY_ODDS_PCT_PATTERN = '0.0"%"'
+_ODDS_PCT_NUMBER_FORMAT = {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}
+ODDS_TYPE_HINT = "type it as 46%"
+_ODDS_NUMBER_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": "+#,##0;-#,##0"}}
 _CURRENCY_FORMAT = {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}
 _NOTE_FMT = {"textFormat": {"italic": True, "foregroundColor": INK_MUTED, "fontSize": 9}}
 
@@ -140,13 +141,15 @@ NOTE_TEXT = "Won blank = bet still pending. Pending bets are excluded from every
 
 
 def odds_formula(row: int) -> str:
-    """American odds from Odds % (`$B{row}`), accepting 53.3, 53.3%, or
-    0.533 the same way (`IF(x>1, x/100, x)`). Verified against the spec's
-    five worked examples: 53.3% -> -114, 50% -> +100, 40% -> +150,
-    75% -> -300, 20% -> +400."""
+    """American odds from Odds % (`$B{row}`), a true percent: the cell holds the probability (0.533 for
+    53.3%). A blank cell is blank; anything that is not a probability strictly between 0 and 1 (a bare 53.3,
+    text) shows `ODDS_TYPE_HINT` instead of a guess. Verified against the spec's worked examples: 53.3% ->
+    -114, 50% -> +100, 40% -> +150, 75% -> -300, 20% -> +400, and 0.7% -> +14,186."""
+    b = f"$B{row}"
     return (
-        f'=IF($B{row}="","",LET(p,IF($B{row}>1,$B{row}/100,$B{row}),'
-        f"IF(p>0.5,-ROUND(100*p/(1-p),0),IF(p<0.5,ROUND(100*(1-p)/p,0),100))))"
+        f'=IF({b}="","",IF(AND(ISNUMBER({b}),{b}>0,{b}<1),LET(p,{b},'
+        f"IF(p>0.5,-ROUND(100*p/(1-p),0),IF(p<0.5,ROUND(100*(1-p)/p,0),100))),"
+        f'"{ODDS_TYPE_HINT}"))'
     )
 
 
@@ -340,6 +343,8 @@ class WeeklyBettingStats:
 
 def compute_weekly_betting_stats(
     rows: list[tuple[float | None, float | None, float | None]],
+    *,
+    percent_cells: bool | None = None,
 ) -> WeeklyBettingStats:
     """A pure-Python re-derivation of the same aggregate row 14's Sheets
     formulas compute, over raw `(odds_pct, entered, won)` tuples read back
@@ -348,7 +353,11 @@ def compute_weekly_betting_stats(
     ever holds formatted text (`"1-1-1"`, `"1.5 vs 1"`) that can't be
     summed across weeks on a season tab. `won is None` (or `""`) means
     pending, excluded from every total -- same convention as `net_formula`
-    and the weekly summary formulas."""
+    and the weekly summary formulas.
+
+    `percent_cells` is whether Odds % is a true percent column (`odds_cells_are_percent`): then a stored value
+    IS the probability and anything outside (0, 1) is not counted. A ledger not repaired yet (False / None)
+    keeps the old reading, `x/100` when x > 1, so a closed week's Season row does not change."""
     settled = wins = losses = pushes = 0
     entered = net = expected = 0.0
     for odds_pct, ent, won in rows:
@@ -371,8 +380,10 @@ def compute_weekly_betting_stats(
         else:
             pushes += 1
         if odds_pct not in (None, ""):
-            p = odds_pct / 100 if odds_pct > 1 else odds_pct
-            expected += p
+            if percent_cells:
+                expected += odds_pct if 0 < odds_pct < 1 else 0.0
+            else:
+                expected += odds_pct / 100 if odds_pct > 1 else odds_pct
     return WeeklyBettingStats(
         settled=settled,
         wins=wins,
@@ -382,3 +393,71 @@ def compute_weekly_betting_stats(
         net=net,
         expected_wins=expected,
     )
+
+
+# -- Plan N item 17: the Odds % column's unit -------------------------------------------------------------
+
+
+def odds_cells_are_percent(client, tab: str, row: int) -> bool | None:
+    """Whether the ledger's Odds % cell on `row` carries a true PERCENT format (repaired), False when it
+    still has the legacy literal-"%" suffix (or another format), None when the format cannot be read."""
+    try:
+        formats = client.get_cell_formats(tab, f"B{row}")
+    except Exception:  # noqa: BLE001 - only decides how an old ledger is read
+        return None
+    fmt = (formats[0][0] if formats and formats[0] else {}).get("numberFormat") or {}
+    return fmt.get("type") == "PERCENT"
+
+
+@dataclass(frozen=True)
+class OddsRepair:
+    """What `repair_odds_column` changes (or would change, on a dry run)."""
+
+    format_changed: bool  # the column still had the legacy literal-% format
+    values: list[tuple[int, float, float]]  # (row, stored before, stored after)
+    formulas: int  # Odds formulas (re)written
+
+    def lines(self, tab: str) -> list[str]:
+        out = [
+            f"{tab}: Odds % format -> true percent (0.0%)"
+            if self.format_changed
+            else f"{tab}: Odds % already a true percent (values left as they are)"
+        ]
+        out += [f"{tab}!B{r}: {a:g} -> {b:g} (shows {b * 100:.1f}%)" for r, a, b in self.values]
+        out.append(f"{tab}: {self.formulas} Odds formula(s) written (C), odds shown as +#,##0")
+        return out
+
+
+def plan_odds_repair(client, tab: str, first_row: int, last_row: int) -> OddsRepair:
+    """Read-only: what `repair_odds_column` would do. Values are converted only while the column still has
+    the legacy format (`LEGACY_ODDS_PCT_PATTERN`, which SHOWED a stored 46 as "46.0%" and 0.7 as "0.7%"):
+    each becomes what it showed, divided by 100. Once the format is a true percent nothing is converted
+    again, so a second run never divides twice."""
+    formats = client.get_cell_formats(tab, f"B{first_row}:B{last_row}")
+    legacy = any(
+        ((row[0] if row else {}).get("numberFormat") or {}).get("pattern") == LEGACY_ODDS_PCT_PATTERN
+        for row in formats
+    )
+    is_percent = odds_cells_are_percent(client, tab, first_row)
+    values: list[tuple[int, float, float]] = []
+    if legacy and not is_percent:
+        raw = client.read_range_unformatted(tab, f"B{first_row}:B{last_row}")
+        for i, row in enumerate(raw):
+            v = row[0] if row else None
+            if isinstance(v, int | float) and not isinstance(v, bool):
+                values.append((first_row + i, float(v), round(float(v) / 100, 6)))
+    return OddsRepair(format_changed=not is_percent, values=values, formulas=last_row - first_row + 1)
+
+
+def repair_odds_column(client, tab: str, first_row: int, last_row: int) -> OddsRepair:
+    """Make Odds % a true percent column on one Bankroll tab: convert the typed values (legacy column only,
+    see `plan_odds_repair`), set the PERCENT format on B, rewrite the Odds formulas in C and their
+    thousands-separated format. Values first, then the format, so no cell is ever shown under the wrong
+    unit for longer than one request."""
+    plan = plan_odds_repair(client, tab, first_row, last_row)
+    if plan.values:
+        client.update_ranges(tab, {f"B{r}": [[after]] for r, _before, after in plan.values})
+    client.format_range(tab, f"B{first_row}:B{last_row}", _ODDS_PCT_NUMBER_FORMAT)
+    client.update_range(tab, f"C{first_row}:C{last_row}", [[odds_formula(r)] for r in range(first_row, last_row + 1)])
+    client.format_range(tab, f"C{first_row}:C{last_row}", _ODDS_NUMBER_FORMAT)
+    return plan

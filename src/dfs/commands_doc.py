@@ -137,6 +137,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs auth fantasypros",
             "dfs bankroll backfill-keys",
             "dfs bankroll build-betting-ledger",
+            "dfs bankroll fix-odds",
         ],
     ),
     (

@@ -6208,6 +6208,51 @@ def bankroll_build_betting_ledger(
     )
 
 
+@bankroll_app.command("fix-odds")
+def bankroll_fix_odds(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Fix a different sheet instead of config.toml's -- template first, then live. Never a closed week.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would change; write nothing."),
+) -> None:
+    """Plan N item 17: make the Betting ledger's Odds % a true percent column, so a typed 0.7% can never be
+    read as 70% again. Converts the typed values while the column still has the old literal-"%" format
+    (each to what it showed: 46 -> 46.0%, 0.7 -> 0.7%), then sets the PERCENT format and rewrites the Odds
+    formulas (`sheet_bankroll_view.repair_odds_column`). Safe to re-run: a repaired column is never
+    converted twice. Reads every changed cell back."""
+    from dfs.sheet_bankroll_view import plan_odds_repair, repair_odds_column
+
+    cfg = _load_config_or_exit()
+    bets = cfg.bankroll.bets
+    if bets is None:
+        console.print("[red]config.toml is missing [bankroll.bets][/red]: nothing to fix.")
+        raise typer.Exit(code=1)
+    target = sheet_id or cfg.google_sheets.sheet_id
+    if cfg.google_sheets.previous_sheet_id and target == cfg.google_sheets.previous_sheet_id:
+        console.print("[red]That is last week's sheet (previous_sheet_id): a closed week is read only.[/red]")
+        raise typer.Exit(code=1)
+    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
+    client = SheetsClient(gs_cfg)
+    tab = cfg.bankroll.tab
+    try:
+        title, url = client.describe()
+        console.print(f"{'Checking' if dry_run else 'Fixing'} the Odds % column on: [bold]{title}[/bold]\n{url}\n")
+        plan = (plan_odds_repair if dry_run else repair_odds_column)(client, tab, bets.first_row, bets.last_row)
+        for line in plan.lines(tab):
+            console.print(f"{'would' if dry_run else '[green]OK[/green]'} {escape(line)}")
+        if dry_run:
+            return
+        shown = client.read_range(tab, f"A{bets.first_row}:C{bets.last_row}")
+        for i, row in enumerate(shown):
+            if row and any(str(x).strip() for x in row):
+                console.print(f"  row {bets.first_row + i}: " + " | ".join(str(x) for x in row))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
 @bankroll_app.command("stakes")
 def bankroll_stakes(
     propose: bool = typer.Option(
