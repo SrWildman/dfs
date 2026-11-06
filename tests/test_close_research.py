@@ -161,3 +161,13 @@ def test_the_decisions_block_is_the_five_lines_after_its_heading():
             raise RuntimeError("no tab")
 
     assert close_research.decisions_from_tab(Empty()) is None
+
+
+def test_the_calls_flashback_pairs_load_and_compare_like_with_like():
+    for candidate, baseline in close_research.CALLS_PAIRS:
+        a = backtest_settings.load(close_research.SETTINGS_DIR / f"{candidate}.toml")
+        b = backtest_settings.load(close_research.SETTINGS_DIR / f"{baseline}.toml")
+        assert a.name != b.name and a.flags.get("calls") in ("avoid", "fade") and not b.flags
+        assert (a.cash, a.gpp) == (b.cash, b.gpp)  # same kind of builds on both sides
+    assert "calls_flashback" in close_research.STAGE_NAMES
+    assert close_research.STAGE_FUNCTIONS["calls_flashback"] is close_research.stage_calls_flashback

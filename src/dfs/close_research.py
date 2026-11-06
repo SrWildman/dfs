@@ -51,10 +51,12 @@ THREAD_CAPS = {
     k: "1" for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
 }
 OWN_ERROR_WORKERS = 4  # the four settings of the contest retro side by side, then the curse weeks
-STAGE_NAMES = ("refresh", "stacks", "backtest", "own_error", "calls")
+STAGE_NAMES = ("refresh", "stacks", "backtest", "own_error", "calls", "calls_flashback")
 # The backtest compares each of these against `BASELINE` (files in `SETTINGS_DIR`).
 BASELINE = "today"
 CANDIDATES = ("ownership_uncertainty", "ownership_uncertainty_gpp")
+# The plays model's ban-only variants (Plan M, M1.5), each against today's builds of the same kind.
+CALLS_PAIRS = (("calls_avoid_cash", "today_cash"), ("calls_fade_gpp", "today_gpp"))
 # Longest first: the order they start in. All of them run at once (`run`): the machine has the cores, and
 # the 45-minute budget is shorter than the stages run one after another.
 STAGE_TITLES = {
@@ -63,6 +65,7 @@ STAGE_TITLES = {
     "backtest": "Flashback: ownership uncertainty against today",
     "own_error": "Ownership uncertainty in the sim (held out by week)",
     "calls": "The plays model's calls: how they did, what they learned",
+    "calls_flashback": "Flashback: the plays model's AVOID / FADE bans against today",
 }
 
 
@@ -167,22 +170,24 @@ def _baseline_pair(results, name_a: str, name_b: str):  # noqa: ANN001, ANN202 -
     return paired, br.compare_lines(a, b), scope
 
 
-def stage_backtest(season: int, week: int) -> list[StageResult]:
-    """Flashback: each candidate settings file against `today`, on every week with standings up to `week`."""
+def _flashback(week: int, pairs: tuple[tuple[str, str], ...], key: str) -> list[StageResult]:
+    """Flashback: each `(candidate, baseline)` pair of settings files, on every week with standings up to
+    `week`, all in one run; one result per candidate against its baseline."""
     from dfs import backtest as bt
     from dfs import backtest_report as br
     from dfs import backtest_settings as bs
 
-    settings = {n: bs.load(SETTINGS_DIR / f"{n}.toml") for n in (BASELINE, *CANDIDATES)}
+    stems = list(dict.fromkeys(n for pair in pairs for n in pair))
+    settings = {n: bs.load(SETTINGS_DIR / f"{n}.toml") for n in stems}
     weeks = list(range(1, week + 1))
     results = bt.backtest(weeks, list(settings.values()), log=_stamped)
     out = []
-    for name in CANDIDATES:
-        paired, lines, scope = _baseline_pair(results, settings[name].name, settings[BASELINE].name)
+    for name, base in pairs:
+        paired, lines, scope = _baseline_pair(results, settings[name].name, settings[base].name)
         out.append(
             StageResult(
-                key=f"backtest.{name}",
-                title=f"Flashback: {settings[name].name} against today",
+                key=f"{key}.{name}",
+                title=f"Flashback: {settings[name].name} against {settings[base].name}",
                 verdict=lines[-1].split("Verdict on the ship bar", 1)[-1].lstrip(" :").strip()
                 if lines and "Verdict on the ship bar" in lines[-1]
                 else f"{paired['diff_week']:+.1%} ROI points by week",
@@ -198,6 +203,17 @@ def stage_backtest(season: int, week: int) -> list[StageResult]:
             )
         )
     return out
+
+
+def stage_backtest(season: int, week: int) -> list[StageResult]:
+    """Flashback: each candidate settings file against `today`, on every week with standings up to `week`."""
+    return _flashback(week, tuple((name, BASELINE) for name in CANDIDATES), "backtest")
+
+
+def stage_calls_flashback(season: int, week: int) -> list[StageResult]:
+    """Flashback: the plays model's ban-only variants (Plan M, M1.5) against today's builds of the same kind:
+    cash builds without the AVOID calls, GPP builds without the FADE calls (`CALLS_PAIRS`). SHADOW."""
+    return _flashback(week, CALLS_PAIRS, "calls_flashback")
 
 
 def stage_own_error(season: int, week: int) -> list[StageResult]:
@@ -291,6 +307,7 @@ STAGE_FUNCTIONS: dict[str, Callable[[int, int], list[StageResult]]] = {
     "backtest": stage_backtest,
     "own_error": stage_own_error,
     "calls": stage_calls,
+    "calls_flashback": stage_calls_flashback,
 }
 
 

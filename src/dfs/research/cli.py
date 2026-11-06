@@ -122,7 +122,8 @@ def research_close_report(
     only: str = typer.Option(
         None,
         "--only",
-        help="Comma-separated stages: refresh, stacks, backtest, own_error, calls (default: all five).",
+        help="Comma-separated stages: refresh, stacks, backtest, own_error, calls, calls_flashback "
+        "(default: all six).",
     ),
     deadline: float = typer.Option(
         45.0, "--deadline", help="Minutes after which a stage still running is stopped."
