@@ -133,6 +133,24 @@ run `dfs setup polish` and check again.
 
 ---
 
+**A pooled player reads #N/A on Player Pool / Lineups (Team, DK Sal, Pts, Own%), and the ownership colours
+vanish from the whole column.**
+Cause: the native lookups bake EdgeRaw's `Name` / `NameKey` column letters; an EdgeRaw column added ahead of
+them leaves the baked letter stale, and a player whose typed name needs the NameKey match (DK's "Joe Milton
+III" for "Joe Milton") stops resolving. One #N/A in an ownership column used to blank its colour scale too
+(Week 9, 2026-11-06).
+Fix: `dfs doctor` names it (`native-lookup-stale`); `dfs setup native-lookups` rewrites the cells (template
+first, then live), and every plain `dfs sync` does too. The colour scales now ignore error cells.
+
+---
+
+**A bet's Odds look wrong (a long shot shows as a favourite).**
+Cause: the Odds % cell was typed under the old literal-"%" format, so `0.7` read as 70%.
+Fix: `dfs bankroll fix-odds --dry-run`, then `dfs bankroll fix-odds` (template first). Type Odds % as a
+percent (`46%`); a bare number shows "type it as 46%".
+
+---
+
 **You're not sure which sheet a command is about to write to.**
 Cause: `config.toml`'s `sheet_id` is an opaque string, and a new sheet
 gets copied every week -- easy to lose track of which week you're
