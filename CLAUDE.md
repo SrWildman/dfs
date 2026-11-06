@@ -168,7 +168,9 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `data/week/inputs/<season>-wk<NN>-calls.json` and prints the "new must-plays" (calls that moved up). `--inactives` runs
   `dfs sync --live` first (which refreshes the Cockpit). Never writes a sheet. The Week page does not show the calls yet (M2).
   Backtest: `python -m dfs.research.plays_backtest run` (report in `docs/research/plays/`, gitignored). Flashback:
-  `dfs backtest --settings research/settings/calls_cash.toml --compare research/settings/today_cash.toml`.
+  `dfs backtest --settings research/settings/calls_cash.toml --compare research/settings/today_cash.toml`
+  (flag `calls`: `true` = CORE locked + AVOID banned; M1.5's ban-only variants `"avoid"` with `calls_avoid_cash.toml` against
+  `today_cash.toml`, `"fade"` with `calls_fade_gpp.toml` against `today_gpp.toml`).
 - `dfs setup stacks [--sheet-id <id>]` -- creates (or rebuilds) the Stacks tab right after Suggested. Template first, then live, `dfs doctor` after
   (check `stacks-tab`). Needs `dfs stacks --refit` once.
 - `dfs research refresh [--through N] [--season S] [--shuffles N] [--only a,b]` -- the weekly offline reruns in one

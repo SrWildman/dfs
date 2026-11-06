@@ -1,0 +1,5 @@
+# Today's GPP builds alone (no cash builds): the baseline the `calls = "fade"` flag is compared against. Shadow.
+name = "today (GPP only)"
+
+[builds]
+cash = 0

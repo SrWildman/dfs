@@ -1,0 +1,9 @@
+# Plan M, M1.5 (b): today's GPP builds with every GPP FADE call out of the pool, nothing locked
+# (`dfs.plays_flag`). Compare with `--compare research/settings/today_gpp.toml`. Shadow, default off.
+name = "calls: FADE bans (GPP only)"
+
+[builds]
+cash = 0
+
+[flags]
+calls = "fade"
