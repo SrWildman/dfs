@@ -112,6 +112,7 @@ WRITERS = frozenset(
         "dfs sim fit",
         "dfs sim script",
         "dfs stacks",
+        "dfs plays",
         "dfs sync",
         "dfs week close",
         "dfs week new",

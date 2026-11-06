@@ -56,10 +56,18 @@ SAMPLER_SIZE = 5000
 
 
 def draw_points(
-    specs: Sequence[PlayerSpec | None], n_sims: int, *, seed: int = 0, correlations=None, tables=None
+    specs: Sequence[PlayerSpec | None],
+    n_sims: int,
+    *,
+    seed: int = 0,
+    correlations=None,
+    tables=None,
+    deltas: Sequence[float] | None = None,
 ) -> np.ndarray:
     """(n_sims x len(specs)) DK points per player per draw: the lineup simulator's copula (same correlation
-    table, PSD repair and principal-root draw). A `None` spec (a player with no projection) scores 0."""
+    table, PSD repair and principal-root draw). A `None` spec (a player with no projection) scores 0.
+    `deltas` (one per spec; default none) stretches each player's upper quantiles about his median
+    (`marginal.stretch_upper`: the tails study's per-role stretch, read by the plays model only)."""
     idx = [i for i, s in enumerate(specs) if s is not None]
     players = [_validate(specs[i]) for i in idx]
     out = np.zeros((n_sims, len(specs)), dtype=np.float32)
@@ -75,7 +83,8 @@ def draw_points(
         cols = [k for k, p in enumerate(players) if p.position == position and p.projection > 0]
         if not cols:
             continue
-        mg = marginal.marginals(position, [players[k].projection for k in cols], tables=tables)
+        delta = None if deltas is None else np.array([float(deltas[idx[k]]) for k in cols])
+        mg = marginal.marginals(position, [players[k].projection for k in cols], tables=tables, delta=delta)
         for j, k in enumerate(cols):
             out[:, idx[k]] = marginal.ppf(mg, j, u[:, k])
     return out

@@ -1,0 +1,9 @@
+# Cash builds from the plays model's cash calls: every CORE locked, every AVOID banned (`dfs.plays_flag`;
+# Plan M, M1). Compare with `--compare research/settings/today_cash.toml`. Shadow, default off.
+name = "calls (cash only)"
+
+[builds]
+gpp = 0
+
+[flags]
+calls = true

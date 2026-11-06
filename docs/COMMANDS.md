@@ -142,6 +142,19 @@ Rank every QB's stacks of one and two teammates (with and without a bring-back) 
 | `--refit` | Refit the field model on the real standings first, and save it (about two minutes). |
 | `--retro` | Refit, then rerun the retro on the weeks with standings and save the track record the tab shows (several minutes). |
 
+### `dfs plays`
+
+The plays model's calls (SHADOW, Plan M): for every rosterable player a cash call (CORE / PLAY / NEUTRAL / AVOID) and a GPP call (TARGET / LEVERAGE / NEUTRAL / FADE), each with one reason, from the synced slate (`data/current/edge.csv`), the simulator, our ownership, FADE, the tails study and the teammate bump when a starter is ruled out. Prints the top calls by position and the "new must-plays" (every call that moved up since the last version); every `dfs sync` recomputes them too. Saves a timestamped version to `data/week/inputs/<season>-wk<NN>-calls.json` (the Week page reads it in round M2). Nothing is written to a sheet (apart from what `--inactives`' sync writes).
+
+| Option | What it does |
+|---|---|
+| `--position STR` | Only these positions, comma-separated (QB,RB,WR,TE,DST). |
+| `--per INT RANGE` | Calls shown per label and position. Default: `3`. |
+| `--week INT` | Override the auto-detected NFL week. |
+| `--season INT` | Override the auto-detected NFL season. |
+| `--no-save` | Print the calls; do not add a version to this week's record. |
+| `--inactives` | The Sunday inactives check: run `dfs sync --live` first (it recomputes the calls and refreshes the Cockpit tab where the sheet has one), then print the calls and what moved up. |
+
 ### `dfs entries fill`
 
 Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
@@ -621,7 +634,7 @@ Monday's offline studies and their one report, on their own (`dfs week close --r
 |---|---|
 | `--week INT` | The closed week to study (default: the newest scored week). |
 | `--season INT` | Override the auto-detected NFL season. |
-| `--only STR` | Comma-separated stages: refresh, stacks, backtest, own_error (default: all four). |
+| `--only STR` | Comma-separated stages: refresh, stacks, backtest, own_error, calls (default: all five). |
 | `--deadline FLOAT` | Minutes after which a stage still running is stopped. Default: `45.0`. |
 
 ### `dfs backtest`

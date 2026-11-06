@@ -315,6 +315,7 @@ MORE_LABELS = {
     "dfs setup player-card": "Create the Player tab (one page per player; pick a name in B1)",
     "dfs setup compare": "Create the Compare tab (up to four players side by side; pick names in B1:E1)",
     "dfs stacks": "Rank the QB stacks against the field (the Stacks tab)",
+    "dfs plays": "Who to play and avoid, cash and GPP, with one reason each (shadow)",
     "dfs setup stacks": "Create the read-only Stacks tab (the QB stack ranker)",
     "dfs setup add-filters": "Add the sort/search filters",
     "dfs setup protect": "Add warning-only protection to formula ranges",

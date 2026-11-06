@@ -2757,6 +2757,8 @@ def sync(
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
     _print_guard_notes(results)
+    if any(r.source == "edge" and r.ok and not r.pending for r in results):
+        _refresh_calls(ctx)
 
     # A name left in Player Pool's add-a-player box (the bound Apps Script normally handles it the moment
     # it is typed; an API write never fires the script) is set on EdgeRaw's Pool now -- see
@@ -3232,6 +3234,86 @@ def stacks_command(
     except SheetsError as e:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
+
+
+@app.command("plays", short_help="Who to play and who to avoid this week, cash and GPP (shadow).")
+def plays_command(
+    position: str = typer.Option(
+        None, "--position", help="Only these positions, comma-separated (QB,RB,WR,TE,DST)."
+    ),
+    per: int = typer.Option(3, "--per", min=1, max=20, help="Calls shown per label and position."),
+    week: int = typer.Option(None, "--week", help="Override the auto-detected NFL week."),
+    season: int = typer.Option(None, "--season", help="Override the auto-detected NFL season."),
+    no_save: bool = typer.Option(
+        False, "--no-save", help="Print the calls; do not add a version to this week's record."
+    ),
+    inactives: bool = typer.Option(
+        False,
+        "--inactives",
+        help="The Sunday inactives check: run `dfs sync --live` first (it recomputes the calls and refreshes "
+        "the Cockpit tab where the sheet has one), then print the calls and what moved up.",
+    ),
+) -> None:
+    """The plays model's calls (SHADOW, Plan M): for every rosterable player a cash call (CORE / PLAY /
+    NEUTRAL / AVOID) and a GPP call (TARGET / LEVERAGE / NEUTRAL / FADE), each with one reason, from the
+    synced slate (`data/current/edge.csv`), the simulator, our ownership, FADE, the tails study and the
+    teammate bump when a starter is ruled out. Prints the top calls by position and the "new must-plays"
+    (every call that moved up since the last version); every `dfs sync` recomputes them too. Saves a
+    timestamped version to `data/week/inputs/<season>-wk<NN>-calls.json` (the Week page reads it in round M2).
+    Nothing is written to a sheet (apart from what `--inactives`' sync writes)."""
+    from dfs import plays as plays_mod
+    from dfs import week_inputs
+    from dfs.sources.base import SyncContext
+
+    if inactives:
+        sync(only=None, no_upload=False, week=week, season=season, live=True, sheet_id=None, props=False)
+    ctx = SyncContext.current(week=week, season=season)
+    try:
+        if inactives:
+            rec = week_inputs.load_input(plays_mod.INPUT_NAME, ctx.season, ctx.week) or {}
+        else:
+            _calls, rec = plays_mod.compute_live(ctx.season, ctx.week, save_record=not no_save)
+    except FileNotFoundError as e:
+        console.print(f"[red]{escape(str(e))}[/red] Run `dfs sync` first.")
+        raise typer.Exit(code=1) from e
+    if not rec.get("calls"):
+        console.print("[yellow]No calls for this week yet: run `dfs sync` (or `dfs plays`).[/yellow]")
+        raise typer.Exit(code=1)
+    positions = (
+        [p.strip().upper() for p in position.split(",") if p.strip()]
+        if position
+        else list(plays_mod.POSITIONS)
+    )
+    console.print(
+        f"[bold]Week {ctx.week} calls[/bold] ({rec.get('trust', 'Shadow')}: not proven yet; "
+        f"version of {rec.get('at', '?')})"
+    )
+    for note in rec.get("notes") or []:
+        console.print(f"[dim]{escape(note)}[/dim]")
+    for line in plays_mod.moved_lines(rec):
+        console.print(f"[yellow]{escape(line)}[/yellow]", highlight=False)
+    for line in plays_mod.top_lines(rec, per=per, positions=positions):
+        console.print(escape(line), highlight=False, soft_wrap=True)
+
+
+def _refresh_calls(ctx) -> None:  # noqa: ANN001 - SyncContext
+    """After an edge sync: recompute the plays model's calls and add a version to this week's record
+    (`plays.compute_live`). Prints one line and the new must-plays; never fails the sync."""
+    from dfs import plays as plays_mod
+
+    try:
+        _calls, rec = plays_mod.compute_live(ctx.season, ctx.week)
+    except Exception as e:  # noqa: BLE001 - shadow output must never stop a sync
+        console.print(f"[yellow]Calls not refreshed: {escape(str(e))}[/yellow]")
+        return
+    moved = rec.get("moved_up") or []
+    console.print(
+        f"[green]OK[/green] calls (shadow): {len(rec.get('calls') or [])} players"
+        + (f", {len(moved)} moved up since the last version" if moved else "")
+        + " (`dfs plays` shows them)"
+    )
+    for line in plays_mod.moved_lines(rec)[1:9]:
+        console.print(f"[yellow]{escape(line)}[/yellow]", highlight=False)
 
 
 @app.command(
@@ -5468,6 +5550,8 @@ def week_new(
             table.add_row(r.source, "-", f"[red]failed: {r.error}[/red]")
     console.print(table)
     _print_guard_notes(results)
+    if any(r.source == "edge" and r.ok and not r.pending for r in results):
+        _refresh_calls(ctx)
 
     _rebuild_cockpit_on_new_sheet(new_cfg, new_client)
     _rebuild_player_card_on_new_sheet(new_cfg, new_client, ctx)

@@ -51,7 +51,7 @@ THREAD_CAPS = {
     k: "1" for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
 }
 OWN_ERROR_WORKERS = 4  # the four settings of the contest retro side by side, then the curse weeks
-STAGE_NAMES = ("refresh", "stacks", "backtest", "own_error")
+STAGE_NAMES = ("refresh", "stacks", "backtest", "own_error", "calls")
 # The backtest compares each of these against `BASELINE` (files in `SETTINGS_DIR`).
 BASELINE = "today"
 CANDIDATES = ("ownership_uncertainty", "ownership_uncertainty_gpp")
@@ -62,6 +62,7 @@ STAGE_TITLES = {
     "stacks": "Stacks: field refit and retro",
     "backtest": "Flashback: ownership uncertainty against today",
     "own_error": "Ownership uncertainty in the sim (held out by week)",
+    "calls": "The plays model's calls: how they did, what they learned",
 }
 
 
@@ -239,11 +240,57 @@ def stage_own_error(season: int, week: int) -> list[StageResult]:
     ]
 
 
+def stage_calls(season: int, week: int) -> list[StageResult]:
+    """The plays model (`research.plays_backtest.close_week`): the week's calls scored and appended to
+    `data/research/calls_history.csv`, the weights refitted through the week. SHADOW."""
+    from dfs.research import plays_backtest as pb
+
+    out = pb.close_week(season, week, log=_stamped)
+    held = out["held_out"]
+    metrics: dict[str, float | bool] = {
+        k: round(float(v), 4) for k, v in held.items() if v is not None and v == v
+    }
+    for key in ("cash_gap", "gpp_diff"):
+        v = out.get(key)
+        if v is not None and v == v:
+            metrics[key] = round(float(v), 4)
+    learned = "; ".join(out["shifts"]) or "no weight moved more than 0.005"
+    labels = " | ".join(out["labels"]) or "no outcomes"
+    headline = [
+        f"Scored the {out['source']} calls of {out['at']} ({out['rows']} players); rows appended to "
+        f"`{out['history']}`, weights saved to `{out['weights']}`.",
+        "",
+        f"- How last week's calls did: {labels}.",
+        f"- What the calls learned this week (biggest weight shifts): {learned}.",
+    ]
+    if held:
+        headline.append(
+            "- Held out (Spearman with the week's result, relevant players): "
+            + ", ".join(f"{k} {v:+.3f}" for k, v in held.items() if v == v)
+        )
+    return [
+        StageResult(
+            key="calls",
+            title=STAGE_TITLES["calls"],
+            verdict=f"what the calls learned this week: {learned}; {labels}"[:190],
+            ship_bar=(
+                "Shadow until the cash calls beat CalPts value and TFFB by more than 2 SE of the paired "
+                "weekly gap in most weeks, and TARGET+LEVERAGE beat same-price players in the real top 1% "
+                "at p < 0.05 "
+                "(python -m dfs.research.plays_backtest run)"
+            ),
+            headline=headline,
+            metrics=metrics,
+        )
+    ]
+
+
 STAGE_FUNCTIONS: dict[str, Callable[[int, int], list[StageResult]]] = {
     "refresh": stage_refresh,
     "stacks": stage_stacks,
     "backtest": stage_backtest,
     "own_error": stage_own_error,
+    "calls": stage_calls,
 }
 
 
