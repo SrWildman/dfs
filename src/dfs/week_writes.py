@@ -238,6 +238,93 @@ class SheetEdits:
             )
         return {c["id"]: after.get(c["id"], "") for c in wanted}
 
+    def set_pool_each(self, changes: Iterable[dict[str, str]], *, action: str = "pool") -> dict[str, dict]:
+        """The bulk write (the board's and the Explorer's multi-select, a chart selection): like
+        `set_pool`, but the conflict check is per cell. Every cell that still reads what the page showed is
+        written, all of them in one batch under the run lock, then read back; a cell that changed in the sheet
+        (or a player not on the tab) is left alone and reported on its own. Returns Id -> `{"status": "ok" |
+        "conflict" | "missing", "value": the sheet's value}` (read back for `ok`, what the sheet holds for
+        `conflict`)."""
+        self._guard()
+        wanted = self._checked(changes)
+        out: dict[str, dict] = {}
+        with self._mutex, self.lock():
+            value, row_of, name_of, pool_col = self._pool_rows()
+            passing = []
+            for c in wanted:
+                pid = c["id"]
+                if pid not in row_of:
+                    out[pid] = {"status": "missing", "value": ""}
+                    self.log(f"{action} refused: Id {pid} not on {self.edge_tab}")
+                elif value[pid] != c["was"]:
+                    out[pid] = {"status": "conflict", "value": value[pid]}
+                    now = value[pid] or "not in the pool"
+                    self.log(f"{action} refused (changed in the sheet): {name_of[pid]} is {now}")
+                else:
+                    passing.append(c)
+            after: dict[str, str] = {}
+            if passing:
+                self.client.update_ranges(
+                    self.edge_tab, {f"{pool_col}{row_of[c['id']]}": [[c["value"]]] for c in passing}
+                )
+                after, _, _, _ = self._pool_rows()
+        for c in passing:
+            back = after.get(c["id"], "")
+            out[c["id"]] = {"status": "ok", "value": back}
+            self.log(
+                f"{action} {self.edge_tab}!{pool_col}{row_of[c['id']]} {name_of[c['id']]}: "
+                f"{c['was'] or '-'} -> {back or '-'}"
+            )
+        return out
+
+    def merge_pool(
+        self, change: dict[str, Callable[[str], str]], *, action: str
+    ) -> dict[str, tuple[str, str]]:
+        """Pool cells rewritten from what the sheet holds NOW (`change[id](current) -> new`), for a decision
+        that adds a player to the pool (`add_kind`) or takes a Cash-only player out (`drop_cash_only`): it is
+        computed from the sheet's own value under the lock, so nothing Sam typed is overwritten. One batch,
+        read back, logged. Returns Id -> (before, after); a player not on the tab is `NotFound`."""
+        self._guard()
+        with self._mutex, self.lock():
+            value, row_of, name_of, pool_col = self._pool_rows()
+            missing = [pid for pid in change if pid not in row_of]
+            if missing:
+                self.log(f"{action} refused: Id {', '.join(missing)} not on {self.edge_tab}")
+                raise NotFound(f"not on {self.edge_tab} (Id {', '.join(missing)}): sync, then try again")
+            new = {pid: fn(value[pid]) for pid, fn in change.items()}
+            moved = {pid: v for pid, v in new.items() if v != value[pid]}
+            for v in moved.values():
+                if v not in POOL_VALUES:
+                    raise WriteError(f"Pool takes Cash, GPP, Both or nothing, not {v!r}")
+            after = value
+            if moved:
+                self.client.update_ranges(
+                    self.edge_tab, {f"{pool_col}{row_of[pid]}": [[v]] for pid, v in moved.items()}
+                )
+                after, _, _, _ = self._pool_rows()
+        for pid in moved:
+            self.log(
+                f"{action} {self.edge_tab}!{pool_col}{row_of[pid]} {name_of[pid]}: "
+                f"{value[pid] or '-'} -> {after.get(pid, '') or '-'}"
+            )
+        return {pid: (value[pid], after.get(pid, "")) for pid in change}
+
+    def _checked(self, changes: Iterable[dict[str, str]]) -> list[dict[str, str]]:
+        wanted = [dict(c) for c in changes]
+        if not wanted:
+            raise WriteError("nothing to write")
+        for c in wanted:
+            c["id"] = str(c.get("id") or "").strip()
+            c["value"] = str(c.get("value") or "").strip()
+            c["was"] = str(c.get("was") or "").strip()
+            if c["value"] not in POOL_VALUES:
+                raise WriteError(f"Pool takes Cash, GPP, Both or nothing, not {c['value']!r}")
+            if not c["id"]:
+                raise WriteError("a pool change needs the player's Id")
+        if len({c["id"] for c in wanted}) != len(wanted):
+            raise WriteError("one change per player")
+        return wanted
+
     def edit_rule(self, label: str, was: str, change: Callable[[str], str], *, action: str = "rules") -> str:
         """Rewrite one rules line: `change(current_text) -> new_text`, applied only when the line still reads
         `was` (else `Conflict`). Returns the text read back."""
@@ -270,6 +357,23 @@ class SheetEdits:
         back = after.get(label, "")
         self.log(f"{action} {ss.TAB}!{cell} {label}: {current!r} -> {back!r}")
         return back
+
+
+# -- a decision's pool cell, from what the sheet holds -------------------------------------------------------
+
+
+def add_kind(current: str, kind: str) -> str:
+    """The pool value once `kind` (Cash or GPP) is added: nothing + Cash is Cash, GPP + Cash is Both, and a
+    player already in that kind keeps his value."""
+    current = (current or "").strip()
+    if current in ("Both", kind):
+        return current
+    return kind if not current else "Both"
+
+
+def drop_cash_only(current: str) -> str:
+    """Fade: a Cash-only player leaves the pool; GPP, Both and nothing are left alone."""
+    return "" if (current or "").strip() == "Cash" else (current or "").strip()
 
 
 # -- the rules box's text, edited item by item ---------------------------------------------------------

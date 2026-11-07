@@ -14,6 +14,10 @@ from the lineup's ownership product and the contest's size. The size of an enter
 of its series in the contest log (`contest_tiers.history_by_series`); before entries are recorded, the typical
 field of his paid contests of that kind this season.
 
+**Shown in DraftKings' roster order** (`dk_order`): QB, RB, RB, WR, WR, WR, TE, FLEX, DST, the FLEX holding
+the extra RB / WR / TE with the latest kickoff (`flex_order`'s rule, so the slot stays open to a swap
+longest).
+
 **Reading it.** Cash: being close to the consensus is fine (the cash line is the field's middle; sharing it is
 not a mistake), so nothing is flagged. GPP: copies split a prize, so a lineup expected at `GPP_COPIES_FLAG`
 (5) or more copies is flagged.
@@ -63,6 +67,42 @@ def consensus_from_frame(frame: pd.DataFrame, own_column: str) -> tuple[str, ...
     if len(found) == 0:
         return None
     return tuple(slate.names[i] for i in found[0])
+
+
+def dk_order(names: Sequence[str], edge: Iterable[dict]) -> list[tuple[str, str]]:
+    """`(slot, name)` in DraftKings' roster order (`models.ROSTER_SLOTS`: QB, RB, RB, WR, WR, WR, TE, FLEX,
+    DST). The FLEX holds the extra RB / WR / TE; when there are two or more of that position, the one with the
+    latest kickoff goes there (`flex_order`'s rule; a tie or a missing kickoff keeps the first one seen in
+    FLEX). A lineup that is not nine players of a legal shape comes back in its own order, slot ``""``."""
+    from datetime import UTC, datetime
+
+    from dfs import flex_order
+    from dfs.kickoff import parse_kickoff
+    from dfs.models import ROSTER_SLOTS
+
+    info = {normalize_name(r.get("Name")): r for r in edge}
+    pos = {n: str((info.get(normalize_name(n)) or {}).get("Position") or "") for n in names}
+    slots: list[tuple[str, str]] = []
+    left = list(names)
+    for slot in ROSTER_SLOTS:
+        if slot == flex_order.FLEX_SLOT:
+            continue
+        pick = next((n for n in left if pos[n] == slot), None)
+        if pick is None:
+            return [("", n) for n in names]
+        left.remove(pick)
+        slots.append((slot, pick))
+    if len(left) != 1 or pos[left[0]] not in flex_order.BASE_SLOTS:
+        return [("", n) for n in names]
+    at = ROSTER_SLOTS.index(flex_order.FLEX_SLOT)
+    slots.insert(at, (flex_order.FLEX_SLOT, left[0]))
+    seats = [
+        flex_order.Seat(slot, n, pos[n], parse_kickoff((info.get(normalize_name(n)) or {}).get("GameStart")))
+        for slot, n in slots
+    ]
+    plan = flex_order.plan_flex(seats, datetime(1970, 1, 1, tzinfo=UTC))  # an order, never a lock
+    ordered = flex_order.apply_swap([n for _, n in slots], plan, seats)
+    return list(zip(ROSTER_SLOTS, ordered, strict=True))
 
 
 def edge_frame(edge: Iterable[dict]) -> pd.DataFrame:
@@ -164,8 +204,10 @@ def view(
             continue
         sh = shares(names, owns[kind])
         n = int(typical.get(kind) or DEFAULT_ENTRIES[kind])
+        ordered = dk_order(names, edge)
         out["consensus"][kind] = {
-            "names": list(names),
+            "names": [name for _, name in ordered],
+            "slots": [slot for slot, _ in ordered],
             "own_sum": float(np.nansum(sh)),
             "salary": int(sum(salary.get(normalize_name(x)) or 0 for x in names)),
             "entrants": n,

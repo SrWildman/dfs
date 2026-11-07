@@ -240,6 +240,23 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   logged to `data/week/edits.log`; a closed week is refused. Every render reads the live Pool column and rules box
   (a read failure falls back to the last sync, read only). `--sheet-id` points it at a test copy. No DK access; the log
   (`data/week/serve.log`) never holds prompts. Ctrl-C stops it.
+- **Plan N on the Week page** (client side in `week_ui.py`: CSS and one script on the static and the served page; no
+  library, no network of its own): the chat folds to a tab (`dfs-chat-collapsed` in localStorage); one wide column
+  (board, `.charts-row`, games, Explorer); sticky headers in each `.scroll` box (the board repeats `board_head` per
+  position) and a sticky name column (`table.stickyname`); Opp / Spread / Total / Implied on every player grid; the
+  page state (open folds, Show more, scroll) kept per week in localStorage and restored after `refreshSections`; ONE
+  client pool store (`dfsPool`, painted on every `.seg` / `.poolval` and the Explorer) fed by each write's read-back;
+  multi-select with a bulk bar, sent as `{"each": true, "changes": [...]}` to `/api/pool`
+  (`week_writes.SheetEdits.set_pool_each`: one batch, per-cell conflict / missing, `week_actions.MAX_BULK`), writes
+  queued (`dfsQueue`); decisions also move the pool (`week_actions.decide_pool`, `merge_pool`, `add_kind`,
+  `drop_cash_only`; the pool half is kept under `pool:` keys in the `decisions` input so Undo reverses it); the chart
+  viewer (`week_charts.viewer_data`, JSON `chart-data`); the game view (`week_top.game_data`, JSON `game-data`;
+  `/api/stack` = `week_actions.more_stack`, a Max exposure `more` line, needs a QB); the cash core's caps
+  (`week_plays.CASH_CORE_CAP`, `cash_core`; 30%+ CashOwn = `Chalk core`, always shown); the chalk check's header and
+  3 "close" rows (`week_page.CHALK_CHECK_HEADER`, `CLOSE_COUNT`); the consensus in DK's roster order
+  (`consensus.dk_order`) with `week_money.CONSENSUS_CAPTION`; and `week_page.table(..., how=...)`: every table and
+  chart carries a "how this is built" note. Tests: `tests/test_week_ui.py` (HTML / script, no browser) and
+  `tests/test_week_ui_browser.py` (Playwright on a fake sheet; skipped where Chromium is not installed, as on CI).
 - **Plan K on the Week page** (`week_money.py`, sections placed by day in `week_page.DAY_ORDER`, each with a trust chip):
   **bankroll health** (`bankroll_health.py`: the Season tab's curve by week, NFL DFS / betting / other / total, found by
   header; spend as a share of the bankroll; a stake guide by tier: `[stakes]` rules when set (with one "over the

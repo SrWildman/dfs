@@ -201,6 +201,67 @@ def test_the_suggested_starting_pool_is_one_batch_and_skips_the_pooled(edits, sh
     assert out == expected
 
 
+# -- the bulk write (Plan N item 7) --------------------------------------------------------------------------
+
+
+def test_a_bulk_write_is_one_batch_with_the_conflict_check_per_cell(edits, sheet, lock, tmp_path):
+    sheet.put(EDGE, 4, 0, "GPP")  # Wr Value changed in the sheet after the page loaded
+    out = week_actions.pool_bulk(
+        edits,
+        [
+            {"id": "id-Qb Beta", "value": "Cash", "was": ""},
+            {"id": "id-Wr Value", "value": "Cash", "was": ""},
+            {"id": "id-Te Plain", "value": "Cash", "was": ""},
+            {"id": "id-Nobody", "value": "Cash", "was": ""},
+        ],
+    )
+    assert out["id-Qb Beta"] == {"status": "ok", "value": "Cash"}
+    assert out["id-Te Plain"] == {"status": "ok", "value": "Cash"}
+    assert out["id-Wr Value"] == {"status": "conflict", "value": "GPP"}  # reported, never dropped
+    assert out["id-Nobody"]["status"] == "missing"
+    assert len(sheet.writes) == 1 and len(sheet.writes[0][1]) == 2 and lock.taken == 1  # one batch, the lock
+    assert sheet.get(EDGE, 4, 0) == "GPP"  # the changed cell is left as the sheet has it
+    log = (tmp_path / "edits.log").read_text()
+    assert "bulk pool refused (changed in the sheet): Wr Value is GPP" in log and "Qb Beta: - -> Cash" in log
+
+
+def test_a_bulk_write_where_every_cell_changed_writes_nothing(edits, sheet):
+    sheet.put(EDGE, 4, 0, "GPP")
+    out = week_actions.pool_bulk(edits, [{"id": "id-Wr Value", "value": "Cash", "was": ""}])
+    assert out == {"id-Wr Value": {"status": "conflict", "value": "GPP"}} and sheet.writes == []
+
+
+def test_a_bulk_write_refuses_bad_values_duplicates_and_a_closed_week(edits, sheet, lock, tmp_path):
+    with pytest.raises(week_writes.WriteError):
+        week_actions.pool_bulk(edits, [{"id": "id-Qb Beta", "value": "Maybe", "was": ""}])
+    with pytest.raises(week_writes.WriteError):
+        week_actions.pool_bulk(
+            edits, [{"id": "id-Qb Beta", "value": "Cash"}, {"id": "id-Qb Beta", "value": ""}]
+        )
+    with pytest.raises(week_writes.WriteError):
+        week_actions.pool_bulk(edits, [])
+    closed = week_writes.SheetEdits(sheet, edge_tab=EDGE, read_only=True, log_path=tmp_path / "l", lock=lock)
+    with pytest.raises(week_writes.ReadOnly):
+        week_actions.pool_bulk(closed, [{"id": "id-Qb Beta", "value": "Cash", "was": ""}])
+    assert sheet.writes == []
+
+
+def test_add_kind_and_drop_cash_only():
+    assert [week_writes.add_kind(v, "Cash") for v in ("", "Cash", "GPP", "Both")] == [
+        "Cash",
+        "Cash",
+        "Both",
+        "Both",
+    ]
+    assert [week_writes.add_kind(v, "GPP") for v in ("", "Cash", "GPP", "Both")] == [
+        "GPP",
+        "Both",
+        "GPP",
+        "Both",
+    ]
+    assert [week_writes.drop_cash_only(v) for v in ("", "Cash", "GPP", "Both")] == ["", "", "GPP", "Both"]
+
+
 # -- the rules box -------------------------------------------------------------------------------------------
 
 
@@ -274,6 +335,80 @@ def test_a_pivot_pools_him_as_both_and_wait_writes_nothing(edits, sheet, tmp_pat
     assert week_actions.answers(inp)[star.key]["pivot_id"] == pick
     week_actions.decide(edits, inp, key=star.key, option="undo", rules_was={})
     assert sheet.get(EDGE, at, 0) == "" and star.key not in week_actions.answers(inp)
+
+
+# -- decisions also move the pool (Plan N item 8) ------------------------------------------------------------
+
+
+def test_play_adds_him_as_cash_and_undo_takes_back_both_writes(edits, sheet, tmp_path):
+    inp = inp_for(tmp_path, chalk_rows())
+    text, pool = week_actions.decide_pool(
+        edits, inp, key="chalk:id-Wr Value", option="play", rules_was=edits.read().rules
+    )
+    assert (
+        pool == {"id-Wr Value": "Cash"} and sheet.get(EDGE, 4, 0) == "Cash" and "In your pool as Cash" in text
+    )
+    assert "cash: Wr Value" in sheet.get(ss.TAB, 2, ss.NAME_INDEX)
+    text, pool = week_actions.decide_pool(
+        edits, inp, key="chalk:id-Wr Value", option="undo", rules_was=edits.read().rules
+    )
+    assert pool == {"id-Wr Value": ""} and sheet.get(EDGE, 4, 0) == "" and "Pool put back" in text
+    assert "Wr Value" not in sheet.get(ss.TAB, 2, ss.NAME_INDEX)
+
+
+def test_play_on_a_gpp_player_makes_him_both_and_on_a_pooled_one_changes_nothing(edits, sheet, tmp_path):
+    inp = inp_for(tmp_path, chalk_rows())
+    sheet.put(EDGE, 4, 0, "GPP")
+    _, pool = week_actions.decide_pool(
+        edits, inp, key="chalk:id-Wr Value", option="play", rules_was=edits.read().rules
+    )
+    assert pool == {"id-Wr Value": "Both"}
+    before = len(sheet.writes)
+    _, pool = week_actions.decide_pool(
+        edits, inp, key="chalk:id-Qb Alpha", option="play", rules_was=edits.read().rules
+    )
+    assert pool == {"id-Qb Alpha": "Both"} and len(sheet.writes) == before + 1  # the rules line only
+
+
+def test_fade_takes_out_a_cash_only_player_and_leaves_the_rest_alone(edits, sheet, tmp_path):
+    inp = inp_for(tmp_path, chalk_rows())
+    sheet.put(EDGE, 4, 0, "Cash")
+    text, pool = week_actions.decide_pool(
+        edits, inp, key="chalk:id-Wr Value", option="fade", rules_was=edits.read().rules
+    )
+    assert pool == {"id-Wr Value": ""} and sheet.get(EDGE, 4, 0) == "" and "Cash only" in text
+    week_actions.decide_pool(edits, inp, key="chalk:id-Wr Value", option="undo", rules_was=edits.read().rules)
+    assert sheet.get(EDGE, 4, 0) == "Cash"  # undo put him back
+    text, pool = week_actions.decide_pool(
+        edits, inp, key="chalk:id-Qb Alpha", option="fade", rules_was=edits.read().rules
+    )
+    assert pool == {"id-Qb Alpha": "Both"} and "left alone (he is Both there)" in text
+
+
+def test_undo_leaves_a_pool_cell_changed_since_and_says_so(edits, sheet, tmp_path):
+    inp = inp_for(tmp_path, chalk_rows())
+    week_actions.decide_pool(edits, inp, key="chalk:id-Wr Value", option="play", rules_was=edits.read().rules)
+    sheet.put(EDGE, 4, 0, "GPP")  # Sam changed it in the sheet
+    text, _ = week_actions.decide_pool(
+        edits, inp, key="chalk:id-Wr Value", option="undo", rules_was=edits.read().rules
+    )
+    assert sheet.get(EDGE, 4, 0) == "GPP" and "left alone: Wr Value (now GPP)" in text
+
+
+def test_a_stack_pick_adds_the_qb_and_mates_as_gpp_and_undo_takes_them_out(edits, sheet, tmp_path):
+    week_inputs.save_input(
+        "stacks",
+        {"rows": [{"qb": "Qb Beta", "mates": "Te Fade"}, {"qb": "Qb Alpha", "mates": "Wr Value"}]},
+        season=2026,
+        week=9,
+        data_dir=tmp_path,
+    )
+    inp = inp_for(tmp_path)
+    sheet.put(EDGE, 3, 0, "Cash")  # Qb Beta, Cash already
+    _, pool = week_actions.decide_pool(edits, inp, key="stack", option="a", rules_was=edits.read().rules)
+    assert pool == {"id-Qb Beta": "Both", "id-Te Fade": "GPP"}
+    week_actions.decide_pool(edits, inp, key="stack", option="undo", rules_was=edits.read().rules)
+    assert sheet.get(EDGE, 3, 0) == "Cash" and sheet.get(EDGE, 7, 0) == ""
 
 
 def test_a_decision_the_data_no_longer_has_is_not_found(edits, tmp_path):

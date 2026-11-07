@@ -171,13 +171,26 @@ def rich(text: object) -> str:
 # -- small HTML helpers -----------------------------------------------------------------------------
 
 
-def table(headers: list[str], rows: list[list[str]], *, cls: str = "") -> str:
-    """Cells are already-escaped HTML."""
+def how_html(text: str) -> str:
+    """The one-line "how this is built" note every table and chart carries (Plan N item 14): shown on hover,
+    and on a tap (the shared script toggles it), never in the way."""
+    return (
+        f'<span class="how" tabindex="0" role="note" data-how="{e(text)}" '
+        f'aria-label="How this is built: {e(text)}">'
+        "ⓘ how this is built</span>"
+    )
+
+
+def table(headers: list[str], rows: list[list[str]], *, how: str, cls: str = "") -> str:
+    """Cells are already-escaped HTML. `how` is the table's one-line "how this is built" note (required: every
+    table says how it is built). The header is sticky inside its scroll box; `cls="stickyname"` keeps the
+    first column in view when the table scrolls sideways."""
     head = "".join(f"<th>{e(h)}</th>" for h in headers)
     body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
     return (
-        f'<div class="scroll"><table class="{cls}"><thead><tr>{head}</tr></thead>'
-        f"<tbody>{body}</tbody></table></div>"
+        f'<div class="tbl">{how_html(how)}<div class="scroll"><table class="{cls}">'
+        f"<thead><tr>{head}</tr></thead>"
+        f"<tbody>{body}</tbody></table></div></div>"
     )
 
 
@@ -347,7 +360,12 @@ def tier_plan_html(inp: WeekInputs) -> str:
     return (
         "<h4>This week's plan, by tier</h4>"
         + head
-        + table(["Tier", "This week", "What to look for in the lobby"], rows)
+        + table(
+            ["Tier", "This week", "What to look for in the lobby"],
+            rows,
+            how="Your Bankroll tab's Weekly Budget split about 60 / 30 / at most 10% across Tiers A / B / C "
+            "(contest_tiers); the look-for text is the tier's rule in plain words.",
+        )
         + (f'<p class="flag">{e(reminder)}</p>' if reminder else "")
         + note(
             "Tiers are rules on a contest's format, fee, field size, entries a user and rake, so they hold "
@@ -378,7 +396,15 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
     caps = plan.get("caps") or {}
     if caps:
         rows = [[e(fmt), e(dollars(cap)) if cap is not None else "-"] for fmt, cap in caps.items()]
-        parts.append("<h4>Caps by format, this week</h4>" + table(["Format", "Cap a week"], rows))
+        parts.append(
+            "<h4>Caps by format, this week</h4>"
+            + table(
+                ["Format", "Cap a week"],
+                rows,
+                how="What dfs contests plan saved: the [contest_plan] caps by format against this week's "
+                "Weekly Budget.",
+            )
+        )
     if plan.get("roi"):
         rows = [
             [
@@ -390,7 +416,12 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
             for r in plan["roi"]
         ]
         parts.append(
-            "<h4>Your ROI and the rake, by format</h4>" + table(["Format", "Entries", "ROI", "Rake"], rows)
+            "<h4>Your ROI and the rake, by format</h4>"
+            + table(
+                ["Format", "Entries", "ROI", "Rake"],
+                rows,
+                how="Your contest log: ROI = net / fees by format; rake = 1 - prize pool / (entries x fee).",
+            )
         )
     if plan.get("h2h_avoid"):
         parts.append(
@@ -451,6 +482,22 @@ def cash_chalk(inp: WeekInputs) -> tuple[list[dict] | None, int]:
     return sorted(chalk, key=lambda c: -c["own"]), len(cash)
 
 
+CHALK_CHECK_HEADER = "everyone predicted in 30% or more of double-up lineups (CashOwn)"  # Plan N item 12
+CLOSE_COUNT = 3  # the next ones under the line, shown as "close" (Plan N item 12)
+
+
+def cash_close(inp: WeekInputs) -> list[dict]:
+    """The `CLOSE_COUNT` highest CashOwn players under the 30% line (shown as "close")."""
+    cash = builds_of(inp, "cash")
+    under = []
+    for r in inp.edge or []:
+        own = num(r.get("CashOwn"))
+        if own is not None and own < CHALK_THRESHOLD:
+            used = sum(1 for b in cash if r["Name"] in b.get("names", []))
+            under.append({"name": r["Name"], "pos": r.get("Position", ""), "own": own, "used": used})
+    return sorted(under, key=lambda c: -c["own"])[:CLOSE_COUNT]
+
+
 def cash_section(inp: WeekInputs) -> Section:
     trust = TRUST["cash"]
     cash = builds_of(inp, "cash")
@@ -481,9 +528,19 @@ def cash_section(inp: WeekInputs) -> Section:
                 f"<b>{e(pct(shown))}</b>",
             ]
         )
-    body = [table(["Build", "Players", "Salary", "Cash %"], rows), note(cash_note(inp, calibrated))]
+    body = [
+        table(
+            ["Build", "Players", "Salary", "Cash %"],
+            rows,
+            how="The last dfs lineups suggest round's cash builds, the top 5 by the Cash % the simulator "
+            "gave each (its chance to clear the double-up line).",
+        ),
+        note(cash_note(inp, calibrated)),
+    ]
     chalk, n_builds = cash_chalk(inp)
-    body.append(f"<h4>Cash chalk check {_chip('cash_chalk')}</h4>")
+    close = cash_close(inp)
+    count = f" ({len(chalk)})" if chalk is not None else ""
+    body.append(f"<h4>Cash chalk check: {e(CHALK_CHECK_HEADER)}{count} {_chip('cash_chalk')}</h4>")
     if chalk is None:
         body.append(
             not_run(
@@ -491,9 +548,9 @@ def cash_section(inp: WeekInputs) -> Section:
                 command="dfs sync",
             )
         )
-    elif not chalk:
-        body.append('<p class="ok">No player is expected at 30%+ in double-ups.</p>')
     else:
+        if not chalk:
+            body.append('<p class="ok">No player is expected at 30%+ in double-ups.</p>')
         rows = [
             [
                 e(c["name"]),
@@ -503,7 +560,25 @@ def cash_section(inp: WeekInputs) -> Section:
             ]
             for c in chalk
         ]
-        body.append(table(["Player", "Pos", "Double-up own", "Cash builds using him"], rows))
+        rows += [
+            [
+                e(c["name"]) + ' <span class="chip close">close</span>',
+                e(c["pos"]),
+                e(pct(c["own"])),
+                f"{c['used']} of {n_builds}",
+            ]
+            for c in close
+        ]
+        if rows:
+            body.append(
+                table(
+                    ["Player", "Pos", "Double-up own", "Cash builds using him"],
+                    rows,
+                    cls="stickyname",
+                    how="Every player at 30%+ CashOwn (our double-up ownership model), then the next 3 under "
+                    "the line as close; how many of the last round's cash builds hold each.",
+                )
+            )
         body.append(
             note("Fading a 30%+ player should be a choice, not an accident. The builder does not use this.")
         )
@@ -545,7 +620,14 @@ def gpp_section(inp: WeekInputs) -> Section:
                     e(pct(num(m.get("p_gpp")), 1)),
                 ]
             )
-        body.append(table(["Build", "Shape", "Players", "Top 1%"], rows))
+        body.append(
+            table(
+                ["Build", "Shape", "Players", "Top 1%"],
+                rows,
+                how="The last dfs lineups suggest round's GPP builds, the top 3 by simulated Top 1% (the "
+                "chance to finish in the top 1% of the generated GPP field).",
+            )
+        )
         body.append(
             note("The audit's use for these: single-entry and small-field GPPs (under about 1,000 entrants).")
         )
@@ -575,7 +657,12 @@ def gpp_section(inp: WeekInputs) -> Section:
             for r in stacks["rows"]
         ]
         body.append(
-            table(["QB", "Teammates", "Game", "Top 1%", "Lift", "Lev", "Type in Suggested's rules box"], rows)
+            table(
+                ["QB", "Teammates", "Game", "Top 1%", "Lift", "Lev", "Type in Suggested's rules box"],
+                rows,
+                how="The Stacks tab's top rows as dfs stacks saved them: each QB stack's simulated Top 1% "
+                "rate against how much of the generated GPP field plays it.",
+            )
         )
         body.append(
             note(f"Sorted by {stacks.get('sorted_by') or 'simulated Top 1%'}. {stacks_trust(inp)[1]}")
@@ -633,7 +720,12 @@ def unknowns_section(inp: WeekInputs) -> Section:
         ]
         body.append(
             f'<p class="note">Q and Doubtful players, {e(scope)}, by kickoff.</p>'
-            + table(["Player", "Team", "Status", "Kickoff (ET)", "Yours"], rows)
+            + table(
+                ["Player", "Team", "Status", "Kickoff (ET)", "Yours"],
+                rows,
+                how="The last sync's Questionable and Doubtful players in your pool or builds (else the top "
+                "by projection), by kickoff.",
+            )
         )
     elif not outs:
         body.append('<p class="ok">No Questionable or Doubtful players on the slate.</p>')
@@ -715,7 +807,12 @@ def sunday_section(inp: WeekInputs) -> Section:
             '</span> (say "late swap with live scores")'
         )
         + "</p>",
-        table(["Lineup", "Open slots", "Position", "Best swap"], rows),
+        table(
+            ["Lineup", "Open slots", "Position", "Best swap"],
+            rows,
+            how="The last dfs lineups late-swap run (data/cockpit/late_swap.json): each lineup's unlocked "
+            "slots and the best change it found.",
+        ),
         guard_html,
         note("The Cockpit tab holds the SWAP / LOOK / FILL cues for the same run."),
     ]
@@ -838,7 +935,15 @@ def spent_vs_plan_html(plan: dict | None) -> str:
                 '<span class="bad">over</span>' if over else "ok",
             ]
         )
-    return out + (table(["Format", "Cap a week", "Spent", ""], rows) if rows else "")
+    return out + (
+        table(
+            ["Format", "Cap a week", "Spent", ""],
+            rows,
+            how="What dfs contests plan saved: last week's spend by format (contest log) against the caps.",
+        )
+        if rows
+        else ""
+    )
 
 
 def last_week_section(inp: WeekInputs) -> Section:
@@ -868,7 +973,12 @@ def last_week_section(inp: WeekInputs) -> Section:
     body = [
         f"<p>Week {lw.week}, the newest in your contest log (NFL, paid entries; net = cash winnings minus "
         "fees).</p>",
-        table(["Format", "Entries", "Fees", "Net", "ROI"], rows),
+        table(
+            ["Format", "Entries", "Fees", "Net", "ROI"],
+            rows,
+            how="Your contest log (DK's history export, read at week close): paid NFL entries of the newest "
+            "week, net = winnings minus fees.",
+        ),
     ]
     body.append(spent_vs_plan_html(inp.contest_plan))
     tw = inp.tier_week
@@ -999,7 +1109,12 @@ def tools_html(inp: WeekInputs, tools: list[week_tools.Tool]) -> str:
                 run = "<br>".join(code(v) for v in t.variants)
                 last = last_tag(inp, t.last).replace("last run ", "")
             rows.append([says, run, rich(t.report), last])
-        body = table(["Say to Claude Code", "Command", "What you get back", "Last run"], rows, cls="tools")
+        body = table(
+            ["Say to Claude Code", "Command", "What you get back", "Last run"],
+            rows,
+            cls="tools",
+            how="Every command, grouped by the day you use it (week_tools); last run from data/runlog.csv.",
+        )
         if group == week_tools.REFERENCE:
             groups.append(
                 f"<details><summary><h4>{e(group)} ({len(in_group)})</h4></summary>{body}</details>"
@@ -1032,7 +1147,7 @@ CSS = """
 --rb:#73c197;--te:#e0b04a;--s1:#3987e5;--s2:#d95926;--s3:#199e70}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,
 BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-header,main{max-width:1240px;margin:0 auto;padding:0 16px}header{padding-top:18px}
+header,main{max-width:2400px;margin:0 auto;padding:0 16px}header{padding-top:18px}
 h1{font-size:26px;margin:0}h2{font-size:17px;margin:0}h3{font-size:15.5px;margin:0}h4{font-size:14px;
 margin:14px 0 6px}
 h5{font-size:13px;margin:10px 0 4px;color:var(--dim)}
@@ -1073,13 +1188,15 @@ flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between}
 .dec li.answered>div:first-child{opacity:.75}.answer{color:var(--proven);font-weight:600;font-size:13.5px}
 .dec ul.pivots{flex-basis:100%;margin:2px 0 0 14px;padding:0;list-style:disc}
 .dec ul.pivots li{border:0;padding:2px 0;display:list-item}
-.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13.5px}
+.scroll{overflow:auto;max-height:80vh}.scroll.tall{max-height:88vh}table{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
 th,td{text-align:left;padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--dim);font-weight:600;font-size:12.5px}td.n,th.n{text-align:right;
 font-variant-numeric:tabular-nums}
 table.board td.n{padding-right:12px}
 table.board td.nm{min-width:130px}table.board td.nm .tags{display:block}
-table.board tr.ph td{background:var(--bg);font-weight:700;font-size:12.5px;padding:4px 8px}
+table.board tr.ph th{position:sticky;top:0;z-index:2;background:var(--bg);padding:5px 8px 5px 0;
+white-space:nowrap}
+table.board tr.ph th.nm{z-index:3}table.board .posname{font-weight:700;color:var(--ink);font-size:13px}
 table.board .why{color:var(--dim);font-size:13px;min-width:190px}
 table.board tr.fade-row td{background:var(--bad-soft)}td.hot{color:var(--bad);font-weight:600}
 .tags{margin-top:2px}
@@ -1186,7 +1303,7 @@ table.tools td:nth-child(3){min-width:260px}table.tools code{white-space:normal;
 .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--ink);color:var(--card);
 padding:8px 14px;border-radius:8px;font-size:14px;z-index:30;max-width:90vw}
 .toast.bad{background:var(--bad);color:#fff}
-footer{max-width:1240px;margin:0 auto;padding:6px 16px 30px;color:var(--dim);font-size:12.5px}
+footer{max-width:2400px;margin:0 auto;padding:6px 16px 30px;color:var(--dim);font-size:12.5px}
 .chart.bank{max-width:760px}.chart .line{fill:none;stroke-width:2}
 .chart .zero{stroke:var(--dim);stroke-width:1}
 .chart .s1{stroke:var(--s1)}.chart .s2{stroke:var(--s2)}.chart .s3{stroke:var(--s3)}
@@ -1199,10 +1316,19 @@ vertical-align:3px}
 .lkey.st{background:var(--ink)}
 .prac{font-size:12px;color:var(--dim);white-space:nowrap}
 main{container-type:inline-size}
-@container (max-width:1060px){.board-grid{grid-template-columns:minmax(0,1fr)}.board-grid .side{display:grid;
-grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 14px}
-.board-grid .side #games{grid-column:1/-1}
-.board-grid .side .games{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}}
+.charts-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:0 14px;
+align-items:start}
+.charts-row .chart{max-width:760px}
+#games .games{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+.scroll>table>thead th{position:sticky;top:0;z-index:2;background:var(--card)}
+table.stickyname td:first-child,table.stickyname th:first-child{position:sticky;left:0;z-index:1;
+background:var(--card)}
+table.stickyname thead th:first-child,table.stickyname tr.ph th:first-child{z-index:3}
+table.board tr.ph th:first-child{background:var(--bg)}
+table.board tr.fade-row td:first-child{background:var(--bad-soft)}
+table.ex tr.pos td:first-child{background:var(--bg)}
+body.live.chat-open .grid,body.live.chat-open .charts-row{grid-template-columns:minmax(0,1fr)}
+.drawer{z-index:28}
 @container (max-width:640px){.grid{grid-template-columns:minmax(0,1fr)}
 .prog{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.prog{grid-template-columns:repeat(3,1fr)}}
@@ -1497,7 +1623,7 @@ def render(
     """The whole page as one HTML string. `live` (the served page) adds the controls that write the sheet;
     `sheet` is what the server read from it (`week_writes.LiveSheet`), `answers` the decisions file."""
     from dfs import week_board as wb
-    from dfs import week_explorer, week_learn, week_money, week_top
+    from dfs import week_charts, week_explorer, week_learn, week_money, week_top, week_ui
 
     token = _LIVE.set(live)
     try:
@@ -1584,7 +1710,8 @@ def render(
         return (
             "<!doctype html><html lang=en><head><meta charset=utf-8>"
             '<meta name=viewport content="width=device-width,initial-scale=1">'
-            f"<title>Week {inp.week}</title><style>{CSS}</style></head><body>"
+            f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
+            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}</style></head><body>"
             f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
             + week_top.progress_html(steps)
             + stale_html
@@ -1593,13 +1720,11 @@ def render(
             + week_top.pool_panel_html(panel, live, source)
             + "</div>"
             + week_top.decisions_html(ds, live, inp.now, rules is not None, by_id)
-            + '<div class="grid board-grid">'
             + week_top.board_html(board, by_id, live, week_money.practice_by_id(inp))
-            + "<div>"
-            + '<div class="side">'
+            + '<div class="charts-row">'
             + week_top.charts_html(inp.edge, own_out)
+            + "</div>"
             + week_top.games_html(inp, live)
-            + "</div></div>"
             + week_top.explorer_html(inp, data)
             + '<h2 class="sec">The rest of the week</h2>'
             + "".join(folds)
@@ -1619,7 +1744,15 @@ def render(
                 "<code>dfs week page</code> rebuilds it now."
             )
             + "</footer>"
-            + week_top.explorer_script(data, nonce_attr)
+            + week_top.explorer_data(data)
+            + '<script type="application/json" id="chart-data">'
+            + json.dumps(week_charts.viewer_data(inp.edge, own_out), separators=(",", ":")).replace(
+                "</", "<\\/"
+            )
+            + "</script>"
+            + f'<script type="application/json" id="game-data">{week_top.game_data_json(inp)}</script>'
+            + f"<script{nonce_attr}>{week_ui.JS}</script>"
+            + week_top.explorer_js(data, nonce_attr)
             + f"<script{nonce_attr}>{BOARD_JS}</script>"
             + "</body></html>"
         )

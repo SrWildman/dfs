@@ -342,11 +342,15 @@ EDGE_COLUMNS_USED = [
 
 
 def load_edge(data_dir: Path) -> list[dict] | None:
-    """The synced slate's rows (only the columns the page uses), or None when nothing is synced."""
+    """The synced slate's rows, every column (the Explorer shows every EdgeRaw column, and the usage chart
+    reads Snap% / Tgt%: a short list here left 50 of its columns blank), or None when nothing is synced.
+    `EDGE_COLUMNS_USED` (always present, blank when edge.csv lacks one) is what the rest of the page reads."""
     rows = _read_csv(data_dir / "current" / "edge.csv")
     if not rows:
         return None
-    return [{k: r.get(k, "") for k in EDGE_COLUMNS_USED} for r in rows]
+    return [
+        {**{k: "" for k in EDGE_COLUMNS_USED}, **{k: v for k, v in r.items() if k is not None}} for r in rows
+    ]
 
 
 SNAPSHOT_STAMP = "%Y%m%dT%H%M%SZ"  # store._SNAPSHOT_STAMP_FORMAT: a raw snapshot's file name

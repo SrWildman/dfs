@@ -237,7 +237,7 @@ def test_slate_sorts_by_total_marks_top_games_and_big_moves(tmp_path):
     assert ("Wr Star", "WR", "DAL", "Q") in top.injuries  # a likely starter, Questionable
     assert all(i[0] != "Wr Out" or i[3] == "OUT" for i in top.injuries)
     games_card = section(render(inputs(tmp_path, slate_rows())), "games")
-    assert "DAL @ IND" in games_card and '<div class="game top">' in games_card
+    assert "DAL @ IND" in games_card and '<div class="game top" data-game="2026_09_DAL_IND"' in games_card
     assert "total +2.5 since open" in games_card  # the big move, flagged
     assert games_card.index("DAL @ IND") < games_card.index("NE @ NYJ") or "NYJ @ NE" in games_card
 
@@ -470,10 +470,13 @@ def test_served_page_pool_segments_write_through_the_api(tmp_path):
     page = live(week_page.render(inputs(tmp_path, slate_rows()), live=True, nonce="n"))
     seg = re.search(r'<span class="seg" data-id="id-Qb Alpha".*?</span>', page, re.S).group(0)
     assert "disabled" not in seg and 'data-was=""' in seg
-    js = week_live.JS
+    from dfs import week_ui
+
+    # a click goes through the shared queue (week_ui), `was` = what the page shows; the served script posts it
+    assert "pool: (body) => post('/api/pool', body)" in week_live.JS
     assert (
-        "write('/api/pool', {changes: [{id: seg.dataset.id, value: sb.dataset.v, was: seg.dataset.was}]})"
-        in js
+        "{each: true, changes: changes.map((c) => ({id: c.id, value: c.value, was: P.val[c.id] || ''}))}"
+        in (week_ui.JS)
     )
     assert "pool-tick" not in page and "Add ticked to pool" not in page
 
@@ -597,3 +600,60 @@ def test_the_pool_shortcut_is_in_claude_md_and_runs_pool_add():
     phrases = {p.says[0]: p for p in week_tools.parse_phrases()}
     assert "add X, Y to my pool" in phrases
     assert phrases["add X, Y to my pool"].commands == ["dfs pool add"]
+
+
+# -- the cash core (Plan N item 11) --------------------------------------------------------------------------
+
+
+def _position(pos, n, team="AAA", opp="BBB"):
+    """`n` players of one position: CalPts 30 down to 30 - n + 1, salary falling slower, so Floor per $1K
+    rises as CalPts falls (the cheap end is the value end)."""
+    step = 6000 // n
+    return [row(f"{pos} {i:02d}", pos, team, opp, 9000 - i * step, 30.0 - i) for i in range(n)]
+
+
+@pytest.mark.parametrize(("pos", "cap"), [("QB", 4), ("TE", 4), ("DST", 4), ("RB", 8), ("WR", 8)])
+def test_the_cash_core_caps_are_4_qb_te_dst_and_8_rb_wr(pos, cap):
+    view = week_plays.plays(_position(pos, 24), per=50)
+    assert len(view.cash[pos]) == cap and week_plays.CASH_CORE_CAP[pos] == cap
+
+
+def test_the_cash_core_ranks_floor_per_k_among_the_top_half_on_calpts():
+    rows = _position("QB", 10)  # CalPts 30..21: the median is 25.5, so QB 00-04 are the top half
+    core = [p.name for p in week_plays.plays(rows, per=50).cash["QB"]]
+    # among the top half the cheapest is the best Floor per $1K: QB 04, 03, 02, 01 (QB 05-09 are cheaper
+    # still, but under the median CalPts, so never in the core)
+    assert core == ["QB 04", "QB 03", "QB 02", "QB 01"]
+    by = {r["Name"]: week_plays.floor_per_k(r) for r in rows}
+    assert by["QB 04"] > by["QB 03"] > by["QB 02"] > by["QB 01"] > by["QB 00"]
+
+
+def test_30_percent_chalk_joins_the_core_beyond_the_caps_once_as_chalk_core():
+    rows = _position("QB", 10)
+    for r in rows:
+        r["CashOwn"] = "0.05"
+    rows[9]["CashOwn"] = "0.42"  # QB 09: under the CalPts median, outside the caps: chalk adds him
+    rows[3]["CashOwn"] = "0.30"  # QB 03: in the Floor list AND chalk: shown once, as chalk core
+    core = week_plays.plays(rows, per=50).cash["QB"]
+    names = [p.name for p in core]
+    assert names == ["QB 04", "QB 03", "QB 02", "QB 01", "QB 09"] and len(set(names)) == len(names)
+    flags = {p.name: p.chalk_core for p in core}
+    assert flags == {"QB 04": False, "QB 03": True, "QB 02": False, "QB 01": False, "QB 09": True}
+
+
+def test_chalk_core_shows_on_the_board_as_its_own_chip_never_behind_show_more(tmp_path):
+    from dfs import week_board, week_top
+
+    rows = _position("WR", 12)
+    for r in rows:
+        r["CashOwn"] = "0.04"
+    rows[11]["CashOwn"] = "0.35"
+    inp = inputs(tmp_path, rows)
+    b = week_board.board(inp)
+    chalk = next(r for r in b.by_pos["WR"] if r.name == "WR 11")
+    assert week_board.CHALK_CORE in chalk.roles and week_board.CASH not in chalk.roles and chalk.shown
+    page = render(inp)
+    assert 'class="chip chalk"' in board_row(page, "WR 11")
+    assert week_plays.CASH_CORE_RULE in html.unescape(section(page, "board"))
+    assert "narrows during the week only as the news and the ownership move" in week_plays.CASH_CORE_RULE
+    assert week_top.ROLE_CLASS[week_board.CHALK_CORE] == "chalk"

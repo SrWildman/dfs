@@ -28,6 +28,7 @@ from dfs.week_page import (
     pct,
     table,
 )
+from dfs.week_plays import num
 
 TRUST: dict[str, tuple[str, str]] = {
     "bankroll": (DATA, "Your own Season and Bankroll tabs: what happened, not a prediction."),
@@ -270,7 +271,14 @@ def bankroll_section(inp: WeekInputs) -> Section:
             heads = ["", "Your Weekly Budget, by tier"]
         if g.get("entry") is not None:
             rows.append(["Largest entry", f"{e(cents(g['entry']))} ({g['pct_entry']:g}% of the bankroll)"])
-        body.append(table(heads, rows))
+        body.append(
+            table(
+                heads,
+                rows,
+                how="Arithmetic on your own settings: the Weekly Budget (or your [stakes] rules when set) "
+                "split by tier the way the contest plan splits it.",
+            )
+        )
         body.append(note(" ".join(g.get("lines") or [])))
     curve = b.get("curve") or []
     if curve:
@@ -304,6 +312,8 @@ def bankroll_section(inp: WeekInputs) -> Section:
                     "Spent / bankroll",
                 ],
                 rows,
+                how="Your Season tab, found by header: each week's net by series, the ending bankroll and "
+                "the money risked.",
             )
             + "</details>"
         )
@@ -432,7 +442,13 @@ def inactives_section(inp: WeekInputs) -> Section:
                 ]
             )
         body.append(
-            table(["Player", "Status", "Slot", "Kickoff (ET)", "Practice", "Pivots (best first)"], rows)
+            table(
+                ["Player", "Status", "Slot", "Kickoff (ET)", "Practice", "Pivots (best first)"],
+                rows,
+                cls="stickyname",
+                how="Every OUT / Doubtful / Questionable player in your entered lineups (else the Lineups "
+                "tab) whose game has not started, with up to three pivots that fit the slot and the salary.",
+            )
         )
     body.append(
         note(
@@ -538,6 +554,19 @@ def calibration_lines(cal: dict | None) -> list[str]:
     return out
 
 
+def pool_cell(pid: str, value: str) -> str:
+    """His pool value, painted by the page's shared pool store (`week_ui`) from then on."""
+    return (
+        f'<span class="poolval{" in" if value else ""}" data-id="{e(pid)}">{e(value or "not in pool")}</span>'
+    )
+
+
+CONSENSUS_CAPTION = (
+    "The legal lineup with the highest total predicted ownership: CashOwn for double-ups, GppOwn for "
+    "GPPs; our ownership model; DK's roster rules and salary cap."
+)  # Plan N item 13, Sam's words
+
+
 def consensus_section(inp: WeekInputs) -> Section:
     trust = TRUST["consensus"]
     title = "Consensus lineup and copies"
@@ -554,7 +583,8 @@ def consensus_section(inp: WeekInputs) -> Section:
             trust,
             ran=False,
         )
-    body = []
+    body = [f'<p class="caption">{e(CONSENSUS_CAPTION)}</p>']
+    by_name = {str(r.get("Name", "")): r for r in inp.edge or []}
     for kind, label, own in (("cash", "Double-ups (CashOwn)", "CashOwn"), ("gpp", "GPPs (GppOwn)", "GppOwn")):
         c = (v.get("consensus") or {}).get(kind)
         if not c:
@@ -565,8 +595,31 @@ def consensus_section(inp: WeekInputs) -> Section:
             if c.get("copies") is not None
             else ""
         )
+        slots = c.get("slots") or [""] * len(c["names"])
+        rows = []
+        for slot, name in zip(slots, c["names"], strict=True):
+            r = by_name.get(name) or {}
+            rows.append(
+                [
+                    e(slot),
+                    e(name),
+                    e(r.get("Position", "")),
+                    e(r.get("Team", "")),
+                    e(f"${num(r.get('Salary')):,.0f}") if num(r.get("Salary")) else "-",
+                    e(pct(num(r.get(own)))),
+                    pool_cell(str(r.get("Id") or ""), inp.pool.get(name, "")),
+                ]
+            )
         body.append(
-            f"<h4>The field's lineup: {e(label)}</h4><p>{e(', '.join(c['names']))}</p>"
+            f"<h4>The field's lineup: {e(label)}</h4>"
+            + table(
+                ["Slot", "Player", "Pos", "Team", "Salary", own, "Your pool"],
+                rows,
+                cls="stickyname",
+                how=f"Solved exactly: the legal lineup (DK's roster and $50,000 cap) with the most total "
+                f"{own}; OUT, IR and Doubtful players left out; shown in DK's roster order, FLEX = the "
+                "latest kickoff.",
+            )
             + note(f"Total {own} {pct(c['own_sum'])}, salary ${c['salary']:,}{copies}.")
         )
     rows = []
@@ -603,6 +656,9 @@ def consensus_section(inp: WeekInputs) -> Section:
                     "Expected copies",
                 ],
                 rows,
+                cls="stickyname",
+                how="Your entered lineups (else the builds) against the field's lineup; copies from the "
+                "duplicates model fitted on your standings, by each contest's typical field.",
             )
         )
     else:
@@ -741,7 +797,16 @@ def entry_plan_section(inp: WeekInputs) -> Section:
         for c in sorted(p.contests, key=lambda c: (c.tier, -c.fee, c.name))
     ]
     heads = ["Contest", "Format", "Tier", "Fee", "Entries", "Your lineups", "Suggested (hint)"]
-    body.append(f"<h4>Contests</h4>{table(heads, rows)}")
+    body.append(
+        "<h4>Contests</h4>"
+        + table(
+            heads,
+            rows,
+            cls="stickyname",
+            how="DK's entries file as dfs entries record saved it (data/entered): each contest's tier by "
+            "contest_tiers' rules, its entries and the lineups in it.",
+        )
+    )
     body.append(
         f"<p>{chip('entry_hint')} <b>Suggested (hint)</b> is the same rule <code>dfs entries fill</code> "
         "greys in: the cash "

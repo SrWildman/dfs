@@ -44,7 +44,11 @@ border-left:1px solid var(--line);background:var(--card)}
 .chat-head{padding:8px 10px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;
 flex-wrap:wrap}
 .chat-head .who{font-size:12px;color:var(--dim);flex:1;min-width:160px}
-#chat.collapsed .chat-head{justify-content:center;padding:8px 0}
+#chat.collapsed .chat-head{justify-content:center;padding:8px 0;border-bottom:0}
+#chat.collapsed{cursor:pointer}
+#chat.collapsed #chat-toggle{writing-mode:vertical-rl;padding:10px 3px;border-color:var(--accent);color:var(--accent);
+font-weight:600}
+#chat.collapsed #chat-toggle::after{content:" ◂"}
 .chat-controls{padding:6px 10px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12.5px;
 border-bottom:1px solid var(--line)}
 .chat-controls select,.chat-controls button{font:inherit;padding:2px 6px}
@@ -55,11 +59,12 @@ border-bottom:1px solid var(--line)}
 .msg{margin:0 0 10px;white-space:pre-wrap;word-break:break-word}
 .msg.user{background:rgba(31,94,255,.1);border-radius:8px;padding:6px 10px}
 .msg.error{color:var(--bad)}.msg.note{color:var(--dim);font-size:12.5px}
-.chip{margin:0 0 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;padding:2px 8px}
-.chip summary{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chip pre{white-space:pre-wrap;word-break:break-word;font:11.5px/1.4 ui-monospace,Menlo,monospace;margin:4px 0;
+#chat-log .chip{display:block;margin:0 0 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;
+padding:2px 8px;white-space:normal;font-weight:400;background:transparent;color:inherit}
+#chat-log .chip summary{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#chat-log .chip pre{white-space:pre-wrap;word-break:break-word;font:11.5px/1.4 ui-monospace,Menlo,monospace;margin:4px 0;
 max-height:220px;overflow:auto}
-.chip.err summary{color:var(--bad)}
+#chat-log .chip.err summary{color:var(--bad)}
 .approval{border:2px solid var(--shadow);border-radius:8px;padding:8px 10px;margin:0 0 10px;background:var(--flag)}
 .approval pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Menlo,monospace;
 max-height:200px;overflow:auto;margin:6px 0}
@@ -97,7 +102,8 @@ border-radius:6px;padding:4px 10px;cursor:pointer}
 #run-out{background:#0f1115;color:#d7dae0;border-radius:8px;padding:10px;font:12px/1.4 ui-monospace,Menlo,
 monospace;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:8px 0}
 @media(max-width:900px){body.live{display:block}#pagecol{height:auto;overflow:visible}
-#chat{position:fixed;right:0;top:0;width:100%;max-width:430px;z-index:5}#chat.collapsed{width:44px}}
+#chat{position:fixed;right:0;top:0;width:100%;max-width:430px;z-index:5}#chat.collapsed{width:44px}
+body.live.chat-closed #pagecol{padding-right:44px}}
 """
 
 CONTEST_HTML = """
@@ -274,7 +280,17 @@ $('#chat-send').onclick = send;
 box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('#chat-stop').onclick = async () => { try { await post('/api/chat/stop'); } catch (e) { add('error', e.message); } };
 $('#chat-new').onclick = () => { if (chat.running) return; chat.id = null; log.replaceChildren(); $('#chat-list').value = ''; };
-$('#chat-toggle').onclick = () => $('#chat').classList.toggle('collapsed');
+/* the chat folds to a thin tab and back, remembered per browser (Plan N item 1) */
+function chatFold(collapsed, save) {
+  $('#chat').classList.toggle('collapsed', collapsed);
+  document.body.classList.toggle('chat-open', !collapsed); document.body.classList.toggle('chat-closed', collapsed);
+  $('#chat-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('#chat-toggle').title = collapsed ? 'Show the chat' : 'Hide the chat';
+  if (save) { try { localStorage.setItem('dfs-chat-collapsed', collapsed ? '1' : '0'); } catch (e) {} }
+}
+(() => { let c = false; try { c = localStorage.getItem('dfs-chat-collapsed') === '1'; } catch (e) {} chatFold(c, false); })();
+$('#chat-toggle').onclick = (e) => { e.stopPropagation(); chatFold(!$('#chat').classList.contains('collapsed'), true); };
+$('#chat').addEventListener('click', () => { if ($('#chat').classList.contains('collapsed')) chatFold(false, true); });
 $('#chat-auto').onchange = (e) => { if (e.target.checked && !confirm("Auto mode lets Claude Code approve what it judges safe without asking you. Turn it on?")) e.target.checked = false; };
 async function loadChats() {
   try {
@@ -294,7 +310,7 @@ $('#chat-list').onchange = async (e) => {
 };
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button.ask'); if (!b) return;
-  $('#chat').classList.remove('collapsed'); box.value = b.dataset.say; box.focus();
+  chatFold(false, true); box.value = b.dataset.say; box.focus();
 });
 
 /* ---------- status ---------- */
@@ -313,22 +329,34 @@ async function status() {
 setInterval(status, 4000);
 
 /* ---------- reload the page's sections (the chat and the live cards stay where they are) ---------- */
+/* What is open, what is expanded and where the page is scrolled survive the refresh (Plan N item 5:
+   week_ui's dfsUI keeps them per browser); the pool store adopts the sheet's values from the fresh HTML,
+   except a cell still being written. */
+let refreshing = null;
 async function refreshSections() {
-  try {
-    const r = await fetch(url('/?fragment=1')); if (!r.ok) return;
-    const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-    for (const fresh of doc.querySelectorAll('#pagecol section[id]:not([data-keep])')) {
-      const old = document.getElementById(fresh.id); if (!old) continue;
-      const was = old.querySelector(':scope > details'), now = fresh.querySelector(':scope > details');
-      if (was && now) now.open = was.open;   // a section Sam opened stays open
-      old.replaceWith(fresh);
-    }
-    const sub = doc.querySelector('.sub'), cur = $('.sub'); if (sub && cur) cur.replaceWith(sub);
-    const rw = doc.querySelector('#rules-was'), rc = $('#rules-was'); if (rw && rc) rc.textContent = rw.textContent;
-    const ed = doc.querySelector('#explorer-data');
-    if (ed && window.dfsExplorer) { try { const d = JSON.parse(ed.textContent); const pi = d.columns.indexOf('Pool');
-      d.rows.forEach((row, i) => window.dfsExplorer.setPool(d.ids[i], row[pi] || '')); window.dfsExplorer.render(); } catch (e) {} }
-  } catch (e) {}
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    try {
+      if (window.dfsUI) window.dfsUI.capture();
+      const r = await fetch(url('/?fragment=1')); if (!r.ok) return;
+      const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+      const ed = doc.querySelector('#explorer-data');
+      if (ed && window.dfsPool) { try { window.dfsPool.adoptExplorer(JSON.parse(ed.textContent)); } catch (e) {} }
+      for (const fresh of doc.querySelectorAll('#pagecol section[id]:not([data-keep])')) {
+        const old = document.getElementById(fresh.id); if (!old) continue;
+        const was = old.querySelector(':scope > details'), now = fresh.querySelector(':scope > details');
+        if (was && now) now.open = was.open;   // a section Sam opened stays open
+        old.replaceWith(fresh);
+        if (window.dfsPool) window.dfsPool.adopt(fresh);
+      }
+      const sub = doc.querySelector('.sub'), cur = $('.sub'); if (sub && cur) cur.replaceWith(sub);
+      const rw = doc.querySelector('#rules-was'), rc = $('#rules-was'); if (rw && rc) rc.textContent = rw.textContent;
+      for (const id of ['chart-data', 'game-data']) { const f = doc.getElementById(id), c = document.getElementById(id); if (f && c) c.textContent = f.textContent; }
+      if (window.dfsExplorer) window.dfsExplorer.render();
+      if (window.dfsUI) window.dfsUI.restore();
+    } catch (e) {} finally { refreshing = null; }
+  })();
+  return refreshing;
 }
 
 /* ---------- run buttons ---------- */
@@ -433,26 +461,20 @@ function toast(text, bad) {
   const t = el('div', 'toast' + (bad ? ' bad' : ''), text); document.body.append(t);
   setTimeout(() => t.remove(), bad ? 9000 : 4000);
 }
-function showPool(values) {
-  for (const [id, v] of Object.entries(values || {})) {
-    for (const seg of document.querySelectorAll('.seg[data-id="' + CSS.escape(id) + '"]')) {
-      seg.dataset.was = v;
-      for (const b of seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === v);
+/* the read-back goes to the shared pool store (week_ui), which paints every place that shows him */
+function showPool(values) { if (window.dfsPool) window.dfsPool.set(values || {}); }
+/* the page's other writes (decisions, the starting pool) wait their turn in the same queue as the pool
+   cells (week_ui's dfsQueue): never refused for being second; the queue refreshes the sections at its end */
+function write(path, data) {
+  return new Promise((resolve) => window.dfsQueue.run(async () => {
+    try { const r = await post(path, data); showPool(r.pool); if (r.message) toast(r.message); resolve(r); }
+    catch (e) {
+      if (e.body && e.body.current && path.startsWith('/api/pool')) showPool(e.body.current);
+      toast(e.message, true); resolve(null);
     }
-    if (window.dfsExplorer) window.dfsExplorer.setPool(id, v);
-  }
+  }));
 }
-let writing = false;
-async function write(path, data) {
-  if (writing) { toast('One change at a time: the last one is still being written.', true); return null; }
-  writing = true;
-  try {
-    const r = await post(path, data); showPool(r.pool); if (r.message) toast(r.message); return r;
-  } catch (e) {
-    if (e.body && e.body.current && path.startsWith('/api/pool')) showPool(e.body.current);
-    toast(e.message, true); return null;
-  } finally { writing = false; await refreshSections(); }
-}
+window.dfsLive = {post, pool: (body) => post('/api/pool', body), stack: (body) => post('/api/stack', body), refresh: refreshSections, toast};
 function askFirst(anchor, text, yes, onYes) {
   const old = anchor.parentElement.querySelector('.confirm'); if (old) { old.remove(); return; }
   const box = el('div', 'confirm flag'); box.append(el('div', null, text));
@@ -464,13 +486,6 @@ document.addEventListener('click', async (e) => {
   const b = e.target.closest('button.runbtn');
   if (b) { if (b.dataset.form) openForm(b.dataset.command, {}, ''); else startJob(b.dataset.command, {}); return; }
   if (READONLY && e.target.closest('.seg button, .dec button, #start-pool')) { toast('This week is closed: the page writes nothing.', true); return; }
-  const sb = e.target.closest('.seg[data-id] button[data-v]');
-  if (sb) {
-    const seg = sb.closest('.seg'); if (sb.dataset.v === seg.dataset.was) return;
-    seg.classList.add('busy');
-    await write('/api/pool', {changes: [{id: seg.dataset.id, value: sb.dataset.v, was: seg.dataset.was}]});
-    seg.classList.remove('busy'); return;
-  }
   if (e.target.closest('button[data-action=start-pool]')) { const sp = $('#start-pool'); if (sp) { sp.scrollIntoView({block: 'center'}); sp.click(); } return; }
   const sp = e.target.closest('#start-pool');
   if (sp) {

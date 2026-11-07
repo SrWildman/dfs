@@ -17,6 +17,7 @@ import re
 from dfs import week_board as wb
 from dfs import week_charts, week_explorer, week_plays
 from dfs.week_inputs import WeekInputs
+from dfs.week_page import how_html
 from dfs.week_plays import POSITIONS, num
 
 TIP = {
@@ -28,10 +29,18 @@ TIP = {
     "Boom": week_explorer.TIPS["Boom%"],
     "leverage": "Leverage: upside the field is not on (ceiling or Boom% rank against ownership rank).",
 }
-ROLE_CLASS = {wb.VALUE: "value", wb.CASH: "cash", wb.UPSIDE: "upside", wb.FADE_ROLE: "fade"}
+ROLE_CLASS = {
+    wb.VALUE: "value",
+    wb.CASH: "cash",
+    wb.CHALK_CORE: "chalk",
+    wb.UPSIDE: "upside",
+    wb.FADE_ROLE: "fade",
+}
 ROLE_TIP = {
     wb.VALUE: "Value: top CalPts per $1K at his position.",
-    wb.CASH: "Cash core: CalPts and value at least the position's median, best Floor first.",
+    wb.CASH: week_plays.CASH_CORE_RULE,
+    wb.CHALK_CORE: "Chalk core: predicted in 30% or more of double-up lineups (CashOwn), so in the cash core "
+    "whatever the caps; play him or fade him on purpose.",
     wb.UPSIDE: "Upside: best Boom% (once GPP ownership is out, the top half of Boom% by leverage).",
     wb.FADE_ROLE: "Fade: the FADE↓ signal (a tight end scoring above his usage), proven in Model Check.",
 }
@@ -140,7 +149,11 @@ def pool_panel_html(panel: wb.PoolPanel, live: bool, source: str) -> str:
         f"<p><b>{panel.total} player{'s' if panel.total != 1 else ''}.</b>"
         + (" Nothing picked yet." if not panel.total else "")
         + "</p>",
-        f'<table class="counts"><tr><th></th>{head}</tr>{body}</table>',
+        how_html(
+            "Your pool as the sheet's EdgeRaw Pool column holds it (read live on the served page, else the "
+            "last sync): Both counts in Cash and in GPP."
+        )
+        + f'<table class="counts"><tr><th></th>{head}</tr>{body}</table>',
     ]
     if panel.gaps:
         parts.append('<p class="warn"><b>Gaps:</b> ' + e("; ".join(panel.gaps)) + "</p>")
@@ -169,8 +182,8 @@ def pool_panel_html(panel: wb.PoolPanel, live: bool, source: str) -> str:
             f'<p><button type="button" id="start-pool" data-names="{e(names)}" '
             f"data-changes='{e(json.dumps(changes))}'>Add the suggested starting pool ({len(panel.start)})"
             "</button></p>"
-            '<p class="note">Value and Cash core players as Cash, Upside players as GPP, both as Both; nobody '
-            "already in your pool is changed. It asks first.</p>"
+            '<p class="note">Value, Cash core and Chalk core players as Cash, Upside players as GPP, both as Both; '
+            "nobody already in your pool is changed. It asks first.</p>"
         )
     elif not live:
         parts.append(
@@ -251,14 +264,21 @@ def decisions_html(
                 for p in d.pivots
             )
             pivots = f'<ul class="pivots" data-key="{e(d.key)}"{" hidden" if live else ""}>{rows}</ul>'
+        pooled = [r for r in ([d.row] if d.kind in ("chalk", "q") and d.row else [])]
+        badge = "".join(
+            f' <span class="poolval{" in" if (pool_by_id or {}).get(wb.pid(r)) else ""}" data-id="{e(wb.pid(r))}">'
+            f"{e((pool_by_id or {}).get(wb.pid(r)) or 'not in pool')}</span>"
+            for r in pooled
+        )
         items.append(
-            f'<li class="{"answered" if d.answer else ""}" data-key="{e(d.key)}"><div>{text}</div>'
+            f'<li class="{"answered" if d.answer else ""}" data-key="{e(d.key)}"><div>{text}{badge}</div>'
             f'<div class="opts">{controls}</div>{pivots}</li>'
         )
     foot = (
-        '<p class="note">Play writes <code>cash: Name</code> on Suggested\'s Always use line, Fade on Never use '
-        "(cash builds only); a stack writes <code>more Name</code> on Max exposure (GPP builds only). The next "
-        "<code>--iterate</code> reads them.</p>"
+        '<p class="note">Play writes <code>cash: Name</code> on Suggested\'s Always use line and adds him to your '
+        "pool as Cash; Fade writes Never use (cash builds only) and takes him out of the pool only if he was Cash "
+        "only; a stack writes <code>more Name</code> on Max exposure (GPP builds only) and adds the QB and mates "
+        "as GPP; a pivot adds him as Both. Undo takes back both. The next <code>--iterate</code> reads them.</p>"
         if live
         else '<p class="note">Answers are read from the sheet on the served page.</p>'
     )
@@ -297,6 +317,69 @@ def own_td(value: float | None, pending: bool) -> str:
     return f'<td class="n{hot}">{pct(value)}</td>'
 
 
+BOARD_COLUMNS = (
+    ("Player", ""),
+    ("Opp", ""),
+    ("Spread", "n"),
+    ("Total", "n"),
+    ("Implied", "n"),
+    ("Salary", "n"),
+    ("Proj", "n"),
+    ("Per $1K", "n"),
+    ("DU own", "n"),
+    ("GPP own", "n"),
+    ("Why", ""),
+    ("Pool", ""),
+)
+GAME_TIP = {
+    "Spread": "His team's spread from the line (minus = favoured).",
+    "Total": "The game's total (over / under).",
+    "Implied": week_explorer.TIPS["Implied"],
+}
+BOARD_HOW = (
+    "Plan I's plays from the last sync (week_plays): Value = CalPts per $1K, Cash core = "
+    + week_plays.CASH_CORE_RULE.removeprefix("Cash core: ")
+    + " Upside = Boom% (by leverage once GppOwn is out); FADE↓ = the proven signal."
+)
+
+
+def game_link(row: dict, team: str) -> str:
+    """A team (or Opp) cell that opens the game view (Plan N item 10)."""
+    game = str(row.get("GameID") or "")
+    if not team:
+        return ""
+    return f'<a class="tm" href="#" data-game="{e(game)}" data-team="{e(team)}" title="Open the game">{e(team)}</a>'
+
+
+def sel_box(row_id: str) -> str:
+    """The multi-select tick (Plan N item 7): shift-click ticks the range."""
+    return f'<input type="checkbox" class="sel" data-id="{e(row_id)}" aria-label="Select">'
+
+
+def _signed(value: float | None) -> str:
+    return "-" if value is None else f"{value:+g}"
+
+
+def board_head(pos: str) -> str:
+    """The header row each position group repeats (sticky while its group scrolls by)."""
+    cells = []
+    for label, cls in BOARD_COLUMNS:
+        if label == "Player":
+            text = f'<span class="posname">{e(pos)}</span>'
+        elif label == "Proj":
+            text = tip("CalPts", "Proj")
+        elif label in ("Per $1K", "DU own", "GPP own"):
+            text = tip(label)
+        elif label in GAME_TIP:
+            text = f'<abbr title="{e(GAME_TIP[label])}">{e(label)}</abbr>'
+        else:
+            text = e(label)
+        cells.append(
+            f'<th class="{" ".join(c for c in (cls, "nm" if label == "Player" else "") if c)}">{text}</th>'
+        )
+    return f'<tr class="ph">{"".join(cells)}</tr>'
+
+
 def board_html(
     b: wb.Board, pool_by_id: dict[str, str], live: bool, practice: dict[str, str] | None = None
 ) -> str:
@@ -307,29 +390,27 @@ def board_html(
             + say("sync")
             + ".</p></section>"
         )
-    head = (
-        "<tr><th>Player</th><th class=n>Salary</th><th class=n>" + tip("CalPts", "Proj") + "</th>"
-        "<th class=n>"
-        + tip("Per $1K")
-        + "</th><th class=n>"
-        + tip("DU own")
-        + "</th><th class=n>"
-        + tip("GPP own")
-        + "</th><th>Why</th><th>Pool</th></tr>"
-    )
+    width = len(BOARD_COLUMNS)
     body = []
     for pos in POSITIONS:
         rows = b.by_pos.get(pos) or []
         if not rows:
             continue
         more = sum(1 for r in rows if not r.shown)
-        body.append(f'<tbody class="posgrp" data-pos="{pos}"><tr class="ph"><td colspan="8">{pos}</td></tr>')
+        body.append(f'<tbody class="posgrp" data-pos="{pos}">{board_head(pos)}')
         for r in rows:
             why = e(r.why) + (f'<br><span class="record">{e(r.record)}</span>' if r.record else "")
             cls = " ".join(c for c in ("fade-row" if r.fade else "", "" if r.shown else "more") if c)
+            implied = wb.implied_total(r.row)
+            total = num(r.row.get("OverUnder"))
             body.append(
-                f'<tr class="{cls}"{" hidden" if not r.shown else ""}><td class="nm">{pl(r.row)}'
+                f'<tr class="{cls}" data-id="{e(r.id)}"{" hidden" if not r.shown else ""}><td class="nm">'
+                f"{sel_box(r.id)}{pl(r.row)}"
                 f'<div class="tags">{role_chips(r, (practice or {}).get(wb.pid(r.row), ""))}</div></td>'
+                f"<td>{game_link(r.row, str(r.row.get('Opp') or ''))}</td>"
+                f"<td class=n>{_signed(num(r.row.get('Spread')))}</td>"
+                f"<td class=n>{'-' if total is None else f'{total:g}'}</td>"
+                f"<td class=n>{'-' if implied is None else f'{implied:.1f}'}</td>"
                 f"<td class=n>${week_plays.salary(r.row):,.0f}</td><td class=n>{r.calpts:.1f}</td>"
                 f"<td class=n>{(wb.per_k(r.row) or 0):.2f}</td>"
                 + own_td(num(r.row.get("CashOwn")), b.cash_pending)
@@ -338,7 +419,7 @@ def board_html(
             )
         if more:
             body.append(
-                f'<tr class="morerow"><td colspan="8"><button type="button" class="showmore" data-pos="{pos}">'
+                f'<tr class="morerow"><td colspan="{width}"><button type="button" class="showmore" data-pos="{pos}">'
                 f"Show {more} more {pos}</button></td></tr>"
             )
         body.append("</tbody>")
@@ -349,33 +430,57 @@ def board_html(
         else ""
     )
     return (
-        '<section class="card" id="board"><div class="card-head"><h2>The board</h2></div>'
+        '<section class="card" id="board"><div class="card-head"><h2>The board</h2>'
+        + how_html(BOARD_HOW)
+        + "</div>"
         '<p class="note">Each player once, with his roles: the top 3 per role and position (<i>Show more</i> for the '
-        "next ones). A FADE↓ player is only a Fade, last in his position, with the signal's record. The Why line "
-        "is what the columns do not say. Click a name for everything about him.</p>"
+        "next ones; a chalk core player is always shown). A FADE↓ player is only a Fade, last in his position, with "
+        "the signal's record. The Why line is what the columns do not say. Click a name for everything about him, "
+        "an Opp for the game; tick players (shift-click for a range) to set their pool in one go.</p>"
         + pending
-        + f'<div class="scroll"><table class="board"><thead>{head}</thead>{"".join(body)}</table></div></section>'
+        + f'<div class="scroll tall"><table class="board stickyname">{"".join(body)}</table></div></section>'
     )
 
 
 # -- the charts and the slate --------------------------------------------------------------------------------
 
 
+def chart_card(sid: str, key: str, title: str, note_html: str, svg: str) -> str:
+    """A chart in its card: the note, the legend, the chart, a Full screen button and the "how this is built"
+    note (Plan N items 9 and 14). A click on the chart (not on a dot) opens the viewer too."""
+    return (
+        f'<section class="card chartcard" id="{sid}" data-chart="{key}"><div class="card-head"><h2>{e(title)}</h2>'
+        f'<button type="button" class="expand" data-chart="{key}" title="Zoom, pan and select">⤢ Full screen</button>'
+        + how_html(week_charts.HOW[key])
+        + f"</div>{note_html}{week_charts.LEGEND}{svg}</section>"
+    )
+
+
 def charts_html(edge: list[dict] | None, ownership_out: bool) -> str:
-    value = week_charts.value_map(edge)
-    lev = week_charts.leverage_map(edge) if ownership_out else ""
+    value = week_charts.value_map(edge, width=520, height=340)
+    lev = week_charts.leverage_map(edge, width=520, height=340) if ownership_out else ""
     parts = []
     if value:
         parts.append(
-            '<section class="card" id="value-map"><div class="card-head"><h2>Value map</h2></div>'
-            '<p class="note">RB, WR, TE. Dots above the dashed line beat 3 points per $1K; the best are named. '
-            f"Hover a dot for the numbers, click it for the player.</p>{week_charts.LEGEND}{value}</section>"
+            chart_card(
+                "value-map",
+                "value",
+                "Value map",
+                '<p class="note">RB, WR, TE. Dots above the dashed line beat 3 points per $1K; the best are named. '
+                "Hover a dot for the numbers, click it for the player, click the chart to zoom and select.</p>",
+                value,
+            )
         )
     if lev:
         parts.append(
-            '<section class="card" id="leverage-map"><div class="card-head"><h2>Leverage map</h2></div>'
-            f'<p class="note">GPP ownership against the ceiling. The shaded corner is {tip("leverage")}: '
-            f"low owned with a top-quarter ceiling.</p>{week_charts.LEGEND}{lev}</section>"
+            chart_card(
+                "leverage-map",
+                "leverage",
+                "Leverage map",
+                f'<p class="note">GPP ownership against the ceiling. The shaded corner is {tip("leverage")}: '
+                "low owned with a top-quarter ceiling.</p>",
+                lev,
+            )
         )
     elif value:
         parts.append(
@@ -420,7 +525,8 @@ def games_html(inp: WeekInputs, live: bool = False) -> str:
         )
         total = f"{g.total:g}" if g.total is not None else "-"
         cards.append(
-            f'<div class="game{" top" if g.top else ""}"><div class="gh"><b>{e(title)}</b><span>{e(total)}</span></div>'
+            f'<div class="game{" top" if g.top else ""}" data-game="{e(g.key)}" role="button" tabindex="0" '
+            f'title="Open the game"><div class="gh"><b>{e(title)}</b><span>{e(total)}</span></div>'
             f'<div class="gk">{e(g.kickoff)}{(" · " + e(g.weather)) if g.weather else ""}</div>{bars}'
             f'<div class="gflags">{"".join(flags)}</div></div>'
         )
@@ -432,10 +538,106 @@ def games_html(inp: WeekInputs, live: bool = False) -> str:
             + ".</p>"
         )
     return (
-        '<section class="card" id="games"><div class="card-head"><h2>The slate</h2></div>'
+        '<section class="card" id="games"><div class="card-head"><h2>The slate</h2>'
+        + how_html(
+            "Every game in the last sync, highest total first: team implied total = half the total minus half "
+            "the team's spread; stack = a game of the Stacks input's top rows."
+        )
+        + "</div>"
         '<p class="note">Team implied totals, highest games first; <span class="tag stack">stack</span> marks a '
-        f'game of the sim\'s top stacks.</p>{opening}<div class="games">{"".join(cards)}</div></section>'
+        "game of the sim's top stacks. Click a game for both teams side by side.</p>"
+        f'{opening}<div class="games">{"".join(cards)}</div></section>'
     )
+
+
+GAME_GROUPS = (("QB", ("QB",)), ("Pass catchers", ("WR", "TE")), ("RB", ("RB",)), ("DST", ("DST",)))
+GAME_HOW = (
+    "Both teams' priced players from the last sync (OUT and IR left out), by position, best CalPts first; the "
+    "line from the odds feed; the stacks are the Stacks input's saved top rows in this game (dfs stacks)."
+)
+
+
+def _pct1(value: float | None) -> str:
+    return "-" if value is None else f"{value * 100:.1f}%"
+
+
+def game_data(inp: WeekInputs) -> dict:
+    """The game view's data (Plan N item 10), per game key: the title and line, each team's players by position
+    group (salary, CalPts, ceiling, GppOwn, leverage) and the saved stacks in the game."""
+    games = week_plays.slate(inp.edge)
+    if not games:
+        return {}
+    players = week_explorer.players(inp.edge)
+    stacks = (inp.stacks or {}).get("rows") or []
+    out = {}
+    for g in games:
+        teams = [t for t in (g.away, g.home) if t]
+        title = f"{g.away} @ {g.home}" if g.away and g.home else g.key
+        bits = [f"total {g.total:g}" if g.total is not None else "no total yet"]
+        if g.favorite and g.spread is not None:
+            bits.append(f"{g.favorite} {g.spread:+g}")
+        imp = [f"{t} {g.implied[t]:.1f}" for t in teams if t in g.implied]
+        if imp:
+            bits.append("implied " + " / ".join(imp))
+        bits += [x for x in (g.kickoff, g.weather) if x]
+        by_team: dict[str, list] = {}
+        for t in teams:
+            mine = [r for r in players if r.get("Team") == t]
+            groups = []
+            for label, positions in GAME_GROUPS:
+                rows = sorted(
+                    (r for r in mine if r.get("Position") in positions),
+                    key=lambda r: -(num(r.get("CalPts")) or 0),
+                )
+                if rows:
+                    groups.append(
+                        [
+                            label,
+                            [
+                                {
+                                    "id": wb.pid(r),
+                                    "name": str(r.get("Name", "")),
+                                    "pos": str(r.get("Position", "")),
+                                    "sal": week_plays.salary(r),
+                                    "cal": num(r.get("CalPts")),
+                                    "ceil": num(r.get("CeilM")) or num(r.get("Ceiling")),
+                                    "gpp": num(r.get("GppOwn")),
+                                    "lev": num(r.get("Leverage")),
+                                    "avail": wb.avail(r),
+                                }
+                                for r in rows
+                            ],
+                        ]
+                    )
+            by_team[t] = groups
+        in_game = []
+        for st in stacks:
+            found = set(re.findall(r"[A-Z]{2,3}", str(st.get("game") or "")))
+            if set(teams) and set(teams) <= found:
+                lift = num(st.get("lift"))
+                in_game.append(
+                    f"{st.get('qb', '')} + {st.get('mates', '')}: Top 1% {_pct1(num(st.get('top1')))}"
+                    + (f", lift {lift:.1f}x" if lift is not None else "")
+                    + (f", leverage {_pct1(num(st.get('lev')))}" if num(st.get("lev")) is not None else "")
+                    + (f" (type: {st.get('rule')})" if st.get("rule") else "")
+                )
+        out[g.key] = {
+            "title": title,
+            "how": GAME_HOW,
+            "line": " · ".join(bits),
+            "order": teams,
+            "implied": {t: g.implied.get(t) for t in teams},
+            "teams": by_team,
+            "stacks": in_game,
+            "no_stacks": "None of the saved top stacks is in this game"
+            if stacks
+            else "No stacks saved for this week yet (dfs stacks saves its top rows).",
+        }
+    return out
+
+
+def game_data_json(inp: WeekInputs) -> str:
+    return json.dumps(game_data(inp), separators=(",", ":"), default=str).replace("</", "<\\/")
 
 
 # -- the Explorer --------------------------------------------------------------------------------------------
@@ -448,6 +650,7 @@ def explorer_html(inp: WeekInputs, data: dict) -> str:
             '<p class="notrun"><b>Not run yet.</b> Nothing is synced.</p></section>'
         )
     charts = (
+        '<p class="note">Click a chart to open it full screen (zoom, pan, select).</p>'
         f'<div class="ex-chart" data-chart="value" hidden>{week_charts.value_map(inp.edge, width=520, height=340)}</div>'
         f'<div class="ex-chart" data-chart="leverage" hidden>'
         f"{week_charts.leverage_map(inp.edge, width=520, height=340) or '<p class=dim>No GPP ownership yet.</p>'}</div>"
@@ -458,7 +661,12 @@ def explorer_html(inp: WeekInputs, data: dict) -> str:
     )
     return (
         '<section class="card" id="explorer-card" data-keep><div class="card-head"><h2>Explorer</h2>'
-        '<span class="asof">every priced player, every EdgeRaw column</span></div>'
+        '<span class="asof">every priced player, every EdgeRaw column</span>'
+        + how_html(
+            "Every priced player in the last sync (OUT and IR left out) with every EdgeRaw column; a lens is a "
+            "column set and a sort; Per $1K, Implied, Chalk, PropsGap and SrcSpread are worked out here."
+        )
+        + "</div>"
         '<div id="explorer"><div class="lenses" id="ex-lenses"></div><p class="note" id="ex-note"></p>'
         '<div class="ex-filters">'
         + sel("ex-pos", "Position")
@@ -487,18 +695,27 @@ def explorer_html(inp: WeekInputs, data: dict) -> str:
         + '<p class="note">Each column header carries its trust: <span class="tchip proven">P</span> Proven, '
         '<span class="tchip shadow">S</span> Shadow, <span class="tchip untested">U</span> Untested, '
         '<span class="tchip data">D</span> Data (a feed, not a prediction). Hover for why.</p>'
-        '<div class="scroll ex-scroll"><table id="ex-table" class="ex"></table></div></div></section>'
+        '<div class="scroll ex-scroll"><table id="ex-table" class="ex stickyname"></table></div></div></section>'
     )
 
 
 DRAWER = '<div id="drawer" class="drawer" role="dialog" hidden aria-label="Player"></div>'
 
 
-def explorer_script(data: dict, nonce_attr: str) -> str:
-    """The Explorer's data and script: last in the page, after the drawer they fill."""
+def explorer_data(data: dict) -> str:
+    """The Explorer's data, before the shared script (`week_ui`, whose pool store starts from it)."""
     if not data.get("rows"):
         return ""
-    return (
-        f'<script type="application/json" id="explorer-data">{week_explorer.payload_json(data)}</script>'
-        f"<script{nonce_attr}>{week_explorer.JS}</script>"
-    )
+    return f'<script type="application/json" id="explorer-data">{week_explorer.payload_json(data)}</script>'
+
+
+def explorer_js(data: dict, nonce_attr: str) -> str:
+    """The Explorer's script: after the shared one, whose tick boxes and pool store it uses."""
+    if not data.get("rows"):
+        return ""
+    return f"<script{nonce_attr}>{week_explorer.JS}</script>"
+
+
+def explorer_script(data: dict, nonce_attr: str) -> str:
+    """The Explorer's data and script together (the page itself puts the shared script between them)."""
+    return explorer_data(data) + explorer_js(data, nonce_attr)
