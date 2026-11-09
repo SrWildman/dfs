@@ -45,6 +45,17 @@ PAGE_HEADERS = {
     "Double-up own": OWN,
     "Props gap": DIFF,
     "PropsGap": DIFF,
+    # the usage view and the model view (`week_views`)
+    "Snap %": GOOD,
+    "Tgt/G": GOOD,
+    "Tgt %": GOOD,
+    "Air %": GOOD,
+    "WOPR": GOOD,
+    "Car/G": GOOD,
+    "RZ/G": GOOD,
+    "HVT/G": GOOD,
+    "DK/G": GOOD,
+    "vs sources": DIFF,
 }
 FULL_AT_Z = 2.0  # colour reaches full strength this many standard deviations out
 TAIL = 0.10  # the top and bottom 10% stand out

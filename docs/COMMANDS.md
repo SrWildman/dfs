@@ -960,6 +960,8 @@ What `dfs sync --only NAME[,NAME]` takes. A plain `dfs sync` runs all of them in
 | `pbp` | `TeamMetricsRaw` | - | nflverse's free, unauthenticated play-by-play release -- Part C, C7. |
 | `usage` | `(none)` | - | Per-player usage (`Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G`); no sheet tab, it feeds EdgeRaw. |
 | `player_log` | `(none)` | - | Each QB / RB / WR / TE's last five games played, for the Player card (`player_card.usage_log`). |
+| `usage_weeks` | `(none)` | - | The Week page's usage view (Plan O item 6): every game of the season per player (`usage_weeks`) and per team (`team_weeks`). |
+| `team_weeks` | `(none)` | - | The Week page's usage view (Plan O item 6): every game of the season per player (`usage_weeks`) and per team (`team_weeks`). |
 | `ffopportunity` | `(none)` | - | Per-player-week expected points (`xFP`), current and prior season; no sheet tab. |
 | `nflverse_injuries` | `(none)` | yes | This season's injury reports; no sheet tab. |
 | `nflverse_depth` | `(none)` | yes | Recent depth-chart snapshots; no sheet tab. |

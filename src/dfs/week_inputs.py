@@ -446,6 +446,16 @@ class WeekInputs:
     numbers: dict | None = None  # how good are our numbers
     salary_prev: dict | None = None  # last week's main-slate salaries by (name, team), for the salary watch
     salary_prev_note: str = ""
+    # Plan O2 (`week_views`): the week's plays calls (every version), the usage view's two files and the
+    # calls' record (M1's backtest summary and the live `calls_history.csv`, kept apart)
+    calls: dict | None = None
+    usage_weeks: list[dict] | None = None
+    team_weeks: list[dict] | None = None
+    calls_record: dict | None = None
+    # teammate news per EdgeRaw Id (`news_context.player_news`: the QB situation, a pass catcher or lead
+    # back out, who leads the targets) and per team, one line each
+    news: dict | None = None
+    team_news: dict | None = None
 
 
 def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) -> WeekInputs:
@@ -490,7 +500,47 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         exposure_close=_closed("exposure_close", season, week, d),
         numbers=_closed("numbers", season, week, d),
         **_salary_prev(d, season, week),
+        calls=load_input("calls", season, week, d),
+        usage_weeks=_read_csv(d / "current" / "usage_weeks.csv") or None,
+        team_weeks=_read_csv(d / "current" / "team_weeks.csv") or None,
+        calls_record=calls_record(d),
+        **_news(d, edge, week),
     )
+
+
+def _news(data_dir: Path, edge: list[dict] | None, week: int) -> dict:
+    """Teammate news (`news_context`) from the saved games (the usage view's file, else the Player card's
+    last five) and this week's injury report. Fail-soft: {} leaves both fields None."""
+    try:
+        from dfs import news_context
+
+        games = _read_csv(data_dir / "current" / "usage_weeks.csv") or _read_csv(
+            data_dir / "current" / "player_log.csv"
+        )
+        if not edge or not games:
+            return {}
+        report = _read_csv(data_dir / "current" / "nflverse_injuries.csv")
+        report = [r for r in report if str(r.get("week")) == str(week)]
+        return {
+            "news": news_context.player_news(edge, games, report),
+            "team_news": news_context.team_lines(edge, games, report),
+        }
+    except Exception:  # noqa: BLE001 - the page never fails over a side panel
+        return {}
+
+
+def calls_record(data_dir: Path, report_dir: Path | None = None) -> dict | None:
+    """The plays calls' record for the Week page (`week_views.record_of`): the newest saved backtest summary
+    (`<season>-wk<NN>-plays-summary.json`, M1's walk-forward rerun) and the live `calls_history.csv`."""
+    from dfs import week_views
+
+    folder = report_dir or paths.REPO_ROOT / "docs" / "research" / "plays"  # plays_backtest.REPORT_DIR
+    summaries = sorted(folder.glob("*-plays-summary.json")) if folder.exists() else []
+    backtest = read_json(summaries[-1]) if summaries else None
+    history = _read_csv(data_dir / "research" / "calls_history.csv")
+    if not backtest and not history:
+        return None
+    return week_views.record_of(history, backtest)
 
 
 def _closed(name: str, season: int, week: int, data_dir: Path) -> dict | None:

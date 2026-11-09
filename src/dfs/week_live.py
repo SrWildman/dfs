@@ -358,29 +358,35 @@ setInterval(status, 4000);
 /* What is open, what is expanded and where the page is scrolled survive the refresh (Plan N item 5:
    week_ui's dfsUI keeps them per browser); the pool store adopts the sheet's values from the fresh HTML,
    except a cell still being written. */
-let refreshing = null;
+/* A refresh asked for while one is in flight runs once more after it (`again`): the one in flight may have
+   left before the write that asked for it landed. `since` is the pool store's last read-back when the render
+   was requested; a cell read back after that keeps its read-back (`week_ui` `stale`). */
+let refreshing = null, again = false;
 async function refreshSections() {
-  if (refreshing) return refreshing;
+  if (refreshing) { again = true; return refreshing; }
   refreshing = (async () => {
     try {
       if (window.dfsUI) window.dfsUI.capture();
+      const since = window.dfsPool ? window.dfsPool.mark() : null;
       const r = await fetch(url('/?fragment=1')); if (!r.ok) return;
       const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
       const ed = doc.querySelector('#explorer-data');
-      if (ed && window.dfsPool) { try { window.dfsPool.adoptExplorer(JSON.parse(ed.textContent)); } catch (e) {} }
+      if (ed && window.dfsPool) { try { window.dfsPool.adoptExplorer(JSON.parse(ed.textContent), since); } catch (e) {} }
       for (const fresh of doc.querySelectorAll('#pagecol section[id]:not([data-keep])')) {
         const old = document.getElementById(fresh.id); if (!old) continue;
         const was = old.querySelector(':scope > details'), now = fresh.querySelector(':scope > details');
         if (was && now) now.open = was.open;   // a section Sam opened stays open
         old.replaceWith(fresh);
-        if (window.dfsPool) window.dfsPool.adopt(fresh);
+        if (window.dfsPool) window.dfsPool.adopt(fresh, since);
       }
       const sub = doc.querySelector('.sub'), cur = $('.sub'); if (sub && cur) cur.replaceWith(sub);
       const rw = doc.querySelector('#rules-was'), rc = $('#rules-was'); if (rw && rc) rc.textContent = rw.textContent;
       for (const id of ['chart-data', 'game-data']) { const f = doc.getElementById(id), c = document.getElementById(id); if (f && c) c.textContent = f.textContent; }
       if (window.dfsExplorer) window.dfsExplorer.render();
       if (window.dfsUI) window.dfsUI.restore();
+      document.dispatchEvent(new CustomEvent('dfs-sections'));   // week_views redraws what it draws itself
     } catch (e) {} finally { refreshing = null; }
+    if (again) { again = false; await refreshSections(); }
   })();
   return refreshing;
 }
@@ -577,7 +583,7 @@ function write(path, data) {
     }
   }));
 }
-window.dfsLive = {post, pool: (body) => post('/api/pool', body), stack: (body) => post('/api/stack', body), refresh: refreshSections, toast};
+window.dfsLive = {post, pool: (body) => post('/api/pool', body), stack: (body) => post('/api/stack', body), refresh: refreshSections, refreshing: () => !!refreshing || again, toast};
 function askFirst(anchor, text, yes, onYes) {
   const old = anchor.parentElement.querySelector('.confirm'); if (old) { old.remove(); return; }
   const box = el('div', 'confirm flag'); box.append(el('div', null, text));

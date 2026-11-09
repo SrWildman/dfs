@@ -496,6 +496,21 @@ header, re-reads it and refuses if the sheet changed since the page showed it (t
 holds), writes one batch under the run lock, reads it back and logs a line to `data/week/edits.log`. A closed week is
 read only. The next `dfs lineups suggest --iterate` reads the rules box as always.
 
+**The views (Plan O2).** Under the brief a bar picks what the page shows: **Overview** (the default: one row per
+position with the top value, the cash core and chalk, the best GPP leverage, the fades and the top injury fallout, the
+slate's top 3 games, your pool by position, and the day's sections below), **Board & Explorer**, **Usage** (snap share,
+targets, target and air-yards share, WOPR, red-zone looks, carries, a five-game trend line against the season, two
+scatters per position, and each team's plays, pass rate, PROE, pace, red-zone trips and how its targets and carries
+split; filled by a full `dfs sync`), **Injuries** (every listed player per team, the practice trend, who benefits),
+**Model vs sources** (CalPts against every source, the biggest disagreements, and the plays calls, Shadow, led by AVOID
+and FADE with the backtest and live records kept apart) and **Everything** (every block). Each view has its own
+`#name` (bookmark it, the back button works) and the page reopens on the last one you used that week. The search box
+(press `/`) finds any priced player on any view; **+ Compare** (in the search, the drawer, or any name's pool chip) puts
+up to four players side by side with the Compare tab's rows, usage trends and ownership. **Team news** chips follow
+the names on the board, the decisions, the overview, the plays calls and the injury report: "Backup QB: Lock" (his QB is
+out), "Pickens out (WR2)" (a teammate's targets are free), "Lead target 36%" (he is the main guy now); hover for the
+full line, and the brief says it for the chalk.
+
 **Working the page (Plan N).** The chat folds to a thin tab on the right (remembered per browser). The board, the
 charts, the games and the Explorer each take the full width; with the chat open every section is one column. Headers
 stay put as a table scrolls (the board repeats its header at each position) and the name column stays put sideways.

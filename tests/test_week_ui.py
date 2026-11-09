@@ -223,7 +223,7 @@ def test_pool_writes_queue_instead_of_being_refused(tmp_path):
     js = week_ui.JS
     assert "One change at a time" not in week_live.JS  # the old refusal is gone
     assert "Q.push(job); pump();" in js
-    assert "P.saving[c.id] = c.value" in js and "saving\\2026" in week_ui.CSS  # "saving..." on each cell
+    assert "P.saving[c.id] = v" in js and "saving\\2026" in week_ui.CSS  # "saving..." on each cell
     assert "res.status === 'conflict'" in js and "drawIssues()" in js  # a refused cell keeps its own row
     assert "window.dfsQueue.run(async () => {" in week_live.JS  # decisions wait their turn too
 

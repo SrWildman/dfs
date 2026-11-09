@@ -1703,7 +1703,16 @@ def render(
     """The whole page as one HTML string. `live` (the served page) adds the controls that write the sheet;
     `sheet` is what the server read from it (`week_writes.LiveSheet`), `answers` the decisions file."""
     from dfs import week_board as wb
-    from dfs import week_charts, week_explorer, week_learn, week_money, week_shade, week_top, week_ui
+    from dfs import (
+        week_charts,
+        week_explorer,
+        week_learn,
+        week_money,
+        week_shade,
+        week_top,
+        week_ui,
+        week_views,
+    )
 
     token = _LIVE.set(live)
     asof_token = _ASOF.set(sync_stamp(inp))
@@ -1787,31 +1796,40 @@ def render(
             asof=("Data " + sync_stamp(inp) + ".") if sync_stamp(inp) else "",
         )
         own_out = not board.gpp_pending
+        wrap = week_views.wrap
         rules_json = json.dumps(rules or {}).replace("</", "<\\/")
         live_data = f'<script type="application/json" id="rules-was">{rules_json}</script>' if live else ""
         page = (
             "<!doctype html><html lang=en><head><meta charset=utf-8>"
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
-            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}</style></head><body>"
+            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}</style>"
+            "</head><body>"
             f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
             + week_top.progress_html(steps)
             + stale_html
             + '<div class="grid">'
             + week_top.brief_html(sentences, wb.next_step(steps), live, week_today.DAY_NAMES[day])
-            + week_top.pool_panel_html(panel, live, source)
+            + wrap(week_top.pool_panel_html(panel, live, source), "pool")
             + "</div>"
-            + week_top.decisions_html(ds, live, inp.now, rules is not None, by_id)
-            + week_top.board_html(board, by_id, live, week_money.practice_by_id(inp))
-            + '<div class="charts-row">'
-            + week_top.charts_html(inp.edge, own_out)
-            + "</div>"
-            + week_top.games_html(inp, live)
-            + week_top.explorer_html(inp, data)
-            + '<h2 class="sec">The rest of the week</h2>'
-            + "".join(folds)
-            + LIVE_RUN
-            + tools_fold(inp, tools)
+            # Plan O2: the view bar; each block below names the views it shows on (`week_views.PLACES`)
+            + week_views.view_bar()
+            + wrap(week_views.overview_section(inp, board, panel), "overview")
+            + wrap(week_top.decisions_html(ds, live, inp.now, rules is not None, by_id), "decisions")
+            + wrap(week_top.board_html(board, by_id, live, week_money.practice_by_id(inp)), "board")
+            + wrap('<div class="charts-row">' + week_top.charts_html(inp.edge, own_out) + "</div>", "charts")
+            + wrap(week_top.games_html(inp, live), "games")
+            + wrap(week_top.explorer_html(inp, data), "explorer")
+            + wrap(week_views.usage_section(inp), "usage")
+            + wrap(week_views.injury_section(inp), "injuries")
+            + wrap(week_views.model_section(inp), "model")
+            + wrap(
+                '<h2 class="sec">The rest of the week</h2>'
+                + "".join(folds)
+                + LIVE_RUN
+                + tools_fold(inp, tools),
+                "rest",
+            )
             + "</main>"
             + week_top.DRAWER
             + live_data
@@ -1836,6 +1854,9 @@ def render(
             + f"<script{nonce_attr}>{week_shade.JS}</script>"
             + f"<script{nonce_attr}>{week_ui.JS}</script>"
             + week_top.explorer_js(data, nonce_attr)
+            + f'<script type="application/json" id="compare-spec">{week_views.compare_json()}</script>'
+            + f'<script type="application/json" id="news-data">{week_views.news_json(inp)}</script>'
+            + f"<script{nonce_attr}>{week_views.JS}</script>"
             + f"<script{nonce_attr}>{BOARD_JS}</script>"
             + "</body></html>"
         )

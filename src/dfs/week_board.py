@@ -601,6 +601,53 @@ def _p(row: dict) -> str:
     return "{" + str(row.get("Name", "")) + "}"
 
 
+NEWS_OWN = 0.15  # the brief's team-news sentence: players owned this much in either format...
+NEWS_SALARY = 7000  # ...or priced this high
+NEWS_MAX = 3  # per list
+
+
+def news_sentence(inp: WeekInputs) -> Sentence | None:
+    """The brief's team-news line (Sam, 2026-11-09): among the chalk and the high-priced players, who catches
+    from a backup QB and who leads his team's targets with a teammate out, most owned first, up to
+    `NEWS_MAX` of each. Facts, not a call."""
+    news = getattr(inp, "news", None) or {}
+    backup, lead = [], []
+    for r in inp.edge or []:
+        facts = news.get(pid(r)) or []
+        if avail(r) in week_plays.UNPLAYABLE or not facts:
+            continue
+        own = max(num(r.get("CashOwn")) or 0, num(r.get("GppOwn")) or 0)
+        if own < NEWS_OWN and (num(r.get("Salary")) or 0) < NEWS_SALARY:
+            continue
+        qb = next((f for f in facts if f.kind == "qb" and f.tone == "down"), None)
+        if qb is not None:
+            swap = (
+                qb.text.removeprefix("QB downgrade: ")
+                .replace(" (backup)", "")
+                .replace(" (", ", ")
+                .rstrip(")")
+            )
+            backup.append((own, r, f"{_p(r)} ({swap})"))
+        top = next((f for f in facts if f.kind == "lead"), None)
+        if top is not None:
+            mate = next((f for f in facts if f.kind == "mate_out" and f.tone == "up"), None)
+            share = top.short.removeprefix("Lead target ")
+            gone = f" ({mate.short.split(' out')[0]} out)" if mate is not None else ""
+            lead.append((own, r, f"{_p(r)} {share}{gone}"))
+    if not backup and not lead:
+        return None
+    parts, rows = [], []
+    for label, items in (
+        ("catching from a backup QB", backup),
+        ("leading the targets with a teammate out", lead),
+    ):
+        items = sorted(items, key=lambda x: -x[0])[:NEWS_MAX]
+        if items:
+            parts.append(f"{label}, " + _join([t for _o, _r, t in items]))
+            rows += [r for _o, r, _t in items]
+    return Sentence("news", "Team news: " + "; ".join(parts) + ".", rows)
+
+
 def brief(inp: WeekInputs, b: Board, panel: PoolPanel) -> list[Sentence]:
     """5-7 plain sentences from the data, each skipped when its data is missing. Saturday and Sunday lead with
     the builds and the swaps."""
@@ -633,6 +680,9 @@ def brief(inp: WeekInputs, b: Board, panel: PoolPanel) -> list[Sentence]:
             else " Nobody is at 30% yet."
         )
         out["chalk"] = Sentence("chalk", f"Cash core forming around {_join(items)}.{tail}", top)
+    team_news = news_sentence(inp)
+    if team_news is not None:
+        out["news"] = team_news
     thin = thinnest(edge)
     if thin is not None:
         pos, n, row = thin
@@ -704,11 +754,11 @@ def brief(inp: WeekInputs, b: Board, panel: PoolPanel) -> list[Sentence]:
         else:
             out["swap"] = Sentence("swap", "Late swap has not run today: run it after inactives.")
     order = (
-        ["swap", "builds", "q", "pool", "chalk", "stack", "fades", "games", "value"]
+        ["swap", "builds", "q", "news", "pool", "chalk", "stack", "fades", "games", "value"]
         if day == 6
-        else ["builds", "pool", "chalk", "q", "stack", "fades", "games", "value"]
+        else ["builds", "pool", "chalk", "news", "q", "stack", "fades", "games", "value"]
         if day == 5
-        else ["games", "chalk", "value", "fades", "q", "stack", "pool"]
+        else ["games", "chalk", "news", "value", "fades", "q", "stack", "pool"]
     )
     return [out[k] for k in order if k in out][:7]
 

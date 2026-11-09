@@ -28,6 +28,7 @@ from dfs.sources.sleeper_projections import SleeperProjectionsSource
 from dfs.sources.tffb_gps import TffbGpsSource
 from dfs.sources.tffb_projections import TffbProjectionsSource
 from dfs.sources.tffb_sos import TffbSosSource
+from dfs.sources.usage_weeks import TeamWeeksSource, UsageWeeksSource
 from dfs.sources.weather import WeatherSource
 
 # Order matters: run_sync iterates SOURCES in this insertion order.
@@ -75,6 +76,9 @@ SOURCES: dict[str, Source] = {
     "usage": NflverseUsageSource(),
     # The Player card's last five games per player; reads the stats snapshot `usage` just saved.
     "player_log": PlayerLogSource(),
+    # The Week page's usage view (Plan O item 6): every game per player and per team; no sheet tab.
+    "usage_weeks": UsageWeeksSource(),
+    "team_weeks": TeamWeeksSource(),
     "ffopportunity": FfopportunitySource(),
     "nflverse_injuries": NflverseInjuriesSource(),
     "nflverse_depth": NflverseDepthSource(),
