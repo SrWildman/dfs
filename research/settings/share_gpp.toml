@@ -1,0 +1,7 @@
+# Plan S check 3, arm A: today's GPP builds ranked by the Top 1% share (Top 1% / (1 + copies), the copies from
+# `dups.DUP_MODEL_GPP` on the field's projected shares), compared against `today_gpp.toml`. Shadow.
+name = "Top 1% share (GPP only)"
+
+[builds]
+cash = 0
+rank = "share"

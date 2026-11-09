@@ -341,17 +341,21 @@ def annotate(
     objective: bool,
     contrarian_at: float | None = None,
     dup_model: dups.DupModel = dups.DupModel(),
+    dup_shares: dict[str, float] | None = None,
 ) -> list[Scored]:
     """`scored` with each lineup's ownership sum and product, its expected duplicates among `entries` entries
     (`dups.expected_dups`), the shapes it matches and, for a GPP candidate (`objective`), its Top 1% share.
-    Without `shares` (no ownership published) only the shapes are filled in."""
+    Without `shares` (no ownership published) only the shapes are filled in. `dup_shares` (default none: the
+    same `shares`) is the ownership the sum, product and copies are read from, for a duplicate model fitted on
+    a different ownership (the backtest's `share_dupes_fitted`, on `GppOwn`); the shapes always use
+    `shares`."""
     out = []
     for s in scored:
         matched = shapes_mod.shapes_of(s.players, contrarian_at=contrarian_at, own=shares)
         if shares is None:
             out.append(replace(s, shapes=matched))
             continue
-        own = dups.shares_for([p.name for p in s.players], shares)
+        own = dups.shares_for([p.name for p in s.players], dup_shares if dup_shares is not None else shares)
         e = dup_model.expected(own, entries)
         out.append(
             replace(
@@ -721,6 +725,7 @@ def suggest_builds(
     gpp_dup_model: dups.DupModel = dups.DUP_MODEL_GPP,
     cash_dup_model: dups.DupModel = dups.DUP_MODEL_CASH,
     cash_fixed: Sequence[str] = (),
+    gpp_dup_shares: dict[str, float] | None = None,
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -731,7 +736,9 @@ def suggest_builds(
     GPP shapes to search (`lineup_shapes.SHAPES`); `rank` what orders the GPP candidates: "top1" (the
     default) the Top 1% chance alone, "share" that chance divided by 1 + the duplicates expected.
     `cash_fixed` names players every cash build holds (the backtest's `calls` flag locks the CORE calls;
-    a name not in the cash pool is ignored)."""
+    a name not in the cash pool is ignored). `gpp_dup_shares` (default none: the field's own shares) is the
+    ownership the GPP builds' copies are read from, with `gpp_dup_model` (the backtest's
+    `share_dupes_fitted`)."""
     gpp_order = rank_key(rank)
     started = time.monotonic()
     budget_start = clock.now()  # the budget is search work, not wall seconds (search_clock.py)
@@ -824,7 +831,13 @@ def suggest_builds(
         )
         t = timed("simulate", t)
         scored = annotate(
-            scored, shares, gpp_entries, objective=True, contrarian_at=cutoff, dup_model=gpp_dup_model
+            scored,
+            shares,
+            gpp_entries,
+            objective=True,
+            contrarian_at=cutoff,
+            dup_model=gpp_dup_model,
+            dup_shares=gpp_dup_shares if shares is not None else None,
         )
         if gpp_builds is None:
             picks = choose_per_qb(scored, key=gpp_order)
