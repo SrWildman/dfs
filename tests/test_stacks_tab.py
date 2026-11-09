@@ -104,17 +104,49 @@ def test_no_text_cell_can_be_read_by_sheets_as_a_formula():
                     assert cell[0] not in "=+@" and not (cell[0] == "-" and cell != "-"), cell
 
 
-def test_the_cue_is_build_only_for_positive_leverage_and_lift_when_the_signal_is_tested_or_weak():
+def test_the_cue_is_build_for_the_top_five_by_leverage_that_beat_the_field():
+    """Sam, Plan O item 5: on Week 9 all 20 rows were BUILD, so the cue separated nothing. Now only the five
+    highest-leverage stacks with Lift over 1x and Lev above 0 get it, with a tested or weak signal."""
     for verdict in ("tested", "weak"):
         lay = stacks_tab.build_layout(inputs(verdict=verdict))
         first, last = stack_rows(lay)
-        cues = col(lay, "A", first, last)
-        levs = col(lay, "K", first, last)
-        assert [c == "BUILD" for c in cues] == [lev > 0 for lev in levs]
-        assert set(lay.cue_rows.values()) == {"BUILD"}
+        cues, levs, lifts = col(lay, "A", first, last), col(lay, "K", first, last), col(lay, "H", first, last)
+        beat = [lev > 0 and lift > 1 for lev, lift in zip(levs, lifts, strict=True)]
+        assert sum(beat) > stacks_tab.BUILD_CUES  # the fixture has more than five that beat the field
+        built = [i for i, c in enumerate(cues) if c == "BUILD"]
+        assert built == [i for i, b in enumerate(beat) if b][: stacks_tab.BUILD_CUES]  # the first five by lev
+        assert levs == sorted(levs, reverse=True)
+        assert set(lay.cue_rows.values()) == {"BUILD"} and len(lay.cue_rows) == stacks_tab.BUILD_CUES
     for verdict in ("untested", None):
         lay = stacks_tab.build_layout(inputs(verdict=verdict))
         assert not lay.cue_rows
+
+
+def test_a_stack_that_does_not_beat_the_field_is_never_cued_even_in_the_top_five():
+    t = table()
+    t.loc[1, "lift"] = 0.9  # second by leverage, but under 1x
+    lay = stacks_tab.build_layout(inputs(result=stacks.StackResult(table=t, games=games(), meta={})))
+    first, _ = stack_rows(lay)
+    assert col(lay, "A", first, first + 5) == ["BUILD", "", "BUILD", "BUILD", "BUILD", "BUILD"]
+
+
+def test_the_legend_sits_in_the_header_and_names_every_colour():
+    lay = stacks_tab.build_layout(inputs())
+    assert lay.legend_row == 3  # under the title and status, frozen with them
+    legend = lay.rows[lay.legend_row - 1][0]
+    assert legend.startswith("COLOURS") and "Green row, BUILD" in legend and "5 highest-leverage" in legend
+    assert "Top 1%, Lift and Lev are shaded" in legend and "Nothing else is coloured" in legend
+    first, last = stack_rows(lay)
+    assert lay.scales == [
+        (f"G{first}:G{last}", "gradient"),
+        (f"H{first}:H{last}", "gradient"),
+        (f"K{first}:K{last}", "diverging"),
+    ]
+    assert lay.table_width == "M"
+    unpublished = stacks_tab.build_layout(inputs(ownership_published=False))
+    assert "No BUILD cue until TFFB publishes ownership" in unpublished.rows[2][0]
+    assert [k for _, k in unpublished.scales] == ["gradient", "gradient"]  # Lev is all dashes
+    assert "untested" in stacks_tab.build_layout(inputs(verdict=None)).rows[2][0]
 
 
 def test_the_last_cell_is_the_line_to_type_into_the_rules_box():

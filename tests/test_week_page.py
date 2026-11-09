@@ -342,7 +342,7 @@ def test_every_section_renders_from_fixture_outputs(full):
     )
     # unknowns: Q in the pool/builds with his kickoff, and the OUT player sitting in a build
     assert re.search(r"Puka Nacua\s+WR LAR\s+Questionable\s+Sun 4:25 pm", text)
-    assert "OUT or on IR but in a build" in text and "Hurt Guy (OUT, in 1 builds)" in text
+    assert "OUT or on IR but in a build" in text and re.search(r"Hurt Guy\s+\(OUT, in 1 builds\)", text)
     # sunday: the run, its field source, the swap with its label
     assert "Tyler Higbee" in text and "HOLD" in text and "nothing beats it" in text
     assert "Safe game-day sync" in text and "never blanks a started player" in text
@@ -730,3 +730,41 @@ def test_a_phrase_is_listed_under_every_command_it_runs():
     tools = {t.command: t for t in week_tools.build([])}
     assert "start week N" in tools["dfs week new"].says and "start week N" in tools["dfs odds snapshot"].says
     assert "final sync" in tools["dfs sync"].says and "dfs sync --live" in tools["dfs sync"].variants
+
+
+def test_every_player_name_in_the_sections_is_a_link_the_pool_chip_can_resolve(full):
+    """Plan O item 2: a name in the Cash and GPP views, the chalk check, What changed, the unknowns (and the
+    rest) is a `pl` link carrying an id or a name the page resolves to one, so it opens the drawer and gets
+    the pool chip; never a bare name."""
+    page = week_page.render(full, registered=set(commands_doc.all_commands()))
+    links = re.findall(r'<a class="pl" href="#"([^>]*)>([^<]*)</a>', page)
+    assert links
+    for attrs, name in links:
+        assert "data-id=" in attrs or f'data-name="{name}"' in attrs, (attrs, name)  # both still escaped
+
+    def section(sid):
+        m = re.search(rf'<section[^>]*id="{sid}".*?</section>', page, re.S)
+        return m.group(0) if m else ""
+
+    named = {
+        "cash": ["Ja'Marr Chase", "Wan'Dale Robinson"],  # the builds and the chalk check
+        "gpp": ["Dak Prescott", "CeeDee Lamb"],  # the builds and the stacks
+        "sunday": ["Puka Nacua", "Hurt Guy"],  # the unknowns, folded inside Sunday
+    }
+    for sid, names in named.items():
+        body = section(sid)
+        for name in names:
+            assert re.search(rf'<a class="pl"[^>]*>{re.escape(html.escape(name, quote=True))}</a>', body), (
+                sid,
+                name,
+            )
+
+
+def test_a_player_missing_from_the_pool_gets_a_one_click_add():
+    assert 'data-v="Cash"' in week_page.add_button("p1", "Cash") and "addpool" in week_page.add_button(
+        "p1", "Cash"
+    )
+    from dfs import week_board as wb
+
+    assert wb.kind_of(["Value"]) == "Cash" and wb.kind_of(["Upside"]) == "GPP"
+    assert wb.kind_of(["Cash core", "Upside"]) == "Both"

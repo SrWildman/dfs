@@ -323,6 +323,11 @@ LEGEND = (
     '<div class="legend"><span class="key RB"></span>RB <span class="key WR"></span>WR '
     '<span class="key TE"></span>TE</div>'
 )
+# The Explorer's chart draws every position a lens passes (QB and DST too).
+LEGEND_ALL = (
+    '<div class="legend"><span class="key QB"></span>QB <span class="key RB"></span>RB '
+    '<span class="key WR"></span>WR <span class="key TE"></span>TE <span class="key DST"></span>DST</div>'
+)
 
 
 # -- the full-screen viewer's data (Plan N item 9) -----------------------------------------------------------
@@ -334,6 +339,19 @@ HOW = {
     "against the ceiling (CeilM, else TFFB's Ceiling); shaded = under 10% owned with a top-quarter ceiling.",
     "usage": "Every healthy RB / WR / TE at $3,000+ with usage: snap share over his last five games (else the "
     "season) against target share; the top target shares are named.",
+}
+
+
+# The caption under each chart (Plan O item 4): the formula first, then the columns it reads.
+FORMULA = {
+    "value": "Value = CalPts ÷ salary × 1,000 (points per $1K).",
+    "leverage": "Leverage = ceiling against GPP ownership.",
+    "usage": "Usage = snap share against target share.",
+}
+SOURCES = {
+    "value": ("Salary", "CalPts"),
+    "leverage": ("GppOwn", "CeilM", "Ceiling"),
+    "usage": ("Snap% L5", "Snap%", "Tgt%"),
 }
 
 

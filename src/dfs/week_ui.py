@@ -18,8 +18,8 @@ page (`dfs week page`) and the served one (`dfs week serve`), where the served p
 - **Page state** (item 5): which sections and folds are open, which positions' Show more is expanded and the
   scroll position, kept per browser (localStorage, every access in try/catch) and put back after every refresh
   of the sections (a command's end, a chat turn, a write) and on reload.
-- **The chart viewer** (item 9): any value / leverage / usage chart opens full screen on click: zoom (the
-  wheel, a pinch, or drag a box), pan, Reset, hover for name / team / salary / projection / ownership, position
+- **The chart viewer** (item 9): any value / leverage / usage chart opens full screen on click: pan by
+  dragging (the default, Plan O), zoom on the wheel, a pinch or a box (Shift-drag or Zoom box), Reset, hover for name / team / salary / projection / ownership, position
   filters, labels that declutter as you zoom, and selection by click, box or lasso into the shared selection.
   Inline SVG and plain JS, from `week_charts.viewer_data` (the inline charts' own points).
 - **The game view** (item 10): a slate card, or any team or Opp cell, opens the game: both teams side by side
@@ -50,6 +50,16 @@ input.sel{margin:0 6px 0 0;vertical-align:-1px;cursor:pointer}
 .seg.saving button{opacity:.6}.seg.saving::after{content:"saving\2026";font-size:11px;color:var(--dim);
 margin-left:5px;align-self:center}
 .seg.bad button.on{outline:2px solid var(--bad)}
+.pchip{font-size:10.5px;line-height:1.3;padding:0 5px;margin-left:4px;border:1px dashed var(--line);
+border-radius:9px;background:transparent;color:var(--dim);cursor:pointer;vertical-align:1px;white-space:nowrap}
+.pchip.in{border-style:solid;border-color:var(--accent);color:var(--accent);font-weight:600}
+.pchip:hover{border-color:var(--accent);color:var(--accent)}
+#pool-pop{position:absolute;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:8px;
+padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:6px;max-width:300px}
+#pool-pop b{font-size:13px}#pool-pop p{margin:0;font-size:11.5px}
+button.addpool{font-size:11px;padding:0 6px;margin-left:3px;border:1px solid var(--accent);border-radius:9px;
+background:var(--accent-soft);color:var(--accent);cursor:pointer;font-weight:600}
+a.pl-unknown{text-decoration:none;color:inherit;cursor:text}
 tr.pool-bad td{box-shadow:inset 0 -2px 0 var(--bad)}
 .poolval{font-size:12px;color:var(--dim);white-space:nowrap}.poolval.in{color:var(--accent);font-weight:600}
 #bulkbar{position:sticky;bottom:10px;z-index:15;margin:10px auto;max-width:980px;background:var(--card);
@@ -93,6 +103,8 @@ padding:3px 0;border-bottom:1px solid var(--line)}.vside li a{flex:1}
 .gv .teams{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}
 .gv h3{margin:6px 0}.gv table td,.gv table th{padding:4px 8px 4px 0}
 .gv .line{font-size:14px;margin:4px 0 10px}
+.vbar .gnav select{font:inherit;max-width:260px;background:var(--bg);color:var(--ink);border:1px solid var(--line);
+border-radius:5px;padding:2px 6px}
 .gv .actions{position:sticky;bottom:0;z-index:5;background:var(--bg);padding:8px 0;display:flex;flex-wrap:wrap;gap:6px 10px;
 align-items:center;border-top:1px solid var(--line)}
 a.tm{color:inherit;text-decoration:none;border-bottom:1px dotted var(--dim);cursor:pointer}
@@ -133,11 +145,17 @@ document.addEventListener('click', (e) => {
 });
 
 /* ---------- the pool store (item 6) ---------- */
-const P = {val: {}, name: {}, saving: {}, bad: {}};
+const P = {val: {}, name: {}, team: {}, byName: {}, saving: {}, bad: {}};
 function adoptFromExplorer(d) {
   if (!d || !d.columns) return;
-  const pi = d.columns.findIndex((c) => (c.key || c) === 'Pool'), ni = d.columns.findIndex((c) => (c.key || c) === 'Name');
-  d.ids.forEach((id, i) => { if (!(id in P.saving)) P.val[id] = d.rows[i][pi] || ''; P.name[id] = d.rows[i][ni]; });
+  const at = (k) => d.columns.findIndex((c) => (c.key || c) === k);
+  const pi = at('Pool'), ni = at('Name'), ti = at('Team');
+  P.byName = {};
+  d.ids.forEach((id, i) => {
+    if (!(id in P.saving)) P.val[id] = d.rows[i][pi] || '';
+    const name = d.rows[i][ni]; P.name[id] = name; P.team[id] = ti >= 0 ? d.rows[i][ti] : '';
+    (P.byName[name] = P.byName[name] || []).push(id);
+  });
 }
 function adoptFromDom(root) {
   for (const seg of $$('.seg[data-id]', root || document)) {
@@ -155,6 +173,8 @@ function paint(id) {
     s.textContent = saving ? 'saving…' : (v || 'not in pool'); s.classList.toggle('in', !!v);
   }
   for (const b of $$('button.pivot[data-pivot="' + CSS.escape(id) + '"]')) b.dataset.was = v;
+  for (const c of $$('.pchip[data-id="' + CSS.escape(id) + '"]')) chipPaint(c, v, saving);
+  for (const b of $$('button.addpool[data-id="' + CSS.escape(id) + '"]')) b.hidden = !!v && pool.addKind(v, b.dataset.v) === v;
   for (const tr of $$('tr[data-id="' + CSS.escape(id) + '"]')) tr.classList.toggle('pool-bad', bad);
   if (window.dfsExplorer) window.dfsExplorer.setPool(id, v);
 }
@@ -163,7 +183,7 @@ const pool = {
   get: (id) => P.val[id] || '',
   name: (id) => P.name[id] || id,
   set(values) { for (const [id, v] of Object.entries(values || {})) { P.val[id] = v || ''; delete P.bad[id]; paint(id); } if (window.dfsExplorer) window.dfsExplorer.render(); drawIssues(); },
-  adopt(root) { adoptFromDom(root); paintAll(); },
+  adopt(root) { adoptFromDom(root); decorate(root); paintAll(); if (window.dfsShade) window.dfsShade.all(root); },
   adoptExplorer(d) { adoptFromExplorer(d); },
   paint, paintAll,
   saving: (id) => id in P.saving,
@@ -214,8 +234,74 @@ function requestPool(changes, label) {
   });
 }
 pool.request = requestPool;
+/* the Cash / GPP / Both / none control, for any place that draws a player from script (the game view, the
+   overview, the compare tray): the same markup the server draws, so the same click handler writes it */
+pool.seg = function (id, name) {
+  const v = pool.get(id); const s = el('span', 'seg'); s.dataset.id = id; s.dataset.name = name || pool.name(id); s.dataset.was = v;
+  for (const [val, lab] of [['Cash', 'Cash'], ['GPP', 'GPP'], ['Both', 'Both'], ['', 'none']]) {
+    const b = el('button', v === val ? 'on' : '', lab); b.type = 'button'; b.dataset.v = val;
+    if (!LIVE || READONLY) { b.disabled = true; b.title = READONLY && LIVE ? 'This week is closed' : NOT_SERVED; }
+    s.append(b);
+  }
+  return s;
+};
 /* the value a decision-style "add" gives: GPP + Cash is Both (week_writes.add_kind) */
 pool.addKind = (cur, kind) => (cur === 'Both' || cur === kind) ? cur : (cur ? 'Both' : kind);
+
+/* ---------- a pool chip on every name (Plan O item 2) ----------
+   Every `a.pl` on the page opens the drawer and carries a small chip with his pool value; the chip opens the
+   same Cash / GPP / Both / none control. A name drawn from a section that holds only the name (`pn` in
+   week_page) is resolved here to his id from the Explorer's data: by name, then by team where two share one;
+   a name that stays ambiguous or unknown is left as plain text, never guessed. A row that already has the
+   control (the board, the Explorer, the game view) gets no second one. */
+function resolveName(a) {
+  if (a.dataset.id) return a.dataset.id;
+  let ids = P.byName[a.dataset.name || a.textContent.trim()] || [];
+  if (ids.length > 1 && a.dataset.team) ids = ids.filter((id) => P.team[id] === a.dataset.team);
+  if (ids.length !== 1) { a.classList.add('pl-unknown'); return ''; }
+  a.dataset.id = ids[0]; return ids[0];
+}
+function chipPaint(c, v, saving) {
+  c.textContent = saving ? '\u2026' : (v || '+ pool'); c.classList.toggle('in', !!v);
+  c.setAttribute('aria-label', 'Pool: ' + (v || 'not in pool') + '. Change');
+}
+function decorate(root) {
+  for (const a of $$('a.pl', root || document)) {
+    if (a.closest('#drawer, .seg, svg, #pool-pop')) continue;
+    const id = resolveName(a); if (!id) continue;
+    const next = a.nextElementSibling;
+    if (next && next.classList.contains('pchip')) continue;
+    const ctx = a.closest('tr, li, .gp-row');
+    if (ctx && ctx.querySelector('.seg[data-id="' + CSS.escape(id) + '"]')) continue;
+    const c = el('button', 'pchip'); c.type = 'button'; c.dataset.id = id; c.title = 'Your pool: Cash / GPP / Both / none';
+    chipPaint(c, pool.get(id), id in P.saving); a.after(c);
+  }
+}
+pool.decorate = decorate;
+document.addEventListener('click', (e) => { const a = e.target.closest('a.pl:not([data-id])'); if (a) e.preventDefault(); });
+function popClose() { const o = $('#pool-pop'); if (o) o.remove(); }
+document.addEventListener('click', (e) => {
+  const c = e.target.closest('.pchip[data-id]');
+  if (!c) { if (!e.target.closest('#pool-pop')) popClose(); return; }
+  e.preventDefault(); e.stopPropagation();
+  const was = $('#pool-pop'); popClose(); if (was && was.dataset.id === c.dataset.id) return;
+  const id = c.dataset.id, o = el('div'); o.id = 'pool-pop'; o.dataset.id = id; o.setAttribute('role', 'dialog');
+  o.append(el('b', null, pool.name(id)), pool.seg(id, pool.name(id)));
+  if (!LIVE || READONLY) o.append(el('p', 'dim', READONLY && LIVE ? 'This week is closed: the page writes nothing.' : NOT_SERVED));
+  document.body.append(o);
+  const r = c.getBoundingClientRect();
+  o.style.top = (window.scrollY + r.bottom + 4) + 'px';
+  o.style.left = Math.max(8, Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - o.offsetWidth - 8)) + 'px';
+  const first = o.querySelector('button.on') || o.querySelector('button'); if (first) first.focus({preventScroll: true});
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#pool-pop')) { popClose(); e.stopPropagation(); } }, true);
+/* "missing from your pool": one click adds him (merged: GPP + Cash = Both) */
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button.addpool[data-id]'); if (!b) return;
+  e.preventDefault();
+  const id = b.dataset.id, cur = id in P.saving ? P.saving[id] : pool.get(id), want = pool.addKind(cur, b.dataset.v);
+  if (want !== cur) requestPool([{id, value: want}], 'Added ' + pool.name(id));
+});
 
 function drawIssues() {
   let box = $('#pool-issues');
@@ -241,6 +327,7 @@ document.addEventListener('click', (e) => {
   const shown = id in P.saving ? P.saving[id] : (P.val[id] || '');
   if (sb.dataset.v === shown) return;
   e.stopPropagation();
+  try { sb.focus({preventScroll: true}); } catch (err) {}  // Safari does not focus a clicked button; the refresh finds it again
   requestPool([{id, value: sb.dataset.v}]);
 }, true);
 
@@ -294,7 +381,8 @@ function drawBulk() {
 
 /* ---------- page state across refreshes and reloads (item 5) ---------- */
 const UKEY = 'ui-' + WEEK;
-const U = Object.assign({open: {}, more: [], scroll: 0}, store.get(UKEY, {}));
+const U = Object.assign({open: {}, more: [], scroll: 0, boxes: {}}, store.get(UKEY, {}));
+if (!U.boxes || typeof U.boxes !== 'object') U.boxes = {};
 function scroller() { const pc = $('#pagecol'); return pc && getComputedStyle(pc).overflowY === 'auto' && pc.scrollHeight > pc.clientHeight ? pc : null; }
 function scrollPos() { const s = scroller(); return s ? s.scrollTop : window.scrollY; }
 function setScroll(y) { const s = scroller(); if (s) s.scrollTop = y; else window.scrollTo(0, y); }
@@ -313,7 +401,37 @@ document.addEventListener('click', (e) => {
 let scrollT = null;
 function onScroll() { if (UI.restoring) return; clearTimeout(scrollT); scrollT = setTimeout(() => { U.scroll = scrollPos(); store.set(UKEY, U); }, 150); }
 window.addEventListener('scroll', onScroll, {passive: true});
-document.addEventListener('scroll', (e) => { if (e.target && e.target.id === 'pagecol') onScroll(); }, {capture: true, passive: true});
+/* the page's own scroll boxes (the board, every table's .scroll): a refresh replaces their section, which
+   put them back at the top (Plan O item 1), so each one's position is kept too, keyed by its section and
+   its place in it */
+function boxKey(b) { const sec = b.closest('section[id]'); return sec ? sec.id + ':' + $$('.scroll', sec).indexOf(b) : null; }
+let boxT = null;
+function onBoxScroll(b) {
+  if (UI.restoring) return; const k = boxKey(b); if (!k) return;
+  U.boxes[k] = [b.scrollTop, b.scrollLeft];
+  clearTimeout(boxT); boxT = setTimeout(() => store.set(UKEY, U), 150);
+}
+document.addEventListener('scroll', (e) => {
+  const t = e.target; if (!t || !t.classList) return;
+  if (t.id === 'pagecol') onScroll(); else if (t.classList.contains('scroll')) onBoxScroll(t);
+}, {capture: true, passive: true});
+/* the control that had focus (a Pool button just clicked, a tick box): found again after the refresh by
+   what it is (its player, its value), not by the node, which the refresh replaced */
+function focusKey() {
+  const a = document.activeElement; if (!a || a === document.body) return null;
+  const seg = a.closest('.seg[data-id]');
+  if (seg && a.dataset.v != null) { const sec = seg.closest('section[id], #drawer'); return {seg: seg.dataset.id, v: a.dataset.v, in: sec ? sec.id : ''}; }
+  if (a.matches('input.sel[data-id]')) { const sec = a.closest('section[id]'); return {sel: a.dataset.id, in: sec ? sec.id : ''}; }
+  return a.id ? {id: a.id} : null;
+}
+function refocus(k) {
+  if (!k) return;
+  const scope = k.in ? document.getElementById(k.in) : document; let n = null;
+  if (k.seg != null && scope) n = scope.querySelector('.seg[data-id="' + CSS.escape(k.seg) + '"] button[data-v="' + CSS.escape(k.v) + '"]');
+  else if (k.sel != null && scope) n = scope.querySelector('input.sel[data-id="' + CSS.escape(k.sel) + '"]');
+  else if (k.id) n = document.getElementById(k.id);
+  if (n && document.activeElement !== n) { try { n.focus({preventScroll: true}); } catch (e) {} }
+}
 function expandMore(pos) {
   const grp = document.querySelector('#board tbody.posgrp[data-pos="' + CSS.escape(pos) + '"]'); if (!grp) return;
   for (const tr of grp.querySelectorAll('tr.more')) tr.hidden = false;
@@ -322,21 +440,62 @@ function expandMore(pos) {
 const UI = {
   restoring: false,
   state: () => JSON.parse(JSON.stringify(U)),
-  capture() { U.scroll = scrollPos(); store.set(UKEY, U); },
+  focus: null,
+  capture() {
+    U.scroll = scrollPos();
+    for (const b of $$('section[id] .scroll')) { const k = boxKey(b); if (k) U.boxes[k] = [b.scrollTop, b.scrollLeft]; }
+    UI.focus = focusKey();
+    store.set(UKEY, U);
+  },
   restore(opts) {
     UI.restoring = true;
     try {
       for (const d of $$('section[id] details')) { const k = detailsKey(d); if (k && k in U.open) d.open = U.open[k]; }
       for (const pos of U.more) expandMore(pos);
       syncTicks(); pool.paintAll();
-      if (!opts || opts.scroll !== false) setScroll(U.scroll || 0);
+      if (!opts || opts.scroll !== false) {
+        setScroll(U.scroll || 0);
+        for (const b of $$('section[id] .scroll')) { const k = boxKey(b); const at = k && U.boxes[k]; if (at) { b.scrollTop = at[0]; b.scrollLeft = at[1]; } }
+      }
+      refocus(UI.focus); UI.focus = null;
     } finally { setTimeout(() => { UI.restoring = false; }, 0); }
   },
 };
 window.dfsUI = UI;
 
 /* ---------- the chart viewer (item 9) ---------- */
-const CH = jsonOf('chart-data') || {};
+/* the page's charts (`chart-data`, re-read on every open: a refresh rewrites it) plus the ones a script draws
+   (the Explorer's lens chart, `dfsCharts.explorer`) */
+const EXTRA = {};
+window.dfsCharts = EXTRA;
+const chartSpecs = () => Object.assign({}, jsonOf('chart-data') || {}, EXTRA);
+/* a small inline scatter from a viewer spec (the Explorer's lens chart): the same classes as week_charts'
+   SVG, so it looks the same; a click opens the viewer (the click handler below) */
+function scatterSvg(spec, w, h, labels) {
+  const M = {l: 48, r: 14, t: 12, b: 40}, [x0, x1, y0, y1] = spec.range;
+  const X = (v) => M.l + (v - x0) / ((x1 - x0) || 1) * (w - M.l - M.r);
+  const Y = (v) => h - M.b - (v - y0) / ((y1 - y0) || 1) * (h - M.t - M.b);
+  const out = ['<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h + '" role="img" aria-label="' + esc(spec.title) + '">'];
+  if (spec.shade) { const [a, b, c, d, lab] = spec.shade; out.push('<rect class="shade" x="' + X(a) + '" y="' + Y(d) + '" width="' + (X(b) - X(a)) + '" height="' + (Y(c) - Y(d)) + '"/><text class="shade-lbl" x="' + (X(a) + 6) + '" y="' + (Y(d) + 16) + '">' + esc(lab) + '</text>'); }
+  for (const t of niceTicks(x0, x1, 4)) out.push('<line class="grid" x1="' + X(t) + '" y1="' + M.t + '" x2="' + X(t) + '" y2="' + (h - M.b) + '"/><text class="tick" x="' + X(t) + '" y="' + (h - M.b + 16) + '" text-anchor="middle">' + fmtv(spec.xfmt, t) + '</text>');
+  for (const t of niceTicks(y0, y1, 4)) out.push('<line class="grid" x1="' + M.l + '" y1="' + Y(t) + '" x2="' + (w - M.r) + '" y2="' + Y(t) + '"/><text class="tick" x="' + (M.l - 6) + '" y="' + (Y(t) + 4) + '" text-anchor="end">' + fmtv(spec.yfmt, t) + '</text>');
+  out.push('<text class="axis" x="' + ((M.l + w - M.r) / 2) + '" y="' + (h - 6) + '" text-anchor="middle">' + esc(spec.x) + '</text><text class="axis" transform="translate(13 ' + ((M.t + h - M.b) / 2) + ') rotate(-90)" text-anchor="middle">' + esc(spec.y) + '</text>');
+  if (spec.ref) { const [[a, b], [c, d], lab] = spec.ref; out.push('<line class="ref" x1="' + X(a) + '" y1="' + Y(b) + '" x2="' + X(c) + '" y2="' + Y(d) + '"/><text class="ref-lbl" x="' + (X(c) - 4) + '" y="' + (Y(d) + 16) + '" text-anchor="end">' + esc(lab) + '</text>'); }
+  const top = new Set(spec.points.slice().sort((a, b) => b.prio - a.prio).slice(0, labels).map((p) => p.id));
+  for (const p of spec.points) out.push('<circle class="dot ' + esc(p.pos) + (top.has(p.id) ? ' strong' : '') + '" cx="' + X(p.x).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="' + (top.has(p.id) ? 5 : 3.5) + '" data-id="' + esc(p.id) + '"><title>' + esc(p.name + ', $' + Number(p.sal).toLocaleString()) + '</title></circle>');
+  const placed = [];
+  for (const p of spec.points.filter((q) => top.has(q.id))) {
+    const wl = p.short.length * 7.3, cx = X(p.x), cy = Y(p.y);
+    for (const [dx, dy, an] of [[7, -6, 'start'], [-7, -6, 'end'], [7, 15, 'start'], [-7, 15, 'end']]) {
+      const lx = an === 'start' ? cx + dx : cx + dx - wl, ly = cy + dy;
+      if (lx < M.l || lx + wl > w - M.r || ly < M.t + 10 || ly > h - M.b) continue;
+      if (placed.some(([px, py, pw]) => Math.abs(ly - py) < 14 && lx < px + pw && px < lx + wl)) continue;
+      placed.push([lx, ly, wl]); out.push('<text class="lbl" x="' + (cx + dx).toFixed(1) + '" y="' + ly.toFixed(1) + '" text-anchor="' + an + '" data-id="' + esc(p.id) + '">' + esc(p.short) + '</text>'); break;
+    }
+  }
+  out.push('</svg>'); return out.join('');
+}
+window.dfsScatter = scatterSvg;
 const fmtv = (f, v) => f === 'money' ? '$' + (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'K' : f === 'pct' ? Math.round(v) + '%' : (Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1));
 const pctOf = (x) => x == null ? '-' : Math.round(x * 100) + '%';
 function niceTicks(lo, hi, n) {
@@ -345,17 +504,17 @@ function niceTicks(lo, hi, n) {
   const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6)); return out;
 }
 function viewerOpen(key) {
-  const spec = CH[key]; if (!spec) return;
+  const spec = chartSpecs()[key]; if (!spec) return;
   let ov = $('#viewer');
   if (!ov) { ov = el('div', 'overlay'); ov.id = 'viewer'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Chart'); document.body.append(ov); }
   const positions = [...new Set(spec.points.map((p) => p.pos))];
-  const V = {key, spec, view: spec.range.slice(), mode: 'zoom', show: Object.fromEntries(positions.map((p) => [p, true])), drag: null, pointers: new Map(), hover: null};
+  const V = {key, spec, view: spec.range.slice(), mode: 'pan', show: Object.fromEntries(positions.map((p) => [p, true])), drag: null, pointers: new Map(), hover: null};
   window.dfsViewer = {V, redraw: () => { draw(); side(); }, close};
   ov.replaceChildren(); ov.hidden = false;
   const bar = el('div', 'vbar'); bar.append(el('h2', null, spec.title));
   const how = el('span', 'how', 'ⓘ how this is built'); how.tabIndex = 0; how.dataset.how = spec.how; bar.append(how);
   const modes = el('span', 'grp');
-  for (const [m, lab, t] of [['zoom', 'Zoom box', 'Drag a box to zoom in'], ['pan', 'Pan', 'Drag to move'], ['box', 'Select box', 'Drag a box to select'], ['lasso', 'Lasso', 'Draw round the players to select']]) {
+  for (const [m, lab, t] of [['pan', 'Pan', 'Drag to move (the default); the wheel or a pinch zooms, Shift-drag zooms to a box'], ['zoom', 'Zoom box', 'Drag a box to zoom in'], ['box', 'Select box', 'Drag a box to select'], ['lasso', 'Lasso', 'Draw round the players to select']]) {
     const b = el('button', m === V.mode ? 'on' : '', lab); b.type = 'button'; b.dataset.mode = m; b.title = t;
     b.onclick = () => { V.mode = m; for (const x of modes.children) x.classList.toggle('on', x.dataset.mode === m); }; modes.append(b);
   }
@@ -435,7 +594,7 @@ function viewerOpen(key) {
   svg.addEventListener('pointerdown', (e) => {
     svg.setPointerCapture(e.pointerId); const q = local(e); V.pointers.set(e.pointerId, q);
     if (V.pointers.size === 2) { const [a, b] = [...V.pointers.values()]; V.drag = {pinch: Math.hypot(a[0] - b[0], a[1] - b[1]), mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]}; return; }
-    V.drag = {start: q, mode: e.shiftKey && V.mode === 'zoom' ? 'pan' : V.mode, view: V.view.slice(), moved: false, add: e.shiftKey || e.metaKey};
+    V.drag = {start: q, mode: e.shiftKey && V.mode === 'pan' ? 'zoom' : V.mode, view: V.view.slice(), moved: false, add: e.shiftKey || e.metaKey};
     if (V.drag.mode === 'lasso') V.drag.path = [q];
   });
   svg.addEventListener('pointermove', (e) => {
@@ -478,7 +637,7 @@ function viewerOpen(key) {
     aside.replaceChildren();
     const ids = selection.ids();
     aside.append(el('h4', null, 'Selected (' + ids.length + ')'));
-    aside.append(el('p', 'vhelp', 'Click a dot to select it; Select box or Lasso for many (they add to the selection). Double-click a dot for the player. Wheel or pinch to zoom, Pan to move, Reset zoom to start again.'));
+    aside.append(el('p', 'vhelp', 'Click a dot to select it; Select box or Lasso for many (they add to the selection). Double-click a dot for the player. Drag to move (Pan); the wheel or a pinch zooms, Shift-drag or Zoom box zooms to a box; Reset zoom to start again.'));
     const ul = el('ul');
     for (const id of ids) {
       const li = el('li'); const a = el('a', 'pl', pool.name(id)); a.href = '#'; a.dataset.id = id;
@@ -509,49 +668,64 @@ document.addEventListener('click', (e) => {
   viewerOpen(svg.closest('[data-chart]').dataset.chart);
 });
 
-/* ---------- the game view (item 10) ---------- */
+/* ---------- the game view (item 10; Plan O: every row's Pool control, previous / next and the game list) ---------- */
 const G = jsonOf('game-data') || {};
 const GSEL = new Set();
+let GCUR = null;
 function gameOf(game, team) {
   if (game && G[game]) return game;
   return Object.keys(G).find((k) => G[k].teams && team && team in G[k].teams) || null;
 }
+function gameStep(d) {
+  const keys = Object.keys(G); if (!GCUR || !keys.length) return;
+  const i = keys.indexOf(GCUR); gameOpen(keys[(i + d + keys.length) % keys.length]);
+}
 function gameOpen(game, team) {
   const key = gameOf(game, team); if (!key) return;
-  const g = G[key]; GSEL.clear();
+  const g = G[key]; GSEL.clear(); GCUR = key;
   let ov = $('#gameview');
   if (!ov) { ov = el('div', 'overlay'); ov.id = 'gameview'; ov.setAttribute('role', 'dialog'); document.body.append(ov); }
   ov.setAttribute('aria-label', g.title); ov.replaceChildren(); ov.hidden = false;
   const bar = el('div', 'vbar'); bar.append(el('h2', null, g.title));
   const how = el('span', 'how', 'ⓘ how this is built'); how.tabIndex = 0; how.dataset.how = g.how; bar.append(how);
-  const x = el('button', 'x', '×'); x.type = 'button'; x.title = 'Close (Esc)'; x.onclick = () => { ov.hidden = true; }; bar.append(x);
+  const nav = el('span', 'grp gnav');
+  const prev = el('button', null, '‹ Previous'); prev.type = 'button'; prev.dataset.act = 'prev'; prev.title = 'The previous game (←)'; prev.onclick = () => gameStep(-1);
+  const list = el('select'); list.setAttribute('aria-label', 'Go to a game'); list.dataset.act = 'list';
+  for (const k of Object.keys(G)) list.append(new Option(G[k].title + (G[k].total_text ? ' · ' + G[k].total_text : ''), k));
+  list.value = key; list.onchange = () => gameOpen(list.value);
+  const next = el('button', null, 'Next ›'); next.type = 'button'; next.dataset.act = 'next'; next.title = 'The next game (→)'; next.onclick = () => gameStep(1);
+  nav.append(prev, list, next); bar.append(nav);
+  const x = el('button', 'x', '×'); x.type = 'button'; x.title = 'Close (Esc)'; x.onclick = () => { ov.hidden = true; GCUR = null; }; bar.append(x);
   const body = el('div', 'gv'); ov.append(bar, body);
   body.append(el('p', 'line', g.line));
   const st = el('div'); st.append(el('h4', null, 'The sim\'s stacks in this game'));
-  if (g.stacks.length) { const ul = el('ul'); for (const s of g.stacks) ul.append(el('li', null, s)); st.append(ul); }
+  if (g.stacks.length) { const ul = el('ul'); for (const s2 of g.stacks) ul.append(el('li', null, s2)); st.append(ul); }
   else st.append(el('p', 'dim', g.no_stacks));
   body.append(st);
   const teams = el('div', 'teams');
   for (const t of g.order) {
     const col = el('div'); col.append(el('h3', null, t + (g.implied[t] != null ? ' · implied ' + g.implied[t].toFixed(1) : '')));
     const tab = el('table', 'stickyname'); const head = el('tr');
-    for (const h of ['Player', 'Salary', 'CalPts', 'Ceiling', 'GPP own', 'Leverage', 'Pool']) head.append(el('th', h === 'Player' ? '' : 'n', h));
+    for (const h of ['Player', 'Salary', 'CalPts', 'Ceiling', 'GPP own', 'Leverage', 'Pool']) head.append(el('th', h === 'Player' || h === 'Pool' ? '' : 'n', h));
     const th = el('thead'); th.append(head); tab.append(th);
-    for (const [grp, players] of g.teams[t]) {
+    if (!(g.teams[t] || []).length) { const tb = el('tbody'); const tr = el('tr'); const td = el('td', 'dim', 'No priced players for ' + t + ' in the last sync.'); td.colSpan = 7; tr.append(td); tb.append(tr); tab.append(tb); }
+    for (const [grp, players] of g.teams[t] || []) {
       const tb = el('tbody'); const gr = el('tr', 'pos'); const gd = el('td', null, grp); gd.colSpan = 7; gr.append(gd); tb.append(gr);
       for (const p of players) {
-        const tr = el('tr'); tr.dataset.id = p.id;
+        const tr = el('tr'); tr.dataset.id = p.id; tr.dataset.pos = p.pos || '';
         const nm = el('td'); const cb = el('input', 'sel'); cb.type = 'checkbox'; cb.dataset.id = p.id; cb.dataset.name = p.name; cb.dataset.pos = p.pos;
         cb.onchange = () => { if (cb.checked) GSEL.add(p.id); else GSEL.delete(p.id); actions(); };
         const a = el('a', 'pl', p.name); a.href = '#'; a.dataset.id = p.id; nm.append(cb, a); if (p.avail) nm.append(el('span', 'chip q', p.avail));
         tr.append(nm);
         for (const v of ['$' + Number(p.sal).toLocaleString(), p.cal == null ? '-' : p.cal.toFixed(1), p.ceil == null ? '-' : p.ceil.toFixed(1), pctOf(p.gpp), p.lev == null ? '-' : p.lev.toFixed(1)]) tr.append(el('td', 'n', v));
-        const pc = el('td'); const pv = el('span', 'poolval', pool.get(p.id) || 'not in pool'); pv.dataset.id = p.id; if (pool.get(p.id)) pv.classList.add('in'); pc.append(pv); tr.append(pc);
+        if (!(p.id in P.name)) P.name[p.id] = p.name;
+        const pc = el('td'); pc.append(pool.seg(p.id, p.name)); tr.append(pc);
         tb.append(tr);
       }
       tab.append(tb);
     }
     const wrap = el('div', 'scroll'); wrap.append(tab); col.append(wrap); teams.append(col);
+    if (window.dfsShade) window.dfsShade.table(tab);   // within each position, as on the page (week_shade)
   }
   body.append(teams);
   const act = el('div', 'actions'); body.append(act);
@@ -571,7 +745,7 @@ function gameOpen(game, team) {
       try { const r = await window.dfsLive.stack({names: ps.map((c) => c.dataset.name), rules_was: rules}); toast(r.message); }
       catch (e) { toast(e.message, true); }
     });
-    act.append(add, more);
+    act.append(add, more, el('span', 'dim', 'Each row\'s Pool control sets him on its own: Cash, GPP, Both or none.'));
   }
   actions(); pool.paintAll();
 }
@@ -582,14 +756,16 @@ document.addEventListener('click', (e) => {
   e.preventDefault(); gameOpen(t.dataset.game, t.dataset.team);
 });
 document.addEventListener('keydown', (e) => {
+  const gv = $('#gameview');
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && gv && !gv.hidden && !e.target.closest('input, select, textarea')) { e.preventDefault(); gameStep(e.key === 'ArrowLeft' ? -1 : 1); return; }
   if (e.key !== 'Escape') return;
   const d = $('#drawer'); if (d && !d.hidden) return;   // the drawer closes first
-  for (const id of ['viewer', 'gameview']) { const o = document.getElementById(id); if (o && !o.hidden) { if (id === 'viewer' && window.dfsViewer) window.dfsViewer.close(); else o.hidden = true; return; } }
+  for (const id of ['viewer', 'gameview']) { const o = document.getElementById(id); if (o && !o.hidden) { if (id === 'viewer' && window.dfsViewer) window.dfsViewer.close(); else { o.hidden = true; GCUR = null; } return; } }
 });
 
 /* ---------- start ---------- */
 adoptFromExplorer(jsonOf('explorer-data'));
 adoptFromDom();
-document.addEventListener('DOMContentLoaded', () => { UI.restore(); drawBulk(); });
+document.addEventListener('DOMContentLoaded', () => { decorate(); paintAll(); UI.restore(); drawBulk(); });
 })();
 """

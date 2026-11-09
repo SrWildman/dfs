@@ -17,7 +17,7 @@ import re
 from dfs import week_board as wb
 from dfs import week_charts, week_explorer, week_plays
 from dfs.week_inputs import WeekInputs
-from dfs.week_page import how_html
+from dfs.week_page import add_button, caption, how_html
 from dfs.week_plays import POSITIONS, num
 
 TIP = {
@@ -172,7 +172,10 @@ def pool_panel_html(panel: wb.PoolPanel, live: bool, source: str) -> str:
     if panel.likes:
         parts.append(
             "<p><b>The data likes, not in your pool:</b> "
-            + ", ".join(f"{pl(r.row)} <span class=dim>({e(', '.join(r.roles))})</span>" for r in panel.likes)
+            + ", ".join(
+                f"{pl(r.row)} <span class=dim>({e(', '.join(r.roles))})</span> {add_button(r.id, wb.kind_of(r.roles))}"
+                for r in panel.likes
+            )
             + "</p>"
         )
     if live and panel.start:
@@ -438,7 +441,13 @@ def board_html(
         "the signal's record. The Why line is what the columns do not say. Click a name for everything about him, "
         "an Opp for the game; tick players (shift-click for a range) to set their pool in one go.</p>"
         + pending
-        + f'<div class="scroll tall"><table class="board stickyname">{"".join(body)}</table></div></section>'
+        + f'<div class="scroll tall"><table class="board stickyname">{"".join(body)}</table></div>'
+        + caption(
+            "Proj = CalPts; Per $1K = CalPts ÷ salary × 1,000; Implied = half the total minus half the spread. "
+            "The roles come from week_plays.",
+            ("CalPts", "Salary", "Spread", "OverUnder", "CashOwn", "GppOwn"),
+        )
+        + "</section>"
     )
 
 
@@ -452,7 +461,9 @@ def chart_card(sid: str, key: str, title: str, note_html: str, svg: str) -> str:
         f'<section class="card chartcard" id="{sid}" data-chart="{key}"><div class="card-head"><h2>{e(title)}</h2>'
         f'<button type="button" class="expand" data-chart="{key}" title="Zoom, pan and select">⤢ Full screen</button>'
         + how_html(week_charts.HOW[key])
-        + f"</div>{note_html}{week_charts.LEGEND}{svg}</section>"
+        + f"</div>{note_html}{week_charts.LEGEND}{svg}"
+        + caption(week_charts.FORMULA[key] + " " + week_charts.HOW[key], week_charts.SOURCES[key])
+        + "</section>"
     )
 
 
@@ -623,6 +634,7 @@ def game_data(inp: WeekInputs) -> dict:
                 )
         out[g.key] = {
             "title": title,
+            "total_text": f"total {g.total:g}" if g.total is not None else "",
             "how": GAME_HOW,
             "line": " · ".join(bits),
             "order": teams,
@@ -650,11 +662,11 @@ def explorer_html(inp: WeekInputs, data: dict) -> str:
             '<p class="notrun"><b>Not run yet.</b> Nothing is synced.</p></section>'
         )
     charts = (
-        '<p class="note">Click a chart to open it full screen (zoom, pan, select).</p>'
-        f'<div class="ex-chart" data-chart="value" hidden>{week_charts.value_map(inp.edge, width=520, height=340)}</div>'
-        f'<div class="ex-chart" data-chart="leverage" hidden>'
-        f"{week_charts.leverage_map(inp.edge, width=520, height=340) or '<p class=dim>No GPP ownership yet.</p>'}</div>"
-        f'<div class="ex-chart" data-chart="usage" hidden>{week_charts.usage_map(inp.edge, width=520, height=340)}</div>'
+        '<div class="ex-chart chartcard" id="ex-chart" data-chart="explorer"><div class="card-head"><h4>Chart</h4>'
+        '<button type="button" class="expand" data-chart="explorer" title="Open full screen: pan, zoom, select">'
+        "Full screen</button></div>"
+        + week_charts.LEGEND_ALL
+        + '<div class="ex-plot"></div><p class="cap" id="ex-chart-cap"></p></div>'
     )
     sel = lambda i, label, first="": (  # noqa: E731
         f'<label>{label}<select id="{i}"><option value="">{first or "any"}</option></select></label>'
@@ -695,7 +707,9 @@ def explorer_html(inp: WeekInputs, data: dict) -> str:
         + '<p class="note">Each column header carries its trust: <span class="tchip proven">P</span> Proven, '
         '<span class="tchip shadow">S</span> Shadow, <span class="tchip untested">U</span> Untested, '
         '<span class="tchip data">D</span> Data (a feed, not a prediction). Hover for why.</p>'
-        '<div class="scroll ex-scroll"><table id="ex-table" class="ex stickyname"></table></div></div></section>'
+        '<div class="scroll ex-scroll"><table id="ex-table" class="ex stickyname"></table></div>'
+        + caption("Every priced player and every EdgeRaw column, as the last sync wrote them.", ("EdgeRaw",))
+        + "</div></section>"
     )
 
 

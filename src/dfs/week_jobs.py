@@ -13,7 +13,12 @@
 - **Guards.** `week new`, `week close`, `lineups clear`, `pool clear` and every `setup ...` (and the old
   `sheets ...`) rewrite tabs, so the page asks for the command typed out (`confirm_phrase`) and the server
   checks it. Nothing writes in a closed week (`read_only`). Nothing here runs on a timer.
-- **History** is `data/week/jobs.jsonl`: time, command (option NAMES only, never values), exit code.
+- **History** is `data/week/jobs.jsonl`: time, command (option NAMES only, never values), exit code, how
+  long it ran and the job's id; each job's output is kept beside it (`data/week/jobs/<id>.log`, the newest
+  `OUTPUT_KEPT`), so a past run in "Recent runs" opens its output.
+- **The panel** (`panel()`, Plan O item 1b): the weekly commands as a short set of buttons in the day's order
+  (`WEEKLY`, each with the options people use, short labels and its defaults filled in), every other command
+  behind a search, and every `setup ...` / `fix-...` one behind a collapsed Advanced toggle (`is_advanced`).
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -39,6 +45,7 @@ from dfs import commands_doc, launcher, paths, run_lock
 OUTPUT_LINES = 3000
 STOP_WAITS = (4.0, 5.0, 3.0)
 HISTORY_SHOWN = 15
+OUTPUT_KEPT = 30  # past runs whose output is kept on disk for "Recent runs"
 
 # Commands that rewrite tabs or reset a week: the page makes Sam type them out.
 CONFIRM_COMMANDS = frozenset({"dfs week new", "dfs week close", "dfs lineups clear", "dfs pool clear"})
@@ -125,6 +132,149 @@ def forms() -> dict[str, dict[str, Any]]:
             "fields": [f.__dict__ for f in _fields(path, command)],
         }
     return out
+
+
+# -- the panel (Plan O item 1b) -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Weekly:
+    """One of the weekly buttons: what it is called, the command, the options shown up front (the rest sit
+    under "More options") and the values its form starts with."""
+
+    label: str
+    command: str
+    when: str  # the day, in plain words
+    common: tuple[str, ...]
+    defaults: tuple[tuple[str, Any], ...] = ()
+
+
+# Sam's standard week, in the day's order (Plan O item 1b). The options up front are the ones his weekly
+# shortcuts use (CLAUDE.md): `sync --live` on Sunday, the late swap's ESPN injury refresh and `--field auto`,
+# `week close --research`, an entries file by hand.
+WEEKLY: tuple[Weekly, ...] = (
+    Weekly("Sync", "dfs sync", "Saturday, and after any news", ("live", "props")),
+    Weekly("Contest plan", "dfs contests plan", "before entering", ("budget",)),
+    Weekly("Build me lineups", "dfs lineups suggest", "after the sync", ("iterate", "round_", "cash", "gpp")),
+    Weekly(
+        "Record entries", "dfs entries record", "at lock, after entering", ("csv", "from_sheet", "dry_run")
+    ),
+    Weekly(
+        "Late swap",
+        "dfs lineups late-swap",
+        "Sunday, before the late games",
+        ("refresh_injuries", "field", "state"),
+        (("refresh_injuries", True),),
+    ),
+    Weekly(
+        "Inactives check",
+        "dfs plays",
+        "Sunday, after inactives",
+        ("inactives", "position"),
+        (("inactives", True),),
+    ),
+    Weekly("Season sync", "dfs season sync", "any day", ("league", "no_sheet")),
+    Weekly("Close the week", "dfs week close", "Monday", ("csv", "research"), (("research", True),)),
+)
+
+# A short label per option name, where the command's own help is a sentence (the full help is the tooltip).
+SHORT_LABELS = {
+    "live": "Final sync: fast-moving sources only",
+    "props": "Pull player props (Odds API credits)",
+    "only": "Only these sources",
+    "no_upload": "Store locally, skip the sheet",
+    "week": "Week",
+    "season": "Season",
+    "sheet_id": "Another sheet (its ID)",
+    "fixed_lines": "Score against the old fixed lines",
+    "budget": "Weekly budget ($)",
+    "no_sheet": "Read or write no sheet",
+    "cash": "Cash builds",
+    "gpp": "GPP builds",
+    "no_write": "Print only, leave Suggested alone",
+    "seconds": "Search seconds",
+    "gpp_entries": "GPP size (entries)",
+    "double_up_entries": "Double-up size (entries)",
+    "rank": "Rank GPP builds by",
+    "iterate": "Rerun from my Suggested edits",
+    "round_": "Bring back round",
+    "portfolio_": "Also plan the GPP entries (shadow)",
+    "portfolio_objective": "Portfolio objective",
+    "portfolio_wide": "Portfolio: noisy reruns",
+    "entries_csv": "Entries file",
+    "csv": "File (left empty: the newest in Downloads)",
+    "from_sheet": "Use the Lineups tab",
+    "dry_run": "Dry run: write nothing",
+    "top": "How many to show",
+    "metric": "Rank by projection",
+    "all_players": "Whole pool, not only mine",
+    "goal": "Rank by",
+    "field": "Live standings export (auto = Downloads)",
+    "state": "Game state",
+    "refresh_injuries": "Refresh ESPN's game-day injuries",
+    "position": "Positions (QB,RB,...)",
+    "per": "Calls per label",
+    "no_save": "Print only, save nothing",
+    "inactives": "Run the final sync first",
+    "league": "League (blank: all)",
+    "all_leagues": "Every league",
+    "open_search": "Leave out the buy-list ideas",
+    "research": "Then run Monday's studies",
+    "yes": "Skip the confirmation",
+    "output": "File to write",
+    "write": "Also write the upload file",
+    "again": "Only lineups changed by a late swap",
+    "refit": "Refit the field model first",
+    "retro": "Rerun the retro",
+    "sheet_url": "This week's sheet (link or ID)",
+}
+
+
+def is_advanced(path: str) -> bool:
+    """Sheet setup and one-off fixes: behind the panel's Advanced toggle (Plan O item 1b)."""
+    words = path.split()
+    return path.startswith(("dfs setup ", "dfs sheets ")) or any(w.startswith("fix-") for w in words[1:])
+
+
+def short_label(field_spec: dict) -> str:
+    """The option's short label: `SHORT_LABELS`, else the first clause of its question."""
+    if field_spec["name"] in SHORT_LABELS:
+        return SHORT_LABELS[field_spec["name"]]
+    text = str(field_spec.get("question") or field_spec["name"])
+    for stop in (" (", ": ", ". ", "; ", " -- "):
+        text = text.split(stop)[0]
+    return text[:48]
+
+
+def panel(known: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The run panel: the weekly buttons (each with its options up front and its defaults), then every other
+    command, then the advanced ones. A weekly button whose command is not registered is left out (a renamed
+    command fails `tests/test_week_jobs`'s check, not the page)."""
+    known = known or forms()
+    weekly = []
+    for w in WEEKLY:
+        spec = known.get(w.command)
+        if spec is None:
+            continue
+        names = {f["name"] for f in spec["fields"]}
+        weekly.append(
+            {
+                "label": w.label,
+                "command": w.command,
+                "when": w.when,
+                "common": [n for n in w.common if n in names],
+                "defaults": {k: v for k, v in w.defaults if k in names},
+                "tip": spec["help"],
+            }
+        )
+    mine = {w.command for w in WEEKLY}
+    rest = [p for p in known if p not in mine]
+    return {
+        "weekly": weekly,
+        "other": [p for p in rest if not is_advanced(p)],
+        "advanced": [p for p in rest if is_advanced(p)],
+        "labels": {p: {f["name"]: short_label(f) for f in spec["fields"]} for p, spec in known.items()},
+    }
 
 
 def menu_buttons() -> list[dict[str, str]]:
@@ -304,7 +454,12 @@ class JobRunner:
         except Exception as exc:  # noqa: BLE001 - a callback never fails a job
             self.log(f"job callback failed: {type(exc).__name__}")
 
+    @property
+    def output_dir(self) -> Path:
+        return self.history_path.parent / "jobs"
+
     def _remember(self, job: Job) -> None:
+        seconds = round((datetime.now(UTC) - job.started).total_seconds(), 1)
         try:
             self.history_path.parent.mkdir(parents=True, exist_ok=True)
             with self.history_path.open("a") as fh:
@@ -315,12 +470,35 @@ class JobRunner:
                             "command": job.command,
                             "rc": job.returncode,
                             "stopped": job.stopping,
+                            "seconds": seconds,
+                            "id": job.id,
                         }
                     )
                     + "\n"
                 )
         except OSError:
             pass
+        try:  # the output, for "Recent runs" (the newest OUTPUT_KEPT only)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            (self.output_dir / f"{job.id}.log").write_text("\n".join([f"$ {job.command}", *job.lines]) + "\n")
+            logs = sorted(self.output_dir.glob("*.log"), key=lambda q: q.stat().st_mtime)
+            for old in logs[:-OUTPUT_KEPT]:
+                old.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def output(self, job_id: str) -> list[str] | None:
+        """A run's output: the running or recent job's lines, else its saved log; None when there is none."""
+        if not re.fullmatch(r"[0-9a-f]{10}", job_id or ""):
+            return None
+        job = self.jobs.get(job_id)
+        if job is not None:
+            with job.cond:
+                return [f"$ {job.command}", *job.lines]
+        try:
+            return (self.output_dir / f"{job_id}.log").read_text().splitlines()
+        except OSError:
+            return None
 
     def history(self, limit: int = HISTORY_SHOWN) -> list[dict]:
         try:

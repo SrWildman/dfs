@@ -110,12 +110,14 @@ def tab_inputs(
 def write_stacks(client: SheetsClient, layout: Layout, tab: str = STACKS_TAB) -> str:
     """Write the rows, then style them. The tab is reset first (it is rebuilt from scratch every time)."""
     from dfs import week_inputs
-    from dfs.sheet_style import _HEADER_FMT, _PANEL_FMT, _TITLE_FMT, INK_MUTED, WHITE, _num
+    from dfs.sheet_color_scales import _DIVERGING, _GRADIENT, _scale_rule_specs
+    from dfs.sheet_style import _HEADER_FMT, _PANEL_FMT, _SOFT_OK_BG, _TITLE_FMT, INK, INK_MUTED, WHITE, _num
 
     last = max(len(layout.rows) + 5, 60)
     client.write_tab(tab, layout.rows)
     week_inputs.save_stacks(layout)  # the Week page's top 3 (fail-soft)
     client.clear_notes(tab, f"A1:{LAST_COLUMN}{last}")
+    client.clear_conditional_formats(tab)  # last run's colour scales (their rows move with the table)
     client.format_range(
         tab,
         f"A1:{LAST_COLUMN}{last}",
@@ -140,6 +142,17 @@ def write_stacks(client: SheetsClient, layout: Layout, tab: str = STACKS_TAB) ->
         client.format_range(
             tab, f"B{row}", {"textFormat": {"italic": True, "fontSize": 9, "foregroundColor": INK_MUTED}}
         )
+    if layout.legend_row:
+        client.format_range(
+            tab,
+            f"A{layout.legend_row}",
+            {
+                "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": INK},
+                "wrapStrategy": "OVERFLOW_CELL",
+            },
+        )
+    for row in layout.cue_rows:  # a BUILD row: tinted pale green across the table (the cue cell is set below)
+        client.format_range(tab, f"A{row}:{layout.table_width}{row}", {"backgroundColor": _SOFT_OK_BG})
     for row, cue in layout.cue_rows.items():
         text_color, fill = CUE_COLORS[cue]
         client.format_range(
@@ -153,7 +166,13 @@ def write_stacks(client: SheetsClient, layout: Layout, tab: str = STACKS_TAB) ->
         )
     for rng, pattern, kind in layout.formats:
         client.format_range(tab, rng, {**_num(pattern, kind), "horizontalAlignment": "RIGHT"})
-    client.freeze(tab, rows=layout.status_row, cols=0)
+    kinds = {"gradient": _GRADIENT, "diverging": _DIVERGING}
+    for rng, kind in layout.scales:
+        gradient, chip = _scale_rule_specs(rng, kinds[kind], "", zero_exclude_range=rng)
+        client.add_color_scales(tab, [gradient])
+        if chip:
+            client.add_boolean_rules(tab, [chip])
+    client.freeze(tab, rows=max(layout.status_row, layout.legend_row), cols=0)  # the legend stays in view
     return f"{tab}: built ({len(layout.rows)} rows)"
 
 

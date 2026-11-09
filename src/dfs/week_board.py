@@ -303,10 +303,16 @@ def starting_pool(b: Board, pool: dict[str, str]) -> list[tuple[dict, str]]:
     for r in b.rows():
         if not r.shown or r.fade or r.name in pool or avail(r.row) in week_plays.STATUS_WORD:
             continue
-        cash = any(role in r.roles for role in CASH_ROLES)
-        gpp = UPSIDE in r.roles
-        out.append((r.row, "Both" if cash and gpp else "Cash" if cash else "GPP"))
+        out.append((r.row, kind_of(r.roles)))
     return out
+
+
+def kind_of(roles) -> str:
+    """The pool kind a set of board roles points to: Value / Cash core / Chalk core = Cash, Upside = GPP,
+    both = Both (the starting pool's rule, and the one-click add's)."""
+    cash = any(role in roles for role in CASH_ROLES)
+    gpp = UPSIDE in roles
+    return "Both" if cash and gpp else "Cash" if cash else "GPP"
 
 
 # -- the decisions -----------------------------------------------------------------------------------------

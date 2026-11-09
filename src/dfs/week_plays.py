@@ -458,10 +458,16 @@ class Game:
 
 
 def _teams(rows: list[dict]) -> tuple[str, str]:
-    """(away, home): `GameID` is `season_week_AWAY_HOME`; without it the first team seen is the away side."""
+    """(away, home): `GameID` is `season_week_AWAY_HOME`; without it the first team seen is the away side.
+
+    `GameID` is nflverse's, which spells some teams its own way (the Rams are `LA`, DraftKings' `LAR`), while
+    every row's Team / Opp is DraftKings'; so the codes are put in DraftKings' spelling
+    (`player_join.normalize_team`), or the game view found no Rams players (Plan O item 1)."""
+    from dfs.player_join import normalize_team
+
     m = re.search(r"_([A-Za-z]+)_([A-Za-z]+)$", str(rows[0].get("GameID") or ""))
     if m:
-        return m.group(1), m.group(2)
+        return normalize_team(m.group(1)), normalize_team(m.group(2))
     teams = [t for r in rows for t in (r.get("Team"), r.get("Opp")) if t]
     uniq = list(dict.fromkeys(teams))
     return (uniq + ["", ""])[0], (uniq + ["", ""])[1]
@@ -542,6 +548,9 @@ class Change:
     kind: str  # status | calpts | line | out
     text: str
     mine: bool = False  # the player is in Sam's pool or on a Suggested build
+    name: str = ""  # the player the line starts with ("" for a game's line move)
+    team: str = ""
+    pid: str = ""
 
 
 @dataclass
@@ -576,13 +585,14 @@ def changes(current: list[dict], previous: list[dict], mine: set[str]) -> Change
         is_mine = name in mine
         was, now = avail(old), avail(r)
         label = f"{name} ({r.get('Position', '')} {r.get('Team', '')})".replace("  ", " ")
+        who = (str(name), str(r.get("Team", "") or ""), _id(r))
         if was != now:
             wording = f"{STATUS_WORD.get(was) or 'healthy'} to {STATUS_WORD.get(now) or 'healthy'}"
             if is_mine:
-                status.append(Change("status", f"{label}: {wording}", True))
+                status.append(Change("status", f"{label}: {wording}", True, *who))
             matters = is_mine or max(num(old.get("CalPts")) or 0.0, num(r.get("CalPts")) or 0.0) >= MATTERS
             if now in ("OUT", "IR") and was not in ("OUT", "IR") and matters:
-                new_outs.append(Change("out", f"{label}: {wording}", is_mine))
+                new_outs.append(Change("out", f"{label}: {wording}", is_mine, *who))
         a, b = num(old.get("CalPts")), num(r.get("CalPts"))
         if (
             a is not None
@@ -594,7 +604,7 @@ def changes(current: list[dict], previous: list[dict], mine: set[str]) -> Change
             cal.append(
                 (
                     abs(b - a),
-                    Change("calpts", f"{label}: CalPts {a:.1f} to {b:.1f} ({b - a:+.1f})", is_mine),
+                    Change("calpts", f"{label}: CalPts {a:.1f} to {b:.1f} ({b - a:+.1f})", is_mine, *who),
                 )
             )
     cal.sort(key=lambda x: (not x[1].mine, -x[0]))

@@ -440,8 +440,11 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "built on the stack finishes in the field's top 1%), Field % (the share of the field playing exactly "
         "it), Boom % (its share of the simulated top 1%) and Lev (Boom % minus Field %). Below it, the best "
         "games. The track record from past weeks sits on top; before TFFB publishes ownership the field "
-        "columns are left out. Read-only; BUILD in column A means type the last cell into Suggested's rules "
-        "box. Rewritten by dfs stacks and dfs sync.",
+        "columns are left out. Read-only. BUILD in column A (a pale green row) marks the five "
+        "highest-leverage stacks that beat the field (Lift over 1x, Lev above 0): type its last cell into "
+        "Suggested's rules box; Top 1%, Lift and Lev are shaded red to green, and the COLOURS row under the "
+        "title explains both. "
+        "Rewritten by dfs stacks and dfs sync.",
     ),
     (
         "Lineups",

@@ -171,6 +171,32 @@ def rich(text: object) -> str:
 # -- small HTML helpers -----------------------------------------------------------------------------
 
 
+def pn(name: object, team: object = "", pid: object = "") -> str:
+    """A player's name in a section that holds only his name (Plan O item 2): a link the page resolves to
+    his id from the Explorer's data (by name, and team where two share one), which opens the drawer and
+    carries the pool chip (`week_ui`). An id, when the section has it, is used as is."""
+    name = str(name or "")
+    if not name:
+        return ""
+    attrs = (f' data-id="{e(pid)}"' if pid else "") + f' data-name="{e(name)}"'
+    attrs += f' data-team="{e(team)}"' if team else ""
+    return f'<a class="pl" href="#"{attrs}>{e(name)}</a>'
+
+
+def pns(names) -> str:
+    """A comma-separated list of names, each a `pn` link."""
+    return ", ".join(pn(n) for n in names or [] if n)
+
+
+def add_button(pid: object, kind: str) -> str:
+    """One click adds a player the page lists as missing from the pool: `kind` (Cash / GPP / Both), merged
+    with what he already has (GPP + Cash = Both). The page hides it once he is in at that kind."""
+    return (
+        f'<button type="button" class="addpool" data-id="{e(pid)}" data-v="{e(kind)}" '
+        f'title="Add him to your pool as {e(kind)} (one write to EdgeRaw\'s Pool cell)">+ {e(kind)}</button>'
+    )
+
+
 def how_html(text: str) -> str:
     """The one-line "how this is built" note every table and chart carries (Plan N item 14): shown on hover,
     and on a tap (the shared script toggles it), never in the way."""
@@ -181,16 +207,41 @@ def how_html(text: str) -> str:
     )
 
 
-def table(headers: list[str], rows: list[list[str]], *, how: str, cls: str = "") -> str:
+CAP_ASOF = '<span class="cap-asof"></span>'  # filled with the section's data date (`fill_asof`)
+
+
+def caption(text: str, src: tuple[str, ...] | list[str] = ()) -> str:
+    """The visible caption under a table or chart (Plan O item 4): how it is built (the formula), the
+    source columns, and the date of the data (the section's own, else the last sync's; `fill_asof`)."""
+    cols = f" From: {', '.join(src)}." if src else ""
+    return f'<p class="cap">{rich(text)}{e(cols)} {CAP_ASOF}</p>'
+
+
+def fill_asof(body: str, asof: str) -> str:
+    """Every caption's data date in `body`: `asof`, else the page's last sync."""
+    when = asof or _ASOF.get()
+    return body.replace(CAP_ASOF, f'<span class="cap-asof">Data: {e(when)}.</span>' if when else "")
+
+
+def table(
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    how: str,
+    cls: str = "",
+    src: tuple[str, ...] | list[str] = (),
+) -> str:
     """Cells are already-escaped HTML. `how` is the table's one-line "how this is built" note (required: every
-    table says how it is built). The header is sticky inside its scroll box; `cls="stickyname"` keeps the
-    first column in view when the table scrolls sideways."""
+    table says how it is built); it shows as the caption under the table (Plan O item 4) with `src`, the
+    columns it reads, and the data's date. The "how this is built" tip above it carries the same note. The
+    header is sticky inside its scroll box; `cls="stickyname"` keeps the first column in view when the
+    table scrolls sideways."""
     head = "".join(f"<th>{e(h)}</th>" for h in headers)
     body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
     return (
         f'<div class="tbl">{how_html(how)}<div class="scroll"><table class="{cls}">'
         f"<thead><tr>{head}</tr></thead>"
-        f"<tbody>{body}</tbody></table></div></div>"
+        f"<tbody>{body}</tbody></table></div>{caption(how, src)}</div>"
     )
 
 
@@ -243,7 +294,7 @@ class Section:
         cls = "card" if self.ran else "card notrun-card"
         return (
             f'<section class="{cls}" id="{e(self.id)}"><div class="card-head"><h3>{e(self.title)}</h3>'
-            f"{chip}{asof}</div>{self.body}{trust_line}</section>"
+            f"{chip}{asof}</div>{fill_asof(self.body, self.asof)}{trust_line}</section>"
         )
 
 
@@ -256,6 +307,7 @@ def run_button(command: str, label: str) -> str:
     return f'<span class="{LIVE_BUTTON}" data-command="{e(command)}" data-label="{e(label)}"></span>'
 
 
+_ASOF: ContextVar[str] = ContextVar("week_page_asof", default="")  # the last sync, for captions
 _LIVE: ContextVar[bool] = ContextVar("week_page_live", default=False)  # the served page: no command text
 
 
@@ -476,7 +528,15 @@ def cash_chalk(inp: WeekInputs) -> tuple[list[dict] | None, int]:
         published = True
         if own >= CHALK_THRESHOLD:
             used = sum(1 for b in cash if r["Name"] in b.get("names", []))
-            chalk.append({"name": r["Name"], "pos": r.get("Position", ""), "own": own, "used": used})
+            chalk.append(
+                {
+                    "name": r["Name"],
+                    "pos": r.get("Position", ""),
+                    "team": r.get("Team", ""),
+                    "own": own,
+                    "used": used,
+                }
+            )
     if not published:
         return None, len(cash)
     return sorted(chalk, key=lambda c: -c["own"]), len(cash)
@@ -494,7 +554,15 @@ def cash_close(inp: WeekInputs) -> list[dict]:
         own = num(r.get("CashOwn"))
         if own is not None and own < CHALK_THRESHOLD:
             used = sum(1 for b in cash if r["Name"] in b.get("names", []))
-            under.append({"name": r["Name"], "pos": r.get("Position", ""), "own": own, "used": used})
+            under.append(
+                {
+                    "name": r["Name"],
+                    "pos": r.get("Position", ""),
+                    "team": r.get("Team", ""),
+                    "own": own,
+                    "used": used,
+                }
+            )
     return sorted(under, key=lambda c: -c["own"])[:CLOSE_COUNT]
 
 
@@ -523,7 +591,7 @@ def cash_section(inp: WeekInputs) -> Section:
         rows.append(
             [
                 e(b.get("number", "")),
-                e(", ".join(b.get("names", []))),
+                pns(b.get("names", [])),
                 e(f"${int(m['salary']):,}") if m.get("salary") else "-",
                 f"<b>{e(pct(shown))}</b>",
             ]
@@ -553,7 +621,7 @@ def cash_section(inp: WeekInputs) -> Section:
             body.append('<p class="ok">No player is expected at 30%+ in double-ups.</p>')
         rows = [
             [
-                e(c["name"]),
+                pn(c["name"], c.get("team", "")),
                 e(c["pos"]),
                 e(pct(c["own"])),
                 f'<span class="{"bad" if c["used"] == 0 else ""}">{c["used"]} of {n_builds}</span>',
@@ -562,7 +630,7 @@ def cash_section(inp: WeekInputs) -> Section:
         ]
         rows += [
             [
-                e(c["name"]) + ' <span class="chip close">close</span>',
+                pn(c["name"], c.get("team", "")) + ' <span class="chip close">close</span>',
                 e(c["pos"]),
                 e(pct(c["own"])),
                 f"{c['used']} of {n_builds}",
@@ -616,7 +684,7 @@ def gpp_section(inp: WeekInputs) -> Section:
                 [
                     e(b.get("number", "")),
                     e(b.get("title", "").split("  ·  ", 1)[-1]),
-                    e(", ".join(b.get("names", []))),
+                    pns(b.get("names", [])),
                     e(pct(num(m.get("p_gpp")), 1)),
                 ]
             )
@@ -646,8 +714,8 @@ def gpp_section(inp: WeekInputs) -> Section:
     if stacks and stacks.get("rows"):
         rows = [
             [
-                e(r["qb"]),
-                e(r["mates"]),
+                pn(r["qb"]),
+                pns(str(r.get("mates") or "").split(", ")),
                 e(r["game"]),
                 e(pct(num(r.get("top1")), 1)),
                 e(f"{r['lift']:.1f}x") if num(r.get("lift")) is not None else "-",
@@ -699,14 +767,18 @@ def unknowns_section(inp: WeekInputs) -> Section:
     if outs:
         body.append(
             '<p class="bad"><b>OUT or on IR but in a build:</b> '
-            + e(", ".join(f"{r['Name']} ({r['Avail']}, in {in_builds[r['Name']]} builds)" for r in outs))
+            + ", ".join(
+                pn(r["Name"], r.get("Team", ""), r.get("Id", ""))
+                + e(f" ({r['Avail']}, in {in_builds[r['Name']]} builds)")
+                for r in outs
+            )
             + ".</p>"
         )
     if shown:
         shown.sort(key=lambda r: r.get("GameStart") or "9")
         rows = [
             [
-                e(r["Name"]),
+                pn(r["Name"], r.get("Team", ""), r.get("Id", "")),
                 e(f"{r.get('Position', '')} {r.get('Team', '')}".strip()),
                 f"<b>{'Doubtful' if r['Avail'] == 'D' else 'Questionable'}</b>",
                 e(kickoff.kickoff_label(r.get("GameStart")) or r.get("Kickoff", "")),
@@ -1032,7 +1104,13 @@ def sync_stamp(inp: WeekInputs) -> str:
 def change_list(items: list[week_plays.Change], empty: str, limit: int = 12) -> str:
     if not items:
         return f'<p class="ok">{e(empty)}</p>'
-    lines = [("<b>yours</b> " if c.mine else "") + e(c.text) for c in items[:limit]]
+
+    def text(c: week_plays.Change) -> str:
+        if c.name and c.text.startswith(c.name):
+            return pn(c.name, c.team, c.pid) + e(c.text[len(c.name) :])
+        return e(c.text)
+
+    lines = [("<b>yours</b> " if c.mine else "") + text(c) for c in items[:limit]]
     more = f'<p class="note">and {len(items) - limit} more.</p>' if len(items) > limit else ""
     return bullets(lines) + more
 
@@ -1235,6 +1313,8 @@ margin-left:-1px}.seg button:first-child{border-radius:6px 0 0 6px;margin-left:0
 .legend{font-size:12.5px;color:var(--dim);margin:2px 0 4px}.legend .key{display:inline-block;width:10px;
 height:10px;border-radius:50%;margin:0 4px 0 8px;vertical-align:-1px}.legend .key.RB{background:var(--rb)}
 .legend .key.WR{background:var(--wr)}.legend .key.TE{background:var(--te)}
+.legend .key.QB{background:var(--s2)}.legend .key.DST{background:var(--dim)}.chart .dot.QB{fill:var(--s2)}
+.cap{font-size:11.5px;color:var(--dim);margin:4px 0 8px;line-height:1.45}.cap .cap-asof{white-space:nowrap}
 .games{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .game{border:1px solid var(--line);border-radius:8px;padding:8px 9px;min-width:0}
 .game.top{border-color:var(--accent)}
@@ -1543,7 +1623,7 @@ def fold_html(s: Section, line: str, urgent: bool, open_: bool = False) -> str:
         f'<section class="card fold" id="{e(s.id)}"><details{" open" if open_ else ""}>'
         f"<summary><h3>{e(s.title)}</h3>"
         f'<span class="line{" bad" if urgent else ""}">{e(line)}</span>{chip}</summary>'
-        f'<div class="body">{s.body}{trust_line}</div></details></section>'
+        f'<div class="body">{fill_asof(s.body, s.asof)}{trust_line}</div></details></section>'
     )
 
 
@@ -1623,9 +1703,10 @@ def render(
     """The whole page as one HTML string. `live` (the served page) adds the controls that write the sheet;
     `sheet` is what the server read from it (`week_writes.LiveSheet`), `answers` the decisions file."""
     from dfs import week_board as wb
-    from dfs import week_charts, week_explorer, week_learn, week_money, week_top, week_ui
+    from dfs import week_charts, week_explorer, week_learn, week_money, week_shade, week_top, week_ui
 
     token = _LIVE.set(live)
+    asof_token = _ASOF.set(sync_stamp(inp))
     try:
         if tools is None:
             tools = week_tools.build(inp.runs)
@@ -1703,15 +1784,16 @@ def render(
             record_lines=record_lines(inp),
             log=player_log(inp),
             practice=week_money.practice_by_id(inp),
+            asof=("Data " + sync_stamp(inp) + ".") if sync_stamp(inp) else "",
         )
         own_out = not board.gpp_pending
         rules_json = json.dumps(rules or {}).replace("</", "<\\/")
         live_data = f'<script type="application/json" id="rules-was">{rules_json}</script>' if live else ""
-        return (
+        page = (
             "<!doctype html><html lang=en><head><meta charset=utf-8>"
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
-            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}</style></head><body>"
+            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}</style></head><body>"
             f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
             + week_top.progress_html(steps)
             + stale_html
@@ -1751,12 +1833,15 @@ def render(
             )
             + "</script>"
             + f'<script type="application/json" id="game-data">{week_top.game_data_json(inp)}</script>'
+            + f"<script{nonce_attr}>{week_shade.JS}</script>"
             + f"<script{nonce_attr}>{week_ui.JS}</script>"
             + week_top.explorer_js(data, nonce_attr)
             + f"<script{nonce_attr}>{BOARD_JS}</script>"
             + "</body></html>"
         )
+        return fill_asof(page, "")
     finally:
+        _ASOF.reset(asof_token)
         _LIVE.reset(token)
 
 

@@ -8,14 +8,16 @@ locally). Nothing here touches a real sheet: the server writes a `FakeSheet`."""
 from __future__ import annotations
 
 import contextlib
+import re
 import threading
 
 import pytest
 
 from dfs import sheet_suggested as ss
-from dfs import week_server, week_writes
+from dfs import week_jobs, week_server, week_writes
 from tests.test_week_money import OWN, rows_with_more_wrs
 from tests.test_week_plays import row, write_csv
+from tests.test_week_server import stub_python
 from tests.test_week_writes import FakeSheet
 
 sync_api = pytest.importorskip("playwright.sync_api")
@@ -87,6 +89,13 @@ class Served:
             log_path=tmp_path / "serve.log",
             edits=edits,
             claude_available=lambda: False,
+            # a stand-in for `python -m dfs.cli`: a run button here never runs a real command
+            jobs=week_jobs.JobRunner(
+                python=stub_python(tmp_path, "echo ran $@; echo second line"),
+                history_path=tmp_path / "jobs.jsonl",
+                cwd=tmp_path,
+                stop_waits=(0.05, 0.05, 0.05),
+            ),
         )
         threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02), daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.ctx.port}/?t=tok-{'x' * 20}"
@@ -255,9 +264,30 @@ def test_the_chart_viewer_zooms_selects_by_box_and_lasso_and_hovers(page):
 
 def test_the_usage_chart_opens_from_the_explorer(page):
     page.locator("#ex-lenses button[data-lens=usage]").click()
-    page.locator(".ex-chart[data-chart=usage] svg.chart").click(position={"x": 30, "y": 20})
+    page.locator("#ex-chart svg.chart").click(position={"x": 30, "y": 20})
     page.wait_for_selector("#viewer circle.dot")
     assert "Usage" in page.locator("#viewer h2").inner_text()
+    assert page.evaluate("window.dfsViewer.V.mode") == "pan"  # Plan O: pan is the default
+
+
+def test_the_explorer_chart_follows_the_lens_and_the_filters(page):
+    """Plan O item 1: the chart changes with the lens, and draws only the rows the filters pass."""
+    titles = {}
+    for key in ("value", "cash", "gpp", "usage", "matchup", "projections", "ownership"):
+        page.locator(f"#ex-lenses button[data-lens={key}]").click()
+        assert page.evaluate("document.querySelector('#ex-chart').dataset.lens") == key
+        titles[key] = page.locator("#ex-chart h4").inner_text()
+    assert len(set(titles.values())) == len(titles)  # a different chart per lens
+    page.locator("#ex-lenses button[data-lens=value]").click()
+    every = page.locator("#ex-chart circle.dot").count()
+    page.select_option("#ex-pos", "WR")
+    wrs = page.locator("#ex-chart circle.dot").count()
+    assert 0 < wrs < every
+    assert page.evaluate("window.dfsCharts.explorer.points.every(p => p.pos === 'WR')")
+    assert f"{wrs} players" in page.locator("#ex-chart-cap").inner_text()
+    page.locator("#ex-chart button.expand").click()
+    page.wait_for_selector("#viewer circle.dot")
+    assert page.evaluate("window.dfsViewer.V.spec.points.length") == wrs  # full screen: the same points
 
 
 def test_the_game_view_adds_the_ticked_as_gpp_and_writes_a_more_stack(page, served):
@@ -286,3 +316,167 @@ def test_the_chat_toggle_is_remembered_across_a_reload(page):
     assert page.evaluate("document.querySelector('#chat').classList.contains('collapsed')")
     page.locator("#chat").click()
     assert not page.evaluate("document.querySelector('#chat').classList.contains('collapsed')")
+
+
+def test_a_pool_click_keeps_the_board_box_and_page_scroll_and_the_focus(browser, served):
+    """Plan O item 1: a Pool click scrolled the board back up. The board sits in its own scroll box, and the
+    refresh after a write replaced its section, which put the box back at the top; the focus went too."""
+    ctx = browser.new_context(
+        viewport={"width": 1440, "height": 420}
+    )  # a short window: the board box scrolls
+    pg = ctx.new_page()
+    pg.goto(served.url)
+    until(pg, "!!(window.dfsPool && window.dfsLive)")
+    box = "document.querySelector('#board .scroll.tall')"
+    pg.evaluate(f"({box}).scrollIntoView({{block: 'start'}})")
+    pg.evaluate(f"({box}).scrollTop = ({box}).scrollHeight")
+    pg.wait_for_timeout(300)
+    inner, outer = (
+        pg.evaluate(f"({box}).scrollTop"),
+        pg.evaluate("document.querySelector('#pagecol').scrollTop"),
+    )
+    assert inner > 50 and outer > 0
+    target = pg.evaluate(
+        f"""(() => {{ const b = {box}, r = b.getBoundingClientRect();
+        const btn = [...b.querySelectorAll('.seg button[data-v=GPP]')].find((x) => {{
+          const q = x.getBoundingClientRect(); return q.top > r.top + 30 && q.bottom < r.bottom; }});
+        return btn.closest('.seg').dataset.id; }})()"""
+    )
+    pg.locator(f'#board .seg[data-id="{target}"] button[data-v=GPP]').click()
+    settle(pg)
+    pg.wait_for_timeout(300)
+    assert abs(pg.evaluate(f"({box}).scrollTop") - inner) < 5
+    assert abs(pg.evaluate("document.querySelector('#pagecol').scrollTop") - outer) < 5
+    assert pg.evaluate("document.activeElement.dataset.v") == "GPP"
+    assert pg.evaluate("document.activeElement.closest('.seg').dataset.id") == target
+    pg.reload()
+    until(pg, "!!window.dfsLive")
+    pg.wait_for_timeout(500)
+    assert abs(pg.evaluate(f"({box}).scrollTop") - inner) < 5  # and after a reload
+    ctx.close()
+
+
+def test_every_explorer_lens_draws_its_rows(page):
+    """Plan O item 1: the Matchup lens was empty (it named a column the page's data leaves out, and the script
+    stopped). Every lens draws rows, and nothing on the page throws (the fixture checks page errors)."""
+    for key in page.evaluate("[...document.querySelectorAll('#ex-lenses button')].map(b => b.dataset.lens)"):
+        page.locator(f"#ex-lenses button[data-lens={key}]").click()
+        if key == "signals":
+            continue  # only players with a signal chip: none in this fixture is guaranteed
+        assert page.locator("#ex-table tbody tr[data-id]").count() > 0, key
+
+
+def test_the_run_panel_is_the_weekly_buttons_curated_forms_and_recent_runs(page):
+    """Plan O item 1b: the weekly commands in the day's order, setup and fix commands behind a collapsed
+    Advanced toggle, forms with the used options up front (short labels, the help as a tooltip, defaults
+    filled, toggles in one column) and a preview of the command; recent runs say ok or failed, how long and
+    when, and open their output."""
+    until(page, "document.querySelectorAll('#run-menu button').length > 0")
+    labels = page.locator("#run-menu button b").all_inner_texts()
+    assert labels == [w.label for w in week_jobs.WEEKLY]
+    assert not page.evaluate("document.querySelector('#run-adv').open")
+    adv = page.evaluate("[...document.querySelectorAll('#run-adv-list button')].map(b => b.textContent)")
+    assert "setup fix-opp-pos-rank" in adv and "setup polish" in adv
+    others = page.evaluate("[...document.querySelectorAll('#run-list button')].map(b => b.textContent)")
+    assert others and not any(t.startswith("setup ") or "fix-" in t for t in others)
+    page.locator("#run-menu button[data-command='dfs lineups late-swap']").click()
+    assert page.locator("#opt-refresh_injuries").is_checked()  # its default, filled in
+    assert page.locator("#run-preview").inner_text() == "dfs lineups late-swap --refresh-injuries"
+    assert page.locator("label[for=opt-refresh_injuries]").get_attribute("title").startswith("Lay ESPN")
+    assert page.locator("#run-form details.more").count() == 1  # the rest, folded away
+    assert not page.evaluate("document.querySelector('#run-form details.more').open")
+    page.locator("#run-menu button[data-command='dfs sync']").click()
+    assert page.locator("label[for=opt-live]").inner_text() == "Final sync: fast-moving sources only"
+    page.locator("#opt-live").check()
+    assert page.locator("#run-preview").inner_text() == "dfs sync --live"
+    toggles = page.evaluate(
+        "[...document.querySelectorAll('#run-form .opts.toggles input')]"
+        ".map(i => Math.round(i.getBoundingClientRect().left))"
+    )
+    assert len(set(toggles)) == 1  # one aligned column
+    page.locator("#run-form button[type=submit]").click()
+    until(page, "document.querySelector('#run-out').textContent.includes('[exit 0]')")
+    until(page, "document.querySelectorAll('#run-history li.ok').length > 0")
+    first = page.locator("#run-history li").first
+    assert first.locator(".st").inner_text() == "ok" and "dfs sync --live" in first.inner_text()
+    assert re.search(r"\d+s", first.locator(".t").inner_text())
+    page.evaluate("document.querySelector('#run-out').textContent = ''")
+    first.locator("a", has_text="output").click()
+    until(page, "document.querySelector('#run-out').textContent.includes('second line')")
+
+
+def test_every_name_carries_the_pool_chip_and_a_missing_player_is_one_click_away(page, served):
+    """Plan O item 2: every resolved `a.pl` outside a row that already has the control gets a chip with his
+    pool value; the chip opens Cash / GPP / Both / none, which writes the same cell; "+ Cash" / "+ GPP" adds a
+    player listed as missing from the pool in one click."""
+    until(page, "document.querySelectorAll('.pchip').length > 0")
+    bare = page.evaluate(
+        """[...document.querySelectorAll('a.pl[data-id]')].filter(a => !a.closest('#drawer, .seg, svg'))
+          .filter(a => {
+            const id = a.dataset.id, row = a.closest('tr, li, .gp-row');
+            const hasSeg = row && row.querySelector('.seg[data-id="' + CSS.escape(id) + '"]');
+            const next = a.nextElementSibling;
+            return !hasSeg && !(next && next.classList.contains('pchip'));
+          }).map(a => a.textContent)"""
+    )
+    assert bare == []
+    assert page.locator("#board .pchip").count() == 0  # the board rows have the control already
+    chip = page.locator(".pchip").first
+    pid = chip.get_attribute("data-id")
+    name = page.evaluate(f"window.dfsPool.name({pid!r})")
+    chip.click()
+    assert page.locator("#pool-pop .seg button").count() == 4
+    page.locator("#pool-pop .seg button[data-v=GPP]").click()
+    settle(page)
+    assert served.pool(name) == "GPP"
+    until(page, f"document.querySelector('.pchip[data-id=\"{pid}\"]').textContent === 'GPP'")
+    page.keyboard.press("Escape")
+    assert page.locator("#pool-pop").count() == 0
+    add = page.locator("button.addpool:visible").first
+    assert add.count(), "the fixture lists a player the data likes who is not in the pool"
+    if add.count():
+        aid, kind = add.get_attribute("data-id"), add.get_attribute("data-v")
+        aname = page.evaluate(f"window.dfsPool.name({aid!r})")
+        add.click()
+        settle(page)
+        assert served.pool(aname) == kind
+        # hidden at once, then gone: the refreshed section no longer lists him as missing
+        gone = f"(b => !b || b.hidden)(document.querySelector('button.addpool[data-id=\"{aid}\"]'))"
+        until(page, gone)
+
+
+SHADE_PROBE = """(() => {
+  const t = document.querySelector('#board table');
+  const heads = [...t.querySelectorAll('tbody.posgrp')[0].rows[0].cells].map(c => c.textContent.trim());
+  const col = (h) => heads.findIndex(x => x.endsWith(h));
+  const has = (td, c) => td.classList.contains(c);
+  const out = {};
+  for (const g of t.querySelectorAll('tbody.posgrp')) {
+    const rows = [...g.rows].filter(r => r.cells.length === heads.length && r.dataset.id);
+    const per = rows.map(r => [parseFloat(r.cells[col('Per $1K')].textContent), r.cells[col('Per $1K')]]);
+    if (per.length < 3) continue;
+    per.sort((a, b) => b[0] - a[0]);
+    const own = rows.flatMap(r => [...r.cells[col('DU own')].classList]);
+    out[g.dataset.pos] = {
+      topGood: has(per[0][1], 'sh-good'),
+      bottomBad: has(per[per.length - 1][1], 'sh-bad'),
+      salary: rows.some(r => has(r.cells[col('Salary')], 'sh')),
+      ownSides: [...new Set(own.filter(c => c.startsWith('sh-') && c !== 'sh-tail'))],
+    };
+  }
+  return out;
+})()"""
+
+
+def test_numbers_are_coloured_within_their_position_with_a_legend(page):
+    """Plan O item 3: a z-score within the position in the sheet's palette; ownership orange; the top and
+    bottom 10% bold; Salary never coloured; a legend above the table."""
+    until(page, "document.querySelectorAll('#board td.sh').length > 0")
+    got = page.evaluate(SHADE_PROBE)
+    assert got
+    for pos, g in got.items():
+        assert g["topGood"] and g["bottomBad"], pos
+        assert not g["salary"], pos
+        assert set(g["ownSides"]) <= {"sh-own"}, pos
+    assert page.locator("#board .shade-key").count() == 1
+    assert page.locator("#board td.sh-tail").count() > 0

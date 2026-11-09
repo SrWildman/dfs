@@ -12,9 +12,9 @@ import re
 import pytest
 
 from dfs import consensus as cons
-from dfs import week_charts, week_explorer, week_live, week_page, week_top, week_ui
+from dfs import week_charts, week_explorer, week_inputs, week_live, week_page, week_plays, week_top, week_ui
 from tests.test_week_money import OWN, entered_record, rows_with_more_wrs
-from tests.test_week_plays import inputs, page_text, render, row, section, slate_rows
+from tests.test_week_plays import WED, inputs, page_text, render, row, section, slate_rows, write_csv
 
 
 def live(page: str) -> str:
@@ -312,6 +312,35 @@ def test_the_game_view_has_both_teams_by_position_and_the_games_stacks(tmp_path)
     assert "a.dataset.team = team" in week_explorer.JS  # the Explorer's Team / Opp cells too
 
 
+@pytest.mark.parametrize(("nflverse", "dk"), [("LA", "LAR"), ("JAC", "JAX"), ("WSH", "WAS")])
+def test_the_game_view_finds_a_team_that_nflverse_spells_differently(tmp_path, nflverse, dk):
+    """Plan O item 1: the Rams showed no players. GameID is nflverse's (`2026_09_LA_WAS`), the rows' Team is
+    DraftKings' (`LAR`), and the view matched one against the other."""
+    rows = [
+        row("Qb Ram", "QB", dk, "NYG", 6000, 20.0, Spread="-3", OverUnder="45.5"),
+        row("Wr Ram", "WR", dk, "NYG", 5000, 14.0, Spread="-3", OverUnder="45.5"),
+        row("Qb Giant", "QB", "NYG", dk, 5500, 17.0, Spread="3", OverUnder="45.5"),
+    ]
+    for r in rows:
+        r["GameID"] = f"2026_09_{nflverse}_NYG"
+    write_csv(tmp_path / "data" / "current" / "edge.csv", rows)
+    inp = week_inputs.gather(2026, 9, WED, tmp_path / "data")
+    g = week_top.game_data(inp)[f"2026_09_{nflverse}_NYG"]
+    assert g["order"] == [dk, "NYG"] and g["title"] == f"{dk} @ NYG"
+    assert [p["name"] for _, ps in g["teams"][dk] for p in ps] == ["Qb Ram", "Wr Ram"]
+    assert g["total_text"] == "total 45.5"
+    assert [x.away for x in week_plays.slate(rows)] == [dk]
+
+
+def test_the_game_view_has_a_pool_control_on_every_row_and_moves_between_games():
+    js = week_ui.JS
+    assert (
+        "pc.append(pool.seg(p.id, p.name))" in js
+    )  # the same Cash / GPP / Both / none control (add AND remove)
+    assert "dataset.act = 'prev'" in js and "dataset.act = 'next'" in js and "dataset.act = 'list'" in js
+    assert "gameStep(e.key === 'ArrowLeft' ? -1 : 1)" in js
+
+
 # -- item 11 is in test_week_plays (caps, ranking, chalk core) -----------------------------------------------
 
 
@@ -340,7 +369,10 @@ def test_the_chalk_check_says_who_counts_and_shows_the_next_three_as_close(tmp_p
     page = render(inputs(tmp_path, rows, suggest=builds))
     cash = page_text(section(page, "cash"))
     assert "Cash chalk check: everyone predicted in 30% or more of double-up lineups (CashOwn) (2)" in cash
-    closes = re.findall(r"(\w+ \w+)\s+close\b", cash)
+    rows = page_text(
+        re.sub(r'<p class="cap">.*?</p>', "", section(page, "cash"), flags=re.S)
+    )  # not the caption
+    closes = re.findall(r"(\w+ \w+)\s+close\b", rows)
     assert closes == ["Wr Star", "Rb Fine", "Te Plain"]  # the next 3 under the line
 
 
@@ -442,3 +474,39 @@ def test_week_ui_sends_nothing_anywhere():
     js = week_ui.JS
     for banned in ("fetch(", "XMLHttpRequest", "WebSocket", "import(", "eval("):
         assert banned not in js, banned
+
+
+# -- Plan O items 3 and 4: colour by position, a caption on every table and chart ---------------------------
+
+
+def test_the_colour_kinds_follow_the_compare_tab_and_leave_neutral_columns_plain():
+    from dfs import week_shade
+
+    k = week_shade.kinds()
+    assert k["CalPts"] == k["Proj"] == k["Per $1K"] == k["Leverage"] == "good"
+    assert k["Bust%"] == k["OppPosRank"] == k["Opp rank"] == "bad"  # 1 = the softest matchup
+    assert k["CashOwn"] == k["DU own"] == k["GPP own"] == k["Own%"] == "own"
+    assert k["PropsGap"] == "diff"
+    for neutral in ("Salary", "Spread", "Team", "Position", "Kickoff", "Avail"):
+        assert neutral not in k
+    assert week_shade.OWN_HEX == "#FCD9A8" and week_shade.GOOD_HEX == "#A8DBB0"  # the sheet's palette
+    assert "window.dfsShade" in week_shade.JS and '"CalPts": "good"' in week_shade.JS
+
+
+@pytest.mark.parametrize("served", [False, True])
+def test_every_table_and_chart_has_a_caption_with_its_data_date(tmp_path, served):
+    synced = {"tffb": {"synced_at": "2026-11-04T15:00:00+00:00"}}
+    inp = inputs(tmp_path / "data", rows=rows_with_more_wrs(**OWN), entered=entered_record(), manifest=synced)
+    page = week_page.render(inp, live=served, nonce="n") if served else render(inp)
+    main = page[page.index("<main>") : page.index("</main>")]
+    assert week_page.CAP_ASOF not in page  # every placeholder filled
+    for m in re.finditer(r'<div class="tbl">.*?</table></div>(<p class="cap">.*?</p>)', main, re.S):
+        assert "Data:" in m.group(1), m.group(1)
+    for chart in re.finditer(r'<section class="card chartcard" id="([^"]+)"', main):
+        card = main[chart.start() : main.index("</section>", chart.start())]
+        cap = re.search(r'<p class="cap">(.*?)</p>', card, re.S)
+        assert cap and "Data:" in cap.group(1) and "From:" in cap.group(1), chart.group(1)
+    value = main[main.index('id="value-map"') :]
+    assert "Value = CalPts ÷ salary × 1,000" in value[: value.index("</section>")]
+    board = main[main.index('id="board"') :]
+    assert '<p class="cap">' in board[: board.index("</section>")]

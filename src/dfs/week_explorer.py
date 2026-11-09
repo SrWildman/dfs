@@ -32,6 +32,7 @@ import json
 from dataclasses import dataclass
 
 from dfs import derived, week_plays
+from dfs.player_join import TEAM_ALIASES
 from dfs.week_board import ROLES as ROLE_NAMES
 from dfs.week_board import Board, implied_total, pid
 from dfs.week_plays import num
@@ -290,8 +291,10 @@ LENSES: tuple[Lens, ...] = (
         "matchup",
         "Matchup",
         "Who has the game: the opponent's rank against his position (the schedule-strength rank), its EPA, "
-        "the totals, pace, pass rate over expected and the weather.",
-        ("OppPosRank", "OppEPA", "OverUnder", IMPLIED, "Pace", "PROE", "Wind", "WX", "Roof", "Kickoff"),
+        "the totals, pace, pass rate over expected, the wind and the roof.",
+        # Not `WX`: on EdgeRaw that is the weather group's label column (always empty), which the Explorer
+        # leaves out, so naming it here crashed the table and the lens showed nothing (Plan O item 1).
+        ("OppPosRank", "OppEPA", "OverUnder", IMPLIED, "Pace", "PROE", "Wind", "Roof", "Kickoff"),
         IMPLIED,
     ),
     Lens(
@@ -320,6 +323,95 @@ LENSES: tuple[Lens, ...] = (
     Lens("all", "All columns", "Everything EdgeRaw holds, in its own groups.", (), "CalPts"),
 )
 SIGNAL_TOKENS = ("FADE↓", "USAGE↑", "USAGE↓", "INJ+", "Proj ▲", "Proj ▼")
+
+
+@dataclass(frozen=True)
+class LensChart:
+    """The chart a lens draws (Plan O item 1: every lens has one, and it follows the Explorer's filters). `x` /
+    `y` are payload columns (`alt_x`: the column used where `x` is blank); `prio` names the players labelled
+    (the top 8 by it); `guide` is a reference: `per_k` (3 points per $1K), `diag` (x = y) or `zero` (y = 0);
+    `shade` the leverage quadrant. `formula` is the caption's first line (Plan O item 4)."""
+
+    title: str
+    x: str
+    y: str
+    prio: str
+    formula: str
+    alt_x: str = ""
+    guide: str = ""
+    shade: bool = False
+
+
+LENS_CHARTS: dict[str, LensChart] = {
+    "value": LensChart(
+        "Value: salary against CalPts",
+        "Salary",
+        "CalPts",
+        PER_K,
+        "Value = CalPts ÷ salary × 1,000; the dashed line is 3 points per $1K.",
+        guide="per_k",
+    ),
+    "cash": LensChart(
+        "Cash: salary against floor",
+        "Salary",
+        "Floor",
+        "Hit3x%",
+        "Floor = the 20th percentile of his outcomes; the named are the best Hit 3x (3x his salary in thousands).",
+    ),
+    "gpp": LensChart(
+        "Leverage: GPP ownership against ceiling",
+        "GppOwn",
+        "CeilM",
+        "Leverage",
+        "Leverage = ceiling against GPP ownership (ceiling rank minus ownership rank); shaded = under 10% owned "
+        "with a top-quarter ceiling.",
+        shade=True,
+    ),
+    "usage": LensChart(
+        "Usage: snap share against target share",
+        "Snap% L5",
+        "Tgt%",
+        "Tgt%",
+        "Target share = his share of the team's targets; snap share = his share of the snaps, last five games "
+        "(else the season).",
+        alt_x="Snap%",
+    ),
+    "matchup": LensChart(
+        "Matchup: opponent rank against implied total",
+        "OppPosRank",
+        "Implied",
+        IMPLIED,
+        "Implied = half the total minus half his team's spread; Opp rank 1 = the easiest matchup for his "
+        "position.",
+    ),
+    "projections": LensChart(
+        "Projections: TFFB against CalPts",
+        "ProjPts",
+        "CalPts",
+        SRC_SPREAD,
+        "CalPts = TFFB, Sleeper and FantasyPros, bias-corrected and weighted by accuracy; above the line = we "
+        "project him higher than TFFB.",
+        guide="diag",
+    ),
+    "ownership": LensChart(
+        "Ownership: double-ups against GPPs",
+        "CashOwn",
+        "GppOwn",
+        "GppOwn",
+        "DU own = predicted double-up ownership; GPP own = TFFB's ownership sharpened for GPPs; above the line = "
+        "chalkier in GPPs than in double-ups.",
+        guide="diag",
+    ),
+    "signals": LensChart(
+        "Signals: CalPts against the props gap",
+        "CalPts",
+        PROPS_GAP,
+        PROPS_GAP,
+        "Props gap = the props projection minus CalPts: above 0, the betting market is higher than we are.",
+        guide="zero",
+    ),
+}
+LENS_CHARTS["all"] = LENS_CHARTS["value"]
 
 
 def _src_spread(row: dict) -> float | None:
@@ -369,6 +461,7 @@ def payload(
     record_lines: dict[str, str] | None = None,
     log: dict[str, list[dict]] | None = None,
     practice: dict[str, str] | None = None,
+    asof: str = "",
 ) -> dict:
     """The Explorer's data: columns (key, header, group, trust, format, tip), one array per player, the
     lenses, the Suggested builds per player, the signal records and each player's last five games."""
@@ -411,6 +504,7 @@ def payload(
                 "sort": lens.sort,
                 "desc": lens.desc,
                 "chart": lens.chart,
+                "lens_chart": LENS_CHARTS[lens.key].__dict__,
                 "signal_only": lens.signal_only,
             }
             for lens in LENSES
@@ -423,6 +517,10 @@ def payload(
         "builds": builds,
         "log": log or {},
         "practice": practice or {},
+        "team_alias": dict(TEAM_ALIASES),
+        "chart_source": "Every priced player in the last sync (OUT and IR left out) that passes the Explorer's "
+        "filters.",
+        "asof": asof,
     }
 
 
@@ -461,7 +559,7 @@ function lensCols() {
   const l = lens();
   if (S.cols[l.key]) return S.cols[l.key].filter((k) => COL[k]);
   if (l.key === 'all') return D.columns.map((c) => c.key);
-  return l.columns;
+  return l.columns.filter((k) => COL[k]);  // a column the data does not carry is left out, never a crash
 }
 
 /* ---------- controls ---------- */
@@ -475,7 +573,9 @@ for (const l of D.lenses) {
 const F = {pos: $('#ex-pos'), team: $('#ex-team'), game: $('#ex-game'), kick: $('#ex-kick'), q: $('#ex-q'), pool: $('#ex-pool'), role: $('#ex-role'), sig: $('#ex-sig'), smin: $('#ex-smin'), smax: $('#ex-smax'), name: $('#ex-name')};
 function opts(sel, values) { for (const x of values) sel.append(new Option(x, x)); }
 const uniq = (key) => [...new Set(D.rows.map((r) => v(r, key)).filter(Boolean))].sort();
-opts(F.pos, D.positions); opts(F.team, uniq('Team')); opts(F.game, uniq('GameID').map((g) => g.split('_').slice(2).join(' @ ')));
+/* a game's label in DraftKings' spelling: GameID is nflverse's (the Rams are LA there, LAR on every row) */
+const gameLabel = (g) => String(g || '').split('_').slice(2).map((t) => (D.team_alias || {})[t] || t).join(' @ ');
+opts(F.pos, D.positions); opts(F.team, uniq('Team')); opts(F.game, [...new Set(uniq('GameID').map(gameLabel))]);
 opts(F.kick, uniq('Kickoff')); opts(F.role, D.roles); opts(F.sig, D.signals);
 for (const [k, inp] of Object.entries(F)) {
   if (S.f[k] != null) inp.value = S.f[k];
@@ -514,7 +614,7 @@ function passes(r) {
   const f = S.f;
   if (f.pos && v(r, 'Position') !== f.pos) return false;
   if (f.team && v(r, 'Team') !== f.team) return false;
-  if (f.game && v(r, 'GameID').split('_').slice(2).join(' @ ') !== f.game) return false;
+  if (f.game && gameLabel(v(r, 'GameID')) !== f.game) return false;
   if (f.kick && v(r, 'Kickoff') !== f.kick) return false;
   const st = v(r, 'Avail');
   if (f.q === 'healthy' && st) return false;
@@ -572,8 +672,8 @@ function render(redrawPicker = true) {
   for (const b of root.querySelectorAll('[data-show]')) b.classList.toggle('on', String(S.show) === b.dataset.show);
   for (const b of root.querySelectorAll('[data-per]')) b.classList.toggle('on', S.per === b.dataset.per);
   note.textContent = lens().note;
-  for (const c of root.querySelectorAll('.ex-chart')) c.hidden = c.dataset.chart !== lens().chart;
   const cols = lensCols(); const all = visible();
+  drawChart();
   const pages = Math.max(1, Math.ceil(all.length / PAGE)); if (S.page >= pages) S.page = pages - 1;
   const rows = all.slice(S.page * PAGE, S.page * PAGE + PAGE);
   $('#ex-count').textContent = all.length + ' players' + (pages > 1 ? ' · page ' + (S.page + 1) + ' of ' + pages : '');
@@ -588,7 +688,7 @@ function render(redrawPicker = true) {
   }
   const key = S.sortKey || lens().sort, desc = S.sortKey ? S.desc : lens().desc;
   for (const k of cols) {
-    const c = COL[k]; const th = el('th'); th.title = (c.tip ? c.tip + '\n' : '') + c.trust + ': ' + c.why;
+    const c = COL[k]; const th = el('th'); th.dataset.key = k; th.title = (c.tip ? c.tip + '\n' : '') + c.trust + ': ' + c.why;
     th.append(document.createTextNode(c.label + ' '), chip(c.trust));
     if (k === key) th.append(document.createTextNode(desc ? ' ▼' : ' ▲'));
     th.addEventListener('click', () => { if (S.sortKey === k) S.desc = !S.desc; else { S.sortKey = k; S.desc = c.fmt !== 'text'; } render(false); });
@@ -599,7 +699,7 @@ function render(redrawPicker = true) {
   for (const r of rows) {
     const id = D.ids[r.__i];
     if (S.per === 'pos' && S.show !== 'all' && v(r, 'Position') !== pos) { pos = v(r, 'Position'); const tr = el('tr', 'pos'); const td = el('td', null, pos); td.colSpan = cols.length; tr.append(td); tb.append(tr); }
-    const tr = el('tr'); tr.dataset.id = id;
+    const tr = el('tr'); tr.dataset.id = id; tr.dataset.pos = v(r, 'Position') || '';
     for (const k of cols) {
       const c = COL[k]; const td = el('td'); const x = v(r, k);
       if (k === 'Name') { if (window.dfsSel) td.append(window.dfsSel.box(id)); const a = el('a', 'pl', x); a.dataset.id = id; a.href = '#'; td.append(a); const st = v(r, 'Avail'); if (st) { const q = el('span', 'chip q', st); const pr = (D.practice || {})[id]; if (pr && (st === 'Q' || st === 'D')) { q.title = 'Practice: ' + pr; td.append(q, el('span', 'prac', pr)); } else td.append(q); } for (const role of v(r, 'Roles').split(', ').filter(Boolean)) td.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role)); }
@@ -612,8 +712,54 @@ function render(redrawPicker = true) {
   }
   table.append(tb);
   if (window.dfsPool) for (const r of rows) window.dfsPool.paint(D.ids[r.__i]);
+  if (window.dfsShade) window.dfsShade.table(table);   // within each position (week_shade)
   if (redrawPicker && !picker.hidden) drawPicker();
 }
+/* ---------- the lens chart (Plan O item 1): every lens has one, drawn from the rows the filters pass ---------- */
+const chartBox = $('#ex-chart'), chartCap = $('#ex-chart-cap');
+function num(r, key) { const c = COL[key]; if (!c) return null; const x = v(r, key); if (x == null || x === '' || isNaN(x)) return null; return c.fmt === 'frac' ? Number(x) * 100 : Number(x); }
+const axisFmt = (key) => { const c = COL[key]; return !c ? 'num' : c.fmt === 'money' ? 'money' : (c.fmt === 'frac' || c.fmt === 'pct') ? 'pct' : 'num'; };
+function lensSpec() {
+  const lc = lens().lens_chart; if (!lc) return null;
+  const rows = D.rows.filter(passes);
+  const pts = [];
+  for (const r of rows) {
+    let x = num(r, lc.x); if (x == null && lc.alt_x) x = num(r, lc.alt_x);
+    const y = num(r, lc.y); if (x == null || y == null) continue;
+    const pr = num(r, lc.prio);
+    const name = v(r, 'Name'), parts = String(name).split(' ');
+    pts.push({id: D.ids[r.__i], name, short: v(r, 'Position') === 'DST' ? name : (parts.length > 1 ? parts.slice(1).filter((w) => !/^(Jr\.?|Sr\.?|II|III|IV|V)$/.test(w)).join(' ') || name : name),
+      pos: v(r, 'Position'), team: v(r, 'Team'), x, y, sal: v(r, 'Salary'), proj: num(r, 'CalPts'), du: v(r, 'CashOwn'), gpp: v(r, 'GppOwn'),
+      prio: pr == null ? -1e9 : (lc.guide === 'zero' ? Math.abs(pr) : pr)});
+  }
+  if (pts.length < 2) return {title: lc.title, empty: true, lc};
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const px = (x1 - x0) * 0.06 || 1, py = (y1 - y0) * 0.08 || 1;
+  x0 -= px; x1 += px; y0 -= py; y1 += py;
+  if (lc.guide === 'diag') { x0 = y0 = Math.min(x0, y0); x1 = y1 = Math.max(x1, y1); }
+  const spec = {title: lc.title, x: (COL[lc.x] || {}).label || lc.x, y: (COL[lc.y] || {}).label || lc.y, xfmt: axisFmt(lc.x), yfmt: axisFmt(lc.y),
+    range: [x0, x1, y0, y1], points: pts, how: lc.formula + ' ' + D.chart_source, lc};
+  if (lc.guide === 'per_k') { const end = Math.min(x1, y1 / 3 * 1000); spec.ref = [[x0, x0 * 3 / 1000], [end, end * 3 / 1000], '3 pts per $1K']; }
+  if (lc.guide === 'diag') spec.ref = [[x0, x0], [x1, x1], 'same'];
+  if (lc.guide === 'zero') spec.ref = [[x0, 0], [x1, 0], 'CalPts = props'];
+  if (lc.shade) { const c = ys.slice().sort((a, b) => a - b); spec.shade = [Math.max(x0, 0), 10, c[Math.floor(c.length * 0.75)], y1, 'leverage: <10% owned, top-quarter ceiling']; }
+  return spec;
+}
+function drawChart() {
+  if (!chartBox) return;
+  const spec = lensSpec(); if (!spec) { chartBox.hidden = true; return; }
+  chartBox.hidden = false; chartBox.dataset.lens = S.lens;
+  const n = spec.empty ? 0 : spec.points.length;
+  const src = [spec.lc.x, spec.lc.alt_x, spec.lc.y].filter(Boolean).map((k) => (COL[k] || {}).label || k);
+  chartCap.textContent = spec.lc.formula + ' ' + n + ' players (the filters above apply). From: ' + src.join(', ') + '. ' + D.asof;
+  if (spec.empty) { window.dfsCharts && delete window.dfsCharts.explorer; chartBox.querySelector('.ex-plot').innerHTML = '<p class="dim">No player passes the filters with both numbers.</p>'; return; }
+  if (window.dfsCharts) window.dfsCharts.explorer = spec;
+  const w = Math.max(320, Math.min(640, chartBox.clientWidth || 560));
+  chartBox.querySelector('.ex-plot').innerHTML = window.dfsScatter ? window.dfsScatter(spec, w, 340, 8) : '';
+  chartBox.querySelector('h4').textContent = spec.title;
+}
+window.dfsExplorerChart = lensSpec;
 function gameLink(r, team) { const a = el('a', 'tm', team); a.href = '#'; a.dataset.team = team; a.dataset.game = v(r, 'GameID') || ''; a.title = 'Open the game'; return a; }
 window.dfsExplorer = { setPool(id, value) { const i = IDX[id]; if (i != null) D.rows[i][COL.Pool.i] = value; }, render: () => render(false) };
 
@@ -668,7 +814,7 @@ function openDrawer(id) {
     sec('Last five games', t);
   }
   sec('Usage (last five)', kv(r, ['Snap% L5', 'Tgt L5', 'Car L5', 'DK L5', 'Snap%', 'Tgt%', 'WOPR', 'TPRR~', 'xFP/G', 'RZ/G', 'HVT/G']));
-  sec('Matchup', kv(r, ['OppPosRank', 'OppEPA', 'OverUnder', 'Spread', 'Implied', 'Pace', 'PROE', 'Wind', 'WX', 'Roof']));
+  sec('Matchup', kv(r, ['OppPosRank', 'OppEPA', 'OverUnder', 'Spread', 'Implied', 'Pace', 'PROE', 'Wind', 'Roof']));
   sec('Props', kv(r, ['PropPts', 'PropsGap']));
   const sig = el('div'); const edge = v(r, 'Edge');
   const tokens = D.signals.filter((t) => edge.includes(t));
