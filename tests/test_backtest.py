@@ -203,6 +203,24 @@ def test_the_cache_key_is_the_settings_and_the_code(tmp_path):
     assert a.name == "w06.json"
 
 
+def test_a_worker_saves_a_plugin_flag_run_where_the_parent_looks(tmp_path, monkeypatch):
+    # A spawned worker starts with no plugin flag registered: run_week must load them before naming the path.
+    monkeypatch.setattr(bs, "FLAGS", {})
+
+    def load_plugins():  # importing the plugin registers its flag
+        bs.register(bs.Flag("x", "d", version="2"))
+        return []
+
+    monkeypatch.setattr(bs, "load_plugins", load_plugins)
+    s = bs.Settings(flags={"x": True})
+    monkeypatch.setattr(bt, "prepare_context", lambda ctx: ctx)
+    monkeypatch.setattr(bt, "make_context", lambda wi, settings: SimpleNamespace(notes=[]))
+    monkeypatch.setattr(bt, "build_prepared", lambda ctx: [])
+    monkeypatch.setattr(bt, "run_choose", lambda ctx, builds, contests: {})
+    bt.run_week(SimpleNamespace(week=6), s, "abc", root=tmp_path)
+    assert bt.job_path(s, "abc", 6, tmp_path).exists()  # the parent, with the flag registered, finds it
+
+
 def test_pool_for_week_uses_the_saved_pool_only_when_it_is_big_enough(tmp_path, monkeypatch):
     from dfs import pool_store
 

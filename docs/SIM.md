@@ -2037,3 +2037,27 @@ today's and the note says so.
 
 Code: `du_line.py` (pure: `lines`, `cash_probability`, `fit`; the saved calibration), `du_line_retro.py` (the retro,
 `calibrated_value`, `refresh_summary`); tests `tests/sim/test_du_line.py`, `tests/test_sim_lines.py`.
+
+## Plan S: three checks from the tool comparison (2026-11-09)
+
+Research only, nothing ships. Each check has its report under `docs/research/sim_checks/`.
+
+- **Per-player volatility** (`sim/volatility_check.py`, report `2026-11-09-player-volatility.md`).
+  - What was tested: a spread term from a player's previous games (aDOT, air-yards share, target SD, TD share, snap trend,
+    points CV) stretching his ratio quantiles above the median.
+  - Fit and judging: fitted on 2014-2022 and judged on 2023-2026 by pinball loss at the 90th and 99th (weekly paired SE)
+    and by calibration per tercile.
+  - Result: no position or feature clears both halves of the bar.
+  - The near miss: WR with all features passes the pinball half (+0.0083, z 2.3, better in 67% of weeks) but not the
+    calibration half (+0.7 SE). That is one pass out of 28 terms tested.
+  - No `[sim] player_volatility` switch was added.
+- **QB-receiver correlation** (`sim/qbwr_check.py`, report `2026-11-09-qb-wr-correlation.md`).
+  - Every residual method puts QB1-WR1 at +0.32 to +0.35 (2014-22); only raw points reach +0.39.
+  - Hand-set 0.45 matches the held-out QB1+WR1 joint-90th count best, but improves on the shipped value by only +1.6 SE,
+    and it loses 18 per 1,000 in pair log-likelihood (SE 4.6).
+  - The table is unchanged. The joint-boom excess (53 hits against 41 expected) is tail dependence, which a bigger
+    Gaussian rho would buy at the cost of the body of the distribution.
+- **Top 1% share ranking** (Flashback, report `2026-11-09-top1-share-rank.md`; flag `share_dupes_fitted` in
+  `sim/share_dupes_flag.py`, default off, which fits the copies model on GppOwn using earlier weeks only).
+  - Not proven in either arm on Weeks 2 and 4-8: "any build" is −24.8 ROI points a week (SE 14.1).
+  - At Sam's field sizes, expected copies run 0.00-0.17, so the share divisor only reorders near-ties.

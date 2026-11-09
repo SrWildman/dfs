@@ -180,6 +180,7 @@ def default_builder(ctx: bs.BuildContext) -> list[ls.Build]:
         time_limit=s.seconds,
         field=ctx.lines.field,
         rank=s.rank,
+        **ctx.builder_kwargs,
     )
     ctx.notes += report.notes
     return report.builds
@@ -262,10 +263,12 @@ def run_week(
     wi: curse.WeekInputs, settings: bs.Settings, code: str, *, fresh: bool = False, root: Path = OUT_DIR
 ) -> dict:
     """The week's builds under `settings` as a JSON-able dict, from the saved run when there is one."""
+    # Flags first: in a spawned worker the plugin flags are not registered yet, and the path's fingerprint
+    # carries their versions, so without this a worker saves under a path the parent never looks for.
+    bs.check_flags(settings)
     path = job_path(settings, code, wi.week, root)
     if path.exists() and not fresh and code != "nogit":
         return json.loads(path.read_text())
-    bs.check_flags(settings)
     started = time.monotonic()
     ctx = prepare_context(make_context(wi, settings))
     builds = build_prepared(ctx)
