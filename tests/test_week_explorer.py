@@ -24,6 +24,37 @@ def test_every_lens_column_is_an_edgeraw_column_or_one_derived_here(lens):
     assert not missing, f"the {lens.label} lens names columns EdgeRaw no longer has: {missing}"
 
 
+@pytest.mark.parametrize("lens", week_explorer.LENSES, ids=lambda lens: lens.key)
+def test_every_lens_has_a_chart_on_columns_the_page_ships(lens):
+    """Plan O item 1: the chart follows the lens. Every lens has one, on columns the payload carries, with the
+    formula its caption leads with."""
+    chart = week_explorer.LENS_CHARTS[lens.key]
+    shipped = set(week_explorer.columns())
+    for c in (chart.x, chart.y, chart.prio, *([chart.alt_x] if chart.alt_x else [])):
+        assert c in shipped, f"the {lens.label} chart reads {c}, which the page drops"
+    assert chart.formula and chart.guide in ("", "per_k", "diag", "zero")
+
+
+def test_the_lens_chart_is_bound_to_the_lens_and_the_filters():
+    js = week_explorer.JS
+    assert (
+        "const lc = lens().lens_chart" in js and "D.rows.filter(passes)" in js
+    )  # the lens, then the filters
+    assert "drawChart();" in js.split("function render(")[1].split("\n}\n")[0]  # every render redraws it
+    assert "window.dfsCharts.explorer = spec" in js  # the full-screen viewer opens the same points
+
+
+@pytest.mark.parametrize("lens", week_explorer.LENSES, ids=lambda lens: lens.key)
+def test_every_lens_column_is_in_the_data_the_page_ships(lens):
+    """Plan O item 1: the Matchup lens named `WX`, which is on EdgeRaw but is the weather group's (empty)
+    label column, so the Explorer leaves it out of its data; the script then crashed and the lens was empty.
+    Every lens column (and its sort) must be one the payload carries, and none may be a group label."""
+    shipped = set(week_explorer.columns())
+    wanted = (*week_explorer.BASE, *lens.columns, lens.sort)
+    assert not [c for c in wanted if c not in shipped], f"the {lens.label} lens names columns the page drops"
+    assert not [c for c in wanted if c in week_explorer.LABELS]
+
+
 def test_all_columns_is_every_edgeraw_column_but_the_labels_and_helpers():
     cols = week_explorer.columns()
     for c in derived.EDGE_SHEET_ORDER:
@@ -88,8 +119,8 @@ def test_every_control_the_script_drives_is_on_the_page(tmp_path):
     for n in ("3", "10", "25", "all"):
         assert f'data-show="{n}"' in page  # show 3 / 10 / 25 / all
     assert 'data-per="pos"' in page and 'data-per="all"' in page
-    for chart in ("value", "leverage", "usage"):
-        assert f'data-chart="{chart}"' in page  # charts that follow the lens
+    assert 'id="ex-chart" data-chart="explorer"' in page  # one chart that follows the lens and the filters
+    assert 'id="ex-chart-cap"' in page
     assert "localStorage" in week_explorer.JS and "try" in week_explorer.JS  # remembered, never required
 
 

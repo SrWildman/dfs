@@ -19,6 +19,7 @@ from dfs.week_page import (
     SHADOW,
     UNTESTED,
     Section,
+    add_button,
     bullets,
     chip_html,
     dollars,
@@ -26,6 +27,7 @@ from dfs.week_page import (
     not_run,
     note,
     pct,
+    pn,
     table,
 )
 from dfs.week_plays import num
@@ -382,6 +384,21 @@ def pivot_text(p: ina.Pivot, by: str) -> str:
     return f"{p.name} ({p.position} {p.team}, ${p.salary:,}, {value}, {p.kickoff_text})"
 
 
+def pivot_html(p: ina.Pivot, by: str, inp: WeekInputs) -> str:
+    """A pivot with his name linked (drawer, pool chip) and, when he is not in the pool, one click to add
+    him as the lineup's kind would use him (Plan O item 2)."""
+    text = pivot_text(p, by)
+    rest = text[len(p.name) :] if text.startswith(p.name) else " " + text
+    row = next((r for r in inp.edge if r.get("Name") == p.name and r.get("Team") == p.team), None)
+    pid = str((row or {}).get("Id") or "")
+    add = (
+        ""
+        if not pid or inp.pool.get(p.name)
+        else " " + add_button(pid, "GPP" if by == "Leverage" else "Cash")
+    )
+    return pn(p.name, p.team, pid) + e(rest) + add
+
+
 def inactives_section(inp: WeekInputs) -> Section:
     trust = TRUST["inactives"]
     sources, where = inactive_sources(inp)
@@ -426,12 +443,12 @@ def inactives_section(inp: WeekInputs) -> Section:
             row = next((r for r in inp.edge if r.get("Name") == f.name), {"Name": f.name, "Team": f.team})
             tone = "bad" if f.status in ("OUT", "IR", "D") else "warn"
             pivots = (
-                "<br>".join(e(pivot_text(p, f.ranked_by)) for p in f.pivots)
+                "<br>".join(pivot_html(p, f.ranked_by, inp) for p in f.pivots)
                 or '<span class="dim">none fits</span>'
             )
             rows.append(
                 [
-                    f"<b>{e(f.name)}</b> {e(f.position)} {e(f.team)}",
+                    f"<b>{pn(f.name, f.team, row.get('Id', ''))}</b> {e(f.position)} {e(f.team)}",
                     f'<span class="{tone}">{e(ina.STATUS_WORD[f.status])}</span>',
                     e(f.slot),
                     e(f.kickoff_text),
@@ -602,7 +619,7 @@ def consensus_section(inp: WeekInputs) -> Section:
             rows.append(
                 [
                     e(slot),
-                    e(name),
+                    pn(name, r.get("Team", ""), r.get("Id", "")),
                     e(r.get("Position", "")),
                     e(r.get("Team", "")),
                     e(f"${num(r.get('Salary')):,.0f}") if num(r.get("Salary")) else "-",

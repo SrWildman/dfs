@@ -166,7 +166,12 @@ def status(ctx: Context) -> dict[str, Any]:
 
 
 def commands(ctx: Context) -> dict[str, Any]:
-    return {"menu": week_jobs.menu_buttons(), "forms": week_jobs.forms(), "read_only": ctx.read_only}
+    return {
+        "menu": week_jobs.menu_buttons(),
+        "forms": week_jobs.forms(),
+        "panel": week_jobs.panel(),
+        "read_only": ctx.read_only,
+    }
 
 
 def _load_config():
@@ -432,6 +437,12 @@ class Handler(BaseHTTPRequestHandler):
     def get_job_history(self) -> None:
         self._json(200, {"history": self.ctx.jobs.history()})
 
+    def get_job_output(self) -> None:
+        lines = self.ctx.jobs.output(self._query().get("job", ""))
+        if lines is None:
+            raise HttpError(404, "no output kept for that run")
+        self._json(200, {"lines": lines})
+
     def get_chat_list(self) -> None:
         self._json(200, {"chats": self.ctx.chat.list_chats()})
 
@@ -586,6 +597,7 @@ GET_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/chat/transcript": Handler.get_chat_transcript,
     "/api/jobs/stream": Handler.get_job_stream,
     "/api/jobs/history": Handler.get_job_history,
+    "/api/jobs/output": Handler.get_job_output,
 }
 POST_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/jobs/start": Handler.post_job_start,

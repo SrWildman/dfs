@@ -3,7 +3,10 @@ inputs and writes it).
 
 Read-only and rewritten whole, like the Cockpit: nothing on it is typed and it holds no formula. Column A is
 the cue (`BUILD`: the stack takes a bigger share of the simulated top 1% than of the field, so it is worth
-typing into Suggested's rules box); the last column holds the line to type there.
+typing into Suggested's rules box); the last column holds the line to type there. Only the `BUILD_CUES` (5)
+highest-leverage stacks that beat the field get it (Sam, Plan O item 5: on Week 9 all 20 did, so the cue
+separated nothing); their rows are tinted pale green. Top 1%, Lift and Lev carry colour scales within the
+table, and the legend (row 3, frozen with the title) says what each colour means.
 
 Two things change what the tab shows, and it says which:
 
@@ -30,7 +33,10 @@ from dfs.cockpit import clock
 STACKS_TAB = "Stacks"
 COLUMN_COUNT = 13
 CUE_BUILD = "BUILD"
+BUILD_CUES = 5  # the most stacks cued BUILD: the top 5 by leverage that beat the field (Sam, Plan O item 5)
 DASH = "-"
+# The stacks table's scaled columns (`sheet_stacks` draws them in the sheet's palette): header -> kind.
+SCALED = {"Top 1%": "gradient", "Lift": "gradient", "Lev": "diverging"}
 
 STACK_HEADERS = [
     "QB",
@@ -76,6 +82,9 @@ class Layout:
     cue_rows: dict[int, str] = field(default_factory=dict)
     formats: list[tuple[str, str, str]] = field(default_factory=list)  # (range, pattern, type)
     sort_label: str = ""
+    legend_row: int = 0  # the colour legend, frozen with the title (0: none, the tab was not built)
+    scales: list[tuple[str, str]] = field(default_factory=list)  # (range, kind) of each colour scale
+    table_width: str = "M"  # the last column of the stacks table (a BUILD row's tint runs A..here)
 
 
 class _Builder:
@@ -123,10 +132,27 @@ def sorted_table(table: pd.DataFrame, *, published: bool, verdict: str | None) -
     return table.sort_values(["boom_share", "top1"], ascending=False, kind="stable"), "boom share"
 
 
-def _cue(row, *, published: bool, verdict: str | None) -> str:
-    if published and verdict in (TESTED, WEAK) and row["lev"] > 0 and row["lift"] > 1.0:
-        return CUE_BUILD
-    return ""
+def _beats_the_field(row, *, published: bool, verdict: str | None) -> bool:
+    return bool(published and verdict in (TESTED, WEAK) and row["lev"] > 0 and row["lift"] > 1.0)
+
+
+def legend_text(verdict: str | None, published: bool) -> str:
+    """The colour legend (Plan O item 5), in the tab's header rows."""
+    if not published:
+        cue = "No BUILD cue until TFFB publishes ownership (field % and leverage wait for it)."
+    elif verdict not in (TESTED, WEAK):
+        cue = "No BUILD cue: the leverage signal is untested (run `dfs stacks --retro`)."
+    else:
+        cue = (
+            f"Green row, BUILD in column A: one of the {BUILD_CUES} highest-leverage stacks that beat the "
+            "field (Lift over 1x and Lev above 0: its share of the simulated top 1% beats its share of the "
+            f"field), with a {verdict} signal. The other rows are not cued, even where they beat the field "
+            "too."
+        )
+    return (
+        f"COLOURS  ·  {cue}  ·  Top 1%, Lift and Lev are shaded within this table: green = higher, red = "
+        "lower, white = the table's middle (Lev: white at 0). Nothing else is coloured."
+    )
 
 
 def build_layout(inputs: StackTabInputs) -> Layout:
@@ -154,6 +180,7 @@ def build_layout(inputs: StackTabInputs) -> Layout:
         b.blank()
         b.note(f"Not built: {inputs.unavailable}")
         return b.layout
+    b.layout.legend_row = b.add([legend_text(inputs.verdict, inputs.ownership_published)])
     if inputs.retro_line:
         b.note(inputs.retro_line)
     else:
@@ -168,8 +195,13 @@ def build_layout(inputs: StackTabInputs) -> Layout:
     b.section(f"TOP {stacks.STACK_ROWS} QB STACKS  —  sorted by {sort_label}")
     b.header(*[lev_label if h == "Lev" else h for h in STACK_HEADERS])
     first = b.next_row
+    cued = 0
     for _, r in table.head(stacks.STACK_ROWS).iterrows():
-        cue = _cue(r, published=published, verdict=inputs.verdict)
+        # BUILD for the first BUILD_CUES rows that beat the field: the table is in leverage order whenever a
+        # cue is possible (a tested or weak signal), so these are the top 5 by leverage
+        cue = ""
+        if cued < BUILD_CUES and _beats_the_field(r, published=published, verdict=inputs.verdict):
+            cue, cued = CUE_BUILD, cued + 1
         game = f"{r['team']} v {r['opp']}"
         row = b.add(
             [
@@ -203,6 +235,12 @@ def build_layout(inputs: StackTabInputs) -> Layout:
             ("L", SIGNED, "PERCENT"),
         ):
             b.layout.formats.append((f"{col}{first}:{col}{last}", pattern, kind))
+        letters = {h: chr(ord("B") + i) for i, h in enumerate(STACK_HEADERS)}
+        b.layout.table_width = chr(ord("B") + len(STACK_HEADERS) - 1)
+        for header, kind in SCALED.items():
+            if header == "Lev" and not published:
+                continue  # a column of dashes: nothing to shade
+            b.layout.scales.append((f"{letters[header]}{first}:{letters[header]}{last}", kind))
     b.note(
         "Top 1% = chance a lineup built on the stack, the rest filled the way the field fills it, finishes "
         "in the field's top 1% (1% is an average lineup; Lift is Top 1% over 1%). Field % = share of the "

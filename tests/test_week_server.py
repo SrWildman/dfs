@@ -1323,3 +1323,40 @@ def test_the_page_writes_need_the_token_like_every_post(make, tmp_path):
     _, edits = served_sheet(tmp_path)
     status, _ = make(edits=edits).post("/api/pool/start", {}, token=False)
     assert status == 403
+
+
+# -- Plan O item 1b: the run panel ---------------------------------------------------------------------------
+
+
+def test_every_weekly_button_is_a_registered_command_with_its_options():
+    known = week_jobs.forms()
+    for w in week_jobs.WEEKLY:
+        assert w.command in known, f"{w.label}: {w.command} is not a dfs command"
+        names = {f["name"] for f in known[w.command]["fields"]}
+        missing = [n for n in (*w.common, *dict(w.defaults)) if n not in names]
+        assert not missing, f"{w.label} names options {w.command} does not have: {missing}"
+    panel = week_jobs.panel(known)
+    assert [b["label"] for b in panel["weekly"]] == [w.label for w in week_jobs.WEEKLY]
+    assert all(week_jobs.is_advanced(p) for p in panel["advanced"])
+    assert "dfs setup polish" in panel["advanced"] and "dfs bankroll fix-odds" in panel["advanced"]
+    assert "dfs odds snapshot" in panel["other"] and not set(panel["other"]) & set(panel["advanced"])
+    for path, labels in panel["labels"].items():
+        for name, label in labels.items():
+            assert 0 < len(label) <= 48, f"{path} {name}: {label!r}"
+
+
+def test_a_run_keeps_its_duration_id_and_output_for_recent_runs(make):
+    c = make()
+    status, started = c.post("/api/jobs/start", {"command": "dfs sync --live", "values": {}})
+    job = wait_job(c, started["job"])
+    h = c.get("/api/jobs/history")[1]["history"][0]
+    assert h["id"] == job.id and h["seconds"] >= 0 and h["rc"] == 0
+    assert (c.tmp / "jobs" / f"{job.id}.log").exists()
+    c.jobs.jobs.clear()  # a past run (the server restarted): read from the saved log
+    status, out = c.get(f"/api/jobs/output?job={job.id}")
+    assert (
+        status == 200
+        and out["lines"][0] == "$ dfs sync --live"
+        and "ran -m dfs.cli sync --live" in out["lines"]
+    )
+    assert c.get("/api/jobs/output?job=../../etc")[0] == 404  # an id, never a path

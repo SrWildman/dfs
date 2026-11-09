@@ -494,11 +494,18 @@ def _style(client: SheetsClient, layout: Layout, report: SuggestReport) -> None:
     )
 
     last_row = max(len(layout.rows), 40)
-    area = f"A1:{LAST_COLUMN}{last_row + 20}"
+    # The whole grid, not just this run's rows: a previous round (or last week's copy of the tab) left
+    # borders, fills and dropdowns below the new layout, which a reset of only the new rows never reached
+    # (Plan A item 3, Plan O item 1: stray lines at the old layout's total rows). Borders survive a fill /
+    # font reset, so they are cleared on their own, first; this run's total rows get theirs back below.
+    grid_rows = max(client.row_count(TAB), last_row + 20)
+    grid_cols = max(client.column_count(TAB), len(COLUMNS) + 2)
+    area = f"A1:{column_letter(grid_cols - 1)}{grid_rows}"
+    client.clear_borders(TAB, 1, grid_rows, grid_cols)
     client.clear_conditional_formats(TAB)
     # The checkboxes and the decision dropdowns are re-set below for this run's rows: whatever the last run's
     # rows carried (they move) goes first.
-    client.clear_data_validation(TAB, f"A1:{YOURS_COLUMN_LETTER}{last_row + 20}")
+    client.clear_data_validation(TAB, f"A1:{YOURS_COLUMN_LETTER}{grid_rows}")
     client.format_range(
         TAB,
         area,

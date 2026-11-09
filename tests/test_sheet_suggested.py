@@ -193,6 +193,17 @@ class _Client:
     def tab_exists(self, tab):
         return self.exists
 
+    def row_count(self, tab):
+        return getattr(self, "grid_rows", 1000)
+
+    def column_count(self, tab):
+        return 26
+
+    def clear_borders(self, tab, first_row, last_row, last_col_index=26):
+        self.borders_cleared = (first_row, last_row, last_col_index)
+        self.formats.append(("borders cleared", {}))
+        self.formats_in_batch += self.in_batch  # one more queued request, in the same batch
+
     def write_tab(self, tab, rows):
         self.written = (tab, rows)
 
@@ -238,6 +249,26 @@ class _Client:
 
     def add_boolean_rules(self, tab, specs):
         self.tints = specs
+
+
+def test_the_writer_clears_every_old_border_and_format_on_the_whole_grid_first():
+    """Plan A item 3 / Plan O item 1: stray lines sat at the old layout's total rows (rows 293-391 on Week 9,
+    below a 286-row layout): the reset only reached this run's rows plus 20, and borders survive it anyway."""
+    cash = _build(1, "cash", "Cash build 1")
+    client = _Client(exists=True)
+    client.grid_rows = 1000
+    ss.write_suggested(
+        client, _report(cash), _edge([cash]), metric="CalPts", cash_line=143.9, gpp_target=190.0
+    )
+    assert client.borders_cleared == (1, 1000, 26)  # every row and column of the grid
+    order = [rng for rng, _ in client.formats]
+    reset = next(
+        i for i, (rng, f) in enumerate(client.formats) if f.get("backgroundColor") and rng.startswith("A1:")
+    )
+    assert client.formats[reset][0] == "A1:Z1000"  # fills, fonts and number formats too, the whole grid
+    total_border = next(i for i, (_, f) in enumerate(client.formats) if "borders" in f)
+    assert order.index("borders cleared") < reset < total_border  # cleared first, this run's lines after
+    assert client.cleared_validation.endswith("1000")
 
 
 def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_top_one_percent_at_two():

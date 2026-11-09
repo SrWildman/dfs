@@ -21,6 +21,7 @@ from dfs.week_page import (
     SHADOW,
     UNTESTED,
     Section,
+    add_button,
     bullets,
     chip_html,
     e,
@@ -28,6 +29,7 @@ from dfs.week_page import (
     note,
     num,
     pct,
+    pn,
     table,
 )
 
@@ -182,7 +184,7 @@ def scorecard_html(inp: WeekInputs) -> str:
                 e(o["build"]),
                 f"{o['shared']} of 9",
                 f"<b>{o['delta']:+.1f}</b>" if o.get("delta") is not None else "-",
-                e(sc.swap_text(o)),
+                swap_html(o),
             ]
             for o in changed
         ]
@@ -206,7 +208,7 @@ def scorecard_html(inp: WeekInputs) -> str:
 def _expo_rows(rows: list[dict]) -> list[list[str]]:
     return [
         [
-            e(r["name"]),
+            pn(r["name"]),
             e(pct(r["mine"])),
             e(pct(r["field"])),
             f"<b>{(r['diff'] or 0) * 100:+.0f}</b>",
@@ -464,6 +466,13 @@ def salary_view(inp: WeekInputs, log: dict[str, list[dict]]) -> dict:
     return sw.watch(inp.edge or [], inp.salary_prev, log)
 
 
+def swap_html(o: dict) -> str:
+    """`sc.swap_text` with every name linked (drawer, pool chip)."""
+    into = ", ".join(f"{pn(n)} {pts:.1f}" for n, pts in o["into"])
+    out = ", ".join(f"{pn(n)} {pts:.1f}" for n, pts in o["out"])
+    return f"in {into}; out {out}"
+
+
 def salary_section(inp: WeekInputs, log: dict[str, list[dict]]) -> Section:
     sid, title = "salaries", "Salary watch"
     if not inp.edge:
@@ -484,10 +493,19 @@ def salary_section(inp: WeekInputs, log: dict[str, list[dict]]) -> Section:
             ran=False,
         )
 
+    by_key = {(str(r.get("Name", "")), str(r.get("Team", ""))): r for r in inp.edge}
+
+    def salary_add(m: dict) -> str:
+        """Cheaper with the same job and not in the pool: one click adds him (Cash: a salary-saver)."""
+        r = by_key.get((str(m["name"]), str(m["team"])))
+        if r is None or not r.get("Id") or inp.pool.get(str(m["name"])):
+            return ""
+        return " " + add_button(r["Id"], "Cash")
+
     def rows(moves: list[dict]) -> list[list[str]]:
         return [
             [
-                e(m["name"]),
+                pn(m["name"], m["team"]) + salary_add(m),
                 e(m["position"]),
                 e(m["team"]),
                 e(_money(m["salary"])),

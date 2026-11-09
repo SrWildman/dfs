@@ -153,7 +153,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs stacks [--sheet-id <id>] [--no-sheet] [--refit] [--retro]` -- ranks every QB's stacks of one and two teammates (WR/TE, or a RB
   whose `Tgt%` is in the top third of the slate's RB1/RB2; with and without a bring-back) by simulated Top 1% rate against how much of the
   generated GPP field plays them, and writes the read-only **Stacks** tab (right after Suggested; top 20 stacks, top 8 games, the retro's
-  track record on top, column A `BUILD` = type the last cell's `Always use: ...` line into Suggested's rules box). Prints the same page; writes the sheet
+  track record on top, column A `BUILD` = one of the 5 highest-leverage stacks that beat the field (Lift > 1x, Lev > 0; `stacks_tab.BUILD_CUES`), a pale green row: type
+  the last cell's `Always use: ...` line into Suggested's rules box; `Top 1%` / `Lift` / `Lev` are colour-scaled and row 3 is the colour legend). Prints the same page; writes the sheet
   only where the tab exists. Before TFFB publishes ownership the field %/leverage columns read `-` (a CalPts stand-in drives the field). `--refit` refits
   the field model on the real standings (about two minutes, saved in `data/model_cache/stack_field.json`); `--retro` refits and reruns the retro
   that is the tab's track record (`data/model_cache/stacks_retro.json`, several minutes; run it after `dfs week close`). Math in `stacks.py`
@@ -257,6 +258,21 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   (`consensus.dk_order`) with `week_money.CONSENSUS_CAPTION`; and `week_page.table(..., how=...)`: every table and
   chart carries a "how this is built" note. Tests: `tests/test_week_ui.py` (HTML / script, no browser) and
   `tests/test_week_ui_browser.py` (Playwright on a fake sheet; skipped where Chromium is not installed, as on CI).
+- **Plan O on the Week page** (O1): the **run panel** (`week_jobs.panel`: `WEEKLY`, the eight weekly buttons in the day's order, each
+  form showing the options his shortcuts use (`Weekly.common`, short labels `SHORT_LABELS`, the help as a tooltip, `Weekly.defaults`
+  filled in, the rest under "More options", a preview line of the exact command); every other command behind a search; `setup ...` /
+  `fix-...` behind a collapsed Advanced toggle (`is_advanced`); recent runs say ok / failed / stopped, how long and when, and open their
+  output (`data/week/jobs/<id>.log`, the newest `OUTPUT_KEPT`; `/api/jobs/output`)). **A pool chip on every name** (`week_ui` `decorate`:
+  any `a.pl` the page draws, resolved to an id from the Explorer's data by name and team when a section holds only the name,
+  `week_page.pn` / `pns`; a name not on this slate stays plain text; a row that already has the control gets none) and **one click to add**
+  a player listed as missing from the pool (`week_page.add_button`, kind from `week_board.kind_of`). **Colour by position**
+  (`week_shade.py`: a z-score within the position in every table that has one, the sheet's palette, ownership orange, the top / bottom 10%
+  bold, a legend above each coloured table; directions from `compare_card.SECTIONS`). **Captions** (`week_page.caption` / `fill_asof`:
+  every `table()` and chart shows how it is built, the source columns and the date of its data; `week_charts.FORMULA` / `SOURCES`).
+  **The Explorer's chart follows the lens and the filters** (`week_explorer.LENS_CHARTS`, one per lens; the full-screen viewer opens the
+  chart that is showing). The game view maps nflverse's team codes to DK's (`player_join.TEAM_ALIASES`: LA = LAR), has Previous / Next and a
+  game list, and a pool control on every row; pan is every chart's default (wheel / pinch / box to zoom); a Pool click keeps the scroll
+  of the page and of the box it is in, and the focus.
 - **Plan K on the Week page** (`week_money.py`, sections placed by day in `week_page.DAY_ORDER`, each with a trust chip):
   **bankroll health** (`bankroll_health.py`: the Season tab's curve by week, NFL DFS / betting / other / total, found by
   header; spend as a share of the bankroll; a stake guide by tier: `[stakes]` rules when set (with one "over the
