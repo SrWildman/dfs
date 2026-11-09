@@ -273,6 +273,33 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   chart that is showing). The game view maps nflverse's team codes to DK's (`player_join.TEAM_ALIASES`: LA = LAR), has Previous / Next and a
   game list, and a pool control on every row; pan is every chart's default (wheel / pinch / box to zoom); a Pool click keeps the scroll
   of the page and of the box it is in, and the focus.
+- **Plan O2 on the Week page** (`week_views.py`): a **view bar** under the brief (`VIEWS`: Overview, the default | Board & Explorer |
+  Usage | Injuries | Model vs sources | Everything = every block; Sam, 2026-11-09), each view its own `#name` (a link or the back
+  button opens it; no element id may equal one, a test checks), the last one kept per week (`dfs-view-<season>-<week>`); every block is
+  wrapped in `week_views.wrap(html, place)` naming its views (`PLACES`); the progress strip and the brief show on all of them, and the
+  one pool store serves every view. **Overview**: one row per position (top value, cash core and chalk, the board's Upside, the fades:
+  FADE↓ plus the plays model's AVOID / FADE (Shadow) on one line per name, the top injury fallout = the calls' teammate bump), the top
+  3 games, the pool by position; the day's folds, the run panel and the tools sit under it. **Usage**: `data/current/usage_weeks.csv`
+  and `team_weeks.csv` (new sheetless sources `usage_weeks` / `team_weeks`, `sources/usage_weeks.py`, math `usage_weeks.py`; a full
+  `dfs sync` only, never `--live`): per game snap share, targets, target / air-yards share, WOPR, RZ / HVT, carries, DK points; per
+  team-game plays, dropback rate, PROE, pace, red-zone trips; drawn by the client (window, trend metric with a last-5 sparkline against
+  the season mean, two scatters per position with the outliers labelled, a stacked bar of each team's targets and carries).
+  **Injuries**: per slate team, DK's OUT / D / Q / IR plus the injury report's designations, the practice trend, who benefits (the calls'
+  `bump` / `bump_from`). **Model vs sources**: CalPts against TFFB / Sleeper / FantasyPros / ESPN / props (the median of 2+ sources),
+  the biggest disagreements by position, every player behind a fold, and the plays calls leading with AVOID and FADE, each label's record
+  kept apart: the M1 backtest (newest `docs/research/plays/*-plays-summary.json`, gitignored) and the live `calls_history.csv`
+  (`week_inputs.calls_record`, `week_views.record_of`). **Search** (`#psearch`, `/` focuses it) and a **compare tray** of 2-4 players
+  (`+ Compare` in the search, the drawer and every pool chip's popover; kept per week) with the Compare tab's rows and directions
+  (`week_views.compare_spec` over `compare_card.SECTIONS`), usage trends and ownership. The served page fires `dfs-sections` after a
+  refresh (`week_live`) so the client-drawn views redraw. The pool store numbers each read-back and a render adopts a cell only when no
+  newer read-back exists (`week_ui` `stale` / `mark`; a refresh asked for during one runs once more after it), and a `+ Cash` is
+  resolved against the last read-back when its write runs (`requestPool` change `{id, add}`), never at the click.
+  **Team news** (`news_context.py`, pure; Sam, 2026-11-09: "JSN had a backup QB, CeeDee did not have his WR2"): facts, not a
+  model, from the last five games and this week's statuses (`WeekInputs.news` / `team_news`): a pass catcher whose QB is a
+  backup (the starter = who started the team's latest game), a pass catcher or lead back out (12%+ of the targets, or 50%+ of the
+  snaps; only while he played in one of the team's last three games) and who leads the targets then. A chip after the name on the
+  board, decisions, overview, plays calls and injury report (`week_views.NEWS_AT`, client side), the full line in the drawer, the
+  compare tray and each injury card's header, and one brief sentence for the chalk and $7,000+ players (`week_board.news_sentence`).
 - **Plan K on the Week page** (`week_money.py`, sections placed by day in `week_page.DAY_ORDER`, each with a trust chip):
   **bankroll health** (`bankroll_health.py`: the Season tab's curve by week, NFL DFS / betting / other / total, found by
   header; spend as a share of the bankroll; a stake guide by tier: `[stakes]` rules when set (with one "over the

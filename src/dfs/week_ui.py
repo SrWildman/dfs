@@ -145,22 +145,27 @@ document.addEventListener('click', (e) => {
 });
 
 /* ---------- the pool store (item 6) ---------- */
-const P = {val: {}, name: {}, team: {}, byName: {}, saving: {}, bad: {}};
-function adoptFromExplorer(d) {
+/* `seq` / `at`: every write's read-back is numbered, and a render adopts the sheet's value for a cell only
+   when no read-back for it is newer than the moment that render was asked for (`since`, from `pool.mark()`):
+   a refresh that left before a write landed must not put the old value back. `pend`: writes queued per
+   cell; the cell shows "saving" until the last of them is read back. */
+const P = {val: {}, name: {}, team: {}, byName: {}, saving: {}, bad: {}, pend: {}, at: {}, seq: 0};
+const stale = (id, since) => id in P.saving || (since != null && (P.at[id] || 0) > since);
+function adoptFromExplorer(d, since) {
   if (!d || !d.columns) return;
   const at = (k) => d.columns.findIndex((c) => (c.key || c) === k);
   const pi = at('Pool'), ni = at('Name'), ti = at('Team');
   P.byName = {};
   d.ids.forEach((id, i) => {
-    if (!(id in P.saving)) P.val[id] = d.rows[i][pi] || '';
+    if (!stale(id, since)) P.val[id] = d.rows[i][pi] || '';
     const name = d.rows[i][ni]; P.name[id] = name; P.team[id] = ti >= 0 ? d.rows[i][ti] : '';
     (P.byName[name] = P.byName[name] || []).push(id);
   });
 }
-function adoptFromDom(root) {
+function adoptFromDom(root, since) {
   for (const seg of $$('.seg[data-id]', root || document)) {
     const id = seg.dataset.id; if (seg.dataset.name) P.name[id] = seg.dataset.name;
-    if (!(id in P.saving)) P.val[id] = seg.dataset.was || '';
+    if (!stale(id, since)) P.val[id] = seg.dataset.was || '';
   }
 }
 function paint(id) {
@@ -183,8 +188,10 @@ const pool = {
   get: (id) => P.val[id] || '',
   name: (id) => P.name[id] || id,
   set(values) { for (const [id, v] of Object.entries(values || {})) { P.val[id] = v || ''; delete P.bad[id]; paint(id); } if (window.dfsExplorer) window.dfsExplorer.render(); drawIssues(); },
-  adopt(root) { adoptFromDom(root); decorate(root); paintAll(); if (window.dfsShade) window.dfsShade.all(root); },
-  adoptExplorer(d) { adoptFromExplorer(d); },
+  adopt(root, since) { adoptFromDom(root, since); decorate(root); paintAll(); if (window.dfsShade) window.dfsShade.all(root); },
+  adoptExplorer(d, since) { adoptFromExplorer(d, since); },
+  mark: () => P.seq,   // a refresh asks for its render after this read-back
+  readBack: (id) => P.at[id] || 0,
   paint, paintAll,
   saving: (id) => id in P.saving,
   issues: () => Object.assign({}, P.bad),
@@ -209,20 +216,29 @@ function requestPool(changes, label) {
   if (!LIVE || READONLY) { toast(READONLY && LIVE ? 'This week is closed: the page writes nothing.' : NOT_SERVED, true); return; }
   changes = changes.filter((c) => c.id);
   if (!changes.length) return;
-  for (const c of changes) { P.saving[c.id] = c.value; delete P.bad[c.id]; paint(c.id); }
+  // A change may carry `add` (a kind) instead of a value: "+ Cash" on a player whose earlier write is still
+  // queued is resolved when its own write runs, against that write's read-back (GPP + Cash = Both), never
+  // against what the page showed at the click.
+  const shown = (id) => (id in P.saving ? P.saving[id] : P.val[id] || '');
+  for (const c of changes) {
+    const v = c.add ? pool.addKind(shown(c.id), c.add) : c.value;
+    P.saving[c.id] = v; P.pend[c.id] = (P.pend[c.id] || 0) + 1; delete P.bad[c.id]; paint(c.id);
+  }
   drawIssues();
   window.dfsQueue.run(async () => {
+    for (const c of changes) if (c.add) c.value = pool.addKind(P.val[c.id] || '', c.add);
+    const done = (id) => { P.pend[id] = Math.max(0, (P.pend[id] || 1) - 1); if (!P.pend[id]) { delete P.saving[id]; delete P.pend[id]; } };
     // `was` is what the page shows now: the last read-back, never a guess
     const body = {each: true, changes: changes.map((c) => ({id: c.id, value: c.value, was: P.val[c.id] || ''}))};
     let r;
     try { r = await window.dfsLive.pool(body); }
     catch (e) {
-      for (const c of changes) { delete P.saving[c.id]; P.bad[c.id] = {want: c.value, why: e.message || 'the write failed'}; paint(c.id); }
+      for (const c of changes) { done(c.id); P.bad[c.id] = {want: c.value, why: e.message || 'the write failed'}; paint(c.id); }
       drawIssues(); toast(e.message, true); return;
     }
     for (const c of changes) {
       const res = (r.results || {})[c.id] || {status: 'missing', value: P.val[c.id] || ''};
-      delete P.saving[c.id];
+      done(c.id); P.at[c.id] = ++P.seq;
       if (res.status === 'ok') { P.val[c.id] = res.value || ''; delete P.bad[c.id]; }
       else if (res.status === 'conflict') { P.val[c.id] = res.value || ''; P.bad[c.id] = {want: c.value, why: 'changed in the sheet since the page read it: the sheet has ' + (res.value || 'nothing')}; }
       else { P.bad[c.id] = {want: c.value, why: 'not on EdgeRaw (sync, then try again)'}; }
@@ -287,6 +303,7 @@ document.addEventListener('click', (e) => {
   const was = $('#pool-pop'); popClose(); if (was && was.dataset.id === c.dataset.id) return;
   const id = c.dataset.id, o = el('div'); o.id = 'pool-pop'; o.dataset.id = id; o.setAttribute('role', 'dialog');
   o.append(el('b', null, pool.name(id)), pool.seg(id, pool.name(id)));
+  if (window.dfsCompare) o.append(window.dfsCompare.button(id));   // add from any name (week_views)
   if (!LIVE || READONLY) o.append(el('p', 'dim', READONLY && LIVE ? 'This week is closed: the page writes nothing.' : NOT_SERVED));
   document.body.append(o);
   const r = c.getBoundingClientRect();
@@ -299,8 +316,8 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#pool
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button.addpool[data-id]'); if (!b) return;
   e.preventDefault();
-  const id = b.dataset.id, cur = id in P.saving ? P.saving[id] : pool.get(id), want = pool.addKind(cur, b.dataset.v);
-  if (want !== cur) requestPool([{id, value: want}], 'Added ' + pool.name(id));
+  const id = b.dataset.id, cur = id in P.saving ? P.saving[id] : pool.get(id);
+  if (pool.addKind(cur, b.dataset.v) !== cur) requestPool([{id, add: b.dataset.v}], 'Added ' + pool.name(id));
 });
 
 function drawIssues() {

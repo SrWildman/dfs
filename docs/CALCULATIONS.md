@@ -2497,3 +2497,48 @@ signal archive.
 `dfs week close --research`'s `calls` stage scores the week's last live version before the lock (else the
 rebuilt calls). It appends the rows to `data/research/calls_history.csv` and refits the weights through the
 week.
+
+
+## The Week page's usage view (`usage_weeks.py`, `sources/usage_weeks.py`; Plan O item 6)
+
+Saved by a full `dfs sync` (never `--live`) as `data/current/usage_weeks.csv` and `team_weeks.csv`; nothing reaches a sheet.
+
+- **Per player, per game played** (QB / RB / WR / TE; a game counts when he has a stats row, so a missed game is skipped, never a 0):
+  `Snap%` = offensive snap share (nflverse snap counts, joined by name key); `Tgt`, `Car`; `Tgt%` = his targets / the team's targets
+  that game; `Air%` = his receiving air yards / the team's PASSING air yards (the denominator nflverse's `air_yards_share` uses, see
+  `usage_metrics`); `WOPR` = 1.5 x `Tgt%` + 0.7 x `Air%`; `RZ` = targets + carries from inside the opponent's 20, `HVT` = from inside
+  the 10 (`usage_metrics.red_zone_counts`: real pass / run plays, no two-point tries, no deleted plays); `DK` = the real DK points
+  (`results_actual`). A quarterback's targets, shares and WOPR are blank. Team codes are DraftKings' (LA = LAR).
+- **Per team, per game:** `Plays` = pass and run plays (no two-point tries, no deleted plays); `Pass%` = plays with `pass` = 1 (sacks
+  and scrambles count as dropbacks) / plays; `PROE` and `Pace` = `team_metrics.team_proe` / `team_pace` on that week's plays alone
+  (neutral script); `RZTrips` = distinct drives with a snap from inside the opponent's 20; `Tgt` / `Car` = the team's totals.
+- **On the page:** a window (season, last 5, last 3) averages the per-game values (a share is the mean of the game shares); the trend
+  line is the last five games of the chosen metric against the season mean; the scatters label the eight players furthest from the
+  straight-line fit; a team's bars split its targets (carries) over the window among the slate's players (2%+), the rest grey.
+
+## Our model against the sources (`week_views.compared`; Plan O item 9)
+
+For every rosterable player with CalPts and at least two of TFFB (`ProjPts`), Sleeper, FantasyPros, ESPN and props: Sources = the
+median of those that rate him, vs sources = CalPts minus that median. The disagreements list, per position, the five furthest above
+and below among players either side projects 4+ points. The plays calls' record is shown two ways, never pooled: the M1 backtest's hit
+rate per label (Weeks 2 and 4-8, walk-forward; `research/plays_backtest.outcome_rows` defines a hit) and the live record from
+`calls_history.csv` (from the Week 9 close on).
+
+## Team news (`news_context.py`; the Week page)
+
+Facts, not a model. Every share is over the player's last five games with his team (`usage_weeks.csv`, else the
+Player card's `player_log.csv`); status is DraftKings' on the slate (OUT / IR / D / Q), else this week's injury report
+(Out / Doubtful / Questionable).
+
+- **The QB.** The starter is the QB who played 50%+ of the snaps in the team's most recent game. When he is OUT / IR /
+  Doubtful, the healthy QB with the highest CalPts is the likely starter, and every pass catcher (a WR / TE with 5%+ of
+  the targets, a RB with 12%+) reads "QB downgrade: Lock (backup) for Darnold (OUT)"; Questionable reads "QB may miss".
+- **A pass catcher out.** A WR / TE / RB with 12%+ of the targets who is OUT / IR / Doubtful (Questionable: "may miss")
+  is named on every healthy pass catcher, with his role (his rank by target share at his position: WR2) and his share;
+  the healthy pass catcher with the biggest share reads "Lead target: 36% of DAL's targets; next healthy Flournoy 13%".
+- **A lead back out.** A RB with 50%+ of the snaps who is out is named on the team's other backs.
+- An absence is news only while the player played in one of his team's last three games; an older one has already moved
+  the shares this reads.
+- **The brief** names, among players owned 15%+ in either format or priced $7,000+, up to three who catch from a backup
+  and three who lead the targets with a teammate out, most owned first.
+

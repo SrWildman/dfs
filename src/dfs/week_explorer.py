@@ -792,6 +792,7 @@ function openDrawer(id) {
     const ask = el('button', 'ask', 'Ask Claude'); ask.type = 'button';
     ask.dataset.say = ASK_PLAYER.replace('{name}', v(r, 'Name')); head.append(ask);
   }
+  if (window.dfsCompare) head.append(window.dfsCompare.button(id));
   head.append(close);
   drawer.append(head);
   const sub = el('p', 'dim');
@@ -802,6 +803,7 @@ function openDrawer(id) {
   const rest = [...game, fmt(COL.Salary, v(r, 'Salary')), v(r, 'Kickoff'), v(r, 'Avail')].filter(Boolean).join(' · ');
   sub.append(document.createTextNode(' · ' + rest)); sub.className = 'dim dgame'; drawer.append(sub);
   const prac = (D.practice || {})[id]; if (prac) drawer.append(el('p', 'prac', 'Practice this week: ' + prac));
+  if (window.dfsNews && window.dfsNews.get(id).length) { const p = el('p', 'newsline'); p.title = window.dfsNews.note; p.append(window.dfsNews.chips(id, true)); drawer.append(p); }
   const tags = el('p'); for (const role of v(r, 'Roles').split(', ').filter(Boolean)) tags.append(el('span', 'chip ' + role.split(' ')[0].toLowerCase(), role));
   tags.append(document.createTextNode(' Pool: ')); tags.append(poolSeg(id, v(r, 'Name'), v(r, 'Pool'))); drawer.append(tags);
   const sec = (title, node) => { const d = el('section', 'dsec'); d.append(el('h4', null, title), node); drawer.append(d); };
@@ -833,6 +835,7 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') drawer.hidden = true; });
 window.dfsDrawer = openDrawer;
+window.dfsData = {D, COL, IDX, fmt, v};   // week_views: search, compare and the usage view read every player here
 // a trust chip links to #numbers: open the collapsed section it points at
 function openHash() { const t = location.hash.length > 1 && document.getElementById(location.hash.slice(1)); const d = t && t.querySelector('details'); if (d) d.open = true; }
 window.addEventListener('hashchange', openHash); openHash();

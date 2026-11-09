@@ -124,7 +124,7 @@ def page(browser, served):
     pg = ctx.new_page()
     errors: list[str] = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
-    pg.goto(served.url)
+    pg.goto(served.url + "#everything")  # the full page (Plan O2: the page opens on the Overview)
     until(pg, "!!(window.dfsPool && window.dfsLive)")
     yield pg
     ctx.close()
@@ -325,7 +325,7 @@ def test_a_pool_click_keeps_the_board_box_and_page_scroll_and_the_focus(browser,
         viewport={"width": 1440, "height": 420}
     )  # a short window: the board box scrolls
     pg = ctx.new_page()
-    pg.goto(served.url)
+    pg.goto(served.url + "#explore")
     until(pg, "!!(window.dfsPool && window.dfsLive)")
     box = "document.querySelector('#board .scroll.tall')"
     pg.evaluate(f"({box}).scrollIntoView({{block: 'start'}})")
@@ -427,22 +427,70 @@ def test_every_name_carries_the_pool_chip_and_a_missing_player_is_one_click_away
     chip.click()
     assert page.locator("#pool-pop .seg button").count() == 4
     page.locator("#pool-pop .seg button[data-v=GPP]").click()
-    settle(page)
+    read_back(page, pid, "GPP")
     assert served.pool(name) == "GPP"
     until(page, f"document.querySelector('.pchip[data-id=\"{pid}\"]').textContent === 'GPP'")
     page.keyboard.press("Escape")
     assert page.locator("#pool-pop").count() == 0
     add = page.locator("button.addpool:visible").first
     assert add.count(), "the fixture lists a player the data likes who is not in the pool"
-    if add.count():
-        aid, kind = add.get_attribute("data-id"), add.get_attribute("data-v")
-        aname = page.evaluate(f"window.dfsPool.name({aid!r})")
-        add.click()
-        settle(page)
-        assert served.pool(aname) == kind
-        # hidden at once, then gone: the refreshed section no longer lists him as missing
-        gone = f"(b => !b || b.hidden)(document.querySelector('button.addpool[data-id=\"{aid}\"]'))"
-        until(page, gone)
+    aid, kind = add.get_attribute("data-id"), add.get_attribute("data-v")
+    aname = page.evaluate(f"window.dfsPool.name({aid!r})")
+    # what the add gives, by the page's own rule (GPP + Cash = Both), from the last read-back
+    want = page.evaluate(f"window.dfsPool.addKind(window.dfsPool.get({aid!r}), {kind!r})")
+    page.locator(f'button.addpool[data-id="{aid}"]').first.click()
+    read_back(page, aid, want)
+    assert served.pool(aname) == want
+    # hidden at once, then gone: the refreshed section no longer lists him as missing
+    gone = f"(b => !b || b.hidden)(document.querySelector('button.addpool[data-id=\"{aid}\"]'))"
+    until(page, gone)
+
+
+def read_back(pg, pid: str, value: str):
+    """Wait on the write's read-back, not on an idle queue: the page holds `value` for `pid` from the
+    server's answer (nothing saving for him, no write queued) and the refresh after it has landed."""
+    until(
+        pg,
+        f"!window.dfsPool.saving({pid!r}) && window.dfsPool.get({pid!r}) === {value!r}"
+        " && !window.dfsQueue.busy() && !window.dfsLive.refreshing()",
+    )
+
+
+def test_a_slow_refresh_never_puts_an_old_pool_value_back_and_an_add_merges_with_the_last_read_back(
+    page, served, monkeypatch
+):
+    """The flake behind the chip test, made to happen every time: two writes on one player back to back (GPP,
+    then "+ Cash"). The render the GPP write's refresh asked for reads the sheet (GPP) and is held on a gate
+    until "+ Cash" has been read back, so it always lands after a newer read-back. The add is resolved
+    against the last read-back (Both, never a stale Cash or GPP), and no render puts an older value back."""
+    real = week_server.render_page
+    gate = threading.Event()
+
+    def held(ctx, nonce):
+        html = real(ctx, nonce)  # the sheet as it is now
+        gate.wait(15)  # ...delivered only once the test lets it go
+        return html
+
+    monkeypatch.setattr(week_server, "render_page", held)
+    pid, name = "id-Qb Alpha", "Qb Alpha"
+    assert served.pool(name) == ""
+    page.evaluate(f"window.dfsPool.request([{{id: {pid!r}, value: 'GPP'}}])")
+    # GPP is read back; the refresh that write asked for is held (its render read the sheet as GPP)
+    until(page, f"!window.dfsPool.saving({pid!r}) && window.dfsPool.get({pid!r}) === 'GPP'")
+    until(page, "window.dfsLive.refreshing()")
+    page.evaluate(f"window.dfsPool.request([{{id: {pid!r}, add: 'Cash'}}])")
+    assert page.evaluate(f"window.dfsPool.saving({pid!r})")  # shown as saving until it lands
+    shown = f"document.querySelector('#board .seg[data-id=\"{pid}\"] button.on').dataset.v"
+    assert page.evaluate(shown) == "Both"  # resolved against the read-back: GPP + Cash
+    until(page, f"!window.dfsPool.saving({pid!r}) && window.dfsPool.get({pid!r}) === 'Both'")
+    assert served.pool(name) == "Both"
+    assert page.evaluate("window.dfsLive.refreshing()")  # the GPP render is still held
+    gate.set()  # the stale render (GPP) lands now, after the Both read-back
+    read_back(page, pid, "Both")
+    assert page.evaluate(shown) == "Both"
+    page.evaluate("window.dfsLive.refresh()")
+    until(page, "!window.dfsLive.refreshing()")
+    assert page.evaluate(f"window.dfsPool.get({pid!r})") == "Both" and page.evaluate(shown) == "Both"
 
 
 SHADE_PROBE = """(() => {
@@ -480,3 +528,210 @@ def test_numbers_are_coloured_within_their_position_with_a_legend(page):
         assert set(g["ownSides"]) <= {"sh-own"}, pos
     assert page.locator("#board .shade-key").count() == 1
     assert page.locator("#board td.sh-tail").count() > 0
+
+
+# -- Plan O2: the view bar, the new views, search and compare ----------------------------------------------
+
+
+def _usage_files(served, tmp_path):
+    """Two games for every skill player on the fake slate, so the usage view has rows."""
+    import csv
+
+    from dfs import usage_weeks
+
+    data = tmp_path / "data" / "current"
+    with (data / "usage_weeks.csv").open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=usage_weeks.PLAYER_COLUMNS)
+        w.writeheader()
+        for i, r in enumerate(x for x in served.rows if x["Position"] in ("QB", "RB", "WR", "TE")):
+            for wk in (1, 2):
+                w.writerow(
+                    {
+                        "NameKey": r["Name"].lower(),
+                        "Name": r["Name"],
+                        "Team": r["Team"],
+                        "Position": r["Position"],
+                        "Wk": wk,
+                        "Opp": r["Opp"],
+                        "Snap%": 0.5 + i / 100,
+                        "Tgt": 3 + i % 5,
+                        "Car": i % 3,
+                        "Tgt%": 0.1 + i / 200,
+                        "Air%": 0.1,
+                        "WOPR": 0.3,
+                        "RZ": 1,
+                        "HVT": 0,
+                        "DK": 10 + i,
+                    }
+                )
+    with (data / "team_weeks.csv").open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=usage_weeks.TEAM_COLUMNS)
+        w.writeheader()
+        for t in sorted({r["Team"] for r in served.rows}):
+            for wk in (1, 2):
+                w.writerow(
+                    {
+                        "Team": t,
+                        "Wk": wk,
+                        "Opp": "XXX",
+                        "Plays": 60,
+                        "Pass%": 0.6,
+                        "PROE": 1.5,
+                        "Pace": 30,
+                        "RZTrips": 3,
+                        "Tgt": 30,
+                        "Car": 25,
+                    }
+                )
+    for r in served.rows:
+        r.setdefault("NameKey", r["Name"].lower())
+        cal = float(r["CalPts"])
+        r["SleeperPts"], r["EspnPts"] = str(round(cal * 0.85, 1)), str(round(cal * 1.1, 1))
+    write_csv(tmp_path / "data" / "current" / "edge.csv", served.rows)
+    import json
+
+    calls = [
+        {
+            "name": r["Name"],
+            "position": r["Position"],
+            "team": r["Team"],
+            "salary": float(r["Salary"]),
+            "calpts": float(r["CalPts"]),
+            "cash": "AVOID" if i % 2 else "CORE",
+            "cash_score": 0.1,
+            "cash_reason": "test",
+            "gpp": "FADE" if i % 3 == 0 else "NEUTRAL",
+            "gpp_score": -0.1,
+            "gpp_reason": "test",
+            "bump": 0.0,
+            "bump_from": "",
+        }
+        for i, r in enumerate(served.rows)
+    ]
+    inputs = tmp_path / "data" / "week" / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    (inputs / "2026-wk09-calls.json").write_text(
+        json.dumps({"versions": [{"at": "2026-11-08", "calls": calls}]})
+    )
+
+
+def visible_views(pg):
+    return pg.evaluate("[...document.querySelectorAll('.vw')].filter(w => !w.hidden).map(w => w.dataset.v)")
+
+
+def test_the_page_opens_on_the_overview_each_view_has_its_hash_and_the_last_one_is_kept(browser, served):
+    """Sam, 2026-11-09: a view bar under the brief, Overview the default, each view its own #name (a link
+    and the back button open it), the last one kept per week."""
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
+    pg = ctx.new_page()
+    pg.goto(served.url)
+    until(pg, "!!(window.dfsViews && window.dfsPool)")
+    assert pg.evaluate("window.dfsViews.current()") == "overview"
+    assert pg.locator("#brief").is_visible() and pg.locator("#progress").is_visible()
+    assert pg.locator("#overview-card").is_visible() and not pg.locator("#board").is_visible()
+    pg.click('#views a[data-view="usage"]')
+    until(pg, "location.hash === '#usage' && window.dfsViews.current() === 'usage'")
+    assert pg.locator("#usage-card").is_visible() and not pg.locator("#overview-card").is_visible()
+    assert pg.locator("#brief").is_visible()  # the brief is on every view
+    pg.click('#views a[data-view="model"]')
+    until(pg, "window.dfsViews.current() === 'model'")
+    pg.go_back()
+    until(pg, "window.dfsViews.current() === 'usage'")
+    pg.goto(served.url)  # no hash: the last view this week
+    until(pg, "!!window.dfsViews")
+    assert pg.evaluate("window.dfsViews.current()") == "usage"
+    pg.goto(served.url + "#everything")
+    until(pg, "window.dfsViews.current() === 'everything'")
+    for sid in ("#board", "#usage-card", "#injury-card", "#model-card", "#explorer-card"):
+        assert pg.locator(sid).count() == 1 and pg.locator(sid).is_visible(), sid
+    # a link to a section on another view opens a view that has it
+    pg.goto(served.url + "#explore")
+    until(pg, "window.dfsViews.current() === 'explore'")
+    pg.evaluate("location.hash = 'numbers'")
+    until(pg, "window.dfsViews.current() === 'overview'")
+    ctx.close()
+
+
+def test_every_name_on_the_new_views_carries_the_pool_chip_and_one_store(browser, served, tmp_path):
+    """Plan O2: every name on the overview, usage, injury and model views has the pool control, and a pool
+    click on one view shows on every view (one store)."""
+    _usage_files(served, tmp_path)
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
+    pg = ctx.new_page()
+    errors = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    pg.goto(served.url + "#usage")
+    until(pg, "document.querySelectorAll('#uv-table tbody tr').length > 0")
+    until(pg, "document.querySelectorAll('#uv-teams .bars span.pl').length > 0")
+    # a name the page resolves (every priced player but OUT / IR, the Explorer's set) carries the chip
+    bare = """sel => [...document.querySelectorAll(sel + ' a.pl[data-id]')].filter(a => {
+        const n = a.nextElementSibling; return !(n && n.classList.contains('pchip'));
+      }).map(a => a.textContent)"""
+    plain = "sel => [...document.querySelectorAll(sel + ' a.pl:not([data-id])')].map(a => a.textContent)"
+    out = {r["Name"] for r in served.rows if r.get("Avail") in ("OUT", "IR")}
+    for view, sel in (
+        ("usage", "#usage-card"),
+        ("overview", "#overview-card"),
+        ("injuries", "#injury-card"),
+        ("model", "#model-card"),
+    ):
+        pg.evaluate(f"location.hash = '{view}'")
+        until(pg, f"window.dfsViews.current() === '{view}'")
+        assert pg.evaluate(f"document.querySelectorAll('{sel} a.pl').length") > 0, view
+        assert pg.evaluate(bare, sel) == [], view
+        assert set(pg.evaluate(plain, sel)) <= out, view
+    # one store: a pool write on the overview shows on the usage view's chip
+    pg.evaluate("location.hash = 'overview'")
+    chip = pg.locator("#overview-card .pchip").first
+    pid = chip.get_attribute("data-id")
+    chip.click()
+    pg.locator("#pool-pop .seg button[data-v=Cash]").click()
+    read_back(pg, pid, "Cash")
+    assert served.pool(pg.evaluate(f"window.dfsPool.name({pid!r})")) == "Cash"
+    pg.evaluate("location.hash = 'everything'")
+    until(
+        pg,
+        f"[...document.querySelectorAll('.pchip[data-id=\"{pid}\"]')].every(c => c.textContent === 'Cash')",
+    )
+    assert errors == []
+    ctx.close()
+
+
+def test_search_finds_a_player_on_any_view_and_the_compare_tray_holds_two_to_four(page, served):
+    """Plan O2 item 8: the search box on every view; + Compare from the search, the drawer or a pool chip;
+    2-4 players side by side with the Compare tab's rows, the best value green."""
+    page.evaluate("location.hash = 'injuries'")
+    page.fill("#psearch", "qb")
+    until(page, "document.querySelectorAll('#psearch-list .sr').length >= 2")
+    page.keyboard.press("Enter")  # the first hit opens in the drawer
+    until(page, "!document.getElementById('drawer').hidden")
+    page.locator("#drawer button.cmp-add").click()
+    page.keyboard.press("Escape")
+    until(
+        page,
+        "document.getElementById('cmp-tray') && document.querySelectorAll('#cmp-tray .tchip2').length === 1",
+    )
+    assert page.locator("#cmp-open").is_disabled()  # one is not a comparison
+    page.fill("#psearch", "qb")
+    until(page, "document.querySelectorAll('#psearch-list .sr').length >= 2")
+    page.locator("#psearch-list .sr").nth(1).locator("button.cmp-add").click()
+    page.click("#cmp-open")
+    until(page, "!!document.querySelector('#cmp-view table.cmp')")
+    labels = page.evaluate("[...document.querySelectorAll('#cmp-view tr.sect td')].map(t => t.textContent)")
+    assert labels[:3] == ["PLAYER", "PROJECTIONS", "OWNERSHIP"]
+    best = page.evaluate(
+        """[...document.querySelectorAll('#cmp-view table.cmp tr')]
+           .find(r => r.cells[0].textContent === 'CalPts').querySelectorAll('td.best').length"""
+    )
+    assert best == 1  # the two QBs differ: one is green
+    # a fifth pick pushes the oldest out: at most four
+    ids = page.evaluate("window.dfsData.D.ids.slice(0, 5)")
+    for pid in ids:
+        page.evaluate(f"window.dfsCompare.picks().includes({pid!r}) || window.dfsCompare.add({pid!r})")
+    assert len(page.evaluate("window.dfsCompare.picks()")) == 4
+    page.reload()  # kept per week
+    until(page, "!!window.dfsCompare")
+    assert len(page.evaluate("window.dfsCompare.picks()")) == 4
+    # from any name: the pool chip's popover has + Compare
+    page.locator(".pchip").first.click()
+    assert page.locator("#pool-pop button.cmp-add").count() == 1
