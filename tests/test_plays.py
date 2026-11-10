@@ -88,42 +88,214 @@ def test_every_rosterable_player_gets_two_labelled_calls_with_one_reason(feature
         assert (by_pos[(by_pos["pos"] == pos)]["cash"] == "CORE").sum() >= plays.CORE_N[pos]
 
 
-def test_fade_chip_is_avoid_and_fade_with_its_record(features):
-    calls = plays.make_calls(
-        features, plays.Weights.prior(2026), season=2026, week=7, at=NOW, fade_record="FADE↓ 35-17 (67%)"
-    ).by_name()
-    te = calls["T02 TE1"]
-    assert te.cash == "AVOID" and te.gpp == "FADE"
-    assert "67%" in te.cash_reason and "67%" in te.gpp_reason
+FADE = plays.FadeEffect(points=-2.5, hit=0.673, n=52, weeks="Weeks 1-8", thin=False)
 
 
-def test_heavy_chalk_is_core_unless_a_clearly_better_alternative(features):
+def test_fade_is_its_measured_effect_on_the_projection_not_an_override(features):
+    """Sam, 2026-11-09: FADE↓ lowers the projection by Model Check's record before the sim, and the label
+    comes from the corrected Cash % like everyone else's."""
+    edge = slate()
+    edge.loc[edge["Name"] == "T00 QB1", "CashOwn"] = 0.45
+    edge.loc[edge["Name"] == "T02 TE1", "Edge"] = "FADE↓"
+    kw = {"typed_cash": typed_cash(), "now": NOW, "n_sims": 400, "field_lineups": 600, "bump_table": TABLE}
+    faded = plays.week_features(edge, fade=FADE, **kw)
+    plain = features.frame.set_index("Name")
+    row = faded.frame.set_index("Name").loc["T02 TE1"]
+    assert row["fade_pts"] == pytest.approx(-2.5)
+    assert row["CalPts"] == pytest.approx(plain.at["T02 TE1", "CalPts"] - 2.5)
+    calls = plays.make_calls(faded, plays.Weights.prior(2026), season=2026, week=7, at=NOW, fade=FADE)
+    te = calls.by_name()["T02 TE1"]
+    assert te.cash_reason.startswith("FADE↓ (67% hit, -2.5 pts) applied; ")
+    assert ("still beats" in te.cash_reason) == (te.alt_gap is not None and te.alt_gap < -0.05)
+    if te.cash == "AVOID":
+        assert te.alt_gap > 0 and "now costs" in te.cash_reason
+    assert not plays.contradictions(plays.call_dict(te))
+    assert any("FADE↓ (67% hit, -2.5 pts) taken off" in n for n in calls.notes)
+    # a thin record moves nothing, and the chip alone no longer labels anyone
+    thin = plays.week_features(edge, fade=plays.FadeEffect(-3.0, 0.75, 8, "Week 1", True), **kw)
+    assert thin.frame.set_index("Name").at["T02 TE1", "CalPts"] == plain.at["T02 TE1", "CalPts"]
+    assert "fade" not in plays.FEATURES["cash"] and "fade" not in plays.FEATURES["gpp"]
+
+
+def test_fade_effect_reads_model_checks_row():
+    rec = {"n": 52, "VsProj": -1.88, "VsCal": -2.51, "HitProj": 0.673, "HitCal": 0.673}
+    fx = plays.FadeEffect.from_record(rec, (1, 8))
+    assert fx.applies and fx.points == pytest.approx(-2.51) and fx.weeks == "Weeks 1-8"
+    assert fx.label() == "FADE↓ (67% hit, -2.5 pts)"
+    assert not plays.FadeEffect.from_record({"n": 18, "VsCal": -1.9}).applies  # thin
+    assert not plays.FadeEffect.from_record(None).applies
+
+
+def test_heavy_chalk_is_core_unless_a_clearly_better_non_chalk_alternative(features):
     calls = plays.make_calls(features, plays.Weights.prior(2026), season=2026, week=7, at=NOW).by_name()
     qb = calls["T00 QB1"]
     assert qb.cash_own == pytest.approx(0.45)
-    if qb.cash != "CORE":  # faded: the reason must state the gap, and it must be at least CHALK_GAP
-        assert "Fading chalk" in qb.cash_reason
+    if qb.cash != "CORE":  # not core: a non-chalk player at his price beats him by the chalk gap
+        assert qb.chalk_gap >= plays.CHALK_GAP and "chalk" in qb.cash_reason.lower()
     else:
-        assert "chalk" in qb.cash_reason.lower()
+        assert qb.chalk_gap is None or qb.chalk_gap < plays.CHALK_GAP
 
 
-def test_chalk_rule_on_a_small_frame():
-    frame = pd.DataFrame(
+def small(names, salaries, values, owns, pos="WR"):
+    return pd.DataFrame(
         {
-            "Name": ["A", "B", "C", "D"],
-            "Position": ["RB"] * 4,
-            "Salary": [7000, 7200, 4000, 4100],
-            "cash_value": [50.0, 55.0, 40.0, 30.0],
-            "cash_own": [0.40, 0.05, 0.35, 0.01],
-            "fade": [0.0, 0.0, 0.0, 0.0],
-            "relevant": [True] * 4,
+            "Name": names,
+            "Position": [pos] * len(names),
+            "Salary": salaries,
+            "cash_value": values,
+            "cash_own": owns,
+            "fade": [0.0] * len(names),
+            "relevant": [True] * len(names),
         }
     )
-    score = pd.Series([-1.0, 1.0, -2.0, 0.0])
-    labels, gap = plays.cash_labels(frame, score)
-    assert labels[0] == "PLAY"  # A trails B by 5 points at his price: chalk, but not forced to CORE
-    assert gap[0] == pytest.approx(5.0)
+
+
+def test_two_chalk_players_close_in_price_do_not_knock_each_other_down():
+    """Week 9 (versions 1-2): Puka 52% and JSN 32%, $500 apart, kept each other off CORE."""
+    frame = small(["Puka", "JSN", "Cheap"], [8800, 9300, 4000], [30.0, 34.0, 45.0], [0.52, 0.32, 0.02])
+    labels, alts = plays.cash_labels(frame, pd.Series([-1.0, -0.5, 1.0]))
+    assert labels[0] == "CORE" and labels[1] == "CORE"  # JSN beats Puka by 4, but JSN is chalk too
+    assert alts.at[0, "alt_gap"] == pytest.approx(4.0) and np.isnan(alts.at[0, "chalk_gap"])
+
+
+def test_chalk_beaten_by_a_non_chalk_player_by_the_gap_is_never_core():
+    frame = small(
+        ["A", "B", "C", "D"],
+        [7000, 7200, 4000, 4100],
+        [50.0, 55.0, 40.0, 30.0],
+        [0.40, 0.05, 0.35, 0.01],
+        pos="RB",
+    )
+    labels, alts = plays.cash_labels(frame, pd.Series([2.0, 1.0, -2.0, 0.0]))
+    assert labels[0] == "PLAY"  # a score CORE, but B (5% owned) adds 5 points at his price
+    assert alts.at[0, "chalk_gap"] == pytest.approx(5.0)
     assert labels[2] == "CORE"  # C is chalk and nobody at his price does clearly better (D: -10)
+
+
+def test_a_player_who_beats_his_price_alternatives_is_never_avoid():
+    """Week 9: JSN read "Costs -5.4 points of Cash % against Puka" and was AVOID."""
+    names = [f"W{i}" for i in range(10)]
+    sal = [9300, 8800, 8300, 8100, 6000, 5900, 4500, 4400, 3500, 3400]
+    val = [34.6, 29.2, 32.2, 37.4, 40.0, 41.0, 47.0, 46.0, 30.0, 29.0]
+    frame = small(names, sal, val, [0.1] * 10)
+    score = pd.Series([-0.5, -0.9, -0.7, -0.3, 0.0, 0.1, 0.5, 0.4, -0.2, -0.25])
+    labels, alts = plays.cash_labels(frame, score)
+    for i in frame.index:
+        if labels[i] == "AVOID":
+            assert alts.at[i, "alt_gap"] > 0
+    assert labels[0] != "AVOID"  # JSN: nobody within $500 beats him
+    assert labels[3] != "AVOID"  # St. Brown beats CeeDee
+    assert labels[1] == "AVOID"  # Puka: JSN beats him by 5.4
+
+
+def test_avoid_is_cut_within_each_position():
+    n = 20
+    sal, val = [5000 + 50 * i for i in range(n)], [40.0 - i for i in range(n)]
+    wr = small([f"W{i}" for i in range(n)], sal, val, [0.01] * n)
+    rb = small([f"R{i}" for i in range(n)], sal, val, [0.01] * n, pos="RB")
+    frame = pd.concat([wr, rb], ignore_index=True)
+    score = pd.Series([10.0 - i for i in range(n)] + [-10.0 - i for i in range(n)])  # every RB below every WR
+    labels, _ = plays.cash_labels(frame, score)
+    assert (labels[:n] == "AVOID").sum() == 6 and (labels[n:] == "AVOID").sum() == 6  # 30% of each
+
+
+@pytest.mark.parametrize("week", [2, 4, 5, 6, 7, 8])
+def test_no_label_contradicts_its_reason_on_any_week(week):
+    """Every call of a slate per backtest week (a different seed each) agrees with its own numbers."""
+    edge = slate(seed=week)
+    edge.loc[edge.index[::7], "CashOwn"] = 0.35  # plenty of chalk
+    edge.loc[edge["Position"].eq("TE") & edge["Name"].str.endswith("1"), "Edge"] = "FADE↓"
+    wf = plays.week_features(
+        edge, typed_cash=typed_cash(), now=NOW, n_sims=300, field_lineups=400, bump_table=TABLE, fade=FADE
+    )
+    calls = plays.make_calls(wf, plays.Weights.prior(2026), season=2026, week=week, at=NOW, fade=FADE)
+    bad = [f"{c.name}: {b}" for c in calls.calls for b in plays.contradictions(plays.call_dict(c))]
+    assert not bad, bad[:5]
+
+
+def test_contradictions_catch_week_9s_saved_calls():
+    """The records saved before M1.6 carry no gaps: the numbers in the reason line are enough."""
+    jsn = {
+        "cash": "AVOID",
+        "cash_own": 0.15,
+        "cash_reason": "Costs -5.4 points of Cash % against Puka Nacua ($8,800) at the same price.",
+        "gpp": "NEUTRAL",
+        "gpp_reason": "",
+    }
+    puka = {
+        "cash": "AVOID",
+        "cash_own": 0.49,
+        "cash_reason": "Fading chalk: 49% of the double-up plays him, "
+        "but Jaxon Smith-Njigba ($9,300) adds 5.4 more points of Cash % at the price.",
+        "gpp": "NEUTRAL",
+    }
+    fade = {
+        "cash": "NEUTRAL",
+        "gpp": "FADE",
+        "gpp_reason": "Over-owned for his ceiling: 8% owned, in 12% of simulated top-1% lineups.",
+    }
+    assert plays.contradictions(jsn) and plays.held_back(jsn, "cash")
+    assert not plays.contradictions(puka) and plays.held_back(puka, "cash")  # chalk AVOID: held back anyway
+    assert plays.contradictions(fade) and plays.held_back(fade, "gpp") and not plays.held_back(fade, "cash")
+    ok = {
+        "cash": "AVOID",
+        "cash_own": 0.05,
+        "alt_gap": 2.0,
+        "cash_reason": "Costs 2.0 points of Cash % against X ($5,000) at the same price.",
+        "gpp": "LEVERAGE",
+        "lev": 0.03,
+        "gpp_reason": "Under-owned for his ceiling: 5% owned, in 8% of simulated top-1% lineups.",
+    }
+    assert not plays.contradictions(ok) and not plays.held_back(ok, "cash") and not plays.held_back(ok, "gpp")
+
+
+def games_rows(team="T01"):
+    """news_context's per-game rows: the team's QB started weeks 3-5 (100% of the snaps)."""
+    rows = []
+    for wk in (3, 4, 5):
+        rows.append({"Name": f"{team} QB1", "Team": team, "Position": "QB", "Wk": wk, "Snap%": 1.0})
+        rows.append({"Name": f"{team} QB2", "Team": team, "Position": "QB", "Wk": wk, "Snap%": 0.0})
+        for k, tgt in ((1, 0.28), (2, 0.20), (3, 0.10)):
+            rows.append({"Name": f"{team} WR{k}", "Team": team, "Position": "WR", "Wk": wk, "Tgt%": tgt})
+        rows.append({"Name": f"{team} TE1", "Team": team, "Position": "TE", "Wk": wk, "Tgt%": 0.15})
+        rows.append(
+            {"Name": f"{team} RB1", "Team": team, "Position": "RB", "Wk": wk, "Tgt%": 0.13, "Snap%": 0.7}
+        )
+    return rows
+
+
+QB_TABLE = {"WR": -0.64, "TE": -0.64}
+
+
+def test_qb_downgrade_moves_his_pass_catchers_by_the_measured_points():
+    edge = slate()
+    edge.loc[edge["Name"] == "T01 QB1", "Avail"] = "OUT"
+    backup = edge[edge["Name"] == "T01 QB1"].assign(Name="T01 QB2", Avail="", CalPts=12.0, Id=9999)
+    edge = pd.concat([edge, backup], ignore_index=True)
+    news = {q.name: q for q in plays.qb_news(edge, games_rows(), QB_TABLE)}
+    assert set(news) == {"T01 WR1", "T01 WR2", "T01 WR3", "T01 TE1"}  # the RB's cell does not ship
+    assert news["T01 WR1"].points == pytest.approx(-0.64)
+    assert news["T01 WR1"].why == "QB downgrade: QB2 (backup) for QB1 (OUT)"
+    wf = plays.week_features(
+        edge,
+        typed_cash=typed_cash(),
+        now=NOW,
+        n_sims=200,
+        field_lineups=300,
+        bump_table=TABLE,
+        games=games_rows(),
+        qb_table=QB_TABLE,
+    )
+    row = wf.frame.set_index("Name").loc["T01 WR1"]
+    base = edge.set_index("Name").at["T01 WR1", "CalPts"]
+    assert row["qb"] == pytest.approx(-0.64) and row["CalPts"] == pytest.approx(base - 0.64)
+    calls = plays.make_calls(wf, plays.Weights.prior(2026), season=2026, week=7, at=NOW).by_name()
+    assert "QB downgrade: QB2 (backup) for QB1 (OUT): -0.6 points applied" in calls["T01 WR1"].cash_reason
+    # a healthy starter: no news; no games: no news
+    healthy = edge.copy()
+    healthy.loc[healthy["Name"] == "T01 QB1", "Avail"] = ""
+    assert not plays.qb_news(healthy, games_rows(), QB_TABLE)
+    assert not plays.qb_news(edge, [], QB_TABLE)
 
 
 def test_news_bumps_teammates_of_a_fresh_out_once():

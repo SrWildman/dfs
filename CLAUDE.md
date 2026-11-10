@@ -163,9 +163,14 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs plays [--position QB,RB] [--per N] [--no-save] [--inactives]` -- **the plays model, SHADOW** (Plan M M1; `plays.py`,
   `sim/plays_sim.py`): two calls per rosterable player, cash CORE / PLAY / NEUTRAL / AVOID and GPP TARGET / LEVERAGE /
   NEUTRAL / FADE, each with a score and one reason. The cash score is the sim's priced Cash % over near-optimal cash lineups
-  (chalk 30%+ is CORE unless an alternative at the price is 2+ points of Cash % better; FADE↓ is AVOID). The GPP score is the
+  (M1.6: chalk 30%+ is CORE unless a NON-chalk player at the price is 2+ points of Cash % better; AVOID is the bottom 30% by
+  score within the position and never a player whose Cash % ties or beats every alternative at his price; FADE↓ is its
+  measured effect, Model Check's record taken off his projection before the sim, not an override). The GPP score is the
   simulated top-1% share against GppOwn, with the tails stretches, the teammate bump for fresh OUT / Doubtful news minus what
-  the projections already moved, and a QB's best stack. Weights are a ridge fit toward a prior, walk-forward, saved in
+  the projections already moved, the QB downgrade (`news_context`'s backup-QB fact, R8's measured -0.64 for WR / TE,
+  `models/research/qb_downgrade.csv`), and a QB's best stack. `plays.contradictions` checks every label against the numbers in
+  its reason (the backtest exits 1 on any); until the new labels clear the bar the Week page holds back a cash AVOID on 30%+
+  chalk and any contradicted label ("no call: label under review", `plays.held_back`). Weights are a ridge fit toward a prior, walk-forward, saved in
   `data/research/calls_weights/`. Every `dfs sync` (and `week new`'s) adds a timestamped version to
   `data/week/inputs/<season>-wk<NN>-calls.json` and prints the "new must-plays" (calls that moved up). `--inactives` runs
   `dfs sync --live` first (which refreshes the Cockpit). Never writes a sheet. The Week page does not show the calls yet (M2).

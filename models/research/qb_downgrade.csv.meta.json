@@ -1,0 +1,19 @@
+{
+  "study": "r8",
+  "seasons": [
+    2018,
+    2025
+  ],
+  "fit_seasons": [
+    2014,
+    2021
+  ],
+  "test_seasons": [
+    2022,
+    2025
+  ],
+  "n": 660,
+  "generated": "2026-11-09",
+  "code_version": "740bf43+dirty",
+  "qb_games": 162
+}
