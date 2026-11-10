@@ -57,7 +57,7 @@ EVAL_WEEKS = (2, 4, 5, 6, 7, 8)  # every week with standings (Sam, 2026-11-05: W
 BIG_GPP = 700  # a GPP with this many entries or more has a top 1% worth counting
 CACHE_DIR = DATA_DIR / "research" / "calls_features"
 REPORT_DIR = REPO_ROOT / "docs" / "research" / "plays"
-CACHE_VERSION = "1"
+CACHE_VERSION = "2"  # M1.6: FADE↓ as its measured effect, the QB downgrade, the label rules
 SATURDAY_HOUR_ET = 24  # "Saturday": the last snapshot before Sunday 00:00 ET
 
 
@@ -102,6 +102,7 @@ class HistWeek:
     gpp_detail: pd.DataFrame | None  # name -> top1_share, own_actual
     cash_own_actual: dict[str, float]
     snapshot: str  # the snapshot the features came from
+    fade: plays.FadeEffect | None = None  # FADE↓'s record over the scored weeks before this one
 
 
 def field_own_filled(edge: pd.DataFrame, ctx: Context, week: int) -> pd.DataFrame:
@@ -204,6 +205,48 @@ def cash_own_actual(contests: Sequence, week: int) -> dict[str, float]:
     return own.to_dict() if n else {}
 
 
+def fade_before(ctx: Context, week: int) -> plays.FadeEffect:
+    """FADE↓'s Model Check record over the scored weeks BEFORE `week` (walk-forward: the live calls read the
+    season's table, which only ever holds earlier weeks)."""
+    from dfs import results_signals
+
+    earlier = ctx.scored[pd.to_numeric(ctx.scored["week"], errors="coerce") < week]
+    if earlier.empty:
+        return plays.FadeEffect()
+    rep = results_signals.signal_report(results_signals.evaluation_frame(earlier, ctx.season))
+    row = rep[rep["Signal"] == plays.FADE_TOKEN]
+    weeks = sorted(int(w) for w in pd.to_numeric(earlier["week"], errors="coerce").dropna().unique())
+    return plays.FadeEffect.from_record(
+        row.iloc[0].to_dict() if not row.empty else None, (weeks[0], weeks[-1]) if weeks else None
+    )
+
+
+def games_before(season: int, week: int) -> list[dict]:
+    """The per-game usage rows `news_context` reads, as the live sync would have saved them before `week`:
+    nflverse's player stats and snap counts (the research caches), games before the week only."""
+    from dfs import usage_weeks
+    from dfs.research import data
+
+    sp = data.read_stats_player([season])
+    sp = sp[pd.to_numeric(sp["week"], errors="coerce") < week]
+    snaps = None
+    try:
+        sn = data.read_snaps([season])
+        names = data.read_players()[["pfr_id", "display_name"]].dropna().drop_duplicates("pfr_id")
+        sn = sn.merge(names, left_on="pfr_player_id", right_on="pfr_id", how="left")
+        snaps = pd.DataFrame(
+            {
+                "NameKey": sn["display_name"].map(normalize_name),
+                "Wk": pd.to_numeric(sn["week"], errors="coerce"),
+                "Snap%": pd.to_numeric(sn["offense_pct"], errors="coerce"),
+            }
+        ).dropna(subset=["NameKey", "Wk"])
+        snaps = snaps[snaps["Wk"] < week].drop_duplicates(["NameKey", "Wk"], keep="last")
+    except Exception:  # noqa: BLE001 - no snaps: news_context finds no starter, so no QB news
+        snaps = None
+    return usage_weeks.player_weeks(sp, None, snaps).to_dict("records")
+
+
 def snapshot_at(week: int, season: int, until: datetime) -> tuple[pd.DataFrame, datetime] | None:
     """The last EdgeRaw snapshot at or before `until` (the main slate cut is the caller's)."""
     snaps = plays.edge_snapshots(season, week, until)
@@ -236,6 +279,7 @@ def week_inputs(
     edge = field_own_filled(edge, ctx, week)
     edge = fade_filled(edge, ctx.season, week, lock)
     snaps = plays.edge_snapshots(ctx.season, week, now)
+    fade = fade_before(ctx, week)
     wf = plays.week_features(
         edge,
         typed_cash=wi.typed_cash,
@@ -244,6 +288,8 @@ def week_inputs(
         field_model=field_rates_before(ctx, week),
         own_lag=own_lag,
         carried=plays.carried_out(ctx.season, week),
+        games=games_before(ctx.season, week),
+        fade=fade,
     )
     frame = wf.frame
     actual = wi.actual
@@ -272,6 +318,7 @@ def week_inputs(
         gpp_detail=detail,
         cash_own_actual=cash_own_actual(ctx.contests, week),
         snapshot=snap_name,
+        fade=fade,
     )
 
 
@@ -352,8 +399,9 @@ def late_news_rows(hw: HistWeek) -> pd.DataFrame:
 
 
 def baseline_cash_labels(frame: pd.DataFrame, value: pd.Series) -> pd.Series:
-    """The calls' label counts applied to `value` alone (no chalk or FADE rule)."""
-    return plays.cash_labels(frame.assign(fade=0.0, cash_own=np.nan), value)[0]
+    """The calls' label counts and rules applied to `value` alone: no chalk rule (no ownership), and the
+    "never AVOID when nobody at his price beats him" guard read on `value` itself."""
+    return plays.cash_labels(frame.assign(fade=0.0, cash_own=np.nan, cash_value=value), value)[0]
 
 
 def baseline_gpp_set(frame: pd.DataFrame, score: pd.Series) -> pd.Series:
@@ -441,6 +489,8 @@ class WeekResult:
     cash: dict = field(default_factory=dict)
     gpp: dict = field(default_factory=dict)
     held_out: dict = field(default_factory=dict)
+    contradictions: list[str] = field(default_factory=list)
+    calls_fade: plays.FadeEffect | None = None
 
 
 def train_set(history: dict[int, HistWeek], before: int) -> dict:
@@ -448,7 +498,7 @@ def train_set(history: dict[int, HistWeek], before: int) -> dict:
 
 
 def score_week(hw: HistWeek, weights: plays.Weights, season: int = SEASON) -> WeekResult:
-    calls = plays.make_calls(hw.features, weights, season=season, week=hw.week, at=hw.now)
+    calls = plays.make_calls(hw.features, weights, season=season, week=hw.week, at=hw.now, fade=hw.fade)
     frame = hw.features.frame.reset_index(drop=True).copy()
     lab = pd.DataFrame(
         [
@@ -475,6 +525,10 @@ def score_week(hw: HistWeek, weights: plays.Weights, season: int = SEASON) -> We
         frame, frame["ProjPts"].fillna(frame["CalPts"]) / (frame["Salary"] / 1000)
     )
     res = WeekResult(hw.week, calls, frame, weights)
+    res.calls_fade = hw.fade
+    res.contradictions = [
+        f"Week {hw.week} {c.name}: {b}" for c in calls.calls for b in plays.contradictions(plays.call_dict(c))
+    ]
     # cash
     target = frame["ppk"]
     g, n_good, n_bad = cash_gap(frame, frame["cash"], target)
@@ -483,6 +537,12 @@ def score_week(hw: HistWeek, weights: plays.Weights, season: int = SEASON) -> We
         res.cash[base] = cash_gap(frame, frame[base], target)[0]
     med = frame[frame["relevant"]].groupby("Position")["ppk"].median()
     above = frame["ppk"] >= frame["Position"].map(med)
+    for base in ("base_cal", "base_tffb"):
+        for label in ("CORE", "PLAY", "AVOID"):
+            m = (frame[base] == label) & frame["ppk"].notna()
+            hit = above[m] if label != "AVOID" else ~above[m]
+            res.cash[f"{base} n {label}"] = int(m.sum())
+            res.cash[f"{base} hit {label}"] = float(hit.mean()) if m.any() else float("nan")
     for label in plays.CASH_LABELS:
         m = (frame["cash"] == label) & frame["ppk"].notna()
         hit = above[m] if label in ("CORE", "PLAY") else ~above[m]
@@ -495,7 +555,13 @@ def score_week(hw: HistWeek, weights: plays.Weights, season: int = SEASON) -> We
         d, se, n = matched_excess(frame, chosen, frame["excess"])
         res.gpp = {"diff": d, "se": se, "n": n, "z": d / se if se and se == se and se > 0 else float("nan")}
         for name, score in (("base_cal", frame["value"]), ("base_tffb", tffb_gpp_score(frame))):
-            res.gpp[name] = matched_excess(frame, baseline_gpp_set(frame, score), frame["excess"])[0]
+            chosen_b = baseline_gpp_set(frame, score)
+            res.gpp[name] = matched_excess(frame, chosen_b, frame["excess"])[0]
+            m = chosen_b & frame["excess"].notna()
+            res.gpp[f"{name} n set"] = int(m.sum())
+            res.gpp[f"{name} hit set"] = (
+                float((frame.loc[m, "excess"] > 0).mean()) if m.any() else float("nan")
+            )
         for label in plays.GPP_LABELS:
             m = (frame["gpp"] == label) & frame["excess"].notna()
             hit = (
@@ -688,6 +754,91 @@ def summarize(results: dict[int, WeekResult]) -> dict:
             out[f"{kind} hit {label}"] = (hits / n if n else float("nan"), n)
     for k in ("cash rho", "cash rho prior", "cash rho value", "gpp rho", "gpp rho prior"):
         out[k] = mean_se([results[w].held_out.get(k, float("nan")) for w in weeks])
+    for base in ("base_cal", "base_tffb"):
+        for label in ("CORE", "PLAY", "AVOID"):
+            n = sum(results[w].cash.get(f"{base} n {label}", 0) for w in weeks)
+            hits = sum(
+                results[w].cash.get(f"{base} hit {label}", 0.0) * results[w].cash.get(f"{base} n {label}", 0)
+                for w in weeks
+                if results[w].cash.get(f"{base} n {label}", 0)
+            )
+            out[f"cash {base} hit {label}"] = (hits / n if n else float("nan"), n)
+        n = sum(results[w].gpp.get(f"{base} n set", 0) for w in gw)
+        hits = sum(
+            results[w].gpp.get(f"{base} hit set", 0.0) * results[w].gpp.get(f"{base} n set", 0)
+            for w in gw
+            if results[w].gpp.get(f"{base} n set", 0)
+        )
+        out[f"gpp {base} hit set"] = (hits / n if n else float("nan"), n)
+    n = sum(results[w].gpp.get(f"n {lab}", 0) for w in gw for lab in ("TARGET", "LEVERAGE"))
+    hits = sum(
+        results[w].gpp.get(f"hit {lab}", 0.0) * results[w].gpp.get(f"n {lab}", 0)
+        for w in gw
+        for lab in ("TARGET", "LEVERAGE")
+        if results[w].gpp.get(f"n {lab}", 0)
+    )
+    out["gpp hit set"] = (hits / n if n else float("nan"), n)
+    out["contradictions"] = [c for w in weeks for c in results[w].contradictions]
+    out["news"] = news_check(results)
+    out["fade"] = {
+        str(w): {"points": r.calls_fade.points, "n": r.calls_fade.n, "applies": r.calls_fade.applies}
+        for w, r in sorted(results.items())
+        if r.calls_fade is not None
+    }
+    return out
+
+
+NEWS_KINDS = (
+    ("qb", "QB downgrade (R8)", lambda f: f["qb"] < 0),
+    ("bump", "teammate out (R7 bump)", lambda f: f["bump"] > 0),
+    ("fade", "FADE↓ (Model Check record)", lambda f: f["fade_pts"] < 0),
+)
+
+
+def news_check(results: dict[int, WeekResult]) -> dict:
+    """Did the news points help against the realized points? Per kind over every scored week: the flagged
+    players' mean (actual - CalPts) minus the same position's unflagged relevant players', with CalPts as it
+    stood before the points (`pre`) and after (`post`), and the flagged players' mean absolute error both
+    ways. This is the 2026 check "against what the projections already moved": CalPts at the lock already
+    holds whatever the market moved."""
+    parts = []
+    for w, r in sorted(results.items()):
+        f = r.frame
+        if "pts" not in f.columns:
+            continue
+        pre = f["CalPts"] - f["bump"] - f.get("qb", 0.0) - f.get("fade_pts", 0.0)
+        parts.append(f.assign(week=w, pre=pre, post=f["CalPts"]))
+    if not parts:
+        return {}
+    f = pd.concat(parts, ignore_index=True)
+    f = f[f["pts"].notna() & f["relevant"].astype(bool)]
+    out = {}
+    for key, title, flag in NEWS_KINDS:
+        if key not in f.columns and key != "fade":
+            continue
+        if key == "fade" and "fade_pts" not in f.columns:
+            continue
+        m = flag(f).fillna(False).astype(bool)
+        if not m.any():
+            out[key] = {"title": title, "n": 0}
+            continue
+        ctrl = f[~m & ~(f["bump"] > 0) & ~(f.get("qb", 0.0) < 0) & ~(f.get("fade_pts", 0.0) < 0)]  # no news
+        base = ctrl.groupby("Position").apply(lambda g: (g["pts"] - g["pre"]).mean(), include_groups=False)
+        adj = f.loc[m, "Position"].map(base).fillna(0.0)
+        r_pre = f.loc[m, "pts"] - f.loc[m, "pre"] - adj
+        r_post = f.loc[m, "pts"] - f.loc[m, "post"] - adj
+        se = float(r_pre.std(ddof=1) / math.sqrt(len(r_pre))) if len(r_pre) > 1 else float("nan")
+        out[key] = {
+            "title": title,
+            "n": int(m.sum()),
+            "weeks": sorted(int(x) for x in f.loc[m, "week"].unique()),
+            "applied": float(f.loc[m, {"fade": "fade_pts"}.get(key, key)].mean()),  # this kind's own points
+            "resid_pre": float(r_pre.mean()),
+            "resid_post": float(r_post.mean()),
+            "se": se,
+            "mae_pre": float((f.loc[m, "pts"] - f.loc[m, "pre"]).abs().mean()),
+            "mae_post": float((f.loc[m, "pts"] - f.loc[m, "post"]).abs().mean()),
+        }
     return out
 
 
@@ -703,9 +854,10 @@ def report(
     lag_rows: pd.DataFrame,
     weights: plays.Weights,
     flashback: list[str] | None = None,
+    before: dict | None = None,
 ) -> list[str]:
     lines = [
-        "# The plays model (M1): backtest",
+        "# The plays model (M1.6): backtest",
         "",
         f"Generated {datetime.now(UTC):%Y-%m-%d %H:%M} UTC. Weeks {', '.join(map(str, summary['weeks']))}; "
         "every week scored on weights fitted on the weeks before it only.",
@@ -843,8 +995,100 @@ def report(
             )
     else:
         lines.append("None found in these weeks: the correction stays 1.")
+    lines += m16_lines(summary, before)
     if flashback:
         lines += ["", "## Flashback: cash builds from the calls (CORE locked, AVOID banned)", "", *flashback]
+    return lines
+
+
+def _rate(pair: object) -> str:
+    if not pair or not isinstance(pair, list | tuple) or pair[0] is None or pair[0] != pair[0]:
+        return "-"
+    return f"{pair[0]:.0%} of {int(pair[1])}"
+
+
+def m16_lines(summary: dict, before: dict | None) -> list[str]:
+    """M1.6's sections: every label's hit rate before (M1's saved summary) and after, beside the baselines;
+    the contradiction count; the news points against CalPts; FADE↓'s effect week by week."""
+    before = before or {}
+    lines = [
+        "",
+        "## M1.6: hit rate by label, before and after, against the baselines",
+        "",
+        "Before = M1's saved walk-forward run (`docs/research/plays/*-plays-summary-m1.json`); after = this "
+        "run. Baselines: the same label counts and rules applied to CalPts per $1K alone and to TFFB's "
+        "ProjPts per $1K (cash), the same-size top set by CalPts value and by TFFB ceiling over ownership "
+        "(GPP: hit = a real top-1% share above real ownership).",
+        "",
+        "| Label | before (M1) | after (M1.6) | CalPts value | TFFB |",
+        "|---|---|---|---|---|",
+    ]
+    for label in ("CORE", "PLAY", "AVOID"):
+        cells = [
+            before.get(f"cash hit {label}"),
+            summary.get(f"cash hit {label}"),
+            summary.get(f"cash base_cal hit {label}"),
+            summary.get(f"cash base_tffb hit {label}"),
+        ]
+        lines.append(f"| cash {label} | " + " | ".join(_rate(c) for c in cells) + " |")
+    for label in ("TARGET", "LEVERAGE", "FADE"):
+        was, now = before.get(f"gpp hit {label}"), summary.get(f"gpp hit {label}")
+        lines.append(f"| GPP {label} | {_rate(was)} | {_rate(now)} | | |")
+    lines.append(
+        f"| GPP TARGET+LEVERAGE set | - | {_rate(summary.get('gpp hit set'))} | "
+        f"{_rate(summary.get('gpp base_cal hit set'))} | {_rate(summary.get('gpp base_tffb hit set'))} |"
+    )
+    bc, ac = before.get("cash gap") or [None], summary.get("cash gap") or [None]
+    lines += [
+        "",
+        f"- Cash CORE+PLAY minus AVOID gap: before {_f(bc[0])}, after {_f(ac[0])} points per $1K.",
+    ]
+    for base in ("base_cal", "base_tffb"):
+        b, a = before.get(f"cash vs {base}") or {}, summary.get(f"cash vs {base}") or {}
+        lines.append(
+            f"- vs {base}: before {_f(b.get('diff'))} (SE {_f(b.get('se'))}, won {b.get('won', '-')} of "
+            f"{b.get('weeks', '-')}), after {_f(a.get('diff'))} (SE {_f(a.get('se'))}, won "
+            f"{a.get('won', '-')} of {a.get('weeks', '-')}): "
+            f"{'clears' if a.get('clears') else 'does not clear'} the bar."
+        )
+    bg, ag = before.get("gpp") or {}, summary.get("gpp") or {}
+    lines.append(
+        f"- GPP combined p: before {bg.get('p', float('nan')):.3f}, after {ag.get('p', float('nan')):.3f}; "
+        f"{'clears' if ag.get('clears') else 'does not clear'} the bar."
+    )
+    bad = summary.get("contradictions") or []
+    lines += [
+        "",
+        "## M1.6: labels against their own reasons",
+        "",
+        f"`plays.contradictions` over every call of every scored week: **{len(bad)}** contradiction(s)."
+        + ("" if not bad else " First ten:"),
+        *[f"- {b}" for b in bad[:10]],
+        "",
+        "## M1.6: the news against CalPts (2026, every scored week)",
+        "",
+        "Flagged players' mean (actual - CalPts) minus their position's unflagged relevant players', with "
+        "CalPts before the news points and after (negative: they did worse than the projection); MAE both "
+        "ways.",
+        "",
+        "| News | n | weeks | points applied | resid before | resid after | SE | MAE before | MAE after |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for _key, v in (summary.get("news") or {}).items():
+        if not v.get("n"):
+            lines.append(f"| {v.get('title')} | 0 | | | | | | | |")
+            continue
+        lines.append(
+            f"| {v['title']} | {v['n']} | {', '.join(map(str, v['weeks']))} | {_f(v['applied'])} | "
+            f"{_f(v['resid_pre'])} | {_f(v['resid_post'])} | {_f(v['se'])} | {v['mae_pre']:.2f} | "
+            f"{v['mae_post']:.2f} |"
+        )
+    lines += ["", "FADE↓'s measured effect as each week read it (Model Check, scored weeks before it):", ""]
+    for w, v in (summary.get("fade") or {}).items():
+        lines.append(
+            f"- Week {w}: {v['points']:+.2f} pts over n={v['n']}"
+            + (" (applied)" if v["applies"] else " (thin: not applied)")
+        )
     return lines
 
 
@@ -1025,6 +1269,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - the resear
     r.add_argument("--weeks", default=",".join(map(str, EVAL_WEEKS)))
     r.add_argument("--fresh", action="store_true")
     r.add_argument("--no-news", action="store_true")
+    r.add_argument("--before", default="", help="M1's saved summary JSON to report against")
     args = parser.parse_args(argv)
     weeks = [int(x) for x in args.weeks.split(",") if x.strip()]
     results, history, fitted = run(weeks, fresh=args.fresh)
@@ -1035,7 +1280,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - the resear
         ctx = Context.load(SEASON, max(weeks))
         news = news_path(ctx, weeks, {r.week: r.weights for r in results.values()})
     lag_rows = pd.concat([late_news_rows(hw) for hw in history.values()], ignore_index=True)
-    lines = report(results, summary, news=news, lag_rows=lag_rows, weights=fitted[-1])
+    before_path = (
+        Path(args.before)
+        if args.before
+        else REPORT_DIR / f"{SEASON}-wk{max(weeks):02d}-plays-summary-m1.json"
+    )
+    before = json.loads(before_path.read_text()) if before_path.exists() else None
+    lines = report(results, summary, news=news, lag_rows=lag_rows, weights=fitted[-1], before=before)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = REPORT_DIR / f"{SEASON}-wk{max(weeks):02d}-plays-backtest.md"
     path.write_text("\n".join(lines) + "\n")
@@ -1044,6 +1295,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - the resear
     )
     print("\n".join(lines))
     print(f"\nreport: {path}")
+    if summary["contradictions"]:
+        print(f"{len(summary['contradictions'])} label(s) contradict their reasons: see the report")
+        return 1
     return 0
 
 

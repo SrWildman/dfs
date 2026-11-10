@@ -198,3 +198,42 @@ def test_m15_settings_files_load():
     assert a.flags["calls"] == "avoid" and a.gpp == 0
     assert b.flags["calls"] == "fade" and b.cash == 0
     assert bs.load(folder / "today_gpp.toml").cash == 0
+
+
+def test_news_check_scores_the_applied_points_against_calpts():
+    """M1.6: flagged players' residual against CalPts before and after the news points, net of their
+    position's unflagged players."""
+    frame = pd.DataFrame(
+        {
+            "Name": ["A", "B", "C", "D", "E", "F"],
+            "Position": ["WR"] * 6,
+            "CalPts": [9.36, 12.0, 10.0, 10.0, 15.0, 7.5],  # A: 10 - 0.64 (QB); B: 10 + 2 (bump); F: 10 - 2.5
+            "bump": [0.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+            "qb": [-0.64, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "fade_pts": [0.0, 0.0, 0.0, 0.0, 0.0, -2.5],
+            "pts": [8.0, 13.0, 11.0, 9.0, 15.0, 6.0],
+            "relevant": [True] * 6,
+        }
+    )
+    res = pb.WeekResult(6, None, frame, plays.Weights.prior(2026))
+    out = pb.news_check({6: res})
+    qb = out["qb"]
+    assert qb["n"] == 1 and qb["applied"] == pytest.approx(-0.64)
+    # unflagged WRs (C, D, E) beat their CalPts by 0 on average: A missed his raw 10 by 2, his 9.36 by 1.36
+    assert qb["resid_pre"] == pytest.approx(-2.0) and qb["resid_post"] == pytest.approx(-1.36)
+    assert out["bump"]["applied"] == pytest.approx(2.0) and out["fade"]["applied"] == pytest.approx(-2.5)
+
+
+def test_the_baselines_use_the_same_never_avoid_guard_on_their_own_number():
+    frame = pd.DataFrame(
+        {
+            "Name": [f"W{i}" for i in range(20)],
+            "Position": ["WR"] * 20,
+            "Salary": [9000] + [4000 + 10 * i for i in range(19)],  # W0 has nobody within $500
+            "cash_value": [np.nan] * 20,
+            "relevant": [True] * 20,
+        }
+    )
+    value = pd.Series([0.1] + [3.0 - 0.1 * i for i in range(19)])  # W0 has the worst value
+    labels = pb.baseline_cash_labels(frame, value)
+    assert labels[0] != "AVOID" and (labels == "AVOID").sum() == 5  # 30% of 20 = 6, W0 protected

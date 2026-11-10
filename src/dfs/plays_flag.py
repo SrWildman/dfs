@@ -43,7 +43,8 @@ def week_calls(week: int):  # noqa: ANN201 - plays.Calls
 
     weights = plays.load_weights(pb.SEASON, before_week=week)
     hw = pb.cached_week(_context(), week, own_lag=weights.own_lag if weights.own_lag.n else None)
-    return plays.make_calls(hw.features, weights, season=pb.SEASON, week=week, at=hw.now), weights
+    calls = plays.make_calls(hw.features, weights, season=pb.SEASON, week=week, at=hw.now, fade=hw.fade)
+    return calls, weights
 
 
 def feasible_locks(core: list, cap: int) -> list[str]:

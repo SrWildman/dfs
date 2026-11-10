@@ -76,20 +76,24 @@ FADE_SHARE = 0.30  # the bottom share by score of those
 CHALK = 0.30  # heavy double-up chalk (Plan D's chalk check)
 CHALK_GAP = 2.0  # points of Cash %: the gap to the best alternative that fading chalk needs
 PRICE_BAND = 500  # dollars either side: "an alternative at the price"
+GAP_EPS = 0.05  # points of Cash %: a smaller gap reads 0.0 at one decimal, so it is a tie (never "beaten")
 FADE_TOKEN = "FADE↓"
 
-# The model
+# The model (M1.6: FADE↓ is no longer an input or an override: its measured effect moves the projection
+# before the sim, `FadeEffect`; the QB downgrade is a new input, `qb`)
 FEATURES = {
-    "cash": ("sim", "value", "floor", "own", "fade", "bump"),
-    "gpp": ("lev", "ceiling", "own", "fade", "bump", "tail"),
+    "cash": ("sim", "value", "floor", "own", "bump", "qb"),
+    "gpp": ("lev", "ceiling", "own", "bump", "qb", "tail"),
 }
-UNSCALED = frozenset({"fade", "bump", "tail"})  # used as they are (0/1, points / 5, the role's stretch)
+UNSCALED = frozenset({"bump", "qb", "tail"})  # used as they are (points / 5, points / 5, the role's stretch)
 BUMP_SCALE = 5.0
-# The simple prior every week's fit is shrunk toward: the simulator's number carries the call, FADE↓ (proven:
-# 67% hit) pushes down. Units: standardised target per standardised input.
+# The simple prior every week's fit is shrunk toward: the simulator's number carries the call. The news
+# inputs start at 0: their measured points are already in the projection the sim reads (`week_news`,
+# `qb_news`), so a weight away from 0 is only what the walk-forward fit finds the sim still misses.
+# Units: standardised target per standardised input.
 PRIOR = {
-    "cash": {"sim": 0.25, "value": 0.0, "floor": 0.0, "own": 0.0, "fade": -0.25, "bump": 0.0},
-    "gpp": {"lev": 0.20, "ceiling": 0.0, "own": 0.0, "fade": -0.25, "bump": 0.0, "tail": 0.0},
+    "cash": {"sim": 0.25, "value": 0.0, "floor": 0.0, "own": 0.0, "bump": 0.0, "qb": 0.0},
+    "gpp": {"lev": 0.20, "ceiling": 0.0, "own": 0.0, "bump": 0.0, "qb": 0.0, "tail": 0.0},
 }
 RIDGE = 150.0  # the prior counts as this many player-weeks per position
 OWN_LAG_SHRINK = 5.0  # pseudo-players at "no lag" when the late-news ownership factor is fitted
@@ -338,6 +342,114 @@ def apply_news(edge: pd.DataFrame, news: News) -> pd.DataFrame:
     return out
 
 
+@dataclass
+class QbNews:
+    """A pass catcher whose starting quarterback is OUT / IR / Doubtful (`news_context`'s "QB downgrade"
+    fact) and the points his projection moves for it (`research.r8_qb_downgrade`'s table, by position)."""
+
+    name: str
+    team: str
+    position: str
+    points: float
+    why: str  # the fact's text: "QB downgrade: Lock (backup) for Darnold (OUT)"
+
+
+def qb_news(
+    edge: pd.DataFrame, games: Sequence[Mapping] | None, table: Mapping[str, float] | None = None
+) -> list[QbNews]:
+    """Every rosterable pass catcher with a QB-downgrade fact (`news_context.team_news`: the starter of his
+    team's most recent game is OUT / IR / Doubtful now) and its measured points. `games` are the per-game
+    usage rows `news_context` reads (`usage_weeks.csv`, else `player_log.csv`; for a past week, the games
+    before it), statuses are DraftKings' `Avail` on `edge`.
+
+    R8 measured the effect against UM, which reads the game's Vegas total: what is left is what a projection
+    that already knows the betting market's move still misses, so it is added as measured (it is not netted
+    against CalPts' own move the way the teammate bump is, which would take the market's part out twice)."""
+    from dfs import news_context
+    from dfs.player_join import normalize_name
+    from dfs.research import r8_qb_downgrade
+
+    table = r8_qb_downgrade.load_table() if table is None else table
+    if not games or not table or edge.empty:
+        return []
+    cols = [c for c in ("Name", "Team", "Position", "Avail", "CalPts") if c in edge.columns]
+    rows = edge[cols].to_dict("records")
+    for r in rows:
+        r["Avail"] = "" if r.get("Avail") is None or r.get("Avail") != r.get("Avail") else r["Avail"]
+    by_key = {(normalize_name(r["Name"]), str(r["Team"])): r for r in rows}
+    out, seen = [], set()
+    for team, tn in news_context.team_news(rows, list(games)).items():
+        for key, fact in tn.facts:
+            if fact.kind != "qb" or fact.tone != news_context.DOWN:
+                continue
+            r = by_key.get((key, team))
+            if r is None or r["Name"] in seen:
+                continue
+            pts = float(table.get(str(r["Position"]), 0.0))
+            if pts:
+                seen.add(r["Name"])
+                out.append(QbNews(str(r["Name"]), team, str(r["Position"]), pts, fact.text))
+    return out
+
+
+@dataclass(frozen=True)
+class FadeEffect:
+    """FADE↓ as its measured effect (Sam, 2026-11-09): Model Check's record for the signal (mean DK points
+    against CalPts and the hit rate, over the scored weeks BEFORE the week), taken off the flagged player's
+    projection before the sim, so his Cash % and his label come out of the corrected numbers like everyone
+    else's. A thin record (`results_analysis.is_thin`: under 30 flagged games) moves nothing, Model Check's
+    own rule: shown, not read as an answer."""
+
+    points: float = 0.0  # mean (actual - CalPts) of the flagged games
+    hit: float | None = None
+    n: int = 0
+    weeks: str = ""  # "Weeks 1-8"
+    thin: bool = True
+
+    @property
+    def applies(self) -> bool:
+        return not self.thin and self.n > 0 and self.points < 0
+
+    def label(self) -> str:
+        """'FADE↓ (67% hit, -2.5 pts)'."""
+        hit = f"{self.hit * 100:.0f}% hit, " if self.hit is not None and self.hit == self.hit else ""
+        return f"{FADE_TOKEN} ({hit}{self.points:+.1f} pts)"
+
+    @classmethod
+    def from_record(cls, rec: Mapping | None, weeks: tuple[int, int] | None = None) -> FadeEffect:
+        """From Model Check's signal-table row (`week_inputs.load_signal_table`'s FADE↓ entry or a
+        `results_signals.signal_report` row)."""
+        from dfs.results_analysis import is_thin
+
+        if not rec:
+            return cls()
+        n = int(num(rec.get("n")) or 0)
+        pts = num(rec.get("VsCal"))
+        pts = num(rec.get("VsProj")) if pts is None else pts
+        hit = num(rec.get("HitCal"))
+        hit = num(rec.get("HitProj")) if hit is None else hit
+        span = ""
+        if weeks:
+            span = f"Weeks {weeks[0]}-{weeks[1]}" if weeks[0] != weeks[1] else f"Week {weeks[0]}"
+        return cls(float(pts or 0.0), hit, n, span, is_thin(n) if n else True)
+
+
+def apply_fade(edge: pd.DataFrame, fade: FadeEffect | None) -> tuple[pd.DataFrame, pd.Series]:
+    """`edge` with every FADE↓ player's CalPts moved by the measured effect (when it applies), and the points
+    moved per row."""
+    moved = pd.Series(0.0, index=edge.index)
+    if fade is None or not fade.applies or "Edge" not in edge.columns or "CalPts" not in edge.columns:
+        return edge, moved
+    hit = edge["Edge"].fillna("").astype(str).str.contains(FADE_TOKEN, regex=False)
+    if not hit.any():
+        return edge, moved
+    out = edge.copy()
+    cal = _col(out, "CalPts")
+    moved = pd.Series(np.where(hit & cal.notna(), fade.points, 0.0), index=edge.index)
+    out["CalPts"] = (cal + moved).where(cal.notna())
+    return out, moved
+
+
 @dataclass(frozen=True)
 class OwnLag:
     """How much a late-news beneficiary's real ownership beat the prediction, per format (a factor)."""
@@ -421,8 +533,11 @@ FEATURE_COLUMNS = [
     "gpp_own",
     "late_news",
     "fade",
+    "fade_pts",
     "bump",
     "bump_from",
+    "qb",
+    "qb_from",
     "cash_value",
     "cash_raw",
     "floor",
@@ -446,18 +561,29 @@ def week_features(
     own_lag: OwnLag | None = None,
     bump_table: Mapping[tuple[str, str], float] | None = None,
     carried: Iterable[str] = (),
+    games: Sequence[Mapping] | None = None,
+    qb_table: Mapping[str, float] | None = None,
+    fade: FadeEffect | None = None,
     cap: int = 50_000,
     n_sims: int | None = None,
     field_lineups: int | None = None,
     seed: int = 0,
 ) -> WeekFeatures:
-    """Everything the calls are scored on, from what was known at `now` (module docstring)."""
+    """Everything the calls are scored on, from what was known at `now` (module docstring). `games` are the
+    per-game usage rows before the week (`qb_news`), `fade` FADE↓'s measured effect (`FadeEffect`)."""
     from dfs.sim import plays_sim as ps
 
     edge = inputs_only(edge)
     snapshots = [(t, inputs_only(f)) for t, f in snapshots if t <= now]
     news = week_news(edge, snapshots, bump_table, carried)
     framed = apply_news(edge, news)
+    framed, fade_moved = apply_fade(framed, fade)
+    fade_by = dict(zip(framed["Name"].astype(str), fade_moved, strict=True))
+    qbs = {q.name: q for q in qb_news(framed, games, qb_table)}  # every status: the starter's OUT is the news
+    if qbs:
+        cal = _col(framed, "CalPts")
+        add = framed["Name"].astype(str).map({n: q.points for n, q in qbs.items()}).fillna(0.0)
+        framed = framed.assign(CalPts=(cal + add).where(cal.notna()))
     lag = own_lag or OwnLag()
     bumps = news.by_name()
     late = {n for n, b in bumps.items() if b.late}
@@ -503,6 +629,9 @@ def week_features(
     out["fade"] = edge_tokens.str.contains(FADE_TOKEN, regex=False).astype(float).to_numpy()
     out["bump"] = out["Name"].map({n: b.applied for n, b in bumps.items()}).fillna(0.0)
     out["bump_from"] = [bumps[n].absent if n in bumps else "" for n in out["Name"]]
+    out["fade_pts"] = out["Name"].map(fade_by).fillna(0.0)
+    out["qb"] = out["Name"].map({n: q.points for n, q in qbs.items()}).fillna(0.0)
+    out["qb_from"] = [qbs[n].why if n in qbs else "" for n in out["Name"]]
     out = out.merge(
         cash.frame[["name", "cash_value", "cash_raw"]], left_on="Name", right_on="name", how="left"
     )
@@ -548,8 +677,8 @@ def _input(frame: pd.DataFrame, kind: str, name: str) -> pd.Series:
         return frame["cash_value"]
     if name == "own":
         return frame["cash_own" if kind == "cash" else "gpp_own"]
-    if name == "bump":
-        return frame["bump"] / BUMP_SCALE
+    if name in ("bump", "qb"):
+        return (frame[name] if name in frame.columns else pd.Series(0.0, index=frame.index)) / BUMP_SCALE
     return frame[name]
 
 
@@ -724,6 +853,14 @@ class Call:
     bump: float = 0.0
     bump_from: str = ""
     late_news: bool = False
+    # M1.6: the numbers the labels are checked against (`contradictions`)
+    alt: str = ""  # the best alternative at his position and price ("Name ($8,800)"); "" when none
+    alt_gap: float | None = None  # his Cash % behind that alternative (points; negative: he is ahead)
+    chalk_alt: str = ""  # the best NON-chalk alternative (the chalk rule's comparison)
+    chalk_gap: float | None = None
+    fade_pts: float = 0.0  # FADE↓'s measured effect taken off his projection
+    qb: float = 0.0  # the QB downgrade's measured points
+    qb_from: str = ""
 
 
 def _money(x: float) -> str:
@@ -734,49 +871,101 @@ def _pct(x: float | None) -> str:
     return "-" if x is None or x != x else f"{x * 100:.0f}%"
 
 
-def cash_labels(frame: pd.DataFrame, score: pd.Series) -> tuple[pd.Series, pd.Series]:
-    """Label by score within position, then the chalk and FADE↓ rules. Returns (labels, chalk_gap): the gap
-    (points of Cash %) to the best alternative at the price, for chalk only."""
+def _is(x: object) -> bool:
+    return x is not None and x == x
+
+
+def alternatives(frame: pd.DataFrame) -> pd.DataFrame:
+    """Per row: the best alternative at his position within `PRICE_BAND` of his salary by Cash % for the price
+    (`alt`, the row index, -1 for none, and `alt_gap`: its Cash % minus his), and the same among the NON-chalk
+    players only (`chalk_alt`, `chalk_gap`: the chalk rule's comparison). A blank Cash % is never an
+    alternative and has no gap."""
+    value = pd.to_numeric(frame["cash_value"], errors="coerce")
+    sal = pd.to_numeric(frame["Salary"], errors="coerce")
+    own = pd.to_numeric(frame["cash_own"], errors="coerce").fillna(0.0)
+    out = pd.DataFrame(
+        {"alt": -1, "alt_gap": np.nan, "chalk_alt": -1, "chalk_gap": np.nan}, index=frame.index
+    ).astype({"alt": int, "chalk_alt": int})
+    for i in frame.index:
+        same = (
+            (frame["Position"] == frame.at[i, "Position"])
+            & ((sal - sal.at[i]).abs() <= PRICE_BAND)
+            & (frame.index != i)
+            & value.notna()
+        )
+        mine = value.at[i]
+        for col, gap_col, mask in (
+            ("alt", "alt_gap", same),
+            ("chalk_alt", "chalk_gap", same & (own < CHALK)),
+        ):
+            if not mask.any():
+                continue
+            j = value[mask].idxmax()
+            out.at[i, col] = int(j)
+            if _is(mine):
+                out.at[i, gap_col] = float(value.at[j] - mine)
+    return out
+
+
+def beaten(alts: pd.DataFrame, i: object) -> bool:
+    """True when a player at his position and price has a strictly better Cash % for the price (fix 1: anyone
+    else is never AVOID, including a player with no alternative at all)."""
+    g = alts.at[i, "alt_gap"]
+    return _is(g) and g >= GAP_EPS
+
+
+def cash_labels(frame: pd.DataFrame, score: pd.Series) -> tuple[pd.Series, pd.DataFrame]:
+    """Label by score within position, then the rules (M1.6). Returns (labels, `alternatives(frame)`).
+
+    1. Score: per position the top `CORE_N` CORE, the next `PLAY_N` PLAY.
+    2. The chalk rule: a `CHALK`+ CashOwn player is CORE unless a NON-chalk player within `PRICE_BAND`
+       beats his Cash % by `CHALK_GAP`+ (two chalk players close in price never knock each other down); one
+       who is beaten that way is never CORE (a score CORE drops to PLAY).
+    3. AVOID: the bottom `AVOID_SHARE` by score of the position's relevant players, taken within the position
+       AFTER the chalk rule, and only a player some alternative at his price beats on Cash % (a player whose
+       Cash % is better than or equal to every alternative's is never AVOID; he stays NEUTRAL)."""
     labels = pd.Series("NEUTRAL", index=frame.index)
-    gap = pd.Series(np.nan, index=frame.index)
+    alts = alternatives(frame)
     for pos, idx in frame.groupby("Position").groups.items():
         order = score.loc[idx].sort_values(ascending=False, kind="stable").index
         core, play = CORE_N.get(pos, 1), PLAY_N.get(pos, 2)
         labels.loc[order[:core]] = "CORE"
         labels.loc[order[core : core + play]] = "PLAY"
-        rel = [i for i in order if frame.at[i, "relevant"] and labels.at[i] == "NEUTRAL"]
-        n_avoid = int(round(AVOID_SHARE * len([i for i in order if frame.at[i, "relevant"]])))
-        if n_avoid:
-            labels.loc[rel[-n_avoid:]] = "AVOID"
-    value = frame["cash_value"]
-    for i in frame.index:
-        own = frame.at[i, "cash_own"]
-        if own is None or own != own or own < CHALK:
-            continue
-        same = frame[
-            (frame["Position"] == frame.at[i, "Position"])
-            & ((frame["Salary"] - frame.at[i, "Salary"]).abs() <= PRICE_BAND)
-            & (frame.index != i)
-        ]
-        best = value.loc[same.index].max() if not same.empty else np.nan
-        g = (best - value.at[i]) if best == best and value.at[i] == value.at[i] else np.nan
-        gap.at[i] = g
-        if not (g == g and g >= CHALK_GAP):
+    own = pd.to_numeric(frame["cash_own"], errors="coerce")
+    for i in frame.index[own >= CHALK]:
+        g = alts.at[i, "chalk_gap"]
+        if _is(g) and g >= CHALK_GAP:
+            if labels.at[i] == "CORE":
+                labels.at[i] = "PLAY"
+        else:
             labels.at[i] = "CORE"
-    labels[frame["fade"] > 0] = "AVOID"
-    return labels, gap
+    for _pos, idx in frame.groupby("Position").groups.items():
+        order = score.loc[idx].sort_values(ascending=False, kind="stable").index
+        relevant_n = int(frame.loc[idx, "relevant"].astype(bool).sum())
+        n_avoid = int(round(AVOID_SHARE * relevant_n))
+        pool = [i for i in order if frame.at[i, "relevant"] and labels.at[i] == "NEUTRAL"]
+        for i in pool[len(pool) - n_avoid :] if n_avoid else []:
+            if beaten(alts, i):
+                labels.at[i] = "AVOID"
+    return labels, alts
 
 
 def gpp_labels(frame: pd.DataFrame, score: pd.Series) -> pd.Series:
+    """TARGET: the position's top shares of the simulated top 1% at fair ownership (`lev` -0.01 or more);
+    LEVERAGE: the best scores with a top-1% share above the ownership; FADE: the bottom `FADE_SHARE` by score
+    of the owned (`FADE_MIN_OWN`+) players, and only one whose top-1% share is BELOW his ownership (the
+    reason says "over-owned", so the numbers must say it too). FADE↓ is no override: its measured effect is
+    already in the projection the sim read (`apply_fade`)."""
     labels = pd.Series("NEUTRAL", index=frame.index)
+    lev = pd.to_numeric(frame["lev"], errors="coerce")
     for pos, idx in frame.groupby("Position").groups.items():
         part = frame.loc[idx]
-        fair = part["lev"].fillna(0) >= -0.01
+        fair = lev.loc[idx].fillna(0) >= -0.01
         by_top = (
             part[fair].sort_values("opt_pct", ascending=False, kind="stable").index[: TARGET_N.get(pos, 2)]
         )
         labels.loc[by_top] = "TARGET"
-        rest = score.loc[[i for i in idx if labels.at[i] == "NEUTRAL" and (frame.at[i, "lev"] or 0) > 0]]
+        rest = score.loc[[i for i in idx if labels.at[i] == "NEUTRAL" and (lev.at[i] or 0) > 0]]
         labels.loc[rest.sort_values(ascending=False, kind="stable").index[: LEVERAGE_N.get(pos, 2)]] = (
             "LEVERAGE"
         )
@@ -785,8 +974,9 @@ def gpp_labels(frame: pd.DataFrame, score: pd.Series) -> pd.Series:
         ]
         n_fade = int(round(FADE_SHARE * len(owned)))
         if n_fade:
-            labels.loc[score.loc[owned].sort_values(kind="stable").index[:n_fade]] = "FADE"
-    labels[frame["fade"] > 0] = "FADE"
+            for i in score.loc[owned].sort_values(kind="stable").index[:n_fade]:
+                if _is(lev.at[i]) and lev.at[i] < 0:
+                    labels.at[i] = "FADE"
     return labels
 
 
@@ -795,8 +985,8 @@ CASH_DRIVER_TEXT = {
     "value": "projection per dollar",
     "floor": "floor for his price",
     "own": "how much of the double-up plays him",
-    "fade": "the FADE↓ chip",
     "bump": "the work he inherits",
+    "qb": "his quarterback's absence",
 }
 
 
@@ -805,81 +995,221 @@ def _driver(contribs: Mapping[str, float], up: bool) -> str:
     return max(items, key=lambda kv: abs(kv[1]))[0] if items else ""
 
 
+def _news_tail(row: pd.Series) -> str:
+    """The QB downgrade, said on every label it touches."""
+    if row.get("qb", 0) and row["qb"] < 0:
+        return f" {row['qb_from']}: {row['qb']:+.1f} points applied (R8, measured)."
+    return ""
+
+
+def _fade_head(row: pd.Series, fade: FadeEffect | None, gap: float, alt: str) -> str:
+    """'FADE↓ (67% hit, -2.5 pts) applied; still beats his price alternatives by 1.2 points of Cash %' or
+    '...; now costs 3.1 points of Cash % against X' (AVOID) / '...; now 3.1 points of Cash % behind X'."""
+    if not (row.get("fade", 0) > 0 and row.get("fade_pts", 0) < 0 and fade is not None):
+        return ""
+    head = f"{fade.label()} applied"
+    if not alt or not _is(gap):
+        return head + "; no alternative at his price"
+    if gap < GAP_EPS:
+        if gap > -GAP_EPS:
+            return head + "; matches his best price alternative on Cash %"
+        return head + f"; still beats his price alternatives by {-gap:.1f} points of Cash %"
+    return head + f"; now {gap:.1f} points of Cash % behind {alt}"
+
+
 def cash_reason(
-    row: pd.Series, label: str, contribs: Mapping[str, float], gap: float, alt: str, record: str
+    row: pd.Series,
+    label: str,
+    contribs: Mapping[str, float],
+    alts: Mapping[str, object],
+    fade: FadeEffect | None = None,
 ) -> str:
+    """One sentence that agrees with the label and its numbers (`contradictions` checks every one)."""
     pos, own = row["Position"], row["cash_own"]
-    if row["fade"] > 0:
-        return (
-            record or "FADE↓: a tight end scoring well above his usage, which Model Check has seen fall back"
-        )
+    gap, alt = alts.get("alt_gap"), str(alts.get("alt") or "")
+    cgap, calt = alts.get("chalk_gap"), str(alts.get("chalk_alt") or "")
+    news = _news_tail(row)
+    fade_head = _fade_head(row, fade, gap, alt)
+    if fade_head:
+        if label == "AVOID":
+            return f"{fade_head.replace('; now ', '; now costs ').replace(' behind ', ' against ')}.{news}"
+        return f"{fade_head}: {label} on what is left.{news}"
     if row["bump"] > 0 and label in ("CORE", "PLAY"):
         return (
             f"{row['bump_from']} OUT: {row['Name']} takes about +{row['bump']:.1f} points of his work at "
             f"{_money(row['Salary'])}, more than the projections have moved"
             + ("; the field's ownership lags the news" if row["late_news"] else "")
             + "."
+            + news
         )
-    if own is not None and own == own and own >= CHALK:
-        if gap == gap and gap >= CHALK_GAP:
+    if _is(own) and own >= CHALK:
+        if _is(cgap) and cgap >= CHALK_GAP:
+            if label == "AVOID":
+                return (
+                    f"Fading chalk: {_pct(own)} of the double-up plays him, but {calt} adds {cgap:.1f} more "
+                    f"points of Cash % at the price.{news}"
+                )
             return (
-                f"Fading chalk: {_pct(own)} of the double-up plays him, but {alt} adds {gap:.1f} more "
-                f"points of "
-                f"Cash % at the price."
+                f"Double-up chalk at {_pct(own)}, not core: {calt} adds {cgap:.1f} more points of Cash % at "
+                f"the price.{news}"
             )
-        tail = (
-            f" (the best alternative at the price, {alt}, is within {gap:.1f} points)"
-            if gap == gap and alt
-            else ""
-        )
-        return f"Double-up chalk: {_pct(own)} owned and no clearly better {pos} at his price{tail}."
+        if _is(cgap) and calt:
+            if abs(cgap) < GAP_EPS:
+                side = f"he matches the best non-chalk alternative, {calt}"
+            elif cgap < 0:
+                side = f"he beats the best non-chalk alternative, {calt}, by {-cgap:.1f} points"
+            else:
+                side = f"the best non-chalk alternative, {calt}, is only {cgap:.1f} points better"
+            return (
+                f"Double-up chalk: {_pct(own)} owned and no clearly better {pos} at his price ({side}).{news}"
+            )
+        return f"Double-up chalk: {_pct(own)} owned and no non-chalk {pos} at his price.{news}"
     if label in ("CORE", "PLAY"):
         d = _driver(contribs, up=True)
         if d == "floor":
             p10 = row["floor"] * row["Salary"] / 1000
-            return f"Safe floor for {_money(row['Salary'])}: a 10th percentile of {p10:.1f} points."
+            return f"Safe floor for {_money(row['Salary'])}: a 10th percentile of {p10:.1f} points.{news}"
         if d == "value":
-            return f"Projection per dollar: {row['value']:.2f} points per $1K at {_money(row['Salary'])}."
+            return (
+                f"Projection per dollar: {row['value']:.2f} points per $1K at {_money(row['Salary'])}.{news}"
+            )
         return (
             f"Among the best Cash % at {pos} for his price ({_money(row['Salary'])}, "
-            f"{row['cash_raw']:.0f}% in his best slot)."
+            f"{row['cash_raw']:.0f}% in his best slot).{news}"
         )
-    if label == "AVOID":
-        if alt and gap == gap:
-            return f"Costs {gap:.1f} points of Cash % against {alt} at the same price."
-        d = _driver(contribs, up=False)
-        if d == "own":
-            return f"Popular for what he adds: {_pct(own)} of the double-up, below-par Cash % for his price."
-        return f"Low Cash % for his price at {pos} ({_money(row['Salary'])})."
+    if label == "AVOID":  # `cash_labels` only says AVOID when an alternative beats him: gap > 0
+        return f"Costs {gap:.1f} points of Cash % against {alt} at the same price.{news}"
     driver = CASH_DRIVER_TEXT.get(_driver(contribs, up=True), "middle of the position")
-    return f"{driver[0].upper()}{driver[1:]}: neither a core play nor a fade."
+    return f"{driver[0].upper()}{driver[1:]}: neither a core play nor a fade.{news}"
 
 
-def gpp_reason(row: pd.Series, label: str, contribs: Mapping[str, float], record: str) -> str:
+def gpp_reason(
+    row: pd.Series, label: str, contribs: Mapping[str, float], fade: FadeEffect | None = None
+) -> str:
     own, opt = row["gpp_own"], row["opt_pct"]
     late = (
         " The field's ownership lags the news: expect him to run above the shown number."
         if row["late_news"]
         else ""
     )
-    if row["fade"] > 0:
-        return (
-            record or "FADE↓: a tight end scoring well above his usage, which Model Check has seen fall back"
-        )
+    head = (
+        f"{fade.label()} applied: "
+        if fade is not None and row.get("fade", 0) > 0 and row.get("fade_pts", 0) < 0
+        else ""
+    )
+    news = _news_tail(row)
     if row["bump"] > 0 and label in ("TARGET", "LEVERAGE"):
         return (
-            f"{row['bump_from']} OUT: takes about +{row['bump']:.1f} points of his work; the field's "
-            f"projections "
-            f"lag.{late}"
+            f"{head}{row['bump_from']} OUT: takes about +{row['bump']:.1f} points of his work; the field's "
+            f"projections lag.{late}{news}"
         )
     share = f"{_pct(own)} owned, in {_pct(opt)} of simulated top-1% lineups"
     if label == "TARGET":
-        return f"Top ceiling at fair ownership: {share}.{late}"
+        return f"{head}Top ceiling at fair ownership: {share}.{late}{news}"
     if label == "LEVERAGE":
-        return f"Under-owned for his ceiling: {share}.{late}"
+        return f"{head}Under-owned for his ceiling: {share}.{late}{news}"
     if label == "FADE":
-        return f"Over-owned for his ceiling: {share}."
-    return f"In {_pct(opt)} of simulated top-1% lineups at {_pct(own)} owned: about his ownership."
+        return f"{head}Over-owned for his ceiling: {share}.{news}"
+    return (
+        f"{head}In {_pct(opt)} of simulated top-1% lineups at {_pct(own)} owned: neither a target nor a "
+        f"fade.{news}"
+    )
+
+
+# ---------------------------------------------------------------------------------------------------------
+# M1.6: a label never contradicts its own numbers
+# ---------------------------------------------------------------------------------------------------------
+
+_NUM = r"(-?\d+(?:\.\d+)?)"
+CASH_PLAY_WORDS = (
+    "Among the best",
+    "Safe floor",
+    "Projection per dollar",
+    "takes about +",
+    "no clearly better",
+)
+CASH_FADE_WORDS = ("Costs ", "Fading chalk", "now costs", "Low Cash %", "Popular for what he adds")
+
+
+def contradictions(c: Mapping) -> list[str]:
+    """Every way a call (a `call_dict` or a saved record's call) contradicts its own reason or the label
+    rules; [] when it agrees. Reads the numbers in the reason line itself, so it works on records saved
+    before M1.6 too (the Week page's hold-back, `week_views`)."""
+    import re
+
+    out: list[str] = []
+    cash, why = str(c.get("cash") or ""), str(c.get("cash_reason") or "")
+    own = num(c.get("cash_own"))
+    for pattern, what in (
+        (rf"Costs {_NUM} points", "Costs"),
+        (rf"adds {_NUM} more", "adds"),
+        (rf"now {_NUM} points of Cash % behind", "behind"),
+        (rf"now costs {_NUM} points", "now costs"),
+        (rf"by {_NUM} points", "beats by"),
+        (rf"is only {_NUM} points better", "only better"),
+    ):
+        for m in re.finditer(pattern, why):
+            if float(m.group(1)) <= 0:
+                out.append(f"cash reason says '{what} {m.group(1)}': not a positive gap")
+    if cash == "AVOID":
+        if any(w in why for w in CASH_PLAY_WORDS):
+            out.append("cash AVOID with a reason that says play him")
+        gap = num(c.get("alt_gap"))
+        if "alt_gap" in c and not (gap is not None and gap >= GAP_EPS):
+            out.append("cash AVOID though no alternative at his price has a better Cash %")
+    if cash in ("CORE", "PLAY") and any(w in why for w in CASH_FADE_WORDS):
+        out.append(f"cash {cash} with a reason that says fade him")
+    if own is not None and own >= CHALK and "chalk_gap" in c:
+        cgap = num(c.get("chalk_gap"))
+        beaten_ = cgap is not None and cgap >= CHALK_GAP
+        if cash == "CORE" and beaten_:
+            out.append("chalk CORE though a non-chalk player at his price beats him by the chalk gap")
+        if cash != "CORE" and not beaten_:
+            out.append("chalk not CORE though no non-chalk player at his price beats him by the chalk gap")
+    gpp, gwhy = str(c.get("gpp") or ""), str(c.get("gpp_reason") or "")
+    m = re.search(r"(\d+)% owned, in (\d+)% of simulated top-1%", gwhy)
+    m2 = re.search(r"In (\d+)% of simulated top-1% lineups at (\d+)% owned", gwhy)
+    shown = (
+        (float(m.group(1)), float(m.group(2)))
+        if m
+        else (float(m2.group(2)), float(m2.group(1)))
+        if m2
+        else None
+    )
+    lev = num(c.get("lev"))
+    if gpp == "FADE":
+        if "Under-owned" in gwhy or "Top ceiling" in gwhy:
+            out.append("GPP FADE with a reason that says play him")
+        if shown and shown[1] > shown[0]:
+            out.append(
+                f"GPP FADE though his top-1% share {shown[1]:.0f}% is above his {shown[0]:.0f}% ownership"
+            )
+        if lev is not None and lev >= 0 and "lev" in c:
+            out.append("GPP FADE with a top-1% share at or above his ownership")
+    if gpp == "LEVERAGE":
+        if "Over-owned" in gwhy:
+            out.append("GPP LEVERAGE with a reason that says fade him")
+        if shown and shown[1] < shown[0]:
+            out.append(
+                f"GPP LEVERAGE though his top-1% share {shown[1]:.0f}% is below his {shown[0]:.0f}% ownership"
+            )
+    if gpp == "TARGET" and "Over-owned" in gwhy:
+        out.append("GPP TARGET with a reason that says fade him")
+    return out
+
+
+HOLD_TEXT = "no call: label under review"
+
+
+def held_back(c: Mapping, kind: str) -> bool:
+    """M1.6, until the new labels clear the bar: the Week page shows no cash AVOID on a `CHALK`+ CashOwn
+    player, and no label whose reason contradicts it (`contradictions`)."""
+    label = str(c.get(kind) or "")
+    if kind == "cash" and label == "AVOID" and (num(c.get("cash_own")) or 0) >= CHALK:
+        return True
+    bad = contradictions(c)
+    prefix = "cash" if kind == "cash" else "GPP"
+    return any(b.startswith(prefix) or b.startswith("chalk") and kind == "cash" for b in bad)
 
 
 @dataclass
@@ -903,27 +1233,25 @@ def make_calls(
     season: int,
     week: int,
     at: datetime,
-    fade_record: str = "",
+    fade: FadeEffect | None = None,
 ) -> Calls:
     """Score and label every row of `wf` (module docstring)."""
     frame = wf.frame.reset_index(drop=True)
     sc = scores(frame, weights)
-    c_lab, gap = cash_labels(frame, sc["cash_score"])
+    c_lab, alts = cash_labels(frame, sc["cash_score"])
     g_lab = gpp_labels(frame, sc["gpp_score"])
+
+    def name_of(j: int) -> str:
+        return f"{frame.at[j, 'Name']} ({_money(frame.at[j, 'Salary'])})" if j >= 0 else ""
+
     calls = []
     for i, row in frame.iterrows():
-        alt_name, alt_gap = "", gap.at[i]
-        if row["cash_value"] == row["cash_value"]:
-            same = frame[
-                (frame["Position"] == row["Position"])
-                & ((frame["Salary"] - row["Salary"]).abs() <= PRICE_BAND)
-                & (frame.index != i)
-            ]
-            if not same.empty and same["cash_value"].notna().any():
-                j = same["cash_value"].idxmax()
-                alt_name = f"{frame.at[j, 'Name']} ({_money(frame.at[j, 'Salary'])})"
-                if alt_gap != alt_gap:
-                    alt_gap = frame.at[j, "cash_value"] - row["cash_value"]
+        a = {
+            "alt": name_of(int(alts.at[i, "alt"])),
+            "alt_gap": num(alts.at[i, "alt_gap"]),
+            "chalk_alt": name_of(int(alts.at[i, "chalk_alt"])),
+            "chalk_gap": num(alts.at[i, "chalk_gap"]),
+        }
         cc = {f: float(sc.at[i, f"cash:{f}"]) for f in FEATURES["cash"]}
         gc = {f: float(sc.at[i, f"gpp:{f}"]) for f in FEATURES["gpp"]}
         calls.append(
@@ -938,10 +1266,10 @@ def make_calls(
                 gpp_own=num(row["gpp_own"]),
                 cash=c_lab.at[i],
                 cash_score=round(float(sc.at[i, "cash_score"]), 3),
-                cash_reason=cash_reason(row, c_lab.at[i], cc, alt_gap, alt_name, fade_record),
+                cash_reason=cash_reason(row, c_lab.at[i], cc, a, fade),
                 gpp=g_lab.at[i],
                 gpp_score=round(float(sc.at[i, "gpp_score"]), 3),
-                gpp_reason=gpp_reason(row, g_lab.at[i], gc, fade_record),
+                gpp_reason=gpp_reason(row, g_lab.at[i], gc, fade),
                 cash_value=num(row["cash_value"]),
                 opt_pct=num(row["opt_pct"]),
                 lev=num(row["lev"]),
@@ -949,6 +1277,13 @@ def make_calls(
                 bump=float(row["bump"]),
                 bump_from=str(row["bump_from"]),
                 late_news=bool(row["late_news"]),
+                alt=a["alt"],
+                alt_gap=a["alt_gap"],
+                chalk_alt=a["chalk_alt"],
+                chalk_gap=a["chalk_gap"],
+                fade_pts=float(row.get("fade_pts", 0.0) or 0.0),
+                qb=float(row.get("qb", 0.0) or 0.0),
+                qb_from=str(row.get("qb_from", "") or ""),
             )
         )
     notes = [
@@ -957,6 +1292,12 @@ def make_calls(
         if weights.through
         else "weights: the prior (nothing fitted yet)",
     ]
+    if fade is not None:
+        notes.append(
+            f"{fade.label()} taken off every FADE↓ projection ({fade.weeks}, n={fade.n})"
+            if fade.applies
+            else f"{FADE_TOKEN}: record thin or missing (n={fade.n}), no projection moved"
+        )
     if wf.news.bumps:
         moved = [b for b in wf.news.bumps if b.applied > 0]
         notes.append(
@@ -966,6 +1307,12 @@ def make_calls(
                 if moved
                 else ""
             )
+        )
+    qbs = [c for c in calls if c.qb]
+    if qbs:
+        notes.append(
+            f"news: {len(qbs)} QB downgrade(s) applied: "
+            + ", ".join(f"{c.name} {c.qb:+.1f}" for c in qbs[:6])
         )
     return Calls(season, week, at, calls, weights.through, notes)
 
@@ -1189,16 +1536,31 @@ def typed_cash_line(season: int, week: int):  # noqa: ANN201 - sim_inputs.CashLi
         return sim_inputs.cash_line_from_results([], [], before_week=week)
 
 
-def fade_record_line(season: int, data_dir: Path | None = None) -> str:
-    """Model Check's record for `FADE↓`, in one line (`week_plays.record_line`)."""
-    from dfs import week_inputs, week_plays
+def live_fade(season: int, data_dir: Path | None = None) -> FadeEffect:
+    """FADE↓'s measured effect from Model Check's signal table (every scored week so far: all before this
+    week). No table: no effect."""
+    from dfs import week_inputs
 
     try:
         table, weeks = week_inputs.load_signal_table(data_dir or paths.DATA_DIR, season)
-    except Exception:  # noqa: BLE001
-        return ""
-    line = week_plays.record_line(FADE_TOKEN, table, weeks)
-    return f"{line}: Model Check says these fall back to their usage."
+    except Exception:  # noqa: BLE001 - a missing table moves nothing
+        return FadeEffect()
+    return FadeEffect.from_record(table.get(FADE_TOKEN), weeks)
+
+
+def live_games(week: int, data_dir: Path | None = None) -> list[dict]:
+    """The per-game usage rows `news_context` reads (`usage_weeks.csv`, else `player_log.csv`), games before
+    `week` only."""
+    from dfs import week_inputs
+
+    current = (data_dir or paths.DATA_DIR) / "current"
+    try:
+        games = week_inputs._read_csv(current / "usage_weeks.csv") or week_inputs._read_csv(
+            current / "player_log.csv"
+        )
+    except Exception:  # noqa: BLE001 - no games: no QB news
+        return []
+    return [g for g in games or [] if (num(g.get("Wk")) or 0) < week]
 
 
 def compute_live(
@@ -1221,6 +1583,7 @@ def compute_live(
     weights = load_weights(season, before_week=week, data_dir=data_dir)
     snaps = edge_snapshots(season, week, now)
     gone = carried_out(season, week)
+    fade = live_fade(season, data_dir)
     wf = week_features(
         edge,
         typed_cash=typed_cash_line(season, week),
@@ -1229,10 +1592,10 @@ def compute_live(
         field_model=stacks_inputs.load_field_model(),
         own_lag=weights.own_lag if weights.own_lag.n else None,
         carried=gone,
+        games=live_games(week, data_dir),
+        fade=fade,
     )
-    calls = make_calls(
-        wf, weights, season=season, week=week, at=now, fade_record=fade_record_line(season, data_dir)
-    )
+    calls = make_calls(wf, weights, season=season, week=week, at=now, fade=fade)
     if save_record:
         rec = save(calls, data_dir=data_dir)
     else:

@@ -204,3 +204,60 @@ def test_a_traded_player_keeps_his_games_when_only_his_name_matches(tmp_path):
     games = [{"NameKey": "wr moved", "Name": "Wr Moved", "Team": "NYJ", "Position": "WR", "Wk": 1, "Tgt": 5}]
     data = week_views.usage_data(_inp(tmp_path, rows, usage_weeks=games))
     assert "id-Wr Moved" in data["players"]
+
+
+def test_contradicted_and_chalk_avoid_labels_are_held_back_on_the_overview_and_the_model_view(tmp_path):
+    """M1.6, until the new labels clear the bar: no cash AVOID on a 30%+ CashOwn player and no label its own
+    reason contradicts; the page says "no call: label under review" instead, and the news chips stay."""
+    import copy
+
+    calls = copy.deepcopy(CALLS)
+    held = [
+        {  # Week 9's JSN: AVOID although his reason says he is ahead of Puka
+            "name": "Qb Alpha",
+            "position": "QB",
+            "team": "DAL",
+            "salary": 6000,
+            "calpts": 24.0,
+            "cash_own": 0.15,
+            "cash": "AVOID",
+            "cash_score": -0.5,
+            "cash_reason": "Costs -5.4 points of Cash % against Qb Beta ($5,000) at the same price.",
+            "gpp": "FADE",
+            "gpp_score": -0.3,
+            "gpp_reason": "Over-owned for his ceiling: 8% owned, in 12% of simulated top-1% lineups.",
+            "bump": 0.0,
+            "bump_from": "",
+        },
+        {  # heavy chalk AVOID, reason consistent: held back anyway
+            "name": "Qb Beta",
+            "position": "QB",
+            "team": "IND",
+            "salary": 5000,
+            "calpts": 19.0,
+            "cash_own": 0.49,
+            "cash": "AVOID",
+            "cash_score": -0.9,
+            "cash_reason": "Fading chalk: 49% of the double-up plays him, but X ($5,200) adds 5.4 more "
+            "points of Cash % at the price.",
+            "gpp": "NEUTRAL",
+            "gpp_score": 0.0,
+            "gpp_reason": "",
+            "bump": 0.0,
+            "bump_from": "",
+        },
+    ]
+    calls["versions"][0]["calls"] = held + calls["versions"][0]["calls"][2:]
+    inp = _inp(tmp_path, calls=calls)
+    from dfs import plays
+    from dfs import week_board as wb
+
+    qb = " ".join(week_views.overview_rows(inp, wb.board(inp))["QB"]["fades"])
+    assert ">AVOID cash<" not in qb and ">FADE GPP<" not in qb
+    assert qb.count(plays.HOLD_TEXT) == 3  # Alpha's two labels, Beta's AVOID
+    html = week_views.model_section(inp)
+    avoid = html[html.index('data-label="AVOID"') : html.index('data-label="FADE"')]
+    assert "Costs -5.4" not in avoid and "Fading chalk" not in avoid
+    assert avoid.count(plays.HOLD_TEXT) == 2 and "2 under review" in avoid
+    page = week_page.render(inp)
+    assert 'id="news-data"' in page  # the news chips' data is still on the page

@@ -2431,15 +2431,18 @@ quarterback's stack is the two teammates in 25%+ of his top-1% lineups, plus a b
 - `value` is CalPts per $1K.
 - `floor` and `ceiling` are the draws' 10th and 90th percentiles per $1K.
 - `own` is CashOwn for cash and GppOwn for GPP. Either falls back to TFFB Own% before Plan D's model existed.
-- `fade` is 1 for the FADE↓ chip.
 - `bump` is the applied teammate bump divided by 5.
+- `qb` (M1.6) is the applied QB downgrade (below) divided by 5.
 - `tail` is the role's delta.
 
-Every input except fade, bump and tail is standardised within position and week.
+Every input except bump, qb and tail is standardised within position and week. Since M1.6 FADE↓ is not an
+input: its measured effect is in the projection the sim reads (below).
 
 **The score** is the sum of weight times input, with weights per kind and position. The weights come from a
-ridge fit shrunk toward the prior: `w = (X'X + 150 I)^-1 (X'y + 150 w0)`. The prior `w0` is cash sim +0.25, fade
--0.25, the rest 0; GPP lev +0.20, fade -0.25, the rest 0. Positions with fewer than 5 rows keep the prior.
+ridge fit shrunk toward the prior: `w = (X'X + 150 I)^-1 (X'y + 150 w0)`. The prior `w0` is cash sim +0.25, the
+rest 0; GPP lev +0.20, the rest 0 (the news inputs start at 0 because their measured points are already in the
+projection; a weight away from 0 is what the walk-forward fit finds the sim still misses). Positions with fewer
+than 5 rows keep the prior.
 - The fit uses only the relevant players: the top `RELEVANT_TOP` by CalPts, or owned 5%+ in either format.
 - The cash target is realized DK points per $1K. The GPP target is his share of the real top-1% lineups minus
   his real ownership, averaged over the week's GPPs of 700+ entries.
@@ -2447,19 +2450,42 @@ ridge fit shrunk toward the prior: `w = (X'X + 150 I)^-1 (X'y + 150 w0)`. The pr
 - Week N is always scored on weights fitted through week N-1, saved as
   `data/research/calls_weights/<season>-wkNN.json` (NN = the week fitted through).
 
-**Cash labels** (`plays.cash_labels`), per position by score:
-- The top `CORE_N` (QB 1, RB 2, WR 3, TE 1, DST 1) are CORE.
-- The next `PLAY_N` (2 / 4 / 6 / 2 / 2) are PLAY.
-- The bottom 30% of the relevant players still NEUTRAL are AVOID.
-- A player at CashOwn 30%+ is CORE unless the best `cash_value` at his position within $500 of his salary is
-  2.0+ points higher. The reason states that gap.
-- FADE↓ is AVOID.
+**Alternatives** (`plays.alternatives`, M1.6): a player's alternatives are the other players at his position
+within $500 of his salary with a `cash_value`. `alt_gap` is the best alternative's `cash_value` minus his;
+`chalk_gap` is the same over the NON-chalk alternatives only (CashOwn under 30%).
+
+**Cash labels** (`plays.cash_labels`), per position, in this order (M1.6):
+1. By score: the top `CORE_N` (QB 1, RB 2, WR 3, TE 1, DST 1) are CORE, the next `PLAY_N` (2 / 4 / 6 / 2 / 2)
+   PLAY.
+2. The chalk rule: a player at CashOwn 30%+ is CORE unless `chalk_gap` is 2.0+ points (a non-chalk player at
+   his price is clearly better). Two chalk players close in price never knock each other down. A chalk player
+   beaten that way is never CORE: a score CORE drops to PLAY.
+3. AVOID: the bottom 30% by score of the position's relevant players (counted within the position, after the
+   chalk rule) among those still NEUTRAL, and only a player with `alt_gap` of 0.05+ points (`GAP_EPS`: a
+   smaller gap reads 0.0). A player whose Cash % is better than or equal to every alternative's, or who has no
+   alternative, is never AVOID: he stays NEUTRAL, and the cut is not refilled.
+
+**FADE↓ as its measured effect** (`plays.FadeEffect`, Sam 2026-11-09): FADE↓ is no longer an override. Model
+Check's record for the signal (mean DK points against CalPts and the hit rate over the scored weeks BEFORE the
+week: the live calls read `results/signal_table_<season>.csv`, the backtest rebuilds it walk-forward with
+`results_signals.signal_report`) is added to the flagged player's CalPts before the simulation, so his
+Cash % and his labels come out of the corrected numbers. A thin record (under 30 flagged games,
+`results_analysis.is_thin`) moves nothing. The reason line says both: "FADE↓ (67% hit, -2.5 pts) applied;
+still beats his price alternatives by X points of Cash %" or "...; now costs Y points of Cash % against Z".
 
 **GPP labels** (`plays.gpp_labels`), per position:
 - TARGET is the top `TARGET_N` (2 / 3 / 4 / 2 / 2) by `opt_pct` among players with `lev >= -0.01`.
 - LEVERAGE is the next `LEVERAGE_N` by score with `lev > 0`.
-- FADE is the bottom 30% by score of those owned 8%+.
-- FADE↓ is FADE.
+- FADE is the bottom 30% by score of those owned 8%+, and only a player with `lev < 0` (his top-1% share below
+  his ownership: the reason says "over-owned"). FADE↓ is not an override (above).
+
+**No label contradicts its reason** (`plays.contradictions`, M1.6): every number in a reason line is checked
+against its label (a gap a reason calls a cost must be positive; an AVOID never has a play reason or a CORE /
+PLAY a fade reason; a chalk player is CORE exactly when no non-chalk player at his price beats him by 2.0+;
+a GPP FADE's top-1% share is below his ownership and a LEVERAGE's above). The backtest counts them over every
+call of every week and exits 1 on any. **The Week page holds back** (`plays.held_back`, until the new labels
+clear the bar): no cash AVOID on a 30%+ CashOwn player and no label its own reason contradicts; the Overview and
+Model vs sources show "no call: label under review" instead.
 
 **News** (`plays.week_news`):
 - A regular (Tgt% 15%+ or Rush% 30%+) listed OUT or Doubtful is news when he was not out on the week's first
@@ -2467,6 +2493,15 @@ ridge fit shrunk toward the prior: `w = (X'X + 150 I)^-1 (X'y + 150 w0)`. The pr
 - When exactly one such regular is out on a team, each teammate gets `teammate_bump.load_table()`'s
   `(absent role, his role)` points, minus however far his projection has already moved up since the last
   snapshot before the news, never below 0. The result is added to CalPts before the simulation.
+- **The QB downgrade** (`plays.qb_news`, M1.6): `news_context`'s "QB downgrade" fact (the starter of the team's
+  most recent game is OUT / IR / Doubtful now; DraftKings' `Avail`) on a pass catcher adds
+  `research/r8_qb_downgrade.load_table()`'s points for his position to CalPts before the simulation. R8
+  measured them on 2018-2025: 162 team-games where the regular starter (the previous game's starter, who
+  started 2+ of the last 3) missed the game, no regular pass catcher or back out, against games he started;
+  DK points minus UM's out-of-fold projection, demeaned within (position, season), game-clustered. Pass
+  catchers (WR + TE) -0.64 (SE 0.28; fit -0.44, test -0.83) ship to WR and TE; RBs (-0.40, halves disagree in
+  sign) get 0. UM reads the Vegas total, so the number is what a projection that already knows the market's
+  move still misses: it is added as measured, not netted against CalPts' own move.
 - News is late when ownership had already published before it. A late beneficiary's ownership is multiplied by
   `own_lag`: the geometric mean of real / shown ownership over earlier weeks' late beneficiaries, shrunk toward
   1 with 5 pseudo-players.

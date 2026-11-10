@@ -124,6 +124,15 @@ def calls_of(inp) -> list[dict]:
     return list((versions[-1] if versions else {}).get("calls") or [])
 
 
+def held(c: dict, kind: str) -> bool:
+    """M1.6's hold-back (`plays.held_back`): until the new labels clear the bar, no cash AVOID on a 30%+
+    CashOwn player and no label whose own reason contradicts it is shown; the page says
+    `plays.HOLD_TEXT` instead."""
+    from dfs import plays
+
+    return plays.held_back(c, kind)
+
+
 def calls_at(inp) -> str:
     """When the newest version was saved, in the page's ET format (the raw text when it is not a time)."""
     from datetime import datetime
@@ -191,9 +200,9 @@ def overview_rows(inp, board: wb.Board) -> dict[str, dict[str, list[str]]]:
         lev = _role_rows(rows, wb.UPSIDE)[:2]
         fades = [r for r in rows if r.fade][:2]
         avoid = [c for c in calls if c.get("position") == pos and c.get("cash") == "AVOID"]
-        avoid.sort(key=lambda c: num(c.get("cash_score")) or 0)
+        avoid.sort(key=lambda c: (held(c, "cash"), num(c.get("cash_score")) or 0))
         gfade = [c for c in calls if c.get("position") == pos and c.get("gpp") == "FADE"]
-        gfade.sort(key=lambda c: num(c.get("gpp_score")) or 0)
+        gfade.sort(key=lambda c: (held(c, "gpp"), num(c.get("gpp_score")) or 0))
         cell: dict[str, list[str]] = {
             "value": [
                 f"{_name(r.row)} {_money(r.row.get('Salary'))} · {_f(wb.per_k(r.row), 2)}/1K" for r in value
@@ -237,10 +246,18 @@ def fade_lines(fades: list[wb.BoardRow], avoid: list[dict], gfade: list[dict]) -
         key = (r.name, str(r.row.get("Team", "")))
         names[key] = _name(r.row)
         lines.setdefault(key, []).append('<span class="chip fade">FADE↓</span>')
-    for calls, tag in ((avoid, "AVOID cash"), (gfade, "FADE GPP")):
+    from dfs import plays
+
+    for calls, tag, kind in ((avoid, "AVOID cash", "cash"), (gfade, "FADE GPP", "gpp")):
         for c in calls:
             key = (c["name"], str(c.get("team", "")))
             names.setdefault(key, pn(c["name"], c.get("team", "")))
+            if held(c, kind):
+                lines.setdefault(key, []).append(
+                    f'<span class="chip held" title="The plays model (Shadow): this {e(tag)} label is held '
+                    f'back until the M1.6 labels clear the bar">{kind}: {e(plays.HOLD_TEXT)}</span>'
+                )
+                continue
             lines.setdefault(key, []).append(
                 f'<span class="chip shadow" title="The plays model (Shadow)">{tag}</span>'
             )
@@ -542,7 +559,9 @@ MODEL_HOW = (
     "source, n = how many rate him; hover a row for each source)."
 )
 CALLS_HOW = (
-    "The plays model's calls (Shadow: not proven): cash CORE / PLAY / AVOID from the sim's Cash % for the "
+    "The plays model's calls (Shadow: not proven). Until the M1.6 labels clear the bar, a cash AVOID on a 30%+ "
+    'CashOwn player and any label its own reason contradicts read "no call: label under review". '
+    "Cash CORE / PLAY / AVOID from the sim's Cash % for the "
     "price; GPP TARGET / LEVERAGE / FADE from the simulated top-1% share against GppOwn. A hit: CORE / PLAY "
     "at or above his position's median points per $1K, AVOID below it; TARGET / LEVERAGE a real top-1% share "
     "above his real ownership, FADE not. The backtest is M1's walk-forward rerun of Weeks 2 and 4-8; the live "
@@ -671,18 +690,34 @@ def _record_line(label: str, kind: str, record: dict | None) -> str:
     return " · ".join(parts)
 
 
-def _calls_block(inp, kind: str, label: str, record: dict | None, limit: int = 12) -> str:
-    calls = [c for c in calls_of(inp) if c.get(kind) == label]
+def _call_row(c: dict, kind: str) -> str:
+    from dfs import plays
+
     score = f"{kind}_score"
-    calls.sort(key=lambda c: num(c.get(score)) or 0, reverse=label not in ("AVOID", "FADE"))
-    rows = "".join(
+    if held(c, kind):
+        return (
+            f'<tr class="held" data-pos="{e(c.get("position", ""))}"><td>{pn(c["name"], c.get("team", ""))}</td>'
+            f"<td>{e(c.get('position', ''))}</td><td>{e(c.get('team', ''))}</td>"
+            f"<td>{_money(c.get('salary'))}</td><td>{_f(c.get('calpts'))}</td><td></td>"
+            f'<td class="why dim">{e(plays.HOLD_TEXT)}</td></tr>'
+        )
+    return (
         f'<tr data-pos="{e(c.get("position", ""))}"><td>{pn(c["name"], c.get("team", ""))}</td>'
         f"<td>{e(c.get('position', ''))}</td><td>{e(c.get('team', ''))}</td><td>{_money(c.get('salary'))}</td>"
         f"<td>{_f(c.get('calpts'))}</td><td>{_f(c.get(score), 2)}</td>"
         f'<td class="why">{e(c.get(f"{kind}_reason", ""))}</td></tr>'
-        for c in calls[:limit]
     )
+
+
+def _calls_block(inp, kind: str, label: str, record: dict | None, limit: int = 12) -> str:
+    calls = [c for c in calls_of(inp) if c.get(kind) == label]
+    score = f"{kind}_score"
+    calls.sort(key=lambda c: num(c.get(score)) or 0, reverse=label not in ("AVOID", "FADE"))
+    calls.sort(key=lambda c: held(c, kind))  # the calls that stand first, the held ones after them
+    rows = "".join(_call_row(c, kind) for c in calls[:limit])
+    n_held = sum(held(c, kind) for c in calls)
     more = f" (the top {limit} of {len(calls)})" if len(calls) > limit else ""
+    more += f"; {n_held} under review" if n_held else ""
     title = {"cash": "cash", "gpp": "GPP"}[kind]
     head = "".join(f"<th>{h}</th>" for h in ("Player", "Pos", "Team", "Salary", "CalPts", "Score", "Why"))
     return (
@@ -889,6 +924,7 @@ table.inj{font-size:12.5px;width:100%}table.inj td.prac{white-space:nowrap}
 table.mvs{font-size:12.5px}
 .calls-block h4{margin:10px 0 2px}.calls-block .record{margin:0 0 4px;font-size:12.5px}
 table.calls td.why{max-width:520px;font-size:12px}
+table.calls tr.held td{color:var(--dim)}.chip.held{background:transparent;border:1px dashed currentColor;opacity:.75}
 #cmp-tray{position:fixed;left:16px;bottom:16px;z-index:80;background:var(--card);border:1px solid var(--line);
   border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:8px 10px;display:flex;gap:6px;align-items:center;
   flex-wrap:wrap;max-width:calc(100vw - 32px);font-size:13px}
