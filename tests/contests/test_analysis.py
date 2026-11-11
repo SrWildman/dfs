@@ -310,7 +310,8 @@ def test_a_bad_slate_index_file_is_a_clear_failure_not_a_traceback(tmp_path):
     bad = tmp_path / "idx.csv"
     bad.write_text("season,week\n2025,6\n")
     result = invoke("--history", str(EXPORT), "--out", str(tmp_path / "out"), "--slate-index-file", str(bad))
-    assert result.exit_code == 1 and "needs column" in result.output and "Traceback" not in result.output
+    flat = " ".join(result.output.split())  # Rich wraps at the terminal width; a longer tmp path splits words
+    assert result.exit_code == 1 and "needs column" in flat and "Traceback" not in result.output
     bad.write_text("season,week,index\n2025,six,1.0\n")
     with pytest.raises(ValueError, match="must all be numbers"):
         slate_index.read_index_file(bad)

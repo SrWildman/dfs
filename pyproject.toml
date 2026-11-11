@@ -46,6 +46,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root on sys.path, so `from tests.<module> import ...` resolves under a bare `pytest` (CI) too.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 110
