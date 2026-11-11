@@ -1243,8 +1243,8 @@ on a loaded machine can differ slightly; Top 1% has real lines in three weeks on
 `dfs lineups late-swap --field <file>|auto` (`dfs.late_swap_field`) scores swaps against the cash and top-1% lines of a LIVE
 contest, from the standings export Sam downloads by hand after the 1 pm lock: every field lineup's points so far plus its open
 players drawn from the same correlated simulation as his own lineup, the line read per draw at the contest's last paid place and
-at the top 1%. Opt-in; without it nothing changes. The back-test is `python -m dfs.late_swap_retro` (a quarter of an hour for the
-28 contests); this is what it said.
+at the top 1%. Opt-in; without it nothing changes. The back-test was `python -m dfs.late_swap_retro` (a quarter of an hour for the
+28 contests; removed in batch F2, last on main at `42e3362`); this is what it said.
 
 **Method.** At the Weeks 4-6 locks (Sunday 1 pm ET) every game already kicked off is final with its ACTUAL points (the standings'
 `FPTS`); later games are drawn from the last pre-lock EdgeRaw snapshot. 7,617 test lineups: up to 300 sampled from each of the

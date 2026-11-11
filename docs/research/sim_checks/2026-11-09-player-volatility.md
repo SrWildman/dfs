@@ -1,5 +1,7 @@
 # Plan S, check 1: per-player volatility (2026-11-09)
 
+*The script (`sim/volatility_check.py`) was removed in removal batch F2 (Nov 2026); it is last on main at `42e3362`.*
+
 **Verdict: nothing clears the bar. No `[sim] player_volatility` switch ships, so no Flashback was run (Sam, 2026-11-09:
 "don't ship" the one near miss).**
 

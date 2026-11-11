@@ -1,5 +1,7 @@
 # Plan S, check 3: ranking GPP builds by Top 1% share (2026-11-09)
 
+*The script (`sim/share_rank_retro.py` and `sim/share_dupes_flag.py`) was removed in removal batch F2 (Nov 2026); it is last on main at `42e3362`.*
+
 **Verdict: not proven, in either arm.** Neither arm comes near the house bar: more than 2 SE of the weekly paired
 difference AND a win in most weeks.
 
