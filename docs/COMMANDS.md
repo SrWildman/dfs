@@ -359,6 +359,21 @@ Logs one contest's actual per-player ownership into the durable local ownership 
 | `--week INT` | Defaults to the current NFL week. |
 | `--season INT` | Defaults to the current season. |
 
+### `dfs news changes`
+
+Print a week's rows from the news change log, oldest first: when each change was seen (Eastern; the time of the sync that saw it, not of the news itself), who, the field, and the value before and after. Status changes by default. Read-only: it reads `data/news/changes.csv` and nothing else.
+
+| Option | What it does |
+|---|---|
+| `--week INT` | The NFL week (default: the current one). |
+| `--season INT` | The season (default: the current one). |
+| `--field STR` | Which fields, comma-separated: status, proj_tffb, proj_sleeper, proj_fantasypros, proj_espn, proj_props, proj_agg, calpts, own_tffb, cash_own, gpp_own, spread, total, or all. Default: `status`. |
+| `--player STR` | Only names containing this text. |
+
+### `dfs news backfill`
+
+Rebuild the news change log (`data/news/changes.csv`) from every saved EdgeRaw snapshot (`data/raw/edge/`): each snapshot against the one before it, one row per changed field. Append-only and safe to run twice: a snapshot already in the log is skipped, so a second run adds nothing. `dfs sync`, `dfs sync --live` and `dfs lineups late-swap --refresh-injuries` keep the log current by themselves; run this once to load the season so far, or after a sync warned that the log was not updated. Reads and writes files only: no sheet.
+
 ### `dfs lineups clear`
 
 Clear last week's typed-in lineup data (Lineups/Player Pool name columns, DK Upload) so the sheet's ready for a new week.

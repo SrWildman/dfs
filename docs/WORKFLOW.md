@@ -343,6 +343,12 @@ kept, a column never loses more than 3 values at once, and when DraftKings moves
 main slate stays (only the unstarted players' Status is refreshed, by name). Each kept value is printed under the sync table.
 Late swap itself never syncs: it reads the last sync's EdgeRaw (`data/current/edge.csv`) and ESPN directly.
 
+**What changed, and when: the news change log.** Every sync (plain and `--live`) appends what changed since the sync before it
+to `data/news/changes.csv`: a player's status, each source's projection, CalPts, ownership, and each team's spread and total, one
+row per changed value with the time the sync saw it. `dfs lineups late-swap --refresh-injuries` adds ESPN's escalations. Nothing
+in the file is ever rewritten. `dfs news changes` prints the week's status changes (`--field all` for everything, `--player` for
+one name); `dfs news backfill` loads the file from the saved snapshots. It is a local record: nothing on the sheet reads it yet.
+
 After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `Top 1%` (the chance of the top-1% line;
 green at 2% or more) on every built lineup's Total row (set its Cash/GPP marker in column A) and a
 portfolio line (first lineup's `Remaining` row): the chance at least one lineup cashes, the expected number that cash and

@@ -294,6 +294,8 @@ MORE_LABELS = {
     "dfs contests dupes": "Calibrate the expected-copies estimate on your standings",
     "dfs week review": "Review a closed week: what won, your process scorecard, exposure, our numbers",
     "dfs ownership log": "Log a contest's actual ownership",
+    "dfs news changes": "What changed between syncs this week (status by default), and when",
+    "dfs news backfill": "Load the news change log from the saved snapshots (no sheet)",
     "dfs lineups clear": "Clear last week's typed-in lineups",
     "dfs sim fit": "Rebuild the simulator's player-correlation table (needs model fetch)",
     "dfs sim backtest": "Back-test the simulator on past seasons (slow)",

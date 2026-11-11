@@ -319,6 +319,15 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   is `entries.suggest_pick`, Untested, never "Best in", never the portfolio plan), and the **practice trend** beside every
   Q / D tag (board, Explorer, drawer; `practice.py` from `data/raw/nflverse_injuries/`). The Cockpit gains blocks 8
   (inactives and pivots) and 9 (practice) below the first seven, and a plain `dfs sync` refreshes it too.
+- **The news change log** (`news_log.py` pure, `news_store.py` I/O; blueprint Phase C item 1): every `dfs sync`, `dfs sync --live` and
+  `dfs week new` diffs the EdgeRaw snapshot it just saved (`data/raw/edge/`) against the one before it and appends one row per changed
+  field to `data/news/changes.csv` (`at, season, week, player_id, name, position, team, field, before, after, source, snapshot`; fields
+  `status`, `proj_tffb` / `proj_sleeper` / `proj_fantasypros` / `proj_espn` / `proj_props` / `proj_agg`, `calpts`, `own_tffb`,
+  `cash_own`, `gpp_own`, and per team `spread` / `total`); `dfs lineups late-swap --refresh-injuries` adds ESPN's escalations (source
+  `espn_injuries`, once each). **Append-only**: the file is only ever opened for append (a test checks the earlier bytes after every
+  write). A new slate's first snapshot is a baseline (no rows); `at` is when the sync SAW the change, not when the news broke. A failure
+  warns and the command carries on. `dfs news backfill` loads every snapshot the log does not hold yet (idempotent; fills a hole a failed
+  hook left); `dfs news changes [--week N] [--field status|...|all] [--player text]` prints a week's rows (read-only). No sheet.
 - `dfs contests dupes [--weeks 4,5,6] [--dry-run]` -- refits the copies estimate on the saved standings (each week held
   out, ownership too), prints the error, saves `data/model_cache/dup_calibration.json`; files only. `week close` reruns it.
 - **Plan K2, the learning loop** (`week_learn.py` on the page; `dfs week review [--week N]`, `week_review.py`, which

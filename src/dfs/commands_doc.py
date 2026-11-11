@@ -131,6 +131,8 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs contests dupes",
             "dfs week review",
             "dfs ownership log",
+            "dfs news changes",
+            "dfs news backfill",
             "dfs lineups clear",
             "dfs auth tffb",
             "dfs auth dk",
