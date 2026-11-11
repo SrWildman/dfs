@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from test_news_log import edge
 
 from dfs import news_log, news_store, paths
-from tests.test_news_log import edge
 
 SAT_NIGHT = "20261107T230109Z"
 SUN_EARLY = "20261108T165702Z"

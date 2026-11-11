@@ -1,12 +1,12 @@
 """`dfs news backfill` and `dfs news changes`: files only."""
 
 import pytest
+from test_news_store import SUNDAY, save_snapshots
 from typer.testing import CliRunner
 
 from dfs import news_store
 from dfs.cli import app
 from dfs.news_cli import _local, parse_fields
-from tests.test_news_store import SUNDAY, save_snapshots
 
 runner = CliRunner()
 
