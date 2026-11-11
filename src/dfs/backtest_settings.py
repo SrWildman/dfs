@@ -66,7 +66,6 @@ from dfs import suggest_state
 
 # Modules that call `register` at import. Sessions H and I add theirs here (one line each).
 PLUGIN_MODULES: tuple[str, ...] = (
-    "dfs.sim.shrink_flag",
     "dfs.sim.own_error_flag",
     "dfs.sim.portfolio_flag",
     "dfs.plays_flag",
