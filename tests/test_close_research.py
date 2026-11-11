@@ -23,14 +23,14 @@ def _result(key, verdict="ok", **kw):
 
 
 def test_the_settings_files_live_in_the_repo_and_load_with_their_flags():
-    names = {}
-    for stem in (close_research.BASELINE, *close_research.CANDIDATES):
-        path = close_research.SETTINGS_DIR / f"{stem}.toml"
-        assert path.exists(), path
-        settings = backtest_settings.load(path)
-        names[stem] = settings.name
-        assert [f.name for f in settings.active_flags()] == ([] if stem == "today" else [stem])
-    assert len(set(names.values())) == len(names)  # a comparison needs distinct names
+    for candidate, baseline in close_research.CALLS_PAIRS:
+        loaded = {}
+        for stem in (candidate, baseline):
+            path = close_research.SETTINGS_DIR / f"{stem}.toml"
+            assert path.exists(), path
+            loaded[stem] = backtest_settings.load(path)
+        assert loaded[baseline].active_flags() == [] and loaded[candidate].active_flags()
+        assert loaded[candidate].name != loaded[baseline].name  # a comparison needs distinct names
 
 
 def test_a_stage_that_raises_still_leaves_a_failed_result(dirs, monkeypatch):
@@ -46,7 +46,7 @@ def test_a_stage_that_raises_still_leaves_a_failed_result(dirs, monkeypatch):
 
 def test_stages_run_side_by_side_and_a_late_one_is_stopped_at_the_deadline(dirs, monkeypatch):
     def command(name, season, week, out):
-        if name == "backtest":  # never finishes on its own
+        if name == "calls_flashback":  # never finishes on its own
             return [sys.executable, "-c", "import time; time.sleep(60)"]
         body = (
             "import json, sys; from dfs.close_research import StageResult; from dataclasses import asdict; "
@@ -59,14 +59,14 @@ def test_stages_run_side_by_side_and_a_late_one_is_stopped_at_the_deadline(dirs,
     lines = []
     start = time.monotonic()
     results = close_research.run_stages(
-        2026, 7, ("stacks", "backtest", "own_error"), deadline_minutes=0.05, log=lines.append
+        2026, 7, ("stacks", "calls_flashback", "calls"), deadline_minutes=0.05, log=lines.append
     )
     assert time.monotonic() - start < 30
     by_key = {r.key: r for r in results}
     assert by_key["stacks"].status == "ok" and by_key["stacks"].verdict == "fine"
-    assert by_key["own_error"].status == "ok"
-    assert by_key["backtest"].status == "timeout" and "deadline" in by_key["backtest"].verdict
-    assert [r.key for r in results] == ["stacks", "backtest", "own_error"]  # stage order, not finish order
+    assert by_key["calls"].status == "ok"
+    assert by_key["calls_flashback"].status == "timeout" and "deadline" in by_key["calls_flashback"].verdict
+    assert [r.key for r in results] == ["stacks", "calls_flashback", "calls"]  # stage order, not finish order
 
 
 def test_a_stage_that_dies_without_a_result_is_reported_not_raised(dirs, monkeypatch):

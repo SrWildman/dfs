@@ -5759,7 +5759,7 @@ def week_close(
         False,
         "--research",
         help="After the close, run Monday's offline studies unattended (research refresh, the stacks retro, "
-        "the ownership-uncertainty backtests, the sim retro; under 45 minutes) and write one report, "
+        "the plays model's calls and their Flashback bans; under 45 minutes) and write one report, "
         "docs/research/weekly/<season>-wk<NN>-close.md. Fail-soft: the close itself is already done.",
     ),
 ) -> None:

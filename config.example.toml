@@ -137,12 +137,6 @@ gpp_top1_offset = 63.2
 # fractions, piecewise-linear, anchored at (0, 0) and (1, 1). Empty = identity. Double-ups are chalkier.
 # double_up_own_curve = [[0.05, 0.05], [0.15, 0.39]]
 # gpp_own_curve = []
-# Ownership as a forecast (shadow, off; docs/SIM.md "Ownership uncertainty"; needs data/model_cache/own_error.json).
-# ownership_mean: the field's ownership is the fitted mean (Own% through the stake / field-size curve), no draws.
-# ownership_uncertainty: the same mean, and the field's ownership drawn per simulation around it.
-# ownership_mean = false
-# ownership_uncertainty = false
-# ownership_scenarios = 200
 # calibrated_cash_offset: the Cash % SHOWN on Lineups and Suggested is measured against the field average + the offset
 # `dfs research refresh` calibrates on your real double-ups (data/model_cache/du_line.json; docs/SIM.md "The double-up
 # cash line"). Display only: builds, late swap and rankings keep today's line. The refresh report says when it clears
