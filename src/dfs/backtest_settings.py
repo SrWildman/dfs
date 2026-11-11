@@ -3,7 +3,7 @@
 A settings file is TOML; every key is optional and a missing one is today's default (what a plain
 `dfs lineups suggest` does):
 
-    name = "ownership uncertainty on"      # label in the report (default: the file name)
+    name = "no AVOID calls"                # label in the report (default: the file name)
     pool = "auto"                          # "auto": Sam's saved pool where there is one (`pool_store`), else
                                            # the constructed one; "constructed": always the constructed pool
 
@@ -21,12 +21,11 @@ A settings file is TOML; every key is optional and a missing one is today's defa
     # reads a built tab: the backtest names them as "not applied" rather than guess
 
     [flags]                                # named switches other sessions register (below)
-    ownership_uncertainty = true
     portfolio = { objective = "robust", wide = 8 }
 
 **The registry.** A flag is a `Flag`: a name, one line of doc, and any of four optional hooks, registered
-with `register(Flag(...))` from the module that implements it (session H registers `ownership_mean` and
-`ownership_uncertainty`, session I `portfolio`) so `dfs backtest` never needs editing for a new switch:
+with `register(Flag(...))` from the module that implements it (session I registers
+`portfolio`) so `dfs backtest` never needs editing for a new switch:
 
 - `prepare(ctx, value) -> ctx`: change what the builder is given (the projections, the specs, the lines or the
   simulated field in `ctx.lines`), e.g. swap in a field that draws ownership per simulation;
@@ -67,7 +66,6 @@ from dfs import suggest_state
 # Modules that call `register` at import. Sessions H and I add theirs here (one line each).
 PLUGIN_MODULES: tuple[str, ...] = (
     "dfs.sim.shrink_flag",
-    "dfs.sim.own_error_flag",
     "dfs.sim.portfolio_flag",
     "dfs.plays_flag",
     "dfs.sim.share_dupes_flag",

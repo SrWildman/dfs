@@ -122,16 +122,15 @@ def research_close_report(
     only: str = typer.Option(
         None,
         "--only",
-        help="Comma-separated stages: refresh, stacks, backtest, own_error, calls, calls_flashback "
-        "(default: all six).",
+        help="Comma-separated stages: refresh, stacks, calls, calls_flashback (default: all four).",
     ),
     deadline: float = typer.Option(
         45.0, "--deadline", help="Minutes after which a stage still running is stopped."
     ),
 ) -> None:
     """Monday's offline studies and their one report, on their own (`dfs week close --research` runs the
-    same after the close): research refresh, the stacks retro, the ownership-uncertainty backtests against
-    today and the sim retro. Reads no sheet and writes none; the stages run side by side, each with a log
+    same after the close): research refresh, the stacks retro, the plays model's calls and their Flashback
+    bans against today. Reads no sheet and writes none; the stages run side by side, each with a log
     under data/research/close/. Writes docs/research/weekly/<season>-wk<NN>-close.md and prints a 15-line
     summary."""
     from dfs import close_research

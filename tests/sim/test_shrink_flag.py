@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -39,7 +38,7 @@ def weeks_with_actuals(k=3):
 
 def test_the_plugin_registers_both_shrink_switches():
     assert "dfs.sim.shrink_flag" in bs.PLUGIN_MODULES and bs.load_plugins() == []
-    assert {"shrink_salary", "shrink_tffb", "ownership_uncertainty_gpp"} <= set(bs.FLAGS)
+    assert {"shrink_salary", "shrink_tffb"} <= set(bs.FLAGS)
 
 
 def test_a_week_is_shrunk_toward_the_salary_line_with_weights_from_earlier_weeks():
@@ -75,31 +74,3 @@ def test_no_earlier_weeks_leaves_the_context_alone(monkeypatch):
     ctx = SimpleNamespace(week=1, edge=edge(), specs="s", lines="l", notes=[])
     out = sf.prepare(ctx, True, prior="tffb")
     assert out.specs == "s" and out.lines == "l" and "no earlier weeks" in out.notes[0]
-
-
-@dataclass
-class Ctx:
-    week: int
-    settings: bs.Settings
-    lines: str
-    notes: list = field(default_factory=list)
-
-
-def test_the_gpp_only_ownership_flag_builds_cash_on_the_plain_field_and_gpp_on_the_drawn_one(monkeypatch):
-    from dfs import backtest
-    from dfs.sim import own_error_flag as flag
-
-    seen = []
-
-    def inner(c):
-        seen.append((c.settings.cash, c.settings.gpp, c.lines))
-        return [f"cash:{c.settings.cash}"] if c.settings.cash else [f"gpp:{c.settings.gpp}"]
-
-    ctx = Ctx(6, bs.Settings(cash=3, gpp=12), "plain")
-    monkeypatch.setattr(backtest, "ensure_sim", lambda c: c)
-    monkeypatch.setattr(flag, "prepare", lambda c, v, draws=True: replace(c, lines="drawn"))
-    assert flag.build_gpp_only(ctx, True, inner) == ["cash:3", "gpp:12"]
-    assert seen == [(3, 0, "plain"), (0, 12, "drawn")]
-    seen.clear()
-    assert flag.build_gpp_only(ctx, False, inner) == ["cash:3"]  # off: today's builder, untouched
-    assert seen == [(3, 12, "plain")]

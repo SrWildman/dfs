@@ -190,13 +190,6 @@ class SimLinesConfig(BaseModel):
     double_up_own_curve: list[tuple[float, float]] = []
     gpp_own_curve: list[tuple[float, float]] = []
     own_coverage: float = Field(SIM_OWN_COVERAGE, gt=0.0, le=1.0)
-    # Ownership as a forecast (shadow, both default off; docs/SIM.md "Ownership uncertainty"; the model is
-    # `data/model_cache/own_error.json`). `ownership_mean`: the field's ownership is the fitted mean (TFFB's
-    # Own% through the stake / size curve) instead of Own% as is. `ownership_uncertainty`: that mean AND the
-    # ownership drawn per simulation around it (implies the mean)
-    ownership_mean: bool = False
-    ownership_uncertainty: bool = False
-    ownership_scenarios: int = Field(200, ge=1, le=5000)
     # The SHOWN Cash % against field average + the offset `dfs research refresh` calibrates on his real
     # double-ups (`data/model_cache/du_line.json`; docs/SIM.md "The double-up cash line"), instead of +
     # `double_up_offset`. Display only (Lineups and Suggested): builds, late swap and every ranking keep

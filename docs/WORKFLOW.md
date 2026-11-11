@@ -375,7 +375,7 @@ dfs week close --research
 ```
 
 `--research` is the Monday option: once the close is done it runs the weekly offline studies (research refresh, the stacks retro, the
-ownership-uncertainty backtests, the sim retro) side by side and writes ONE report, `docs/research/weekly/<season>-wk<NN>-close.md`,
+plays model's calls and their Flashback bans) side by side and writes ONE report, `docs/research/weekly/<season>-wk<NN>-close.md`,
 plus a 15-line summary to paste to planning. Leave it off for a close on its own.
 
 With no `--csv` it uses the newest history export in your Downloads folder (found by its header row, `[contests] downloads_dir` changes

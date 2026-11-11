@@ -30,7 +30,7 @@ see "In the sheet" at the end of this file. Nothing in `src/dfs/sim/` itself wri
 | Team shape | `shape_table.py`, `script_shape.py` | The one shipped modifier: QB1-TE1 by the tight end's target share (`correlations_shape.csv`), a layer on the pooled table that `simulate_lineups` reads by default. `script_shape.py` is the research behind it. |
 | Duplicates | `dups.py` | Expected identical entries, the Top 1% share, the fit. Used by `lineup_suggest.py`. |
 | Contest sim (shadow) | `payouts.py`, `field_gen.py`, `contest_sim.py`, `contest_retro.py` | Payout curves, a generated field, E[$] / ROI / P(cash) per lineup per contest, and the retro against his real contests. Not wired into anything but `dfs research refresh`. See "Contest sim (shadow)". |
-| Ownership uncertainty (shadow) | `own_error.py`, `own_error_retro.py` | A random draw of the field's ownership around the forecast, fitted and checked on his real contests, held out by week. Not wired into anything yet. See "Ownership uncertainty (shadow)". |
+| Ownership uncertainty (removed) | (`own_error.py`, `own_error_retro.py`, removed in batch F5 (Nov 2026; last on main at `42e3362`)) | A random draw of the field's ownership around the forecast, fitted and checked on his real contests, held out by week. Never cleared the bar. See "Ownership uncertainty (shadow)". |
 
 ## Using it
 
@@ -1624,6 +1624,10 @@ timers still show wall seconds. `search_clock.wall_clock()` restores real second
 
 ## Ownership uncertainty (shadow) (2026-10-21)
 
+*The model, its switches (`[sim.lines] ownership_mean` / `ownership_uncertainty` / `ownership_scenarios`,
+`field.with_ownership_draws`), its Flashback flags, the close's `backtest` and `own_error` stages and their settings files were
+removed in batch F5 (Nov 2026; last on main at `42e3362`): it never beat today by the bar. This section is the record.*
+
 **Why.** Every sim above treats projected ownership as known. It is a forecast: TFFB misses by about 3.4 points a player, and
 his double-ups run far chalkier than projected and swing with one megadup lineup. Haugh & Singal (Management Science 2021) put
 the field's ownership at the centre of their model as a random draw and report the largest documented DFS edge from it.
@@ -1952,7 +1956,7 @@ ones (PSK, x1.5, a measured ratio of about 1.1-1.7) moves its choices to the rea
 base rate. So the default is unchanged (`late_swap_field.LiveLines.amplified` exists for the test only); the label and the position
 are what ship. The sampled lineups are the contests' FINAL lineups, which already hold whatever late swapping their owners did.
 
-**Backtest flags added** (`sim/shrink_flag.py`, `sim/own_error_flag.py`; `dfs backtest --compare`, Weeks 2, 4-7, 38 contests; all default
+**Backtest flags added** (`sim/shrink_flag.py`, `sim/own_error_flag.py` (removed in batch F5 (Nov 2026; last on main at `42e3362`)); `dfs backtest --compare`, Weeks 2, 4-7, 38 contests; all default
 off): `shrink_salary` / `shrink_tffb` pull each CalPts toward the position's salary line / TFFB's projection with the curse study's
 per-position weights, fitted on the weeks **before** the backtested one only (Week 2 on Week 1 alone); `ownership_uncertainty_gpp` is
 `ownership_uncertainty` for the GPP builds only (the cash builds are scored on the plain field). ROI points, flag minus today:
