@@ -70,7 +70,6 @@ PLUGIN_MODULES: tuple[str, ...] = (
     "dfs.sim.own_error_flag",
     "dfs.sim.portfolio_flag",
     "dfs.plays_flag",
-    "dfs.sim.share_dupes_flag",
 )
 
 # The live builder stops its search after 120 s, so runs of one slate differ (two runs agree on 13 of 14
@@ -99,8 +98,8 @@ class BuildContext:
     lines: Any = None
     n_sims: int = 5000
     notes: list[str] = field(default_factory=list)
-    # Extra keyword arguments for `lineup_suggest.suggest_builds` that a `prepare` hook sets (the
-    # `share_dupes_fitted` flag: `gpp_dup_model`, `gpp_dup_shares`); empty is today's builder.
+    # Extra keyword arguments for `lineup_suggest.suggest_builds` that a `prepare` hook sets (e.g.
+    # `gpp_dup_model`, `gpp_dup_shares`); empty is today's builder.
     builder_kwargs: dict = field(default_factory=dict)
 
 

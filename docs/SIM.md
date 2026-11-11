@@ -1319,7 +1319,7 @@ QB1-WR1, WR2 and TE1 move by about +0.006. `correlations_shape.csv` is identical
 
 Offline, from the cached 2014-2026 history (2026 through Week 6). Code: `sim/shape_retest.py` and `sim/copula_test.py`
 (`python -m dfs.sim.shape_retest --frame <parquet>`, `python -m dfs.sim.copula_test --frame <parquet>`, the frame being
-`pipeline.load_frame(2026)` saved as parquet). **Nothing in `models/sim/` was refitted.** Rerun both after Week 7 is added.
+`pipeline.load_frame(2026)` saved as parquet; `copula_test.py` removed in batch F2, last on main at `42e3362`). **Nothing in `models/sim/` was refitted.** Rerun both after Week 7 is added.
 
 ### QB1 with RB1, RB2, WR1, WR2, WR3 by target share: none clears the bar
 
@@ -1385,7 +1385,7 @@ evidence for switching is nothing, and **the Top 1% effect for stacked versus un
 
 ## The top of the marginal tables, tested (2026-10-20)
 
-Offline; code `dfs/tail_check.py`, `sim/tail_backtest.py` (`python -m dfs.tail_check --frame <parquet>`, `python -m dfs.sim.tail_backtest --frame <parquet>`),
+Offline; code `dfs/tail_check.py`, `sim/tail_backtest.py` (`python -m dfs.tail_check --frame <parquet>`, `python -m dfs.sim.tail_backtest --frame <parquet>`; `tail_backtest.py` removed in batch F2, last on main at `42e3362`),
 tables and every fit from 2014-2022 only, judged on 2023-2026 (2026 through Week 6). The starting point was QB1 and WR1 beating their own 90th percentile
 10.7-10.8% of the time in the copula study. **It does not survive a held-out check, and no tail adjustment ships.**
 
@@ -1928,7 +1928,7 @@ the ones out), **HOLD** (more owned) or **EVEN** (the summed ownership moves und
 the real %Drafted under `--field`, else Own%. The Cockpit's swap block shows the label and the position. Nothing about the ranking
 changed: swaps are still ordered by the change in P(Top 1%); the label only says what kind of swap it is.
 
-**The retro** (`python -m dfs.late_swap_retro --weeks 4,5,6,7`, the 1 pm state; 2,542 sampled GPP lineups, 739 swaps by today's
+**The retro** (`python -m dfs.late_swap_retro --weeks 4,5,6,7`, removed in batch F2, last on main at `42e3362`; the 1 pm state; 2,542 sampled GPP lineups, 739 swaps by today's
 projected line). By the lineup's chance of finishing above the real top-1% line it is `behind` (under 1%: 90% of the sample, a median 60
 points under the line), `near` (1-10%) or `ahead` (10%+). Does the Top-1%-maximising swap go LEVERAGE when behind and HOLD when ahead?
 
@@ -2040,7 +2040,8 @@ Code: `du_line.py` (pure: `lines`, `cash_probability`, `fit`; the saved calibrat
 
 ## Plan S: three checks from the tool comparison (2026-11-09)
 
-Research only, nothing ships. Each check has its report under `docs/research/sim_checks/`.
+Research only, nothing ships. Each check has its report under `docs/research/sim_checks/`. The three scripts
+(`volatility_check.py`, `qbwr_check.py`, `share_rank_retro.py` with `share_dupes_flag.py`) were removed in batch F2, last on main at `42e3362`.
 
 - **Per-player volatility** (`sim/volatility_check.py`, report `2026-11-09-player-volatility.md`).
   - What was tested: a spread term from a player's previous games (aDOT, air-yards share, target SD, TD share, snap trend,

@@ -347,7 +347,7 @@ def annotate(
     (`dups.expected_dups`), the shapes it matches and, for a GPP candidate (`objective`), its Top 1% share.
     Without `shares` (no ownership published) only the shapes are filled in. `dup_shares` (default none: the
     same `shares`) is the ownership the sum, product and copies are read from, for a duplicate model fitted on
-    a different ownership (the backtest's `share_dupes_fitted`, on `GppOwn`); the shapes always use
+    a different ownership (Plan S's removed `share_dupes_fitted` flag used `GppOwn`); the shapes always use
     `shares`."""
     out = []
     for s in scored:
@@ -737,8 +737,8 @@ def suggest_builds(
     default) the Top 1% chance alone, "share" that chance divided by 1 + the duplicates expected.
     `cash_fixed` names players every cash build holds (the backtest's `calls` flag locks the CORE calls;
     a name not in the cash pool is ignored). `gpp_dup_shares` (default none: the field's own shares) is the
-    ownership the GPP builds' copies are read from, with `gpp_dup_model` (the backtest's
-    `share_dupes_fitted`)."""
+    ownership the GPP builds' copies are read from, with `gpp_dup_model` (a backtest hook can set
+    both)."""
     gpp_order = rank_key(rank)
     started = time.monotonic()
     budget_start = clock.now()  # the budget is search work, not wall seconds (search_clock.py)

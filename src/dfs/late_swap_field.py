@@ -498,7 +498,8 @@ class LiveLines:
 
     def amplified(self, factor: float) -> LiveLines:
         """The same draws with both lines' swings around their means scaled by `factor` (the projected lines
-        move less with the slate than the real field's; `late_swap_retro` tests whether matching it helps)."""
+        move less with the slate than the real field's; the removed `late_swap_retro` tested whether matching
+        it helps)."""
         cash = self.cash_line.mean() + factor * (self.cash_line - self.cash_line.mean())
         top = self.top_line.mean() + factor * (self.top_line - self.top_line.mean())
         return LiveLines(
