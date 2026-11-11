@@ -93,3 +93,6 @@ docs/research/backtest/
 
 # The plays model's backtest reports (`python -m dfs.research.plays_backtest run`): personal output.
 docs/research/plays/
+
+# The late-news studies read from the news change log (`data/news/changes.csv`): personal output.
+docs/research/news/

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from dfs import perf, sync_guard
+from dfs import news_store, perf, sync_guard
 from dfs.config import Config
 from dfs.log import get_logger
 from dfs.sheets import SheetsClient, SheetsError
@@ -47,6 +47,17 @@ def _previous(name: str) -> pd.DataFrame | None:
         return None
 
 
+def _log_news() -> None:
+    """After an EdgeRaw snapshot is saved: append what changed since the one before it to the news change
+    log (`news_store`, `data/news/changes.csv`; no sheet). A failure is a warning, never the sync's."""
+    try:
+        rows = news_store.log_latest()
+    except Exception as e:  # noqa: BLE001 - the log must never fail a sync
+        log.warning("news change log not updated (%s); `dfs news backfill` fills the gap later", e)
+        return
+    log.info("news change log: %d change(s) since the last snapshot", rows)
+
+
 def run_sync(
     cfg: Config,
     source_names: list[str],
@@ -77,6 +88,8 @@ def run_sync(
             for note in guarded.notes:
                 log.warning("%s", note)
             save(name, df)
+            if name == news_store.EDGE_SOURCE:
+                _log_news()
 
             if upload and source.uploads_to_sheet:
                 tab = cfg.google_sheets.tab_mappings.get(name)

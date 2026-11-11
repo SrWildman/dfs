@@ -318,6 +318,7 @@ app.add_typer(__import__("dfs.sim.cli", fromlist=["sim_app"]).sim_app, name="sim
 # Hidden while unfinished (docs/CONTESTS.md): not in COMMANDS.md or the launcher until `week close` runs it.
 app.add_typer(__import__("dfs.contests.cli", fromlist=["contests_app"]).contests_app, name="contests")
 app.add_typer(__import__("dfs.season_long.cli", fromlist=["season_app"]).season_app, name="season")
+app.add_typer(__import__("dfs.news_cli", fromlist=["news_app"]).news_app, name="news")
 app.add_typer(
     __import__("dfs.research.cli", fromlist=["research_app"]).research_app, name="research", hidden=False
 )
@@ -4178,6 +4179,12 @@ def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> tupl
         return edge, []
     edge, changes = news.apply_news(edge, feed)
     console.print(f"ESPN injuries read now: {len(changes)} change(s) to Avail.")
+    try:  # the news change log (`data/news/changes.csv`, no sheet): a failure is a warning
+        from dfs import news_store
+
+        news_store.log_espn(edge, changes, at=now)
+    except Exception as e:  # noqa: BLE001 - the log must never fail a late-swap run
+        console.print(f"[yellow]News change log not updated: {escape(str(e))}[/yellow]")
     for c in changes[:25]:
         when = f" ({news.age_minutes(c.updated, now):.0f} min old)" if c.updated else ""
         console.print(
