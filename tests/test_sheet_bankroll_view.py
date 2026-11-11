@@ -7,14 +7,19 @@ entry for this change)."""
 from __future__ import annotations
 
 import re
+from unittest.mock import MagicMock
 
 import pytest
 
 from dfs.sheet_bankroll_view import (
+    FIRST_ROW,
+    LAST_ROW,
     ODDS_TYPE_HINT,
+    build_betting_ledger,
     compute_weekly_betting_stats,
     entered_formula,
     net_formula,
+    odds_cells_are_percent,
     odds_formula,
     record_formula,
     winnings_formula,
@@ -176,3 +181,29 @@ def test_all_row_formulas_are_row_relative_not_hardcoded():
     for row in (17, 30, 56):
         assert odds_formula(row).count(str(row)) >= 3
         assert net_formula(row).count(str(row)) >= 2
+
+
+def test_expected_wins_reads_a_percent_column_as_probabilities():
+    rows = [(0.007, 1.0, 0.0), (0.46, 4.8, 10.0), (53.3, 1.0, 0.0)]  # a stray 53.3 is not a probability
+    stats = compute_weekly_betting_stats(rows, percent_cells=True)
+    assert round(stats.expected_wins, 3) == 0.467
+    legacy = compute_weekly_betting_stats([(46, 4.8, 10.0)], percent_cells=False)
+    assert round(legacy.expected_wins, 2) == 0.46  # an old closed week (literal-% column) reads as before
+
+
+def test_odds_cells_are_percent_reads_the_cell_format():
+    client = MagicMock()
+    client.get_cell_formats.return_value = [[{"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}]]
+    assert odds_cells_are_percent(client, "Bankroll", 17) is True
+    client.get_cell_formats.return_value = [[{"numberFormat": {"type": "NUMBER", "pattern": '0.0"%"'}}]]
+    assert odds_cells_are_percent(client, "Bankroll", 17) is False
+    client.get_cell_formats.side_effect = RuntimeError("no read")
+    assert odds_cells_are_percent(client, "Bankroll", 17) is None
+
+
+def test_a_fresh_betting_ledger_has_a_true_percent_odds_column():
+    """`bankroll fix-odds` (removed) used to set this on old sheets; a ledger built from scratch has it."""
+    client = MagicMock()
+    build_betting_ledger(client, "Bankroll")
+    formats = {c.args[1]: c.args[2] for c in client.format_range.call_args_list}
+    assert formats[f"B{FIRST_ROW}:B{LAST_ROW}"]["numberFormat"] == {"type": "PERCENT", "pattern": "0.0%"}

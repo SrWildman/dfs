@@ -45,7 +45,6 @@ from dfs import (
 )
 from dfs.apps_script import script_warnings
 from dfs.bankroll import (
-    backfill_entry_keys,
     entries_for_week,
     ledger_bucket,
     parse_contest_history,
@@ -155,27 +154,22 @@ from dfs.sheet_links import (
 )
 from dfs.sheet_names import build_name_alias_tab
 from dfs.sheet_pool_control import add_typed_player_to_pool, ensure_pool_control_row, retire_added_list
-from dfs.sheet_pool_deck import remove_pool_deck
 from dfs.sheet_pool_formulas import write_pool_formulas
-from dfs.sheet_pool_raw_sos import rewrite_opp_pos_rank
-from dfs.sheet_pool_resize import fix_color_scale_ranges, resize_player_pool
 from dfs.sheet_pool_usage import write_pool_usage_columns
 from dfs.sheet_protection import protect_workbook
-from dfs.sheet_reorder import migrate_tab_to_designed_order, remove_header_columns, rename_header_column
+from dfs.sheet_reorder import migrate_tab_to_designed_order, rename_header_column
 from dfs.sheet_season_view import add_season_chart, build_season_tab
 from dfs.sheet_style import (
     EDGE_ROWS,
     POOL_RAW_ROWS,
     apply_tab_chrome,
     apply_tab_notes,
-    fix_lineups_dst_slot_label,
     hidden_source_tabs,
     polish_bankroll,
     polish_builder_tab,
     polish_edge,
     polish_guardrails,
     polish_lineups_identity_cells,
-    polish_lineups_pct_of_cap,
     polish_lineups_totals_rows,
     style_results,
     style_tier23_tabs,
@@ -190,7 +184,6 @@ from dfs.sheet_suggested import (
     write_suggested,
 )
 from dfs.sheet_suggested import read_state as read_suggested_state
-from dfs.sheet_tab_removal import remove_retired_tabs
 from dfs.sheet_typo_guard import add_lineups_typo_guard
 from dfs.sheet_views import (
     build_board,
@@ -219,7 +212,6 @@ from dfs.week import (
 from dfs.weekly_reset import (
     LINEUPS_NAME_BLOCKS,
     LINEUPS_TOTALS_ROWS,
-    PLAYER_POOL_BLOCK_ROWS,
     PLAYER_POOL_HEADER_ROW,
     PLAYER_POOL_NAME_BLOCKS,
     clear_previous_week,
@@ -274,14 +266,6 @@ app = typer.Typer(
 setup_app = typer.Typer(
     help="One-time sheet construction: build, style and link a sheet from scratch.", cls=PromptingGroup
 )
-# `dfs sheets X` used to be where all nine `setup_app` commands (plus
-# `doctor`, now promoted to top-level) lived. Kept around, hidden from
-# `--help`, as a compatibility shim -- 79 places across docs/tests/muscle
-# memory said `dfs sheets ...` before this reorganisation, and breaking
-# that silently (a renamed command that just says "no such command") is
-# worse than a deprecation notice. Remove this whole app once the season's
-# over and the old habit has had time to fade -- see CONTRIBUTING.md.
-sheets_app = typer.Typer(hidden=True, cls=PromptingGroup)
 auth_app = typer.Typer(help="Log in to sites that require an authenticated session.", cls=PromptingGroup)
 bankroll_app = typer.Typer(help="Reconcile contest history into your bankroll tab.", cls=PromptingGroup)
 lineups_app = typer.Typer(
@@ -301,7 +285,6 @@ results_app = typer.Typer(
     help="Score every projection against what actually happened (Model Check).", cls=PromptingGroup
 )
 app.add_typer(setup_app, name="setup")
-app.add_typer(sheets_app, name="sheets")
 app.add_typer(auth_app, name="auth")
 app.add_typer(bankroll_app, name="bankroll")
 app.add_typer(lineups_app, name="lineups")
@@ -668,187 +651,6 @@ def sheets_inspect() -> None:
 
 
 @setup_app.command(
-    "remove-pool-deck",
-    short_help="One-time repair: delete a still-present pool deck. Kept only for an un-migrated sheet.",
-)
-def sheets_remove_pool_deck(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Remove the pool deck from a different sheet instead of config.toml's -- e.g. the "
-        "canonical weekly template.",
-    ),
-) -> None:
-    """Phase 5 (2026-09-16): the pool deck -- frozen rows at the top of
-    Lineups holding a sortable/filterable window into Player Pool -- is
-    retired. Sam, after a week building real lineups against it: "I've
-    used it week 1 and it was a pain," and on the "where is this player"
-    jump control alone -- "doesn't get me much. Cut it." Player Pool's own
-    colour scales/chips/`Used`/`In` columns cover the browsing job now.
-
-    Kept around (unlike `add-pool-deck`/`add-pool-picks`/`remove-pool-picks`,
-    removed in Phase 6 Part 1.6) only in case some un-migrated sheet still
-    has a deck sitting on it -- not part of the standing `dfs setup
-    sheet`/`polish` pipeline, and a from-scratch build never creates one.
-
-    Deletes the deck's rows (a real Sheets row delete, so every Lineups
-    block shifts up with it) and the hidden `PoolSort` helper tab. No-op
-    if the deck isn't present (already removed, or never built). See
-    `sheet_pool_deck.py`'s module docstring and CONTRIBUTING.md's
-    changelog for the full history and what depended on it.
-    """
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(
-            f"Removing pool deck from {cfg.lineups.builder_tab!r} in: [bold]{title}[/bold]\n{url}\n"
-        )
-        result = remove_pool_deck(client, cfg.lineups.builder_tab)
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-    console.print(f"[green]OK[/green] {result}")
-
-
-@setup_app.command(
-    "remove-retired-tabs",
-    short_help="One-time: remove Scratch/EntriesRaw/GPPin/DKLineupsRaw/DKLineupsFinal.",
-)
-def sheets_remove_retired_tabs(
-    mode: str = typer.Option(
-        ...,
-        "--mode",
-        help="'delete' (template -- future weekly copies start clean) or 'hide' (live sheet -- "
-        "EntriesRaw may hold real pasted history a delete can't recover; a hidden tab is still "
-        "fully readable/writable by dfs sync). See Part 4b in CONTRIBUTING.md's changelog.",
-    ),
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Act on a different sheet instead of config.toml's -- e.g. the canonical weekly "
-        "template (pass --mode delete there; the live sheet should get --mode hide).",
-    ),
-) -> None:
-    """Phase 6 Part 4b (2026-09-22): `Scratch` (a blank drafting grid, no
-    formulas) and the `EntriesRaw`/`GPPin`/`DKLineupsRaw`/`DKLineupsFinal`
-    hand-paste DK-contest-history chain (superseded by `dfs week close
-    --csv`'s CSV-based path) are retired -- Sam confirmed he does not use
-    any of the five, and `dfs` never read or wrote them except to
-    clear/style them. Asymmetric by design: run this with `--mode delete`
-    against the template and `--mode hide` against the live sheet -- never
-    delete on live, `EntriesRaw` may hold real pasted history. Idempotent
-    either way. Also removes these five's own rows from the `Instructions`
-    tab on whichever sheet this runs against, regardless of `--mode` --
-    the documentation should read correctly on both. See
-    `sheet_tab_removal.py`'s module docstring and `docs/planning/PROMPT_DATA.md`
-    for where a past entry's roster-slot detail lives now that
-    `EntriesRaw` is gone (the DK export CSVs on disk).
-    """
-    if mode not in ("delete", "hide"):
-        console.print(f"[red]Error:[/red] --mode must be 'delete' or 'hide', got {mode!r}")
-        raise typer.Exit(code=1)
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Removing retired tabs (--mode {mode}) in: [bold]{title}[/bold]\n{url}\n")
-        results = remove_retired_tabs(client, mode=mode)
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-    for line in results:
-        console.print(f"[green]OK[/green] {line}")
-
-
-@setup_app.command(
-    "remove-sos-placeholders", short_help="One-time: delete the retired blank SoS 1..4 columns."
-)
-def sheets_remove_sos_placeholders(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Remove the placeholders from a different sheet instead of config.toml's -- e.g. the "
-        "canonical weekly template.",
-    ),
-) -> None:
-    """Phase 5 (2026-09-16): `SoS 1`/`SoS 2`/`SoS 3`/`SoS 4` -- four blank
-    GAME-zone columns reserved on PlayerPoolRaw/Player Pool/Lineups back
-    when strength-of-schedule data didn't exist yet -- are retired now
-    that the real sync (`sources/tffb_sos.py`) landed straight into
-    `OppPosRank` instead. Sam: "Why still sos 1-4. Should only be one per
-    player." Deletes all four columns (a real Sheets column delete, so
-    everything to their right shifts left) from each of the three tabs.
-    No-op per tab if none of the four are present (already removed, or a
-    sheet built after this migration already shipped without them). See
-    `sheet_reorder.remove_header_columns` and CONTRIBUTING.md's changelog.
-    """
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    sos_columns = ["SoS 1", "SoS 2", "SoS 3", "SoS 4"]
-    try:
-        title, url = client.describe()
-        console.print(f"Removing SoS 1..4 placeholders in: [bold]{title}[/bold]\n{url}\n")
-        # Player Pool's real header sits at PLAYER_POOL_HEADER_ROW (row 1
-        # is the "Add a player" control cell), unlike PlayerPoolRaw/
-        # Lineups, which both default to row 1 -- passing the wrong row
-        # here would read the control row instead and conclude (wrongly)
-        # that none of the four columns are present.
-        tabs = [
-            (PLAYER_POOL_RAW_TAB, 1),
-            (cfg.lineups.player_pool_tab, PLAYER_POOL_HEADER_ROW),
-            (cfg.lineups.builder_tab, 1),
-        ]
-        for tab, header_row in tabs:
-            result = remove_header_columns(client, tab, sos_columns, header_row=header_row)
-            console.print(f"[green]OK[/green] {result}")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-
-RETIRED_LINEUP_METRICS = ["Stack", "Bring-back", "Own% Used", "Sub-10%"]
-
-
-@setup_app.command(
-    "remove-lineup-metrics",
-    short_help="One-time: delete Lineups' Stack, Bring-back, Own% Used and Sub-10% columns.",
-)
-def sheets_remove_lineup_metrics(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Remove the columns from a different sheet instead of config.toml's -- e.g. the "
-        "canonical weekly template.",
-    ),
-) -> None:
-    """Round 5 item 1c (2026-09-29): Sam doesn't use `Stack`, `Bring-back`
-    or `Own% Used`, and `Sub-10%` never worked to his eye. Deletes all
-    four from Lineups (a real Sheets column delete -- everything to their
-    right shifts left, and the repeated per-block header rows go with
-    them). `Games` and `Min Unique` stay. No-op if none are present.
-    See `sheet_reorder.remove_header_columns` and CONTRIBUTING.md's
-    changelog; run `dfs doctor` afterwards."""
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Removing retired Lineups metrics in: [bold]{title}[/bold]\n{url}\n")
-        header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
-        result = remove_header_columns(
-            client, cfg.lineups.builder_tab, RETIRED_LINEUP_METRICS, header_row=header_row
-        )
-        console.print(f"[green]OK[/green] {result}")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-
-@setup_app.command(
     "repair-formula-ranges",
     short_help="Rewrite gaps in the hand-built per-row formula ranges that `dfs doctor` checks.",
 )
@@ -1066,242 +868,6 @@ def sheets_guard_empty_states(
         raise typer.Exit(code=1) from e
     for line in report:
         console.print(f"[green]OK[/green] {escape(line)}")
-
-
-@setup_app.command(
-    "remove-model-implied",
-    short_help="One-time: delete the retired ModelImplied column from the three builder tabs.",
-)
-def sheets_remove_model_implied(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Remove the column from a different sheet instead of config.toml's -- e.g. the "
-        "canonical weekly template.",
-    ),
-) -> None:
-    """Round 5 item 5c (2026-09-29): GPS's `Implied Total` is Vegas, not a
-    model (`gps_check.py`), so EdgeRaw's `ModelImplied` and its linked
-    copies on PlayerPoolRaw/Player Pool/Lineups are retired. This deletes the
-    three linked columns (a real Sheets column delete -- everything to their
-    right shifts left). EdgeRaw itself just needs a fresh `dfs sync --only
-    edge`, and `dfs setup link-edge --force` then re-derives every VLOOKUP
-    index. Run in that order; no-op per tab if the column is already gone."""
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Removing ModelImplied in: [bold]{title}[/bold]\n{url}\n")
-        tabs = [
-            (PLAYER_POOL_RAW_TAB, 1),
-            (cfg.lineups.player_pool_tab, PLAYER_POOL_HEADER_ROW),
-            (cfg.lineups.builder_tab, 1),
-        ]
-        for tab, header_row in tabs:
-            result = remove_header_columns(client, tab, ["ModelImplied"], header_row=header_row)
-            console.print(f"[green]OK[/green] {result}")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-
-@setup_app.command(
-    "fix-opp-pos-rank", short_help="One-time: fix PlayerPoolRaw's OppPosRank (was keyed on Team, not Opp.)."
-)
-def sheets_fix_opp_pos_rank(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
-    ),
-) -> None:
-    """Found live 2026-09-16, the first time real strength-of-schedule
-    data ever flowed through it: `PlayerPoolRaw`'s `OppPosRank` -- a
-    hand-typed `VLOOKUP`+`HLOOKUP` against `SoSComb` that nothing in this
-    codebase previously regenerated -- was keyed on this row's own `Team`
-    column instead of `Opp.`, so every value measured how tough a
-    player's OWN defense is, never their actual opponent's. Rewrites
-    every row's formula, keyed correctly this time (`sheet_pool_raw_sos.
-    rewrite_opp_pos_rank`). Player Pool/Lineups need no separate fix --
-    both already VLOOKUP their own `OppPosRank` off PlayerPoolRaw by
-    Name, so they self-heal the moment PlayerPoolRaw's own value is
-    correct.
-    """
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Fixing OppPosRank in: [bold]{title}[/bold]\n{url}\n")
-        result = rewrite_opp_pos_rank(client, PLAYER_POOL_RAW_TAB, last_row=POOL_RAW_ROWS)
-        console.print(f"[green]OK[/green] {result}")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-
-@setup_app.command(
-    "fix-pct-of-cap",
-    short_help="One-time: rebuild Lineups' '% of Cap' against the salary cap, not the running total.",
-)
-def sheets_fix_pct_of_cap(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
-    ),
-) -> None:
-    """Part 7.9 (2026-09-17): `Lineups`' `% of Own` column (renamed from
-    `% of Rstr` in Phase 6, Part 2) was really cap allocation misnamed and
-    mis-derived -- `=F<row>/F$<totals_row>`, this player's DK Sal as a
-    share of the lineup's own running salary total, not its rostership.
-    Renames the header to `% of Cap` in place first (`rename_header_
-    column`, same "rename before any name-based lookup touches it" order
-    as every other column rename in this codebase), then redivides by the
-    salary cap (`config.toml`'s `[lineups] salary_cap`) instead, which
-    also removes the `#DIV/0!` Part 1.2 previously guarded against -- a
-    constant denominator can't divide by zero
-    (`sheet_style.polish_lineups_pct_of_cap`)."""
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Fixing '% of Cap' in: [bold]{title}[/bold]\n{url}\n")
-        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
-        header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
-        renamed = rename_header_column(
-            client,
-            cfg.lineups.builder_tab,
-            "% of Own",
-            "% of Cap",
-            header_row=lineups_header_row,
-            header_repeats_at=header_repeats_at,
-        )
-        result = polish_lineups_pct_of_cap(
-            client,
-            cfg.lineups.builder_tab,
-            header_row=lineups_header_row,
-            name_blocks=LINEUPS_NAME_BLOCKS,
-            salary_cap=cfg.lineups.salary_cap,
-        )
-        console.print(f"[green]OK[/green] renamed: {renamed}; {result}")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-
-@setup_app.command(
-    "resize-player-pool",
-    short_help="One-time: grow Player Pool's QB/RB/WR/TE/DST blocks (PROMPT_BOARD_FIXES.md item 8).",
-)
-def sheets_resize_player_pool(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Resize a different sheet instead of config.toml's -- ALWAYS run against the "
-        "canonical template first, verify with real cell reads, then run again against the "
-        "live sheet.",
-    ),
-) -> None:
-    """PROMPT_BOARD_FIXES.md item 8 (2026-09-25): grows each of Player
-    Pool's five position blocks to `weekly_reset.PLAYER_POOL_BLOCK_ROWS`'
-    row counts (QB/TE 10->17, RB 20->22, WR 25->27, DST 10->12) via real
-    `insertDimension` calls (`sheet_pool_resize.resize_player_pool`) --
-    restoring the player capacity `sheet_pool_formulas._grouped_with_
-    separators_formula`'s own blank separator rows (Fix 3/A7) had been
-    silently eating into.
-
-    Prints the new block boundaries -- these must be hand-verified against
-    a real cell read (not trusted from this output alone) and then pinned
-    into `weekly_reset.PLAYER_POOL_NAME_BLOCKS` as a literal, the same
-    convention `resize_player_pool`'s own docstring describes. Also
-    rewrites the Name/Overflow formulas for the grown blocks (the old
-    formulas have last week's row cap baked into their own `ARRAY_
-    CONSTRAIN` call, which growing the block's physical size does not
-    update on its own) and re-points the three EdgeRaw-linked colour
-    scales (`sheet_pool_resize.fix_color_scale_ranges`) at the new last
-    row. `dfs setup polish` must still be re-run afterward, same standing
-    rule as `reorder-columns` -- this command only does the structural
-    part.
-    """
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Resizing Player Pool in: [bold]{title}[/bold]\n{url}\n")
-        positions = list(PLAYER_POOL_BLOCK_ROWS)
-        target_sizes = [PLAYER_POOL_BLOCK_ROWS[p] for p in positions]
-        new_blocks = resize_player_pool(
-            client,
-            player_pool_tab=cfg.lineups.player_pool_tab,
-            blocks=PLAYER_POOL_NAME_BLOCKS,
-            positions=positions,
-            target_sizes=target_sizes,
-            header_row=PLAYER_POOL_HEADER_ROW,
-        )
-        console.print(f"[green]OK[/green] grew blocks -- new boundaries: {new_blocks}")
-        console.print(
-            "[yellow]Verify these against a real cell read, then pin them into "
-            "weekly_reset.PLAYER_POOL_NAME_BLOCKS.[/yellow]"
-        )
-        formula_result = write_pool_formulas(
-            client,
-            player_pool_tab=cfg.lineups.player_pool_tab,
-            edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw"),
-            name_blocks=new_blocks,
-        )
-        console.print(f"[green]OK[/green] {'; '.join(formula_result)}")
-        last_row = max(end for _, end in new_blocks)
-        fix_color_scale_ranges(
-            client, cfg.lineups.player_pool_tab, last_row=last_row, header_row=PLAYER_POOL_HEADER_ROW
-        )
-        console.print(f"[green]OK[/green] colour scales re-pointed through row {last_row}")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-
-@setup_app.command(
-    "fix-lineups-dst-label",
-    short_help="One-time: correct Lineups' stale 'DEF' defense-slot label to 'DST'.",
-)
-def sheets_fix_lineups_dst_label(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template.",
-    ),
-) -> None:
-    """Found live (2026-09-18) verifying Part 7.4's DST-vs-own-QB
-    guardrail with a real test lineup: it never fired. `Lineups`' own
-    `Pos.` column is static text, one fixed roster-slot label per row --
-    the defense slot says `"DEF"` on every block, both sheets, instead of
-    `"DST"` (this codebase's own convention everywhere else), so the
-    guardrail's own `MATCH("DST", ...)` could never find it
-    (`sheet_style.fix_lineups_dst_slot_label`)."""
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Fixing Lineups' DST slot label in: [bold]{title}[/bold]\n{url}\n")
-        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
-        header = client.read_range(cfg.lineups.builder_tab, f"A{lineups_header_row}:{lineups_header_row}")
-        header = header[0] if header else []
-        if "Pos." not in header:
-            console.print("[red]'Pos.' column not found in Lineups' header.[/red]")
-            raise typer.Exit(code=1)
-        position_col = column_letter(header.index("Pos."))
-        result = fix_lineups_dst_slot_label(
-            client, cfg.lineups.builder_tab, position_col=position_col, name_blocks=LINEUPS_NAME_BLOCKS
-        )
-        console.print(f"[green]OK[/green] {result}")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
 
 
 @setup_app.command("dk-upload", short_help="Build DK Upload's entries layout (Lineup dropdown, Suggested).")
@@ -2162,115 +1728,6 @@ def sheets_reorder_columns(
 
 
 @setup_app.command(
-    "fix-flag-split",
-    short_help="One-time: split Flag/Flags, drop OwnPct, rename LevBasis -> OwnStatus (Part 7.9).",
-)
-def sheets_fix_flag_split(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Fix a different sheet instead of config.toml's -- ALWAYS run against the "
-        "canonical template first, verify with `dfs doctor`, then run again against the "
-        "live sheet.",
-    ),
-) -> None:
-    """Part 7.9 (2026-09-17), three changes to `PlayerPoolRaw`/`Player
-    Pool`/`Lineups`, run together since all three touch the same
-    Ceiling-detail/spine region:
-
-    1. `LevBasis` -> `OwnStatus` (renamed in place -- Leverage's own
-       demotion off the spine left this marker gating `Own%` instead, the
-       old name no longer said what it does).
-    2. `Flag` (already every matching condition, space-separated, despite
-       7.9's own spec assuming a stale first-match-only value -- see
-       CONTRIBUTING.md) -> `Flags`, renamed in place, taking over `Flag`'s
-       old visible spine slot; a NEW `Flag` column (single
-       highest-priority token only) is then provisioned and moved into
-       the hidden zone beside `Id`.
-    3. `OwnPct` removed entirely (a real column delete) -- its only
-       consumer anywhere in this codebase was the Leverage formula in
-       `derived.py`, verified by grep before removing.
-
-    Renames and the delete run FIRST (same "rename/delete before any
-    name-based lookup touches it" order as every other migration in this
-    codebase), then each tab runs through `sheet_reorder.migrate_tab_to_
-    designed_order` again to provision the new `Flag` column, re-link
-    every EdgeRaw formula against the current column set, and fix Ceiling
-    detail's own internal order (CeilPct/Leverage/OwnStatus, was CeilPct/
-    OwnPct/Leverage/LevBasis).
-
-    Re-run `dfs setup link-edge --force`, `dfs setup polish`, and `dfs
-    doctor` afterward -- this command only renames/removes/moves/creates
-    columns; it doesn't touch widths, hiding, or conditional formatting.
-    """
-    cfg = _load_config_or_exit()
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    edge_tab = cfg.google_sheets.tab_mappings.get("edge")
-    if not edge_tab:
-        console.print("[red]No tab mapped for 'edge' in config.toml.[/red]")
-        raise typer.Exit(code=1)
-
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Fixing Flag/Flags/OwnPct/OwnStatus in: [bold]{title}[/bold]\n{url}\n")
-
-        header_repeats_at = [start - 1 for start, _ in LINEUPS_NAME_BLOCKS[1:]]
-        lineups_header_row = LINEUPS_NAME_BLOCKS[0][0] - 1
-        rename_targets = [
-            (PLAYER_POOL_RAW_TAB, 1, None),
-            (cfg.lineups.player_pool_tab, PLAYER_POOL_HEADER_ROW, None),
-            (cfg.lineups.builder_tab, lineups_header_row, header_repeats_at),
-        ]
-        renamed = 0
-        for tab, row, repeats in rename_targets:
-            kwargs = {"header_row": row, "header_repeats_at": repeats}
-            if rename_header_column(client, tab, "LevBasis", "OwnStatus", **kwargs):
-                renamed += 1
-            if rename_header_column(client, tab, "Flag", "Flags", **kwargs):
-                renamed += 1
-        console.print(f"[green]OK[/green] renamed {renamed} header cell(s)")
-
-        for tab, row, _repeats in rename_targets:
-            removed = remove_header_columns(client, tab, ["OwnPct"], header_row=row)
-            console.print(f"[green]OK[/green] {removed}")
-
-        results = migrate_tab_to_designed_order(
-            client,
-            PLAYER_POOL_RAW_TAB,
-            PLAYER_POOL_RAW_COLUMN_ORDER,
-            name_blocks=PLAYER_POOL_RAW_BLOCK,
-            edge_tab=edge_tab,
-            rewrite_native=False,
-        )
-        results += migrate_tab_to_designed_order(
-            client,
-            cfg.lineups.player_pool_tab,
-            PLAYER_POOL_COLUMN_ORDER,
-            name_blocks=PLAYER_POOL_NAME_BLOCKS,
-            edge_tab=edge_tab,
-            header_row=PLAYER_POOL_HEADER_ROW,
-            rewrite_native=True,
-        )
-        results += migrate_tab_to_designed_order(
-            client,
-            cfg.lineups.builder_tab,
-            LINEUPS_COLUMN_ORDER,
-            name_blocks=LINEUPS_NAME_BLOCKS,
-            edge_tab=edge_tab,
-            header_row=lineups_header_row,
-            header_repeats_at=header_repeats_at,
-            rewrite_native=True,
-        )
-    except (SheetsError, ValueError) as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-    for line in results:
-        console.print(f"[green]OK[/green] {line}")
-
-
-@setup_app.command(
     "add-filters", short_help="Make sorting/searching visible: basic filters plus saved filter views."
 )
 def sheets_add_filters(
@@ -2603,9 +2060,7 @@ def setup_sheet(
     `inspect` (also moved under `setup`) isn't part of this sequence at
     all -- it's a read-only tab lister you'd reach for anytime, not a
     construction step, the same reason `doctor`/`audit-style` aren't
-    either except as this composite's own final checks. `remove-pool-deck`
-    isn't part of it either -- a one-time repair for a sheet that still
-    has the retired deck, not something a fresh build ever creates.
+    either except as this composite's own final checks.
     """
     steps: list[tuple[str, Callable[[], None]]] = [
         ("add-pool-control", lambda: sheets_add_pool_control(sheet_id=sheet_id)),
@@ -2628,73 +2083,6 @@ def setup_sheet(
                 console.print(f"\n[red]Stopped at {name!r} -- fix the above and re-run.[/red]")
                 raise
     console.print("\n[green]OK[/green] sheet build complete.")
-
-
-# -- `dfs sheets ...` compatibility aliases -----------------------------
-#
-# Every one of the nine commands above moved to `dfs setup ...`, and
-# `doctor` moved to top-level `dfs doctor`, in this same reorganisation.
-# `sheets_app` (declared near the top of this file, `hidden=True`) keeps
-# every old spelling working: same function, same options, one notice
-# printed first. 79 places (docs, tests, muscle memory) said `dfs sheets
-# ...` before today -- a renamed command that just says "no such command"
-# is a worse outcome than a deprecation notice for the rest of this season.
-#
-# Remove this whole block (and `sheets_app`'s registration near the top)
-# once the season's over and the old habit's had time to fade.
-def _moved_notice(old: str, new: str) -> None:
-    console.print(f"[dim]`{old}` has moved to `{new}`.[/dim]")
-
-
-@sheets_app.command("inspect")
-def sheets_inspect_alias() -> None:
-    _moved_notice("dfs sheets inspect", "dfs setup inspect")
-    sheets_inspect()
-
-
-@sheets_app.command("polish")
-def sheets_polish_alias(
-    sheet_id: str = typer.Option(None, "--sheet-id"),
-    skip_chrome: bool = typer.Option(False, "--skip-chrome"),
-) -> None:
-    _moved_notice("dfs sheets polish", "dfs setup polish")
-    sheets_polish(sheet_id=sheet_id, skip_chrome=skip_chrome)
-
-
-@sheets_app.command("build-views")
-def sheets_build_views_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets build-views", "dfs setup build-views")
-    sheets_build_views(sheet_id=sheet_id)
-
-
-@sheets_app.command("link-edge")
-def sheets_link_edge_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets link-edge", "dfs setup link-edge")
-    sheets_link_edge(sheet_id=sheet_id)
-
-
-@sheets_app.command("add-filters")
-def sheets_add_filters_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets add-filters", "dfs setup add-filters")
-    sheets_add_filters(sheet_id=sheet_id)
-
-
-@sheets_app.command("protect")
-def sheets_protect_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets protect", "dfs setup protect")
-    sheets_protect(sheet_id=sheet_id)
-
-
-@sheets_app.command("doctor")
-def sheets_doctor_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets doctor", "dfs doctor")
-    sheets_doctor(sheet_id=sheet_id)
-
-
-@sheets_app.command("audit-style")
-def sheets_audit_style_alias(sheet_id: str = typer.Option(None, "--sheet-id")) -> None:
-    _moved_notice("dfs sheets audit-style", "dfs setup audit-style")
-    sheets_audit_style(sheet_id=sheet_id)
 
 
 @app.command()
@@ -3076,7 +2464,7 @@ def _write_lineup_sim(
 def _print_live_flag_diff(
     old_edge: pd.DataFrame | None, client: SheetsClient | None = None, edge_tab: str = "EdgeRaw"
 ) -> None:
-    """Called only from `sync --live`/`dfs go`, after `run_sync` --
+    """Called only from `sync --live`, after `run_sync` --
     compares EdgeRaw's Flag column from right before this sync
     (`old_edge`, read before `run_sync` ran) to right after, and prints
     the difference. `store.load_previous`/`diff_odds`'s per-snapshot
@@ -3451,90 +2839,6 @@ def backtest_command(
     if not no_report:
         path = backtest_report.write_report(ordered, paired)
         console.print(f"[green]OK[/green] report written to {path}")
-
-
-@app.command(short_help="Sync, check the sheet, and report what changed -- in one go.")
-def go() -> None:
-    """Sync, check the sheet, and report what changed -- the three
-    commands you'd otherwise run back to back every time anyway. Stops at
-    the first failure (a failed sync means nothing to check; a failed
-    doctor means don't trust what changed until it's fixed)."""
-    cfg = _load_config_or_exit()
-    try:
-        old_edge = store.load_current("edge")
-    except FileNotFoundError:
-        old_edge = None
-
-    console.print("[bold]-- sync --[/bold]")
-    sync(only=None, no_upload=False, week=None, season=None, live=False, sheet_id=None, props=False)
-
-    console.print("\n[bold]-- doctor --[/bold]")
-    sheets_doctor(sheet_id=None)
-
-    console.print("\n[bold]-- what changed --[/bold]")
-    _print_live_flag_diff(
-        old_edge,
-        client=SheetsClient(cfg.google_sheets),
-        edge_tab=cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw"),
-    )
-
-
-@app.command()
-def edge(
-    top: int = typer.Option(20, "--top", "-n", help="Number of leverage plays to show."),
-    position: str = typer.Option(None, "--position", "-p", help="Filter to one position (e.g. RB)."),
-) -> None:
-    """Print the top leverage plays from the last `dfs sync` locally --
-    no Sheets round-trip, quick look without opening the sheet."""
-    try:
-        df = store.load_current("edge")
-    except FileNotFoundError as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(code=1) from e
-
-    if position:
-        df = df[df["Position"].str.upper() == position.upper()]
-        if df.empty:
-            console.print(f"[yellow]No players at position {position!r}.[/yellow]")
-            raise typer.Exit(code=1)
-
-    basis = df["OwnStatus"].iloc[0] if len(df) else "?"
-    console.print(f"Ownership status: [bold]{basis}[/bold] (real Own% until TFFB computes it midweek)\n")
-
-    table = Table(title="Top leverage plays")
-    columns = (
-        "Name",
-        "Position",
-        "Team",
-        "Opp",
-        "Salary",
-        "ProjPts",
-        "Own%",
-        "Leverage",
-        "GameEnv",
-        "Flags",
-    )
-    for col in columns:
-        table.add_column(col)
-    for _, r in df.head(top).iterrows():
-        table.add_row(
-            r["Name"],
-            r["Position"],
-            r["Team"],
-            str(r["Opp"]),
-            str(r["Salary"]),
-            f"{r['ProjPts']:.1f}",
-            # Phase 6, Part 2: Own% is now a true fraction (0.146), not a
-            # raw percentage-as-number (14.6) -- :.1% does the *100 for
-            # display, matching the sheet's own PERCENT-format rendering.
-            f"{r['Own%']:.1%}",
-            f"{r['Leverage']:.1f}" if pd.notna(r["Leverage"]) else "-",
-            f"{r['GameEnv']:.1f}" if pd.notna(r["GameEnv"]) else "-",
-            # Part 7.9: "Flags" is every matching condition, space-separated
-            # -- "Flag" (singular) is now hidden, top-priority-only.
-            r["Flags"] or "",
-        )
-    console.print(table)
 
 
 @odds_app.command("snapshot")
@@ -6149,72 +5453,6 @@ def bankroll_sync(
     _keep_history_export(csv)
 
 
-@bankroll_app.command("backfill-keys")
-def bankroll_backfill_keys(
-    csv: Path = typer.Option(
-        ..., "--csv", help="Path to a DK contest-history CSV export (My Contests > export)."
-    ),
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Repair a different sheet instead of config.toml's -- e.g. a past week's sheet, "
-        "since this is a one-time repair for rows that predate the dedupe key, not a standing "
-        "per-week command.",
-    ),
-) -> None:
-    """One-time repair: fills in the dedupe-key column for existing
-    Bankroll rows that don't have one -- confirmed live (2026-09-16) that
-    rows written before this key existed, or by some path that skipped
-    it, are invisible to `sync_bucket`'s dedupe check, so a later sync of
-    overlapping contest history re-appends them as duplicates. Matches
-    each keyless row to exactly one CSV entry by its Place/Entries/
-    Entry Fee/Prize Pool/Places Paid (fields that round-trip exactly
-    through Sheets' own display formatting); a row matching zero or more
-    than one entry is left alone and reported, never guessed. Never
-    touches a row's own A-H data or an already-populated key. Safe to
-    run against a CSV that also contains entries already fully synced --
-    only blank key cells are ever written.
-    """
-    cfg = _load_config_or_exit()
-    if cfg.bankroll.cash is None or cfg.bankroll.gpp is None:
-        console.print(
-            "[red]config.toml is missing [bankroll.cash]/[bankroll.gpp][/red] "
-            "-- see config.example.toml for the shape."
-        )
-        raise typer.Exit(code=1)
-    if not csv.exists():
-        console.print(f"[red]No such file:[/red] {csv}")
-        raise typer.Exit(code=1)
-
-    df = pd.read_csv(csv)
-    try:
-        entries = parse_contest_history(df)
-    except KeyError as e:
-        console.print(f"[red]CSV is missing an expected column:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    try:
-        title, url = client.describe()
-        console.print(f"Backfilling dedupe keys in: [bold]{title}[/bold]\n{url}\n")
-        cash_result = backfill_entry_keys(client, cfg.bankroll.tab, cfg.bankroll.cash, entries, "cash")
-        gpp_result = backfill_entry_keys(client, cfg.bankroll.tab, cfg.bankroll.gpp, entries, "gpp")
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-
-    for result in (cash_result, gpp_result):
-        console.print(
-            f"[bold]{result.bucket}[/bold]: backfilled {len(result.backfilled)} row(s), "
-            f"{len(result.ambiguous_rows)} ambiguous, {len(result.unmatched_rows)} unmatched"
-        )
-        if result.ambiguous_rows:
-            console.print(f"  ambiguous rows (multiple CSV matches, left alone): {result.ambiguous_rows}")
-        if result.unmatched_rows:
-            console.print(f"  unmatched rows (no CSV match, left alone): {result.unmatched_rows}")
-
-
 @bankroll_app.command("build-betting-ledger")
 def bankroll_build_betting_ledger(
     sheet_id: str = typer.Option(
@@ -6265,56 +5503,6 @@ def bankroll_build_betting_ledger(
         f"{BLOCK_ROWS} rows -- update config.toml's [bankroll.cash]/[bankroll.gpp] row numbers "
         f"to match (old value + {BLOCK_ROWS}), then run `dfs doctor`."
     )
-
-
-@bankroll_app.command("fix-odds")
-def bankroll_fix_odds(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Fix a different sheet instead of config.toml's -- template first, then live. "
-        "Never a closed week.",
-    ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would change; write nothing."),
-) -> None:
-    """Plan N item 17: make the Betting ledger's Odds % a true percent column, so a typed 0.7% can never be
-    read as 70% again. Converts the typed values while the column still has the old literal-"%" format
-    (each to what it showed: 46 -> 46.0%, 0.7 -> 0.7%), then sets the PERCENT format and rewrites the Odds
-    formulas (`sheet_bankroll_view.repair_odds_column`). Safe to re-run: a repaired column is never
-    converted twice. Reads every changed cell back."""
-    from dfs.sheet_bankroll_view import plan_odds_repair, repair_odds_column
-
-    cfg = _load_config_or_exit()
-    bets = cfg.bankroll.bets
-    if bets is None:
-        console.print("[red]config.toml is missing [bankroll.bets][/red]: nothing to fix.")
-        raise typer.Exit(code=1)
-    target = sheet_id or cfg.google_sheets.sheet_id
-    if cfg.google_sheets.previous_sheet_id and target == cfg.google_sheets.previous_sheet_id:
-        console.print("[red]That is last week's sheet (previous_sheet_id): a closed week is read only.[/red]")
-        raise typer.Exit(code=1)
-    gs_cfg = cfg.google_sheets.model_copy(update={"sheet_id": sheet_id}) if sheet_id else cfg.google_sheets
-    client = SheetsClient(gs_cfg)
-    tab = cfg.bankroll.tab
-    try:
-        title, url = client.describe()
-        console.print(
-            f"{'Checking' if dry_run else 'Fixing'} the Odds % column on: [bold]{title}[/bold]\n{url}\n"
-        )
-        plan = (plan_odds_repair if dry_run else repair_odds_column)(
-            client, tab, bets.first_row, bets.last_row
-        )
-        for line in plan.lines(tab):
-            console.print(f"{'would' if dry_run else '[green]OK[/green]'} {escape(line)}")
-        if dry_run:
-            return
-        shown = client.read_range(tab, f"A{bets.first_row}:C{bets.last_row}")
-        for i, row in enumerate(shown):
-            if row and any(str(x).strip() for x in row):
-                console.print(f"  row {bets.first_row + i}: " + " | ".join(str(x) for x in row))
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
 
 
 @bankroll_app.command("stakes")
@@ -6682,18 +5870,6 @@ def auth_tffb() -> None:
         "tffb",
         "https://www.thefantasyfootballers.com/2025-ultimate-dfs-pass/dfs-pass-lineup-optimizer/",
         success_check="the DFS Lineup Optimizer, not a 'Get the DFS Pass to unlock' paywall",
-    )
-
-
-@auth_app.command("dk")
-def auth_dk() -> None:
-    """One-time interactive login to DraftKings."""
-    from dfs.browser import interactive_login
-
-    interactive_login(
-        "dk",
-        "https://www.draftkings.com/",
-        success_check="your DraftKings lobby/account menu, not a login prompt",
     )
 
 

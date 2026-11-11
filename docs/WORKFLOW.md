@@ -88,8 +88,6 @@ copied every week.
 ```
 dfs sync              # re-run any time through the week as lines/injuries/weather move
 dfs sync --live       # gameday: odds/DK status/TFFB projections+ownership/weather only, prints what changed
-dfs edge              # top leverage plays, in the terminal, no browser needed
-dfs go                # sync + dfs doctor + what changed, back to back
 ```
 
 Every sync also rewrites the **Edge Finder** tab (cash core and GPP upside per position with a reason and a verb on every row, punt plays, where
