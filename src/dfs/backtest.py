@@ -25,7 +25,10 @@ in it: a single-entry double-up is one coin flip a week.
 among the contest's real final scores (the builds are an extra entry, as in the contest retro) and it shares
 the payout of its real copies in the field (`contest_retro.realized_payout`'s rule), paid from the contest's
 fitted payout table (`sim/payouts.py`, the min-cash tier fitted on Sam's own results). Cashed = paid anything;
-Top 1% = at or above the contest's real top-1% score.
+Top 1% / Top 10% = at or above the contest's real top-1% / top-10% score; the finish percentile is the share
+of the contest's real scores the lineup matched or beat (0.99 = the top 1%). Dollars hang on one ticket; the
+percentile, the points and the top-10% rate do not, so the report shows them beside the ROI (blueprint
+section 8).
 
 **Beside Sam.** His real lineups in the same contests, twice: with the winnings DraftKings actually paid him
 (the history log) and re-paid on the same fitted table as the builds, so the comparison is like for like
@@ -55,8 +58,8 @@ import numpy as np
 import pandas as pd
 
 from dfs import backtest_settings as bs
+from dfs import build_exact, pool_store, suggest_state
 from dfs import lineup_suggest as ls
-from dfs import pool_store, suggest_state
 from dfs.contests import history, week_frames
 from dfs.paths import REPO_ROOT
 from dfs.player_join import normalize_name
@@ -72,6 +75,7 @@ ME = contest_retro.ME
 MIN_POOL_PLAYERS = 25  # a saved pool smaller than this is not a pool anyone builds twenty lineups from
 N_SIMS = curse.N_SIMS
 WORKERS = 6
+TOP10_FRACTION = 0.10  # "top 10%": at or above the score of the entry that far down the real standings
 
 # ---------------------------------------------------------------------------------------------------------
 # The builds of one week under one set of settings
@@ -188,8 +192,9 @@ def default_builder(ctx: bs.BuildContext) -> list[ls.Build]:
 
 def run_builder(ctx: bs.BuildContext) -> list[ls.Build]:
     """The settings' flags around the default builder: `prepare` hooks in order, then the `build` hooks nested
-    (the first registered is the outermost)."""
-    return build_prepared(prepare_context(ctx))
+    (the first registered is the outermost). Every search inside runs with the settings' solver."""
+    with build_exact.use(ctx.settings.solver):
+        return build_prepared(prepare_context(ctx))
 
 
 def prepare_context(ctx: bs.BuildContext) -> bs.BuildContext:
@@ -270,9 +275,10 @@ def run_week(
     if path.exists() and not fresh and code != "nogit":
         return json.loads(path.read_text())
     started = time.monotonic()
-    ctx = prepare_context(make_context(wi, settings))
-    builds = build_prepared(ctx)
-    chosen = run_choose(ctx, builds, lambda: week_contests(wi.week))
+    with build_exact.use(settings.solver):  # every search of the week, a flag's own builder runs included
+        ctx = prepare_context(make_context(wi, settings))
+        builds = build_prepared(ctx)
+        chosen = run_choose(ctx, builds, lambda: week_contests(wi.week))
     out = {
         "week": wi.week,
         "settings": settings.name,
@@ -358,6 +364,18 @@ class Entered:
     def fmt(self) -> str:
         return self.c.fmt
 
+    def percentile(self, points: float) -> float:
+        """The share of the contest's real final scores that `points` matches or beats (0.99: the top 1%)."""
+        n = len(self.sorted_pts)
+        if not n:
+            return float("nan")
+        return float(np.searchsorted(self.sorted_pts, points + 1e-9, side="right") / n)
+
+    def line(self, fraction: float) -> float:
+        """The real score of the entry `fraction` of the way down the standings (0.10: the top-10% line)."""
+        n = len(self.sorted_pts)
+        return float(self.sorted_pts[n - max(1, round(fraction * n))]) if n else float("nan")
+
     def pay(self, names: Sequence[str], points: float, *, own: bool = False) -> float:
         """What a lineup of `names` (normalised) scoring `points` is paid here: its place among the real final
         scores and the payout shared with its real copies; `own` for one of Sam's real lineups (one of those
@@ -439,6 +457,8 @@ ROW_COLUMNS = [
     "paid",
     "cashed",
     "top1",
+    "top10",
+    "pct",
 ]
 
 
@@ -545,6 +565,8 @@ def _row(side: str, e: Entered, slot: int, scope: str, points: float, paid: floa
         "paid": paid,
         "cashed": float(paid > 1e-9),
         "top1": float(points >= e.top1_line - 1e-9),
+        "top10": float(points >= e.line(TOP10_FRACTION) - 1e-9),
+        "pct": e.percentile(points),
     }
 
 
@@ -566,7 +588,10 @@ def sam_rows(entered: list[Entered]) -> pd.DataFrame:
 
 
 def contest_table(rows: pd.DataFrame) -> pd.DataFrame:
-    """One line per side, scope, contest: dollars in and out, entries, cashes and top-1% hits."""
+    """One line per side, scope, contest: dollars in and out, entries, cashes, top-1% and top-10% hits, the
+    mean finish percentile and points. Rows without `top10` / `pct` (built before those columns) count as
+    unknown there."""
+    rows = rows.reindex(columns=[*rows.columns, *(c for c in ("top10", "pct") if c not in rows.columns)])
     g = rows.groupby(["side", "scope", "week", "contest", "series", "fmt"], sort=True)
     t = g.agg(
         entries=("paid", "size"),
@@ -574,6 +599,8 @@ def contest_table(rows: pd.DataFrame) -> pd.DataFrame:
         paid=("paid", "sum"),
         cashed=("cashed", "sum"),
         top1=("top1", "sum"),
+        top10=("top10", "sum"),
+        pct=("pct", "mean"),
         points=("points", "mean"),
     ).reset_index()
     t["cost"] = t["entries"] * t["fee"]
@@ -636,6 +663,22 @@ def paired_vs(t: pd.DataFrame, a: str, b: str, scope: str = "entry", fmt: str | 
         "se_week": se_w,
         "weeks_won": int((wd > 0).sum()),
     }
+
+
+def paired_metric(
+    rows: pd.DataFrame, a: str, b: str, column: str, scope: str = "entry", fmt: str | None = None
+) -> dict:
+    """Side `a` minus side `b` in the mean of `column` (`pct`, `points`, `top10`) over each week's entries:
+    the mean difference across weeks, its standard error and the weeks `a` was ahead. Every entry counts once
+    (not every dollar), so one ticket cannot carry it."""
+    d = rows[rows["scope"] == scope]
+    if fmt is not None:
+        d = d[d["fmt"] == fmt]
+    wa = d[d["side"] == a].groupby("week")[column].mean()
+    wb = d[d["side"] == b].groupby("week")[column].mean()
+    wd = (wa - wb).dropna()
+    mean, se = mean_se(wd)
+    return {"weeks": len(wd), "diff_week": mean, "se_week": se, "weeks_won": int((wd > 0).sum())}
 
 
 @dataclass

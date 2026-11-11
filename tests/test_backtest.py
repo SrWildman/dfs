@@ -341,6 +341,47 @@ def test_paired_vs_is_by_contest_and_by_week_with_weeks_won():
     assert p["diff_week"] == pytest.approx(np.mean([(30 - 20) / 20, -10 / 10, 40 / 10]))
 
 
+def test_the_finish_percentile_and_the_top_10_line_come_from_the_real_scores():
+    e = contest(list(range(100, 200)))  # a hundred entries scoring 100 .. 199
+    assert e.percentile(199) == 1.0 and e.percentile(99.9) == 0.0
+    assert e.percentile(149) == 0.5  # matched or beat fifty of the hundred
+    assert e.line(bt.TOP10_FRACTION) == 190.0 and e.line(0.01) == 199.0
+    at_the_line = bt._row("backtest", e, 1, "entry", 190.0, 0.0)  # noqa: SLF001
+    assert at_the_line["top10"] == 1.0 and at_the_line["pct"] == pytest.approx(0.91)
+    assert bt._row("backtest", e, 1, "entry", 189.9, 0.0)["top10"] == 0.0  # noqa: SLF001
+    assert {"top10", "pct"} <= set(bt.ROW_COLUMNS)
+
+
+def test_paired_metric_counts_every_entry_once_by_week():
+    spec = [(4, "a", "gpp", 10, 0, 1, 0), (4, "b", "gpp", 10, 0, 1, 0), (5, "c", "gpp", 10, 0, 1, 0)]
+    a = rows("A", "entry", spec).assign(pct=[0.60, 0.80, 0.40], top10=[0.0, 1.0, 0.0], points=[120, 140, 100])
+    b = rows("B", "entry", spec).assign(pct=[0.50, 0.50, 0.50], top10=[0.0, 0.0, 0.0], points=[110, 110, 110])
+    both = pd.concat([a, b])
+    finish = bt.paired_metric(both, "A", "B", "pct")
+    assert finish["weeks"] == 2 and finish["weeks_won"] == 1  # week 4: 0.70 against 0.50; week 5: 0.40
+    assert finish["diff_week"] == pytest.approx(np.mean([0.20, -0.10]))
+    assert bt.paired_metric(both, "A", "B", "points")["diff_week"] == pytest.approx(np.mean([20.0, -10.0]))
+    assert bt.paired_metric(both, "A", "B", "top10", fmt="cash")["weeks"] == 0  # no cash rows: nothing paired
+    line = rep.metric_line(both, "entry", None)
+    assert "finish +5.0 pts" in line and "A ahead in 1 of 2 weeks" in line
+    assert "points +5.0" in line and "top 10% +25.0 pts" in line
+    assert rep.metric_line(both, "any", None) == ""
+
+
+def test_the_table_shows_top_10_finish_and_points_beside_the_roi():
+    spec = [(4, "a", "gpp", 10, 0, 100, 0), (5, "c", "gpp", 10, 90, 180, 1)]
+    d = rows("backtest", "entry", spec).assign(pct=[0.40, 0.98], top10=[0.0, 1.0])
+    s = rep.stats(d)
+    assert s["finish"] == pytest.approx(0.69) and s["top10"] == 0.5 and s["points"] == 140.0
+    r = result()
+    r.rows = d
+    head, line = rep.table_lines(r)
+    assert head.split() == [
+        *"entries in out ROI cash top 1% top 10% finish points ROI w/o best ticket".split()
+    ]
+    assert "50.0%" in line and "69%" in line and "140.0" in line
+
+
 def test_the_verdict_needs_four_weeks_two_standard_errors_and_most_weeks():
     ok = {"diff_week": 0.5, "se_week": 0.1, "weeks": 4, "weeks_won": 4}
     assert rep.verdict(ok, 4) == "clears the bar"

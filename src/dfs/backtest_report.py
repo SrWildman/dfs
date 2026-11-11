@@ -54,8 +54,8 @@ def side_rows(rows: pd.DataFrame, name: str, side: str, fmt: str | None = None) 
 
 
 def stats(d: pd.DataFrame) -> dict[str, float]:
-    """Entries, dollars, ROI, cash rate, top-1% rate, the ROI without the single best ticket, and the ROI by
-    week."""
+    """Entries, dollars, ROI, cash rate, top-1% and top-10% rates, the mean finish percentile and points, the
+    ROI without the single best ticket, and the ROI by week."""
     if d.empty:
         return {
             "entries": 0,
@@ -64,6 +64,9 @@ def stats(d: pd.DataFrame) -> dict[str, float]:
             "roi": float("nan"),
             "cash": float("nan"),
             "top1": float("nan"),
+            "top10": float("nan"),
+            "finish": float("nan"),
+            "points": float("nan"),
             "ex_top": float("nan"),
             "week_se": float("nan"),
             "weeks": 0,
@@ -81,6 +84,9 @@ def stats(d: pd.DataFrame) -> dict[str, float]:
         "roi": paid / cost - 1.0,
         "cash": float(d["cashed"].mean()),
         "top1": float(d["top1"].mean()),
+        "top10": float(d["top10"].mean()),
+        "finish": float(d["pct"].mean()),
+        "points": float(d["points"].mean()),
         "ex_top": float(ex["paid"].sum() / ex["fee"].sum() - 1.0) if len(ex) else float("nan"),
         "week_se": se,
         "weeks": int(d["week"].nunique()),
@@ -88,8 +94,10 @@ def stats(d: pd.DataFrame) -> dict[str, float]:
 
 
 def table_lines(result: bt.Result, fmt: str | None = None) -> list[str]:
-    """The comparison table for one format (None: all), one row per side."""
+    """The comparison table for one format (None: all), one row per side. `finish` is the mean finish
+    percentile (the share of the real field matched or beaten) and `points` the mean DraftKings score."""
     head = f"{'':26}{'entries':>8}{'in':>8}{'out':>8}{'ROI':>8}{'cash':>7}{'top 1%':>8}"
+    head += f"{'top 10%':>9}{'finish':>8}{'points':>8}"
     lines = [head + f"{'ROI w/o best ticket':>21}"]
     for side, label in SIDES.items():
         s = stats(side_rows(result.rows, result.name, side, fmt))
@@ -104,6 +112,9 @@ def table_lines(result: bt.Result, fmt: str | None = None) -> list[str]:
             f"{pct(s['roi'], 0, True):>8}",
             f"{pct(s['cash']):>7}",
             f"{pct(s['top1'], 1):>8}",
+            f"{pct(s['top10'], 1):>9}",
+            f"{pct(s['finish']):>8}",
+            f"{s['points']:>8.1f}",
             f"{pct(s['ex_top'], 0, True):>21}",
         ]
         lines.append("".join(cells))
@@ -237,6 +248,15 @@ def compare_lines(a: bt.Result, b: bt.Result) -> list[str]:
             by_week = f"by week {p['diff_week']:+.1%} (SE {p['se_week']:.1%})"
             by_week += f", A wins {p['weeks_won']} of {p['weeks']} weeks"
             out.append(f"- {label}, {flabel}: {per_contest}; {by_week}")
+    out.append(
+        "Beside the dollars, A minus B by week, every entry counting once: finish percentile (share of the "
+        "real field matched or beaten), DraftKings points, top-10% rate"
+    )
+    for scope, label in (("entry", "as entered"), ("any", "any build")):
+        for fmt, flabel in ((None, "all"), ("cash", "cash"), ("gpp", "GPP")):
+            line = metric_line(rows, scope, fmt)
+            if line:
+                out.append(f"- {label}, {flabel}: {line}")
     # a flag that changes which builds go in (not the builds) shows only as entered: judge it there
     scope = "entry" if enters_differently(a) or enters_differently(b) else "any"
     p = bt.paired_vs(t, "A", "B", scope, None)
@@ -252,6 +272,22 @@ def compare_lines(a: bt.Result, b: bt.Result) -> list[str]:
             "search finishes: it then gives the same builds every time."
         )
     return out
+
+
+def metric_line(rows: pd.DataFrame, scope: str, fmt: str | None) -> str:
+    """A minus B by week in finish percentile, points and top-10% rate ("" when the two share no week)."""
+    finish = bt.paired_metric(rows, "A", "B", "pct", scope, fmt)
+    if not finish["weeks"]:
+        return ""
+    points = bt.paired_metric(rows, "A", "B", "points", scope, fmt)
+    top10 = bt.paired_metric(rows, "A", "B", "top10", scope, fmt)
+    return (
+        f"finish {finish['diff_week'] * 100:+.1f} pts (SE {finish['se_week'] * 100:.1f}), A ahead in "
+        f"{finish['weeks_won']} of {finish['weeks']} weeks; points {points['diff_week']:+.1f} (SE "
+        f"{points['se_week']:.1f}), ahead in {points['weeks_won']} of {points['weeks']}; top 10% "
+        f"{top10['diff_week'] * 100:+.1f} pts (SE {top10['se_week'] * 100:.1f}), ahead in "
+        f"{top10['weeks_won']} of {top10['weeks']}"
+    )
 
 
 def enters_differently(r: bt.Result) -> bool:
@@ -348,8 +384,11 @@ def render(results: list[bt.Result], compare: list[str] | None = None, when: dat
         "believe the by-week numbers, not the by-contest ones, and treat anything resting on one ticket as "
         "luck. 'As entered' puts the best builds by the tool's own ranking into the contests Sam entered; "
         "'any build' scores every build in every one of them (the same question with less luck in it). "
-        "Builds ran with each setting's search budget (`seconds`; the live tool stops at 120) on the pool "
-        "the report names.",
+        "Builds ran with each setting's search budget (`seconds`; the live tool stops at 120), or to the end "
+        'with `solver = "exact"`, on the pool the report names. `finish` is the mean finish percentile (the '
+        "share of the contest's real scores a lineup matched or beat), `points` its mean DraftKings score "
+        "and `top 10%` how often it reached the real top-10% line: they count every entry once, so one "
+        "ticket cannot carry them the way it carries the ROI.",
         "",
     ]
     return "\n".join(out)
@@ -390,5 +429,7 @@ def refresh_from(result: bt.Result) -> dict:
         "builds any roi ex best": round(anyb["ex_top"], 4),
         "sam roi": round(sam["roi"], 4),
         "builds cash rate": round(built["cash"], 4),
+        "builds any finish pct": round(anyb["finish"], 4),
+        "builds any top10 rate": round(anyb["top10"], 4),
     }
     return {"headline": [head, "", *summary_lines(result)[2:]], "metrics": metrics, "ship_bar": SHIP_BAR}
