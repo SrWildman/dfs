@@ -168,6 +168,13 @@ shadow_min_weeks = 3
 [suggest]
 bring_back_gain = 0.25
 
+# How `dfs lineups suggest` searches for candidate lineups. "search" (the default) is the budgeted search that
+# `--seconds` can cut short ("a better build may exist"). "exact" finishes the same search, with the same rules
+# and the same objective, in seconds and with no budget, so the same pool always gives the same builds
+# (docs/SIM.md, "Exact search"). "milp" is the slow HiGHS checker of "exact": minutes a week, never needed to build.
+[builds]
+solver = "search"
+
 # Contest selection (dfs week close): where to find the two files you download from DraftKings by hand -- the
 # contest-entry history export and the per-contest "export full standings" files -- and which double-up's
 # standings fill Results' blank Cash Line (a value you typed is never overwritten).

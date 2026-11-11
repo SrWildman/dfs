@@ -1,0 +1,7 @@
+# Today's GPP builds alone with the exact search: the baseline `calls_fade_gpp_exact.toml` is compared
+# against (blueprint Phase E's rerun of the FADE-ban Flashback, R6). Shadow.
+name = "today (GPP only, exact search)"
+
+[builds]
+cash = 0
+solver = "exact"

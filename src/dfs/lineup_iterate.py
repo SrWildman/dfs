@@ -65,6 +65,7 @@ from dfs import lineup_suggest as ls
 from dfs import my_frame
 from dfs import search_clock as clock
 from dfs import suggest_state as st
+from dfs.build_exact import LeafRules, described
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import SwapPlayer, conflicts, edge_players
 from dfs.models import ROSTER_SLOTS
@@ -741,7 +742,14 @@ def _leaf(rules: st.Rules, tags: dict[str, str], kind: str) -> Callable[[Sequenc
         tests.append(ls.not_all_cash(tags))
     if not tests:
         return None
-    return lambda players: all(test(players) for test in tests)
+    return described(
+        lambda players: all(test(players) for test in tests),
+        LeafRules(
+            need_one_of=frozenset(n for n, t in tags.items() if t in ls.GPP_MARKS) if kind == "gpp" else None,
+            max_per_game=rules.max_per_game,
+            stacks=rules.stacks or None,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------------------------
