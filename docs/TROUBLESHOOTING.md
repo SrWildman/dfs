@@ -21,9 +21,12 @@ Cause: this project's CLI got reorganized (one-time sheet construction
 moved under `dfs setup ...`, `dfs sheets doctor` promoted to top-level
 `dfs doctor`) -- see README's Commands table or `dfs --help` for the
 current shape.
-Fix: `dfs sheets ...` (the old spelling) still works for one season as a
-deprecated alias and prints the new name the first time you use it; or
-just use the new name directly.
+Fix: use the new name (`dfs setup ...`, `dfs doctor`); the old `dfs sheets
+...` spelling has been removed. The one-time sheet repairs (`setup remove-*`,
+`setup fix-*`, `setup resize-player-pool`, `bankroll backfill-keys`,
+`bankroll fix-odds`), `dfs go`, `dfs edge` and `dfs auth dk` were removed too
+(Nov 2026); every new week is a copy of the template, which already has
+every repair.
 
 ---
 
@@ -146,8 +149,9 @@ first, then live), and every plain `dfs sync` does too. The colour scales now ig
 
 **A bet's Odds look wrong (a long shot shows as a favourite).**
 Cause: the Odds % cell was typed under the old literal-"%" format, so `0.7` read as 70%.
-Fix: `dfs bankroll fix-odds --dry-run`, then `dfs bankroll fix-odds` (template first). Type Odds % as a
-percent (`46%`); a bare number shows "type it as 46%".
+Fix: type Odds % as a percent (`46%`); a bare number shows "type it as 46%". (The one-time repair of old
+literal-"%" columns, `dfs bankroll fix-odds`, has been removed: the template and every copy of it are repaired,
+and a closed week keeps its old reading.)
 
 ---
 

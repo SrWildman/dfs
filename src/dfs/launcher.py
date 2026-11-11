@@ -166,9 +166,6 @@ ANSWER_DEFAULTS = {("dfs export", "output"): "lineups.csv"}
 QUESTIONS = {
     ("dfs week new", "sheet_url"): "Link (or ID) of this week's sheet -- the copy of the template",
     ("dfs export", "output"): "File to write",
-    ("dfs bankroll backfill-keys", "csv"): (
-        "DraftKings contest-history CSV (My Contests > export) -- drag the file in"
-    ),
     ("dfs pool add", "names"): "Player name(s), separated by commas",
     ("dfs pool remove", "names"): "Player name(s), separated by commas",
 }
@@ -282,8 +279,6 @@ MORE_LABELS = {
     "dfs entries fill": "Fill DK's entries file: you pick each entry's lineup, then upload",
     "dfs entries print": "Print every lineup as Name (ID) for DK, and write a file",
     "dfs entries record": "At lock: record what you entered, where, and which build it came from",
-    "dfs go": "Sync, check the sheet and report what changed, in one go",
-    "dfs edge": "Show the top leverage plays from the last sync",
     "dfs pool clear": "Clear your whole pool",
     "dfs odds movement": "Which betting lines moved since the last sync",
     "dfs bankroll sync": "Reconcile a DK contest-history CSV into Bankroll",
@@ -302,11 +297,8 @@ MORE_LABELS = {
     "dfs sim script": "Test whether the spread or implied total changes a correlation (slow)",
     "dfs sim demo": "Worked example: two lineups, one stacked, and a swap",
     "dfs auth tffb": "Log in to The Fantasy Footballers (one time)",
-    "dfs auth dk": "Log in to DraftKings (one time)",
     "dfs auth fantasypros": "Log in to FantasyPros (one time)",
-    "dfs bankroll backfill-keys": "Repair: fill in Bankroll's dedupe keys",
     "dfs bankroll build-betting-ledger": "Build the hand-entered Betting ledger",
-    "dfs bankroll fix-odds": "Make the Betting ledger's Odds % a true percent",
     "dfs setup native-lookups": "Rewrite stale Player Pool / Lineups lookups",
     "dfs setup sheet": "Build a whole sheet from scratch (the full setup)",
     "dfs setup polish": "Re-apply widths, formats and header styling",
@@ -332,15 +324,6 @@ MORE_LABELS = {
     "dfs setup lineup-chalk": "Add the missing-chalk warning to Lineups' Issues column",
     "dfs setup guard-empty-states": "Restore the empty-state guards on division cells",
     "dfs setup other-sports": "Give non-NFL contests their own Bankroll ledger and Season columns",
-    "dfs setup resize-player-pool": "Resize the Player Pool position blocks",
-    "dfs setup fix-opp-pos-rank": "One-time fix: opponent position rank",
-    "dfs setup fix-pct-of-cap": "One-time fix: the % of Own column",
-    "dfs setup fix-flag-split": "One-time fix: split the Flag column",
-    "dfs setup fix-lineups-dst-label": "One-time fix: Lineups' DST label",
-    "dfs setup remove-pool-deck": "Remove the retired pool deck",
-    "dfs setup remove-retired-tabs": "Remove retired tabs",
-    "dfs setup remove-sos-placeholders": "Remove the SoS placeholder tabs",
-    "dfs setup remove-lineup-metrics": "Remove the retired Lineups metric columns",
     "dfs odds snapshot": "Save the current betting lines (no sheet)",
     "dfs model fetch": "Download the public NFL history the model and simulator read",
     "dfs model train": "Retrain the player-outcome model (about 2 minutes)",
@@ -351,7 +334,6 @@ MORE_LABELS = {
     "dfs research refresh": "Rerun the weekly offline studies and write one report",
     "dfs research close-report": "Monday's studies after a close, in one report (no sheet)",
     "dfs backtest": "Flashback: would these build settings have made money? (your real contests)",
-    "dfs setup remove-model-implied": "Remove the retired model-implied column",
 }
 
 

@@ -73,19 +73,6 @@ Read-only structural check: every tab named in config.toml exists, EdgeRaw's hea
 |---|---|
 | `--sheet-id STR` | Check a different sheet instead of config.toml's -- e.g. a freshly made weekly copy or the canonical template, before pointing anything at it. |
 
-### `dfs go`
-
-Sync, check the sheet, and report what changed -- the three commands you'd otherwise run back to back every time anyway. Stops at the first failure (a failed sync means nothing to check; a failed doctor means don't trust what changed until it's fixed).
-
-### `dfs edge`
-
-Print the top leverage plays from the last `dfs sync` locally -- no Sheets round-trip, quick look without opening the sheet.
-
-| Option | What it does |
-|---|---|
-| `--top / -n INT` | Number of leverage plays to show. Default: `20`. |
-| `--position / -p STR` | Filter to one position (e.g. RB). |
-
 ### `dfs week new`
 
 Move config.toml to a new week's sheet copy: check the new sheet's structure (`dfs doctor`), carry the bankroll and Results log forward, clear last week's lineups, and run a full sync -- in that order, with one confirmation before anything is written.
@@ -387,22 +374,9 @@ Clear last week's typed-in lineup data (Lineups/Player Pool name columns, DK Upl
 
 One-time interactive login to The Fantasy Footballers (DFS Pass).
 
-### `dfs auth dk`
-
-One-time interactive login to DraftKings.
-
 ### `dfs auth fantasypros`
 
 One-time interactive login to FantasyPros (Part C -- anonymous projection pages cap at 10 players/position behind a registration wall; a logged-in session is required for full weekly projections).
-
-### `dfs bankroll backfill-keys`
-
-One-time repair: fills in the dedupe-key column for existing Bankroll rows that don't have one -- confirmed live (2026-09-16) that rows written before this key existed, or by some path that skipped it, are invisible to `sync_bucket`'s dedupe check, so a later sync of overlapping contest history re-appends them as duplicates. Matches each keyless row to exactly one CSV entry by its Place/Entries/ Entry Fee/Prize Pool/Places Paid (fields that round-trip exactly through Sheets' own display formatting); a row matching zero or more than one entry is left alone and reported, never guessed. Never touches a row's own A-H data or an already-populated key. Safe to run against a CSV that also contains entries already fully synced -- only blank key cells are ever written.
-
-| Option | What it does |
-|---|---|
-| `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). **Required.** |
-| `--sheet-id STR` | Repair a different sheet instead of config.toml's -- e.g. a past week's sheet, since this is a one-time repair for rows that predate the dedupe key, not a standing per-week command. |
 
 ### `dfs bankroll build-betting-ledger`
 
@@ -411,15 +385,6 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build on a different sheet instead of config.toml's -- template first, then live, per the two-sheet rule. This is a one-time structural build, not a per-week command. |
-
-### `dfs bankroll fix-odds`
-
-Plan N item 17: make the Betting ledger's Odds % a true percent column, so a typed 0.7% can never be read as 70% again. Converts the typed values while the column still has the old literal-"%" format (each to what it showed: 46 -> 46.0%, 0.7 -> 0.7%), then sets the PERCENT format and rewrites the Odds formulas (`sheet_bankroll_view.repair_odds_column`). Safe to re-run: a repaired column is never converted twice. Reads every changed cell back.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Fix a different sheet instead of config.toml's -- template first, then live. Never a closed week. |
-| `--dry-run` | Print what would change; write nothing. |
 
 ## Reference: season-long leagues and the Season sheet (only when needed)
 
@@ -876,87 +841,6 @@ Plan D item 2 (Sam, 2026-11-03: "own category, but it's the same total bankroll"
 | `--history` | Also split the Season rows already written (non-NFL money out of GPP into Other, from the kept DK history export) and re-read last week's row from its own Bankroll. The live week only, never the template. |
 | `--csv PATH` | The DK contest-history export for --history (default: the newest kept one). |
 | `--dry-run` | Print what would change; write nothing. |
-
-### `dfs setup resize-player-pool`
-
-PROMPT_BOARD_FIXES.md item 8 (2026-09-25): grows each of Player Pool's five position blocks to `weekly_reset.PLAYER_POOL_BLOCK_ROWS`' row counts (QB/TE 10->17, RB 20->22, WR 25->27, DST 10->12) via real `insertDimension` calls (`sheet_pool_resize.resize_player_pool`) -- restoring the player capacity `sheet_pool_formulas._grouped_with_ separators_formula`'s own blank separator rows (Fix 3/A7) had been silently eating into.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Resize a different sheet instead of config.toml's -- ALWAYS run against the canonical template first, verify with real cell reads, then run again against the live sheet. |
-
-### `dfs setup fix-opp-pos-rank`
-
-Found live 2026-09-16, the first time real strength-of-schedule data ever flowed through it: `PlayerPoolRaw`'s `OppPosRank` -- a hand-typed `VLOOKUP`+`HLOOKUP` against `SoSComb` that nothing in this codebase previously regenerated -- was keyed on this row's own `Team` column instead of `Opp.`, so every value measured how tough a player's OWN defense is, never their actual opponent's. Rewrites every row's formula, keyed correctly this time (`sheet_pool_raw_sos. rewrite_opp_pos_rank`). Player Pool/Lineups need no separate fix -- both already VLOOKUP their own `OppPosRank` off PlayerPoolRaw by Name, so they self-heal the moment PlayerPoolRaw's own value is correct.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
-
-### `dfs setup fix-pct-of-cap`
-
-Part 7.9 (2026-09-17): `Lineups`' `% of Own` column (renamed from `% of Rstr` in Phase 6, Part 2) was really cap allocation misnamed and mis-derived -- `=F<row>/F$<totals_row>`, this player's DK Sal as a share of the lineup's own running salary total, not its rostership. Renames the header to `% of Cap` in place first (`rename_header_ column`, same "rename before any name-based lookup touches it" order as every other column rename in this codebase), then redivides by the salary cap (`config.toml`'s `[lineups] salary_cap`) instead, which also removes the `#DIV/0!` Part 1.2 previously guarded against -- a constant denominator can't divide by zero (`sheet_style.polish_lineups_pct_of_cap`).
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
-
-### `dfs setup fix-flag-split`
-
-Part 7.9 (2026-09-17), three changes to `PlayerPoolRaw`/`Player Pool`/`Lineups`, run together since all three touch the same Ceiling-detail/spine region:
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Fix a different sheet instead of config.toml's -- ALWAYS run against the canonical template first, verify with `dfs doctor`, then run again against the live sheet. |
-
-### `dfs setup fix-lineups-dst-label`
-
-Found live (2026-09-18) verifying Part 7.4's DST-vs-own-QB guardrail with a real test lineup: it never fired. `Lineups`' own `Pos.` column is static text, one fixed roster-slot label per row -- the defense slot says `"DEF"` on every block, both sheets, instead of `"DST"` (this codebase's own convention everywhere else), so the guardrail's own `MATCH("DST", ...)` could never find it (`sheet_style.fix_lineups_dst_slot_label`).
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Fix a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
-
-### `dfs setup remove-pool-deck`
-
-Phase 5 (2026-09-16): the pool deck -- frozen rows at the top of Lineups holding a sortable/filterable window into Player Pool -- is retired. Sam, after a week building real lineups against it: "I've used it week 1 and it was a pain," and on the "where is this player" jump control alone -- "doesn't get me much. Cut it." Player Pool's own colour scales/chips/`Used`/`In` columns cover the browsing job now.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Remove the pool deck from a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
-
-### `dfs setup remove-retired-tabs`
-
-Phase 6 Part 4b (2026-09-22): `Scratch` (a blank drafting grid, no formulas) and the `EntriesRaw`/`GPPin`/`DKLineupsRaw`/`DKLineupsFinal` hand-paste DK-contest-history chain (superseded by `dfs week close --csv`'s CSV-based path) are retired -- Sam confirmed he does not use any of the five, and `dfs` never read or wrote them except to clear/style them. Asymmetric by design: run this with `--mode delete` against the template and `--mode hide` against the live sheet -- never delete on live, `EntriesRaw` may hold real pasted history. Idempotent either way. Also removes these five's own rows from the `Instructions` tab on whichever sheet this runs against, regardless of `--mode` -- the documentation should read correctly on both. See `sheet_tab_removal.py`'s module docstring and `docs/planning/PROMPT_DATA.md` for where a past entry's roster-slot detail lives now that `EntriesRaw` is gone (the DK export CSVs on disk).
-
-| Option | What it does |
-|---|---|
-| `--mode STR` | 'delete' (template -- future weekly copies start clean) or 'hide' (live sheet -- EntriesRaw may hold real pasted history a delete can't recover; a hidden tab is still fully readable/writable by dfs sync). See Part 4b in CONTRIBUTING.md's changelog. **Required.** |
-| `--sheet-id STR` | Act on a different sheet instead of config.toml's -- e.g. the canonical weekly template (pass --mode delete there; the live sheet should get --mode hide). |
-
-### `dfs setup remove-sos-placeholders`
-
-Phase 5 (2026-09-16): `SoS 1`/`SoS 2`/`SoS 3`/`SoS 4` -- four blank GAME-zone columns reserved on PlayerPoolRaw/Player Pool/Lineups back when strength-of-schedule data didn't exist yet -- are retired now that the real sync (`sources/tffb_sos.py`) landed straight into `OppPosRank` instead. Sam: "Why still sos 1-4. Should only be one per player." Deletes all four columns (a real Sheets column delete, so everything to their right shifts left) from each of the three tabs. No-op per tab if none of the four are present (already removed, or a sheet built after this migration already shipped without them). See `sheet_reorder.remove_header_columns` and CONTRIBUTING.md's changelog.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Remove the placeholders from a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
-
-### `dfs setup remove-lineup-metrics`
-
-Round 5 item 1c (2026-09-29): Sam doesn't use `Stack`, `Bring-back` or `Own% Used`, and `Sub-10%` never worked to his eye. Deletes all four from Lineups (a real Sheets column delete -- everything to their right shifts left, and the repeated per-block header rows go with them). `Games` and `Min Unique` stay. No-op if none are present. See `sheet_reorder.remove_header_columns` and CONTRIBUTING.md's changelog; run `dfs doctor` afterwards.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Remove the columns from a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
-
-### `dfs setup remove-model-implied`
-
-Round 5 item 5c (2026-09-29): GPS's `Implied Total` is Vegas, not a model (`gps_check.py`), so EdgeRaw's `ModelImplied` and its linked copies on PlayerPoolRaw/Player Pool/Lineups are retired. This deletes the three linked columns (a real Sheets column delete -- everything to their right shifts left). EdgeRaw itself just needs a fresh `dfs sync --only edge`, and `dfs setup link-edge --force` then re-derives every VLOOKUP index. Run in that order; no-op per tab if the column is already gone.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Remove the column from a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
 
 ## Data sources
 

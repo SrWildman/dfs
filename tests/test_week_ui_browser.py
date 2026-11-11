@@ -376,7 +376,7 @@ def test_the_run_panel_is_the_weekly_buttons_curated_forms_and_recent_runs(page)
     assert labels == [w.label for w in week_jobs.WEEKLY]
     assert not page.evaluate("document.querySelector('#run-adv').open")
     adv = page.evaluate("[...document.querySelectorAll('#run-adv-list button')].map(b => b.textContent)")
-    assert "setup fix-opp-pos-rank" in adv and "setup polish" in adv
+    assert "setup repair-formula-ranges" in adv and "setup polish" in adv
     others = page.evaluate("[...document.querySelectorAll('#run-list button')].map(b => b.textContent)")
     assert others and not any(t.startswith("setup ") or "fix-" in t for t in others)
     page.locator("#run-menu button[data-command='dfs lineups late-swap']").click()

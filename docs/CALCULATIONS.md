@@ -875,7 +875,7 @@ fired) moved to the hidden zone beside `Id` -- kept, not deleted, since
 other boolean/categorical lookups still key off it. Every reading
 consumer at the time (Board's `LANDMINES` panel -- since replaced
 entirely by the Part 3/7.6 Board rebuild, see `CONTRIBUTING.md`'s
-changelog -- plus the Movement view, `dfs edge`'s terminal report,
+changelog -- plus the Movement view, the old `dfs edge` terminal report,
 `dfs lineups late-swap`, `dfs sync --live`'s diff report, the "Leverage
 plays" filter view) was repointed at `Flags`;
 nothing needed the single-token `Flag` for anything except that one
@@ -1761,8 +1761,7 @@ each written once per lineup block onto its own TOTALS row.
 **Removed, Round 5 item 1c (2026-09-29):** `Stack`, `Bring-back`,
 `Own% Used` and `Sub-10%` (Sam doesn't use them; `Sub-10%` never worked
 to his eye). Stack shape is shown by subtle correlation tints on the
-pick rows instead (item 4). `dfs setup remove-lineup-metrics` deletes
-them from a sheet that still has them.
+pick rows instead (item 4).
 
 **`Games`** -- `IFERROR(ROWS(UNIQUE(FILTER(GameID_range, GameID_range<>""))),0)`,
 distinct `GameID`s across the 9 picks. `ROWS`, not `COUNTA`, and the
@@ -1889,8 +1888,8 @@ the same groups the Lineups tints show.
 `p` is the Odds % cell itself: the column is a true percent column (Plan N, 2026-11-06), so typing `53.3%` stores
 `0.533` and `0.7%` stores `0.007`. A value that is not a probability (blank aside: `53.3` typed with no `%`, `1`,
 `0`, text) shows "type it as 46%" instead of odds, never a guess. (Before, `IF(x>1, x/100, x)` read a stored `0.7`
--- shown as "0.7%" by a literal-suffix format -- as 70% and gave -233 for a +14,186 bet; `dfs bankroll fix-odds`
-converts an old column once.)
+-- shown as "0.7%" by a literal-suffix format -- as 70% and gave -233 for a +14,186 bet; the one-time
+`dfs bankroll fix-odds`, since removed, converted the old columns.)
 
 - `p > 0.5` (favorite): `-ROUND(100 * p / (1 - p))`
 - `p < 0.5` (underdog): `+ROUND(100 * (1 - p) / p)`
