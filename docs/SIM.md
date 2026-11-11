@@ -1319,7 +1319,8 @@ QB1-WR1, WR2 and TE1 move by about +0.006. `correlations_shape.csv` is identical
 
 Offline, from the cached 2014-2026 history (2026 through Week 6). Code: `sim/shape_retest.py` and `sim/copula_test.py`
 (`python -m dfs.sim.shape_retest --frame <parquet>`, `python -m dfs.sim.copula_test --frame <parquet>`, the frame being
-`pipeline.load_frame(2026)` saved as parquet; `copula_test.py` removed in batch F2, last on main at `42e3362`). **Nothing in `models/sim/` was refitted.** Rerun both after Week 7 is added.
+`pipeline.load_frame(2026)` saved as parquet; `copula_test.py` removed in batch F2 and `shape_retest.py` with its weekly
+rerun in batch F4, both last on main at `42e3362`). **Nothing in `models/sim/` was refitted.** Rerun both after Week 7 is added.
 
 ### QB1 with RB1, RB2, WR1, WR2, WR3 by target share: none clears the bar
 
@@ -1385,7 +1386,8 @@ evidence for switching is nothing, and **the Top 1% effect for stacked versus un
 
 ## The top of the marginal tables, tested (2026-10-20)
 
-Offline; code `dfs/tail_check.py`, `sim/tail_backtest.py` (`python -m dfs.tail_check --frame <parquet>`, `python -m dfs.sim.tail_backtest --frame <parquet>`; `tail_backtest.py` removed in batch F2, last on main at `42e3362`),
+Offline; code `dfs/tail_check.py`, `sim/tail_backtest.py` (`python -m dfs.tail_check --frame <parquet>`, `python -m dfs.sim.tail_backtest --frame <parquet>`; `tail_backtest.py` removed in batch F2 and `tail_check.py` with its
+weekly rerun in batch F4, both last on main at `42e3362`; `plays_sim.TAIL_DELTA` keeps the measured per-role stretch),
 tables and every fit from 2014-2022 only, judged on 2023-2026 (2026 through Week 6). The starting point was QB1 and WR1 beating their own 90th percentile
 10.7-10.8% of the time in the copula study. **It does not survive a held-out check, and no tail adjustment ships.**
 
@@ -1952,7 +1954,7 @@ ones (PSK, x1.5, a measured ratio of about 1.1-1.7) moves its choices to the rea
 base rate. So the default is unchanged (`late_swap_field.LiveLines.amplified` exists for the test only); the label and the position
 are what ship. The sampled lineups are the contests' FINAL lineups, which already hold whatever late swapping their owners did.
 
-**Backtest flags added** (`sim/shrink_flag.py`, `sim/own_error_flag.py`; `dfs backtest --compare`, Weeks 2, 4-7, 38 contests; all default
+**Backtest flags added** (`sim/shrink_flag.py`, removed in batch F4 (Nov 2026; last on main at `42e3362`), `sim/own_error_flag.py`; `dfs backtest --compare`, Weeks 2, 4-7, 38 contests; all default
 off): `shrink_salary` / `shrink_tffb` pull each CalPts toward the position's salary line / TFFB's projection with the curse study's
 per-position weights, fitted on the weeks **before** the backtested one only (Week 2 on Week 1 alone); `ownership_uncertainty_gpp` is
 `ownership_uncertainty` for the GPP builds only (the cash builds are scored on the plain field). ROI points, flag minus today:

@@ -634,6 +634,8 @@ The full set of quantile levels is in `distribution.csv`.
 
 ## Recalibrating Hit3x%, Boom% and Bust% on 2026 results (Week 8 round): not shipped
 
+*The study (`prob_recal.py`) was removed in batch F4 (Nov 2026; last on main at `42e3362`) with its weekly rerun; this is the record.*
+
 `python -m dfs.prob_recal` (code: `prob_recal.py`). Two corrections, both shrunk toward "no change" with the repository's convention
 (`n / (n + 200)` of the fitted amount): **scale**, which asks the engine about `c * CalPts` with `c` per position (least squares on the
 three Brier scores together; the tables themselves are untouched), and **Platt**, `logistic(a + b * logit(p))` per measure about the
@@ -656,7 +658,10 @@ Boom 8.1 against 5.5, Bust 65.8 against 69.3; TE the other way, 26.0 against 33.
 WR 0.95, TE 1.07, QB and DST 1.00), but 140 to 520 rows per position cannot carry them out of sample yet. Rerun after Week 7 (fit 1-5,
 test 6-7): the machinery is `evaluate`, and a fit would be written with `prob_recal.save` only if it clears.
 
-## OurDST: our own DST projection (shadow: Model Check and the weekly refresh; nothing else reads it)
+## OurDST: our own DST projection (shadow; removed)
+
+*`model/dst.py` and `model/dst_study.py`, Model Check's OurDST row and the weekly rerun were removed in batch F4 (Nov 2026; last on main at `42e3362`): OurDST never beat
+CalPts at DST. This is the record.*
 
 Shown as the **OurDST** row of Model Check's SHADOW SOURCES (DST, weeks CalPts did not train on, beside TFFB and CalPts;
 fitted on every season before the current one) and as the `dst` study of `dfs research refresh`. It feeds no projection, no
