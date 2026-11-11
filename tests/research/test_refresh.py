@@ -45,7 +45,7 @@ def test_a_broken_study_is_reported_and_the_rest_still_run(monkeypatch):
 
     monkeypatch.setattr(refresh, "STUDIES", {"bad": boom, "good": fake_study("good", {"x": 1.0})})
     monkeypatch.setattr(refresh, "TITLES", {"bad": "Bad", "good": "Good"})
-    out = refresh.run_studies(refresh.Context(2026, 6, 1))
+    out = refresh.run_studies(refresh.Context(2026, 6))
     assert [s.status for s in out] == ["failed", "ok"]
     assert "RuntimeError: cache missing" in out[0].verdict and out[0].note
     assert all(s.seconds >= 0 for s in out)
@@ -53,7 +53,7 @@ def test_a_broken_study_is_reported_and_the_rest_still_run(monkeypatch):
 
 def test_unknown_study_names_are_refused(two_studies):
     with pytest.raises(ValueError, match="unknown studies"):
-        refresh.run_studies(refresh.Context(2026, 6, 1), ["a", "zzz"])
+        refresh.run_studies(refresh.Context(2026, 6), ["a", "zzz"])
 
 
 def test_changes_lists_flipped_flags_first_then_the_numbers_that_really_moved():
@@ -92,7 +92,7 @@ def test_the_previous_report_is_the_newest_earlier_week_of_the_same_season(two_s
 def test_the_summary_is_a_line_per_study_between_a_header_and_the_report(tmp_path):
     studies = [refresh.Study(k, k, "bar", verdict="v", seconds=1.0) for k in refresh.STUDIES]
     lines = refresh.summary_lines(studies, 12.0, tmp_path / "r.md", 2026, 6)
-    assert len(refresh.STUDIES) == 12 and len(lines) == 14
+    assert len(refresh.STUDIES) == 8 and len(lines) == 10
     assert lines[0].startswith("research refresh 2026 through Week 6") and "shared history" in lines[0]
     assert lines[-1].strip().startswith("report:")
 
@@ -103,12 +103,11 @@ def test_the_summary_is_a_line_per_study_between_a_header_and_the_report(tmp_pat
         ("contest_retro", refresh.study_contest_retro),
         ("curse", refresh.study_curse),
         ("backtest", refresh.study_backtest),
-        ("dst", refresh.study_dst),
         ("du_line", refresh.study_du_line),
     ],
 )
 def test_a_hook_study_is_skipped_without_its_module_and_used_when_it_has_one(monkeypatch, key, run):
-    ctx = refresh.Context(2026, 6, 1)
+    ctx = refresh.Context(2026, 6)
     name = refresh.HOOK_MODULES[key]
     monkeypatch.setitem(sys.modules, name, None)  # the module is on main now: hide it
     skipped = run(ctx)
@@ -168,24 +167,6 @@ def test_the_latest_scored_week_is_read_from_the_results_files(monkeypatch, tmp_
     ):
         (tmp_path / name).write_text("x")
     assert refresh.latest_scored_week(2026) == 6
-
-
-def test_tail_metrics_read_the_real_column_names():
-    import pandas as pd
-
-    cov = pd.DataFrame({"position": ["QB", "RB"], "n": [10, 20], ">90": [10.234, 9.02], "z90": [0.3, -1.9]})
-    judged = pd.DataFrame(
-        {"group": ["RB2", "All"], "pinball_better": [0.0567, 0.0201], "clears_2se": [True, False]}
-    )
-    got = refresh.tail_metrics(cov, judged)
-    assert got == {
-        "QB >90": 10.23,
-        "RB >90": 9.02,
-        "RB2 pinball_better": 0.0567,
-        "RB2 clears_2se": True,
-        "All pinball_better": 0.0201,
-        "All clears_2se": False,
-    }
 
 
 def test_ownership_metrics_compare_ours_with_tffb_per_format():
@@ -252,7 +233,7 @@ def test_the_props_study_uses_the_shadow_and_cuts_it_at_the_closed_week(monkeypa
 
     monkeypatch.setattr(props_edge, "build_shadow", fake_build)
     monkeypatch.setattr(props_edge, "latest_stats_player", lambda: None)
-    study = refresh.study_props(refresh.Context(2026, 5, 1))
+    study = refresh.study_props(refresh.Context(2026, 5))
     assert seen["season"] == 2026 and study.metrics["all gaps n"] == 2  # week 6 is not closed yet
     assert study.status == "ok" and "Too early for a verdict" in study.verdict
 
@@ -271,6 +252,6 @@ def test_the_backtest_is_optional_so_a_plain_refresh_does_not_run_it(monkeypatch
     monkeypatch.setattr(
         refresh, "STUDIES", {"a": fake_study("a", {}), "backtest": fake_study("backtest", {})}
     )
-    ctx = refresh.Context(2026, 6, 1)
+    ctx = refresh.Context(2026, 6)
     assert [s.key for s in refresh.run_studies(ctx)] == ["a"]
     assert [s.key for s in refresh.run_studies(ctx, ["backtest"])] == ["backtest"]

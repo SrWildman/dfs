@@ -8,20 +8,16 @@ Studies, each with the bar it must clear to matter:
 
 | key | study | module |
 |---|---|---|
-| `shape` | the five QB1-receiver pairs re-tested by target share | `dfs.sim.shape_retest` |
 | `bump` | the teammate-bump shadow's Model Check race | `dfs.teammate_bump` |
-| `recal` | recalibrating Hit3x% / Boom% / Bust% | `dfs.prob_recal` |
-| `tails` | the top of the marginal tables (coverage, per-role stretch) | `dfs.tail_check` |
 | `ownership` | the field-ownership shadow's scores, where CalPts and TFFB disagree | `dfs.field_own` |
 | `shadows` | ESPN and props shadow projections against CalPts (the blend gate) | `calibration.shadow_race` |
 | `props` | the PROPS SHADOW: does ESPN beat the prop market's price | `dfs.props_edge.build_shadow` |
 | `contest_retro` | the contest retro (hook below) | `dfs.sim.contest_retro` |
 | `curse` | the optimizer's curse and its held-out fixes (hook below) | `dfs.research.curse` |
 | `backtest` | Flashback: build settings scored in his real contests (optional: `--only`) | `dfs.backtest` |
-| `dst` | OurDST, our own DST projection, against TFFB and CalPts (hook below) | `dfs.model.dst_study` |
 | `du_line` | the calibrated double-up Cash % offset (saved for its switch) | `dfs.sim.du_line_retro` |
 
-**The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study, OurDST, the
+**The hook.** A study kept in its own module (`HOOK_MODULES`: the contest retro, the curse study, the
 double-up line) plugs in by exposing
 
     refresh_summary(season, through) -> {"headline": [str, ...], "metrics": {str: float | bool},
@@ -74,14 +70,13 @@ class Study:
 
 
 class Context:
-    """What the studies share, built on first use: the scored files, the UM out-of-fold frame (about a
-    minute),
-    the nflverse history. `through` is the last closed week to include."""
+    """What the studies share, built on first use: the scored files. `through` is the last closed week to
+    include."""
 
-    def __init__(self, season: int, through: int, shuffles: int):
-        self.season, self.through, self.shuffles = season, through, shuffles
+    def __init__(self, season: int, through: int):
+        self.season, self.through = season, through
         self.load_seconds = 0.0
-        self._scored = self._frame = self._history = None
+        self._scored = None
 
     def _timed(self, build: Callable):
         start = time.perf_counter()
@@ -101,28 +96,6 @@ class Context:
 
             self._scored = self._timed(build)
         return self._scored
-
-    @property
-    def frame(self) -> pd.DataFrame:
-        """Every out-of-fold player-game 2014 through `season`, with this season cut after `through`."""
-        if self._frame is None:
-            from dfs.sim.pipeline import load_frame
-
-            def build():
-                f = load_frame(self.season)
-                return f[(f["season"] < self.season) | (f["week"] <= self.through)].reset_index(drop=True)
-
-            self._frame = self._timed(build)
-        return self._frame
-
-    @property
-    def history(self):
-        if self._history is None:
-            from dfs.model.history import load_history
-            from dfs.model.predict import available_seasons
-
-            self._history = self._timed(lambda: load_history(available_seasons(self.season))[0])
-        return self._history
 
 
 def latest_scored_week(season: int) -> int | None:
@@ -155,37 +128,6 @@ def _md_table(frame: pd.DataFrame, places: int = 3) -> list[str]:
 
 
 # --- the studies -------------------------------------------------------------------------------------------
-
-
-def study_shape(ctx: Context) -> Study:
-    from dfs.sim import shape_retest
-
-    s = Study(
-        "shape",
-        "Five QB1-receiver pairs by target share (and the QB1-TE1 control)",
-        f"held-out gain per 1,000 pairs above {shape_retest.BAR_SE:g} SE "
-        f"(fit 2014-{shape_retest.TRAIN_THROUGH}, judge the seasons after); "
-        "a pair that clears it and beats its shuffled-feature tables is a candidate "
-        "for `shape_table.SHIPPED_TESTS`, and shipping a refit is Sam's call",
-    )
-    f = shape_retest.prepare(ctx.frame, ctx.history)
-    result = shape_retest.run(f, n_shuffle=ctx.shuffles)
-    t = result["table"]
-    s.headline = _md_table(
-        t[["pair", "n_test", "gain_per_1000", "se", "z", "shuffled_as_good", "ships"]].rename(
-            columns={"gain_per_1000": "gain/1000", "shuffled_as_good": "shuffles as good"}
-        ),
-        2,
-    ) + ["", f"Held out: {result['test_seasons']}; {ctx.shuffles} shuffled-feature tables per pair."]
-    for r in t.itertuples():
-        s.metrics[f"{r.pair} gain/1000"] = round(r.gain_per_1000, 3)
-        s.metrics[f"{r.pair} z"] = round(r.z, 2)
-        s.metrics[f"{r.pair} ships"] = bool(r.ships)
-    shipping = [r.pair for r in t.itertuples() if r.ships]
-    s.verdict = f"{len(shipping)} of {len(t)} clear the bar" + (
-        f": {', '.join(shipping)}" if shipping else ""
-    )
-    return s
 
 
 def study_bump(ctx: Context) -> Study:
@@ -227,112 +169,6 @@ def study_bump(ctx: Context) -> Study:
         }
     )
     s.verdict = f"n {int(bump['n'])}: MAE {_fmt(cal['MAE'])} CalPts, {_fmt(bump['MAE'])} with the bump"
-    return s
-
-
-def study_recal(ctx: Context) -> Study:
-    from dfs import prob_recal
-
-    s = Study(
-        "recal",
-        "Recalibrating Hit3x% / Boom% / Bust%",
-        "held-out Brier gain over the shown probabilities above 2 SE on a measure with none worse by 1 SE "
-        "(`prob_recal.evaluate`); then behind a default-off config switch until Sam's OK",
-    )
-    frame = prob_recal.load_frame(ctx.season)
-    frame = frame[frame["week"] <= ctx.through]
-    top = int(frame["week"].max())
-    plans = {
-        f"split (fit 1-{top - 2}, test {top - 1}-{top})": [(list(range(1, top - 1)), [top - 1, top])],
-        f"rolling (weeks 3-{top})": [p for p in prob_recal.ROLLING_PLAN if p[1][0] <= top],
-    }
-    lines, ship = [], []
-    for label, plan in plans.items():
-        if top < 4 or not plan:
-            continue
-        res = prob_recal.evaluate(frame, plan)
-        lines += [
-            "",
-            f"**{label}:** {res['n']} held-out rows; Brier as shown "
-            + ", ".join(f"{m} {v:.4f}" for m, v in res["old"].items()),
-        ]
-        rows = []
-        for kind, byc in res["kinds"].items():
-            row = {"correction": kind}
-            for m, v in byc.items():
-                row[m] = f"{v['better']:+.4f} ({v['se']:.4f})"
-                s.metrics[f"{label.split(' ')[0]} {kind} {m}"] = round(v["better"], 5)
-            rows.append(row)
-            clears = any(v["better"] > 2 * v["se"] for v in byc.values()) and all(
-                v["better"] > -v["se"] for v in byc.values()
-            )
-            s.metrics[f"{label.split(' ')[0]} {kind} clears"] = bool(clears)
-            if clears:
-                ship.append(f"{kind} ({label.split(' ')[0]})")
-        lines += _md_table(pd.DataFrame(rows), 3)
-    s.headline = ["Old minus new Brier per measure, (SE); positive = the correction is better.", *lines]
-    s.verdict = "clears: " + ", ".join(ship) if ship else "no correction beats the shown probabilities"
-    return s
-
-
-def tail_metrics(cov: pd.DataFrame, judged: pd.DataFrame) -> dict[str, float | bool]:
-    """The numbers the tails report compares week to week: each position's share above the 90th percentile,
-    and each role's pinball gain and whether it clears 2 SE."""
-    out: dict[str, float | bool] = {}
-    for _, r in cov.iterrows():
-        out[f"{r['position']} >90"] = round(float(r[">90"]), 2)
-    for _, r in judged.iterrows():
-        out[f"{r['group']} pinball_better"] = round(float(r["pinball_better"]), 4)
-        out[f"{r['group']} clears_2se"] = bool(r["clears_2se"])
-    return out
-
-
-def study_tails(ctx: Context) -> Study:
-    from dfs import tail_check
-
-    s = Study(
-        "tails",
-        "Top of the marginal tables (coverage; per-role stretch)",
-        "a stretch of the upper quantiles that clears 2 SE on BOTH pinball loss and tail log-likelihood "
-        f"held out (fit 2014-{tail_check.TRAIN_THROUGH}, judge {tail_check.TRAIN_THROUGH + 1}+); "
-        "at position level none did, RB2 and WR4 (lower tops) did by role "
-        "and are parked as value-column only",
-    )
-    frame = ctx.frame
-    tables = tail_check.train_tables(frame)
-    scored = tail_check.with_pit(frame, tables)
-    held = scored[scored["season"] > tail_check.TRAIN_THROUGH]
-    cov = tail_check.coverage(held, ("position",))
-    fitted = tail_check.fit_adjustment(frame, tables, group="role")
-    seasons = range(tail_check.TRAIN_THROUGH + 1, ctx.season + 1)
-    judged = tail_check.judge(frame, tables, fitted, seasons, group="role")
-    s.headline = (
-        [
-            "Share of actuals above the predicted percentile, "
-            f"tables fitted 2014-{tail_check.TRAIN_THROUGH}, "
-            f"rows {tail_check.TRAIN_THROUGH + 1}-{ctx.season} (nominal 10 / 5 / 1):"
-        ]
-        + _md_table(cov[["position", "n", ">90", "z90", ">95", ">99"]], 2)
-        + ["", "Per-role stretch of the top (positive `better` = adjusted is better):"]
-        + _md_table(
-            judged[
-                [
-                    "group",
-                    "n",
-                    "delta",
-                    "pinball_better",
-                    "pinball_se",
-                    "tail_ll_better",
-                    "tail_ll_se",
-                    "clears_2se",
-                ]
-            ],
-            3,
-        )
-    )
-    s.metrics.update(tail_metrics(cov, judged))
-    clears = [r.group for r in judged.itertuples() if r.clears_2se and r.group != "All"]
-    s.verdict = "clears 2 SE: " + ", ".join(clears) if clears else "no stretch clears 2 SE"
     return s
 
 
@@ -483,13 +319,11 @@ def study_props(ctx: Context) -> Study:
 CONTEST_RETRO_MODULE = "dfs.sim.contest_retro"
 CURSE_MODULE = "dfs.research.curse"
 BACKTEST_MODULE = "dfs.backtest"
-DST_MODULE = "dfs.model.dst_study"
 DU_LINE_MODULE = "dfs.sim.du_line_retro"
 HOOK_MODULES = {
     "contest_retro": CONTEST_RETRO_MODULE,
     "curse": CURSE_MODULE,
     "backtest": BACKTEST_MODULE,
-    "dst": DST_MODULE,
     "du_line": DU_LINE_MODULE,
 }
 
@@ -533,41 +367,29 @@ def study_backtest(ctx: Context) -> Study:
     return hook_study(ctx, "backtest", "Flashback backtest (session J)")
 
 
-def study_dst(ctx: Context) -> Study:
-    return hook_study(ctx, "dst", "OurDST, our own DST projection (session O)")
-
-
 def study_du_line(ctx: Context) -> Study:
     return hook_study(ctx, "du_line", "The double-up cash line: calibrated Cash % (session O)")
 
 
 STUDIES: dict[str, Callable[[Context], Study]] = {
-    "shape": study_shape,
     "bump": study_bump,
-    "recal": study_recal,
-    "tails": study_tails,
     "ownership": study_ownership,
     "shadows": study_shadows,
     "props": study_props,
     "contest_retro": study_contest_retro,
     "curse": study_curse,
     "backtest": study_backtest,
-    "dst": study_dst,
     "du_line": study_du_line,
 }
 OPTIONAL = frozenset({"backtest"})  # in STUDIES, but run only when asked for (`--only backtest`)
 TITLES = {
-    "shape": "Five QB1-receiver pairs",
     "bump": "Teammate bump shadow",
-    "recal": "Probability recalibration",
-    "tails": "Top of the marginal tables",
     "ownership": "Field-ownership shadow",
     "shadows": "ESPN / props shadows",
     "props": "PROPS SHADOW",
     "contest_retro": "Contest retro",
     "curse": "Optimizer's curse",
     "backtest": "Flashback backtest",
-    "dst": "OurDST",
     "du_line": "Double-up Cash % offset",
 }
 
@@ -718,13 +540,12 @@ def refresh(
     season: int,
     through: int,
     *,
-    shuffles: int = 40,
     only: list[str] | None = None,
     directory: Path | None = None,
     log: Callable[[str], None] = lambda m: None,
 ) -> tuple[Path, list[Study], float]:
     """Run the studies and write the report. Returns (path, studies, seconds spent loading shared inputs)."""
-    ctx = Context(season, through, shuffles)
+    ctx = Context(season, through)
     studies = run_studies(ctx, only, log)
     path = report_path(season, through, directory, partial=only is not None)
     text = render(studies, season, through, ctx.load_seconds, previous_report(season, through, directory))

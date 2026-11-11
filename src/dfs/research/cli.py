@@ -75,24 +75,21 @@ def research_refresh(
         None, "--through", help="Last closed week to include (default: the newest scored week)."
     ),
     season: int = typer.Option(None, "--season", help="Override the auto-detected NFL season."),
-    shuffles: int = typer.Option(
-        40, "--shuffles", help="Shuffled-feature tables behind the five-pair retest's chance control."
-    ),
     only: str = typer.Option(
         None,
         "--only",
-        help="Comma-separated studies to run: shape, bump, recal, tails, ownership, shadows, props, "
-        "contest_retro, curse; backtest (the Flashback backtest, about 6 minutes) runs only when named here.",
+        help="Comma-separated studies to run: bump, ownership, shadows, props, contest_retro, curse, "
+        "du_line; backtest (the Flashback backtest, about 6 minutes) runs only when named here.",
     ),
 ) -> None:
     """Rerun the weekly offline studies with the closed weeks so far and write one report.
 
-    The five-pair shape retest, the teammate-bump race, the probability recalibration check, the tails check,
-    the field-ownership scores, the ESPN / props shadows, the contest retro and the optimizer's-curse study,
-    each failing soft (and, only with `--only backtest`, the Flashback backtest of today's build settings).
-    Writes docs/research/weekly/<season>-wk<NN>.md (gitignored) with each study's headline numbers, its ship
-    bar and what changed since the previous report, prints a short summary with the time each study took, and
-    never touches a sheet. About two minutes, plus about 15 the first time a week is in it (the curse study's
+    The teammate-bump race, the field-ownership scores, the ESPN / props shadows, the contest retro, the
+    optimizer's-curse study and the double-up Cash % offset, each failing soft (and, only with `--only
+    backtest`, the Flashback backtest of today's build settings). Writes
+    docs/research/weekly/<season>-wk<NN>.md (gitignored) with each study's headline numbers, its ship bar and
+    what changed since the previous report, prints a short summary with the time each study took, and never
+    touches a sheet. About two minutes, plus about 15 the first time a week is in it (the curse study's
     builder runs for that week; saved, so later reruns reuse them).
     """
     from dfs.nfl_calendar import current_season
@@ -106,7 +103,7 @@ def research_refresh(
         raise _fail(f"no scored weeks for {season} yet -- run `dfs results update` first")
     keys = [k.strip() for k in only.split(",") if k.strip()] if only else None
     try:
-        path, studies, load_seconds = refresh.refresh(season, through, shuffles=shuffles, only=keys, log=_say)
+        path, studies, load_seconds = refresh.refresh(season, through, only=keys, log=_say)
     except ValueError as e:
         raise _fail(str(e)) from e
     for line in refresh.summary_lines(studies, load_seconds, path, season, through):
