@@ -340,6 +340,17 @@ class SuggestConfig(BaseModel):
     bring_back_gain: float = Field(0.25, ge=0.0)
 
 
+class BuildsConfig(BaseModel):
+    """`[builds]`: how `dfs lineups suggest` searches for its candidate lineups (`build_exact.py`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # "search" (the default): the budgeted branch-and-bound, which `--seconds` can cut short. "exact": the
+    # same search split so that it finishes, in seconds, with no budget (blueprint Phase E; off until Sam
+    # turns it on). "milp": the HiGHS checker, exact but minutes a week: for checking, not for building.
+    solver: Literal["search", "exact", "milp"] = "search"
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -355,6 +366,7 @@ class Config(BaseModel):
     odds_api: OddsApiConfig = OddsApiConfig()
     stakes: StakesConfig = StakesConfig()
     suggest: SuggestConfig = SuggestConfig()
+    builds: BuildsConfig = BuildsConfig()
     contest_plan: ContestPlanConfig = ContestPlanConfig()
 
 

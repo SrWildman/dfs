@@ -1,0 +1,6 @@
+# Today's builds (3 cash, every QB stack) with the exact search: the same rules and objective as `today.toml`,
+# no time box (`build_exact.py`; blueprint Phase E). Shadow: `[builds] solver` is off in config.toml.
+name = "today (exact search)"
+
+[builds]
+solver = "exact"

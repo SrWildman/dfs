@@ -12,6 +12,9 @@ A settings file is TOML; every key is optional and a missing one is today's defa
     gpp = 12                               # GPP builds; leave out for every QB stack, two each (`--gpp`)
     rank = "top1"                          # or "share" (`--rank`)
     seconds = 600                          # search budget per week (the live default is 120)
+    solver = "exact"                       # "search" (default: the budgeted search), "exact" (the same search
+                                           # run to the end in seconds; `seconds` is then unused) or "milp"
+                                           # (the slow HiGHS checker); `build_exact.py`
 
     [rules]                                # the rules box, one line per label, as he would type it
     adjust = "Nacua +2, Kyren -15%"        # applied: your frame (`suggest_state.frame_from_rules`)
@@ -61,8 +64,8 @@ from typing import Any
 
 import pandas as pd
 
+from dfs import build_exact, suggest_state
 from dfs import lineup_suggest as ls
-from dfs import suggest_state
 
 # Modules that call `register` at import. Sessions H and I add theirs here (one line each).
 PLUGIN_MODULES: tuple[str, ...] = (
@@ -162,6 +165,7 @@ class Settings:
     gpp: int | None = None
     rank: str = ls.DEFAULT_RANK
     seconds: float = SEARCH_SECONDS
+    solver: str = build_exact.DEFAULT_SOLVER
     rules: Mapping[str, str] = field(default_factory=dict)
     flags: Mapping[str, Any] = field(default_factory=dict)
 
@@ -179,6 +183,7 @@ class Settings:
             "gpp": self.gpp,
             "rank": self.rank,
             "seconds": self.seconds,
+            "solver": self.solver,
             "rules": {k.casefold(): v.strip() for k, v in sorted(self.rules.items()) if v.strip()},
             "flags": {k: self.flags[k] for k in sorted(self.flags) if self.flags[k] not in (False, None)},
             "flag_versions": {f.name: f.version for f in self.active_flags()},
@@ -188,7 +193,12 @@ class Settings:
 
     def describe(self) -> list[str]:
         gpp = "every QB stack" if self.gpp is None else str(self.gpp)
-        out = [f"cash {self.cash}, GPP {gpp}, rank {self.rank}, {self.seconds:g} s a week, pool {self.pool}"]
+        search = (
+            f"{self.seconds:g} s a week"
+            if self.solver == build_exact.SEARCH
+            else f"{self.solver} search (no time box)"
+        )
+        out = [f"cash {self.cash}, GPP {gpp}, rank {self.rank}, {search}, pool {self.pool}"]
         out += [f"rules: {k}: {v}" for k, v in self.rules.items() if v.strip()]
         out += [f"flag {k} = {v}" for k, v in self.flags.items() if v not in (False, None)]
         return out
@@ -203,7 +213,7 @@ class SettingsError(ValueError):
     pass
 
 
-_BUILD_KEYS = {"cash", "gpp", "rank", "seconds"}
+_BUILD_KEYS = {"cash", "gpp", "rank", "seconds", "solver"}
 _TOP_KEYS = {"name", "pool", "builds", "rules", "flags"}
 
 
@@ -223,6 +233,9 @@ def from_dict(data: Mapping[str, Any], default_name: str = "today") -> Settings:
     rank = str(builds.get("rank", ls.DEFAULT_RANK))
     if rank not in ls.RANKS:
         raise SettingsError(f"rank must be one of {ls.RANKS}, not {rank!r}")
+    solver = str(builds.get("solver", build_exact.DEFAULT_SOLVER))
+    if solver not in build_exact.SOLVERS:
+        raise SettingsError(f"solver must be one of {build_exact.SOLVERS}, not {solver!r}")
     rules = {str(k): str(v) for k, v in dict(data.get("rules", {})).items()}
     labels = {label.casefold(): label for label in suggest_state.RULE_FIELDS}
     labels.update(
@@ -242,6 +255,7 @@ def from_dict(data: Mapping[str, Any], default_name: str = "today") -> Settings:
         gpp=None if gpp is None else int(gpp),
         rank=rank,
         seconds=float(builds.get("seconds", SEARCH_SECONDS)),
+        solver=solver,
         rules=rules,
         flags=flags,
     )

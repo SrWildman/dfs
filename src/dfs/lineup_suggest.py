@@ -61,6 +61,7 @@ import pandas as pd
 from dfs import chalk_watch
 from dfs import lineup_shapes as shapes_mod
 from dfs import search_clock as clock
+from dfs.build_exact import LeafRules, described, top_lineups  # the search, by the solver in use
 from dfs.flex_order import BASE_SLOTS
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import (
@@ -68,7 +69,6 @@ from dfs.late_swap_search import (
     OpenSlot,
     SwapPlayer,
     swap_pool,
-    top_lineups,
 )
 from dfs.lineup_shapes import can_stack, is_stacked  # noqa: F401 - re-exported: callers and tests use both
 from dfs.models import ROSTER_SLOTS
@@ -202,7 +202,7 @@ def not_all_cash(tags: dict[str, str]):
     def ok(players: Sequence[SwapPlayer]) -> bool:
         return sum(1 for p in players if tags.get(p.name) in GPP_MARKS) >= GPP_MIN_NOT_CASH_ONLY
 
-    return ok
+    return described(ok, LeafRules(need_one_of=frozenset(n for n, t in tags.items() if t in GPP_MARKS)))
 
 
 def stack_name(players: Sequence[SwapPlayer]) -> str:

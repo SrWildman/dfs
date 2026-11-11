@@ -2061,3 +2061,116 @@ Research only, nothing ships. Each check has its report under `docs/research/sim
   `sim/share_dupes_flag.py`, default off, which fits the copies model on GppOwn using earlier weeks only).
   - Not proven in either arm on Weeks 2 and 4-8: "any build" is −24.8 ROI points a week (SE 14.1).
   - At Sam's field sizes, expected copies run 0.00-0.17, so the share divisor only reorders near-ties.
+
+## Exact search: the builder without a time box (blueprint Phase E, 2026-11-10)
+
+**Why.** The GPP shape searches do not finish inside their budget (above, "Deterministic search budget": 120 s was cut short in
+Weeks 4-6), so a build is partly what the clock let the search find, and so is every Flashback verdict built on it. Phase E of the
+November blueprint asked for a search that finishes in seconds. `[builds] solver = "exact"` (config.toml, or a `dfs backtest`
+settings file) is that search. **It is off by default**; nothing about a live build changes until Sam turns it on.
+
+**What was planned, and what was measured.** The plan was a mixed-integer program for HiGHS (`scipy.optimize.milp`, which
+`sim/field_gen.py` already uses) with one no-good cut per lineup. Built and measured, HiGHS needs 70-400 ms for each lineup of a real
+week, more as the cuts pile up, and tuning (one thread, no presolve, no heuristics, an integer objective) does not move it: the cash
+top-300 alone took 6 minutes, a whole week 15-20. Sam's decision (2026-11-10): ship the fast exact search below behind the flag and
+keep the MILP as its independent checker (`solver = "milp"` runs it; nobody should build with it).
+
+**How `exact` works** (`build_exact.py`). It is the same branch-and-bound (`late_swap_search._Search`), with the rule its bound
+cannot see removed from the search instead of tested at the leaf. Each quarterback's search is split into cases that together cover
+every lineup exactly once, and in each case the shape already holds:
+
+- his first teammate in pool order is this one, and the teammates before him are out (`rb_stack`: his first RB); "at most three" is
+  the prune `feasible_for` always made;
+- `stack` and `game`: the first one (two) bring-backs in pool order are these, the ones before them out; `naked`: the other team's
+  offense is out of the pool, as before;
+- the rules box's stack rules pick the cases too (`no stacks from DET`: none; `no bring-back`: the opponents out; `QB+RB+WR only`:
+  every allowed set of teammates is a case), and "never nine Cash-marked players" becomes cases only when fewer than 13 players are
+  marked GPP.
+
+Each case is told the score the best `k` so far already reach, so a case that cannot beat them ends at once. The whole-lineup test
+and `feasible_for` still run on every lineup: the cases are an accelerator, the tests stay the definition. The cash search has no
+rule its bound cannot see; under `exact` it is the old search with no budget, lineup for lineup. The pool, the rules, the objective
+(projection, the cheaper lineup among exact ties), the `rb_dst` and `contrarian` anchors, the simulator and the selection are
+unchanged; exposure and "differs by N players" were never search rules and stay in `choose`. A circuit breaker (`SAFETY_SECONDS`,
+about twenty million nodes for one search) reports a search as cut short rather than hang; it did not fire in any run below.
+
+**The checker** (`build_milp.py`). One 0/1 variable per candidate; salary, the roster slots and FLEX, nobody twice, no DST against
+his own QB, one RB per game, the stack (one to three teammates), bring-backs (at least one / none / at least two), a RB among the
+teammates, a RB with his own DST, the contrarian ownership cut, "at least one GPP-marked player", "at most N from one game" and the
+rules box's stack rules are all linear rows (the conditional ones with 0/1 helper variables); the next lineup comes from a no-good
+cut. Every lineup HiGHS returns is then checked with the search's own Python tests, so a float tolerance can not let one through.
+It shares no search code with the branch-and-bound.
+
+**Equivalence** (`python scripts/exact_equivalence.py`, then `--report`). Each week as `dfs backtest` builds it (last pre-lock
+snapshot; Sam's saved pool in Weeks 7-9, the constructed pool before), the cash top-300 and all six GPP shapes for every quarterback,
+three ways: the old search with no budget (it finishes), `exact`, and the MILP. The contrarian cut depends on the stacks found
+before it, so all three are given the old search's cut. Week 3 has no contest of Sam's but has a slate, so it is here too.
+
+| week | pool, GPP players | cash | stack | naked | rb_stack | game | rb_dst | contrarian | lineups | tie swaps (exact / MILP) | old search s | exact s | MILP s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | constructed, 75 | 150.9 | 143.7 | 150.9 | 150.9 | 139.7 | 149.3 | 143.5 | 882 | 5 / 11 | 189 | 16 | 1,039 |
+| 3 | constructed, 75 | 144.2 | 141.5 | 144.2 | 143.2 | 140.5 | 141.7 | 139.6 | 1,117 | 10 / 15 | 376 | 43 | 1,197 |
+| 4 | constructed, 73 | 141.8 | 141.6 | 141.8 | 141.6 | 141.5 | 139.5 | 137.9 | 1,010 | 4 / 9 | 263 | 32 | 1,168 |
+| 5 | constructed, 71 | 141.8 | 141.8 | 139.7 | 139.6 | 140.1 | 138.0 | 136.3 | 1,000 | 3 / 9 | 206 | 27 | 1,250 |
+| 6 | constructed, 69 | 144.4 | 141.6 | 144.0 | 144.0 | 139.4 | 140.8 | 139.2 | 1,200 | 5 / 7 | 286 | 35 | 1,234 |
+| 7 | saved, 77 | 143.9 | 145.4 | 143.6 | 141.8 | 144.8 | 143.1 | 135.7 | 990 | 5 / 9 | 307 | 39 | 1,107 |
+| 8 | saved, 79 | 144.5 | 144.3 | 145.6 | 145.6 | 142.2 | 142.0 | 141.0 | 1,304 | 10 / 16 | 375 | 33 | 1,156 |
+| 9 | saved, 82 | 145.2 | 143.5 | 145.2 | 144.4 | 141.5 | 140.5 | 140.7 | 1,186 | 4 / 8 | 486 | 39 | 877 |
+
+The seven middle columns are each search's best projection sum, and it is **the same number from all three solvers in all 56
+searches**. "Up to ties" is checked per quarterback: the lists of (projection sum, salary) are identical between the old search and
+each of the other two in all 56, so a lineup one solver has and another has not ("tie swaps": 46 of 8,689 for `exact`, 84 for the
+MILP) is always matched by one with the same projection and the same price at the edge of the list. No search was cut short. The
+seconds are wall time with the eight weeks running side by side on a 12-core Mac: the old search needs 92-315 budget seconds a week
+to finish (more than the live 120 in seven of the eight weeks, and at the live budget, with its per-shape boxes, every one of
+Weeks 2 and 4-9 was cut short; the stack search alone took 365 s of wall in Week 9).
+
+**Speed.** One week at a time on a quiet machine, `dfs backtest --settings research/settings/today_exact.toml --workers 1`: a whole
+week's build (3 cash and every quarterback's GPP builds: search, a 5,000-draw simulation, selection) takes **9-23 seconds** (Week 2: 9,
+Week 4: 17, 5: 14, 6: 20, 7: 23, 8: 17, 9: 23), and the whole seven-week Flashback 3 min 7 s, 55 s of it loading the weeks. The
+FADE-ban pair below (14 week-builds, six at a time) took 5 min 9 s with the machine busy (3 min 0 s on a quiet one, measured before
+the last change to the order of the cases); most of its time is the calls flag's own model, not the builder. The old search at a
+budget that lets it finish took 154-480 s a week.
+
+**What it changes in a build** (Weeks 2, 4-9, today's settings). The cash builds are the same three in every week whichever search
+ran (21 of 21): the cash search always finished. Of the GPP builds, 59 of 73 are the ones a finished old search gives, and only 32 of
+78 are the ones the live 120 s budget gives. The 14 that differ from the finished search trace to the 3-10 tied lineups a week
+(same projection, same salary, of 500-880 candidates) the two keep differently at the edge of a list: the simulator hands out its draws in the order players first
+appear in the candidate list, and in the three weeks where a swap moved a player's first appearance (Weeks 2, 5, 7) the Top 1%
+ranking, which counts a handful of draws in 5,000, picked other builds (3 of 8, 7 of 10 and 5 of 10 the same); in the weeks where no
+player moved (4, 6, 8, 9) the builds are identical but one. So the search is no longer where a build's noise comes from; the
+simulator's ranking of rare events is (a canonical draw order would remove that last dependence; not done here, it would change
+every simulated number).
+
+**The FADE-ban Flashback, rerun** (`research/settings/calls_fade_gpp_exact.toml` against `today_gpp_exact.toml`, Weeks 2 and 4-9,
+35 GPP contests; blueprint R6). No "search cut short" note on either side.
+
+| | FADE bans | today | FADE minus today, by week | weeks ahead |
+|---|---|---|---|---|
+| ROI, as entered | +16% (87 entries) | +54% (89) | -12.8 pts (SE 75.8) | 4 of 7 |
+| ROI, any build | +292% (331) | +105% (377) | +129.9 pts (SE 91.5) | 6 of 7 |
+| ROI without the best ticket, as entered / any build | -11% / +249% | -37% / +78% | | |
+| Finish percentile, as entered | 59% | 54% | +5.0 pts (SE 6.2) | 5 of 7 |
+| Finish percentile, any build | 62% | 55% | +4.6 pts (SE 3.6) | 4 of 7 |
+| Points, as entered / any build | 130.9 / 135.4 | 126.8 / 127.7 | +4.8 (SE 5.2) / +5.1 (SE 3.2) | 5 / 4 of 7 |
+| Top-10% rate, as entered / any build | 19.5% / 24.2% | 9.0% / 17.0% | +9.2 pts (SE 7.3) / +4.9 pts (SE 5.4) | 4 / 4 of 7 |
+
+Verdict on the house bar (dollar ROI, any build): **not proven** (+129.9 is within 2 SE). On the finish percentile the bans are ahead
+by about five points in both scopes, 0.8 and 1.3 standard errors: the same direction, not a result. The run of the same test at a
+1,200 s budget earlier in the day (Week 9 cut short) read +120.7 ROI points a week as entered (SE 63.0), nearly two standard errors;
+with searches that finish it reads -12.8 (SE 75.8). That flip is one ticket in the baseline (Week 5, +469%) that the cut search did
+not build. Nothing ships from this.
+
+**Flashback's new columns.** Every table shows `top 10%`, `finish` (the mean finish percentile: the share of the contest's real
+scores a lineup matched or beat) and `points` beside the ROI, and `--compare` their paired difference by week with its standard error
+and the weeks ahead (`backtest.paired_metric`). They count every entry once, so one ticket cannot carry them the way it carries the
+ROI (blueprint section 8). The verdict line is still the dollar ship bar.
+
+**Limits.** The case count grows with the number of a quarterback's teammates and opponents in the pool (a few of each in Sam's
+pools; a synthetic slate with eight of each still builds in seconds). HiGHS prints a line of its own
+(`HighsMipSolverData::transformNewIntegerFeasibleSolution`) now and then under `solver = "milp"`; it is harmless. Ties at the edge of
+a list are kept in search order, as the old search keeps them, not by name.
+
+Code: `build_exact.py` (the switch, the cases), `build_milp.py` (the checker), `scripts/exact_equivalence.py` (the proof), tests
+`tests/test_build_exact.py` (the cases against exhaustive enumeration and the finished old search; the MILP against `exact` on a
+fixture) and `tests/test_build_milp.py` (every row type and the cuts against exhaustive enumeration).

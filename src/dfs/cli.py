@@ -28,6 +28,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from dfs import (
+    build_exact,
     cash_postmortem,
     edge_finder_tab,
     late_swap_store,
@@ -4811,23 +4812,29 @@ def lineups_suggest(
     Copy builds to Lineups (type 1,4,6 or all). Reads the last sync's data; run `dfs sync` (or
     `dfs sync --live`) first for the freshest picture."""
     cfg = _load_config_or_exit()
-    _run_suggest(
-        cfg,
-        cash=cash,
-        gpp=gpp,
-        write=not no_write,
-        now=datetime.now(UTC),
-        seconds=seconds,
-        fixed_lines=fixed_lines,
-        gpp_entries=gpp_entries,
-        double_up_entries=double_up_entries,
-        rank=rank.value,
-        iterate=iterate,
-        restore_round=round_,
-        portfolio_objective=portfolio_objective.value if portfolio_ else None,
-        portfolio_wide=portfolio_wide,
-        entries_csv=entries_csv,
-    )
+    with build_exact.use(_builds_solver(cfg)):  # `[builds] solver`: every search of this run
+        _run_suggest(
+            cfg,
+            cash=cash,
+            gpp=gpp,
+            write=not no_write,
+            now=datetime.now(UTC),
+            seconds=seconds,
+            fixed_lines=fixed_lines,
+            gpp_entries=gpp_entries,
+            double_up_entries=double_up_entries,
+            rank=rank.value,
+            iterate=iterate,
+            restore_round=round_,
+            portfolio_objective=portfolio_objective.value if portfolio_ else None,
+            portfolio_wide=portfolio_wide,
+            entries_csv=entries_csv,
+        )
+
+
+def _builds_solver(cfg: Config) -> str:
+    """`[builds] solver` from config.toml ("search" when the section is missing)."""
+    return getattr(getattr(cfg, "builds", None), "solver", build_exact.DEFAULT_SOLVER)
 
 
 def _suggest_week(title: str) -> int:
@@ -5039,7 +5046,13 @@ def _run_suggest(
     console.print(
         f"Round {record.round} ({how}). Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
         f"{report.candidates.get('gpp', 0)} for GPP builds. {len(report.builds)} build(s) in "
-        f"{report.seconds:.1f} s.\n"
+        f"{report.seconds:.1f} s."
+        + (
+            ""
+            if build_exact.solver() == build_exact.SEARCH
+            else f" Search: {build_exact.solver()} (no time box)."
+        )
+        + "\n"
     )
     for build in report.builds:
         console.print(build_summary(build), markup=False, highlight=False, soft_wrap=True)

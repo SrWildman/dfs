@@ -200,6 +200,21 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `PLUGIN_MODULES`). The search runs to the end (`seconds = 600` default; the live clock is 120 and its runs differ), so reruns give the same builds. Saved builds (`data/research/backtest/jobs/<fingerprint>/`) are keyed by settings + code, `--fresh` ignores them. Report in
   `docs/research/backtest/` (gitignored). Read-only: no sheet. Also `dfs research refresh --only backtest` (optional study). Math/orchestration
   `backtest.py`, text `backtest_report.py`.
+- **`[builds] solver`** (config.toml, and the same key in a `dfs backtest` settings file; `build_exact.py`; blueprint Phase E;
+  **default `"search"`, off**): `"search"` is the budgeted branch-and-bound that `--seconds` can cut short; `"exact"` runs the same
+  searches to the end with no budget, in seconds (each QB's stack search split into cases where the shape holds by construction: his
+  first teammate, the first bring-back(s); the old `_Search` does each case, told the score to beat), with the same pool, rules,
+  objective, `rb_dst` / `contrarian` anchors, simulator and selection, so no "search cut short" note and the same builds on every run;
+  `"milp"` is its independent checker (`build_milp.py`: HiGHS through `scipy.optimize.milp`, every search rule a linear constraint,
+  top-K by no-good cuts; exact but 15-20 minutes a week, never for building). `lineup_suggest` / `lineup_shapes` call
+  `build_exact.top_lineups` (the switch; `build_exact.use(name)` sets it for a block); a whole-lineup test says what it checks with
+  `build_exact.described(test, LeafRules(...))` so the exact solvers can use it early (the test itself still decides). Late swap never
+  goes through it. Proof: `python scripts/exact_equivalence.py --weeks 2,4,5,6,7,8,9` (the old search with no budget, `exact` and
+  `milp`, shape by shape; `--report` prints the tables; results in `docs/SIM.md`, "Exact search") and `tests/test_build_exact.py`
+  (the MILP against the exact search on a fixture). Settings for Flashback: `research/settings/today_exact.toml`,
+  `today_gpp_exact.toml`, `calls_fade_gpp_exact.toml`. Flashback's tables also show the mean **finish percentile** (share of the
+  real field matched or beaten), mean **points** and the **top-10% rate** beside the dollar ROI, and `--compare` their paired
+  difference by week (`backtest.paired_metric`); the verdict line is still the ROI ship bar.
 - `dfs week page [--week N] [--open/--no-open]` -- **the Week page** (v2): one self-contained HTML file,
   `data/week/<season>-wk<NN>.html` (inline CSS, an inline JSON block and script for the Explorer, no external loads), opened
   in the browser. Top, in this order: the **progress strip** (Pool, Contest plan, Builds, Entries recorded, Late swap,
