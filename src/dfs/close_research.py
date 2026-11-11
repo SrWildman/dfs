@@ -7,8 +7,8 @@ one overall deadline so an unattended run always ends):
 |---|---|---|
 | `refresh` | `dfs research refresh --through <week>`: the weekly studies | `research.refresh` |
 | `stacks` | `dfs stacks --retro`: the field refit and the stack ranking's track record | `sim.stacks_retro` |
-| `backtest` | Flashback: `ownership_uncertainty` and `_gpp` against today, all weeks | `backtest` |
-| `own_error` | `dfs.sim.own_error_sim_retro`: the sim's ownership draws | `sim.own_error_sim_retro` |
+| `calls` | the plays model's calls scored and its weights refitted | `research.plays_backtest` |
+| `calls_flashback` | Flashback: the plays model's AVOID / FADE bans against today | `backtest` |
 
 The settings the backtest compares live in the repo (`research/settings/*.toml`), not in a scratchpad.
 
@@ -50,11 +50,7 @@ SUMMARY_LINES = 15
 THREAD_CAPS = {
     k: "1" for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
 }
-OWN_ERROR_WORKERS = 4  # the four settings of the contest retro side by side, then the curse weeks
-STAGE_NAMES = ("refresh", "stacks", "backtest", "own_error", "calls", "calls_flashback")
-# The backtest compares each of these against `BASELINE` (files in `SETTINGS_DIR`).
-BASELINE = "today"
-CANDIDATES = ("ownership_uncertainty", "ownership_uncertainty_gpp")
+STAGE_NAMES = ("refresh", "stacks", "calls", "calls_flashback")
 # The plays model's ban-only variants (Plan M, M1.5), each against today's builds of the same kind.
 CALLS_PAIRS = (("calls_avoid_cash", "today_cash"), ("calls_fade_gpp", "today_gpp"))
 # Longest first: the order they start in. All of them run at once (`run`): the machine has the cores, and
@@ -62,8 +58,6 @@ CALLS_PAIRS = (("calls_avoid_cash", "today_cash"), ("calls_fade_gpp", "today_gpp
 STAGE_TITLES = {
     "refresh": "Weekly research reruns",
     "stacks": "Stacks: field refit and retro",
-    "backtest": "Flashback: ownership uncertainty against today",
-    "own_error": "Ownership uncertainty in the sim (held out by week)",
     "calls": "The plays model's calls: how they did, what they learned",
     "calls_flashback": "Flashback: the plays model's AVOID / FADE bans against today",
 }
@@ -205,55 +199,10 @@ def _flashback(week: int, pairs: tuple[tuple[str, str], ...], key: str) -> list[
     return out
 
 
-def stage_backtest(season: int, week: int) -> list[StageResult]:
-    """Flashback: each candidate settings file against `today`, on every week with standings up to `week`."""
-    return _flashback(week, tuple((name, BASELINE) for name in CANDIDATES), "backtest")
-
-
 def stage_calls_flashback(season: int, week: int) -> list[StageResult]:
     """Flashback: the plays model's ban-only variants (Plan M, M1.5) against today's builds of the same kind:
     cash builds without the AVOID calls, GPP builds without the FADE calls (`CALLS_PAIRS`). SHADOW."""
     return _flashback(week, CALLS_PAIRS, "calls_flashback")
-
-
-def stage_own_error(season: int, week: int) -> list[StageResult]:
-    """`python -m dfs.sim.own_error_sim_retro`: the sim's ownership uncertainty held out by week."""
-    from dfs.research import refresh
-    from dfs.sim import own_error_sim_retro as oesr
-
-    tables = oesr.run(log=_stamped, workers=OWN_ERROR_WORKERS)
-    cal, curse = tables["contest_calibration"], tables["curse_calibration"]
-    metrics: dict[str, float | bool] = {}
-    for _, r in cal.iterrows():
-        metrics[f"{r['measure']} brier [{r['setting']}]"] = round(float(r["brier"]), 5)
-    for _, r in curse.iterrows():
-        metrics[f"{r['set']} cash gap [{r['setting']}]"] = round(float(r["gap"]), 4)
-        metrics[f"{r['set']} brier [{r['setting']}]"] = round(float(r["brier_cash"]), 5)
-    headline = ["Contest retro (his and the field's lineups in every real contest):", ""]
-    headline += refresh._md_table(cal.round(4), 4)
-    headline += ["", "Coverage of the lines (inside the 10-90% band):", ""]
-    headline += refresh._md_table(tables["coverage"].round(3), 3)
-    headline += ["", "Ranking inside a contest, setting minus today:", ""]
-    headline += refresh._md_table(tables["ranking"].round(4), 4)
-    headline += ["", "The curse study's builds rescored (cash shown minus cashed, Brier):", ""]
-    headline += refresh._md_table(curse.round(4), 4)
-    today = {k.split(" [")[0]: v for k, v in metrics.items() if k.endswith("[today]") and "brier" in k}
-    draws = {k.split(" [")[0]: v for k, v in metrics.items() if k.endswith("[draws]") and "brier" in k}
-    better = sum(1 for k in today if k in draws and draws[k] < today[k])
-    return [
-        StageResult(
-            key="own_error",
-            title=STAGE_TITLES["own_error"],
-            verdict=f"draws beat today's Brier on {better} of {len(today)} measures (SEs: see the tables)",
-            ship_bar=(
-                "ships only if it beats today by more than 2 SE held out by week on Cash % Brier and does "
-                "not worsen the GPP build ranking (docs/SIM.md, 'Ownership uncertainty in the sim'); "
-                "until then default off"
-            ),
-            headline=headline,
-            metrics=metrics,
-        )
-    ]
 
 
 def stage_calls(season: int, week: int) -> list[StageResult]:
@@ -304,8 +253,6 @@ def stage_calls(season: int, week: int) -> list[StageResult]:
 STAGE_FUNCTIONS: dict[str, Callable[[int, int], list[StageResult]]] = {
     "refresh": stage_refresh,
     "stacks": stage_stacks,
-    "backtest": stage_backtest,
-    "own_error": stage_own_error,
     "calls": stage_calls,
     "calls_flashback": stage_calls_flashback,
 }

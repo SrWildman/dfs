@@ -107,8 +107,9 @@ class SimField:
     chalk: np.ndarray
     herd: field_gen.HerdModel
     own: np.ndarray
-    # ownership uncertainty (`with_scenarios`, default off): scenarios x sampler lineups, each row summing to
-    # 1; draw d weighs the sampler by row d % scenarios. None: every sampler lineup weighs the same
+    # per-draw reweighting (`with_scenarios`, default off; no caller since batch F5): scenarios x sampler
+    # lineups, each row summing to 1; draw d weighs the sampler by row d % scenarios. None: every sampler
+    # lineup weighs the same
     scenarios: np.ndarray | None = None
 
     @property
@@ -118,7 +119,7 @@ class SimField:
 
 def with_scenarios(field: SimField, targets: np.ndarray, *, own: np.ndarray | None = None) -> SimField:
     """`field` with one weighting of its sampler per row of `targets` (scenarios x slate players: a drawn
-    ownership of the whole field, `dfs.sim.own_error`; one row: a fixed reweighting, e.g. to one contest's
+    ownership of the whole field; one row: a fixed reweighting, e.g. to one contest's
     own mean): what the sampler must hold once the herd's expected holdings are taken out, met by
     reweighting the same lineups (`field_gen.scenario_weights`). `own` replaces the field's target ownership
     (what its duplicate estimate reads)."""
