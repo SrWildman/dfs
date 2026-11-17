@@ -213,9 +213,6 @@ _STATE: dict = {}
 SLOW_MARKERS = ("slow", "browser")  # left out of the default run, in `--full`
 OPT_IN_MARKERS = ("exhaustive",)  # left out of `--full` too, in `--exhaustive`
 ALL_MARKERS = SLOW_MARKERS + OPT_IN_MARKERS
-# Whole files that are slow but carry no `pytestmark` of their own (the Phase A session is editing them; move
-# the mark into the file once that merges).
-SLOW_FILES = frozenset({"tests/test_lineup_suggest.py", "tests/test_lineups_suggest_cli.py"})
 
 
 def is_worker(config) -> bool:
@@ -272,8 +269,6 @@ def pytest_collection_modifyitems(config, items):
     named = _named_files(config)
     kept, left_out = [], []
     for item in items:
-        if item.nodeid.split("::", 1)[0] in SLOW_FILES:
-            item.add_marker(pytest.mark.slow)
         marks = {m for m in ALL_MARKERS if item.get_closest_marker(m)}
         in_named_file = os.path.realpath(item.path) in named
         skip = (

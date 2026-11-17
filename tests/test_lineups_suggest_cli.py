@@ -14,6 +14,8 @@ from dfs.derived import edge_sheet_index  # noqa: E402
 from dfs.late_swap_sim import SimSettings  # noqa: E402
 from dfs.sim_inputs import build_specs  # noqa: E402
 
+pytestmark = pytest.mark.slow
+
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 
 

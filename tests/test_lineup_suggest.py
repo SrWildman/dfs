@@ -18,6 +18,8 @@ from dfs.late_swap_search import LineupState, OpenSlot, SwapPlayer, conflicts, t
 from dfs.models import ROSTER_SLOTS
 from dfs.sim_inputs import build_specs
 
+pytestmark = pytest.mark.slow
+
 CAP = 50000
 SLOTS = {"QB": 1, "RB": 2, "WR": 3, "TE": 1, "DST": 1}
 EARLY, LATE, NIGHT = "2026-10-18T13:00:00Z", "2026-10-18T16:25:00Z", "2026-10-18T20:20:00Z"

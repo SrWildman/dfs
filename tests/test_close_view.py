@@ -249,7 +249,8 @@ def test_most_weeks_the_one_thing_is_nothing_and_each_trigger_fires_alone():
     assert "CalPts has trailed TFFB 4 weeks" in one(projection_gains=[0.4, -0.1, -0.2, -0.1, -0.3])
     assert one(projection_gains=[-0.1, -0.2, -0.1]).startswith("Nothing.")  # three weeks is not four
     assert "cash ownership has trailed the double-up curve" in one(ownership_gains={"cash": [-0.01] * 4})
-    assert "Edge at lock was at or under zero in 3 of the last 4" in one(edge_by_week=[5, 0, -1, 2, -3])
+    said = one(edge_by_week=[5, 0, -1, 2, -3])
+    assert "Edge at lock, on paper, was at or under zero in 3 of the last 4" in said and "projected" in said
     assert "17 points above the cash rate" in one(calibration_gap=0.17)
     assert "Fun line was over your $20 3 weeks" in one(fun_by_week=[5, 25, 30, 21])
 
@@ -275,7 +276,11 @@ def test_the_close_view_shows_the_closed_week_on_one_screen(tmp_path):
         "Edge at lock",
     ):
         assert model in text, model
-    assert "Edge at lock +7.3 pts" in text and "Avoidable errors, season 4" in text
+    assert (
+        "Edge at lock, on paper +7.3 pts" in text
+        and "not proof it pays" in text
+        and "Avoidable errors, season 4" in text
+    )
     assert "Calibration gap +16.6 pts" in text and "Cash percentile in field" in text
     assert "The one thing worth changing" in text and "Nothing." in text
     assert 'id="close-ledger"' in page and page.count('id="ledger"') <= 1

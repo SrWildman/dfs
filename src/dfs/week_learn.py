@@ -612,20 +612,24 @@ def close_tiles(c: dict) -> list[tuple[str, str, str, str]]:
     this = edge.get("this_week")
     if this and this.get("edge") is not None:
         note_ = (
-            f"Week {c['week']} vs the four-source consensus, out-projected {this['pct'] * 100:.0f}% of the "
-            f"double-up field; {edge.get('n_weeks', 0)}-week mean {_signed(edge.get('season_edge'))} pts"
+            f"On paper: Week {c['week']} on the four-source consensus, ahead of {this['pct'] * 100:.0f}% of "
+            f"the double-up field's projections; {edge.get('n_weeks', 0)}-week mean "
+            f"{_signed(edge.get('season_edge'))} pts"
             + (
                 f" ({edge['season_pct'] * 100:.0f}th percentile)"
                 if edge.get("season_pct") is not None
                 else ""
             )
-            + ". A tripwire, not proof it pays."
+            + ". An early warning, not proof it pays: the Edge at lock scorecard's status is the actual "
+            "margin."
         )
-        out.append(("Edge at lock", f"{this['edge']:+.1f} pts", note_, "warn" if this["edge"] <= 0 else ""))
+        out.append(
+            ("Edge at lock, on paper", f"{this['edge']:+.1f} pts", note_, "warn" if this["edge"] <= 0 else "")
+        )
     else:
         out.append(
             (
-                "Edge at lock",
+                "Edge at lock, on paper",
                 "-",
                 f"no lock-time snapshot or double-up standings for Week {c['week']}; season mean "
                 f"{_signed(edge.get('season_edge'))} pts over {edge.get('n_weeks', 0)} weeks",

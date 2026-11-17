@@ -2204,11 +2204,12 @@ percentile are the card's text ("on paper: +5.8 pts, 85th percentile").
 Calibration's status: **Overstated** when `gap > 2 se`; **Proven** when `|gap| <= 2 se` on 30+ builds; New under 3 weeks; else
 Not proven.
 
-**The tiles**: edge at lock (above); avoidable errors = blank entries (`data/entered/*.json` `blank`), this week and the season's
+**The tiles**: edge at lock, labelled "on paper" (the projected edge above: an early warning, never the proof; the
+scorecard's status is the realized margin); avoidable errors = blank entries (`data/entered/*.json` `blank`), this week and the season's
 recorded weeks; the calibration gap; the cash percentile by week (the median share of the double-up field beaten).
 
 **The one thing** (`close_view.one_thing`), the first of blueprint 13.3's triggers that fires, else "Nothing": CalPts behind TFFB 4
-weeks running; our cash or GPP ownership behind its baseline 4 weeks running; edge at lock at or under 0 in 3 of the last 4 weeks;
+weeks running; our cash or GPP ownership behind its baseline 4 weeks running; edge at lock ON PAPER (the projected edge, said as such) at or under 0 in 3 of the last 4 weeks;
 the calibration gap over 10 points; the Fun group's fees over `[ledger] fun_per_week` 3 weeks running. Information only.
 
 ## Consensus lineup and expected copies (`consensus.py`, `sim/dup_calibration.py`; Plan K item 3)

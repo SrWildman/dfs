@@ -381,9 +381,9 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   MAE; Ownership: ours vs TFFB's Own% (GPP) and the double-up curve (cash), the weaker format's status; Calibration: Cash % shown
   vs cashed, `cash_shown.csv`; Edge at lock: the status from the REALIZED margin by week, his cash lineups' actual points minus
   the field's mean actual points, the projected edge and percentile its "on paper" text; Sam, 2026-11-17), each Proven / Not proven / Overstated / New (the rules in `docs/CALCULATIONS.md`),
-  the ledger (Phase B's section, as `#close-ledger`), four tiles (edge at lock, avoidable errors = blank entries, calibration gap,
+  the ledger (Phase B's section, as `#close-ledger`), four tiles (edge at lock "on paper", the projected edge as an early warning, avoidable errors = blank entries, calibration gap,
   cash percentile by week), **the one thing** (`close_view.one_thing`: the first of blueprint 13.3's monthly triggers that fires,
-  else "Nothing") and the **decision log** fold (`decisions_log.read`, reason pills; on the served page one tap posts
+  else "Nothing"; its edge trigger reads the projected edge and says "on paper") and the **decision log** fold (`decisions_log.read`, reason pills; on the served page one tap posts
   `/api/reason`, a new line in `data/week/decisions.jsonl`, never a sheet write). **Edge at lock**
   (`data/contests/edge_at_lock.csv`, one row per distinct lineup of his per contest with standings): his nine summed on the
   **four-source consensus** (TFFB `ProjPts`, `SleeperPts`, `FantasyProsPts`, `EspnPts`; props are not in it) against every lineup
