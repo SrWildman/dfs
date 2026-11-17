@@ -500,8 +500,12 @@ def iterate_builds(
 
     def listed(e: Entry) -> tuple:
         assert e.scored is not None
+        # `--only`: the kind rerun keeps its place (the Week page's open-spot pick reruns the Default every
+        # time; listing it after the kept GPP builds would renumber all of them, and builds are copied by
+        # number)
+        group = GROUP[KEPT] if only is not None and e.kind == only else GROUP[e.origin]
         return (
-            GROUP[e.origin],
+            group,
             e.kind != "cash",
             _qb(e.players),
             -round(e.scored.projection, ls.VALUE_DECIMALS),

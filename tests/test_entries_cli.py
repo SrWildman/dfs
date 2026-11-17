@@ -127,7 +127,8 @@ def test_fill_lays_out_every_classic_entry_with_a_blank_dropdown_and_a_suggestio
     assert sheet.upload[1] == list(DK_UPLOAD_SHEET_HEADER)
     col = {h: DK_UPLOAD_SHEET_HEADER.index(h) for h in ("Format", "Lineup", "Suggested", "Why")}
     row = next(r for r in sheet.upload.values() if r[0] == "9001")
-    assert (row[col["Format"]], row[col["Lineup"]], row[col["Suggested"]]) == ("Double Up", "", "L1")
+    # the cash hint is the top projection now, not the best Cash % (blueprint Phase A)
+    assert (row[col["Format"]], row[col["Lineup"]], row[col["Suggested"]]) == ("Double Up", "", "L2")
     assert not any(row[4:13])  # slots stay blank until Sam picks a lineup
     assert not list(folder.glob("upload_*.csv"))  # no --write
 

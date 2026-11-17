@@ -8,7 +8,7 @@ A settings file is TOML; every key is optional and a missing one is today's defa
                                            # the constructed one; "constructed": always the constructed pool
 
     [builds]
-    cash = 3                               # cash builds (`--cash`)
+    cash = 1                               # cash builds (`--cash`; 1 = the Default)
     gpp = 12                               # GPP builds; leave out for every QB stack, two each (`--gpp`)
     rank = "top1"                          # or "share" (`--rank`)
     seconds = 600                          # search budget per week (the live default is 120)

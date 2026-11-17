@@ -183,9 +183,8 @@ _MODEL_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Cash",
-        "Pool from Top plays, then Cash. dfs lineups suggest builds the Default cash lineup (the top "
-        "projection) and shows its core and its open spots; the Week page shows its cash chance as a band "
-        "and the record of every cash build, never a percentage.",
+        "Pool from Top plays, then Cash. Build the Default (top projection), then decide its open spots. "
+        "Its cash chance is a band and a record, never a percentage.",
     ),
     (
         "GPP",

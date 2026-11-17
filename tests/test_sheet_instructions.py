@@ -72,7 +72,9 @@ def test_how_to_use_the_model_is_six_short_lines_at_the_top():
     rows = [(a, b) for kind, a, b in _LAYOUT if kind == "row"][:6]
     assert [a for a, _ in rows] == ["CalPts", "Cash", "GPP", "Proj ▼ / Proj ▲", "Suggested", "Gameday"]
     text = " ".join(b for _, b in rows)
-    assert "50% or more" in text and "+25 or more" in text and "Fix FLEX order" in text and "4 pm" in text
+    assert "never a percentage" in text and "+25 or more" in text
+    assert "Fix FLEX order" in text and "4 pm" in text
+    assert "50% or more" not in text  # the cash chance is a band now (blueprint Phase A)
     assert all(len(b) < 200 for _, b in rows)  # short, plain lines
 
 

@@ -21,7 +21,7 @@ def test_no_file_is_todays_defaults():
     s = bs.load(None)
     assert (s.name, s.cash, s.gpp, s.rank, s.pool, s.flags, s.rules) == (
         "today",
-        3,
+        1,  # the Default cash lineup (blueprint Phase A)
         None,
         "top1",
         "auto",
