@@ -1,5 +1,7 @@
 from contextlib import contextmanager
 
+import pytest
+
 from dfs.season_long import finder as fd
 from dfs.season_long import season_tabs as st
 from dfs.season_long import sheet_season as ss
@@ -94,6 +96,7 @@ def _run(monkeypatch):
     return st.LeagueRun(v, ev, m, fd.find_trades(v, ev, m, fd.Filters(), top=5), tr.free_move(v, ev, 1, []))
 
 
+@pytest.mark.slow
 def test_setup_sync_then_doctor_is_clean(monkeypatch):
     client = FakeClient()
     ss.setup(client, ["Test"])
@@ -117,6 +120,7 @@ def test_rebuild_keeps_the_typed_box_and_pickers(monkeypatch):
     assert client.read_range(st.PLAYERS_TAB, st.PICKER_CELL) == [["Other"]]
 
 
+@pytest.mark.slow
 def test_write_ideas_replaces_only_its_league(monkeypatch):
     client = FakeClient()
     ss.setup(client, ["Test"])
@@ -145,6 +149,7 @@ def test_setup_grows_the_raw_tabs_before_writing_formulas_over_them():
     assert client.widths[st.PLAYERS_RAW] >= len(st.PLAYER_COLUMNS)
 
 
+@pytest.mark.slow
 def test_a_stale_header_above_the_ideas_list_is_cleared(monkeypatch):
     client = FakeClient()
     ss.setup(client, ["Test"])

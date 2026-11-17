@@ -11,6 +11,9 @@ import pytest
 
 from dfs import plays, sim_inputs
 
+# Runs the real lineup search or a long study: a bare `pytest` leaves the file out, `--full` runs it.
+pytestmark = pytest.mark.slow
+
 NOW = datetime(2026, 10, 18, 15, 0, tzinfo=UTC)
 EARLY, LATE = "2026-10-18T17:00:00Z", "2026-10-18T20:25:00Z"
 TABLE = {("RB1", "RB2"): 4.27, ("RB1", "RB3+"): 2.05, ("WR1", "WR2"): 1.49, ("WR1", "QB1"): -1.35}

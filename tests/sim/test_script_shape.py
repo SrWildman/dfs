@@ -103,6 +103,7 @@ def test_a_test_reads_the_feature_of_the_side_it_names():
     assert qb_side["x"].between(-0.3, 0.3).all()
 
 
+@pytest.mark.slow
 def test_the_scan_finds_a_planted_target_share_effect_and_not_a_null_one():
     real = script_shape.scan(make_frame(), tests=(TEST,), n_shuffle=20)
     row = real.table.iloc[0]
@@ -221,6 +222,7 @@ def lift_frame(n=4000, link=0.5, seed=0):
     return pd.DataFrame(rows)
 
 
+@pytest.mark.slow
 def test_the_bring_back_lift_is_above_one_when_it_moves_with_the_stack_and_one_when_it_does_not():
     linked = script_bringback.lift_table(
         lift_frame(link=0.6), stacks={"QB+WR1": ("QB1", "WR1")}, backs=("WR1",), n_draws=40, n_boot=100

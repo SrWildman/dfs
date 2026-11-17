@@ -144,6 +144,7 @@ def test_any_failure_returns_the_frame_unchanged(monkeypatch):
     pd.testing.assert_frame_equal(out, frame)
 
 
+@pytest.mark.slow
 def test_the_edge_finder_no_longer_infers_um_so_neither_sync_runs_the_model_package(monkeypatch):
     def forbidden(frame, **kw):
         raise AssertionError("UM inference must not run in the Edge Finder: UM is not in CalPts")

@@ -3,6 +3,7 @@
 import re
 
 import pandas as pd
+import pytest
 
 from dfs.sheet_model_check import COLUMN_COUNT, LAST_COLUMN, MODEL_CHECK_TAB, build_layout, write_model_check
 
@@ -244,6 +245,7 @@ def test_signal_progress_lists_only_signals_that_fired_with_their_unflagged_base
 # --- shadow sources (ESPN, props) ------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_shadow_block_always_says_where_each_source_stands_and_marks_a_rated_source_as_shadow():
     from dfs import sheet_model_check as smc
 
@@ -314,6 +316,7 @@ def test_empty_ownership_tables_say_so_instead_of_rendering_a_blank_table():
     assert sum("Not enough data yet" in t for t in _text(layout)) >= 2
 
 
+@pytest.mark.slow
 def test_the_teammate_bump_row_sits_in_the_shadow_block_beside_the_others():
     from dfs import sheet_model_check as smc
     from dfs import teammate_bump

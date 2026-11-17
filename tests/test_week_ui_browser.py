@@ -20,6 +20,9 @@ from tests.test_week_plays import row, write_csv
 from tests.test_week_server import stub_python
 from tests.test_week_writes import FakeSheet
 
+# Playwright's Chromium: also slow; a bare `pytest` leaves the file out, `--full` runs it.
+pytestmark = [pytest.mark.browser, pytest.mark.slow]
+
 sync_api = pytest.importorskip("playwright.sync_api")
 
 EDGE = "EdgeRaw"

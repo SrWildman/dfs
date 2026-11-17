@@ -11,6 +11,7 @@ def legal_rows(week, ids):
     return week[week["gsis_id"].isin(ids)]
 
 
+@pytest.mark.slow
 def test_generated_lineups_are_all_legal(synth_week):
     lineups = B.generate_lineups(synth_week, 120, np.random.default_rng(0))
     assert len(lineups) == 120
@@ -20,6 +21,7 @@ def test_generated_lineups_are_all_legal(synth_week):
     assert sum(lu.stacked for lu in lineups) == 60
 
 
+@pytest.mark.slow
 def test_every_slot_is_filled_with_at_most_one_flex(synth_week):
     for lu in B.generate_lineups(synth_week, 60, np.random.default_rng(1)):
         n = lu.rows["position"].value_counts()
@@ -30,6 +32,7 @@ def test_every_slot_is_filled_with_at_most_one_flex(synth_week):
         assert lu.rows["gsis_id"].is_unique
 
 
+@pytest.mark.slow
 def test_a_stack_is_qb_two_teammates_and_a_bring_back(synth_week):
     stacks = [lu for lu in B.generate_lineups(synth_week, 80, np.random.default_rng(2)) if lu.stacked]
     assert stacks
@@ -41,6 +44,7 @@ def test_a_stack_is_qb_two_teammates_and_a_bring_back(synth_week):
         assert (catchers["team"] != qb["team"]).sum() >= 1
 
 
+@pytest.mark.slow
 def test_generation_is_deterministic_in_the_rng(synth_week):
     a = B.generate_lineups(synth_week, 10, np.random.default_rng(5))
     b = B.generate_lineups(synth_week, 10, np.random.default_rng(5))
@@ -102,6 +106,7 @@ def _look():
     return CorrelationLookup(table)
 
 
+@pytest.mark.slow
 def test_run_backtest_end_to_end_on_a_small_frame(synth_week):
     frame = pd.concat([synth_week.assign(week=w) for w in (1, 2)], ignore_index=True)
     frame["game_id"] = frame["game_id"] + "_" + frame["week"].astype(str)

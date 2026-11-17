@@ -9,6 +9,8 @@ import re
 import signal
 from datetime import datetime
 
+import pytest
+
 from dfs import salary_watch, week_explorer, week_learn, week_money, week_server
 from tests.test_week_money import entered_record, rows_with_more_wrs
 from tests.test_week_plays import WED, inputs, page_text, render, section, slate_rows
@@ -107,6 +109,7 @@ def test_the_numbers_flag_cash_percent_running_high(tmp_path):
     assert 'class="line bad"' in body  # the fold line is urgent while it runs high
 
 
+@pytest.mark.slow
 def test_exposure_this_week_from_recorded_gpp_entries(tmp_path):
     rows = rows_with_more_wrs(GppOwn="0.05")
     gpp = [{"contest_id": str(i), "name": "NFL $3 SE", "format": "SE GPP", "fee": 3.0} for i in range(2)]

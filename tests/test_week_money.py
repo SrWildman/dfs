@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import re
 
+import pytest
+
 from dfs import bankroll_health as bh
 from dfs import practice, week_money
 from dfs.config import StakesConfig
@@ -119,6 +121,7 @@ def test_on_sunday_the_inactives_check_leads_and_is_open_when_something_is_flagg
     assert re.search(r'id="inactives"><details open>', page)
 
 
+@pytest.mark.slow
 def test_the_consensus_names_the_field_lineup_and_flags_a_gpp_lineup_at_five_copies(tmp_path):
     calibration = {
         "fit": {"cash": {"scale": 1.0, "exponent": 0.5}, "gpp": {"scale": 1e5, "exponent": 0.5}},

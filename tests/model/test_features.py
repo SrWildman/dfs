@@ -17,6 +17,7 @@ def _frame(history, t: int) -> pd.DataFrame:
     return rows[(rows["season"] * 100 + rows["week"]) == t].reset_index(drop=True)
 
 
+@pytest.mark.slow
 def test_inference_features_equal_training_features_exactly(history):
     """The parity test: the slate for week N, built from only the games before N (what inference sees),
     equals the training row for the same players built from the full history."""
@@ -29,6 +30,7 @@ def test_inference_features_equal_training_features_exactly(history):
         pd.testing.assert_frame_equal(inference, expected, check_exact=True)
 
 
+@pytest.mark.slow
 def test_features_for_week_n_do_not_change_when_week_n_and_later_are_added(history):
     t = 202405
     slate = _frame(history, t)
@@ -48,6 +50,7 @@ def test_features_for_week_n_do_not_change_when_week_n_and_later_are_added(histo
     pd.testing.assert_frame_equal(before_only, with_future, check_exact=True)
 
 
+@pytest.mark.slow
 def test_every_feature_matches_a_naive_per_player_computation(history):
     feats = build_features(history, history.player_games[ROW_COLUMNS])
     pg = history.player_games
@@ -116,6 +119,7 @@ def test_dst_features_look_up_own_defense_and_the_opposing_offense(history):
     assert feats["opp_implied"].iloc[0] == pytest.approx(row["total"].iloc[0] - row["implied"].iloc[0])
 
 
+@pytest.mark.slow
 def test_output_keeps_input_order_and_has_every_feature_column(history):
     rows = _all_rows(history).sample(frac=1.0, random_state=1).reset_index(drop=True)
     feats = build_features(history, rows)

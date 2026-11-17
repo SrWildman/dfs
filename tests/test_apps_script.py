@@ -208,6 +208,7 @@ def test_the_scripts_pool_formula_is_the_one_python_writes(node_module):
         assert from_script == pc.pool_formula(row, "EdgeRaw", id_col=id_col)
 
 
+@pytest.mark.slow
 @needs_node
 def test_header_row_and_column_helpers(node_module):
     column = [

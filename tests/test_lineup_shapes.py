@@ -16,6 +16,9 @@ from dfs import lineup_suggest as ls  # noqa: E402
 from dfs import search_clock as clock  # noqa: E402
 from dfs.late_swap_search import SwapPlayer  # noqa: E402
 
+# Runs the real lineup search or a long study: a bare `pytest` leaves the file out, `--full` runs it.
+pytestmark = pytest.mark.slow
+
 
 def P(name, pos, team, opp, value=10.0, salary=5000):
     return SwapPlayer(name, pos, team, opp, f"{min(team, opp)}-{max(team, opp)}", salary, value)

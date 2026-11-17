@@ -242,6 +242,7 @@ def test_ties_between_penalties_go_to_the_larger_ones():
 # ---- the three treatments of the week, compared --------------------------------------------------
 
 
+@pytest.mark.slow
 def test_big_week_effects_that_the_index_cannot_see_are_found_by_the_week_model():
     """Weeks differ by sd 1.0 on the logit (about 20 points); the index is unrelated noise."""
     rng = np.random.default_rng(987654)  # independent of the shocks' stream (seed 11)
@@ -257,6 +258,7 @@ def test_big_week_effects_that_the_index_cannot_see_are_found_by_the_week_model(
     assert table["n_scored"].nunique() == 1  # all three scored on the same rows
 
 
+@pytest.mark.slow
 def test_the_index_wins_when_scores_really_scale_with_it():
     """Points are the true score times the week's scale and nothing else differs between weeks."""
     rng = np.random.default_rng(3)
@@ -280,6 +282,7 @@ def test_choose_mode_takes_the_lowest_error_and_ties_go_to_the_simplest():
     assert T.choose_mode(tied) == "raw"
 
 
+@pytest.mark.slow
 def test_the_index_comparator_is_dropped_when_there_is_no_index():
     obs, _ = random_world({"A": 0.5, "B": -0.5}, weeks=30, week_sd=0.5, noise=0.3)
     obs["x_idx"] = math.nan
@@ -313,6 +316,7 @@ def log_from_obs(obs, *, places_paid=200, entries=1000):
     )
 
 
+@pytest.mark.slow
 def test_fit_toughness_reports_series_formats_weeks_and_the_comparison():
     obs, shocks = random_world(
         {"hard": 0.8, "easy": -0.8, "mid": 0.0}, weeks=60, week_sd=0.9, noise=0.2, seed=5, skip=0.2
@@ -332,6 +336,7 @@ def test_fit_toughness_reports_series_formats_weeks_and_the_comparison():
     assert fmt["reliable"] and fmt["beta"] < 0 and fmt["n_entries"] == len(obs)
 
 
+@pytest.mark.slow
 def test_expected_cash_line_is_the_score_that_finishes_at_the_payout_percentile_in_an_average_week():
     obs, _ = random_world({"A": 0.0, "B": 0.0}, weeks=40, week_sd=1.0, seed=6)
     res = T.fit_toughness(log_from_obs(obs, places_paid=200), None, mode="weeks", k=1e9, k_w=1.0)
@@ -343,6 +348,7 @@ def test_expected_cash_line_is_the_score_that_finishes_at_the_payout_percentile_
     assert expected == pytest.approx((ALPHA - math.log(0.25)) / 0.05, abs=6)
 
 
+@pytest.mark.slow
 def test_the_weeks_table_has_effects_in_logit_and_points_and_the_index_as_context():
     obs, shocks = random_world({"A": 0.5, "B": -0.5}, weeks=40, week_sd=1.0, noise=0.1, seed=9)
     index = pd.DataFrame({"season": 2025, "week": range(1, 41), "index": np.linspace(0.9, 1.1, 40)})

@@ -29,6 +29,7 @@ def _slate(history, t=T, with_rookie=False) -> pd.DataFrame:
     return rows.reset_index(drop=True)
 
 
+@pytest.mark.slow
 def test_blend_projection_matches_the_formula_and_ignores_the_slate_weeks_own_outcome(history):
     slate = _slate(history)
     out = P.predict_slate(slate, history=history, artifacts=_blend_artifacts())
@@ -42,6 +43,7 @@ def test_blend_projection_matches_the_formula_and_ignores_the_slate_weeks_own_ou
     assert np.allclose(out.loc[dst.to_numpy(), "um_mean"], feats.loc[dst, "def_dk"])
 
 
+@pytest.mark.slow
 def test_floor_is_below_the_mean_and_ceiling_above(history):
     out = P.predict_slate(_slate(history), history=history, artifacts=_blend_artifacts())
     live = out[(out["um_mean"] > 0)]
@@ -49,6 +51,7 @@ def test_floor_is_below_the_mean_and_ceiling_above(history):
     assert (live["floor"] < live["um_mean"]).all() and (live["um_mean"] < live["ceil"]).all()
 
 
+@pytest.mark.slow
 def test_a_player_outside_the_training_population_is_blank_not_zero(history):
     slate = _slate(history, with_rookie=True)
     low = history.__class__(history.player_games.copy(), history.team_games, history.def_vs_pos)
@@ -62,6 +65,7 @@ def test_a_player_outside_the_training_population_is_blank_not_zero(history):
     assert out.loc["AAA", "um_mean"] == out.loc["AAA", "um_mean"]
 
 
+@pytest.mark.slow
 def test_the_gbm_path_uses_the_shipped_model_on_the_same_features(history):
     ds_rows = history.player_games[history.player_games["position"] == "WR"]
     feats = build_features(history, ds_rows[ROW_COLUMNS])

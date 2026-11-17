@@ -56,6 +56,7 @@ def world(tmp_path, monkeypatch):
     return cfg, downloads, kept
 
 
+@pytest.mark.slow
 def test_the_history_is_found_by_header_kept_and_the_standings_are_moved(world):
     cfg, downloads, kept = world
     report = contests_close.run_contests(cfg, None, fetch_season=None, season=2025)
@@ -70,6 +71,7 @@ def test_the_history_is_found_by_header_kept_and_the_standings_are_moved(world):
     assert (kept / "contests" / "contest_log.csv").exists() and (kept / "contests" / "profiles.csv").exists()
 
 
+@pytest.mark.slow
 def test_ownership_is_logged_once_per_contest_and_a_rerun_logs_nothing_new(world):
     cfg, _downloads, kept = world
     first = contests_close.run_contests(cfg, None, fetch_season=None, season=2025)
@@ -86,6 +88,7 @@ def test_without_a_client_no_sheet_is_touched_and_the_files_are_still_written(wo
     assert report.analysis is not None and "Contests tab" not in "\n".join(report.lines)
 
 
+@pytest.mark.slow
 def test_with_a_client_the_blank_cash_line_is_filled_from_the_configured_series_and_the_tab_is_written(world):
     cfg, _d, _k = world
     client = _Client()
@@ -98,6 +101,7 @@ def test_with_a_client_the_blank_cash_line_is_filled_from_the_configured_series_
     assert "write_tab" in names and "Contests: built" in text
 
 
+@pytest.mark.slow
 def test_a_template_run_never_fills_results(world):
     cfg, _d, _k = world
     client = _Client()

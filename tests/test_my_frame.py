@@ -23,6 +23,9 @@ from dfs.my_frame import ADD, PERCENT, SET, Adjustment  # noqa: E402
 from dfs.sheet_suggested import NAME_INDEX  # noqa: E402
 from dfs.sim_inputs import build_specs, ownership_by_name  # noqa: E402
 
+# Runs the real lineup search or a long study: a bare `pytest` leaves the file out, `--full` runs it.
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture(scope="module")
 def edge():

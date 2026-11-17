@@ -1,3 +1,5 @@
+import pytest
+
 from dfs.season_long import finder as fd
 from dfs.season_long import season_tabs as st
 from dfs.season_long import trade as tr
@@ -24,6 +26,7 @@ def test_box_cells_follow_the_field_list():
     assert st.IDEAS_HEADER_ROW > st.BOX_FIRST_ROW + len(st.BOX_FIELDS)
 
 
+@pytest.mark.slow
 def test_tabs_from_a_synthetic_run(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)

@@ -3,6 +3,7 @@ that survive a rewrite."""
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from dfs import edge_finder_tab as eft
 from dfs import sheet_edge_finder as writer
@@ -248,6 +249,7 @@ def test_a_first_write_uses_the_default_state_sections_open_overflow_shut():
     assert client.calls.index("clear_row_groups") < client.calls.index("control_before")
 
 
+@pytest.mark.slow
 def test_open_and_shut_state_survives_a_second_write_even_when_the_count_changes():
     client = FakeClient()
     writer.write_tab(client, _inputs(_wr_edge(20)), edge_tab="EdgeRaw")  # sync 1: WR overflow shut
@@ -316,6 +318,7 @@ def test_pool_through_why_fits_the_budget_with_nothing_cut_off_on_a_realistic_sl
     )  # the fixed columns stay tight
 
 
+@pytest.mark.slow
 def test_edge_and_do_take_the_width_of_their_longest_real_value_capped():
     short = writer.fit_widths(eft.build_layout(_inputs(_edge([_player(1, Edge="INJ+")]))))
     stacked = writer.fit_widths(

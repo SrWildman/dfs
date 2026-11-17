@@ -62,6 +62,7 @@ def one_year_holdout(monkeypatch):
     monkeypatch.setattr(T, "HOLDOUT_YEARS", 1)
 
 
+@pytest.mark.slow
 def test_train_position_ships_the_method_the_rule_picks(history, one_year_holdout):
     result = T.train_position(history, "WR", through=2024)
     m = result.metrics
@@ -85,6 +86,7 @@ def test_a_worse_gbm_falls_back_to_the_blend_and_ships_no_model(history, one_yea
     assert result.method == "blend" and result.model is None
 
 
+@pytest.mark.slow
 def test_a_better_gbm_ships_a_model_refit_on_every_season_through_the_last(
     history, one_year_holdout, monkeypatch
 ):
@@ -109,6 +111,7 @@ def test_a_better_gbm_ships_a_model_refit_on_every_season_through_the_last(
     assert seen == [[2023, 2024]]  # the shipped refit uses the holdout seasons too
 
 
+@pytest.mark.slow
 def test_out_of_fold_predictions_never_train_on_the_season_they_predict(history, monkeypatch):
     ds = T.build_dataset(history, "WR")
     fitted_on = []

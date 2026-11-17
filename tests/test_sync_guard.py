@@ -320,6 +320,7 @@ def _salary_file(statuses: dict[int, str]) -> pd.DataFrame:
     )
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("dk_status", ["OUT", "IR"])
 def test_a_dropped_row_that_dk_marks_out_is_never_built_or_offered(dk_status):
     """Rule 2 keeps Star Back's projection row when TFFB's feed drops him; DraftKings has ruled him out. The

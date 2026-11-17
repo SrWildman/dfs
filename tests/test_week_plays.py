@@ -255,6 +255,7 @@ def test_slate_only_lists_likely_starters_not_ir_or_backups(tmp_path):
     assert [i[0] for i in game.injuries] == ["Starter WR"]
 
 
+@pytest.mark.slow
 def test_slate_without_an_opening_snapshot_says_how_to_get_one(tmp_path):
     rows = slate_rows()
     for r in rows:
@@ -322,6 +323,7 @@ def test_changes_includes_builds_names_as_his(tmp_path):
     assert week_page.mine_names(inp) == {"Wr Star", "Qb Alpha"}
 
 
+@pytest.mark.slow
 def test_changes_not_run_without_an_earlier_sync_or_with_another_weeks_slate(tmp_path):
     write_csv(tmp_path / "current" / "edge.csv", slate_rows())
     assert "Not run yet" in section(render(inputs(tmp_path)), "changes")  # one snapshot at most

@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from dfs import calibration, usage_r6
 from dfs import edge_finder_tab as eft
@@ -319,6 +320,7 @@ def _gpp_upside_rows(layout):
     return [r for r in layout.player_rows if start < r < end]
 
 
+@pytest.mark.slow
 def test_gpp_verbs_add_for_a_top_quartile_boom_and_leverage_adds_the_star():
     rows = [
         _player(i, **{"Boom%": 10.0 + i, "Own%": 0.20 - i / 100, "OwnStatus": "real"}) for i in range(1, 9)
@@ -376,6 +378,7 @@ def test_rows_under_three_games_are_muted_and_the_why_says_how_little_data():
     assert layout.rows[row - 1][_col(eft.WHY_COL)].endswith("2 games")
 
 
+@pytest.mark.slow
 def test_a_thin_week_verdict_needs_history_and_a_best_below_the_typical_best():
     edge = _edge([_player(1, **{"Hit3x%": 34.0}), _player(2, **{"Hit3x%": 20.0})])
     none = eft.build_layout(_inputs(edge))
@@ -547,6 +550,7 @@ def _r6(signals=None, trends=None, short_games=0):
     )
 
 
+@pytest.mark.slow
 def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
     edge = _edge([_player(7)])
     layout = eft.build_layout(_inputs(edge, r6=_r6(trends=_trends())))
@@ -569,6 +573,7 @@ def test_usage_trends_use_r6s_measured_band_with_a_plain_why_and_a_watch_verb():
     assert any("moved by more than R6's measured band" in _row_text(r) for r in quiet.rows)
 
 
+@pytest.mark.slow
 def test_usage_trends_fold_the_players_past_the_visible_rows_into_a_more_group():
     count = eft.TREND_ROWS_PER_POSITION + 3
     edge = _edge([_player(i) for i in range(1, count + 1)])
@@ -583,6 +588,7 @@ def test_usage_trends_fold_the_players_past_the_visible_rows_into_a_more_group()
     assert any(f"WR · {eft.TREND_ROWS_PER_POSITION} of {count} moved" in _row_text(r) for r in layout.rows)
 
 
+@pytest.mark.slow
 def test_a_player_too_new_for_an_arrow_is_counted_not_guessed():
     edge = _edge([_player(7)])
     layout = eft.build_layout(_inputs(edge, r6=_r6(short_games=4)))
@@ -845,6 +851,7 @@ def test_board_panel_is_five_lines_one_each_and_says_none_when_empty():
     )
 
 
+@pytest.mark.slow
 def test_only_beneficiaries_draftkings_lists_are_shown_in_the_tab_and_the_board_line():
     edge = _edge([_player(1), _player(2)])
     ben = pd.DataFrame(
@@ -969,6 +976,7 @@ def test_own_pct_shows_in_every_player_row_once_published_as_a_fraction():
     assert layout.own_cells and not any("Own%" in name for name in ("Hit3x%", "Boom%", "Bust%"))
 
 
+@pytest.mark.slow
 def test_ownership_never_changes_calpts_or_any_probability():
     """Own% is read only to show and to rank; the projection and the model's odds do not depend on it."""
     low = _edge([_owned(i, boom=10.0 + i, own=0.05) for i in range(1, 9)])
@@ -1208,6 +1216,7 @@ def test_the_beneficiaries_section_says_it_covers_backs_only_and_where_pass_catc
 # --- Slice 2 (Week 6): the section header repeats at the top of every position block after the first --------
 
 
+@pytest.mark.slow
 def test_every_position_block_after_the_first_repeats_the_sections_header_in_a_smaller_bar():
     edge = _edge([_player(i, pos=pos) for i, pos in enumerate(["QB", "RB", "RB", "WR", "WR", "TE"], start=1)])
     layout = eft.build_layout(_inputs(edge))
@@ -1253,6 +1262,7 @@ def _top_rows(layout):
     return _section_rows(layout, "TOP PLAYS")
 
 
+@pytest.mark.slow
 def test_top_plays_is_the_first_section_with_one_line_under_the_title_and_a_cash_then_a_gpp_block():
     layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
     first = layout.section_rows[0]
@@ -1292,6 +1302,7 @@ def test_top_plays_is_the_first_section_with_one_line_under_the_title_and_a_cash
     ]
 
 
+@pytest.mark.slow
 def test_top_plays_cash_lists_model_picks_first_then_greyed_next_up_to_fill_the_cap():
     layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
     do = _col(eft.DO_COL)
@@ -1318,6 +1329,7 @@ def test_top_plays_cash_lists_model_picks_first_then_greyed_next_up_to_fill_the_
     assert hit == sorted(hit, reverse=True) and boom == sorted(boom, reverse=True)
 
 
+@pytest.mark.slow
 def test_top_plays_rows_carry_the_same_pool_control_id_and_note_as_the_detail_rows():
     layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
     for row in _top_rows(layout):
@@ -1334,6 +1346,7 @@ def test_top_plays_rows_carry_the_same_pool_control_id_and_note_as_the_detail_ro
             assert detail.get(name) == "Cash add"
 
 
+@pytest.mark.slow
 def test_each_position_run_in_top_plays_is_its_own_colour_block():
     layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
     top = set(_top_rows(layout))
@@ -1351,6 +1364,7 @@ def test_top_plays_says_so_when_nobody_qualifies_and_the_empty_state_still_lists
     assert "No Cash add yet." in cells and "No GPP add yet." in cells
 
 
+@pytest.mark.slow
 def test_the_favourites_are_the_cash_adds_by_hit3x_and_the_gpp_adds_and_leverage_by_boom_best_first():
     layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
     assert layout.favourites_cash and layout.favourites_gpp
@@ -1367,6 +1381,7 @@ def test_the_favourites_are_the_cash_adds_by_hit3x_and_the_gpp_adds_and_leverage
     assert top_cash_ids <= set(layout.favourites_cash) | set(layout.favourites_gpp)
 
 
+@pytest.mark.slow
 def test_the_writer_puts_the_favourites_in_two_hidden_columns_with_a_label_in_row_one():
     layout = eft.build_layout(_inputs(_cash_and_gpp_edge()))
     rows = writer.tab_rows(layout, "EdgeRaw")
@@ -1378,6 +1393,7 @@ def test_the_writer_puts_the_favourites_in_two_hidden_columns_with_a_label_in_ro
     assert writer.HIDDEN_FIRST == eft.ID_COL and writer.HIDDEN_LAST == eft.LAST_COLUMN == "R"
 
 
+@pytest.mark.slow
 def test_bust_pct_follows_boom_pct_in_every_gpp_block_and_the_matchup_rows():
     """Sam, 2026-10-17: Bust% next to Boom% in the GPP blocks (it took CeilM's slot), Top plays GPP and the
     nested Matchup player rows. Every block keeps its slot count: Edge is still the last of the six."""

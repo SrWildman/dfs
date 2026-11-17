@@ -20,6 +20,15 @@ Two layers:
   `socket.getaddrinfo` to anything but this machine (localhost, a Unix socket), naming the host. A test that
   needs data from a service fakes the call; in the cloud a real call got a 403 and failed.
 
+**Speed** (`docs/planning/audit/TEST_SPEED.md`): a bare `pytest` is the editing run and leaves out the tests
+marked `slow` (about a second or more; the builder's files), `browser` (Playwright) and `exhaustive` (the
+long version of a property a shorter test already checks). `pytest --full` runs the first two, `--exhaustive`
+adds the third, and **naming a file or a test (`pytest tests/test_plays.py`) runs all of it**. A default
+run says how many it left out. An unmarked test that takes over `--speed-guard` seconds (3) fails in the
+default run: mark it `slow` or make it faster. The suite runs under `pytest-xdist` (`-n 6 --dist loadfile`,
+which keeps a module's fixtures on one worker): each worker installs the data guard below, and only the
+controller snapshots `data/`.
+
 The guard stays off outside a test's own body (`pytest_runtest_call`), so collection and fixtures that only
 import are unaffected; a fixture that reaches the network is caught by its test."""
 
@@ -201,17 +210,124 @@ def snapshot_changes(before, after) -> list[str]:
 
 _STATE: dict = {}
 
+SLOW_MARKERS = ("slow", "browser")  # left out of the default run, in `--full`
+OPT_IN_MARKERS = ("exhaustive",)  # left out of `--full` too, in `--exhaustive`
+ALL_MARKERS = SLOW_MARKERS + OPT_IN_MARKERS
+# Whole files that are slow but carry no `pytestmark` of their own (the Phase A session is editing them; move
+# the mark into the file once that merges).
+SLOW_FILES = frozenset({"tests/test_lineup_suggest.py", "tests/test_lineups_suggest_cli.py"})
+
+
+def is_worker(config) -> bool:
+    """True inside a `pytest-xdist` worker (the controller has no `workerinput`)."""
+    return hasattr(config, "workerinput")
+
+
+def uses_workers(config) -> bool:
+    return bool(getattr(config.option, "numprocesses", None)) or bool(
+        getattr(config.option, "dist", "no") != "no"
+    )
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("dfs speed")
+    group.addoption(
+        "--full", action="store_true", help="also run the slow and browser tests (before every PR)"
+    )
+    group.addoption("--exhaustive", action="store_true", help="also run the exhaustive tests (beyond --full)")
+    group.addoption(
+        "--speed-guard",
+        type=float,
+        default=3.0,
+        help="default run: an unmarked test slower than this many seconds fails (0 turns it off)",
+    )
+
+
+def pytest_configure(config):
+    for name, text in (
+        ("slow", "takes about a second or more; skipped by a bare `pytest`, run by `--full`"),
+        ("browser", "drives Playwright's Chromium (also slow); skipped by a bare `pytest`, run by `--full`"),
+        ("exhaustive", "the long version of a property another test checks; run only by `--exhaustive`"),
+    ):
+        config.addinivalue_line("markers", f"{name}: {text}")
+    config._dfs_left_out = 0
+
+
+def _named_files(config) -> set[str]:
+    """The files (not directories) the command line names, with or without `::test`."""
+    named: set[str] = set()
+    for arg in config.args:
+        path = Path(str(arg).split("::", 1)[0])
+        if not path.is_absolute():
+            path = Path(config.invocation_params.dir) / path
+        if path.is_file():
+            named.add(os.path.realpath(path))
+    return named
+
+
+def pytest_collection_modifyitems(config, items):
+    opt = config.option
+    if opt.markexpr or opt.keyword:  # the user is selecting by hand
+        return
+    named = _named_files(config)
+    kept, left_out = [], []
+    for item in items:
+        if item.nodeid.split("::", 1)[0] in SLOW_FILES:
+            item.add_marker(pytest.mark.slow)
+        marks = {m for m in ALL_MARKERS if item.get_closest_marker(m)}
+        in_named_file = os.path.realpath(item.path) in named
+        skip = (
+            bool(marks & set(OPT_IN_MARKERS))
+            and not opt.exhaustive
+            and not in_named_file
+            or bool(marks & set(SLOW_MARKERS))
+            and not (opt.full or opt.exhaustive)
+            and not in_named_file
+        )
+        (left_out if skip else kept).append(item)
+    if left_out:
+        config.hook.pytest_deselected(items=left_out)
+        items[:] = kept
+    config._dfs_left_out = len(left_out)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """The speed guard: in the default run an unmarked test over the limit fails."""
+    outcome = yield
+    config = item.config
+    limit = config.option.speed_guard
+    if call.when != "call" or not limit or config.option.full or config.option.exhaustive:
+        return
+    if any(item.get_closest_marker(m) for m in ALL_MARKERS):
+        return
+    report = outcome.get_result()
+    if report.passed and report.duration > limit:
+        report.outcome = "failed"
+        report.longrepr = (
+            f"{item.nodeid} took {report.duration:.1f} s (the default run's limit is {limit:g} s): "
+            "mark it slow (@pytest.mark.slow) or make it faster"
+        )
+
 
 def pytest_sessionstart(session):
+    config = session.config
+    if not is_worker(config):
+        _STATE["before"] = _snapshot(REAL_DATA_DIR)  # only the controller walks the real data/
+    if uses_workers(config) and not is_worker(config):
+        return  # the controller runs no test: workers import the modules and install the guard
     import_all_dfs_modules()
     _STATE["refs"] = data_path_references()
-    _STATE["before"] = _snapshot(REAL_DATA_DIR)
     sys.addaudithook(_audit)
     _GUARD["on"] = True
 
 
 def pytest_sessionfinish(session, exitstatus):
     _GUARD["on"] = False
+    config = session.config
+    if is_worker(config):
+        config.workeroutput["left_out"] = getattr(config, "_dfs_left_out", 0)
+        return
     if "before" not in _STATE:
         return
     changes = snapshot_changes(_STATE["before"], _snapshot(REAL_DATA_DIR))
@@ -220,7 +336,19 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
-def pytest_terminal_summary(terminalreporter):
+def pytest_testnodedown(node, error):
+    """A worker's report: every worker collects the same tests, so the largest count is the count."""
+    left = (getattr(node, "workeroutput", None) or {}).get("left_out", 0)
+    _STATE["left_out"] = max(_STATE.get("left_out", 0), left)
+
+
+def pytest_terminal_summary(terminalreporter, config):
+    left_out = max(getattr(config, "_dfs_left_out", 0), _STATE.get("left_out", 0))
+    if left_out:
+        terminalreporter.write_line(
+            f"{left_out} slow/browser/exhaustive tests not run (`--full` runs the slow ones, "
+            "`--exhaustive` the rest; naming a file runs all of it)"
+        )
     changes = _STATE.get("changes")
     if not changes:
         return

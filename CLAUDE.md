@@ -400,8 +400,18 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   odds history line per league. `outlook --check` scores the simulation from earlier weeks against what happened
   (Brier, vs record-only and scoring-only models; `outlook_check.py`) and back-fills the history.
   Nothing is ever written to Sleeper. `dfs season doctor` is the Season sheet's structural check. Method: `docs/SEASON.md`.
-- `pytest -q`, `ruff check .`, `ruff format --check .` -- all three run in
-  CI on every push/PR; run them before considering a change done. None of
+- **The tests** (`tests/conftest.py`; the study behind it is `docs/planning/audit/TEST_SPEED.md`). A bare `pytest -n 6 --dist loadfile`
+  is the **editing run**: it leaves out every test marked `slow` (about a second or more: the lineup search's files,
+  `tests/sim`'s long studies, individual tests elsewhere) and `browser` (Playwright; skipped anyway where Chromium is not
+  installed), says "N slow/browser/exhaustive tests not run", and **fails an unmarked test over 3 s** ("mark it slow or make it
+  faster"; `--speed-guard SECONDS`, 0 turns it off). **Naming a file or a test (`pytest tests/test_plays.py`) runs everything
+  in it.** **`pytest --full -n 6 --dist loadfile` is required before every PR**, locally, and CI runs the same with
+  `-n auto`: a green default run proves nothing about the builder. `--exhaustive` adds the long versions of properties
+  a shorter test already covers (the simulation-seed test's other three seeds). Mark a new slow test
+  `@pytest.mark.slow` (a whole file: `pytestmark = pytest.mark.slow`). `--dist loadfile` keeps a module's fixtures on one
+  worker (the default spread rebuilt a 41 s fixture on each). The data guard runs in every worker; only the controller
+  snapshots `data/`. Then `ruff check .` and `ruff format --check .`. CI installs from the tracked `uv.lock`
+  (`uv sync --locked --extra dev`): after changing a dependency in `pyproject.toml`, run `uv lock` and commit both. None of
   the tests need real credentials, a real sheet, or a browser.
 
 ## Sam's weekly shortcuts

@@ -118,6 +118,7 @@ def test_iterate_refuses_an_old_layout_tab_before_reading_or_writing_anything(cf
     assert "Round" not in out and not suggest_state.state_path(6).exists()
 
 
+@pytest.mark.slow
 def test_a_plain_run_still_replaces_an_old_layout_tab(cfg, edge, capsys, monkeypatch):  # noqa: F811
     from test_lineups_suggest_cli import NOW, StubClient
 

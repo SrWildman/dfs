@@ -70,6 +70,7 @@ def test_a_corrupt_model_file_says_to_retrain(tmp_path):
         A.load_artifacts(tmp_path)
 
 
+@pytest.mark.slow
 def test_a_fitted_model_round_trips_and_a_stale_joblib_is_removed(tmp_path):
     rng = np.random.default_rng(0)
     x = rng.normal(size=(200, 3))

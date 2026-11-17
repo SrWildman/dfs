@@ -105,6 +105,7 @@ def qb_of(pool, n=0):
 # --- the roster, the cap, the pair rules, the cuts ----------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_plain_model_finds_the_best_lineups_of_the_whole_slate(pool, universe, cap):
     lineups = solve(pool, cap, k=10)
     assert scores(lineups) == best(universe, cap, 10)
@@ -126,6 +127,7 @@ def test_each_lineup_sits_in_its_slots_with_one_flex(pool, cap):
             assert player.position in (("RB", "WR", "TE") if slot == "FLEX" else (slot,))
 
 
+@pytest.mark.slow
 def test_the_salary_cap_is_a_constraint(pool, universe, cap):
     tight = sorted(sum(p.salary for p in lu) for lu in universe)[len(universe) // 20]
     assert scores(solve(pool, tight)) == best(universe, tight, K)
@@ -134,6 +136,7 @@ def test_the_salary_cap_is_a_constraint(pool, universe, cap):
     assert solve(pool, cheapest - 100) == []  # nothing fits: no lineup, and the run still finished
 
 
+@pytest.mark.slow
 def test_a_no_good_cut_excludes_each_lineup_found_and_nothing_else(pool, universe, cap):
     lineups = solve(pool, cap, k=25)
     sets = [frozenset(p.name for p in lu) for lu in lineups]
@@ -141,6 +144,7 @@ def test_a_no_good_cut_excludes_each_lineup_found_and_nothing_else(pool, univers
     assert scores(lineups) == best(universe, cap, 25)  # and none skipped
 
 
+@pytest.mark.slow
 def test_asking_for_more_than_exist_returns_them_all(pool, universe, cap):
     qb, dst = qb_of(pool), next(p for p in pool if p.position == "DST" and p.team != qb_of(pool).opp)
     rbs = [p for p in pool if p.position == "RB"][:1]
@@ -151,6 +155,7 @@ def test_asking_for_more_than_exist_returns_them_all(pool, universe, cap):
     assert len(lineups) == len(best(universe, generous, 10**6, holding=fixed)) < 500
 
 
+@pytest.mark.slow
 def test_fixed_players_are_in_every_lineup_and_the_pool_is_the_only_choice(pool, universe, cap):
     qb = qb_of(pool, 1)
     always = [qb, next(p for p in pool if p.position == "TE" and p.team != qb.team)]
@@ -183,6 +188,7 @@ def test_a_name_listed_twice_is_one_player(pool, cap):
 # --- the shapes ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("shape", [sh.STACK, sh.NAKED, sh.RB_STACK, sh.GAME, sh.RB_DST])
 def test_each_shape_is_its_rule_as_rows(pool, universe, cap, shape):
     rule = sh.rule_for(shape)
@@ -193,6 +199,7 @@ def test_each_shape_is_its_rule_as_rows(pool, universe, cap, shape):
         assert scores(lineups) == best(universe, cap, K, rule, holding=[qb])
 
 
+@pytest.mark.slow
 def test_rb_with_his_own_dst_holds_for_a_fixed_dst_too(pool, universe, cap):
     qb = qb_of(pool)
     dst = next(p for p in pool if p.position == "DST" and p.team not in (qb.team, qb.opp))
@@ -202,6 +209,7 @@ def test_rb_with_his_own_dst_holds_for_a_fixed_dst_too(pool, universe, cap):
     assert scores(lineups) == best(universe, cap, K, rule, holding=[qb, dst])
 
 
+@pytest.mark.slow
 def test_the_contrarian_cut_is_a_row_on_the_stacks_summed_ownership(pool, universe, cap):
     qb = qb_of(pool)
     own = {p.name: 0.02 + 0.03 * (i % 7) for i, p in enumerate(pool)}
@@ -225,6 +233,7 @@ def test_a_shape_needs_its_quarterback_fixed(pool, cap):
 # --- the whole-lineup rules ---------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_at_least_one_of_a_set_of_names(pool, universe, cap):
     ranked = sorted((lu for lu in universe if sum(p.salary for p in lu) <= cap), key=lambda lu: -score(lu))
     in_the_best = {p.name for lu in ranked[:15] for p in lu}
@@ -238,6 +247,7 @@ def test_at_least_one_of_a_set_of_names(pool, universe, cap):
     assert solve(pool, cap, rules=LeafRules(need_one_of=frozenset())) == []  # nobody is marked: no lineup
 
 
+@pytest.mark.slow
 def test_at_most_n_from_one_game(pool, universe, cap):
     def rule(lu):
         return max(sum(1 for p in lu if p.game == g) for g in {p.game for p in lu}) <= 5
@@ -248,6 +258,7 @@ def test_at_most_n_from_one_game(pool, universe, cap):
     assert solve(pool, cap, rules=LeafRules(max_per_game=4)) == []  # nine players, two games
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "make",
     [
@@ -302,6 +313,7 @@ def test_the_make_up_labels_are_the_shape_modules_own_spelling():
 # --- exact, whatever the solver's tolerances ----------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_a_rule_nobody_described_is_still_enforced_lineup_by_lineup(pool, universe, cap):
     """A `leaf_filter` with no description has no rows: HiGHS proposes, the test disposes, the rejected
     lineup is cut and does not count."""
@@ -322,6 +334,7 @@ def test_a_run_that_only_finds_rejected_lineups_gives_up_and_says_so(pool, cap, 
     assert found == [] and not complete
 
 
+@pytest.mark.slow
 def test_the_search_feasibility_test_is_applied_to_every_lineup(pool, universe, cap):
     qb = qb_of(pool)
     feasible = sh.feasible_for(sh.GAME, qb)

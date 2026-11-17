@@ -73,6 +73,7 @@ def test_every_sampled_lineup_is_legal_and_leaves_little_salary(slate):
     assert left.max() <= max(RATES.unspent) + fg.UNSPENT_SLACK
 
 
+@pytest.mark.slow
 def test_the_construction_rates_come_out_as_asked(slate):
     field = fg.generate_field(slate, RATES, 3000, seed=1)
     f = field.features()
@@ -83,6 +84,7 @@ def test_the_construction_rates_come_out_as_asked(slate):
     assert g["stack1"].sum() == 0 and g["bringback"].sum() == 0
 
 
+@pytest.mark.slow
 def test_raking_brings_the_field_to_its_targets(slate):
     field = fg.generate_field(slate, RATES, 3000, seed=2)
     err = np.abs(field.ownership() - slate.targets())
@@ -90,6 +92,7 @@ def test_raking_brings_the_field_to_its_targets(slate):
     assert err.max() < 0.08
 
 
+@pytest.mark.slow
 def test_the_chalk_lineups_are_legal_distinct_and_in_product_order(slate):
     chalk = fg.chalk_lineups(slate, 5)
     assert chalk.shape == (5, 9)
@@ -99,6 +102,7 @@ def test_the_chalk_lineups_are_legal_distinct_and_in_product_order(slate):
     assert np.all(np.diff(logp) <= 1e-9)
 
 
+@pytest.mark.slow
 def test_the_herd_puts_its_share_on_the_chalk(slate):
     herd = fg.HerdModel(share=0.3, decay=0.0, k=3)
     field = fg.generate_field(slate, RATES, 2000, herd=herd, seed=3, rake_rounds=2)
@@ -111,6 +115,7 @@ def test_the_herd_puts_its_share_on_the_chalk(slate):
     assert weights == pytest.approx([4 / 7, 2 / 7, 1 / 7])
 
 
+@pytest.mark.slow
 def test_the_field_is_deterministic_in_the_seed(slate):
     a = fg.generate_field(slate, RATES, 500, seed=9, rake_rounds=2)
     b = fg.generate_field(slate, RATES, 500, seed=9, rake_rounds=2)
