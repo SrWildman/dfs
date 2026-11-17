@@ -240,9 +240,16 @@ def _f(v: object) -> float | None:
     return None if x != x else x
 
 
+def _realized(r: dict) -> float | None:
+    pts, field = _f(r.get("realized")), _f(r.get("field_mean_pts"))
+    return None if pts is None or field is None else pts - field
+
+
 def summary(rows: list[dict], season: int, week: int) -> dict:
-    """The Close screen's tile: this week's mean edge and percentile (over his rows in double-ups and other
-    cash contests, each distinct lineup once per contest), the season's weeks so far and their mean."""
+    """The Close screen's tile and card: this week's mean edge and percentile (over his rows in double-ups and
+    other cash contests, each distinct lineup once per contest), the season's weeks so far and their mean.
+    `realized` is the same rows' actual margin over the field: his points minus the field's mean points
+    (`realized - field_mean_pts`); the scorecard's status comes from it, the projected edge is its text."""
     from dfs import field_review
 
     def cash(r: dict) -> bool:
@@ -261,6 +268,7 @@ def summary(rows: list[dict], season: int, week: int) -> dict:
         w: {
             "edge": mean([_f(r["edge"]) for r in rs]),
             "pct": mean([_f(r["pct_in_field"]) for r in rs]),
+            "realized": mean([_realized(r) for r in rs]),
             "rows": len(rs),
             "n_src": min(int(_f(r["n_src"]) or 0) for r in rs),
         }
@@ -274,5 +282,6 @@ def summary(rows: list[dict], season: int, week: int) -> dict:
         "weeks": {str(w): v for w, v in weeks.items()},
         "season_edge": mean([v["edge"] for v in weeks.values()]),
         "season_pct": mean([v["pct"] for v in weeks.values()]),
+        "season_realized": mean([v["realized"] for v in weeks.values()]),
         "n_weeks": len(weeks),
     }

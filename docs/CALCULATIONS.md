@@ -2170,8 +2170,9 @@ with standings, for each distinct lineup of his: `proj_consensus` (his nine summ
 field, computed in full), `edge = proj_consensus - field_mean_consensus`, `pct_in_field` = the share of the field with a lower sum,
 `cut_proj` = the field's sum at the paid share's quantile, `modal_share`, `copies_exact` (others with his nine),
 `within_2_swaps` (share sharing 7+ of his nine), and `realized`, `line`, `margin = realized - line`. The tile (`summary`) is over
-cash formats only (`field_review.CASH_FORMATS`): the mean edge and percentile this week, and the mean of the weekly means. A
-tripwire, not proof it pays (R4).
+cash formats only (`field_review.CASH_FORMATS`): the mean edge, percentile and realized margin (`realized - field_mean_pts`)
+this week, and the mean of the weekly means. The projected edge is a tripwire, not proof it pays (R4): the scorecard's status
+comes from the realized margin.
 
 **The week line** (`close_view.cash_line`, `week_line`): his Double Up rows of `data/contests/decisions.csv` for the week: points
 (min-max), the cash lines (min-max), how many cashed (`points >= line`), the share of the field beaten = the median over them of
@@ -2195,7 +2196,10 @@ baseline's error minus ours (positive: ours better), weeks as the unit; with `m`
 | Projection | CalPts MAE | TFFB MAE (`numbers.projection_by_week`) | TFFB MAE - CalPts MAE |
 | Ownership | our ownership MAE (`field_own.score_weeks`) | GPP: TFFB's Own%; cash: the double-up curve | baseline MAE - ours, per format; the status is the weaker format's |
 | Calibration | the mean Cash % shown | the share cashed (`data/contests/cash_shown.csv`) | not by week: gap = shown - cashed, `se = sqrt(c (1 - c) / n)` |
-| Edge at lock | his cash lineups' consensus sum | the double-up field's mean | the week's mean edge |
+| Edge at lock | his cash lineups' actual points | the double-up field's mean actual points | the week's mean realized margin, `realized - field_mean_pts` |
+
+Edge at lock's status comes from the **realized** margin (Sam, 2026-11-17); the projected edge on the consensus and its
+percentile are the card's text ("on paper: +5.8 pts, 85th percentile").
 
 Calibration's status: **Overstated** when `gap > 2 se`; **Proven** when `|gap| <= 2 se` on 30+ builds; New under 3 weeks; else
 Not proven.

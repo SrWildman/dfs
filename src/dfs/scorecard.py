@@ -447,23 +447,39 @@ def calibration_card(rows: list[dict], week: int) -> dict:
 
 
 def edge_card(summary: dict | None) -> dict:
-    """Edge at lock (`edge_at_lock.summary`): his cash lineups against the field's mean on the four-source
-    consensus, by week."""
+    """Edge at lock (`edge_at_lock.summary`). The status comes from the REALIZED margin by week (his cash
+    lineups' actual points minus the field's mean actual points; Sam, 2026-11-17); the projected edge on the
+    four-source consensus and its percentile are the card's text ("on paper")."""
     weeks = (summary or {}).get("weeks") or {}
-    edges = [float(v["edge"]) for v in weeks.values() if v.get("edge") is not None]
-    this = (summary or {}).get("this_week")
+    realized = [float(v["realized"]) for v in weeks.values() if v.get("realized") is not None]
+    this = (summary or {}).get("this_week") or {}
+    paper = (summary or {}).get("season_edge")
+    pctl = (summary or {}).get("season_pct")
+    if this.get("edge") is not None:
+        week_text = f"actual {_signed_pts(this.get('realized'))}; on paper {this['edge']:+.1f} pts"
+        if this.get("pct") is not None:
+            week_text += f", {this['pct'] * 100:.0f}th percentile"
+    else:
+        week_text = "no standings this week"
+    season_text = f"actual {_gain_text(realized, ' pts', 1)}"
+    if paper is not None:
+        season_text += f"; on paper: {paper:+.1f} pts" + (
+            f", {pctl * 100:.0f}th percentile" if pctl is not None else ""
+        )
     return {
         "model": "Edge at lock",
-        "week": f"{this['edge']:+.1f} pts, beat {this['pct'] * 100:.0f}% of the field"
-        if this and this.get("edge") is not None
-        else "no standings this week",
-        "season": _gain_text(edges, " pts", 1),
+        "week": week_text,
+        "season": season_text,
         "baseline": (
-            "the double-up field's mean on the four-source consensus (above it is not proof it pays: R4)"
+            "the double-up field's mean actual points (on paper: its mean on the four-source consensus)"
         ),
-        "weeks": len(edges),
-        "status": _status(edges),
+        "weeks": len(realized),
+        "status": _status(realized),
     }
+
+
+def _signed_pts(x: object) -> str:
+    return "-" if x is None else f"{float(x):+.1f} pts"
 
 
 def scorecards(

@@ -123,6 +123,8 @@ def test_the_summary_is_the_cash_rows_by_week():
             "edge": "8",
             "pct_in_field": "0.9",
             "n_src": "4",
+            "realized": "120.5",
+            "field_mean_pts": "118",
         },
         {
             "season": "2026",
@@ -136,4 +138,6 @@ def test_the_summary_is_the_cash_rows_by_week():
     s = eal.summary(rows, 2026, 9)
     assert s["this_week"]["edge"] == 8.0 and s["this_week"]["pct"] == 0.9
     assert s["season_edge"] == 6.0 and s["n_weeks"] == 2
+    assert s["this_week"]["realized"] == 2.5 and s["weeks"]["8"]["realized"] is None  # no points: not counted
+    assert s["season_realized"] == 2.5
     assert eal.summary(rows, 2026, 8)["n_weeks"] == 1  # a later week never counts
