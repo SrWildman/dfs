@@ -387,3 +387,12 @@ def test_a_teammate_swap_shows_once_on_the_worse_news():
     got = ls.rows(ls.net_changes(pd.DataFrame(rows_), BUILT), e, [lineup()], {}, MORNING)
     assert [r.name for r in got.act] == ["Wr Bench"]
     assert "Wr Back" in [r.name for r in got.none]
+
+
+def test_a_past_nfl_week_is_closed_whatever_slate_the_page_reads():
+    """`dfs week page --week 9` on Week 11's Tuesday reads the current slate (another week's kickoffs): the
+    week is over, so the page opens on its close (blueprint Phase D)."""
+    tue_after = datetime(2026, 11, 10, 6, 0, tzinfo=UTC)  # Tuesday 1 am ET, the next NFL week has begun
+    assert ls.week_over(2026, 9, tue_after) is not None
+    assert ls.week_over(2026, 9, datetime(2026, 11, 9, 23, 0, tzinfo=UTC)) is None  # Monday night: not yet
+    assert ls.week_over(2026, 11, tue_after) is None
