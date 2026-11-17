@@ -26,7 +26,6 @@ import pandas as pd
 from dfs import (
     calibration,
     field_own,
-    props_edge,
     results_actual,
     results_loop,
     results_signals,
@@ -214,7 +213,6 @@ def update_results(
             reliability=reliability,
             ownership=ownership,
             ownership_gaps=ownership_gaps,
-            props_shadow=_props_shadow(season, stats_player, report),
             teammate_race=_teammate_bump_race(season, scored),
             opportunity=opportunity,
         )
@@ -259,19 +257,6 @@ def _save_opportunity_table(table: pd.DataFrame | None, season: int) -> None:
         )
     except OSError as e:
         log.warning("opportunity record not saved for the Edge Finder: %s", e)
-
-
-def _props_shadow(season: int, stats_player: pd.DataFrame, report: UpdateReport) -> props_edge.Shadow | None:
-    """Model Check's PROPS SHADOW from the saved pulls and ESPN snapshots (no network, no Odds API credits).
-    Fail soft: None leaves the section out."""
-    try:
-        shadow = props_edge.build_shadow(stats_player, season=season)
-    except Exception as e:  # noqa: BLE001 - never fail a results update over a shadow
-        log.warning("props shadow skipped: %s", e)
-        report.say(f"Props shadow skipped ({e}); Model Check's PROPS SHADOW will be missing.")
-        return None
-    report.say(f"Props shadow: {props_edge.headline(shadow)}")
-    return shadow
 
 
 def _refit_field_own(

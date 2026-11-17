@@ -58,9 +58,10 @@ def _signal_table(season: int) -> tuple[pd.DataFrame | None, str]:
 def _props(edge: pd.DataFrame, week: int) -> tuple[list[dict], str]:
     """The newest saved Odds API pull FOR THIS WEEK, reduced to each player's consensus lines. A pull from
     another week is never shown as this week's."""
-    from dfs import props, props_edge
+    from dfs import props
+    from dfs.sources import odds_props
 
-    pulls = [(at, p) for at, p in props_edge.load_pulls() if p.get("week") == week]
+    pulls = [(at, p) for at, p in odds_props.load_pulls() if p.get("week") == week]
     if not pulls:
         return [], f"No props pulled for week {week} yet (the weekend pull, or `dfs sync --props`)."
     stamp, payload = pulls[-1]

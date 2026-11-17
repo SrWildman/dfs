@@ -198,8 +198,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs setup stacks [--sheet-id <id>]` -- creates (or rebuilds) the Stacks tab right after Suggested. Template first, then live, `dfs doctor` after
   (check `stacks-tab`). Needs `dfs stacks --refit` once.
 - `dfs research refresh [--through N] [--season S] [--only a,b]` -- the weekly offline reruns in one
-  command, no sheet: the teammate-bump race, the field_own scores, the ESPN / props blend gate and the PROPS SHADOW
-  (`props_edge.build_shadow`), `sim/contest_retro`, the optimizer's-curse study (`research/curse.py`), and the calibrated
+  command, no sheet: the teammate-bump race, the field_own scores, the ESPN / props blend gate, `sim/contest_retro`, the optimizer's-curse study (`research/curse.py`), and the calibrated
   double-up Cash % offset (`sim/du_line_retro.py`; it saves the offset `[sim.lines] calibrated_cash_offset` shows Cash % against,
   default off, and says when it clears the bar; all three plug in through `refresh_summary(season, through)`, see `research/refresh.py`). Each fails soft; it writes
   `docs/research/weekly/<season>-wk<NN>.md` (gitignored; an `--only` run writes `-partial.md` instead) with one block per study (headline numbers, ship bar,

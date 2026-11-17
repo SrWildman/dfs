@@ -621,7 +621,7 @@ Rerun the weekly offline studies with the closed weeks so far and write one repo
 |---|---|
 | `--through INT` | Last closed week to include (default: the newest scored week). |
 | `--season INT` | Override the auto-detected NFL season. |
-| `--only STR` | Comma-separated studies to run: bump, ownership, shadows, props, contest_retro, curse, du_line; backtest (the Flashback backtest, about 6 minutes) runs only when named here. |
+| `--only STR` | Comma-separated studies to run: bump, ownership, shadows, contest_retro, curse, du_line; backtest (the Flashback backtest, about 6 minutes) runs only when named here. |
 
 ### `dfs research close-report`
 

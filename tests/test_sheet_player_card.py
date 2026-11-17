@@ -176,10 +176,10 @@ def test_gather_raw_quotes_the_saved_signal_records(monkeypatch, tmp_path):
 
 
 def test_props_never_show_another_weeks_pull(monkeypatch):
-    from dfs import props_edge
+    from dfs.sources import odds_props
 
     stamp = pd.Timestamp("2026-10-17T17:21:00Z").to_pydatetime()
-    monkeypatch.setattr(props_edge, "load_pulls", lambda: [(stamp, {"week": 6, "events": []})])
+    monkeypatch.setattr(odds_props, "load_pulls", lambda: [(stamp, {"week": 6, "events": []})])
     rows, note = sheet_player_card._props(edge(), 7)
     assert rows == [] and "No props pulled for week 7" in note
 

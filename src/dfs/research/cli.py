@@ -78,7 +78,7 @@ def research_refresh(
     only: str = typer.Option(
         None,
         "--only",
-        help="Comma-separated studies to run: bump, ownership, shadows, props, contest_retro, curse, "
+        help="Comma-separated studies to run: bump, ownership, shadows, contest_retro, curse, "
         "du_line; backtest (the Flashback backtest, about 6 minutes) runs only when named here.",
     ),
 ) -> None:

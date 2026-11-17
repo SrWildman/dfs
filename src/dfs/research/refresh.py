@@ -11,7 +11,6 @@ Studies, each with the bar it must clear to matter:
 | `bump` | the teammate-bump shadow's Model Check race | `dfs.teammate_bump` |
 | `ownership` | the field-ownership shadow's scores, where CalPts and TFFB disagree | `dfs.field_own` |
 | `shadows` | ESPN and props shadow projections against CalPts (the blend gate) | `calibration.shadow_race` |
-| `props` | the PROPS SHADOW: does ESPN beat the prop market's price | `dfs.props_edge.build_shadow` |
 | `contest_retro` | the contest retro (hook below) | `dfs.sim.contest_retro` |
 | `curse` | the optimizer's curse and its held-out fixes (hook below) | `dfs.research.curse` |
 | `backtest` | Flashback: build settings scored in his real contests (optional: `--only`) | `dfs.backtest` |
@@ -269,53 +268,6 @@ def study_shadows(ctx: Context) -> Study:
     return s
 
 
-def props_metrics(table: pd.DataFrame) -> dict[str, float | bool]:
-    """Per band of the "All markets" rows: scored player-markets, how often ESPN's favoured side won, the win
-    rate the prices needed, the return per unit staked, and whether the verdict reads "beat the price"."""
-    out: dict[str, float | bool] = {}
-    allm = table[table["Market"] == "All markets"] if not table.empty else table
-    for _, r in allm.iterrows():
-        band = str(r["Band"])
-        out[f"{band} n"] = int(r["n"])
-        if r["n"]:
-            out[f"{band} won"] = round(float(r["Won"]), 4)
-            out[f"{band} needed"] = round(float(r["Needed"]), 4)
-            out[f"{band} return"] = round(float(r["Return"]), 4)
-        out[f"{band} beat the price"] = r["Verdict"] == "beat the price"
-    return out
-
-
-def study_props(ctx: Context) -> Study:
-    from dfs import props_edge
-
-    s = Study(
-        "props",
-        "PROPS SHADOW (ESPN against the prop market)",
-        f"a verdict word only at {props_edge.MIN_N_VERDICT}+ scored player-markets in a cell; "
-        '"beat the price" means ESPN\'s favoured side won more often than the price needed by more than '
-        "2 SE. "
-        "Analysis only: nothing here is a bet, and nothing in the sheet uses it",
-    )
-    shadow = props_edge.build_shadow(props_edge.latest_stats_player(), season=ctx.season)
-    rows = shadow.rows[shadow.rows["Week"] <= ctx.through] if not shadow.rows.empty else shadow.rows
-    table = props_edge.band_table(rows)
-    shadow = props_edge.Shadow(
-        rows,
-        table,
-        shadow.fit,
-        shadow.counts,
-        sorted(int(w) for w in rows["Week"].unique()),
-        shadow.fit_weeks,
-    )
-    s.headline = [props_edge.headline(shadow), "", *props_edge.summary_lines(shadow)[:1]]
-    allm = table[table["Market"] == "All markets"] if not table.empty else table
-    if not allm.empty:
-        s.headline += [""] + _md_table(allm[["Band", "n", "Won", "Needed", "Return", "Verdict"]], 3)
-    s.metrics = props_metrics(table)
-    s.verdict = props_edge.headline(shadow)
-    return s
-
-
 CONTEST_RETRO_MODULE = "dfs.sim.contest_retro"
 CURSE_MODULE = "dfs.research.curse"
 BACKTEST_MODULE = "dfs.backtest"
@@ -375,7 +327,6 @@ STUDIES: dict[str, Callable[[Context], Study]] = {
     "bump": study_bump,
     "ownership": study_ownership,
     "shadows": study_shadows,
-    "props": study_props,
     "contest_retro": study_contest_retro,
     "curse": study_curse,
     "backtest": study_backtest,
@@ -386,7 +337,6 @@ TITLES = {
     "bump": "Teammate bump shadow",
     "ownership": "Field-ownership shadow",
     "shadows": "ESPN / props shadows",
-    "props": "PROPS SHADOW",
     "contest_retro": "Contest retro",
     "curse": "Optimizer's curse",
     "backtest": "Flashback backtest",

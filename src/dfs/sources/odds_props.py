@@ -35,6 +35,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -219,6 +220,23 @@ def snapshot_age(now: datetime | None = None) -> timedelta | None:
     if not snaps:
         return None
     return (now or datetime.now(UTC)) - snaps[-1][0]
+
+
+def load_pulls(directory: Path | None = None) -> list[tuple[datetime, dict]]:
+    """Every saved pull's raw responses `[(stamp, payload)]` (`data/raw/odds_props/<UTC stamp>.json`), oldest
+    first. An unreadable file is skipped."""
+    directory = directory or RAW_DIR / RAW_DIR_NAME
+    out = []
+    for path in sorted(directory.glob("*.json")):
+        if not re.fullmatch(r"\d{8}T\d{6}Z", path.stem):
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, ValueError) as e:
+            log.warning("props pull %s unreadable: %s", path.name, e)
+            continue
+        out.append((datetime.strptime(path.stem, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC), payload))
+    return out
 
 
 def _note(season: int, week: int, kind: str) -> str:

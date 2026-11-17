@@ -92,7 +92,7 @@ def test_the_previous_report_is_the_newest_earlier_week_of_the_same_season(two_s
 def test_the_summary_is_a_line_per_study_between_a_header_and_the_report(tmp_path):
     studies = [refresh.Study(k, k, "bar", verdict="v", seconds=1.0) for k in refresh.STUDIES]
     lines = refresh.summary_lines(studies, 12.0, tmp_path / "r.md", 2026, 6)
-    assert len(refresh.STUDIES) == 8 and len(lines) == 10
+    assert len(refresh.STUDIES) == 7 and len(lines) == 9
     assert lines[0].startswith("research refresh 2026 through Week 6") and "shared history" in lines[0]
     assert lines[-1].strip().startswith("report:")
 
@@ -187,55 +187,6 @@ def test_ownership_metrics_compare_ours_with_tffb_per_format():
     assert got["gpp Ours MAE"] == 0.035 and "cash TFFB Own% chalk bias" not in got
     assert got["gap share"] == 0.55
     assert refresh.ownership_metrics(summary, gaps.iloc[0:0]).get("gap share") is None
-
-
-def test_props_metrics_read_the_all_markets_rows_by_band():
-    import pandas as pd
-
-    table = pd.DataFrame(
-        {
-            "Market": ["Pass yards", "All markets", "All markets", "All markets"],
-            "Band": ["all gaps", "all gaps", "10+ pts", "15+ pts"],
-            "n": [90, 400, 120, 0],
-            "Won": [0.5, 0.56, 0.61, float("nan")],
-            "Needed": [0.5, 0.51, 0.52, float("nan")],
-            "Return": [0.0, 0.05, 0.12, float("nan")],
-            "Verdict": ["n < 100", "beat the price", "no edge shown", "n < 100"],
-        }
-    )
-    got = refresh.props_metrics(table)
-    assert got["all gaps n"] == 400 and got["all gaps won"] == 0.56 and got["all gaps beat the price"] is True
-    assert got["10+ pts beat the price"] is False and got["15+ pts n"] == 0
-    assert "15+ pts won" not in got and not any(k.startswith("Pass") for k in got)
-    assert refresh.props_metrics(pd.DataFrame()) == {}
-
-
-def test_the_props_study_uses_the_shadow_and_cuts_it_at_the_closed_week(monkeypatch):
-    import pandas as pd
-
-    from dfs import props_edge
-
-    rows = pd.DataFrame(
-        {
-            "Week": [4, 5, 6],
-            "Stat": ["rec_yd"] * 3,
-            "Edge": [0.12, 0.2, 0.3],
-            "Price": [1.9, 1.9, 1.9],
-            "Won": [1.0, 0.0, 1.0],
-            "Profit": [0.9, -1.0, 0.9],
-        }
-    )
-    seen = {}
-
-    def fake_build(stats_player, *, season, pulls=None):
-        seen["season"] = season
-        return props_edge.Shadow(rows, props_edge.band_table(rows), pd.DataFrame(), {}, [4, 5, 6], [4, 5, 6])
-
-    monkeypatch.setattr(props_edge, "build_shadow", fake_build)
-    monkeypatch.setattr(props_edge, "latest_stats_player", lambda: None)
-    study = refresh.study_props(refresh.Context(2026, 5))
-    assert seen["season"] == 2026 and study.metrics["all gaps n"] == 2  # week 6 is not closed yet
-    assert study.status == "ok" and "Too early for a verdict" in study.verdict
 
 
 def test_a_partial_run_never_replaces_the_full_report_or_becomes_last_weeks(two_studies, tmp_path):

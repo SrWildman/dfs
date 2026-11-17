@@ -503,3 +503,13 @@ def test_the_source_is_registered_as_a_shadow_source_with_no_tab():
     assert names.index("odds_props") < names.index("edge") and names.index("draftkings") < names.index(
         "odds_props"
     )
+
+
+def test_load_pulls_reads_the_saved_responses_oldest_first_and_skips_the_rest(tmp_path):
+    (tmp_path / "20261018T150000Z.json").write_text(json.dumps({"week": 7, "events": []}))
+    (tmp_path / "20261017T150000Z.json").write_text(json.dumps({"week": 6, "events": []}))
+    (tmp_path / "20261019T150000Z.json").write_text("not json")
+    (tmp_path / "credits.json").write_text("{}")
+    pulls = O.load_pulls(tmp_path)
+    assert [p["week"] for _, p in pulls] == [6, 7]
+    assert pulls[0][0] == datetime(2026, 10, 17, 15, 0, tzinfo=UTC)

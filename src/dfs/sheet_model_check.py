@@ -23,9 +23,8 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from dfs import calibration, props_edge, results_signals
+from dfs import calibration, results_signals
 from dfs import results_analysis as ra
-from dfs.props_edge import Shadow
 from dfs.sheet_clipping import fit_tab_widths
 from dfs.sheet_column_notes import MODEL_CHECK_NOTES, apply_notes_to_values
 from dfs.sheets import SheetsClient
@@ -57,8 +56,6 @@ _TEXT_HEADERS = {
     "Measure",
     "Off?",
     "Players rated by",
-    "ESPN vs market",
-    "Verdict",
 }
 
 
@@ -268,14 +265,13 @@ def build_layout(
     reliability: pd.DataFrame | None = None,
     ownership: pd.DataFrame | None = None,
     ownership_gaps: pd.DataFrame | None = None,
-    props_shadow: Shadow | None = None,
     teammate_race: pd.DataFrame | None = None,
     opportunity: pd.DataFrame | None = None,
 ) -> Layout:
     """The whole tab as rows plus formatting instructions. Pure. `signal_table` is
     `results_signals.signal_report` (None when no signals archive exists yet); `ownership` is
     `field_own.score_summary` and `ownership_gaps` `field_own.disagreement` (None leaves the sections out);
-    `props_shadow` is `props_edge.Shadow` (None leaves PROPS SHADOW out); `teammate_race` is
+    `teammate_race` is
     `calibration.teammate_bump_race` (the SHADOW SOURCES row for a starter's absence; None leaves it out);
     `opportunity` is `results_signals.opportunity_report` (OPPORTUNITY PER DOLLAR; None leaves it out)."""
     b = _Builder()
@@ -306,7 +302,6 @@ def build_layout(
     _add_shadow_sources(b, scored, teammate_race)
     _add_ownership(b, ownership)
     _add_ownership_gaps(b, ownership_gaps)
-    _add_props_shadow(b, props_shadow)
     _add_opportunity(b, opportunity)
     _add_reliability(b, reliability)
 
@@ -933,41 +928,6 @@ def _add_opportunity(b: _Builder, report: pd.DataFrame | None) -> None:
         "weeks the group beat CalPts in the signal's direction. Every feature is built from earlier games "
         "only. TPRR~ is a proxy (snaps x team dropback rate, not real route counts). Shadow: nothing reads "
         "these until they beat CalPts by 2+ SE on held-out weeks and in most weeks, and you say so."
-    )
-
-
-def _add_props_shadow(b: _Builder, shadow: Shadow | None) -> None:
-    """ESPN's stat projections against the prop market (`props_edge`): when ESPN sat away from the book's
-    line, did its side beat the price? Left out when it could not be built."""
-    if shadow is None:
-        return
-    b.section("PROPS SHADOW  —  when ESPN differs from the prop line, does its side beat the price? (shadow)")
-    if shadow.table.empty:
-        b.note("Not enough data yet -- needs a saved props pull and ESPN snapshot from a completed week.")
-        return
-    b.verdict(props_edge.headline(shadow))
-    b.table(
-        shadow.table,
-        [
-            ("Market", "Market"),
-            ("ESPN vs market", "Band"),
-            ("n", "n"),
-            ("ESPN side won", "Won"),
-            ("Price needed", "Needed"),
-            ("Return", "Return"),
-            ("Verdict", "Verdict"),
-        ],
-        percent={"ESPN side won", "Price needed", "Return"},
-        signed={"Return"},
-    )
-    b.note(
-        "ESPN vs market is how far ESPN's chance of the Over (Yes for a TD) sits from the book's, in points; "
-        "each band includes the bigger gaps. ESPN side won is how often the side ESPN favoured won (pushes "
-        "and players who did not play dropped); Price needed is the win rate the median quoted prices "
-        "asked for; Return is per unit staked at those prices. ESPN's spread comes from "
-        f"{shadow.counts.get('fit_players', 0)} projections, week(s) {_weeks_text(shadow.fit_weeks)}, shrunk "
-        "toward nflverse history, and a week is judged on a spread fitted without it. A verdict word needs "
-        f"{props_edge.MIN_N_VERDICT} rows in the cell. Shadow: no player column, no picks, nothing reads it."
     )
 
 
