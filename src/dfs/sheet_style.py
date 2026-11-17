@@ -1569,7 +1569,7 @@ BUILDER_WIDTHS = {
     # scope. Renamed "% of Rstr" -> "% of Own" in Part 2 (alongside Rstr%'s
     # own rename to Own%), then "% of Own" -> "% of Cap" in Part 7.9 (its
     # denominator changed from the lineup's own running salary total to
-    # the salary cap constant -- see `polish_lineups_pct_of_cap`).
+    # the salary cap constant).
     "% of Cap": 90,
     # Part B widths-audit extension (2026-09-22): Lineups' own "Issues"
     # column was already given an explicit width (110px), but via a
@@ -2383,111 +2383,6 @@ def polish_lineups_totals_rows(
         f"{summed} sum(s) written (Ceil/Pts/Own%), {labeled} label(s) written, "
         f"{reset} Name cell(s) un-typo-guarded"
     )
-
-
-def polish_lineups_pct_of_cap(
-    client: SheetsClient, tab: str, *, header_row: int, name_blocks: list[tuple[int, int]], salary_cap: int
-) -> str:
-    """Phase 6, Part 1.2 gave this column (`% of Rstr` at the time)
-    `=F<row>/F$<totals_row>` -- this player's DK Sal as a share of the
-    lineup's own running salary total -- and guarded it against dividing
-    by zero on a fresh lineup, since the block's total salary is 0 until
-    at least one name is typed. Not written by any `dfs` command before
-    that (a genuinely hand-authored template formula, like the "average
-    remaining per slot" helper documented in docs/SHEET_REFERENCE.md).
-
-    Part 7.9 found that fix was patching the wrong problem: Sam confirmed
-    the intended meaning is "what share of my total lineup salary is this
-    player taking up" -- cap allocation, not rostership share, and not a
-    running total either (`F$<totals_row>` lurches as slots fill: three
-    players in, each reads ~33%, meaningful only once the lineup is
-    complete, which is exactly when it stops being needed). Renamed
-    `Rstr%` -> `Own%` -> unrelated; this column itself went `% of Rstr` ->
-    `% of Own` (Part 2, name-matching Own%'s own rename) -> `% of Cap`
-    (Part 7.9, once the real meaning was confirmed) -- the name changed
-    twice while the bug underneath was still there both times.
-
-    Dividing by the salary cap (`config.toml`'s `[lineups] salary_cap`,
-    never hardcoded 50000) instead of the block's own running total fixes
-    the #DIV/0! at the source -- a constant denominator can't divide by
-    zero, so the old whole-block-empty guard is gone, not just redundant.
-    Still guards the individual blank-slot case (`$A<row>=""`) -- "an
-    empty slot has no share" (Sam's own framing for the original bug), not
-    a real 0% for a slot nobody's picked yet.
-    """
-    if not client.tab_exists(tab):
-        return f"{tab}: not present -- skipped"
-    header_rows = client.read_range(tab, f"A{header_row}:{header_row}")
-    header = header_rows[0] if header_rows else []
-    if not header:
-        return f"{tab}: no header found at row {header_row} -- skipped"
-
-    def col(name: str) -> str | None:
-        return column_letter(header.index(name)) if name in header else None
-
-    name_col = col("Name")
-    salary_col = col("DK Sal")
-    pct_col = col("% of Cap")
-    if not (name_col and salary_col and pct_col):
-        return f"{tab}: 'Name'/'DK Sal'/'% of Cap' not all present -- skipped"
-
-    written = 0
-    for start, end in name_blocks:
-        for row in range(start, end + 1):
-            formula = f'=IF({name_col}{row}="","",{salary_col}{row}/{salary_cap})'
-            client.update_range(tab, f"{pct_col}{row}", [[formula]])
-            written += 1
-
-    return f"{tab}: '% of Cap' set against the {salary_cap} salary cap for {written} row(s)"
-
-
-def fix_lineups_dst_slot_label(
-    client: SheetsClient, tab: str, *, position_col: str, name_blocks: list[tuple[int, int]]
-) -> str:
-    """Found live (2026-09-18) verifying Part 7.4's new DST-vs-own-QB
-    guardrail with a real test lineup: it never fired, on either sheet,
-    for any block. Root cause has nothing to do with that guardrail's own
-    formula -- `Lineups`' own `Pos.` column is STATIC TEXT (never a
-    formula, confirmed via a real formula-mode read), one fixed roster-
-    slot label per row (`QB, RB, RB, WR, WR, WR, TE, FLEX, DST` in DK's
-    own classic-contest order) written once, presumably by hand, before
-    this codebase's own "DST" convention (`derived.EDGE_COLUMNS`, Player
-    Pool's own DST block, EVERY other reference anywhere in this project)
-    existed. The defense slot's own label reads `"DEF"` instead, on every
-    single one of 20 blocks, both sheets -- confirmed by reading every
-    block's own last row directly rather than assuming a single instance
-    generalizes. `_stack_check_formula`'s `MATCH("DST", Position_range,
-    0)` can never find a slot literally labelled `"DEF"`, so `dst_opp`
-    always resolves to `""` via its own `IFERROR` guard, and the whole
-    check silently never fires -- not a formula bug, a stale-data one,
-    invisible until tested against a real lineup because an untested
-    guardrail LOOKS identical to a working one that just hasn't found a
-    violation yet.
-
-    Verify-then-overwrite, never blind: only touches a row that actually
-    still says `"DEF"`, so a block already fixed (or one that was never
-    wrong) is left untouched and reported as such, not silently
-    re-written."""
-    if not client.tab_exists(tab):
-        return f"{tab}: not present -- skipped"
-
-    fixed = 0
-    already_correct = 0
-    unexpected: list[tuple[int, str]] = []
-    for _start, end in name_blocks:
-        cell = f"{position_col}{end}"
-        current = client.read_range(tab, cell)
-        value = current[0][0].strip() if current and current[0] else ""
-        if value == "DST":
-            already_correct += 1
-        elif value == "DEF":
-            client.update_range(tab, cell, [["DST"]])
-            fixed += 1
-        else:
-            unexpected.append((end, value))
-
-    note = f", {len(unexpected)} unexpected value(s) left untouched: {unexpected}" if unexpected else ""
-    return f"{tab}: {fixed} 'DEF' -> 'DST' fix(es), {already_correct} already correct{note}"
 
 
 def polish_guardrails(
@@ -3757,8 +3652,6 @@ for _name in (
     "polish_builder_tab",
     "polish_lineups_identity_cells",
     "polish_lineups_totals_rows",
-    "polish_lineups_pct_of_cap",
-    "fix_lineups_dst_slot_label",
     "polish_guardrails",
     "polish_bankroll",
     "apply_tab_chrome",

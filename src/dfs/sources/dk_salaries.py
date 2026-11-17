@@ -133,7 +133,7 @@ class DkSalariesSource(Source):
         if "(LOCKED)" in resp.text:
             raise DkSalariesFetchError(
                 "DraftKings returned locked placeholder salaries -- this endpoint may "
-                "now require an authenticated session (run `dfs auth dk`)."
+                "now require an authenticated session (this tool never logs in to DraftKings)."
             )
 
         from io import StringIO

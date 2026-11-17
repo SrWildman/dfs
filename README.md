@@ -141,10 +141,9 @@ Also handy most weeks:
 | `dfs week serve` [`--week N`, `--port P`, `--no-open`, `--sheet-id <id>`, `--stop`] | you want the Week page as a local app: Claude Code docked beside it (approvals shown on the page), run buttons with live output for every command, a contest check form, a drop zone for DK's entries file (at lock) and history / standings (at close), and the page's own controls: Cash / GPP / Both / none on every player (the EdgeRaw Pool cell the sheet's dropdown writes), the decisions (Play / Fade writes `cash: Name` on Always use / Never use; the stack writes `more` items on Max exposure; a pivot puts him in the pool as Both; each can be undone), and "Add the suggested starting pool". Each write re-reads the cell first and refuses if the sheet changed, takes the run lock, is read back and is logged to `data/week/edits.log`; a closed week is read only. Local only (`127.0.0.1`, a random token in the link). Ctrl-C stops it. One server at a time: a second `dfs week serve` opens the running one, and `--stop` stops it. In the player drawer, **Ask Claude** fills the chat with a question about him. |
 | `dfs week review` [`--week N`] | you want a closed week reviewed for the Week page (`dfs week close` does it for you): what won and how the field built by contest type with your lineups beside it, the process scorecard (spend by tier, chalk decisions kept, your overrides against the nearest build and their points; a season line), your GPP exposure against actual ownership, and how good our numbers are (CalPts vs TFFB by week, Cash % shown vs cashed, each signal's record). Files only, no sheet. |
 | `dfs status` / `dfs doctor` | which sheet am I on and how fresh is the data / has the sheet's structure drifted. |
-| `dfs go` | `sync` + `doctor` + what-changed, back to back. |
 | `dfs pool add\|remove\|list\|clear` | managing your pool without opening the sheet. |
 | `dfs results update` | scoring the week's projections into `Model Check` on its own (`dfs week close` already does this; nflverse posts stats a day or two late). |
-| `dfs edge` / `dfs odds movement` | a terminal look at the top leverage plays / how lines have moved. |
+| `dfs odds movement` | a terminal look at how lines have moved. |
 | `dfs odds snapshot` | saving the week's opening lines (run it Monday or Tuesday morning, before `dfs week new`). |
 
 **Reference, only when needed:** `dfs setup other-sports` (once per sheet, template first: non-NFL DK contests get their own Bankroll ledger and Season columns, so Cash and GPP are NFL only), `dfs bankroll sync`, `dfs bankroll stakes` (the Bankroll tab's STAKES block: your ROI by format and this week's plan from your own `[stakes]` rules), `dfs ownership log`, `dfs lineups clear`, `dfs auth ...`
@@ -157,9 +156,6 @@ finder), `dfs season trade "Give A" "Get B"` (the analyzer), `dfs season waivers
 `dfs season lineups` and `dfs season check` (this week's lineups, the Sunday check), `dfs season outlook` (playoff
 odds, power rankings, strength of schedule). Setup and method:
 [docs/SEASON.md](docs/SEASON.md).
-
-`dfs sheets ...` (the pre-reorganisation spelling of every `setup`
-command, plus `doctor`) still works this season as a deprecated alias.
 
 ## Documentation
 

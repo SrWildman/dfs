@@ -317,30 +317,22 @@ def test_every_group_in_the_cli_prompts_for_missing_parameters():
 
 
 def test_without_a_terminal_a_missing_option_errors_exactly_as_before():
-    result = CliRunner().invoke(app, ["bankroll", "backfill-keys"])
+    result = CliRunner().invoke(app, ["ownership", "log"])
     assert result.exit_code != 0 and "Missing option" in result.output
 
 
-def test_at_a_terminal_a_missing_option_is_asked_for_then_the_command_runs(monkeypatch):
+def test_at_a_terminal_a_missing_option_is_asked_for_then_the_command_runs(monkeypatch, tmp_path):
     monkeypatch.setattr(prompt_missing, "interactive", lambda: True)
-    from dfs import cli
-
-    reached = {}
-
-    def stop_here():
-        reached["config"] = True
-        raise SystemExit(0)
-
-    monkeypatch.setattr(cli, "_load_config_or_exit", stop_here)
-    result = CliRunner().invoke(app, ["bankroll", "backfill-keys"], input="/tmp/my history.csv\n")
-    assert "DraftKings contest-history CSV" in result.output  # the question was asked
+    missing = tmp_path / "contest-standings-1.csv"
+    result = CliRunner().invoke(app, ["ownership", "log"], input=f"{missing}\n")
+    assert "export full standings" in result.output  # the question was asked (from the option's help)
     assert "Missing option" not in result.output
-    assert reached.get("config"), "the command body ran after the answer was supplied"
+    assert "No such file" in result.output, "the command body ran after the answer was supplied"
 
 
 def test_a_blank_answer_cancels_and_shows_the_usual_error(monkeypatch):
     monkeypatch.setattr(prompt_missing, "interactive", lambda: True)
-    result = CliRunner().invoke(app, ["bankroll", "backfill-keys"], input="\n")
+    result = CliRunner().invoke(app, ["ownership", "log"], input="\n")
     assert result.exit_code != 0 and "Missing option" in result.output
 
 

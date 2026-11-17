@@ -1,7 +1,7 @@
 """Shared Playwright browser profile for sites that need a login.
 
 One persistent context per site under data/profiles/<site>/, so you log in
-once (`dfs auth tffb`, `dfs auth dk`) -- including any 2FA -- and every
+once (`dfs auth tffb`, `dfs auth fantasypros`) -- including any 2FA -- and every
 later run reuses those cookies headlessly. Replaces the old approach of
 `webbrowser.open()` + an AppleScript Cmd+W sent to "whatever application
 process is frontmost" (scraper_common.close_arc_tab, draftkings/scraper.py's

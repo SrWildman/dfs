@@ -1110,7 +1110,7 @@ def used_queue_rows(body: list[list]) -> int:
 
 def write_queue_section(client: SheetsClient, changes: pd.DataFrame, edge_tab: str) -> str:
     """Populates Board's Queue body from `live_diff.diff_queue_changes`' output, filtered to the players
-    currently ticked into the pool. Called from `dfs sync --live`/`dfs go` right after the diff is computed
+    currently ticked into the pool. Called from `dfs sync --live` right after the diff is computed
     -- NOT from `build_board`, since a Sheets formula can't see yesterday's values, only this Python diff
     can. Every row is a player row (name, reason, a live `Pool` dropdown, a hidden `Id`); the
     rows it did not use are hidden, so "nothing changed" is one line instead of twenty empty rows.

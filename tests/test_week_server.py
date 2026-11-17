@@ -1338,7 +1338,7 @@ def test_every_weekly_button_is_a_registered_command_with_its_options():
     panel = week_jobs.panel(known)
     assert [b["label"] for b in panel["weekly"]] == [w.label for w in week_jobs.WEEKLY]
     assert all(week_jobs.is_advanced(p) for p in panel["advanced"])
-    assert "dfs setup polish" in panel["advanced"] and "dfs bankroll fix-odds" in panel["advanced"]
+    assert "dfs setup polish" in panel["advanced"] and "dfs setup repair-formula-ranges" in panel["advanced"]
     assert "dfs odds snapshot" in panel["other"] and not set(panel["other"]) & set(panel["advanced"])
     for path, labels in panel["labels"].items():
         for name, label in labels.items():

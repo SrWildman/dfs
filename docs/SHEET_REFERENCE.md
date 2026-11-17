@@ -555,9 +555,8 @@ twice, then removed entirely after a week of real use: Sam found it "a
 pain" and, on the one piece worth keeping (a "where is this player"
 jump), "doesn't get me much. Cut it." Player Pool's own colour scales/
 chips/`Used`/`In` columns (below) now cover the browsing job the deck
-existed for. `dfs setup remove-pool-deck` is the one-time repair for a
-sheet that still has the retired deck; see CONTRIBUTING.md's changelog
-for the full history and `sheet_pool_deck.py`'s module docstring.
+existed for. See CONTRIBUTING.md's changelog for the full history (the
+one-time `dfs setup remove-pool-deck` repair was removed in Nov 2026).
 
 `dfs lineups clear` wipes `Lineups`' typed-in `Name` columns (and
 `DK Upload`, below) at the start of a new week. `Player Pool`'s
@@ -614,7 +613,7 @@ dropdown. Every table starts in column B. Banner (rows 2-3): row 2 is ONE live l
 collapsible row sections, all open by default, in this order (Sam's call):
 
 1. **Slate shape**: games ranked by total (formulas), with Fav, Spread, Pace, PROE, Expl%, GameEnv, Wind, a Shootout flag and GPS. The 16 reserved rows below the last game are **hidden** (`sheet_views.size_slate_shape`, run by polish and every edge sync), so the section is as tall as the slate.
-2. **Queue**: pooled players whose numbers changed since the last sync (`dfs sync --live` / `dfs go` write it from `live_diff.diff_queue_changes`; a
+2. **Queue**: pooled players whose numbers changed since the last sync (`dfs sync --live` writes it from `live_diff.diff_queue_changes`; a
    formula cannot see yesterday's values). Every row is a player row: a live `Pool` dropdown, the player, the reason, and a hidden `Id`. The
    rows it does not use are **hidden**, so "no changes" is one line, not twenty empty rows (`sheet_views.apply_queue_visibility`). The Pool dropdown is on the player rows only; the "no changes" line has none (`apply_queue_pool_dropdown`).
 3. **Pool check** (live formulas): pooled players whose numbers went bad, each with its reason and a `Pool` cell, so clearing it (Delete) removes him. Triggers:

@@ -113,11 +113,10 @@ _RESET_FMT = {
     "textFormat": {"bold": False, "foregroundColor": _BLACK},
 }
 # Odds % is a TRUE percent (Plan N item 17, 2026-11-06): the cell stores the probability (0.533) and shows
-# "53.3%"; typing "53.3%" or "0.7%" stores 0.533 / 0.007. The old literal `0.0"%"` suffix (kept below only to
-# recognise a column not yet repaired) stored whatever was typed, so 53.3 and 0.7 sat side by side and the
+# "53.3%"; typing "53.3%" or "0.7%" stores 0.533 / 0.007. The old literal `0.0"%"` suffix stored whatever was
+# typed, so 53.3 and 0.7 sat side by side and the
 # formula's `IF(x>1, x/100, x)` read 0.7 (meaning 0.7%) as 70%: Week 9's "4 Pick TNF combo" showed -233
 # instead of +14,186. Now nothing is guessed: a value that is not a probability says how to type it.
-LEGACY_ODDS_PCT_PATTERN = '0.0"%"'
 _ODDS_PCT_NUMBER_FORMAT = {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}
 ODDS_TYPE_HINT = "type it as 46%"
 _ODDS_NUMBER_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": "+#,##0;-#,##0"}}
@@ -230,7 +229,7 @@ def build_betting_ledger(client: SheetsClient, tab: str) -> None:
 
     client.format_range(tab, f"A{FIRST_ROW}:A{LAST_ROW}", _DATA_TEXT_FMT)
     for col, extra in (
-        ("B", {}),
+        ("B", _ODDS_PCT_NUMBER_FORMAT),  # a true percent from the start (Plan N item 17)
         ("C", _ODDS_NUMBER_FORMAT),
         ("D", _CURRENCY_FORMAT),
         ("E", _CURRENCY_FORMAT),
@@ -407,59 +406,3 @@ def odds_cells_are_percent(client, tab: str, row: int) -> bool | None:
         return None
     fmt = (formats[0][0] if formats and formats[0] else {}).get("numberFormat") or {}
     return fmt.get("type") == "PERCENT"
-
-
-@dataclass(frozen=True)
-class OddsRepair:
-    """What `repair_odds_column` changes (or would change, on a dry run)."""
-
-    format_changed: bool  # the column still had the legacy literal-% format
-    values: list[tuple[int, float, float]]  # (row, stored before, stored after)
-    formulas: int  # Odds formulas (re)written
-
-    def lines(self, tab: str) -> list[str]:
-        out = [
-            f"{tab}: Odds % format -> true percent (0.0%)"
-            if self.format_changed
-            else f"{tab}: Odds % already a true percent (values left as they are)"
-        ]
-        out += [f"{tab}!B{r}: {a:g} -> {b:g} (shows {b * 100:.1f}%)" for r, a, b in self.values]
-        out.append(f"{tab}: {self.formulas} Odds formula(s) written (C), odds shown as +#,##0")
-        return out
-
-
-def plan_odds_repair(client, tab: str, first_row: int, last_row: int) -> OddsRepair:
-    """Read-only: what `repair_odds_column` would do. Values are converted only while the column still has
-    the legacy format (`LEGACY_ODDS_PCT_PATTERN`, which SHOWED a stored 46 as "46.0%" and 0.7 as "0.7%"):
-    each becomes what it showed, divided by 100. Once the format is a true percent nothing is converted
-    again, so a second run never divides twice."""
-    formats = client.get_cell_formats(tab, f"B{first_row}:B{last_row}")
-    legacy = any(
-        ((row[0] if row else {}).get("numberFormat") or {}).get("pattern") == LEGACY_ODDS_PCT_PATTERN
-        for row in formats
-    )
-    is_percent = odds_cells_are_percent(client, tab, first_row)
-    values: list[tuple[int, float, float]] = []
-    if legacy and not is_percent:
-        raw = client.read_range_unformatted(tab, f"B{first_row}:B{last_row}")
-        for i, row in enumerate(raw):
-            v = row[0] if row else None
-            if isinstance(v, int | float) and not isinstance(v, bool):
-                values.append((first_row + i, float(v), round(float(v) / 100, 6)))
-    return OddsRepair(format_changed=not is_percent, values=values, formulas=last_row - first_row + 1)
-
-
-def repair_odds_column(client, tab: str, first_row: int, last_row: int) -> OddsRepair:
-    """Make Odds % a true percent column on one Bankroll tab: convert the typed values (legacy column only,
-    see `plan_odds_repair`), set the PERCENT format on B, rewrite the Odds formulas in C and their
-    thousands-separated format. Values first, then the format, so no cell is ever shown under the wrong
-    unit for longer than one request."""
-    plan = plan_odds_repair(client, tab, first_row, last_row)
-    if plan.values:
-        client.update_ranges(tab, {f"B{r}": [[after]] for r, _before, after in plan.values})
-    client.format_range(tab, f"B{first_row}:B{last_row}", _ODDS_PCT_NUMBER_FORMAT)
-    client.update_range(
-        tab, f"C{first_row}:C{last_row}", [[odds_formula(r)] for r in range(first_row, last_row + 1)]
-    )
-    client.format_range(tab, f"C{first_row}:C{last_row}", _ODDS_NUMBER_FORMAT)
-    return plan
