@@ -3136,6 +3136,12 @@ def entries_record(
     ),
     sheet_id: str = typer.Option(None, "--sheet-id", help="Read a different sheet instead of config.toml's."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the record; write no file."),
+    h2h: H2hKind = typer.Option(
+        None,
+        "--h2h",
+        help="This week's H2Hs: ones you posted, joined, or both (the ledger's H2H line). Left out at a "
+        "terminal with H2H entries, it asks once; never when piped.",
+    ),
 ) -> None:
     """Record what you entered this week, at lock: every lineup, its contest(s), and which Suggested build it
     came from (8 or more of its 9 players in one saved build of the week, any round) or "own".
@@ -3192,6 +3198,8 @@ def entries_record(
             lineups,
             skipped=skipped,
             blank=entered.blank_entries(kept),
+            skipped_fees=ent.skipped_fees(parsed),
+            h2h=_h2h_answer(h2h, ent.has_h2h(kept), season, week),
         )
     else:
         try:
@@ -3210,6 +3218,86 @@ def entries_record(
         return
     out = entered.save(record)
     console.print(f"[green]Recorded to {out}[/green]")
+    _save_ledger(cfg, season, week, through=week - 1, record=record)
+
+
+class H2hKind(StrEnum):
+    posted = "posted"
+    joined = "joined"
+    both = "both"
+
+
+def _h2h_answer(given: H2hKind | None, has_h2h: bool, season: int, week: int) -> str:
+    """`--h2h`, else the answer saved for the week, else (a terminal and H2H entries only) one question.
+    Never asks when piped: an unanswered week is ""."""
+    from dfs import entered
+    from dfs.prompt_missing import interactive
+
+    if given is not None:
+        return given.value
+    saved = entered.load(season, week)
+    if saved is not None and saved.h2h:
+        return saved.h2h
+    if not has_h2h or not interactive():
+        return ""
+    try:
+        answer = typer.prompt(
+            "This week's H2Hs: did you post them, join them, or both? "
+            "(posted / joined / both, Enter to skip)",
+            default="",
+            show_default=False,
+        )
+    except (typer.Abort, KeyboardInterrupt):
+        return ""
+    answer = answer.strip().lower()
+    return answer if answer in entered.H2H_CHOICES else ""
+
+
+def _save_ledger(
+    cfg: Config,
+    season: int,
+    week: int,
+    *,
+    through: int,
+    record=None,  # noqa: ANN001 - entered.EnteredRecord
+    budget: float | None | bool = False,
+) -> None:
+    """The week input `ledger` (`ledger.payload`, the log through Week `through`) saved under `week` for the
+    Week page. `budget=False` reads the Bankroll tab's Weekly Budget. Fail-soft: a failure prints one line."""
+    try:
+        from dataclasses import asdict
+
+        from dfs import contest_plan, entered, ledger, week_inputs
+        from dfs.contests import history
+        from dfs.paths import CONTESTS_DIR
+
+        log = history.read_log(CONTESTS_DIR / "contest_log.csv")
+        if budget is False:
+            budget = _weekly_budget_or_none(cfg)
+        plan = contest_plan.tier_plan(cfg.contest_plan, budget)
+        rec = record if record is not None else entered.load(season, week)
+        body = ledger.payload(
+            log,
+            season=season,
+            week=max(through, 0),
+            plan=plan,
+            fun_per_week=cfg.ledger.fun_per_week,
+            entered=asdict(rec) if rec is not None else None,
+        )
+        week_inputs.save_input("ledger", body, season=season, week=week)
+    except Exception as e:  # noqa: BLE001 - the ledger never fails the command
+        console.print(f"[yellow]The ledger was not saved for the Week page ({escape(str(e))}).[/yellow]")
+
+
+def _weekly_budget_or_none(cfg: Config) -> float | None:
+    """The Bankroll tab's Weekly Budget on config's sheet; None when it cannot be read."""
+    try:
+        from dfs.sheet_stakes import _cell
+        from dfs.week import BANKROLL_WEEKLY_BUDGET_CELL
+
+        return _cell(SheetsClient(cfg.google_sheets), cfg.bankroll.tab, BANKROLL_WEEKLY_BUDGET_CELL)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @entries_app.command("print")
@@ -5287,7 +5375,7 @@ def _entered_record_warning(week: int | None) -> None:
 
 
 def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
-    """`spent $X vs plan $Y; over in: ...` for the week just closed, from the contest log the contests step
+    """`spent $X vs plan $Y (by format)` for the week just closed, from the contest log the contests step
     just updated (Plan D item 3; `dfs contests plan` has the whole report). NEVER fails the close."""
     from dfs import contest_plan
     from dfs.contests import history
@@ -5306,8 +5394,34 @@ def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
         check = contest_plan.check_week(typed, season, closed, cfg.contest_plan, budget)
         console.print("\n" + escape(check.line()), highlight=False)
         _tier_line_after_close(typed, season, closed, cfg, budget)
+        _h2h_log_after_close(season, closed)
+        from dfs.nfl_calendar import current_week
+
+        _save_ledger(cfg, season, max(current_week(), closed), through=closed, budget=budget)
     except Exception as e:  # noqa: BLE001 - the close already succeeded; never fail it over this
         console.print(f"[yellow]Contest plan check skipped ({e}); `dfs contests plan` shows it.[/yellow]")
+
+
+def _h2h_log_after_close(season: int, closed: int) -> None:
+    """Append the closed week's H2H games to `data/contests/h2h_log.csv` (blueprint 13.2 item 5; it holds
+    opponent names, stays in data/ and nothing prints it). Fail-soft."""
+    try:
+        from dfs import entered, h2h_log
+        from dfs.contests import history
+        from dfs.paths import CONTESTS_DIR
+
+        rec = entered.load(season, closed)
+        n = h2h_log.append(
+            CONTESTS_DIR / "h2h_log.csv",
+            history.read_log(CONTESTS_DIR / "contest_log.csv"),
+            season=season,
+            week=closed,
+            posted_or_joined=rec.h2h if rec is not None else "",
+        )
+        if n:
+            console.print(f"H2H log: {n} game(s) of Week {closed} added.")
+    except Exception as e:  # noqa: BLE001 - the close already succeeded
+        console.print(f"[yellow]H2H log not updated ({escape(str(e))}).[/yellow]")
 
 
 def _tier_line_after_close(typed, season: int, closed: int, cfg: Config, budget: float | None) -> None:  # noqa: ANN001
@@ -5324,8 +5438,7 @@ def _tier_line_after_close(typed, season: int, closed: int, cfg: Config, budget:
     spend = contest_plan.check_week_tiers(typed, season, closed, cfg.contest_plan, budget, opponents)
     if spend is None:
         return
-    over = "; over in: " + ", ".join(spend.over) if spend.over else "; within the tier plan"
-    console.print(escape(f"Tier plan, Week {closed}: {spend.line()}{over}"), highlight=False)
+    console.print(escape(f"Tier plan, Week {closed}: {spend.line()}"), highlight=False)
     week_inputs.save_input(
         "tier_week",
         {

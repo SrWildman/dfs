@@ -299,6 +299,32 @@ def classify_entries(parsed: EntriesFile) -> tuple[list[Entry], dict[str, int]]:
     return entries, dict(skipped)
 
 
+def skipped_fees(parsed: EntriesFile) -> dict[str, float]:
+    """The fees of the entries `classify_entries` skips, by the same reasons (the ledger's Fun group counts a
+    Showdown's money before the close has it from the log)."""
+    out: dict[str, float] = defaultdict(float)
+    if parsed.kind == "showdown":
+        out["Showdown file"] = sum(_dollars(e.entry_fee) for e in parsed.entries)
+        return {k: round(v, 2) for k, v in out.items()}
+    if not is_main_slate(parsed.players):
+        out["another slate (not Sunday afternoon only)"] = sum(_dollars(e.entry_fee) for e in parsed.entries)
+        return {k: round(v, 2) for k, v in out.items()}
+    for raw in parsed.entries:
+        fmt = entry_format(raw)
+        if fmt in (series.SHOWDOWN, series.OTHER):
+            out[fmt] += _dollars(raw.entry_fee)
+    return {k: round(v, 2) for k, v in out.items()}
+
+
+def has_h2h(entries: Sequence[Entry]) -> bool:
+    return any(e.format == series.H2H for e in entries)
+
+
+def _dollars(text: str) -> float:
+    fee = _fee(str(text))
+    return float(fee) if fee is not None else 0.0
+
+
 # -- the lineups on the sheet --------------------------------------------------------------------------------
 
 

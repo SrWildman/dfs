@@ -211,8 +211,7 @@ def lines(p: dict) -> list[str]:
     """The close report's lines (and the page's summary)."""
     out = [f"Process scorecard, Week {p['week']} (what was decided, not what it paid):"]
     if p.get("tier_line"):
-        over = "; over in: " + ", ".join(p["tier_over"]) if p.get("tier_over") else "; within the tier plan"
-        out.append(f"  spend by tier: {p['tier_line']}{over}")
+        out.append(f"  spend by tier: {p['tier_line']}")
     else:
         out.append(
             "  spend by tier: no tier line saved at that week's close (it needs the Weekly Budget then)"

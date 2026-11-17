@@ -159,11 +159,11 @@ def plan(
         False, "--no-sheet", help="Read no sheet (the plan then has no total cap)."
     ),
 ) -> None:
-    """The weekly contest plan and the last week against it, from your own contest log (Plan D item 3):
-    Showdown and big-field N-max GPPs capped (`[contest_plan]` in config.toml), the rest to double-ups,
-    H2Hs and small single-entry GPPs, the total within the Bankroll tab's Weekly Budget. Then ROI by
-    format (this season and all seasons), the effective rake by format and field size, and the H2H
-    regulars to avoid. Terminal only: writes nothing."""
+    """The weekly contest plan and what last week spent, from your own contest log (Plan D item 3):
+    the Weekly Budget split by format (`[contest_plan]` in config.toml) and by tier, last week's spend by
+    format, ROI by format (this season and all seasons), the effective rake by format and field size, and
+    the H2H regulars. Writes no sheet; saves the plan and the ledger (blueprint Phase B) for the Week
+    page."""
     import pandas as pd
 
     from dfs import contest_plan
@@ -203,6 +203,9 @@ def plan(
         typed, opponents, season=season, week=checked, cfg=cfg.contest_plan, budget=budget
     )
     week_inputs.save_input("contest_plan", payload, season=season, week=current_week())  # for the Week page
+    from dfs.cli import _save_ledger  # the ledger (blueprint Phase B), fail-soft
+
+    _save_ledger(cfg, season, current_week(), through=checked if checked is not None else 0, budget=budget)
     if not no_sheet:  # the Week page's bankroll health block reads the same tabs
         from dfs import bankroll_health
 

@@ -834,13 +834,7 @@ def entry_plan_section(inp: WeekInputs) -> Section:
         "DraftKings yourself.</p>"
     )
     if p.spent:
-        body.append(
-            note(
-                "Spent by tier: "
-                + ", ".join(f"{t} {dollars(v)}" for t, v in p.spent.items() if v)
-                + (" (over: " + "; ".join(p.over) + ")" if p.over else "")
-            )
-        )
+        body.append(note("Spent by tier: " + ", ".join(f"{t} {dollars(v)}" for t, v in p.spent.items() if v)))
     at = parse_time((inp.entered or {}).get("recorded_at"))
     from dfs import week_today
 
@@ -866,3 +860,231 @@ def entry_plan_line(inp: WeekInputs) -> tuple[str, bool]:
     return (
         f"{len(p.contests)} contests: " + (f"{len(bad)} {word} ({bad[0]})" if bad else "every check ok")
     ), bool(bad)
+
+
+# -- the ledger (blueprint Phase B) ------------------------------------------------------------------------
+
+LEDGER_TRUST = (
+    DATA,
+    "Your own contest log (DK's history export): what happened, not a prediction. The bar is the ROI plus "
+    "and minus 2 standard errors, resampling whole weeks.",
+)
+LEDGER_HOW = (
+    "Your contest log through the week shown: ROI = net / fees by format; the bar is ROI plus and minus 2 "
+    "standard errors, resampling whole season-weeks (entries in one week share a lineup); rake = the median "
+    "of 1 - prize pool / (entries x fee). Plan $ is per group, from the Weekly Budget's tier split (Cash = "
+    "tier A, Small GPP = tier B); Fun is the number you set in [ledger] fun_per_week. Information only: "
+    "nothing here caps or warns."
+)
+LEDGER_SRC = ("contest_log.csv", "data/entered", "Weekly Budget")
+GROUP_TIP = {
+    "cash": "Tier A in the contest plan",
+    "small_gpp": "Tier B in the contest plan",
+    "fun": "Tier C in the contest plan",
+    "free": "No fee",
+    "other": "Formats outside the groups, shown so the ledger adds up to the log",
+}
+BAR_RANGE = 120.0  # points either side of zero the bar draws (wider values sit at the edge)
+NOT_RECORDED = "Entered: not recorded yet (say 'record my entries')"
+
+
+def roi_text(roi: float | None) -> str:
+    return "-" if roi is None else f"{roi:+.1f}%".replace("-", "−")
+
+
+def interval_svg(roi: float | None, se: float | None, *, width: int = 170, height: int = 16) -> str:
+    """ROI with a ±2 SE bar, on a fixed -120..+120 scale with a zero line; no colour for good or bad. No
+    bar without an SE (fewer than two weeks): the point alone."""
+    if roi is None:
+        return ""
+
+    def x(v: float) -> float:
+        v = max(-BAR_RANGE, min(BAR_RANGE, v))
+        return 2 + (v + BAR_RANGE) / (2 * BAR_RANGE) * (width - 4)
+
+    mid = height / 2
+    parts = [
+        f'<svg class="iv" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" '
+        f'aria-label="ROI {e(roi_text(roi))}'
+        + (f", plus or minus {2 * se:.0f} points" if se is not None else "")
+        + '">',
+        f'<line class="zero" x1="{x(0):.1f}" x2="{x(0):.1f}" y1="1" y2="{height - 1}"/>',
+    ]
+    if se is not None:
+        lo, hi = x(roi - 2 * se), x(roi + 2 * se)
+        parts.append(
+            f'<rect class="band" x="{lo:.1f}" y="{mid - 3:.1f}" width="{hi - lo:.1f}" height="6" rx="3"/>'
+        )
+    parts.append(f'<circle class="m" cx="{x(roi):.1f}" cy="{mid:.1f}" r="3.5"/>')
+    tip = f"ROI {roi_text(roi)}" + (
+        f" ± {2 * se:.0f} (2 SE)" if se is not None else "; under two weeks, no bar"
+    )
+    parts.append(f"<title>{e(tip)}</title></svg>")
+    return "".join(parts)
+
+
+def _group_money(groups: dict, key: str, field: str, size: int) -> str:
+    value = (groups.get(key) or {}).get(field)
+    if value is None:
+        return "-"
+    return e(cents(value)) if size == 1 else f'in {e(cents(value))} <span class="faint">shared</span>'
+
+
+def ledger_rows_html(ld: dict) -> list[list[str]]:
+    from dfs import ledger
+
+    season = (ld.get("through") or {}).get("season")
+    groups = ld.get("groups") or {}
+    rows_by_group: dict[str, list[dict]] = {}
+    for r in ld.get("rows") or []:
+        rows_by_group.setdefault(r["group"], []).append(r)
+    out: list[list[str]] = []
+
+    def row(r: dict, plan_cell: str, entered_cell: str, cls: str = "") -> list[str]:
+        a, s = r.get("all") or {}, r.get("season") or {}
+        tip = GROUP_TIP.get(r["group"], "")
+        se = a.get("se")
+        name = (
+            f'<span class="faint" title="{e(tip)}">{e(r["format"])}</span>'
+            if cls
+            else f'<b title="{e(tip)}">{e(r["format"])}</b>'
+        )
+        return [
+            name,
+            e(pct(r.get("rake"))) if r.get("rake") is not None else "-",
+            interval_svg(a.get("roi"), se),
+            f"<b>{e(roi_text(a.get('roi')))}</b>"
+            + (f' <span class="faint">±{2 * se:.0f}</span>' if se is not None else "")
+            + f'<br><span class="faint">n={a.get("n", 0)}</span>',
+            f"{e(roi_text(s.get('roi')))}<br>"
+            f'<span class="faint">n={s.get("n", 0)}, {e(cents(s.get("net", 0.0)))}</span>'
+            if s.get("n")
+            else f'<span class="faint">none in {e(season)}</span>',
+            plan_cell,
+            entered_cell,
+        ]
+
+    recorded = bool(ld.get("recorded"))
+    for g in (ledger.CASH, ledger.SMALL_GPP):
+        rs = rows_by_group.get(g) or []
+        for r in rs:
+            out.append(
+                row(
+                    r,
+                    _group_money(groups, g, "planned", len(rs)),
+                    _group_money(groups, g, "entered", len(rs)) if recorded else "-",
+                )
+            )
+    fun = rows_by_group.get(ledger.FUN) or []
+    if fun:
+        out.append(
+            ['<b>Fun</b> <span class="faint">small budget, played for the fun of it</span>'] + [""] * 6
+        )
+        for r in fun:
+            out.append(row(r, "", ""))
+    for r in rows_by_group.get(ledger.FREE) or []:
+        out.append(row(r, "", "", cls="faint"))
+    other = ld.get("other") or {}
+    if (other.get("all") or {}).get("n"):
+        line = {
+            "format": "Other: " + ", ".join(other.get("formats") or []),
+            "group": ledger.OTHER,
+            "rake": None,
+            "all": other["all"],
+            "season": other.get("season") or {},
+        }
+        out.append(row(line, "", "", cls="faint"))
+    return out
+
+
+def fun_line(ld: dict) -> str:
+    """This week's and the season's Fun spend beside the number Sam set. No colour, never "over"."""
+    f = (ld.get("groups") or {}).get("fun") or {}
+    planned = f.get("planned")
+    week = (
+        f"this week {cents(f['entered'])} entered"
+        if f.get("entered") is not None and ld.get("recorded")
+        else "this week not recorded yet"
+    )
+    season = (
+        f"season to date {cents(f.get('season_fees', 0.0))} in fees, {cents(f.get('season_net', 0.0))} net"
+    )
+    mine = f"your number {cents(planned)} a week" if planned is not None else "no number set"
+    return f"Fun: {week}; {season}; {mine}."
+
+
+def ledger_section(inp: WeekInputs) -> Section:
+    from dfs import ledger
+
+    ld = inp.ledger
+    if not ld:
+        return Section(
+            "ledger",
+            "The ledger",
+            not_run(
+                "Your record by format has not been saved this week (`dfs contests plan`, "
+                "`dfs entries record` and `dfs week close` save it)",
+                say="contest plan",
+                command="dfs contests plan",
+            ),
+            LEDGER_TRUST,
+            ran=False,
+        )
+    seasons = ld.get("seasons") or []
+    span = f"{seasons[0]}-{str(seasons[-1])[-2:]}" if seasons else ""
+    season = (ld.get("through") or {}).get("season", "")
+    body = [
+        table(
+            ["Format", "Rake", f"ROI {span} (±2 SE)", "ROI · n", str(season), "Plan $", "Entered $"],
+            ledger_rows_html(ld),
+            how=LEDGER_HOW,
+            cls="stickyname ledger",
+            src=LEDGER_SRC,
+        )
+    ]
+    if not ld.get("recorded"):
+        body.append(f"<p>{e(NOT_RECORDED)}</p>")
+    body.append(f"<p>{e(fun_line(ld))}</p>")
+    h = ld.get("h2h") or {}
+    if h.get("all"):
+        text = ledger.h2h_sentence(h, seasons)
+        kind = h.get("this_week") or ""
+        if kind:
+            from dfs.entered import H2H_WORDS
+
+            text += f" This week's were {H2H_WORDS.get(kind, kind)}."
+        games = h["all"]["regular"]["games"]
+        body.append(f"<p>{e(text)} {chip_html(DATA, f'n={games} games against regulars, {span}')}</p>")
+    through = ld.get("through") or {}
+    return Section(
+        "ledger",
+        "The ledger",
+        "".join(body),
+        LEDGER_TRUST,
+        asof=f"your contest log through Week {through.get('week', '?')} of {through.get('season', '?')}",
+    )
+
+
+def ledger_line(inp: WeekInputs) -> tuple[str, bool]:
+    """The fold's one line: plan and entered for the week, by group. Never urgent."""
+    ld = inp.ledger
+    if not ld:
+        return "not run yet", False
+    groups = ld.get("groups") or {}
+    bits = []
+    for key, label in (("cash", "Cash"), ("small_gpp", "Small GPP"), ("fun", "Fun")):
+        g = groups.get(key) or {}
+        planned = cents(g["planned"]) if g.get("planned") is not None else "no plan"
+        entered = cents(g["entered"]) if g.get("entered") is not None and ld.get("recorded") else "-"
+        bits.append(f"{label} {entered} of {planned}")
+    head = "; ".join(bits)
+    return (head if ld.get("recorded") else head + "; entries not recorded yet"), False
+
+
+LEDGER_CSS = """
+table.ledger svg.iv{display:block}
+table.ledger svg.iv .zero{stroke:var(--muted,#888);stroke-width:1}
+table.ledger svg.iv .band{fill:var(--ink,#333);opacity:.18}
+table.ledger svg.iv .m{fill:var(--ink,#333)}
+table.ledger td:nth-child(3){min-width:170px}
+"""

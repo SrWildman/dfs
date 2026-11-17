@@ -371,7 +371,8 @@ def test_this_weeks_plan_has_no_last_week_spend_and_last_week_has_it(tmp_path):
     plan, last = section(page, "contest-plan"), section(page, "last-week")
     assert "Tier A" in plan and "Weekly Budget $150" in plan  # this week's plan, in dollars
     assert "Spent last week" not in plan and "spent $179" not in plan and ">over<" not in plan
-    assert "spent $179 vs plan $150" in last and "Spent against the plan" in last and ">over<" in last
+    # last week's spend is shown as facts: no caps and no "over" (blueprint Phase B)
+    assert "spent $179 vs plan $150" in last and "Spent last week" in last and ">over<" not in last
 
 
 # -- season-long ------------------------------------------------------------------------------------------
@@ -424,11 +425,11 @@ def ids_in_order(page):
 @pytest.mark.parametrize(
     "day,lead",
     [
-        (0, ["field-review", "last-week", "numbers", "exposure", "bankroll"]),
+        (0, ["ledger", "field-review", "last-week", "numbers", "exposure"]),
         (1, ["field-review", "changes", "salaries", "contest-plan", "bankroll"]),
         (2, ["changes", "salaries", "contest-plan", "bankroll", "season"]),
         (4, ["changes", "salaries", "contest-plan", "bankroll", "season"]),
-        (5, ["contest-plan", "entry-plan", "exposure", "cash", "gpp"]),
+        (5, ["ledger", "contest-plan", "entry-plan", "exposure", "cash"]),
         (6, ["inactives", "sunday", "entry-plan", "exposure", "changes"]),
     ],
 )
@@ -440,8 +441,8 @@ def test_the_collapsed_sections_are_ordered_by_day(tmp_path, day, lead):
     assert sorted(order) == sorted(week_page.SECTION_IDS)  # nothing dropped on any day
 
 
-def test_monday_order_leads_with_what_won_and_last_week():
-    assert week_page.section_order(0)[:3] == ["field-review", "last-week", "numbers"]
+def test_monday_order_leads_with_the_ledger_then_what_won_and_last_week():
+    assert week_page.section_order(0)[:4] == ["ledger", "field-review", "last-week", "numbers"]
     assert sorted(week_page.section_order(0)) == sorted(week_page.SECTION_IDS)
 
 

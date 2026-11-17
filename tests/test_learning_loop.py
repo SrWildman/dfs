@@ -155,7 +155,7 @@ def test_the_scorecard_lines_split_edited_builds_from_his_own(monkeypatch):
     )
     text = "\n".join(scorecard.lines(scorecard.payload(c, "your overrides against the model: +1.0 / -2.0")))
     assert "2 of 2 lineups differ from their nearest build (1 edited builds, 1 your own)" in text
-    assert "chalk decisions: 1 of 1 kept" in text and "within the tier plan" in text
+    assert "chalk decisions: 1 of 1 kept" in text and "spend by tier: A $10 of $15" in text
     assert "in D 30.0; out C 5.0" in text
 
 

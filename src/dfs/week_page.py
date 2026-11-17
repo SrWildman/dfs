@@ -433,7 +433,7 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
     if not plan:
         built = registered is None or "dfs contests plan" in registered
         why = (
-            "Spend by format against the caps, and the H2H opponents to avoid"
+            "Your ROI and the rake by format, and the H2H opponents to avoid"
             if built
             else "`dfs contests plan` (Plan D) is not built yet, so there is no plan to show"
         )
@@ -444,19 +444,7 @@ def contest_plan_section(inp: WeekInputs, registered: set[str] | None) -> Sectio
             trust,
             ran=False,
         )
-    parts = []
-    caps = plan.get("caps") or {}
-    if caps:
-        rows = [[e(fmt), e(dollars(cap)) if cap is not None else "-"] for fmt, cap in caps.items()]
-        parts.append(
-            "<h4>Caps by format, this week</h4>"
-            + table(
-                ["Format", "Cap a week"],
-                rows,
-                how="What dfs contests plan saved: the [contest_plan] caps by format against this week's "
-                "Weekly Budget.",
-            )
-        )
+    parts = []  # no caps by format (blueprint Phase B: the ledger shows the record; nothing caps)
     if plan.get("roi"):
         rows = [
             [
@@ -1009,31 +997,21 @@ def season_section(inp: WeekInputs) -> Section:
 
 
 def spent_vs_plan_html(plan: dict | None) -> str:
-    """Last week's spend against the format caps (what `dfs contests plan` saved as `spent`)."""
+    """Last week's spend by format (what `dfs contests plan` saved as `spent`). No caps and no verdict
+    (blueprint Phase B)."""
     plan = plan or {}
-    caps, spent = plan.get("caps") or {}, plan.get("spent") or {}
-    if not caps and not plan.get("line"):
+    spent = plan.get("spent") or {}
+    if not spent and not plan.get("line"):
         return ""
-    out = "<h4>Spent against the plan</h4>"
+    out = "<h4>Spent last week</h4>"
     if plan.get("line"):
         out += f"<p><b>{e(plan['line'])}</b></p>"
-    rows = []
-    for fmt, cap in caps.items():
-        used = spent.get(fmt)
-        over = used is not None and cap is not None and used > cap
-        rows.append(
-            [
-                e(fmt),
-                e(dollars(cap)) if cap is not None else "-",
-                e(dollars(used)) if used is not None else "-",
-                '<span class="bad">over</span>' if over else "ok",
-            ]
-        )
+    rows = [[e(fmt), e(dollars(used))] for fmt, used in spent.items() if used]
     return out + (
         table(
-            ["Format", "Cap a week", "Spent", ""],
+            ["Format", "Spent"],
             rows,
-            how="What dfs contests plan saved: last week's spend by format (contest log) against the caps.",
+            how="What dfs contests plan saved: last week's spend by format, from the contest log.",
         )
         if rows
         else ""
@@ -1077,8 +1055,7 @@ def last_week_section(inp: WeekInputs) -> Section:
     body.append(spent_vs_plan_html(inp.contest_plan))
     tw = inp.tier_week
     if tw and tw.get("line"):
-        over = f' <span class="bad">Over: {e("; ".join(tw["over"]))}</span>' if tw.get("over") else ""
-        body.append(f"<h4>The week by tier (planned against spent)</h4><p><b>{e(tw['line'])}</b>{over}</p>")
+        body.append(f"<h4>The week by tier (planned against spent)</h4><p><b>{e(tw['line'])}</b></p>")
     pm = inp.postmortem
     body.append("<h4>Cash post-mortem</h4>")
     if pm and pm.get("headline"):
@@ -1450,6 +1427,7 @@ def page_path(season: int, week: int, data_dir: Path | None = None) -> Path:
 # Below the fold, collapsed, ordered by day: what Sam needs first today comes first. Tuesday to Friday is
 # research, Saturday is build and enter, Sunday is game day, Monday the close.
 FOLD_IDS = [
+    "ledger",
     "field-review",
     "changes",
     "salaries",
@@ -1468,6 +1446,7 @@ FOLD_IDS = [
 ]
 DAY_ORDER: dict[int, list[str]] = {
     0: [  # Monday: the close
+        "ledger",
         "field-review",
         "last-week",
         "numbers",
@@ -1519,6 +1498,7 @@ DAY_ORDER: dict[int, list[str]] = {
         "sunday",
     ],
     5: [  # Saturday: build and enter
+        "ledger",
         "contest-plan",
         "entry-plan",
         "exposure",
@@ -1554,7 +1534,8 @@ DAY_ORDER: dict[int, list[str]] = {
     ],
 }
 OPEN_ON_SUNDAY = "inactives"  # Sunday: the inactives check is open when anything is flagged
-OPEN_ON_DAY = {0: "field-review", 1: "field-review"}  # Monday and Tuesday: what won is open, at the top
+# Monday and Tuesday: what won is open (Monday: right under the ledger, blueprint Phase B; Tuesday: on top)
+OPEN_ON_DAY = {0: "field-review", 1: "field-review"}
 DAY_ORDER[3] = DAY_ORDER[4] = DAY_ORDER[2]
 SECTION_IDS = FOLD_IDS
 
@@ -1626,10 +1607,11 @@ def fold_line(sid: str, inp: WeekInputs, built: dict[str, Section]) -> tuple[str
         from dfs import week_learn as wl
 
         return wl.salary_line(inp, player_log(inp))
-    if sid in ("bankroll", "inactives", "consensus", "entry-plan"):
+    if sid in ("ledger", "bankroll", "inactives", "consensus", "entry-plan"):
         from dfs import week_money as wm
 
         return {
+            "ledger": wm.ledger_line,
             "bankroll": wm.bankroll_line,
             "inactives": wm.inactives_line,
             "consensus": wm.consensus_line,
@@ -1774,6 +1756,7 @@ def render(
                 season_section(inp),
                 last_week_section(inp),
                 unknowns_into_sunday(sunday_section(inp), unknowns_section(inp)),
+                week_money.ledger_section(inp),
                 week_money.bankroll_section(inp),
                 week_money.inactives_section(inp),
                 week_money.consensus_section(inp),
@@ -1832,7 +1815,7 @@ def render(
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
             f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
-            f"{week_top.CASH_CSS}</style>"
+            f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}</style>"
             "</head><body>"
             f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
             + week_top.progress_html(steps)

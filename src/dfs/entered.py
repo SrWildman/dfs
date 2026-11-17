@@ -31,6 +31,10 @@ MATCH_MIN = 8  # of 9 players shared with a saved build: that build is the sourc
 OWN = "own"
 
 
+H2H_CHOICES = ("posted", "joined", "both")
+H2H_WORDS = {"posted": "ones you posted", "joined": "ones you joined", "both": "some posted, some joined"}
+
+
 def record_path(season: int, week: int) -> Path:
     return ENTERED_DIR / f"{season}-wk{week:02d}.json"
 
@@ -81,6 +85,10 @@ class EnteredRecord:
     # Entries the file held with no lineup yet, one dict per contest: contest_id, name, entry_fee, format,
     # entry_ids (Plan K item 4: the entry plan's "every contest has a lineup" check).
     blank: list[dict] = field(default_factory=list)
+    # Blueprint Phase B (the ledger): whether this week's H2Hs were ones he posted, joined or both ("" when
+    # not said), and the fees of the entries the file held but skipped (a Showdown, another slate), by reason
+    h2h: str = ""
+    skipped_fees: dict[str, float] = field(default_factory=dict)
 
 
 def name_key(name: str) -> str:
@@ -194,6 +202,8 @@ def load(season: int, week: int, path: Path | None = None) -> EnteredRecord | No
             note=str(raw.get("note", "")),
             skipped=dict(raw.get("skipped", {})),
             blank=list(raw.get("blank", [])),
+            h2h=str(raw.get("h2h", "") or ""),
+            skipped_fees={str(k): float(v) for k, v in (raw.get("skipped_fees") or {}).items()},
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -226,7 +236,10 @@ def summary_lines(record: EnteredRecord) -> list[str]:
         out.append(f"  {label}: {lu.source_text}; {where}")
         out.append(f"      {', '.join(lu.names)}")
     for reason, n in record.skipped.items():
-        out.append(f"  skipped {n}: {reason}")
+        fees = record.skipped_fees.get(reason)
+        out.append(f"  skipped {n}: {reason}" + (f" (${fees:,.2f} in fees)" if fees else ""))
+    if record.h2h:
+        out.append(f"  this week's H2Hs: {H2H_WORDS.get(record.h2h, record.h2h)}")
     for c in record.blank:
         n = len(c.get("entry_ids") or [])
         out.append(f"  no lineup yet: {n} entr{'y' if n == 1 else 'ies'} in {c.get('name', '')}")

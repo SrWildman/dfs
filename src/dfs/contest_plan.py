@@ -105,10 +105,13 @@ class WeekCheck:
     over: list[str]  # "Showdown $31.00 (cap $5.00)"
 
     def line(self) -> str:
-        """`week close`'s one line: "spent $X vs plan $Y; over in: ..." """
+        """`week close`'s one line: "spent $X vs plan $Y (Double Up $40.00, H2H $20.00, ...)". Facts only:
+        no caps and no "over" (blueprint Phase B: nothing warns or enforces; the ledger shows the record)."""
         plan = "no budget set" if self.budget is None else f"plan ${self.budget:,.2f}"
-        over = "; over in: " + ", ".join(self.over) if self.over else "; within the plan"
-        return f"Contest plan, Week {self.week}: spent ${self.total:,.2f} vs {plan}{over}"
+        where = ", ".join(f"{b} ${v:,.2f}" for b, v in self.spent.items() if v)
+        return f"Contest plan, Week {self.week}: spent ${self.total:,.2f} vs {plan}" + (
+            f" ({where})" if where else ""
+        )
 
 
 def check_week(
@@ -181,8 +184,6 @@ def tier_lines(
     out.append(f"  Avoid: {contest_tiers.AVOID_LOOK_FOR}")
     if spend is not None and week is not None:
         out.append(f"  Last week by tier (Week {week}): {spend.line()}")
-        if spend.over:
-            out.append("  Over the tier plan: " + "; ".join(spend.over))
     return out
 
 

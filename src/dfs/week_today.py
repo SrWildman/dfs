@@ -65,8 +65,8 @@ _SYNC_SAT = StepSpec(
 _PLAN = StepSpec(
     None,
     "dfs contests plan",
-    "Decide where the money goes before you build: spend by format against the caps, and who to avoid "
-    "in H2Hs.",
+    "Decide where the money goes before you build: your record and the rake by format (the ledger), and "
+    "your H2H record.",
     planned=True,
 )
 _PICKUPS = StepSpec(

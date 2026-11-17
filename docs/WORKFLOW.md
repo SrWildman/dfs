@@ -235,7 +235,11 @@ rewrites only the entries whose lineup changed.
 **Before you enter: `dfs contests plan`.** It prints this week's plan by format (Showdown at most $5, N-max GPPs with
 2,000+ entrants at most $10, the rest to double-ups, 50/50s, H2Hs and single-entry GPPs under 1,000 entrants, the total
 within the Bankroll tab's Weekly Budget; `[contest_plan]` in config.toml changes the caps), last week against it, ROI and
-effective rake by format and field size, and the H2H regulars to avoid. Terminal only.
+effective rake by format and field size, and the H2H regulars to avoid. It writes no sheet; it saves the plan and the
+**ledger** for the Week page (the first fold on Saturday and Monday: your ROI by format with a +/-2 SE bar, the rake,
+plan and entered dollars by group, your H2H record against regulars). Information only: nothing caps or warns.
+`dfs entries record` adds what you entered (`--h2h posted|joined|both` says whether your H2Hs were ones you posted or
+joined; at a terminal it asks once), and `dfs week close` brings the record up to the closed week.
 
 **By tier, not by list.** The same command (and the Week page) also splits the Weekly Budget by tier: A about 60% (H2H
 at $1-$5, single-entry double-ups and 50/50s at $2-$25), B about 30% (single-entry or 3-max GPPs under ~2,500 entrants,
