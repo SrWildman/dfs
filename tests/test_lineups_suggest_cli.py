@@ -1,4 +1,7 @@
-"""`dfs lineups suggest` end to end on a stub sheet and a synthetic slate (no network, no real sheet)."""
+"""`dfs lineups suggest` on a stub sheet and a synthetic slate (no network, no real sheet). Three tests run
+the real builder end to end (it prints and writes, rounds and `--iterate`, the calibrated Cash % kept); the
+ones that check only what the command does around it hand it one real report built once per session
+(`builder_helpers.stub_builder`)."""
 
 import sys
 from datetime import UTC, datetime
@@ -7,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, "tests")
-import test_lineup_suggest as syn  # noqa: E402
+import builder_helpers as syn  # noqa: E402
 
 from dfs import cli, suggest_state  # noqa: E402
 from dfs.derived import edge_sheet_index  # noqa: E402
@@ -108,6 +111,7 @@ def test_it_prints_how_long_every_phase_took_in_the_order_they_ran(cfg, edge, ca
         return "Suggested: ok"
 
     monkeypatch.setattr(cli, "write_suggested", fake_write)
+    syn.stub_builder(monkeypatch, cli)  # the search phases are the (real) report's own
     out = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys)
     block = out[out.index("Phase times:") :]
     names = [
@@ -129,17 +133,16 @@ def test_it_prints_how_long_every_phase_took_in_the_order_they_ran(cfg, edge, ca
 
 
 def test_seconds_sets_the_search_time_limit_and_defaults_to_two_minutes(cfg, edge, capsys, monkeypatch):
-    seen = []
-    real = cli.suggest_builds
-    monkeypatch.setattr(cli, "suggest_builds", lambda *a, **k: seen.append(k["time_limit"]) or real(*a, **k))
+    calls = syn.stub_builder(monkeypatch, cli)
     tags = dict.fromkeys(edge["Name"], "Both")
     run(cfg, edge, tags, capsys, write=False)
     run(cfg, edge, tags, capsys, write=False, seconds=180.0)
-    assert seen == [120.0, 180.0]
+    assert [k["time_limit"] for k in calls] == [120.0, 180.0]
 
 
 def test_no_write_leaves_the_tab_alone(cfg, edge, capsys, monkeypatch):
     monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: pytest.fail("the tab must not be written"))
+    syn.stub_builder(monkeypatch, cli)
     out = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys, write=False)
     assert "--no-write" in out and "Build 1" in out
 
@@ -159,13 +162,11 @@ def test_the_command_is_registered_with_the_documented_options():
 
 
 def test_rank_defaults_to_the_top_1_chance_and_share_is_opt_in(cfg, edge, capsys, monkeypatch):
-    seen = []
-    real = cli.suggest_builds
-    monkeypatch.setattr(cli, "suggest_builds", lambda *a, **k: seen.append(k["rank"]) or real(*a, **k))
+    calls = syn.stub_builder(monkeypatch, cli)
     tags = dict.fromkeys(edge["Name"], "Both")
     run(cfg, edge, tags, capsys, write=False)
     run(cfg, edge, tags, capsys, write=False, rank="share")
-    assert seen == ["top1", "share"]
+    assert [k["rank"] for k in calls] == ["top1", "share"]
 
 
 def test_the_rank_option_takes_top1_or_share_and_defaults_to_top1():

@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import test_lineup_suggest as syn  # noqa: E402
+import builder_helpers as syn  # noqa: E402
 
 from dfs import build_milp as bm  # noqa: E402
 from dfs import lineup_shapes as sh  # noqa: E402

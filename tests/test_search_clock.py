@@ -2,8 +2,8 @@
 
 import time
 
+import builder_helpers as syn
 import pytest
-import test_lineup_suggest as syn
 
 from dfs import search_clock as clock
 from dfs.late_swap_search import LineupState, OpenSlot, top_lineups
