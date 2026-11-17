@@ -1077,13 +1077,27 @@ def lineup_sources(inp, live_lineups: list[dict] | None, started: bool):  # noqa
     return [], "", None
 
 
+def week_over(season: int, week: int, now: datetime) -> datetime | None:
+    """The start of the next NFL week when `now` is past it, else None: a past week (`dfs week page --week N`
+    reads the current slate, whose kickoffs are another week's) is a closed week."""
+    from dfs import nfl_calendar
+
+    try:
+        nxt = datetime.combine(
+            nfl_calendar.week_start_date(week + 1, season), datetime.min.time(), tzinfo=EASTERN
+        )
+    except (ValueError, KeyError):
+        return None
+    return nxt if now >= nxt else None
+
+
 def view(inp, live_lineups: list[dict] | None = None) -> LockView:  # noqa: ANN001 - WeekInputs
     """The Lock state's whole picture from the week's inputs (pure: it only reads `inp`, and `live_lineups`,
     the Lineups tab the served page just read)."""
     from dfs import week_board
 
     starts = kickoffs(inp.edge)
-    st = state(inp.now, starts, week_board.week_closed(inp))
+    st = state(inp.now, starts, week_board.week_closed(inp) or week_over(inp.season, inp.week, inp.now))
     started = bool(starts) and inp.now >= starts[0]
     sources, where, entered = lineup_sources(inp, live_lineups, started)
     base = baseline(inp.suggest_rounds, [s.names for s in sources], starts[0] if starts else None, inp.now)

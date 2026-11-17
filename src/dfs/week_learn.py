@@ -591,7 +591,8 @@ td.status.new{color:var(--accent);font-weight:600}
 margin:6px 0 10px}
 .reasons button{font-size:11.5px;padding:1px 7px;border-radius:9px;border:1px solid var(--line);
 background:none;cursor:pointer;margin:1px}.reasons button.on{background:var(--accent);color:#fff}
-@media(max-width:760px){.vsdef{grid-template-columns:1fr}}
+.strip.close-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:760px){.vsdef{grid-template-columns:1fr}.strip.close-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 """
 
 
@@ -705,7 +706,12 @@ def _decision_log(inp: WeekInputs, live: bool) -> str:
             "the latest wins",
             src=("data/week/decisions.jsonl",),
         )
-    path = decisions_log.PATH
+    from dfs.paths import REPO_ROOT
+
+    try:
+        path = decisions_log.PATH.relative_to(REPO_ROOT)
+    except ValueError:
+        path = decisions_log.PATH
     return (
         f'<details class="declog" id="decision-log"><summary>Decision log ({len(items)})</summary>{body}'
         f'<p class="note">Export: the file itself, <code>{e(str(path))}</code> (one JSON object per line, '

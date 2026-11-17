@@ -1415,12 +1415,12 @@ def lock_files(tmp_path, season: int = SEASON, week: int = WEEK):
 def test_a_lock_answer_is_recorded_names_the_swap_and_writes_no_sheet(make, tmp_path):
     from dfs import decisions_log
 
-    lock_files(tmp_path)
+    lock_files(tmp_path, SEASON, 9)  # Week 9: the Sunday below is its own (a past week reads as closed)
     sheet, edits = served_sheet(tmp_path)
     from test_week_plays import slate_rows, write_csv
 
     write_csv(tmp_path / "data" / "current" / "edge.csv", star_out(slate_rows()))  # served_sheet rewrote it
-    client = make(edits=edits)
+    client = make(edits=edits, week=9)
     client.server.ctx.now = lambda: datetime(2026, 11, 8, 16, 0, tzinfo=UTC)  # 11:00 am ET Sunday
     status, page = client.get("/")
     assert status == 200 and 'data-row="id-Wr Star:status"' in page and 'data-state="lock"' in page
@@ -1428,7 +1428,7 @@ def test_a_lock_answer_is_recorded_names_the_swap_and_writes_no_sheet(make, tmp_
     assert status == 200, body
     assert "Make this swap on DraftKings: in L1, take out Wr Star and put in Wr Value" in body["message"]
     assert sheet.writes == []
-    [rec] = decisions_log.read(SEASON, WEEK, path=tmp_path / "data" / "week" / "decisions.jsonl")
+    [rec] = decisions_log.read(SEASON, 9, path=tmp_path / "data" / "week" / "decisions.jsonl")
     assert rec["id"] == body["id"] and rec["kind"] == "swap" and rec["state"] == "lock"
     assert rec["chosen"]["name"] == "Wr Value" and rec["default_at_time"]["name"] == "Wr Star"
     status, page = client.get("/")
@@ -1436,11 +1436,11 @@ def test_a_lock_answer_is_recorded_names_the_swap_and_writes_no_sheet(make, tmp_
 
 
 def test_a_lock_answer_on_a_closed_week_or_a_gone_row_is_refused(make, tmp_path):
-    lock_files(tmp_path)
+    lock_files(tmp_path, SEASON, 9)
     closed = make(read_only=True)
     status, body = closed.post("/api/lock", {"row": "id-Wr Star:status", "action": "keep"})
     assert status == 403
-    open_ = make()
+    open_ = make(week=9)
     open_.server.ctx.now = lambda: datetime(2026, 11, 8, 16, 0, tzinfo=UTC)
     status, body = open_.post("/api/lock", {"row": "nobody:status", "action": "keep"})
     assert status == 409 and "no longer on the list" in body["error"]
