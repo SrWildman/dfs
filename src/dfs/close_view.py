@@ -27,7 +27,7 @@ DOUBLE_UP = "Double Up"
 DECIDED_N = 5
 HAD, CHOICE, VARIANCE = "you had him", "a choice", "variance"
 STREAK = 4  # a scorecard behind its baseline this many weeks running
-EDGE_WINDOW, EDGE_BAD = 4, 3  # edge at lock at or under zero in 3 of the last 4 weeks
+EDGE_WINDOW, EDGE_BAD = 4, 3  # edge at lock ON PAPER (projected) at or under zero in 3 of the last 4 weeks
 CALIBRATION_GAP = 0.10  # the cash chance shown runs this far above the cash rate
 FUN_RUN = 3  # the fun line over his number this many weeks running
 
@@ -168,8 +168,9 @@ def one_thing(
     last = list(edge_by_week)[-EDGE_WINDOW:]
     if len(last) == EDGE_WINDOW and sum(x <= 0 for x in last) >= EDGE_BAD:
         return (
-            f"Edge at lock was at or under zero in {sum(x <= 0 for x in last)} of the last {EDGE_WINDOW} "
-            "weeks: check the sources are fresh and the pool is not stale; do not add a model."
+            f"Edge at lock, on paper, was at or under zero in {sum(x <= 0 for x in last)} of the last "
+            f"{EDGE_WINDOW} weeks (projected, not what happened): check the sources are fresh and the pool "
+            "is not stale; do not add a model."
         )
     if calibration_gap is not None and calibration_gap > CALIBRATION_GAP:
         return (
