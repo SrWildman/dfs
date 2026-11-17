@@ -259,6 +259,34 @@ def sheet_write(ctx: Context, action: Callable[[week_writes.SheetEdits, week_inp
         raise HttpError(409, f"{exc}") from exc
 
 
+def lock_answer(ctx: Context, data: dict) -> dict:
+    """A Swap / Keep / Look later on a Lock-state row (blueprint C2): recorded in the decisions log, nothing
+    written to any sheet (the Lineups tab is only read, to find the row as the page showed it)."""
+    from dfs import decisions_log, lock_state
+
+    if ctx.read_only:
+        raise HttpError(403, "This week is closed: the page records nothing for it.")
+    key, action = str(data.get("row") or ""), str(data.get("action") or "")
+    if action not in lock_state.ACTIONS:
+        raise HttpError(400, f"unknown action {action!r}")
+    lineups = [str(x) for x in data.get("lineups") or [] if isinstance(x, str)]
+    inp = week_inputs.gather(ctx.season, ctx.week, ctx.now(), ctx.data_dir)
+    sheet = ctx.edits.read() if ctx.edits is not None else None
+    lv = week_page.lock_view(inp, sheet)
+    row = lock_state.find(lv, key) if lv is not None else None
+    if row is None:
+        raise HttpError(409, "That change is no longer on the list: the page has refreshed since.")
+    starts = lock_state.kickoffs(inp.edge)
+    late = bool(starts) and inp.now >= starts[0]
+    rec = lock_state.record(row, action, lineups, season=ctx.season, week=ctx.week, now=inp.now, late=late)
+    path = (ctx.data_dir or paths.DATA_DIR) / "week" / "decisions.jsonl"
+    try:
+        decision_id = decisions_log.append(rec, path)
+    except OSError as exc:
+        raise HttpError(500, f"Could not record it: {exc}") from exc
+    return {"message": lock_state.message(row, action, lineups), "id": decision_id}
+
+
 def pool_message(values: dict[str, str], inp: week_inputs.WeekInputs) -> str:
     names = {str(r.get("Id", "")): str(r.get("Name", "")) for r in inp.edge or []}
     return "; ".join(f"{names.get(i, i)}: {v or 'out of the pool'}" for i, v in values.items())
@@ -588,6 +616,13 @@ Handler.post_stack = _post_stack  # type: ignore[attr-defined]
 Handler.post_pool_start = _post_pool_start  # type: ignore[attr-defined]
 Handler.post_decide = _post_decide  # type: ignore[attr-defined]
 
+
+def _post_lock(self: Handler) -> None:
+    self._json(200, lock_answer(self.ctx, self._json_body()))
+
+
+Handler.post_lock = _post_lock  # type: ignore[attr-defined]
+
 GET_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/": Handler.page,
     "/api/status": Handler.get_status,
@@ -611,6 +646,7 @@ POST_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/pool": _post_pool,
     "/api/pool/start": _post_pool_start,
     "/api/decide": _post_decide,
+    "/api/lock": _post_lock,
     "/api/stack": _post_stack,
 }
 
@@ -686,7 +722,9 @@ def sheet_edits(sheet_id: str | None, read_only: bool) -> tuple[Any, str]:
             None,
             f"No sheet ({type(exc).__name__}: {exc}): the page shows the last sync and writes nothing.",
         )
-    edits = week_writes.SheetEdits(client, edge_tab=edge_tab, read_only=read_only, title=title)
+    edits = week_writes.SheetEdits(
+        client, edge_tab=edge_tab, read_only=read_only, title=title, lineups_tab=cfg.lineups.builder_tab
+    )
     return edits, f"Sheet: {title} ({url}){' (read only)' if read_only else ''}"
 
 

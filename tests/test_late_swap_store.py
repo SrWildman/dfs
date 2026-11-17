@@ -108,8 +108,32 @@ def test_a_run_is_stale_after_twelve_hours():
 def test_save_replaces_atomically_and_leaves_no_temp_file(tmp_path):
     lss.save(lss.Saved(NOW, False), tmp_path)
     lss.save(lss.Saved(NOW + timedelta(minutes=5), False), tmp_path)
-    assert sorted(p.name for p in tmp_path.iterdir()) == [lss.STORE_FILE]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([lss.STORE_FILE, lss.RUNS_FILE])
     assert lss.load(tmp_path).saved_at == NOW + timedelta(minutes=5)
+
+
+def test_every_run_is_appended_and_a_line_is_never_rewritten(tmp_path):
+    """Blueprint C2: late-swap runs are append-only; `late_swap.json` stays the latest."""
+    first = lss.summarize(1, "cash", ["a"] * 9, suggestions(pairs=[swap("C", "D", 2.0), swap("E", "F", 1.0)]))
+    lss.save(lss.Saved(NOW, True, (first,)), tmp_path)
+    log = tmp_path / lss.RUNS_FILE
+    before = log.read_bytes()
+    lss.save(lss.Saved(NOW + timedelta(minutes=5), False), tmp_path)
+    after = log.read_bytes()
+    assert after.startswith(before) and len(after.splitlines()) == 2
+    runs = lss.read_runs(tmp_path)
+    assert [o["into"] for o in runs[0]["lineups"][0]["options"]] == [["D"], ["F"]]  # best first
+    assert runs[1]["lineups"] == [] and lss.load(tmp_path).saved_at == NOW + timedelta(minutes=5)
+
+
+def test_options_keep_three_improving_changes_once_each():
+    same = swap("A", "B", 3.0)
+    s = suggestions(
+        refill=same,
+        pairs=[same, swap("C", "D", 2.0), swap("E", "F", 1.5), swap("G", "H", 1.0)],
+        singles={3: [swap("I", "J", -1.0)]},
+    )
+    assert [o.into for o in lss.options(s, "cash")] == [("B",), ("D",), ("F",)]
 
 
 def test_the_overlap_label_and_the_position_are_kept_for_the_cockpit(tmp_path):

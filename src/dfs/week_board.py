@@ -776,9 +776,24 @@ def default_sentence(inp: WeekInputs) -> str:
     )
 
 
-def brief(inp: WeekInputs, b: Board, panel: PoolPanel) -> list[Sentence]:
+def lock_sentence(row, edge: list[dict] | None) -> Sentence:  # noqa: ANN001 - lock_state.Row
+    """The Lock state's top change as the brief's first sentence (blueprint C2)."""
+    me = next((r for r in edge or [] if str(r.get("Id") or "") == row.player_id), {"Name": row.name})
+    text = _p(me) + row.what[len(row.name) :] if row.what.startswith(row.name) else row.what
+    where = f" (in {', '.join(row.touches)})" if row.touches else " (in your pool)"
+    if row.started:
+        tail = ": his game has started."
+    elif row.swap is not None:
+        sw = row.swap
+        tail = f": best swap {sw.into.name} ({sw.gain:+.1f} pts) in {', '.join(sw.lineups)}, on DraftKings."
+    else:
+        tail = ": nothing better fits."
+    return Sentence("lock", f"First change to look at: {text}{where}{tail}", [me])
+
+
+def brief(inp: WeekInputs, b: Board, panel: PoolPanel, lock_first: Sentence | None = None) -> list[Sentence]:
     """5-7 plain sentences from the data, each skipped when its data is missing. Saturday and Sunday lead with
-    the builds and the swaps."""
+    the builds and the swaps; in the Lock state the top change leads (`lock_first`)."""
     edge = inp.edge or []
     if not edge:
         return [Sentence("empty", "Nothing is synced for this week yet: sync to fill the page.")]
@@ -889,7 +904,10 @@ def brief(inp: WeekInputs, b: Board, panel: PoolPanel) -> list[Sentence]:
         if day == 5
         else ["games", "chalk", "news", "value", "fades", "q", "stack", "pool"]
     )
-    return [out[k] for k in order if k in out][:7]
+    found = [out[k] for k in order if k in out]
+    if lock_first is not None:
+        found = [lock_first, *found]
+    return found[:7]
 
 
 def thinnest(edge: list[dict]) -> tuple[str, int, dict] | None:

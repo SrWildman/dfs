@@ -460,6 +460,50 @@ class WeekInputs:
     # back out, who leads the targets) and per team, one line each
     news: dict | None = None
     team_news: dict | None = None
+    # blueprint Phase C2 (the Lock state): this week's rows of `data/news/changes.csv` (the fields the change
+    # list reads), every suggest round (`{"round", "at", "builds": [names]}`), the decisions log's lines
+    changes: list[dict] | None = None
+    suggest_rounds: list[dict] = field(default_factory=list)
+    decisions_log: list[dict] | None = None
+
+
+def load_changes(data_dir: Path, season: int, week: int) -> list[dict] | None:
+    """This week's news change log rows for the Lock state (status, CalPts and the two ownerships)."""
+    try:
+        from dfs import lock_state, news_store
+
+        frame = news_store.week_changes(
+            season,
+            week,
+            fields=lock_state.FIELDS,
+            path=data_dir / news_store.NEWS_SUBDIR / news_store.CHANGES_FILE,
+        )
+    except Exception:  # noqa: BLE001 - the page never fails over the log
+        return None
+    return frame.to_dict("records") if not frame.empty else None
+
+
+def load_rounds(data_dir: Path, week: int) -> list[dict]:
+    """Every round of `data/suggest_state/<week>.json`: its number, when it ran and its builds' names."""
+    out: list[dict] = []
+    for r in (read_json(data_dir / "suggest_state" / f"{week}.json") or {}).get("rounds") or []:
+        try:
+            at = datetime.fromisoformat(str(r.get("at")))
+            number = int(r.get("round"))
+        except (TypeError, ValueError):
+            continue
+        builds = [list(b.get("names") or []) for b in r.get("builds") or []]
+        out.append({"round": number, "at": at if at.tzinfo else at.replace(tzinfo=UTC), "builds": builds})
+    return out
+
+
+def load_decisions(data_dir: Path, season: int, week: int) -> list[dict] | None:
+    from dfs import decisions_log
+
+    try:
+        return decisions_log.read(season, week, path=data_dir / "week" / "decisions.jsonl") or None
+    except (OSError, ValueError):
+        return None
 
 
 def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) -> WeekInputs:
@@ -511,6 +555,9 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         team_weeks=_read_csv(d / "current" / "team_weeks.csv") or None,
         calls_record=calls_record(d),
         **_news(d, edge, week),
+        changes=load_changes(d, season, week),
+        suggest_rounds=load_rounds(d, week),
+        decisions_log=load_decisions(d, season, week),
     )
 
 
