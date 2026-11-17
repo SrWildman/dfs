@@ -173,3 +173,66 @@ def test_the_calls_flashback_pairs_load_and_compare_like_with_like():
         assert (a.cash, a.gpp) == (b.cash, b.gpp)  # same kind of builds on both sides
     assert "calls_flashback" in close_research.STAGE_NAMES
     assert close_research.STAGE_FUNCTIONS["calls_flashback"] is close_research.stage_calls_flashback
+
+
+# -- blueprint Phase D: the scorecards weekly, everything else monthly ---
+
+
+def test_the_monthly_set_runs_on_the_first_close_of_a_month_only():
+    # the Monday after each Sunday: Week 4 (Oct 5), Week 8 (Nov 2), Week 13 (Dec 7), Week 17 (Jan 4)
+    firsts = [w for w in range(2, 19) if close_research.first_close_of_month(2026, w)]
+    assert firsts == [4, 8, 13, 17]
+    assert close_research.stages_for(2026, 9) == (("scorecards",), ())
+    assert close_research.stages_for(2026, 9, monthly=True) == (("scorecards",), close_research.STAGE_NAMES)
+    assert close_research.stages_for(2026, 8)[1] == close_research.MONTHLY
+    assert (
+        close_research.ALL_STAGES[0] == "scorecards" and close_research.MONTHLY == close_research.STAGE_NAMES
+    )
+
+
+def test_a_plain_run_is_the_weekly_set_and_monthly_adds_the_rest_after_it(dirs, monkeypatch):
+    calls = []
+
+    def fake(season, week, stages, *, deadline_minutes, log):
+        calls.append((tuple(stages), deadline_minutes))
+        return [_result(s) for s in stages]
+
+    monkeypatch.setattr(close_research, "run_stages", fake)
+    _path, results, _wall = close_research.run(2026, 9, log=lambda m: None)
+    assert [c[0] for c in calls] == [("scorecards",)] and [r.key for r in results] == ["scorecards"]
+    calls.clear()
+    close_research.run(2026, 9, monthly=True, log=lambda m: None)
+    assert [c[0] for c in calls] == [("scorecards",), close_research.STAGE_NAMES]
+    assert calls[1][1] <= close_research.DEADLINE_MINUTES  # the same deadline, what is left of it
+    calls.clear()
+    close_research.run(2026, 9, stages=("stacks",), log=lambda m: None)
+    assert [c[0] for c in calls] == [("stacks",)]
+
+
+def test_the_scorecards_stage_is_four_results_and_the_report_lists_them(dirs, monkeypatch):
+    from dfs import week_review
+
+    cards = [
+        {"model": m, "week": "w", "season": "s", "baseline": "b", "weeks": 6, "status": st}
+        for m, st in (
+            ("Projection (CalPts vs TFFB)", "Proven"),
+            ("Ownership (GPP, cash)", "Not proven"),
+            ("Cash % calibration", "Not proven"),
+            ("Edge at lock", "Proven"),
+        )
+    ]
+    cards[2]["gap"] = 0.17
+    monkeypatch.setattr(week_review, "scorecard_inputs", lambda *a, **k: (cards, [], [], {}))
+    results = close_research.stage_scorecards(2026, 9)
+    assert [r.key for r in results] == [
+        "scorecards.projection",
+        "scorecards.ownership",
+        "scorecards.calibration",
+        "scorecards.edge_at_lock",
+    ]
+    assert results[0].verdict == "Proven: s" and results[2].metrics["gap"] == 0.17
+    text = close_research.render(
+        results, 2026, 9, close_text=None, decisions=None, previous=None, wall_seconds=60.0
+    )
+    for card in cards:
+        assert f"Scorecard: {card['model']}" in text

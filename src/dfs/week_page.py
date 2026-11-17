@@ -1818,7 +1818,7 @@ def render(
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
             f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
-            f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}</style>"
+            f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}{week_learn.CLOSE_CSS}</style>"
             f'</head><body data-state="{e(st)}">'
             f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
             # blueprint C2: the strip (five tiles); the six steps sit under the brief's "next" line
@@ -1837,6 +1837,8 @@ def render(
             # Plan O2: the view bar; each block below names the views it shows on (`week_views.PLACES`)
             + week_views.view_bar(st if st in week_views.VIEW_NAMES else week_views.DEFAULT_VIEW)
             + wrap(week_views.lock_section(inp, lv, live), "lock")
+            # blueprint Phase D: the closed week on one screen (the clock's `close` state opens it)
+            + wrap(week_learn.close_section(inp, live).html(), "close")
             + wrap(week_views.overview_section(inp, board, panel), "overview")
             # blueprint Phase A: the Default cash lineup, its core and open spots (their decisions live there)
             + wrap(week_top.cash_block_html(inp, ds, board, live), "decisions")

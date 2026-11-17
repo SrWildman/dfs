@@ -86,7 +86,7 @@ def test_every_block_names_real_views_and_no_element_id_shadows_a_view_hash(tmp_
     for place, views in week_views.PLACES.items():
         assert views.split() and set(views.split()) <= set(week_views.VIEW_NAMES), place
         assert "everything" in views.split() or place == "overview", place  # Everything is the full page
-    assert week_views.VIEW_NAMES[:2] == ("build", "lock")  # blueprint C2: the clock's states lead the bar
+    assert week_views.VIEW_NAMES[:3] == ("build", "lock", "close")  # the clock's states lead the bar
     assert set(week_views.ALIASES) == {"overview"} and "overview" not in week_views.VIEW_NAMES
     html = week_page.render(_inp(tmp_path))
     assert 'id="views"' in html and html.index('id="brief"') < html.index(

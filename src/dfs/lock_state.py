@@ -1143,6 +1143,8 @@ def record(
         if sw is not None
         else []
     )
+    if sw is not None:  # the lineup's player the swap takes out: him, or the teammate his news moved
+        me = {"id": sw.out_id, "name": sw.out}
     chosen = {"id": sw.into_id, "name": sw.into.name} if action == "swap" and sw is not None else me
     labels = [str(x) for x in lineups] or list(sw.lineups if sw else row.touches)
     return {

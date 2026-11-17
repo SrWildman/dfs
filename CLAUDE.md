@@ -73,8 +73,11 @@ topic, which is how the "More, by topic" screen reaches it (tests enforce both).
 Typed commands also ask for a missing required argument at a terminal (`prompt_missing.py`; every Typer app needs
 `cls=PromptingGroup`) and fail as before when piped/scripted.
 
-- `dfs week close --research` / `dfs research close-report [--week N] [--only refresh,stacks,calls,calls_flashback] [--deadline MIN]` -- Monday
-  on autopilot (`close_research.py`): after the close, four stages run side by side as child processes (each with a log under
+- `dfs week close --research [--monthly]` / `dfs research close-report [--week N] [--only scorecards,refresh,stacks,calls,calls_flashback] [--monthly] [--deadline MIN]` -- Monday
+  on autopilot (`close_research.py`; blueprint Phase D): **every week the weekly set**, `close_research.WEEKLY` = the `scorecards` stage
+  (the four scorecards, `week_review.scorecard_inputs`: no builder, a minute or two); **the monthly set** (`MONTHLY` = the four stages
+  below) runs after it, under what is left of the same deadline, on the first close of a calendar month (`first_close_of_month`: the
+  Monday after the week's Sunday; Weeks 4, 8, 13 and 17 in 2026) or with `--monthly`. The stages run as child processes (each with a log under
   `data/research/close/<season>-wk<NN>/`; the parent stops any still running at the deadline, 45 min): `dfs research refresh --through
   <week>`, `dfs stacks --retro`, the plays model's `calls` (the week's calls scored into
   `data/research/calls_history.csv`, weights refitted; `research/plays_backtest.close_week`), and `calls_flashback` (`dfs backtest` of
@@ -350,7 +353,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   (inactives and pivots) and 9 (practice) below the first seven, and a plain `dfs sync` refreshes it too.
 - **The Lock state** (blueprint Phase C2; `lock_state.py` pure, `week_views.lock_section`, `week_top.strip_html`): the Week page knows
   the clock (`lock_state.state`: `lock` from 13 hours before the main slate's first kickoff until 3.5 hours after its last, `close`
-  after or on a closed week, `build` otherwise) and opens on it (Close's own view is Phase D; until then `close` opens Saturday's); a **status strip** of five tiles (time to lock, entered vs planned, open decisions, news pending,
+  after or on a closed week, `build` otherwise) and opens on it (`close` opens the Close view, Phase D below); a **status strip** of five tiles (time to lock, entered vs planned, open decisions, news pending,
   lineup health) replaces the progress steps at the top (the steps moved into the brief). The **Sunday view** (`#lock`): **what changed
   since the build his lineups came from** (`lock_state.baseline`: the newest suggest round the Lineups-tab lineups match, 8+ of 9,
   else the latest round, else Saturday 9 pm ET; Sam, 2026-11-17), from `data/news/changes.csv` netted per player and field
@@ -368,6 +371,26 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   undos are lines of their own) and says the swap to make on DraftKings: **nothing writes a sheet, nothing blocks or warns.** Late
   swap's runs are append-only too: `late_swap_store.save` also appends each run to `data/cockpit/late_swaps.jsonl` with its top three
   options per lineup.
+- **The Close view** (blueprint Phase D; `close_view.py` pure, `week_learn.close_section`, `scorecard.scorecards`, `edge_at_lock.py`,
+  `decisions_log.py`): the Week page's **Tuesday** view (`#close`; the clock's `close` state opens it), the closed week on one
+  screen from the `close` input that `dfs week review` (run by `week close`) saves: the week line (`close_view.week_line`: his
+  double-up points against the double-up cash lines, how many cashed, the share of the field beaten = median of `1 - pct` from
+  `decisions.csv`, the net from the contest log), **what decided it** (the cash post-mortem's top five, tagged `you had him` / `a
+  choice` / `variance`), **you against the build** (`scorecard.csv`'s overrides, week and season; "too few to call" under 12 weeks;
+  "the Default" once Phase A saved a `cash_core`, "the nearest build" before), the **four scorecards** (Projection: CalPts vs TFFB
+  MAE; Ownership: ours vs TFFB's Own% (GPP) and the double-up curve (cash), the weaker format's status; Calibration: Cash % shown
+  vs cashed, `cash_shown.csv`; Edge at lock), each Proven / Not proven / Overstated / New (the rules in `docs/CALCULATIONS.md`),
+  the ledger (Phase B's section, as `#close-ledger`), four tiles (edge at lock, avoidable errors = blank entries, calibration gap,
+  cash percentile by week), **the one thing** (`close_view.one_thing`: the first of blueprint 13.3's monthly triggers that fires,
+  else "Nothing") and the **decision log** fold (`decisions_log.read`, reason pills; on the served page one tap posts
+  `/api/reason`, a new line in `data/week/decisions.jsonl`, never a sheet write). **Edge at lock**
+  (`data/contests/edge_at_lock.csv`, one row per distinct lineup of his per contest with standings): his nine summed on the
+  **four-source consensus** (TFFB `ProjPts`, `SleeperPts`, `FantasyProsPts`, `EspnPts`; props are not in it) against every lineup
+  of the field, from the last EdgeRaw snapshot before the lock (`sim.retro.edge_snapshot_before`; a week whose newest snapshot is
+  older than the previous lock is skipped, `NoSnapshot`). The served page's decisions (`/api/decide`: open spot, core Play / Fade,
+  stack, pivot, wait; `week_actions.decision_record`) and the Sunday view's answers append to the log (fail-soft; an undo is a
+  line of its own). `dfs week review --week N --only edge_at_lock,close` backfills a past week (files only). The research
+  registry is `research/registry.toml` (`tests/test_registry.py`: every key, at most two `open`, no verdict on an open one).
 - **The news change log** (`news_log.py` pure, `news_store.py` I/O; blueprint Phase C item 1): every `dfs sync`, `dfs sync --live` and
   `dfs week new` diffs the EdgeRaw snapshot it just saved (`data/raw/edge/`) against the one before it and appends one row per changed
   field to `data/news/changes.csv` (`at, season, week, player_id, name, position, team, field, before, after, source, snapshot`; fields

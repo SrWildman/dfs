@@ -1446,3 +1446,21 @@ def test_a_lock_answer_on_a_closed_week_or_a_gone_row_is_refused(make, tmp_path)
     assert status == 409 and "no longer on the list" in body["error"]
     status, body = open_.post("/api/lock", {"row": "id-Wr Star:status", "action": "delete"})
     assert status == 400
+
+
+def test_a_reason_is_a_new_line_and_an_unknown_decision_or_reason_is_refused(make, tmp_path):
+    from dfs import decisions_log
+
+    path = tmp_path / "data" / "week" / "decisions.jsonl"
+    first = decisions_log.append(
+        {"season": SEASON, "week": WEEK, "kind": "swap", "chosen": {"id": "1", "name": "A"}}, path
+    )
+    client = make()
+    status, body = client.post("/api/reason", {"id": first, "reason": "news", "note": "inactives"})
+    assert status == 200 and "news" in body["message"]
+    assert (
+        decisions_log.read(SEASON, WEEK, path)[0]["reason"] == "news" and len(decisions_log.lines(path)) == 2
+    )
+    assert client.post("/api/reason", {"id": first, "reason": "vibes"})[0] == 400
+    assert client.post("/api/reason", {"id": "2026-07-0099", "reason": "gut"})[0] == 404
+    assert make(read_only=True).post("/api/reason", {"id": first, "reason": "gut"})[0] == 403

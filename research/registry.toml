@@ -1,0 +1,19 @@
+# The research registry (blueprint Phase D; docs/planning/audit/SPECS_A_TO_D.md section 5): every experiment
+# pre-registered before it is read. One [[experiment]] per question. `status` is open | read | dropped, and at
+# most two are open at once; a `verdict` is written only once it is read. The bar rises with
+# `variants_tried`: 2 SE for 1, 2.5 for 2 to 5, 3 for 6 or more. `tests/test_registry.py` checks the file.
+
+[[experiment]]
+id = "R2"
+question = "Does late news carry edge?"
+hypothesis = "The field's ownership under-adjusts to changes after Saturday night."
+metric = "slope of actual minus Saturday projection on the move, clustered by week"
+baseline = "no adjustment"
+bar = "slope above 0 at 2 SE by week"
+weeks = "2026 W1-W9"
+variants_tried = 1          # the bar rises with this: 2 SE for 1, 2.5 for 2 to 5, 3 for 6 or more
+registered = 2026-11-10
+testable = "now"
+status = "read"             # open | read | dropped. At most two are open
+verdict = "Cleared on ruled-out players; no ownership leverage. Rerun after Week 13."
+report = "docs/research/news/R2_LATE_NEWS_2026.md"

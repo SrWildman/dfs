@@ -1,14 +1,17 @@
-"""`dfs week close --research`: Monday on autopilot -- the weekly offline studies after a close.
+"""`dfs week close --research`: Monday on autopilot -- the offline studies after a close.
 
 The close runs as it always did; then (each stage fail-soft, in its own process with its own log, bounded by
-one overall deadline so an unattended run always ends):
+one overall deadline so an unattended run always ends) the **weekly** set, and the **monthly** set as well on
+the first close of a month (`first_close_of_month`) or with `--monthly` (blueprint Phase D: the weekly
+battery is the four scorecards; everything else is monthly):
 
-| stage | what | module |
-|---|---|---|
-| `refresh` | `dfs research refresh --through <week>`: the weekly studies | `research.refresh` |
-| `stacks` | `dfs stacks --retro`: the field refit and the stack ranking's track record | `sim.stacks_retro` |
-| `calls` | the plays model's calls scored and its weights refitted | `research.plays_backtest` |
-| `calls_flashback` | Flashback: the plays model's AVOID / FADE bans against today | `backtest` |
+| stage | set | what | module |
+|---|---|---|---|
+| `scorecards` | weekly | the four scorecards (projection, ownership, calibration, edge) | `week_review` |
+| `refresh` | monthly | `dfs research refresh --through <week>`: the weekly studies | `research.refresh` |
+| `stacks` | monthly | `dfs stacks --retro`: the field refit and the retro | `sim.stacks_retro` |
+| `calls` | monthly | the plays model's calls scored and its weights refitted | `research.plays_backtest` |
+| `calls_flashback` | monthly | Flashback: the plays model's AVOID / FADE bans against today | `backtest` |
 
 The settings the backtest compares live in the repo (`research/settings/*.toml`), not in a scratchpad.
 
@@ -51,11 +54,15 @@ THREAD_CAPS = {
     k: "1" for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
 }
 STAGE_NAMES = ("refresh", "stacks", "calls", "calls_flashback")
+WEEKLY = ("scorecards",)  # blueprint Phase D: every close
+MONTHLY = STAGE_NAMES  # the first close of a month, or `--monthly`
+ALL_STAGES = WEEKLY + MONTHLY
 # The plays model's ban-only variants (Plan M, M1.5), each against today's builds of the same kind.
 CALLS_PAIRS = (("calls_avoid_cash", "today_cash"), ("calls_fade_gpp", "today_gpp"))
 # Longest first: the order they start in. All of them run at once (`run`): the machine has the cores, and
 # the 45-minute budget is shorter than the stages run one after another.
 STAGE_TITLES = {
+    "scorecards": "The four scorecards",
     "refresh": "Weekly research reruns",
     "stacks": "Stacks: field refit and retro",
     "calls": "The plays model's calls: how they did, what they learned",
@@ -250,7 +257,62 @@ def stage_calls(season: int, week: int) -> list[StageResult]:
     ]
 
 
+def stage_scorecards(season: int, week: int) -> list[StageResult]:
+    """The four scorecards (`week_review.scorecard_inputs`), one result each: runs no builder."""
+    from dfs import scorecard, week_review
+
+    cards, *_ = week_review.scorecard_inputs(season, week, say=_stamped)
+    keys = ("projection", "ownership", "calibration", "edge_at_lock")
+    out = []
+    for key, card in zip(keys, cards, strict=True):
+        metrics: dict[str, float | bool] = {
+            "weeks": float(card["weeks"]),
+            "proven": card["status"] == "Proven",
+        }
+        if card.get("gap") is not None:
+            metrics["gap"] = float(card["gap"])
+        out.append(
+            StageResult(
+                key=f"scorecards.{key}",
+                title=f"Scorecard: {card['model']}",
+                verdict=f"{card['status']}: {card['season']}",
+                ship_bar=(
+                    f"Proven = ahead of its simple baseline by {scorecard.BAR_SE:g} SE, weeks as the "
+                    f"unit; New under {scorecard.MIN_WEEKS} weeks; Overstated (calibration) = the cash "
+                    "chance shown above the cash rate by 2 SE"
+                ),
+                headline=[
+                    f"This week: {card['week']}.",
+                    f"Season: {card['season']}.",
+                    f"Baseline: {card['baseline']}.",
+                ],
+                metrics=metrics,
+            )
+        )
+    return out
+
+
+def first_close_of_month(season: int, week: int) -> bool:
+    """True when `week`'s close (the Monday after its Sunday) is the first close in its calendar month."""
+    from datetime import timedelta
+
+    from dfs.contests.week_frames import sunday_of
+
+    if week <= 1:
+        return True
+    this = sunday_of(season, week) + timedelta(days=1)
+    before = sunday_of(season, week - 1) + timedelta(days=1)
+    return (this.year, this.month) != (before.year, before.month)
+
+
+def stages_for(season: int, week: int, *, monthly: bool = False) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(weekly, monthly) stages for this close: the monthly set is empty unless `monthly` or the first close
+    of the month."""
+    return WEEKLY, (MONTHLY if monthly or first_close_of_month(season, week) else ())
+
+
 STAGE_FUNCTIONS: dict[str, Callable[[int, int], list[StageResult]]] = {
+    "scorecards": stage_scorecards,
     "refresh": stage_refresh,
     "stacks": stage_stacks,
     "calls": stage_calls,
@@ -562,16 +624,31 @@ def run(
     *,
     close_text: str | None = None,
     decisions: list[str] | None = None,
-    stages: tuple[str, ...] = STAGE_NAMES,
+    stages: tuple[str, ...] | None = None,
+    monthly: bool = False,
     deadline_minutes: float = DEADLINE_MINUTES,
     directory: Path | None = None,
     log: Callable[[str], None] = print,
 ) -> tuple[Path, list[StageResult], float]:
-    """Run the stages, write the close report. Returns (the report's path, the results, wall seconds)."""
+    """Run the stages, write the close report. Returns (the report's path, the results, wall seconds).
+    `stages` names them outright; else the weekly set, then the monthly set (`stages_for`) under what is
+    left of the same deadline."""
     start = time.monotonic()
     if close_text is None and close_text_path(season, week).exists():
         close_text = close_text_path(season, week).read_text()
-    results = run_stages(season, week, stages, deadline_minutes=deadline_minutes, log=log)
+    if stages is not None:
+        groups = [tuple(stages)]
+    else:
+        weekly, month = stages_for(season, week, monthly=monthly)
+        groups = [weekly] + ([month] if month else [])
+        log(
+            "  the weekly set"
+            + (" and the monthly set" if month else " (the monthly set runs on the first close of a month)")
+        )
+    results: list[StageResult] = []
+    for group in groups:
+        left = deadline_minutes - (time.monotonic() - start) / 60
+        results += run_stages(season, week, group, deadline_minutes=max(left, 0.1), log=log)
     wall = time.monotonic() - start
     previous = previous_report(season, week, directory)
     fill_changes(results, previous)
@@ -595,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - the child 
     parser = argparse.ArgumentParser(prog="dfs.close_research")
     sub = parser.add_subparsers(dest="command", required=True)
     stage = sub.add_parser("stage")
-    stage.add_argument("name", choices=STAGE_NAMES)
+    stage.add_argument("name", choices=ALL_STAGES)
     stage.add_argument("--season", type=int, required=True)
     stage.add_argument("--week", type=int, required=True)
     stage.add_argument("--out", type=Path, required=True)

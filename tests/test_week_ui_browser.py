@@ -635,10 +635,12 @@ def test_the_page_opens_on_the_overview_each_view_has_its_hash_and_the_last_one_
     pg = ctx.new_page()
     pg.goto(served.url)
     until(pg, "!!(window.dfsViews && window.dfsPool)")
-    # blueprint C2: the page opens on the clock's state; this fixture's slate is over, and the Close view is
-    # Phase D's, so it opens on the Saturday view (which holds the overview)
+    # blueprint C2 / D: the page opens on the clock's state; this fixture's slate is over, so the Close view
     assert pg.evaluate("document.body.dataset.state") == "close"
-    assert pg.evaluate("window.dfsViews.current()") == "build"
+    assert pg.evaluate("window.dfsViews.current()") == "close"
+    assert pg.locator("#close-card").is_visible() and not pg.locator("#overview-card").is_visible()
+    pg.click('#views a[data-view="build"]')
+    until(pg, "window.dfsViews.current() === 'build'")
     assert pg.locator("#brief").is_visible() and pg.locator("#progress").is_visible()
     assert pg.locator("#strip").is_visible()
     assert pg.locator("#overview-card").is_visible() and not pg.locator("#board").is_visible()
@@ -808,7 +810,20 @@ def test_the_sunday_view_opens_by_itself_and_swap_records_without_a_sheet_write(
         swap.click()
         until(pg, "!!document.querySelector('#lock-card span.answered')")
         assert s.sheet.writes == []
-        assert (tmp_path / "data" / "week" / "decisions.jsonl").exists()
+        log = tmp_path / "data" / "week" / "decisions.jsonl"
+        assert log.exists()
+        # blueprint Phase D: the Tuesday view's decision log lists it; one tap gives it a reason (a new line)
+        first = log.read_bytes()
+        pg.goto(s.url + "#close")
+        pg.reload()  # a hash-only goto keeps the old render; the log is read at render
+        until(pg, "window.dfsViews && window.dfsViews.current() === 'close'")
+        pg.click("#decision-log summary")
+        pill = pg.locator('#decision-log button[data-reason="news"]').first
+        assert pill.is_enabled()
+        pill.click()
+        until(pg, "!!document.querySelector('#decision-log button.on[data-reason=news]')")
+        assert log.read_bytes().startswith(first) and b'"reason":"news"' in log.read_bytes()[len(first) :]
+        assert s.sheet.writes == []
         ctx.close()
         assert errors == []
     finally:

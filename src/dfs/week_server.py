@@ -259,6 +259,48 @@ def sheet_write(ctx: Context, action: Callable[[week_writes.SheetEdits, week_inp
         raise HttpError(409, f"{exc}") from exc
 
 
+def decisions_path(ctx: Context) -> Path:
+    return (ctx.data_dir or paths.DATA_DIR) / "week" / "decisions.jsonl"
+
+
+def log_decision(ctx: Context, inp: week_inputs.WeekInputs, d, data: dict) -> tuple[str, str]:  # noqa: ANN001
+    """Record a page decision that was just written (blueprint Phase D): (its id, a warning). An undo is a
+    line of its own pointing at the decision it takes back. NEVER fails the write: a failure is the
+    warning."""
+    from dfs import decisions_log, week_actions
+
+    option = str(data.get("option", ""))
+    path = decisions_path(ctx)
+    try:
+        if option == "undo":
+            prev = decisions_log.latest_for(d.key, ctx.season, ctx.week, path)
+            if prev is None:
+                return "", ""
+            return decisions_log.undo(str(prev["id"]), season=ctx.season, week=ctx.week, path=path), ""
+        rec = week_actions.decision_record(d, inp, option=option, pivot=str(data.get("pivot") or ""))
+        return (decisions_log.append(rec, path), "") if rec else ("", "")
+    except Exception as exc:  # noqa: BLE001 - the sheet write already happened
+        return "", f"Written, but not recorded in the decisions log ({type(exc).__name__}: {exc})."
+
+
+def reason_answer(ctx: Context, data: dict) -> dict:
+    """`/api/reason`: give a recorded decision its reason afterwards (a new line in the decisions log)."""
+    from dfs import decisions_log
+
+    if ctx.read_only:
+        raise HttpError(403, "This week is closed: the page records nothing for it.")
+    of, reason = str(data.get("id") or ""), str(data.get("reason") or "")
+    note = str(data.get("note") or "")[:500]
+    path = decisions_path(ctx)
+    if not any(str(d.get("id")) == of for d in decisions_log.read(ctx.season, ctx.week, path)):
+        raise HttpError(404, "That decision is not in this week's log (or it was undone).")
+    try:
+        decisions_log.set_reason(of, reason, note, path)
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from exc
+    return {"message": f"Reason recorded: {reason or 'cleared'}."}
+
+
 def lock_answer(ctx: Context, data: dict) -> dict:
     """A Swap / Keep / Look later on a Lock-state row (blueprint C2): recorded in the decisions log, nothing
     written to any sheet (the Lineups tab is only read, to find the row as the page showed it)."""
@@ -279,7 +321,7 @@ def lock_answer(ctx: Context, data: dict) -> dict:
     starts = lock_state.kickoffs(inp.edge)
     late = bool(starts) and inp.now >= starts[0]
     rec = lock_state.record(row, action, lineups, season=ctx.season, week=ctx.week, now=inp.now, late=late)
-    path = (ctx.data_dir or paths.DATA_DIR) / "week" / "decisions.jsonl"
+    path = decisions_path(ctx)
     try:
         decision_id = decisions_log.append(rec, path)
     except OSError as exc:
@@ -586,16 +628,22 @@ def _post_decide(self: Handler) -> None:
     rules_was = data.get("rules_was") if isinstance(data.get("rules_was"), dict) else {}
 
     def act(edits, inp):
+        key = str(data.get("key", ""))
+        try:
+            shown = week_actions._find(inp, {str(k): str(v) for k, v in rules_was.items()}, key)  # noqa: SLF001
+        except week_writes.WriteError:
+            shown = None  # decide_pool says why
         text, pool = week_actions.decide_pool(
             edits,
             inp,
-            key=str(data.get("key", "")),
+            key=key,
             option=str(data.get("option", "")),
             rules_was=rules_was,
             pivot=str(data.get("pivot") or ""),
             pool_was=str(data.get("pool_was") or ""),
         )
-        return {"message": text, "pool": pool}
+        decision_id, warning = log_decision(self.ctx, inp, shown, data) if shown is not None else ("", "")
+        return {"message": text + (f" {warning}" if warning else ""), "pool": pool, "id": decision_id}
 
     self._json(200, sheet_write(self.ctx, act))
 
@@ -621,7 +669,12 @@ def _post_lock(self: Handler) -> None:
     self._json(200, lock_answer(self.ctx, self._json_body()))
 
 
+def _post_reason(self: Handler) -> None:
+    self._json(200, reason_answer(self.ctx, self._json_body()))
+
+
 Handler.post_lock = _post_lock  # type: ignore[attr-defined]
+Handler.post_reason = _post_reason  # type: ignore[attr-defined]
 
 GET_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/": Handler.page,
@@ -647,6 +700,7 @@ POST_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/pool/start": _post_pool_start,
     "/api/decide": _post_decide,
     "/api/lock": _post_lock,
+    "/api/reason": _post_reason,
     "/api/stack": _post_stack,
 }
 

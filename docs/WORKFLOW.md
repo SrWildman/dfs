@@ -28,7 +28,7 @@ This is what most weeks are -- **sections 1 to 7 below are the standard week**; 
 | 3 | research, pool, lineups | in the sheet (no command) |
 | 4 | lineups are built | `dfs entries fill` (pick each entry's Lineup), then `dfs export -o lineups.csv` or `dfs entries fill --write` |
 | 5 | gameday | `dfs sync --live`, then `dfs lineups late-swap` |
-| 6 | after the games | `dfs week close --research` (reconciles Bankroll, keeps your DraftKings downloads and rebuilds Contests, **and** scores the week into Model Check; `--research` then runs Monday's offline studies unattended, under 45 minutes, into one report) |
+| 6 | after the games | `dfs week close --research` (reconciles Bankroll, keeps your DraftKings downloads and rebuilds Contests, **and** scores the week into Model Check; `--research` then runs the four scorecards, plus the monthly studies on a month's first close, into one report; the Week page's Tuesday view shows the close) |
 
 Sections 8 (log ownership) and 9 (read Model Check) are optional extras. The full command list is in
 [COMMANDS.md](COMMANDS.md).
@@ -384,9 +384,17 @@ weeks, then sends an empty file**, so grab them on Monday or Tuesday; they canno
 dfs week close --research
 ```
 
-`--research` is the Monday option: once the close is done it runs the weekly offline studies (research refresh, the stacks retro, the
-plays model's calls and their Flashback bans) side by side and writes ONE report, `docs/research/weekly/<season>-wk<NN>-close.md`,
-plus a 15-line summary to paste to planning. Leave it off for a close on its own.
+`--research` is the Monday option: once the close is done it runs the four scorecards (a minute or two) and writes ONE report,
+`docs/research/weekly/<season>-wk<NN>-close.md`, plus a 15-line summary to paste to planning. On the first close of a month (or with
+`--monthly`) it also runs the monthly studies after them (research refresh, the stacks retro, the plays model's calls and their
+Flashback bans; under 45 minutes). Leave it off for a close on its own.
+
+**Tuesday: the Week page's Close view.** After the close the Week page opens on **Tuesday** (`#close`): one line for the week (your
+double-up points against the cash lines, how many cashed, the share of the field you beat, the week's net), what decided it (the five
+players who most separated cashers from the rest, each tagged you had him / a choice / variance), you against the build, the four
+scorecards (projection, ownership, calibration, edge at lock: Proven / Not proven / Overstated / New), the ledger, four tiles and the
+one thing worth changing (usually nothing). The decision log at the bottom lists every decision the page recorded; on the served
+page one tap gives each a reason. Information only: nothing on it blocks, warns or writes a sheet.
 
 With no `--csv` it uses the newest history export in your Downloads folder (found by its header row, `[contests] downloads_dir` changes
 the folder) and says which file. `--csv <file>` still works.

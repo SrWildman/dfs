@@ -15,11 +15,19 @@ clicks are not decisions (`data/week/edits.log` keeps them).
 
 `append` opens the file for append and writes one line; nothing here rewrites it
 (`tests/test_decisions_log.py` checks the earlier bytes after every write).
+
+**Settled at the close** (`settle`): each decision's points = the chosen player's actual DK points minus
+`default_at_time`'s, null when either has no result (a postponed game, a Fade with no one named in his place);
+`by_reason` counts and averages them per reason. The callers: the Lock state's Swap / Keep / Later
+(`week_server.lock_answer`, Phase C2); the Week page's decisions (`/api/decide`, through
+`week_actions.decision_record`: open spots, cash core Play / Fade, the GPP stack, a Questionable star's
+pivot or Wait); and `/api/reason` (`set_reason`).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -128,4 +136,84 @@ def read(season: int | None = None, week: int | None = None, path: Path | None =
                 "note": reasons[str(i["id"])][1] or i.get("note", ""),
             }
         out.append(i)
+    return out
+
+
+def _week_of(decision_id: str) -> tuple[int, int]:
+    season, week, _n = str(decision_id).split("-")
+    return int(season), int(week)
+
+
+def set_reason(of: str, reason: str, note: str = "", path: Path | None = None) -> str:
+    """Give decision `of` its reason afterwards (one of `REASONS`, or "" to clear it): a new line with
+    `reason_for` set; `read` folds the latest one in. Returns the new line's id."""
+    if reason and reason not in REASONS:
+        raise ValueError(f"unknown reason {reason!r}")
+    season, week = _week_of(of)
+    item = {
+        "id": next_id(season, week, path),
+        "at": _now(),
+        "season": season,
+        "week": week,
+        "reason_for": of,
+        "reason": reason,
+        "note": note,
+    }
+    _write(item, path)
+    return item["id"]
+
+
+def latest_for(row: str, season: int, week: int, path: Path | None = None) -> dict | None:
+    """The newest standing decision recorded for page row `row` (the key the page answered), or None."""
+    found = [d for d in read(season, week, path) if str(d.get("row") or "") == row]
+    return found[-1] if found else None
+
+
+def _pts(who: object, points: Mapping[str, float]) -> float | None:
+    from dfs.player_join import normalize_name
+
+    if not isinstance(who, dict):
+        return None
+    for k in (str(who.get("id") or ""), normalize_name(str(who.get("name") or ""))):
+        if k and k in points:
+            v = points[k]
+            return None if v is None or v != v else float(v)
+    return None
+
+
+def settle(decisions: list[dict], points: Mapping[str, float]) -> list[dict]:
+    """Each decision with `points` = chosen minus `default_at_time` in actual DK points (`points` keyed by
+    DK id or normalised name); null when either side has no result. A decision whose chosen IS the default
+    (Keep) settles at 0."""
+    out = []
+    for d in decisions:
+        a, b = _pts(d.get("chosen"), points), _pts(d.get("default_at_time"), points)
+        same = isinstance(d.get("chosen"), dict) and d.get("chosen") == d.get("default_at_time")
+        diff = 0.0 if same and a is not None else (None if a is None or b is None else round(a - b, 2))
+        out.append({**d, "points": diff})
+    return out
+
+
+def by_reason(settled: list[dict]) -> list[dict]:
+    """Per reason (blank = "none given"): decisions, how many settled, their total and mean points; in
+    `REASONS` order, then none given. Decisions with no result are counted, never averaged."""
+    order = [*REASONS, ""]
+    groups: dict[str, list[dict]] = {}
+    for d in settled:
+        groups.setdefault(str(d.get("reason") or ""), []).append(d)
+    out = []
+    for r in order:
+        g = groups.get(r)
+        if not g:
+            continue
+        pts = [float(d["points"]) for d in g if d.get("points") is not None]
+        out.append(
+            {
+                "reason": r or "none given",
+                "decisions": len(g),
+                "settled": len(pts),
+                "total": round(sum(pts), 2) if pts else None,
+                "mean": round(sum(pts) / len(pts), 2) if pts else None,
+            }
+        )
     return out

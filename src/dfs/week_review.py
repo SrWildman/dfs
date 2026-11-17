@@ -10,9 +10,15 @@ Classic double-ups, 50/50s, multipliers and GPPs that have a contest-log row), t
   decisions against what he played, overrides from the nearest build; a row in `data/contests/scorecard.csv`;
 - `exposure_close` (item 8, `exposure.py`): his GPP exposure against the actual and the predicted ownership;
 - `numbers` (item 9, `numbers.py`): CalPts against TFFB by week, Cash % shown against the cash rate (this
-  week's cash builds join `data/contests/cash_shown.csv`), the signals' records.
+  week's cash builds join `data/contests/cash_shown.csv`), the signals' records;
+- `edge_at_lock` (blueprint Phase D, `edge_at_lock.py`): the week's rows of `data/contests/edge_at_lock.csv`
+  (replaced on a rerun) and its summary for the Close view's tile;
+- `close` (blueprint Phase D, `close_view.py`): the Close view's one screen (the week line, what decided it,
+  you against the build, the four scorecards, the tiles, the one thing), from files only.
 
-Each part fails soft (a line says what was skipped). Reads no sheet and writes none: files only.
+Each part fails soft (a line says what was skipped). Reads no sheet and writes none: files only. `only` runs
+a subset by name (`PARTS`): `dfs week review --week N --only edge_at_lock,close` is the backfill that writes
+only those two parts' files.
 """
 
 from __future__ import annotations
@@ -22,6 +28,9 @@ from pathlib import Path
 
 from dfs import exposure, field_review, numbers, scorecard
 from dfs.player_join import normalize_name
+
+PARTS = ("field_review", "scorecard", "exposure", "numbers", "edge_at_lock", "close")
+NEEDS_STANDINGS = ("field_review", "scorecard", "exposure", "numbers", "edge_at_lock")
 
 
 def _contests_dir() -> Path:
@@ -94,17 +103,129 @@ def _tier_saved(season: int, week: int) -> tuple[str, list[str]]:
     return "", []
 
 
-def run(season: int, week: int, *, say: Callable[[str], None] = print) -> bool:
-    """Build and save the four inputs for `week`. True when the standings were found (each part may still
-    have been skipped, said through `say`)."""
+def _csv_rows(path: Path) -> list[dict]:
+    import csv
+
+    if not path.exists():
+        return []
+    with path.open(newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+def scorecard_inputs(
+    season: int, week: int, *, edge_summary: dict | None = None, say: Callable[[str], None] = print
+) -> tuple[list[dict], list[dict], list[dict], dict]:
+    """The four scorecards (`scorecard.scorecards`) and what they were built from: (cards, projection by
+    week, ownership scores, the edge-at-lock summary). Files only; runs no builder (about 20 seconds, most
+    of it the ownership scoring)."""
+    from dfs import edge_at_lock, field_own, results_update
+    from dfs.sim import dups
+
+    projection = numbers.projection_by_week(results_update.load_all_scored(season))
+    try:
+        own_frame, _counts = field_own.training_frame(season, through=week)
+        own = field_own.score_weeks(own_frame, curve=dups.double_up_ownership).to_dict("records")
+    except Exception as exc:  # noqa: BLE001
+        say(f"  ownership scorecard: skipped ({type(exc).__name__}: {exc})")
+        own = []
+    cash_rows = numbers.read_csv(_contests_dir() / "cash_shown.csv")
+    edge = edge_summary or edge_at_lock.summary(edge_at_lock.read(), season, week)
+    cards = scorecard.scorecards(
+        week=week, projection=projection, ownership=own, cash_rows=cash_rows, edge=edge
+    )
+    return cards, projection, own, edge
+
+
+def close_input(season: int, week: int, *, edge_summary: dict | None, say: Callable[[str], None]) -> dict:
+    """The `close` input (`close_view.payload`) from the files the close leaves. Each piece fails soft."""
+    from dfs import cash_postmortem, close_view, entered, ledger
+    from dfs.contests import history
+
+    contests_dir = _contests_dir()
+    decisions = _csv_rows(contests_dir / "decisions.csv")
+    frame = ledger.load(history.read_log(contests_dir / "contest_log.csv"), through=(season, week))
+    week_rows = frame[(frame["Season"] == season) & (frame["Week"] == week)]
+    net, by_group = close_view.money(week_rows[["group", "net"]].to_dict("records"))
+    fun = frame[(frame["Season"] == season) & (frame["group"] == ledger.FUN)]
+    fun_by_week = [float(v) for _, v in sorted(fun.groupby(fun["Week"].astype(int))["fee"].sum().items())]
+    try:
+        pm = cash_postmortem.postmortem(cash_postmortem.load_week(season, week))
+        decided = close_view.decided(pm.gaps, [e.names for e in pm.entered])
+    except Exception as exc:  # noqa: BLE001
+        say(f"  what decided it: skipped ({type(exc).__name__}: {exc})")
+        decided = []
+    from dfs import week_inputs
+
+    against = "the Default" if week_inputs.load_input("cash_core", season, week) else "the nearest build"
+    vs = close_view.vs_default(_csv_rows(contests_dir / "scorecard.csv"), season, week, against=against)
+    blank = {}
+    for w in range(1, week + 1):
+        rec = entered.load(season, w)
+        if rec is not None:
+            blank[w] = len(rec.blank)
+    cards, projection, own, edge = scorecard_inputs(season, week, edge_summary=edge_summary, say=say)
+    gap = cards[2].get("gap")
+    try:
+        from dfs.config import load_config
+
+        fun_per_week = load_config().ledger.fun_per_week
+    except Exception:  # noqa: BLE001 - no config: no number set
+        fun_per_week = None
+    one = close_view.one_thing(
+        cards,
+        projection_gains=scorecard.projection_gains(projection, week),
+        ownership_gains=scorecard.ownership_gains(own, week)[0],
+        edge_by_week=[
+            float(v["edge"]) for v in (edge or {}).get("weeks", {}).values() if v.get("edge") is not None
+        ],
+        calibration_gap=gap,
+        fun_by_week=fun_by_week,
+        fun_per_week=fun_per_week,
+    )
+    with_standings = len(
+        {r["contest_id"] for r in decisions if int(r["season"]) == season and int(r["week"]) == week}
+    )
+    return close_view.payload(
+        season=season,
+        week=week,
+        cash=close_view.cash_line(decisions, season, week),
+        net=net if len(week_rows) else None,
+        by_group=by_group,
+        decided_rows=decided,
+        vs=vs,
+        avoid=close_view.avoidable(blank, week),
+        percentile=close_view.percentile_by_week(decisions, season, week),
+        cards=cards,
+        edge=edge,
+        calibration_gap=gap,
+        one=one,
+        contests=with_standings,
+        entries=len(week_rows),
+        du_entered=int((week_rows["bucket"] == "Double-up").sum()),
+    )
+
+
+def run(
+    season: int, week: int, *, say: Callable[[str], None] = print, only: tuple[str, ...] | None = None
+) -> bool:
+    """Build and save the inputs for `week` (`only`: those parts of `PARTS`). True when the standings were
+    found (each part may still have been skipped, said through `say`)."""
     from dfs import week_inputs
     from dfs.contests import series as series_mod
     from dfs.sim import contest_retro
 
+    wanted = tuple(only) if only else PARTS
+    unknown = [p for p in wanted if p not in PARTS]
+    if unknown:
+        raise ValueError(f"unknown review parts {unknown}; choose from {', '.join(PARTS)}")
     me = series_mod.MY_USERNAME
     contests = contest_retro.load_real_contests(weeks={week})
     if not contests:
-        say(f"Week {week}: no saved standings with a contest-log row, so nothing to review.")
+        say(
+            f"Week {week}: no saved standings with a contest-log row, so nothing to review against the field."
+        )
+        if "close" in wanted:
+            _close_part(season, week, None, say)
         return False
 
     def part(name: str, fn: Callable[[], None]) -> None:
@@ -204,8 +325,51 @@ def run(season: int, week: int, *, say: Callable[[str], None] = print) -> bool:
         week_inputs.save_input("numbers", body, season=season, week=week)
         say(f"Our numbers: {numbers.headline(body)}")
 
-    part("what won", do_field)
-    part("scorecard", do_card)
-    part("exposure", do_exposure)
-    part("numbers", do_numbers)
+    edge_summary: dict | None = None
+
+    def do_edge() -> None:
+        nonlocal edge_summary
+        from dfs import edge_at_lock
+
+        try:
+            n = edge_at_lock.run(season, week, contests=contests)
+        except edge_at_lock.NoSnapshot as exc:
+            say(f"  edge at lock: Week {week} skipped ({exc}); the tile shows the season's other weeks")
+            n = 0
+        edge_summary = edge_at_lock.summary(edge_at_lock.read(), season, week)
+        week_inputs.save_input("edge_at_lock", edge_summary, season=season, week=week)
+        this = edge_summary.get("this_week")
+        say(
+            f"Edge at lock: {n} rows"
+            + (
+                f"; double-ups {this['edge']:+.1f} pts, beat {this['pct'] * 100:.0f}% of the field"
+                if this
+                else ""
+            )
+        )
+
+    steps = {
+        "field_review": ("what won", do_field),
+        "scorecard": ("scorecard", do_card),
+        "exposure": ("exposure", do_exposure),
+        "numbers": ("numbers", do_numbers),
+        "edge_at_lock": ("edge at lock", do_edge),
+    }
+    for name in PARTS:
+        if name in wanted and name in steps:
+            part(*steps[name])
+    if "close" in wanted:
+        _close_part(season, week, edge_summary, say)
     return True
+
+
+def _close_part(season: int, week: int, edge_summary: dict | None, say: Callable[[str], None]) -> None:
+    from dfs import close_view, week_inputs
+
+    try:
+        body = close_input(season, week, edge_summary=edge_summary, say=say)
+    except Exception as exc:  # noqa: BLE001 - one part never stops the others
+        say(f"  close skipped ({type(exc).__name__}: {exc})")
+        return
+    week_inputs.save_input("close", body, season=season, week=week)
+    say(f"The close: {close_view.headline(body)}")

@@ -51,6 +51,7 @@ VIEWS = (
     # blueprint Phase C2: the three states the clock chooses (`lock_state.state`), ahead of the six
     ("build", "Saturday"),
     ("lock", "Sunday"),
+    ("close", "Tuesday"),  # blueprint Phase D: the Close view
     ("explore", "Board & Explorer"),
     ("usage", "Usage"),
     ("injuries", "Injuries"),
@@ -70,13 +71,14 @@ PLACES = {
     "explorer": "explore everything",
     "overview": "build",
     "lock": "lock everything",
+    "close": "close everything",
     "usage": "usage everything",
     "injuries": "injuries everything",
     "model": "model everything",
     # the rest of the week (the folds): under the Saturday view ("the full sections sit below")
     "rest": "build everything",
     # the run panel and the tools: Saturday and Sunday (late swap and the live sync run from here)
-    "runs": "build lock everything",
+    "runs": "build lock close everything",
 }
 
 

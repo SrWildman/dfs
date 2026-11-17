@@ -480,3 +480,58 @@ def test_a_core_fade_writes_cash_scope_on_never_use_and_the_chalk_decision_does_
     assert "chalk:id-Wr Value" not in keys  # an open-spot player is asked there, not as chalk
     week_actions.decide(edits, inp, key="core:id-Qb Alpha", option="fade", rules_was=edits.read().rules)
     assert sheet.get(ss.TAB, 3, ss.NAME_INDEX) == "Rb Fine, cash: Qb Alpha"
+
+
+# -- blueprint Phase D: every page decision is logged --------------------------------------------------------
+
+
+def test_each_page_decision_becomes_a_decisions_log_record(edits, sheet, tmp_path):
+    from types import SimpleNamespace
+
+    from dfs import decisions_log, week_server
+
+    inp = inp_for(tmp_path, chalk_rows())
+    shown = week_board.decisions(inp, edits.read().rules, {})
+    chalk = next(d for d in shown if d.key == "chalk:id-Wr Value")
+    play = week_actions.decision_record(chalk, inp, option="play")
+    assert play["kind"] == "core_fade" and play["chosen"] == {"id": "id-Wr Value", "name": "Wr Value"}
+    assert play["default_at_time"] == play["chosen"] and play["state"] == "build" and play["row"] == chalk.key
+    fade = week_actions.decision_record(chalk, inp, option="fade")
+    assert fade["chosen"] is None  # a Fade names no one in his place: it settles to nothing
+    assert week_actions.decision_record(chalk, inp, option="undo") is None
+
+    ctx = SimpleNamespace(season=2026, week=9, data_dir=tmp_path)
+    path = tmp_path / "week" / "decisions.jsonl"
+    week_actions.decide(edits, inp, key=chalk.key, option="play", rules_was=edits.read().rules)
+    first, warning = week_server.log_decision(ctx, inp, chalk, {"option": "play"})
+    assert first == "2026-09-0001" and warning == ""
+    undone, _ = week_server.log_decision(ctx, inp, chalk, {"option": "undo"})
+    assert decisions_log.read(2026, 9, path) == [] and undone == "2026-09-0002"
+
+
+def test_a_pivot_and_a_wait_are_logged_against_the_star(edits, sheet, tmp_path):
+    rows = [*slate_rows(), row("Wr Near", "WR", "NE", "NYJ", 8500, 16.0)]
+    inp = inp_for(tmp_path, rows)
+    star = next(d for d in week_board.decisions(inp, {}, {}) if d.kind == "q")
+    pick = week_board.pid(star.pivots[0])
+    rec = week_actions.decision_record(star, inp, option="pivot", pivot=pick)
+    assert rec["kind"] == "pivot" and rec["chosen"]["id"] == pick
+    assert rec["default_at_time"]["id"] == week_board.pid(star.row)
+    assert all(a["id"] != pick for a in rec["alternatives"])
+    wait = week_actions.decision_record(star, inp, option="wait")
+    assert wait["kind"] == "later" and wait["chosen"] == wait["default_at_time"]
+
+
+def test_a_log_that_cannot_be_written_never_fails_the_sheet_write(edits, sheet, tmp_path):
+    from types import SimpleNamespace
+
+    from dfs import week_server
+
+    inp = inp_for(tmp_path, chalk_rows())
+    shown = week_board.decisions(inp, edits.read().rules, {})
+    chalk = next(d for d in shown if d.key == "chalk:id-Wr Value")
+    (tmp_path / "week").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "week" / "decisions.jsonl").mkdir()  # a folder where the file should be
+    ctx = SimpleNamespace(season=2026, week=9, data_dir=tmp_path)
+    decision_id, warning = week_server.log_decision(ctx, inp, chalk, {"option": "play"})
+    assert decision_id == "" and "not recorded in the decisions log" in warning

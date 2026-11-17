@@ -300,3 +300,181 @@ def season_line_from_csv(path: Path, season: int) -> str:
         return ""
     with path.open(newline="") as f:
         return season_line(list(csv.DictReader(f)), season)
+
+
+# -- the four scorecards (blueprint Phase D; the Close view) ---------------------------------------------
+
+PROVEN, NOT_PROVEN, OVERSTATED, NEW = "Proven", "Not proven", "Overstated", "New"
+MIN_WEEKS = 3  # fewer weeks than this: New
+BAR_SE = 2.0  # the registry's bar for one variant: above zero at 2 SE by week
+
+
+def _mean_se(xs: list[float]) -> tuple[float | None, float | None]:
+    if not xs:
+        return None, None
+    m = sum(xs) / len(xs)
+    if len(xs) < 2:
+        return m, None
+    var = sum((x - m) ** 2 for x in xs) / (len(xs) - 1)
+    return m, (var / len(xs)) ** 0.5
+
+
+def _status(gains: list[float]) -> str:
+    """Proven when the mean weekly gain over the baseline is above zero by `BAR_SE` standard errors (weeks as
+    the unit), New under `MIN_WEEKS` weeks, else Not proven."""
+    if len(gains) < MIN_WEEKS:
+        return NEW
+    m, se = _mean_se(gains)
+    return PROVEN if m is not None and se is not None and m > BAR_SE * se else NOT_PROVEN
+
+
+def _gain_text(gains: list[float], unit: str, nd: int) -> str:
+    m, se = _mean_se(gains)
+    if m is None:
+        return "no weeks yet"
+    return f"{m:+.{nd}f}{unit} a week" + (f" (SE {se:.{nd}f})" if se is not None else "")
+
+
+def projection_gains(by_week: list[dict], week: int) -> list[float]:
+    """TFFB's MAE minus CalPts', per scored week up to `week` (positive: CalPts better)."""
+    return [float(r["tffb"]) - float(r["calpts"]) for r in by_week if int(r["week"]) <= week]
+
+
+OWN_BASELINE = {"gpp": "TFFB Own%", "cash": "Double-up curve"}
+
+
+def ownership_gains(scores: list[dict], week: int) -> tuple[dict[str, list[float]], dict[str, tuple]]:
+    """Per format: the baseline's MAE minus ours by week (positive: ours better), and this week's pair."""
+    gains: dict[str, list[float]] = {}
+    this: dict[str, tuple[float, float]] = {}
+    for fmt, b in OWN_BASELINE.items():
+        mae: dict[int, dict[str, float]] = {}
+        for r in scores:
+            if r["Format"] == fmt and int(r["Week"]) <= week and r["Model"] in (b, "Ours"):
+                mae.setdefault(int(r["Week"]), {})[r["Model"]] = float(r["MAE"])
+        weeks = sorted(w for w, m in mae.items() if len(m) == 2)
+        gains[fmt] = [mae[w][b] - mae[w]["Ours"] for w in weeks]
+        if week in weeks:
+            this[fmt] = (mae[week]["Ours"], mae[week][b])
+    return gains, this
+
+
+def projection_card(by_week: list[dict], week: int) -> dict:
+    """CalPts against TFFB, error by week (`numbers.projection_by_week`): the gain is TFFB's MAE minus
+    ours."""
+    gains = projection_gains(by_week, week)
+    this = next((r for r in by_week if int(r["week"]) == week), None)
+    better = sum(g > 0 for g in gains)
+    return {
+        "model": "Projection (CalPts vs TFFB)",
+        "week": f"MAE {this['calpts']:.2f} vs {this['tffb']:.2f}" if this else "not scored yet",
+        "season": _gain_text(gains, " pts", 2),
+        "baseline": f"TFFB: CalPts better {better} of {len(gains)} weeks",
+        "weeks": len(gains),
+        "status": _status(gains),
+    }
+
+
+def ownership_card(scores: list[dict], week: int) -> dict:
+    """Our ownership against its simple baseline (`field_own.score_weeks`): TFFB's Own% for GPP, the
+    double-up curve for cash. The gain is the baseline's MAE minus ours, per week and format; the status is
+    the weaker format's."""
+    base = OWN_BASELINE
+    gains, this = ownership_gains(scores, week)
+    statuses = [_status(gains[f]) for f in base]
+    status = NEW if NEW in statuses else (NOT_PROVEN if NOT_PROVEN in statuses else PROVEN)
+    return {
+        "model": "Ownership (GPP, cash)",
+        "week": "; ".join(
+            f"{f.upper() if f == 'gpp' else f} MAE {o:.3f} vs {b:.3f}" for f, (o, b) in this.items()
+        )
+        or "not scored yet",
+        "season": "; ".join(f"{f.upper() if f == 'gpp' else f} {_gain_text(gains[f], '', 4)}" for f in base),
+        "baseline": "GPP: TFFB's Own%; cash: the double-up curve",
+        "weeks": min(len(g) for g in gains.values()),
+        "status": status,
+    }
+
+
+def calibration_card(rows: list[dict], week: int) -> dict:
+    """The cash chance shown against the cash rate (`data/contests/cash_shown.csv`): Overstated when the shown
+    average is above the share that cashed by `BAR_SE` binomial standard errors, Proven when within them on
+    30+ builds, else Not proven."""
+    usable = [
+        r
+        for r in rows
+        if r.get("shown") not in (None, "") and r.get("cashed") not in (None, "") and int(r["week"]) <= week
+    ]
+    shown = [float(r["shown"]) for r in usable]
+    cashed = [str(r["cashed"]).lower() in ("true", "1") for r in usable]
+    weeks = sorted({int(r["week"]) for r in usable})
+    this = [i for i, r in enumerate(usable) if int(r["week"]) == week]
+    if not usable:
+        return {
+            "model": "Cash % calibration",
+            "week": "no cash builds scored",
+            "season": "",
+            "baseline": "",
+            "weeks": 0,
+            "status": NEW,
+        }
+    s, c = sum(shown) / len(shown), sum(cashed) / len(cashed)
+    se = max((c * (1 - c) / len(cashed)) ** 0.5, 1e-9)
+    gap = s - c
+    if len(weeks) < MIN_WEEKS:
+        status = NEW
+    elif gap > BAR_SE * se:
+        status = OVERSTATED
+    elif abs(gap) <= BAR_SE * se and len(usable) >= 30:
+        status = PROVEN
+    else:
+        status = NOT_PROVEN
+    week_text = (
+        f"shown {sum(shown[i] for i in this) / len(this) * 100:.0f}% vs cashed "
+        f"{sum(cashed[i] for i in this) / len(this) * 100:.0f}%"
+        if this
+        else "no cash builds this week"
+    )
+    return {
+        "model": "Cash % calibration",
+        "week": week_text,
+        "season": f"shown {s * 100:.0f}% vs cashed {c * 100:.0f}% (n={len(usable)})",
+        "baseline": f"gap {gap * 100:+.1f} pts (SE {se * 100:.1f})",
+        "weeks": len(weeks),
+        "status": status,
+        "gap": round(gap, 4),
+    }
+
+
+def edge_card(summary: dict | None) -> dict:
+    """Edge at lock (`edge_at_lock.summary`): his cash lineups against the field's mean on the four-source
+    consensus, by week."""
+    weeks = (summary or {}).get("weeks") or {}
+    edges = [float(v["edge"]) for v in weeks.values() if v.get("edge") is not None]
+    this = (summary or {}).get("this_week")
+    return {
+        "model": "Edge at lock",
+        "week": f"{this['edge']:+.1f} pts, beat {this['pct'] * 100:.0f}% of the field"
+        if this and this.get("edge") is not None
+        else "no standings this week",
+        "season": _gain_text(edges, " pts", 1),
+        "baseline": (
+            "the double-up field's mean on the four-source consensus (above it is not proof it pays: R4)"
+        ),
+        "weeks": len(edges),
+        "status": _status(edges),
+    }
+
+
+def scorecards(
+    *, week: int, projection: list[dict], ownership: list[dict], cash_rows: list[dict], edge: dict | None
+) -> list[dict]:
+    """The Close view's four rows: Projection, Ownership, Calibration, Edge at lock. Each is
+    `{model, week, season, baseline, weeks, status}`, status one of Proven, Not proven, Overstated, New.
+    Pure."""
+    return [
+        projection_card(projection, week),
+        ownership_card(ownership, week),
+        calibration_card(cash_rows, week),
+        edge_card(edge),
+    ]
