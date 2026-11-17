@@ -268,6 +268,7 @@ def test_the_ranking_arithmetic(world):
     assert (t["k"] == t["mates"].str.count(",") + 1).all()
 
 
+@pytest.mark.slow
 def test_the_ranking_is_deterministic_in_the_seed(world):
     a, b = small_rank(world), small_rank(world)
     pd.testing.assert_frame_equal(a.table.drop(columns="mates_i"), b.table.drop(columns="mates_i"))

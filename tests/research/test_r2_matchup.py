@@ -17,6 +17,7 @@ def _sorted(f: pd.DataFrame) -> pd.DataFrame:
     return f.sort_values(["position", "gsis_id", "t"]).reset_index(drop=True)
 
 
+@pytest.mark.slow
 def test_components_use_prior_games_only(matchup_tables):
     base, pos_game, team_game, off_game = matchup_tables
     original = _sorted(r2.matchup_features(base, pos_game, team_game, off_game))
@@ -43,6 +44,7 @@ def test_components_use_prior_games_only(matchup_tables):
     assert not original.loc[after, cols].equals(changed.loc[after, cols])
 
 
+@pytest.mark.slow
 def test_every_variant_column_exists_for_every_position(matchup_tables):
     feats = r2.matchup_features(*matchup_tables)
     for position in r2.POSITIONS:
@@ -52,6 +54,7 @@ def test_every_variant_column_exists_for_every_position(matchup_tables):
                 assert set(cols) <= set(feats.columns), (position, lb, adjusted)
 
 
+@pytest.mark.slow
 def test_schedule_adjustment_subtracts_the_offenses_own_norm(matchup_tables):
     base, pos_game, *_ = matchup_tables
     table = r2.defense_dk_table(pos_game)
@@ -109,6 +112,7 @@ def test_heavy_shrinkage_means_no_effect():
     assert np.abs(fit.weights).max() < 1e-4
 
 
+@pytest.mark.slow
 def test_study_runs_on_pure_noise_and_calls_it_context(matchup_tables):
     feats = r2.matchup_features(*matchup_tables)
     result = r2.run_study(feats)
@@ -123,6 +127,7 @@ def test_study_runs_on_pure_noise_and_calls_it_context(matchup_tables):
         assert len(res["variants"]) == 6  # 3 lookbacks x raw / schedule-adjusted
 
 
+@pytest.mark.slow
 def test_the_study_fits_only_on_fit_seasons(matchup_tables):
     feats = r2.matchup_features(*matchup_tables)
     res = r2.study_position(feats, "WR", "resid")

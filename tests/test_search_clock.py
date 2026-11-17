@@ -45,6 +45,7 @@ def test_a_search_is_cut_by_its_budget_at_the_same_node_every_time():
     assert names(first) == names(second)
 
 
+@pytest.mark.slow
 def test_the_same_slate_gives_the_same_builds_when_the_search_is_cut_short():
     edge = syn.slate(teams=6, seed=3)
 

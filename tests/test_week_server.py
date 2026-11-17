@@ -1193,6 +1193,7 @@ def test_a_button_job_holds_the_lock_and_the_chats_command_is_told_so(monkeypatc
         os.close(fd)
 
 
+@pytest.mark.slow
 def test_the_lock_file_is_gone_after_a_job_that_held_it(make, tmp_path):
     """A run button's job is a real process that takes the run lock (here on a tmp data dir); once it ends,
     normally or by failing, no `.run.lock` is left naming it (Week 9 left `dfs pool add`, pid 67700)."""

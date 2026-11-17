@@ -87,6 +87,7 @@ def _serve_everything(httpx_mock):
     httpx_mock.add_response(url=re.compile(r".*\.parquet$"), content=_parquet(), is_reusable=True)
 
 
+@pytest.mark.slow
 def test_completed_seasons_are_fetched_once_and_the_current_season_every_time(httpx_mock, monkeypatch):
     monkeypatch.setattr(data, "FIRST_SEASON", 2023)
     _serve_everything(httpx_mock)

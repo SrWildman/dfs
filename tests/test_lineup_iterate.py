@@ -21,6 +21,9 @@ from dfs.late_swap_search import edge_players  # noqa: E402
 from dfs.models import ROSTER_SLOTS  # noqa: E402
 from dfs.sim_inputs import build_specs  # noqa: E402
 
+# Runs the real lineup search or a long study: a bare `pytest` leaves the file out, `--full` runs it.
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture(scope="module")
 def edge():

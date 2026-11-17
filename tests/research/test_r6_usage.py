@@ -227,6 +227,7 @@ def test_the_stronger_of_two_signals_flagging_the_same_players_survives():
 # --------------------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_a_planted_effect_is_kept_in_both_periods_and_in_the_matched_residual(planted_frame):
     res = R.run_study(planted_frame, n_shuffles=2, seed=1)
     rec = {r["id"]: r for r in res["signals"]}["tgt_pg|TE|change_down"]
@@ -237,6 +238,7 @@ def test_a_planted_effect_is_kept_in_both_periods_and_in_the_matched_residual(pl
     assert "tgt_pg|TE|change_down" in res["keeps"]
 
 
+@pytest.mark.slow
 def test_pure_noise_keeps_few_signals_and_the_shuffle_baseline_says_how_few(noise_frame):
     res = R.run_study(noise_frame, n_shuffles=6, seed=7)
     n_specs = len(res["signals"])
@@ -260,6 +262,7 @@ def test_permute_within_only_moves_values_inside_their_group():
     assert not np.array_equal(out, values)
 
 
+@pytest.mark.slow
 def test_shuffle_groups_are_position_season_week_never_across_seasons_or_weeks(noise_frame, monkeypatch):
     seen = {}
     real = R.permute_within
@@ -282,6 +285,7 @@ def test_shuffle_groups_are_position_season_week_never_across_seasons_or_weeks(n
     assert (pd.crosstab(seen["groups"], labels.to_numpy()) > 0).sum(axis=1).eq(1).all()
 
 
+@pytest.mark.slow
 def test_the_shuffle_baseline_is_deterministic_under_a_seed(noise_frame):
     specs = R.build_specs(noise_frame)[:12]
     a = R.shuffle_baseline(noise_frame, specs, n_shuffles=5, seed=11)
@@ -291,6 +295,7 @@ def test_the_shuffle_baseline_is_deterministic_under_a_seed(noise_frame):
     assert a["per_spec_keep_rate"] != c["per_spec_keep_rate"] or a["brief_rule"] != c["brief_rule"]
 
 
+@pytest.mark.slow
 def test_the_shuffle_keeps_the_flags_and_severs_only_their_link_to_the_outcome(planted_frame):
     """On data with a planted effect the shuffled keep rate for that spec collapses toward chance."""
     specs = [s for s in R.build_specs(planted_frame) if s.id == "tgt_pg|TE|change_down"]

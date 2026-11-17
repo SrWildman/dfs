@@ -95,6 +95,7 @@ def test_the_cost_estimate_is_markets_times_games_in_one_region():
     assert O.estimate_cost(13) == 13 * 6 == 78 and "player_pass_interceptions" not in O.PULL_MARKETS
 
 
+@pytest.mark.slow
 def test_a_pull_reads_each_game_keeps_the_raw_json_records_credits_and_scores_the_players(
     httpx_mock, isolated
 ):
@@ -219,6 +220,7 @@ def test_a_forced_or_early_test_pull_does_not_use_up_the_weeks_automatic_pull(cr
     assert O.auto_pulled(SEASON, WEEK) is None and O.full_sync_decision(SAT, SEASON, WEEK)[0] is True
 
 
+@pytest.mark.slow
 def test_a_pull_records_its_kind_so_the_next_full_sync_knows(httpx_mock, isolated):
     sample = json.loads(SAMPLE.read_text())
     mock_week(httpx_mock, events=[event(sample["id"], sample["commence_time"])], odds_body=sample)
@@ -359,6 +361,7 @@ def test_live_props_with_a_change_runs_before_edge_for_those_teams_only(monkeypa
     assert names.index("odds_props") == names.index("edge") - 1 and ctx.props_teams == frozenset({"HOU"})
 
 
+@pytest.mark.slow
 def test_a_refresh_requests_only_the_changed_teams_games_and_keeps_the_others_prices(
     httpx_mock, isolated, monkeypatch
 ):

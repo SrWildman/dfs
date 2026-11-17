@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass
 
+import pytest
+
 from dfs import compare_card, derived, doctor, player_card
 from dfs import sheet_dk_upload as dku
 from dfs import sheet_literal_lookups as sll
@@ -536,6 +538,7 @@ def test_run_doctor_flags_a_cash_gpp_marker_that_is_behind_the_lineups_protectio
     assert len(lineups_unprotected_ranges()) == 2 * len(LINEUPS_NAME_BLOCKS)
 
 
+@pytest.mark.slow
 def test_run_doctor_flags_the_suggested_lock_column_and_decision_cells_behind_the_protection():
     """The lock ticks and the decision cells (the Name column: rules box and typed names too) are typed
     cells."""

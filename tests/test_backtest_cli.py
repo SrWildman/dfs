@@ -1,5 +1,6 @@
 """`dfs backtest` on the command line: the argument errors, and one run with the backtest itself stubbed."""
 
+import pytest
 from cli_text import strip_ansi
 from test_backtest import result
 from typer.testing import CliRunner
@@ -46,6 +47,7 @@ def test_weeks_must_be_numbers():
     assert r.exit_code == 1
 
 
+@pytest.mark.slow
 def test_a_run_prints_the_summary_and_writes_the_report(tmp_path, monkeypatch):
     seen = {}
 

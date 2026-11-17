@@ -72,6 +72,7 @@ def test_fit_counts_each_week_once_and_leaves_one_out():
     assert du_line.fit([]) == du_line.DuLineModel()
 
 
+@pytest.mark.slow
 def test_the_calibrated_offset_makes_the_other_weeks_double_up_entries_add_up():
     import pandas as pd
 

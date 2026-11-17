@@ -58,6 +58,7 @@ def test_phi_recovers_a_poisson_and_a_known_overdispersion():
     assert phi == pytest.approx(25.0, rel=0.2)  # gamma shape level/25, scale 25: variance = 25 * mean
 
 
+@pytest.mark.slow
 def test_survival_calibration_is_calibrated_on_data_from_the_assumed_family():
     history = _history(
         n_players=300, n_games=14, mean_level=60.0, stat_column="receiving_yards", draw="gamma"
@@ -68,6 +69,7 @@ def test_survival_calibration_is_calibrated_on_data_from_the_assumed_family():
     assert (wr["Predicted"] - wr["Realised"]).abs().max() < 0.08
 
 
+@pytest.mark.slow
 def test_mean_from_line_backtest_prefers_the_modelled_mean_on_skewed_data():
     history = _history(
         n_players=400, n_games=16, mean_level=60.0, stat_column="receiving_yards", draw="gamma"

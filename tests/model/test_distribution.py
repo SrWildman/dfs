@@ -25,6 +25,7 @@ def tables() -> pd.DataFrame:
     return pd.concat([D.build_tables(_synthetic_oof(), pos) for pos in POSITIONS], ignore_index=True)
 
 
+@pytest.mark.slow
 def test_every_table_has_monotone_quantiles_and_valid_zero_share(tables):
     ratios = tables[D.LEVEL_COLUMNS].to_numpy()
     assert (np.diff(ratios, axis=1) >= 0).all()
@@ -220,6 +221,7 @@ def _engine_mean(position: str, projection: float, tables: pd.DataFrame) -> floa
     return float(np.trapezoid(D.prob_at_least_many(position, projection, t, tables=tables), t))
 
 
+@pytest.mark.slow
 def test_the_smooth_top_end_does_not_overstate_the_best_players_but_the_buckets_did():
     """The regression this model exists for: reusing the top bucket's ratios however high the projection
     overstated the engine's mean past that bucket (by 10%+ here); the smooth fit follows the saturation."""
@@ -232,6 +234,7 @@ def test_the_smooth_top_end_does_not_overstate_the_best_players_but_the_buckets_
     assert _engine_mean("WR", 31.0, buckets) > 1.10 * 24.0 * np.tanh(31.0 / 24.0)  # the test would catch it
 
 
+@pytest.mark.slow
 def test_the_smooth_fit_is_calibrated_across_the_range():
     oof = _saturating_oof()
     tables = D.build_tables(oof, "WR")
@@ -256,12 +259,14 @@ def test_p_zero_is_the_bucket_share_exactly_as_before(tables):
     assert mid["p_zero"] == pytest.approx(expected)
 
 
+@pytest.mark.slow
 def test_a_ratio_quantile_is_never_below_zero_when_no_game_scored_below_zero():
     oof = _saturating_oof()
     oof.loc[oof.sample(frac=0.1, random_state=0).index, "dk"] = 0.0
     assert (D.build_tables(oof, "WR")[D.LEVEL_COLUMNS].to_numpy() >= 0).all()
 
 
+@pytest.mark.slow
 def test_a_level_that_really_goes_negative_is_allowed_to():
     oof = _saturating_oof()
     oof.loc[oof.sample(frac=0.05, random_state=0).index, "dk"] = -3.0

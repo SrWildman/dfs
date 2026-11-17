@@ -354,6 +354,7 @@ def _full_pool(rng):
     return players
 
 
+@pytest.mark.slow
 def test_a_full_refill_with_nine_open_slots_finishes_inside_two_seconds():
     pool = _full_pool(random.Random(0))
     state = state_of({}, {k: None for k in IDX})
@@ -365,6 +366,7 @@ def test_a_full_refill_with_nine_open_slots_finishes_inside_two_seconds():
     assert elapsed < 2.0, f"9-slot re-fill took {elapsed:.2f}s"
 
 
+@pytest.mark.slow
 def test_the_whole_suggest_pass_for_nine_open_slots_stays_fast_too():
     pool = _full_pool(random.Random(6))
     by_pos = {pos: [p for p in pool if p.position == pos] for pos in ("QB", "RB", "WR", "TE", "DST")}

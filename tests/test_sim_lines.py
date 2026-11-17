@@ -244,6 +244,7 @@ def _key(report):
     return [(b.title, [p.name for p in b.players], b.p_cash, b.p_gpp) for b in report.builds]
 
 
+@pytest.mark.slow
 def test_cash_builds_rank_by_the_new_cash_percent_and_gpp_builds_by_top_1_percent(
     relative_report, fixed_report, owned_edge, field_for
 ):
@@ -271,10 +272,12 @@ def test_the_exposure_diversity_and_stack_rules_are_unchanged(relative_report):
         assert all(len(x - y) >= minimum for i, x in enumerate(picks) for y in picks[:i])
 
 
+@pytest.mark.slow
 def test_the_builds_are_deterministic_with_a_field(owned_edge, field_for, relative_report):
     assert _key(_suggest(owned_edge, field=field_for)) == _key(relative_report)
 
 
+@pytest.mark.slow
 def test_without_a_field_the_builds_are_what_they_were(owned_edge, fixed_report):
     # `field=None` is `--fixed-lines` (and the blank-ownership fallback): the old call, the old builds
     assert _key(_suggest(owned_edge, field=None)) == _key(fixed_report)
@@ -322,6 +325,7 @@ class _Client:
         return rows
 
 
+@pytest.mark.slow
 def test_suggest_passes_the_flag_the_field_and_the_lines_text_through(monkeypatch, capsys, tmp_path):
     from dfs import suggest_state
 

@@ -78,6 +78,7 @@ def test_chop_plan_bid_range():
     assert plan.bid(worth=0, price=200).startswith("no bid")
 
 
+@pytest.mark.slow
 def test_lopsided_ideas_are_hidden_unless_asked(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)

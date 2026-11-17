@@ -359,6 +359,7 @@ def test_projection_at_reads_the_latest_snapshot_at_or_before_the_stamp():
     assert signals.projection_at("Wr Two", "DEN", None, snaps) is None
 
 
+@pytest.mark.slow
 def test_priced_in_compares_now_with_the_snapshot_before_the_designation():
     dk = [("20261001T120000Z", _dk(np.nan, "Rb One")), ("20261003T120000Z", _dk("OUT", "Rb One"))]
     gain = rc.carry_shares("RB1").next_up * 8.0  # Rb Two's gained xFP/G; priced in = 70% of it

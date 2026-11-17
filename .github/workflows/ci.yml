@@ -10,10 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
-      - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: pytest -q
+          enable-cache: true
+      # The versions in uv.lock, not whatever pip picks that day (typer 0.29 broke CI on Nov 11).
+      # `--locked` never re-resolves and fails when pyproject.toml and uv.lock disagree (run `uv lock`).
+      - run: uv sync --locked --extra dev --python 3.11
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # The FULL suite (the slow builder tests too), on every worker the runner has, a module to a worker.
+      - run: uv run pytest --full -n auto --dist loadfile -q

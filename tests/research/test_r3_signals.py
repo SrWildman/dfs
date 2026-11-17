@@ -212,6 +212,7 @@ def _signal_frame(n=40000, seed=3) -> pd.DataFrame:
     return f
 
 
+@pytest.mark.slow
 def test_a_usage_metric_is_judged_among_the_positions_it_applies_to():
     signals = r3.run_study(_signal_frame())
     res = signals["USAGE_up"]["per_metric"]["carry_share"]

@@ -97,6 +97,7 @@ def tiny_row(res):
     return rows[(rows["contest_id"] == "900000001") & (rows["group"] == "all")].iloc[0]
 
 
+@pytest.mark.slow
 def test_the_frames_hook_builds_each_contests_week_and_reports_the_snapshot(tmp_path):
     asked = []
 
@@ -111,12 +112,14 @@ def test_the_frames_hook_builds_each_contests_week_and_reports_the_snapshot(tmp_
     assert any("Week 6 2025: fake_snapshot.csv" in line for line in analysis.summary_lines(res))
 
 
+@pytest.mark.slow
 def test_a_week_with_no_frame_is_a_warning_and_blank_measures_never_a_guess(tmp_path):
     res = run_fixture(tmp_path, frames=lambda season, week: (None, "no snapshot"))
     assert pd.isna(tiny_row(res)["avg_unspent"])
     assert any("no players frame for Week 6 2025: no snapshot" in w for w in res.warnings)
 
 
+@pytest.mark.slow
 def test_a_supplied_frame_with_week_columns_is_cut_to_each_contests_week(tmp_path):
     players = pd.read_csv(FIXTURES / "players_week.csv")
     right = players.assign(Season=2025, Week=6)

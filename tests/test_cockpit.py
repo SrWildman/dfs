@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pandas as pd
+import pytest
 
 from dfs import cockpit
 from dfs import late_swap_store as lss
@@ -385,6 +386,7 @@ def test_a_long_overuse_list_is_cut_with_a_count_of_the_rest():
     assert rows[-1][2] == "and 4 more players in over half of them"
 
 
+@pytest.mark.slow
 def test_exposure_divides_by_the_built_lineups_so_nine_of_fifteen_is_sixty_percent_not_150():
     # Week 6: Exposure's typed divisor stayed at 6 while 15 lineups were built, so a player in 9 read 150%.
     other = [f"Other {i}" for i in range(9)]

@@ -358,6 +358,7 @@ def test_the_protection_list_and_doctor_know_the_tab():
     assert json.dumps(stacks_tab.STACKS_TAB) == '"Stacks"'
 
 
+@pytest.mark.slow
 def test_compute_runs_the_whole_pipeline_on_a_synthetic_edge_frame(monkeypatch, tmp_path):
     from test_stacks import RATES, TEAMS, make_slate
 

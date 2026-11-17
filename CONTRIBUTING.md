@@ -3,21 +3,31 @@
 ## Setup
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --locked --extra dev     # the versions in uv.lock, which is what CI installs (or: python3 -m venv .venv &&
+                                 # pip install -e ".[dev]", which takes whatever versions pip picks)
 ```
 
 ```bash
-pytest -q          # run the test suite
-ruff check .        # lint
-ruff format .       # format
+pytest -n 6 --dist loadfile        # the editing run: skips the slow and browser tests (a few minutes at most with workers)
+pytest tests/test_plays.py         # naming a file runs ALL of it, slow tests included
+pytest --full -n 6 --dist loadfile # EVERYTHING: required before every PR (CI runs it too, with -n auto)
+ruff check .                       # lint
+ruff format .                      # format
 ```
 
-CI runs all three on every push/PR (`.github/workflows/ci.yml`). None of
+Tests marked `slow` (about a second or more), `browser` (Playwright) or `exhaustive` (the long version of a property
+a shorter test already checks; `--exhaustive`) are left out of a bare `pytest`, which prints how many. A new test that
+takes over 3 s fails the default run until you mark it `@pytest.mark.slow` (or a whole file with
+`pytestmark = pytest.mark.slow`) or make it faster. The default run is for editing: **a green default run says
+nothing about the lineup builder**, and `--full` is the one that counts. `--dist loadfile` matters: it keeps a
+module's expensive fixtures on one worker. Change a dependency in `pyproject.toml`, then `uv lock`, and commit
+`uv.lock` with it.
+
+CI runs the lock-file install, `ruff check`, `ruff format --check` and `pytest --full` on every push/PR
+(`.github/workflows/ci.yml`). None of
 the tests need real credentials, a real sheet, or a browser -- they mock
-HTTP (`pytest-httpx`) and the Sheets client, and nothing in `tests/`
-touches Playwright at all. If a test you're adding needs any of those,
+HTTP (`pytest-httpx`) and the Sheets client, and the Playwright tests (`browser`) skip themselves where Chromium is not
+installed. If a test you're adding needs any of those,
 that's a sign the logic under test should be split into a pure function
 first (see "Sources" below).
 

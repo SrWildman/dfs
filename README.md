@@ -174,7 +174,8 @@ one line per tab, and where to find the docs above.
 ## Development
 
 ```bash
-pytest              # offline; network sources are mocked, Sheets calls are faked
+pytest -n 6 --dist loadfile          # the editing run (skips slow tests); offline, sources mocked, Sheets faked
+pytest --full -n 6 --dist loadfile   # everything: required before a PR
 ruff check .
 ruff format --check .
 ```

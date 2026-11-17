@@ -21,6 +21,7 @@ def test_ppf_inverts_cdf_above_the_atom(position):
     np.testing.assert_allclose(back[keep], pts[keep], rtol=1e-6, atol=1e-6)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("position", POSITIONS)
 def test_u_is_uniform_when_actuals_come_from_the_distribution(position):
     n = 20000
@@ -52,6 +53,7 @@ def test_a_simulated_zero_is_a_zero():
     assert marginal.ppf(m, 0, np.array([0.99]))[0] > 5.0
 
 
+@pytest.mark.slow
 def test_normal_scores_of_the_engines_own_draws_are_standard_normal():
     n = 30000
     m = marginal.marginals("RB", [11.0] * n)

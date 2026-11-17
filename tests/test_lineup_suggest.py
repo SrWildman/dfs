@@ -548,7 +548,10 @@ def test_an_empty_pool_builds_nothing_and_says_nothing_dishonest(edge):
     assert report.builds == [] and report.candidates == {"cash": 0, "gpp": 0}
 
 
-@pytest.mark.parametrize("seed", [0, 1000, 1019, 1021, 1033])
+@pytest.mark.parametrize(
+    "seed",  # two seeds show the seed does not matter; the other three run under `--exhaustive`
+    [0, 1000, *(pytest.param(s, marks=pytest.mark.exhaustive) for s in (1019, 1021, 1033))],
+)
 def test_the_gpp_builds_are_found_whatever_the_simulation_draws_turn_out_to_be(edge, seed):
     """The ranking of this slate's stacked lineups is almost all ties (0-5 of 1,500 draws reach the target),
     so a different realisation of the draws reorders it, and that used to decide whether the last build was

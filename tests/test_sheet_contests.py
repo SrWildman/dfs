@@ -45,6 +45,7 @@ def test_an_empty_log_still_builds_every_section_with_a_plain_sentence():
     assert "No Classic entries logged this season yet." in _text(layout)
 
 
+@pytest.mark.slow
 def test_sections_come_in_the_decided_order(tables):
     layout = sc.build_layout(tables, SEASON)
     titles = [layout.rows[r - 1][0] for r in layout.section_rows]

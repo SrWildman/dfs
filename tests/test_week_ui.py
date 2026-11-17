@@ -94,6 +94,7 @@ def test_the_board_repeats_its_header_at_each_position_group(tmp_path):
     assert "table.board tr.ph th{position:sticky;top:0" in week_page.CSS
 
 
+@pytest.mark.slow
 def test_sticky_headers_live_in_each_tables_scroll_box_and_names_stick_sideways(tmp_path):
     css = week_page.CSS
     assert ".scroll{overflow:auto;max-height:80vh}" in css  # the scroll box the header sticks in
@@ -130,6 +131,7 @@ def test_every_explorer_lens_and_the_drawer_carry_the_game():
     assert "'spread ' +" in js and "'total ' +" in js and "'implied ' +" in js  # the drawer's game line
 
 
+@pytest.mark.slow
 def test_explorer_lens_columns_are_not_repeated(tmp_path):
     inp, _ = full_page(tmp_path)
     data = json.loads(week_explorer.payload_json(week_explorer.payload(inp, week_top.wb.board(inp), {})))
@@ -344,6 +346,7 @@ def test_the_game_view_has_a_pool_control_on_every_row_and_moves_between_games()
 # -- item 11 is in test_week_plays (caps, ranking, chalk core) -----------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_explorer_role_filter_includes_chalk_core(tmp_path):
     inp, _ = full_page(tmp_path)
     data = week_explorer.payload(inp, week_top.wb.board(inp), {})
@@ -428,6 +431,7 @@ def test_table_requires_its_how_note():
     assert 'data-how="Counted."' in out and 'tabindex="0"' in out
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("served", [False, True])
 def test_every_table_and_chart_on_the_page_has_a_how_note(tmp_path, served):
     calibration = {"fit": {"cash": {"scale": 1.0, "exponent": 0.5}, "gpp": {"scale": 1e5, "exponent": 0.5}},
@@ -493,6 +497,7 @@ def test_the_colour_kinds_follow_the_compare_tab_and_leave_neutral_columns_plain
     assert "window.dfsShade" in week_shade.JS and '"CalPts": "good"' in week_shade.JS
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("served", [False, True])
 def test_every_table_and_chart_has_a_caption_with_its_data_date(tmp_path, served):
     synced = {"tffb": {"synced_at": "2026-11-04T15:00:00+00:00"}}

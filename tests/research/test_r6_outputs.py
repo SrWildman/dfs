@@ -215,6 +215,7 @@ def synthetic_outputs(tmp_path_factory):
     return out, result
 
 
+@pytest.mark.slow
 def test_freshly_written_usage_signals_match_the_schema(synthetic_outputs):
     out, _ = synthetic_outputs
     check_usage_signals(json.loads((out / "usage_signals.json").read_text()), full=False)

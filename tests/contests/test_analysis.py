@@ -34,6 +34,7 @@ def run(tmp_path, **kw):
     )
 
 
+@pytest.mark.slow
 def test_the_whole_run_on_the_fixtures(tmp_path):
     res = run(tmp_path)
     assert [m.added for _, m in res.merges] == [31, 1] and len(res.log) == 32
@@ -58,12 +59,14 @@ def test_the_whole_run_on_the_fixtures(tmp_path):
     assert any("no history row" in w for w in res.warnings)
 
 
+@pytest.mark.slow
 def test_empty_downloads_are_reported_not_fatal(tmp_path):
     res = run(tmp_path)
     assert len(res.scan.empty) == 2
     assert any("empty: " in line for line in analysis.summary_lines(res))
 
 
+@pytest.mark.slow
 def test_the_series_table_and_the_class_cross_check(tmp_path):
     res = run(tmp_path)
     table = res.series_table.set_index(["format", "series"])
@@ -73,6 +76,7 @@ def test_the_series_table_and_the_class_cross_check(tmp_path):
     assert res.disagreements.empty  # every fixture row agrees with the payout-ratio band
 
 
+@pytest.mark.slow
 def test_idempotent_rerun_changes_nothing(tmp_path):
     first = run(tmp_path)
     log_bytes = (tmp_path / "out" / analysis.LOG_NAME).read_bytes()
@@ -85,6 +89,7 @@ def test_idempotent_rerun_changes_nothing(tmp_path):
     assert [m.added for _, m in again.merges] == [0, 0]
 
 
+@pytest.mark.slow
 def test_write_produces_every_csv_and_nothing_else(tmp_path):
     res = run(tmp_path)
     written = analysis.write(res)
@@ -120,6 +125,7 @@ def test_write_produces_every_csv_and_nothing_else(tmp_path):
     )
 
 
+@pytest.mark.slow
 def test_the_slate_index_comes_from_the_committed_backfill_for_past_seasons(tmp_path):
     res = run(tmp_path)
     got = res.index.set_index(["season", "week"])["index"]
@@ -129,6 +135,7 @@ def test_the_slate_index_comes_from_the_committed_backfill_for_past_seasons(tmp_
     assert 2026 not in set(res.index["season"])
 
 
+@pytest.mark.slow
 def test_a_season_outside_the_backfill_is_fetched_through_the_given_loader(tmp_path):
     seen = []
 
@@ -150,6 +157,7 @@ def test_a_season_outside_the_backfill_is_fetched_through_the_given_loader(tmp_p
     assert not any("unavailable" in w for w in res.warnings)
 
 
+@pytest.mark.slow
 def test_slate_index_none_leaves_the_index_out_and_never_fetches(tmp_path):
     res = run(tmp_path, index_candidate="none")
     assert res.index.empty
@@ -157,6 +165,7 @@ def test_slate_index_none_leaves_the_index_out_and_never_fetches(tmp_path):
     assert not any("unavailable" in w for w in res.warnings)
 
 
+@pytest.mark.slow
 def test_a_supplied_index_file_wins(tmp_path):
     supplied = tmp_path / "idx.csv"
     pd.DataFrame({"season": [2025], "week": [6], "index": [2.0]}).to_csv(supplied, index=False)
@@ -164,6 +173,7 @@ def test_a_supplied_index_file_wins(tmp_path):
     assert res.index.to_dict("list") == {"season": [2025], "week": [6], "index": [2.0]}
 
 
+@pytest.mark.slow
 def test_the_previous_runs_index_is_the_fallback_for_a_season_that_cannot_be_fetched(tmp_path):
     first = run(
         tmp_path,
@@ -191,6 +201,7 @@ def invoke(*args):
     return CliRunner().invoke(app, ["contests", "analyze", *args])
 
 
+@pytest.mark.slow
 def test_the_command_runs_writes_csvs_and_prints_a_summary(tmp_path):
     out = tmp_path / "out"
     result = invoke(
@@ -298,6 +309,7 @@ def test_a_partial_standings_export_is_kept_out_of_the_fit(tmp_path):
     assert (res.toughness.observations["kind"] == "profile").sum() == 0
 
 
+@pytest.mark.slow
 def test_a_complete_standings_export_does_enter_the_fit(tmp_path):
     folder = _standings_copy(tmp_path, lambda t: t)
     res = analysis.run(
@@ -324,6 +336,7 @@ def test_a_bad_slate_index_file_is_a_clear_failure_not_a_traceback(tmp_path):
     }
 
 
+@pytest.mark.slow
 def test_importing_the_command_does_not_import_the_analysis_stack():
     """The group is registered on every `dfs` start; the unfinished command must stay lazy."""
     import subprocess
@@ -333,6 +346,7 @@ def test_importing_the_command_does_not_import_the_analysis_stack():
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
 
 
+@pytest.mark.slow
 def test_what_wins_looks_only_at_classic_gpps(tmp_path, monkeypatch):
     """The top-1% comparison is for GPP formats: a Double Up's top 1% is not a winners' lineup."""
     seen = []

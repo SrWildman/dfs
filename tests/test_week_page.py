@@ -711,6 +711,7 @@ def test_generate_writes_the_page_and_only_opens_it_when_asked(tmp_path, monkeyp
     assert opened == [path.resolve().as_uri()]
 
 
+@pytest.mark.slow
 def test_the_command_builds_the_page_and_opens_it_by_default(monkeypatch):
     opened = []
     monkeypatch.setattr(week_page.webbrowser, "open", lambda url: opened.append(url))

@@ -5,6 +5,9 @@ import pytest
 from dfs.sim import correlation as C
 from dfs.sim.roles import ROLES
 
+# Runs the real lineup search or a long study: a bare `pytest` leaves the file out, `--full` runs it.
+pytestmark = pytest.mark.slow
+
 
 def test_shrink_pulls_toward_zero_by_the_prior_weight():
     # n - 3 = 200 observations against a prior worth 200: exactly halfway in Fisher-z space

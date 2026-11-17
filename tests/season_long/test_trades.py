@@ -10,6 +10,7 @@ from dfs.season_long import trade as tr
 from . import synthetic as syn
 
 
+@pytest.mark.slow
 def test_finder_trades_sams_wr_surplus_for_the_rb_team_needs(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -25,6 +26,7 @@ def test_finder_trades_sams_wr_surplus_for_the_rb_team_needs(monkeypatch):
     )
 
 
+@pytest.mark.slow
 def test_finder_filters(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -39,6 +41,7 @@ def test_finder_filters(monkeypatch):
     assert rb and all(any(p.startswith("rb") for p in i.analysis.get.players) for i in rb)
 
 
+@pytest.mark.slow
 def test_market_unfair_trade_is_dropped_or_sweetened_with_faab(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -130,6 +133,7 @@ def test_shapes():
         fd.parse_shapes("3-1")
 
 
+@pytest.mark.slow
 def test_a_player_list_sorts_into_sells_and_buys_per_league(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -142,6 +146,7 @@ def test_a_player_list_sorts_into_sells_and_buys_per_league(monkeypatch):
     assert fd.find_trades(v, ev, syn.market(v), fd.Filters(players=["Nobody Here"])) == []
 
 
+@pytest.mark.slow
 def test_a_sell_list_skips_names_not_on_the_roster_and_never_widens_to_everything(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -152,6 +157,7 @@ def test_a_sell_list_skips_names_not_on_the_roster_and_never_widens_to_everythin
     assert fd.find_trades(v, ev, syn.market(v), fd.Filters(give=["Somebody Else"])) == []
 
 
+@pytest.mark.slow
 def test_targets_are_the_buy_list_or_the_weakest_spot(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -165,6 +171,7 @@ def test_targets_are_the_buy_list_or_the_weakest_spot(monkeypatch):
     assert notes[0].startswith("targets: your buy list (WR5) and your weakest spot, RB")
 
 
+@pytest.mark.slow
 def test_list_names_never_match_by_last_name_alone(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -177,6 +184,7 @@ def test_list_names_never_match_by_last_name_alone(monkeypatch):
     assert "your buy list (none here)" in notes[0]
 
 
+@pytest.mark.slow
 def test_the_weakest_spot_skips_streamed_slots(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -186,6 +194,7 @@ def test_the_weakest_spot_skips_streamed_slots(monkeypatch):
     assert notes[0].endswith("your weakest spot, RB (-2.0/wk)")
 
 
+@pytest.mark.slow
 def test_targeted_ideas_are_added_to_the_standard_ones_not_instead(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)
@@ -201,6 +210,7 @@ def test_targeted_ideas_are_added_to_the_standard_ones_not_instead(monkeypatch):
     assert any(i.target.startswith(("buy list: WR5", "weakest spot: RB")) for i in aimed)
 
 
+@pytest.mark.slow
 def test_every_buy_list_name_keeps_its_best_ideas(monkeypatch):
     v = syn.view()
     ev = syn.evaluator(v, monkeypatch)

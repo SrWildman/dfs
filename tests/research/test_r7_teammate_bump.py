@@ -3,6 +3,7 @@ effects (the nflverse-driven builder is covered by R1's tests; the residuals com
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from dfs.research import r7_teammate_bump as r7
 
@@ -114,6 +115,7 @@ def _resid(sp, bump=3.0):
     return out.assign(resid=out["dk"] - out["um"])
 
 
+@pytest.mark.slow
 def test_event_rows_label_the_teammates_of_the_one_regular_out_and_leave_games_with_two_out_alone():
     sp, games = _league(missing={("AAA", "WR1", 6)})
     rows = r7.event_rows(sp, games, _resid(sp))

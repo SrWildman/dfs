@@ -44,6 +44,7 @@ def test_a_stage_that_raises_still_leaves_a_failed_result(dirs, monkeypatch):
     assert result.status == "failed" and "no standings" in result.verdict
 
 
+@pytest.mark.slow
 def test_stages_run_side_by_side_and_a_late_one_is_stopped_at_the_deadline(dirs, monkeypatch):
     def command(name, season, week, out):
         if name == "calls_flashback":  # never finishes on its own
@@ -69,6 +70,7 @@ def test_stages_run_side_by_side_and_a_late_one_is_stopped_at_the_deadline(dirs,
     assert [r.key for r in results] == ["stacks", "calls_flashback", "calls"]  # stage order, not finish order
 
 
+@pytest.mark.slow
 def test_a_stage_that_dies_without_a_result_is_reported_not_raised(dirs, monkeypatch):
     monkeypatch.setattr(
         close_research,

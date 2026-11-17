@@ -71,6 +71,7 @@ def test_the_flag_is_off_by_default_and_a_block_puts_it_back():
     assert be.solver() == "search"  # a bad name changes nothing
 
 
+@pytest.mark.slow
 def test_with_the_flag_off_the_search_is_todays_call_for_call(pool, cap, monkeypatch):
     seen = []
     monkeypatch.setattr(be, "budgeted_top_lineups", lambda *a, **k: seen.append((a, k)) or ([], False))
@@ -112,6 +113,7 @@ def test_the_bring_back_cases_hold_every_choice_exactly_once():
                 assert len(homes) == (1 if size >= need else 0)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("shape", SHAPES)
 def test_the_exact_search_is_the_exhaustive_answer_for_each_shape(pool, universe, cap, shape):
     for n in range(4):
@@ -124,6 +126,7 @@ def test_the_exact_search_is_the_exhaustive_answer_for_each_shape(pool, universe
             assert len({frozenset(p.name for p in lu) for lu in lineups}) == len(lineups)  # none twice
 
 
+@pytest.mark.slow
 def test_the_contrarian_cut_still_prunes_inside_the_cases(pool, universe, cap):
     qb = small.qb_of(pool)
     own = {p.name: 0.02 + 0.03 * (i % 7) for i, p in enumerate(pool)}
@@ -140,6 +143,7 @@ def test_the_contrarian_cut_still_prunes_inside_the_cases(pool, universe, cap):
     assert lineups and small.scores(lineups) == small.best(universe, cap, K, rule, holding=[qb])
 
 
+@pytest.mark.slow
 def test_locked_players_are_part_of_every_case(pool, universe, cap):
     qb = small.qb_of(pool)
     mate = next(p for p in pool if p.team == qb.team and p.position == "WR")
@@ -153,6 +157,7 @@ def test_locked_players_are_part_of_every_case(pool, universe, cap):
     assert exact(pool, cap, fixed=[qb, back], shape=sh.NAKED, qb=qb, leaf_filter=shape_test(sh.NAKED)) == []
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "make",
     [
@@ -176,6 +181,7 @@ def test_the_rules_boxes_stack_rules_choose_the_cases(pool, universe, cap, make)
         assert exact(pool, cap, fixed=[qb], shape=sh.STACK, qb=qb, leaf_filter=test, rules=rules) == []
 
 
+@pytest.mark.slow
 def test_a_few_gpp_marked_players_become_cases_and_many_are_left_to_the_test(pool, universe, cap):
     qb = small.qb_of(pool)
     ranked = sorted((lu for lu in universe if sum(p.salary for p in lu) <= cap), key=lambda lu: -be.score(lu))
@@ -230,6 +236,7 @@ def test_the_cash_search_is_the_old_search_without_a_budget(pool, cap):
     assert complete and new == old  # the same lineups in the same order
 
 
+@pytest.mark.slow
 def test_the_circuit_breaker_reports_a_cut_search_instead_of_hanging(pool, cap):
     qb = small.qb_of(pool)
     state = small.state_for(cap, [qb])
@@ -261,6 +268,7 @@ def wide_pool():
     return ls.pool_for(frame, syn.tags_for(frame), ls.GPP_TAGS, now=syn.NOW, metric="CalPts")
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("shape", sh.SHAPES)
 def test_every_shape_matches_the_old_search_run_to_its_end_up_to_ties(wide_pool, shape):
     """Six teams, every quarterback, the real per-quarterback counts: the exact search and the old search with
@@ -277,6 +285,7 @@ def test_every_shape_matches_the_old_search_run_to_its_end_up_to_ties(wide_pool,
     assert all(rule(lu) for lu in new)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("shape", [None, *sh.SHAPES])
 def test_the_milp_checker_agrees_with_the_exact_search(pool, cap, shape):
     """The guard on exactness: HiGHS, which shares no search code with the branch-and-bound, finds the same
@@ -301,6 +310,7 @@ def test_the_milp_checker_agrees_with_the_exact_search(pool, cap, shape):
 # --- a whole build ----------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_a_build_with_the_flag_on_finishes_whatever_the_budget():
     """A budget that cuts today's search short does not touch the exact one: no "cut short" note, every build
     legal, and the same builds on a second run."""
@@ -321,6 +331,7 @@ def test_a_build_with_the_flag_on_finishes_whatever_the_budget():
     ]
 
 
+@pytest.mark.slow
 def test_the_exact_build_s_candidates_lead_with_the_finished_old_search_s(pool, cap):
     """The builds come from the simulator's ranking of the candidates, so compare the candidates: every
     quarterback's best candidates are the same as an old search given a budget large enough to finish. (The

@@ -213,6 +213,7 @@ def test_writers_roundtrip_metadata_and_nan(tmp_path):
     assert json.loads(meta_sidecar(csv).read_text())["study"] == "r2"
 
 
+@pytest.mark.slow
 def test_r2_writer_matches_the_schema(tmp_path):
     result = r2.run_study(r2.matchup_features(*make_matchup_tables()))
     r2.write_outputs(result, 123, tmp_path)
@@ -223,6 +224,7 @@ def test_r2_writer_matches_the_schema(tmp_path):
     )
 
 
+@pytest.mark.slow
 def test_r1_writer_matches_the_schema(tmp_path):
     games = make_games(bye_week=5)
     sp = make_stats(games, missing={("AAA", "WR1", 7), ("AAA", "RB1", 8), ("CCC", "WR2", 9)})

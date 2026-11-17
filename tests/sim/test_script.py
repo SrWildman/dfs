@@ -86,6 +86,7 @@ def test_the_clustered_slope_recovers_a_slope_and_a_null_is_not_significant():
     assert np.isnan(script.clustered_slope(np.ones(5), np.arange(5.0), np.arange(5))[0])
 
 
+@pytest.mark.slow
 def test_the_scan_finds_a_planted_spread_dependence_and_not_a_null_one():
     def planted(spread):
         return 0.45 if spread >= 7 else 0.05
@@ -178,6 +179,7 @@ def test_an_opposing_pair_is_oriented_by_role_a_and_flips_to_the_other_team_when
     assert lk.rho("opp", "RB1", "QB1", dog_rb, favourite_qb) == pytest.approx(up)  # the QB's team supplies it
 
 
+@pytest.mark.slow
 def test_the_out_of_sample_score_rewards_a_real_dependence_and_penalises_a_planted_noise():
     def planted(spread):
         return 0.5 if spread >= 7 else (0.05 if spread <= -7 else 0.25)

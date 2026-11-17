@@ -39,10 +39,8 @@ MANIFEST
 .ruff_cache/
 .mypy_cache/
 
-# uv isn't this project's package manager (see README's `pip install -e
-# ".[dev]"` setup) -- if a lockfile shows up locally it's incidental, not
-# meant to be tracked.
-uv.lock
+# uv.lock IS tracked: CI installs from it (`uv sync --locked --extra dev`), so a test run there uses the
+# versions this Mac does. Change a dependency in pyproject.toml, run `uv lock`, commit both.
 
 # Virtual environments
 .env

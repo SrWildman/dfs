@@ -119,6 +119,7 @@ def _study(missing, scale=None, injuries=None):
     return r1.run_study(sp, games, injuries if injuries is not None else make_injuries())
 
 
+@pytest.mark.slow
 def test_the_accounting_identity_holds_for_every_event_and_channel():
     # WR1 out in week 7 with a newcomer, a missing fringe player and a team-volume change in the game.
     games = make_games(bye_week=BYE)
@@ -151,6 +152,7 @@ def test_the_accounting_identity_holds_for_every_event_and_channel():
         assert by_item["NOWHERE"] == pytest.approx(g["v"].iloc[0] - by_item["ROTATION"])
 
 
+@pytest.mark.slow
 def test_vacated_volume_and_a_teammate_gain_are_computed_from_the_prior_window():
     # WR1 (12 of 36 targets) is out in week 7; WR2 gets 6 extra targets that day.
     games = make_games(bye_week=BYE)
@@ -165,6 +167,7 @@ def test_vacated_volume_and_a_teammate_gain_are_computed_from_the_prior_window()
     assert g["gain"] == pytest.approx(6.0) and g["frac"] == pytest.approx(0.5)
 
 
+@pytest.mark.slow
 def test_reason_tags_come_from_the_injury_report():
     inj = make_injuries([("AAA-WR1", 7, "Knee"), ("AAA-RB1", 8, "Suspension"), ("AAA-WR2", 9, "Personal")])
     games = make_games(bye_week=BYE)
@@ -263,6 +266,7 @@ def test_refit_structure_keeps_two_free_constants_and_may_leave_a_leak():
     assert alloc == pytest.approx({"wr2": 0.14, "te1": 0.10})  # no rest-of-position bucket; sums below 1
 
 
+@pytest.mark.slow
 def test_control_games_have_no_regular_out():
     res = _study(missing={("AAA", "WR1", 7)})
     controls = res["controls"]
