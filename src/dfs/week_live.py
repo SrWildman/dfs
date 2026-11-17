@@ -611,6 +611,18 @@ document.addEventListener('click', async (e) => {
   }
   const pv = e.target.closest('.dec button.pivot');
   if (pv) { await write('/api/decide', {key: pv.dataset.key, option: 'pivot', pivot: pv.dataset.pivot, pool_was: pv.dataset.was || '', rules_was: rulesWas()}); return; }
+  const lk = e.target.closest('button.lockbtn');
+  if (lk) {
+    if (READONLY) { toast('This week is closed: the page records nothing.', true); return; }
+    let lineups = []; try { lineups = JSON.parse(lk.dataset.lineups || '[]'); } catch (err) {}
+    try {
+      const r = await post('/api/lock', {row: lk.dataset.row, action: lk.dataset.action, lineups});
+      const tr = lk.closest('tr'); if (tr) tr.classList.add('done');
+      const box = lk.closest('.lockbtns'); if (box) box.replaceWith(el('span', 'answered', lk.textContent));
+      if (r && r.message) toast(r.message);
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
   const un = e.target.closest('.dec button.undo');
   if (un) { const r = await write('/api/decide', {key: un.dataset.key, option: 'undo', rules_was: rulesWas()}); rerunCash(r, un.dataset.key); }
 });
@@ -715,6 +727,7 @@ def augment(page: str, *, token: str, nonce: str, read_only: bool, budget: float
         '<meta name="referrer" content="no-referrer">'
     )
     page = page.replace("</head>", f"{metas}<style>{CSS}</style></head>", 1)
-    page = page.replace("<body>", '<body class="live"><div id="pagecol">', 1)
+    # the page's <body> carries attributes (`data-state`, blueprint C2): keep them
+    page = re.sub(r"<body([^>]*)>", r'<body class="live"\1><div id="pagecol">', page, count=1)
     page = page.replace("</body>", f'</div>{chat}<script nonce="{nonce}">{JS}</script></body>', 1)
     return page

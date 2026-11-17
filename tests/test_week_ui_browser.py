@@ -635,8 +635,12 @@ def test_the_page_opens_on_the_overview_each_view_has_its_hash_and_the_last_one_
     pg = ctx.new_page()
     pg.goto(served.url)
     until(pg, "!!(window.dfsViews && window.dfsPool)")
-    assert pg.evaluate("window.dfsViews.current()") == "overview"
+    # blueprint C2: the page opens on the clock's state; this fixture's slate is over, and the Close view is
+    # Phase D's, so it opens on the Saturday view (which holds the overview)
+    assert pg.evaluate("document.body.dataset.state") == "close"
+    assert pg.evaluate("window.dfsViews.current()") == "build"
     assert pg.locator("#brief").is_visible() and pg.locator("#progress").is_visible()
+    assert pg.locator("#strip").is_visible()
     assert pg.locator("#overview-card").is_visible() and not pg.locator("#board").is_visible()
     pg.click('#views a[data-view="usage"]')
     until(pg, "location.hash === '#usage' && window.dfsViews.current() === 'usage'")
@@ -657,7 +661,9 @@ def test_the_page_opens_on_the_overview_each_view_has_its_hash_and_the_last_one_
     pg.goto(served.url + "#explore")
     until(pg, "window.dfsViews.current() === 'explore'")
     pg.evaluate("location.hash = 'numbers'")
-    until(pg, "window.dfsViews.current() === 'overview'")
+    until(pg, "window.dfsViews.current() === 'build'")
+    pg.evaluate("location.hash = 'overview'")  # an old link to the Overview opens the Saturday view
+    until(pg, "window.dfsViews.current() === 'build'")
     ctx.close()
 
 
@@ -680,7 +686,7 @@ def test_every_name_on_the_new_views_carries_the_pool_chip_and_one_store(browser
     out = {r["Name"] for r in served.rows if r.get("Avail") in ("OUT", "IR")}
     for view, sel in (
         ("usage", "#usage-card"),
-        ("overview", "#overview-card"),
+        ("build", "#overview-card"),
         ("injuries", "#injury-card"),
         ("model", "#model-card"),
     ):
@@ -690,7 +696,7 @@ def test_every_name_on_the_new_views_carries_the_pool_chip_and_one_store(browser
         assert pg.evaluate(bare, sel) == [], view
         assert set(pg.evaluate(plain, sel)) <= out, view
     # one store: a pool write on the overview shows on the usage view's chip
-    pg.evaluate("location.hash = 'overview'")
+    pg.evaluate("location.hash = 'build'")
     chip = pg.locator("#overview-card .pchip").first
     pid = chip.get_attribute("data-id")
     chip.click()
@@ -775,3 +781,35 @@ def test_the_ledger_fits_a_1440_wide_window_with_its_bars_and_no_scolding(browse
     assert box["bars"] >= 2 and box["red"] == 0, box
     ctx.close()
     assert errors == []
+
+
+def test_the_sunday_view_opens_by_itself_and_swap_records_without_a_sheet_write(browser, tmp_path):
+    """Blueprint C2: on Sunday morning the page opens on the Sunday view; Swap posts the answer, the row
+    shows it, and nothing is written to the sheet."""
+    from datetime import UTC, datetime
+
+    from tests.test_week_server import lock_files
+
+    s = Served(tmp_path)
+    try:
+        lock_files(tmp_path, 2026, 9)  # Wr Star OUT at 10 am ET, in L1 on the Lineups tab
+        s.server.ctx.now = lambda: datetime(2026, 11, 8, 16, 0, tzinfo=UTC)
+        ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
+        pg = ctx.new_page()
+        errors: list[str] = []
+        pg.on("pageerror", lambda e: errors.append(str(e)))
+        pg.goto(s.url)
+        until(pg, "!!(window.dfsPool && window.dfsLive)")
+        assert pg.evaluate("document.body.dataset.state") == "lock"
+        assert pg.evaluate("window.dfsViews.current()") == "lock"
+        assert pg.locator("#lock-card").is_visible() and pg.locator("#strip").is_visible()
+        swap = pg.locator('#lock-card button.lockbtn[data-action="swap"]').first
+        assert swap.is_enabled()
+        swap.click()
+        until(pg, "!!document.querySelector('#lock-card span.answered')")
+        assert s.sheet.writes == []
+        assert (tmp_path / "data" / "week" / "decisions.jsonl").exists()
+        ctx.close()
+        assert errors == []
+    finally:
+        s.close()

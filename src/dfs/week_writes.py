@@ -76,6 +76,9 @@ class LiveSheet:
     rules_found: bool = False  # the Suggested tab has a rules box
     title: str = ""
     error: str = ""  # the sheet could not be read: the page falls back to the last sync's pool
+    # the Lineups tab's built lineups (`{"label", "marker", "names"}`), read fresh for the Lock state
+    # (blueprint C2; Sam, 2026-11-17); None when no Lineups tab was asked for or it could not be read
+    lineups: list[dict] | None = None
 
     @property
     def ok(self) -> bool:
@@ -98,6 +101,7 @@ class SheetEdits:
         log_path: Path | None = None,
         lock: Callable[..., Any] | None = None,
         title: str = "",
+        lineups_tab: str | None = None,
     ):
         self.client = client
         self.edge_tab = edge_tab
@@ -105,6 +109,7 @@ class SheetEdits:
         self.log_path = log_path
         self.lock = lock or (lambda: run_lock.hold(EDIT_COMMAND, origin_name="button"))
         self.title = title
+        self.lineups_tab = lineups_tab
         self._mutex = threading.Lock()  # one write at a time inside this server, too
 
     # -- logging -----------------------------------------------------------------------------------------
@@ -190,7 +195,25 @@ class SheetEdits:
             rules=rules,
             rules_found=bool(rows),
             title=self.title,
+            lineups=self._lineups(),
         )
+
+    def _lineups(self) -> list[dict] | None:
+        """The Lineups tab's built lineups as read now, or None (no tab asked for, or it could not be read:
+        the Lock state then uses the last sync's read). Never raises."""
+        if not self.lineups_tab:
+            return None
+        try:
+            from dfs import sheet_dk_upload
+
+            found = sheet_dk_upload.read_lineups(self.client, self.lineups_tab)
+        except Exception:  # noqa: BLE001 - the pool and rules still stand
+            return None
+        return [
+            {"label": lu.label, "marker": lu.marker, "names": list(lu.names)}
+            for lu in found
+            if any(str(n).strip() for n in lu.names)
+        ]
 
     # -- writing ---------------------------------------------------------------------------------------------
 

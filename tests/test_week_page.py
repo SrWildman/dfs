@@ -531,7 +531,9 @@ def test_every_phrase_on_the_page_is_one_claude_code_knows_and_every_command_exi
 
 def test_the_progress_strip_and_the_next_step_come_from_the_real_state(full):
     page = html.unescape(week_page.render(full, registered=set(commands_doc.all_commands())))
-    strip = re.search(r'<section class="prog" id="progress".*?</section>', page, re.S).group(0)
+    # blueprint C2: the six steps sit under the brief's "next" line; the strip above holds five tiles
+    assert page.count('class="tile') == 5
+    strip = re.search(r'<div class="prog" id="progress".*?</div></div>', page, re.S).group(0)
     assert strip.count('class="step ') == 6
     assert 'class="step next"' in strip  # exactly one next step
     assert strip.count('class="step next"') == 1

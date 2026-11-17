@@ -347,7 +347,17 @@ Late swap itself never syncs: it reads the last sync's EdgeRaw (`data/current/ed
 to `data/news/changes.csv`: a player's status, each source's projection, CalPts, ownership, and each team's spread and total, one
 row per changed value with the time the sync saw it. `dfs lineups late-swap --refresh-injuries` adds ESPN's escalations. Nothing
 in the file is ever rewritten. `dfs news changes` prints the week's status changes (`--field all` for everything, `--player` for
-one name); `dfs news backfill` loads the file from the saved snapshots. It is a local record: nothing on the sheet reads it yet.
+one name); `dfs news backfill` loads the file from the saved snapshots. Nothing on the sheet reads it; the Week page's Sunday view does.
+
+**Sunday before lock: the Week page's Sunday view.** From Sunday morning the Week page (`dfs week serve`) opens on **Sunday**: five
+tiles at the top (time to lock, entered vs planned, open decisions, news pending, lineup health), then **what changed since the build
+your lineups came from**: every status, projection and ownership move that touches a lineup on the Lineups tab or your pool, the ones
+with a better swap first, sorted by the points at stake, each with the swap the inactives check would make. Any OUT / D / Q player in
+a lineup or the pool stays on the list until he is out of it. It reads the Lineups tab fresh on each refresh, so rebuild as often as
+you like; you never need to record entries for it. **Swap** records your choice and shows the swap to make on DraftKings, **Keep** and
+**Skip** record that you saw it; none of them writes the sheet. Below it, the four-line pre-lock checklist (grey when fine, amber only
+when wrong) and the late window (your players in later games). Every late-swap run is now also kept in
+`data/cockpit/late_swaps.jsonl`.
 
 After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `Top 1%` (the chance of the top-1% line;
 green at 2% or more) on every built lineup's Total row (set its Cash/GPP marker in column A) and a

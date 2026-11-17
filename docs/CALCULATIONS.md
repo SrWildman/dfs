@@ -2133,6 +2133,31 @@ names), `Salary <= his salary + (50,000 - the lineup's salary)` (only his salary
 clean `Avail`, game not started, not already in the lineup. Ranked by `CalPts` for cash, by `Leverage` (ceiling rank minus
 ownership rank) for GPP; before ownership publishes a GPP lineup ranks by `CalPts` and says so. Three each.
 
+## The Lock state's change list (`lock_state.py`; Week page, Sunday view; blueprint Phase C2)
+
+**Clock** (`state`): `lock` from 13 hours before the main slate's first kickoff (`GameStart`) until 3.5 hours after its last; `close`
+after that or on a closed week; `build` otherwise. **Baseline** (`baseline`): the newest saved suggest round (`data/suggest_state`) that one of the
+lineups matches 8+ of 9 players in (a tie goes to the newer round); none matched, the newest round; no round, Saturday 9 pm ET. Rounds
+saved after now are ignored. **Lineups**: before lock the Lineups tab (the served page reads it live; else the last read the sync
+saved); after lock the recorded entries once they exist and were recorded before now, else the Lineups tab.
+
+**Netting** (`net_changes`): every `changes.csv` row after the baseline, per player and field, first `before` to last `after`; a field
+that ends where it began drops. Fields: `status`, `calpts`, `cash_own`, `gpp_own`. A row needs a net move of 1.0 CalPts or 5 points of
+ownership, or a status change; a status change for a player projected under 5 (before and now) or to / from IR is counted, not shown.
+**Sticky**: a player in a lineup, the Default or the pool whose current `Avail` is OUT / IR / D / Q is a row whatever the time.
+
+**Teammates**: a status row lists up to three teammates whose net move since the baseline is 0.8+ CalPts or 8+ points of ownership
+(by size); it touches their lineups too, and they get no row of their own. **Swap** (`best_swap`): only on the lineups a move went
+against (worse status: all that hold him; a drop of 0.5+ CalPts: all; ownership up 5+ points: the GPP ones), the inactives check's
+pivots for his slot and budget (CalPts for cash, Leverage for GPP), the first that beats his current CalPts (0 when OUT / IR) by 0.5+;
+for a status row whose player is in no lineup, the best such swap on a teammate. **Stake** = the swap's CalPts gain, else the absolute
+CalPts move. **Order**: rows with a swap first ("act"), then the rest ("no action needed"); each: in a lineup before pool only, stake,
+newest first.
+
+**Checklist** (`checklist`): no OUT / IR / D in a lineup (Q is the change list's job); each lineup's latest-kickoff RB / WR / TE in FLEX
+when a swap keeps it legal (`flex_order.plan_flex`); every recorded contest has a lineup (unknown, `?`, before entries exist); every
+lineup at or under $50,000 and leaving less than $1,500 (`SALARY_SLACK`). None blocks anything.
+
 ## Consensus lineup and expected copies (`consensus.py`, `sim/dup_calibration.py`; Plan K item 3)
 
 **The field's lineup** is the legal DraftKings lineup (QB, 2 RB, 3 WR, TE, FLEX, DST, salary <= 50,000) maximising the sum of

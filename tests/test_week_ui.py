@@ -515,3 +515,12 @@ def test_every_table_and_chart_has_a_caption_with_its_data_date(tmp_path, served
     assert "Value = CalPts ÷ salary × 1,000" in value[: value.index("</section>")]
     board = main[main.index('id="board"') :]
     assert '<p class="cap">' in board[: board.index("</section>")]
+
+
+def test_the_served_page_is_live_whatever_the_body_tag_carries(tmp_path):
+    """Blueprint C2 put the clock's state on `<body>`; the served page still marks it live (the pool
+    controls read the class: without it every control is disabled)."""
+    _inp, page = full_page(tmp_path)
+    assert re.search(r'<body data-state="\w+">', page)
+    served = live(page)
+    assert re.search(r'<body class="live" data-state="\w+"><div id="pagecol">', served)

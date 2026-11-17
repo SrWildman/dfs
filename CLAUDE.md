@@ -306,8 +306,9 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   chart that is showing). The game view maps nflverse's team codes to DK's (`player_join.TEAM_ALIASES`: LA = LAR), has Previous / Next and a
   game list, and a pool control on every row; pan is every chart's default (wheel / pinch / box to zoom); a Pool click keeps the scroll
   of the page and of the box it is in, and the focus.
-- **Plan O2 on the Week page** (`week_views.py`): a **view bar** under the brief (`VIEWS`: Overview, the default | Board & Explorer |
-  Usage | Injuries | Model vs sources | Everything = every block; Sam, 2026-11-09), each view its own `#name` (a link or the back
+- **Plan O2 on the Week page** (`week_views.py`): a **view bar** under the brief (`VIEWS`: Saturday (`build`, holds the Overview; `#overview`
+  is an alias) | Sunday (`lock`, blueprint C2) | Board & Explorer | Usage | Injuries | Model vs sources | Everything = every block; Sam,
+  2026-11-09; the page opens on the clock's state, `body[data-state]`), each view its own `#name` (a link or the back
   button opens it; no element id may equal one, a test checks), the last one kept per week (`dfs-view-<season>-<week>`); every block is
   wrapped in `week_views.wrap(html, place)` naming its views (`PLACES`); the progress strip and the brief show on all of them, and the
   one pool store serves every view. **Overview**: one row per position (top value, cash core and chalk, the board's Upside, the fades:
@@ -347,6 +348,26 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   is `entries.suggest_pick`, Untested, never "Best in"), and the **practice trend** beside every
   Q / D tag (board, Explorer, drawer; `practice.py` from `data/raw/nflverse_injuries/`). The Cockpit gains blocks 8
   (inactives and pivots) and 9 (practice) below the first seven, and a plain `dfs sync` refreshes it too.
+- **The Lock state** (blueprint Phase C2; `lock_state.py` pure, `week_views.lock_section`, `week_top.strip_html`): the Week page knows
+  the clock (`lock_state.state`: `lock` from 13 hours before the main slate's first kickoff until 3.5 hours after its last, `close`
+  after or on a closed week, `build` otherwise) and opens on it (Close's own view is Phase D; until then `close` opens Saturday's); a **status strip** of five tiles (time to lock, entered vs planned, open decisions, news pending,
+  lineup health) replaces the progress steps at the top (the steps moved into the brief). The **Sunday view** (`#lock`): **what changed
+  since the build his lineups came from** (`lock_state.baseline`: the newest suggest round the Lineups-tab lineups match, 8+ of 9,
+  else the latest round, else Saturday 9 pm ET; Sam, 2026-11-17), from `data/news/changes.csv` netted per player and field
+  (`net_changes`), one row per player (status > projection > ownership), only rows touching a lineup or the pool, a status row
+  carrying the teammates who moved and touching their lineups; the rows **with a better swap** first (`best_swap` = the inactives
+  check's pivots, the first gaining 0.5+ CalPts, on the lineups the move went against), sorted by points at stake, then a collapsed
+  "No action needed". **Sticky**: any player in a lineup, the Default or the pool whose current status is OUT / IR / D / Q is listed
+  whatever the time of the change ("a rebuild must never hide a live problem"). A backup's status change (projected under 5) and IR
+  moves are counted, never rows. Before lock the lineups are **the Lineups tab read fresh** (the served page reads it on every render,
+  `week_writes.LiveSheet.lineups`; the static page uses the last read the sync saved); recorded entries only after lock. **Never asks
+  him to record entries.** A four-line **pre-lock checklist** (no inactive player; late-game players in FLEX, `flex_order.plan_flex`;
+  every contest has an entry once entries exist; salary sanity), grey when fine, amber only when wrong, and the **late window** (each
+  lineup's players in later games and what could still swap in). **Swap / Keep / Skip** on the served page (`/api/lock`,
+  `week_server.lock_answer`) records the choice in `data/week/decisions.jsonl` (`decisions_log.py`, append-only, ids `<season>-<week>-NNNN`,
+  undos are lines of their own) and says the swap to make on DraftKings: **nothing writes a sheet, nothing blocks or warns.** Late
+  swap's runs are append-only too: `late_swap_store.save` also appends each run to `data/cockpit/late_swaps.jsonl` with its top three
+  options per lineup.
 - **The news change log** (`news_log.py` pure, `news_store.py` I/O; blueprint Phase C item 1): every `dfs sync`, `dfs sync --live` and
   `dfs week new` diffs the EdgeRaw snapshot it just saved (`data/raw/edge/`) against the one before it and appends one row per changed
   field to `data/news/changes.csv` (`at, season, week, player_id, name, position, team, field, before, after, source, snapshot`; fields

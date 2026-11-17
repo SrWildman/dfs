@@ -94,10 +94,37 @@ def pool_seg(row_id: str, name: str, value: str, live: bool) -> str:
 
 
 def progress_html(steps: list[wb.Step]) -> str:
+    """The six steps of the week, compact, under the brief's "next" line (blueprint C2 moved them there)."""
     cells = "".join(
         f'<div class="step {s.state}"><b>{e(s.name)}</b><span>{e(s.status)}</span></div>' for s in steps
     )
-    return f'<section class="prog" id="progress" aria-label="The week so far">{cells}</section>'
+    return f'<div class="prog" id="progress" aria-label="The week so far">{cells}</div>'
+
+
+STRIP_CSS = """
+.strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:0 0 14px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:0}
+.tile small{display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim)}
+.tile b{display:block;font-size:20px;line-height:1.25;overflow-wrap:anywhere}
+.tile span{display:block;font-size:12.5px;color:var(--dim)}
+.tile.warn b{color:var(--warn)}.tile.ok b{color:var(--ok)}
+.brief .prog{grid-template-columns:repeat(6,minmax(0,1fr));margin:10px 0 0}.brief .step{padding:5px 7px}
+.brief .step span{font-size:12px}
+@media(max-width:760px){.strip{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}.tile{padding:5px 7px}
+.tile small{font-size:9.5px}.tile b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile span{display:none}.brief .prog{grid-template-columns:repeat(3,minmax(0,1fr))}}
+"""
+
+
+def strip_html(tiles) -> str:  # noqa: ANN001 - lock_state.Tile
+    """The strip (blueprint 7: five items at most): time to lock, entered vs planned, open decisions, news
+    pending, lineup health. Grey; amber only when wrong."""
+    cells = "".join(
+        f'<div class="tile {e(t.tone)}" data-key="{e(t.key)}"><small>{e(t.label)}</small><b>{e(t.value)}</b>'
+        f"<span>{e(t.note)}</span></div>"
+        for t in tiles
+    )
+    return f'<section class="strip" id="strip" aria-label="The week at a glance">{cells}</section>'
 
 
 def next_html(step: wb.Step | None, live: bool) -> str:
@@ -131,11 +158,18 @@ def sentence_html(s: wb.Sentence) -> str:
     return "".join(link(re.match(r"\{(.+)\}", p)) if re.fullmatch(r"\{[^{}]+\}", p) else e(p) for p in parts)
 
 
-def brief_html(sentences: list[wb.Sentence], step: wb.Step | None, live: bool, day_word: str) -> str:
+def brief_html(
+    sentences: list[wb.Sentence],
+    step: wb.Step | None,
+    live: bool,
+    day_word: str,
+    steps: list[wb.Step] | None = None,
+) -> str:
     items = "".join(f"<li>{sentence_html(s)}</li>" for s in sentences)
+    prog = progress_html(steps) if steps else ""
     return (
         f'<section class="card brief" id="brief"><div class="card-head"><h2>The brief</h2>'
-        f'<span class="asof">{e(day_word)}</span></div><ul>{items}</ul>{next_html(step, live)}</section>'
+        f'<span class="asof">{e(day_word)}</span></div><ul>{items}</ul>{next_html(step, live)}{prog}</section>'
     )
 
 

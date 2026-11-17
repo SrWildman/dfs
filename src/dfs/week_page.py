@@ -1738,7 +1738,10 @@ def render(
         board = wb.board(inp)
         panel = wb.pool_panel(inp, board, pool)
         steps = wb.progress(inp, pool)
-        sentences = wb.brief(inp, board, panel)
+        lv = lock_view(inp, sheet)
+        st = lv.state if lv is not None else "build"
+        top = lv.changes.top if lv is not None and st == "lock" else None
+        sentences = wb.brief(inp, board, panel, wb.lock_sentence(top, inp.edge) if top is not None else None)
         ds = wb.decisions(inp, rules, answers)
         if sheet is not None and sheet.ok:
             source = f"from the sheet, {kickoff.format_et(inp.now)}"
@@ -1815,17 +1818,25 @@ def render(
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
             f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
-            f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}</style>"
-            "</head><body>"
+            f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}</style>"
+            f'</head><body data-state="{e(st)}">'
             f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
-            + week_top.progress_html(steps)
+            # blueprint C2: the strip (five tiles); the six steps sit under the brief's "next" line
+            + (week_top.strip_html(lv.tiles) if lv is not None else week_top.progress_html(steps))
             + stale_html
             + '<div class="grid">'
-            + week_top.brief_html(sentences, wb.next_step(steps), live, week_today.DAY_NAMES[day])
+            + week_top.brief_html(
+                sentences,
+                wb.next_step(steps),
+                live,
+                week_today.DAY_NAMES[day],
+                steps if lv is not None else None,
+            )
             + wrap(week_top.pool_panel_html(panel, live, source), "pool")
             + "</div>"
             # Plan O2: the view bar; each block below names the views it shows on (`week_views.PLACES`)
-            + week_views.view_bar()
+            + week_views.view_bar(st if st in week_views.VIEW_NAMES else week_views.DEFAULT_VIEW)
+            + wrap(week_views.lock_section(inp, lv, live), "lock")
             + wrap(week_views.overview_section(inp, board, panel), "overview")
             # blueprint Phase A: the Default cash lineup, its core and open spots (their decisions live there)
             + wrap(week_top.cash_block_html(inp, ds, board, live), "decisions")
@@ -1842,13 +1853,8 @@ def render(
             + wrap(week_views.usage_section(inp), "usage")
             + wrap(week_views.injury_section(inp), "injuries")
             + wrap(week_views.model_section(inp), "model")
-            + wrap(
-                '<h2 class="sec">The rest of the week</h2>'
-                + "".join(folds)
-                + LIVE_RUN
-                + tools_fold(inp, tools),
-                "rest",
-            )
+            + wrap('<h2 class="sec">The rest of the week</h2>' + "".join(folds), "rest")
+            + wrap(LIVE_RUN + tools_fold(inp, tools), "runs")
             + "</main>"
             + week_top.DRAWER
             + live_data
@@ -1893,6 +1899,19 @@ document.addEventListener('click', (e) => {
   b.closest('tr').remove();
 });
 """
+
+
+def lock_view(inp: WeekInputs, sheet=None):  # noqa: ANN001, ANN201 - week_writes.LiveSheet, lock_state.LockView
+    """The Lock state's picture (blueprint C2), with the Lineups tab the served page just read; None when it
+    cannot be built (the page never fails over it)."""
+    from dfs import lock_state
+
+    live = sheet.lineups if sheet is not None and getattr(sheet, "ok", False) else None
+    try:
+        return lock_state.view(inp, live)
+    except Exception as exc:  # noqa: BLE001 - the page never fails over the Lock state
+        print(f"Warning: the Lock state was not built ({type(exc).__name__}: {exc}).", file=sys.stderr)
+        return None
 
 
 def generate(

@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -1361,3 +1361,88 @@ def test_a_run_keeps_its_duration_id_and_output_for_recent_runs(make):
         and "ran -m dfs.cli sync --live" in out["lines"]
     )
     assert c.get("/api/jobs/output?job=../../etc")[0] == 404  # an id, never a path
+
+
+# -- blueprint C2: the Lock state's answers ------------------------------------------------------------------
+
+
+def star_out(rows):
+    for r in rows:
+        if r["Name"] == "Wr Star":
+            r["Avail"] = "OUT"
+    return rows
+
+
+def lock_files(tmp_path, season: int = SEASON, week: int = WEEK):
+    """A slate where Wr Star went OUT on Sunday morning and the Lineups tab (as the last sync read it) holds
+    him."""
+    import csv
+
+    from test_week_plays import slate_rows, write_csv
+
+    from dfs import news_log
+
+    data = tmp_path / "data"
+    write_csv(data / "current" / "edge.csv", star_out(slate_rows()))
+    inputs = data / "week" / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    lineups = [{"label": "L1", "marker": "Cash", "names": ["Qb Alpha", "Wr Star", "Rb Fine"]}]
+    (inputs / f"{season}-wk{week:02d}-sheet_lineups.json").write_text(json.dumps({"lineups": lineups}))
+    news = data / "news" / "changes.csv"
+    news.parent.mkdir(parents=True, exist_ok=True)
+    with news.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=news_log.COLUMNS)
+        w.writeheader()
+        w.writerow(
+            {
+                "at": "2026-11-08T15:00:00Z",
+                "season": season,
+                "week": week,
+                "player_id": "id-Wr Star",
+                "name": "Wr Star",
+                "position": "WR",
+                "team": "DAL",
+                "field": "status",
+                "before": "Q",
+                "after": "OUT",
+                "source": "dk",
+                "snapshot": "20261108T150000Z",
+            }
+        )
+    return data
+
+
+def test_a_lock_answer_is_recorded_names_the_swap_and_writes_no_sheet(make, tmp_path):
+    from dfs import decisions_log
+
+    lock_files(tmp_path)
+    sheet, edits = served_sheet(tmp_path)
+    from test_week_plays import slate_rows, write_csv
+
+    write_csv(tmp_path / "data" / "current" / "edge.csv", star_out(slate_rows()))  # served_sheet rewrote it
+    client = make(edits=edits)
+    client.server.ctx.now = lambda: datetime(2026, 11, 8, 16, 0, tzinfo=UTC)  # 11:00 am ET Sunday
+    status, page = client.get("/")
+    assert status == 200 and 'data-row="id-Wr Star:status"' in page and 'data-state="lock"' in page
+    status, body = client.post("/api/lock", {"row": "id-Wr Star:status", "action": "swap", "lineups": ["L1"]})
+    assert status == 200, body
+    assert "Make this swap on DraftKings: in L1, take out Wr Star and put in Wr Value" in body["message"]
+    assert sheet.writes == []
+    [rec] = decisions_log.read(SEASON, WEEK, path=tmp_path / "data" / "week" / "decisions.jsonl")
+    assert rec["id"] == body["id"] and rec["kind"] == "swap" and rec["state"] == "lock"
+    assert rec["chosen"]["name"] == "Wr Value" and rec["default_at_time"]["name"] == "Wr Star"
+    status, page = client.get("/")
+    assert 'class="answered">Swap<' in page  # answered: the buttons give way to the answer
+
+
+def test_a_lock_answer_on_a_closed_week_or_a_gone_row_is_refused(make, tmp_path):
+    lock_files(tmp_path)
+    closed = make(read_only=True)
+    status, body = closed.post("/api/lock", {"row": "id-Wr Star:status", "action": "keep"})
+    assert status == 403
+    open_ = make()
+    open_.server.ctx.now = lambda: datetime(2026, 11, 8, 16, 0, tzinfo=UTC)
+    status, body = open_.post("/api/lock", {"row": "nobody:status", "action": "keep"})
+    assert status == 409 and "no longer on the list" in body["error"]
+    status, body = open_.post("/api/lock", {"row": "id-Wr Star:status", "action": "delete"})
+    assert status == 400
