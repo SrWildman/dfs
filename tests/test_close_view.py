@@ -51,10 +51,11 @@ def close_input(**over):
         cash_rows=[{"week": 9, "shown": 0.75, "cashed": "True"}],
         edge={
             "week": 9,
-            "this_week": {"edge": 7.3, "pct": 0.98, "rows": 1, "n_src": 4},
-            "weeks": {"8": {"edge": 4.0}, "9": {"edge": 7.3}},
+            "this_week": {"edge": 7.3, "pct": 0.98, "realized": 6.5, "rows": 1, "n_src": 4},
+            "weeks": {"8": {"edge": 4.0, "realized": -9.3}, "9": {"edge": 7.3, "realized": 6.5}},
             "season_edge": 5.65,
             "season_pct": 0.85,
+            "season_realized": -1.4,
             "n_weeks": 2,
         },
     )
@@ -208,7 +209,24 @@ def test_the_four_cards_in_order():
         scorecard.OVERSTATED,
         scorecard.NEW,
     }
-    assert cards[3]["week"] == "+7.3 pts, beat 98% of the field"
+    assert cards[3]["week"] == "actual +6.5 pts; on paper +7.3 pts, 98th percentile"
+    assert cards[3]["season"].endswith("on paper: +5.7 pts, 85th percentile")
+
+
+def edge(realized, paper=6.0):
+    weeks = {str(w): {"edge": paper, "pct": 0.85, "realized": r} for w, r in enumerate(realized, start=4)}
+    last = weeks[str(3 + len(realized))]
+    return {"this_week": last, "weeks": weeks, "season_edge": paper, "season_pct": 0.85}
+
+
+def test_the_edge_card_status_comes_from_the_realized_margin_not_the_projected_edge():
+    """Sam, 2026-11-17: on paper every week is well ahead of the field; the status is what happened."""
+    assert scorecard.edge_card(edge([-5.8, 9.1, -13.9, 1.9, -9.3, 6.5]))["status"] == scorecard.NOT_PROVEN
+    assert scorecard.edge_card(edge([3.0, 4.0, 5.0, 3.5]))["status"] == scorecard.PROVEN
+    assert scorecard.edge_card(edge([3.0, 4.0]))["status"] == scorecard.NEW
+    card = scorecard.edge_card(edge([-5.8, 9.1, -13.9, 1.9, -9.3, 6.5], paper=5.9))
+    assert card["season"] == "actual -1.9 pts a week (SE 3.7); on paper: +5.9 pts, 85th percentile"
+    assert card["weeks"] == 6 and card["week"] == "actual +6.5 pts; on paper +5.9 pts, 85th percentile"
 
 
 # -- the one thing ----------
