@@ -12,8 +12,8 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, "tests")
+import builder_helpers as syn  # noqa: E402
 import test_late_swap_cli as lsc  # noqa: E402
-import test_lineup_suggest as syn  # noqa: E402
 
 from dfs import cli, cockpit, my_frame  # noqa: E402
 from dfs import lineup_iterate as li  # noqa: E402
@@ -313,6 +313,7 @@ def test_a_fresh_suggest_applies_adjust_and_says_so(monkeypatch, capsys):
 
     monkeypatch.setattr(cli, "_late_swap_sim_setup", sim)
     monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: "Suggested: ok")
+    syn.stub_builder(monkeypatch, cli)  # only the rules box's lines are checked: no search needed
     grid = [["Adjust", *[""] * (NAME_INDEX - 1), "T00 WR1 +5, T00 WR2 15%"]]
     client = sc.StubClient(frame, dict.fromkeys(frame["Name"], "Both"), suggested=grid)
     cfg = SimpleNamespace(

@@ -14,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 sys.path.insert(0, "tests")
-import test_lineup_suggest as syn  # noqa: E402
+import builder_helpers as syn  # noqa: E402
 import test_sheet_lineup_sim as tsls  # noqa: E402
 
 from dfs import cli  # noqa: E402

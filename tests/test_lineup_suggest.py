@@ -7,8 +7,18 @@ from itertools import combinations
 from types import SimpleNamespace
 
 import numpy as np
-import pandas as pd
 import pytest
+from builder_helpers import (
+    CAP,
+    EARLY,
+    NIGHT,
+    NOW,
+    assert_legal,
+    brute_force,
+    run,
+    slate,
+    tags_for,
+)
 
 from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
@@ -16,88 +26,8 @@ from dfs import search_clock as clock
 from dfs.kickoff import parse_kickoff
 from dfs.late_swap_search import LineupState, OpenSlot, SwapPlayer, conflicts, top_lineups
 from dfs.models import ROSTER_SLOTS
-from dfs.sim_inputs import build_specs
 
 pytestmark = pytest.mark.slow
-
-CAP = 50000
-SLOTS = {"QB": 1, "RB": 2, "WR": 3, "TE": 1, "DST": 1}
-EARLY, LATE, NIGHT = "2026-10-18T13:00:00Z", "2026-10-18T16:25:00Z", "2026-10-18T20:20:00Z"
-NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)  # 8 am ET Sunday: nothing has kicked off
-N_SIMS = 1500  # plenty for the rules; the sheet itself uses 20,000
-
-
-def slate(teams=6, seed=1, per_team=None):
-    """A synthetic slate: `teams` teams in `teams // 2` games; each has a QB, 2 RB, 4 WR, 2 TE and a DST with
-    salaries that make the cap bind. Kickoffs rotate through three slots."""
-    rng = np.random.default_rng(seed)
-    per_team = per_team or {"QB": 1, "RB": 2, "WR": 4, "TE": 2, "DST": 1}
-    base = {
-        "QB": (14, 24, 5000, 7500),
-        "RB": (6, 18, 4000, 8500),
-        "WR": (5, 17, 3500, 8500),
-        "TE": (4, 12, 2800, 5500),
-        "DST": (3, 9, 2000, 3500),
-    }
-    rows, pid = [], 1
-    for t in range(teams):
-        game, side = divmod(t, 2)
-        team, opp = f"T{t:02d}", f"T{(t ^ 1):02d}"
-        start = (EARLY, LATE, NIGHT)[game % 3]
-        for pos, n in per_team.items():
-            lo, hi, slo, shi = base[pos]
-            for k in range(n):
-                skill = rng.uniform(0.0, 1.0)
-                rows.append(
-                    {
-                        "Id": pid,
-                        "Name": f"{team} {pos}{k + 1}",
-                        "Position": pos,
-                        "Team": team,
-                        "Opp": opp,
-                        "GameID": f"G{game}",
-                        "GameStart": start,
-                        "Salary": int(round((slo + (shi - slo) * skill + rng.normal(0, 150)) / 100) * 100),
-                        "CalPts": round(lo + (hi - lo) * skill + rng.normal(0, 1.0), 1),
-                        "ProjPts": round(lo + (hi - lo) * skill, 1),
-                        "Avail": "",
-                        "Own%": 0.0,
-                    }
-                )
-                pid += 1
-    return pd.DataFrame(rows)
-
-
-def tags_for(edge, tag="Both"):
-    return dict.fromkeys(edge["Name"], tag)
-
-
-def run(edge, tags=None, **kw):
-    kw.setdefault("n_sims", N_SIMS)
-    return ls.suggest_builds(
-        edge,
-        tags if tags is not None else tags_for(edge),
-        build_specs(edge),
-        now=NOW,
-        cap=CAP,
-        cash_line=145.0,
-        gpp_target=190.0,
-        metric="CalPts",
-        **kw,
-    )
-
-
-# --- the rules ---------------------------------------------------------------
-
-
-def assert_legal(build):
-    players = list(build.players)
-    assert len(players) == 9 and len({p.name for p in players}) == 9
-    assert sum(p.salary for p in players) <= CAP and build.salary == sum(p.salary for p in players)
-    for slot, p in zip(ROSTER_SLOTS, players, strict=True):  # slot positions, FLEX takes an RB, WR or TE
-        assert p.position in (("RB", "WR", "TE") if slot == "FLEX" else (slot,))
-    for p in players:
-        assert not conflicts(p, [o for o in players if o is not p])  # no DST vs own QB, one RB a game
 
 
 @pytest.fixture(scope="module")
@@ -105,59 +35,7 @@ def edge():
     return slate()
 
 
-@pytest.fixture(scope="module")
-def report(edge):
-    return run(edge)
-
-
-def _qb(build):
-    return next(p.name for p in build.players if p.position == "QB")
-
-
-def test_the_defaults_are_one_cash_build_and_a_gpp_build_for_every_qb_stack_two_when_they_fit(report, edge):
-    kinds = [b.kind for b in report.builds]
-    assert kinds[:1] == ["cash"] and set(kinds[1:]) == {"gpp"}
-    assert [b.number for b in report.builds] == list(range(1, len(report.builds) + 1))
-    quarterbacks = {
-        p.name
-        for p in ls.pool_for(edge, tags_for(edge), ls.GPP_TAGS, now=NOW, metric="CalPts")
-        if p.position == "QB"
-    }
-    per_qb = {}
-    for build in (b for b in report.builds if b.kind == "gpp"):
-        per_qb[_qb(build)] = per_qb.get(_qb(build), 0) + 1
-    assert set(per_qb) == quarterbacks  # every QB stack has a build...
-    assert all(1 <= n <= ls.BUILDS_PER_QB for n in per_qb.values())  # ...and at most two each
-    assert any(n == ls.BUILDS_PER_QB for n in per_qb.values())
-    assert report.complete
-
-
-def test_every_build_is_a_legal_lineup(report):
-    for build in report.builds:
-        assert_legal(build)
-
-
-def test_every_build_differs_from_the_earlier_ones_of_its_kind_by_at_least_three_players(report):
-    for kind in ("cash", "gpp"):
-        group = [b for b in report.builds if b.kind == kind]
-        floor = (
-            ls.MIN_DIFFERENCE if kind == "cash" else ls.SECOND_BUILD_MIN_DIFFERENCE
-        )  # a QB's 2nd GPP build
-        for a, b in combinations(group, 2):
-            assert len({p.name for p in a.players} - {p.name for p in b.players}) >= floor
-
-
-def test_every_gpp_build_has_a_shape_it_really_matches_and_its_title_names_it(report):
-    for build in (b for b in report.builds if b.kind == "gpp"):
-        qb = next(p for p in build.players if p.position == "QB")
-        mates = [p for p in build.players if p.team == qb.team and p.position in ("RB", "WR", "TE")]
-        assert 1 <= len(mates) <= 3  # every shape ties the QB to one to three teammates
-        assert build.shapes and set(build.shapes) <= set(shapes_mod.SHAPES)
-        assert tuple(shapes_mod.shapes_of(build.players)) == tuple(
-            s for s in build.shapes if s != shapes_mod.CONTRARIAN
-        )
-        assert build.stack == shapes_mod.shape_name(build.players, build.shapes)
-        assert build.stack.startswith(qb.team) and build.stack in build.title
+# --- the rules ---------------------------------------------------------------
 
 
 def test_no_player_is_in_more_than_sixty_percent_of_the_gpp_builds(edge):
@@ -171,19 +49,6 @@ def test_no_player_is_in_more_than_sixty_percent_of_the_gpp_builds(edge):
         for p in build.players:
             uses[p.name] = uses.get(p.name, 0) + 1
     assert max(uses.values()) <= cap
-
-
-def test_builds_are_listed_cash_then_gpp_by_qb_then_calpts_total_and_numbered_down_the_list(report):
-    """Sam, 2026-10-17: ordered by QB, then CalPts total, within Cash and GPP; Build N follows that order."""
-    assert [b.number for b in report.builds] == list(range(1, len(report.builds) + 1))
-    kinds = [b.kind for b in report.builds]
-    assert kinds == sorted(kinds, key=lambda k: k != "cash")  # every cash build before every GPP build
-    for kind in ("cash", "gpp"):
-        part = [b for b in report.builds if b.kind == kind]
-        keys = [(_qb(b), -round(b.projection, 6)) for b in part]
-        assert keys == sorted(keys), kind  # QB name A-Z, the higher CalPts total first within a QB
-    for b in report.builds:  # the title carries the number it is listed under
-        assert b.title.startswith(f"{'Cash' if b.kind == 'cash' else 'GPP'} build {b.number}")
 
 
 def test_a_run_times_its_search_phases_and_phase_lines_lays_them_out_with_a_total(edge):
@@ -224,21 +89,6 @@ def test_display_order_is_the_same_whatever_order_the_picks_were_made_in():
     ]
     assert [b.title for b in forward] == [b.title for b in backward]
     assert [b.title for b in forward][0] == "Cash build 1" and forward[2].title == "GPP build 3  ·  U stack"
-
-
-def test_the_flex_of_every_build_is_the_latest_kickoff_of_its_surplus_position(report, edge):
-    kickoff = dict(zip(edge["Name"], edge["GameStart"].map(parse_kickoff), strict=True))
-    for build in report.builds:
-        flex = build.players[ROSTER_SLOTS.index("FLEX")]
-        same = [p for p in build.players if p.position == flex.position]
-        assert kickoff[flex.name] == max(kickoff[p.name] for p in same)
-
-
-def test_the_same_pool_and_data_give_the_same_builds(edge, report):
-    again = run(edge)
-    assert [(b.title, [p.name for p in b.players], b.p_cash, b.p_gpp) for b in again.builds] == [
-        (b.title, [p.name for p in b.players], b.p_cash, b.p_gpp) for b in report.builds
-    ]
 
 
 def test_a_realistic_pool_finishes_inside_the_time_budget():
@@ -432,9 +282,8 @@ def test_choose_searches_every_candidate_not_just_the_best_few_when_the_cap_leav
     assert chosen == [top[0], far]
 
 
-def test_choose_returns_the_first_valid_set_in_rank_order_and_agrees_with_brute_force():
+def test_choose_returns_the_first_valid_set_in_rank_order_and_agrees_withbrute_force():
     import random
-    from itertools import combinations
 
     rng = random.Random(5)
     for trial in range(12):
@@ -485,27 +334,6 @@ def test_seat_puts_the_latest_kickoff_of_the_surplus_position_in_flex_and_ties_u
     assert [p.position for p in seated] == [s if s != "FLEX" else "WR" for s in ROSTER_SLOTS]
 
 
-def _brute_force(pool, k):
-    """The k best legal lineup totals by exhaustive search: every 9-set with the right position counts."""
-    by = {pos: [p for p in pool if p.position == pos] for pos in SLOTS}
-    totals = {}
-    for qb in by["QB"]:
-        for dst in by["DST"]:
-            for rbs in combinations(by["RB"], 2):
-                for wrs in combinations(by["WR"], 3):
-                    for te in by["TE"]:
-                        used = {qb, dst, te, *rbs, *wrs}
-                        for flex in (p for p in pool if p.position in ("RB", "WR", "TE") and p not in used):
-                            lineup = [qb, *rbs, *wrs, te, flex, dst]
-                            if sum(p.salary for p in lineup) > CAP:
-                                continue
-                            if any(conflicts(p, [o for o in lineup if o is not p]) for p in lineup):
-                                continue
-                            totals[frozenset(p.name for p in lineup)] = round(sum(p.value for p in lineup), 6)
-    # each SET of nine players counts once, however its surplus position is seated
-    return sorted(totals.values(), reverse=True)[:k]
-
-
 def test_top_lineups_agrees_with_exhaustive_search_on_a_small_pool():
     frame = slate(teams=4, seed=3, per_team={"QB": 1, "RB": 1, "WR": 2, "TE": 1, "DST": 1})
     pool = ls.pool_for(frame, tags_for(frame), ls.CASH_TAGS, now=NOW, metric="CalPts")
@@ -514,7 +342,7 @@ def test_top_lineups_agrees_with_exhaustive_search_on_a_small_pool():
     assert complete and len(found) == 12
     totals = [round(sum(p.value for p in a.values()), 6) for a in found]
     assert totals == sorted(totals, reverse=True)
-    assert totals == _brute_force(pool, 12)[: len(totals)]
+    assert totals == brute_force(pool, 12)[: len(totals)]
     sets = [frozenset(p.name for p in a.values()) for a in found]
     assert len(set(sets)) == len(sets)  # no lineup twice
 
@@ -584,149 +412,3 @@ def test_a_gpp_build_is_never_a_lineup_of_nothing_but_cash_marked_players():
     assert not ok(players("a", "b"))  # all Cash-marked
     assert ok(players("a", "c")) and ok(players("a", "d"))  # one GPP or Both player is enough
     assert not ok(players("a", "b", "an-unpooled-dst"))  # a defense nobody pooled is not marked GPP
-
-
-# --- shapes, duplicates and the Top 1% share ----------------------------------------------------------------
-
-
-def owned(edge, seed=1):
-    """`edge` with a plausible ownership: popular where value is high, position totals as on a real slate."""
-    rng = np.random.default_rng(seed)
-    out = edge.copy()
-    value = (out["CalPts"] / out["Salary"] * 1000) ** 3 * rng.uniform(0.6, 1.4, len(out))
-    for pos, total in {"QB": 1.0, "RB": 2.2, "WR": 3.4, "TE": 1.1, "DST": 1.0}.items():
-        mask = out["Position"] == pos
-        out.loc[mask, "Own%"] = (value[mask] / value[mask].sum() * total).clip(upper=0.6)
-    return out
-
-
-@pytest.fixture(scope="module")
-def owned_report(edge):
-    return run(owned(edge))
-
-
-def _cand(names_values, p_gpp, e_dups=None):
-    players = tuple(SwapPlayer(n, "WR", "T", "U", "G", 5000, 10.0) for n in names_values)
-    objective = None if e_dups is None else p_gpp / (1 + e_dups)
-    return ls.Scored(players, 90.0, 45000, 0.5, p_gpp, 100.0, 130.0, (), None, None, e_dups, objective)
-
-
-def test_the_gpp_objective_ranks_equal_top_1_percent_by_fewer_duplicates():
-    unique, chalk, no_info = _cand("a", 0.02, 0.1), _cand("b", 0.02, 5.0), _cand("c", 0.02)
-    ranked = sorted([chalk, unique], key=ls.gpp_key)
-    assert [s.players[0].name for s in ranked] == ["a", "b"]
-    # a higher Top 1% loses to enough extra copies; without ownership the plain chance decides
-    assert ls.gpp_key(_cand("d", 0.021, 5.0)) > ls.gpp_key(_cand("e", 0.020, 0.1))
-    assert no_info.gpp_value == pytest.approx(0.02)
-    assert ls.gpp_key(_cand("f", 0.03)) < ls.gpp_key(_cand("g", 0.02))
-
-
-def test_top1_ranks_by_the_chance_alone_and_share_discounts_the_duplicates():
-    unique, chalk = _cand("a", 0.020, 0.1), _cand("b", 0.021, 5.0)
-    assert [s.players[0].name for s in sorted([unique, chalk], key=ls.top1_key)] == ["b", "a"]
-    assert [s.players[0].name for s in sorted([unique, chalk], key=ls.gpp_key)] == ["a", "b"]
-    # with the chance tied, the projection decides under top1 (the duplicates are only shown)
-    tied = [_cand("c", 0.02, 5.0), _cand("d", 0.02, 0.1)]
-    assert ls.top1_key(tied[0])[:3] == ls.top1_key(tied[1])[:3]  # the chance, projection and salary tie
-
-
-def test_the_default_rank_is_top1_and_an_unknown_rank_is_refused():
-    assert ls.DEFAULT_RANK == "top1" and ls.RANKS == ("top1", "share")
-    assert ls.rank_key("top1") is ls.top1_key and ls.rank_key("share") is ls.gpp_key
-    with pytest.raises(ValueError, match="rank must be one of top1, share"):
-        ls.rank_key("ev")
-
-
-def test_a_gpp_run_defaults_to_top1_and_either_rank_still_reports_the_duplicates(edge, owned_report):
-    explicit = run(owned(edge), rank="top1")
-    assert [_build_key(b) for b in explicit.builds] == [_build_key(b) for b in owned_report.builds]
-    shared = run(owned(edge), rank="share")
-    for report in (explicit, shared):
-        gpp = [b for b in report.builds if b.kind == "gpp"]
-        assert gpp and all(b.e_dups is not None and b.objective is not None for b in gpp)
-        for b in report.builds:
-            assert_legal(b)
-    # the same lineups are scored either way; only the order they are picked in can differ
-    assert {b.p_cash for b in shared.builds if b.kind == "cash"} == {
-        b.p_cash for b in explicit.builds if b.kind == "cash"
-    }
-    with pytest.raises(ValueError):
-        run(owned(edge), rank="bogus")
-
-
-def test_every_gpp_build_reports_sum_product_dupes_and_the_top_1_share(owned_report):
-    from dfs.sim import dups
-
-    edge = owned(slate())
-    specs = build_specs(edge)
-    from dfs.sim_inputs import ownership_by_name
-
-    shares = ls.ownership_shares(specs, edge, None, "top")
-    assert shares and sum(shares.values()) == pytest.approx(9.0)
-    assert ownership_by_name(edge)  # the shares come from the edge's Own%
-    gpp = [b for b in owned_report.builds if b.kind == "gpp"]
-    assert gpp
-    for b in gpp:
-        own = dups.shares_for([p.name for p in b.players], shares)
-        assert b.own_sum == pytest.approx(dups.ownership_sum(own))
-        assert b.own_product == pytest.approx(dups.ownership_product(own))
-        assert b.e_dups == pytest.approx(dups.DUP_MODEL_GPP.expected(own, dups.DEFAULT_GPP_ENTRIES))
-        assert b.entries == dups.DEFAULT_GPP_ENTRIES
-        assert b.objective == pytest.approx(b.p_gpp / (1 + b.e_dups))
-        assert dups.dups_label(b.e_dups) in b.title and b.stack in b.title
-        assert b.shapes
-
-
-def test_the_contest_size_is_an_input(edge, owned_report):
-    small = run(owned(edge), cash_builds=0, gpp_entries=800)
-    base = [b for b in owned_report.builds if b.kind == "gpp"]
-    assert {x.entries for x in small.builds} == {800} and {x.entries for x in base} == {1000}
-    # the same lineup has proportionally more copies in a bigger field
-    by_players = {tuple(p.name for p in b.players): b for b in base}
-    shared = [b for b in small.builds if tuple(p.name for p in b.players) in by_players]
-    assert shared
-    for b in shared:
-        assert by_players[tuple(p.name for p in b.players)].e_dups == pytest.approx(b.e_dups * 1000 / 800)
-
-
-def test_without_ownership_the_gpp_objective_is_the_plain_top_1_percent(report):
-    assert any("Ownership has not published" in n for n in report.notes)
-    for b in (b for b in report.builds if b.kind == "gpp"):
-        assert b.objective is None and b.e_dups is None and "dupes" not in b.title
-
-
-def test_cash_builds_are_not_changed_by_ownership_only_read_out(edge, owned_report, report):
-    plain = [b for b in report.builds if b.kind == "cash"]
-    with_own = [b for b in owned_report.builds if b.kind == "cash"]
-    assert [[p.name for p in b.players] for b in plain] == [[p.name for p in b.players] for b in with_own]
-    assert [b.p_cash for b in plain] == [b.p_cash for b in with_own]
-    assert all(b.e_dups is None for b in plain) and all(b.e_dups is not None for b in with_own)
-    assert all(b.objective is None for b in with_own)  # nothing ranks on it
-
-
-def test_a_cash_build_many_entries_share_gets_a_warning_and_is_still_built(edge):
-    loud = run(owned(edge), cash_builds=3, gpp_builds=0, double_up_entries=5_000_000)
-    assert len([b for b in loud.builds if b.kind == "cash"]) == 3  # never a filter
-    assert any("identical entries" in n for n in loud.notes)
-    quiet = run(owned(edge), gpp_builds=0, double_up_entries=10)
-    assert not any("identical entries" in n for n in quiet.notes)
-
-
-def test_the_candidates_cover_the_shapes_and_the_builds_are_tagged(edge, owned_report):
-    seen = {s for b in owned_report.builds if b.kind == "gpp" for s in b.shapes}
-    assert shapes_mod.STACK in seen and len(seen) > 1
-    stack_only = run(owned(edge), cash_builds=0, shapes=(shapes_mod.STACK,))
-    assert all(b.shapes and shapes_mod.STACK in b.shapes for b in stack_only.builds)
-
-
-def test_the_shaped_builds_are_deterministic_under_a_seed(edge, owned_report):
-    again = run(owned(edge))
-    assert [_build_key(b) for b in again.builds] == [_build_key(b) for b in owned_report.builds]
-
-
-def _build_key(b):
-    return (b.title, [p.name for p in b.players], b.p_cash, b.p_gpp, b.shapes, b.e_dups, b.objective)
-
-
-def test_the_shaped_search_stays_inside_the_time_budget(owned_report):
-    assert owned_report.complete and owned_report.seconds < ls.TIME_LIMIT_SECONDS

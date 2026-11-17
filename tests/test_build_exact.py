@@ -10,8 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import builder_helpers as syn  # noqa: E402
 import test_build_milp as small  # noqa: E402
-import test_lineup_suggest as syn  # noqa: E402
 
 from dfs import backtest_settings as bs  # noqa: E402
 from dfs import build_exact as be  # noqa: E402

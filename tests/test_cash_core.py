@@ -3,7 +3,8 @@
 from datetime import UTC, datetime
 
 import pytest
-from test_lineup_suggest import CAP, NOW, _brute_force, slate, tags_for
+from builder_helpers import CAP, NOW, slate, tags_for
+from builder_helpers import brute_force as _brute_force
 
 from dfs import cash_core as cc
 from dfs import lineup_suggest as ls

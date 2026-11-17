@@ -10,7 +10,7 @@ from itertools import combinations
 import pytest
 
 sys.path.insert(0, "tests")
-import test_lineup_suggest as syn  # noqa: E402
+import builder_helpers as syn  # noqa: E402
 
 from dfs import lineup_iterate as li  # noqa: E402
 from dfs import lineup_shapes as shapes_mod  # noqa: E402
