@@ -22,11 +22,11 @@ A settings file is TOML; every key is optional and a missing one is today's defa
 
     [flags]                                # named switches other sessions register (below)
     ownership_uncertainty = true
-    portfolio = { objective = "robust", wide = 8 }
+    calls = "avoid"
 
 **The registry.** A flag is a `Flag`: a name, one line of doc, and any of four optional hooks, registered
 with `register(Flag(...))` from the module that implements it (session H registers `ownership_mean` and
-`ownership_uncertainty`, session I `portfolio`) so `dfs backtest` never needs editing for a new switch:
+`ownership_uncertainty`, Plan M `calls`) so `dfs backtest` never needs editing for a new switch:
 
 - `prepare(ctx, value) -> ctx`: change what the builder is given (the projections, the specs, the lines or the
   simulated field in `ctx.lines`), e.g. swap in a field that draws ownership per simulation;
@@ -68,7 +68,6 @@ from dfs import suggest_state
 PLUGIN_MODULES: tuple[str, ...] = (
     "dfs.sim.shrink_flag",
     "dfs.sim.own_error_flag",
-    "dfs.sim.portfolio_flag",
     "dfs.plays_flag",
     "dfs.sim.share_dupes_flag",
 )

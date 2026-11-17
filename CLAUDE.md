@@ -124,16 +124,6 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   own settings, never advice. `--propose` prints suggested rule values with the arithmetic and writes nothing.
   `dfs week new` rebuilds the block on the new sheet (never failing); `doctor` flags a sheet without it.
 
-- `dfs lineups suggest --portfolio [--portfolio-objective edollars|top1|robust] [--portfolio-wide N] [--entries-csv <file>]` -- **default off, shadow**
-  (the retro did not prove it): after the builds, picks which GPP build goes in which of his GPP entries as one set (greedy marginal gain
-  on shared sim draws, `portfolio.py`; his N-max entries compete for the same places, so they are placed together), prints the plan beside
-  today's pick (`entries.suggest_pick`: the best build in every contest) and, on a write run, saves `data/suggest_state/<week>_portfolio.json`;
-  `dfs entries fill` then shows its lineup as the grey Suggested hint for GPP entries once the builds are on Lineups (cash entries keep today's
-  pick; a hint is never a choice). `--portfolio-wide N` adds the retro's wide pool (the builder run N times on noisy projections, ~15 s
-  each); a chosen lineup that is not a build joins the round as a new GPP build (note `portfolio pick (wide pool)`). The retro's lead
-  candidate is `--portfolio-objective robust --portfolio-wide 8` (robust is chosen on correlated-shock draws). Needs DK's entries file (downloaded by hand) and `dfs stacks --refit` once. Never writes a sheet. Plan I/O:
-  `portfolio_inputs.py`; the retro behind the verdict: `sim/portfolio_retro.py` (needs the curse study's saved builds). **Dropped from the weekly
-  reruns** (the Week 7 backtest lost again, -13.8 ROI pts/wk, 1 of 5): the code and the `portfolio` backtest flag stay, default off.
 - `dfs setup cockpit [--sheet-id <id>]` -- creates (or rebuilds) the read-only **Cockpit** tab right before Board (to its left): Sunday's last 90
   minutes on one page (new Q / D / OUT in his lineups, open slots with the best change from the last `late-swap` run, wind, the Lineups
   warnings, exposure top 10, DK Upload entries without a Lineup, budget). Nothing on it is typed; column A is the cue (`SWAP`, `LOOK`,
@@ -316,7 +306,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   under DK rules via `field_gen.chalk_lineups(objective="sum")`; copies from `sim/dup_calibration.py`'s held-out fit,
   `data/model_cache/dup_calibration.json`, error shown; 5+ copies flags a GPP lineup, never cash), the **entry plan**
   (`entry_plan.py`: kind, entry limits, spend by tier, every entry has a lineup (`entered.EnteredRecord.blank`); the hint
-  is `entries.suggest_pick`, Untested, never "Best in", never the portfolio plan), and the **practice trend** beside every
+  is `entries.suggest_pick`, Untested, never "Best in"), and the **practice trend** beside every
   Q / D tag (board, Explorer, drawer; `practice.py` from `data/raw/nflverse_injuries/`). The Cockpit gains blocks 8
   (inactives and pivots) and 9 (practice) below the first seven, and a plain `dfs sync` refreshes it too.
 - **The news change log** (`news_log.py` pure, `news_store.py` I/O; blueprint Phase C item 1): every `dfs sync`, `dfs sync --live` and
