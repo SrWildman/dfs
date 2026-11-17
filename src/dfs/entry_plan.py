@@ -210,12 +210,9 @@ def make(
     checks += [(m, False) for m in kind_bad]
     checks.append(("Single-entry and entry limits respected", not limit_bad))
     checks += [(m, False) for m in limit_bad]
-    if tier_plan is None:
-        checks.append(("Spend by tier: no Weekly Budget, so no plan to check against", False))
-    else:
-        checks.append(("Spend by tier within the plan", not over))
-        checks += [(f"Over: {o}", False) for o in over]
+    # spend by tier is shown (the section's "Spent by tier" line), never checked: nothing caps or warns
+    # (blueprint Phase B)
     checks.append(("Every contest has a lineup", not blank_bad))
     checks += [(m, False) for m in blank_bad]
-    problems = kind_bad + limit_bad + [f"Over: {o}" for o in over] + blank_bad
+    problems = kind_bad + limit_bad + blank_bad
     return Plan(budget, tiers, spent, over, contests, checks, build_rows, True, problems)

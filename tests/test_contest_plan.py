@@ -65,12 +65,11 @@ def test_check_week_names_every_line_over_its_cap():
     check = cp.check_week(log, 2026, 8, CFG, 100.0)
     assert check.total == 107.0
     assert check.spent[cp.SHOWDOWN] == 31.0 and check.spent[cp.BIG_NMAX] == 5.0
-    assert check.line() == (
-        "Contest plan, Week 8: spent $107.00 vs plan $100.00; over in: Showdown $31.00 (cap $5.00), "
-        "Outside the plan $46.00 (cap $0.00), the total $107.00 (budget $100.00)"
-    )
+    line = check.line()  # facts only: no caps, no "over" (blueprint Phase B)
+    assert line.startswith("Contest plan, Week 8: spent $107.00 vs plan $100.00 (")
+    assert "Showdown $31.00" in line and "over" not in line and "cap" not in line
     ok = cp.check_week(log[log["contest_key"] == "d"], 2026, 8, CFG, 100.0)
-    assert ok.line() == "Contest plan, Week 8: spent $25.00 vs plan $100.00; within the plan"
+    assert ok.line().startswith("Contest plan, Week 8: spent $25.00 vs plan $100.00")
     assert "no budget set" in cp.check_week(log, 2026, 8, CFG, None).line()
 
 
@@ -119,7 +118,7 @@ def test_report_lines_hold_every_section():
         "EFFECTIVE RAKE",
     ):
         assert heading in text
-    assert "over in: Showdown $10.00 (cap $5.00)" in text
+    assert "over in" not in text and "(cap $" not in text
     assert "no h2h_opponents.csv yet" in text
 
 
@@ -190,7 +189,7 @@ def test_report_lines_add_the_tier_view_after_the_format_view():
     )
     assert text.index("ROI BY FORMAT") < text.index("THIS WEEK'S PLAN, BY TIER")
     assert "Tier A $60.00  |  Tier B $30.00  |  Tier C $10.00" in text
-    assert "Last week by tier (Week 8): A $13 of $60, B $15 of $30, C $12 of $10 (over); Avoid $8" in text
+    assert "Last week by tier (Week 8): A $13 of $60, B $15 of $30, C $12 of $10; Avoid $8" in text
     assert "B: Single-entry or 3-max Classic GPPs, under ~2,500 entrants" in text
     no_budget = "\n".join(
         cp.report_lines(_tier_log(), None, season=2026, week=8, cfg=CFG, budget=None, budget_source="x")

@@ -14,7 +14,7 @@ import threading
 import pytest
 
 from dfs import sheet_suggested as ss
-from dfs import week_jobs, week_server, week_writes
+from dfs import week_inputs, week_jobs, week_server, week_writes
 from tests.test_week_money import OWN, rows_with_more_wrs
 from tests.test_week_plays import row, write_csv
 from tests.test_week_server import stub_python
@@ -744,3 +744,34 @@ def test_search_finds_a_player_on_any_view_and_the_compare_tray_holds_two_to_fou
     # from any name: the pool chip's popover has + Compare
     page.locator(".pchip").first.click()
     assert page.locator("#pool-pop button.cmp-add").count() == 1
+
+
+def test_the_ledger_fits_a_1440_wide_window_with_its_bars_and_no_scolding(browser, served, tmp_path):
+    """Blueprint Phase B: the ledger fold at 1440 px: every column in view (no sideways scroll), a ±2 SE bar
+    drawn on each row with two weeks or more, and nothing red."""
+    from tests.test_ledger import ledger_payload, record
+
+    week_inputs.save_input(
+        "ledger", ledger_payload(entered=record()), season=2026, week=9, data_dir=tmp_path / "data"
+    )
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
+    pg = ctx.new_page()
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    pg.goto(served.url + "#everything")
+    until(pg, "!!document.querySelector('#ledger details')")
+    pg.evaluate("document.querySelector('#ledger details').open = true")
+    pg.wait_for_timeout(100)
+    box = pg.evaluate(
+        """(() => { const s = document.querySelector('#ledger .scroll');
+        return {sw: s.scrollWidth, cw: s.clientWidth, page: document.documentElement.scrollWidth,
+                win: window.innerWidth, bars: document.querySelectorAll('#ledger svg.iv rect').length,
+                red: [...document.querySelectorAll('#ledger *')].filter(n =>
+                    getComputedStyle(n).color === 'rgb(255, 0, 0)'
+                    || n.classList.contains('bad')).length}; })()"""
+    )
+    assert box["sw"] <= box["cw"] + 1, box
+    assert box["page"] <= box["win"], box
+    assert box["bars"] >= 2 and box["red"] == 0, box
+    ctx.close()
+    assert errors == []

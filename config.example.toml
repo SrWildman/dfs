@@ -195,6 +195,11 @@ cash_line_series = "NFL GIANT $25 Double Up [Single Entry]"
 # small_field_entrants = 1000
 # casual_eligible = false       # DK's Beginner / Casual contests are for players without an experience badge
 
+# The Week page's ledger: the dollars a week you set aside for the fun formats (Showdown, 3-max/5-max and bigger
+# multi-entry GPPs, paid Discord games). Shown beside what you spent; nothing caps or warns. Left out: "no number set".
+# [ledger]
+# fun_per_week = 10.0
+
 # The Odds API (the-odds-api.com), for player props. Put your own key here; config.toml is gitignored and the key is
 # never printed or committed.
 [odds_api]

@@ -85,7 +85,7 @@ def test_an_h2h_counts_as_single_entry():
     assert plan.problems == ["NFL $2 Head-to-Head: 2 entries, the contest allows 1"]
 
 
-def test_spend_over_a_tier_is_a_problem_and_no_budget_says_so():
+def test_spend_by_tier_is_shown_never_checked_or_called_over():
     record = {
         "lineups": [
             lineup(
@@ -94,12 +94,12 @@ def test_spend_over_a_tier_is_a_problem_and_no_budget_says_so():
         ]
     }
     over = ep.make(budget=50.0, builds=BUILDS, record=record)
-    assert any(p.startswith("Over: ") for p in over.problems)
+    assert not any("Over" in p or "over" in p for p in over.problems)
+    assert not any("tier" in text.lower() for text, _ in over.checks)
     tier = over.contests[0].tier
     assert over.spent[tier] == 75.0  # the tier is contest_tiers' call; the spend is three $25 entries
     none = ep.make(budget=None, builds=BUILDS, record=record)
     assert none.tiers is None
-    assert ("Spend by tier: no Weekly Budget, so no plan to check against", False) in none.checks
 
 
 def test_before_entering_only_the_plan_and_where_builds_go():

@@ -329,7 +329,7 @@ def test_every_section_renders_from_fixture_outputs(full):
     for section_id in SECTION_IDS:
         assert f'id="{section_id}"' in page
     # contest plan (Plan D's sidecar)
-    assert "spent $179 vs plan $150" in text and "Jpbielke" in text and 'class="bad">over' in page
+    assert "spent $179 vs plan $150" in text and "Jpbielke" in text and 'class="bad">over' not in page
     # cash: the builds by projection, never a Cash % (blueprint Phase A), and the chalk check (Chase 41% is
     # in 1 of 2 cash builds, Wan'Dale 33% in 0)
     cash_fold = html.unescape(re.sub(r"<[^>]+>", " ", week_page.cash_section(full).html()))

@@ -324,12 +324,10 @@ class TierSpend:
         return sum(self.spent.values())
 
     def line(self) -> str:
-        """One line: `Tiers, Week 9: A $28 of $30, B $20 of $15 (over), C $5 of $5; Avoid $0`."""
+        """One line: `A $28 of $30, B $20 of $15, C $5 of $5; Avoid $0` (spent of planned, no verdict)."""
         parts = []
         for tier in (A, B, C):
-            cap = self.plan.dollars(tier)
-            tag = " (over)" if self.spent[tier] > cap + 1e-9 else ""
-            parts.append(f"{tier} {_money(self.spent[tier])} of {_money(cap)}{tag}")
+            parts.append(f"{tier} {_money(self.spent[tier])} of {_money(self.plan.dollars(tier))}")
         avoid = f"; Avoid {_money(self.spent[AVOID])}" if self.spent[AVOID] else ""
         return ", ".join(parts) + avoid
 

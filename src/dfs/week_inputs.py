@@ -39,7 +39,7 @@ CONTEST_PLAN_SHAPE = """`dfs contests plan` leaves (via `week_inputs.save_input(
 {"caps": {"Showdown": 5, "N-max GPP (2,000+ entrants)": 10, ...},          # dollars a week, by format
  "spent": {"Showdown": 7.0, ...},                                           # last week's spend, same keys
  "budget": 150.0, "total_spent": 179.0,                                     # weekly total vs Bankroll budget
- "over": ["Showdown ($7 vs $5)"],                                           # the "over in:" list
+ "over": ["Showdown ($7 vs $5)"],                                           # kept in the file, never shown
  "roi": [{"format": "Double Up", "entries": 152, "roi": 0.091, "rake": 0.13}, ...],
  "h2h_avoid": [{"opponent": "Jpbielke", "record": "0-6"}, ...],
  "line": "spent $179 vs plan $150; over in: Showdown"}"""
@@ -427,6 +427,9 @@ class WeekInputs:
     late_swap: dict | None = None
     du_line: dict | None = None
     contest_plan: dict | None = None
+    ledger: dict | None = (
+        None  # blueprint Phase B: `ledger.payload`, saved by contests plan / entries record / close
+    )
     postmortem: dict | None = None
     tier_week: dict | None = None  # `week close`'s tier plan line for the week it closed
     budget_input: dict | None = None  # the Weekly Budget typed on the live page (`{"budget": 150}`)
@@ -484,6 +487,7 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         late_swap=read_json(d / "cockpit" / "late_swap.json"),
         du_line=read_json(d / "model_cache" / "du_line.json"),
         contest_plan=load_input("contest_plan", season, week, d),
+        ledger=load_input("ledger", season, week, d),
         # `week close` writes the closing week's post-mortem: Monday it is this week's, Tuesday on last week's
         postmortem=load_input("postmortem", season, week, d) or load_input("postmortem", season, week - 1, d),
         tier_week=load_input("tier_week", season, week, d) or load_input("tier_week", season, week - 1, d),

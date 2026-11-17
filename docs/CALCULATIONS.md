@@ -2001,7 +2001,38 @@ Each paid NFL entry in the contest log falls under one plan line (`plan_bucket`)
 GPP** (Double Up, 50/50, H2H, and SE GPP under `small_field_entrants`, 1,000); **Outside the plan**
 (everything else). Caps: `showdown_max` ($5), `big_nmax_max` ($10), the rest of the Bankroll tab's
 Weekly Budget for the preferred line, $0 outside it, and the week's total at most the budget.
-`week close` prints `spent $X vs plan $Y; over in: ...` naming every line over its cap.
+`week close` prints `spent $X vs plan $Y (format $A, ...)`: facts only. Since blueprint Phase B nothing
+calls a line "over" and the caps are no longer shown on the Week page (the `[contest_plan]` keys stay,
+so no config breaks).
+
+## The ledger (`ledger.py`; blueprint Phase B)
+
+**Formats**: the thirteen ground-truth buckets, checked in this order (`bucket_of`, ported line for line
+from the ground-truth pack's `gt_common.bucket`): Discord (a `Private` format, or "discord" in the
+contest name, paid or free), Free (fee $0), Showdown, any other non-Classic game type ("Other game
+types"), then the log's own format: H2H, Double-up, 50/50, SE GPP, Multiplier, and an N-max GPP by the
+"[N Entry Max]" in its name (under 20: "3-max/5-max"; 20 and up; no max in the name); anything else is
+"Other Classic GPP". **Groups**: Cash (H2H, Double-up, 50/50), Small GPP (SE GPP), Fun (Showdown,
+3-max/5-max, 20-max and up, N-max with no max in the name, Discord with a fee), Free (Free, Discord at
+$0), Other (Multiplier, Other Classic GPP, Other game types; one grey line on the page).
+
+Per format, over the five seasons shown (this one and the four before) and this season: n, fees,
+net = winnings (cash + tickets) - fee, **ROI = net / fees**, the cash rate (winnings > 0), and the
+**ROI's standard error** by resampling whole season-weeks (`cluster_se`: 2,000 draws with
+`numpy.random.default_rng(0)`, ROI of each draw = summed net / summed fees, the population SD times 100;
+entries in one week share a lineup, so they are not independent; none under two weeks). The page draws
+ROI +/- 2 SE on a fixed -120..+120 scale. **Rake** = the median of `1 - prize pool / (entries x fee)`
+over the format's paid entries.
+
+**H2H**: a regular is an opponent met 5+ times in the seasons shown; a win pays more than the fee, a
+tie pays something up to the fee, else a loss. Games with no opponent in the contest name are counted
+apart. Counts only: the payload holds no name.
+
+**Plan and entered, by group**: Cash = tier A and Small GPP = tier B of `contest_plan.tier_plan` (the
+Weekly Budget's tier split); Fun = `[ledger] fun_per_week` (unset: "no number set"). Entered = fee x
+entries of each contest in `data/entered` (lineups and the entries with no lineup yet), plus
+`skipped_fees` (a Showdown or another slate's entries the file held). At lock the ledger covers the log
+through the week before; at the close, through the closed week.
 
 **Effective rake** per contest: `1 - prize_pool / (entrants x fee)` (negative when a contest
 overlaid); the table shows its median over the distinct contests played, by format and, for Classic

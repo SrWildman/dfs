@@ -157,7 +157,10 @@ WEEKLY: tuple[Weekly, ...] = (
     Weekly("Contest plan", "dfs contests plan", "before entering", ("budget",)),
     Weekly("Build me lineups", "dfs lineups suggest", "after the sync", ("iterate", "round_", "cash", "gpp")),
     Weekly(
-        "Record entries", "dfs entries record", "at lock, after entering", ("csv", "from_sheet", "dry_run")
+        "Record entries",
+        "dfs entries record",
+        "at lock, after entering",
+        ("csv", "h2h", "from_sheet", "dry_run"),
     ),
     Weekly(
         "Late swap",
@@ -199,6 +202,7 @@ SHORT_LABELS = {
     "iterate": "Rerun from my Suggested edits",
     "round_": "Bring back round",
     "csv": "File (left empty: the newest in Downloads)",
+    "h2h": "This week's H2Hs: posted, joined or both",
     "from_sheet": "Use the Lineups tab",
     "dry_run": "Dry run: write nothing",
     "top": "How many to show",

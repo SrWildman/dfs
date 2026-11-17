@@ -173,6 +173,7 @@ Record what you entered this week, at lock: every lineup, its contest(s), and wh
 | `--from-sheet` | Read the Lineups tab even when an entries file is in Downloads. |
 | `--sheet-id STR` | Read a different sheet instead of config.toml's. |
 | `--dry-run` | Print the record; write no file. |
+| `--h2h CHOICE` | This week's H2Hs: ones you posted, joined, or both (the ledger's H2H line). Left out at a terminal with H2H entries, it asks once; never when piped. |
 
 ### `dfs export`
 
@@ -293,7 +294,7 @@ The contest side of `dfs week close`, on its own: keeps the history export and m
 
 ### `dfs contests plan`
 
-The weekly contest plan and the last week against it, from your own contest log (Plan D item 3): Showdown and big-field N-max GPPs capped (`[contest_plan]` in config.toml), the rest to double-ups, H2Hs and small single-entry GPPs, the total within the Bankroll tab's Weekly Budget. Then ROI by format (this season and all seasons), the effective rake by format and field size, and the H2H regulars to avoid. Terminal only: writes nothing.
+The weekly contest plan and what last week spent, from your own contest log (Plan D item 3): the Weekly Budget split by format (`[contest_plan]` in config.toml) and by tier, last week's spend by format, ROI by format (this season and all seasons), the effective rake by format and field size, and the H2H regulars. Writes no sheet; saves the plan and the ledger (blueprint Phase B) for the Week page.
 
 | Option | What it does |
 |---|---|

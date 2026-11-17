@@ -322,6 +322,16 @@ class ContestPlanConfig(BaseModel):
     casual_eligible: bool = False
 
 
+class LedgerConfig(BaseModel):
+    """`[ledger]`: the Week page's ledger (blueprint Phase B). Nothing here caps or warns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The dollars a week Sam sets aside for the fun formats (Showdown, 3-max/5-max and bigger multi-entry
+    # GPPs, paid Discord games). Unset: the page says "no number set" beside the spend.
+    fun_per_week: float | None = Field(default=None, ge=0)
+
+
 class SuggestConfig(BaseModel):
     """`[suggest]`: how `dfs lineups suggest --iterate` treats what Sam decided."""
 
@@ -361,6 +371,7 @@ class Config(BaseModel):
     suggest: SuggestConfig = SuggestConfig()
     builds: BuildsConfig = BuildsConfig()
     contest_plan: ContestPlanConfig = ContestPlanConfig()
+    ledger: LedgerConfig = LedgerConfig()
 
 
 def _missing_config_message() -> str:

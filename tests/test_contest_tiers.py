@@ -272,7 +272,7 @@ def test_spend_by_tier_names_what_is_over_the_plan():
     assert "Showdown $12 (cap $5)" in spend.over
     assert "Avoid $8 (the plan is $0)" in spend.over
     assert not any(o.startswith("Tier A") for o in spend.over)
-    assert spend.line() == "A $13 of $60, B $45 of $30 (over), C $12 of $10 (over); Avoid $8"
+    assert spend.line() == "A $13 of $60, B $45 of $30, C $12 of $10; Avoid $8"  # planned against spent
 
 
 # --- contests as an entries file describes them ------------------
