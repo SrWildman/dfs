@@ -4,13 +4,20 @@ Each player has his own outcome distribution (`dfs.model.distribution`, through 
 the same game move together according to the role-pair correlations (`correlation.py`). The simulator joins
 them with a **Gaussian copula**:
 
-    z ~ N(0, R)      R: the correlation matrix of every distinct player in every lineup
+    z ~ N(0, R)      R: the correlation matrix of every distinct player in every lineup (and the universe)
     u = Phi(z)       a uniform per player
     points = the player's quantile function at u
 
 so each player keeps exactly his own marginal while the pairs inherit R. The same player in two lineups is
 ONE variable (one column of z), so lineups that share players are correlated with each other the way real
 lineups are.
+
+**Common random numbers.** A player's draws do not depend on the order the lineups arrive in, nor on which
+other lineups are simulated with his. Players in different games are independent, so z is drawn game by game:
+each game's players in id order, from a generator seeded by `(seed, the game id)` (`_game_seed`). With a
+`universe` (the builder passes every player it holds a spec for) each game's draws are those of the
+universe's players in that game, so a lineup's simulated numbers depend only on the lineup, the universe and
+the seed: two runs over the same pool rank the same lineups the same way, whatever else they simulated.
 
 R is assembled from the shipped table: a pair in different games is 0; in the same game it is the table's
 'same_team' or 'opp' value for the two roles. Pairs
@@ -28,6 +35,8 @@ fixed-line callers (the back-test, the tests).
 
 from __future__ import annotations
 
+import zlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -167,6 +176,18 @@ def _validate(spec: PlayerSpec) -> PlayerSpec:
     return spec if role == spec.role else PlayerSpec(**{**spec.__dict__, "role": role})
 
 
+def _valid_only(specs: Iterable[PlayerSpec]) -> list[PlayerSpec]:
+    """The universe's players the simulator can draw (a spec it would refuse, say one with no game id, is
+    left out of the universe: it can only fail a run when a lineup holds him)."""
+    out = []
+    for spec in specs:
+        try:
+            out.append(_validate(spec))
+        except ValueError:
+            continue
+    return out
+
+
 def _distinct_players(lineups: list[list[PlayerSpec]]) -> list[PlayerSpec]:
     seen: dict[str, PlayerSpec] = {}
     for lineup in lineups:
@@ -224,6 +245,46 @@ def repair_correlation(r: np.ndarray) -> tuple[np.ndarray, RepairInfo]:
     return fixed, RepairInfo(n, True, float(w[0]), float(np.abs(fixed - r).max()))
 
 
+def _game_seed(seed: int, game_id: str) -> list[int]:
+    """The generator seed of one game's draws: the run's seed and a stable hash of the game id (CRC-32, the
+    same on every machine and in every process, unlike `hash`)."""
+    return [int(seed), zlib.crc32(str(game_id).encode("utf-8"))]
+
+
+def _games(players: list[PlayerSpec]) -> list[list[int]]:
+    """The column indices of each game's players, games in id order (`players` is already in id order)."""
+    by_game: dict[str, list[int]] = {}
+    for i, p in enumerate(players):
+        by_game.setdefault(p.game_id, []).append(i)
+    return [by_game[g] for g in sorted(by_game)]
+
+
+def _correlated_normals(
+    players: list[PlayerSpec], lookup: CorrelationLookup | None, n_sims: int, seed: int, independent: bool
+) -> tuple[np.ndarray, RepairInfo, list[str]]:
+    """`n_sims` x len(players) correlated standard normals, game by game (`_game_seed`): a game's block of R
+    is assembled, repaired and drawn on its own, so a game's draws depend only on its own players and the
+    seed. R is block-diagonal by game (pairs in different games are 0), so repairing it a block at a time is
+    the same repair as the whole matrix's (eigenvalue clipping is a function of the matrix, whatever basis
+    eigh returns)."""
+    m = len(players)
+    z = np.empty((n_sims, m))
+    notes: list[str] = []
+    needed, min_eigen, max_change = False, 1.0, 0.0
+    for cols in _games(players):
+        block = [players[i] for i in cols]
+        if independent:
+            r = np.eye(len(block))
+        else:
+            raw, block_notes = correlation_matrix(block, lookup)
+            notes.extend(block_notes)
+            r, info = repair_correlation(raw)
+            needed = needed or info.needed
+            min_eigen, max_change = min(min_eigen, info.min_eigenvalue), max(max_change, info.max_change)
+        z[:, cols] = _draw(r, n_sims, np.random.default_rng(_game_seed(seed, block[0].game_id)))
+    return z, RepairInfo(m, needed, min_eigen, max_change), notes
+
+
 def _draw(r: np.ndarray, n_sims: int, rng: np.random.Generator) -> np.ndarray:
     """`n_sims` x n standard normals with correlation `r` (any positive semi-definite matrix)."""
     w, v = np.linalg.eigh(r)
@@ -248,8 +309,14 @@ def simulate_lineups(
     keep_scores: bool = False,
     field: field_model.FieldModel | None = None,
     tail_delta: dict[str, float] | None = None,
+    universe: Iterable[PlayerSpec] = (),
 ) -> SimResult:
     """Simulate every lineup on the same draws.
+
+    `universe` (default none) adds players who are drawn but in no lineup, so that each game's draws are
+    those of a fixed set of players (common random numbers; see the module docstring): the builder passes
+    every player it holds a spec for. Without one, a game's draws are those of the players the lineups (and
+    the field) hold, still in id order, so the ORDER of the lineups never matters.
 
     `correlations` defaults to `models/sim/correlations.csv` with the shipped team-shape layer on top
     (`shape_table`: QB1-TE1 by the tight end's target share; a player whose `tshare` is unknown gets the
@@ -266,19 +333,15 @@ def simulate_lineups(
     if not lineups or not all(lineups):
         raise ValueError("lineups must be non-empty lists of players")
     field_cover = field.cover_players if field is not None else []
-    players = _distinct_players([*lineups, field_cover] if field_cover else lineups)
+    extra = [list(field_cover), _valid_only(universe)]
+    players = sorted(_distinct_players([*lineups, *(e for e in extra if e)]), key=lambda p: p.id)
     lineup_ids = {p.id for lineup in lineups for p in lineup}
     index = {p.id: i for i, p in enumerate(players)}
     m = len(players)
-    notes: list[str] = []
-    if independent:
-        r, repair = np.eye(m), RepairInfo(m, False, 1.0, 0.0)
-    else:
-        raw, notes = correlation_matrix(players, correlations or default_lookup())
-        r, repair = repair_correlation(raw)
-
-    rng = np.random.default_rng(seed)
-    u = ndtr(_draw(r, n_sims, rng))
+    z, repair, notes = _correlated_normals(
+        players, None if independent else correlations or default_lookup(), n_sims, seed, independent
+    )
+    u = ndtr(z)
     points = np.zeros((n_sims, m))
     for position in ("QB", "RB", "WR", "TE", "DST"):
         cols = [i for i, p in enumerate(players) if p.position == position and p.projection > 0]
@@ -289,7 +352,11 @@ def simulate_lineups(
         for k, col in enumerate(cols):
             points[:, col] = marginal.ppf(mg, k, u[:, col])
 
-    scores = np.column_stack([points[:, [index[p.id] for p in lineup]].sum(axis=1) for lineup in lineups])
+    # Each lineup's players summed in column (id) order, so the same nine in another seat order add up to
+    # the same float.
+    scores = np.column_stack(
+        [points[:, sorted(index[p.id] for p in lineup)].sum(axis=1) for lineup in lineups]
+    )
     cash_thr: float | np.ndarray = cash_line  # a number, or (relative lines) one threshold per draw
     gpp_thr: float | np.ndarray = gpp_target
     lines, f_mean, f_sd, cash_lines, top_lines = "fixed", None, None, None, None
@@ -333,7 +400,7 @@ def simulate_lineups(
         lines=lines,
         field_mean=f_mean,
         field_sd=f_sd,
-        field_extra_players=len(players) - len(lineup_ids) if field is not None else 0,
+        field_extra_players=len({p.id for p in field_cover} - lineup_ids) if field is not None else 0,
         cash_lines=cash_lines if keep_scores else None,
         top_lines=top_lines if keep_scores else None,
     )
@@ -343,10 +410,12 @@ def _field_lines(
     field: field_model.FieldModel, points: np.ndarray, index: dict[str, int], tables
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Each draw's cash line and top-end line: the field mean (the ownership-weighted sum of the draw's
-    points) plus the offset. A field player who was simulated enters at his drawn points; the rest of the
-    ownership (the tail) enters at his expected points, a constant."""
-    drawn = [(k, index[p.id]) for k, p in enumerate(field.players) if p.id in index]
-    tail = [k for k, p in enumerate(field.players) if p.id not in index]
+    points) plus the offset. A field player of `field.cover` enters at his drawn points; the rest of the
+    ownership (the tail) enters at his expected points, a constant, even when he is in a lineup or the
+    universe (so the lines are the same whatever lineups are simulated)."""
+    cover = set(field.cover)
+    drawn = [(k, index[p.id]) for k, p in enumerate(field.players) if k in cover]
+    tail = [k for k in range(len(field.players)) if k not in cover]
     ks, cols = [k for k, _ in drawn], [c for _, c in drawn]
     tail_points = (
         field_model.expected_points([field.players[k] for k in tail], tables=tables) if tail else np.zeros(0)

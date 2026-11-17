@@ -321,6 +321,7 @@ def margins(
         gpp_target=lines.gpp_target,
         field=lines.field,
         keep_scores=True,
+        universe=specs.values(),
     )
     cash = res.cash_lines[:, None] if res.cash_lines is not None else lines.cash_line
     top = res.top_lines[:, None] if res.top_lines is not None else lines.gpp_target
