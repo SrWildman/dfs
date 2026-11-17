@@ -586,9 +586,12 @@ def test_only_cash_searches_the_cash_builds_around_an_always_pick_and_leaves_eve
     )["Name"]
     state.rules = st.RulesText(always=f"cash: {pick}")
     gpp_before = sorted(sorted(b.names) for b in state.builds if b.kind == "gpp")
+    numbered_before = {b.number: sorted(b.names) for b in state.builds if b.kind == "gpp"}
     got = rerun(edge, specs, state, prior, only="cash")
     gpp_after = sorted(sorted(names(b)) for b in got.report.builds if b.kind == "gpp")
     assert gpp_after == gpp_before  # frozen, though nobody marked them Keep
+    numbered_after = {b.number: sorted(names(b)) for b in got.report.builds if b.kind == "gpp"}
+    assert numbered_after == numbered_before  # and numbered as before: the cash builds keep their place
     cash = [b for b in got.report.builds if b.kind == "cash"]
     assert cash and all(pick in names(b) for b in cash)
     core = got.report.cash_core

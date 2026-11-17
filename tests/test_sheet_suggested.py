@@ -468,3 +468,16 @@ def test_no_cash_percentage_is_written_anywhere_on_the_tab():
     text = " ".join(str(c) for row in layout.rows for c in row)
     assert "Cash %" not in text and "51%" not in text and 0.512 not in [c for row in layout.rows for c in row]
     assert "Cash 51%" not in ss.build_summary(cash) and "Top 1%" not in ss.build_summary(cash)
+
+
+def test_an_alternative_with_no_status_never_reads_nan():
+    """A frame's empty Avail cell is a float NaN: the open spot shows no status, never the text "nan"
+    (seen on the throwaway Week 9 copy)."""
+    cash = _build(1, "cash", "Cash build 1")
+    report = _with_core(_report(cash), cash)
+    edge = _edge([cash])
+    edge["Avail"] = float("nan")
+    edge = pd.concat([edge, pd.DataFrame([{"Name": "ALT WR", "Avail": float("nan")}])], ignore_index=True)
+    layout = ss.build_layout(report, edge, metric="CalPts", cash_line=143.9, gpp_target=190.0)
+    flex = layout.rows[layout.open_rows[1] - 1][ss.TITLE_INDEX]
+    assert "ALT WR" in flex and "nan" not in flex

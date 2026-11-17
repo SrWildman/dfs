@@ -301,6 +301,13 @@ def record_of(rows: Sequence[Mapping[str, object]]) -> tuple[int, int] | None:
 # ---------------------------------------------------------------------------------------------------------
 
 
+def _text(value: object) -> str:
+    """A cell as text: "" for None and for a frame's empty cell (a float NaN, which is truthy)."""
+    if value is None or (isinstance(value, float) and value != value):
+        return ""
+    return str(value).strip()
+
+
 def details_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict]:
     """Name -> what a card shows beside a player, from EdgeRaw rows (the synced frame as records): his Id,
     position, team, opponent, CashOwn (a fraction; None before ownership), status (`Avail`) and kickoff."""
@@ -311,7 +318,7 @@ def details_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict]:
     known = [s for s in starts if s is not None]
     first = min(known) if known else None
     for r, start in zip(rows, starts, strict=True):
-        name = str(r.get("Name") or "").strip()
+        name = _text(r.get("Name"))
         if not name or name in out:
             continue
         try:
@@ -319,12 +326,12 @@ def details_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict]:
             own = None if own != own or own <= 0 else own
         except (TypeError, ValueError):
             own = None
-        status = str(r.get("Avail") or "").strip()
+        status = _text(r.get("Avail"))
         out[name] = {
-            "id": str(r.get("Id") or ""),
-            "position": str(r.get("Position") or ""),
-            "team": str(r.get("Team") or ""),
-            "opp": str(r.get("Opp") or ""),
+            "id": _text(r.get("Id")),
+            "position": _text(r.get("Position")),
+            "team": _text(r.get("Team")),
+            "opp": _text(r.get("Opp")),
             "cash_own": own,
             "status": status,
             "kickoff": kickoff_label(r.get("GameStart")) if start is not None else "",

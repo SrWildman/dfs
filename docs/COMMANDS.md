@@ -114,7 +114,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--rank CHOICE` | What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by 1 + the identical entries expected). Default: `top1`. |
 | `--iterate` | Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are ignored: the rules box's Builds wanted line says how many. |
 | `--round INT RANGE` | Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a new round (the state is kept in data/suggest_state/<week>.json). |
-| `--only CHOICE` | With --iterate: rerun only this kind of build. `cash` searches the Default cash lineup again around the rules box (what the Week page's open-spot pick runs) and leaves every GPP build as it is; `gpp` leaves the cash builds as they are. |
+| `--only CHOICE` | With --iterate: rerun only this kind of build. `cash` searches the Default cash lineup again around the rules box (what the Week page's open-spot pick runs) and leaves every GPP build as is; `gpp` leaves the cash builds as they are. |
 
 ### `dfs stacks`
 

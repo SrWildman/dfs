@@ -201,7 +201,7 @@ def open_spot_rows(report: SuggestReport, edge: pd.DataFrame) -> list[tuple[str,
         if pd.notna(v)
     }
     status = {
-        str(n): str(a or "").strip()
+        str(n): str(a).strip() if pd.notna(a) else ""  # an empty cell is NaN, never the text "nan"
         for n, a in zip(
             edge.get("Name", pd.Series(dtype=str)), edge.get("Avail", pd.Series(dtype=str)), strict=False
         )

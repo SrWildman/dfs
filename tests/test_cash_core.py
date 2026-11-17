@@ -191,6 +191,8 @@ def test_details_mark_late_games_and_status_flags():
     assert d["A"]["late"] is False and d["B"]["late"] is True
     assert d["A"]["cash_own"] == 0.31 and d["B"]["cash_own"] is None
     assert d["B"]["flags"] == ["Q"]
+    blank = cc.details_from_rows([{"Name": "C", "Id": "3", "Avail": float("nan"), "Team": float("nan")}])
+    assert blank["C"]["status"] == "" and blank["C"]["team"] == "" and blank["C"]["flags"] == []
 
 
 def test_the_payload_has_no_tier_or_percentage_text_and_its_differences_are_signed_right():

@@ -65,8 +65,8 @@ def contest(points, *, fmt="gpp", entries=None, k=1, places=3, pool=300.0, fee=1
 
 def test_entry_order_is_the_tools_own_ranking_per_kind():
     builds = [
-        build("cash", 1, p_cash=0.5),
-        build("cash", 2, p_cash=0.7),
+        build("cash", 1, p_cash=0.7, proj=120.0),
+        build("cash", 2, p_cash=0.5, proj=121.0),  # cash goes by projection, never the Cash %
         build("gpp", 3, p_gpp=0.02, e_dups=0.0),
         build("gpp", 4, p_gpp=0.05, e_dups=9.0),
         build("gpp", 5, p_gpp=0.04, e_dups=0.0),
