@@ -2150,7 +2150,7 @@ ownership, or a status change; a status change for a player projected under 5 (b
 (by size); it touches their lineups too, and they get no row of their own. **Swap** (`best_swap`): only on the lineups a move went
 against (worse status: all that hold him; a drop of 0.5+ CalPts: all; ownership up 5+ points: the GPP ones), the inactives check's
 pivots for his slot and budget (CalPts for cash, Leverage for GPP), the first that beats his current CalPts (0 when OUT / IR) by 0.5+;
-for a status row whose player is in no lineup, the best such swap on a teammate. **Stake** = the swap's CalPts gain, else the absolute
+searched past the check's top three (they are often punts below him). When only his ownership rose, the pivot must also be owned less than he now is. For a status row whose player is in no lineup, the best such swap on a teammate; a teammate's swap shows once, on the first row in the order below (on a tie, the worse status first). **Stake** = the swap's CalPts gain, else the absolute
 CalPts move. **Order**: rows with a swap first ("act"), then the rest ("no action needed"); each: in a lineup before pool only, stake,
 newest first.
 

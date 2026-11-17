@@ -46,7 +46,7 @@ Pure: rows and dicts in, dataclasses out. No file, no clock, no network.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -406,9 +406,13 @@ def best_swap(
     holders: Sequence[inactives.Source],
     now: datetime,
     by_name: Mapping[str, dict],
+    *,
+    less_owned: bool = False,
 ) -> Swap | None:
     """The best pivot for the player `row` across the lineups that hold him (the inactives check's call, one
-    lineup at a time); None when nothing gains `MIN_SWAP_GAIN`."""
+    lineup at a time); None when nothing gains `MIN_SWAP_GAIN`. `less_owned`: the move was his ownership
+    rising, so only a pivot owned less than he now is answers it (a leverage problem is never answered with
+    a chalkier player)."""
     me = normalize_name(row.get("Name"))
     now_pts = 0.0 if _status(row.get("Avail")) in ("OUT", "IR") else (_calpts(row) or 0.0)
     salary = _num(row.get("Salary"))
@@ -425,9 +429,22 @@ def best_swap(
             else (int(salary) if salary is not None else None)
         )
         exclude = {normalize_name(n) for n in src.names if str(n).strip()}
-        pivots, ranked_by = inactives.pivots_for(edge, slot, budget, src.kind, exclude, now)
-        # the inactives check's three, in its order (CalPts for cash, Leverage for GPP): the first that gains
-        p = next((q for q in pivots if (q.calpts or 0.0) - now_pts >= MIN_SWAP_GAIN), None)
+        pivots, ranked_by = inactives.pivots_for(edge, slot, budget, src.kind, exclude, now, n=len(edge))
+        # the inactives check's ranking (CalPts for cash, Leverage for GPP), searched past its three: the
+        # first that gains. For an OUT player that is the check's own first pivot; for a healthy player whose
+        # numbers moved, its top three are often punts that project under him (Week 9: $3,000 WRs for Lamb)
+        own_col = "CashOwn" if src.kind == inactives.CASH else "GppOwn"
+        cap = _num(row.get(own_col)) if less_owned else None
+
+        def ok(q: inactives.Pivot, cap: float | None = cap, own_col: str = own_col) -> bool:
+            if (q.calpts or 0.0) - now_pts < MIN_SWAP_GAIN:
+                return False
+            if cap is None:
+                return True
+            q_own = _num((by_name.get(normalize_name(q.name)) or {}).get(own_col))
+            return q_own is not None and q_own < cap
+
+        p = next((q for q in pivots if ok(q)), None)
         if p is None:
             continue
         gain = (p.calpts or 0.0) - now_pts
@@ -533,13 +550,13 @@ def rows(
         return tuple(ms[:3])
 
     def against(d_pts, d_c, d_g, holders):  # noqa: ANN001, ANN202
-        """The lineups a move went against: a projection drop hurts every lineup; an ownership rise only
-        a GPP lineup's leverage (chalk getting chalkier is fine in cash)."""
+        """(the lineups a move went against, whether only his ownership did): a projection drop hurts every
+        lineup; an ownership rise only a GPP lineup's leverage (chalk getting chalkier is fine in cash)."""
         if d_pts is not None and d_pts <= -MATE_MOVE["against"]:
-            return list(holders)
+            return list(holders), False
         if max(d_c or 0.0, d_g or 0.0) >= MIN_MOVE["cash_own"]:
-            return [h for h in holders if h.kind != inactives.CASH]
-        return []
+            return [h for h in holders if h.kind != inactives.CASH], True
+        return [], False
 
     # status rows first: the teammates they list are part of them, not rows of their own
     order = sorted(per, key=lambda pid: "status" not in per[pid])
@@ -577,11 +594,11 @@ def rows(
                 else status_text(name, stat.before, stat.after)
             )
             worse = sticky or WORSE.get(_status(stat.after), 0) > WORSE.get(_status(stat.before), 0)
-            hit = list(holders) if worse else []
+            hit, by_own = (list(holders) if worse else []), False
         elif d_pts is not None and abs(d_pts) >= MIN_MOVE["calpts"]:
             kind = "projection"
             what = f"{name}: proj {_num(cal.before) or 0:.1f} to {_num(cal.after) or 0:.1f}"
-            hit = against(d_pts, d_c, d_g, holders)
+            hit, by_own = against(d_pts, d_c, d_g, holders)
         elif (d_c is not None and abs(d_c) >= MIN_MOVE["cash_own"]) or (
             d_g is not None and abs(d_g) >= MIN_MOVE["gpp_own"]
         ):
@@ -590,7 +607,7 @@ def rows(
                 what = f"{name}: cash own {_pct(_num(cown.before))} to {_pct(_num(cown.after))}"
             else:
                 what = f"{name}: GPP own {_pct(_num(gown.before))} to {_pct(_num(gown.after))}"
-            hit = against(None, d_c, d_g, holders)
+            hit, by_own = against(None, d_c, d_g, holders)
         else:
             continue
         mates = mates_of(pid, any_net.team) if kind == "status" else ()
@@ -607,7 +624,7 @@ def rows(
         started = live is not None and inactives.started(live, now)
         swap = None
         if hit and not started and live is not None:
-            swap = best_swap(edge, live, hit, now, by_name)
+            swap = best_swap(edge, live, hit, now, by_name, less_owned=by_own)
         if kind == "status" and swap is None and not holders:  # his news, a teammate's swap
             found = []
             for m in mates:
@@ -615,8 +632,8 @@ def rows(
                 mh = holders_of.get(normalize_name(m.name), [])
                 if mrow is None or not mh or inactives.started(mrow, now):
                     continue
-                mhit = against(m.d_points, m.d_cash_own, m.d_gpp_own, mh)
-                if mhit and (sw := best_swap(edge, mrow, mhit, now, by_name)) is not None:
+                mhit, m_own = against(m.d_points, m.d_cash_own, m.d_gpp_own, mh)
+                if mhit and (sw := best_swap(edge, mrow, mhit, now, by_name, less_owned=m_own)) is not None:
                     found.append(sw)
             swap = max(found, key=lambda x: x.gain) if found else None
         stake = swap.gain if swap is not None else abs(d_pts or 0.0)
@@ -646,7 +663,23 @@ def rows(
                 sticky,
             )
         )
-    out_rows.sort(key=lambda r: (not r.in_lineup, -r.stake, -r.seen.timestamp() if r.seen else 0.0, r.name))
+    out_rows.sort(
+        key=lambda r: (
+            not r.in_lineup,
+            -r.stake,
+            -WORSE.get(r.status, 0),  # a tie: the player ruled out before the one cleared
+            -r.seen.timestamp() if r.seen else 0.0,
+            r.name,
+        )
+    )
+    offered: set[tuple[str, str]] = set()
+    for i, r in enumerate(out_rows):  # a teammate's swap shows once, on the first row that offers it
+        sw = r.swap
+        if sw is None or normalize_name(sw.out) == normalize_name(r.name):
+            continue
+        if (sw.out_id, sw.into_id) in offered:
+            out_rows[i] = replace(r, swap=None, stake=round(abs(r.d_points or 0.0), 2))
+        offered.add((sw.out_id, sw.into_id))
     result = ChangeList(other=other)
     for r in out_rows:
         (result.act if r.swap is not None and not r.started else result.none).append(r)

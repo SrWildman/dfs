@@ -346,3 +346,44 @@ def test_a_backups_status_change_is_not_a_row_but_a_live_problem_always_is():
     assert [r.name for r in kept.all] == [
         "Wr Bench"
     ]  # in the pool and Questionable: kept whatever he projects
+
+
+def test_an_ownership_rise_is_answered_only_by_a_less_owned_pivot():
+    """A GPP lineup's player got chalkier: the swap must lower the ownership, never raise it."""
+    t = BUILT + timedelta(hours=12)
+    rows_ = [change("Wr Two", "gpp_own", "0.05", "0.20", t)]
+
+    def run(cheap_own: float):
+        e = edge()
+        for r in e:
+            if r["Name"] == "Wr Two":
+                r["CalPts"], r["GppOwn"] = 7.0, 0.20
+            if r["Name"] == "Wr Cheap":
+                r["GppOwn"] = cheap_own
+        return ls.rows(ls.net_changes(pd.DataFrame(rows_), BUILT), e, [lineup(kind="gpp")], {}, MORNING)
+
+    [row_] = run(0.04).act
+    assert row_.swap is not None and row_.swap.into.name == "Wr Cheap"
+    chalky = run(0.35)
+    assert chalky.act == [] or all(r.swap.into.name != "Wr Cheap" for r in chalky.act)
+
+
+def test_a_teammate_swap_shows_once_on_the_worse_news():
+    """Two status rows of one team share a teammate's swap: it shows on the player ruled out, not on the one
+    cleared, and the second row moves to No action needed."""
+    t = BUILT + timedelta(hours=12)
+    e = edge(**{"Wr Bench": "OUT"})
+    for r in e:
+        if r["Name"] == "Wr Bench":
+            r["CalPts"] = 8.0
+        if r["Name"] == "Wr Two":
+            r["CalPts"] = 7.0
+    e.append({**next(r for r in e if r["Name"] == "Wr Bench"), "Name": "Wr Back", "Id": "299", "Avail": ""})
+    rows_ = [
+        change("Wr Back", "status", "Q", "", t, pid="299"),
+        change("Wr Bench", "status", "", "OUT", t, pid="202"),
+        change("Wr Two", "calpts", "10.0", "7.0", t),
+    ]
+    got = ls.rows(ls.net_changes(pd.DataFrame(rows_), BUILT), e, [lineup()], {}, MORNING)
+    assert [r.name for r in got.act] == ["Wr Bench"]
+    assert "Wr Back" in [r.name for r in got.none]
