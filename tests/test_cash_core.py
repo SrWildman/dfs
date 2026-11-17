@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import pytest
 from test_lineup_suggest import CAP, NOW, _brute_force, slate, tags_for
 
 from dfs import cash_core as cc
@@ -53,6 +54,7 @@ def test_the_default_is_the_top_projection_ties_broken_by_salary_then_names():
     assert core.projection == 100.0
 
 
+@pytest.mark.slow  # about 10 s: five seeds, each an exhaustive search
 def test_the_default_matches_an_exhaustive_search_on_every_seed():
     for seed in range(1, 6):
         frame = slate(teams=4, seed=seed, per_team={"QB": 1, "RB": 1, "WR": 2, "TE": 1, "DST": 1})
