@@ -1,9 +1,9 @@
-"""The optimizer's curse: how far the builder's chosen lineups fall short of their promise, and three fixes.
+"""The optimizer's curse: how far the builder's chosen lineups fall short of their promise, and two fixes.
 
 Session A's retro saw Sam's own double-up entries promised 62% to cash and cash 20% (n 10), while random real
 field lineups were calibrated. The likely reason is selection: the builder keeps the lineups the projection
 likes most, and those carry the most projection error in their favour. This study sizes that on every 2026
-week with a pre-lock snapshot and tests three fixes, each held out by week. Shadow only: nothing here changes
+week with a pre-lock snapshot and tests two fixes, each held out by week. Shadow only: nothing here changes
 a default, the builder or a sheet.
 
 **Each week as it stood at the lock.** The last EdgeRaw snapshot before Sunday 1 pm ET
@@ -29,14 +29,14 @@ gap between the two relative lines (`TOP1_GAP`, 63.2 - 0.6), marked a proxy.
 
 **Fixes** (every fitted number comes from the OTHER weeks only):
 
-- *shrink*: each player's projection pulled toward a prior by a per-position weight fitted by least squares on
-  the other weeks' players (`fit_shrink`); priors: the position's salary line (`salary`) or TFFB (`tffb`);
 - *noise*: the builder run on `NOISE_DRAWS` noisy copies of the projections (multiplicative, sd `sigma`);
   the builds are the lineups chosen most often across the draws (`robust_pick`), shown with today's odds;
 - *display calibration*: only the shown Cash % / Top 1% change (`shift` moves every build's simulated score
   by the points the builds fell short by on the other weeks; `platt` refits the logit).
 
-The ship bar is `SHIP_BAR`. Local and read-only: everything comes from Sam's files under `data/`.
+(A third, *shrink* toward the salary line or TFFB, was dropped in Nov 2026 with its `shrink_*` backtest flags;
+the code is in git history.) The ship bar is `SHIP_BAR`. Local and read-only: everything comes from Sam's
+files under `data/`.
 """
 
 from __future__ import annotations
@@ -71,8 +71,6 @@ FIELD_LINEUPS = {"cash": 150, "gpp": 150}
 RANDOM_MIN_SALARY = 48_000  # a random lineup must spend at least this much (real lineups leave little)
 TOP1_GAP = 63.2 - 0.6  # docs/SIM.md "Relative lines": top 1% and double-up cash, above the field mean
 BIG_GPP_ENTRIES = 700
-SHRINK_PRIORS = ("salary", "tffb")
-SHRINK_MIN_CALPTS = 4.0  # the players the shrink weight is fitted on (the ones a lineup can hold)
 NOISE_DRAWS = 8
 NOISE_SIGMAS = (0.10, 0.20)
 RESULTS_CACHE = Path("data/research/curse/results_lines.json")
@@ -226,73 +224,6 @@ def with_projection(edge: pd.DataFrame, values: pd.Series | np.ndarray) -> pd.Da
     base = pd.to_numeric(out["CalPts"], errors="coerce")
     out["CalPts"] = v.where(base.isna() | (v > 0.1), 0.1).where(base.notna())
     return out
-
-
-def prior_values(
-    edge: pd.DataFrame, prior: str, salary_fit: dict[str, tuple[float, float]] | None = None
-) -> pd.Series:
-    """Each row's prior: the position's salary line `a + b * salary` (`salary_fit`) or TFFB's `ProjPts`."""
-    if prior == "tffb":
-        return pd.to_numeric(edge["ProjPts"], errors="coerce").fillna(
-            pd.to_numeric(edge["CalPts"], errors="coerce")
-        )
-    if prior != "salary" or salary_fit is None:
-        raise ValueError(f"prior {prior!r} needs {SHRINK_PRIORS} (and a salary fit for 'salary')")
-    sal = pd.to_numeric(edge["Salary"], errors="coerce")
-    out = pd.Series(np.nan, index=edge.index)
-    for pos, (a, b) in salary_fit.items():
-        m = edge["Position"] == pos
-        out[m] = a + b * sal[m]
-    return out.fillna(pd.to_numeric(edge["CalPts"], errors="coerce"))
-
-
-def training_rows(weeks: dict[int, WeekInputs]) -> pd.DataFrame:
-    """One row per rated main-slate player per week: position, salary, CalPts, ProjPts, actual."""
-    parts = []
-    for w, wi in weeks.items():
-        e = wi.edge
-        parts.append(
-            pd.DataFrame(
-                {
-                    "week": w,
-                    "Position": e["Position"].to_numpy(),
-                    "Salary": pd.to_numeric(e["Salary"], errors="coerce").to_numpy(),
-                    "CalPts": pd.to_numeric(e["CalPts"], errors="coerce").to_numpy(),
-                    "ProjPts": pd.to_numeric(e["ProjPts"], errors="coerce").to_numpy(),
-                    "actual": [wi.actual.get(str(n), np.nan) for n in e["Name"]],
-                }
-            )
-        )
-    f = pd.concat(parts, ignore_index=True)
-    return f[(f["CalPts"] >= SHRINK_MIN_CALPTS) & f["actual"].notna()].reset_index(drop=True)
-
-
-def fit_salary(rows: pd.DataFrame) -> dict[str, tuple[float, float]]:
-    """Per position, the least-squares line actual = a + b * salary."""
-    out = {}
-    for pos, g in rows.groupby("Position"):
-        b, a = np.polyfit(g["Salary"].to_numpy(float), g["actual"].to_numpy(float), 1)
-        out[str(pos)] = (float(a), float(b))
-    return out
-
-
-def fit_shrink(rows: pd.DataFrame, prior: pd.Series) -> dict[str, float]:
-    """Per position, the weight `lam` in [0, 1] minimising the squared error of `(1 - lam) * CalPts + lam *
-    prior` against the actual points: `lam = sum(r d) / sum(d d)` with `r = actual - CalPts`, `d = prior -
-    CalPts`."""
-    out = {}
-    for pos, g in rows.assign(_prior=prior.to_numpy()).groupby("Position"):
-        r = g["actual"] - g["CalPts"]
-        d = g["_prior"] - g["CalPts"]
-        dd = float((d * d).sum())
-        out[str(pos)] = float(np.clip((r * d).sum() / dd, 0.0, 1.0)) if dd > 0 else 0.0
-    return out
-
-
-def shrunk_edge(edge: pd.DataFrame, prior: pd.Series, lam: dict[str, float]) -> pd.DataFrame:
-    cal = pd.to_numeric(edge["CalPts"], errors="coerce")
-    weight = edge["Position"].map(lam).fillna(0.0)
-    return with_projection(edge, (1 - weight) * cal + weight * prior)
 
 
 def noisy_edge(edge: pd.DataFrame, sigma: float, rng: np.random.Generator) -> pd.DataFrame:
@@ -481,12 +412,6 @@ def rows_for(
     return pd.DataFrame(rows)
 
 
-def base_odds(wi: WeekInputs, builds: Sequence) -> dict[tuple, ls.Scored]:
-    """`{sorted names: Scored}` for `builds` on the week's own projections."""
-    lineups = [[p.name for p in b.players] for b in builds]
-    return {tuple(sorted(p.name for p in s.players)): s for s in score_names(wi, lineups)}
-
-
 def robust_pick(
     wi: WeekInputs, draws: Sequence[Sequence[ls.Build]], kind: str, count: int = BUILDS
 ) -> list[ls.Scored]:
@@ -613,17 +538,6 @@ class Study:
             w: week_inputs(w, lines=self.lines, scored=self.scored, contests=self.contests) for w in weeks
         }
 
-    def train(self, held_out: int) -> pd.DataFrame:
-        return training_rows({w: wi for w, wi in self.weeks.items() if w != held_out})
-
-    def shrink_edge(self, week: int, prior: str) -> tuple[pd.DataFrame, dict[str, float]]:
-        """The week's edge shrunk toward `prior` with weights fitted on the other weeks."""
-        rows = self.train(week)
-        fit = fit_salary(rows) if prior == "salary" else None
-        lam = fit_shrink(rows, prior_values(rows, prior, fit))
-        edge = self.weeks[week].edge
-        return shrunk_edge(edge, prior_values(edge, prior, fit), lam), lam
-
 
 def job_name(week: int, variant: str) -> str:
     return f"w{week:02d}_{variant}"
@@ -643,17 +557,13 @@ def builds_record(builds: Sequence[ls.Build]) -> list[dict]:
 
 
 def run_job(study: Study, week: int, variant: str, out_dir: Path = OUT_DIR, seed: int = 0) -> Path:
-    """One builder run: `today`, `shrink_<prior>` or `noise_<sigma>_<draw>`; saves its builds as JSON."""
+    """One builder run: `today` or `noise_<sigma>_<draw>`; saves its builds as JSON."""
     path = out_dir / "jobs" / f"{job_name(week, variant)}.json"
     if path.exists():
         return path
     wi = study.weeks[week]
-    extra: dict = {}
     if variant == "today":
         edge = wi.edge
-    elif variant.startswith("shrink_"):
-        edge, lam = study.shrink_edge(week, variant.removeprefix("shrink_"))
-        extra["lam"] = lam
     elif variant.startswith("noise_"):
         _, sigma, draw = variant.split("_")
         rng = np.random.default_rng([seed, week, int(float(sigma) * 1000), int(draw)])
@@ -662,12 +572,12 @@ def run_job(study: Study, week: int, variant: str, out_dir: Path = OUT_DIR, seed
         raise ValueError(f"unknown variant {variant!r}")
     builds = run_builder(wi, edge)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"week": week, "variant": variant, "builds": builds_record(builds), **extra}))
+    path.write_text(json.dumps({"week": week, "variant": variant, "builds": builds_record(builds)}))
     return path
 
 
 def all_jobs(weeks: Sequence[int]) -> list[tuple[int, str]]:
-    variants = ["today", *(f"shrink_{p}" for p in SHRINK_PRIORS)]
+    variants = ["today"]
     variants += [f"noise_{s:.2f}_{d}" for s in NOISE_SIGMAS for d in range(NOISE_DRAWS)]
     return [(w, v) for v in variants for w in weeks]
 
@@ -759,9 +669,9 @@ def load_jobs(out_dir: Path = OUT_DIR) -> dict[tuple[int, str], dict]:
 
 def assemble(study: Study, out_dir: Path = OUT_DIR, seed: int = 0, log=print) -> dict:
     """Every table of the study from the saved jobs: `rows` (one per lineup, every variant and comparison
-    set), `margins` (today's builds' simulated margins over the lines), `lams` (the shrink weights)."""
+    set) and `margins` (today's builds' simulated margins over the lines)."""
     jobs = load_jobs(out_dir)
-    parts, margin_parts, lams = [], [], []
+    parts, margin_parts = [], []
     for week, wi in study.weeks.items():
         rng = np.random.default_rng([seed, week])
         today = jobs[(week, "today")]["builds"]
@@ -774,17 +684,6 @@ def assemble(study: Study, out_dir: Path = OUT_DIR, seed: int = 0, log=print) ->
                 margin_parts.append(
                     {"week": week, "kind": kind, "names": "|".join(r["names"]), "margin": col}
                 )
-        for prior in SHRINK_PRIORS:
-            d = jobs.get((week, f"shrink_{prior}"))
-            if d is None:
-                continue
-            lams.append({"week": week, "prior": prior, **d["lam"]})
-            base = base_odds(wi, [_named(r) for r in d["builds"]])
-            for kind in ("cash", "gpp"):
-                rows = record_rows(
-                    wi, [r for r in d["builds"] if r["kind"] == kind], variant=f"shrink_{prior}", kind=kind
-                )
-                parts.append(_with_base(rows, base))
         # each sigma's draws 0..7; the first sigma's draws 8..15 (`main replicate`) are an independent rerun
         sets = [(f"noise_{s:.2f}", s, range(NOISE_DRAWS)) for s in NOISE_SIGMAS]
         sets.append(
@@ -809,12 +708,12 @@ def assemble(study: Study, out_dir: Path = OUT_DIR, seed: int = 0, log=print) ->
                 )
         log(f"week {week} assembled")
     rows = pd.concat(parts, ignore_index=True)
-    return {"rows": rows, "margins": pd.DataFrame(margin_parts), "lams": pd.DataFrame(lams)}
+    return {"rows": rows, "margins": pd.DataFrame(margin_parts)}
 
 
 @dataclass(frozen=True)
 class _Named:
-    """A saved build in the shape `robust_pick` / `base_odds` read: `.kind` and `.players[i].name`."""
+    """A saved build in the shape `robust_pick` reads: `.kind` and `.players[i].name`."""
 
     kind: str
     players: tuple
@@ -827,15 +726,6 @@ class _NamePlayer:
 
 def _named(record: dict) -> _Named:
     return _Named(record["kind"], tuple(_NamePlayer(n) for n in record["names"]))
-
-
-def _with_base(rows: pd.DataFrame, base: dict) -> pd.DataFrame:
-    out = rows.copy()
-    got = [base.get(tuple(n.split("|"))) for n in out["names"]]
-    out["base_proj"] = [np.nan if s is None else s.projection for s in got]
-    out["base_p_cash"] = [np.nan if s is None else s.p_cash for s in got]
-    out["base_p_gpp"] = [np.nan if s is None else s.p_gpp for s in got]
-    return out
 
 
 def held_out_noise(per_week: pd.DataFrame, kind: str, column: str = "realized") -> pd.DataFrame:
@@ -906,7 +796,7 @@ def summarize(tables: dict) -> dict:
     fixes = {}
     for kind in ("cash", "gpp"):
         hit = "cashed" if kind == "cash" else "top1"
-        for fix in ("shrink_salary", "shrink_tffb", "noise_0.10", "noise_0.20", "noise_0.10_rep", "noise_cv"):
+        for fix in ("noise_0.10", "noise_0.20", "noise_0.10_rep", "noise_cv"):
             fixes[(kind, fix)] = {col: paired(per_week, col, fix, kind=kind) for col in ("realized", hit)}
     calibration = {}
     for kind in ("cash", "gpp"):
@@ -932,7 +822,7 @@ def summarize(tables: dict) -> dict:
 # The weekly rerun (`dfs research refresh`)
 # ---------------------------------------------------------------------------------------------------------
 
-REFRESH_FIXES = ("shrink_salary", "shrink_tffb", "noise_cv", "noise_0.10_rep")
+REFRESH_FIXES = ("noise_cv", "noise_0.10_rep")
 
 
 def cached_tables(study: Study, out_dir: Path = OUT_DIR, log=print) -> dict:
