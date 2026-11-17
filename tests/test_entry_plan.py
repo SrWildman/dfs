@@ -10,8 +10,18 @@ def contest(cid, name, fee, fmt, ids) -> dict:
 
 
 BUILDS = [
-    {"number": 1, "kind": "cash", "names": ["a"] * 9, "metrics": {"p_cash": 0.60, "p_gpp": 0.001}},
-    {"number": 2, "kind": "cash", "names": ["b"] * 9, "metrics": {"p_cash": 0.70, "p_gpp": 0.002}},
+    {
+        "number": 1,
+        "kind": "cash",
+        "names": ["a"] * 9,
+        "metrics": {"p_cash": 0.60, "p_gpp": 0.001, "projection": 120.0},
+    },
+    {
+        "number": 2,
+        "kind": "cash",
+        "names": ["b"] * 9,
+        "metrics": {"p_cash": 0.70, "p_gpp": 0.002, "projection": 125.0},
+    },
     {"number": 3, "kind": "gpp", "names": ["c"] * 9, "metrics": {"p_cash": 0.40, "p_gpp": 0.020}},
     {"number": 4, "kind": "gpp", "names": ["d"] * 9, "metrics": {"p_cash": 0.30, "p_gpp": 0.030}},
 ]
@@ -36,7 +46,7 @@ def test_a_clean_week_passes_every_check_and_hints_the_best_build():
     assert plan.entered and plan.problems == []
     assert all(ok for _, ok in plan.checks)
     hints = {c.name: c.hint for c in plan.contests}
-    assert hints["NFL $5 Double Up [Single Entry]"].startswith("build 2:")  # best Cash %
+    assert hints["NFL $5 Double Up [Single Entry]"].startswith("build 2: the Default")  # the top cash build
     assert hints["NFL $3 Mini [3 Entry Max]"].startswith("build 4:")  # best Top 1%
     assert set(plan.tiers) == {"A", "B", "C"}
 

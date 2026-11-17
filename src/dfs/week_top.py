@@ -17,7 +17,7 @@ import re
 from dfs import week_board as wb
 from dfs import week_charts, week_explorer, week_plays
 from dfs.week_inputs import WeekInputs
-from dfs.week_page import add_button, caption, how_html
+from dfs.week_page import add_button, caption, chip_html, how_html
 from dfs.week_plays import POSITIONS, num
 
 TIP = {
@@ -36,6 +36,11 @@ ROLE_CLASS = {
     wb.UPSIDE: "upside",
     wb.FADE_ROLE: "fade",
 }
+CASH_REAL_TIP = (
+    "Cash core: in 70%+ of the lineups within 1.5 points of the Default cash lineup (the last `dfs lineups "
+    "suggest`)."
+)
+CASH_GUESS_TIP = "Cash core, before the first build (a guess): " + week_plays.CASH_CORE_RULE
 ROLE_TIP = {
     wb.VALUE: "Value: top CalPts per $1K at his position.",
     wb.CASH: week_plays.CASH_CORE_RULE,
@@ -293,13 +298,266 @@ def decisions_html(
     )
 
 
+# -- the Default cash lineup (blueprint Phase A) -----------------------------------------------------------
+
+CASH_CSS = """
+.cashgrid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start;margin:12px 0}
+@media (max-width:900px){.cashgrid{grid-template-columns:1fr}}
+.crow{display:grid;grid-template-columns:40px minmax(0,1fr) 68px 70px 70px 120px;gap:8px;align-items:center;
+  padding:8px 10px;border-top:1px solid var(--line,#e4e7eb)}
+.crow:first-child{border-top:0}.crow.chead{font-size:11px;color:#8a929c;text-transform:uppercase}
+.crow .posb{font-size:11px;font-weight:650;color:#59626d;background:#eef0f3;border-radius:5px;text-align:center}
+.crow .who .sub,.cand .gm,.slotrow .tm{font-size:12px;color:#6b7480}.crow .who .why{font-size:12px}
+.crow .num{text-align:right}.crow.faded .who b,.crow.faded .num{opacity:.45;text-decoration:line-through}
+.crow .opts{justify-self:end}
+.spots{display:grid;gap:10px}.spot h3{margin:0 0 6px;font-size:13px}.spot h3 span{font-weight:400;color:#6b7480}
+.cands{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
+@media (max-width:700px){.cands{grid-auto-flow:row}.crow{grid-template-columns:34px minmax(0,1fr) 60px 60px}}
+.cand{text-align:left;background:#fff;border:1px solid #d9dde3;border-radius:8px;padding:8px 10px;display:flex;
+  flex-direction:column;gap:2px;min-width:0;font:inherit;color:inherit}
+.cand[aria-pressed=true]{border-color:#2457c5;background:#eef3fd}.cand .nm{font-weight:650}
+.cand .d{display:flex;justify-content:space-between;gap:6px;font-size:12.5px}.cand .d i{font-style:normal;color:#6b7480}
+.cand .g{color:#1a7a43}.cand .rd{color:#b42318}.cand .a{color:#b25e09}
+.slotrow{display:grid;grid-template-columns:44px minmax(0,1fr) 64px 22px;gap:8px;padding:6px 10px;
+  border-top:1px solid #eef0f3}.slotrow .sl{font-size:11px;font-weight:650;color:#59626d}
+.slotrow .open{color:#8a929c;font-style:italic}
+"""
+
+
+def _money(v: object) -> str:
+    x = num(v)
+    return f"${x:,.0f}" if x is not None else "-"
+
+
+def _when(p: dict) -> str:
+    return ("late " + p["kickoff"]) if p.get("late") and p.get("kickoff") else (p.get("kickoff") or "")
+
+
+def _cash_controls(d: wb.Decision | None, live: bool, opt_class: str = "opt") -> str:
+    if d is None:
+        return ""
+    if d.answer:
+        undo = (
+            f' <button type="button" class="undo" data-key="{e(d.key)}">Undo</button>'
+            if live and d.undo
+            else ""
+        )
+        return f'<span class="answer">{e(d.answer_text)}</span>{undo}'
+    if live:
+        return "".join(
+            f'<button type="button" class="{opt_class}" data-key="{e(d.key)}" data-opt="{e(o.key)}">'
+            f"{e(o.label)}</button>"
+            for o in d.options
+        )
+    return "".join(f'<button type="button" disabled>{e(o.label)}</button>' for o in d.options)
+
+
+def cash_board_html(core: dict, ds: list[wb.Decision], why: dict[str, str], live: bool) -> str:
+    """The Default's core: one row per player (position, name, game, the board's why, "in N of M", salary,
+    projection, cash ownership) with Play / Fade (the `core:` decisions; a faded one is listed with his
+    Undo)."""
+    of = f"{core.get('near', 0)}+" if core.get("near_truncated") else str(core.get("near", 0))
+    by_key = {d.key: d for d in ds}
+    by_name = {str((d.row or {}).get("Name")): d for d in ds if d.kind == "core"}
+    rows = []
+    for c in core.get("core") or []:
+        d = by_name.get(str(c.get("name")))
+        if c.get("faded"):
+            rows.append(
+                f'<div class="crow faded"><span class="posb">-</span><div class="who"><b>{e(c["name"])}</b>'
+                '<span class="sub"> faded: the next run built without him</span></div><span></span><span></span>'
+                f'<span></span><div class="opts">{_cash_controls(d, live)}</div></div>'
+            )
+            continue
+        d = d or by_key.get(f"core:{c.get('id', '')}")
+        status = f' <span class="chip q">{e(c["status"])}</span>' if c.get("status") else ""
+        rows.append(
+            f'<div class="crow"><span class="posb">{e(c.get("position", ""))}</span>'
+            f'<div class="who"><b>{pl({"Name": c["name"], "Id": c.get("id", ""), "Team": c.get("team", "")})}</b>'
+            f'<span class="sub"> {e(c.get("team", ""))} vs {e(c.get("opp", ""))} · {e(_when(c))}</span>{status}'
+            f'<span class="why"> · {e(why.get(c["name"], ""))}</span> <span class="chip">in {c.get("in", 0)} of {of}</span>'
+            f'</div><span class="num">{_money(c.get("salary"))}</span>'
+            f'<span class="num"><b>{num(c.get("projection")) or 0:.1f}</b></span>'
+            f'<span class="num">{e(pct(num(c.get("cash_own"))) if c.get("cash_own") is not None else "-")}</span>'
+            f'<div class="opts">{_cash_controls(d, live)}</div></div>'
+        )
+    from dfs.week_page import TRUST
+
+    proj_chip = chip_html(*TRUST["plays_value"])
+    own_chip = chip_html(*TRUST["plays_own"])
+    head = (
+        '<div class="crow chead"><span></span><span>Core: in 70%+ of the '
+        f"{e(of)} lineups within {num(core.get('near_points')) or 1.5:g} pts of the Default</span>"
+        f"<span class=num>Salary</span><span class=num>Proj {proj_chip}</span>"
+        f"<span class=num>Cash own {own_chip}</span><span></span></div>"
+    )
+    return (
+        f'<section class="card dec cashboard" id="cash-board"><div class="card-head"><h2>Cash board</h2> '
+        f"{chip_html('Untested', 'One cash lineup a week: the core is what the near-optimal lineups agree on, not a proven edge.')}"
+        f"</div>{head}{''.join(rows) or '<p class=dim>No core yet.</p>'}</section>"
+    )
+
+
+def _cand_html(c: dict, base: dict, i: int, d: wb.Decision | None, live: bool, of: str) -> str:
+    own = num(c.get("cash_own"))
+    own_txt = pct(own) if own is not None else "-"
+    if i == 0:
+        proj = f"<span>{num(c.get('projection')) or 0:.1f} pts</span>"
+        sal = f"<span>{_money(c.get('salary'))}</span>"
+        label = "projection"
+    else:
+        dp = num(c.get("d_points")) or 0.0
+        cls = "g" if dp >= 2 else "rd" if dp <= -2 else ""
+        proj = f'<b class="{cls}">{dp:+.1f} pts</b>'
+        fr = int(num(c.get("d_salary")) or 0)
+        sal = f"<b>{'+' if fr >= 0 else '-'}${abs(fr):,} {'freed' if fr >= 0 else 'more'}</b>"
+        label = "vs " + wb.short_name(str(base.get("name", "")))
+    flags = " ".join(f'<span class="chip q">{e(f)}</span>' for f in c.get("flags") or []) or "no flags"
+    pressed = "true" if d is not None and d.answer and d.answer == c.get("id") else "false"
+    attrs = (
+        f'class="cand opt" data-key="{e(d.key)}" data-opt="{e(c.get("id", ""))}"'
+        if live and d is not None and not d.answer
+        else 'class="cand" disabled'
+    )
+    return (
+        f'<button type="button" {attrs} aria-pressed="{pressed}"><span class="nm">{e(c.get("name", ""))}</span>'
+        f'<span class="gm">{e(c.get("team", ""))} vs {e(c.get("opp", ""))} · {e(_when(c))}</span>'
+        f'<span class="d"><i>{e(label)}</i>{proj}</span><span class="d"><i>salary</i>{sal}</span>'
+        f'<span class="d"><i>cash own</i><b class="{"a" if own is not None and own >= 0.45 else ""}">{e(own_txt)}</b></span>'
+        f'<span class="d"><i>status</i><span>{flags}</span></span>'
+        f'<span class="chip">in {c.get("in", 0)} of {e(of)}</span></button>'
+    )
+
+
+def open_spots_html(core: dict, ds: list[wb.Decision], live: bool) -> str:
+    """Each open spot: the Default's player and up to two single swaps, as differences against him (points,
+    salary freed, cash ownership, status). Colour only at 2+ points, amber at 45%+ owned. A pick writes
+    `cash: Name` on Always use and reruns the cash build (`--iterate --only cash`)."""
+    from dfs import cash_core as cc
+
+    of = f"{core.get('near', 0)}+" if core.get("near_truncated") else str(core.get("near", 0))
+    by_key = {d.key: d for d in ds}
+    cards = []
+    for s in core.get("open") or []:
+        d = by_key.get(f"spot:{s.get('slot', '')}")
+        base = s.get("default") or {}
+        cands = [base, *(s.get("alternatives") or [])]
+        body = "".join(_cand_html(c, base, i, d, live, of) for i, c in enumerate(cands))
+        if not s.get("alternatives"):
+            body += f'<p class="dim">{e(cc.NOTHING_AT_THE_PRICE)}</p>'
+        state = (
+            e(d.answer_text)
+            if d is not None and d.answer
+            else "pick one: the near-optimal lineups differ here"
+        )
+        undo = (
+            f' <button type="button" class="undo" data-key="{e(d.key)}">Undo</button>'
+            if live and d is not None and d.answer and d.undo
+            else ""
+        )
+        cards.append(
+            f'<div class="card spot"><h3>{e(s.get("slot", ""))} <span>{state}</span>{undo}</h3>'
+            f'<div class="cands">{body}</div></div>'
+        )
+    if not cards:
+        inner = '<p class="ok">Every near-optimal lineup agrees. Nothing to decide.</p>'
+    else:
+        inner = f'<div class="spots">{"".join(cards)}</div>'
+    say_line = (
+        ""
+        if live
+        else f'<p class="note">A pick: say {say("always <name> in cash")}, then {say(wb.CASH_RERUN_SAY)} '
+        f"(<code>{e(wb.CASH_RERUN)}</code>).</p>"
+    )
+    return (
+        '<section class="card dec" id="open-spots"><div class="card-head"><h2>Open spots, your call</h2>'
+        '<span class="dim"> only what differs is shown</span></div>'
+        f"{inner}{say_line}</section>"
+    )
+
+
+def cash_lineup_html(core: dict, calibration: dict | None = None) -> str:
+    """The Default's nine in DK's slots (E / L), salary used and left, projection, its band and the
+    late-swap order. No percentage: the band is a word and the base rate."""
+    from dfs import cash_core as cc
+
+    d = core.get("default") or {}
+    rows = []
+    for slot, p in zip(d.get("slots") or cc.SLOT_LABELS, d.get("players") or [], strict=False):
+        rows.append(
+            f'<div class="slotrow"><span class="sl">{e(slot)}</span><span><b>{e(p.get("name", ""))}</b> '
+            f'<span class="tm">{e(p.get("team", ""))}</span></span><span class="num">{_money(p.get("salary"))}</span>'
+            f'<span class="tm">{"L" if p.get("late") else "E"}</span></div>'
+        )
+    band = d.get("band") or {}
+    tie = (
+        f" (tied with {d['tied'] - 1} other{'s' if d['tied'] > 2 else ''} at {num(d.get('projection')) or 0:.1f})"
+        if (d.get("tied") or 1) > 1
+        else ""
+    )
+    cut = (
+        ""
+        if core.get("complete", True)
+        else '<p class="warn">The search was cut short: a better build may exist.</p>'
+    )
+    gap = ""
+    a = (calibration or {}).get("all") if calibration else None
+    if a and a.get("shown") is not None and a.get("cashed") is not None:
+        diff = (a["shown"] - a["cashed"]) * 100
+        gap = f"shown ran {abs(diff):.0f} pts {'high' if diff > 0 else 'low'} (n={a['n']}); no % is shown"
+    why = gap or "No % is shown: the band is a word and the record of every cash build."
+    if not core.get("complete", True):
+        why += "; search cut short"
+    chip = chip_html("Untested", why)
+    flex = d.get("flex_order") or ""
+    return (
+        '<section class="card" id="cash-lineup"><div class="card-head"><h2>Cash lineup</h2>'
+        f'<span class="dim"> round {e(core.get("round", ""))}</span></div>{"".join(rows)}'
+        f"<p><b>{_money(d.get('salary'))}</b> used, {_money(d.get('left'))} left · "
+        f"<b>{num(d.get('projection')) or 0:.1f}</b> pts{e(tie)}</p>"
+        f"<p><b>Cash chance:</b> {e(band.get('text', ''))} {chip}</p>"
+        + (f"<p><b>Late-swap order:</b> {e(flex)}</p>" if flex else "")
+        + f"{cut}</section>"
+    )
+
+
+def cash_block_html(inp: WeekInputs, ds: list[wb.Decision], board: wb.Board, live: bool) -> str:
+    """The Build state's cash half: the board and the open spots beside the Default's lineup card. Empty
+    before the first build (the decisions and the board's guess stand in)."""
+    core = inp.cash_core
+    if not core or not (core.get("default") or {}).get("names"):
+        return ""
+    why = {r.name: r.why for r in board.rows()}
+    edge_rows = {str(r.get("Name")): r for r in inp.edge or []}
+    for c in core.get("core") or []:  # the board shows only its top rows; the core needs every why
+        if c.get("name") not in why and c.get("name") in edge_rows:
+            why[c["name"]] = wb.why_facts(edge_rows[c["name"]], wb.game_rank(inp.edge or []))
+    cash = [d for d in ds if d.kind in ("core", "spot")]
+    return (
+        '<div class="cashgrid"><div>'
+        + cash_board_html(core, cash, why, live)
+        + open_spots_html(core, cash, live)
+        + "</div><div>"
+        + cash_lineup_html(core, (inp.numbers or {}).get("cash"))
+        + "</div></div>"
+    )
+
+
 # -- the board -----------------------------------------------------------------------------------------------
 
 
 def role_chips(r: wb.BoardRow, practice: str = "") -> str:
     """The row's role chips, then a Q / D tag with the week's practice trend beside it (`practice.py`)."""
+
+    def tip_for(x: str) -> str:
+        if x == wb.CASH:
+            return CASH_REAL_TIP if r.cash_real else CASH_GUESS_TIP
+        return ROLE_TIP[x]
+
     chips = "".join(
-        f'<span class="chip {ROLE_CLASS[x]}" title="{e(ROLE_TIP[x])}">{e(x)}</span>' for x in r.roles
+        f'<span class="chip {ROLE_CLASS[x]}" title="{e(tip_for(x))}">'
+        f"{e(x if x != wb.CASH or r.cash_real else x + ' (before the first build)')}</span>"
+        for x in r.roles
     )
     status = wb.avail(r.row)
     if status in ("Q", "D"):

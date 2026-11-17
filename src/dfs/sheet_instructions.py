@@ -183,7 +183,9 @@ _MODEL_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Cash",
-        f"Pool from Top plays, then Cash. Build lineups with a Cash % of {P_CASH_GREEN:.0%} or more.",
+        "Pool from Top plays, then Cash. dfs lineups suggest builds the Default cash lineup (the top "
+        "projection) and shows its core and its open spots; the Week page shows its cash chance as a band "
+        "and the record of every cash build, never a percentage.",
     ),
     (
         "GPP",
@@ -423,7 +425,9 @@ _TAB_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Suggested",
-        "Complete lineups built from your pool by dfs lineups suggest: 3 cash builds, ranked by Cash %, "
+        "Complete lineups built from your pool by dfs lineups suggest: the Default cash build (the top "
+        "projection; the OPEN SPOTS block above the builds lists its core and where the near-optimal lineups "
+        "differ), "
         "and GPP builds, a stack for every QB and two each when they fit, ranked by Top 1% "
         "(GPP builds may use anyone in your pool, never all Cash-marked). Every "
         "build shows salary, CalPts, kickoff and total ownership, with the FLEX on the latest kickoff. "

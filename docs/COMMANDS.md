@@ -104,7 +104,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 
 | Option | What it does |
 |---|---|
-| `--cash INT RANGE` | How many cash builds (0 for none). Default: `3`. |
+| `--cash INT RANGE` | How many cash builds (0 for none). Default: `1`. |
 | `--gpp INT RANGE` | How many GPP builds (0 for none). Left off, every QB stack gets a build and ideally two. |
 | `--no-write` | Print the builds here and leave the Suggested tab alone. |
 | `--seconds FLOAT RANGE` | The search budget, in seconds of search work (default 120, or 12 for --iterate; a fresh run gives cash 40%, GPP the rest). A second is a fixed amount of search, about a real second on a Mac, so the same pool always gives the same builds. Raise it for a big pool when the run says the time limit cut it short. |
@@ -114,6 +114,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--rank CHOICE` | What orders the GPP candidates: top1 (their Top 1% chance) or share (that chance divided by 1 + the identical entries expected). Default: `top1`. |
 | `--iterate` | Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are ignored: the rules box's Builds wanted line says how many. |
 | `--round INT RANGE` | Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a new round (the state is kept in data/suggest_state/<week>.json). |
+| `--only CHOICE` | With --iterate: rerun only this kind of build. `cash` searches the Default cash lineup again around the rules box (what the Week page's open-spot pick runs) and leaves every GPP build as it is; `gpp` leaves the cash builds as they are. |
 
 ### `dfs stacks`
 

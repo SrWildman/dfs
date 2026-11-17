@@ -6,6 +6,9 @@ only HTTP around these, so the tests drive them with a fake sheet).
 - **Decisions** (`decide`): the server recomputes the decision from the week's data (the page sends only its
   key and the option), so a page cannot write anything but the three answers Sam chose:
   - chalk Play / Fade: `cash: Name` on Always use / Never use (cash builds only);
+  - the Default cash lineup's (blueprint Phase A) core Play / Fade, the same lines as chalk; an open spot's
+    pick: `cash: Name` on Always use for the candidate picked (one spot holds one pick); the served page
+    then reruns the cash builds (`week_board.CASH_RERUN`);
   - the GPP stack: `more QB`, `more Mate` on Max exposure (GPP builds only already);
   - a Questionable star's pivot: that player's Pool cell to Both, and the answer saved in the week's
     decisions file (`week_inputs.save_input("decisions", ...)`); Wait for news writes nothing.
@@ -190,7 +193,39 @@ def decide_pool(
         raise ww.WriteError("there is nothing on the page to undo for that decision")
 
     rec = answers(inp)
-    if d.kind == "chalk":
+    if d.kind == "spot":
+        offered = {wb.pid(c): c for c in d.candidates}
+        if option == "undo":
+            name = str(offered.get(d.answer, {}).get("Name", ""))
+            match = ww.scoped_matcher("cash", name, slate)
+            edits.edit_rule(
+                ALWAYS, rules_was.get(ALWAYS, ""), lambda t: ww.remove_items(t, match), action="undo"
+            )
+            pool, text = _pool_undo(edits, inp, key, rec)
+            return (
+                f"{name} taken off Always use (cash); {(d.spot or {}).get('slot', 'the spot')} is open again."
+                f"{text}",
+                pool,
+            )
+        if option not in offered:
+            raise ww.WriteError("pick one of the players the spot offers")
+        name = str(offered[option]["Name"])
+        match = ww.scoped_matcher("cash", name, slate)
+        edits.edit_rule(
+            ALWAYS,
+            rules_was.get(ALWAYS, ""),
+            lambda t: ww.add_item(t, f"cash: {name}", match),
+            action="decide",
+        )
+        pool = _pool_add(edits, inp, key, [option], "Cash", rec)
+        slot = (d.spot or {}).get("slot", "the open spot")
+        return (
+            f"{slot}: {name}, written as cash: {name} on {ALWAYS}. "
+            f"In your pool as {pool.get(option) or 'nothing'}.",
+            pool,
+        )
+
+    if d.kind in ("chalk", "core"):
         name = str(d.row["Name"])
         me = wb.pid(d.row)
         match = ww.scoped_matcher("cash", name, slate)

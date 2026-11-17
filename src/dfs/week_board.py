@@ -7,8 +7,10 @@ HTML is `week_top`'s.
 (`week_plays.plays`), unchanged:
 
 - *Value*: CalPts per $1K, CalPts the tiebreak;
-- *Cash core*: the best Floor per $1K among the top half on CalPts, at most 4 QB / TE / DST and 8 RB / WR
-  (`week_plays.cash_core`); *Chalk core*: every 30%+ CashOwn player, shown even outside the caps and never
+- *Cash core*: once `dfs lineups suggest` has run, the Default cash lineup's core (`cash_core.py`: in 70%+
+  of the lineups within 1.5 points of it); before the first build, a guess: the best Floor per $1K among the
+  top half on CalPts, at most 4 QB / TE / DST and 8 RB / WR (`week_plays.cash_core_guess`, its chip says
+  "before the first build"); *Chalk core*: every 30%+ CashOwn player, shown even outside the caps and never
   behind Show more (a player on both lists is chalk core);
 - *Upside*: best Boom% (once GppOwn is out, the top half of Boom% by leverage);
 - *Fade*: the `FADE↓` chip.
@@ -150,6 +152,7 @@ class BoardRow:
     shown: bool
     why: str
     record: str = ""  # a fade's Model Check record
+    cash_real: bool = False  # his Cash core role is the build's real core, not the guess
 
     @property
     def name(self) -> str:
@@ -174,6 +177,7 @@ class Board:
     cash_pending: bool
     gpp_pending: bool
     players: int
+    cash_real: bool = False  # the Cash core role is the last build's real core (else the guess)
 
     def rows(self) -> list[BoardRow]:
         return [r for pos in POSITIONS for r in self.by_pos.get(pos, [])]
@@ -191,9 +195,33 @@ def _index(edge: list[dict]) -> dict[tuple[str, str], dict]:
     return {(str(r.get("Name", "")), str(r.get("Team", ""))): r for r in edge}
 
 
+def real_core(inp: WeekInputs) -> set[str]:
+    """The names in the last build's cash core (`cash_core` input), faded ones left out; empty before one."""
+    return {str(c.get("name")) for c in (inp.cash_core or {}).get("core") or [] if not c.get("faded")}
+
+
+def _with_real_core(view, edge: list[dict], core: set[str], pool: dict[str, str]) -> None:  # noqa: ANN001
+    """The plays view's Cash core replaced by the build's real core (and every 30%+ CashOwn player beside it,
+    as chalk core, as before)."""
+    for pos in POSITIONS:
+        at = [r for r in week_plays.rosterable(edge) if r.get("Position") == pos]
+        plays = []
+        for r in sorted(at, key=lambda r: -(num(r.get("CalPts")) or 0.0)):
+            own = num(r.get("CashOwn"))
+            chalk = own is not None and own >= CHALK
+            if str(r.get("Name")) in core or chalk:
+                play = week_plays.make_play(r, "cash", pool=pool)
+                play.chalk_core = chalk
+                plays.append(play)
+        view.cash[pos] = plays
+
+
 def board(inp: WeekInputs) -> Board:
     edge = inp.edge or []
     view = week_plays.plays(edge, inp.pool, per=DEPTH)
+    core = real_core(inp)
+    if core:
+        _with_real_core(view, edge, core, inp.pool)
     by_key = _index(edge)
     ranks = game_rank(edge)
     faded = {(r.get("Name"), r.get("Team")) for r in edge if week_plays.has_token(r, FADE)}
@@ -214,7 +242,7 @@ def board(inp: WeekInputs) -> Board:
                 if rank < SHOWN or chalk_core:  # chalk core is never behind Show more
                     shown.add(key)
         rows = [
-            BoardRow(by_key[k], r, k in shown, why_facts(by_key[k], ranks))
+            BoardRow(by_key[k], r, k in shown, why_facts(by_key[k], ranks), cash_real=bool(core))
             for k, r in roles.items()
             if k in by_key
         ]
@@ -228,7 +256,7 @@ def board(inp: WeekInputs) -> Board:
             rows.append(BoardRow(row, [FADE_ROLE], i < SHOWN, why_facts(row, ranks), record))
         if rows:
             out[pos] = rows
-    return Board(out, view.cash_own_pending, view.gpp_own_pending, view.players)
+    return Board(out, view.cash_own_pending, view.gpp_own_pending, view.players, cash_real=bool(core))
 
 
 # -- the pool ----------------------------------------------------------------------------------------------
@@ -326,9 +354,9 @@ class Option:
 
 @dataclass
 class Decision:
-    key: str  # "chalk:<Id>" | "q:<Id>" | "stack"
-    kind: str  # chalk | q | stack
-    row: dict | None  # the player (chalk / q)
+    key: str  # "chalk:<Id>" | "q:<Id>" | "stack" | "core:<Id>" | "spot:<SLOT>"
+    kind: str  # chalk | q | stack | core | spot
+    row: dict | None  # the player (chalk / q / core; spot: the Default's player)
     options: list[Option]
     answer: str = ""  # the option chosen, as the sheet (or the decisions file) says
     answer_text: str = ""
@@ -336,6 +364,14 @@ class Decision:
     pivots: list[dict] = field(default_factory=list)  # q: the pivots offered
     stacks: list[dict] = field(default_factory=list)  # stack: the two stacks
     say: str = ""  # static page: the phrase that does the same
+    spot: dict | None = (
+        None  # spot: the open spot (`cash_core` input), candidates = the Default's + alternatives
+    )
+    candidates: list[dict] = field(default_factory=list)  # spot: the EdgeRaw rows offered, in order
+
+
+CASH_RERUN = "dfs lineups suggest --iterate --only cash"  # what a core / spot answer runs (Phase A)
+CASH_RERUN_SAY = "rerun cash"  # the phrase on the static page
 
 
 def slate_names(inp: WeekInputs) -> list[str]:
@@ -406,7 +442,9 @@ def decisions(
     shown as answered from it); `answers` is the decisions file (pivots)."""
     parsed = parsed_rules(inp, rules)
     out: list[Decision] = []
-    for r in chalk_rows(inp)[:chalk_max]:
+    cash_names = cash_decision_names(inp)
+    out.extend(cash_decisions(inp, parsed))
+    for r in [r for r in chalk_rows(inp) if r["Name"] not in cash_names][:chalk_max]:
         name = r["Name"]
         d = Decision(
             f"chalk:{pid(r)}",
@@ -461,6 +499,82 @@ def decisions(
                 pick = stacks[0] if has[0] else stacks[1]
                 d.answer, d.undo = ("a" if has[0] else "b"), True
                 d.answer_text = f"{pick.get('qb', '')}: steered on Max exposure (GPP builds)"
+        out.append(d)
+    return out
+
+
+def _by_name(inp: WeekInputs) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for r in inp.edge or []:
+        out.setdefault(str(r.get("Name", "")), r)
+    return out
+
+
+def cash_decision_names(inp: WeekInputs) -> set[str]:
+    """Everyone the Default's core / open spots already ask about (so a chalk decision never asks twice)."""
+    cc = inp.cash_core or {}
+    names = {str(c.get("name")) for c in cc.get("core") or []}
+    for s in cc.get("open") or []:
+        names.add(str((s.get("default") or {}).get("name")))
+        names.update(str(a.get("name")) for a in s.get("alternatives") or [])
+    return names
+
+
+def _cash_answer(d: Decision, parsed, name: str) -> None:  # noqa: ANN001
+    """A core player's Play / Fade, read off the rules box (as the chalk decision reads it)."""
+    if parsed is None:
+        return
+    if name in parsed.always_kind.get("cash", []):
+        d.answer, d.answer_text, d.undo = "play", "Play: on Always use for cash builds", True
+    elif name in parsed.never_kind.get("cash", set()):
+        d.answer, d.answer_text, d.undo = "fade", "Fade: on Never use for cash builds", True
+    elif name in parsed.always:
+        d.answer, d.answer_text = "play", "Play: on Always use (every build, typed in the sheet)"
+    elif name in parsed.never:
+        d.answer, d.answer_text = "fade", "Fade: on Never use (every build, typed in the sheet)"
+
+
+def cash_decisions(inp: WeekInputs, parsed) -> list[Decision]:  # noqa: ANN001
+    """The Default cash lineup's choices (blueprint Phase A), from the `cash_core` input: each core player
+    (Play / Fade, the chalk decision's answers: `cash: Name` on Always use / Never use), each faded one (his
+    Fade, with its undo) and each open spot (one option per candidate: his `cash: Name` on Always use).
+    Every answer reruns the cash builds (`CASH_RERUN`)."""
+    cc = inp.cash_core or {}
+    rows = _by_name(inp)
+    out: list[Decision] = []
+    for c in cc.get("core") or []:
+        r = rows.get(str(c.get("name")))
+        if r is None:
+            continue
+        name = str(r["Name"])
+        d = Decision(
+            f"core:{pid(r)}",
+            "core",
+            r,
+            [Option("play", "Play"), Option("fade", "Fade")],
+            say=f"always {name} in cash / never {name} in cash, then {CASH_RERUN_SAY}",
+        )
+        _cash_answer(d, parsed, name)
+        out.append(d)
+    for s in cc.get("open") or []:
+        offered = [s.get("default") or {}, *(s.get("alternatives") or [])]
+        cands = [rows[str(c.get("name"))] for c in offered if str(c.get("name")) in rows]
+        if not cands:
+            continue
+        d = Decision(
+            f"spot:{s.get('slot', '')}",
+            "spot",
+            cands[0],
+            [Option(pid(r), short_name(str(r["Name"]))) for r in cands],
+            say=f"always <name> in cash, then {CASH_RERUN_SAY}",
+            spot=s,
+            candidates=cands,
+        )
+        if parsed is not None:
+            chosen = [r for r in cands if r["Name"] in parsed.always_kind.get("cash", [])]
+            if chosen:
+                d.answer, d.undo = pid(chosen[0]), True
+                d.answer_text = f"{chosen[0]['Name']}: on Always use for cash builds"
         out.append(d)
     return out
 
@@ -648,6 +762,20 @@ def news_sentence(inp: WeekInputs) -> Sentence | None:
     return Sentence("news", "Team news: " + "; ".join(parts) + ".", rows)
 
 
+def default_sentence(inp: WeekInputs) -> str:
+    """ " Default cash lineup 131.3 pts, 2 open spots (lean: cash builds have cashed 14 of 25)." or ""."""
+    d = (inp.cash_core or {}).get("default") or {}
+    if not d.get("names"):
+        return ""
+    k = len((inp.cash_core or {}).get("open") or [])
+    band = (d.get("band") or {}).get("text", "")
+    return (
+        f" Default cash lineup {num(d.get('projection')) or 0:.1f} pts, {k} open spot{'' if k == 1 else 's'}"
+        + (f" ({band})" if band else "")
+        + "."
+    )
+
+
 def brief(inp: WeekInputs, b: Board, panel: PoolPanel) -> list[Sentence]:
     """5-7 plain sentences from the data, each skipped when its data is missing. Saturday and Sunday lead with
     the builds and the swaps."""
@@ -737,7 +865,8 @@ def brief(inp: WeekInputs, b: Board, panel: PoolPanel) -> list[Sentence]:
         if builds:
             out["builds"] = Sentence(
                 "builds",
-                f"{len(builds)} builds saved (round {(inp.suggest or {}).get('round', '?')}).",
+                f"{len(builds)} builds saved (round {(inp.suggest or {}).get('round', '?')})."
+                + default_sentence(inp),
             )
         else:
             out["builds"] = Sentence("builds", "No builds yet this week: build once the pool is set.")

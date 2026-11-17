@@ -288,11 +288,17 @@ def test_nothing_is_assigned_without_the_dropdown(entries_file):
     assert plan.summary == "8 entries: 0 set, 8 blank"
 
 
-def test_cash_formats_are_suggested_the_cash_marked_lineup_with_the_best_cash_pct(entries_file):
-    plan = ent.plan_fill(entries_file, {}, sheet_lineups(**STANDARD_LINEUPS), now=BEFORE)
-    for entry_id in ("9001", "9002", "9003"):  # a Double Up and two H2H: spread over the same best lineup
-        assert row_of(plan, entry_id).suggested == "L1"
-    assert "best Cash %" in row_of(plan, "9001").why and "58.0%" in row_of(plan, "9001").why
+def test_cash_formats_are_suggested_the_cash_marked_lineup_with_the_top_projection_and_no_percentage(
+    entries_file,
+):
+    lineups = sheet_lineups(**STANDARD_LINEUPS)
+    plan = ent.plan_fill(entries_file, {}, lineups, now=BEFORE)
+    default = max((ln for ln in lineups if ln.marker == ent.CASH_MARKER), key=lambda ln: ln.cal_pts)
+    assert default.number == 2  # L2 projects more than L1, though L1's old Cash % was higher
+    for entry_id in ("9001", "9002", "9003"):  # a Double Up and two H2H: spread over the same Default
+        assert row_of(plan, entry_id).suggested == "L2"
+    why = row_of(plan, "9001").why
+    assert why.startswith("the Default (top projection") and "%" not in why
 
 
 def test_gpp_formats_are_suggested_by_top_1_pct_and_never_the_same_lineup_twice_in_a_contest(entries_file):

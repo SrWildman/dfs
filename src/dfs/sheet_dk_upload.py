@@ -59,8 +59,9 @@ LINEUP_NOTE = (
     "players into the slots to the left, and `--write` makes the upload file."
 )
 SUGGESTED_NOTE = (
-    "SUGGESTED: the tool's guess, by contest format (the Cash-marked lineup with the best Cash % for H2H, "
-    "50/50 and Double Up; the GPP-marked one with the best Top 1% for GPPs; never the same lineup twice "
+    "SUGGESTED: the tool's guess, by contest format (the Cash-marked lineup with the top projection, the "
+    "Default, for H2H, 50/50 and Double Up; the GPP-marked one with the best Top 1% for GPPs; never the same "
+    "lineup twice "
     "in one contest). It is only a hint: it is never copied into Lineup and the export never reads it."
 )
 

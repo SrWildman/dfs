@@ -463,13 +463,16 @@ ROW_COLUMNS = [
 
 
 def entry_order(builds: list[dict], kind: str, rank: str) -> list[dict]:
-    """The builds of `kind` best first by the tool's own ranking (Cash % for cash; for GPP the Top 1%
+    """The builds of `kind` best first by the tool's own ranking (for cash the projection, the Default first:
+    blueprint Phase A, so the cash arm's meaning changed with it; for GPP the Top 1%
     chance, or with `rank = "share"` that chance over 1 + the duplicates expected): the order Sam would fill
     contests in. The builder's own numbering is alphabetical by quarterback, which is no ranking."""
 
     def key(b: dict):
-        p = b["p_cash"] if kind == "cash" else b["p_gpp"]
-        if kind == "gpp" and rank == "share" and b.get("e_dups") is not None:
+        if kind == "cash":
+            return (-round(b["proj"], 6), b["number"])
+        p = b["p_gpp"]
+        if rank == "share" and b.get("e_dups") is not None:
             p = p / (1.0 + b["e_dups"])
         return (-round(p, ls.PROB_DECIMALS), -b["proj"], b["number"])
 

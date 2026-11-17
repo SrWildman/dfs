@@ -429,3 +429,54 @@ def test_items_are_added_once_and_removed_without_reformatting_the_rest():
     )  # unscoped differs
     assert week_writes.remove_items("Wr Value,cash: Qb Alpha", match) == "Wr Value"
     assert week_writes.remove_items("Wr Value;  odd", match) == "Wr Value;  odd"  # nothing matched: untouched
+
+
+# -- blueprint Phase A: the Default cash lineup's core and open spots ----------------------------------------
+
+
+def cash_core_input():
+    def p(name):
+        return {"name": name, "position": "", "team": "", "salary": 0, "projection": 0.0}
+
+    return {
+        "core": [{**p("Qb Alpha"), "in": 9, "of": 9, "faded": False}],
+        "open": [
+            {
+                "slot": "FLEX",
+                "default": {**p("Wr Value"), "in": 6},
+                "alternatives": [{**p("Te Plain"), "d_points": -0.4, "d_salary": 500, "in": 3}],
+            }
+        ],
+        "default": {"names": ["Qb Alpha", "Wr Value"]},
+    }
+
+
+def test_an_open_spot_pick_writes_cash_scope_on_always_use_and_adds_him_as_cash(edits, sheet, tmp_path):
+    inp = replace(inp_for(tmp_path, chalk_rows()), cash_core=cash_core_input())
+    cell = (2, ss.NAME_INDEX)
+    text, pool = week_actions.decide_pool(
+        edits, inp, key="spot:FLEX", option="id-Te Plain", rules_was=edits.read().rules
+    )
+    assert sheet.get(ss.TAB, *cell) == "cash: Te Plain" and "FLEX: Te Plain" in text
+    assert pool == {"id-Te Plain": "Cash"}
+    d = next(
+        d
+        for d in week_board.decisions(inp, edits.read().rules, week_actions.answers(inp))
+        if d.key == "spot:FLEX"
+    )
+    assert d.answer == "id-Te Plain" and d.undo
+    with pytest.raises(week_writes.WriteError):  # only a candidate the spot offers
+        week_actions.decide(edits, inp, key="spot:FLEX", option="id-Qb Beta", rules_was=edits.read().rules)
+    week_actions.decide(edits, inp, key="spot:FLEX", option="undo", rules_was=edits.read().rules)
+    assert sheet.get(ss.TAB, *cell) == "" and edits.read().pool.get("id-Te Plain", "") == ""
+
+
+def test_a_core_fade_writes_cash_scope_on_never_use_and_the_chalk_decision_does_not_ask_again(
+    edits, sheet, tmp_path
+):
+    inp = replace(inp_for(tmp_path, chalk_rows()), cash_core=cash_core_input())
+    keys = [d.key for d in week_board.decisions(inp, edits.read().rules, {})]
+    assert "core:id-Qb Alpha" in keys and "chalk:id-Qb Alpha" not in keys
+    assert "chalk:id-Wr Value" not in keys  # an open-spot player is asked there, not as chalk
+    week_actions.decide(edits, inp, key="core:id-Qb Alpha", option="fade", rules_was=edits.read().rules)
+    assert sheet.get(ss.TAB, 3, ss.NAME_INDEX) == "Rb Fine, cash: Qb Alpha"

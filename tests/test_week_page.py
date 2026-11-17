@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
+from dfs import cash_core as cc
 from dfs import commands_doc, runlog, week_inputs, week_page, week_today, week_tools
 from dfs.cli import app
 
@@ -329,11 +330,12 @@ def test_every_section_renders_from_fixture_outputs(full):
         assert f'id="{section_id}"' in page
     # contest plan (Plan D's sidecar)
     assert "spent $179 vs plan $150" in text and "Jpbielke" in text and 'class="bad">over' in page
-    # cash: top builds by Cash %, and the chalk check (Chase 41% is in 1 of 2 cash builds, Wan'Dale 33% in 0)
-    assert "73%" in text and "60%" in text
+    # cash: the builds by projection, never a Cash % (blueprint Phase A), and the chalk check (Chase 41% is
+    # in 1 of 2 cash builds, Wan'Dale 33% in 0)
+    cash_fold = html.unescape(re.sub(r"<[^>]+>", " ", week_page.cash_section(full).html()))
+    assert "73%" not in cash_fold and "60%" not in cash_fold and "Cash %" not in cash_fold
     assert re.search(r"Ja'Marr Chase\s+WR\s+41%\s+1 of 2", text)
     assert re.search(r"Wan'Dale Robinson\s+WR\s+33%\s+0 of 2", text)
-    assert "today's line" in text  # the saved run is not the calibrated one, and the page says so
     # gpp: the build's shape and the stacks
     assert (
         "PIT stack QB+WR" in text
@@ -362,19 +364,76 @@ def test_the_page_is_self_contained(full):
     assert scripts and all("src" not in attrs for attrs in scripts)
 
 
-def test_calibrated_cash_is_labelled_as_such(full):
-    builds = full.suggest["builds"]
-    builds[0]["metrics"]["p_cash_shown"] = 0.41
-    page = html.unescape(week_page.render(full))
-    assert "41%" in page and "calibrated one" in page
+def _p(name, pos, team, salary, proj, **extra):
+    row = {"name": name, "id": "", "position": pos, "team": team, "opp": "X", "salary": salary}
+    return {
+        **row,
+        "projection": proj,
+        "cash_own": 0.2,
+        "kickoff": "Sun 1:00 pm",
+        "late": False,
+        "flags": [],
+        **extra,
+    }
 
 
-def test_the_calibration_switch_on_but_not_in_the_saved_run_is_explained(full):
-    cfg = {"sim": {"lines": {"calibrated_cash_offset": True}}}
-    page = week_page.render(replace(full, config=cfg))
-    assert (
-        "switched on, but the saved run keeps" in page and "field average +9.0, Weeks 4, 5, 6, 7, 8" in page
-    )
+def cash_core_payload():
+    """A `cash_core` input as `cash_core.payload` writes it: Dak in the core, Puka the FLEX's open spot with
+    Wan'Dale as the alternative."""
+    dak, puka = _p("Dak Prescott", "QB", "DAL", 6000, 22.0), _p("Puka Nacua", "WR", "LAR", 7000, 18.0)
+    filler = [_p(f"Filler {i}", "RB", "SEA", 4000, 10.0) for i in range(7)]
+    players = [dak, *filler[:6], puka, filler[6]]
+    return {
+        "round": 2, "at": "t", "metric": "CalPts", "complete": True, "searched": 40, "near": 12,
+        "near_truncated": False, "near_points": 1.5, "core_share": 0.7,
+        "default": {
+            "names": [p["name"] for p in players], "ids": [""] * 9, "slots": list(cc.SLOT_LABELS),
+            "projection": 131.3, "salary": 49800, "left": 200, "tied": 1,
+            "band": {"word": "lean", "shown": 0.58, "cashed": 14, "of": 25, "line_offset": 9.5,
+                     "line_weeks": [4, 5], "text": "lean: cash builds have cashed 14 of 25"},
+            "flex_order": "", "players": players,
+        },
+        "core": [{**dak, "in": 12, "of": 12, "faded": False}],
+        "open": [{
+            "slot": "FLEX", "position": "WR", "default": {**puka, "in": 7},
+            "alternatives": [{**_p("Wan'Dale Robinson", "WR", "NYG", 5800, 16.9), "d_points": -1.1,
+                              "d_salary": 1200, "in": 5}],
+            "picked": "",
+        }],
+    }  # fmt: skip
+
+
+def test_the_cash_fold_shows_the_default_its_band_core_and_open_spots_and_never_a_percentage(full):
+    inp = replace(full, cash_core=cash_core_payload())
+    page = html.unescape(week_page.render(inp))
+    text = re.sub(r"<[^>]+>", " ", page)
+    assert "Default cash lineup: 131.3 pts" in text and "lean: cash builds have cashed 14 of 25" in text
+    assert "Open spots (1): FLEX: Puka Nacua or Wan'Dale Robinson" in text
+    assert 'id="cash-board"' in page and 'id="open-spots"' in page and 'id="cash-lineup"' in page
+    assert "+$1,200 freed" in text and "-1.1 pts" in text
+    line, _ = week_page.fold_line("cash", inp, {"cash": week_page.cash_section(inp)})
+    assert line == "Default 131.3 pts, 1 open spot"
+    for block in ("cash-board", "open-spots", "cash-lineup"):
+        start = page.index(f'id="{block}"')
+        part = page[start : page.index("</section>", start)]
+        assert "58%" not in part and "Cash %" not in part
+    fold = html.unescape(week_page.cash_section(inp).html())
+    for word in ("73%", "60%", "Cash %", "58%"):
+        assert word not in fold
+
+
+def test_a_core_player_is_asked_once_on_the_cash_board_not_again_as_chalk(full):
+    inp = replace(full, cash_core=cash_core_payload())
+    for row in inp.edge:
+        if row["Name"] == "Dak Prescott":
+            row["CashOwn"] = "0.5"
+    from dfs import week_board as wb
+
+    ds = wb.decisions(inp, {"Always use": "", "Never use": ""}, {})
+    kinds = {(d.kind, (d.row or {}).get("Name")) for d in ds}
+    assert ("core", "Dak Prescott") in kinds and ("chalk", "Dak Prescott") not in kinds
+    spot = next(d for d in ds if d.kind == "spot")
+    assert spot.key == "spot:FLEX" and [o.label for o in spot.options] == ["Nacua", "Robinson"]
 
 
 def test_chalk_check_waits_for_ownership(full):

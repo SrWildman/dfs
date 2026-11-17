@@ -465,12 +465,14 @@ def suggest_pick(entry: Entry, lineups: Sequence[SheetLineup], taken: frozenset[
     """The tool's guess for one entry, by format. **The hook Contests Phase 2's "Best in" replaces**: same
     arguments (the entry, the complete lineups, the lineup numbers already in this contest) and result.
 
-    Cash formats (H2H, 50/50, Double Up): the Cash-marked lineup with the best Cash %. GPP formats (SE/N-max
+    Cash formats (H2H, 50/50, Double Up): the Cash-marked lineup with the top projection, the Default
+    (blueprint Phase A: no cash percentage is shown any more; a multi-entry contest gets the next one). GPP
+    formats (SE/N-max
     GPP, Multiplier, Freeroll): the GPP-marked lineup with the best Top 1%. A lineup in `taken` is never
     repeated in one contest (a multi-entry contest gets the next best). With no lineup of the right marker
     the unmarked ones stand in and the reason says so; a Private or other contest has no rule."""
     if entry.format in series.CASH_FORMATS:
-        marker, metric, label = CASH_MARKER, "cash_pct", "Cash %"
+        marker, metric, label = CASH_MARKER, "cal_pts", "projection"
     elif entry.format in GPP_FORMATS:
         marker, metric, label = GPP_MARKER, "top1", "Top 1%"
     else:
@@ -492,7 +494,13 @@ def suggest_pick(entry: Entry, lineups: Sequence[SheetLineup], taken: frozenset[
     value = getattr(pick, metric)
     rank = pool.index(pick)
     how = "best" if rank == 0 else f"{_ordinal(rank + 1)}-best"
-    text = f"{how} {label}{standin}" + (f" ({value:.1%})" if value is not None else "")
+    if metric == "cal_pts":  # the cash hint: the Default, never a percentage
+        what = "the Default (top projection" if rank == 0 else f"the {_ordinal(rank + 1)}-best projection"
+        text = (
+            what + (f", {value:.1f} pts" if value is not None else "") + (")" if rank == 0 else "") + standin
+        )
+    else:
+        text = f"{how} {label}{standin}" + (f" ({value:.1%})" if value is not None else "")
     if rank and pool[0].number in taken:
         text += f"; {pool[0].label} is already in this contest"
     return Suggestion(pick.number, text)

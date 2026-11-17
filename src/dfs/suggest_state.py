@@ -520,6 +520,7 @@ class RoundRecord:
     notes: list[str] = field(default_factory=list)
     seconds: float = 0.0
     restored_from: int | None = None
+    cash_core: dict | None = None  # the Default cash lineup, its core and open spots (`cash_core.payload`)
 
 
 @dataclass

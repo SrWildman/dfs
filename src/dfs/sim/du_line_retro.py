@@ -609,13 +609,15 @@ def refresh_summary(season: int, through: int) -> dict:
     gap_today, gap_offset = table.loc[("today", "all"), "gap"], table.loc[("offset", "all"), "gap"]
     weeks = ", ".join(str(w) for w in retro.calibration_weeks)
     action = (
-        "it clears the bar: `[sim.lines] calibrated_cash_offset = true` can go on"
+        "held out, it beats today's line on Brier and calibration by more than 2 SE"
         if passes
-        else "it does not clear the bar: leave `[sim.lines] calibrated_cash_offset` off"
+        else "held out, it does not yet beat today's line by more than 2 SE"
     )
+    # blueprint Phase A: this offset IS the line the Default cash lineup's band is shown against (it is a word
+    # and the record of every cash build, never a percentage), refitted at every close
     headline = [
-        f"Cash % against field average +{retro.final_offset:g} (calibrated on the double-ups of Weeks "
-        f"{weeks}): {action}.",
+        f"The cash band's line: field average +{retro.final_offset:g} (calibrated on the double-ups of Weeks "
+        f"{weeks}); {action}.",
         f"Shown minus cashed, all lineups: today {gap_today:+.1%}, calibrated {gap_offset:+.1%}.",
         f"- {pair_brier.line()}",
         f"- {pair_gap.line()}",

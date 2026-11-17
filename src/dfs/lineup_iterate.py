@@ -60,6 +60,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from dfs import cash_core as cash_core_mod
 from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
 from dfs import my_frame
@@ -270,9 +271,16 @@ def iterate_builds(
     rank: str = ls.DEFAULT_RANK,
     bring_back_gain: float = BRING_BACK_GAIN,
     freeze: bool = False,
+    only: str | None = None,
 ) -> Iterated:
     """The new round: `tab` is what Sam left on the Suggested tab, `prior` the last round on file (what the
-    tab showed when it was written: how edits are told). `freeze` keeps every build as it is (`--round N`)."""
+    tab showed when it was written: how edits are told). `freeze` keeps every build as it is (`--round N`).
+    `only` ("cash" or "gpp", `--only`) freezes every build of the other kind exactly as `freeze` would and
+    tops up only this kind; with `only="cash"` a cash build is searched again whatever its decision cell says
+    (Drop and Vary N still mean what they say), so the Default follows the rules box (the Week page's
+    open-spot pick writes `cash: Name` on Always use, then runs this)."""
+    if only not in (None, *KINDS):
+        raise ValueError(f"only must be one of {', '.join(KINDS)}, not {only!r}")
     started = time.monotonic()
     report = ls.SuggestReport()
     notes = report.notes
@@ -306,12 +314,12 @@ def iterate_builds(
     }
     timed("candidates", t)
 
-    entries, jobs, dropped = _read_tab(tab, prior, by_name, all_names, rules, cap, freeze, notes)
+    entries, jobs, dropped = _read_tab(tab, prior, by_name, all_names, rules, cap, freeze, notes, only=only)
     # What the tab should hold: the line typed, else as many of each kind as it holds now (an empty tab: the
     # defaults). A rebuild replaces its own build; a dropped build is what a top-up replaces.
     held = Counter(e.kind for e in entries)
     if not freeze:
-        for kind in KINDS:
+        for kind in KINDS if only is None else (only,):
             wanted = rules.wanted.get(
                 kind, Counter(kind_of(b) for b in tab.builds)[kind] if tab.builds else DEFAULT_WANTED[kind]
             )
@@ -344,6 +352,10 @@ def iterate_builds(
         leaf = _leaf(rules, tags, job.kind)
         if job.kind == "cash":
             lineups, done = ls.cash_lineups(pool, cap=cap, deadline=box, fixed=job.fixed, leaf_ok=leaf)
+            if report.cash_core is None:  # the first cash search is the Default's (`cash_core`)
+                report.cash_core = cash_core_mod.cash_core(
+                    lineups, pool, cap=cap, kickoff=kickoff, legal=leaf, k=ls.CASH_TOP_K, complete=done
+                )
         else:
             plan = ls.GPP_PLAN if any(p.position == "QB" for p in job.fixed) else ITERATE_PLAN
             lineups, done, cutoff = ls.gpp_candidates(
@@ -546,6 +558,8 @@ def _read_tab(
     cap: int,
     freeze: bool,
     notes: list[str],
+    *,
+    only: str | None = None,
 ) -> tuple[list[Entry], list[Job], dict[str, list[int]]]:
     """Every build on the tab as an `Entry`, the jobs its decisions ask for (a rebuild, the variations of a
     Vary) and the numbers of the dropped builds by kind."""
@@ -574,9 +588,12 @@ def _read_tab(
             entry.notes.append(f"decision '{typed}' not understood, left as it was")
             entry.decision = typed
             entries.append(entry)
-        elif freeze:
+        elif freeze or (only is not None and kind != only):
             entry.decision = tb.decision.strip()
             entries.append(entry)
+        elif ok and decision.kind == "keep" and only == "cash":
+            entries.append(entry)  # `--only cash`: the Default is searched again around the rules box
+            jobs.append(Job(kind, _fixed_players(entry, by_name), entry=entry))
         elif not ok or decision.kind == "keep":
             entry.decision = "Keep" if ok else ""
             entries.append(entry)
@@ -907,15 +924,21 @@ def _note(entry: Entry, scored: ls.Scored) -> str:
     if entry.origin == REBUILT and entry.prior_names:
         parts.append(_change(entry.prior_names, [p.name for p in scored.players]))
     old = entry.prior
-    if entry.kind == "cash" and "p_cash" in old and round(old["p_cash"], 2) != round(scored.p_cash, 2):
-        parts.append(f"Cash % {old['p_cash']:.0%} → {scored.p_cash:.0%}")
+    if (
+        entry.kind == "cash"
+        and "projection" in old
+        and round(old["projection"], 1) != round(scored.projection, 1)
+    ):
+        # no Cash % for a cash build (blueprint Phase A): the projection is what ranks it
+        parts.append(f"{old['projection']:.1f} → {scored.projection:.1f} pts")
     if entry.kind == "gpp" and "p_gpp" in old and round(old["p_gpp"], 3) != round(scored.p_gpp, 3):
         parts.append(f"Top 1% {old['p_gpp']:.1%} → {scored.p_gpp:.1%}")
     return "; ".join(parts)
 
 
 def metrics_of(build: ls.Build) -> dict[str, float]:
-    """The numbers a round keeps for a build (the next round's "Cash % 61% → 64%" reads them)."""
+    """The numbers a round keeps for a build (the next round's "131.3 → 132.0 pts" / "Top 1% 2.1% → 2.4%"
+    read them)."""
     return {
         "p_cash": round(build.p_cash, 6),
         "p_gpp": round(build.p_gpp, 6),

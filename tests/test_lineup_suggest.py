@@ -112,11 +112,9 @@ def _qb(build):
     return next(p.name for p in build.players if p.position == "QB")
 
 
-def test_the_defaults_are_three_cash_builds_and_a_gpp_build_for_every_qb_stack_two_when_they_fit(
-    report, edge
-):
+def test_the_defaults_are_one_cash_build_and_a_gpp_build_for_every_qb_stack_two_when_they_fit(report, edge):
     kinds = [b.kind for b in report.builds]
-    assert kinds[:3] == ["cash"] * 3 and set(kinds[3:]) == {"gpp"}
+    assert kinds[:1] == ["cash"] and set(kinds[1:]) == {"gpp"}
     assert [b.number for b in report.builds] == list(range(1, len(report.builds) + 1))
     quarterbacks = {
         p.name
@@ -188,7 +186,8 @@ def test_builds_are_listed_cash_then_gpp_by_qb_then_calpts_total_and_numbered_do
 
 def test_a_run_times_its_search_phases_and_phase_lines_lays_them_out_with_a_total(edge):
     report = run(edge, cash_builds=1, gpp_builds=1)
-    assert list(report.phases) == ["candidates", "search", "simulate", "choose"]
+    # the cash builds are chosen by projection and then simulated; GPP adds to the same phases
+    assert list(report.phases) == ["candidates", "search", "choose", "simulate"]
     assert all(seconds >= 0 for seconds in report.phases.values())
     assert sum(report.phases.values()) <= report.seconds + 1e-6
     lines = ls.phase_lines({"read sheet": (1.0, 2), "search": (2.0, 0), "format tab": (1.0, 1)})
@@ -704,7 +703,7 @@ def test_cash_builds_are_not_changed_by_ownership_only_read_out(edge, owned_repo
 
 
 def test_a_cash_build_many_entries_share_gets_a_warning_and_is_still_built(edge):
-    loud = run(owned(edge), gpp_builds=0, double_up_entries=5_000_000)
+    loud = run(owned(edge), cash_builds=3, gpp_builds=0, double_up_entries=5_000_000)
     assert len([b for b in loud.builds if b.kind == "cash"]) == 3  # never a filter
     assert any("identical entries" in n for n in loud.notes)
     quiet = run(owned(edge), gpp_builds=0, double_up_entries=10)

@@ -190,11 +190,11 @@ class SimLinesConfig(BaseModel):
     double_up_own_curve: list[tuple[float, float]] = []
     gpp_own_curve: list[tuple[float, float]] = []
     own_coverage: float = Field(SIM_OWN_COVERAGE, gt=0.0, le=1.0)
-    # The SHOWN Cash % against field average + the offset `dfs research refresh` calibrates on his real
-    # double-ups (`data/model_cache/du_line.json`; docs/SIM.md "The double-up cash line"), instead of +
-    # `double_up_offset`. Display only (Lineups and Suggested): builds, late swap and every ranking keep
-    # today's line. Default off.
-    calibrated_cash_offset: bool = False
+    # The SHOWN cash chance (the Default cash lineup's band, and Lineups' Cash %) against field average + the
+    # offset measured on his real double-ups (`data/model_cache/du_line.json`, refitted at every `dfs week
+    # close`; docs/SIM.md "The double-up cash line"), instead of + `double_up_offset`. Display only: late swap
+    # keeps today's line, and no Cash % ranks a cash build any more (blueprint Phase A). Default on.
+    calibrated_cash_offset: bool = True
 
     @field_validator("double_up_own_curve", "gpp_own_curve")
     @classmethod

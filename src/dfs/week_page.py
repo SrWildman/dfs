@@ -489,32 +489,6 @@ def _saved(inp: WeekInputs, payload: dict | None) -> str:
     return week_today.when(inp.now, at) if at else ""
 
 
-def cash_shown(b: dict) -> tuple[float | None, bool]:
-    """(the Cash % to show, whether it is the calibrated one). A saved build that carries the shown number
-    (`p_cash_shown`) is calibrated; otherwise the saved `p_cash` is the build's own-line number."""
-    m = b.get("metrics") or {}
-    if m.get("p_cash_shown") is not None:
-        return num(m["p_cash_shown"]), True
-    return num(m.get("p_cash")), False
-
-
-def cash_note(inp: WeekInputs, calibrated: bool) -> str:
-    on = bool(((inp.config.get("sim") or {}).get("lines") or {}).get("calibrated_cash_offset"))
-    du = inp.du_line or {}
-    if calibrated:
-        return "Cash % is the calibrated one (against the double-up line fitted on your own contests)."
-    if on:
-        weeks = ", ".join(str(w) for w in du.get("weeks", []))
-        return (
-            "The calibrated Cash % is switched on, but the saved run keeps the builds' own-line numbers: "
-            f"Suggested shows the calibrated ones (field average +{du.get('offset', '?')}, Weeks {weeks})."
-        )
-    return (
-        "Cash % here is today's line, which the audit found runs 16-21 points above what your double-ups "
-        "really cash. The calibrated display is off (`[sim.lines] calibrated_cash_offset`)."
-    )
-
-
 def cash_chalk(inp: WeekInputs) -> tuple[list[dict] | None, int]:
     """Players the double-ups are expected to own at 30%+ (CashOwn), each with how many of the cash builds use
     him. None when CashOwn is not out yet."""
@@ -566,6 +540,76 @@ def cash_close(inp: WeekInputs) -> list[dict]:
     return sorted(under, key=lambda c: -c["own"])[:CLOSE_COUNT]
 
 
+def default_html(inp: WeekInputs, cash: list[dict]) -> str:
+    """The Default cash lineup (blueprint Phase A): its nine in DK's slots, its band (a word and the record,
+    never a percentage), the core and the open spots in one line each. Before a run that saved one, the
+    round's cash builds by projection."""
+    core = inp.cash_core or {}
+    d = core.get("default") or {}
+    if not d.get("names"):
+        rows = [
+            [
+                e(b.get("number", "")),
+                pns(b.get("names", [])),
+                e(f"${int((b.get('metrics') or {})['salary']):,}")
+                if (b.get("metrics") or {}).get("salary")
+                else "-",
+                e(f"{num((b.get('metrics') or {}).get('projection')) or 0:.1f}"),
+            ]
+            for b in sorted(cash, key=lambda b: -(num((b.get("metrics") or {}).get("projection")) or 0))
+        ]
+        return table(
+            ["Build", "Players", "Salary", "Proj"],
+            rows,
+            how="The last dfs lineups suggest round's cash builds by projection (this round saved no "
+            "Default: "
+            "build again to see it).",
+        )
+    players = d.get("players") or []
+    rows = [
+        [
+            e(slot),
+            pn(p.get("name", ""), p.get("team", "")),
+            e(f"${int(p.get('salary') or 0):,}"),
+            e(f"{num(p.get('projection')) or 0:.1f}"),
+            "L" if p.get("late") else "E",
+        ]
+        for slot, p in zip(d.get("slots") or [], players, strict=False)
+    ]
+    band = (d.get("band") or {}).get("text", "")
+    open_ = core.get("open") or []
+    spots = "; ".join(
+        f"{s.get('slot')}: {(s.get('default') or {}).get('name', '')}"
+        + (
+            " or " + ", ".join(a.get("name", "") for a in s.get("alternatives") or [])
+            if s.get("alternatives")
+            else ""
+        )
+        for s in open_
+    )
+    of = f"{core.get('near', 0)}+" if core.get("near_truncated") else str(core.get("near", 0))
+    out = [
+        f"<p><b>Default cash lineup: {num(d.get('projection')) or 0:.1f} pts</b>, "
+        f"${int(d.get('salary') or 0):,} "
+        f"used, ${int(d.get('left') or 0):,} left (round {e(core.get('round', ''))}). "
+        f"<b>Cash chance:</b> {e(band)}.</p>",
+        table(
+            ["Slot", "Player", "Salary", "Proj", "E / L"],
+            rows,
+            how="The top cash lineup by projection your pool and rules allow (ties: the cheaper, then by "
+            "name). Its cash chance is a band (under, coin flip, lean) against the measured double-up line, "
+            "with the record of every cash build scored so far; no percentage is shown.",
+        ),
+        f"<p>Core: {len(core.get('core') or [])} players in 70%+ of the {e(of)} lineups within "
+        f"{num(core.get('near_points')) or 1.5:g} pts. "
+        + (f"Open spots ({len(open_)}): {e(spots)}." if open_ else "No open spot: every near lineup agrees.")
+        + "</p>",
+    ]
+    if not core.get("complete", True):
+        out.append('<p class="warn">The search was cut short: a better build may exist.</p>')
+    return "".join(out)
+
+
 def cash_section(inp: WeekInputs) -> Section:
     trust = TRUST["cash"]
     cash = builds_of(inp, "cash")
@@ -582,29 +626,7 @@ def cash_section(inp: WeekInputs) -> Section:
             trust,
             ran=False,
         )
-    top = sorted(cash, key=lambda b: -(cash_shown(b)[0] or 0))[:5]
-    calibrated = any(cash_shown(b)[1] for b in top)
-    rows = []
-    for b in top:
-        shown, _ = cash_shown(b)
-        m = b.get("metrics") or {}
-        rows.append(
-            [
-                e(b.get("number", "")),
-                pns(b.get("names", [])),
-                e(f"${int(m['salary']):,}") if m.get("salary") else "-",
-                f"<b>{e(pct(shown))}</b>",
-            ]
-        )
-    body = [
-        table(
-            ["Build", "Players", "Salary", "Cash %"],
-            rows,
-            how="The last dfs lineups suggest round's cash builds, the top 5 by the Cash % the simulator "
-            "gave each (its chance to clear the double-up line).",
-        ),
-        note(cash_note(inp, calibrated)),
-    ]
+    body = [default_html(inp, cash)]
     chalk, n_builds = cash_chalk(inp)
     close = cash_close(inp)
     count = f" ({len(chalk)})" if chalk is not None else ""
@@ -1578,8 +1600,14 @@ def fold_line(sid: str, inp: WeekInputs, built: dict[str, Section]) -> tuple[str
     if sid in ("cash", "gpp"):
         bs = builds_of(inp, sid)
         if sid == "cash":
-            best = max((cash_shown(b)[0] or 0 for b in bs), default=0)
-            return f"{len(bs)} cash builds, best Cash % {pct(best)}", False
+            d = (inp.cash_core or {}).get("default") or {}
+            if d.get("names"):
+                k = len((inp.cash_core or {}).get("open") or [])
+                return (
+                    f"Default {num(d.get('projection')) or 0:.1f} pts, {k} open spot{'' if k == 1 else 's'}",
+                    False,
+                )
+            return (f"{len(bs)} cash builds" if bs else "no cash builds yet"), False
         best = max((num((b.get("metrics") or {}).get("p_gpp")) or 0 for b in bs), default=0)
         st = ((inp.stacks or {}).get("rows") or [])[:1]
         top = f"; top stack {st[0].get('qb', '')} + {st[0].get('mates', '')}" if st else ""
@@ -1803,7 +1831,8 @@ def render(
             "<!doctype html><html lang=en><head><meta charset=utf-8>"
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
-            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}</style>"
+            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
+            f"{week_top.CASH_CSS}</style>"
             "</head><body>"
             f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
             + week_top.progress_html(steps)
@@ -1815,7 +1844,14 @@ def render(
             # Plan O2: the view bar; each block below names the views it shows on (`week_views.PLACES`)
             + week_views.view_bar()
             + wrap(week_views.overview_section(inp, board, panel), "overview")
-            + wrap(week_top.decisions_html(ds, live, inp.now, rules is not None, by_id), "decisions")
+            # blueprint Phase A: the Default cash lineup, its core and open spots (their decisions live there)
+            + wrap(week_top.cash_block_html(inp, ds, board, live), "decisions")
+            + wrap(
+                week_top.decisions_html(
+                    [d for d in ds if d.kind not in ("core", "spot")], live, inp.now, rules is not None, by_id
+                ),
+                "decisions",
+            )
             + wrap(week_top.board_html(board, by_id, live, week_money.practice_by_id(inp)), "board")
             + wrap('<div class="charts-row">' + week_top.charts_html(inp.edge, own_out) + "</div>", "charts")
             + wrap(week_top.games_html(inp, live), "games")

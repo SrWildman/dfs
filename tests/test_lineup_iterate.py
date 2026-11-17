@@ -570,3 +570,38 @@ def test_a_scoped_conflict_says_never_wins_for_that_kind():
     rules = st.parse_rules(st.RulesText(always="cash: Aa", never="Aa"), ["Aa"], [])
     assert rules.always_for("cash") == []
     assert any("cash builds" in p and "Never wins" in p for p in rules.problems)
+
+
+# -- `--only cash`: the Week page's open-spot pick (blueprint Phase A) --------------------------------------
+
+
+def test_only_cash_searches_the_cash_builds_around_an_always_pick_and_leaves_every_gpp_build_alone(
+    edge, specs, tab
+):
+    state, prior = tab
+    cash_names = {n for b in state.builds if b.kind == "cash" for n in b.names}
+    pick = min(
+        (r for r in edge.to_dict("records") if r["Position"] == "WR" and r["Name"] not in cash_names),
+        key=lambda r: r["Salary"],
+    )["Name"]
+    state.rules = st.RulesText(always=f"cash: {pick}")
+    gpp_before = sorted(sorted(b.names) for b in state.builds if b.kind == "gpp")
+    got = rerun(edge, specs, state, prior, only="cash")
+    gpp_after = sorted(sorted(names(b)) for b in got.report.builds if b.kind == "gpp")
+    assert gpp_after == gpp_before  # frozen, though nobody marked them Keep
+    cash = [b for b in got.report.builds if b.kind == "cash"]
+    assert cash and all(pick in names(b) for b in cash)
+    core = got.report.cash_core
+    assert core is not None and pick in core.core_names  # fixed in every lineup searched
+    best = max(cash, key=lambda b: (round(b.projection, 6), -b.salary))
+    assert names(best) == [p.name for p in core.default]  # the best rebuilt cash build is the Default
+
+
+def test_only_gpp_leaves_the_cash_builds_alone_and_an_unknown_kind_is_refused(edge, specs, tab):
+    state, prior = tab
+    decide(state, next(b.number for b in state.builds if b.kind == "cash"), "Rebuild")
+    cash_before = sorted(sorted(b.names) for b in state.builds if b.kind == "cash")
+    got = rerun(edge, specs, state, prior, only="gpp", time_limit=2.0)
+    assert sorted(sorted(names(b)) for b in got.report.builds if b.kind == "cash") == cash_before
+    with pytest.raises(ValueError):
+        rerun(edge, specs, state, prior, only="both")

@@ -7,19 +7,23 @@ on any other tab reads it except the Apps Script's Lineup Tools > Copy builds to
 block in the Lineups layout (Sam approved it, Week 6):
 
     Build 4 | GPP | Rebuild | NO stack + NYG bring-back                   (a dark bar)
-    Slot | 🔒 | Name | Team | Opp | Salary | CalPts | Kickoff | Own% | Typical | Big night | Cash % | Top 1%
+    Slot | 🔒 | Name | Team | Opp | Salary | CalPts | Kickoff | Own% | Typical | Big night | Top 1%
     QB   | [x] | ...                                          (nine player rows, FLEX = the latest
     ...                                                        kickoff)
-    Total |    |     |    | $49,900 | 132.9 |        |      | 126.1 | 163.4 | 25% | 1.4%
-         bring-back → McBride (yours, was ...); Cash % 61% → 64%                (the note, when there is one)
+    Total |    |     |    | $49,900 | 132.9 |        |      | 126.1 | 163.4 | 1.4%
+         bring-back → McBride (yours, was ...); Top 1% 1.2% → 1.4%            (the note, when there is one)
 
 The bar's first cell names it (`Build N`), the second its kind (Cash or GPP, over the lock column), the third
 is the DECISION (Keep / Rebuild / Drop / Vary N; blank is Keep) and the rest its title. The second row is
 the column header, then nine player rows in `ROSTER_SLOTS` order, then the Total row: salary and projection,
-and the simulator's four numbers under their own labels. A blank row separates blocks. Above the first build:
-the title, a status line ("Round 3  ·  ..."), how to use it, and the RULES box (one typed line each for Always
-use, Never use, Max exposure, Stack rules and Builds wanted; `suggest_state.py` has the syntax). Below the
-last: the run's notes and a History block, one line per round.
+the simulated median and 90th percentile, and (a GPP build only) Top 1%. **No Cash % anywhere** (blueprint
+Phase A): the status line carries the Default cash lineup's band ("lean: cash builds have cashed 14 of 25").
+A blank row separates blocks. Above the first build: the title, the status line ("Round 3  ·  ..."), how to
+use it, the RULES box (one typed line each for Always use, Never use, Max exposure, Stack rules and Builds
+wanted; `suggest_state.py` has the syntax) and, once a run has a Default, the read-only OPEN SPOTS block
+(`open_spot_rows`: its core and each open spot's alternatives as differences; label in the Slot column, text
+from the Team column on, never in the lock or Name columns, which are typed). Below the last: the run's notes
+and a History block, one line per round.
 
 `parse_builds` reads the builds back for Copy (the Apps Script's `planCopyBuild` does the same in JavaScript,
 and the tests run both over one grid) and `parse_state` reads everything the rerun needs, so the layout is
@@ -37,7 +41,7 @@ from dfs import perf
 from dfs.kickoff import kickoff_label
 from dfs.lineup_suggest import Build, SuggestReport
 from dfs.models import ROSTER_SLOTS
-from dfs.sheet_lineup_sim import P_CASH_GREEN, P_GPP_GREEN, TOP1_HEADER
+from dfs.sheet_lineup_sim import P_GPP_GREEN, TOP1_HEADER
 from dfs.sheet_lineup_tints import apply_lineup_tints
 from dfs.sheets import SheetsClient, SheetsError, column_letter
 from dfs.suggest_state import DECISION_OPTIONS, RULE_LABELS, RULE_SYNTAX, RulesText, TabBuild, TabState
@@ -57,7 +61,6 @@ COLUMNS = [
     "Own%",
     "Typical",
     "Big night",
-    "Cash %",
     TOP1_HEADER,
 ]
 LAST_COLUMN = column_letter(len(COLUMNS) - 1)  # the last visible column
@@ -95,10 +98,18 @@ RANK_NOTES = {
 RULES_TITLE = "RULES  ·  typed here; they apply to every rebuilt and new build"
 ANY_DST_NOTE = "plus any DST on the slate (pooled or not)"
 EMPTY = "No builds yet. Put players in your pool (Cash, GPP or Both) and run `dfs lineups suggest`."
-WIDTHS = [56, 34, 170, 48, 48, 70, 62, 92, 56, 66, 74, 62, 62]
+WIDTHS = [56, 34, 170, 48, 48, 70, 62, 92, 56, 66, 74, 62]
 # Rows 1-3 are the title, the status and the how-to; row 4 is blank; then the rules box (a title, one row per
-# label, the syntax line) and a blank row, and the builds start.
+# label, the syntax line) and a blank row, and the builds start (after the OPEN SPOTS block, when a run has a
+# Default cash lineup: `open_spot_rows`).
 FIRST_BUILD_ROW = 8 + len(RULE_LABELS)
+OPEN_SPOTS_TITLE = "OPEN SPOTS"
+OPEN_SPOTS_HOW = (
+    "The Default cash lineup (Cash build) is the top by projection. Core = in 70%+ of the lineups within 1.5 "
+    "points; each open spot shows the Default's player and up to two single swaps, as differences. To take "
+    "one: pick it on the Week page, or type cash: Name on Always use and run "
+    "`dfs lineups suggest --iterate --only cash` (the GPP builds stay as they are)."
+)
 # "Your pick": a name Sam typed over another player. A mint green, not near the blue / amber / lavender of the
 # correlation tints (a rule of its own, above them).
 YOUR_PICK_TINT = {"red": 0.74, "green": 0.90, "blue": 0.78}
@@ -131,6 +142,8 @@ class Layout:
     rules_title_row: int = 0
     rules_rows: list[int] = field(default_factory=list)
     note_rows: list[tuple[int, bool]] = field(default_factory=list)  # (row, a refusal: shown red)
+    open_title_row: int = 0  # the OPEN SPOTS block's title (0: no block)
+    open_rows: list[int] = field(default_factory=list)
 
 
 def projection_label(metric: str) -> str:
@@ -147,20 +160,81 @@ def status_line(
     lines_text: str | None = None,
 ) -> str:
     """ "Round 3  ·  CalPts · pool 47 Cash / 51 GPP + any DST · cash line 143.9 · GPP target 190 · 8 builds".
-    `lines_text` (what the Cash % and Top 1% were measured against, `SimLines.status`) replaces the two fixed
+    `lines_text` (what the cash band and Top 1% were measured against, `SimLines.status`) replaces the two
+    fixed
     numbers. The pool counts include every defense on the slate (any DST may be used, pooled or not). The
     round (`parse_state` reads it back) leads the line once the state file has one."""
     pool = report.candidates
     if not pool and not report.builds:  # nothing has been run yet (a fresh template or week)
         return "Not run yet: `dfs lineups suggest` fills this tab from your pool."
     lead = f"Round {report.round}  ·  " if report.round else ""
+    band = f"  ·  Default cash lineup: {report.cash_band}" if report.cash_band else ""
     return (
         f"{lead}{metric}  ·  pool {pool.get('cash', 0)} for Cash / {pool.get('gpp', 0)} for GPP, "
         f"{ANY_DST_NOTE}  ·  "
         + (lines_text or f"cash line {cash_line:g}  ·  GPP target {gpp_target:g}")
         + f"  ·  {len(report.builds)} build"
-        f"{'' if len(report.builds) == 1 else 's'} in {report.seconds:.0f} s"
+        f"{'' if len(report.builds) == 1 else 's'} in {report.seconds:.0f} s{band}"
     )
+
+
+def _own_text(value: object) -> str:
+    return f"own {float(value):.0%}" if isinstance(value, (int, float)) and value > 0 else "own -"
+
+
+def open_spot_rows(report: SuggestReport, edge: pd.DataFrame) -> list[tuple[str, str]]:
+    """The OPEN SPOTS block as (label, text) rows: the core on one line, then one line per open spot (the
+    Default's player, then each alternative as differences: points, salary freed, cash ownership, status).
+    Empty without a Default."""
+    from dfs import cash_core as cc
+
+    core = report.cash_core
+    if core is None:
+        return []
+    own = {
+        str(n): float(v)
+        for n, v in zip(
+            edge.get("Name", pd.Series(dtype=str)),
+            pd.to_numeric(edge.get("CashOwn", pd.Series(dtype=float)), errors="coerce"),
+            strict=False,
+        )
+        if pd.notna(v)
+    }
+    status = {
+        str(n): str(a or "").strip()
+        for n, a in zip(
+            edge.get("Name", pd.Series(dtype=str)), edge.get("Avail", pd.Series(dtype=str)), strict=False
+        )
+    }
+    of = f"{core.near}+" if core.truncated else str(core.near)
+    tie = f"; tied with {core.tied - 1} other(s)" if core.tied > 1 else ""
+    cut = "; the search was cut short: a better Default may exist" if not core.complete else ""
+    rows = [
+        (
+            "Core",
+            ", ".join(p.name for p, _ in core.core)
+            + f"  ({len(core.core)} of 9, in 70%+ of the {of} lineups "
+            f"within {core.near_points:g} pts of the Default's {core.projection:.1f}{tie}{cut})",
+        )
+    ]
+    if not core.open:
+        rows.append(("Open", "Every near-optimal lineup agrees. Nothing to decide."))
+    for s in core.open:
+        alts = "  ·  ".join(
+            f"{a.player.name} {a.d_points:+.1f} pts, {cc.freed(a.d_salary)}, "
+            f"{_own_text(own.get(a.player.name))}"
+            + (f", {status[a.player.name]}" if status.get(a.player.name) else "")
+            + f", in {a.held} of {of}"
+            for a in s.alternatives
+        )
+        rows.append(
+            (
+                s.slot,
+                f"{s.player.name} (in {s.held} of {of}, {_own_text(own.get(s.player.name))})  ·  "
+                + (alts or cc.NOTHING_AT_THE_PRICE),
+            )
+        )
+    return rows
 
 
 def _details(edge: pd.DataFrame) -> dict[str, tuple[str, float | str]]:
@@ -243,6 +317,12 @@ def build_layout(
         layout.rules_rows.append(add(cells({"Slot": label, "Name": report.rules.get(label, "")})))
     layout.status_rows.append(add([RULE_SYNTAX]))
     add([])
+    spots = open_spot_rows(report, edge)
+    if spots:
+        layout.open_title_row = add(cells({"Slot": OPEN_SPOTS_TITLE, "Team": OPEN_SPOTS_HOW}))
+        for label, text in spots:
+            layout.open_rows.append(add(cells({"Slot": label, "Team": text})))
+        add([])
     if not report.builds:
         layout.status_rows.append(add([EMPTY]))
     details = _details(edge)
@@ -295,8 +375,8 @@ def build_layout(
                         "Own%": _total_own(build, details),
                         "Typical": round(build.typical, 1),
                         "Big night": round(build.big_night, 1),
-                        "Cash %": round(build.p_cash, 4),
-                        TOP1_HEADER: round(build.p_gpp, 4),
+                        # no per-build percentage on a cash build (blueprint Phase A)
+                        TOP1_HEADER: round(build.p_gpp, 4) if build.kind == "gpp" else "",
                     }
                 )
             )
@@ -563,6 +643,15 @@ def _style(client: SheetsClient, layout: Layout, report: SuggestReport) -> None:
             f"{number['Own%']}{first}:{number['Own%']}{last}",
             {**_num("0%"), "horizontalAlignment": "RIGHT"},
         )
+    if layout.open_title_row:
+        client.format_range(
+            TAB, f"A{layout.open_title_row}:{LAST_COLUMN}{layout.open_title_row}", _SUBHEAD_FMT
+        )
+    for row in layout.open_rows:  # read-only text: muted, the label bold
+        client.format_range(TAB, f"A{row}", {"textFormat": {"bold": True}})
+        client.format_range(
+            TAB, f"{column_letter(TITLE_INDEX)}{row}:{LAST_COLUMN}{row}", {"textFormat": {"fontSize": 9}}
+        )
     for row, refused in layout.note_rows:
         client.format_range(
             TAB,
@@ -593,22 +682,17 @@ def _style(client: SheetsClient, layout: Layout, report: SuggestReport) -> None:
             f"{number['Typical']}{row}:{number['Big night']}{row}",
             {**_num("0.0"), "horizontalAlignment": "RIGHT"},
         )
-        client.format_range(TAB, f"{number['Cash %']}{row}", {**_num("0%"), "horizontalAlignment": "RIGHT"})
         client.format_range(
             TAB, f"{number[TOP1_HEADER]}{row}", {**_num("0.0%"), "horizontalAlignment": "RIGHT"}
         )
-    for row in layout.total_rows:  # green at the same lines Lineups uses (Cash % 50%, Top 1% 2%)
-        for column, line in (("Cash %", P_CASH_GREEN), (TOP1_HEADER, P_GPP_GREEN)):
-            cell = f"{number[column]}{row}"
-            client.add_boolean_rule(
-                TAB,
-                cell,
-                condition_type="NUMBER_GREATER_THAN_EQ",
-                values=[str(line)],
-                fmt=_chip(
-                    {"red": 0.85, "green": 0.94, "blue": 0.85}, {"red": 0.10, "green": 0.45, "blue": 0.25}
-                ),
-            )
+    for row in layout.total_rows:  # green at the line Lineups uses (Top 1% 2%); a cash build shows none
+        client.add_boolean_rule(
+            TAB,
+            f"{number[TOP1_HEADER]}{row}",
+            condition_type="NUMBER_GREATER_THAN_EQ",
+            values=[str(P_GPP_GREEN)],
+            fmt=_chip({"red": 0.85, "green": 0.94, "blue": 0.85}, {"red": 0.10, "green": 0.45, "blue": 0.25}),
+        )
     if report.builds:
         client.hide_columns(TAB, GAME_COLUMN_LETTER, YOURS_COLUMN_LETTER)
         # The same stack / bring-back / other tints as Lineups, over each build's Name and Team cells. The
@@ -642,10 +726,12 @@ def _runs(rows: list[int]) -> list[tuple[int, int]]:
 
 
 def build_summary(build: Build) -> str:
-    """One terminal line for a build: number, kind, title, salary, projection and the odds."""
+    """One terminal line for a build: number, kind, title, salary, projection and (GPP) Top 1%. No Cash %:
+    the Default's band is printed with its core and open spots (`cash_core.summary_lines`)."""
+    odds = f"Top 1% {build.p_gpp:.1%}  " if build.kind == "gpp" else ""
     line = (
         f"Build {build.number}  {build.kind.upper():<4} ${build.salary:,}  {build.projection:.1f} pts  "
-        f"Cash {build.p_cash:.0%}  Top 1% {build.p_gpp:.1%}  {build.title}"
+        f"{odds}{build.title}"
     )
     if build.e_dups is None or build.own_sum is None or build.own_product is None:
         return line

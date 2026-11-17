@@ -212,7 +212,7 @@ dfs entries fill            # lay out DK's entries on DK Upload; then choose eac
 dfs entries fill --write    # fill the slots and write upload_<timestamp>.csv (or `dfs export -o lineups.csv`)
 ```
 
-Before that, if you want a starting point: `dfs lineups suggest` writes complete builds from your pool to the **Suggested** tab (3 cash, and GPP builds in several shapes (a QB with one to three teammates of any position, with or without a bring-back; a stack holding a RB; a game stack; a stack with a RB and his DST; a contrarian stack; the title names the shape, the make-up and the identical entries expected, "DET stack QB+WR+TE + ARI bring-back · ~0.3 dupes") for every QB, two each when they fit, ranked by the Top 1% chance (`--rank share` discounts it by the identical entries expected), each at least 3 players
+Before that, if you want a starting point: `dfs lineups suggest` writes complete builds from your pool to the **Suggested** tab (the **Default cash lineup**: the top projection your pool and rules allow, with an OPEN SPOTS block naming its core, the players in 70%+ of the lineups within 1.5 points of it, and each slot where those lineups differ with 2-3 candidates as differences; its cash chance is a band, "lean: cash builds have cashed 14 of 25", never a percentage; on the served Week page a pick in an open spot or a core Play / Fade writes the rules box and reruns the cash build, `dfs lineups suggest --iterate --only cash`; and GPP builds in several shapes (a QB with one to three teammates of any position, with or without a bring-back; a stack holding a RB; a game stack; a stack with a RB and his DST; a contrarian stack; the title names the shape, the make-up and the identical entries expected, "DET stack QB+WR+TE + ARI bring-back · ~0.3 dupes") for every QB, two each when they fit, ranked by the Top 1% chance (`--rank share` discounts it by the identical entries expected), each at least 3 players
 apart, FLEX on the latest kickoff), and **Lineup Tools > Copy builds to Lineups** asks which builds (`1,4,6` or `all`) and drops them into the empty lineups in order, telling you which went where and what did not fit. It never touches a lineup that has names.
 
 **You decide which lineup goes in which contest; nothing is assigned for you.** Download DraftKings' entries file
@@ -220,7 +220,7 @@ apart, FLEX on the latest kickoff), and **Lineup Tools > Copy builds to Lineups*
 in Downloads by its header row (not its name) and says which, then lists every Classic main-slate entry on **DK Upload**
 (Showdown and other-slate entries are skipped and reported): Entry ID, Contest Name, Contest ID, Entry Fee, the nine slots,
 the contest's **Format**, a **Lineup** dropdown (L1..L20, the one yellow cell), and a grey **Suggested** pick with its **Why**.
-Suggested is only a hint: Cash-marked lineups (best Cash %) for H2H, 50/50 and Double Up, GPP-marked lineups (best Top 1%)
+Suggested is only a hint: the Cash-marked lineup with the top projection (the Default) for H2H, 50/50 and Double Up, GPP-marked lineups (best Top 1%)
 for GPPs and multipliers, never the same lineup twice in one contest. It is never copied into Lineup.
 
 Choose each entry's Lineup, then run `dfs entries fill` again (**re-running never overwrites a dropdown you set**, entries

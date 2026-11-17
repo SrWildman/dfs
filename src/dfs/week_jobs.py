@@ -232,8 +232,15 @@ def is_advanced(path: str) -> bool:
     return path.startswith(("dfs setup ", "dfs sheets ")) or any(w.startswith("fix-") for w in words[1:])
 
 
-def short_label(field_spec: dict) -> str:
-    """The option's short label: `SHORT_LABELS`, else the first clause of its question."""
+# Where one option name means something else on one command (`--only`: sources on sync, a build kind on
+# suggest).
+SHORT_LABELS_FOR = {("dfs lineups suggest", "only"): "Only rerun (cash / gpp; with Rerun)"}
+
+
+def short_label(field_spec: dict, path: str = "") -> str:
+    """The option's short label: `SHORT_LABELS_FOR` / `SHORT_LABELS`, else its question's first clause."""
+    if (path, field_spec["name"]) in SHORT_LABELS_FOR:
+        return SHORT_LABELS_FOR[(path, field_spec["name"])]
     if field_spec["name"] in SHORT_LABELS:
         return SHORT_LABELS[field_spec["name"]]
     text = str(field_spec.get("question") or field_spec["name"])
@@ -269,7 +276,7 @@ def panel(known: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         "weekly": weekly,
         "other": [p for p in rest if not is_advanced(p)],
         "advanced": [p for p in rest if is_advanced(p)],
-        "labels": {p: {f["name"]: short_label(f) for f in spec["fields"]} for p, spec in known.items()},
+        "labels": {p: {f["name"]: short_label(f, p) for f in spec["fields"]} for p, spec in known.items()},
     }
 
 

@@ -15,7 +15,8 @@ contests and entry ids, and the entries the file held with no lineup yet).
 4. *Every contest has a lineup*: an entry the entries file held empty is named.
 
 **The hint** per contest is `entries.suggest_pick`, the same rule `dfs entries fill` greys in as Suggested:
-the cash build with the best Cash % for a cash contest, the GPP build with the best Top 1% for a GPP. It is
+the cash build with the top projection (the Default, blueprint Phase A) for a cash contest, the GPP build with
+the best Top 1% for a GPP. It is
 labelled **Untested**, not "Best in" (Sam, 2026-11-05: the contest retro found no contest ranking that clears
 the bar, and the portfolio plan lost its backtest and is not used here). Sam still uploads to DraftKings
 himself.
