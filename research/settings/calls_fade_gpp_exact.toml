@@ -1,0 +1,11 @@
+# Plan M, M1.5 (b) with the exact search: today's GPP builds with every GPP FADE call out of the pool, nothing
+# locked (`dfs.plays_flag`), no time box (`build_exact.py`). Compare with
+# `--compare research/settings/today_gpp_exact.toml`. Shadow, default off.
+name = "calls: FADE bans (GPP only, exact search)"
+
+[builds]
+cash = 0
+solver = "exact"
+
+[flags]
+calls = "fade"

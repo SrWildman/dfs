@@ -34,7 +34,8 @@ from collections.abc import Callable, Mapping, Sequence
 import numpy as np
 
 from dfs import search_clock as clock
-from dfs.late_swap_search import LineupState, OpenSlot, SwapPlayer, top_lineups
+from dfs.build_exact import rules_of, top_lineups  # late_swap_search's search, by the solver in use
+from dfs.late_swap_search import LineupState, OpenSlot, SwapPlayer
 from dfs.models import ROSTER_SLOTS
 
 PASS_CATCHERS = ("WR", "TE")
@@ -395,9 +396,9 @@ def shape_lineups(
             rest = [p for p in rest if not (p.team == qb.opp and p.position in SKILL)]
         if any(p.position == "DST" for p in merged):
             rest = [p for p in rest if p.position != "DST"]
-        return fixed, rest, feasible_for(shape, qb, **feasible_kwargs)
+        return fixed, rest, feasible_for(shape, qb, **feasible_kwargs), qb
 
-    anchors: list[list] = []  # per QB, his searches: (fixed slots, players to search among, feasibility)
+    anchors: list[list] = []  # per QB, his searches: (fixed slots, players to search among, feasibility, him)
     for qb in quarterbacks:
         if shape == RB_DST:
             options = sorted(
@@ -423,7 +424,7 @@ def shape_lineups(
     searches = [(*a, max(2, -(-per_qb // len(group)))) for group in anchors for a in group]
     found: dict[frozenset[str], list[SwapPlayer]] = {}
     complete = True
-    for n, (fixed, rest, feasible, k) in enumerate(searches):
+    for n, (fixed, rest, feasible, qb, k) in enumerate(searches):
         left = None if deadline is None else max(0.0, deadline - clock.now())
         if (
             shape == STACK
@@ -447,6 +448,12 @@ def shape_lineups(
             leaf_filter=lambda ps: rule(ps) and (leaf_ok is None or leaf_ok(ps)),
             feasible=feasible,
             time_limit=share,
+            # what the two tests above mean, for a solver that is not the budgeted search (`build_exact`)
+            shape=shape,
+            qb=qb,
+            own=own,
+            max_stack_own=max_stack_own,
+            rules=rules_of(leaf_ok),
         )
         complete = complete and done
         for assignment in assignments:
