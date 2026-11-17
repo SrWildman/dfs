@@ -2158,6 +2158,55 @@ newest first.
 when a swap keeps it legal (`flex_order.plan_flex`); every recorded contest has a lineup (unknown, `?`, before entries exist); every
 lineup at or under $50,000 and leaving less than $1,500 (`SALARY_SLACK`). None blocks anything.
 
+## The Close view (`close_view.py`, `scorecard.scorecards`, `edge_at_lock.py`; Week page, Tuesday view; blueprint Phase D)
+
+**Edge at lock** (`data/contests/edge_at_lock.csv`, rebuilt per week by `dfs week review`). The projections at lock are DraftKings'
+main slate (`contests.week_frames.week_frame`) joined by normalised name to the last EdgeRaw snapshot before the Sunday 1 pm ET lock
+(`sim.retro.edge_snapshot_before`; CalPts from `with_calpts` where the snapshot had none). The **consensus** is the plain mean of
+`ProjPts` (TFFB), `SleeperPts`, `FantasyProsPts` and `EspnPts`, skipping blanks; a source the snapshot lacks is filled from the
+scored rows stamped at or before the lock; props are not in it. `n_src` is the fewest sources any of his nine had; a player the frame
+lacks counts 0 and sets it to 0. A snapshot older than the previous week's lock is not this week's: the week is skipped. Per contest
+with standings, for each distinct lineup of his: `proj_consensus` (his nine summed), `field_mean_consensus` (every lineup of the
+field, computed in full), `edge = proj_consensus - field_mean_consensus`, `pct_in_field` = the share of the field with a lower sum,
+`cut_proj` = the field's sum at the paid share's quantile, `modal_share`, `copies_exact` (others with his nine),
+`within_2_swaps` (share sharing 7+ of his nine), and `realized`, `line`, `margin = realized - line`. The tile (`summary`) is over
+cash formats only (`field_review.CASH_FORMATS`): the mean edge and percentile this week, and the mean of the weekly means. A
+tripwire, not proof it pays (R4).
+
+**The week line** (`close_view.cash_line`, `week_line`): his Double Up rows of `data/contests/decisions.csv` for the week: points
+(min-max), the cash lines (min-max), how many cashed (`points >= line`), the share of the field beaten = the median over them of
+`1 - pct`, the copies (min-max). The net and its groups are `ledger.load` over the contest log (the history export). "N of M
+double-ups with standings" when the log has more Double Up rows than standings.
+
+**What decided it** (`close_view.decided`): the cash post-mortem's five biggest casher / non-casher gaps. `you had him` = in a cash
+lineup he entered (`cash_postmortem`'s entered lineups); `a choice` = in a cash build or the pool and not entered (`IN_BUILDS`,
+`POOL_ONLY`); `variance` = neither.
+
+**You against the build** (`close_view.vs_default`): `data/contests/scorecard.csv` (`scorecard.override`), this week's row and the
+sum over the season's: lineups, overrides, the points gained and lost; net = gain + loss. Under 12 weeks a chip says it is too few to
+call.
+
+**The four scorecards** (`scorecard.scorecards`), each `{model, week, season, baseline, weeks, status}`. The weekly gain is the
+baseline's error minus ours (positive: ours better), weeks as the unit; with `m` its mean and `se` its standard error,
+**Proven** when `m > 2 se`, **New** under 3 weeks, else **Not proven**.
+
+| Card | Ours | Baseline | Per week |
+|---|---|---|---|
+| Projection | CalPts MAE | TFFB MAE (`numbers.projection_by_week`) | TFFB MAE - CalPts MAE |
+| Ownership | our ownership MAE (`field_own.score_weeks`) | GPP: TFFB's Own%; cash: the double-up curve | baseline MAE - ours, per format; the status is the weaker format's |
+| Calibration | the mean Cash % shown | the share cashed (`data/contests/cash_shown.csv`) | not by week: gap = shown - cashed, `se = sqrt(c (1 - c) / n)` |
+| Edge at lock | his cash lineups' consensus sum | the double-up field's mean | the week's mean edge |
+
+Calibration's status: **Overstated** when `gap > 2 se`; **Proven** when `|gap| <= 2 se` on 30+ builds; New under 3 weeks; else
+Not proven.
+
+**The tiles**: edge at lock (above); avoidable errors = blank entries (`data/entered/*.json` `blank`), this week and the season's
+recorded weeks; the calibration gap; the cash percentile by week (the median share of the double-up field beaten).
+
+**The one thing** (`close_view.one_thing`), the first of blueprint 13.3's triggers that fires, else "Nothing": CalPts behind TFFB 4
+weeks running; our cash or GPP ownership behind its baseline 4 weeks running; edge at lock at or under 0 in 3 of the last 4 weeks;
+the calibration gap over 10 points; the Fun group's fees over `[ledger] fun_per_week` 3 weeks running. Information only.
+
 ## Consensus lineup and expected copies (`consensus.py`, `sim/dup_calibration.py`; Plan K item 3)
 
 **The field's lineup** is the legal DraftKings lineup (QB, 2 RB, 3 WR, TE, FLEX, DST, salary <= 50,000) maximising the sum of

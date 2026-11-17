@@ -22,6 +22,8 @@ is read back and logged (`data/week/edits.log`) by `SheetEdits`.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from dfs import week_board as wb
 from dfs import week_writes as ww
 from dfs.week_inputs import WeekInputs, load_input, save_input
@@ -314,3 +316,89 @@ def decide_pool(
     }
     _save_answers(inp, rec)
     return f"{p.get('Name')} is in your pool as Both (a pivot from {d.row.get('Name')}).", pool
+
+
+# -- the decisions log (blueprint Phase D) -------------------------------------------------------------------
+
+
+def decision_state(inp: WeekInputs) -> str:
+    """`build`, `lock` or `late` (after the slate's first kickoff), for a decisions-log line."""
+    from dfs import lock_state
+
+    starts = lock_state.kickoffs(inp.edge)
+    if starts and inp.now >= starts[0]:
+        return "late"
+    return "lock" if lock_state.state(inp.now, starts, False) == "lock" else "build"
+
+
+def _who(r: dict | None) -> dict | None:
+    return {"id": wb.pid(r), "name": str(r.get("Name", ""))} if r else None
+
+
+def decision_record(d: wb.Decision, inp: WeekInputs, *, option: str, pivot: str = "") -> dict | None:
+    """The decisions-log record for answering page decision `d` with `option` (None for an undo, which is
+    logged as `decisions_log.undo`). `default_at_time` is who the tool had: the Default's player for an
+    open spot or a cash core player, the Questionable star for a pivot."""
+    if option == "undo":
+        return None
+    base = {
+        "season": inp.season,
+        "week": inp.week,
+        "at": inp.now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "state": decision_state(inp),
+        "row": d.key,
+        "answer": option,
+        "source": "page",
+    }
+    if d.kind == "spot":
+        spot = d.spot or {}
+        alts = {str(a.get("name")): a for a in spot.get("alternatives") or []}
+        chosen = next((r for r in d.candidates if wb.pid(r) == option), None)
+        return {
+            **base,
+            "kind": "open_spot",
+            "lineup": "Cash",
+            "slot": str(spot.get("slot", "")),
+            "chosen": _who(chosen),
+            "alternatives": [
+                {
+                    **(_who(r) or {}),
+                    "d_points": (alts.get(str(r["Name"])) or {}).get("d_points"),
+                    "d_salary": (alts.get(str(r["Name"])) or {}).get("d_salary"),
+                    "cash_own": (alts.get(str(r["Name"])) or {}).get("cash_own"),
+                }
+                for r in d.candidates
+                if wb.pid(r) != option
+            ],
+            "default_at_time": _who(d.candidates[0] if d.candidates else d.row),
+        }
+    if d.kind in ("chalk", "core"):
+        me = _who(d.row)
+        return {
+            **base,
+            "kind": "core_fade",
+            "lineup": "Cash",
+            "chosen": me if option == "play" else None,  # a Fade names no one in his place
+            "default_at_time": me,
+        }
+    if d.kind == "stack":
+        picked = {"a": d.stacks[:1], "b": d.stacks[1:2], "both": d.stacks}.get(option) or []
+        names = lambda ss: " + ".join(n for s in ss for n in wb.stack_names(s) if n)  # noqa: E731
+        return {
+            **base,
+            "kind": "stack",
+            "lineup": "GPP",
+            "chosen": {"id": "", "name": names(picked)},
+            "alternatives": [{"id": "", "name": names([s])} for s in d.stacks if s not in picked],
+        }
+    star = _who(d.row)
+    if option == "wait":
+        return {**base, "kind": "later", "chosen": star, "default_at_time": star}
+    offered = {wb.pid(p): p for p in d.pivots}
+    return {
+        **base,
+        "kind": "pivot",
+        "chosen": _who(offered.get(pivot)),
+        "alternatives": [_who(p) for k, p in offered.items() if k != pivot],
+        "default_at_time": star,
+    }

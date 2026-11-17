@@ -465,6 +465,8 @@ class WeekInputs:
     changes: list[dict] | None = None
     suggest_rounds: list[dict] = field(default_factory=list)
     decisions_log: list[dict] | None = None
+    close: dict | None = None  # blueprint Phase D: `close_view.payload`, saved by `week_review` (the close)
+    edge_at_lock: dict | None = None  # blueprint Phase D: `edge_at_lock.summary`, saved by `week_review`
 
 
 def load_changes(data_dir: Path, season: int, week: int) -> list[dict] | None:
@@ -558,6 +560,8 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         changes=load_changes(d, season, week),
         suggest_rounds=load_rounds(d, week),
         decisions_log=load_decisions(d, season, week),
+        close=load_input("close", season, week, d),
+        edge_at_lock=load_input("edge_at_lock", season, week, d),
     )
 
 

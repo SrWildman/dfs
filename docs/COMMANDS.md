@@ -206,7 +206,8 @@ End-of-week bankroll reconciliation -- currently a thin wrapper over `dfs bankro
 |---|---|
 | `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). Left out, the newest history export in your Downloads folder is used (found by its header row; [contests] downloads_dir in config.toml changes the folder). |
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
-| `--research` | After the close, run Monday's offline studies unattended (research refresh, the stacks retro, the plays model's calls and their Flashback bans; under 45 minutes) and write one report, docs/research/weekly/<season>-wk<NN>-close.md. Fail-soft: the close itself is already done. |
+| `--research` | After the close, run the offline studies unattended and write one report, docs/research/weekly/<season>-wk<NN>-close.md: every week the four scorecards (a minute or two); on the first close of a month (or with --monthly) also research refresh, the stacks retro, the plays model's calls and their Flashback bans (under 45 minutes). Fail-soft: the close itself is already done. |
+| `--monthly` | With --research: also run the monthly studies, whatever the date. |
 
 ### `dfs results update`
 
@@ -327,11 +328,12 @@ Calibrate the expected-copies estimate on your own saved standings (Plan K item 
 
 ### `dfs week review`
 
-Review a closed week from its saved standings and builds, for the Week page (Plan K, K2): what won and how the field built by contest type, with your lineups beside it; the process scorecard (spend by tier against the plan, the chalk decisions against what you played, your overrides from the nearest build and their points); your GPP exposure against the actual and the predicted ownership; and how good our numbers are (CalPts against TFFB by week, Cash % shown against the cash rate, each signal's record). Files only: `data/week/inputs/`, `data/contests/scorecard.csv` and `data/contests/cash_shown.csv`; no sheet. `dfs week close` runs it at its end.
+Review a closed week from its saved standings and builds, for the Week page (Plan K, K2): what won and how the field built by contest type, with your lineups beside it; the process scorecard (spend by tier against the plan, the chalk decisions against what you played, your overrides from the nearest build and their points); your GPP exposure against the actual and the predicted ownership; and how good our numbers are (CalPts against TFFB by week, Cash % shown against the cash rate, each signal's record); edge at lock (blueprint Phase D: your cash lineups against the field on the four-source consensus, `data/contests/edge_at_lock.csv`); and the Close view (the week line, what decided it, you against the build, the four scorecards, the tiles, the one thing). Files only: `data/week/inputs/`, `data/contests/scorecard.csv`, `cash_shown.csv` and `edge_at_lock.csv`; no sheet. `dfs week close` runs it at its end.
 
 | Option | What it does |
 |---|---|
 | `--week INT` | The closed week to review (default: the contest log's newest week). |
+| `--only STR` | Run only these parts, comma-separated: field_review, scorecard, exposure, numbers, edge_at_lock, close (e.g. --only edge_at_lock,close to backfill the Close view of a past week). |
 
 ### `dfs ownership log`
 
@@ -623,13 +625,14 @@ Rerun the weekly offline studies with the closed weeks so far and write one repo
 
 ### `dfs research close-report`
 
-Monday's offline studies and their one report, on their own (`dfs week close --research` runs the same after the close): research refresh, the stacks retro, the plays model's calls and their Flashback bans against today. Reads no sheet and writes none; the stages run side by side, each with a log under data/research/close/. Writes docs/research/weekly/<season>-wk<NN>-close.md and prints a 15-line summary.
+Monday's offline studies and their one report, on their own (`dfs week close --research` runs the same after the close): every week the four scorecards; on the first close of a month (or with --monthly) also research refresh, the stacks retro, the plays model's calls and their Flashback bans against today. Reads no sheet and writes none; the stages run side by side, each with a log under data/research/close/. Writes docs/research/weekly/<season>-wk<NN>-close.md and prints a 15-line summary.
 
 | Option | What it does |
 |---|---|
 | `--week INT` | The closed week to study (default: the newest scored week). |
 | `--season INT` | Override the auto-detected NFL season. |
-| `--only STR` | Comma-separated stages: refresh, stacks, calls, calls_flashback (default: all four). |
+| `--only STR` | Comma-separated stages: scorecards, refresh, stacks, calls, calls_flashback (default: the scorecards, plus the other four on the first close of a month or with --monthly). |
+| `--monthly` | Also run the monthly studies (refresh, stacks, calls, calls_flashback). |
 | `--deadline FLOAT` | Minutes after which a stage still running is stopped. Default: `45.0`. |
 
 ### `dfs backtest`

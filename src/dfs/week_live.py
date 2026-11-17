@@ -623,6 +623,18 @@ document.addEventListener('click', async (e) => {
     } catch (err) { toast(err.message, true); }
     return;
   }
+  /* blueprint Phase D: one tap gives a recorded decision its reason (a new line in the log; tap again to clear) */
+  const rs = e.target.closest('.reasons button[data-reason]');
+  if (rs) {
+    if (READONLY) { toast('This week is closed: the page records nothing.', true); return; }
+    const reason = rs.classList.contains('on') ? '' : rs.dataset.reason;
+    try {
+      const r = await post('/api/reason', {id: rs.dataset.id, reason});
+      rs.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === rs && !!reason));
+      if (r && r.message) toast(r.message);
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
   const un = e.target.closest('.dec button.undo');
   if (un) { const r = await write('/api/decide', {key: un.dataset.key, option: 'undo', rules_was: rulesWas()}); rerunCash(r, un.dataset.key); }
 });

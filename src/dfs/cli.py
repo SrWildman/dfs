@@ -4592,14 +4592,23 @@ def week_review_command(
     week: int = typer.Option(
         None, "--week", help="The closed week to review (default: the contest log's newest week)."
     ),
+    only: str = typer.Option(
+        None,
+        "--only",
+        help="Run only these parts, comma-separated: field_review, scorecard, exposure, numbers, "
+        "edge_at_lock, close (e.g. --only edge_at_lock,close to backfill the Close view of a past week).",
+    ),
 ) -> None:
     """Review a closed week from its saved standings and builds, for the Week page (Plan K, K2): what won and
     how the field built by contest type, with your lineups beside it; the process scorecard (spend by tier
     against the plan, the chalk decisions against what you played, your overrides from the nearest build and
     their points); your GPP exposure against the actual and the predicted ownership; and how good our numbers
-    are (CalPts against TFFB by week, Cash % shown against the cash rate, each signal's record). Files only:
-    `data/week/inputs/`, `data/contests/scorecard.csv` and `data/contests/cash_shown.csv`; no sheet.
-    `dfs week close` runs it at its end."""
+    are (CalPts against TFFB by week, Cash % shown against the cash rate, each signal's record); edge at lock
+    (blueprint Phase D: your cash lineups against the field on the four-source consensus,
+    `data/contests/edge_at_lock.csv`); and the Close view (the week line, what decided it, you against the
+    build, the four scorecards, the tiles, the one thing). Files only: `data/week/inputs/`,
+    `data/contests/scorecard.csv`, `cash_shown.csv` and `edge_at_lock.csv`; no sheet. `dfs week close` runs
+    it at its end."""
     from dfs import contest_plan, week_review
     from dfs.contests import history
     from dfs.nfl_calendar import current_season
@@ -4614,7 +4623,14 @@ def week_review_command(
     if target is None:
         console.print("[red]The contest log has no week this season: pass --week.[/red]")
         raise typer.Exit(1)
-    ok = week_review.run(season, target, say=lambda t: console.print(escape(t), highlight=False))
+    parts = tuple(p.strip() for p in only.split(",") if p.strip()) if only else None
+    bad = [p for p in parts or () if p not in week_review.PARTS]
+    if bad:
+        console.print(
+            f"[red]Unknown part(s) {', '.join(bad)}; choose from {', '.join(week_review.PARTS)}.[/red]"
+        )
+        raise typer.Exit(2)
+    ok = week_review.run(season, target, say=lambda t: console.print(escape(t), highlight=False), only=parts)
     if not ok:
         raise typer.Exit(1)
 
@@ -5104,9 +5120,16 @@ def week_close(
     research: bool = typer.Option(
         False,
         "--research",
-        help="After the close, run Monday's offline studies unattended (research refresh, the stacks retro, "
-        "the plays model's calls and their Flashback bans; under 45 minutes) and write one report, "
-        "docs/research/weekly/<season>-wk<NN>-close.md. Fail-soft: the close itself is already done.",
+        help="After the close, run the offline studies unattended and write one report, "
+        "docs/research/weekly/<season>-wk<NN>-close.md: every week the four scorecards (a minute or two); "
+        "on the first close of a month (or with --monthly) also research refresh, the stacks retro, the "
+        "plays model's calls and their Flashback bans (under 45 minutes). Fail-soft: the close itself is "
+        "already done.",
+    ),
+    monthly: bool = typer.Option(
+        False,
+        "--monthly",
+        help="With --research: also run the monthly studies, whatever the date.",
     ),
 ) -> None:
     """End-of-week bankroll reconciliation -- currently a thin wrapper over
@@ -5141,7 +5164,7 @@ def week_close(
     _du_line_after_close(closed)  # before the review: the band's line, measured on the new double-up too
     _plan_k_after_close(cfg, closed)
     if research:
-        _research_after_close(cfg, week)
+        _research_after_close(cfg, week, monthly=monthly)
 
 
 def _du_line_after_close(closed: int | None) -> None:
@@ -5201,7 +5224,7 @@ def _plan_k_after_close(cfg: Config, closed: int | None) -> None:
         )
 
 
-def _research_after_close(cfg: Config, week: int | None) -> None:
+def _research_after_close(cfg: Config, week: int | None, *, monthly: bool = False) -> None:
     """`week close --research`: Monday's offline studies and their one report. NEVER fails the close (it is
     done); the studies run as child processes under `caffeinate` where there is one and stop at the
     deadline."""
@@ -5211,7 +5234,7 @@ def _research_after_close(cfg: Config, week: int | None) -> None:
 
     close_text = console.export_text(clear=False)
     console.record = False
-    console.print("\n[bold]Research[/bold] (the weekly studies, unattended; under 45 minutes)...")
+    console.print("\n[bold]Research[/bold] (the scorecards; the monthly studies on a month's first close)...")
     try:
         season = current_season()
         scored = refresh.latest_scored_week(season)
@@ -5238,6 +5261,7 @@ def _research_after_close(cfg: Config, week: int | None) -> None:
                 closed,
                 close_text=close_text,
                 decisions=decisions,
+                monthly=monthly,
                 log=lambda line: console.print(escape(line)),
             )
         finally:

@@ -119,15 +119,20 @@ def research_close_report(
     only: str = typer.Option(
         None,
         "--only",
-        help="Comma-separated stages: refresh, stacks, calls, calls_flashback (default: all four).",
+        help="Comma-separated stages: scorecards, refresh, stacks, calls, calls_flashback (default: the "
+        "scorecards, plus the other four on the first close of a month or with --monthly).",
+    ),
+    monthly: bool = typer.Option(
+        False, "--monthly", help="Also run the monthly studies (refresh, stacks, calls, calls_flashback)."
     ),
     deadline: float = typer.Option(
         45.0, "--deadline", help="Minutes after which a stage still running is stopped."
     ),
 ) -> None:
     """Monday's offline studies and their one report, on their own (`dfs week close --research` runs the
-    same after the close): research refresh, the stacks retro, the plays model's calls and their Flashback
-    bans against today. Reads no sheet and writes none; the stages run side by side, each with a log
+    same after the close): every week the four scorecards; on the first close of a month (or with
+    --monthly) also research refresh, the stacks retro, the plays model's calls and their Flashback bans
+    against today. Reads no sheet and writes none; the stages run side by side, each with a log
     under data/research/close/. Writes docs/research/weekly/<season>-wk<NN>-close.md and prints a 15-line
     summary."""
     from dfs import close_research
@@ -139,12 +144,17 @@ def research_close_report(
         week = refresh.latest_scored_week(season)
     if week is None:
         raise _fail(f"no scored weeks for {season} yet -- run `dfs results update` first")
-    stages = tuple(k.strip() for k in only.split(",") if k.strip()) if only else close_research.STAGE_NAMES
-    unknown = [k for k in stages if k not in close_research.STAGE_NAMES]
+    stages = tuple(k.strip() for k in only.split(",") if k.strip()) if only else None
+    unknown = [k for k in stages or () if k not in close_research.ALL_STAGES]
     if unknown:
-        raise _fail(f"unknown stages {unknown}; choose from {', '.join(close_research.STAGE_NAMES)}")
+        raise _fail(f"unknown stages {unknown}; choose from {', '.join(close_research.ALL_STAGES)}")
     path, results, wall = close_research.run(
-        season, week, stages=stages, deadline_minutes=deadline, log=lambda m: console.print(escape(m))
+        season,
+        week,
+        stages=stages,
+        monthly=monthly,
+        deadline_minutes=deadline,
+        log=lambda m: console.print(escape(m)),
     )
     for line in close_research.summary_lines(results, season, week, path, wall):
         console.print(escape(line), highlight=False, soft_wrap=True)

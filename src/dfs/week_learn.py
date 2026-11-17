@@ -9,6 +9,8 @@ input is missing says "not run yet" and what produces it.
 
 from __future__ import annotations
 
+import dataclasses
+
 from dfs import exposure as expo
 from dfs import field_review as fr
 from dfs import numbers as nums
@@ -554,3 +556,259 @@ __all__ = [
     "salary_section",
     "scorecard_html",
 ]
+
+
+# -- the Close view (blueprint Phase D) ---------------------------------------------------------------------
+
+CLOSE_ID = "close-card"
+TOO_FEW_WEEKS = 12  # under this, "you against the build" says it is too few weeks to call
+STATUS_CLASS = {sc.PROVEN: "ok", sc.NOT_PROVEN: "", sc.OVERSTATED: "warn", sc.NEW: "new"}
+TAG_CLASS = {"you had him": "had", "a choice": "choice", "variance": "variance"}
+REASON_LABELS = {
+    "projection": "Projection",
+    "news": "News",
+    "source": "A source",
+    "gut": "Gut",
+    "price": "Price",
+    "correlation": "Correlation",
+    "ownership": "Ownership",
+}
+CLOSE_CSS = """
+#close-card .line1{font-size:16px;line-height:1.5;padding:10px 14px;border:1px solid var(--line);
+border-radius:8px;background:var(--card);margin:0 0 14px}
+#close-card .bar{display:inline-block;vertical-align:middle;width:90px;height:6px;border-radius:3px;
+background:var(--line);margin-left:6px;position:relative;overflow:hidden}
+#close-card .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+#close-card .bar.non i{background:var(--dim)}
+.tagchip{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:9px;border:1px solid var(--line)}
+.tagchip.had{color:var(--ok)}.tagchip.choice{color:var(--warn)}.tagchip.variance{color:var(--dim)}
+.vsdef{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:6px 0 14px}
+.vsdef div{border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--card)}
+.vsdef b{display:block;font-size:20px}.vsdef small{text-transform:uppercase;font-size:11px;color:var(--dim)}
+td.status.ok{color:var(--ok);font-weight:600}td.status.warn{color:var(--warn);font-weight:600}
+td.status.new{color:var(--accent);font-weight:600}
+.onething{border-left:4px solid var(--accent);padding:10px 14px;background:var(--card);font-size:15.5px;
+margin:6px 0 10px}
+.reasons button{font-size:11.5px;padding:1px 7px;border-radius:9px;border:1px solid var(--line);
+background:none;cursor:pointer;margin:1px}.reasons button.on{background:var(--accent);color:#fff}
+@media(max-width:760px){.vsdef{grid-template-columns:1fr}}
+"""
+
+
+def _signed(x: float | None, nd: int = 1, unit: str = "") -> str:
+    return "-" if x is None else f"{x:+.{nd}f}{unit}"
+
+
+def _bar(share: float, cls: str = "") -> str:
+    w = max(0.0, min(1.0, share)) * 100
+    return f'{share * 100:.0f}%<span class="bar {cls}"><i style="width:{w:.0f}%"></i></span>'
+
+
+def close_tiles(c: dict) -> list[tuple[str, str, str, str]]:
+    """(label, value, note, tone) for the four Close tiles."""
+    out = []
+    edge = c.get("edge") or {}
+    this = edge.get("this_week")
+    if this and this.get("edge") is not None:
+        note_ = (
+            f"Week {c['week']} vs the four-source consensus, out-projected {this['pct'] * 100:.0f}% of the "
+            f"double-up field; {edge.get('n_weeks', 0)}-week mean {_signed(edge.get('season_edge'))} pts"
+            + (
+                f" ({edge['season_pct'] * 100:.0f}th percentile)"
+                if edge.get("season_pct") is not None
+                else ""
+            )
+            + ". A tripwire, not proof it pays."
+        )
+        out.append(("Edge at lock", f"{this['edge']:+.1f} pts", note_, "warn" if this["edge"] <= 0 else ""))
+    else:
+        out.append(
+            (
+                "Edge at lock",
+                "-",
+                f"no lock-time snapshot or double-up standings for Week {c['week']}; season mean "
+                f"{_signed(edge.get('season_edge'))} pts over {edge.get('n_weeks', 0)} weeks",
+                "",
+            )
+        )
+    av = c.get("avoidable") or {}
+    this_av = av.get("week") if av.get("week") is not None else "no record"
+    n_av = int(av.get("weeks") or 0)
+    out.append(
+        (
+            "Avoidable errors, season",
+            str(av.get("season", 0)),
+            f"{av.get('what', 'blank entries')}: {this_av} in Week {c['week']}; "
+            f"{n_av} week{'s' if n_av != 1 else ''} with entries recorded",
+            "warn" if av.get("week") else "",
+        )
+    )
+    gap = c.get("calibration_gap")
+    cal = next((r for r in c.get("scorecards") or [] if r.get("model") == "Cash % calibration"), {})
+    out.append(
+        (
+            "Calibration gap",
+            _signed(None if gap is None else gap * 100, 1, " pts"),
+            f"cash chance shown minus cashed; {cal.get('season', '')}",
+            "warn" if gap is not None and gap > 0.10 else "",
+        )
+    )
+    pctl = c.get("percentile") or {}
+    this_p = pctl.get(str(c["week"]))
+    out.append(
+        (
+            "Cash percentile in field",
+            "-" if this_p is None else f"{this_p * 100:.0f}th",
+            "share of the double-up field beaten, weeks "
+            + " · ".join(f"{w}: {v * 100:.0f}" for w, v in pctl.items())
+            + " (50 = the median)",
+            "",
+        )
+    )
+    return out
+
+
+def _decision_log(inp: WeekInputs, live: bool) -> str:
+    from dfs import decisions_log
+
+    items = inp.decisions_log or []
+    if not items:
+        body = note(
+            "No decisions recorded this week (the page records Swap / Keep / Later, open spots, Play / Fade, "
+            "stacks and pivots)."
+        )
+    else:
+        rows = []
+        for d in items:
+            chosen = (d.get("chosen") or {}).get("name") or "nobody named"
+            was = (d.get("default_at_time") or {}).get("name") or ""
+            dis = "" if live else " disabled"
+            pills = "".join(
+                f'<button type="button" class="{"on" if d.get("reason") == r else ""}" '
+                f'data-id="{e(d["id"])}" data-reason="{e(r)}"{dis}>{e(lab)}</button>'
+                for r, lab in REASON_LABELS.items()
+            )
+            rows.append(
+                [
+                    e(str(d.get("at", ""))[11:16] + " " + str(d.get("state", ""))),
+                    e(str(d.get("kind", "")).replace("_", " ")),
+                    e(str(d.get("lineup") or "")) + (f" {e(d['slot'])}" if d.get("slot") else ""),
+                    e(chosen)
+                    + (f' <span class="dim">(was {e(was)})</span>' if was and was != chosen else ""),
+                    f'<span class="reasons">{pills}</span>',
+                ]
+            )
+        body = table(
+            ["When", "Kind", "Lineup", "Chosen", "Why (one tap)"],
+            rows,
+            how="every decision the page recorded this week, undone ones left out; a reason is a new line, "
+            "the latest wins",
+            src=("data/week/decisions.jsonl",),
+        )
+    path = decisions_log.PATH
+    return (
+        f'<details class="declog" id="decision-log"><summary>Decision log ({len(items)})</summary>{body}'
+        f'<p class="note">Export: the file itself, <code>{e(str(path))}</code> (one JSON object per line, '
+        "append-only).</p></details>"
+    )
+
+
+def close_section(inp: WeekInputs, live: bool = False) -> Section:
+    """The Close view's one screen (`close` input, `close_view.payload`)."""
+    from dfs import close_view, week_money
+
+    c = inp.close
+    if not c:
+        return Section(
+            CLOSE_ID,
+            "The week, closed",
+            not_run("the close's review", "dfs week review", "close the week") + _decision_log(inp, live),
+            ran=False,
+        )
+    parts = [f'<p class="line1">{e(close_view.week_line(c))}</p>']
+    rows = [
+        [
+            pn(d["name"]) + f' <span class="dim">{e(d.get("position", ""))}</span>',
+            _bar(float(d["in_cashers"])),
+            _bar(float(d["in_non_cashers"]), "non"),
+            ("-" if d.get("cash_own") is None else pct(d["cash_own"])) + " / " + pct(d.get("field")),
+            f'<span class="tagchip {TAG_CLASS.get(d["tag"], "")}">{e(d["tag"])}</span> '
+            f'<span class="dim">{e(d.get("detail", ""))}</span>',
+        ]
+        for d in c.get("decided") or []
+    ]
+    parts.append('<h3 class="sub">What decided it</h3>')
+    parts.append(
+        table(
+            ["Player", "In cashers", "In non-cashers", "Cash own: predicted / actual", "Tag"],
+            rows,
+            how="the cash post-mortem's five biggest casher / non-casher gaps in the week's double-ups; you "
+            "had him = in a cash lineup you entered, a choice = in a cash build or your pool, variance = "
+            "neither",
+            src=("data/contests/cash_postmortem.csv", "data/entered/"),
+        )
+        if rows
+        else note("No double-up standings for this week, so nothing to separate cashers from the rest.")
+    )
+    vs = c.get("vs_default") or {}
+    wk, ss = vs.get("week"), vs.get("season") or {}
+
+    def fig(label: str, v: dict | None) -> str:
+        if not v or not v.get("lineups"):
+            return f"<div><small>{e(label)}</small><b>-</b><span class=dim>no lineups matched</span></div>"
+        net = float(v["gain"]) + float(v["loss"])
+        return (
+            f"<div><small>{e(label)}</small><b>{net:+.1f} pts</b>"
+            f'<span class="dim">{v["overrides"]} of {v["lineups"]} lineups overrode the build · '
+            f"{float(v['gain']):+.1f} / {float(v['loss']):+.1f}</span></div>"
+        )
+
+    weeks = int(ss.get("weeks") or 0)
+    parts.append(f'<h3 class="sub">You against {e(vs.get("against", "the nearest build"))}</h3>')
+    parts.append(
+        '<div class="vsdef">'
+        + fig("This week", wk)
+        + fig(f"Season to date ({weeks} week{'s' if weeks != 1 else ''})", ss)
+        + "</div>"
+        + (
+            f'<p class="note"><span class="tagchip choice">{weeks} weeks: too few to call</span> under '
+            f"{TOO_FEW_WEEKS} weeks a total like this is mostly the players' variance.</p>"
+            if weeks < TOO_FEW_WEEKS
+            else ""
+        )
+    )
+    cards = c.get("scorecards") or []
+    parts.append('<h3 class="sub">Scorecards</h3>')
+    parts.append(
+        table(
+            ["Model", "This week", "Season", "Against its simple baseline", "Weeks", "Status"],
+            [
+                [
+                    e(r["model"]),
+                    e(r["week"]),
+                    e(r["season"]),
+                    e(r["baseline"]),
+                    str(r["weeks"]),
+                    f'<span class="status {STATUS_CLASS.get(r["status"], "")}">{e(r["status"])}</span>',
+                ]
+                for r in cards
+            ],
+            how="each model against its simple baseline by week, weeks as the unit: Proven = ahead by 2 SE, "
+            "New = under 3 weeks, Overstated = the cash chance shown above the cash rate by 2 SE",
+            src=("numbers", "field_own", "data/contests/cash_shown.csv", "data/contests/edge_at_lock.csv"),
+        )
+    )
+    # the ledger (Phase B's section) under its own id: the fold below keeps `#ledger`
+    parts.append(dataclasses.replace(week_money.ledger_section(inp), id="close-ledger").html())
+    tiles = "".join(
+        f'<div class="tile {e(tone)}"><small>{e(label)}</small><b>{e(value)}</b><span>{e(n)}</span></div>'
+        for label, value, n, tone in close_tiles(c)
+    )
+    parts.append(
+        f'<section class="strip close-tiles" aria-label="The close in four numbers">{tiles}</section>'
+    )
+    parts.append('<h3 class="sub">The one thing worth changing</h3>')
+    parts.append(f'<p class="onething">{e(c.get("one_thing") or "Nothing.")}</p>')
+    parts.append(_decision_log(inp, live))
+    parts.append(note("Information only: nothing here blocks, warns or writes a sheet."))
+    return Section(CLOSE_ID, f"Week {c['week']}, closed", "".join(parts), trust=TRUST["numbers"])
