@@ -25,7 +25,7 @@ credit rules are `sources/odds_props.py`.
    yardage are a gamma with variance `phi * mean`** (right-skewed, so mean > median; passing yards a normal,
    being nearly symmetric); **counts** (receptions, pass TDs, INTs) are
    Poisson when `phi <= 1` and negative binomial with variance `phi * mean` otherwise. `phi` is fitted per
-   (position, stat) from nflverse history (`DISPERSION`, refit with `python -m dfs.props_history`).
+   (position, stat) from nflverse history (`DISPERSION`, a fixed table; docs/CALCULATIONS.md, "PropPts").
    Anytime TD: `E[TDs] = -ln(1 - p)` (Poisson), scored as one TD bucket (DK pays rush and receiving TDs the
    same 6).
 5. `prop_pts` -> DraftKings points from `dk_scoring`'s own constants, plus the expected 300/100/100 yardage
@@ -116,9 +116,10 @@ SHIFT_MIN_LEVEL = 1.0
 # threshold - 0.5.
 YARDAGE_CONTINUITY = 0.5
 # Variance-to-mean ratio of a single game's stat given what a bettor knew (the last eight games): fitted on
-# nflverse 2018-2025 by `python -m dfs.props_history`. See docs/CALCULATIONS.md, "PropPts", for the table. An
-# upper bound on the market's own dispersion (the market also knows injuries and matchup), so means from lines
-# are a little more spread than the market's: the effect is second order for the mean.
+# nflverse 2018-2025 by the one-off `props_history` script (removed; last on main at 1535519). See
+# docs/CALCULATIONS.md, "PropPts", for the table. An upper bound on the market's own dispersion (the market
+# also knows injuries and matchup), so means from lines are a little more spread than the market's: the effect
+# is second order for the mean.
 DISPERSION: dict[tuple[str, str], float] = {
     ("QB", "pass_yd"): 22.368,
     ("QB", "pass_td"): 0.833,  # under-dispersed: a Poisson is used (phi <= 1)

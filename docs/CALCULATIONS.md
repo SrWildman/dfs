@@ -1432,8 +1432,8 @@ the bookmaker list does not change it (measured: 1 market x 3 books = 1 credit; 
    quoted. **An RB with no receiving markets is scored without receiving**, flagged `no:rec no:rec_yd`; that is the brief's
    rule but understates a pass-catching back (open question, below).
 
-**Dispersion** (`props.DISPERSION`; refit with `python -m dfs.props_history --last 2025 --test-from 2023`, which downloads
-nflverse `stats_player` once). No free historical props lines exist, so `phi = sum((actual - fitted)^2) / sum(fitted)`
+**Dispersion** (`props.DISPERSION`, a fixed table; it was fitted by `python -m dfs.props_history --last 2025
+--test-from 2023`, a one-off script removed in batch F6 and last on main at `1535519`). No free historical props lines exist, so `phi = sum((actual - fitted)^2) / sum(fitted)`
 is fitted per (position, stat) to the **proxy a bettor had**: `fitted` is the game's stat regressed on the mean of the
 player's previous eight games (at least six), regular seasons 2018-2025. Because the market also knows injuries and
 matchup, this is an **upper bound** on the market's own dispersion.
@@ -1449,7 +1449,7 @@ Variance grows with the mean (var/mean is roughly flat across levels: WR receivi
 of projected yards and 23 in the top), which is why the model is `variance = phi * mean` and not a fixed CV. TD counts are under-dispersed
 (0.83), so a Poisson (phi = 1) is used.
 
-**Evidence on history** (`python -m dfs.props_history`, fit on 2018-22, tested on 2023-25 unless stated):
+**Evidence on history** (from the same script, fit on 2018-22, tested on 2023-25 unless stated):
 
 * *Does the distribution give the right tail probabilities?* (it is what `mean_from_line` inverts.) For thresholds at
   0.6-1.4 times each player's fitted mean, the model's `P(X > t)` against how often the stat really exceeded it differs by
@@ -2410,33 +2410,12 @@ byte-identical). A week counts when the source rated at least 20 players. `PropP
 TFFB's projections: each player's row is from the **last props snapshot taken before his own kickoff**
 (`results_loop.props_for_week`); `EspnPts` through the snapshot at the week's reference time, like Sleeper's.
 
-## Props shadow (`props_edge.py`, 2026-10-20)
+## Props shadow (removed 2026-11-17)
 
-Question: when ESPN's stat-level projection sits away from the prop market's line, does the side ESPN favours
-beat the price? Analysis only: no sportsbook is touched, no bet is tracked, no player column or pick is shown,
-and it reads saved files only (`data/raw/odds_props/*.json`, `data/raw/espn/*.csv`, nflverse `stats_player`), so
-it costs no Odds API credits. Model Check's **PROPS SHADOW** block is rebuilt by `dfs results update` (and so by
-`dfs week close`, which never fails over it); `python -m dfs.props_edge [--rows]` prints it from the terminal.
-
-**Per player-market.** Book line = the most-quoted line (a tie goes to the one nearer the median); market
-probability = the median over the books on that line of the de-vigged Over (Yes for a TD; a Yes-only quote takes
-`props.ANYTD_YES_ONLY_VIG`), prices = the median quoted decimal price per side at that line. The pull used is the
-last one before the event's kickoff that holds the event; ESPN's projection is the last ESPN snapshot at or
-before that pull.
-
-**ESPN's distribution.** Mean = ESPN's projected stat (not re-centred). Spread: `phi = sum((actual - proj)^2) /
-sum(proj)` per (position, stat) over every ESPN-projected player who played (projection above
-`props_history.CASES`' floor), shrunk to `props.dispersion` (the nflverse-history prior) as
-`(n * phi_raw + 50 * prior) / (n + 50)` (`SHRINK_PLAYERS = 50`). A week is judged with a `phi` fitted from the other
-weeks (the prior alone when there are none), so a result never uses the spread it helped fit. P(Over) =
-`props.over_probability(stat, mean, phi, line)`; anytime TD: `1 - exp(-(rush_td + rec_td))`.
-
-**The table.** The side with the higher ESPN probability is "bet" at the median price for that side; a push is
-dropped, a player who did not play voids the prop and is dropped, an anytime-TD No is bettable only where a book
-quoted one. Per market and per band of `|ESPN P - market P|` (5+, 10+, 15+ points, cumulative): `n`, how often the
-side won, the win rate the prices needed (mean of 1 / decimal price) and the return per unit staked. A verdict word
-("beat the price" / "missed the price" / "no edge shown", at two standard errors) appears only from
-`MIN_N_VERDICT = 100` rows in a cell. Shadow until about Week 10 and Sam's OK.
+The study that asked whether ESPN's stat projections beat the prop market's price (`props_edge.py`, Model Check's
+PROPS SHADOW block and `dfs research refresh`'s `props` study) was removed in removal batch F6: it never reached a
+verdict and nothing read it. Its method is last on main at `1535519`. The props pull, `PropPts` and its place in the
+CalPts blend are unchanged ("PropPts" above).
 
 
 ## Stack ranker (`stacks.py`, 2026-10-21)
